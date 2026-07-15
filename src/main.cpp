@@ -242,6 +242,7 @@ int main() {
         game.Scripts.BindCamera(camera);
         game.Scripts.BindParticles(game.Particles);
         game.Scripts.BindBillboards(billboards);
+        game.Scripts.BindAudio(game.Audio);
 
         // demo_features.lua — витрина расширенного Lua-API движка (спавн
         // объектов, таймеры, корутины, камера, частицы, билборды), никак не
@@ -315,7 +316,10 @@ int main() {
                 game.Noclip = !game.Noclip;
                 game.ShowToast(game.Noclip ? "Noclip ON" : "Noclip OFF");
             }
-            if (actions.WasPressed(GameActions::ToggleCrafting)) game.CraftMenuOpen = !game.CraftMenuOpen;
+            if (actions.WasPressed(GameActions::ToggleCrafting)) {
+                game.CraftMenuOpen = !game.CraftMenuOpen;
+                game.Audio.PlaySound2D(GameSounds::Pickup, 0.4f); // короткий UI-щелчок
+            }
 
             const char* const* hotbarSlots = GameActions::HotbarSlotNames();
             for (int i = 0; i < Inventory::HotbarSize; ++i) {
@@ -342,6 +346,11 @@ int main() {
             }
             camera.Position = game.Player.EyePosition();
 
+            // Слушатель 3D-звука едет с камерой — панорама/громкость позиционных
+            // звуков (всплески, установка блоков, поклёвка) считаются относительно
+            // взгляда игрока. Обновляем до Play* этого кадра.
+            game.Audio.SetListener(camera.Position, camera.Front, camera.Up);
+
             // ================= СИМУЛЯЦИЯ (статы, сутки, мусор, рыбалка, готовка) =================
             bool isExerting = !game.Noclip && game.Player.IsMovingFast();
             game.UpdateSimulation(deltaTime, isExerting);
@@ -360,6 +369,10 @@ int main() {
             }
 
             game.Terrain.RebuildDirtyMeshes();
+
+            // Освобождаем доигравшие одноразовые звуки этого кадра (эмбиент,
+            // музыка и активные лупы не трогаются — они управляются по дескриптору)
+            game.Audio.Update();
 
             // ================= РЕНДЕР =================
             g_renderStats.Reset();

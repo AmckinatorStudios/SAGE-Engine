@@ -119,6 +119,13 @@ target_include_directories(stb INTERFACE external/stb)
 add_library(tinygltf INTERFACE)
 target_include_directories(tinygltf INTERFACE external/tinygltf)
 
+# ---------- miniaudio (звук: декодирование + устройство + 3D-микс) ----------
+# Single-header, public domain. Сам выбирает системный аудио-API (ALSA/Pulse/
+# WASAPI/CoreAudio) и грузит его через dlopen в рантайме — на этапе линковки
+# аудио-библиотеки не нужны. Реализация разворачивается в src/audio/miniaudio_impl.cpp.
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio INTERFACE external/miniaudio)
+
 # ============================================================================
 #  sage_engine — переиспользуемое, УНИВЕРСАЛЬНОЕ ЯДРО движка (окно, рендер,
 #  камера, сцена, сериализация, UI, скриптинг). НЕ знает ничего ни о вокселях,
@@ -132,6 +139,8 @@ target_include_directories(tinygltf INTERFACE external/tinygltf)
 #  сборка детерминирована и не зависит от того, переконфигурировали ли CMake).
 # ============================================================================
 set(SAGE_ENGINE_SOURCES
+    src/audio/AudioEngine.cpp
+    src/audio/miniaudio_impl.cpp
     src/core/GLDebug.cpp
     src/core/Log.cpp
     src/core/Stats.cpp
@@ -179,12 +188,15 @@ target_link_libraries(sage_engine PRIVATE
     tinyobjloader
     tinygltf
     nlohmann_json::nlohmann_json
+    miniaudio
 )
 
 if (WIN32)
     target_link_libraries(sage_engine PUBLIC opengl32)
 elseif(UNIX)
-    target_link_libraries(sage_engine PUBLIC GL dl pthread X11)
+    # m — нужна miniaudio (математика микшера); dl/pthread — и GLFW, и miniaudio
+    # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).
+    target_link_libraries(sage_engine PUBLIC GL dl pthread m X11)
 endif()
 
 # ============================================================================

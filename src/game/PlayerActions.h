@@ -60,6 +60,8 @@ inline void PickUpTrash(GameState& game, const LookContext& look) {
     game.ShowToast(std::string("+1 ") + GetItemName(picked));
     LOG_INFO("Game") << "Подобран мусор: " << GetItemName(picked);
     game.Particles.Burst(ParticlePresets::WaterSplash(), pos, 5);
+    game.Audio.PlaySound3D(GameSounds::Splash, pos, 0.7f);
+    game.Audio.PlaySound2D(GameSounds::Pickup, 0.6f);
 }
 
 // Цвет частиц-обломков подбираем под материал блока — иначе доски
@@ -83,6 +85,7 @@ inline void HandleLeftClick(GameState& game, const LookContext& look) {
             game.ShowToast("+1 Raw Fish");
             LOG_INFO("Game") << "Рыба поймана";
             game.Particles.Burst(ParticlePresets::WaterSplash(), game.Fishing.BobberPosition(), 10);
+            game.Audio.PlaySound3D(GameSounds::Splash, game.Fishing.BobberPosition(), 0.9f);
         }
         return;
     }
@@ -106,6 +109,7 @@ inline void HandleLeftClick(GameState& game, const LookContext& look) {
     debris.EndColor = glm::vec4(glm::vec3(debris.StartColor), 0.0f);
     glm::vec3 blockCenter = glm::vec3(look.Hit.BlockPos) + glm::vec3(0.5f);
     game.Particles.Burst(debris, blockCenter, 10);
+    game.Audio.PlaySound3D(GameSounds::Break, blockCenter, 0.8f);
 }
 
 // ПКМ — использовать предмет в руке (контекстно: блок/удочка/еда/питьё)
@@ -121,14 +125,17 @@ inline void HandleRightClick(GameState& game, const Camera& camera, const LookCo
     if (heldItem == ItemType::FishingRod) {
         game.Fishing.Cast(camera.Position, camera.Front, GameConstants::SeaLevel);
         game.ShowToast("Cast... wait for a bite");
+        game.Audio.PlaySound3D(GameSounds::Cast, game.Fishing.BobberPosition(), 0.8f);
         return;
     }
     if (placeBlock != BlockType::Air) {
         if (!game.Items.Has(heldItem)) {
             game.ShowToast("No blocks left - craft more");
+            game.Audio.PlaySound2D(GameSounds::Error, 0.5f);
         } else if (look.Hit.Hit && !BlockIntersectsPlayer(look.Hit.PlacePos, game.Player)) {
             game.Terrain.SetBlock(look.Hit.PlacePos.x, look.Hit.PlacePos.y, look.Hit.PlacePos.z, placeBlock);
             game.Items.Remove(heldItem, 1);
+            game.Audio.PlaySound3D(GameSounds::Place, glm::vec3(look.Hit.PlacePos) + glm::vec3(0.5f), 0.8f);
         }
         return;
     }
@@ -139,10 +146,13 @@ inline void HandleRightClick(GameState& game, const Camera& camera, const LookCo
             game.Items.Remove(ItemType::RawFish, 1);
             game.CookTimer = GameState::CookDuration;
             game.ShowToast("Cooking...");
+            game.Audio.PlaySound3D(GameSounds::Place, glm::vec3(game.Ship.StovePos) + glm::vec3(0.5f, 1.0f, 0.5f), 0.7f);
         } else if (look.LookingAtStove) {
             game.ShowToast("Stove is busy");
+            game.Audio.PlaySound2D(GameSounds::Error, 0.5f);
         } else {
             game.ShowToast("Raw... cook it on the stove");
+            game.Audio.PlaySound2D(GameSounds::Error, 0.5f);
         }
         return;
     }
@@ -150,6 +160,7 @@ inline void HandleRightClick(GameState& game, const Camera& camera, const LookCo
         if (game.Items.Remove(ItemType::CookedFish, 1)) {
             game.Stats.Eat(40.0f);
             game.ShowToast("Tasty!");
+            game.Audio.PlaySound2D(GameSounds::Eat, 0.8f);
         } else {
             game.ShowToast("No cooked fish");
         }
@@ -159,6 +170,7 @@ inline void HandleRightClick(GameState& game, const Camera& camera, const LookCo
         if (game.Items.Remove(ItemType::FreshWater, 1)) {
             game.Stats.Drink(45.0f);
             game.ShowToast("Refreshing!");
+            game.Audio.PlaySound2D(GameSounds::Eat, 0.8f);
         } else {
             game.ShowToast("No fresh water");
         }
@@ -181,8 +193,10 @@ inline void HandleCraftMenuInput(GameState& game, InputMap& actions) {
         if (Craft(game.Items, recipe)) {
             LOG_INFO("Craft") << "Скрафчено: " << recipe.Name;
             game.ShowToast(std::string("Crafted: ") + recipe.Name);
+            game.Audio.PlaySound2D(GameSounds::Craft, 0.8f);
         } else {
             game.ShowToast("Not enough materials");
+            game.Audio.PlaySound2D(GameSounds::Error, 0.6f);
         }
     }
 }

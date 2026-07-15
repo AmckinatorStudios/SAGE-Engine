@@ -62,6 +62,15 @@ function OnStart(entity)
     EmitParticles(ParticlePresets.BlockBreak(), origin, 10)
     CreateParticleStream("demo_smoke", ParticlePresets.Smoke(), origin + Vec3.new(0, 1, 0))
     SetParticleStreamActive("demo_smoke", true)
+
+    -- Звук: доступно после ScriptEngine::BindAudio() — скрипт может проиграть
+    -- эффект в точке мира (3D, микшируется относительно камеры) и разово в 2D.
+    -- Через 3 секунды повторяем всплеск как звуковую "отбивку" секции демо.
+    PlaySound3D("assets/audio/splash.wav", origin, 0.8)
+    Schedule(3.0, function()
+        PlaySound("assets/audio/craft.wav", 0.7)
+        log("Демо: звук проигран из Lua")
+    end)
     Schedule(6.0, function()
         RemoveParticleStream("demo_smoke")
         log("Демо-дым потушен")

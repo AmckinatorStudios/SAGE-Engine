@@ -5,6 +5,7 @@
 #include "../render/ParticleSystem.h"
 #include "../render/BillboardSystem.h"
 #include "../render/Texture.h"
+#include "../audio/AudioEngine.h"
 #include <sol/sol.hpp>
 #include <memory>
 #include <unordered_map>
@@ -69,6 +70,10 @@ public:
     // Даёт скриптам доступ к системе билбордов: AddBillboard/RemoveBillboard
     // и т.п. Без BindBillboards эти функции бросают ошибку при вызове.
     void BindBillboards(BillboardSystem& billboards) { m_billboards = &billboards; }
+
+    // Даёт скриптам доступ к звуку: PlaySound/PlaySound3D/PlayMusic/StopMusic/
+    // SetMasterVolume. Без BindAudio эти функции бросают ошибку при вызове.
+    void BindAudio(AudioEngine& audio) { m_audio = &audio; }
 
     // Загружает .lua файл и привязывает его к объекту. Скрипт должен
     // определить глобальную функцию OnUpdate(entity, dt) — она будет
@@ -144,6 +149,7 @@ private:
     Camera* m_camera = nullptr;
     ParticleSystem* m_particles = nullptr;
     BillboardSystem* m_billboards = nullptr;
+    AudioEngine* m_audio = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
 
     int m_nextTimerId = 1;
