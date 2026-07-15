@@ -1,0 +1,5 @@
+#pragma once
+
+// Сгенерировано CMake из файла VERSION в момент конфигурации сборки —
+// не редактировать вручную, править версию нужно только в VERSION.
+constexpr const char* kSageEngineVersion = "@SAGE_ENGINE_VERSION@";
