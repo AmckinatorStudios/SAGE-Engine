@@ -33,10 +33,11 @@
 // ---------------------------------------------------------------------
 struct GameState {
     static constexpr float CookDuration = 4.0f;
+    static constexpr float OceanHalfSize = 400.0f; // половина стороны квада океана вокруг корабля
 
     World Terrain;
     ShipInfo Ship;
-    WaterPlane Water{400.0f, GameConstants::SeaLevel};
+    WaterPlane Water{OceanHalfSize, GameConstants::SeaLevel};
 
     Scene SceneData;
     ScriptEngine Scripts; // работает с объектами SceneData — см. BindScene/BindInput в конструкторе

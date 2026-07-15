@@ -55,6 +55,8 @@
 
 namespace {
 
+constexpr float kNoclipFlySpeed = 10.0f; // м/с, свободный полёт в режиме noclip (см. UpdateNoclipFly)
+
 // Читает позицию/угол камеры и время суток из переменных окружения —
 // используется автотестами/CI для детерминированных скриншотов без
 // реального ввода (см. SAGE_CAM_POS/YAW/PITCH, SAGE_TIME_OF_DAY, SAGE_NOCLIP).
@@ -140,7 +142,7 @@ void UpdateNoclipFly(GameState& game, InputMap& actions, const Camera& camera, f
     if (actions.IsDown(GameActions::FlyUp)) fly += glm::vec3(0, 1, 0);
     if (actions.IsDown(GameActions::FlyDown)) fly -= glm::vec3(0, 1, 0);
     if (glm::length(fly) > 0.001f) {
-        game.Player.Position += glm::normalize(fly) * 10.0f * dt;
+        game.Player.Position += glm::normalize(fly) * kNoclipFlySpeed * dt;
     }
     game.Player.Velocity = glm::vec3(0.0f);
 }
@@ -167,6 +169,9 @@ int main() {
         InputSystem input;
         input.Attach(window.Handle());
         GameActions::RegisterDefaultBindings(input);
+        // Необязательный файл настроек рядом с игрой — переопределяет
+        // раскладку по умолчанию без пересборки (см. GameActions.h).
+        GameActions::LoadBindingsFromFile(input.Actions(), "keybindings.cfg");
         glfwSetInputMode(window.Handle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         glEnable(GL_BLEND);

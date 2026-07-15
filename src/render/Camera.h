@@ -18,6 +18,8 @@ public:
     float MovementSpeed = 4.0f;
     float MouseSensitivity = 0.1f;
     float Fov = 60.0f;
+    float NearClip = 0.1f;
+    float FarClip = 200.0f; // ограничивает дальность прорисовки — увеличь для игр с большим миром
 
     Camera() { UpdateVectors(); }
 
@@ -26,7 +28,7 @@ public:
     }
 
     glm::mat4 GetProjectionMatrix(float aspect) const {
-        return glm::perspective(glm::radians(Fov), aspect, 0.1f, 200.0f);
+        return glm::perspective(glm::radians(Fov), aspect, NearClip, FarClip);
     }
 
     void ProcessKeyboard(CameraMove dir, float deltaTime) {

@@ -2,7 +2,6 @@
 #include "Chunk.h"
 #include <unordered_map>
 #include <memory>
-#include <cmath>
 
 // Хэш для glm::ivec3, чтобы использовать его как ключ unordered_map
 struct IVec3Hash {
@@ -62,43 +61,6 @@ public:
         if (local.x == CHUNK_SIZE - 1) MarkDirtyIfExists({chunk.WorldPos().x / CHUNK_SIZE + 1, chunk.WorldPos().y / CHUNK_SIZE, chunk.WorldPos().z / CHUNK_SIZE});
         if (local.z == 0) MarkDirtyIfExists({chunk.WorldPos().x / CHUNK_SIZE, chunk.WorldPos().y / CHUNK_SIZE, chunk.WorldPos().z / CHUNK_SIZE - 1});
         if (local.z == CHUNK_SIZE - 1) MarkDirtyIfExists({chunk.WorldPos().x / CHUNK_SIZE, chunk.WorldPos().y / CHUNK_SIZE, chunk.WorldPos().z / CHUNK_SIZE + 1});
-    }
-
-    // Простая процедурная высота рельефа (сумма синусоид — не настоящий шум
-    // Перлина, но даёт органичный холмистый ландшафт без внешних библиотек)
-    static int TerrainHeight(int worldX, int worldZ) {
-        float x = (float)worldX;
-        float z = (float)worldZ;
-        float h = 6.0f
-            + 2.5f * std::sin(x * 0.15f) * std::cos(z * 0.15f)
-            + 1.2f * std::sin(x * 0.05f + z * 0.08f);
-        int ih = (int)std::round(h);
-        if (ih < 1) ih = 1;
-        if (ih > CHUNK_SIZE - 1) ih = CHUNK_SIZE - 1;
-        return ih;
-    }
-
-    // Генерирует остров/дно в прямоугольнике чанков [-radius, radius] по X и Z
-    void GenerateTerrain(int radiusInChunks) {
-        for (int cx = -radiusInChunks; cx <= radiusInChunks; ++cx) {
-            for (int cz = -radiusInChunks; cz <= radiusInChunks; ++cz) {
-                Chunk& chunk = GetOrCreateChunk({cx, 0, cz});
-                for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
-                    for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
-                        int worldX = cx * CHUNK_SIZE + lx;
-                        int worldZ = cz * CHUNK_SIZE + lz;
-                        int height = TerrainHeight(worldX, worldZ);
-                        for (int y = 0; y <= height; ++y) {
-                            BlockType type;
-                            if (y == height) type = BlockType::Grass;
-                            else if (y >= height - 2) type = BlockType::Dirt;
-                            else type = BlockType::Stone;
-                            chunk.SetBlock(lx, y, lz, type);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     // Перестраивает меши всех чанков, помеченных как "грязные"
