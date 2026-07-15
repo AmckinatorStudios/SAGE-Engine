@@ -35,23 +35,36 @@ engine/
   src/
     main.cpp                    — точка входа, игровой цикл ИГРЫ (The Boat)
 
-    ── ЯДРО ДВИЖКА (универсальное, не зависит от вокселей/конкретной игры) ──
+    ── ЯДРО ДВИЖКА → статическая библиотека sage_engine ──
+    ── (универсальное, не зависит от вокселей/конкретной игры) ──
     core/Window.*                — окно и контекст OpenGL
-    render/Shader.*               — загрузка/компиляция шейдеров
-    render/Camera.h                — камера-полёт
-    render/Mesh.*                   — геометрия на GPU, генератор куба
-    render/ModelLoader.*             — загрузка .obj моделей
-    render/ResourceManager.h          — кэш мешей
+    core/InputSystem.h            — ввод: сырой GLFW → именованные действия
+    render/Shader.*                — загрузка/компиляция шейдеров
+    render/Camera.h                 — камера-полёт
+    render/Mesh.*                    — геометрия на GPU, генератор куба
+    render/ModelLoader.*              — загрузка .obj моделей
+    render/ResourceManager.h           — кэш мешей
+    render/ParticleSystem.*, BillboardSystem.h, PostProcess.h, ShadowMap.h
     scene/Transform.h                 — позиция/поворот/масштаб
     scene/Scene.h                      — сцена: список GameObject'ов (ECS-лайт)
     scene/SceneSerializer.*             — сохранение/загрузка сцены в JSON
     scene/SceneManager.h                 — несколько сцен, переключение активной
+    ui/UIRenderer.*, UICanvas.h, Widgets.h — immediate-mode UI + виджеты
     scripting/ScriptEngine.*              — система скриптинга на Lua
 
-    ── МОДУЛЬ ИГРЫ THE BOAT (написан ПОВЕРХ ядра, не часть движка) ──
+    ── КОД ИГРЫ THE BOAT → exe TheBoat (линкует sage_engine) ──
+    ── (написан ПОВЕРХ ядра, не часть движка) ──
+    game/GameState.h, PlayerActions.h, GameHud.h, Fishing.h, Crafting.h, ...
+                                   — состояние партии, действия, худ, механики
     voxel/Block.h, Chunk.*, World.*, VoxelMesh.*, VoxelRaycast.h,
-          WorldRaycast.h, WaterPlane.h
+          WorldRaycast.h, WaterPlane.h — воксельный корабль (специфика The Boat)
 ```
+
+Сборка даёт два таргета: библиотеку `sage_engine` (переиспользуемое ядро) и
+исполняемый файл игры `TheBoat`, который её линкует. Граница строгая и
+проверяемая: код движка нигде не включает `src/game/` или `src/voxel/`, поэтому
+следующую игру (пусть даже не про воксели) можно собрать, слинковав ту же
+библиотеку `sage_engine` и написав свой `main` + свой игровой код.
 
 
 

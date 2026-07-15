@@ -1,13 +1,13 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)
 project(SAGEEngine LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Имя игры, которая сейчас собирается на движке. Один и тот же движок
-# (SAGEEngine) может использоваться для нескольких игр — меняя эту
-# переменную (или передавая -DGAME_NAME=... в cmake), меняется только
-# имя итогового исполняемого файла, весь код движка остаётся общим.
+# (библиотека sage_engine ниже) может использоваться для нескольких игр —
+# меняя эту переменную (или передавая -DGAME_NAME=... в cmake), меняется
+# только имя итогового исполняемого файла, весь код движка остаётся общим.
 if (NOT GAME_NAME)
     set(GAME_NAME "TheBoat")
 endif()
@@ -66,14 +66,18 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(json)
 
 # ---------- Lua (язык скриптов) ----------
-# У Lua нет официальной поддержки CMake, поэтому качаем исходники и собираем
-# сами как обычную библиотеку (аналогично glad ниже).
+# У Lua нет CMake-сборки в репозитории, поэтому нам нужны только его исходники,
+# которые мы компилируем сами как обычную библиотеку (аналогично glad ниже).
+# SOURCE_SUBDIR указывает на несуществующую поддиректорию — это штатный способ
+# сказать FetchContent_MakeAvailable "только скачай, не вызывай add_subdirectory"
+# (замена устаревшей FetchContent_Populate, которую удаляют в CMake >= 3.30).
 FetchContent_Declare(
   lua_src
   GIT_REPOSITORY https://github.com/lua/lua.git
   GIT_TAG v5.4.7
+  SOURCE_SUBDIR do-not-add-to-build
 )
-FetchContent_Populate(lua_src)
+FetchContent_MakeAvailable(lua_src)
 file(GLOB LUA_SOURCES ${lua_src_SOURCE_DIR}/*.c)
 list(REMOVE_ITEM LUA_SOURCES
     ${lua_src_SOURCE_DIR}/lua.c
@@ -88,12 +92,16 @@ if (UNIX)
 endif()
 
 # ---------- sol2 (удобная C++ обёртка над Lua C API) ----------
+# У sol2 есть свой CMakeLists, но нам нужны только его заголовки, а не его
+# CMake-цели (они пытаются искать Lua по-своему и конфликтовали бы с нашим
+# ручным lua54). Тот же приём с SOURCE_SUBDIR: только скачать исходники.
 FetchContent_Declare(
   sol2_src
   GIT_REPOSITORY https://github.com/ThePhD/sol2.git
   GIT_TAG v3.3.0
+  SOURCE_SUBDIR do-not-add-to-build
 )
-FetchContent_Populate(sol2_src)
+FetchContent_MakeAvailable(sol2_src)
 add_library(sol2 INTERFACE)
 target_include_directories(sol2 INTERFACE ${sol2_src_SOURCE_DIR}/include)
 target_link_libraries(sol2 INTERFACE lua54)
@@ -111,36 +119,93 @@ target_include_directories(stb INTERFACE external/stb)
 add_library(tinygltf INTERFACE)
 target_include_directories(tinygltf INTERFACE external/tinygltf)
 
-# ---------- Исходники движка ----------
-file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
+# ============================================================================
+#  sage_engine — переиспользуемое, УНИВЕРСАЛЬНОЕ ЯДРО движка (окно, рендер,
+#  камера, сцена, сериализация, UI, скриптинг). НЕ знает ничего ни о вокселях,
+#  ни о конкретной игре: код движка нигде не включает src/voxel/ и src/game/
+#  (это проверяемая границей архитектура — см. README, раздел "Что внутри").
+#  Собирается как статическая библиотека, которую линкует тонкий исполняемый
+#  файл игры ниже. Другая игра на SAGE (пусть даже не про воксели) линкует эту
+#  же библиотеку и пишет свой main + свой игровой код.
+#
+#  Новые .cpp движка добавляйте в этот список (явный список вместо GLOB —
+#  сборка детерминирована и не зависит от того, переконфигурировали ли CMake).
+# ============================================================================
+set(SAGE_ENGINE_SOURCES
+    src/core/GLDebug.cpp
+    src/core/Log.cpp
+    src/core/Stats.cpp
+    src/core/Window.cpp
+    src/render/DebugOverlay.cpp
+    src/render/Mesh.cpp
+    src/render/Model.cpp
+    src/render/ModelLoader.cpp
+    src/render/Screenshot.cpp
+    src/render/Shader.cpp
+    src/render/Skybox.cpp
+    src/render/Texture.cpp
+    src/scene/SceneSerializer.cpp
+    src/scripting/ScriptEngine.cpp
+    src/ui/UIRenderer.cpp
+)
 
-add_executable(SAGEEngine ${ENGINE_SOURCES})
-set_target_properties(SAGEEngine PROPERTIES OUTPUT_NAME "${GAME_NAME}")
+add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})
 
-target_include_directories(SAGEEngine PRIVATE src ${CMAKE_BINARY_DIR}/generated)
+# src — общий корень включений и для движка, и для игры (заголовки включают
+# друг друга относительно него, напр. "render/Shader.h"). generated — для
+# сгенерированного core/Version.h. Оба PUBLIC: цели, линкующие движок,
+# наследуют эти пути автоматически.
+target_include_directories(sage_engine PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+)
 
 # В Debug-сборке включаем GL_CHECK (см. src/core/GLDebug.h) — проверку
 # glGetError после обёрнутых вызовов. В Release макрос ничего не делает.
-target_compile_definitions(SAGEEngine PRIVATE $<$<CONFIG:Debug>:SAGE_DEBUG>)
+target_compile_definitions(sage_engine PUBLIC $<$<CONFIG:Debug>:SAGE_DEBUG>)
 
-target_link_libraries(SAGEEngine PRIVATE
+# PUBLIC — то, что торчит в публичных заголовках движка (окно/ввод/математика/
+# скриптинг/текстуры): линкующая игра должна их видеть транзитивно.
+target_link_libraries(sage_engine PUBLIC
     glfw
     glad
     glm::glm
-    tinyobjloader
-    nlohmann_json::nlohmann_json
     sol2
     stb
+)
+# PRIVATE — используется только в .cpp движка (загрузка моделей/сериализация),
+# в публичных заголовках не появляется — игре знать о них не нужно.
+target_link_libraries(sage_engine PRIVATE
+    tinyobjloader
     tinygltf
+    nlohmann_json::nlohmann_json
 )
 
 if (WIN32)
-    target_link_libraries(SAGEEngine PRIVATE opengl32)
+    target_link_libraries(sage_engine PUBLIC opengl32)
 elseif(UNIX)
-    target_link_libraries(SAGEEngine PRIVATE GL dl pthread X11)
+    target_link_libraries(sage_engine PUBLIC GL dl pthread X11)
 endif()
 
+# ============================================================================
+#  Игра "The Boat" — exe поверх движка: точка входа + игровая логика
+#  (src/game/*, src/main.cpp) + воксельный модуль (src/voxel/*). Воксели —
+#  это код КОНКРЕТНОЙ ИГРЫ (корабль из блоков), написанный поверх движка, а
+#  не часть движка: другая игра на SAGE могла бы не подключать voxel вовсе.
+#  Всё, что специфично для The Boat (корабль, рыбалка, крафт, статы, блоки),
+#  живёт здесь и линкует sage_engine, но не наоборот.
+# ============================================================================
+set(GAME_SOURCES
+    src/main.cpp
+    src/game/PlayerController.cpp
+    src/voxel/Chunk.cpp
+    src/voxel/VoxelMesh.cpp
+)
+
+add_executable(${GAME_NAME} ${GAME_SOURCES})
+target_link_libraries(${GAME_NAME} PRIVATE sage_engine)
+
 # Копируем папку assets рядом с исполняемым файлом
-add_custom_command(TARGET SAGEEngine POST_BUILD
+add_custom_command(TARGET ${GAME_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:SAGEEngine>/assets)
+    ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${GAME_NAME}>/assets)
