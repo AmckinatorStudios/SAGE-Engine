@@ -211,7 +211,24 @@ int main() {
 
         // ---- Игровое состояние: мир, корабль, игрок, инвентарь, системы ----
         GameState game;
-        game.Scripts.BindInput(input.Actions()); // InputSystem создан раньше — привязка снаружи GameState
+        // Camera/billboards созданы раньше GameState — привязка снаружи неё,
+        // как и InputSystem выше. ParticleSystem же живёт внутри GameState,
+        // поэтому её привязываем на неё саму (game.Particles). Все Bind*
+        // должны отработать ДО RunScript() ниже — иначе демо-скрипт упадёт
+        // на первом же обращении к ещё не привязанной системе.
+        game.Scripts.BindInput(input.Actions());
+        game.Scripts.BindCamera(camera);
+        game.Scripts.BindParticles(game.Particles);
+        game.Scripts.BindBillboards(billboards);
+
+        // demo_features.lua — витрина расширенного Lua-API движка (спавн
+        // объектов, таймеры, корутины, камера, частицы, билборды), никак не
+        // относится к геймплею The Boat — только по явному запросу, как и
+        // остальные SAGE_* debug-флаги.
+        if (std::getenv("SAGE_RUN_DEMO_SCRIPT")) {
+            game.Scripts.RunScript("assets/scripts/demo_features.lua");
+        }
+
         UICanvas statsHud = BuildStatsHud(game);
         ApplyDebugEnvOverrides(game, camera);
 

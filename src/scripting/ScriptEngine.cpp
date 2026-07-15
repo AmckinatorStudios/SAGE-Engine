@@ -1,6 +1,7 @@
 #include "ScriptEngine.h"
 #include "../core/Log.h"
 #include "../render/ResourceManager.h"
+#include "../render/ParticlePresets.h"
 #include <algorithm>
 
 ScriptEngine::ScriptEngine() {
@@ -34,6 +35,35 @@ void ScriptEngine::RegisterEngineApi() {
         },
         "Distance", [](const glm::vec3& a, const glm::vec3& b) { return glm::length(b - a); },
         "Dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); }
+    );
+
+    // Vec2 — размеры билбордов (Size) и прочая 2D-математика (экранные
+    // координаты, UV). Минимальный набор — арифметика та же, что у Vec3.
+    m_lua.new_usertype<glm::vec2>("Vec2",
+        sol::constructors<glm::vec2(), glm::vec2(float, float)>(),
+        "x", &glm::vec2::x,
+        "y", &glm::vec2::y,
+        sol::meta_function::addition, [](const glm::vec2& a, const glm::vec2& b) { return a + b; },
+        sol::meta_function::subtraction, [](const glm::vec2& a, const glm::vec2& b) { return a - b; },
+        sol::meta_function::multiplication, [](const glm::vec2& a, float s) { return a * s; },
+        sol::meta_function::to_string, [](const glm::vec2& a) {
+            return "(" + std::to_string(a.x) + ", " + std::to_string(a.y) + ")";
+        }
+    );
+
+    // Vec4 — цвета с альфа-каналом (частицы, тонирование билбордов). Здесь
+    // намеренно нет геометрических операций (Length/Normalized/Dot) — Vec4
+    // в этом движке используется только как rgba, не как направление/точка.
+    m_lua.new_usertype<glm::vec4>("Vec4",
+        sol::constructors<glm::vec4(), glm::vec4(float, float, float, float)>(),
+        "x", &glm::vec4::x,
+        "y", &glm::vec4::y,
+        "z", &glm::vec4::z,
+        "w", &glm::vec4::w,
+        sol::meta_function::to_string, [](const glm::vec4& a) {
+            return "(" + std::to_string(a.x) + ", " + std::to_string(a.y) + ", "
+                 + std::to_string(a.z) + ", " + std::to_string(a.w) + ")";
+        }
     );
 
     // Transform — позиция/поворот/масштаб объекта, доступны на чтение и запись
@@ -81,6 +111,14 @@ void ScriptEngine::RegisterEngineApi() {
         obj.MeshComponent = ResourceManager::Instance().GetCube();
     });
 
+    // То же самое, но грузит .obj модель (кэшируется ResourceManager'ом —
+    // одна и та же модель, запрошенная из нескольких скриптов, не
+    // перечитывается с диска). Бросает ошибку, если файл не найден/битый.
+    m_lua.set_function("SetMeshModel", [](GameObject& obj, const std::string& path) {
+        obj.MeshRefComponent = MeshRef{MeshRef::Type::Model, path};
+        obj.MeshComponent = ResourceManager::Instance().GetModel(path);
+    });
+
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
     // после BindInput. Скрипты читают тот же ввод, что и C++-код игры —
     // никакого параллельного дублирования раскладки клавиш. ---
@@ -92,6 +130,117 @@ void ScriptEngine::RegisterEngineApi() {
     });
     m_lua.set_function("WasActionReleased", [this](const std::string& name) -> bool {
         return m_input && m_input->Has(name) && m_input->WasReleased(name);
+    });
+
+    // --- Камера: доступно после BindCamera. Position — обычное поле, но
+    // Yaw/Pitch выставлены через property-функции, которые сразу пересчитывают
+    // Front/Right/Up вызовом ProcessMouse(0,0) — тем же приёмом, что уже
+    // использует ApplyDebugEnvOverrides() в main.cpp после ручной правки угла.
+    // Без этого камера "смотрела" бы в старом направлении до следующего
+    // движения мыши игроком. ---
+    m_lua.new_usertype<Camera>("Camera",
+        "Position", &Camera::Position,
+        "Front", sol::readonly(&Camera::Front),
+        "Right", sol::readonly(&Camera::Right),
+        "Up", sol::readonly(&Camera::Up),
+        "Fov", &Camera::Fov,
+        "MovementSpeed", &Camera::MovementSpeed,
+        "NearClip", &Camera::NearClip,
+        "FarClip", &Camera::FarClip,
+        "Yaw", sol::property(
+            [](const Camera& c) { return c.Yaw; },
+            [](Camera& c, float yaw) { c.Yaw = yaw; c.ProcessMouse(0.0f, 0.0f); }),
+        "Pitch", sol::property(
+            [](const Camera& c) { return c.Pitch; },
+            [](Camera& c, float pitch) { c.Pitch = pitch; c.ProcessMouse(0.0f, 0.0f); })
+    );
+
+    m_lua.set_function("GetCamera", [this]() -> Camera& {
+        if (!m_camera) throw std::runtime_error("GetCamera: камера не привязана (ScriptEngine::BindCamera не вызван)");
+        return *m_camera;
+    });
+
+    // --- Частицы: доступно после BindParticles. ParticleConfig — те же поля,
+    // что и ParticleEmitterConfig в C++ (см. render/Particle.h), плюс готовые
+    // пресеты ParticlePresets.* (те же, что использует The Boat в main.cpp) —
+    // Lua-скрипт может взять пресет как основу и подправить пару полей,
+    // вместо того чтобы описывать весь конфиг с нуля. ---
+    m_lua.new_usertype<ParticleEmitterConfig>("ParticleConfig",
+        sol::constructors<ParticleEmitterConfig()>(),
+        "DirectionMin", &ParticleEmitterConfig::DirectionMin,
+        "DirectionMax", &ParticleEmitterConfig::DirectionMax,
+        "SpeedMin", &ParticleEmitterConfig::SpeedMin,
+        "SpeedMax", &ParticleEmitterConfig::SpeedMax,
+        "Gravity", &ParticleEmitterConfig::Gravity,
+        "LifetimeMin", &ParticleEmitterConfig::LifetimeMin,
+        "LifetimeMax", &ParticleEmitterConfig::LifetimeMax,
+        "StartSizeMin", &ParticleEmitterConfig::StartSizeMin,
+        "StartSizeMax", &ParticleEmitterConfig::StartSizeMax,
+        "EndSizeMin", &ParticleEmitterConfig::EndSizeMin,
+        "EndSizeMax", &ParticleEmitterConfig::EndSizeMax,
+        "StartColor", &ParticleEmitterConfig::StartColor,
+        "EndColor", &ParticleEmitterConfig::EndColor,
+        "AngularVelocityMax", &ParticleEmitterConfig::AngularVelocityMax,
+        "EmissionRate", &ParticleEmitterConfig::EmissionRate
+    );
+
+    sol::table presets = m_lua.create_table();
+    presets.set_function("WaterSplash", &ParticlePresets::WaterSplash);
+    presets.set_function("Smoke", &ParticlePresets::Smoke);
+    presets.set_function("BlockBreak", &ParticlePresets::BlockBreak);
+    presets.set_function("StoveEmbers", &ParticlePresets::StoveEmbers);
+    m_lua["ParticlePresets"] = presets;
+
+    // Разовый залп частиц в мировой точке — см. ParticleSystem::Burst
+    m_lua.set_function("EmitParticles", [this](const ParticleEmitterConfig& config, glm::vec3 pos, int count) {
+        if (!m_particles) throw std::runtime_error("EmitParticles: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        m_particles->Burst(config, pos, count);
+    });
+    // Непрерывная струя (дым, искры) — создаётся выключенной, включай
+    // SetParticleStreamActive(id, true) отдельно (см. ParticleSystem::CreateStream)
+    m_lua.set_function("CreateParticleStream", [this](const std::string& id, const ParticleEmitterConfig& config, glm::vec3 pos) {
+        if (!m_particles) throw std::runtime_error("CreateParticleStream: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        m_particles->CreateStream(id, config, pos);
+    });
+    m_lua.set_function("SetParticleStreamActive", [this](const std::string& id, bool active) {
+        if (!m_particles) throw std::runtime_error("SetParticleStreamActive: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        m_particles->SetStreamActive(id, active);
+    });
+    m_lua.set_function("SetParticleStreamPosition", [this](const std::string& id, glm::vec3 pos) {
+        if (!m_particles) throw std::runtime_error("SetParticleStreamPosition: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        m_particles->SetStreamPosition(id, pos);
+    });
+    m_lua.set_function("RemoveParticleStream", [this](const std::string& id) {
+        if (!m_particles) throw std::runtime_error("RemoveParticleStream: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        m_particles->RemoveStream(id);
+    });
+
+    // --- Билборды: доступно после BindBillboards. Спрайт без texturePath
+    // рисуется сплошным цветом Tint (см. BillboardSprite) — удобно для
+    // маркеров/индикаторов, для которых не хочется готовить текстуру. ---
+    m_lua.set_function("AddBillboard", [this](glm::vec3 pos, glm::vec2 size, sol::optional<std::string> texturePath) -> int {
+        if (!m_billboards) throw std::runtime_error("AddBillboard: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
+        BillboardSprite sprite;
+        sprite.WorldPos = pos;
+        sprite.Size = size;
+        if (texturePath) sprite.SpriteTexture = GetOrLoadBillboardTexture(*texturePath);
+        return m_billboards->Add(sprite);
+    });
+    m_lua.set_function("RemoveBillboard", [this](int id) {
+        if (!m_billboards) throw std::runtime_error("RemoveBillboard: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
+        m_billboards->Remove(id);
+    });
+    m_lua.set_function("SetBillboardPosition", [this](int id, glm::vec3 pos) {
+        if (!m_billboards) throw std::runtime_error("SetBillboardPosition: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
+        m_billboards->SetPosition(id, pos);
+    });
+    m_lua.set_function("SetBillboardVisible", [this](int id, bool visible) {
+        if (!m_billboards) throw std::runtime_error("SetBillboardVisible: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
+        m_billboards->SetVisible(id, visible);
+    });
+    m_lua.set_function("SetBillboardTint", [this](int id, glm::vec4 tint) {
+        if (!m_billboards) throw std::runtime_error("SetBillboardTint: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
+        m_billboards->SetTint(id, tint);
     });
 
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
@@ -124,8 +273,22 @@ void ScriptEngine::RegisterEngineApi() {
     // "attempt to call a thread value" — sol2 ожидает управлять созданием
     // потока сам, а не оборачивать уже готовый Lua-thread.
     m_lua.set_function("StartCoroutine", [this](sol::function fn) {
-        sol::coroutine co = fn;
-        m_coroutines.push_back({std::move(co), 0.0f});
+        // sol::coroutine, построенный НАПРЯМУЮ из функции главного Lua-состояния
+        // (sol::coroutine co = fn;), не создаёт для неё отдельный Lua-поток —
+        // lua_resume() в его реализации вызывается на lua_state() САМОЙ fn,
+        // то есть на главном состоянии. Пока активна только ОДНА такая
+        // "корутина", это незаметно работает случайно; как только их две
+        // одновременно, вторая резюмится на ТОМ ЖЕ lua_State*, что и первая,
+        // и по факту продолжает выполнение первой вместо своей функции.
+        // Поэтому явно создаём отдельный Lua-поток (sol::thread) и переносим
+        // на его стек функцию через lua_xmove перед тем, как обернуть в
+        // sol::coroutine — так каждая корутина резюмится на СВОЁМ потоке.
+        sol::thread runner = sol::thread::create(m_lua.lua_state());
+        lua_State* runnerState = runner.state().lua_state();
+        fn.push();
+        lua_xmove(fn.lua_state(), runnerState, 1);
+        sol::coroutine co(runnerState, -1);
+        m_coroutines.push_back({std::move(co), 0.0f, std::move(runner)});
     });
 
     sol::protected_function_result bootstrap = m_lua.script(
@@ -252,4 +415,16 @@ void ScriptEngine::UpdateCoroutines(float dt) {
             it = m_coroutines.erase(it);
         }
     }
+}
+
+const Texture* ScriptEngine::GetOrLoadBillboardTexture(const std::string& path) {
+    auto it = m_billboardTextures.find(path);
+    if (it != m_billboardTextures.end()) return it->second.get();
+
+    // Bilinear — разумный дефолт для одиночных спрайтов (не атлас, в
+    // отличие от блочного атласа вокселей, которому нужен Nearest)
+    auto texture = std::make_unique<Texture>(path, TextureFilter::Bilinear);
+    const Texture* raw = texture.get();
+    m_billboardTextures[path] = std::move(texture);
+    return raw;
 }

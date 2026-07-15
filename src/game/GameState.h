@@ -14,7 +14,6 @@
 #include "../render/ParticlePresets.h"
 #include "../scripting/ScriptEngine.h"
 #include "../core/InputMap.h"
-#include <cstdlib>
 #include <string>
 
 // ---------------------------------------------------------------------
@@ -102,18 +101,13 @@ struct GameState {
 
         // Скрипты работают с объектами SceneData — то, что они заспавнят
         // через SpawnObject(), рисуется тем же проходом, что и любой другой
-        // GameObject (см. main.cpp, рендер SceneData.Objects()). BindInput
-        // делает снаружи main.cpp (InputSystem создаётся раньше GameState) —
-        // см. game.Scripts.BindInput(input.Actions()) сразу после создания game.
+        // GameObject (см. main.cpp, рендер SceneData.Objects()). Остальные
+        // Bind* (Input/Camera/Particles/Billboards) и опциональный запуск
+        // demo_features.lua делает main.cpp ПОСЛЕ конструирования GameState —
+        // см. комментарий там. Раньше RunScript() вызывался прямо здесь, но
+        // тогда демо-скрипт стартовал до того, как эти системы успевали
+        // привязаться, и падал на первом же обращении к камере/частицам.
         Scripts.BindScene(SceneData);
-
-        // demo_features.lua — витрина Lua-API движка (спавн кубов, таймеры,
-        // корутины), никак не относится к геймплею The Boat. Раньше грузился
-        // безусловно при каждом старте партии; теперь — только по явному
-        // запросу (SAGE_RUN_DEMO_SCRIPT), как и остальные SAGE_* debug-флаги.
-        if (std::getenv("SAGE_RUN_DEMO_SCRIPT")) {
-            Scripts.RunScript("assets/scripts/demo_features.lua");
-        }
 
         PrevTimeOfDay = DayNight.TimeOfDay();
     }
