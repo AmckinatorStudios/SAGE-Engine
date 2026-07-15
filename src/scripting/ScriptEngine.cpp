@@ -101,6 +101,18 @@ void ScriptEngine::RegisterEngineApi() {
 
     m_lua.set_function("DestroyObject", [this](int id) {
         if (!m_scene) throw std::runtime_error("DestroyObject: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        // Помечаем зависимые ScriptInstance мёртвыми ДО RemoveObject — ниже
+        // она реально освобождает GameObject (Scene хранит его в unique_ptr),
+        // поэтому сравнение instance.Object->Id должно случиться, пока объект
+        // ещё жив, иначе само это сравнение уже было бы use-after-free.
+        // UpdateAll() пропустит помеченные записи и уберёт их после текущего
+        // прохода, не разыменовывая освобождённую память. ВАЖНО: если скрипт
+        // вызывает DestroyObject(entity.Id) сам про себя, это должно быть
+        // последним действием в OnUpdate — entity после этого момента (даже в
+        // том же вызове) ссылается на уже уничтоженный объект.
+        for (auto& instance : m_instances) {
+            if (instance.Object && instance.Object->Id == id) instance.Dead = true;
+        }
         m_scene->RemoveObject(id);
     });
 
@@ -351,6 +363,7 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
 
 void ScriptEngine::UpdateAll(float deltaTime) {
     for (auto& instance : m_instances) {
+        if (instance.Dead) continue; // Object уничтожен через DestroyObject() — см. ScriptInstance::Dead
         if (!instance.UpdateFn.valid()) continue; // скрипт без OnUpdate — легитимно (см. AttachScript)
 
         // Объектные скрипты получают entity первым аргументом, уровневые — нет
@@ -363,26 +376,52 @@ void ScriptEngine::UpdateAll(float deltaTime) {
         }
     }
 
+    // Убираем экземпляры с уничтоженным Object одним проходом ПОСЛЕ основного
+    // цикла — как и ниже для таймеров/корутин, чтобы не мутировать m_instances
+    // во время его же итерации (в т.ч. если DestroyObject был вызван изнутри
+    // самого OnUpdate этого же экземпляра).
+    m_instances.erase(
+        std::remove_if(m_instances.begin(), m_instances.end(), [](const ScriptInstance& i) { return i.Dead; }),
+        m_instances.end());
+
     UpdateTimers(deltaTime);
     UpdateCoroutines(deltaTime);
 }
 
 void ScriptEngine::UpdateTimers(float dt) {
-    for (auto& call : m_scheduled) {
-        if (call.Cancelled) continue;
-        call.TimeLeft -= dt;
-        if (call.TimeLeft > 0.0f) continue;
+    // Индекс, а не диапазон/итератор: колбэк таймера может сам вызвать
+    // Schedule/Repeat (см. ниже), чей push_back способен реаллоцировать
+    // m_scheduled — любой ранее взятый итератор/ссылка внутрь вектора после
+    // этого висячий (undefined behavior). Индекс остаётся корректным для уже
+    // пройденных и текущего элемента (до конца этой функции ничего не
+    // удаляется поэлементно, только один проход erase-remove в самом конце).
+    //
+    // Сам колбэк ПЕРЕД вызовом копируем в локальную переменную, а не вызываем
+    // прямо "m_scheduled[i].Fn()": sol2 после resume пишет результат обратно
+    // в себя (в "this"), и если бы этот "this" жил внутри вектора, реаллокация
+    // ВНУТРИ самого вызова (из-за вложенного Schedule/Repeat) оборвала бы его
+    // раньше, чем вызов успеет завершиться — copy sol::protected_function
+    // дешёвый (просто ссылка на тот же Lua-объект), поэтому это не накладно.
+    for (size_t i = 0; i < m_scheduled.size(); ++i) {
+        if (m_scheduled[i].Cancelled) continue;
+        m_scheduled[i].TimeLeft -= dt;
+        if (m_scheduled[i].TimeLeft > 0.0f) continue;
 
-        auto result = call.Fn();
+        int id = m_scheduled[i].Id;
+        sol::protected_function fn = m_scheduled[i].Fn;
+
+        auto result = fn();
         if (!result.valid()) {
             sol::error err = result;
-            LOG_ERROR("ScriptEngine") << "Ошибка в таймере (id " << call.Id << "): " << err.what();
+            LOG_ERROR("ScriptEngine") << "Ошибка в таймере (id " << id << "): " << err.what();
         }
 
-        if (call.Repeating) {
-            call.TimeLeft += call.Interval; // "+=", не "=", чтобы не копить дрейф при просадках FPS
+        // m_scheduled могла реаллоцироваться внутри fn() — обращаемся к
+        // элементу заново по тому же индексу, не через старую ссылку.
+        if (m_scheduled[i].Repeating) {
+            m_scheduled[i].TimeLeft += m_scheduled[i].Interval; // "+=", не "=", чтобы не копить дрейф при просадках FPS
         } else {
-            call.Cancelled = true; // одноразовый — гасим после первого срабатывания
+            m_scheduled[i].Cancelled = true; // одноразовый — гасим после первого срабатывания
         }
     }
 
@@ -393,26 +432,40 @@ void ScriptEngine::UpdateTimers(float dt) {
 }
 
 void ScriptEngine::UpdateCoroutines(float dt) {
-    for (auto it = m_coroutines.begin(); it != m_coroutines.end(); ) {
-        it->WaitTime -= dt;
-        if (it->WaitTime > 0.0f) { ++it; continue; }
+    // Индекс, а не итератор — по той же причине, что и в UpdateTimers: тело
+    // корутины может само вызвать StartCoroutine, чей push_back способен
+    // реаллоцировать m_coroutines. Резюмируем ЛОКАЛЬНУЮ КОПИЮ sol::coroutine
+    // (дешёвая операция — копирует лишь ссылку на тот же Lua-поток), а не
+    // объект, живущий прямо в векторе: sol2 после lua_resume пишет статус
+    // обратно в себя (в "this"), и если бы "this" был указателем внутрь
+    // вектора, реаллокация ВНУТРИ самого вызова оборвала бы его раньше, чем
+    // вызов успеет завершиться. Индекс остаётся корректным после реаллокации
+    // (erase здесь — только для текущего/уже пройденных элементов).
+    for (size_t i = 0; i < m_coroutines.size(); ) {
+        m_coroutines[i].WaitTime -= dt;
+        if (m_coroutines[i].WaitTime > 0.0f) { ++i; continue; }
 
-        auto result = it->Co();
+        sol::coroutine co = m_coroutines[i].Co;
+        auto result = co();
+
         if (!result.valid()) {
             sol::error err = result;
             LOG_ERROR("ScriptEngine") << "Ошибка в корутине: " << err.what();
-            it = m_coroutines.erase(it);
+            m_coroutines.erase(m_coroutines.begin() + i);
             continue;
         }
 
-        if (it->Co.status() == sol::call_status::yielded) {
-            // wait(seconds) вернул через yield время следующей паузы
+        if (co.status() == sol::call_status::yielded) {
+            // wait(seconds) вернул через yield время следующей паузы.
+            // m_coroutines могла реаллоцироваться внутри co() — обращаемся к
+            // элементу заново по тому же индексу, не через старую ссылку.
             float nextWait = result.get<sol::optional<float>>().value_or(0.0f);
-            it->WaitTime = nextWait;
-            ++it;
+            m_coroutines[i].Co = co;
+            m_coroutines[i].WaitTime = nextWait;
+            ++i;
         } else {
             // Корутина дошла до конца функции — больше резюмировать нечего
-            it = m_coroutines.erase(it);
+            m_coroutines.erase(m_coroutines.begin() + i);
         }
     }
 }

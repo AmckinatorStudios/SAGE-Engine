@@ -98,6 +98,12 @@ private:
         sol::environment Env;
         sol::protected_function UpdateFn; // может быть невалидной, если OnUpdate не определён
         std::string Path; // для сообщений об ошибках
+        // true, если Object был уничтожен через DestroyObject() — Object в этом
+        // случае становится висячим указателем, поэтому UpdateAll() пропускает
+        // такие записи, не разыменовывая его, а затем убирает их из m_instances
+        // (см. UpdateAll). Без этого флага следующий кадр обращался бы к уже
+        // освобождённой памяти GameObject — реальный use-after-free.
+        bool Dead = false;
     };
 
     struct ScheduledCall {

@@ -18,6 +18,16 @@ public:
     Shader(const std::string& vertexPath, const std::string& fragmentPath);
     ~Shader();
 
+    // Владеет GL-объектом программы (m_id) — копирование запрещено. Без
+    // этого неявный копирующий конструктор скопировал бы голый ID программы,
+    // а деструктор одной из копий удалил бы её из-под другой, ещё живой (см.
+    // фикс такого же бага в Mesh). Сейчас Shader используется только как
+    // именованные переменные/поля, которые сами не копируются, но явный
+    // запрет защищает от того, чтобы это молча сломалось в будущем
+    // (например, если появится кэш шейдеров, возвращающий Shader по значению).
+    Shader(const Shader&) = delete;
+    Shader& operator=(const Shader&) = delete;
+
     void Use() const;
 
     void SetMat4(const std::string& name, const glm::mat4& value) const;

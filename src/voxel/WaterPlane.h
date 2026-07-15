@@ -41,6 +41,15 @@ public:
         glDeleteBuffers(1, &m_ebo);
     }
 
+    // Владеет GL-объектами (VAO/VBO/EBO) — копирование запрещено. Без этого
+    // неявный копирующий конструктор скопировал бы голые числа хендлов, а
+    // деструктор одной из копий удалил бы их из-под другой, ещё живой (см.
+    // фикс такого же бага в Mesh). Сейчас WaterPlane нигде не копируется
+    // (хранится по значению как поле GameState, которое само не копируется),
+    // но явный запрет защищает от того, чтобы это молча сломалось в будущем.
+    WaterPlane(const WaterPlane&) = delete;
+    WaterPlane& operator=(const WaterPlane&) = delete;
+
     void Draw() const {
         glBindVertexArray(m_vao);
         glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, 0);
