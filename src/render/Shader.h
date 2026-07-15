@@ -37,9 +37,25 @@ public:
     void SetFloat(const std::string& name, float value) const;
     void SetInt(const std::string& name, int value) const;
 
+    // Перечитывает и перекомпилирует шейдер из тех же файлов (hot-reload).
+    // При успехе подменяет GL-программу НА МЕСТЕ — все, кто держит ссылку на
+    // этот Shader, продолжают работать без изменений, просто с новым кодом.
+    // При ошибке (файл не открылся / не скомпилировался) СТАРАЯ программа
+    // сохраняется и продолжает работать, а метод возвращает false — так
+    // опечатка в шейдере во время hot-reload не роняет игру.
+    bool Reload();
+
+    const std::string& VertexPath() const { return m_vertexPath; }
+    const std::string& FragmentPath() const { return m_fragmentPath; }
+
 private:
-    unsigned int m_id;
+    unsigned int m_id = 0;
+    std::string m_vertexPath;
+    std::string m_fragmentPath;
 
     static std::string ReadFile(const std::string& path);
     static unsigned int Compile(unsigned int type, const std::string& source);
+    // Собирает программу из исходников. Возвращает 0 при ошибке (не бросает) и
+    // кладёт причину в *error — общий путь и для конструктора, и для Reload().
+    static unsigned int BuildProgram(const std::string& vSrc, const std::string& fSrc, std::string* error);
 };

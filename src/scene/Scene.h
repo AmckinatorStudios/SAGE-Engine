@@ -9,7 +9,7 @@
 
 // Описание того, ИЗ ЧЕГО сделан меш объекта — то, что реально
 // сохраняется в файл сцены. Сам Mesh (данные на GPU) не сериализуется,
-// он пересоздаётся при загрузке через ResourceManager.
+// он пересоздаётся при загрузке через AssetManager.
 struct MeshRef {
     enum class Type { None, Cube, Model };
     Type type = Type::None;
@@ -28,7 +28,7 @@ struct GameObject {
     glm::vec3 Color{1.0f, 1.0f, 1.0f};
 
     // Runtime-указатель на GPU-меш. Не сериализуется — заполняется
-    // ResourceManager'ом при загрузке сцены на основе MeshRefComponent.
+    // AssetManager'ом при загрузке сцены на основе MeshRefComponent.
     std::shared_ptr<Mesh> MeshComponent;
 };
 

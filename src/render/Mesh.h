@@ -39,6 +39,12 @@ public:
 
     void Draw() const;
 
+    // Пере-загружает геометрию в те же GL-буферы НА МЕСТЕ (hot-reload модели):
+    // держатели ссылки на этот Mesh продолжают рисовать, просто новую форму.
+    void Reload(const MeshData& data);
+
+    size_t IndexCount() const { return m_indexCount; }
+
     static Mesh CreateCube();
 
 private:
@@ -46,4 +52,5 @@ private:
     size_t m_indexCount = 0;
 
     void SetupMesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
+    void ReleaseGpu();
 };

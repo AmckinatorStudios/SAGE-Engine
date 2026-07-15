@@ -5,6 +5,7 @@
 #include "../ui/UIRenderer.h"
 #include "../render/DebugOverlay.h"
 #include "../core/Stats.h"
+#include "../asset/AssetManager.h"
 #include <sstream>
 #include <vector>
 
@@ -153,6 +154,12 @@ inline void DrawDebugOverlay(DebugOverlay& overlay, const GameState& game, float
     lines.emplace_back(buf);
 
     std::snprintf(buf, sizeof(buf), "post: %s  shadows: %s", postEnabled ? "on" : "off", shadowsEnabled ? "on" : "off");
+    lines.emplace_back(buf);
+
+    AssetManager::Stats as = AssetManager::Instance().GetStats();
+    std::snprintf(buf, sizeof(buf), "assets: %zu (%zu KB)  hot-reload: %s",
+                  as.Total, as.ApproxBytes / 1024,
+                  AssetManager::Instance().HotReloadEnabled() ? "on" : "off");
     lines.emplace_back(buf);
 
     overlay.Draw(lines, screenW, screenH);

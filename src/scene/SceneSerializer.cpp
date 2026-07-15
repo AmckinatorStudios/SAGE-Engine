@@ -1,5 +1,5 @@
 #include "SceneSerializer.h"
-#include "../render/ResourceManager.h"
+#include "../asset/AssetManager.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <stdexcept>
@@ -155,10 +155,10 @@ std::unique_ptr<Scene> Load(const std::string& path) {
         // Пересоздаём GPU-ресурс на основе описания
         switch (obj.MeshRefComponent.type) {
             case MeshRef::Type::Cube:
-                obj.MeshComponent = ResourceManager::Instance().GetCube();
+                obj.MeshComponent = AssetManager::Instance().Cube().Shared();
                 break;
             case MeshRef::Type::Model:
-                obj.MeshComponent = ResourceManager::Instance().GetModel(obj.MeshRefComponent.path);
+                obj.MeshComponent = AssetManager::Instance().LoadModel(obj.MeshRefComponent.path).Shared();
                 break;
             default:
                 obj.MeshComponent = nullptr;

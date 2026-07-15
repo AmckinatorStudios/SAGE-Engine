@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "../core/Log.h"
+#include "../asset/AssetManager.h"
 
 // Только ОБЪЯВЛЕНИЯ miniaudio — реализация (MINIAUDIO_IMPLEMENTATION) собрана
 // в отдельном TU (miniaudio_impl.cpp), чтобы её ~90k строк не перекомпилировались
@@ -67,8 +68,11 @@ struct AudioEngine::Impl {
         ma_uint32 flags = streaming ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
         if (!spatial) flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
 
+        // Путь разрешается через единую систему ассетов (общий asset-root) —
+        // "audio/x.wav" и "assets/audio/x.wav" ведут к одному файлу.
+        std::string resolved = AssetManager::Instance().Resolve(path);
         auto* sound = new ma_sound{};
-        ma_result r = ma_sound_init_from_file(&Engine, path.c_str(), flags,
+        ma_result r = ma_sound_init_from_file(&Engine, resolved.c_str(), flags,
                                               GroupFor(cat), nullptr, sound);
         if (r != MA_SUCCESS) {
             delete sound;

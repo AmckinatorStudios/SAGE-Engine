@@ -5,10 +5,20 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>&
     SetupMesh(vertices, indices);
 }
 
-Mesh::~Mesh() {
+void Mesh::ReleaseGpu() {
     if (m_vao) glDeleteVertexArrays(1, &m_vao);
     if (m_vbo) glDeleteBuffers(1, &m_vbo);
     if (m_ebo) glDeleteBuffers(1, &m_ebo);
+    m_vao = m_vbo = m_ebo = 0;
+}
+
+Mesh::~Mesh() {
+    ReleaseGpu();
+}
+
+void Mesh::Reload(const MeshData& data) {
+    ReleaseGpu();
+    SetupMesh(data.Vertices, data.Indices);
 }
 
 Mesh::Mesh(Mesh&& other) noexcept

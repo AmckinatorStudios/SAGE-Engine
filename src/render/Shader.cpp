@@ -16,6 +16,9 @@ std::string Shader::ReadFile(const std::string& path) {
     return ss.str();
 }
 
+// Компилирует один шейдерный объект. Возвращает 0 при ошибке (не бросает),
+// причину кладёт в *error — чтобы вызывающий сам решил, фатально это
+// (конструктор) или нет (hot-reload оставляет старую программу).
 unsigned int Shader::Compile(unsigned int type, const std::string& source) {
     unsigned int id = glCreateShader(type);
     const char* src = source.c_str();
@@ -29,40 +32,74 @@ unsigned int Shader::Compile(unsigned int type, const std::string& source) {
         glGetShaderInfoLog(id, 1024, nullptr, info);
         std::string kind = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
         LOG_ERROR("Shader") << "Ошибка компиляции шейдера (" << kind << "): " << info;
-        throw std::runtime_error("Ошибка компиляции шейдера (" + kind + "): " + info);
+        glDeleteShader(id);
+        return 0;
     }
     return id;
 }
 
-Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
-    std::string vSrc = ReadFile(vertexPath);
-    std::string fSrc = ReadFile(fragmentPath);
-
+unsigned int Shader::BuildProgram(const std::string& vSrc, const std::string& fSrc, std::string* error) {
     unsigned int vShader = Compile(GL_VERTEX_SHADER, vSrc);
     unsigned int fShader = Compile(GL_FRAGMENT_SHADER, fSrc);
-
-    m_id = glCreateProgram();
-    glAttachShader(m_id, vShader);
-    glAttachShader(m_id, fShader);
-    glLinkProgram(m_id);
-
-    int success;
-    glGetProgramiv(m_id, GL_LINK_STATUS, &success);
-    if (!success) {
-        char info[1024];
-        glGetProgramInfoLog(m_id, 1024, nullptr, info);
-        LOG_ERROR("Shader") << "Ошибка линковки шейдерной программы: " << info;
-        throw std::runtime_error(std::string("Ошибка линковки шейдерной программы: ") + info);
+    if (!vShader || !fShader) {
+        if (vShader) glDeleteShader(vShader);
+        if (fShader) glDeleteShader(fShader);
+        if (error) *error = "не удалось скомпилировать шейдер";
+        return 0;
     }
 
+    unsigned int program = glCreateProgram();
+    glAttachShader(program, vShader);
+    glAttachShader(program, fShader);
+    glLinkProgram(program);
     glDeleteShader(vShader);
     glDeleteShader(fShader);
 
+    int success;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char info[1024];
+        glGetProgramInfoLog(program, 1024, nullptr, info);
+        LOG_ERROR("Shader") << "Ошибка линковки шейдерной программы: " << info;
+        glDeleteProgram(program);
+        if (error) *error = std::string("ошибка линковки: ") + info;
+        return 0;
+    }
+    return program;
+}
+
+Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath)
+    : m_vertexPath(vertexPath), m_fragmentPath(fragmentPath) {
+    std::string error;
+    m_id = BuildProgram(ReadFile(vertexPath), ReadFile(fragmentPath), &error);
+    if (!m_id) throw std::runtime_error("Шейдер " + vertexPath + " + " + fragmentPath + ": " + error);
     LOG_DEBUG("Shader") << "Скомпилирован: " << vertexPath << " + " << fragmentPath;
 }
 
+bool Shader::Reload() {
+    std::string vSrc, fSrc;
+    try {
+        vSrc = ReadFile(m_vertexPath);
+        fSrc = ReadFile(m_fragmentPath);
+    } catch (const std::exception& e) {
+        LOG_WARN("Shader") << "Hot-reload пропущен (" << m_vertexPath << "): " << e.what();
+        return false;
+    }
+    std::string error;
+    unsigned int program = BuildProgram(vSrc, fSrc, &error);
+    if (!program) {
+        LOG_WARN("Shader") << "Hot-reload не удался (" << m_vertexPath << "): " << error
+                           << " — оставляю прежнюю версию";
+        return false;
+    }
+    if (m_id) glDeleteProgram(m_id);
+    m_id = program;
+    LOG_INFO("Shader") << "Hot-reload: " << m_vertexPath << " + " << m_fragmentPath;
+    return true;
+}
+
 Shader::~Shader() {
-    glDeleteProgram(m_id);
+    if (m_id) glDeleteProgram(m_id);
 }
 
 void Shader::Use() const {

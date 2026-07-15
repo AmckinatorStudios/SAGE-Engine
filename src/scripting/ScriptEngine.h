@@ -5,8 +5,8 @@
 #include "../render/ParticleSystem.h"
 #include "../render/BillboardSystem.h"
 #include "../render/Texture.h"
-#include "../render/ResourceManager.h"
-#include "../core/AsyncResource.h"
+#include "../render/Mesh.h"
+#include "../asset/AssetManager.h"
 #include "../audio/AudioEngine.h"
 #include <sol/sol.hpp>
 #include <memory>
@@ -141,7 +141,7 @@ private:
     // Храним Id, а не указатель: объект может быть удалён, пока меш грузится.
     struct PendingMeshLoad {
         int ObjectId;
-        std::shared_ptr<AsyncResource<Mesh>> Handle;
+        Asset<Mesh> Handle;
         std::string Path;
     };
 
@@ -162,7 +162,7 @@ private:
     ParticleSystem* m_particles = nullptr;
     BillboardSystem* m_billboards = nullptr;
     AudioEngine* m_audio = nullptr;
-    std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
+    std::unordered_map<std::string, Asset<Texture>> m_billboardTextures;
 
     int m_nextTimerId = 1;
 };

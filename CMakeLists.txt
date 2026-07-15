@@ -139,6 +139,7 @@ target_include_directories(miniaudio INTERFACE external/miniaudio)
 #  сборка детерминирована и не зависит от того, переконфигурировали ли CMake).
 # ============================================================================
 set(SAGE_ENGINE_SOURCES
+    src/asset/AssetManager.cpp
     src/audio/AudioEngine.cpp
     src/audio/miniaudio_impl.cpp
     src/core/GLDebug.cpp

@@ -65,8 +65,16 @@ public:
 
     void Bind(unsigned int unit = 0) const;
 
+    // Пере-загружает пиксели в ту же текстуру НА МЕСТЕ (hot-reload): все, кто
+    // держит ссылку на этот Texture, продолжают работать, просто с новым
+    // изображением. Фильтр/мипмапы берутся те же, что при создании.
+    void Reload(const ImageData& data);
+
     int Width() const { return m_width; }
     int Height() const { return m_height; }
+
+    // Приблизительный размер в видеопамяти (байты) — для статистики ассетов.
+    size_t ApproxBytes() const { return (size_t)m_width * m_height * (m_channels > 0 ? m_channels : 4); }
 
     // Максимальный уровень анизотропии, который поддерживает текущая
     // видеокарта/драйвер (обычно 4, 8 или 16). Определяется один раз при
@@ -79,4 +87,6 @@ private:
 
     unsigned int m_id = 0;
     int m_width = 0, m_height = 0, m_channels = 0;
+    TextureFilter m_filter = TextureFilter::Trilinear; // запоминаем для Reload()
+    bool m_generateMipmaps = true;
 };

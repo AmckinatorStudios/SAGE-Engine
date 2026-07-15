@@ -43,12 +43,13 @@ engine/
     core/InputSystem.h            — ввод: сырой GLFW → именованные действия
     core/JobSystem.*               — пул потоков (фоновые задачи, async-загрузка)
     core/MainThreadDispatcher.*     — возврат GL-работы из фона в главный поток
-    core/AsyncResource.h             — дескриптор асинхронно грузящегося ресурса
-    render/Shader.*                — загрузка/компиляция шейдеров
-    render/Camera.h                 — камера-полёт
-    render/Mesh.*                    — геометрия на GPU, генератор куба
-    render/ModelLoader.*              — загрузка .obj моделей
-    render/ResourceManager.h           — кэш мешей
+    asset/AssetManager.*             — единая система ассетов (кэш/refcount/
+                                       async/hot-reload/реестр — см. раздел ниже)
+    asset/Asset.h                     — типизированный хендл Asset<T>
+    render/Shader.*                    — загрузка/компиляция шейдеров (+ hot-reload)
+    render/Camera.h                     — камера-полёт
+    render/Mesh.*                        — геометрия на GPU, генератор куба
+    render/ModelLoader.*                  — загрузка .obj моделей (CPU-часть)
     render/ParticleSystem.*, BillboardSystem.h, PostProcess.h, ShadowMap.h
     scene/Transform.h                 — позиция/поворот/масштаб
     scene/Scene.h                      — сцена: список GameObject'ов (ECS-лайт)
@@ -91,7 +92,7 @@ SceneManager sceneManager;
 Scene& level1 = sceneManager.CreateScene("Level1");
 auto& obj = level1.CreateObject("MyCube");
 obj.MeshRefComponent.type = MeshRef::Type::Cube;
-obj.MeshComponent = ResourceManager::Instance().GetCube();
+obj.MeshComponent = AssetManager::Instance().Cube().Shared();
 
 // Сохранить сцену на диск (человекочитаемый JSON, расширение .sage)
 sceneManager.SaveScene("Level1", "assets/scenes/level1.sage");
@@ -469,31 +470,69 @@ CI, нет звуковой карты), конструктор не падае�
   валидны только на потоке с контекстом, поэтому воркер делает CPU-часть, а
   GL-загрузку возвращает сюда. `Drain(budgetMs)` в главном цикле разбирает её с
   бюджетом времени на кадр (пачка загрузок «размазывается», а не фризит кадр).
-- **`AsyncResource<T>`** (`core/AsyncResource.h`) — дескриптор: `IsReady()` /
-  `Get()` / `IsFailed()`. Владелец просто смотрит его раз в кадр.
+- **`Asset<T>`** (`asset/Asset.h`) — дескриптор: `IsReady()` / `Get()` /
+  `IsFailed()`. Владелец просто смотрит его раз в кадр.
 
 Загрузчики разделены на CPU-часть (безопасна в фоне) и GL-часть (главный
 поток): `LoadImageFile`→`Texture(ImageData)`, `ModelLoader::LoadObjData`→
-`Mesh(MeshData)`. `ResourceManager` связывает это в готовый конвейер:
+`Mesh(MeshData)`. `AssetManager` (см. следующий раздел) связывает это в готовый
+конвейер и раздаёт результаты через `Asset<T>`:
 
 ```cpp
 // при старте:  JobSystem::Instance().Start();
 // в главном цикле раз в кадр:  MainThreadDispatcher::Instance().Drain(2.0);
 
-auto model = ResourceManager::Instance().GetModelAsync("assets/models/sphere.obj");
+Asset<Mesh> model = AssetManager::Instance().LoadModelAsync("models/sphere.obj");
 // ... через несколько кадров:
-if (model->IsReady()) object.MeshComponent = model->Get();  // без фриза
+if (model.IsReady()) object.MeshComponent = model.Shared();  // без фриза
 ```
 
-Модели кэшируются и дедуплицируются (один и тот же путь читается с диска один
-раз, даже при нескольких одновременных запросах). Из Lua доступно
-`SetMeshModelAsync(obj, path)` — объект появляется, когда меш догрузится
-(см. `assets/scripts/demo_features.lua`). Всё обращение к `ResourceManager` —
-из главного потока; в фоне выполняется только чистая CPU-часть загрузчиков.
+Из Lua доступно `SetMeshModelAsync(obj, path)` — объект появляется, когда меш
+догрузится (см. `assets/scripts/demo_features.lua`).
 
 Самопроверку конвейера можно прогнать без графики (в т.ч. в CI):
 `SAGE_TEST_ASYNC=1 ./TheBoat` — гоняет пул задач, `ParallelFor`, асинхронную
-загрузку текстуры и модели, кэш/дедуп, печатает результат и выходит.
+загрузку, кэш/дедуп, разрешение путей, hot-reload, реестр и GC, печатает
+результат и выходит.
+
+## Система ассетов (AssetManager)
+Единая точка загрузки и владения ассетами движка (`asset/AssetManager.*`) —
+текстуры, меши (.obj), шейдеры. Часть ЯДРА. Через неё грузятся ресурсы и самой
+игры, и движка (шейдеры/атлас/иконки), и Lua-скриптов (модели/спрайты), и путей
+аудио — вместо разрозненных «текстуру создаём тут, меш кэшируем там». Даёт:
+
+- **Единый корень ассетов** (`SetAssetRoot`) и разрешение путей (`Resolve`):
+  код просит `"textures/blocks.png"`, а не хардкодит `"assets/..."`. Оба стиля
+  работают (сначала пробуется путь как есть, потом относительно корня).
+- **Кэш + дедупликация**: один файл грузится с диска один раз; повторный запрос
+  отдаёт тот же ресурс (в т.ч. при нескольких одновременных async-запросах).
+- **Типизированные хендлы `Asset<T>` со счётом ссылок**: пока жив хоть один
+  хендл, ассет остаётся; `CollectGarbage()` выгружает те, на кого никто не
+  ссылается.
+- **Sync и async загрузка** (async — поверх job-системы выше).
+- **Hot-reload**: `PollHotReload()` перечитывает изменённые на диске файлы и
+  обновляет ресурс **на месте** (`Shader::Reload`/`Texture::Reload`/
+  `Mesh::Reload`) — правишь шейдер или текстуру и видишь результат без
+  перезапуска, а держатели `Asset<T>`/ссылок ничего не переполучают. Включается
+  флагом `SAGE_HOT_RELOAD`; в проде выключен (без накладных `stat`-ов).
+  `ReloadAll()` перечитывает всё принудительно (напр. по хоткею).
+- **Реестр/статистика** (`GetStats`) — сколько чего загружено и сколько
+  видеопамяти; показывается в debug-HUD (F3).
+
+```cpp
+auto& assets = AssetManager::Instance();
+assets.SetAssetRoot("assets");
+Asset<Texture> atlas = assets.LoadTexture("textures/blocks_atlas.png", TextureFilter::Nearest, false);
+Asset<Shader>  voxel = assets.LoadShader("shaders/voxel.vert", "shaders/voxel.frag");
+// в кадре:  atlas->Bind(0);  voxel->Use();
+// dev, раз в кадр:  assets.PollHotReload();
+```
+
+Приём миграции (в `main.cpp`): держим хендлы `Asset<Shader>`/`Asset<Texture>`
+живыми, а работаем через ссылку (`Shader& s = *handle;`) — весь код рендера не
+меняется, а hot-reload обновляет ту же программу/текстуру на месте, и ссылка
+остаётся валидной. Все методы `AssetManager` вызываются из главного потока; в
+фоне выполняется только чистая CPU-часть загрузчиков.
 
 ## Сборка готового продукта под платформу
 Есть скрипты, которые одной командой создают ГОТОВЫЙ К РАЗДАЧЕ архив —
@@ -574,6 +613,7 @@ cmake --build build-windows -j$(nproc)
 несколько источников света, skybox, **тени (shadow mapping)**,
 **пост-процессинг (HDR + тон-маппинг ACES)**, **аудио (2D/3D-звук,
 эмбиент, потоковая музыка, miniaudio)**, **асинхронная загрузка ресурсов
-(пул потоков + async-текстуры/модели)**.
+(пул потоков + async-текстуры/модели)**, **единая система ассетов
+(кэш/refcount/async/hot-reload/реестр)**.
 
 Просто пиши мне, что добавить — я буду расширять этот же проект.

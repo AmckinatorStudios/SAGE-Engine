@@ -34,6 +34,8 @@
 #include <future>
 #include <thread>
 #include <chrono>
+#include <cstdint>
+#include <filesystem>
 
 #include "core/Version.h"
 #include "core/Window.h"
@@ -44,7 +46,7 @@
 #include "core/MainThreadDispatcher.h"
 #include "render/Shader.h"
 #include "render/Camera.h"
-#include "render/ResourceManager.h"
+#include "asset/AssetManager.h"
 #include "render/Texture.h"
 #include "render/Skybox.h"
 #include "render/BillboardSystem.h"
@@ -188,29 +190,77 @@ bool RunAsyncSelfTest() {
     }
     LOG_INFO("AsyncTest") << "ParallelFor: " << (ok ? "OK" : "ОШИБКА");
 
-    // 3) Асинхронная загрузка текстуры и модели (CPU-декод в фоне, GL-загрузка
-    //    в главном потоке через Drain). Крутим Drain, пока не готово/таймаут.
-    auto tex = ResourceManager::Instance().LoadTextureAsync("assets/textures/checker_demo.png");
-    auto model = ResourceManager::Instance().GetModelAsync("assets/models/sphere.obj");
+    // 3) Система ассетов: async-загрузка текстуры и модели (CPU-декод в фоне,
+    //    GL-загрузка в главном потоке через Drain). Крутим Drain до готовности.
+    AssetManager& am = AssetManager::Instance();
+    Asset<Texture> tex = am.LoadTextureAsync("textures/checker_demo.png");
+    Asset<Mesh> model = am.LoadModelAsync("models/sphere.obj");
 
     auto start = clock::now();
-    while (tex->IsLoading() || model->IsLoading()) {
+    while (tex.IsLoading() || model.IsLoading()) {
         MainThreadDispatcher::Instance().Drain();
         if (std::chrono::duration<double>(clock::now() - start).count() > 5.0) break; // страховка
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-
-    bool texOk = tex->IsReady() && tex->Get() && tex->Get()->Width() > 0;
-    bool modelOk = model->IsReady() && model->Get();
+    bool texOk = tex.IsReady() && tex.Get() && tex->Width() > 0;
+    bool modelOk = model.IsReady() && model.Get();
     LOG_INFO("AsyncTest") << "Async-текстура: " << (texOk ? "OK" : "ОШИБКА")
                           << ", async-модель: " << (modelOk ? "OK" : "ОШИБКА");
 
-    // 4) Дедупликация: повторный запрос уже загруженной модели — сразу Ready.
-    auto again = ResourceManager::Instance().GetModelAsync("assets/models/sphere.obj");
-    bool dedupOk = again->IsReady() && again->Get() == model->Get();
-    LOG_INFO("AsyncTest") << "Кэш/дедуп модели: " << (dedupOk ? "OK" : "ОШИБКА");
+    // 4) Кэш/дедуп: повторный запрос отдаёт ТОТ ЖЕ ресурс (один читок с диска).
+    Asset<Texture> texAgain = am.LoadTexture("textures/checker_demo.png");
+    Asset<Mesh> modelAgain = am.LoadModelAsync("models/sphere.obj");
+    bool dedupOk = texAgain.Get() == tex.Get() && modelAgain.Get() == model.Get();
+    LOG_INFO("AsyncTest") << "Кэш/дедуп: " << (dedupOk ? "OK" : "ОШИБКА");
 
-    ok = ok && texOk && modelOk && dedupOk;
+    // 5) Разрешение путей: "textures/x" и "assets/textures/x" → один ассет.
+    Asset<Texture> texFull = am.LoadTexture("assets/textures/checker_demo.png");
+    bool resolveOk = texFull.Get() == tex.Get();
+    LOG_INFO("AsyncTest") << "Разрешение пути (root): " << (resolveOk ? "OK" : "ОШИБКА");
+
+    // 6) Hot-reload (перезагрузка НА МЕСТЕ): форсим ReloadAll (детерминированно,
+    //    без зависимости от mtime), ждём — Version должен вырасти, а тот же
+    //    ресурс остаться валиден и Ready (модель перезагружена в те же буферы).
+    Mesh* meshBefore = model.Get();
+    uint64_t verBefore = model.Version();
+    am.ReloadAll();
+    start = clock::now();
+    while (model.Version() == verBefore) {
+        MainThreadDispatcher::Instance().Drain();
+        if (std::chrono::duration<double>(clock::now() - start).count() > 5.0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    // Ресурс тот же объект (обновлён на месте), но версия выросла и он готов.
+    bool reloadOk = model.Version() > verBefore && model.IsReady() && model.Get() == meshBefore;
+    LOG_INFO("AsyncTest") << "Hot-reload (in-place): " << (reloadOk ? "OK" : "ОШИБКА")
+                          << " (version " << verBefore << " -> " << model.Version() << ")";
+
+    // Заодно проверяем автоматическое слежение за файлом (может не работать на
+    // некоторых оверлей-ФС — тогда просто информируем, не валим тест).
+    am.EnableHotReload(true);
+    std::error_code ec;
+    std::filesystem::last_write_time(am.Resolve("models/sphere.obj"),
+                                     std::filesystem::file_time_type::clock::now(), ec);
+    size_t watched = am.PollHotReload();
+    am.EnableHotReload(false);
+    LOG_INFO("AsyncTest") << "File-watch (PollHotReload): "
+                          << (watched > 0 ? "изменение замечено" : "изменение не замечено (ожидаемо на overlay-ФС)");
+
+    // 7) Статистика + сборка мусора: дропаем локальные хендлы дубликатов, GC
+    //    удаляет только записи без живых ссылок; текстура/модель ещё держатся.
+    AssetManager::Stats st = am.GetStats();
+    LOG_INFO("AsyncTest") << "Реестр: " << st.Total << " ассетов, " << st.Ready << " готовы, "
+                          << (st.ApproxBytes / 1024) << " КБ";
+    Asset<Texture> temp = am.LoadTexture("textures/icon_alert.png");
+    void* tempPtr = temp.Get();
+    temp = Asset<Texture>();          // отпускаем единственный внешний хендл
+    size_t freed = am.CollectGarbage();
+    bool gcOk = freed >= 1 && tex.IsReady() && model.IsReady(); // «живые» не тронуты
+    LOG_INFO("AsyncTest") << "GC: выгружено " << freed << " (ожидали >=1), живые целы: "
+                          << (gcOk ? "OK" : "ОШИБКА");
+    (void)tempPtr;
+
+    ok = ok && texOk && modelOk && dedupOk && resolveOk && reloadOk && gcOk;
     LOG_INFO("AsyncTest") << (ok ? "=== ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ ===" : "=== ЕСТЬ ПРОВАЛЫ ===");
     return ok;
 }
@@ -236,17 +286,27 @@ int main() {
 
         // Пул фоновых задач движка: асинхронная загрузка ресурсов и любая
         // тяжёлая CPU-работа вне главного потока (см. core/JobSystem.h,
-        // ResourceManager::*Async). Готовые результаты, требующие GL, каждый
+        // AssetManager::*Async). Готовые результаты, требующие GL, каждый
         // кадр забираются из MainThreadDispatcher ниже.
         JobSystem::Instance().Start();
 
-        // Самопроверка асинхронной подсистемы для CI/отладки — прогоняет пул
-        // задач и асинхронную загрузку ресурсов на реальном GL-контексте, затем
-        // выходит, не запуская игру. Обычной партии не касается.
+        // Единая система ассетов: корень путей + опциональный hot-reload
+        // (перечитывать изменённые шейдеры/текстуры на лету — включается
+        // SAGE_HOT_RELOAD, удобно при разработке; в проде выключен = без
+        // накладных stat-ов). См. asset/AssetManager.h.
+        AssetManager::Instance().SetAssetRoot("assets");
+        if (std::getenv("SAGE_HOT_RELOAD")) {
+            AssetManager::Instance().EnableHotReload(true);
+            LOG_INFO("Assets") << "Hot-reload включён (SAGE_HOT_RELOAD)";
+        }
+
+        // Самопроверка async + системы ассетов для CI/отладки — прогоняет пул
+        // задач, async-загрузку, кэш/дедуп, hot-reload и статистику на реальном
+        // GL-контексте, затем выходит, не запуская игру. Партии не касается.
         if (std::getenv("SAGE_TEST_ASYNC")) {
             bool passed = RunAsyncSelfTest();
             JobSystem::Instance().Shutdown();
-            ResourceManager::Instance().Clear();
+            AssetManager::Instance().Clear();
             return passed ? 0 : 1;
         }
 
@@ -261,15 +321,33 @@ int main() {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // ---- Рендер-ресурсы ----
-        Shader voxelShader("assets/shaders/voxel.vert", "assets/shaders/voxel.frag");
-        Shader waterShader("assets/shaders/water.vert", "assets/shaders/water.frag");
-        Shader basicShader("assets/shaders/basic.vert", "assets/shaders/basic.frag");
-        Shader skyboxShader("assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
-        Shader particleShader("assets/shaders/particle.vert", "assets/shaders/particle.frag");
-        Shader billboardShader("assets/shaders/billboard.vert", "assets/shaders/billboard.frag");
-        Shader shadowDepthShader("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-        Shader postShader("assets/shaders/post.vert", "assets/shaders/post.frag");
+        // ---- Рендер-ресурсы (через единую систему ассетов) ----
+        // Держим хендлы Asset<Shader>/Asset<Texture> живыми (пока они в области
+        // видимости, ассет не выгрузится), а работаем через ссылки — тогда весь
+        // код ниже не меняется, а hot-reload обновляет ту же программу/текстуру
+        // НА МЕСТЕ, и ссылки остаются валидны. Пути — относительно asset-root.
+        AssetManager& assets = AssetManager::Instance();
+        auto loadShader = [&](const char* v, const char* f) -> Asset<Shader> {
+            Asset<Shader> s = assets.LoadShader(v, f);
+            if (!s.IsReady()) throw std::runtime_error(std::string("Не удалось загрузить шейдер: ") + v);
+            return s;
+        };
+        Asset<Shader> voxelShaderA      = loadShader("shaders/voxel.vert", "shaders/voxel.frag");
+        Asset<Shader> waterShaderA      = loadShader("shaders/water.vert", "shaders/water.frag");
+        Asset<Shader> basicShaderA      = loadShader("shaders/basic.vert", "shaders/basic.frag");
+        Asset<Shader> skyboxShaderA     = loadShader("shaders/skybox.vert", "shaders/skybox.frag");
+        Asset<Shader> particleShaderA   = loadShader("shaders/particle.vert", "shaders/particle.frag");
+        Asset<Shader> billboardShaderA  = loadShader("shaders/billboard.vert", "shaders/billboard.frag");
+        Asset<Shader> shadowDepthShaderA= loadShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
+        Asset<Shader> postShaderA       = loadShader("shaders/post.vert", "shaders/post.frag");
+        Shader& voxelShader = *voxelShaderA;
+        Shader& waterShader = *waterShaderA;
+        Shader& basicShader = *basicShaderA;
+        Shader& skyboxShader = *skyboxShaderA;
+        Shader& particleShader = *particleShaderA;
+        Shader& billboardShader = *billboardShaderA;
+        Shader& shadowDepthShader = *shadowDepthShaderA;
+        Shader& postShader = *postShaderA;
 
         // Пост-процессинг: сцена рисуется в HDR-буфер, затем полноэкранный
         // проход (тон-маппинг/экспозиция/виньетка) выводит её на экран.
@@ -289,8 +367,15 @@ int main() {
             "assets/textures/skybox/py.png", "assets/textures/skybox/ny.png",
             "assets/textures/skybox/pz.png", "assets/textures/skybox/nz.png"
         });
-        Texture blockAtlas("assets/textures/blocks_atlas.png", TextureFilter::Nearest, /*generateMipmaps=*/false);
-        Texture alertIcon("assets/textures/icon_alert.png", TextureFilter::Bilinear);
+        auto loadTexture = [&](const char* p, TextureFilter fil, bool mip) -> Asset<Texture> {
+            Asset<Texture> t = assets.LoadTexture(p, fil, mip);
+            if (!t.IsReady()) throw std::runtime_error(std::string("Не удалось загрузить текстуру: ") + p);
+            return t;
+        };
+        Asset<Texture> blockAtlasA = loadTexture("textures/blocks_atlas.png", TextureFilter::Nearest, /*mip=*/false);
+        Asset<Texture> alertIconA  = loadTexture("textures/icon_alert.png", TextureFilter::Bilinear, /*mip=*/true);
+        Texture& blockAtlas = *blockAtlasA;
+        Texture& alertIcon = *alertIconA;
 
         BillboardSystem billboards;
         // Иконка "клюёт!" над поплавком — создаём один раз, скрытую, и
@@ -304,7 +389,7 @@ int main() {
 
         UIRenderer ui;
         DebugOverlay debugOverlay;
-        auto cubeMesh = ResourceManager::Instance().GetCube(); // мусор, поплавок
+        Asset<Mesh> cubeMesh = assets.Cube(); // мусор, поплавок (процедурный куб)
 
         Camera camera;
 
@@ -451,6 +536,11 @@ int main() {
             // (создание текстур/мешей в главном потоке). Бюджет ~2 мс/кадр —
             // пачка тяжёлых загрузок размазывается по кадрам, а не фризит один.
             MainThreadDispatcher::Instance().Drain(2.0);
+
+            // Hot-reload: перечитываем изменённые на диске ассеты (шейдеры/
+            // текстуры/модели) и обновляем их НА МЕСТЕ. No-op, если выключен
+            // (SAGE_HOT_RELOAD) — тогда без накладных расходов.
+            AssetManager::Instance().PollHotReload();
 
             // Освобождаем доигравшие одноразовые звуки этого кадра (эмбиент,
             // музыка и активные лупы не трогаются — они управляются по дескриптору)
@@ -615,10 +705,13 @@ int main() {
         // (GL-объекты в них не создавались — контекст всё равно вот-вот умрёт).
         JobSystem::Instance().Shutdown();
 
-        // ВАЖНО: ResourceManager — статический синглтон. Если не очистить его
-        // здесь, его меши будут удаляться уже ПОСЛЕ main() и разрушения окна,
-        // когда OpenGL-контекста больше нет — это давало segfault при выходе.
-        ResourceManager::Instance().Clear();
+        // ВАЖНО: AssetManager — статический синглтон. Если не очистить его
+        // здесь, его ресурсы (GL-объекты текстур/мешей/шейдеров) удалялись бы
+        // уже ПОСЛЕ main() и разрушения окна, когда OpenGL-контекста больше нет
+        // — это давало segfault при выходе. Локальные Asset<>-хендлы выше тоже
+        // разрушатся здесь, но реальные GL-объекты освобождает именно Clear(),
+        // пока контекст ещё жив.
+        AssetManager::Instance().Clear();
     } catch (const std::exception& e) {
         LOG_ERROR("Game") << "Фатальная ошибка: " << e.what();
         std::cerr << "Фатальная ошибка: " << e.what() << std::endl;

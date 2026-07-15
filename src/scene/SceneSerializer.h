@@ -4,7 +4,7 @@
 
 // Сохраняет/загружает Scene в человекочитаемый JSON-файл.
 // Сохраняются: имя сцены, все объекты (имя, transform, ссылка на меш,
-// цвет). GPU-ресурсы (Mesh) при загрузке пересоздаются через ResourceManager.
+// цвет). GPU-ресурсы (Mesh) при загрузке пересоздаются через AssetManager.
 namespace SceneSerializer {
     void Save(const Scene& scene, const std::string& path);
 

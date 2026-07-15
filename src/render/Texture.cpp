@@ -2,7 +2,7 @@
 // Делает внутренние флаги stb_image (флип по вертикали, причина ошибки)
 // потоко-локальными — чтобы одновременный декод в нескольких воркерах
 // JobSystem не гонялся за общий глобал (см. LoadImageFile / асинхронную
-// загрузку текстур в ResourceManager).
+// загрузку текстур в AssetManager).
 #define STBI_THREAD_LOCAL
 #include <stb_image.h>
 #include "Texture.h"
@@ -96,10 +96,19 @@ Texture::Texture(const ImageData& data, TextureFilter filter, bool generateMipma
     UploadFromImage(data, filter, generateMipmaps);
 }
 
+void Texture::Reload(const ImageData& data) {
+    if (!data.Ok()) return; // битый файл при hot-reload — молча оставляем прежнюю текстуру
+    if (m_id) glDeleteTextures(1, &m_id);
+    m_id = 0;
+    UploadFromImage(data, m_filter, m_generateMipmaps);
+}
+
 void Texture::UploadFromImage(const ImageData& data, TextureFilter filter, bool generateMipmaps) {
     m_width = data.Width;
     m_height = data.Height;
     m_channels = data.Channels;
+    m_filter = filter;
+    m_generateMipmaps = generateMipmaps;
 
     GLenum format = GL_RGB;
     if (m_channels == 1) format = GL_RED;

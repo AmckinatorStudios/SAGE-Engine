@@ -1,6 +1,6 @@
 #include "ScriptEngine.h"
 #include "../core/Log.h"
-#include "../render/ResourceManager.h"
+#include "../asset/AssetManager.h"
 #include "../render/ParticlePresets.h"
 #include <algorithm>
 
@@ -117,18 +117,18 @@ void ScriptEngine::RegisterEngineApi() {
     });
 
     // Удобный хелпер: даёт заспавненному объекту видимый куб-меш, чтобы его
-    // сразу было видно на сцене без ручной возни с MeshRef/ResourceManager
+    // сразу было видно на сцене без ручной возни с MeshRef/AssetManager
     m_lua.set_function("SetMeshCube", [](GameObject& obj) {
         obj.MeshRefComponent = MeshRef{MeshRef::Type::Cube, ""};
-        obj.MeshComponent = ResourceManager::Instance().GetCube();
+        obj.MeshComponent = AssetManager::Instance().Cube().Shared();
     });
 
-    // То же самое, но грузит .obj модель (кэшируется ResourceManager'ом —
+    // То же самое, но грузит .obj модель (кэшируется AssetManager'ом —
     // одна и та же модель, запрошенная из нескольких скриптов, не
     // перечитывается с диска). Бросает ошибку, если файл не найден/битый.
     m_lua.set_function("SetMeshModel", [](GameObject& obj, const std::string& path) {
         obj.MeshRefComponent = MeshRef{MeshRef::Type::Model, path};
-        obj.MeshComponent = ResourceManager::Instance().GetModel(path);
+        obj.MeshComponent = AssetManager::Instance().LoadModel(path).Shared();
     });
 
     // Асинхронный вариант: модель грузится в фоне (JobSystem), а меш
@@ -138,7 +138,7 @@ void ScriptEngine::RegisterEngineApi() {
     // результат тихо отбрасывается (ищем по Id).
     m_lua.set_function("SetMeshModelAsync", [this](GameObject& obj, const std::string& path) {
         obj.MeshRefComponent = MeshRef{MeshRef::Type::Model, path};
-        m_pendingMeshes.push_back({obj.Id, ResourceManager::Instance().GetModelAsync(path), path});
+        m_pendingMeshes.push_back({obj.Id, AssetManager::Instance().LoadModelAsync(path), path});
     });
 
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
@@ -427,19 +427,19 @@ void ScriptEngine::UpdateAll(float deltaTime) {
 // SetMeshModelAsync). Готовые/ошибочные/осиротевшие записи убираются.
 void ScriptEngine::UpdatePendingMeshes() {
     for (auto& pending : m_pendingMeshes) {
-        if (pending.Handle->IsFailed()) {
+        if (pending.Handle.IsFailed()) {
             LOG_WARN("ScriptEngine") << "Async-модель не загрузилась: " << pending.Path
-                                     << " (" << pending.Handle->Error() << ")";
+                                     << " (" << pending.Handle.Error() << ")";
             continue;
         }
-        if (!pending.Handle->IsReady()) continue; // ещё грузится
+        if (!pending.Handle.IsReady()) continue; // ещё грузится
         if (GameObject* obj = m_scene ? m_scene->FindById(pending.ObjectId) : nullptr) {
-            obj->MeshComponent = pending.Handle->Get();
+            obj->MeshComponent = pending.Handle.Shared();
         }
     }
     m_pendingMeshes.erase(
         std::remove_if(m_pendingMeshes.begin(), m_pendingMeshes.end(),
-                       [](const PendingMeshLoad& p) { return !p.Handle->IsLoading(); }),
+                       [](const PendingMeshLoad& p) { return !p.Handle.IsLoading(); }),
         m_pendingMeshes.end());
 }
 
@@ -527,12 +527,16 @@ void ScriptEngine::UpdateCoroutines(float dt) {
 
 const Texture* ScriptEngine::GetOrLoadBillboardTexture(const std::string& path) {
     auto it = m_billboardTextures.find(path);
-    if (it != m_billboardTextures.end()) return it->second.get();
+    if (it != m_billboardTextures.end()) return it->second.Get();
 
-    // Bilinear — разумный дефолт для одиночных спрайтов (не атлас, в
-    // отличие от блочного атласа вокселей, которому нужен Nearest)
-    auto texture = std::make_unique<Texture>(path, TextureFilter::Bilinear);
-    const Texture* raw = texture.get();
-    m_billboardTextures[path] = std::move(texture);
+    // Грузим через единую систему ассетов (кэш/дедуп/hot-reload — общие).
+    // Bilinear — разумный дефолт для одиночных спрайтов (не атлас, в отличие
+    // от блочного атласа вокселей, которому нужен Nearest). Держим хендл
+    // Asset<Texture> здесь: билборд хранит невладеющий указатель, а хендл не
+    // даёт AssetManager'у выгрузить текстуру, пока жив ScriptEngine.
+    Asset<Texture> tex = AssetManager::Instance().LoadTexture(path, TextureFilter::Bilinear);
+    if (!tex.IsReady()) return nullptr;
+    const Texture* raw = tex.Get();
+    m_billboardTextures[path] = tex;
     return raw;
 }
