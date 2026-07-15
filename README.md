@@ -33,24 +33,45 @@ engine/
     scripts/                    — .lua скрипты (см. раздел "Скриптинг")
 
   src/
-    main.cpp                    — точка входа, игровой цикл ИГРЫ (The Boat)
+    main.cpp                    — крошечный бутстрап: создать движок, игру, запустить
 
     ── ЯДРО ДВИЖКА (универсальное, не зависит от вокселей/конкретной игры) ──
-    core/Window.*                — окно и контекст OpenGL
-    render/Shader.*               — загрузка/компиляция шейдеров
-    render/Camera.h                — камера-полёт
-    render/Mesh.*                   — геометрия на GPU, генератор куба
-    render/ModelLoader.*             — загрузка .obj моделей
-    render/ResourceManager.h          — кэш мешей
-    scene/Transform.h                 — позиция/поворот/масштаб
-    scene/Scene.h                      — сцена: список GameObject'ов (ECS-лайт)
-    scene/SceneSerializer.*             — сохранение/загрузка сцены в JSON
-    scene/SceneManager.h                 — несколько сцен, переключение активной
-    scripting/ScriptEngine.*              — система скриптинга на Lua
+    core/Engine.*                — раннер приложения: окно + главный цикл + тайминг
+    core/Game.h                   — интерфейс игры, который «крутит» движок (ШОВ движок⇄игра)
+    core/Window.*                  — окно и контекст OpenGL
+    render/Shader.*                 — загрузка/компиляция шейдеров
+    render/Camera.h                  — камера-полёт
+    render/Mesh.*                     — геометрия на GPU, генератор куба
+    render/ModelLoader.*               — загрузка .obj моделей
+    render/ResourceManager.h            — кэш мешей
+    scene/Transform.h                   — позиция/поворот/масштаб
+    scene/Scene.h                        — сцена: список GameObject'ов (ECS-лайт)
+    scene/SceneSerializer.*               — сохранение/загрузка сцены в JSON
+    scene/SceneManager.h                   — несколько сцен, переключение активной
+    scripting/ScriptEngine.*                — система скриптинга на Lua
 
-    ── МОДУЛЬ ИГРЫ THE BOAT (написан ПОВЕРХ ядра, не часть движка) ──
+    ── ИГРА THE BOAT (написана ПОВЕРХ ядра, не часть движка) ──
+    game/TheBoat.*               — реализация core/Game.h: весь игровой цикл, ресурсы,
+                                    порядок отрисовки, реакция на ввод (то, что раньше
+                                    было навалено в main.cpp)
+    game/*                        — состояние партии, инвентарь, крафт, рыбалка и т.д.
     voxel/Block.h, Chunk.*, World.*, VoxelMesh.*, VoxelRaycast.h,
           WorldRaycast.h, WaterPlane.h
+```
+
+### Движок ⇄ игра: где шов
+Движок (`core/Engine.*`) владеет окном, главным циклом и таймингом и «крутит»
+игру через интерфейс `core/Game.h` (хуки `OnStart`/`OnUpdate`/`OnRender`/
+`OnShutdown`), но НИЧЕГО не знает о конкретной игре. `main.cpp` свёлся к паре
+строк — создать `Engine`, создать `TheBoat`, вызвать `engine.Run(game)`.
+Чтобы сделать другую игру, пишешь свой класс с интерфейсом `Game` вместо
+`TheBoat` — код движка (`core`/`render`/`scene`/`scripting`/`ui`) не меняется:
+
+```cpp
+// весь main.cpp:
+Engine engine(TheBoat::DefaultConfig()); // окно + GL-контекст
+TheBoat game(engine);                    // игра грузит свои ресурсы
+engine.Run(game);                        // OnStart -> цикл -> OnShutdown
 ```
 
 
