@@ -255,6 +255,30 @@ void ScriptEngine::RegisterEngineApi() {
         m_billboards->SetTint(id, tint);
     });
 
+    // --- Звук: доступно после BindAudio. Скрипты (катсцены, события уровня)
+    // могут проигрывать эффекты/музыку и рулить громкостью. Если аудио-
+    // устройство недоступно (headless), вызовы безопасно ничего не делают. ---
+    m_lua.set_function("PlaySound", [this](const std::string& path, sol::optional<float> volume) {
+        if (!m_audio) throw std::runtime_error("PlaySound: аудио не привязано (ScriptEngine::BindAudio не вызван)");
+        m_audio->PlaySound2D(path, volume.value_or(1.0f));
+    });
+    m_lua.set_function("PlaySound3D", [this](const std::string& path, glm::vec3 pos, sol::optional<float> volume) {
+        if (!m_audio) throw std::runtime_error("PlaySound3D: аудио не привязано (ScriptEngine::BindAudio не вызван)");
+        m_audio->PlaySound3D(path, pos, volume.value_or(1.0f));
+    });
+    m_lua.set_function("PlayMusic", [this](const std::string& path, sol::optional<float> volume) {
+        if (!m_audio) throw std::runtime_error("PlayMusic: аудио не привязано (ScriptEngine::BindAudio не вызван)");
+        m_audio->PlayMusic(path, volume.value_or(1.0f), true);
+    });
+    m_lua.set_function("StopMusic", [this]() {
+        if (!m_audio) throw std::runtime_error("StopMusic: аудио не привязано (ScriptEngine::BindAudio не вызван)");
+        m_audio->StopMusic();
+    });
+    m_lua.set_function("SetMasterVolume", [this](float volume) {
+        if (!m_audio) throw std::runtime_error("SetMasterVolume: аудио не привязано (ScriptEngine::BindAudio не вызван)");
+        m_audio->SetMasterVolume(volume);
+    });
+
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
     // "сколько осталось" в самом скрипте. Возвращают id для CancelTimer. ---
     m_lua.set_function("Schedule", [this](float seconds, sol::protected_function fn) -> int {

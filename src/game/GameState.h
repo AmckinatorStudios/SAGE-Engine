@@ -13,6 +13,8 @@
 #include "../render/ParticleSystem.h"
 #include "../render/ParticlePresets.h"
 #include "../scripting/ScriptEngine.h"
+#include "../audio/AudioEngine.h"
+#include "GameSounds.h"
 #include "../core/InputMap.h"
 #include <string>
 
@@ -55,6 +57,13 @@ struct GameState {
     ParticleSystem Particles;
     static constexpr const char* kStoveSmokeStream = "stove_smoke";
     static constexpr const char* kStoveEmbersStream = "stove_embers";
+
+    // Звук — часть партии (как Particles): геймплей триггерит его напрямую
+    // (см. PlayerActions.h). При недоступном аудио-устройстве (headless/CI)
+    // AudioEngine молча становится no-op — см. AudioEngine::IsAvailable().
+    AudioEngine Audio;
+    AudioEngine::SoundHandle OceanLoop = AudioEngine::InvalidHandle;
+    FishingSystem::State PrevFishingState = FishingSystem::State::Idle; // для звука поклёвки
 
     bool CraftMenuOpen = false;
     int CraftSelected = 0;
@@ -99,6 +108,14 @@ struct GameState {
         Particles.CreateStream(kStoveSmokeStream, ParticlePresets::Smoke(), stoveTop);
         Particles.CreateStream(kStoveEmbersStream, ParticlePresets::StoveEmbers(), stoveTop);
 
+        // Звуковой фон партии: тихая музыка (стриминг) + зацикленный эмбиент
+        // моря. Оба no-op, если аудио недоступно. Категории разведены, чтобы
+        // при желании музыку/эффекты можно было регулировать раздельно.
+        Audio.SetCategoryVolume(AudioEngine::Category::Music, 0.6f);
+        Audio.SetCategoryVolume(AudioEngine::Category::Ambient, 0.8f);
+        Audio.PlayMusic(GameSounds::Music, 0.5f, /*loop=*/true);
+        OceanLoop = Audio.PlayLoop(GameSounds::Ocean, 0.7f, AudioEngine::Category::Ambient);
+
         // Скрипты работают с объектами SceneData — то, что они заспавнят
         // через SpawnObject(), рисуется тем же проходом, что и любой другой
         // GameObject (см. main.cpp, рендер SceneData.Objects()). Остальные
@@ -138,6 +155,13 @@ struct GameState {
 
         Trash.Update(dt);
         Fishing.Update(dt);
+        // Звук поклёвки — один раз в момент перехода в состояние Bite (а не
+        // каждый кадр, пока рыба клюёт), у поплавка в мире (3D).
+        if (Fishing.CurrentState() == FishingSystem::State::Bite &&
+            PrevFishingState != FishingSystem::State::Bite) {
+            Audio.PlaySound3D(GameSounds::Bite, Fishing.BobberPosition(), 0.9f);
+        }
+        PrevFishingState = Fishing.CurrentState();
         Scripts.UpdateAll(dt);
 
         bool cooking = CookTimer > 0.0f;
@@ -149,6 +173,7 @@ struct GameState {
             if (CookTimer <= 0.0f) {
                 Items.Add(ItemType::CookedFish, 1);
                 ShowToast("Fish is ready!");
+                Audio.PlaySound2D(GameSounds::CookDone, 0.8f);
                 LOG_INFO("Game") << "Рыба пожарена";
             }
         }
