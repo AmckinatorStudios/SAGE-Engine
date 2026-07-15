@@ -3,6 +3,14 @@
 #include <string>
 #include <glm/glm.hpp>
 
+// Пути к шейдеру векторного debug-текста (stb_easy_font) — используется и
+// UIRenderer, и DebugOverlay, поэтому вынесено в одно место вместо двух
+// одинаковых строковых литералов в разных .cpp.
+namespace ShaderPaths {
+    constexpr const char* DebugTextVert = "assets/shaders/debug_text.vert";
+    constexpr const char* DebugTextFrag = "assets/shaders/debug_text.frag";
+}
+
 // Загружает и компилирует vertex+fragment шейдеры, даёт удобные методы
 // для передачи uniform-переменных.
 class Shader {

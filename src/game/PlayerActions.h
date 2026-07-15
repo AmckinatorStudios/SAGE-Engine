@@ -119,7 +119,7 @@ inline void HandleRightClick(GameState& game, const Camera& camera, const LookCo
         return;
     }
     if (heldItem == ItemType::FishingRod) {
-        game.Fishing.Cast(camera.Position, camera.Front, GameState::SeaLevel);
+        game.Fishing.Cast(camera.Position, camera.Front, GameConstants::SeaLevel);
         game.ShowToast("Cast... wait for a bite");
         return;
     }

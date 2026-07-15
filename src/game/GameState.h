@@ -1,4 +1,5 @@
 #pragma once
+#include "GameConstants.h"
 #include "Inventory.h"
 #include "PlayerStats.h"
 #include "PlayerController.h"
@@ -13,6 +14,7 @@
 #include "../render/ParticlePresets.h"
 #include "../scripting/ScriptEngine.h"
 #include "../core/InputMap.h"
+#include <cstdlib>
 #include <string>
 
 // ---------------------------------------------------------------------
@@ -30,12 +32,11 @@
 // это дело main.cpp и рендер-слоя. Здесь только "что происходит в мире".
 // ---------------------------------------------------------------------
 struct GameState {
-    static constexpr float SeaLevel = 7.4f;
     static constexpr float CookDuration = 4.0f;
 
     World Terrain;
     ShipInfo Ship;
-    WaterPlane Water{400.0f, SeaLevel};
+    WaterPlane Water{400.0f, GameConstants::SeaLevel};
 
     Scene SceneData;
     ScriptEngine Scripts; // работает с объектами SceneData — см. BindScene/BindInput в конструкторе
@@ -47,7 +48,7 @@ struct GameState {
     PlayerStats Stats;
     Inventory Items;
 
-    TrashSystem Trash{SeaLevel, glm::vec3(0.0f)};
+    TrashSystem Trash{GameConstants::SeaLevel, glm::vec3(0.0f)};
     FishingSystem Fishing;
     float CookTimer = 0.0f; // > 0 — на печке жарится рыба
 
@@ -66,12 +67,11 @@ struct GameState {
     // Строит корабль, ставит игрока на палубу, выдаёт стартовый инвентарь.
     // Вызывается один раз при старте новой партии (или после SAGE_* env
     // переопределений в main — она может тронуть Player.Position уже после).
-    GameState() : Trash(SeaLevel, glm::vec3(0.0f)) {
-        Player.SeaLevel = SeaLevel;
+    GameState() : Trash(GameConstants::SeaLevel, glm::vec3(0.0f)) {
         Ship = BuildDefaultShip(Terrain, glm::ivec3(0, 6, 0));
         Terrain.RebuildDirtyMeshes();
         Player.Position = Ship.Center;
-        Trash = TrashSystem(SeaLevel, Ship.Center);
+        Trash = TrashSystem(GameConstants::SeaLevel, Ship.Center);
 
         // Стартовые значения — чисто заглушка на первый кадр до старта игры,
         // реальный hemisphere-ambient (небо/отражённый свет) каждый кадр
@@ -105,7 +105,14 @@ struct GameState {
         // делает снаружи main.cpp (InputSystem создаётся раньше GameState) —
         // см. game.Scripts.BindInput(input.Actions()) сразу после создания game.
         Scripts.BindScene(SceneData);
-        Scripts.RunScript("assets/scripts/demo_features.lua");
+
+        // demo_features.lua — витрина Lua-API движка (спавн кубов, таймеры,
+        // корутины), никак не относится к геймплею The Boat. Раньше грузился
+        // безусловно при каждом старте партии; теперь — только по явному
+        // запросу (SAGE_RUN_DEMO_SCRIPT), как и остальные SAGE_* debug-флаги.
+        if (std::getenv("SAGE_RUN_DEMO_SCRIPT")) {
+            Scripts.RunScript("assets/scripts/demo_features.lua");
+        }
 
         PrevTimeOfDay = DayNight.TimeOfDay();
     }

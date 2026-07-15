@@ -1,4 +1,5 @@
 #pragma once
+#include "GameConstants.h"
 #include "../voxel/World.h"
 #include <glm/glm.hpp>
 
@@ -21,7 +22,7 @@ public:
     float JumpVelocity = 8.0f;
     float Gravity = 22.0f;
 
-    float SeaLevel = 8.0f;
+    float SeaLevel = GameConstants::SeaLevel;
 
     bool OnGround = false;
     bool InWater = false;

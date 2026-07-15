@@ -70,15 +70,14 @@ void Chunk::RebuildMesh(World* world) {
 
                 glm::vec3 color = GetBlockColor(block);
 
-                // Атлас — сетка 4x2 тайла. Переводим индекс тайла блока в
-                // прямоугольник UV-координат (u0,v0)-(u1,v1) внутри атласа.
-                constexpr int ATLAS_COLS = 4, ATLAS_ROWS = 3;
+                // Переводим индекс тайла блока (см. Block.h) в прямоугольник
+                // UV-координат (u0,v0)-(u1,v1) внутри атласа.
                 int atlasIndex = GetBlockAtlasIndex(block);
                 glm::vec2 tileOrigin(
-                    (atlasIndex % ATLAS_COLS) / float(ATLAS_COLS),
-                    (atlasIndex / ATLAS_COLS) / float(ATLAS_ROWS)
+                    (atlasIndex % kBlockAtlasCols) / float(kBlockAtlasCols),
+                    (atlasIndex / kBlockAtlasCols) / float(kBlockAtlasRows)
                 );
-                glm::vec2 tileSize(1.0f / ATLAS_COLS, 1.0f / ATLAS_ROWS);
+                glm::vec2 tileSize(1.0f / kBlockAtlasCols, 1.0f / kBlockAtlasRows);
 
                 for (const FaceDef& face : kFaces) {
                     int nx = x + face.neighborOffset.x;

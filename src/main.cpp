@@ -31,6 +31,7 @@
 #include <iostream>
 #include <algorithm>
 
+#include "core/Version.h"
 #include "core/Window.h"
 #include "core/Log.h"
 #include "core/Stats.h"
@@ -69,7 +70,7 @@ void ApplyDebugEnvOverrides(GameState& game, Camera& camera) {
     if (std::getenv("SAGE_FORCE_COOKING")) game.CookTimer = 999.0f; // для CI-скриншотов эффекта готовки/дыма
     if (std::getenv("SAGE_DEBUG_HUD")) game.DebugHudVisible = true;
     if (std::getenv("SAGE_FORCE_BITE")) {
-        game.Fishing.Cast(camera.Position, camera.Front, GameState::SeaLevel);
+        game.Fishing.Cast(camera.Position, camera.Front, GameConstants::SeaLevel);
         game.Fishing.DebugForceBite();
     }
     camera.ProcessMouse(0.0f, 0.0f); // пересчитать Front/Right/Up после ручной правки Yaw/Pitch
@@ -148,10 +149,20 @@ void UpdateNoclipFly(GameState& game, InputMap& actions, const Camera& camera, f
 
 int main() {
     Log::Init("sage_engine.log");
-    LOG_INFO("Game") << "The Boat (alpha) запускается...";
+    LOG_INFO("Game") << "The Boat (alpha) v" << kSageEngineVersion << " запускается...";
 
     try {
-        Window window(1280, 720, "The Boat (alpha) - SAGE Engine");
+        // Размер и заголовок окна настраиваются через переменные окружения —
+        // тот же паттерн, что и остальные SAGE_* debug-переопределения ниже
+        // (см. ApplyDebugEnvOverrides), чтобы не редактировать код движка
+        // ради другого разрешения при разработке/тестировании.
+        int windowWidth = 1280;
+        int windowHeight = 720;
+        if (const char* w = std::getenv("SAGE_WINDOW_WIDTH")) windowWidth = std::atoi(w);
+        if (const char* h = std::getenv("SAGE_WINDOW_HEIGHT")) windowHeight = std::atoi(h);
+        std::string windowTitle = std::string("The Boat (alpha) v") + kSageEngineVersion + " - SAGE Engine";
+
+        Window window(windowWidth, windowHeight, windowTitle);
 
         InputSystem input;
         input.Attach(window.Handle());
@@ -199,11 +210,16 @@ int main() {
         UICanvas statsHud = BuildStatsHud(game);
         ApplyDebugEnvOverrides(game, camera);
 
+        // Путь скриншота — общий для F2 (ручной, по хоткею) и автоскриншота
+        // для CI/тестов (по кадру); раньше F2 был захардкожен на
+        // "screenshot.png" отдельно от переопределяемого CI-пути, из-за чего
+        // SAGE_SCREENSHOT_PATH молча не действовал на ручной скриншот.
+        std::string screenshotPath = "screenshot.png";
+        if (const char* pathEnv = std::getenv("SAGE_SCREENSHOT_PATH")) screenshotPath = pathEnv;
+
         // ---- Автоскриншот для CI/тестов ----
         int autoScreenshotFrame = -1;
-        std::string autoScreenshotPath = "screenshot.png";
         if (const char* frameEnv = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) autoScreenshotFrame = std::atoi(frameEnv);
-        if (const char* pathEnv = std::getenv("SAGE_SCREENSHOT_PATH")) autoScreenshotPath = pathEnv;
         int frameCounter = 0;
 
         LOG_INFO("Game") << "Мир создан. Корабль в (" << game.Ship.Center.x << ", "
@@ -231,7 +247,7 @@ int main() {
             InputMap& actions = input.Actions();
 
             if (actions.WasPressed(GameActions::QuitGame)) glfwSetWindowShouldClose(w, true);
-            if (actions.WasPressed(GameActions::Screenshot)) SaveScreenshot("screenshot.png", window.Width(), window.Height());
+            if (actions.WasPressed(GameActions::Screenshot)) SaveScreenshot(screenshotPath, window.Width(), window.Height());
             if (actions.WasPressed(GameActions::ToggleDebugHud)) game.DebugHudVisible = !game.DebugHudVisible;
             if (actions.WasPressed(GameActions::ToggleNoclip)) {
                 game.Noclip = !game.Noclip;
@@ -379,7 +395,7 @@ int main() {
             // ---- Скриншот на заданном кадре (для CI) ----
             ++frameCounter;
             if (autoScreenshotFrame >= 0 && frameCounter == autoScreenshotFrame) {
-                SaveScreenshot(autoScreenshotPath, window.Width(), window.Height());
+                SaveScreenshot(screenshotPath, window.Width(), window.Height());
                 glfwSetWindowShouldClose(window.Handle(), true);
             }
 

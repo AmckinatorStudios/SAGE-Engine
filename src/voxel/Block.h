@@ -24,10 +24,19 @@ inline glm::vec3 GetBlockColor(BlockType type) {
     return glm::vec3(1.0f);
 }
 
+// Сетка тайлов текстурного атласа assets/textures/blocks_atlas.png. Это
+// свойство конкретного файла атласа (сколько тайлов в нём нарезано), а не
+// движка вокселей — вынесено сюда, рядом с индексами тайлов, а не оставлено
+// локальной константой в коде построения меша (см. Chunk.cpp), чтобы при
+// перенарезке атласа менять эти два числа нужно было только в одном месте.
+constexpr int kBlockAtlasCols = 4;
+constexpr int kBlockAtlasRows = 3;
+
 // Индекс тайла блока в текстурном атласе assets/textures/blocks_atlas.png
-// (сетка 4x3 тайла). Один и тот же тайл используется на всех 6 гранях блока —
-// разные текстуры для верха/боков/низа (как трава в Minecraft) можно добавить
-// позже, расширив эту функцию до GetBlockAtlasIndex(type, faceNormal).
+// (сетка kBlockAtlasCols x kBlockAtlasRows). Один и тот же тайл используется
+// на всех 6 гранях блока — разные текстуры для верха/боков/низа (как трава в
+// Minecraft) можно добавить позже, расширив эту функцию до
+// GetBlockAtlasIndex(type, faceNormal).
 inline int GetBlockAtlasIndex(BlockType type) {
     switch (type) {
         case BlockType::Grass:  return 0;

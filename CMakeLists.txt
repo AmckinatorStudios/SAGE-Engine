@@ -12,6 +12,18 @@ if (NOT GAME_NAME)
     set(GAME_NAME "TheBoat")
 endif()
 
+# Версия движка читается из файла VERSION (единственный источник истины —
+# используется и здесь для сборки бинарника, и в scripts/build_*.sh для
+# имени пакета) и запекается в бинарник через генерируемый заголовок, чтобы
+# запущенная игра тоже знала свою версию (заголовок окна, лог-баннер).
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" SAGE_ENGINE_VERSION)
+string(STRIP "${SAGE_ENGINE_VERSION}" SAGE_ENGINE_VERSION)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/src/core/Version.h.in
+    ${CMAKE_BINARY_DIR}/generated/core/Version.h
+    @ONLY
+)
+
 include(FetchContent)
 
 # ---------- GLFW (окно, ввод) ----------
@@ -105,7 +117,7 @@ file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
 add_executable(SAGEEngine ${ENGINE_SOURCES})
 set_target_properties(SAGEEngine PROPERTIES OUTPUT_NAME "${GAME_NAME}")
 
-target_include_directories(SAGEEngine PRIVATE src)
+target_include_directories(SAGEEngine PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 
 # В Debug-сборке включаем GL_CHECK (см. src/core/GLDebug.h) — проверку
 # glGetError после обёрнутых вызовов. В Release макрос ничего не делает.

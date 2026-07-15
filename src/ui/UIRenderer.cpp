@@ -13,7 +13,7 @@ namespace {
 }
 
 UIRenderer::UIRenderer()
-    : m_shader("assets/shaders/debug_text.vert", "assets/shaders/debug_text.frag") {
+    : m_shader(ShaderPaths::DebugTextVert, ShaderPaths::DebugTextFrag) {
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
     glGenBuffers(1, &m_ebo);
