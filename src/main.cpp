@@ -30,12 +30,18 @@
 #include <string>
 #include <iostream>
 #include <algorithm>
+#include <vector>
+#include <future>
+#include <thread>
+#include <chrono>
 
 #include "core/Version.h"
 #include "core/Window.h"
 #include "core/Log.h"
 #include "core/Stats.h"
 #include "core/InputSystem.h"
+#include "core/JobSystem.h"
+#include "core/MainThreadDispatcher.h"
 #include "render/Shader.h"
 #include "render/Camera.h"
 #include "render/ResourceManager.h"
@@ -154,6 +160,61 @@ void UpdateNoclipFly(GameState& game, InputMap& actions, const Camera& camera, f
     game.Player.Velocity = glm::vec3(0.0f);
 }
 
+// Самопроверка асинхронной подсистемы (JobSystem + MainThreadDispatcher +
+// асинхронная загрузка ресурсов) — гоняется по SAGE_TEST_ASYNC, в т.ч. в CI
+// headless. Требует уже созданного GL-контекста (загрузка текстуры/меша идёт
+// в главном потоке). Возвращает true, если всё прошло. НЕ входит в обычный
+// игровой цикл — это отдельный детерминированный прогон с последующим выходом.
+bool RunAsyncSelfTest() {
+    using clock = std::chrono::steady_clock;
+    bool ok = true;
+
+    // 1) Пул задач: 64 независимые задачи, собираем результаты через future.
+    std::vector<std::future<long>> futures;
+    for (int i = 0; i < 64; ++i) {
+        futures.push_back(JobSystem::Instance().Enqueue([i]() -> long {
+            long s = 0; for (int k = 0; k < 5000; ++k) s += (i * k) % 13; return s;
+        }));
+    }
+    long sum = 0; for (auto& f : futures) sum += f.get();
+    LOG_INFO("AsyncTest") << "Пул: 64 задачи выполнены (" << JobSystem::Instance().WorkerCount()
+                          << " воркеров), sum=" << sum;
+
+    // 2) ParallelFor: параллельно заполняем массив, проверяем корректность.
+    std::vector<int> arr(20000, -1);
+    JobSystem::Instance().ParallelFor(arr.size(), [&arr](size_t i) { arr[i] = int(i % 1000); });
+    for (size_t i = 0; i < arr.size(); ++i) {
+        if (arr[i] != int(i % 1000)) { ok = false; break; }
+    }
+    LOG_INFO("AsyncTest") << "ParallelFor: " << (ok ? "OK" : "ОШИБКА");
+
+    // 3) Асинхронная загрузка текстуры и модели (CPU-декод в фоне, GL-загрузка
+    //    в главном потоке через Drain). Крутим Drain, пока не готово/таймаут.
+    auto tex = ResourceManager::Instance().LoadTextureAsync("assets/textures/checker_demo.png");
+    auto model = ResourceManager::Instance().GetModelAsync("assets/models/sphere.obj");
+
+    auto start = clock::now();
+    while (tex->IsLoading() || model->IsLoading()) {
+        MainThreadDispatcher::Instance().Drain();
+        if (std::chrono::duration<double>(clock::now() - start).count() > 5.0) break; // страховка
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    bool texOk = tex->IsReady() && tex->Get() && tex->Get()->Width() > 0;
+    bool modelOk = model->IsReady() && model->Get();
+    LOG_INFO("AsyncTest") << "Async-текстура: " << (texOk ? "OK" : "ОШИБКА")
+                          << ", async-модель: " << (modelOk ? "OK" : "ОШИБКА");
+
+    // 4) Дедупликация: повторный запрос уже загруженной модели — сразу Ready.
+    auto again = ResourceManager::Instance().GetModelAsync("assets/models/sphere.obj");
+    bool dedupOk = again->IsReady() && again->Get() == model->Get();
+    LOG_INFO("AsyncTest") << "Кэш/дедуп модели: " << (dedupOk ? "OK" : "ОШИБКА");
+
+    ok = ok && texOk && modelOk && dedupOk;
+    LOG_INFO("AsyncTest") << (ok ? "=== ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ ===" : "=== ЕСТЬ ПРОВАЛЫ ===");
+    return ok;
+}
+
 } // namespace
 
 int main() {
@@ -172,6 +233,22 @@ int main() {
         std::string windowTitle = std::string("The Boat (alpha) v") + kSageEngineVersion + " - SAGE Engine";
 
         Window window(windowWidth, windowHeight, windowTitle);
+
+        // Пул фоновых задач движка: асинхронная загрузка ресурсов и любая
+        // тяжёлая CPU-работа вне главного потока (см. core/JobSystem.h,
+        // ResourceManager::*Async). Готовые результаты, требующие GL, каждый
+        // кадр забираются из MainThreadDispatcher ниже.
+        JobSystem::Instance().Start();
+
+        // Самопроверка асинхронной подсистемы для CI/отладки — прогоняет пул
+        // задач и асинхронную загрузку ресурсов на реальном GL-контексте, затем
+        // выходит, не запуская игру. Обычной партии не касается.
+        if (std::getenv("SAGE_TEST_ASYNC")) {
+            bool passed = RunAsyncSelfTest();
+            JobSystem::Instance().Shutdown();
+            ResourceManager::Instance().Clear();
+            return passed ? 0 : 1;
+        }
 
         InputSystem input;
         input.Attach(window.Handle());
@@ -370,6 +447,11 @@ int main() {
 
             game.Terrain.RebuildDirtyMeshes();
 
+            // Забираем результаты фоновых загрузок, готовые к GL-загрузке
+            // (создание текстур/мешей в главном потоке). Бюджет ~2 мс/кадр —
+            // пачка тяжёлых загрузок размазывается по кадрам, а не фризит один.
+            MainThreadDispatcher::Instance().Drain(2.0);
+
             // Освобождаем доигравшие одноразовые звуки этого кадра (эмбиент,
             // музыка и активные лупы не трогаются — они управляются по дескриптору)
             game.Audio.Update();
@@ -526,6 +608,12 @@ int main() {
             window.SwapBuffers();
             window.PollEvents();
         }
+
+        // Сначала гасим пул задач (join воркеров) — чтобы ни одна фоновая
+        // загрузка не обращалась к ресурсам/диспетчеру после этой точки. Ещё
+        // не забранные из MainThreadDispatcher финализации просто отбрасываются
+        // (GL-объекты в них не создавались — контекст всё равно вот-вот умрёт).
+        JobSystem::Instance().Shutdown();
 
         // ВАЖНО: ResourceManager — статический синглтон. Если не очистить его
         // здесь, его меши будут удаляться уже ПОСЛЕ main() и разрушения окна,

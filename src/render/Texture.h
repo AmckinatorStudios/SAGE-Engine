@@ -1,6 +1,25 @@
 #pragma once
 #include <glad/glad.h>
 #include <string>
+#include <vector>
+
+// Декодированное изображение в ОЗУ (RGBA/RGB/RED, 8 бит на канал) — без GL.
+// Именно это готовят на фоновом потоке при асинхронной загрузке текстуры
+// (декод PNG/JPG через stb_image), а затем в главном потоке из него делают
+// GPU-текстуру. LoadImageFile ниже потокобезопасен (stb собран с
+// STBI_THREAD_LOCAL — см. Texture.cpp).
+struct ImageData {
+    std::vector<unsigned char> Pixels;
+    int Width = 0;
+    int Height = 0;
+    int Channels = 0;
+    bool Ok() const { return !Pixels.empty() && Width > 0 && Height > 0; }
+};
+
+// Читает и декодирует файл изображения в ImageData. НЕ трогает GL — безопасно
+// вызывать на фоновом потоке (JobSystem). При ошибке возвращает пустой
+// ImageData (Ok() == false); reason, если нужен, кладётся в *error.
+ImageData LoadImageFile(const std::string& path, std::string* error = nullptr);
 
 // Режим фильтрации текстуры:
 //  Nearest     — пиксельная чёткость без сглаживания (voxel-атласы, pixel-art)
@@ -33,6 +52,12 @@ public:
     Texture(const unsigned char* pixelsRGBA, int width, int height,
             TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true);
 
+    // Создаёт GPU-текстуру из уже декодированного изображения (см. ImageData /
+    // LoadImageFile). Это GL-часть асинхронной загрузки: пиксели готовит фон,
+    // а этот конструктор вызывается в главном потоке. Бросает при пустом data.
+    Texture(const ImageData& data, TextureFilter filter = TextureFilter::Trilinear,
+            bool generateMipmaps = true);
+
     ~Texture();
 
     Texture(const Texture&) = delete;
@@ -50,6 +75,7 @@ public:
 
 private:
     void ApplyFilter(TextureFilter filter, bool generateMipmaps);
+    void UploadFromImage(const ImageData& data, TextureFilter filter, bool generateMipmaps);
 
     unsigned int m_id = 0;
     int m_width = 0, m_height = 0, m_channels = 0;

@@ -35,6 +35,16 @@ function OnStart(entity)
         end)
     end
 
+    -- Асинхронная загрузка модели: объект создаётся сразу, а его меш грузится
+    -- в фоне (JobSystem: чтение+парсинг .obj вне главного потока) и появляется
+    -- через несколько кадров — кадр при этом не фризит. См. движковые
+    -- ResourceManager::GetModelAsync / SetMeshModelAsync.
+    local sphere = SpawnObject("async_sphere")
+    sphere.Transform.Position = origin + Vec3.new(0, 2, 0)
+    sphere.Color = Vec3.new(0.4, 0.8, 1.0)
+    SetMeshModelAsync(sphere, "assets/models/sphere.obj")
+    log("Модель сферы поставлена в очередь на асинхронную загрузку")
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()

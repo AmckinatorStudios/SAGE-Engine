@@ -1,4 +1,9 @@
 #define STB_IMAGE_IMPLEMENTATION
+// Делает внутренние флаги stb_image (флип по вертикали, причина ошибки)
+// потоко-локальными — чтобы одновременный декод в нескольких воркерах
+// JobSystem не гонялся за общий глобал (см. LoadImageFile / асинхронную
+// загрузку текстур в ResourceManager).
+#define STBI_THREAD_LOCAL
 #include <stb_image.h>
 #include "Texture.h"
 #include "../core/Log.h"
@@ -55,14 +60,46 @@ void Texture::ApplyFilter(TextureFilter filter, bool generateMipmaps) {
     }
 }
 
-Texture::Texture(const std::string& path, TextureFilter filter, bool generateMipmaps) {
-    stbi_set_flip_vertically_on_load(true); // OpenGL ждёт (0,0) внизу-слева, у большинства картинок — вверху-слева
+ImageData LoadImageFile(const std::string& path, std::string* error) {
+    stbi_set_flip_vertically_on_load_thread(1); // (0,0) внизу-слева для OpenGL; потоко-локально
 
-    unsigned char* data = stbi_load(path.c_str(), &m_width, &m_height, &m_channels, 0);
-    if (!data) {
-        LOG_ERROR("Texture") << "Не удалось загрузить текстуру: " << path << " (" << stbi_failure_reason() << ")";
-        throw std::runtime_error("Не удалось загрузить текстуру: " + path + " (" + stbi_failure_reason() + ")");
+    int w = 0, h = 0, channels = 0;
+    unsigned char* pixels = stbi_load(path.c_str(), &w, &h, &channels, 0);
+    if (!pixels) {
+        const char* reason = stbi_failure_reason();
+        if (error) *error = std::string("не удалось загрузить '") + path + "': " + (reason ? reason : "?");
+        return {};
     }
+
+    ImageData data;
+    data.Width = w;
+    data.Height = h;
+    data.Channels = channels;
+    data.Pixels.assign(pixels, pixels + (size_t)w * h * channels);
+    stbi_image_free(pixels);
+    return data;
+}
+
+Texture::Texture(const std::string& path, TextureFilter filter, bool generateMipmaps) {
+    std::string error;
+    ImageData data = LoadImageFile(path, &error);
+    if (!data.Ok()) {
+        LOG_ERROR("Texture") << "Не удалось загрузить текстуру: " << error;
+        throw std::runtime_error("Не удалось загрузить текстуру: " + error);
+    }
+    UploadFromImage(data, filter, generateMipmaps);
+    LOG_INFO("Texture") << "Текстура загружена: " << path << " (" << m_width << "x" << m_height << ")";
+}
+
+Texture::Texture(const ImageData& data, TextureFilter filter, bool generateMipmaps) {
+    if (!data.Ok()) throw std::runtime_error("Texture: пустой ImageData");
+    UploadFromImage(data, filter, generateMipmaps);
+}
+
+void Texture::UploadFromImage(const ImageData& data, TextureFilter filter, bool generateMipmaps) {
+    m_width = data.Width;
+    m_height = data.Height;
+    m_channels = data.Channels;
 
     GLenum format = GL_RGB;
     if (m_channels == 1) format = GL_RED;
@@ -72,16 +109,12 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
     glGenTextures(1, &m_id);
     glBindTexture(GL_TEXTURE_2D, m_id);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, format, m_width, m_height, 0, format, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, format, m_width, m_height, 0, format, GL_UNSIGNED_BYTE, data.Pixels.data());
     if (generateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
 
     ApplyFilter(filter, generateMipmaps);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-    stbi_image_free(data);
-
-    LOG_INFO("Texture") << "Текстура загружена: " << path << " (" << m_width << "x" << m_height << ")";
 }
 
 Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, TextureFilter filter, bool generateMipmaps) {

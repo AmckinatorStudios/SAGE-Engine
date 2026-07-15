@@ -9,10 +9,21 @@ struct Vertex {
     glm::vec2 TexCoords;
 };
 
+// Геометрия в виде обычных данных в ОЗУ — без всякого GL. Именно её готовят
+// на фоновом потоке при асинхронной загрузке (парсинг .obj, генерация меша),
+// а затем в главном потоке из неё делают Mesh (GL-загрузка VAO/VBO/EBO).
+struct MeshData {
+    std::vector<Vertex> Vertices;
+    std::vector<unsigned int> Indices;
+};
+
 // Хранит геометрию на GPU (VAO/VBO/EBO) и умеет себя отрисовать
 class Mesh {
 public:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
+    // Удобный конструктор из CPU-данных (см. MeshData) — GL-загрузка. Должен
+    // вызываться в главном потоке (с GL-контекстом), как и вариант выше.
+    explicit Mesh(const MeshData& data) : Mesh(data.Vertices, data.Indices) {}
     ~Mesh();
 
     // Владеет GL-объектами (VAO/VBO/EBO) — копирование запрещено (иначе

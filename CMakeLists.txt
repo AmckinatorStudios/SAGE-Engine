@@ -142,7 +142,9 @@ set(SAGE_ENGINE_SOURCES
     src/audio/AudioEngine.cpp
     src/audio/miniaudio_impl.cpp
     src/core/GLDebug.cpp
+    src/core/JobSystem.cpp
     src/core/Log.cpp
+    src/core/MainThreadDispatcher.cpp
     src/core/Stats.cpp
     src/core/Window.cpp
     src/render/DebugOverlay.cpp

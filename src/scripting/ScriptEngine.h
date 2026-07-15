@@ -5,6 +5,8 @@
 #include "../render/ParticleSystem.h"
 #include "../render/BillboardSystem.h"
 #include "../render/Texture.h"
+#include "../render/ResourceManager.h"
+#include "../core/AsyncResource.h"
 #include "../audio/AudioEngine.h"
 #include <sol/sol.hpp>
 #include <memory>
@@ -133,6 +135,15 @@ private:
     void RegisterEngineApi();
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
+    void UpdatePendingMeshes();
+
+    // Объект, ждущий свою асинхронно загружаемую модель (см. SetMeshModelAsync).
+    // Храним Id, а не указатель: объект может быть удалён, пока меш грузится.
+    struct PendingMeshLoad {
+        int ObjectId;
+        std::shared_ptr<AsyncResource<Mesh>> Handle;
+        std::string Path;
+    };
 
     // Текстуры для билбордов, заказанных из Lua по пути к файлу, кэшируются
     // здесь (по пути) и живут, пока жив ScriptEngine — билборды в
@@ -143,6 +154,7 @@ private:
     std::vector<ScriptInstance> m_instances;
     std::vector<ScheduledCall> m_scheduled;
     std::vector<CoroutineInstance> m_coroutines;
+    std::vector<PendingMeshLoad> m_pendingMeshes;
 
     Scene* m_scene = nullptr;
     InputMap* m_input = nullptr;

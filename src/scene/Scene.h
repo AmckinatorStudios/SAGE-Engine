@@ -60,6 +60,15 @@ public:
         return nullptr;
     }
 
+    // Поиск по стабильному Id (в отличие от имени, он уникален). Нужен, в
+    // частности, отложенным колбэкам (асинхронная загрузка меша): к моменту
+    // готовности объект мог быть уже удалён — тогда вернётся nullptr.
+    GameObject* FindById(int id) {
+        for (auto& o : m_objects)
+            if (o->Id == id) return o.get();
+        return nullptr;
+    }
+
     std::vector<std::unique_ptr<GameObject>>& Objects() { return m_objects; }
     int NextId() const { return m_nextId; }
     void SetNextId(int id) { m_nextId = id; }

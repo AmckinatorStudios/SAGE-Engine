@@ -131,6 +131,16 @@ void ScriptEngine::RegisterEngineApi() {
         obj.MeshComponent = ResourceManager::Instance().GetModel(path);
     });
 
+    // Асинхронный вариант: модель грузится в фоне (JobSystem), а меш
+    // назначается объекту, как только он готов (GL-загрузка в главном потоке).
+    // Кадр при этом не фризит — объект просто «появляется» через несколько
+    // кадров. Готовность опрашивается в UpdateAll(); если объект удалят раньше,
+    // результат тихо отбрасывается (ищем по Id).
+    m_lua.set_function("SetMeshModelAsync", [this](GameObject& obj, const std::string& path) {
+        obj.MeshRefComponent = MeshRef{MeshRef::Type::Model, path};
+        m_pendingMeshes.push_back({obj.Id, ResourceManager::Instance().GetModelAsync(path), path});
+    });
+
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
     // после BindInput. Скрипты читают тот же ввод, что и C++-код игры —
     // никакого параллельного дублирования раскладки клавиш. ---
@@ -410,6 +420,27 @@ void ScriptEngine::UpdateAll(float deltaTime) {
 
     UpdateTimers(deltaTime);
     UpdateCoroutines(deltaTime);
+    UpdatePendingMeshes();
+}
+
+// Назначает объектам меши, чья асинхронная загрузка завершилась (см.
+// SetMeshModelAsync). Готовые/ошибочные/осиротевшие записи убираются.
+void ScriptEngine::UpdatePendingMeshes() {
+    for (auto& pending : m_pendingMeshes) {
+        if (pending.Handle->IsFailed()) {
+            LOG_WARN("ScriptEngine") << "Async-модель не загрузилась: " << pending.Path
+                                     << " (" << pending.Handle->Error() << ")";
+            continue;
+        }
+        if (!pending.Handle->IsReady()) continue; // ещё грузится
+        if (GameObject* obj = m_scene ? m_scene->FindById(pending.ObjectId) : nullptr) {
+            obj->MeshComponent = pending.Handle->Get();
+        }
+    }
+    m_pendingMeshes.erase(
+        std::remove_if(m_pendingMeshes.begin(), m_pendingMeshes.end(),
+                       [](const PendingMeshLoad& p) { return !p.Handle->IsLoading(); }),
+        m_pendingMeshes.end());
 }
 
 void ScriptEngine::UpdateTimers(float dt) {

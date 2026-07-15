@@ -6,7 +6,7 @@
 
 namespace ModelLoader {
 
-std::shared_ptr<Mesh> LoadObj(const std::string& path) {
+MeshData LoadObjData(const std::string& path) {
     tinyobj::ObjReaderConfig config;
     tinyobj::ObjReader reader;
 
@@ -18,9 +18,7 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
     const auto& attrib = reader.GetAttrib();
     const auto& shapes = reader.GetShapes();
 
-    std::vector<Vertex> vertices;
-    std::vector<unsigned int> indices;
-
+    MeshData data;
     for (const auto& shape : shapes) {
         for (const auto& idx : shape.mesh.indices) {
             Vertex v{};
@@ -42,12 +40,15 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
                     attrib.texcoords[2 * idx.texcoord_index + 1]
                 };
             }
-            vertices.push_back(v);
-            indices.push_back(static_cast<unsigned int>(indices.size()));
+            data.Vertices.push_back(v);
+            data.Indices.push_back(static_cast<unsigned int>(data.Indices.size()));
         }
     }
+    return data;
+}
 
-    return std::make_shared<Mesh>(vertices, indices);
+std::shared_ptr<Mesh> LoadObj(const std::string& path) {
+    return std::make_shared<Mesh>(LoadObjData(path)); // CPU-парсинг + GL-загрузка
 }
 
 }
