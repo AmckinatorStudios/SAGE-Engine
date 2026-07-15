@@ -69,6 +69,7 @@ struct GameState {
     int CraftSelected = 0;
     bool Noclip = false;
     bool DebugHudVisible = false;
+    bool UiPanelOpen = false; // интерактивная панель настроек (F4)
 
     std::string Toast;
     float ToastTimer = 0.0f;

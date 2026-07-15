@@ -17,6 +17,7 @@
 //         пожарить рыбу на печке / съесть / выпить)
 //   1..9, колесо — хотбар; F — подобрать мусор; Tab — меню крафта
 //   V — noclip (режим полёта для стройки), F2 — скриншот, F3 — debug HUD
+//   F4 — панель настроек (интерактивный UI: тумблеры/кнопки мышью)
 //
 // Устройство файла (после рефакторинга): main() отвечает только за
 // инициализацию ресурсов и цикл "ввод -> симуляция -> рендер". Вся игровая
@@ -265,6 +266,145 @@ bool RunAsyncSelfTest() {
     return ok;
 }
 
+// Самопроверка UI-системы (интерактив + масштаб + рендер) — по SAGE_TEST_UI.
+// Клик мышью эмулируется синтетическим UIInputState, так что интерактив (кнопки,
+// переключатели) проверяется без реального курсора, в т.ч. headless в CI.
+bool RunUISelfTest() {
+    bool ok = true;
+    const float W = 1280.0f, H = 720.0f;
+
+    UICanvas canvas;
+    canvas.ReferenceSize = {640.0f, 360.0f}; // на 1280x720 масштаб должен быть 2.0
+
+    int clicks = 0;
+    auto* btn = canvas.Add<UIButton>();
+    btn->Anchor = UIAnchor::Center; btn->Offset = {0.0f, 0.0f}; btn->Size = {200.0f, 50.0f};
+    btn->Label = "OK"; btn->OnClick = [&clicks] { ++clicks; };
+
+    bool toggleVal = false;
+    auto* tog = canvas.Add<UIToggle>();
+    tog->Anchor = UIAnchor::Center; tog->Offset = {0.0f, 90.0f}; tog->Size = {60.0f, 28.0f};
+    tog->OnChanged = [&toggleVal](bool v) { toggleVal = v; };
+
+    // Прогоняем «пустой» ввод, чтобы канвас выставил LayoutScale элементам.
+    UIInputState idle; idle.Mouse = {-1.0f, -1.0f};
+    canvas.Update(idle, W, H);
+    bool scaleOk = std::abs(btn->LayoutScale - 2.0f) < 0.001f;
+    LOG_INFO("UITest") << "Масштаб под соотношение сторон: " << (scaleOk ? "OK" : "ОШИБКА")
+                       << " (scale=" << btn->LayoutScale << ", ожидали 2.0)";
+
+    auto centerOf = [W, H](UIElement* e) {
+        return e->ResolvePosition(W, H) + e->ScaledSize() * 0.5f;
+    };
+    auto clickAt = [&canvas, W, H](glm::vec2 pos) {
+        UIInputState down; down.Mouse = pos; down.MouseDown = true; down.MousePressed = true;
+        canvas.Update(down, W, H);
+        UIInputState up; up.Mouse = pos; up.MouseReleased = true;
+        canvas.Update(up, W, H);
+    };
+
+    clickAt(centerOf(btn));
+    bool clickOk = clicks == 1;
+    LOG_INFO("UITest") << "Клик по кнопке: " << (clickOk ? "OK" : "ОШИБКА") << " (clicks=" << clicks << ")";
+
+    clickAt(centerOf(tog));
+    bool toggleOk = toggleVal && tog->CurrentValue();
+    LOG_INFO("UITest") << "Переключатель: " << (toggleOk ? "OK" : "ОШИБКА");
+
+    // Клик мимо кнопки не должен её срабатывать.
+    clickAt({4.0f, 4.0f});
+    bool missOk = clicks == 1;
+    LOG_INFO("UITest") << "Клик мимо (без ложных срабатываний): " << (missOk ? "OK" : "ОШИБКА");
+
+    // Рендер-проход со спрайтом (текстура) + все виджеты — проверяем, что путь
+    // отрисовки (в т.ч. текстурные спрайты) отрабатывает без GL-ошибок.
+    Asset<Texture> checker = AssetManager::Instance().LoadTexture("textures/checker_demo.png");
+    auto* spr = canvas.Add<UISprite>();
+    spr->Anchor = UIAnchor::Center; spr->Offset = {0.0f, -90.0f}; spr->Size = {80.0f, 48.0f};
+    spr->KeepAspect = true; spr->SpriteTexture = checker.Get();
+    auto* panel = canvas.Add<UIPanel>();
+    panel->Anchor = UIAnchor::Center; panel->Size = {260.0f, 240.0f}; panel->OutlineThickness = 2.0f;
+    {
+        UIRenderer ui;
+        ui.Begin((int)W, (int)H);
+        canvas.Draw(ui);
+        ui.End();
+    }
+    LOG_INFO("UITest") << "Рендер (спрайт+виджеты): OK";
+
+    ok = scaleOk && clickOk && toggleOk && missOk;
+    LOG_INFO("UITest") << (ok ? "=== ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ ===" : "=== ЕСТЬ ПРОВАЛЫ ===");
+    return ok;
+}
+
+// Панель настроек (F4) — витрина всех компонентов UI: подложка (UIPanel),
+// заголовок и подписи (UILabel), иконка (UISprite), полоски статов
+// (UIProgressBar), тумблеры (UIToggle) и кнопки (UIButton). Виджеты сами тянут
+// актуальные значения и правят реальное состояние игры/движка через источники
+// и колбэки — после сборки канвас трогать вручную не нужно. ReferenceSize
+// включает масштабирование под соотношение сторон окна.
+UICanvas BuildSettingsPanel(GameState& game, bool& postEnabled, bool& shadowsEnabled,
+                            const Texture& iconTexture, Window& window,
+                            const std::string& screenshotPath) {
+    UICanvas panel;
+    panel.ReferenceSize = {1280.0f, 720.0f};
+
+    auto* bg = panel.Add<UIPanel>();
+    bg->Anchor = UIAnchor::Center; bg->Size = {460.0f, 500.0f};
+    bg->Color = {0.05f, 0.06f, 0.09f}; bg->Alpha = 0.94f;
+    bg->OutlineThickness = 2.0f; bg->OutlineColor = {0.82f, 0.76f, 0.6f};
+
+    auto* title = panel.Add<UILabel>();
+    title->Anchor = UIAnchor::Center; title->Offset = {0.0f, -210.0f}; title->Size = {460.0f, 0.0f};
+    title->CenterInSize = true; title->Text = "SETTINGS"; title->Scale = 3.0f;
+
+    auto* icon = panel.Add<UISprite>();
+    icon->Anchor = UIAnchor::Center; icon->Offset = {0.0f, -150.0f}; icon->Size = {56.0f, 56.0f};
+    icon->KeepAspect = true; icon->SpriteTexture = &iconTexture;
+
+    // Полоски статов (демонстрация UIProgressBar с динамическим источником)
+    struct BarDef { const char* label; float PlayerStats::* field; glm::vec3 color; float y; };
+    BarDef bars[] = {
+        {"HP", &PlayerStats::Health, {0.85f, 0.25f, 0.25f}, -95.0f},
+        {"EN", &PlayerStats::Energy, {0.95f, 0.85f, 0.30f}, -68.0f},
+    };
+    for (const BarDef& d : bars) {
+        auto* bar = panel.Add<UIProgressBar>();
+        bar->Anchor = UIAnchor::Center; bar->Offset = {0.0f, d.y}; bar->Size = {300.0f, 18.0f};
+        bar->Label = d.label; bar->FillColor = d.color;
+        float PlayerStats::* field = d.field;
+        bar->ValueSource = [&game, field] { return game.Stats.*field / 100.0f; };
+    }
+
+    // Тумблеры (UIToggle) — правят реальные флаги рендера/движка
+    struct ToggleDef { const char* label; float y; std::function<bool()> get; std::function<void(bool)> set; };
+    ToggleDef toggles[] = {
+        {"Post-processing", -20.0f, [&postEnabled]{ return postEnabled; }, [&postEnabled](bool v){ postEnabled = v; }},
+        {"Shadows",          15.0f, [&shadowsEnabled]{ return shadowsEnabled; }, [&shadowsEnabled](bool v){ shadowsEnabled = v; }},
+        {"Asset hot-reload", 50.0f, []{ return AssetManager::Instance().HotReloadEnabled(); },
+                                    [](bool v){ AssetManager::Instance().EnableHotReload(v); }},
+    };
+    for (const ToggleDef& d : toggles) {
+        auto* t = panel.Add<UIToggle>();
+        t->Anchor = UIAnchor::Center; t->Offset = {-150.0f, d.y}; t->Size = {52.0f, 24.0f};
+        t->Label = d.label; t->ValueSource = d.get; t->OnChanged = d.set;
+    }
+
+    // Кнопки (UIButton) — действия
+    struct ButtonDef { const char* label; float y; std::function<void()> onClick; };
+    ButtonDef buttons[] = {
+        {"Screenshot", 110.0f, [&window, &screenshotPath]{ SaveScreenshot(screenshotPath, window.Width(), window.Height()); }},
+        {"Reload assets", 155.0f, []{ AssetManager::Instance().ReloadAll(); }},
+        {"Close", 200.0f, [&game]{ game.UiPanelOpen = false; }},
+    };
+    for (const ButtonDef& d : buttons) {
+        auto* b = panel.Add<UIButton>();
+        b->Anchor = UIAnchor::Center; b->Offset = {0.0f, d.y}; b->Size = {200.0f, 38.0f};
+        b->Label = d.label; b->OnClick = d.onClick;
+    }
+    return panel;
+}
+
 } // namespace
 
 int main() {
@@ -305,6 +445,12 @@ int main() {
         // GL-контексте, затем выходит, не запуская игру. Партии не касается.
         if (std::getenv("SAGE_TEST_ASYNC")) {
             bool passed = RunAsyncSelfTest();
+            JobSystem::Instance().Shutdown();
+            AssetManager::Instance().Clear();
+            return passed ? 0 : 1;
+        }
+        if (std::getenv("SAGE_TEST_UI")) {
+            bool passed = RunUISelfTest();
             JobSystem::Instance().Shutdown();
             AssetManager::Instance().Clear();
             return passed ? 0 : 1;
@@ -424,6 +570,15 @@ int main() {
         std::string screenshotPath = "screenshot.png";
         if (const char* pathEnv = std::getenv("SAGE_SCREENSHOT_PATH")) screenshotPath = pathEnv;
 
+        // Интерактивная панель настроек (F4): витрина всех UI-компонентов,
+        // правит реальные флаги (пост/тени/hot-reload) и делает скриншот/
+        // перезагрузку ассетов. Пока открыта — курсор виден, взгляд/движение
+        // заморожены, клики идут в UI, а не в мир.
+        UICanvas settingsPanel = BuildSettingsPanel(game, postEnabled, shadowsEnabled,
+                                                    alertIcon, window, screenshotPath);
+        bool prevUiMouseDown = false;
+        if (std::getenv("SAGE_OPEN_UI_PANEL")) game.UiPanelOpen = true; // для скриншота/CI
+
         // ---- Автоскриншот для CI/тестов ----
         int autoScreenshotFrame = -1;
         if (const char* frameEnv = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) autoScreenshotFrame = std::atoi(frameEnv);
@@ -468,7 +623,9 @@ int main() {
             // через их привязки (клавиатура/мышь/колесо) — дальше весь код
             // читает именованные действия, а не сырые коды клавиш.
             input.Update(w);
-            input.ApplyMouseDelta(camera);
+            // Пока открыта интерактивная панель — мышь управляет курсором UI,
+            // а не поворотом камеры (иначе взгляд бы крутился при наведении).
+            if (!game.UiPanelOpen) input.ApplyMouseDelta(camera);
             InputMap& actions = input.Actions();
 
             if (actions.WasPressed(GameActions::QuitGame)) glfwSetWindowShouldClose(w, true);
@@ -481,6 +638,12 @@ int main() {
             if (actions.WasPressed(GameActions::ToggleCrafting)) {
                 game.CraftMenuOpen = !game.CraftMenuOpen;
                 game.Audio.PlaySound2D(GameSounds::Pickup, 0.4f); // короткий UI-щелчок
+            }
+            if (actions.WasPressed(GameActions::ToggleUiPanel)) {
+                game.UiPanelOpen = !game.UiPanelOpen;
+                // Показываем/прячем системный курсор под интерактивный UI
+                glfwSetInputMode(w, GLFW_CURSOR, game.UiPanelOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+                game.Audio.PlaySound2D(GameSounds::Pickup, 0.4f);
             }
 
             const char* const* hotbarSlots = GameActions::HotbarSlotNames();
@@ -497,8 +660,29 @@ int main() {
                 PlayerActions::HandleCraftMenuInput(game, actions);
             }
 
+            // Интерактивная панель настроек: собираем состояние мыши из GLFW и
+            // прогоняем виджеты. Клики этого кадра "съедаются" панелью (в мир
+            // не идут). Фронт нажатия/отпускания считаем сами по prev-состоянию.
+            bool uiPanelConsumedClicks = game.UiPanelOpen;
+            if (game.UiPanelOpen) {
+                double mx, my; glfwGetCursorPos(w, &mx, &my);
+                bool lmb = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+                UIInputState uiIn;
+                uiIn.Mouse = {(float)mx, (float)my};
+                uiIn.MouseDown = lmb;
+                uiIn.MousePressed = lmb && !prevUiMouseDown;
+                uiIn.MouseReleased = !lmb && prevUiMouseDown;
+                prevUiMouseDown = lmb;
+                settingsPanel.Update(uiIn, (float)window.Width(), (float)window.Height());
+            } else {
+                prevUiMouseDown = false;
+            }
+
             // ================= ДВИЖЕНИЕ И ФИЗИКА =================
-            if (game.Noclip) {
+            if (game.UiPanelOpen) {
+                // Панель открыта — движение и полёт заморожены (мышь/клики в UI)
+                game.Player.Velocity = glm::vec3(0.0f);
+            } else if (game.Noclip) {
                 UpdateNoclipFly(game, actions, camera, deltaTime);
             } else {
                 glm::vec3 moveDir = game.CraftMenuOpen ? glm::vec3(0.0f) : ReadMoveDirection(actions, camera);
@@ -520,13 +704,13 @@ int main() {
             // ================= ДЕЙСТВИЯ ИГРОКА =================
             PlayerActions::LookContext look = PlayerActions::ComputeLookContext(game, camera);
 
-            if (actions.WasPressed(GameActions::PickUpTrash) && !game.CraftMenuOpen) {
+            if (actions.WasPressed(GameActions::PickUpTrash) && !game.CraftMenuOpen && !game.UiPanelOpen) {
                 PlayerActions::PickUpTrash(game, look);
             }
-            if (!craftMenuConsumedClicks && actions.WasPressed(GameActions::BreakOrHook)) {
+            if (!craftMenuConsumedClicks && !uiPanelConsumedClicks && actions.WasPressed(GameActions::BreakOrHook)) {
                 PlayerActions::HandleLeftClick(game, look);
             }
-            if (!craftMenuConsumedClicks && actions.WasPressed(GameActions::UseItem)) {
+            if (!craftMenuConsumedClicks && !uiPanelConsumedClicks && actions.WasPressed(GameActions::UseItem)) {
                 PlayerActions::HandleRightClick(game, camera, look);
             }
 
@@ -681,6 +865,7 @@ int main() {
             ui.Begin(window.Width(), window.Height());
             statsHud.Draw(ui);
             GameHud::DrawWorldHud(ui, game, look, window.Width(), window.Height());
+            if (game.UiPanelOpen) settingsPanel.Draw(ui); // поверх худа
             ui.End();
 
             if (game.DebugHudVisible) {

@@ -1,5 +1,6 @@
 #pragma once
 #include "../render/Shader.h"
+#include "../render/Texture.h"
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
@@ -46,6 +47,13 @@ public:
     // Ширина строки в экранных пикселях при данном масштабе (для вёрстки)
     static float MeasureText(const std::string& text, float scale);
 
+    // Текстурный спрайт (иконка/картинка) в экранных пикселях. tint — цвет-
+    // множитель с альфой (белый = как есть). uv — прямоугольник в текстуре
+    // (u0,v0,u1,v1), по умолчанию вся текстура. Рисуется в правильном порядке
+    // относительно Rect/Text (слои сохраняются — см. список команд в .cpp).
+    void Sprite(float x, float y, float w, float h, const Texture& texture,
+                glm::vec4 tint = glm::vec4(1.0f), glm::vec4 uv = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+
     void End();
 
     int ScreenWidth() const { return m_screenWidth; }
@@ -57,14 +65,38 @@ private:
         unsigned char r, g, b, a;
     };
 
-    void PushQuad(float x, float y, float w, float h, glm::vec3 color, float alpha);
-    void EnsureIndexCapacity(size_t quadCount);
+    // Команда отрисовки кадра. Цветные квады (Rect/Text) копятся пачками, а
+    // спрайты вклиниваются между ними — так порядок слоёв (панель → спрайт →
+    // текст) сохраняется, несмотря на смену шейдера/текстуры.
+    struct Command {
+        enum class Type { ColoredQuads, Sprite } Kind;
+        size_t FirstQuad = 0, QuadCount = 0;      // для ColoredQuads
+        const Texture* Tex = nullptr;             // для Sprite
+        float X = 0, Y = 0, W = 0, H = 0;
+        glm::vec4 Tint{1.0f};
+        glm::vec4 UV{0.0f, 0.0f, 1.0f, 1.0f};
+    };
 
-    std::vector<UIVertex> m_vertices; // все квады кадра (и прямоугольники, и глифы текста)
+    void PushQuad(float x, float y, float w, float h, glm::vec3 color, float alpha);
+    // Учитывает только что добавленный в m_vertices цветной квад в списке
+    // команд (продлевает текущую цветную команду или заводит новую). Общий
+    // для Rect и Text — иначе текстовые квады выпадали бы из диапазонов.
+    void NoteColoredQuad();
+    void EnsureIndexCapacity(size_t quadCount);
+    void DrawColored(size_t firstQuad, size_t quadCount, const glm::mat4& proj);
+    void DrawSprite(const Command& cmd, const glm::mat4& proj);
+
+    std::vector<UIVertex> m_vertices; // все цветные квады кадра (прямоугольники + глифы текста)
     size_t m_quadCount = 0;
+    std::vector<Command> m_commands;  // порядок отрисовки кадра
 
     unsigned int m_vao = 0, m_vbo = 0, m_ebo = 0;
     size_t m_indexCapacity = 0;
     Shader m_shader;
+
+    // Отдельный конвейер для текстурных спрайтов (позиция + UV, свой шейдер)
+    unsigned int m_spriteVao = 0, m_spriteVbo = 0;
+    Shader m_spriteShader;
+
     int m_screenWidth = 0, m_screenHeight = 0;
 };

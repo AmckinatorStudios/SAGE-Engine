@@ -13,7 +13,8 @@ namespace {
 }
 
 UIRenderer::UIRenderer()
-    : m_shader(ShaderPaths::DebugTextVert, ShaderPaths::DebugTextFrag) {
+    : m_shader(ShaderPaths::DebugTextVert, ShaderPaths::DebugTextFrag),
+      m_spriteShader("assets/shaders/ui_sprite.vert", "assets/shaders/ui_sprite.frag") {
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
     glGenBuffers(1, &m_ebo);
@@ -26,11 +27,25 @@ UIRenderer::UIRenderer()
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)0);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(UIVertex), (void*)12);
+    glBindVertexArray(0);
 
+    // Спрайты: динамический квад (позиция xy + uv), 4 вершины, перезаливается
+    // на каждый спрайт (их немного — иконки/картинки, не тысячи).
+    glGenVertexArrays(1, &m_spriteVao);
+    glGenBuffers(1, &m_spriteVbo);
+    glBindVertexArray(m_spriteVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_spriteVbo);
+    glBufferData(GL_ARRAY_BUFFER, 4 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
 }
 
 UIRenderer::~UIRenderer() {
+    if (m_spriteVbo) glDeleteBuffers(1, &m_spriteVbo);
+    if (m_spriteVao) glDeleteVertexArrays(1, &m_spriteVao);
     if (m_ebo) glDeleteBuffers(1, &m_ebo);
     if (m_vbo) glDeleteBuffers(1, &m_vbo);
     if (m_vao) glDeleteVertexArrays(1, &m_vao);
@@ -41,6 +56,7 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_screenHeight = screenHeight;
     m_vertices.clear();
     m_quadCount = 0;
+    m_commands.clear();
 }
 
 void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, float alpha) {
@@ -53,7 +69,33 @@ void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, f
     m_vertices.push_back({x + w, y,     0.0f, r, g, b, a});
     m_vertices.push_back({x + w, y + h, 0.0f, r, g, b, a});
     m_vertices.push_back({x,     y + h, 0.0f, r, g, b, a});
+    NoteColoredQuad();
+}
+
+void UIRenderer::NoteColoredQuad() {
+    // Продлеваем последнюю цветную команду или заводим новую (если перед этим
+    // был спрайт) — так порядок слоёв соблюдается, а текстовые квады (их
+    // добавляет Text напрямую) не выпадают из диапазонов отрисовки.
+    if (!m_commands.empty() && m_commands.back().Kind == Command::Type::ColoredQuads) {
+        ++m_commands.back().QuadCount;
+    } else {
+        Command c;
+        c.Kind = Command::Type::ColoredQuads;
+        c.FirstQuad = m_quadCount;
+        c.QuadCount = 1;
+        m_commands.push_back(c);
+    }
     ++m_quadCount;
+}
+
+void UIRenderer::Sprite(float x, float y, float w, float h, const Texture& texture,
+                        glm::vec4 tint, glm::vec4 uv) {
+    Command c;
+    c.Kind = Command::Type::Sprite;
+    c.Tex = &texture;
+    c.X = x; c.Y = y; c.W = w; c.H = h;
+    c.Tint = tint; c.UV = uv;
+    m_commands.push_back(c);
 }
 
 void UIRenderer::Rect(float x, float y, float w, float h, glm::vec3 color, float alpha) {
@@ -95,7 +137,7 @@ void UIRenderer::Text(float x, float y, float scale, glm::vec3 color, const std:
             });
             src += 16;
         }
-        ++m_quadCount;
+        NoteColoredQuad(); // тот же учёт, что и у Rect — иначе глифы вне команд
     }
 }
 
@@ -121,8 +163,42 @@ void UIRenderer::EnsureIndexCapacity(size_t quadCount) {
     m_indexCapacity = indices.size();
 }
 
+void UIRenderer::DrawColored(size_t firstQuad, size_t quadCount, const glm::mat4& proj) {
+    m_shader.Use();
+    m_shader.SetMat4("uProjection", proj);
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    // Индексы глобальны (квад q -> вершины q*4..), поэтому подмассив [firstQuad..]
+    // ссылается ровно на свои вершины в общем VBO кадра.
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(quadCount * 6), GL_UNSIGNED_INT,
+                   (void*)(firstQuad * 6 * sizeof(unsigned int)));
+}
+
+void UIRenderer::DrawSprite(const Command& cmd, const glm::mat4& proj) {
+    if (!cmd.Tex) return;
+    float x = cmd.X, y = cmd.Y, w = cmd.W, h = cmd.H;
+    float u0 = cmd.UV.x, v0 = cmd.UV.y, u1 = cmd.UV.z, v1 = cmd.UV.w;
+    // Текстуры движка грузятся с флипом по вертикали (см. Texture), поэтому в UI
+    // (0,0 сверху) верх спрайта берёт v1, низ — v0 — иначе иконка вверх ногами.
+    float verts[16] = {
+        x,     y,     u0, v1,
+        x + w, y,     u1, v1,
+        x + w, y + h, u1, v0,
+        x,     y + h, u0, v0,
+    };
+    m_spriteShader.Use();
+    m_spriteShader.SetMat4("uProjection", proj);
+    m_spriteShader.SetVec4("uTint", cmd.Tint);
+    m_spriteShader.SetInt("uTexture", 0);
+    cmd.Tex->Bind(0);
+    glBindVertexArray(m_spriteVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_spriteVbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
 void UIRenderer::End() {
-    if (m_quadCount == 0) return;
+    if (m_commands.empty()) return;
 
     glDisable(GL_DEPTH_TEST);
     // В ortho-проекции с перевёрнутой осью Y (0 сверху) обход вершин квадов
@@ -132,16 +208,23 @@ void UIRenderer::End() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glm::mat4 proj = glm::ortho(0.0f, (float)m_screenWidth, (float)m_screenHeight, 0.0f, -1.0f, 1.0f);
-    m_shader.Use();
-    m_shader.SetMat4("uProjection", proj);
 
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, m_vertices.size() * sizeof(UIVertex), m_vertices.data(), GL_DYNAMIC_DRAW);
+    // Один раз заливаем все цветные вершины кадра; индексы — под все квады
+    if (m_quadCount > 0) {
+        glBindVertexArray(m_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+        glBufferData(GL_ARRAY_BUFFER, m_vertices.size() * sizeof(UIVertex), m_vertices.data(), GL_DYNAMIC_DRAW);
+        EnsureIndexCapacity(m_quadCount);
+    }
 
-    EnsureIndexCapacity(m_quadCount);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_quadCount * 6), GL_UNSIGNED_INT, 0);
+    // Проходим команды по порядку — слои (панель/спрайт/текст) сохраняются
+    for (const Command& cmd : m_commands) {
+        if (cmd.Kind == Command::Type::ColoredQuads) {
+            DrawColored(cmd.FirstQuad, cmd.QuadCount, proj);
+        } else {
+            DrawSprite(cmd, proj);
+        }
+    }
 
     glBindVertexArray(0);
     glEnable(GL_CULL_FACE);

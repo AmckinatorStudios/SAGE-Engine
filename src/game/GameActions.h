@@ -52,6 +52,7 @@ inline constexpr const char* CraftNavigateUp = "CraftNavigateUp";
 inline constexpr const char* CraftNavigateDown = "CraftNavigateDown";
 inline constexpr const char* CraftConfirm = "CraftConfirm";
 inline constexpr const char* ToggleNoclip = "ToggleNoclip"; // V
+inline constexpr const char* ToggleUiPanel = "ToggleUiPanel"; // F4 — панель настроек (интерактивный UI)
 
 // Отладка/система
 inline constexpr const char* Screenshot = "Screenshot";     // F2
@@ -93,6 +94,7 @@ inline void RegisterDefaultBindings(InputSystem& input) {
     actions.Register(CraftNavigateDown).Bind(InputBinding::Key(GLFW_KEY_DOWN));
     actions.Register(CraftConfirm).Bind(InputBinding::Key(GLFW_KEY_ENTER));
     actions.Register(ToggleNoclip).Bind(InputBinding::Key(GLFW_KEY_V));
+    actions.Register(ToggleUiPanel).Bind(InputBinding::Key(GLFW_KEY_F4));
 
     actions.Register(Screenshot).Bind(InputBinding::Key(GLFW_KEY_F2));
     actions.Register(ToggleDebugHud).Bind(InputBinding::Key(GLFW_KEY_F3));
