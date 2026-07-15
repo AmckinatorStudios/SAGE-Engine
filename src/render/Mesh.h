@@ -15,6 +15,17 @@ public:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
     ~Mesh();
 
+    // Владеет GL-объектами (VAO/VBO/EBO) — копирование запрещено (иначе
+    // деструктор одной копии удалил бы хендлы, которыми "владеет" и другая:
+    // именно так раньше ломался рендер — CreateCube() возвращает Mesh по
+    // значению, и неявный копирующий конструктор копировал голые числа
+    // хендлов, а деструктор временного объекта тут же удалял их из-под
+    // "настоящего", ещё живого Mesh). Перемещение разрешено и безопасно.
+    Mesh(const Mesh&) = delete;
+    Mesh& operator=(const Mesh&) = delete;
+    Mesh(Mesh&& other) noexcept;
+    Mesh& operator=(Mesh&& other) noexcept;
+
     void Draw() const;
 
     static Mesh CreateCube();

@@ -11,6 +11,26 @@ Mesh::~Mesh() {
     if (m_ebo) glDeleteBuffers(1, &m_ebo);
 }
 
+Mesh::Mesh(Mesh&& other) noexcept
+    : m_vao(other.m_vao), m_vbo(other.m_vbo), m_ebo(other.m_ebo), m_indexCount(other.m_indexCount) {
+    other.m_vao = other.m_vbo = other.m_ebo = 0;
+    other.m_indexCount = 0;
+}
+
+Mesh& Mesh::operator=(Mesh&& other) noexcept {
+    if (this != &other) {
+        if (m_vao) glDeleteVertexArrays(1, &m_vao);
+        if (m_vbo) glDeleteBuffers(1, &m_vbo);
+        if (m_ebo) glDeleteBuffers(1, &m_ebo);
+
+        m_vao = other.m_vao; m_vbo = other.m_vbo; m_ebo = other.m_ebo;
+        m_indexCount = other.m_indexCount;
+        other.m_vao = other.m_vbo = other.m_ebo = 0;
+        other.m_indexCount = 0;
+    }
+    return *this;
+}
+
 void Mesh::SetupMesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) {
     m_indexCount = indices.size();
 

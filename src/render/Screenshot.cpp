@@ -8,6 +8,12 @@
 #include "stb_image_write.h"
 
 void SaveScreenshot(const std::string& path, int width, int height) {
+    // glReadPixels обязан неявно дождаться завершения всех предыдущих команд
+    // рисования по спецификации OpenGL, но явный glFinish() здесь — дешёвая
+    // (один раз на скриншот, не каждый кадр) защита от того, чтобы читать
+    // кадр раньше, чем его дорисовал асинхронный/программный рендерер.
+    glFinish();
+
     std::vector<unsigned char> pixels(static_cast<size_t>(width) * height * 3);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
