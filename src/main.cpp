@@ -45,6 +45,9 @@
 #include "render/LightingUpload.h"
 #include "render/Screenshot.h"
 #include "render/DebugOverlay.h"
+#include "render/Framebuffer.h"
+#include "render/ShadowMap.h"
+#include "render/PostProcess.h"
 #include "ui/UIRenderer.h"
 #include "ui/UICanvas.h"
 #include "ui/Widgets.h"
@@ -56,6 +59,10 @@
 namespace {
 
 constexpr float kNoclipFlySpeed = 10.0f; // м/с, свободный полёт в режиме noclip (см. UpdateNoclipFly)
+
+// Полусторона ортобокса карты теней вокруг центра корабля — накрывает весь
+// корабль плюс воду вокруг него с запасом (см. ShadowMap::SetLightMatrix).
+constexpr float kShadowRadius = 24.0f;
 
 // Читает позицию/угол камеры и время суток из переменных окружения —
 // используется автотестами/CI для детерминированных скриншотов без
@@ -184,6 +191,21 @@ int main() {
         Shader skyboxShader("assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
         Shader particleShader("assets/shaders/particle.vert", "assets/shaders/particle.frag");
         Shader billboardShader("assets/shaders/billboard.vert", "assets/shaders/billboard.frag");
+        Shader shadowDepthShader("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
+        Shader postShader("assets/shaders/post.vert", "assets/shaders/post.frag");
+
+        // Пост-процессинг: сцена рисуется в HDR-буфер, затем полноэкранный
+        // проход (тон-маппинг/экспозиция/виньетка) выводит её на экран.
+        // Карта теней: depth-проход из точки зрения солнца, приёмники
+        // (voxel/basic/water) сэмплируют её. Оба можно отключить env-флагом
+        // (SAGE_NO_POST / SAGE_NO_SHADOWS) — удобно для сравнения "до/после".
+        Framebuffer sceneFbo(window.Width(), window.Height());
+        PostProcess post;
+        PostProcessSettings postSettings;
+        ShadowMap shadows(2048);
+        bool postEnabled = (std::getenv("SAGE_NO_POST") == nullptr);
+        bool shadowsEnabled = (std::getenv("SAGE_NO_SHADOWS") == nullptr);
+        if (const char* exp = std::getenv("SAGE_EXPOSURE")) postSettings.Exposure = (float)std::atof(exp);
 
         Skybox skybox({
             "assets/textures/skybox/px.png", "assets/textures/skybox/nx.png",
@@ -246,6 +268,24 @@ int main() {
 
         LOG_INFO("Game") << "Мир создан. Корабль в (" << game.Ship.Center.x << ", "
                           << game.Ship.Center.y << ", " << game.Ship.Center.z << ")";
+
+        // Отрисовка отбрасывающей тень геометрии (корабль + заспавненные
+        // скриптами объекты) для depth-прохода теней. Один depth-шейдер годится
+        // и для воксельных чанков, и для обычных мешей — позиция у обоих в
+        // location 0 (см. shadow_depth.vert). Вода не кастит (плоская), только
+        // принимает тень.
+        auto drawShadowCasters = [&](Shader& depthShader) {
+            for (auto& [coord, chunk] : game.Terrain.Chunks()) {
+                glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(chunk->WorldPos()));
+                depthShader.SetMat4("uModel", model);
+                chunk->Mesh().Draw();
+            }
+            for (auto& object : game.SceneData.Objects()) {
+                if (!object->MeshComponent) continue;
+                depthShader.SetMat4("uModel", object->TransformComponent.GetMatrix());
+                object->MeshComponent->Draw();
+            }
+        };
 
         float lastFrame = (float)glfwGetTime();
         float fpsTimer = 0.0f; int fpsFrames = 0; float fps = 0.0f;
@@ -323,11 +363,34 @@ int main() {
 
             // ================= РЕНДЕР =================
             g_renderStats.Reset();
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             glm::mat4 view = camera.GetViewMatrix();
             glm::mat4 proj = camera.GetProjectionMatrix((float)window.Width() / (float)window.Height());
+
+            // Держим offscreen-буфер сцены в размер окна (no-op, если не менялось)
+            sceneFbo.Resize(window.Width(), window.Height());
+
+            // ---- ПРОХОД ТЕНЕЙ: глубина сцены из точки зрения солнца ----
+            // Ортобокс следует за кораблём (стабильный центр — меньше мерцания
+            // краёв тени, чем если центрировать на игроке).
+            if (shadowsEnabled) {
+                shadows.SetLightMatrix(game.SceneData.Lighting.Sun.Direction, game.Ship.Center, kShadowRadius);
+                shadows.BeginRender();
+                shadowDepthShader.Use();
+                shadowDepthShader.SetMat4("uLightSpace", shadows.LightMatrix());
+                drawShadowCasters(shadowDepthShader);
+                shadows.EndRender(window.Width(), window.Height());
+            }
+
+            // ---- ПРОХОД СЦЕНЫ: в HDR-буфер (или сразу в экран, если пост выключен) ----
+            if (postEnabled) sceneFbo.Bind();
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            // Карта теней на юнит 1 — общая для voxel/basic/water на весь проход
+            // (юнит 0 занят их собственными текстурами: атлас/спрайт).
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, shadows.DepthTexture());
 
             skybox.Draw(skyboxShader, view, proj, game.DayNight.SkyTint());
 
@@ -336,6 +399,7 @@ int main() {
             voxelShader.SetMat4("uView", view);
             voxelShader.SetMat4("uProjection", proj);
             UploadLighting(voxelShader, game.SceneData.Lighting);
+            UploadShadowUniforms(voxelShader, shadows.LightMatrix(), 1, shadowsEnabled);
             blockAtlas.Bind(0);
             voxelShader.SetInt("uAtlas", 0);
             voxelShader.SetInt("uUseTexture", 1);
@@ -351,6 +415,7 @@ int main() {
             basicShader.SetMat4("uProjection", proj);
             basicShader.SetVec3("uViewPos", camera.Position);
             UploadLighting(basicShader, game.SceneData.Lighting);
+            UploadShadowUniforms(basicShader, shadows.LightMatrix(), 1, shadowsEnabled);
             basicShader.SetInt("uUseTexture", 0);
 
             for (const TrashItem& item : game.Trash.Items()) {
@@ -396,6 +461,7 @@ int main() {
             waterShader.SetFloat("uScrollSpeed", 2.0f);
             waterShader.SetVec2("uCenter", glm::vec2(game.Player.Position.x, game.Player.Position.z));
             UploadLighting(waterShader, game.SceneData.Lighting);
+            UploadShadowUniforms(waterShader, shadows.LightMatrix(), 1, shadowsEnabled);
             game.Water.Draw();
 
             // --- частицы (дым/искры/всплески) поверх воды, до UI ---
@@ -404,6 +470,28 @@ int main() {
             // --- билборды (иконки/маркеры, всегда развёрнутые к камере) ---
             billboards.Draw(billboardShader, camera, view, proj);
 
+            // ---- ПОСТ-ПРОЦЕССИНГ: HDR-сцена -> экран ----
+            // Полноэкранный проход выводит offscreen-буфер сцены на экран с
+            // тон-маппингом/экспозицией/виньеткой. UI рисуется ПОСЛЕ него, в
+            // экранный буфер напрямую, чтобы текст/полоски не тон-мапились и
+            // не виньетировались вместе со сценой.
+            if (postEnabled) {
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glViewport(0, 0, window.Width(), window.Height());
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                postShader.Use();
+                postShader.SetFloat("uExposure", postSettings.Exposure);
+                postShader.SetFloat("uGamma", postSettings.Gamma);
+                postShader.SetFloat("uSaturation", postSettings.Saturation);
+                postShader.SetFloat("uContrast", postSettings.Contrast);
+                postShader.SetFloat("uVignette", postSettings.VignetteStrength);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, sceneFbo.ColorTexture());
+                postShader.SetInt("uScene", 0);
+                post.Draw();
+            }
+
             // --- UI: худ (виджеты) + immediate-mode (хотбар/подсказки/крафт) ---
             ui.Begin(window.Width(), window.Height());
             statsHud.Draw(ui);
@@ -411,7 +499,8 @@ int main() {
             ui.End();
 
             if (game.DebugHudVisible) {
-                GameHud::DrawDebugOverlay(debugOverlay, game, fps, window.Width(), window.Height());
+                GameHud::DrawDebugOverlay(debugOverlay, game, fps, window.Width(), window.Height(),
+                                          postEnabled, shadowsEnabled);
             }
 
             // ---- Скриншот на заданном кадре (для CI) ----

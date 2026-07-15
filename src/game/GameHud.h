@@ -128,7 +128,9 @@ inline void DrawWorldHud(UIRenderer& ui, const GameState& game, const PlayerActi
 }
 
 // F3 — техническая панель поверх всего (собственный шрифт DebugOverlay)
-inline void DrawDebugOverlay(DebugOverlay& overlay, const GameState& game, float fps, int screenW, int screenH) {
+inline void DrawDebugOverlay(DebugOverlay& overlay, const GameState& game, float fps,
+                             int screenW, int screenH,
+                             bool postEnabled = true, bool shadowsEnabled = true) {
     std::vector<DebugLine> lines;
     char buf[128];
 
@@ -148,6 +150,9 @@ inline void DrawDebugOverlay(DebugOverlay& overlay, const GameState& game, float
     lines.emplace_back(buf);
 
     std::snprintf(buf, sizeof(buf), "onGround: %d  inWater: %d  noclip: %d", game.Player.OnGround, game.Player.InWater, game.Noclip);
+    lines.emplace_back(buf);
+
+    std::snprintf(buf, sizeof(buf), "post: %s  shadows: %s", postEnabled ? "on" : "off", shadowsEnabled ? "on" : "off");
     lines.emplace_back(buf);
 
     overlay.Draw(lines, screenW, screenH);

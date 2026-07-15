@@ -1,6 +1,7 @@
 #pragma once
 #include "../scene/Light.h"
 #include "Shader.h"
+#include <glm/glm.hpp>
 #include <algorithm>
 #include <string>
 
@@ -30,4 +31,15 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         shader.SetFloat(prefix + "linear", light.Linear());
         shader.SetFloat(prefix + "quadratic", light.Quadratic());
     }
+}
+
+// Заливает uniform'ы карты теней в шейдер-приёмник (voxel/basic/water):
+// матрицу пространства света, номер текстурного юнита карты теней и флаг
+// включённости. Тень применяется только к вкладу солнца (см. .frag).
+// Вызывается после UploadLighting для тех же шейдеров.
+inline void UploadShadowUniforms(Shader& shader, const glm::mat4& lightMatrix,
+                                 int shadowMapUnit, bool enabled) {
+    shader.SetMat4("uLightSpace", lightMatrix);
+    shader.SetInt("uShadowMap", shadowMapUnit);
+    shader.SetInt("uShadowsEnabled", enabled ? 1 : 0);
 }

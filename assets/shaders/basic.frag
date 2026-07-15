@@ -2,6 +2,7 @@
 in vec3 FragPos;
 in vec3 Normal;
 in vec2 TexCoords;
+in vec4 FragPosLightSpace;
 
 out vec4 FragColor;
 
@@ -33,6 +34,29 @@ uniform vec3 uViewPos;
 
 uniform sampler2D uTexture;
 uniform bool uUseTexture; // false — используем uObjectColor как раньше (обратная совместимость)
+
+uniform sampler2D uShadowMap;
+uniform bool uShadowsEnabled;
+
+// Доля затенения фрагмента солнцем: 0 — освещён, 1 — в тени (PCF 3x3 +
+// slope-scaled bias). См. подробный комментарий в voxel.frag.
+float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
+    vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    proj = proj * 0.5 + 0.5;
+    if (proj.z > 1.0) return 0.0;
+    float currentDepth = proj.z;
+    float bias = max(0.0025 * (1.0 - dot(normal, sunDir)), 0.0008);
+
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(uShadowMap, proj.xy + vec2(x, y) * texelSize).r;
+            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
+        }
+    }
+    return shadow / 9.0;
+}
 
 // Полусферический ambient: верх объекта тянется к цвету неба, низ — к
 // отражённому свету снизу (вода/палуба), переход плавный по normal.y.
@@ -73,6 +97,10 @@ void main() {
     vec3 sunReflect = reflect(-sunDir, norm);
     float sunSpec = pow(max(dot(viewDir, sunReflect), 0.0), 32.0);
     vec3 sunLight = (sunDiff + 0.5 * sunSpec) * uSunColor * uSunIntensity;
+
+    // Тень гасит только вклад солнца (ambient/фонари не затеняются)
+    float shadow = uShadowsEnabled ? CalcSunShadow(FragPosLightSpace, norm, sunDir) : 0.0;
+    sunLight *= (1.0 - shadow);
 
     // точечные источники (фонари и т.п.)
     vec3 pointLight = vec3(0.0);

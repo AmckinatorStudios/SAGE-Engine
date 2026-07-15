@@ -1,5 +1,6 @@
 #version 330 core
 in vec3 FragPos;
+in vec4 FragPosLightSpace;
 out vec4 FragColor;
 
 #define MAX_POINT_LIGHTS 8
@@ -30,6 +31,29 @@ uniform float uTime;
 // Скорость "хода корабля": корабль в мире статичен, но узор волн скользит
 // мимо него по +Z, создавая ощущение движения вперёд.
 uniform float uScrollSpeed;
+
+uniform sampler2D uShadowMap;
+uniform bool uShadowsEnabled;
+
+// Доля затенения солнцем (PCF 3x3 + bias) — чтобы тень корабля ложилась и
+// на воду, где она заметнее всего. См. подробности в voxel.frag.
+float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
+    vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    proj = proj * 0.5 + 0.5;
+    if (proj.z > 1.0) return 0.0;
+    float currentDepth = proj.z;
+    float bias = max(0.0025 * (1.0 - dot(normal, sunDir)), 0.0008);
+
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(uShadowMap, proj.xy + vec2(x, y) * texelSize).r;
+            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
+        }
+    }
+    return shadow / 9.0;
+}
 
 // Нормаль воды из производных двух бегущих синусоид — дёшево, но достаточно,
 // чтобы блики солнца и фонарей "играли" на волнах.
@@ -62,6 +86,10 @@ void main() {
     vec3 sunReflect = reflect(-sunDir, normal);
     float sunSpec = pow(max(dot(viewDir, sunReflect), 0.0), 96.0);
     vec3 sunLight = sunDiff * 0.6 * uSunColor * uSunIntensity + sunSpec * uSunColor * uSunIntensity;
+
+    // Тень корабля на воде: гасим вклад солнца (и диффуз, и блик)
+    float shadow = uShadowsEnabled ? CalcSunShadow(FragPosLightSpace, normal, sunDir) : 0.0;
+    sunLight *= (1.0 - shadow);
 
     // Фонари дают бликующие "дорожки" на воде рядом с кораблём
     vec3 pointGlints = vec3(0.0);

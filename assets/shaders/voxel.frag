@@ -3,6 +3,7 @@ in vec3 FragPos;
 in vec3 Normal;
 in vec3 VertexColor;
 in vec2 TexCoords;
+in vec4 FragPosLightSpace;
 
 out vec4 FragColor;
 
@@ -30,6 +31,31 @@ uniform int uNumPointLights;
 
 uniform sampler2D uAtlas;
 uniform bool uUseTexture; // false — старое поведение: только цвет вершины (обратная совместимость)
+
+uniform sampler2D uShadowMap;
+uniform bool uShadowsEnabled;
+
+// Доля затенения фрагмента солнцем: 0 — полностью освещён, 1 — в тени.
+// PCF 3x3 для мягкого края + slope-scaled bias против shadow acne.
+float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
+    vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w; // перспективное деление
+    proj = proj * 0.5 + 0.5;                                 // из [-1,1] в [0,1]
+    if (proj.z > 1.0) return 0.0;                            // за дальней плоскостью — освещён
+    float currentDepth = proj.z;
+    // Смещение зависит от угла падения света: чем более косой свет, тем
+    // больше bias (иначе на пологих к солнцу поверхностях — самозатенение).
+    float bias = max(0.0025 * (1.0 - dot(normal, sunDir)), 0.0008);
+
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(uShadowMap, proj.xy + vec2(x, y) * texelSize).r;
+            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
+        }
+    }
+    return shadow / 9.0;
+}
 
 vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos) {
     vec3 toLight = light.position - fragPos;
@@ -61,6 +87,11 @@ void main() {
     vec3 sunDir = normalize(-uSunDir);
     float sunDiff = max(dot(norm, sunDir), 0.0);
     vec3 sunLight = sunDiff * uSunColor * uSunIntensity;
+
+    // Тень гасит только вклад солнца (ambient и фонари не затеняются картой
+    // теней — она построена только для направленного света).
+    float shadow = uShadowsEnabled ? CalcSunShadow(FragPosLightSpace, norm, sunDir) : 0.0;
+    sunLight *= (1.0 - shadow);
 
     vec3 pointLight = vec3(0.0);
     for (int i = 0; i < uNumPointLights; ++i) {
