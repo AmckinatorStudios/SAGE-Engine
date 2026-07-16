@@ -116,11 +116,11 @@ struct GameState {
         Audio.PlayMusic(GameSounds::Music, 0.5f, /*loop=*/true);
         OceanLoop = Audio.PlayLoop(GameSounds::Ocean, 0.7f, AudioEngine::Category::Ambient);
 
-        // Скрипты работают с объектами SceneData — то, что они заспавнят
-        // через SpawnObject(), рисуется тем же проходом, что и любой другой
-        // GameObject (см. main.cpp, рендер SceneData.Objects()). Остальные
-        // Bind* (Input/Camera/Particles/Billboards) и опциональный запуск
-        // demo_features.lua делает main.cpp ПОСЛЕ конструирования GameState —
+        // Скрипты работают с сущностями SceneData — то, что они заспавнят
+        // через SpawnObject(), рисуется тем же проходом, что и любая другая
+        // сущность с MeshRenderer (см. TheBoatLayer, ECS-обход рендерящихся).
+        // Остальные Bind* (Input/Camera/Particles/Billboards) и опциональный
+        // запуск demo_features.lua делает TheBoatLayer ПОСЛЕ конструирования GameState —
         // см. комментарий там. Раньше RunScript() вызывался прямо здесь, но
         // тогда демо-скрипт стартовал до того, как эти системы успевали
         // привязаться, и падал на первом же обращении к камере/частицам.

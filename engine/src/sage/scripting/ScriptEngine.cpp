@@ -74,12 +74,22 @@ void ScriptEngine::RegisterEngineApi() {
     );
 
     // GameObject — то, что скрипт получает как "entity" в OnUpdate/OnStart,
-    // или что возвращают SpawnObject/FindObject
+    // или что возвращают SpawnObject/FindObject. Теперь это дескриптор поверх
+    // ECS (см. Scene.h), поэтому поля выставлены через property-аксессоры к
+    // компонентам сущности. Transform/Color отдаются ССЫЛКОЙ — чтобы прежний
+    // код вида `entity.Transform.Rotation.y = ...` и `cube.Color.x = ...`
+    // писал прямо в компонент; для Color есть и сеттер целого значения
+    // (`cube.Color = Vec3.new(...)`), чтобы поведение совпало со старым
+    // data-member-биндингом один в один.
     m_lua.new_usertype<GameObject>("GameObject",
-        "Id", sol::readonly(&GameObject::Id),
-        "Name", &GameObject::Name,
-        "Transform", &GameObject::TransformComponent,
-        "Color", &GameObject::Color
+        "Id", sol::property([](GameObject& o) { return o.Id(); }),
+        "Name", sol::property(
+            [](GameObject& o) { return o.Name(); },
+            [](GameObject& o, const std::string& n) { o.SetName(n); }),
+        "Transform", sol::property([](GameObject& o) -> ::Transform& { return o.GetTransform(); }),
+        "Color", sol::property(
+            [](GameObject& o) -> glm::vec3& { return o.ColorRef(); },
+            [](GameObject& o, const glm::vec3& c) { o.ColorRef() = c; })
     );
 
     // Простая функция логирования, чтобы скрипты могли печатать отладочную информацию
@@ -88,47 +98,45 @@ void ScriptEngine::RegisterEngineApi() {
     });
 
     // --- Сцена: спавн/поиск/удаление объектов из Lua (доступно после BindScene) ---
-    m_lua.set_function("SpawnObject", [this](const std::string& name) -> GameObject& {
+    m_lua.set_function("SpawnObject", [this](const std::string& name) -> GameObject {
         if (!m_scene) throw std::runtime_error("SpawnObject: сцена не привязана (ScriptEngine::BindScene не вызван)");
-        GameObject& obj = m_scene->CreateObject(name);
-        LOG_INFO("Lua") << "Создан объект: " << name << " (id " << obj.Id << ")";
+        GameObject obj = m_scene->CreateObject(name);
+        LOG_INFO("Lua") << "Создан объект: " << name << " (id " << obj.Id() << ")";
         return obj;
     });
 
-    m_lua.set_function("FindObject", [this](const std::string& name) -> GameObject* {
-        return m_scene ? m_scene->FindByName(name) : nullptr;
+    m_lua.set_function("FindObject", [this](const std::string& name) -> sol::optional<GameObject> {
+        if (!m_scene) return sol::nullopt;
+        GameObject obj = m_scene->FindByName(name);
+        if (!obj.Valid()) return sol::nullopt;
+        return obj;
     });
 
     m_lua.set_function("DestroyObject", [this](int id) {
         if (!m_scene) throw std::runtime_error("DestroyObject: сцена не привязана (ScriptEngine::BindScene не вызван)");
-        // Помечаем зависимые ScriptInstance мёртвыми ДО RemoveObject — ниже
-        // она реально освобождает GameObject (Scene хранит его в unique_ptr),
-        // поэтому сравнение instance.Object->Id должно случиться, пока объект
-        // ещё жив, иначе само это сравнение уже было бы use-after-free.
-        // UpdateAll() пропустит помеченные записи и уберёт их после текущего
-        // прохода, не разыменовывая освобождённую память. ВАЖНО: если скрипт
-        // вызывает DestroyObject(entity.Id) сам про себя, это должно быть
-        // последним действием в OnUpdate — entity после этого момента (даже в
-        // том же вызове) ссылается на уже уничтоженный объект.
-        for (auto& instance : m_instances) {
-            if (instance.Object && instance.Object->Id == id) instance.Dead = true;
-        }
+        // RemoveObject уничтожает сущность в ECS-registry. Зависимые
+        // ScriptInstance держат дескриптор {registry, entity}, а не сырой
+        // указатель, поэтому после уничтожения их Object.Valid() станет false —
+        // UpdateAll() безопасно пропустит и уберёт их после текущего прохода
+        // (никакого use-after-free, даже если скрипт уничтожает сам себя).
         m_scene->RemoveObject(id);
     });
 
     // Удобный хелпер: даёт заспавненному объекту видимый куб-меш, чтобы его
     // сразу было видно на сцене без ручной возни с MeshRef/ResourceManager
     m_lua.set_function("SetMeshCube", [](GameObject& obj) {
-        obj.MeshRefComponent = MeshRef{MeshRef::Type::Cube, ""};
-        obj.MeshComponent = ResourceManager::Instance().GetCube();
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetCube();
     });
 
     // То же самое, но грузит .obj модель (кэшируется ResourceManager'ом —
     // одна и та же модель, запрошенная из нескольких скриптов, не
     // перечитывается с диска). Бросает ошибку, если файл не найден/битый.
     m_lua.set_function("SetMeshModel", [](GameObject& obj, const std::string& path) {
-        obj.MeshRefComponent = MeshRef{MeshRef::Type::Model, path};
-        obj.MeshComponent = ResourceManager::Instance().GetModel(path);
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Model, path};
+        mr.MeshPtr = ResourceManager::Instance().GetModel(path);
     });
 
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
@@ -336,7 +344,7 @@ void ScriptEngine::RegisterEngineApi() {
     }
 }
 
-void ScriptEngine::AttachScript(GameObject& object, const std::string& scriptPath) {
+void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
     sol::environment env(m_lua, sol::create, m_lua.globals());
 
     auto result = m_lua.script_file(scriptPath, env, sol::script_pass_on_error);
@@ -359,7 +367,7 @@ void ScriptEngine::AttachScript(GameObject& object, const std::string& scriptPat
         }
     }
 
-    m_instances.push_back({ &object, std::move(env), std::move(updateFn), scriptPath });
+    m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn), scriptPath });
 }
 
 void ScriptEngine::RunScript(const std::string& scriptPath) {
@@ -382,20 +390,21 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
         }
     }
 
-    m_instances.push_back({ nullptr, std::move(env), std::move(updateFn), scriptPath });
+    m_instances.push_back({ GameObject{}, /*HasObject=*/false, std::move(env), std::move(updateFn), scriptPath });
 }
 
 void ScriptEngine::UpdateAll(float deltaTime) {
     for (auto& instance : m_instances) {
-        if (instance.Dead) continue; // Object уничтожен через DestroyObject() — см. ScriptInstance::Dead
+        // Объект уничтожен через DestroyObject() — сущность больше не валидна.
+        if (instance.HasObject && !instance.Object.Valid()) continue;
         if (!instance.UpdateFn.valid()) continue; // скрипт без OnUpdate — легитимно (см. AttachScript)
 
         // Объектные скрипты получают entity первым аргументом, уровневые — нет
-        auto result = instance.Object ? instance.UpdateFn(*instance.Object, deltaTime)
-                                       : instance.UpdateFn(deltaTime);
+        auto result = instance.HasObject ? instance.UpdateFn(instance.Object, deltaTime)
+                                         : instance.UpdateFn(deltaTime);
         if (!result.valid()) {
             sol::error err = result;
-            std::string who = instance.Object ? instance.Object->Name : instance.Path;
+            std::string who = (instance.HasObject && instance.Object.Valid()) ? instance.Object.Name() : instance.Path;
             LOG_ERROR("ScriptEngine") << "Ошибка в OnUpdate (" << who << "): " << err.what();
         }
     }
@@ -405,7 +414,8 @@ void ScriptEngine::UpdateAll(float deltaTime) {
     // во время его же итерации (в т.ч. если DestroyObject был вызван изнутри
     // самого OnUpdate этого же экземпляра).
     m_instances.erase(
-        std::remove_if(m_instances.begin(), m_instances.end(), [](const ScriptInstance& i) { return i.Dead; }),
+        std::remove_if(m_instances.begin(), m_instances.end(),
+            [](const ScriptInstance& i) { return i.HasObject && !i.Object.Valid(); }),
         m_instances.end());
 
     UpdateTimers(deltaTime);

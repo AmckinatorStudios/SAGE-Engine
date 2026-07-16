@@ -3,6 +3,8 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <stdexcept>
+#include <algorithm>
+#include <vector>
 
 using json = nlohmann::json;
 
@@ -98,17 +100,26 @@ void Save(const Scene& scene, const std::string& path) {
     root["name"] = scene.Name();
 
     json objectsJson = json::array();
-    for (auto& objPtr : const_cast<Scene&>(scene).Objects()) {
-        const GameObject& obj = *objPtr;
+    // Обходим сущности через ECS-view. Собираем в вектор и сортируем по id,
+    // чтобы вывод был детерминированным (порядок обхода entt не гарантирован).
+    entt::registry& reg = const_cast<Scene&>(scene).Registry();
+    std::vector<entt::entity> entities;
+    for (auto e : reg.view<IdComponent>()) entities.push_back(e);
+    std::sort(entities.begin(), entities.end(), [&reg](entt::entity a, entt::entity b) {
+        return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
+    });
+    for (entt::entity e : entities) {
+        const Transform& tr = reg.get<Transform>(e);
+        const MeshRendererComponent& mr = reg.get<MeshRendererComponent>(e);
         json j;
-        j["id"] = obj.Id;
-        j["name"] = obj.Name;
-        j["position"] = Vec3ToJson(obj.TransformComponent.Position);
-        j["rotation"] = Vec3ToJson(obj.TransformComponent.Rotation);
-        j["scale"]    = Vec3ToJson(obj.TransformComponent.Scale);
-        j["color"]    = Vec3ToJson(obj.Color);
-        j["mesh"]["type"] = MeshTypeToString(obj.MeshRefComponent.type);
-        j["mesh"]["path"] = obj.MeshRefComponent.path;
+        j["id"] = reg.get<IdComponent>(e).Id;
+        j["name"] = reg.get<NameComponent>(e).Name;
+        j["position"] = Vec3ToJson(tr.Position);
+        j["rotation"] = Vec3ToJson(tr.Rotation);
+        j["scale"]    = Vec3ToJson(tr.Scale);
+        j["color"]    = Vec3ToJson(mr.Color);
+        j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
+        j["mesh"]["path"] = mr.Ref.path;
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -137,31 +148,34 @@ std::unique_ptr<Scene> Load(const std::string& path) {
     auto scene = std::make_unique<Scene>(root.value("name", "Untitled"));
 
     int maxId = 0;
+    int fallbackId = 1;
     for (const auto& j : root.value("objects", json::array())) {
-        auto& obj = scene->CreateObject(j.value("name", "Object"));
-        obj.Id = j.value("id", obj.Id);
-        maxId = std::max(maxId, obj.Id);
+        int id = j.value("id", fallbackId++);
+        GameObject obj = scene->CreateObjectWithId(j.value("name", "Object"), id);
+        maxId = std::max(maxId, id);
 
-        if (j.contains("position")) obj.TransformComponent.Position = Vec3FromJson(j["position"]);
-        if (j.contains("rotation")) obj.TransformComponent.Rotation = Vec3FromJson(j["rotation"]);
-        if (j.contains("scale"))    obj.TransformComponent.Scale    = Vec3FromJson(j["scale"]);
-        if (j.contains("color"))    obj.Color              = Vec3FromJson(j["color"]);
+        Transform& tr = obj.GetTransform();
+        MeshRendererComponent& mr = obj.Renderer();
+        if (j.contains("position")) tr.Position = Vec3FromJson(j["position"]);
+        if (j.contains("rotation")) tr.Rotation = Vec3FromJson(j["rotation"]);
+        if (j.contains("scale"))    tr.Scale    = Vec3FromJson(j["scale"]);
+        if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
 
         if (j.contains("mesh")) {
-            obj.MeshRefComponent.type = MeshTypeFromString(j["mesh"].value("type", "none"));
-            obj.MeshRefComponent.path = j["mesh"].value("path", "");
+            mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));
+            mr.Ref.path = j["mesh"].value("path", "");
         }
 
         // Пересоздаём GPU-ресурс на основе описания
-        switch (obj.MeshRefComponent.type) {
+        switch (mr.Ref.type) {
             case MeshRef::Type::Cube:
-                obj.MeshComponent = ResourceManager::Instance().GetCube();
+                mr.MeshPtr = ResourceManager::Instance().GetCube();
                 break;
             case MeshRef::Type::Model:
-                obj.MeshComponent = ResourceManager::Instance().GetModel(obj.MeshRefComponent.path);
+                mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
                 break;
             default:
-                obj.MeshComponent = nullptr;
+                mr.MeshPtr = nullptr;
                 break;
         }
     }

@@ -78,8 +78,9 @@ public:
     // Загружает .lua файл и привязывает его к объекту. Скрипт должен
     // определить глобальную функцию OnUpdate(entity, dt) — она будет
     // вызываться каждый кадр из UpdateAll(). Необязательная OnStart(entity)
-    // вызывается один раз сразу при загрузке.
-    void AttachScript(GameObject& object, const std::string& scriptPath);
+    // вызывается один раз сразу при загрузке. object — дешёвый дескриптор
+    // сущности (см. Scene.h), передаётся по значению.
+    void AttachScript(GameObject object, const std::string& scriptPath);
 
     // Выполняет .lua файл как самостоятельный скрипт уровня игры, не
     // привязанный ни к одному объекту — например, "правила уровня",
@@ -99,16 +100,17 @@ public:
 
 private:
     struct ScriptInstance {
-        GameObject* Object; // nullptr для уровневых скриптов (RunScript)
+        GameObject Object;   // дескриптор сущности; невалиден для уровневых скриптов
+        bool HasObject = false; // false для уровневых скриптов (RunScript)
         sol::environment Env;
         sol::protected_function UpdateFn; // может быть невалидной, если OnUpdate не определён
         std::string Path; // для сообщений об ошибках
-        // true, если Object был уничтожен через DestroyObject() — Object в этом
-        // случае становится висячим указателем, поэтому UpdateAll() пропускает
-        // такие записи, не разыменовывая его, а затем убирает их из m_instances
-        // (см. UpdateAll). Без этого флага следующий кадр обращался бы к уже
-        // освобождённой памяти GameObject — реальный use-after-free.
-        bool Dead = false;
+        // Когда сущность объекта уничтожена (DestroyObject), Object.Valid()
+        // становится false: UpdateAll() пропускает такую запись, не обращаясь к
+        // мёртвой сущности, и убирает её из m_instances после прохода. Так как
+        // Object теперь дескриптор {registry, entity}, а не сырой указатель,
+        // само обращение к нему безопасно (проверяется валидность) — но пропуск
+        // нужен, чтобы не сыпать ошибками про невалидную сущность каждый кадр.
     };
 
     struct ScheduledCall {

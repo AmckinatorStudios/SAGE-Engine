@@ -1,0 +1,51 @@
+#pragma once
+#include <string>
+#include <memory>
+#include <glm/glm.hpp>
+#include "sage/scene/Transform.h"
+#include "sage/render/Mesh.h"
+
+// ---------------------------------------------------------------------------
+// Компоненты ECS — простые data-структуры, навешиваемые на сущности (entity)
+// в sage::Scene (поверх entt). Системы (см. sage/ecs/*) итерируют сущности по
+// набору компонентов. Движок не зашивает «толстый» объект с фиксированными
+// полями — состав сущности собирается из компонентов, что и делает архитектуру
+// расширяемой: своя игра добавляет свои компоненты, не трогая ядро.
+// ---------------------------------------------------------------------------
+
+// Человекочитаемое имя сущности (для поиска, иерархии, инспектора редактора).
+struct NameComponent {
+    std::string Name;
+};
+
+// Стабильный целочисленный id сущности в пределах сцены. entt::entity несёт в
+// себе биты версии и не годится как «простой id» для Lua/сериализации, поэтому
+// движок раздаёт свои последовательные id (1,2,3...) и держит карту id->entity
+// в Scene. Так сохраняется прежний контракт GameObject.Id / DestroyObject(id).
+struct IdComponent {
+    int Id = 0;
+};
+
+// Описание того, ИЗ ЧЕГО сделан меш — то, что реально сохраняется в файл сцены.
+// Сам GPU-меш (Mesh) не сериализуется, он пересоздаётся при загрузке через
+// ResourceManager на основе этого описания.
+struct MeshRef {
+    enum class Type { None, Cube, Model };
+    Type type = Type::None;
+    std::string path; // используется только при Type::Model
+
+    bool operator==(const MeshRef& other) const {
+        return type == other.type && path == other.path;
+    }
+};
+
+// Визуальное представление сущности: чем она нарисована (Ref + runtime-меш на
+// GPU) и каким цветом тонируется. Сущность без MeshPtr не рисуется (см.
+// RenderSystem) — так же, как раньше пропускался GameObject без MeshComponent.
+struct MeshRendererComponent {
+    MeshRef Ref;
+    glm::vec3 Color{1.0f, 1.0f, 1.0f};
+    // Runtime-указатель на GPU-меш. Не сериализуется — заполняется
+    // ResourceManager'ом на основе Ref при загрузке сцены или назначении меша.
+    std::shared_ptr<Mesh> MeshPtr;
+};

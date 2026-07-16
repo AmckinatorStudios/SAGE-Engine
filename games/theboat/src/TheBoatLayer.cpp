@@ -16,6 +16,7 @@
 #include "sage/render/ResourceManager.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/Screenshot.h"
+#include "sage/ecs/RenderSystem.h"
 #include "sage/ui/Widgets.h"
 #include "game/GameActions.h"
 #include "game/PlayerActions.h"
@@ -193,11 +194,10 @@ void TheBoatLayer::DrawShadowCasters(Shader& depthShader) {
         depthShader.SetMat4("uModel", model);
         chunk->Mesh().Draw();
     }
-    for (auto& object : m_game.SceneData.Objects()) {
-        if (!object->MeshComponent) continue;
-        depthShader.SetMat4("uModel", object->TransformComponent.GetMatrix());
-        object->MeshComponent->Draw();
-    }
+    sage::ecs::ForEachRenderable(m_game.SceneData, [&](Transform& tr, MeshRendererComponent& mr) {
+        depthShader.SetMat4("uModel", tr.GetMatrix());
+        mr.MeshPtr->Draw();
+    });
 }
 
 void TheBoatLayer::OnUpdate(float deltaTime) {
@@ -336,13 +336,12 @@ void TheBoatLayer::OnRender() {
         m_cubeMesh->Draw();
     }
 
-    // --- объекты сцены, заспавненные Lua-скриптами ---
-    for (auto& object : m_game.SceneData.Objects()) {
-        if (!object->MeshComponent) continue;
-        m_basicShader->SetMat4("uModel", object->TransformComponent.GetMatrix());
-        m_basicShader->SetVec3("uObjectColor", object->Color);
-        object->MeshComponent->Draw();
-    }
+    // --- объекты сцены, заспавненные Lua-скриптами (ECS-обход рендерящихся) ---
+    sage::ecs::ForEachRenderable(m_game.SceneData, [&](Transform& tr, MeshRendererComponent& mr) {
+        m_basicShader->SetMat4("uModel", tr.GetMatrix());
+        m_basicShader->SetVec3("uObjectColor", mr.Color);
+        mr.MeshPtr->Draw();
+    });
 
     if (m_game.Fishing.IsActive()) {
         glm::mat4 model = glm::translate(glm::mat4(1.0f), m_game.Fishing.VisualBobberPosition());
