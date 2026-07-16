@@ -101,47 +101,13 @@ inline void RegisterDefaultBindings(InputSystem& input) {
     actions.Register(QuitGame).Bind(InputBinding::Key(GLFW_KEY_ESCAPE));
 }
 
-// Читает переопределения раскладки из простого текстового файла настроек и
-// накатывает их поверх RegisterDefaultBindings() через InputAction::Rebind().
-// Формат — построчно "ActionName=KeyName" (см. имена в KeyNames.h: буквы,
-// цифры, SPACE/TAB/ENTER/ESCAPE/F1-F12/стрелки/MOUSE_LEFT/MOUSE_RIGHT/
-// MOUSE_MIDDLE), "#" начинает комментарий, пустые строки пропускаются.
-// Пример строки: "Jump=E". Файл опционален — если его нет, молча остаёмся
-// на дефолтной раскладке; нераспознанные строки логируются и пропускаются.
+// Читает переопределения раскладки из простого текстового файла настроек —
+// теперь тонкая обёртка над KeyNames::LoadBindingsFromFile (генерик-утилита
+// ядра, перенесена туда в рамках A5 движковых Lua-биндингов ввода — сама
+// логика не содержала ничего игро-специфичного). Оставлена здесь под старым
+// именем ради существующего вызова в main.cpp.
 inline void LoadBindingsFromFile(InputMap& actions, const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) return;
-
-    auto trim = [](std::string s) {
-        size_t start = s.find_first_not_of(" \t\r");
-        if (start == std::string::npos) return std::string();
-        size_t end = s.find_last_not_of(" \t\r");
-        return s.substr(start, end - start + 1);
-    };
-
-    std::string line;
-    while (std::getline(file, line)) {
-        size_t hash = line.find('#');
-        if (hash != std::string::npos) line.erase(hash);
-
-        size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-
-        std::string name = trim(line.substr(0, eq));
-        std::string keyName = trim(line.substr(eq + 1));
-        if (name.empty() || keyName.empty()) continue;
-
-        if (!actions.Has(name)) {
-            LOG_WARN("Input") << "keybindings: неизвестное действие '" << name << "' в " << path;
-            continue;
-        }
-        auto binding = KeyNames::Parse(keyName);
-        if (!binding) {
-            LOG_WARN("Input") << "keybindings: неизвестная клавиша '" << keyName << "' для '" << name << "' в " << path;
-            continue;
-        }
-        actions.Get(name).Rebind(*binding);
-    }
+    KeyNames::LoadBindingsFromFile(actions, path);
 }
 
 // Хотбар-слоты по порядку — удобно для цикла `for (i, name) : HotbarSlotNames()`

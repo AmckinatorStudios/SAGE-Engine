@@ -98,6 +98,16 @@ function OnStart(entity)
     SetPointLight(lampId, origin + Vec3.new(0, 1, 0), Vec3.new(1.0, 0.7, 0.4), 1.5, 12.0)
     log("Точечный свет обновлён")
 
+    -- Регистрация ввода из Lua — движок не знает заранее ни одного имени
+    -- действия, игра объявляет свою раскладку сама (см. RegisterAction/
+    -- BindAction). "DemoDance" — заведомо новое имя, не существовавшее в
+    -- C++-раскладке The Boat, что и доказывает: работает без правки движка.
+    RegisterAction("DemoDance")
+    BindAction("DemoDance", "G")
+    BindAction("DemoDance", "MOUSE_MIDDLE")
+    log("Action 'DemoDance' зарегистрирован и привязан к G / MOUSE_MIDDLE, IsActionDown = "
+        .. tostring(IsActionDown("DemoDance")))
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()

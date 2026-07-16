@@ -1,6 +1,9 @@
 #pragma once
 #include "InputBinding.h"
+#include "InputMap.h"
+#include "Log.h"
 #include <GLFW/glfw3.h>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -38,16 +41,64 @@ inline const std::unordered_map<std::string, int>& KeyTable() {
 }
 
 // Разбирает имя привязки из файла настроек в InputBinding. Понимает буквы,
-// цифры, именованные клавиши из KeyTable() и MOUSE_LEFT/MOUSE_RIGHT/
-// MOUSE_MIDDLE. Возвращает std::nullopt, если имя не распознано.
+// цифры, именованные клавиши из KeyTable(), MOUSE_LEFT/MOUSE_RIGHT/
+// MOUSE_MIDDLE и WHEEL_UP/WHEEL_DOWN. Возвращает std::nullopt, если имя не
+// распознано.
 inline std::optional<InputBinding> Parse(const std::string& name) {
     if (name == "MOUSE_LEFT") return InputBinding::Mouse(GLFW_MOUSE_BUTTON_LEFT);
     if (name == "MOUSE_RIGHT") return InputBinding::Mouse(GLFW_MOUSE_BUTTON_RIGHT);
     if (name == "MOUSE_MIDDLE") return InputBinding::Mouse(GLFW_MOUSE_BUTTON_MIDDLE);
+    if (name == "WHEEL_UP") return InputBinding::WheelUp();
+    if (name == "WHEEL_DOWN") return InputBinding::WheelDown();
 
     auto it = KeyTable().find(name);
     if (it != KeyTable().end()) return InputBinding::Key(it->second);
     return std::nullopt;
+}
+
+// Читает переопределения раскладки из простого текстового файла настроек и
+// накатывает их поверх уже зарегистрированных действий через
+// InputAction::Rebind(). Формат — построчно "ActionName=KeyName" (имена
+// клавиш см. выше в Parse()), "#" начинает комментарий, пустые строки
+// пропускаются. Пример строки: "Jump=E". Файл опционален — если его нет,
+// молча ничего не делаем; нераспознанные строки логируются и пропускаются.
+// Генерик-утилита ядра (перенесена из game/GameActions.h — в ней не было
+// ничего игро-специфичного, только список ИМЁН действий/клавиш по умолчанию
+// оставался снаружи, в вызывающем коде).
+inline void LoadBindingsFromFile(InputMap& actions, const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) return;
+
+    auto trim = [](std::string s) {
+        size_t start = s.find_first_not_of(" \t\r");
+        if (start == std::string::npos) return std::string();
+        size_t end = s.find_last_not_of(" \t\r");
+        return s.substr(start, end - start + 1);
+    };
+
+    std::string line;
+    while (std::getline(file, line)) {
+        size_t hash = line.find('#');
+        if (hash != std::string::npos) line.erase(hash);
+
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+
+        std::string name = trim(line.substr(0, eq));
+        std::string keyName = trim(line.substr(eq + 1));
+        if (name.empty() || keyName.empty()) continue;
+
+        if (!actions.Has(name)) {
+            LOG_WARN("Input") << "keybindings: неизвестное действие '" << name << "' в " << path;
+            continue;
+        }
+        auto binding = Parse(keyName);
+        if (!binding) {
+            LOG_WARN("Input") << "keybindings: неизвестная клавиша '" << keyName << "' для '" << name << "' в " << path;
+            continue;
+        }
+        actions.Get(name).Rebind(*binding);
+    }
 }
 
 } // namespace KeyNames

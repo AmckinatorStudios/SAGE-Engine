@@ -1,5 +1,6 @@
 #include "ScriptEngine.h"
 #include "../core/Log.h"
+#include "../core/KeyNames.h"
 #include "../asset/AssetManager.h"
 #include "../render/ParticlePresets.h"
 #include <algorithm>
@@ -260,6 +261,35 @@ void ScriptEngine::RegisterEngineApi() {
     });
     m_lua.set_function("WasActionReleased", [this](const std::string& name) -> bool {
         return m_input && m_input->Has(name) && m_input->WasReleased(name);
+    });
+
+    // Регистрация именованных действий и их привязок из Lua — раньше это
+    // жило только как хардкод в C++ (game/GameActions.h); теперь игра может
+    // целиком объявить свою раскладку скриптом. RegisterAction создаёт
+    // действие (без привязок — их даёт BindAction), BindAction добавляет к
+    // нему физический источник по имени (буквы/цифры/F1-F12/SPACE/TAB/
+    // ENTER/ESCAPE/стрелки/MOUSE_LEFT/MOUSE_RIGHT/MOUSE_MIDDLE/WHEEL_UP/
+    // WHEEL_DOWN — полный список см. core/KeyNames.h::Parse), одно действие
+    // может иметь несколько привязок (несколько вызовов BindAction). Логи
+    // и переопределение раскладки без пересборки — из того же keybindings.cfg,
+    // что и раньше, теперь через LoadKeybindingsFromFile.
+    m_lua.set_function("RegisterAction", [this](const std::string& name) {
+        if (!m_input) throw std::runtime_error("RegisterAction: ввод не привязан (ScriptEngine::BindInput не вызван)");
+        m_input->Register(name);
+    });
+    m_lua.set_function("BindAction", [this](const std::string& name, const std::string& bindingName) {
+        if (!m_input) throw std::runtime_error("BindAction: ввод не привязан (ScriptEngine::BindInput не вызван)");
+        if (!m_input->Has(name)) throw std::runtime_error("BindAction: действие '" + name + "' не зарегистрировано — забыт RegisterAction?");
+        auto binding = KeyNames::Parse(bindingName);
+        if (!binding) {
+            LOG_WARN("Lua") << "BindAction: нераспознанная привязка '" << bindingName << "' для '" << name << "'";
+            return;
+        }
+        m_input->Get(name).Bind(*binding);
+    });
+    m_lua.set_function("LoadKeybindingsFromFile", [this](const std::string& path) {
+        if (!m_input) throw std::runtime_error("LoadKeybindingsFromFile: ввод не привязан (ScriptEngine::BindInput не вызван)");
+        KeyNames::LoadBindingsFromFile(*m_input, path);
     });
 
     // --- Камера: доступно после BindCamera. Position — обычное поле, но
