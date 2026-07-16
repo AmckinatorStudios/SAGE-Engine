@@ -163,6 +163,11 @@ set(SAGE_ENGINE_SOURCES
 
 add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})
 
+# -Wall -Wextra на движковом коде — без -Werror (проект ещё не прошёл
+# полную чистку предупреждений; -Werror включим отдельно, когда пройдём).
+target_compile_options(sage_engine PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra>)
+
 # src — общий корень включений и для движка, и для игры (заголовки включают
 # друг друга относительно него, напр. "render/Shader.h"). generated — для
 # сгенерированного core/Version.h. Оба PUBLIC: цели, линкующие движок,
@@ -219,8 +224,21 @@ set(GAME_SOURCES
 
 add_executable(${GAME_NAME} ${GAME_SOURCES})
 target_link_libraries(${GAME_NAME} PRIVATE sage_engine)
+target_compile_options(${GAME_NAME} PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra>)
 
 # Копируем папку assets рядом с исполняемым файлом
 add_custom_command(TARGET ${GAME_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${GAME_NAME}>/assets)
+
+# ============================================================================
+#  Юнит-тесты (doctest + CTest) — see tests/CMakeLists.txt. Отдельный
+#  таргет, не влияет на сборку движка/игры. Включается по умолчанию, но
+#  можно выключить -DSAGE_BUILD_TESTS=OFF, если doctest недоступен офлайн.
+# ============================================================================
+option(SAGE_BUILD_TESTS "Собирать юнит-тесты sage_engine (doctest/CTest)" ON)
+if (SAGE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
