@@ -4,23 +4,27 @@ project(SAGEEngine LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Имя игры, которая сейчас собирается на движке. Один и тот же движок
-# (библиотека sage_engine ниже) может использоваться для нескольких игр —
-# меняя эту переменную (или передавая -DGAME_NAME=... в cmake), меняется
-# только имя итогового исполняемого файла, весь код движка остаётся общим.
-if (NOT GAME_NAME)
-    set(GAME_NAME "TheBoat")
-endif()
+# Хелперы сборки (sage_add_game и т.п.)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+include(SageHelpers)
 
-# Версия движка читается из файла VERSION (единственный источник истины —
-# используется и здесь для сборки бинарника, и в scripts/build_*.sh для
-# имени пакета) и запекается в бинарник через генерируемый заголовок, чтобы
-# запущенная игра тоже знала свою версию (заголовок окна, лог-баннер).
+# ============================================================================
+#  Архитектура сборки (см. README):
+#    engine/        — переиспользуемое ядро → статическая библиотека sage::engine
+#    editor/        — редактор на ImGui     → exe SageEditor (линкует движок)
+#    games/<name>/  — конкретные игры       → exe (линкуют движок, независимы)
+#  Верхний уровень объявляет ВСЕ сторонние зависимости, чтобы и движок, и
+#  редактор, и игры тянули один и тот же набор без дублирования.
+# ============================================================================
+
+# Версия движка — единый источник истины (файл VERSION в корне). Запекается в
+# генерируемый заголовок sage/core/Version.h (кладётся в generated/, который
+# движок отдаёт как PUBLIC include — заголовок виден и играм, и редактору).
 file(READ "${CMAKE_SOURCE_DIR}/VERSION" SAGE_ENGINE_VERSION)
 string(STRIP "${SAGE_ENGINE_VERSION}" SAGE_ENGINE_VERSION)
 configure_file(
-    ${CMAKE_SOURCE_DIR}/src/core/Version.h.in
-    ${CMAKE_BINARY_DIR}/generated/core/Version.h
+    ${CMAKE_SOURCE_DIR}/engine/src/sage/core/Version.h.in
+    ${CMAKE_BINARY_DIR}/generated/sage/core/Version.h
     @ONLY
 )
 
@@ -48,6 +52,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
+# ---------- EnTT (ECS) ----------
+# Header-only. Движок оборачивает entt в sage/ecs — но линкуем PUBLIC, чтобы
+# заголовки сцены/компонентов, торчащие в публичном API, компилировались и у игр.
+FetchContent_Declare(
+  entt
+  GIT_REPOSITORY https://github.com/skypjack/entt.git
+  GIT_TAG v3.13.2
+)
+FetchContent_MakeAvailable(entt)
+
 # ---------- tinyobjloader (загрузка .obj моделей) ----------
 FetchContent_Declare(
   tinyobjloader
@@ -66,11 +80,9 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(json)
 
 # ---------- Lua (язык скриптов) ----------
-# У Lua нет CMake-сборки в репозитории, поэтому нам нужны только его исходники,
-# которые мы компилируем сами как обычную библиотеку (аналогично glad ниже).
-# SOURCE_SUBDIR указывает на несуществующую поддиректорию — это штатный способ
-# сказать FetchContent_MakeAvailable "только скачай, не вызывай add_subdirectory"
-# (замена устаревшей FetchContent_Populate, которую удаляют в CMake >= 3.30).
+# У Lua нет CMake-сборки в репозитории — берём только исходники и компилируем
+# сами (SOURCE_SUBDIR указывает на несуществующую поддиректорию: «только скачай,
+# не вызывай add_subdirectory» — замена устаревшей FetchContent_Populate).
 FetchContent_Declare(
   lua_src
   GIT_REPOSITORY https://github.com/lua/lua.git
@@ -91,10 +103,7 @@ if (UNIX)
     target_link_libraries(lua54 PUBLIC m)
 endif()
 
-# ---------- sol2 (удобная C++ обёртка над Lua C API) ----------
-# У sol2 есть свой CMakeLists, но нам нужны только его заголовки, а не его
-# CMake-цели (они пытаются искать Lua по-своему и конфликтовали бы с нашим
-# ручным lua54). Тот же приём с SOURCE_SUBDIR: только скачать исходники.
+# ---------- sol2 (C++ обёртка над Lua) ----------
 FetchContent_Declare(
   sol2_src
   GIT_REPOSITORY https://github.com/ThePhD/sol2.git
@@ -107,117 +116,56 @@ target_include_directories(sol2 INTERFACE ${sol2_src_SOURCE_DIR}/include)
 target_link_libraries(sol2 INTERFACE lua54)
 
 # ---------- glad (загрузчик функций OpenGL) ----------
-# Собран как обычная библиотека из локальных файлов в external/glad
 add_library(glad STATIC external/glad/src/glad.c)
 target_include_directories(glad PUBLIC external/glad/include)
 
-# ---------- stb_image (загрузка PNG/JPG для текстур) ----------
+# ---------- stb_image (текстуры) ----------
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE external/stb)
 
-# ---------- tinygltf (загрузка .gltf/.glb моделей) ----------
+# ---------- tinygltf (загрузка .gltf/.glb) ----------
 add_library(tinygltf INTERFACE)
 target_include_directories(tinygltf INTERFACE external/tinygltf)
 
-# ---------- miniaudio (звук: декодирование + устройство + 3D-микс) ----------
-# Single-header, public domain. Сам выбирает системный аудио-API (ALSA/Pulse/
-# WASAPI/CoreAudio) и грузит его через dlopen в рантайме — на этапе линковки
-# аудио-библиотеки не нужны. Реализация разворачивается в src/audio/miniaudio_impl.cpp.
+# ---------- miniaudio (звук) ----------
 add_library(miniaudio INTERFACE)
 target_include_directories(miniaudio INTERFACE external/miniaudio)
 
-# ============================================================================
-#  sage_engine — переиспользуемое, УНИВЕРСАЛЬНОЕ ЯДРО движка (окно, рендер,
-#  камера, сцена, сериализация, UI, скриптинг). НЕ знает ничего ни о вокселях,
-#  ни о конкретной игре: код движка нигде не включает src/voxel/ и src/game/
-#  (это проверяемая границей архитектура — см. README, раздел "Что внутри").
-#  Собирается как статическая библиотека, которую линкует тонкий исполняемый
-#  файл игры ниже. Другая игра на SAGE (пусть даже не про воксели) линкует эту
-#  же библиотеку и пишет свой main + свой игровой код.
-#
-#  Новые .cpp движка добавляйте в этот список (явный список вместо GLOB —
-#  сборка детерминирована и не зависит от того, переконфигурировали ли CMake).
-# ============================================================================
-set(SAGE_ENGINE_SOURCES
-    src/audio/AudioEngine.cpp
-    src/audio/miniaudio_impl.cpp
-    src/core/GLDebug.cpp
-    src/core/Log.cpp
-    src/core/Stats.cpp
-    src/core/Window.cpp
-    src/render/DebugOverlay.cpp
-    src/render/Mesh.cpp
-    src/render/Model.cpp
-    src/render/ModelLoader.cpp
-    src/render/Screenshot.cpp
-    src/render/Shader.cpp
-    src/render/Skybox.cpp
-    src/render/Texture.cpp
-    src/scene/SceneSerializer.cpp
-    src/scripting/ScriptEngine.cpp
-    src/ui/UIRenderer.cpp
+# ---------- Dear ImGui (docking) — UI редактора и in-game отладки ----------
+# Вендорится в external/imgui (ядро + бэкенды glfw/opengl3 + std::string-хелперы).
+# Собирается как статическая библиотека; линкуется редактором (и движковым
+# ImGuiLayer). Использует собственный GL-загрузчик бэкенда opengl3, поэтому не
+# зависит от нашего glad.
+add_library(imgui STATIC
+    external/imgui/imgui.cpp
+    external/imgui/imgui_draw.cpp
+    external/imgui/imgui_tables.cpp
+    external/imgui/imgui_widgets.cpp
+    external/imgui/imgui_demo.cpp
+    external/imgui/backends/imgui_impl_glfw.cpp
+    external/imgui/backends/imgui_impl_opengl3.cpp
+    external/imgui/misc/cpp/imgui_stdlib.cpp
 )
-
-add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})
-
-# src — общий корень включений и для движка, и для игры (заголовки включают
-# друг друга относительно него, напр. "render/Shader.h"). generated — для
-# сгенерированного core/Version.h. Оба PUBLIC: цели, линкующие движок,
-# наследуют эти пути автоматически.
-target_include_directories(sage_engine PUBLIC
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_BINARY_DIR}/generated
+target_include_directories(imgui PUBLIC
+    external/imgui
+    external/imgui/backends
+    external/imgui/misc/cpp
 )
-
-# В Debug-сборке включаем GL_CHECK (см. src/core/GLDebug.h) — проверку
-# glGetError после обёрнутых вызовов. В Release макрос ничего не делает.
-target_compile_definitions(sage_engine PUBLIC $<$<CONFIG:Debug>:SAGE_DEBUG>)
-
-# PUBLIC — то, что торчит в публичных заголовках движка (окно/ввод/математика/
-# скриптинг/текстуры): линкующая игра должна их видеть транзитивно.
-target_link_libraries(sage_engine PUBLIC
-    glfw
-    glad
-    glm::glm
-    sol2
-    stb
-)
-# PRIVATE — используется только в .cpp движка (загрузка моделей/сериализация),
-# в публичных заголовках не появляется — игре знать о них не нужно.
-target_link_libraries(sage_engine PRIVATE
-    tinyobjloader
-    tinygltf
-    nlohmann_json::nlohmann_json
-    miniaudio
-)
-
+target_link_libraries(imgui PUBLIC glfw)
 if (WIN32)
-    target_link_libraries(sage_engine PUBLIC opengl32)
-elseif(UNIX)
-    # m — нужна miniaudio (математика микшера); dl/pthread — и GLFW, и miniaudio
-    # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).
-    target_link_libraries(sage_engine PUBLIC GL dl pthread m X11)
+    target_link_libraries(imgui PUBLIC opengl32)
+elseif (UNIX)
+    target_link_libraries(imgui PUBLIC GL dl)
 endif()
 
 # ============================================================================
-#  Игра "The Boat" — exe поверх движка: точка входа + игровая логика
-#  (src/game/*, src/main.cpp) + воксельный модуль (src/voxel/*). Воксели —
-#  это код КОНКРЕТНОЙ ИГРЫ (корабль из блоков), написанный поверх движка, а
-#  не часть движка: другая игра на SAGE могла бы не подключать voxel вовсе.
-#  Всё, что специфично для The Boat (корабль, рыбалка, крафт, статы, блоки),
-#  живёт здесь и линкует sage_engine, но не наоборот.
+#  Модули проекта
 # ============================================================================
-set(GAME_SOURCES
-    src/main.cpp
-    src/game/PlayerController.cpp
-    src/voxel/Chunk.cpp
-    src/voxel/VoxelMesh.cpp
-)
+add_subdirectory(engine)
+add_subdirectory(games/theboat)
 
-add_executable(${GAME_NAME} ${GAME_SOURCES})
-target_link_libraries(${GAME_NAME} PRIVATE sage_engine)
-
-# Копируем папку assets рядом с исполняемым файлом
-add_custom_command(TARGET ${GAME_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${GAME_NAME}>/assets)
+# Редактор подключается начиная с Фазы 5 (см. README). Пока каталог editor/
+# может быть пустым — не добавляем несуществующую цель.
+if (EXISTS "${CMAKE_SOURCE_DIR}/editor/CMakeLists.txt")
+    add_subdirectory(editor)
+endif()
