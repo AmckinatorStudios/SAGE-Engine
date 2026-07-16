@@ -61,6 +61,7 @@
 #include "ui/UIRenderer.h"
 #include "ui/UICanvas.h"
 #include "ui/Widgets.h"
+#include "ui/UIManager.h"
 #include "game/GameActions.h"
 #include "game/GameState.h"
 #include "game/PlayerActions.h"
@@ -536,6 +537,25 @@ int main() {
 
         // ---- Игровое состояние: мир, корабль, игрок, инвентарь, системы ----
         GameState game;
+
+        // UI, полностью управляемый из Lua (CreateCanvas/AddPanel/.../
+        // SetWidget* — см. ScriptEngine::BindUI): держит именованные канвасы
+        // и реестр виджетов по id. Независим от статHUD/settingsPanel ниже
+        // (те — рукописный C++ UI игры The Boat, не трогаем) — это отдельная
+        // движковая возможность для игр, которые строят весь свой интерфейс
+        // скриптом (см. план: часть B).
+        //
+        // ВАЖНО про порядок объявления: scriptUi объявлен ПОСЛЕ game
+        // специально. UIButton/UIToggle держат Lua-колбэки (OnClick/
+        // OnChanged — sol::protected_function в std::function), а C++
+        // уничтожает локальные переменные в ОБРАТНОМ порядке объявления —
+        // значит scriptUi разрушится ПЕРВЫМ (пока game.Scripts и её
+        // sol::state ещё живы), а game — вторым. Если бы порядок был
+        // обратным, разрушение этих колбэков обращалось бы к уже мёртвому
+        // lua_State (тот же класс бага, что был исправлен в GameState —
+        // см. комментарий у полей Scripts/SceneData в game/GameState.h).
+        UIManager scriptUi;
+
         // Camera/billboards созданы раньше GameState — привязка снаружи неё,
         // как и InputSystem выше. ParticleSystem же живёт внутри GameState,
         // поэтому её привязываем на неё саму (game.Particles). Все Bind*
@@ -546,6 +566,7 @@ int main() {
         game.Scripts.BindParticles(game.Particles);
         game.Scripts.BindBillboards(billboards);
         game.Scripts.BindAudio(game.Audio);
+        game.Scripts.BindUI(scriptUi);
 
         // demo_features.lua — витрина расширенного Lua-API движка (спавн
         // объектов, таймеры, корутины, камера, частицы, билборды), никак не
@@ -669,6 +690,10 @@ int main() {
                 uiIn.MouseReleased = !lmb && prevUiMouseDown;
                 prevUiMouseDown = lmb;
                 settingsPanel.Update(uiIn, (float)window.Width(), (float)window.Height());
+                // Тот же реальный курсор — для UI, полностью построенного из
+                // Lua (см. UIManager выше); канвасы, которые ничего не
+                // создали, просто не на что реагировать.
+                scriptUi.UpdateAll(uiIn, (float)window.Width(), (float)window.Height());
             } else {
                 prevUiMouseDown = false;
             }
@@ -856,11 +881,14 @@ int main() {
                 post.Draw();
             }
 
-            // --- UI: худ (виджеты) + immediate-mode (хотбар/подсказки/крафт) ---
+            // --- UI: худ (виджеты) + immediate-mode (хотбар/подсказки/крафт) +
+            // всё, что построила Lua через UIManager (пусто, пока ни один
+            // скрипт не вызвал CreateCanvas/Add* — обычной партии не касается) ---
             ui.Begin(window.Width(), window.Height());
             statsHud.Draw(ui);
             GameHud::DrawWorldHud(ui, game, look, window.Width(), window.Height());
             if (game.UiPanelOpen) settingsPanel.Draw(ui); // поверх худа
+            scriptUi.DrawAll(ui);
             ui.End();
 
             if (game.DebugHudVisible) {

@@ -6,6 +6,38 @@
 #include <algorithm>
 #include <any>
 
+namespace {
+
+// Строковое имя якоря (как в C++ UIAnchor) -> значение. Нераспознанное имя —
+// предупреждение и Center (не бросаем: опечатка в строке не должна ронять
+// весь скрипт игры).
+UIAnchor ParseUIAnchor(const std::string& name) {
+    if (name == "TopLeft") return UIAnchor::TopLeft;
+    if (name == "TopCenter") return UIAnchor::TopCenter;
+    if (name == "TopRight") return UIAnchor::TopRight;
+    if (name == "CenterLeft") return UIAnchor::CenterLeft;
+    if (name == "Center") return UIAnchor::Center;
+    if (name == "CenterRight") return UIAnchor::CenterRight;
+    if (name == "BottomLeft") return UIAnchor::BottomLeft;
+    if (name == "BottomCenter") return UIAnchor::BottomCenter;
+    if (name == "BottomRight") return UIAnchor::BottomRight;
+    LOG_WARN("Lua") << "UI: неизвестный Anchor '" << name << "', использую Center";
+    return UIAnchor::Center;
+}
+
+// Поля, общие для всех виджетов (Anchor/Offset/Size/Visible) — читаются из
+// props-таблицы, если присутствуют; отсутствующие остаются значениями по
+// умолчанию виджета. Offset/Size ожидаются как Vec2 (glm::vec2), тем же
+// типом, что уже используют билборды в этом файле.
+void ApplyCommonUiProps(UIElement& el, const sol::table& props) {
+    if (sol::optional<std::string> anchor = props["Anchor"]) el.Anchor = ParseUIAnchor(*anchor);
+    if (sol::optional<glm::vec2> offset = props["Offset"]) el.Offset = *offset;
+    if (sol::optional<glm::vec2> size = props["Size"]) el.Size = *size;
+    if (sol::optional<bool> visible = props["Visible"]) el.Visible = *visible;
+}
+
+} // namespace
+
 ScriptEngine::ScriptEngine() {
     m_lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
                           sol::lib::table, sol::lib::coroutine);
@@ -425,6 +457,161 @@ void ScriptEngine::RegisterEngineApi() {
     m_lua.set_function("SetMasterVolume", [this](float volume) {
         if (!m_audio) throw std::runtime_error("SetMasterVolume: аудио не привязано (ScriptEngine::BindAudio не вызван)");
         m_audio->SetMasterVolume(volume);
+    });
+
+    // --- UI: доступно после BindUI. Раньше UICanvas собирался только руками
+    // в C++ (main.cpp) — теперь HUD/меню/панели настроек можно целиком
+    // построить и обновлять из Lua: CreateCanvas заводит именованный канвас,
+    // Add* добавляет в него виджет и возвращает целочисленный id, SetWidget*
+    // обновляет уже созданный виджет по id (типично — каждый кадр из
+    // OnUpdate, как и обновление игровых данных). Общие поля (Anchor/Offset/
+    // Size/Visible) — см. ApplyCommonUiProps выше; удобно передавать как
+    // props = {Anchor="TopLeft", Offset=Vec2.new(16,16), Size=Vec2.new(180,16)}. ---
+    m_lua.set_function("CreateCanvas", [this](const std::string& name) {
+        if (!m_ui) throw std::runtime_error("CreateCanvas: UI не привязан (ScriptEngine::BindUI не вызван)");
+        m_ui->CreateCanvas(name);
+    });
+    m_lua.set_function("SetCanvasReferenceSize", [this](const std::string& name, float w, float h) {
+        if (!m_ui) throw std::runtime_error("SetCanvasReferenceSize: UI не привязан (ScriptEngine::BindUI не вызван)");
+        m_ui->CreateCanvas(name).ReferenceSize = {w, h};
+    });
+    m_lua.set_function("SetCanvasVisible", [this](const std::string& name, bool visible) {
+        if (!m_ui) throw std::runtime_error("SetCanvasVisible: UI не привязан (ScriptEngine::BindUI не вызван)");
+        m_ui->CreateCanvas(name).Visible = visible;
+    });
+
+    m_lua.set_function("AddPanel", [this](const std::string& canvas, sol::table props) -> int {
+        if (!m_ui) throw std::runtime_error("AddPanel: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* w = m_ui->CreateCanvas(canvas).Add<UIPanel>();
+        ApplyCommonUiProps(*w, props);
+        if (sol::optional<glm::vec3> c = props["Color"]) w->Color = *c;
+        if (sol::optional<float> a = props["Alpha"]) w->Alpha = *a;
+        if (sol::optional<float> ot = props["OutlineThickness"]) w->OutlineThickness = *ot;
+        if (sol::optional<glm::vec3> oc = props["OutlineColor"]) w->OutlineColor = *oc;
+        if (sol::optional<float> oa = props["OutlineAlpha"]) w->OutlineAlpha = *oa;
+        return m_ui->RegisterWidget(w);
+    });
+    m_lua.set_function("AddLabel", [this](const std::string& canvas, sol::table props) -> int {
+        if (!m_ui) throw std::runtime_error("AddLabel: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* w = m_ui->CreateCanvas(canvas).Add<UILabel>();
+        ApplyCommonUiProps(*w, props);
+        if (sol::optional<std::string> t = props["Text"]) w->Text = *t;
+        if (sol::optional<float> s = props["Scale"]) w->Scale = *s;
+        if (sol::optional<glm::vec3> c = props["Color"]) w->Color = *c;
+        if (sol::optional<bool> ci = props["CenterInSize"]) w->CenterInSize = *ci;
+        return m_ui->RegisterWidget(w);
+    });
+    m_lua.set_function("AddProgressBar", [this](const std::string& canvas, sol::table props) -> int {
+        if (!m_ui) throw std::runtime_error("AddProgressBar: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* w = m_ui->CreateCanvas(canvas).Add<UIProgressBar>();
+        ApplyCommonUiProps(*w, props);
+        if (sol::optional<std::string> l = props["Label"]) w->Label = *l;
+        if (sol::optional<glm::vec3> fc = props["FillColor"]) w->FillColor = *fc;
+        if (sol::optional<glm::vec3> bc = props["BackColor"]) w->BackColor = *bc;
+        if (sol::optional<float> ba = props["BackAlpha"]) w->BackAlpha = *ba;
+        if (sol::optional<float> ls = props["LabelScale"]) w->LabelScale = *ls;
+        return m_ui->RegisterWidget(w);
+    });
+    m_lua.set_function("AddSprite", [this](const std::string& canvas, sol::table props) -> int {
+        if (!m_ui) throw std::runtime_error("AddSprite: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* w = m_ui->CreateCanvas(canvas).Add<UISprite>();
+        ApplyCommonUiProps(*w, props);
+        if (sol::optional<glm::vec4> tint = props["Tint"]) w->Tint = *tint;
+        if (sol::optional<bool> ka = props["KeepAspect"]) w->KeepAspect = *ka;
+        int id = m_ui->RegisterWidget(w);
+        if (sol::optional<std::string> path = props["Texture"]) {
+            Asset<Texture> tex = AssetManager::Instance().LoadTexture(*path, TextureFilter::Bilinear);
+            w->SpriteTexture = tex.Get();
+            m_ui->KeepTextureAlive(id, tex);
+        }
+        return id;
+    });
+    m_lua.set_function("AddButton", [this](const std::string& canvas, sol::table props) -> int {
+        if (!m_ui) throw std::runtime_error("AddButton: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* w = m_ui->CreateCanvas(canvas).Add<UIButton>();
+        ApplyCommonUiProps(*w, props);
+        if (sol::optional<std::string> l = props["Label"]) w->Label = *l;
+        if (sol::optional<glm::vec3> nc = props["NormalColor"]) w->NormalColor = *nc;
+        if (sol::optional<glm::vec3> hc = props["HoverColor"]) w->HoverColor = *hc;
+        if (sol::optional<glm::vec3> pc = props["PressedColor"]) w->PressedColor = *pc;
+        if (sol::optional<float> a = props["Alpha"]) w->Alpha = *a;
+        if (sol::optional<glm::vec3> tc = props["TextColor"]) w->TextColor = *tc;
+        if (sol::optional<float> ts = props["TextScale"]) w->TextScale = *ts;
+        if (sol::optional<float> ot = props["OutlineThickness"]) w->OutlineThickness = *ot;
+        if (sol::optional<glm::vec3> oc = props["OutlineColor"]) w->OutlineColor = *oc;
+        if (sol::optional<sol::protected_function> onClick = props["OnClick"]) {
+            sol::protected_function fn = *onClick;
+            w->OnClick = [fn]() {
+                auto result = fn();
+                if (!result.valid()) {
+                    sol::error err = result;
+                    LOG_ERROR("ScriptEngine") << "Ошибка в UI OnClick: " << err.what();
+                }
+            };
+        }
+        return m_ui->RegisterWidget(w);
+    });
+    m_lua.set_function("AddToggle", [this](const std::string& canvas, sol::table props) -> int {
+        if (!m_ui) throw std::runtime_error("AddToggle: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* w = m_ui->CreateCanvas(canvas).Add<UIToggle>();
+        ApplyCommonUiProps(*w, props);
+        if (sol::optional<std::string> l = props["Label"]) w->Label = *l;
+        if (sol::optional<bool> v = props["Value"]) w->Value = *v;
+        if (sol::optional<glm::vec3> onc = props["OnColor"]) w->OnColor = *onc;
+        if (sol::optional<glm::vec3> offc = props["OffColor"]) w->OffColor = *offc;
+        if (sol::optional<glm::vec3> kc = props["KnobColor"]) w->KnobColor = *kc;
+        if (sol::optional<glm::vec3> lc = props["LabelColor"]) w->LabelColor = *lc;
+        if (sol::optional<float> ls = props["LabelScale"]) w->LabelScale = *ls;
+        if (sol::optional<sol::protected_function> onChanged = props["OnChanged"]) {
+            sol::protected_function fn = *onChanged;
+            w->OnChanged = [fn](bool value) {
+                auto result = fn(value);
+                if (!result.valid()) {
+                    sol::error err = result;
+                    LOG_ERROR("ScriptEngine") << "Ошибка в UI OnChanged: " << err.what();
+                }
+            };
+        }
+        return m_ui->RegisterWidget(w);
+    });
+
+    // Обновление уже созданных виджетов по id — типично раз в кадр из
+    // OnUpdate (полоски статов, текст HUD и т.п.), тем самым паттерном, что
+    // и весь остальной игровой цикл на Lua. Невалидный id тихо игнорируется
+    // (виджет мог быть создан на другом канвасе/ещё не существовать).
+    m_lua.set_function("SetWidgetText", [this](int id, const std::string& text) {
+        if (!m_ui) throw std::runtime_error("SetWidgetText: UI не привязан (ScriptEngine::BindUI не вызван)");
+        UIElement* w = m_ui->GetWidget(id);
+        if (!w) return;
+        if (auto* label = dynamic_cast<UILabel*>(w)) label->Text = text;
+        else if (auto* btn = dynamic_cast<UIButton*>(w)) btn->Label = text;
+        else if (auto* bar = dynamic_cast<UIProgressBar*>(w)) bar->Label = text;
+        else if (auto* toggle = dynamic_cast<UIToggle*>(w)) toggle->Label = text;
+    });
+    // value — число (0..1) для ProgressBar, булево для Toggle; тип должен
+    // соответствовать типу виджета по id.
+    m_lua.set_function("SetWidgetValue", [this](int id, sol::object value) {
+        if (!m_ui) throw std::runtime_error("SetWidgetValue: UI не привязан (ScriptEngine::BindUI не вызван)");
+        UIElement* w = m_ui->GetWidget(id);
+        if (!w) return;
+        if (auto* bar = dynamic_cast<UIProgressBar*>(w)) {
+            float v = value.as<float>();
+            bar->ValueSource = [v] { return v; };
+        } else if (auto* toggle = dynamic_cast<UIToggle*>(w)) {
+            toggle->Value = value.as<bool>();
+        }
+    });
+    m_lua.set_function("SetWidgetVisible", [this](int id, bool visible) {
+        if (!m_ui) throw std::runtime_error("SetWidgetVisible: UI не привязан (ScriptEngine::BindUI не вызван)");
+        if (UIElement* w = m_ui->GetWidget(id)) w->Visible = visible;
+    });
+    m_lua.set_function("SetWidgetTexture", [this](int id, const std::string& path) {
+        if (!m_ui) throw std::runtime_error("SetWidgetTexture: UI не привязан (ScriptEngine::BindUI не вызван)");
+        auto* sprite = dynamic_cast<UISprite*>(m_ui->GetWidget(id));
+        if (!sprite) return;
+        Asset<Texture> tex = AssetManager::Instance().LoadTexture(path, TextureFilter::Bilinear);
+        sprite->SpriteTexture = tex.Get();
+        m_ui->KeepTextureAlive(id, tex);
     });
 
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения

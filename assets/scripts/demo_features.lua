@@ -108,6 +108,46 @@ function OnStart(entity)
     log("Action 'DemoDance' зарегистрирован и привязан к G / MOUSE_MIDDLE, IsActionDown = "
         .. tostring(IsActionDown("DemoDance")))
 
+    -- UI целиком из Lua: движок не знает ни про одну игру заранее — весь
+    -- канвас (панель, текст, полоска, спрайт, кнопка, тумблер) собирается
+    -- отсюда (см. CreateCanvas/Add*/SetWidget* в ScriptEngine.cpp).
+    CreateCanvas("demo_ui")
+    SetCanvasReferenceSize("demo_ui", 1280, 720)
+
+    AddPanel("demo_ui", {
+        Anchor = "TopLeft", Offset = Vec2.new(16, 100), Size = Vec2.new(220, 150),
+        Color = Vec3.new(0.05, 0.06, 0.09), Alpha = 0.9, OutlineThickness = 2.0,
+    })
+    local demoLabelId = AddLabel("demo_ui", {
+        Anchor = "TopLeft", Offset = Vec2.new(24, 108), Text = "Lua UI demo", Scale = 1.6,
+    })
+    local demoBarId = AddProgressBar("demo_ui", {
+        Anchor = "TopLeft", Offset = Vec2.new(24, 130), Size = Vec2.new(180, 14),
+        Label = "XP", FillColor = Vec3.new(0.3, 0.7, 0.9),
+    })
+    SetWidgetValue(demoBarId, 0.65)
+
+    local demoClicks = 0
+    local demoBtnId = AddButton("demo_ui", {
+        Anchor = "TopLeft", Offset = Vec2.new(24, 160), Size = Vec2.new(120, 30),
+        Label = "Click me",
+        OnClick = function()
+            demoClicks = demoClicks + 1
+            SetWidgetText(demoLabelId, "Clicked " .. demoClicks .. "x")
+            log("Lua UI button clicked, count = " .. demoClicks)
+        end,
+    })
+
+    local demoToggleId = AddToggle("demo_ui", {
+        Anchor = "TopLeft", Offset = Vec2.new(24, 200), Size = Vec2.new(44, 20),
+        Label = "Enabled",
+        OnChanged = function(value)
+            log("Lua UI toggle changed to " .. tostring(value))
+        end,
+    })
+    log("Lua UI canvas 'demo_ui' построен: label=" .. tostring(demoLabelId) .. " bar=" .. tostring(demoBarId)
+        .. " button=" .. tostring(demoBtnId) .. " toggle=" .. tostring(demoToggleId))
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()
