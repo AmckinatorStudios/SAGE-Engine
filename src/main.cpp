@@ -58,6 +58,12 @@
 #include "render/Framebuffer.h"
 #include "render/ShadowMap.h"
 #include "render/PostProcess.h"
+#include "render/RenderContext.h"
+#include "render/RenderPass.h"
+#include "render/RenderPipeline.h"
+#include "render/CallbackPass.h"
+#include "render/ShadowPass.h"
+#include "render/PostProcessPass.h"
 #include "ui/UIRenderer.h"
 #include "ui/UICanvas.h"
 #include "ui/Widgets.h"
@@ -480,29 +486,23 @@ int main() {
         Asset<Shader> skyboxShaderA     = loadShader("shaders/skybox.vert", "shaders/skybox.frag");
         Asset<Shader> particleShaderA   = loadShader("shaders/particle.vert", "shaders/particle.frag");
         Asset<Shader> billboardShaderA  = loadShader("shaders/billboard.vert", "shaders/billboard.frag");
-        Asset<Shader> shadowDepthShaderA= loadShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
-        Asset<Shader> postShaderA       = loadShader("shaders/post.vert", "shaders/post.frag");
         Shader& voxelShader = *voxelShaderA;
         Shader& waterShader = *waterShaderA;
         Shader& basicShader = *basicShaderA;
         Shader& skyboxShader = *skyboxShaderA;
         Shader& particleShader = *particleShaderA;
         Shader& billboardShader = *billboardShaderA;
-        Shader& shadowDepthShader = *shadowDepthShaderA;
-        Shader& postShader = *postShaderA;
 
-        // Пост-процессинг: сцена рисуется в HDR-буфер, затем полноэкранный
-        // проход (тон-маппинг/экспозиция/виньетка) выводит её на экран.
-        // Карта теней: depth-проход из точки зрения солнца, приёмники
-        // (voxel/basic/water) сэмплируют её. Оба можно отключить env-флагом
-        // (SAGE_NO_POST / SAGE_NO_SHADOWS) — удобно для сравнения "до/после".
-        Framebuffer sceneFbo(window.Width(), window.Height());
-        PostProcess post;
-        PostProcessSettings postSettings;
-        ShadowMap shadows(2048);
+        // Пост-процессинг — через движковый проход (см. PostProcessPass.h):
+        // сам грузит свой шейдер через AssetManager и владеет своим FBO.
+        // Проход теней (ShadowPass) создаётся ниже прямо внутри пайплайна —
+        // он единственный, отдельный локальной переменной не дублируем. Оба
+        // можно отключить env-флагом (SAGE_NO_POST / SAGE_NO_SHADOWS) —
+        // удобно для сравнения "до/после".
+        PostProcessPass postProcessPass(window.Width(), window.Height());
         bool postEnabled = (std::getenv("SAGE_NO_POST") == nullptr);
         bool shadowsEnabled = (std::getenv("SAGE_NO_SHADOWS") == nullptr);
-        if (const char* exp = std::getenv("SAGE_EXPOSURE")) postSettings.Exposure = (float)std::atof(exp);
+        if (const char* exp = std::getenv("SAGE_EXPOSURE")) postProcessPass.Settings.Exposure = (float)std::atof(exp);
 
         Skybox skybox({
             "assets/textures/skybox/px.png", "assets/textures/skybox/nx.png",
@@ -620,6 +620,111 @@ int main() {
                 object->MeshComponent->Draw();
             }
         };
+
+        // ---- Рендер-пайплайн: собирается ОДИН РАЗ, дальше каждый кадр —
+        // просто pipeline.Execute(ctx) (см. render/RenderPipeline.h). Тени и
+        // пост-процесс — движковые проходы (ShadowPass/PostProcessPass, сами
+        // владеют своими шейдерами/FBO); содержимое сцены — CallbackPass с
+        // игровым кодом The Boat (воксельный корабль, вода, мусор, скриптовые
+        // объекты, частицы, билборды), который раньше был вписан прямо в
+        // тело главного цикла построчно вперемешку с generic-оркестрацией.
+        RenderPipeline pipeline;
+
+        ShadowPass* shadowPassPtr = pipeline.Add<ShadowPass>(2048);
+        shadowPassPtr->DrawCasters = [&](Shader& depthShader, RenderContext&) {
+            drawShadowCasters(depthShader);
+        };
+
+        pipeline.Add<CallbackPass>([&](RenderContext& ctx) { postProcessPass.Begin(ctx); });
+
+        pipeline.Add<CallbackPass>([&](RenderContext& ctx) {
+            // Карта теней на юнит 1 — общая для voxel/basic/water на весь
+            // проход (юнит 0 занят их собственными текстурами: атлас/спрайт).
+            unsigned int shadowTex = ctx.Shadows ? ctx.Shadows->DepthTexture() : 0;
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, shadowTex);
+            glm::mat4 lightMatrix = ctx.Shadows ? ctx.Shadows->LightMatrix() : glm::mat4(1.0f);
+
+            skybox.Draw(skyboxShader, ctx.View, ctx.Proj, game.DayNight.SkyTint());
+
+            // --- корабль (воксельные чанки) ---
+            voxelShader.Use();
+            voxelShader.SetMat4("uView", ctx.View);
+            voxelShader.SetMat4("uProjection", ctx.Proj);
+            UploadLighting(voxelShader, *ctx.Lighting);
+            UploadShadowUniforms(voxelShader, lightMatrix, 1, ctx.ShadowsEnabled);
+            blockAtlas.Bind(0);
+            voxelShader.SetInt("uAtlas", 0);
+            voxelShader.SetInt("uUseTexture", 1);
+            for (auto& [coord, chunk] : game.Terrain.Chunks()) {
+                glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(chunk->WorldPos()));
+                voxelShader.SetMat4("uModel", model);
+                chunk->Mesh().Draw();
+            }
+
+            // --- мусор и поплавок (обычные меши) ---
+            basicShader.Use();
+            basicShader.SetMat4("uView", ctx.View);
+            basicShader.SetMat4("uProjection", ctx.Proj);
+            basicShader.SetVec3("uViewPos", ctx.Cam->Position);
+            UploadLighting(basicShader, *ctx.Lighting);
+            UploadShadowUniforms(basicShader, lightMatrix, 1, ctx.ShadowsEnabled);
+            basicShader.SetInt("uUseTexture", 0);
+
+            for (const TrashItem& item : game.Trash.Items()) {
+                glm::mat4 model = glm::translate(glm::mat4(1.0f), item.Position);
+                model = glm::rotate(model, item.BobPhase * 0.4f, glm::vec3(0, 1, 0));
+                model = glm::scale(model, glm::vec3(0.35f));
+                basicShader.SetMat4("uModel", model);
+                basicShader.SetVec3("uObjectColor", GetItemFloatColor(item.Type));
+                cubeMesh->Draw();
+            }
+
+            // --- объекты сцены, заспавненные Lua-скриптами (game.Scripts) ---
+            for (auto& object : game.SceneData.Objects()) {
+                if (!object->MeshComponent) continue; // скрипт создал GameObject, но не назначил меш — не рисуем
+                basicShader.SetMat4("uModel", object->TransformComponent.GetMatrix());
+                basicShader.SetVec3("uObjectColor", object->Color);
+                object->MeshComponent->Draw();
+            }
+
+            if (game.Fishing.IsActive()) {
+                glm::mat4 model = glm::translate(glm::mat4(1.0f), game.Fishing.VisualBobberPosition());
+                model = glm::scale(model, glm::vec3(0.16f));
+                basicShader.SetMat4("uModel", model);
+                basicShader.SetVec3("uObjectColor", glm::vec3(0.9f, 0.15f, 0.1f));
+                cubeMesh->Draw();
+            }
+
+            // Иконка "клюёт!" — billboard над поплавком, видна только в
+            // момент поклёвки (демонстрация BillboardSystem: долгоживущий
+            // маркер, у которого меняется позиция/видимость, а не Add/Remove)
+            bool isBiting = game.Fishing.CurrentState() == FishingSystem::State::Bite;
+            billboards.SetVisible(biteIconId, isBiting);
+            if (isBiting) {
+                billboards.SetPosition(biteIconId, game.Fishing.VisualBobberPosition() + glm::vec3(0.0f, 0.25f, 0.0f));
+            }
+
+            // --- океан (после непрозрачного: полупрозрачная вода) ---
+            waterShader.Use();
+            waterShader.SetMat4("uView", ctx.View);
+            waterShader.SetMat4("uProjection", ctx.Proj);
+            waterShader.SetVec3("uViewPos", ctx.Cam->Position);
+            waterShader.SetFloat("uTime", ctx.Time);
+            waterShader.SetFloat("uScrollSpeed", 2.0f);
+            waterShader.SetVec2("uCenter", glm::vec2(game.Player.Position.x, game.Player.Position.z));
+            UploadLighting(waterShader, *ctx.Lighting);
+            UploadShadowUniforms(waterShader, lightMatrix, 1, ctx.ShadowsEnabled);
+            game.Water.Draw();
+
+            // --- частицы (дым/искры/всплески) поверх воды, до UI ---
+            game.Particles.Draw(particleShader, *ctx.Cam, ctx.View, ctx.Proj);
+
+            // --- билборды (иконки/маркеры, всегда развёрнутые к камере) ---
+            billboards.Draw(billboardShader, *ctx.Cam, ctx.View, ctx.Proj);
+        });
+
+        pipeline.Add<CallbackPass>([&](RenderContext& ctx) { postProcessPass.Resolve(ctx); });
 
         float lastFrame = (float)glfwGetTime();
         float fpsTimer = 0.0f; int fpsFrames = 0; float fps = 0.0f;
@@ -751,135 +856,31 @@ int main() {
             game.Audio.Update();
 
             // ================= РЕНДЕР =================
+            // Весь проход (тени -> сцена в HDR -> тон-маппинг на экран)
+            // теперь генерик RenderPipeline, собранный один раз до цикла
+            // (см. выше) — здесь только заполняем per-frame контекст и
+            // прогоняем проходы. Ортобокс теней следует за кораблём
+            // (стабильный центр — меньше мерцания краёв тени, чем если
+            // центрировать на игроке) — это игровое решение (см. комментарий
+            // у kShadowRadius), поэтому центр/радиус задаются здесь, а не
+            // внутри движкового ShadowPass.
             g_renderStats.Reset();
 
-            glm::mat4 view = camera.GetViewMatrix();
-            glm::mat4 proj = camera.GetProjectionMatrix((float)window.Width() / (float)window.Height());
+            RenderContext ctx;
+            ctx.View = camera.GetViewMatrix();
+            ctx.Proj = camera.GetProjectionMatrix((float)window.Width() / (float)window.Height());
+            ctx.Cam = &camera;
+            ctx.Lighting = &game.SceneData.Lighting;
+            ctx.ScreenWidth = window.Width();
+            ctx.ScreenHeight = window.Height();
+            ctx.Time = currentFrame;
+            ctx.DeltaTime = deltaTime;
+            ctx.ShadowCenter = game.Ship.Center;
+            ctx.ShadowRadius = kShadowRadius;
+            ctx.ShadowsEnabled = shadowsEnabled;
+            ctx.PostEnabled = postEnabled;
 
-            // Держим offscreen-буфер сцены в размер окна (no-op, если не менялось)
-            sceneFbo.Resize(window.Width(), window.Height());
-
-            // ---- ПРОХОД ТЕНЕЙ: глубина сцены из точки зрения солнца ----
-            // Ортобокс следует за кораблём (стабильный центр — меньше мерцания
-            // краёв тени, чем если центрировать на игроке).
-            if (shadowsEnabled) {
-                shadows.SetLightMatrix(game.SceneData.Lighting.Sun.Direction, game.Ship.Center, kShadowRadius);
-                shadows.BeginRender();
-                shadowDepthShader.Use();
-                shadowDepthShader.SetMat4("uLightSpace", shadows.LightMatrix());
-                drawShadowCasters(shadowDepthShader);
-                shadows.EndRender(window.Width(), window.Height());
-            }
-
-            // ---- ПРОХОД СЦЕНЫ: в HDR-буфер (или сразу в экран, если пост выключен) ----
-            if (postEnabled) sceneFbo.Bind();
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-            // Карта теней на юнит 1 — общая для voxel/basic/water на весь проход
-            // (юнит 0 занят их собственными текстурами: атлас/спрайт).
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, shadows.DepthTexture());
-
-            skybox.Draw(skyboxShader, view, proj, game.DayNight.SkyTint());
-
-            // --- корабль (воксельные чанки) ---
-            voxelShader.Use();
-            voxelShader.SetMat4("uView", view);
-            voxelShader.SetMat4("uProjection", proj);
-            UploadLighting(voxelShader, game.SceneData.Lighting);
-            UploadShadowUniforms(voxelShader, shadows.LightMatrix(), 1, shadowsEnabled);
-            blockAtlas.Bind(0);
-            voxelShader.SetInt("uAtlas", 0);
-            voxelShader.SetInt("uUseTexture", 1);
-            for (auto& [coord, chunk] : game.Terrain.Chunks()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(chunk->WorldPos()));
-                voxelShader.SetMat4("uModel", model);
-                chunk->Mesh().Draw();
-            }
-
-            // --- мусор и поплавок (обычные меши) ---
-            basicShader.Use();
-            basicShader.SetMat4("uView", view);
-            basicShader.SetMat4("uProjection", proj);
-            basicShader.SetVec3("uViewPos", camera.Position);
-            UploadLighting(basicShader, game.SceneData.Lighting);
-            UploadShadowUniforms(basicShader, shadows.LightMatrix(), 1, shadowsEnabled);
-            basicShader.SetInt("uUseTexture", 0);
-
-            for (const TrashItem& item : game.Trash.Items()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), item.Position);
-                model = glm::rotate(model, item.BobPhase * 0.4f, glm::vec3(0, 1, 0));
-                model = glm::scale(model, glm::vec3(0.35f));
-                basicShader.SetMat4("uModel", model);
-                basicShader.SetVec3("uObjectColor", GetItemFloatColor(item.Type));
-                cubeMesh->Draw();
-            }
-
-            // --- объекты сцены, заспавненные Lua-скриптами (game.Scripts) ---
-            for (auto& object : game.SceneData.Objects()) {
-                if (!object->MeshComponent) continue; // скрипт создал GameObject, но не назначил меш — не рисуем
-                basicShader.SetMat4("uModel", object->TransformComponent.GetMatrix());
-                basicShader.SetVec3("uObjectColor", object->Color);
-                object->MeshComponent->Draw();
-            }
-
-            if (game.Fishing.IsActive()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), game.Fishing.VisualBobberPosition());
-                model = glm::scale(model, glm::vec3(0.16f));
-                basicShader.SetMat4("uModel", model);
-                basicShader.SetVec3("uObjectColor", glm::vec3(0.9f, 0.15f, 0.1f));
-                cubeMesh->Draw();
-            }
-
-            // Иконка "клюёт!" — billboard над поплавком, видна только в
-            // момент поклёвки (демонстрация BillboardSystem: долгоживущий
-            // маркер, у которого меняется позиция/видимость, а не Add/Remove)
-            bool isBiting = game.Fishing.CurrentState() == FishingSystem::State::Bite;
-            billboards.SetVisible(biteIconId, isBiting);
-            if (isBiting) {
-                billboards.SetPosition(biteIconId, game.Fishing.VisualBobberPosition() + glm::vec3(0.0f, 0.25f, 0.0f));
-            }
-
-            // --- океан (после непрозрачного: полупрозрачная вода) ---
-            waterShader.Use();
-            waterShader.SetMat4("uView", view);
-            waterShader.SetMat4("uProjection", proj);
-            waterShader.SetVec3("uViewPos", camera.Position);
-            waterShader.SetFloat("uTime", currentFrame);
-            waterShader.SetFloat("uScrollSpeed", 2.0f);
-            waterShader.SetVec2("uCenter", glm::vec2(game.Player.Position.x, game.Player.Position.z));
-            UploadLighting(waterShader, game.SceneData.Lighting);
-            UploadShadowUniforms(waterShader, shadows.LightMatrix(), 1, shadowsEnabled);
-            game.Water.Draw();
-
-            // --- частицы (дым/искры/всплески) поверх воды, до UI ---
-            game.Particles.Draw(particleShader, camera, view, proj);
-
-            // --- билборды (иконки/маркеры, всегда развёрнутые к камере) ---
-            billboards.Draw(billboardShader, camera, view, proj);
-
-            // ---- ПОСТ-ПРОЦЕССИНГ: HDR-сцена -> экран ----
-            // Полноэкранный проход выводит offscreen-буфер сцены на экран с
-            // тон-маппингом/экспозицией/виньеткой. UI рисуется ПОСЛЕ него, в
-            // экранный буфер напрямую, чтобы текст/полоски не тон-мапились и
-            // не виньетировались вместе со сценой.
-            if (postEnabled) {
-                glBindFramebuffer(GL_FRAMEBUFFER, 0);
-                glViewport(0, 0, window.Width(), window.Height());
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-                postShader.Use();
-                postShader.SetFloat("uExposure", postSettings.Exposure);
-                postShader.SetFloat("uGamma", postSettings.Gamma);
-                postShader.SetFloat("uSaturation", postSettings.Saturation);
-                postShader.SetFloat("uContrast", postSettings.Contrast);
-                postShader.SetFloat("uVignette", postSettings.VignetteStrength);
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, sceneFbo.ColorTexture());
-                postShader.SetInt("uScene", 0);
-                post.Draw();
-            }
+            pipeline.Execute(ctx);
 
             // --- UI: худ (виджеты) + immediate-mode (хотбар/подсказки/крафт) +
             // всё, что построила Lua через UIManager (пусто, пока ни один
