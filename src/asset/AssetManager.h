@@ -30,9 +30,9 @@
 // Использование:
 //   auto& assets = AssetManager::Instance();
 //   assets.SetAssetRoot("assets");
-//   Asset<Texture> atlas = assets.LoadTexture("textures/blocks_atlas.png", TextureFilter::Nearest, false);
-//   Asset<Shader>  voxel = assets.LoadShader("shaders/voxel.vert", "shaders/voxel.frag");
-//   ... в кадре: atlas->Bind(0);  voxel->Use();
+//   Asset<Texture> atlas = assets.LoadTexture("textures/atlas.png", TextureFilter::Nearest, false);
+//   Asset<Shader>  basic = assets.LoadShader("shaders/basic.vert", "shaders/basic.frag");
+//   ... в кадре: atlas->Bind(0);  basic->Use();
 //   ... раз в N кадров (dev): assets.PollHotReload();
 // ---------------------------------------------------------------------
 class AssetManager {

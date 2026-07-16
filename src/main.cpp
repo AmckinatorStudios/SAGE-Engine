@@ -1,30 +1,16 @@
 // ============================================================================
-// The Boat (альфа) на SAGE Engine.
+// SAGE Engine — generic bootstrap.
 //
-// Концепт: бесконечный спокойный океан. Игрок — на небольшом корабле,
-// который "плывёт вперёд" (корабль в мире статичен, океан и мусор движутся
-// мимо — так проще и стабильнее для воксельной структуры). Корабль целиком
-// построен из игровых блоков: его можно ломать, перестраивать и достраивать.
-// Из воды вылавливается мусор, из мусора крафтятся блоки, удочка и пресная
-// вода. Рыбу можно поймать, пожарить на печке и съесть. У игрока четыре
-// стата: здоровье, энергия, голод, жажда. Время суток сменяется, ночью
-// разгораются корабельные фонари. Игра про атмосферу и расслабленность.
-//
-// Управление:
-//   WASD — ходьба, Shift — бег, Space — прыжок (в воде — грести вверх)
-//   Мышь — взгляд; ЛКМ — сломать блок / подсечь рыбу
-//   ПКМ — использовать предмет в руке (поставить блок / закинуть удочку /
-//         пожарить рыбу на печке / съесть / выпить)
-//   1..9, колесо — хотбар; F — подобрать мусор; Tab — меню крафта
-//   V — noclip (режим полёта для стройки), F2 — скриншот, F3 — debug HUD
-//   F4 — панель настроек (интерактивный UI: тумблеры/кнопки мышью)
-//
-// Устройство файла (после рефакторинга): main() отвечает только за
-// инициализацию ресурсов и цикл "ввод -> симуляция -> рендер". Вся игровая
-// логика живёт в src/game/:
-//   GameState.h     — состояние партии (мир, игрок, инвентарь, системы)
-//   PlayerActions.h — реакция на ввод (ломать/ставить/крафтить/есть)
-//   GameHud.h        — отрисовка игрового интерфейса
+// Часть Фазы 1 масштабного рефакторинга: старая игра The Boat (воксельный
+// мир, рыбалка/крафт/статы/HUD, ручной voxel-AABB PlayerController) удалена
+// целиком (src/game/*, src/voxel/*) — движок больше не тянет за собой ни
+// строки конкретной игровой логики. main() ниже — это ТОЛЬКО инициализация
+// движковых подсистем и цикл "ввод -> скрипты -> рендер", без какой-либо
+// игровой механики (даже передвижение игрока сюда сознательно не
+// возвращается — оно появится позже как Lua-скрипт поверх физического API
+// из Фазы 3). Полная генерализация (games/<name>/, SAGE_GAME) — Фаза 5;
+// сейчас это промежуточный смок-тест движка: окно, куб, ScriptEngine,
+// гоняющий Lua-скрипт по SAGE_RUN_DEMO_SCRIPT.
 // ============================================================================
 #include <cstdlib>
 #include <cstdio>
@@ -53,6 +39,7 @@
 #include "render/Texture.h"
 #include "render/Skybox.h"
 #include "render/BillboardSystem.h"
+#include "render/ParticleSystem.h"
 #include "render/LightingUpload.h"
 #include "render/Screenshot.h"
 #include "render/DebugOverlay.h"
@@ -69,107 +56,23 @@
 #include "ui/UICanvas.h"
 #include "ui/Widgets.h"
 #include "ui/UIManager.h"
-#include "game/GameActions.h"
-#include "game/GameState.h"
-#include "game/PlayerActions.h"
-#include "game/GameHud.h"
+#include "scene/Scene.h"
+#include "audio/AudioEngine.h"
+#include "scripting/ScriptEngine.h"
 
 namespace {
 
-constexpr float kNoclipFlySpeed = 10.0f; // м/с, свободный полёт в режиме noclip (см. UpdateNoclipFly)
-
-// Полусторона ортобокса карты теней вокруг центра корабля — накрывает весь
-// корабль плюс воду вокруг него с запасом (см. ShadowMap::SetLightMatrix).
-constexpr float kShadowRadius = 24.0f;
-
 // Читает позицию/угол камеры и время суток из переменных окружения —
 // используется автотестами/CI для детерминированных скриншотов без
-// реального ввода (см. SAGE_CAM_POS/YAW/PITCH, SAGE_TIME_OF_DAY, SAGE_NOCLIP).
-void ApplyDebugEnvOverrides(GameState& game, Camera& camera) {
+// реального ввода.
+void ApplyDebugEnvOverrides(Camera& camera) {
     if (const char* posEnv = std::getenv("SAGE_CAM_POS")) {
         float x, y, z;
-        if (std::sscanf(posEnv, "%f,%f,%f", &x, &y, &z) == 3) game.Player.Position = {x, y, z};
+        if (std::sscanf(posEnv, "%f,%f,%f", &x, &y, &z) == 3) camera.Position = {x, y, z};
     }
     if (const char* yawEnv = std::getenv("SAGE_CAM_YAW")) camera.Yaw = (float)std::atof(yawEnv);
     if (const char* pitchEnv = std::getenv("SAGE_CAM_PITCH")) camera.Pitch = (float)std::atof(pitchEnv);
-    if (const char* t = std::getenv("SAGE_TIME_OF_DAY")) game.DayNight.SetTimeOfDay((float)std::atof(t));
-    if (std::getenv("SAGE_NOCLIP")) game.Noclip = true;
-    if (std::getenv("SAGE_FORCE_COOKING")) game.CookTimer = 999.0f; // для CI-скриншотов эффекта готовки/дыма
-    if (std::getenv("SAGE_DEBUG_HUD")) game.DebugHudVisible = true;
-    if (std::getenv("SAGE_FORCE_BITE")) {
-        game.Fishing.Cast(camera.Position, camera.Front, GameConstants::SeaLevel);
-        game.Fishing.DebugForceBite();
-    }
     camera.ProcessMouse(0.0f, 0.0f); // пересчитать Front/Right/Up после ручной правки Yaw/Pitch
-}
-
-// Собирает худ (статбары + часы) из виджетов UI-системы движка. Виджеты
-// сами тянут актуальные значения через ValueSource/TextSource каждый кадр —
-// после сборки этот канвас не нужно больше трогать вручную.
-UICanvas BuildStatsHud(GameState& game) {
-    UICanvas hud;
-    struct BarDef { const char* label; float PlayerStats::* field; glm::vec3 color; };
-    // Порядок принципиален: здоровье, энергия, голод, жажда
-    BarDef defs[] = {
-        {"HP", &PlayerStats::Health, {0.85f, 0.25f, 0.25f}},
-        {"EN", &PlayerStats::Energy, {0.95f, 0.85f, 0.30f}},
-        {"FD", &PlayerStats::Hunger, {0.90f, 0.55f, 0.20f}},
-        {"WT", &PlayerStats::Thirst, {0.30f, 0.60f, 0.95f}},
-    };
-    for (int i = 0; i < 4; ++i) {
-        auto* bar = hud.Add<UIProgressBar>();
-        bar->Anchor = UIAnchor::TopLeft;
-        bar->Offset = {16.0f, 16.0f + i * 24.0f};
-        bar->Size = {180.0f, 16.0f};
-        bar->Label = defs[i].label;
-        bar->FillColor = defs[i].color;
-        float PlayerStats::* field = defs[i].field;
-        bar->ValueSource = [&game, field] { return game.Stats.*field / 100.0f; };
-    }
-
-    auto* clockPanel = hud.Add<UIPanel>();
-    clockPanel->Anchor = UIAnchor::TopRight;
-    clockPanel->Offset = {12.0f, 12.0f};
-    clockPanel->Size = {172.0f, 26.0f};
-    clockPanel->Color = {0.0f, 0.0f, 0.0f};
-    clockPanel->Alpha = 0.5f;
-
-    auto* clockLabel = hud.Add<UILabel>();
-    clockLabel->Anchor = UIAnchor::TopRight;
-    clockLabel->Offset = {20.0f, 18.0f};
-    clockLabel->Scale = 2.0f;
-    clockLabel->TextSource = [&game] {
-        return "Day " + std::to_string(game.DayCounter) + "  " + game.DayNight.ClockString();
-    };
-    return hud;
-}
-
-// Читает действия движения и превращает их в желаемое направление в
-// горизонтальной плоскости (относительно текущего взгляда камеры)
-glm::vec3 ReadMoveDirection(InputMap& actions, const Camera& camera) {
-    glm::vec3 flatFront = glm::normalize(glm::vec3(camera.Front.x, 0.0f, camera.Front.z));
-    glm::vec3 flatRight = glm::normalize(glm::vec3(camera.Right.x, 0.0f, camera.Right.z));
-    glm::vec3 dir(0.0f);
-    if (actions.IsDown(GameActions::MoveForward)) dir += flatFront;
-    if (actions.IsDown(GameActions::MoveBackward)) dir -= flatFront;
-    if (actions.IsDown(GameActions::MoveLeft)) dir -= flatRight;
-    if (actions.IsDown(GameActions::MoveRight)) dir += flatRight;
-    return dir;
-}
-
-// Свободный полёт (ToggleNoclip) для стройки/отладки — минует физику и статы целиком
-void UpdateNoclipFly(GameState& game, InputMap& actions, const Camera& camera, float dt) {
-    glm::vec3 fly(0.0f);
-    if (actions.IsDown(GameActions::MoveForward)) fly += camera.Front;
-    if (actions.IsDown(GameActions::MoveBackward)) fly -= camera.Front;
-    if (actions.IsDown(GameActions::MoveLeft)) fly -= camera.Right;
-    if (actions.IsDown(GameActions::MoveRight)) fly += camera.Right;
-    if (actions.IsDown(GameActions::FlyUp)) fly += glm::vec3(0, 1, 0);
-    if (actions.IsDown(GameActions::FlyDown)) fly -= glm::vec3(0, 1, 0);
-    if (glm::length(fly) > 0.001f) {
-        game.Player.Position += glm::normalize(fly) * kNoclipFlySpeed * dt;
-    }
-    game.Player.Velocity = glm::vec3(0.0f);
 }
 
 // Самопроверка асинхронной подсистемы (JobSystem + MainThreadDispatcher +
@@ -346,110 +249,29 @@ bool RunUISelfTest() {
     return ok;
 }
 
-// Панель настроек (F4) — витрина всех компонентов UI: подложка (UIPanel),
-// заголовок и подписи (UILabel), иконка (UISprite), полоски статов
-// (UIProgressBar), тумблеры (UIToggle) и кнопки (UIButton). Виджеты сами тянут
-// актуальные значения и правят реальное состояние игры/движка через источники
-// и колбэки — после сборки канвас трогать вручную не нужно. ReferenceSize
-// включает масштабирование под соотношение сторон окна.
-UICanvas BuildSettingsPanel(GameState& game, bool& postEnabled, bool& shadowsEnabled,
-                            const Texture& iconTexture, Window& window,
-                            const std::string& screenshotPath) {
-    UICanvas panel;
-    panel.ReferenceSize = {1280.0f, 720.0f};
-
-    auto* bg = panel.Add<UIPanel>();
-    bg->Anchor = UIAnchor::Center; bg->Size = {460.0f, 500.0f};
-    bg->Color = {0.05f, 0.06f, 0.09f}; bg->Alpha = 0.94f;
-    bg->OutlineThickness = 2.0f; bg->OutlineColor = {0.82f, 0.76f, 0.6f};
-
-    auto* title = panel.Add<UILabel>();
-    title->Anchor = UIAnchor::Center; title->Offset = {0.0f, -210.0f}; title->Size = {460.0f, 0.0f};
-    title->CenterInSize = true; title->Text = "SETTINGS"; title->Scale = 3.0f;
-
-    auto* icon = panel.Add<UISprite>();
-    icon->Anchor = UIAnchor::Center; icon->Offset = {0.0f, -150.0f}; icon->Size = {56.0f, 56.0f};
-    icon->KeepAspect = true; icon->SpriteTexture = &iconTexture;
-
-    // Полоски статов (демонстрация UIProgressBar с динамическим источником)
-    struct BarDef { const char* label; float PlayerStats::* field; glm::vec3 color; float y; };
-    BarDef bars[] = {
-        {"HP", &PlayerStats::Health, {0.85f, 0.25f, 0.25f}, -95.0f},
-        {"EN", &PlayerStats::Energy, {0.95f, 0.85f, 0.30f}, -68.0f},
-    };
-    for (const BarDef& d : bars) {
-        auto* bar = panel.Add<UIProgressBar>();
-        bar->Anchor = UIAnchor::Center; bar->Offset = {0.0f, d.y}; bar->Size = {300.0f, 18.0f};
-        bar->Label = d.label; bar->FillColor = d.color;
-        float PlayerStats::* field = d.field;
-        bar->ValueSource = [&game, field] { return game.Stats.*field / 100.0f; };
-    }
-
-    // Тумблеры (UIToggle) — правят реальные флаги рендера/движка
-    struct ToggleDef { const char* label; float y; std::function<bool()> get; std::function<void(bool)> set; };
-    ToggleDef toggles[] = {
-        {"Post-processing", -20.0f, [&postEnabled]{ return postEnabled; }, [&postEnabled](bool v){ postEnabled = v; }},
-        {"Shadows",          15.0f, [&shadowsEnabled]{ return shadowsEnabled; }, [&shadowsEnabled](bool v){ shadowsEnabled = v; }},
-        {"Asset hot-reload", 50.0f, []{ return AssetManager::Instance().HotReloadEnabled(); },
-                                    [](bool v){ AssetManager::Instance().EnableHotReload(v); }},
-    };
-    for (const ToggleDef& d : toggles) {
-        auto* t = panel.Add<UIToggle>();
-        t->Anchor = UIAnchor::Center; t->Offset = {-150.0f, d.y}; t->Size = {52.0f, 24.0f};
-        t->Label = d.label; t->ValueSource = d.get; t->OnChanged = d.set;
-    }
-
-    // Кнопки (UIButton) — действия
-    struct ButtonDef { const char* label; float y; std::function<void()> onClick; };
-    ButtonDef buttons[] = {
-        {"Screenshot", 110.0f, [&window, &screenshotPath]{ SaveScreenshot(screenshotPath, window.Width(), window.Height()); }},
-        {"Reload assets", 155.0f, []{ AssetManager::Instance().ReloadAll(); }},
-        {"Close", 200.0f, [&game]{ game.UiPanelOpen = false; }},
-    };
-    for (const ButtonDef& d : buttons) {
-        auto* b = panel.Add<UIButton>();
-        b->Anchor = UIAnchor::Center; b->Offset = {0.0f, d.y}; b->Size = {200.0f, 38.0f};
-        b->Label = d.label; b->OnClick = d.onClick;
-    }
-    return panel;
-}
-
 } // namespace
 
 int main() {
     Log::Init("sage_engine.log");
-    LOG_INFO("Game") << "The Boat (alpha) v" << kSageEngineVersion << " запускается...";
+    LOG_INFO("Engine") << "SAGE Engine v" << kSageEngineVersion << " запускается...";
 
     try {
-        // Размер и заголовок окна настраиваются через переменные окружения —
-        // тот же паттерн, что и остальные SAGE_* debug-переопределения ниже
-        // (см. ApplyDebugEnvOverrides), чтобы не редактировать код движка
-        // ради другого разрешения при разработке/тестировании.
         int windowWidth = 1280;
         int windowHeight = 720;
         if (const char* w = std::getenv("SAGE_WINDOW_WIDTH")) windowWidth = std::atoi(w);
         if (const char* h = std::getenv("SAGE_WINDOW_HEIGHT")) windowHeight = std::atoi(h);
-        std::string windowTitle = std::string("The Boat (alpha) v") + kSageEngineVersion + " - SAGE Engine";
+        std::string windowTitle = std::string("SAGE Engine v") + kSageEngineVersion;
 
         Window window(windowWidth, windowHeight, windowTitle);
 
-        // Формальное владение жизненным циклом движковых подсистем (пул
-        // фоновых задач + единая система ассетов): поднимает их в правильном
-        // порядке, гарантированно гасит в обратном при выходе из этой области
-        // видимости (в т.ч. на раннем return self-тестов ниже и при
-        // исключении) — включая GL-очистку AssetManager ПОКА GL-контекст ещё
-        // жив (window объявлено раньше engine, поэтому при разрушении стека
-        // engine.Shutdown() отработает первым — см. core/EngineRuntime.h).
-        // Hot-reload ассетов (перечитывать изменённые шейдеры/текстуры на
-        // лету) включается SAGE_HOT_RELOAD, удобно при разработке; в проде
-        // выключен = без накладных stat-ов.
+        // Формальное владение жизненным циклом движковых подсистем — см.
+        // core/EngineRuntime.h. Hot-reload ассетов включается SAGE_HOT_RELOAD.
         EngineConfig engineConfig;
         engineConfig.HotReload = (std::getenv("SAGE_HOT_RELOAD") != nullptr);
         EngineRuntime engine(engineConfig);
 
-        // Самопроверка async + системы ассетов для CI/отладки — прогоняет пул
-        // задач, async-загрузку, кэш/дедуп, hot-reload и статистику на реальном
-        // GL-контексте, затем выходит, не запуская игру. Партии не касается.
+        // Самопроверки для CI/отладки — прогоняют подсистему и выходят, не
+        // запуская основной цикл.
         if (std::getenv("SAGE_TEST_ASYNC")) {
             bool passed = RunAsyncSelfTest();
             return passed ? 0 : 1;
@@ -461,45 +283,42 @@ int main() {
 
         InputSystem input;
         input.Attach(window.Handle());
-        GameActions::RegisterDefaultBindings(input);
-        // Необязательный файл настроек рядом с игрой — переопределяет
-        // раскладку по умолчанию без пересборки (см. GameActions.h).
-        GameActions::LoadBindingsFromFile(input.Actions(), "keybindings.cfg");
+        // Минимальный набор действий для смок-теста рантайма (свободная
+        // камера-полёт) — это движковая утилита (Camera::ProcessKeyboard уже
+        // часть ядра), не игровая механика. Настоящее передвижение игрока с
+        // коллизией/гравитацией появится позже как Lua-скрипт поверх
+        // физического API (см. план, Фаза 3), не здесь.
+        InputMap& actions = input.Actions();
+        actions.Register("FlyForward").Bind(InputBinding::Key(GLFW_KEY_W));
+        actions.Register("FlyBackward").Bind(InputBinding::Key(GLFW_KEY_S));
+        actions.Register("FlyLeft").Bind(InputBinding::Key(GLFW_KEY_A));
+        actions.Register("FlyRight").Bind(InputBinding::Key(GLFW_KEY_D));
+        actions.Register("FlyUp").Bind(InputBinding::Key(GLFW_KEY_SPACE));
+        actions.Register("FlyDown").Bind(InputBinding::Key(GLFW_KEY_LEFT_CONTROL));
+        actions.Register("Quit").Bind(InputBinding::Key(GLFW_KEY_ESCAPE));
+        actions.Register("Screenshot").Bind(InputBinding::Key(GLFW_KEY_F2));
+        actions.Register("ToggleDebugHud").Bind(InputBinding::Key(GLFW_KEY_F3));
         glfwSetInputMode(window.Handle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // ---- Рендер-ресурсы (через единую систему ассетов) ----
-        // Держим хендлы Asset<Shader>/Asset<Texture> живыми (пока они в области
-        // видимости, ассет не выгрузится), а работаем через ссылки — тогда весь
-        // код ниже не меняется, а hot-reload обновляет ту же программу/текстуру
-        // НА МЕСТЕ, и ссылки остаются валидны. Пути — относительно asset-root.
+        // ---- Рендер-ресурсы ----
         AssetManager& assets = AssetManager::Instance();
         auto loadShader = [&](const char* v, const char* f) -> Asset<Shader> {
             Asset<Shader> s = assets.LoadShader(v, f);
             if (!s.IsReady()) throw std::runtime_error(std::string("Не удалось загрузить шейдер: ") + v);
             return s;
         };
-        Asset<Shader> voxelShaderA      = loadShader("shaders/voxel.vert", "shaders/voxel.frag");
-        Asset<Shader> waterShaderA      = loadShader("shaders/water.vert", "shaders/water.frag");
-        Asset<Shader> basicShaderA      = loadShader("shaders/basic.vert", "shaders/basic.frag");
-        Asset<Shader> skyboxShaderA     = loadShader("shaders/skybox.vert", "shaders/skybox.frag");
-        Asset<Shader> particleShaderA   = loadShader("shaders/particle.vert", "shaders/particle.frag");
-        Asset<Shader> billboardShaderA  = loadShader("shaders/billboard.vert", "shaders/billboard.frag");
-        Shader& voxelShader = *voxelShaderA;
-        Shader& waterShader = *waterShaderA;
+        Asset<Shader> basicShaderA     = loadShader("shaders/basic.vert", "shaders/basic.frag");
+        Asset<Shader> skyboxShaderA    = loadShader("shaders/skybox.vert", "shaders/skybox.frag");
+        Asset<Shader> particleShaderA  = loadShader("shaders/particle.vert", "shaders/particle.frag");
+        Asset<Shader> billboardShaderA = loadShader("shaders/billboard.vert", "shaders/billboard.frag");
         Shader& basicShader = *basicShaderA;
         Shader& skyboxShader = *skyboxShaderA;
         Shader& particleShader = *particleShaderA;
         Shader& billboardShader = *billboardShaderA;
 
-        // Пост-процессинг — через движковый проход (см. PostProcessPass.h):
-        // сам грузит свой шейдер через AssetManager и владеет своим FBO.
-        // Проход теней (ShadowPass) создаётся ниже прямо внутри пайплайна —
-        // он единственный, отдельный локальной переменной не дублируем. Оба
-        // можно отключить env-флагом (SAGE_NO_POST / SAGE_NO_SHADOWS) —
-        // удобно для сравнения "до/после".
         PostProcessPass postProcessPass(window.Width(), window.Height());
         bool postEnabled = (std::getenv("SAGE_NO_POST") == nullptr);
         bool shadowsEnabled = (std::getenv("SAGE_NO_SHADOWS") == nullptr);
@@ -510,122 +329,74 @@ int main() {
             "assets/textures/skybox/py.png", "assets/textures/skybox/ny.png",
             "assets/textures/skybox/pz.png", "assets/textures/skybox/nz.png"
         });
-        auto loadTexture = [&](const char* p, TextureFilter fil, bool mip) -> Asset<Texture> {
-            Asset<Texture> t = assets.LoadTexture(p, fil, mip);
-            if (!t.IsReady()) throw std::runtime_error(std::string("Не удалось загрузить текстуру: ") + p);
-            return t;
-        };
-        Asset<Texture> blockAtlasA = loadTexture("textures/blocks_atlas.png", TextureFilter::Nearest, /*mip=*/false);
-        Asset<Texture> alertIconA  = loadTexture("textures/icon_alert.png", TextureFilter::Bilinear, /*mip=*/true);
-        Texture& blockAtlas = *blockAtlasA;
-        Texture& alertIcon = *alertIconA;
 
         BillboardSystem billboards;
-        // Иконка "клюёт!" над поплавком — создаём один раз, скрытую, и
-        // просто переключаем видимость/позицию по состоянию рыбалки каждый
-        // кадр, вместо Add/Remove (дешевле и демонстрирует типичный паттерн
-        // использования системы для долгоживущего маркера).
-        int biteIconId = billboards.Add({
-            glm::vec3(0.0f), glm::vec2(0.45f, 0.45f), &alertIcon,
-            glm::vec4(1.0f), 0.0f, BillboardPivot::Bottom, /*visible=*/false
-        });
-
         UIRenderer ui;
         DebugOverlay debugOverlay;
-        Asset<Mesh> cubeMesh = assets.Cube(); // мусор, поплавок (процедурный куб)
+        Asset<Mesh> cubeMesh = assets.Cube();
 
         Camera camera;
+        camera.Position = {0.0f, 2.0f, 6.0f};
 
-        // ---- Игровое состояние: мир, корабль, игрок, инвентарь, системы ----
-        GameState game;
+        // ---- Сцена + скриптинг движка ----
+        // ВАЖНО про порядок объявления: Scripts должен пережить SceneData
+        // (объекты сцены могут держать sol::table в LuaData) — объявляем
+        // ScriptEngine ПЕРЕД Scene (C++ разрушает члены в обратном порядке
+        // объявления, Scripts разрушится последним).
+        ScriptEngine scripts;
+        Scene scene("Untitled");
+        ParticleSystem particles;
+        AudioEngine audio;
 
-        // UI, полностью управляемый из Lua (CreateCanvas/AddPanel/.../
-        // SetWidget* — см. ScriptEngine::BindUI): держит именованные канвасы
-        // и реестр виджетов по id. Независим от статHUD/settingsPanel ниже
-        // (те — рукописный C++ UI игры The Boat, не трогаем) — это отдельная
-        // движковая возможность для игр, которые строят весь свой интерфейс
-        // скриптом (см. план: часть B).
-        //
-        // ВАЖНО про порядок объявления: scriptUi объявлен ПОСЛЕ game
-        // специально. UIButton/UIToggle держат Lua-колбэки (OnClick/
-        // OnChanged — sol::protected_function в std::function), а C++
-        // уничтожает локальные переменные в ОБРАТНОМ порядке объявления —
-        // значит scriptUi разрушится ПЕРВЫМ (пока game.Scripts и её
-        // sol::state ещё живы), а game — вторым. Если бы порядок был
-        // обратным, разрушение этих колбэков обращалось бы к уже мёртвому
-        // lua_State (тот же класс бага, что был исправлен в GameState —
-        // см. комментарий у полей Scripts/SceneData в game/GameState.h).
+        // UI, полностью управляемый из Lua (см. ScriptEngine::BindUI).
+        // Объявлена ПОСЛЕ scripts специально — виджеты держат Lua-колбэки
+        // (sol::protected_function), должны разрушиться ДО sol::state внутри
+        // scripts (обратный порядок объявления это обеспечивает).
         UIManager scriptUi;
 
-        // Шина событий (pub/sub) движка: скрипты общаются слабо связанно
-        // через On/Emit/Off (см. ScriptEngine::BindEvents), C++ может слушать/
-        // публиковать через ту же EventBus. Объявлена ПОСЛЕ game по той же
-        // причине, что и scriptUi: подписки хранят Lua-замыкания
-        // (sol::protected_function), поэтому шина должна разрушиться РАНЬШЕ
-        // sol::state внутри game.Scripts — обратный порядок объявления это
-        // и обеспечивает.
+        // Шина событий движка (см. ScriptEngine::BindEvents) — та же причина
+        // порядка объявления, что у scriptUi (подписки держат Lua-замыкания).
         EventBus eventBus;
 
-        // Camera/billboards созданы раньше GameState — привязка снаружи неё,
-        // как и InputSystem выше. ParticleSystem же живёт внутри GameState,
-        // поэтому её привязываем на неё саму (game.Particles). Все Bind*
-        // должны отработать ДО RunScript() ниже — иначе демо-скрипт упадёт
-        // на первом же обращении к ещё не привязанной системе.
-        game.Scripts.BindInput(input.Actions());
-        game.Scripts.BindCamera(camera);
-        game.Scripts.BindParticles(game.Particles);
-        game.Scripts.BindBillboards(billboards);
-        game.Scripts.BindAudio(game.Audio);
-        game.Scripts.BindUI(scriptUi);
-        game.Scripts.BindEvents(eventBus);
+        scripts.BindScene(scene);
+        scripts.BindInput(actions);
+        scripts.BindCamera(camera);
+        scripts.BindParticles(particles);
+        scripts.BindBillboards(billboards);
+        scripts.BindAudio(audio);
+        scripts.BindUI(scriptUi);
+        scripts.BindEvents(eventBus);
 
-        // demo_features.lua — витрина расширенного Lua-API движка (спавн
-        // объектов, таймеры, корутины, камера, частицы, билборды), никак не
-        // относится к геймплею The Boat — только по явному запросу, как и
-        // остальные SAGE_* debug-флаги.
+        // Один куб на сцене — минимальный смок-объект, доказывающий, что
+        // рендер-пайплайн ниже реально что-то рисует до появления полноценной
+        // Lua-игры (Фаза 5).
+        GameObject& smokeCube = scene.CreateObject("SmokeTestCube");
+        smokeCube.MeshComponent = cubeMesh.Shared();
+        smokeCube.Color = {0.6f, 0.75f, 0.9f};
+
+        // demo_features.lua — витрина Lua-API движка (спавн объектов, таймеры,
+        // корутины, камера, частицы, билборды, JSON, события, сцены) — не
+        // относится ни к какой конкретной игре, запускается только по явному
+        // запросу, как и остальные SAGE_* debug-флаги.
         if (std::getenv("SAGE_RUN_DEMO_SCRIPT")) {
-            game.Scripts.RunScript("assets/scripts/demo_features.lua");
+            scripts.RunScript("assets/scripts/demo_features.lua");
         }
 
-        UICanvas statsHud = BuildStatsHud(game);
-        ApplyDebugEnvOverrides(game, camera);
+        ApplyDebugEnvOverrides(camera);
 
-        // Путь скриншота — общий для F2 (ручной, по хоткею) и автоскриншота
-        // для CI/тестов (по кадру); раньше F2 был захардкожен на
-        // "screenshot.png" отдельно от переопределяемого CI-пути, из-за чего
-        // SAGE_SCREENSHOT_PATH молча не действовал на ручной скриншот.
         std::string screenshotPath = "screenshot.png";
         if (const char* pathEnv = std::getenv("SAGE_SCREENSHOT_PATH")) screenshotPath = pathEnv;
 
-        // Интерактивная панель настроек (F4): витрина всех UI-компонентов,
-        // правит реальные флаги (пост/тени/hot-reload) и делает скриншот/
-        // перезагрузку ассетов. Пока открыта — курсор виден, взгляд/движение
-        // заморожены, клики идут в UI, а не в мир.
-        UICanvas settingsPanel = BuildSettingsPanel(game, postEnabled, shadowsEnabled,
-                                                    alertIcon, window, screenshotPath);
-        bool prevUiMouseDown = false;
-        if (std::getenv("SAGE_OPEN_UI_PANEL")) game.UiPanelOpen = true; // для скриншота/CI
-
-        // ---- Автоскриншот для CI/тестов ----
         int autoScreenshotFrame = -1;
         if (const char* frameEnv = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) autoScreenshotFrame = std::atoi(frameEnv);
         int frameCounter = 0;
 
-        LOG_INFO("Game") << "Мир создан. Корабль в (" << game.Ship.Center.x << ", "
-                          << game.Ship.Center.y << ", " << game.Ship.Center.z << ")";
+        LOG_INFO("Engine") << "Сцена создана: " << scene.Objects().size() << " объект(ов)";
 
-        // Отрисовка отбрасывающей тень геометрии (корабль + заспавненные
-        // скриптами объекты) для depth-прохода теней. Один depth-шейдер годится
-        // и для воксельных чанков, и для обычных мешей — позиция у обоих в
-        // location 0 (см. shadow_depth.vert). Вода не кастит (плоская), только
-        // принимает тень.
+        // Отрисовка отбрасывающей тень геометрии — сцена целиком (объекты,
+        // заспавненные Lua-скриптами, включая smokeCube выше).
         auto drawShadowCasters = [&](Shader& depthShader) {
-            for (auto& [coord, chunk] : game.Terrain.Chunks()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(chunk->WorldPos()));
-                depthShader.SetMat4("uModel", model);
-                chunk->Mesh().Draw();
-            }
-            for (auto& object : game.SceneData.Objects()) {
+            for (auto& object : scene.Objects()) {
                 if (!object->MeshComponent) continue;
                 depthShader.SetMat4("uModel", object->TransformComponent.GetMatrix());
                 object->MeshComponent->Draw();
@@ -633,12 +404,7 @@ int main() {
         };
 
         // ---- Рендер-пайплайн: собирается ОДИН РАЗ, дальше каждый кадр —
-        // просто pipeline.Execute(ctx) (см. render/RenderPipeline.h). Тени и
-        // пост-процесс — движковые проходы (ShadowPass/PostProcessPass, сами
-        // владеют своими шейдерами/FBO); содержимое сцены — CallbackPass с
-        // игровым кодом The Boat (воксельный корабль, вода, мусор, скриптовые
-        // объекты, частицы, билборды), который раньше был вписан прямо в
-        // тело главного цикла построчно вперемешку с generic-оркестрацией.
+        // просто pipeline.Execute(ctx) (см. render/RenderPipeline.h).
         RenderPipeline pipeline;
 
         ShadowPass* shadowPassPtr = pipeline.Add<ShadowPass>(2048);
@@ -649,31 +415,13 @@ int main() {
         pipeline.Add<CallbackPass>([&](RenderContext& ctx) { postProcessPass.Begin(ctx); });
 
         pipeline.Add<CallbackPass>([&](RenderContext& ctx) {
-            // Карта теней на юнит 1 — общая для voxel/basic/water на весь
-            // проход (юнит 0 занят их собственными текстурами: атлас/спрайт).
             unsigned int shadowTex = ctx.Shadows ? ctx.Shadows->DepthTexture() : 0;
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, shadowTex);
             glm::mat4 lightMatrix = ctx.Shadows ? ctx.Shadows->LightMatrix() : glm::mat4(1.0f);
 
-            skybox.Draw(skyboxShader, ctx.View, ctx.Proj, game.DayNight.SkyTint());
+            skybox.Draw(skyboxShader, ctx.View, ctx.Proj, glm::vec3(1.0f));
 
-            // --- корабль (воксельные чанки) ---
-            voxelShader.Use();
-            voxelShader.SetMat4("uView", ctx.View);
-            voxelShader.SetMat4("uProjection", ctx.Proj);
-            UploadLighting(voxelShader, *ctx.Lighting);
-            UploadShadowUniforms(voxelShader, lightMatrix, 1, ctx.ShadowsEnabled);
-            blockAtlas.Bind(0);
-            voxelShader.SetInt("uAtlas", 0);
-            voxelShader.SetInt("uUseTexture", 1);
-            for (auto& [coord, chunk] : game.Terrain.Chunks()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(chunk->WorldPos()));
-                voxelShader.SetMat4("uModel", model);
-                chunk->Mesh().Draw();
-            }
-
-            // --- мусор и поплавок (обычные меши) ---
             basicShader.Use();
             basicShader.SetMat4("uView", ctx.View);
             basicShader.SetMat4("uProjection", ctx.Proj);
@@ -682,56 +430,14 @@ int main() {
             UploadShadowUniforms(basicShader, lightMatrix, 1, ctx.ShadowsEnabled);
             basicShader.SetInt("uUseTexture", 0);
 
-            for (const TrashItem& item : game.Trash.Items()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), item.Position);
-                model = glm::rotate(model, item.BobPhase * 0.4f, glm::vec3(0, 1, 0));
-                model = glm::scale(model, glm::vec3(0.35f));
-                basicShader.SetMat4("uModel", model);
-                basicShader.SetVec3("uObjectColor", GetItemFloatColor(item.Type));
-                cubeMesh->Draw();
-            }
-
-            // --- объекты сцены, заспавненные Lua-скриптами (game.Scripts) ---
-            for (auto& object : game.SceneData.Objects()) {
-                if (!object->MeshComponent) continue; // скрипт создал GameObject, но не назначил меш — не рисуем
+            for (auto& object : scene.Objects()) {
+                if (!object->MeshComponent) continue;
                 basicShader.SetMat4("uModel", object->TransformComponent.GetMatrix());
                 basicShader.SetVec3("uObjectColor", object->Color);
                 object->MeshComponent->Draw();
             }
 
-            if (game.Fishing.IsActive()) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), game.Fishing.VisualBobberPosition());
-                model = glm::scale(model, glm::vec3(0.16f));
-                basicShader.SetMat4("uModel", model);
-                basicShader.SetVec3("uObjectColor", glm::vec3(0.9f, 0.15f, 0.1f));
-                cubeMesh->Draw();
-            }
-
-            // Иконка "клюёт!" — billboard над поплавком, видна только в
-            // момент поклёвки (демонстрация BillboardSystem: долгоживущий
-            // маркер, у которого меняется позиция/видимость, а не Add/Remove)
-            bool isBiting = game.Fishing.CurrentState() == FishingSystem::State::Bite;
-            billboards.SetVisible(biteIconId, isBiting);
-            if (isBiting) {
-                billboards.SetPosition(biteIconId, game.Fishing.VisualBobberPosition() + glm::vec3(0.0f, 0.25f, 0.0f));
-            }
-
-            // --- океан (после непрозрачного: полупрозрачная вода) ---
-            waterShader.Use();
-            waterShader.SetMat4("uView", ctx.View);
-            waterShader.SetMat4("uProjection", ctx.Proj);
-            waterShader.SetVec3("uViewPos", ctx.Cam->Position);
-            waterShader.SetFloat("uTime", ctx.Time);
-            waterShader.SetFloat("uScrollSpeed", 2.0f);
-            waterShader.SetVec2("uCenter", glm::vec2(game.Player.Position.x, game.Player.Position.z));
-            UploadLighting(waterShader, *ctx.Lighting);
-            UploadShadowUniforms(waterShader, lightMatrix, 1, ctx.ShadowsEnabled);
-            game.Water.Draw();
-
-            // --- частицы (дым/искры/всплески) поверх воды, до UI ---
-            game.Particles.Draw(particleShader, *ctx.Cam, ctx.View, ctx.Proj);
-
-            // --- билборды (иконки/маркеры, всегда развёрнутые к камере) ---
+            particles.Draw(particleShader, *ctx.Cam, ctx.View, ctx.Proj);
             billboards.Draw(billboardShader, *ctx.Cam, ctx.View, ctx.Proj);
         });
 
@@ -739,10 +445,11 @@ int main() {
 
         float lastFrame = (float)glfwGetTime();
         float fpsTimer = 0.0f; int fpsFrames = 0; float fps = 0.0f;
+        bool debugHudVisible = false;
 
         while (!window.ShouldClose()) {
             float currentFrame = (float)glfwGetTime();
-            float deltaTime = std::min(currentFrame - lastFrame, 0.05f); // защита от рывка после паузы/лага
+            float deltaTime = std::min(currentFrame - lastFrame, 0.05f);
             lastFrame = currentFrame;
 
             fpsTimer += deltaTime; ++fpsFrames;
@@ -750,165 +457,61 @@ int main() {
 
             GLFWwindow* w = window.Handle();
 
-            // ================= ВВОД =================
-            // Один вызов Update() прогоняет ВСЕ зарегистрированные действия
-            // через их привязки (клавиатура/мышь/колесо) — дальше весь код
-            // читает именованные действия, а не сырые коды клавиш.
             input.Update(w);
-            // Пока открыта интерактивная панель — мышь управляет курсором UI,
-            // а не поворотом камеры (иначе взгляд бы крутился при наведении).
-            if (!game.UiPanelOpen) input.ApplyMouseDelta(camera);
-            InputMap& actions = input.Actions();
+            input.ApplyMouseDelta(camera);
 
-            if (actions.WasPressed(GameActions::QuitGame)) glfwSetWindowShouldClose(w, true);
-            if (actions.WasPressed(GameActions::Screenshot)) SaveScreenshot(screenshotPath, window.Width(), window.Height());
-            if (actions.WasPressed(GameActions::ToggleDebugHud)) game.DebugHudVisible = !game.DebugHudVisible;
-            if (actions.WasPressed(GameActions::ToggleNoclip)) {
-                game.Noclip = !game.Noclip;
-                game.ShowToast(game.Noclip ? "Noclip ON" : "Noclip OFF");
-            }
-            if (actions.WasPressed(GameActions::ToggleCrafting)) {
-                game.CraftMenuOpen = !game.CraftMenuOpen;
-                game.Audio.PlaySound2D(GameSounds::Pickup, 0.4f); // короткий UI-щелчок
-            }
-            if (actions.WasPressed(GameActions::ToggleUiPanel)) {
-                game.UiPanelOpen = !game.UiPanelOpen;
-                // Показываем/прячем системный курсор под интерактивный UI
-                glfwSetInputMode(w, GLFW_CURSOR, game.UiPanelOpen ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
-                game.Audio.PlaySound2D(GameSounds::Pickup, 0.4f);
-            }
+            if (actions.WasPressed("Quit")) glfwSetWindowShouldClose(w, true);
+            if (actions.WasPressed("Screenshot")) SaveScreenshot(screenshotPath, window.Width(), window.Height());
+            if (actions.WasPressed("ToggleDebugHud")) debugHudVisible = !debugHudVisible;
 
-            const char* const* hotbarSlots = GameActions::HotbarSlotNames();
-            for (int i = 0; i < Inventory::HotbarSize; ++i) {
-                if (actions.WasPressed(hotbarSlots[i])) game.Items.SelectSlot(i);
-            }
-            if (actions.WasPressed(GameActions::HotbarNext)) game.Items.ScrollSlot(1);
-            if (actions.WasPressed(GameActions::HotbarPrev)) game.Items.ScrollSlot(-1);
+            // Свободный полёт — движковая утилита для смок-теста, см. комментарий выше.
+            if (actions.IsDown("FlyForward")) camera.ProcessKeyboard(CameraMove::Forward, deltaTime);
+            if (actions.IsDown("FlyBackward")) camera.ProcessKeyboard(CameraMove::Backward, deltaTime);
+            if (actions.IsDown("FlyLeft")) camera.ProcessKeyboard(CameraMove::Left, deltaTime);
+            if (actions.IsDown("FlyRight")) camera.ProcessKeyboard(CameraMove::Right, deltaTime);
+            if (actions.IsDown("FlyUp")) camera.ProcessKeyboard(CameraMove::Up, deltaTime);
+            if (actions.IsDown("FlyDown")) camera.ProcessKeyboard(CameraMove::Down, deltaTime);
 
-            // Пока открыто меню крафта, клики мышью ему не передаются —
-            // иначе клик по пункту меню одновременно ломал бы блок под прицелом
-            bool craftMenuConsumedClicks = game.CraftMenuOpen;
-            if (game.CraftMenuOpen) {
-                PlayerActions::HandleCraftMenuInput(game, actions);
-            }
+            audio.SetListener(camera.Position, camera.Front, camera.Up);
 
-            // Интерактивная панель настроек: собираем состояние мыши из GLFW и
-            // прогоняем виджеты. Клики этого кадра "съедаются" панелью (в мир
-            // не идут). Фронт нажатия/отпускания считаем сами по prev-состоянию.
-            bool uiPanelConsumedClicks = game.UiPanelOpen;
-            if (game.UiPanelOpen) {
-                double mx, my; glfwGetCursorPos(w, &mx, &my);
-                bool lmb = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-                UIInputState uiIn;
-                uiIn.Mouse = {(float)mx, (float)my};
-                uiIn.MouseDown = lmb;
-                uiIn.MousePressed = lmb && !prevUiMouseDown;
-                uiIn.MouseReleased = !lmb && prevUiMouseDown;
-                prevUiMouseDown = lmb;
-                settingsPanel.Update(uiIn, (float)window.Width(), (float)window.Height());
-                // Тот же реальный курсор — для UI, полностью построенного из
-                // Lua (см. UIManager выше); канвасы, которые ничего не
-                // создали, просто не на что реагировать.
-                scriptUi.UpdateAll(uiIn, (float)window.Width(), (float)window.Height());
-            } else {
-                prevUiMouseDown = false;
-            }
+            scripts.UpdateAll(deltaTime);
 
-            // ================= ДВИЖЕНИЕ И ФИЗИКА =================
-            if (game.UiPanelOpen) {
-                // Панель открыта — движение и полёт заморожены (мышь/клики в UI)
-                game.Player.Velocity = glm::vec3(0.0f);
-            } else if (game.Noclip) {
-                UpdateNoclipFly(game, actions, camera, deltaTime);
-            } else {
-                glm::vec3 moveDir = game.CraftMenuOpen ? glm::vec3(0.0f) : ReadMoveDirection(actions, camera);
-                bool wantsJump = !game.CraftMenuOpen && actions.IsDown(GameActions::Jump);
-                bool wantsRun = !game.CraftMenuOpen && actions.IsDown(GameActions::Run);
-                game.Player.Update(game.Terrain, deltaTime, moveDir, wantsJump, wantsRun, game.Stats.CanRun());
-            }
-            camera.Position = game.Player.EyePosition();
-
-            // Слушатель 3D-звука едет с камерой — панорама/громкость позиционных
-            // звуков (всплески, установка блоков, поклёвка) считаются относительно
-            // взгляда игрока. Обновляем до Play* этого кадра.
-            game.Audio.SetListener(camera.Position, camera.Front, camera.Up);
-
-            // ================= СИМУЛЯЦИЯ (статы, сутки, мусор, рыбалка, готовка) =================
-            bool isExerting = !game.Noclip && game.Player.IsMovingFast();
-            game.UpdateSimulation(deltaTime, isExerting);
-
-            // ================= ДЕЙСТВИЯ ИГРОКА =================
-            PlayerActions::LookContext look = PlayerActions::ComputeLookContext(game, camera);
-
-            if (actions.WasPressed(GameActions::PickUpTrash) && !game.CraftMenuOpen && !game.UiPanelOpen) {
-                PlayerActions::PickUpTrash(game, look);
-            }
-            if (!craftMenuConsumedClicks && !uiPanelConsumedClicks && actions.WasPressed(GameActions::BreakOrHook)) {
-                PlayerActions::HandleLeftClick(game, look);
-            }
-            if (!craftMenuConsumedClicks && !uiPanelConsumedClicks && actions.WasPressed(GameActions::UseItem)) {
-                PlayerActions::HandleRightClick(game, camera, look);
-            }
-
-            game.Terrain.RebuildDirtyMeshes();
-
-            // Забираем результаты фоновых загрузок, готовые к GL-загрузке
-            // (создание текстур/мешей в главном потоке). Бюджет ~2 мс/кадр —
-            // пачка тяжёлых загрузок размазывается по кадрам, а не фризит один.
             MainThreadDispatcher::Instance().Drain(2.0);
-
-            // Hot-reload: перечитываем изменённые на диске ассеты (шейдеры/
-            // текстуры/модели) и обновляем их НА МЕСТЕ. No-op, если выключен
-            // (SAGE_HOT_RELOAD) — тогда без накладных расходов.
             AssetManager::Instance().PollHotReload();
+            audio.Update();
 
-            // Освобождаем доигравшие одноразовые звуки этого кадра (эмбиент,
-            // музыка и активные лупы не трогаются — они управляются по дескриптору)
-            game.Audio.Update();
-
-            // ================= РЕНДЕР =================
-            // Весь проход (тени -> сцена в HDR -> тон-маппинг на экран)
-            // теперь генерик RenderPipeline, собранный один раз до цикла
-            // (см. выше) — здесь только заполняем per-frame контекст и
-            // прогоняем проходы. Ортобокс теней следует за кораблём
-            // (стабильный центр — меньше мерцания краёв тени, чем если
-            // центрировать на игроке) — это игровое решение (см. комментарий
-            // у kShadowRadius), поэтому центр/радиус задаются здесь, а не
-            // внутри движкового ShadowPass.
             g_renderStats.Reset();
 
             RenderContext ctx;
             ctx.View = camera.GetViewMatrix();
             ctx.Proj = camera.GetProjectionMatrix((float)window.Width() / (float)window.Height());
             ctx.Cam = &camera;
-            ctx.Lighting = &game.SceneData.Lighting;
+            ctx.Lighting = &scene.Lighting;
             ctx.ScreenWidth = window.Width();
             ctx.ScreenHeight = window.Height();
             ctx.Time = currentFrame;
             ctx.DeltaTime = deltaTime;
-            ctx.ShadowCenter = game.Ship.Center;
-            ctx.ShadowRadius = kShadowRadius;
+            ctx.ShadowCenter = glm::vec3(0.0f);
+            ctx.ShadowRadius = 16.0f;
             ctx.ShadowsEnabled = shadowsEnabled;
             ctx.PostEnabled = postEnabled;
 
             pipeline.Execute(ctx);
 
-            // --- UI: худ (виджеты) + immediate-mode (хотбар/подсказки/крафт) +
-            // всё, что построила Lua через UIManager (пусто, пока ни один
-            // скрипт не вызвал CreateCanvas/Add* — обычной партии не касается) ---
             ui.Begin(window.Width(), window.Height());
-            statsHud.Draw(ui);
-            GameHud::DrawWorldHud(ui, game, look, window.Width(), window.Height());
-            if (game.UiPanelOpen) settingsPanel.Draw(ui); // поверх худа
             scriptUi.DrawAll(ui);
             ui.End();
 
-            if (game.DebugHudVisible) {
-                GameHud::DrawDebugOverlay(debugOverlay, game, fps, window.Width(), window.Height(),
-                                          postEnabled, shadowsEnabled);
+            if (debugHudVisible) {
+                std::vector<DebugLine> lines = {
+                    {"FPS: " + std::to_string((int)fps)},
+                    {"Objects: " + std::to_string(scene.Objects().size())},
+                    {"Post: " + std::string(postEnabled ? "on" : "off")
+                         + "  Shadows: " + std::string(shadowsEnabled ? "on" : "off")},
+                };
+                debugOverlay.Draw(lines, window.Width(), window.Height());
             }
 
-            // ---- Скриншот на заданном кадре (для CI) ----
             ++frameCounter;
             if (autoScreenshotFrame >= 0 && frameCounter == autoScreenshotFrame) {
                 SaveScreenshot(screenshotPath, window.Width(), window.Height());
@@ -919,16 +522,15 @@ int main() {
             window.PollEvents();
         }
 
-        // Явный вызов не нужен: EngineRuntime гасит JobSystem (join воркеров)
-        // и очищает AssetManager (GL-объекты текстур/мешей/шейдеров) в своём
-        // деструкторе при выходе из этой области видимости — ПОКА GL-контекст
-        // (window) ещё жив, см. объявление engine выше и core/EngineRuntime.h.
+        // Явный вызов не нужен: EngineRuntime гасит JobSystem и очищает
+        // AssetManager в своём деструкторе при выходе из этой области
+        // видимости — ПОКА GL-контекст (window) ещё жив.
     } catch (const std::exception& e) {
-        LOG_ERROR("Game") << "Фатальная ошибка: " << e.what();
+        LOG_ERROR("Engine") << "Фатальная ошибка: " << e.what();
         std::cerr << "Фатальная ошибка: " << e.what() << std::endl;
         return -1;
     }
 
-    LOG_INFO("Game") << "Завершение работы";
+    LOG_INFO("Engine") << "Завершение работы";
     return 0;
 }

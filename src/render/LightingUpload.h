@@ -6,10 +6,9 @@
 #include <string>
 
 // Заливает в шейдер все uniform'ы, описывающие освещение сцены: фоновую
-// засветку, солнце и точечные источники. voxel.frag, basic.frag и water.frag
-// ожидают одинаковый набор имён uniform'ов (uAmbient*, uSun*, uPointLights[]),
-// поэтому вызов один и тот же для всех трёх — не нужно дублировать имена
-// в main.cpp на каждый шейдер.
+// засветку, солнце и точечные источники. Любой шейдер, ожидающий этот же
+// набор имён (uAmbient*, uSun*, uPointLights[]), может переиспользовать
+// один и тот же вызов — не нужно дублировать имена в main.cpp на каждый шейдер.
 inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     shader.SetVec3("uAmbientSky", env.SkyColor);
     shader.SetVec3("uAmbientGround", env.GroundColor);
@@ -33,10 +32,10 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     }
 }
 
-// Заливает uniform'ы карты теней в шейдер-приёмник (voxel/basic/water):
-// матрицу пространства света, номер текстурного юнита карты теней и флаг
-// включённости. Тень применяется только к вкладу солнца (см. .frag).
-// Вызывается после UploadLighting для тех же шейдеров.
+// Заливает uniform'ы карты теней в шейдер-приёмник: матрицу пространства
+// света, номер текстурного юнита карты теней и флаг включённости. Тень
+// применяется только к вкладу солнца (см. .frag). Вызывается после
+// UploadLighting для тех же шейдеров.
 inline void UploadShadowUniforms(Shader& shader, const glm::mat4& lightMatrix,
                                  int shadowMapUnit, bool enabled) {
     shader.SetMat4("uLightSpace", lightMatrix);
