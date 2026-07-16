@@ -148,6 +148,28 @@ function OnStart(entity)
     log("Lua UI canvas 'demo_ui' построен: label=" .. tostring(demoLabelId) .. " bar=" .. tostring(demoBarId)
         .. " button=" .. tostring(demoBtnId) .. " toggle=" .. tostring(demoToggleId))
 
+    -- Сохранение/загрузка: движок не знает про инвентарь/статы игры — это
+    -- просто произвольная Lua-таблица, ушедшая на диск как JSON и обратно
+    -- (см. SaveTable/LoadTable). Смешанные типы (число/строка/вложенная
+    -- таблица-массив/вложенная таблица-объект) — всё должно пережить round-trip.
+    local savePath = "demo_save.json"
+    local saveData = {
+        day = 3,
+        playerName = "Ferris",
+        stats = {health = 87.5, hunger = 42.0},   -- вложенный объект
+        inventory = {"plank", "rope", "fish"},     -- вложенный массив
+    }
+    local saveOk = SaveTable(savePath, saveData)
+    log("SaveTable -> " .. tostring(saveOk))
+    local loaded = LoadTable(savePath)
+    if loaded then
+        log("LoadTable: day=" .. tostring(loaded.day) .. " playerName=" .. tostring(loaded.playerName)
+            .. " stats.health=" .. tostring(loaded.stats.health) .. " inventory[1]=" .. tostring(loaded.inventory[1])
+            .. " inventory[3]=" .. tostring(loaded.inventory[3]))
+    else
+        log("LoadTable вернул nil — ОШИБКА round-trip")
+    end
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()

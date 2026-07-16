@@ -5,6 +5,8 @@
 #include "../render/ParticlePresets.h"
 #include <algorithm>
 #include <any>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace {
 
@@ -34,6 +36,63 @@ void ApplyCommonUiProps(UIElement& el, const sol::table& props) {
     if (sol::optional<glm::vec2> offset = props["Offset"]) el.Offset = *offset;
     if (sol::optional<glm::vec2> size = props["Size"]) el.Size = *size;
     if (sol::optional<bool> visible = props["Visible"]) el.Visible = *visible;
+}
+
+// --- Lua <-> JSON конвертация для SaveTable/LoadTable (см. ниже) ---
+// Таблица без дырок с ключами 1..N (t.size() == реальное число элементов) —
+// JSON-массив; иначе — JSON-объект (строковые/числовые ключи как строки).
+// Нераспознанные типы значений (функции, userdata и т.п.) молча становятся
+// null — сохранять их и не имеет смысла.
+nlohmann::json LuaValueToJson(const sol::object& v);
+
+nlohmann::json LuaTableToJson(const sol::table& t) {
+    size_t n = t.size();
+    size_t total = 0;
+    for (const auto& kv : t) { (void)kv; ++total; }
+    bool isArray = (n > 0) && (n == total);
+
+    if (isArray) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (size_t i = 1; i <= n; ++i) arr.push_back(LuaValueToJson(t[i]));
+        return arr;
+    }
+    nlohmann::json obj = nlohmann::json::object();
+    for (const auto& kv : t) {
+        std::string key;
+        if (kv.first.is<std::string>()) key = kv.first.as<std::string>();
+        else if (kv.first.is<double>()) key = std::to_string(kv.first.as<double>());
+        else continue;
+        obj[key] = LuaValueToJson(kv.second);
+    }
+    return obj;
+}
+
+nlohmann::json LuaValueToJson(const sol::object& v) {
+    switch (v.get_type()) {
+        case sol::type::number:  return v.as<double>();
+        case sol::type::string:  return v.as<std::string>();
+        case sol::type::boolean: return v.as<bool>();
+        case sol::type::table:   return LuaTableToJson(v.as<sol::table>());
+        default:                 return nullptr;
+    }
+}
+
+sol::object JsonToLuaValue(sol::state& lua, const nlohmann::json& j) {
+    if (j.is_boolean()) return sol::make_object(lua, j.get<bool>());
+    if (j.is_number())  return sol::make_object(lua, j.get<double>());
+    if (j.is_string())  return sol::make_object(lua, j.get<std::string>());
+    if (j.is_array()) {
+        sol::table t = lua.create_table();
+        int i = 1;
+        for (const auto& el : j) t[i++] = JsonToLuaValue(lua, el);
+        return t;
+    }
+    if (j.is_object()) {
+        sol::table t = lua.create_table();
+        for (auto it = j.begin(); it != j.end(); ++it) t[it.key()] = JsonToLuaValue(lua, it.value());
+        return t;
+    }
+    return sol::lua_nil;
 }
 
 } // namespace
@@ -612,6 +671,42 @@ void ScriptEngine::RegisterEngineApi() {
         Asset<Texture> tex = AssetManager::Instance().LoadTexture(path, TextureFilter::Bilinear);
         sprite->SpriteTexture = tex.Get();
         m_ui->KeepTextureAlive(id, tex);
+    });
+
+    // --- Сохранение/загрузка: произвольная Lua-таблица <-> JSON-файл на
+    // диске, без необходимости изобретать свою сериализацию на каждую игру
+    // (инвентарь, статы, счётчик дня и т.п.). Использует nlohmann::json —
+    // ту же библиотеку, что и SceneSerializer для .sage-сцен. Таблица без
+    // дырок с ключами 1..N сохраняется как JSON-массив, любая другая — как
+    // JSON-объект (см. LuaTableToJson выше). SaveTable возвращает true/false
+    // (успех записи); LoadTable возвращает nil, если файла нет или он битый
+    // — вызывающий сам решает, что подставить по умолчанию в этом случае. ---
+    m_lua.set_function("SaveTable", [](const std::string& path, sol::table data) -> bool {
+        try {
+            nlohmann::json j = LuaTableToJson(data);
+            std::ofstream file(path);
+            if (!file.is_open()) {
+                LOG_ERROR("Lua") << "SaveTable: не удалось открыть файл для записи: " << path;
+                return false;
+            }
+            file << j.dump(2);
+            return true;
+        } catch (const std::exception& e) {
+            LOG_ERROR("Lua") << "SaveTable: ошибка сериализации (" << path << "): " << e.what();
+            return false;
+        }
+    });
+    m_lua.set_function("LoadTable", [this](const std::string& path) -> sol::object {
+        std::ifstream file(path);
+        if (!file.is_open()) return sol::lua_nil;
+        try {
+            nlohmann::json j;
+            file >> j;
+            return JsonToLuaValue(m_lua, j);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Lua") << "LoadTable: ошибка разбора (" << path << "): " << e.what();
+            return sol::lua_nil;
+        }
     });
 
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
