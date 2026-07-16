@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-smoke-test:
+    name: Build + headless smoke test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake g++ libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libgl1-mesa-dev xvfb
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      # Sandbox рендерит сцену + Lua-скрипт; SageEditor гоняет свой self-test
+      # (проект + сцена + undo/redo + play). См. scripts/ci_smoke_test.sh —
+      # тот же скрипт можно запустить локально, чтобы воспроизвести падение CI.
+      - name: Headless smoke test (Sandbox + SageEditor self-test)
+        run: ./scripts/ci_smoke_test.sh build
+
+  windows-cross-compile:
+    name: Cross-compile check (Windows, build-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64
+
+      - name: Configure
+        run: |
+          cmake -B build-windows \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-windows -j"$(nproc)"

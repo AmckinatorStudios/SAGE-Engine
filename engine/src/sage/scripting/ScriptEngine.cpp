@@ -182,7 +182,7 @@ void ScriptEngine::RegisterEngineApi() {
 
     // --- Частицы: доступно после BindParticles. ParticleConfig — те же поля,
     // что и ParticleEmitterConfig в C++ (см. render/Particle.h), плюс готовые
-    // пресеты ParticlePresets.* (те же, что использует The Boat в main.cpp) —
+    // пресеты ParticlePresets.* (готовые визуальные рецепты — всплеск/дым/осколки) —
     // Lua-скрипт может взять пресет как основу и подправить пару полей,
     // вместо того чтобы описывать весь конфиг с нуля. ---
     m_lua.new_usertype<ParticleEmitterConfig>("ParticleConfig",

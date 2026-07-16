@@ -46,8 +46,8 @@ private:
     std::shared_ptr<Mesh> m_cube;
     std::unique_ptr<ScriptEngine> m_scripts;
 
-    // Авто-скриншот для headless-проверки/CI (тот же паттерн, что в редакторе
-    // и в истории проекта — см. TheBoatLayer/EditorLayer в git log).
+    // Авто-скриншот для headless-проверки/CI — тот же паттерн, что и в
+    // EditorLayer (SAGE_SCREENSHOT_AT_FRAME/SAGE_SCREENSHOT_PATH).
     std::string m_screenshotPath = "screenshot.png";
     int m_autoScreenshotFrame = -1;
     int m_frameCounter = 0;
