@@ -159,6 +159,51 @@ void ScriptEngine::RegisterEngineApi() {
         m_pendingMeshes.push_back({obj.Id, AssetManager::Instance().LoadModelAsync(path), path});
     });
 
+    // Процедурный/динамический меш — ключевой энейблер для игр без готовой
+    // геометрии на диске (например, воксельный мир, полностью реализованный
+    // на Lua: игра сама хранит блоки и считает меш чанка, а движок только
+    // грузит готовые вершины на GPU). Переиспользует существующие MeshData/
+    // Mesh(MeshData)/Mesh::Reload — никакой новой C++ геометрии, только
+    // маршалинг Lua-таблиц.
+    //
+    // vertices — массив вершин, каждая вершина — массив из 8 чисел
+    // {x,y,z, nx,ny,nz, u,v} (позиция, нормаль, UV). indices — плоский массив
+    // индексов треугольников, 1-based (как везде в Lua) — сами конвертируем
+    // в 0-based. Если у объекта уже есть меш — перезагружаем его НА МЕСТЕ
+    // (Mesh::Reload), не создавая новый GL-объект каждый вызов: так можно
+    // звать SetMeshData каждый раз, когда чанк поменялся, без накопления
+    // мусора. Иначе создаём новый Mesh.
+    //
+    // Процедурный меш не привязан к MeshRefComponent (Type::None) — в
+    // отличие от куба/модели, у него нет исходного файла, который
+    // AssetManager мог бы перечитать при загрузке сцены; игра, которая
+    // хранит свою геометрию сама (как воксельный мир на Lua), отвечает и за
+    // её восстановление после загрузки сама.
+    m_lua.set_function("SetMeshData", [](GameObject& obj, sol::table vertices, sol::table indices) {
+        MeshData data;
+        data.Vertices.reserve(vertices.size());
+        for (size_t i = 1; i <= vertices.size(); ++i) {
+            sol::table v = vertices[i];
+            Vertex vert{};
+            vert.Position  = {v.get_or(1, 0.0f), v.get_or(2, 0.0f), v.get_or(3, 0.0f)};
+            vert.Normal    = {v.get_or(4, 0.0f), v.get_or(5, 0.0f), v.get_or(6, 0.0f)};
+            vert.TexCoords = {v.get_or(7, 0.0f), v.get_or(8, 0.0f)};
+            data.Vertices.push_back(vert);
+        }
+        data.Indices.reserve(indices.size());
+        for (size_t i = 1; i <= indices.size(); ++i) {
+            int idx = indices.get<int>(i);
+            data.Indices.push_back(static_cast<unsigned int>(idx - 1)); // Lua 1-based -> C++ 0-based
+        }
+
+        obj.MeshRefComponent = MeshRef{MeshRef::Type::None, ""};
+        if (obj.MeshComponent) {
+            obj.MeshComponent->Reload(data);
+        } else {
+            obj.MeshComponent = std::make_shared<Mesh>(data);
+        }
+    });
+
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
     // после BindInput. Скрипты читают тот же ввод, что и C++-код игры —
     // никакого параллельного дублирования раскладки клавиш. ---

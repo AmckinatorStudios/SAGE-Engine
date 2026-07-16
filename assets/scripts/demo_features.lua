@@ -62,6 +62,32 @@ function OnStart(entity)
             .. ", customLabel = " .. sphere.Lua.customLabel)
     end)
 
+    -- Процедурный меш: движок не знает о вокселях/треугольниках игры — он
+    -- просто грузит на GPU то, что Lua посчитала сама (см. SetMeshData).
+    -- Здесь — плоский треугольник, но тем же способом Lua-воксельный мир
+    -- строит меш чанка из посчитанных face-culling'ом вершин.
+    local triObj = SpawnObject("demo_procedural_tri")
+    triObj.Transform.Position = origin + Vec3.new(-3, 0, 0)
+    triObj.Color = Vec3.new(1.0, 0.5, 0.2)
+    local triVerts = {
+        {0.0, 0.0, 0.0,  0, 1, 0,  0, 0},
+        {1.0, 0.0, 0.0,  0, 1, 0,  1, 0},
+        {0.5, 1.0, 0.0,  0, 1, 0,  0.5, 1},
+    }
+    SetMeshData(triObj, triVerts, {1, 2, 3})
+    log("Процедурный треугольник построен через SetMeshData")
+    -- Перестраиваем НА МЕСТЕ (тот же объект, другая форма) — подтверждает,
+    -- что повторный SetMeshData не плодит новые GL-объекты, а зовёт Reload.
+    Schedule(0.3, function()
+        local biggerVerts = {
+            {0.0, 0.0, 0.0,  0, 1, 0,  0, 0},
+            {2.0, 0.0, 0.0,  0, 1, 0,  1, 0},
+            {1.0, 2.0, 0.0,  0, 1, 0,  0.5, 1},
+        }
+        SetMeshData(triObj, biggerVerts, {1, 2, 3})
+        log("Процедурный треугольник перестроен НА МЕСТЕ через SetMeshData")
+    end)
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()
