@@ -44,7 +44,7 @@ SAGE-Engine/
       audio/    AudioEngine — 2D/3D-звук, музыка (miniaudio)
     src/rhi/opengl/           — OpenGL-бэкенд: ЕДИНСТВЕННОЕ место с glad (уровень устройства)
 
-  editor/                     → exe SageEditor (ImGui: Hierarchy/Inspector/Viewport)
+  editor/                     → exe SageEditor (редактор на ImGui, см. раздел ниже)
     src/, assets/shaders/
 
   games/theboat/              → exe TheBoat (пример игры на движке)
@@ -83,6 +83,29 @@ SAGE_MAIN()
 Затем добавить `add_subdirectory(games/mygame)` в корневой CMakeLists. Игровой
 слой наследует `sage::Layer` и работает с движковой `Scene` (ECS), рендером
 через RHI-девайс и т.д. — как это делает `games/theboat/src/TheBoatLayer.*`.
+
+## Редактор SageEditor
+Полноценный редактор сцен на ImGui (docking) + ImGuizmo:
+- **Доккинг**: раскладка по умолчанию строится автоматически (Hierarchy слева,
+  Inspector справа, Console/Assets табами снизу, Viewport в центре); панели
+  свободно перетаскиваются и стыкуются, раскладка сохраняется между запусками
+  (`sage_editor_imgui.ini`), Window > Reset Layout возвращает дефолт.
+- **Гизмо** (ImGuizmo): перемещение/поворот/масштаб выбранной сущности прямо во
+  вьюпорте. Горячие клавиши **W/E/R**, привязка к сетке — галка Snap.
+- **Камера вьюпорта**: ПКМ — осмотреться, ПКМ+WASD (Q/E — вниз/вверх, Shift —
+  быстрее) — полёт, колесо — наезд.
+- **Пикинг**: клик ЛКМ по объекту выбирает его (луч в ECS-сцену), клик в пустоту
+  снимает выбор.
+- **Проекты**: File > New Project создаёт `<папка>/<имя>/` с `project.sageproj`,
+  `scenes/` и `assets/`; Open Project открывает существующий. Сцены сохраняются
+  в `scenes/` проекта (`.sage` JSON) и открываются двойным кликом в Assets.
+- **Панели**: Hierarchy (создание/дублирование/удаление сущностей, контекстное
+  меню), Inspector (имя, Transform, цвет, выбор меша Cube/Model), Console
+  (живой лог движка с цветами уровней), Assets (браузер файлов проекта).
+- Горячие клавиши: Ctrl+S — сохранить сцену, Ctrl+D — дублировать, Del — удалить.
+- CI-хуки: `SAGE_SCREENSHOT_AT_FRAME`/`SAGE_SCREENSHOT_PATH` — авто-скриншот,
+  `SAGE_EDITOR_SELFTEST=1` — headless-проверка «проект + сохранение/загрузка
+  сцены» (пишет `SELFTEST: PASS/FAIL` в лог).
 
 ## Как добавить графический бэкенд
 Реализовать интерфейс `sage::rhi::GraphicsDevice` (см. `sage/rhi/GraphicsDevice.h`)

@@ -167,6 +167,12 @@ elseif (UNIX)
     target_link_libraries(imgui PUBLIC GL dl)
 endif()
 
+# ---------- ImGuizmo — 3D-гизмо (перемещение/поворот/масштаб) для редактора ----------
+# Вендорится в external/imguizmo; рисует поверх ImGui, поэтому зависит от него.
+add_library(imguizmo STATIC external/imguizmo/ImGuizmo.cpp)
+target_include_directories(imguizmo PUBLIC external/imguizmo)
+target_link_libraries(imguizmo PUBLIC imgui)
+
 # ============================================================================
 #  Модули проекта
 # ============================================================================

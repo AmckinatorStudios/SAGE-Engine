@@ -8,6 +8,7 @@ std::mutex Log::s_mutex;
 std::ofstream Log::s_file;
 LogLevel Log::s_minLevel = LogLevel::Trace;
 bool Log::s_fileEnabled = false;
+Log::Sink Log::s_sink;
 
 namespace {
     const char* LevelName(LogLevel level) {
@@ -85,4 +86,11 @@ void Log::WriteLine(LogLevel level, const std::string& category, const std::stri
         s_file << prefix << message << std::endl;
         s_file.flush();
     }
+
+    if (s_sink) s_sink(level, category, message);
+}
+
+void Log::SetSink(Sink sink) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    s_sink = std::move(sink);
 }

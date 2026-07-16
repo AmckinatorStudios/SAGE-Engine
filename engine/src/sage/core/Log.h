@@ -3,6 +3,7 @@
 #include <sstream>
 #include <mutex>
 #include <fstream>
+#include <functional>
 
 // ---------------------------------------------------------------------
 // Система логирования SAGE Engine.
@@ -38,11 +39,18 @@ public:
     // LogMessageBuilder'ом, обычно напрямую вызывать не нужно.
     static void WriteLine(LogLevel level, const std::string& category, const std::string& message);
 
+    // Дополнительный приёмник сообщений (помимо консоли/файла) — например,
+    // панель Console в редакторе. Вызывается под внутренним мьютексом логгера,
+    // поэтому сам приёмник НЕ должен логировать (иначе дедлок). nullptr — снять.
+    using Sink = std::function<void(LogLevel, const std::string& category, const std::string& message)>;
+    static void SetSink(Sink sink);
+
 private:
     static std::mutex s_mutex;
     static std::ofstream s_file;
     static LogLevel s_minLevel;
     static bool s_fileEnabled;
+    static Sink s_sink;
 };
 
 // RAII-построитель одного сообщения: копит поток через operator<<,

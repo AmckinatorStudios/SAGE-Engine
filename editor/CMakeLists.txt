@@ -6,9 +6,11 @@
 add_executable(SageEditor
     src/main.cpp
     src/EditorLayer.cpp
+    src/Project.cpp
 )
 
-target_link_libraries(SageEditor PRIVATE sage::engine imgui)
+# imguizmo — 3D-гизмо во вьюпорте; nlohmann_json — файлы проектов (.sageproj).
+target_link_libraries(SageEditor PRIVATE sage::engine imgui imguizmo nlohmann_json::nlohmann_json)
 target_include_directories(SageEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Ассеты редактора (его шейдеры превью) — рядом с бинарником.
