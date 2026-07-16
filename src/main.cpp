@@ -45,6 +45,7 @@
 #include "core/InputSystem.h"
 #include "core/JobSystem.h"
 #include "core/MainThreadDispatcher.h"
+#include "core/EngineRuntime.h"
 #include "render/Shader.h"
 #include "render/Camera.h"
 #include "asset/AssetManager.h"
@@ -424,35 +425,29 @@ int main() {
 
         Window window(windowWidth, windowHeight, windowTitle);
 
-        // Пул фоновых задач движка: асинхронная загрузка ресурсов и любая
-        // тяжёлая CPU-работа вне главного потока (см. core/JobSystem.h,
-        // AssetManager::*Async). Готовые результаты, требующие GL, каждый
-        // кадр забираются из MainThreadDispatcher ниже.
-        JobSystem::Instance().Start();
-
-        // Единая система ассетов: корень путей + опциональный hot-reload
-        // (перечитывать изменённые шейдеры/текстуры на лету — включается
-        // SAGE_HOT_RELOAD, удобно при разработке; в проде выключен = без
-        // накладных stat-ов). См. asset/AssetManager.h.
-        AssetManager::Instance().SetAssetRoot("assets");
-        if (std::getenv("SAGE_HOT_RELOAD")) {
-            AssetManager::Instance().EnableHotReload(true);
-            LOG_INFO("Assets") << "Hot-reload включён (SAGE_HOT_RELOAD)";
-        }
+        // Формальное владение жизненным циклом движковых подсистем (пул
+        // фоновых задач + единая система ассетов): поднимает их в правильном
+        // порядке, гарантированно гасит в обратном при выходе из этой области
+        // видимости (в т.ч. на раннем return self-тестов ниже и при
+        // исключении) — включая GL-очистку AssetManager ПОКА GL-контекст ещё
+        // жив (window объявлено раньше engine, поэтому при разрушении стека
+        // engine.Shutdown() отработает первым — см. core/EngineRuntime.h).
+        // Hot-reload ассетов (перечитывать изменённые шейдеры/текстуры на
+        // лету) включается SAGE_HOT_RELOAD, удобно при разработке; в проде
+        // выключен = без накладных stat-ов.
+        EngineConfig engineConfig;
+        engineConfig.HotReload = (std::getenv("SAGE_HOT_RELOAD") != nullptr);
+        EngineRuntime engine(engineConfig);
 
         // Самопроверка async + системы ассетов для CI/отладки — прогоняет пул
         // задач, async-загрузку, кэш/дедуп, hot-reload и статистику на реальном
         // GL-контексте, затем выходит, не запуская игру. Партии не касается.
         if (std::getenv("SAGE_TEST_ASYNC")) {
             bool passed = RunAsyncSelfTest();
-            JobSystem::Instance().Shutdown();
-            AssetManager::Instance().Clear();
             return passed ? 0 : 1;
         }
         if (std::getenv("SAGE_TEST_UI")) {
             bool passed = RunUISelfTest();
-            JobSystem::Instance().Shutdown();
-            AssetManager::Instance().Clear();
             return passed ? 0 : 1;
         }
 
@@ -884,19 +879,10 @@ int main() {
             window.PollEvents();
         }
 
-        // Сначала гасим пул задач (join воркеров) — чтобы ни одна фоновая
-        // загрузка не обращалась к ресурсам/диспетчеру после этой точки. Ещё
-        // не забранные из MainThreadDispatcher финализации просто отбрасываются
-        // (GL-объекты в них не создавались — контекст всё равно вот-вот умрёт).
-        JobSystem::Instance().Shutdown();
-
-        // ВАЖНО: AssetManager — статический синглтон. Если не очистить его
-        // здесь, его ресурсы (GL-объекты текстур/мешей/шейдеров) удалялись бы
-        // уже ПОСЛЕ main() и разрушения окна, когда OpenGL-контекста больше нет
-        // — это давало segfault при выходе. Локальные Asset<>-хендлы выше тоже
-        // разрушатся здесь, но реальные GL-объекты освобождает именно Clear(),
-        // пока контекст ещё жив.
-        AssetManager::Instance().Clear();
+        // Явный вызов не нужен: EngineRuntime гасит JobSystem (join воркеров)
+        // и очищает AssetManager (GL-объекты текстур/мешей/шейдеров) в своём
+        // деструкторе при выходе из этой области видимости — ПОКА GL-контекст
+        // (window) ещё жив, см. объявление engine выше и core/EngineRuntime.h.
     } catch (const std::exception& e) {
         LOG_ERROR("Game") << "Фатальная ошибка: " << e.what();
         std::cerr << "Фатальная ошибка: " << e.what() << std::endl;
