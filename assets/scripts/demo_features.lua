@@ -45,6 +45,23 @@ function OnStart(entity)
     SetMeshModelAsync(sphere, "assets/models/sphere.obj")
     log("Модель сферы поставлена в очередь на асинхронную загрузку")
 
+    -- Tag и Lua — свободное расширение GameObject из скрипта (см. Scene.h):
+    -- Tag фильтрует объекты в рендер-проходах по строке, Lua хранит любые
+    -- свои данные объекта без правки заголовков движка. Таблица создаётся
+    -- лениво при первом обращении к entity.Lua.
+    sphere.Tag = "demo_sphere"
+    sphere.Lua.spinSpeed = 30.0
+    sphere.Lua.customLabel = "hello from lua table"
+    log("sphere.Tag = " .. sphere.Tag .. ", sphere.Lua.spinSpeed = " .. tostring(sphere.Lua.spinSpeed)
+        .. ", sphere.Lua.customLabel = " .. sphere.Lua.customLabel)
+
+    -- Подтверждаем, что sphere.Lua переживает смену кадров (та же таблица,
+    -- не пересоздаётся при каждом обращении) — читаем то же поле спустя время.
+    Schedule(0.5, function()
+        log("sphere.Lua пережила " .. "0.5с: spinSpeed всё ещё " .. tostring(sphere.Lua.spinSpeed)
+            .. ", customLabel = " .. sphere.Lua.customLabel)
+    end)
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()

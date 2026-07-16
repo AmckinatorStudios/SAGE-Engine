@@ -40,8 +40,17 @@ struct GameState {
     ShipInfo Ship;
     WaterPlane Water{OceanHalfSize, GameConstants::SeaLevel};
 
+    // ВАЖНО про порядок объявления: Scripts (владеет sol::state — Lua VM)
+    // объявлен ДО SceneData специально. C++ уничтожает поля в ОБРАТНОМ
+    // порядке объявления, поэтому при таком порядке SceneData разрушается
+    // ПЕРВЫМ (пока Lua ещё жива), а Scripts — вторым. GameObject хранит
+    // sol::table в LuaData (см. scene/Scene.h) — если бы Lua-VM умерла раньше
+    // Scene, разрушение этих sol::table обращалось бы к уже мёртвому
+    // lua_State (use-after-free/segfault при выходе). BindScene/BindInput
+    // всё равно вызываются в ТЕЛЕ конструктора ниже, а не в списке
+    // инициализации — порядок объявления на порядок их вызова не влияет.
+    ScriptEngine Scripts;
     Scene SceneData;
-    ScriptEngine Scripts; // работает с объектами SceneData — см. BindScene/BindInput в конструкторе
     DayNightCycle DayNight;
     int DayCounter = 1;
     float PrevTimeOfDay = 0.0f;

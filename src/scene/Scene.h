@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <algorithm>
+#include <any>
 #include "Transform.h"
 #include "Light.h"
 #include "../render/Mesh.h"
@@ -30,6 +31,26 @@ struct GameObject {
     // Runtime-указатель на GPU-меш. Не сериализуется — заполняется
     // AssetManager'ом при загрузке сцены на основе MeshRefComponent.
     std::shared_ptr<Mesh> MeshComponent;
+
+    // Свободный "тег" объекта (например "terrain"/"water") — игра решает,
+    // что он значит; движок использует его только как ключ фильтрации в
+    // рендер-проходах (см. render/ScenePass.h), сам не придаёт ему смысла.
+    // Не сериализуется по умолчанию (как и LuaData ниже) — если игре нужно
+    // сохранять его в .sage-сцену, это делается через собственный код.
+    std::string Tag;
+
+    // Свободное хранилище данных игры на этом объекте — Lua-таблица,
+    // лениво создаваемая при первом обращении к entity.Lua из скрипта (см.
+    // ScriptEngine::RegisterEngineApi, свойство "Lua" на GameObject). Хранится
+    // как std::any (а не sol::table напрямую), чтобы Scene.h — часть ЯДРА,
+    // используемая многими файлами движка, — не тянул зависимость на sol2/Lua;
+    // фактическое создание/чтение sol::table происходит только в
+    // ScriptEngine.cpp, который и так уже включает sol2. Это ПРАВИЛЬНЫЙ
+    // инструмент расширяемости для Lua-первого дизайна движка: игра хранит
+    // любые свои данные объекта (obj.Lua.chunkCoord, obj.Lua.driftPhase) без
+    // правки заголовков движка — типизированный C++ component-registry тут
+    // не нужен, т.к. Lua всё равно не параметризует C++-шаблоны.
+    std::any LuaData;
 };
 
 class Scene {

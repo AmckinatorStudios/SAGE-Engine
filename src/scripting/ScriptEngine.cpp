@@ -3,6 +3,7 @@
 #include "../asset/AssetManager.h"
 #include "../render/ParticlePresets.h"
 #include <algorithm>
+#include <any>
 
 ScriptEngine::ScriptEngine() {
     m_lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
@@ -79,7 +80,24 @@ void ScriptEngine::RegisterEngineApi() {
         "Id", sol::readonly(&GameObject::Id),
         "Name", &GameObject::Name,
         "Transform", &GameObject::TransformComponent,
-        "Color", &GameObject::Color
+        "Color", &GameObject::Color,
+        // Свободный тег объекта — фильтрация в рендер-проходах по строке
+        // (например "terrain"/"water"), смысл которой знает только игра.
+        "Tag", &GameObject::Tag,
+        // entity.Lua — свободная Lua-таблица для произвольных данных игры на
+        // этом объекте, без правки заголовков движка (см. Scene.h::LuaData).
+        // Геттер лениво создаёт таблицу при первом обращении; сеттер
+        // позволяет целиком заменить её (entity.Lua = {...}).
+        "Lua", sol::property(
+            [this](GameObject& obj) -> sol::table {
+                if (!obj.LuaData.has_value()) {
+                    obj.LuaData = m_lua.create_table();
+                }
+                return std::any_cast<sol::table>(obj.LuaData);
+            },
+            [](GameObject& obj, sol::table value) {
+                obj.LuaData = std::move(value);
+            })
     );
 
     // Простая функция логирования, чтобы скрипты могли печатать отладочную информацию
