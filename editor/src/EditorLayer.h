@@ -13,6 +13,7 @@
 #include "sage/render/Framebuffer.h"
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
+#include "sage/scripting/ScriptEngine.h"
 #include "Project.h"
 
 // ---------------------------------------------------------------------------
@@ -29,8 +30,14 @@
 //   • Проекты: File > New/Open Project (папка + project.sageproj + scenes/ +
 //     assets/); сцены сохраняются/грузятся в scenes/ проекта (.sage JSON).
 //   • Панели: Hierarchy (создание/дублирование/удаление сущностей), Inspector
-//     (имя/Transform/цвет/меш), Console (живой сток лога движка), Assets
+//     (имя/Transform/цвет/меш/скрипт), Console (живой сток лога движка), Assets
 //     (браузер файлов проекта, двойной клик по .sage — загрузка сцены).
+//   • Play-режим: кнопка Play снапшотит сцену и запускает рантайм — скрипты
+//     сущностей (ScriptComponent, .lua) привязываются к ScriptEngine и тикают
+//     каждый кадр; Pause замораживает, Stop откатывает сцену к снапшоту.
+//   • Undo/Redo (Ctrl+Z / Ctrl+Y): снапшот-модель — состояние сцены (JSON)
+//     запоминается ПЕРЕД каждой мутацией: создание/удаление/дублирование,
+//     завершённое перетаскивание гизмо, завершённая правка в Inspector.
 // ---------------------------------------------------------------------------
 class EditorLayer : public sage::Layer {
 public:
@@ -60,7 +67,23 @@ private:
     GameObject CreateCubeEntity(const std::string& name);
     void DuplicateSelected();
     void DeleteSelected();
-    void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1: проект + сохранение/загрузка сцены (для CI)
+    void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1: проект/сцена + undo/redo + Play (для CI)
+
+    // --- Play-режим ---
+    enum class PlayState { Editing, Playing, Paused };
+    void StartPlay();
+    void PausePlay() { if (m_playState == PlayState::Playing) m_playState = PlayState::Paused; }
+    void ResumePlay() { if (m_playState == PlayState::Paused) m_playState = PlayState::Playing; }
+    void StopPlay();
+    bool InPlayMode() const { return m_playState != PlayState::Editing; }
+
+    // --- Undo/Redo (снапшот-модель) ---
+    // Зафиксировать текущее состояние сцены как «до мутации» (вершина undo-стека).
+    // Каждая фиксация сбрасывает redo-ветку. В Play-режиме не работает.
+    void PushUndoSnapshot();
+    void Undo();
+    void Redo();
+    bool RestoreSceneFromString(const std::string& snapshot);
     void PickEntityAtViewportPos(float u, float v); // u,v в [0..1] внутри вьюпорта
 
     // --- проект ---
@@ -74,6 +97,18 @@ private:
     std::optional<Shader> m_shader;
     std::optional<Framebuffer> m_sceneFbo;
     std::shared_ptr<Mesh> m_cube;
+
+    // --- Play-режим ---
+    PlayState m_playState = PlayState::Editing;
+    std::string m_playSnapshot;                    // сцена на момент Play — восстанавливается по Stop
+    std::unique_ptr<ScriptEngine> m_playScripts;   // живёт только в Play-режиме
+
+    // --- Undo/Redo ---
+    std::vector<std::string> m_undoStack; // JSON-снапшоты «состояние до мутации»
+    std::vector<std::string> m_redoStack;
+    bool m_gizmoWasUsing = false;         // фронт «начали таскать гизмо» -> снапшот
+    std::string m_pendingEditSnapshot;    // состояние на момент активации виджета Inspector
+    std::string m_gizmoPendingSnapshot;   // состояние до первого кадра перетаскивания гизмо
 
     // --- выбор/гизмо/вьюпорт ---
     int m_selectedId = -1;

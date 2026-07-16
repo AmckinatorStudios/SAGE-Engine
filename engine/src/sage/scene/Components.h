@@ -49,3 +49,12 @@ struct MeshRendererComponent {
     // ResourceManager'ом на основе Ref при загрузке сцены или назначении меша.
     std::shared_ptr<Mesh> MeshPtr;
 };
+
+// Поведение сущности на Lua: путь к .lua файлу со стандартными хуками
+// OnStart(entity)/OnUpdate(entity, dt) (см. sage/scripting/ScriptEngine.h).
+// Сам компонент — только ДАННЫЕ (путь, сериализуется вместе со сценой);
+// привязку к ScriptEngine выполняет рантайм: игра — при старте уровня,
+// редактор — при входе в Play-режим.
+struct ScriptComponent {
+    std::string Path;
+};

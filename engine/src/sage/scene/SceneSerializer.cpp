@@ -94,7 +94,8 @@ static LightingEnvironment LightingFromJson(const json& root) {
 
 namespace SceneSerializer {
 
-void Save(const Scene& scene, const std::string& path) {
+// Общая сборка JSON-дерева сцены — используется и файловым Save, и SaveToString.
+static json BuildSceneJson(const Scene& scene) {
     json root;
     root["sage_scene_version"] = 1;
     root["name"] = scene.Name();
@@ -120,31 +121,18 @@ void Save(const Scene& scene, const std::string& path) {
         j["color"]    = Vec3ToJson(mr.Color);
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
         j["mesh"]["path"] = mr.Ref.path;
+        if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
+            j["script"] = sc->Path;
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
     root["lighting"] = LightingToJson(scene.Lighting);
-
-    std::ofstream file(path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Не удалось открыть файл для записи сцены: " + path);
-    }
-    file << root.dump(2);
+    return root;
 }
 
-std::unique_ptr<Scene> Load(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Не удалось открыть файл сцены: " + path);
-    }
-
-    json root;
-    try {
-        file >> root;
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Ошибка парсинга JSON сцены (" + path + "): " + e.what());
-    }
-
+// Общее восстановление сцены из JSON-дерева — для файлового Load и LoadFromString.
+static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     auto scene = std::make_unique<Scene>(root.value("name", "Untitled"));
 
     int maxId = 0;
@@ -166,6 +154,10 @@ std::unique_ptr<Scene> Load(const std::string& path) {
             mr.Ref.path = j["mesh"].value("path", "");
         }
 
+        if (j.contains("script")) {
+            obj.Registry()->emplace<ScriptComponent>(obj.Entity(), ScriptComponent{j.value("script", "")});
+        }
+
         // Пересоздаём GPU-ресурс на основе описания
         switch (mr.Ref.type) {
             case MeshRef::Type::Cube:
@@ -183,6 +175,45 @@ std::unique_ptr<Scene> Load(const std::string& path) {
     scene->Lighting = LightingFromJson(root);
 
     return scene;
+}
+
+// --- Публичные обёртки: файл и строка используют одну и ту же сборку JSON ---
+
+void Save(const Scene& scene, const std::string& path) {
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Не удалось открыть файл для записи сцены: " + path);
+    }
+    file << BuildSceneJson(scene).dump(2);
+}
+
+std::unique_ptr<Scene> Load(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Не удалось открыть файл сцены: " + path);
+    }
+    json root;
+    try {
+        file >> root;
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Ошибка парсинга JSON сцены (" + path + "): " + e.what());
+    }
+    return BuildSceneFromJson(root);
+}
+
+std::string SaveToString(const Scene& scene) {
+    // Без отступов (dump()) — снапшоты undo/Play держатся в памяти, компактность важнее читаемости.
+    return BuildSceneJson(scene).dump();
+}
+
+std::unique_ptr<Scene> LoadFromString(const std::string& jsonText) {
+    json root;
+    try {
+        root = json::parse(jsonText);
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Ошибка парсинга JSON сцены (строка): ") + e.what());
+    }
+    return BuildSceneFromJson(root);
 }
 
 }

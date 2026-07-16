@@ -143,6 +143,19 @@ void EditorLayer::OnAttach() {
     LOG_INFO("Editor") << "SAGE Editor started (entities: " << m_scene->Count() << ")";
 
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
+
+    // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
+    // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
+    // а в тулбаре гореть PLAYING.
+    if (std::getenv("SAGE_EDITOR_AUTOPLAY")) {
+        GameObject green = m_scene->FindByName("Green Cube");
+        if (green.Valid()) {
+            m_scene->Registry().emplace_or_replace<ScriptComponent>(
+                green.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
+            m_selectedId = green.Id();
+        }
+        StartPlay();
+    }
 }
 
 // Headless-проверка ядра редактора без UI-кликов (модалки недоступны в CI):
@@ -173,7 +186,58 @@ void EditorLayer::RunSelfTest() {
             ok = false;
         }
     }
-    if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene save/load, " << before << " entities)";
+
+    // --- Undo/Redo: создание сущности откатывается и накатывается обратно ---
+    if (ok) {
+        size_t n0 = m_scene->Count();
+        PushUndoSnapshot();
+        CreateCubeEntity("UndoProbe");
+        Undo();
+        if (m_scene->Count() != n0) {
+            LOG_ERROR("Editor") << "SELFTEST: undo failed (count " << m_scene->Count() << ", expected " << n0 << ")";
+            ok = false;
+        }
+        Redo();
+        if (ok && m_scene->Count() != n0 + 1) {
+            LOG_ERROR("Editor") << "SELFTEST: redo failed (count " << m_scene->Count() << ", expected " << n0 + 1 << ")";
+            ok = false;
+        }
+        Undo(); // вернуть сцену к исходным n0 сущностям
+    }
+
+    // --- Play: скрипт вращает сущность, Stop откатывает сцену к снапшоту ---
+    if (ok) {
+        GameObject green = m_scene->FindByName("Green Cube");
+        if (!green.Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: Green Cube not found for play test";
+            ok = false;
+        } else {
+            m_scene->Registry().emplace_or_replace<ScriptComponent>(
+                green.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
+            float rotBefore = green.GetTransform().Rotation.y;
+
+            StartPlay();
+            // Несколько тиков «вручную» — self-test выполняется до главного цикла.
+            for (int i = 0; i < 5; ++i) m_playScripts->UpdateAll(0.1f);
+            float rotDuring = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
+            StopPlay();
+            float rotAfter = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
+
+            if (std::abs(rotDuring - rotBefore) < 1.0f) {
+                LOG_ERROR("Editor") << "SELFTEST: play failed - script did not rotate entity ("
+                                    << rotBefore << " -> " << rotDuring << ")";
+                ok = false;
+            }
+            if (ok && std::abs(rotAfter - rotBefore) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: stop failed - scene not restored (rot "
+                                    << rotAfter << ", expected " << rotBefore << ")";
+                ok = false;
+            }
+        }
+    }
+
+    if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene save/load + undo/redo + play, "
+                               << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
 
@@ -188,9 +252,104 @@ void EditorLayer::OnDetach() {
     ResourceManager::Instance().Clear();
 }
 
-void EditorLayer::OnUpdate(float /*dt*/) {
-    // Вся логика редактора событийная и живёт в панелях (камера — в Viewport,
-    // где известно состояние наведения); отдельного тика симуляции нет.
+void EditorLayer::OnUpdate(float dt) {
+    // Логика правки — событийная, живёт в панелях (камера — в Viewport, где
+    // известно состояние наведения). Единственный "симуляционный" тик — Play:
+    // скрипты сущностей обновляются, пока не нажата пауза.
+    if (m_playState == PlayState::Playing && m_playScripts) {
+        m_playScripts->UpdateAll(dt);
+    }
+}
+
+// ============================================================================
+//  Play-режим
+// ============================================================================
+
+void EditorLayer::StartPlay() {
+    if (InPlayMode()) return;
+
+    // Снапшот сцены — Stop вернёт всё ровно как было до Play.
+    m_playSnapshot = SceneSerializer::SaveToString(*m_scene);
+
+    m_playScripts = std::make_unique<ScriptEngine>();
+    m_playScripts->BindScene(*m_scene);
+
+    // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
+    // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные
+    // продолжают работать.
+    int attached = 0;
+    auto view = m_scene->Registry().view<ScriptComponent, IdComponent>();
+    for (auto e : view) {
+        const std::string& path = view.get<ScriptComponent>(e).Path;
+        if (path.empty()) continue;
+        try {
+            m_playScripts->AttachScript(GameObject(&m_scene->Registry(), e), path);
+            ++attached;
+        } catch (const std::exception& ex) {
+            LOG_ERROR("Editor") << "Play: script attach failed: " << ex.what();
+        }
+    }
+
+    m_playState = PlayState::Playing;
+    LOG_INFO("Editor") << "Play started (" << attached << " script(s) attached)";
+}
+
+void EditorLayer::StopPlay() {
+    if (!InPlayMode()) return;
+
+    // Порядок важен: ScriptEngine держит указатель на текущую сцену — гасим
+    // его ДО того, как заменить сцену восстановленным снапшотом.
+    m_playScripts.reset();
+    RestoreSceneFromString(m_playSnapshot);
+    m_playSnapshot.clear();
+    m_playState = PlayState::Editing;
+    LOG_INFO("Editor") << "Play stopped, scene restored";
+}
+
+// ============================================================================
+//  Undo/Redo (снапшот-модель)
+// ============================================================================
+
+bool EditorLayer::RestoreSceneFromString(const std::string& snapshot) {
+    try {
+        m_scene = SceneSerializer::LoadFromString(snapshot);
+        // Выбор хранится как id, а сериализатор сохраняет id — выбор переживает
+        // откат, если сущность существует в снапшоте (иначе Get() даст invalid).
+        return true;
+    } catch (const std::exception& e) {
+        LOG_ERROR("Editor") << "Scene restore failed: " << e.what();
+        return false;
+    }
+}
+
+void EditorLayer::PushUndoSnapshot() {
+    if (InPlayMode()) return; // правки в Play эфемерны — Stop их и так откатит
+    constexpr size_t kMaxUndoEntries = 100;
+    if (m_undoStack.size() >= kMaxUndoEntries) {
+        m_undoStack.erase(m_undoStack.begin());
+    }
+    m_undoStack.push_back(SceneSerializer::SaveToString(*m_scene));
+    m_redoStack.clear(); // новая мутация обрывает redo-ветку
+}
+
+void EditorLayer::Undo() {
+    if (InPlayMode() || m_undoStack.empty()) return;
+    m_redoStack.push_back(SceneSerializer::SaveToString(*m_scene));
+    if (RestoreSceneFromString(m_undoStack.back())) {
+        m_undoStack.pop_back();
+    } else {
+        m_redoStack.pop_back(); // откат не удался — не ломаем историю
+    }
+}
+
+void EditorLayer::Redo() {
+    if (InPlayMode() || m_redoStack.empty()) return;
+    m_undoStack.push_back(SceneSerializer::SaveToString(*m_scene));
+    if (RestoreSceneFromString(m_redoStack.back())) {
+        m_redoStack.pop_back();
+    } else {
+        m_undoStack.pop_back();
+    }
 }
 
 // ============================================================================
@@ -206,6 +365,9 @@ GameObject EditorLayer::CreateCubeEntity(const std::string& name) {
 }
 
 void EditorLayer::NewScene(bool withDemoContent) {
+    if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
+    m_undoStack.clear();
+    m_redoStack.clear();
     m_scene = std::make_unique<Scene>("Untitled");
     m_selectedId = -1;
     m_scenePath.clear();
@@ -232,8 +394,11 @@ void EditorLayer::NewScene(bool withDemoContent) {
 }
 
 bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
+    if (InPlayMode()) StopPlay(); // см. NewScene
     try {
         m_scene = SceneSerializer::Load(path.string());
+        m_undoStack.clear();
+        m_redoStack.clear();
         m_selectedId = -1;
         m_scenePath = path;
         LOG_INFO("Editor") << "Scene loaded: " << path.string();
@@ -261,16 +426,21 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
 void EditorLayer::DuplicateSelected() {
     GameObject src = m_scene->Get(m_selectedId);
     if (!src.Valid()) return;
+    PushUndoSnapshot();
     GameObject copy = m_scene->CreateObject(src.Name() + " Copy");
     copy.GetTransform() = src.GetTransform();
     copy.GetTransform().Position.x += 0.5f; // сдвиг, чтобы копия не сливалась с оригиналом
     MeshRendererComponent& mr = copy.Renderer();
     mr = src.Renderer();
+    if (const ScriptComponent* sc = src.Registry()->try_get<ScriptComponent>(src.Entity())) {
+        copy.Registry()->emplace<ScriptComponent>(copy.Entity(), *sc);
+    }
     m_selectedId = copy.Id();
 }
 
 void EditorLayer::DeleteSelected() {
-    if (m_selectedId < 0) return;
+    if (!m_scene->Get(m_selectedId).Valid()) return;
+    PushUndoSnapshot();
     m_scene->RemoveObject(m_selectedId);
     m_selectedId = -1;
 }
@@ -404,19 +574,29 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !m_undoStack.empty() && !InPlayMode())) Undo();
+            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !m_redoStack.empty() && !InPlayMode())) Redo();
+            ImGui::Separator();
             bool hasSel = m_scene->Get(m_selectedId).Valid();
             if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, hasSel)) DuplicateSelected();
             if (ImGui::MenuItem("Delete", "Del", false, hasSel)) DeleteSelected();
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Play")) {
+            if (ImGui::MenuItem("Play", nullptr, false, m_playState == PlayState::Editing)) StartPlay();
+            if (ImGui::MenuItem("Pause", nullptr, false, m_playState == PlayState::Playing)) PausePlay();
+            if (ImGui::MenuItem("Resume", nullptr, false, m_playState == PlayState::Paused)) ResumePlay();
+            if (ImGui::MenuItem("Stop", nullptr, false, InPlayMode())) StopPlay();
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Entity")) {
             if (ImGui::MenuItem("Create Empty")) {
-                GameObject obj = m_scene->CreateObject("Empty");
-                m_selectedId = obj.Id();
+                PushUndoSnapshot();
+                m_selectedId = m_scene->CreateObject("Empty").Id();
             }
             if (ImGui::MenuItem("Create Cube")) {
-                GameObject obj = CreateCubeEntity("Cube");
-                m_selectedId = obj.Id();
+                PushUndoSnapshot();
+                m_selectedId = CreateCubeEntity("Cube").Id();
             }
             ImGui::EndMenu();
         }
@@ -450,6 +630,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
         if (ImGui::IsKeyPressed(ImGuiKey_Delete)) DeleteSelected();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) DuplicateSelected();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S) && !m_scenePath.empty()) SaveSceneToFile(m_scenePath);
+        if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) Undo();
+        if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) ||
+            (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z))) Redo();
     }
 }
 
@@ -563,8 +746,8 @@ void EditorLayer::DrawHierarchyPanel() {
 
     // Контекстное меню пустого места — создание сущностей.
     if (ImGui::BeginPopupContextWindow("##hierarchy_ctx", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        if (ImGui::MenuItem("Create Empty")) m_selectedId = m_scene->CreateObject("Empty").Id();
-        if (ImGui::MenuItem("Create Cube")) m_selectedId = CreateCubeEntity("Cube").Id();
+        if (ImGui::MenuItem("Create Empty")) { PushUndoSnapshot(); m_selectedId = m_scene->CreateObject("Empty").Id(); }
+        if (ImGui::MenuItem("Create Cube")) { PushUndoSnapshot(); m_selectedId = CreateCubeEntity("Cube").Id(); }
         ImGui::EndPopup();
     }
     ImGui::End();
@@ -579,26 +762,43 @@ void EditorLayer::DrawInspectorPanel() {
         return;
     }
 
+    // Undo-трекинг «размазанных» правок (drag/текст): на активации виджета
+    // запоминаем состояние «до», на завершении правки — кладём его в undo-стек.
+    // Так всё перетаскивание DragFloat3 или набор имени = одна запись undo.
+    auto trackLastItem = [this]() {
+        if (InPlayMode()) return;
+        if (ImGui::IsItemActivated()) m_pendingEditSnapshot = SceneSerializer::SaveToString(*m_scene);
+        if (ImGui::IsItemDeactivatedAfterEdit() && !m_pendingEditSnapshot.empty()) {
+            constexpr size_t kMaxUndoEntries = 100;
+            if (m_undoStack.size() >= kMaxUndoEntries) m_undoStack.erase(m_undoStack.begin());
+            m_undoStack.push_back(m_pendingEditSnapshot);
+            m_pendingEditSnapshot.clear();
+            m_redoStack.clear();
+        }
+    };
+
     char buf[128];
     std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
     if (ImGui::InputText("Name", buf, sizeof(buf))) obj.SetName(buf);
+    trackLastItem();
     ImGui::TextDisabled("Id: %d", obj.Id());
     ImGui::Separator();
 
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
         Transform& tr = obj.GetTransform();
-        ImGui::DragFloat3("Position", &tr.Position.x, 0.05f);
-        ImGui::DragFloat3("Rotation", &tr.Rotation.x, 0.5f);
-        ImGui::DragFloat3("Scale", &tr.Scale.x, 0.05f, 0.01f, 100.0f);
+        ImGui::DragFloat3("Position", &tr.Position.x, 0.05f); trackLastItem();
+        ImGui::DragFloat3("Rotation", &tr.Rotation.x, 0.5f); trackLastItem();
+        ImGui::DragFloat3("Scale", &tr.Scale.x, 0.05f, 0.01f, 100.0f); trackLastItem();
     }
 
     if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
-        ImGui::ColorEdit3("Color", &mr.Color.x);
+        ImGui::ColorEdit3("Color", &mr.Color.x); trackLastItem();
 
         const char* kinds[] = {"None", "Cube", "Model"};
         int kind = (int)mr.Ref.type;
         if (ImGui::Combo("Mesh", &kind, kinds, 3)) {
+            PushUndoSnapshot(); // дискретное изменение — прямая запись undo
             mr.Ref.type = (MeshRef::Type)kind;
             if (mr.Ref.type == MeshRef::Type::Cube) { mr.Ref.path.clear(); mr.MeshPtr = m_cube; }
             if (mr.Ref.type == MeshRef::Type::None) { mr.Ref.path.clear(); mr.MeshPtr = nullptr; }
@@ -608,6 +808,7 @@ void EditorLayer::DrawInspectorPanel() {
             char pathBuf[512];
             std::snprintf(pathBuf, sizeof(pathBuf), "%s", mr.Ref.path.c_str());
             if (ImGui::InputText("Path", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
+            trackLastItem();
             ImGui::SameLine();
             if (ImGui::Button("Load")) {
                 try {
@@ -615,6 +816,27 @@ void EditorLayer::DrawInspectorPanel() {
                 } catch (const std::exception& e) {
                     LOG_ERROR("Editor") << "Model load failed: " << e.what();
                 }
+            }
+        }
+    }
+
+    // --- Скрипт (поведение в Play-режиме) ---
+    if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
+        entt::registry& reg = m_scene->Registry();
+        if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
+            char scriptBuf[512];
+            std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", sc->Path.c_str());
+            if (ImGui::InputText("Lua file", scriptBuf, sizeof(scriptBuf))) sc->Path = scriptBuf;
+            trackLastItem();
+            ImGui::TextDisabled("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)");
+            if (ImGui::Button("Remove Script")) {
+                PushUndoSnapshot();
+                reg.remove<ScriptComponent>(obj.Entity());
+            }
+        } else {
+            if (ImGui::Button("Add Script")) {
+                PushUndoSnapshot();
+                reg.emplace<ScriptComponent>(obj.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
             }
         }
     }
@@ -712,6 +934,13 @@ void EditorLayer::DrawViewportPanel() {
         Transform& tr = selected.GetTransform();
         glm::mat4 model = tr.GetMatrix();
 
+        // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
+        // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
+        // должен быть взят раньше него.
+        if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !InPlayMode()) {
+            m_gizmoPendingSnapshot = SceneSerializer::SaveToString(*m_scene);
+        }
+
         float snapT = 0.5f, snapR = 15.0f, snapS = 0.1f;
         float snapValues[3];
         auto op = (ImGuizmo::OPERATION)m_gizmoOp;
@@ -723,6 +952,18 @@ void EditorLayer::DrawViewportPanel() {
                                  nullptr, m_snap ? snapValues : nullptr)) {
             DecomposeToTransform(model, tr);
         }
+
+        // Фронт «начали таскать»: одна запись undo на всё перетаскивание.
+        bool usingNow = ImGuizmo::IsUsing();
+        if (usingNow && !m_gizmoWasUsing && !InPlayMode() && !m_gizmoPendingSnapshot.empty()) {
+            constexpr size_t kMaxUndoEntries = 100;
+            if (m_undoStack.size() >= kMaxUndoEntries) m_undoStack.erase(m_undoStack.begin());
+            m_undoStack.push_back(m_gizmoPendingSnapshot);
+            m_redoStack.clear();
+        }
+        m_gizmoWasUsing = usingNow;
+    } else {
+        m_gizmoWasUsing = false;
     }
 
     // --- Пикинг ЛКМ (не по гизмо и не во время манипуляции) ---
@@ -752,6 +993,28 @@ void EditorLayer::DrawViewportPanel() {
         modeButton("Rotate (E)", ImGuizmo::ROTATE); ImGui::SameLine();
         modeButton("Scale (R)", ImGuizmo::SCALE); ImGui::SameLine();
         ImGui::Checkbox("Snap", &m_snap);
+
+        // --- Play-режим ---
+        ImGui::SameLine(); ImGui::TextDisabled("|"); ImGui::SameLine();
+        if (m_playState == PlayState::Editing) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
+            if (ImGui::SmallButton("Play")) StartPlay();
+            ImGui::PopStyleColor();
+        } else {
+            if (m_playState == PlayState::Playing) {
+                if (ImGui::SmallButton("Pause")) PausePlay();
+            } else {
+                if (ImGui::SmallButton("Resume")) ResumePlay();
+            }
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
+            if (ImGui::SmallButton("Stop")) StopPlay();
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::TextColored(m_playState == PlayState::Playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
+                                                                 : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
+                               m_playState == PlayState::Playing ? "PLAYING" : "PAUSED");
+        }
     }
     ImGui::End();
 
