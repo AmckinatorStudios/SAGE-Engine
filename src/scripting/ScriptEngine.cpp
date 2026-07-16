@@ -737,6 +737,38 @@ void ScriptEngine::RegisterEngineApi() {
         }
     });
 
+    // --- События (pub/sub) поверх движковой EventBus. Разные скрипты
+    // общаются слабо связанно: один делает Emit("boat.docked", {...}), другой
+    // заранее подписался через On("boat.docked", fn) и получает данные — при
+    // этом ни тот, ни другой не держат прямой ссылки друг на друга. Та же
+    // шина доступна C++-коду (BindEvents), так что событие может прийти и
+    // из движка. On возвращает id подписки для Off. Данные любого события —
+    // произвольное Lua-значение (число/строка/таблица), проходящее через
+    // std::any как sol::object; событие без данных приходит как nil. ---
+    m_lua.set_function("On", [this](const std::string& event, sol::protected_function fn) -> int {
+        if (!m_events) throw std::runtime_error("On: шина событий не привязана (ScriptEngine::BindEvents не вызван)");
+        return m_events->Subscribe(event, [this, fn](const std::any& payload) {
+            sol::object data = sol::lua_nil;
+            if (payload.has_value()) {
+                if (const sol::object* obj = std::any_cast<sol::object>(&payload)) data = *obj;
+            }
+            sol::protected_function_result r = fn(data);
+            if (!r.valid()) {
+                sol::error err = r;
+                LOG_ERROR("Lua") << "Обработчик события упал: " << err.what();
+            }
+        });
+    });
+    m_lua.set_function("Emit", [this](const std::string& event, sol::object data) {
+        if (!m_events) throw std::runtime_error("Emit: шина событий не привязана (ScriptEngine::BindEvents не вызван)");
+        if (data.valid()) m_events->Emit(event, std::make_any<sol::object>(data));
+        else m_events->Emit(event);
+    });
+    m_lua.set_function("Off", [this](int id) {
+        if (!m_events) throw std::runtime_error("Off: шина событий не привязана (ScriptEngine::BindEvents не вызван)");
+        m_events->Unsubscribe(id);
+    });
+
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
     // "сколько осталось" в самом скрипте. Возвращают id для CancelTimer. ---
     m_lua.set_function("Schedule", [this](float seconds, sol::protected_function fn) -> int {

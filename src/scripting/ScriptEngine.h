@@ -1,6 +1,7 @@
 #pragma once
 #include "../scene/Scene.h"
 #include "../core/InputMap.h"
+#include "../core/EventBus.h"
 #include "../render/Camera.h"
 #include "../render/ParticleSystem.h"
 #include "../render/BillboardSystem.h"
@@ -81,6 +82,12 @@ public:
     // Даёт скриптам доступ к UI: CreateCanvas/AddPanel/AddLabel/.../
     // SetWidget*. Без BindUI эти функции бросают ошибку при вызове.
     void BindUI(UIManager& ui) { m_ui = &ui; }
+
+    // Даёт скриптам доступ к шине событий: On(event, fn)->id / Emit(event,
+    // data) / Off(id). Позволяет разным Lua-скриптам (и C++-коду через ту же
+    // EventBus) общаться слабо связанно, не зная друг о друге. Без BindEvents
+    // эти функции бросают ошибку при вызове.
+    void BindEvents(EventBus& events) { m_events = &events; }
 
     // Загружает .lua файл и привязывает его к объекту. Скрипт должен
     // определить глобальную функцию OnUpdate(entity, dt) — она будет
@@ -168,6 +175,7 @@ private:
     BillboardSystem* m_billboards = nullptr;
     AudioEngine* m_audio = nullptr;
     UIManager* m_ui = nullptr;
+    EventBus* m_events = nullptr;
     std::unordered_map<std::string, Asset<Texture>> m_billboardTextures;
 
     int m_nextTimerId = 1;

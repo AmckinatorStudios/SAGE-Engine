@@ -46,6 +46,7 @@
 #include "core/JobSystem.h"
 #include "core/MainThreadDispatcher.h"
 #include "core/EngineRuntime.h"
+#include "core/EventBus.h"
 #include "render/Shader.h"
 #include "render/Camera.h"
 #include "asset/AssetManager.h"
@@ -556,6 +557,15 @@ int main() {
         // см. комментарий у полей Scripts/SceneData в game/GameState.h).
         UIManager scriptUi;
 
+        // Шина событий (pub/sub) движка: скрипты общаются слабо связанно
+        // через On/Emit/Off (см. ScriptEngine::BindEvents), C++ может слушать/
+        // публиковать через ту же EventBus. Объявлена ПОСЛЕ game по той же
+        // причине, что и scriptUi: подписки хранят Lua-замыкания
+        // (sol::protected_function), поэтому шина должна разрушиться РАНЬШЕ
+        // sol::state внутри game.Scripts — обратный порядок объявления это
+        // и обеспечивает.
+        EventBus eventBus;
+
         // Camera/billboards созданы раньше GameState — привязка снаружи неё,
         // как и InputSystem выше. ParticleSystem же живёт внутри GameState,
         // поэтому её привязываем на неё саму (game.Particles). Все Bind*
@@ -567,6 +577,7 @@ int main() {
         game.Scripts.BindBillboards(billboards);
         game.Scripts.BindAudio(game.Audio);
         game.Scripts.BindUI(scriptUi);
+        game.Scripts.BindEvents(eventBus);
 
         // demo_features.lua — витрина расширенного Lua-API движка (спавн
         // объектов, таймеры, корутины, камера, частицы, билборды), никак не

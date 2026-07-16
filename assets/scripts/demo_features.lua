@@ -188,6 +188,30 @@ function OnStart(entity)
     log("JsonDecode('[1,2,3]')[3] = " .. tostring(JsonDecode("[1,2,3]")[3]))
     log("JsonDecode('{bad json') = " .. tostring(JsonDecode("{bad json")))
 
+    -- События (pub/sub): подписываемся на именованное событие, публикуем его
+    -- с таблицей-нагрузкой, проверяем, что обработчик получил данные. Затем
+    -- отписываемся через Off и убеждаемся, что повторный Emit больше не
+    -- доходит. Издатель и подписчик не держат ссылок друг на друга — только
+    -- имя события.
+    local eventHits = 0
+    local lastPayload = nil
+    local subId = On("demo.ping", function(data)
+        eventHits = eventHits + 1
+        lastPayload = data
+    end)
+    Emit("demo.ping", {value = 7, who = "demo"})
+    log("Event demo.ping hits=" .. tostring(eventHits)
+        .. " payload.value=" .. tostring(lastPayload and lastPayload.value)
+        .. " payload.who=" .. tostring(lastPayload and lastPayload.who))
+    Off(subId)
+    Emit("demo.ping", {value = 99})
+    log("После Off: hits=" .. tostring(eventHits) .. " (должно остаться прежним)")
+    -- Событие без данных приходит как nil
+    On("demo.tick", function(data)
+        log("Event demo.tick data=" .. tostring(data))
+    end)
+    Emit("demo.tick")
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()
