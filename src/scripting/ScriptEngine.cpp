@@ -3,6 +3,7 @@
 #include "../core/KeyNames.h"
 #include "../asset/AssetManager.h"
 #include "../render/ParticlePresets.h"
+#include "../scene/SceneSerializer.h"
 #include <algorithm>
 #include <any>
 #include <fstream>
@@ -767,6 +768,58 @@ void ScriptEngine::RegisterEngineApi() {
     m_lua.set_function("Off", [this](int id) {
         if (!m_events) throw std::runtime_error("Off: шина событий не привязана (ScriptEngine::BindEvents не вызван)");
         m_events->Unsubscribe(id);
+    });
+
+    // --- Сцены: сохранение/загрузка ВСЕЙ привязанной сцены в .sage-файл
+    // (объекты, transform, цвет, меш, тег, освещение) плюс свободные данные
+    // объекта (entity.Lua) через хуки, конвертирующие sol::table <-> JSON теми
+    // же helper'ами, что и SaveTable/JsonEncode. SaveScene пишет текущую
+    // m_scene; LoadScene заменяет её содержимое НА МЕСТЕ (LoadInto) — так все
+    // C++-ссылки на сцену (рендер, m_scene) остаются валидными. Оба требуют
+    // BindScene. Возвращают true/false (успех). ---
+    SceneSerializer::Hooks sceneHooks;
+    sceneHooks.SaveLuaData = [](const GameObject& obj) -> nlohmann::json {
+        if (!obj.LuaData.has_value()) return nullptr;
+        const sol::table* t = std::any_cast<sol::table>(&obj.LuaData);
+        if (!t || !t->valid()) return nullptr;
+        nlohmann::json j = LuaTableToJson(*t);
+        // Пустую таблицу не пишем — нечего сохранять.
+        return j.empty() ? nlohmann::json(nullptr) : j;
+    };
+    sceneHooks.LoadLuaData = [this](GameObject& obj, const nlohmann::json& j) {
+        sol::object v = JsonToLuaValue(m_lua, j);
+        if (v.is<sol::table>()) obj.LuaData = v.as<sol::table>();
+    };
+    m_lua.set_function("SaveScene", [this, sceneHooks](const std::string& path) -> bool {
+        if (!m_scene) throw std::runtime_error("SaveScene: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        try {
+            SceneSerializer::Save(*m_scene, path, sceneHooks);
+            return true;
+        } catch (const std::exception& e) {
+            LOG_ERROR("Lua") << "SaveScene: " << e.what();
+            return false;
+        }
+    });
+    m_lua.set_function("LoadScene", [this, sceneHooks](const std::string& path) -> bool {
+        if (!m_scene) throw std::runtime_error("LoadScene: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        try {
+            SceneSerializer::LoadInto(*m_scene, path, sceneHooks);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Lua") << "LoadScene: " << e.what();
+            return false;
+        }
+        // LoadInto очистил Objects() старой сцены — все объектные скрипты
+        // держали на них висячие GameObject*. Помечаем их мёртвыми, чтобы
+        // UpdateAll не разыменовывал освобождённую память (тот же инвариант,
+        // что и у DestroyObject). Уровневые скрипты (Object==nullptr) не трогаем.
+        for (auto& inst : m_instances) {
+            if (inst.Object) inst.Dead = true;
+        }
+        // Отложенные загрузки мешей адресовали объекты по Id старой сцены —
+        // после перезагрузки эти Id уже не те; отменяем, чтобы не применить
+        // меш к чужому объекту.
+        m_pendingMeshes.clear();
+        return true;
     });
 
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения

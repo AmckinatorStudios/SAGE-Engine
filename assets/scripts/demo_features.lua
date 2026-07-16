@@ -212,6 +212,25 @@ function OnStart(entity)
     end)
     Emit("demo.tick")
 
+    -- Сцена: сохраняем ВСЮ текущую сцену (спавн-объекты выше, их теги и
+    -- свободные данные entity.Lua, освещение) в .sage-файл, затем грузим
+    -- обратно ПОВЕРХ живой сцены (LoadInto) и проверяем, что тег и Lua-данные
+    -- sphere пережили round-trip через диск. LoadScene заменяет содержимое на
+    -- месте — уровневый demo-скрипт (без entity) продолжает работать.
+    local scenePath = "demo_scene.sage"
+    local sceneSaved = SaveScene(scenePath)
+    log("SaveScene -> " .. tostring(sceneSaved))
+    local sceneLoaded = LoadScene(scenePath)
+    log("LoadScene -> " .. tostring(sceneLoaded))
+    local restored = FindObject("async_sphere")
+    if restored then
+        log("Сцена round-trip: sphere.Tag=" .. tostring(restored.Tag)
+            .. " sphere.Lua.spinSpeed=" .. tostring(restored.Lua.spinSpeed)
+            .. " sphere.Lua.customLabel=" .. tostring(restored.Lua.customLabel))
+    else
+        log("После LoadScene async_sphere не найден — ОШИБКА round-trip")
+    end
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()

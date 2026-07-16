@@ -90,55 +90,29 @@ static LightingEnvironment LightingFromJson(const json& root) {
     return lighting;
 }
 
-namespace SceneSerializer {
-
-void Save(const Scene& scene, const std::string& path) {
-    json root;
-    root["sage_scene_version"] = 1;
-    root["name"] = scene.Name();
-
-    json objectsJson = json::array();
-    for (auto& objPtr : const_cast<Scene&>(scene).Objects()) {
-        const GameObject& obj = *objPtr;
-        json j;
-        j["id"] = obj.Id;
-        j["name"] = obj.Name;
-        j["position"] = Vec3ToJson(obj.TransformComponent.Position);
-        j["rotation"] = Vec3ToJson(obj.TransformComponent.Rotation);
-        j["scale"]    = Vec3ToJson(obj.TransformComponent.Scale);
-        j["color"]    = Vec3ToJson(obj.Color);
-        j["mesh"]["type"] = MeshTypeToString(obj.MeshRefComponent.type);
-        j["mesh"]["path"] = obj.MeshRefComponent.path;
-        objectsJson.push_back(j);
-    }
-    root["objects"] = objectsJson;
-    root["lighting"] = LightingToJson(scene.Lighting);
-
-    std::ofstream file(path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Не удалось открыть файл для записи сцены: " + path);
-    }
-    file << root.dump(2);
-}
-
-std::unique_ptr<Scene> Load(const std::string& path) {
+// Читает файл сцены с диска в JSON-корень. Бросает при ошибке открытия/парса.
+static json ReadSceneFile(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
         throw std::runtime_error("Не удалось открыть файл сцены: " + path);
     }
-
     json root;
     try {
         file >> root;
     } catch (const std::exception& e) {
         throw std::runtime_error("Ошибка парсинга JSON сцены (" + path + "): " + e.what());
     }
+    return root;
+}
 
-    auto scene = std::make_unique<Scene>(root.value("name", "Untitled"));
+// Заполняет ПУСТУЮ сцену объектами/освещением из уже разобранного JSON.
+// Общая часть Load (в новый Scene) и LoadInto (в очищенный существующий).
+static void PopulateScene(Scene& scene, const json& root, const SceneSerializer::Hooks& hooks) {
+    scene.SetName(root.value("name", "Untitled"));
 
     int maxId = 0;
     for (const auto& j : root.value("objects", json::array())) {
-        auto& obj = scene->CreateObject(j.value("name", "Object"));
+        auto& obj = scene.CreateObject(j.value("name", "Object"));
         obj.Id = j.value("id", obj.Id);
         maxId = std::max(maxId, obj.Id);
 
@@ -146,6 +120,7 @@ std::unique_ptr<Scene> Load(const std::string& path) {
         if (j.contains("rotation")) obj.TransformComponent.Rotation = Vec3FromJson(j["rotation"]);
         if (j.contains("scale"))    obj.TransformComponent.Scale    = Vec3FromJson(j["scale"]);
         if (j.contains("color"))    obj.Color              = Vec3FromJson(j["color"]);
+        obj.Tag = j.value("tag", std::string{});
 
         if (j.contains("mesh")) {
             obj.MeshRefComponent.type = MeshTypeFromString(j["mesh"].value("type", "none"));
@@ -164,11 +139,71 @@ std::unique_ptr<Scene> Load(const std::string& path) {
                 obj.MeshComponent = nullptr;
                 break;
         }
-    }
-    scene->SetNextId(maxId + 1);
-    scene->Lighting = LightingFromJson(root);
 
+        // Свободные данные объекта (LuaData) — только если игра передала хук
+        // и в файле есть непустой блок "lua".
+        if (hooks.LoadLuaData && j.contains("lua") && !j["lua"].is_null()) {
+            hooks.LoadLuaData(obj, j["lua"]);
+        }
+    }
+    scene.SetNextId(maxId + 1);
+    scene.Lighting = LightingFromJson(root);
+}
+
+namespace SceneSerializer {
+
+void Save(const Scene& scene, const std::string& path, const Hooks& hooks) {
+    json root;
+    root["sage_scene_version"] = 1;
+    root["name"] = scene.Name();
+
+    json objectsJson = json::array();
+    for (auto& objPtr : const_cast<Scene&>(scene).Objects()) {
+        const GameObject& obj = *objPtr;
+        json j;
+        j["id"] = obj.Id;
+        j["name"] = obj.Name;
+        j["position"] = Vec3ToJson(obj.TransformComponent.Position);
+        j["rotation"] = Vec3ToJson(obj.TransformComponent.Rotation);
+        j["scale"]    = Vec3ToJson(obj.TransformComponent.Scale);
+        j["color"]    = Vec3ToJson(obj.Color);
+        // Тег сохраняем только если он непустой — не засоряем файл.
+        if (!obj.Tag.empty()) j["tag"] = obj.Tag;
+        j["mesh"]["type"] = MeshTypeToString(obj.MeshRefComponent.type);
+        j["mesh"]["path"] = obj.MeshRefComponent.path;
+        // Свободные данные объекта (LuaData) — только через хук игры, и только
+        // если он вернул непустой JSON (null пропускаем, чтобы не плодить "lua": null).
+        if (hooks.SaveLuaData) {
+            json luaJson = hooks.SaveLuaData(obj);
+            if (!luaJson.is_null()) j["lua"] = std::move(luaJson);
+        }
+        objectsJson.push_back(j);
+    }
+    root["objects"] = objectsJson;
+    root["lighting"] = LightingToJson(scene.Lighting);
+
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Не удалось открыть файл для записи сцены: " + path);
+    }
+    file << root.dump(2);
+}
+
+std::unique_ptr<Scene> Load(const std::string& path, const Hooks& hooks) {
+    json root = ReadSceneFile(path);
+    auto scene = std::make_unique<Scene>(root.value("name", "Untitled"));
+    PopulateScene(*scene, root, hooks);
     return scene;
+}
+
+void LoadInto(Scene& scene, const std::string& path, const Hooks& hooks) {
+    // Читаем и парсим ДО очистки: если файл битый/отсутствует, брошенное
+    // исключение оставит текущую сцену нетронутой, а не наполовину стёртой.
+    json root = ReadSceneFile(path);
+    scene.Objects().clear();
+    scene.Lighting = LightingEnvironment{};
+    scene.SetNextId(1);
+    PopulateScene(scene, root, hooks);
 }
 
 }
