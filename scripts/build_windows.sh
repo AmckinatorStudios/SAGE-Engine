@@ -27,15 +27,21 @@ echo "=== Собираю ${GAME_NAME} v${VERSION} под Windows (кросс-к�
 
 cmake -B "${BUILD_DIR}" \
     -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-toolchain.cmake \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DGAME_NAME="${GAME_NAME}"
-cmake --build "${BUILD_DIR}" -j"$(nproc)"
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build "${BUILD_DIR}" -j"$(nproc)" --target "${GAME_NAME}"
 
 echo "=== Упаковываю ==="
+# Бинарник и ассеты игры лежат вместе в build/games/<name>/ — пакуем оттуда.
+EXE=$(find "${BUILD_DIR}" -type f -name "${GAME_NAME}.exe" | head -1)
+if [ -z "${EXE}" ]; then
+    echo "Ошибка: не найден собранный ${GAME_NAME}.exe в ${BUILD_DIR}"
+    exit 1
+fi
+EXE_DIR=$(dirname "${EXE}")
 rm -rf "${PACKAGE_DIR}"
 mkdir -p "${PACKAGE_DIR}"
-cp "${BUILD_DIR}/${GAME_NAME}.exe" "${PACKAGE_DIR}/"
-cp -r assets "${PACKAGE_DIR}/"
+cp "${EXE}" "${PACKAGE_DIR}/"
+cp -r "${EXE_DIR}/assets" "${PACKAGE_DIR}/"
 
 cd dist/windows
 zip -r -q "${PACKAGE_NAME}.zip" "${PACKAGE_NAME}"

@@ -1,74 +1,96 @@
-# SAGE Engine — универсальный 3D-движок (C++ / OpenGL)
+# SAGE Engine — универсальный модульный 3D-движок (C++ / OpenGL)
 
-**SAGE Engine — универсальный движок общего назначения, не воксельный.**
-Ядро (окно, рендер, камера, сцены, сериализация, скриптинг) не знает
-и не должно ничего знать о вокселях — оно одинаково подходит для любой
-3D-игры: шутера, платформера, симулятора, чего угодно. Воксельная система
-(`src/voxel/`) — это МОДУЛЬ КОНКРЕТНОЙ ИГРЫ (The Boat), написанный поверх
-ядра движка, точно так же как любой другой игровой код мог бы быть написан
-поверх него. Если следующая игра не про воксели — просто не подключаешь
-`src/voxel/`, и движок останется тем же самым.
+**SAGE Engine — универсальный движок общего назначения с ECS, редактором на
+ImGui и абстракцией графического бэкенда.** Ядро (окно, рендер, ECS-сцены,
+сериализация, скриптинг, аудио) не знает ничего о вокселях или конкретной игре
+— оно одинаково подходит для любой 3D-игры. Проект строго разделён на три части:
 
-Готовые пакеты игры The Boat собраны и лежат в `dist/` — Linux и Windows,
-кросс-скомпилировано и проверено мной вручную (собрано, слинковано, запущено
-headless для проверки).
+- **`engine/`** — переиспользуемое ядро → статическая библиотека `sage::engine`.
+  Публичный API отдаётся ТОЛЬКО под префиксом `<sage/...>` — игры и редактор
+  физически не могут дотянуться до внутренностей мимо этой границы.
+- **`editor/`** — редактор `SageEditor` на ImGui (линкует движок).
+- **`games/<name>/`** — конкретные игры (линкуют движок, независимы друг от
+  друга). Пример — `games/theboat/` (воксельная игра The Boat).
 
-## Быстрый старт (Windows, без сборки)
-Готовый пакет игры лежит в `dist/windows/TheBoat-0.1.0-windows-x64.zip`.
-Распакуй архив и запусти `TheBoat.exe` — всё нужное (ассеты) уже внутри,
-ничего доустанавливать не надо.
+Добавить новую игру = создать `games/<name>/` и вызвать `sage_add_game()` в её
+CMakeLists — движок общий, игровой код независим.
 
-## Что внутри
+## Архитектура (ключевые решения)
+
+| Слой | Что это | Где |
+|---|---|---|
+| **Application / Layer** | Движок владеет окном, главным циклом и таймингом; игра/редактор подключаются как слои (`OnAttach/OnUpdate/OnRender`). Точку входа даёт макрос `SAGE_MAIN`. | `sage/core/Application.h`, `Layer.h`, `GameModule.h` |
+| **ECS (entt)** | Сцена — это `entt::registry`; сущности собираются из компонентов (`Name`, `Transform`, `MeshRenderer`, ...). `GameObject` — дешёвый дескриптор поверх. Системы обходят сущности (`sage/ecs/RenderSystem.h`). | `sage/scene/Scene.h`, `Components.h`, `sage/ecs/` |
+| **RHI (абстракция графики)** | Движок обращается не к OpenGL напрямую, а к интерфейсу `GraphicsDevice`. Реализация бэкенда (сейчас OpenGL) изолирована в `engine/src/rhi/opengl/`. Чтобы добавить Vulkan/D3D — реализуют интерфейс, код движка/игр не трогают. | `sage/rhi/GraphicsDevice.h`, `engine/src/rhi/opengl/` |
+| **Скриптинг (Lua)** | Управление сущностями и логикой уровня из `.lua` без перекомпиляции. | `sage/scripting/ScriptEngine.*` |
+
+## Структура репозитория
 ```
-engine/
-  CMakeLists.txt              — сборка, сама качает зависимости
-  cmake/mingw-toolchain.cmake — файл для кросс-сборки .exe из Linux
-  scripts/                     — скрипты сборки готовых пакетов (см. ниже)
-  dist/                         — готовые собранные пакеты игры (.tar.gz/.zip)
-  external/glad/                — загрузчик функций OpenGL
-  external/miniaudio/           — звук (single-header, public domain)
-  assets/
-    shaders/                    — шейдеры (свет по Фонгу, вода, воксели)
-    scenes/                     — сохранённые .sage сцены
-    models/                     — .obj модели
-    scripts/                    — .lua скрипты (см. раздел "Скриптинг")
-    audio/                      — звуки (.wav): эмбиент, музыка, SFX
+SAGE-Engine/
+  CMakeLists.txt              — оркестратор: сторонние зависимости + подпроекты
+  cmake/SageHelpers.cmake     — функция sage_add_game() (новая игра в пару строк)
+  cmake/mingw-toolchain.cmake — кросс-сборка .exe из Linux
 
-  src/
-    main.cpp                    — точка входа, игровой цикл ИГРЫ (The Boat)
+  engine/                     → библиотека sage::engine (универсальное ядро)
+    CMakeLists.txt
+    src/sage/                 — ПУБЛИЧНЫЙ API (включается как <sage/...>)
+      core/     Application, Layer, GameModule, Window, InputSystem, Log
+      rhi/      GraphicsDevice — абстракция графического устройства
+      ecs/      Registry (фасад entt), RenderSystem
+      scene/    Scene (ECS), Components, Transform, Light, SceneSerializer
+      render/   Shader, Camera, Mesh, Model, Skybox, ShadowMap, PostProcess, ...
+      ui/       UIRenderer, Widgets — immediate-mode UI
+      scripting/ ScriptEngine — Lua (sol2)
+      audio/    AudioEngine — 2D/3D-звук, музыка (miniaudio)
+    src/rhi/opengl/           — OpenGL-бэкенд: ЕДИНСТВЕННОЕ место с glad (уровень устройства)
 
-    ── ЯДРО ДВИЖКА → статическая библиотека sage_engine ──
-    ── (универсальное, не зависит от вокселей/конкретной игры) ──
-    core/Window.*                — окно и контекст OpenGL
-    core/InputSystem.h            — ввод: сырой GLFW → именованные действия
-    render/Shader.*                — загрузка/компиляция шейдеров
-    render/Camera.h                 — камера-полёт
-    render/Mesh.*                    — геометрия на GPU, генератор куба
-    render/ModelLoader.*              — загрузка .obj моделей
-    render/ResourceManager.h           — кэш мешей
-    render/ParticleSystem.*, BillboardSystem.h, PostProcess.h, ShadowMap.h
-    scene/Transform.h                 — позиция/поворот/масштаб
-    scene/Scene.h                      — сцена: список GameObject'ов (ECS-лайт)
-    scene/SceneSerializer.*             — сохранение/загрузка сцены в JSON
-    scene/SceneManager.h                 — несколько сцен, переключение активной
-    ui/UIRenderer.*, UICanvas.h, Widgets.h — immediate-mode UI + виджеты
-    scripting/ScriptEngine.*              — система скриптинга на Lua
-    audio/AudioEngine.*                    — звук: 2D/3D-эффекты, эмбиент,
-                                             музыка-стриминг, слушатель (miniaudio)
+  editor/                     → exe SageEditor (ImGui: Hierarchy/Inspector/Viewport)
+    src/, assets/shaders/
 
-    ── КОД ИГРЫ THE BOAT → exe TheBoat (линкует sage_engine) ──
-    ── (написан ПОВЕРХ ядра, не часть движка) ──
-    game/GameState.h, PlayerActions.h, GameHud.h, Fishing.h, Crafting.h, ...
-                                   — состояние партии, действия, худ, механики
-    voxel/Block.h, Chunk.*, World.*, VoxelMesh.*, VoxelRaycast.h,
-          WorldRaycast.h, WaterPlane.h — воксельный корабль (специфика The Boat)
+  games/theboat/              → exe TheBoat (пример игры на движке)
+    src/  main.cpp (тонкий), TheBoatLayer.*, game/*, voxel/*
+    assets/ shaders, models, scripts, audio, textures
+
+  external/                   — glad, stb, tinygltf, miniaudio, imgui (вендорены)
 ```
 
-Сборка даёт два таргета: библиотеку `sage_engine` (переиспользуемое ядро) и
-исполняемый файл игры `TheBoat`, который её линкует. Граница строгая и
-проверяемая: код движка нигде не включает `src/game/` или `src/voxel/`, поэтому
-следующую игру (пусть даже не про воксели) можно собрать, слинковав ту же
-библиотеку `sage_engine` и написав свой `main` + свой игровой код.
+Сборка даёт: библиотеку `sage::engine`, exe игры `TheBoat` и exe редактора
+`SageEditor`. Граница строгая и проверяемая: код движка нигде не включает
+`game/`/`voxel/`, а `#include <glad/...>` на уровне устройства есть только в
+`engine/src/rhi/opengl/`. Следующую игру можно собрать, слинковав ту же
+библиотеку и написав свой слой + `CreateApplication`.
+
+## Как сделать новую игру
+```cmake
+# games/mygame/CMakeLists.txt
+sage_add_game(
+    NAME MyGame
+    SOURCES src/main.cpp src/MyGameLayer.cpp
+    ASSETS  ${CMAKE_CURRENT_SOURCE_DIR}/assets
+)
+```
+```cpp
+// games/mygame/src/main.cpp
+#include "sage/core/GameModule.h"
+#include "MyGameLayer.h"
+sage::Application* sage::CreateApplication(int, char**) {
+    auto* app = new sage::Application({.Title = "My Game"});
+    app->PushLayer(std::make_unique<MyGameLayer>());
+    return app;
+}
+SAGE_MAIN()
+```
+Затем добавить `add_subdirectory(games/mygame)` в корневой CMakeLists. Игровой
+слой наследует `sage::Layer` и работает с движковой `Scene` (ECS), рендером
+через RHI-девайс и т.д. — как это делает `games/theboat/src/TheBoatLayer.*`.
+
+## Как добавить графический бэкенд
+Реализовать интерфейс `sage::rhi::GraphicsDevice` (см. `sage/rhi/GraphicsDevice.h`)
+в новом каталоге `engine/src/rhi/<backend>/`, добавить ветку в фабрику
+`GraphicsDevice::Create()`. Код движка и игр обращается только к интерфейсу,
+поэтому смена бэкенда их не затрагивает. (Сейчас на уровне устройства покрыты
+инициализация драйвера и состояние конвейера; миграция ресурсов рендера
+Shader/Mesh/Texture/Framebuffer за RHI — в работе.)
 
 
 
@@ -78,17 +100,18 @@ engine/
 - **F9** — загрузить сцену из `assets/scenes/level1.sage`
 
 ## Система сцен и сериализация
-`Scene` — список объектов (`GameObject`): имя, `Transform` (позиция/
-поворот/масштаб), ссылка на меш (`MeshRefComponent`: куб или путь к .obj),
-цвет. `SceneManager` умеет держать несколько сцен одновременно и
-переключать активную:
+`Scene` — это ECS-сцена на `entt::registry`. Сущности собираются из компонентов
+(`NameComponent`, `Transform`, `MeshRendererComponent`, ...); `GameObject` —
+дешёвый дескриптор `{registry, entity}` с аксессорами к компонентам.
+`SceneManager` держит несколько сцен и переключает активную:
 
 ```cpp
 SceneManager sceneManager;
 Scene& level1 = sceneManager.CreateScene("Level1");
-auto& obj = level1.CreateObject("MyCube");
-obj.MeshRefComponent.type = MeshRef::Type::Cube;
-obj.MeshComponent = ResourceManager::Instance().GetCube();
+GameObject obj = level1.CreateObject("MyCube");
+obj.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+obj.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+obj.Renderer().MeshPtr = ResourceManager::Instance().GetCube();
 
 // Сохранить сцену на диск (человекочитаемый JSON, расширение .sage)
 sceneManager.SaveScene("Level1", "assets/scenes/level1.sage");
@@ -96,6 +119,9 @@ sceneManager.SaveScene("Level1", "assets/scenes/level1.sage");
 // Загрузить сцену обратно (сам пересоздаст GPU-ресурсы мешей)
 sceneManager.LoadScene("assets/scenes/level1.sage");
 ```
+
+Обход сущностей — через ECS-view (`scene.Registry().view<...>()`) или готовую
+систему `sage::ecs::ForEachRenderable(scene, ...)`.
 
 Файл `.sage` — обычный JSON, можно открыть и посмотреть/поправить руками:
 ```json
@@ -118,7 +144,7 @@ sceneManager.LoadScene("assets/scenes/level1.sage");
 Для модели вместо куба: `"mesh": {"type":"model","path":"assets/models/dragon.obj"}`.
 
 ## Скриптинг (Lua)
-Часть ЯДРА движка (`src/scripting/ScriptEngine.*`) — не зависит от вокселей
+Часть ЯДРА движка (`engine/src/sage/scripting/ScriptEngine.*`) — не зависит от вокселей
 и вообще ни от какой конкретной игры. Позволяет управлять поведением
 `GameObject` через `.lua` файлы без перекомпиляции движка: правишь скрипт,
 перезапускаешь игру, видишь результат.
@@ -156,7 +182,7 @@ end
 привязку.
 
 ## Текстуры
-Часть ЯДРА движка (`src/render/Texture.*`, через stb_image) — грузит PNG/JPG/BMP/TGA
+Часть ЯДРА движка (`engine/src/sage/render/Texture.*`, через stb_image) — грузит PNG/JPG/BMP/TGA
 в GPU-текстуру, не зависит от вокселей. Используется в двух местах, чтобы
 показать это:
 
@@ -217,7 +243,7 @@ Anisotropic реализован через расширение `GL_EXT_texture
 можно будет включить мипмапы/анизотропию и для атласа тоже — пока не сделано).
 
 ## Загрузка 3D-моделей (OBJ+MTL / GLTF / GLB)
-Часть ЯДРА движка (`src/render/Model.*`) — грузит модели трёх форматов,
+Часть ЯДРА движка (`engine/src/sage/render/Model.*`) — грузит модели трёх форматов,
 с материалами и текстурами, без вокселей. Определяет формат по расширению
 файла автоматически:
 
@@ -273,7 +299,7 @@ model->Draw(shader); // сама переключает текстуру/цве�
 вода, текстуры блоков через общий атлас.
 
 ```
-src/voxel/
+games/theboat/src/voxel/
   Block.h            — типы блоков (Air, Grass, Dirt, Stone, Wood, Plank),
                         индекс тайла в атласе для каждого типа
   Chunk.h/cpp         — чанк 16x16x16 блоков + генерация меша (face culling + UV)
@@ -316,7 +342,7 @@ src/voxel/
 - **Коллизии игрока с блоками** (сейчас камера свободно летает сквозь блоки)
 
 ## Skybox
-Часть ЯДРА движка (`src/render/Skybox.*`) — кубическая (cubemap) текстура,
+Часть ЯДРА движка (`engine/src/sage/render/Skybox.*`) — кубическая (cubemap) текстура,
 создающая иллюзию бескрайнего неба вокруг сцены. Не зависит от вокселей.
 
 ```cpp
@@ -367,7 +393,7 @@ skybox.Draw(skyboxShader, view, projection);
    совпадает с краем боковых граней при любом угле обзора).
 
 ## Пост-процессинг (HDR + тон-маппинг)
-Часть ЯДРА рендера (`src/render/Framebuffer.h`, `PostProcess.h`,
+Часть ЯДРА рендера (`engine/src/sage/render/Framebuffer.h`, `PostProcess.h`,
 `assets/shaders/post.*`) — не зависит от вокселей/конкретной игры.
 
 Вся 3D-сцена рисуется не в экран напрямую, а в offscreen HDR-буфер
@@ -388,7 +414,7 @@ UI рисуется ПОСЛЕ пост-процессинга, поэтому �
 целиком отключается для сравнения "до/после": `SAGE_NO_POST=1 ./TheBoat`.
 
 ## Тени (shadow mapping от солнца)
-Часть ЯДРА рендера (`src/render/ShadowMap.h`, `assets/shaders/shadow_depth.*`) —
+Часть ЯДРА рендера (`engine/src/sage/render/ShadowMap.h`, `assets/shaders/shadow_depth.*`) —
 не зависит от вокселей/конкретной игры.
 
 Направленный свет ("солнце") отбрасывает тени через классический shadow
@@ -488,10 +514,12 @@ dist/windows/TheBoat-0.1.0-windows-x64.zip
 
 ## Как собрать вручную (без скриптов, для разработки)
 
+Имена таргетов фиксированы (задаются через `sage_add_game`): `TheBoat` (игра),
+`SageEditor` (редактор), `sage_engine` (библиотека). `-DGAME_NAME` больше не нужен.
+
 ### Windows
 ```
-cd engine
-cmake -B build -DGAME_NAME=TheBoat
+cmake -B build
 cmake --build build --config Release
 ```
 Или открой папку в Visual Studio через "Open Folder" — она сама подхватит CMake.
@@ -500,38 +528,35 @@ cmake --build build --config Release
 ```
 sudo apt install cmake g++ libx11-dev libxrandr-dev libxinerama-dev \
                   libxcursor-dev libxi-dev libgl1-mesa-dev
-cd engine
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DGAME_NAME=TheBoat
+cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-cd build && ./TheBoat
+./build/games/theboat/TheBoat      # запуск игры
+./build/editor/SageEditor          # запуск редактора
 ```
+Собрать только один таргет: `cmake --build build --target TheBoat` (или `SageEditor`).
 
 ### Кросс-компиляция в .exe из Linux
 ```
 sudo apt install g++-mingw-w64-x86-64
-cd engine
-cmake -B build-windows -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DGAME_NAME=TheBoat
-cmake --build build-windows -j$(nproc)
+cmake -B build-windows -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build-windows -j$(nproc) --target TheBoat
 ```
 .exe линкуется статически — запускается на чистой Windows без установки рантайма MinGW.
 
-Обрати внимание: имя выходного файла теперь `TheBoat` (или что укажешь в
-`GAME_NAME`), а не `SAGEEngine` — движок называется SAGE Engine, но продукт,
-который из него собирается, называется по имени игры.
+## Что добавить дальше
+- **Завершить RHI (фаза 4b):** увести ресурсы рендера (Shader/Mesh/Texture/
+  Framebuffer и подсистемы эффектов) за RHI, чтобы `glad` остался только в
+  `engine/src/rhi/opengl/` — тогда возможен второй бэкенд (Vulkan/D3D).
+- **Редактор:** сохранение/загрузка `.sage` из UI, гизмо-манипуляторы,
+  ассет-браузер, консоль лога, Play-режим (запуск игрового слоя в редакторе).
+- Хот-релоад скриптов; доступ к воксельному миру из Lua.
+- Каскадные тени (CSM) + мягкие (PCSS); bloom, SSAO, DoF.
+- Физика/коллизии; PBR-материалы.
 
-## Что добавить дальше (скажи мне, и я допишу)
-- Хот-релоад скриптов (перечитывать .lua без перезапуска игры)
-- Доступ к воксельному миру из Lua (ломать/ставить блоки из скрипта)
-- Каскадные тени (CSM) для больших открытых сцен + мягкие тени (PCSS)
-- Ещё эффекты пост-процессинга: bloom (свечение), SSAO, глубина резкости
-- Физика/коллизии
-- Полноценная ECS (entt)
-- PBR-материалы
-- Редактор сцен (ImGui) вместо ручного JSON
-
-Уже сделано: скриптинг на Lua с камерой/частицами/билбордами, текстуры,
-несколько источников света, skybox, **тени (shadow mapping)**,
-**пост-процессинг (HDR + тон-маппинг ACES)**, **аудио (2D/3D-звук,
-эмбиент, потоковая музыка, miniaudio)**.
-
-Просто пиши мне, что добавить — я буду расширять этот же проект.
+Уже сделано в этой переработке: **модульная структура engine/editor/games** с
+проверяемой границей `<sage/...>`, **каркас Application/Layer + SAGE_MAIN**,
+**ECS на entt** (компоненты/системы, дескрипторы `GameObject`), **RHI-шов с
+OpenGL-бэкендом** (уровень устройства), **редактор SageEditor на ImGui**
+(Hierarchy/Inspector/Viewport), а также прежние подсистемы: скриптинг на Lua,
+текстуры, несколько источников света, skybox, тени (shadow mapping),
+пост-процессинг (HDR + ACES), аудио (2D/3D, музыка, miniaudio).

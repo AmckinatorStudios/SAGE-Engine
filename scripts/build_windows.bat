@@ -20,23 +20,29 @@ set PACKAGE_DIR=dist\windows\%PACKAGE_NAME%
 
 echo === Sobirayu %GAME_NAME% v%VERSION% pod Windows ===
 
-cmake -B %BUILD_DIR% -DCMAKE_BUILD_TYPE=Release -DGAME_NAME=%GAME_NAME%
+REM Imya igrovogo targeta zadaotsya v games\<name>\CMakeLists.txt (sage_add_game),
+REM poetomu -DGAME_NAME bolshe ne nuzhen - sobiraem nuzhnyy target po imeni.
+cmake -B %BUILD_DIR% -DCMAKE_BUILD_TYPE=Release
 if errorlevel 1 goto :error
 
-cmake --build %BUILD_DIR% --config Release
+cmake --build %BUILD_DIR% --config Release --target %GAME_NAME%
 if errorlevel 1 goto :error
 
 echo === Upakovyvayu ===
 if exist "%PACKAGE_DIR%" rmdir /s /q "%PACKAGE_DIR%"
 mkdir "%PACKAGE_DIR%"
 
-REM Visual Studio кладёт .exe в подпапку Release, MinGW - прямо в build_dir
-if exist "%BUILD_DIR%\Release\%GAME_NAME%.exe" (
-    copy "%BUILD_DIR%\Release\%GAME_NAME%.exe" "%PACKAGE_DIR%\"
-) else (
-    copy "%BUILD_DIR%\%GAME_NAME%.exe" "%PACKAGE_DIR%\"
+REM Binarnik igry lezhit v build\games\<name>\ (VS - v podpapke Release);
+REM ryadom s nim lezhat i assets (ih kladot POST_BUILD-shag sage_add_game).
+set "EXE="
+for /r "%BUILD_DIR%" %%F in (%GAME_NAME%.exe) do set "EXE=%%F"
+if not defined EXE (
+    echo Oshibka: ne nayden sobrannyy %GAME_NAME%.exe v %BUILD_DIR%
+    goto :error
 )
-xcopy /e /i /q assets "%PACKAGE_DIR%\assets"
+for %%F in ("%EXE%") do set "EXE_DIR=%%~dpF"
+copy "%EXE%" "%PACKAGE_DIR%\"
+xcopy /e /i /q "%EXE_DIR%assets" "%PACKAGE_DIR%\assets"
 
 powershell -Command "Compress-Archive -Path '%PACKAGE_DIR%' -DestinationPath 'dist\windows\%PACKAGE_NAME%.zip' -Force"
 
