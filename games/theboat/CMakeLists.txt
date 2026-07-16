@@ -9,6 +9,7 @@ sage_add_game(
     NAME TheBoat
     SOURCES
         src/main.cpp
+        src/TheBoatLayer.cpp
         src/game/PlayerController.cpp
         src/voxel/Chunk.cpp
         src/voxel/VoxelMesh.cpp

@@ -44,6 +44,15 @@ if (UNIX AND NOT APPLE)
 endif()
 FetchContent_MakeAvailable(glfw)
 
+# GLFW не должен сам подтягивать заголовок OpenGL: единственный поставщик
+# GL-символов в проекте — glad. Без этого порядок включения (glad раньше GLFW)
+# становился хрупким — стоило какому-то заголовку включить GLFW первым (напр.
+# InputSystem.h), и glad падал с «OpenGL header already included». С
+# GLFW_INCLUDE_NONE GLFW даёт только оконный/вводный API, а GL берётся из glad
+# в тех файлах, где он реально нужен. Определение INTERFACE — наследуется
+# движком, imgui и играми автоматически.
+target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
+
 # ---------- GLM (математика) ----------
 FetchContent_Declare(
   glm

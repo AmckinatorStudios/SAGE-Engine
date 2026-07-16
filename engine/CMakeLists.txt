@@ -11,6 +11,7 @@
 set(SAGE_ENGINE_SOURCES
     src/sage/audio/AudioEngine.cpp
     src/sage/audio/miniaudio_impl.cpp
+    src/sage/core/Application.cpp
     src/sage/core/GLDebug.cpp
     src/sage/core/Log.cpp
     src/sage/core/Stats.cpp
