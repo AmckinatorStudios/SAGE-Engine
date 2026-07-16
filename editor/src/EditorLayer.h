@@ -57,7 +57,9 @@ private:
     void DrawViewportPanel();
     void DrawConsolePanel();
     void DrawAssetsPanel();
-    void DrawDialogs(); // модалки New Project / Open Project / Save Scene As / Open Scene
+    void DrawAssetsBreadcrumb();
+    void DrawAssetTile(const std::filesystem::path& path, bool isDir); // одна плитка сетки
+    void DrawDialogs(); // модалки New Project / Open Project / Save Scene As / Open Scene / Delete Asset
 
     // --- сцена / рендер ---
     void RenderSceneToFramebuffer();
@@ -137,6 +139,13 @@ private:
     char m_dlgOpenPath[512] = "";
     char m_dlgSceneName[128] = "level1";
     std::string m_dlgError;
+
+    // --- панель Assets (сетка тайлов + поиск + rename/delete) ---
+    char m_assetsSearch[128] = "";
+    std::filesystem::path m_assetsSelected; // выделенный тайл (не обязательно открытый)
+    std::filesystem::path m_assetsRenameTarget; // файл, который переименовываем (пусто — не активно)
+    char m_assetsRenameBuf[256] = "";
+    std::filesystem::path m_assetsDeleteTarget; // ждёт подтверждения в модалке Delete
 
     bool m_imguiReady = false;
 

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 
@@ -714,6 +715,72 @@ void EditorLayer::DrawDialogs() {
         if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+
+    // Rename/Delete ассета — открываются из DrawAssetTile (деферред: сама
+    // плитка только выставляет m_assetsRenameTarget/m_assetsDeleteTarget,
+    // OpenPopup зовётся здесь же, на уровне хоста, по тому же паттерну, что и
+    // File-меню выше).
+    if (!m_assetsRenameTarget.empty() && !ImGui::IsPopupOpen("Rename Asset")) {
+        ImGui::OpenPopup("Rename Asset");
+    }
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Rename Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextDisabled("%s", m_assetsRenameTarget.filename().string().c_str());
+        bool justOpened = ImGui::IsWindowAppearing();
+        if (justOpened) {
+            std::string stem = m_assetsRenameTarget.filename().string();
+            std::snprintf(m_assetsRenameBuf, sizeof(m_assetsRenameBuf), "%s", stem.c_str());
+        }
+        bool enterPressed = ImGui::InputText("New name", m_assetsRenameBuf, sizeof(m_assetsRenameBuf),
+                                              ImGuiInputTextFlags_EnterReturnsTrue);
+        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
+        bool doRename = enterPressed || ImGui::Button("Rename", ImVec2(120, 0));
+        if (doRename) {
+            fs::path target = m_assetsRenameTarget.parent_path() / m_assetsRenameBuf;
+            std::error_code ec;
+            fs::rename(m_assetsRenameTarget, target, ec);
+            if (ec) {
+                m_dlgError = "Rename failed: " + ec.message();
+                LOG_ERROR("Editor") << "Asset rename failed: " << ec.message();
+            } else {
+                m_assetsRenameTarget.clear();
+                m_dlgError.clear();
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            m_assetsRenameTarget.clear();
+            m_dlgError.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (!m_assetsDeleteTarget.empty() && !ImGui::IsPopupOpen("Delete Asset")) {
+        ImGui::OpenPopup("Delete Asset");
+    }
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Delete Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Delete \"%s\"?", m_assetsDeleteTarget.filename().string().c_str());
+        ImGui::TextDisabled("This cannot be undone.");
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
+        if (ImGui::Button("Delete", ImVec2(120, 0))) {
+            std::error_code ec;
+            fs::remove_all(m_assetsDeleteTarget, ec);
+            if (ec) LOG_ERROR("Editor") << "Asset delete failed: " << ec.message();
+            if (m_assetsSelected == m_assetsDeleteTarget) m_assetsSelected.clear();
+            m_assetsDeleteTarget.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            m_assetsDeleteTarget.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 // ============================================================================
@@ -1050,6 +1117,129 @@ void EditorLayer::DrawConsolePanel() {
     ImGui::End();
 }
 
+namespace {
+
+// Цветная плашка + короткий тег по типу файла — свой минимализм панели Assets
+// вместо иконочного шрифта: ImDrawList::AddRectFilled с закруглением плюс
+// 2-4 символа расширения по центру.
+struct AssetStyle { ImVec4 Color; std::string Tag; };
+
+std::string ToLower(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+AssetStyle StyleForPath(const fs::path& path, bool isDir) {
+    if (isDir) return { ImVec4(0.80f, 0.60f, 0.20f, 1.0f), "DIR" };
+    std::string ext = ToLower(path.extension().string());
+    if (ext == ".sage") return { ImVec4(0.25f, 0.45f, 0.85f, 1.0f), "SCENE" };
+    if (ext == ".lua") return { ImVec4(0.25f, 0.70f, 0.30f, 1.0f), "LUA" };
+    if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return { ImVec4(0.55f, 0.35f, 0.80f, 1.0f), "MESH" };
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp")
+        return { ImVec4(0.20f, 0.65f, 0.65f, 1.0f), ext.substr(1) };
+    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return { ImVec4(0.80f, 0.30f, 0.55f, 1.0f), "AUDIO" };
+    if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return { ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "GLSL" };
+    std::string tag = ext.empty() ? "FILE" : ToLower(ext.substr(1));
+    return { ImVec4(0.45f, 0.45f, 0.48f, 1.0f), tag };
+}
+
+// Обрезает строку многоточием посередине справа, чтобы уместиться в maxWidth.
+std::string TruncateToWidth(const std::string& s, float maxWidth) {
+    if (ImGui::CalcTextSize(s.c_str()).x <= maxWidth) return s;
+    const char* ellipsis = "...";
+    float ellipsisW = ImGui::CalcTextSize(ellipsis).x;
+    std::string out;
+    for (size_t n = 1; n <= s.size(); ++n) {
+        std::string candidate = s.substr(0, n);
+        if (ImGui::CalcTextSize(candidate.c_str()).x + ellipsisW > maxWidth) {
+            out = s.substr(0, n > 1 ? n - 1 : 1);
+            break;
+        }
+        out = candidate;
+    }
+    return out + ellipsis;
+}
+
+constexpr float kTileW = 76.0f;
+constexpr float kTileH = 64.0f;
+constexpr float kTileSpacing = 10.0f;
+
+} // namespace
+
+void EditorLayer::DrawAssetsBreadcrumb() {
+    fs::path root = m_project.Loaded() ? m_project.Dir().parent_path() : m_assetsCwd.root_path();
+
+    // Собираем цепочку сегментов от текущей папки вверх до корня.
+    std::vector<fs::path> chain;
+    for (fs::path p = m_assetsCwd; p != root && p.has_parent_path(); p = p.parent_path()) {
+        chain.push_back(p);
+        if (p.parent_path() == p) break; // достигли корня файловой системы
+    }
+    std::reverse(chain.begin(), chain.end());
+
+    for (size_t i = 0; i < chain.size(); ++i) {
+        std::string seg = chain[i].filename().string();
+        if (seg.empty()) seg = chain[i].string();
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::SmallButton(seg.c_str())) m_assetsCwd = chain[i];
+        ImGui::PopID();
+        if (i + 1 < chain.size()) { ImGui::SameLine(0, 2); ImGui::TextDisabled("/"); ImGui::SameLine(0, 2); }
+    }
+}
+
+void EditorLayer::DrawAssetTile(const fs::path& path, bool isDir) {
+    AssetStyle style = StyleForPath(path, isDir);
+    std::string filename = path.filename().string();
+
+    ImGui::PushID(filename.c_str());
+    ImGui::BeginGroup();
+
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImVec2 swatchSize(kTileW, kTileW * 0.72f);
+    ImGui::InvisibleButton("##tile", ImVec2(kTileW, kTileH));
+    bool hovered = ImGui::IsItemHovered();
+    bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    bool isSelected = m_assetsSelected == path;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec4 fillColor = style.Color;
+    if (!hovered) { fillColor.x *= 0.85f; fillColor.y *= 0.85f; fillColor.z *= 0.85f; }
+    dl->AddRectFilled(cursor, ImVec2(cursor.x + swatchSize.x, cursor.y + swatchSize.y),
+                       ImGui::ColorConvertFloat4ToU32(fillColor), 6.0f);
+    if (isSelected) {
+        dl->AddRect(cursor, ImVec2(cursor.x + swatchSize.x, cursor.y + swatchSize.y),
+                    ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 0.9f)), 6.0f, 0, 2.0f);
+    }
+    std::string tagUpper = style.Tag;
+    for (char& c : tagUpper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    ImVec2 tagSize = ImGui::CalcTextSize(tagUpper.c_str());
+    ImVec2 tagPos(cursor.x + (swatchSize.x - tagSize.x) * 0.5f, cursor.y + (swatchSize.y - tagSize.y) * 0.5f);
+    dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.95f)), tagUpper.c_str());
+
+    std::string label = TruncateToWidth(filename, kTileW);
+    ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
+    ImVec2 labelPos(cursor.x + (kTileW - labelSize.x) * 0.5f, cursor.y + swatchSize.y + 4.0f);
+    dl->AddText(labelPos, ImGui::ColorConvertFloat4ToU32(ImVec4(0.9f, 0.9f, 0.9f, 1.0f)), label.c_str());
+
+    ImGui::EndGroup();
+
+    if (clicked) m_assetsSelected = path;
+    if (doubleClicked) {
+        if (isDir) m_assetsCwd = path;
+        else if (path.extension() == ".sage") LoadSceneFromFile(path);
+    }
+    if (ImGui::BeginPopupContextItem("##tile_ctx")) {
+        m_assetsSelected = path;
+        if (ImGui::MenuItem("Rename")) { m_assetsRenameTarget = path; m_dlgError.clear(); }
+        if (ImGui::MenuItem("Delete")) { m_assetsDeleteTarget = path; }
+        ImGui::EndPopup();
+    }
+    if (hovered && !filename.empty() && label != filename) ImGui::SetTooltip("%s", filename.c_str());
+
+    ImGui::PopID();
+}
+
 void EditorLayer::DrawAssetsPanel() {
     ImGui::Begin("Assets");
 
@@ -1058,11 +1248,14 @@ void EditorLayer::DrawAssetsPanel() {
         ImGui::TextDisabled("File > New Project... to create one; browsing current dir:");
     }
 
-    // Навигация: не даём подняться выше корня проекта (если проект открыт).
     fs::path root = m_project.Loaded() ? m_project.Dir() : fs::path("/");
-    ImGui::TextDisabled("%s", m_assetsCwd.string().c_str());
     bool canGoUp = m_assetsCwd.has_parent_path() && m_assetsCwd != root;
-    if (canGoUp && ImGui::SmallButton("[..] Up")) m_assetsCwd = m_assetsCwd.parent_path();
+    if (canGoUp && ImGui::SmallButton("Up")) m_assetsCwd = m_assetsCwd.parent_path();
+    ImGui::SameLine();
+    DrawAssetsBreadcrumb();
+
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##assets_search", "Search...", m_assetsSearch, sizeof(m_assetsSearch));
     ImGui::Separator();
 
     ImGui::BeginChild("##assets_scroll");
@@ -1077,21 +1270,31 @@ void EditorLayer::DrawAssetsPanel() {
     std::sort(dirs.begin(), dirs.end(), byName);
     std::sort(files.begin(), files.end(), byName);
 
+    std::string filter = ToLower(m_assetsSearch);
+    auto matches = [&](const fs::path& p) {
+        if (filter.empty()) return true;
+        return ToLower(p.filename().string()).find(filter) != std::string::npos;
+    };
+
+    float availWidth = ImGui::GetContentRegionAvail().x;
+    int columns = std::max(1, static_cast<int>(availWidth / (kTileW + kTileSpacing)));
+    int col = 0;
+    bool any = false;
     for (const auto& d : dirs) {
-        std::string label = "[dir] " + d.path().filename().string();
-        if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            m_assetsCwd = d.path();
-        }
+        if (!matches(d.path())) continue;
+        any = true;
+        if (col > 0) ImGui::SameLine(0, kTileSpacing);
+        DrawAssetTile(d.path(), true);
+        col = (col + 1) % columns;
     }
     for (const auto& f : files) {
-        bool isScene = f.path().extension() == ".sage";
-        std::string label = (isScene ? "[scene] " : "") + f.path().filename().string();
-        if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && isScene) {
-            LoadSceneFromFile(f.path());
-        }
+        if (!matches(f.path())) continue;
+        any = true;
+        if (col > 0) ImGui::SameLine(0, kTileSpacing);
+        DrawAssetTile(f.path(), false);
+        col = (col + 1) % columns;
     }
+    if (!any) ImGui::TextDisabled("(empty)");
     ImGui::EndChild();
     ImGui::End();
 }
