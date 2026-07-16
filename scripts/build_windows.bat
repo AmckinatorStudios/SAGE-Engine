@@ -9,7 +9,7 @@ REM   scripts\build_windows.bat MyOtherGame
 setlocal
 
 set GAME_NAME=%1
-if "%GAME_NAME%"=="" set GAME_NAME=TheBoat
+if "%GAME_NAME%"=="" set GAME_NAME=Sandbox
 
 cd /d "%~dp0\.."
 

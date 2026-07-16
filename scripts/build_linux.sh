@@ -3,13 +3,13 @@
 # dist/<GameName>-<version>-linux-x64.tar.gz
 #
 # Использование:
-#   ./scripts/build_linux.sh              # имя игры = TheBoat (по умолчанию)
+#   ./scripts/build_linux.sh              # имя игры = Sandbox (по умолчанию)
 #   ./scripts/build_linux.sh MyOtherGame  # собрать другую игру этим же движком
 set -e
 
 cd "$(dirname "$0")/.."  # переходим в корень engine/
 
-GAME_NAME="${1:-TheBoat}"
+GAME_NAME="${1:-Sandbox}"
 VERSION=$(cat VERSION 2>/dev/null || echo "0.0.0")
 BUILD_DIR="build-linux"
 PACKAGE_NAME="${GAME_NAME}-${VERSION}-linux-x64"

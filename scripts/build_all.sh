@@ -7,7 +7,7 @@
 set -e
 cd "$(dirname "$0")"
 
-GAME_NAME="${1:-TheBoat}"
+GAME_NAME="${1:-Sandbox}"
 
 ./build_linux.sh "${GAME_NAME}"
 echo ""

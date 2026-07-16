@@ -11,7 +11,7 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-GAME_NAME="${1:-TheBoat}"
+GAME_NAME="${1:-Sandbox}"
 VERSION=$(cat VERSION 2>/dev/null || echo "0.0.0")
 BUILD_DIR="build-windows"
 PACKAGE_NAME="${GAME_NAME}-${VERSION}-windows-x64"
