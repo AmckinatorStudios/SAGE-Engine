@@ -24,7 +24,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/2: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/3: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +45,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/2: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/3: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -64,5 +64,12 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: SageEditor self-test прошёл"
+
+echo "=== Smoke-тест 3/3: плагины редактора (example_stats) ==="
+if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
+    echo "ОШИБКА: плагин example_stats не загрузился (нет строки 'Загружен плагин' в логе)"
+    cat "${EDITOR_LOG}"; exit 1
+fi
+echo "OK: плагин example_stats загрузился и выгрузился без падения"
 
 echo "=== Все smoke-тесты прошли ==="

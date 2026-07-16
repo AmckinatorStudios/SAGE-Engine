@@ -143,6 +143,11 @@ void EditorLayer::OnAttach() {
 
     LOG_INFO("Editor") << "SAGE Editor started (entities: " << m_scene->Count() << ")";
 
+    // --- Плагины (v1, только редактор — см. PluginAPI.h) ---
+    fs::path pluginsDir = fs::current_path() / "plugins";
+    if (const char* dir = std::getenv("SAGE_PLUGINS_DIR")) pluginsDir = dir;
+    m_plugins.LoadAll(pluginsDir, m_pluginCtx);
+
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
 
     // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
@@ -244,6 +249,7 @@ void EditorLayer::RunSelfTest() {
 
 void EditorLayer::OnDetach() {
     Log::SetSink(nullptr); // сток ссылается на this — снять до разрушения слоя
+    m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
     if (m_imguiReady) {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -260,6 +266,25 @@ void EditorLayer::OnUpdate(float dt) {
     if (m_playState == PlayState::Playing && m_playScripts) {
         m_playScripts->UpdateAll(dt);
     }
+    m_plugins.UpdateAll(dt);
+}
+
+// ============================================================================
+//  Плагины редактора — реализация facade'а EditorPluginContext
+// ============================================================================
+
+void EditorLayer::PluginContextImpl::Log(const char* message) {
+    LOG_INFO("Plugin") << message;
+}
+
+const char* EditorLayer::PluginContextImpl::SelectedEntityName() const {
+    GameObject obj = m_owner.m_scene->Get(m_owner.m_selectedId);
+    m_selectedNameBuf = obj.Valid() ? obj.Name() : "";
+    return m_selectedNameBuf.c_str();
+}
+
+void EditorLayer::PluginContextImpl::SetStatusMessage(const char* message) {
+    m_owner.m_pluginStatusMessage = message ? message : "";
 }
 
 // ============================================================================
@@ -497,6 +522,7 @@ void EditorLayer::OnRender() {
     DrawViewportPanel();
     DrawConsolePanel();
     DrawAssetsPanel();
+    m_plugins.ImGuiAll();
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -607,8 +633,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
 
-        // Статус проекта справа в меню-баре.
+        // Статус проекта справа в меню-баре (плагины могут дописать свой статус через SetStatusMessage).
         std::string status = m_project.Loaded() ? ("Project: " + m_project.Name()) : "No project";
+        if (!m_pluginStatusMessage.empty()) status += "  |  " + m_pluginStatusMessage;
         float w = ImGui::CalcTextSize(status.c_str()).x + 16.0f;
         ImGui::SameLine(ImGui::GetWindowWidth() - w);
         ImGui::TextDisabled("%s", status.c_str());

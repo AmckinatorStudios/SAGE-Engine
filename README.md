@@ -128,7 +128,10 @@ fixture для headless smoke-тестов в CI (сама библиотека 
   в `scenes/` проекта (`.sage` JSON) и открываются двойным кликом в Assets.
 - **Панели**: Hierarchy (создание/дублирование/удаление сущностей, контекстное
   меню), Inspector (имя, Transform, цвет, выбор меша Cube/Model, скрипт),
-  Console (живой лог движка с цветами уровней), Assets (браузер файлов проекта).
+  Console (живой лог движка с цветами уровней), Assets (сетка цветных тайлов по
+  типу файла — папка/сцена/скрипт/меш/текстура/аудио/шейдер — с breadcrumb,
+  поиском по имени и rename/delete через ПКМ; двойной клик по `.sage` грузит
+  сцену).
 - **Play-режим**: кнопка Play в тулбаре вьюпорта (или меню Play). При входе
   сцена снапшотится, к сущностям со Script-компонентом привязываются их `.lua`
   (`OnStart`/`OnUpdate` — тот же ScriptEngine, что в играх) и тикают каждый
@@ -143,6 +146,46 @@ fixture для headless smoke-тестов в CI (сама библиотека 
   `SAGE_EDITOR_SELFTEST=1` — headless-проверка «проект + сцена + undo/redo +
   Play» (пишет `SELFTEST: PASS/FAIL` в лог), `SAGE_EDITOR_AUTOPLAY=1` —
   авто-вход в Play при старте (для визуальных проверок).
+
+## Плагины редактора
+
+**v1: только редактор** (панели/инструменты) — плагины НЕ участвуют в рантайме
+игр и не грузятся ни во что, кроме `SageEditor`. Без гарантий бинарной
+совместимости между версиями движка/редактора: плагин пересобирается вместе с
+редактором (собирается тем же CMake-проектом, тем же компилятором).
+
+- Плагин — динамическая библиотека (`.so`/`.dll`), которую `PluginManager`
+  грузит при старте редактора из каталога `plugins/` рядом с бинарником
+  `SageEditor` (переопределяется переменной окружения `SAGE_PLUGINS_DIR`, тот
+  же паттерн, что у `SAGE_SCREENSHOT_*`/`SAGE_EDITOR_SELFTEST`).
+- Контракт — `editor/src/PluginAPI.h`: класс `SageEditorPlugin` с
+  `Name()/OnLoad()/OnUnload()/OnUpdate(dt)/OnImGui()` (в `OnImGui()` плагин
+  рисует свои `ImGui::Begin(...)` панели/пункты меню как обычный код
+  редактора). `OnLoad` получает `EditorPluginContext&` — узкий facade
+  (`Log`, `SelectedEntityName`, `SetStatusMessage`), **сознательно НЕ**
+  пробрасывающий `Scene&`/`entt::registry&` через границу библиотеки (разные
+  версии компилятора/STL у хоста и плагина делают это ABI-небезопасным);
+  facade расширяется по мере появления реальных плагинов, не заранее.
+- Плагин экспортирует две `extern "C"` функции:
+  ```cpp
+  extern "C" SageEditorPlugin* CreateSageEditorPlugin() { return new MyPlugin(); }
+  extern "C" void DestroySageEditorPlugin(SageEditorPlugin* p) { delete p; }
+  ```
+- Сборка — `sage_add_editor_plugin(NAME <lib> SOURCES <files...>)` в
+  `cmake/SageHelpers.cmake` (по образцу `editor/plugins/example_stats/`):
+  собирает `MODULE`-библиотеку и копирует её в `plugins/` рядом с
+  `SageEditor`. Плагин **не линкует** ни `sage::engine`, ни статическую
+  `imgui` — только заголовки (ImGui хранит состояние `GImGui` в статической
+  переменной; если плагин слинкует свою копию `libimgui.a`, он получит
+  отдельный `GImGui` и упадёт на первом же `ImGui::Begin()`). Вместо этого
+  вызовы `ImGui::` остаются неразрешёнными символами в библиотеке плагина и
+  резолвятся в рантайме против уже загруженного ImGui хоста: на Linux/macOS —
+  автоматически (dlopen против процесса, `SageEditor` собран с
+  `ENABLE_EXPORTS`), на Windows — линковкой на сгенерированную
+  import-библиотеку `SageEditor.exe` (`--export-all-symbols`).
+- Пример: `editor/plugins/example_stats/` — панель с графиком времени кадра
+  и именем выбранной сущности, показывающая полный цикл `OnLoad -> OnImGui`
+  каждый кадр `-> OnUnload`.
 
 ## Как добавить графический бэкенд
 Реализовать интерфейсы `sage::rhi::GraphicsDevice` (устройство: инициализация,
@@ -431,8 +474,10 @@ CI, нет звуковой карты), конструктор не падае�
   ./scripts/ci_smoke_test.sh build
   ```
   Проверяет: `Sandbox` реально рисует кадр (скриншот на заданном кадре, файл
-  непустой) и `SageEditor` проходит собственный self-test (`SAGE_EDITOR_SELFTEST=1`
-  — создание проекта, сохранение/загрузка сцены, undo/redo, Play-режим).
+  непустой), `SageEditor` проходит собственный self-test (`SAGE_EDITOR_SELFTEST=1`
+  — создание проекта, сохранение/загрузка сцены, undo/redo, Play-режим) и
+  плагин-пример `example_stats` грузится и выгружается без падения (см.
+  «Плагины редактора»).
 - **Windows (build-only)**: кросс-компиляция через `mingw-w64` тем же
   `cmake/mingw-toolchain.cmake`, что и `scripts/build_windows.sh` — ловит
   поломки Windows-сборки без необходимости реально запускать .exe в CI.

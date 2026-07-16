@@ -7,14 +7,43 @@ add_executable(SageEditor
     src/main.cpp
     src/EditorLayer.cpp
     src/Project.cpp
+    src/PluginManager.cpp
 )
 
 # imguizmo — 3D-гизмо во вьюпорте; nlohmann_json — файлы проектов (.sageproj).
 target_link_libraries(SageEditor PRIVATE sage::engine imgui imguizmo nlohmann_json::nlohmann_json)
 target_include_directories(SageEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# ImGui хранит своё состояние (GImGui) в статической глобальной переменной.
+# Плагины (.so) НЕ линкуют libimgui.a сами (см. sage_add_editor_plugin) —
+# иначе получили бы СВОЮ копию ImGui с отдельным GImGui и падали бы при
+# первом же ImGui::Begin(). Вместо этого их вызовы ImGui:: остаются
+# неразрешёнными символами в .so и резолвятся в рантайме (dlopen) против уже
+# загруженного ImGui хоста — а для этого хост должен экспортировать свои
+# символы (аналог -rdynamic на Linux).
+# На Windows недостаточно ENABLE_EXPORTS — DLL плагина не линкуется с
+# неразрешёнными символами (в отличие от Linux/.so), поэтому дополнительно
+# просим линковщик экспортировать ВСЕ символы SageEditor.exe и сгенерировать
+# import-библиотеку (libSageEditor.dll.a), на которую линкуется плагин (см.
+# sage_add_editor_plugin в cmake/SageHelpers.cmake). ВАЖНО: CMake-свойство
+# WINDOWS_EXPORT_ALL_SYMBOLS применяется только к SHARED-таргетам — для EXE
+# оно молча игнорируется (implib получается пустым/не создаётся), поэтому
+# флаг линковщика --export-all-symbols передаётся напрямую. На Linux/macOS
+# ENABLE_EXPORTS/этот флаг не действуют, там резолвинг ImGui:: символов
+# плагина — рантаймовый (dlopen против уже загруженного процесса).
+set_target_properties(SageEditor PROPERTIES ENABLE_EXPORTS ON)
+if (WIN32)
+    target_link_options(SageEditor PRIVATE -Wl,--export-all-symbols)
+endif()
+
 # Ассеты редактора (его шейдеры превью) — рядом с бинарником.
 add_custom_command(TARGET SageEditor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:SageEditor>/assets
     COMMENT "Копирование ассетов редактора рядом с бинарником")
+
+# Плагины редактора (см. src/PluginAPI.h) — каждый sage_add_editor_plugin()
+# ниже собирается отдельной динамической библиотекой и копируется в plugins/
+# рядом с SageEditor; должны идти ПОСЛЕ add_executable(SageEditor) выше — их
+# POST_BUILD команда ссылается на $<TARGET_FILE_DIR:SageEditor>.
+add_subdirectory(plugins/example_stats)

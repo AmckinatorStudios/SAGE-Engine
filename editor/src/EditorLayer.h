@@ -15,6 +15,8 @@
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "Project.h"
+#include "PluginAPI.h"
+#include "PluginManager.h"
 
 // ---------------------------------------------------------------------------
 // EditorLayer — редактор SAGE поверх движка.
@@ -38,6 +40,9 @@
 //   • Undo/Redo (Ctrl+Z / Ctrl+Y): снапшот-модель — состояние сцены (JSON)
 //     запоминается ПЕРЕД каждой мутацией: создание/удаление/дублирование,
 //     завершённое перетаскивание гизмо, завершённая правка в Inspector.
+//   • Плагины (v1, только редактор — см. PluginAPI.h): .so/.dll из plugins/
+//     рядом с бинарником грузятся при старте (PluginManager), рисуют свои
+//     ImGui-панели каждый кадр через узкий EditorPluginContext facade.
 // ---------------------------------------------------------------------------
 class EditorLayer : public sage::Layer {
 public:
@@ -49,6 +54,21 @@ public:
     void OnRender() override;
 
 private:
+    // Реализация facade'а, который видят плагины — сознательно узкая (см.
+    // PluginAPI.h): не пробрасывает Scene&/entt::registry& через границу
+    // динамической библиотеки.
+    class PluginContextImpl : public EditorPluginContext {
+    public:
+        explicit PluginContextImpl(EditorLayer& owner) : m_owner(owner) {}
+        void Log(const char* message) override;
+        const char* SelectedEntityName() const override;
+        void SetStatusMessage(const char* message) override;
+
+    private:
+        EditorLayer& m_owner;
+        mutable std::string m_selectedNameBuf;
+    };
+
     // --- построение кадра UI ---
     void DrawDockspaceAndMenu();
     void BuildDefaultDockLayout(unsigned int dockspaceId);
@@ -148,6 +168,11 @@ private:
     std::filesystem::path m_assetsDeleteTarget; // ждёт подтверждения в модалке Delete
 
     bool m_imguiReady = false;
+
+    // --- плагины редактора (v1, см. PluginAPI.h/PluginManager.h) ---
+    PluginManager m_plugins;
+    PluginContextImpl m_pluginCtx{*this};
+    std::string m_pluginStatusMessage;
 
     // --- авто-скриншот для headless-проверки/CI (SAGE_SCREENSHOT_*) ---
     std::string m_screenshotPath = "editor.png";
