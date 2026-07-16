@@ -2,7 +2,8 @@
 #include "Shader.h"
 #include "Texture.h"
 #include "Camera.h"
-#include <glad/glad.h>
+#include "sage/rhi/GraphicsDevice.h"
+#include <memory>
 #include <glm/glm.hpp>
 #include <vector>
 #include <unordered_map>
@@ -51,11 +52,6 @@ struct BillboardSprite {
 class BillboardSystem {
 public:
     BillboardSystem() { SetupQuad(); }
-
-    ~BillboardSystem() {
-        if (m_vbo) glDeleteBuffers(1, &m_vbo);
-        if (m_vao) glDeleteVertexArrays(1, &m_vao);
-    }
 
     BillboardSystem(const BillboardSystem&) = delete;
     BillboardSystem& operator=(const BillboardSystem&) = delete;
@@ -117,16 +113,15 @@ public:
 
 private:
     void BeginBatch(Shader& shader, const Camera& camera, const glm::mat4& view, const glm::mat4& proj) {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDepthMask(GL_FALSE); // билборды не пишут в depth — иначе перекрывают друг друга жёстко по границе квада
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetBlend(true);
+        device.SetDepthWrite(false); // билборды не пишут в depth — иначе перекрывают друг друга жёстко по границе квада
 
         shader.Use();
         shader.SetMat4("uView", view);
         shader.SetMat4("uProjection", proj);
         shader.SetVec3("uCameraRight", camera.Right);
         shader.SetVec3("uCameraUp", camera.Up);
-        glBindVertexArray(m_vao);
     }
 
     void DrawOne(Shader& shader, const BillboardSprite& sprite) {
@@ -144,12 +139,11 @@ private:
             shader.SetInt("uUseTexture", 0);
         }
 
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        m_geometry->DrawArrays(6);
     }
 
     void EndBatch() {
-        glBindVertexArray(0);
-        glDepthMask(GL_TRUE);
+        sage::rhi::GraphicsDevice::Get().SetDepthWrite(true);
     }
 
     void SetupQuad() {
@@ -165,22 +159,17 @@ private:
             -0.5f,  0.5f,     0.0f, 1.0f,
         };
 
-        glGenVertexArrays(1, &m_vao);
-        glGenBuffers(1, &m_vbo);
-
-        glBindVertexArray(m_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
-
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-
-        glBindVertexArray(0);
+        sage::rhi::VertexLayout layout;
+        layout.Stride = 4 * sizeof(float);
+        layout.Attributes = {
+            {0, 2, sage::rhi::AttribType::Float, 0},
+            {1, 2, sage::rhi::AttribType::Float, 2 * (int)sizeof(float)},
+        };
+        m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(layout);
+        m_geometry->SetVertexData(verts, sizeof(verts), /*dynamic=*/false);
     }
 
-    unsigned int m_vao = 0, m_vbo = 0;
+    std::unique_ptr<sage::rhi::Geometry> m_geometry;
     std::unordered_map<int, BillboardSprite> m_sprites;
     int m_nextId = 1;
 };

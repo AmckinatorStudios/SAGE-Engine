@@ -1,6 +1,7 @@
 #pragma once
-#include <glad/glad.h>
+#include <memory>
 #include <string>
+#include "sage/rhi/Resources.h"
 
 // Режим фильтрации текстуры:
 //  Nearest     — пиксельная чёткость без сглаживания (voxel-атласы, pixel-art)
@@ -11,11 +12,13 @@
 //                размытость текстуры на поверхностях, видных под острым
 //                углом (типичный случай — земля/пол, если смотреть почти
 //                вдоль неё). Требует мипмапов, автоматически включает их.
-enum class TextureFilter { Nearest, Bilinear, Trilinear, Anisotropic };
+// Это те же режимы, что у rhi::Filter — тонкая обёртка сохраняет прежнее имя
+// для кода игр.
+using TextureFilter = sage::rhi::Filter;
 
-// Загружает изображение (PNG/JPG/BMP/TGA — через stb_image) и создаёт
-// из него GPU-текстуру. Часть ЯДРА движка — не зависит от вокселей,
-// подходит для текстурирования любых мешей (моделей, кубов, чего угодно).
+// Загружает изображение (PNG/JPG/BMP/TGA — через stb_image) и создаёт из него
+// GPU-текстуру через текущий графический бэкенд. Часть ЯДРА движка — не
+// зависит от вокселей, подходит для текстурирования любых мешей.
 class Texture {
 public:
     // generateMipmaps=false ОБЯЗАТЕЛЕН для текстурных атласов (несколько
@@ -33,24 +36,21 @@ public:
     Texture(const unsigned char* pixelsRGBA, int width, int height,
             TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true);
 
-    ~Texture();
-
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;
+    Texture(Texture&&) noexcept = default;
+    Texture& operator=(Texture&&) noexcept = default;
 
-    void Bind(unsigned int unit = 0) const;
+    void Bind(unsigned int unit = 0) const { m_texture->Bind((int)unit); }
 
     int Width() const { return m_width; }
     int Height() const { return m_height; }
 
     // Максимальный уровень анизотропии, который поддерживает текущая
-    // видеокарта/драйвер (обычно 4, 8 или 16). Определяется один раз при
-    // первом обращении и кэшируется.
+    // видеокарта/драйвер (обычно 4, 8 или 16).
     static float MaxSupportedAnisotropy();
 
 private:
-    void ApplyFilter(TextureFilter filter, bool generateMipmaps);
-
-    unsigned int m_id = 0;
+    std::unique_ptr<sage::rhi::Texture2D> m_texture;
     int m_width = 0, m_height = 0, m_channels = 0;
 };

@@ -1,5 +1,7 @@
 #pragma once
 #include "Shader.h"
+#include "sage/rhi/Resources.h"
+#include <memory>
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
@@ -21,7 +23,6 @@ struct DebugLine {
 class DebugOverlay {
 public:
     DebugOverlay();
-    ~DebugOverlay();
 
     DebugOverlay(const DebugOverlay&) = delete;
     DebugOverlay& operator=(const DebugOverlay&) = delete;
@@ -29,7 +30,7 @@ public:
     void Draw(const std::vector<DebugLine>& lines, int screenWidth, int screenHeight);
 
 private:
-    unsigned int m_vao = 0, m_vbo = 0, m_ebo = 0;
-    size_t m_indexCapacity = 0; // сколько индексов уже загружено в m_ebo
+    std::unique_ptr<sage::rhi::Geometry> m_geometry;
+    size_t m_indexCapacity = 0; // сколько индексов уже загружено в индексный буфер
     Shader m_shader;
 };

@@ -1,5 +1,5 @@
-#include "GLDebug.h"
-#include "Log.h"
+#include "rhi/opengl/GLDebug.h"
+#include "sage/core/Log.h"
 
 namespace {
     const char* GlErrorName(GLenum err) {

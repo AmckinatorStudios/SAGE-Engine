@@ -1,6 +1,6 @@
 #include "UIRenderer.h"
 #include "stb_easy_font.h"
-#include <glad/glad.h>
+#include "sage/rhi/GraphicsDevice.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
@@ -14,26 +14,14 @@ namespace {
 
 UIRenderer::UIRenderer()
     : m_shader(ShaderPaths::DebugTextVert, ShaderPaths::DebugTextFrag) {
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
-    glGenBuffers(1, &m_ebo);
-
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-
     // Формат вершины совпадает с stb_easy_font: 3 float позиции + 4 байта цвета
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(UIVertex), (void*)12);
-
-    glBindVertexArray(0);
-}
-
-UIRenderer::~UIRenderer() {
-    if (m_ebo) glDeleteBuffers(1, &m_ebo);
-    if (m_vbo) glDeleteBuffers(1, &m_vbo);
-    if (m_vao) glDeleteVertexArrays(1, &m_vao);
+    sage::rhi::VertexLayout layout;
+    layout.Stride = sizeof(UIVertex);
+    layout.Attributes = {
+        {0, 3, sage::rhi::AttribType::Float, 0},
+        {1, 4, sage::rhi::AttribType::UByteNorm, 12},
+    };
+    m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(layout);
 }
 
 void UIRenderer::Begin(int screenWidth, int screenHeight) {
@@ -116,34 +104,28 @@ void UIRenderer::EnsureIndexCapacity(size_t quadCount) {
         unsigned int base = static_cast<unsigned int>(q * 4);
         indices.insert(indices.end(), { base, base + 1, base + 2, base + 2, base + 3, base });
     }
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_DYNAMIC_DRAW);
+    m_geometry->SetIndexData(indices.data(), indices.size(), /*dynamic=*/true);
     m_indexCapacity = indices.size();
 }
 
 void UIRenderer::End() {
     if (m_quadCount == 0) return;
 
-    glDisable(GL_DEPTH_TEST);
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetDepthTest(false);
     // В ortho-проекции с перевёрнутой осью Y (0 сверху) обход вершин квадов
     // становится CW — backface culling движка отсёк бы весь интерфейс
-    glDisable(GL_CULL_FACE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    device.SetCullMode(sage::rhi::CullMode::Off);
+    device.SetBlend(true);
 
     glm::mat4 proj = glm::ortho(0.0f, (float)m_screenWidth, (float)m_screenHeight, 0.0f, -1.0f, 1.0f);
     m_shader.Use();
     m_shader.SetMat4("uProjection", proj);
 
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, m_vertices.size() * sizeof(UIVertex), m_vertices.data(), GL_DYNAMIC_DRAW);
-
+    m_geometry->SetVertexData(m_vertices.data(), m_vertices.size() * sizeof(UIVertex), /*dynamic=*/true);
     EnsureIndexCapacity(m_quadCount);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_quadCount * 6), GL_UNSIGNED_INT, 0);
+    m_geometry->DrawIndexed(m_quadCount * 6);
 
-    glBindVertexArray(0);
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
+    device.SetCullMode(sage::rhi::CullMode::Back);
+    device.SetDepthTest(true);
 }

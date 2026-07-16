@@ -1,9 +1,13 @@
 #include "rhi/opengl/OpenGLDevice.h"
+#include "rhi/opengl/OpenGLResources.h"
 #include "sage/core/Log.h"
 #include <glad/glad.h>
 #include <stdexcept>
 
 namespace sage::rhi {
+
+// Реализация в OpenGLResources.cpp (кэшируемый запрос лимита анизотропии).
+float QueryMaxAnisotropy();
 
 void OpenGLDevice::Init(ProcLoader loader) {
     if (!gladLoadGLLoader((GLADloadproc)loader)) {
@@ -66,13 +70,56 @@ void OpenGLDevice::SetDepthWrite(bool enabled) {
     glDepthMask(enabled ? GL_TRUE : GL_FALSE);
 }
 
-void OpenGLDevice::SetCullFace(bool enabled) {
-    if (enabled) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+void OpenGLDevice::SetDepthFunc(DepthFunc func) {
+    glDepthFunc(func == DepthFunc::LessEqual ? GL_LEQUAL : GL_LESS);
+}
+
+void OpenGLDevice::SetCullMode(CullMode mode) {
+    if (mode == CullMode::Off) {
+        glDisable(GL_CULL_FACE);
+        return;
+    }
+    glEnable(GL_CULL_FACE);
+    glCullFace(mode == CullMode::Front ? GL_FRONT : GL_BACK);
 }
 
 void OpenGLDevice::BindTexture2D(int unit, unsigned int nativeHandle) {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, nativeHandle);
+}
+
+void OpenGLDevice::ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) {
+    // glReadPixels обязан дождаться завершения команд по спецификации, но
+    // явный glFinish — дешёвая (раз на скриншот) защита от чтения кадра
+    // раньше, чем его дорисовал асинхронный/программный рендерер.
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, out);
+}
+
+float OpenGLDevice::MaxAnisotropy() {
+    return QueryMaxAnisotropy();
+}
+
+std::unique_ptr<ShaderProgram> OpenGLDevice::CreateShaderProgram(const std::string& vertexSrc,
+                                                                 const std::string& fragmentSrc) {
+    return std::make_unique<GLShaderProgram>(vertexSrc, fragmentSrc);
+}
+
+std::unique_ptr<Geometry> OpenGLDevice::CreateGeometry(const VertexLayout& layout) {
+    return std::make_unique<GLGeometry>(layout);
+}
+
+std::unique_ptr<Texture2D> OpenGLDevice::CreateTexture2D(const Texture2DDesc& desc, const void* pixels) {
+    return std::make_unique<GLTexture2D>(desc, pixels);
+}
+
+std::unique_ptr<TextureCube> OpenGLDevice::CreateTextureCube(const CubeFacePixels faces[6]) {
+    return std::make_unique<GLTextureCube>(faces);
+}
+
+std::unique_ptr<RenderTarget> OpenGLDevice::CreateRenderTarget(const RenderTargetDesc& desc) {
+    return std::make_unique<GLRenderTarget>(desc);
 }
 
 } // namespace sage::rhi

@@ -1,6 +1,6 @@
 #include "DebugOverlay.h"
 #include "stb_easy_font.h"
-#include <glad/glad.h>
+#include "sage/rhi/GraphicsDevice.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 
@@ -16,26 +16,14 @@ namespace {
 
 DebugOverlay::DebugOverlay()
     : m_shader(ShaderPaths::DebugTextVert, ShaderPaths::DebugTextFrag) {
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
-    glGenBuffers(1, &m_ebo);
-
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-
     // stb_easy_font вершина: 3 float (x,y,z) + 4 байта цвета = 16 байт
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 16, (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
-
-    glBindVertexArray(0);
-}
-
-DebugOverlay::~DebugOverlay() {
-    if (m_ebo) glDeleteBuffers(1, &m_ebo);
-    if (m_vbo) glDeleteBuffers(1, &m_vbo);
-    if (m_vao) glDeleteVertexArrays(1, &m_vao);
+    sage::rhi::VertexLayout layout;
+    layout.Stride = 16;
+    layout.Attributes = {
+        {0, 3, sage::rhi::AttribType::Float, 0},
+        {1, 4, sage::rhi::AttribType::UByteNorm, 12},
+    };
+    m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(layout);
 }
 
 void DebugOverlay::Draw(const std::vector<DebugLine>& lines, int screenWidth, int screenHeight) {
@@ -73,15 +61,14 @@ void DebugOverlay::Draw(const std::vector<DebugLine>& lines, int screenWidth, in
             unsigned int base = static_cast<unsigned int>(q * 4);
             indices.insert(indices.end(), { base, base + 1, base + 2, base + 2, base + 3, base });
         }
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_DYNAMIC_DRAW);
+        m_geometry->SetIndexData(indices.data(), indices.size(), /*dynamic=*/true);
         m_indexCapacity = indices.size();
     }
 
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE); // квады текста в перевёрнутом ortho идут CW
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetDepthTest(false);
+    device.SetCullMode(sage::rhi::CullMode::Off); // квады текста в перевёрнутом ortho идут CW
+    device.SetBlend(true);
 
     // Масштабируем экранные координаты так, чтобы мелкий векторный шрифт
     // stb_easy_font (~7px высота глифа) читался на HiDPI/телефонных экранах.
@@ -90,15 +77,10 @@ void DebugOverlay::Draw(const std::vector<DebugLine>& lines, int screenWidth, in
     m_shader.Use();
     m_shader.SetMat4("uProjection", proj);
 
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, offsetBytes, g_vertexScratch, GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    m_geometry->SetVertexData(g_vertexScratch, (size_t)offsetBytes, /*dynamic=*/true);
+    m_geometry->DrawIndexed((size_t)totalQuads * 6);
 
-    glDrawElements(GL_TRIANGLES, totalQuads * 6, GL_UNSIGNED_INT, 0);
-
-    glBindVertexArray(0);
-    glDisable(GL_BLEND);
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
+    device.SetBlend(false);
+    device.SetCullMode(sage::rhi::CullMode::Back);
+    device.SetDepthTest(true);
 }

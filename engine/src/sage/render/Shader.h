@@ -1,7 +1,8 @@
 #pragma once
-#include <glad/glad.h>
+#include <memory>
 #include <string>
 #include <glm/glm.hpp>
+#include "sage/rhi/Resources.h"
 
 // Пути к шейдеру векторного debug-текста (stb_easy_font) — используется и
 // UIRenderer, и DebugOverlay, поэтому вынесено в одно место вместо двух
@@ -11,35 +12,32 @@ namespace ShaderPaths {
     constexpr const char* DebugTextFrag = "assets/shaders/debug_text.frag";
 }
 
-// Загружает и компилирует vertex+fragment шейдеры, даёт удобные методы
-// для передачи uniform-переменных.
+// Загружает вершинный+фрагментный шейдеры из файлов, компилирует их через
+// текущий графический бэкенд (rhi::GraphicsDevice) и даёт удобные методы для
+// передачи uniform-переменных. Сам класс не знает, какой API под капотом —
+// это тонкая обёртка над rhi::ShaderProgram, добавляющая чтение файлов.
 class Shader {
 public:
     Shader(const std::string& vertexPath, const std::string& fragmentPath);
-    ~Shader();
 
-    // Владеет GL-объектом программы (m_id) — копирование запрещено. Без
-    // этого неявный копирующий конструктор скопировал бы голый ID программы,
-    // а деструктор одной из копий удалил бы её из-под другой, ещё живой (см.
-    // фикс такого же бага в Mesh). Сейчас Shader используется только как
-    // именованные переменные/поля, которые сами не копируются, но явный
-    // запрет защищает от того, чтобы это молча сломалось в будущем
-    // (например, если появится кэш шейдеров, возвращающий Shader по значению).
+    // Владеет GPU-программой единолично — копирование запрещено, перемещение
+    // безопасно (владение переезжает вместе с unique_ptr).
     Shader(const Shader&) = delete;
     Shader& operator=(const Shader&) = delete;
+    Shader(Shader&&) noexcept = default;
+    Shader& operator=(Shader&&) noexcept = default;
 
-    void Use() const;
+    void Use() const { m_program->Use(); }
 
-    void SetMat4(const std::string& name, const glm::mat4& value) const;
-    void SetVec3(const std::string& name, const glm::vec3& value) const;
-    void SetVec4(const std::string& name, const glm::vec4& value) const;
-    void SetVec2(const std::string& name, const glm::vec2& value) const;
-    void SetFloat(const std::string& name, float value) const;
-    void SetInt(const std::string& name, int value) const;
+    void SetMat4(const std::string& name, const glm::mat4& value) const { m_program->SetMat4(name, value); }
+    void SetVec3(const std::string& name, const glm::vec3& value) const { m_program->SetVec3(name, value); }
+    void SetVec4(const std::string& name, const glm::vec4& value) const { m_program->SetVec4(name, value); }
+    void SetVec2(const std::string& name, const glm::vec2& value) const { m_program->SetVec2(name, value); }
+    void SetFloat(const std::string& name, float value) const { m_program->SetFloat(name, value); }
+    void SetInt(const std::string& name, int value) const { m_program->SetInt(name, value); }
 
 private:
-    unsigned int m_id;
-
     static std::string ReadFile(const std::string& path);
-    static unsigned int Compile(unsigned int type, const std::string& source);
+
+    std::unique_ptr<sage::rhi::ShaderProgram> m_program;
 };

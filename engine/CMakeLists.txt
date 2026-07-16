@@ -12,7 +12,6 @@ set(SAGE_ENGINE_SOURCES
     src/sage/audio/AudioEngine.cpp
     src/sage/audio/miniaudio_impl.cpp
     src/sage/core/Application.cpp
-    src/sage/core/GLDebug.cpp
     src/sage/core/Log.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Window.cpp
@@ -25,7 +24,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/Skybox.cpp
     src/sage/render/Texture.cpp
     src/rhi/GraphicsDevice.cpp
+    src/rhi/opengl/GLDebug.cpp
     src/rhi/opengl/OpenGLDevice.cpp
+    src/rhi/opengl/OpenGLResources.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp

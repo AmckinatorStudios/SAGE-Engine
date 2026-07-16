@@ -22,9 +22,19 @@ public:
     void SetBlend(bool enabled) override;
     void SetDepthTest(bool enabled) override;
     void SetDepthWrite(bool enabled) override;
-    void SetCullFace(bool enabled) override;
+    void SetDepthFunc(DepthFunc func) override;
+    void SetCullMode(CullMode mode) override;
 
     void BindTexture2D(int unit, unsigned int nativeHandle) override;
+    void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
+    float MaxAnisotropy() override;
+
+    std::unique_ptr<ShaderProgram> CreateShaderProgram(const std::string& vertexSrc,
+                                                       const std::string& fragmentSrc) override;
+    std::unique_ptr<Geometry> CreateGeometry(const VertexLayout& layout) override;
+    std::unique_ptr<Texture2D> CreateTexture2D(const Texture2DDesc& desc, const void* pixels) override;
+    std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) override;
+    std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) override;
 };
 
 } // namespace sage::rhi

@@ -1,8 +1,8 @@
 #pragma once
-#include <glad/glad.h>
+#include <memory>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "sage/core/Log.h"
+#include "sage/rhi/GraphicsDevice.h"
 
 // ---------------------------------------------------------------------
 // ShadowMap — карта теней от направленного света ("солнца"). Сначала сцена
@@ -11,61 +11,37 @@
 // фрагмент в тени. Мягкие края даёт PCF-фильтрация в шейдере-приёмнике.
 //
 // Свет направленный (ортографическая проекция — параллельные лучи), поэтому
-// "камера света" — это ортобокс, накрывающий интересующую часть мира
-// (корабль + вода вокруг). Центр и радиус бокса передаются каждый кадр.
+// "камера света" — это ортобокс, накрывающий интересующую часть мира.
+// Центр и радиус бокса передаются каждый кадр.
 //
+// Тонкая обёртка над rhi::RenderTarget (вид DepthOnly) + матрица света.
 // Часть ЯДРА рендера — не зависит от вокселей/The Boat.
 //
 // Использование за кадр:
-//   shadows.SetLightMatrix(sun.Direction, shipCenter, radius);
+//   shadows.SetLightMatrix(sun.Direction, center, radius);
 //   shadows.BeginRender();
 //   depthShader.Use(); depthShader.SetMat4("uLightSpace", shadows.LightMatrix());
 //   ...рисуем отбрасывающую тень геометрию (uModel + Draw)...
 //   shadows.EndRender(window.Width(), window.Height());
-//   ...в основном проходе: bind shadows.DepthTexture() + uLightSpace...
+//   ...в основном проходе: BindTexture2D(1, shadows.DepthTexture()) + uLightSpace...
 // ---------------------------------------------------------------------
 class ShadowMap {
 public:
     explicit ShadowMap(int resolution = 2048) : m_resolution(resolution) {
-        glGenFramebuffers(1, &m_fbo);
-
-        glGenTextures(1, &m_depthTex);
-        glBindTexture(GL_TEXTURE_2D, m_depthTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, resolution, resolution, 0,
-                     GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        // За пределами ортобокса солнца считаем "полностью освещено":
-        // граничный тексель глубины = 1.0 (максимально далеко), поэтому
-        // сравнение глубины никогда не даст тень для геометрии вне бокса.
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-        float border[] = {1.0f, 1.0f, 1.0f, 1.0f};
-        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTex, 0);
-        // Только глубина, без цвета — явно отключаем чтение/запись цвета,
-        // иначе FBO без color-attachment считается неполным.
-        glDrawBuffer(GL_NONE);
-        glReadBuffer(GL_NONE);
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            LOG_ERROR("ShadowMap") << "Buffer карты теней неполный (incomplete)";
-        }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    }
-
-    ~ShadowMap() {
-        if (m_depthTex) glDeleteTextures(1, &m_depthTex);
-        if (m_fbo) glDeleteFramebuffers(1, &m_fbo);
+        sage::rhi::RenderTargetDesc desc;
+        desc.Width = resolution;
+        desc.Height = resolution;
+        desc.Kind = sage::rhi::RenderTargetKind::DepthOnly;
+        m_target = sage::rhi::GraphicsDevice::Get().CreateRenderTarget(desc);
     }
 
     ShadowMap(const ShadowMap&) = delete;
     ShadowMap& operator=(const ShadowMap&) = delete;
+    ShadowMap(ShadowMap&&) noexcept = default;
+    ShadowMap& operator=(ShadowMap&&) noexcept = default;
 
     // Строит матрицу вида-проекции света: ортобокс с полустороной radius,
-    // отцентрованный на center. sunDir — направление, КУДА летит свет
-    // (env.Sun.Direction).
+    // отцентрованный на center. sunDir — направление, КУДА летит свет.
     void SetLightMatrix(glm::vec3 sunDir, glm::vec3 center, float radius) {
         glm::vec3 dir = glm::normalize(sunDir);
         // Безопасный up: когда солнце почти в зените (dir ~ вертикаль),
@@ -81,28 +57,31 @@ public:
     }
 
     void BeginRender() {
-        glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-        glViewport(0, 0, m_resolution, m_resolution);
-        glClear(GL_DEPTH_BUFFER_BIT);
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        m_target->Bind(); // FBO + viewport под разрешение карты
+        device.Clear(/*color=*/false, /*depth=*/true);
         // Отсечение ЛИЦЕВЫХ граней в проходе глубины (вместо задних):
         // классический приём против shadow acne — в карту пишется задняя
         // стенка объекта, а лицевую (освещённую) сравнение уже не самозатеняет.
         // Работает для замкнутых тел (воксельные кубы, меши-кубы, .obj).
-        glCullFace(GL_FRONT);
+        device.SetCullMode(sage::rhi::CullMode::Front);
     }
 
     void EndRender(int screenW, int screenH) {
-        glCullFace(GL_BACK);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, screenW, screenH);
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetCullMode(sage::rhi::CullMode::Back);
+        device.BindDefaultFramebuffer();
+        device.SetViewport(0, 0, screenW, screenH);
     }
 
-    unsigned int DepthTexture() const { return m_depthTex; }
+    // Нативный хендл depth-текстуры — для привязки шейдерам-приёмникам
+    // через GraphicsDevice::BindTexture2D.
+    unsigned int DepthTexture() const { return m_target->DepthTextureHandle(); }
     const glm::mat4& LightMatrix() const { return m_lightMatrix; }
     int Resolution() const { return m_resolution; }
 
 private:
-    unsigned int m_fbo = 0, m_depthTex = 0;
+    std::unique_ptr<sage::rhi::RenderTarget> m_target;
     int m_resolution;
     glm::mat4 m_lightMatrix{1.0f};
 };

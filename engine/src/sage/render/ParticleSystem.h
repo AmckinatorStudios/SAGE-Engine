@@ -2,7 +2,8 @@
 #include "Particle.h"
 #include "Shader.h"
 #include "Camera.h"
-#include <glad/glad.h>
+#include "sage/rhi/GraphicsDevice.h"
+#include <memory>
 #include <vector>
 #include <random>
 #include <unordered_map>
@@ -25,8 +26,8 @@
 //      если источник двигается. Система сама рождает частицы по EmissionRate,
 //      пока стрим активен.
 //
-// Рендер — один draw call на ВСЕ живые частицы разом через инстансинг
-// (glDrawArraysInstanced): геометрия — общий unit-квад, у каждой частицы
+// Рендер — один draw call на ВСЕ живые частицы разом через инстансинг:
+// геометрия — общий unit-квад, у каждой частицы
 // только позиция/размер/цвет/поворот в отдельном instance-буфере,
 // перезаливаемом раз в кадр. Частицы всегда развёрнуты к камере
 // (billboard) — считается в шейдере через uCameraRight/uCameraUp.
@@ -45,12 +46,6 @@ class ParticleSystem {
 public:
     ParticleSystem() : m_rng(std::random_device{}()) {
         SetupBuffers();
-    }
-
-    ~ParticleSystem() {
-        if (m_instanceVbo) glDeleteBuffers(1, &m_instanceVbo);
-        if (m_quadVbo) glDeleteBuffers(1, &m_quadVbo);
-        if (m_vao) glDeleteVertexArrays(1, &m_vao);
     }
 
     ParticleSystem(const ParticleSystem&) = delete;
@@ -127,9 +122,9 @@ public:
             m_instanceScratch.push_back(d);
         }
 
-        glDepthMask(GL_FALSE);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetDepthWrite(false);
+        device.SetBlend(true);
 
         shader.Use();
         shader.SetMat4("uView", view);
@@ -138,14 +133,10 @@ public:
         shader.SetVec3("uCameraUp", camera.Up);
         shader.SetInt("uShape", 0);
 
-        glBindVertexArray(m_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
-        glBufferData(GL_ARRAY_BUFFER, m_instanceScratch.size() * sizeof(InstanceData), m_instanceScratch.data(), GL_STREAM_DRAW);
+        m_geometry->SetInstanceData(m_instanceScratch.data(), m_instanceScratch.size() * sizeof(InstanceData));
+        m_geometry->DrawInstanced(6, m_instanceScratch.size());
 
-        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)m_instanceScratch.size());
-
-        glBindVertexArray(0);
-        glDepthMask(GL_TRUE);
+        device.SetDepthWrite(true);
     }
 
     size_t AliveCount() const { return m_particles.size(); }
@@ -201,44 +192,30 @@ private:
 
     void SetupBuffers() {
         // Единичный квад (-0.5..0.5), общий для всех частиц — вершинные позиции,
-        // растягиваемые в billboard прямо в шейдере
+        // растягиваемые в billboard прямо в шейдере. Инстансный поток (атрибуты
+        // 1..4, продвигаются раз на инстанс) должен точно соответствовать
+        // particle.vert — см. InstanceData выше.
         float quad[] = {
             -0.5f, -0.5f,  0.5f, -0.5f,  0.5f, 0.5f,
             -0.5f, -0.5f,  0.5f,  0.5f, -0.5f, 0.5f,
         };
 
-        glGenVertexArrays(1, &m_vao);
-        glGenBuffers(1, &m_quadVbo);
-        glGenBuffers(1, &m_instanceVbo);
+        sage::rhi::VertexLayout layout;
+        layout.Stride = 2 * sizeof(float);
+        layout.Attributes = {{0, 2, sage::rhi::AttribType::Float, 0}};
+        layout.InstanceStride = sizeof(InstanceData);
+        layout.InstanceAttributes = {
+            {1, 3, sage::rhi::AttribType::Float, (int)offsetof(InstanceData, Position)}, // iWorldPos
+            {2, 1, sage::rhi::AttribType::Float, (int)offsetof(InstanceData, Size)},     // iSize
+            {3, 4, sage::rhi::AttribType::Float, (int)offsetof(InstanceData, Color)},    // iColor
+            {4, 1, sage::rhi::AttribType::Float, (int)offsetof(InstanceData, Rotation)}, // iRotation
+        };
 
-        glBindVertexArray(m_vao);
-
-        glBindBuffer(GL_ARRAY_BUFFER, m_quadVbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-
-        glBindBuffer(GL_ARRAY_BUFFER, m_instanceVbo);
-        GLsizei stride = sizeof(InstanceData);
-        glEnableVertexAttribArray(1); // iWorldPos
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(InstanceData, Position));
-        glEnableVertexAttribArray(2); // iSize
-        glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(InstanceData, Size));
-        glEnableVertexAttribArray(3); // iColor
-        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(InstanceData, Color));
-        glEnableVertexAttribArray(4); // iRotation
-        glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(InstanceData, Rotation));
-
-        // divisor 1 — эти атрибуты продвигаются раз на ИНСТАНС, а не раз на вершину
-        glVertexAttribDivisor(1, 1);
-        glVertexAttribDivisor(2, 1);
-        glVertexAttribDivisor(3, 1);
-        glVertexAttribDivisor(4, 1);
-
-        glBindVertexArray(0);
+        m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(layout);
+        m_geometry->SetVertexData(quad, sizeof(quad), /*dynamic=*/false);
     }
 
-    unsigned int m_vao = 0, m_quadVbo = 0, m_instanceVbo = 0;
+    std::unique_ptr<sage::rhi::Geometry> m_geometry;
 
     std::vector<Particle> m_particles;
     std::unordered_map<std::string, StreamEmitter> m_streams;

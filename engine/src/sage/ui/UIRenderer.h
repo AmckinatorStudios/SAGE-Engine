@@ -1,5 +1,7 @@
 #pragma once
 #include "sage/render/Shader.h"
+#include "sage/rhi/Resources.h"
+#include <memory>
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
@@ -23,7 +25,6 @@
 class UIRenderer {
 public:
     UIRenderer();
-    ~UIRenderer();
 
     UIRenderer(const UIRenderer&) = delete;
     UIRenderer& operator=(const UIRenderer&) = delete;
@@ -63,7 +64,7 @@ private:
     std::vector<UIVertex> m_vertices; // все квады кадра (и прямоугольники, и глифы текста)
     size_t m_quadCount = 0;
 
-    unsigned int m_vao = 0, m_vbo = 0, m_ebo = 0;
+    std::unique_ptr<sage::rhi::Geometry> m_geometry;
     size_t m_indexCapacity = 0;
     Shader m_shader;
     int m_screenWidth = 0, m_screenHeight = 0;

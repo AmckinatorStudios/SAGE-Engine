@@ -1,5 +1,5 @@
 #include "Screenshot.h"
-#include <glad/glad.h>
+#include "sage/rhi/GraphicsDevice.h"
 #include <vector>
 #include <cstring>
 #include "sage/core/Log.h"
@@ -8,17 +8,12 @@
 #include "stb_image_write.h"
 
 void SaveScreenshot(const std::string& path, int width, int height) {
-    // glReadPixels обязан неявно дождаться завершения всех предыдущих команд
-    // рисования по спецификации OpenGL, но явный glFinish() здесь — дешёвая
-    // (один раз на скриншот, не каждый кадр) защита от того, чтобы читать
-    // кадр раньше, чем его дорисовал асинхронный/программный рендерер.
-    glFinish();
-
+    // Чтение кадра — через графическое устройство (оно само дожидается
+    // завершения всех команд GPU перед чтением).
     std::vector<unsigned char> pixels(static_cast<size_t>(width) * height * 3);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    sage::rhi::GraphicsDevice::Get().ReadPixelsRGB(0, 0, width, height, pixels.data());
 
-    // OpenGL отдаёт строки снизу вверх, PNG ожидает сверху вниз — переворачиваем
+    // GPU отдаёт строки снизу вверх, PNG ожидает сверху вниз — переворачиваем
     std::vector<unsigned char> flipped(pixels.size());
     for (int y = 0; y < height; ++y) {
         std::memcpy(&flipped[static_cast<size_t>(y) * width * 3],

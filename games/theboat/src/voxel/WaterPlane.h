@@ -1,6 +1,7 @@
 #pragma once
-#include <glad/glad.h>
+#include <memory>
 #include <glm/glm.hpp>
+#include "sage/rhi/GraphicsDevice.h"
 
 // Пока вода — не воксельный блок, а один большой полупрозрачный квад на
 // фиксированной высоте. Этого достаточно для ощущения "открытого моря" и
@@ -20,43 +21,26 @@ public:
         unsigned int indices[] = { 0, 2, 1, 2, 0, 3 };
         m_indexCount = 6;
 
-        glGenVertexArrays(1, &m_vao);
-        glGenBuffers(1, &m_vbo);
-        glGenBuffers(1, &m_ebo);
-
-        glBindVertexArray(m_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-        glBindVertexArray(0);
+        sage::rhi::VertexLayout layout;
+        layout.Stride = 3 * sizeof(float);
+        layout.Attributes = {{0, 3, sage::rhi::AttribType::Float, 0}};
+        m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(layout);
+        m_geometry->SetVertexData(vertices, sizeof(vertices), /*dynamic=*/false);
+        m_geometry->SetIndexData(indices, 6, /*dynamic=*/false);
     }
 
-    ~WaterPlane() {
-        glDeleteVertexArrays(1, &m_vao);
-        glDeleteBuffers(1, &m_vbo);
-        glDeleteBuffers(1, &m_ebo);
-    }
-
-    // Владеет GL-объектами (VAO/VBO/EBO) — копирование запрещено. Без этого
-    // неявный копирующий конструктор скопировал бы голые числа хендлов, а
-    // деструктор одной из копий удалил бы их из-под другой, ещё живой (см.
-    // фикс такого же бага в Mesh). Сейчас WaterPlane нигде не копируется
-    // (хранится по значению как поле GameState, которое само не копируется),
-    // но явный запрет защищает от того, чтобы это молча сломалось в будущем.
+    // GPU-ресурсом владеет единолично — копирование запрещено (unique_ptr
+    // защищает от двойного освобождения автоматически).
     WaterPlane(const WaterPlane&) = delete;
     WaterPlane& operator=(const WaterPlane&) = delete;
+    WaterPlane(WaterPlane&&) noexcept = default;
+    WaterPlane& operator=(WaterPlane&&) noexcept = default;
 
     void Draw() const {
-        glBindVertexArray(m_vao);
-        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
+        m_geometry->DrawIndexed(m_indexCount);
     }
 
 private:
-    unsigned int m_vao = 0, m_vbo = 0, m_ebo = 0;
-    unsigned int m_indexCount = 0;
+    std::unique_ptr<sage::rhi::Geometry> m_geometry;
+    size_t m_indexCount = 0;
 };

@@ -1,10 +1,11 @@
 #pragma once
-#include <glad/glad.h>
+#include <memory>
+#include "sage/rhi/GraphicsDevice.h"
 
 // ---------------------------------------------------------------------
 // Настройки прохода пост-процессинга (см. assets/shaders/post.frag). Все
-// значения — обычные uniform'ы, заливаемые каждый кадр в main.cpp, поэтому
-// игра (или debug-переопределения) может менять картинку без правки движка.
+// значения — обычные uniform'ы, заливаемые каждый кадр игрой, поэтому она
+// может менять картинку без правки движка.
 // ---------------------------------------------------------------------
 struct PostProcessSettings {
     float Exposure = 1.05f;         // экспозиция HDR перед тон-маппингом
@@ -21,36 +22,34 @@ struct PostProcessSettings {
 // гамма-коррекция, виньетка/насыщенность/контраст — результат пишется в
 // текущий привязанный буфер (в обычном режиме — экранный).
 //
-// main.cpp сам создаёт post-шейдер и выставляет его uniform'ы (как и для
-// всех остальных шейдеров) — этот класс отвечает только за геометрию прохода.
-//
-// Часть ЯДРА рендера — не зависит от вокселей/The Boat.
+// Вызывающий сам создаёт post-шейдер и выставляет его uniform'ы — этот класс
+// отвечает только за геометрию прохода. Часть ЯДРА рендера.
 // ---------------------------------------------------------------------
 class PostProcess {
 public:
     PostProcess() {
-        // Пустой VAO: вершины полноэкранного треугольника генерируются в
-        // post.vert из gl_VertexID, буфер не нужен. Но в core-профиле для
-        // любого draw-вызова VAO должен быть привязан — поэтому создаём его.
-        glGenVertexArrays(1, &m_vao);
+        // Геометрия без атрибутов: вершины полноэкранного треугольника
+        // генерируются в post.vert из gl_VertexID, буфер не нужен (но объект
+        // геометрии нужен — draw-вызов без него невозможен в core-профилях).
+        m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(sage::rhi::VertexLayout{});
     }
-    ~PostProcess() { if (m_vao) glDeleteVertexArrays(1, &m_vao); }
 
     PostProcess(const PostProcess&) = delete;
     PostProcess& operator=(const PostProcess&) = delete;
+    PostProcess(PostProcess&&) noexcept = default;
+    PostProcess& operator=(PostProcess&&) noexcept = default;
 
     // Рисует полноэкранный проход. Вызывающий уже сделал shader.Use(),
     // выставил его uniform'ы и привязал текстуру сцены к юниту 0.
     void Draw() const {
         // Полноэкранный треугольник накрывает весь кадр — глубина не нужна
         // (и не должна мешать), временно выключаем depth-тест.
-        glDisable(GL_DEPTH_TEST);
-        glBindVertexArray(m_vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        glBindVertexArray(0);
-        glEnable(GL_DEPTH_TEST);
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetDepthTest(false);
+        m_geometry->DrawArrays(3);
+        device.SetDepthTest(true);
     }
 
 private:
-    unsigned int m_vao = 0;
+    std::unique_ptr<sage::rhi::Geometry> m_geometry;
 };

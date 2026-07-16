@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include "sage/rhi/Resources.h"
 
 // ---------------------------------------------------------------------------
 // RHI (Render Hardware Interface) — абстракция графического «устройства».
@@ -13,10 +14,11 @@
 // переписывается. Это и есть требование «уметь переключаться на другие
 // графические библиотеки».
 //
-// Данная (первая) итоговая версия покрывает УРОВЕНЬ УСТРОЙСТВА: инициализацию
-// драйвера/контекста и глобальное состояние конвейера (viewport, очистка,
-// blend/depth/cull, привязка экранного буфера). Ресурсы (буферы/текстуры/
-// шейдеры/кадровые буферы) переезжают за RHI следующим шагом — см. rhi/*.
+// Интерфейс покрывает два уровня:
+//   1) УСТРОЙСТВО: инициализация драйвера/контекста и состояние конвейера
+//      (viewport, очистка, blend/depth/cull, экранный буфер, чтение пикселей).
+//   2) РЕСУРСЫ: фабрики GPU-объектов (шейдеры, геометрия, текстуры,
+//      рендер-таргеты) — см. sage/rhi/Resources.h.
 // ---------------------------------------------------------------------------
 namespace sage::rhi {
 
@@ -53,12 +55,28 @@ public:
     virtual void SetBlend(bool enabled) = 0;
     virtual void SetDepthTest(bool enabled) = 0;
     virtual void SetDepthWrite(bool enabled) = 0;
-    virtual void SetCullFace(bool enabled) = 0;
+    virtual void SetDepthFunc(DepthFunc func) = 0;      // LessEqual нужен skybox'у
+    virtual void SetCullMode(CullMode mode) = 0;        // Front — depth-проход теней
 
-    // Привязать текстуру (нативный хендл бэкенда) к текстурному юниту. Временный
-    // мост, пока ресурсы-текстуры не переехали за RHI: принимает сырой хендл,
-    // который отдают ещё-не-мигрированные Texture/Framebuffer/ShadowMap.
+    // Привязать 2D-текстуру по нативному хендлу (хендлы отдают Texture2D::
+    // NativeHandle и RenderTarget::*TextureHandle) — для сэмплирования
+    // вложений рендер-таргетов (карта теней, HDR-сцена) обычными шейдерами.
     virtual void BindTexture2D(int unit, unsigned int nativeHandle) = 0;
+
+    // Дождаться завершения всех команд GPU и прочитать прямоугольник пикселей
+    // текущего буфера как плотный RGB8 (для скриншотов).
+    virtual void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) = 0;
+
+    // Максимальная поддерживаемая анизотропия фильтрации (>= 1.0).
+    virtual float MaxAnisotropy() = 0;
+
+    // --- Фабрики GPU-ресурсов (см. sage/rhi/Resources.h) ---
+    virtual std::unique_ptr<ShaderProgram> CreateShaderProgram(const std::string& vertexSrc,
+                                                               const std::string& fragmentSrc) = 0;
+    virtual std::unique_ptr<Geometry> CreateGeometry(const VertexLayout& layout) = 0;
+    virtual std::unique_ptr<Texture2D> CreateTexture2D(const Texture2DDesc& desc, const void* pixels) = 0;
+    virtual std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) = 0;
+    virtual std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) = 0;
 
     // Фабрика бэкенда. Возвращает готовый (но ещё не Init) девайс.
     static std::unique_ptr<GraphicsDevice> Create(Backend backend);

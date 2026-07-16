@@ -1,5 +1,6 @@
 #pragma once
 #include "GameConstants.h"
+#include "sage/core/Log.h"
 #include "Inventory.h"
 #include "PlayerStats.h"
 #include "PlayerController.h"
