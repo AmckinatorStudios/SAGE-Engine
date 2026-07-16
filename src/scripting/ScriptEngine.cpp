@@ -709,6 +709,34 @@ void ScriptEngine::RegisterEngineApi() {
         }
     });
 
+    // --- JSON как строка (без файла): полезно для сетевых сообщений,
+    // конфигов, обмена с C++-стороной и вообще любого текстового формата.
+    // Те же правила маршалинга, что и у SaveTable/LoadTable (таблица с
+    // ключами 1..N -> JSON-массив, иначе -> JSON-объект; числа/строки/булевы
+    // -> примитивы). JsonEncode(value, pretty?) кодирует любое Lua-значение
+    // (не только таблицу) в строку; pretty=true даёт отступ в 2 пробела,
+    // иначе компактный вывод. JsonDecode(str) разбирает строку обратно в
+    // Lua-значение, возвращая nil при синтаксической ошибке. ---
+    m_lua.set_function("JsonEncode", [](sol::object value, sol::optional<bool> pretty) -> sol::object {
+        try {
+            nlohmann::json j = LuaValueToJson(value);
+            return sol::make_object(sol::state_view(value.lua_state()),
+                                    j.dump(pretty.value_or(false) ? 2 : -1));
+        } catch (const std::exception& e) {
+            LOG_ERROR("Lua") << "JsonEncode: ошибка сериализации: " << e.what();
+            return sol::lua_nil;
+        }
+    });
+    m_lua.set_function("JsonDecode", [this](const std::string& text) -> sol::object {
+        try {
+            nlohmann::json j = nlohmann::json::parse(text);
+            return JsonToLuaValue(m_lua, j);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Lua") << "JsonDecode: ошибка разбора: " << e.what();
+            return sol::lua_nil;
+        }
+    });
+
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
     // "сколько осталось" в самом скрипте. Возвращают id для CancelTimer. ---
     m_lua.set_function("Schedule", [this](float seconds, sol::protected_function fn) -> int {

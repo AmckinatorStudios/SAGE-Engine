@@ -170,6 +170,24 @@ function OnStart(entity)
         log("LoadTable вернул nil — ОШИБКА round-trip")
     end
 
+    -- JSON как строка (без файла): та же таблица кодируется в текст и
+    -- разбирается обратно. Проверяем и компактный, и pretty-вывод, а также
+    -- то, что примитив (не таблица) тоже кодируется/декодируется корректно.
+    local jsonCompact = JsonEncode(saveData)
+    local jsonPretty = JsonEncode(saveData, true)
+    log("JsonEncode compact len=" .. tostring(#jsonCompact) .. " pretty len=" .. tostring(#jsonPretty))
+    local decoded = JsonDecode(jsonCompact)
+    if decoded then
+        log("JsonDecode: day=" .. tostring(decoded.day) .. " stats.hunger=" .. tostring(decoded.stats.hunger)
+            .. " inventory[2]=" .. tostring(decoded.inventory[2]))
+    else
+        log("JsonDecode вернул nil — ОШИБКА round-trip")
+    end
+    -- Примитив и битая строка
+    log("JsonEncode(42) = " .. tostring(JsonEncode(42)))
+    log("JsonDecode('[1,2,3]')[3] = " .. tostring(JsonDecode("[1,2,3]")[3]))
+    log("JsonDecode('{bad json') = " .. tostring(JsonDecode("{bad json")))
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()
