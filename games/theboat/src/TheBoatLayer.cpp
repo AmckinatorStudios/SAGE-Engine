@@ -6,7 +6,6 @@
 #include <array>
 #include <algorithm>
 
-#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -125,8 +124,9 @@ void TheBoatLayer::OnAttach() {
     GameActions::LoadBindingsFromFile(m_input.Actions(), "keybindings.cfg");
     glfwSetInputMode(handle, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // Прозрачность (вода, частицы, UI) — включаем через графическое устройство,
+    // а не прямым вызовом GL.
+    sage::Application::Get().Device().SetBlend(true);
 
     // ---- Рендер-ресурсы ----
     m_voxelShader.emplace("assets/shaders/voxel.vert", "assets/shaders/voxel.frag");
@@ -271,6 +271,7 @@ void TheBoatLayer::OnUpdate(float deltaTime) {
 void TheBoatLayer::OnRender() {
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
+    sage::rhi::GraphicsDevice& device = app.Device();
     float currentFrame = (float)glfwGetTime();
 
     g_renderStats.Reset();
@@ -295,11 +296,11 @@ void TheBoatLayer::OnRender() {
 
     // ---- ПРОХОД СЦЕНЫ (в HDR-буфер, либо сразу в экран) ----
     if (m_postEnabled) m_sceneFbo->Bind();
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear();
 
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_shadows->DepthTexture());
+    // Карта теней на юнит 1 — общая для voxel/basic/water на весь проход.
+    device.BindTexture2D(1, m_shadows->DepthTexture());
 
     m_skybox->Draw(*m_skyboxShader, view, proj, m_game.DayNight.SkyTint());
 
@@ -377,9 +378,9 @@ void TheBoatLayer::OnRender() {
 
     // ---- ПОСТ-ПРОЦЕССИНГ: HDR-сцена -> экран ----
     if (m_postEnabled) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, window.Width(), window.Height());
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        device.BindDefaultFramebuffer();
+        device.SetViewport(0, 0, window.Width(), window.Height());
+        device.Clear();
 
         m_postShader->Use();
         m_postShader->SetFloat("uExposure", m_postSettings.Exposure);
@@ -387,8 +388,7 @@ void TheBoatLayer::OnRender() {
         m_postShader->SetFloat("uSaturation", m_postSettings.Saturation);
         m_postShader->SetFloat("uContrast", m_postSettings.Contrast);
         m_postShader->SetFloat("uVignette", m_postSettings.VignetteStrength);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, m_sceneFbo->ColorTexture());
+        device.BindTexture2D(0, m_sceneFbo->ColorTexture());
         m_postShader->SetInt("uScene", 0);
         m_post.Draw();
     }

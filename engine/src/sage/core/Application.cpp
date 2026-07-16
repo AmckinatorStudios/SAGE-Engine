@@ -14,9 +14,16 @@ Application::Application(const AppConfig& config) : m_config(config) {
     }
     s_instance = this;
 
-    // Создание окна создаёт и OpenGL-контекст, и загружает glad — после этого
-    // конструкции слоёв (и их OnAttach) уже могут работать с GPU-ресурсами.
+    // Окно создаёт графический контекст (но НЕ трогает GL). Затем поднимаем
+    // графическое устройство выбранного бэкенда: оно грузит драйвер и выставляет
+    // дефолтное состояние конвейера. После этого конструкции слоёв (и их
+    // OnAttach) уже могут создавать GPU-ресурсы.
     m_window = std::make_unique<Window>(config.Width, config.Height, config.Title);
+
+    m_device = rhi::GraphicsDevice::Create(rhi::Backend::OpenGL);
+    m_device->Init(reinterpret_cast<rhi::ProcLoader>(glfwGetProcAddress));
+    m_device->SetViewport(0, 0, config.Width, config.Height);
+    rhi::GraphicsDevice::SetCurrent(m_device.get());
 }
 
 Application::~Application() {
@@ -27,6 +34,8 @@ Application::~Application() {
         (*it)->OnDetach();
     }
     m_layers.clear();
+    rhi::GraphicsDevice::SetCurrent(nullptr);
+    m_device.reset();
     m_window.reset();
     s_instance = nullptr;
 }
@@ -61,6 +70,11 @@ void Application::Run() {
         if (fpsTimer >= 0.5f) { m_fps = fpsFrames / fpsTimer; fpsTimer = 0.0f; fpsFrames = 0; }
 
         for (auto& layer : m_layers) layer->OnUpdate(m_deltaTime);
+
+        // Viewport экранного буфера держим в размер окна каждый кадр (раньше
+        // это делал Window::OnResize напрямую через glViewport; теперь окно к
+        // GL не обращается — за viewport отвечает графический слой).
+        m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
         for (auto& layer : m_layers) layer->OnRender();
 
         m_window->SwapBuffers();

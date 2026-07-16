@@ -24,6 +24,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/Shader.cpp
     src/sage/render/Skybox.cpp
     src/sage/render/Texture.cpp
+    src/rhi/GraphicsDevice.cpp
+    src/rhi/opengl/OpenGLDevice.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp

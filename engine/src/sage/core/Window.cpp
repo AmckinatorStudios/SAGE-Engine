@@ -33,30 +33,9 @@ Window::Window(int width, int height, const std::string& title)
     glfwSetWindowUserPointer(m_handle, this);
     glfwSetFramebufferSizeCallback(m_handle, FramebufferSizeCallback);
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        LOG_ERROR("Window") << "Не удалось инициализировать glad (OpenGL)";
-        throw std::runtime_error("Не удалось инициализировать glad (OpenGL)");
-    }
-
-    glViewport(0, 0, width, height);
-    glEnable(GL_DEPTH_TEST);
-
-    // Backface culling: не рисуем грани треугольников, обращённые от камеры.
-    // Особенно важно для вокселей — у каждого видимого блока обычно не все
-    // 6 граней смотрят на камеру, отсечение "невидимых" граней экономит
-    // значительную часть работы GPU. Все меши движка (Mesh, VoxelMesh,
-    // WaterPlane) используют CCW-порядок вершин при взгляде снаружи/сверху.
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
-
-    // Без этого на стыках граней кубических (cubemap) текстур — то есть у
-    // skybox — видны швы: резкий скачок цвета ровно на границе между
-    // гранями вместо плавного перехода. Драйвер не интерполирует между
-    // соседними гранями куба, если это явно не включено.
-    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-
-    LOG_INFO("Window") << "OpenGL версия: " << glGetString(GL_VERSION);
+    // Загрузку драйвера (glad) и дефолтное состояние конвейера (depth test,
+    // backface culling, бесшовные cubemap) выполняет rhi::GraphicsDevice::Init,
+    // который Application создаёт сразу после окна. Здесь — только окно/контекст.
 }
 
 Window::~Window() {
@@ -77,7 +56,9 @@ void Window::PollEvents() {
 }
 
 void Window::OnResize(int width, int height) {
+    // Только запоминаем новый размер. Обновление viewport под этот размер —
+    // задача графического слоя (Application каждый кадр выставляет viewport
+    // экранного буфера через rhi::GraphicsDevice), окно к GL не обращается.
     m_width = width;
     m_height = height;
-    glViewport(0, 0, width, height);
 }

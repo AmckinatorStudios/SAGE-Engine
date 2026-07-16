@@ -1,10 +1,12 @@
 #pragma once
-#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <string>
 #include <functional>
 
-// Обёртка над GLFW-окном + контекстом OpenGL
+// Обёртка над GLFW-окном + графическим контекстом. Само окно — чисто оконная
+// система (GLFW): создание окна и контекста, обмен буферов, события. За загрузку
+// драйвера и любое состояние конвейера отвечает rhi::GraphicsDevice, а не Window
+// — поэтому здесь нет ни одного вызова OpenGL (граница «окно vs графика»).
 class Window {
 public:
     Window(int width, int height, const std::string& title);

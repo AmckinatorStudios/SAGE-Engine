@@ -4,6 +4,7 @@
 #include <vector>
 #include "sage/core/Window.h"
 #include "sage/core/Layer.h"
+#include "sage/rhi/GraphicsDevice.h"
 
 namespace sage {
 
@@ -41,6 +42,7 @@ public:
     void Close();
 
     Window& GetWindow() { return *m_window; }
+    rhi::GraphicsDevice& Device() { return *m_device; }
     float DeltaTime() const { return m_deltaTime; }
     float Fps() const { return m_fps; }
 
@@ -49,6 +51,7 @@ public:
 private:
     AppConfig m_config;
     std::unique_ptr<Window> m_window;
+    std::unique_ptr<rhi::GraphicsDevice> m_device;
     std::vector<std::unique_ptr<Layer>> m_layers;
 
     bool m_running = true;
