@@ -204,6 +204,51 @@ void ScriptEngine::RegisterEngineApi() {
         }
     });
 
+    // --- Освещение: доступно после BindScene (LightingEnvironment — часть
+    // Scene, см. scene/Light.h). Даёт скриптам полный контроль над картинкой
+    // без правки движка/шейдеров — тот же UploadLighting каждый кадр читает
+    // те же поля, что здесь пишет Lua (день/ночь, фонари и т.п. — целиком на
+    // стороне игры). ---
+    m_lua.set_function("SetAmbient", [this](glm::vec3 sky, glm::vec3 ground, float strength) {
+        if (!m_scene) throw std::runtime_error("SetAmbient: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        m_scene->Lighting.SkyColor = sky;
+        m_scene->Lighting.GroundColor = ground;
+        m_scene->Lighting.AmbientStrength = strength;
+    });
+    m_lua.set_function("SetSun", [this](glm::vec3 direction, glm::vec3 color, float intensity) {
+        if (!m_scene) throw std::runtime_error("SetSun: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        m_scene->Lighting.Sun.Direction = direction;
+        m_scene->Lighting.Sun.Color = color;
+        m_scene->Lighting.Sun.Intensity = intensity;
+    });
+    // Возвращает индекс добавленного света (0-based) — использовать как id
+    // для SetPointLight. Индексы стабильны, пока не вызван ClearPointLights()
+    // (точечного удаления одного света нет — см. комментарий в .h).
+    m_lua.set_function("AddPointLight", [this](glm::vec3 pos, glm::vec3 color, float intensity, float range) -> int {
+        if (!m_scene) throw std::runtime_error("AddPointLight: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        auto& lights = m_scene->Lighting.PointLights;
+        if ((int)lights.size() >= LightingEnvironment::MaxPointLights) {
+            LOG_WARN("Lua") << "AddPointLight: достигнут лимит MaxPointLights ("
+                            << LightingEnvironment::MaxPointLights << "), свет проигнорирован";
+            return -1;
+        }
+        PointLight light;
+        light.Position = pos; light.Color = color; light.Intensity = intensity; light.Range = range;
+        lights.push_back(light);
+        return (int)lights.size() - 1;
+    });
+    m_lua.set_function("SetPointLight", [this](int id, glm::vec3 pos, glm::vec3 color, float intensity, float range) {
+        if (!m_scene) throw std::runtime_error("SetPointLight: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        auto& lights = m_scene->Lighting.PointLights;
+        if (id < 0 || id >= (int)lights.size()) return; // тихо игнорируем невалидный id
+        lights[id].Position = pos; lights[id].Color = color;
+        lights[id].Intensity = intensity; lights[id].Range = range;
+    });
+    m_lua.set_function("ClearPointLights", [this]() {
+        if (!m_scene) throw std::runtime_error("ClearPointLights: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        m_scene->Lighting.PointLights.clear();
+    });
+
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
     // после BindInput. Скрипты читают тот же ввод, что и C++-код игры —
     // никакого параллельного дублирования раскладки клавиш. ---

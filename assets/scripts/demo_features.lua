@@ -88,6 +88,16 @@ function OnStart(entity)
         log("Процедурный треугольник перестроен НА МЕСТЕ через SetMeshData")
     end)
 
+    -- Освещение из Lua: движок не знает о дне/ночи — это целиком расчёт
+    -- скрипта, который просто пишет в те же поля, что рендер читает каждый
+    -- кадр (см. SetAmbient/SetSun/AddPointLight выше в ScriptEngine.cpp).
+    SetAmbient(Vec3.new(0.5, 0.6, 0.8), Vec3.new(0.2, 0.18, 0.16), 0.35)
+    SetSun(Vec3.new(-0.4, -1.0, -0.3), Vec3.new(1.0, 0.95, 0.85), 1.0)
+    local lampId = AddPointLight(origin, Vec3.new(1.0, 0.7, 0.4), 1.0, 10.0)
+    log("Точечный свет добавлен, id = " .. tostring(lampId))
+    SetPointLight(lampId, origin + Vec3.new(0, 1, 0), Vec3.new(1.0, 0.7, 0.4), 1.5, 12.0)
+    log("Точечный свет обновлён")
+
     -- Корутина: последовательность действий во времени читается линейно,
     -- без ручного стейт-машины из таймеров
     StartCoroutine(function()
