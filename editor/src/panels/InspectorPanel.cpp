@@ -147,14 +147,29 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    // --- Точечный свет (позиция — Transform сущности) ---
+    // --- Свет (позиция — Transform сущности; тип: точечный / прожектор) ---
     if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
         entt::registry& reg = host.CurrentScene().Registry();
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
+            const char* types[] = {"Point", "Spot"};
+            int kind = (int)light->Kind;
+            if (ImGui::Combo("Type", &kind, types, 2)) {
+                host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
+                light->Kind = (LightComponent::Type)kind;
+            }
             ImGui::ColorEdit3("Light Color", &light->Color.x); host.TrackLastImGuiItem();
             ImGui::DragFloat("Intensity", &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat("Range", &light->Range, 0.1f, 0.5f, 100.0f); host.TrackLastImGuiItem();
-            ImGui::TextDisabled("Point light at this entity's position");
+            if (light->Kind == LightComponent::Type::Spot) {
+                ImGui::DragFloat("Inner Cone", &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat("Outer Cone", &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                // Внешний угол не должен быть уже внутреннего (иначе конус
+                // «выворачивается»): подтягиваем внешний до внутреннего.
+                if (light->OuterConeDeg < light->InnerConeDeg) light->OuterConeDeg = light->InnerConeDeg;
+                ImGui::TextDisabled("Cone points along the entity's forward (-Z rotation)");
+            } else {
+                ImGui::TextDisabled("Point light at this entity's position");
+            }
             if (ImGui::Button("Remove Light")) {
                 host.PushUndoSnapshot();
                 reg.remove<LightComponent>(obj.Entity());

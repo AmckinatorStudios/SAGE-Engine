@@ -102,6 +102,31 @@ void DebugDraw::WireSphere(glm::vec3 center, float radius, glm::vec3 color, int 
     }
 }
 
+void DebugDraw::WireCone(glm::vec3 apex, glm::vec3 dir, float length, float halfAngleDeg,
+                         glm::vec3 color, int segments) {
+    if (segments < 3) segments = 3;
+    dir = glm::normalize(dir);
+    if (glm::length(dir) < 0.0001f) dir = glm::vec3(0.0f, -1.0f, 0.0f);
+
+    // Ортонормальный базис вокруг оси конуса: любой не-параллельный вектор.
+    glm::vec3 up = (glm::abs(dir.y) > 0.99f) ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::normalize(glm::cross(dir, up));
+    up = glm::normalize(glm::cross(right, dir));
+
+    glm::vec3 center = apex + dir * length;
+    float radius = length * std::tan(glm::radians(halfAngleDeg));
+    float twoPi = glm::two_pi<float>();
+
+    glm::vec3 prev;
+    for (int i = 0; i <= segments; ++i) {
+        float a = twoPi * i / segments;
+        glm::vec3 p = center + (right * std::cos(a) + up * std::sin(a)) * radius;
+        if (i > 0) Line(prev, p, color);   // окружность основания
+        if (i < segments) Line(apex, p, color); // боковые рёбра от вершины
+        prev = p;
+    }
+}
+
 void DebugDraw::Axes(const glm::mat4& transform, float size) {
     glm::vec3 origin = glm::vec3(transform[3]);
     // Нормализуем базисные векторы: оси показывают ОРИЕНТАЦИЮ, длина всегда

@@ -1,5 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
+#include <glm/trigonometric.hpp>
 #include <vector>
 
 // Направленный свет — "солнце". На сцену обычно один: светит из бесконечности
@@ -27,6 +28,28 @@ struct PointLight {
     float Quadratic() const { return 75.0f / (Range * Range); }
 };
 
+// Прожектор (spot) — точечный источник, светящий КОНУСОМ вдоль Direction:
+// фонарик, лампа-спот, сценический прожектор. Внутри внутреннего угла
+// (InnerAngle) светит на полную, между внутренним и внешним (OuterAngle)
+// плавно гаснет, за внешним — темно. Затухание с расстоянием — как у точечного
+// (из Range). Направление обычно берётся из поворота сущности (см. LightSystem).
+struct SpotLight {
+    glm::vec3 Position{0.0f};
+    glm::vec3 Direction{0.0f, -1.0f, 0.0f}; // КУДА светит конус
+    glm::vec3 Color{1.0f};
+    float Intensity = 1.0f;
+    float Range = 12.0f;
+    float InnerAngleDeg = 20.0f; // полная яркость внутри этого полуугла
+    float OuterAngleDeg = 30.0f; // край конуса (яркость -> 0)
+
+    float Constant() const { return 1.0f; }
+    float Linear() const { return 4.5f / Range; }
+    float Quadratic() const { return 75.0f / (Range * Range); }
+    // Косинусы углов — шейдер сравнивает через dot(), а не через arccos.
+    float CosInner() const { return glm::cos(glm::radians(InnerAngleDeg)); }
+    float CosOuter() const { return glm::cos(glm::radians(OuterAngleDeg)); }
+};
+
 // Полное описание освещения сцены: фоновая засветка (ambient) + солнце +
 // произвольное число точечных источников (до MaxPointLights одновременно
 // видимых шейдеру — остальные игнорируются, этого достаточно для одного
@@ -44,6 +67,7 @@ struct PointLight {
 // если кто-то предпочитает старый плоский ambient — см. SetFlatAmbient().
 struct LightingEnvironment {
     static constexpr int MaxPointLights = 8;
+    static constexpr int MaxSpotLights = 8;
 
     glm::vec3 SkyColor{0.55f, 0.65f, 0.85f};    // засветка верхних граней (свет неба)
     glm::vec3 GroundColor{0.20f, 0.18f, 0.16f}; // засветка нижних граней (отражённый свет)
@@ -52,6 +76,7 @@ struct LightingEnvironment {
     DirectionalLight Sun;
 
     std::vector<PointLight> PointLights;
+    std::vector<SpotLight> SpotLights;
 
     // Обратная совместимость / удобный шорткат: выставляет Sky и Ground
     // в один и тот же цвет — эквивалент старого плоского ambient.

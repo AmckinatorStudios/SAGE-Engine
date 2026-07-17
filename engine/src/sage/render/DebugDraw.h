@@ -44,6 +44,11 @@ public:
     // Каркасная сфера: три больших круга (XY/XZ/YZ).
     void WireSphere(glm::vec3 center, float radius, glm::vec3 color, int segments = 32);
 
+    // Каркасный конус прожектора: от apex вдоль dir на длину length, радиус
+    // основания задан полууглом halfAngleDeg — готовая визуализация зоны spot.
+    void WireCone(glm::vec3 apex, glm::vec3 dir, float length, float halfAngleDeg,
+                  glm::vec3 color, int segments = 20);
+
     // Оси объекта: X — красная, Y — зелёная, Z — синяя.
     void Axes(const glm::mat4& transform, float size = 1.0f);
 

@@ -7,6 +7,7 @@ in vec4 FragPosLightSpace;
 out vec4 FragColor;
 
 #define MAX_POINT_LIGHTS 8
+#define MAX_SPOT_LIGHTS 8
 
 struct PointLight {
     vec3 position;
@@ -15,6 +16,20 @@ struct PointLight {
     float constant;
     float linear;
     float quadratic;
+};
+
+// Прожектор: точечный источник, светящий конусом вдоль direction. cosInner/
+// cosOuter — косинусы полууглов внутреннего/внешнего конуса (мягкий край).
+struct SpotLight {
+    vec3 position;
+    vec3 direction; // КУДА светит конус
+    vec3 color;
+    float intensity;
+    float constant;
+    float linear;
+    float quadratic;
+    float cosInner;
+    float cosOuter;
 };
 
 uniform vec3 uObjectColor;
@@ -30,6 +45,9 @@ uniform float uSunIntensity;
 uniform PointLight uPointLights[MAX_POINT_LIGHTS];
 uniform int uNumPointLights;
 
+uniform SpotLight uSpotLights[MAX_SPOT_LIGHTS];
+uniform int uNumSpotLights;
+
 uniform vec3 uViewPos;
 
 uniform sampler2D uTexture;
@@ -39,7 +57,7 @@ uniform sampler2D uShadowMap;
 uniform bool uShadowsEnabled;
 
 // Доля затенения фрагмента солнцем: 0 — освещён, 1 — в тени (PCF 3x3 +
-// slope-scaled bias). См. подробный комментарий в voxel.frag.
+// slope-scaled bias). Тени только от солнца — точечные/прожекторы не затеняются.
 float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
     vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
     proj = proj * 0.5 + 0.5;
@@ -82,6 +100,29 @@ vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
     return (diffuse + specular) * attenuation;
 }
 
+vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
+    vec3 toLight = light.position - fragPos;
+    float dist = length(toLight);
+    vec3 lightDir = toLight / max(dist, 0.0001);
+
+    // Конус: угол между направлением НА свет и осью прожектора (обратной к
+    // direction). theta=1 — точно по оси; плавный спад между cosInner..cosOuter.
+    float theta = dot(lightDir, normalize(-light.direction));
+    float epsilon = max(light.cosInner - light.cosOuter, 0.0001);
+    float cone = clamp((theta - light.cosOuter) / epsilon, 0.0, 1.0);
+    if (cone <= 0.0) return vec3(0.0);
+
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+
+    float attenuation = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
+
+    vec3 diffuse = diff * light.color * light.intensity;
+    vec3 specular = 0.5 * spec * light.color * light.intensity;
+    return (diffuse + specular) * attenuation * cone;
+}
+
 void main() {
     vec3 baseColor = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
 
@@ -98,16 +139,22 @@ void main() {
     float sunSpec = pow(max(dot(viewDir, sunReflect), 0.0), 32.0);
     vec3 sunLight = (sunDiff + 0.5 * sunSpec) * uSunColor * uSunIntensity;
 
-    // Тень гасит только вклад солнца (ambient/фонари не затеняются)
+    // Тень гасит только вклад солнца (ambient/фонари/прожекторы не затеняются)
     float shadow = uShadowsEnabled ? CalcSunShadow(FragPosLightSpace, norm, sunDir) : 0.0;
     sunLight *= (1.0 - shadow);
 
-    // точечные источники (фонари и т.п.)
+    // точечные источники (лампы, факелы)
     vec3 pointLight = vec3(0.0);
     for (int i = 0; i < uNumPointLights; ++i) {
         pointLight += CalcPointLight(uPointLights[i], norm, FragPos, viewDir);
     }
 
-    vec3 result = (ambient + sunLight + pointLight) * baseColor;
+    // прожекторы (фонарики, лампы-споты, сценический свет)
+    vec3 spotLight = vec3(0.0);
+    for (int i = 0; i < uNumSpotLights; ++i) {
+        spotLight += CalcSpotLight(uSpotLights[i], norm, FragPos, viewDir);
+    }
+
+    vec3 result = (ambient + sunLight + pointLight + spotLight) * baseColor;
     FragColor = vec4(result, 1.0);
 }

@@ -364,6 +364,21 @@ void EditorLayer::NewScene(bool withDemoContent) {
         lamp.GetTransform().Position = {2.4f, 1.6f, 1.8f};
         m_scene->Registry().emplace<LightComponent>(lamp.Entity());
 
+        // Прожектор сверху — демонстрация конусного света (Spot): смотрит вниз
+        // (поворот -90° по X направляет «вперёд» -Z в -Y), кладёт круг света
+        // на кубы и пол.
+        GameObject spot = m_scene->CreateObject("Spotlight");
+        spot.GetTransform().Position = {0.0f, 5.0f, 0.0f};
+        spot.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f};
+        LightComponent spotLc;
+        spotLc.Kind = LightComponent::Type::Spot;
+        spotLc.Color = {0.55f, 0.7f, 1.0f};
+        spotLc.Intensity = 4.0f;
+        spotLc.Range = 12.0f;
+        spotLc.InnerConeDeg = 18.0f;
+        spotLc.OuterConeDeg = 30.0f;
+        m_scene->Registry().emplace<LightComponent>(spot.Entity(), spotLc);
+
         // Что-то выбрано сразу — гизмо видно, Inspector не пустой.
         GameObject green = m_scene->FindByName("Green Cube");
         if (green.Valid()) m_selectedId = green.Id();
@@ -604,11 +619,18 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
         m_debugDraw->WireBox(slightlyLarger, {1.0f, 0.62f, 0.12f});
         m_debugDraw->Axes(model, 1.4f);
 
-        // У света — сфера радиуса затухания: сразу видно зону действия.
+        // У света — визуализация зоны действия: точечный — сфера радиуса
+        // затухания, прожектор — конус вдоль «вперёд» сущности.
         if (const LightComponent* light =
                 m_scene->Registry().try_get<LightComponent>(selectedObj.Entity())) {
-            m_debugDraw->WireSphere(selectedObj.GetTransform().Position, light->Range,
-                                    glm::vec3(light->Color) * 0.9f);
+            const Transform& lt = selectedObj.GetTransform();
+            glm::vec3 lightColor = glm::vec3(light->Color) * 0.9f;
+            if (light->Kind == LightComponent::Type::Spot) {
+                glm::vec3 dir = sage::ecs::ForwardFromEuler(lt.Rotation);
+                m_debugDraw->WireCone(lt.Position, dir, light->Range, light->OuterConeDeg, lightColor);
+            } else {
+                m_debugDraw->WireSphere(lt.Position, light->Range, lightColor);
+            }
         }
     }
     m_debugDraw->Flush(m_view, m_proj);
@@ -1092,18 +1114,30 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
-    // --- LightComponent: демо-лампа переживает save/load, CollectLighting
-    // добавляет её к окружению сцены ---
+    // --- LightComponent: демо-лампа (точечный) и прожектор переживают
+    // save/load, CollectLighting раскладывает их по типам (Point/Spot) ---
     if (ok) {
         GameObject lamp = m_scene->FindByName("Lamp");
-        const LightComponent* light =
+        GameObject spot = m_scene->FindByName("Spotlight");
+        const LightComponent* pointLc =
             lamp.Valid() ? m_scene->Registry().try_get<LightComponent>(lamp.Entity()) : nullptr;
-        size_t sceneLights = m_scene->Lighting.PointLights.size();
-        size_t collected = sage::ecs::CollectLighting(*m_scene).PointLights.size();
-        if (!light || collected != sceneLights + 1) {
-            LOG_ERROR("Editor") << "SELFTEST: light round-trip failed (component "
-                                << (light != nullptr) << ", collected " << collected
-                                << ", scene-level " << sceneLights << ")";
+        const LightComponent* spotLc =
+            spot.Valid() ? m_scene->Registry().try_get<LightComponent>(spot.Entity()) : nullptr;
+
+        LightingEnvironment collected = sage::ecs::CollectLighting(*m_scene);
+        size_t expectPoint = m_scene->Lighting.PointLights.size() + 1; // + лампа
+        size_t expectSpot = m_scene->Lighting.SpotLights.size() + 1;   // + прожектор
+        bool typeOk = spotLc && spotLc->Kind == LightComponent::Type::Spot &&
+                      pointLc && pointLc->Kind == LightComponent::Type::Point;
+        // Направление прожектора смотрит вниз (поворот -90° по X) — Y-компонента
+        // «вперёд» должна быть заметно отрицательной.
+        bool dirOk = !collected.SpotLights.empty() && collected.SpotLights.front().Direction.y < -0.9f;
+        if (!typeOk || collected.PointLights.size() != expectPoint ||
+            collected.SpotLights.size() != expectSpot || !dirOk) {
+            LOG_ERROR("Editor") << "SELFTEST: light round-trip failed (types " << typeOk
+                                << ", points " << collected.PointLights.size() << "/" << expectPoint
+                                << ", spots " << collected.SpotLights.size() << "/" << expectSpot
+                                << ", dir " << dirOk << ")";
             ok = false;
         }
     }

@@ -30,6 +30,24 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         shader.SetFloat(prefix + "linear", light.Linear());
         shader.SetFloat(prefix + "quadratic", light.Quadratic());
     }
+
+    // Прожекторы (spot): то же затухание, плюс направление конуса и косинусы
+    // внутреннего/внешнего угла для мягкого края (см. lit.frag CalcSpotLight).
+    int spotCount = std::min(static_cast<int>(env.SpotLights.size()), LightingEnvironment::MaxSpotLights);
+    shader.SetInt("uNumSpotLights", spotCount);
+    for (int i = 0; i < spotCount; ++i) {
+        const SpotLight& light = env.SpotLights[i];
+        std::string prefix = "uSpotLights[" + std::to_string(i) + "].";
+        shader.SetVec3(prefix + "position", light.Position);
+        shader.SetVec3(prefix + "direction", light.Direction);
+        shader.SetVec3(prefix + "color", light.Color);
+        shader.SetFloat(prefix + "intensity", light.Intensity);
+        shader.SetFloat(prefix + "constant", light.Constant());
+        shader.SetFloat(prefix + "linear", light.Linear());
+        shader.SetFloat(prefix + "quadratic", light.Quadratic());
+        shader.SetFloat(prefix + "cosInner", light.CosInner());
+        shader.SetFloat(prefix + "cosOuter", light.CosOuter());
+    }
 }
 
 // Заливает uniform'ы карты теней в шейдер-приёмник: матрицу пространства

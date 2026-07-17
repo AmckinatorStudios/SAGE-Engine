@@ -132,9 +132,12 @@ static json BuildSceneJson(const Scene& scene) {
             j["camera"]["primary"] = cam->Primary;
         }
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) {
+            j["light"]["type"] = (light->Kind == LightComponent::Type::Spot) ? "spot" : "point";
             j["light"]["color"] = Vec3ToJson(light->Color);
             j["light"]["intensity"] = light->Intensity;
             j["light"]["range"] = light->Range;
+            j["light"]["innerCone"] = light->InnerConeDeg;
+            j["light"]["outerCone"] = light->OuterConeDeg;
         }
         objectsJson.push_back(j);
     }
@@ -189,9 +192,13 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("light")) {
             const auto& lj = j["light"];
             LightComponent light;
+            if (lj.value("type", std::string("point")) == "spot")
+                light.Kind = LightComponent::Type::Spot;
             if (lj.contains("color")) light.Color = Vec3FromJson(lj["color"]);
             light.Intensity = lj.value("intensity", light.Intensity);
             light.Range = lj.value("range", light.Range);
+            light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
+            light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
             obj.Registry()->emplace<LightComponent>(obj.Entity(), light);
         }
 

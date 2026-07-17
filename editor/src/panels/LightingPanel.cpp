@@ -28,20 +28,23 @@ void LightingPanel::Draw(EditorHost& host) {
         ImGui::TextDisabled("Direction is where light TRAVELS; casts shadows");
     }
 
-    if (ImGui::CollapsingHeader("Point lights", ImGuiTreeNodeFlags_DefaultOpen)) {
-        // Точечные света — сущности сцены; здесь список для навигации.
+    if (ImGui::CollapsingHeader("Scene lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Света — сущности сцены (точечные/прожекторы); здесь список для
+        // навигации с пометкой типа.
         int count = 0;
         auto view = scene.Registry().view<LightComponent, IdComponent, NameComponent>();
         for (auto e : view) {
             ++count;
             int id = view.get<IdComponent>(e).Id;
-            const std::string& name = view.get<NameComponent>(e).Name;
-            std::string label = name + "##light" + std::to_string(id);
+            const LightComponent& lc = view.get<LightComponent>(e);
+            const char* tag = lc.Kind == LightComponent::Type::Spot ? "[spot] " : "[point] ";
+            std::string label = tag + view.get<NameComponent>(e).Name + "##light" + std::to_string(id);
             if (ImGui::Selectable(label.c_str(), host.SelectedId() == id)) host.SetSelectedId(id);
         }
         if (count == 0) ImGui::TextDisabled("(no light entities)");
-        ImGui::TextDisabled("Add via Entity > Create Light; edit in Inspector");
-        ImGui::TextDisabled("Shader limit: %d point lights per frame", LightingEnvironment::MaxPointLights);
+        ImGui::TextDisabled("Add via Entity > Create Light; type/params in Inspector");
+        ImGui::TextDisabled("Shader limit: %d point + %d spot lights per frame",
+                            LightingEnvironment::MaxPointLights, LightingEnvironment::MaxSpotLights);
     }
 
     ImGui::End();
