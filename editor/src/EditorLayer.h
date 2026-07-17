@@ -11,6 +11,7 @@
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/DebugDraw.h"
+#include "sage/render/ShadowMap.h"
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
@@ -27,6 +28,7 @@
 #include "panels/GamePanel.h"
 #include "panels/AssetsPanel.h"
 #include "panels/LauncherPanel.h"
+#include "panels/LightingPanel.h"
 
 // ---------------------------------------------------------------------------
 // EditorLayer — ядро редактора SAGE (архитектура v3).
@@ -118,11 +120,19 @@ private:
     void DrawDialogs(); // модалки New Project / Open Project / Save Scene As / Open Scene
 
     // --- сцена / рендер ---
-    void RenderSceneToFramebuffer(); // редакторская камера + DebugDraw (Viewport)
-    void RenderGameToFramebuffer(); // Primary-камера сцены, без гизмо (Game)
+    void RenderShadowPass(const LightingEnvironment& env);  // глубина от солнца (общая карта)
+    void DrawLitScene(const LightingEnvironment& env, const glm::mat4& view,
+                      const glm::mat4& proj, glm::vec3 viewPos); // общий lit-проход
+    void RenderSceneToFramebuffer(const LightingEnvironment& env); // редакторская камера + DebugDraw
+    void RenderGameToFramebuffer(const LightingEnvironment& env);  // Primary-камера сцены, без гизмо
     void NewScene(bool withDemoContent);
     void UpdateWindowTitle();
     void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
+
+    // --- сборка игры (File > Build Game...) ---
+    // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
+    // рантайм-ассеты + project/. false + err при ошибке.
+    bool BuildGame(const std::filesystem::path& outputDir, std::string& err);
 
     bool RestoreSceneFromString(const std::string& snapshot);
 
@@ -137,7 +147,9 @@ private:
     // --- сцена и рендер превью ---
     std::unique_ptr<Scene> m_scene;
     Camera m_camera;
-    std::optional<Shader> m_shader;
+    std::optional<Shader> m_shader;       // lit-шейдер (ambient+sun+point lights+тени)
+    std::optional<Shader> m_shadowShader; // depth-проход карты теней
+    std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<Framebuffer> m_gameFbo;
     std::optional<DebugDraw> m_debugDraw;
@@ -170,7 +182,12 @@ private:
     GamePanel m_game;
     AssetsPanel m_assets;
     LauncherPanel m_launcher;
+    LightingPanel m_lighting;
     bool m_launcherRequested = false; // Window > Project Launcher
+
+    // --- сборка игры: буферы диалога Build Game ---
+    char m_dlgBuildDir[512] = "";
+    std::string m_dlgBuildResult; // путь готовой сборки (успех) — показывается в диалоге
 
     // --- состояние модалок File-меню (буферы полей ввода) ---
     char m_dlgProjectName[128] = "MyGame";

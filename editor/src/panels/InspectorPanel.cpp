@@ -147,6 +147,26 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Точечный свет (позиция — Transform сущности) ---
+    if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+        entt::registry& reg = host.CurrentScene().Registry();
+        if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
+            ImGui::ColorEdit3("Light Color", &light->Color.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Intensity", &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Range", &light->Range, 0.1f, 0.5f, 100.0f); host.TrackLastImGuiItem();
+            ImGui::TextDisabled("Point light at this entity's position");
+            if (ImGui::Button("Remove Light")) {
+                host.PushUndoSnapshot();
+                reg.remove<LightComponent>(obj.Entity());
+            }
+        } else {
+            if (ImGui::Button("Add Light")) {
+                host.PushUndoSnapshot();
+                reg.emplace<LightComponent>(obj.Entity());
+            }
+        }
+    }
+
     // --- Скрипт (поведение в Play-режиме) ---
     if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
         entt::registry& reg = host.CurrentScene().Registry();

@@ -21,7 +21,9 @@
 #include "sage/core/Application.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
+#include "sage/render/LightingUpload.h"
 #include "sage/ecs/RenderSystem.h"
+#include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -70,8 +72,10 @@ void EditorLayer::OnAttach() {
     // --- Console первой: сток лога ловит все сообщения запуска ---
     m_console.Attach();
 
-    // --- Ресурсы превью ---
-    m_shader.emplace("assets/shaders/editor_basic.vert", "assets/shaders/editor_basic.frag");
+    // --- Ресурсы превью: полноценное освещение (ambient+sun+point+тени) ---
+    m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
+    m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
+    m_shadows.emplace(2048);
     m_sceneFbo.emplace(m_viewportW, m_viewportH);
     m_gameFbo.emplace(m_gameW, m_gameH);
     m_debugDraw.emplace();
@@ -84,8 +88,10 @@ void EditorLayer::OnAttach() {
     m_camera.Pitch = -28.0f;
     m_camera.ProcessMouse(0.0f, 0.0f);
 
-    // Дефолтная папка диалогов — рядом с бинарником.
+    // Дефолтная папка диалогов — рядом с бинарником; сборка игр — в dist/.
     std::snprintf(m_dlgProjectDir, sizeof(m_dlgProjectDir), "%s", fs::current_path().string().c_str());
+    std::snprintf(m_dlgBuildDir, sizeof(m_dlgBuildDir), "%s",
+                  (fs::current_path() / "dist").string().c_str());
     m_assetsCwd = fs::current_path();
 
     m_recent.Load();
@@ -353,6 +359,11 @@ void EditorLayer::NewScene(bool withDemoContent) {
         camObj.GetTransform().Rotation = {-25.0f, 45.0f, 0.0f};
         m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
 
+        // Тёплая лампа — демонстрация точечного света-сущности (LightComponent).
+        GameObject lamp = m_scene->CreateObject("Lamp");
+        lamp.GetTransform().Position = {2.4f, 1.6f, 1.8f};
+        m_scene->Registry().emplace<LightComponent>(lamp.Entity());
+
         // Что-то выбрано сразу — гизмо видно, Inspector не пустой.
         GameObject green = m_scene->FindByName("Green Cube");
         if (green.Valid()) m_selectedId = green.Id();
@@ -422,6 +433,71 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     return true;
 }
 
+// ============================================================================
+//  Сборка игры: SagePlayer + рантайм-ассеты + project/ => запускаемая папка
+// ============================================================================
+
+bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
+    if (!m_project.Loaded()) {
+        err = "No project open";
+        return false;
+    }
+
+    // 1. Собранный SagePlayer: явный SAGE_PLAYER_PATH, иначе стандартные
+    // места относительно редактора (../runtime в дереве сборки, рядом с exe).
+#ifdef _WIN32
+    const char* playerName = "SagePlayer.exe";
+    std::string exeSuffix = ".exe";
+#else
+    const char* playerName = "SagePlayer";
+    std::string exeSuffix;
+#endif
+    std::vector<fs::path> candidates;
+    if (const char* p = std::getenv("SAGE_PLAYER_PATH")) candidates.push_back(p);
+    candidates.push_back(fs::path("..") / "runtime" / playerName);
+    candidates.push_back(fs::path(".") / playerName);
+
+    std::error_code ec;
+    fs::path player;
+    for (const fs::path& candidate : candidates) {
+        if (fs::exists(candidate, ec)) { player = candidate; break; }
+    }
+    if (player.empty()) {
+        err = "SagePlayer not found (build the SagePlayer target or set SAGE_PLAYER_PATH)";
+        return false;
+    }
+
+    // 2. Слепить папку игры: <out>/<Name>/{<Name>, assets/(рантайм), project/}.
+    fs::path gameDir = outputDir / m_project.Name();
+    fs::remove_all(gameDir, ec); // пересборка затирает прошлую (это артефакт, не данные)
+    fs::create_directories(gameDir, ec);
+    if (ec) {
+        err = "Cannot create " + gameDir.string() + ": " + ec.message();
+        return false;
+    }
+
+    fs::copy_file(player, gameDir / (m_project.Name() + exeSuffix),
+                  fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        err = "Player copy failed: " + ec.message();
+        return false;
+    }
+    fs::copy(player.parent_path() / "assets", gameDir / "assets",
+             fs::copy_options::recursive, ec);
+    if (ec) {
+        err = "Runtime assets copy failed: " + ec.message();
+        return false;
+    }
+    fs::copy(m_project.Dir(), gameDir / "project", fs::copy_options::recursive, ec);
+    if (ec) {
+        err = "Project copy failed: " + ec.message();
+        return false;
+    }
+
+    LOG_INFO("Editor") << "Game built: " << gameDir.string();
+    return true;
+}
+
 // Заголовок OS-окна: "SAGE Editor — сцена[*] — проект". Обновляется только
 // по факту изменения (не дёргаем GLFW каждый кадр).
 void EditorLayer::UpdateWindowTitle() {
@@ -464,10 +540,45 @@ void EditorLayer::PickAtViewport(float u, float v) {
 }
 
 // ============================================================================
-//  Рендер превью: Viewport (редакторская камера) и Game (камера сцены)
+//  Рендер превью: тени -> Viewport (редакторская камера) -> Game (камера сцены)
 // ============================================================================
 
-void EditorLayer::RenderSceneToFramebuffer() {
+// Общая карта теней кадра: солнце одно, и Viewport, и Game сэмплируют один
+// depth-проход. Центр — на начале координат (сцены редактора компактны).
+void EditorLayer::RenderShadowPass(const LightingEnvironment& env) {
+    Window& window = sage::Application::Get().GetWindow();
+    m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
+    m_shadows->BeginRender();
+    m_shadowShader->Use();
+    m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
+    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
+        m_shadowShader->SetMat4("uModel", tr.GetMatrix());
+        mr.MeshPtr->Draw();
+    });
+    m_shadows->EndRender(window.Width(), window.Height());
+}
+
+// Освещённый проход сцены в текущий привязанный FBO (общая часть Viewport/Game).
+void EditorLayer::DrawLitScene(const LightingEnvironment& env, const glm::mat4& view,
+                               const glm::mat4& proj, glm::vec3 viewPos) {
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+
+    m_shader->Use();
+    m_shader->SetMat4("uView", view);
+    m_shader->SetMat4("uProjection", proj);
+    m_shader->SetVec3("uViewPos", viewPos);
+    UploadLighting(*m_shader, env);
+    device.BindTexture2D(1, m_shadows->DepthTexture());
+    UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/true);
+    m_shader->SetInt("uUseTexture", 0);
+    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
+        m_shader->SetMat4("uModel", tr.GetMatrix());
+        m_shader->SetVec3("uObjectColor", EffectiveColor(mr)); // материал (если назначен) важнее Color
+        mr.MeshPtr->Draw();
+    });
+}
+
+void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
     m_sceneFbo->Resize(m_viewportW, m_viewportH);
@@ -478,14 +589,7 @@ void EditorLayer::RenderSceneToFramebuffer() {
     m_view = m_camera.GetViewMatrix();
     m_proj = m_camera.GetProjectionMatrix((float)m_viewportW / (float)std::max(m_viewportH, 1));
 
-    m_shader->Use();
-    m_shader->SetMat4("uView", m_view);
-    m_shader->SetMat4("uProjection", m_proj);
-    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
-        m_shader->SetMat4("uModel", tr.GetMatrix());
-        m_shader->SetVec3("uObjectColor", EffectiveColor(mr)); // материал (если назначен) важнее Color
-        mr.MeshPtr->Draw();
-    });
+    DrawLitScene(env, m_view, m_proj, m_camera.Position);
 
     // Гизмо-графика движка (DebugDraw) — в ТОТ ЖЕ буфер после сцены, с тестом
     // глубины: объекты заслоняют сетку (не 2D-оверлей поверх картинки).
@@ -499,6 +603,13 @@ void EditorLayer::RenderSceneToFramebuffer() {
         glm::mat4 slightlyLarger = glm::scale(model, glm::vec3(1.02f));
         m_debugDraw->WireBox(slightlyLarger, {1.0f, 0.62f, 0.12f});
         m_debugDraw->Axes(model, 1.4f);
+
+        // У света — сфера радиуса затухания: сразу видно зону действия.
+        if (const LightComponent* light =
+                m_scene->Registry().try_get<LightComponent>(selectedObj.Entity())) {
+            m_debugDraw->WireSphere(selectedObj.GetTransform().Position, light->Range,
+                                    glm::vec3(light->Color) * 0.9f);
+        }
     }
     m_debugDraw->Flush(m_view, m_proj);
 
@@ -513,7 +624,7 @@ bool EditorLayer::HasPrimaryCamera() {
     return false;
 }
 
-void EditorLayer::RenderGameToFramebuffer() {
+void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     // Первая Primary-камера сцены. Нет камеры — панель Game сама покажет
     // подсказку, кадр не рендерим.
     entt::entity camEntity = entt::null;
@@ -540,17 +651,11 @@ void EditorLayer::RenderGameToFramebuffer() {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     m_gameFbo->Resize(m_gameW, m_gameH);
     m_gameFbo->Bind();
-    device.SetClearColor(0.08f, 0.09f, 0.11f, 1.0f);
+    // Игровое окно очищается цветом неба сцены — как это увидит игрок.
+    device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
 
-    m_shader->Use();
-    m_shader->SetMat4("uView", view);
-    m_shader->SetMat4("uProjection", proj);
-    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& objTr, MeshRendererComponent& mr) {
-        m_shader->SetMat4("uModel", objTr.GetMatrix());
-        m_shader->SetVec3("uObjectColor", EffectiveColor(mr));
-        mr.MeshPtr->Draw();
-    });
+    DrawLitScene(env, view, proj, tr.Position);
     // Никакого DebugDraw: игровое окно показывает сцену как её увидит игрок.
 
     device.BindDefaultFramebuffer();
@@ -563,8 +668,12 @@ void EditorLayer::RenderGameToFramebuffer() {
 void EditorLayer::OnRender() {
     sage::Application& app = sage::Application::Get();
 
-    RenderSceneToFramebuffer();
-    RenderGameToFramebuffer();
+    // Итоговое освещение кадра: окружение сцены + света-сущности; один
+    // shadow-проход на кадр, Viewport и Game сэмплируют общую карту.
+    LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+    RenderShadowPass(env);
+    RenderSceneToFramebuffer(env);
+    RenderGameToFramebuffer(env);
 
     app.Device().SetViewport(0, 0, app.GetWindow().Width(), app.GetWindow().Height());
     app.Device().SetClearColor(0.05f, 0.05f, 0.06f, 1.0f);
@@ -578,6 +687,7 @@ void EditorLayer::OnRender() {
     DrawDockspaceAndMenu(); // включая модальные диалоги (см. DrawDialogs внутри)
     m_hierarchy.Draw(*this);
     m_inspector.Draw(*this);
+    m_lighting.Draw(*this);
     m_viewport.Draw(*this);
     m_game.Draw(*this);
     m_console.Draw();
@@ -624,6 +734,7 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28f, nullptr, &center);
 
     ImGui::DockBuilderDockWindow("Hierarchy", left);
+    ImGui::DockBuilderDockWindow("Lighting", right);
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Console", bottom);
     ImGui::DockBuilderDockWindow("Assets", bottom);
@@ -739,6 +850,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
             }
             if (ImGui::MenuItem("Save Scene As...")) openDialog = "Save Scene As";
             ImGui::Separator();
+            if (ImGui::MenuItem("Build Game...", nullptr, false, m_project.Loaded())) {
+                m_dlgBuildResult.clear();
+                openDialog = "Build Game";
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Exit")) sage::Application::Get().Close();
             ImGui::EndMenu();
         }
@@ -772,6 +888,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 GameObject camObj = m_scene->CreateObject("Camera");
                 m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
                 m_selectedId = camObj.Id();
+            }
+            if (ImGui::MenuItem("Create Light")) {
+                PushUndoSnapshot();
+                GameObject lightObj = m_scene->CreateObject("Light");
+                lightObj.GetTransform().Position = {0.0f, 2.5f, 0.0f};
+                m_scene->Registry().emplace<LightComponent>(lightObj.Entity());
+                m_selectedId = lightObj.Id();
             }
             ImGui::EndMenu();
         }
@@ -874,6 +997,30 @@ void EditorLayer::DrawDialogs() {
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Build Game", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextDisabled("Packages SagePlayer + project '%s' into a runnable game",
+                            m_project.Name().c_str());
+        ImGui::InputText("Output dir", m_dlgBuildDir, sizeof(m_dlgBuildDir));
+        ImGui::TextDisabled("-> %s/%s/%s", m_dlgBuildDir, m_project.Name().c_str(),
+                            m_project.Name().c_str());
+        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
+        if (!m_dlgBuildResult.empty())
+            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1), "Built: %s", m_dlgBuildResult.c_str());
+        if (ImGui::Button("Build", ImVec2(120, 0))) {
+            std::string err;
+            if (BuildGame(m_dlgBuildDir, err)) {
+                m_dlgError.clear();
+                m_dlgBuildResult = (fs::path(m_dlgBuildDir) / m_project.Name()).string();
+            } else {
+                m_dlgError = err;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Open Scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::InputText("Path", m_dlgOpenPath, sizeof(m_dlgOpenPath));
         ImGui::TextDisabled("Path to a .sage scene file (tip: double-click one in Assets)");
@@ -941,6 +1088,22 @@ void EditorLayer::RunSelfTest() {
                      HasPrimaryCamera();
         if (!camOk) {
             LOG_ERROR("Editor") << "SELFTEST: Main Camera lost after scene save/load round-trip";
+            ok = false;
+        }
+    }
+
+    // --- LightComponent: демо-лампа переживает save/load, CollectLighting
+    // добавляет её к окружению сцены ---
+    if (ok) {
+        GameObject lamp = m_scene->FindByName("Lamp");
+        const LightComponent* light =
+            lamp.Valid() ? m_scene->Registry().try_get<LightComponent>(lamp.Entity()) : nullptr;
+        size_t sceneLights = m_scene->Lighting.PointLights.size();
+        size_t collected = sage::ecs::CollectLighting(*m_scene).PointLights.size();
+        if (!light || collected != sceneLights + 1) {
+            LOG_ERROR("Editor") << "SELFTEST: light round-trip failed (component "
+                                << (light != nullptr) << ", collected " << collected
+                                << ", scene-level " << sceneLights << ")";
             ok = false;
         }
     }
@@ -1038,6 +1201,29 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Сборка игры: SagePlayer + project/ упакованы в запускаемую папку ---
+    // (запуск упакованной игры проверяет smoke-тест 5/5 отдельным процессом)
+    if (ok) {
+        std::string buildErr;
+        if (!BuildGame("selftest_dist", buildErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: game build failed: " << buildErr;
+            ok = false;
+        } else {
+            fs::path gameDir = fs::path("selftest_dist") / m_project.Name();
+#ifdef _WIN32
+            fs::path exe = gameDir / (m_project.Name() + ".exe");
+#else
+            fs::path exe = gameDir / m_project.Name();
+#endif
+            if (!fs::exists(exe, ec) ||
+                !fs::exists(gameDir / "project" / "project.sageproj", ec) ||
+                !fs::exists(gameDir / "assets" / "shaders" / "lit.frag", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: built game layout incomplete in " << gameDir.string();
+                ok = false;
+            }
+        }
+    }
+
     // --- Play: скрипт вращает сущность, Stop откатывает сцену к снапшоту ---
     if (ok) {
         GameObject green = m_scene->FindByName("Green Cube");
@@ -1070,7 +1256,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + recent + dirty + play, "
+                               << "materials + camera + light + build + recent + dirty + play, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

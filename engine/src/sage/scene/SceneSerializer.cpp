@@ -131,6 +131,11 @@ static json BuildSceneJson(const Scene& scene) {
             j["camera"]["far"] = cam->FarClip;
             j["camera"]["primary"] = cam->Primary;
         }
+        if (const LightComponent* light = reg.try_get<LightComponent>(e)) {
+            j["light"]["color"] = Vec3ToJson(light->Color);
+            j["light"]["intensity"] = light->Intensity;
+            j["light"]["range"] = light->Range;
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -179,6 +184,15 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             cam.FarClip = cj.value("far", cam.FarClip);
             cam.Primary = cj.value("primary", cam.Primary);
             obj.Registry()->emplace<CameraComponent>(obj.Entity(), cam);
+        }
+
+        if (j.contains("light")) {
+            const auto& lj = j["light"];
+            LightComponent light;
+            if (lj.contains("color")) light.Color = Vec3FromJson(lj["color"]);
+            light.Intensity = lj.value("intensity", light.Intensity);
+            light.Range = lj.value("range", light.Range);
+            obj.Registry()->emplace<LightComponent>(obj.Entity(), light);
         }
 
         // Пересоздаём GPU-ресурс на основе описания

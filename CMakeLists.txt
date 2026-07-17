@@ -181,6 +181,7 @@ target_link_libraries(imguizmo PUBLIC imgui)
 #  Модули проекта
 # ============================================================================
 add_subdirectory(engine)
+add_subdirectory(runtime)
 add_subdirectory(games/sandbox)
 add_subdirectory(games/testgame)
 
