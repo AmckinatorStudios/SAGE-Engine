@@ -15,6 +15,7 @@
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
+#include "sage/anim/AnimationSystem.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -136,6 +137,7 @@ void PlayerLayer::OnUpdate(float dt) {
     if (!m_scene) return;
     m_scripts->UpdateAll(dt);
     if (m_physics) m_physics->Step(*m_scene, dt);
+    sage::anim::UpdateAnimators(*m_scene, dt);
 
     if (glfwGetKey(sage::Application::Get().GetWindow().Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         sage::Application::Get().Close();
@@ -209,6 +211,9 @@ void PlayerLayer::OnRender() {
         m_shader->SetVec3("uObjectColor", EffectiveColor(mr));
         mr.MeshPtr->Draw();
     });
+
+    // Скелетно-анимированные модели — своим скиннинг-шейдером, поверх сцены.
+    sage::anim::DrawAnimatedModels(*m_scene, view, proj, env);
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {

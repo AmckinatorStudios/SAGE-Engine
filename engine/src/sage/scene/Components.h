@@ -6,6 +6,7 @@
 #include "sage/render/Mesh.h"
 #include "sage/render/Material.h"
 #include "sage/physics/PhysicsTypes.h"
+#include "sage/anim/Animator.h"
 
 // ---------------------------------------------------------------------------
 // Компоненты ECS — простые data-структуры, навешиваемые на сущности (entity)
@@ -133,4 +134,28 @@ struct ColliderComponent {
     glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
     float Radius = 0.5f;                     // Sphere / Capsule
     float HalfHeight = 0.5f;                 // Capsule
+};
+
+namespace sage::render { class SkinnedModel; }
+
+// Скелетно-анимированная модель на сущности. Path — файл .glb/.gltf со скином и
+// анимациями; ПУСТОЙ Path означает встроенную процедурную демо-модель (щупалец
+// с клипом «Wave»), удобную для примеров и тестов без ассетов. Позой управляет
+// система анимации (sage/anim/AnimationSystem): при первом обновлении грузит
+// модель, привязывает Animator к её скелету и запускает клип Clip; каждый кадр
+// продвигает время и обновляет палитру костей, которой рисуется модель.
+//
+// Сериализуются только «описательные» поля (Path/DemoSegments/Clip/Speed/Loop/
+// Playing); Model/Anim/Ready — рантайм-состояние, восстанавливается загрузкой.
+struct AnimatedModelComponent {
+    std::string Path;         // .glb/.gltf; пусто -> процедурный демо-щупалец
+    int DemoSegments = 6;     // число костей процедурного демо (если Path пуст)
+    int Clip = 0;             // индекс проигрываемого клипа
+    float Speed = 1.0f;
+    bool Loop = true;
+    bool Playing = true;
+
+    std::shared_ptr<sage::render::SkinnedModel> Model; // рантайм (не сериализуется)
+    sage::anim::Animator Anim;                          // рантайм-состояние проигрывания
+    bool Ready = false;                                 // инициализирован ли (загрузка+rig)
 };

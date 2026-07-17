@@ -47,10 +47,12 @@ SAGE-Engine/
       rhi/      GraphicsDevice — абстракция графического устройства
       ecs/      Registry (фасад entt), RenderSystem
       scene/    Scene (ECS), Components, Transform, Light, SceneSerializer
-      render/   Shader, Camera, Mesh (+примитивы), Model, Material, Skybox,
-                SkyRenderer (процедурное небо), ShadowMap, PostProcess,
+      render/   Shader, Camera, Mesh (+примитивы), Model, SkinnedModel, Font,
+                Material, Skybox, SkyRenderer (небо), ShadowMap, PostProcess,
                 DebugDraw (гизмо/линии в мире), ...
-      ui/       UIRenderer, Widgets — immediate-mode UI
+      anim/     Skeleton, Animator, SkinnedModel — скелетная анимация
+      ui/       UIRenderer (текст TrueType), Widgets — immediate-mode UI
+      physics/  PhysicsWorld (абстракция) — Jolt / Simple / Null бэкенды
       scripting/ ScriptEngine — Lua (sol2)
       audio/    AudioEngine — 2D/3D-звук, музыка (miniaudio)
     src/rhi/opengl/           — OpenGL-бэкенд: ЕДИНСТВЕННОЕ место с glad (уровень устройства)
@@ -358,6 +360,37 @@ dbg.Flush(view, proj); // один draw call на весь батч
 (инвариант проверяется grep'ом — см. ниже), поэтому смена бэкенда не затрагивает
 ни движок, ни игры, ни редактор.
 
+## Скелетная анимация
+Движок умеет **скелетную анимацию** (skinning) — деформацию меша скелетом
+костей. Данные независимы от GPU и живут в `sage/anim/`:
+
+- `Skeleton` — кости (TRS + родитель + обратная bind-матрица);
+- `AnimationClip` — каналы (перенос/поворот/масштаб кости) с ключами и
+  интерполяцией (линейная со сферической для поворотов / STEP);
+- `Animator` — проигрыватель: сэмплирует клип, считает глобальные матрицы
+  костей и выдаёт **палитру** (`global · inverseBind`) для скиннинг-шейдера.
+
+Геометрия и рендер — в `sage/render/SkinnedModel.*`: вершина несёт до 4 костей
+с весами; встроенный скиннинг-шейдер (полусферический ambient + солнце) считает
+позицию/нормаль как взвешенную сумму костей на GPU. Модель — разделяемый ассет
+(скелет/клипы), а покадровое состояние держит `Animator` у каждой сущности.
+
+**Загрузка.** `SkinnedModel::Load("hero.glb")` читает из glTF/GLB скин
+(JOINTS_0/WEIGHTS_0, inverseBindMatrices) и анимации (каналы/сэмплеры) —
+стандартный формат экспорта из Blender/Maya. Без внешнего ассета есть
+процедурная демо-модель `SkinnedModel::CreateDemoTentacle()` (гибкий «щупалец»
+с клипом Wave) — на ней держатся примеры и headless-тесты.
+
+**В ECS/редакторе.** Повесь `AnimatedModelComponent` (поле `Path` — файл .glb,
+пустое = процедурное демо; `Clip`/`Speed`/`Loop`/`Playing`). Система
+`sage::anim::UpdateAnimators`/`DrawAnimatedModels` (`sage/anim/AnimationSystem.h`)
+инициализирует, продвигает и рисует все такие сущности — вызывается редактором
+(анимация видна в вьюпорте, секция **Animated Model** в Inspector, меню
+**Entity → Create Animated Model**) и рантаймом `SagePlayer`. Описательные поля
+сериализуются в `.sage`. Живой пример — «тотем» в `games/testgame` (комната 1).
+Ограничения: до 128 костей на модель (`kMaxBones`), морф-таргеты и IK не
+поддерживаются.
+
 ## Физика
 Физика построена по тому же принципу, что и графика (RHI): **подключаемая
 абстракция** `sage::physics::PhysicsWorld` (заголовок `sage/physics/
@@ -527,8 +560,9 @@ model->Draw(shader); // сама переключает текстуру/цве�
 ```
 
 Известные ограничения: только `pbrMetallicRoughness.baseColorTexture` (normal
-maps/metallic-roughness/emissive пока не читаются), анимации/скелеты glTF не
-поддержаны (только статическая геометрия), OBJ без переиспользования вершин.
+maps/metallic-roughness/emissive пока не читаются), OBJ без переиспользования
+вершин. Это путь для СТАТИЧЕСКОЙ геометрии (`Model`); скелетные меши с анимацией
+из glTF грузит отдельный путь `SkinnedModel::Load` — см. `## Скелетная анимация`.
 
 ## Skybox
 Часть ЯДРА движка (`engine/src/sage/render/Skybox.*`) — кубическая (cubemap)

@@ -9,6 +9,9 @@
 #  сборка детерминирована и не зависит от переконфигурации CMake).
 # ============================================================================
 set(SAGE_ENGINE_SOURCES
+    src/sage/anim/AnimationSystem.cpp
+    src/sage/anim/Animator.cpp
+    src/sage/anim/Skeleton.cpp
     src/sage/audio/AudioEngine.cpp
     src/sage/audio/miniaudio_impl.cpp
     src/sage/core/Application.cpp
@@ -24,6 +27,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/Font.cpp
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
+    src/sage/render/SkinnedModel.cpp
     src/sage/render/SkyRenderer.cpp
     src/sage/render/stb_truetype_impl.cpp
     src/sage/render/Skybox.cpp

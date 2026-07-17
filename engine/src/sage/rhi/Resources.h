@@ -46,6 +46,8 @@ public:
     virtual ~ShaderProgram() = default;
     virtual void Use() const = 0;
     virtual void SetMat4(const std::string& name, const glm::mat4& v) const = 0;
+    // Массив матриц (напр. палитра костей скелетной анимации uBones[N]).
+    virtual void SetMat4Array(const std::string& name, const glm::mat4* v, int count) const = 0;
     virtual void SetVec4(const std::string& name, const glm::vec4& v) const = 0;
     virtual void SetVec3(const std::string& name, const glm::vec3& v) const = 0;
     virtual void SetVec2(const std::string& name, const glm::vec2& v) const = 0;

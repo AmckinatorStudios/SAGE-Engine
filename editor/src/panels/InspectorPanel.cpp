@@ -267,6 +267,59 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Скелетно-анимированная модель (.glb/.gltf или процедурное демо) ---
+    if (ImGui::CollapsingHeader("Animated Model", ImGuiTreeNodeFlags_DefaultOpen)) {
+        entt::registry& reg = host.CurrentScene().Registry();
+        if (AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity())) {
+            char pathBuf[512];
+            std::snprintf(pathBuf, sizeof(pathBuf), "%s", am->Path.c_str());
+            if (ImGui::InputText("Model (.glb)", pathBuf, sizeof(pathBuf))) am->Path = pathBuf;
+            host.TrackLastImGuiItem();
+            ImGui::TextDisabled("Empty path = procedural demo (\"tentacle\")");
+            if (am->Path.empty()) {
+                if (ImGui::SliderInt("Demo Segments", &am->DemoSegments, 2, 16)) {
+                    am->Ready = false; am->Model = nullptr; // пересобрать демо
+                }
+            }
+            if (ImGui::Button("Reload")) { am->Ready = false; am->Model = nullptr; }
+
+            // Список клипов — из проигрывателя (модель уже загружена системой).
+            int clipCount = am->Anim.ClipCount();
+            if (clipCount > 0) {
+                if (am->Clip >= clipCount) am->Clip = 0;
+                std::string preview = am->Anim.ClipName(am->Clip);
+                if (ImGui::BeginCombo("Clip", preview.c_str())) {
+                    for (int i = 0; i < clipCount; ++i) {
+                        bool sel = (am->Clip == i);
+                        if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel)) {
+                            am->Clip = i;
+                            am->Anim.Play(i, am->Loop);
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+            } else {
+                ImGui::TextDisabled("No animation clips (bind pose)");
+            }
+            ImGui::DragFloat("Speed", &am->Speed, 0.02f, 0.0f, 8.0f); host.TrackLastImGuiItem();
+            if (ImGui::Checkbox("Loop", &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
+            ImGui::SameLine();
+            ImGui::Checkbox("Playing", &am->Playing);
+            if (clipCount > 0) {
+                ImGui::TextDisabled("t = %.2f s", am->Anim.Time());
+            }
+            if (ImGui::Button("Remove Animated Model")) {
+                host.PushUndoSnapshot();
+                reg.remove<AnimatedModelComponent>(obj.Entity());
+            }
+        } else {
+            if (ImGui::Button("Add Animated Model")) {
+                host.PushUndoSnapshot();
+                reg.emplace<AnimatedModelComponent>(obj.Entity());
+            }
+        }
+    }
+
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
     if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) host.DeleteSelected();

@@ -10,6 +10,7 @@
 #include "sage/core/Application.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/RenderSystem.h"
+#include "sage/anim/AnimationSystem.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -168,6 +169,12 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     m_roomSpawns["room1"] = {0.0f, 0.85f, 9.0f};
 
     SpawnPhysicsProps(scene, {-6.5f, 0.0f, 6.0f}); // башенка падающих ящиков
+
+    // Скелетно-анимированная модель: процедурный «щупалец» с клипом Wave
+    // (пустой Path). Демонстрирует скелетную анимацию в живой игре.
+    GameObject rig = scene.CreateObject("Animated Totem");
+    rig.GetTransform().Position = {3.5f, 0.0f, 4.0f};
+    scene.Registry().emplace<AnimatedModelComponent>(rig.Entity());
 }
 
 void TestGameLayer::BuildRoomTwo(Scene& scene) {
@@ -618,6 +625,8 @@ void TestGameLayer::OnUpdate(float dt) {
 
     // Физика активной сцены: динамические ящики падают/складываются.
     if (m_physics) m_physics->Step(*m_scenes.Active(), dt);
+    // Скелетные анимации активной сцены (демо-тотем).
+    sage::anim::UpdateAnimators(*m_scenes.Active(), dt);
 
     // Скрипты ТОЛЬКО активной сцены — неактивная комната «заморожена».
     auto it = m_sceneScripts.find(m_activeName);
@@ -702,6 +711,9 @@ void TestGameLayer::OnRender() {
     if (m_shadowsEnabled) device.BindTexture2D(1, m_shadows->DepthTexture());
     UploadShadowUniforms(*m_sceneShader, m_shadows->LightMatrix(), /*unit=*/1, m_shadowsEnabled);
     DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true);
+
+    // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
+    sage::anim::DrawAnimatedModels(*scene, view, proj, scene->Lighting);
 
     // --- 3. Пост-процесс: HDR -> экран (тон-маппинг ACES и т.д.) ---
     if (m_postEnabled) {

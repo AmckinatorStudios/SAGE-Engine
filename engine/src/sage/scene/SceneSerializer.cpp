@@ -213,6 +213,15 @@ static json BuildSceneJson(const Scene& scene) {
             j["collider"]["radius"] = col->Radius;
             j["collider"]["halfHeight"] = col->HalfHeight;
         }
+        if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) {
+            // Только описательные поля — модель/палитра восстанавливаются загрузкой.
+            j["animatedModel"]["path"] = am->Path;
+            j["animatedModel"]["demoSegments"] = am->DemoSegments;
+            j["animatedModel"]["clip"] = am->Clip;
+            j["animatedModel"]["speed"] = am->Speed;
+            j["animatedModel"]["loop"] = am->Loop;
+            j["animatedModel"]["playing"] = am->Playing;
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -299,6 +308,18 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             col.Radius = cj.value("radius", col.Radius);
             col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
             obj.Registry()->emplace<ColliderComponent>(obj.Entity(), col);
+        }
+        if (j.contains("animatedModel")) {
+            const auto& aj = j["animatedModel"];
+            AnimatedModelComponent am;
+            am.Path = aj.value("path", std::string());
+            am.DemoSegments = aj.value("demoSegments", 6);
+            am.Clip = aj.value("clip", 0);
+            am.Speed = aj.value("speed", 1.0f);
+            am.Loop = aj.value("loop", true);
+            am.Playing = aj.value("playing", true);
+            // Model/Anim восстановятся при первом UpdateAnimators (Ready=false).
+            obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), std::move(am));
         }
 
         // Пересоздаём GPU-ресурс на основе описания

@@ -24,6 +24,7 @@
 #include "sage/render/LightingUpload.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/ecs/LightSystem.h"
+#include "sage/anim/AnimationSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -158,6 +159,9 @@ void EditorLayer::OnUpdate(float dt) {
         if (m_playScripts) m_playScripts->UpdateAll(dt);
         if (m_playPhysics) m_playPhysics->Step(*m_scene, dt);
     }
+    // Анимации проигрываются и в режиме правки — чтобы в вьюпорте было видно
+    // движение скелетных моделей (превью), не только в Play.
+    sage::anim::UpdateAnimators(*m_scene, dt);
     m_plugins.UpdateAll(dt);
 }
 
@@ -752,6 +756,9 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
     }
     DrawLitScene(env, m_view, m_proj, m_camera.Position, shadingMode, wireframe);
 
+    // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
+    sage::anim::DrawAnimatedModels(*m_scene, m_view, m_proj, env);
+
     // Аутлайн выбранной сущности (масштабированная оболочка) — поверх сцены,
     // до гизмо-линий.
     GameObject selectedObj = m_scene->Get(m_selectedId);
@@ -829,6 +836,7 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     // Игровое окно — всегда полное освещение (Shaded), без гизмо/аутлайна:
     // показывает сцену как её увидит игрок.
     DrawLitScene(env, view, proj, tr.Position, /*shadingMode=*/0, /*wireframe=*/false);
+    sage::anim::DrawAnimatedModels(*m_scene, view, proj, env);
 
     device.BindDefaultFramebuffer();
 }
@@ -1092,6 +1100,15 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 m_scene->Registry().emplace<RigidBodyComponent>(box.Entity());
                 m_scene->Registry().emplace<ColliderComponent>(box.Entity());
                 m_selectedId = box.Id();
+            }
+            // Скелетно-анимированная модель: без пути — процедурный демо-щупалец
+            // с клипом «Wave» (сразу проигрывается в вьюпорте).
+            if (ImGui::MenuItem("Create Animated Model")) {
+                PushUndoSnapshot();
+                GameObject anim = m_scene->CreateObject("Animated Model");
+                anim.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+                m_scene->Registry().emplace<AnimatedModelComponent>(anim.Entity());
+                m_selectedId = anim.Id();
             }
             ImGui::EndMenu();
         }
@@ -1526,8 +1543,36 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Анимация: демо-скелет проигрывается, палитра костей меняется во времени ---
+    if (ok) {
+        GameObject rig = m_scene->CreateObject("SelftestRig");
+        m_scene->Registry().emplace<AnimatedModelComponent>(rig.Entity());
+
+        sage::anim::UpdateAnimators(*m_scene, 0.0f); // инициализация (загрузка демо + rig)
+        AnimatedModelComponent& am = m_scene->Registry().get<AnimatedModelComponent>(rig.Entity());
+        if (!am.Model || am.Anim.BoneCount() < 2) {
+            LOG_ERROR("Editor") << "SELFTEST: animation failed - rig not built";
+            ok = false;
+        } else if (am.Anim.ClipCount() < 1) {
+            LOG_ERROR("Editor") << "SELFTEST: animation failed - no clips";
+            ok = false;
+        } else {
+            glm::mat4 boneA = am.Anim.BoneMatrices()[1]; // поза в начале
+            for (int i = 0; i < 5; ++i) sage::anim::UpdateAnimators(*m_scene, 0.1f); // t=0.5s
+            glm::mat4 boneB = am.Anim.BoneMatrices()[1];
+            float diff = 0.0f;
+            for (int c = 0; c < 4; ++c) for (int r = 0; r < 4; ++r)
+                diff += std::abs(boneA[c][r] - boneB[c][r]);
+            if (diff < 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: animation failed - bone pose did not change over time";
+                ok = false;
+            }
+        }
+        m_scene->RemoveObject(rig.Id());
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play + physics, " << before << " entities)";
+                               << "recent + dirty + play + physics + animation, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

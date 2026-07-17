@@ -60,6 +60,10 @@ void GLShaderProgram::Use() const { glUseProgram(m_id); }
 void GLShaderProgram::SetMat4(const std::string& name, const glm::mat4& v) const {
     glUniformMatrix4fv(glGetUniformLocation(m_id, name.c_str()), 1, GL_FALSE, glm::value_ptr(v));
 }
+void GLShaderProgram::SetMat4Array(const std::string& name, const glm::mat4* v, int count) const {
+    if (count <= 0) return;
+    glUniformMatrix4fv(glGetUniformLocation(m_id, name.c_str()), count, GL_FALSE, glm::value_ptr(v[0]));
+}
 void GLShaderProgram::SetVec4(const std::string& name, const glm::vec4& v) const {
     glUniform4fv(glGetUniformLocation(m_id, name.c_str()), 1, glm::value_ptr(v));
 }

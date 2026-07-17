@@ -36,6 +36,7 @@ public:
     void Use() const { m_program->Use(); }
 
     void SetMat4(const std::string& name, const glm::mat4& value) const { m_program->SetMat4(name, value); }
+    void SetMat4Array(const std::string& name, const glm::mat4* values, int count) const { m_program->SetMat4Array(name, values, count); }
     void SetVec3(const std::string& name, const glm::vec3& value) const { m_program->SetVec3(name, value); }
     void SetVec4(const std::string& name, const glm::vec4& value) const { m_program->SetVec4(name, value); }
     void SetVec2(const std::string& name, const glm::vec2& value) const { m_program->SetVec2(name, value); }

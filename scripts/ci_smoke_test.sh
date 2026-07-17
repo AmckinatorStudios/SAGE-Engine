@@ -96,7 +96,7 @@ fi
 # должны отработать; TrueType-шрифт HUD — загрузиться; физика — на Jolt; а лог
 # — не содержать ни одной ERROR-строки движка.
 for MARKER in "serialization round-trip PASS" "TESTGAME: picked up" "TESTGAME: portal -> room2" \
-              "Font] Загружен шрифт" "TESTGAME: physics backend"; do
+              "Font] Загружен шрифт" "TESTGAME: physics backend" "Anim] SkinnedModel"; do
     if ! grep -q "${MARKER}" "${TESTGAME_LOG}"; then
         echo "ОШИБКА: в логе TestGame нет маркера '${MARKER}'"
         cat "${TESTGAME_LOG}"; exit 1
