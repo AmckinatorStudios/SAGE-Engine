@@ -31,6 +31,17 @@ function(sage_add_game)
                     ${GAME_ASSETS} $<TARGET_FILE_DIR:${GAME_NAME}>/assets
             COMMENT "Копирование ассетов ${GAME_NAME} рядом с бинарником")
     endif()
+
+    # Дефолтный шрифт движка (TrueType) — рядом с любой игрой, чтобы UIRenderer
+    # рисовал текст настоящим шрифтом с кириллицей без ассетов в самой игре
+    # (путь по умолчанию assets/fonts/sage-default.ttf). Идёт ПОСЛЕ копирования
+    # игровых ассетов, чтобы игра могла положить/переопределить свой шрифт.
+    add_custom_command(TARGET ${GAME_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${GAME_NAME}>/assets/fonts
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_SOURCE_DIR}/engine/assets/fonts/sage-default.ttf
+                $<TARGET_FILE_DIR:${GAME_NAME}>/assets/fonts/sage-default.ttf
+        COMMENT "Копирование дефолтного шрифта движка рядом с ${GAME_NAME}")
 endfunction()
 
 # sage_add_editor_plugin(NAME <lib-name> SOURCES <files...>)

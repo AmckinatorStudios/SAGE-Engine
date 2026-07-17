@@ -289,7 +289,9 @@ void TestGameLayer::SetupHud() {
     m_hudHint.Offset = {0, 16};
     m_hudHint.Scale = 1.5f;
     m_hudHint.Color = {0.8f, 0.8f, 0.8f};
-    m_hudHint.Text = "WASD move, mouse look, blue beacon = portal, ESC quit";
+    // Кириллица — прямая проверка TrueType-шрифта UIRenderer (раньше был
+    // ASCII-only stb_easy_font, русский текст не рисовался вообще).
+    m_hudHint.Text = "WASD — движение, мышь — обзор, синий маяк — портал, ESC — выход";
 }
 
 // ============================================================================

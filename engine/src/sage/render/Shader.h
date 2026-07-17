@@ -20,6 +20,12 @@ class Shader {
 public:
     Shader(const std::string& vertexPath, const std::string& fragmentPath);
 
+    // Компиляция прямо из исходников (не из файлов) — для встроенных шейдеров
+    // движка, которые не должны зависеть от ассетов конкретной игры (напр.
+    // шейдер текста UIRenderer). tag — имя для сообщений лога.
+    static Shader FromSource(const std::string& vertexSrc, const std::string& fragmentSrc,
+                             const std::string& tag = "inline");
+
     // Владеет GPU-программой единолично — копирование запрещено, перемещение
     // безопасно (владение переезжает вместе с unique_ptr).
     Shader(const Shader&) = delete;
@@ -38,6 +44,11 @@ public:
 
 private:
     static std::string ReadFile(const std::string& path);
+
+    // Тег-конструктор из готовых исходников (используется FromSource).
+    struct FromSourceTag {};
+    Shader(FromSourceTag, const std::string& vertexSrc, const std::string& fragmentSrc,
+           const std::string& tag);
 
     std::unique_ptr<sage::rhi::ShaderProgram> m_program;
 };

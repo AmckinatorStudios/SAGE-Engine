@@ -93,8 +93,10 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
     cat "${TESTGAME_LOG}"; exit 1
 fi
 # Реальный игровой цикл: сериализация, подбор предметов, переход между сценами
-# должны отработать, а лог — не содержать ни одной ERROR-строки движка.
-for MARKER in "serialization round-trip PASS" "TESTGAME: picked up" "TESTGAME: portal -> room2"; do
+# должны отработать; TrueType-шрифт HUD — загрузиться; физика — на Jolt; а лог
+# — не содержать ни одной ERROR-строки движка.
+for MARKER in "serialization round-trip PASS" "TESTGAME: picked up" "TESTGAME: portal -> room2" \
+              "Font] Загружен шрифт" "TESTGAME: physics backend"; do
     if ! grep -q "${MARKER}" "${TESTGAME_LOG}"; then
         echo "ОШИБКА: в логе TestGame нет маркера '${MARKER}'"
         cat "${TESTGAME_LOG}"; exit 1

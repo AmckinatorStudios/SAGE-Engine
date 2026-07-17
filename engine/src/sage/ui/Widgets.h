@@ -49,7 +49,7 @@ public:
 
         // Если Size не задан — считаем размером сам текст (для якорей справа/снизу)
         glm::vec2 effSize = Size;
-        if (effSize.x <= 0.0f) effSize.x = UIRenderer::MeasureText(text, Scale);
+        if (effSize.x <= 0.0f) effSize.x = ui.MeasureText(text, Scale);
         if (effSize.y <= 0.0f) effSize.y = 8.0f * Scale;
 
         glm::vec2 saved = Size;

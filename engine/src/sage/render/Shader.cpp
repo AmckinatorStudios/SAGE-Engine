@@ -26,3 +26,14 @@ Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
 
     LOG_DEBUG("Shader") << "Скомпилирован: " << vertexPath << " + " << fragmentPath;
 }
+
+Shader::Shader(FromSourceTag, const std::string& vertexSrc, const std::string& fragmentSrc,
+               const std::string& tag) {
+    m_program = sage::rhi::GraphicsDevice::Get().CreateShaderProgram(vertexSrc, fragmentSrc);
+    LOG_DEBUG("Shader") << "Скомпилирован из исходников: " << tag;
+}
+
+Shader Shader::FromSource(const std::string& vertexSrc, const std::string& fragmentSrc,
+                          const std::string& tag) {
+    return Shader(FromSourceTag{}, vertexSrc, fragmentSrc, tag);
+}

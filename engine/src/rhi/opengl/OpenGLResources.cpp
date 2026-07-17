@@ -235,7 +235,11 @@ GLTexture2D::GLTexture2D(const Texture2DDesc& desc, const void* pixels) {
 
     glGenTextures(1, &m_id);
     glBindTexture(GL_TEXTURE_2D, m_id);
+    // Одноканальные (R8) текстуры — например, атлас шрифта — могут иметь ширину,
+    // не кратную 4; выравнивание строк по 1 байту защищает от косой загрузки.
+    if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, format, desc.Width, desc.Height, 0, format, GL_UNSIGNED_BYTE, pixels);
+    if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 4); // вернуть по умолчанию
     if (desc.GenerateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
 
     ApplyFilter2D(desc.FilterMode, desc.GenerateMipmaps);
