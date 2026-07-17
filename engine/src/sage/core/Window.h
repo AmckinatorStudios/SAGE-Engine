@@ -23,8 +23,24 @@ public:
     // Вызывается GLFW при изменении размера окна
     void OnResize(int width, int height);
 
+    // Подписка на события мыши. GLFW даёт ровно ОДИН user pointer и один
+    // колбэк каждого типа на окно — ими монопольно владеет Window (user
+    // pointer нужен его resize-колбэку), а желающие получать события мыши
+    // (InputSystem) подписываются через эти хуки, НЕ трогая GLFW напрямую.
+    // Иначе повторный glfwSetWindowUserPointer(окно, не-Window) заставил бы
+    // FramebufferSizeCallback кастовать чужой указатель к Window* (UB).
+    using CursorPosFn = std::function<void(double x, double y)>;
+    using ScrollFn = std::function<void(double xoffset, double yoffset)>;
+    void SetCursorPosCallback(CursorPosFn fn) { m_cursorPosFn = std::move(fn); }
+    void SetScrollCallback(ScrollFn fn) { m_scrollFn = std::move(fn); }
+
 private:
+    static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
+    static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
+
     GLFWwindow* m_handle = nullptr;
     int m_width;
     int m_height;
+    CursorPosFn m_cursorPosFn;
+    ScrollFn m_scrollFn;
 };

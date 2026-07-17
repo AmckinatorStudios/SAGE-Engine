@@ -15,8 +15,13 @@ void ScriptEngine::RegisterEngineApi() {
     // арифметика (+, -, унарный минус, умножение/деление на число) и пара
     // геометрических хелперов — без этого любая игровая математика (движение,
     // направления, дистанции) была бы мучением через отдельные x/y/z-поля.
+    // ВАЖНО: sol::constructors регистрирует только Vec3.new(...) — вызов
+    // Vec3(...) как функции требует ОТДЕЛЬНОЙ регистрации call_constructor
+    // (без него Lua падает с «attempt to call a table value»; найдено боевым
+    // тестом games/testgame — прежние скрипты векторы не конструировали).
     m_lua.new_usertype<glm::vec3>("Vec3",
         sol::constructors<glm::vec3(), glm::vec3(float, float, float)>(),
+        sol::call_constructor, sol::constructors<glm::vec3(), glm::vec3(float, float, float)>(),
         "x", &glm::vec3::x,
         "y", &glm::vec3::y,
         "z", &glm::vec3::z,
@@ -41,6 +46,7 @@ void ScriptEngine::RegisterEngineApi() {
     // координаты, UV). Минимальный набор — арифметика та же, что у Vec3.
     m_lua.new_usertype<glm::vec2>("Vec2",
         sol::constructors<glm::vec2(), glm::vec2(float, float)>(),
+        sol::call_constructor, sol::constructors<glm::vec2(), glm::vec2(float, float)>(),
         "x", &glm::vec2::x,
         "y", &glm::vec2::y,
         sol::meta_function::addition, [](const glm::vec2& a, const glm::vec2& b) { return a + b; },
@@ -56,6 +62,7 @@ void ScriptEngine::RegisterEngineApi() {
     // в этом движке используется только как rgba, не как направление/точка.
     m_lua.new_usertype<glm::vec4>("Vec4",
         sol::constructors<glm::vec4(), glm::vec4(float, float, float, float)>(),
+        sol::call_constructor, sol::constructors<glm::vec4(), glm::vec4(float, float, float, float)>(),
         "x", &glm::vec4::x,
         "y", &glm::vec4::y,
         "z", &glm::vec4::z,

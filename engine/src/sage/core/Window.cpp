@@ -7,6 +7,16 @@ static void FramebufferSizeCallback(GLFWwindow* handle, int width, int height) {
     if (win) win->OnResize(width, height);
 }
 
+void Window::ForwardCursorPos(GLFWwindow* handle, double x, double y) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (win && win->m_cursorPosFn) win->m_cursorPosFn(x, y);
+}
+
+void Window::ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (win && win->m_scrollFn) win->m_scrollFn(xoffset, yoffset);
+}
+
 Window::Window(int width, int height, const std::string& title)
     : m_width(width), m_height(height) {
 
@@ -32,6 +42,8 @@ Window::Window(int width, int height, const std::string& title)
     glfwMakeContextCurrent(m_handle);
     glfwSetWindowUserPointer(m_handle, this);
     glfwSetFramebufferSizeCallback(m_handle, FramebufferSizeCallback);
+    glfwSetCursorPosCallback(m_handle, &Window::ForwardCursorPos);
+    glfwSetScrollCallback(m_handle, &Window::ForwardScroll);
 
     // Загрузку драйвера (glad) и дефолтное состояние конвейера (depth test,
     // backface culling, бесшовные cubemap) выполняет rhi::GraphicsDevice::Init,
