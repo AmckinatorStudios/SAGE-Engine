@@ -182,6 +182,7 @@ target_link_libraries(imguizmo PUBLIC imgui)
 # ============================================================================
 add_subdirectory(engine)
 add_subdirectory(games/sandbox)
+add_subdirectory(games/testgame)
 
 # Редактор — часть стандартной сборки движка. Проверка EXISTS оставлена как
 # защита на случай частичного checkout, а не как признак опциональности.

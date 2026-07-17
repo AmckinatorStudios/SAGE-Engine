@@ -24,7 +24,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/3: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/4: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +45,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/3: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/4: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -65,11 +65,45 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/3: плагины редактора (example_stats) ==="
+echo "=== Smoke-тест 3/4: плагины редактора (example_stats) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился (нет строки 'Загружен плагин' в логе)"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения"
+
+echo "=== Smoke-тест 4/4: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
+if [ ! -x "${TESTGAME_EXE}" ]; then
+    echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
+    exit 1
+fi
+TESTGAME_LOG="${SCRATCH_DIR}/testgame.log"
+TESTGAME_SHOT="${SCRATCH_DIR}/testgame.png"
+STATUS=0
+( cd "$(dirname "${TESTGAME_EXE}")" && \
+  run_headless env SAGE_TESTGAME_AUTOPILOT=1 SAGE_SCREENSHOT_AT_FRAME=400 SAGE_SCREENSHOT_PATH="${TESTGAME_SHOT}" \
+      "./$(basename "${TESTGAME_EXE}")" ) > "${TESTGAME_LOG}" 2>&1 || STATUS=$?
+if [ ${STATUS} -ne 0 ]; then
+    echo "ОШИБКА: TestGame завершился с кодом ${STATUS}"; cat "${TESTGAME_LOG}"; exit 1
+fi
+SHOT_SIZE=$(stat -c%s "${TESTGAME_SHOT}" 2>/dev/null || echo 0)
+if [ "${SHOT_SIZE}" -lt 1024 ]; then
+    echo "ОШИБКА: скриншот TestGame отсутствует или подозрительно мал (${SHOT_SIZE} байт)"
+    cat "${TESTGAME_LOG}"; exit 1
+fi
+# Реальный игровой цикл: сериализация, подбор предметов, переход между сценами
+# должны отработать, а лог — не содержать ни одной ERROR-строки движка.
+for MARKER in "serialization round-trip PASS" "TESTGAME: picked up" "TESTGAME: portal -> room2"; do
+    if ! grep -q "${MARKER}" "${TESTGAME_LOG}"; then
+        echo "ОШИБКА: в логе TestGame нет маркера '${MARKER}'"
+        cat "${TESTGAME_LOG}"; exit 1
+    fi
+done
+if grep -q "ERROR" "${TESTGAME_LOG}"; then
+    echo "ОШИБКА: в логе TestGame есть ERROR-строки:"
+    grep "ERROR" "${TESTGAME_LOG}"; exit 1
+fi
+echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
 echo "=== Все smoke-тесты прошли ==="
