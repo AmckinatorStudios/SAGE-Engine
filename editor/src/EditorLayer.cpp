@@ -154,8 +154,9 @@ void EditorLayer::OnDetach() {
 void EditorLayer::OnUpdate(float dt) {
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
-    if (m_playState == EditorPlayState::Playing && m_playScripts) {
-        m_playScripts->UpdateAll(dt);
+    if (m_playState == EditorPlayState::Playing) {
+        if (m_playScripts) m_playScripts->UpdateAll(dt);
+        if (m_playPhysics) m_playPhysics->Step(*m_scene, dt);
     }
     m_plugins.UpdateAll(dt);
 }
@@ -207,9 +208,16 @@ void EditorLayer::StartPlay() {
         }
     }
 
+    // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
+    // Jolt, если собран, иначе встроенный Simple (см. PhysicsWorld::DefaultBackend).
+    m_playPhysics = std::make_unique<PhysicsScene>(
+        sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
+
     m_playState = EditorPlayState::Playing;
     m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
-    LOG_INFO("Editor") << "Play started (" << attached << " script(s) attached)";
+    LOG_INFO("Editor") << "Play started (" << attached << " script(s), "
+                       << m_playPhysics->BodyCount() << " physics body(ies) on "
+                       << m_playPhysics->BackendName() << ")";
 }
 
 void EditorLayer::StopPlay() {
@@ -218,6 +226,7 @@ void EditorLayer::StopPlay() {
     // Порядок важен: ScriptEngine держит указатель на текущую сцену — гасим
     // его ДО того, как заменить сцену восстановленным снапшотом.
     m_playScripts.reset();
+    m_playPhysics.reset();
     RestoreSceneFromString(m_playSnapshot);
     m_playSnapshot.clear();
     m_playState = EditorPlayState::Editing;
@@ -686,6 +695,33 @@ void EditorLayer::DrawEntityGizmos() {
         const LightComponent& lc = lightView.get<LightComponent>(e);
         m_debugDraw->WireSphere(lightView.get<Transform>(e).Position, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
     }
+    // Коллайдеры: каркас формы в масштабе Transform — зелёный для выбранной
+    // сущности, приглушённый для остальных (чтобы видеть все физические тела).
+    auto colView = m_scene->Registry().view<ColliderComponent, Transform, IdComponent>();
+    for (auto e : colView) {
+        const Transform& tr = colView.get<Transform>(e);
+        const ColliderComponent& col = colView.get<ColliderComponent>(e);
+        bool selected = colView.get<IdComponent>(e).Id == m_selectedId;
+        glm::vec3 color = selected ? glm::vec3(0.3f, 1.0f, 0.4f) : glm::vec3(0.25f, 0.55f, 0.30f);
+        glm::vec3 scale = glm::abs(tr.Scale);
+        switch (col.Shape) {
+            case sage::physics::ShapeType::Box:
+                m_debugDraw->WireBox(tr.Position, col.HalfExtents * scale, color);
+                break;
+            case sage::physics::ShapeType::Sphere:
+                m_debugDraw->WireSphere(tr.Position,
+                    col.Radius * glm::max(scale.x, glm::max(scale.y, scale.z)), color);
+                break;
+            case sage::physics::ShapeType::Capsule:
+                // Каркас как коробка по габаритам капсулы (примитива капсулы в
+                // DebugDraw нет — коробка радиус×высота даёт понятный габарит).
+                m_debugDraw->WireBox(tr.Position,
+                    glm::vec3(col.Radius * scale.x,
+                              (col.HalfHeight + col.Radius) * scale.y,
+                              col.Radius * scale.z), color);
+                break;
+        }
+    }
 }
 
 void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
@@ -1045,6 +1081,17 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 lightObj.GetTransform().Position = {0.0f, 2.5f, 0.0f};
                 m_scene->Registry().emplace<LightComponent>(lightObj.Entity());
                 m_selectedId = lightObj.Id();
+            }
+            ImGui::Separator();
+            // Физический куб: меш + динамическое тело + бокс-коллайдер — падает
+            // под гравитацией сразу в Play (быстрый способ проверить физику).
+            if (ImGui::MenuItem("Create Physics Cube")) {
+                PushUndoSnapshot();
+                GameObject box = CreatePrimitiveEntity("Physics Cube", MeshRef::Type::Cube);
+                box.GetTransform().Position = {0.0f, 4.0f, 0.0f};
+                m_scene->Registry().emplace<RigidBodyComponent>(box.Entity());
+                m_scene->Registry().emplace<ColliderComponent>(box.Entity());
+                m_selectedId = box.Id();
             }
             ImGui::EndMenu();
         }
@@ -1447,8 +1494,40 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Физика: динамическое тело падает под гравитацией, Stop откатывает ---
+    if (ok) {
+        GameObject green = m_scene->FindByName("Green Cube");
+        if (green.Valid()) {
+            // Убираем крутящий скрипт, вешаем твёрдое тело — чистая физика.
+            m_scene->Registry().remove<ScriptComponent>(green.Entity());
+            m_scene->Registry().emplace_or_replace<RigidBodyComponent>(green.Entity());
+            float yBefore = green.GetTransform().Position.y;
+
+            StartPlay();
+            if (!m_playPhysics || m_playPhysics->BodyCount() < 1) {
+                LOG_ERROR("Editor") << "SELFTEST: physics failed - no bodies created";
+                ok = false;
+            }
+            for (int i = 0; i < 10; ++i) m_playPhysics->Step(*m_scene, 0.1f);
+            float yDuring = m_scene->FindByName("Green Cube").GetTransform().Position.y;
+            StopPlay();
+            float yAfter = m_scene->FindByName("Green Cube").GetTransform().Position.y;
+
+            if (ok && yDuring >= yBefore - 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: physics failed - body did not fall ("
+                                    << yBefore << " -> " << yDuring << ")";
+                ok = false;
+            }
+            if (ok && std::abs(yAfter - yBefore) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: physics stop failed - scene not restored (y "
+                                    << yAfter << ", expected " << yBefore << ")";
+                ok = false;
+            }
+        }
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play, " << before << " entities)";
+                               << "recent + dirty + play + physics, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

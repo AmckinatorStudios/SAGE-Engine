@@ -204,6 +204,69 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
+    if (ImGui::CollapsingHeader("Rigid Body", ImGuiTreeNodeFlags_DefaultOpen)) {
+        entt::registry& reg = host.CurrentScene().Registry();
+        if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
+            // Порядок строго совпадает с sage::physics::BodyType.
+            const char* types[] = {"Static", "Dynamic", "Kinematic"};
+            int kind = (int)rb->Type;
+            if (ImGui::Combo("Body Type", &kind, types, IM_ARRAYSIZE(types))) {
+                host.PushUndoSnapshot();
+                rb->Type = (sage::physics::BodyType)kind;
+            }
+            ImGui::DragFloat("Mass", &rb->Mass, 0.05f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Friction", &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Restitution", &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            ImGui::TextDisabled("Dynamic falls under gravity; Static/Kinematic don't");
+            if (ImGui::Button("Remove Rigid Body")) {
+                host.PushUndoSnapshot();
+                reg.remove<RigidBodyComponent>(obj.Entity());
+            }
+        } else {
+            if (ImGui::Button("Add Rigid Body")) {
+                host.PushUndoSnapshot();
+                reg.emplace<RigidBodyComponent>(obj.Entity());
+            }
+        }
+    }
+
+    // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
+    if (ImGui::CollapsingHeader("Collider", ImGuiTreeNodeFlags_DefaultOpen)) {
+        entt::registry& reg = host.CurrentScene().Registry();
+        if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
+            // Порядок строго совпадает с sage::physics::ShapeType.
+            const char* shapes[] = {"Box", "Sphere", "Capsule"};
+            int shape = (int)col->Shape;
+            if (ImGui::Combo("Shape", &shape, shapes, IM_ARRAYSIZE(shapes))) {
+                host.PushUndoSnapshot();
+                col->Shape = (sage::physics::ShapeType)shape;
+            }
+            if (col->Shape == sage::physics::ShapeType::Box) {
+                ImGui::DragFloat3("Half Extents", &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
+                host.TrackLastImGuiItem();
+            } else if (col->Shape == sage::physics::ShapeType::Sphere) {
+                ImGui::DragFloat("Radius", &col->Radius, 0.02f, 0.001f, 100.0f);
+                host.TrackLastImGuiItem();
+            } else { // Capsule
+                ImGui::DragFloat("Radius", &col->Radius, 0.02f, 0.001f, 100.0f);
+                host.TrackLastImGuiItem();
+                ImGui::DragFloat("Half Height", &col->HalfHeight, 0.02f, 0.001f, 100.0f);
+                host.TrackLastImGuiItem();
+            }
+            ImGui::TextDisabled("Sizes are scaled by the entity's Transform scale");
+            if (ImGui::Button("Remove Collider")) {
+                host.PushUndoSnapshot();
+                reg.remove<ColliderComponent>(obj.Entity());
+            }
+        } else {
+            if (ImGui::Button("Add Collider")) {
+                host.PushUndoSnapshot();
+                reg.emplace<ColliderComponent>(obj.Entity());
+            }
+        }
+    }
+
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
     if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) host.DeleteSelected();

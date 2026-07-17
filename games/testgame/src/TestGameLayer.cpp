@@ -40,6 +40,36 @@ GameObject TestGameLayer::SpawnBox(Scene& scene, const std::string& name, glm::v
     return obj;
 }
 
+// Демонстрация движковой физики в живой игре: даём полу статическое тело, затем
+// роняем на него башенку динамических ящиков. Их позиции ведёт PhysicsScene
+// (Jolt по умолчанию) — падение/укладка стресс-тестят физику 400 кадров в CI.
+void TestGameLayer::SpawnPhysicsProps(Scene& scene, glm::vec3 origin) {
+    // Пол уже есть как визуальный бокс — добавляем ему статическое физ-тело,
+    // чтобы ящики было на что приземляться (верх пола на y=0).
+    GameObject floor = scene.FindByName("Floor");
+    if (floor.Valid()) {
+        scene.Registry().emplace_or_replace<RigidBodyComponent>(
+            floor.Entity(), RigidBodyComponent{sage::physics::BodyType::Static});
+        scene.Registry().emplace_or_replace<ColliderComponent>(floor.Entity());
+    }
+
+    // Башенка из 5 ящиков со случайным горизонтальным сдвигом — красиво
+    // рассыпается при падении.
+    const glm::vec3 kColors[] = {
+        {0.90f, 0.45f, 0.30f}, {0.35f, 0.70f, 0.85f}, {0.85f, 0.80f, 0.35f},
+        {0.55f, 0.80f, 0.45f}, {0.80f, 0.45f, 0.75f},
+    };
+    for (int i = 0; i < 5; ++i) {
+        float jitter = 0.12f * (float)((i % 2) ? 1 : -1);
+        glm::vec3 pos = origin + glm::vec3(jitter, 1.0f + 1.05f * (float)i, jitter * 0.5f);
+        GameObject box = SpawnBox(scene, "PhysBox " + std::to_string(i + 1), pos,
+                                  {0.8f, 0.8f, 0.8f}, kColors[i], false);
+        scene.Registry().emplace<RigidBodyComponent>(
+            box.Entity(), RigidBodyComponent{sage::physics::BodyType::Dynamic, 1.0f, 0.6f, 0.15f});
+        scene.Registry().emplace<ColliderComponent>(box.Entity());
+    }
+}
+
 namespace {
 
 // Игрок: сущность без меша (MeshPtr == nullptr не рендерится) — носитель
@@ -136,6 +166,8 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     SpawnPortal(scene, "Portal to room2", {10, 1.3f, -10}, "room2", {0.0f, 0.85f, 5.5f});
     SpawnPlayer(scene, {0.0f, 0.85f, 9.0f});
     m_roomSpawns["room1"] = {0.0f, 0.85f, 9.0f};
+
+    SpawnPhysicsProps(scene, {-6.5f, 0.0f, 6.0f}); // башенка падающих ящиков
 }
 
 void TestGameLayer::BuildRoomTwo(Scene& scene) {
@@ -310,6 +342,12 @@ void TestGameLayer::OnAttach() {
     m_activeSpawn = m_roomSpawns[startRoom];
     m_playerPos = m_activeSpawn;
 
+    // Физика активной комнаты — динамические ящики начинают падать сразу.
+    m_physics = std::make_unique<PhysicsScene>(
+        sage::physics::PhysicsWorld::DefaultBackend(), *m_scenes.Active());
+    LOG_INFO("TestGame") << "TESTGAME: physics backend " << m_physics->BackendName()
+                         << ", " << m_physics->BodyCount() << " bodies in " << startRoom;
+
     // --- ввод: именованные действия через InputSystem (первый реальный
     // потребитель; подписка на мышь — через Window, см. InputSystem::Attach) ---
     m_input.Attach(window);
@@ -340,6 +378,7 @@ void TestGameLayer::OnAttach() {
 }
 
 void TestGameLayer::OnDetach() {
+    m_physics.reset(); // держит тела, ссылающиеся на сцену — снять до сцен
     m_sceneScripts.clear(); // скрипты держат ссылки на сцены/аудио — снять до них
     m_audio.reset();
     ResourceManager::Instance().Clear();
@@ -484,6 +523,10 @@ void TestGameLayer::SwitchRoom(const std::string& target, glm::vec3 spawnPos) {
         newPlayer.GetTransform().Position = spawnPos;
     }
 
+    // Физику пересобираем под новую активную сцену (у каждой комнаты — свои тела).
+    m_physics = std::make_unique<PhysicsScene>(
+        sage::physics::PhysicsWorld::DefaultBackend(), *m_scenes.Active());
+
     m_audio->PlaySound2D("assets/audio/portal.wav", 0.9f);
     LOG_INFO("TestGame") << "TESTGAME: portal -> " << target;
 }
@@ -569,7 +612,10 @@ void TestGameLayer::OnUpdate(float dt) {
 
     UpdatePickups();
     UpdatePatrols(dt);
-    UpdatePortals(dt);
+    UpdatePortals(dt); // может сменить комнату (пересобирает m_physics)
+
+    // Физика активной сцены: динамические ящики падают/складываются.
+    if (m_physics) m_physics->Step(*m_scenes.Active(), dt);
 
     // Скрипты ТОЛЬКО активной сцены — неактивная комната «заморожена».
     auto it = m_sceneScripts.find(m_activeName);

@@ -199,6 +199,20 @@ static json BuildSceneJson(const Scene& scene) {
             j["light"]["innerCone"] = light->InnerConeDeg;
             j["light"]["outerCone"] = light->OuterConeDeg;
         }
+        if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) {
+            const char* types[] = {"static", "dynamic", "kinematic"};
+            j["rigidBody"]["type"] = types[(int)rb->Type];
+            j["rigidBody"]["mass"] = rb->Mass;
+            j["rigidBody"]["friction"] = rb->Friction;
+            j["rigidBody"]["restitution"] = rb->Restitution;
+        }
+        if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) {
+            const char* shapes[] = {"box", "sphere", "capsule"};
+            j["collider"]["shape"] = shapes[(int)col->Shape];
+            j["collider"]["halfExtents"] = Vec3ToJson(col->HalfExtents);
+            j["collider"]["radius"] = col->Radius;
+            j["collider"]["halfHeight"] = col->HalfHeight;
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -260,6 +274,31 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
             light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
             obj.Registry()->emplace<LightComponent>(obj.Entity(), light);
+        }
+
+        if (j.contains("rigidBody")) {
+            const auto& rj = j["rigidBody"];
+            RigidBodyComponent rb;
+            std::string type = rj.value("type", "dynamic");
+            rb.Type = type == "static" ? sage::physics::BodyType::Static
+                    : type == "kinematic" ? sage::physics::BodyType::Kinematic
+                    : sage::physics::BodyType::Dynamic;
+            rb.Mass = rj.value("mass", rb.Mass);
+            rb.Friction = rj.value("friction", rb.Friction);
+            rb.Restitution = rj.value("restitution", rb.Restitution);
+            obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), rb);
+        }
+        if (j.contains("collider")) {
+            const auto& cj = j["collider"];
+            ColliderComponent col;
+            std::string shape = cj.value("shape", "box");
+            col.Shape = shape == "sphere" ? sage::physics::ShapeType::Sphere
+                      : shape == "capsule" ? sage::physics::ShapeType::Capsule
+                      : sage::physics::ShapeType::Box;
+            if (cj.contains("halfExtents")) col.HalfExtents = Vec3FromJson(cj["halfExtents"]);
+            col.Radius = cj.value("radius", col.Radius);
+            col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
+            obj.Registry()->emplace<ColliderComponent>(obj.Entity(), col);
         }
 
         // Пересоздаём GPU-ресурс на основе описания

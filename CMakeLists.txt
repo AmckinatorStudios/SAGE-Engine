@@ -177,6 +177,45 @@ add_library(imguizmo STATIC external/imguizmo/ImGuizmo.cpp)
 target_include_directories(imguizmo PUBLIC external/imguizmo)
 target_link_libraries(imguizmo PUBLIC imgui)
 
+# ---------- Jolt Physics (основной физический бэкенд) ----------
+# Физика движка — подключаемая (см. sage/physics/PhysicsWorld.h): встроенный
+# Simple-бэкенд работает всегда без зависимостей, а Jolt — основной, «взрослый»
+# бэкенд. Включён по умолчанию; выключается -DSAGE_PHYSICS_JOLT=OFF (тогда движок
+# собирается только со Simple/Null — полезно для быстрой сборки/окружений без сети).
+option(SAGE_PHYSICS_JOLT "Собрать физический бэкенд Jolt (основной)" ON)
+if (SAGE_PHYSICS_JOLT)
+    FetchContent_Declare(
+      jolt
+      GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+      GIT_TAG v5.3.0
+      SOURCE_SUBDIR Build  # CMake-проект Jolt лежит в подкаталоге Build/
+    )
+    # Собираем ТОЛЬКО библиотеку — без сэмплов/тестов/вьюера/hello-world.
+    set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+    set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+    set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+    # Не позволяем Jolt перезаписывать общие флаги компилятора всего проекта
+    # (его Build/CMakeLists.txt по умолчанию правит CMAKE_CXX_FLAGS глобально).
+    set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+    set(CROSS_PLATFORM_DETERMINISTIC OFF CACHE BOOL "" FORCE)
+    set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+    # Консервативный SIMD: без AVX/AVX2/AVX512 — код запустится и на CI-раннерах,
+    # и в headless-окружениях без этих инструкций (иначе возможен SIGILL).
+    set(USE_AVX512 OFF CACHE BOOL "" FORCE)
+    set(USE_AVX2 OFF CACHE BOOL "" FORCE)
+    set(USE_AVX OFF CACHE BOOL "" FORCE)
+    set(USE_F16C OFF CACHE BOOL "" FORCE)
+    set(USE_FMADD OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(jolt)
+    if (TARGET Jolt)
+        message(STATUS "SAGE: физический бэкенд Jolt включён (v5.3.0)")
+    else()
+        message(WARNING "SAGE: Jolt запрошен, но цель не создана — собираю без него")
+    endif()
+endif()
+
 # ============================================================================
 #  Модули проекта
 # ============================================================================

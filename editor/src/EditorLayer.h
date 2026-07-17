@@ -16,6 +16,7 @@
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/physics/PhysicsScene.h"
 
 #include "EditorHost.h"
 #include "Project.h"
@@ -180,6 +181,7 @@ private:
     EditorPlayState m_playState = EditorPlayState::Editing;
     std::string m_playSnapshot;                    // сцена на момент Play — восстанавливается по Stop
     std::unique_ptr<ScriptEngine> m_playScripts;   // живёт только в Play-режиме
+    std::unique_ptr<PhysicsScene> m_playPhysics;   // симуляция физики только в Play-режиме
 
     // --- Undo/Redo ---
     std::vector<std::string> m_undoStack; // JSON-снапшоты «состояние до мутации»

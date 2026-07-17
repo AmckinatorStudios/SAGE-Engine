@@ -30,6 +30,9 @@ set(SAGE_ENGINE_SOURCES
     src/rhi/opengl/GLDebug.cpp
     src/rhi/opengl/OpenGLDevice.cpp
     src/rhi/opengl/OpenGLResources.cpp
+    src/physics/PhysicsWorld.cpp
+    src/physics/PhysicsScene.cpp
+    src/physics/simple/SimpleWorld.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp
@@ -68,6 +71,16 @@ target_link_libraries(sage_engine PRIVATE
     nlohmann_json::nlohmann_json
     miniaudio
 )
+
+# Физический бэкенд Jolt (основной) — подключается, только если верхний уровень
+# создал цель Jolt (option SAGE_PHYSICS_JOLT, вкл. по умолчанию). SAGE_HAS_JOLT
+# включает jolt-ветки в PhysicsWorld.cpp/JoltWorld.cpp; всё под Jolt изолировано
+# в src/physics/jolt/ (как opengl-бэкенд изолирован в rhi/opengl/).
+if (TARGET Jolt)
+    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp)
+    target_compile_definitions(sage_engine PRIVATE SAGE_HAS_JOLT)
+    target_link_libraries(sage_engine PRIVATE Jolt)
+endif()
 
 if (WIN32)
     target_link_libraries(sage_engine PUBLIC opengl32)

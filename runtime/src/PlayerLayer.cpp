@@ -108,6 +108,11 @@ void PlayerLayer::OnAttach() {
         }
     }
 
+    // Физика: строим мир по сущностям с RigidBodyComponent (бэкенд по умолчанию —
+    // Jolt, если собран, иначе встроенный Simple). Игра всегда «в Play».
+    m_physics = std::make_unique<PhysicsScene>(
+        sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
+
     // Fallback-камера, если сцена без CameraComponent.
     m_fallbackCamera.Position = {6.5f, 5.0f, 6.5f};
     m_fallbackCamera.Yaw = -135.0f;
@@ -116,10 +121,13 @@ void PlayerLayer::OnAttach() {
 
     LOG_INFO("Player") << "PLAYER: started '" << m_projectName << "', scene "
                        << scenePath.filename().string() << " (" << m_scene->Count()
-                       << " entities, " << attached << " scripts)";
+                       << " entities, " << attached << " scripts, "
+                       << m_physics->BodyCount() << " physics bodies on "
+                       << m_physics->BackendName() << ")";
 }
 
 void PlayerLayer::OnDetach() {
+    m_physics.reset();
     m_scripts.reset();
     ResourceManager::Instance().Clear();
 }
@@ -127,6 +135,7 @@ void PlayerLayer::OnDetach() {
 void PlayerLayer::OnUpdate(float dt) {
     if (!m_scene) return;
     m_scripts->UpdateAll(dt);
+    if (m_physics) m_physics->Step(*m_scene, dt);
 
     if (glfwGetKey(sage::Application::Get().GetWindow().Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         sage::Application::Get().Close();

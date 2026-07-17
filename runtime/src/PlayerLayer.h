@@ -10,6 +10,7 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/scene/Scene.h"
+#include "sage/physics/PhysicsScene.h"
 
 class ScriptEngine;
 
@@ -51,6 +52,7 @@ private:
 
     std::unique_ptr<Scene> m_scene;
     std::unique_ptr<ScriptEngine> m_scripts;
+    std::unique_ptr<PhysicsScene> m_physics; // симуляция физики (игра всегда «в Play»)
 
     std::optional<Shader> m_shader;       // lit: ambient+sun+point lights+тени
     std::optional<Shader> m_shadowShader;

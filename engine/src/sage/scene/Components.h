@@ -5,6 +5,7 @@
 #include "sage/scene/Transform.h"
 #include "sage/render/Mesh.h"
 #include "sage/render/Material.h"
+#include "sage/physics/PhysicsTypes.h"
 
 // ---------------------------------------------------------------------------
 // Компоненты ECS — простые data-структуры, навешиваемые на сущности (entity)
@@ -108,4 +109,28 @@ struct LightComponent {
     float Range = 12.0f;         // дистанция затухания, единицы мира
     float InnerConeDeg = 20.0f;  // Spot: полная яркость внутри этого полуугла
     float OuterConeDeg = 30.0f;  // Spot: край конуса (яркость -> 0)
+};
+
+// Физическое тело сущности (см. sage/physics). Тип задаёт роль:
+// Static (пол/стены), Dynamic (падает/сталкивается), Kinematic (двигается
+// скриптом, толкает динамику). Форму столкновения задаёт ColliderComponent
+// (если его нет — берётся единичный бокс по масштабу сущности). Симуляция идёт
+// в Play-режиме редактора и в игре (PhysicsScene): позиция/поворот Dynamic-тел
+// пишутся обратно в Transform. Данные сериализуются; RuntimeBody — рантайм.
+struct RigidBodyComponent {
+    sage::physics::BodyType Type = sage::physics::BodyType::Dynamic;
+    float Mass = 1.0f;
+    float Friction = 0.5f;
+    float Restitution = 0.1f;
+    sage::physics::BodyHandle RuntimeBody = sage::physics::kInvalidBody; // не сериализуется
+};
+
+// Форма коллайдера. Размеры — ЛОКАЛЬНЫЕ (для единичной сущности); при создании
+// тела умножаются на Transform.Scale. Без RigidBodyComponent коллайдер не
+// участвует в симуляции (но редактор рисует его гизмо).
+struct ColliderComponent {
+    sage::physics::ShapeType Shape = sage::physics::ShapeType::Box;
+    glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
+    float Radius = 0.5f;                     // Sphere / Capsule
+    float HalfHeight = 0.5f;                 // Capsule
 };
