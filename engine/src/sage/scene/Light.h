@@ -65,6 +65,24 @@ struct SpotLight {
 // AmbientColor/AmbientStrength оставлены для обратной совместимости со
 // старыми сохранёнными сценами (.sage) и просто задают Sky/Ground разом,
 // если кто-то предпочитает старый плоский ambient — см. SetFlatAmbient().
+// Линейный туман: фрагменты дальше Start плавно уходят в Color к End. Часть
+// атмосферы сцены (сериализуется вместе с окружением).
+struct FogSettings {
+    bool Enabled = false;
+    glm::vec3 Color{0.55f, 0.62f, 0.72f};
+    float Start = 12.0f;
+    float End = 60.0f;
+};
+
+// Процедурный градиентный скайбокс: фон отрисовывается как переход от TopColor
+// (зенит) к HorizonColor (горизонт) по вертикали луча взгляда — без ассетов.
+// Отключён — фон очищается сплошным цветом как раньше.
+struct SkyboxSettings {
+    bool Enabled = false;
+    glm::vec3 TopColor{0.30f, 0.45f, 0.75f};
+    glm::vec3 HorizonColor{0.70f, 0.80f, 0.92f};
+};
+
 struct LightingEnvironment {
     static constexpr int MaxPointLights = 8;
     static constexpr int MaxSpotLights = 8;
@@ -77,6 +95,11 @@ struct LightingEnvironment {
 
     std::vector<PointLight> PointLights;
     std::vector<SpotLight> SpotLights;
+
+    // Атмосфера сцены — туман и скайбокс. Живут здесь же, потому что это часть
+    // окружения (сериализуются одним блоком с освещением, см. SceneSerializer).
+    FogSettings Fog;
+    SkyboxSettings Skybox;
 
     // Обратная совместимость / удобный шорткат: выставляет Sky и Ground
     // в один и тот же цвет — эквивалент старого плоского ambient.

@@ -56,6 +56,18 @@ uniform bool uUseTexture; // false — используем uObjectColor как 
 uniform sampler2D uShadowMap;
 uniform bool uShadowsEnabled;
 
+// Режим затенения: 0 = полное освещение, 1 = unlit (плоский базовый цвет),
+// 2 = визуализация нормалей. Задаётся редактором (View > Render Mode).
+uniform int uShadingMode;
+
+// Линейный туман: фрагменты дальше uFogStart плавно уходят в uFogColor к
+// uFogEnd. Атмосфера сцены (серийализуется в environment). Применяется только
+// в режиме полного освещения.
+uniform bool uFogEnabled;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+
 // Доля затенения фрагмента солнцем: 0 — освещён, 1 — в тени (PCF 3x3 +
 // slope-scaled bias). Тени только от солнца — точечные/прожекторы не затеняются.
 float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
@@ -125,8 +137,12 @@ vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
 
 void main() {
     vec3 baseColor = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
-
     vec3 norm = normalize(Normal);
+
+    // Отладочные режимы затенения (без освещения/тумана).
+    if (uShadingMode == 2) { FragColor = vec4(norm * 0.5 + 0.5, 1.0); return; } // нормали
+    if (uShadingMode == 1) { FragColor = vec4(baseColor, 1.0); return; }         // unlit
+
     vec3 viewDir = normalize(uViewPos - FragPos);
 
     // ambient (полусферический — зависит от нормали, не плоский)
@@ -156,5 +172,13 @@ void main() {
     }
 
     vec3 result = (ambient + sunLight + pointLight + spotLight) * baseColor;
+
+    // Линейный туман: чем дальше фрагмент, тем сильнее уходит в цвет тумана.
+    if (uFogEnabled) {
+        float dist = length(uViewPos - FragPos);
+        float f = clamp((uFogEnd - dist) / max(uFogEnd - uFogStart, 0.0001), 0.0, 1.0);
+        result = mix(uFogColor, result, f);
+    }
+
     FragColor = vec4(result, 1.0);
 }

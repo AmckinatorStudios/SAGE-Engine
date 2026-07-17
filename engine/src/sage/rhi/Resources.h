@@ -16,6 +16,7 @@ namespace sage::rhi {
 // --- Общие перечисления состояния конвейера ---
 enum class DepthFunc { Less, LessEqual };
 enum class CullMode { Back, Front, Off };
+enum class PolygonMode { Fill, Line }; // Line — каркасный (wireframe) режим отрисовки
 
 // --- Описание вершинного формата ---
 enum class AttribType {

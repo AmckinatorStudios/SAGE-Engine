@@ -11,6 +11,16 @@ class Project;
 // чтобы панели зависели от контракта EditorHost, а не от EditorLayer.
 enum class EditorPlayState { Editing, Playing, Paused };
 
+// Режим отображения сцены во вьюпорте (View > Render Mode / тулбар).
+//   Shaded    — полное освещение (по умолчанию);
+//   Wireframe — каркас (полигоны линиями), плоский цвет для читаемости;
+//   Unlit     — плоский базовый цвет без освещения;
+//   Normals   — визуализация нормалей цветом (отладка).
+enum class EditorRenderMode { Shaded, Wireframe, Unlit, Normals };
+
+// Пространство манипулятора гизмо: Local — оси объекта, World — оси мира.
+enum class EditorGizmoSpace { Local, World };
+
 // ---------------------------------------------------------------------------
 // EditorHost — контракт операций редактора, доступных панелям.
 //
@@ -63,6 +73,13 @@ public:
     virtual void PausePlay() = 0;
     virtual void ResumePlay() = 0;
     virtual void StopPlay() = 0;
+
+    // --- общее состояние инструментов (делят тулбар и вьюпорт) ---
+    virtual int& GizmoOp() = 0;              // значение ImGuizmo::OPERATION
+    virtual bool& GizmoSnap() = 0;
+    virtual EditorGizmoSpace& GizmoSpace() = 0;
+    virtual bool& ShowGrid() = 0;
+    virtual EditorRenderMode& RenderMode() = 0;
 
     // --- вьюпорт/камера ---
     virtual Camera& EditorCamera() = 0;

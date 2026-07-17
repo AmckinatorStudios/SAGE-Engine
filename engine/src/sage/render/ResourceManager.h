@@ -21,6 +21,35 @@ public:
         if (!m_cube) m_cube = std::make_shared<Mesh>(Mesh::CreateCube());
         return m_cube;
     }
+    std::shared_ptr<Mesh> GetSphere() {
+        if (!m_sphere) m_sphere = std::make_shared<Mesh>(Mesh::CreateSphere());
+        return m_sphere;
+    }
+    std::shared_ptr<Mesh> GetPlane() {
+        if (!m_plane) m_plane = std::make_shared<Mesh>(Mesh::CreatePlane());
+        return m_plane;
+    }
+    std::shared_ptr<Mesh> GetCylinder() {
+        if (!m_cylinder) m_cylinder = std::make_shared<Mesh>(Mesh::CreateCylinder());
+        return m_cylinder;
+    }
+    std::shared_ptr<Mesh> GetCone() {
+        if (!m_cone) m_cone = std::make_shared<Mesh>(Mesh::CreateCone());
+        return m_cone;
+    }
+
+    // Готовый GPU-меш по описанию примитива — единая точка для сцен/сериализатора
+    // (nullptr для None/Model: None не рисуется, Model грузится через GetModel).
+    std::shared_ptr<Mesh> GetPrimitive(MeshRef::Type type) {
+        switch (type) {
+            case MeshRef::Type::Cube:     return GetCube();
+            case MeshRef::Type::Sphere:   return GetSphere();
+            case MeshRef::Type::Plane:    return GetPlane();
+            case MeshRef::Type::Cylinder: return GetCylinder();
+            case MeshRef::Type::Cone:     return GetCone();
+            default:                      return nullptr;
+        }
+    }
 
     std::shared_ptr<Mesh> GetModel(const std::string& path) {
         auto it = m_models.find(path);
@@ -62,13 +91,17 @@ public:
 
     void Clear() {
         m_cube.reset();
+        m_sphere.reset();
+        m_plane.reset();
+        m_cylinder.reset();
+        m_cone.reset();
         m_models.clear();
         m_materials.clear();
     }
 
 private:
     ResourceManager() = default;
-    std::shared_ptr<Mesh> m_cube;
+    std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
 };

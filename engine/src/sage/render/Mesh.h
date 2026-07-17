@@ -25,7 +25,14 @@ public:
 
     void Draw() const;
 
+    // Процедурные примитивы движка (единичный масштаб, с нормалями и UV).
+    // Все вписаны в габарит ~1 вокруг начала координат, чтобы Transform.Scale
+    // работал предсказуемо (куб от -0.5 до 0.5, сфера радиуса 0.5 и т.д.).
     static Mesh CreateCube();
+    static Mesh CreateSphere(int rings = 24, int sectors = 32); // UV-сфера r=0.5
+    static Mesh CreatePlane(int subdivisions = 1);              // 1x1 в плоскости XZ, нормаль +Y
+    static Mesh CreateCylinder(int sectors = 32);               // r=0.5, высота 1 (Y), с крышками
+    static Mesh CreateCone(int sectors = 32);                   // r=0.5 у основания, высота 1 (Y)
 
 private:
     std::unique_ptr<sage::rhi::Geometry> m_geometry;

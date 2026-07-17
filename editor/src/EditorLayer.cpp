@@ -45,6 +45,7 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
 }
 
 constexpr float kStatusBarHeight = 26.0f;
+constexpr float kToolbarHeight = 34.0f;
 
 } // namespace
 
@@ -79,7 +80,10 @@ void EditorLayer::OnAttach() {
     m_sceneFbo.emplace(m_viewportW, m_viewportH);
     m_gameFbo.emplace(m_gameW, m_gameH);
     m_debugDraw.emplace();
+    m_sky.emplace();
     m_cube = ResourceManager::Instance().GetCube();
+
+    m_gizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
 
     NewScene(/*withDemoContent=*/true);
 
@@ -97,7 +101,17 @@ void EditorLayer::OnAttach() {
     m_recent.Load();
 
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
-    if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
+    if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) {
+        m_autoScreenshotFrame = std::atoi(f);
+        m_launcher.Dismiss(); // headless-скриншот — hub проектов не нужен, показываем сцену
+    }
+    // Начальный режим рендера (для headless-скриншотов/CI): shaded|wireframe|unlit|normals.
+    if (const char* m = std::getenv("SAGE_EDITOR_RENDER_MODE")) {
+        std::string mode = m;
+        if (mode == "wireframe") m_renderMode = EditorRenderMode::Wireframe;
+        else if (mode == "unlit") m_renderMode = EditorRenderMode::Unlit;
+        else if (mode == "normals") m_renderMode = EditorRenderMode::Normals;
+    }
 
     LOG_INFO("Editor") << "SAGE Editor started (entities: " << m_scene->Count() << ")";
 
@@ -291,10 +305,14 @@ void EditorLayer::Redo() {
 // ============================================================================
 
 GameObject EditorLayer::CreateCubeEntity(const std::string& name) {
+    return CreatePrimitiveEntity(name, MeshRef::Type::Cube);
+}
+
+GameObject EditorLayer::CreatePrimitiveEntity(const std::string& name, MeshRef::Type type) {
     GameObject obj = m_scene->CreateObject(name);
     MeshRendererComponent& mr = obj.Renderer();
-    mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
-    mr.MeshPtr = m_cube;
+    mr.Ref = MeshRef{type, ""};
+    mr.MeshPtr = ResourceManager::Instance().GetPrimitive(type);
     return obj;
 }
 
@@ -337,6 +355,9 @@ void EditorLayer::NewScene(bool withDemoContent) {
     m_sceneDirty = false;
 
     if (withDemoContent) {
+        // Скайбокс включён по умолчанию — сцена сразу с атмосферным фоном.
+        m_scene->Lighting.Skybox.Enabled = true;
+
         struct Def { const char* name; glm::vec3 pos; glm::vec3 color; glm::vec3 scale; };
         Def defs[] = {
             {"Ground",     {0.0f, -0.75f, 0.0f}, {0.30f, 0.32f, 0.36f}, {6.0f, 0.3f, 6.0f}},
@@ -551,6 +572,24 @@ void EditorLayer::PickAtViewport(float u, float v) {
             bestId = view.get<IdComponent>(e).Id;
         }
     }
+
+    // Невидимые сущности (камера/свет) кликабельны по маленькому боксу вокруг
+    // их позиции — иначе их гизмо не выбрать (меша нет).
+    auto pickMarker = [&](entt::entity e, int id, const glm::vec3& pos) {
+        glm::mat4 boxInv = glm::inverse(glm::translate(glm::mat4(1.0f), pos) *
+                                        glm::scale(glm::mat4(1.0f), glm::vec3(0.6f)));
+        glm::vec3 lro = glm::vec3(boxInv * glm::vec4(ro, 1.0f));
+        glm::vec3 lrd = glm::vec3(boxInv * glm::vec4(rd, 0.0f));
+        float t = RayUnitCube(lro, lrd);
+        if (t >= 0.0f && t < bestDist) { bestDist = t; bestId = id; }
+    };
+    auto camMarkers = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
+    for (auto e : camMarkers)
+        pickMarker(e, camMarkers.get<IdComponent>(e).Id, camMarkers.get<Transform>(e).Position);
+    auto lightMarkers = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
+    for (auto e : lightMarkers)
+        pickMarker(e, lightMarkers.get<IdComponent>(e).Id, lightMarkers.get<Transform>(e).Position);
+
     m_selectedId = bestId; // клик мимо всех объектов — снять выбор
 }
 
@@ -574,9 +613,14 @@ void EditorLayer::RenderShadowPass(const LightingEnvironment& env) {
 }
 
 // Освещённый проход сцены в текущий привязанный FBO (общая часть Viewport/Game).
+// shadingMode/wireframe задают режим рендера (Viewport — из тулбара, Game —
+// всегда Shaded, чтобы игровое окно выглядело как финальная картинка).
 void EditorLayer::DrawLitScene(const LightingEnvironment& env, const glm::mat4& view,
-                               const glm::mat4& proj, glm::vec3 viewPos) {
+                               const glm::mat4& proj, glm::vec3 viewPos,
+                               int shadingMode, bool wireframe) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+
+    if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
 
     m_shader->Use();
     m_shader->SetMat4("uView", view);
@@ -586,11 +630,62 @@ void EditorLayer::DrawLitScene(const LightingEnvironment& env, const glm::mat4& 
     device.BindTexture2D(1, m_shadows->DepthTexture());
     UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/true);
     m_shader->SetInt("uUseTexture", 0);
+    m_shader->SetInt("uShadingMode", shadingMode); // 0 lit, 1 unlit, 2 normals
     sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
         m_shader->SetMat4("uModel", tr.GetMatrix());
         m_shader->SetVec3("uObjectColor", EffectiveColor(mr)); // материал (если назначен) важнее Color
         mr.MeshPtr->Draw();
     });
+
+    if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill); // вернуть заливку
+}
+
+// Аутлайн выбранного меша: масштабированная «оболочка» плоским цветом с
+// отсечением ЛИЦЕВЫХ граней (видны только задние — они образуют кайму вокруг
+// объекта). Асимметрично к mesh: работает для выпуклых примитивов/моделей.
+void EditorLayer::DrawSelectionOutline(GameObject obj, const glm::mat4& view, const glm::mat4& proj) {
+    const MeshRendererComponent* mr = m_scene->Registry().try_get<MeshRendererComponent>(obj.Entity());
+    if (!mr || !mr->MeshPtr) return;
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+
+    glm::mat4 model = glm::scale(obj.GetTransform().GetMatrix(), glm::vec3(1.06f));
+    m_shader->Use();
+    m_shader->SetMat4("uView", view);
+    m_shader->SetMat4("uProjection", proj);
+    m_shader->SetMat4("uModel", model);
+    m_shader->SetInt("uShadingMode", 1); // unlit — плоский цвет каймы
+    m_shader->SetInt("uUseTexture", 0);
+    m_shader->SetInt("uFogEnabled", 0);
+    m_shader->SetVec3("uObjectColor", {1.0f, 0.62f, 0.12f});
+
+    device.SetCullMode(sage::rhi::CullMode::Front); // рисуем только задние грани оболочки
+    mr->MeshPtr->Draw();
+    device.SetCullMode(sage::rhi::CullMode::Back);
+}
+
+// Гизмо невидимых сущностей (камера/свет) — всегда видны в редакторе, чтобы их
+// можно было найти и выбрать. Рисуются через DebugDraw (накопление, Flush —
+// у вызывающего). Выбранная сущность подсвечивается ярче.
+void EditorLayer::DrawEntityGizmos() {
+    // Камеры: каркас усечённой пирамиды (frustum) в масштабе near..~2.5.
+    auto camView = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
+    for (auto e : camView) {
+        const Transform& tr = camView.get<Transform>(e);
+        bool selected = camView.get<IdComponent>(e).Id == m_selectedId;
+        glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.5f, 0.7f, 0.9f);
+        glm::vec3 fwd = sage::ecs::ForwardFromEuler(tr.Rotation);
+        const CameraComponent& cam = camView.get<CameraComponent>(e);
+        m_debugDraw->WireFrustum(tr.Position, fwd, cam.Fov,
+                                 (float)m_gameW / (float)std::max(m_gameH, 1), 0.3f, 2.2f, color);
+    }
+    // Свет-сущности: маленький маркер (сфера) в позиции — всегда, даже если не
+    // выбраны (у выбранного зона действия рисуется отдельно, крупнее).
+    auto lightView = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
+    for (auto e : lightView) {
+        if (lightView.get<IdComponent>(e).Id == m_selectedId) continue; // выбранный — крупная зона ниже
+        const LightComponent& lc = lightView.get<LightComponent>(e);
+        m_debugDraw->WireSphere(lightView.get<Transform>(e).Position, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
+    }
 }
 
 void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
@@ -604,23 +699,38 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
     m_view = m_camera.GetViewMatrix();
     m_proj = m_camera.GetProjectionMatrix((float)m_viewportW / (float)std::max(m_viewportH, 1));
 
-    DrawLitScene(env, m_view, m_proj, m_camera.Position);
+    // Скайбокс (если включён) — фон до сцены.
+    if (env.Skybox.Enabled) {
+        m_sky->Draw(m_view, m_proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    }
+
+    // Режим рендера из тулбара: Shaded(0)/Unlit(1)/Normals(2), Wireframe —
+    // unlit + полигоны линиями.
+    int shadingMode = 0;
+    bool wireframe = false;
+    switch (m_renderMode) {
+        case EditorRenderMode::Shaded:    shadingMode = 0; break;
+        case EditorRenderMode::Wireframe: shadingMode = 1; wireframe = true; break;
+        case EditorRenderMode::Unlit:     shadingMode = 1; break;
+        case EditorRenderMode::Normals:   shadingMode = 2; break;
+    }
+    DrawLitScene(env, m_view, m_proj, m_camera.Position, shadingMode, wireframe);
+
+    // Аутлайн выбранной сущности (масштабированная оболочка) — поверх сцены,
+    // до гизмо-линий.
+    GameObject selectedObj = m_scene->Get(m_selectedId);
+    if (selectedObj.Valid()) DrawSelectionOutline(selectedObj, m_view, m_proj);
 
     // Гизмо-графика движка (DebugDraw) — в ТОТ ЖЕ буфер после сцены, с тестом
     // глубины: объекты заслоняют сетку (не 2D-оверлей поверх картинки).
-    if (m_viewport.ShowGrid()) {
+    if (m_showGrid) {
         m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
     }
-    GameObject selectedObj = m_scene->Get(m_selectedId);
+    DrawEntityGizmos(); // всегда видимые гизмо камер/светов
     if (selectedObj.Valid()) {
-        // Подсветка выбора: каркас вокруг сущности + её оси.
+        // Оси выбранной сущности + зона действия света.
         glm::mat4 model = selectedObj.GetTransform().GetMatrix();
-        glm::mat4 slightlyLarger = glm::scale(model, glm::vec3(1.02f));
-        m_debugDraw->WireBox(slightlyLarger, {1.0f, 0.62f, 0.12f});
         m_debugDraw->Axes(model, 1.4f);
-
-        // У света — визуализация зоны действия: точечный — сфера радиуса
-        // затухания, прожектор — конус вдоль «вперёд» сущности.
         if (const LightComponent* light =
                 m_scene->Registry().try_get<LightComponent>(selectedObj.Entity())) {
             const Transform& lt = selectedObj.GetTransform();
@@ -677,8 +787,12 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
 
-    DrawLitScene(env, view, proj, tr.Position);
-    // Никакого DebugDraw: игровое окно показывает сцену как её увидит игрок.
+    if (env.Skybox.Enabled) {
+        m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    }
+    // Игровое окно — всегда полное освещение (Shaded), без гизмо/аутлайна:
+    // показывает сцену как её увидит игрок.
+    DrawLitScene(env, view, proj, tr.Position, /*shadingMode=*/0, /*wireframe=*/false);
 
     device.BindDefaultFramebuffer();
 }
@@ -824,6 +938,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
     ImGui::Begin("##SageEditorHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
+    // Тулбар — горизонтальный бар сразу под меню-баром (инструменты гизмо,
+    // Play, режим рендера). Рисуется ДО dockspace, чтобы занять свою полосу.
+    m_toolbar.Draw(*this, kToolbarHeight);
+
     ImGuiID dockspaceId = ImGui::GetID("SageDockSpace");
     // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)
     // или пользователь попросил сброс (Window > Reset Layout).
@@ -831,7 +949,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
         m_rebuildDockLayout = false;
         BuildDefaultDockLayout(dockspaceId);
     }
-    // Док-пространство занимает всё, кроме статус-бара внизу.
+    // Док-пространство занимает всё между тулбаром и статус-баром.
     ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight), ImGuiDockNodeFlags_None);
     DrawStatusBar(kStatusBarHeight);
 
@@ -901,9 +1019,19 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 PushUndoSnapshot();
                 m_selectedId = m_scene->CreateObject("Empty").Id();
             }
-            if (ImGui::MenuItem("Create Cube")) {
-                PushUndoSnapshot();
-                m_selectedId = CreateCubeEntity("Cube").Id();
+            if (ImGui::BeginMenu("Create Primitive")) {
+                struct { const char* name; MeshRef::Type type; } prims[] = {
+                    {"Cube", MeshRef::Type::Cube}, {"Sphere", MeshRef::Type::Sphere},
+                    {"Plane", MeshRef::Type::Plane}, {"Cylinder", MeshRef::Type::Cylinder},
+                    {"Cone", MeshRef::Type::Cone},
+                };
+                for (const auto& p : prims) {
+                    if (ImGui::MenuItem(p.name)) {
+                        PushUndoSnapshot();
+                        m_selectedId = CreatePrimitiveEntity(p.name, p.type).Id();
+                    }
+                }
+                ImGui::EndMenu();
             }
             if (ImGui::MenuItem("Create Camera")) {
                 PushUndoSnapshot();
@@ -922,7 +1050,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
         }
         if (ImGui::BeginMenu("Window")) {
             if (ImGui::MenuItem("Reset Layout")) m_rebuildDockLayout = true;
-            ImGui::MenuItem("Show Grid", nullptr, &m_viewport.ShowGridRef());
+            ImGui::MenuItem("Show Grid", nullptr, &m_showGrid);
             ImGui::EndMenu();
         }
 
@@ -1235,6 +1363,36 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Примитивы + атмосфера (скайбокс/туман): переживают save/load ---
+    if (ok) {
+        GameObject probe = m_scene->FindByName("Red Cube");
+        if (probe.Valid()) {
+            MeshRendererComponent& mr = probe.Renderer();
+            mr.Ref = MeshRef{MeshRef::Type::Sphere, ""};
+            mr.MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Sphere);
+        }
+        m_scene->Lighting.Fog.Enabled = true;
+        m_scene->Lighting.Fog.Color = {0.1f, 0.4f, 0.7f};
+        m_scene->Lighting.Skybox.TopColor = {0.05f, 0.1f, 0.3f};
+
+        fs::path scenePath = m_project.ScenesDir() / "selftest_env.sage";
+        if (!SaveSceneToFile(scenePath) || !LoadSceneFromFile(scenePath)) ok = false;
+        if (ok) {
+            GameObject reloaded = m_scene->FindByName("Red Cube");
+            bool meshOk = reloaded.Valid() && reloaded.Renderer().Ref.type == MeshRef::Type::Sphere &&
+                          reloaded.Renderer().MeshPtr != nullptr;
+            bool fogOk = m_scene->Lighting.Fog.Enabled &&
+                         std::abs(m_scene->Lighting.Fog.Color.b - 0.7f) < 0.001f;
+            bool skyOk = m_scene->Lighting.Skybox.Enabled &&
+                         std::abs(m_scene->Lighting.Skybox.TopColor.b - 0.3f) < 0.001f;
+            if (!meshOk || !fogOk || !skyOk) {
+                LOG_ERROR("Editor") << "SELFTEST: primitive/environment round-trip failed (mesh "
+                                    << meshOk << ", fog " << fogOk << ", sky " << skyOk << ")";
+                ok = false;
+            }
+        }
+    }
+
     // --- Сборка игры: SagePlayer + project/ упакованы в запускаемую папку ---
     // (запуск упакованной игры проверяет smoke-тест 5/5 отдельным процессом)
     if (ok) {
@@ -1290,7 +1448,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + build + recent + dirty + play, "
-                               << before << " entities)";
+                               << "materials + camera + light + primitives + environment + build + "
+                               << "recent + dirty + play, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

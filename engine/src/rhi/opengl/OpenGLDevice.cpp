@@ -83,6 +83,12 @@ void OpenGLDevice::SetCullMode(CullMode mode) {
     glCullFace(mode == CullMode::Front ? GL_FRONT : GL_BACK);
 }
 
+void OpenGLDevice::SetPolygonMode(PolygonMode mode) {
+    // GL_LINE рисует только рёбра треугольников — каркасный (wireframe) режим.
+    // FRONT_AND_BACK: каркас виден с обеих сторон вне зависимости от отсечения.
+    glPolygonMode(GL_FRONT_AND_BACK, mode == PolygonMode::Line ? GL_LINE : GL_FILL);
+}
+
 void OpenGLDevice::BindTexture2D(int unit, unsigned int nativeHandle) {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, nativeHandle);

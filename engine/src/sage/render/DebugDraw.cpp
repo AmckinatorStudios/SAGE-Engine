@@ -127,6 +127,35 @@ void DebugDraw::WireCone(glm::vec3 apex, glm::vec3 dir, float length, float half
     }
 }
 
+void DebugDraw::WireFrustum(glm::vec3 apex, glm::vec3 dir, float fovDeg, float aspect,
+                            float nearDist, float farDist, glm::vec3 color) {
+    dir = glm::normalize(dir);
+    if (glm::length(dir) < 0.0001f) dir = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 upHint = (glm::abs(dir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::normalize(glm::cross(dir, upHint));
+    glm::vec3 up = glm::normalize(glm::cross(right, dir));
+
+    auto rect = [&](float dist, glm::vec3 out[4]) {
+        float h = std::tan(glm::radians(fovDeg) * 0.5f) * dist;
+        float w = h * aspect;
+        glm::vec3 c = apex + dir * dist;
+        out[0] = c + up * h - right * w; // TL
+        out[1] = c + up * h + right * w; // TR
+        out[2] = c - up * h + right * w; // BR
+        out[3] = c - up * h - right * w; // BL
+    };
+    glm::vec3 n[4], f[4];
+    rect(nearDist, n);
+    rect(farDist, f);
+    for (int i = 0; i < 4; ++i) {
+        Line(n[i], n[(i + 1) % 4], color); // ближняя рамка
+        Line(f[i], f[(i + 1) % 4], color); // дальняя рамка
+        Line(n[i], f[i], color);           // боковые рёбра
+    }
+    // Хвостик от вершины к ближней рамке — читается как «камера».
+    for (int i = 0; i < 4; ++i) Line(apex, n[i], color * 0.7f);
+}
+
 void DebugDraw::Axes(const glm::mat4& transform, float size) {
     glm::vec3 origin = glm::vec3(transform[3]);
     // Нормализуем базисные векторы: оси показывают ОРИЕНТАЦИЮ, длина всегда

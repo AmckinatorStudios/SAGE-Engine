@@ -23,6 +23,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ModelLoader.cpp
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
+    src/sage/render/SkyRenderer.cpp
     src/sage/render/Skybox.cpp
     src/sage/render/Texture.cpp
     src/rhi/GraphicsDevice.cpp

@@ -12,6 +12,7 @@
 #include "sage/render/Framebuffer.h"
 #include "sage/render/DebugDraw.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/SkyRenderer.h"
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
@@ -29,6 +30,7 @@
 #include "panels/AssetsPanel.h"
 #include "panels/LauncherPanel.h"
 #include "panels/LightingPanel.h"
+#include "panels/ToolbarPanel.h"
 
 // ---------------------------------------------------------------------------
 // EditorLayer — ядро редактора SAGE (архитектура v3).
@@ -81,6 +83,7 @@ public:
 
     // --- EditorHost: сущности ---
     GameObject CreateCubeEntity(const std::string& name) override;
+    GameObject CreatePrimitiveEntity(const std::string& name, MeshRef::Type type);
     void DuplicateSelected() override;
     void DeleteSelected() override;
 
@@ -91,6 +94,13 @@ public:
     void PausePlay() override { if (m_playState == EditorPlayState::Playing) m_playState = EditorPlayState::Paused; }
     void ResumePlay() override { if (m_playState == EditorPlayState::Paused) m_playState = EditorPlayState::Playing; }
     void StopPlay() override;
+
+    // --- EditorHost: общее состояние инструментов (тулбар + вьюпорт) ---
+    int& GizmoOp() override { return m_gizmoOp; }
+    bool& GizmoSnap() override { return m_snap; }
+    EditorGizmoSpace& GizmoSpace() override { return m_gizmoSpace; }
+    bool& ShowGrid() override { return m_showGrid; }
+    EditorRenderMode& RenderMode() override { return m_renderMode; }
 
     // --- EditorHost: вьюпорт/камера ---
     Camera& EditorCamera() override { return m_camera; }
@@ -122,7 +132,10 @@ private:
     // --- сцена / рендер ---
     void RenderShadowPass(const LightingEnvironment& env);  // глубина от солнца (общая карта)
     void DrawLitScene(const LightingEnvironment& env, const glm::mat4& view,
-                      const glm::mat4& proj, glm::vec3 viewPos); // общий lit-проход
+                      const glm::mat4& proj, glm::vec3 viewPos,
+                      int shadingMode, bool wireframe);     // общий lit-проход
+    void DrawSelectionOutline(GameObject obj, const glm::mat4& view, const glm::mat4& proj);
+    void DrawEntityGizmos();                                // гизмо камер/светов (DebugDraw)
     void RenderSceneToFramebuffer(const LightingEnvironment& env); // редакторская камера + DebugDraw
     void RenderGameToFramebuffer(const LightingEnvironment& env);  // Primary-камера сцены, без гизмо
     void NewScene(bool withDemoContent);
@@ -153,7 +166,15 @@ private:
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<Framebuffer> m_gameFbo;
     std::optional<DebugDraw> m_debugDraw;
+    std::optional<SkyRenderer> m_sky;     // процедурный градиентный скайбокс
     std::shared_ptr<Mesh> m_cube;
+
+    // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---
+    int m_gizmoOp = 0;                                          // ImGuizmo::OPERATION (TRANSLATE)
+    bool m_snap = false;
+    EditorGizmoSpace m_gizmoSpace = EditorGizmoSpace::Local;
+    bool m_showGrid = true;
+    EditorRenderMode m_renderMode = EditorRenderMode::Shaded;
 
     // --- Play-режим ---
     EditorPlayState m_playState = EditorPlayState::Editing;
@@ -183,6 +204,7 @@ private:
     AssetsPanel m_assets;
     LauncherPanel m_launcher;
     LightingPanel m_lighting;
+    ToolbarPanel m_toolbar;
     bool m_launcherRequested = false; // Window > Project Launcher
 
     // --- сборка игры: буферы диалога Build Game ---

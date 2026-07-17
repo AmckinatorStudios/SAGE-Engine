@@ -49,6 +49,12 @@ public:
     void WireCone(glm::vec3 apex, glm::vec3 dir, float length, float halfAngleDeg,
                   glm::vec3 color, int segments = 20);
 
+    // Каркас усечённой пирамиды камеры (frustum): из apex вдоль dir, с
+    // вертикальным углом fovDeg и соотношением сторон aspect, от near до far.
+    // Готовая иконка-гизмо для сущности-камеры.
+    void WireFrustum(glm::vec3 apex, glm::vec3 dir, float fovDeg, float aspect,
+                     float nearDist, float farDist, glm::vec3 color);
+
     // Оси объекта: X — красная, Y — зелёная, Z — синяя.
     void Axes(const glm::mat4& transform, float size = 1.0f);
 

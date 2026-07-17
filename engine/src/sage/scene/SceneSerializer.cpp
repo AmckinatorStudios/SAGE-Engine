@@ -18,15 +18,23 @@ static glm::vec3 Vec3FromJson(const json& j) {
 
 static std::string MeshTypeToString(MeshRef::Type t) {
     switch (t) {
-        case MeshRef::Type::Cube:  return "cube";
-        case MeshRef::Type::Model: return "model";
+        case MeshRef::Type::Cube:     return "cube";
+        case MeshRef::Type::Sphere:   return "sphere";
+        case MeshRef::Type::Plane:    return "plane";
+        case MeshRef::Type::Cylinder: return "cylinder";
+        case MeshRef::Type::Cone:     return "cone";
+        case MeshRef::Type::Model:    return "model";
         default: return "none";
     }
 }
 
 static MeshRef::Type MeshTypeFromString(const std::string& s) {
-    if (s == "cube") return MeshRef::Type::Cube;
-    if (s == "model") return MeshRef::Type::Model;
+    if (s == "cube")     return MeshRef::Type::Cube;
+    if (s == "sphere")   return MeshRef::Type::Sphere;
+    if (s == "plane")    return MeshRef::Type::Plane;
+    if (s == "cylinder") return MeshRef::Type::Cylinder;
+    if (s == "cone")     return MeshRef::Type::Cone;
+    if (s == "model")    return MeshRef::Type::Model;
     return MeshRef::Type::None;
 }
 
@@ -53,6 +61,32 @@ static json LightingToJson(const LightingEnvironment& lighting) {
         pointsJson.push_back(pj);
     }
     j["pointLights"] = pointsJson;
+
+    // Прожекторы scene-level (обычно света-сущности, но окружение тоже может
+    // нести свои — сериализуем для полноты).
+    json spotsJson = json::array();
+    for (const SpotLight& s : lighting.SpotLights) {
+        json sj;
+        sj["position"] = Vec3ToJson(s.Position);
+        sj["direction"] = Vec3ToJson(s.Direction);
+        sj["color"] = Vec3ToJson(s.Color);
+        sj["intensity"] = s.Intensity;
+        sj["range"] = s.Range;
+        sj["innerCone"] = s.InnerAngleDeg;
+        sj["outerCone"] = s.OuterAngleDeg;
+        spotsJson.push_back(sj);
+    }
+    j["spotLights"] = spotsJson;
+
+    // Атмосфера: туман + скайбокс.
+    j["fog"]["enabled"] = lighting.Fog.Enabled;
+    j["fog"]["color"] = Vec3ToJson(lighting.Fog.Color);
+    j["fog"]["start"] = lighting.Fog.Start;
+    j["fog"]["end"] = lighting.Fog.End;
+
+    j["skybox"]["enabled"] = lighting.Skybox.Enabled;
+    j["skybox"]["top"] = Vec3ToJson(lighting.Skybox.TopColor);
+    j["skybox"]["horizon"] = Vec3ToJson(lighting.Skybox.HorizonColor);
     return j;
 }
 
@@ -88,6 +122,32 @@ static LightingEnvironment LightingFromJson(const json& root) {
         light.Intensity = pj.value("intensity", light.Intensity);
         light.Range = pj.value("range", light.Range);
         lighting.PointLights.push_back(light);
+    }
+
+    for (const auto& sj : j.value("spotLights", json::array())) {
+        SpotLight s;
+        if (sj.contains("position")) s.Position = Vec3FromJson(sj["position"]);
+        if (sj.contains("direction")) s.Direction = Vec3FromJson(sj["direction"]);
+        if (sj.contains("color")) s.Color = Vec3FromJson(sj["color"]);
+        s.Intensity = sj.value("intensity", s.Intensity);
+        s.Range = sj.value("range", s.Range);
+        s.InnerAngleDeg = sj.value("innerCone", s.InnerAngleDeg);
+        s.OuterAngleDeg = sj.value("outerCone", s.OuterAngleDeg);
+        lighting.SpotLights.push_back(s);
+    }
+
+    if (j.contains("fog")) {
+        const json& fj = j["fog"];
+        lighting.Fog.Enabled = fj.value("enabled", lighting.Fog.Enabled);
+        if (fj.contains("color")) lighting.Fog.Color = Vec3FromJson(fj["color"]);
+        lighting.Fog.Start = fj.value("start", lighting.Fog.Start);
+        lighting.Fog.End = fj.value("end", lighting.Fog.End);
+    }
+    if (j.contains("skybox")) {
+        const json& sj = j["skybox"];
+        lighting.Skybox.Enabled = sj.value("enabled", lighting.Skybox.Enabled);
+        if (sj.contains("top")) lighting.Skybox.TopColor = Vec3FromJson(sj["top"]);
+        if (sj.contains("horizon")) lighting.Skybox.HorizonColor = Vec3FromJson(sj["horizon"]);
     }
     return lighting;
 }
@@ -203,16 +263,11 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         }
 
         // Пересоздаём GPU-ресурс на основе описания
-        switch (mr.Ref.type) {
-            case MeshRef::Type::Cube:
-                mr.MeshPtr = ResourceManager::Instance().GetCube();
-                break;
-            case MeshRef::Type::Model:
-                mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
-                break;
-            default:
-                mr.MeshPtr = nullptr;
-                break;
+        if (mr.Ref.type == MeshRef::Type::Model) {
+            mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+        } else {
+            // Примитивы (Cube/Sphere/Plane/Cylinder/Cone) — из кэша; None -> nullptr.
+            mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);
         }
     }
     scene->SetNextId(maxId + 1);

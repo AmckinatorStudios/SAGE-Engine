@@ -42,8 +42,6 @@ void DecomposeToTransform(const glm::mat4& m, Transform& out) {
 
 } // namespace
 
-ViewportPanel::ViewportPanel() : m_gizmoOp((int)ImGuizmo::TRANSLATE) {}
-
 void ViewportPanel::Draw(EditorHost& host) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("Viewport");
@@ -82,9 +80,9 @@ void ViewportPanel::Draw(EditorHost& host) {
 
     // --- Хоткеи гизмо (не во время полёта камеры и не в полях ввода) ---
     if (hovered && !m_cameraDriving && !io.WantTextInput) {
-        if (ImGui::IsKeyPressed(ImGuiKey_W)) m_gizmoOp = (int)ImGuizmo::TRANSLATE;
-        if (ImGui::IsKeyPressed(ImGuiKey_E)) m_gizmoOp = (int)ImGuizmo::ROTATE;
-        if (ImGui::IsKeyPressed(ImGuiKey_R)) m_gizmoOp = (int)ImGuizmo::SCALE;
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) host.GizmoOp() = (int)ImGuizmo::ROTATE;
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) host.GizmoOp() = (int)ImGuizmo::SCALE;
     }
 
     // --- ImGuizmo: манипулятор выбранной сущности (сетка — DebugDraw в FBO) ---
@@ -106,13 +104,17 @@ void ViewportPanel::Draw(EditorHost& host) {
 
         float snapT = 0.5f, snapR = 15.0f, snapS = 0.1f;
         float snapValues[3];
-        auto op = (ImGuizmo::OPERATION)m_gizmoOp;
+        auto op = (ImGuizmo::OPERATION)host.GizmoOp();
         float snapUnit = (op == ImGuizmo::ROTATE) ? snapR : (op == ImGuizmo::SCALE ? snapS : snapT);
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
 
+        // Scale всегда в локальном пространстве (ImGuizmo игнорит WORLD для scale);
+        // Move/Rotate — по выбору пользователя (тулбар: Local/World).
+        auto mode = (host.GizmoSpace() == EditorGizmoSpace::World && op != ImGuizmo::SCALE)
+                        ? ImGuizmo::WORLD : ImGuizmo::LOCAL;
         if (ImGuizmo::Manipulate(glm::value_ptr(host.ViewMatrix()), glm::value_ptr(host.ProjMatrix()),
-                                 op, ImGuizmo::LOCAL, glm::value_ptr(model),
-                                 nullptr, m_snap ? snapValues : nullptr)) {
+                                 op, mode, glm::value_ptr(model),
+                                 nullptr, host.GizmoSnap() ? snapValues : nullptr)) {
             DecomposeToTransform(model, tr);
         }
 
@@ -135,53 +137,8 @@ void ViewportPanel::Draw(EditorHost& host) {
         if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) host.PickAtViewport(u, v);
     }
 
-    // --- Оверлей-тулбар в углу вьюпорта: режим гизмо + snap + Play ---
-    ImGui::SetNextWindowPos(ImVec2(imgPos.x + 8.0f, imgPos.y + 8.0f));
-    ImGui::SetNextWindowBgAlpha(0.65f);
-    ImGuiWindowFlags overlayFlags =
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
-        ImGuiWindowFlags_NoDocking;
-    if (ImGui::Begin("##viewport_toolbar", nullptr, overlayFlags)) {
-        auto opButton = [this](const char* label, ImGuizmo::OPERATION op) {
-            bool active = m_gizmoOp == (int)op;
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
-            if (ImGui::SmallButton(label)) m_gizmoOp = (int)op;
-            if (active) ImGui::PopStyleColor();
-        };
-        opButton("Move (W)", ImGuizmo::TRANSLATE);
-        ImGui::SameLine();
-        opButton("Rotate (E)", ImGuizmo::ROTATE);
-        ImGui::SameLine();
-        opButton("Scale (R)", ImGuizmo::SCALE);
-        ImGui::SameLine();
-        ImGui::Checkbox("Snap", &m_snap);
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-
-        EditorPlayState state = host.GetPlayState();
-        if (state == EditorPlayState::Editing) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
-            if (ImGui::SmallButton("Play")) host.StartPlay();
-            ImGui::PopStyleColor();
-        } else {
-            if (state == EditorPlayState::Playing) {
-                if (ImGui::SmallButton("Pause")) host.PausePlay();
-            } else {
-                if (ImGui::SmallButton("Resume")) host.ResumePlay();
-            }
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-            if (ImGui::SmallButton("Stop")) host.StopPlay();
-            ImGui::PopStyleColor();
-            ImGui::SameLine();
-            ImGui::TextColored(state == EditorPlayState::Playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
-                                                                 : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                               state == EditorPlayState::Playing ? "PLAYING" : "PAUSED");
-        }
-    }
-    ImGui::End();
+    // Инструменты (режим гизмо, snap, пространство, Play, режим рендера) —
+    // в верхнем тулбаре редактора (ToolbarPanel), не оверлеем во вьюпорте.
 
     ImGui::End(); // Viewport
     ImGui::PopStyleVar();

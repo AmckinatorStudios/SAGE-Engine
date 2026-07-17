@@ -57,6 +57,7 @@ public:
     virtual void SetDepthWrite(bool enabled) = 0;
     virtual void SetDepthFunc(DepthFunc func) = 0;      // LessEqual нужен skybox'у
     virtual void SetCullMode(CullMode mode) = 0;        // Front — depth-проход теней
+    virtual void SetPolygonMode(PolygonMode mode) = 0;  // Line — каркасный рендер (wireframe)
 
     // Привязать 2D-текстуру по нативному хендлу (хендлы отдают Texture2D::
     // NativeHandle и RenderTarget::*TextureHandle) — для сэмплирования

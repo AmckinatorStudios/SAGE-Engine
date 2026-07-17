@@ -49,6 +49,7 @@ void PlayerLayer::OnAttach() {
     m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
     m_shadows.emplace(2048);
+    m_sky.emplace();
 
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
@@ -177,18 +178,23 @@ void PlayerLayer::OnRender() {
         viewPos = m_fallbackCamera.Position;
     }
 
-    // --- Основной проход: полное освещение + тени ---
+    // --- Основной проход: полное освещение + тени + туман/скайбокс ---
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
+
+    if (env.Skybox.Enabled) {
+        m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    }
 
     m_shader->Use();
     m_shader->SetMat4("uView", view);
     m_shader->SetMat4("uProjection", proj);
     m_shader->SetVec3("uViewPos", viewPos);
-    UploadLighting(*m_shader, env);
+    UploadLighting(*m_shader, env); // включая туман (uFog*)
     device.BindTexture2D(1, m_shadows->DepthTexture());
     UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/true);
     m_shader->SetInt("uUseTexture", 0);
+    m_shader->SetInt("uShadingMode", 0); // игра — всегда полное освещение
     sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
         m_shader->SetMat4("uModel", tr.GetMatrix());
         m_shader->SetVec3("uObjectColor", EffectiveColor(mr));

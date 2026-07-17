@@ -47,8 +47,9 @@ SAGE-Engine/
       rhi/      GraphicsDevice — абстракция графического устройства
       ecs/      Registry (фасад entt), RenderSystem
       scene/    Scene (ECS), Components, Transform, Light, SceneSerializer
-      render/   Shader, Camera, Mesh, Model, Material, Skybox, ShadowMap,
-                PostProcess, DebugDraw (гизмо/линии в мире), ...
+      render/   Shader, Camera, Mesh (+примитивы), Model, Material, Skybox,
+                SkyRenderer (процедурное небо), ShadowMap, PostProcess,
+                DebugDraw (гизмо/линии в мире), ...
       ui/       UIRenderer, Widgets — immediate-mode UI
       scripting/ ScriptEngine — Lua (sol2)
       audio/    AudioEngine — 2D/3D-звук, музыка (miniaudio)
@@ -185,13 +186,25 @@ Game, Console, Assets, Launcher. Новая панель = новый файл +
 кадре — в ядро врастать не нужно. Тема — `EditorTheme` (единая палитра/метрики).
 
 - **Доккинг + отдельные окна**: раскладка по умолчанию строится автоматически
-  (Hierarchy слева, Inspector справа, Console/Assets табами снизу,
+  (Hierarchy слева, Inspector/Lighting справа, Console/Assets табами снизу,
   Viewport+Game табами в центре); панели свободно перетаскиваются, стыкуются и
   **вытаскиваются в отдельные OS-окна** (multi-viewport), раскладка
   сохраняется между запусками (`sage_editor_imgui.ini`), Window > Reset Layout
-  возвращает дефолт. Внизу — статус-бар: проект | сцена (+`*` при
-  несохранённых правках — он же в заголовке OS-окна) | сущности | Play-статус |
-  сообщения плагинов | FPS.
+  возвращает дефолт.
+- **Тулбар** — полоса под меню-баром (не оверлей во вьюпорте): слева режим
+  гизмо (Move/Rotate/Scale), snap, пространство (Local/World); по центру
+  Play/Pause/Stop; справа режим рендера и сетка. Внизу — статус-бар: проект |
+  сцена (+`*` при несохранённых правках — он же в заголовке OS-окна) |
+  сущности | Play-статус | сообщения плагинов | FPS.
+- **Режимы рендера вьюпорта** (тулбар / env `SAGE_EDITOR_RENDER_MODE`):
+  **Shaded** (полное освещение), **Wireframe** (каркас — движковый
+  `PolygonMode::Line`), **Unlit** (плоский цвет), **Normals** (визуализация
+  нормалей). Игровое окно (Game) всегда Shaded.
+- **Гизмо и выделение**: выбранная сущность обведена **аутлайном**
+  (масштабированная оболочка) + оси; **невидимые сущности видны и кликабельны**
+  — у камеры рисуется каркас пирамиды видимости (frustum), у света — маркер и
+  зона действия (сфера/конус). Клик по гизмо камеры/света выбирает сущность.
+  Сетка вьюпорта — 3D-линии `DebugDraw` (заслоняются геометрией).
 - **Игровое окно (Game)**: рендер сцены от ИГРОВОЙ камеры — первой сущности с
   `CameraComponent.Primary` (движковый компонент, сериализуется в `.sage`;
   Inspector > Camera — Add/Remove, FOV/Near/Far/Primary). При нажатии Play таб
@@ -220,6 +233,13 @@ Game, Console, Assets, Launcher. Новая панель = новый файл +
   действия (сфера радиуса — point, конус — spot). Итоговое освещение кадра
   собирает `sage::ecs::CollectLighting` (окружение + света-сущности, лимит
   шейдера — 8 точечных + 8 прожекторов).
+- **Атмосфера сцены** (панель Lighting, сериализуется): **скайбокс** —
+  процедурный градиент неба (`SkyRenderer`, зенит → горизонт, без ассетов) и
+  **линейный туман** (цвет + start/end, применяется в Shaded). Оба поля —
+  часть окружения сцены, работают и в редакторе, и в собранной игре.
+- **Примитивы**: движок генерирует Cube/Sphere/Plane/Cylinder/Cone
+  (`Mesh::Create*`, с нормалями и UV; кэш `ResourceManager::GetPrimitive`).
+  Entity > Create Primitive, выбор в Inspector (Mesh), сериализация в `.sage`.
 - **Сборка игры (File > Build Game...)**: упаковывает открытый проект в
   ЗАПУСКАЕМУЮ игру — папка `<out>/<Имя>/` с копией рантайма `SagePlayer`
   (переименован в имя проекта), его шейдерами и `project/` (сцены/ассеты).

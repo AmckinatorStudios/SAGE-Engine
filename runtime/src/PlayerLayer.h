@@ -8,6 +8,7 @@
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/SkyRenderer.h"
 #include "sage/scene/Scene.h"
 
 class ScriptEngine;
@@ -54,6 +55,7 @@ private:
     std::optional<Shader> m_shader;       // lit: ambient+sun+point lights+тени
     std::optional<Shader> m_shadowShader;
     std::optional<ShadowMap> m_shadows;
+    std::optional<SkyRenderer> m_sky;     // процедурный скайбокс сцены
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
 
     std::string m_screenshotPath = "player.png";

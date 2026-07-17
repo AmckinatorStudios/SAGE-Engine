@@ -61,17 +61,18 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         MeshRendererComponent& mr = obj.Renderer();
         ImGui::ColorEdit3("Color", &mr.Color.x); host.TrackLastImGuiItem();
 
-        const char* kinds[] = {"None", "Cube", "Model"};
+        // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
+        const char* kinds[] = {"None", "Cube", "Sphere", "Plane", "Cylinder", "Cone", "Model"};
         int kind = (int)mr.Ref.type;
-        if (ImGui::Combo("Mesh", &kind, kinds, 3)) {
+        if (ImGui::Combo("Mesh", &kind, kinds, IM_ARRAYSIZE(kinds))) {
             host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
             mr.Ref.type = (MeshRef::Type)kind;
-            if (mr.Ref.type == MeshRef::Type::Cube) {
+            if (mr.Ref.type == MeshRef::Type::Model) {
+                // Model — путь задаётся ниже и грузится по кнопке Load.
+            } else {
                 mr.Ref.path.clear();
-                mr.MeshPtr = ResourceManager::Instance().GetCube();
+                mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type); // None -> nullptr
             }
-            if (mr.Ref.type == MeshRef::Type::None) { mr.Ref.path.clear(); mr.MeshPtr = nullptr; }
-            // Model — путь задаётся ниже и грузится по кнопке Load.
         }
         if (mr.Ref.type == MeshRef::Type::Model) {
             char pathBuf[512];

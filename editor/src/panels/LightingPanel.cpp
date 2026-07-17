@@ -28,6 +28,22 @@ void LightingPanel::Draw(EditorHost& host) {
         ImGui::TextDisabled("Direction is where light TRAVELS; casts shadows");
     }
 
+    if (ImGui::CollapsingHeader("Skybox", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::Checkbox("Enable Skybox", &env.Skybox.Enabled)) host.PushUndoSnapshot();
+        ImGui::ColorEdit3("Sky Top", &env.Skybox.TopColor.x); host.TrackLastImGuiItem();
+        ImGui::ColorEdit3("Sky Horizon", &env.Skybox.HorizonColor.x); host.TrackLastImGuiItem();
+        ImGui::TextDisabled("Procedural gradient (top -> horizon), no textures");
+    }
+
+    if (ImGui::CollapsingHeader("Fog", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::Checkbox("Enable Fog", &env.Fog.Enabled)) host.PushUndoSnapshot();
+        ImGui::ColorEdit3("Fog Color", &env.Fog.Color.x); host.TrackLastImGuiItem();
+        ImGui::DragFloat("Fog Start", &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
+        ImGui::DragFloat("Fog End", &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
+        if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;
+        ImGui::TextDisabled("Linear distance fog (applied in Shaded mode)");
+    }
+
     if (ImGui::CollapsingHeader("Scene lights", ImGuiTreeNodeFlags_DefaultOpen)) {
         // Света — сущности сцены (точечные/прожекторы); здесь список для
         // навигации с пометкой типа.

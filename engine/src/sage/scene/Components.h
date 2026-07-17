@@ -31,7 +31,9 @@ struct IdComponent {
 // Сам GPU-меш (Mesh) не сериализуется, он пересоздаётся при загрузке через
 // ResourceManager на основе этого описания.
 struct MeshRef {
-    enum class Type { None, Cube, Model };
+    // Примитивы генерируются процедурно (Mesh::Create*), Model грузится из файла
+    // по path. None — сущность без меша (камера/свет/пустышка), не рисуется.
+    enum class Type { None, Cube, Sphere, Plane, Cylinder, Cone, Model };
     Type type = Type::None;
     std::string path; // используется только при Type::Model
 

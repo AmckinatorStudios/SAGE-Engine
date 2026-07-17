@@ -48,6 +48,12 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         shader.SetFloat(prefix + "cosInner", light.CosInner());
         shader.SetFloat(prefix + "cosOuter", light.CosOuter());
     }
+
+    // Туман (атмосфера сцены) — применяется только в режиме полного освещения.
+    shader.SetInt("uFogEnabled", env.Fog.Enabled ? 1 : 0);
+    shader.SetVec3("uFogColor", env.Fog.Color);
+    shader.SetFloat("uFogStart", env.Fog.Start);
+    shader.SetFloat("uFogEnd", env.Fog.End);
 }
 
 // Заливает uniform'ы карты теней в шейдер-приёмник: матрицу пространства
