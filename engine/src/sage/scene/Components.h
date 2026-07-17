@@ -73,3 +73,14 @@ inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr) {
 struct ScriptComponent {
     std::string Path;
 };
+
+// Игровая камера сцены. Позицию и ориентацию задаёт Transform сущности
+// (Scale не влияет). Панель Game редактора — и игры, которым это удобно —
+// рендерят изображение от ПЕРВОЙ сущности с Primary == true; так камера
+// становится частью сцены (сериализуется), а не хардкодом кода игры.
+struct CameraComponent {
+    float Fov = 60.0f;      // вертикальный угол обзора, градусы
+    float NearClip = 0.1f;
+    float FarClip = 200.0f;
+    bool Primary = true;    // первая Primary-камера сцены — «главная»
+};

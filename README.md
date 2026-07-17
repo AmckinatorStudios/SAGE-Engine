@@ -55,7 +55,12 @@ SAGE-Engine/
     src/rhi/opengl/           — OpenGL-бэкенд: ЕДИНСТВЕННОЕ место с glad (уровень устройства)
 
   editor/                     → exe SageEditor (редактор на ImGui, см. раздел ниже)
-    src/, assets/shaders/
+    src/EditorLayer.*         — ядро: сцена/проект/Play/undo/рендер превью
+    src/EditorHost.h          — контракт операций редактора для панелей
+    src/EditorTheme.*         — тема (палитра/метрики/шрифт с кириллицей)
+    src/panels/               — панели: Hierarchy, Inspector, Viewport, Game,
+                                Console, Assets, Launcher (каждая — свой класс)
+    src/RecentProjects.*      — список недавних проектов (~/.config/sage/)
     src/PluginAPI.h, PluginManager.*  — система плагинов редактора (см. ниже)
     plugins/example_stats/    — плагин-пример (собирается в plugins/ рядом с exe)
 
@@ -165,11 +170,33 @@ ERROR-строк (см. `scripts/ci_smoke_test.sh`, тест 4/4).
    скрипт векторы не создавал, поэтому баг жил незамеченным.
 
 ## Редактор SageEditor
-Полноценный редактор сцен на ImGui (docking) + ImGuizmo:
-- **Доккинг**: раскладка по умолчанию строится автоматически (Hierarchy слева,
-  Inspector справа, Console/Assets табами снизу, Viewport в центре); панели
-  свободно перетаскиваются и стыкуются, раскладка сохраняется между запусками
-  (`sage_editor_imgui.ini`), Window > Reset Layout возвращает дефолт.
+Полноценный редактор сцен на ImGui (docking + multi-viewport) + ImGuizmo.
+
+**Архитектура (v3, модульная)**: ядро `EditorLayer` (сцена/проект/Play/undo/
+рендер превью) реализует контракт `EditorHost` (`editor/src/EditorHost.h`), а
+каждая панель — независимый класс в `editor/src/panels/` со СВОИМ
+UI-состоянием, зависящий только от контракта: Hierarchy, Inspector, Viewport,
+Game, Console, Assets, Launcher. Новая панель = новый файл + вызов `Draw()` в
+кадре — в ядро врастать не нужно. Тема — `EditorTheme` (единая палитра/метрики).
+
+- **Доккинг + отдельные окна**: раскладка по умолчанию строится автоматически
+  (Hierarchy слева, Inspector справа, Console/Assets табами снизу,
+  Viewport+Game табами в центре); панели свободно перетаскиваются, стыкуются и
+  **вытаскиваются в отдельные OS-окна** (multi-viewport), раскладка
+  сохраняется между запусками (`sage_editor_imgui.ini`), Window > Reset Layout
+  возвращает дефолт. Внизу — статус-бар: проект | сцена (+`*` при
+  несохранённых правках — он же в заголовке OS-окна) | сущности | Play-статус |
+  сообщения плагинов | FPS.
+- **Игровое окно (Game)**: рендер сцены от ИГРОВОЙ камеры — первой сущности с
+  `CameraComponent.Primary` (движковый компонент, сериализуется в `.sage`;
+  Inspector > Camera — Add/Remove, FOV/Near/Far/Primary). При нажатии Play таб
+  Game автоматически выходит на передний план — редактируешь в Viewport,
+  играешь в Game. Демо-сцена сразу содержит Main Camera.
+- **Стартовый Project Launcher**: пока проект не открыт — окно с недавними
+  проектами (хранятся в `~/.config/sage/recent_projects.json`), формой
+  создания нового и открытием по пути; открытие проекта автоматически грузит
+  его первую сцену. File > Project Launcher... открывает hub повторно; File >
+  Project Scenes — быстрый доступ ко всем сценам открытого проекта.
 - **Гизмо** (ImGuizmo): перемещение/поворот/масштаб выбранной сущности прямо во
   вьюпорте. Горячие клавиши **W/E/R**, привязка к сетке — галка Snap. Выбранная
   сущность дополнительно подсвечивается каркасом и осями X/Y/Z, а сетка-
@@ -284,7 +311,8 @@ dbg.Flush(view, proj); // один draw call на весь батч
 
 ## Система сцен и сериализация
 `Scene` — это ECS-сцена на `entt::registry`. Сущности собираются из компонентов
-(`NameComponent`, `Transform`, `MeshRendererComponent`, `ScriptComponent`, ...);
+(`NameComponent`, `Transform`, `MeshRendererComponent`, `ScriptComponent`,
+`CameraComponent`, ...);
 `GameObject` — дешёвый дескриптор `{registry, entity}` с аксессорами к
 компонентам. `SceneManager` держит несколько сцен и переключает активную:
 
@@ -547,7 +575,8 @@ CI, нет звуковой карты), конструктор не падае�
   MeshRenderer/Script), нет ассет-импорт-пайплайна (импорт .obj/.gltf — вручную
   через путь в Inspector).
 - **`SceneSerializer` не сохраняет кастомные компоненты игр** — в `.sage`
-  попадают только встроенные (Name/Id/Transform/MeshRenderer/Script + свет).
+  попадают только встроенные (Name/Id/Transform/MeshRenderer/Material-путь/
+Script/Camera + свет).
   Игра с собственными компонентами (как `games/testgame`) либо строит мир
   кодом, либо сериализует своё сама поверх движкового файла. Подтверждено
   боевым тестом; кандидат на «пользовательские сериализаторы компонентов»

@@ -125,6 +125,12 @@ static json BuildSceneJson(const Scene& scene) {
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             j["script"] = sc->Path;
         }
+        if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) {
+            j["camera"]["fov"] = cam->Fov;
+            j["camera"]["near"] = cam->NearClip;
+            j["camera"]["far"] = cam->FarClip;
+            j["camera"]["primary"] = cam->Primary;
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -163,6 +169,16 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         mr.MaterialPath = j.value("material", "");
         if (!mr.MaterialPath.empty()) {
             mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+        }
+
+        if (j.contains("camera")) {
+            const auto& cj = j["camera"];
+            CameraComponent cam;
+            cam.Fov = cj.value("fov", cam.Fov);
+            cam.NearClip = cj.value("near", cam.NearClip);
+            cam.FarClip = cj.value("far", cam.FarClip);
+            cam.Primary = cj.value("primary", cam.Primary);
+            obj.Registry()->emplace<CameraComponent>(obj.Entity(), cam);
         }
 
         // Пересоздаём GPU-ресурс на основе описания

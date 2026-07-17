@@ -3,14 +3,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
-#include <cctype>
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/euler_angles.hpp>
 
@@ -20,6 +17,7 @@
 #include "imgui_impl_opengl3.h"
 #include "ImGuizmo.h"
 
+#include "EditorTheme.h"
 #include "sage/core/Application.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -30,30 +28,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-// Раскладывает мировую матрицу обратно в Transform (Position/Rotation/Scale).
-// ВАЖНО: порядок углов должен совпадать с Transform::GetMatrix (T*Rx*Ry*Rz*S),
-// поэтому используется glm::extractEulerAngleXYZ, а не декомпозиция ImGuizmo
-// (у неё другой порядок осей — гизмо «прыгал» бы на повёрнутых объектах).
-void DecomposeToTransform(const glm::mat4& m, Transform& out) {
-    out.Position = glm::vec3(m[3]);
-
-    glm::vec3 scale(glm::length(glm::vec3(m[0])),
-                    glm::length(glm::vec3(m[1])),
-                    glm::length(glm::vec3(m[2])));
-    // защита от вырожденного масштаба (деление на ноль при нормализации)
-    scale = glm::max(scale, glm::vec3(1e-6f));
-    out.Scale = scale;
-
-    glm::mat4 rot(1.0f);
-    rot[0] = glm::vec4(glm::vec3(m[0]) / scale.x, 0.0f);
-    rot[1] = glm::vec4(glm::vec3(m[1]) / scale.y, 0.0f);
-    rot[2] = glm::vec4(glm::vec3(m[2]) / scale.z, 0.0f);
-
-    float rx, ry, rz;
-    glm::extractEulerAngleXYZ(rot, rx, ry, rz);
-    out.Rotation = glm::degrees(glm::vec3(rx, ry, rz));
-}
 
 // Пересечение луча с AABB [-0.5,0.5]^3 (единичный куб движка) в локальном
 // пространстве объекта. Возвращает t входа (>=0) или отрицательное при промахе.
@@ -68,27 +42,7 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
     return tNear >= 0.0f ? tNear : tFar;
 }
 
-// Шрифт с кириллицей: дефолтный ProggyClean не содержит кириллических глифов
-// (русский текст рисовался бы как '???'). Пробуем известные системные шрифты;
-// приоритет — assets/fonts/editor.ttf, чтобы можно было вложить свой шрифт в
-// поставку редактора. Если ничего не нашлось — остаёмся на дефолтном (ASCII).
-void LoadEditorFont() {
-    ImGuiIO& io = ImGui::GetIO();
-    const char* candidates[] = {
-        "assets/fonts/editor.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-    };
-    for (const char* path : candidates) {
-        FILE* probe = std::fopen(path, "rb");
-        if (!probe) continue;
-        std::fclose(probe);
-        io.Fonts->AddFontFromFileTTF(path, 16.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic());
-        return;
-    }
-}
+constexpr float kStatusBarHeight = 26.0f;
 
 } // namespace
 
@@ -99,33 +53,27 @@ void LoadEditorFont() {
 void EditorLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
 
-    // --- ImGui (docking) ---
+    // --- ImGui: docking + multi-viewport (панели можно вытаскивать в
+    // отдельные OS-окна — «плавающие» панели становятся полноценными окнами) ---
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename = "sage_editor_imgui.ini"; // своё имя, чтобы не пересекаться с другими ImGui-приложениями
-    LoadEditorFont();
-    ImGui::StyleColorsDark();
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 4.0f;
-    style.FrameRounding = 3.0f;
+    EditorTheme::LoadFont();
+    EditorTheme::Apply();
     ImGui_ImplGlfw_InitForOpenGL(app.GetWindow().Handle(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
     m_imguiReady = true;
 
-    m_gizmoOp = (int)ImGuizmo::TRANSLATE;
-
-    // --- Сток лога -> панель Console (снимается в OnDetach) ---
-    Log::SetSink([this](LogLevel level, const std::string& cat, const std::string& msg) {
-        std::lock_guard<std::mutex> lock(m_consoleMutex);
-        if (m_console.size() > 2000) m_console.erase(m_console.begin(), m_console.begin() + 500);
-        m_console.push_back({level, cat, msg});
-    });
+    // --- Console первой: сток лога ловит все сообщения запуска ---
+    m_console.Attach();
 
     // --- Ресурсы превью ---
     m_shader.emplace("assets/shaders/editor_basic.vert", "assets/shaders/editor_basic.frag");
     m_sceneFbo.emplace(m_viewportW, m_viewportH);
+    m_gameFbo.emplace(m_gameW, m_gameH);
     m_debugDraw.emplace();
     m_cube = ResourceManager::Instance().GetCube();
 
@@ -139,6 +87,8 @@ void EditorLayer::OnAttach() {
     // Дефолтная папка диалогов — рядом с бинарником.
     std::snprintf(m_dlgProjectDir, sizeof(m_dlgProjectDir), "%s", fs::current_path().string().c_str());
     m_assetsCwd = fs::current_path();
+
+    m_recent.Load();
 
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
@@ -154,8 +104,9 @@ void EditorLayer::OnAttach() {
 
     // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
     // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
-    // а в тулбаре гореть PLAYING.
+    // а в тулбаре гореть PLAYING. Launcher в этом режиме не показываем.
     if (std::getenv("SAGE_EDITOR_AUTOPLAY")) {
+        m_launcher.Dismiss(); // headless-прогон — hub не должен закрывать кадр
         GameObject green = m_scene->FindByName("Green Cube");
         if (green.Valid()) {
             m_scene->Registry().emplace_or_replace<ScriptComponent>(
@@ -164,154 +115,12 @@ void EditorLayer::OnAttach() {
         }
         StartPlay();
     }
-}
 
-// Headless-проверка ядра редактора без UI-кликов (модалки недоступны в CI):
-// создать проект -> сохранить сцену в его scenes/ -> очистить -> загрузить
-// обратно -> сверить число сущностей. Результат — строкой PASS/FAIL в лог.
-void EditorLayer::RunSelfTest() {
-    size_t before = m_scene->Count();
-    std::string err;
-    bool ok = true;
-
-    std::error_code ec;
-    fs::remove_all("selftest_project", ec); // от прошлого прогона
-    if (!m_project.CreateNew(".", "selftest_project", err)) {
-        LOG_ERROR("Editor") << "SELFTEST: create project failed: " << err;
-        ok = false;
-    }
-    if (ok) {
-        m_assetsCwd = m_project.Dir();
-        fs::path scenePath = m_project.ScenesDir() / "selftest.sage";
-        if (!SaveSceneToFile(scenePath)) ok = false;
-        if (ok) {
-            NewScene(false); // пустая сцена — убеждаемся, что загрузка реально восстанавливает
-            if (!LoadSceneFromFile(scenePath)) ok = false;
-        }
-        if (ok && m_scene->Count() != before) {
-            LOG_ERROR("Editor") << "SELFTEST: entity count mismatch: saved " << before
-                                << ", loaded " << m_scene->Count();
-            ok = false;
-        }
-    }
-
-    // --- Undo/Redo: создание сущности откатывается и накатывается обратно ---
-    if (ok) {
-        size_t n0 = m_scene->Count();
-        PushUndoSnapshot();
-        CreateCubeEntity("UndoProbe");
-        Undo();
-        if (m_scene->Count() != n0) {
-            LOG_ERROR("Editor") << "SELFTEST: undo failed (count " << m_scene->Count() << ", expected " << n0 << ")";
-            ok = false;
-        }
-        Redo();
-        if (ok && m_scene->Count() != n0 + 1) {
-            LOG_ERROR("Editor") << "SELFTEST: redo failed (count " << m_scene->Count() << ", expected " << n0 + 1 << ")";
-            ok = false;
-        }
-        Undo(); // вернуть сцену к исходным n0 сущностям
-    }
-
-    // --- Создание ассетов: та же логика, что у модалки Create Asset ---
-    if (ok) {
-        struct { AssetCreateKind kind; const char* name; const char* expect; } cases[] = {
-            {AssetCreateKind::Folder, "selftest_dir", "selftest_dir"},
-            {AssetCreateKind::Script, "selftest_script", "selftest_script.lua"},
-            {AssetCreateKind::Material, "selftest_mat", "selftest_mat.sagemat"},
-        };
-        for (const auto& c : cases) {
-            m_assetsCreateKind = c.kind;
-            std::snprintf(m_assetsCreateName, sizeof(m_assetsCreateName), "%s", c.name);
-            fs::path created;
-            if (!CreatePendingAsset(created) || !fs::exists(m_assetsCwd / c.expect, ec)) {
-                LOG_ERROR("Editor") << "SELFTEST: asset create failed for " << c.expect
-                                    << " (" << m_dlgError << ")";
-                ok = false;
-                break;
-            }
-        }
-        m_assetsCreateKind = AssetCreateKind::None;
-    }
-
-    // --- Материалы: правка разделяемого экземпляра + назначение + сохранение
-    // сцены + перезагрузка => путь и albedo восстановлены ---
-    if (ok) {
-        std::string matPath = (m_assetsCwd / "selftest_mat.sagemat").string();
-        auto material = ResourceManager::Instance().GetMaterial(matPath);
-        material->Albedo = {0.1f, 0.2f, 0.9f};
-        try {
-            material->SaveToFile(matPath);
-        } catch (const std::exception& e) {
-            LOG_ERROR("Editor") << "SELFTEST: material save failed: " << e.what();
-            ok = false;
-        }
-        if (ok) {
-            GameObject cube = m_scene->FindByName("Green Cube");
-            MeshRendererComponent& mr = cube.Renderer();
-            mr.MaterialPath = matPath;
-            mr.MaterialPtr = material;
-
-            fs::path scenePath = m_project.ScenesDir() / "selftest_mat.sage";
-            if (!SaveSceneToFile(scenePath) || !LoadSceneFromFile(scenePath)) ok = false;
-            if (ok) {
-                MeshRendererComponent& reloaded = m_scene->FindByName("Green Cube").Renderer();
-                bool pathOk = reloaded.MaterialPath == matPath;
-                bool albedoOk = reloaded.MaterialPtr &&
-                                std::abs(reloaded.MaterialPtr->Albedo.b - 0.9f) < 0.001f;
-                if (!pathOk || !albedoOk) {
-                    LOG_ERROR("Editor") << "SELFTEST: material round-trip failed (path "
-                                        << pathOk << ", albedo " << albedoOk << ")";
-                    ok = false;
-                }
-                // Убираем материал, чтобы дальнейшие проверки (undo/play) шли
-                // по прежнему сценарию.
-                if (ok) {
-                    reloaded.MaterialPath.clear();
-                    reloaded.MaterialPtr = nullptr;
-                }
-            }
-        }
-    }
-
-    // --- Play: скрипт вращает сущность, Stop откатывает сцену к снапшоту ---
-    if (ok) {
-        GameObject green = m_scene->FindByName("Green Cube");
-        if (!green.Valid()) {
-            LOG_ERROR("Editor") << "SELFTEST: Green Cube not found for play test";
-            ok = false;
-        } else {
-            m_scene->Registry().emplace_or_replace<ScriptComponent>(
-                green.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
-            float rotBefore = green.GetTransform().Rotation.y;
-
-            StartPlay();
-            // Несколько тиков «вручную» — self-test выполняется до главного цикла.
-            for (int i = 0; i < 5; ++i) m_playScripts->UpdateAll(0.1f);
-            float rotDuring = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
-            StopPlay();
-            float rotAfter = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
-
-            if (std::abs(rotDuring - rotBefore) < 1.0f) {
-                LOG_ERROR("Editor") << "SELFTEST: play failed - script did not rotate entity ("
-                                    << rotBefore << " -> " << rotDuring << ")";
-                ok = false;
-            }
-            if (ok && std::abs(rotAfter - rotBefore) > 0.001f) {
-                LOG_ERROR("Editor") << "SELFTEST: stop failed - scene not restored (rot "
-                                    << rotAfter << ", expected " << rotBefore << ")";
-                ok = false;
-            }
-        }
-    }
-
-    if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene save/load + undo/redo + play, "
-                               << before << " entities)";
-    else LOG_ERROR("Editor") << "SELFTEST: FAIL";
+    UpdateWindowTitle();
 }
 
 void EditorLayer::OnDetach() {
-    Log::SetSink(nullptr); // сток ссылается на this — снять до разрушения слоя
+    m_console.Detach();    // сток ссылается на панель — снять до разрушения
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
     if (m_imguiReady) {
         ImGui_ImplOpenGL3_Shutdown();
@@ -323,10 +132,9 @@ void EditorLayer::OnDetach() {
 }
 
 void EditorLayer::OnUpdate(float dt) {
-    // Логика правки — событийная, живёт в панелях (камера — в Viewport, где
-    // известно состояние наведения). Единственный "симуляционный" тик — Play:
-    // скрипты сущностей обновляются, пока не нажата пауза.
-    if (m_playState == PlayState::Playing && m_playScripts) {
+    // Логика правки — событийная, живёт в панелях. Единственный
+    // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
+    if (m_playState == EditorPlayState::Playing && m_playScripts) {
         m_playScripts->UpdateAll(dt);
     }
     m_plugins.UpdateAll(dt);
@@ -379,7 +187,8 @@ void EditorLayer::StartPlay() {
         }
     }
 
-    m_playState = PlayState::Playing;
+    m_playState = EditorPlayState::Playing;
+    m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
     LOG_INFO("Editor") << "Play started (" << attached << " script(s) attached)";
 }
 
@@ -391,12 +200,12 @@ void EditorLayer::StopPlay() {
     m_playScripts.reset();
     RestoreSceneFromString(m_playSnapshot);
     m_playSnapshot.clear();
-    m_playState = PlayState::Editing;
+    m_playState = EditorPlayState::Editing;
     LOG_INFO("Editor") << "Play stopped, scene restored";
 }
 
 // ============================================================================
-//  Undo/Redo (снапшот-модель)
+//  Undo/Redo (снапшот-модель) + dirty-маркер
 // ============================================================================
 
 bool EditorLayer::RestoreSceneFromString(const std::string& snapshot) {
@@ -419,6 +228,32 @@ void EditorLayer::PushUndoSnapshot() {
     }
     m_undoStack.push_back(SceneSerializer::SaveToString(*m_scene));
     m_redoStack.clear(); // новая мутация обрывает redo-ветку
+    m_sceneDirty = true;
+    UpdateWindowTitle();
+}
+
+void EditorLayer::CapturePendingSnapshot() {
+    if (InPlayMode()) return;
+    m_pendingEditSnapshot = SceneSerializer::SaveToString(*m_scene);
+}
+
+void EditorLayer::CommitPendingSnapshot() {
+    if (InPlayMode() || m_pendingEditSnapshot.empty()) return;
+    constexpr size_t kMaxUndoEntries = 100;
+    if (m_undoStack.size() >= kMaxUndoEntries) m_undoStack.erase(m_undoStack.begin());
+    m_undoStack.push_back(m_pendingEditSnapshot);
+    m_pendingEditSnapshot.clear();
+    m_redoStack.clear();
+    m_sceneDirty = true;
+    UpdateWindowTitle();
+}
+
+// Одна запись undo на всё перетаскивание DragFloat/набор текста: состояние
+// «до» запоминается на активации виджета, в стек уходит на завершении правки.
+void EditorLayer::TrackLastImGuiItem() {
+    if (InPlayMode()) return;
+    if (ImGui::IsItemActivated()) CapturePendingSnapshot();
+    if (ImGui::IsItemDeactivatedAfterEdit()) CommitPendingSnapshot();
 }
 
 void EditorLayer::Undo() {
@@ -426,6 +261,8 @@ void EditorLayer::Undo() {
     m_redoStack.push_back(SceneSerializer::SaveToString(*m_scene));
     if (RestoreSceneFromString(m_undoStack.back())) {
         m_undoStack.pop_back();
+        m_sceneDirty = true;
+        UpdateWindowTitle();
     } else {
         m_redoStack.pop_back(); // откат не удался — не ломаем историю
     }
@@ -436,13 +273,15 @@ void EditorLayer::Redo() {
     m_undoStack.push_back(SceneSerializer::SaveToString(*m_scene));
     if (RestoreSceneFromString(m_redoStack.back())) {
         m_redoStack.pop_back();
+        m_sceneDirty = true;
+        UpdateWindowTitle();
     } else {
         m_undoStack.pop_back();
     }
 }
 
 // ============================================================================
-//  Сцена
+//  Сущности
 // ============================================================================
 
 GameObject EditorLayer::CreateCubeEntity(const std::string& name) {
@@ -453,6 +292,35 @@ GameObject EditorLayer::CreateCubeEntity(const std::string& name) {
     return obj;
 }
 
+void EditorLayer::DuplicateSelected() {
+    GameObject src = m_scene->Get(m_selectedId);
+    if (!src.Valid()) return;
+    PushUndoSnapshot();
+    GameObject copy = m_scene->CreateObject(src.Name() + " Copy");
+    copy.GetTransform() = src.GetTransform();
+    copy.GetTransform().Position.x += 0.5f; // сдвиг, чтобы копия не сливалась с оригиналом
+    MeshRendererComponent& mr = copy.Renderer();
+    mr = src.Renderer();
+    if (const ScriptComponent* sc = src.Registry()->try_get<ScriptComponent>(src.Entity())) {
+        copy.Registry()->emplace<ScriptComponent>(copy.Entity(), *sc);
+    }
+    if (const CameraComponent* cam = src.Registry()->try_get<CameraComponent>(src.Entity())) {
+        copy.Registry()->emplace<CameraComponent>(copy.Entity(), *cam);
+    }
+    m_selectedId = copy.Id();
+}
+
+void EditorLayer::DeleteSelected() {
+    if (!m_scene->Get(m_selectedId).Valid()) return;
+    PushUndoSnapshot();
+    m_scene->RemoveObject(m_selectedId);
+    m_selectedId = -1;
+}
+
+// ============================================================================
+//  Сцена / проект
+// ============================================================================
+
 void EditorLayer::NewScene(bool withDemoContent) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
     m_undoStack.clear();
@@ -460,6 +328,7 @@ void EditorLayer::NewScene(bool withDemoContent) {
     m_scene = std::make_unique<Scene>("Untitled");
     m_selectedId = -1;
     m_scenePath.clear();
+    m_sceneDirty = false;
 
     if (withDemoContent) {
         struct Def { const char* name; glm::vec3 pos; glm::vec3 color; glm::vec3 scale; };
@@ -476,10 +345,19 @@ void EditorLayer::NewScene(bool withDemoContent) {
             obj.GetTransform().Scale = d.scale;
             obj.Renderer().Color = d.color;
         }
+
+        // Игровая камера сцены — панель Game сразу показывает картинку, а не
+        // подсказку «нет камеры»; сущность без меша (не рисуется в мире).
+        GameObject camObj = m_scene->CreateObject("Main Camera");
+        camObj.GetTransform().Position = {5.0f, 4.5f, 5.0f};
+        camObj.GetTransform().Rotation = {-25.0f, 45.0f, 0.0f};
+        m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
+
         // Что-то выбрано сразу — гизмо видно, Inspector не пустой.
         GameObject green = m_scene->FindByName("Green Cube");
         if (green.Valid()) m_selectedId = green.Id();
     }
+    UpdateWindowTitle();
 }
 
 bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
@@ -490,7 +368,9 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
         m_redoStack.clear();
         m_selectedId = -1;
         m_scenePath = path;
+        m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene loaded: " << path.string();
+        UpdateWindowTitle();
         return true;
     } catch (const std::exception& e) {
         LOG_ERROR("Editor") << "Scene load failed: " << e.what();
@@ -504,7 +384,9 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
         if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
         SceneSerializer::Save(*m_scene, path.string());
         m_scenePath = path;
+        m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene saved: " << path.string();
+        UpdateWindowTitle();
         return true;
     } catch (const std::exception& e) {
         LOG_ERROR("Editor") << "Scene save failed: " << e.what();
@@ -512,30 +394,77 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
     }
 }
 
-void EditorLayer::DuplicateSelected() {
-    GameObject src = m_scene->Get(m_selectedId);
-    if (!src.Valid()) return;
-    PushUndoSnapshot();
-    GameObject copy = m_scene->CreateObject(src.Name() + " Copy");
-    copy.GetTransform() = src.GetTransform();
-    copy.GetTransform().Position.x += 0.5f; // сдвиг, чтобы копия не сливалась с оригиналом
-    MeshRendererComponent& mr = copy.Renderer();
-    mr = src.Renderer();
-    if (const ScriptComponent* sc = src.Registry()->try_get<ScriptComponent>(src.Entity())) {
-        copy.Registry()->emplace<ScriptComponent>(copy.Entity(), *sc);
-    }
-    m_selectedId = copy.Id();
+bool EditorLayer::CreateProject(const std::string& dir, const std::string& name, std::string& err) {
+    if (!m_project.CreateNew(dir, name, err)) return false;
+    m_assetsCwd = m_project.Dir();
+    m_recent.Add(m_project.Dir().string());
+    NewScene(/*withDemoContent=*/true);
+    UpdateWindowTitle();
+    return true;
 }
 
-void EditorLayer::DeleteSelected() {
-    if (!m_scene->Get(m_selectedId).Valid()) return;
-    PushUndoSnapshot();
-    m_scene->RemoveObject(m_selectedId);
-    m_selectedId = -1;
+bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
+    if (!m_project.Open(path, err)) return false;
+    m_assetsCwd = m_project.Dir();
+    m_recent.Add(m_project.Dir().string());
+
+    // Автозагрузка первой сцены проекта (по алфавиту) — открытый проект сразу
+    // показывает свой контент, а не осиротевшую демо-сцену.
+    std::error_code ec;
+    std::vector<fs::path> scenes;
+    for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
+        if (entry.path().extension() == ".sage") scenes.push_back(entry.path());
+    }
+    std::sort(scenes.begin(), scenes.end());
+    if (!scenes.empty()) LoadSceneFromFile(scenes.front());
+
+    UpdateWindowTitle();
+    return true;
+}
+
+// Заголовок OS-окна: "SAGE Editor — сцена[*] — проект". Обновляется только
+// по факту изменения (не дёргаем GLFW каждый кадр).
+void EditorLayer::UpdateWindowTitle() {
+    std::string scene = m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
+    std::string title = "SAGE Editor — " + scene + (m_sceneDirty ? "*" : "");
+    if (m_project.Loaded()) title += " — " + m_project.Name();
+    if (title == m_windowTitle) return;
+    m_windowTitle = title;
+    glfwSetWindowTitle(sage::Application::Get().GetWindow().Handle(), title.c_str());
 }
 
 // ============================================================================
-//  Рендер превью сцены
+//  Пикинг из вьюпорта
+// ============================================================================
+
+void EditorLayer::PickAtViewport(float u, float v) {
+    // Луч из камеры через пиксель вьюпорта: unprojection ближней/дальней точек NDC.
+    glm::vec2 ndc(u * 2.0f - 1.0f, 1.0f - v * 2.0f);
+    glm::mat4 invVP = glm::inverse(m_proj * m_view);
+    glm::vec4 p0 = invVP * glm::vec4(ndc, -1.0f, 1.0f);
+    glm::vec4 p1 = invVP * glm::vec4(ndc, 1.0f, 1.0f);
+    glm::vec3 ro = glm::vec3(p0) / p0.w;
+    glm::vec3 rd = glm::normalize(glm::vec3(p1) / p1.w - ro);
+
+    int bestId = -1;
+    float bestDist = 1e30f;
+    auto view = m_scene->Registry().view<IdComponent, Transform, MeshRendererComponent>();
+    for (auto e : view) {
+        if (!view.get<MeshRendererComponent>(e).MeshPtr) continue;
+        glm::mat4 inv = glm::inverse(view.get<Transform>(e).GetMatrix());
+        glm::vec3 lro = glm::vec3(inv * glm::vec4(ro, 1.0f));
+        glm::vec3 lrd = glm::vec3(inv * glm::vec4(rd, 0.0f)); // без нормализации: t остаётся в масштабе мира
+        float t = RayUnitCube(lro, lrd);
+        if (t >= 0.0f && t < bestDist) {
+            bestDist = t;
+            bestId = view.get<IdComponent>(e).Id;
+        }
+    }
+    m_selectedId = bestId; // клик мимо всех объектов — снять выбор
+}
+
+// ============================================================================
+//  Рендер превью: Viewport (редакторская камера) и Game (камера сцены)
 // ============================================================================
 
 void EditorLayer::RenderSceneToFramebuffer() {
@@ -558,10 +487,9 @@ void EditorLayer::RenderSceneToFramebuffer() {
         mr.MeshPtr->Draw();
     });
 
-    // Гизмо-графика движка (DebugDraw) — рисуется В ТОТ ЖЕ буфер после сцены,
-    // с тестом глубины: объекты заслоняют сетку (раньше сетка была 2D-оверлеем
-    // ImGuizmo поверх готовой картинки и просвечивала сквозь всю геометрию).
-    if (m_showGrid) {
+    // Гизмо-графика движка (DebugDraw) — в ТОТ ЖЕ буфер после сцены, с тестом
+    // глубины: объекты заслоняют сетку (не 2D-оверлей поверх картинки).
+    if (m_viewport.ShowGrid()) {
         m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
     }
     GameObject selectedObj = m_scene->Get(m_selectedId);
@@ -577,6 +505,57 @@ void EditorLayer::RenderSceneToFramebuffer() {
     device.BindDefaultFramebuffer();
 }
 
+bool EditorLayer::HasPrimaryCamera() {
+    auto view = m_scene->Registry().view<CameraComponent, Transform>();
+    for (auto e : view) {
+        if (view.get<CameraComponent>(e).Primary) return true;
+    }
+    return false;
+}
+
+void EditorLayer::RenderGameToFramebuffer() {
+    // Первая Primary-камера сцены. Нет камеры — панель Game сама покажет
+    // подсказку, кадр не рендерим.
+    entt::entity camEntity = entt::null;
+    auto camView = m_scene->Registry().view<CameraComponent, Transform>();
+    for (auto e : camView) {
+        if (camView.get<CameraComponent>(e).Primary) { camEntity = e; break; }
+    }
+    if (camEntity == entt::null) return;
+
+    const CameraComponent& cam = camView.get<CameraComponent>(camEntity);
+    const Transform& tr = camView.get<Transform>(camEntity);
+
+    // Ориентация из углов Эйлера Transform (порядок XYZ — как в GetMatrix);
+    // Scale сущности на камеру не влияет.
+    glm::mat4 rot = glm::eulerAngleXYZ(glm::radians(tr.Rotation.x),
+                                       glm::radians(tr.Rotation.y),
+                                       glm::radians(tr.Rotation.z));
+    glm::vec3 fwd = glm::normalize(glm::vec3(rot * glm::vec4(0, 0, -1, 0)));
+    glm::vec3 up = glm::normalize(glm::vec3(rot * glm::vec4(0, 1, 0, 0)));
+    glm::mat4 view = glm::lookAt(tr.Position, tr.Position + fwd, up);
+    float aspect = (float)m_gameW / (float)std::max(m_gameH, 1);
+    glm::mat4 proj = glm::perspective(glm::radians(cam.Fov), aspect, cam.NearClip, cam.FarClip);
+
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+    m_gameFbo->Resize(m_gameW, m_gameH);
+    m_gameFbo->Bind();
+    device.SetClearColor(0.08f, 0.09f, 0.11f, 1.0f);
+    device.Clear();
+
+    m_shader->Use();
+    m_shader->SetMat4("uView", view);
+    m_shader->SetMat4("uProjection", proj);
+    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& objTr, MeshRendererComponent& mr) {
+        m_shader->SetMat4("uModel", objTr.GetMatrix());
+        m_shader->SetVec3("uObjectColor", EffectiveColor(mr));
+        mr.MeshPtr->Draw();
+    });
+    // Никакого DebugDraw: игровое окно показывает сцену как её увидит игрок.
+
+    device.BindDefaultFramebuffer();
+}
+
 // ============================================================================
 //  Кадр UI
 // ============================================================================
@@ -585,6 +564,7 @@ void EditorLayer::OnRender() {
     sage::Application& app = sage::Application::Get();
 
     RenderSceneToFramebuffer();
+    RenderGameToFramebuffer();
 
     app.Device().SetViewport(0, 0, app.GetWindow().Width(), app.GetWindow().Height());
     app.Device().SetClearColor(0.05f, 0.05f, 0.06f, 1.0f);
@@ -596,15 +576,32 @@ void EditorLayer::OnRender() {
     ImGuizmo::BeginFrame();
 
     DrawDockspaceAndMenu(); // включая модальные диалоги (см. DrawDialogs внутри)
-    DrawHierarchyPanel();
-    DrawInspectorPanel();
-    DrawViewportPanel();
-    DrawConsolePanel();
-    DrawAssetsPanel();
+    m_hierarchy.Draw(*this);
+    m_inspector.Draw(*this);
+    m_viewport.Draw(*this);
+    m_game.Draw(*this);
+    m_console.Draw();
+    m_assets.Draw(*this);
     m_plugins.ImGuiAll();
+
+    // Стартовый launcher проектов: пока проект не открыт (и не отклонён).
+    if ((!m_project.Loaded() && !m_launcher.Dismissed()) || m_launcherRequested) {
+        m_launcher.Draw(*this, m_recent);
+        if (m_project.Loaded()) m_launcherRequested = false;
+    }
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    // Multi-viewport: панели, вытащенные за пределы главного окна, живут в
+    // собственных OS-окнах — их нужно обновить и отрисовать отдельно.
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        GLFWwindow* backup = glfwGetCurrentContext();
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(backup);
+    }
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {
@@ -615,7 +612,8 @@ void EditorLayer::OnRender() {
 }
 
 void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
-    // Пересобираем узлы доккинга с нуля: Viewport в центре, панели вокруг.
+    // Пересобираем узлы доккинга с нуля: Viewport+Game в центре (табами),
+    // панели вокруг.
     ImGui::DockBuilderRemoveNode(dockspaceId);
     ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
@@ -629,8 +627,51 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Console", bottom);
     ImGui::DockBuilderDockWindow("Assets", bottom);
+    ImGui::DockBuilderDockWindow("Game", center);
     ImGui::DockBuilderDockWindow("Viewport", center);
     ImGui::DockBuilderFinish(dockspaceId);
+
+    // По умолчанию активен таб Viewport (Game выходит вперёд при Play).
+    ImGui::SetWindowFocus("Viewport");
+}
+
+void EditorLayer::DrawStatusBar(float height) {
+    // Строка состояния внизу хост-окна: проект | сцена(+dirty) | сущности |
+    // Play-статус | сообщение плагинов | FPS.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 3));
+    ImGui::BeginChild("##statusbar", ImVec2(0, height), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoScrollbar);
+    ImGui::AlignTextToFramePadding();
+
+    ImGui::TextDisabled("%s", m_project.Loaded() ? m_project.Name().c_str() : "No project");
+    ImGui::SameLine(); ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    std::string scene = m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
+    ImGui::Text("%s%s", scene.c_str(), m_sceneDirty ? "*" : "");
+    ImGui::SameLine(); ImGui::TextDisabled("|");
+    ImGui::SameLine(); ImGui::TextDisabled("Entities: %zu", m_scene->Count());
+
+    if (InPlayMode()) {
+        ImGui::SameLine(); ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        bool playing = m_playState == EditorPlayState::Playing;
+        ImGui::TextColored(playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
+                           playing ? "PLAYING" : "PAUSED");
+    }
+    if (!m_pluginStatusMessage.empty()) {
+        ImGui::SameLine(); ImGui::TextDisabled("|");
+        ImGui::SameLine(); ImGui::TextDisabled("%s", m_pluginStatusMessage.c_str());
+    }
+
+    // FPS — справа.
+    char fps[32];
+    std::snprintf(fps, sizeof(fps), "%.0f FPS", sage::Application::Get().Fps());
+    float w = ImGui::CalcTextSize(fps).x + 16.0f;
+    ImGui::SameLine(ImGui::GetWindowWidth() - w);
+    ImGui::TextDisabled("%s", fps);
+
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
 }
 
 void EditorLayer::DrawDockspaceAndMenu() {
@@ -657,7 +698,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
         m_rebuildDockLayout = false;
         BuildDefaultDockLayout(dockspaceId);
     }
-    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    // Док-пространство занимает всё, кроме статус-бара внизу.
+    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight), ImGuiDockNodeFlags_None);
+    DrawStatusBar(kStatusBarHeight);
 
     // ВАЖНО: OpenPopup нельзя звать изнутри BeginMenu (другой ID-стек — модалка
     // на уровне окна её не найдёт). Меню лишь запоминает, какой диалог открыть;
@@ -667,9 +710,29 @@ void EditorLayer::DrawDockspaceAndMenu() {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("New Project...")) openDialog = "New Project";
             if (ImGui::MenuItem("Open Project...")) openDialog = "Open Project";
+            if (ImGui::MenuItem("Project Launcher...")) m_launcherRequested = true;
             ImGui::Separator();
             if (ImGui::MenuItem("New Scene")) NewScene(false);
             if (ImGui::MenuItem("Open Scene...")) openDialog = "Open Scene";
+
+            // Сцены открытого проекта — прямой доступ без файлового диалога.
+            if (m_project.Loaded() && ImGui::BeginMenu("Project Scenes")) {
+                std::error_code ec;
+                std::vector<fs::path> scenes;
+                for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
+                    if (entry.path().extension() == ".sage") scenes.push_back(entry.path());
+                }
+                std::sort(scenes.begin(), scenes.end());
+                if (scenes.empty()) ImGui::TextDisabled("(no scenes yet)");
+                for (const fs::path& scenePath : scenes) {
+                    bool current = scenePath == m_scenePath;
+                    if (ImGui::MenuItem(scenePath.filename().string().c_str(), nullptr, current)) {
+                        LoadSceneFromFile(scenePath);
+                    }
+                }
+                ImGui::EndMenu();
+            }
+
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
                 if (!m_scenePath.empty()) SaveSceneToFile(m_scenePath);
                 else openDialog = "Save Scene As";
@@ -689,9 +752,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Play")) {
-            if (ImGui::MenuItem("Play", nullptr, false, m_playState == PlayState::Editing)) StartPlay();
-            if (ImGui::MenuItem("Pause", nullptr, false, m_playState == PlayState::Playing)) PausePlay();
-            if (ImGui::MenuItem("Resume", nullptr, false, m_playState == PlayState::Paused)) ResumePlay();
+            if (ImGui::MenuItem("Play", nullptr, false, m_playState == EditorPlayState::Editing)) StartPlay();
+            if (ImGui::MenuItem("Pause", nullptr, false, m_playState == EditorPlayState::Playing)) PausePlay();
+            if (ImGui::MenuItem("Resume", nullptr, false, m_playState == EditorPlayState::Paused)) ResumePlay();
             if (ImGui::MenuItem("Stop", nullptr, false, InPlayMode())) StopPlay();
             ImGui::EndMenu();
         }
@@ -704,17 +767,22 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 PushUndoSnapshot();
                 m_selectedId = CreateCubeEntity("Cube").Id();
             }
+            if (ImGui::MenuItem("Create Camera")) {
+                PushUndoSnapshot();
+                GameObject camObj = m_scene->CreateObject("Camera");
+                m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
+                m_selectedId = camObj.Id();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Window")) {
             if (ImGui::MenuItem("Reset Layout")) m_rebuildDockLayout = true;
-            ImGui::MenuItem("Show Grid", nullptr, &m_showGrid);
+            ImGui::MenuItem("Show Grid", nullptr, &m_viewport.ShowGridRef());
             ImGui::EndMenu();
         }
 
-        // Статус проекта справа в меню-баре (плагины могут дописать свой статус через SetStatusMessage).
+        // Статус проекта справа в меню-баре.
         std::string status = m_project.Loaded() ? ("Project: " + m_project.Name()) : "No project";
-        if (!m_pluginStatusMessage.empty()) status += "  |  " + m_pluginStatusMessage;
         float w = ImGui::CalcTextSize(status.c_str()).x + 16.0f;
         ImGui::SameLine(ImGui::GetWindowWidth() - w);
         ImGui::TextDisabled("%s", status.c_str());
@@ -744,7 +812,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
 }
 
 // ============================================================================
-//  Диалоги (модальные окна)
+//  Диалоги File-меню (модальные окна)
 // ============================================================================
 
 void EditorLayer::DrawDialogs() {
@@ -758,9 +826,7 @@ void EditorLayer::DrawDialogs() {
         if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
         if (ImGui::Button("Create", ImVec2(120, 0))) {
             std::string err;
-            if (m_project.CreateNew(m_dlgProjectDir, m_dlgProjectName, err)) {
-                m_assetsCwd = m_project.Dir();
-                NewScene(false);
+            if (CreateProject(m_dlgProjectDir, m_dlgProjectName, err)) {
                 ImGui::CloseCurrentPopup();
             } else {
                 m_dlgError = err;
@@ -778,8 +844,7 @@ void EditorLayer::DrawDialogs() {
         if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
         if (ImGui::Button("Open", ImVec2(120, 0))) {
             std::string err;
-            if (m_project.Open(m_dlgOpenPath, err)) {
-                m_assetsCwd = m_project.Dir();
+            if (OpenProject(m_dlgOpenPath, err)) {
                 ImGui::CloseCurrentPopup();
             } else {
                 m_dlgError = err;
@@ -821,778 +886,191 @@ void EditorLayer::DrawDialogs() {
         if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+}
 
-    // Rename/Delete ассета — открываются из DrawAssetTile (деферред: сама
-    // плитка только выставляет m_assetsRenameTarget/m_assetsDeleteTarget,
-    // OpenPopup зовётся здесь же, на уровне хоста, по тому же паттерну, что и
-    // File-меню выше).
-    if (!m_assetsRenameTarget.empty() && !ImGui::IsPopupOpen("Rename Asset")) {
-        ImGui::OpenPopup("Rename Asset");
+// ============================================================================
+//  Self-test (SAGE_EDITOR_SELFTEST=1, headless CI)
+// ============================================================================
+
+// Headless-проверка ядра редактора без UI-кликов (модалки недоступны в CI):
+// проект -> сцена -> undo/redo -> ассеты -> материалы -> камера -> Play.
+// Результат — строкой SELFTEST: PASS/FAIL в лог.
+void EditorLayer::RunSelfTest() {
+    size_t before = m_scene->Count();
+    std::string err;
+    bool ok = true;
+
+    std::error_code ec;
+    fs::remove_all("selftest_project", ec); // от прошлого прогона
+    if (!CreateProject(".", "selftest_project", err)) {
+        LOG_ERROR("Editor") << "SELFTEST: create project failed: " << err;
+        ok = false;
     }
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Rename Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextDisabled("%s", m_assetsRenameTarget.filename().string().c_str());
-        bool justOpened = ImGui::IsWindowAppearing();
-        if (justOpened) {
-            std::string stem = m_assetsRenameTarget.filename().string();
-            std::snprintf(m_assetsRenameBuf, sizeof(m_assetsRenameBuf), "%s", stem.c_str());
+    if (ok) {
+        before = m_scene->Count(); // CreateProject пересоздал демо-сцену
+        fs::path scenePath = m_project.ScenesDir() / "selftest.sage";
+        if (!SaveSceneToFile(scenePath)) ok = false;
+        if (ok) {
+            NewScene(false); // пустая сцена — убеждаемся, что загрузка реально восстанавливает
+            if (!LoadSceneFromFile(scenePath)) ok = false;
         }
-        bool enterPressed = ImGui::InputText("New name", m_assetsRenameBuf, sizeof(m_assetsRenameBuf),
-                                              ImGuiInputTextFlags_EnterReturnsTrue);
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        bool doRename = enterPressed || ImGui::Button("Rename", ImVec2(120, 0));
-        if (doRename) {
-            fs::path target = m_assetsRenameTarget.parent_path() / m_assetsRenameBuf;
-            std::error_code ec;
-            fs::rename(m_assetsRenameTarget, target, ec);
-            if (ec) {
-                m_dlgError = "Rename failed: " + ec.message();
-                LOG_ERROR("Editor") << "Asset rename failed: " << ec.message();
-            } else {
-                m_assetsRenameTarget.clear();
-                m_dlgError.clear();
-                ImGui::CloseCurrentPopup();
-            }
+        if (ok && m_scene->Count() != before) {
+            LOG_ERROR("Editor") << "SELFTEST: entity count mismatch: saved " << before
+                                << ", loaded " << m_scene->Count();
+            ok = false;
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            m_assetsRenameTarget.clear();
-            m_dlgError.clear();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
     }
 
-    // Создание ассета (New Folder / Script / Text / Material из панели Assets).
-    if (m_assetsCreateKind != AssetCreateKind::None && !ImGui::IsPopupOpen("Create Asset")) {
-        ImGui::OpenPopup("Create Asset");
-    }
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Create Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        const char* kindLabel = "";
-        switch (m_assetsCreateKind) {
-            case AssetCreateKind::Folder:   kindLabel = "Folder"; break;
-            case AssetCreateKind::Script:   kindLabel = "Lua script"; break;
-            case AssetCreateKind::TextFile: kindLabel = "Text file"; break;
-            case AssetCreateKind::Material: kindLabel = "Material"; break;
-            default: break;
+    // --- Недавние проекты: наш проект должен был попасть в начало списка ---
+    if (ok) {
+        RecentProjects reload;
+        reload.Load();
+        bool found = !reload.List().empty() &&
+                     reload.List().front() == m_project.Dir().string();
+        if (!found) {
+            LOG_ERROR("Editor") << "SELFTEST: recent projects did not record the new project";
+            ok = false;
         }
-        ImGui::TextDisabled("%s in %s", kindLabel, m_assetsCwd.filename().string().c_str());
-        bool enterPressed = ImGui::InputText("Name", m_assetsCreateName, sizeof(m_assetsCreateName),
-                                              ImGuiInputTextFlags_EnterReturnsTrue);
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        if (enterPressed || ImGui::Button("Create", ImVec2(120, 0))) {
+    }
+
+    // --- CameraComponent: сериализация вместе со сценой ---
+    if (ok) {
+        GameObject camObj = m_scene->FindByName("Main Camera");
+        bool camOk = camObj.Valid() &&
+                     m_scene->Registry().try_get<CameraComponent>(camObj.Entity()) != nullptr &&
+                     HasPrimaryCamera();
+        if (!camOk) {
+            LOG_ERROR("Editor") << "SELFTEST: Main Camera lost after scene save/load round-trip";
+            ok = false;
+        }
+    }
+
+    // --- Dirty-маркер: мутация ставит, сохранение снимает ---
+    if (ok) {
+        PushUndoSnapshot();
+        CreateCubeEntity("DirtyProbe");
+        if (!m_sceneDirty) {
+            LOG_ERROR("Editor") << "SELFTEST: scene not marked dirty after mutation";
+            ok = false;
+        }
+        if (ok && !SaveSceneToFile(m_project.ScenesDir() / "selftest.sage")) ok = false;
+        if (ok && m_sceneDirty) {
+            LOG_ERROR("Editor") << "SELFTEST: dirty flag not cleared by save";
+            ok = false;
+        }
+        Undo(); // вернуть сцену к сохранённому состоянию
+    }
+
+    // --- Undo/Redo: создание сущности откатывается и накатывается обратно ---
+    if (ok) {
+        size_t n0 = m_scene->Count();
+        PushUndoSnapshot();
+        CreateCubeEntity("UndoProbe");
+        Undo();
+        if (m_scene->Count() != n0) {
+            LOG_ERROR("Editor") << "SELFTEST: undo failed (count " << m_scene->Count() << ", expected " << n0 << ")";
+            ok = false;
+        }
+        Redo();
+        if (ok && m_scene->Count() != n0 + 1) {
+            LOG_ERROR("Editor") << "SELFTEST: redo failed (count " << m_scene->Count() << ", expected " << n0 + 1 << ")";
+            ok = false;
+        }
+        Undo(); // вернуть сцену к исходным n0 сущностям
+    }
+
+    // --- Создание ассетов: та же логика, что у модалки Create Asset ---
+    if (ok) {
+        struct { AssetsPanel::CreateKind kind; const char* name; const char* expect; } cases[] = {
+            {AssetsPanel::CreateKind::Folder, "selftest_dir", "selftest_dir"},
+            {AssetsPanel::CreateKind::Script, "selftest_script", "selftest_script.lua"},
+            {AssetsPanel::CreateKind::Material, "selftest_mat", "selftest_mat.sagemat"},
+        };
+        for (const auto& c : cases) {
             fs::path created;
-            if (CreatePendingAsset(created)) {
-                m_assetsSelected = created;
-                m_assetsCreateKind = AssetCreateKind::None;
-                m_dlgError.clear();
-                ImGui::CloseCurrentPopup();
+            std::string createErr;
+            if (!AssetsPanel::CreateAsset(c.kind, c.name, m_assetsCwd, created, createErr) ||
+                !fs::exists(m_assetsCwd / c.expect, ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: asset create failed for " << c.expect
+                                    << " (" << createErr << ")";
+                ok = false;
+                break;
             }
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            m_assetsCreateKind = AssetCreateKind::None;
-            m_dlgError.clear();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
     }
 
-    if (!m_assetsDeleteTarget.empty() && !ImGui::IsPopupOpen("Delete Asset")) {
-        ImGui::OpenPopup("Delete Asset");
-    }
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Delete Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Delete \"%s\"?", m_assetsDeleteTarget.filename().string().c_str());
-        ImGui::TextDisabled("This cannot be undone.");
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-        if (ImGui::Button("Delete", ImVec2(120, 0))) {
-            std::error_code ec;
-            fs::remove_all(m_assetsDeleteTarget, ec);
-            if (ec) LOG_ERROR("Editor") << "Asset delete failed: " << ec.message();
-            if (m_assetsSelected == m_assetsDeleteTarget) m_assetsSelected.clear();
-            m_assetsDeleteTarget.clear();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            m_assetsDeleteTarget.clear();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-}
-
-// ============================================================================
-//  Панели
-// ============================================================================
-
-void EditorLayer::DrawHierarchyPanel() {
-    ImGui::Begin("Hierarchy");
-    ImGui::TextDisabled("Scene: %s  |  Entities: %zu", m_scene->Name().c_str(), m_scene->Count());
-    ImGui::Separator();
-
-    // Стабильный порядок — сортировка по id (порядок обхода entt не гарантирован).
-    std::vector<std::pair<int, std::string>> items;
-    auto view = m_scene->Registry().view<IdComponent, NameComponent>();
-    for (auto e : view) {
-        items.push_back({view.get<IdComponent>(e).Id, view.get<NameComponent>(e).Name});
-    }
-    std::sort(items.begin(), items.end());
-
-    for (auto& [id, name] : items) {
-        std::string label = name + "##" + std::to_string(id);
-        if (ImGui::Selectable(label.c_str(), m_selectedId == id)) m_selectedId = id;
-        if (ImGui::BeginPopupContextItem()) {
-            m_selectedId = id;
-            if (ImGui::MenuItem("Duplicate")) DuplicateSelected();
-            if (ImGui::MenuItem("Delete")) DeleteSelected();
-            ImGui::EndPopup();
-        }
-    }
-
-    // Контекстное меню пустого места — создание сущностей.
-    if (ImGui::BeginPopupContextWindow("##hierarchy_ctx", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        if (ImGui::MenuItem("Create Empty")) { PushUndoSnapshot(); m_selectedId = m_scene->CreateObject("Empty").Id(); }
-        if (ImGui::MenuItem("Create Cube")) { PushUndoSnapshot(); m_selectedId = CreateCubeEntity("Cube").Id(); }
-        ImGui::EndPopup();
-    }
-    ImGui::End();
-}
-
-// Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
-// ResourceManager — все сущности с этим материалом обновляются в вьюпорте
-// сразу; Save фиксирует значения на диск, Revert перечитывает файл.
-void EditorLayer::DrawMaterialEditor() {
-    std::string pathStr = m_assetsSelected.string();
-    std::shared_ptr<Material> material = ResourceManager::Instance().GetMaterial(pathStr);
-
-    ImGui::TextDisabled("Material: %s", m_assetsSelected.filename().string().c_str());
-    ImGui::ColorEdit3("Albedo", &material->Albedo.x);
-    ImGui::ColorEdit3("Emissive", &material->Emissive.x);
-    ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
-    char texBuf[512];
-    std::snprintf(texBuf, sizeof(texBuf), "%s", material->TexturePath.c_str());
-    if (ImGui::InputText("Texture", texBuf, sizeof(texBuf))) material->TexturePath = texBuf;
-    ImGui::TextDisabled("Edits apply live to every entity using this material.");
-
-    if (ImGui::Button("Save Material")) {
+    // --- Материалы: правка разделяемого экземпляра + назначение + сохранение
+    // сцены + перезагрузка => путь и albedo восстановлены ---
+    if (ok) {
+        std::string matPath = (m_assetsCwd / "selftest_mat.sagemat").string();
+        auto material = ResourceManager::Instance().GetMaterial(matPath);
+        material->Albedo = {0.1f, 0.2f, 0.9f};
         try {
-            material->SaveToFile(pathStr);
-            LOG_INFO("Editor") << "Material saved: " << pathStr;
+            material->SaveToFile(matPath);
         } catch (const std::exception& e) {
-            LOG_ERROR("Editor") << "Material save failed: " << e.what();
+            LOG_ERROR("Editor") << "SELFTEST: material save failed: " << e.what();
+            ok = false;
         }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Revert")) ResourceManager::Instance().ReloadMaterial(pathStr);
-}
+        if (ok) {
+            GameObject cube = m_scene->FindByName("Green Cube");
+            MeshRendererComponent& mr = cube.Renderer();
+            mr.MaterialPath = matPath;
+            mr.MaterialPtr = material;
 
-void EditorLayer::DrawInspectorPanel() {
-    ImGui::Begin("Inspector");
-
-    // Выбранный в Assets материал редактируется здесь же — независимо от
-    // того, выбрана ли сущность.
-    if (m_assetsSelected.extension() == ".sagemat") {
-        DrawMaterialEditor();
-        ImGui::Separator();
-    }
-
-    GameObject obj = m_scene->Get(m_selectedId);
-    if (!obj.Valid()) {
-        ImGui::TextDisabled("Nothing selected");
-        ImGui::End();
-        return;
-    }
-
-    // Undo-трекинг «размазанных» правок (drag/текст): на активации виджета
-    // запоминаем состояние «до», на завершении правки — кладём его в undo-стек.
-    // Так всё перетаскивание DragFloat3 или набор имени = одна запись undo.
-    auto trackLastItem = [this]() {
-        if (InPlayMode()) return;
-        if (ImGui::IsItemActivated()) m_pendingEditSnapshot = SceneSerializer::SaveToString(*m_scene);
-        if (ImGui::IsItemDeactivatedAfterEdit() && !m_pendingEditSnapshot.empty()) {
-            constexpr size_t kMaxUndoEntries = 100;
-            if (m_undoStack.size() >= kMaxUndoEntries) m_undoStack.erase(m_undoStack.begin());
-            m_undoStack.push_back(m_pendingEditSnapshot);
-            m_pendingEditSnapshot.clear();
-            m_redoStack.clear();
-        }
-    };
-
-    char buf[128];
-    std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-    if (ImGui::InputText("Name", buf, sizeof(buf))) obj.SetName(buf);
-    trackLastItem();
-    ImGui::TextDisabled("Id: %d", obj.Id());
-    ImGui::Separator();
-
-    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-        Transform& tr = obj.GetTransform();
-        ImGui::DragFloat3("Position", &tr.Position.x, 0.05f); trackLastItem();
-        ImGui::DragFloat3("Rotation", &tr.Rotation.x, 0.5f); trackLastItem();
-        ImGui::DragFloat3("Scale", &tr.Scale.x, 0.05f, 0.01f, 100.0f); trackLastItem();
-    }
-
-    if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
-        MeshRendererComponent& mr = obj.Renderer();
-        ImGui::ColorEdit3("Color", &mr.Color.x); trackLastItem();
-
-        const char* kinds[] = {"None", "Cube", "Model"};
-        int kind = (int)mr.Ref.type;
-        if (ImGui::Combo("Mesh", &kind, kinds, 3)) {
-            PushUndoSnapshot(); // дискретное изменение — прямая запись undo
-            mr.Ref.type = (MeshRef::Type)kind;
-            if (mr.Ref.type == MeshRef::Type::Cube) { mr.Ref.path.clear(); mr.MeshPtr = m_cube; }
-            if (mr.Ref.type == MeshRef::Type::None) { mr.Ref.path.clear(); mr.MeshPtr = nullptr; }
-            // Model — путь задаётся ниже и грузится по кнопке Load.
-        }
-        if (mr.Ref.type == MeshRef::Type::Model) {
-            char pathBuf[512];
-            std::snprintf(pathBuf, sizeof(pathBuf), "%s", mr.Ref.path.c_str());
-            if (ImGui::InputText("Path", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
-            trackLastItem();
-            ImGui::SameLine();
-            if (ImGui::Button("Load")) {
-                try {
-                    mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
-                } catch (const std::exception& e) {
-                    LOG_ERROR("Editor") << "Model load failed: " << e.what();
+            fs::path scenePath = m_project.ScenesDir() / "selftest_mat.sage";
+            if (!SaveSceneToFile(scenePath) || !LoadSceneFromFile(scenePath)) ok = false;
+            if (ok) {
+                MeshRendererComponent& reloaded = m_scene->FindByName("Green Cube").Renderer();
+                bool pathOk = reloaded.MaterialPath == matPath;
+                bool albedoOk = reloaded.MaterialPtr &&
+                                std::abs(reloaded.MaterialPtr->Albedo.b - 0.9f) < 0.001f;
+                if (!pathOk || !albedoOk) {
+                    LOG_ERROR("Editor") << "SELFTEST: material round-trip failed (path "
+                                        << pathOk << ", albedo " << albedoOk << ")";
+                    ok = false;
+                }
+                // Убираем материал, чтобы дальнейшие проверки шли по прежнему сценарию.
+                if (ok) {
+                    reloaded.MaterialPath.clear();
+                    reloaded.MaterialPtr = nullptr;
                 }
             }
         }
     }
 
-    // --- Материал (.sagemat): заменяет Color, общий для всех сущностей с ним ---
-    if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
-        MeshRendererComponent& mr = obj.Renderer();
-        if (mr.MaterialPath.empty()) {
-            ImGui::TextDisabled("No material (entity uses Color above)");
+    // --- Play: скрипт вращает сущность, Stop откатывает сцену к снапшоту ---
+    if (ok) {
+        GameObject green = m_scene->FindByName("Green Cube");
+        if (!green.Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: Green Cube not found for play test";
+            ok = false;
         } else {
-            if (mr.MaterialPtr) {
-                ImGui::ColorButton("##mat_preview", ImVec4(mr.MaterialPtr->Albedo.r, mr.MaterialPtr->Albedo.g,
-                                                            mr.MaterialPtr->Albedo.b, 1.0f));
-                ImGui::SameLine();
-            }
-            ImGui::TextWrapped("%s", mr.MaterialPath.c_str());
-        }
+            m_scene->Registry().emplace_or_replace<ScriptComponent>(
+                green.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
+            float rotBefore = green.GetTransform().Rotation.y;
 
-        // Назначение: выбери .sagemat в Assets (клик по тайлу) — тут появится
-        // кнопка Assign. Отдельного файлового диалога нет намеренно: панель
-        // Assets и есть браузер файлов проекта.
-        if (m_assetsSelected.extension() == ".sagemat") {
-            std::string label = "Assign \"" + m_assetsSelected.filename().string() + "\"";
-            if (ImGui::Button(label.c_str())) {
-                PushUndoSnapshot();
-                mr.MaterialPath = m_assetsSelected.string();
-                mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+            StartPlay();
+            // Несколько тиков «вручную» — self-test выполняется до главного цикла.
+            for (int i = 0; i < 5; ++i) m_playScripts->UpdateAll(0.1f);
+            float rotDuring = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
+            StopPlay();
+            float rotAfter = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
+
+            if (std::abs(rotDuring - rotBefore) < 1.0f) {
+                LOG_ERROR("Editor") << "SELFTEST: play failed - script did not rotate entity ("
+                                    << rotBefore << " -> " << rotDuring << ")";
+                ok = false;
             }
-        } else {
-            ImGui::TextDisabled("Select a .sagemat in Assets to assign it");
-        }
-        if (!mr.MaterialPath.empty()) {
-            if (ImGui::Button("Clear Material")) {
-                PushUndoSnapshot();
-                mr.MaterialPath.clear();
-                mr.MaterialPtr = nullptr;
+            if (ok && std::abs(rotAfter - rotBefore) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: stop failed - scene not restored (rot "
+                                    << rotAfter << ", expected " << rotBefore << ")";
+                ok = false;
             }
         }
     }
 
-    // --- Скрипт (поведение в Play-режиме) ---
-    if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = m_scene->Registry();
-        if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
-            char scriptBuf[512];
-            std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", sc->Path.c_str());
-            if (ImGui::InputText("Lua file", scriptBuf, sizeof(scriptBuf))) sc->Path = scriptBuf;
-            trackLastItem();
-            ImGui::TextDisabled("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)");
-            if (ImGui::Button("Remove Script")) {
-                PushUndoSnapshot();
-                reg.remove<ScriptComponent>(obj.Entity());
-            }
-        } else {
-            if (ImGui::Button("Add Script")) {
-                PushUndoSnapshot();
-                reg.emplace<ScriptComponent>(obj.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
-            }
-        }
-    }
-
-    ImGui::Separator();
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-    if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) DeleteSelected();
-    ImGui::PopStyleColor();
-    ImGui::End();
-}
-
-void EditorLayer::PickEntityAtViewportPos(float u, float v) {
-    // Луч из камеры через пиксель вьюпорта: unprojection ближней/дальней точек NDC.
-    glm::vec2 ndc(u * 2.0f - 1.0f, 1.0f - v * 2.0f);
-    glm::mat4 invVP = glm::inverse(m_proj * m_view);
-    glm::vec4 p0 = invVP * glm::vec4(ndc, -1.0f, 1.0f);
-    glm::vec4 p1 = invVP * glm::vec4(ndc, 1.0f, 1.0f);
-    glm::vec3 ro = glm::vec3(p0) / p0.w;
-    glm::vec3 rd = glm::normalize(glm::vec3(p1) / p1.w - ro);
-
-    int bestId = -1;
-    float bestDist = 1e30f;
-    auto view = m_scene->Registry().view<IdComponent, Transform, MeshRendererComponent>();
-    for (auto e : view) {
-        if (!view.get<MeshRendererComponent>(e).MeshPtr) continue;
-        glm::mat4 inv = glm::inverse(view.get<Transform>(e).GetMatrix());
-        glm::vec3 lro = glm::vec3(inv * glm::vec4(ro, 1.0f));
-        glm::vec3 lrd = glm::vec3(inv * glm::vec4(rd, 0.0f)); // без нормализации: t остаётся в масштабе мира
-        float t = RayUnitCube(lro, lrd);
-        if (t >= 0.0f && t < bestDist) {
-            bestDist = t;
-            bestId = view.get<IdComponent>(e).Id;
-        }
-    }
-    m_selectedId = bestId; // клик мимо всех объектов — снять выбор
-}
-
-void EditorLayer::DrawViewportPanel() {
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("Viewport");
-    m_viewportHovered = ImGui::IsWindowHovered();
-
-    ImVec2 avail = ImGui::GetContentRegionAvail();
-    if (avail.x >= 8 && avail.y >= 8) {
-        m_viewportW = (int)avail.x;
-        m_viewportH = (int)avail.y;
-    }
-    ImVec2 imgPos = ImGui::GetCursorScreenPos();
-
-    // Текстура OpenGL идёт снизу-вверх — переворот по V.
-    ImTextureID tex = (ImTextureID)(std::intptr_t)m_sceneFbo->ColorTexture();
-    ImGui::Image(tex, avail, ImVec2(0, 1), ImVec2(1, 0));
-
-    ImGuiIO& io = ImGui::GetIO();
-    float dt = sage::Application::Get().DeltaTime();
-
-    // --- Камера: ПКМ — осмотр, ПКМ+WASDQE — полёт, Shift — ускорение ---
-    bool rmb = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-    if ((m_viewportHovered || m_cameraDriving) && rmb) {
-        m_cameraDriving = true;
-        m_camera.ProcessMouse(io.MouseDelta.x, -io.MouseDelta.y);
-        float speed = m_camera.MovementSpeed * (io.KeyShift ? 3.0f : 1.0f) * dt;
-        if (ImGui::IsKeyDown(ImGuiKey_W)) m_camera.Position += m_camera.Front * speed;
-        if (ImGui::IsKeyDown(ImGuiKey_S)) m_camera.Position -= m_camera.Front * speed;
-        if (ImGui::IsKeyDown(ImGuiKey_A)) m_camera.Position -= m_camera.Right * speed;
-        if (ImGui::IsKeyDown(ImGuiKey_D)) m_camera.Position += m_camera.Right * speed;
-        if (ImGui::IsKeyDown(ImGuiKey_E)) m_camera.Position += m_camera.WorldUp * speed;
-        if (ImGui::IsKeyDown(ImGuiKey_Q)) m_camera.Position -= m_camera.WorldUp * speed;
-    } else {
-        m_cameraDriving = false;
-    }
-    if (m_viewportHovered && io.MouseWheel != 0.0f) {
-        m_camera.Position += m_camera.Front * io.MouseWheel * 0.8f;
-    }
-
-    // --- Хоткеи гизмо (не во время полёта камеры и не в полях ввода) ---
-    if (m_viewportHovered && !m_cameraDriving && !io.WantTextInput) {
-        if (ImGui::IsKeyPressed(ImGuiKey_W)) m_gizmoOp = (int)ImGuizmo::TRANSLATE;
-        if (ImGui::IsKeyPressed(ImGuiKey_E)) m_gizmoOp = (int)ImGuizmo::ROTATE;
-        if (ImGui::IsKeyPressed(ImGuiKey_R)) m_gizmoOp = (int)ImGuizmo::SCALE;
-    }
-
-    // --- ImGuizmo: манипулятор выбранной сущности. Сетка-ориентир больше НЕ
-    // рисуется здесь: ImGuizmo::DrawGrid — 2D-оверлей без теста глубины,
-    // просвечивавший сквозь объекты; теперь сетка — 3D-линии движкового
-    // DebugDraw внутри RenderSceneToFramebuffer (заслоняется геометрией). ---
-    ImGuizmo::SetOrthographic(false);
-    ImGuizmo::SetDrawlist();
-    ImGuizmo::SetRect(imgPos.x, imgPos.y, avail.x, avail.y);
-
-    GameObject selected = m_scene->Get(m_selectedId);
-    if (selected.Valid()) {
-        Transform& tr = selected.GetTransform();
-        glm::mat4 model = tr.GetMatrix();
-
-        // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
-        // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
-        // должен быть взят раньше него.
-        if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !InPlayMode()) {
-            m_gizmoPendingSnapshot = SceneSerializer::SaveToString(*m_scene);
-        }
-
-        float snapT = 0.5f, snapR = 15.0f, snapS = 0.1f;
-        float snapValues[3];
-        auto op = (ImGuizmo::OPERATION)m_gizmoOp;
-        float snapUnit = (op == ImGuizmo::ROTATE) ? snapR : (op == ImGuizmo::SCALE ? snapS : snapT);
-        snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
-
-        if (ImGuizmo::Manipulate(glm::value_ptr(m_view), glm::value_ptr(m_proj),
-                                 op, ImGuizmo::LOCAL, glm::value_ptr(model),
-                                 nullptr, m_snap ? snapValues : nullptr)) {
-            DecomposeToTransform(model, tr);
-        }
-
-        // Фронт «начали таскать»: одна запись undo на всё перетаскивание.
-        bool usingNow = ImGuizmo::IsUsing();
-        if (usingNow && !m_gizmoWasUsing && !InPlayMode() && !m_gizmoPendingSnapshot.empty()) {
-            constexpr size_t kMaxUndoEntries = 100;
-            if (m_undoStack.size() >= kMaxUndoEntries) m_undoStack.erase(m_undoStack.begin());
-            m_undoStack.push_back(m_gizmoPendingSnapshot);
-            m_redoStack.clear();
-        }
-        m_gizmoWasUsing = usingNow;
-    } else {
-        m_gizmoWasUsing = false;
-    }
-
-    // --- Пикинг ЛКМ (не по гизмо и не во время манипуляции) ---
-    if (m_viewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        !ImGuizmo::IsOver() && !ImGuizmo::IsUsing()) {
-        ImVec2 mp = ImGui::GetMousePos();
-        float u = (mp.x - imgPos.x) / avail.x;
-        float v = (mp.y - imgPos.y) / avail.y;
-        if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) PickEntityAtViewportPos(u, v);
-    }
-
-    // --- Оверлей-тулбар в углу вьюпорта: режим гизмо + snap ---
-    ImGui::SetNextWindowPos(ImVec2(imgPos.x + 8.0f, imgPos.y + 8.0f));
-    ImGui::SetNextWindowBgAlpha(0.65f);
-    ImGuiWindowFlags overlayFlags =
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
-        ImGuiWindowFlags_NoDocking;
-    if (ImGui::Begin("##viewport_toolbar", nullptr, overlayFlags)) {
-        auto modeButton = [this](const char* label, ImGuizmo::OPERATION op) {
-            bool active = m_gizmoOp == (int)op;
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.26f, 0.46f, 0.80f, 1.0f));
-            if (ImGui::SmallButton(label)) m_gizmoOp = (int)op;
-            if (active) ImGui::PopStyleColor();
-        };
-        modeButton("Move (W)", ImGuizmo::TRANSLATE); ImGui::SameLine();
-        modeButton("Rotate (E)", ImGuizmo::ROTATE); ImGui::SameLine();
-        modeButton("Scale (R)", ImGuizmo::SCALE); ImGui::SameLine();
-        ImGui::Checkbox("Snap", &m_snap);
-
-        // --- Play-режим ---
-        ImGui::SameLine(); ImGui::TextDisabled("|"); ImGui::SameLine();
-        if (m_playState == PlayState::Editing) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
-            if (ImGui::SmallButton("Play")) StartPlay();
-            ImGui::PopStyleColor();
-        } else {
-            if (m_playState == PlayState::Playing) {
-                if (ImGui::SmallButton("Pause")) PausePlay();
-            } else {
-                if (ImGui::SmallButton("Resume")) ResumePlay();
-            }
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-            if (ImGui::SmallButton("Stop")) StopPlay();
-            ImGui::PopStyleColor();
-            ImGui::SameLine();
-            ImGui::TextColored(m_playState == PlayState::Playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
-                                                                 : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                               m_playState == PlayState::Playing ? "PLAYING" : "PAUSED");
-        }
-    }
-    ImGui::End();
-
-    ImGui::End(); // Viewport
-    ImGui::PopStyleVar();
-}
-
-void EditorLayer::DrawConsolePanel() {
-    ImGui::Begin("Console");
-    if (ImGui::SmallButton("Clear")) {
-        std::lock_guard<std::mutex> lock(m_consoleMutex);
-        m_console.clear();
-    }
-    ImGui::SameLine();
-    ImGui::Checkbox("Auto-scroll", &m_consoleAutoScroll);
-    ImGui::Separator();
-
-    ImGui::BeginChild("##console_scroll", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
-    {
-        std::lock_guard<std::mutex> lock(m_consoleMutex);
-        for (const ConsoleEntry& e : m_console) {
-            ImVec4 color = ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
-            if (e.Level == LogLevel::Warn) color = ImVec4(0.95f, 0.80f, 0.30f, 1.0f);
-            if (e.Level == LogLevel::Error) color = ImVec4(0.95f, 0.40f, 0.40f, 1.0f);
-            if (e.Level <= LogLevel::Debug) color = ImVec4(0.55f, 0.60f, 0.65f, 1.0f);
-            ImGui::TextColored(color, "[%s] %s", e.Category.c_str(), e.Message.c_str());
-        }
-    }
-    if (m_consoleAutoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {
-        ImGui::SetScrollHereY(1.0f);
-    }
-    ImGui::EndChild();
-    ImGui::End();
-}
-
-namespace {
-
-// Цветная плашка + короткий тег по типу файла — свой минимализм панели Assets
-// вместо иконочного шрифта: ImDrawList::AddRectFilled с закруглением плюс
-// 2-4 символа расширения по центру.
-struct AssetStyle { ImVec4 Color; std::string Tag; };
-
-std::string ToLower(std::string s) {
-    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
-}
-
-AssetStyle StyleForPath(const fs::path& path, bool isDir) {
-    if (isDir) return { ImVec4(0.80f, 0.60f, 0.20f, 1.0f), "DIR" };
-    std::string ext = ToLower(path.extension().string());
-    if (ext == ".sage") return { ImVec4(0.25f, 0.45f, 0.85f, 1.0f), "SCENE" };
-    if (ext == ".sagemat") return { ImVec4(0.75f, 0.45f, 0.20f, 1.0f), "MAT" };
-    if (ext == ".lua") return { ImVec4(0.25f, 0.70f, 0.30f, 1.0f), "LUA" };
-    if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return { ImVec4(0.55f, 0.35f, 0.80f, 1.0f), "MESH" };
-    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp")
-        return { ImVec4(0.20f, 0.65f, 0.65f, 1.0f), ext.substr(1) };
-    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return { ImVec4(0.80f, 0.30f, 0.55f, 1.0f), "AUDIO" };
-    if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return { ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "GLSL" };
-    std::string tag = ext.empty() ? "FILE" : ToLower(ext.substr(1));
-    return { ImVec4(0.45f, 0.45f, 0.48f, 1.0f), tag };
-}
-
-// Обрезает строку многоточием посередине справа, чтобы уместиться в maxWidth.
-std::string TruncateToWidth(const std::string& s, float maxWidth) {
-    if (ImGui::CalcTextSize(s.c_str()).x <= maxWidth) return s;
-    const char* ellipsis = "...";
-    float ellipsisW = ImGui::CalcTextSize(ellipsis).x;
-    std::string out;
-    for (size_t n = 1; n <= s.size(); ++n) {
-        std::string candidate = s.substr(0, n);
-        if (ImGui::CalcTextSize(candidate.c_str()).x + ellipsisW > maxWidth) {
-            out = s.substr(0, n > 1 ? n - 1 : 1);
-            break;
-        }
-        out = candidate;
-    }
-    return out + ellipsis;
-}
-
-constexpr float kTileW = 76.0f;
-constexpr float kTileH = 64.0f;
-constexpr float kTileSpacing = 10.0f;
-
-} // namespace
-
-void EditorLayer::DrawAssetsBreadcrumb() {
-    fs::path root = m_project.Loaded() ? m_project.Dir().parent_path() : m_assetsCwd.root_path();
-
-    // Собираем цепочку сегментов от текущей папки вверх до корня.
-    std::vector<fs::path> chain;
-    for (fs::path p = m_assetsCwd; p != root && p.has_parent_path(); p = p.parent_path()) {
-        chain.push_back(p);
-        if (p.parent_path() == p) break; // достигли корня файловой системы
-    }
-    std::reverse(chain.begin(), chain.end());
-
-    for (size_t i = 0; i < chain.size(); ++i) {
-        std::string seg = chain[i].filename().string();
-        if (seg.empty()) seg = chain[i].string();
-        ImGui::PushID(static_cast<int>(i));
-        if (ImGui::SmallButton(seg.c_str())) m_assetsCwd = chain[i];
-        ImGui::PopID();
-        if (i + 1 < chain.size()) { ImGui::SameLine(0, 2); ImGui::TextDisabled("/"); ImGui::SameLine(0, 2); }
-    }
-}
-
-void EditorLayer::DrawAssetTile(const fs::path& path, bool isDir) {
-    AssetStyle style = StyleForPath(path, isDir);
-    std::string filename = path.filename().string();
-
-    ImGui::PushID(filename.c_str());
-    ImGui::BeginGroup();
-
-    ImVec2 cursor = ImGui::GetCursorScreenPos();
-    ImVec2 swatchSize(kTileW, kTileW * 0.72f);
-    ImGui::InvisibleButton("##tile", ImVec2(kTileW, kTileH));
-    bool hovered = ImGui::IsItemHovered();
-    bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-    bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
-    bool isSelected = m_assetsSelected == path;
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec4 fillColor = style.Color;
-    if (!hovered) { fillColor.x *= 0.85f; fillColor.y *= 0.85f; fillColor.z *= 0.85f; }
-    dl->AddRectFilled(cursor, ImVec2(cursor.x + swatchSize.x, cursor.y + swatchSize.y),
-                       ImGui::ColorConvertFloat4ToU32(fillColor), 6.0f);
-    if (isSelected) {
-        dl->AddRect(cursor, ImVec2(cursor.x + swatchSize.x, cursor.y + swatchSize.y),
-                    ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 0.9f)), 6.0f, 0, 2.0f);
-    }
-    std::string tagUpper = style.Tag;
-    for (char& c : tagUpper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    ImVec2 tagSize = ImGui::CalcTextSize(tagUpper.c_str());
-    ImVec2 tagPos(cursor.x + (swatchSize.x - tagSize.x) * 0.5f, cursor.y + (swatchSize.y - tagSize.y) * 0.5f);
-    dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.95f)), tagUpper.c_str());
-
-    std::string label = TruncateToWidth(filename, kTileW);
-    ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
-    ImVec2 labelPos(cursor.x + (kTileW - labelSize.x) * 0.5f, cursor.y + swatchSize.y + 4.0f);
-    dl->AddText(labelPos, ImGui::ColorConvertFloat4ToU32(ImVec4(0.9f, 0.9f, 0.9f, 1.0f)), label.c_str());
-
-    ImGui::EndGroup();
-
-    if (clicked) m_assetsSelected = path;
-    if (doubleClicked) {
-        if (isDir) m_assetsCwd = path;
-        else if (path.extension() == ".sage") LoadSceneFromFile(path);
-    }
-    if (ImGui::BeginPopupContextItem("##tile_ctx")) {
-        m_assetsSelected = path;
-        if (ImGui::MenuItem("Rename")) { m_assetsRenameTarget = path; m_dlgError.clear(); }
-        if (ImGui::MenuItem("Delete")) { m_assetsDeleteTarget = path; }
-        ImGui::EndPopup();
-    }
-    if (hovered && !filename.empty() && label != filename) ImGui::SetTooltip("%s", filename.c_str());
-
-    ImGui::PopID();
-}
-
-void EditorLayer::DrawAssetsPanel() {
-    ImGui::Begin("Assets");
-
-    if (!m_project.Loaded()) {
-        ImGui::TextDisabled("No project open.");
-        ImGui::TextDisabled("File > New Project... to create one; browsing current dir:");
-    }
-
-    fs::path root = m_project.Loaded() ? m_project.Dir() : fs::path("/");
-    bool canGoUp = m_assetsCwd.has_parent_path() && m_assetsCwd != root;
-    if (canGoUp && ImGui::SmallButton("Up")) m_assetsCwd = m_assetsCwd.parent_path();
-    ImGui::SameLine();
-    DrawAssetsBreadcrumb();
-
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##assets_search", "Search...", m_assetsSearch, sizeof(m_assetsSearch));
-    ImGui::Separator();
-
-    ImGui::BeginChild("##assets_scroll");
-    std::error_code ec;
-    std::vector<fs::directory_entry> dirs, files;
-    for (const auto& entry : fs::directory_iterator(m_assetsCwd, ec)) {
-        (entry.is_directory(ec) ? dirs : files).push_back(entry);
-    }
-    auto byName = [](const fs::directory_entry& a, const fs::directory_entry& b) {
-        return a.path().filename() < b.path().filename();
-    };
-    std::sort(dirs.begin(), dirs.end(), byName);
-    std::sort(files.begin(), files.end(), byName);
-
-    std::string filter = ToLower(m_assetsSearch);
-    auto matches = [&](const fs::path& p) {
-        if (filter.empty()) return true;
-        return ToLower(p.filename().string()).find(filter) != std::string::npos;
-    };
-
-    float availWidth = ImGui::GetContentRegionAvail().x;
-    int columns = std::max(1, static_cast<int>(availWidth / (kTileW + kTileSpacing)));
-    int col = 0;
-    bool any = false;
-    for (const auto& d : dirs) {
-        if (!matches(d.path())) continue;
-        any = true;
-        if (col > 0) ImGui::SameLine(0, kTileSpacing);
-        DrawAssetTile(d.path(), true);
-        col = (col + 1) % columns;
-    }
-    for (const auto& f : files) {
-        if (!matches(f.path())) continue;
-        any = true;
-        if (col > 0) ImGui::SameLine(0, kTileSpacing);
-        DrawAssetTile(f.path(), false);
-        col = (col + 1) % columns;
-    }
-    if (!any) ImGui::TextDisabled("(empty)");
-
-    // Создание ассетов — ПКМ по пустому месту (не по тайлу: у тайлов своё
-    // контекстное меню). Меню только запоминает вид создаваемого ассета —
-    // модалка имени открывается в DrawDialogs (деферред-паттерн).
-    if (ImGui::BeginPopupContextWindow("##assets_create_ctx",
-                                       ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        auto startCreate = [this](AssetCreateKind kind, const char* defaultName) {
-            m_assetsCreateKind = kind;
-            std::snprintf(m_assetsCreateName, sizeof(m_assetsCreateName), "%s", defaultName);
-            m_dlgError.clear();
-        };
-        if (ImGui::MenuItem("New Folder")) startCreate(AssetCreateKind::Folder, "NewFolder");
-        if (ImGui::MenuItem("New Script (.lua)")) startCreate(AssetCreateKind::Script, "new_script");
-        if (ImGui::MenuItem("New Text File (.txt)")) startCreate(AssetCreateKind::TextFile, "notes");
-        if (ImGui::MenuItem("New Material (.sagemat)")) startCreate(AssetCreateKind::Material, "NewMaterial");
-        ImGui::EndPopup();
-    }
-
-    ImGui::EndChild();
-    ImGui::End();
-}
-
-// Создаёт ассет вида m_assetsCreateKind с именем m_assetsCreateName в текущей
-// папке панели. Расширение дописывается автоматически, если не указано.
-// При ошибке возвращает false и кладёт причину в m_dlgError.
-bool EditorLayer::CreatePendingAsset(fs::path& outCreatedPath) {
-    std::string name = m_assetsCreateName;
-    if (name.empty()) {
-        m_dlgError = "Name must not be empty";
-        return false;
-    }
-
-    const char* wantExt = nullptr;
-    switch (m_assetsCreateKind) {
-        case AssetCreateKind::Script:   wantExt = ".lua"; break;
-        case AssetCreateKind::TextFile: wantExt = ".txt"; break;
-        case AssetCreateKind::Material: wantExt = ".sagemat"; break;
-        default: break;
-    }
-    if (wantExt && fs::path(name).extension() != wantExt) name += wantExt;
-
-    fs::path target = m_assetsCwd / name;
-    std::error_code ec;
-    if (fs::exists(target, ec)) {
-        m_dlgError = "Already exists: " + name;
-        return false;
-    }
-
-    if (m_assetsCreateKind == AssetCreateKind::Folder) {
-        if (!fs::create_directory(target, ec) || ec) {
-            m_dlgError = "Create folder failed: " + ec.message();
-            return false;
-        }
-    } else {
-        std::string content;
-        if (m_assetsCreateKind == AssetCreateKind::Script) {
-            content =
-                "-- " + name + " — скрипт сущности SAGE.\n"
-                "-- OnStart(entity) вызывается один раз при привязке скрипта,\n"
-                "-- OnUpdate(entity, dt) — каждый кадр Play-режима/игры.\n"
-                "\n"
-                "function OnStart(entity)\n"
-                "end\n"
-                "\n"
-                "function OnUpdate(entity, dt)\n"
-                "    -- entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 45.0\n"
-                "end\n";
-        } else if (m_assetsCreateKind == AssetCreateKind::Material) {
-            content =
-                "{\n"
-                "    \"albedo\": [1.0, 1.0, 1.0],\n"
-                "    \"emissive\": [0.0, 0.0, 0.0],\n"
-                "    \"shininess\": 32.0,\n"
-                "    \"texture\": \"\"\n"
-                "}\n";
-        }
-        std::ofstream out(target);
-        if (!out) {
-            m_dlgError = "Create file failed: " + target.string();
-            return false;
-        }
-        out << content;
-    }
-
-    LOG_INFO("Editor") << "Asset created: " << target.string();
-    outCreatedPath = target;
-    return true;
+    if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
+                               << "materials + camera + recent + dirty + play, "
+                               << before << " entities)";
+    else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
