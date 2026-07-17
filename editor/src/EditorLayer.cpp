@@ -6,6 +6,7 @@
 #include <cctype>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -125,6 +126,7 @@ void EditorLayer::OnAttach() {
     // --- Ресурсы превью ---
     m_shader.emplace("assets/shaders/editor_basic.vert", "assets/shaders/editor_basic.frag");
     m_sceneFbo.emplace(m_viewportW, m_viewportH);
+    m_debugDraw.emplace();
     m_cube = ResourceManager::Instance().GetCube();
 
     NewScene(/*withDemoContent=*/true);
@@ -209,6 +211,67 @@ void EditorLayer::RunSelfTest() {
             ok = false;
         }
         Undo(); // вернуть сцену к исходным n0 сущностям
+    }
+
+    // --- Создание ассетов: та же логика, что у модалки Create Asset ---
+    if (ok) {
+        struct { AssetCreateKind kind; const char* name; const char* expect; } cases[] = {
+            {AssetCreateKind::Folder, "selftest_dir", "selftest_dir"},
+            {AssetCreateKind::Script, "selftest_script", "selftest_script.lua"},
+            {AssetCreateKind::Material, "selftest_mat", "selftest_mat.sagemat"},
+        };
+        for (const auto& c : cases) {
+            m_assetsCreateKind = c.kind;
+            std::snprintf(m_assetsCreateName, sizeof(m_assetsCreateName), "%s", c.name);
+            fs::path created;
+            if (!CreatePendingAsset(created) || !fs::exists(m_assetsCwd / c.expect, ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: asset create failed for " << c.expect
+                                    << " (" << m_dlgError << ")";
+                ok = false;
+                break;
+            }
+        }
+        m_assetsCreateKind = AssetCreateKind::None;
+    }
+
+    // --- Материалы: правка разделяемого экземпляра + назначение + сохранение
+    // сцены + перезагрузка => путь и albedo восстановлены ---
+    if (ok) {
+        std::string matPath = (m_assetsCwd / "selftest_mat.sagemat").string();
+        auto material = ResourceManager::Instance().GetMaterial(matPath);
+        material->Albedo = {0.1f, 0.2f, 0.9f};
+        try {
+            material->SaveToFile(matPath);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Editor") << "SELFTEST: material save failed: " << e.what();
+            ok = false;
+        }
+        if (ok) {
+            GameObject cube = m_scene->FindByName("Green Cube");
+            MeshRendererComponent& mr = cube.Renderer();
+            mr.MaterialPath = matPath;
+            mr.MaterialPtr = material;
+
+            fs::path scenePath = m_project.ScenesDir() / "selftest_mat.sage";
+            if (!SaveSceneToFile(scenePath) || !LoadSceneFromFile(scenePath)) ok = false;
+            if (ok) {
+                MeshRendererComponent& reloaded = m_scene->FindByName("Green Cube").Renderer();
+                bool pathOk = reloaded.MaterialPath == matPath;
+                bool albedoOk = reloaded.MaterialPtr &&
+                                std::abs(reloaded.MaterialPtr->Albedo.b - 0.9f) < 0.001f;
+                if (!pathOk || !albedoOk) {
+                    LOG_ERROR("Editor") << "SELFTEST: material round-trip failed (path "
+                                        << pathOk << ", albedo " << albedoOk << ")";
+                    ok = false;
+                }
+                // Убираем материал, чтобы дальнейшие проверки (undo/play) шли
+                // по прежнему сценарию.
+                if (ok) {
+                    reloaded.MaterialPath.clear();
+                    reloaded.MaterialPtr = nullptr;
+                }
+            }
+        }
     }
 
     // --- Play: скрипт вращает сущность, Stop откатывает сцену к снапшоту ---
@@ -491,9 +554,25 @@ void EditorLayer::RenderSceneToFramebuffer() {
     m_shader->SetMat4("uProjection", m_proj);
     sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
         m_shader->SetMat4("uModel", tr.GetMatrix());
-        m_shader->SetVec3("uObjectColor", mr.Color);
+        m_shader->SetVec3("uObjectColor", EffectiveColor(mr)); // материал (если назначен) важнее Color
         mr.MeshPtr->Draw();
     });
+
+    // Гизмо-графика движка (DebugDraw) — рисуется В ТОТ ЖЕ буфер после сцены,
+    // с тестом глубины: объекты заслоняют сетку (раньше сетка была 2D-оверлеем
+    // ImGuizmo поверх готовой картинки и просвечивала сквозь всю геометрию).
+    if (m_showGrid) {
+        m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
+    }
+    GameObject selectedObj = m_scene->Get(m_selectedId);
+    if (selectedObj.Valid()) {
+        // Подсветка выбора: каркас вокруг сущности + её оси.
+        glm::mat4 model = selectedObj.GetTransform().GetMatrix();
+        glm::mat4 slightlyLarger = glm::scale(model, glm::vec3(1.02f));
+        m_debugDraw->WireBox(slightlyLarger, {1.0f, 0.62f, 0.12f});
+        m_debugDraw->Axes(model, 1.4f);
+    }
+    m_debugDraw->Flush(m_view, m_proj);
 
     device.BindDefaultFramebuffer();
 }
@@ -784,6 +863,42 @@ void EditorLayer::DrawDialogs() {
         ImGui::EndPopup();
     }
 
+    // Создание ассета (New Folder / Script / Text / Material из панели Assets).
+    if (m_assetsCreateKind != AssetCreateKind::None && !ImGui::IsPopupOpen("Create Asset")) {
+        ImGui::OpenPopup("Create Asset");
+    }
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Create Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const char* kindLabel = "";
+        switch (m_assetsCreateKind) {
+            case AssetCreateKind::Folder:   kindLabel = "Folder"; break;
+            case AssetCreateKind::Script:   kindLabel = "Lua script"; break;
+            case AssetCreateKind::TextFile: kindLabel = "Text file"; break;
+            case AssetCreateKind::Material: kindLabel = "Material"; break;
+            default: break;
+        }
+        ImGui::TextDisabled("%s in %s", kindLabel, m_assetsCwd.filename().string().c_str());
+        bool enterPressed = ImGui::InputText("Name", m_assetsCreateName, sizeof(m_assetsCreateName),
+                                              ImGuiInputTextFlags_EnterReturnsTrue);
+        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
+        if (enterPressed || ImGui::Button("Create", ImVec2(120, 0))) {
+            fs::path created;
+            if (CreatePendingAsset(created)) {
+                m_assetsSelected = created;
+                m_assetsCreateKind = AssetCreateKind::None;
+                m_dlgError.clear();
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            m_assetsCreateKind = AssetCreateKind::None;
+            m_dlgError.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     if (!m_assetsDeleteTarget.empty() && !ImGui::IsPopupOpen("Delete Asset")) {
         ImGui::OpenPopup("Delete Asset");
     }
@@ -847,8 +962,44 @@ void EditorLayer::DrawHierarchyPanel() {
     ImGui::End();
 }
 
+// Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
+// ResourceManager — все сущности с этим материалом обновляются в вьюпорте
+// сразу; Save фиксирует значения на диск, Revert перечитывает файл.
+void EditorLayer::DrawMaterialEditor() {
+    std::string pathStr = m_assetsSelected.string();
+    std::shared_ptr<Material> material = ResourceManager::Instance().GetMaterial(pathStr);
+
+    ImGui::TextDisabled("Material: %s", m_assetsSelected.filename().string().c_str());
+    ImGui::ColorEdit3("Albedo", &material->Albedo.x);
+    ImGui::ColorEdit3("Emissive", &material->Emissive.x);
+    ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
+    char texBuf[512];
+    std::snprintf(texBuf, sizeof(texBuf), "%s", material->TexturePath.c_str());
+    if (ImGui::InputText("Texture", texBuf, sizeof(texBuf))) material->TexturePath = texBuf;
+    ImGui::TextDisabled("Edits apply live to every entity using this material.");
+
+    if (ImGui::Button("Save Material")) {
+        try {
+            material->SaveToFile(pathStr);
+            LOG_INFO("Editor") << "Material saved: " << pathStr;
+        } catch (const std::exception& e) {
+            LOG_ERROR("Editor") << "Material save failed: " << e.what();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Revert")) ResourceManager::Instance().ReloadMaterial(pathStr);
+}
+
 void EditorLayer::DrawInspectorPanel() {
     ImGui::Begin("Inspector");
+
+    // Выбранный в Assets материал редактируется здесь же — независимо от
+    // того, выбрана ли сущность.
+    if (m_assetsSelected.extension() == ".sagemat") {
+        DrawMaterialEditor();
+        ImGui::Separator();
+    }
+
     GameObject obj = m_scene->Get(m_selectedId);
     if (!obj.Valid()) {
         ImGui::TextDisabled("Nothing selected");
@@ -910,6 +1061,42 @@ void EditorLayer::DrawInspectorPanel() {
                 } catch (const std::exception& e) {
                     LOG_ERROR("Editor") << "Model load failed: " << e.what();
                 }
+            }
+        }
+    }
+
+    // --- Материал (.sagemat): заменяет Color, общий для всех сущностей с ним ---
+    if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+        MeshRendererComponent& mr = obj.Renderer();
+        if (mr.MaterialPath.empty()) {
+            ImGui::TextDisabled("No material (entity uses Color above)");
+        } else {
+            if (mr.MaterialPtr) {
+                ImGui::ColorButton("##mat_preview", ImVec4(mr.MaterialPtr->Albedo.r, mr.MaterialPtr->Albedo.g,
+                                                            mr.MaterialPtr->Albedo.b, 1.0f));
+                ImGui::SameLine();
+            }
+            ImGui::TextWrapped("%s", mr.MaterialPath.c_str());
+        }
+
+        // Назначение: выбери .sagemat в Assets (клик по тайлу) — тут появится
+        // кнопка Assign. Отдельного файлового диалога нет намеренно: панель
+        // Assets и есть браузер файлов проекта.
+        if (m_assetsSelected.extension() == ".sagemat") {
+            std::string label = "Assign \"" + m_assetsSelected.filename().string() + "\"";
+            if (ImGui::Button(label.c_str())) {
+                PushUndoSnapshot();
+                mr.MaterialPath = m_assetsSelected.string();
+                mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+            }
+        } else {
+            ImGui::TextDisabled("Select a .sagemat in Assets to assign it");
+        }
+        if (!mr.MaterialPath.empty()) {
+            if (ImGui::Button("Clear Material")) {
+                PushUndoSnapshot();
+                mr.MaterialPath.clear();
+                mr.MaterialPtr = nullptr;
             }
         }
     }
@@ -1013,15 +1200,13 @@ void EditorLayer::DrawViewportPanel() {
         if (ImGui::IsKeyPressed(ImGuiKey_R)) m_gizmoOp = (int)ImGuizmo::SCALE;
     }
 
-    // --- ImGuizmo: сетка-ориентир и манипулятор выбранной сущности ---
+    // --- ImGuizmo: манипулятор выбранной сущности. Сетка-ориентир больше НЕ
+    // рисуется здесь: ImGuizmo::DrawGrid — 2D-оверлей без теста глубины,
+    // просвечивавший сквозь объекты; теперь сетка — 3D-линии движкового
+    // DebugDraw внутри RenderSceneToFramebuffer (заслоняется геометрией). ---
     ImGuizmo::SetOrthographic(false);
     ImGuizmo::SetDrawlist();
     ImGuizmo::SetRect(imgPos.x, imgPos.y, avail.x, avail.y);
-
-    if (m_showGrid) {
-        glm::mat4 identity(1.0f);
-        ImGuizmo::DrawGrid(glm::value_ptr(m_view), glm::value_ptr(m_proj), glm::value_ptr(identity), 12.0f);
-    }
 
     GameObject selected = m_scene->Get(m_selectedId);
     if (selected.Valid()) {
@@ -1160,6 +1345,7 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
     if (isDir) return { ImVec4(0.80f, 0.60f, 0.20f, 1.0f), "DIR" };
     std::string ext = ToLower(path.extension().string());
     if (ext == ".sage") return { ImVec4(0.25f, 0.45f, 0.85f, 1.0f), "SCENE" };
+    if (ext == ".sagemat") return { ImVec4(0.75f, 0.45f, 0.20f, 1.0f), "MAT" };
     if (ext == ".lua") return { ImVec4(0.25f, 0.70f, 0.30f, 1.0f), "LUA" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return { ImVec4(0.55f, 0.35f, 0.80f, 1.0f), "MESH" };
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp")
@@ -1322,6 +1508,91 @@ void EditorLayer::DrawAssetsPanel() {
         col = (col + 1) % columns;
     }
     if (!any) ImGui::TextDisabled("(empty)");
+
+    // Создание ассетов — ПКМ по пустому месту (не по тайлу: у тайлов своё
+    // контекстное меню). Меню только запоминает вид создаваемого ассета —
+    // модалка имени открывается в DrawDialogs (деферред-паттерн).
+    if (ImGui::BeginPopupContextWindow("##assets_create_ctx",
+                                       ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+        auto startCreate = [this](AssetCreateKind kind, const char* defaultName) {
+            m_assetsCreateKind = kind;
+            std::snprintf(m_assetsCreateName, sizeof(m_assetsCreateName), "%s", defaultName);
+            m_dlgError.clear();
+        };
+        if (ImGui::MenuItem("New Folder")) startCreate(AssetCreateKind::Folder, "NewFolder");
+        if (ImGui::MenuItem("New Script (.lua)")) startCreate(AssetCreateKind::Script, "new_script");
+        if (ImGui::MenuItem("New Text File (.txt)")) startCreate(AssetCreateKind::TextFile, "notes");
+        if (ImGui::MenuItem("New Material (.sagemat)")) startCreate(AssetCreateKind::Material, "NewMaterial");
+        ImGui::EndPopup();
+    }
+
     ImGui::EndChild();
     ImGui::End();
+}
+
+// Создаёт ассет вида m_assetsCreateKind с именем m_assetsCreateName в текущей
+// папке панели. Расширение дописывается автоматически, если не указано.
+// При ошибке возвращает false и кладёт причину в m_dlgError.
+bool EditorLayer::CreatePendingAsset(fs::path& outCreatedPath) {
+    std::string name = m_assetsCreateName;
+    if (name.empty()) {
+        m_dlgError = "Name must not be empty";
+        return false;
+    }
+
+    const char* wantExt = nullptr;
+    switch (m_assetsCreateKind) {
+        case AssetCreateKind::Script:   wantExt = ".lua"; break;
+        case AssetCreateKind::TextFile: wantExt = ".txt"; break;
+        case AssetCreateKind::Material: wantExt = ".sagemat"; break;
+        default: break;
+    }
+    if (wantExt && fs::path(name).extension() != wantExt) name += wantExt;
+
+    fs::path target = m_assetsCwd / name;
+    std::error_code ec;
+    if (fs::exists(target, ec)) {
+        m_dlgError = "Already exists: " + name;
+        return false;
+    }
+
+    if (m_assetsCreateKind == AssetCreateKind::Folder) {
+        if (!fs::create_directory(target, ec) || ec) {
+            m_dlgError = "Create folder failed: " + ec.message();
+            return false;
+        }
+    } else {
+        std::string content;
+        if (m_assetsCreateKind == AssetCreateKind::Script) {
+            content =
+                "-- " + name + " — скрипт сущности SAGE.\n"
+                "-- OnStart(entity) вызывается один раз при привязке скрипта,\n"
+                "-- OnUpdate(entity, dt) — каждый кадр Play-режима/игры.\n"
+                "\n"
+                "function OnStart(entity)\n"
+                "end\n"
+                "\n"
+                "function OnUpdate(entity, dt)\n"
+                "    -- entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 45.0\n"
+                "end\n";
+        } else if (m_assetsCreateKind == AssetCreateKind::Material) {
+            content =
+                "{\n"
+                "    \"albedo\": [1.0, 1.0, 1.0],\n"
+                "    \"emissive\": [0.0, 0.0, 0.0],\n"
+                "    \"shininess\": 32.0,\n"
+                "    \"texture\": \"\"\n"
+                "}\n";
+        }
+        std::ofstream out(target);
+        if (!out) {
+            m_dlgError = "Create file failed: " + target.string();
+            return false;
+        }
+        out << content;
+    }
+
+    LOG_INFO("Editor") << "Asset created: " << target.string();
+    outCreatedPath = target;
+    return true;
 }

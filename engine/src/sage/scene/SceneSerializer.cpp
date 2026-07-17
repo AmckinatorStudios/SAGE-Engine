@@ -121,6 +121,7 @@ static json BuildSceneJson(const Scene& scene) {
         j["color"]    = Vec3ToJson(mr.Color);
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
         j["mesh"]["path"] = mr.Ref.path;
+        if (!mr.MaterialPath.empty()) j["material"] = mr.MaterialPath;
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             j["script"] = sc->Path;
         }
@@ -156,6 +157,12 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
         if (j.contains("script")) {
             obj.Registry()->emplace<ScriptComponent>(obj.Entity(), ScriptComponent{j.value("script", "")});
+        }
+
+        // Материал: путь сериализуется, разделяемый экземпляр — из кэша.
+        mr.MaterialPath = j.value("material", "");
+        if (!mr.MaterialPath.empty()) {
+            mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
         }
 
         // Пересоздаём GPU-ресурс на основе описания

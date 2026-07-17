@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include "sage/scene/Transform.h"
 #include "sage/render/Mesh.h"
+#include "sage/render/Material.h"
 
 // ---------------------------------------------------------------------------
 // Компоненты ECS — простые data-структуры, навешиваемые на сущности (entity)
@@ -48,7 +49,21 @@ struct MeshRendererComponent {
     // Runtime-указатель на GPU-меш. Не сериализуется — заполняется
     // ResourceManager'ом на основе Ref при загрузке сцены или назначении меша.
     std::shared_ptr<Mesh> MeshPtr;
+
+    // Материал (.sagemat) — переиспользуемое описание внешнего вида, общее
+    // для всех сущностей с этим путём. Path сериализуется; Ptr — runtime,
+    // восстанавливается ResourceManager::GetMaterial при загрузке сцены.
+    // Назначенный материал ЗАМЕНЯЕТ Color (см. EffectiveColor ниже).
+    std::string MaterialPath;
+    std::shared_ptr<Material> MaterialPtr;
 };
+
+// Итоговый базовый цвет сущности для рендера: albedo материала, если материал
+// назначен, иначе — прямой Color компонента. Единая точка выбора для
+// редактора и игр (см. использование в EditorLayer/SandboxLayer/TestGame).
+inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr) {
+    return mr.MaterialPtr ? mr.MaterialPtr->Albedo : mr.Color;
+}
 
 // Поведение сущности на Lua: путь к .lua файлу со стандартными хуками
 // OnStart(entity)/OnUpdate(entity, dt) (см. sage/scripting/ScriptEngine.h).

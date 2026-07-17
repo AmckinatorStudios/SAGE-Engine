@@ -36,6 +36,7 @@ public:
     void DrawIndexed(size_t indexCount) const override;
     void DrawArrays(size_t vertexCount) const override;
     void DrawInstanced(size_t vertexCount, size_t instanceCount) const override;
+    void DrawLines(size_t vertexCount) const override;
 
 private:
     unsigned int m_vao = 0, m_vbo = 0, m_ebo = 0, m_instanceVbo = 0;

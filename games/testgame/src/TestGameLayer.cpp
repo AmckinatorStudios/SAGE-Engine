@@ -596,7 +596,7 @@ void TestGameLayer::DrawSceneGeometry(Shader& shader, bool colorPass) {
         shader.SetMat4("uModel", tr.GetMatrix());
         if (colorPass) {
             shader.SetInt("uUseTexture", 0);
-            shader.SetVec3("uObjectColor", mr.Color);
+            shader.SetVec3("uObjectColor", EffectiveColor(mr)); // albedo материала, если назначен
         }
         mr.MeshPtr->Draw();
     });

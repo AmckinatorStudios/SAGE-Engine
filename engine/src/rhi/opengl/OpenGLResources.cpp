@@ -166,6 +166,13 @@ void GLGeometry::DrawInstanced(size_t vertexCount, size_t instanceCount) const {
     glBindVertexArray(0);
 }
 
+void GLGeometry::DrawLines(size_t vertexCount) const {
+    ++g_renderStats.DrawCalls;
+    glBindVertexArray(m_vao);
+    glDrawArrays(GL_LINES, 0, (GLsizei)vertexCount);
+    glBindVertexArray(0);
+}
+
 // ============================================================================
 //  GLTexture2D
 // ============================================================================

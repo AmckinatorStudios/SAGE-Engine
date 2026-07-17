@@ -66,6 +66,9 @@ public:
     virtual void DrawIndexed(size_t indexCount) const = 0;
     virtual void DrawArrays(size_t vertexCount) const = 0;
     virtual void DrawInstanced(size_t vertexCount, size_t instanceCount) const = 0;
+    // Отрезки (каждая пара вершин — линия). Используется DebugDraw (сетка,
+    // wire-примитивы, оси) — линии не выражаются треугольным DrawArrays.
+    virtual void DrawLines(size_t vertexCount) const = 0;
 };
 
 // --- Текстуры ---

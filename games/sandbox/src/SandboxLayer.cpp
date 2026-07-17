@@ -106,7 +106,7 @@ void SandboxLayer::OnRender() {
     m_shader->SetMat4("uProjection", proj);
     sage::ecs::ForEachRenderable(m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
         m_shader->SetMat4("uModel", tr.GetMatrix());
-        m_shader->SetVec3("uObjectColor", mr.Color);
+        m_shader->SetVec3("uObjectColor", EffectiveColor(mr)); // albedo материала, если он назначен
         mr.MeshPtr->Draw();
     });
 

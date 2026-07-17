@@ -11,6 +11,7 @@
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
+#include "sage/render/DebugDraw.h"
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
@@ -74,6 +75,7 @@ private:
     void BuildDefaultDockLayout(unsigned int dockspaceId);
     void DrawHierarchyPanel();
     void DrawInspectorPanel();
+    void DrawMaterialEditor(); // редактор .sagemat, выбранного в Assets (внутри Inspector)
     void DrawViewportPanel();
     void DrawConsolePanel();
     void DrawAssetsPanel();
@@ -118,6 +120,7 @@ private:
     Camera m_camera;
     std::optional<Shader> m_shader;
     std::optional<Framebuffer> m_sceneFbo;
+    std::optional<DebugDraw> m_debugDraw; // сетка/подсветка выбора — 3D-линии с depth-тестом
     std::shared_ptr<Mesh> m_cube;
 
     // --- Play-режим ---
@@ -160,12 +163,20 @@ private:
     char m_dlgSceneName[128] = "level1";
     std::string m_dlgError;
 
-    // --- панель Assets (сетка тайлов + поиск + rename/delete) ---
+    // --- панель Assets (сетка тайлов + поиск + rename/delete + создание) ---
     char m_assetsSearch[128] = "";
     std::filesystem::path m_assetsSelected; // выделенный тайл (не обязательно открытый)
     std::filesystem::path m_assetsRenameTarget; // файл, который переименовываем (пусто — не активно)
     char m_assetsRenameBuf[256] = "";
     std::filesystem::path m_assetsDeleteTarget; // ждёт подтверждения в модалке Delete
+
+    // Создание нового ассета (ПКМ по пустому месту панели): вид + имя.
+    // Kind != None => модалка "Create Asset" открывается в DrawDialogs
+    // (деферред-паттерн, как у Rename/Delete).
+    enum class AssetCreateKind { None, Folder, Script, TextFile, Material };
+    AssetCreateKind m_assetsCreateKind = AssetCreateKind::None;
+    char m_assetsCreateName[128] = "";
+    bool CreatePendingAsset(std::filesystem::path& outCreatedPath); // false + m_dlgError при ошибке
 
     bool m_imguiReady = false;
 

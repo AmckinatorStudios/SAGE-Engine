@@ -15,7 +15,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Log.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Window.cpp
+    src/sage/render/DebugDraw.cpp
     src/sage/render/DebugOverlay.cpp
+    src/sage/render/Material.cpp
     src/sage/render/Mesh.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
