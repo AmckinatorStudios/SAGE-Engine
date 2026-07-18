@@ -23,10 +23,30 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     ImGui::TextDisabled("Material: %s", host.SelectedAssetPath().filename().string().c_str());
     ImGui::ColorEdit3("Albedo", &material->Albedo.x);
     ImGui::ColorEdit3("Emissive", &material->Emissive.x);
-    ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
+
+    // PBR (metallic-roughness) — основной путь освещения (Cook-Torrance).
+    ImGui::SeparatorText("PBR");
+    ImGui::SliderFloat("Metallic", &material->Metallic, 0.0f, 1.0f);
+    ImGui::SliderFloat("Roughness", &material->Roughness, 0.0f, 1.0f);
+
+    // Карты: путь правится вручную; по Enter/потере фокуса перезагружаем текстуры
+    // материала (albedo/normal), чтобы вьюпорт сразу показал результат.
     char texBuf[512];
     std::snprintf(texBuf, sizeof(texBuf), "%s", material->TexturePath.c_str());
-    if (ImGui::InputText("Texture", texBuf, sizeof(texBuf))) material->TexturePath = texBuf;
+    if (ImGui::InputText("Albedo Map", texBuf, sizeof(texBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->TexturePath = texBuf;
+        ResourceManager::Instance().ResolveMaterialTextures(*material);
+    }
+    char nrmBuf[512];
+    std::snprintf(nrmBuf, sizeof(nrmBuf), "%s", material->NormalMapPath.c_str());
+    if (ImGui::InputText("Normal Map", nrmBuf, sizeof(nrmBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->NormalMapPath = nrmBuf;
+        ResourceManager::Instance().ResolveMaterialTextures(*material);
+    }
+    ImGui::TextDisabled("Normal map: tangent-space (RGB). Enter applies the path.");
+
+    ImGui::SeparatorText("Legacy");
+    ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
     ImGui::TextDisabled("Edits apply live to every entity using this material.");
 
     if (ImGui::Button("Save Material")) {

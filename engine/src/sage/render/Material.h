@@ -3,6 +3,8 @@
 #include <string>
 #include <glm/glm.hpp>
 
+class Texture; // загруженные PBR-карты держатся здесь как runtime-указатели
+
 // ---------------------------------------------------------------------------
 // Material — переиспользуемое описание внешнего вида объекта, живущее в
 // файле проекта (`.sagemat`, JSON). Один материал прикрепляется к любому
@@ -23,8 +25,19 @@
 struct Material {
     glm::vec3 Albedo{1.0f, 1.0f, 1.0f};
     glm::vec3 Emissive{0.0f, 0.0f, 0.0f};
-    float Shininess = 32.0f;
-    std::string TexturePath; // пусто — без текстуры; путь относительно assets игры
+    float Shininess = 32.0f; // legacy (Blinn-Phong) — оставлено для совместимости .sagemat
+
+    // --- PBR (metallic-roughness workflow) ---
+    float Metallic = 0.0f;    // 0 — диэлектрик, 1 — металл
+    float Roughness = 0.5f;   // 0 — зеркало, 1 — матовое
+    std::string TexturePath;  // albedo-карта (пусто — без текстуры)
+    std::string NormalMapPath; // normal map (tangent-space); пусто — без нормал-маппинга
+
+    // runtime (не сериализуется): загруженные GPU-текстуры, заполняются
+    // ResourceManager::GetMaterial по путям выше. nullptr — карта не задана.
+    std::shared_ptr<Texture> AlbedoTex;
+    std::shared_ptr<Texture> NormalTex;
+    bool HasMaps() const { return AlbedoTex || NormalTex; } // рисуется текстурным PBR-путём
 
     // Читает .sagemat (JSON). Бросает std::runtime_error, если файл не
     // открывается/не парсится — вызывающий решает, чем ответить (редактор

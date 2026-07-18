@@ -2,6 +2,7 @@
 #include "Mesh.h"
 #include "Material.h"
 #include "ModelLoader.h"
+#include "Texture.h"
 #include "sage/core/Log.h"
 #include "sage/scene/Transform.h" // подключаем заранее не обязательно, но пусть будет явный порядок
 #include <unordered_map>
@@ -63,6 +64,22 @@ public:
     // один экземпляр — редактор правит его поля напрямую, объекты обновляются
     // мгновенно. Ошибка чтения не валит вызывающего: логируется, отдаётся
     // материал по умолчанию (белый) — сцена продолжает грузиться.
+    // Текстура по пути (кэшируется). nullptr при ошибке — вызывающий рисует без неё.
+    std::shared_ptr<Texture> GetTexture(const std::string& path) {
+        if (path.empty()) return nullptr;
+        auto it = m_textures.find(path);
+        if (it != m_textures.end()) return it->second;
+        std::shared_ptr<Texture> tex;
+        try {
+            tex = std::make_shared<Texture>(path);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Resources") << "Текстура не загрузилась (" << path << "): " << e.what();
+            tex = nullptr;
+        }
+        m_textures[path] = tex;
+        return tex;
+    }
+
     std::shared_ptr<Material> GetMaterial(const std::string& path) {
         auto it = m_materials.find(path);
         if (it != m_materials.end()) return it->second;
@@ -72,6 +89,7 @@ public:
         } catch (const std::exception& e) {
             LOG_ERROR("Resources") << "Материал не загрузился, использую дефолт: " << e.what();
         }
+        ResolveMaterialTextures(*material);
         m_materials[path] = material;
         return material;
     }
@@ -86,7 +104,15 @@ public:
         } catch (const std::exception& e) {
             LOG_ERROR("Resources") << "Перезагрузка материала не удалась: " << e.what();
         }
+        ResolveMaterialTextures(*it->second);
         return it->second;
+    }
+
+    // Подгружает albedo/normal текстуры материала по его путям (для PBR-пути).
+    // Вызывается после загрузки/перезагрузки и когда редактор поменял путь.
+    void ResolveMaterialTextures(Material& m) {
+        m.AlbedoTex = GetTexture(m.TexturePath);
+        m.NormalTex = GetTexture(m.NormalMapPath);
     }
 
     void Clear() {
@@ -97,6 +123,7 @@ public:
         m_cone.reset();
         m_models.clear();
         m_materials.clear();
+        m_textures.clear();
     }
 
 private:
@@ -104,4 +131,5 @@ private:
     std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
+    std::unordered_map<std::string, std::shared_ptr<Texture>> m_textures;
 };

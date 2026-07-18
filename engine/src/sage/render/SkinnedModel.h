@@ -52,6 +52,8 @@ struct SkinnedSubMesh {
     std::shared_ptr<SkinnedMesh> Mesh;
     std::shared_ptr<Texture> Diffuse; // может быть nullptr — тогда только Tint
     glm::vec3 Tint{1.0f};
+    float Metallic = 0.0f;   // PBR (metallic-roughness) — из glTF-материала или дефолт
+    float Roughness = 0.6f;
 };
 
 class SkinnedModel {

@@ -8,14 +8,18 @@ struct Vertex {
     glm::vec3 Position;
     glm::vec3 Normal;
     glm::vec2 TexCoords;
+    glm::vec3 Tangent{1.0f, 0.0f, 0.0f}; // касательная (для normal mapping, TBN)
 };
 
 // Per-instance данные для инстансной отрисовки (батчинг): модельная матрица +
-// базовый цвет. Layout совпадает с instance-атрибутами геометрии Mesh
-// (loc 3..6 — строки mat4, loc 7 — цвет). Размер 76 байт (без паддинга).
+// базовый цвет + PBR-параметры (metallic/roughness). Layout совпадает с
+// instance-атрибутами геометрии Mesh (loc 4..7 — строки mat4, loc 8 — цвет,
+// loc 9 — metallic, loc 10 — roughness).
 struct MeshInstance {
     glm::mat4 Model{1.0f};
     glm::vec3 Color{1.0f};
+    float Metallic = 0.0f;
+    float Roughness = 0.5f;
 };
 
 // Хранит геометрию на GPU (через rhi::Geometry) и умеет себя отрисовать.

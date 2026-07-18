@@ -16,10 +16,13 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "sage/core/Log.h"
+#include "sage/render/PbrShader.h"
 #include "sage/render/Shader.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Light.h"
+
+#include <string>
 
 using namespace sage::rhi;
 using namespace sage::anim;
@@ -49,12 +52,12 @@ SkinnedMesh::SkinnedMesh(const std::vector<SkinnedVertex>& vertices,
 void SkinnedMesh::Draw() const { m_geometry->DrawIndexed(m_indexCount); }
 
 // ============================================================================
-//  Встроенный скиннинг-шейдер. Фрагментная стадия ИДЕНТИЧНА статическому
-//  lit.frag (ambient + солнце с PCF-тенями + точечные + прожекторы + туман) —
-//  так анимированные и статичные меши освещаются ОДИНАКОВО (устранение
-//  рассогласования). Отличие только в вершинной стадии: скиннинг костями.
-//  Uniform'ы освещения названы как в lit.frag, чтобы UploadLighting/
-//  UploadShadowUniforms заливали их без изменений.
+//  Встроенный скиннинг-шейдер. Фрагментная стадия использует ОБЩИЙ PBR-блок
+//  kPbrSharedGlsl (Cook-Torrance, metallic-roughness) — тот же, что у статических
+//  инстансных/текстурных мешей, поэтому анимированные и статичные объекты
+//  освещаются ФИЗИЧЕСКИ ОДИНАКОВО (единый источник модели освещения). Отличие
+//  только в вершинной стадии: скиннинг палитрой костей. Uniform'ы освещения
+//  названы как в UploadLighting/UploadShadowUniforms и заливаются без изменений.
 // ============================================================================
 namespace {
 
@@ -101,138 +104,39 @@ void main() {
 }
 )";
 
-// Фрагментный шейдер — построчная копия статического lit.frag (тот же набор
-// uniform'ов и та же модель освещения), чтобы скин и статика выглядели одинаково.
-const char* kSkinFrag = R"(#version 330 core
+// Фрагментный шейдер: тот же общий PBR-блок (kPbrSharedGlsl), что у статических
+// мешей — albedo из tint (× опциональная текстура), metallic/roughness из
+// материала. Так скин и статика физически неразличимы по освещению.
+std::string SkinFragSource() {
+    return std::string(R"(#version 330 core
 in vec3 FragPos;
 in vec3 Normal;
 in vec2 TexCoords;
 in vec4 FragPosLightSpace;
-
 out vec4 FragColor;
 
-#define MAX_POINT_LIGHTS 8
-#define MAX_SPOT_LIGHTS 8
-
-struct PointLight {
-    vec3 position; vec3 color; float intensity;
-    float constant; float linear; float quadratic;
-};
-struct SpotLight {
-    vec3 position; vec3 direction; vec3 color; float intensity;
-    float constant; float linear; float quadratic;
-    float cosInner; float cosOuter;
-};
-
 uniform vec3 uObjectColor;
-uniform vec3 uAmbientSky;
-uniform vec3 uAmbientGround;
-uniform float uAmbientStrength;
-uniform vec3 uSunDir;
-uniform vec3 uSunColor;
-uniform float uSunIntensity;
-uniform PointLight uPointLights[MAX_POINT_LIGHTS];
-uniform int uNumPointLights;
-uniform SpotLight uSpotLights[MAX_SPOT_LIGHTS];
-uniform int uNumSpotLights;
-uniform vec3 uViewPos;
 uniform sampler2D uTexture;
 uniform bool uUseTexture;
-uniform sampler2D uShadowMap;
-uniform bool uShadowsEnabled;
-uniform bool uFogEnabled;
-uniform vec3 uFogColor;
-uniform float uFogStart;
-uniform float uFogEnd;
-
-float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
-    vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    proj = proj * 0.5 + 0.5;
-    if (proj.z > 1.0) return 0.0;
-    float currentDepth = proj.z;
-    float bias = max(0.0025 * (1.0 - dot(normal, sunDir)), 0.0008);
-    float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
-    for (int x = -1; x <= 1; ++x)
-        for (int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(uShadowMap, proj.xy + vec2(x, y) * texelSize).r;
-            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
-        }
-    return shadow / 9.0;
-}
-vec3 CalcHemisphereAmbient(vec3 normal) {
-    float skyWeight = normal.y * 0.5 + 0.5;
-    return mix(uAmbientGround, uAmbientSky, skyWeight) * uAmbientStrength;
-}
-vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
-    vec3 toLight = light.position - fragPos;
-    float dist = length(toLight);
-    vec3 lightDir = toLight / max(dist, 0.0001);
-    float diff = max(dot(normal, lightDir), 0.0);
-    vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
-    float attenuation = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
-    vec3 diffuse = diff * light.color * light.intensity;
-    vec3 specular = 0.5 * spec * light.color * light.intensity;
-    return (diffuse + specular) * attenuation;
-}
-vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
-    vec3 toLight = light.position - fragPos;
-    float dist = length(toLight);
-    vec3 lightDir = toLight / max(dist, 0.0001);
-    float theta = dot(lightDir, normalize(-light.direction));
-    float epsilon = max(light.cosInner - light.cosOuter, 0.0001);
-    float cone = clamp((theta - light.cosOuter) / epsilon, 0.0, 1.0);
-    if (cone <= 0.0) return vec3(0.0);
-    float diff = max(dot(normal, lightDir), 0.0);
-    vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
-    float attenuation = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
-    vec3 diffuse = diff * light.color * light.intensity;
-    vec3 specular = 0.5 * spec * light.color * light.intensity;
-    return (diffuse + specular) * attenuation * cone;
-}
-
+uniform float uMetallic;
+uniform float uRoughness;
+)") + sage::render::kPbrSharedGlsl + R"(
 void main() {
-    vec3 baseColor = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
-    vec3 norm = normalize(Normal);
-    vec3 viewDir = normalize(uViewPos - FragPos);
-
-    vec3 ambient = CalcHemisphereAmbient(norm);
-
-    vec3 sunDir = normalize(-uSunDir);
-    float sunDiff = max(dot(norm, sunDir), 0.0);
-    vec3 sunReflect = reflect(-sunDir, norm);
-    float sunSpec = pow(max(dot(viewDir, sunReflect), 0.0), 32.0);
-    vec3 sunLight = (sunDiff + 0.5 * sunSpec) * uSunColor * uSunIntensity;
-    float shadow = uShadowsEnabled ? CalcSunShadow(FragPosLightSpace, norm, sunDir) : 0.0;
-    sunLight *= (1.0 - shadow);
-
-    vec3 pointLight = vec3(0.0);
-    for (int i = 0; i < uNumPointLights; ++i)
-        pointLight += CalcPointLight(uPointLights[i], norm, FragPos, viewDir);
-
-    vec3 spotLight = vec3(0.0);
-    for (int i = 0; i < uNumSpotLights; ++i)
-        spotLight += CalcSpotLight(uSpotLights[i], norm, FragPos, viewDir);
-
-    vec3 result = (ambient + sunLight + pointLight + spotLight) * baseColor;
-
-    if (uFogEnabled) {
-        float dist = length(uViewPos - FragPos);
-        float f = clamp((uFogEnd - dist) / max(uFogEnd - uFogStart, 0.0001), 0.0, 1.0);
-        result = mix(uFogColor, result, f);
-    }
-    FragColor = vec4(result, 1.0);
+    vec3 albedo = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
+    vec3 N = normalize(Normal);
+    if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
+    if (uShadingMode == 1) { FragColor = vec4(albedo, 1.0); return; }
+    FragColor = vec4(ShadePBR(N, FragPos, FragPosLightSpace, albedo, uMetallic, uRoughness), 1.0);
 }
 )";
+}
 
 Shader& SkinShader() {
     // Намеренно НЕ уничтожаем: function-local static с деструктором Shader снёс
     // бы GL-программу при выходе из процесса — уже ПОСЛЕ разрушения GL-контекста
     // (segfault в glDeleteProgram). Утечка одной программы на выходе безвредна
     // (ОС всё освободит), зато нет обращения к мёртвому контексту.
-    static Shader* shader = new Shader(Shader::FromSource(kSkinVert, kSkinFrag, "SkinnedModel"));
+    static Shader* shader = new Shader(Shader::FromSource(kSkinVert, SkinFragSource(), "SkinnedModel"));
     return *shader;
 }
 
@@ -308,6 +212,8 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
 
     for (const auto& sub : m_subMeshes) {
         shader.SetVec3("uObjectColor", sub.Tint);
+        shader.SetFloat("uMetallic", sub.Metallic);
+        shader.SetFloat("uRoughness", sub.Roughness);
         if (sub.Diffuse) {
             shader.SetInt("uUseTexture", 1);
             shader.SetInt("uTexture", 0);
@@ -610,6 +516,8 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
                 if (pbr.baseColorFactor.size() == 4)
                     sub.Tint = glm::vec3(pbr.baseColorFactor[0], pbr.baseColorFactor[1], pbr.baseColorFactor[2]);
                 if (pbr.baseColorTexture.index >= 0) sub.Diffuse = loadTex(pbr.baseColorTexture.index);
+                sub.Metallic = (float)pbr.metallicFactor;   // glTF по умолчанию 1.0
+                sub.Roughness = (float)pbr.roughnessFactor; // glTF по умолчанию 1.0
             }
             model->m_subMeshes.push_back(std::move(sub));
         }

@@ -6,8 +6,40 @@
 
 using namespace sage::rhi;
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) {
+// Вычисляет касательные (tangent) для normal mapping из позиций и UV каждого
+// треугольника; аккумулирует по вершинам, затем ортонормирует относительно
+// нормали (Gram–Schmidt). Вырожденные UV дают запасную касательную.
+static void ComputeTangents(std::vector<Vertex>& v, const std::vector<unsigned int>& idx) {
+    std::vector<glm::vec3> acc(v.size(), glm::vec3(0.0f));
+    for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+        unsigned a = idx[i], b = idx[i + 1], c = idx[i + 2];
+        glm::vec3 e1 = v[b].Position - v[a].Position;
+        glm::vec3 e2 = v[c].Position - v[a].Position;
+        glm::vec2 d1 = v[b].TexCoords - v[a].TexCoords;
+        glm::vec2 d2 = v[c].TexCoords - v[a].TexCoords;
+        float det = d1.x * d2.y - d2.x * d1.y;
+        if (std::abs(det) < 1e-8f) continue;
+        float f = 1.0f / det;
+        glm::vec3 t = f * (d2.y * e1 - d1.y * e2);
+        acc[a] += t; acc[b] += t; acc[c] += t;
+    }
+    for (size_t i = 0; i < v.size(); ++i) {
+        glm::vec3 n = v[i].Normal;
+        glm::vec3 t = acc[i];
+        t = t - n * glm::dot(n, t); // ортогонализация к нормали
+        if (glm::dot(t, t) < 1e-10f) {
+            // Запасная касательная, перпендикулярная нормали.
+            t = glm::abs(n.y) < 0.99f ? glm::cross(glm::vec3(0, 1, 0), n) : glm::vec3(1, 0, 0);
+        }
+        v[i].Tangent = glm::normalize(t);
+    }
+}
+
+Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indices) {
     m_indexCount = indices.size();
+
+    std::vector<Vertex> vertices = verticesIn;
+    ComputeTangents(vertices, indices); // касательные для normal mapping
 
     VertexLayout layout;
     layout.Stride = sizeof(Vertex);
@@ -15,18 +47,20 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>&
         {0, 3, AttribType::Float, (int)offsetof(Vertex, Position)},
         {1, 3, AttribType::Float, (int)offsetof(Vertex, Normal)},
         {2, 2, AttribType::Float, (int)offsetof(Vertex, TexCoords)},
+        {3, 3, AttribType::Float, (int)offsetof(Vertex, Tangent)},
     };
-    // Per-instance поток (батчинг): модельная матрица (loc 3..6 — 4 строки) +
-    // цвет (loc 7). Продвигается раз на инстанс (divisor 1). Регулярная
-    // (не инстансная) отрисовка эти локации не читает — атрибуты просто не
-    // задействованы соответствующим шейдером.
+    // Per-instance поток (батчинг): модельная матрица (loc 4..7 — 4 строки) +
+    // цвет (loc 8) + metallic (loc 9) + roughness (loc 10). Divisor 1.
+    // Не-инстансная отрисовка эти локации не читает.
     layout.InstanceStride = sizeof(MeshInstance);
     layout.InstanceAttributes = {
-        {3, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 0},
-        {4, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 16},
-        {5, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 32},
-        {6, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 48},
-        {7, 3, AttribType::Float, (int)offsetof(MeshInstance, Color)},
+        {4, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 0},
+        {5, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 16},
+        {6, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 32},
+        {7, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 48},
+        {8, 3, AttribType::Float, (int)offsetof(MeshInstance, Color)},
+        {9, 1, AttribType::Float, (int)offsetof(MeshInstance, Metallic)},
+        {10, 1, AttribType::Float, (int)offsetof(MeshInstance, Roughness)},
     };
 
     m_geometry = GraphicsDevice::Get().CreateGeometry(layout);

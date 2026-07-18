@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
+#include <vector>
 
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -15,8 +17,10 @@
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/render/LightingUpload.h"
+#include "sage/render/Material.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
+#include "sage/render/Texture.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
@@ -122,6 +126,81 @@ void SpawnPortal(Scene& scene, const std::string& name, glm::vec3 pos,
         ScriptComponent{"assets/scripts/beacon_pulse.lua"});
 }
 
+// Демонстрация PBR + normal mapping БЕЗ бинарных ассетов: процедурно генерируем
+// albedo- и tangent-space normal-карты кирпичной кладки прямо в памяти и вешаем
+// их на материал сферы. Так текстурный PBR-путь (RenderBatch::m_textured, TBN,
+// Cook-Torrance) реально прогоняется в headless-скриншоте CI, а не только
+// компилируется. Материал живёт в MaterialPtr сущности (владеет и текстурами).
+void SpawnNormalMappedDemo(Scene& scene, glm::vec3 pos) {
+    const int N = 128;
+    std::vector<unsigned char> albedo(N * N * 4);
+    std::vector<float> height(N * N);
+
+    // Кирпичная кладка: ряды со сдвигом, шов (mortar) темнее и «продавлен».
+    auto brickAt = [&](int x, int y, float& h, glm::vec3& col) {
+        const int brickH = 32, brickW = 64, mortar = 5;
+        int row = y / brickH;
+        int sx = (row % 2) ? brickW / 2 : 0;         // сдвиг чётных рядов
+        int bx = (x + sx) % brickW;
+        int by = y % brickH;
+        bool seam = bx < mortar || by < mortar;
+        if (seam) {
+            h = 0.0f;                                 // шов утоплен
+            col = glm::vec3(0.35f, 0.33f, 0.30f);     // серый раствор
+        } else {
+            // лёгкая зернистость кирпича + чуть выпуклая поверхность
+            float n = 0.5f + 0.5f * std::sin(x * 12.9898f) * std::sin(y * 78.233f);
+            h = 0.75f + 0.25f * n;
+            float shade = 0.85f + 0.15f * n;
+            col = glm::vec3(0.62f, 0.28f, 0.20f) * shade; // терракота
+        }
+    };
+    for (int y = 0; y < N; ++y)
+        for (int x = 0; x < N; ++x) {
+            float h; glm::vec3 col;
+            brickAt(x, y, h, col);
+            height[y * N + x] = h;
+            int i = (y * N + x) * 4;
+            albedo[i + 0] = (unsigned char)(glm::clamp(col.r, 0.0f, 1.0f) * 255);
+            albedo[i + 1] = (unsigned char)(glm::clamp(col.g, 0.0f, 1.0f) * 255);
+            albedo[i + 2] = (unsigned char)(glm::clamp(col.b, 0.0f, 1.0f) * 255);
+            albedo[i + 3] = 255;
+        }
+
+    // Tangent-space нормали из градиента высоты: N = normalize(-dH/dx, -dH/dy, 1),
+    // кодируем в RGB [0..1]. strength масштабирует рельеф швов.
+    std::vector<unsigned char> normal(N * N * 4);
+    const float strength = 3.0f;
+    auto H = [&](int x, int y) { return height[((y + N) % N) * N + ((x + N) % N)]; };
+    for (int y = 0; y < N; ++y)
+        for (int x = 0; x < N; ++x) {
+            float dx = (H(x + 1, y) - H(x - 1, y)) * strength;
+            float dy = (H(x, y + 1) - H(x, y - 1)) * strength;
+            glm::vec3 n = glm::normalize(glm::vec3(-dx, -dy, 1.0f));
+            int i = (y * N + x) * 4;
+            normal[i + 0] = (unsigned char)((n.x * 0.5f + 0.5f) * 255);
+            normal[i + 1] = (unsigned char)((n.y * 0.5f + 0.5f) * 255);
+            normal[i + 2] = (unsigned char)((n.z * 0.5f + 0.5f) * 255);
+            normal[i + 3] = 255;
+        }
+
+    auto mat = std::make_shared<Material>();
+    mat->Albedo = glm::vec3(1.0f);
+    mat->Metallic = 0.0f;
+    mat->Roughness = 0.55f;
+    mat->AlbedoTex = std::make_shared<Texture>(albedo.data(), N, N);
+    mat->NormalTex = std::make_shared<Texture>(normal.data(), N, N);
+
+    GameObject obj = scene.CreateObject("PBR Brick Sphere");
+    obj.GetTransform().Position = pos;
+    obj.GetTransform().Scale = glm::vec3(1.3f);
+    MeshRendererComponent& mr = obj.Renderer();
+    mr.Ref = MeshRef{MeshRef::Type::Sphere, ""};
+    mr.MeshPtr = ResourceManager::Instance().GetSphere();
+    mr.MaterialPtr = mat; // текстурный PBR-путь (HasMaps() == true)
+    scene.Registry().emplace<StaticColliderComponent>(obj.Entity());
+}
+
 } // namespace
 
 void TestGameLayer::BuildRoomOne(Scene& scene) {
@@ -158,6 +237,10 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     statueMr.MeshPtr = ResourceManager::Instance().GetModel(statueMr.Ref.path);
     statueMr.Color = {0.75f, 0.72f, 0.65f};
     scene.Registry().emplace<StaticColliderComponent>(statue.Entity());
+
+    // PBR-демо: кирпичная сфера с процедурными albedo + normal картами
+    // (нормал-маппинг + Cook-Torrance) — прогоняет текстурный PBR-путь в CI.
+    SpawnNormalMappedDemo(scene, {-2.2f, 1.2f, 5.5f});
 
     SpawnPickup(scene, "Coin 1-1", {-6, 0.8f, -6});
     SpawnPickup(scene, "Coin 1-2", {6, 0.8f, -7});

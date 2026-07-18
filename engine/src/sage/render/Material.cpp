@@ -30,7 +30,10 @@ Material Material::LoadFromFile(const std::string& path) {
     m.Albedo = Vec3FromJson(root.value("albedo", json()), m.Albedo);
     m.Emissive = Vec3FromJson(root.value("emissive", json()), m.Emissive);
     m.Shininess = root.value("shininess", m.Shininess);
+    m.Metallic = root.value("metallic", m.Metallic);
+    m.Roughness = root.value("roughness", m.Roughness);
     m.TexturePath = root.value("texture", m.TexturePath);
+    m.NormalMapPath = root.value("normalMap", m.NormalMapPath);
     return m;
 }
 
@@ -39,7 +42,10 @@ void Material::SaveToFile(const std::string& path) const {
     root["albedo"] = Vec3ToJson(Albedo);
     root["emissive"] = Vec3ToJson(Emissive);
     root["shininess"] = Shininess;
+    root["metallic"] = Metallic;
+    root["roughness"] = Roughness;
     root["texture"] = TexturePath;
+    root["normalMap"] = NormalMapPath;
 
     std::ofstream file(path);
     if (!file.is_open()) {

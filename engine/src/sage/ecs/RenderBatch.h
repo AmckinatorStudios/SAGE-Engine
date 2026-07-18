@@ -8,6 +8,7 @@
 
 class Scene;
 struct LightingEnvironment;
+struct Material;
 
 // ---------------------------------------------------------------------------
 // RenderBatch — масштабируемый проход статических мешей: отсечение по фрустуму
@@ -45,10 +46,16 @@ public:
     const RenderStats& LastStats() const { return m_stats; }
 
 private:
-    // Сбор видимых сущностей в группы по мешу (общий для обоих проходов).
+    // Одна видимая текстурная сущность (с albedo/normal-картами) — рисуется
+    // индивидуально текстурным PBR-шейдером (нельзя инстансить с текстурами).
+    struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; };
+
+    // Сбор видимых сущностей: flat (без карт) — в m_groups по мешу (инстансинг),
+    // текстурные (с картами) — в m_textured. cullMatrix — фрустум камеры/света.
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
-    std::unordered_map<Mesh*, std::vector<MeshInstance>> m_groups; // переиспользуемый scratch
+    std::unordered_map<Mesh*, std::vector<MeshInstance>> m_groups; // flat-инстансы по мешу
+    std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)
     RenderStats m_stats;
 };
 
