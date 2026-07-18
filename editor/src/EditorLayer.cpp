@@ -82,6 +82,10 @@ void EditorLayer::OnAttach() {
     m_shadows.emplace(2048);
     m_sceneFbo.emplace(m_viewportW, m_viewportH);
     m_gameFbo.emplace(m_gameW, m_gameH);
+    m_postFbo.emplace(m_viewportW, m_viewportH); // LDR-выход PostFX (вьюпорт)
+    m_postfx.emplace();                          // SSAO + Bloom + виньетка
+    m_gamePostFbo.emplace(m_gameW, m_gameH);      // LDR-выход PostFX (панель Game)
+    m_gamePostfx.emplace();
     m_debugDraw.emplace();
     m_sky.emplace();
     m_particles.emplace(); // пул частиц сцены (эмиттеры ECS)
@@ -823,6 +827,27 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
     }
     m_debugDraw->Flush(m_view, m_proj);
 
+    // Пост-обработка (SSAO + Bloom + виньетка/тон-маппинг) — только в Shaded-режиме
+    // и если включена в конфиге; отладочные режимы (Unlit/Normals/Wireframe)
+    // показываем как есть. Результат — в m_postFbo (его и покажет вьюпорт).
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    m_postApplied = false;
+    if (cfg.PostProcessing && m_renderMode == EditorRenderMode::Shaded) {
+        sage::render::PostFXSettings fx;
+        fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
+        fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
+        fx.Vignette = cfg.Vignette;
+        fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
+        fx.BloomIntensity = cfg.BloomIntensity;
+        fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
+        fx.AORadius = cfg.AORadius;
+        m_postFbo->Resize(m_viewportW, m_viewportH);
+        m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
+                         m_sceneFbo->Width(), m_sceneFbo->Height(), m_proj, fx,
+                         /*output=*/&*m_postFbo, 0, 0, m_viewportW, m_viewportH);
+        m_postApplied = true;
+    }
+
     device.BindDefaultFramebuffer();
 }
 
@@ -874,6 +899,25 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     sage::anim::DrawAnimatedModels(*m_scene, view, proj, tr.Position, env,
                                    m_shadows->LightMatrix(), m_shadows->DepthTexture(), true);
     if (m_particles) m_particles->DrawFromView(view, proj); // camRight/Up из матрицы вида
+
+    // Панель Game = финальная картинка игрока: применяем ту же пост-обработку.
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    m_gamePostApplied = false;
+    if (cfg.PostProcessing) {
+        sage::render::PostFXSettings fx;
+        fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
+        fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
+        fx.Vignette = cfg.Vignette;
+        fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
+        fx.BloomIntensity = cfg.BloomIntensity;
+        fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
+        fx.AORadius = cfg.AORadius;
+        m_gamePostFbo->Resize(m_gameW, m_gameH);
+        m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
+                             m_gameFbo->Width(), m_gameFbo->Height(), proj, fx,
+                             /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
+        m_gamePostApplied = true;
+    }
 
     device.BindDefaultFramebuffer();
 }
@@ -1364,6 +1408,20 @@ void EditorLayer::DrawSettingsWindow() {
         ImGui::SliderFloat("Saturation", &c.Saturation, 0.0f, 2.0f);
         ImGui::SliderFloat("Contrast", &c.Contrast, 0.5f, 2.0f);
         ImGui::SliderFloat("Vignette", &c.Vignette, 0.0f, 1.0f);
+
+        ImGui::SeparatorText("Bloom");
+        ImGui::Checkbox("Bloom", &c.Bloom);
+        ImGui::BeginDisabled(!c.Bloom);
+        ImGui::SliderFloat("Bloom Threshold", &c.BloomThreshold, 0.0f, 3.0f);
+        ImGui::SliderFloat("Bloom Intensity", &c.BloomIntensity, 0.0f, 2.0f);
+        ImGui::EndDisabled();
+
+        ImGui::SeparatorText("Ambient Occlusion (SSAO)");
+        ImGui::Checkbox("Ambient Occlusion", &c.AmbientOcclusion);
+        ImGui::BeginDisabled(!c.AmbientOcclusion);
+        ImGui::SliderFloat("AO Strength", &c.AOStrength, 0.0f, 4.0f);
+        ImGui::SliderFloat("AO Radius", &c.AORadius, 0.05f, 2.0f);
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
     }
 

@@ -114,8 +114,9 @@ public:
 
 // --- Рендер-таргеты (offscreen кадровые буферы) ---
 enum class RenderTargetKind {
-    ColorHDRWithDepth, // float-цвет (HDR, для пост-процессинга) + depth-буфер
+    ColorHDRWithDepth, // float-цвет (HDR, для пост-процессинга) + depth-текстура
     DepthOnly,         // только depth-текстура (карта теней); за границей — «освещено»
+    ColorHDR,          // только float-цвет (HDR), без глубины — промежуточные буферы пост-эффектов
 };
 
 struct RenderTargetDesc {

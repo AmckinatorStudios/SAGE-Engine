@@ -315,9 +315,11 @@ void GLRenderTarget::CreateStorage() {
     glGenFramebuffers(1, &m_fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 
-    if (m_kind == RenderTargetKind::ColorHDRWithDepth) {
-        // Цвет — float-текстура (HDR: значения не обрезаются в [0,1], что
-        // нужно тон-маппингу). Глубина — renderbuffer (читать её не нужно).
+    if (m_kind == RenderTargetKind::ColorHDRWithDepth || m_kind == RenderTargetKind::ColorHDR) {
+        // Цвет — float-текстура (HDR: значения не обрезаются в [0,1], что нужно
+        // тон-маппингу). ColorHDRWithDepth вдобавок держит depth-ТЕКСТУРУ (не
+        // renderbuffer), чтобы её можно было сэмплировать в SSAO (DepthTextureHandle).
+        // ColorHDR — только цвет (промежуточные буферы пост-эффектов, глубина не нужна).
         glGenTextures(1, &m_colorTex);
         glBindTexture(GL_TEXTURE_2D, m_colorTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0, GL_RGBA, GL_FLOAT, nullptr);
@@ -327,10 +329,17 @@ void GLRenderTarget::CreateStorage() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_colorTex, 0);
 
-        glGenRenderbuffers(1, &m_depthRbo);
-        glBindRenderbuffer(GL_RENDERBUFFER, m_depthRbo);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, m_width, m_height);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_depthRbo);
+        if (m_kind == RenderTargetKind::ColorHDRWithDepth) {
+            glGenTextures(1, &m_depthTex);
+            glBindTexture(GL_TEXTURE_2D, m_depthTex);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0,
+                         GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTex, 0);
+        }
     } else { // DepthOnly (карта теней)
         glGenTextures(1, &m_depthTex);
         glBindTexture(GL_TEXTURE_2D, m_depthTex);
@@ -378,11 +387,14 @@ void GLRenderTarget::Resize(int width, int height) {
     m_height = height;
 
     // Перевыделяем только хранилища вложений — FBO и параметры сохраняются.
-    if (m_kind == RenderTargetKind::ColorHDRWithDepth) {
+    if (m_kind == RenderTargetKind::ColorHDRWithDepth || m_kind == RenderTargetKind::ColorHDR) {
         glBindTexture(GL_TEXTURE_2D, m_colorTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
-        glBindRenderbuffer(GL_RENDERBUFFER, m_depthRbo);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+        if (m_depthTex) {
+            glBindTexture(GL_TEXTURE_2D, m_depthTex);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
+                         GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+        }
     } else {
         glBindTexture(GL_TEXTURE_2D, m_depthTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,

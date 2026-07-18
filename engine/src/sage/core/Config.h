@@ -53,6 +53,12 @@ struct EngineConfig {
     float Saturation = 1.0f;
     float Contrast = 1.0f;
     float Vignette = 0.35f;
+    bool Bloom = true;             // свечение ярких участков
+    float BloomThreshold = 1.0f;   // яркость, выше которой пиксель светится
+    float BloomIntensity = 0.55f;  // сила добавляемого свечения
+    bool AmbientOcclusion = true;  // SSAO — затемнение щелей/контактов
+    float AOStrength = 1.0f;       // сила SSAO (0 — выкл)
+    float AORadius = 0.5f;         // радиус выборки SSAO (мировые единицы)
 
     // Соотношение сторон для Aspect (0 — Free, кадр по размеру окна).
     float AspectRatio() const;

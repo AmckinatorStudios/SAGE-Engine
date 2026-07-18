@@ -131,6 +131,12 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Saturation = pp.value("saturation", Saturation);
     Contrast   = pp.value("contrast", Contrast);
     Vignette   = pp.value("vignette", Vignette);
+    Bloom            = pp.value("bloom", Bloom);
+    BloomThreshold   = pp.value("bloomThreshold", BloomThreshold);
+    BloomIntensity   = pp.value("bloomIntensity", BloomIntensity);
+    AmbientOcclusion = pp.value("ao", AmbientOcclusion);
+    AOStrength       = pp.value("aoStrength", AOStrength);
+    AORadius         = pp.value("aoRadius", AORadius);
 
     LOG_INFO("Config") << "Загружены настройки: " << path;
     return true;
@@ -153,6 +159,8 @@ bool EngineConfig::SaveFile(const std::string& path) const {
     j["postProcess"] = {
         {"exposure", Exposure}, {"gamma", Gamma}, {"saturation", Saturation},
         {"contrast", Contrast}, {"vignette", Vignette},
+        {"bloom", Bloom}, {"bloomThreshold", BloomThreshold}, {"bloomIntensity", BloomIntensity},
+        {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
     };
 
     std::ofstream f(path);

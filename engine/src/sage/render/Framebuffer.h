@@ -45,6 +45,8 @@ public:
     // Нативный хендл текстуры цвета — для сэмплирования проходом пост-процесса
     // (GraphicsDevice::BindTexture2D) и показа в ImGui (viewport редактора).
     unsigned int ColorTexture() const { return m_target->ColorTextureHandle(); }
+    // Нативный хендл depth-текстуры сцены — для SSAO/пост-эффектов, читающих глубину.
+    unsigned int DepthTexture() const { return m_target->DepthTextureHandle(); }
     int Width() const { return m_target->Width(); }
     int Height() const { return m_target->Height(); }
 

@@ -13,6 +13,7 @@
 #include "sage/render/Framebuffer.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/PostProcess.h"
+#include "sage/render/PostFX.h"
 #include "sage/render/Model.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/ecs/RenderBatch.h"
@@ -122,6 +123,8 @@ private:
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<PostProcess> m_post;
+    std::optional<sage::render::PostFX> m_postfx;      // SSAO + Bloom + composite
+    sage::render::PostFXSettings m_postfxSettings;     // экспозиция/AO/bloom/виньетка
     PostProcessSettings m_postSettings;
     bool m_shadowsEnabled = true;
     bool m_postEnabled = true;

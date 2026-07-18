@@ -10,6 +10,7 @@
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
+#include "sage/render/PostFX.h"
 #include "sage/render/DebugDraw.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
@@ -111,12 +112,16 @@ public:
     Camera& EditorCamera() override { return m_camera; }
     const glm::mat4& ViewMatrix() const override { return m_view; }
     const glm::mat4& ProjMatrix() const override { return m_proj; }
-    unsigned int SceneTexture() const override { return m_sceneFbo->ColorTexture(); }
+    unsigned int SceneTexture() const override {
+        return m_postApplied && m_postFbo ? m_postFbo->ColorTexture() : m_sceneFbo->ColorTexture();
+    }
     void SetViewportSize(int w, int h) override { m_viewportW = w; m_viewportH = h; }
     void PickAtViewport(float u, float v) override;
 
     // --- EditorHost: панель Game ---
-    unsigned int GameTexture() const override { return m_gameFbo->ColorTexture(); }
+    unsigned int GameTexture() const override {
+        return m_gamePostApplied && m_gamePostFbo ? m_gamePostFbo->ColorTexture() : m_gameFbo->ColorTexture();
+    }
     void SetGameViewportSize(int w, int h) override { m_gameW = w; m_gameH = h; }
     bool HasPrimaryCamera() override;
 
@@ -171,6 +176,12 @@ private:
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<Framebuffer> m_gameFbo;
+    std::optional<Framebuffer> m_postFbo;             // LDR-выход PostFX для вьюпорта
+    std::optional<sage::render::PostFX> m_postfx;     // SSAO + Bloom + виньетка (вьюпорт)
+    bool m_postApplied = false;                       // применён ли PostFX к текущему кадру вьюпорта
+    std::optional<Framebuffer> m_gamePostFbo;         // LDR-выход PostFX для панели Game
+    std::optional<sage::render::PostFX> m_gamePostfx; // отдельный экземпляр (свой размер)
+    bool m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
     std::optional<SkyRenderer> m_sky;     // процедурный градиентный скайбокс
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)

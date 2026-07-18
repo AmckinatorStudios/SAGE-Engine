@@ -493,6 +493,18 @@ void TestGameLayer::OnAttach() {
     m_postSettings.Saturation = cfg.Saturation;
     m_postSettings.Contrast = cfg.Contrast;
     m_postSettings.VignetteStrength = cfg.Vignette;
+    // PostFX (SSAO + Bloom + виньетка) — параметры из EngineConfig.
+    m_postfxSettings.Exposure = cfg.Exposure;
+    m_postfxSettings.Gamma = cfg.Gamma;
+    m_postfxSettings.Saturation = cfg.Saturation;
+    m_postfxSettings.Contrast = cfg.Contrast;
+    m_postfxSettings.Vignette = cfg.Vignette;
+    m_postfxSettings.BloomEnabled = cfg.Bloom;
+    m_postfxSettings.BloomThreshold = cfg.BloomThreshold;
+    m_postfxSettings.BloomIntensity = cfg.BloomIntensity;
+    m_postfxSettings.AOEnabled = cfg.AmbientOcclusion;
+    m_postfxSettings.AOStrength = cfg.AOStrength;
+    m_postfxSettings.AORadius = cfg.AORadius;
     m_autopilot = (std::getenv("SAGE_TESTGAME_AUTOPILOT") != nullptr);
 
     // --- аудио (первым: скрипты сцен биндят его при привязке) ---
@@ -506,6 +518,7 @@ void TestGameLayer::OnAttach() {
     m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512);
     m_sceneFbo.emplace(window.Width(), window.Height());
     m_post.emplace();
+    m_postfx.emplace(); // SSAO + Bloom + виньетка (полная цепочка пост-обработки)
     m_monument = Model::Load("assets/models/monument.obj"); // прямой путь Model::Load
     m_particles.emplace(); // пул частиц (эмиттеры-факелы в комнатах)
 
@@ -915,17 +928,11 @@ void TestGameLayer::OnRender() {
     // --- 3. Пост-процесс: HDR -> экран (тон-маппинг ACES и т.д.), апскейл до
     //        letterbox-viewport (внутреннее разрешение могло быть меньше) ---
     if (m_postEnabled) {
-        device.BindDefaultFramebuffer();
-        device.SetViewport(vpX, vpY, vpW, vpH);
-        m_postShader->Use();
-        m_postShader->SetFloat("uExposure", m_postSettings.Exposure);
-        m_postShader->SetFloat("uGamma", m_postSettings.Gamma);
-        m_postShader->SetFloat("uSaturation", m_postSettings.Saturation);
-        m_postShader->SetFloat("uContrast", m_postSettings.Contrast);
-        m_postShader->SetFloat("uVignette", m_postSettings.VignetteStrength);
-        device.BindTexture2D(0, m_sceneFbo->ColorTexture());
-        m_postShader->SetInt("uScene", 0);
-        m_post->Draw();
+        // Полная цепочка PostFX: SSAO (из глубины сцены) + Bloom + тон-маппинг/
+        // виньетка. Пишет в экран, letterbox-viewport (vpX..).
+        m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
+                         m_sceneFbo->Width(), m_sceneFbo->Height(), proj, m_postfxSettings,
+                         /*output=*/nullptr, vpX, vpY, vpW, vpH);
     }
 
     // --- 4. HUD поверх всего (движковый UIRenderer, не ImGui) — во весь экран,
