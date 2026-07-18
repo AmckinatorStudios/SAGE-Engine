@@ -17,7 +17,7 @@ void Window::ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset) {
     if (win && win->m_scrollFn) win->m_scrollFn(xoffset, yoffset);
 }
 
-Window::Window(int width, int height, const std::string& title)
+Window::Window(int width, int height, const std::string& title, Params params)
     : m_width(width), m_height(height) {
 
     if (!glfwInit()) {
@@ -31,15 +31,39 @@ Window::Window(int width, int height, const std::string& title)
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
+    glfwWindowHint(GLFW_RESIZABLE, params.Resizable ? GLFW_TRUE : GLFW_FALSE);
+    if (params.Msaa > 0) glfwWindowHint(GLFW_SAMPLES, params.Msaa); // сглаживание экранного буфера
 
-    m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    // Полноэкранный/безрамочный режим использует текущий видеорежим монитора
+    // (borderless = «окно во весь монитор без рамки», fullscreen = эксклюзивный).
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* vmode = monitor ? glfwGetVideoMode(monitor) : nullptr;
+    GLFWmonitor* useMonitor = nullptr;
+    int createW = width, createH = height;
+    if (params.Mode == sage::WindowMode::Fullscreen && monitor && vmode) {
+        useMonitor = monitor;
+        createW = vmode->width; createH = vmode->height;
+    } else if (params.Mode == sage::WindowMode::Borderless && monitor && vmode) {
+        // Безрамочное окно во весь монитор: подсказки под видеорежим + decorated=false.
+        glfwWindowHint(GLFW_RED_BITS, vmode->redBits);
+        glfwWindowHint(GLFW_GREEN_BITS, vmode->greenBits);
+        glfwWindowHint(GLFW_BLUE_BITS, vmode->blueBits);
+        glfwWindowHint(GLFW_REFRESH_RATE, vmode->refreshRate);
+        glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+        createW = vmode->width; createH = vmode->height;
+    }
+
+    m_handle = glfwCreateWindow(createW, createH, title.c_str(), useMonitor, nullptr);
     if (!m_handle) {
         glfwTerminate();
         LOG_ERROR("Window") << "Не удалось создать окно GLFW";
         throw std::runtime_error("Не удалось создать окно GLFW");
     }
+    m_width = createW;
+    m_height = createH;
 
     glfwMakeContextCurrent(m_handle);
+    glfwSwapInterval(params.VSync ? 1 : 0); // вертикальная синхронизация
     glfwSetWindowUserPointer(m_handle, this);
     glfwSetFramebufferSizeCallback(m_handle, FramebufferSizeCallback);
     glfwSetCursorPosCallback(m_handle, &Window::ForwardCursorPos);

@@ -20,6 +20,7 @@
 
 #include "sage/core/GameModule.h"
 #include "sage/core/Log.h"
+#include "sage/core/Config.h"
 #include "sage/core/Version.h"
 #include "PlayerLayer.h"
 
@@ -38,11 +39,16 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     else projectDir = ".";
     projectDir = fs::absolute(projectDir, ec);
 
-    sage::AppConfig config;
-    config.Width = 1280;
-    config.Height = 720;
-    if (const char* w = std::getenv("SAGE_WINDOW_WIDTH")) config.Width = std::atoi(w);
-    if (const char* h = std::getenv("SAGE_WINDOW_HEIGHT")) config.Height = std::atoi(h);
+    // Гибкие настройки: файл (рядом с игрой и/или в проекте) + env-оверрайды.
+    // Приоритет: значения по умолчанию -> sage.cfg (CWD) -> <проект>/sage.cfg -> env.
+    sage::EngineConfig cfg;
+    cfg.Title = "SAGE Player";
+    cfg.LoadFile("sage.cfg");
+    cfg.LoadFile((projectDir / "sage.cfg").string());
+    cfg.ApplyEnvOverrides();
+    sage::EngineConfig::Set(cfg);
+
+    sage::AppConfig config = sage::AppConfig::FromEngineConfig(cfg);
     config.Title = "SAGE Player"; // заменится именем проекта после загрузки
 
     auto* app = new sage::Application(config);

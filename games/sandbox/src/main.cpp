@@ -18,6 +18,7 @@
 
 #include "sage/core/GameModule.h"
 #include "sage/core/Log.h"
+#include "sage/core/Config.h"
 #include "sage/core/Version.h"
 #include "SandboxLayer.h"
 
@@ -25,14 +26,15 @@ sage::Application* sage::CreateApplication(int /*argc*/, char** /*argv*/) {
     Log::Init("sage_engine.log");
     LOG_INFO("Sandbox") << "SAGE Sandbox v" << kSageEngineVersion << " запускается...";
 
-    // Размер окна настраивается через переменные окружения — паттерн,
-    // общий для всех приложений на движке (см. также EditorLayer).
-    sage::AppConfig config;
-    config.Width = 1280;
-    config.Height = 720;
-    if (const char* w = std::getenv("SAGE_WINDOW_WIDTH")) config.Width = std::atoi(w);
-    if (const char* h = std::getenv("SAGE_WINDOW_HEIGHT")) config.Height = std::atoi(h);
-    config.Title = std::string("SAGE Sandbox v") + kSageEngineVersion;
+    // Гибкие настройки движка: файл sage.cfg + env-оверрайды — единый механизм
+    // для всех приложений на движке (окно/vsync/тени/пост-процесс и т.д.).
+    sage::EngineConfig cfg;
+    cfg.Title = std::string("SAGE Sandbox v") + kSageEngineVersion;
+    cfg.LoadFile("sage.cfg");
+    cfg.ApplyEnvOverrides();
+    sage::EngineConfig::Set(cfg);
+
+    sage::AppConfig config = sage::AppConfig::FromEngineConfig(cfg);
 
     auto* app = new sage::Application(config);
     app->PushLayer(std::make_unique<SandboxLayer>());

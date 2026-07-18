@@ -123,6 +123,9 @@ void EditorLayer::OnAttach() {
 
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
 
+    // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
+    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
+
     // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
     // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
     // а в тулбаре гореть PLAYING. Launcher в этом режиме не показываем.
@@ -468,6 +471,11 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     m_assetsCwd = m_project.Dir();
     m_recent.Add(m_project.Dir().string());
 
+    // Настройки проекта (sage.cfg) — в окно Settings; отсутствие файла не ошибка
+    // (остаются значения по умолчанию).
+    m_settings = sage::EngineConfig{};
+    m_settings.LoadFile((m_project.Dir() / "sage.cfg").string());
+
     // Автозагрузка первой сцены проекта (по алфавиту) — открытый проект сразу
     // показывает свой контент, а не осиротевшую демо-сцену.
     std::error_code ec;
@@ -541,6 +549,14 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     if (ec) {
         err = "Project copy failed: " + ec.message();
         return false;
+    }
+
+    // Настройки проекта — рядом с exe игры (sage.cfg), чтобы игрок мог править их
+    // без залезания в project/. SagePlayer грузит и этот, и project/sage.cfg.
+    std::error_code cfgEc;
+    fs::path projCfg = m_project.Dir() / "sage.cfg";
+    if (fs::exists(projCfg, cfgEc)) {
+        fs::copy_file(projCfg, gameDir / "sage.cfg", fs::copy_options::overwrite_existing, cfgEc);
     }
 
     LOG_INFO("Editor") << "Game built: " << gameDir.string();
@@ -1115,6 +1131,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
         if (ImGui::BeginMenu("Window")) {
             if (ImGui::MenuItem("Reset Layout")) m_rebuildDockLayout = true;
             ImGui::MenuItem("Show Grid", nullptr, &m_showGrid);
+            ImGui::Separator();
+            ImGui::MenuItem("Settings...", nullptr, &m_showSettings);
             ImGui::EndMenu();
         }
 
@@ -1133,6 +1151,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     }
     // Модалки рисуются в том же ID-пространстве окна-хоста, где их открыли.
     DrawDialogs();
+    DrawSettingsWindow();
 
     ImGui::End();
 
@@ -1247,6 +1266,90 @@ void EditorLayer::DrawDialogs() {
         if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+}
+
+// ============================================================================
+//  Окно гибких настроек движка (EngineConfig). Редактирует m_settings и
+//  сохраняет в <проект>/sage.cfg — Build Game кладёт файл в собранную игру, и
+//  SagePlayer/игра читают его при запуске. Оконные параметры (размер/режим/
+//  vsync) применяются при следующем запуске игры, не в самом редакторе.
+// ============================================================================
+void EditorLayer::DrawSettingsWindow() {
+    if (!m_showSettings) return;
+    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Settings", &m_showSettings)) { ImGui::End(); return; }
+
+    sage::EngineConfig& c = m_settings;
+
+    ImGui::TextDisabled("Гибкая конфигурация игры (сохраняется в проект как sage.cfg).");
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Window / Окно", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::InputInt("Width", &c.Width);
+        ImGui::InputInt("Height", &c.Height);
+        const char* modes[] = {"Windowed", "Borderless", "Fullscreen"};
+        int mode = (int)c.Mode;
+        if (ImGui::Combo("Mode", &mode, modes, IM_ARRAYSIZE(modes))) c.Mode = (sage::WindowMode)mode;
+        ImGui::Checkbox("VSync", &c.VSync);
+        ImGui::SameLine();
+        ImGui::Checkbox("Resizable", &c.Resizable);
+        ImGui::InputInt("Frame Cap (0=off)", &c.FrameCap);
+        static const int kMsaaVals[] = {0, 2, 4, 8};
+        const char* msaa[] = {"Off", "2x", "4x", "8x"};
+        int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
+        if (ImGui::Combo("MSAA", &msaaIdx, msaa, IM_ARRAYSIZE(msaa)))
+            c.Msaa = kMsaaVals[msaaIdx];
+        ImGui::TextDisabled("Оконные параметры применяются при запуске игры.");
+    }
+
+    if (ImGui::CollapsingHeader("Display / Дисплей", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const char* aspects[] = {"Free", "16:9", "16:10", "4:3", "21:9"};
+        int a = (int)c.Aspect;
+        if (ImGui::Combo("Aspect Ratio", &a, aspects, IM_ARRAYSIZE(aspects))) c.Aspect = (sage::AspectMode)a;
+        ImGui::SliderFloat("Render Scale", &c.RenderScale, 0.25f, 2.0f, "%.2fx");
+        ImGui::TextDisabled("Render Scale < 1 — быстрее; > 1 — суперсэмплинг (чётче).");
+    }
+
+    if (ImGui::CollapsingHeader("Graphics / Графика", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Shadows", &c.Shadows);
+        static const int kShadowVals[] = {512, 1024, 2048, 4096};
+        const char* shadowRes[] = {"512", "1024", "2048", "4096"};
+        int sr = c.ShadowResolution >= 4096 ? 3 : c.ShadowResolution >= 2048 ? 2 : c.ShadowResolution >= 1024 ? 1 : 0;
+        if (ImGui::Combo("Shadow Resolution", &sr, shadowRes, IM_ARRAYSIZE(shadowRes)))
+            c.ShadowResolution = kShadowVals[sr];
+        ImGui::Checkbox("Post-Processing", &c.PostProcessing);
+        ImGui::Checkbox("Fog", &c.Fog);
+        ImGui::SameLine();
+        ImGui::Checkbox("Skybox", &c.Skybox);
+    }
+
+    if (ImGui::CollapsingHeader("Post-Process / Пост-эффекты")) {
+        ImGui::BeginDisabled(!c.PostProcessing);
+        ImGui::SliderFloat("Exposure", &c.Exposure, 0.1f, 4.0f);
+        ImGui::SliderFloat("Gamma", &c.Gamma, 1.0f, 3.0f);
+        ImGui::SliderFloat("Saturation", &c.Saturation, 0.0f, 2.0f);
+        ImGui::SliderFloat("Contrast", &c.Contrast, 0.5f, 2.0f);
+        ImGui::SliderFloat("Vignette", &c.Vignette, 0.0f, 1.0f);
+        ImGui::EndDisabled();
+    }
+
+    ImGui::Separator();
+    bool haveProject = m_project.Loaded();
+    ImGui::BeginDisabled(!haveProject);
+    if (ImGui::Button("Save to Project")) {
+        std::string path = (m_project.Dir() / "sage.cfg").string();
+        if (c.SaveFile(path)) m_pluginStatusMessage = "Настройки сохранены: sage.cfg";
+        else m_pluginStatusMessage = "Не удалось сохранить sage.cfg";
+    }
+    ImGui::EndDisabled();
+    if (!haveProject) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(откройте проект, чтобы сохранить)");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset to Defaults")) c = sage::EngineConfig{};
+
+    ImGui::End();
 }
 
 // ============================================================================
@@ -1571,8 +1674,38 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(rig.Id());
     }
 
+    // --- Конфиг: сохранение и загрузка настроек сохраняют значения (round-trip) ---
+    if (ok) {
+        sage::EngineConfig a;
+        a.Shadows = false;
+        a.PostProcessing = false;
+        a.ShadowResolution = 1024;
+        a.Aspect = sage::AspectMode::R21x9;
+        a.RenderScale = 0.75f;
+        a.VSync = false;
+        a.Msaa = 4;
+        std::string cfgPath = "selftest_settings.cfg";
+        if (!a.SaveFile(cfgPath)) {
+            LOG_ERROR("Editor") << "SELFTEST: config save failed";
+            ok = false;
+        } else {
+            sage::EngineConfig b; // из значений по умолчанию
+            if (!b.LoadFile(cfgPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: config load failed";
+                ok = false;
+            } else if (b.Shadows != false || b.PostProcessing != false ||
+                       b.ShadowResolution != 1024 || b.Aspect != sage::AspectMode::R21x9 ||
+                       std::abs(b.RenderScale - 0.75f) > 0.001f || b.VSync != false || b.Msaa != 4) {
+                LOG_ERROR("Editor") << "SELFTEST: config round-trip mismatch";
+                ok = false;
+            }
+            std::error_code cfgEc;
+            fs::remove(cfgPath, cfgEc);
+        }
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play + physics + animation, " << before << " entities)";
+                               << "recent + dirty + play + physics + animation + config, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

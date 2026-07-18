@@ -3,13 +3,25 @@
 #include <string>
 #include <functional>
 
+#include "sage/core/Config.h"
+
 // Обёртка над GLFW-окном + графическим контекстом. Само окно — чисто оконная
 // система (GLFW): создание окна и контекста, обмен буферов, события. За загрузку
 // драйвера и любое состояние конвейера отвечает rhi::GraphicsDevice, а не Window
 // — поэтому здесь нет ни одного вызова OpenGL (граница «окно vs графика»).
 class Window {
 public:
-    Window(int width, int height, const std::string& title);
+    // Параметры создания окна (режим/ресайз/vsync/сглаживание) берутся из конфига.
+    struct Params {
+        sage::WindowMode Mode = sage::WindowMode::Windowed;
+        bool Resizable = true;
+        bool VSync = true;
+        int Msaa = 0;
+    };
+
+    Window(int width, int height, const std::string& title)
+        : Window(width, height, title, Params{}) {}
+    Window(int width, int height, const std::string& title, Params params);
     ~Window();
 
     bool ShouldClose() const;

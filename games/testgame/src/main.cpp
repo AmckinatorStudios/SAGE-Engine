@@ -12,6 +12,7 @@
 
 #include "sage/core/GameModule.h"
 #include "sage/core/Log.h"
+#include "sage/core/Config.h"
 #include "sage/core/Version.h"
 #include "TestGameLayer.h"
 
@@ -19,12 +20,14 @@ sage::Application* sage::CreateApplication(int /*argc*/, char** /*argv*/) {
     Log::Init("sage_engine.log");
     LOG_INFO("TestGame") << "SAGE TestGame v" << kSageEngineVersion << " запускается...";
 
-    sage::AppConfig config;
-    config.Width = 1280;
-    config.Height = 720;
-    if (const char* w = std::getenv("SAGE_WINDOW_WIDTH")) config.Width = std::atoi(w);
-    if (const char* h = std::getenv("SAGE_WINDOW_HEIGHT")) config.Height = std::atoi(h);
-    config.Title = std::string("SAGE TestGame v") + kSageEngineVersion;
+    // Гибкие настройки: файл sage.cfg рядом с игрой + env-оверрайды.
+    sage::EngineConfig cfg;
+    cfg.Title = std::string("SAGE TestGame v") + kSageEngineVersion;
+    cfg.LoadFile("sage.cfg");
+    cfg.ApplyEnvOverrides();
+    sage::EngineConfig::Set(cfg);
+
+    sage::AppConfig config = sage::AppConfig::FromEngineConfig(cfg);
 
     auto* app = new sage::Application(config);
     app->PushLayer(std::make_unique<TestGameLayer>());

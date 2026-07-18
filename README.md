@@ -605,6 +605,50 @@ slope-scaled bias против самозатенения (плюс отсече
 граней в депт-проходе — тот же классический приём). Ортобокс света задаётся
 центром и радиусом, которые игра передаёт каждый кадр под свою сцену.
 
+## Конфигурация и настройки (EngineConfig)
+Единый гибкий конфиг движка — `sage::EngineConfig` (`engine/src/sage/core/Config.h`)
+— заменяет разрозненное чтение env-переменных одним источником правды. Приоритет
+применения (от слабого к сильному):
+
+    значения по умолчанию  →  файл sage.cfg (JSON)  →  env-переменные
+
+Каждое приложение на движке в точке входа делает `cfg.LoadFile("sage.cfg");
+cfg.ApplyEnvOverrides(); EngineConfig::Set(cfg);`, после чего окно строится из
+конфига, а слои читают `EngineConfig::Get()`.
+
+Что настраивается:
+
+- **Окно**: размер (`width`/`height`), режим (`windowed`/`borderless`/
+  `fullscreen`), `vsync`, `resizable`, ограничение кадров `frameCap`,
+  сглаживание `msaa` (0/2/4/8).
+- **Дисплей**: соотношение сторон `aspect` (`free`/`16:9`/`16:10`/`4:3`/`21:9`
+  — фиксированное даёт letterbox/pillarbox чёрными полосами) и масштаб
+  внутреннего разрешения `renderScale` (0.25..2.0 — быстрее/чётче).
+- **Графика**: `shadows` (+`shadowResolution` 512..4096), `postProcessing`,
+  `fog`, `skybox` — любой тяжёлый проход отключается одним флагом.
+- **Пост-эффекты**: `exposure`/`gamma`/`saturation`/`contrast`/`vignette`.
+
+**Файл** (`sage.cfg` рядом с игрой). Пример:
+
+```json
+{
+  "window":  { "width": 1920, "height": 1080, "mode": "borderless", "vsync": true },
+  "display": { "aspect": "16:9", "renderScale": 1.0 },
+  "graphics":{ "shadows": true, "shadowResolution": 2048, "postProcessing": true }
+}
+```
+
+**env-переопределения** (поверх файла — для отладки/CI): `SAGE_WINDOW_WIDTH/
+HEIGHT`, `SAGE_WINDOW_MODE`, `SAGE_VSYNC`, `SAGE_FRAME_CAP`, `SAGE_MSAA`,
+`SAGE_ASPECT`, `SAGE_RENDER_SCALE`, `SAGE_SHADOWS`(+`SAGE_SHADOW_RES`),
+`SAGE_POST`, `SAGE_FOG`, `SAGE_SKYBOX` (плюс обратно-совместимые
+`SAGE_NO_SHADOWS`/`SAGE_NO_POST`, чьё наличие выключает проход).
+
+**Редактор**: окно **Window → Settings** правит настройки визуально и сохраняет
+их в `<проект>/sage.cfg`; **File → Build Game** кладёт файл рядом с собранной
+игрой, так что игрок правит настройки, не залезая внутрь. Оконные параметры
+(размер/режим/vsync) применяются при следующем запуске игры.
+
 ## Текст и шрифты (TrueType)
 Текст в игровом интерфейсе рисует `UIRenderer` (`engine/src/sage/ui/`)
 настоящим **TrueType-шрифтом** через класс `Font`

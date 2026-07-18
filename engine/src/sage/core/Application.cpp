@@ -18,11 +18,18 @@ Application::Application(const AppConfig& config) : m_config(config) {
     // графическое устройство выбранного бэкенда: оно грузит драйвер и выставляет
     // дефолтное состояние конвейера. После этого конструкции слоёв (и их
     // OnAttach) уже могут создавать GPU-ресурсы.
-    m_window = std::make_unique<Window>(config.Width, config.Height, config.Title);
+    Window::Params wp;
+    wp.Mode = config.Mode;
+    wp.Resizable = config.Resizable;
+    wp.VSync = config.VSync;
+    wp.Msaa = config.Msaa;
+    m_window = std::make_unique<Window>(config.Width, config.Height, config.Title, wp);
 
     m_device = rhi::GraphicsDevice::Create(rhi::Backend::OpenGL);
     m_device->Init(reinterpret_cast<rhi::ProcLoader>(glfwGetProcAddress));
-    m_device->SetViewport(0, 0, config.Width, config.Height);
+    // Реальный размер окна может отличаться от запрошенного (fullscreen/borderless
+    // берут разрешение монитора) — берём фактический.
+    m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
     rhi::GraphicsDevice::SetCurrent(m_device.get());
 }
 
@@ -79,6 +86,15 @@ void Application::Run() {
 
         m_window->SwapBuffers();
         m_window->PollEvents();
+
+        // Ограничитель кадров (если задан и без VSync): досыпаем до 1/cap секунды.
+        if (m_config.FrameCap > 0) {
+            float target = 1.0f / (float)m_config.FrameCap;
+            float frameTime = (float)glfwGetTime() - now;
+            if (frameTime < target) {
+                glfwWaitEventsTimeout(target - frameTime); // спит, но не игнорирует события
+            }
+        }
     }
 
     LOG_INFO("Engine") << "Завершение работы";

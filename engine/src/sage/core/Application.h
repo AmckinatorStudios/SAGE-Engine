@@ -4,16 +4,33 @@
 #include <vector>
 #include "sage/core/Window.h"
 #include "sage/core/Layer.h"
+#include "sage/core/Config.h"
 #include "sage/rhi/GraphicsDevice.h"
 
 namespace sage {
 
 // Начальная конфигурация приложения — то, что нужно движку до создания окна.
+// Оконные параметры удобно заполнять из EngineConfig (см. FromEngineConfig).
 struct AppConfig {
     int Width = 1280;
     int Height = 720;
     std::string Title = "SAGE Engine";
     float MaxDeltaTime = 0.05f; // ограничитель dt после паузы/лага (см. Run)
+
+    WindowMode Mode = WindowMode::Windowed;
+    bool Resizable = true;
+    bool VSync = true;
+    int FrameCap = 0; // 0 — без ограничения
+    int Msaa = 0;     // сглаживание экранного буфера (GLFW_SAMPLES)
+
+    // Заполняет оконные поля из глобального/переданного EngineConfig.
+    static AppConfig FromEngineConfig(const EngineConfig& cfg) {
+        AppConfig a;
+        a.Width = cfg.Width; a.Height = cfg.Height; a.Title = cfg.Title;
+        a.Mode = cfg.Mode; a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
+        a.FrameCap = cfg.FrameCap; a.Msaa = cfg.Msaa;
+        return a;
+    }
 };
 
 // ---------------------------------------------------------------------------

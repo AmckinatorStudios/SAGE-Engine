@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "sage/core/Application.h"
+#include "sage/core/Config.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
@@ -47,9 +48,10 @@ void PlayerLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
 
     // 1. Шейдеры плеера — рядом с бинарником, грузим ДО перехода в проект.
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-    m_shadows.emplace(2048);
+    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512); // разрешение теней из конфига
     m_sky.emplace();
 
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
@@ -150,23 +152,33 @@ void PlayerLayer::OnRender() {
     Window& window = app.GetWindow();
     sage::rhi::GraphicsDevice& device = app.Device();
 
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+    // Флаги качества из конфига переопределяют настройки сцены.
+    if (!cfg.Skybox) env.Skybox.Enabled = false;
+    if (!cfg.Fog) env.Fog.Enabled = false;
 
-    // --- Тени: глубина от солнца ---
-    m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
-    m_shadows->BeginRender();
-    m_shadowShader->Use();
-    m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
-    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
-        m_shadowShader->SetMat4("uModel", tr.GetMatrix());
-        mr.MeshPtr->Draw();
-    });
-    m_shadows->EndRender(window.Width(), window.Height());
+    // --- Тени: глубина от солнца (можно отключить в настройках) ---
+    if (cfg.Shadows) {
+        m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
+        m_shadows->BeginRender();
+        m_shadowShader->Use();
+        m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
+        sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
+            m_shadowShader->SetMat4("uModel", tr.GetMatrix());
+            mr.MeshPtr->Draw();
+        });
+        m_shadows->EndRender(window.Width(), window.Height());
+    }
+
+    // --- Соотношение сторон: letterbox-viewport по центру окна (или весь экран) ---
+    int vpX, vpY, vpW, vpH;
+    cfg.LetterboxViewport(window.Width(), window.Height(), vpX, vpY, vpW, vpH);
 
     // --- Камера: Primary-CameraComponent сцены либо fallback ---
     glm::mat4 view, proj;
     glm::vec3 viewPos;
-    float aspect = (float)window.Width() / (float)std::max(window.Height(), 1);
+    float aspect = (float)vpW / (float)std::max(vpH, 1);
     entt::entity camEntity = entt::null;
     auto camView = m_scene->Registry().view<CameraComponent, Transform>();
     for (auto e : camView) {
@@ -190,6 +202,14 @@ void PlayerLayer::OnRender() {
     }
 
     // --- Основной проход: полное освещение + тени + туман/скайбокс ---
+    // Полосы letterbox чёрные: сперва чистим весь экран, затем рендерим в
+    // центральный viewport нужного соотношения.
+    if (vpX != 0 || vpY != 0) {
+        device.SetViewport(0, 0, window.Width(), window.Height());
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear();
+    }
+    device.SetViewport(vpX, vpY, vpW, vpH);
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
 
@@ -203,7 +223,7 @@ void PlayerLayer::OnRender() {
     m_shader->SetVec3("uViewPos", viewPos);
     UploadLighting(*m_shader, env); // включая туман (uFog*)
     device.BindTexture2D(1, m_shadows->DepthTexture());
-    UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/true);
+    UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/cfg.Shadows);
     m_shader->SetInt("uUseTexture", 0);
     m_shader->SetInt("uShadingMode", 0); // игра — всегда полное освещение
     sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {

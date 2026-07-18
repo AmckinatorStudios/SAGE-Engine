@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/core/Application.h"
+#include "sage/core/Config.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/anim/AnimationSystem.h"
@@ -312,8 +313,16 @@ void TestGameLayer::OnAttach() {
     // --- env-хуки (паттерн движка) ---
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
-    m_shadowsEnabled = (std::getenv("SAGE_NO_SHADOWS") == nullptr);
-    m_postEnabled = (std::getenv("SAGE_NO_POST") == nullptr);
+    // Качество графики — из гибкого конфига (файл sage.cfg + env-оверрайды,
+    // включая обратно-совместимые SAGE_NO_SHADOWS/SAGE_NO_POST).
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    m_shadowsEnabled = cfg.Shadows;
+    m_postEnabled = cfg.PostProcessing;
+    m_postSettings.Exposure = cfg.Exposure;
+    m_postSettings.Gamma = cfg.Gamma;
+    m_postSettings.Saturation = cfg.Saturation;
+    m_postSettings.Contrast = cfg.Contrast;
+    m_postSettings.VignetteStrength = cfg.Vignette;
     m_autopilot = (std::getenv("SAGE_TESTGAME_AUTOPILOT") != nullptr);
 
     // --- аудио (первым: скрипты сцен биндят его при привязке) ---
@@ -324,7 +333,7 @@ void TestGameLayer::OnAttach() {
     m_sceneShader.emplace("assets/shaders/scene.vert", "assets/shaders/scene.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
     m_postShader.emplace("assets/shaders/post.vert", "assets/shaders/post.frag");
-    m_shadows.emplace(2048);
+    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512);
     m_sceneFbo.emplace(window.Width(), window.Height());
     m_post.emplace();
     m_monument = Model::Load("assets/models/monument.obj"); // прямой путь Model::Load
@@ -679,8 +688,19 @@ void TestGameLayer::OnRender() {
     sage::rhi::GraphicsDevice& device = app.Device();
     Scene* scene = m_scenes.Active();
 
+    // Гибкий конфиг: соотношение сторон (letterbox), масштаб разрешения, туман.
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    int vpX, vpY, vpW, vpH;
+    cfg.LetterboxViewport(window.Width(), window.Height(), vpX, vpY, vpW, vpH);
+    int renderW, renderH;
+    cfg.ScaledResolution(vpW, vpH, renderW, renderH); // внутреннее разрешение (RenderScale)
+
     glm::mat4 view = m_camera.GetViewMatrix();
-    glm::mat4 proj = m_camera.GetProjectionMatrix((float)window.Width() / (float)window.Height());
+    glm::mat4 proj = m_camera.GetProjectionMatrix((float)vpW / (float)std::max(vpH, 1));
+
+    // Копия освещения сцены с учётом флага тумана из настроек.
+    LightingEnvironment lighting = scene->Lighting;
+    if (!cfg.Fog) lighting.Fog.Enabled = false;
 
     // --- 1. Проход теней (глубина из точки зрения солнца) ---
     if (m_shadowsEnabled) {
@@ -692,13 +712,18 @@ void TestGameLayer::OnRender() {
         m_shadows->EndRender(window.Width(), window.Height());
     }
 
-    // --- 2. Основной проход: в HDR-буфер (или сразу на экран без поста) ---
+    // Чёрные полосы letterbox — очищаем всё окно перед рендером в центр.
+    device.BindDefaultFramebuffer();
+    device.SetViewport(0, 0, window.Width(), window.Height());
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear();
+
+    // --- 2. Основной проход: в HDR-буфер (RenderScale) или сразу на экран ---
     if (m_postEnabled) {
-        m_sceneFbo->Resize(window.Width(), window.Height());
+        m_sceneFbo->Resize(renderW, renderH); // внутреннее разрешение с учётом масштаба
         m_sceneFbo->Bind();
     } else {
-        device.BindDefaultFramebuffer();
-        device.SetViewport(0, 0, window.Width(), window.Height());
+        device.SetViewport(vpX, vpY, vpW, vpH); // без поста — сразу в letterbox-viewport
     }
     device.SetClearColor(0.09f, 0.09f, 0.12f, 1.0f);
     device.Clear();
@@ -707,19 +732,19 @@ void TestGameLayer::OnRender() {
     m_sceneShader->SetMat4("uView", view);
     m_sceneShader->SetMat4("uProjection", proj);
     m_sceneShader->SetVec3("uViewPos", m_camera.Position);
-    UploadLighting(*m_sceneShader, scene->Lighting);
+    UploadLighting(*m_sceneShader, lighting);
     if (m_shadowsEnabled) device.BindTexture2D(1, m_shadows->DepthTexture());
     UploadShadowUniforms(*m_sceneShader, m_shadows->LightMatrix(), /*unit=*/1, m_shadowsEnabled);
     DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true);
 
     // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
-    sage::anim::DrawAnimatedModels(*scene, view, proj, scene->Lighting);
+    sage::anim::DrawAnimatedModels(*scene, view, proj, lighting);
 
-    // --- 3. Пост-процесс: HDR -> экран (тон-маппинг ACES и т.д.) ---
+    // --- 3. Пост-процесс: HDR -> экран (тон-маппинг ACES и т.д.), апскейл до
+    //        letterbox-viewport (внутреннее разрешение могло быть меньше) ---
     if (m_postEnabled) {
         device.BindDefaultFramebuffer();
-        device.SetViewport(0, 0, window.Width(), window.Height());
-        device.Clear();
+        device.SetViewport(vpX, vpY, vpW, vpH);
         m_postShader->Use();
         m_postShader->SetFloat("uExposure", m_postSettings.Exposure);
         m_postShader->SetFloat("uGamma", m_postSettings.Gamma);
@@ -731,7 +756,9 @@ void TestGameLayer::OnRender() {
         m_post->Draw();
     }
 
-    // --- 4. HUD поверх всего (движковый UIRenderer, не ImGui) ---
+    // --- 4. HUD поверх всего (движковый UIRenderer, не ImGui) — во весь экран,
+    //        поверх возможных чёрных полос letterbox ---
+    device.SetViewport(0, 0, window.Width(), window.Height());
     m_ui->Begin(window.Width(), window.Height());
     m_hudHealth.Draw(*m_ui);
     m_hudScore.Draw(*m_ui);

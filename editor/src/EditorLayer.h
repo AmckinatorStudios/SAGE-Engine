@@ -17,6 +17,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/physics/PhysicsScene.h"
+#include "sage/core/Config.h"
 
 #include "EditorHost.h"
 #include "Project.h"
@@ -129,6 +130,7 @@ private:
     void BuildDefaultDockLayout(unsigned int dockspaceId);
     void DrawStatusBar(float height);
     void DrawDialogs(); // модалки New Project / Open Project / Save Scene As / Open Scene
+    void DrawSettingsWindow(); // окно гибких настроек движка (тени/пост/разрешение/…)
 
     // --- сцена / рендер ---
     void RenderShadowPass(const LightingEnvironment& env);  // глубина от солнца (общая карта)
@@ -208,6 +210,11 @@ private:
     LightingPanel m_lighting;
     ToolbarPanel m_toolbar;
     bool m_launcherRequested = false; // Window > Project Launcher
+
+    // --- гибкие настройки движка (редактируются в окне Settings, сохраняются
+    //     в <проект>/sage.cfg; Build Game кладёт их в собранную игру) ---
+    sage::EngineConfig m_settings;
+    bool m_showSettings = false;
 
     // --- сборка игры: буферы диалога Build Game ---
     char m_dlgBuildDir[512] = "";
