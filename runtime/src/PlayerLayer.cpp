@@ -17,6 +17,7 @@
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/anim/AnimationSystem.h"
+#include "sage/render/ParticleECS.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -53,6 +54,7 @@ void PlayerLayer::OnAttach() {
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
     m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512); // разрешение теней из конфига
     m_sky.emplace();
+    m_particles.emplace();
 
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
@@ -140,6 +142,7 @@ void PlayerLayer::OnUpdate(float dt) {
     m_scripts->UpdateAll(dt);
     if (m_physics) m_physics->Step(*m_scene, dt);
     sage::anim::UpdateAnimators(*m_scene, dt);
+    if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
 
     if (glfwGetKey(sage::Application::Get().GetWindow().Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         sage::Application::Get().Close();
@@ -234,6 +237,8 @@ void PlayerLayer::OnRender() {
 
     // Скелетно-анимированные модели — своим скиннинг-шейдером, поверх сцены.
     sage::anim::DrawAnimatedModels(*m_scene, view, proj, env);
+    // Частицы (billboard) — camRight/Up берём из матрицы вида.
+    if (m_particles) m_particles->DrawFromView(view, proj);
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {

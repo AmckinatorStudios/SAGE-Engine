@@ -7,6 +7,7 @@
 #include "sage/render/Material.h"
 #include "sage/physics/PhysicsTypes.h"
 #include "sage/anim/Animator.h"
+#include "sage/render/Particle.h"
 
 // ---------------------------------------------------------------------------
 // Компоненты ECS — простые data-структуры, навешиваемые на сущности (entity)
@@ -158,4 +159,20 @@ struct AnimatedModelComponent {
     std::shared_ptr<sage::render::SkinnedModel> Model; // рантайм (не сериализуется)
     sage::anim::Animator Anim;                          // рантайм-состояние проигрывания
     bool Ready = false;                                 // инициализирован ли (загрузка+rig)
+};
+
+// Эмиттер частиц на сущности: рождает частицы в позиции Transform по правилам
+// Config (форма/скорость/цвет/размер/гравитация — см. ParticleEmitterConfig).
+// Continuous — непрерывная струя (EmissionRate частиц/сек, дым/огонь);
+// иначе — периодические залпы (BurstCount частиц каждые BurstInterval сек,
+// искры/всплески). Preset — индекс пресета из ParticlePresets::Registry (для UI
+// и «применить пресет»; сама Config сериализуется целиком, правки сохраняются).
+struct ParticleEmitterComponent {
+    ParticleEmitterConfig Config;
+    int Preset = 0;            // выбранный пресет в UI (справочно)
+    bool Active = true;
+    bool Continuous = true;    // струя (true) или периодические залпы (false)
+    int BurstCount = 24;       // частиц в залпе (Continuous=false)
+    float BurstInterval = 1.5f;// сек между залпами (Continuous=false)
+    float Accumulator = 0.0f;  // рантайм: накопитель эмиссии/таймер залпа (не сериализуется)
 };

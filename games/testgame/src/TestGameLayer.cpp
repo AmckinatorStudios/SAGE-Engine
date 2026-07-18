@@ -12,6 +12,8 @@
 #include "sage/core/Log.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/anim/AnimationSystem.h"
+#include "sage/render/ParticleECS.h"
+#include "sage/render/ParticlePresets.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -176,6 +178,15 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     GameObject rig = scene.CreateObject("Animated Totem");
     rig.GetTransform().Position = {3.5f, 0.0f, 4.0f};
     scene.Registry().emplace<AnimatedModelComponent>(rig.Entity());
+
+    // Факел — эмиттер частиц (огонь) на колонне: демонстрирует систему частиц.
+    GameObject torch = scene.CreateObject("Torch Fire");
+    torch.GetTransform().Position = {-4.0f, 2.7f, -4.0f}; // над Pillar A
+    {
+        ParticleEmitterComponent em;
+        em.Config = ParticlePresets::Fire();
+        scene.Registry().emplace<ParticleEmitterComponent>(torch.Entity(), em);
+    }
 }
 
 void TestGameLayer::BuildRoomTwo(Scene& scene) {
@@ -337,6 +348,7 @@ void TestGameLayer::OnAttach() {
     m_sceneFbo.emplace(window.Width(), window.Height());
     m_post.emplace();
     m_monument = Model::Load("assets/models/monument.obj"); // прямой путь Model::Load
+    m_particles.emplace(); // пул частиц (эмиттеры-факелы в комнатах)
 
     // --- HUD ---
     SetupHud();
@@ -636,6 +648,8 @@ void TestGameLayer::OnUpdate(float dt) {
     if (m_physics) m_physics->Step(*m_scenes.Active(), dt);
     // Скелетные анимации активной сцены (демо-тотем).
     sage::anim::UpdateAnimators(*m_scenes.Active(), dt);
+    // Частицы активной сцены (факелы-эмиттеры).
+    if (m_particles) sage::fx::UpdateEmitters(*m_scenes.Active(), *m_particles, dt);
 
     // Скрипты ТОЛЬКО активной сцены — неактивная комната «заморожена».
     auto it = m_sceneScripts.find(m_activeName);
@@ -739,6 +753,8 @@ void TestGameLayer::OnRender() {
 
     // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
     sage::anim::DrawAnimatedModels(*scene, view, proj, lighting);
+    // Частицы (billboard) — camRight/Up из матрицы вида.
+    if (m_particles) m_particles->DrawFromView(view, proj);
 
     // --- 3. Пост-процесс: HDR -> экран (тон-маппинг ACES и т.д.), апскейл до
     //        letterbox-viewport (внутреннее разрешение могло быть меньше) ---

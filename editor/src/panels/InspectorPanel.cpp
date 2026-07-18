@@ -10,6 +10,7 @@
 #include "EditorHost.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/ParticlePresets.h"
 #include "sage/scene/Components.h"
 
 // Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
@@ -316,6 +317,58 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::Button("Add Animated Model")) {
                 host.PushUndoSnapshot();
                 reg.emplace<AnimatedModelComponent>(obj.Entity());
+            }
+        }
+    }
+
+    // --- Эмиттер частиц (огонь/дым/искры/…): пресеты + тонкая настройка ---
+    if (ImGui::CollapsingHeader("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen)) {
+        entt::registry& reg = host.CurrentScene().Registry();
+        if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
+            ParticleEmitterConfig& cfg = em->Config;
+            // Пресеты: применяют готовый конфиг, дальше его можно править.
+            const auto& presets = ParticlePresets::Registry();
+            std::string preview = (em->Preset >= 0 && em->Preset < (int)presets.size())
+                                      ? presets[em->Preset].Name : "Custom";
+            if (ImGui::BeginCombo("Preset", preview.c_str())) {
+                for (int i = 0; i < (int)presets.size(); ++i) {
+                    if (ImGui::Selectable(presets[i].Name, em->Preset == i)) {
+                        host.PushUndoSnapshot();
+                        em->Preset = i;
+                        cfg = presets[i].Make();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::Checkbox("Active", &em->Active);
+            ImGui::SameLine();
+            ImGui::Checkbox("Continuous", &em->Continuous);
+            if (em->Continuous) {
+                ImGui::DragFloat("Rate (p/s)", &cfg.EmissionRate, 0.5f, 0.0f, 500.0f); host.TrackLastImGuiItem();
+            } else {
+                ImGui::DragInt("Burst Count", &em->BurstCount, 1, 1, 500); host.TrackLastImGuiItem();
+                ImGui::DragFloat("Burst Interval", &em->BurstInterval, 0.05f, 0.05f, 30.0f); host.TrackLastImGuiItem();
+            }
+            ImGui::DragFloatRange2("Speed", &cfg.SpeedMin, &cfg.SpeedMax, 0.05f, 0.0f, 50.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Gravity", &cfg.Gravity, 0.05f, -30.0f, 30.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloatRange2("Lifetime", &cfg.LifetimeMin, &cfg.LifetimeMax, 0.02f, 0.02f, 20.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloatRange2("Start Size", &cfg.StartSizeMin, &cfg.StartSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloatRange2("End Size", &cfg.EndSizeMin, &cfg.EndSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
+            ImGui::ColorEdit4("Start Color", &cfg.StartColor.x); host.TrackLastImGuiItem();
+            ImGui::ColorEdit4("End Color", &cfg.EndColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat3("Dir Min", &cfg.DirectionMin.x, 0.02f); host.TrackLastImGuiItem();
+            ImGui::DragFloat3("Dir Max", &cfg.DirectionMax.x, 0.02f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Spin", &cfg.AngularVelocityMax, 0.05f, 0.0f, 20.0f); host.TrackLastImGuiItem();
+            if (ImGui::Button("Remove Emitter")) {
+                host.PushUndoSnapshot();
+                reg.remove<ParticleEmitterComponent>(obj.Entity());
+            }
+        } else {
+            if (ImGui::Button("Add Particle Emitter")) {
+                host.PushUndoSnapshot();
+                ParticleEmitterComponent em;
+                em.Config = ParticlePresets::Registry()[0].Make(); // Fire
+                reg.emplace<ParticleEmitterComponent>(obj.Entity(), em);
             }
         }
     }

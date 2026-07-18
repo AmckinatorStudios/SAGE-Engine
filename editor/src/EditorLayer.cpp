@@ -25,6 +25,7 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/anim/AnimationSystem.h"
+#include "sage/render/ParticlePresets.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -82,6 +83,7 @@ void EditorLayer::OnAttach() {
     m_gameFbo.emplace(m_gameW, m_gameH);
     m_debugDraw.emplace();
     m_sky.emplace();
+    m_particles.emplace(); // пул частиц сцены (эмиттеры ECS)
     m_cube = ResourceManager::Instance().GetCube();
 
     m_gizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
@@ -117,9 +119,16 @@ void EditorLayer::OnAttach() {
     LOG_INFO("Editor") << "SAGE Editor started (entities: " << m_scene->Count() << ")";
 
     // --- Плагины (v1, только редактор — см. PluginAPI.h) ---
-    fs::path pluginsDir = fs::current_path() / "plugins";
-    if (const char* dir = std::getenv("SAGE_PLUGINS_DIR")) pluginsDir = dir;
-    m_plugins.LoadAll(pluginsDir, m_pluginCtx);
+    // ПО УМОЛЧАНИЮ ОТКЛЮЧЕНЫ: система плагинов v1 экспериментальная (нестабильный
+    // ABI между сборками), поэтому редактор их не грузит, пока явно не разрешено
+    // переменной SAGE_EDITOR_PLUGINS=1. Без неё plugins/ игнорируется.
+    if (std::getenv("SAGE_EDITOR_PLUGINS")) {
+        fs::path pluginsDir = fs::current_path() / "plugins";
+        if (const char* dir = std::getenv("SAGE_PLUGINS_DIR")) pluginsDir = dir;
+        m_plugins.LoadAll(pluginsDir, m_pluginCtx);
+    } else {
+        LOG_INFO("Editor") << "Плагины редактора отключены (SAGE_EDITOR_PLUGINS не задан)";
+    }
 
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
 
@@ -165,6 +174,8 @@ void EditorLayer::OnUpdate(float dt) {
     // Анимации проигрываются и в режиме правки — чтобы в вьюпорте было видно
     // движение скелетных моделей (превью), не только в Play.
     sage::anim::UpdateAnimators(*m_scene, dt);
+    // Частицы эмиттеров ECS — тоже живут в режиме правки (превью эффектов).
+    if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
     m_plugins.UpdateAll(dt);
 }
 
@@ -715,6 +726,17 @@ void EditorLayer::DrawEntityGizmos() {
         const LightComponent& lc = lightView.get<LightComponent>(e);
         m_debugDraw->WireSphere(lightView.get<Transform>(e).Position, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
     }
+    // Эмиттеры частиц: маленький маркер-звёздочка в позиции (частицы могут не
+    // рождаться прямо сейчас — а гизмо показывает, где эмиттер).
+    auto fxView = m_scene->Registry().view<ParticleEmitterComponent, Transform, IdComponent>();
+    for (auto e : fxView) {
+        const Transform& tr = fxView.get<Transform>(e);
+        bool selected = fxView.get<IdComponent>(e).Id == m_selectedId;
+        glm::vec3 color = selected ? glm::vec3(1.0f, 0.85f, 0.3f) : glm::vec3(0.9f, 0.6f, 0.3f);
+        m_debugDraw->WireSphere(tr.Position, 0.18f, color, 8);
+        m_debugDraw->Axes(glm::translate(glm::mat4(1.0f), tr.Position), 0.4f);
+    }
+
     // Коллайдеры: каркас формы в масштабе Transform — зелёный для выбранной
     // сущности, приглушённый для остальных (чтобы видеть все физические тела).
     auto colView = m_scene->Registry().view<ColliderComponent, Transform, IdComponent>();
@@ -774,6 +796,9 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
 
     // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
     sage::anim::DrawAnimatedModels(*m_scene, m_view, m_proj, env);
+
+    // Частицы (billboard, поверх сцены, с блендингом) — камера редактора.
+    if (m_particles) m_particles->Draw(m_camera, m_view, m_proj);
 
     // Аутлайн выбранной сущности (масштабированная оболочка) — поверх сцены,
     // до гизмо-линий.
@@ -853,6 +878,7 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     // показывает сцену как её увидит игрок.
     DrawLitScene(env, view, proj, tr.Position, /*shadingMode=*/0, /*wireframe=*/false);
     sage::anim::DrawAnimatedModels(*m_scene, view, proj, env);
+    if (m_particles) m_particles->DrawFromView(view, proj); // camRight/Up из матрицы вида
 
     device.BindDefaultFramebuffer();
 }
@@ -1125,6 +1151,17 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 anim.GetTransform().Position = {0.0f, 0.0f, 0.0f};
                 m_scene->Registry().emplace<AnimatedModelComponent>(anim.Entity());
                 m_selectedId = anim.Id();
+            }
+            // Эмиттер частиц: по умолчанию пресет «Fire» в точке над началом.
+            if (ImGui::MenuItem("Create Particle Emitter")) {
+                PushUndoSnapshot();
+                GameObject fx = m_scene->CreateObject("Particle Emitter");
+                fx.GetTransform().Position = {0.0f, 0.5f, 0.0f};
+                ParticleEmitterComponent em;
+                em.Config = ParticlePresets::Registry()[0].Make(); // Fire
+                em.Preset = 0;
+                m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity(), em);
+                m_selectedId = fx.Id();
             }
             ImGui::EndMenu();
         }
@@ -1704,8 +1741,24 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Частицы: эмиттер рождает живые частицы, пул растёт со временем ---
+    if (ok && m_particles) {
+        GameObject fx = m_scene->CreateObject("SelftestEmitter");
+        fx.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+        ParticleEmitterComponent em;
+        em.Config = ParticlePresets::Fire();
+        m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity(), em);
+
+        for (int i = 0; i < 8; ++i) sage::fx::UpdateEmitters(*m_scene, *m_particles, 0.05f);
+        if (m_particles->AliveCount() == 0) {
+            LOG_ERROR("Editor") << "SELFTEST: particles failed - no live particles emitted";
+            ok = false;
+        }
+        m_scene->RemoveObject(fx.Id());
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play + physics + animation + config, " << before << " entities)";
+                               << "recent + dirty + play + physics + animation + config + particles, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

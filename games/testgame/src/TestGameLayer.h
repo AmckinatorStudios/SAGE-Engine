@@ -14,6 +14,7 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/PostProcess.h"
 #include "sage/render/Model.h"
+#include "sage/render/ParticleSystem.h"
 #include "sage/scene/SceneManager.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/ui/UIRenderer.h"
@@ -124,6 +125,7 @@ private:
     bool m_shadowsEnabled = true;
     bool m_postEnabled = true;
     std::unique_ptr<Model> m_monument; // прямой Model::Load путь (комната 2)
+    std::optional<ParticleSystem> m_particles; // пул частиц (эмиттеры ECS)
 
     // --- HUD ---
     std::optional<UIRenderer> m_ui;

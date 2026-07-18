@@ -53,8 +53,10 @@ fi
 EDITOR_LOG="${SCRATCH_DIR}/editor.log"
 EDITOR_SHOT="${SCRATCH_DIR}/editor.png"
 STATUS=0
+# SAGE_EDITOR_PLUGINS=1 — плагины по умолчанию ОТКЛЮЧЕНЫ (экспериментальны),
+# здесь включаем явно, чтобы smoke-тест 3 всё ещё проверял загрузку плагина.
 ( cd "$(dirname "${EDITOR_EXE}")" && rm -rf selftest_project && \
-  run_headless env SAGE_EDITOR_SELFTEST=1 SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${EDITOR_SHOT}" \
+  run_headless env SAGE_EDITOR_SELFTEST=1 SAGE_EDITOR_PLUGINS=1 SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${EDITOR_SHOT}" \
       "./$(basename "${EDITOR_EXE}")" ) > "${EDITOR_LOG}" 2>&1 || STATUS=$?
 if [ ${STATUS} -ne 0 ]; then
     echo "ОШИБКА: SageEditor завершился с кодом ${STATUS}"; cat "${EDITOR_LOG}"; exit 1
@@ -65,12 +67,12 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/5: плагины редактора (example_stats) ==="
+echo "=== Smoke-тест 3/5: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
-    echo "ОШИБКА: плагин example_stats не загрузился (нет строки 'Загружен плагин' в логе)"
+    echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
-echo "OK: плагин example_stats загрузился и выгрузился без падения"
+echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
 echo "=== Smoke-тест 4/5: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"

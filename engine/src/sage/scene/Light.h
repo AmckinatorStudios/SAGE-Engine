@@ -112,4 +112,20 @@ struct LightingEnvironment {
     // Старые геттеры для кода/сериализации, который ещё думает в терминах
     // единого AmbientColor (например, .sage файлы, сохранённые до этого апдейта)
     glm::vec3 AmbientColorApprox() const { return (SkyColor + GroundColor) * 0.5f; }
+
+    // Итоговые цвета полусферического ambient. Если включён скайбокс —
+    // засветка берётся ИЗ НЕГО (верх объектов тянется к цвету зенита/неба,
+    // низ — к приглушённому цвету горизонта), чтобы освещение согласовывалось
+    // с видимым небом. Без скайбокса — заданные Sky/GroundColor.
+    void ResolveAmbient(glm::vec3& outSky, glm::vec3& outGround) const {
+        if (Skybox.Enabled) {
+            // Верхняя полусфера видит и зенит, и горизонт — смещаемся к зениту;
+            // нижняя (отражённый свет земли) — приглушённый горизонт.
+            outSky = glm::mix(Skybox.HorizonColor, Skybox.TopColor, 0.6f);
+            outGround = Skybox.HorizonColor * 0.5f;
+        } else {
+            outSky = SkyColor;
+            outGround = GroundColor;
+        }
+    }
 };

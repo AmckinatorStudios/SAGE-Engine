@@ -16,6 +16,15 @@ static glm::vec3 Vec3FromJson(const json& j) {
     return glm::vec3(j.value("x", 0.0f), j.value("y", 0.0f), j.value("z", 0.0f));
 }
 
+static json Vec4ToJson(const glm::vec4& v) {
+    return json{ {"x", v.x}, {"y", v.y}, {"z", v.z}, {"w", v.w} };
+}
+
+static glm::vec4 Vec4FromJson(const json& j, const glm::vec4& def = glm::vec4(1.0f)) {
+    return glm::vec4(j.value("x", def.x), j.value("y", def.y),
+                     j.value("z", def.z), j.value("w", def.w));
+}
+
 static std::string MeshTypeToString(MeshRef::Type t) {
     switch (t) {
         case MeshRef::Type::Cube:     return "cube";
@@ -222,6 +231,27 @@ static json BuildSceneJson(const Scene& scene) {
             j["animatedModel"]["loop"] = am->Loop;
             j["animatedModel"]["playing"] = am->Playing;
         }
+        if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) {
+            json& pj = j["particles"];
+            pj["preset"] = pe->Preset;
+            pj["active"] = pe->Active;
+            pj["continuous"] = pe->Continuous;
+            pj["burstCount"] = pe->BurstCount;
+            pj["burstInterval"] = pe->BurstInterval;
+            const ParticleEmitterConfig& c = pe->Config;
+            pj["directionMin"] = Vec3ToJson(c.DirectionMin);
+            pj["directionMax"] = Vec3ToJson(c.DirectionMax);
+            pj["speedMin"] = c.SpeedMin; pj["speedMax"] = c.SpeedMax;
+            pj["gravity"] = c.Gravity;
+            pj["lifetimeMin"] = c.LifetimeMin; pj["lifetimeMax"] = c.LifetimeMax;
+            pj["startSizeMin"] = c.StartSizeMin; pj["startSizeMax"] = c.StartSizeMax;
+            pj["endSizeMin"] = c.EndSizeMin; pj["endSizeMax"] = c.EndSizeMax;
+            pj["startColor"] = Vec4ToJson(c.StartColor);
+            pj["endColor"] = Vec4ToJson(c.EndColor);
+            pj["angularVelocityMax"] = c.AngularVelocityMax;
+            pj["shape"] = (c.Shape == ParticleShape::Quad) ? "quad" : "circle";
+            pj["emissionRate"] = c.EmissionRate;
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -320,6 +350,34 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             am.Playing = aj.value("playing", true);
             // Model/Anim восстановятся при первом UpdateAnimators (Ready=false).
             obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), std::move(am));
+        }
+        if (j.contains("particles")) {
+            const auto& pj = j["particles"];
+            ParticleEmitterComponent pe;
+            pe.Preset = pj.value("preset", 0);
+            pe.Active = pj.value("active", true);
+            pe.Continuous = pj.value("continuous", true);
+            pe.BurstCount = pj.value("burstCount", 24);
+            pe.BurstInterval = pj.value("burstInterval", 1.5f);
+            ParticleEmitterConfig& c = pe.Config;
+            if (pj.contains("directionMin")) c.DirectionMin = Vec3FromJson(pj["directionMin"]);
+            if (pj.contains("directionMax")) c.DirectionMax = Vec3FromJson(pj["directionMax"]);
+            c.SpeedMin = pj.value("speedMin", c.SpeedMin);
+            c.SpeedMax = pj.value("speedMax", c.SpeedMax);
+            c.Gravity = pj.value("gravity", c.Gravity);
+            c.LifetimeMin = pj.value("lifetimeMin", c.LifetimeMin);
+            c.LifetimeMax = pj.value("lifetimeMax", c.LifetimeMax);
+            c.StartSizeMin = pj.value("startSizeMin", c.StartSizeMin);
+            c.StartSizeMax = pj.value("startSizeMax", c.StartSizeMax);
+            c.EndSizeMin = pj.value("endSizeMin", c.EndSizeMin);
+            c.EndSizeMax = pj.value("endSizeMax", c.EndSizeMax);
+            if (pj.contains("startColor")) c.StartColor = Vec4FromJson(pj["startColor"]);
+            if (pj.contains("endColor")) c.EndColor = Vec4FromJson(pj["endColor"], glm::vec4(1, 1, 1, 0));
+            c.AngularVelocityMax = pj.value("angularVelocityMax", c.AngularVelocityMax);
+            c.Shape = (pj.value("shape", std::string("circle")) == "quad")
+                          ? ParticleShape::Quad : ParticleShape::SoftCircle;
+            c.EmissionRate = pj.value("emissionRate", c.EmissionRate);
+            obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), pe);
         }
 
         // Пересоздаём GPU-ресурс на основе описания

@@ -139,8 +139,10 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     shader.SetMat4("uModel", model);
     shader.SetMat4("uView", view);
     shader.SetMat4("uProjection", proj);
-    shader.SetVec3("uSkyColor", env.SkyColor);
-    shader.SetVec3("uGroundColor", env.GroundColor);
+    glm::vec3 ambientSky, ambientGround;
+    env.ResolveAmbient(ambientSky, ambientGround); // ambient из скайбокса, если включён
+    shader.SetVec3("uSkyColor", ambientSky);
+    shader.SetVec3("uGroundColor", ambientGround);
     shader.SetFloat("uAmbient", env.AmbientStrength);
     shader.SetVec3("uSunDir", env.Sun.Direction);
     shader.SetVec3("uSunColor", env.Sun.Color);

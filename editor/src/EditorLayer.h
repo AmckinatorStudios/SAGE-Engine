@@ -13,6 +13,8 @@
 #include "sage/render/DebugDraw.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
+#include "sage/render/ParticleSystem.h"
+#include "sage/render/ParticleECS.h"
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
@@ -170,6 +172,7 @@ private:
     std::optional<Framebuffer> m_gameFbo;
     std::optional<DebugDraw> m_debugDraw;
     std::optional<SkyRenderer> m_sky;     // процедурный градиентный скайбокс
+    std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
     std::shared_ptr<Mesh> m_cube;
 
     // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---

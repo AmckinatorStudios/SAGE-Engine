@@ -10,8 +10,12 @@
 // одинаковый набор имён uniform'ов (uAmbient*, uSun*, uPointLights[]),
 // используют один и тот же вызов — не нужно дублировать имена на каждый шейдер.
 inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
-    shader.SetVec3("uAmbientSky", env.SkyColor);
-    shader.SetVec3("uAmbientGround", env.GroundColor);
+    // Ambient берётся из скайбокса, если он включён (см. ResolveAmbient) —
+    // освещение согласовано с видимым небом.
+    glm::vec3 ambientSky, ambientGround;
+    env.ResolveAmbient(ambientSky, ambientGround);
+    shader.SetVec3("uAmbientSky", ambientSky);
+    shader.SetVec3("uAmbientGround", ambientGround);
     shader.SetFloat("uAmbientStrength", env.AmbientStrength);
 
     shader.SetVec3("uSunDir", env.Sun.Direction);

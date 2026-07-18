@@ -108,7 +108,11 @@ public:
     // Ожидает, что глубина уже включена (частицы сортируются относительно
     // сцены), но сама отключает запись в depth buffer, чтобы полупрозрачные
     // частицы не перекрывали друг друга жёстко по глубине.
-    void Draw(Shader& shader, const Camera& camera, const glm::mat4& view, const glm::mat4& proj) {
+    // Базовая отрисовка: billboard-направления камеры задаются явно (camRight/
+    // camUp в мировых координатах) — так частицы рисуются и там, где нет объекта
+    // Camera (напр. игровое окно редактора от CameraComponent).
+    void Draw(Shader& shader, glm::vec3 camRight, glm::vec3 camUp,
+              const glm::mat4& view, const glm::mat4& proj) {
         if (m_particles.empty()) return;
 
         m_instanceScratch.clear();
@@ -129,8 +133,8 @@ public:
         shader.Use();
         shader.SetMat4("uView", view);
         shader.SetMat4("uProjection", proj);
-        shader.SetVec3("uCameraRight", camera.Right);
-        shader.SetVec3("uCameraUp", camera.Up);
+        shader.SetVec3("uCameraRight", camRight);
+        shader.SetVec3("uCameraUp", camUp);
         shader.SetInt("uShape", 0);
 
         m_geometry->SetInstanceData(m_instanceScratch.data(), m_instanceScratch.size() * sizeof(InstanceData));
@@ -139,10 +143,38 @@ public:
         device.SetDepthWrite(true);
     }
 
+    void Draw(Shader& shader, const Camera& camera, const glm::mat4& view, const glm::mat4& proj) {
+        Draw(shader, camera.Right, camera.Up, view, proj);
+    }
+
+    // Отрисовка встроенным шейдером с явными camRight/camUp (см. ниже перегрузку
+    // от Camera). camRight/camUp обычно берут из строк матрицы вида.
+    void Draw(glm::vec3 camRight, glm::vec3 camUp, const glm::mat4& view, const glm::mat4& proj) {
+        Draw(BuiltinShader(), camRight, camUp, view, proj);
+    }
+
+    // Извлекает camRight/camUp прямо из матрицы вида (мировые оси камеры) — удобно
+    // там, где есть только view/proj, без объекта Camera.
+    void DrawFromView(const glm::mat4& view, const glm::mat4& proj) {
+        glm::vec3 right = glm::normalize(glm::vec3(view[0][0], view[1][0], view[2][0]));
+        glm::vec3 up = glm::normalize(glm::vec3(view[0][1], view[1][1], view[2][1]));
+        Draw(BuiltinShader(), right, up, view, proj);
+    }
+
+    // Отрисовка ВСТРОЕННЫМ шейдером частиц (billboard + soft-circle/quad) — не
+    // требует ассетного particle.vert/frag, поэтому частицы рисует кто угодно
+    // (редактор/рантайм/игра) без своих шейдеров. Шейдер компилируется лениво.
+    void Draw(const Camera& camera, const glm::mat4& view, const glm::mat4& proj) {
+        Draw(BuiltinShader(), camera.Right, camera.Up, view, proj);
+    }
+
     size_t AliveCount() const { return m_particles.size(); }
     size_t StreamCount() const { return m_streams.size(); }
 
 private:
+    // Встроенный шейдер частиц (общий, ленивая инициализация; определён в .cpp).
+    static Shader& BuiltinShader();
+
     struct StreamEmitter {
         ParticleEmitterConfig Config;
         glm::vec3 Position{0.0f};

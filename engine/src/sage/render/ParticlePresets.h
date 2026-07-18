@@ -1,5 +1,6 @@
 #pragma once
 #include "Particle.h"
+#include <vector>
 
 // ---------------------------------------------------------------------
 // ParticlePresets — готовые ParticleEmitterConfig под типовые визуальные
@@ -81,6 +82,57 @@ inline ParticleEmitterConfig StoveEmbers() {
     c.EmissionRate = 4.0f;
     c.Shape = ParticleShape::SoftCircle;
     return c;
+}
+
+// Огонь: тёплый непрерывный столб пламени, поднимающийся вверх и остывающий
+// от жёлтого к красному, затем в дым. Универсальный факел/костёр.
+inline ParticleEmitterConfig Fire() {
+    ParticleEmitterConfig c;
+    c.DirectionMin = {-0.2f, 0.9f, -0.2f};
+    c.DirectionMax = {0.2f, 1.4f, 0.2f};
+    c.SpeedMin = 0.6f; c.SpeedMax = 1.2f;
+    c.Gravity = 0.8f; // пламя всплывает
+    c.LifetimeMin = 0.5f; c.LifetimeMax = 1.0f;
+    c.StartSizeMin = 0.18f; c.StartSizeMax = 0.30f;
+    c.EndSizeMin = 0.02f; c.EndSizeMax = 0.06f;
+    c.StartColor = {1.0f, 0.85f, 0.25f, 0.9f}; // жёлто-белое ядро
+    c.EndColor = {0.8f, 0.15f, 0.05f, 0.0f};   // гаснет в тёмно-красный
+    c.EmissionRate = 40.0f;
+    c.Shape = ParticleShape::SoftCircle;
+    return c;
+}
+
+// Искры (фейерверк/электрика): быстрый разлёт ярких точек во все стороны,
+// падающих под гравитацией. Разовый залп (Burst).
+inline ParticleEmitterConfig Sparks() {
+    ParticleEmitterConfig c;
+    c.DirectionMin = {-1.0f, -0.2f, -1.0f};
+    c.DirectionMax = {1.0f, 1.0f, 1.0f};
+    c.SpeedMin = 2.5f; c.SpeedMax = 5.0f;
+    c.Gravity = -7.0f;
+    c.LifetimeMin = 0.4f; c.LifetimeMax = 0.9f;
+    c.StartSizeMin = 0.03f; c.StartSizeMax = 0.06f;
+    c.EndSizeMin = 0.0f; c.EndSizeMax = 0.0f;
+    c.StartColor = {1.0f, 0.9f, 0.5f, 1.0f};
+    c.EndColor = {1.0f, 0.4f, 0.1f, 0.0f};
+    c.EmissionRate = 30.0f;
+    c.Shape = ParticleShape::SoftCircle;
+    return c;
+}
+
+// Реестр пресетов для UI/сериализации: имя + фабрика конфига. Индекс в этом
+// списке хранится в ParticleEmitterComponent.Preset (0 — «Custom», без пресета).
+struct PresetEntry { const char* Name; ParticleEmitterConfig (*Make)(); };
+inline const std::vector<PresetEntry>& Registry() {
+    static const std::vector<PresetEntry> kEntries = {
+        {"Fire", &Fire},
+        {"Smoke", &Smoke},
+        {"Sparks", &Sparks},
+        {"Water Splash", &WaterSplash},
+        {"Embers", &StoveEmbers},
+        {"Block Break", &BlockBreak},
+    };
+    return kEntries;
 }
 
 } // namespace ParticlePresets
