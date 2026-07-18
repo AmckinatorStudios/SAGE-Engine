@@ -170,6 +170,13 @@ void GLGeometry::DrawInstanced(size_t vertexCount, size_t instanceCount) const {
     glBindVertexArray(0);
 }
 
+void GLGeometry::DrawIndexedInstanced(size_t indexCount, size_t instanceCount) const {
+    ++g_renderStats.DrawCalls;
+    glBindVertexArray(m_vao);
+    glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT, 0, (GLsizei)instanceCount);
+    glBindVertexArray(0);
+}
+
 void GLGeometry::DrawLines(size_t vertexCount) const {
     ++g_renderStats.DrawCalls;
     glBindVertexArray(m_vao);

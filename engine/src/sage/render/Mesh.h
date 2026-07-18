@@ -10,6 +10,14 @@ struct Vertex {
     glm::vec2 TexCoords;
 };
 
+// Per-instance данные для инстансной отрисовки (батчинг): модельная матрица +
+// базовый цвет. Layout совпадает с instance-атрибутами геометрии Mesh
+// (loc 3..6 — строки mat4, loc 7 — цвет). Размер 76 байт (без паддинга).
+struct MeshInstance {
+    glm::mat4 Model{1.0f};
+    glm::vec3 Color{1.0f};
+};
+
 // Хранит геометрию на GPU (через rhi::Geometry) и умеет себя отрисовать.
 // О графическом API ничего не знает — вся работа с буферами у бэкенда.
 class Mesh {
@@ -25,6 +33,17 @@ public:
 
     void Draw() const;
 
+    // --- Инстансный батчинг (много одинаковых мешей за один вызов) ---
+    // Заливает per-instance поток (MeshInstance[]) и рисует count инстансов
+    // одним draw call'ом. Данные перезаливаются каждый кадр (STREAM).
+    void SetInstances(const MeshInstance* data, size_t count) const;
+    void DrawInstances(size_t count) const;
+
+    // --- Ограничивающая сфера в ЛОКАЛЬНЫХ координатах (для отсечения по
+    //     фрустуму). Мировая сфера = центр*model, радиус*max|scale|. ---
+    glm::vec3 BoundsCenter() const { return m_boundsCenter; }
+    float BoundsRadius() const { return m_boundsRadius; }
+
     // Процедурные примитивы движка (единичный масштаб, с нормалями и UV).
     // Все вписаны в габарит ~1 вокруг начала координат, чтобы Transform.Scale
     // работал предсказуемо (куб от -0.5 до 0.5, сфера радиуса 0.5 и т.д.).
@@ -37,4 +56,6 @@ public:
 private:
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
     size_t m_indexCount = 0;
+    glm::vec3 m_boundsCenter{0.0f};
+    float m_boundsRadius = 0.0f;
 };

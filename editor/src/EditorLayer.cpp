@@ -25,6 +25,7 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/anim/AnimationSystem.h"
+#include "sage/render/Frustum.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -643,12 +644,8 @@ void EditorLayer::RenderShadowPass(const LightingEnvironment& env) {
     Window& window = sage::Application::Get().GetWindow();
     m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
     m_shadows->BeginRender();
-    m_shadowShader->Use();
-    m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
-    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
-        m_shadowShader->SetMat4("uModel", tr.GetMatrix());
-        mr.MeshPtr->Draw();
-    });
+    // Статика в карту теней — батчем (инстансно + отсечение по фрустуму света).
+    m_batch.RenderDepth(*m_scene, m_shadows->LightMatrix());
     // Скелетные модели тоже отбрасывают тень — рисуем их в карту глубины со
     // скиннингом в текущей позе (свой depth-шейдер).
     sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix());
@@ -665,20 +662,12 @@ void EditorLayer::DrawLitScene(const LightingEnvironment& env, const glm::mat4& 
 
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
 
-    m_shader->Use();
-    m_shader->SetMat4("uView", view);
-    m_shader->SetMat4("uProjection", proj);
-    m_shader->SetVec3("uViewPos", viewPos);
-    UploadLighting(*m_shader, env);
-    device.BindTexture2D(1, m_shadows->DepthTexture());
-    UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/true);
-    m_shader->SetInt("uUseTexture", 0);
-    m_shader->SetInt("uShadingMode", shadingMode); // 0 lit, 1 unlit, 2 normals
-    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
-        m_shader->SetMat4("uModel", tr.GetMatrix());
-        m_shader->SetVec3("uObjectColor", EffectiveColor(mr)); // материал (если назначен) важнее Color
-        mr.MeshPtr->Draw();
-    });
+    // Статика — через RenderBatch: отсечение по фрустуму камеры + инстансный
+    // батчинг (один draw call на группу одинаковых мешей). Освещение/тени —
+    // те же, что в статическом lit.frag.
+    m_lastRenderStats = m_batch.RenderColor(*m_scene, view, proj, viewPos, env,
+                                            m_shadows->LightMatrix(), m_shadows->DepthTexture(),
+                                            /*shadowsEnabled=*/true, shadingMode);
 
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill); // вернуть заливку
 }
@@ -1002,12 +991,14 @@ void EditorLayer::DrawStatusBar(float height) {
         ImGui::SameLine(); ImGui::TextDisabled("%s", m_pluginStatusMessage.c_str());
     }
 
-    // FPS — справа.
-    char fps[32];
-    std::snprintf(fps, sizeof(fps), "%.0f FPS", sage::Application::Get().Fps());
-    float w = ImGui::CalcTextSize(fps).x + 16.0f;
+    // Статистика рендера (отсечение/батчинг) + FPS — справа.
+    char stat[128];
+    const sage::ecs::RenderStats& rs = m_lastRenderStats;
+    std::snprintf(stat, sizeof(stat), "meshes %d/%d  culled %d  batches %d  |  %.0f FPS",
+                  rs.Drawn, rs.Total, rs.Culled, rs.Batches, sage::Application::Get().Fps());
+    float w = ImGui::CalcTextSize(stat).x + 16.0f;
     ImGui::SameLine(ImGui::GetWindowWidth() - w);
-    ImGui::TextDisabled("%s", fps);
+    ImGui::TextDisabled("%s", stat);
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -1763,8 +1754,41 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(fx.Id());
     }
 
+    // --- Отсечение по фрустуму + инстансный батчинг ---
+    if (ok) {
+        // 1. Математика фрустума: точка перед камерой видна, за камерой — нет.
+        glm::mat4 v = glm::lookAt(glm::vec3(0, 0, 10), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+        glm::mat4 p = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f);
+        sage::render::Frustum fr = sage::render::Frustum::FromViewProj(p * v);
+        bool inFront = fr.IntersectsSphere(glm::vec3(0, 0, 0), 1.0f);
+        bool behind  = fr.IntersectsSphere(glm::vec3(0, 0, 60), 1.0f); // за спиной камеры
+        if (!inFront || behind) {
+            LOG_ERROR("Editor") << "SELFTEST: frustum cull math failed (front=" << inFront
+                                << " behind=" << behind << ")";
+            ok = false;
+        }
+
+        // 2. Батчинг: демо-сцена рендерится, группы мешей < числа сущностей
+        //    (несколько кубов -> один инстанс-вызов), учёт видимых сходится.
+        if (ok) {
+            LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+            glm::mat4 cv = m_camera.GetViewMatrix();
+            glm::mat4 cp = m_camera.GetProjectionMatrix(16.0f / 9.0f);
+            sage::ecs::RenderStats st = m_batch.RenderColor(*m_scene, cv, cp, m_camera.Position, env,
+                                                            m_shadows->LightMatrix(), m_shadows->DepthTexture(),
+                                                            true, 0);
+            if (st.Total < 1 || st.Batches < 1 || st.Batches > st.Total ||
+                st.Drawn + st.Culled != st.Total) {
+                LOG_ERROR("Editor") << "SELFTEST: batch render stats inconsistent (total=" << st.Total
+                                    << " drawn=" << st.Drawn << " culled=" << st.Culled
+                                    << " batches=" << st.Batches << ")";
+                ok = false;
+            }
+        }
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play + physics + animation + config + particles, " << before << " entities)";
+                               << "recent + dirty + play + physics + animation + config + particles + culling, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

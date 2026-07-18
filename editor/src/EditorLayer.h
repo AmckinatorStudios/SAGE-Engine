@@ -20,6 +20,7 @@
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/core/Config.h"
+#include "sage/ecs/RenderBatch.h"
 
 #include "EditorHost.h"
 #include "Project.h"
@@ -173,6 +174,8 @@ private:
     std::optional<DebugDraw> m_debugDraw;
     std::optional<SkyRenderer> m_sky;     // процедурный градиентный скайбокс
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
+    sage::ecs::RenderBatch m_batch; // отсечение по фрустуму + инстансный батчинг статики
+    sage::ecs::RenderStats m_lastRenderStats; // статистика последнего кадра вьюпорта
     std::shared_ptr<Mesh> m_cube;
 
     // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---

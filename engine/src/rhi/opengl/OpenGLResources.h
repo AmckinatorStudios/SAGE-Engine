@@ -37,6 +37,7 @@ public:
     void DrawIndexed(size_t indexCount) const override;
     void DrawArrays(size_t vertexCount) const override;
     void DrawInstanced(size_t vertexCount, size_t instanceCount) const override;
+    void DrawIndexedInstanced(size_t indexCount, size_t instanceCount) const override;
     void DrawLines(size_t vertexCount) const override;
 
 private:

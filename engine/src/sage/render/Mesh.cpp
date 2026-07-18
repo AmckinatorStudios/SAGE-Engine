@@ -16,14 +16,51 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>&
         {1, 3, AttribType::Float, (int)offsetof(Vertex, Normal)},
         {2, 2, AttribType::Float, (int)offsetof(Vertex, TexCoords)},
     };
+    // Per-instance поток (батчинг): модельная матрица (loc 3..6 — 4 строки) +
+    // цвет (loc 7). Продвигается раз на инстанс (divisor 1). Регулярная
+    // (не инстансная) отрисовка эти локации не читает — атрибуты просто не
+    // задействованы соответствующим шейдером.
+    layout.InstanceStride = sizeof(MeshInstance);
+    layout.InstanceAttributes = {
+        {3, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 0},
+        {4, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 16},
+        {5, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 32},
+        {6, 4, AttribType::Float, (int)offsetof(MeshInstance, Model) + 48},
+        {7, 3, AttribType::Float, (int)offsetof(MeshInstance, Color)},
+    };
 
     m_geometry = GraphicsDevice::Get().CreateGeometry(layout);
     m_geometry->SetVertexData(vertices.data(), vertices.size() * sizeof(Vertex), /*dynamic=*/false);
     m_geometry->SetIndexData(indices.data(), indices.size(), /*dynamic=*/false);
+
+    // Затравка инстанс-буфера одним элементом — чтобы enabled instance-атрибуты
+    // не читали из пустого буфера при обычной (не инстансной) отрисовке.
+    MeshInstance seed{};
+    m_geometry->SetInstanceData(&seed, sizeof(seed));
+
+    // Ограничивающая сфера в локальных координатах: центр — середина AABB,
+    // радиус — макс. расстояние вершины от центра. Для отсечения по фрустуму.
+    if (!vertices.empty()) {
+        glm::vec3 lo = vertices[0].Position, hi = vertices[0].Position;
+        for (const Vertex& v : vertices) { lo = glm::min(lo, v.Position); hi = glm::max(hi, v.Position); }
+        m_boundsCenter = (lo + hi) * 0.5f;
+        float r2 = 0.0f;
+        for (const Vertex& v : vertices) r2 = glm::max(r2, glm::dot(v.Position - m_boundsCenter, v.Position - m_boundsCenter));
+        m_boundsRadius = std::sqrt(r2);
+    }
 }
 
 void Mesh::Draw() const {
     m_geometry->DrawIndexed(m_indexCount);
+}
+
+void Mesh::SetInstances(const MeshInstance* data, size_t count) const {
+    m_geometry->SetInstanceData(data, count * sizeof(MeshInstance));
+}
+
+void Mesh::DrawInstances(size_t count) const {
+    if (count == 0) return;
+    m_geometry->DrawIndexedInstanced(m_indexCount, count);
 }
 
 Mesh Mesh::CreateCube() {

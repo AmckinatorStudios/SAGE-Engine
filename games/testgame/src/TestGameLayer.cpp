@@ -171,6 +171,21 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     SpawnPlayer(scene, {0.0f, 0.85f, 9.0f});
     m_roomSpawns["room1"] = {0.0f, 0.85f, 9.0f};
 
+    // Стресс-тест масштабирования: SAGE_TESTGAME_STRESS=N рассыпает N*N мелких
+    // кубов сеткой — большинство вне поля зрения, отсекается фрустумом, а
+    // видимые рисуются одним инстанс-вызовом (проверка батчинга/отсечения).
+    if (const char* s = std::getenv("SAGE_TESTGAME_STRESS")) {
+        int n = std::max(1, std::atoi(s));
+        int made = 0;
+        for (int x = 0; x < n; ++x)
+            for (int z = 0; z < n; ++z) {
+                glm::vec3 pos{-11.0f + 22.0f * x / (float)n, 0.3f, -11.0f + 22.0f * z / (float)n};
+                glm::vec3 col{0.4f + 0.5f * ((x * 7 + z) % 3) / 2.0f, 0.5f, 0.7f};
+                SpawnBox(scene, "Stress " + std::to_string(made++), pos, {0.3f, 0.3f, 0.3f}, col, false);
+            }
+        LOG_INFO("TestGame") << "TESTGAME: stress-test " << made << " кубов (батчинг+отсечение)";
+    }
+
     SpawnPhysicsProps(scene, {-6.5f, 0.0f, 6.0f}); // башенка падающих ящиков
 
     // Скелетно-анимированная модель: процедурный «щупалец» с клипом Wave
@@ -668,19 +683,10 @@ void TestGameLayer::OnUpdate(float dt) {
 //  Рендер: тени -> HDR-сцена -> пост-процесс -> HUD
 // ============================================================================
 
+// Рисует НЕ-ECS геометрию, привязанную к переданному шейдеру: сейчас это только
+// монумент комнаты 2 (текстурная модель). ECS-меши сцены идут отдельно через
+// m_batch (отсечение по фрустуму + инстансинг), см. OnRender.
 void TestGameLayer::DrawSceneGeometry(Shader& shader, bool colorPass) {
-    Scene* scene = m_scenes.Active();
-
-    if (colorPass) shader.SetInt("uUseTexture", 0);
-    sage::ecs::ForEachRenderable(*scene, [&](Transform& tr, MeshRendererComponent& mr) {
-        shader.SetMat4("uModel", tr.GetMatrix());
-        if (colorPass) {
-            shader.SetInt("uUseTexture", 0);
-            shader.SetVec3("uObjectColor", EffectiveColor(mr)); // albedo материала, если назначен
-        }
-        mr.MeshPtr->Draw();
-    });
-
     // Монумент комнаты 2 — прямой Model::Draw (сам ставит uUseTexture/
     // uObjectColor по своим submesh'ам в цветном проходе).
     if (m_activeName == "room2" && m_monument) {
@@ -722,7 +728,8 @@ void TestGameLayer::OnRender() {
         m_shadows->BeginRender();
         m_shadowShader->Use();
         m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
-        DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false);
+        DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false); // монумент
+        m_batch.RenderDepth(*scene, m_shadows->LightMatrix()); // ECS-статика (инстансно+отсечение)
         sage::anim::DrawAnimatedModelsDepth(*scene, m_shadows->LightMatrix()); // скелеты отбрасывают тень
         m_shadows->EndRender(window.Width(), window.Height());
     }
@@ -750,7 +757,10 @@ void TestGameLayer::OnRender() {
     UploadLighting(*m_sceneShader, lighting);
     if (m_shadowsEnabled) device.BindTexture2D(1, m_shadows->DepthTexture());
     UploadShadowUniforms(*m_sceneShader, m_shadows->LightMatrix(), /*unit=*/1, m_shadowsEnabled);
-    DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true);
+    DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true); // монумент
+    // ECS-статика — через RenderBatch (отсечение по фрустуму + инстансинг).
+    m_batch.RenderColor(*scene, view, proj, m_camera.Position, lighting,
+                        m_shadows->LightMatrix(), m_shadows->DepthTexture(), m_shadowsEnabled, 0);
 
     // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
     sage::anim::DrawAnimatedModels(*scene, view, proj, m_camera.Position, lighting,

@@ -167,10 +167,7 @@ void PlayerLayer::OnRender() {
         m_shadows->BeginRender();
         m_shadowShader->Use();
         m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
-        sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
-            m_shadowShader->SetMat4("uModel", tr.GetMatrix());
-            mr.MeshPtr->Draw();
-        });
+        m_batch.RenderDepth(*m_scene, m_shadows->LightMatrix()); // статика в карту теней (инстансно+отсечение)
         sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix()); // скелеты тоже отбрасывают тень
         m_shadows->EndRender(window.Width(), window.Height());
     }
@@ -221,20 +218,10 @@ void PlayerLayer::OnRender() {
         m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
     }
 
-    m_shader->Use();
-    m_shader->SetMat4("uView", view);
-    m_shader->SetMat4("uProjection", proj);
-    m_shader->SetVec3("uViewPos", viewPos);
-    UploadLighting(*m_shader, env); // включая туман (uFog*)
-    device.BindTexture2D(1, m_shadows->DepthTexture());
-    UploadShadowUniforms(*m_shader, m_shadows->LightMatrix(), /*unit=*/1, /*enabled=*/cfg.Shadows);
-    m_shader->SetInt("uUseTexture", 0);
-    m_shader->SetInt("uShadingMode", 0); // игра — всегда полное освещение
-    sage::ecs::ForEachRenderable(*m_scene, [&](Transform& tr, MeshRendererComponent& mr) {
-        m_shader->SetMat4("uModel", tr.GetMatrix());
-        m_shader->SetVec3("uObjectColor", EffectiveColor(mr));
-        mr.MeshPtr->Draw();
-    });
+    // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
+    m_batch.RenderColor(*m_scene, view, proj, viewPos, env,
+                        m_shadows->LightMatrix(), m_shadows->DepthTexture(),
+                        /*shadowsEnabled=*/cfg.Shadows, /*shadingMode=*/0);
 
     // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
     sage::anim::DrawAnimatedModels(*m_scene, view, proj, viewPos, env,
