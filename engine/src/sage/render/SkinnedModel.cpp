@@ -17,6 +17,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/render/Shader.h"
+#include "sage/render/LightingUpload.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Light.h"
 
@@ -48,8 +49,12 @@ SkinnedMesh::SkinnedMesh(const std::vector<SkinnedVertex>& vertices,
 void SkinnedMesh::Draw() const { m_geometry->DrawIndexed(m_indexCount); }
 
 // ============================================================================
-//  Встроенный скиннинг-шейдер (полусферический ambient + направленное солнце).
-//  Один на все SkinnedModel — ленивая инициализация при первом Draw.
+//  Встроенный скиннинг-шейдер. Фрагментная стадия ИДЕНТИЧНА статическому
+//  lit.frag (ambient + солнце с PCF-тенями + точечные + прожекторы + туман) —
+//  так анимированные и статичные меши освещаются ОДИНАКОВО (устранение
+//  рассогласования). Отличие только в вершинной стадии: скиннинг костями.
+//  Uniform'ы освещения названы как в lit.frag, чтобы UploadLighting/
+//  UploadShadowUniforms заливали их без изменений.
 // ============================================================================
 namespace {
 
@@ -60,15 +65,18 @@ layout (location = 2) in vec2 aUV;
 layout (location = 3) in vec4 aJoints;
 layout (location = 4) in vec4 aWeights;
 
-out vec3 vNormal;
-out vec2 vUV;
+out vec3 FragPos;
+out vec3 Normal;
+out vec2 TexCoords;
+out vec4 FragPosLightSpace;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
+uniform mat4 uLightSpace;
 const int MAX_BONES = 128;
 uniform mat4 uBones[MAX_BONES];
-uniform int uSkinned; // 0 — рисовать в bind-позе (без палитры)
+uniform int uSkinned; // 0 — bind-поза (без палитры)
 
 void main() {
     mat4 skin;
@@ -85,39 +93,137 @@ void main() {
     vec3 skinnedNormal = mat3(skin) * aNormal;
 
     vec4 worldPos = uModel * skinnedPos;
-    vNormal = mat3(uModel) * skinnedNormal;
-    vUV = aUV;
+    FragPos = worldPos.xyz;
+    Normal = mat3(uModel) * skinnedNormal;
+    TexCoords = aUV;
+    FragPosLightSpace = uLightSpace * worldPos;
     gl_Position = uProjection * uView * worldPos;
 }
 )";
 
+// Фрагментный шейдер — построчная копия статического lit.frag (тот же набор
+// uniform'ов и та же модель освещения), чтобы скин и статика выглядели одинаково.
 const char* kSkinFrag = R"(#version 330 core
-in vec3 vNormal;
-in vec2 vUV;
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoords;
+in vec4 FragPosLightSpace;
+
 out vec4 FragColor;
 
-uniform vec3 uSkyColor;
-uniform vec3 uGroundColor;
-uniform float uAmbient;
-uniform vec3 uSunDir;   // куда светит
+#define MAX_POINT_LIGHTS 8
+#define MAX_SPOT_LIGHTS 8
+
+struct PointLight {
+    vec3 position; vec3 color; float intensity;
+    float constant; float linear; float quadratic;
+};
+struct SpotLight {
+    vec3 position; vec3 direction; vec3 color; float intensity;
+    float constant; float linear; float quadratic;
+    float cosInner; float cosOuter;
+};
+
+uniform vec3 uObjectColor;
+uniform vec3 uAmbientSky;
+uniform vec3 uAmbientGround;
+uniform float uAmbientStrength;
+uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform float uSunIntensity;
-uniform vec3 uTint;
-uniform sampler2D uTex;
-uniform int uUseTex;
+uniform PointLight uPointLights[MAX_POINT_LIGHTS];
+uniform int uNumPointLights;
+uniform SpotLight uSpotLights[MAX_SPOT_LIGHTS];
+uniform int uNumSpotLights;
+uniform vec3 uViewPos;
+uniform sampler2D uTexture;
+uniform bool uUseTexture;
+uniform sampler2D uShadowMap;
+uniform bool uShadowsEnabled;
+uniform bool uFogEnabled;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+
+float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
+    vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    proj = proj * 0.5 + 0.5;
+    if (proj.z > 1.0) return 0.0;
+    float currentDepth = proj.z;
+    float bias = max(0.0025 * (1.0 - dot(normal, sunDir)), 0.0008);
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
+    for (int x = -1; x <= 1; ++x)
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(uShadowMap, proj.xy + vec2(x, y) * texelSize).r;
+            shadow += (currentDepth - bias > pcfDepth) ? 1.0 : 0.0;
+        }
+    return shadow / 9.0;
+}
+vec3 CalcHemisphereAmbient(vec3 normal) {
+    float skyWeight = normal.y * 0.5 + 0.5;
+    return mix(uAmbientGround, uAmbientSky, skyWeight) * uAmbientStrength;
+}
+vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
+    vec3 toLight = light.position - fragPos;
+    float dist = length(toLight);
+    vec3 lightDir = toLight / max(dist, 0.0001);
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+    float attenuation = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
+    vec3 diffuse = diff * light.color * light.intensity;
+    vec3 specular = 0.5 * spec * light.color * light.intensity;
+    return (diffuse + specular) * attenuation;
+}
+vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
+    vec3 toLight = light.position - fragPos;
+    float dist = length(toLight);
+    vec3 lightDir = toLight / max(dist, 0.0001);
+    float theta = dot(lightDir, normalize(-light.direction));
+    float epsilon = max(light.cosInner - light.cosOuter, 0.0001);
+    float cone = clamp((theta - light.cosOuter) / epsilon, 0.0, 1.0);
+    if (cone <= 0.0) return vec3(0.0);
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+    float attenuation = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
+    vec3 diffuse = diff * light.color * light.intensity;
+    vec3 specular = 0.5 * spec * light.color * light.intensity;
+    return (diffuse + specular) * attenuation * cone;
+}
 
 void main() {
-    vec3 N = normalize(vNormal);
-    // Полусферический ambient: верх — небо, низ — земля.
-    float hemi = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 ambient = mix(uGroundColor, uSkyColor, hemi) * uAmbient;
-    // Направленное солнце (Ламберт).
-    float ndl = max(dot(N, -normalize(uSunDir)), 0.0);
-    vec3 diffuse = ndl * uSunColor * uSunIntensity;
+    vec3 baseColor = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
+    vec3 norm = normalize(Normal);
+    vec3 viewDir = normalize(uViewPos - FragPos);
 
-    vec3 base = uTint;
-    if (uUseTex == 1) base *= texture(uTex, vUV).rgb;
-    FragColor = vec4(base * (ambient + diffuse), 1.0);
+    vec3 ambient = CalcHemisphereAmbient(norm);
+
+    vec3 sunDir = normalize(-uSunDir);
+    float sunDiff = max(dot(norm, sunDir), 0.0);
+    vec3 sunReflect = reflect(-sunDir, norm);
+    float sunSpec = pow(max(dot(viewDir, sunReflect), 0.0), 32.0);
+    vec3 sunLight = (sunDiff + 0.5 * sunSpec) * uSunColor * uSunIntensity;
+    float shadow = uShadowsEnabled ? CalcSunShadow(FragPosLightSpace, norm, sunDir) : 0.0;
+    sunLight *= (1.0 - shadow);
+
+    vec3 pointLight = vec3(0.0);
+    for (int i = 0; i < uNumPointLights; ++i)
+        pointLight += CalcPointLight(uPointLights[i], norm, FragPos, viewDir);
+
+    vec3 spotLight = vec3(0.0);
+    for (int i = 0; i < uNumSpotLights; ++i)
+        spotLight += CalcSpotLight(uSpotLights[i], norm, FragPos, viewDir);
+
+    vec3 result = (ambient + sunLight + pointLight + spotLight) * baseColor;
+
+    if (uFogEnabled) {
+        float dist = length(uViewPos - FragPos);
+        float f = clamp((uFogEnd - dist) / max(uFogEnd - uFogStart, 0.0001), 0.0, 1.0);
+        result = mix(uFogColor, result, f);
+    }
+    FragColor = vec4(result, 1.0);
 }
 )";
 
@@ -133,20 +239,26 @@ Shader& SkinShader() {
 } // namespace
 
 void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
-                        const LightingEnvironment& env, const std::vector<glm::mat4>& bones) const {
+                        const glm::vec3& viewPos, const LightingEnvironment& env,
+                        const std::vector<glm::mat4>& bones,
+                        const glm::mat4& lightMatrix, unsigned int shadowMap,
+                        bool shadowsEnabled) const {
     Shader& shader = SkinShader();
     shader.Use();
     shader.SetMat4("uModel", model);
     shader.SetMat4("uView", view);
     shader.SetMat4("uProjection", proj);
-    glm::vec3 ambientSky, ambientGround;
-    env.ResolveAmbient(ambientSky, ambientGround); // ambient из скайбокса, если включён
-    shader.SetVec3("uSkyColor", ambientSky);
-    shader.SetVec3("uGroundColor", ambientGround);
-    shader.SetFloat("uAmbient", env.AmbientStrength);
-    shader.SetVec3("uSunDir", env.Sun.Direction);
-    shader.SetVec3("uSunColor", env.Sun.Color);
-    shader.SetFloat("uSunIntensity", env.Sun.Intensity);
+    shader.SetVec3("uViewPos", viewPos);
+
+    // Полное освещение сцены (ambient из скайбокса, солнце, точечные, прожекторы,
+    // туман) — теми же uniform'ами, что и статический lit-проход.
+    UploadLighting(shader, env);
+
+    // Тени от солнца: карта на юнит 1, матрица света + флаг — как у статики.
+    if (shadowsEnabled && shadowMap) {
+        sage::rhi::GraphicsDevice::Get().BindTexture2D(1, shadowMap);
+    }
+    UploadShadowUniforms(shader, lightMatrix, /*unit=*/1, shadowsEnabled);
 
     int boneCount = std::min((int)bones.size(), kMaxBones);
     if (boneCount > 0) {
@@ -157,13 +269,13 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     }
 
     for (const auto& sub : m_subMeshes) {
-        shader.SetVec3("uTint", sub.Tint);
+        shader.SetVec3("uObjectColor", sub.Tint);
         if (sub.Diffuse) {
-            shader.SetInt("uUseTex", 1);
-            shader.SetInt("uTex", 0);
+            shader.SetInt("uUseTexture", 1);
+            shader.SetInt("uTexture", 0);
             sub.Diffuse->Bind(0);
         } else {
-            shader.SetInt("uUseTex", 0);
+            shader.SetInt("uUseTexture", 0);
         }
         sub.Mesh->Draw();
     }

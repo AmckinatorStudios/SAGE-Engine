@@ -69,10 +69,15 @@ public:
     const std::vector<sage::anim::AnimationClip>& Clips() const { return m_clips; }
     int SubMeshCount() const { return (int)m_subMeshes.size(); }
 
-    // Рисует все submesh со скиннингом по палитре костей bones (из Animator).
-    // Если bones пуст — рисует в bind-позе (единичные кости).
+    // Рисует все submesh со скиннингом по палитре костей bones (из Animator),
+    // с ПОЛНЫМ освещением сцены (ambient/солнце+тени/точечные/прожекторы/туман) —
+    // тем же, что и статические меши. lightMatrix/shadowMap/shadowsEnabled —
+    // карта теней от солнца (как в статическом lit-проходе). Если bones пуст —
+    // bind-поза (единичные кости).
     void Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
-              const LightingEnvironment& env, const std::vector<glm::mat4>& bones) const;
+              const glm::vec3& viewPos, const LightingEnvironment& env,
+              const std::vector<glm::mat4>& bones,
+              const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled) const;
 
 private:
     std::vector<SkinnedSubMesh> m_subMeshes;

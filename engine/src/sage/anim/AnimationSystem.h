@@ -21,8 +21,12 @@ namespace sage::anim {
 void UpdateAnimators(Scene& scene, float dt);
 
 // Рисует все анимированные модели сцены в текущий фреймбуфер (после основного
-// прохода сцены — использует свой скиннинг-шейдер, тест глубины включён).
+// прохода сцены — тест глубины включён). Освещение ПОЛНОЕ и совпадает со
+// статическими мешами: передаются позиция камеры, окружение и карта теней
+// солнца (матрица света + нативный хендл depth-текстуры + флаг), как в
+// статическом lit-проходе.
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
-                        const LightingEnvironment& env);
+                        const glm::vec3& viewPos, const LightingEnvironment& env,
+                        const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled);
 
 } // namespace sage::anim

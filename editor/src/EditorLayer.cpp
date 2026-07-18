@@ -794,8 +794,10 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
     }
     DrawLitScene(env, m_view, m_proj, m_camera.Position, shadingMode, wireframe);
 
-    // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
-    sage::anim::DrawAnimatedModels(*m_scene, m_view, m_proj, env);
+    // Скелетно-анимированные модели: ПОЛНОЕ освещение + та же карта теней, что и
+    // статические меши (единый lit-конвейер, без рассогласования).
+    sage::anim::DrawAnimatedModels(*m_scene, m_view, m_proj, m_camera.Position, env,
+                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), true);
 
     // Частицы (billboard, поверх сцены, с блендингом) — камера редактора.
     if (m_particles) m_particles->Draw(m_camera, m_view, m_proj);
@@ -877,7 +879,8 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     // Игровое окно — всегда полное освещение (Shaded), без гизмо/аутлайна:
     // показывает сцену как её увидит игрок.
     DrawLitScene(env, view, proj, tr.Position, /*shadingMode=*/0, /*wireframe=*/false);
-    sage::anim::DrawAnimatedModels(*m_scene, view, proj, env);
+    sage::anim::DrawAnimatedModels(*m_scene, view, proj, tr.Position, env,
+                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), true);
     if (m_particles) m_particles->DrawFromView(view, proj); // camRight/Up из матрицы вида
 
     device.BindDefaultFramebuffer();

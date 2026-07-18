@@ -751,8 +751,9 @@ void TestGameLayer::OnRender() {
     UploadShadowUniforms(*m_sceneShader, m_shadows->LightMatrix(), /*unit=*/1, m_shadowsEnabled);
     DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true);
 
-    // Скелетно-анимированные модели (свой скиннинг-шейдер) — в тот же буфер.
-    sage::anim::DrawAnimatedModels(*scene, view, proj, lighting);
+    // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
+    sage::anim::DrawAnimatedModels(*scene, view, proj, m_camera.Position, lighting,
+                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), m_shadowsEnabled);
     // Частицы (billboard) — camRight/Up из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
 

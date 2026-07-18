@@ -235,8 +235,9 @@ void PlayerLayer::OnRender() {
         mr.MeshPtr->Draw();
     });
 
-    // Скелетно-анимированные модели — своим скиннинг-шейдером, поверх сцены.
-    sage::anim::DrawAnimatedModels(*m_scene, view, proj, env);
+    // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
+    sage::anim::DrawAnimatedModels(*m_scene, view, proj, viewPos, env,
+                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), cfg.Shadows);
     // Частицы (billboard) — camRight/Up берём из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
 
