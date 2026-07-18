@@ -60,4 +60,14 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
     }
 }
 
+void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix) {
+    auto v = scene.Registry().view<AnimatedModelComponent, Transform>();
+    for (auto e : v) {
+        AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
+        if (!am.Model) continue;
+        const Transform& tr = v.get<Transform>(e);
+        am.Model->DrawDepth(tr.GetMatrix(), lightMatrix, am.Anim.BoneMatrices());
+    }
+}
+
 } // namespace sage::anim

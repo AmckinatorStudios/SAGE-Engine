@@ -171,6 +171,7 @@ void PlayerLayer::OnRender() {
             m_shadowShader->SetMat4("uModel", tr.GetMatrix());
             mr.MeshPtr->Draw();
         });
+        sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix()); // скелеты тоже отбрасывают тень
         m_shadows->EndRender(window.Width(), window.Height());
     }
 

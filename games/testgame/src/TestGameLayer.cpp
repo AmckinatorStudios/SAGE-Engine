@@ -723,6 +723,7 @@ void TestGameLayer::OnRender() {
         m_shadowShader->Use();
         m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
         DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false);
+        sage::anim::DrawAnimatedModelsDepth(*scene, m_shadows->LightMatrix()); // скелеты отбрасывают тень
         m_shadows->EndRender(window.Width(), window.Height());
     }
 

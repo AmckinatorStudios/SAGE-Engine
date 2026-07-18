@@ -29,4 +29,8 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled);
 
+// Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
+// внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.
+void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix);
+
 } // namespace sage::anim

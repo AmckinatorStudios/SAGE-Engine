@@ -79,6 +79,13 @@ public:
               const std::vector<glm::mat4>& bones,
               const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled) const;
 
+    // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей
+    // позе — чтобы анимированная модель ОТБРАСЫВАЛА тень. Вызывается внутри
+    // depth-прохода солнца (после static-геометрии, до EndRender). lightMatrix —
+    // uLightSpace прохода. bones пуст — bind-поза.
+    void DrawDepth(const glm::mat4& model, const glm::mat4& lightMatrix,
+                   const std::vector<glm::mat4>& bones) const;
+
 private:
     std::vector<SkinnedSubMesh> m_subMeshes;
     sage::anim::Skeleton m_skeleton;

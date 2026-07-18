@@ -236,6 +236,44 @@ Shader& SkinShader() {
     return *shader;
 }
 
+// Depth-only скиннинг-шейдер для карты теней: скиннинг в вершинной стадии,
+// пустой фрагмент (пишется только глубина). Позиция/кости в тех же локациях,
+// что и основной скиннинг-шейдер (0/3/4).
+const char* kSkinDepthVert = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 3) in vec4 aJoints;
+layout (location = 4) in vec4 aWeights;
+
+uniform mat4 uLightSpace;
+uniform mat4 uModel;
+const int MAX_BONES = 128;
+uniform mat4 uBones[MAX_BONES];
+uniform int uSkinned;
+
+void main() {
+    mat4 skin;
+    float wsum = aWeights.x + aWeights.y + aWeights.z + aWeights.w;
+    if (uSkinned == 0 || wsum < 0.0001) {
+        skin = mat4(1.0);
+    } else {
+        skin = aWeights.x * uBones[int(aJoints.x)]
+             + aWeights.y * uBones[int(aJoints.y)]
+             + aWeights.z * uBones[int(aJoints.z)]
+             + aWeights.w * uBones[int(aJoints.w)];
+    }
+    gl_Position = uLightSpace * uModel * skin * vec4(aPos, 1.0);
+}
+)";
+
+const char* kSkinDepthFrag = R"(#version 330 core
+void main() {}
+)";
+
+Shader& SkinDepthShader() {
+    static Shader* shader = new Shader(Shader::FromSource(kSkinDepthVert, kSkinDepthFrag, "SkinnedModelDepth"));
+    return *shader;
+}
+
 } // namespace
 
 void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
@@ -279,6 +317,24 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
         }
         sub.Mesh->Draw();
     }
+}
+
+void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatrix,
+                             const std::vector<glm::mat4>& bones) const {
+    Shader& shader = SkinDepthShader();
+    shader.Use();
+    shader.SetMat4("uLightSpace", lightMatrix);
+    shader.SetMat4("uModel", model);
+
+    int boneCount = std::min((int)bones.size(), kMaxBones);
+    if (boneCount > 0) {
+        shader.SetInt("uSkinned", 1);
+        shader.SetMat4Array("uBones", bones.data(), boneCount);
+    } else {
+        shader.SetInt("uSkinned", 0);
+    }
+
+    for (const auto& sub : m_subMeshes) sub.Mesh->Draw();
 }
 
 // ============================================================================

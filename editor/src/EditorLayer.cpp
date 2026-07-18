@@ -649,6 +649,9 @@ void EditorLayer::RenderShadowPass(const LightingEnvironment& env) {
         m_shadowShader->SetMat4("uModel", tr.GetMatrix());
         mr.MeshPtr->Draw();
     });
+    // Скелетные модели тоже отбрасывают тень — рисуем их в карту глубины со
+    // скиннингом в текущей позе (свой depth-шейдер).
+    sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix());
     m_shadows->EndRender(window.Width(), window.Height());
 }
 
