@@ -1,8 +1,10 @@
 #include "TestGameLayer.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -126,12 +128,70 @@ void SpawnPortal(Scene& scene, const std::string& name, glm::vec3 pos,
         ScriptComponent{"assets/scripts/beacon_pulse.lua"});
 }
 
+// Собирает PBR-материал из директории с полным набором карт (albedo/normal/
+// metallic/roughness/ao — по ключевым словам в именах файлов, регистронезависимо).
+// Позволяет протестить движок на РЕАЛЬНОМ материале (например, скачанном PBR-сете)
+// без коммита тяжёлых текстур в репозиторий: путь задаётся env SAGE_TESTGAME_PBR_DIR.
+// nullptr, если директории нет или в ней не найден albedo.
+static std::shared_ptr<Material> LoadPbrSetFromDir(const std::string& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (dir.empty() || !fs::is_directory(dir, ec)) return nullptr;
+
+    auto lower = [](std::string s) { for (char& c : s) c = (char)std::tolower((unsigned char)c); return s; };
+    // Ищет первый файл, чьё имя содержит любое из ключевых слов (но не anti — чтобы
+    // «normal» не хватал «...normal-dx», когда нужен «-ogl»: предпочтение отдаётся ogl).
+    auto find = [&](std::initializer_list<const char*> keys, const char* prefer = nullptr) -> std::string {
+        std::string best, preferred;
+        for (const auto& e : fs::directory_iterator(dir, ec)) {
+            if (!e.is_regular_file()) continue;
+            std::string name = lower(e.path().filename().string());
+            std::string ext = lower(e.path().extension().string());
+            if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".tga" && ext != ".bmp") continue;
+            for (const char* k : keys)
+                if (name.find(k) != std::string::npos) {
+                    if (prefer && name.find(prefer) != std::string::npos) preferred = e.path().string();
+                    else if (best.empty()) best = e.path().string();
+                }
+        }
+        return !preferred.empty() ? preferred : best;
+    };
+
+    std::string albedo = find({"albedo", "basecolor", "base_color", "diffuse"});
+    if (albedo.empty()) return nullptr; // без базового цвета материал не собрать
+
+    auto& rm = ResourceManager::Instance();
+    auto mat = std::make_shared<Material>();
+    mat->Albedo = glm::vec3(1.0f);
+    mat->Metallic = 1.0f;  // карта (если есть) даёт итог; фактор 1 не гасит её
+    mat->Roughness = 1.0f;
+    mat->TexturePath = albedo;
+    mat->NormalMapPath = find({"normal"}, /*prefer=*/"ogl"); // OpenGL-нормали (зелёный вверх)
+    mat->MetallicMapPath = find({"metallic", "metalness"});
+    mat->RoughnessMapPath = find({"roughness", "rough"});
+    mat->AOMapPath = find({"ao", "occlusion", "ambientocclusion"});
+    rm.ResolveMaterialTextures(*mat);
+    if (!mat->AlbedoTex) return nullptr; // albedo не загрузился — откат к процедурному
+    LOG_INFO("TestGame") << "PBR-сет загружен из " << dir
+                         << " (normal=" << (mat->NormalTex ? "да" : "нет")
+                         << ", metallic=" << (mat->MetallicTex ? "да" : "нет")
+                         << ", roughness=" << (mat->RoughnessTex ? "да" : "нет")
+                         << ", ao=" << (mat->AOTex ? "да" : "нет") << ")";
+    return mat;
+}
+
 // Демонстрация PBR + normal mapping БЕЗ бинарных ассетов: процедурно генерируем
 // albedo- и tangent-space normal-карты кирпичной кладки прямо в памяти и вешаем
 // их на материал сферы. Так текстурный PBR-путь (RenderBatch::m_textured, TBN,
 // Cook-Torrance) реально прогоняется в headless-скриншоте CI, а не только
 // компилируется. Материал живёт в MaterialPtr сущности (владеет и текстурами).
+// SAGE_TESTGAME_PBR_DIR переопределяет процедурный набор реальным PBR-сетом с диска.
 void SpawnNormalMappedDemo(Scene& scene, glm::vec3 pos) {
+    // Реальный PBR-сет с диска (если задан) — иначе процедурная кладка ниже.
+    std::shared_ptr<Material> mat;
+    if (const char* d = std::getenv("SAGE_TESTGAME_PBR_DIR")) mat = LoadPbrSetFromDir(d);
+
+    if (!mat) {
     const int N = 128;
     std::vector<unsigned char> albedo(N * N * 4);
     std::vector<float> height(N * N);
@@ -184,12 +244,13 @@ void SpawnNormalMappedDemo(Scene& scene, glm::vec3 pos) {
             normal[i + 3] = 255;
         }
 
-    auto mat = std::make_shared<Material>();
+    mat = std::make_shared<Material>();
     mat->Albedo = glm::vec3(1.0f);
     mat->Metallic = 0.0f;
     mat->Roughness = 0.55f;
     mat->AlbedoTex = std::make_shared<Texture>(albedo.data(), N, N);
     mat->NormalTex = std::make_shared<Texture>(normal.data(), N, N);
+    } // конец процедурной ветки
 
     GameObject obj = scene.CreateObject("PBR Brick Sphere");
     obj.GetTransform().Position = pos;

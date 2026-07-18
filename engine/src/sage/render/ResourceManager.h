@@ -113,6 +113,9 @@ public:
     void ResolveMaterialTextures(Material& m) {
         m.AlbedoTex = GetTexture(m.TexturePath);
         m.NormalTex = GetTexture(m.NormalMapPath);
+        m.MetallicTex = GetTexture(m.MetallicMapPath);
+        m.RoughnessTex = GetTexture(m.RoughnessMapPath);
+        m.AOTex = GetTexture(m.AOMapPath);
     }
 
     void Clear() {

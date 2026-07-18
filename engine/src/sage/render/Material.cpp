@@ -34,6 +34,9 @@ Material Material::LoadFromFile(const std::string& path) {
     m.Roughness = root.value("roughness", m.Roughness);
     m.TexturePath = root.value("texture", m.TexturePath);
     m.NormalMapPath = root.value("normalMap", m.NormalMapPath);
+    m.MetallicMapPath = root.value("metallicMap", m.MetallicMapPath);
+    m.RoughnessMapPath = root.value("roughnessMap", m.RoughnessMapPath);
+    m.AOMapPath = root.value("aoMap", m.AOMapPath);
     return m;
 }
 
@@ -46,6 +49,9 @@ void Material::SaveToFile(const std::string& path) const {
     root["roughness"] = Roughness;
     root["texture"] = TexturePath;
     root["normalMap"] = NormalMapPath;
+    root["metallicMap"] = MetallicMapPath;
+    root["roughnessMap"] = RoughnessMapPath;
+    root["aoMap"] = AOMapPath;
 
     std::ofstream file(path);
     if (!file.is_open()) {

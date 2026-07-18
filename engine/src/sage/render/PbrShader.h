@@ -92,11 +92,12 @@ vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metall
     return (kd * albedo / PI + spec) * radiance * NdotL;
 }
 
-// Полное PBR-освещение фрагмента: ambient (полусфера) + солнце (с тенью) +
-// точечные + прожекторы + туман. shadingMode 1/2 обрабатывает вызывающий main.
-vec3 ShadePBR(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough) {
+// Полное PBR-освещение фрагмента с ambient occlusion (ao множит непрямой свет —
+// полусферический ambient): ambient*ao + солнце (с тенью) + точечные + прожекторы
+// + туман. shadingMode 1/2 обрабатывает вызывающий main.
+vec3 ShadePBRao(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough, float ao) {
     vec3 V = normalize(uViewPos - fragPos);
-    vec3 ambient = CalcHemisphereAmbient(N) * albedo;
+    vec3 ambient = CalcHemisphereAmbient(N) * albedo * ao;
     vec3 Lo = vec3(0.0);
 
     // Солнце (направленное) + PCF-тень.
@@ -132,6 +133,11 @@ vec3 ShadePBR(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float m
         result = mix(uFogColor, result, f);
     }
     return result;
+}
+
+// Совместимая обёртка без AO (ao = 1.0) — для путей без ambient-occlusion карты.
+vec3 ShadePBR(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough) {
+    return ShadePBRao(N, fragPos, fragPosLightSpace, albedo, metallic, rough, 1.0);
 }
 )GLSL";
 

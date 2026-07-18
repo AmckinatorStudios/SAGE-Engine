@@ -43,7 +43,26 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         material->NormalMapPath = nrmBuf;
         ResourceManager::Instance().ResolveMaterialTextures(*material);
     }
-    ImGui::TextDisabled("Normal map: tangent-space (RGB). Enter applies the path.");
+    char metBuf[512];
+    std::snprintf(metBuf, sizeof(metBuf), "%s", material->MetallicMapPath.c_str());
+    if (ImGui::InputText("Metallic Map", metBuf, sizeof(metBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->MetallicMapPath = metBuf;
+        ResourceManager::Instance().ResolveMaterialTextures(*material);
+    }
+    char rghBuf[512];
+    std::snprintf(rghBuf, sizeof(rghBuf), "%s", material->RoughnessMapPath.c_str());
+    if (ImGui::InputText("Roughness Map", rghBuf, sizeof(rghBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->RoughnessMapPath = rghBuf;
+        ResourceManager::Instance().ResolveMaterialTextures(*material);
+    }
+    char aoBuf[512];
+    std::snprintf(aoBuf, sizeof(aoBuf), "%s", material->AOMapPath.c_str());
+    if (ImGui::InputText("AO Map", aoBuf, sizeof(aoBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->AOMapPath = aoBuf;
+        ResourceManager::Instance().ResolveMaterialTextures(*material);
+    }
+    ImGui::TextDisabled("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel.");
+    ImGui::TextDisabled("Map value multiplies the factor above; Enter applies the path.");
 
     ImGui::SeparatorText("Legacy");
     ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);

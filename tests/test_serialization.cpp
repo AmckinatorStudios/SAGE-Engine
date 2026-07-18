@@ -79,6 +79,9 @@ TEST(Material_save_load_roundtrip) {
     out.Roughness = 0.3f;
     out.TexturePath = "textures/brick_albedo.png";
     out.NormalMapPath = "textures/brick_normal.png";
+    out.MetallicMapPath = "textures/brick_metallic.png";
+    out.RoughnessMapPath = "textures/brick_roughness.png";
+    out.AOMapPath = "textures/brick_ao.png";
     out.Shininess = 64.0f;
 
     std::string path = TempPath("mat.sagemat");
@@ -93,6 +96,9 @@ TEST(Material_save_load_roundtrip) {
     CHECK_NEAR(in.Roughness, 0.3f, 1e-5);
     CHECK_EQ(in.TexturePath, std::string("textures/brick_albedo.png"));
     CHECK_EQ(in.NormalMapPath, std::string("textures/brick_normal.png"));
+    CHECK_EQ(in.MetallicMapPath, std::string("textures/brick_metallic.png"));
+    CHECK_EQ(in.RoughnessMapPath, std::string("textures/brick_roughness.png"));
+    CHECK_EQ(in.AOMapPath, std::string("textures/brick_ao.png"));
     CHECK_NEAR(in.Shininess, 64.0f, 1e-5);
 
     fs::remove(path);

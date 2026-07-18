@@ -133,6 +133,12 @@ uniform sampler2D uAlbedoMap;
 uniform bool uHasAlbedo;
 uniform sampler2D uNormalMap;
 uniform bool uHasNormal;
+uniform sampler2D uMetallicMap;
+uniform bool uHasMetallic;
+uniform sampler2D uRoughnessMap;
+uniform bool uHasRoughness;
+uniform sampler2D uAOMap;
+uniform bool uHasAO;
 )") + kPbrSharedGlsl + R"(
 void main() {
     vec3 albedo = uAlbedoFactor;
@@ -143,9 +149,16 @@ void main() {
         vec3 n = texture(uNormalMap, TexCoords).rgb * 2.0 - 1.0;
         N = normalize(TBN * n);
     }
+    // metallic/roughness/ao — из карт (R-канал) × фактор, иначе только фактор.
+    float metallic = uMetallic;
+    if (uHasMetallic) metallic *= texture(uMetallicMap, TexCoords).r;
+    float rough = uRoughness;
+    if (uHasRoughness) rough *= texture(uRoughnessMap, TexCoords).r;
+    float ao = uHasAO ? texture(uAOMap, TexCoords).r : 1.0;
+
     if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
     if (uShadingMode == 1) { FragColor = vec4(albedo, 1.0); return; }
-    FragColor = vec4(ShadePBR(N, FragPos, FragPosLightSpace, albedo, uMetallic, uRoughness), 1.0);
+    FragColor = vec4(ShadePBRao(N, FragPos, FragPosLightSpace, albedo, metallic, rough, ao), 1.0);
 }
 )";
 }
@@ -242,8 +255,12 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     if (!m_textured.empty()) {
         Shader& tex = TexShader();
         setupCommon(tex);
+        // Юниты текстур: albedo=0, shadow=1, normal=2, metallic=3, roughness=4, ao=5.
         tex.SetInt("uAlbedoMap", 0);
         tex.SetInt("uNormalMap", 2);
+        tex.SetInt("uMetallicMap", 3);
+        tex.SetInt("uRoughnessMap", 4);
+        tex.SetInt("uAOMap", 5);
         for (const TexturedItem& it : m_textured) {
             tex.SetMat4("uModel", it.Model);
             tex.SetVec3("uAlbedoFactor", it.Mat->Albedo);
@@ -251,8 +268,14 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             tex.SetFloat("uRoughness", it.Mat->Roughness);
             tex.SetInt("uHasAlbedo", it.Mat->AlbedoTex ? 1 : 0);
             tex.SetInt("uHasNormal", it.Mat->NormalTex ? 1 : 0);
+            tex.SetInt("uHasMetallic", it.Mat->MetallicTex ? 1 : 0);
+            tex.SetInt("uHasRoughness", it.Mat->RoughnessTex ? 1 : 0);
+            tex.SetInt("uHasAO", it.Mat->AOTex ? 1 : 0);
             if (it.Mat->AlbedoTex) it.Mat->AlbedoTex->Bind(0);
             if (it.Mat->NormalTex) it.Mat->NormalTex->Bind(2);
+            if (it.Mat->MetallicTex) it.Mat->MetallicTex->Bind(3);
+            if (it.Mat->RoughnessTex) it.Mat->RoughnessTex->Bind(4);
+            if (it.Mat->AOTex) it.Mat->AOTex->Bind(5);
             it.Mesh_->Draw();
             ++m_stats.Batches;
         }

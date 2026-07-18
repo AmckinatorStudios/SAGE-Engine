@@ -277,14 +277,20 @@ Game, Console, Assets, Launcher. Новая панель = новый файл +
   Folder / New Script (.lua с шаблоном OnStart/OnUpdate) / New Text File /
   New Material (.sagemat)**.
 - **Материалы (PBR)**: `.sagemat` (JSON: albedo/emissive/**metallic/roughness**/
-  **texture (albedo-карта)**/**normalMap (tangent-space)**/shininess-legacy) —
-  переиспользуемое описание внешнего вида в metallic-roughness workflow. Клик по
-  `.sagemat` в Assets открывает его редактор в Inspector (слайдеры Metallic/
-  Roughness, поля Albedo/Normal Map; правки видны на всех сущностях с этим
-  материалом сразу — экземпляр разделяемый, Save пишет на диск); у выбранной
-  сущности секция Material — Assign/Clear. Материал с назначенными картами
-  рисуется отдельным текстурным PBR-путём (TBN, нормал-маппинг); без карт —
-  быстрым инстансным путём с metallic/roughness из материала. Назначенный материал заменяет Color
+  **texture (albedo)**/**normalMap**/**metallicMap**/**roughnessMap**/**aoMap**/
+  shininess-legacy) — переиспользуемое описание внешнего вида в metallic-roughness
+  workflow. Скалярные факторы metallic/roughness применяются всегда; если задана
+  карта — её значение (R-канал) умножается на фактор (glTF-семантика). Normal —
+  tangent-space (OpenGL, зелёный вверх); AO множит непрямой (ambient) свет. Клик
+  по `.sagemat` в Assets открывает его редактор в Inspector (слайдеры Metallic/
+  Roughness, поля Albedo/Normal/Metallic/Roughness/AO Map; правки видны на всех
+  сущностях с этим материалом сразу — экземпляр разделяемый, Save пишет на диск);
+  у выбранной сущности секция Material — Assign/Clear. Материал с назначенными
+  картами рисуется отдельным текстурным PBR-путём (TBN, нормал-маппинг + все
+  карты); без карт — быстрым инстансным путём с metallic/roughness из материала.
+  `games/testgame` умеет собрать материал из целого PBR-сета на диске (env
+  `SAGE_TESTGAME_PBR_DIR` — карты ищутся по ключевым словам в именах файлов),
+  чтобы протестить движок на реальном материале без коммита тяжёлых текстур. Назначенный материал заменяет Color
   сущности (`EffectiveColor` в `sage/scene/Components.h`), путь сохраняется в
   `.sage` и восстанавливается при загрузке.
 - **Play-режим**: кнопка Play в тулбаре вьюпорта (или меню Play). При входе

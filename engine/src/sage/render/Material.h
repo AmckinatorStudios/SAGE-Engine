@@ -28,16 +28,28 @@ struct Material {
     float Shininess = 32.0f; // legacy (Blinn-Phong) — оставлено для совместимости .sagemat
 
     // --- PBR (metallic-roughness workflow) ---
+    // Скалярные факторы применяются ВСЕГДА; если задана соответствующая карта —
+    // значение из карты умножается на фактор (glTF-семантика). Для чисто
+    // текстурного материала держи факторы = 1.
     float Metallic = 0.0f;    // 0 — диэлектрик, 1 — металл
     float Roughness = 0.5f;   // 0 — зеркало, 1 — матовое
-    std::string TexturePath;  // albedo-карта (пусто — без текстуры)
-    std::string NormalMapPath; // normal map (tangent-space); пусто — без нормал-маппинга
+    std::string TexturePath;      // albedo-карта (пусто — без текстуры)
+    std::string NormalMapPath;    // normal map (tangent-space, OpenGL — зелёный вверх)
+    std::string MetallicMapPath;  // metallic-карта (R-канал); пусто — только фактор
+    std::string RoughnessMapPath; // roughness-карта (R-канал); пусто — только фактор
+    std::string AOMapPath;        // ambient occlusion (R-канал); пусто — AO=1
 
     // runtime (не сериализуется): загруженные GPU-текстуры, заполняются
     // ResourceManager::GetMaterial по путям выше. nullptr — карта не задана.
     std::shared_ptr<Texture> AlbedoTex;
     std::shared_ptr<Texture> NormalTex;
-    bool HasMaps() const { return AlbedoTex || NormalTex; } // рисуется текстурным PBR-путём
+    std::shared_ptr<Texture> MetallicTex;
+    std::shared_ptr<Texture> RoughnessTex;
+    std::shared_ptr<Texture> AOTex;
+    // Рисуется текстурным PBR-путём, если задана хотя бы одна карта.
+    bool HasMaps() const {
+        return AlbedoTex || NormalTex || MetallicTex || RoughnessTex || AOTex;
+    }
 
     // Читает .sagemat (JSON). Бросает std::runtime_error, если файл не
     // открывается/не парсится — вызывающий решает, чем ответить (редактор
