@@ -2,6 +2,7 @@
 #include "sage/rhi/GraphicsDevice.h"
 
 #include <cmath>
+#include <utility>
 #include <glm/gtc/constants.hpp>
 
 using namespace sage::rhi;
@@ -45,10 +46,29 @@ static void ComputeTangents(std::vector<Vertex>& v, const std::vector<unsigned i
     }
 }
 
-Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indices) {
-    m_indexCount = indices.size();
+// Приводит порядок обхода треугольников к CCW-СНАРУЖИ: если геометрическая
+// нормаль грани (cross рёбер) противоположна усреднённой нормали её вершин,
+// меняем местами два индекса. Вершинные нормали примитивов/моделей заданы
+// наружу, поэтому это делает winding согласованным с ними. Без этого некоторые
+// генераторы (сфера/цилиндр/конус) выдавали обратный порядок обхода, и back-face
+// culling отсекал ЛИЦЕВЫЕ грани — объекты выглядели вывернутыми наизнанку
+// (видна была дальняя внутренняя поверхность). Для уже корректных мешей (куб,
+// правильные модели) — no-op.
+static void FixWinding(const std::vector<Vertex>& v, std::vector<unsigned int>& idx) {
+    for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+        unsigned a = idx[i], b = idx[i + 1], c = idx[i + 2];
+        glm::vec3 faceN = glm::cross(v[b].Position - v[a].Position, v[c].Position - v[a].Position);
+        glm::vec3 vtxN = v[a].Normal + v[b].Normal + v[c].Normal;
+        if (glm::dot(faceN, vtxN) < 0.0f) std::swap(idx[i + 1], idx[i + 2]);
+    }
+}
+
+Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indicesIn) {
+    m_indexCount = indicesIn.size();
 
     std::vector<Vertex> vertices = verticesIn;
+    std::vector<unsigned int> indices = indicesIn;
+    FixWinding(vertices, indices);      // единый CCW-снаружи порядок (не даёт «вывернутых» мешей)
     ComputeTangents(vertices, indices); // касательные для normal mapping
 
     VertexLayout layout;
