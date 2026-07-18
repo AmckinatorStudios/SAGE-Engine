@@ -224,6 +224,11 @@ add_subdirectory(runtime)
 add_subdirectory(games/sandbox)
 add_subdirectory(games/testgame)
 
+# Модульные тесты (математика/сериализация/анимация) — быстрые, без GL.
+# Собираются всегда; гоняются через CTest или напрямую ./tests/sage_tests.
+enable_testing()
+add_subdirectory(tests)
+
 # Редактор — часть стандартной сборки движка. Проверка EXISTS оставлена как
 # защита на случай частичного checkout, а не как признак опциональности.
 if (EXISTS "${CMAKE_SOURCE_DIR}/editor/CMakeLists.txt")

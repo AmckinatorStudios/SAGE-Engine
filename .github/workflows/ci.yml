@@ -24,6 +24,10 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
+      # Модульные тесты (математика/сериализация/анимация) — быстрые, без GL.
+      - name: Unit tests (math/serialization/animation)
+        run: ctest --test-dir build --output-on-failure
+
       # Sandbox рендерит сцену + Lua-скрипт; SageEditor гоняет свой self-test
       # (проект + сцена + undo/redo + play). См. scripts/ci_smoke_test.sh —
       # тот же скрипт можно запустить локально, чтобы воспроизвести падение CI.

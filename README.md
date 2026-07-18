@@ -38,7 +38,8 @@ SAGE-Engine/
   CMakeLists.txt              — оркестратор: сторонние зависимости + подпроекты
   cmake/SageHelpers.cmake     — функция sage_add_game() (новая игра в пару строк)
   cmake/mingw-toolchain.cmake — кросс-сборка .exe из Linux
-  .github/workflows/ci.yml    — CI: сборка + headless smoke-тесты (см. ниже)
+  .github/workflows/ci.yml    — CI: сборка + unit-тесты (ctest) + smoke (см. ниже)
+  tests/                      — модульные тесты (математика/сериализация/анимация)
 
   engine/                     → библиотека sage::engine (универсальное ядро)
     CMakeLists.txt
@@ -856,14 +857,18 @@ Script/Camera + свет + RigidBody/Collider).
   кодом, либо сериализует своё сама поверх движкового файла. Подтверждено
   боевым тестом; кандидат на «пользовательские сериализаторы компонентов»
   после 1.0.
-- **Тестовое покрытие** — headless smoke-тесты в CI (см.
-  `scripts/ci_smoke_test.sh`): движок реально запускается и рисует кадр,
+- **Тестовое покрытие** — два уровня в CI. **Модульные тесты** (`tests/`,
+  цель `sage_tests`, гоняются через `ctest`): быстрые проверки БЕЗ GL —
+  математика (фрустум-отсечение, матрица трансформа, вычисления конфигурации),
+  сериализация (round-trip `EngineConfig`/`Material`/`Scene`) и анимация
+  (сэмплирование каналов, иерархия костей Animator). **Headless smoke-тесты**
+  (`scripts/ci_smoke_test.sh`): движок реально запускается и рисует кадр,
   self-test редактора проходит, `TestGame` в автопилоте проходит игровой цикл
-  (подбор/портал/рендер без ERROR). Юнит-тестов на отдельные классы нет.
+  (подбор/портал/рендер без ERROR). Покрытие пока точечное, не сплошное.
 - Второй графический бэкенд (Vulkan/D3D) — RHI к этому готов (`glad` изолирован
   в `engine/src/rhi/opengl/`), но никто пока не реализован.
 - Хот-релоад скриптов; каскадные тени (CSM) + мягкие тени (PCSS); bloom/SSAO/DoF;
-  PBR-материалы.
+  IBL (image-based lighting) поверх уже сделанного metallic-roughness PBR.
 
 ## CI и smoke-тесты
 `.github/workflows/ci.yml` на каждый push/PR:
