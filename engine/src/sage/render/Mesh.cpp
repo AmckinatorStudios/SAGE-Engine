@@ -7,10 +7,14 @@
 using namespace sage::rhi;
 
 // Вычисляет касательные (tangent) для normal mapping из позиций и UV каждого
-// треугольника; аккумулирует по вершинам, затем ортонормирует относительно
-// нормали (Gram–Schmidt). Вырожденные UV дают запасную касательную.
+// треугольника; аккумулирует касательную И бинормаль по вершинам, затем
+// ортонормирует касательную относительно нормали (Gram–Schmidt) и определяет
+// ЗНАК ориентации (handedness) w = sign(dot(cross(N,T), B_accum)). Он пишется в
+// Tangent.w и в шейдере даёт бинормаль cross(N,T)*w — без него грани с
+// зеркальной UV-развёрткой показывали бы ИНВЕРТИРОВАННЫЙ рельеф нормал-карты.
 static void ComputeTangents(std::vector<Vertex>& v, const std::vector<unsigned int>& idx) {
-    std::vector<glm::vec3> acc(v.size(), glm::vec3(0.0f));
+    std::vector<glm::vec3> tanAcc(v.size(), glm::vec3(0.0f));
+    std::vector<glm::vec3> bitAcc(v.size(), glm::vec3(0.0f));
     for (size_t i = 0; i + 2 < idx.size(); i += 3) {
         unsigned a = idx[i], b = idx[i + 1], c = idx[i + 2];
         glm::vec3 e1 = v[b].Position - v[a].Position;
@@ -21,17 +25,23 @@ static void ComputeTangents(std::vector<Vertex>& v, const std::vector<unsigned i
         if (std::abs(det) < 1e-8f) continue;
         float f = 1.0f / det;
         glm::vec3 t = f * (d2.y * e1 - d1.y * e2);
-        acc[a] += t; acc[b] += t; acc[c] += t;
+        glm::vec3 bt = f * (d1.x * e2 - d2.x * e1);
+        tanAcc[a] += t; tanAcc[b] += t; tanAcc[c] += t;
+        bitAcc[a] += bt; bitAcc[b] += bt; bitAcc[c] += bt;
     }
     for (size_t i = 0; i < v.size(); ++i) {
         glm::vec3 n = v[i].Normal;
-        glm::vec3 t = acc[i];
+        glm::vec3 t = tanAcc[i];
         t = t - n * glm::dot(n, t); // ортогонализация к нормали
         if (glm::dot(t, t) < 1e-10f) {
             // Запасная касательная, перпендикулярная нормали.
             t = glm::abs(n.y) < 0.99f ? glm::cross(glm::vec3(0, 1, 0), n) : glm::vec3(1, 0, 0);
         }
-        v[i].Tangent = glm::normalize(t);
+        t = glm::normalize(t);
+        // Знак: если накопленная бинормаль смотрит противоположно cross(N,T) —
+        // UV зеркальны на этой грани, w = -1 (иначе +1).
+        float w = (glm::dot(glm::cross(n, t), bitAcc[i]) < 0.0f) ? -1.0f : 1.0f;
+        v[i].Tangent = glm::vec4(t, w);
     }
 }
 
@@ -47,7 +57,7 @@ Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int
         {0, 3, AttribType::Float, (int)offsetof(Vertex, Position)},
         {1, 3, AttribType::Float, (int)offsetof(Vertex, Normal)},
         {2, 2, AttribType::Float, (int)offsetof(Vertex, TexCoords)},
-        {3, 3, AttribType::Float, (int)offsetof(Vertex, Tangent)},
+        {3, 4, AttribType::Float, (int)offsetof(Vertex, Tangent)},
     };
     // Per-instance поток (батчинг): модельная матрица (loc 4..7 — 4 строки) +
     // цвет (loc 8) + metallic (loc 9) + roughness (loc 10). Divisor 1.

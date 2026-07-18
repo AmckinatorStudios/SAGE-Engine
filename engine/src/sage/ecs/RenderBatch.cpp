@@ -31,7 +31,7 @@ const char* kLitVert = R"(#version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aUV;
-layout (location = 3) in vec3 aTangent;
+layout (location = 3) in vec4 aTangent;
 layout (location = 4) in vec4 iM0;
 layout (location = 5) in vec4 iM1;
 layout (location = 6) in vec4 iM2;
@@ -55,7 +55,9 @@ void main() {
     mat4 model = mat4(iM0, iM1, iM2, iM3);
     vec4 world = model * vec4(aPos, 1.0);
     FragPos = world.xyz;
-    Normal = mat3(model) * aNormal;
+    // Нормальная матрица = обратно-транспонированная mat3(model): корректные
+    // нормали при неравномерном/отрицательном масштабе (иначе перекос/инверсия).
+    Normal = transpose(inverse(mat3(model))) * aNormal;
     vColor = iColor;
     vMetallic = iMetallic;
     vRoughness = iRoughness;
@@ -88,7 +90,7 @@ const char* kTexVert = R"(#version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aUV;
-layout (location = 3) in vec3 aTangent;
+layout (location = 3) in vec4 aTangent;
 
 out vec3 FragPos;
 out vec3 Normal;
@@ -104,11 +106,12 @@ uniform mat4 uLightSpace;
 void main() {
     vec4 world = uModel * vec4(aPos, 1.0);
     FragPos = world.xyz;
-    mat3 nm = mat3(uModel);
+    // Нормальная матрица (обратно-транспонированная) — верные N/T при любом масштабе.
+    mat3 nm = transpose(inverse(mat3(uModel)));
     vec3 N = normalize(nm * aNormal);
-    vec3 T = normalize(nm * aTangent);
-    T = normalize(T - N * dot(N, T));   // Gram-Schmidt в мировом пространстве
-    vec3 B = cross(N, T);
+    vec3 T = normalize(nm * aTangent.xyz);
+    T = normalize(T - N * dot(N, T));       // Gram-Schmidt в мировом пространстве
+    vec3 B = cross(N, T) * aTangent.w;      // знак ориентации (handedness) UV-развёртки
     TBN = mat3(T, B, N);
     Normal = N;
     TexCoords = aUV;

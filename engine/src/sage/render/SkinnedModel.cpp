@@ -97,7 +97,9 @@ void main() {
 
     vec4 worldPos = uModel * skinnedPos;
     FragPos = worldPos.xyz;
-    Normal = mat3(uModel) * skinnedNormal;
+    // Обратно-транспонированная нормальная матрица — верные нормали при
+    // неравномерном/отрицательном масштабе модели.
+    Normal = transpose(inverse(mat3(uModel))) * skinnedNormal;
     TexCoords = aUV;
     FragPosLightSpace = uLightSpace * worldPos;
     gl_Position = uProjection * uView * worldPos;

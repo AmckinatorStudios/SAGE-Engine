@@ -8,7 +8,10 @@ struct Vertex {
     glm::vec3 Position;
     glm::vec3 Normal;
     glm::vec2 TexCoords;
-    glm::vec3 Tangent{1.0f, 0.0f, 0.0f}; // касательная (для normal mapping, TBN)
+    // Касательная для normal mapping (TBN). w — знак ориентации (handedness):
+    // бинормаль в шейдере = cross(N, T.xyz) * T.w. Без него зеркальные по UV
+    // грани получали бы инвертированный рельеф нормал-карты.
+    glm::vec4 Tangent{1.0f, 0.0f, 0.0f, 1.0f};
 };
 
 // Per-instance данные для инстансной отрисовки (батчинг): модельная матрица +
