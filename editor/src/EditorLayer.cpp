@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -128,6 +129,7 @@ void EditorLayer::OnAttach() {
     }
 
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
+    if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
 
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
@@ -210,6 +212,9 @@ void EditorLayer::StartPlay() {
 
     m_playScripts = std::make_unique<ScriptEngine>();
     m_playScripts->BindScene(*m_scene);
+    // Паритет с рантаймом: частицы доступны скриптам уже в OnStart
+    // (EmitParticles/CreateParticleStream рисуются в предпросмотре сцены).
+    m_playScripts->BindParticles(m_renderer.Particles());
 
     // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
     // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные
@@ -219,8 +224,19 @@ void EditorLayer::StartPlay() {
     for (auto e : view) {
         const std::string& path = view.get<ScriptComponent>(e).Path;
         if (path.empty()) continue;
+        // Пути скриптов в сцене — ОТНОСИТЕЛЬНО ПРОЕКТА ("assets/scripts/x.lua"):
+        // так их резолвит собранная игра (SagePlayer делает chdir в проект). CWD
+        // редактора — не папка проекта, поэтому здесь резолвим сами: как есть
+        // (скрипты редактора, абсолютные пути), иначе — от корня проекта. Без
+        // этого скрипты проекта работали бы в собранной игре, но НЕ в Play.
+        std::string resolved = path;
+        std::error_code scriptEc;
+        if (!fs::exists(resolved, scriptEc) && m_project.Loaded()) {
+            fs::path inProject = m_project.Dir() / path;
+            if (fs::exists(inProject, scriptEc)) resolved = inProject.string();
+        }
         try {
-            m_playScripts->AttachScript(GameObject(&m_scene->Registry(), e), path);
+            m_playScripts->AttachScript(GameObject(&m_scene->Registry(), e), resolved);
             ++attached;
         } catch (const std::exception& ex) {
             LOG_ERROR("Editor") << "Play: script attach failed: " << ex.what();
@@ -1590,4 +1606,198 @@ void EditorLayer::RunSelfTest() {
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + presets, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
+}
+
+// ============================================================================
+//  E2E: полная игра через редактор (SAGE_EDITOR_E2E=1, headless CI)
+//
+//  «Без иллюзий»: РЕАЛЬНЫМИ операциями редактора (те же методы, что зовут
+//  кнопки UI) создаётся проект-игра «Coin Rush» с Lua-логикой: бот сам едет к
+//  монетам, собирает их через SendMessage, монеты уничтожают себя, счёт на
+//  HUD обновляется из Lua (GetUI). Сцена сохраняется в .sage, ПЕРЕЧИТЫВАЕТСЯ
+//  с диска, проигрывается в Play (проверяем: монеты исчезли, счёт «5/5»),
+//  Stop откатывает мир, затем File > Build Game упаковывает ИСПОЛНЯЕМУЮ игру.
+//  Отдельный шаг smoke-теста запускает СОБРАННЫЙ бинарник и убеждается по
+//  логам/скриншоту, что та же Lua-логика работает и в нём.
+// ============================================================================
+void EditorLayer::RunE2EGameTest() {
+    bool ok = true;
+    std::error_code ec;
+    fs::remove_all("e2e_game", ec);  // от прошлого прогона
+    fs::remove_all("e2e_dist", ec);
+
+    // --- 1. Проект (File > New Project) ---
+    std::string err;
+    if (!CreateProject(".", "e2e_game", err)) {
+        LOG_ERROR("Editor") << "E2E: create project failed: " << err;
+        LOG_ERROR("Editor") << "E2E: FAIL";
+        return;
+    }
+
+    // --- 2. Скрипты игры — файлы в assets/scripts проекта (как из панели Assets) ---
+    fs::create_directories(m_project.Dir() / "assets" / "scripts", ec);
+    auto writeScript = [&](const char* name, const char* body) {
+        std::ofstream f(m_project.Dir() / "assets" / "scripts" / name);
+        if (!f) { ok = false; LOG_ERROR("Editor") << "E2E: can't write script " << name; }
+        f << body;
+    };
+    // Бот: сам едет к ближайшей живой монете, вблизи шлёт ей "collect".
+    writeScript("bot.lua", R"LUA(
+function OnUpdate(entity, dt)
+    local coin = nil
+    for i = 1, 5 do
+        local c = FindObject("Coin" .. i)
+        if c ~= nil then coin = c break end
+    end
+    if coin == nil then return end
+    local p = entity.Transform.Position
+    local d = coin.Transform.Position - p
+    d.y = 0.0
+    if d:Length() < 0.45 then
+        SendMessage(coin, "collect")
+    else
+        entity.Transform.Position = p + d:Normalized() * (2.5 * dt)
+    end
+end
+)LUA");
+    // Монета: крутится; по "collect" объявляет счёт и уничтожает себя.
+    writeScript("coin.lua", R"LUA(
+function OnUpdate(entity, dt)
+    entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 240.0
+end
+function OnMessage(entity, name, data)
+    if name == "collect" then
+        log("E2E: coin collected: " .. entity.Name)
+        Broadcast("scored")
+        entity:Destroy()
+    end
+end
+)LUA");
+    // HUD: копит счёт по "scored", пишет текст и заполняет полосу из Lua.
+    writeScript("hud.lua", R"LUA(
+local score = 0
+function OnStart(entity)
+    local ui = entity:GetUI()
+    if ui ~= nil then ui.Text = "Score: 0 / 5" end
+end
+function OnMessage(entity, name, data)
+    if name ~= "scored" then return end
+    score = score + 1
+    local ui = entity:GetUI()
+    if ui ~= nil then ui.Text = "Score: " .. score .. " / 5" end
+    local bar = FindObject("Score Bar")
+    if bar ~= nil then bar:GetUI().Value = score / 5.0 end
+    if score >= 5 then log("E2E: ALL COINS COLLECTED") end
+end
+)LUA");
+
+    // --- 3. Сцена игры — редакторскими операциями создания сущностей ---
+    NewScene(false);
+    m_scene->Lighting.Skybox.Enabled = true;
+
+    GameObject ground = CreatePrimitiveEntity("Ground", MeshRef::Type::Cube);
+    ground.GetTransform().Position = {0.0f, -0.55f, 0.0f};
+    ground.GetTransform().Scale = {14.0f, 0.3f, 6.0f};
+    ground.Renderer().Color = {0.28f, 0.30f, 0.34f};
+
+    GameObject bot = CreatePrimitiveEntity("Bot", MeshRef::Type::Cube);
+    bot.GetTransform().Position = {-6.0f, 0.1f, 0.0f};
+    bot.GetTransform().Scale = {0.8f, 0.8f, 0.8f};
+    bot.Renderer().Color = {0.30f, 0.55f, 0.95f};
+    m_scene->Registry().emplace<ScriptComponent>(bot.Entity(), ScriptComponent{"assets/scripts/bot.lua"});
+
+    for (int i = 1; i <= 5; ++i) {
+        GameObject coin = CreatePrimitiveEntity("Coin" + std::to_string(i), MeshRef::Type::Sphere);
+        coin.GetTransform().Position = {-4.0f + (float)i * 1.6f, 0.35f, 0.0f};
+        coin.GetTransform().Scale = {0.45f, 0.45f, 0.45f};
+        coin.Renderer().Color = {0.95f, 0.80f, 0.20f};
+        m_scene->Registry().emplace<ScriptComponent>(coin.Entity(), ScriptComponent{"assets/scripts/coin.lua"});
+    }
+
+    GameObject cam = m_scene->CreateObject("Main Camera");
+    cam.GetTransform().Position = {0.0f, 2.5f, 8.5f};
+    cam.GetTransform().Rotation = {-12.0f, 0.0f, 0.0f};
+    m_scene->Registry().emplace<CameraComponent>(cam.Entity());
+
+    GameObject hud = m_scene->CreateObject("HUD");
+    UIElementComponent hudUi;
+    hudUi.Type = UIElementComponent::Kind::Panel;
+    hudUi.Offset = {16.0f, 16.0f};
+    hudUi.Size = {240.0f, 64.0f};
+    hudUi.Rounding = 12.0f;
+    hudUi.BorderThickness = 2.0f;
+    hudUi.Text = "Score: 0 / 5";
+    hudUi.TextCentered = false;
+    m_scene->Registry().emplace<UIElementComponent>(hud.Entity(), hudUi);
+    m_scene->Registry().emplace<ScriptComponent>(hud.Entity(), ScriptComponent{"assets/scripts/hud.lua"});
+
+    GameObject bar = m_scene->CreateObject("Score Bar");
+    UIElementComponent barUi;
+    barUi.Type = UIElementComponent::Kind::Bar;
+    barUi.Anchor = UIAnchor::BottomLeft;
+    barUi.Offset = {12.0f, 8.0f};
+    barUi.Size = {216.0f, 16.0f};
+    barUi.Rounding = 7.0f;
+    barUi.Color = {0.0f, 0.0f, 0.0f, 0.55f};
+    barUi.Value = 0.0f;
+    barUi.BarFillColor = {0.95f, 0.80f, 0.20f, 1.0f};
+    m_scene->Registry().emplace<UIElementComponent>(bar.Entity(), barUi);
+    m_scene->SetParent(bar.Entity(), hud.Entity());
+
+    // --- 4. Сохранить и ПЕРЕЧИТАТЬ с диска: играем то, что реально в файле ---
+    fs::path scenePath = m_project.ScenesDir() / "main.sage";
+    if (!SaveSceneToFile(scenePath) || !LoadSceneFromFile(scenePath)) {
+        LOG_ERROR("Editor") << "E2E: scene save/reload failed";
+        ok = false;
+    }
+
+    // --- 5. Play: логика Lua реально играет (бот собирает все монеты) ---
+    if (ok) {
+        StartPlay();
+        for (int i = 0; i < 240 && ok; ++i) m_playScripts->UpdateAll(0.05f); // ~12 c игры
+        bool coinsGone = true;
+        for (int i = 1; i <= 5; ++i)
+            if (m_scene->FindByName("Coin" + std::to_string(i)).Valid()) coinsGone = false;
+        const UIElementComponent* hudNow =
+            m_scene->Registry().try_get<UIElementComponent>(m_scene->FindByName("HUD").Entity());
+        bool scoreOk = hudNow && hudNow->Text == "Score: 5 / 5";
+        const UIElementComponent* barNow =
+            m_scene->Registry().try_get<UIElementComponent>(m_scene->FindByName("Score Bar").Entity());
+        bool barOk = barNow && std::abs(barNow->Value - 1.0f) < 0.001f;
+        if (!coinsGone || !scoreOk || !barOk) {
+            LOG_ERROR("Editor") << "E2E: play logic failed (coinsGone=" << coinsGone
+                                << " scoreOk=" << scoreOk << " barOk=" << barOk
+                                << " hudText='" << (hudNow ? hudNow->Text : "?") << "')";
+            ok = false;
+        }
+        StopPlay();
+        // Stop обязан вернуть мир: монеты на месте, счёт исходный.
+        if (ok && (!m_scene->FindByName("Coin1").Valid() || !m_scene->FindByName("Coin5").Valid())) {
+            LOG_ERROR("Editor") << "E2E: stop did not restore coins";
+            ok = false;
+        }
+    }
+
+    // --- 6. File > Build Game: упаковка ИСПОЛНЯЕМОЙ игры ---
+    if (ok) {
+        std::string buildErr;
+        if (!BuildGame("e2e_dist", buildErr)) {
+            LOG_ERROR("Editor") << "E2E: build game failed: " << buildErr;
+            ok = false;
+        } else {
+#ifdef _WIN32
+            fs::path exe = fs::path("e2e_dist") / "e2e_game" / "e2e_game.exe";
+#else
+            fs::path exe = fs::path("e2e_dist") / "e2e_game" / "e2e_game";
+#endif
+            if (!fs::exists(exe, ec)) {
+                LOG_ERROR("Editor") << "E2E: built game exe missing: " << exe.string();
+                ok = false;
+            }
+        }
+    }
+
+    if (ok) LOG_INFO("Editor") << "E2E: PASS (project + lua scripts + scene save/reload + "
+                                  "play logic [5 coins, messaging, HUD from Lua] + stop restore + build exe)";
+    else LOG_ERROR("Editor") << "E2E: FAIL";
 }

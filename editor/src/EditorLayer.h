@@ -151,6 +151,9 @@ private:
     void NewScene(bool withDemoContent);
     void UpdateWindowTitle();
     void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
+    // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +
+    // Play + Build Game (собранный бинарник затем гоняет smoke-тест).
+    void RunE2EGameTest();
 
     bool RestoreSceneFromString(const std::string& snapshot);
 

@@ -102,6 +102,7 @@ void PlayerLayer::OnAttach() {
     // 4. Скрипты: игра стартует сразу (Play всегда включён).
     m_scripts = std::make_unique<ScriptEngine>();
     m_scripts->BindScene(*m_scene);
+    if (m_particles) m_scripts->BindParticles(*m_particles); // паритет с Play редактора
     int attached = 0;
     auto view = m_scene->Registry().view<ScriptComponent>();
     for (auto e : view) {
