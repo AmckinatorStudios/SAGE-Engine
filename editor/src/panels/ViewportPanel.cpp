@@ -43,6 +43,11 @@ void DecomposeToTransform(const glm::mat4& m, Transform& out) {
 } // namespace
 
 void ViewportPanel::Draw(EditorHost& host) {
+    if (m_focusFrames > 0) {
+        ImGui::SetNextWindowFocus(); // вывести Viewport вперёд на старте (см. RequestFocus)
+        --m_focusFrames;
+    }
+
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("Viewport");
     bool hovered = ImGui::IsWindowHovered();

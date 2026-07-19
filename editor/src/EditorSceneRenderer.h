@@ -63,7 +63,12 @@ public:
 private:
     void DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
                  const glm::mat4& proj, glm::vec3 viewPos, int shadingMode, bool wireframe);
-    void DrawSelectionOutline(Scene& scene, GameObject obj, const glm::mat4& view, const glm::mat4& proj);
+    // Аутлайн выделения — робастный пост-проход: силуэт объекта в масочный
+    // буфер, затем краевая дилатация ПОСТОЯННОЙ ширины в пикселях поверх кадра.
+    // Работает для любых мешей (модели/плоскости/невыпуклые), в отличие от
+    // прежней «раздутой оболочки» (толщина зависела от размера, только выпуклые).
+    void RenderOutlineMask(Scene& scene, GameObject obj, const glm::mat4& view, const glm::mat4& proj);
+    void CompositeOutline(Framebuffer& target);
     void DrawEntityGizmos(Scene& scene, int selectedId, float gameAspect);
     static sage::render::PostFXSettings FxFromConfig(const sage::EngineConfig& cfg);
 
@@ -71,6 +76,8 @@ private:
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo, m_gameFbo;
     std::optional<Framebuffer> m_postFbo, m_gamePostFbo; // LDR-выходы PostFX
+    std::optional<Framebuffer> m_outlineMask;            // силуэт выделенного объекта (аутлайн)
+    std::unique_ptr<sage::rhi::Geometry> m_outlineTri;   // полноэкранный треугольник для краевого прохода
     // UI сцены (UIElementComponent) — оверлей в панели Game (WYSIWYG: как в
     // собранной игре). Лениво: создаётся при первом кадре с UI-сущностями.
     std::unique_ptr<UIRenderer> m_ui;

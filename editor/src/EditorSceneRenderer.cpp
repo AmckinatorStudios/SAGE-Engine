@@ -23,6 +23,8 @@ void EditorSceneRenderer::Init() {
     m_debugDraw.emplace();
     m_sky.emplace();
     m_particles.emplace();
+    m_outlineMask.emplace(m_vpW, m_vpH);
+    m_outlineTri = sage::rhi::GraphicsDevice::Get().CreateGeometry(sage::rhi::VertexLayout{});
 }
 
 sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::EngineConfig& cfg) {
@@ -59,27 +61,87 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 }
 
-// Аутлайн выбранного меша: масштабированная «оболочка» плоским цветом с отсечением
-// ЛИЦЕВЫХ граней (видны только задние — образуют кайму). Работает для выпуклых.
-void EditorSceneRenderer::DrawSelectionOutline(Scene& scene, GameObject obj,
-                                               const glm::mat4& view, const glm::mat4& proj) {
+namespace {
+// Краевой проход аутлайна: дилатация силуэта из масочного буфера на ПОСТОЯННУЮ
+// ширину в пикселях (kOutlineRadius), поверх готового кадра. Пиксель вне
+// силуэта, но рядом с ним (в радиусе) — кайма. Ширина не зависит ни от размера
+// объекта, ни от расстояния до камеры. Работает для любой геометрии.
+const char* kOutlineEdgeVert = R"(#version 330 core
+out vec2 vUV;
+void main() {
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    vUV = p;
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+)";
+const char* kOutlineEdgeFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uMask;
+uniform vec2 uTexel;   // 1 / размер маски
+uniform vec3 uColor;
+const int R = 3;       // ширина каймы в пикселях (постоянная на экране)
+void main() {
+    float center = texture(uMask, vUV).r;
+    if (center > 0.5) discard;              // внутри силуэта каймы нет
+    float near = 0.0;
+    for (int y = -R; y <= R; ++y)
+        for (int x = -R; x <= R; ++x)
+            near = max(near, texture(uMask, vUV + vec2(x, y) * uTexel).r);
+    if (near < 0.5) discard;                // вокруг нет объекта — не кайма
+    FragColor = vec4(uColor, 1.0);
+}
+)";
+Shader& OutlineEdgeShader() {
+    static Shader* s = new Shader(Shader::FromSource(kOutlineEdgeVert, kOutlineEdgeFrag, "OutlineEdge"));
+    return *s;
+}
+} // namespace
+
+// Рисует силуэт выбранного меша сплошным белым в масочный буфер (без теста
+// глубины — полный силуэт даже при частичном перекрытии другими объектами).
+void EditorSceneRenderer::RenderOutlineMask(Scene& scene, GameObject obj,
+                                            const glm::mat4& view, const glm::mat4& proj) {
     const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(obj.Entity());
     if (!mr || !mr->MeshPtr) return;
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
-    glm::mat4 model = glm::scale(scene.WorldMatrix(obj.Entity()), glm::vec3(1.06f));
+    m_outlineMask->Resize(m_vpW, m_vpH);
+    m_outlineMask->Bind();
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear();
+
     m_outlineShader->Use();
     m_outlineShader->SetMat4("uView", view);
     m_outlineShader->SetMat4("uProjection", proj);
-    m_outlineShader->SetMat4("uModel", model);
-    m_outlineShader->SetInt("uShadingMode", 1); // unlit — плоский цвет каймы
+    m_outlineShader->SetMat4("uModel", scene.WorldMatrix(obj.Entity()));
+    m_outlineShader->SetInt("uShadingMode", 1); // unlit — плоский белый силуэт
     m_outlineShader->SetInt("uUseTexture", 0);
     m_outlineShader->SetInt("uFogEnabled", 0);
-    m_outlineShader->SetVec3("uObjectColor", {1.0f, 0.62f, 0.12f});
+    m_outlineShader->SetVec3("uObjectColor", {1.0f, 1.0f, 1.0f});
 
-    device.SetCullMode(sage::rhi::CullMode::Front); // только задние грани оболочки
+    device.SetDepthTest(false); // полный силуэт независимо от перекрытий
     mr->MeshPtr->Draw();
-    device.SetCullMode(sage::rhi::CullMode::Back);
+    device.SetDepthTest(true);
+}
+
+// Накладывает кайму из маски на итоговый кадр (target — то, что уходит во вьюпорт).
+void EditorSceneRenderer::CompositeOutline(Framebuffer& target) {
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+    target.Bind();
+    device.SetViewport(0, 0, m_vpW, m_vpH);
+    device.SetDepthTest(false);
+    device.SetBlend(true);
+
+    Shader& edge = OutlineEdgeShader();
+    edge.Use();
+    edge.SetInt("uMask", 0);
+    edge.SetVec2("uTexel", {1.0f / (float)m_vpW, 1.0f / (float)m_vpH});
+    edge.SetVec3("uColor", {1.0f, 0.62f, 0.12f}); // янтарная кайма выделения
+    device.BindTexture2D(0, m_outlineMask->ColorTexture());
+    m_outlineTri->DrawArrays(3);
+
+    device.SetDepthTest(true);
 }
 
 // Гизмо невидимых/физических сущностей (камера/свет/эмиттер/коллайдер) — всегда
@@ -171,7 +233,6 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     m_particles->Draw(camera, outView, outProj);
 
     GameObject selectedObj = scene.Get(selectedId);
-    if (selectedObj.Valid()) DrawSelectionOutline(scene, selectedObj, outView, outProj);
 
     // Гизмо-графика (DebugDraw) — в тот же буфер, с тестом глубины (объекты заслоняют сетку).
     if (showGrid) m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
@@ -192,6 +253,9 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     }
     m_debugDraw->Flush(outView, outProj);
 
+    // Силуэт выбранного объекта в масочный буфер (до поста, свой FBO).
+    if (selectedObj.Valid()) RenderOutlineMask(scene, selectedObj, outView, outProj);
+
     // Пост-обработка — только Shaded + включена в конфиге (отладочные режимы как есть).
     m_postApplied = false;
     if (cfg.PostProcessing && mode == EditorRenderMode::Shaded) {
@@ -201,6 +265,11 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                          /*output=*/&*m_postFbo, 0, 0, m_vpW, m_vpH);
         m_postApplied = true;
     }
+
+    // Кайма выделения — поверх ИТОГОВОГО кадра (после поста, постоянная ширина
+    // в пикселях, крайне читаемая независимо от размера объекта и дистанции).
+    if (selectedObj.Valid()) CompositeOutline(m_postApplied ? *m_postFbo : *m_sceneFbo);
+
     device.BindDefaultFramebuffer();
 }
 

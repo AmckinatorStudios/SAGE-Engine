@@ -11,7 +11,14 @@ class ViewportPanel {
 public:
     void Draw(EditorHost& host);
 
+    // Просит вывести таб Viewport вперёд (несколько кадров SetNextWindowFocus —
+    // одноразовый проигрывает раскладке доков). По умолчанию активно на старте:
+    // Viewport — рабочая панель (пикинг/гизмо/аутлайн), редактор должен
+    // открываться на ней, а не на «игровом окне» Game.
+    void RequestFocus() { m_focusFrames = 3; }
+
 private:
     bool m_cameraDriving = false; // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)
     bool m_gizmoWasUsing = false; // фронт «начали таскать гизмо» -> одна запись undo
+    int m_focusFrames = 3;        // >0 — просим фокус (стартовые кадры + после RequestFocus)
 };

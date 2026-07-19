@@ -34,17 +34,22 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// Пересечение луча с AABB [-0.5,0.5]^3 (единичный куб движка) в локальном
-// пространстве объекта. Возвращает t входа (>=0) или отрицательное при промахе.
-float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
+// Пересечение луча с произвольным AABB [bmin, bmax] в локальном пространстве
+// объекта (slab-тест). Возвращает t входа (>=0) или отрицательное при промахе.
+float RayBox(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& bmin, const glm::vec3& bmax) {
     glm::vec3 inv = 1.0f / rd; // IEEE inf при нулевой компоненте — slab-тест это переживает
-    glm::vec3 t0 = (glm::vec3(-0.5f) - ro) * inv;
-    glm::vec3 t1 = (glm::vec3(0.5f) - ro) * inv;
+    glm::vec3 t0 = (bmin - ro) * inv;
+    glm::vec3 t1 = (bmax - ro) * inv;
     glm::vec3 tmin = glm::min(t0, t1), tmax = glm::max(t0, t1);
     float tNear = std::max({tmin.x, tmin.y, tmin.z});
     float tFar  = std::min({tmax.x, tmax.y, tmax.z});
     if (tNear > tFar || tFar < 0.0f) return -1.0f;
     return tNear >= 0.0f ? tNear : tFar;
+}
+
+// Луч vs единичный куб [-0.5,0.5]^3 — маркеры невидимых сущностей (камера/свет).
+float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
+    return RayBox(ro, rd, glm::vec3(-0.5f), glm::vec3(0.5f));
 }
 
 constexpr float kStatusBarHeight = 26.0f;
@@ -243,6 +248,7 @@ void EditorLayer::StopPlay() {
     RestoreSceneFromString(m_playSnapshot);
     m_playSnapshot.clear();
     m_playState = EditorPlayState::Editing;
+    m_viewport.RequestFocus(); // вернулись к редактированию — Viewport вперёд
     LOG_INFO("Editor") << "Play stopped, scene restored";
 }
 
@@ -647,13 +653,20 @@ void EditorLayer::PickAtViewport(float u, float v) {
 
     int bestId = -1;
     float bestDist = 1e30f;
-    auto view = m_scene->Registry().view<IdComponent, Transform, MeshRendererComponent>();
+    auto view = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
     for (auto e : view) {
-        if (!view.get<MeshRendererComponent>(e).MeshPtr) continue;
-        glm::mat4 inv = glm::inverse(view.get<Transform>(e).GetMatrix());
+        Mesh* mesh = view.get<MeshRendererComponent>(e).MeshPtr.get();
+        if (!mesh) continue;
+        // МИРОВАЯ матрица (учёт иерархии родителей): раньше бралась локальная —
+        // дочерние сущности выделялись по неверной позиции. AABB меша — из его
+        // собственных границ (center±radius), а не фиксированный единичный куб,
+        // так пикинг попадает по объектам любого размера/формы (модели, плоскости).
+        glm::mat4 inv = glm::inverse(m_scene->WorldMatrix(e));
         glm::vec3 lro = glm::vec3(inv * glm::vec4(ro, 1.0f));
         glm::vec3 lrd = glm::vec3(inv * glm::vec4(rd, 0.0f)); // без нормализации: t остаётся в масштабе мира
-        float t = RayUnitCube(lro, lrd);
+        glm::vec3 c = mesh->BoundsCenter();
+        glm::vec3 r(mesh->BoundsRadius());
+        float t = RayBox(lro, lrd, c - r, c + r);
         if (t >= 0.0f && t < bestDist) {
             bestDist = t;
             bestId = view.get<IdComponent>(e).Id;
@@ -672,10 +685,10 @@ void EditorLayer::PickAtViewport(float u, float v) {
     };
     auto camMarkers = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
     for (auto e : camMarkers)
-        pickMarker(e, camMarkers.get<IdComponent>(e).Id, camMarkers.get<Transform>(e).Position);
+        pickMarker(e, camMarkers.get<IdComponent>(e).Id, glm::vec3(m_scene->WorldMatrix(e)[3]));
     auto lightMarkers = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
     for (auto e : lightMarkers)
-        pickMarker(e, lightMarkers.get<IdComponent>(e).Id, lightMarkers.get<Transform>(e).Position);
+        pickMarker(e, lightMarkers.get<IdComponent>(e).Id, glm::vec3(m_scene->WorldMatrix(e)[3]));
 
     m_selectedId = bestId; // клик мимо всех объектов — снять выбор
 }
@@ -767,11 +780,15 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Console", bottom);
     ImGui::DockBuilderDockWindow("Assets", bottom);
-    ImGui::DockBuilderDockWindow("Game", center);
+    // Viewport докается ПЕРВЫМ в центральный узел — так он и есть таб по
+    // умолчанию (первый добавленный к узлу становится выбранным). Раньше первым
+    // шёл Game, из-за чего редактор открывался на «игровом окне» без пикинга/
+    // гизмо/аутлайна — выглядело как «выделение не работает». Game выходит
+    // вперёд при входе в Play (GamePanel::RequestFocus).
     ImGui::DockBuilderDockWindow("Viewport", center);
+    ImGui::DockBuilderDockWindow("Game", center);
     ImGui::DockBuilderFinish(dockspaceId);
 
-    // По умолчанию активен таб Viewport (Game выходит вперёд при Play).
     ImGui::SetWindowFocus("Viewport");
 }
 
