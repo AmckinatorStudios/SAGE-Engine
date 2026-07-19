@@ -1383,8 +1383,101 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Дубликат: копия несёт ВСЕ движковые компоненты (свет/тело/коллайдер),
+    // рантайм-состояние своё (RuntimeBody сброшен) ---
+    if (ok) {
+        GameObject src = m_scene->CreateObject("DupSource");
+        m_scene->Registry().emplace<LightComponent>(src.Entity());
+        RigidBodyComponent rb; rb.RuntimeBody = 12345; // «живое» тело — не должно скопироваться
+        m_scene->Registry().emplace<RigidBodyComponent>(src.Entity(), rb);
+        m_scene->Registry().emplace<ColliderComponent>(src.Entity());
+        m_selectedId = src.Id();
+        DuplicateSelected();
+        GameObject copy = m_scene->Get(m_selectedId);
+        bool compOk = copy.Valid() && copy.Id() != src.Id() &&
+                      m_scene->Registry().all_of<LightComponent>(copy.Entity()) &&
+                      m_scene->Registry().all_of<RigidBodyComponent>(copy.Entity()) &&
+                      m_scene->Registry().all_of<ColliderComponent>(copy.Entity());
+        bool runtimeOk = compOk &&
+            m_scene->Registry().get<RigidBodyComponent>(copy.Entity()).RuntimeBody ==
+                sage::physics::kInvalidBody;
+        if (!compOk || !runtimeOk) {
+            LOG_ERROR("Editor") << "SELFTEST: duplicate failed (components " << compOk
+                                << ", runtime reset " << runtimeOk << ")";
+            ok = false;
+        }
+        if (copy.Valid()) m_scene->RemoveObject(copy.Id());
+        m_scene->RemoveObject(src.Id());
+        m_selectedId = -1;
+    }
+
+    // --- Иерархия: мировая позиция ребёнка складывается из родителя, удаление
+    // родителя сносит поддерево, undo возвращает обоих со связью ---
+    if (ok) {
+        size_t n0 = m_scene->Count();
+        GameObject parent = m_scene->CreateObject("HierParent");
+        parent.GetTransform().Position = {10.0f, 0.0f, 0.0f};
+        GameObject child = m_scene->CreateObject("HierChild");
+        child.GetTransform().Position = {0.0f, 5.0f, 0.0f};
+        m_scene->SetParent(child.Entity(), parent.Entity());
+
+        glm::vec3 wp = glm::vec3(m_scene->WorldMatrix(child.Entity())[3]);
+        if (std::abs(wp.x - 10.0f) > 0.001f || std::abs(wp.y - 5.0f) > 0.001f) {
+            LOG_ERROR("Editor") << "SELFTEST: hierarchy world matrix wrong (" << wp.x << ", " << wp.y << ")";
+            ok = false;
+        }
+        if (ok) {
+            m_selectedId = parent.Id();
+            DeleteSelected(); // PushUndoSnapshot внутри; удаляет родителя С ребёнком
+            if (m_scene->Count() != n0) {
+                LOG_ERROR("Editor") << "SELFTEST: hierarchy subtree delete failed (count "
+                                    << m_scene->Count() << ", expected " << n0 << ")";
+                ok = false;
+            }
+        }
+        if (ok) {
+            Undo(); // возвращает и родителя, и ребёнка, и связь между ними
+            GameObject p2 = m_scene->FindByName("HierParent");
+            GameObject c2 = m_scene->FindByName("HierChild");
+            bool linkOk = p2.Valid() && c2.Valid() &&
+                          m_scene->ParentOf(c2.Entity()) == p2.Entity();
+            if (!linkOk) {
+                LOG_ERROR("Editor") << "SELFTEST: hierarchy undo did not restore parent link";
+                ok = false;
+            }
+            if (p2.Valid()) m_scene->RemoveObject(p2.Id()); // чистим вместе с поддеревом
+        }
+        m_selectedId = -1;
+    }
+
+    // --- Пресеты качества: Low гасит тяжёлые проходы, значения переживают
+    // sage.cfg round-trip, оконные параметры не тронуты ---
+    if (ok) {
+        sage::EngineConfig pc;
+        pc.Width = 1600; pc.VSync = false;
+        pc.ApplyPreset(sage::QualityPreset::Low);
+        bool presetOk = !pc.Shadows && !pc.PostProcessing && !pc.AmbientOcclusion &&
+                        std::abs(pc.RenderScale - 0.75f) < 0.001f &&
+                        pc.Width == 1600 && pc.VSync == false;
+        std::string pPath = "selftest_preset.cfg";
+        bool fileOk = presetOk && pc.SaveFile(pPath);
+        if (fileOk) {
+            sage::EngineConfig back;
+            fileOk = back.LoadFile(pPath) && !back.Shadows && !back.PostProcessing &&
+                     std::abs(back.RenderScale - 0.75f) < 0.001f;
+            std::error_code pEc;
+            fs::remove(pPath, pEc);
+        }
+        if (!presetOk || !fileOk) {
+            LOG_ERROR("Editor") << "SELFTEST: quality preset failed (preset " << presetOk
+                                << ", file " << fileOk << ")";
+            ok = false;
+        }
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play + physics + animation + config + particles + culling, " << before << " entities)";
+                               << "recent + dirty + play + physics + animation + config + particles + "
+                               << "culling + duplicate + hierarchy + presets, " << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

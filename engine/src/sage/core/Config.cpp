@@ -1,5 +1,6 @@
 #include "sage/core/Config.h"
 
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 
@@ -93,6 +94,51 @@ void EngineConfig::LetterboxViewport(int winW, int winH, int& x, int& y, int& w,
     }
 }
 
+void EngineConfig::ApplyPreset(QualityPreset preset) {
+    switch (preset) {
+        case QualityPreset::Low:
+            // Слабый/старый ПК: убираем оба тяжёлых прохода (тени, HDR-пост со
+            // всеми эффектами) и рендерим в 75% разрешения. Туман и скайбокс
+            // остаются — они почти бесплатны, а картинку держат.
+            Shadows = false;
+            ShadowResolution = 512;
+            PostProcessing = false;
+            Bloom = false;
+            AmbientOcclusion = false;
+            Msaa = 0;
+            RenderScale = 0.75f;
+            break;
+        case QualityPreset::Medium:
+            Shadows = true;
+            ShadowResolution = 1024;
+            PostProcessing = true;  // тон-маппинг/экспозиция — дёшево и заметно
+            Bloom = false;
+            AmbientOcclusion = false;
+            Msaa = 0;
+            RenderScale = 1.0f;
+            break;
+        case QualityPreset::High:
+            // Значения по умолчанию движка — всё включено.
+            Shadows = true;
+            ShadowResolution = 2048;
+            PostProcessing = true;
+            Bloom = true;
+            AmbientOcclusion = true;
+            Msaa = 0;
+            RenderScale = 1.0f;
+            break;
+        case QualityPreset::Ultra:
+            Shadows = true;
+            ShadowResolution = 4096;
+            PostProcessing = true;
+            Bloom = true;
+            AmbientOcclusion = true;
+            Msaa = 4;
+            RenderScale = 1.0f;
+            break;
+    }
+}
+
 bool EngineConfig::LoadFile(const std::string& path) {
     std::ifstream f(path);
     if (!f) return false;
@@ -174,6 +220,19 @@ bool EngineConfig::SaveFile(const std::string& path) const {
 }
 
 void EngineConfig::ApplyEnvOverrides() {
+    // Пресет качества ПЕРВЫМ — он выставляет группу полей разом, а точечные
+    // SAGE_*-переменные ниже могут поправить любое поле поверх пресета.
+    if (const char* v = std::getenv("SAGE_QUALITY")) {
+        std::string s(v);
+        for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+        if (s == "low")         ApplyPreset(QualityPreset::Low);
+        else if (s == "medium") ApplyPreset(QualityPreset::Medium);
+        else if (s == "high")   ApplyPreset(QualityPreset::High);
+        else if (s == "ultra")  ApplyPreset(QualityPreset::Ultra);
+        else LOG_WARN("Config") << "SAGE_QUALITY: неизвестный пресет '" << v
+                                << "' (ожидается low/medium/high/ultra) — игнорирую";
+    }
+
     // Размер/окно
     if (const char* v = std::getenv("SAGE_WINDOW_WIDTH")) Width = std::atoi(v);
     if (const char* v = std::getenv("SAGE_WINDOW_HEIGHT")) Height = std::atoi(v);

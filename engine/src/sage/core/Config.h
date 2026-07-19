@@ -25,6 +25,15 @@ enum class WindowMode { Windowed, Borderless, Fullscreen };
 // Free — кадр занимает всё окно (соотношение = размер окна).
 enum class AspectMode { Free, R16x9, R16x10, R4x3, R21x9 };
 
+// Готовые пресеты качества графики — один клик/переменная окружения вместо
+// ручной настройки десятка флагов. Меняют ТОЛЬКО дисплей/графику/пост-процесс;
+// оконные параметры (размер/режим/vsync) не трогают.
+//   Low    — слабые/старые ПК: без теней и пост-процесса, рендер в 75% разрешения;
+//   Medium — тени 1024 + базовый пост (тон-маппинг), без Bloom/SSAO;
+//   High   — всё включено, тени 2048 (значения по умолчанию движка);
+//   Ultra  — тени 4096 + MSAA 4x.
+enum class QualityPreset { Low, Medium, High, Ultra };
+
 struct EngineConfig {
     // --- Окно ---
     int Width = 1280;
@@ -70,6 +79,11 @@ struct EngineConfig {
     // Viewport с фиксированным соотношением сторон по центру окна (letterbox/
     // pillarbox чёрными полосами). Aspect=Free -> весь экран (0,0,winW,winH).
     void LetterboxViewport(int winW, int winH, int& x, int& y, int& w, int& h) const;
+
+    // Применяет пресет качества (см. QualityPreset): выставляет display/graphics/
+    // post-поля разом. Оконные параметры не трогаются. Дальше поля можно
+    // подстраивать вручную — пресет лишь стартовая точка, не режим.
+    void ApplyPreset(QualityPreset preset);
 
     // --- Загрузка/сохранение/переопределения ---
     // Читает JSON-файл настроек. false, если файла нет или он битый (значения не

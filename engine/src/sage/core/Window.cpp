@@ -32,6 +32,10 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
     glfwWindowHint(GLFW_RESIZABLE, params.Resizable ? GLFW_TRUE : GLFW_FALSE);
+    // sRGB-способный экранный буфер: позволяет включать аппаратную гамма-
+    // коррекцию (GraphicsDevice::SetSRGBWrite) при рендере сцены напрямую в
+    // экран без пост-процесса. Если драйвер не умеет — хинт игнорируется.
+    glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
     if (params.Msaa > 0) glfwWindowHint(GLFW_SAMPLES, params.Msaa); // сглаживание экранного буфера
 
     // Полноэкранный/безрамочный режим использует текущий видеорежим монитора

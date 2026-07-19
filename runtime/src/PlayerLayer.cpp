@@ -218,6 +218,11 @@ void PlayerLayer::OnRender() {
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
 
+    // Сцена рендерится напрямую в экран (HDR-пост-цепочки у рантайма нет) —
+    // включаем аппаратную гамма-коррекцию, иначе линейный цвет шейдеров уходит
+    // на монитор сырым и вся игра выглядит неоправданно тёмной.
+    device.SetSRGBWrite(true);
+
     if (env.Skybox.Enabled) {
         m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
     }
@@ -232,6 +237,8 @@ void PlayerLayer::OnRender() {
                                    m_shadows->LightMatrix(), m_shadows->DepthTexture(), cfg.Shadows);
     // Частицы (billboard) — camRight/Up берём из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
+
+    device.SetSRGBWrite(false); // всё после сцены (UI/оверлеи) — уже в sRGB
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {

@@ -89,6 +89,15 @@ void OpenGLDevice::SetPolygonMode(PolygonMode mode) {
     glPolygonMode(GL_FRONT_AND_BACK, mode == PolygonMode::Line ? GL_LINE : GL_FILL);
 }
 
+void OpenGLDevice::SetSRGBWrite(bool enabled) {
+    // Кодирование линейного цвета в sRGB на записи (ядро GL с 3.0). Действует
+    // только на sRGB-способные фреймбуферы (окно создаётся с GLFW_SRGB_CAPABLE);
+    // для обычных RGBA8-вложений FBO — no-op, что нам и нужно (HDR-цепочка
+    // пост-процесса делает гамму сама в композите).
+    if (enabled) glEnable(GL_FRAMEBUFFER_SRGB);
+    else glDisable(GL_FRAMEBUFFER_SRGB);
+}
+
 void OpenGLDevice::BindTexture2D(int unit, unsigned int nativeHandle) {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, nativeHandle);

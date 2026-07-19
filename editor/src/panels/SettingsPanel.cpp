@@ -20,6 +20,29 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     ImGui::TextDisabled("Гибкая конфигурация игры (сохраняется в проект как sage.cfg).");
     ImGui::Separator();
 
+    // Пресеты качества: один клик выставляет display/graphics/post разом
+    // (EngineConfig::ApplyPreset); дальше поля можно подстроить вручную.
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("Preset:");
+    ImGui::SameLine();
+    if (ImGui::Button("Low")) c.ApplyPreset(sage::QualityPreset::Low);
+    ImGui::SameLine();
+    if (ImGui::Button("Medium")) c.ApplyPreset(sage::QualityPreset::Medium);
+    ImGui::SameLine();
+    if (ImGui::Button("High")) c.ApplyPreset(sage::QualityPreset::High);
+    ImGui::SameLine();
+    if (ImGui::Button("Ultra")) c.ApplyPreset(sage::QualityPreset::Ultra);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Low — слабые/старые ПК: без теней и пост-процесса, рендер 75%%\n"
+                          "Medium — тени 1024 + тон-маппинг, без Bloom/SSAO\n"
+                          "High — всё включено, тени 2048 (по умолчанию)\n"
+                          "Ultra — тени 4096 + MSAA 4x\n"
+                          "В игре: переменная окружения SAGE_QUALITY=low|medium|high|ultra");
+    }
+    ImGui::Separator();
+
     if (ImGui::CollapsingHeader("Window / Окно", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::InputInt("Width", &c.Width);
         ImGui::InputInt("Height", &c.Height);

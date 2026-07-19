@@ -903,6 +903,9 @@ void TestGameLayer::OnRender() {
         m_sceneFbo->Bind();
     } else {
         device.SetViewport(vpX, vpY, vpW, vpH); // без поста — сразу в letterbox-viewport
+        // Гамму делал композит пост-процесса — без него включаем аппаратное
+        // sRGB-кодирование, иначе прямой вывод линейного цвета выглядит тёмным.
+        device.SetSRGBWrite(true);
     }
     device.SetClearColor(0.09f, 0.09f, 0.12f, 1.0f);
     device.Clear();
@@ -933,6 +936,8 @@ void TestGameLayer::OnRender() {
         m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                          m_sceneFbo->Width(), m_sceneFbo->Height(), proj, m_postfxSettings,
                          /*output=*/nullptr, vpX, vpY, vpW, vpH);
+    } else {
+        device.SetSRGBWrite(false); // HUD ниже — его цвета уже в sRGB
     }
 
     // --- 4. HUD поверх всего (движковый UIRenderer, не ImGui) — во весь экран,
