@@ -161,6 +161,165 @@ static LightingEnvironment LightingFromJson(const json& root) {
     return lighting;
 }
 
+// ---------------------------------------------------------------------------
+// Per-компонентная (де)сериализация. Раньше эти блоки жили ВНУТРИ двух гигантских
+// циклов по сущностям (BuildSceneJson/BuildSceneFromJson); вынесены в парные
+// Save*/Parse* функции, чтобы каждый компонент читался/правился независимо, а
+// добавление нового компонента было локальной правкой (новая пара + одна строка
+// в каждом цикле), а не вставкой в середину 100-строчного тела. Save* пишет свой
+// под-объект в json сущности; Parse* собирает компонент из его под-json (вызывающий
+// решает, навешивать ли его — по наличию ключа). Поведение идентично прежнему.
+// ---------------------------------------------------------------------------
+
+static void SaveCamera(json& j, const CameraComponent& cam) {
+    j["camera"]["fov"] = cam.Fov;
+    j["camera"]["near"] = cam.NearClip;
+    j["camera"]["far"] = cam.FarClip;
+    j["camera"]["primary"] = cam.Primary;
+}
+
+static CameraComponent ParseCamera(const json& cj) {
+    CameraComponent cam;
+    cam.Fov = cj.value("fov", cam.Fov);
+    cam.NearClip = cj.value("near", cam.NearClip);
+    cam.FarClip = cj.value("far", cam.FarClip);
+    cam.Primary = cj.value("primary", cam.Primary);
+    return cam;
+}
+
+static void SaveLight(json& j, const LightComponent& light) {
+    j["light"]["type"] = (light.Kind == LightComponent::Type::Spot) ? "spot" : "point";
+    j["light"]["color"] = Vec3ToJson(light.Color);
+    j["light"]["intensity"] = light.Intensity;
+    j["light"]["range"] = light.Range;
+    j["light"]["innerCone"] = light.InnerConeDeg;
+    j["light"]["outerCone"] = light.OuterConeDeg;
+}
+
+static LightComponent ParseLight(const json& lj) {
+    LightComponent light;
+    if (lj.value("type", std::string("point")) == "spot")
+        light.Kind = LightComponent::Type::Spot;
+    if (lj.contains("color")) light.Color = Vec3FromJson(lj["color"]);
+    light.Intensity = lj.value("intensity", light.Intensity);
+    light.Range = lj.value("range", light.Range);
+    light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
+    light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
+    return light;
+}
+
+static void SaveRigidBody(json& j, const RigidBodyComponent& rb) {
+    const char* types[] = {"static", "dynamic", "kinematic"};
+    j["rigidBody"]["type"] = types[(int)rb.Type];
+    j["rigidBody"]["mass"] = rb.Mass;
+    j["rigidBody"]["friction"] = rb.Friction;
+    j["rigidBody"]["restitution"] = rb.Restitution;
+}
+
+static RigidBodyComponent ParseRigidBody(const json& rj) {
+    RigidBodyComponent rb;
+    std::string type = rj.value("type", "dynamic");
+    rb.Type = type == "static" ? sage::physics::BodyType::Static
+            : type == "kinematic" ? sage::physics::BodyType::Kinematic
+            : sage::physics::BodyType::Dynamic;
+    rb.Mass = rj.value("mass", rb.Mass);
+    rb.Friction = rj.value("friction", rb.Friction);
+    rb.Restitution = rj.value("restitution", rb.Restitution);
+    return rb;
+}
+
+static void SaveCollider(json& j, const ColliderComponent& col) {
+    const char* shapes[] = {"box", "sphere", "capsule"};
+    j["collider"]["shape"] = shapes[(int)col.Shape];
+    j["collider"]["halfExtents"] = Vec3ToJson(col.HalfExtents);
+    j["collider"]["radius"] = col.Radius;
+    j["collider"]["halfHeight"] = col.HalfHeight;
+}
+
+static ColliderComponent ParseCollider(const json& cj) {
+    ColliderComponent col;
+    std::string shape = cj.value("shape", "box");
+    col.Shape = shape == "sphere" ? sage::physics::ShapeType::Sphere
+              : shape == "capsule" ? sage::physics::ShapeType::Capsule
+              : sage::physics::ShapeType::Box;
+    if (cj.contains("halfExtents")) col.HalfExtents = Vec3FromJson(cj["halfExtents"]);
+    col.Radius = cj.value("radius", col.Radius);
+    col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
+    return col;
+}
+
+static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
+    // Только описательные поля — модель/палитра восстанавливаются загрузкой.
+    j["animatedModel"]["path"] = am.Path;
+    j["animatedModel"]["demoSegments"] = am.DemoSegments;
+    j["animatedModel"]["clip"] = am.Clip;
+    j["animatedModel"]["speed"] = am.Speed;
+    j["animatedModel"]["loop"] = am.Loop;
+    j["animatedModel"]["playing"] = am.Playing;
+}
+
+static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
+    AnimatedModelComponent am;
+    am.Path = aj.value("path", std::string());
+    am.DemoSegments = aj.value("demoSegments", 6);
+    am.Clip = aj.value("clip", 0);
+    am.Speed = aj.value("speed", 1.0f);
+    am.Loop = aj.value("loop", true);
+    am.Playing = aj.value("playing", true);
+    // Model/Anim восстановятся при первом UpdateAnimators (Ready=false).
+    return am;
+}
+
+static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
+    json& pj = j["particles"];
+    pj["preset"] = pe.Preset;
+    pj["active"] = pe.Active;
+    pj["continuous"] = pe.Continuous;
+    pj["burstCount"] = pe.BurstCount;
+    pj["burstInterval"] = pe.BurstInterval;
+    const ParticleEmitterConfig& c = pe.Config;
+    pj["directionMin"] = Vec3ToJson(c.DirectionMin);
+    pj["directionMax"] = Vec3ToJson(c.DirectionMax);
+    pj["speedMin"] = c.SpeedMin; pj["speedMax"] = c.SpeedMax;
+    pj["gravity"] = c.Gravity;
+    pj["lifetimeMin"] = c.LifetimeMin; pj["lifetimeMax"] = c.LifetimeMax;
+    pj["startSizeMin"] = c.StartSizeMin; pj["startSizeMax"] = c.StartSizeMax;
+    pj["endSizeMin"] = c.EndSizeMin; pj["endSizeMax"] = c.EndSizeMax;
+    pj["startColor"] = Vec4ToJson(c.StartColor);
+    pj["endColor"] = Vec4ToJson(c.EndColor);
+    pj["angularVelocityMax"] = c.AngularVelocityMax;
+    pj["shape"] = (c.Shape == ParticleShape::Quad) ? "quad" : "circle";
+    pj["emissionRate"] = c.EmissionRate;
+}
+
+static ParticleEmitterComponent ParseParticles(const json& pj) {
+    ParticleEmitterComponent pe;
+    pe.Preset = pj.value("preset", 0);
+    pe.Active = pj.value("active", true);
+    pe.Continuous = pj.value("continuous", true);
+    pe.BurstCount = pj.value("burstCount", 24);
+    pe.BurstInterval = pj.value("burstInterval", 1.5f);
+    ParticleEmitterConfig& c = pe.Config;
+    if (pj.contains("directionMin")) c.DirectionMin = Vec3FromJson(pj["directionMin"]);
+    if (pj.contains("directionMax")) c.DirectionMax = Vec3FromJson(pj["directionMax"]);
+    c.SpeedMin = pj.value("speedMin", c.SpeedMin);
+    c.SpeedMax = pj.value("speedMax", c.SpeedMax);
+    c.Gravity = pj.value("gravity", c.Gravity);
+    c.LifetimeMin = pj.value("lifetimeMin", c.LifetimeMin);
+    c.LifetimeMax = pj.value("lifetimeMax", c.LifetimeMax);
+    c.StartSizeMin = pj.value("startSizeMin", c.StartSizeMin);
+    c.StartSizeMax = pj.value("startSizeMax", c.StartSizeMax);
+    c.EndSizeMin = pj.value("endSizeMin", c.EndSizeMin);
+    c.EndSizeMax = pj.value("endSizeMax", c.EndSizeMax);
+    if (pj.contains("startColor")) c.StartColor = Vec4FromJson(pj["startColor"]);
+    if (pj.contains("endColor")) c.EndColor = Vec4FromJson(pj["endColor"], glm::vec4(1, 1, 1, 0));
+    c.AngularVelocityMax = pj.value("angularVelocityMax", c.AngularVelocityMax);
+    c.Shape = (pj.value("shape", std::string("circle")) == "quad")
+                  ? ParticleShape::Quad : ParticleShape::SoftCircle;
+    c.EmissionRate = pj.value("emissionRate", c.EmissionRate);
+    return pe;
+}
+
 namespace SceneSerializer {
 
 // Общая сборка JSON-дерева сцены — используется и файловым Save, и SaveToString.
@@ -200,64 +359,12 @@ static json BuildSceneJson(const Scene& scene) {
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             j["script"] = sc->Path;
         }
-        if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) {
-            j["camera"]["fov"] = cam->Fov;
-            j["camera"]["near"] = cam->NearClip;
-            j["camera"]["far"] = cam->FarClip;
-            j["camera"]["primary"] = cam->Primary;
-        }
-        if (const LightComponent* light = reg.try_get<LightComponent>(e)) {
-            j["light"]["type"] = (light->Kind == LightComponent::Type::Spot) ? "spot" : "point";
-            j["light"]["color"] = Vec3ToJson(light->Color);
-            j["light"]["intensity"] = light->Intensity;
-            j["light"]["range"] = light->Range;
-            j["light"]["innerCone"] = light->InnerConeDeg;
-            j["light"]["outerCone"] = light->OuterConeDeg;
-        }
-        if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) {
-            const char* types[] = {"static", "dynamic", "kinematic"};
-            j["rigidBody"]["type"] = types[(int)rb->Type];
-            j["rigidBody"]["mass"] = rb->Mass;
-            j["rigidBody"]["friction"] = rb->Friction;
-            j["rigidBody"]["restitution"] = rb->Restitution;
-        }
-        if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) {
-            const char* shapes[] = {"box", "sphere", "capsule"};
-            j["collider"]["shape"] = shapes[(int)col->Shape];
-            j["collider"]["halfExtents"] = Vec3ToJson(col->HalfExtents);
-            j["collider"]["radius"] = col->Radius;
-            j["collider"]["halfHeight"] = col->HalfHeight;
-        }
-        if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) {
-            // Только описательные поля — модель/палитра восстанавливаются загрузкой.
-            j["animatedModel"]["path"] = am->Path;
-            j["animatedModel"]["demoSegments"] = am->DemoSegments;
-            j["animatedModel"]["clip"] = am->Clip;
-            j["animatedModel"]["speed"] = am->Speed;
-            j["animatedModel"]["loop"] = am->Loop;
-            j["animatedModel"]["playing"] = am->Playing;
-        }
-        if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) {
-            json& pj = j["particles"];
-            pj["preset"] = pe->Preset;
-            pj["active"] = pe->Active;
-            pj["continuous"] = pe->Continuous;
-            pj["burstCount"] = pe->BurstCount;
-            pj["burstInterval"] = pe->BurstInterval;
-            const ParticleEmitterConfig& c = pe->Config;
-            pj["directionMin"] = Vec3ToJson(c.DirectionMin);
-            pj["directionMax"] = Vec3ToJson(c.DirectionMax);
-            pj["speedMin"] = c.SpeedMin; pj["speedMax"] = c.SpeedMax;
-            pj["gravity"] = c.Gravity;
-            pj["lifetimeMin"] = c.LifetimeMin; pj["lifetimeMax"] = c.LifetimeMax;
-            pj["startSizeMin"] = c.StartSizeMin; pj["startSizeMax"] = c.StartSizeMax;
-            pj["endSizeMin"] = c.EndSizeMin; pj["endSizeMax"] = c.EndSizeMax;
-            pj["startColor"] = Vec4ToJson(c.StartColor);
-            pj["endColor"] = Vec4ToJson(c.EndColor);
-            pj["angularVelocityMax"] = c.AngularVelocityMax;
-            pj["shape"] = (c.Shape == ParticleShape::Quad) ? "quad" : "circle";
-            pj["emissionRate"] = c.EmissionRate;
-        }
+        if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
+        if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
+        if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
+        if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
+        if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) SaveAnimatedModel(j, *am);
+        if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -300,93 +407,18 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
         }
 
-        if (j.contains("camera")) {
-            const auto& cj = j["camera"];
-            CameraComponent cam;
-            cam.Fov = cj.value("fov", cam.Fov);
-            cam.NearClip = cj.value("near", cam.NearClip);
-            cam.FarClip = cj.value("far", cam.FarClip);
-            cam.Primary = cj.value("primary", cam.Primary);
-            obj.Registry()->emplace<CameraComponent>(obj.Entity(), cam);
-        }
-
-        if (j.contains("light")) {
-            const auto& lj = j["light"];
-            LightComponent light;
-            if (lj.value("type", std::string("point")) == "spot")
-                light.Kind = LightComponent::Type::Spot;
-            if (lj.contains("color")) light.Color = Vec3FromJson(lj["color"]);
-            light.Intensity = lj.value("intensity", light.Intensity);
-            light.Range = lj.value("range", light.Range);
-            light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
-            light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
-            obj.Registry()->emplace<LightComponent>(obj.Entity(), light);
-        }
-
-        if (j.contains("rigidBody")) {
-            const auto& rj = j["rigidBody"];
-            RigidBodyComponent rb;
-            std::string type = rj.value("type", "dynamic");
-            rb.Type = type == "static" ? sage::physics::BodyType::Static
-                    : type == "kinematic" ? sage::physics::BodyType::Kinematic
-                    : sage::physics::BodyType::Dynamic;
-            rb.Mass = rj.value("mass", rb.Mass);
-            rb.Friction = rj.value("friction", rb.Friction);
-            rb.Restitution = rj.value("restitution", rb.Restitution);
-            obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), rb);
-        }
-        if (j.contains("collider")) {
-            const auto& cj = j["collider"];
-            ColliderComponent col;
-            std::string shape = cj.value("shape", "box");
-            col.Shape = shape == "sphere" ? sage::physics::ShapeType::Sphere
-                      : shape == "capsule" ? sage::physics::ShapeType::Capsule
-                      : sage::physics::ShapeType::Box;
-            if (cj.contains("halfExtents")) col.HalfExtents = Vec3FromJson(cj["halfExtents"]);
-            col.Radius = cj.value("radius", col.Radius);
-            col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
-            obj.Registry()->emplace<ColliderComponent>(obj.Entity(), col);
-        }
-        if (j.contains("animatedModel")) {
-            const auto& aj = j["animatedModel"];
-            AnimatedModelComponent am;
-            am.Path = aj.value("path", std::string());
-            am.DemoSegments = aj.value("demoSegments", 6);
-            am.Clip = aj.value("clip", 0);
-            am.Speed = aj.value("speed", 1.0f);
-            am.Loop = aj.value("loop", true);
-            am.Playing = aj.value("playing", true);
-            // Model/Anim восстановятся при первом UpdateAnimators (Ready=false).
-            obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), std::move(am));
-        }
-        if (j.contains("particles")) {
-            const auto& pj = j["particles"];
-            ParticleEmitterComponent pe;
-            pe.Preset = pj.value("preset", 0);
-            pe.Active = pj.value("active", true);
-            pe.Continuous = pj.value("continuous", true);
-            pe.BurstCount = pj.value("burstCount", 24);
-            pe.BurstInterval = pj.value("burstInterval", 1.5f);
-            ParticleEmitterConfig& c = pe.Config;
-            if (pj.contains("directionMin")) c.DirectionMin = Vec3FromJson(pj["directionMin"]);
-            if (pj.contains("directionMax")) c.DirectionMax = Vec3FromJson(pj["directionMax"]);
-            c.SpeedMin = pj.value("speedMin", c.SpeedMin);
-            c.SpeedMax = pj.value("speedMax", c.SpeedMax);
-            c.Gravity = pj.value("gravity", c.Gravity);
-            c.LifetimeMin = pj.value("lifetimeMin", c.LifetimeMin);
-            c.LifetimeMax = pj.value("lifetimeMax", c.LifetimeMax);
-            c.StartSizeMin = pj.value("startSizeMin", c.StartSizeMin);
-            c.StartSizeMax = pj.value("startSizeMax", c.StartSizeMax);
-            c.EndSizeMin = pj.value("endSizeMin", c.EndSizeMin);
-            c.EndSizeMax = pj.value("endSizeMax", c.EndSizeMax);
-            if (pj.contains("startColor")) c.StartColor = Vec4FromJson(pj["startColor"]);
-            if (pj.contains("endColor")) c.EndColor = Vec4FromJson(pj["endColor"], glm::vec4(1, 1, 1, 0));
-            c.AngularVelocityMax = pj.value("angularVelocityMax", c.AngularVelocityMax);
-            c.Shape = (pj.value("shape", std::string("circle")) == "quad")
-                          ? ParticleShape::Quad : ParticleShape::SoftCircle;
-            c.EmissionRate = pj.value("emissionRate", c.EmissionRate);
-            obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), pe);
-        }
+        if (j.contains("camera"))
+            obj.Registry()->emplace<CameraComponent>(obj.Entity(), ParseCamera(j["camera"]));
+        if (j.contains("light"))
+            obj.Registry()->emplace<LightComponent>(obj.Entity(), ParseLight(j["light"]));
+        if (j.contains("rigidBody"))
+            obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), ParseRigidBody(j["rigidBody"]));
+        if (j.contains("collider"))
+            obj.Registry()->emplace<ColliderComponent>(obj.Entity(), ParseCollider(j["collider"]));
+        if (j.contains("animatedModel"))
+            obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
+        if (j.contains("particles"))
+            obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
 
         // Пересоздаём GPU-ресурс на основе описания
         if (mr.Ref.type == MeshRef::Type::Model) {
