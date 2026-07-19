@@ -1,5 +1,6 @@
 #include "sage/core/Application.h"
 #include "sage/core/Log.h"
+#include "sage/core/Systems.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <stdexcept>
@@ -31,6 +32,9 @@ Application::Application(const AppConfig& config) : m_config(config) {
     // берут разрешение монитора) — берём фактический.
     m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
     rhi::GraphicsDevice::SetCurrent(m_device.get());
+
+    // Состав и версии подсистем — в лог любой сборки (игра/редактор/рантайм).
+    LogEngineSystems();
 }
 
 Application::~Application() {

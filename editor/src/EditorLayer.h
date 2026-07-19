@@ -145,6 +145,7 @@ private:
     void DrawDockspaceAndMenu();
     void BuildDefaultDockLayout(unsigned int dockspaceId);
     void DrawStatusBar(float height);
+    void DrawAboutWindow(); // Help > About: версия движка + версии подсистем (v1)
 
     // --- сцена / рендер (превью-рендер вынесен в EditorSceneRenderer) ---
     void NewScene(bool withDemoContent);
@@ -210,6 +211,7 @@ private:
     //     полей модалок File-меню теперь живут внутри DialogsPanel. ---
     sage::EngineConfig m_settings;
     bool m_showSettings = false;
+    bool m_showAbout = false; // Help > About SAGE (версии подсистем)
 
     // --- плагины редактора (v1, см. PluginAPI.h/PluginManager.h) ---
     class PluginContextImpl : public EditorPluginContext {

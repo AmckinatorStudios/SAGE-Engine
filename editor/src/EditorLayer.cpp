@@ -19,6 +19,8 @@
 
 #include "EditorTheme.h"
 #include "sage/core/Application.h"
+#include "sage/core/Systems.h"
+#include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/LightingUpload.h"
@@ -129,6 +131,8 @@ void EditorLayer::OnAttach() {
 
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
+    // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
+    if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
 
     // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
     // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
@@ -792,6 +796,39 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGui::SetWindowFocus("Viewport");
 }
 
+// Help > About SAGE — версия движка + таблица версий ВСЕХ подсистем (пока все
+// v1). Единый источник — sage::EngineSystems() (тот же список, что в лог старта).
+void EditorLayer::DrawAboutWindow() {
+    if (!m_showAbout) return;
+    ImGui::SetNextWindowSize(ImVec2(560, 520), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("About SAGE", &m_showAbout)) { ImGui::End(); return; }
+
+    ImGui::Text("SAGE Engine %s", kSageEngineVersion);
+    ImGui::TextDisabled("Модульный 3D-движок: ECS, RHI, PBR, физика, скриптинг, UI.");
+    ImGui::Spacing();
+    const auto& systems = sage::EngineSystems();
+    ImGui::Text("Подсистемы: %zu (все v1)", systems.size());
+    ImGui::Separator();
+
+    if (ImGui::BeginTable("##systems", 3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                          ImGuiTableFlags_ScrollY)) {
+        ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("Ver", ImGuiTableColumnFlags_WidthFixed, 44.0f);
+        ImGui::TableSetupColumn("Summary", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        for (const sage::SystemVersion& s : systems) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(s.Name);
+            ImGui::TableNextColumn();
+            ImGui::TextColored(ImVec4(0.55f, 0.8f, 1.0f, 1.0f), "%s", s.Tag().c_str());
+            ImGui::TableNextColumn(); ImGui::TextDisabled("%s", s.Summary);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
 void EditorLayer::DrawStatusBar(float height) {
     // Строка состояния внизу хост-окна: проект | сцена(+dirty) | сущности |
     // Play-статус | сообщение плагинов | FPS.
@@ -997,6 +1034,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem("Settings...", nullptr, &m_showSettings);
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Help")) {
+            ImGui::MenuItem("About SAGE...", nullptr, &m_showAbout);
+            ImGui::EndMenu();
+        }
 
         // Статус проекта справа в меню-баре.
         std::string status = m_project.Loaded() ? ("Project: " + m_project.Name()) : "No project";
@@ -1013,6 +1054,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     if (openDialog) m_dialogs.Open(openDialog);
     m_dialogs.Draw(*this);
     m_settingsPanel.Draw(*this, m_showSettings);
+    DrawAboutWindow();
 
     ImGui::End();
 

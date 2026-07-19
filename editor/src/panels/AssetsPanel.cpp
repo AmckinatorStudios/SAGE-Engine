@@ -59,9 +59,15 @@ std::string TruncateToWidth(const std::string& s, float maxWidth) {
     return out + ellipsis;
 }
 
-constexpr float kTileW = 76.0f;
-constexpr float kTileH = 64.0f;
-constexpr float kTileSpacing = 10.0f;
+// Габариты карточки-тайла. ВАЖНО: высота тайла включает и плашку, и подпись —
+// раньше подпись рисовалась DrawList'ом НИЖЕ InvisibleButton'а (высотой лишь в
+// плашку), выходила за границы item'а, и строки грида налезали друг на друга
+// («неровность»). Теперь весь тайл — единый item, всё внутри его границ.
+constexpr float kTileW = 104.0f;
+constexpr float kSwatchH = 62.0f;  // цветная плашка (верх карточки)
+constexpr float kLabelH = 34.0f;   // область подписи (1-2 строки)
+constexpr float kTileH = kSwatchH + kLabelH + 6.0f; // + внутренний отступ
+constexpr float kTileSpacing = 12.0f;
 
 } // namespace
 
@@ -93,10 +99,10 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     std::string filename = path.filename().string();
 
     ImGui::PushID(filename.c_str());
-    ImGui::BeginGroup();
 
+    // Весь тайл — ОДИН item (InvisibleButton на полную высоту карточки): подпись
+    // теперь внутри его границ, строки грида больше не налезают друг на друга.
     ImVec2 cursor = ImGui::GetCursorScreenPos();
-    ImVec2 swatchSize(kTileW, kTileW * 0.72f);
     ImGui::InvisibleButton("##tile", ImVec2(kTileW, kTileH));
     bool hovered = ImGui::IsItemHovered();
     bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -104,26 +110,40 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     bool isSelected = m_selected == path;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec4 fillColor = style.Color;
-    if (!hovered) { fillColor.x *= 0.85f; fillColor.y *= 0.85f; fillColor.z *= 0.85f; }
-    dl->AddRectFilled(cursor, ImVec2(cursor.x + swatchSize.x, cursor.y + swatchSize.y),
-                       ImGui::ColorConvertFloat4ToU32(fillColor), 6.0f);
+    ImVec2 tileMax(cursor.x + kTileW, cursor.y + kTileH);
+
+    // Подложка карточки — по теме редактора; подсвечивается при наведении/выборе.
+    ImU32 cardBg = 0;
+    if (isSelected)      cardBg = ImGui::GetColorU32(ImGuiCol_Header);
+    else if (hovered)    cardBg = ImGui::GetColorU32(ImGuiCol_HeaderHovered);
+    else                 cardBg = ImGui::GetColorU32(ImVec4(1, 1, 1, 0.035f));
+    dl->AddRectFilled(cursor, tileMax, cardBg, 8.0f);
     if (isSelected) {
-        dl->AddRect(cursor, ImVec2(cursor.x + swatchSize.x, cursor.y + swatchSize.y),
-                    ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 0.9f)), 6.0f, 0, 2.0f);
+        dl->AddRect(cursor, tileMax, ImGui::GetColorU32(ImGuiCol_NavHighlight), 8.0f, 0, 1.6f);
     }
+
+    // Цветная плашка типа с внутренним отступом (верх карточки).
+    constexpr float kInset = 8.0f;
+    ImVec2 sw0(cursor.x + kInset, cursor.y + kInset);
+    ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + kSwatchH - kInset);
+    ImVec4 fill = style.Color;
+    if (!hovered && !isSelected) { fill.x *= 0.9f; fill.y *= 0.9f; fill.z *= 0.9f; }
+    dl->AddRectFilled(sw0, sw1, ImGui::ColorConvertFloat4ToU32(fill), 6.0f);
+
+    // Тег типа по центру плашки.
     std::string tagUpper = style.Tag;
     for (char& c : tagUpper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     ImVec2 tagSize = ImGui::CalcTextSize(tagUpper.c_str());
-    ImVec2 tagPos(cursor.x + (swatchSize.x - tagSize.x) * 0.5f, cursor.y + (swatchSize.y - tagSize.y) * 0.5f);
-    dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.95f)), tagUpper.c_str());
+    ImVec2 tagPos(sw0.x + (sw1.x - sw0.x - tagSize.x) * 0.5f, sw0.y + (sw1.y - sw0.y - tagSize.y) * 0.5f);
+    dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.96f)), tagUpper.c_str());
 
-    std::string label = TruncateToWidth(filename, kTileW);
+    // Имя файла по центру области подписи (внутри границ тайла, с усечением).
+    std::string label = TruncateToWidth(filename, kTileW - 8.0f);
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
-    ImVec2 labelPos(cursor.x + (kTileW - labelSize.x) * 0.5f, cursor.y + swatchSize.y + 4.0f);
-    dl->AddText(labelPos, ImGui::ColorConvertFloat4ToU32(ImVec4(0.9f, 0.9f, 0.9f, 1.0f)), label.c_str());
-
-    ImGui::EndGroup();
+    ImVec2 labelPos(cursor.x + (kTileW - labelSize.x) * 0.5f, sw1.y + 7.0f);
+    ImU32 textCol = ImGui::GetColorU32(isSelected ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    if (hovered) textCol = ImGui::GetColorU32(ImGuiCol_Text);
+    dl->AddText(labelPos, textCol, label.c_str());
 
     if (clicked) m_selected = path;
     if (doubleClicked) {
@@ -348,25 +368,26 @@ void AssetsPanel::Draw(EditorHost& host) {
         return ToLower(p.filename().string()).find(filter) != std::string::npos;
     };
 
+    // Единый ритм по вертикали между строками грида — как горизонтальный зазор.
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kTileSpacing, kTileSpacing));
     float availWidth = ImGui::GetContentRegionAvail().x;
-    int columns = std::max(1, static_cast<int>(availWidth / (kTileW + kTileSpacing)));
+    int columns = std::max(1, static_cast<int>((availWidth + kTileSpacing) / (kTileW + kTileSpacing)));
     int col = 0;
     bool any = false;
-    for (const auto& d : dirs) {
-        if (!matches(d.path())) continue;
+    auto placeTile = [&](const fs::path& p, bool isDir) {
         any = true;
         if (col > 0) ImGui::SameLine(0, kTileSpacing);
-        DrawTile(host, d.path(), true);
+        DrawTile(host, p, isDir);
         col = (col + 1) % columns;
+    };
+    for (const auto& d : dirs) if (matches(d.path())) placeTile(d.path(), true);
+    for (const auto& f : files) if (matches(f.path())) placeTile(f.path(), false);
+    ImGui::PopStyleVar();
+    if (!any) {
+        ImGui::Spacing();
+        ImGui::TextDisabled(m_search[0] ? "Nothing matches the search." : "This folder is empty.");
+        ImGui::TextDisabled("Right-click to create a folder, script, material or text file.");
     }
-    for (const auto& f : files) {
-        if (!matches(f.path())) continue;
-        any = true;
-        if (col > 0) ImGui::SameLine(0, kTileSpacing);
-        DrawTile(host, f.path(), false);
-        col = (col + 1) % columns;
-    }
-    if (!any) ImGui::TextDisabled("(empty)");
 
     // Создание ассетов — ПКМ по пустому месту (не по тайлу: у тайлов своё меню).
     if (ImGui::BeginPopupContextWindow("##assets_create_ctx",

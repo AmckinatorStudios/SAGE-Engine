@@ -6,9 +6,21 @@
 #include <cstdlib>
 
 #include "sage/core/Config.h"
+#include "sage/core/Systems.h"
 
 using sage::EngineConfig;
 using sage::QualityPreset;
+
+TEST(Systems_registry_all_v1_and_valid) {
+    const auto& systems = sage::EngineSystems();
+    CHECK_TRUE(systems.size() >= 15); // движок состоит из многих подсистем
+    for (const sage::SystemVersion& s : systems) {
+        CHECK_EQ(s.Major, 1);                 // пока все на v1
+        CHECK_EQ(s.Tag(), std::string("v1"));
+        CHECK_TRUE(s.Name != nullptr && s.Name[0] != '\0');
+        CHECK_TRUE(s.Summary != nullptr && s.Summary[0] != '\0');
+    }
+}
 
 TEST(Config_preset_low_disables_heavy_passes) {
     EngineConfig c;
