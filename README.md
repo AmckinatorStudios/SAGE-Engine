@@ -590,6 +590,56 @@ end
 API-функцию — смотри `ScriptEngine::RegisterEngineApi()`, там пара строк на
 sol2 на каждую привязку.
 
+### Полный доступ к движку из скрипта
+
+API не ограничен `Transform`/`Color` — скрипт общается со всеми системами
+движка через ECS и с другими скриптами через сообщения:
+
+- **Компоненты любой сущности** (в т.ч. чужой) — единый набор `Has*/Get*/Add*/
+  Remove*` на каждый тип: `entity:AddLight()`, `entity:GetRigidBody()`,
+  `entity:HasCollider()`, `entity:GetEmitter()`, `entity:GetCamera()`,
+  `entity:GetRenderer()`, `entity:GetScript()`. `Get*` отдаёт компонент (или
+  `nil`, если его нет), `Add*` создаёт и отдаёт ссылкой — правки идут прямо в
+  состояние системы. Enum-значения именованы: `LightType.Spot`,
+  `BodyType.Dynamic`, `ColliderShape.Capsule`.
+- **Иерархия** прямо на объекте: `child:SetParent(parent)` / `child:Unparent()` /
+  `entity:Parent()` / `entity:Children()` (таблица) / `entity:WorldPosition()` /
+  `entity:Destroy()`.
+- **Сообщения между скриптами** (событийная модель — компоненты общаются, не
+  завязываясь на глобальные переменные): скрипт объявляет хук
+  `OnMessage(entity, name, data)`, другой шлёт ему `SendMessage(target, name,
+  data)` (target — объект или его `Id`) либо всем сразу `Broadcast(name, data)`.
+  `data` — любое значение Lua (число/строка/таблица) или отсутствует.
+- **Математика**: `Cross`/`Lerp`(число и `Vec3`)/`Clamp`/`Radians`/`Degrees`
+  сверх арифметики `Vec*` (`+ - * /`, `Length`/`Normalized`/`Dot`).
+- **Меш-примитивы**: `SetMeshCube`/`SetMeshSphere`/`SetMeshPlane`/
+  `SetMeshCylinder`/`SetMeshCone`/`SetMeshNone` и `SetMeshModel(path)`.
+- **Освещение сцены**: `GetLighting()` — солнце/ambient/туман
+  (`GetLighting().Sun.Intensity = 0.2`, `GetLighting().Fog.Enabled = true`)
+  для цикла дня и программной атмосферы.
+- **Физика времени выполнения** (после `BindPhysics`, привязан в Play-режиме
+  редактора и в рантайме игры): `SetVelocity(entity, v)` / `GetVelocity(entity)`
+  для тела с `RigidBodyComponent` и `SetGravity(v)` для всего мира.
+
+Пример «компоненты общаются» — дверь открывается по сообщению от кнопки:
+```lua
+-- door.lua
+function OnMessage(entity, name, data)
+    if name == "open" then entity.Transform.Position.y = 3.0 end
+end
+-- button.lua
+function OnUpdate(entity, dt)
+    if WasActionPressed("Use") then
+        SendMessage(FindObject("Door"), "open")   -- адресно
+        -- или Broadcast("open") — всем слушателям сразу
+    end
+end
+```
+
+Всё это покрыто модульными тестами (`tests/test_scripting.cpp`): компоненты,
+иерархия, сообщения (адресные/широковещательные/с полезной нагрузкой),
+математика и доступ к освещению.
+
 ## Текстуры и модели
 Часть ЯДРА движка (`engine/src/sage/render/Texture.*`, через stb_image) —
 грузит PNG/JPG/BMP/TGA в GPU-текстуру через текущий RHI-бэкенд:

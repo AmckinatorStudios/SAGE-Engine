@@ -118,6 +118,10 @@ void PlayerLayer::OnAttach() {
     m_physics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
 
+    // Скрипты рулят физикой времени выполнения (SetVelocity/SetGravity) — доступно
+    // после построения мира (RuntimeBody сущностей уже созданы).
+    m_scripts->BindPhysics(*m_physics);
+
     // Fallback-камера, если сцена без CameraComponent.
     m_fallbackCamera.Position = {6.5f, 5.0f, 6.5f};
     m_fallbackCamera.Yaw = -135.0f;

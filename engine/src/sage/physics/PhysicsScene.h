@@ -25,6 +25,20 @@ public:
     const char* BackendName() const { return m_world ? m_world->BackendName() : "None"; }
     int BodyCount() const { return m_bodyCount; }
 
+    // --- Рантайм-управление телами по хэндлу (для скриптинга) ----------------
+    // ScriptEngine достаёт BodyHandle из RigidBodyComponent.RuntimeBody сущности
+    // и рулит её скоростью/гравитацией мира прямо из Lua. Невалидный хэндл или
+    // Null-бэкенд — безопасный no-op / нулевая скорость.
+    void SetLinearVelocity(sage::physics::BodyHandle body, const glm::vec3& v) {
+        if (m_world) m_world->SetLinearVelocity(body, v);
+    }
+    glm::vec3 GetLinearVelocity(sage::physics::BodyHandle body) const {
+        return m_world ? m_world->GetLinearVelocity(body) : glm::vec3(0.0f);
+    }
+    void SetGravity(const glm::vec3& g) {
+        if (m_world) m_world->SetGravity(g);
+    }
+
 private:
     std::unique_ptr<sage::physics::PhysicsWorld> m_world;
     int m_bodyCount = 0;

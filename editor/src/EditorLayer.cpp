@@ -224,6 +224,11 @@ void EditorLayer::StartPlay() {
     m_playPhysics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
 
+    // Скрипты получают доступ к физике времени выполнения (SetVelocity/GetVelocity/
+    // SetGravity) — привязываем ПОСЛЕ построения мира, чтобы RuntimeBody сущностей
+    // уже существовали к первому OnUpdate.
+    m_playScripts->BindPhysics(*m_playPhysics);
+
     m_playState = EditorPlayState::Playing;
     m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
     LOG_INFO("Editor") << "Play started (" << attached << " script(s), "

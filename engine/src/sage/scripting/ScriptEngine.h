@@ -6,6 +6,7 @@
 #include "sage/render/BillboardSystem.h"
 #include "sage/render/Texture.h"
 #include "sage/audio/AudioEngine.h"
+#include "sage/physics/PhysicsScene.h"
 #include <sol/sol.hpp>
 #include <memory>
 #include <unordered_map>
@@ -29,6 +30,17 @@
 //   - EmitParticles/CreateParticleStream и т.п. — частицы (залпы и непрерывные
 //     струи) с готовыми пресетами из ParticlePresets или своей конфигурацией
 //   - AddBillboard/RemoveBillboard и т.п. — именованные спрайты, повёрнутые к камере
+//   - ДОСТУП К КОМПОНЕНТАМ сущности: entity:GetLight()/AddRigidBody()/HasCollider()
+//     и т.п. для Light/Camera/RigidBody/Collider/ParticleEmitter — скрипт читает и
+//     правит любой компонент любой сущности (в т.ч. чужой), т.е. общается со всеми
+//     системами движка через ECS, а не только со своим Transform/Color
+//   - ИЕРАРХИЯ: entity:SetParent(other)/Parent()/Children()/WorldPosition()/Destroy()
+//   - СООБЩЕНИЯ между скриптами: SendMessage(target, name, data)/Broadcast(name, data)
+//     и хук OnMessage(entity, name, data) — компоненты общаются друг с другом, не
+//     завязываясь на глобальные переменные (событийная модель)
+//   - Математика: Cross/Lerp/Clamp/Radians/Degrees сверх Vec-арифметики
+//   - GetLighting() — солнце/ambient/туман сцены (день-ночь, программная атмосфера)
+//   - SetVelocity/GetVelocity/SetGravity — физика времени выполнения (после BindPhysics)
 //
 // Использование в игре:
 //   ScriptEngine scripts;
@@ -75,6 +87,12 @@ public:
     // SetMasterVolume. Без BindAudio эти функции бросают ошибку при вызове.
     void BindAudio(AudioEngine& audio) { m_audio = &audio; }
 
+    // Даёт скриптам доступ к физике времени выполнения: SetVelocity/GetVelocity
+    // сущности с RigidBodyComponent и SetGravity мира. Привязывается там же, где
+    // создаётся PhysicsScene (Play-режим редактора, рантайм игры). Без BindPhysics
+    // эти функции бросают понятную ошибку при вызове из Lua.
+    void BindPhysics(PhysicsScene& physics) { m_physics = &physics; }
+
     // Загружает .lua файл и привязывает его к объекту. Скрипт должен
     // определить глобальную функцию OnUpdate(entity, dt) — она будет
     // вызываться каждый кадр из UpdateAll(). Необязательная OnStart(entity)
@@ -104,6 +122,7 @@ private:
         bool HasObject = false; // false для уровневых скриптов (RunScript)
         sol::environment Env;
         sol::protected_function UpdateFn; // может быть невалидной, если OnUpdate не определён
+        sol::protected_function MessageFn; // OnMessage(entity, name, data) — необязателен
         std::string Path; // для сообщений об ошибках
         // Когда сущность объекта уничтожена (DestroyObject), Object.Valid()
         // становится false: UpdateAll() пропускает такую запись, не обращаясь к
@@ -136,6 +155,13 @@ private:
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
 
+    // Доставляет сообщение обработчикам OnMessage привязанных объектных скриптов.
+    // targetId < 0 — широковещательно (всем); иначе — только скриптам сущности с
+    // этим Id. Сначала собирает список целей (объект + копия обработчика), затем
+    // вызывает — так безопасно к повторному SendMessage/удалению объектов внутри
+    // обработчика (никакой инвалидации при реаллокации m_instances).
+    void DispatchMessage(int targetId, const std::string& name, sol::object data);
+
     // Текстуры для билбордов, заказанных из Lua по пути к файлу, кэшируются
     // здесь (по пути) и живут, пока жив ScriptEngine — билборды в
     // BillboardSystem хранят на них НЕвладеющий указатель (см. AddBillboard).
@@ -152,6 +178,7 @@ private:
     ParticleSystem* m_particles = nullptr;
     BillboardSystem* m_billboards = nullptr;
     AudioEngine* m_audio = nullptr;
+    PhysicsScene* m_physics = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
 
     int m_nextTimerId = 1;

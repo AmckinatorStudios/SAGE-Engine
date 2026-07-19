@@ -4,6 +4,34 @@
 #include "sage/render/ParticlePresets.h"
 #include <algorithm>
 
+namespace {
+// Навешивает на usertype GameObject единый набор аксессоров к компоненту C:
+//   entity:HasX()    -> bool  (есть ли компонент)
+//   entity:GetX()    -> C | nil (Unity-семантика: nil, если компонента нет)
+//   entity:AddX()    -> C     (создаёт при отсутствии и отдаёт ссылкой для правки)
+//   entity:RemoveX()          (снимает компонент)
+// Так один шаблон закрывает Light/Camera/RigidBody/Collider/ParticleEmitter/…
+// одинаковым, предсказуемым API — скрипт правит ЛЮБОЙ компонент ЛЮБОЙ сущности
+// (в т.ч. чужой), то есть общается со всеми системами движка через ECS.
+template <typename C>
+void BindComponentAccessors(sol::usertype<GameObject>& t, const char* has,
+                            const char* get, const char* add, const char* remove) {
+    t[has] = [](GameObject& o) {
+        return o.Valid() && o.Registry()->all_of<C>(o.Entity());
+    };
+    t[get] = [](GameObject& o) -> C* {
+        return o.Valid() ? o.Registry()->try_get<C>(o.Entity()) : nullptr;
+    };
+    t[add] = [](GameObject& o) -> C& {
+        if (!o.Valid()) throw std::runtime_error("Добавление компонента: невалидная сущность");
+        return o.Registry()->get_or_emplace<C>(o.Entity());
+    };
+    t[remove] = [](GameObject& o) {
+        if (o.Valid()) o.Registry()->remove<C>(o.Entity());
+    };
+}
+} // namespace
+
 ScriptEngine::ScriptEngine() {
     m_lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
                           sol::lib::table, sol::lib::coroutine);
@@ -39,7 +67,8 @@ void ScriptEngine::RegisterEngineApi() {
             return len > 0.0001f ? a / len : a;
         },
         "Distance", [](const glm::vec3& a, const glm::vec3& b) { return glm::length(b - a); },
-        "Dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); }
+        "Dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); },
+        "Cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); }
     );
 
     // Vec2 — размеры билбордов (Size) и прочая 2D-математика (экранные
@@ -80,6 +109,70 @@ void ScriptEngine::RegisterEngineApi() {
         "Scale", &::Transform::Scale
     );
 
+    // --- Перечисления компонентов: даём скриптам именованные значения вместо
+    // «магических» чисел (light.Kind = LightType.Spot, rb.Type = BodyType.Dynamic).
+    // Зарегистрированный enum позволяет sol2 биндить и сами enum-поля компонентов
+    // напрямую (&LightComponent::Kind и т.п. ниже). ---
+    m_lua.new_enum<LightComponent::Type>("LightType", {
+        {"Point", LightComponent::Type::Point},
+        {"Spot",  LightComponent::Type::Spot},
+    });
+    m_lua.new_enum<sage::physics::BodyType>("BodyType", {
+        {"Static",    sage::physics::BodyType::Static},
+        {"Dynamic",   sage::physics::BodyType::Dynamic},
+        {"Kinematic", sage::physics::BodyType::Kinematic},
+    });
+    m_lua.new_enum<sage::physics::ShapeType>("ColliderShape", {
+        {"Box",     sage::physics::ShapeType::Box},
+        {"Sphere",  sage::physics::ShapeType::Sphere},
+        {"Capsule", sage::physics::ShapeType::Capsule},
+    });
+
+    // --- Компоненты как usertype'ы: скрипт читает/пишет ЛЮБОЕ поле любого
+    // компонента (свет/камера/тело/коллайдер/эмиттер/рендерер/скрипт). Аксессоры
+    // GetX/AddX на GameObject (ниже) отдают эти структуры ССЫЛКОЙ — правки идут
+    // прямо в компонент сущности, то есть напрямую в состояние системы движка. ---
+    m_lua.new_usertype<LightComponent>("LightComponent",
+        "Kind", &LightComponent::Kind,
+        "Color", &LightComponent::Color,
+        "Intensity", &LightComponent::Intensity,
+        "Range", &LightComponent::Range,
+        "InnerConeDeg", &LightComponent::InnerConeDeg,
+        "OuterConeDeg", &LightComponent::OuterConeDeg
+    );
+    m_lua.new_usertype<CameraComponent>("CameraComponent",
+        "Fov", &CameraComponent::Fov,
+        "NearClip", &CameraComponent::NearClip,
+        "FarClip", &CameraComponent::FarClip,
+        "Primary", &CameraComponent::Primary
+    );
+    m_lua.new_usertype<RigidBodyComponent>("RigidBodyComponent",
+        "Type", &RigidBodyComponent::Type,
+        "Mass", &RigidBodyComponent::Mass,
+        "Friction", &RigidBodyComponent::Friction,
+        "Restitution", &RigidBodyComponent::Restitution
+    );
+    m_lua.new_usertype<ColliderComponent>("ColliderComponent",
+        "Shape", &ColliderComponent::Shape,
+        "HalfExtents", &ColliderComponent::HalfExtents,
+        "Radius", &ColliderComponent::Radius,
+        "HalfHeight", &ColliderComponent::HalfHeight
+    );
+    m_lua.new_usertype<ParticleEmitterComponent>("ParticleEmitterComponent",
+        "Config", &ParticleEmitterComponent::Config,
+        "Active", &ParticleEmitterComponent::Active,
+        "Continuous", &ParticleEmitterComponent::Continuous,
+        "BurstCount", &ParticleEmitterComponent::BurstCount,
+        "BurstInterval", &ParticleEmitterComponent::BurstInterval
+    );
+    m_lua.new_usertype<MeshRendererComponent>("MeshRendererComponent",
+        "Color", &MeshRendererComponent::Color,
+        "MaterialPath", &MeshRendererComponent::MaterialPath
+    );
+    m_lua.new_usertype<ScriptComponent>("ScriptComponent",
+        "Path", &ScriptComponent::Path
+    );
+
     // GameObject — то, что скрипт получает как "entity" в OnUpdate/OnStart,
     // или что возвращают SpawnObject/FindObject. Теперь это дескриптор поверх
     // ECS (см. Scene.h), поэтому поля выставлены через property-аксессоры к
@@ -88,7 +181,7 @@ void ScriptEngine::RegisterEngineApi() {
     // писал прямо в компонент; для Color есть и сеттер целого значения
     // (`cube.Color = Vec3.new(...)`), чтобы поведение совпало со старым
     // data-member-биндингом один в один.
-    m_lua.new_usertype<GameObject>("GameObject",
+    sol::usertype<GameObject> goType = m_lua.new_usertype<GameObject>("GameObject",
         "Id", sol::property([](GameObject& o) { return o.Id(); }),
         "Name", sol::property(
             [](GameObject& o) { return o.Name(); },
@@ -96,8 +189,54 @@ void ScriptEngine::RegisterEngineApi() {
         "Transform", sol::property([](GameObject& o) -> ::Transform& { return o.GetTransform(); }),
         "Color", sol::property(
             [](GameObject& o) -> glm::vec3& { return o.ColorRef(); },
-            [](GameObject& o, const glm::vec3& c) { o.ColorRef() = c; })
+            [](GameObject& o, const glm::vec3& c) { o.ColorRef() = c; }),
+        "Valid", [](GameObject& o) { return o.Valid(); }
     );
+
+    // Аксессоры компонентов (Has/Get/Add/Remove) — единый шаблон на каждый тип.
+    BindComponentAccessors<LightComponent>(goType, "HasLight", "GetLight", "AddLight", "RemoveLight");
+    BindComponentAccessors<CameraComponent>(goType, "HasCamera", "GetCamera", "AddCamera", "RemoveCamera");
+    BindComponentAccessors<RigidBodyComponent>(goType, "HasRigidBody", "GetRigidBody", "AddRigidBody", "RemoveRigidBody");
+    BindComponentAccessors<ColliderComponent>(goType, "HasCollider", "GetCollider", "AddCollider", "RemoveCollider");
+    BindComponentAccessors<ParticleEmitterComponent>(goType, "HasEmitter", "GetEmitter", "AddEmitter", "RemoveEmitter");
+    BindComponentAccessors<MeshRendererComponent>(goType, "HasRenderer", "GetRenderer", "AddRenderer", "RemoveRenderer");
+    BindComponentAccessors<ScriptComponent>(goType, "HasScript", "GetScript", "AddScript", "RemoveScript");
+
+    // --- Иерархия прямо на объекте: e:SetParent(p) / e:Parent() / e:Children() /
+    // e:WorldPosition() / e:Destroy(). Всё маршрутизируется через Scene (циклы
+    // предотвращаются, мировая матрица считается по цепочке родителей). ---
+    goType["SetParent"] = [this](GameObject& child, GameObject& parent) {
+        if (!m_scene) throw std::runtime_error("SetParent: сцена не привязана (BindScene не вызван)");
+        if (child.Valid())
+            m_scene->SetParent(child.Entity(), parent.Valid() ? parent.Entity() : entt::null);
+    };
+    goType["Unparent"] = [this](GameObject& child) {
+        if (m_scene && child.Valid()) m_scene->SetParent(child.Entity(), entt::null);
+    };
+    goType["Parent"] = [this](GameObject& o) -> sol::optional<GameObject> {
+        if (!m_scene || !o.Valid()) return sol::nullopt;
+        entt::entity p = m_scene->ParentOf(o.Entity());
+        if (p == entt::null) return sol::nullopt;
+        return GameObject(&m_scene->Registry(), p);
+    };
+    goType["Children"] = [this](GameObject& o) -> sol::table {
+        sol::table list = m_lua.create_table();
+        if (m_scene && o.Valid()) {
+            if (auto* h = m_scene->Registry().try_get<HierarchyComponent>(o.Entity())) {
+                int i = 1;
+                for (auto c : h->Children)
+                    if (m_scene->Registry().valid(c)) list[i++] = GameObject(&m_scene->Registry(), c);
+            }
+        }
+        return list;
+    };
+    goType["WorldPosition"] = [this](GameObject& o) -> glm::vec3 {
+        if (!m_scene || !o.Valid()) return glm::vec3(0.0f);
+        return glm::vec3(m_scene->WorldMatrix(o.Entity())[3]);
+    };
+    goType["Destroy"] = [this](GameObject& o) {
+        if (m_scene && o.Valid()) m_scene->RemoveObject(o.Id());
+    };
 
     // Простая функция логирования, чтобы скрипты могли печатать отладочную информацию
     m_lua.set_function("log", [](const std::string& message) {
@@ -342,6 +481,114 @@ void ScriptEngine::RegisterEngineApi() {
         m_coroutines.push_back({std::move(co), 0.0f, std::move(runner)});
     });
 
+    // --- Сообщения между скриптами: событийная модель для «компоненты общаются
+    // друг с другом». Скрипт объявляет хук OnMessage(entity, name, data) (как
+    // OnStart/OnUpdate); другой скрипт шлёт ему SendMessage(target, name, data)
+    // (target — GameObject или его Id) или всем сразу Broadcast(name, data).
+    // data — любое значение Lua (число/строка/таблица) или отсутствует (nil).
+    // Так поведения связываются без глобальных переменных и жёстких ссылок. ---
+    m_lua.set_function("SendMessage", [this](sol::object target, const std::string& name, sol::object data) {
+        int id = -1;
+        if (target.is<GameObject>()) {
+            GameObject o = target.as<GameObject>();
+            if (o.Valid()) id = o.Id();
+        } else if (target.is<int>()) {
+            id = target.as<int>();
+        }
+        if (id >= 0) DispatchMessage(id, name, data);
+    });
+    m_lua.set_function("Broadcast", [this](const std::string& name, sol::object data) {
+        DispatchMessage(-1, name, data);
+    });
+
+    // --- Математические хелперы сверх Vec-арифметики: то, чего не выразить
+    // операторами. Lerp работает и для чисел, и для Vec3 (перегрузка). ---
+    m_lua.set_function("Cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); });
+    m_lua.set_function("Radians", [](float deg) { return glm::radians(deg); });
+    m_lua.set_function("Degrees", [](float rad) { return glm::degrees(rad); });
+    m_lua.set_function("Clamp", [](float x, float lo, float hi) { return glm::clamp(x, lo, hi); });
+    m_lua.set_function("Lerp", sol::overload(
+        [](float a, float b, float t) { return a + (b - a) * t; },
+        [](const glm::vec3& a, const glm::vec3& b, float t) { return a + (b - a) * t; }
+    ));
+
+    // --- Меш-примитивы: как SetMeshCube, но для остальных встроенных форм.
+    // SetMeshNone убирает геометрию (пустышка/маркер/держатель компонентов). ---
+    m_lua.set_function("SetMeshSphere", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Sphere, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetSphere();
+    });
+    m_lua.set_function("SetMeshPlane", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Plane, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetPlane();
+    });
+    m_lua.set_function("SetMeshCylinder", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cylinder, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetCylinder();
+    });
+    m_lua.set_function("SetMeshCone", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cone, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetCone();
+    });
+    m_lua.set_function("SetMeshNone", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::None, ""};
+        mr.MeshPtr.reset();
+    });
+
+    // --- Освещение сцены: солнце, ambient, туман — доступны после BindScene.
+    // Скрипт-дирижёр катсцены/цикла дня меняет их прямо: GetLighting().Sun.
+    // Intensity = 0.2, GetLighting().Fog.Enabled = true и т.п. ---
+    m_lua.new_usertype<DirectionalLight>("DirectionalLight",
+        "Direction", &DirectionalLight::Direction,
+        "Color", &DirectionalLight::Color,
+        "Intensity", &DirectionalLight::Intensity
+    );
+    m_lua.new_usertype<FogSettings>("FogSettings",
+        "Enabled", &FogSettings::Enabled,
+        "Color", &FogSettings::Color,
+        "Start", &FogSettings::Start,
+        "End", &FogSettings::End
+    );
+    m_lua.new_usertype<LightingEnvironment>("LightingEnvironment",
+        "SkyColor", &LightingEnvironment::SkyColor,
+        "GroundColor", &LightingEnvironment::GroundColor,
+        "AmbientStrength", &LightingEnvironment::AmbientStrength,
+        "Sun", &LightingEnvironment::Sun,
+        "Fog", &LightingEnvironment::Fog
+    );
+    m_lua.set_function("GetLighting", [this]() -> LightingEnvironment& {
+        if (!m_scene) throw std::runtime_error("GetLighting: сцена не привязана (BindScene не вызван)");
+        return m_scene->Lighting;
+    });
+
+    // --- Физика времени выполнения: доступна после BindPhysics. Управляет
+    // линейной скоростью тела сущности (у неё должен быть RigidBodyComponent,
+    // и симуляция должна идти) и гравитацией всего мира. Если тела нет/оно ещё
+    // не построено — тихий no-op / нулевая скорость (не ошибка). ---
+    m_lua.set_function("SetVelocity", [this](GameObject& obj, const glm::vec3& v) {
+        if (!m_physics) throw std::runtime_error("SetVelocity: физика не привязана (BindPhysics не вызван)");
+        if (!obj.Valid()) return;
+        auto* rb = obj.Registry()->try_get<RigidBodyComponent>(obj.Entity());
+        if (!rb || rb->RuntimeBody == sage::physics::kInvalidBody) return;
+        m_physics->SetLinearVelocity(rb->RuntimeBody, v);
+    });
+    m_lua.set_function("GetVelocity", [this](GameObject& obj) -> glm::vec3 {
+        if (!m_physics) throw std::runtime_error("GetVelocity: физика не привязана (BindPhysics не вызван)");
+        if (!obj.Valid()) return glm::vec3(0.0f);
+        auto* rb = obj.Registry()->try_get<RigidBodyComponent>(obj.Entity());
+        if (!rb || rb->RuntimeBody == sage::physics::kInvalidBody) return glm::vec3(0.0f);
+        return m_physics->GetLinearVelocity(rb->RuntimeBody);
+    });
+    m_lua.set_function("SetGravity", [this](const glm::vec3& g) {
+        if (!m_physics) throw std::runtime_error("SetGravity: физика не привязана (BindPhysics не вызван)");
+        m_physics->SetGravity(g);
+    });
+
     sol::protected_function_result bootstrap = m_lua.script(
         "function wait(seconds) return coroutine.yield(seconds or 0) end",
         sol::script_pass_on_error);
@@ -365,6 +612,10 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     // OnStart или через StartCoroutine/Schedule — раньше это было required,
     // что мешало писать скрипты "разово настроил и забыл".
 
+    // OnMessage(entity, name, data) — необязательный хук: если объявлен, скрипт
+    // может принимать сообщения от других скриптов (SendMessage/Broadcast).
+    sol::protected_function messageFn = env["OnMessage"];
+
     sol::protected_function startFn = env["OnStart"];
     if (startFn.valid()) {
         auto startResult = startFn(object);
@@ -374,7 +625,8 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
         }
     }
 
-    m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn), scriptPath });
+    m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn),
+                            std::move(messageFn), scriptPath });
 }
 
 void ScriptEngine::RunScript(const std::string& scriptPath) {
@@ -397,7 +649,32 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
         }
     }
 
-    m_instances.push_back({ GameObject{}, /*HasObject=*/false, std::move(env), std::move(updateFn), scriptPath });
+    m_instances.push_back({ GameObject{}, /*HasObject=*/false, std::move(env), std::move(updateFn),
+                            sol::protected_function{}, scriptPath });
+}
+
+void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::object data) {
+    // Собираем цели ДО вызова обработчиков: обработчик может сам слать сообщения,
+    // спавнить или уничтожать объекты — любое из этого способно реаллоцировать
+    // m_instances и оборвать итератор. Снимок (объект + КОПИЯ обработчика, дешёвая
+    // ссылка на тот же Lua-объект) к такой мутации иммунен. targetId < 0 — всем.
+    struct Target { GameObject Object; sol::protected_function Fn; };
+    std::vector<Target> targets;
+    for (auto& inst : m_instances) {
+        if (!inst.HasObject || !inst.Object.Valid()) continue;
+        if (!inst.MessageFn.valid()) continue;
+        if (targetId >= 0 && inst.Object.Id() != targetId) continue;
+        targets.push_back({ inst.Object, inst.MessageFn });
+    }
+    for (auto& t : targets) {
+        if (!t.Object.Valid()) continue; // мог быть уничтожен предыдущим обработчиком в этой рассылке
+        auto result = t.Fn(t.Object, name, data);
+        if (!result.valid()) {
+            sol::error err = result;
+            std::string who = t.Object.Valid() ? t.Object.Name() : std::string("?");
+            LOG_ERROR("ScriptEngine") << "Ошибка в OnMessage (" << who << "): " << err.what();
+        }
+    }
 }
 
 void ScriptEngine::UpdateAll(float deltaTime) {
