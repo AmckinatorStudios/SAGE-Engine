@@ -151,7 +151,28 @@ private:
         sol::thread Runner;
     };
 
+    // RegisterEngineApi раньше был одной ~600-строчной функцией; теперь это
+    // тонкий диспетчер, вызывающий по одному Register*-методу на связную область
+    // API (математика, компоненты, сцена, ввод, камера, частицы, …). Разбивка
+    // чисто организационная — порядок вызова сохраняет прежнее поведение, а найти
+    // и дополнить нужную группу привязок стало на порядок проще.
     void RegisterEngineApi();
+    void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
+    void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
+    void RegisterGameObject();    // GameObject + аксессоры компонентов + иерархия
+    void RegisterSceneApi();      // log, Spawn/Find/DestroyObject
+    void RegisterMeshApi();       // SetMeshCube/Sphere/…/Model/None
+    void RegisterInputApi();      // IsActionDown/WasActionPressed/…
+    void RegisterCameraApi();     // Camera usertype + GetCamera
+    void RegisterParticleApi();   // ParticleConfig, пресеты, Emit/Stream
+    void RegisterBillboardApi();  // AddBillboard/…
+    void RegisterAudioApi();      // PlaySound/PlayMusic/…
+    void RegisterTimerApi();      // Schedule/Repeat/StartCoroutine + wait()
+    void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
+    void RegisterMathHelpers();   // Cross/Lerp/Clamp/Radians/Degrees
+    void RegisterLightingApi();   // GetLighting + usertype'ы освещения
+    void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
+
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
 

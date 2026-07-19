@@ -39,6 +39,27 @@ ScriptEngine::ScriptEngine() {
 }
 
 void ScriptEngine::RegisterEngineApi() {
+    // Тонкий диспетчер: по одному вызову на связную группу привязок. Порядок —
+    // как в прежней монолитной функции (типы прежде их потребителей), поэтому
+    // поведение идентично, но каждую область теперь видно/править отдельно.
+    RegisterMathTypes();
+    RegisterComponentTypes();
+    RegisterGameObject();
+    RegisterSceneApi();
+    RegisterMeshApi();
+    RegisterInputApi();
+    RegisterCameraApi();
+    RegisterParticleApi();
+    RegisterBillboardApi();
+    RegisterAudioApi();
+    RegisterTimerApi();
+    RegisterMessagingApi();
+    RegisterMathHelpers();
+    RegisterLightingApi();
+    RegisterPhysicsApi();
+}
+
+void ScriptEngine::RegisterMathTypes() {
     // glm::vec3 — доступен из Lua как обычная таблица с полями x/y/z, плюс
     // арифметика (+, -, унарный минус, умножение/деление на число) и пара
     // геометрических хелперов — без этого любая игровая математика (движение,
@@ -108,7 +129,9 @@ void ScriptEngine::RegisterEngineApi() {
         "Rotation", &::Transform::Rotation,
         "Scale", &::Transform::Scale
     );
+}
 
+void ScriptEngine::RegisterComponentTypes() {
     // --- Перечисления компонентов: даём скриптам именованные значения вместо
     // «магических» чисел (light.Kind = LightType.Spot, rb.Type = BodyType.Dynamic).
     // Зарегистрированный enum позволяет sol2 биндить и сами enum-поля компонентов
@@ -172,7 +195,9 @@ void ScriptEngine::RegisterEngineApi() {
     m_lua.new_usertype<ScriptComponent>("ScriptComponent",
         "Path", &ScriptComponent::Path
     );
+}
 
+void ScriptEngine::RegisterGameObject() {
     // GameObject — то, что скрипт получает как "entity" в OnUpdate/OnStart,
     // или что возвращают SpawnObject/FindObject. Теперь это дескриптор поверх
     // ECS (см. Scene.h), поэтому поля выставлены через property-аксессоры к
@@ -237,7 +262,9 @@ void ScriptEngine::RegisterEngineApi() {
     goType["Destroy"] = [this](GameObject& o) {
         if (m_scene && o.Valid()) m_scene->RemoveObject(o.Id());
     };
+}
 
+void ScriptEngine::RegisterSceneApi() {
     // Простая функция логирования, чтобы скрипты могли печатать отладочную информацию
     m_lua.set_function("log", [](const std::string& message) {
         LOG_INFO("Lua") << message;
@@ -267,7 +294,9 @@ void ScriptEngine::RegisterEngineApi() {
         // (никакого use-after-free, даже если скрипт уничтожает сам себя).
         m_scene->RemoveObject(id);
     });
+}
 
+void ScriptEngine::RegisterMeshApi() {
     // Удобный хелпер: даёт заспавненному объекту видимый куб-меш, чтобы его
     // сразу было видно на сцене без ручной возни с MeshRef/ResourceManager
     m_lua.set_function("SetMeshCube", [](GameObject& obj) {
@@ -285,6 +314,37 @@ void ScriptEngine::RegisterEngineApi() {
         mr.MeshPtr = ResourceManager::Instance().GetModel(path);
     });
 
+    // Остальные встроенные примитивы — как SetMeshCube, но для сферы/плоскости/
+    // цилиндра/конуса. SetMeshNone убирает геометрию (пустышка/маркер/держатель
+    // компонентов).
+    m_lua.set_function("SetMeshSphere", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Sphere, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetSphere();
+    });
+    m_lua.set_function("SetMeshPlane", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Plane, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetPlane();
+    });
+    m_lua.set_function("SetMeshCylinder", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cylinder, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetCylinder();
+    });
+    m_lua.set_function("SetMeshCone", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cone, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetCone();
+    });
+    m_lua.set_function("SetMeshNone", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::None, ""};
+        mr.MeshPtr.reset();
+    });
+}
+
+void ScriptEngine::RegisterInputApi() {
     // --- Ввод: именованные действия движка (см. core/InputMap.h), доступно
     // после BindInput. Скрипты читают тот же ввод, что и C++-код игры —
     // никакого параллельного дублирования раскладки клавиш. ---
@@ -297,7 +357,9 @@ void ScriptEngine::RegisterEngineApi() {
     m_lua.set_function("WasActionReleased", [this](const std::string& name) -> bool {
         return m_input && m_input->Has(name) && m_input->WasReleased(name);
     });
+}
 
+void ScriptEngine::RegisterCameraApi() {
     // --- Камера: доступно после BindCamera. Position — обычное поле, но
     // Yaw/Pitch выставлены через property-функции, которые сразу пересчитывают
     // Front/Right/Up вызовом ProcessMouse(0,0) — тем же приёмом, что уже
@@ -325,7 +387,9 @@ void ScriptEngine::RegisterEngineApi() {
         if (!m_camera) throw std::runtime_error("GetCamera: камера не привязана (ScriptEngine::BindCamera не вызван)");
         return *m_camera;
     });
+}
 
+void ScriptEngine::RegisterParticleApi() {
     // --- Частицы: доступно после BindParticles. ParticleConfig — те же поля,
     // что и ParticleEmitterConfig в C++ (см. render/Particle.h), плюс готовые
     // пресеты ParticlePresets.* (готовые визуальные рецепты — всплеск/дым/осколки) —
@@ -380,7 +444,9 @@ void ScriptEngine::RegisterEngineApi() {
         if (!m_particles) throw std::runtime_error("RemoveParticleStream: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
         m_particles->RemoveStream(id);
     });
+}
 
+void ScriptEngine::RegisterBillboardApi() {
     // --- Билборды: доступно после BindBillboards. Спрайт без texturePath
     // рисуется сплошным цветом Tint (см. BillboardSprite) — удобно для
     // маркеров/индикаторов, для которых не хочется готовить текстуру. ---
@@ -408,7 +474,9 @@ void ScriptEngine::RegisterEngineApi() {
         if (!m_billboards) throw std::runtime_error("SetBillboardTint: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
         m_billboards->SetTint(id, tint);
     });
+}
 
+void ScriptEngine::RegisterAudioApi() {
     // --- Звук: доступно после BindAudio. Скрипты (катсцены, события уровня)
     // могут проигрывать эффекты/музыку и рулить громкостью. Если аудио-
     // устройство недоступно (headless), вызовы безопасно ничего не делают. ---
@@ -432,7 +500,9 @@ void ScriptEngine::RegisterEngineApi() {
         if (!m_audio) throw std::runtime_error("SetMasterVolume: аудио не привязано (ScriptEngine::BindAudio не вызван)");
         m_audio->SetMasterVolume(volume);
     });
+}
 
+void ScriptEngine::RegisterTimerApi() {
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
     // "сколько осталось" в самом скрипте. Возвращают id для CancelTimer. ---
     m_lua.set_function("Schedule", [this](float seconds, sol::protected_function fn) -> int {
@@ -481,6 +551,19 @@ void ScriptEngine::RegisterEngineApi() {
         m_coroutines.push_back({std::move(co), 0.0f, std::move(runner)});
     });
 
+    // wait(seconds) — именованная обёртка над coroutine.yield для читаемости тела
+    // корутины (см. StartCoroutine выше). Регистрируется здесь же, рядом со своим
+    // единственным потребителем.
+    sol::protected_function_result bootstrap = m_lua.script(
+        "function wait(seconds) return coroutine.yield(seconds or 0) end",
+        sol::script_pass_on_error);
+    if (!bootstrap.valid()) {
+        sol::error err = bootstrap;
+        LOG_ERROR("ScriptEngine") << "Не удалось зарегистрировать встроенную функцию wait(): " << err.what();
+    }
+}
+
+void ScriptEngine::RegisterMessagingApi() {
     // --- Сообщения между скриптами: событийная модель для «компоненты общаются
     // друг с другом». Скрипт объявляет хук OnMessage(entity, name, data) (как
     // OnStart/OnUpdate); другой скрипт шлёт ему SendMessage(target, name, data)
@@ -500,7 +583,9 @@ void ScriptEngine::RegisterEngineApi() {
     m_lua.set_function("Broadcast", [this](const std::string& name, sol::object data) {
         DispatchMessage(-1, name, data);
     });
+}
 
+void ScriptEngine::RegisterMathHelpers() {
     // --- Математические хелперы сверх Vec-арифметики: то, чего не выразить
     // операторами. Lerp работает и для чисел, и для Vec3 (перегрузка). ---
     m_lua.set_function("Cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); });
@@ -511,35 +596,9 @@ void ScriptEngine::RegisterEngineApi() {
         [](float a, float b, float t) { return a + (b - a) * t; },
         [](const glm::vec3& a, const glm::vec3& b, float t) { return a + (b - a) * t; }
     ));
+}
 
-    // --- Меш-примитивы: как SetMeshCube, но для остальных встроенных форм.
-    // SetMeshNone убирает геометрию (пустышка/маркер/держатель компонентов). ---
-    m_lua.set_function("SetMeshSphere", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref = MeshRef{MeshRef::Type::Sphere, ""};
-        mr.MeshPtr = ResourceManager::Instance().GetSphere();
-    });
-    m_lua.set_function("SetMeshPlane", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref = MeshRef{MeshRef::Type::Plane, ""};
-        mr.MeshPtr = ResourceManager::Instance().GetPlane();
-    });
-    m_lua.set_function("SetMeshCylinder", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref = MeshRef{MeshRef::Type::Cylinder, ""};
-        mr.MeshPtr = ResourceManager::Instance().GetCylinder();
-    });
-    m_lua.set_function("SetMeshCone", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref = MeshRef{MeshRef::Type::Cone, ""};
-        mr.MeshPtr = ResourceManager::Instance().GetCone();
-    });
-    m_lua.set_function("SetMeshNone", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref = MeshRef{MeshRef::Type::None, ""};
-        mr.MeshPtr.reset();
-    });
-
+void ScriptEngine::RegisterLightingApi() {
     // --- Освещение сцены: солнце, ambient, туман — доступны после BindScene.
     // Скрипт-дирижёр катсцены/цикла дня меняет их прямо: GetLighting().Sun.
     // Intensity = 0.2, GetLighting().Fog.Enabled = true и т.п. ---
@@ -565,7 +624,9 @@ void ScriptEngine::RegisterEngineApi() {
         if (!m_scene) throw std::runtime_error("GetLighting: сцена не привязана (BindScene не вызван)");
         return m_scene->Lighting;
     });
+}
 
+void ScriptEngine::RegisterPhysicsApi() {
     // --- Физика времени выполнения: доступна после BindPhysics. Управляет
     // линейной скоростью тела сущности (у неё должен быть RigidBodyComponent,
     // и симуляция должна идти) и гравитацией всего мира. Если тела нет/оно ещё
@@ -588,14 +649,6 @@ void ScriptEngine::RegisterEngineApi() {
         if (!m_physics) throw std::runtime_error("SetGravity: физика не привязана (BindPhysics не вызван)");
         m_physics->SetGravity(g);
     });
-
-    sol::protected_function_result bootstrap = m_lua.script(
-        "function wait(seconds) return coroutine.yield(seconds or 0) end",
-        sol::script_pass_on_error);
-    if (!bootstrap.valid()) {
-        sol::error err = bootstrap;
-        LOG_ERROR("ScriptEngine") << "Не удалось зарегистрировать встроенную функцию wait(): " << err.what();
-    }
 }
 
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
