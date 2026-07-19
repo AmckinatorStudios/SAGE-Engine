@@ -446,6 +446,34 @@ void EditorLayer::NewScene(bool withDemoContent) {
         spotLc.OuterConeDeg = 30.0f;
         m_scene->Registry().emplace<LightComponent>(spot.Entity(), spotLc);
 
+        // Демо-худ (UIElementComponent): панель со скруглением и рамкой + полоса
+        // здоровья ребёнком — показывает UI-систему сразу в панели Game и служит
+        // стартовой точкой для своего интерфейса (правится в Inspector).
+        GameObject hud = m_scene->CreateObject("HUD Panel");
+        UIElementComponent hudUi;
+        hudUi.Type = UIElementComponent::Kind::Panel;
+        hudUi.Anchor = UIAnchor::TopLeft;
+        hudUi.Offset = {16.0f, 16.0f};
+        hudUi.Size = {230.0f, 64.0f};
+        hudUi.Rounding = 12.0f;
+        hudUi.BorderThickness = 2.0f;
+        hudUi.Text = "SAGE UI";
+        hudUi.TextCentered = false;
+        m_scene->Registry().emplace<UIElementComponent>(hud.Entity(), hudUi);
+
+        GameObject hp = m_scene->CreateObject("HP Bar");
+        UIElementComponent hpUi;
+        hpUi.Type = UIElementComponent::Kind::Bar;
+        hpUi.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
+        hpUi.Offset = {12.0f, 8.0f};
+        hpUi.Size = {206.0f, 18.0f};
+        hpUi.Rounding = 8.0f;
+        hpUi.Color = {0.0f, 0.0f, 0.0f, 0.55f};
+        hpUi.Value = 0.72f;
+        hpUi.BarFillColor = {0.85f, 0.30f, 0.30f, 1.0f};
+        m_scene->Registry().emplace<UIElementComponent>(hp.Entity(), hpUi);
+        m_scene->SetParent(hp.Entity(), hud.Entity());
+
         // Что-то выбрано сразу — гизмо видно, Inspector не пустой.
         GameObject green = m_scene->FindByName("Green Cube");
         if (green.Valid()) m_selectedId = green.Id();

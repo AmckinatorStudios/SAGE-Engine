@@ -11,6 +11,7 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/ParticleSystem.h"
+#include "sage/ui/UIRenderer.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Light.h"
 #include "sage/core/Config.h"
@@ -70,6 +71,9 @@ private:
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo, m_gameFbo;
     std::optional<Framebuffer> m_postFbo, m_gamePostFbo; // LDR-выходы PostFX
+    // UI сцены (UIElementComponent) — оверлей в панели Game (WYSIWYG: как в
+    // собранной игре). Лениво: создаётся при первом кадре с UI-сущностями.
+    std::unique_ptr<UIRenderer> m_ui;
     std::optional<sage::render::PostFX> m_postfx, m_gamePostfx;
     bool m_postApplied = false, m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;

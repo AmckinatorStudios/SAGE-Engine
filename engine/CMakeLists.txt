@@ -47,6 +47,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp
+    src/sage/ui/UISceneSystem.cpp
 )
 
 add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})

@@ -164,6 +164,15 @@ void GLGeometry::DrawIndexed(size_t indexCount) const {
     glBindVertexArray(0);
 }
 
+void GLGeometry::DrawIndexedRange(size_t firstIndex, size_t indexCount) const {
+    ++g_renderStats.DrawCalls;
+    glBindVertexArray(m_vao);
+    // Смещение — в БАЙТАХ внутри индексного буфера (u32-индексы).
+    glDrawElements(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT,
+                   (const void*)(firstIndex * sizeof(unsigned int)));
+    glBindVertexArray(0);
+}
+
 void GLGeometry::DrawArrays(size_t vertexCount) const {
     ++g_renderStats.DrawCalls;
     glBindVertexArray(m_vao);

@@ -9,6 +9,7 @@
 #include "sage/render/ParticleECS.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UISceneSystem.h"
 
 void EditorSceneRenderer::Init() {
     m_outlineShader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
@@ -241,6 +242,19 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
                              m_gameFbo->Width(), m_gameFbo->Height(), proj, FxFromConfig(cfg),
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
         m_gamePostApplied = true;
+    }
+
+    // UI сцены (UIElementComponent) — поверх ИТОГОВОЙ картинки (после поста),
+    // ровно как его увидит игрок в собранной игре (WYSIWYG панели Game).
+    auto uiView = scene.Registry().view<UIElementComponent>();
+    if (uiView.begin() != uiView.end()) {
+        if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+        Framebuffer& target = m_gamePostApplied ? *m_gamePostFbo : *m_gameFbo;
+        target.Bind();
+        device.SetViewport(0, 0, m_gameW, m_gameH);
+        m_ui->Begin(m_gameW, m_gameH);
+        sage::ui::DrawSceneUI(scene, *m_ui, m_gameW, m_gameH);
+        m_ui->End();
     }
     device.BindDefaultFramebuffer();
 }

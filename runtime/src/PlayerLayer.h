@@ -10,6 +10,7 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/ParticleSystem.h"
+#include "sage/ui/UIRenderer.h"
 #include "sage/ecs/RenderBatch.h"
 #include "sage/scene/Scene.h"
 #include "sage/physics/PhysicsScene.h"
@@ -61,6 +62,9 @@ private:
     std::optional<ShadowMap> m_shadows;
     std::optional<SkyRenderer> m_sky;     // процедурный скайбокс сцены
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
+    // UI сцены (UIElementComponent из .sage) — рисуется поверх кадра; лениво,
+    // создаётся при первом кадре со сценой, содержащей UI-сущности.
+    std::unique_ptr<UIRenderer> m_ui;
     sage::ecs::RenderBatch m_batch;            // отсечение по фрустуму + инстансинг статики
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
 

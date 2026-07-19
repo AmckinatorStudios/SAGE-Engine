@@ -26,6 +26,7 @@ public:
     void SetCullMode(CullMode mode) override;
     void SetPolygonMode(PolygonMode mode) override;
     void SetSRGBWrite(bool enabled) override;
+    void SetScissor(bool enabled, int x, int y, int w, int h) override;
 
     void BindTexture2D(int unit, unsigned int nativeHandle) override;
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;

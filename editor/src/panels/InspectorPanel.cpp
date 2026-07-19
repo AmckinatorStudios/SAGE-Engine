@@ -369,6 +369,71 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    if (reg.all_of<UIElementComponent>(obj.Entity()) && ImGui::CollapsingHeader("UI Element", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (UIElementComponent* u = reg.try_get<UIElementComponent>(obj.Entity())) {
+            const char* kinds[] = {"Panel", "Label", "Image", "Bar"};
+            int kind = (int)u->Type;
+            if (ImGui::Combo("Kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
+                host.PushUndoSnapshot();
+                u->Type = (UIElementComponent::Kind)kind;
+            }
+            const char* anchors[] = {"Top Left", "Top Center", "Top Right",
+                                     "Center Left", "Center", "Center Right",
+                                     "Bottom Left", "Bottom Center", "Bottom Right"};
+            int anchor = (int)u->Anchor;
+            if (ImGui::Combo("Anchor", &anchor, anchors, IM_ARRAYSIZE(anchors))) {
+                host.PushUndoSnapshot();
+                u->Anchor = (UIAnchor)anchor;
+            }
+            ImGui::DragFloat2("Offset", &u->Offset.x, 1.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat2("Size", &u->Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
+            ImGui::DragInt("Layer", &u->Layer, 1); host.TrackLastImGuiItem();
+            ImGui::Checkbox("Visible", &u->Visible);
+            ImGui::SameLine();
+            ImGui::Checkbox("Clip Children", &u->ClipChildren);
+            ImGui::SeparatorText("Style");
+            ImGui::ColorEdit4("Fill / Tint", &u->Color.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Rounding", &u->Rounding, 0.5f, 0.0f, 200.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Border", &u->BorderThickness, 0.25f, 0.0f, 50.0f); host.TrackLastImGuiItem();
+            if (u->BorderThickness > 0.0f) {
+                ImGui::ColorEdit4("Border Color", &u->BorderColor.x); host.TrackLastImGuiItem();
+            }
+            ImGui::SeparatorText("Text");
+            char textBuf[256];
+            std::snprintf(textBuf, sizeof(textBuf), "%s", u->Text.c_str());
+            if (ImGui::InputText("Text", textBuf, sizeof(textBuf))) u->Text = textBuf;
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat("Text Scale", &u->TextScale, 0.05f, 0.5f, 12.0f); host.TrackLastImGuiItem();
+            ImGui::ColorEdit4("Text Color", &u->TextColor.x); host.TrackLastImGuiItem();
+            ImGui::Checkbox("Center Text", &u->TextCentered);
+            if (u->Type == UIElementComponent::Kind::Image) {
+                ImGui::SeparatorText("Image");
+                char texBuf[512];
+                std::snprintf(texBuf, sizeof(texBuf), "%s", u->TexturePath.c_str());
+                if (ImGui::InputText("Texture", texBuf, sizeof(texBuf))) u->TexturePath = texBuf;
+                host.TrackLastImGuiItem();
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Load")) {
+                    host.PushUndoSnapshot();
+                    u->Tex = u->TexturePath.empty()
+                                 ? nullptr
+                                 : ResourceManager::Instance().GetTexture(u->TexturePath);
+                }
+                if (!u->TexturePath.empty() && !u->Tex)
+                    ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "Texture not loaded (press Load)");
+            }
+            if (u->Type == UIElementComponent::Kind::Bar) {
+                ImGui::SeparatorText("Bar");
+                ImGui::SliderFloat("Value", &u->Value, 0.0f, 1.0f); host.TrackLastImGuiItem();
+                ImGui::ColorEdit4("Fill Color", &u->BarFillColor.x); host.TrackLastImGuiItem();
+            }
+            if (ImGui::Button("Remove UI Element")) {
+                host.PushUndoSnapshot();
+                reg.remove<UIElementComponent>(obj.Entity());
+            }
+        }
+    }
+
     // --- Единое «Add Component»: добавляет любой ОТСУТСТВУЮЩИЙ компонент ---
     DrawAddComponentMenu(host, obj);
 
@@ -410,6 +475,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
             em.Config = ParticlePresets::Registry()[0].Make(); // Fire
             reg.emplace<ParticleEmitterComponent>(e, em);
         });
+        item("UI Element", reg.all_of<UIElementComponent>(e), [&] { reg.emplace<UIElementComponent>(e); });
         if (!any) ImGui::TextDisabled("All components already added");
         ImGui::EndPopup();
     }

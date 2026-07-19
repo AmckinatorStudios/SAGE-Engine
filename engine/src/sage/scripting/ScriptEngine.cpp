@@ -2,6 +2,7 @@
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ParticlePresets.h"
+#include "sage/ui/UISceneSystem.h"
 #include <algorithm>
 
 namespace {
@@ -195,6 +196,42 @@ void ScriptEngine::RegisterComponentTypes() {
     m_lua.new_usertype<ScriptComponent>("ScriptComponent",
         "Path", &ScriptComponent::Path
     );
+
+    // --- UI: интерфейс сцены (см. UIElementComponent в Components.h).
+    // Скрипты правят текст/значение/видимость прямо в компоненте — так худ
+    // (здоровье, счёт, таймеры) обновляется из игровой логики. ---
+    m_lua.new_enum<UIElementComponent::Kind>("UIKind", {
+        {"Panel", UIElementComponent::Kind::Panel},
+        {"Label", UIElementComponent::Kind::Label},
+        {"Image", UIElementComponent::Kind::Image},
+        {"Bar",   UIElementComponent::Kind::Bar},
+    });
+    m_lua.new_enum<UIAnchor>("UIAnchor", {
+        {"TopLeft", UIAnchor::TopLeft},       {"TopCenter", UIAnchor::TopCenter},
+        {"TopRight", UIAnchor::TopRight},     {"CenterLeft", UIAnchor::CenterLeft},
+        {"Center", UIAnchor::Center},         {"CenterRight", UIAnchor::CenterRight},
+        {"BottomLeft", UIAnchor::BottomLeft}, {"BottomCenter", UIAnchor::BottomCenter},
+        {"BottomRight", UIAnchor::BottomRight},
+    });
+    m_lua.new_usertype<UIElementComponent>("UIElementComponent",
+        "Type", &UIElementComponent::Type,
+        "Anchor", &UIElementComponent::Anchor,
+        "Offset", &UIElementComponent::Offset,
+        "Size", &UIElementComponent::Size,
+        "Layer", &UIElementComponent::Layer,
+        "Visible", &UIElementComponent::Visible,
+        "ClipChildren", &UIElementComponent::ClipChildren,
+        "Color", &UIElementComponent::Color,
+        "Rounding", &UIElementComponent::Rounding,
+        "BorderThickness", &UIElementComponent::BorderThickness,
+        "BorderColor", &UIElementComponent::BorderColor,
+        "Text", &UIElementComponent::Text,
+        "TextScale", &UIElementComponent::TextScale,
+        "TextColor", &UIElementComponent::TextColor,
+        "TextCentered", &UIElementComponent::TextCentered,
+        "Value", &UIElementComponent::Value,
+        "BarFillColor", &UIElementComponent::BarFillColor
+    );
 }
 
 void ScriptEngine::RegisterGameObject() {
@@ -226,6 +263,7 @@ void ScriptEngine::RegisterGameObject() {
     BindComponentAccessors<ParticleEmitterComponent>(goType, "HasEmitter", "GetEmitter", "AddEmitter", "RemoveEmitter");
     BindComponentAccessors<MeshRendererComponent>(goType, "HasRenderer", "GetRenderer", "AddRenderer", "RemoveRenderer");
     BindComponentAccessors<ScriptComponent>(goType, "HasScript", "GetScript", "AddScript", "RemoveScript");
+    BindComponentAccessors<UIElementComponent>(goType, "HasUI", "GetUI", "AddUI", "RemoveUI");
 
     // --- Иерархия прямо на объекте: e:SetParent(p) / e:Parent() / e:Children() /
     // e:WorldPosition() / e:Destroy(). Всё маршрутизируется через Scene (циклы
@@ -284,6 +322,19 @@ void ScriptEngine::RegisterSceneApi() {
         if (!obj.Valid()) return sol::nullopt;
         return obj;
     });
+
+    // Верхний видимый UI-элемент под экранной точкой (учитывает слои/маски):
+    // GameObject или nil. Экранный размер передаётся явно — скрипт берёт его
+    // из своего контекста (окно игры / панель Game).
+    m_lua.set_function("GetUIElementAt",
+        [this](float x, float y, int screenW, int screenH) -> sol::optional<GameObject> {
+            if (!m_scene) return sol::nullopt;
+            int id = sage::ui::HitTest(*m_scene, x, y, screenW, screenH);
+            if (id < 0) return sol::nullopt;
+            GameObject obj = m_scene->Get(id);
+            if (!obj.Valid()) return sol::nullopt;
+            return obj;
+        });
 
     m_lua.set_function("DestroyObject", [this](int id) {
         if (!m_scene) throw std::runtime_error("DestroyObject: сцена не привязана (ScriptEngine::BindScene не вызван)");

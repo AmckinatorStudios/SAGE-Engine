@@ -2,6 +2,7 @@
 #include "rhi/opengl/OpenGLResources.h"
 #include "sage/core/Log.h"
 #include <glad/glad.h>
+#include <algorithm>
 #include <stdexcept>
 
 namespace sage::rhi {
@@ -87,6 +88,15 @@ void OpenGLDevice::SetPolygonMode(PolygonMode mode) {
     // GL_LINE рисует только рёбра треугольников — каркасный (wireframe) режим.
     // FRONT_AND_BACK: каркас виден с обеих сторон вне зависимости от отсечения.
     glPolygonMode(GL_FRONT_AND_BACK, mode == PolygonMode::Line ? GL_LINE : GL_FILL);
+}
+
+void OpenGLDevice::SetScissor(bool enabled, int x, int y, int w, int h) {
+    if (enabled) {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x, y, std::max(w, 0), std::max(h, 0));
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
 }
 
 void OpenGLDevice::SetSRGBWrite(bool enabled) {

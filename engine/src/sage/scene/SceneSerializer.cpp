@@ -270,6 +270,77 @@ static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
     return am;
 }
 
+static std::string UIKindToString(UIElementComponent::Kind k) {
+    switch (k) {
+        case UIElementComponent::Kind::Label: return "label";
+        case UIElementComponent::Kind::Image: return "image";
+        case UIElementComponent::Kind::Bar:   return "bar";
+        default: return "panel";
+    }
+}
+
+static UIElementComponent::Kind UIKindFromString(const std::string& s) {
+    if (s == "label") return UIElementComponent::Kind::Label;
+    if (s == "image") return UIElementComponent::Kind::Image;
+    if (s == "bar")   return UIElementComponent::Kind::Bar;
+    return UIElementComponent::Kind::Panel;
+}
+
+static void SaveUIElement(json& j, const UIElementComponent& u) {
+    json& uj = j["ui"];
+    uj["kind"] = UIKindToString(u.Type);
+    uj["anchor"] = (int)u.Anchor; // 0..8 (см. UIAnchor)
+    uj["offset"] = json{{"x", u.Offset.x}, {"y", u.Offset.y}};
+    uj["size"] = json{{"x", u.Size.x}, {"y", u.Size.y}};
+    uj["layer"] = u.Layer;
+    uj["visible"] = u.Visible;
+    uj["clipChildren"] = u.ClipChildren;
+    uj["color"] = Vec4ToJson(u.Color);
+    uj["rounding"] = u.Rounding;
+    uj["borderThickness"] = u.BorderThickness;
+    uj["borderColor"] = Vec4ToJson(u.BorderColor);
+    uj["text"] = u.Text;
+    uj["textScale"] = u.TextScale;
+    uj["textColor"] = Vec4ToJson(u.TextColor);
+    uj["textCentered"] = u.TextCentered;
+    uj["texture"] = u.TexturePath;
+    uj["value"] = u.Value;
+    uj["barFillColor"] = Vec4ToJson(u.BarFillColor);
+}
+
+static UIElementComponent ParseUIElement(const json& uj) {
+    UIElementComponent u;
+    u.Type = UIKindFromString(uj.value("kind", "panel"));
+    int anchor = uj.value("anchor", 0);
+    if (anchor >= 0 && anchor <= 8) u.Anchor = (UIAnchor)anchor;
+    if (uj.contains("offset")) {
+        u.Offset.x = uj["offset"].value("x", u.Offset.x);
+        u.Offset.y = uj["offset"].value("y", u.Offset.y);
+    }
+    if (uj.contains("size")) {
+        u.Size.x = uj["size"].value("x", u.Size.x);
+        u.Size.y = uj["size"].value("y", u.Size.y);
+    }
+    u.Layer = uj.value("layer", u.Layer);
+    u.Visible = uj.value("visible", u.Visible);
+    u.ClipChildren = uj.value("clipChildren", u.ClipChildren);
+    if (uj.contains("color")) u.Color = Vec4FromJson(uj["color"], u.Color);
+    u.Rounding = uj.value("rounding", u.Rounding);
+    u.BorderThickness = uj.value("borderThickness", u.BorderThickness);
+    if (uj.contains("borderColor")) u.BorderColor = Vec4FromJson(uj["borderColor"], u.BorderColor);
+    u.Text = uj.value("text", u.Text);
+    u.TextScale = uj.value("textScale", u.TextScale);
+    if (uj.contains("textColor")) u.TextColor = Vec4FromJson(uj["textColor"], u.TextColor);
+    u.TextCentered = uj.value("textCentered", u.TextCentered);
+    u.TexturePath = uj.value("texture", u.TexturePath);
+    u.Value = uj.value("value", u.Value);
+    if (uj.contains("barFillColor")) u.BarFillColor = Vec4FromJson(uj["barFillColor"], u.BarFillColor);
+    // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).
+    if (!u.TexturePath.empty())
+        u.Tex = ResourceManager::Instance().GetTexture(u.TexturePath);
+    return u;
+}
+
 static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
     json& pj = j["particles"];
     pj["preset"] = pe.Preset;
@@ -365,6 +436,7 @@ static json BuildSceneJson(const Scene& scene) {
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
         if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) SaveAnimatedModel(j, *am);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
+        if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -422,6 +494,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
         if (j.contains("particles"))
             obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
+        if (j.contains("ui"))
+            obj.Registry()->emplace<UIElementComponent>(obj.Entity(), ParseUIElement(j["ui"]));
 
         // Пересоздаём GPU-ресурс на основе описания
         if (mr.Ref.type == MeshRef::Type::Model) {

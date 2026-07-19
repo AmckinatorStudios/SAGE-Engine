@@ -24,6 +24,7 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/ui/UISceneSystem.h"
 
 namespace fs = std::filesystem;
 
@@ -239,6 +240,17 @@ void PlayerLayer::OnRender() {
     if (m_particles) m_particles->DrawFromView(view, proj);
 
     device.SetSRGBWrite(false); // всё после сцены (UI/оверлеи) — уже в sRGB
+
+    // UI сцены (UIElementComponent из .sage): худ/меню, собранные в редакторе.
+    // Рисуется в letterbox-viewport с его размерами — якоря совпадают с панелью
+    // Game редактора (WYSIWYG).
+    auto uiView = m_scene->Registry().view<UIElementComponent>();
+    if (uiView.begin() != uiView.end()) {
+        if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+        m_ui->Begin(vpW, vpH);
+        sage::ui::DrawSceneUI(*m_scene, *m_ui, vpW, vpH);
+        m_ui->End();
+    }
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {

@@ -67,6 +67,10 @@ public:
     virtual void SetInstanceData(const void* data, size_t bytes) = 0;
 
     virtual void DrawIndexed(size_t indexCount) const = 0;
+    // Диапазон индексов [firstIndex, firstIndex+indexCount) — для батчей,
+    // разбитых на сегменты (UI: смена текстуры/scissor-маски между сегментами
+    // одного общего буфера, без перезаливки геометрии).
+    virtual void DrawIndexedRange(size_t firstIndex, size_t indexCount) const = 0;
     virtual void DrawArrays(size_t vertexCount) const = 0;
     virtual void DrawInstanced(size_t vertexCount, size_t instanceCount) const = 0;
     // Индексированная инстансная отрисовка (батчинг мешей: один вызов на группу

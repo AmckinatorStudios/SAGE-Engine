@@ -10,6 +10,7 @@
 #include "sage/physics/PhysicsTypes.h"
 #include "sage/anim/Animator.h"
 #include "sage/render/Particle.h"
+#include "sage/ui/UIAnchor.h"
 
 // ---------------------------------------------------------------------------
 // Компоненты ECS — простые data-структуры, навешиваемые на сущности (entity)
@@ -171,6 +172,53 @@ struct AnimatedModelComponent {
     std::shared_ptr<sage::render::SkinnedModel> Model; // рантайм (не сериализуется)
     sage::anim::Animator Anim;                          // рантайм-состояние проигрывания
     bool Ready = false;                                 // инициализирован ли (загрузка+rig)
+};
+
+// Элемент игрового интерфейса — UI как часть СЦЕНЫ: создаётся и настраивается
+// в редакторе (Inspector), сериализуется в .sage, рендерится в панели Game и в
+// собранной игре (SagePlayer) системой sage::ui::DrawSceneUI.
+//
+// Позиционирование — якорь + отступ ВНУТРИ РОДИТЕЛЯ: если сущность через
+// HierarchyComponent вложена в другую сущность с UIElementComponent, её якорь
+// считается от прямоугольника родителя (контейнеры/панели), иначе — от экрана.
+// Layer задаёт порядок отрисовки среди соседей (больше — поверх); дети всегда
+// рисуются поверх родителя. ClipChildren превращает элемент в МАСКУ: всё
+// поддерево обрезается его прямоугольником (списки, миникарты, прогресс-контейнеры).
+//
+// Kind:
+//   • Panel — скруглённая подложка (+рамка); с Text — готовая «кнопка»;
+//   • Label — только текст (фон не рисуется);
+//   • Image — текстура из TexturePath (тонируется Color, скругляется Rounding);
+//   • Bar   — полоса прогресса Value 0..1 (фон Color, заполнение BarFillColor).
+// Каждый Kind дополнительно рисует Text, если он задан.
+struct UIElementComponent {
+    enum class Kind { Panel, Label, Image, Bar };
+
+    Kind Type = Kind::Panel;
+    UIAnchor Anchor = UIAnchor::TopLeft;
+    glm::vec2 Offset{16.0f, 16.0f};
+    glm::vec2 Size{200.0f, 56.0f};
+    int Layer = 0;              // порядок среди соседей (больше — поверх)
+    bool Visible = true;
+    bool ClipChildren = false;  // маска: обрезать поддерево своим прямоугольником
+
+    // Стиль подложки/картинки: цвет-заливка (для Image — тонирование), радиус
+    // скругления углов, рамка (толщина 0 — без рамки).
+    glm::vec4 Color{0.09f, 0.10f, 0.14f, 0.85f};
+    float Rounding = 8.0f;
+    float BorderThickness = 0.0f;
+    glm::vec4 BorderColor{0.85f, 0.80f, 0.65f, 0.9f};
+
+    std::string Text;           // надпись (у любого Kind; пусто — не рисуется)
+    float TextScale = 2.0f;
+    glm::vec4 TextColor{1.0f, 1.0f, 1.0f, 1.0f};
+    bool TextCentered = true;   // по центру прямоугольника (иначе — левый верх + отступ)
+
+    std::string TexturePath;    // Image: путь к текстуре (png/jpg/...)
+    float Value = 1.0f;         // Bar: заполнение 0..1 (скрипты пишут сюда)
+    glm::vec4 BarFillColor{0.36f, 0.75f, 0.42f, 1.0f};
+
+    std::shared_ptr<Texture> Tex; // рантайм (не сериализуется) — из TexturePath
 };
 
 // Эмиттер частиц на сущности: рождает частицы в позиции Transform по правилам
