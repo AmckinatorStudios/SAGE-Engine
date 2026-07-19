@@ -76,20 +76,8 @@ void EditorLayer::OnAttach() {
     // --- Console первой: сток лога ловит все сообщения запуска ---
     m_console.Attach();
 
-    // --- Ресурсы превью: полноценное освещение (ambient+sun+point+тени) ---
-    m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
-    m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-    m_shadows.emplace(2048);
-    m_sceneFbo.emplace(m_viewportW, m_viewportH);
-    m_gameFbo.emplace(m_gameW, m_gameH);
-    m_postFbo.emplace(m_viewportW, m_viewportH); // LDR-выход PostFX (вьюпорт)
-    m_postfx.emplace();                          // SSAO + Bloom + виньетка
-    m_gamePostFbo.emplace(m_gameW, m_gameH);      // LDR-выход PostFX (панель Game)
-    m_gamePostfx.emplace();
-    m_debugDraw.emplace();
-    m_sky.emplace();
-    m_particles.emplace(); // пул частиц сцены (эмиттеры ECS)
-    m_cube = ResourceManager::Instance().GetCube();
+    // --- Превью-рендер: тени/Viewport/Game/PostFX/гизмо — в EditorSceneRenderer ---
+    m_renderer.Init();
 
     m_gizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
 
@@ -180,7 +168,7 @@ void EditorLayer::OnUpdate(float dt) {
     // движение скелетных моделей (превью), не только в Play.
     sage::anim::UpdateAnimators(*m_scene, dt);
     // Частицы эмиттеров ECS — тоже живут в режиме правки (превью эффектов).
-    if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
+    sage::fx::UpdateEmitters(*m_scene, m_renderer.Particles(), dt);
     m_plugins.UpdateAll(dt);
 }
 
@@ -638,287 +626,12 @@ void EditorLayer::PickAtViewport(float u, float v) {
     m_selectedId = bestId; // клик мимо всех объектов — снять выбор
 }
 
-// ============================================================================
-//  Рендер превью: тени -> Viewport (редакторская камера) -> Game (камера сцены)
-// ============================================================================
-
-// Общая карта теней кадра: солнце одно, и Viewport, и Game сэмплируют один
-// depth-проход. Центр — на начале координат (сцены редактора компактны).
-void EditorLayer::RenderShadowPass(const LightingEnvironment& env) {
-    Window& window = sage::Application::Get().GetWindow();
-    m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
-    m_shadows->BeginRender();
-    // Статика в карту теней — батчем (инстансно + отсечение по фрустуму света).
-    m_batch.RenderDepth(*m_scene, m_shadows->LightMatrix());
-    // Скелетные модели тоже отбрасывают тень — рисуем их в карту глубины со
-    // скиннингом в текущей позе (свой depth-шейдер).
-    sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix());
-    m_shadows->EndRender(window.Width(), window.Height());
-}
-
-// Освещённый проход сцены в текущий привязанный FBO (общая часть Viewport/Game).
-// shadingMode/wireframe задают режим рендера (Viewport — из тулбара, Game —
-// всегда Shaded, чтобы игровое окно выглядело как финальная картинка).
-void EditorLayer::DrawLitScene(const LightingEnvironment& env, const glm::mat4& view,
-                               const glm::mat4& proj, glm::vec3 viewPos,
-                               int shadingMode, bool wireframe) {
-    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-
-    if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
-
-    // Статика — через RenderBatch: отсечение по фрустуму камеры + инстансный
-    // батчинг (один draw call на группу одинаковых мешей). Освещение/тени —
-    // те же, что в статическом lit.frag.
-    m_lastRenderStats = m_batch.RenderColor(*m_scene, view, proj, viewPos, env,
-                                            m_shadows->LightMatrix(), m_shadows->DepthTexture(),
-                                            /*shadowsEnabled=*/true, shadingMode);
-
-    if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill); // вернуть заливку
-}
-
-// Аутлайн выбранного меша: масштабированная «оболочка» плоским цветом с
-// отсечением ЛИЦЕВЫХ граней (видны только задние — они образуют кайму вокруг
-// объекта). Асимметрично к mesh: работает для выпуклых примитивов/моделей.
-void EditorLayer::DrawSelectionOutline(GameObject obj, const glm::mat4& view, const glm::mat4& proj) {
-    const MeshRendererComponent* mr = m_scene->Registry().try_get<MeshRendererComponent>(obj.Entity());
-    if (!mr || !mr->MeshPtr) return;
-    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-
-    glm::mat4 model = glm::scale(m_scene->WorldMatrix(obj.Entity()), glm::vec3(1.06f));
-    m_shader->Use();
-    m_shader->SetMat4("uView", view);
-    m_shader->SetMat4("uProjection", proj);
-    m_shader->SetMat4("uModel", model);
-    m_shader->SetInt("uShadingMode", 1); // unlit — плоский цвет каймы
-    m_shader->SetInt("uUseTexture", 0);
-    m_shader->SetInt("uFogEnabled", 0);
-    m_shader->SetVec3("uObjectColor", {1.0f, 0.62f, 0.12f});
-
-    device.SetCullMode(sage::rhi::CullMode::Front); // рисуем только задние грани оболочки
-    mr->MeshPtr->Draw();
-    device.SetCullMode(sage::rhi::CullMode::Back);
-}
-
-// Гизмо невидимых сущностей (камера/свет) — всегда видны в редакторе, чтобы их
-// можно было найти и выбрать. Рисуются через DebugDraw (накопление, Flush —
-// у вызывающего). Выбранная сущность подсвечивается ярче.
-void EditorLayer::DrawEntityGizmos() {
-    // Камеры: каркас усечённой пирамиды (frustum) в масштабе near..~2.5.
-    auto camView = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
-    for (auto e : camView) {
-        bool selected = camView.get<IdComponent>(e).Id == m_selectedId;
-        glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.5f, 0.7f, 0.9f);
-        glm::mat4 world = m_scene->WorldMatrix(e); // мировая (иерархия)
-        glm::vec3 wpos = glm::vec3(world[3]);
-        glm::vec3 fwd = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
-        const CameraComponent& cam = camView.get<CameraComponent>(e);
-        m_debugDraw->WireFrustum(wpos, fwd, cam.Fov,
-                                 (float)m_gameW / (float)std::max(m_gameH, 1), 0.3f, 2.2f, color);
-    }
-    // Свет-сущности: маленький маркер (сфера) в позиции — всегда, даже если не
-    // выбраны (у выбранного зона действия рисуется отдельно, крупнее).
-    auto lightView = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
-    for (auto e : lightView) {
-        if (lightView.get<IdComponent>(e).Id == m_selectedId) continue; // выбранный — крупная зона ниже
-        const LightComponent& lc = lightView.get<LightComponent>(e);
-        glm::vec3 wpos = glm::vec3(m_scene->WorldMatrix(e)[3]); // мировая позиция (иерархия)
-        m_debugDraw->WireSphere(wpos, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
-    }
-    // Эмиттеры частиц: маленький маркер-звёздочка в позиции (частицы могут не
-    // рождаться прямо сейчас — а гизмо показывает, где эмиттер).
-    auto fxView = m_scene->Registry().view<ParticleEmitterComponent, Transform, IdComponent>();
-    for (auto e : fxView) {
-        bool selected = fxView.get<IdComponent>(e).Id == m_selectedId;
-        glm::vec3 color = selected ? glm::vec3(1.0f, 0.85f, 0.3f) : glm::vec3(0.9f, 0.6f, 0.3f);
-        glm::vec3 wpos = glm::vec3(m_scene->WorldMatrix(e)[3]); // мировая позиция (иерархия)
-        m_debugDraw->WireSphere(wpos, 0.18f, color, 8);
-        m_debugDraw->Axes(glm::translate(glm::mat4(1.0f), wpos), 0.4f);
-    }
-
-    // Коллайдеры: каркас формы в масштабе Transform — зелёный для выбранной
-    // сущности, приглушённый для остальных (чтобы видеть все физические тела).
-    auto colView = m_scene->Registry().view<ColliderComponent, Transform, IdComponent>();
-    for (auto e : colView) {
-        const Transform& tr = colView.get<Transform>(e);
-        const ColliderComponent& col = colView.get<ColliderComponent>(e);
-        bool selected = colView.get<IdComponent>(e).Id == m_selectedId;
-        glm::vec3 color = selected ? glm::vec3(0.3f, 1.0f, 0.4f) : glm::vec3(0.25f, 0.55f, 0.30f);
-        glm::vec3 scale = glm::abs(tr.Scale);
-        switch (col.Shape) {
-            case sage::physics::ShapeType::Box:
-                m_debugDraw->WireBox(tr.Position, col.HalfExtents * scale, color);
-                break;
-            case sage::physics::ShapeType::Sphere:
-                m_debugDraw->WireSphere(tr.Position,
-                    col.Radius * glm::max(scale.x, glm::max(scale.y, scale.z)), color);
-                break;
-            case sage::physics::ShapeType::Capsule:
-                // Каркас как коробка по габаритам капсулы (примитива капсулы в
-                // DebugDraw нет — коробка радиус×высота даёт понятный габарит).
-                m_debugDraw->WireBox(tr.Position,
-                    glm::vec3(col.Radius * scale.x,
-                              (col.HalfHeight + col.Radius) * scale.y,
-                              col.Radius * scale.z), color);
-                break;
-        }
-    }
-}
-
-void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
-    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-
-    m_sceneFbo->Resize(m_viewportW, m_viewportH);
-    m_sceneFbo->Bind();
-    device.SetClearColor(0.10f, 0.11f, 0.13f, 1.0f);
-    device.Clear();
-
-    m_view = m_camera.GetViewMatrix();
-    m_proj = m_camera.GetProjectionMatrix((float)m_viewportW / (float)std::max(m_viewportH, 1));
-
-    // Скайбокс (если включён) — фон до сцены.
-    if (env.Skybox.Enabled) {
-        m_sky->Draw(m_view, m_proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
-    }
-
-    // Режим рендера из тулбара: Shaded(0)/Unlit(1)/Normals(2), Wireframe —
-    // unlit + полигоны линиями.
-    int shadingMode = 0;
-    bool wireframe = false;
-    switch (m_renderMode) {
-        case EditorRenderMode::Shaded:    shadingMode = 0; break;
-        case EditorRenderMode::Wireframe: shadingMode = 1; wireframe = true; break;
-        case EditorRenderMode::Unlit:     shadingMode = 1; break;
-        case EditorRenderMode::Normals:   shadingMode = 2; break;
-    }
-    DrawLitScene(env, m_view, m_proj, m_camera.Position, shadingMode, wireframe);
-
-    // Скелетно-анимированные модели: ПОЛНОЕ освещение + та же карта теней, что и
-    // статические меши (единый lit-конвейер, без рассогласования).
-    sage::anim::DrawAnimatedModels(*m_scene, m_view, m_proj, m_camera.Position, env,
-                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), true);
-
-    // Частицы (billboard, поверх сцены, с блендингом) — камера редактора.
-    if (m_particles) m_particles->Draw(m_camera, m_view, m_proj);
-
-    // Аутлайн выбранной сущности (масштабированная оболочка) — поверх сцены,
-    // до гизмо-линий.
-    GameObject selectedObj = m_scene->Get(m_selectedId);
-    if (selectedObj.Valid()) DrawSelectionOutline(selectedObj, m_view, m_proj);
-
-    // Гизмо-графика движка (DebugDraw) — в ТОТ ЖЕ буфер после сцены, с тестом
-    // глубины: объекты заслоняют сетку (не 2D-оверлей поверх картинки).
-    if (m_showGrid) {
-        m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
-    }
-    DrawEntityGizmos(); // всегда видимые гизмо камер/светов
-    if (selectedObj.Valid()) {
-        // Оси выбранной сущности + зона действия света — в МИРОВОМ пространстве.
-        glm::mat4 world = m_scene->WorldMatrix(selectedObj.Entity());
-        m_debugDraw->Axes(world, 1.4f);
-        if (const LightComponent* light =
-                m_scene->Registry().try_get<LightComponent>(selectedObj.Entity())) {
-            glm::vec3 wpos = glm::vec3(world[3]);
-            glm::vec3 lightColor = glm::vec3(light->Color) * 0.9f;
-            if (light->Kind == LightComponent::Type::Spot) {
-                glm::vec3 dir = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
-                m_debugDraw->WireCone(wpos, dir, light->Range, light->OuterConeDeg, lightColor);
-            } else {
-                m_debugDraw->WireSphere(wpos, light->Range, lightColor);
-            }
-        }
-    }
-    m_debugDraw->Flush(m_view, m_proj);
-
-    // Пост-обработка (SSAO + Bloom + виньетка/тон-маппинг) — только в Shaded-режиме
-    // и если включена в конфиге; отладочные режимы (Unlit/Normals/Wireframe)
-    // показываем как есть. Результат — в m_postFbo (его и покажет вьюпорт).
-    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
-    m_postApplied = false;
-    if (cfg.PostProcessing && m_renderMode == EditorRenderMode::Shaded) {
-        sage::render::PostFXSettings fx;
-        fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
-        fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
-        fx.Vignette = cfg.Vignette;
-        fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
-        fx.BloomIntensity = cfg.BloomIntensity;
-        fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
-        fx.AORadius = cfg.AORadius;
-        m_postFbo->Resize(m_viewportW, m_viewportH);
-        m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
-                         m_sceneFbo->Width(), m_sceneFbo->Height(), m_proj, fx,
-                         /*output=*/&*m_postFbo, 0, 0, m_viewportW, m_viewportH);
-        m_postApplied = true;
-    }
-
-    device.BindDefaultFramebuffer();
-}
-
 bool EditorLayer::HasPrimaryCamera() {
     auto view = m_scene->Registry().view<CameraComponent, Transform>();
     for (auto e : view) {
         if (view.get<CameraComponent>(e).Primary) return true;
     }
     return false;
-}
-
-void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
-    // Первая Primary-камера сцены. Нет камеры — панель Game сама покажет
-    // подсказку, кадр не рендерим.
-    entt::entity camEntity = entt::null;
-    auto camView = m_scene->Registry().view<CameraComponent, Transform>();
-    for (auto e : camView) {
-        if (camView.get<CameraComponent>(e).Primary) { camEntity = e; break; }
-    }
-    if (camEntity == entt::null) return;
-
-    const CameraComponent& cam = camView.get<CameraComponent>(camEntity);
-
-    // Мировая матрица камеры (учёт родителей): позиция и оси из неё, Scale не влияет.
-    glm::mat4 camWorld = m_scene->WorldMatrix(camEntity);
-    glm::vec3 camPos = glm::vec3(camWorld[3]);
-    glm::vec3 fwd = glm::normalize(glm::vec3(camWorld * glm::vec4(0, 0, -1, 0)));
-    glm::vec3 up = glm::normalize(glm::vec3(camWorld * glm::vec4(0, 1, 0, 0)));
-    glm::mat4 view = glm::lookAt(camPos, camPos + fwd, up);
-    float aspect = (float)m_gameW / (float)std::max(m_gameH, 1);
-    glm::mat4 proj = glm::perspective(glm::radians(cam.Fov), aspect, cam.NearClip, cam.FarClip);
-
-    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-    m_gameFbo->Resize(m_gameW, m_gameH);
-    m_gameFbo->Bind();
-    // Игровое окно очищается цветом неба сцены — как это увидит игрок.
-    device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
-    device.Clear();
-
-    if (env.Skybox.Enabled) {
-        m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
-    }
-    // Игровое окно — всегда полное освещение (Shaded), без гизмо/аутлайна:
-    // показывает сцену как её увидит игрок.
-    DrawLitScene(env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
-    sage::anim::DrawAnimatedModels(*m_scene, view, proj, camPos, env,
-                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), true);
-    if (m_particles) m_particles->DrawFromView(view, proj); // camRight/Up из матрицы вида
-
-    // Панель Game = финальная картинка игрока: применяем ту же пост-обработку.
-    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
-    m_gamePostApplied = false;
-    if (cfg.PostProcessing) {
-        sage::render::PostFXSettings fx;
-        fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
-        fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
-        fx.Vignette = cfg.Vignette;
-        fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
-        fx.BloomIntensity = cfg.BloomIntensity;
-        fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
-        fx.AORadius = cfg.AORadius;
-        m_gamePostFbo->Resize(m_gameW, m_gameH);
-        m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
-                             m_gameFbo->Width(), m_gameFbo->Height(), proj, fx,
-                             /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
-        m_gamePostApplied = true;
-    }
-
-    device.BindDefaultFramebuffer();
 }
 
 // ============================================================================
@@ -931,9 +644,11 @@ void EditorLayer::OnRender() {
     // Итоговое освещение кадра: окружение сцены + света-сущности; один
     // shadow-проход на кадр, Viewport и Game сэмплируют общую карту.
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
-    RenderShadowPass(env);
-    RenderSceneToFramebuffer(env);
-    RenderGameToFramebuffer(env);
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    m_renderer.RenderShadow(*m_scene, env); // общая карта теней (Viewport + Game)
+    m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_renderMode, m_showGrid,
+                              cfg, m_view, m_proj); // отдаёт view/proj для гизмо/пикинга
+    m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 
     app.Device().SetViewport(0, 0, app.GetWindow().Width(), app.GetWindow().Height());
     app.Device().SetClearColor(0.05f, 0.05f, 0.06f, 1.0f);
@@ -1036,7 +751,7 @@ void EditorLayer::DrawStatusBar(float height) {
 
     // Статистика рендера (отсечение/батчинг) + FPS — справа.
     char stat[128];
-    const sage::ecs::RenderStats& rs = m_lastRenderStats;
+    const sage::ecs::RenderStats& rs = m_renderer.LastStats();
     std::snprintf(stat, sizeof(stat), "meshes %d/%d  culled %d  batches %d  |  %.0f FPS",
                   rs.Drawn, rs.Total, rs.Culled, rs.Batches, sage::Application::Get().Fps());
     float w = ImGui::CalcTextSize(stat).x + 16.0f;
@@ -1796,15 +1511,16 @@ void EditorLayer::RunSelfTest() {
     }
 
     // --- Частицы: эмиттер рождает живые частицы, пул растёт со временем ---
-    if (ok && m_particles) {
+    if (ok) {
+        ParticleSystem& particles = m_renderer.Particles();
         GameObject fx = m_scene->CreateObject("SelftestEmitter");
         fx.GetTransform().Position = {0.0f, 1.0f, 0.0f};
         ParticleEmitterComponent em;
         em.Config = ParticlePresets::Fire();
         m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity(), em);
 
-        for (int i = 0; i < 8; ++i) sage::fx::UpdateEmitters(*m_scene, *m_particles, 0.05f);
-        if (m_particles->AliveCount() == 0) {
+        for (int i = 0; i < 8; ++i) sage::fx::UpdateEmitters(*m_scene, particles, 0.05f);
+        if (particles.AliveCount() == 0) {
             LOG_ERROR("Editor") << "SELFTEST: particles failed - no live particles emitted";
             ok = false;
         }
@@ -1831,9 +1547,7 @@ void EditorLayer::RunSelfTest() {
             LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
             glm::mat4 cv = m_camera.GetViewMatrix();
             glm::mat4 cp = m_camera.GetProjectionMatrix(16.0f / 9.0f);
-            sage::ecs::RenderStats st = m_batch.RenderColor(*m_scene, cv, cp, m_camera.Position, env,
-                                                            m_shadows->LightMatrix(), m_shadows->DepthTexture(),
-                                                            true, 0);
+            sage::ecs::RenderStats st = m_renderer.RenderColorForTest(*m_scene, cv, cp, m_camera.Position, env);
             if (st.Total < 1 || st.Batches < 1 || st.Batches > st.Total ||
                 st.Drawn + st.Culled != st.Total) {
                 LOG_ERROR("Editor") << "SELFTEST: batch render stats inconsistent (total=" << st.Total

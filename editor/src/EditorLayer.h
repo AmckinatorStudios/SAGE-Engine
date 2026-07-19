@@ -24,6 +24,7 @@
 #include "sage/ecs/RenderBatch.h"
 
 #include "EditorHost.h"
+#include "EditorSceneRenderer.h"
 #include "Project.h"
 #include "RecentProjects.h"
 #include "PluginAPI.h"
@@ -41,11 +42,13 @@
 // ---------------------------------------------------------------------------
 // EditorLayer — ядро редактора SAGE (архитектура v3).
 //
-// Оркестратор: владеет сценой/проектом/Play-режимом/undo/рендером превью и
-// реализует контракт EditorHost, через который работают ПАНЕЛИ — независимые
-// классы в panels/ (Hierarchy, Inspector, Viewport, Game, Console, Assets,
-// Launcher), каждая со своим UI-состоянием. Новая панель = новый файл +
-// вызов Draw() в кадре; в ядро врастать не нужно.
+// Оркестратор: владеет сценой/проектом/Play-режимом/undo и реализует контракт
+// EditorHost, через который работают ПАНЕЛИ — независимые классы в panels/
+// (Hierarchy, Inspector, Viewport, Game, Console, Assets, Launcher), каждая со
+// своим UI-состоянием. Новая панель = новый файл + вызов Draw() в кадре; в ядро
+// врастать не нужно. Весь ПРЕВЬЮ-РЕНДЕР (тени/Viewport/Game/PostFX/гизмо) вынесен
+// в отдельный класс EditorSceneRenderer — EditorLayer только зовёт его в OnRender
+// и показывает его текстуры в панелях (разгрузка god-object).
 //
 //   • Docking + multi-viewport: полноэкранный dockspace (DockBuilder-раскладка
 //     по умолчанию, Window > Reset Layout); панели можно вытаскивать в
@@ -112,17 +115,13 @@ public:
     Camera& EditorCamera() override { return m_camera; }
     const glm::mat4& ViewMatrix() const override { return m_view; }
     const glm::mat4& ProjMatrix() const override { return m_proj; }
-    unsigned int SceneTexture() const override {
-        return m_postApplied && m_postFbo ? m_postFbo->ColorTexture() : m_sceneFbo->ColorTexture();
-    }
-    void SetViewportSize(int w, int h) override { m_viewportW = w; m_viewportH = h; }
+    unsigned int SceneTexture() const override { return m_renderer.ViewportTexture(); }
+    void SetViewportSize(int w, int h) override { m_renderer.SetViewportSize(w, h); }
     void PickAtViewport(float u, float v) override;
 
     // --- EditorHost: панель Game ---
-    unsigned int GameTexture() const override {
-        return m_gamePostApplied && m_gamePostFbo ? m_gamePostFbo->ColorTexture() : m_gameFbo->ColorTexture();
-    }
-    void SetGameViewportSize(int w, int h) override { m_gameW = w; m_gameH = h; }
+    unsigned int GameTexture() const override { return m_renderer.GameTexture(); }
+    void SetGameViewportSize(int w, int h) override { m_renderer.SetGameSize(w, h); }
     bool HasPrimaryCamera() override;
 
     // --- EditorHost: выбор в Assets ---
@@ -140,15 +139,7 @@ private:
     void DrawDialogs(); // модалки New Project / Open Project / Save Scene As / Open Scene
     void DrawSettingsWindow(); // окно гибких настроек движка (тени/пост/разрешение/…)
 
-    // --- сцена / рендер ---
-    void RenderShadowPass(const LightingEnvironment& env);  // глубина от солнца (общая карта)
-    void DrawLitScene(const LightingEnvironment& env, const glm::mat4& view,
-                      const glm::mat4& proj, glm::vec3 viewPos,
-                      int shadingMode, bool wireframe);     // общий lit-проход
-    void DrawSelectionOutline(GameObject obj, const glm::mat4& view, const glm::mat4& proj);
-    void DrawEntityGizmos();                                // гизмо камер/светов (DebugDraw)
-    void RenderSceneToFramebuffer(const LightingEnvironment& env); // редакторская камера + DebugDraw
-    void RenderGameToFramebuffer(const LightingEnvironment& env);  // Primary-камера сцены, без гизмо
+    // --- сцена / рендер (превью-рендер вынесен в EditorSceneRenderer) ---
     void NewScene(bool withDemoContent);
     void UpdateWindowTitle();
     void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
@@ -170,24 +161,8 @@ private:
 
     // --- сцена и рендер превью ---
     std::unique_ptr<Scene> m_scene;
-    Camera m_camera;
-    std::optional<Shader> m_shader;       // lit-шейдер (ambient+sun+point lights+тени)
-    std::optional<Shader> m_shadowShader; // depth-проход карты теней
-    std::optional<ShadowMap> m_shadows;
-    std::optional<Framebuffer> m_sceneFbo;
-    std::optional<Framebuffer> m_gameFbo;
-    std::optional<Framebuffer> m_postFbo;             // LDR-выход PostFX для вьюпорта
-    std::optional<sage::render::PostFX> m_postfx;     // SSAO + Bloom + виньетка (вьюпорт)
-    bool m_postApplied = false;                       // применён ли PostFX к текущему кадру вьюпорта
-    std::optional<Framebuffer> m_gamePostFbo;         // LDR-выход PostFX для панели Game
-    std::optional<sage::render::PostFX> m_gamePostfx; // отдельный экземпляр (свой размер)
-    bool m_gamePostApplied = false;
-    std::optional<DebugDraw> m_debugDraw;
-    std::optional<SkyRenderer> m_sky;     // процедурный градиентный скайбокс
-    std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
-    sage::ecs::RenderBatch m_batch; // отсечение по фрустуму + инстансный батчинг статики
-    sage::ecs::RenderStats m_lastRenderStats; // статистика последнего кадра вьюпорта
-    std::shared_ptr<Mesh> m_cube;
+    Camera m_camera;                       // редакторская камера (Viewport)
+    EditorSceneRenderer m_renderer;        // весь превью-рендер (теней/Viewport/Game/PostFX/гизмо)
 
     // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---
     int m_gizmoOp = 0;                                          // ImGuizmo::OPERATION (TRANSLATE)
@@ -207,10 +182,8 @@ private:
     std::vector<std::string> m_redoStack;
     std::string m_pendingEditSnapshot;    // состояние на момент Capture (виджет/гизмо)
 
-    // --- выбор/вьюпорты ---
+    // --- выбор/вьюпорты (размеры окон живут в m_renderer) ---
     int m_selectedId = -1;
-    int m_viewportW = 1280, m_viewportH = 720;
-    int m_gameW = 1280, m_gameH = 720;
     glm::mat4 m_view{1.0f}, m_proj{1.0f}; // последние view/proj кадра (гизмо/пикинг)
 
     // --- docking ---
