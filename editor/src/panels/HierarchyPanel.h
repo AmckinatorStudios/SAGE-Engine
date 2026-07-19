@@ -1,11 +1,19 @@
 #pragma once
 
-class EditorHost;
+#include <entt/entt.hpp>
 
-// Панель Hierarchy — список сущностей сцены: выбор, создание (ПКМ по пустому
-// месту), дублирование/удаление (ПКМ по сущности). Без собственного состояния —
-// всё через EditorHost.
+class EditorHost;
+class Scene;
+
+// Панель Hierarchy — ДЕРЕВО сущностей сцены с иерархией родитель/ребёнок:
+// выбор, создание (ПКМ по пустому месту), Create Child / Duplicate / Unparent /
+// Delete (ПКМ по сущности), перетаскивание одной сущности на другую для смены
+// родителя (drag-drop) и перетаскивание в пустую зону — открепление в корень.
+// Без собственного состояния — всё через EditorHost/Scene.
 class HierarchyPanel {
 public:
     void Draw(EditorHost& host);
+
+private:
+    void DrawNode(EditorHost& host, Scene& scene, entt::entity e);
 };

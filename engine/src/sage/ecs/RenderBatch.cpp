@@ -198,14 +198,15 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     m_textured.clear();
     Frustum frustum = Frustum::FromViewProj(cullMatrix);
 
-    ForEachRenderable(scene, [&](Transform& tr, MeshRendererComponent& mr) {
+    ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
         ++m_stats.Total;
         Mesh* mesh = mr.MeshPtr.get();
-        glm::mat4 model = tr.GetMatrix();
+        glm::mat4 model = scene.WorldMatrix(e); // мировая матрица (учёт иерархии родителей)
 
         glm::vec3 center = glm::vec3(model * glm::vec4(mesh->BoundsCenter(), 1.0f));
-        glm::vec3 s = glm::abs(tr.Scale);
-        float radius = mesh->BoundsRadius() * glm::max(s.x, glm::max(s.y, s.z));
+        // Масштаб для радиуса — из столбцов мировой матрицы (учитывает масштаб родителей).
+        float sx = glm::length(glm::vec3(model[0])), sy = glm::length(glm::vec3(model[1])), sz = glm::length(glm::vec3(model[2]));
+        float radius = mesh->BoundsRadius() * glm::max(sx, glm::max(sy, sz));
         if (!frustum.IntersectsSphere(center, radius)) { ++m_stats.Culled; return; }
         ++m_stats.Drawn;
 

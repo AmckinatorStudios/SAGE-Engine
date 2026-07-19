@@ -34,12 +34,14 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
     auto view = scene.Registry().view<LightComponent, Transform>();
     for (auto e : view) {
         const LightComponent& lc = view.get<LightComponent>(e);
-        const Transform& tr = view.get<Transform>(e);
+        // Мировые позиция/направление (учёт иерархии родителей).
+        glm::mat4 world = scene.WorldMatrix(e);
+        glm::vec3 wpos = glm::vec3(world[3]);
         if (lc.Kind == LightComponent::Type::Spot) {
             if ((int)env.SpotLights.size() >= LightingEnvironment::MaxSpotLights) continue;
             SpotLight s;
-            s.Position = tr.Position;
-            s.Direction = ForwardFromEuler(tr.Rotation);
+            s.Position = wpos;
+            s.Direction = glm::normalize(glm::vec3(world * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
             s.Color = lc.Color;
             s.Intensity = lc.Intensity;
             s.Range = lc.Range;
@@ -49,7 +51,7 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
         } else {
             if ((int)env.PointLights.size() >= LightingEnvironment::MaxPointLights) continue;
             PointLight p;
-            p.Position = tr.Position;
+            p.Position = wpos;
             p.Color = lc.Color;
             p.Intensity = lc.Intensity;
             p.Range = lc.Range;

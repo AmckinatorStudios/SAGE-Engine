@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 #include <memory>
+#include <vector>
+#include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include "sage/scene/Transform.h"
 #include "sage/render/Mesh.h"
@@ -28,6 +30,16 @@ struct NameComponent {
 // в Scene. Так сохраняется прежний контракт GameObject.Id / DestroyObject(id).
 struct IdComponent {
     int Id = 0;
+};
+
+// Иерархия сцены: родитель + список детей. Мировая матрица сущности =
+// worldMatrix(Parent) * Transform.GetMatrix() — так дети наследуют перенос/
+// поворот/масштаб родителя (см. sage::ecs::WorldMatrix). Связи двусторонние
+// (Parent у ребёнка и Children у родителя) и поддерживаются Scene::SetParent.
+// Отсутствие компонента = корневая сущность без родителя и детей.
+struct HierarchyComponent {
+    entt::entity Parent = entt::null;
+    std::vector<entt::entity> Children;
 };
 
 // Описание того, ИЗ ЧЕГО сделан меш — то, что реально сохраняется в файл сцены.

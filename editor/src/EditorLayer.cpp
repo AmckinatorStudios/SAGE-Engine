@@ -684,7 +684,7 @@ void EditorLayer::DrawSelectionOutline(GameObject obj, const glm::mat4& view, co
     if (!mr || !mr->MeshPtr) return;
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
-    glm::mat4 model = glm::scale(obj.GetTransform().GetMatrix(), glm::vec3(1.06f));
+    glm::mat4 model = glm::scale(m_scene->WorldMatrix(obj.Entity()), glm::vec3(1.06f));
     m_shader->Use();
     m_shader->SetMat4("uView", view);
     m_shader->SetMat4("uProjection", proj);
@@ -706,12 +706,13 @@ void EditorLayer::DrawEntityGizmos() {
     // Камеры: каркас усечённой пирамиды (frustum) в масштабе near..~2.5.
     auto camView = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
     for (auto e : camView) {
-        const Transform& tr = camView.get<Transform>(e);
         bool selected = camView.get<IdComponent>(e).Id == m_selectedId;
         glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.5f, 0.7f, 0.9f);
-        glm::vec3 fwd = sage::ecs::ForwardFromEuler(tr.Rotation);
+        glm::mat4 world = m_scene->WorldMatrix(e); // мировая (иерархия)
+        glm::vec3 wpos = glm::vec3(world[3]);
+        glm::vec3 fwd = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
         const CameraComponent& cam = camView.get<CameraComponent>(e);
-        m_debugDraw->WireFrustum(tr.Position, fwd, cam.Fov,
+        m_debugDraw->WireFrustum(wpos, fwd, cam.Fov,
                                  (float)m_gameW / (float)std::max(m_gameH, 1), 0.3f, 2.2f, color);
     }
     // Свет-сущности: маленький маркер (сфера) в позиции — всегда, даже если не
@@ -720,17 +721,18 @@ void EditorLayer::DrawEntityGizmos() {
     for (auto e : lightView) {
         if (lightView.get<IdComponent>(e).Id == m_selectedId) continue; // выбранный — крупная зона ниже
         const LightComponent& lc = lightView.get<LightComponent>(e);
-        m_debugDraw->WireSphere(lightView.get<Transform>(e).Position, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
+        glm::vec3 wpos = glm::vec3(m_scene->WorldMatrix(e)[3]); // мировая позиция (иерархия)
+        m_debugDraw->WireSphere(wpos, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
     }
     // Эмиттеры частиц: маленький маркер-звёздочка в позиции (частицы могут не
     // рождаться прямо сейчас — а гизмо показывает, где эмиттер).
     auto fxView = m_scene->Registry().view<ParticleEmitterComponent, Transform, IdComponent>();
     for (auto e : fxView) {
-        const Transform& tr = fxView.get<Transform>(e);
         bool selected = fxView.get<IdComponent>(e).Id == m_selectedId;
         glm::vec3 color = selected ? glm::vec3(1.0f, 0.85f, 0.3f) : glm::vec3(0.9f, 0.6f, 0.3f);
-        m_debugDraw->WireSphere(tr.Position, 0.18f, color, 8);
-        m_debugDraw->Axes(glm::translate(glm::mat4(1.0f), tr.Position), 0.4f);
+        glm::vec3 wpos = glm::vec3(m_scene->WorldMatrix(e)[3]); // мировая позиция (иерархия)
+        m_debugDraw->WireSphere(wpos, 0.18f, color, 8);
+        m_debugDraw->Axes(glm::translate(glm::mat4(1.0f), wpos), 0.4f);
     }
 
     // Коллайдеры: каркас формы в масштабе Transform — зелёный для выбранной
@@ -810,18 +812,18 @@ void EditorLayer::RenderSceneToFramebuffer(const LightingEnvironment& env) {
     }
     DrawEntityGizmos(); // всегда видимые гизмо камер/светов
     if (selectedObj.Valid()) {
-        // Оси выбранной сущности + зона действия света.
-        glm::mat4 model = selectedObj.GetTransform().GetMatrix();
-        m_debugDraw->Axes(model, 1.4f);
+        // Оси выбранной сущности + зона действия света — в МИРОВОМ пространстве.
+        glm::mat4 world = m_scene->WorldMatrix(selectedObj.Entity());
+        m_debugDraw->Axes(world, 1.4f);
         if (const LightComponent* light =
                 m_scene->Registry().try_get<LightComponent>(selectedObj.Entity())) {
-            const Transform& lt = selectedObj.GetTransform();
+            glm::vec3 wpos = glm::vec3(world[3]);
             glm::vec3 lightColor = glm::vec3(light->Color) * 0.9f;
             if (light->Kind == LightComponent::Type::Spot) {
-                glm::vec3 dir = sage::ecs::ForwardFromEuler(lt.Rotation);
-                m_debugDraw->WireCone(lt.Position, dir, light->Range, light->OuterConeDeg, lightColor);
+                glm::vec3 dir = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
+                m_debugDraw->WireCone(wpos, dir, light->Range, light->OuterConeDeg, lightColor);
             } else {
-                m_debugDraw->WireSphere(lt.Position, light->Range, lightColor);
+                m_debugDraw->WireSphere(wpos, light->Range, lightColor);
             }
         }
     }
@@ -870,16 +872,13 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     if (camEntity == entt::null) return;
 
     const CameraComponent& cam = camView.get<CameraComponent>(camEntity);
-    const Transform& tr = camView.get<Transform>(camEntity);
 
-    // Ориентация из углов Эйлера Transform (порядок XYZ — как в GetMatrix);
-    // Scale сущности на камеру не влияет.
-    glm::mat4 rot = glm::eulerAngleXYZ(glm::radians(tr.Rotation.x),
-                                       glm::radians(tr.Rotation.y),
-                                       glm::radians(tr.Rotation.z));
-    glm::vec3 fwd = glm::normalize(glm::vec3(rot * glm::vec4(0, 0, -1, 0)));
-    glm::vec3 up = glm::normalize(glm::vec3(rot * glm::vec4(0, 1, 0, 0)));
-    glm::mat4 view = glm::lookAt(tr.Position, tr.Position + fwd, up);
+    // Мировая матрица камеры (учёт родителей): позиция и оси из неё, Scale не влияет.
+    glm::mat4 camWorld = m_scene->WorldMatrix(camEntity);
+    glm::vec3 camPos = glm::vec3(camWorld[3]);
+    glm::vec3 fwd = glm::normalize(glm::vec3(camWorld * glm::vec4(0, 0, -1, 0)));
+    glm::vec3 up = glm::normalize(glm::vec3(camWorld * glm::vec4(0, 1, 0, 0)));
+    glm::mat4 view = glm::lookAt(camPos, camPos + fwd, up);
     float aspect = (float)m_gameW / (float)std::max(m_gameH, 1);
     glm::mat4 proj = glm::perspective(glm::radians(cam.Fov), aspect, cam.NearClip, cam.FarClip);
 
@@ -895,8 +894,8 @@ void EditorLayer::RenderGameToFramebuffer(const LightingEnvironment& env) {
     }
     // Игровое окно — всегда полное освещение (Shaded), без гизмо/аутлайна:
     // показывает сцену как её увидит игрок.
-    DrawLitScene(env, view, proj, tr.Position, /*shadingMode=*/0, /*wireframe=*/false);
-    sage::anim::DrawAnimatedModels(*m_scene, view, proj, tr.Position, env,
+    DrawLitScene(env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
+    sage::anim::DrawAnimatedModels(*m_scene, view, proj, camPos, env,
                                    m_shadows->LightMatrix(), m_shadows->DepthTexture(), true);
     if (m_particles) m_particles->DrawFromView(view, proj); // camRight/Up из матрицы вида
 

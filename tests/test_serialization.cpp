@@ -182,6 +182,21 @@ TEST(Scene_string_roundtrip_entities_and_transforms) {
         CHECK_NEAR(loaded->Lighting.PointLights[0].Intensity, 1.7f, 1e-4);
 }
 
+TEST(Scene_roundtrip_preserves_parent_hierarchy) {
+    Scene scene("HierScene");
+    GameObject parent = scene.CreateObject("Parent");
+    GameObject child = scene.CreateObject("Child");
+    scene.SetParent(child.Entity(), parent.Entity());
+
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    GameObject lp = FindByName(*loaded, "Parent");
+    GameObject lc = FindByName(*loaded, "Child");
+    CHECK_TRUE(lp.Valid());
+    CHECK_TRUE(lc.Valid());
+    // Ребёнок после загрузки снова имеет родителя Parent.
+    CHECK_TRUE(loaded->ParentOf(lc.Entity()) == lp.Entity());
+}
+
 TEST(Scene_json_encodes_primitive_mesh_ref) {
     // Проверка ЗАПИСИ (без загрузки — примитив на загрузке создал бы GPU-меш):
     // тип примитива корректно попадает в JSON.

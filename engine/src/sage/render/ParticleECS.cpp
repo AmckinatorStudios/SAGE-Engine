@@ -11,7 +11,7 @@ void UpdateEmitters(Scene& scene, ParticleSystem& sys, float dt) {
     for (auto e : view) {
         ParticleEmitterComponent& em = view.get<ParticleEmitterComponent>(e);
         if (!em.Active) continue;
-        glm::vec3 pos = view.get<Transform>(e).Position;
+        glm::vec3 pos = glm::vec3(scene.WorldMatrix(e)[3]); // мировая позиция (иерархия)
 
         if (em.Continuous) {
             // Непрерывная струя: EmissionRate частиц/сек через дробный накопитель.

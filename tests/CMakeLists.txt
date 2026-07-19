@@ -9,6 +9,7 @@ add_executable(sage_tests
     test_math.cpp
     test_serialization.cpp
     test_animation.cpp
+    test_hierarchy.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

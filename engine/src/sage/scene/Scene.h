@@ -1,8 +1,11 @@
 #pragma once
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <stdexcept>
+#include <vector>
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 #include "sage/scene/Transform.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/Components.h"
@@ -89,11 +92,60 @@ public:
         return GameObject(&m_registry, e);
     }
 
+    // Удаляет сущность ВМЕСТЕ с её поддеревом (детьми, внуками, …) и отвязывает
+    // её от родителя. Так удаление узла иерархии в редакторе убирает всю ветку.
     void RemoveObject(int id) {
         auto it = m_idToEntity.find(id);
         if (it == m_idToEntity.end()) return;
-        if (m_registry.valid(it->second)) m_registry.destroy(it->second);
-        m_idToEntity.erase(it);
+        entt::entity e = it->second;
+        DetachFromParent(e);
+        DestroySubtree(e);
+    }
+
+    // --- Иерархия (родитель/дети) ------------------------------------------
+    // Делает parent родителем child (parent == entt::null — открепить в корень).
+    // Двусторонняя связь; циклы предотвращаются (нельзя сделать родителем своего
+    // потомка). Мировая матрица ребёнка = WorldMatrix(parent) * его локальная.
+    void SetParent(entt::entity child, entt::entity parent) {
+        if (child == entt::null || !m_registry.valid(child) || child == parent) return;
+        if (parent != entt::null && (!m_registry.valid(parent) || IsDescendant(parent, child))) return;
+
+        auto& hc = m_registry.get_or_emplace<HierarchyComponent>(child);
+        if (hc.Parent != entt::null && m_registry.valid(hc.Parent)) {
+            if (auto* oldp = m_registry.try_get<HierarchyComponent>(hc.Parent)) {
+                auto& v = oldp->Children;
+                v.erase(std::remove(v.begin(), v.end(), child), v.end());
+            }
+        }
+        hc.Parent = parent;
+        if (parent != entt::null) {
+            auto& ph = m_registry.get_or_emplace<HierarchyComponent>(parent);
+            if (std::find(ph.Children.begin(), ph.Children.end(), child) == ph.Children.end())
+                ph.Children.push_back(child);
+        }
+    }
+    void SetParentById(int childId, int parentId) {
+        entt::entity c = Resolve(childId), p = Resolve(parentId);
+        SetParent(c, p);
+    }
+    entt::entity ParentOf(entt::entity e) const {
+        const auto* h = m_registry.try_get<HierarchyComponent>(e);
+        return (h && m_registry.valid(h->Parent)) ? h->Parent : entt::null;
+    }
+
+    // Мировая матрица: композиция локальных матриц по цепочке родителей.
+    glm::mat4 WorldMatrix(entt::entity e) const {
+        if (e == entt::null || !m_registry.valid(e)) return glm::mat4(1.0f);
+        const Transform* tr = m_registry.try_get<Transform>(e);
+        glm::mat4 local = tr ? tr->GetMatrix() : glm::mat4(1.0f);
+        const auto* h = m_registry.try_get<HierarchyComponent>(e);
+        if (h && h->Parent != entt::null && m_registry.valid(h->Parent))
+            return WorldMatrix(h->Parent) * local;
+        return local;
+    }
+    glm::mat4 WorldMatrixById(int id) const {
+        auto it = m_idToEntity.find(id);
+        return it == m_idToEntity.end() ? glm::mat4(1.0f) : WorldMatrix(it->second);
     }
 
     GameObject FindByName(const std::string& name) {
@@ -121,6 +173,39 @@ public:
     LightingEnvironment Lighting;
 
 private:
+    entt::entity Resolve(int id) const {
+        auto it = m_idToEntity.find(id);
+        return it == m_idToEntity.end() ? entt::null : it->second;
+    }
+    // Является ли node потомком ancestor (поднимаясь по родителям node, встретим ancestor).
+    bool IsDescendant(entt::entity node, entt::entity ancestor) const {
+        while (node != entt::null && m_registry.valid(node)) {
+            const auto* h = m_registry.try_get<HierarchyComponent>(node);
+            if (!h) return false;
+            if (h->Parent == ancestor) return true;
+            node = h->Parent;
+        }
+        return false;
+    }
+    void DetachFromParent(entt::entity e) {
+        auto* h = m_registry.try_get<HierarchyComponent>(e);
+        if (h && h->Parent != entt::null && m_registry.valid(h->Parent)) {
+            if (auto* p = m_registry.try_get<HierarchyComponent>(h->Parent)) {
+                auto& v = p->Children;
+                v.erase(std::remove(v.begin(), v.end(), e), v.end());
+            }
+        }
+    }
+    // Рекурсивно уничтожает сущность и всё её поддерево (с чисткой карты id).
+    void DestroySubtree(entt::entity e) {
+        if (!m_registry.valid(e)) return;
+        std::vector<entt::entity> kids;
+        if (auto* h = m_registry.try_get<HierarchyComponent>(e)) kids = h->Children;
+        for (auto k : kids) DestroySubtree(k);
+        if (auto* idc = m_registry.try_get<IdComponent>(e)) m_idToEntity.erase(idc->Id);
+        if (m_registry.valid(e)) m_registry.destroy(e);
+    }
+
     std::string m_name;
     entt::registry m_registry;
     std::unordered_map<int, entt::entity> m_idToEntity;

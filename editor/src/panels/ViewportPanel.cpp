@@ -93,7 +93,13 @@ void ViewportPanel::Draw(EditorHost& host) {
     GameObject selected = host.SelectedObject();
     if (selected.Valid()) {
         Transform& tr = selected.GetTransform();
-        glm::mat4 model = tr.GetMatrix();
+        // Гизмо работает в МИРОВОМ пространстве (учёт родителей): манипулируем
+        // мировой матрицей, результат переводим обратно в локальную через
+        // inverse(родительская мировая). Для корневой сущности родитель = единица.
+        Scene& scene = host.CurrentScene();
+        entt::entity parent = scene.ParentOf(selected.Entity());
+        glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
+        glm::mat4 model = scene.WorldMatrix(selected.Entity());
 
         // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
         // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
@@ -115,7 +121,9 @@ void ViewportPanel::Draw(EditorHost& host) {
         if (ImGuizmo::Manipulate(glm::value_ptr(host.ViewMatrix()), glm::value_ptr(host.ProjMatrix()),
                                  op, mode, glm::value_ptr(model),
                                  nullptr, host.GizmoSnap() ? snapValues : nullptr)) {
-            DecomposeToTransform(model, tr);
+            // Мировая -> локальная: убираем вклад родителя.
+            glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
+            DecomposeToTransform(local, tr);
         }
 
         // Фронт «начали таскать»: одна запись undo на всё перетаскивание.

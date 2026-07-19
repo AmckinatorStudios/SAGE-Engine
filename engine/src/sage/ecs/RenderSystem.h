@@ -21,4 +21,17 @@ inline void ForEachRenderable(Scene& scene, Fn&& fn) {
     }
 }
 
+// Вариант с сущностью — для кода, которому нужна МИРОВАЯ матрица (иерархия):
+// fn(entt::entity, Transform&, MeshRendererComponent&). Мировую матрицу
+// вызывающий берёт через scene.WorldMatrix(entity).
+template <typename Fn>
+inline void ForEachRenderableEntity(Scene& scene, Fn&& fn) {
+    auto view = scene.Registry().view<Transform, MeshRendererComponent>();
+    for (auto entity : view) {
+        MeshRendererComponent& mr = view.template get<MeshRendererComponent>(entity);
+        if (!mr.MeshPtr) continue;
+        fn(entity, view.template get<Transform>(entity), mr);
+    }
+}
+
 } // namespace sage::ecs

@@ -82,6 +82,7 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.SelectedObject();
+    entt::registry& reg = host.CurrentScene().Registry();
 
     char buf[128];
     std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
@@ -168,8 +169,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
-    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<CameraComponent>(obj.Entity()) && ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (CameraComponent* cam = reg.try_get<CameraComponent>(obj.Entity())) {
             ImGui::DragFloat("FOV", &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat("Near", &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
@@ -180,17 +180,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<CameraComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Camera")) {
-                host.PushUndoSnapshot();
-                reg.emplace<CameraComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор) ---
-    if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<LightComponent>(obj.Entity()) && ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
             const char* types[] = {"Point", "Spot"};
             int kind = (int)light->Kind;
@@ -215,17 +209,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<LightComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Light")) {
-                host.PushUndoSnapshot();
-                reg.emplace<LightComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
-    if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<ScriptComponent>(obj.Entity()) && ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             char scriptBuf[512];
             std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", sc->Path.c_str());
@@ -236,17 +224,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<ScriptComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Script")) {
-                host.PushUndoSnapshot();
-                reg.emplace<ScriptComponent>(obj.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
-            }
         }
     }
 
     // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
-    if (ImGui::CollapsingHeader("Rigid Body", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && ImGui::CollapsingHeader("Rigid Body", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::BodyType.
             const char* types[] = {"Static", "Dynamic", "Kinematic"};
@@ -263,17 +245,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<RigidBodyComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Rigid Body")) {
-                host.PushUndoSnapshot();
-                reg.emplace<RigidBodyComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
-    if (ImGui::CollapsingHeader("Collider", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<ColliderComponent>(obj.Entity()) && ImGui::CollapsingHeader("Collider", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::ShapeType.
             const char* shapes[] = {"Box", "Sphere", "Capsule"};
@@ -299,17 +275,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<ColliderComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Collider")) {
-                host.PushUndoSnapshot();
-                reg.emplace<ColliderComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Скелетно-анимированная модель (.glb/.gltf или процедурное демо) ---
-    if (ImGui::CollapsingHeader("Animated Model", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<AnimatedModelComponent>(obj.Entity()) && ImGui::CollapsingHeader("Animated Model", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity())) {
             char pathBuf[512];
             std::snprintf(pathBuf, sizeof(pathBuf), "%s", am->Path.c_str());
@@ -352,17 +322,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<AnimatedModelComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Animated Model")) {
-                host.PushUndoSnapshot();
-                reg.emplace<AnimatedModelComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Эмиттер частиц (огонь/дым/искры/…): пресеты + тонкая настройка ---
-    if (ImGui::CollapsingHeader("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen)) {
-        entt::registry& reg = host.CurrentScene().Registry();
+    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && ImGui::CollapsingHeader("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
             ParticleEmitterConfig& cfg = em->Config;
             // Пресеты: применяют готовый конфиг, дальше его можно править.
@@ -402,20 +366,53 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<ParticleEmitterComponent>(obj.Entity());
             }
-        } else {
-            if (ImGui::Button("Add Particle Emitter")) {
-                host.PushUndoSnapshot();
-                ParticleEmitterComponent em;
-                em.Config = ParticlePresets::Registry()[0].Make(); // Fire
-                reg.emplace<ParticleEmitterComponent>(obj.Entity(), em);
-            }
         }
     }
+
+    // --- Единое «Add Component»: добавляет любой ОТСУТСТВУЮЩИЙ компонент ---
+    DrawAddComponentMenu(host, obj);
 
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
     if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) host.DeleteSelected();
     ImGui::PopStyleColor();
+}
+
+// Кнопка «Add Component» + попап со списком компонентов, которых у сущности ещё
+// нет. Так добавление унифицировано (а удаление — кнопкой Remove в самой секции).
+void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    entt::entity e = obj.Entity();
+
+    ImGui::Separator();
+    if (ImGui::Button("Add Component", ImVec2(-1, 0))) ImGui::OpenPopup("##add_component");
+    if (ImGui::BeginPopup("##add_component")) {
+        bool any = false;
+        auto item = [&](const char* label, bool present, auto addFn) {
+            if (present) return;
+            any = true;
+            if (ImGui::MenuItem(label)) {
+                host.PushUndoSnapshot();
+                addFn();
+                ImGui::CloseCurrentPopup();
+            }
+        };
+        item("Camera", reg.all_of<CameraComponent>(e), [&] { reg.emplace<CameraComponent>(e); });
+        item("Light", reg.all_of<LightComponent>(e), [&] { reg.emplace<LightComponent>(e); });
+        item("Script", reg.all_of<ScriptComponent>(e),
+             [&] { reg.emplace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"}); });
+        item("Rigid Body", reg.all_of<RigidBodyComponent>(e), [&] { reg.emplace<RigidBodyComponent>(e); });
+        item("Collider", reg.all_of<ColliderComponent>(e), [&] { reg.emplace<ColliderComponent>(e); });
+        item("Animated Model", reg.all_of<AnimatedModelComponent>(e),
+             [&] { reg.emplace<AnimatedModelComponent>(e); });
+        item("Particle Emitter", reg.all_of<ParticleEmitterComponent>(e), [&] {
+            ParticleEmitterComponent em;
+            em.Config = ParticlePresets::Registry()[0].Make(); // Fire
+            reg.emplace<ParticleEmitterComponent>(e, em);
+        });
+        if (!any) ImGui::TextDisabled("All components already added");
+        ImGui::EndPopup();
+    }
 }
 
 void InspectorPanel::Draw(EditorHost& host) {

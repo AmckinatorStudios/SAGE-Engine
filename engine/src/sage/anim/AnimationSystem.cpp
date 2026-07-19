@@ -54,8 +54,7 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
     for (auto e : v) {
         AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
         if (!am.Model) continue;
-        const Transform& tr = v.get<Transform>(e);
-        am.Model->Draw(tr.GetMatrix(), view, proj, viewPos, env, am.Anim.BoneMatrices(),
+        am.Model->Draw(scene.WorldMatrix(e), view, proj, viewPos, env, am.Anim.BoneMatrices(),
                        lightMatrix, shadowMap, shadowsEnabled);
     }
 }
@@ -65,8 +64,7 @@ void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix) {
     for (auto e : v) {
         AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
         if (!am.Model) continue;
-        const Transform& tr = v.get<Transform>(e);
-        am.Model->DrawDepth(tr.GetMatrix(), lightMatrix, am.Anim.BoneMatrices());
+        am.Model->DrawDepth(scene.WorldMatrix(e), lightMatrix, am.Anim.BoneMatrices());
     }
 }
 

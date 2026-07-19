@@ -184,6 +184,12 @@ static json BuildSceneJson(const Scene& scene) {
         json j;
         j["id"] = reg.get<IdComponent>(e).Id;
         j["name"] = reg.get<NameComponent>(e).Name;
+        // Родитель в иерархии — по стабильному id (восстанавливается после загрузки всех).
+        if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e)) {
+            if (h->Parent != entt::null && reg.valid(h->Parent))
+                if (const IdComponent* pid = reg.try_get<IdComponent>(h->Parent))
+                    j["parent"] = pid->Id;
+        }
         j["position"] = Vec3ToJson(tr.Position);
         j["rotation"] = Vec3ToJson(tr.Rotation);
         j["scale"]    = Vec3ToJson(tr.Scale);
@@ -265,10 +271,12 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
     int maxId = 0;
     int fallbackId = 1;
+    std::vector<std::pair<int, int>> parentLinks; // {childId, parentId} — применяем после загрузки всех
     for (const auto& j : root.value("objects", json::array())) {
         int id = j.value("id", fallbackId++);
         GameObject obj = scene->CreateObjectWithId(j.value("name", "Object"), id);
         maxId = std::max(maxId, id);
+        if (j.contains("parent")) parentLinks.push_back({id, j.value("parent", -1)});
 
         Transform& tr = obj.GetTransform();
         MeshRendererComponent& mr = obj.Renderer();
@@ -388,6 +396,10 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);
         }
     }
+    // Восстанавливаем иерархию, когда ВСЕ сущности уже созданы (родитель мог
+    // идти в файле позже ребёнка).
+    for (const auto& [childId, parentId] : parentLinks) scene->SetParentById(childId, parentId);
+
     scene->SetNextId(maxId + 1);
     scene->Lighting = LightingFromJson(root);
 
