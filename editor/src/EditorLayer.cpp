@@ -338,6 +338,18 @@ GameObject EditorLayer::CreatePrimitiveEntity(const std::string& name, MeshRef::
     return obj;
 }
 
+namespace {
+// Копирует компонент T с сущности src на copy, если он есть. Дубликат должен
+// нести ВСЕ движковые компоненты — раньше копировались только Script/Camera, и
+// дубликат света/физического тела/эмиттера молча терял суть оригинала.
+template <typename T>
+void CopyComponentIfPresent(GameObject& src, GameObject& copy) {
+    if (const T* c = src.Registry()->try_get<T>(src.Entity())) {
+        copy.Registry()->emplace_or_replace<T>(copy.Entity(), *c);
+    }
+}
+} // namespace
+
 void EditorLayer::DuplicateSelected() {
     GameObject src = m_scene->Get(m_selectedId);
     if (!src.Valid()) return;
@@ -347,12 +359,24 @@ void EditorLayer::DuplicateSelected() {
     copy.GetTransform().Position.x += 0.5f; // сдвиг, чтобы копия не сливалась с оригиналом
     MeshRendererComponent& mr = copy.Renderer();
     mr = src.Renderer();
-    if (const ScriptComponent* sc = src.Registry()->try_get<ScriptComponent>(src.Entity())) {
-        copy.Registry()->emplace<ScriptComponent>(copy.Entity(), *sc);
+    CopyComponentIfPresent<ScriptComponent>(src, copy);
+    CopyComponentIfPresent<CameraComponent>(src, copy);
+    CopyComponentIfPresent<LightComponent>(src, copy);
+    CopyComponentIfPresent<RigidBodyComponent>(src, copy);
+    CopyComponentIfPresent<ColliderComponent>(src, copy);
+    CopyComponentIfPresent<ParticleEmitterComponent>(src, copy);
+    CopyComponentIfPresent<AnimatedModelComponent>(src, copy);
+    // Рантайм-состояние копии — своё, не разделённое с оригиналом: тело физики
+    // построится в Play заново, анимация — при первом апдейте, эмиттер — с нуля.
+    if (auto* rb = copy.Registry()->try_get<RigidBodyComponent>(copy.Entity()))
+        rb->RuntimeBody = sage::physics::kInvalidBody;
+    if (auto* am = copy.Registry()->try_get<AnimatedModelComponent>(copy.Entity())) {
+        am->Model.reset();
+        am->Anim = sage::anim::Animator{};
+        am->Ready = false;
     }
-    if (const CameraComponent* cam = src.Registry()->try_get<CameraComponent>(src.Entity())) {
-        copy.Registry()->emplace<CameraComponent>(copy.Entity(), *cam);
-    }
+    if (auto* pe = copy.Registry()->try_get<ParticleEmitterComponent>(copy.Entity()))
+        pe->Accumulator = 0.0f;
     m_selectedId = copy.Id();
 }
 

@@ -82,7 +82,12 @@ public:
 
     // То же, но с явным id — используется сериализатором при загрузке сцены,
     // чтобы сохранить id из файла. Обычный код зовёт CreateObject.
+    // Занятый id (битый/правленный руками файл сцены с дубликатами) молча
+    // перезаписал бы карту id->entity — прежняя сущность стала бы недостижимой
+    // (утечка в registry, RemoveObject её больше не найдёт). Вместо этого
+    // выдаём ближайший свободный id; фактический id — в возвращённом объекте.
     GameObject CreateObjectWithId(const std::string& name, int id) {
+        while (m_idToEntity.find(id) != m_idToEntity.end()) id = m_nextId++;
         entt::entity e = m_registry.create();
         m_registry.emplace<IdComponent>(e, IdComponent{id});
         m_registry.emplace<NameComponent>(e, NameComponent{name});

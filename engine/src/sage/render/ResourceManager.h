@@ -52,10 +52,19 @@ public:
         }
     }
 
+    // Модель по пути. nullptr при ошибке (файл удалён/бит) — вызывающий просто
+    // не рисует сущность, а сцена с одной битой моделью грузится ЦЕЛИКОМ (раньше
+    // исключение из лоадера обрывало загрузку всей сцены). Ошибка кэшируется
+    // (негативный кэш) — битый файл не перечитывается с диска на каждый запрос.
     std::shared_ptr<Mesh> GetModel(const std::string& path) {
         auto it = m_models.find(path);
         if (it != m_models.end()) return it->second;
-        auto mesh = ModelLoader::LoadObj(path);
+        std::shared_ptr<Mesh> mesh;
+        try {
+            mesh = ModelLoader::LoadObj(path);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
+        }
         m_models[path] = mesh;
         return mesh;
     }

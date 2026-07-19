@@ -21,22 +21,29 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
 
+    // Границы массивов атрибутов — индексы из битого/вредоносного .obj обязаны
+    // проверяться, иначе чтение за границей буфера (crash/UB на крафтовом файле).
+    const size_t vertexCount = attrib.vertices.size() / 3;
+    const size_t normalCount = attrib.normals.size() / 3;
+    const size_t texCount = attrib.texcoords.size() / 2;
+
     for (const auto& shape : shapes) {
         for (const auto& idx : shape.mesh.indices) {
+            if (idx.vertex_index < 0 || (size_t)idx.vertex_index >= vertexCount) continue;
             Vertex v{};
             v.Position = {
                 attrib.vertices[3 * idx.vertex_index + 0],
                 attrib.vertices[3 * idx.vertex_index + 1],
                 attrib.vertices[3 * idx.vertex_index + 2]
             };
-            if (idx.normal_index >= 0) {
+            if (idx.normal_index >= 0 && (size_t)idx.normal_index < normalCount) {
                 v.Normal = {
                     attrib.normals[3 * idx.normal_index + 0],
                     attrib.normals[3 * idx.normal_index + 1],
                     attrib.normals[3 * idx.normal_index + 2]
                 };
             }
-            if (idx.texcoord_index >= 0) {
+            if (idx.texcoord_index >= 0 && (size_t)idx.texcoord_index < texCount) {
                 v.TexCoords = {
                     attrib.texcoords[2 * idx.texcoord_index + 0],
                     attrib.texcoords[2 * idx.texcoord_index + 1]

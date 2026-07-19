@@ -51,9 +51,15 @@ public:
     ParticleSystem(const ParticleSystem&) = delete;
     ParticleSystem& operator=(const ParticleSystem&) = delete;
 
+    // Жёсткий потолок живых частиц. Burst/EmissionRate доступны из Lua и из
+    // сериализуемых сцен — без потолка EmitParticles(cfg, pos, 10^9) или битое
+    // поле emissionRate исчерпали бы память/заморозили кадр. Новые частицы
+    // сверх лимита просто не рождаются (старые доживают своё).
+    static constexpr size_t kMaxParticles = 65536;
+
     // Разовый залп из `count` частиц в точке position по правилам config
     void Burst(const ParticleEmitterConfig& config, glm::vec3 position, int count) {
-        for (int i = 0; i < count; ++i) {
+        for (int i = 0; i < count && m_particles.size() < kMaxParticles; ++i) {
             m_particles.push_back(SpawnOne(config, position));
         }
     }
@@ -85,10 +91,14 @@ public:
         for (auto& [id, stream] : m_streams) {
             if (!stream.Active) continue;
             stream.SpawnAccumulator += stream.Config.EmissionRate * dt;
-            while (stream.SpawnAccumulator >= 1.0f) {
+            // Потолок и на накопитель: безумный EmissionRate (битая сцена/скрипт)
+            // не должен ни крутить цикл миллиарды итераций, ни копить «долг».
+            stream.SpawnAccumulator = std::min(stream.SpawnAccumulator, 4096.0f);
+            while (stream.SpawnAccumulator >= 1.0f && m_particles.size() < kMaxParticles) {
                 m_particles.push_back(SpawnOne(stream.Config, stream.Position));
                 stream.SpawnAccumulator -= 1.0f;
             }
+            if (m_particles.size() >= kMaxParticles) stream.SpawnAccumulator = 0.0f;
         }
 
         for (Particle& p : m_particles) {

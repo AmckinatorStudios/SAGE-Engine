@@ -312,6 +312,9 @@ void ScriptEngine::RegisterMeshApi() {
         MeshRendererComponent& mr = obj.Renderer();
         mr.Ref = MeshRef{MeshRef::Type::Model, path};
         mr.MeshPtr = ResourceManager::Instance().GetModel(path);
+        // GetModel при ошибке возвращает nullptr (чтобы загрузка СЦЕНЫ с битой
+        // моделью не обрывалась) — но скрипту отдаём прежний контракт: ошибка.
+        if (!mr.MeshPtr) throw std::runtime_error("SetMeshModel: модель не загрузилась: " + path);
     });
 
     // Остальные встроенные примитивы — как SetMeshCube, но для сферы/плоскости/
@@ -707,6 +710,18 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
 }
 
 void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::object data) {
+    // Ограничение глубины: OnMessage может сам слать сообщения — цикл из двух
+    // обработчиков, пересылающих друг другу, дал бы неограниченную рекурсию и
+    // переполнение C++-стека (краш всего движка из-за ошибки в скрипте).
+    constexpr int kMaxMessageDepth = 16;
+    if (m_messageDepth >= kMaxMessageDepth) {
+        LOG_ERROR("ScriptEngine") << "SendMessage/Broadcast: превышена глубина вложенной рассылки ("
+                                  << kMaxMessageDepth << ") на сообщении '" << name
+                                  << "' — вероятен цикл OnMessage-обработчиков, рассылка оборвана";
+        return;
+    }
+    ++m_messageDepth;
+
     // Собираем цели ДО вызова обработчиков: обработчик может сам слать сообщения,
     // спавнить или уничтожать объекты — любое из этого способно реаллоцировать
     // m_instances и оборвать итератор. Снимок (объект + КОПИЯ обработчика, дешёвая
@@ -728,6 +743,8 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
             LOG_ERROR("ScriptEngine") << "Ошибка в OnMessage (" << who << "): " << err.what();
         }
     }
+
+    --m_messageDepth;
 }
 
 void ScriptEngine::UpdateAll(float deltaTime) {
@@ -773,7 +790,12 @@ void ScriptEngine::UpdateTimers(float dt) {
     // ВНУТРИ самого вызова (из-за вложенного Schedule/Repeat) оборвала бы его
     // раньше, чем вызов успеет завершиться — copy sol::protected_function
     // дешёвый (просто ссылка на тот же Lua-объект), поэтому это не накладно.
-    for (size_t i = 0; i < m_scheduled.size(); ++i) {
+    //
+    // Границу цикла ФИКСИРУЕМ до прохода: таймер, созданный колбэком ВНУТРИ
+    // этого же прохода (Schedule из тела таймера), не должен тикать в текущем
+    // кадре — иначе он теряет один dt и срабатывает на кадр раньше срока.
+    const size_t scheduledAtFrameStart = m_scheduled.size();
+    for (size_t i = 0; i < scheduledAtFrameStart; ++i) {
         if (m_scheduled[i].Cancelled) continue;
         m_scheduled[i].TimeLeft -= dt;
         if (m_scheduled[i].TimeLeft > 0.0f) continue;

@@ -382,6 +382,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     for (const auto& j : root.value("objects", json::array())) {
         int id = j.value("id", fallbackId++);
         GameObject obj = scene->CreateObjectWithId(j.value("name", "Object"), id);
+        // ФАКТИЧЕСКИЙ id: при дубликате в файле Scene выдаёт ближайший свободный
+        // (см. CreateObjectWithId) — maxId и связи иерархии считаем по нему.
+        id = obj.Id();
         maxId = std::max(maxId, id);
         if (j.contains("parent")) parentLinks.push_back({id, j.value("parent", -1)});
 
