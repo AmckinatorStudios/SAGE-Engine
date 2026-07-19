@@ -67,6 +67,7 @@ private:
     std::unique_ptr<UIRenderer> m_ui;
     sage::ecs::RenderBatch m_batch;            // отсечение по фрустуму + инстансинг статики
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
+    bool m_warnedNoCamera = false; // предупреждение «нет Primary-камеры» — один раз
 
     std::string m_screenshotPath = "player.png";
     int m_autoScreenshotFrame = -1;

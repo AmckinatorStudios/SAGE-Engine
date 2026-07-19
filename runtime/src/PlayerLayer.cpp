@@ -24,6 +24,7 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/ecs/CameraView.h"
 #include "sage/ui/UISceneSystem.h"
 
 namespace fs = std::filesystem;
@@ -123,10 +124,14 @@ void PlayerLayer::OnAttach() {
     // после построения мира (RuntimeBody сущностей уже созданы).
     m_scripts->BindPhysics(*m_physics);
 
-    // Fallback-камера, если сцена без CameraComponent.
-    m_fallbackCamera.Position = {6.5f, 5.0f, 6.5f};
-    m_fallbackCamera.Yaw = -135.0f;
-    m_fallbackCamera.Pitch = -28.0f;
+    // Запасная камера, если в сцене НЕТ Primary-камеры. НАРОЧНО отличается от
+    // редакторской орбитальной камеры (та — {6.5,5,6.5}, yaw -135, pitch -28):
+    // низкий фронтальный ракурс, чтобы «нет камеры» сразу читалось как аварийный
+    // вид, а не как настоящая игровая камера (иначе игрок думал бы, что игра
+    // показывает вьюпорт редактора).
+    m_fallbackCamera.Position = {0.0f, 1.4f, 9.0f};
+    m_fallbackCamera.Yaw = -90.0f;   // строго вдоль -Z, на сцену
+    m_fallbackCamera.Pitch = -6.0f;
     m_fallbackCamera.ProcessMouse(0.0f, 0.0f);
 
     LOG_INFO("Player") << "PLAYER: started '" << m_projectName << "', scene "
@@ -181,27 +186,26 @@ void PlayerLayer::OnRender() {
     int vpX, vpY, vpW, vpH;
     cfg.LetterboxViewport(window.Width(), window.Height(), vpX, vpY, vpW, vpH);
 
-    // --- Камера: Primary-CameraComponent сцены либо fallback ---
+    // --- Камера: Primary-CameraComponent сцены либо запасной вид ---
+    // Кадр берём ТЕМ ЖЕ хелпером, что и панель Game редактора — вид в собранной
+    // игре побайтово совпадает с превью (никакой «фальшивости» превью↔игра).
     glm::mat4 view, proj;
     glm::vec3 viewPos;
     float aspect = (float)vpW / (float)std::max(vpH, 1);
-    entt::entity camEntity = entt::null;
-    auto camView = m_scene->Registry().view<CameraComponent, Transform>();
-    for (auto e : camView) {
-        if (camView.get<CameraComponent>(e).Primary) { camEntity = e; break; }
-    }
-    if (camEntity != entt::null) {
-        const CameraComponent& cam = camView.get<CameraComponent>(camEntity);
-        const Transform& tr = camView.get<Transform>(camEntity);
-        glm::mat4 rot = glm::eulerAngleXYZ(glm::radians(tr.Rotation.x),
-                                           glm::radians(tr.Rotation.y),
-                                           glm::radians(tr.Rotation.z));
-        glm::vec3 fwd = glm::normalize(glm::vec3(rot * glm::vec4(0, 0, -1, 0)));
-        glm::vec3 up = glm::normalize(glm::vec3(rot * glm::vec4(0, 1, 0, 0)));
-        view = glm::lookAt(tr.Position, tr.Position + fwd, up);
-        proj = glm::perspective(glm::radians(cam.Fov), aspect, cam.NearClip, cam.FarClip);
-        viewPos = tr.Position;
+    sage::ecs::CameraFrame frame = sage::ecs::PrimaryCameraFrame(*m_scene, aspect);
+    if (frame.HasPrimary) {
+        view = frame.View;
+        proj = frame.Proj;
+        viewPos = frame.Position;
     } else {
+        // Явно предупреждаем (один раз): без Primary-камеры игра показывает
+        // ЗАПАСНОЙ вид — и он НАРОЧНО не совпадает с редакторской камерой, чтобы
+        // «нет камеры» нельзя было спутать с нормальным игровым видом.
+        if (!m_warnedNoCamera) {
+            LOG_WARN("Player") << "В сцене нет Primary-камеры (CameraComponent) — показываю "
+                                  "запасной вид. Добавьте камеру: Entity > Create Camera в редакторе.";
+            m_warnedNoCamera = true;
+        }
         view = m_fallbackCamera.GetViewMatrix();
         proj = m_fallbackCamera.GetProjectionMatrix(aspect);
         viewPos = m_fallbackCamera.Position;

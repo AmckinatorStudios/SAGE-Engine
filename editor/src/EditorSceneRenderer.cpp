@@ -9,6 +9,7 @@
 #include "sage/render/ParticleECS.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
+#include "sage/ecs/CameraView.h"
 #include "sage/ui/UISceneSystem.h"
 
 void EditorSceneRenderer::Init() {
@@ -274,21 +275,16 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 }
 
 void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg) {
-    // Первая Primary-камера сцены; нет — кадр не рисуем (панель Game покажет подсказку).
-    entt::entity camEntity = entt::null;
-    auto camView = scene.Registry().view<CameraComponent, Transform>();
-    for (auto e : camView)
-        if (camView.get<CameraComponent>(e).Primary) { camEntity = e; break; }
-    if (camEntity == entt::null) { m_gamePostApplied = false; return; }
-
-    const CameraComponent& cam = camView.get<CameraComponent>(camEntity);
-    glm::mat4 camWorld = scene.WorldMatrix(camEntity); // учёт иерархии родителей
-    glm::vec3 camPos = glm::vec3(camWorld[3]);
-    glm::vec3 fwd = glm::normalize(glm::vec3(camWorld * glm::vec4(0, 0, -1, 0)));
-    glm::vec3 up = glm::normalize(glm::vec3(camWorld * glm::vec4(0, 1, 0, 0)));
-    glm::mat4 view = glm::lookAt(camPos, camPos + fwd, up);
+    // Кадр от Primary-камеры сцены — ЧЕРЕЗ ТОТ ЖЕ ХЕЛПЕР, что и собранная игра
+    // (sage::ecs::PrimaryCameraFrame): превью Game-панели = реальный вид в игре.
+    // Нет Primary-камеры — кадр не рисуем (панель Game покажет подсказку).
     float aspect = (float)m_gameW / (float)std::max(m_gameH, 1);
-    glm::mat4 proj = glm::perspective(glm::radians(cam.Fov), aspect, cam.NearClip, cam.FarClip);
+    sage::ecs::CameraFrame frame = sage::ecs::PrimaryCameraFrame(scene, aspect);
+    if (!frame.HasPrimary) { m_gamePostApplied = false; return; }
+
+    const glm::mat4& view = frame.View;
+    const glm::mat4& proj = frame.Proj;
+    glm::vec3 camPos = frame.Position;
 
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     m_gameFbo->Resize(m_gameW, m_gameH);

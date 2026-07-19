@@ -133,6 +133,8 @@ void EditorLayer::OnAttach() {
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
+    // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
+    if (std::getenv("SAGE_EDITOR_SHOW_GAME")) m_game.RequestFocus();
 
     // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
     // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
@@ -429,11 +431,29 @@ void EditorLayer::NewScene(bool withDemoContent) {
             obj.Renderer().Color = d.color;
         }
 
-        // Игровая камера сцены — панель Game сразу показывает картинку, а не
-        // подсказку «нет камеры»; сущность без меша (не рисуется в мире).
+        // Криволинейные примитивы — витрина форм И проверка аутлайна выделения:
+        // кайма строится из СИЛУЭТА реального меша, поэтому одинаково точна для
+        // сферы/цилиндра/конуса, а не только для боксов.
+        struct Prim { const char* name; MeshRef::Type type; glm::vec3 pos; glm::vec3 color; };
+        Prim prims[] = {
+            {"Sphere",   MeshRef::Type::Sphere,   {-3.0f, 0.5f, 1.8f}, {0.85f, 0.55f, 0.25f}},
+            {"Cylinder", MeshRef::Type::Cylinder, {-1.5f, 0.5f, 2.2f}, {0.55f, 0.35f, 0.80f}},
+            {"Cone",     MeshRef::Type::Cone,     {1.5f,  0.5f, 2.2f}, {0.30f, 0.70f, 0.70f}},
+        };
+        for (const Prim& p : prims) {
+            GameObject obj = CreatePrimitiveEntity(p.name, p.type);
+            obj.GetTransform().Position = p.pos;
+            obj.Renderer().Color = p.color;
+        }
+
+        // Игровая камера сцены — панель Game сразу показывает картинку. НАРОЧНО
+        // поставлена НЕ как редакторская орбитальная камера ({6.5,5,6.5}, взгляд
+        // сверху): низкий, почти фронтальный «кинематографичный» ракурс с уровня
+        // сцены — так сразу видно, что панель Game показывает СВОЮ, игровую
+        // камеру, а не вид вьюпорта. Сущность без меша (не рисуется в мире).
         GameObject camObj = m_scene->CreateObject("Main Camera");
-        camObj.GetTransform().Position = {5.0f, 4.5f, 5.0f};
-        camObj.GetTransform().Rotation = {-25.0f, 45.0f, 0.0f};
+        camObj.GetTransform().Position = {0.0f, 1.5f, 6.5f};
+        camObj.GetTransform().Rotation = {-6.0f, 0.0f, 0.0f}; // чуть вниз, вдоль -Z
         m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
 
         // Тёплая лампа — демонстрация точечного света-сущности (LightComponent).
@@ -484,9 +504,12 @@ void EditorLayer::NewScene(bool withDemoContent) {
         m_scene->Registry().emplace<UIElementComponent>(hp.Entity(), hpUi);
         m_scene->SetParent(hp.Entity(), hud.Entity());
 
-        // Что-то выбрано сразу — гизмо видно, Inspector не пустой.
-        GameObject green = m_scene->FindByName("Green Cube");
-        if (green.Valid()) m_selectedId = green.Id();
+        // Что-то выбрано сразу — гизмо видно, Inspector не пустой. Выбираем
+        // криволинейный примитив: сразу демонстрирует аутлайн на изогнутом
+        // силуэте (кайма строится из силуэта меша — точна для любой формы).
+        GameObject sel = m_scene->FindByName("Cone");
+        if (!sel.Valid()) sel = m_scene->FindByName("Green Cube");
+        if (sel.Valid()) m_selectedId = sel.Id();
     }
     UpdateWindowTitle();
 }

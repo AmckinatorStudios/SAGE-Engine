@@ -6,6 +6,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
+#include "sage/ecs/CameraView.h"
 
 TEST(Hierarchy_child_inherits_parent_translation) {
     Scene scene("H");
@@ -102,6 +103,37 @@ TEST(Hierarchy_unparent_to_root) {
     scene.SetParent(c.Entity(), p.Entity());
     scene.SetParent(c.Entity(), entt::null); // открепить в корень
     CHECK_TRUE(scene.ParentOf(c.Entity()) == entt::null);
+}
+
+TEST(Camera_frame_none_when_no_primary) {
+    Scene scene("C");
+    scene.CreateObject("JustACube");
+    sage::ecs::CameraFrame f = sage::ecs::PrimaryCameraFrame(scene, 16.0f / 9.0f);
+    CHECK_FALSE(f.HasPrimary); // нет камеры — вызывающий покажет fallback/подсказку
+}
+
+TEST(Camera_frame_uses_world_transform_of_parented_camera) {
+    // Ключ анти-«фальшивости»: кадр камеры берётся из МИРОВОЙ матрицы. Раньше
+    // рантайм брал ЛОКАЛЬНЫЙ Transform — вложенная камера в игре смотрела не
+    // туда, что показывало превью. Теперь и превью, и игра идут через этот хелпер.
+    Scene scene("C");
+    GameObject rig = scene.CreateObject("Rig");
+    rig.GetTransform().Position = {10.0f, 0.0f, 0.0f};
+    GameObject cam = scene.CreateObject("Cam");
+    cam.GetTransform().Position = {0.0f, 2.0f, 5.0f}; // ЛОКАЛЬНО относительно rig
+    scene.Registry().emplace<CameraComponent>(cam.Entity());
+    scene.SetParent(cam.Entity(), rig.Entity());
+
+    sage::ecs::CameraFrame f = sage::ecs::PrimaryCameraFrame(scene, 16.0f / 9.0f);
+    CHECK_TRUE(f.HasPrimary);
+    // Мировая позиция = родитель + локальная = (10, 2, 5), НЕ локальная (0,2,5).
+    CHECK_NEAR(f.Position.x, 10.0f, 1e-3);
+    CHECK_NEAR(f.Position.y, 2.0f, 1e-3);
+    CHECK_NEAR(f.Position.z, 5.0f, 1e-3);
+    // Камера без поворота смотрит вдоль -Z мира: точка на 5 впереди (world z=0)
+    // в видовом пространстве имеет отрицательный z (перед камерой).
+    glm::vec4 vp = f.View * glm::vec4(10.0f, 2.0f, 0.0f, 1.0f);
+    CHECK_TRUE(vp.z < 0.0f);
 }
 
 TEST(Hierarchy_compute_world_matrices_matches_recursive) {
