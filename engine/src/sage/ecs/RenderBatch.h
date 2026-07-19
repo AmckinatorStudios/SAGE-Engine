@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <glm/glm.hpp>
+#include <entt/entt.hpp>
 
 #include "sage/render/Mesh.h"
 
@@ -56,6 +57,10 @@ private:
 
     std::unordered_map<Mesh*, std::vector<MeshInstance>> m_groups; // flat-инстансы по мешу
     std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)
+    // Мировые матрицы кадра (Scene::ComputeWorldMatrices) — один O(n)-проход
+    // на сбор вместо рекурсивного WorldMatrix на каждую сущность (см. Scene.h).
+    // Переиспользуется между кадрами, чтобы не переаллоцировать хэш-таблицу.
+    std::unordered_map<entt::entity, glm::mat4> m_worldCache;
     RenderStats m_stats;
 };
 

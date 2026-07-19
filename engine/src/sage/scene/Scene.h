@@ -153,6 +153,18 @@ public:
         return it == m_idToEntity.end() ? glm::mat4(1.0f) : WorldMatrix(it->second);
     }
 
+    // Мировые матрицы ВСЕХ сущностей с Transform одним мемоизированным проходом:
+    // O(n) на кадр вместо O(n·глубина) при повызовном WorldMatrix на каждую
+    // сущность (рендер зовёт матрицу для каждой видимой сущности в КАЖДОМ
+    // проходе — тени/вьюпорт/игра; общие родительские цепочки пересчитывались
+    // многократно). out переиспользуется вызывающим между кадрами — ёмкость
+    // хэш-таблицы не переаллоцируется.
+    void ComputeWorldMatrices(std::unordered_map<entt::entity, glm::mat4>& out) const {
+        out.clear();
+        auto view = m_registry.view<Transform>();
+        for (auto e : view) WorldMatrixMemo(e, out);
+    }
+
     GameObject FindByName(const std::string& name) {
         auto view = m_registry.view<NameComponent>();
         for (auto e : view) {
@@ -181,6 +193,20 @@ private:
     entt::entity Resolve(int id) const {
         auto it = m_idToEntity.find(id);
         return it == m_idToEntity.end() ? entt::null : it->second;
+    }
+
+    // Рекурсия WorldMatrix с мемо-таблицей: каждая сущность (и каждый общий
+    // родитель) считается ровно один раз за проход ComputeWorldMatrices.
+    glm::mat4 WorldMatrixMemo(entt::entity e, std::unordered_map<entt::entity, glm::mat4>& memo) const {
+        auto it = memo.find(e);
+        if (it != memo.end()) return it->second;
+        const Transform* tr = m_registry.try_get<Transform>(e);
+        glm::mat4 world = tr ? tr->GetMatrix() : glm::mat4(1.0f);
+        const auto* h = m_registry.try_get<HierarchyComponent>(e);
+        if (h && h->Parent != entt::null && m_registry.valid(h->Parent))
+            world = WorldMatrixMemo(h->Parent, memo) * world;
+        memo.emplace(e, world);
+        return world;
     }
     // Является ли node потомком ancestor (поднимаясь по родителям node, встретим ancestor).
     bool IsDescendant(entt::entity node, entt::entity ancestor) const {

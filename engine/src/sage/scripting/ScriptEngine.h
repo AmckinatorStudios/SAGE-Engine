@@ -123,6 +123,12 @@ private:
         sol::environment Env;
         sol::protected_function UpdateFn; // может быть невалидной, если OnUpdate не определён
         sol::protected_function MessageFn; // OnMessage(entity, name, data) — необязателен
+        // Готовый Lua-userdata сущности, создаётся ОДИН раз в AttachScript.
+        // Передача GameObject по значению в каждый вызов OnUpdate заставляла
+        // sol2 аллоцировать новый userdata на КАЖДЫЙ скрипт КАЖДЫЙ кадр —
+        // чистое давление на Lua GC при десятках скриптов. Дескриптор
+        // {registry, entity} стабилен всё время жизни скрипта, кэш корректен.
+        sol::object EntityRef;
         std::string Path; // для сообщений об ошибках
         // Когда сущность объекта уничтожена (DestroyObject), Object.Valid()
         // становится false: UpdateAll() пропускает такую запись, не обращаясь к

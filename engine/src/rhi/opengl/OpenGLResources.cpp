@@ -57,27 +57,35 @@ GLShaderProgram::~GLShaderProgram() {
 
 void GLShaderProgram::Use() const { glUseProgram(m_id); }
 
+int GLShaderProgram::Loc(const std::string& name) const {
+    auto it = m_uniformLocations.find(name);
+    if (it != m_uniformLocations.end()) return it->second;
+    int loc = glGetUniformLocation(m_id, name.c_str());
+    m_uniformLocations.emplace(name, loc); // -1 (нет такой униформы) тоже кэшируем
+    return loc;
+}
+
 void GLShaderProgram::SetMat4(const std::string& name, const glm::mat4& v) const {
-    glUniformMatrix4fv(glGetUniformLocation(m_id, name.c_str()), 1, GL_FALSE, glm::value_ptr(v));
+    glUniformMatrix4fv(Loc(name), 1, GL_FALSE, glm::value_ptr(v));
 }
 void GLShaderProgram::SetMat4Array(const std::string& name, const glm::mat4* v, int count) const {
     if (count <= 0) return;
-    glUniformMatrix4fv(glGetUniformLocation(m_id, name.c_str()), count, GL_FALSE, glm::value_ptr(v[0]));
+    glUniformMatrix4fv(Loc(name), count, GL_FALSE, glm::value_ptr(v[0]));
 }
 void GLShaderProgram::SetVec4(const std::string& name, const glm::vec4& v) const {
-    glUniform4fv(glGetUniformLocation(m_id, name.c_str()), 1, glm::value_ptr(v));
+    glUniform4fv(Loc(name), 1, glm::value_ptr(v));
 }
 void GLShaderProgram::SetVec3(const std::string& name, const glm::vec3& v) const {
-    glUniform3fv(glGetUniformLocation(m_id, name.c_str()), 1, glm::value_ptr(v));
+    glUniform3fv(Loc(name), 1, glm::value_ptr(v));
 }
 void GLShaderProgram::SetVec2(const std::string& name, const glm::vec2& v) const {
-    glUniform2fv(glGetUniformLocation(m_id, name.c_str()), 1, glm::value_ptr(v));
+    glUniform2fv(Loc(name), 1, glm::value_ptr(v));
 }
 void GLShaderProgram::SetFloat(const std::string& name, float v) const {
-    glUniform1f(glGetUniformLocation(m_id, name.c_str()), v);
+    glUniform1f(Loc(name), v);
 }
 void GLShaderProgram::SetInt(const std::string& name, int v) const {
-    glUniform1i(glGetUniformLocation(m_id, name.c_str()), v);
+    glUniform1i(Loc(name), v);
 }
 
 // ============================================================================

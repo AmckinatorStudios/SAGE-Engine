@@ -1,5 +1,6 @@
 #pragma once
 #include "sage/rhi/Resources.h"
+#include <unordered_map>
 
 // OpenGL-реализации RHI-ресурсов. Вместе с OpenGLDevice это ЕДИНСТВЕННОЕ место
 // движка, где включается glad и живут вызовы GL — остальной код (включая игры)
@@ -22,7 +23,16 @@ public:
 
 private:
     static unsigned int Compile(unsigned int type, const std::string& source);
+
+    // Локация униформы с кэшированием. glGetUniformLocation — обращение к
+    // драйверу со строковым поиском; в горячем пути его звали НА КАЖДУЮ
+    // установку униформы (освещение — ~30 установок на проход, редактор — три
+    // прохода в кадр). Программа неизменяема после линковки, так что локации
+    // можно запомнить навсегда. mutable — Set* методы const.
+    int Loc(const std::string& name) const;
+
     unsigned int m_id = 0;
+    mutable std::unordered_map<std::string, int> m_uniformLocations;
 };
 
 class GLGeometry : public Geometry {

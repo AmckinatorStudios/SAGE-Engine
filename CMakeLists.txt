@@ -4,6 +4,16 @@ project(SAGEEngine LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Одноконфигурационные генераторы (Makefiles/Ninja) БЕЗ явного CMAKE_BUILD_TYPE
+# собирают без оптимизаций (-O0) — на слабых машинах это в разы медленнее и
+# легко получить случайно, просто набрав `cmake -B build`. Дефолт — Release;
+# явный выбор пользователя (в т.ч. Debug) уважается.
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Тип сборки (Release по умолчанию: без явного выбора получилась бы -O0)" FORCE)
+    message(STATUS "SAGE: CMAKE_BUILD_TYPE не задан — использую Release")
+endif()
+
 # Хелперы сборки (sage_add_game и т.п.)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(SageHelpers)

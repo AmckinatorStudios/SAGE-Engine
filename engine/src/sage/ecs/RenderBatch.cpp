@@ -198,10 +198,15 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     m_textured.clear();
     Frustum frustum = Frustum::FromViewProj(cullMatrix);
 
+    // Все мировые матрицы кадра одним O(n)-проходом (мемоизация общих
+    // родительских цепочек) — вместо рекурсивного WorldMatrix per-entity.
+    scene.ComputeWorldMatrices(m_worldCache);
+
     ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
         ++m_stats.Total;
         Mesh* mesh = mr.MeshPtr.get();
-        glm::mat4 model = scene.WorldMatrix(e); // мировая матрица (учёт иерархии родителей)
+        auto wit = m_worldCache.find(e);
+        glm::mat4 model = wit != m_worldCache.end() ? wit->second : scene.WorldMatrix(e);
 
         glm::vec3 center = glm::vec3(model * glm::vec4(mesh->BoundsCenter(), 1.0f));
         // Масштаб для радиуса — из столбцов мировой матрицы (учитывает масштаб родителей).

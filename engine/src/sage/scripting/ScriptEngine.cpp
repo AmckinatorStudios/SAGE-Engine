@@ -672,9 +672,13 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     // может принимать сообщения от других скриптов (SendMessage/Broadcast).
     sol::protected_function messageFn = env["OnMessage"];
 
+    // Userdata сущности создаём один раз — все дальнейшие вызовы хуков
+    // передают его же (см. комментарий у ScriptInstance::EntityRef).
+    sol::object entityRef = sol::make_object(m_lua, object);
+
     sol::protected_function startFn = env["OnStart"];
     if (startFn.valid()) {
-        auto startResult = startFn(object);
+        auto startResult = startFn(entityRef);
         if (!startResult.valid()) {
             sol::error err = startResult;
             LOG_ERROR("ScriptEngine") << "Ошибка в OnStart (" << scriptPath << "): " << err.what();
@@ -682,7 +686,7 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     }
 
     m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn),
-                            std::move(messageFn), scriptPath });
+                            std::move(messageFn), std::move(entityRef), scriptPath });
 }
 
 void ScriptEngine::RunScript(const std::string& scriptPath) {
@@ -706,7 +710,7 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
     }
 
     m_instances.push_back({ GameObject{}, /*HasObject=*/false, std::move(env), std::move(updateFn),
-                            sol::protected_function{}, scriptPath });
+                            sol::protected_function{}, sol::object{}, scriptPath });
 }
 
 void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::object data) {
@@ -726,17 +730,17 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
     // спавнить или уничтожать объекты — любое из этого способно реаллоцировать
     // m_instances и оборвать итератор. Снимок (объект + КОПИЯ обработчика, дешёвая
     // ссылка на тот же Lua-объект) к такой мутации иммунен. targetId < 0 — всем.
-    struct Target { GameObject Object; sol::protected_function Fn; };
+    struct Target { GameObject Object; sol::object Ref; sol::protected_function Fn; };
     std::vector<Target> targets;
     for (auto& inst : m_instances) {
         if (!inst.HasObject || !inst.Object.Valid()) continue;
         if (!inst.MessageFn.valid()) continue;
         if (targetId >= 0 && inst.Object.Id() != targetId) continue;
-        targets.push_back({ inst.Object, inst.MessageFn });
+        targets.push_back({ inst.Object, inst.EntityRef, inst.MessageFn });
     }
     for (auto& t : targets) {
         if (!t.Object.Valid()) continue; // мог быть уничтожен предыдущим обработчиком в этой рассылке
-        auto result = t.Fn(t.Object, name, data);
+        auto result = t.Fn(t.Ref, name, data);
         if (!result.valid()) {
             sol::error err = result;
             std::string who = t.Object.Valid() ? t.Object.Name() : std::string("?");
@@ -753,8 +757,10 @@ void ScriptEngine::UpdateAll(float deltaTime) {
         if (instance.HasObject && !instance.Object.Valid()) continue;
         if (!instance.UpdateFn.valid()) continue; // скрипт без OnUpdate — легитимно (см. AttachScript)
 
-        // Объектные скрипты получают entity первым аргументом, уровневые — нет
-        auto result = instance.HasObject ? instance.UpdateFn(instance.Object, deltaTime)
+        // Объектные скрипты получают entity первым аргументом, уровневые — нет.
+        // EntityRef — кэшированный userdata (см. ScriptInstance): без него sol2
+        // аллоцировал бы новый объект на каждый скрипт каждый кадр.
+        auto result = instance.HasObject ? instance.UpdateFn(instance.EntityRef, deltaTime)
                                          : instance.UpdateFn(deltaTime);
         if (!result.valid()) {
             sol::error err = result;

@@ -103,3 +103,34 @@ TEST(Hierarchy_unparent_to_root) {
     scene.SetParent(c.Entity(), entt::null); // открепить в корень
     CHECK_TRUE(scene.ParentOf(c.Entity()) == entt::null);
 }
+
+TEST(Hierarchy_compute_world_matrices_matches_recursive) {
+    // Мемоизированный проход ComputeWorldMatrices (оптимизация рендера) обязан
+    // давать в точности те же матрицы, что рекурсивный WorldMatrix per-entity.
+    Scene scene("H");
+    GameObject root = scene.CreateObject("Root");
+    root.GetTransform().Position = {1.0f, 2.0f, 3.0f};
+    root.GetTransform().Rotation = {0.0f, 45.0f, 0.0f};
+    GameObject mid = scene.CreateObject("Mid");
+    mid.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+    mid.GetTransform().Scale = {2.0f, 2.0f, 2.0f};
+    GameObject leaf = scene.CreateObject("Leaf");
+    leaf.GetTransform().Position = {0.5f, 0.0f, -0.5f};
+    GameObject lone = scene.CreateObject("Lone"); // без родителя
+    lone.GetTransform().Position = {-4.0f, 0.0f, 7.0f};
+    scene.SetParent(mid.Entity(), root.Entity());
+    scene.SetParent(leaf.Entity(), mid.Entity());
+
+    std::unordered_map<entt::entity, glm::mat4> memo;
+    scene.ComputeWorldMatrices(memo);
+
+    for (GameObject o : {root, mid, leaf, lone}) {
+        auto it = memo.find(o.Entity());
+        CHECK_TRUE(it != memo.end());
+        glm::mat4 expect = scene.WorldMatrix(o.Entity());
+        const glm::mat4& got = it->second;
+        for (int c2 = 0; c2 < 4; ++c2)
+            for (int r = 0; r < 4; ++r)
+                CHECK_NEAR(got[c2][r], expect[c2][r], 1e-4);
+    }
+}
