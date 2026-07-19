@@ -4,6 +4,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/render/Camera.h"
+#include "sage/core/Config.h"
 
 class Project;
 
@@ -49,7 +50,16 @@ public:
     virtual bool SaveSceneToFile(const std::filesystem::path& path) = 0;
     virtual bool CreateProject(const std::string& dir, const std::string& name, std::string& err) = 0;
     virtual bool OpenProject(const std::string& path, std::string& err) = 0;
+    // Упаковывает открытый проект в готовую к запуску игру (SagePlayer + ассеты).
+    // false + err при ошибке. Нужен панели диалогов (Build Game...).
+    virtual bool BuildGame(const std::filesystem::path& outputDir, std::string& err) = 0;
     virtual std::filesystem::path& AssetsCwd() = 0; // текущая папка панели Assets
+
+    // Гибкая конфигурация игры (EngineConfig) — редактируется панелью Settings,
+    // сохраняется в <проект>/sage.cfg, Build Game кладёт её в собранную игру.
+    virtual sage::EngineConfig& Settings() = 0;
+    // Короткое сообщение в статус-баре (обратная связь панелей/плагинов).
+    virtual void SetStatusMessage(const std::string& message) = 0;
 
     // --- undo/redo ---
     virtual void PushUndoSnapshot() = 0;

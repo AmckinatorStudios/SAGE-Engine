@@ -88,10 +88,7 @@ void EditorLayer::OnAttach() {
     m_camera.Pitch = -28.0f;
     m_camera.ProcessMouse(0.0f, 0.0f);
 
-    // Дефолтная папка диалогов — рядом с бинарником; сборка игр — в dist/.
-    std::snprintf(m_dlgProjectDir, sizeof(m_dlgProjectDir), "%s", fs::current_path().string().c_str());
-    std::snprintf(m_dlgBuildDir, sizeof(m_dlgBuildDir), "%s",
-                  (fs::current_path() / "dist").string().c_str());
+    // Дефолтные пути диалогов теперь инициализирует DialogsPanel (в конструкторе).
     m_assetsCwd = fs::current_path();
 
     m_recent.Load();
@@ -664,7 +661,7 @@ void EditorLayer::OnRender() {
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
 
-    DrawDockspaceAndMenu(); // включая модальные диалоги (см. DrawDialogs внутри)
+    DrawDockspaceAndMenu(); // включая модалки (m_dialogs) и окно настроек (m_settingsPanel)
     m_hierarchy.Draw(*this);
     m_inspector.Draw(*this);
     m_lighting.Draw(*this);
@@ -837,7 +834,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (ImGui::MenuItem("Save Scene As...")) openDialog = "Save Scene As";
             ImGui::Separator();
             if (ImGui::MenuItem("Build Game...", nullptr, false, m_project.Loaded())) {
-                m_dlgBuildResult.clear();
                 openDialog = "Build Game";
             }
             ImGui::Separator();
@@ -942,13 +938,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
         ImGui::EndMenuBar();
     }
 
-    if (openDialog) {
-        m_dlgError.clear();
-        ImGui::OpenPopup(openDialog);
-    }
-    // Модалки рисуются в том же ID-пространстве окна-хоста, где их открыли.
-    DrawDialogs();
-    DrawSettingsWindow();
+    // Модалки диалогов и окно настроек — самостоятельные панели, но рисуются
+    // ЗДЕСЬ, на уровне окна-хоста: модалка ImGui совпадает с OpenPopup по
+    // ID-стеку окна, поэтому открытие и отрисовку нельзя разносить по окнам.
+    if (openDialog) m_dialogs.Open(openDialog);
+    m_dialogs.Draw(*this);
+    m_settingsPanel.Draw(*this, m_showSettings);
 
     ImGui::End();
 
@@ -962,205 +957,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
         if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) ||
             (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z))) Redo();
     }
-}
-
-// ============================================================================
-//  Диалоги File-меню (модальные окна)
-// ============================================================================
-
-void EditorLayer::DrawDialogs() {
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("New Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("Name", m_dlgProjectName, sizeof(m_dlgProjectName));
-        ImGui::InputText("Location", m_dlgProjectDir, sizeof(m_dlgProjectDir));
-        ImGui::TextDisabled("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/");
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        if (ImGui::Button("Create", ImVec2(120, 0))) {
-            std::string err;
-            if (CreateProject(m_dlgProjectDir, m_dlgProjectName, err)) {
-                ImGui::CloseCurrentPopup();
-            } else {
-                m_dlgError = err;
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Open Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("Path", m_dlgOpenPath, sizeof(m_dlgOpenPath));
-        ImGui::TextDisabled("Path to project.sageproj or the project folder");
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        if (ImGui::Button("Open", ImVec2(120, 0))) {
-            std::string err;
-            if (OpenProject(m_dlgOpenPath, err)) {
-                ImGui::CloseCurrentPopup();
-            } else {
-                m_dlgError = err;
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Save Scene As", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("File name", m_dlgSceneName, sizeof(m_dlgSceneName));
-        fs::path target = m_project.Loaded()
-            ? m_project.ScenesDir() / (std::string(m_dlgSceneName) + ".sage")
-            : fs::path(std::string(m_dlgSceneName) + ".sage");
-        ImGui::TextDisabled("-> %s", target.string().c_str());
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        if (ImGui::Button("Save", ImVec2(120, 0))) {
-            m_scene->SetName(m_dlgSceneName);
-            if (SaveSceneToFile(target)) ImGui::CloseCurrentPopup();
-            else m_dlgError = "Save failed (see Console)";
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Build Game", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextDisabled("Packages SagePlayer + project '%s' into a runnable game",
-                            m_project.Name().c_str());
-        ImGui::InputText("Output dir", m_dlgBuildDir, sizeof(m_dlgBuildDir));
-        ImGui::TextDisabled("-> %s/%s/%s", m_dlgBuildDir, m_project.Name().c_str(),
-                            m_project.Name().c_str());
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        if (!m_dlgBuildResult.empty())
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1), "Built: %s", m_dlgBuildResult.c_str());
-        if (ImGui::Button("Build", ImVec2(120, 0))) {
-            std::string err;
-            if (BuildGame(m_dlgBuildDir, err)) {
-                m_dlgError.clear();
-                m_dlgBuildResult = (fs::path(m_dlgBuildDir) / m_project.Name()).string();
-            } else {
-                m_dlgError = err;
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Open Scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("Path", m_dlgOpenPath, sizeof(m_dlgOpenPath));
-        ImGui::TextDisabled("Path to a .sage scene file (tip: double-click one in Assets)");
-        if (!m_dlgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_dlgError.c_str());
-        if (ImGui::Button("Open", ImVec2(120, 0))) {
-            if (LoadSceneFromFile(m_dlgOpenPath)) ImGui::CloseCurrentPopup();
-            else m_dlgError = "Load failed (see Console)";
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-}
-
-// ============================================================================
-//  Окно гибких настроек движка (EngineConfig). Редактирует m_settings и
-//  сохраняет в <проект>/sage.cfg — Build Game кладёт файл в собранную игру, и
-//  SagePlayer/игра читают его при запуске. Оконные параметры (размер/режим/
-//  vsync) применяются при следующем запуске игры, не в самом редакторе.
-// ============================================================================
-void EditorLayer::DrawSettingsWindow() {
-    if (!m_showSettings) return;
-    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Settings", &m_showSettings)) { ImGui::End(); return; }
-
-    sage::EngineConfig& c = m_settings;
-
-    ImGui::TextDisabled("Гибкая конфигурация игры (сохраняется в проект как sage.cfg).");
-    ImGui::Separator();
-
-    if (ImGui::CollapsingHeader("Window / Окно", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::InputInt("Width", &c.Width);
-        ImGui::InputInt("Height", &c.Height);
-        const char* modes[] = {"Windowed", "Borderless", "Fullscreen"};
-        int mode = (int)c.Mode;
-        if (ImGui::Combo("Mode", &mode, modes, IM_ARRAYSIZE(modes))) c.Mode = (sage::WindowMode)mode;
-        ImGui::Checkbox("VSync", &c.VSync);
-        ImGui::SameLine();
-        ImGui::Checkbox("Resizable", &c.Resizable);
-        ImGui::InputInt("Frame Cap (0=off)", &c.FrameCap);
-        static const int kMsaaVals[] = {0, 2, 4, 8};
-        const char* msaa[] = {"Off", "2x", "4x", "8x"};
-        int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
-        if (ImGui::Combo("MSAA", &msaaIdx, msaa, IM_ARRAYSIZE(msaa)))
-            c.Msaa = kMsaaVals[msaaIdx];
-        ImGui::TextDisabled("Оконные параметры применяются при запуске игры.");
-    }
-
-    if (ImGui::CollapsingHeader("Display / Дисплей", ImGuiTreeNodeFlags_DefaultOpen)) {
-        const char* aspects[] = {"Free", "16:9", "16:10", "4:3", "21:9"};
-        int a = (int)c.Aspect;
-        if (ImGui::Combo("Aspect Ratio", &a, aspects, IM_ARRAYSIZE(aspects))) c.Aspect = (sage::AspectMode)a;
-        ImGui::SliderFloat("Render Scale", &c.RenderScale, 0.25f, 2.0f, "%.2fx");
-        ImGui::TextDisabled("Render Scale < 1 — быстрее; > 1 — суперсэмплинг (чётче).");
-    }
-
-    if (ImGui::CollapsingHeader("Graphics / Графика", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Checkbox("Shadows", &c.Shadows);
-        static const int kShadowVals[] = {512, 1024, 2048, 4096};
-        const char* shadowRes[] = {"512", "1024", "2048", "4096"};
-        int sr = c.ShadowResolution >= 4096 ? 3 : c.ShadowResolution >= 2048 ? 2 : c.ShadowResolution >= 1024 ? 1 : 0;
-        if (ImGui::Combo("Shadow Resolution", &sr, shadowRes, IM_ARRAYSIZE(shadowRes)))
-            c.ShadowResolution = kShadowVals[sr];
-        ImGui::Checkbox("Post-Processing", &c.PostProcessing);
-        ImGui::Checkbox("Fog", &c.Fog);
-        ImGui::SameLine();
-        ImGui::Checkbox("Skybox", &c.Skybox);
-    }
-
-    if (ImGui::CollapsingHeader("Post-Process / Пост-эффекты")) {
-        ImGui::BeginDisabled(!c.PostProcessing);
-        ImGui::SliderFloat("Exposure", &c.Exposure, 0.1f, 4.0f);
-        ImGui::SliderFloat("Gamma", &c.Gamma, 1.0f, 3.0f);
-        ImGui::SliderFloat("Saturation", &c.Saturation, 0.0f, 2.0f);
-        ImGui::SliderFloat("Contrast", &c.Contrast, 0.5f, 2.0f);
-        ImGui::SliderFloat("Vignette", &c.Vignette, 0.0f, 1.0f);
-
-        ImGui::SeparatorText("Bloom");
-        ImGui::Checkbox("Bloom", &c.Bloom);
-        ImGui::BeginDisabled(!c.Bloom);
-        ImGui::SliderFloat("Bloom Threshold", &c.BloomThreshold, 0.0f, 3.0f);
-        ImGui::SliderFloat("Bloom Intensity", &c.BloomIntensity, 0.0f, 2.0f);
-        ImGui::EndDisabled();
-
-        ImGui::SeparatorText("Ambient Occlusion (SSAO)");
-        ImGui::Checkbox("Ambient Occlusion", &c.AmbientOcclusion);
-        ImGui::BeginDisabled(!c.AmbientOcclusion);
-        ImGui::SliderFloat("AO Strength", &c.AOStrength, 0.0f, 4.0f);
-        ImGui::SliderFloat("AO Radius", &c.AORadius, 0.05f, 2.0f);
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
-    }
-
-    ImGui::Separator();
-    bool haveProject = m_project.Loaded();
-    ImGui::BeginDisabled(!haveProject);
-    if (ImGui::Button("Save to Project")) {
-        std::string path = (m_project.Dir() / "sage.cfg").string();
-        if (c.SaveFile(path)) m_pluginStatusMessage = "Настройки сохранены: sage.cfg";
-        else m_pluginStatusMessage = "Не удалось сохранить sage.cfg";
-    }
-    ImGui::EndDisabled();
-    if (!haveProject) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(откройте проект, чтобы сохранить)");
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Reset to Defaults")) c = sage::EngineConfig{};
-
-    ImGui::End();
 }
 
 // ============================================================================

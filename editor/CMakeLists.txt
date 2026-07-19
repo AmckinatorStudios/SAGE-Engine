@@ -20,6 +20,8 @@ add_executable(SageEditor
     src/panels/LauncherPanel.cpp
     src/panels/LightingPanel.cpp
     src/panels/ToolbarPanel.cpp
+    src/panels/SettingsPanel.cpp
+    src/panels/DialogsPanel.cpp
 )
 
 # imguizmo — 3D-гизмо во вьюпорте; nlohmann_json — файлы проектов (.sageproj).

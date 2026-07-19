@@ -38,6 +38,8 @@
 #include "panels/LauncherPanel.h"
 #include "panels/LightingPanel.h"
 #include "panels/ToolbarPanel.h"
+#include "panels/SettingsPanel.h"
+#include "panels/DialogsPanel.h"
 
 // ---------------------------------------------------------------------------
 // EditorLayer — ядро редактора SAGE (архитектура v3).
@@ -82,7 +84,14 @@ public:
     bool SaveSceneToFile(const std::filesystem::path& path) override;
     bool CreateProject(const std::string& dir, const std::string& name, std::string& err) override;
     bool OpenProject(const std::string& path, std::string& err) override;
+    // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
+    // рантайм-ассеты + project/. false + err при ошибке.
+    bool BuildGame(const std::filesystem::path& outputDir, std::string& err) override;
     std::filesystem::path& AssetsCwd() override { return m_assetsCwd; }
+
+    // --- EditorHost: настройки и статус ---
+    sage::EngineConfig& Settings() override { return m_settings; }
+    void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
 
     // --- EditorHost: undo/redo ---
     void PushUndoSnapshot() override;
@@ -136,18 +145,11 @@ private:
     void DrawDockspaceAndMenu();
     void BuildDefaultDockLayout(unsigned int dockspaceId);
     void DrawStatusBar(float height);
-    void DrawDialogs(); // модалки New Project / Open Project / Save Scene As / Open Scene
-    void DrawSettingsWindow(); // окно гибких настроек движка (тени/пост/разрешение/…)
 
     // --- сцена / рендер (превью-рендер вынесен в EditorSceneRenderer) ---
     void NewScene(bool withDemoContent);
     void UpdateWindowTitle();
     void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
-
-    // --- сборка игры (File > Build Game...) ---
-    // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
-    // рантайм-ассеты + project/. false + err при ошибке.
-    bool BuildGame(const std::filesystem::path& outputDir, std::string& err);
 
     bool RestoreSceneFromString(const std::string& snapshot);
 
@@ -199,23 +201,15 @@ private:
     LauncherPanel m_launcher;
     LightingPanel m_lighting;
     ToolbarPanel m_toolbar;
+    SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
+    DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)
     bool m_launcherRequested = false; // Window > Project Launcher
 
-    // --- гибкие настройки движка (редактируются в окне Settings, сохраняются
-    //     в <проект>/sage.cfg; Build Game кладёт их в собранную игру) ---
+    // --- гибкие настройки движка (редактируются панелью Settings, сохраняются
+    //     в <проект>/sage.cfg; Build Game кладёт их в собранную игру). Буферы
+    //     полей модалок File-меню теперь живут внутри DialogsPanel. ---
     sage::EngineConfig m_settings;
     bool m_showSettings = false;
-
-    // --- сборка игры: буферы диалога Build Game ---
-    char m_dlgBuildDir[512] = "";
-    std::string m_dlgBuildResult; // путь готовой сборки (успех) — показывается в диалоге
-
-    // --- состояние модалок File-меню (буферы полей ввода) ---
-    char m_dlgProjectName[128] = "MyGame";
-    char m_dlgProjectDir[512] = "";
-    char m_dlgOpenPath[512] = "";
-    char m_dlgSceneName[128] = "level1";
-    std::string m_dlgError;
 
     // --- плагины редактора (v1, см. PluginAPI.h/PluginManager.h) ---
     class PluginContextImpl : public EditorPluginContext {
