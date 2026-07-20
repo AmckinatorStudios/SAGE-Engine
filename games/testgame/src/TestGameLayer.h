@@ -70,7 +70,7 @@ private:
     GameObject SpawnBox(Scene& scene, const std::string& name, glm::vec3 pos,
                         glm::vec3 scale, glm::vec3 color, bool collider);
     // Динамический ящик с движковой физикой (RigidBody+Collider): падает и
-    // складывается на полу через выбранный бэкенд (Jolt/Simple) — демонстрирует
+    // складывается на полу через выбранный бэкенд (Jolt/Builtin) — демонстрирует
     // физику в реальном игровом цикле, а не только в редакторе.
     void SpawnPhysicsProps(Scene& scene, glm::vec3 origin);
     void AttachSceneScripts(const std::string& sceneName);
@@ -98,7 +98,7 @@ private:
     std::string m_activeName;
     std::unordered_map<std::string, std::unique_ptr<ScriptEngine>> m_sceneScripts;
     std::unordered_map<std::string, glm::vec3> m_roomSpawns; // стартовая точка каждой комнаты
-    std::unique_ptr<PhysicsScene> m_physics; // физика активной сцены (Jolt/Simple)
+    std::unique_ptr<PhysicsScene> m_physics; // физика активной сцены (Jolt/Builtin)
     glm::vec3 m_activeSpawn{0.0f};
 
     // --- игрок (живёт поверх сцен; здоровье — в HealthComponent сущности

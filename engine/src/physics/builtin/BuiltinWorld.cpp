@@ -1,4 +1,4 @@
-#include "physics/simple/SimpleWorld.h"
+#include "physics/builtin/BuiltinWorld.h"
 
 #include <algorithm>
 #include <cmath>
@@ -136,7 +136,7 @@ bool BoxBox(const glm::vec3& pa, const glm::vec3& ha, const glm::vec3& pb, const
 // Диспетчер по формам. Нормаль всегда от A к B. Сфера и капсула — «круглые»
 // формы (осевой отрезок вдоль Y + радиус; сфера — отрезок нулевой длины); бокс
 // — AABB.
-bool SimpleWorld::Collide(const Body& A, const Body& B, glm::vec3& normal, float& depth) {
+bool BuiltinWorld::Collide(const Body& A, const Body& B, glm::vec3& normal, float& depth) {
     // Осевой отрезок круглой формы (для сферы hh=0 -> вырожденная точка).
     auto seg = [](const Body& b) -> std::pair<glm::vec3, glm::vec3> {
         float hh = (b.Kind == Shape::Capsule) ? b.HalfHeight : 0.0f;
@@ -170,7 +170,7 @@ bool SimpleWorld::Collide(const Body& A, const Body& B, glm::vec3& normal, float
 }
 
 // Нормальный импульс (с упругостью) + кулоновское трение по касательной.
-void SimpleWorld::SolveVelocity(const Contact& c) {
+void BuiltinWorld::SolveVelocity(const Contact& c) {
     Body& A = *c.A;
     Body& B = *c.B;
     float invSum = A.InvMass + B.InvMass;
@@ -203,7 +203,7 @@ void SimpleWorld::SolveVelocity(const Contact& c) {
 
 // Позиционная коррекция (нелинейная проекция) с распределением по обратной массе
 // и допуском slop — чтобы стопки не «тонули» и не дрожали на контакте покоя.
-void SimpleWorld::CorrectPosition(const Contact& c) {
+void BuiltinWorld::CorrectPosition(const Contact& c) {
     Body& A = *c.A;
     Body& B = *c.B;
     float invSum = A.InvMass + B.InvMass;
@@ -216,7 +216,7 @@ void SimpleWorld::CorrectPosition(const Contact& c) {
     B.Position += push * B.InvMass;
 }
 
-BodyHandle SimpleWorld::CreateBody(const BodyDesc& desc) {
+BodyHandle BuiltinWorld::CreateBody(const BodyDesc& desc) {
     Body b;
     b.Type = desc.Type;
     // Одиночные Sphere/Capsule — настоящие формы; составное тело приближается
@@ -244,9 +244,9 @@ BodyHandle SimpleWorld::CreateBody(const BodyDesc& desc) {
     return h;
 }
 
-void SimpleWorld::RemoveBody(BodyHandle body) { m_bodies.erase(body); }
+void BuiltinWorld::RemoveBody(BodyHandle body) { m_bodies.erase(body); }
 
-void SimpleWorld::AddImpulse(BodyHandle body, const glm::vec3& impulse) {
+void BuiltinWorld::AddImpulse(BodyHandle body, const glm::vec3& impulse) {
     auto it = m_bodies.find(body);
     if (it == m_bodies.end()) return;
     Body& b = it->second;
@@ -254,20 +254,20 @@ void SimpleWorld::AddImpulse(BodyHandle body, const glm::vec3& impulse) {
     b.Velocity += impulse * b.InvMass;       // Δv = J / m
 }
 
-JointHandle SimpleWorld::CreateJoint(const JointDesc&) {
+JointHandle BuiltinWorld::CreateJoint(const JointDesc&) {
     // Встроенный аркадный бэкенд не решает соединений — для суставов/тросов/
     // ragdoll выбирают Backend::Jolt. Предупреждаем один раз, не заваливаем лог.
     if (!m_warnedNoJoints) {
-        LOG_WARN("Physics") << "Simple-бэкенд не поддерживает соединения (joints) — "
+        LOG_WARN("Physics") << "Встроенный бэкенд не поддерживает соединения (joints) — "
                                "для суставов/ragdoll используйте Backend::Jolt";
         m_warnedNoJoints = true;
     }
     return kInvalidJoint;
 }
 
-void SimpleWorld::RemoveJoint(JointHandle) {}
+void BuiltinWorld::RemoveJoint(JointHandle) {}
 
-void SimpleWorld::Step(float dt) {
+void BuiltinWorld::Step(float dt) {
     // Фиксированный шаг 1/120 c аккумулятором — стабильнее переменного dt.
     const float fixed = 1.0f / 120.0f;
     m_accum += std::min(dt, 0.1f); // защита от «спирали смерти» при лагах
@@ -278,7 +278,7 @@ void SimpleWorld::Step(float dt) {
     }
 }
 
-void SimpleWorld::SubStep(float dt) {
+void BuiltinWorld::SubStep(float dt) {
     // 1. Интегрируем скорость/позицию динамических тел (полу-неявно).
     for (auto& [h, b] : m_bodies) {
         if (b.Type != BodyType::Dynamic) continue;
@@ -316,12 +316,12 @@ void SimpleWorld::SubStep(float dt) {
     for (const Contact& c : contacts) CorrectPosition(c);
 }
 
-void SimpleWorld::GetBodyTransform(BodyHandle body, glm::vec3& position, glm::quat& rotation) const {
+void BuiltinWorld::GetBodyTransform(BodyHandle body, glm::vec3& position, glm::quat& rotation) const {
     auto it = m_bodies.find(body);
     if (it != m_bodies.end()) { position = it->second.Position; rotation = it->second.Rotation; }
 }
 
-void SimpleWorld::SetBodyTransform(BodyHandle body, const glm::vec3& position, const glm::quat& rotation) {
+void BuiltinWorld::SetBodyTransform(BodyHandle body, const glm::vec3& position, const glm::quat& rotation) {
     auto it = m_bodies.find(body);
     if (it == m_bodies.end()) return;
     it->second.Position = position;
@@ -329,12 +329,12 @@ void SimpleWorld::SetBodyTransform(BodyHandle body, const glm::vec3& position, c
     if (it->second.Type != BodyType::Dynamic) it->second.Velocity = glm::vec3(0.0f);
 }
 
-void SimpleWorld::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) {
+void BuiltinWorld::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) {
     auto it = m_bodies.find(body);
     if (it != m_bodies.end()) it->second.Velocity = velocity;
 }
 
-glm::vec3 SimpleWorld::GetLinearVelocity(BodyHandle body) const {
+glm::vec3 BuiltinWorld::GetLinearVelocity(BodyHandle body) const {
     auto it = m_bodies.find(body);
     return it != m_bodies.end() ? it->second.Velocity : glm::vec3(0.0f);
 }

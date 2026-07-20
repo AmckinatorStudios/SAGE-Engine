@@ -10,7 +10,7 @@
 // добавить новый движок физики значит реализовать интерфейс, код движка/игр
 // не переписывается. Это и есть требование «подключать разные библиотеки».
 //
-// Основной бэкенд — Jolt (jrouwe/JoltPhysics). Встроенный Simple работает
+// Основной бэкенд — Jolt (jrouwe/JoltPhysics). Встроенный Builtin работает
 // всегда без внешних зависимостей (лёгкая аркадная физика). Null — заглушка.
 // ---------------------------------------------------------------------------
 namespace sage::physics {
@@ -46,19 +46,19 @@ public:
 
     // --- Соединения (constraints/joints) ------------------------------------
     // Создаёт соединение между телами по описанию; kInvalidJoint при ошибке или
-    // если бэкенд их не поддерживает (Simple/Null логируют и возвращают invalid).
+    // если бэкенд их не поддерживает (Builtin/Null логируют и возвращают invalid).
     // Составные тела задаются через BodyDesc.Children в CreateBody (не тут).
     virtual JointHandle CreateJoint(const JointDesc& desc) = 0;
     virtual void RemoveJoint(JointHandle joint) = 0;
 
-    // Поддерживает ли бэкенд настоящие соединения (Jolt — да; Simple/Null — нет).
+    // Поддерживает ли бэкенд настоящие соединения (Jolt — да; Builtin/Null — нет).
     virtual bool SupportsJoints() const = 0;
 
     // Фабрика бэкенда. Если запрошен Jolt, но он не скомпилирован — вернёт
-    // встроенный Simple (с предупреждением в лог), чтобы код не падал.
+    // встроенный Builtin (с предупреждением в лог), чтобы код не падал.
     static std::unique_ptr<PhysicsWorld> Create(Backend backend);
 
-    // Бэкенд по умолчанию: Jolt, если собран с SAGE_PHYSICS_JOLT, иначе Simple.
+    // Бэкенд по умолчанию: Jolt, если собран с SAGE_PHYSICS_JOLT, иначе Builtin.
     static Backend DefaultBackend();
 
     // Скомпилирован ли Jolt-бэкенд в этой сборке.

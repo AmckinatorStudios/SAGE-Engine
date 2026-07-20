@@ -117,7 +117,7 @@ void PlayerLayer::OnAttach() {
     }
 
     // Физика: строим мир по сущностям с RigidBodyComponent (бэкенд по умолчанию —
-    // Jolt, если собран, иначе встроенный Simple). Игра всегда «в Play».
+    // Jolt, если собран, иначе встроенный Builtin). Игра всегда «в Play».
     m_physics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
 

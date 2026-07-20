@@ -49,7 +49,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/PhysicsWorld.cpp
     src/physics/PhysicsScene.cpp
     src/physics/Ragdoll.cpp
-    src/physics/simple/SimpleWorld.cpp
+    src/physics/builtin/BuiltinWorld.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp

@@ -5,7 +5,7 @@
 
 namespace sage::physics {
 
-// SimpleWorld — встроенный лёгкий физический бэкенд без внешних зависимостей.
+// BuiltinWorld — встроенный лёгкий физический бэкенд без внешних зависимостей.
 // Доступен всегда (в т.ч. когда Jolt не собран). Честный, но нарочно
 // линейный (без вращения) импульсный решатель:
 //   • гравитация + полу-неявное интегрирование скорости/позиции;
@@ -21,9 +21,9 @@ namespace sage::physics {
 // Сознательно НЕ моделируется: вращательная динамика (тела не кувыркаются) и
 // соединения (joints/ragdoll) — для этого выбирают Backend::Jolt. Этого хватает
 // для аркадной физики предметов, снарядов, куч ящиков и толкания игроком.
-class SimpleWorld : public PhysicsWorld {
+class BuiltinWorld : public PhysicsWorld {
 public:
-    const char* BackendName() const override { return "Simple"; }
+    const char* BackendName() const override { return "Builtin"; }
     bool IsAvailable() const override { return true; }
     void SetGravity(const glm::vec3& gravity) override { m_gravity = gravity; }
 
@@ -42,7 +42,7 @@ public:
     bool SupportsJoints() const override { return false; }
 
 private:
-    // Форма коллайдера в Simple: AABB-бокс, сфера или вертикальная капсула
+    // Форма коллайдера: AABB-бокс, сфера или вертикальная капсула
     // (отрезок вдоль Y + радиус). Составное тело и капсула-как-бокс уходят в Box.
     enum class Shape : uint8_t { Box, Sphere, Capsule };
 

@@ -24,7 +24,7 @@ class JoltObjectLayerPairFilter;
 // ---------------------------------------------------------------------------
 // JoltWorld — основной физический бэкенд поверх jrouwe/JoltPhysics. Полноценная
 // физика: динамика твёрдых тел с вращением, честные контакты, формы Box/Sphere/
-// Capsule. Реализует тот же интерфейс PhysicsWorld, что и Simple/Null —
+// Capsule. Реализует тот же интерфейс PhysicsWorld, что и Builtin/Null —
 // вызывающий код (PhysicsScene) их не различает.
 //
 // Весь код, специфичный для Jolt, изолирован в этом файле и JoltWorld.cpp

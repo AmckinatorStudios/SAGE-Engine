@@ -21,7 +21,7 @@ const std::vector<SystemVersion>& EngineSystems() {
         {"Skybox",         1, "процедурный градиентный скайбокс + туман"},
         {"Particles",      1, "инстансные billboard-частицы (залпы и струи)"},
         {"Animation",      1, "скелетная анимация (glTF-скины, палитра костей)"},
-        {"Physics",        1, "PhysicsWorld: Jolt / встроенный Simple / Null"},
+        {"Physics",        1, "PhysicsWorld: Jolt / встроенный Builtin / Null"},
         {"Audio",          1, "miniaudio: 2D/3D звук, музыка, группы громкости"},
         {"Scripting",      1, "Lua (sol2): доступ к системам/компонентам/сообщениям"},
         {"UI",             1, "SDF-виджеты, ECS UIElement, редактор интерфейса"},

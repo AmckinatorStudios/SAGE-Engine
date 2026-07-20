@@ -812,7 +812,7 @@ void ScriptEngine::RegisterPhysicsApi() {
     });
     // Собирает тряпичную куклу (кости-капсулы + суставы) в сцене на месте pos.
     // Возвращает id корневой сущности (таз). Полноценно симулируется на Jolt;
-    // на Simple кости просто падают по отдельности (joints не поддержаны).
+    // на встроенном бэкенде кости просто падают по отдельности (joints не поддержаны).
     m_lua.set_function("SpawnRagdoll", [this](const glm::vec3& pos, sol::optional<float> scale) -> int {
         if (!m_scene) throw std::runtime_error("SpawnRagdoll: сцена не привязана");
         return sage::physics::BuildRagdoll(*m_scene, pos, scale.value_or(1.0f));

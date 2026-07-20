@@ -57,7 +57,7 @@ TEST(Physics_compound_body_rests_on_floor) {
 }
 
 TEST(Physics_backend_reports_joint_support) {
-    auto simple = PhysicsWorld::Create(Backend::Simple);
+    auto simple = PhysicsWorld::Create(Backend::Builtin);
     CHECK_FALSE(simple->SupportsJoints()); // аркадный бэкенд — без соединений
     if (PhysicsWorld::HasJolt()) {
         auto jolt = PhysicsWorld::Create(Backend::Jolt);
@@ -67,7 +67,7 @@ TEST(Physics_backend_reports_joint_support) {
 
 TEST(Physics_point_joint_pins_body_in_place) {
     auto w = PhysicsWorld::Create(PhysicsWorld::DefaultBackend());
-    if (!w->SupportsJoints()) return; // Simple — нечего проверять
+    if (!w->SupportsJoints()) return; // Builtin — нечего проверять
     w->SetGravity({0, -9.81f, 0});
 
     BodyDesc d; d.Type = BodyType::Dynamic; d.Position = {0, 5, 0}; d.Mass = 1.0f;
@@ -130,13 +130,13 @@ TEST(Physics_hinge_swings_but_keeps_pivot) {
     CHECK_TRUE(pos.y < 5.0f); // качнулось вниз под гравитацией
 }
 
-// --- Встроенный Simple-бэкенд: честный импульсный решатель ------------------
-// Эти тесты гоняют ИМЕННО Backend::Simple (а не DefaultBackend=Jolt), проверяя
+// --- Встроенный Builtin-бэкенд: честный импульсный решатель ------------------
+// Эти тесты гоняют ИМЕННО Backend::Builtin (а не DefaultBackend=Jolt), проверяя
 // улучшения аркадного бэкенда: контакт динамика-динамика, стопки, настоящие
 // сферы, распределение по массе.
 
-TEST(SimpleWorld_dynamic_box_rests_on_floor) {
-    auto w = PhysicsWorld::Create(Backend::Simple);
+TEST(BuiltinWorld_dynamic_box_rests_on_floor) {
+    auto w = PhysicsWorld::Create(Backend::Builtin);
     w->SetGravity({0, -9.81f, 0});
     MakeFloor(*w); // верх пола y=0.5
 
@@ -150,10 +150,10 @@ TEST(SimpleWorld_dynamic_box_rests_on_floor) {
     CHECK_NEAR(p.y, 1.0f, 0.15f);
 }
 
-TEST(SimpleWorld_dynamic_stacks_on_dynamic) {
+TEST(BuiltinWorld_dynamic_stacks_on_dynamic) {
     // Раньше динамика проходила сквозь динамику — теперь верхний ящик ложится
     // НА нижний, а не проваливается в него.
-    auto w = PhysicsWorld::Create(Backend::Simple);
+    auto w = PhysicsWorld::Create(Backend::Builtin);
     w->SetGravity({0, -9.81f, 0});
     MakeFloor(*w);
 
@@ -171,9 +171,9 @@ TEST(SimpleWorld_dynamic_stacks_on_dynamic) {
     CHECK_TRUE(pt.y < pb.y + 1.2f);
 }
 
-TEST(SimpleWorld_sphere_rests_at_radius) {
+TEST(BuiltinWorld_sphere_rests_at_radius) {
     // Настоящая сфера: центр покоя на высоте радиуса над полом, а не как AABB.
-    auto w = PhysicsWorld::Create(Backend::Simple);
+    auto w = PhysicsWorld::Create(Backend::Builtin);
     w->SetGravity({0, -9.81f, 0});
     MakeFloor(*w);
 
@@ -186,10 +186,10 @@ TEST(SimpleWorld_sphere_rests_at_radius) {
     CHECK_NEAR(p.y, 1.0f, 0.15f); // низ сферы (p.y-0.5) касается пола 0.5
 }
 
-TEST(SimpleWorld_capsule_rests_on_floor) {
+TEST(BuiltinWorld_capsule_rests_on_floor) {
     // Настоящая капсула (отрезок вдоль Y + радиус), а не AABB-приближение:
     // нижняя полусфера касается пола, центр стоит на halfHeight+radius над ним.
-    auto w = PhysicsWorld::Create(Backend::Simple);
+    auto w = PhysicsWorld::Create(Backend::Builtin);
     w->SetGravity({0, -9.81f, 0});
     MakeFloor(*w); // верх пола y=0.5
 
@@ -204,9 +204,9 @@ TEST(SimpleWorld_capsule_rests_on_floor) {
     CHECK_NEAR(p.y, 1.4f, 0.2f);
 }
 
-TEST(SimpleWorld_two_dynamics_push_apart) {
+TEST(BuiltinWorld_two_dynamics_push_apart) {
     // Два перекрывающихся динамических тела расталкиваются (не занимают одно место).
-    auto w = PhysicsWorld::Create(Backend::Simple);
+    auto w = PhysicsWorld::Create(Backend::Builtin);
     w->SetGravity({0, 0, 0}); // без гравитации — изолируем боковое расталкивание
 
     BodyDesc d; d.Type = BodyType::Dynamic; d.Shape = ShapeType::Box;
@@ -222,10 +222,10 @@ TEST(SimpleWorld_two_dynamics_push_apart) {
     CHECK_TRUE(sep > 0.9f); // разошлись до суммы полуширин (~1.0), не насквозь
 }
 
-TEST(SimpleWorld_heavy_body_resists_light) {
+TEST(BuiltinWorld_heavy_body_resists_light) {
     // Позиционная коррекция распределяется по обратной массе: тяжёлое тело почти
     // не двигается, лёгкое отлетает.
-    auto w = PhysicsWorld::Create(Backend::Simple);
+    auto w = PhysicsWorld::Create(Backend::Builtin);
     w->SetGravity({0, 0, 0});
 
     BodyDesc h; h.Type = BodyType::Dynamic; h.Shape = ShapeType::Box;
@@ -265,7 +265,7 @@ TEST(Physics_scene_builds_joints_from_components) {
     scene.Registry().emplace<JointComponent>(hang.Entity(), jc);
 
     PhysicsScene phys(PhysicsWorld::DefaultBackend(), scene);
-    if (!phys.SupportsJoints()) return; // Simple — соединения не строятся
+    if (!phys.SupportsJoints()) return; // Builtin — соединения не строятся
 
     CHECK_EQ(phys.JointCount(), 1);
     // Прогоняем симуляцию: висящее тело держится тросом у якоря. Точка крепления

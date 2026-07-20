@@ -282,7 +282,7 @@ void JoltWorld::RemoveBody(BodyHandle body) {
 void JoltWorld::Step(float dt) {
     if (!m_system) return;
     // Фиксированный внутренний шаг 1/60 с аккумулятором — стабильность симуляции
-    // не зависит от кадрового dt (как в Simple-бэкенде).
+    // не зависит от кадрового dt (как во встроенном бэкенде).
     const float fixed = 1.0f / 60.0f;
     m_accum += glm::min(dt, 0.25f);
     int guard = 0;

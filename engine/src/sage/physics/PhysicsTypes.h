@@ -8,15 +8,15 @@
 // Общие типы физической подсистемы — бэкенд-независимые (как sage/rhi для
 // графики). Движок и игры описывают тела через эти структуры и обращаются к
 // интерфейсу PhysicsWorld; конкретный движок физики (Jolt — основной, плюс
-// встроенный Simple и пустой Null) прячется за фабрикой PhysicsWorld::Create.
+// встроенный Builtin и пустой Null) прячется за фабрикой PhysicsWorld::Create.
 // ---------------------------------------------------------------------------
 namespace sage::physics {
 
 // Доступные бэкенды. Jolt — основной (полноценная физика, jrouwe/JoltPhysics),
-// подключается опционально через CMake (SAGE_PHYSICS_JOLT). Simple — встроенный
+// подключается опционально через CMake (SAGE_PHYSICS_JOLT). Builtin — встроенный
 // лёгкий интегратор (гравитация + столкновение со статикой), без зависимостей,
 // доступен всегда. Null — заглушка (физика отключена).
-enum class Backend { Null, Simple, Jolt };
+enum class Backend { Null, Builtin, Jolt };
 
 // Тип тела:
 //   Static    — неподвижное препятствие (пол, стены);
@@ -25,7 +25,7 @@ enum class Backend { Null, Simple, Jolt };
 //               не реагирует на столкновения.
 enum class BodyType { Static, Dynamic, Kinematic };
 
-// Форма коллайдера. Simple-бэкенд поддерживает Box (AABB), Sphere и Capsule
+// Форма коллайдера. Встроенный бэкенд поддерживает Box (AABB), Sphere и Capsule
 // (вертикальный отрезок + радиус) как настоящие формы; Jolt — полноценно все.
 enum class ShapeType { Box, Sphere, Capsule };
 
@@ -33,7 +33,7 @@ enum class ShapeType { Box, Sphere, Capsule };
 // поворот относительно начала тела. Составное тело = несколько таких форм в
 // одном твёрдом теле (напр. «молоток» = ручка-бокс + головка-бокс со сдвигом,
 // или коллайдер-аппроксимация модели из нескольких примитивов). Jolt строит из
-// них StaticCompoundShape; Simple берёт объемлющий AABB (составное — приближение).
+// них StaticCompoundShape; Builtin берёт объемлющий AABB (составное — приближение).
 struct ChildShape {
     ShapeType Shape = ShapeType::Box;
     glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
