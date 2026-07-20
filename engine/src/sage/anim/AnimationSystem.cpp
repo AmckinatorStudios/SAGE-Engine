@@ -43,6 +43,15 @@ void UpdateAnimators(Scene& scene, float dt) {
         EnsureReady(am);
         if (!am.Model) continue;
         am.Anim.SetSpeed(am.Speed);
+        // Смена Clip в компоненте (редактор/скрипт) -> плавный кросс-фейд к нему
+        // (или мгновенно, если BlendTime<=0). Anim.CurrentClip() сразу становится
+        // новым, поэтому переход не перезапускается каждый кадр.
+        int want = am.Clip;
+        int clipCount = (int)am.Model->Clips().size();
+        if (clipCount > 0 && want >= 0 && want < clipCount && want != am.Anim.CurrentClip()) {
+            if (am.BlendTime > 0.0f) am.Anim.CrossFade(want, am.BlendTime, am.Loop);
+            else am.Anim.Play(want, am.Loop);
+        }
         am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
     }
 }

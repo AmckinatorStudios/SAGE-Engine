@@ -333,8 +333,25 @@ std::unique_ptr<SkinnedModel> SkinnedModel::CreateDemoTentacle(int segments) {
     }
     m->m_clips.push_back(std::move(clip));
 
+    // --- клип «Curl»: щупалец собран в спираль (постоянный изгиб каждой кости) —
+    //     ВТОРОЙ клип, чтобы демонстрировать/тестировать кросс-фейд между позами. ---
+    AnimationClip curl;
+    curl.Name = "Curl";
+    curl.Duration = 1.0f;
+    for (int b = 1; b < segments; ++b) {
+        AnimChannel ch;
+        ch.Joint = b;
+        ch.Target = AnimPath::Rotation;
+        ch.Interp = AnimInterp::Step;
+        glm::quat q = glm::angleAxis(glm::radians(40.0f), glm::vec3(0, 0, 1)); // сильный изгиб
+        ch.Times = {0.0f};
+        ch.Values = {glm::vec4(q.x, q.y, q.z, q.w)};
+        curl.Channels.push_back(std::move(ch));
+    }
+    m->m_clips.push_back(std::move(curl));
+
     LOG_INFO("Anim") << "SkinnedModel: процедурный щупалец (" << segments << " костей, "
-                     << verts.size() << " вершин, клип Wave)";
+                     << verts.size() << " вершин, клипы Wave/Curl)";
     return m;
 }
 

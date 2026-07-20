@@ -316,6 +316,19 @@ void ScriptEngine::RegisterComponentTypes() {
     m_lua.set_function("TweenCancel", [this](uint64_t id) { m_tweens.Cancel(id); });
     m_lua.set_function("TweenCancelAll", [this]() { m_tweens.CancelAll(); });
     m_lua.set_function("ActiveTweens", [this]() { return m_tweens.ActiveCount(); });
+
+    // Проиграть клип анимации на сущности с AnimatedModelComponent, плавно
+    // перейдя за blend секунд (кросс-фейд; система анимации подхватит смену Clip).
+    // false, если у сущности нет анимированной модели.
+    m_lua.set_function("PlayAnimation", [](GameObject obj, int clip, sol::optional<float> blend) -> bool {
+        if (!obj.Valid()) return false;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am) return false;
+        am->Clip = clip;
+        if (blend) am->BlendTime = *blend;
+        am->Playing = true;
+        return true;
+    });
 }
 
 void ScriptEngine::RegisterGameObject() {

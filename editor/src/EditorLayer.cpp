@@ -1663,6 +1663,23 @@ void EditorLayer::RunSelfTest() {
                 LOG_ERROR("Editor") << "SELFTEST: animation failed - bone pose did not change over time";
                 ok = false;
             }
+            // Кросс-фейд между клипами демо (Wave -> Curl) через ШТАТНЫЙ путь:
+            // меняем Clip в компоненте, система сама запускает переход. Во время
+            // — Fading()==true и вес в диапазоне; после — CurrentClip == Curl.
+            if (ok && am.Anim.ClipCount() >= 2) {
+                am.Clip = 1;
+                am.BlendTime = 0.4f;
+                sage::anim::UpdateAnimators(*m_scene, 0.2f); // система стартует фейд + шаг
+                bool midOk = am.Anim.Fading() && am.Anim.FadeWeight() > 0.2f &&
+                             am.Anim.FadeWeight() < 0.9f;
+                sage::anim::UpdateAnimators(*m_scene, 0.4f); // добить переход
+                bool doneOk = !am.Anim.Fading() && am.Anim.CurrentClip() == 1;
+                if (!midOk || !doneOk) {
+                    LOG_ERROR("Editor") << "SELFTEST: animation crossfade failed (mid " << midOk
+                                        << ", done " << doneOk << ")";
+                    ok = false;
+                }
+            }
         }
         m_scene->RemoveObject(rig.Id());
     }

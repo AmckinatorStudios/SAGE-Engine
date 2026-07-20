@@ -421,13 +421,20 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 if (ImGui::BeginCombo("Clip", preview.c_str())) {
                     for (int i = 0; i < clipCount; ++i) {
                         bool sel = (am->Clip == i);
-                        if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel)) {
+                        if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel) && i != am->Clip) {
                             am->Clip = i;
-                            am->Anim.Play(i, am->Loop);
+                            // Плавный кросс-фейд к выбранному клипу (или резко, если 0).
+                            if (am->BlendTime > 0.0f) am->Anim.CrossFade(i, am->BlendTime, am->Loop);
+                            else am->Anim.Play(i, am->Loop);
                         }
                     }
                     ImGui::EndCombo();
                 }
+                ImGui::DragFloat("Blend Time", &am->BlendTime, 0.01f, 0.0f, 2.0f);
+                host.TrackLastImGuiItem();
+                if (am->Anim.Fading())
+                    ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), "cross-fading %.0f%%",
+                                       am->Anim.FadeWeight() * 100.0f);
             } else {
                 ImGui::TextDisabled("No animation clips (bind pose)");
             }

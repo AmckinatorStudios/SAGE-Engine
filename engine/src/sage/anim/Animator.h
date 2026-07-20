@@ -30,6 +30,15 @@ public:
 
     void Play(int clipIndex, bool loop = true);
     bool Play(const std::string& clipName, bool loop = true); // false, если клипа нет
+
+    // Плавный переход к клипу за fadeDuration секунд: старый клип затухает, новый
+    // проявляется, позы смешиваются покостно (lerp T/S, slerp R). Оба клипа
+    // тикают во время перехода. Если сейчас ничего не играет (или fadeDuration<=0)
+    // — эквивалент Play. Это основа «нет резких переключений» и одновременного
+    // проигрывания двух клипов.
+    void CrossFade(int clipIndex, float fadeDuration, bool loop = true);
+    bool CrossFade(const std::string& clipName, float fadeDuration, bool loop = true);
+
     void Stop() { m_playing = false; }
     void SetSpeed(float s) { m_speed = s; }
 
@@ -45,8 +54,18 @@ public:
     int ClipCount() const { return m_clips ? (int)m_clips->size() : 0; }
     const std::string& ClipName(int i) const;
 
+    // Идёт ли сейчас кросс-фейд, и его вес (0 -> целиком старый клип, 1 -> новый).
+    bool Fading() const { return m_fadeFromClip >= 0; }
+    float FadeWeight() const;
+
 private:
-    void ComputePose(float time); // сэмплирует клип -> глобальные -> палитра
+    // Локальные TRS костей для клипа в момент time (дефолты, переопределённые
+    // каналами). Общий сэмплер — используется и одиночным проигрыванием, и
+    // обоими клипами кросс-фейда.
+    void SamplePose(int clipIndex, float time,
+                    std::vector<glm::vec3>& t, std::vector<glm::quat>& r, std::vector<glm::vec3>& s) const;
+    // Считает палитру из TRS двух клипов, смешанных по weight (globals -> bones).
+    void ComputePoseBlended(float weight);
 
     const Skeleton* m_skeleton = nullptr;
     const std::vector<AnimationClip>* m_clips = nullptr;
@@ -56,6 +75,13 @@ private:
     float m_speed = 1.0f;
     bool m_loop = true;
     bool m_playing = false;
+
+    // Кросс-фейд: затухающий («откуда») клип + прогресс перехода.
+    int m_fadeFromClip = -1;
+    float m_fadeFromTime = 0.0f;
+    bool m_fadeFromLoop = true;
+    float m_fadeElapsed = 0.0f;
+    float m_fadeDuration = 0.0f;
 
     std::vector<glm::mat4> m_bones;   // палитра (global * inverseBind)
     std::vector<glm::mat4> m_globals; // scratch: глобальные матрицы костей

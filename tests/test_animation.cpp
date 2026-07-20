@@ -172,3 +172,58 @@ TEST(Animator_non_loop_clamps_and_stops) {
     CHECK_NEAR(a.Time(), 2.0f, 1e-4);
     CHECK_FALSE(a.Playing());
 }
+
+// --- Кросс-фейд между клипами (одновременное проигрывание + смешивание поз) ---
+static AnimationClip MakeRootRotClip(const char* name, float deg) {
+    glm::quat rot = glm::angleAxis(glm::radians(deg), glm::vec3(0, 0, 1));
+    AnimationClip clip; clip.Name = name; clip.Duration = 1.0f;
+    AnimChannel ch; ch.Joint = 0; ch.Target = AnimPath::Rotation; ch.Times = {0.0f};
+    ch.Values = {glm::vec4(rot.x, rot.y, rot.z, rot.w)};
+    clip.Channels.push_back(ch);
+    return clip;
+}
+
+TEST(Animator_crossfade_blends_two_clips) {
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips{MakeRootRotClip("Idle", 0.0f), MakeRootRotClip("Bend", 90.0f)};
+    Animator a; a.SetRig(&sk, &clips);
+    CHECK_TRUE(a.Play("Idle"));
+    a.Update(0.0f);
+    glm::vec4 p = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p.x, 0.0f, 1e-3); CHECK_NEAR(p.y, 1.0f, 1e-3); // 0° -> ребёнок (0,1,0)
+
+    CHECK_TRUE(a.CrossFade("Bend", 1.0f));
+    a.Update(0.5f); // середина перехода -> slerp 0°..90° = 45°
+    CHECK_TRUE(a.Fading());
+    CHECK_NEAR(a.FadeWeight(), 0.5f, 1e-3);
+    p = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p.x, -0.7071f, 2e-2);
+    CHECK_NEAR(p.y, 0.7071f, 2e-2);
+
+    a.Update(0.6f); // переход завершён -> чистый Bend (90° -> ребёнок (-1,0,0))
+    CHECK_FALSE(a.Fading());
+    p = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p.x, -1.0f, 1e-3);
+    CHECK_NEAR(p.y, 0.0f, 1e-3);
+    CHECK_EQ(a.CurrentClip(), 1);
+}
+
+TEST(Animator_play_cancels_crossfade) {
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips{MakeRootRotClip("Idle", 0.0f), MakeRootRotClip("Bend", 90.0f)};
+    Animator a; a.SetRig(&sk, &clips);
+    a.Play("Idle"); a.Update(0.0f);
+    a.CrossFade("Bend", 1.0f);
+    CHECK_TRUE(a.Fading());
+    a.Play("Idle");         // резкое переключение отменяет фейд
+    CHECK_FALSE(a.Fading());
+}
+
+TEST(Animator_crossfade_without_current_is_play) {
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips{MakeRootRotClip("Idle", 0.0f), MakeRootRotClip("Bend", 90.0f)};
+    Animator a; a.SetRig(&sk, &clips);
+    a.CrossFade("Bend", 0.5f); // ничего не играло -> эквивалент Play, без фейда
+    CHECK_FALSE(a.Fading());
+    CHECK_EQ(a.CurrentClip(), 1);
+}

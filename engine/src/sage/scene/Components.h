@@ -198,10 +198,11 @@ namespace sage::render { class SkinnedModel; }
 struct AnimatedModelComponent {
     std::string Path;         // .glb/.gltf; пусто -> процедурный демо-щупалец
     int DemoSegments = 6;     // число костей процедурного демо (если Path пуст)
-    int Clip = 0;             // индекс проигрываемого клипа
+    int Clip = 0;             // индекс проигрываемого клипа (смена -> кросс-фейд)
     float Speed = 1.0f;
     bool Loop = true;
     bool Playing = true;
+    float BlendTime = 0.25f;  // длительность кросс-фейда при смене Clip (0 — резко)
 
     std::shared_ptr<sage::render::SkinnedModel> Model; // рантайм (не сериализуется)
     sage::anim::Animator Anim;                          // рантайм-состояние проигрывания
