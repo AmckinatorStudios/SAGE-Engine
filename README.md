@@ -640,6 +640,27 @@ end
 иерархия, сообщения (адресные/широковещательные/с полезной нагрузкой),
 математика и доступ к освещению.
 
+## Твины (интерполяция значений)
+`sage/core/Tween.h` — система inbetweening: плавно ведёт значение из A в B за
+`duration` секунд по кривой сглаживания, без ручного лерпа в каждом `OnUpdate`.
+
+- **Кривые** (`sage::Easing`): Linear, Quad/Cubic/Sine In/Out/InOut, ExpoOut,
+  **BackOut** и **ElasticOut** (пружинят с перелётом за цель), **BounceOut**.
+  `Ease(e, t)` — чистая функция, покрыта юнит-тестами.
+- **`TweenManager`**: `To<T>(from, to, dur, ease, setter, onComplete, delay,
+  loop)` — интерполирует float/vec2/vec3/vec4 (glm::mix) и кватернионы (slerp);
+  `TweenLoop` None/Restart/**PingPong**; `Cancel`/`CancelAll`. Твины,
+  добавленные из коллбека, безопасно копятся в pending (без порчи вектора).
+  Движком твинов владеет `ScriptEngine` — они тикают со скриптами (`UpdateAll`),
+  замирают на паузе и умирают на Stop.
+- **Из Lua**: `TweenMove(entity, target, dur[, Ease.X])`, `TweenScale`,
+  `TweenRotate`, `TweenColor`, `TweenUIValue` (полоса/значение UI); сеттеры
+  проверяют `Valid()` — уничтоженная в полёте сущность безопасно пропускается.
+  `TweenCancel(id)`/`TweenCancelAll()`/`ActiveTweens()`. Пример — пружинистое
+  появление монеток в `games/testgame` (`pickup_bob.lua`, `Ease.BackOut`).
+- Покрытие: `tests/test_tween.cpp` (кривые, интерполяция, delay, ping-pong,
+  cancel, добавление из коллбека) + Lua-интеграция в `tests/test_scripting.cpp`.
+
 ## Текстуры и модели
 Часть ЯДРА движка (`engine/src/sage/render/Texture.*`, через stb_image) —
 грузит PNG/JPG/BMP/TGA в GPU-текстуру через текущий RHI-бэкенд:

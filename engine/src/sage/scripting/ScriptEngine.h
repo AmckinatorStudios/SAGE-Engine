@@ -1,6 +1,7 @@
 #pragma once
 #include "sage/scene/Scene.h"
 #include "sage/core/InputMap.h"
+#include "sage/core/Tween.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/BillboardSystem.h"
@@ -211,6 +212,10 @@ private:
     AudioEngine* m_audio = nullptr;
     PhysicsScene* m_physics = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
+
+    // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,
+    // умирают вместе с движком скриптов при Stop). Правятся из Lua (Tween*).
+    sage::TweenManager m_tweens;
 
     int m_nextTimerId = 1;
 };

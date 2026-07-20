@@ -261,6 +261,61 @@ void ScriptEngine::RegisterComponentTypes() {
         if (!m_scene) throw std::runtime_error("SpawnUIShowcase: сцена не привязана");
         return sage::ui::BuildShowcase(*m_scene);
     });
+
+    // --- Твины (интерполяция значений) --------------------------------------
+    // Плавно ведут поля сущности к цели за duration секунд по кривой ease.
+    // Тикают со скриптами (UpdateAll). Возвращают id (для TweenCancel), сеттеры
+    // проверяют Valid() — уничтоженная в полёте сущность безопасно пропускается.
+    m_lua.new_enum<sage::Easing>("Ease", {
+        {"Linear", sage::Easing::Linear},
+        {"QuadIn", sage::Easing::QuadIn}, {"QuadOut", sage::Easing::QuadOut}, {"QuadInOut", sage::Easing::QuadInOut},
+        {"CubicIn", sage::Easing::CubicIn}, {"CubicOut", sage::Easing::CubicOut}, {"CubicInOut", sage::Easing::CubicInOut},
+        {"SineIn", sage::Easing::SineIn}, {"SineOut", sage::Easing::SineOut}, {"SineInOut", sage::Easing::SineInOut},
+        {"ExpoOut", sage::Easing::ExpoOut}, {"BackOut", sage::Easing::BackOut},
+        {"ElasticOut", sage::Easing::ElasticOut}, {"BounceOut", sage::Easing::BounceOut},
+    });
+
+    auto easeOr = [](sol::optional<sage::Easing> e, sage::Easing def) { return e.value_or(def); };
+
+    m_lua.set_function("TweenMove", [this, easeOr](GameObject obj, glm::vec3 to, float dur,
+                                                   sol::optional<sage::Easing> ease) -> uint64_t {
+        if (!obj.Valid()) return 0;
+        return m_tweens.To<glm::vec3>(obj.GetTransform().Position, to, dur, easeOr(ease, sage::Easing::QuadOut),
+            [obj](const glm::vec3& v) mutable { if (obj.Valid()) obj.GetTransform().Position = v; });
+    });
+    m_lua.set_function("TweenScale", [this, easeOr](GameObject obj, glm::vec3 to, float dur,
+                                                    sol::optional<sage::Easing> ease) -> uint64_t {
+        if (!obj.Valid()) return 0;
+        return m_tweens.To<glm::vec3>(obj.GetTransform().Scale, to, dur, easeOr(ease, sage::Easing::QuadOut),
+            [obj](const glm::vec3& v) mutable { if (obj.Valid()) obj.GetTransform().Scale = v; });
+    });
+    m_lua.set_function("TweenRotate", [this, easeOr](GameObject obj, glm::vec3 toEulerDeg, float dur,
+                                                     sol::optional<sage::Easing> ease) -> uint64_t {
+        if (!obj.Valid()) return 0;
+        return m_tweens.To<glm::vec3>(obj.GetTransform().Rotation, toEulerDeg, dur, easeOr(ease, sage::Easing::QuadInOut),
+            [obj](const glm::vec3& v) mutable { if (obj.Valid()) obj.GetTransform().Rotation = v; });
+    });
+    m_lua.set_function("TweenColor", [this, easeOr](GameObject obj, glm::vec3 to, float dur,
+                                                    sol::optional<sage::Easing> ease) -> uint64_t {
+        if (!obj.Valid()) return 0;
+        return m_tweens.To<glm::vec3>(obj.ColorRef(), to, dur, easeOr(ease, sage::Easing::Linear),
+            [obj](const glm::vec3& v) mutable { if (obj.Valid()) obj.ColorRef() = v; });
+    });
+    // Полоса/значение UI (0..1) — например плавная убыль здоровья.
+    m_lua.set_function("TweenUIValue", [this, easeOr](GameObject obj, float to, float dur,
+                                                      sol::optional<sage::Easing> ease) -> uint64_t {
+        if (!obj.Valid()) return 0;
+        auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity());
+        if (!ui) return 0;
+        return m_tweens.To<float>(ui->Value, to, dur, easeOr(ease, sage::Easing::QuadOut),
+            [obj](const float& v) mutable {
+                if (!obj.Valid()) return;
+                if (auto* u = obj.Registry()->try_get<UIElementComponent>(obj.Entity())) u->Value = v;
+            });
+    });
+    m_lua.set_function("TweenCancel", [this](uint64_t id) { m_tweens.Cancel(id); });
+    m_lua.set_function("TweenCancelAll", [this]() { m_tweens.CancelAll(); });
+    m_lua.set_function("ActiveTweens", [this]() { return m_tweens.ActiveCount(); });
 }
 
 void ScriptEngine::RegisterGameObject() {
@@ -877,6 +932,7 @@ void ScriptEngine::UpdateAll(float deltaTime) {
 
     UpdateTimers(deltaTime);
     UpdateCoroutines(deltaTime);
+    m_tweens.Update(deltaTime); // твины геймплея — в такт со скриптами
 }
 
 void ScriptEngine::UpdateTimers(float dt) {

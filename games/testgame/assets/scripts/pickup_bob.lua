@@ -7,6 +7,11 @@ local phase = {}
 function OnStart(entity)
     baseY[entity.Id] = entity.Transform.Position.y
     phase[entity.Id] = entity.Id * 0.7 -- рассинхронизировать колебания соседей
+    -- Демонстрация системы твинов: пружинистое появление монетки — масштаб
+    -- от нуля к полному с перелётом (Ease.BackOut). Тикает движком твинов.
+    local full = entity.Transform.Scale
+    entity.Transform.Scale = Vec3(0.01, 0.01, 0.01)
+    TweenScale(entity, full, 0.6, Ease.BackOut)
 end
 
 local t = 0

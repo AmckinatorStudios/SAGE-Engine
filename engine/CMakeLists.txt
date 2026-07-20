@@ -20,6 +20,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
+    src/sage/core/Tween.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp

@@ -202,3 +202,39 @@ TEST(Scripting_message_payload_delivered) {
 
     std::remove(path.c_str());
 }
+
+// --- Твины из Lua: TweenMove ведёт позицию к цели, тикая в UpdateAll ---
+TEST(Scripting_tween_moves_entity_over_time) {
+    ScriptEngine se;
+    Scene scene("T");
+    se.BindScene(scene);
+    GameObject o = scene.CreateObject("Mover");
+    o.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+    se.Lua()["e"] = o;
+
+    se.Lua().script("TweenMove(e, Vec3.new(10, 0, 0), 1.0, Ease.Linear)");
+    int active = se.Lua().script("return ActiveTweens()");
+    CHECK_EQ(active, 1);
+
+    se.UpdateAll(0.5f); // линейно, половина -> x≈5
+    CHECK_NEAR(o.GetTransform().Position.x, 5.0f, 1e-2);
+
+    se.UpdateAll(0.6f); // перелёт за конец -> x=10, твин завершён
+    CHECK_NEAR(o.GetTransform().Position.x, 10.0f, 1e-2);
+    int activeAfter = se.Lua().script("return ActiveTweens()");
+    CHECK_EQ(activeAfter, 0);
+}
+
+// --- TweenCancelAll останавливает всё ---
+TEST(Scripting_tween_cancel_all) {
+    ScriptEngine se;
+    Scene scene("T");
+    se.BindScene(scene);
+    GameObject o = scene.CreateObject("Mover");
+    se.Lua()["e"] = o;
+    se.Lua().script("TweenScale(e, Vec3.new(2,2,2), 2.0); TweenColor(e, Vec3.new(1,0,0), 2.0)");
+    CHECK_EQ((int)se.Lua().script("return ActiveTweens()"), 2);
+    se.Lua().script("TweenCancelAll()");
+    se.UpdateAll(0.1f);
+    CHECK_EQ((int)se.Lua().script("return ActiveTweens()"), 0);
+}
