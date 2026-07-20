@@ -41,6 +41,19 @@ public:
     virtual void SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) = 0;
     virtual glm::vec3 GetLinearVelocity(BodyHandle body) const = 0;
 
+    // Мгновенный импульс (кг·м/с) в центр масс — толчок/выстрел/пинок ragdoll.
+    virtual void AddImpulse(BodyHandle body, const glm::vec3& impulse) = 0;
+
+    // --- Соединения (constraints/joints) ------------------------------------
+    // Создаёт соединение между телами по описанию; kInvalidJoint при ошибке или
+    // если бэкенд их не поддерживает (Simple/Null логируют и возвращают invalid).
+    // Составные тела задаются через BodyDesc.Children в CreateBody (не тут).
+    virtual JointHandle CreateJoint(const JointDesc& desc) = 0;
+    virtual void RemoveJoint(JointHandle joint) = 0;
+
+    // Поддерживает ли бэкенд настоящие соединения (Jolt — да; Simple/Null — нет).
+    virtual bool SupportsJoints() const = 0;
+
     // Фабрика бэкенда. Если запрошен Jolt, но он не скомпилирован — вернёт
     // встроенный Simple (с предупреждением в лог), чтобы код не падал.
     static std::unique_ptr<PhysicsWorld> Create(Backend backend);

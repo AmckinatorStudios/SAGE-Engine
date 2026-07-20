@@ -31,6 +31,11 @@ public:
     }
     void SetLinearVelocity(BodyHandle, const glm::vec3&) override {}
     glm::vec3 GetLinearVelocity(BodyHandle) const override { return glm::vec3(0.0f); }
+    void AddImpulse(BodyHandle, const glm::vec3&) override {}
+
+    JointHandle CreateJoint(const JointDesc&) override { return kInvalidJoint; }
+    void RemoveJoint(JointHandle) override {}
+    bool SupportsJoints() const override { return false; }
 
 private:
     BodyHandle m_next = 1;

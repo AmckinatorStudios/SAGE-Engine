@@ -12,6 +12,7 @@ class PhysicsSystem;
 class TempAllocator;
 class JobSystem;
 class BodyInterface;
+class Constraint;
 } // namespace JPH
 
 namespace sage::physics {
@@ -47,6 +48,11 @@ public:
     void SetBodyTransform(BodyHandle body, const glm::vec3& position, const glm::quat& rotation) override;
     void SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) override;
     glm::vec3 GetLinearVelocity(BodyHandle body) const override;
+    void AddImpulse(BodyHandle body, const glm::vec3& impulse) override;
+
+    JointHandle CreateJoint(const JointDesc& desc) override;
+    void RemoveJoint(JointHandle joint) override;
+    bool SupportsJoints() const override { return true; }
 
 private:
     std::unique_ptr<JPH::PhysicsSystem> m_system;
@@ -61,6 +67,9 @@ private:
     // Наш BodyHandle (uint32) -> Jolt BodyID (тоже uint32, но иной смысл).
     std::unordered_map<BodyHandle, uint32_t> m_bodies;
     BodyHandle m_next = 1;
+    // Наш JointHandle -> Jolt Constraint (держим ссылку, чтобы жил в системе).
+    std::unordered_map<JointHandle, JPH::Constraint*> m_joints;
+    JointHandle m_nextJoint = 1;
     float m_accum = 0.0f;
 };
 

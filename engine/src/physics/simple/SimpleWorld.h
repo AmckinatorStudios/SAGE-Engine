@@ -30,6 +30,11 @@ public:
     void SetBodyTransform(BodyHandle body, const glm::vec3& position, const glm::quat& rotation) override;
     void SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) override;
     glm::vec3 GetLinearVelocity(BodyHandle body) const override;
+    void AddImpulse(BodyHandle body, const glm::vec3& impulse) override;
+
+    JointHandle CreateJoint(const JointDesc& desc) override; // не поддержаны (warn+invalid)
+    void RemoveJoint(JointHandle joint) override;
+    bool SupportsJoints() const override { return false; }
 
 private:
     struct Body {
@@ -50,6 +55,7 @@ private:
     std::unordered_map<BodyHandle, Body> m_bodies;
     BodyHandle m_next = 1;
     float m_accum = 0.0f;
+    bool m_warnedNoJoints = false; // предупреждение о неподдержке joints — один раз
 };
 
 } // namespace sage::physics

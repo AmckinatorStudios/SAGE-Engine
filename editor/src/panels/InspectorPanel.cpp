@@ -271,9 +271,98 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.TrackLastImGuiItem();
             }
             ImGui::TextDisabled("Sizes are scaled by the entity's Transform scale");
+
+            // --- Составная (compound) форма: список дочерних примитивов ---
+            ImGui::Separator();
+            ImGui::Text("Compound parts: %d", (int)col->Parts.size());
+            if (!col->Parts.empty())
+                ImGui::TextDisabled("Parts override the single shape above");
+            const char* shapeNames[] = {"Box", "Sphere", "Capsule"};
+            int removePart = -1;
+            for (int pi = 0; pi < (int)col->Parts.size(); ++pi) {
+                ColliderComponent::Part& p = col->Parts[pi];
+                ImGui::PushID(pi);
+                if (ImGui::TreeNodeEx("part", ImGuiTreeNodeFlags_DefaultOpen, "Part %d", pi)) {
+                    int ps = (int)p.Shape;
+                    if (ImGui::Combo("Shape", &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
+                        host.PushUndoSnapshot();
+                        p.Shape = (sage::physics::ShapeType)ps;
+                    }
+                    if (p.Shape == sage::physics::ShapeType::Box) {
+                        ImGui::DragFloat3("Half Extents", &p.HalfExtents.x, 0.02f, 0.001f, 100.0f);
+                        host.TrackLastImGuiItem();
+                    } else {
+                        ImGui::DragFloat("Radius", &p.Radius, 0.02f, 0.001f, 100.0f);
+                        host.TrackLastImGuiItem();
+                        if (p.Shape == sage::physics::ShapeType::Capsule) {
+                            ImGui::DragFloat("Half Height", &p.HalfHeight, 0.02f, 0.001f, 100.0f);
+                            host.TrackLastImGuiItem();
+                        }
+                    }
+                    ImGui::DragFloat3("Offset", &p.Offset.x, 0.02f);
+                    host.TrackLastImGuiItem();
+                    ImGui::DragFloat3("Rotation", &p.EulerDeg.x, 0.5f);
+                    host.TrackLastImGuiItem();
+                    if (ImGui::SmallButton("Remove Part")) removePart = pi;
+                    ImGui::TreePop();
+                }
+                ImGui::PopID();
+            }
+            if (removePart >= 0) {
+                host.PushUndoSnapshot();
+                col->Parts.erase(col->Parts.begin() + removePart);
+            }
+            if (ImGui::Button("Add Part")) {
+                host.PushUndoSnapshot();
+                col->Parts.push_back(ColliderComponent::Part{});
+            }
+
             if (ImGui::Button("Remove Collider")) {
                 host.PushUndoSnapshot();
                 reg.remove<ColliderComponent>(obj.Entity());
+            }
+        }
+    }
+
+    // --- Соединение (constraint/joint) с другим телом или миром ---
+    if (reg.all_of<JointComponent>(obj.Entity()) && ImGui::CollapsingHeader("Joint", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (JointComponent* jc = reg.try_get<JointComponent>(obj.Entity())) {
+            const char* types[] = {"Fixed", "Point", "Hinge", "Slider", "Distance", "Cone"};
+            int t = (int)jc->Type;
+            if (ImGui::Combo("Type", &t, types, IM_ARRAYSIZE(types))) {
+                host.PushUndoSnapshot();
+                jc->Type = (sage::physics::JointType)t;
+            }
+            ImGui::DragInt("Target Id (-1 = world)", &jc->TargetId, 0.1f, -1, 100000);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat3("Anchor (offset)", &jc->Anchor.x, 0.02f);
+            host.TrackLastImGuiItem();
+            using JT = sage::physics::JointType;
+            if (jc->Type == JT::Hinge || jc->Type == JT::Slider || jc->Type == JT::Cone) {
+                ImGui::DragFloat3("Axis", &jc->Axis.x, 0.02f);
+                host.TrackLastImGuiItem();
+            }
+            if (jc->Type == JT::Hinge || jc->Type == JT::Slider) {
+                ImGui::Checkbox("Use Limits", &jc->UseLimits);
+                if (jc->UseLimits) {
+                    ImGui::DragFloat("Min", &jc->MinLimit, 0.5f);
+                    host.TrackLastImGuiItem();
+                    ImGui::DragFloat("Max", &jc->MaxLimit, 0.5f);
+                    host.TrackLastImGuiItem();
+                }
+            } else if (jc->Type == JT::Distance) {
+                ImGui::DragFloat("Min Distance", &jc->MinDistance, 0.02f, 0.0f, 100.0f);
+                host.TrackLastImGuiItem();
+                ImGui::DragFloat("Max Distance", &jc->MaxDistance, 0.02f, 0.0f, 100.0f);
+                host.TrackLastImGuiItem();
+            } else if (jc->Type == JT::Cone) {
+                ImGui::DragFloat("Cone Half Angle", &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
+                host.TrackLastImGuiItem();
+            }
+            ImGui::TextDisabled("Needs a Rigid Body; only the Jolt backend simulates joints");
+            if (ImGui::Button("Remove Joint")) {
+                host.PushUndoSnapshot();
+                reg.remove<JointComponent>(obj.Entity());
             }
         }
     }
@@ -468,6 +557,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
              [&] { reg.emplace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"}); });
         item("Rigid Body", reg.all_of<RigidBodyComponent>(e), [&] { reg.emplace<RigidBodyComponent>(e); });
         item("Collider", reg.all_of<ColliderComponent>(e), [&] { reg.emplace<ColliderComponent>(e); });
+        item("Joint", reg.all_of<JointComponent>(e), [&] { reg.emplace<JointComponent>(e); });
         item("Animated Model", reg.all_of<AnimatedModelComponent>(e),
              [&] { reg.emplace<AnimatedModelComponent>(e); });
         item("Particle Emitter", reg.all_of<ParticleEmitterComponent>(e), [&] {

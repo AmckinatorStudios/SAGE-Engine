@@ -21,6 +21,7 @@
 #include "sage/render/LightingUpload.h"
 #include "sage/render/Material.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/physics/Ragdoll.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/Texture.h"
 #include "sage/scene/Components.h"
@@ -77,6 +78,30 @@ void TestGameLayer::SpawnPhysicsProps(Scene& scene, glm::vec3 origin) {
         scene.Registry().emplace<RigidBodyComponent>(
             box.Entity(), RigidBodyComponent{sage::physics::BodyType::Dynamic, 1.0f, 0.6f, 0.15f});
         scene.Registry().emplace<ColliderComponent>(box.Entity());
+    }
+
+    // Тряпичная кукла (кости-капсулы + суставы Cone/Hinge) — падает и
+    // складывается рядом с башней. Демонстрирует соединения и сочленённые тела.
+    sage::physics::BuildRagdoll(scene, origin + glm::vec3(3.0f, 5.0f, 0.0f), 1.0f);
+
+    // Составное (compound) тело: «гантель» — два сферических груза на оси-боксе,
+    // один твёрдый объект из нескольких форм. Падает как единое целое.
+    {
+        // Uniform scale: у compound-коллайдера части задают геометрию сами
+        // (неравномерный масштаб сущности исказил бы дочерние формы).
+        GameObject dumbbell = SpawnBox(scene, "Dumbbell", origin + glm::vec3(-3.0f, 3.0f, 0.0f),
+                                       {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.55f}, false);
+        scene.Registry().emplace<RigidBodyComponent>(
+            dumbbell.Entity(), RigidBodyComponent{sage::physics::BodyType::Dynamic, 2.0f, 0.6f, 0.1f});
+        ColliderComponent col;
+        ColliderComponent::Part bar;   bar.Shape = sage::physics::ShapeType::Box;
+        bar.HalfExtents = {0.8f, 0.12f, 0.12f};
+        ColliderComponent::Part left;  left.Shape = sage::physics::ShapeType::Sphere;
+        left.Radius = 0.3f; left.Offset = {-0.8f, 0.0f, 0.0f};
+        ColliderComponent::Part right; right.Shape = sage::physics::ShapeType::Sphere;
+        right.Radius = 0.3f; right.Offset = {0.8f, 0.0f, 0.0f};
+        col.Parts = {bar, left, right};
+        scene.Registry().emplace<ColliderComponent>(dumbbell.Entity(), col);
     }
 }
 

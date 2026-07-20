@@ -228,24 +228,85 @@ static RigidBodyComponent ParseRigidBody(const json& rj) {
     return rb;
 }
 
+static const char* kShapeNames[] = {"box", "sphere", "capsule"};
+static sage::physics::ShapeType ShapeFromStr(const std::string& s) {
+    return s == "sphere" ? sage::physics::ShapeType::Sphere
+         : s == "capsule" ? sage::physics::ShapeType::Capsule
+         : sage::physics::ShapeType::Box;
+}
+
 static void SaveCollider(json& j, const ColliderComponent& col) {
-    const char* shapes[] = {"box", "sphere", "capsule"};
-    j["collider"]["shape"] = shapes[(int)col.Shape];
+    j["collider"]["shape"] = kShapeNames[(int)col.Shape];
     j["collider"]["halfExtents"] = Vec3ToJson(col.HalfExtents);
     j["collider"]["radius"] = col.Radius;
     j["collider"]["halfHeight"] = col.HalfHeight;
+    if (!col.Parts.empty()) {
+        json parts = json::array();
+        for (const ColliderComponent::Part& p : col.Parts) {
+            parts.push_back({
+                {"shape", kShapeNames[(int)p.Shape]},
+                {"halfExtents", Vec3ToJson(p.HalfExtents)},
+                {"radius", p.Radius},
+                {"halfHeight", p.HalfHeight},
+                {"offset", Vec3ToJson(p.Offset)},
+                {"euler", Vec3ToJson(p.EulerDeg)},
+            });
+        }
+        j["collider"]["parts"] = std::move(parts);
+    }
 }
 
 static ColliderComponent ParseCollider(const json& cj) {
     ColliderComponent col;
-    std::string shape = cj.value("shape", "box");
-    col.Shape = shape == "sphere" ? sage::physics::ShapeType::Sphere
-              : shape == "capsule" ? sage::physics::ShapeType::Capsule
-              : sage::physics::ShapeType::Box;
+    col.Shape = ShapeFromStr(cj.value("shape", "box"));
     if (cj.contains("halfExtents")) col.HalfExtents = Vec3FromJson(cj["halfExtents"]);
     col.Radius = cj.value("radius", col.Radius);
     col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
+    if (cj.contains("parts") && cj["parts"].is_array()) {
+        for (const json& pj : cj["parts"]) {
+            ColliderComponent::Part p;
+            p.Shape = ShapeFromStr(pj.value("shape", "box"));
+            if (pj.contains("halfExtents")) p.HalfExtents = Vec3FromJson(pj["halfExtents"]);
+            p.Radius = pj.value("radius", p.Radius);
+            p.HalfHeight = pj.value("halfHeight", p.HalfHeight);
+            if (pj.contains("offset")) p.Offset = Vec3FromJson(pj["offset"]);
+            if (pj.contains("euler")) p.EulerDeg = Vec3FromJson(pj["euler"]);
+            col.Parts.push_back(p);
+        }
+    }
     return col;
+}
+
+static const char* kJointNames[] = {"fixed", "point", "hinge", "slider", "distance", "cone"};
+static void SaveJoint(json& j, const JointComponent& jc) {
+    j["joint"]["type"] = kJointNames[(int)jc.Type];
+    j["joint"]["targetId"] = jc.TargetId;
+    j["joint"]["anchor"] = Vec3ToJson(jc.Anchor);
+    j["joint"]["axis"] = Vec3ToJson(jc.Axis);
+    j["joint"]["useLimits"] = jc.UseLimits;
+    j["joint"]["minLimit"] = jc.MinLimit;
+    j["joint"]["maxLimit"] = jc.MaxLimit;
+    j["joint"]["minDistance"] = jc.MinDistance;
+    j["joint"]["maxDistance"] = jc.MaxDistance;
+    j["joint"]["coneHalfAngle"] = jc.ConeHalfAngle;
+}
+
+static JointComponent ParseJoint(const json& jj) {
+    JointComponent jc;
+    std::string t = jj.value("type", "point");
+    using JT = sage::physics::JointType;
+    jc.Type = t == "fixed" ? JT::Fixed : t == "hinge" ? JT::Hinge : t == "slider" ? JT::Slider
+            : t == "distance" ? JT::Distance : t == "cone" ? JT::Cone : JT::Point;
+    jc.TargetId = jj.value("targetId", -1);
+    if (jj.contains("anchor")) jc.Anchor = Vec3FromJson(jj["anchor"]);
+    if (jj.contains("axis")) jc.Axis = Vec3FromJson(jj["axis"]);
+    jc.UseLimits = jj.value("useLimits", false);
+    jc.MinLimit = jj.value("minLimit", jc.MinLimit);
+    jc.MaxLimit = jj.value("maxLimit", jc.MaxLimit);
+    jc.MinDistance = jj.value("minDistance", jc.MinDistance);
+    jc.MaxDistance = jj.value("maxDistance", jc.MaxDistance);
+    jc.ConeHalfAngle = jj.value("coneHalfAngle", jc.ConeHalfAngle);
+    return jc;
 }
 
 static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
@@ -434,6 +495,7 @@ static json BuildSceneJson(const Scene& scene) {
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
         if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
+        if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
         if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) SaveAnimatedModel(j, *am);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
@@ -490,6 +552,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), ParseRigidBody(j["rigidBody"]));
         if (j.contains("collider"))
             obj.Registry()->emplace<ColliderComponent>(obj.Entity(), ParseCollider(j["collider"]));
+        if (j.contains("joint"))
+            obj.Registry()->emplace<JointComponent>(obj.Entity(), ParseJoint(j["joint"]));
         if (j.contains("animatedModel"))
             obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
         if (j.contains("particles"))

@@ -1,6 +1,7 @@
 #include "ScriptEngine.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/physics/Ragdoll.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include <algorithm>
@@ -151,6 +152,14 @@ void ScriptEngine::RegisterComponentTypes() {
         {"Sphere",  sage::physics::ShapeType::Sphere},
         {"Capsule", sage::physics::ShapeType::Capsule},
     });
+    m_lua.new_enum<sage::physics::JointType>("JointType", {
+        {"Fixed",    sage::physics::JointType::Fixed},
+        {"Point",    sage::physics::JointType::Point},
+        {"Hinge",    sage::physics::JointType::Hinge},
+        {"Slider",   sage::physics::JointType::Slider},
+        {"Distance", sage::physics::JointType::Distance},
+        {"Cone",     sage::physics::JointType::Cone},
+    });
 
     // --- Компоненты как usertype'ы: скрипт читает/пишет ЛЮБОЕ поле любого
     // компонента (свет/камера/тело/коллайдер/эмиттер/рендерер/скрипт). Аксессоры
@@ -181,6 +190,18 @@ void ScriptEngine::RegisterComponentTypes() {
         "HalfExtents", &ColliderComponent::HalfExtents,
         "Radius", &ColliderComponent::Radius,
         "HalfHeight", &ColliderComponent::HalfHeight
+    );
+    m_lua.new_usertype<JointComponent>("JointComponent",
+        "Type", &JointComponent::Type,
+        "TargetId", &JointComponent::TargetId,
+        "Anchor", &JointComponent::Anchor,
+        "Axis", &JointComponent::Axis,
+        "UseLimits", &JointComponent::UseLimits,
+        "MinLimit", &JointComponent::MinLimit,
+        "MaxLimit", &JointComponent::MaxLimit,
+        "MinDistance", &JointComponent::MinDistance,
+        "MaxDistance", &JointComponent::MaxDistance,
+        "ConeHalfAngle", &JointComponent::ConeHalfAngle
     );
     m_lua.new_usertype<ParticleEmitterComponent>("ParticleEmitterComponent",
         "Config", &ParticleEmitterComponent::Config,
@@ -260,6 +281,7 @@ void ScriptEngine::RegisterGameObject() {
     BindComponentAccessors<CameraComponent>(goType, "HasCamera", "GetCamera", "AddCamera", "RemoveCamera");
     BindComponentAccessors<RigidBodyComponent>(goType, "HasRigidBody", "GetRigidBody", "AddRigidBody", "RemoveRigidBody");
     BindComponentAccessors<ColliderComponent>(goType, "HasCollider", "GetCollider", "AddCollider", "RemoveCollider");
+    BindComponentAccessors<JointComponent>(goType, "HasJoint", "GetJoint", "AddJoint", "RemoveJoint");
     BindComponentAccessors<ParticleEmitterComponent>(goType, "HasEmitter", "GetEmitter", "AddEmitter", "RemoveEmitter");
     BindComponentAccessors<MeshRendererComponent>(goType, "HasRenderer", "GetRenderer", "AddRenderer", "RemoveRenderer");
     BindComponentAccessors<ScriptComponent>(goType, "HasScript", "GetScript", "AddScript", "RemoveScript");
@@ -702,6 +724,22 @@ void ScriptEngine::RegisterPhysicsApi() {
     m_lua.set_function("SetGravity", [this](const glm::vec3& g) {
         if (!m_physics) throw std::runtime_error("SetGravity: физика не привязана (BindPhysics не вызван)");
         m_physics->SetGravity(g);
+    });
+    // Мгновенный импульс в тело сущности (толчок/пинок/выстрел). No-op, если у
+    // сущности нет тела или симуляция не идёт.
+    m_lua.set_function("AddImpulse", [this](GameObject& obj, const glm::vec3& impulse) {
+        if (!m_physics) throw std::runtime_error("AddImpulse: физика не привязана (BindPhysics не вызван)");
+        if (!obj.Valid()) return;
+        auto* rb = obj.Registry()->try_get<RigidBodyComponent>(obj.Entity());
+        if (!rb || rb->RuntimeBody == sage::physics::kInvalidBody) return;
+        m_physics->AddImpulse(rb->RuntimeBody, impulse);
+    });
+    // Собирает тряпичную куклу (кости-капсулы + суставы) в сцене на месте pos.
+    // Возвращает id корневой сущности (таз). Полноценно симулируется на Jolt;
+    // на Simple кости просто падают по отдельности (joints не поддержаны).
+    m_lua.set_function("SpawnRagdoll", [this](const glm::vec3& pos, sol::optional<float> scale) -> int {
+        if (!m_scene) throw std::runtime_error("SpawnRagdoll: сцена не привязана");
+        return sage::physics::BuildRagdoll(*m_scene, pos, scale.value_or(1.0f));
     });
 }
 

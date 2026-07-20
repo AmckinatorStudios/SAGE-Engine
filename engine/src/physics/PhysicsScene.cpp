@@ -42,10 +42,23 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
     d.Rotation = EulerToQuat(tr.Rotation);
 
     glm::vec3 scale = glm::abs(tr.Scale);
-    if (col) {
+    float uniform = glm::max(scale.x, glm::max(scale.y, scale.z));
+    if (col && !col->Parts.empty()) {
+        // Составная форма: каждая дочерняя часть масштабируется как одиночная.
+        for (const ColliderComponent::Part& p : col->Parts) {
+            ChildShape cs;
+            cs.Shape = p.Shape;
+            cs.HalfExtents = p.HalfExtents * scale;
+            cs.Radius = p.Radius * uniform;
+            cs.HalfHeight = p.HalfHeight * scale.y;
+            cs.Position = p.Offset * scale;
+            cs.Rotation = EulerToQuat(p.EulerDeg);
+            d.Children.push_back(cs);
+        }
+    } else if (col) {
         d.Shape = col->Shape;
         d.HalfExtents = col->HalfExtents * scale;              // Box масштабируется по осям
-        d.Radius = col->Radius * glm::max(scale.x, glm::max(scale.y, scale.z)); // равномерно
+        d.Radius = col->Radius * uniform;                     // равномерно
         d.HalfHeight = col->HalfHeight * scale.y;
     } else {
         // Нет коллайдера — единичный бокс по масштабу сущности.
@@ -70,8 +83,42 @@ PhysicsScene::PhysicsScene(Backend backend, Scene& scene) {
         ++m_bodyCount;
     }
 
+    // Второй проход — соединения (все тела уже созданы, партнёров можно
+    // резолвить по id). Требует RigidBodyComponent у самой сущности (BodyA).
+    auto joints = scene.Registry().view<JointComponent, RigidBodyComponent, Transform>();
+    for (auto e : joints) {
+        JointComponent& jc = joints.get<JointComponent>(e);
+        const RigidBodyComponent& rb = joints.get<RigidBodyComponent>(e);
+        const Transform& tr = joints.get<Transform>(e);
+        if (rb.RuntimeBody == kInvalidBody) continue;
+
+        JointDesc jd;
+        jd.Type = jc.Type;
+        jd.BodyA = rb.RuntimeBody;
+        jd.BodyB = kInvalidBody;
+        if (jc.TargetId >= 0) {
+            GameObject target = scene.Get(jc.TargetId);
+            if (target.Valid()) {
+                const RigidBodyComponent* trb =
+                    scene.Registry().try_get<RigidBodyComponent>(target.Entity());
+                if (trb) jd.BodyB = trb->RuntimeBody;
+            }
+        }
+        jd.Anchor = tr.Position + jc.Anchor; // мировая точка крепления
+        jd.Axis = jc.Axis;
+        jd.UseLimits = jc.UseLimits;
+        jd.MinLimit = jc.MinLimit;
+        jd.MaxLimit = jc.MaxLimit;
+        jd.MinDistance = jc.MinDistance;
+        jd.MaxDistance = jc.MaxDistance;
+        jd.ConeHalfAngle = jc.ConeHalfAngle;
+
+        jc.RuntimeJoint = m_world->CreateJoint(jd);
+        if (jc.RuntimeJoint != kInvalidJoint) ++m_jointCount;
+    }
+
     LOG_INFO("Physics") << "PhysicsScene: бэкенд " << m_world->BackendName()
-                        << ", тел " << m_bodyCount
+                        << ", тел " << m_bodyCount << ", соединений " << m_jointCount
                         << (m_world->IsAvailable() ? "" : " (симуляция отключена)");
 }
 

@@ -148,6 +148,40 @@ struct ColliderComponent {
     glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
     float Radius = 0.5f;                     // Sphere / Capsule
     float HalfHeight = 0.5f;                 // Capsule
+
+    // СОСТАВНАЯ форма: если Parts непусто, тело строится из этих дочерних форм
+    // (каждая со своим локальным смещением/поворотом), а поля выше игнорируются.
+    // Так один твёрдый объект получает несколько примитивов — «молоток»,
+    // Т/Г-образные детали, грубая аппроксимация модели кластером примитивов.
+    struct Part {
+        sage::physics::ShapeType Shape = sage::physics::ShapeType::Box;
+        glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f};
+        float Radius = 0.5f;
+        float HalfHeight = 0.5f;
+        glm::vec3 Offset{0.0f};   // локальное смещение внутри тела
+        glm::vec3 EulerDeg{0.0f}; // локальный поворот (градусы, XYZ)
+    };
+    std::vector<Part> Parts;
+};
+
+// Соединение (constraint/joint) сущности с ДРУГИМ телом или с миром. У сущности
+// должен быть RigidBodyComponent (её тело — BodyA). TargetId — id сущности с
+// телом-партнёром (BodyB); -1 -> прикрепить к неподвижному миру. Anchor —
+// смещение точки крепления от МИРОВОЙ позиции этой сущности; Axis — ось в
+// мировых координатах (петля/ползун — вдоль неё, конус — twist-ось). Строится
+// PhysicsScene вторым проходом (после всех тел). RuntimeJoint — рантайм.
+struct JointComponent {
+    sage::physics::JointType Type = sage::physics::JointType::Point;
+    int TargetId = -1;                  // id партнёра; -1 -> к миру
+    glm::vec3 Anchor{0.0f, 0.0f, 0.0f}; // смещение pivot от позиции сущности (мир)
+    glm::vec3 Axis{0.0f, 1.0f, 0.0f};   // ось (Hinge/Slider/Cone)
+    bool UseLimits = false;
+    float MinLimit = 0.0f;              // Hinge °: [-180..0]; Slider: ед.
+    float MaxLimit = 0.0f;
+    float MinDistance = 0.0f;           // Distance
+    float MaxDistance = 1.0f;
+    float ConeHalfAngle = 45.0f;        // Cone °
+    sage::physics::JointHandle RuntimeJoint = sage::physics::kInvalidJoint; // не сериализуется
 };
 
 namespace sage::render { class SkinnedModel; }

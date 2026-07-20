@@ -12,7 +12,15 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/PointConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/ConeConstraint.h>
 
 #include <cstdarg>
 #include <thread>
@@ -114,6 +122,46 @@ JPH::Quat ToJoltQuat(const glm::quat& q) { return JPH::Quat(q.x, q.y, q.z, q.w);
 glm::vec3 FromJolt(const JPH::Vec3& v) { return glm::vec3(v.GetX(), v.GetY(), v.GetZ()); }
 glm::quat FromJoltQuat(const JPH::Quat& q) { return glm::quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ()); }
 
+// Одна выпуклая форма Jolt по параметрам (box/sphere/capsule) — общий код для
+// одиночных и составных тел. Возвращает null при ошибке (вызывающий пропустит
+// подшейп/тело). Тонкие боксы безопасны: convex radius адаптируется под
+// наименьшую полуось (иначе Jolt делает форму вырожденной и падает при сборке
+// compound — реальный баг, найденный на «гантели» со сплюснутой перекладиной).
+JPH::ShapeRefC MakeShape(ShapeType shape, const glm::vec3& halfExtents, float radius, float halfHeight) {
+    JPH::Shape::ShapeResult res;
+    switch (shape) {
+        case ShapeType::Sphere:
+            res = JPH::SphereShapeSettings(glm::max(radius, 0.01f)).Create();
+            break;
+        case ShapeType::Capsule:
+            res = JPH::CapsuleShapeSettings(glm::max(halfHeight, 0.01f), glm::max(radius, 0.01f)).Create();
+            break;
+        case ShapeType::Box:
+        default: {
+            glm::vec3 he = glm::max(halfExtents, glm::vec3(0.01f));
+            float minHalf = glm::min(he.x, glm::min(he.y, he.z));
+            // Convex radius не больше 0.05 (дефолт Jolt) и не больше 90% самой
+            // тонкой полуоси — тонкая перекладина/пластина остаётся валидной.
+            float convex = glm::min(0.05f, minHalf * 0.9f);
+            JPH::BoxShapeSettings s(JPH::Vec3(he.x, he.y, he.z), convex);
+            res = s.Create();
+            break;
+        }
+    }
+    if (res.HasError()) {
+        LOG_ERROR("Jolt") << "Форма не создана: " << res.GetError().c_str();
+        return {};
+    }
+    return res.Get();
+}
+
+// Перпендикуляр к оси (для рамок Hinge/Slider, которым нужна нормаль ⟂ оси).
+JPH::Vec3 PerpendicularTo(const JPH::Vec3& axis) {
+    JPH::Vec3 a = axis.NormalizedOr(JPH::Vec3::sAxisY());
+    JPH::Vec3 ref = std::abs(a.GetX()) < 0.9f ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
+    return a.Cross(ref).NormalizedOr(JPH::Vec3::sAxisZ());
+}
+
 } // namespace
 
 JoltWorld::JoltWorld() {
@@ -139,6 +187,11 @@ JoltWorld::JoltWorld() {
 }
 
 JoltWorld::~JoltWorld() {
+    // Отпускаем удержанные ссылки на соединения (AddRef при создании). Сами
+    // Constraint'ы уедут вместе с PhysicsSystem; наш Release балансирует ref-счёт.
+    for (auto& kv : m_joints)
+        if (kv.second) kv.second->Release();
+    m_joints.clear();
     // Тела удаляются вместе с PhysicsSystem. Глобальную фабрику Jolt намеренно
     // НЕ рушим — она разделяется всеми мирами на время жизни процесса.
     m_system.reset();
@@ -153,27 +206,40 @@ void JoltWorld::SetGravity(const glm::vec3& gravity) {
 BodyHandle JoltWorld::CreateBody(const BodyDesc& desc) {
     if (!m_system) return kInvalidBody;
 
-    // Форма коллайдера.
+    // Форма коллайдера: одиночная или СОСТАВНАЯ (StaticCompoundShape из
+    // дочерних форм с локальными смещениями — «молоток», кластер примитивов).
     JPH::ShapeRefC shape;
-    switch (desc.Shape) {
-        case ShapeType::Sphere: {
-            float r = glm::max(desc.Radius, 0.01f);
-            shape = JPH::SphereShapeSettings(r).Create().Get();
-            break;
+    if (!desc.Children.empty()) {
+        JPH::StaticCompoundShapeSettings compound;
+        // Держим ссылки на дочерние формы живыми до Create() (компаунду нужен ≥1
+        // валидный подшейп; StaticCompoundShape требует минимум 2 — при одной
+        // добавляем её же копию, чтобы не падать).
+        std::vector<JPH::ShapeRefC> keepAlive;
+        for (const ChildShape& c : desc.Children) {
+            JPH::ShapeRefC child = MakeShape(c.Shape, c.HalfExtents, c.Radius, c.HalfHeight);
+            if (!child) continue;
+            keepAlive.push_back(child);
+            compound.AddShape(JPH::Vec3(c.Position.x, c.Position.y, c.Position.z),
+                              ToJoltQuat(c.Rotation), child.GetPtr());
         }
-        case ShapeType::Capsule: {
-            float r = glm::max(desc.Radius, 0.01f);
-            float hh = glm::max(desc.HalfHeight, 0.01f);
-            shape = JPH::CapsuleShapeSettings(hh, r).Create().Get();
-            break;
+        if (keepAlive.empty()) {
+            LOG_ERROR("Jolt") << "Составная форма без валидных подшейпов";
+            return kInvalidBody;
         }
-        case ShapeType::Box:
-        default: {
-            glm::vec3 he = glm::max(desc.HalfExtents, glm::vec3(0.01f));
-            shape = JPH::BoxShapeSettings(JPH::Vec3(he.x, he.y, he.z)).Create().Get();
-            break;
+        // StaticCompoundShape требует ≥2 подшейпа — дублируем единственный.
+        if (keepAlive.size() == 1) {
+            compound.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), keepAlive[0].GetPtr());
         }
+        JPH::Shape::ShapeResult res = compound.Create();
+        if (res.HasError()) {
+            LOG_ERROR("Jolt") << "Составная форма не создана: " << res.GetError().c_str();
+            return kInvalidBody;
+        }
+        shape = res.Get();
+    } else {
+        shape = MakeShape(desc.Shape, desc.HalfExtents, desc.Radius, desc.HalfHeight);
     }
+    if (!shape) return kInvalidBody; // форма не создалась — тела не будет (не падаем)
 
     JPH::EMotionType motion = JPH::EMotionType::Dynamic;
     JPH::ObjectLayer layer = ObjectLayers::MOVING;
@@ -262,4 +328,111 @@ glm::vec3 JoltWorld::GetLinearVelocity(BodyHandle body) const {
     if (it == m_bodies.end() || !m_system) return glm::vec3(0.0f);
     JPH::BodyID id(it->second);
     return FromJolt(m_system->GetBodyInterface().GetLinearVelocity(id));
+}
+
+void JoltWorld::AddImpulse(BodyHandle body, const glm::vec3& impulse) {
+    auto it = m_bodies.find(body);
+    if (it == m_bodies.end() || !m_system) return;
+    JPH::BodyID id(it->second);
+    m_system->GetBodyInterface().AddImpulse(id, JPH::Vec3(impulse.x, impulse.y, impulse.z));
+}
+
+JointHandle JoltWorld::CreateJoint(const JointDesc& desc) {
+    if (!m_system) return kInvalidJoint;
+
+    // Тело A обязательно; тело B == invalid -> крепим к неподвижному «миру».
+    auto ia = m_bodies.find(desc.BodyA);
+    if (ia == m_bodies.end()) return kInvalidJoint;
+
+    const JPH::BodyLockInterface& lock = m_system->GetBodyLockInterfaceNoLock();
+    JPH::Body* a = lock.TryGetBody(JPH::BodyID(ia->second));
+    if (!a) return kInvalidJoint;
+
+    JPH::Body* b = &JPH::Body::sFixedToWorld;
+    if (desc.BodyB != kInvalidBody) {
+        auto ib = m_bodies.find(desc.BodyB);
+        if (ib == m_bodies.end()) return kInvalidJoint;
+        b = lock.TryGetBody(JPH::BodyID(ib->second));
+        if (!b) return kInvalidJoint;
+    }
+
+    JPH::RVec3 anchor = ToJolt(desc.Anchor);
+    JPH::Vec3 axis = JPH::Vec3(desc.Axis.x, desc.Axis.y, desc.Axis.z).NormalizedOr(JPH::Vec3::sAxisY());
+
+    JPH::Constraint* constraint = nullptr;
+    switch (desc.Type) {
+        case JointType::Fixed: {
+            JPH::FixedConstraintSettings s;
+            s.mSpace = JPH::EConstraintSpace::WorldSpace;
+            s.mAutoDetectPoint = true; // фиксируем текущее взаимное положение тел
+            constraint = s.Create(*a, *b);
+            break;
+        }
+        case JointType::Point: {
+            JPH::PointConstraintSettings s;
+            s.mSpace = JPH::EConstraintSpace::WorldSpace;
+            s.mPoint1 = s.mPoint2 = anchor;
+            constraint = s.Create(*a, *b);
+            break;
+        }
+        case JointType::Hinge: {
+            JPH::HingeConstraintSettings s;
+            s.mSpace = JPH::EConstraintSpace::WorldSpace;
+            s.mPoint1 = s.mPoint2 = anchor;
+            s.mHingeAxis1 = s.mHingeAxis2 = axis;
+            JPH::Vec3 normal = PerpendicularTo(axis);
+            s.mNormalAxis1 = s.mNormalAxis2 = normal;
+            if (desc.UseLimits) {
+                s.mLimitsMin = glm::radians(desc.MinLimit);
+                s.mLimitsMax = glm::radians(desc.MaxLimit);
+            }
+            constraint = s.Create(*a, *b);
+            break;
+        }
+        case JointType::Slider: {
+            JPH::SliderConstraintSettings s;
+            s.mSpace = JPH::EConstraintSpace::WorldSpace;
+            s.mPoint1 = s.mPoint2 = anchor;
+            s.SetSliderAxis(axis); // выставляет ось скольжения + нормали
+            if (desc.UseLimits) {
+                s.mLimitsMin = desc.MinLimit;
+                s.mLimitsMax = desc.MaxLimit;
+            }
+            constraint = s.Create(*a, *b);
+            break;
+        }
+        case JointType::Distance: {
+            JPH::DistanceConstraintSettings s;
+            s.mSpace = JPH::EConstraintSpace::WorldSpace;
+            s.mPoint1 = s.mPoint2 = anchor;
+            s.mMinDistance = desc.MinDistance;
+            s.mMaxDistance = desc.MaxDistance;
+            constraint = s.Create(*a, *b);
+            break;
+        }
+        case JointType::Cone: {
+            JPH::ConeConstraintSettings s;
+            s.mSpace = JPH::EConstraintSpace::WorldSpace;
+            s.mPoint1 = s.mPoint2 = anchor;
+            s.mTwistAxis1 = s.mTwistAxis2 = axis;
+            s.mHalfConeAngle = glm::radians(glm::clamp(desc.ConeHalfAngle, 0.0f, 180.0f));
+            constraint = s.Create(*a, *b);
+            break;
+        }
+    }
+    if (!constraint) return kInvalidJoint;
+
+    constraint->AddRef(); // держим ссылку сами (карта m_joints) — иначе удалится
+    m_system->AddConstraint(constraint);
+    JointHandle h = m_nextJoint++;
+    m_joints[h] = constraint;
+    return h;
+}
+
+void JoltWorld::RemoveJoint(JointHandle joint) {
+    auto it = m_joints.find(joint);
+    if (it == m_joints.end() || !m_system) return;
+    m_system->RemoveConstraint(it->second);
+    it->second->Release();
+    m_joints.erase(it);
 }

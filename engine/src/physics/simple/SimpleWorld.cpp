@@ -3,16 +3,35 @@
 #include <algorithm>
 #include <cmath>
 
+#include "sage/core/Log.h"
+
 namespace sage::physics {
 
 namespace {
-// AABB-полуразмеры по форме (сфера/капсула приближаются боксом).
-glm::vec3 HalfFromDesc(const BodyDesc& d) {
-    switch (d.Shape) {
-        case ShapeType::Sphere:  return glm::vec3(d.Radius);
-        case ShapeType::Capsule: return glm::vec3(d.Radius, d.HalfHeight + d.Radius, d.Radius);
-        default:                 return d.HalfExtents; // Box
+// AABB-полуразмеры одиночной формы (сфера/капсула приближаются боксом).
+glm::vec3 HalfOfShape(ShapeType shape, const glm::vec3& halfExtents, float radius, float halfHeight) {
+    switch (shape) {
+        case ShapeType::Sphere:  return glm::vec3(radius);
+        case ShapeType::Capsule: return glm::vec3(radius, halfHeight + radius, radius);
+        default:                 return halfExtents; // Box
     }
+}
+
+// AABB-полуразмеры по описанию тела. Составное тело (Children) сводим к
+// объемлющему AABB — аркадное приближение (вращение дочерних форм игнорируем).
+glm::vec3 HalfFromDesc(const BodyDesc& d) {
+    if (d.Children.empty())
+        return HalfOfShape(d.Shape, d.HalfExtents, d.Radius, d.HalfHeight);
+
+    glm::vec3 lo(1e9f), hi(-1e9f);
+    for (const ChildShape& c : d.Children) {
+        glm::vec3 h = HalfOfShape(c.Shape, c.HalfExtents, c.Radius, c.HalfHeight);
+        lo = glm::min(lo, c.Position - h);
+        hi = glm::max(hi, c.Position + h);
+    }
+    // Половина габарита + сдвиг центра учитываем как симметричный AABB вокруг
+    // центра тела (простое, но устойчивое приближение для аркадной физики).
+    return glm::max(glm::abs(lo), glm::abs(hi));
 }
 } // namespace
 
@@ -31,6 +50,27 @@ BodyHandle SimpleWorld::CreateBody(const BodyDesc& desc) {
 }
 
 void SimpleWorld::RemoveBody(BodyHandle body) { m_bodies.erase(body); }
+
+void SimpleWorld::AddImpulse(BodyHandle body, const glm::vec3& impulse) {
+    auto it = m_bodies.find(body);
+    if (it == m_bodies.end()) return;
+    Body& b = it->second;
+    if (b.InvMass <= 0.0f) return;           // static/kinematic не толкаются
+    b.Velocity += impulse * b.InvMass;       // Δv = J / m
+}
+
+JointHandle SimpleWorld::CreateJoint(const JointDesc&) {
+    // Встроенный аркадный бэкенд не решает соединений — для суставов/тросов/
+    // ragdoll выбирают Backend::Jolt. Предупреждаем один раз, не заваливаем лог.
+    if (!m_warnedNoJoints) {
+        LOG_WARN("Physics") << "Simple-бэкенд не поддерживает соединения (joints) — "
+                               "для суставов/ragdoll используйте Backend::Jolt";
+        m_warnedNoJoints = true;
+    }
+    return kInvalidJoint;
+}
+
+void SimpleWorld::RemoveJoint(JointHandle) {}
 
 void SimpleWorld::Step(float dt) {
     // Фиксированный шаг 1/120 c аккумулятором — стабильнее переменного dt.

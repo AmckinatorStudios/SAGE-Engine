@@ -25,6 +25,7 @@
 #include "sage/core/Systems.h"
 #include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/physics/Ragdoll.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/ecs/RenderSystem.h"
@@ -1483,6 +1484,39 @@ void EditorLayer::RunSelfTest() {
             if (ok && std::abs(yAfter - yBefore) > 0.001f) {
                 LOG_ERROR("Editor") << "SELFTEST: physics stop failed - scene not restored (y "
                                     << yAfter << ", expected " << yBefore << ")";
+                ok = false;
+            }
+        }
+    }
+
+    // --- Ragdoll + соединения: собранная кукла строит тела и суставы, падает ---
+    if (ok) {
+        int rootId = sage::physics::BuildRagdoll(*m_scene, {0.0f, 8.0f, 0.0f}, 1.0f);
+        GameObject root = m_scene->Get(rootId);
+        int jointComps = 0;
+        m_scene->Registry().view<JointComponent>().each([&](auto) { ++jointComps; });
+        bool built = root.Valid() &&
+                     m_scene->Registry().all_of<RigidBodyComponent>(root.Entity()) &&
+                     jointComps >= 6; // 11 костей -> 10 суставов (минимум 6)
+        if (!built) {
+            LOG_ERROR("Editor") << "SELFTEST: ragdoll build failed (root " << root.Valid()
+                                << ", joints " << jointComps << ")";
+            ok = false;
+        } else {
+            float yBefore = root.GetTransform().Position.y;
+            StartPlay();
+            // На Jolt суставы реально строятся; на Simple — их нет (ожидаемо).
+            bool jointsOk = !m_playPhysics->SupportsJoints() || m_playPhysics->JointCount() >= 6;
+            for (int i = 0; i < 40; ++i) m_playPhysics->Step(*m_scene, 1.0f / 60.0f);
+            float yAfter = m_scene->Get(rootId).GetTransform().Position.y;
+            StopPlay();
+            if (!jointsOk) {
+                LOG_ERROR("Editor") << "SELFTEST: ragdoll joints not built on Jolt ("
+                                    << m_playPhysics->JointCount() << ")";
+                ok = false;
+            } else if (yAfter >= yBefore - 0.05f) {
+                LOG_ERROR("Editor") << "SELFTEST: ragdoll did not fall (" << yBefore
+                                    << " -> " << yAfter << ")";
                 ok = false;
             }
         }

@@ -47,6 +47,7 @@ set(SAGE_ENGINE_SOURCES
     src/rhi/opengl/OpenGLResources.cpp
     src/physics/PhysicsWorld.cpp
     src/physics/PhysicsScene.cpp
+    src/physics/Ragdoll.cpp
     src/physics/simple/SimpleWorld.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp

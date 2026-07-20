@@ -35,11 +35,17 @@ public:
     glm::vec3 GetLinearVelocity(sage::physics::BodyHandle body) const {
         return m_world ? m_world->GetLinearVelocity(body) : glm::vec3(0.0f);
     }
+    void AddImpulse(sage::physics::BodyHandle body, const glm::vec3& impulse) {
+        if (m_world) m_world->AddImpulse(body, impulse);
+    }
     void SetGravity(const glm::vec3& g) {
         if (m_world) m_world->SetGravity(g);
     }
+    bool SupportsJoints() const { return m_world && m_world->SupportsJoints(); }
+    int JointCount() const { return m_jointCount; }
 
 private:
     std::unique_ptr<sage::physics::PhysicsWorld> m_world;
     int m_bodyCount = 0;
+    int m_jointCount = 0;
 };
