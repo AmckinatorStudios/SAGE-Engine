@@ -452,13 +452,18 @@ GPU. Его **фрагментная стадия использует тот ж
 разделяемый ассет (скелет/клипы), а покадровое состояние держит `Animator` у
 каждой сущности.
 
-**Загрузка.** `SkinnedModel::Load("hero.glb")` читает из glTF/GLB скин
-(JOINTS_0/WEIGHTS_0, inverseBindMatrices) и анимации (каналы/сэмплеры) —
-стандартный формат экспорта из Blender/Maya. Без внешнего ассета есть
-процедурная демо-модель `SkinnedModel::CreateDemoTentacle()` (гибкий «щупалец»
-с клипом Wave) — на ней держатся примеры и headless-тесты.
+**Загрузка.** `SkinnedModel::Load("hero.glb")` читает скин и анимации из
+glTF/GLB (JOINTS_0/WEIGHTS_0, inverseBindMatrices, каналы/сэмплеры) **или из
+FBX** (через ufbx: скин-кластеры → кости, per-vertex веса, anim-стеки → клипы) —
+оба стандартные форматы экспорта из Blender/Maya, автоопределение по расширению.
+FBX-кости хранятся в абсолютной мировой позе (inverse-bind = `inverse(node→world)`,
+вершины в мире), а анимация каждого стека семплируется в мировые TRS-ключи на
+30 к/с — это даёт ровные линейно-интерполируемые клипы под общий `Animator`, не
+завязываясь на устройство FBX-иерархии. Без внешнего ассета есть процедурная
+демо-модель `SkinnedModel::CreateDemoTentacle()` (гибкий «щупалец» с клипами
+Wave/Curl) — на ней держатся примеры и headless-тесты.
 
-**В ECS/редакторе.** Повесь `AnimatedModelComponent` (поле `Path` — файл .glb,
+**В ECS/редакторе.** Повесь `AnimatedModelComponent` (поле `Path` — файл .glb/.fbx,
 пустое = процедурное демо; `Clip`/`Speed`/`Loop`/`Playing`). Система
 `sage::anim::UpdateAnimators`/`DrawAnimatedModels` (`sage/anim/AnimationSystem.h`)
 инициализирует, продвигает и рисует все такие сущности — вызывается редактором
@@ -697,20 +702,29 @@ shader.SetInt("uUseTexture", 1); // если 0 — рендер работает
 границах).
 
 **Загрузка 3D-моделей** (`engine/src/sage/render/Model.*`) — форматы OBJ+MTL
-(через tinyobjloader) и GLTF/GLB (через tinygltf, включая встроенные как
-base64 текстуры), автоопределение по расширению файла:
+(через tinyobjloader), GLTF/GLB (через tinygltf, включая встроенные как base64
+текстуры) и **FBX (через ufbx)**, автоопределение по расширению файла:
 
 ```cpp
-auto model = Model::Load("assets/models/dragon.glb"); // или .obj, или .gltf
+auto model = Model::Load("assets/models/dragon.glb"); // или .obj, .gltf, .fbx
 shader.Use();
 shader.SetMat4("uModel", transformMatrix);
 model->Draw(shader); // сама переключает текстуру/цвет между подмешами (submesh)
 ```
 
-Известные ограничения: только `pbrMetallicRoughness.baseColorTexture` (normal
-maps/metallic-roughness/emissive пока не читаются), OBJ без переиспользования
-вершин. Это путь для СТАТИЧЕСКОЙ геометрии (`Model`); скелетные меши с анимацией
-из glTF грузит отдельный путь `SkinnedModel::Load` — см. `## Скелетная анимация`.
+FBX грузится в систему координат движка (правая, Y вверх, метры — ufbx сам
+пересчитывает вершины/нормали и конвертирует единицы, обычно см→м), каждый
+node-меш становится подмешем с базовым цветом из материала. ECS-путь
+(`ResourceManager::GetModel` для `MeshRef`) сплющивает FBX в единый меш через
+`ModelLoader::LoadFbx` — так `.fbx` работает и для энтити со `MeshRef`, и для
+прямого `Model::Load`.
+
+Известные ограничения: только `pbrMetallicRoughness.baseColorTexture` для glTF
+(normal maps/metallic-roughness/emissive пока не читаются), для FBX берётся
+только базовый цвет материала (внешние текстуры по абсолютным путям не
+подтягиваются), OBJ/FBX без переиспользования вершин. Это путь для СТАТИЧЕСКОЙ
+геометрии (`Model`); скелетные меши с анимацией из glTF/FBX грузит отдельный
+путь `SkinnedModel::Load` — см. `## Скелетная анимация`.
 
 ## Skybox
 Часть ЯДРА движка (`engine/src/sage/render/Skybox.*`) — кубическая (cubemap)

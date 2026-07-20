@@ -5,8 +5,12 @@
 
 #include "SkinnedModel.h"
 
+#include <ufbx.h>
+
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -425,8 +429,20 @@ glm::mat4 NodeLocal(const tinygltf::Node& n) {
 } // namespace
 
 std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
-    bool binary = path.size() > 4 && path.substr(path.size() - 4) == ".glb";
+    // Расширение → загрузчик. .fbx идёт через ufbx (скелет+скин+клипы), остальное
+    // (.gltf/.glb) — через tinygltf.
+    auto endsWith = [&](const char* suf) {
+        size_t n = std::strlen(suf);
+        if (path.size() < n) return false;
+        std::string tail = path.substr(path.size() - n);
+        for (auto& c : tail) c = (char)std::tolower((unsigned char)c);
+        return tail == suf;
+    };
+    if (endsWith(".fbx")) return LoadFbx(path);
+    return LoadGltf(path, endsWith(".glb"));
+}
 
+std::unique_ptr<SkinnedModel> SkinnedModel::LoadGltf(const std::string& path, bool binary) {
     tinygltf::TinyGLTF loader;
     loader.SetImageLoader(&GltfSkinImageLoader, nullptr);
     tinygltf::Model g;
@@ -578,6 +594,232 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
                      << ", клипов " << model->m_clips.size() << ")";
     if (model->m_subMeshes.empty())
         throw std::runtime_error("SkinnedModel: в файле нет скиновых мешей: " + path);
+    return model;
+}
+
+// ============================================================================
+//  FBX-загрузчик (ufbx): скелет + скин-веса + анимационные клипы
+// ============================================================================
+namespace {
+
+// ufbx_matrix — аффинная 3x4, столбцы cols[0..3]. Переводим в glm::mat4.
+glm::mat4 FbxToGlm(const ufbx_matrix& m) {
+    glm::mat4 r(1.0f);
+    r[0] = glm::vec4((float)m.m00, (float)m.m10, (float)m.m20, 0.0f);
+    r[1] = glm::vec4((float)m.m01, (float)m.m11, (float)m.m21, 0.0f);
+    r[2] = glm::vec4((float)m.m02, (float)m.m12, (float)m.m22, 0.0f);
+    r[3] = glm::vec4((float)m.m03, (float)m.m13, (float)m.m23, 1.0f);
+    return r;
+}
+
+// Раскладывает аффинную матрицу на перенос/поворот/масштаб (без сдвига — для
+// костей его нет). Свой decompose, чтобы не тянуть экспериментальный glm/gtx.
+void FbxDecompose(const glm::mat4& mtx, glm::vec3& t, glm::quat& rot, glm::vec3& s) {
+    t = glm::vec3(mtx[3]);
+    glm::vec3 c0(mtx[0]), c1(mtx[1]), c2(mtx[2]);
+    s = glm::vec3(glm::length(c0), glm::length(c1), glm::length(c2));
+    if (s.x > 1e-8f) c0 /= s.x;
+    if (s.y > 1e-8f) c1 /= s.y;
+    if (s.z > 1e-8f) c2 /= s.z;
+    glm::mat3 rm(c0, c1, c2);
+    rot = glm::normalize(glm::quat_cast(rm));
+}
+
+// Мировая матрица узла в момент t: произведение локальных трансформов по цепочке
+// от узла до корня (target_axes уже вшит ufbx в local_transform). Костей немного,
+// так что рекурсивная композиция на кадр допустима на этапе загрузки.
+glm::mat4 FbxEvalWorld(const ufbx_anim* anim, const ufbx_node* node, double time) {
+    glm::mat4 world(1.0f);
+    for (const ufbx_node* n = node; n != nullptr; n = n->parent) {
+        ufbx_transform lt = ufbx_evaluate_transform(anim, n, time);
+        ufbx_matrix lm = ufbx_transform_to_matrix(&lt);
+        world = FbxToGlm(lm) * world;
+    }
+    return world;
+}
+
+} // namespace
+
+std::unique_ptr<SkinnedModel> SkinnedModel::LoadFbx(const std::string& path) {
+    ufbx_load_opts opts = {};
+    opts.target_axes = ufbx_axes_right_handed_y_up;
+    opts.target_unit_meters = 1.0f;
+    opts.generate_missing_normals = true;
+
+    ufbx_error error;
+    ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &error);
+    if (!scene) {
+        char buf[512];
+        ufbx_format_error(buf, sizeof(buf), &error);
+        throw std::runtime_error("SkinnedModel: не загрузить FBX " + path + ": " + buf);
+    }
+    // RAII-освобождение сцены при любом выходе (в т.ч. через throw ниже).
+    struct SceneGuard { ufbx_scene* s; ~SceneGuard() { if (s) ufbx_free_scene(s); } } guard{scene};
+
+    if (scene->skin_deformers.count == 0)
+        throw std::runtime_error("SkinnedModel: в FBX нет скина: " + path);
+
+    auto model = std::unique_ptr<SkinnedModel>(new SkinnedModel());
+
+    // --- Скелет: все кости-узлы из всех кластеров всех скин-деформеров. ---
+    // Каждая кость — «корень» в нашем скелете (Parent = -1): её TRS хранит
+    // АБСОЛЮТНУЮ мировую позу, поэтому Animator получает global = local напрямую,
+    // без композиции иерархии (веса и inverse-bind при этом полностью корректны).
+    std::unordered_map<const ufbx_node*, int> boneIndex;
+    std::vector<const ufbx_node*> boneNodes;
+    Skeleton& sk = model->m_skeleton;
+
+    auto ensureBone = [&](const ufbx_node* n) -> int {
+        auto it = boneIndex.find(n);
+        if (it != boneIndex.end()) return it->second;
+        int idx = (int)boneNodes.size();
+        boneIndex[n] = idx;
+        boneNodes.push_back(n);
+        Joint j;
+        j.Name = std::string(n->name.data, n->name.length);
+        j.Parent = -1;
+        glm::mat4 world = FbxToGlm(n->node_to_world);
+        FbxDecompose(world, j.Translation, j.Rotation, j.Scale);
+        j.InverseBind = glm::inverse(world); // world(bind) -> bone
+        sk.Joints.push_back(std::move(j));
+        return idx;
+    };
+
+    for (size_t di = 0; di < scene->skin_deformers.count; ++di) {
+        const ufbx_skin_deformer* def = scene->skin_deformers.data[di];
+        for (size_t ci = 0; ci < def->clusters.count; ++ci) {
+            const ufbx_skin_cluster* cl = def->clusters.data[ci];
+            if (cl->bone_node) ensureBone(cl->bone_node);
+        }
+    }
+    if (sk.Joints.empty())
+        throw std::runtime_error("SkinnedModel: в FBX нет костей скина: " + path);
+    if (sk.Count() > kMaxBones)
+        LOG_WARN("Anim") << "SkinnedModel FBX: костей " << sk.Count() << " > " << kMaxBones
+                         << " — лишние не поместятся в палитру";
+
+    // --- Меши со скином: вершины в МИРОВОМ пространстве (как inverse-bind). ---
+    std::vector<uint32_t> triIndices;
+    for (size_t ni = 0; ni < scene->nodes.count; ++ni) {
+        const ufbx_node* node = scene->nodes.data[ni];
+        if (!node->mesh || node->mesh->skin_deformers.count == 0) continue;
+        const ufbx_mesh* mesh = node->mesh;
+        const ufbx_skin_deformer* skin = mesh->skin_deformers.data[0];
+        const glm::mat4 g2w = FbxToGlm(node->geometry_to_world);
+        const glm::mat3 g2wN = glm::transpose(glm::inverse(glm::mat3(g2w)));
+
+        std::vector<SkinnedVertex> verts;
+        std::vector<unsigned int> indices;
+        triIndices.resize(mesh->max_face_triangles * 3);
+
+        for (size_t fi = 0; fi < mesh->faces.count; ++fi) {
+            ufbx_face face = mesh->faces.data[fi];
+            size_t numTris = ufbx_triangulate_face(triIndices.data(), triIndices.size(), mesh, face);
+            for (size_t t = 0; t < numTris * 3; ++t) {
+                uint32_t corner = triIndices[t];
+                uint32_t vtx = mesh->vertex_indices.data[corner]; // логический control-point
+
+                SkinnedVertex v{};
+                ufbx_vec3 p = ufbx_get_vertex_vec3(&mesh->vertex_position, corner);
+                glm::vec4 pw = g2w * glm::vec4((float)p.x, (float)p.y, (float)p.z, 1.0f);
+                v.Position = glm::vec3(pw);
+                if (mesh->vertex_normal.exists) {
+                    ufbx_vec3 n = ufbx_get_vertex_vec3(&mesh->vertex_normal, corner);
+                    glm::vec3 nw = g2wN * glm::vec3((float)n.x, (float)n.y, (float)n.z);
+                    float len = glm::length(nw);
+                    v.Normal = len > 1e-6f ? nw / len : glm::vec3(0, 1, 0);
+                }
+                if (mesh->vertex_uv.exists) {
+                    ufbx_vec2 uv = ufbx_get_vertex_vec2(&mesh->vertex_uv, corner);
+                    v.TexCoords = {(float)uv.x, (float)uv.y};
+                }
+
+                // До 4 самых весомых костей вершины (skin отсортирован по убыванию веса).
+                const ufbx_skin_vertex& sv = skin->vertices.data[vtx];
+                glm::ivec4 ji(0);
+                glm::vec4 wt(0.0f);
+                uint32_t take = std::min<uint32_t>(sv.num_weights, 4);
+                for (uint32_t k = 0; k < take; ++k) {
+                    const ufbx_skin_weight& w = skin->weights.data[sv.weight_begin + k];
+                    const ufbx_skin_cluster* cl = w.cluster_index < skin->clusters.count
+                        ? skin->clusters.data[w.cluster_index] : nullptr;
+                    int bi = 0;
+                    if (cl && cl->bone_node) {
+                        auto it = boneIndex.find(cl->bone_node);
+                        if (it != boneIndex.end()) bi = it->second;
+                    }
+                    ji[k] = bi;
+                    wt[k] = (float)w.weight;
+                }
+                float sum = wt.x + wt.y + wt.z + wt.w;
+                if (sum > 1e-5f) wt /= sum; else wt = glm::vec4(1, 0, 0, 0);
+                v.Joints = glm::vec4(ji);
+                v.Weights = wt;
+
+                indices.push_back((unsigned int)verts.size());
+                verts.push_back(v);
+            }
+        }
+        if (verts.empty()) continue;
+
+        SkinnedSubMesh sub;
+        sub.Mesh = std::make_shared<SkinnedMesh>(verts, indices);
+        sub.Tint = glm::vec3(1.0f);
+        if (mesh->materials.count > 0) {
+            const ufbx_material* mat = mesh->materials.data[0];
+            ufbx_vec3 c = mat->fbx.diffuse_color.value_vec3;
+            if (mat->pbr.base_color.has_value) c = mat->pbr.base_color.value_vec3;
+            sub.Tint = {(float)c.x, (float)c.y, (float)c.z};
+            if (mat->pbr.metalness.has_value) sub.Metallic = (float)mat->pbr.metalness.value_real;
+            if (mat->pbr.roughness.has_value) sub.Roughness = (float)mat->pbr.roughness.value_real;
+        }
+        model->m_subMeshes.push_back(std::move(sub));
+    }
+    if (model->m_subMeshes.empty())
+        throw std::runtime_error("SkinnedModel: в FBX нет скиновых мешей: " + path);
+
+    // --- Анимации: каждый anim-stack -> клип; кости сэмплируем в мировой позе. ---
+    const int kBones = sk.Count();
+    for (size_t si = 0; si < scene->anim_stacks.count; ++si) {
+        const ufbx_anim_stack* stack = scene->anim_stacks.data[si];
+        double t0 = stack->time_begin, t1 = stack->time_end;
+        if (t1 <= t0) continue;
+        const ufbx_anim* anim = stack->anim;
+
+        AnimationClip clip;
+        clip.Name = stack->name.length ? std::string(stack->name.data, stack->name.length)
+                                       : ("clip" + std::to_string(model->m_clips.size()));
+        clip.Duration = (float)(t1 - t0);
+
+        // Равномерно 30 к/с — ufbx-каналы могут иметь разные разбиения ключей,
+        // единая сетка даёт ровные линейно-интерполируемые клипы под наш Animator.
+        const double fps = 30.0;
+        int frames = std::max(2, (int)std::lround((t1 - t0) * fps) + 1);
+
+        for (int bi = 0; bi < kBones; ++bi) {
+            AnimChannel tc; tc.Joint = bi; tc.Target = AnimPath::Translation;
+            AnimChannel rc; rc.Joint = bi; rc.Target = AnimPath::Rotation;
+            AnimChannel sc; sc.Joint = bi; sc.Target = AnimPath::Scale;
+            for (int f = 0; f < frames; ++f) {
+                double tt = t0 + (t1 - t0) * (double)f / (double)(frames - 1);
+                glm::mat4 world = FbxEvalWorld(anim, boneNodes[bi], tt);
+                glm::vec3 T, S; glm::quat R;
+                FbxDecompose(world, T, R, S);
+                float lt = (float)(tt - t0);
+                tc.Times.push_back(lt); tc.Values.push_back(glm::vec4(T, 0.0f));
+                rc.Times.push_back(lt); rc.Values.push_back(glm::vec4(R.x, R.y, R.z, R.w));
+                sc.Times.push_back(lt); sc.Values.push_back(glm::vec4(S, 0.0f));
+            }
+            clip.Channels.push_back(std::move(tc));
+            clip.Channels.push_back(std::move(rc));
+            clip.Channels.push_back(std::move(sc));
+        }
+        model->m_clips.push_back(std::move(clip));
+    }
+
+    LOG_INFO("Anim") << "SkinnedModel загружен (FBX): " << path << " (костей " << kBones
+                     << ", submesh " << model->m_subMeshes.size()
+                     << ", клипов " << model->m_clips.size() << ")";
     return model;
 }
 

@@ -20,6 +20,22 @@ namespace ModelLoader {
     // (если он есть). Бросает std::runtime_error при ошибке чтения модели.
     std::shared_ptr<Mesh> LoadObj(const std::string& path);
 
+    // Загружает .fbx (через ufbx) и сплющивает все node-меши в один Mesh
+    // (мировые координаты), применив ImportSettings. Для ECS-пути MeshRef,
+    // которому нужен единый меш без материалов.
+    std::shared_ptr<Mesh> LoadFbx(const std::string& path);
+
+    // CPU-часть загрузки .fbx: читает и триангулирует все node-меши в мировых
+    // координатах в vertices/indices (БЕЗ ImportSettings и без GL — для юнит-
+    // тестов геометрии). Бросает std::runtime_error при ошибке чтения.
+    void ParseFbxGeometry(const std::string& path,
+                          std::vector<Vertex>& vertices,
+                          std::vector<unsigned int>& indices);
+
+    // Диспетчер по расширению: .fbx -> LoadFbx, всё остальное -> LoadObj.
+    // Единая точка входа для ResourceManager::GetModel.
+    std::shared_ptr<Mesh> Load(const std::string& path);
+
     // --- Сайдкар настроек импорта (GL-независимо) ---
     std::string ImportSidecarPath(const std::string& modelPath); // «<path>.sageimport»
     ImportSettings LoadImportSettings(const std::string& modelPath); // дефолт, если нет/битый

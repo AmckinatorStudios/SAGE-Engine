@@ -58,8 +58,8 @@ struct SkinnedSubMesh {
 
 class SkinnedModel {
 public:
-    // Загружает скелетную модель из .gltf/.glb (skins + animations). Бросает при
-    // ошибке или если в файле нет скина. Меши без скина игнорируются.
+    // Загружает скелетную модель из .gltf/.glb или .fbx (skins + animations).
+    // Бросает при ошибке или если в файле нет скина. Меши без скина игнорируются.
     static std::unique_ptr<SkinnedModel> Load(const std::string& path);
 
     // Процедурная демонстрация: гибкий сегментированный «щупалец» из нескольких
@@ -89,6 +89,9 @@ public:
                    const std::vector<glm::mat4>& bones) const;
 
 private:
+    static std::unique_ptr<SkinnedModel> LoadGltf(const std::string& path, bool binary);
+    static std::unique_ptr<SkinnedModel> LoadFbx(const std::string& path);
+
     std::vector<SkinnedSubMesh> m_subMeshes;
     sage::anim::Skeleton m_skeleton;
     std::vector<sage::anim::AnimationClip> m_clips;

@@ -5,6 +5,7 @@
 
 #include "Model.h"
 #include <tiny_obj_loader.h>
+#include <ufbx.h>
 #include <stb_image.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -369,6 +370,88 @@ std::unique_ptr<Model> Model::LoadGltfInternal(const std::string& path, bool bin
 }
 
 // ----------------------------------------------------------------------
+// FBX через ufbx (статические меши: геометрия + базовый цвет материала)
+// ----------------------------------------------------------------------
+std::unique_ptr<Model> Model::LoadFbxInternal(const std::string& path) {
+    ufbx_load_opts opts = {};
+    // Приводим к системе координат движка: правая, Y вверх, метры. ufbx сам
+    // пересчитает вершины/нормали/трансформы узлов под неё.
+    opts.target_axes = ufbx_axes_right_handed_y_up;
+    opts.target_unit_meters = 1.0f;
+    opts.generate_missing_normals = true;
+
+    ufbx_error error;
+    ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &error);
+    if (!scene) {
+        char buf[512];
+        ufbx_format_error(buf, sizeof(buf), &error);
+        LOG_ERROR("Model") << "Не удалось загрузить FBX " << path << ": " << buf;
+        throw std::runtime_error("Не удалось загрузить FBX " + path);
+    }
+
+    auto model = std::make_unique<Model>();
+    std::vector<uint32_t> triIndices;
+
+    for (size_t ni = 0; ni < scene->nodes.count; ++ni) {
+        const ufbx_node* node = scene->nodes.data[ni];
+        if (!node->mesh) continue;
+        const ufbx_mesh* mesh = node->mesh;
+        const ufbx_matrix& g2w = node->geometry_to_world;
+
+        std::vector<Vertex> vertices;
+        std::vector<unsigned int> indices;
+        triIndices.resize(mesh->max_face_triangles * 3);
+
+        for (size_t fi = 0; fi < mesh->faces.count; ++fi) {
+            ufbx_face face = mesh->faces.data[fi];
+            size_t numTris = ufbx_triangulate_face(triIndices.data(), triIndices.size(), mesh, face);
+            for (size_t t = 0; t < numTris * 3; ++t) {
+                uint32_t corner = triIndices[t];
+                ufbx_vec3 p = ufbx_get_vertex_vec3(&mesh->vertex_position, corner);
+                ufbx_vec3 pw = ufbx_transform_position(&g2w, p);
+                Vertex v{};
+                v.Position = {(float)pw.x, (float)pw.y, (float)pw.z};
+                if (mesh->vertex_normal.exists) {
+                    ufbx_vec3 n = ufbx_get_vertex_vec3(&mesh->vertex_normal, corner);
+                    ufbx_vec3 nw = ufbx_transform_direction(&g2w, n);
+                    glm::vec3 gn(nw.x, nw.y, nw.z);
+                    float len = glm::length(gn);
+                    v.Normal = len > 1e-6f ? gn / len : glm::vec3(0, 1, 0);
+                }
+                if (mesh->vertex_uv.exists) {
+                    ufbx_vec2 uv = ufbx_get_vertex_vec2(&mesh->vertex_uv, corner);
+                    v.TexCoords = {(float)uv.x, (float)uv.y};
+                }
+                indices.push_back((unsigned int)vertices.size());
+                vertices.push_back(v);
+            }
+        }
+        if (vertices.empty()) continue;
+
+        SubMesh sub;
+        sub.MeshData = std::make_shared<Mesh>(vertices, indices);
+        // Базовый цвет из первого материала узла (если есть) — текстуры FBX часто
+        // ссылаются на внешние файлы по абсолютным путям, поэтому тут только цвет.
+        if (mesh->materials.count > 0) {
+            const ufbx_material* mat = mesh->materials.data[0];
+            ufbx_vec3 c = mat->fbx.diffuse_color.value_vec3;
+            if (mat->pbr.base_color.has_value) c = mat->pbr.base_color.value_vec3;
+            sub.TintColor = {(float)c.x, (float)c.y, (float)c.z};
+        }
+        model->m_subMeshes.push_back(std::move(sub));
+    }
+
+    ufbx_free_scene(scene);
+
+    if (model->m_subMeshes.empty()) {
+        LOG_ERROR("Model") << "FBX не содержит поддерживаемой геометрии: " << path;
+        throw std::runtime_error("FBX не содержит поддерживаемой геометрии: " + path);
+    }
+    LOG_INFO("Model") << "Загружен FBX " << path << " (" << model->m_subMeshes.size() << " подмешей)";
+    return model;
+}
+
+// ----------------------------------------------------------------------
 // Диспетчер по расширению + рендер
 // ----------------------------------------------------------------------
 static std::string GetExtensionLower(const std::string& path) {
@@ -384,8 +467,9 @@ std::unique_ptr<Model> Model::Load(const std::string& path) {
     if (ext == "obj") return LoadObjInternal(path);
     if (ext == "gltf") return LoadGltfInternal(path, false);
     if (ext == "glb") return LoadGltfInternal(path, true);
+    if (ext == "fbx") return LoadFbxInternal(path);
     LOG_ERROR("Model") << "Неподдерживаемый формат модели: " << path;
-    throw std::runtime_error("Неподдерживаемый формат модели: " + path + " (поддерживаются .obj, .gltf, .glb)");
+    throw std::runtime_error("Неподдерживаемый формат модели: " + path + " (поддерживаются .obj, .gltf, .glb, .fbx)");
 }
 
 void Model::Draw(Shader& shader) const {

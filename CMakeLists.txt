@@ -89,6 +89,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyobjloader)
 
+# ---------- ufbx (загрузка .fbx: меши, скелет, скины, анимации) ----------
+# Одно-файловая C-библиотека (ufbx.c + ufbx.h) — как Lua, берём только исходники
+# (SOURCE_SUBDIR на несуществующую папку) и собираем сами.
+FetchContent_Declare(
+  ufbx_src
+  GIT_REPOSITORY https://github.com/ufbx/ufbx.git
+  GIT_TAG v0.20.0
+  SOURCE_SUBDIR do-not-add-to-build
+)
+FetchContent_MakeAvailable(ufbx_src)
+add_library(ufbx STATIC ${ufbx_src_SOURCE_DIR}/ufbx.c)
+target_include_directories(ufbx PUBLIC ${ufbx_src_SOURCE_DIR})
+if (UNIX)
+    target_link_libraries(ufbx PUBLIC m)
+endif()
+
 # ---------- nlohmann/json (сериализация сцен) ----------
 FetchContent_Declare(
   json

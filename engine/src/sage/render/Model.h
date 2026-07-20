@@ -37,6 +37,7 @@ public:
 private:
     static std::unique_ptr<Model> LoadObjInternal(const std::string& path);
     static std::unique_ptr<Model> LoadGltfInternal(const std::string& path, bool binary);
+    static std::unique_ptr<Model> LoadFbxInternal(const std::string& path);
 
     std::vector<SubMesh> m_subMeshes;
 };

@@ -1,7 +1,9 @@
 #include "ModelLoader.h"
 #define TINYOBJLOADER_IMPLEMENTATION_ALREADY_IN_LIB
 #include <tiny_obj_loader.h>
+#include <ufbx.h>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -118,6 +120,82 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
     ApplyImportSettings(vertices, LoadImportSettings(path));
 
     return std::make_shared<Mesh>(vertices, indices);
+}
+
+void ParseFbxGeometry(const std::string& path,
+                      std::vector<Vertex>& vertices,
+                      std::vector<unsigned int>& indices) {
+    ufbx_load_opts opts = {};
+    opts.target_axes = ufbx_axes_right_handed_y_up;
+    opts.target_unit_meters = 1.0f;
+    opts.generate_missing_normals = true;
+
+    ufbx_error error;
+    ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &error);
+    if (!scene) {
+        char buf[512];
+        ufbx_format_error(buf, sizeof(buf), &error);
+        throw std::runtime_error("Не удалось загрузить FBX " + path + ": " + buf);
+    }
+    struct SceneGuard { ufbx_scene* s; ~SceneGuard() { if (s) ufbx_free_scene(s); } } guard{scene};
+
+    vertices.clear();
+    indices.clear();
+    std::vector<uint32_t> tri;
+
+    for (size_t ni = 0; ni < scene->nodes.count; ++ni) {
+        const ufbx_node* node = scene->nodes.data[ni];
+        if (!node->mesh) continue;
+        const ufbx_mesh* mesh = node->mesh;
+        const ufbx_matrix& g2w = node->geometry_to_world;
+        tri.resize(mesh->max_face_triangles * 3);
+        for (size_t fi = 0; fi < mesh->faces.count; ++fi) {
+            ufbx_face face = mesh->faces.data[fi];
+            size_t numTris = ufbx_triangulate_face(tri.data(), tri.size(), mesh, face);
+            for (size_t t = 0; t < numTris * 3; ++t) {
+                uint32_t corner = tri[t];
+                ufbx_vec3 p = ufbx_get_vertex_vec3(&mesh->vertex_position, corner);
+                ufbx_vec3 pw = ufbx_transform_position(&g2w, p);
+                Vertex v{};
+                v.Position = {(float)pw.x, (float)pw.y, (float)pw.z};
+                if (mesh->vertex_normal.exists) {
+                    ufbx_vec3 n = ufbx_get_vertex_vec3(&mesh->vertex_normal, corner);
+                    ufbx_vec3 nw = ufbx_transform_direction(&g2w, n);
+                    glm::vec3 gn((float)nw.x, (float)nw.y, (float)nw.z);
+                    float len = glm::length(gn);
+                    v.Normal = len > 1e-6f ? gn / len : glm::vec3(0, 1, 0);
+                }
+                if (mesh->vertex_uv.exists) {
+                    ufbx_vec2 uv = ufbx_get_vertex_vec2(&mesh->vertex_uv, corner);
+                    v.TexCoords = {(float)uv.x, (float)uv.y};
+                }
+                indices.push_back((unsigned int)vertices.size());
+                vertices.push_back(v);
+            }
+        }
+    }
+    if (vertices.empty())
+        throw std::runtime_error("FBX не содержит геометрии: " + path);
+}
+
+std::shared_ptr<Mesh> LoadFbx(const std::string& path) {
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+    ParseFbxGeometry(path, vertices, indices);
+    // Настройки импорта (масштаб/центрирование/нормализация) — ДО GPU-меша.
+    ApplyImportSettings(vertices, LoadImportSettings(path));
+    return std::make_shared<Mesh>(vertices, indices);
+}
+
+std::shared_ptr<Mesh> Load(const std::string& path) {
+    std::string ext;
+    size_t dot = path.find_last_of('.');
+    if (dot != std::string::npos) {
+        ext = path.substr(dot + 1);
+        for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    }
+    if (ext == "fbx") return LoadFbx(path);
+    return LoadObj(path);
 }
 
 }

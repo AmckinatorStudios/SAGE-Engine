@@ -87,6 +87,7 @@ target_link_libraries(sage_engine PUBLIC
 target_link_libraries(sage_engine PRIVATE
     tinyobjloader
     tinygltf
+    ufbx
     nlohmann_json::nlohmann_json
     miniaudio
 )
