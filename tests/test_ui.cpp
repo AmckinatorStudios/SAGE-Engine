@@ -5,6 +5,7 @@
 
 #include "sage/ui/UIAnchor.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UIShowcase.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -140,4 +141,37 @@ TEST(UI_hit_test_child_and_clip_mask) {
     // Без маски та же точка попадает в ребёнка.
     scene.Registry().get<UIElementComponent>(parent.Entity()).ClipChildren = false;
     CHECK_EQ(sage::ui::HitTest(scene, 320, 130, 800, 600), child.Id());
+}
+
+// --- Боевой сложный интерфейс (инвентарь + дерево навыков): плотная вёрстка,
+//     вложенные контейнеры, слои, клип-маска — стресс-тест тулкита без GL. ---
+TEST(UI_showcase_builds_dense_layout) {
+    Scene scene("UI");
+    int rootId = sage::ui::BuildShowcase(scene);
+    CHECK_TRUE(rootId != -1);
+    // Плотный экран: десятки элементов (панели/иконки/счётчики/узлы/провода).
+    CHECK_TRUE(scene.Count() > 50);
+    CHECK_TRUE(scene.FindByName("Inventory").Valid());
+    CHECK_TRUE(scene.FindByName("SkillTree").Valid());
+    CHECK_TRUE(scene.FindByName("Slot0").Valid());
+    CHECK_TRUE(scene.FindByName("Skill_Ultima").Valid());
+}
+
+TEST(UI_showcase_hittest_respects_clip_mask) {
+    Scene scene("UI");
+    sage::ui::BuildShowcase(scene);
+    const int W = 1920, H = 1080;
+
+    // Инвентарь якорится TopRight {24,24} размером {372,470}: слева-верх на
+    // экране = (1920-24-372, 24) = (1524, 24). Сетка внутри {16,58} h=250 —
+    // маска по y в [82, 332). Слот0 (12,12) виден, слот20 (12,268) — обрезан.
+    int visible = sage::ui::HitTest(scene, 1524 + 16 + 40, 24 + 58 + 40, W, H); // центр слота0
+    CHECK_TRUE(visible >= 0); // попали во что-то (слот/иконку) внутри маски
+
+    int clipped = sage::ui::HitTest(scene, 1524 + 16 + 40, 24 + 58 + 290, W, H); // где был бы слот20
+    int slot20 = scene.FindByName("Slot20").Id();
+    CHECK_TRUE(clipped != slot20); // обрезанный слот не кликается
+
+    // Точка далеко от обеих панелей (низ-центр экрана) — мимо всего.
+    CHECK_EQ(sage::ui::HitTest(scene, W / 2, H - 40, W, H), -1);
 }

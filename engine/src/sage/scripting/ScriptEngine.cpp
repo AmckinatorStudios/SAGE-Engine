@@ -2,6 +2,7 @@
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/physics/Ragdoll.h"
+#include "sage/ui/UIShowcase.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include <algorithm>
@@ -253,6 +254,13 @@ void ScriptEngine::RegisterComponentTypes() {
         "Value", &UIElementComponent::Value,
         "BarFillColor", &UIElementComponent::BarFillColor
     );
+
+    // Собирает боевой интерфейс (инвентарь + дерево навыков) из UIElementComponent
+    // в сцену — плотный реальный экран одним вызовом. Возвращает id корня.
+    m_lua.set_function("SpawnUIShowcase", [this]() -> int {
+        if (!m_scene) throw std::runtime_error("SpawnUIShowcase: сцена не привязана");
+        return sage::ui::BuildShowcase(*m_scene);
+    });
 }
 
 void ScriptEngine::RegisterGameObject() {

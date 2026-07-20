@@ -53,6 +53,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UISceneSystem.cpp
+    src/sage/ui/UIShowcase.cpp
 )
 
 add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})

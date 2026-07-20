@@ -22,6 +22,8 @@
 #include "sage/render/Material.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/physics/Ragdoll.h"
+#include "sage/ui/UIShowcase.h"
+#include "sage/ui/UISceneSystem.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/Texture.h"
 #include "sage/scene/Components.h"
@@ -339,6 +341,10 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     SpawnPortal(scene, "Portal to room2", {10, 1.3f, -10}, "room2", {0.0f, 0.85f, 5.5f});
     SpawnPlayer(scene, {0.0f, 0.85f, 9.0f});
     m_roomSpawns["room1"] = {0.0f, 0.85f, 9.0f};
+
+    // Боевой сложный интерфейс (инвентарь + дерево навыков) поверх комнаты —
+    // реальная проверка UI-тулкита на плотном экране, не на паре панелей.
+    sage::ui::BuildShowcase(scene);
 
     // Стресс-тест масштабирования: SAGE_TESTGAME_STRESS=N рассыпает N*N мелких
     // кубов сеткой — большинство вне поля зрения, отсекается фрустумом, а
@@ -969,6 +975,10 @@ void TestGameLayer::OnRender() {
     //        поверх возможных чёрных полос letterbox ---
     device.SetViewport(0, 0, window.Width(), window.Height());
     m_ui->Begin(window.Width(), window.Height());
+    // UI сцены (инвентарь + дерево навыков из UIElementComponent активной комнаты)
+    // — тот же путь, что в собранной игре/редакторе; под кастомным HUD игры.
+    if (m_scenes.Active())
+        sage::ui::DrawSceneUI(*m_scenes.Active(), *m_ui, window.Width(), window.Height());
     m_hudHealth.Draw(*m_ui);
     m_hudScore.Draw(*m_ui);
     m_hudRoom.Draw(*m_ui);
