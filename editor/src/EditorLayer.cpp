@@ -150,7 +150,7 @@ void EditorLayer::OnAttach() {
         if (green.Valid()) {
             m_scene->Registry().emplace_or_replace<ScriptComponent>(
                 green.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
-            m_selectedId = green.Id();
+            SetSelectedId(green.Id());
         }
         StartPlay();
     }
@@ -381,41 +381,152 @@ void CopyComponentIfPresent(GameObject& src, GameObject& copy) {
 }
 } // namespace
 
-void EditorLayer::DuplicateSelected() {
-    GameObject src = m_scene->Get(m_selectedId);
-    if (!src.Valid()) return;
-    PushUndoSnapshot();
-    GameObject copy = m_scene->CreateObject(src.Name() + " Copy");
-    copy.GetTransform() = src.GetTransform();
-    copy.GetTransform().Position.x += 0.5f; // сдвиг, чтобы копия не сливалась с оригиналом
-    MeshRendererComponent& mr = copy.Renderer();
-    mr = src.Renderer();
-    CopyComponentIfPresent<ScriptComponent>(src, copy);
-    CopyComponentIfPresent<CameraComponent>(src, copy);
-    CopyComponentIfPresent<LightComponent>(src, copy);
-    CopyComponentIfPresent<RigidBodyComponent>(src, copy);
-    CopyComponentIfPresent<ColliderComponent>(src, copy);
-    CopyComponentIfPresent<ParticleEmitterComponent>(src, copy);
-    CopyComponentIfPresent<AnimatedModelComponent>(src, copy);
-    // Рантайм-состояние копии — своё, не разделённое с оригиналом: тело физики
-    // построится в Play заново, анимация — при первом апдейте, эмиттер — с нуля.
-    if (auto* rb = copy.Registry()->try_get<RigidBodyComponent>(copy.Entity()))
+namespace {
+// Копирует ВСЕ компоненты (кроме имени/иерархии) из src в dst — может быть в
+// ДРУГОЙ сцене (CopyComponentIfPresent работает по реестрам независимо). Рантайм-
+// поля копии сбрасываются: тело физики/сустав/анимация/эмиттер строятся заново.
+void CopyAllComponents(GameObject& src, GameObject& dst) {
+    dst.GetTransform() = src.GetTransform();
+    dst.Renderer() = src.Renderer();
+    CopyComponentIfPresent<ScriptComponent>(src, dst);
+    CopyComponentIfPresent<CameraComponent>(src, dst);
+    CopyComponentIfPresent<LightComponent>(src, dst);
+    CopyComponentIfPresent<RigidBodyComponent>(src, dst);
+    CopyComponentIfPresent<ColliderComponent>(src, dst);
+    CopyComponentIfPresent<JointComponent>(src, dst);
+    CopyComponentIfPresent<ParticleEmitterComponent>(src, dst);
+    CopyComponentIfPresent<AnimatedModelComponent>(src, dst);
+    CopyComponentIfPresent<UIElementComponent>(src, dst);
+    if (auto* rb = dst.Registry()->try_get<RigidBodyComponent>(dst.Entity()))
         rb->RuntimeBody = sage::physics::kInvalidBody;
-    if (auto* am = copy.Registry()->try_get<AnimatedModelComponent>(copy.Entity())) {
+    if (auto* jc = dst.Registry()->try_get<JointComponent>(dst.Entity()))
+        jc->RuntimeJoint = sage::physics::kInvalidJoint;
+    if (auto* am = dst.Registry()->try_get<AnimatedModelComponent>(dst.Entity())) {
         am->Model.reset();
         am->Anim = sage::anim::Animator{};
         am->Ready = false;
     }
-    if (auto* pe = copy.Registry()->try_get<ParticleEmitterComponent>(copy.Entity()))
+    if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity()))
         pe->Accumulator = 0.0f;
-    m_selectedId = copy.Id();
+}
+
+// Рекурсивно копирует поддерево (src.srcE + потомки) в dst под dstParent,
+// сохраняя иерархию. Новые сущности получают новые id. Возвращает корень копии.
+GameObject CopySubtree(Scene& src, entt::entity srcE, Scene& dst, entt::entity dstParent) {
+    GameObject s(&src.Registry(), srcE);
+    GameObject d = dst.CreateObject(s.Name());
+    CopyAllComponents(s, d);
+    if (dstParent != entt::null) dst.SetParent(d.Entity(), dstParent);
+    if (const HierarchyComponent* h = src.Registry().try_get<HierarchyComponent>(srcE)) {
+        std::vector<entt::entity> kids = h->Children; // копия: SetParent мутирует список
+        for (entt::entity k : kids)
+            if (src.Registry().valid(k)) CopySubtree(src, k, dst, d.Entity());
+    }
+    return d;
+}
+} // namespace
+
+// Копирует одну сущность (без детей) со всеми компонентами; сдвиг, чтобы копия
+// не сливалась с оригиналом. Возвращает копию.
+GameObject EditorLayer::DuplicateEntity(GameObject src) {
+    GameObject copy = m_scene->CreateObject(src.Name() + " Copy");
+    CopyAllComponents(src, copy);
+    copy.GetTransform().Position.x += 0.5f;
+    return copy;
+}
+
+void EditorLayer::DuplicateSelected() {
+    if (m_selection.empty()) return;
+    PushUndoSnapshot();
+    std::vector<int> copies;
+    for (int id : m_selection) {
+        GameObject src = m_scene->Get(id);
+        if (!src.Valid()) continue;
+        entt::entity parent = m_scene->ParentOf(src.Entity()); // копия остаётся у того же родителя
+        GameObject copy = DuplicateEntity(src);
+        if (parent != entt::null) m_scene->SetParent(copy.Entity(), parent);
+        copies.push_back(copy.Id());
+    }
+    m_selection = copies;
+    m_selectedId = copies.empty() ? -1 : copies.back();
 }
 
 void EditorLayer::DeleteSelected() {
-    if (!m_scene->Get(m_selectedId).Valid()) return;
+    bool any = false;
+    for (int id : m_selection)
+        if (m_scene->Get(id).Valid()) { any = true; break; }
+    if (!any) return;
     PushUndoSnapshot();
-    m_scene->RemoveObject(m_selectedId);
-    m_selectedId = -1;
+    for (int id : m_selection)
+        if (m_scene->Get(id).Valid()) m_scene->RemoveObject(id); // удаляет и поддерево
+    SetSelectedId(-1);
+    m_selection.clear();
+}
+
+void EditorLayer::SetSelectedId(int id) {
+    m_selectedId = id;
+    m_selection.clear();
+    if (id != -1) m_selection.push_back(id);
+}
+
+bool EditorLayer::IsSelected(int id) const {
+    return std::find(m_selection.begin(), m_selection.end(), id) != m_selection.end();
+}
+
+void EditorLayer::ToggleSelection(int id) {
+    if (id == -1) return;
+    auto it = std::find(m_selection.begin(), m_selection.end(), id);
+    if (it != m_selection.end()) {
+        m_selection.erase(it);
+        m_selectedId = m_selection.empty() ? -1 : m_selection.back();
+    } else {
+        m_selection.push_back(id);
+        m_selectedId = id; // добавленная становится первичной
+    }
+}
+
+// ============================================================================
+//  Префабы — переиспользуемые сущности-поддеревья (.sageprefab). Формат —
+//  та же JSON-сериализация, что у сцен: префаб = мини-сцена с одним корнем.
+// ============================================================================
+bool EditorLayer::SaveSelectedAsPrefab(const fs::path& path, std::string& err) {
+    GameObject root = m_scene->Get(m_selectedId);
+    if (!root.Valid()) { err = "ничего не выбрано"; return false; }
+    Scene temp("Prefab");
+    CopySubtree(*m_scene, root.Entity(), temp, entt::null); // корень + потомки
+    try {
+        SceneSerializer::Save(temp, path.string());
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+    SetStatusMessage("Префаб сохранён: " + path.filename().string());
+    return true;
+}
+
+int EditorLayer::InstantiatePrefab(const fs::path& path) {
+    std::unique_ptr<Scene> loaded;
+    try {
+        loaded = SceneSerializer::Load(path.string());
+    } catch (const std::exception& e) {
+        LOG_ERROR("Editor") << "Префаб не загрузился (" << path.string() << "): " << e.what();
+        return -1;
+    }
+    PushUndoSnapshot();
+    // Копируем ВСЕ корни префаба в текущую сцену (новые id, сохранена иерархия).
+    int firstRootId = -1;
+    auto& reg = loaded->Registry();
+    std::vector<entt::entity> roots;
+    for (auto e : reg.view<IdComponent>()) {
+        const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
+        if (!h || h->Parent == entt::null || !reg.valid(h->Parent)) roots.push_back(e);
+    }
+    for (entt::entity r : roots) {
+        GameObject copy = CopySubtree(*loaded, r, *m_scene, entt::null);
+        if (firstRootId == -1) firstRootId = copy.Id();
+    }
+    if (firstRootId != -1) SetSelectedId(firstRootId);
+    return firstRootId;
 }
 
 // ============================================================================
@@ -427,7 +538,7 @@ void EditorLayer::NewScene(bool withDemoContent) {
     m_undoStack.clear();
     m_redoStack.clear();
     m_scene = std::make_unique<Scene>("Untitled");
-    m_selectedId = -1;
+    SetSelectedId(-1);
     m_scenePath.clear();
     m_sceneDirty = false;
 
@@ -528,7 +639,7 @@ void EditorLayer::NewScene(bool withDemoContent) {
         // силуэте (кайма строится из силуэта меша — точна для любой формы).
         GameObject sel = m_scene->FindByName("Cone");
         if (!sel.Valid()) sel = m_scene->FindByName("Green Cube");
-        if (sel.Valid()) m_selectedId = sel.Id();
+        if (sel.Valid()) SetSelectedId(sel.Id());
     }
     UpdateWindowTitle();
 }
@@ -539,7 +650,7 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
         m_scene = SceneSerializer::Load(path.string());
         m_undoStack.clear();
         m_redoStack.clear();
-        m_selectedId = -1;
+        SetSelectedId(-1);
         m_scenePath = path;
         m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene loaded: " << path.string();
@@ -688,7 +799,7 @@ void EditorLayer::UpdateWindowTitle() {
 //  Пикинг из вьюпорта
 // ============================================================================
 
-void EditorLayer::PickAtViewport(float u, float v) {
+void EditorLayer::PickAtViewport(float u, float v, bool additive) {
     // Луч из камеры через пиксель вьюпорта: unprojection ближней/дальней точек NDC.
     glm::vec2 ndc(u * 2.0f - 1.0f, 1.0f - v * 2.0f);
     glm::mat4 invVP = glm::inverse(m_proj * m_view);
@@ -736,7 +847,13 @@ void EditorLayer::PickAtViewport(float u, float v) {
     for (auto e : lightMarkers)
         pickMarker(e, lightMarkers.get<IdComponent>(e).Id, glm::vec3(m_scene->WorldMatrix(e)[3]));
 
-    m_selectedId = bestId; // клик мимо всех объектов — снять выбор
+    // Ctrl-клик (additive): добавить/убрать попадание из набора (клик по пустоте
+    // ничего не меняет). Обычный клик: одиночный выбор (мимо всех — снять).
+    if (additive) {
+        if (bestId != -1) ToggleSelection(bestId);
+    } else {
+        SetSelectedId(bestId);
+    }
 }
 
 bool EditorLayer::HasPrimaryCamera() {
@@ -759,7 +876,7 @@ void EditorLayer::OnRender() {
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_renderer.RenderShadow(*m_scene, env); // общая карта теней (Viewport + Game)
-    m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_renderMode, m_showGrid,
+    m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode, m_showGrid,
                               cfg, m_view, m_proj); // отдаёт view/proj для гизмо/пикинга
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 
@@ -1007,7 +1124,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
         if (ImGui::BeginMenu("Entity")) {
             if (ImGui::MenuItem("Create Empty")) {
                 PushUndoSnapshot();
-                m_selectedId = m_scene->CreateObject("Empty").Id();
+                SetSelectedId(m_scene->CreateObject("Empty").Id());
             }
             if (ImGui::BeginMenu("Create Primitive")) {
                 struct { const char* name; MeshRef::Type type; } prims[] = {
@@ -1018,7 +1135,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 for (const auto& p : prims) {
                     if (ImGui::MenuItem(p.name)) {
                         PushUndoSnapshot();
-                        m_selectedId = CreatePrimitiveEntity(p.name, p.type).Id();
+                        SetSelectedId(CreatePrimitiveEntity(p.name, p.type).Id());
                     }
                 }
                 ImGui::EndMenu();
@@ -1027,14 +1144,14 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 PushUndoSnapshot();
                 GameObject camObj = m_scene->CreateObject("Camera");
                 m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
-                m_selectedId = camObj.Id();
+                SetSelectedId(camObj.Id());
             }
             if (ImGui::MenuItem("Create Light")) {
                 PushUndoSnapshot();
                 GameObject lightObj = m_scene->CreateObject("Light");
                 lightObj.GetTransform().Position = {0.0f, 2.5f, 0.0f};
                 m_scene->Registry().emplace<LightComponent>(lightObj.Entity());
-                m_selectedId = lightObj.Id();
+                SetSelectedId(lightObj.Id());
             }
             ImGui::Separator();
             // Физический куб: меш + динамическое тело + бокс-коллайдер — падает
@@ -1045,7 +1162,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 box.GetTransform().Position = {0.0f, 4.0f, 0.0f};
                 m_scene->Registry().emplace<RigidBodyComponent>(box.Entity());
                 m_scene->Registry().emplace<ColliderComponent>(box.Entity());
-                m_selectedId = box.Id();
+                SetSelectedId(box.Id());
             }
             // Скелетно-анимированная модель: без пути — процедурный демо-щупалец
             // с клипом «Wave» (сразу проигрывается в вьюпорте).
@@ -1054,7 +1171,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 GameObject anim = m_scene->CreateObject("Animated Model");
                 anim.GetTransform().Position = {0.0f, 0.0f, 0.0f};
                 m_scene->Registry().emplace<AnimatedModelComponent>(anim.Entity());
-                m_selectedId = anim.Id();
+                SetSelectedId(anim.Id());
             }
             // Эмиттер частиц: по умолчанию пресет «Fire» в точке над началом.
             if (ImGui::MenuItem("Create Particle Emitter")) {
@@ -1065,7 +1182,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 em.Config = ParticlePresets::Registry()[0].Make(); // Fire
                 em.Preset = 0;
                 m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity(), em);
-                m_selectedId = fx.Id();
+                SetSelectedId(fx.Id());
             }
             ImGui::EndMenu();
         }
@@ -1636,7 +1753,7 @@ void EditorLayer::RunSelfTest() {
         RigidBodyComponent rb; rb.RuntimeBody = 12345; // «живое» тело — не должно скопироваться
         m_scene->Registry().emplace<RigidBodyComponent>(src.Entity(), rb);
         m_scene->Registry().emplace<ColliderComponent>(src.Entity());
-        m_selectedId = src.Id();
+        SetSelectedId(src.Id());
         DuplicateSelected();
         GameObject copy = m_scene->Get(m_selectedId);
         bool compOk = copy.Valid() && copy.Id() != src.Id() &&
@@ -1653,7 +1770,7 @@ void EditorLayer::RunSelfTest() {
         }
         if (copy.Valid()) m_scene->RemoveObject(copy.Id());
         m_scene->RemoveObject(src.Id());
-        m_selectedId = -1;
+        SetSelectedId(-1);
     }
 
     // --- Иерархия: мировая позиция ребёнка складывается из родителя, удаление
@@ -1672,7 +1789,7 @@ void EditorLayer::RunSelfTest() {
             ok = false;
         }
         if (ok) {
-            m_selectedId = parent.Id();
+            SetSelectedId(parent.Id());
             DeleteSelected(); // PushUndoSnapshot внутри; удаляет родителя С ребёнком
             if (m_scene->Count() != n0) {
                 LOG_ERROR("Editor") << "SELFTEST: hierarchy subtree delete failed (count "
@@ -1692,7 +1809,97 @@ void EditorLayer::RunSelfTest() {
             }
             if (p2.Valid()) m_scene->RemoveObject(p2.Id()); // чистим вместе с поддеревом
         }
-        m_selectedId = -1;
+        SetSelectedId(-1);
+    }
+
+    // --- Мультивыделение: набор из двух, Delete удаляет обе, Undo возвращает,
+    // Duplicate дублирует обе ---
+    if (ok) {
+        GameObject a = m_scene->CreateObject("MultiA");
+        GameObject b = m_scene->CreateObject("MultiB");
+        SetSelectedId(a.Id());
+        ToggleSelection(b.Id()); // теперь выбраны обе, первичная — b
+        bool selOk = m_selection.size() == 2 && IsSelected(a.Id()) && IsSelected(b.Id()) &&
+                     m_selectedId == b.Id();
+        if (!selOk) {
+            LOG_ERROR("Editor") << "SELFTEST: multi-select set wrong (size " << m_selection.size() << ")";
+            ok = false;
+        }
+        if (ok) {
+            size_t n0 = m_scene->Count();
+            DuplicateSelected(); // обе -> +2, выделены копии
+            if (m_scene->Count() != n0 + 2 || m_selection.size() != 2) {
+                LOG_ERROR("Editor") << "SELFTEST: multi-duplicate failed (count " << m_scene->Count()
+                                    << ", sel " << m_selection.size() << ")";
+                ok = false;
+            }
+            if (ok) DeleteSelected(); // убрать копии (выделены они) -> снова n0
+            // Удаляем исходную пару (снова мультивыбор) и проверяем Undo.
+            if (ok) {
+                SetSelectedId(m_scene->FindByName("MultiA").Id());
+                ToggleSelection(m_scene->FindByName("MultiB").Id());
+                size_t nBefore = m_scene->Count();
+                DeleteSelected();
+                bool delOk = m_scene->Count() == nBefore - 2 && m_selection.empty();
+                Undo();
+                bool undoOk = m_scene->FindByName("MultiA").Valid() &&
+                              m_scene->FindByName("MultiB").Valid();
+                if (!delOk || !undoOk) {
+                    LOG_ERROR("Editor") << "SELFTEST: multi-delete/undo failed (del " << delOk
+                                        << ", undo " << undoOk << ")";
+                    ok = false;
+                }
+            }
+        }
+        // Чистим тестовые сущности.
+        for (const char* nm : {"MultiA", "MultiB"}) {
+            GameObject g = m_scene->FindByName(nm);
+            if (g.Valid()) m_scene->RemoveObject(g.Id());
+        }
+        SetSelectedId(-1);
+    }
+
+    // --- Префабы: сущность с ребёнком -> .sageprefab -> инстанс восстанавливает
+    // поддерево (имя/компонент/иерархия), новые id ---
+    if (ok) {
+        GameObject root = m_scene->CreateObject("PrefabRoot");
+        root.GetTransform().Position = {3.0f, 1.0f, 0.0f};
+        m_scene->Registry().emplace<LightComponent>(root.Entity());
+        GameObject kid = m_scene->CreateObject("PrefabKid");
+        kid.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+        m_scene->SetParent(kid.Entity(), root.Entity());
+
+        SetSelectedId(root.Id());
+        fs::path prefabPath = m_project.Dir() / "assets" / "selftest.sageprefab";
+        std::error_code pec;
+        fs::create_directories(prefabPath.parent_path(), pec);
+        std::string perr;
+        bool saved = SaveSelectedAsPrefab(prefabPath, perr);
+        // Удаляем оригинал и инстанцируем — проверяем восстановление из файла.
+        if (saved) {
+            m_scene->RemoveObject(root.Id());
+            SetSelectedId(-1);
+            int newRootId = InstantiatePrefab(prefabPath);
+            GameObject nr = m_scene->Get(newRootId);
+            bool rootOk = nr.Valid() && nr.Name() == "PrefabRoot" &&
+                          m_scene->Registry().all_of<LightComponent>(nr.Entity()) &&
+                          m_selectedId == newRootId;
+            // Ребёнок восстановлен и прикреплён к новому корню.
+            const HierarchyComponent* h = nr.Valid()
+                ? m_scene->Registry().try_get<HierarchyComponent>(nr.Entity()) : nullptr;
+            bool childOk = h && h->Children.size() == 1;
+            if (!rootOk || !childOk) {
+                LOG_ERROR("Editor") << "SELFTEST: prefab round-trip failed (root " << rootOk
+                                    << ", child " << childOk << ")";
+                ok = false;
+            }
+            if (nr.Valid()) m_scene->RemoveObject(nr.Id());
+        } else {
+            LOG_ERROR("Editor") << "SELFTEST: prefab save failed: " << perr;
+            ok = false;
+        }
+        fs::remove(prefabPath, pec);
+        SetSelectedId(-1);
     }
 
     // --- Пресеты качества: Low гасит тяжёлые проходы, значения переживают
@@ -1723,7 +1930,8 @@ void EditorLayer::RunSelfTest() {
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
-                               << "culling + duplicate + hierarchy + presets, " << before << " entities)";
+                               << "culling + duplicate + hierarchy + multiselect + prefab + presets, "
+                               << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
 

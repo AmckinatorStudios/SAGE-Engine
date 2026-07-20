@@ -1,6 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include "sage/scene/Scene.h"
 #include "sage/render/Camera.h"
@@ -40,9 +41,22 @@ public:
 
     // --- сцена и выбор ---
     virtual Scene& CurrentScene() = 0;
+    // Выбор — МНОЖЕСТВЕННЫЙ. SelectedId() — «первичная» (последняя кликнутая)
+    // сущность: под неё Inspector и пивот гизмо. Selection() — весь набор
+    // (включает первичную); гизмо двигает все, Delete/Duplicate — по всем.
     virtual int SelectedId() const = 0;
-    virtual void SetSelectedId(int id) = 0;
-    virtual GameObject SelectedObject() = 0; // invalid, если ничего не выбрано
+    virtual void SetSelectedId(int id) = 0;               // одиночный выбор (набор = {id})
+    virtual GameObject SelectedObject() = 0;              // первичная; invalid, если пусто
+    virtual const std::vector<int>& Selection() const = 0; // весь набор выбранных id
+    virtual bool IsSelected(int id) const = 0;
+    virtual void ToggleSelection(int id) = 0;             // Ctrl-клик: добавить/убрать из набора
+
+    // --- префабы (переиспользуемые сущности-поддеревья) ---
+    // Сохраняет сущность (с детьми) в .sageprefab; false + err при ошибке.
+    virtual bool SaveSelectedAsPrefab(const std::filesystem::path& path, std::string& err) = 0;
+    // Инстанцирует префаб из файла в сцену (новые id), выделяет корень. Возвращает
+    // id корня инстанса или -1 при ошибке.
+    virtual int InstantiatePrefab(const std::filesystem::path& path) = 0;
 
     // --- проект и файлы сцен ---
     virtual Project& CurrentProject() = 0;
@@ -97,7 +111,8 @@ public:
     virtual const glm::mat4& ProjMatrix() const = 0;
     virtual unsigned int SceneTexture() const = 0;     // цвет FBO сцены (для ImGui::Image)
     virtual void SetViewportSize(int w, int h) = 0;    // панель сообщает размер под FBO
-    virtual void PickAtViewport(float u, float v) = 0; // u,v в [0..1] — выбор сущности лучом
+    // u,v в [0..1] — выбор сущности лучом. additive (Ctrl) — добавить/убрать из набора.
+    virtual void PickAtViewport(float u, float v, bool additive = false) = 0;
 
     // --- панель Game (игровое окно: рендер от Primary-камеры сцены) ---
     virtual unsigned int GameTexture() const = 0;

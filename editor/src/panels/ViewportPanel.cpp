@@ -123,18 +123,52 @@ void ViewportPanel::Draw(EditorHost& host) {
         // Move/Rotate — по выбору пользователя (тулбар: Local/World).
         auto mode = (host.GizmoSpace() == EditorGizmoSpace::World && op != ImGuizmo::SCALE)
                         ? ImGuizmo::WORLD : ImGuizmo::LOCAL;
+        // Фронт «начали таскать»: одна запись undo + снимок мировых матриц всех
+        // выбранных (для мультивыделения — двигаем весь набор относительно
+        // первичной, вокруг которой и стоит гизмо).
+        bool usingNow = ImGuizmo::IsUsing();
+        if (usingNow && !m_gizmoWasUsing && !host.InPlayMode()) {
+            host.CommitPendingSnapshot();
+            m_dragStartPrimary = scene.WorldMatrix(selected.Entity());
+            m_dragStartWorlds.clear();
+            for (int id : host.Selection()) {
+                GameObject o = scene.Get(id);
+                if (o.Valid()) m_dragStartWorlds.push_back({id, scene.WorldMatrix(o.Entity())});
+            }
+        }
+
         if (ImGuizmo::Manipulate(glm::value_ptr(host.ViewMatrix()), glm::value_ptr(host.ProjMatrix()),
                                  op, mode, glm::value_ptr(model),
                                  nullptr, host.GizmoSnap() ? snapValues : nullptr)) {
             // Мировая -> локальная: убираем вклад родителя.
             glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
             DecomposeToTransform(local, tr);
-        }
 
-        // Фронт «начали таскать»: одна запись undo на всё перетаскивание.
-        bool usingNow = ImGuizmo::IsUsing();
-        if (usingNow && !m_gizmoWasUsing && !host.InPlayMode()) {
-            host.CommitPendingSnapshot();
+            // Мультивыделение: та же мировая дельта — на остальные выбранные.
+            if (host.Selection().size() > 1) {
+                glm::mat4 delta = model * glm::inverse(m_dragStartPrimary);
+                for (auto& [id, startWorld] : m_dragStartWorlds) {
+                    if (id == selected.Id()) continue;
+                    GameObject o = scene.Get(id);
+                    if (!o.Valid()) continue;
+                    // Пропускаем потомков других выбранных: их несёт двигающийся
+                    // родитель, иначе смещение применилось бы дважды.
+                    bool ancestorSelected = false;
+                    for (entt::entity a = scene.ParentOf(o.Entity());
+                         a != entt::null; a = scene.ParentOf(a)) {
+                        if (host.IsSelected(scene.Registry().get<IdComponent>(a).Id)) {
+                            ancestorSelected = true;
+                            break;
+                        }
+                    }
+                    if (ancestorSelected) continue;
+                    glm::mat4 newWorld = delta * startWorld;
+                    entt::entity p = scene.ParentOf(o.Entity());
+                    glm::mat4 pw = (p != entt::null) ? scene.WorldMatrix(p) : glm::mat4(1.0f);
+                    glm::mat4 loc = (p != entt::null) ? glm::inverse(pw) * newWorld : newWorld;
+                    DecomposeToTransform(loc, o.GetTransform());
+                }
+            }
         }
         m_gizmoWasUsing = usingNow;
     } else {
@@ -147,7 +181,8 @@ void ViewportPanel::Draw(EditorHost& host) {
         ImVec2 mp = ImGui::GetMousePos();
         float u = (mp.x - imgPos.x) / avail.x;
         float v = (mp.y - imgPos.y) / avail.y;
-        if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) host.PickAtViewport(u, v);
+        if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f)
+            host.PickAtViewport(u, v, io.KeyCtrl); // Ctrl — добавить/убрать из набора
     }
 
     // Инструменты (режим гизмо, snap, пространство, Play, режим рендера) —

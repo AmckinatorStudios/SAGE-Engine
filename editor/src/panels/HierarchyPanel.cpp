@@ -2,13 +2,16 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "Project.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 
@@ -21,13 +24,17 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     bool hasChildren = h && !h->Children.empty();
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (host.SelectedId() == id) flags |= ImGuiTreeNodeFlags_Selected;
+    if (host.IsSelected(id)) flags |= ImGuiTreeNodeFlags_Selected; // подсветка всех выбранных
     if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
     ImGui::PushID(id);
     bool open = ImGui::TreeNodeEx((void*)(intptr_t)id, flags, "%s", name.c_str());
-    // Клик по строке (не по треугольнику раскрытия) — выбор.
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) host.SetSelectedId(id);
+    // Клик по строке (не по треугольнику раскрытия) — выбор. Ctrl — добавить/
+    // убрать из набора (множественный выбор), обычный клик — одиночный.
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        if (ImGui::GetIO().KeyCtrl) host.ToggleSelection(id);
+        else host.SetSelectedId(id);
+    }
 
     // Перетаскиваем эту сущность как источник.
     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
@@ -49,7 +56,9 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
 
     // Контекстное меню сущности.
     if (ImGui::BeginPopupContextItem()) {
-        host.SetSelectedId(id);
+        // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
+        // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
+        if (!host.IsSelected(id)) host.SetSelectedId(id);
         if (ImGui::MenuItem("Create Child")) {
             host.PushUndoSnapshot();
             GameObject child = scene.CreateObject("Child");
@@ -57,6 +66,18 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
             host.SetSelectedId(child.Id());
         }
         if (ImGui::MenuItem("Duplicate")) host.DuplicateSelected();
+        // Сохранить выбранную сущность (с детьми) как переиспользуемый префаб в
+        // assets/ проекта. Имя файла — по имени сущности.
+        if (ImGui::MenuItem("Save as Prefab")) {
+            std::error_code ec;
+            std::filesystem::path dir = host.CurrentProject().Dir() / "assets";
+            std::filesystem::create_directories(dir, ec);
+            std::string safe = name;
+            for (char& c : safe) if (c == '/' || c == '\\' || c == ':') c = '_';
+            std::string perr;
+            if (!host.SaveSelectedAsPrefab(dir / (safe + ".sageprefab"), perr))
+                host.SetStatusMessage("Prefab save failed: " + perr);
+        }
         bool hasParent = h && h->Parent != entt::null;
         if (ImGui::MenuItem("Unparent", nullptr, false, hasParent)) {
             host.PushUndoSnapshot();

@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -41,7 +42,8 @@ public:
     // Превью сцены редакторской камерой. Возвращает использованные view/proj
     // (нужны вызывающему для гизмо/пикинга). mode/showGrid — из тулбара.
     void RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
-                        int selectedId, EditorRenderMode mode, bool showGrid,
+                        int selectedId, const std::vector<int>& selection,
+                        EditorRenderMode mode, bool showGrid,
                         const sage::EngineConfig& cfg, glm::mat4& outView, glm::mat4& outProj);
 
     // Игровое окно от первой Primary-камеры сцены (нет камеры — кадр не рисуется,
@@ -67,9 +69,11 @@ private:
     // буфер, затем краевая дилатация ПОСТОЯННОЙ ширины в пикселях поверх кадра.
     // Работает для любых мешей (модели/плоскости/невыпуклые), в отличие от
     // прежней «раздутой оболочки» (толщина зависела от размера, только выпуклые).
-    void RenderOutlineMask(Scene& scene, GameObject obj, const glm::mat4& view, const glm::mat4& proj);
+    // Силуэты ВСЕХ выбранных сущностей в масочный буфер (одна очистка, потом все).
+    void RenderOutlineMask(Scene& scene, const std::vector<int>& selection,
+                           const glm::mat4& view, const glm::mat4& proj);
     void CompositeOutline(Framebuffer& target);
-    void DrawEntityGizmos(Scene& scene, int selectedId, float gameAspect);
+    void DrawEntityGizmos(Scene& scene, const std::vector<int>& selection, float gameAspect);
     static sage::render::PostFXSettings FxFromConfig(const sage::EngineConfig& cfg);
 
     std::optional<Shader> m_outlineShader;   // lit-шейдер как flat-цвет каймы выделения

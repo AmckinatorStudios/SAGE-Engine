@@ -75,8 +75,15 @@ public:
     // --- EditorHost: сцена и выбор ---
     Scene& CurrentScene() override { return *m_scene; }
     int SelectedId() const override { return m_selectedId; }
-    void SetSelectedId(int id) override { m_selectedId = id; }
+    void SetSelectedId(int id) override; // одиночный выбор (сбрасывает набор)
     GameObject SelectedObject() override { return m_scene->Get(m_selectedId); }
+    const std::vector<int>& Selection() const override { return m_selection; }
+    bool IsSelected(int id) const override;
+    void ToggleSelection(int id) override;
+
+    // --- EditorHost: префабы ---
+    bool SaveSelectedAsPrefab(const std::filesystem::path& path, std::string& err) override;
+    int InstantiatePrefab(const std::filesystem::path& path) override;
 
     // --- EditorHost: проект и файлы сцен ---
     Project& CurrentProject() override { return m_project; }
@@ -102,6 +109,7 @@ public:
     // --- EditorHost: сущности ---
     GameObject CreateCubeEntity(const std::string& name) override;
     GameObject CreatePrimitiveEntity(const std::string& name, MeshRef::Type type);
+    GameObject DuplicateEntity(GameObject src); // копия одной сущности (для Duplicate/prefab)
     void DuplicateSelected() override;
     void DeleteSelected() override;
 
@@ -126,7 +134,7 @@ public:
     const glm::mat4& ProjMatrix() const override { return m_proj; }
     unsigned int SceneTexture() const override { return m_renderer.ViewportTexture(); }
     void SetViewportSize(int w, int h) override { m_renderer.SetViewportSize(w, h); }
-    void PickAtViewport(float u, float v) override;
+    void PickAtViewport(float u, float v, bool additive = false) override;
 
     // --- EditorHost: панель Game ---
     unsigned int GameTexture() const override { return m_renderer.GameTexture(); }
@@ -189,7 +197,8 @@ private:
     std::string m_pendingEditSnapshot;    // состояние на момент Capture (виджет/гизмо)
 
     // --- выбор/вьюпорты (размеры окон живут в m_renderer) ---
-    int m_selectedId = -1;
+    int m_selectedId = -1;              // «первичная» (последняя кликнутая)
+    std::vector<int> m_selection;       // весь набор выбранных (включает первичную)
     glm::mat4 m_view{1.0f}, m_proj{1.0f}; // последние view/proj кадра (гизмо/пикинг)
 
     // --- docking ---

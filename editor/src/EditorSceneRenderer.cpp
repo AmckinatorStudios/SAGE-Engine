@@ -101,10 +101,8 @@ Shader& OutlineEdgeShader() {
 
 // Рисует силуэт выбранного меша сплошным белым в масочный буфер (без теста
 // глубины — полный силуэт даже при частичном перекрытии другими объектами).
-void EditorSceneRenderer::RenderOutlineMask(Scene& scene, GameObject obj,
+void EditorSceneRenderer::RenderOutlineMask(Scene& scene, const std::vector<int>& selection,
                                             const glm::mat4& view, const glm::mat4& proj) {
-    const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(obj.Entity());
-    if (!mr || !mr->MeshPtr) return;
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
     m_outlineMask->Resize(m_vpW, m_vpH);
@@ -115,14 +113,21 @@ void EditorSceneRenderer::RenderOutlineMask(Scene& scene, GameObject obj,
     m_outlineShader->Use();
     m_outlineShader->SetMat4("uView", view);
     m_outlineShader->SetMat4("uProjection", proj);
-    m_outlineShader->SetMat4("uModel", scene.WorldMatrix(obj.Entity()));
     m_outlineShader->SetInt("uShadingMode", 1); // unlit — плоский белый силуэт
     m_outlineShader->SetInt("uUseTexture", 0);
     m_outlineShader->SetInt("uFogEnabled", 0);
     m_outlineShader->SetVec3("uObjectColor", {1.0f, 1.0f, 1.0f});
 
     device.SetDepthTest(false); // полный силуэт независимо от перекрытий
-    mr->MeshPtr->Draw();
+    // Все выбранные сущности с мешем — в одну маску (кайма охватит их все).
+    for (int id : selection) {
+        GameObject obj = scene.Get(id);
+        if (!obj.Valid()) continue;
+        const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(obj.Entity());
+        if (!mr || !mr->MeshPtr) continue;
+        m_outlineShader->SetMat4("uModel", scene.WorldMatrix(obj.Entity()));
+        mr->MeshPtr->Draw();
+    }
     device.SetDepthTest(true);
 }
 
@@ -147,12 +152,15 @@ void EditorSceneRenderer::CompositeOutline(Framebuffer& target) {
 
 // Гизмо невидимых/физических сущностей (камера/свет/эмиттер/коллайдер) — всегда
 // видны и кликабельны. Накопление в DebugDraw, Flush — у вызывающего.
-void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, int selectedId, float gameAspect) {
+void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>& selection, float gameAspect) {
     auto& reg = scene.Registry();
+    auto isSel = [&](int id) {
+        return std::find(selection.begin(), selection.end(), id) != selection.end();
+    };
     // Камеры: каркас усечённой пирамиды (frustum).
     auto camView = reg.view<CameraComponent, Transform, IdComponent>();
     for (auto e : camView) {
-        bool selected = camView.get<IdComponent>(e).Id == selectedId;
+        bool selected = isSel(camView.get<IdComponent>(e).Id);
         glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.5f, 0.7f, 0.9f);
         glm::mat4 world = scene.WorldMatrix(e); // мировая (иерархия)
         glm::vec3 wpos = glm::vec3(world[3]);
@@ -160,18 +168,19 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, int selectedId, float g
         const CameraComponent& cam = camView.get<CameraComponent>(e);
         m_debugDraw->WireFrustum(wpos, fwd, cam.Fov, gameAspect, 0.3f, 2.2f, color);
     }
-    // Свет-сущности: маркер-сфера в позиции (у выбранного зона рисуется крупнее ниже).
+    // Свет-сущности: маркер-сфера в позиции (у выбранного — ярче; крупная зона
+    // выбранного примитива рисуется в RenderViewport поверх).
     auto lightView = reg.view<LightComponent, Transform, IdComponent>();
     for (auto e : lightView) {
-        if (lightView.get<IdComponent>(e).Id == selectedId) continue;
+        bool selected = isSel(lightView.get<IdComponent>(e).Id);
         const LightComponent& lc = lightView.get<LightComponent>(e);
         glm::vec3 wpos = glm::vec3(scene.WorldMatrix(e)[3]);
-        m_debugDraw->WireSphere(wpos, 0.25f, glm::vec3(lc.Color) * 0.9f, 10);
+        m_debugDraw->WireSphere(wpos, selected ? 0.30f : 0.25f, glm::vec3(lc.Color) * (selected ? 1.2f : 0.9f), 10);
     }
     // Эмиттеры частиц: маркер в позиции.
     auto fxView = reg.view<ParticleEmitterComponent, Transform, IdComponent>();
     for (auto e : fxView) {
-        bool selected = fxView.get<IdComponent>(e).Id == selectedId;
+        bool selected = isSel(fxView.get<IdComponent>(e).Id);
         glm::vec3 color = selected ? glm::vec3(1.0f, 0.85f, 0.3f) : glm::vec3(0.9f, 0.6f, 0.3f);
         glm::vec3 wpos = glm::vec3(scene.WorldMatrix(e)[3]);
         m_debugDraw->WireSphere(wpos, 0.18f, color, 8);
@@ -182,7 +191,7 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, int selectedId, float g
     for (auto e : colView) {
         const Transform& tr = colView.get<Transform>(e);
         const ColliderComponent& col = colView.get<ColliderComponent>(e);
-        bool selected = colView.get<IdComponent>(e).Id == selectedId;
+        bool selected = isSel(colView.get<IdComponent>(e).Id);
         glm::vec3 color = selected ? glm::vec3(0.3f, 1.0f, 0.4f) : glm::vec3(0.25f, 0.55f, 0.30f);
         glm::vec3 scale = glm::abs(tr.Scale);
         switch (col.Shape) {
@@ -203,7 +212,8 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, int selectedId, float g
 }
 
 void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
-                                         int selectedId, EditorRenderMode mode, bool showGrid,
+                                         int selectedId, const std::vector<int>& selection,
+                                         EditorRenderMode mode, bool showGrid,
                                          const sage::EngineConfig& cfg, glm::mat4& outView, glm::mat4& outProj) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
@@ -237,7 +247,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Гизмо-графика (DebugDraw) — в тот же буфер, с тестом глубины (объекты заслоняют сетку).
     if (showGrid) m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
-    DrawEntityGizmos(scene, selectedId, (float)m_gameW / (float)std::max(m_gameH, 1));
+    DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
     if (selectedObj.Valid()) {
         glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());
         m_debugDraw->Axes(world, 1.4f);
@@ -254,8 +264,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     }
     m_debugDraw->Flush(outView, outProj);
 
-    // Силуэт выбранного объекта в масочный буфер (до поста, свой FBO).
-    if (selectedObj.Valid()) RenderOutlineMask(scene, selectedObj, outView, outProj);
+    // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).
+    if (!selection.empty()) RenderOutlineMask(scene, selection, outView, outProj);
 
     // Пост-обработка — только Shaded + включена в конфиге (отладочные режимы как есть).
     m_postApplied = false;
@@ -269,7 +279,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Кайма выделения — поверх ИТОГОВОГО кадра (после поста, постоянная ширина
     // в пикселях, крайне читаемая независимо от размера объекта и дистанции).
-    if (selectedObj.Valid()) CompositeOutline(m_postApplied ? *m_postFbo : *m_sceneFbo);
+    if (!selection.empty()) CompositeOutline(m_postApplied ? *m_postFbo : *m_sceneFbo);
 
     device.BindDefaultFramebuffer();
 }

@@ -582,6 +582,13 @@ void InspectorPanel::Draw(EditorHost& host) {
     }
 
     if (host.SelectedObject().Valid()) {
+        // Мультивыделение: правим первичную, но подсказываем размер набора
+        // (гизмо двигает все; Delete/Duplicate — по всем выбранным).
+        if (host.Selection().size() > 1) {
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+                               "%zu selected — editing primary", host.Selection().size());
+            ImGui::Separator();
+        }
         DrawEntityProperties(host);
     } else {
         ImGui::TextDisabled("Nothing selected");

@@ -31,6 +31,7 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
     if (isDir) return { ImVec4(0.80f, 0.60f, 0.20f, 1.0f), "DIR" };
     std::string ext = ToLower(path.extension().string());
     if (ext == ".sage") return { ImVec4(0.25f, 0.45f, 0.85f, 1.0f), "SCENE" };
+    if (ext == ".sageprefab") return { ImVec4(0.35f, 0.55f, 0.95f, 1.0f), "PREFAB" };
     if (ext == ".sagemat") return { ImVec4(0.75f, 0.45f, 0.20f, 1.0f), "MAT" };
     if (ext == ".lua") return { ImVec4(0.25f, 0.70f, 0.30f, 1.0f), "LUA" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return { ImVec4(0.55f, 0.35f, 0.80f, 1.0f), "MESH" };
@@ -149,6 +150,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     if (doubleClicked) {
         if (isDir) host.AssetsCwd() = path;
         else if (path.extension() == ".sage") host.LoadSceneFromFile(path);
+        else if (path.extension() == ".sageprefab") host.InstantiatePrefab(path); // инстанс в сцену
     }
     if (ImGui::BeginPopupContextItem("##tile_ctx")) {
         m_selected = path;
