@@ -25,15 +25,15 @@ enum class Backend { Null, Simple, Jolt };
 //               не реагирует на столкновения.
 enum class BodyType { Static, Dynamic, Kinematic };
 
-// Форма коллайдера. Capsule приближается боксом во встроенном Simple-бэкенде;
-// Jolt поддерживает её полноценно.
+// Форма коллайдера. Simple-бэкенд поддерживает Box (AABB), Sphere и Capsule
+// (вертикальный отрезок + радиус) как настоящие формы; Jolt — полноценно все.
 enum class ShapeType { Box, Sphere, Capsule };
 
 // Одна дочерняя форма СОСТАВНОГО (compound) тела: форма + её ЛОКАЛЬНОЕ смещение/
 // поворот относительно начала тела. Составное тело = несколько таких форм в
 // одном твёрдом теле (напр. «молоток» = ручка-бокс + головка-бокс со сдвигом,
 // или коллайдер-аппроксимация модели из нескольких примитивов). Jolt строит из
-// них StaticCompoundShape; Simple берёт объемлющий AABB (аркадное приближение).
+// них StaticCompoundShape; Simple берёт объемлющий AABB (составное — приближение).
 struct ChildShape {
     ShapeType Shape = ShapeType::Box;
     glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box

@@ -10,6 +10,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 
+#include <cmath>
 #include <glm/glm.hpp>
 
 using namespace sage::physics;
@@ -127,6 +128,118 @@ TEST(Physics_hinge_swings_but_keeps_pivot) {
     float dist = glm::length(pos - glm::vec3(0, 5, 0));
     CHECK_NEAR(dist, 1.0f, 0.3f);
     CHECK_TRUE(pos.y < 5.0f); // качнулось вниз под гравитацией
+}
+
+// --- Встроенный Simple-бэкенд: честный импульсный решатель ------------------
+// Эти тесты гоняют ИМЕННО Backend::Simple (а не DefaultBackend=Jolt), проверяя
+// улучшения аркадного бэкенда: контакт динамика-динамика, стопки, настоящие
+// сферы, распределение по массе.
+
+TEST(SimpleWorld_dynamic_box_rests_on_floor) {
+    auto w = PhysicsWorld::Create(Backend::Simple);
+    w->SetGravity({0, -9.81f, 0});
+    MakeFloor(*w); // верх пола y=0.5
+
+    BodyDesc d; d.Type = BodyType::Dynamic; d.Shape = ShapeType::Box;
+    d.HalfExtents = {0.5f, 0.5f, 0.5f}; d.Mass = 1.0f; d.Position = {0, 4, 0};
+    BodyHandle b = w->CreateBody(d);
+
+    StepFor(*w, 3.0f);
+    glm::vec3 p; glm::quat r; w->GetBodyTransform(b, p, r);
+    // Низ бокса (p.y-0.5) ложится на верх пола (0.5) => центр ≈ 1.0.
+    CHECK_NEAR(p.y, 1.0f, 0.15f);
+}
+
+TEST(SimpleWorld_dynamic_stacks_on_dynamic) {
+    // Раньше динамика проходила сквозь динамику — теперь верхний ящик ложится
+    // НА нижний, а не проваливается в него.
+    auto w = PhysicsWorld::Create(Backend::Simple);
+    w->SetGravity({0, -9.81f, 0});
+    MakeFloor(*w);
+
+    BodyDesc d; d.Type = BodyType::Dynamic; d.Shape = ShapeType::Box;
+    d.HalfExtents = {0.5f, 0.5f, 0.5f}; d.Mass = 1.0f;
+    d.Position = {0, 2, 0}; BodyHandle bottom = w->CreateBody(d);
+    d.Position = {0, 4, 0}; BodyHandle top = w->CreateBody(d);
+
+    StepFor(*w, 5.0f);
+    glm::vec3 pb, pt; glm::quat r;
+    w->GetBodyTransform(bottom, pb, r);
+    w->GetBodyTransform(top, pt, r);
+    CHECK_NEAR(pb.y, 1.0f, 0.2f);          // нижний — на полу
+    CHECK_TRUE(pt.y > pb.y + 0.85f);        // верхний стоит НА нижнем (не в нём)
+    CHECK_TRUE(pt.y < pb.y + 1.2f);
+}
+
+TEST(SimpleWorld_sphere_rests_at_radius) {
+    // Настоящая сфера: центр покоя на высоте радиуса над полом, а не как AABB.
+    auto w = PhysicsWorld::Create(Backend::Simple);
+    w->SetGravity({0, -9.81f, 0});
+    MakeFloor(*w);
+
+    BodyDesc d; d.Type = BodyType::Dynamic; d.Shape = ShapeType::Sphere;
+    d.Radius = 0.5f; d.Mass = 1.0f; d.Position = {0, 4, 0};
+    BodyHandle b = w->CreateBody(d);
+
+    StepFor(*w, 3.0f);
+    glm::vec3 p; glm::quat r; w->GetBodyTransform(b, p, r);
+    CHECK_NEAR(p.y, 1.0f, 0.15f); // низ сферы (p.y-0.5) касается пола 0.5
+}
+
+TEST(SimpleWorld_capsule_rests_on_floor) {
+    // Настоящая капсула (отрезок вдоль Y + радиус), а не AABB-приближение:
+    // нижняя полусфера касается пола, центр стоит на halfHeight+radius над ним.
+    auto w = PhysicsWorld::Create(Backend::Simple);
+    w->SetGravity({0, -9.81f, 0});
+    MakeFloor(*w); // верх пола y=0.5
+
+    BodyDesc d; d.Type = BodyType::Dynamic; d.Shape = ShapeType::Capsule;
+    d.Radius = 0.3f; d.HalfHeight = 0.6f; d.Mass = 1.0f; d.Position = {0, 4, 0};
+    BodyHandle b = w->CreateBody(d);
+
+    StepFor(*w, 3.0f);
+    glm::vec3 p; glm::quat r; w->GetBodyTransform(b, p, r);
+    // Низ капсулы = центр − (halfHeight+radius) = p.y−0.9 должен лечь на 0.5 =>
+    // центр ≈ 1.4.
+    CHECK_NEAR(p.y, 1.4f, 0.2f);
+}
+
+TEST(SimpleWorld_two_dynamics_push_apart) {
+    // Два перекрывающихся динамических тела расталкиваются (не занимают одно место).
+    auto w = PhysicsWorld::Create(Backend::Simple);
+    w->SetGravity({0, 0, 0}); // без гравитации — изолируем боковое расталкивание
+
+    BodyDesc d; d.Type = BodyType::Dynamic; d.Shape = ShapeType::Box;
+    d.HalfExtents = {0.5f, 0.5f, 0.5f}; d.Mass = 1.0f;
+    d.Position = {-0.2f, 0, 0}; BodyHandle a = w->CreateBody(d);
+    d.Position = { 0.2f, 0, 0}; BodyHandle b = w->CreateBody(d);
+
+    StepFor(*w, 2.0f);
+    glm::vec3 pa, pb; glm::quat r;
+    w->GetBodyTransform(a, pa, r);
+    w->GetBodyTransform(b, pb, r);
+    float sep = std::fabs(pb.x - pa.x);
+    CHECK_TRUE(sep > 0.9f); // разошлись до суммы полуширин (~1.0), не насквозь
+}
+
+TEST(SimpleWorld_heavy_body_resists_light) {
+    // Позиционная коррекция распределяется по обратной массе: тяжёлое тело почти
+    // не двигается, лёгкое отлетает.
+    auto w = PhysicsWorld::Create(Backend::Simple);
+    w->SetGravity({0, 0, 0});
+
+    BodyDesc h; h.Type = BodyType::Dynamic; h.Shape = ShapeType::Box;
+    h.HalfExtents = {0.5f, 0.5f, 0.5f}; h.Mass = 100.0f; h.Position = {0, 0, 0};
+    BodyHandle heavy = w->CreateBody(h);
+    BodyDesc l = h; l.Mass = 1.0f; l.Position = {0.3f, 0, 0};
+    BodyHandle light = w->CreateBody(l);
+
+    StepFor(*w, 2.0f);
+    glm::vec3 ph, pl; glm::quat r;
+    w->GetBodyTransform(heavy, ph, r);
+    w->GetBodyTransform(light, pl, r);
+    CHECK_TRUE(std::fabs(ph.x) < 0.2f); // тяжёлое почти на месте
+    CHECK_TRUE(pl.x > 0.7f);            // лёгкое вытолкнуто
 }
 
 TEST(Physics_scene_builds_joints_from_components) {
