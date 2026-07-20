@@ -23,12 +23,17 @@ struct AppConfig {
     int FrameCap = 0; // 0 — без ограничения
     int Msaa = 0;     // сглаживание экранного буфера (GLFW_SAMPLES)
 
+    // --- Многопоточность (JobSystem) ---
+    int WorkerThreads = 0;           // 0 — авто (аппаратные потоки − 1)
+    bool MultithreadedRender = true; // параллельные отсечение/подготовка кадра
+
     // Заполняет оконные поля из глобального/переданного EngineConfig.
     static AppConfig FromEngineConfig(const EngineConfig& cfg) {
         AppConfig a;
         a.Width = cfg.Width; a.Height = cfg.Height; a.Title = cfg.Title;
         a.Mode = cfg.Mode; a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
         a.FrameCap = cfg.FrameCap; a.Msaa = cfg.Msaa;
+        a.WorkerThreads = cfg.WorkerThreads; a.MultithreadedRender = cfg.MultithreadedRender;
         return a;
     }
 };

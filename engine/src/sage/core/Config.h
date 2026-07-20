@@ -69,6 +69,13 @@ struct EngineConfig {
     float AOStrength = 1.0f;       // сила SSAO (0 — выкл)
     float AORadius = 0.5f;         // радиус выборки SSAO (мировые единицы)
 
+    // --- Многопоточность ---
+    // Фоновые воркеры JobSystem (отсечение/подготовка кадра). 0 — авто
+    // (аппаратные потоки − 1). Игровые скрипты и выдача GL остаются на главном
+    // потоке по устройству движка (см. JobSystem.h / README).
+    int WorkerThreads = 0;
+    bool MultithreadedRender = true; // параллельные отсечение/сбор батчей кадра
+
     // Соотношение сторон для Aspect (0 — Free, кадр по размеру окна).
     float AspectRatio() const;
 

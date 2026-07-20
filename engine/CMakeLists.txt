@@ -18,6 +18,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ecs/CameraView.cpp
     src/sage/core/Application.cpp
     src/sage/core/Config.cpp
+    src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Systems.cpp

@@ -1,6 +1,7 @@
 #include "sage/core/Application.h"
 #include "sage/core/Log.h"
 #include "sage/core/Systems.h"
+#include "sage/core/JobSystem.h"
 #include "sage/render/ResourceManager.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -34,6 +35,11 @@ Application::Application(const AppConfig& config) : m_config(config) {
     m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
     rhi::GraphicsDevice::SetCurrent(m_device.get());
 
+    // Пул задач: фоновые воркеры под параллельную подготовку кадра (отсечение/
+    // батчи). Поднимается один раз на процесс; слои затем зовут ParallelFor.
+    JobSystem::Get().Initialize(config.WorkerThreads);
+    JobSystem::Get().SetEnabled(config.MultithreadedRender);
+
     // Состав и версии подсистем — в лог любой сборки (игра/редактор/рантайм).
     LogEngineSystems();
 }
@@ -46,6 +52,9 @@ Application::~Application() {
         (*it)->OnDetach();
     }
     m_layers.clear();
+    // Останавливаем фоновые воркеры ДО разрушения GL/окна: их задачи могли бы
+    // ещё держать ссылки на данные слоёв. Джойн гарантирует чистое завершение.
+    JobSystem::Get().Shutdown();
     rhi::GraphicsDevice::SetCurrent(nullptr);
     m_device.reset();
     m_window.reset();

@@ -51,12 +51,27 @@ private:
     // индивидуально текстурным PBR-шейдером (нельзя инстансить с текстурами).
     struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; };
 
+    // Кандидат кадра: заполняется ПОСЛЕДОВАТЕЛЬНЫМ проходом по реестру (чтение
+    // ECS не потокобезопасно на структурные правки), затем ПАРАЛЛЕЛЬНО
+    // проверяется на видимость (frustum) — каждый поток пишет только свой
+    // Visible, читая общий frustum/bounds меша только на чтение. Слияние в
+    // бакеты — снова последовательно, в исходном порядке (детерминизм).
+    struct CullItem {
+        Mesh* Mesh_;
+        glm::mat4 Model;
+        const Material* Mat;
+        glm::vec3 Color;
+        bool Textured;
+        bool Visible;
+    };
+
     // Сбор видимых сущностей: flat (без карт) — в m_groups по мешу (инстансинг),
     // текстурные (с картами) — в m_textured. cullMatrix — фрустум камеры/света.
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
     std::unordered_map<Mesh*, std::vector<MeshInstance>> m_groups; // flat-инстансы по мешу
     std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)
+    std::vector<CullItem> m_cull;                                  // кандидаты кадра (переиспользуется)
     // Мировые матрицы кадра (Scene::ComputeWorldMatrices) — один O(n)-проход
     // на сбор вместо рекурсивного WorldMatrix на каждую сущность (см. Scene.h).
     // Переиспользуется между кадрами, чтобы не переаллоцировать хэш-таблицу.

@@ -184,6 +184,10 @@ bool EngineConfig::LoadFile(const std::string& path) {
     AOStrength       = pp.value("aoStrength", AOStrength);
     AORadius         = pp.value("aoRadius", AORadius);
 
+    auto sys = j.value("system", json::object());
+    WorkerThreads       = sys.value("workerThreads", WorkerThreads);
+    MultithreadedRender = sys.value("multithreadedRender", MultithreadedRender);
+
     LOG_INFO("Config") << "Загружены настройки: " << path;
     return true;
 }
@@ -207,6 +211,9 @@ bool EngineConfig::SaveFile(const std::string& path) const {
         {"contrast", Contrast}, {"vignette", Vignette},
         {"bloom", Bloom}, {"bloomThreshold", BloomThreshold}, {"bloomIntensity", BloomIntensity},
         {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
+    };
+    j["system"] = {
+        {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
     };
 
     std::ofstream f(path);

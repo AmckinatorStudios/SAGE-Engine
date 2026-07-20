@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include "sage/core/JobSystem.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/render/Frustum.h"
 #include "sage/render/LightingUpload.h"
@@ -196,39 +197,61 @@ Shader& DepthUModelShader() { static Shader* s = new Shader(Shader::FromSource(k
 void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     for (auto& kv : m_groups) kv.second.clear(); // переиспользуем ёмкость
     m_textured.clear();
+    m_cull.clear();
     Frustum frustum = Frustum::FromViewProj(cullMatrix);
 
     // Все мировые матрицы кадра одним O(n)-проходом (мемоизация общих
     // родительских цепочек) — вместо рекурсивного WorldMatrix per-entity.
+    // Иерархия задаёт зависимость родитель→ребёнок, поэтому этот проход —
+    // последовательный (дёшев: O(n) без тяжёлой математики).
     scene.ComputeWorldMatrices(m_worldCache);
 
+    // 1) ПОСЛЕДОВАТЕЛЬНЫЙ сбор: итерация реестра (не потокобезопасна на
+    //    структурные правки) в плоский список — только указатели/матрицы/цвет.
     ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
-        ++m_stats.Total;
-        Mesh* mesh = mr.MeshPtr.get();
         auto wit = m_worldCache.find(e);
         glm::mat4 model = wit != m_worldCache.end() ? wit->second : scene.WorldMatrix(e);
-
-        glm::vec3 center = glm::vec3(model * glm::vec4(mesh->BoundsCenter(), 1.0f));
-        // Масштаб для радиуса — из столбцов мировой матрицы (учитывает масштаб родителей).
-        float sx = glm::length(glm::vec3(model[0])), sy = glm::length(glm::vec3(model[1])), sz = glm::length(glm::vec3(model[2]));
-        float radius = mesh->BoundsRadius() * glm::max(sx, glm::max(sy, sz));
-        if (!frustum.IntersectsSphere(center, radius)) { ++m_stats.Culled; return; }
-        ++m_stats.Drawn;
-
         const Material* mat = mr.MaterialPtr.get();
-        if (mat && mat->HasMaps()) {
+        m_cull.push_back(CullItem{mr.MeshPtr.get(), model, mat, EffectiveColor(mr),
+                                  mat && mat->HasMaps(), /*visible*/ false});
+    });
+
+    // 2) ПАРАЛЛЕЛЬНОЕ отсечение: каждый элемент независим — поток пишет только
+    //    свой Visible, читает общий frustum/bounds меша лишь на чтение. Гонок нет.
+    //    Это горячая математика кадра (матрица·вектор, длины столбцов, 6 плоскостей)
+    //    — она и масштабируется по ядрам. При 1 ядре/выключенном MT — фолбэк.
+    sage::JobSystem::Get().ParallelFor(m_cull.size(), [&](std::size_t begin, std::size_t end) {
+        for (std::size_t i = begin; i < end; ++i) {
+            CullItem& c = m_cull[i];
+            glm::vec3 center = glm::vec3(c.Model * glm::vec4(c.Mesh_->BoundsCenter(), 1.0f));
+            // Масштаб для радиуса — из столбцов мировой матрицы (учитывает масштаб родителей).
+            float sx = glm::length(glm::vec3(c.Model[0]));
+            float sy = glm::length(glm::vec3(c.Model[1]));
+            float sz = glm::length(glm::vec3(c.Model[2]));
+            float radius = c.Mesh_->BoundsRadius() * glm::max(sx, glm::max(sy, sz));
+            c.Visible = frustum.IntersectsSphere(center, radius);
+        }
+    });
+
+    // 3) ПОСЛЕДОВАТЕЛЬНОЕ слияние в бакеты — в исходном порядке сбора, так что
+    //    результат кадра детерминирован и совпадает с однопоточным.
+    m_stats.Total = (int)m_cull.size();
+    for (CullItem& c : m_cull) {
+        if (!c.Visible) { ++m_stats.Culled; continue; }
+        ++m_stats.Drawn;
+        if (c.Textured) {
             // Есть текстурные карты — индивидуальный текстурный PBR-путь.
-            m_textured.push_back({mesh, model, mat});
+            m_textured.push_back({c.Mesh_, c.Model, c.Mat});
         } else {
             // Плоский цвет — быстрый инстансный путь. Metallic/roughness из
             // материала (если назначен), иначе дефолты MeshInstance.
             MeshInstance inst;
-            inst.Model = model;
-            inst.Color = EffectiveColor(mr);
-            if (mat) { inst.Metallic = mat->Metallic; inst.Roughness = mat->Roughness; }
-            m_groups[mesh].push_back(inst);
+            inst.Model = c.Model;
+            inst.Color = c.Color;
+            if (c.Mat) { inst.Metallic = c.Mat->Metallic; inst.Roughness = c.Mat->Roughness; }
+            m_groups[c.Mesh_].push_back(inst);
         }
-    });
+    }
 }
 
 RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
