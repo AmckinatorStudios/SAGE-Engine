@@ -111,6 +111,11 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     return mesh;
 }
 
+std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
+    m_models.erase(path); // сброс кэша -> GetModel перечитает с диска (новый .sageimport)
+    return GetModel(path);
+}
+
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path) {
     if (path.empty()) return nullptr;
     auto it = m_textures.find(path);

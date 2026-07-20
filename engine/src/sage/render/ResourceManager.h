@@ -81,6 +81,10 @@ public:
     // не рисует сущность, а сцена с одной битой моделью грузится ЦЕЛИКОМ.
     std::shared_ptr<Mesh> GetModel(const std::string& path);
 
+    // Перечитывает модель с диска (после смены её .sageimport-настроек), заменяя
+    // кэш-запись. Держатели старого меша сохраняют его; новые запросы — свежий.
+    std::shared_ptr<Mesh> ReloadModel(const std::string& path);
+
     // Текстура по пути (СИНХРОННО — блокирует на декодировании/загрузке).
     // nullptr при ошибке/пустом пути. Учитывается в бюджете VRAM.
     std::shared_ptr<Texture> GetTexture(const std::string& path);

@@ -7,6 +7,7 @@
 #include "TestFramework.h"
 
 #include "sage/render/ResourceManager.h"
+#include "sage/render/ModelLoader.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -138,4 +139,50 @@ TEST(Texture_estimate_bytes_accounts_for_mips) {
     CHECK_EQ((int)noMip, 256 * 256 * 4);
     CHECK_TRUE(withMip > noMip);
     CHECK_EQ((int)withMip, (int)(noMip + noMip / 3));
+}
+
+// --- Пайплайн импорта моделей: применение настроек к вершинам (GL-free) + сайдкар ---
+TEST(ModelImport_scale_and_recenter) {
+    std::vector<Vertex> verts(2);
+    verts[0].Position = {0.0f, 0.0f, 0.0f};
+    verts[1].Position = {2.0f, 0.0f, 0.0f}; // AABB центр (1,0,0), размер 2 по X
+
+    ModelLoader::ImportSettings s;
+    s.Recenter = true;   // центр -> 0: точки станут (-1,0,0) и (1,0,0)
+    s.Scale = 3.0f;      // затем ×3: (-3,0,0) и (3,0,0)
+    ModelLoader::ApplyImportSettings(verts, s);
+
+    CHECK_NEAR(verts[0].Position.x, -3.0f, 1e-4);
+    CHECK_NEAR(verts[1].Position.x, 3.0f, 1e-4);
+}
+
+TEST(ModelImport_normalize_size) {
+    std::vector<Vertex> verts(2);
+    verts[0].Position = {0.0f, 0.0f, 0.0f};
+    verts[1].Position = {4.0f, 0.0f, 0.0f}; // наибольшая сторона = 4
+
+    ModelLoader::ImportSettings s;
+    s.NormalizeSize = true; // /4 -> сторона 1
+    ModelLoader::ApplyImportSettings(verts, s);
+    CHECK_NEAR(verts[1].Position.x - verts[0].Position.x, 1.0f, 1e-4);
+}
+
+TEST(ModelImport_sidecar_roundtrip) {
+    std::string model = (fs::temp_directory_path() / "sage_test_model.obj").string();
+    ModelLoader::ImportSettings s;
+    s.Scale = 2.5f; s.Recenter = true; s.NormalizeSize = false;
+    CHECK_TRUE(ModelLoader::SaveImportSettings(model, s));
+
+    ModelLoader::ImportSettings back = ModelLoader::LoadImportSettings(model);
+    CHECK_NEAR(back.Scale, 2.5f, 1e-4);
+    CHECK_TRUE(back.Recenter);
+    CHECK_FALSE(back.NormalizeSize);
+
+    std::error_code ec;
+    fs::remove(ModelLoader::ImportSidecarPath(model), ec);
+
+    // Отсутствующий сайдкар -> дефолт (Scale 1, без правок).
+    ModelLoader::ImportSettings def = ModelLoader::LoadImportSettings("no_such_model_xyz.obj");
+    CHECK_NEAR(def.Scale, 1.0f, 1e-4);
+    CHECK_FALSE(def.Recenter);
 }

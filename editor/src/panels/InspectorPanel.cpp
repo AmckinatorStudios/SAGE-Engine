@@ -10,6 +10,7 @@
 #include "EditorHost.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/ModelLoader.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/scene/Components.h"
 
@@ -78,6 +79,36 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     }
     ImGui::SameLine();
     if (ImGui::Button("Revert")) ResourceManager::Instance().ReloadMaterial(pathStr);
+}
+
+// Настройки импорта выбранной модели (.obj/.gltf/.glb): масштаб/центрирование/
+// нормализация в сайдкар .sageimport. Reimport перечитывает меш и обновляет все
+// сущности сцены, использующие эту модель.
+void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
+    std::string path = host.SelectedAssetPath().string();
+    ImGui::Text("Model Import: %s", host.SelectedAssetPath().filename().string().c_str());
+
+    ModelLoader::ImportSettings s = ModelLoader::LoadImportSettings(path);
+    ImGui::DragFloat("Import Scale", &s.Scale, 0.01f, 0.001f, 1000.0f);
+    ImGui::Checkbox("Recenter (AABB -> origin)", &s.Recenter);
+    ImGui::Checkbox("Normalize size (max side = 1)", &s.NormalizeSize);
+
+    if (ImGui::Button("Reimport")) {
+        if (!ModelLoader::SaveImportSettings(path, s)) {
+            host.SetStatusMessage("Import settings save failed");
+        } else {
+            // Перечитываем меш и переназначаем всем сущностям с этой моделью.
+            std::shared_ptr<Mesh> mesh = ResourceManager::Instance().ReloadModel(path);
+            Scene& scene = host.CurrentScene();
+            auto view = scene.Registry().view<MeshRendererComponent>();
+            for (auto e : view) {
+                MeshRendererComponent& mr = view.get<MeshRendererComponent>(e);
+                if (mr.Ref.type == MeshRef::Type::Model && mr.Ref.path == path) mr.MeshPtr = mesh;
+            }
+            host.SetStatusMessage("Reimported: " + host.SelectedAssetPath().filename().string());
+        }
+    }
+    ImGui::TextDisabled("Baked into the mesh on load — affects editor and built game");
 }
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
@@ -578,6 +609,12 @@ void InspectorPanel::Draw(EditorHost& host) {
     // того, выбрана ли сущность.
     if (host.SelectedAssetPath().extension() == ".sagemat") {
         DrawMaterialEditor(host);
+        ImGui::Separator();
+    }
+    // Выбранная модель — настройки импорта (масштаб/центрирование/нормализация).
+    std::string ext = host.SelectedAssetPath().extension().string();
+    if (ext == ".obj" || ext == ".gltf" || ext == ".glb") {
+        DrawModelImportEditor(host);
         ImGui::Separator();
     }
 

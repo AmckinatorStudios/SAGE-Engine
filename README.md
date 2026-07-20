@@ -1001,11 +1001,13 @@ CI, нет звуковой карты), конструктор не падае�
   двигает весь набор относительно первичной, Delete/Duplicate — по всем, аутлайн
   подсвечивает все), **префабы** (`Save as Prefab` в Hierarchy -> `.sageprefab`
   в assets/; двойной клик по префабу инстанцирует поддерево в сцену), **полное
-  undo** всех мутаций (снапшот-модель). Пока НЕТ: универсального добавления
-  произвольных компонентов (Inspector понимает Transform/MeshRenderer/Material/
-  Camera/Light/Script/RigidBody/Collider/Joint/Particle/UI/AnimatedModel), нет
-  ассет-импорт-пайплайна с настройками (импорт .obj/.gltf — через путь в
-  Inspector).
+  undo** всех мутаций (снапшот-модель) и **ассет-импорт-пайплайн для моделей**
+  (выбери `.obj`/`.gltf` в Assets -> Inspector правит масштаб/центрирование/
+  нормализацию, `Reimport` пишет сайдкар `.sageimport` и перечитывает меш во
+  все сущности; настройки пекутся в вершины при загрузке — действуют и в
+  собранной игре). Пока НЕТ: универсального добавления произвольных компонентов
+  (Inspector понимает Transform/MeshRenderer/Material/Camera/Light/Script/
+  RigidBody/Collider/Joint/Particle/UI/AnimatedModel).
 - **`SceneSerializer` не сохраняет кастомные компоненты игр** — в `.sage`
   попадают только встроенные (Name/Id/Transform/MeshRenderer/Material-путь/
 Script/Camera + свет + RigidBody/Collider).

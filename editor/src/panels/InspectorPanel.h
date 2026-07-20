@@ -12,6 +12,7 @@ public:
 
 private:
     void DrawMaterialEditor(EditorHost& host);
+    void DrawModelImportEditor(EditorHost& host); // настройки импорта выбранной модели
     void DrawEntityProperties(EditorHost& host);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
 };

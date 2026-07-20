@@ -33,6 +33,7 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
     if (ext == ".sage") return { ImVec4(0.25f, 0.45f, 0.85f, 1.0f), "SCENE" };
     if (ext == ".sageprefab") return { ImVec4(0.35f, 0.55f, 0.95f, 1.0f), "PREFAB" };
     if (ext == ".sagemat") return { ImVec4(0.75f, 0.45f, 0.20f, 1.0f), "MAT" };
+    if (ext == ".sageimport") return { ImVec4(0.45f, 0.40f, 0.30f, 1.0f), "IMPORT" };
     if (ext == ".lua") return { ImVec4(0.25f, 0.70f, 0.30f, 1.0f), "LUA" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return { ImVec4(0.55f, 0.35f, 0.80f, 1.0f), "MESH" };
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp")
