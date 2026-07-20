@@ -26,6 +26,7 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
     desc.Channels = m_channels;
     desc.FilterMode = filter;
     desc.GenerateMipmaps = generateMipmaps;
+    m_hasMipmaps = generateMipmaps;
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, data);
 
     stbi_image_free(data);
@@ -44,5 +45,24 @@ Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, Texture
     desc.Channels = 4;
     desc.FilterMode = filter;
     desc.GenerateMipmaps = generateMipmaps;
+    m_hasMipmaps = generateMipmaps;
+    m_texture = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
+}
+
+void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int height,
+                            TextureFilter filter, bool generateMipmaps) {
+    m_width = width;
+    m_height = height;
+    m_channels = 4;
+    m_hasMipmaps = generateMipmaps;
+
+    Texture2DDesc desc;
+    desc.Width = width;
+    desc.Height = height;
+    desc.Channels = 4;
+    desc.FilterMode = filter;
+    desc.GenerateMipmaps = generateMipmaps;
+    // Пересоздание: старый rhi::Texture2D освобождается (unique_ptr), новый
+    // занимает его место — GL-хендл заменяется на главном потоке.
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
 }

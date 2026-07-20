@@ -1,6 +1,7 @@
 #include "sage/core/Application.h"
 #include "sage/core/Log.h"
 #include "sage/core/Systems.h"
+#include "sage/render/ResourceManager.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
 #include <stdexcept>
@@ -79,6 +80,10 @@ void Application::Run() {
         fpsTimer += m_deltaTime;
         ++fpsFrames;
         if (fpsTimer >= 0.5f) { m_fps = fpsFrames / fpsTimer; fpsTimer = 0.0f; fpsFrames = 0; }
+
+        // Заливаем в VRAM текстуры, декодированные фоновым потоком (стриминг
+        // ассетов). Только здесь — у главного потока единственного GL-контекст.
+        ResourceManager::Instance().PumpAsyncUploads();
 
         for (auto& layer : m_layers) layer->OnUpdate(m_deltaTime);
 

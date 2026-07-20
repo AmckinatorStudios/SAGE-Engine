@@ -14,6 +14,7 @@ add_executable(sage_tests
     test_robustness.cpp
     test_config.cpp
     test_ui.cpp
+    test_resources.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -5,7 +5,9 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <fstream>
+#include <thread>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -1315,6 +1317,89 @@ void EditorLayer::RunSelfTest() {
                 ok = false;
             }
         }
+    }
+
+    // --- Управление памятью: асинхронная загрузка + GC + LRU-вытеснение ---
+    // Полный GPU-путь (у редактора есть GL-контекст): плейсхолдер приходит
+    // мгновенно, фоновый поток декодирует файл, PumpAsyncUploads заливает его в
+    // VRAM в тот же объект; неиспользуемые текстуры собираются GC; при
+    // превышении бюджета LRU-неиспользуемые вытесняются.
+    if (ok) {
+        auto& rm = ResourceManager::Instance();
+
+        // Пишем настоящий файл-картинку (несжатый TGA) рядом с проектом.
+        auto writeTGA = [](const fs::path& path, int w, int h) -> bool {
+            std::vector<unsigned char> buf;
+            unsigned char hdr[18] = {0};
+            hdr[2] = 2; hdr[12] = (unsigned char)(w & 0xFF); hdr[13] = (unsigned char)((w >> 8) & 0xFF);
+            hdr[14] = (unsigned char)(h & 0xFF); hdr[15] = (unsigned char)((h >> 8) & 0xFF); hdr[16] = 24;
+            buf.insert(buf.end(), hdr, hdr + 18);
+            for (int i = 0; i < w * h; ++i) { buf.push_back(20); buf.push_back(120); buf.push_back(220); }
+            std::ofstream f(path, std::ios::binary);
+            if (!f) return false;
+            f.write(reinterpret_cast<const char*>(buf.data()), (std::streamsize)buf.size());
+            return (bool)f;
+        };
+
+        fs::path texA = m_project.Dir() / "selftest_texA.tga";
+        fs::path texB = m_project.Dir() / "selftest_texB.tga";
+        if (!writeTGA(texA, 32, 32) || !writeTGA(texB, 32, 32)) {
+            LOG_ERROR("Editor") << "SELFTEST: could not write test textures";
+            ok = false;
+        }
+
+        // 1) Async: мгновенно возвращается плейсхолдер 1x1, реальные пиксели
+        //    приезжают после декодирования фоновым потоком + PumpAsyncUploads.
+        if (ok) {
+            auto tex = rm.GetTextureAsync(texA.string());
+            bool placeholderOk = tex && tex->Width() == 1 && tex->Height() == 1;
+            bool resident = false;
+            for (int i = 0; i < 500 && !resident; ++i) {
+                rm.PumpAsyncUploads();
+                if (tex && tex->Width() == 32 && tex->Height() == 32) resident = true;
+                else std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            if (!placeholderOk || !resident) {
+                LOG_ERROR("Editor") << "SELFTEST: async texture load failed (placeholder "
+                                    << placeholderOk << ", resident " << resident << ")";
+                ok = false;
+            }
+            // 2) GC: отпускаем ссылку — текстура становится неиспользуемой и
+            //    выгружается (use_count()==1 держал только кэш).
+            if (ok) {
+                tex.reset();
+                int freed = rm.GarbageCollectUnused();
+                if (freed < 1) {
+                    LOG_ERROR("Editor") << "SELFTEST: GarbageCollectUnused freed nothing after ref drop";
+                    ok = false;
+                }
+            }
+        }
+
+        // 3) LRU-вытеснение: бюджет вмещает одну текстуру. Грузим A (не держим
+        //    ссылку), затем B — загрузка B видит превышение и вытесняет
+        //    неиспользуемую A. Резидентный размер не превышает бюджет.
+        if (ok) {
+            size_t oneTex = Texture::EstimateBytes(32, 32, true);
+            rm.SetTextureBudgetBytes(oneTex + oneTex / 2); // < 2 текстур, >= 1
+            rm.GetTexture(texA.string()); // ссылку не держим -> кандидат на вытеснение
+            size_t beforeEvict = rm.GetStats().Evictions;
+            rm.GetTexture(texB.string()); // триггерит EvictToBudget
+            ResourceManager::Stats st = rm.GetStats();
+            bool evicted = st.Evictions > beforeEvict;
+            bool underBudget = st.TextureBytes <= st.TextureBudget;
+            if (!evicted || !underBudget) {
+                LOG_ERROR("Editor") << "SELFTEST: LRU eviction failed (evicted " << evicted
+                                    << ", bytes " << st.TextureBytes << " / budget " << st.TextureBudget << ")";
+                ok = false;
+            }
+            rm.SetTextureBudgetBytes(0);   // снимаем ограничение — не мешать остальным проверкам
+            rm.GarbageCollectUnused();     // прибираем тестовые текстуры
+        }
+
+        std::error_code rmec;
+        fs::remove(texA, rmec);
+        fs::remove(texB, rmec);
     }
 
     // --- Сборка игры: SagePlayer + project/ упакованы в запускаемую папку ---

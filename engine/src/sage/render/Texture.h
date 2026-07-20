@@ -46,6 +46,22 @@ public:
     int Width() const { return m_width; }
     int Height() const { return m_height; }
 
+    // Пересоздаёт GPU-хранилище из уже декодированных RGBA8-пикселей. Ключ
+    // асинхронной загрузки: воркер декодирует файл в CPU-буфер, а главный поток
+    // (единственный с GL-контекстом) вызывает это, ЗАМЕНЯЯ картинку прямо в
+    // существующем объекте Texture — все держатели shared_ptr<Texture>
+    // (материалы, UI) видят подгруженное изображение без повторного запроса.
+    void ReplacePixels(const unsigned char* pixelsRGBA, int width, int height,
+                       TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true);
+
+    // Приблизительный размер в VRAM (RGBA8 + ~33% на цепочку мип-уровней) —
+    // для бюджета памяти и LRU-вытеснения в ResourceManager.
+    static size_t EstimateBytes(int width, int height, bool mipmaps) {
+        size_t base = (size_t)width * (size_t)height * 4u;
+        return mipmaps ? base + base / 3u : base;
+    }
+    size_t GpuBytes() const { return EstimateBytes(m_width, m_height, m_hasMipmaps); }
+
     // Максимальный уровень анизотропии, который поддерживает текущая
     // видеокарта/драйвер (обычно 4, 8 или 16).
     static float MaxSupportedAnisotropy();
@@ -53,4 +69,5 @@ public:
 private:
     std::unique_ptr<sage::rhi::Texture2D> m_texture;
     int m_width = 0, m_height = 0, m_channels = 0;
+    bool m_hasMipmaps = true;
 };

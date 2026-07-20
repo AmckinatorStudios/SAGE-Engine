@@ -5,12 +5,36 @@
 #include "Texture.h"
 #include "sage/core/Log.h"
 #include "sage/scene/Transform.h" // подключаем заранее не обязательно, но пусть будет явный порядок
+#include "sage/scene/Components.h" // MeshRef::Type для GetPrimitive
 #include <unordered_map>
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstdint>
+#include <cstddef>
 
-// Простой кэш ресурсов. На вход — описание (тип + путь), на выход — готовый
-// Mesh/Material. Один и тот же файл, запрошенный дважды, не грузится повторно.
+// ---------------------------------------------------------------------------
+// ResourceManager — кэш ресурсов И менеджер памяти для больших проектов.
+//
+// Базовый контракт: на вход — описание (тип + путь), на выход — готовый
+// Mesh/Material/Texture. Один и тот же файл, запрошенный дважды, не грузится
+// повторно (положительный кэш); битый файл кэшируется как nullptr (негативный
+// кэш) — не перечитывается с диска на каждый запрос.
+//
+// Управление памятью (для проектов, которые не помещаются в VRAM целиком):
+//   • Бюджет VRAM под текстуры + LRU-вытеснение. Каждый GetTexture учитывает
+//     размер; при превышении бюджета выгружаются наименее недавно
+//     использованные текстуры, НА КОТОРЫЕ БОЛЬШЕ НИКТО НЕ ССЫЛАЕТСЯ
+//     (shared_ptr::use_count()==1 — держит только кэш). Ссылающиеся ресурсы
+//     никогда не выгружаются (это была бы висячая ссылка).
+//   • GarbageCollectUnused() — разовая чистка всех неиспользуемых
+//     текстур/моделей/материалов (напр. при смене сцены).
+//   • Асинхронный стриминг: GetTextureAsync() возвращает объект Texture
+//     МГНОВЕННО (плейсхолдер 1x1), а файл декодируется в фоновом потоке;
+//     PumpAsyncUploads() на главном потоке (у него единственного GL-контекст)
+//     заменяет пиксели в том же объекте — держатели shared_ptr видят картинку
+//     без повторного запроса. Кадр не встаёт колом на диске/декодировании.
+// ---------------------------------------------------------------------------
 class ResourceManager {
 public:
     static ResourceManager& Instance() {
@@ -18,6 +42,7 @@ public:
         return instance;
     }
 
+    // --- Примитивы (лениво создаются, живут до Clear) ---
     std::shared_ptr<Mesh> GetCube() {
         if (!m_cube) m_cube = std::make_shared<Mesh>(Mesh::CreateCube());
         return m_cube;
@@ -53,95 +78,110 @@ public:
     }
 
     // Модель по пути. nullptr при ошибке (файл удалён/бит) — вызывающий просто
-    // не рисует сущность, а сцена с одной битой моделью грузится ЦЕЛИКОМ (раньше
-    // исключение из лоадера обрывало загрузку всей сцены). Ошибка кэшируется
-    // (негативный кэш) — битый файл не перечитывается с диска на каждый запрос.
-    std::shared_ptr<Mesh> GetModel(const std::string& path) {
-        auto it = m_models.find(path);
-        if (it != m_models.end()) return it->second;
-        std::shared_ptr<Mesh> mesh;
-        try {
-            mesh = ModelLoader::LoadObj(path);
-        } catch (const std::exception& e) {
-            LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
-        }
-        m_models[path] = mesh;
-        return mesh;
-    }
+    // не рисует сущность, а сцена с одной битой моделью грузится ЦЕЛИКОМ.
+    std::shared_ptr<Mesh> GetModel(const std::string& path);
 
-    // Материал КЭШИРУЕТСЯ И РАЗДЕЛЯЕТСЯ: все сущности с одним путём держат
-    // один экземпляр — редактор правит его поля напрямую, объекты обновляются
-    // мгновенно. Ошибка чтения не валит вызывающего: логируется, отдаётся
-    // материал по умолчанию (белый) — сцена продолжает грузиться.
-    // Текстура по пути (кэшируется). nullptr при ошибке — вызывающий рисует без неё.
-    std::shared_ptr<Texture> GetTexture(const std::string& path) {
-        if (path.empty()) return nullptr;
-        auto it = m_textures.find(path);
-        if (it != m_textures.end()) return it->second;
-        std::shared_ptr<Texture> tex;
-        try {
-            tex = std::make_shared<Texture>(path);
-        } catch (const std::exception& e) {
-            LOG_ERROR("Resources") << "Текстура не загрузилась (" << path << "): " << e.what();
-            tex = nullptr;
-        }
-        m_textures[path] = tex;
-        return tex;
-    }
+    // Текстура по пути (СИНХРОННО — блокирует на декодировании/загрузке).
+    // nullptr при ошибке/пустом пути. Учитывается в бюджете VRAM.
+    std::shared_ptr<Texture> GetTexture(const std::string& path);
 
-    std::shared_ptr<Material> GetMaterial(const std::string& path) {
-        auto it = m_materials.find(path);
-        if (it != m_materials.end()) return it->second;
-        auto material = std::make_shared<Material>();
-        try {
-            *material = Material::LoadFromFile(path);
-        } catch (const std::exception& e) {
-            LOG_ERROR("Resources") << "Материал не загрузился, использую дефолт: " << e.what();
-        }
-        ResolveMaterialTextures(*material);
-        m_materials[path] = material;
-        return material;
-    }
+    // Текстура по пути АСИНХРОННО: возвращает объект немедленно (сначала
+    // плейсхолдер 1x1), реальные пиксели подгружаются фоновым потоком и
+    // заменяются в этом же объекте на PumpAsyncUploads(). Никогда не nullptr
+    // при непустом пути. Для стриминга ассетов без фризов кадра.
+    std::shared_ptr<Texture> GetTextureAsync(const std::string& path);
+
+    std::shared_ptr<Material> GetMaterial(const std::string& path);
 
     // Перечитать материал с диска В ТОТ ЖЕ разделяемый экземпляр (все
     // держатели видят обновление). Если не кэширован — просто загрузит.
-    std::shared_ptr<Material> ReloadMaterial(const std::string& path) {
-        auto it = m_materials.find(path);
-        if (it == m_materials.end()) return GetMaterial(path);
-        try {
-            *it->second = Material::LoadFromFile(path);
-        } catch (const std::exception& e) {
-            LOG_ERROR("Resources") << "Перезагрузка материала не удалась: " << e.what();
-        }
-        ResolveMaterialTextures(*it->second);
-        return it->second;
-    }
+    std::shared_ptr<Material> ReloadMaterial(const std::string& path);
 
-    // Подгружает albedo/normal текстуры материала по его путям (для PBR-пути).
-    // Вызывается после загрузки/перезагрузки и когда редактор поменял путь.
-    void ResolveMaterialTextures(Material& m) {
-        m.AlbedoTex = GetTexture(m.TexturePath);
-        m.NormalTex = GetTexture(m.NormalMapPath);
-        m.MetallicTex = GetTexture(m.MetallicMapPath);
-        m.RoughnessTex = GetTexture(m.RoughnessMapPath);
-        m.AOTex = GetTexture(m.AOMapPath);
-    }
+    // Подгружает albedo/normal/… текстуры материала по его путям (для PBR-пути).
+    void ResolveMaterialTextures(Material& m);
 
-    void Clear() {
-        m_cube.reset();
-        m_sphere.reset();
-        m_plane.reset();
-        m_cylinder.reset();
-        m_cone.reset();
-        m_models.clear();
-        m_materials.clear();
-        m_textures.clear();
-    }
+    // --- Управление памятью ---
+
+    // Забирает готовые декодированные текстуры с фонового потока и создаёт/
+    // заменяет их GPU-хранилище. ОБЯЗАН вызываться на главном потоке раз в кадр
+    // (Application::Run делает это сам). Возвращает число загруженных за вызов.
+    int PumpAsyncUploads();
+
+    // Выгружает все текстуры/модели/материалы, на которые больше никто не
+    // ссылается (use_count()==1). Возвращает число выгруженных ресурсов.
+    // Вызывать при смене сцены / выгрузке уровня.
+    int GarbageCollectUnused();
+
+    // Бюджет VRAM под текстуры. При превышении GetTexture вытесняет LRU
+    // НЕИСПОЛЬЗУЕМЫЕ текстуры. 0 — без ограничения (вытеснения не будет).
+    void SetTextureBudgetBytes(size_t bytes) { m_textureBudget = bytes; }
+    size_t TextureBudgetBytes() const { return m_textureBudget; }
+    size_t ResidentTextureBytes() const { return m_textureBytes; }
+
+    // Статистика для оверлея/тестов.
+    struct Stats {
+        size_t Textures = 0;      // записей в кэше текстур (вкл. плейсхолдеры)
+        size_t Models = 0;
+        size_t Materials = 0;
+        size_t TextureBytes = 0;  // сумма приблизительных размеров текстур
+        size_t TextureBudget = 0;
+        size_t PendingAsync = 0;  // текстур в очереди фоновой загрузки
+        size_t Evictions = 0;     // всего вытеснений за жизнь менеджера
+    };
+    Stats GetStats() const;
+
+    void Clear();
+    ~ResourceManager();
+
+    // --- Тестируемые (GL-независимые) хелперы ---
+
+    // Декодирует файл изображения в RGBA8 (то же, что делает фоновый поток).
+    // Не трогает GL — чистое CPU-декодирование, поэтому проверяется юнит-тестом.
+    // false при ошибке (файл битый/отсутствует).
+    static bool DecodeImageFile(const std::string& path, std::vector<unsigned char>& outRGBA,
+                                int& outW, int& outH);
+
+    // Запись кандидата на вытеснение для чистой (без GL) LRU-политики.
+    struct EvictCandidate {
+        size_t Index = 0;    // индекс во внешнем списке вызывающего
+        size_t Bytes = 0;    // размер ресурса
+        uint64_t Tick = 0;   // «использован последний раз» (меньше = старее)
+        bool Evictable = false; // можно ли выгрузить (никто не ссылается)
+    };
+    // Возвращает индексы кандидатов, которые надо выгрузить, чтобы уместиться в
+    // бюджет: сначала самые старые (LRU), только Evictable. currentBytes —
+    // текущая занятость. Чистая функция — ядро политики, юнит-тестируемо.
+    static std::vector<size_t> SelectEvictions(const std::vector<EvictCandidate>& candidates,
+                                               size_t currentBytes, size_t budget);
 
 private:
-    ResourceManager() = default;
+    ResourceManager(); // out-of-line: m_async — неполный тип pimpl (см. .cpp)
+
+    void StartWorker();          // лениво поднимает фоновый поток декодирования
+    void EvictToBudget();        // вытеснить LRU-неиспользуемые до бюджета
+    uint64_t NextTick() { return ++m_tick; }
+
     std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
-    std::unordered_map<std::string, std::shared_ptr<Texture>> m_textures;
+
+    // Запись кэша текстуры: сам ресурс + учёт для бюджета/LRU + флаг «ещё
+    // грузится» (плейсхолдер, реальные байты пока не в VRAM).
+    struct TextureRecord {
+        std::shared_ptr<Texture> Tex;
+        size_t Bytes = 0;
+        uint64_t Tick = 0;
+        bool Pending = false;
+    };
+    std::unordered_map<std::string, TextureRecord> m_textures;
+
+    size_t m_textureBudget = 0;      // 0 = без ограничения (по умолчанию)
+    size_t m_textureBytes = 0;       // сумма Bytes резидентных текстур
+    uint64_t m_tick = 0;             // монотонный счётчик обращений (LRU)
+    size_t m_evictions = 0;
+
+    // --- Асинхронный конвейер (реализация в .cpp, чтобы не тащить <thread>
+    //     и очереди во все TU, включающие этот заголовок) ---
+    struct AsyncImpl;
+    std::unique_ptr<AsyncImpl> m_async;
 };
