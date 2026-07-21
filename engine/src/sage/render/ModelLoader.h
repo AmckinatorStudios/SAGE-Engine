@@ -1,5 +1,6 @@
 #pragma once
 #include "Mesh.h"
+#include "MeshData.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,6 +36,11 @@ namespace ModelLoader {
     // Диспетчер по расширению: .fbx -> LoadFbx, всё остальное -> LoadObj.
     // Единая точка входа для ResourceManager::GetModel.
     std::shared_ptr<Mesh> Load(const std::string& path);
+
+    // CPU-стадия загрузки .obj: геометрия с применёнными ImportSettings, БЕЗ
+    // создания GPU-меша (не требует GL). Используется бейкером GI (sage/gi),
+    // которому нужны треугольники модели для трассировки и лайтмап-развёртки.
+    sage::render::MeshData LoadObjData(const std::string& path);
 
     // --- Сайдкар настроек импорта (GL-независимо) ---
     std::string ImportSidecarPath(const std::string& modelPath); // «<path>.sageimport»

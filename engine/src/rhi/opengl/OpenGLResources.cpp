@@ -266,7 +266,13 @@ GLTexture2D::GLTexture2D(const Texture2DDesc& desc, const void* pixels) {
     // Одноканальные (R8) текстуры — например, атлас шрифта — могут иметь ширину,
     // не кратную 4; выравнивание строк по 1 байту защищает от косой загрузки.
     if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, format, desc.Width, desc.Height, 0, format, GL_UNSIGNED_BYTE, pixels);
+    if (desc.FloatPixels) {
+        // HDR-текстура (лайтмапы GI): 16F-хранилище, данные — float.
+        GLenum internal = desc.Channels == 4 ? GL_RGBA16F : (desc.Channels == 3 ? GL_RGB16F : GL_R16F);
+        glTexImage2D(GL_TEXTURE_2D, 0, internal, desc.Width, desc.Height, 0, format, GL_FLOAT, pixels);
+    } else {
+        glTexImage2D(GL_TEXTURE_2D, 0, format, desc.Width, desc.Height, 0, format, GL_UNSIGNED_BYTE, pixels);
+    }
     if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 4); // вернуть по умолчанию
     if (desc.GenerateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
 
@@ -283,6 +289,39 @@ GLTexture2D::~GLTexture2D() {
 void GLTexture2D::Bind(int unit) const {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, m_id);
+}
+
+// ============================================================================
+//  GLTexture3D — объёмная float-текстура (GI-объём световых проб).
+//  Трилинейная фильтрация + clamp: выборка между пробами интерполируется
+//  аппаратно, за границей объёма — ближайшая проба (без заворота).
+// ============================================================================
+
+GLTexture3D::GLTexture3D(const Texture3DDesc& desc, const float* pixels) {
+    GLenum internal, format;
+    switch (desc.Channels) {
+        case 1: internal = GL_R16F;    format = GL_RED;  break;
+        case 3: internal = GL_RGB16F;  format = GL_RGB;  break;
+        default: internal = GL_RGBA16F; format = GL_RGBA; break;
+    }
+    glGenTextures(1, &m_id);
+    glBindTexture(GL_TEXTURE_3D, m_id);
+    glTexImage3D(GL_TEXTURE_3D, 0, internal, desc.Width, desc.Height, desc.Depth,
+                 0, format, GL_FLOAT, pixels);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+}
+
+GLTexture3D::~GLTexture3D() {
+    if (m_id) glDeleteTextures(1, &m_id);
+}
+
+void GLTexture3D::Bind(int unit) const {
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_3D, m_id);
 }
 
 // ============================================================================

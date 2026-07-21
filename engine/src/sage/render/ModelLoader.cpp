@@ -1,4 +1,5 @@
 #include "ModelLoader.h"
+#include "sage/render/MeshData.h"
 #define TINYOBJLOADER_IMPLEMENTATION_ALREADY_IN_LIB
 #include <tiny_obj_loader.h>
 #include <ufbx.h>
@@ -68,6 +69,11 @@ void ApplyImportSettings(std::vector<Vertex>& vertices, const ImportSettings& s)
 }
 
 std::shared_ptr<Mesh> LoadObj(const std::string& path) {
+    sage::render::MeshData d = LoadObjData(path);
+    return std::make_shared<Mesh>(d.Vertices, d.Indices);
+}
+
+sage::render::MeshData LoadObjData(const std::string& path) {
     tinyobj::ObjReaderConfig config;
     tinyobj::ObjReader reader;
 
@@ -119,7 +125,7 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
     // ДО создания GPU-меша — модель приходит в сцену уже приведённой.
     ApplyImportSettings(vertices, LoadImportSettings(path));
 
-    return std::make_shared<Mesh>(vertices, indices);
+    return sage::render::MeshData{std::move(vertices), std::move(indices)};
 }
 
 void ParseFbxGeometry(const std::string& path,

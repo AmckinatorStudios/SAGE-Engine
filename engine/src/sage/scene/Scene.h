@@ -24,6 +24,8 @@
 // сущностью. Прежний код (скрипты, сериализатор) работает с тем же
 // Id/Name/Transform/Color, что и раньше, — сменилась только реализация под ним.
 // ---------------------------------------------------------------------------
+namespace sage::gi { struct GIState; } // запечённое GI сцены (см. sage/gi/GI.h)
+
 class GameObject {
 public:
     GameObject() = default;
@@ -188,6 +190,12 @@ public:
     // вместе с ней). Пока это единый environment, а не per-entity компонент —
     // так проще и совпадает с прежним поведением.
     LightingEnvironment Lighting;
+
+    // Запечённое глобальное освещение (лайтмапы + GI-объём проб, см. sage/gi).
+    // nullptr — GI не запекалось. shared_ptr намеренно: снапшоты сцены
+    // редактора (undo/Play) переносят бейк без повторного запекания
+    // (sage::gi::Transplant), а рендер безопасно держит ссылку на кадр.
+    std::shared_ptr<sage::gi::GIState> GI;
 
 private:
     entt::entity Resolve(int id) const {

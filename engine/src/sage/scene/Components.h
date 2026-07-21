@@ -83,6 +83,17 @@ inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr) {
     return mr.MaterialPtr ? mr.MaterialPtr->Albedo : mr.Color;
 }
 
+// Участие сущности в запечённом глобальном освещении (GI, см. sage/gi).
+// Статичная геометрия — окклюдер и отражатель света бейкера; при
+// Lightmapped == true сущность получает и собственную лайтмапу (непрямой свет
+// запекается в атлас), иначе только влияет на освещение других. TexelScale —
+// локальный множитель плотности лайтмапы (крупным неважным поверхностям можно
+// уменьшить). Сериализуется; бейк запускается из панели Lighting редактора.
+struct GIStaticComponent {
+    bool Lightmapped = true;
+    float TexelScale = 1.0f;
+};
+
 // Поведение сущности на Lua: путь к .lua файлу со стандартными хуками
 // OnStart(entity)/OnUpdate(entity, dt) (см. sage/scripting/ScriptEngine.h).
 // Сам компонент — только ДАННЫЕ (путь, сериализуется вместе со сценой);

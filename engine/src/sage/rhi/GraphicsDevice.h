@@ -89,6 +89,9 @@ public:
                                                                const std::string& fragmentSrc) = 0;
     virtual std::unique_ptr<Geometry> CreateGeometry(const VertexLayout& layout) = 0;
     virtual std::unique_ptr<Texture2D> CreateTexture2D(const Texture2DDesc& desc, const void* pixels) = 0;
+    // Объёмная float-текстура (GI-объём проб). pixels — плотный массив
+    // Width*Height*Depth*Channels float'ов (может быть nullptr).
+    virtual std::unique_ptr<Texture3D> CreateTexture3D(const Texture3DDesc& desc, const float* pixels) = 0;
     virtual std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) = 0;
     virtual std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) = 0;
 

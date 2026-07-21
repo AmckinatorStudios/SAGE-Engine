@@ -67,6 +67,17 @@ private:
     unsigned int m_id = 0;
 };
 
+class GLTexture3D : public Texture3D {
+public:
+    GLTexture3D(const Texture3DDesc& desc, const float* pixels);
+    ~GLTexture3D() override;
+
+    void Bind(int unit) const override;
+
+private:
+    unsigned int m_id = 0;
+};
+
 class GLTextureCube : public TextureCube {
 public:
     explicit GLTextureCube(const CubeFacePixels faces[6]);

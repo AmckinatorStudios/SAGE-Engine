@@ -33,6 +33,7 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/render/Frustum.h"
 #include "sage/render/ParticlePresets.h"
+#include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -283,7 +284,12 @@ void EditorLayer::StopPlay() {
 
 bool EditorLayer::RestoreSceneFromString(const std::string& snapshot) {
     try {
-        m_scene = SceneSerializer::LoadFromString(snapshot);
+        std::unique_ptr<Scene> restored = SceneSerializer::LoadFromString(snapshot);
+        // Запечённый GI переезжает указателем: строковый снапшот не тащит
+        // страницы лайтмап, а бейк валиден для той же статичной геометрии
+        // (Transplant сверяет отпечаток и при несовпадении не переносит).
+        if (m_scene && restored) sage::gi::Transplant(*m_scene, *restored);
+        m_scene = std::move(restored);
         // Выбор хранится как id, а сериализатор сохраняет id — выбор переживает
         // откат, если сущность существует в снапшоте (иначе Get() даст invalid).
         return true;
@@ -1944,10 +1950,60 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- GI: бейк лайтмап + объёма проб и рендер с ними на реальном GPU ---
+    // Проверяет весь конвейер запечённого GI: пометка статики, CPU-бейк
+    // (BVH/path tracing/развёртка), ленивое создание GPU-ресурсов (HDR-атлас,
+    // 3D-текстуры проб, меши с UV2) и отрисовку через RenderBatch.
+    if (ok) {
+        GameObject giFloor = CreatePrimitiveEntity("GI Floor", MeshRef::Type::Plane);
+        giFloor.GetTransform().Scale = {10.0f, 1.0f, 10.0f};
+        m_scene->Registry().emplace<GIStaticComponent>(giFloor.Entity());
+        GameObject giCube = CreatePrimitiveEntity("GI Cube", MeshRef::Type::Cube);
+        giCube.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+        m_scene->Registry().emplace<GIStaticComponent>(giCube.Entity());
+
+        sage::gi::GISettings giSettings;
+        giSettings.TexelsPerUnit = 2;
+        giSettings.AtlasSize = 256;
+        giSettings.SampleCount = 16;
+        giSettings.Bounces = 2;
+        giSettings.ProbeCellSize = 3.0f;
+        giSettings.MaxProbeAxis = 8;
+        sage::gi::BakeInput giInput = sage::gi::CollectBakeInput(*m_scene, giSettings);
+        std::shared_ptr<sage::gi::GIState> giState = sage::gi::Bake(giInput);
+        bool giBaked = giState->Baked && giState->Entities.size() == 2 &&
+                       !giState->Pages.empty() && giState->Probes.Valid();
+        if (giBaked) {
+            m_scene->GI = giState;
+            glm::mat4 view = glm::lookAt(glm::vec3(6, 6, 6), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+            glm::mat4 proj = glm::perspective(glm::radians(60.0f), 1.0f, 0.1f, 100.0f);
+            sage::ecs::RenderStats st = m_renderer.RenderColorForTest(
+                *m_scene, view, proj, glm::vec3(6, 6, 6), sage::ecs::CollectLighting(*m_scene));
+            // Оба GI-объекта видимы и нарисованы уникальными мешами с UV2;
+            // GPU-ресурсы (страница атласа, 3D-объём) создались лениво.
+            bool giDrawn = st.Drawn >= 2;
+            bool giGpu = giState->Pages[0].Gpu != nullptr && giState->Probes.GpuR != nullptr;
+            if (!giDrawn || !giGpu) {
+                LOG_ERROR("Editor") << "SELFTEST: GI render failed (drawn " << st.Drawn
+                                    << ", gpu " << giGpu << ")";
+                ok = false;
+            }
+        } else {
+            LOG_ERROR("Editor") << "SELFTEST: GI bake failed (baked " << giState->Baked
+                                << ", entities " << giState->Entities.size()
+                                << ", pages " << giState->Pages.size() << ")";
+            ok = false;
+        }
+        // Прибираем: GI-объекты и бейк не должны влиять на остальные шаги.
+        m_scene->GI.reset();
+        m_scene->RemoveObject(giFloor.Id());
+        m_scene->RemoveObject(giCube.Id());
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
-                               << "culling + duplicate + hierarchy + multiselect + prefab + presets, "
+                               << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
