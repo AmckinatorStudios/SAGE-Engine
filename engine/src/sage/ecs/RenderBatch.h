@@ -10,6 +10,7 @@
 class Scene;
 struct LightingEnvironment;
 struct Material;
+namespace sage::gi { struct GIState; }
 
 // ---------------------------------------------------------------------------
 // RenderBatch — масштабируемый проход статических мешей: отсечение по фрустуму
@@ -49,7 +50,8 @@ public:
 private:
     // Одна видимая текстурная сущность (с albedo/normal-картами) — рисуется
     // индивидуально текстурным PBR-шейдером (нельзя инстансить с текстурами).
-    struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; };
+    // LmPage >= 0 — сущность лайтмапнута (страница атласа GI).
+    struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; int LmPage; };
 
     // Кандидат кадра: заполняется ПОСЛЕДОВАТЕЛЬНЫМ проходом по реестру (чтение
     // ECS не потокобезопасно на структурные правки), затем ПАРАЛЛЕЛЬНО
@@ -61,15 +63,23 @@ private:
         glm::mat4 Model;
         const Material* Mat;
         glm::vec3 Color;
+        int LmPage;     // страница лайтмапы (-1 — не запечена)
         bool Textured;
         bool Visible;
+    };
+
+    // Инстанс-группа одного меша. У запечённой статики меш уникален для
+    // сущности (свои лайтмап-UV), так что LmPage один на группу.
+    struct Group {
+        std::vector<MeshInstance> Instances;
+        int LmPage = -1;
     };
 
     // Сбор видимых сущностей: flat (без карт) — в m_groups по мешу (инстансинг),
     // текстурные (с картами) — в m_textured. cullMatrix — фрустум камеры/света.
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
-    std::unordered_map<Mesh*, std::vector<MeshInstance>> m_groups; // flat-инстансы по мешу
+    std::unordered_map<Mesh*, Group> m_groups; // flat-инстансы по мешу
     std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)
     std::vector<CullItem> m_cull;                                  // кандидаты кадра (переиспользуется)
     // Мировые матрицы кадра (Scene::ComputeWorldMatrices) — один O(n)-проход

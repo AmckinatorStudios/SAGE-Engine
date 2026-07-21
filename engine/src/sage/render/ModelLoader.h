@@ -1,5 +1,6 @@
 #pragma once
 #include "Mesh.h"
+#include "MeshData.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,6 +20,11 @@ namespace ModelLoader {
     // Загружает .obj и возвращает Mesh, применив ImportSettings из сайдкара
     // (если он есть). Бросает std::runtime_error при ошибке чтения модели.
     std::shared_ptr<Mesh> LoadObj(const std::string& path);
+
+    // CPU-стадия той же загрузки: геометрия с применёнными ImportSettings, БЕЗ
+    // создания GPU-меша (не требует GL). Используется бейкером GI (sage/gi),
+    // которому нужны треугольники модели для трассировки и лайтмап-развёртки.
+    sage::render::MeshData LoadObjData(const std::string& path);
 
     // --- Сайдкар настроек импорта (GL-независимо) ---
     std::string ImportSidecarPath(const std::string& modelPath); // «<path>.sageimport»

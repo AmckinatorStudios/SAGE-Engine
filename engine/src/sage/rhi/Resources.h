@@ -92,6 +92,9 @@ struct Texture2DDesc {
     Filter FilterMode = Filter::Trilinear;
     Wrap WrapMode = Wrap::Repeat;
     bool GenerateMipmaps = true;
+    // HDR-режим: пиксели — float* (16F-хранилище на GPU). Нужен лайтмапам GI:
+    // запечённая освещённость линейна и может быть > 1.0.
+    bool FloatPixels = false;
 };
 
 class Texture2D {
@@ -100,6 +103,22 @@ public:
     virtual void Bind(int unit) const = 0;
     // Нативный хендл бэкенда (для передачи в сторонние API вроде ImGui::Image).
     virtual unsigned int NativeHandle() const = 0;
+};
+
+// --- Объёмная (3D) текстура — GI-объём световых проб (см. sage/gi) ---
+// Хранит float-данные (16F): аппаратная трилинейная интерполяция между пробами
+// достаётся бесплатно при семплировании в шейдере.
+struct Texture3DDesc {
+    int Width = 0;   // X — колонки сетки проб
+    int Height = 0;  // Y
+    int Depth = 0;   // Z
+    int Channels = 4;
+};
+
+class Texture3D {
+public:
+    virtual ~Texture3D() = default;
+    virtual void Bind(int unit) const = 0;
 };
 
 // Одна грань кубической текстуры (порядок граней: +X,-X,+Y,-Y,+Z,-Z).

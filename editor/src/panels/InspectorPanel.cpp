@@ -244,6 +244,18 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
+    if (reg.all_of<GIStaticComponent>(obj.Entity()) && ImGui::CollapsingHeader("GI Static", ImGuiTreeNodeFlags_DefaultOpen)) {
+        GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
+        ImGui::Checkbox("Lightmapped", &gs.Lightmapped); host.TrackLastImGuiItem();
+        ImGui::DragFloat("Texel Scale", &gs.TexelScale, 0.05f, 0.1f, 8.0f); host.TrackLastImGuiItem();
+        ImGui::TextDisabled("Static occluder for baked GI; lightmapped = has own lightmap");
+        ImGui::TextDisabled("Re-bake lighting after changes (Lighting panel)");
+        if (ImGui::Button("Remove##gistatic")) {
+            host.PushUndoSnapshot();
+            reg.remove<GIStaticComponent>(obj.Entity());
+        }
+    }
+
     if (reg.all_of<ScriptComponent>(obj.Entity()) && ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             char scriptBuf[512];
@@ -589,6 +601,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
                 ImGui::CloseCurrentPopup();
             }
         };
+        item("GI Static", reg.all_of<GIStaticComponent>(e), [&] { reg.emplace<GIStaticComponent>(e); });
         item("Camera", reg.all_of<CameraComponent>(e), [&] { reg.emplace<CameraComponent>(e); });
         item("Light", reg.all_of<LightComponent>(e), [&] { reg.emplace<LightComponent>(e); });
         item("Script", reg.all_of<ScriptComponent>(e),

@@ -1,4 +1,5 @@
 #include "SceneSerializer.h"
+#include "sage/gi/GI.h"
 #include "sage/render/ResourceManager.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -170,6 +171,18 @@ static LightingEnvironment LightingFromJson(const json& root) {
 // под-объект в json сущности; Parse* собирает компонент из его под-json (вызывающий
 // решает, навешивать ли его — по наличию ключа). Поведение идентично прежнему.
 // ---------------------------------------------------------------------------
+
+static void SaveGIStatic(json& j, const GIStaticComponent& gs) {
+    j["giStatic"]["lightmapped"] = gs.Lightmapped;
+    j["giStatic"]["texelScale"] = gs.TexelScale;
+}
+
+static GIStaticComponent ParseGIStatic(const json& gj) {
+    GIStaticComponent gs;
+    gs.Lightmapped = gj.value("lightmapped", gs.Lightmapped);
+    gs.TexelScale = gj.value("texelScale", gs.TexelScale);
+    return gs;
+}
 
 static void SaveCamera(json& j, const CameraComponent& cam) {
     j["camera"]["fov"] = cam.Fov;
@@ -457,7 +470,82 @@ static ParticleEmitterComponent ParseParticles(const json& pj) {
 namespace SceneSerializer {
 
 // Общая сборка JSON-дерева сцены — используется и файловым Save, и SaveToString.
-static json BuildSceneJson(const Scene& scene) {
+// Секция запечённого GI: настройки + отпечаток + (для файла) объём проб.
+// Страницы атласа в JSON не кладутся — файловый Save пишет их рядом .hdr-файлами
+// (gi::SavePages), а строковые снапшоты (undo/Play) переносят бейк указателем
+// (gi::Transplant) — тащить мегабайты текселей в каждый снапшот незачем.
+static json GIToJson(const sage::gi::GIState& st, bool withProbes) {
+    json g;
+    g["settings"] = {
+        {"texelsPerUnit", st.Settings.TexelsPerUnit},
+        {"atlasSize", st.Settings.AtlasSize},
+        {"sampleCount", st.Settings.SampleCount},
+        {"bounces", st.Settings.Bounces},
+        {"probeCellSize", st.Settings.ProbeCellSize},
+        {"maxProbeAxis", st.Settings.MaxProbeAxis},
+        {"seed", st.Settings.Seed},
+    };
+    g["baked"] = st.Baked;
+    g["geometryHash"] = st.GeometryHash;
+    g["pages"] = (int)st.Pages.size();
+    if (withProbes && st.Probes.Valid()) {
+        json pj;
+        pj["dims"] = {st.Probes.Dims.x, st.Probes.Dims.y, st.Probes.Dims.z};
+        pj["min"] = Vec3ToJson(st.Probes.Min);
+        pj["cell"] = Vec3ToJson(st.Probes.CellSize);
+        std::vector<float> data;
+        data.reserve(st.Probes.Probes.size() * 12);
+        for (const sage::gi::SH1& sh : st.Probes.Probes) {
+            for (int k = 0; k < 4; ++k) data.push_back(sh.R[k]);
+            for (int k = 0; k < 4; ++k) data.push_back(sh.G[k]);
+            for (int k = 0; k < 4; ++k) data.push_back(sh.B[k]);
+        }
+        pj["sh"] = std::move(data);
+        g["probes"] = std::move(pj);
+    }
+    return g;
+}
+
+static std::shared_ptr<sage::gi::GIState> GIFromJson(const json& g) {
+    auto st = std::make_shared<sage::gi::GIState>();
+    if (g.contains("settings")) {
+        const json& sj = g["settings"];
+        st->Settings.TexelsPerUnit = sj.value("texelsPerUnit", st->Settings.TexelsPerUnit);
+        st->Settings.AtlasSize = sj.value("atlasSize", st->Settings.AtlasSize);
+        st->Settings.SampleCount = sj.value("sampleCount", st->Settings.SampleCount);
+        st->Settings.Bounces = sj.value("bounces", st->Settings.Bounces);
+        st->Settings.ProbeCellSize = sj.value("probeCellSize", st->Settings.ProbeCellSize);
+        st->Settings.MaxProbeAxis = sj.value("maxProbeAxis", st->Settings.MaxProbeAxis);
+        st->Settings.Seed = sj.value("seed", st->Settings.Seed);
+    }
+    st->Baked = g.value("baked", false);
+    st->GeometryHash = g.value("geometryHash", (uint64_t)0);
+    if (g.contains("probes")) {
+        const json& pj = g["probes"];
+        auto dims = pj.value("dims", std::vector<int>{0, 0, 0});
+        if (dims.size() == 3 && dims[0] > 0 && dims[1] > 0 && dims[2] > 0) {
+            st->Probes.Dims = {dims[0], dims[1], dims[2]};
+            if (pj.contains("min")) st->Probes.Min = Vec3FromJson(pj["min"]);
+            if (pj.contains("cell")) st->Probes.CellSize = Vec3FromJson(pj["cell"]);
+            size_t count = (size_t)dims[0] * dims[1] * dims[2];
+            auto data = pj.value("sh", std::vector<float>{});
+            if (data.size() == count * 12) {
+                st->Probes.Probes.resize(count);
+                for (size_t i = 0; i < count; ++i) {
+                    sage::gi::SH1& sh = st->Probes.Probes[i];
+                    for (int k = 0; k < 4; ++k) sh.R[k] = data[i * 12 + k];
+                    for (int k = 0; k < 4; ++k) sh.G[k] = data[i * 12 + 4 + k];
+                    for (int k = 0; k < 4; ++k) sh.B[k] = data[i * 12 + 8 + k];
+                }
+            } else {
+                st->Probes.Dims = {0, 0, 0}; // битые данные — без объёма
+            }
+        }
+    }
+    return st;
+}
+
+static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
     json root;
     root["sage_scene_version"] = 1;
     root["name"] = scene.Name();
@@ -493,6 +581,7 @@ static json BuildSceneJson(const Scene& scene) {
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             j["script"] = sc->Path;
         }
+        if (const GIStaticComponent* gs = reg.try_get<GIStaticComponent>(e)) SaveGIStatic(j, *gs);
         if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
         if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
@@ -505,6 +594,7 @@ static json BuildSceneJson(const Scene& scene) {
     }
     root["objects"] = objectsJson;
     root["lighting"] = LightingToJson(scene.Lighting);
+    if (scene.GI) root["gi"] = GIToJson(*scene.GI, withProbes);
     return root;
 }
 
@@ -546,6 +636,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
         }
 
+        if (j.contains("giStatic"))
+            obj.Registry()->emplace<GIStaticComponent>(obj.Entity(), ParseGIStatic(j["giStatic"]));
         if (j.contains("camera"))
             obj.Registry()->emplace<CameraComponent>(obj.Entity(), ParseCamera(j["camera"]));
         if (j.contains("light"))
@@ -577,6 +669,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
     scene->SetNextId(maxId + 1);
     scene->Lighting = LightingFromJson(root);
+    if (root.contains("gi")) scene->GI = GIFromJson(root["gi"]);
 
     return scene;
 }
@@ -589,6 +682,8 @@ void Save(const Scene& scene, const std::string& path) {
         throw std::runtime_error("Не удалось открыть файл для записи сцены: " + path);
     }
     file << BuildSceneJson(scene).dump(2);
+    // Страницы атласа лайтмап — HDR-файлами рядом со сценой (в JSON им не место).
+    if (scene.GI && scene.GI->Baked) sage::gi::SavePages(*scene.GI, path);
 }
 
 std::unique_ptr<Scene> Load(const std::string& path) {
@@ -602,12 +697,17 @@ std::unique_ptr<Scene> Load(const std::string& path) {
     } catch (const std::exception& e) {
         throw std::runtime_error("Ошибка парсинга JSON сцены (" + path + "): " + e.what());
     }
-    return BuildSceneFromJson(root);
+    std::unique_ptr<Scene> scene = BuildSceneFromJson(root);
+    // Восстановление лайтмап: пересчёт развёртки + чтение страниц с диска
+    // (при несовпадении отпечатка геометрии бейк помечается устаревшим).
+    sage::gi::RebuildAfterLoad(*scene, path);
+    return scene;
 }
 
 std::string SaveToString(const Scene& scene) {
     // Без отступов (dump()) — снапшоты undo/Play держатся в памяти, компактность важнее читаемости.
-    return BuildSceneJson(scene).dump();
+    // Без объёма проб: снапшоты undo/Play переносят бейк через gi::Transplant.
+    return BuildSceneJson(scene, /*withProbes=*/false).dump();
 }
 
 std::unique_ptr<Scene> LoadFromString(const std::string& jsonText) {

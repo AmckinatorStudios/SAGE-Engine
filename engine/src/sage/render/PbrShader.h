@@ -78,6 +78,38 @@ vec3 CalcHemisphereAmbient(vec3 normal) {
     return mix(uAmbientGround, uAmbientSky, w) * uAmbientStrength;
 }
 
+// --- Запечённое GI (см. sage/gi): объём световых проб (L1 SH) -------------
+// Три 3D-текстуры — по одной на цветовой канал, в каждой vec4 гармоник
+// (c0, cx, cy, cz). Семплится per-pixel по мировой позиции: аппаратная
+// трилинейная интерполяция между пробами. Значение — «непрямая освещённость/π»
+// (та же конвенция, что CalcHemisphereAmbient) — прямой множитель albedo.
+uniform bool uGIVolumeEnabled;
+uniform sampler3D uGIVolR;
+uniform sampler3D uGIVolG;
+uniform sampler3D uGIVolB;
+uniform vec3 uGIVolMin;       // мировая позиция пробы (0,0,0)
+uniform vec3 uGIVolInvExtent; // 1 / (CellSize * (Dims-1))
+uniform vec3 uGIVolDims;      // число проб по осям
+
+vec3 EvalGIVolume(vec3 worldPos, vec3 n) {
+    vec3 uvw = clamp((worldPos - uGIVolMin) * uGIVolInvExtent, 0.0, 1.0);
+    uvw = (uvw * (uGIVolDims - 1.0) + 0.5) / uGIVolDims; // узлы -> центры текселей
+    vec4 shR = texture(uGIVolR, uvw);
+    vec4 shG = texture(uGIVolG, uvw);
+    vec4 shB = texture(uGIVolB, uvw);
+    const float w0 = 0.282095;           // Y00 (свёртка косинусом, /π)
+    const float w1 = 0.325735;           // (2/3)·0.488603
+    vec4 basis = vec4(w0, w1 * n.x, w1 * n.y, w1 * n.z);
+    return max(vec3(dot(shR, basis), dot(shG, basis), dot(shB, basis)), vec3(0.0));
+}
+
+// Непрямая составляющая по умолчанию: GI-объём, если запечён, иначе прежний
+// полусферический ambient. Лайтмапнутая статика подставляет свою лайтмапу
+// напрямую через ShadePBRgi (см. RenderBatch).
+vec3 DefaultIndirect(vec3 worldPos, vec3 n) {
+    return uGIVolumeEnabled ? EvalGIVolume(worldPos, n) : CalcHemisphereAmbient(n);
+}
+
 // Вклад одного источника (Cook-Torrance): N — нормаль, V — к камере, L — к свету,
 // radiance — цвет*интенсивность источника (с затуханием/тенью, посчитанными выше).
 vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float rough) {
@@ -92,12 +124,13 @@ vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metall
     return (kd * albedo / PI + spec) * radiance * NdotL;
 }
 
-// Полное PBR-освещение фрагмента с ambient occlusion (ao множит непрямой свет —
-// полусферический ambient): ambient*ao + солнце (с тенью) + точечные + прожекторы
-// + туман. shadingMode 1/2 обрабатывает вызывающий main.
-vec3 ShadePBRao(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough, float ao) {
+// Полное PBR-освещение фрагмента с ЯВНОЙ непрямой составляющей (indirect —
+// «освещённость/π»: лайтмапа, GI-объём или полусферический ambient; умножает
+// albedo и ao). Прямой свет — realtime: солнце (с тенью) + точечные +
+// прожекторы + туман. shadingMode 1/2 обрабатывает вызывающий main.
+vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough, float ao, vec3 indirect) {
     vec3 V = normalize(uViewPos - fragPos);
-    vec3 ambient = CalcHemisphereAmbient(N) * albedo * ao;
+    vec3 ambient = indirect * albedo * ao;
     vec3 Lo = vec3(0.0);
 
     // Солнце (направленное) + PCF-тень.
@@ -133,6 +166,12 @@ vec3 ShadePBRao(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float
         result = mix(uFogColor, result, f);
     }
     return result;
+}
+
+// Совместимая обёртка: непрямой свет по умолчанию (GI-объём или полусферический
+// ambient). Прежний контракт для путей без собственной лайтмапы.
+vec3 ShadePBRao(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough, float ao) {
+    return ShadePBRgi(N, fragPos, fragPosLightSpace, albedo, metallic, rough, ao, DefaultIndirect(fragPos, N));
 }
 
 // Совместимая обёртка без AO (ao = 1.0) — для путей без ambient-occlusion карты.

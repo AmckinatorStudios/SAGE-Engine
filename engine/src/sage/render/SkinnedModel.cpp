@@ -4,6 +4,7 @@
 #include <tiny_gltf.h>
 
 #include "SkinnedModel.h"
+#include "sage/gi/GIUpload.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -197,6 +198,13 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     // Полное освещение сцены (ambient из скайбокса, солнце, точечные, прожекторы,
     // туман) — теми же uniform'ами, что и статический lit-проход.
     UploadLighting(shader, env);
+
+    // GI: юниты сэмплеров общего PBR-блока обязательны всегда (конфликт типов
+    // сэмплеров на юните 0 — см. SetGISamplerUnits). Объём проб к скиннингу
+    // пока не подключён (сюда не проброшена сцена) — непрямой свет остаётся
+    // полусферическим ambient.
+    sage::gi::SetGISamplerUnits(shader);
+    shader.SetInt("uGIVolumeEnabled", 0);
 
     // Тени от солнца: карта на юнит 1, матрица света + флаг — как у статики.
     if (shadowsEnabled && shadowMap) {

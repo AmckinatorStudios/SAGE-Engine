@@ -36,6 +36,7 @@ public:
                                                        const std::string& fragmentSrc) override;
     std::unique_ptr<Geometry> CreateGeometry(const VertexLayout& layout) override;
     std::unique_ptr<Texture2D> CreateTexture2D(const Texture2DDesc& desc, const void* pixels) override;
+    std::unique_ptr<Texture3D> CreateTexture3D(const Texture3DDesc& desc, const float* pixels) override;
     std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) override;
     std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) override;
 };

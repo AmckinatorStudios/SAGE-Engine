@@ -139,6 +139,10 @@ std::unique_ptr<Texture2D> OpenGLDevice::CreateTexture2D(const Texture2DDesc& de
     return std::make_unique<GLTexture2D>(desc, pixels);
 }
 
+std::unique_ptr<Texture3D> OpenGLDevice::CreateTexture3D(const Texture3DDesc& desc, const float* pixels) {
+    return std::make_unique<GLTexture3D>(desc, pixels);
+}
+
 std::unique_ptr<TextureCube> OpenGLDevice::CreateTextureCube(const CubeFacePixels faces[6]) {
     return std::make_unique<GLTextureCube>(faces);
 }

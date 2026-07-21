@@ -15,6 +15,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/audio/AudioEngine.cpp
     src/sage/audio/miniaudio_impl.cpp
     src/sage/ecs/RenderBatch.cpp
+    src/sage/gi/BVH.cpp
+    src/sage/gi/GI.cpp
+    src/sage/gi/LightBaker.cpp
+    src/sage/gi/LightmapUV.cpp
     src/sage/ecs/CameraView.cpp
     src/sage/core/Application.cpp
     src/sage/core/Config.cpp
@@ -28,6 +32,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/DebugOverlay.cpp
     src/sage/render/Material.cpp
     src/sage/render/Mesh.cpp
+    src/sage/render/MeshData.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
     src/sage/render/Font.cpp
