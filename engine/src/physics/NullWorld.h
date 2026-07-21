@@ -32,6 +32,8 @@ public:
     void SetLinearVelocity(BodyHandle, const glm::vec3&) override {}
     glm::vec3 GetLinearVelocity(BodyHandle) const override { return glm::vec3(0.0f); }
     void AddImpulse(BodyHandle, const glm::vec3&) override {}
+    RayHitInfo Raycast(const glm::vec3&, const glm::vec3&, float) const override { return {}; }
+    std::vector<ContactEvent> DrainContactEvents() override { return {}; }
 
     JointHandle CreateJoint(const JointDesc&) override { return kInvalidJoint; }
     void RemoveJoint(JointHandle) override {}

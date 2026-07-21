@@ -175,8 +175,13 @@ void EditorLayer::OnUpdate(float dt) {
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
     if (m_playState == EditorPlayState::Playing) {
+        m_playNetwork.Update(*m_scene, dt); // транспорт + снапшоты/интерполяция
         if (m_playScripts) m_playScripts->UpdateAll(dt);
-        if (m_playPhysics) m_playPhysics->Step(*m_scene, dt);
+        if (m_playPhysics) {
+            m_playPhysics->Step(*m_scene, dt);
+            // Столкновения шага -> хуки OnCollisionEnter/Exit скриптов.
+            if (m_playScripts) m_playScripts->DispatchCollisions(m_playPhysics->CollisionEvents());
+        }
     }
     // Анимации проигрываются и в режиме правки — чтобы в вьюпорте было видно
     // движение скелетных моделей (превью), не только в Play.
@@ -256,6 +261,7 @@ void EditorLayer::StartPlay() {
     // SetGravity) — привязываем ПОСЛЕ построения мира, чтобы RuntimeBody сущностей
     // уже существовали к первому OnUpdate.
     m_playScripts->BindPhysics(*m_playPhysics);
+    m_playScripts->BindNetwork(m_playNetwork); // Lua Net.* в Play-режиме
 
     m_playState = EditorPlayState::Playing;
     m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
@@ -271,6 +277,7 @@ void EditorLayer::StopPlay() {
     // его ДО того, как заменить сцену восстановленным снапшотом.
     m_playScripts.reset();
     m_playPhysics.reset();
+    m_playNetwork.Stop(); // Play кончился — сервер/клиент закрываются
     RestoreSceneFromString(m_playSnapshot);
     m_playSnapshot.clear();
     m_playState = EditorPlayState::Editing;

@@ -15,6 +15,11 @@
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Constraints/FixedConstraint.h>
 #include <Jolt/Physics/Constraints/PointConstraint.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
@@ -23,6 +28,7 @@
 #include <Jolt/Physics/Constraints/ConeConstraint.h>
 
 #include <cstdarg>
+#include <mutex>
 #include <thread>
 
 #include "sage/core/Log.h"
@@ -108,6 +114,60 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------
+// JoltContactListener — переводит колбэки контактов Jolt в бэкенд-независимые
+// ContactEvent. Колбэки приходят из ПОТОКОВ решателя во время Update — все
+// обращения под мьютексом. Пара идентифицируется BodyID (OnContactRemoved не
+// даёт тел, только id), наружу отдаются НАШИ хэндлы из Body::GetUserData.
+// Компаунд-формы дают несколько подшейп-пар — события дедуплицируются по паре
+// тел (счётчик подшейп-пар на пару).
+// ---------------------------------------------------------------------------
+class JoltContactListener : public JPH::ContactListener {
+public:
+    void OnContactAdded(const JPH::Body& a, const JPH::Body& b,
+                        const JPH::ContactManifold&, JPH::ContactSettings&) override {
+        uint64_t key = PairKey(a.GetID(), b.GetID());
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto [it, inserted] = m_pairs.emplace(
+            key, std::make_pair((uint32_t)a.GetUserData(), (uint32_t)b.GetUserData()));
+        m_refs[key]++;
+        if (inserted) m_events.push_back({it->second.first, it->second.second, true});
+    }
+
+    void OnContactRemoved(const JPH::SubShapeIDPair& p) override {
+        uint64_t key = PairKey(p.GetBody1ID(), p.GetBody2ID());
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto rit = m_refs.find(key);
+        if (rit == m_refs.end()) return;
+        if (--rit->second > 0) return; // пара ещё касается другими подшейпами
+        m_refs.erase(rit);
+        auto it = m_pairs.find(key);
+        if (it != m_pairs.end()) {
+            m_events.push_back({it->second.first, it->second.second, false});
+            m_pairs.erase(it);
+        }
+    }
+
+    std::vector<ContactEvent> Drain() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::vector<ContactEvent> out;
+        out.swap(m_events);
+        return out;
+    }
+
+private:
+    static uint64_t PairKey(JPH::BodyID a, JPH::BodyID b) {
+        uint32_t x = a.GetIndexAndSequenceNumber(), y = b.GetIndexAndSequenceNumber();
+        if (x > y) std::swap(x, y);
+        return ((uint64_t)x << 32) | y;
+    }
+
+    std::mutex m_mutex;
+    std::vector<ContactEvent> m_events;
+    std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>> m_pairs; // ключ -> наши хэндлы
+    std::unordered_map<uint64_t, int> m_refs;                            // подшейп-пар на пару
+};
+
 } // namespace sage::physics
 
 // ============================================================================
@@ -184,6 +244,10 @@ JoltWorld::JoltWorld() {
     const JPH::uint kMaxContacts = 4096;
     m_system->Init(kMaxBodies, kNumBodyMutexes, kMaxBodyPairs, kMaxContacts,
                    *m_bpLayers, *m_objectVsBpFilter, *m_objectLayerFilter);
+
+    // События контактов -> скрипты (OnCollisionEnter/Exit через PhysicsScene).
+    m_contactListener = std::make_unique<JoltContactListener>();
+    m_system->SetContactListener(m_contactListener.get());
 }
 
 JoltWorld::~JoltWorld() {
@@ -258,13 +322,17 @@ BodyHandle JoltWorld::CreateBody(const BodyDesc& desc) {
         settings.mMassPropertiesOverride.mMass = desc.Mass;
     }
 
+    // Наш хэндл — в user data тела: рейкаст и контакт-листенер отдают его
+    // наружу без обратных карт.
+    BodyHandle h = m_next++;
+    settings.mUserData = (JPH::uint64)h;
+
     JPH::BodyInterface& bi = m_system->GetBodyInterface();
     JPH::BodyID id = bi.CreateAndAddBody(
         settings, desc.Type == BodyType::Static ? JPH::EActivation::DontActivate
                                                 : JPH::EActivation::Activate);
     if (id.IsInvalid()) return kInvalidBody;
 
-    BodyHandle h = m_next++;
     m_bodies[h] = id.GetIndexAndSequenceNumber();
     return h;
 }
@@ -435,4 +503,35 @@ void JoltWorld::RemoveJoint(JointHandle joint) {
     m_system->RemoveConstraint(it->second);
     it->second->Release();
     m_joints.erase(it);
+}
+
+RayHitInfo JoltWorld::Raycast(const glm::vec3& origin, const glm::vec3& dirIn, float maxDist) const {
+    RayHitInfo out;
+    if (!m_system || maxDist <= 0.0f) return out;
+    glm::vec3 dir = dirIn;
+    float len = glm::length(dir);
+    if (len < 1e-8f) return out;
+    dir /= len;
+
+    JPH::RRayCast ray(ToJolt(origin), JPH::Vec3(dir.x, dir.y, dir.z) * maxDist);
+    JPH::RayCastResult hit;
+    if (!m_system->GetNarrowPhaseQuery().CastRay(ray, hit)) return out;
+
+    out.Hit = true;
+    out.Distance = hit.mFraction * maxDist;
+    out.Position = origin + dir * out.Distance;
+    // Нормаль и наш хэндл — под блокировкой тела (требование интерфейса Jolt).
+    JPH::BodyLockRead lock(m_system->GetBodyLockInterface(), hit.mBodyID);
+    if (lock.Succeeded()) {
+        const JPH::Body& body = lock.GetBody();
+        out.Body = (BodyHandle)body.GetUserData();
+        JPH::Vec3 n = body.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ray.GetPointOnRay(hit.mFraction));
+        out.Normal = glm::vec3(n.GetX(), n.GetY(), n.GetZ());
+    }
+    return out;
+}
+
+std::vector<ContactEvent> JoltWorld::DrainContactEvents() {
+    return m_contactListener ? m_contactListener->Drain()
+                             : std::vector<ContactEvent>{};
 }

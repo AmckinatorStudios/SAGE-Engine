@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <vector>
 #include "sage/physics/PhysicsWorld.h"
 
 class Scene;
@@ -15,11 +16,30 @@ class Scene;
 // Форма берётся из ColliderComponent (или единичный бокс по Transform.Scale),
 // размеры масштабируются на Transform.Scale.
 // ---------------------------------------------------------------------------
+// Результат рейкаста ПО СЦЕНЕ: попадание + id сущности-владельца тела.
+struct SceneRayHit {
+    bool Hit = false;
+    int EntityId = -1;
+    glm::vec3 Position{0.0f};
+    glm::vec3 Normal{0.0f};
+    float Distance = 0.0f;
+};
+
 class PhysicsScene {
 public:
     PhysicsScene(sage::physics::Backend backend, Scene& scene);
 
     void Step(Scene& scene, float dt);
+
+    // Рейкаст по физическому миру с резолвом тела в сущность сцены.
+    SceneRayHit Raycast(Scene& scene, const glm::vec3& origin, const glm::vec3& dir,
+                        float maxDist) const;
+
+    // События столкновений ПОСЛЕДНЕГО Step в терминах id сущностей — питают
+    // OnCollisionEnter/OnCollisionExit скриптов (см. ScriptEngine::DispatchCollisions).
+    const std::vector<sage::physics::CollisionEvent>& CollisionEvents() const {
+        return m_collisions;
+    }
 
     bool Available() const { return m_world && m_world->IsAvailable(); }
     const char* BackendName() const { return m_world ? m_world->BackendName() : "None"; }
@@ -45,7 +65,11 @@ public:
     int JointCount() const { return m_jointCount; }
 
 private:
+    // id сущности по хэндлу тела (лениво перестраивается в Step из реестра).
+    int EntityForBody(Scene& scene, sage::physics::BodyHandle body) const;
+
     std::unique_ptr<sage::physics::PhysicsWorld> m_world;
     int m_bodyCount = 0;
     int m_jointCount = 0;
+    std::vector<sage::physics::CollisionEvent> m_collisions;
 };

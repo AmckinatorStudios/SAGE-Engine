@@ -15,6 +15,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/audio/AudioEngine.cpp
     src/sage/audio/miniaudio_impl.cpp
     src/sage/ecs/RenderBatch.cpp
+    src/sage/net/NetConnection.cpp
+    src/sage/net/NetHost.cpp
+    src/sage/net/NetworkSystem.cpp
+    src/sage/net/UdpSocket.cpp
     src/sage/gi/BVH.cpp
     src/sage/gi/GI.cpp
     src/sage/gi/LightBaker.cpp
@@ -108,7 +112,8 @@ if (TARGET Jolt)
 endif()
 
 if (WIN32)
-    target_link_libraries(sage_engine PUBLIC opengl32)
+    # ws2_32 — Winsock (UDP-сокеты мультиплеера, sage/net/UdpSocket).
+    target_link_libraries(sage_engine PUBLIC opengl32 ws2_32)
 elseif (UNIX)
     # m — miniaudio (математика микшера); dl/pthread — GLFW и miniaudio
     # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).

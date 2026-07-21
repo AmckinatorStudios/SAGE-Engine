@@ -238,3 +238,96 @@ TEST(Scripting_tween_cancel_all) {
     se.UpdateAll(0.1f);
     CHECK_EQ((int)se.Lua().script("return ActiveTweens()"), 0);
 }
+
+// ============================================================================
+//  Рейкаст из Lua, события столкновений, горячая перезагрузка
+// ============================================================================
+
+TEST(Scripting_raycast_from_lua) {
+    Scene scene("ray");
+    // Пол со статическим телом — рейкасту нужен физический мир.
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Scale = {20.0f, 1.0f, 20.0f};
+    auto& rb = scene.Registry().emplace<RigidBodyComponent>(floor.Entity());
+    rb.Type = sage::physics::BodyType::Static;
+
+    PhysicsScene physics(sage::physics::PhysicsWorld::DefaultBackend(), scene);
+    ScriptEngine se;
+    se.BindScene(scene);
+    se.BindPhysics(physics);
+
+    se.Lua().script(R"LUA(
+        hit = Raycast(Vec3.new(0, 5, 0), Vec3.new(0, -1, 0), 100)
+        hit_none = Raycast(Vec3.new(100, 5, 0), Vec3.new(0, -1, 0), 10)
+    )LUA");
+    sol::table hit = se.Lua()["hit"];
+    CHECK_TRUE(hit.valid());
+    CHECK_NEAR((float)hit["distance"].get_or(0.0), 4.5f, 0.05f);
+    CHECK_EQ((int)hit["entityId"].get_or(-1), floor.Id());
+    glm::vec3 n = hit["normal"];
+    CHECK_NEAR(n.y, 1.0f, 0.01f);
+    CHECK_TRUE(se.Lua()["hit_none"] == sol::lua_nil);
+}
+
+TEST(Scripting_collision_hooks_from_physics) {
+    Scene scene("coll");
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Scale = {20.0f, 1.0f, 20.0f};
+    scene.Registry().emplace<RigidBodyComponent>(floor.Entity()).Type = sage::physics::BodyType::Static;
+
+    GameObject box = scene.CreateObject("Box");
+    box.GetTransform().Position = {0.0f, 3.0f, 0.0f};
+    scene.Registry().emplace<RigidBodyComponent>(box.Entity()); // Dynamic по умолчанию
+
+    PhysicsScene physics(sage::physics::PhysicsWorld::DefaultBackend(), scene);
+    ScriptEngine se;
+    se.BindScene(scene);
+    se.BindPhysics(physics);
+
+    // Окружение скрипта изолировано — наблюдаем через C++-колбэк (как в
+    // тестах сообщений выше).
+    int enters = 0;
+    std::string otherName;
+    se.Lua().set_function("TestCollision", [&](const std::string& n) { ++enters; otherName = n; });
+
+    std::string path = WriteTempScript("oncoll", R"LUA(
+        function OnCollisionEnter(entity, other)
+            if other ~= nil then TestCollision(other.Name) end
+        end
+        function OnUpdate(entity, dt) end
+    )LUA");
+    se.AttachScript(box, path);
+
+    // Падение до контакта; события каждого шага доставляем в скрипты.
+    for (int i = 0; i < 120; ++i) {
+        physics.Step(scene, 1.0f / 60.0f);
+        se.DispatchCollisions(physics.CollisionEvents());
+    }
+    CHECK_TRUE(enters >= 1);
+    CHECK_EQ(otherName, std::string("Floor"));
+    std::remove(path.c_str());
+}
+
+TEST(Scripting_hot_reload_replaces_behavior) {
+    Scene scene("reload");
+    GameObject obj = scene.CreateObject("Obj");
+    ScriptEngine se;
+    se.BindScene(scene);
+
+    std::string path = WriteTempScript("hot", R"LUA(
+        function OnUpdate(entity, dt) entity.Transform.Position.x = 1.0 end
+    )LUA");
+    se.AttachScript(obj, path);
+    se.UpdateAll(0.016f);
+    CHECK_NEAR(obj.GetTransform().Position.x, 1.0f, 1e-4f);
+
+    // Правим файл (гарантированно другой mtime за счёт явной проверки цикла).
+    {
+        std::ofstream f(path);
+        f << "function OnUpdate(entity, dt) entity.Transform.Position.x = 2.0 end\n";
+    }
+    se.CheckHotReload(); // форс-проверка (в проде — сама, раз в секунду)
+    se.UpdateAll(0.016f);
+    CHECK_NEAR(obj.GetTransform().Position.x, 2.0f, 1e-4f);
+    std::remove(path.c_str());
+}

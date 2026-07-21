@@ -848,7 +848,13 @@ void TestGameLayer::OnUpdate(float dt) {
     UpdatePortals(dt); // может сменить комнату (пересобирает m_physics)
 
     // Физика активной сцены: динамические ящики падают/складываются.
-    if (m_physics) m_physics->Step(*m_scenes.Active(), dt);
+    if (m_physics) {
+        m_physics->Step(*m_scenes.Active(), dt);
+        // Столкновения шага -> хуки OnCollisionEnter/Exit скриптов активной сцены.
+        auto scriptsIt = m_sceneScripts.find(m_activeName);
+        if (scriptsIt != m_sceneScripts.end())
+            scriptsIt->second->DispatchCollisions(m_physics->CollisionEvents());
+    }
     // Скелетные анимации активной сцены (демо-тотем).
     sage::anim::UpdateAnimators(*m_scenes.Active(), dt);
     // Частицы активной сцены (факелы-эмиттеры).

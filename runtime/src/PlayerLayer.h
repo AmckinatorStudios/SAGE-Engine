@@ -12,6 +12,7 @@
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ecs/RenderBatch.h"
+#include "sage/net/NetworkSystem.h"
 #include "sage/scene/Scene.h"
 #include "sage/physics/PhysicsScene.h"
 
@@ -55,6 +56,7 @@ private:
 
     std::unique_ptr<Scene> m_scene;
     std::unique_ptr<ScriptEngine> m_scripts;
+    sage::net::NetworkSystem m_network;      // мультиплеер (Lua: Net.*)
     std::unique_ptr<PhysicsScene> m_physics; // симуляция физики (игра всегда «в Play»)
 
     std::optional<Shader> m_shader;       // lit: ambient+sun+point lights+тени

@@ -240,6 +240,7 @@ BodyHandle BuiltinWorld::CreateBody(const BodyDesc& desc) {
     b.Friction = desc.Friction;
     b.Restitution = desc.Restitution;
     BodyHandle h = m_next++;
+    b.Handle = h;
     m_bodies[h] = b;
     return h;
 }
@@ -272,10 +273,37 @@ void BuiltinWorld::Step(float dt) {
     const float fixed = 1.0f / 120.0f;
     m_accum += std::min(dt, 0.1f); // защита от «спирали смерти» при лагах
     int guard = 0;
+    bool stepped = false;
+    m_curPairs.clear();
     while (m_accum >= fixed && guard++ < 16) {
         SubStep(fixed);
         m_accum -= fixed;
+        stepped = true;
     }
+    if (!stepped) return; // под-шагов не было — состояние контактов не менялось
+
+    // Диф множеств касающихся пар (прошлый Step против текущего) -> события
+    // начала/конца контакта. Пары дедуплицируются сортировкой.
+    std::sort(m_curPairs.begin(), m_curPairs.end());
+    m_curPairs.erase(std::unique(m_curPairs.begin(), m_curPairs.end()), m_curPairs.end());
+    auto emit = [&](uint64_t key, bool began) {
+        ContactEvent ev;
+        ev.A = (uint32_t)(key >> 32);
+        ev.B = (uint32_t)(key & 0xFFFFFFFFu);
+        ev.Began = began;
+        m_contactEvents.push_back(ev);
+    };
+    for (uint64_t key : m_curPairs)
+        if (!std::binary_search(m_prevPairs.begin(), m_prevPairs.end(), key)) emit(key, true);
+    for (uint64_t key : m_prevPairs)
+        if (!std::binary_search(m_curPairs.begin(), m_curPairs.end(), key)) emit(key, false);
+    m_prevPairs = m_curPairs;
+}
+
+std::vector<ContactEvent> BuiltinWorld::DrainContactEvents() {
+    std::vector<ContactEvent> out;
+    out.swap(m_contactEvents);
+    return out;
 }
 
 void BuiltinWorld::SubStep(float dt) {
@@ -302,8 +330,12 @@ void BuiltinWorld::SubStep(float dt) {
             if (A->Type != BodyType::Dynamic && B->Type != BodyType::Dynamic) continue;
             glm::vec3 normal;
             float depth;
-            if (Collide(*A, *B, normal, depth))
+            if (Collide(*A, *B, normal, depth)) {
                 contacts.push_back({A, B, normal, depth});
+                uint32_t lo = std::min(A->Handle, B->Handle);
+                uint32_t hi = std::max(A->Handle, B->Handle);
+                m_curPairs.push_back(((uint64_t)lo << 32) | hi);
+            }
         }
     }
 
@@ -337,6 +369,113 @@ void BuiltinWorld::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity)
 glm::vec3 BuiltinWorld::GetLinearVelocity(BodyHandle body) const {
     auto it = m_bodies.find(body);
     return it != m_bodies.end() ? it->second.Velocity : glm::vec3(0.0f);
+}
+
+// --- Рейкаст: перебор тел, ближайшее пересечение по форме -------------------
+namespace {
+
+// Луч против AABB (центр c, полуразмеры h): slab-метод; выход — t входа и ось.
+bool RayAabb(const glm::vec3& o, const glm::vec3& d, const glm::vec3& c, const glm::vec3& h,
+             float tMax, float& tHit, glm::vec3& nHit) {
+    float t0 = 0.0f, t1 = tMax;
+    int axis = -1;
+    float sign = 0.0f;
+    for (int a = 0; a < 3; ++a) {
+        float inv = 1.0f / (std::abs(d[a]) > 1e-8f ? d[a] : std::copysign(1e-8f, d[a]));
+        float lo = (c[a] - h[a] - o[a]) * inv;
+        float hi = (c[a] + h[a] - o[a]) * inv;
+        float s = -1.0f;
+        if (lo > hi) { std::swap(lo, hi); s = 1.0f; }
+        if (lo > t0) { t0 = lo; axis = a; sign = s; }
+        t1 = std::min(t1, hi);
+        if (t0 > t1) return false;
+    }
+    if (axis < 0) return false; // старт внутри бокса — не считаем попаданием
+    tHit = t0;
+    nHit = glm::vec3(0.0f);
+    nHit[axis] = sign;
+    return true;
+}
+
+// Луч против сферы (центр c, радиус r): ближайший положительный корень.
+bool RaySphere(const glm::vec3& o, const glm::vec3& d, const glm::vec3& c, float r,
+               float tMax, float& tHit, glm::vec3& nHit) {
+    glm::vec3 m = o - c;
+    float b = glm::dot(m, d);
+    float cc = glm::dot(m, m) - r * r;
+    if (cc > 0.0f && b > 0.0f) return false;
+    float disc = b * b - cc;
+    if (disc < 0.0f) return false;
+    float t = -b - std::sqrt(disc);
+    if (t < 0.0f || t > tMax) return false;
+    tHit = t;
+    nHit = glm::normalize(o + d * t - c);
+    return true;
+}
+
+// Луч против вертикальной капсулы (центр c, полувысота hh цилиндра, радиус r):
+// боковая поверхность (квадратика в XZ) + сферические крышки.
+bool RayCapsule(const glm::vec3& o, const glm::vec3& d, const glm::vec3& c, float hh, float r,
+                float tMax, float& tHit, glm::vec3& nHit) {
+    bool found = false;
+    float best = tMax;
+    // Боковая: (px+t·dx)² + (pz+t·dz)² = r², |py+t·dy| <= hh.
+    glm::vec3 p = o - c;
+    float a2 = d.x * d.x + d.z * d.z;
+    if (a2 > 1e-10f) {
+        float b = (p.x * d.x + p.z * d.z) / a2;
+        float cc = (p.x * p.x + p.z * p.z - r * r) / a2;
+        float disc = b * b - cc;
+        if (disc >= 0.0f) {
+            float t = -b - std::sqrt(disc);
+            if (t >= 0.0f && t < best && std::abs(p.y + t * d.y) <= hh) {
+                best = t;
+                glm::vec3 hit = p + d * t;
+                nHit = glm::normalize(glm::vec3(hit.x, 0.0f, hit.z));
+                found = true;
+            }
+        }
+    }
+    // Крышки — сферы в c ± (0, hh, 0).
+    float t;
+    glm::vec3 n;
+    if (RaySphere(o, d, c + glm::vec3(0, hh, 0), r, best, t, n)) { best = t; nHit = n; found = true; }
+    if (RaySphere(o, d, c - glm::vec3(0, hh, 0), r, best, t, n)) { best = t; nHit = n; found = true; }
+    if (found) tHit = best;
+    return found;
+}
+
+} // namespace
+
+RayHitInfo BuiltinWorld::Raycast(const glm::vec3& origin, const glm::vec3& dirIn, float maxDist) const {
+    RayHitInfo out;
+    if (maxDist <= 0.0f) return out;
+    glm::vec3 dir = dirIn;
+    float len = glm::length(dir);
+    if (len < 1e-8f) return out;
+    dir /= len;
+
+    float best = maxDist;
+    for (const auto& [h, b] : m_bodies) {
+        float t;
+        glm::vec3 n;
+        bool hit = false;
+        switch (b.Kind) {
+            case Shape::Sphere:  hit = RaySphere(origin, dir, b.Position, b.Radius, best, t, n); break;
+            case Shape::Capsule: hit = RayCapsule(origin, dir, b.Position, b.HalfHeight, b.Radius, best, t, n); break;
+            case Shape::Box:
+            default:             hit = RayAabb(origin, dir, b.Position, b.Half, best, t, n); break;
+        }
+        if (hit && t < best) {
+            best = t;
+            out.Hit = true;
+            out.Body = h;
+            out.Distance = t;
+            out.Position = origin + dir * t;
+            out.Normal = n;
+        }
+    }
+    return out;
 }
 
 } // namespace sage::physics

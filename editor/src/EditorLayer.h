@@ -22,6 +22,7 @@
 #include "sage/physics/PhysicsScene.h"
 #include "sage/core/Config.h"
 #include "sage/ecs/RenderBatch.h"
+#include "sage/net/NetworkSystem.h"
 
 #include "EditorHost.h"
 #include "EditorSceneRenderer.h"
@@ -189,6 +190,7 @@ private:
     EditorPlayState m_playState = EditorPlayState::Editing;
     std::string m_playSnapshot;                    // сцена на момент Play — восстанавливается по Stop
     std::unique_ptr<ScriptEngine> m_playScripts;   // живёт только в Play-режиме
+    sage::net::NetworkSystem m_playNetwork;        // мультиплеер Play-режима (Lua: Net.*)
     std::unique_ptr<PhysicsScene> m_playPhysics;   // симуляция физики только в Play-режиме
 
     // --- Undo/Redo ---

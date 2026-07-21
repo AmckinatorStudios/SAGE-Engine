@@ -20,6 +20,7 @@ namespace sage::physics {
 class JoltBPLayerInterface;      // определены в .cpp
 class JoltObjectVsBPFilter;
 class JoltObjectLayerPairFilter;
+class JoltContactListener;
 
 // ---------------------------------------------------------------------------
 // JoltWorld — основной физический бэкенд поверх jrouwe/JoltPhysics. Полноценная
@@ -49,6 +50,8 @@ public:
     void SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) override;
     glm::vec3 GetLinearVelocity(BodyHandle body) const override;
     void AddImpulse(BodyHandle body, const glm::vec3& impulse) override;
+    RayHitInfo Raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const override;
+    std::vector<ContactEvent> DrainContactEvents() override;
 
     JointHandle CreateJoint(const JointDesc& desc) override;
     void RemoveJoint(JointHandle joint) override;
@@ -63,6 +66,8 @@ private:
     std::unique_ptr<JoltBPLayerInterface> m_bpLayers;
     std::unique_ptr<JoltObjectVsBPFilter> m_objectVsBpFilter;
     std::unique_ptr<JoltObjectLayerPairFilter> m_objectLayerFilter;
+    // Слушатель контактов: копит события начала/конца касания (см. .cpp).
+    std::unique_ptr<JoltContactListener> m_contactListener;
 
     // Наш BodyHandle (uint32) -> Jolt BodyID (тоже uint32, но иной смысл).
     std::unordered_map<BodyHandle, uint32_t> m_bodies;

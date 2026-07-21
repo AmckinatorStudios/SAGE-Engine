@@ -582,6 +582,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             j["script"] = sc->Path;
         }
         if (const GIStaticComponent* gs = reg.try_get<GIStaticComponent>(e)) SaveGIStatic(j, *gs);
+        if (reg.all_of<NetReplicatedComponent>(e)) j["netReplicated"] = true;
         if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
         if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
@@ -638,6 +639,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
         if (j.contains("giStatic"))
             obj.Registry()->emplace<GIStaticComponent>(obj.Entity(), ParseGIStatic(j["giStatic"]));
+        if (j.value("netReplicated", false))
+            obj.Registry()->emplace<NetReplicatedComponent>(obj.Entity());
         if (j.contains("camera"))
             obj.Registry()->emplace<CameraComponent>(obj.Entity(), ParseCamera(j["camera"]));
         if (j.contains("light"))

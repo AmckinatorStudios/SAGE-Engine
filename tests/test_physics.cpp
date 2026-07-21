@@ -276,3 +276,68 @@ TEST(Physics_scene_builds_joints_from_components) {
     CHECK_TRUE(y > 2.6f);  // удержано тросом (иначе упало бы намного ниже)
     CHECK_TRUE(y < 4.1f);
 }
+
+// ============================================================================
+//  Рейкасты и события контактов (оба бэкенда)
+// ============================================================================
+
+TEST(Physics_raycast_hits_box_builtin_and_jolt) {
+    for (Backend backend : {Backend::Builtin, PhysicsWorld::DefaultBackend()}) {
+        auto w = PhysicsWorld::Create(backend);
+        MakeFloor(*w); // бокс 10x0.5x10 с верхом на y=0.5
+
+        RayHitInfo hit = w->Raycast({0, 5, 0}, {0, -1, 0}, 100.0f);
+        CHECK_TRUE(hit.Hit);
+        CHECK_NEAR(hit.Position.y, 0.5f, 0.01f);
+        CHECK_NEAR(hit.Normal.y, 1.0f, 0.01f);
+        CHECK_NEAR(hit.Distance, 4.5f, 0.01f);
+
+        // Мимо (вбок) и слишком короткий луч.
+        CHECK_FALSE(w->Raycast({0, 5, 50}, {0, -1, 0}, 100.0f).Hit);
+        CHECK_FALSE(w->Raycast({0, 5, 0}, {0, -1, 0}, 2.0f).Hit);
+    }
+}
+
+TEST(Physics_raycast_sphere_builtin) {
+    auto w = PhysicsWorld::Create(Backend::Builtin);
+    BodyDesc d;
+    d.Type = BodyType::Static;
+    d.Shape = ShapeType::Sphere;
+    d.Radius = 1.0f;
+    d.Position = {0, 0, 0};
+    w->CreateBody(d);
+    RayHitInfo hit = w->Raycast({0, 0, 5}, {0, 0, -1}, 100.0f);
+    CHECK_TRUE(hit.Hit);
+    CHECK_NEAR(hit.Distance, 4.0f, 0.01f);
+    CHECK_NEAR(hit.Normal.z, 1.0f, 0.01f);
+}
+
+TEST(Physics_contact_events_enter_and_exit) {
+    // Падающий бокс касается пола -> Began; выстрел вверх -> после разлёта Exit.
+    for (Backend backend : {Backend::Builtin, PhysicsWorld::DefaultBackend()}) {
+        auto w = PhysicsWorld::Create(backend);
+        BodyHandle floor = MakeFloor(*w);
+
+        BodyDesc d;
+        d.Type = BodyType::Dynamic;
+        d.Shape = ShapeType::Box;
+        d.HalfExtents = {0.5f, 0.5f, 0.5f};
+        d.Position = {0, 3, 0};
+        BodyHandle box = w->CreateBody(d);
+
+        StepFor(*w, 1.5f); // упал и лёг
+        bool began = false;
+        for (const ContactEvent& ev : w->DrainContactEvents())
+            if (ev.Began && ((ev.A == floor && ev.B == box) || (ev.A == box && ev.B == floor)))
+                began = true;
+        CHECK_TRUE(began);
+
+        w->SetLinearVelocity(box, {0, 20, 0}); // подброс — контакт разорвётся
+        StepFor(*w, 0.5f);
+        bool ended = false;
+        for (const ContactEvent& ev : w->DrainContactEvents())
+            if (!ev.Began && ((ev.A == floor && ev.B == box) || (ev.A == box && ev.B == floor)))
+                ended = true;
+        CHECK_TRUE(ended);
+    }
+}

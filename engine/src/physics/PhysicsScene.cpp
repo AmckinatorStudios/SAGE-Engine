@@ -136,6 +136,15 @@ void PhysicsScene::Step(Scene& scene, float dt) {
 
     m_world->Step(dt);
 
+    // События контактов бэкенда -> пары id сущностей (для скриптов).
+    m_collisions.clear();
+    for (const ContactEvent& ev : m_world->DrainContactEvents()) {
+        int a = EntityForBody(scene, ev.A);
+        int b = EntityForBody(scene, ev.B);
+        if (a < 0 || b < 0) continue; // тело без сущности (уже удалена и т.п.)
+        m_collisions.push_back({a, b, ev.Began});
+    }
+
     // После шага: позиции динамических тел -> обратно в Transform сущностей.
     for (auto e : view) {
         RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
@@ -147,4 +156,28 @@ void PhysicsScene::Step(Scene& scene, float dt) {
         tr.Position = pos;
         tr.Rotation = QuatToEuler(rot);
     }
+}
+
+int PhysicsScene::EntityForBody(Scene& scene, BodyHandle body) const {
+    if (body == kInvalidBody) return -1;
+    auto view = scene.Registry().view<RigidBodyComponent, IdComponent>();
+    for (auto e : view) {
+        if (view.get<RigidBodyComponent>(e).RuntimeBody == body)
+            return view.get<IdComponent>(e).Id;
+    }
+    return -1;
+}
+
+SceneRayHit PhysicsScene::Raycast(Scene& scene, const glm::vec3& origin, const glm::vec3& dir,
+                                  float maxDist) const {
+    SceneRayHit out;
+    if (!m_world || !m_world->IsAvailable()) return out;
+    RayHitInfo hit = m_world->Raycast(origin, dir, maxDist);
+    if (!hit.Hit) return out;
+    out.Hit = true;
+    out.Position = hit.Position;
+    out.Normal = hit.Normal;
+    out.Distance = hit.Distance;
+    out.EntityId = EntityForBody(scene, hit.Body);
+    return out;
 }

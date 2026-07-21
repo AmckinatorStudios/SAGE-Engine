@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <vector>
 #include "sage/physics/PhysicsTypes.h"
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,14 @@ public:
 
     // Мгновенный импульс (кг·м/с) в центр масс — толчок/выстрел/пинок ragdoll.
     virtual void AddImpulse(BodyHandle body, const glm::vec3& impulse) = 0;
+
+    // Рейкаст по миру: ближайшее тело вдоль луча (dir нормируется вызывающим).
+    // Null-бэкенд всегда «мимо».
+    virtual RayHitInfo Raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const = 0;
+
+    // События контактов (начало/конец касания пар тел), накопленные с прошлого
+    // вызова; внутренний буфер очищается. Питает OnCollisionEnter/Exit скриптов.
+    virtual std::vector<ContactEvent> DrainContactEvents() = 0;
 
     // --- Соединения (constraints/joints) ------------------------------------
     // Создаёт соединение между телами по описанию; kInvalidJoint при ошибке или

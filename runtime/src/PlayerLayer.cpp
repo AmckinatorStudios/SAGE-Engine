@@ -124,6 +124,7 @@ void PlayerLayer::OnAttach() {
     // Скрипты рулят физикой времени выполнения (SetVelocity/SetGravity) — доступно
     // после построения мира (RuntimeBody сущностей уже созданы).
     m_scripts->BindPhysics(*m_physics);
+    m_scripts->BindNetwork(m_network); // Lua Net.* — хост/подключение из скриптов
 
     // Запасная камера, если в сцене НЕТ Primary-камеры. НАРОЧНО отличается от
     // редакторской орбитальной камеры (та — {6.5,5,6.5}, yaw -135, pitch -28):
@@ -150,8 +151,13 @@ void PlayerLayer::OnDetach() {
 
 void PlayerLayer::OnUpdate(float dt) {
     if (!m_scene) return;
+    m_network.Update(*m_scene, dt); // транспорт + снапшоты/интерполяция
     m_scripts->UpdateAll(dt);
-    if (m_physics) m_physics->Step(*m_scene, dt);
+    if (m_physics) {
+        m_physics->Step(*m_scene, dt);
+        // Столкновения шага -> хуки OnCollisionEnter/Exit скриптов.
+        m_scripts->DispatchCollisions(m_physics->CollisionEvents());
+    }
     sage::anim::UpdateAnimators(*m_scene, dt);
     if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
 

@@ -6,6 +6,9 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include <algorithm>
+#include <filesystem>
+
+#include "sage/net/NetworkSystem.h"
 
 namespace {
 // Навешивает на usertype GameObject единый набор аксессоров к компоненту C:
@@ -60,6 +63,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterMathHelpers();
     RegisterLightingApi();
     RegisterPhysicsApi();
+    RegisterNetApi();
 }
 
 void ScriptEngine::RegisterMathTypes() {
@@ -810,6 +814,24 @@ void ScriptEngine::RegisterPhysicsApi() {
         if (!rb || rb->RuntimeBody == sage::physics::kInvalidBody) return;
         m_physics->AddImpulse(rb->RuntimeBody, impulse);
     });
+    // Рейкаст по физическому миру: Raycast(origin, dir [, maxDist]) -> таблица
+    // {position, normal, distance, entity, entityId} или nil при промахе.
+    // entity — GameObject сущности-владельца тела (nil, если тело без сущности).
+    m_lua.set_function("Raycast", [this](const glm::vec3& origin, const glm::vec3& dir,
+                                         sol::optional<float> maxDist) -> sol::object {
+        if (!m_physics) throw std::runtime_error("Raycast: физика не привязана (BindPhysics не вызван)");
+        if (!m_scene) throw std::runtime_error("Raycast: сцена не привязана");
+        SceneRayHit hit = m_physics->Raycast(*m_scene, origin, dir, maxDist.value_or(1000.0f));
+        if (!hit.Hit) return sol::make_object(m_lua, sol::lua_nil);
+        sol::table t = m_lua.create_table();
+        t["position"] = hit.Position;
+        t["normal"] = hit.Normal;
+        t["distance"] = hit.Distance;
+        t["entityId"] = hit.EntityId;
+        if (hit.EntityId >= 0) t["entity"] = m_scene->Get(hit.EntityId);
+        return t;
+    });
+
     // Собирает тряпичную куклу (кости-капсулы + суставы) в сцене на месте pos.
     // Возвращает id корневой сущности (таз). Полноценно симулируется на Jolt;
     // на встроенном бэкенде кости просто падают по отдельности (joints не поддержаны).
@@ -818,6 +840,16 @@ void ScriptEngine::RegisterPhysicsApi() {
         return sage::physics::BuildRagdoll(*m_scene, pos, scale.value_or(1.0f));
     });
 }
+
+namespace {
+// mtime файла в наносекундах (0 — файла нет/ошибка) — ключ горячей перезагрузки.
+long long FileMTimeNs(const std::string& path) {
+    std::error_code ec;
+    auto t = std::filesystem::last_write_time(path, ec);
+    if (ec) return 0;
+    return (long long)t.time_since_epoch().count();
+}
+} // namespace
 
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
     sol::environment env(m_lua, sol::create, m_lua.globals());
@@ -837,6 +869,11 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     // может принимать сообщения от других скриптов (SendMessage/Broadcast).
     sol::protected_function messageFn = env["OnMessage"];
 
+    // OnCollisionEnter/OnCollisionExit(entity, other) — необязательные хуки
+    // столкновений (события приходят из PhysicsScene через DispatchCollisions).
+    sol::protected_function collEnterFn = env["OnCollisionEnter"];
+    sol::protected_function collExitFn = env["OnCollisionExit"];
+
     // Userdata сущности создаём один раз — все дальнейшие вызовы хуков
     // передают его же (см. комментарий у ScriptInstance::EntityRef).
     sol::object entityRef = sol::make_object(m_lua, object);
@@ -851,7 +888,8 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     }
 
     m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn),
-                            std::move(messageFn), std::move(entityRef), scriptPath });
+                            std::move(messageFn), std::move(collEnterFn), std::move(collExitFn),
+                            std::move(entityRef), scriptPath, FileMTimeNs(scriptPath) });
 }
 
 void ScriptEngine::RunScript(const std::string& scriptPath) {
@@ -875,7 +913,9 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
     }
 
     m_instances.push_back({ GameObject{}, /*HasObject=*/false, std::move(env), std::move(updateFn),
-                            sol::protected_function{}, sol::object{}, scriptPath });
+                            sol::protected_function{}, sol::protected_function{},
+                            sol::protected_function{}, sol::object{}, scriptPath,
+                            FileMTimeNs(scriptPath) });
 }
 
 void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::object data) {
@@ -917,6 +957,16 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
 }
 
 void ScriptEngine::UpdateAll(float deltaTime) {
+    // Горячая перезагрузка — не чаще раза в секунду (обращение к mtime файлов).
+    m_hotReloadTimer += deltaTime;
+    if (m_hotReloadTimer >= 1.0f) {
+        m_hotReloadTimer = 0.0f;
+        CheckHotReload();
+    }
+
+    // События сети (подключения/сообщения) -> хуки скриптов.
+    if (m_network) DispatchNetEvents();
+
     for (auto& instance : m_instances) {
         // Объект уничтожен через DestroyObject() — сущность больше не валидна.
         if (instance.HasObject && !instance.Object.Valid()) continue;
@@ -1045,4 +1095,280 @@ const Texture* ScriptEngine::GetOrLoadBillboardTexture(const std::string& path) 
     const Texture* raw = texture.get();
     m_billboardTextures[path] = std::move(texture);
     return raw;
+}
+
+// ============================================================================
+//  Столкновения -> скрипты и горячая перезагрузка
+// ============================================================================
+
+void ScriptEngine::DispatchCollisions(const std::vector<sage::physics::CollisionEvent>& events) {
+    if (events.empty() || !m_scene) return;
+
+    // Сначала собираем вызовы, затем исполняем: обработчик может рушить
+    // сущности/слать сообщения — план не должен инвалидироваться (та же
+    // дисциплина, что в DispatchMessage).
+    struct Call {
+        sol::protected_function Fn;
+        sol::object Self;
+        GameObject Other;
+        std::string Path;
+    };
+    std::vector<Call> calls;
+    for (const sage::physics::CollisionEvent& ev : events) {
+        for (int side = 0; side < 2; ++side) {
+            int selfId = side == 0 ? ev.EntityA : ev.EntityB;
+            int otherId = side == 0 ? ev.EntityB : ev.EntityA;
+            for (ScriptInstance& inst : m_instances) {
+                if (!inst.HasObject || !inst.Object.Valid()) continue;
+                if (inst.Object.Id() != selfId) continue;
+                sol::protected_function& fn = ev.Began ? inst.CollisionEnterFn : inst.CollisionExitFn;
+                if (!fn.valid()) continue;
+                calls.push_back({fn, inst.EntityRef, m_scene->Get(otherId), inst.Path});
+            }
+        }
+    }
+    for (Call& c : calls) {
+        auto result = c.Fn(c.Self, c.Other);
+        if (!result.valid()) {
+            sol::error err = result;
+            LOG_ERROR("ScriptEngine") << "Ошибка в OnCollisionEnter/Exit (" << c.Path
+                                      << "): " << err.what();
+        }
+    }
+}
+
+bool ScriptEngine::ReloadInstance(ScriptInstance& inst) {
+    sol::environment env(m_lua, sol::create, m_lua.globals());
+    auto result = m_lua.script_file(inst.Path, env, sol::script_pass_on_error);
+    if (!result.valid()) {
+        sol::error err = result;
+        LOG_ERROR("ScriptEngine") << "Горячая перезагрузка " << inst.Path
+                                  << " не удалась: " << err.what();
+        return false;
+    }
+    inst.Env = std::move(env);
+    inst.UpdateFn = inst.Env["OnUpdate"];
+    inst.MessageFn = inst.Env["OnMessage"];
+    inst.CollisionEnterFn = inst.Env["OnCollisionEnter"];
+    inst.CollisionExitFn = inst.Env["OnCollisionExit"];
+
+    // OnStart вызывается заново: скрипт инициализирует своё состояние с нуля
+    // (локальные переменные окружения при перезагрузке сбрасываются).
+    sol::protected_function startFn = inst.Env["OnStart"];
+    if (startFn.valid()) {
+        auto startResult = inst.HasObject ? startFn(inst.EntityRef) : startFn();
+        if (!startResult.valid()) {
+            sol::error err = startResult;
+            LOG_ERROR("ScriptEngine") << "Ошибка в OnStart после перезагрузки ("
+                                      << inst.Path << "): " << err.what();
+        }
+    }
+    LOG_INFO("ScriptEngine") << "Скрипт перезагружен на лету: " << inst.Path;
+    return true;
+}
+
+void ScriptEngine::CheckHotReload() {
+    for (ScriptInstance& inst : m_instances) {
+        long long now = FileMTimeNs(inst.Path);
+        if (now == 0 || now == inst.MTimeNs) continue; // нет файла или не менялся
+        inst.MTimeNs = now;
+        ReloadInstance(inst);
+    }
+}
+
+// ============================================================================
+//  Сеть в Lua: кодек значений, Net.* API, доставка событий
+// ============================================================================
+
+namespace {
+
+// Бинарный кодек Lua-значений для сетевых сообщений: nil/bool/number/string/
+// таблица (рекурсивно, ключи — тоже значения). Компактно и без JSON-парсинга.
+constexpr int kMaxCodecDepth = 16;
+
+void WriteF64(std::vector<uint8_t>& b, double v) {
+    uint64_t u;
+    std::memcpy(&u, &v, 8);
+    sage::net::WriteU32(b, (uint32_t)(u & 0xFFFFFFFFu));
+    sage::net::WriteU32(b, (uint32_t)(u >> 32));
+}
+
+double ReadF64(sage::net::ByteReader& r) {
+    uint64_t lo = r.U32(), hi = r.U32();
+    uint64_t u = lo | (hi << 32);
+    double v;
+    std::memcpy(&v, &u, 8);
+    return v;
+}
+
+void EncodeLuaValue(const sol::object& v, std::vector<uint8_t>& out, int depth) {
+    if (depth > kMaxCodecDepth) throw std::runtime_error("Net: слишком глубокая таблица в сообщении");
+    switch (v.get_type()) {
+        case sol::type::lua_nil:
+            out.push_back(0);
+            break;
+        case sol::type::boolean:
+            out.push_back(v.as<bool>() ? 2 : 1);
+            break;
+        case sol::type::number:
+            out.push_back(3);
+            WriteF64(out, v.as<double>());
+            break;
+        case sol::type::string: {
+            out.push_back(4);
+            const std::string str = v.as<std::string>();
+            sage::net::WriteU32(out, (uint32_t)str.size());
+            out.insert(out.end(), str.begin(), str.end());
+            break;
+        }
+        case sol::type::table: {
+            out.push_back(5);
+            sol::table t = v.as<sol::table>();
+            uint32_t count = 0;
+            for (auto& kv : t) { (void)kv; ++count; }
+            sage::net::WriteU32(out, count);
+            for (auto& kv : t) {
+                EncodeLuaValue(kv.first, out, depth + 1);
+                EncodeLuaValue(kv.second, out, depth + 1);
+            }
+            break;
+        }
+        default:
+            throw std::runtime_error("Net: в сообщении можно слать nil/bool/число/строку/таблицу");
+    }
+}
+
+sol::object DecodeLuaValue(sol::state& lua, sage::net::ByteReader& r, int depth) {
+    if (depth > kMaxCodecDepth || !r.Ok) return sol::make_object(lua, sol::lua_nil);
+    uint8_t tag = r.U8();
+    switch (tag) {
+        case 0: return sol::make_object(lua, sol::lua_nil);
+        case 1: return sol::make_object(lua, false);
+        case 2: return sol::make_object(lua, true);
+        case 3: return sol::make_object(lua, ReadF64(r));
+        case 4: {
+            uint32_t len = r.U32();
+            if (!r.Ok || r.Pos + len > r.Size) { r.Ok = false; return sol::make_object(lua, sol::lua_nil); }
+            std::string str((const char*)r.Data + r.Pos, len);
+            r.Pos += len;
+            return sol::make_object(lua, str);
+        }
+        case 5: {
+            uint32_t count = r.U32();
+            sol::table t = lua.create_table();
+            for (uint32_t i = 0; i < count && r.Ok; ++i) {
+                sol::object key = DecodeLuaValue(lua, r, depth + 1);
+                sol::object val = DecodeLuaValue(lua, r, depth + 1);
+                if (key.get_type() != sol::type::lua_nil) t[key] = val;
+            }
+            return t;
+        }
+        default:
+            r.Ok = false;
+            return sol::make_object(lua, sol::lua_nil);
+    }
+}
+
+std::vector<uint8_t> EncodePayload(const sol::object& v) {
+    std::vector<uint8_t> out;
+    EncodeLuaValue(v, out, 0);
+    return out;
+}
+
+} // namespace
+
+void ScriptEngine::RegisterNetApi() {
+    sol::table net = m_lua.create_named_table("Net");
+    auto requireNet = [this]() -> sage::net::NetworkSystem& {
+        if (!m_network) throw std::runtime_error("Net: сеть не привязана (BindNetwork не вызван)");
+        return *m_network;
+    };
+
+    net.set_function("IsServer", [requireNet]() { return requireNet().IsServer(); });
+    net.set_function("IsClient", [requireNet]() { return requireNet().IsClient(); });
+    net.set_function("IsConnected", [requireNet]() { return requireNet().IsConnected(); });
+    net.set_function("Host", [requireNet](uint16_t port, sol::optional<int> maxClients) {
+        return requireNet().StartServer(port, maxClients.value_or(8));
+    });
+    net.set_function("Connect", [requireNet](const std::string& ip, uint16_t port) {
+        return requireNet().Connect(ip, port);
+    });
+    net.set_function("Stop", [requireNet]() { requireNet().Stop(); });
+    net.set_function("ClientCount", [requireNet]() { return requireNet().ClientCount(); });
+    net.set_function("Clients", [this, requireNet]() {
+        sol::table t = m_lua.create_table();
+        int i = 1;
+        for (int id : requireNet().ClientIds()) t[i++] = id;
+        return t;
+    });
+
+    // Клиент -> сервер. reliable по умолчанию true (геймплейные команды).
+    net.set_function("Send", [requireNet](const std::string& name, sol::object data,
+                                          sol::optional<bool> reliable) {
+        return requireNet().SendToServer(name, EncodePayload(data), reliable.value_or(true));
+    });
+    // Сервер -> конкретный клиент / всем.
+    net.set_function("SendTo", [requireNet](int clientId, const std::string& name, sol::object data,
+                                            sol::optional<bool> reliable) {
+        return requireNet().SendToClient(clientId, name, EncodePayload(data), reliable.value_or(true));
+    });
+    net.set_function("Broadcast", [requireNet](const std::string& name, sol::object data,
+                                               sol::optional<bool> reliable) {
+        requireNet().BroadcastToClients(name, EncodePayload(data), reliable.value_or(true));
+    });
+}
+
+void ScriptEngine::DispatchNetEvents() {
+    std::vector<sage::net::ScriptNetEvent> events = m_network->DrainScriptEvents();
+    if (events.empty()) return;
+
+    // Хуки ищутся в окружении каждого скрипта на момент доставки (события
+    // редки — динамический поиск дешевле кэширования ещё пяти функций).
+    for (sage::net::ScriptNetEvent& ev : events) {
+        const char* hookName = nullptr;
+        switch (ev.Kind) {
+            case sage::net::ScriptNetEvent::Type::Message: hookName = "OnNetMessage"; break;
+            case sage::net::ScriptNetEvent::Type::ClientConnected: hookName = "OnClientConnected"; break;
+            case sage::net::ScriptNetEvent::Type::ClientDisconnected: hookName = "OnClientDisconnected"; break;
+            case sage::net::ScriptNetEvent::Type::Connected: hookName = "OnNetConnected"; break;
+            case sage::net::ScriptNetEvent::Type::Disconnected: hookName = "OnNetDisconnected"; break;
+        }
+        if (!hookName) continue;
+
+        sol::object data;
+        if (ev.Kind == sage::net::ScriptNetEvent::Type::Message) {
+            sage::net::ByteReader r{ev.Payload.data(), ev.Payload.size(), 0, true};
+            data = ev.Payload.empty() ? sol::make_object(m_lua, sol::lua_nil)
+                                      : DecodeLuaValue(m_lua, r, 0);
+        }
+
+        // Копия плана вызовов до исполнения (обработчик может менять m_instances).
+        struct Call { sol::protected_function Fn; std::string Path; };
+        std::vector<Call> calls;
+        for (ScriptInstance& inst : m_instances) {
+            if (inst.HasObject && !inst.Object.Valid()) continue;
+            sol::protected_function fn = inst.Env[hookName];
+            if (fn.valid()) calls.push_back({fn, inst.Path});
+        }
+        for (Call& c : calls) {
+            sol::protected_function_result result;
+            switch (ev.Kind) {
+                case sage::net::ScriptNetEvent::Type::Message:
+                    result = c.Fn(ev.Name, data, ev.ClientId);
+                    break;
+                case sage::net::ScriptNetEvent::Type::ClientConnected:
+                case sage::net::ScriptNetEvent::Type::ClientDisconnected:
+                    result = c.Fn(ev.ClientId);
+                    break;
+                default:
+                    result = c.Fn();
+                    break;
+            }
+            if (!result.valid()) {
+                sol::error err = result;
+                LOG_ERROR("ScriptEngine") << "Ошибка в " << hookName << " (" << c.Path
+                                          << "): " << err.what();
+            }
+        }
+    }
 }

@@ -25,6 +25,31 @@ enum class Backend { Null, Builtin, Jolt };
 //               не реагирует на столкновения.
 enum class BodyType { Static, Dynamic, Kinematic };
 
+// Результат рейкаста по физическому миру (PhysicsWorld::Raycast).
+struct RayHitInfo {
+    bool Hit = false;
+    uint32_t Body = 0;        // BodyHandle попадания (0 = kInvalidBody)
+    glm::vec3 Position{0.0f}; // мировая точка попадания
+    glm::vec3 Normal{0.0f};   // нормаль поверхности в точке
+    float Distance = 0.0f;    // вдоль луча от origin
+};
+
+// Событие контакта пары тел за шаг: Began — тела начали касаться, иначе
+// перестали. Копится бэкендом внутри Step, забирается DrainContactEvents.
+struct ContactEvent {
+    uint32_t A = 0; // BodyHandle
+    uint32_t B = 0;
+    bool Began = true;
+};
+
+// То же на уровне СЦЕНЫ (PhysicsScene переводит хэндлы тел в id сущностей) —
+// этим форматом события уходят в скрипты (OnCollisionEnter/OnCollisionExit).
+struct CollisionEvent {
+    int EntityA = 0;
+    int EntityB = 0;
+    bool Began = true;
+};
+
 // Форма коллайдера. Встроенный бэкенд поддерживает Box (AABB), Sphere и Capsule
 // (вертикальный отрезок + радиус) как настоящие формы; Jolt — полноценно все.
 enum class ShapeType { Box, Sphere, Capsule };

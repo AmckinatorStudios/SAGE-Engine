@@ -378,3 +378,184 @@ TEST(gi_transplant_matches_hash) {
     Transplant(a, c);
     CHECK_TRUE(c.GI == nullptr);
 }
+
+// ============================================================================
+//  Расширенное покрытие GI: цветовой bleeding, точечный/прожекторный свет,
+//  направленность проб, плотность лайтмапы
+// ============================================================================
+
+TEST(gi_color_bleeding_from_red_wall) {
+    // Белый пол + КРАСНАЯ стена, солнце светит на стену сбоку: непрямой свет
+    // окрашивает пол возле стены в красноватый (r/g текселей у стены выше,
+    // чем на дальнем краю) — классическая проверка переноса цвета.
+    Scene scene("bleed");
+    // Свет летит В сторону +X (из -X): попадает на обращённую К ПОЛУ грань
+    // стены — именно она отражает красный на пол.
+    scene.Lighting.Sun.Direction = {1.0f, -0.35f, 0.0f};
+    scene.Lighting.Sun.Intensity = 3.0f;
+    scene.Lighting.Sun.Color = {1.0f, 1.0f, 1.0f};
+    scene.Lighting.SkyColor = {0.0f, 0.0f, 0.0f}; // без неба — только отскок от стены
+    scene.Lighting.GroundColor = {0.0f, 0.0f, 0.0f};
+    scene.Lighting.AmbientStrength = 0.0f;
+
+    GameObject floor = scene.CreateObject("floor");
+    floor.Renderer().Ref = MeshRef{MeshRef::Type::Plane, ""};
+    floor.Renderer().Color = {1.0f, 1.0f, 1.0f};
+    floor.GetTransform().Scale = {10.0f, 1.0f, 10.0f};
+    floor.Registry()->emplace<GIStaticComponent>(floor.Entity());
+
+    GameObject wall = scene.CreateObject("wall");
+    wall.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    wall.Renderer().Color = {1.0f, 0.05f, 0.05f}; // красная
+    wall.GetTransform().Position = {5.0f, 2.0f, 0.0f}; // у края пола (+X)
+    wall.GetTransform().Scale = {0.5f, 4.0f, 10.0f};
+    auto& gs = wall.Registry()->emplace<GIStaticComponent>(wall.Entity());
+    gs.Lightmapped = false; // стена — только отражатель
+
+    GISettings s;
+    s.TexelsPerUnit = 3;
+    s.AtlasSize = 256;
+    s.SampleCount = 96;
+    s.Bounces = 2;
+    s.MaxProbeAxis = 4;
+    auto state = Bake(CollectBakeInput(scene, s));
+    CHECK_TRUE(state->Baked);
+
+    // Ищем на полу самый «красный» покрытый тексель и сравниваем со средним:
+    // отражённый от стены свет обязан дать участки с выраженным перекосом r>g.
+    const LightmapPage& p = state->Pages[0];
+    double maxRatio = 0.0;
+    double sumR = 0.0, sumG = 0.0;
+    int covered = 0;
+    for (size_t i = 0; i < p.Texels.size(); ++i) {
+        if (!p.Coverage[i]) continue;
+        ++covered;
+        sumR += p.Texels[i].r;
+        sumG += p.Texels[i].g;
+        if (p.Texels[i].r > 1e-4f)
+            maxRatio = std::max(maxRatio, (double)(p.Texels[i].r / std::max(p.Texels[i].g, 1e-4f)));
+    }
+    CHECK_TRUE(covered > 0);
+    CHECK_TRUE(sumR > sumG * 1.5); // в целом бейк заметно красный (единственный источник — красная стена)
+    CHECK_TRUE(maxRatio > 3.0);    // у стены перекос выраженный
+}
+
+TEST(gi_point_light_bakes_into_indirect) {
+    // Тёмная сцена, точечный свет над полом: непрямой свет пола обязан
+    // «увидеть» лампу через отскоки от соседней геометрии — сравниваем бейк с
+    // лампой и без.
+    auto bakeAvg = [](bool withLight) {
+        Scene scene("pl");
+        scene.Lighting.Sun.Intensity = 0.0f;
+        scene.Lighting.SkyColor = {0.0f, 0.0f, 0.0f};
+        scene.Lighting.GroundColor = {0.0f, 0.0f, 0.0f};
+        scene.Lighting.AmbientStrength = 0.0f;
+        if (withLight) {
+            PointLight l;
+            l.Position = {0.0f, 2.0f, 0.0f};
+            l.Color = {1.0f, 1.0f, 1.0f};
+            l.Intensity = 5.0f;
+            l.Range = 15.0f;
+            scene.Lighting.PointLights.push_back(l);
+        }
+
+        GameObject floor = scene.CreateObject("floor");
+        floor.Renderer().Ref = MeshRef{MeshRef::Type::Plane, ""};
+        floor.GetTransform().Scale = {8.0f, 1.0f, 8.0f};
+        floor.Registry()->emplace<GIStaticComponent>(floor.Entity());
+
+        // Отражатель над полом: лампа освещает его низ, тот подсвечивает пол.
+        GameObject panel = scene.CreateObject("panel");
+        panel.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+        panel.Renderer().Color = {1.0f, 1.0f, 1.0f};
+        panel.GetTransform().Position = {0.0f, 4.0f, 0.0f};
+        panel.GetTransform().Scale = {6.0f, 0.3f, 6.0f};
+        panel.Registry()->emplace<GIStaticComponent>(panel.Entity()).Lightmapped = false;
+
+        GISettings s;
+        s.TexelsPerUnit = 2;
+        s.AtlasSize = 128;
+        s.SampleCount = 64;
+        s.Bounces = 2;
+        s.MaxProbeAxis = 4;
+        auto state = Bake(CollectBakeInput(scene, s));
+        const LightmapPage& p = state->Pages[0];
+        double sum = 0.0;
+        int cnt = 0;
+        for (size_t i = 0; i < p.Texels.size(); ++i)
+            if (p.Coverage[i]) { sum += p.Texels[i].r; ++cnt; }
+        return cnt ? sum / cnt : 0.0;
+    };
+
+    double dark = bakeAvg(false);
+    double lit = bakeAvg(true);
+    CHECK_NEAR(dark, 0.0, 1e-4);  // без источников бейк чёрный
+    CHECK_TRUE(lit > 0.005);       // лампа даёт непрямой свет на пол
+}
+
+TEST(gi_probe_volume_directional) {
+    // Освещённый солнцем пол, чёрное небо: пробы над полом видят яркий пол
+    // СНИЗУ. Освещённость поверхности, обращённой ВНИЗ (n = -Y), должна быть
+    // существенно больше, чем обращённой вверх (небо чёрное).
+    Scene scene("probes");
+    scene.Lighting.Sun.Direction = {0.0f, -1.0f, 0.0f};
+    scene.Lighting.Sun.Intensity = 3.0f;
+    scene.Lighting.SkyColor = {0.0f, 0.0f, 0.0f};
+    scene.Lighting.GroundColor = {0.0f, 0.0f, 0.0f};
+    scene.Lighting.AmbientStrength = 0.0f;
+
+    GameObject floor = scene.CreateObject("floor");
+    floor.Renderer().Ref = MeshRef{MeshRef::Type::Plane, ""};
+    floor.Renderer().Color = {0.9f, 0.9f, 0.9f};
+    floor.GetTransform().Scale = {20.0f, 1.0f, 20.0f};
+    floor.Registry()->emplace<GIStaticComponent>(floor.Entity());
+
+    GISettings s;
+    s.TexelsPerUnit = 2;
+    s.AtlasSize = 128;
+    s.SampleCount = 96;
+    s.Bounces = 1;
+    s.ProbeCellSize = 3.0f;
+    s.MaxProbeAxis = 8;
+    auto state = Bake(CollectBakeInput(scene, s));
+    CHECK_TRUE(state->Probes.Valid());
+
+    // Проба над центром пола (не в плоскости пола).
+    const ProbeVolume& vol = state->Probes;
+    int cx = vol.Dims.x / 2, cz = vol.Dims.z / 2;
+    int cy = std::min(vol.Dims.y - 1, 1); // первый уровень над полом
+    const SH1& sh = vol.Probes[vol.Index(cx, cy, cz)];
+    glm::vec3 down = SHEvalIrradianceOverPi(sh, {0, -1, 0}); // поверхность смотрит вниз
+    glm::vec3 up = SHEvalIrradianceOverPi(sh, {0, 1, 0});    // поверхность смотрит вверх
+    CHECK_TRUE(down.r > 0.01f);
+    CHECK_TRUE(down.r > up.r * 2.0f);
+}
+
+TEST(gi_texel_scale_raises_density) {
+    // TexelScale сущности повышает плотность её лайтмапы: покрытых текселей
+    // становится ощутимо больше.
+    auto coveredTexels = [](float texelScale) {
+        Scene scene("dens");
+        GameObject floor = scene.CreateObject("floor");
+        floor.Renderer().Ref = MeshRef{MeshRef::Type::Plane, ""};
+        floor.GetTransform().Scale = {8.0f, 1.0f, 8.0f};
+        auto& gs = floor.Registry()->emplace<GIStaticComponent>(floor.Entity());
+        gs.TexelScale = texelScale;
+
+        GISettings s;
+        s.TexelsPerUnit = 2;
+        s.AtlasSize = 256;
+        s.SampleCount = 8;
+        s.Bounces = 1;
+        s.MaxProbeAxis = 4;
+        auto state = Bake(CollectBakeInput(scene, s));
+        int covered = 0;
+        for (size_t i = 0; i < state->Pages[0].Coverage.size(); ++i)
+            if (state->Pages[0].Coverage[i]) ++covered;
+        return covered;
+    };
+    int base = coveredTexels(1.0f);
+    int dense = coveredTexels(2.0f);
+    CHECK_TRUE(base > 0);
+    CHECK_TRUE(dense > base * 3); // плотность x2 -> площадь ~x4 (с запасом >3)
+}

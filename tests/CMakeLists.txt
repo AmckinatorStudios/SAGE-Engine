@@ -20,6 +20,7 @@ add_executable(sage_tests
     test_tween.cpp
     test_fbx.cpp
     test_gi.cpp
+    test_net.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

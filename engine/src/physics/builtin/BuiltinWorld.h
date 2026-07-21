@@ -36,6 +36,8 @@ public:
     void SetLinearVelocity(BodyHandle body, const glm::vec3& velocity) override;
     glm::vec3 GetLinearVelocity(BodyHandle body) const override;
     void AddImpulse(BodyHandle body, const glm::vec3& impulse) override;
+    RayHitInfo Raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDist) const override;
+    std::vector<ContactEvent> DrainContactEvents() override;
 
     JointHandle CreateJoint(const JointDesc& desc) override; // не поддержаны (warn+invalid)
     void RemoveJoint(JointHandle joint) override;
@@ -47,6 +49,7 @@ private:
     enum class Shape : uint8_t { Box, Sphere, Capsule };
 
     struct Body {
+        BodyHandle Handle = 0; // свой хэндл (для контактных событий)
         BodyType Type;
         Shape Kind = Shape::Box;
         glm::vec3 Half{0.5f};  // AABB-полуразмеры (Box / bound составного тела)
@@ -79,6 +82,11 @@ private:
 
     glm::vec3 m_gravity{0.0f, -9.81f, 0.0f};
     std::unordered_map<BodyHandle, Body> m_bodies;
+    // Пары, касавшиеся на ПРОШЛОМ Step (ключ: minHandle<<32|maxHandle), пары
+    // текущего шага и накопленные события начала/конца контакта.
+    std::vector<uint64_t> m_prevPairs;
+    std::vector<uint64_t> m_curPairs;
+    std::vector<ContactEvent> m_contactEvents;
     BodyHandle m_next = 1;
     float m_accum = 0.0f;
     bool m_warnedNoJoints = false; // предупреждение о неподдержке joints — один раз

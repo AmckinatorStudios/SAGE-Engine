@@ -8,6 +8,8 @@
 #include "sage/render/Texture.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/physics/PhysicsScene.h"
+
+namespace sage::net { class NetworkSystem; }
 #include <sol/sol.hpp>
 #include <memory>
 #include <unordered_map>
@@ -94,6 +96,11 @@ public:
     // эти функции бросают понятную ошибку при вызове из Lua.
     void BindPhysics(PhysicsScene& physics) { m_physics = &physics; }
 
+    // Мультиплеер (см. sage/net/NetworkSystem): открывает скриптам таблицу
+    // Net.* и хуки OnNetMessage/OnClientConnected/... (события сети
+    // доставляются в UpdateAll). Без BindNetwork Net.* бросает ошибку.
+    void BindNetwork(sage::net::NetworkSystem& network) { m_network = &network; }
+
     // Загружает .lua файл и привязывает его к объекту. Скрипт должен
     // определить глобальную функцию OnUpdate(entity, dt) — она будет
     // вызываться каждый кадр из UpdateAll(). Необязательная OnStart(entity)
@@ -110,8 +117,22 @@ public:
 
     // Вызывает OnUpdate для всех привязанных объектных и уровневых
     // скриптов, а также тикает отложенные вызовы (Schedule/Repeat) и
-    // резюмирует активные корутины (StartCoroutine/wait).
+    // резюмирует активные корутины (StartCoroutine/wait). Раз в секунду
+    // проверяет mtime привязанных .lua и перечитывает изменившиеся
+    // (горячая перезагрузка: правишь скрипт — поведение меняется без
+    // перезапуска; OnStart вызывается заново, локальное состояние скрипта
+    // сбрасывается).
     void UpdateAll(float deltaTime);
+
+    // Доставляет события столкновений (из PhysicsScene::CollisionEvents) в
+    // необязательные хуки скриптов OnCollisionEnter(entity, other) /
+    // OnCollisionExit(entity, other). other — GameObject второй сущности пары
+    // (может быть невалидным, если её уже удалили). Вызывать после шага физики.
+    void DispatchCollisions(const std::vector<sage::physics::CollisionEvent>& events);
+
+    // Принудительная проверка горячей перезагрузки (UpdateAll делает это сам
+    // раз в секунду; метод оставлен для тестов/ручного вызова).
+    void CheckHotReload();
 
     // Доступ к состоянию Lua — на случай если игре нужно зарегистрировать
     // свою собственную API-функцию/тип в дополнение к базовой
@@ -124,13 +145,16 @@ private:
         sol::environment Env;
         sol::protected_function UpdateFn; // может быть невалидной, если OnUpdate не определён
         sol::protected_function MessageFn; // OnMessage(entity, name, data) — необязателен
+        sol::protected_function CollisionEnterFn; // OnCollisionEnter(entity, other) — необязателен
+        sol::protected_function CollisionExitFn;  // OnCollisionExit(entity, other) — необязателен
         // Готовый Lua-userdata сущности, создаётся ОДИН раз в AttachScript.
         // Передача GameObject по значению в каждый вызов OnUpdate заставляла
         // sol2 аллоцировать новый userdata на КАЖДЫЙ скрипт КАЖДЫЙ кадр —
         // чистое давление на Lua GC при десятках скриптов. Дескриптор
         // {registry, entity} стабилен всё время жизни скрипта, кэш корректен.
         sol::object EntityRef;
-        std::string Path; // для сообщений об ошибках
+        std::string Path; // для сообщений об ошибках и горячей перезагрузки
+        long long MTimeNs = 0; // mtime файла на момент загрузки (hot reload)
         // Когда сущность объекта уничтожена (DestroyObject), Object.Valid()
         // становится false: UpdateAll() пропускает такую запись, не обращаясь к
         // мёртвой сущности, и убирает её из m_instances после прохода. Так как
@@ -178,10 +202,21 @@ private:
     void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
     void RegisterMathHelpers();   // Cross/Lerp/Clamp/Radians/Degrees
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
-    void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
+    void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity/Raycast
+    void RegisterNetApi();        // Net.* (мультиплеер)
 
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
+
+    // Перечитывает скрипт инстанса в свежее окружение и обновляет хуки
+    // (горячая перезагрузка). Возвращает true при успехе.
+    bool ReloadInstance(ScriptInstance& inst);
+    float m_hotReloadTimer = 0.0f;
+
+    // Раздаёт события сети (DrainScriptEvents) в необязательные хуки скриптов:
+    // OnNetMessage(name, data, senderId), OnClientConnected(id),
+    // OnClientDisconnected(id), OnNetConnected(), OnNetDisconnected().
+    void DispatchNetEvents();
 
     // Доставляет сообщение обработчикам OnMessage привязанных объектных скриптов.
     // targetId < 0 — широковещательно (всем); иначе — только скриптам сущности с
@@ -211,6 +246,7 @@ private:
     BillboardSystem* m_billboards = nullptr;
     AudioEngine* m_audio = nullptr;
     PhysicsScene* m_physics = nullptr;
+    sage::net::NetworkSystem* m_network = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
 
     // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,
