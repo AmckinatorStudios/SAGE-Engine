@@ -39,7 +39,7 @@ function(sage_add_game)
     add_custom_command(TARGET ${GAME_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${GAME_NAME}>/assets/fonts
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_SOURCE_DIR}/engine/assets/fonts/sage-default.ttf
+                ${SAGE_ENGINE_ROOT}/engine/assets/fonts/sage-default.ttf
                 $<TARGET_FILE_DIR:${GAME_NAME}>/assets/fonts/sage-default.ttf
         COMMENT "Копирование дефолтного шрифта движка рядом с ${GAME_NAME}")
 endfunction()
@@ -79,7 +79,7 @@ function(sage_add_editor_plugin)
     # чтобы не затащить в плагин статическую копию libimgui.a.
     target_include_directories(${PLUGIN_NAME} PRIVATE
         $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>
-        ${CMAKE_SOURCE_DIR}/editor/src)
+        ${SAGE_ENGINE_ROOT}/editor/src)
     set_target_properties(${PLUGIN_NAME} PROPERTIES PREFIX "")
 
     # Windows-линковщик (в отличие от Linux) не позволяет оставить символы

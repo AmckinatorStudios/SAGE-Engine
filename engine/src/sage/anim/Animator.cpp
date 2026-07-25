@@ -99,6 +99,32 @@ bool AdvanceClipTime(const AnimationClip& clip, float& time, float dt, bool loop
 }
 } // namespace
 
+void Animator::Seek(float time) {
+    if (!m_skeleton) return;
+    // Кросс-фейд — это состояние ПЕРЕХОДА, накопленное во времени; при явной
+    // перемотке его нечем восстановить, поэтому переход схлопывается в целевой
+    // клип (он и так был бы результатом через долю секунды).
+    m_fadeFromClip = -1;
+    m_fadeDuration = 0.0f;
+    m_fadeElapsed = 0.0f;
+
+    if (m_clips && m_clip >= 0 && m_clip < (int)m_clips->size()) {
+        float duration = (*m_clips)[m_clip].Duration;
+        if (duration > 0.0f) {
+            if (m_loop) {
+                time = std::fmod(time, duration);
+                if (time < 0.0f) time += duration;
+            } else {
+                time = time < 0.0f ? 0.0f : (time > duration ? duration : time);
+            }
+        } else {
+            time = 0.0f;
+        }
+    }
+    m_time = time;
+    ComputePoseBlended(1.0f);
+}
+
 void Animator::Update(float dt) {
     if (!m_skeleton) return;
     float step = dt * m_speed;

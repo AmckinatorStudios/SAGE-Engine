@@ -173,6 +173,61 @@ TEST(Animator_non_loop_clamps_and_stops) {
     CHECK_FALSE(a.Playing());
 }
 
+// --- Seek: постановка позы на произвольное время (перемотка) ----------------
+// Нужна всему, что показывает кадр НЕ «через dt от предыдущего»: таймлайн
+// инструмента анимации, покадровый рендер секвенции, превью клипа.
+
+TEST(Animator_seek_sets_absolute_time) {
+    Skeleton sk = MakeTwoBoneRig();
+    AnimationClip clip; clip.Name = "Walk"; clip.Duration = 2.0f;
+    std::vector<AnimationClip> clips{clip};
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.Play("Walk", /*loop=*/false);
+    a.Update(0.5f);
+    a.Seek(1.25f);
+    CHECK_NEAR(a.Time(), 1.25f, 1e-4); // время задано явно, а не сдвинуто на dt
+}
+
+TEST(Animator_seek_wraps_when_looping) {
+    Skeleton sk = MakeTwoBoneRig();
+    AnimationClip clip; clip.Name = "Loop"; clip.Duration = 2.0f;
+    std::vector<AnimationClip> clips{clip};
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.Play("Loop", /*loop=*/true);
+    a.Seek(5.0f);                       // fmod(5, 2) = 1
+    CHECK_NEAR(a.Time(), 1.0f, 1e-4);
+    a.Seek(-0.5f);                      // отрицательное заворачивается вперёд
+    CHECK_NEAR(a.Time(), 1.5f, 1e-4);
+}
+
+TEST(Animator_seek_clamps_when_not_looping) {
+    Skeleton sk = MakeTwoBoneRig();
+    AnimationClip clip; clip.Name = "Once"; clip.Duration = 2.0f;
+    std::vector<AnimationClip> clips{clip};
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.Play("Once", /*loop=*/false);
+    a.Seek(99.0f);
+    CHECK_NEAR(a.Time(), 2.0f, 1e-4);
+    a.Seek(-99.0f);
+    CHECK_NEAR(a.Time(), 0.0f, 1e-4);
+}
+
+TEST(Animator_seek_keeps_paused_state) {
+    Skeleton sk = MakeTwoBoneRig();
+    AnimationClip clip; clip.Name = "Walk"; clip.Duration = 2.0f;
+    std::vector<AnimationClip> clips{clip};
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.Play("Walk");
+    a.Stop();               // перемотка на паузе не должна снимать паузу
+    a.Seek(1.0f);
+    CHECK_FALSE(a.Playing());
+    CHECK_NEAR(a.Time(), 1.0f, 1e-4);
+}
+
 // --- Кросс-фейд между клипами (одновременное проигрывание + смешивание поз) ---
 static AnimationClip MakeRootRotClip(const char* name, float deg) {
     glm::quat rot = glm::angleAxis(glm::radians(deg), glm::vec3(0, 0, 1));
@@ -217,6 +272,20 @@ TEST(Animator_play_cancels_crossfade) {
     CHECK_TRUE(a.Fading());
     a.Play("Idle");         // резкое переключение отменяет фейд
     CHECK_FALSE(a.Fading());
+}
+
+TEST(Animator_seek_collapses_crossfade) {
+    // Переход — состояние, накопленное во времени; при явной перемотке его
+    // нечем восстановить, поэтому он схлопывается в целевой клип.
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips{MakeRootRotClip("Idle", 0.0f), MakeRootRotClip("Bend", 90.0f)};
+    Animator a; a.SetRig(&sk, &clips);
+    a.Play("Idle");
+    a.CrossFade("Bend", 1.0f);
+    CHECK_TRUE(a.Fading());
+    a.Seek(0.5f);
+    CHECK_FALSE(a.Fading());
+    CHECK_TRUE(a.CurrentClip() == 1);
 }
 
 TEST(Animator_crossfade_without_current_is_play) {

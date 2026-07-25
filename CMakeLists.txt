@@ -14,8 +14,14 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "SAGE: CMAKE_BUILD_TYPE не задан — использую Release")
 endif()
 
+# Корень репозитория движка. НЕ CMAKE_SOURCE_DIR: движок умеет подключаться в
+# чужой проект через add_subdirectory (см. Director 3D) — тогда CMAKE_SOURCE_DIR
+# указывает на корень ТОГО проекта, и все пути к ассетам/заголовкам движка
+# уехали бы. CACHE INTERNAL — значение видно вложенным каталогам и хелперам.
+set(SAGE_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "Корень репозитория SAGE Engine")
+
 # Хелперы сборки (sage_add_game и т.п.)
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${SAGE_ENGINE_ROOT}/cmake)
 include(SageHelpers)
 
 # ============================================================================
@@ -30,10 +36,10 @@ include(SageHelpers)
 # Версия движка — единый источник истины (файл VERSION в корне). Запекается в
 # генерируемый заголовок sage/core/Version.h (кладётся в generated/, который
 # движок отдаёт как PUBLIC include — заголовок виден и играм, и редактору).
-file(READ "${CMAKE_SOURCE_DIR}/VERSION" SAGE_ENGINE_VERSION)
+file(READ "${SAGE_ENGINE_ROOT}/VERSION" SAGE_ENGINE_VERSION)
 string(STRIP "${SAGE_ENGINE_VERSION}" SAGE_ENGINE_VERSION)
 configure_file(
-    ${CMAKE_SOURCE_DIR}/engine/src/sage/core/Version.h.in
+    ${SAGE_ENGINE_ROOT}/engine/src/sage/core/Version.h.in
     ${CMAKE_BINARY_DIR}/generated/sage/core/Version.h
     @ONLY
 )
@@ -228,19 +234,39 @@ endif()
 
 # ============================================================================
 #  Модули проекта
+#
+#  Движок собирается ВСЕГДА; всё остальное (рантайм-плеер, редактор, примеры,
+#  тесты) — переключаемо. Дефолт ON: обычная сборка репозитория движка ничем
+#  не отличается от прежней. Выключение нужно СТОРОННЕМУ приложению, которое
+#  подключает движок к себе через add_subdirectory (например, инструмент
+#  анимации Director 3D) — ему нужна только библиотека sage::engine плюс
+#  общие зависимости (imgui/imguizmo/json), а не чужие исполняемые файлы.
 # ============================================================================
+option(SAGE_BUILD_RUNTIME "Собрать рантайм-плеер SagePlayer" ON)
+option(SAGE_BUILD_EDITOR  "Собрать редактор SageEditor" ON)
+option(SAGE_BUILD_SAMPLES "Собрать игры-примеры (sandbox, testgame)" ON)
+option(SAGE_BUILD_TESTS   "Собрать модульные тесты движка" ON)
+
 add_subdirectory(engine)
-add_subdirectory(runtime)
-add_subdirectory(games/sandbox)
-add_subdirectory(games/testgame)
+
+if (SAGE_BUILD_RUNTIME)
+    add_subdirectory(runtime)
+endif()
+
+if (SAGE_BUILD_SAMPLES)
+    add_subdirectory(games/sandbox)
+    add_subdirectory(games/testgame)
+endif()
 
 # Модульные тесты (математика/сериализация/анимация) — быстрые, без GL.
-# Собираются всегда; гоняются через CTest или напрямую ./tests/sage_tests.
-enable_testing()
-add_subdirectory(tests)
+# Гоняются через CTest или напрямую ./tests/sage_tests.
+if (SAGE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Редактор — часть стандартной сборки движка. Проверка EXISTS оставлена как
 # защита на случай частичного checkout, а не как признак опциональности.
-if (EXISTS "${CMAKE_SOURCE_DIR}/editor/CMakeLists.txt")
+if (SAGE_BUILD_EDITOR AND EXISTS "${SAGE_ENGINE_ROOT}/editor/CMakeLists.txt")
     add_subdirectory(editor)
 endif()
