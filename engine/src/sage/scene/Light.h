@@ -1,6 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <glm/trigonometric.hpp>
+#include <string>
 #include <vector>
 
 // Направленный свет — "солнце". На сцену обычно один: светит из бесконечности
@@ -74,13 +75,25 @@ struct FogSettings {
     float End = 60.0f;
 };
 
-// Процедурный градиентный скайбокс: фон отрисовывается как переход от TopColor
-// (зенит) к HorizonColor (горизонт) по вертикали луча взгляда — без ассетов.
-// Отключён — фон очищается сплошным цветом как раньше.
+// Небо сцены. Два режима, выбор — по наличию CubemapDir:
+//
+//   • процедурный градиент — переход от TopColor (зенит) к HorizonColor
+//     (горизонт) по вертикали луча взгляда, без единого ассета;
+//   • кубическая текстура — набор из шести граней px/nx/py/ny/pz/nz в одном
+//     каталоге (см. Skybox::LoadFromDirectory).
+//
+// Enabled == false — фон просто очищается сплошным цветом.
 struct SkyboxSettings {
     bool Enabled = false;
     glm::vec3 TopColor{0.30f, 0.45f, 0.75f};
     glm::vec3 HorizonColor{0.70f, 0.80f, 0.92f};
+
+    // Каталог с гранями кубической текстуры. Пусто — процедурный градиент.
+    std::string CubemapDir;
+    float Intensity = 1.0f;    // яркость неба (экспозиция окружения)
+    float RotationDeg = 0.0f;  // поворот вокруг вертикали: развернуть солнце набора под сцену
+
+    bool HasCubemap() const { return !CubemapDir.empty(); }
 };
 
 struct LightingEnvironment {

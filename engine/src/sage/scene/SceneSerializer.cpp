@@ -97,6 +97,9 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["skybox"]["enabled"] = lighting.Skybox.Enabled;
     j["skybox"]["top"] = Vec3ToJson(lighting.Skybox.TopColor);
     j["skybox"]["horizon"] = Vec3ToJson(lighting.Skybox.HorizonColor);
+    j["skybox"]["cubemapDir"] = lighting.Skybox.CubemapDir;
+    j["skybox"]["intensity"] = lighting.Skybox.Intensity;
+    j["skybox"]["rotation"] = lighting.Skybox.RotationDeg;
     return j;
 }
 
@@ -158,6 +161,9 @@ static LightingEnvironment LightingFromJson(const json& root) {
         lighting.Skybox.Enabled = sj.value("enabled", lighting.Skybox.Enabled);
         if (sj.contains("top")) lighting.Skybox.TopColor = Vec3FromJson(sj["top"]);
         if (sj.contains("horizon")) lighting.Skybox.HorizonColor = Vec3FromJson(sj["horizon"]);
+        lighting.Skybox.CubemapDir = sj.value("cubemapDir", lighting.Skybox.CubemapDir);
+        lighting.Skybox.Intensity = sj.value("intensity", lighting.Skybox.Intensity);
+        lighting.Skybox.RotationDeg = sj.value("rotation", lighting.Skybox.RotationDeg);
     }
     return lighting;
 }

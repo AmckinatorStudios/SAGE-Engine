@@ -7,6 +7,7 @@
 #include "sage/core/Application.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/render/ParticleECS.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
 #include "sage/ecs/CameraView.h"
@@ -43,6 +44,23 @@ sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::Engin
     fx.MotionBlurSamples = cfg.MotionBlurSamples;
     fx.ChromaticAberration = cfg.ChromaticAberration;
     return fx;
+}
+
+// Небо кадра: кубическая текстура, если у сцены задан её каталог, иначе
+// процедурный градиент. Одна точка на оба окна редактора — иначе вьюпорт и
+// окно игры легко разъезжаются по фону.
+void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat4& view,
+                                  const glm::mat4& proj) {
+    if (!env.Skybox.Enabled) return;
+    if (env.Skybox.HasCubemap()) {
+        if (std::shared_ptr<Skybox> sky = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir)) {
+            sky->Draw(view, proj, env.Skybox.Intensity, env.Skybox.RotationDeg);
+            return;
+        }
+        // Каталог задан, но не читается — падать на этом нельзя, поэтому
+        // молча остаёмся на градиенте (причина уже в логе от ResourceManager).
+    }
+    m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
 }
 
 void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env) {
@@ -230,8 +248,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     outView = camera.GetViewMatrix();
     outProj = camera.GetProjectionMatrix((float)m_vpW / (float)std::max(m_vpH, 1));
 
-    if (env.Skybox.Enabled)
-        m_sky->Draw(outView, outProj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    DrawSky(env, outView, outProj);
 
     // Режим рендера из тулбара: Shaded(0)/Unlit(1)/Normals(2); Wireframe — unlit + линии.
     int shadingMode = 0;
@@ -308,8 +325,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
 
-    if (env.Skybox.Enabled)
-        m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    DrawSky(env, view, proj);
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
     sage::anim::DrawAnimatedModels(scene, view, proj, camPos, env,
