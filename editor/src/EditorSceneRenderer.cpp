@@ -37,6 +37,11 @@ sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::Engin
     fx.BloomIntensity = cfg.BloomIntensity;
     fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
     fx.AORadius = cfg.AORadius;
+    fx.DofEnabled = cfg.DepthOfField; fx.FocusDistance = cfg.FocusDistance;
+    fx.Aperture = cfg.Aperture; fx.DofMaxRadius = cfg.DofMaxRadius;
+    fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
+    fx.MotionBlurSamples = cfg.MotionBlurSamples;
+    fx.ChromaticAberration = cfg.ChromaticAberration;
     return fx;
 }
 
@@ -272,7 +277,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     if (cfg.PostProcessing && mode == EditorRenderMode::Shaded) {
         m_postFbo->Resize(m_vpW, m_vpH);
         m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
-                         m_sceneFbo->Width(), m_sceneFbo->Height(), outProj, FxFromConfig(cfg),
+                         m_sceneFbo->Width(), m_sceneFbo->Height(), outProj, outView,
+                         FxFromConfig(cfg),
                          /*output=*/&*m_postFbo, 0, 0, m_vpW, m_vpH);
         m_postApplied = true;
     }
@@ -314,7 +320,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     if (cfg.PostProcessing) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
-                             m_gameFbo->Width(), m_gameFbo->Height(), proj, FxFromConfig(cfg),
+                             m_gameFbo->Width(), m_gameFbo->Height(), proj, view,
+                             FxFromConfig(cfg),
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
         m_gamePostApplied = true;
     }

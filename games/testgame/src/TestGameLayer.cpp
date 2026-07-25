@@ -965,7 +965,8 @@ void TestGameLayer::OnRender() {
         // Полная цепочка PostFX: SSAO (из глубины сцены) + Bloom + тон-маппинг/
         // виньетка. Пишет в экран, letterbox-viewport (vpX..).
         m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
-                         m_sceneFbo->Width(), m_sceneFbo->Height(), proj, m_postfxSettings,
+                         m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
+                         m_postfxSettings,
                          /*output=*/nullptr, vpX, vpY, vpW, vpH);
     } else {
         device.SetSRGBWrite(false); // HUD ниже — его цвета уже в sRGB

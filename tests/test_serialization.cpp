@@ -4,6 +4,7 @@
 // (MeshRef::Type::None), поэтому загрузка не трогает графический бэкенд.
 #include "TestFramework.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -22,6 +23,47 @@ static std::string TempPath(const std::string& name) {
 }
 
 // --- EngineConfig round-trip -----------------------------------------------
+
+// Параметры кинематографических эффектов (глубина резкости, смаз движения,
+// хроматическая аберрация) должны переживать сохранение конфига: иначе
+// выставленная в редакторе картинка молча возвращалась бы к дефолтам при
+// каждом перезапуске.
+TEST(Config_cinematic_effects_roundtrip) {
+    sage::EngineConfig out;
+    out.DepthOfField = true;
+    out.FocusDistance = 7.25f;
+    out.Aperture = 1.4f;
+    out.DofMaxRadius = 20.0f;
+    out.MotionBlur = true;
+    out.MotionBlurAmount = 0.75f;
+    out.MotionBlurSamples = 20;
+    out.ChromaticAberration = 0.45f;
+
+    std::string path = TempPath("config_fx.json");
+    CHECK_TRUE(out.SaveFile(path));
+
+    sage::EngineConfig in;
+    CHECK_TRUE(in.LoadFile(path));
+    CHECK_TRUE(in.DepthOfField);
+    CHECK_NEAR(in.FocusDistance, 7.25f, 1e-5);
+    CHECK_NEAR(in.Aperture, 1.4f, 1e-5);
+    CHECK_NEAR(in.DofMaxRadius, 20.0f, 1e-5);
+    CHECK_TRUE(in.MotionBlur);
+    CHECK_NEAR(in.MotionBlurAmount, 0.75f, 1e-5);
+    CHECK_EQ(in.MotionBlurSamples, 20);
+    CHECK_NEAR(in.ChromaticAberration, 0.45f, 1e-5);
+
+    std::remove(path.c_str());
+}
+
+// Конфиг без раздела эффектов (файл от прежней версии движка) должен грузиться
+// с безопасными дефолтами, а не включать тяжёлые проходы сам по себе.
+TEST(Config_effects_default_off_for_old_files) {
+    sage::EngineConfig cfg;
+    CHECK_FALSE(cfg.DepthOfField);
+    CHECK_FALSE(cfg.MotionBlur);
+    CHECK_NEAR(cfg.ChromaticAberration, 0.0f, 1e-6);
+}
 
 TEST(Config_save_load_roundtrip) {
     sage::EngineConfig out;
