@@ -296,3 +296,118 @@ TEST(Animator_crossfade_without_current_is_play) {
     CHECK_FALSE(a.Fading());
     CHECK_EQ(a.CurrentClip(), 1);
 }
+
+// --- Переопределение позы (ручная анимация костей) ---------------------------
+
+TEST(Animator_pose_override_without_clip_moves_bone) {
+    // Без единого клипа поза берётся из дефолтов скелета, а переопределение
+    // должно её менять: это ровно тот случай, когда аниматор ставит позу с нуля.
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips;
+    Animator a;
+    a.SetRig(&sk, &clips);
+
+    std::vector<JointPose> pose(2);
+    pose[0].HasRotation = true;
+    pose[0].Rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 0, 1));
+    a.SetPoseOverride(&pose);
+    a.RefreshPose();
+
+    // Поворот корня на 90° вокруг Z переносит ребёнка из (0,1,0) в (-1,0,0).
+    glm::vec4 p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.x, -1.0f, 1e-4);
+    CHECK_NEAR(p1.y, 0.0f, 1e-4);
+}
+
+TEST(Animator_pose_override_beats_clip) {
+    // Переопределение применяется ПОСЛЕ сэмплирования клипа, поэтому выигрывает.
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips{MakeRootRotClip("Bend", 90.0f)};
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.Play("Bend");
+    a.Update(0.0f);
+
+    std::vector<JointPose> pose(2);
+    pose[0].HasRotation = true;
+    pose[0].Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // разогнуть обратно
+    a.SetPoseOverride(&pose);
+    a.Update(0.0f);
+
+    glm::vec4 p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.x, 0.0f, 1e-4);
+    CHECK_NEAR(p1.y, 1.0f, 1e-4); // поза клипа перебита, ребёнок снова сверху
+}
+
+TEST(Animator_pose_override_is_per_channel) {
+    // Переопределён только перенос — поворот обязан остаться от клипа.
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips{MakeRootRotClip("Bend", 90.0f)};
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.Play("Bend");
+
+    std::vector<JointPose> pose(2);
+    pose[0].HasTranslation = true;
+    pose[0].Translation = {5.0f, 0.0f, 0.0f};
+    a.SetPoseOverride(&pose);
+    a.Update(0.0f);
+
+    // Корень сдвинут на +5 по X, ребёнок по-прежнему повёрнут клипом в (-1,0,0).
+    glm::vec4 p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.x, 4.0f, 1e-4);
+    CHECK_NEAR(p1.y, 0.0f, 1e-4);
+}
+
+TEST(Animator_pose_override_shorter_than_skeleton_is_ok) {
+    // Вектор переопределений короче скелета — обычное дело: кости, до которых
+    // аниматор не дошёл, просто берутся от клипа. Выхода за границы быть не должно.
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips;
+    Animator a;
+    a.SetRig(&sk, &clips);
+
+    std::vector<JointPose> pose(1); // только корень
+    pose[0].HasTranslation = true;
+    pose[0].Translation = {0.0f, 2.0f, 0.0f};
+    a.SetPoseOverride(&pose);
+    a.RefreshPose();
+
+    glm::vec4 p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.y, 3.0f, 1e-4); // 2 от корня + 1 от дефолта ребёнка
+}
+
+TEST(Animator_pose_override_can_be_removed) {
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips;
+    Animator a;
+    a.SetRig(&sk, &clips);
+
+    std::vector<JointPose> pose(2);
+    pose[1].HasTranslation = true;
+    pose[1].Translation = {0.0f, 7.0f, 0.0f};
+    a.SetPoseOverride(&pose);
+    a.RefreshPose();
+    CHECK_NEAR((a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1)).y, 7.0f, 1e-4);
+
+    a.SetPoseOverride(nullptr);
+    a.RefreshPose();
+    CHECK_NEAR((a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1)).y, 1.0f, 1e-4);
+}
+
+TEST(Animator_global_matrices_exclude_inverse_bind) {
+    // Глобальные матрицы описывают ПОЛОЖЕНИЕ СУСТАВА, палитра — перенос вершин
+    // из bind-позы. С нетривиальным inverseBind они обязаны разойтись, иначе
+    // гизмо на кости встанет не туда.
+    Skeleton sk = MakeTwoBoneRig();
+    sk.Joints[1].InverseBind = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+    std::vector<AnimationClip> clips;
+    Animator a;
+    a.SetRig(&sk, &clips);
+
+    CHECK_EQ((int)a.GlobalMatrices().size(), 2);
+    const glm::vec4 joint = a.GlobalMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(joint.y, 1.0f, 1e-4); // сустав стоит на (0,1,0)
+    const glm::vec4 skinned = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(skinned.y, 0.0f, 1e-4); // палитра в bind-позе ничего не двигает
+}

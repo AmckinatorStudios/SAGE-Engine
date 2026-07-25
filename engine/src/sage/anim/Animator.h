@@ -56,8 +56,31 @@ public:
     // Продвигает время и пересчитывает палитру костей. Без клипа/скелета — no-op.
     void Update(float dt);
 
+    // Переопределение позы поверх клипа — то, чем инструмент анимации правит
+    // позу руками. Указатель НЕ копируется и не владеется: вектор живёт снаружи
+    // (в компоненте сцены), и его достаточно переустанавливать каждый кадр,
+    // чтобы пережить перевыделение памяти в хранилище компонентов. nullptr или
+    // пустой вектор — переопределений нет, поза целиком от клипа.
+    //
+    // Переопределения применяются ПОСЛЕ смешивания клипов, в локальном TRS, а
+    // значит корректно работают и во время кросс-фейда, и вообще без клипа
+    // (тогда база — дефолтная поза скелета).
+    void SetPoseOverride(const std::vector<JointPose>* overrides) { m_overrides = overrides; }
+    const std::vector<JointPose>* PoseOverride() const { return m_overrides; }
+
+    // Пересчитывает позу, не трогая время. Нужно после правки переопределений в
+    // тот же кадр: без этого изменение кости было бы видно только со следующего
+    // Update, то есть гизмо «отставало» бы на кадр.
+    void RefreshPose() { ComputePoseBlended(FadeWeight()); }
+
     const std::vector<glm::mat4>& BoneMatrices() const { return m_bones; }
     int BoneCount() const { return (int)m_bones.size(); }
+
+    // Глобальные матрицы костей в пространстве модели — БЕЗ inverseBind, в
+    // отличие от палитры. Именно они нужны, чтобы нарисовать скелет и поставить
+    // гизмо на кость: палитра к этому непригодна, она переводит вершины из
+    // bind-позы, а не описывает положение сустава.
+    const std::vector<glm::mat4>& GlobalMatrices() const { return m_globals; }
 
     bool Playing() const { return m_playing; }
     int CurrentClip() const { return m_clip; }
@@ -93,6 +116,9 @@ private:
     bool m_fadeFromLoop = true;
     float m_fadeElapsed = 0.0f;
     float m_fadeDuration = 0.0f;
+
+    // Переопределения позы (не владеем — см. SetPoseOverride).
+    const std::vector<JointPose>* m_overrides = nullptr;
 
     std::vector<glm::mat4> m_bones;   // палитра (global * inverseBind)
     std::vector<glm::mat4> m_globals; // scratch: глобальные матрицы костей

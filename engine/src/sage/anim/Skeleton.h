@@ -55,6 +55,26 @@ struct AnimChannel {
     void Sample(float t, glm::vec3& outVec3, glm::quat& outQuat) const;
 };
 
+// Переопределение локальной позы ОДНОЙ кости — то, чем инструмент анимации
+// правит позу поверх клипа (или вместо него, когда клипа нет).
+//
+// Переопределения хранятся в тех же локальных TRS, что и ключи клипа, и
+// применяются ПОСЛЕ сэмплирования и смешивания клипов. Поэтому они складываются
+// с клипом предсказуемо: переопределённое свойство берётся отсюда, остальные —
+// из клипа. Флаги раздельные по T/R/S: анимировать поворот руки, оставив
+// перенос от клипа, — обычная задача, и она не должна требовать ключей на всё.
+struct JointPose {
+    bool HasTranslation = false;
+    bool HasRotation = false;
+    bool HasScale = false;
+    glm::vec3 Translation{0.0f};
+    glm::quat Rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 Scale{1.0f};
+
+    bool Any() const { return HasTranslation || HasRotation || HasScale; }
+    void Clear() { HasTranslation = HasRotation = HasScale = false; }
+};
+
 // Анимационный клип: набор каналов + длительность (макс. время ключей).
 struct AnimationClip {
     std::string Name;

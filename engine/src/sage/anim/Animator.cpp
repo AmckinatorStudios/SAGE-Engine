@@ -1,5 +1,6 @@
 #include "sage/anim/Animator.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -192,14 +193,29 @@ void Animator::ComputePoseBlended(float weight) {
         }
     }
 
-    // 2. Локальные матрицы из TRS.
+    // 2. Переопределения позы поверх клипа — то, что аниматор поставил руками.
+    //    Именно ЗДЕСЬ, после смешивания: правка кости должна выигрывать у клипа
+    //    и во время кросс-фейда тоже, иначе поставленная поза «плавала» бы вслед
+    //    за переходом. Вектор короче скелета — это норма: кости, до которых
+    //    аниматор не дошёл, остаются от клипа.
+    if (m_overrides) {
+        const int count = std::min(n, (int)m_overrides->size());
+        for (int i = 0; i < count; ++i) {
+            const JointPose& o = (*m_overrides)[i];
+            if (o.HasTranslation) t[i] = o.Translation;
+            if (o.HasRotation) r[i] = o.Rotation;
+            if (o.HasScale) s[i] = o.Scale;
+        }
+    }
+
+    // 3. Локальные матрицы из TRS.
     std::vector<glm::mat4> local(n);
     for (int i = 0; i < n; ++i) {
         local[i] = glm::translate(glm::mat4(1.0f), t[i]) * glm::mat4_cast(r[i]) *
                    glm::scale(glm::mat4(1.0f), s[i]);
     }
 
-    // 3. Глобальные матрицы: поднимаемся по цепочке родителей (любой порядок костей).
+    // 4. Глобальные матрицы: поднимаемся по цепочке родителей (любой порядок костей).
     for (int i = 0; i < n; ++i) {
         glm::mat4 global = local[i];
         int p = joints[i].Parent;
@@ -210,7 +226,7 @@ void Animator::ComputePoseBlended(float weight) {
         m_globals[i] = global;
     }
 
-    // 4. Палитра костей: global * inverseBind.
+    // 5. Палитра костей: global * inverseBind.
     for (int i = 0; i < n; ++i) {
         m_bones[i] = m_globals[i] * joints[i].InverseBind;
     }
