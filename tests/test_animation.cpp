@@ -411,3 +411,154 @@ TEST(Animator_global_matrices_exclude_inverse_bind) {
     const glm::vec4 skinned = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
     CHECK_NEAR(skinned.y, 0.0f, 1e-4); // палитра в bind-позе ничего не двигает
 }
+
+// --- Ретаргет анимации между скелетами ---------------------------------------
+
+#include "sage/anim/Retarget.h"
+
+// Целевой скелет с ТАКОЙ ЖЕ топологией, но другими именами (префикс экспортёра),
+// другими длинами костей и другой ориентацией сустава в бинд-позе. Именно это
+// сочетание и ломает наивный перенос локальных поворотов.
+static Skeleton MakeTargetRig() {
+    Skeleton sk;
+    sk.Joints.resize(2);
+    sk.Joints[0].Name = "mixamorig:Root";
+    sk.Joints[0].Parent = -1;
+    sk.Joints[0].Translation = {0, 0, 0};
+    sk.Joints[0].InverseBind = glm::mat4(1.0f);
+    sk.Joints[1].Name = "mixamorig:Child_01";
+    sk.Joints[1].Parent = 0;
+    sk.Joints[1].Translation = {0, 2, 0}; // кость вдвое длиннее исходной
+    sk.Joints[1].InverseBind = glm::mat4(1.0f);
+    return sk;
+}
+
+static Skeleton MakeNamedSourceRig() {
+    Skeleton sk = MakeTwoBoneRig();
+    sk.Joints[0].Name = "Root";
+    sk.Joints[1].Name = "child 01";
+    return sk;
+}
+
+TEST(Retarget_normalizes_bone_names) {
+    CHECK_TRUE(NormalizeBoneName("mixamorig:LeftArm") == "leftarm");
+    CHECK_TRUE(NormalizeBoneName("Armature|Hips") == "hips");
+    CHECK_TRUE(NormalizeBoneName("Hand_L") == "handl");
+    CHECK_TRUE(NormalizeBoneName("hand.l") == "handl");
+    CHECK_TRUE(NormalizeBoneName("Spine 02") == "spine02");
+}
+
+TEST(Retarget_maps_bones_by_name) {
+    Skeleton src = MakeNamedSourceRig();
+    Skeleton dst = MakeTargetRig();
+    BoneMap map = MapByName(src, dst);
+    CHECK_EQ(map.Mapped(), 2);
+    CHECK_EQ(map.SourceToTarget[0], 0);
+    CHECK_EQ(map.SourceToTarget[1], 1);
+}
+
+TEST(Retarget_unmatched_bones_are_dropped) {
+    Skeleton src = MakeNamedSourceRig();
+    src.Joints[1].Name = "TailTip"; // такой кости у цели нет
+    Skeleton dst = MakeTargetRig();
+    BoneMap map = MapByName(src, dst);
+    CHECK_EQ(map.Mapped(), 1);
+    CHECK_EQ(map.SourceToTarget[1], -1);
+
+    AnimationClip clip = MakeRootRotClip("Bend", 90.0f);
+    AnimChannel tail;                 // канал для кости без пары
+    tail.Joint = 1;
+    tail.Target = AnimPath::Rotation;
+    tail.Times = {0.0f};
+    tail.Values = {glm::vec4(0, 0, 0, 1)};
+    clip.Channels.push_back(tail);
+
+    AnimationClip out = Retarget(clip, src, dst, map);
+    CHECK_EQ((int)out.Channels.size(), 1); // остался только канал корня
+    CHECK_EQ(out.Channels[0].Joint, 0);
+}
+
+TEST(Retarget_preserves_pose_across_different_bind_rotations) {
+    // Суть ретаргета: одинаковое ДВИЖЕНИЕ на скелетах с разной бинд-позой.
+    // У цели корень в бинд-позе уже повёрнут на 30° — прямой перенос локального
+    // поворота дал бы другую позу, перенос отклонения от бинд-позы даёт ту же.
+    Skeleton src = MakeNamedSourceRig();
+    Skeleton dst = MakeTargetRig();
+    dst.Joints[0].Rotation = glm::angleAxis(glm::radians(30.0f), glm::vec3(0, 0, 1));
+
+    AnimationClip clip = MakeRootRotClip("Bend", 90.0f); // источник гнёт корень на 90°
+    AnimationClip out = Retarget(clip, src, dst);
+    CHECK_EQ((int)out.Channels.size(), 1);
+
+    // Ожидаем бинд-поворот цели, домноженный на то же отклонение (90°).
+    const glm::quat expected = dst.Joints[0].Rotation *
+                               (glm::inverse(src.Joints[0].Rotation) *
+                                glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 0, 1)));
+    const glm::vec4 v = out.Channels[0].Values[0];
+    const glm::quat got(v.w, v.x, v.y, v.z);
+    // Кватернионы q и -q — один поворот; сравниваем по модулю скалярного произведения.
+    CHECK_NEAR(std::fabs(glm::dot(expected, got)), 1.0f, 1e-4);
+}
+
+TEST(Retarget_keeps_target_bone_lengths) {
+    // Перенос кости — это её длина, и она принадлежит цели: канал переноса
+    // НЕкорневой кости переноситься не должен, иначе персонаж «вытянется» под
+    // того, с кого снято движение.
+    Skeleton src = MakeNamedSourceRig();
+    Skeleton dst = MakeTargetRig();
+
+    AnimationClip clip;
+    clip.Name = "Move";
+    clip.Duration = 1.0f;
+    AnimChannel childMove;
+    childMove.Joint = 1;
+    childMove.Target = AnimPath::Translation;
+    childMove.Times = {0.0f};
+    childMove.Values = {glm::vec4(0, 5, 0, 0)};
+    clip.Channels.push_back(childMove);
+
+    AnimationClip out = Retarget(clip, src, dst);
+    CHECK_EQ((int)out.Channels.size(), 0);
+    // Длина кости цели осталась своей.
+    CHECK_NEAR(dst.Joints[1].Translation.y, 2.0f, 1e-5);
+}
+
+TEST(Retarget_scales_root_motion_to_target_size) {
+    // Цель вдвое крупнее источника — шаг корня должен вырасти вдвое, иначе
+    // высокий персонаж семенил бы шагами низкого.
+    Skeleton src = MakeNamedSourceRig(); // размах 1
+    Skeleton dst = MakeTargetRig();      // размах 2
+
+    AnimationClip clip;
+    clip.Name = "Walk";
+    clip.Duration = 1.0f;
+    AnimChannel rootMove;
+    rootMove.Joint = 0;
+    rootMove.Target = AnimPath::Translation;
+    rootMove.Times = {0.0f, 1.0f};
+    rootMove.Values = {glm::vec4(0, 0, 0, 0), glm::vec4(1, 0, 0, 0)}; // шаг на 1 вперёд
+    clip.Channels.push_back(rootMove);
+
+    AnimationClip out = Retarget(clip, src, dst);
+    CHECK_EQ((int)out.Channels.size(), 1);
+    CHECK_NEAR(out.Channels[0].Values[0].x, 0.0f, 1e-4);
+    CHECK_NEAR(out.Channels[0].Values[1].x, 2.0f, 1e-4); // шаг удвоился
+}
+
+TEST(Retarget_result_plays_on_target_skeleton) {
+    // Итоговая проверка: перенесённый клип реально проигрывается на цели.
+    Skeleton src = MakeNamedSourceRig();
+    Skeleton dst = MakeTargetRig();
+    AnimationClip clip = MakeRootRotClip("Bend", 90.0f);
+
+    std::vector<AnimationClip> clips{Retarget(clip, src, dst)};
+    Animator a;
+    a.SetRig(&dst, &clips);
+    CHECK_TRUE(a.Play("Bend"));
+    a.Update(0.0f);
+
+    // Кость 1 цели стоит на (0,2,0); поворот корня на 90° вокруг Z уводит её в (-2,0,0).
+    glm::vec4 p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.x, -2.0f, 1e-3);
+    CHECK_NEAR(p1.y, 0.0f, 1e-3);
+}

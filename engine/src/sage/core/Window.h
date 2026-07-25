@@ -17,6 +17,11 @@ public:
         bool Resizable = true;
         bool VSync = true;
         int Msaa = 0;
+        // Окно без показа на экране. Нужно инструментам и тестам, которым
+        // требуется только графический КОНТЕКСТ: рендер идёт в offscreen-буферы,
+        // а мигающее пустое окно на экране — побочный эффект, которого быть
+        // не должно.
+        bool Hidden = false;
     };
 
     Window(int width, int height, const std::string& title)

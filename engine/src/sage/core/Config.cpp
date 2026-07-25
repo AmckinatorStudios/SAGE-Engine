@@ -191,6 +191,8 @@ bool EngineConfig::LoadFile(const std::string& path) {
     MotionBlurAmount = pp.value("motionBlurAmount", MotionBlurAmount);
     MotionBlurSamples = pp.value("motionBlurSamples", MotionBlurSamples);
     ChromaticAberration = pp.value("chromaticAberration", ChromaticAberration);
+    Fxaa = pp.value("fxaa", Fxaa);
+    FxaaContrastThreshold = pp.value("fxaaContrastThreshold", FxaaContrastThreshold);
 
     auto sys = j.value("system", json::object());
     WorkerThreads       = sys.value("workerThreads", WorkerThreads);
@@ -224,6 +226,8 @@ bool EngineConfig::SaveFile(const std::string& path) const {
         {"motionBlur", MotionBlur}, {"motionBlurAmount", MotionBlurAmount},
         {"motionBlurSamples", MotionBlurSamples},
         {"chromaticAberration", ChromaticAberration},
+        {"fxaa", Fxaa},
+        {"fxaaContrastThreshold", FxaaContrastThreshold},
     };
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},

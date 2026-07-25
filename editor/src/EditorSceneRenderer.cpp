@@ -43,6 +43,8 @@ sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::Engin
     fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
     fx.MotionBlurSamples = cfg.MotionBlurSamples;
     fx.ChromaticAberration = cfg.ChromaticAberration;
+    fx.FxaaEnabled = cfg.Fxaa;
+    fx.FxaaContrastThreshold = cfg.FxaaContrastThreshold;
     return fx;
 }
 

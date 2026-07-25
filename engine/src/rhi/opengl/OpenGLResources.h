@@ -15,6 +15,8 @@ public:
     void Use() const override;
     void SetMat4(const std::string& name, const glm::mat4& v) const override;
     void SetMat4Array(const std::string& name, const glm::mat4* v, int count) const override;
+    void SetIntArray(const std::string& name, const int* v, int count) const override;
+    void SetFloatArray(const std::string& name, const float* v, int count) const override;
     void SetVec4(const std::string& name, const glm::vec4& v) const override;
     void SetVec3(const std::string& name, const glm::vec3& v) const override;
     void SetVec2(const std::string& name, const glm::vec2& v) const override;

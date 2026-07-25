@@ -11,6 +11,7 @@
 set(SAGE_ENGINE_SOURCES
     src/sage/anim/AnimationSystem.cpp
     src/sage/anim/Animator.cpp
+    src/sage/anim/Retarget.cpp
     src/sage/anim/Skeleton.cpp
     src/sage/audio/AudioEngine.cpp
     src/sage/audio/miniaudio_impl.cpp

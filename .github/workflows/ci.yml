@@ -24,9 +24,19 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
-      # Модульные тесты (математика/сериализация/анимация) — быстрые, без GL.
+      # Модульные тесты (математика/сериализация/анимация/ретаргет) — быстрые,
+      # без GL. Эталонные кадры исключены: им нужен графический контекст, и
+      # гоняются они отдельным шагом под xvfb.
       - name: Unit tests (math/serialization/animation)
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure -E sage_render_tests
+
+      # Эталонные кадры: сцена рисуется в offscreen-буфер и сравнивается с
+      # закоммиченными PNG. Единственный тест, который проверяет КАРТИНКУ —
+      # ошибку в шейдере не видит больше ничто (см. tests/render).
+      - name: Reference frame tests (rendering)
+        run: |
+          xvfb-run -a --server-args="-screen 0 800x600x24" \
+            ./build/tests/render/sage_render_tests --references tests/render/references
 
       # Sandbox рендерит сцену + Lua-скрипт; SageEditor гоняет свой self-test
       # (проект + сцена + undo/redo + play). См. scripts/ci_smoke_test.sh —

@@ -256,6 +256,85 @@ void main() {
 
 // Финальный composite: scene*AO + bloom -> экспозиция -> ACES -> насыщенность/
 // контраст -> хроматическая аберрация -> виньетка -> гамма.
+
+// --- FXAA ------------------------------------------------------------------
+// Сглаживание кромок по яркости готовой картинки (Timothy Lottes, FXAA 3.11,
+// сокращённый вариант). Работает ПОСЛЕ тон-маппинга: пороги здесь заданы в
+// воспринимаемой яркости, и в линейном HDR они не имеют смысла.
+//
+// Идея: найти локальный контраст по четырём соседям, определить направление
+// кромки (вертикаль/горизонталь) и сместить выборку ВДОЛЬ неё — так ступенька
+// заменяется плавным переходом, а плоские области остаются нетронутыми.
+const char* kFxaaFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;         // 1/размер текстуры
+uniform float uContrastThreshold;
+
+// Воспринимаемая яркость. Полноценная формула здесь избыточна: FXAA нужен
+// монотонный признак «светлее/темнее», а не колориметрия.
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+void main() {
+    vec3 rgbM = texture(uTex, vUV).rgb;
+    float lM = luma(rgbM);
+    float lN = luma(texture(uTex, vUV + vec2(0.0, -uTexel.y)).rgb);
+    float lS = luma(texture(uTex, vUV + vec2(0.0,  uTexel.y)).rgb);
+    float lW = luma(texture(uTex, vUV + vec2(-uTexel.x, 0.0)).rgb);
+    float lE = luma(texture(uTex, vUV + vec2( uTexel.x, 0.0)).rgb);
+
+    float lMin = min(lM, min(min(lN, lS), min(lW, lE)));
+    float lMax = max(lM, max(max(lN, lS), max(lW, lE)));
+    float range = lMax - lMin;
+
+    // Плоский участок — не трогаем вовсе. Без этого порога FXAA мылит текстуры.
+    if (range < max(uContrastThreshold, lMax * 0.125)) {
+        FragColor = vec4(rgbM, 1.0);
+        return;
+    }
+
+    // Диагональные соседи нужны, чтобы отличить вертикальную кромку от
+    // горизонтальной: по одним «крестом» направление неоднозначно.
+    float lNW = luma(texture(uTex, vUV + vec2(-uTexel.x, -uTexel.y)).rgb);
+    float lNE = luma(texture(uTex, vUV + vec2( uTexel.x, -uTexel.y)).rgb);
+    float lSW = luma(texture(uTex, vUV + vec2(-uTexel.x,  uTexel.y)).rgb);
+    float lSE = luma(texture(uTex, vUV + vec2( uTexel.x,  uTexel.y)).rgb);
+
+    float edgeH = abs((lNW + lNE) - 2.0 * lN) * 2.0 +
+                  abs((lW  + lE ) - 2.0 * lM) * 4.0 +
+                  abs((lSW + lSE) - 2.0 * lS) * 2.0;
+    float edgeV = abs((lNW + lSW) - 2.0 * lW) * 2.0 +
+                  abs((lN  + lS ) - 2.0 * lM) * 4.0 +
+                  abs((lNE + lSE) - 2.0 * lE) * 2.0;
+    bool horizontal = edgeH >= edgeV;
+
+    // Шаг делаем в сторону БОЛЬШЕГО перепада: туда, где лежит другая сторона
+    // кромки, — иначе смешивали бы пиксель сам с собой.
+    float l1 = horizontal ? lN : lW;
+    float l2 = horizontal ? lS : lE;
+    float grad1 = abs(l1 - lM);
+    float grad2 = abs(l2 - lM);
+    // Положительный шаг ведёт к l2 (S или E) — туда и идём, когда перепад
+    // больше именно там. Знак здесь легко перепутать, и ошибка тихая: FXAA
+    // продолжает работать, но смешивает пиксель с СОБСТВЕННОЙ стороной кромки
+    // и почти ничего не меняет.
+    float stepLen = horizontal ? uTexel.y : uTexel.x;
+    if (grad1 > grad2) stepLen = -stepLen;
+
+    // Вес смешивания — насколько пиксель отличается от среднего по окрестности.
+    // Возведение в квадрат сохраняет резкими явные контуры и сглаживает слабые
+    // ступеньки, ради которых всё и затевалось.
+    float lAvg = (2.0 * (lN + lS + lW + lE) + lNW + lNE + lSW + lSE) / 12.0;
+    float blend = clamp(abs(lAvg - lM) / max(range, 1e-5), 0.0, 1.0);
+    blend = blend * blend * 0.75;
+
+    vec2 offset = horizontal ? vec2(0.0, stepLen * 0.5) : vec2(stepLen * 0.5, 0.0);
+    vec3 rgbEdge = texture(uTex, vUV + offset).rgb;
+    FragColor = vec4(mix(rgbM, rgbEdge, blend), 1.0);
+}
+)";
+
 const char* kCompositeFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
@@ -319,6 +398,7 @@ Shader& MotionShader()    { static Shader* s = new Shader(Shader::FromSource(kFs
 Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBrightFrag, "PostFX.Bright")); return *s; }
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
 Shader& CompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kCompositeFrag, "PostFX.Composite")); return *s; }
+Shader& FxaaShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kFxaaFrag, "PostFX.FXAA")); return *s; }
 
 std::unique_ptr<RenderTarget> MakeColor(int w, int h) {
     RenderTargetDesc d;
@@ -345,6 +425,7 @@ void PostFX::EnsureTargets(int w, int h) {
     // репроецировать старую матрицу на другой кадр нельзя.
     m_dof.reset();
     m_motion.reset();
+    m_ldr.reset();
     m_hasPrevFrame = false;
 }
 
@@ -468,7 +549,14 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     }
 
     // --- 5. Composite -> output (FBO вьюпорта) или экран ---
-    if (output) {
+    // FXAA работает по ГОТОВОЙ картинке, поэтому при включённом сглаживании
+    // composite пишет не в выход, а в промежуточный буфер: шейдеру нужен вход,
+    // а читать тот же буфер, в который пишешь, нельзя.
+    const bool doFxaa = s.FxaaEnabled;
+    RenderTarget* ldr = doFxaa ? EnsureAux(m_ldr) : nullptr;
+    if (ldr) {
+        ldr->Bind();
+    } else if (output) {
         output->Bind();
     } else {
         device.BindDefaultFramebuffer();
@@ -493,6 +581,23 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     if (doBloom) device.BindTexture2D(1, m_bloomB->ColorTextureHandle());
     if (doAO) device.BindTexture2D(2, m_aoBlur->ColorTextureHandle());
     drawTri();
+
+    // --- 6. FXAA -> выход ---
+    if (ldr) {
+        if (output) {
+            output->Bind();
+        } else {
+            device.BindDefaultFramebuffer();
+            device.SetViewport(outX, outY, outW, outH);
+        }
+        Shader& fxaa = FxaaShader();
+        fxaa.Use();
+        fxaa.SetInt("uTex", 0);
+        fxaa.SetVec2("uTexel", glm::vec2(1.0f / (float)m_w, 1.0f / (float)m_h));
+        fxaa.SetFloat("uContrastThreshold", glm::max(s.FxaaContrastThreshold, 0.0f));
+        device.BindTexture2D(0, ldr->ColorTextureHandle());
+        drawTri();
+    }
 
     device.SetDepthTest(true);
 

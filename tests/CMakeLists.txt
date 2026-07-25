@@ -25,3 +25,12 @@ target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json)
 
 add_test(NAME sage_tests COMMAND sage_tests)
+
+# ============================================================================
+#  sage_render_tests — проверка КАРТИНКИ по эталонным кадрам. Требует GL, поэтому
+#  собирается по флагу и запускается в CI под xvfb (см. tests/render).
+# ============================================================================
+option(SAGE_BUILD_RENDER_TESTS "Собрать тесты эталонных кадров (нужен OpenGL)" ON)
+if (SAGE_BUILD_RENDER_TESTS)
+    add_subdirectory(render)
+endif()

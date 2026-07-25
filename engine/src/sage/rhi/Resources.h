@@ -48,6 +48,10 @@ public:
     virtual void SetMat4(const std::string& name, const glm::mat4& v) const = 0;
     // Массив матриц (напр. палитра костей скелетной анимации uBones[N]).
     virtual void SetMat4Array(const std::string& name, const glm::mat4* v, int count) const = 0;
+    // Массивы скаляров — нужны блендшейпам: индексы и веса активных морф-целей
+    // передаются пачкой, по одному вызову на кадр вместо N.
+    virtual void SetIntArray(const std::string& name, const int* v, int count) const = 0;
+    virtual void SetFloatArray(const std::string& name, const float* v, int count) const = 0;
     virtual void SetVec4(const std::string& name, const glm::vec4& v) const = 0;
     virtual void SetVec3(const std::string& name, const glm::vec3& v) const = 0;
     virtual void SetVec2(const std::string& name, const glm::vec2& v) const = 0;

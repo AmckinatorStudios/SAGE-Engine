@@ -62,7 +62,34 @@ void SkinnedMesh::Draw() const { m_geometry->DrawIndexed(m_indexCount); }
 // ============================================================================
 namespace {
 
-const char* kSkinVert = R"(#version 330 core
+
+// Блок морфинга — общий для цветного и depth-прохода: форма обязана совпадать,
+// иначе тень персонажа не соответствовала бы его лицу.
+const char* kMorphGlsl = R"(
+const int MAX_ACTIVE_MORPHS = 8;
+uniform sampler2D uMorphPos;
+uniform sampler2D uMorphNrm;
+uniform int uMorphCount;                        // сколько АКТИВНЫХ целей в кадре
+uniform int uMorphTarget[MAX_ACTIVE_MORPHS];    // их индексы в модели
+uniform float uMorphWeight[MAX_ACTIVE_MORPHS];  // и веса
+uniform int uMorphWidth;                        // ширина текстуры дельт, вершин
+uniform int uMorphRows;                         // строк на одну цель
+
+// Смещает позицию и нормаль вершины суммой активных морф-целей. texelFetch, а
+// не texture(): нам нужен ТОЧНО этот тексель, без фильтрации и мип-уровней.
+void ApplyMorphs(inout vec3 pos, inout vec3 nrm) {
+    if (uMorphCount <= 0) return;
+    int col = gl_VertexID % uMorphWidth;
+    int rowInTarget = gl_VertexID / uMorphWidth;
+    for (int i = 0; i < uMorphCount; ++i) {
+        int row = uMorphTarget[i] * uMorphRows + rowInTarget;
+        pos += uMorphWeight[i] * texelFetch(uMorphPos, ivec2(col, row), 0).xyz;
+        nrm += uMorphWeight[i] * texelFetch(uMorphNrm, ivec2(col, row), 0).xyz;
+    }
+}
+)";
+
+const char* kSkinVertBody = R"(
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aUV;
@@ -83,6 +110,13 @@ uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned; // 0 — bind-поза (без палитры)
 
 void main() {
+    // Морфинг ДО скиннинга: блендшейпы заданы в той же bind-позе, что и меш,
+    // а кости двигают уже итоговую форму. Обратный порядок деформировал бы
+    // дельты вместе с костями — лицо «уезжало» бы при повороте головы.
+    vec3 morphedPos = aPos;
+    vec3 morphedNrm = aNormal;
+    ApplyMorphs(morphedPos, morphedNrm);
+
     mat4 skin;
     float wsum = aWeights.x + aWeights.y + aWeights.z + aWeights.w;
     if (uSkinned == 0 || wsum < 0.0001) {
@@ -93,8 +127,8 @@ void main() {
              + aWeights.z * uBones[int(aJoints.z)]
              + aWeights.w * uBones[int(aJoints.w)];
     }
-    vec4 skinnedPos = skin * vec4(aPos, 1.0);
-    vec3 skinnedNormal = mat3(skin) * aNormal;
+    vec4 skinnedPos = skin * vec4(morphedPos, 1.0);
+    vec3 skinnedNormal = mat3(skin) * morphedNrm;
 
     vec4 worldPos = uModel * skinnedPos;
     FragPos = worldPos.xyz;
@@ -134,19 +168,27 @@ void main() {
 )";
 }
 
+// Готовый исходник вершинной стадии: версия + блок морфинга + тело. Склейка
+// здесь, а не в двух местах, гарантирует, что цветной и depth-проход морфят
+// вершину ОДИНАКОВО (см. комментарий у kMorphGlsl).
+std::string SkinVertSource() {
+    return std::string("#version 330 core\n") + kMorphGlsl + kSkinVertBody;
+}
+
 Shader& SkinShader() {
     // Намеренно НЕ уничтожаем: function-local static с деструктором Shader снёс
     // бы GL-программу при выходе из процесса — уже ПОСЛЕ разрушения GL-контекста
     // (segfault в glDeleteProgram). Утечка одной программы на выходе безвредна
     // (ОС всё освободит), зато нет обращения к мёртвому контексту.
-    static Shader* shader = new Shader(Shader::FromSource(kSkinVert, SkinFragSource(), "SkinnedModel"));
+    static Shader* shader =
+        new Shader(Shader::FromSource(SkinVertSource(), SkinFragSource(), "SkinnedModel"));
     return *shader;
 }
 
 // Depth-only скиннинг-шейдер для карты теней: скиннинг в вершинной стадии,
 // пустой фрагмент (пишется только глубина). Позиция/кости в тех же локациях,
 // что и основной скиннинг-шейдер (0/3/4).
-const char* kSkinDepthVert = R"(#version 330 core
+const char* kSkinDepthVertBody = R"(
 layout (location = 0) in vec3 aPos;
 layout (location = 3) in vec4 aJoints;
 layout (location = 4) in vec4 aWeights;
@@ -158,6 +200,10 @@ uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned;
 
 void main() {
+    vec3 morphedPos = aPos;
+    vec3 unusedNrm = vec3(0.0, 1.0, 0.0);
+    ApplyMorphs(morphedPos, unusedNrm);
+
     mat4 skin;
     float wsum = aWeights.x + aWeights.y + aWeights.z + aWeights.w;
     if (uSkinned == 0 || wsum < 0.0001) {
@@ -168,17 +214,80 @@ void main() {
              + aWeights.z * uBones[int(aJoints.z)]
              + aWeights.w * uBones[int(aJoints.w)];
     }
-    gl_Position = uLightSpace * uModel * skin * vec4(aPos, 1.0);
+    gl_Position = uLightSpace * uModel * skin * vec4(morphedPos, 1.0);
 }
 )";
+
+// Исходник depth-стадии: версия + блок морфинга + тело (см. SkinVertSource).
+std::string SkinDepthVertSource() {
+    return std::string("#version 330 core\n") + kMorphGlsl + kSkinDepthVertBody;
+}
 
 const char* kSkinDepthFrag = R"(#version 330 core
 void main() {}
 )";
 
 Shader& SkinDepthShader() {
-    static Shader* shader = new Shader(Shader::FromSource(kSkinDepthVert, kSkinDepthFrag, "SkinnedModelDepth"));
+    static Shader* shader = new Shader(Shader::FromSource(SkinDepthVertSource(), kSkinDepthFrag, "SkinnedModelDepth"));
     return *shader;
+}
+
+} // namespace
+
+namespace {
+
+// Отбирает АКТИВНЫЕ морф-цели submesh и заливает их в шейдер.
+//
+// В кадр идут только цели с ненулевым весом, и не больше восьми: у лица целей
+// бывают десятки, но одновременно шевелится единицы, а цикл в вершинном шейдере
+// стоит по выборке из текстуры на каждую. Если активных больше восьми — берём
+// восемь САМЫХ ВЕСОМЫХ: тихо потерять сильную цель хуже, чем слабую.
+// Единицы текстур 10 и 11. Числа не случайные: 0 — albedo, 1 — карта теней,
+// 6..8 — GI-объём, 9 — лайтмапа (см. sage/gi/GIUpload.h). Совпадение юнита
+// молча ломает морфинг — выборка идёт из чужой текстуры и даёт нули, — поэтому
+// берём заведомо свободные и держим их рядом с этим списком.
+constexpr int kMaxActiveMorphs = 8;
+constexpr int kMorphPosUnit = 10;
+constexpr int kMorphNrmUnit = 11;
+
+void UploadMorphs(const Shader& shader, const SkinnedSubMesh& sub,
+                  const std::vector<float>* weights) {
+    if (!sub.Morphs.Valid() || !weights || weights->empty()) {
+        shader.SetInt("uMorphCount", 0);
+        return;
+    }
+
+    // Пары (вес, индекс) — сортируем по убыванию веса и берём верхушку.
+    std::vector<std::pair<float, int>> active;
+    const int count = std::min((int)weights->size(), sub.Morphs.Count);
+    for (int i = 0; i < count; ++i) {
+        const float w = (*weights)[(size_t)i];
+        if (std::fabs(w) > 1e-4f) active.emplace_back(std::fabs(w), i);
+    }
+    if (active.empty()) {
+        shader.SetInt("uMorphCount", 0);
+        return;
+    }
+    std::sort(active.begin(), active.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    if ((int)active.size() > kMaxActiveMorphs) active.resize(kMaxActiveMorphs);
+
+    int indices[kMaxActiveMorphs] = {};
+    float values[kMaxActiveMorphs] = {};
+    for (size_t i = 0; i < active.size(); ++i) {
+        indices[i] = active[i].second;
+        values[i] = (*weights)[(size_t)active[i].second]; // знак важен: бывают отрицательные веса
+    }
+
+    shader.SetInt("uMorphCount", (int)active.size());
+    shader.SetIntArray("uMorphTarget", indices, (int)active.size());
+    shader.SetFloatArray("uMorphWeight", values, (int)active.size());
+    shader.SetInt("uMorphWidth", sub.Morphs.Width);
+    shader.SetInt("uMorphRows", sub.Morphs.RowsPerTarget);
+    shader.SetInt("uMorphPos", kMorphPosUnit);
+    shader.SetInt("uMorphNrm", kMorphNrmUnit);
+    sub.Morphs.Positions->Bind(kMorphPosUnit);
+    sub.Morphs.Normals->Bind(kMorphNrmUnit);
 }
 
 } // namespace
@@ -187,7 +296,7 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const std::vector<glm::mat4>& bones,
                         const glm::mat4& lightMatrix, unsigned int shadowMap,
-                        bool shadowsEnabled) const {
+                        bool shadowsEnabled, const std::vector<float>* morphWeights) const {
     Shader& shader = SkinShader();
     shader.Use();
     shader.SetMat4("uModel", model);
@@ -221,6 +330,7 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     }
 
     for (const auto& sub : m_subMeshes) {
+        UploadMorphs(shader, sub, morphWeights);
         shader.SetVec3("uObjectColor", sub.Tint);
         shader.SetFloat("uMetallic", sub.Metallic);
         shader.SetFloat("uRoughness", sub.Roughness);
@@ -235,8 +345,10 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     }
 }
 
+
 void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatrix,
-                             const std::vector<glm::mat4>& bones) const {
+                             const std::vector<glm::mat4>& bones,
+                             const std::vector<float>* morphWeights) const {
     Shader& shader = SkinDepthShader();
     shader.Use();
     shader.SetMat4("uLightSpace", lightMatrix);
@@ -250,7 +362,19 @@ void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatri
         shader.SetInt("uSkinned", 0);
     }
 
-    for (const auto& sub : m_subMeshes) sub.Mesh->Draw();
+    for (const auto& sub : m_subMeshes) {
+        // Тень обязана повторять ту же форму, что и сам меш, иначе лицо и его
+        // тень «разъедутся» при любом выражении.
+        UploadMorphs(shader, sub, morphWeights);
+        sub.Mesh->Draw();
+    }
+}
+
+int SkinnedModel::FindMorph(const std::string& name) const {
+    for (size_t i = 0; i < m_morphNames.size(); ++i) {
+        if (m_morphNames[i] == name) return (int)i;
+    }
+    return -1;
 }
 
 // ============================================================================
@@ -317,6 +441,62 @@ std::unique_ptr<SkinnedModel> SkinnedModel::CreateDemoTentacle(int segments) {
     SkinnedSubMesh sub;
     sub.Mesh = std::make_shared<SkinnedMesh>(verts, idx);
     sub.Tint = {0.35f, 0.75f, 0.55f};
+
+    // --- Две морф-цели, как у настоящей модели ---
+    // Блендшейпы нужно на чём-то показывать и чем-то проверять, а лицевой модели
+    // в комплекте движка нет и быть не должно. Цели процедурные и намеренно
+    // разные по характеру: одна меняет толщину (равномерно), вторая — только
+    // верхушку (локально), чтобы было видно, что веса работают независимо.
+    {
+        const int targetCount = 2;
+        const int width = 1024;
+        const int rows = (int)((verts.size() + width - 1) / width);
+        std::vector<float> posDeltas((size_t)width * rows * targetCount * 3u, 0.0f);
+        std::vector<float> nrmDeltas((size_t)width * rows * targetCount * 3u, 0.0f);
+
+        const float topY = rings * segLen;
+        for (size_t v = 0; v < verts.size(); ++v) {
+            const glm::vec3& p = verts[v].Position;
+
+            // Цель 0 «Fatten»: раздуть сечение наружу вдоль нормали.
+            const glm::vec3 fatten = verts[v].Normal * (halfW * 1.6f);
+            const size_t t0 = 0 * (size_t)width * rows + v;
+            posDeltas[t0 * 3 + 0] = fatten.x;
+            posDeltas[t0 * 3 + 1] = fatten.y;
+            posDeltas[t0 * 3 + 2] = fatten.z;
+
+            // Цель 1 «Bend»: отклонить щупалец в сторону тем сильнее, чем выше
+            // вершина. Квадрат по высоте — основание остаётся на месте, а
+            // силуэт меняется заметно; равномерный сдвиг просто переставил бы
+            // модель и ничего не показал бы про деформацию.
+            const float t = topY > 0.0001f ? glm::clamp(p.y / topY, 0.0f, 1.0f) : 0.0f;
+            const glm::vec3 bend(t * t * segLen * 2.5f, 0.0f, 0.0f);
+            const size_t t1 = 1 * (size_t)width * rows + v;
+            posDeltas[t1 * 3 + 0] = bend.x;
+            posDeltas[t1 * 3 + 1] = bend.y;
+            posDeltas[t1 * 3 + 2] = bend.z;
+        }
+
+        sage::rhi::Texture2DDesc desc;
+        desc.Width = width;
+        desc.Height = rows * targetCount;
+        desc.Channels = 3;
+        desc.FilterMode = sage::rhi::Filter::Nearest;
+        desc.WrapMode = sage::rhi::Wrap::ClampEdge;
+        desc.GenerateMipmaps = false;
+        desc.FloatPixels = true;
+
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        sub.Morphs.Positions = device.CreateTexture2D(desc, posDeltas.data());
+        sub.Morphs.Normals = device.CreateTexture2D(desc, nrmDeltas.data());
+        sub.Morphs.Count = targetCount;
+        sub.Morphs.Width = width;
+        sub.Morphs.RowsPerTarget = rows;
+
+        m->m_morphNames = {"Fatten", "Bend"};
+        m->m_morphDefaults.assign((size_t)targetCount, 0.0f);
+    }
+
     m->m_subMeshes.push_back(std::move(sub));
 
     // --- клип «Wave»: каждая кость покачивается по Z с фазовым сдвигом ---
@@ -502,6 +682,33 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
         return t;
     };
 
+    // Ширина текстуры дельт. 1024 — заведомо в пределах любого GL 3.3
+    // (минимум по спецификации 1024) и достаточно широка, чтобы у обычного
+    // лицевого меша получилось несколько десятков строк на цель, а не тысячи.
+    constexpr int kMorphTexWidth = 1024;
+
+    // Имена морф-целей: glTF кладёт их в нестандартное, но общепринятое место —
+    // mesh.extras.targetNames. Без имён блендшейпы пришлось бы выбирать номером,
+    // а художник называет их «улыбка», «моргание», и терять это нельзя.
+    auto readTargetNames = [](const tinygltf::Mesh& mesh, size_t count) {
+        std::vector<std::string> names;
+        const tinygltf::Value& extras = mesh.extras;
+        if (extras.IsObject() && extras.Has("targetNames")) {
+            const tinygltf::Value& arr = extras.Get("targetNames");
+            if (arr.IsArray()) {
+                for (size_t i = 0; i < arr.ArrayLen(); ++i) {
+                    const tinygltf::Value& v = arr.Get((int)i);
+                    names.push_back(v.IsString() ? v.Get<std::string>() : std::string{});
+                }
+            }
+        }
+        names.resize(count);
+        for (size_t i = 0; i < names.size(); ++i) {
+            if (names[i].empty()) names[i] = "Morph " + std::to_string(i);
+        }
+        return names;
+    };
+
     for (const auto& mesh : g.meshes) {
         for (const auto& prim : mesh.primitives) {
             if (prim.mode != TINYGLTF_MODE_TRIANGLES) continue;
@@ -538,6 +745,70 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
             SkinnedSubMesh sub;
             sub.Mesh = std::make_shared<SkinnedMesh>(verts, indices);
             sub.Tint = glm::vec3(1.0f);
+
+            // --- Морф-цели примитива ---
+            if (!prim.targets.empty()) {
+                const int targetCount = (int)prim.targets.size();
+                const int rows = (int)((vc + kMorphTexWidth - 1) / kMorphTexWidth);
+                const size_t texels = (size_t)kMorphTexWidth * rows * targetCount;
+
+                // Три канала (xyz дельты); четвёртый не нужен, но RGB-раскладка
+                // float-текстуры проще и совместимее.
+                std::vector<float> posDeltas(texels * 3u, 0.0f);
+                std::vector<float> nrmDeltas(texels * 3u, 0.0f);
+
+                for (int t = 0; t < targetCount; ++t) {
+                    const auto& target = prim.targets[(size_t)t];
+                    auto tp = target.find("POSITION");
+                    auto tn = target.find("NORMAL");
+                    std::vector<float> dp = tp != target.end() ? ReadFloats(g, tp->second, 3)
+                                                              : std::vector<float>();
+                    std::vector<float> dn = tn != target.end() ? ReadFloats(g, tn->second, 3)
+                                                              : std::vector<float>();
+                    for (size_t v = 0; v < vc; ++v) {
+                        const size_t texel = (size_t)t * kMorphTexWidth * rows + v;
+                        if (dp.size() >= (v + 1) * 3) {
+                            posDeltas[texel * 3 + 0] = dp[v * 3 + 0];
+                            posDeltas[texel * 3 + 1] = dp[v * 3 + 1];
+                            posDeltas[texel * 3 + 2] = dp[v * 3 + 2];
+                        }
+                        if (dn.size() >= (v + 1) * 3) {
+                            nrmDeltas[texel * 3 + 0] = dn[v * 3 + 0];
+                            nrmDeltas[texel * 3 + 1] = dn[v * 3 + 1];
+                            nrmDeltas[texel * 3 + 2] = dn[v * 3 + 2];
+                        }
+                    }
+                }
+
+                // Nearest и без мипов: выборка идёт texelFetch по точному
+                // индексу вершины, любая фильтрация тут только смешала бы
+                // дельты соседних вершин.
+                sage::rhi::Texture2DDesc desc;
+                desc.Width = kMorphTexWidth;
+                desc.Height = rows * targetCount;
+                desc.Channels = 3;
+                desc.FilterMode = sage::rhi::Filter::Nearest;
+                desc.WrapMode = sage::rhi::Wrap::ClampEdge;
+                desc.GenerateMipmaps = false;
+                desc.FloatPixels = true;
+
+                sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+                sub.Morphs.Positions = device.CreateTexture2D(desc, posDeltas.data());
+                sub.Morphs.Normals = device.CreateTexture2D(desc, nrmDeltas.data());
+                sub.Morphs.Count = targetCount;
+                sub.Morphs.Width = kMorphTexWidth;
+                sub.Morphs.RowsPerTarget = rows;
+
+                // Имена и стартовые веса берём у ПЕРВОГО примитива с морфами:
+                // в glTF цели общие для всего меша, а модель у нас одна.
+                if (model->m_morphNames.empty()) {
+                    model->m_morphNames = readTargetNames(mesh, (size_t)targetCount);
+                    model->m_morphDefaults.assign((size_t)targetCount, 0.0f);
+                    for (size_t i = 0; i < mesh.weights.size() && i < model->m_morphDefaults.size(); ++i) {
+                        model->m_morphDefaults[i] = (float)mesh.weights[i];
+                    }
+                }
+            }
             if (prim.material >= 0 && prim.material < (int)g.materials.size()) {
                 const auto& pbr = g.materials[prim.material].pbrMetallicRoughness;
                 if (pbr.baseColorFactor.size() == 4)

@@ -42,6 +42,8 @@ public:
     void SetVec2(const std::string& name, const glm::vec2& value) const { m_program->SetVec2(name, value); }
     void SetFloat(const std::string& name, float value) const { m_program->SetFloat(name, value); }
     void SetInt(const std::string& name, int value) const { m_program->SetInt(name, value); }
+    void SetIntArray(const std::string& name, const int* v, int count) const { m_program->SetIntArray(name, v, count); }
+    void SetFloatArray(const std::string& name, const float* v, int count) const { m_program->SetFloatArray(name, v, count); }
 
 private:
     static std::string ReadFile(const std::string& path);
