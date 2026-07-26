@@ -1,6 +1,7 @@
 #pragma once
 #include "Mesh.h"
 #include "Material.h"
+#include "Skybox.h"
 #include "ModelLoader.h"
 #include "Texture.h"
 #include "sage/core/Log.h"
@@ -97,6 +98,12 @@ public:
 
     std::shared_ptr<Material> GetMaterial(const std::string& path);
 
+    // Небо из каталога с гранями px/nx/py/ny/pz/nz. Кэшируется по пути: сцена
+    // спрашивает его КАЖДЫЙ кадр, а сборка cubemap — это шесть декодирований
+    // картинок и загрузка в VRAM. nullptr при ошибке кэшируется тоже, иначе
+    // битый путь пытался бы грузиться в каждом кадре.
+    std::shared_ptr<Skybox> GetSkybox(const std::string& directory);
+
     // Перечитать материал с диска В ТОТ ЖЕ разделяемый экземпляр (все
     // держатели видят обновление). Если не кэширован — просто загрузит.
     std::shared_ptr<Material> ReloadMaterial(const std::string& path);
@@ -168,6 +175,7 @@ private:
     std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
+    std::unordered_map<std::string, std::shared_ptr<Skybox>> m_skyboxes;
 
     // Запись кэша текстуры: сам ресурс + учёт для бюджета/LRU + флаг «ещё
     // грузится» (плейсхолдер, реальные байты пока не в VRAM).

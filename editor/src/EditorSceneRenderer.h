@@ -63,6 +63,8 @@ public:
                                               const LightingEnvironment& env);
 
 private:
+    // Небо кадра (кубическая текстура или процедурный градиент).
+    void DrawSky(const LightingEnvironment& env, const glm::mat4& view, const glm::mat4& proj);
     void DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
                  const glm::mat4& proj, glm::vec3 viewPos, int shadingMode, bool wireframe);
     // Аутлайн выделения — робастный пост-проход: силуэт объекта в масочный

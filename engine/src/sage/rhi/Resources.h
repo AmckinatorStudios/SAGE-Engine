@@ -48,6 +48,10 @@ public:
     virtual void SetMat4(const std::string& name, const glm::mat4& v) const = 0;
     // Массив матриц (напр. палитра костей скелетной анимации uBones[N]).
     virtual void SetMat4Array(const std::string& name, const glm::mat4* v, int count) const = 0;
+    // Массивы скаляров — нужны блендшейпам: индексы и веса активных морф-целей
+    // передаются пачкой, по одному вызову на кадр вместо N.
+    virtual void SetIntArray(const std::string& name, const int* v, int count) const = 0;
+    virtual void SetFloatArray(const std::string& name, const float* v, int count) const = 0;
     virtual void SetVec4(const std::string& name, const glm::vec4& v) const = 0;
     virtual void SetVec3(const std::string& name, const glm::vec3& v) const = 0;
     virtual void SetVec2(const std::string& name, const glm::vec2& v) const = 0;
@@ -146,11 +150,38 @@ struct RenderTargetDesc {
     int Width = 0;
     int Height = 0;
     RenderTargetKind Kind = RenderTargetKind::ColorHDRWithDepth;
+    // Число сэмплов на пиксель (MSAA). 1 — обычный таргет.
+    //
+    // Сглаживание кромок бывает двух разных природ, и путать их нельзя.
+    // Экранный фильтр (FXAA) работает по ГОТОВОЙ картинке: он ищет перепад
+    // яркости и замывает его — то есть догадывается о кромке по результату, уже
+    // потерявшему информацию. На пологой кромке (горизонт, длинная грань пола)
+    // догадаться не по чему, и лесенка остаётся.
+    //
+    // MSAA решает задачу там, где информация ещё есть: растеризатор считает
+    // ПОКРЫТИЕ пикселя геометрией по нескольким точкам и смешивает по нему.
+    // Кромка любого наклона получает честные промежуточные значения.
+    //
+    // Поддерживается только у ColorHDRWithDepth: сглаживать промежуточные
+    // буферы пост-эффектов бессмысленно (в них нет геометрии), а карту теней —
+    // вредно (глубину нельзя усреднять, среднее двух глубин не является
+    // глубиной ничего).
+    int Samples = 1;
 };
 
 class RenderTarget {
 public:
     virtual ~RenderTarget() = default;
+    // Переносит многосэмпловое содержимое в обычные текстуры, которые отдают
+    // ColorTextureHandle/DepthTextureHandle. У таргета без MSAA — пустышка,
+    // поэтому вызывать можно всегда и не спрашивать, включён ли он.
+    //
+    // Отдельным шагом, а не внутри ColorTextureHandle, намеренно: разрешение
+    // стоит полного копирования кадра, и делать его на каждое обращение к
+    // текстуре значило бы платить за него по нескольку раз за проход.
+    virtual void Resolve() {}
+    // Сколько сэмплов на пиксель реально выделено (1 — MSAA нет).
+    virtual int Samples() const { return 1; }
     // Делает таргет активным и выставляет viewport под его размер.
     virtual void Bind() const = 0;
     // Пересоздаёт хранилище под новый размер (no-op, если не изменился).

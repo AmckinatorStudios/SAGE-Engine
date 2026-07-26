@@ -254,7 +254,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             }
         }
         m_cull.push_back(CullItem{mesh, model, mat, EffectiveColor(mr), lmPage,
-                                  mat && mat->HasMaps(), /*visible*/ false});
+                                  mat && mat->HasMaps(), /*visible*/ false, e});
     });
 
     // 2) ПАРАЛЛЕЛЬНОЕ отсечение: каждый элемент независим — поток пишет только
@@ -377,6 +377,100 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         }
     }
     return m_stats;
+}
+
+// --- Проход скоростей ------------------------------------------------------
+//
+// Вершина проецируется ДВАЖДЫ: своей матрицей этого кадра и своей матрицей
+// прошлого. Разница их экранных позиций и есть вектор скорости пикселя.
+//
+// Считать её именно в вершинном шейдере, а не восстанавливать из глубины,
+// принципиально: восстановление знает только, куда сместилась КАМЕРА, и
+// молча считает мир неподвижным.
+namespace {
+
+const char* kVelocityVert = R"(#version 330 core
+layout(location = 0) in vec3 aPos;
+
+uniform mat4 uViewProj;
+uniform mat4 uPrevViewProj;
+uniform mat4 uModel;
+uniform mat4 uPrevModel;
+
+out vec4 vClip;
+out vec4 vPrevClip;
+
+void main() {
+    vClip     = uViewProj     * uModel     * vec4(aPos, 1.0);
+    vPrevClip = uPrevViewProj * uPrevModel * vec4(aPos, 1.0);
+    gl_Position = vClip;
+}
+)";
+
+const char* kVelocityFrag = R"(#version 330 core
+in vec4 vClip;
+in vec4 vPrevClip;
+out vec4 FragColor;
+
+void main() {
+    // Перспективное деление делаем ЗДЕСЬ, а не во вершинном шейдере: между
+    // вершинами интерполируется clip-позиция, и делить надо уже
+    // проинтерполированное значение, иначе скорость внутри крупного
+    // треугольника считается неверно.
+    if (abs(vClip.w) < 1e-6 || abs(vPrevClip.w) < 1e-6) { FragColor = vec4(0.0); return; }
+    vec2 ndc     = vClip.xy / vClip.w;
+    vec2 prevNdc = vPrevClip.xy / vPrevClip.w;
+    // В долях экрана (0..1), как их читает проход смаза: NDC вдвое шире.
+    FragColor = vec4((ndc - prevNdc) * 0.5, 0.0, 1.0);
+}
+)";
+
+Shader& VelocityShader() {
+    static Shader* s = new Shader(Shader::FromSource(kVelocityVert, kVelocityFrag, "RenderBatchVelocity"));
+    return *s;
+}
+
+} // namespace
+
+void RenderBatch::ResetVelocityHistory() {
+    m_prevWorld.clear();
+    m_hasPrevFrame = false;
+}
+
+void RenderBatch::RenderVelocity(const glm::mat4& viewProj, const glm::mat4& prevViewProj) {
+    Shader& sh = VelocityShader();
+    sh.Use();
+    sh.SetMat4("uViewProj", viewProj);
+    sh.SetMat4("uPrevViewProj", prevViewProj);
+
+    for (const CullItem& c : m_cull) {
+        if (!c.Visible || !c.Mesh_) continue;
+
+        // Матрица прошлого кадра. Если сущности тогда не было — берём текущую:
+        // нулевая скорость честнее, чем смаз из случайной точки, где её никогда
+        // не было. То же на первом кадре после сброса истории.
+        glm::mat4 prev = c.Model;
+        if (m_hasPrevFrame) {
+            auto it = m_prevWorld.find(c.Entity);
+            if (it != m_prevWorld.end()) prev = it->second;
+        }
+        sh.SetMat4("uModel", c.Model);
+        sh.SetMat4("uPrevModel", prev);
+        c.Mesh_->Draw();
+    }
+
+}
+
+void RenderBatch::AdvanceVelocityHistory() {
+    // Снимок берём с ПОЛНОГО кэша мировых матриц, а не с видимого списка:
+    // объект, вылетевший за край кадра и вернувшийся, иначе потерял бы историю
+    // и на первом же кадре возврата дал бы нулевую скорость посреди движения.
+    //
+    // Таблица строится заново, а не дополняется: иначе удалённые сущности
+    // копились бы в ней бесконечно.
+    m_prevWorld.clear();
+    for (const auto& kv : m_worldCache) m_prevWorld[kv.first] = kv.second;
+    m_hasPrevFrame = !m_prevWorld.empty();
 }
 
 void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {

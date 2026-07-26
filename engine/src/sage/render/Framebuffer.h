@@ -22,11 +22,15 @@
 // ---------------------------------------------------------------------
 class Framebuffer {
 public:
-    Framebuffer(int width, int height) {
+    // samples > 1 — сглаживание кромок средствами растеризатора (MSAA). Рисовать
+    // в такой буфер можно как обычно, но ПЕРЕД чтением ColorTexture/DepthTexture
+    // надо вызвать Resolve: наружу отдаются обычные текстуры, а не многосэмпловые.
+    explicit Framebuffer(int width, int height, int samples = 1) {
         sage::rhi::RenderTargetDesc desc;
         desc.Width = width;
         desc.Height = height;
         desc.Kind = sage::rhi::RenderTargetKind::ColorHDRWithDepth;
+        desc.Samples = samples;
         m_target = sage::rhi::GraphicsDevice::Get().CreateRenderTarget(desc);
     }
 
@@ -41,6 +45,12 @@ public:
     // Пересоздаёт хранилище под новый размер (no-op, если не изменился) —
     // безопасно звать каждый кадр.
     void Resize(int width, int height) { m_target->Resize(width, height); }
+
+    // Переносит многосэмпловое содержимое в обычные текстуры. Без MSAA — пустышка.
+    // Зовётся один раз после всей отрисовки в этот буфер и до первого чтения.
+    void Resolve() const { m_target->Resolve(); }
+    // Сколько сэмплов реально выделено (1 — MSAA нет или недоступен).
+    int Samples() const { return m_target->Samples(); }
 
     // Нативный хендл текстуры цвета — для сэмплирования проходом пост-процесса
     // (GraphicsDevice::BindTexture2D) и показа в ImGui (viewport редактора).

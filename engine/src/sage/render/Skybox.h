@@ -11,18 +11,30 @@
 // от вокселей и подходит для любой 3D-игры.
 //
 // Использование:
-//   Skybox skybox({
-//       "assets/textures/skybox/px.png", "assets/textures/skybox/nx.png",
-//       "assets/textures/skybox/py.png", "assets/textures/skybox/ny.png",
-//       "assets/textures/skybox/pz.png", "assets/textures/skybox/nz.png"
-//   });
+//   auto sky = Skybox::LoadFromDirectory("assets/textures/sky");
 //   ...
-//   skybox.Draw(shader, view, projection); // рисовать ПЕРВЫМ, до остальной сцены
+//   sky->Draw(view, projection);   // рисовать ПЕРВЫМ, до остальной сцены
+//
+// Шейдер ВСТРОЕН (как у SkyRenderer): внешних файлов не требуется. Раньше Draw
+// принимал Shader извне, а подходящего assets/shaders/skybox.* в репозитории не
+// было — класс формально существовал, но воспользоваться им было нечем. Старая
+// перегрузка со своим шейдером сохранена: она нужна тем, кто хочет свой разбор
+// освещения неба.
 class Skybox {
 public:
     // faces — ровно 6 путей к картинкам, в порядке:
     // +X, -X, +Y (верх), -Y (низ), +Z, -Z
     explicit Skybox(const std::array<std::string, 6>& faces);
+
+    // Грани по общепринятым именам внутри каталога: px/nx/py/ny/pz/nz с
+    // расширением png, jpg, jpeg, tga или bmp (ищутся в этом порядке). Так
+    // распространяются почти все наборы неба, и пользователю достаточно указать
+    // ОДНУ папку вместо шести путей. nullptr, если каталога нет или в нём не
+    // хватает граней; причина уходит в лог.
+    static std::unique_ptr<Skybox> LoadFromDirectory(const std::string& directory);
+
+    // Имена граней в порядке +X, -X, +Y, -Y, +Z, -Z (без расширения).
+    static const std::array<const char*, 6>& FaceNames();
 
     Skybox(const Skybox&) = delete;
     Skybox& operator=(const Skybox&) = delete;
@@ -36,7 +48,16 @@ public:
     void Draw(Shader& shader, const glm::mat4& view, const glm::mat4& projection,
               const glm::vec3& tint = glm::vec3(1.0f)) const;
 
+    // Отрисовка встроенным шейдером — обычный путь.
+    //   intensity  — множитель яркости неба (экспозиция окружения);
+    //   rotationDeg— поворот неба вокруг вертикали: позволяет развернуть готовый
+    //                набор так, чтобы солнце на картинке совпало с солнцем сцены.
+    void Draw(const glm::mat4& view, const glm::mat4& projection,
+              float intensity = 1.0f, float rotationDeg = 0.0f) const;
+
 private:
+    void DrawInternal(const glm::mat4& view, const glm::mat4& projection) const;
+
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
     std::unique_ptr<sage::rhi::TextureCube> m_cubemap;
 };

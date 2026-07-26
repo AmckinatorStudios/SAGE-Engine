@@ -48,12 +48,36 @@ private:
     size_t m_indexCount = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Блендшейпы (морф-цели). Мимика и всё, что скелетом не выражается: скелет
+// двигает жёсткие части, морфы меняют саму форму поверхности.
+//
+// Хранение — ДЕЛЬТЫ в float-текстуре, а не дополнительные вершинные атрибуты.
+// Атрибутов в GL 3.3 шестнадцать, пять уже заняты скиннингом, и на каждую цель
+// ушло бы по два (позиция + нормаль): четыре-пять целей — потолок, а лицу их
+// нужны десятки. Текстура же ограничена только памятью, и цена выборки платится
+// лишь за АКТИВНЫЕ цели: в кадр уходят индексы и веса только тех, чей вес не ноль.
+//
+// Раскладка: ширина фиксирована (kMorphTexWidth), вершина v цели t лежит в
+// строке t*RowsPerTarget + v/W, колонке v%W. Такая свёртка нужна, потому что
+// вершин в меше бывает больше, чем максимальная ширина текстуры.
+struct MorphData {
+    std::unique_ptr<sage::rhi::Texture2D> Positions; // дельты позиций (RGB, float)
+    std::unique_ptr<sage::rhi::Texture2D> Normals;   // дельты нормалей (RGB, float)
+    int Count = 0;        // сколько целей
+    int Width = 0;        // ширина текстуры в вершинах
+    int RowsPerTarget = 0;
+
+    bool Valid() const { return Count > 0 && Positions && Normals; }
+};
+
 struct SkinnedSubMesh {
     std::shared_ptr<SkinnedMesh> Mesh;
     std::shared_ptr<Texture> Diffuse; // может быть nullptr — тогда только Tint
     glm::vec3 Tint{1.0f};
     float Metallic = 0.0f;   // PBR (metallic-roughness) — из glTF-материала или дефолт
     float Roughness = 0.6f;
+    MorphData Morphs;        // пусто, если у примитива нет морф-целей
 };
 
 class SkinnedModel {
@@ -71,27 +95,44 @@ public:
     const std::vector<sage::anim::AnimationClip>& Clips() const { return m_clips; }
     int SubMeshCount() const { return (int)m_subMeshes.size(); }
 
+    // --- Блендшейпы ---
+    // Имена морф-целей модели. Их порядок — это и есть порядок весов, которые
+    // передаются в Draw: индекс в этом списке = индекс веса.
+    const std::vector<std::string>& MorphNames() const { return m_morphNames; }
+    int MorphCount() const { return (int)m_morphNames.size(); }
+    // Веса по умолчанию из файла (glTF mesh.weights) — стартовое выражение лица,
+    // если художник его задал.
+    const std::vector<float>& DefaultMorphWeights() const { return m_morphDefaults; }
+    // Индекс цели по имени, -1 — нет такой. Имя устойчиво к переэкспорту, номер нет.
+    int FindMorph(const std::string& name) const;
+
     // Рисует все submesh со скиннингом по палитре костей bones (из Animator),
     // с ПОЛНЫМ освещением сцены (ambient/солнце+тени/точечные/прожекторы/туман) —
     // тем же, что и статические меши. lightMatrix/shadowMap/shadowsEnabled —
     // карта теней от солнца (как в статическом lit-проходе). Если bones пуст —
     // bind-поза (единичные кости).
+    // morphWeights — веса блендшейпов в порядке MorphNames(); пусто или
+    // nullptr — форма как в файле.
     void Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
               const glm::vec3& viewPos, const LightingEnvironment& env,
               const std::vector<glm::mat4>& bones,
-              const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled) const;
+              const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled,
+              const std::vector<float>* morphWeights = nullptr) const;
 
     // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей
     // позе — чтобы анимированная модель ОТБРАСЫВАЛА тень. Вызывается внутри
     // depth-прохода солнца (после static-геометрии, до EndRender). lightMatrix —
     // uLightSpace прохода. bones пуст — bind-поза.
     void DrawDepth(const glm::mat4& model, const glm::mat4& lightMatrix,
-                   const std::vector<glm::mat4>& bones) const;
+                   const std::vector<glm::mat4>& bones,
+                   const std::vector<float>* morphWeights = nullptr) const;
 
 private:
     std::vector<SkinnedSubMesh> m_subMeshes;
     sage::anim::Skeleton m_skeleton;
     std::vector<sage::anim::AnimationClip> m_clips;
+    std::vector<std::string> m_morphNames;
+    std::vector<float> m_morphDefaults;
 };
 
 } // namespace sage::render

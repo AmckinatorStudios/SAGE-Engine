@@ -97,6 +97,9 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["skybox"]["enabled"] = lighting.Skybox.Enabled;
     j["skybox"]["top"] = Vec3ToJson(lighting.Skybox.TopColor);
     j["skybox"]["horizon"] = Vec3ToJson(lighting.Skybox.HorizonColor);
+    j["skybox"]["cubemapDir"] = lighting.Skybox.CubemapDir;
+    j["skybox"]["intensity"] = lighting.Skybox.Intensity;
+    j["skybox"]["rotation"] = lighting.Skybox.RotationDeg;
     return j;
 }
 
@@ -158,6 +161,9 @@ static LightingEnvironment LightingFromJson(const json& root) {
         lighting.Skybox.Enabled = sj.value("enabled", lighting.Skybox.Enabled);
         if (sj.contains("top")) lighting.Skybox.TopColor = Vec3FromJson(sj["top"]);
         if (sj.contains("horizon")) lighting.Skybox.HorizonColor = Vec3FromJson(sj["horizon"]);
+        lighting.Skybox.CubemapDir = sj.value("cubemapDir", lighting.Skybox.CubemapDir);
+        lighting.Skybox.Intensity = sj.value("intensity", lighting.Skybox.Intensity);
+        lighting.Skybox.RotationDeg = sj.value("rotation", lighting.Skybox.RotationDeg);
     }
     return lighting;
 }
@@ -185,7 +191,10 @@ static GIStaticComponent ParseGIStatic(const json& gj) {
 }
 
 static void SaveCamera(json& j, const CameraComponent& cam) {
+    j["camera"]["projection"] =
+        cam.Mode == CameraComponent::Projection::Orthographic ? "orthographic" : "perspective";
     j["camera"]["fov"] = cam.Fov;
+    j["camera"]["orthoHeight"] = cam.OrthoHeight;
     j["camera"]["near"] = cam.NearClip;
     j["camera"]["far"] = cam.FarClip;
     j["camera"]["primary"] = cam.Primary;
@@ -193,7 +202,12 @@ static void SaveCamera(json& j, const CameraComponent& cam) {
 
 static CameraComponent ParseCamera(const json& cj) {
     CameraComponent cam;
+    // Сцена без поля projection — от версии до орто-камер: перспектива.
+    cam.Mode = cj.value("projection", std::string("perspective")) == "orthographic"
+                   ? CameraComponent::Projection::Orthographic
+                   : CameraComponent::Projection::Perspective;
     cam.Fov = cj.value("fov", cam.Fov);
+    cam.OrthoHeight = cj.value("orthoHeight", cam.OrthoHeight);
     cam.NearClip = cj.value("near", cam.NearClip);
     cam.FarClip = cj.value("far", cam.FarClip);
     cam.Primary = cj.value("primary", cam.Primary);

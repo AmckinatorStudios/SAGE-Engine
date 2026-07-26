@@ -30,6 +30,13 @@ static void EnsureReady(AnimatedModelComponent& am) {
     }
     am.Anim.SetRig(&am.Model->GetSkeleton(), &am.Model->Clips());
     am.Anim.SetSpeed(am.Speed);
+    // Веса блендшейпов появляются только вместе с моделью — до её загрузки
+    // неизвестно даже, сколько их. Стартовое выражение берём из файла: художник
+    // мог задать его в glTF (mesh.weights).
+    if (am.MorphWeights.empty() && am.Model->MorphCount() > 0) {
+        am.MorphWeights = am.Model->DefaultMorphWeights();
+        am.MorphWeights.resize((size_t)am.Model->MorphCount(), 0.0f);
+    }
     if (am.Model->Clips().empty()) return;      // нет клипов — остаётся bind-поза
     int clip = (am.Clip >= 0 && am.Clip < am.Model->Clips().size()) ? am.Clip : 0;
     am.Anim.Play(clip, am.Loop);
@@ -64,7 +71,7 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
         AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
         if (!am.Model) continue;
         am.Model->Draw(scene.WorldMatrix(e), view, proj, viewPos, env, am.Anim.BoneMatrices(),
-                       lightMatrix, shadowMap, shadowsEnabled);
+                       lightMatrix, shadowMap, shadowsEnabled, &am.MorphWeights);
     }
 }
 
@@ -73,7 +80,8 @@ void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix) {
     for (auto e : v) {
         AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
         if (!am.Model) continue;
-        am.Model->DrawDepth(scene.WorldMatrix(e), lightMatrix, am.Anim.BoneMatrices());
+        am.Model->DrawDepth(scene.WorldMatrix(e), lightMatrix, am.Anim.BoneMatrices(),
+                            &am.MorphWeights);
     }
 }
 

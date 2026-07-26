@@ -15,6 +15,8 @@ public:
     void Use() const override;
     void SetMat4(const std::string& name, const glm::mat4& v) const override;
     void SetMat4Array(const std::string& name, const glm::mat4* v, int count) const override;
+    void SetIntArray(const std::string& name, const int* v, int count) const override;
+    void SetFloatArray(const std::string& name, const float* v, int count) const override;
     void SetVec4(const std::string& name, const glm::vec4& v) const override;
     void SetVec3(const std::string& name, const glm::vec3& v) const override;
     void SetVec2(const std::string& name, const glm::vec2& v) const override;
@@ -100,6 +102,8 @@ public:
     int Height() const override { return m_height; }
     unsigned int ColorTextureHandle() const override { return m_colorTex; }
     unsigned int DepthTextureHandle() const override { return m_depthTex; }
+    void Resolve() override;
+    int Samples() const override { return m_samples; }
 
 private:
     void CreateStorage();
@@ -107,10 +111,18 @@ private:
 
     RenderTargetKind m_kind;
     int m_width = 0, m_height = 0;
+    int m_samples = 1;
     unsigned int m_fbo = 0;
     unsigned int m_colorTex = 0;  // ColorHDRWithDepth
     unsigned int m_depthRbo = 0;  // ColorHDRWithDepth
     unsigned int m_depthTex = 0;  // DepthOnly
+    // MSAA: рисуем в многосэмпловый FBO, а наружу отдаём обычные текстуры выше.
+    // Сэмплировать многосэмпловую текстуру обычным sampler2D нельзя, а весь
+    // пост-процесс написан именно под него — поэтому нужен явный перенос
+    // (glBlitFramebuffer), а не «просто ещё один формат вложения».
+    unsigned int m_msFbo = 0;
+    unsigned int m_msColor = 0;   // многосэмпловый renderbuffer цвета
+    unsigned int m_msDepth = 0;   // многосэмпловый renderbuffer глубины
 };
 
 } // namespace sage::rhi

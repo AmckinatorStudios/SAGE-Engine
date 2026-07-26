@@ -205,6 +205,16 @@ int ResourceManager::PumpAsyncUploads() {
     return uploaded;
 }
 
+std::shared_ptr<Skybox> ResourceManager::GetSkybox(const std::string& directory) {
+    if (directory.empty()) return nullptr;
+    auto it = m_skyboxes.find(directory);
+    if (it != m_skyboxes.end()) return it->second; // в т.ч. закэшированный nullptr
+
+    std::shared_ptr<Skybox> sky = Skybox::LoadFromDirectory(directory);
+    m_skyboxes[directory] = sky;
+    return sky;
+}
+
 std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) {
     auto it = m_materials.find(path);
     if (it != m_materials.end()) return it->second;
@@ -339,6 +349,7 @@ void ResourceManager::Clear() {
     m_cone.reset();
     m_models.clear();
     m_materials.clear();
+    m_skyboxes.clear(); // GPU-ресурс: чистится, пока GL-контекст ещё жив
     m_textures.clear();
     m_textureBytes = 0;
     // m_evictions/m_tick намеренно НЕ сбрасываем — это счётчики за жизнь процесса.

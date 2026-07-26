@@ -7,6 +7,7 @@
 #include "sage/core/Application.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/render/ParticleECS.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
 #include "sage/ecs/CameraView.h"
@@ -37,7 +38,31 @@ sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::Engin
     fx.BloomIntensity = cfg.BloomIntensity;
     fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
     fx.AORadius = cfg.AORadius;
+    fx.DofEnabled = cfg.DepthOfField; fx.FocusDistance = cfg.FocusDistance;
+    fx.Aperture = cfg.Aperture; fx.DofMaxRadius = cfg.DofMaxRadius;
+    fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
+    fx.MotionBlurSamples = cfg.MotionBlurSamples;
+    fx.ChromaticAberration = cfg.ChromaticAberration;
+    fx.FxaaEnabled = cfg.Fxaa;
+    fx.FxaaContrastThreshold = cfg.FxaaContrastThreshold;
     return fx;
+}
+
+// Небо кадра: кубическая текстура, если у сцены задан её каталог, иначе
+// процедурный градиент. Одна точка на оба окна редактора — иначе вьюпорт и
+// окно игры легко разъезжаются по фону.
+void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat4& view,
+                                  const glm::mat4& proj) {
+    if (!env.Skybox.Enabled) return;
+    if (env.Skybox.HasCubemap()) {
+        if (std::shared_ptr<Skybox> sky = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir)) {
+            sky->Draw(view, proj, env.Skybox.Intensity, env.Skybox.RotationDeg);
+            return;
+        }
+        // Каталог задан, но не читается — падать на этом нельзя, поэтому
+        // молча остаёмся на градиенте (причина уже в логе от ResourceManager).
+    }
+    m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
 }
 
 void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env) {
@@ -225,8 +250,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     outView = camera.GetViewMatrix();
     outProj = camera.GetProjectionMatrix((float)m_vpW / (float)std::max(m_vpH, 1));
 
-    if (env.Skybox.Enabled)
-        m_sky->Draw(outView, outProj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    DrawSky(env, outView, outProj);
 
     // Режим рендера из тулбара: Shaded(0)/Unlit(1)/Normals(2); Wireframe — unlit + линии.
     int shadingMode = 0;
@@ -272,7 +296,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     if (cfg.PostProcessing && mode == EditorRenderMode::Shaded) {
         m_postFbo->Resize(m_vpW, m_vpH);
         m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
-                         m_sceneFbo->Width(), m_sceneFbo->Height(), outProj, FxFromConfig(cfg),
+                         m_sceneFbo->Width(), m_sceneFbo->Height(), outProj, outView,
+                         FxFromConfig(cfg),
                          /*output=*/&*m_postFbo, 0, 0, m_vpW, m_vpH);
         m_postApplied = true;
     }
@@ -302,8 +327,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
 
-    if (env.Skybox.Enabled)
-        m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    DrawSky(env, view, proj);
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
     sage::anim::DrawAnimatedModels(scene, view, proj, camPos, env,
@@ -314,7 +338,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     if (cfg.PostProcessing) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
-                             m_gameFbo->Width(), m_gameFbo->Height(), proj, FxFromConfig(cfg),
+                             m_gameFbo->Width(), m_gameFbo->Height(), proj, view,
+                             FxFromConfig(cfg),
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
         m_gamePostApplied = true;
     }

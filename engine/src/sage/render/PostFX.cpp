@@ -134,8 +134,219 @@ void main() {
 }
 )";
 
+// --- Глубина резкости: gather-размытие по кругу нерезкости из глубины ---
+//
+// Классическая проблема экранного DoF — «протекание» резкого переднего плана на
+// размытый фон. Решается правилом сбора: сэмпл участвует в размытии пикселя,
+// только если ОН САМ достаточно размыт, чтобы дотянуться сюда своим кругом
+// нерезкости (или если он дальше от камеры, чем текущий пиксель). Поэтому
+// каждый сэмпл проверяется по собственной глубине, а не берётся вслепую.
+const char* kDofFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform sampler2D uScene;
+uniform sampler2D uDepth;
+uniform mat4 uInvProj;
+uniform vec2 uTexel;
+uniform float uFocus;      // расстояние до плоскости фокуса, единицы мира
+uniform float uAperture;   // f-число
+uniform float uMaxRadius;  // потолок радиуса, пиксели
+
+// Расстояние от камеры вдоль взгляда (положительное).
+float LinearDepth(vec2 uv) {
+    float d = texture(uDepth, uv).r;
+    vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    return -(c.z / max(abs(c.w), 1e-6)) * sign(c.w);
+}
+
+// Радиус круга нерезкости в пикселях.
+//
+// Считается по РАЗНИЦЕ ОБРАТНЫХ РАССТОЯНИЙ (диоптрий), а не по относительному
+// отклонению: именно так ведёт себя тонкая линза. Разница принципиальная —
+// |d - focus| / d уже при полуторакратном удалении от плоскости фокуса упирается
+// в потолок, и весь фон превращается в кашу; |1/focus - 1/d| растёт плавно и
+// насыщается только на действительно далёких планах. Диафрагма делит результат:
+// f/1.4 размывает сильно, f/16 оставляет резким почти всё.
+float Coc(float depth) {
+    float diopters = abs(1.0 / max(uFocus, 1e-3) - 1.0 / max(depth, 1e-3));
+    return clamp(diopters * (15.0 / max(uAperture, 0.7)), 0.0, 1.0) * uMaxRadius;
+}
+
+void main() {
+    float depth = LinearDepth(vUV);
+    float coc = Coc(depth);
+
+    vec3 sum = texture(uScene, vUV).rgb;
+    float weight = 1.0;
+
+    if (coc > 0.75) { // меньше пикселя — размывать нечего
+        const int N = 24;
+        for (int i = 0; i < N; ++i) {
+            // Спираль по золотому углу: равномерное покрытие диска без таблиц.
+            float fi = (float(i) + 0.5) / float(N);
+            float ang = float(i) * 2.39996323;
+            float r = sqrt(fi) * coc;
+            vec2 suv = vUV + vec2(cos(ang), sin(ang)) * r * uTexel;
+
+            float sd = LinearDepth(suv);
+            float sc = Coc(sd);
+            // Дальний сэмпл виден всегда; ближний — только если его собственный
+            // круг нерезкости дотягивается до нас (иначе резкий передний план
+            // размазался бы по фону).
+            float w = (sd >= depth) ? 1.0 : smoothstep(0.0, 1.0, sc / max(r, 1e-3));
+            sum += texture(uScene, suv).rgb * w;
+            weight += w;
+        }
+    }
+    FragColor = vec4(sum / weight, 1.0);
+}
+)";
+
+// --- Motion blur: камерный, по репроекции глубины матрицей прошлого кадра ---
+//
+// Мировая позиция пикселя восстанавливается из глубины, затем проецируется
+// матрицей ПРОШЛОГО кадра. Разница экранных координат — вектор скорости; вдоль
+// него и усредняется цвет. Так смазывается движение и поворот камеры, чего
+// достаточно для съёмки; смаз от движения самих объектов потребовал бы
+// отдельного буфера скоростей на этапе геометрии.
+const char* kMotionFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform sampler2D uScene;
+uniform sampler2D uDepth;
+uniform sampler2D uVelocity;  // буфер скоростей (если uUseVelocity == 1)
+uniform mat4 uInvViewProj;   // обратная view-projection ЭТОГО кадра
+uniform mat4 uPrevViewProj;  // view-projection ПРОШЛОГО кадра
+uniform float uAmount;
+uniform int uSamples;
+uniform int uUseVelocity;    // 1 — брать вектор из буфера скоростей
+
+void main() {
+    vec2 velocity;
+
+    if (uUseVelocity == 1) {
+        // Готовый вектор из прохода геометрии: он уже учитывает и движение
+        // камеры, и собственное движение объекта.
+        velocity = texture(uVelocity, vUV).xy * uAmount;
+    } else {
+        // Запасной путь без буфера скоростей: мир считается неподвижным, и
+        // смаз получается только от камеры (см. комментарий к PostFX::Render).
+        float d = texture(uDepth, vUV).r;
+
+        vec4 clip = vec4(vUV * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+        vec4 world = uInvViewProj * clip;
+        if (abs(world.w) < 1e-6) { FragColor = texture(uScene, vUV); return; }
+        world /= world.w;
+
+        vec4 prevClip = uPrevViewProj * world;
+        if (prevClip.w < 1e-6) { FragColor = texture(uScene, vUV); return; } // за камерой
+        vec2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+
+        velocity = (vUV - prevUV) * uAmount;
+    }
+
+    // Потолок длины: резкий рывок камеры иначе размазал бы кадр целиком, и
+    // вместо смаза получилась бы каша.
+    const float kMaxLen = 0.05;
+    float len = length(velocity);
+    if (len < 1e-5) { FragColor = texture(uScene, vUV); return; }
+    if (len > kMaxLen) velocity *= kMaxLen / len;
+
+    vec3 sum = vec3(0.0);
+    int n = max(uSamples, 2);
+    for (int i = 0; i < n; ++i) {
+        // Центрируем выборку на текущем пикселе: смаз идёт симметрично в обе
+        // стороны, объект не «съезжает» с реальной позиции.
+        float t = float(i) / float(n - 1) - 0.5;
+        sum += texture(uScene, vUV + velocity * t).rgb;
+    }
+    FragColor = vec4(sum / float(n), 1.0);
+}
+)";
+
 // Финальный composite: scene*AO + bloom -> экспозиция -> ACES -> насыщенность/
-// контраст -> виньетка -> гамма.
+// контраст -> хроматическая аберрация -> виньетка -> гамма.
+
+// --- FXAA ------------------------------------------------------------------
+// Сглаживание кромок по яркости готовой картинки (Timothy Lottes, FXAA 3.11,
+// сокращённый вариант). Работает ПОСЛЕ тон-маппинга: пороги здесь заданы в
+// воспринимаемой яркости, и в линейном HDR они не имеют смысла.
+//
+// Идея: найти локальный контраст по четырём соседям, определить направление
+// кромки (вертикаль/горизонталь) и сместить выборку ВДОЛЬ неё — так ступенька
+// заменяется плавным переходом, а плоские области остаются нетронутыми.
+const char* kFxaaFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;         // 1/размер текстуры
+uniform float uContrastThreshold;
+
+// Воспринимаемая яркость. Полноценная формула здесь избыточна: FXAA нужен
+// монотонный признак «светлее/темнее», а не колориметрия.
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+void main() {
+    vec3 rgbM = texture(uTex, vUV).rgb;
+    float lM = luma(rgbM);
+    float lN = luma(texture(uTex, vUV + vec2(0.0, -uTexel.y)).rgb);
+    float lS = luma(texture(uTex, vUV + vec2(0.0,  uTexel.y)).rgb);
+    float lW = luma(texture(uTex, vUV + vec2(-uTexel.x, 0.0)).rgb);
+    float lE = luma(texture(uTex, vUV + vec2( uTexel.x, 0.0)).rgb);
+
+    float lMin = min(lM, min(min(lN, lS), min(lW, lE)));
+    float lMax = max(lM, max(max(lN, lS), max(lW, lE)));
+    float range = lMax - lMin;
+
+    // Плоский участок — не трогаем вовсе. Без этого порога FXAA мылит текстуры.
+    if (range < max(uContrastThreshold, lMax * 0.125)) {
+        FragColor = vec4(rgbM, 1.0);
+        return;
+    }
+
+    // Диагональные соседи нужны, чтобы отличить вертикальную кромку от
+    // горизонтальной: по одним «крестом» направление неоднозначно.
+    float lNW = luma(texture(uTex, vUV + vec2(-uTexel.x, -uTexel.y)).rgb);
+    float lNE = luma(texture(uTex, vUV + vec2( uTexel.x, -uTexel.y)).rgb);
+    float lSW = luma(texture(uTex, vUV + vec2(-uTexel.x,  uTexel.y)).rgb);
+    float lSE = luma(texture(uTex, vUV + vec2( uTexel.x,  uTexel.y)).rgb);
+
+    float edgeH = abs((lNW + lNE) - 2.0 * lN) * 2.0 +
+                  abs((lW  + lE ) - 2.0 * lM) * 4.0 +
+                  abs((lSW + lSE) - 2.0 * lS) * 2.0;
+    float edgeV = abs((lNW + lSW) - 2.0 * lW) * 2.0 +
+                  abs((lN  + lS ) - 2.0 * lM) * 4.0 +
+                  abs((lNE + lSE) - 2.0 * lE) * 2.0;
+    bool horizontal = edgeH >= edgeV;
+
+    // Шаг делаем в сторону БОЛЬШЕГО перепада: туда, где лежит другая сторона
+    // кромки, — иначе смешивали бы пиксель сам с собой.
+    float l1 = horizontal ? lN : lW;
+    float l2 = horizontal ? lS : lE;
+    float grad1 = abs(l1 - lM);
+    float grad2 = abs(l2 - lM);
+    // Положительный шаг ведёт к l2 (S или E) — туда и идём, когда перепад
+    // больше именно там. Знак здесь легко перепутать, и ошибка тихая: FXAA
+    // продолжает работать, но смешивает пиксель с СОБСТВЕННОЙ стороной кромки
+    // и почти ничего не меняет.
+    float stepLen = horizontal ? uTexel.y : uTexel.x;
+    if (grad1 > grad2) stepLen = -stepLen;
+
+    // Вес смешивания — насколько пиксель отличается от среднего по окрестности.
+    // Возведение в квадрат сохраняет резкими явные контуры и сглаживает слабые
+    // ступеньки, ради которых всё и затевалось.
+    float lAvg = (2.0 * (lN + lS + lW + lE) + lNW + lNE + lSW + lSE) / 12.0;
+    float blend = clamp(abs(lAvg - lM) / max(range, 1e-5), 0.0, 1.0);
+    blend = blend * blend * 0.75;
+
+    vec2 offset = horizontal ? vec2(0.0, stepLen * 0.5) : vec2(stepLen * 0.5, 0.0);
+    vec3 rgbEdge = texture(uTex, vUV + offset).rgb;
+    FragColor = vec4(mix(rgbM, rgbEdge, blend), 1.0);
+}
+)";
+
 const char* kCompositeFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
@@ -151,13 +362,26 @@ uniform float uContrast;
 uniform float uVignette;
 uniform float uBloomIntensity;
 uniform float uAOStrength;
+uniform float uChromatic;
 
 vec3 ACES(vec3 x) {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
 
+// Чтение сцены с хроматической аберрацией: каналы расходятся ВДОЛЬ РАДИУСА и
+// тем сильнее, чем дальше от центра кадра, — так ведёт себя реальная оптика. В
+// центре расхождения нет, поэтому лицо в центре кадра остаётся чистым.
+vec3 SampleScene(vec2 uv) {
+    if (uChromatic <= 0.0) return texture(uScene, uv).rgb;
+    vec2 radial = uv - 0.5;
+    vec2 off = radial * uChromatic * 0.02;
+    return vec3(texture(uScene, uv + off).r,
+                texture(uScene, uv).g,
+                texture(uScene, uv - off).b);
+}
+
 void main() {
-    vec3 hdr = texture(uScene, vUV).rgb;
+    vec3 hdr = SampleScene(vUV);
     if (uUseAO) {
         float ao = clamp(texture(uAO, vUV).r, 0.0, 1.0);
         ao = pow(ao, uAOStrength); // усиление затемнения
@@ -181,9 +405,12 @@ void main() {
 
 Shader& SsaoShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsaoFrag, "PostFX.SSAO")); return *s; }
 Shader& AoBlurShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAoBlurFrag, "PostFX.AOBlur")); return *s; }
+Shader& DofShader()       { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofFrag, "PostFX.DoF")); return *s; }
+Shader& MotionShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kMotionFrag, "PostFX.MotionBlur")); return *s; }
 Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBrightFrag, "PostFX.Bright")); return *s; }
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
 Shader& CompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kCompositeFrag, "PostFX.Composite")); return *s; }
+Shader& FxaaShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kFxaaFrag, "PostFX.FXAA")); return *s; }
 
 std::unique_ptr<RenderTarget> MakeColor(int w, int h) {
     RenderTargetDesc d;
@@ -206,19 +433,42 @@ void PostFX::EnsureTargets(int w, int h) {
     m_bright = MakeColor(hw, hh);
     m_bloomA = MakeColor(hw, hh);
     m_bloomB = MakeColor(hw, hh);
+    // Смена размера обесценивает вспомогательные буферы и историю кадра:
+    // репроецировать старую матрицу на другой кадр нельзя.
+    m_dof.reset();
+    m_motion.reset();
+    m_ldr.reset();
+    m_hasPrevFrame = false;
+}
+
+RenderTarget* PostFX::EnsureAux(std::unique_ptr<RenderTarget>& slot) {
+    if (!slot) slot = MakeColor(m_w, m_h);
+    return slot.get();
 }
 
 void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int h,
-                    const glm::mat4& proj, const PostFXSettings& s,
-                    Framebuffer* output, int outX, int outY, int outW, int outH) {
+                    const glm::mat4& proj, const glm::mat4& view, const PostFXSettings& s,
+                    Framebuffer* output, int outX, int outY, int outW, int outH,
+                    unsigned int velocityTexture) {
     GraphicsDevice& device = GraphicsDevice::Get();
     EnsureTargets(w, h);
     device.SetDepthTest(false); // все проходы — полноэкранные, глубина не нужна
 
     auto drawTri = [&]() { m_fsTri->DrawArrays(3); };
 
-    bool doAO = s.AOEnabled && sceneDepth != 0;
-    bool doBloom = s.BloomEnabled;
+    // Все три эффекта, читающие глубину, без depth-текстуры невозможны.
+    const bool haveDepth = sceneDepth != 0;
+    const bool doAO = s.AOEnabled && haveDepth;
+    const bool doDof = s.DofEnabled && haveDepth;
+    // С буфером скоростей история прошлого кадра ЗДЕСЬ не нужна — её хранит
+    // проход геометрии, у каждой сущности свою. Поэтому m_hasPrevFrame требуется
+    // только запасному пути.
+    const bool useVelocity = velocityTexture != 0;
+    const bool doMotion = s.MotionBlurEnabled && (useVelocity || (haveDepth && m_hasPrevFrame)) &&
+                          s.MotionBlurAmount > 0.001f;
+    const bool doBloom = s.BloomEnabled;
+
+    const glm::mat4 viewProj = proj * view;
 
     // --- 1. SSAO из глубины сцены -> m_ao, затем размытие -> m_aoBlur ---
     if (doAO) {
@@ -242,14 +492,62 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
         drawTri();
     }
 
-    // --- 2. Bloom: bright-pass -> размытие (2 итерации, ping-pong) ---
+    // --- 2. Глубина резкости: размытие по кругу нерезкости из глубины ---
+    // colorTex — «текущая картинка» цепочки: каждый следующий проход читает
+    // результат предыдущего, а не исходный кадр.
+    unsigned int colorTex = sceneColor;
+    if (doDof) {
+        RenderTarget* dof = EnsureAux(m_dof);
+        dof->Bind();
+        Shader& sh = DofShader();
+        sh.Use();
+        sh.SetInt("uScene", 0);
+        sh.SetInt("uDepth", 1);
+        device.BindTexture2D(0, colorTex);
+        device.BindTexture2D(1, sceneDepth);
+        sh.SetMat4("uInvProj", glm::inverse(proj));
+        sh.SetVec2("uTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
+        sh.SetFloat("uFocus", glm::max(s.FocusDistance, 0.01f));
+        sh.SetFloat("uAperture", glm::max(s.Aperture, 0.7f));
+        sh.SetFloat("uMaxRadius", glm::max(s.DofMaxRadius, 0.0f));
+        drawTri();
+        colorTex = dof->ColorTextureHandle();
+    }
+
+    // --- 3. Motion blur: смаз вдоль вектора репроекции прошлым кадром ---
+    if (doMotion) {
+        RenderTarget* motion = EnsureAux(m_motion);
+        motion->Bind();
+        Shader& sh = MotionShader();
+        sh.Use();
+        sh.SetInt("uScene", 0);
+        sh.SetInt("uDepth", 1);
+        sh.SetInt("uVelocity", 2);
+        device.BindTexture2D(0, colorTex);
+        device.BindTexture2D(1, sceneDepth);
+        // Сэмплер обязан быть привязан всегда, даже когда путь не выбран:
+        // непривязанный юнит на части драйверов читается как чёрная текстура,
+        // а на части — как мусор из чужого прохода.
+        device.BindTexture2D(2, useVelocity ? velocityTexture : sceneDepth);
+        sh.SetInt("uUseVelocity", useVelocity ? 1 : 0);
+        sh.SetMat4("uInvViewProj", glm::inverse(viewProj));
+        sh.SetMat4("uPrevViewProj", m_prevViewProj);
+        sh.SetFloat("uAmount", s.MotionBlurAmount);
+        sh.SetInt("uSamples", glm::clamp(s.MotionBlurSamples, 2, 32));
+        drawTri();
+        colorTex = motion->ColorTextureHandle();
+    }
+
+    // --- 4. Bloom: bright-pass -> размытие (2 итерации, ping-pong) ---
+    // Считается по УЖЕ размытой картинке (см. комментарий к порядку цепочки в
+    // PostFX.h): свечение размытого источника не должно быть резким.
     if (doBloom) {
         int hw = m_bright->Width(), hh = m_bright->Height();
         m_bright->Bind();
         Shader& br = BrightShader();
         br.Use();
         br.SetInt("uScene", 0);
-        device.BindTexture2D(0, sceneColor);
+        device.BindTexture2D(0, colorTex);
         br.SetFloat("uThreshold", s.BloomThreshold);
         drawTri();
 
@@ -273,8 +571,15 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
         }
     }
 
-    // --- 3. Composite -> output (FBO вьюпорта) или экран ---
-    if (output) {
+    // --- 5. Composite -> output (FBO вьюпорта) или экран ---
+    // FXAA работает по ГОТОВОЙ картинке, поэтому при включённом сглаживании
+    // composite пишет не в выход, а в промежуточный буфер: шейдеру нужен вход,
+    // а читать тот же буфер, в который пишешь, нельзя.
+    const bool doFxaa = s.FxaaEnabled;
+    RenderTarget* ldr = doFxaa ? EnsureAux(m_ldr) : nullptr;
+    if (ldr) {
+        ldr->Bind();
+    } else if (output) {
         output->Bind();
     } else {
         device.BindDefaultFramebuffer();
@@ -294,12 +599,36 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     comp.SetFloat("uVignette", s.Vignette);
     comp.SetFloat("uBloomIntensity", s.BloomIntensity);
     comp.SetFloat("uAOStrength", glm::max(s.AOStrength, 0.01f));
-    device.BindTexture2D(0, sceneColor);
+    comp.SetFloat("uChromatic", glm::max(s.ChromaticAberration, 0.0f));
+    device.BindTexture2D(0, colorTex);
     if (doBloom) device.BindTexture2D(1, m_bloomB->ColorTextureHandle());
     if (doAO) device.BindTexture2D(2, m_aoBlur->ColorTextureHandle());
     drawTri();
 
+    // --- 6. FXAA -> выход ---
+    if (ldr) {
+        if (output) {
+            output->Bind();
+        } else {
+            device.BindDefaultFramebuffer();
+            device.SetViewport(outX, outY, outW, outH);
+        }
+        Shader& fxaa = FxaaShader();
+        fxaa.Use();
+        fxaa.SetInt("uTex", 0);
+        fxaa.SetVec2("uTexel", glm::vec2(1.0f / (float)m_w, 1.0f / (float)m_h));
+        fxaa.SetFloat("uContrastThreshold", glm::max(s.FxaaContrastThreshold, 0.0f));
+        device.BindTexture2D(0, ldr->ColorTextureHandle());
+        drawTri();
+    }
+
     device.SetDepthTest(true);
+
+    // История для смаза следующего кадра. Пишется ВСЕГДА, даже когда motion blur
+    // выключен: иначе после его включения первый кадр сравнивался бы с давно
+    // устаревшей матрицей и размазал бы весь экран.
+    m_prevViewProj = viewProj;
+    m_hasPrevFrame = true;
 }
 
 } // namespace sage::render

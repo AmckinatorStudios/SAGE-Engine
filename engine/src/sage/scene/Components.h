@@ -4,6 +4,7 @@
 #include <vector>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp> // CameraComponent::ProjectionMatrix
 #include "sage/scene/Transform.h"
 #include "sage/render/Mesh.h"
 #include "sage/render/Material.h"
@@ -108,10 +109,34 @@ struct ScriptComponent {
 // рендерят изображение от ПЕРВОЙ сущности с Primary == true; так камера
 // становится частью сцены (сериализуется), а не хардкодом кода игры.
 struct CameraComponent {
-    float Fov = 60.0f;      // вертикальный угол обзора, градусы
+    // Тип проекции. Перспектива — обычная игровая камера; орто нужна там, где
+    // размер объекта не должен зависеть от расстояния: 2.5D-игры, изометрия,
+    // техническая анимация, схемы и чертежи.
+    enum class Projection { Perspective, Orthographic };
+
+    Projection Mode = Projection::Perspective;
+    float Fov = 60.0f;          // вертикальный угол обзора, градусы (перспектива)
+    float OrthoHeight = 10.0f;  // видимая ВЫСОТА кадра в метрах (орто)
     float NearClip = 0.1f;
     float FarClip = 200.0f;
-    bool Primary = true;    // первая Primary-камера сцены — «главная»
+    bool Primary = true;        // первая Primary-камера сцены — «главная»
+
+    // Матрица проекции — ЕДИНСТВЕННОЕ место, где она собирается из компонента.
+    // Иначе про орто пришлось бы помнить в каждом вызывающем, и однажды кто-то
+    // забыл бы: превью показывало бы одно, рендер — другое.
+    //
+    // Ширина орто-кадра выводится из высоты и соотношения сторон, а не задаётся
+    // отдельно: так смена размера окна не меняет КОМПОЗИЦИЮ по вертикали —
+    // ровно то же поведение, что у Fov в перспективе.
+    glm::mat4 ProjectionMatrix(float aspect) const {
+        const float a = aspect > 0.0001f ? aspect : 0.0001f;
+        if (Mode == Projection::Orthographic) {
+            const float halfH = (OrthoHeight > 0.0001f ? OrthoHeight : 0.0001f) * 0.5f;
+            const float halfW = halfH * a;
+            return glm::ortho(-halfW, halfW, -halfH, halfH, NearClip, FarClip);
+        }
+        return glm::perspective(glm::radians(Fov), a, NearClip, FarClip);
+    }
 };
 
 // Свет на сущности: позиция берётся из Transform (двигается гизмо,
@@ -214,6 +239,11 @@ struct AnimatedModelComponent {
     bool Loop = true;
     bool Playing = true;
     float BlendTime = 0.25f;  // длительность кросс-фейда при смене Clip (0 — резко)
+
+    // Веса блендшейпов в порядке SkinnedModel::MorphNames(). Это ПОЗА ЛИЦА, и
+    // живёт она рядом с позой скелета: у одной модели может быть много
+    // экземпляров с разными выражениями. Пусто — форма как в файле.
+    std::vector<float> MorphWeights;
 
     std::shared_ptr<sage::render::SkinnedModel> Model; // рантайм (не сериализуется)
     sage::anim::Animator Anim;                          // рантайм-состояние проигрывания

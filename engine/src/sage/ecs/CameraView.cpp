@@ -25,8 +25,7 @@ CameraFrame PrimaryCameraFrame(Scene& scene, float aspect) {
     glm::vec3 up  = glm::normalize(glm::vec3(world * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)));
 
     frame.View = glm::lookAt(pos, pos + fwd, up);
-    frame.Proj = glm::perspective(glm::radians(cam.Fov), std::max(aspect, 0.0001f),
-                                  cam.NearClip, cam.FarClip);
+    frame.Proj = cam.ProjectionMatrix(aspect);
     frame.Position = pos;
     frame.HasPrimary = true;
     return frame;

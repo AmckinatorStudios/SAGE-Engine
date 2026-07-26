@@ -183,6 +183,16 @@ bool EngineConfig::LoadFile(const std::string& path) {
     AmbientOcclusion = pp.value("ao", AmbientOcclusion);
     AOStrength       = pp.value("aoStrength", AOStrength);
     AORadius         = pp.value("aoRadius", AORadius);
+    DepthOfField     = pp.value("depthOfField", DepthOfField);
+    FocusDistance    = pp.value("focusDistance", FocusDistance);
+    Aperture         = pp.value("aperture", Aperture);
+    DofMaxRadius     = pp.value("dofMaxRadius", DofMaxRadius);
+    MotionBlur       = pp.value("motionBlur", MotionBlur);
+    MotionBlurAmount = pp.value("motionBlurAmount", MotionBlurAmount);
+    MotionBlurSamples = pp.value("motionBlurSamples", MotionBlurSamples);
+    ChromaticAberration = pp.value("chromaticAberration", ChromaticAberration);
+    Fxaa = pp.value("fxaa", Fxaa);
+    FxaaContrastThreshold = pp.value("fxaaContrastThreshold", FxaaContrastThreshold);
 
     auto sys = j.value("system", json::object());
     WorkerThreads       = sys.value("workerThreads", WorkerThreads);
@@ -211,6 +221,13 @@ bool EngineConfig::SaveFile(const std::string& path) const {
         {"contrast", Contrast}, {"vignette", Vignette},
         {"bloom", Bloom}, {"bloomThreshold", BloomThreshold}, {"bloomIntensity", BloomIntensity},
         {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
+        {"depthOfField", DepthOfField}, {"focusDistance", FocusDistance},
+        {"aperture", Aperture}, {"dofMaxRadius", DofMaxRadius},
+        {"motionBlur", MotionBlur}, {"motionBlurAmount", MotionBlurAmount},
+        {"motionBlurSamples", MotionBlurSamples},
+        {"chromaticAberration", ChromaticAberration},
+        {"fxaa", Fxaa},
+        {"fxaaContrastThreshold", FxaaContrastThreshold},
     };
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
