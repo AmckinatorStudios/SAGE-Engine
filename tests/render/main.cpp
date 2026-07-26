@@ -285,6 +285,125 @@ void TestDepthOfField(FrameRenderer& r, Scene& scene) {
     Check(mean > 1.0, "глубина резкости реально влияет на картинку");
 }
 
+// --- MSAA -------------------------------------------------------------------
+//
+// Сглаживание бывает двух разных природ, и проверять их надо по-разному.
+//
+// FXAA — экранный фильтр: он ищет перепад яркости в ГОТОВОЙ картинке и
+// замывает его. На пологой кромке (горизонт, длинная грань пола) перепад
+// размазан по многим пикселям, догадаться о геометрии не по чему, и лесенка
+// остаётся — именно её и было видно в отрендеренном ролике.
+//
+// MSAA работает раньше: растеризатор считает ПОКРЫТИЕ пикселя геометрией по
+// нескольким точкам. Поэтому здесь проверяется не «картинка изменилась», а то,
+// что у кромок появились ПРОМЕЖУТОЧНЫЕ значения — резких скачков между
+// соседними пикселями стало меньше.
+void TestMsaa(FrameRenderer& r) {
+    // Сцена НАРОЧНО вырожденная: один повёрнутый куб на пустом фоне, без пола,
+    // без теней, без освещения. Так почти каждый резкий перепад между соседними
+    // пикселями — это силуэтная кромка, и метрика меряет именно её.
+    //
+    // На обычной сцене та же метрика считала бы заодно границы теней и складки
+    // затенения, на которые MSAA не влияет никак: он про покрытие пикселя
+    // геометрией, а не про то, что на этой геометрии нарисовано. Первая версия
+    // теста этого не учитывала и требовала от MSAA невозможного.
+    auto scene = std::make_unique<Scene>("MsaaTest");
+    scene->Lighting.Skybox.Enabled = false;
+    scene->Lighting.AmbientStrength = 1.0f;
+
+    GameObject cube = scene->CreateObject("Cube");
+    cube.GetTransform().Position = {0.0f, 0.8f, 0.0f};
+    cube.GetTransform().Rotation = {17.0f, 31.0f, 9.0f}; // косые кромки — худший случай
+    cube.GetTransform().Scale = {1.6f, 1.6f, 1.6f};
+    cube.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    cube.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    cube.Renderer().Color = {0.95f, 0.95f, 0.95f};
+
+    const glm::mat4 proj = PerspectiveProj();
+    const glm::mat4 view = TestView();
+
+    sage::render::PostFXSettings fx = BaseSettings();
+    fx.FxaaEnabled = false; // иначе измеряли бы сумму двух разных механизмов
+    fx.BloomEnabled = false;
+    fx.AOEnabled = false;
+    fx.Vignette = 0.0f;
+
+    auto render = [&](int samples) {
+        Framebuffer sceneFbo(kW, kH, samples);
+        Framebuffer output(kW, kH);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+
+        sceneFbo.Bind();
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        // Режим 1 (unlit): плоский цвет без освещения и без теней — на кубе не
+        // будет ни градиента, ни складок, только силуэт.
+        r.Batch.RenderColor(*scene, view, proj, kEye, env, glm::mat4(1.0f), 0, false, 1);
+        sceneFbo.Resolve();
+
+        r.Fx.ResetHistory();
+        r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, fx,
+                    &output, 0, 0, kW, kH);
+        output.Bind();
+        return std::make_pair(Capture(kW, kH), sceneFbo.Samples());
+    };
+
+    const auto plain = render(1);
+    const auto msaa = render(4);
+
+    Check(plain.second == 1, "буфер без MSAA действительно односэмпловый");
+    // Драйвер вправе выдать меньше запрошенного — тогда проверка ниже мерила бы
+    // не то, что думает, и об этом надо знать сразу.
+    Check(msaa.second > 1, "буфер с MSAA получил больше одного сэмпла");
+    if (msaa.second <= 1) return;
+    std::printf("       сэмплов выделено: %d\n", msaa.second);
+
+    // Меряем ПРОМЕЖУТОЧНЫЕ пиксели: те, что не фон и не объект. Их наличие и
+    // есть сглаживание — растеризатор посчитал частичное покрытие пикселя.
+    //
+    // Считать «резкие перепады» здесь нельзя, и это стоило двух неверных
+    // подходов подряд. Сглаживание не убирает перепад, а разбивает один скачок
+    // на несколько; с низким порогом сглаженная кромка даёт БОЛЬШЕ срабатываний
+    // (проверено: 174 против 202), а с высоким счёт вообще не меняется, потому
+    // что после ACES и гаммы даже наполовину покрытый пиксель яркого объекта
+    // остаётся близко к его цвету.
+    //
+    // Границы берём из самой картинки, а не числом из воздуха: тон-маппинг,
+    // экспозиция и гамма двигают абсолютные значения, и любой зашитый порог
+    // сломался бы от правки грейда, ничего не сломав в рендере.
+    auto intermediatePixels = [](const Image& img) {
+        int lo = 255, hi = 0;
+        for (size_t i = 0; i < img.Pixels.size(); i += 3) {
+            lo = std::min(lo, (int)img.Pixels[i]);
+            hi = std::max(hi, (int)img.Pixels[i]);
+        }
+        const int span = hi - lo;
+        if (span < 40) return (size_t)0; // нечего различать
+        const int low = lo + span / 5, high = hi - span / 5;
+        size_t count = 0;
+        for (size_t i = 0; i < img.Pixels.size(); i += 3) {
+            const int v = img.Pixels[i];
+            if (v > low && v < high) ++count;
+        }
+        return count;
+    };
+
+    const size_t midPlain = intermediatePixels(plain.first);
+    const size_t midMsaa = intermediatePixels(msaa.first);
+    std::printf("       промежуточных пикселей на кромке: без MSAA %zu, с MSAA %zu\n",
+                midPlain, midMsaa);
+
+    // Без сглаживания пиксель принадлежит либо фону, либо объекту — третьего
+    // растеризатор без MSAA дать не может, и это «почти ноль» тут не оценка, а
+    // свойство: единичные срабатывания приходят от дизеринга в композите.
+    Check(midPlain < 20, "без MSAA промежуточных значений на кромке практически нет");
+    Check(midMsaa > 30, "MSAA даёт промежуточные значения на кромке");
+    Check(midMsaa > midPlain * 3, "разница между путями не на уровне шума");
+
+    Report("scene_msaa", CompareWithReference("scene_msaa", msaa.first));
+}
+
 // --- Смаз движения от ОБЪЕКТОВ ----------------------------------------------
 //
 // Главное, что здесь проверяется, — не «смаз работает», а то, что он работает
@@ -669,6 +788,7 @@ int main(int argc, char** argv) {
         TestFxaa(renderer, *scene);
         TestGrid(renderer, *scene);
         TestObjectMotionBlur(renderer);
+        TestMsaa(renderer);
         TestMorphTargets(renderer);
     }
 

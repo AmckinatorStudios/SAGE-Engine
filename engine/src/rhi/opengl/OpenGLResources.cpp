@@ -1,6 +1,7 @@
 #include "rhi/opengl/OpenGLResources.h"
 #include "sage/core/Log.h"
 #include "sage/core/Stats.h"
+#include <algorithm>
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <stdexcept>
@@ -368,6 +369,16 @@ void GLTextureCube::Bind(int unit) const {
 
 GLRenderTarget::GLRenderTarget(const RenderTargetDesc& desc)
     : m_kind(desc.Kind), m_width(desc.Width), m_height(desc.Height) {
+    // MSAA имеет смысл только там, где растеризуется геометрия. У буферов
+    // пост-эффектов её нет, у карты теней усреднять глубину нельзя.
+    if (desc.Kind == RenderTargetKind::ColorHDRWithDepth && desc.Samples > 1) {
+        GLint maxSamples = 1;
+        glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+        m_samples = std::min(desc.Samples, (int)std::max(maxSamples, 1));
+        if (m_samples != desc.Samples) {
+            LOG_INFO("RHI") << "MSAA " << desc.Samples << "x недоступен, взято " << m_samples << "x";
+        }
+    }
     CreateStorage();
 }
 
@@ -425,9 +436,55 @@ void GLRenderTarget::CreateStorage() {
         glReadBuffer(GL_NONE);
     }
 
+    // Многосэмпловая пара к обычным вложениям. Рисование идёт СЮДА, а Resolve
+    // переносит результат в текстуры выше — их и читает весь пост-процесс.
+    if (m_samples > 1) {
+        glGenFramebuffers(1, &m_msFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_msFbo);
+
+        // Renderbuffer, а не многосэмпловая текстура: сэмплировать её мы всё
+        // равно не будем (для этого есть разрешённая копия), а renderbuffer
+        // проще и поддерживается шире.
+        glGenRenderbuffers(1, &m_msColor);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_msColor);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA16F, m_width, m_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_msColor);
+
+        glGenRenderbuffers(1, &m_msDepth);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_msDepth);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24,
+                                         m_width, m_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_msDepth);
+
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            LOG_ERROR("RHI") << "Многосэмпловый рендер-таргет неполный — MSAA отключён";
+            glDeleteFramebuffers(1, &m_msFbo);
+            glDeleteRenderbuffers(1, &m_msColor);
+            glDeleteRenderbuffers(1, &m_msDepth);
+            m_msFbo = m_msColor = m_msDepth = 0;
+            m_samples = 1;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    }
+
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         LOG_ERROR("RHI") << "Рендер-таргет неполный (incomplete framebuffer)";
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void GLRenderTarget::Resolve() {
+    if (m_samples <= 1 || !m_msFbo) return;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_msFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
+    // Цвет и глубина переносятся РАЗНЫМИ вызовами: цвет можно фильтровать при
+    // масштабировании, глубину — нет, и GL требует для неё строго GL_NEAREST.
+    // Размеры совпадают, поэтому фильтр здесь ни на что не влияет, но правило
+    // всё равно обязано соблюдаться — иначе blit молча ничего не сделает.
+    glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height,
+                      GL_DEPTH_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -435,12 +492,18 @@ void GLRenderTarget::DestroyStorage() {
     if (m_colorTex) glDeleteTextures(1, &m_colorTex);
     if (m_depthTex) glDeleteTextures(1, &m_depthTex);
     if (m_depthRbo) glDeleteRenderbuffers(1, &m_depthRbo);
+    if (m_msColor) glDeleteRenderbuffers(1, &m_msColor);
+    if (m_msDepth) glDeleteRenderbuffers(1, &m_msDepth);
+    if (m_msFbo) glDeleteFramebuffers(1, &m_msFbo);
     if (m_fbo) glDeleteFramebuffers(1, &m_fbo);
     m_colorTex = m_depthTex = m_depthRbo = m_fbo = 0;
+    m_msColor = m_msDepth = m_msFbo = 0;
 }
 
 void GLRenderTarget::Bind() const {
-    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    // При MSAA рисуем в многосэмпловый буфер: именно там растеризатор считает
+    // покрытие пикселя. Обычные текстуры — только приёмник Resolve.
+    glBindFramebuffer(GL_FRAMEBUFFER, m_samples > 1 && m_msFbo ? m_msFbo : m_fbo);
     glViewport(0, 0, m_width, m_height);
 }
 
@@ -463,6 +526,17 @@ void GLRenderTarget::Resize(int width, int height) {
         glBindTexture(GL_TEXTURE_2D, m_depthTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
                      GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    }
+
+    // Многосэмпловые вложения перевыделяются тем же размером — иначе blit при
+    // разных размерах источника и приёмника молча ничего не переносит, и кадр
+    // после смены размера окна остаётся пустым.
+    if (m_samples > 1 && m_msFbo) {
+        glBindRenderbuffer(GL_RENDERBUFFER, m_msColor);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA16F, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_msDepth);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24,
+                                         width, height);
     }
 }
 
