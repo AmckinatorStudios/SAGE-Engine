@@ -285,6 +285,160 @@ void TestDepthOfField(FrameRenderer& r, Scene& scene) {
     Check(mean > 1.0, "глубина резкости реально влияет на картинку");
 }
 
+// --- Смаз движения от ОБЪЕКТОВ ----------------------------------------------
+//
+// Главное, что здесь проверяется, — не «смаз работает», а то, что он работает
+// там, где старый путь работать не мог В ПРИНЦИПЕ.
+//
+// Старый смаз восстанавливал мировую точку из глубины и проецировал её матрицей
+// прошлого кадра. Так виден только сдвиг КАМЕРЫ: мир при этом считается
+// неподвижным. Значит, при неподвижной камере пролетающий мимо объект обязан
+// остаться резким — и это тоже проверяется, иначе тест не отличал бы новый путь
+// от старого.
+void TestObjectMotionBlur(FrameRenderer& r) {
+    auto scene = std::make_unique<Scene>("MotionTest");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.35f));
+    scene->Lighting.Sun.Intensity = 1.2f;
+    scene->Lighting.SkyColor = {0.40f, 0.48f, 0.64f};
+    scene->Lighting.GroundColor = {0.20f, 0.17f, 0.15f};
+    scene->Lighting.AmbientStrength = 0.35f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    GameObject ground = scene->CreateObject("Ground");
+    ground.GetTransform().Scale = {14.0f, 1.0f, 14.0f};
+    ground.Renderer().Ref = MeshRef{MeshRef::Type::Plane};
+    ground.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Plane);
+    ground.Renderer().Color = {0.34f, 0.35f, 0.37f};
+
+    GameObject mover = scene->CreateObject("Mover");
+    mover.GetTransform().Position = {-1.5f, 0.8f, 0.0f};
+    mover.GetTransform().Scale = {0.8f, 0.8f, 0.8f};
+    mover.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    mover.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    mover.Renderer().Color = {0.85f, 0.30f, 0.20f};
+
+    const glm::mat4 proj = PerspectiveProj();
+    const glm::mat4 view = TestView();
+    const glm::mat4 viewProj = proj * view;
+
+    sage::render::PostFXSettings fx = BaseSettings();
+    fx.MotionBlurEnabled = true;
+    fx.MotionBlurAmount = 1.0f;
+    fx.BloomEnabled = false; // bloom размазал бы кромку и смазал границу измерения
+    fx.AOEnabled = false;
+
+    // Буфер скоростей размером с кадр. ColorHDRWithDepth: глубина нужна, чтобы
+    // скорость писала ближайшая поверхность, а не последняя нарисованная.
+    Framebuffer velocity(kW, kH);
+
+    auto renderWithVelocity = [&](bool useVelocity) {
+        Framebuffer sceneFbo(kW, kH), output(kW, kH);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+
+        r.Shadow.SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 12.0f);
+        r.Shadow.BeginRender();
+        r.Batch.RenderDepth(*scene, r.Shadow.LightMatrix());
+        r.Shadow.EndRender(kW, kH);
+
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        sceneFbo.Bind();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        r.Batch.RenderColor(*scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
+                            r.Shadow.DepthTexture(), true, 0);
+
+        unsigned int velTex = 0;
+        if (useVelocity) {
+            velocity.Bind();
+            device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            device.Clear(true, true);
+            r.Batch.RenderVelocity(viewProj, viewProj); // камера НЕ движется
+            velTex = velocity.ColorTexture();
+        }
+
+        r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, fx,
+                    &output, 0, 0, kW, kH, velTex);
+        output.Bind();
+        return Capture(kW, kH);
+    };
+
+    auto meanDiff = [](const Image& a, const Image& b) {
+        long long sum = 0;
+        for (size_t i = 0; i < a.Pixels.size(); ++i) {
+            sum += std::abs((int)a.Pixels[i] - (int)b.Pixels[i]);
+        }
+        return (double)sum / (double)a.Pixels.size();
+    };
+
+    // --- Шаг 1: объект стоит, историю движения заводим на его текущем месте ---
+    r.Batch.ResetVelocityHistory();
+    r.Fx.ResetHistory();
+    renderWithVelocity(true);
+    r.Batch.AdvanceVelocityHistory();
+
+    // Опорный кадр без смаза, снятый в ТОЙ ЖЕ точке, куда объект сейчас
+    // переедет: с ним и сравниваем, иначе разница была бы просто от смещения.
+    mover.GetTransform().Position.x = -0.3f;
+    sage::render::PostFXSettings sharpFx = fx;
+    sharpFx.MotionBlurEnabled = false;
+    Image sharp;
+    {
+        Framebuffer sceneFbo(kW, kH), output(kW, kH);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        r.Shadow.SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 12.0f);
+        r.Shadow.BeginRender();
+        r.Batch.RenderDepth(*scene, r.Shadow.LightMatrix());
+        r.Shadow.EndRender(kW, kH);
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        sceneFbo.Bind();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        r.Batch.RenderColor(*scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
+                            r.Shadow.DepthTexture(), true, 0);
+        r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, sharpFx,
+                    &output, 0, 0, kW, kH, 0);
+        output.Bind();
+        sharp = Capture(kW, kH);
+    }
+
+    // --- Шаг 2: объект переехал, камера НЕ двигалась ---
+    const Image withVelocity = renderWithVelocity(true);
+    const Image withoutVelocity = renderWithVelocity(false);
+
+    Report("motion_object", CompareWithReference("motion_object", withVelocity));
+
+    const double velocityVsSharp = meanDiff(withVelocity, sharp);
+    const double oldPathVsSharp = meanDiff(withoutVelocity, sharp);
+    std::printf("       смаз с буфером скоростей: %.3f, старым путём: %.3f\n",
+                velocityVsSharp, oldPathVsSharp);
+
+    // Порог низкий не по слабости проверки: среднее берётся по ВСЕМУ кадру, а
+    // смазанный объект занимает около процента его площади — то есть внутри
+    // затронутой области изменение примерно в сто раз больше этого числа.
+    // Локальность отдельно проверяется ниже по доле тронутых пикселей.
+    Check(velocityVsSharp > 0.1, "буфер скоростей даёт смаз от движения объекта");
+    // Вот ради этой проверки тест и написан: старый путь при неподвижной камере
+    // не может отличить движущийся объект от стоящего, и разница выходит РОВНО
+    // нулевой — не «маленькой», а нулевой.
+    Check(oldPathVsSharp < 0.001, "старый путь при неподвижной камере смаза не даёт");
+
+    // Смаз обязан быть ЛОКАЛЬНЫМ: тронуть окрестность объекта, а не весь кадр.
+    size_t touched = 0;
+    const size_t pixels = withVelocity.Pixels.size() / 3;
+    for (size_t i = 0; i < pixels; ++i) {
+        int worst = 0;
+        for (int c = 0; c < 3; ++c) {
+            worst = std::max(worst, std::abs((int)withVelocity.Pixels[i * 3 + c] -
+                                             (int)sharp.Pixels[i * 3 + c]));
+        }
+        if (worst > 2) ++touched;
+    }
+    const double fraction = (double)touched / (double)pixels;
+    std::printf("       смаз тронул %.2f%% кадра\n", fraction * 100.0);
+    Check(fraction > 0.002, "смаз виден");
+    Check(fraction < 0.35, "смаз локален вокруг объекта, а не размазывает весь кадр");
+}
+
 void TestFxaa(FrameRenderer& r, Scene& scene) {
     sage::render::PostFXSettings fx = BaseSettings();
     fx.FxaaEnabled = true;
@@ -514,6 +668,7 @@ int main(int argc, char** argv) {
         TestDepthOfField(renderer, *scene);
         TestFxaa(renderer, *scene);
         TestGrid(renderer, *scene);
+        TestObjectMotionBlur(renderer);
         TestMorphTargets(renderer);
     }
 

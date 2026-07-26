@@ -216,24 +216,36 @@ out vec4 FragColor;
 
 uniform sampler2D uScene;
 uniform sampler2D uDepth;
+uniform sampler2D uVelocity;  // буфер скоростей (если uUseVelocity == 1)
 uniform mat4 uInvViewProj;   // обратная view-projection ЭТОГО кадра
 uniform mat4 uPrevViewProj;  // view-projection ПРОШЛОГО кадра
 uniform float uAmount;
 uniform int uSamples;
+uniform int uUseVelocity;    // 1 — брать вектор из буфера скоростей
 
 void main() {
-    float d = texture(uDepth, vUV).r;
+    vec2 velocity;
 
-    vec4 clip = vec4(vUV * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    vec4 world = uInvViewProj * clip;
-    if (abs(world.w) < 1e-6) { FragColor = texture(uScene, vUV); return; }
-    world /= world.w;
+    if (uUseVelocity == 1) {
+        // Готовый вектор из прохода геометрии: он уже учитывает и движение
+        // камеры, и собственное движение объекта.
+        velocity = texture(uVelocity, vUV).xy * uAmount;
+    } else {
+        // Запасной путь без буфера скоростей: мир считается неподвижным, и
+        // смаз получается только от камеры (см. комментарий к PostFX::Render).
+        float d = texture(uDepth, vUV).r;
 
-    vec4 prevClip = uPrevViewProj * world;
-    if (prevClip.w < 1e-6) { FragColor = texture(uScene, vUV); return; } // за камерой
-    vec2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+        vec4 clip = vec4(vUV * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+        vec4 world = uInvViewProj * clip;
+        if (abs(world.w) < 1e-6) { FragColor = texture(uScene, vUV); return; }
+        world /= world.w;
 
-    vec2 velocity = (vUV - prevUV) * uAmount;
+        vec4 prevClip = uPrevViewProj * world;
+        if (prevClip.w < 1e-6) { FragColor = texture(uScene, vUV); return; } // за камерой
+        vec2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+
+        velocity = (vUV - prevUV) * uAmount;
+    }
 
     // Потолок длины: резкий рывок камеры иначе размазал бы кадр целиком, и
     // вместо смаза получилась бы каша.
@@ -436,7 +448,8 @@ RenderTarget* PostFX::EnsureAux(std::unique_ptr<RenderTarget>& slot) {
 
 void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int h,
                     const glm::mat4& proj, const glm::mat4& view, const PostFXSettings& s,
-                    Framebuffer* output, int outX, int outY, int outW, int outH) {
+                    Framebuffer* output, int outX, int outY, int outW, int outH,
+                    unsigned int velocityTexture) {
     GraphicsDevice& device = GraphicsDevice::Get();
     EnsureTargets(w, h);
     device.SetDepthTest(false); // все проходы — полноэкранные, глубина не нужна
@@ -447,7 +460,11 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     const bool haveDepth = sceneDepth != 0;
     const bool doAO = s.AOEnabled && haveDepth;
     const bool doDof = s.DofEnabled && haveDepth;
-    const bool doMotion = s.MotionBlurEnabled && haveDepth && m_hasPrevFrame &&
+    // С буфером скоростей история прошлого кадра ЗДЕСЬ не нужна — её хранит
+    // проход геометрии, у каждой сущности свою. Поэтому m_hasPrevFrame требуется
+    // только запасному пути.
+    const bool useVelocity = velocityTexture != 0;
+    const bool doMotion = s.MotionBlurEnabled && (useVelocity || (haveDepth && m_hasPrevFrame)) &&
                           s.MotionBlurAmount > 0.001f;
     const bool doBloom = s.BloomEnabled;
 
@@ -505,8 +522,14 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
         sh.Use();
         sh.SetInt("uScene", 0);
         sh.SetInt("uDepth", 1);
+        sh.SetInt("uVelocity", 2);
         device.BindTexture2D(0, colorTex);
         device.BindTexture2D(1, sceneDepth);
+        // Сэмплер обязан быть привязан всегда, даже когда путь не выбран:
+        // непривязанный юнит на части драйверов читается как чёрная текстура,
+        // а на части — как мусор из чужого прохода.
+        device.BindTexture2D(2, useVelocity ? velocityTexture : sceneDepth);
+        sh.SetInt("uUseVelocity", useVelocity ? 1 : 0);
         sh.SetMat4("uInvViewProj", glm::inverse(viewProj));
         sh.SetMat4("uPrevViewProj", m_prevViewProj);
         sh.SetFloat("uAmount", s.MotionBlurAmount);

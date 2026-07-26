@@ -107,9 +107,18 @@ public:
     //                пропускается — сравнивать не с чем).
     // output != nullptr — composite пишется в этот Framebuffer (вьюпорт редактора);
     // output == nullptr — в экранный буфер, в прямоугольник (outX,outY,outW,outH).
+    //
+    // velocityTexture — буфер экранных СКОРОСТЕЙ (sage::ecs::RenderBatch::
+    // RenderVelocity). Если он передан, смаз движения берёт вектор оттуда и
+    // смазывает движение и камеры, И объектов. Ноль — старый путь: движение
+    // восстанавливается из глубины матрицей прошлого кадра, что даёт смаз
+    // ТОЛЬКО от камеры. Второй путь оставлен не для совместимости, а по делу:
+    // он не требует лишнего прохода геометрии, и там, где камера — единственное,
+    // что движется, он даёт тот же результат дешевле.
     void Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int h,
                 const glm::mat4& proj, const glm::mat4& view, const PostFXSettings& s,
-                Framebuffer* output, int outX, int outY, int outW, int outH);
+                Framebuffer* output, int outX, int outY, int outW, int outH,
+                unsigned int velocityTexture = 0);
 
     // Сбрасывает накопленную историю кадра (матрицу прошлой камеры). Нужен
     // после «телепорта» камеры — смены плана, перемотки таймлайна, загрузки
