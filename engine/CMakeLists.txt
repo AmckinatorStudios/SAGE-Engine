@@ -11,6 +11,7 @@
 set(SAGE_ENGINE_SOURCES
     src/sage/anim/AnimationSystem.cpp
     src/sage/anim/Animator.cpp
+    src/sage/anim/IK.cpp
     src/sage/anim/Retarget.cpp
     src/sage/anim/Skeleton.cpp
     src/sage/audio/AudioEngine.cpp
@@ -37,6 +38,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
     src/sage/render/Font.cpp
+    src/sage/render/GridRenderer.cpp
     src/sage/render/ParticleECS.cpp
     src/sage/render/ParticleSystem.cpp
     src/sage/render/PostFX.cpp

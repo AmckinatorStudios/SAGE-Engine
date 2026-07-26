@@ -226,3 +226,70 @@ void AudioEngine::Update() {
         }
     }
 }
+
+// ============================================================================
+//  Декодирование в моно — для волновой формы в инструментах
+// ============================================================================
+
+namespace {
+
+// Общая часть обоих DecodeToMono: декодер уже открыт, осталось вычитать всё и
+// свести каналы. Читаем ПОРЦИЯМИ: длина файла заранее известна не всегда
+// (потоковые форматы), а держать в памяти два представления — исходное и
+// моно — незачем.
+bool DecodeAllToMono(ma_decoder& decoder, std::vector<float>& outSamples, int& outSampleRate) {
+    const ma_uint32 channels = decoder.outputChannels;
+    outSampleRate = (int)decoder.outputSampleRate;
+    if (channels == 0 || outSampleRate <= 0) return false;
+
+    outSamples.clear();
+    // Оценка длины, если формат её знает: одна аллокация вместо десятков.
+    ma_uint64 totalFrames = 0;
+    if (ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames) == MA_SUCCESS && totalFrames > 0) {
+        outSamples.reserve((size_t)totalFrames);
+    }
+
+    constexpr ma_uint64 kChunkFrames = 4096;
+    std::vector<float> chunk((size_t)kChunkFrames * channels);
+    for (;;) {
+        ma_uint64 read = 0;
+        if (ma_decoder_read_pcm_frames(&decoder, chunk.data(), kChunkFrames, &read) != MA_SUCCESS) break;
+        if (read == 0) break;
+        for (ma_uint64 f = 0; f < read; ++f) {
+            float sum = 0.0f;
+            for (ma_uint32 c = 0; c < channels; ++c) sum += chunk[(size_t)(f * channels + c)];
+            outSamples.push_back(sum / (float)channels);
+        }
+        if (read < kChunkFrames) break; // файл кончился
+    }
+    return !outSamples.empty();
+}
+
+} // namespace
+
+bool AudioEngine::DecodeToMono(const std::string& path, std::vector<float>& outSamples,
+                               int& outSampleRate) {
+    // Просим float32: волне нужна амплитуда, а не исходная разрядность, и
+    // конвертацию miniaudio делает сам — надёжнее, чем разбирать форматы руками.
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
+    ma_decoder decoder;
+    if (ma_decoder_init_file(path.c_str(), &config, &decoder) != MA_SUCCESS) {
+        LOG_WARN("Audio") << "Не удалось открыть для разбора: " << path;
+        return false;
+    }
+    const bool ok = DecodeAllToMono(decoder, outSamples, outSampleRate);
+    ma_decoder_uninit(&decoder);
+    if (!ok) LOG_WARN("Audio") << "Файл открылся, но сэмплов не дал: " << path;
+    return ok;
+}
+
+bool AudioEngine::DecodeToMono(const void* data, size_t bytes, std::vector<float>& outSamples,
+                               int& outSampleRate) {
+    if (!data || bytes == 0) return false;
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
+    ma_decoder decoder;
+    if (ma_decoder_init_memory(data, bytes, &config, &decoder) != MA_SUCCESS) return false;
+    const bool ok = DecodeAllToMono(decoder, outSamples, outSampleRate);
+    ma_decoder_uninit(&decoder);
+    return ok;
+}

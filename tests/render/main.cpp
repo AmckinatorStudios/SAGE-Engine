@@ -27,6 +27,7 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/Framebuffer.h"
+#include "sage/render/GridRenderer.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ShadowMap.h"
@@ -148,10 +149,15 @@ struct FrameRenderer {
     sage::ecs::RenderBatch Batch;
     ShadowMap Shadow{1024};
     sage::render::PostFX Fx;
+    sage::render::GridRenderer Grid;
 };
 
+// grid — рисовать ли сетку поверх геометрии (nullptr — не рисовать). Сетка
+// идёт ДО пост-обработки и после геометрии: ровно там же, где во вьюпорте
+// инструмента, иначе тест проверял бы не тот путь.
 Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
-                  const sage::render::PostFXSettings& fx, int width, int height) {
+                  const sage::render::PostFXSettings& fx, int width, int height,
+                  const sage::render::GridSettings* grid = nullptr) {
     Framebuffer sceneFbo(width, height);
     Framebuffer output(width, height);
 
@@ -174,6 +180,8 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
     // как и в редакторе с инструментом.
     sage::anim::DrawAnimatedModels(scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
                                    r.Shadow.DepthTexture(), true);
+
+    if (grid) r.Grid.Draw(view, proj, kEye, *grid);
 
     // Смаз движения опирается на историю кадров, а тест должен быть
     // детерминированным при любом порядке запуска — сбрасываем её явно.
@@ -306,6 +314,81 @@ void TestFxaa(FrameRenderer& r, Scene& scene) {
     Check(fraction < 0.5, "FXAA правит кромки, а не мылит весь кадр");
 }
 
+// --- Сетка -----------------------------------------------------------------
+
+// Сетка целиком живёт в шейдере: и линии, и затухание, и обрезка по радиусу
+// считаются из точки пересечения луча с плоскостью. Проверить её значениями
+// нечем — наружу она не отдаёт ни одного числа. Поэтому только кадр.
+//
+// Проверка «радиус отличается от бесконечной» здесь не формальность: ровно так
+// ловится случай, когда сетка с радиусом гаснет целиком и кадр совпадает с
+// кадром вообще без сетки.
+void TestGrid(FrameRenderer& r, Scene& scene) {
+    const glm::mat4 proj = PerspectiveProj();
+
+    sage::render::GridSettings infinite;
+    infinite.Mode = sage::render::GridSettings::Extent::Infinite;
+    infinite.CellSize = 1.0f;
+    infinite.MajorEvery = 10;
+    infinite.ShowAxes = true;
+
+    sage::render::GridSettings radius = infinite;
+    radius.Mode = sage::render::GridSettings::Extent::Radius;
+    radius.Radius = 5.0f; // заметно меньше пола (14 м), чтобы край окружности попал в кадр
+
+    const Image plain = RenderFrame(r, scene, proj, BaseSettings(), kW, kH);
+    const Image withInfinite = RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &infinite);
+    const Image withRadius = RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &radius);
+
+    Report("grid_infinite", CompareWithReference("grid_infinite", withInfinite));
+    Report("grid_radius", CompareWithReference("grid_radius", withRadius));
+
+    auto meanDiff = [](const Image& a, const Image& b) {
+        long long sum = 0;
+        for (size_t i = 0; i < a.Pixels.size(); ++i) {
+            sum += std::abs((int)a.Pixels[i] - (int)b.Pixels[i]);
+        }
+        return (double)sum / (double)a.Pixels.size();
+    };
+
+    const double infiniteVsPlain = meanDiff(withInfinite, plain);
+    const double radiusVsPlain = meanDiff(withRadius, plain);
+    const double radiusVsInfinite = meanDiff(withRadius, withInfinite);
+    std::printf("       сетка против пустого кадра: бесконечная %.2f, с радиусом %.2f; "
+                "между собой %.2f\n",
+                infiniteVsPlain, radiusVsPlain, radiusVsInfinite);
+    Check(infiniteVsPlain > 1.0, "бесконечная сетка видна в кадре");
+    // Порог у сетки с радиусом ниже не по слабости проверки: она занимает
+    // пятно в центре кадра, а бесконечная — весь пол до горизонта, и одинаковое
+    // среднее по кадру от них требовать нечестно. Отличить «видна» от «погасла
+    // целиком» этого хватает с большим запасом: погасшая даёт ноль.
+    Check(radiusVsPlain > 0.3, "сетка с радиусом видна в кадре");
+    Check(radiusVsInfinite > 1.0, "радиус реально обрезает сетку, а не гасит её целиком");
+
+    // Выключенная сетка обязана не оставить ни пикселя: иначе флаг показа —
+    // ложь, и снять сетку с кадра было бы нечем.
+    sage::render::GridSettings off = infinite;
+    off.Enabled = false;
+    Check(meanDiff(RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &off), plain) < 0.001,
+          "выключенная сетка не рисуется");
+
+    // Прозрачность обязана влиять монотонно: половинная сетка ближе к пустому
+    // кадру, чем полная.
+    sage::render::GridSettings faint = infinite;
+    faint.Opacity = 0.35f;
+    const double faintVsPlain =
+        meanDiff(RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &faint), plain);
+    std::printf("       полупрозрачная сетка против пустого кадра: %.2f\n", faintVsPlain);
+    Check(faintVsPlain > 0.05 && faintVsPlain < infiniteVsPlain,
+          "прозрачность сетки ослабляет её, но не убирает");
+
+    // Шаг клетки обязан менять картинку: без этого настройка была бы мёртвой.
+    sage::render::GridSettings coarse = infinite;
+    coarse.CellSize = 4.0f;
+    Check(meanDiff(RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &coarse), withInfinite) > 0.5,
+          "шаг клетки меняет сетку");
+}
+
 // --- Блендшейпы ------------------------------------------------------------
 
 // Морф-цели меняют саму ФОРМУ меша, а не его положение, поэтому единственная
@@ -430,6 +513,7 @@ int main(int argc, char** argv) {
         TestNoPostFX(renderer, *scene);
         TestDepthOfField(renderer, *scene);
         TestFxaa(renderer, *scene);
+        TestGrid(renderer, *scene);
         TestMorphTargets(renderer);
     }
 
