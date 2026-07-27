@@ -6,6 +6,7 @@
 add_executable(SageEditor
     src/main.cpp
     src/EditorLayer.cpp
+    src/EditorSelfTest.cpp
     src/EditorSceneRenderer.cpp
     src/EditorTheme.cpp
     src/Project.cpp
