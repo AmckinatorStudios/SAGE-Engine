@@ -18,6 +18,12 @@ jobs:
             cmake g++ libx11-dev libxrandr-dev libxinerama-dev \
             libxcursor-dev libxi-dev libgl1-mesa-dev xvfb
 
+      # Граница RHI: за пределами engine/src/rhi/ вызовов gl* быть не должно.
+      # Шаг стоит ДО сборки намеренно — он не требует компилятора и падает за
+      # секунду, а не через пять минут, если кто-то дёрнул GL напрямую.
+      - name: RHI boundary check (no gl* outside the backend)
+        run: python3 scripts/check_rhi_boundary.py
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

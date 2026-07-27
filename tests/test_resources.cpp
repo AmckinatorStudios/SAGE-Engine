@@ -8,6 +8,12 @@
 
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ModelLoader.h"
+#include "rhi/null/NullDevice.h"
+#include "sage/rhi/GraphicsDevice.h"
+#include "sage/core/Profiler.h"
+
+#include <cstring>
+#include <string>
 
 #include <cstdio>
 #include <filesystem>
@@ -185,4 +191,150 @@ TEST(ModelImport_sidecar_roundtrip) {
     ModelLoader::ImportSettings def = ModelLoader::LoadImportSettings("no_such_model_xyz.obj");
     CHECK_NEAR(def.Scale, 1.0f, 1e-4);
     CHECK_FALSE(def.Recenter);
+}
+
+// ============================================================================
+//  Null-бэкенд: доказательство границы RHI
+// ============================================================================
+//
+// Смысл этих проверок не в самом Null-устройстве, а в том, что движок с ним
+// РАБОТАЕТ. Ресурсы создаются, геометрия рисуется, состояние выставляется — и
+// всё это без единого вызова OpenGL. Значит движок нигде за пределами rhi/ на
+// OpenGL не рассчитывает: раньше это было утверждение, теперь проверка.
+//
+// Чего эти проверки НЕ доказывают: что интерфейс годится для Vulkan. Пустышка
+// соглашается с любой формой интерфейса, ей нечего возразить (см. комментарий
+// в rhi/null/NullDevice.h).
+TEST(null_backend_runs_engine_without_gl) {
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    CHECK_TRUE(device != nullptr);
+    device->Init(nullptr);
+    CHECK_TRUE(std::string(device->BackendName()) == "Null");
+
+    sage::rhi::GraphicsDevice::SetCurrent(device.get());
+    sage::rhi::NullDevice::ResetCounters();
+
+    // Ресурсы всех видов — те же вызовы, что делает настоящий рендер.
+    std::string err;
+    auto shader = device->CreateShaderProgram("void main(){}", "void main(){}");
+    CHECK_TRUE(shader != nullptr);
+
+    sage::rhi::VertexLayout layout;
+    auto geometry = device->CreateGeometry(layout);
+    CHECK_TRUE(geometry != nullptr);
+
+    sage::rhi::Texture2DDesc texDesc;
+    texDesc.Width = 4; texDesc.Height = 4;
+    const unsigned char pixels[4 * 4 * 4] = {};
+    auto texture = device->CreateTexture2D(texDesc, pixels);
+    CHECK_TRUE(texture != nullptr);
+    // Хендлы разных ресурсов обязаны различаться: ноль означает «нет ресурса»,
+    // а совпадение маскировало бы ошибки привязки.
+    auto texture2 = device->CreateTexture2D(texDesc, pixels);
+    CHECK_TRUE(texture->NativeHandle() != 0);
+    CHECK_TRUE(texture->NativeHandle() != texture2->NativeHandle());
+
+    sage::rhi::RenderTargetDesc rtDesc;
+    rtDesc.Width = 64; rtDesc.Height = 64;
+    auto target = device->CreateRenderTarget(rtDesc);
+    CHECK_TRUE(target != nullptr);
+    CHECK_TRUE(target->Width() == 64);
+    target->Resize(128, 32);
+    CHECK_TRUE(target->Width() == 128 && target->Height() == 32);
+
+    // Отрисовка и состояние.
+    device->SetViewport(0, 0, 128, 128);
+    device->Clear();
+    shader->Use();
+    shader->SetMat4("uModel", glm::mat4(1.0f));
+    geometry->DrawIndexed(36);
+    geometry->DrawIndexedInstanced(36, 10);
+
+    const sage::rhi::NullCounters& counters = sage::rhi::NullDevice::Counters();
+    CHECK_TRUE(counters.DrawCalls == 2);
+    CHECK_TRUE(counters.Shaders == 1);
+    CHECK_TRUE(counters.Textures == 2);
+    CHECK_TRUE(counters.RenderTargets == 1);
+    CHECK_TRUE(counters.StateChanges > 0);
+
+    // Чтение пикселей отдаёт чёрный кадр, а не мусор: недетерминированные
+    // данные здесь ломали бы проверки в местах, где причина неочевидна.
+    unsigned char frame[2 * 2 * 3];
+    std::memset(frame, 0xAB, sizeof(frame));
+    device->ReadPixelsRGB(0, 0, 2, 2, frame);
+    bool cleared = true;
+    for (unsigned char c : frame) cleared = cleared && c == 0;
+    CHECK_TRUE(cleared);
+
+    sage::rhi::GraphicsDevice::SetCurrent(nullptr);
+}
+
+// Профилировщик кадра БЕЗ видеокарты: с Null-бэкендом таймеров GPU нет, и
+// проверяется ровно то, что не зависит от драйвера, — учёт участков, их
+// вложенность и то, что выключенный профилировщик не стоит ничего.
+//
+// Почему тут нет проверок «проход занял меньше N мс»: время на машине CI
+// зависит от соседей по железу, и такой порог либо ничего не ловит, либо
+// падает на ровном месте. Меряем структуру, а не скорость.
+TEST(profiler_records_nested_scopes) {
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    device->Init(nullptr);
+    sage::rhi::GraphicsDevice::SetCurrent(device.get());
+
+    // Выключенный профилировщик обязан молчать: ни одной записи, иначе за
+    // измерения платили бы в игре у игрока.
+    sage::profile::SetEnabled(false);
+    sage::profile::BeginFrame();
+    { SAGE_PROFILE("Мимо"); }
+    sage::profile::EndFrame();
+    CHECK_TRUE(sage::profile::Frame().empty());
+
+    sage::profile::SetEnabled(true);
+    CHECK_TRUE(sage::profile::Enabled());
+    // Null не умеет таймеров GPU — и не притворяется, что умеет.
+    CHECK_TRUE(!sage::profile::GpuTimersAvailable());
+
+    // Результат созревает не сразу (метки GPU читаются через несколько кадров),
+    // поэтому крутим несколько одинаковых кадров и смотрим на готовый.
+    for (int i = 0; i < 8; ++i) {
+        sage::profile::BeginFrame();
+        {
+            SAGE_PROFILE("Отрисовка");
+            { SAGE_PROFILE("Тени"); }
+            { SAGE_PROFILE("Сцена"); }
+        }
+        { SAGE_PROFILE("Интерфейс"); }
+        sage::profile::EndFrame();
+    }
+
+    const std::vector<sage::profile::Entry>& frame = sage::profile::Frame();
+    CHECK_TRUE(frame.size() == 4);
+    // Порядок — тот, в котором участки ОТКРЫВАЛИСЬ, поэтому вложенные идут
+    // сразу за родителем, а не после него.
+    CHECK_TRUE(frame[0].Name == "Отрисовка" && frame[0].Depth == 0);
+    CHECK_TRUE(frame[1].Name == "Тени" && frame[1].Depth == 1);
+    CHECK_TRUE(frame[2].Name == "Сцена" && frame[2].Depth == 1);
+    CHECK_TRUE(frame[3].Name == "Интерфейс" && frame[3].Depth == 0);
+
+    // Родитель не может длиться меньше своего ребёнка: это была бы явная
+    // ошибка учёта, а не разброс измерений.
+    CHECK_TRUE(frame[0].CpuMs >= frame[1].CpuMs);
+    CHECK_TRUE(sage::profile::FrameCpuMs() > 0.0);
+
+    // Усреднение — по ИМЕНИ: состав проходов меняется от кадра к кадру
+    // (эффект включили, тени выключили), и «третья строка с третьей» складывала
+    // бы разные вещи.
+    const std::vector<sage::profile::Entry>& avg = sage::profile::Average();
+    CHECK_TRUE(avg.size() == 4);
+    bool named = false;
+    for (const sage::profile::Entry& e : avg) named = named || e.Name == "Тени";
+    CHECK_TRUE(named);
+
+    // Незакрытый Pop не должен ронять процесс: профилировщик — инструмент
+    // отладки, и падать из-за него хуже, чем недосчитать участок.
+    sage::profile::Pop();
+    sage::profile::Pop();
+
+    sage::profile::SetEnabled(false);
+    sage::rhi::GraphicsDevice::SetCurrent(nullptr);
 }

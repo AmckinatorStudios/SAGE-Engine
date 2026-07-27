@@ -32,6 +32,14 @@ public:
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
     float MaxAnisotropy() override;
 
+    // Метки времени GPU (ARB_timer_query, ядро с OpenGL 3.3).
+    unsigned int CreateTimestampQuery() override;
+    void DestroyTimestampQuery(unsigned int query) override;
+    void WriteTimestamp(unsigned int query) override;
+    bool TimestampReady(unsigned int query) override;
+    unsigned long long TimestampNs(unsigned int query) override;
+    bool SupportsGpuTimers() const override { return true; }
+
     std::unique_ptr<ShaderProgram> CreateShaderProgram(const std::string& vertexSrc,
                                                        const std::string& fragmentSrc) override;
     std::unique_ptr<Geometry> CreateGeometry(const VertexLayout& layout) override;

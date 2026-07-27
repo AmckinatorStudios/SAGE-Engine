@@ -151,4 +151,43 @@ std::unique_ptr<RenderTarget> OpenGLDevice::CreateRenderTarget(const RenderTarge
     return std::make_unique<GLRenderTarget>(desc);
 }
 
+// --- Метки времени GPU ------------------------------------------------------
+
+unsigned int OpenGLDevice::CreateTimestampQuery() {
+    GLuint query = 0;
+    glGenQueries(1, &query);
+    return query;
+}
+
+void OpenGLDevice::DestroyTimestampQuery(unsigned int query) {
+    if (query) {
+        GLuint q = query;
+        glDeleteQueries(1, &q);
+    }
+}
+
+void OpenGLDevice::WriteTimestamp(unsigned int query) {
+    // glQueryCounter, а не glBeginQuery(GL_TIME_ELAPSED): интервальный запрос
+    // может быть активен только один за раз, и вложенные проходы им не
+    // измерить. Метка просто просит видеокарту записать «когда сюда дошло».
+    if (query) glQueryCounter(query, GL_TIMESTAMP);
+}
+
+bool OpenGLDevice::TimestampReady(unsigned int query) {
+    if (!query) return false;
+    GLint available = GL_FALSE;
+    glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+    return available == GL_TRUE;
+}
+
+unsigned long long OpenGLDevice::TimestampNs(unsigned int query) {
+    if (!query) return 0;
+    GLuint64 value = 0;
+    // Спрашиваем результат ТОЛЬКО когда он готов (см. TimestampReady): иначе
+    // этот вызов блокирует поток до конца работы видеокарты, то есть само
+    // измерение и создаёт задержку, которую мы измеряем.
+    glGetQueryObjectui64v(query, GL_QUERY_RESULT, &value);
+    return (unsigned long long)value;
+}
+
 } // namespace sage::rhi

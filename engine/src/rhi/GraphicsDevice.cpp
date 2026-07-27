@@ -1,4 +1,5 @@
 #include "sage/rhi/GraphicsDevice.h"
+#include "rhi/null/NullDevice.h"
 #include "rhi/opengl/OpenGLDevice.h"
 #include <stdexcept>
 
@@ -10,6 +11,8 @@ std::unique_ptr<GraphicsDevice> GraphicsDevice::Create(Backend backend) {
     switch (backend) {
         case Backend::OpenGL:
             return std::make_unique<OpenGLDevice>();
+        case Backend::Null:
+            return std::make_unique<NullDevice>();
     }
     throw std::runtime_error("GraphicsDevice::Create: неизвестный бэкенд");
 }

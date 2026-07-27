@@ -2,6 +2,7 @@
 #include "sage/core/Log.h"
 #include "sage/core/Systems.h"
 #include "sage/core/JobSystem.h"
+#include "sage/core/Profiler.h"
 #include "sage/render/ResourceManager.h"
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -92,18 +93,39 @@ void Application::Run() {
 
         // Заливаем в VRAM текстуры, декодированные фоновым потоком (стриминг
         // ассетов). Только здесь — у главного потока единственного GL-контекст.
-        ResourceManager::Instance().PumpAsyncUploads();
+        profile::BeginFrame();
+        {
+            SAGE_PROFILE("Загрузка ресурсов");
+            ResourceManager::Instance().PumpAsyncUploads();
+        }
 
-        for (auto& layer : m_layers) layer->OnUpdate(m_deltaTime);
+        {
+            SAGE_PROFILE("Обновление");
+            for (auto& layer : m_layers) layer->OnUpdate(m_deltaTime);
+        }
 
         // Viewport экранного буфера держим в размер окна каждый кадр (раньше
         // это делал Window::OnResize напрямую через glViewport; теперь окно к
         // GL не обращается — за viewport отвечает графический слой).
         m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
-        for (auto& layer : m_layers) layer->OnRender();
+        {
+            SAGE_PROFILE("Отрисовка");
+            for (auto& layer : m_layers) layer->OnRender();
+        }
 
-        m_window->SwapBuffers();
+        // Обмен буферов меряем отдельно и НЕ считаем «нашим» временем: при
+        // включённой вертикальной синхронизации здесь стоит ожидание развёртки,
+        // и большое число тут означает «мы успеваем», а не «мы тормозим».
+        {
+            SAGE_PROFILE("Обмен буферов");
+            m_window->SwapBuffers();
+        }
         m_window->PollEvents();
+
+        // Кадр закрываем ДО ограничителя частоты: досып до 1/cap — это
+        // намеренное безделье, и включать его в стоимость кадра значило бы
+        // показывать 16 мс там, где работы было на 3.
+        profile::EndFrame();
 
         // Ограничитель кадров (если задан и без VSync): досыпаем до 1/cap секунды.
         if (m_config.FrameCap > 0) {
