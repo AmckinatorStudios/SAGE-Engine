@@ -185,12 +185,10 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
     device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
     device.Clear(true, true);
-    r.Batch.RenderColor(scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
-                        r.Shadow.DepthTexture(), true, 0);
+    r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
     // Скелетные модели рисуются отдельным проходом (свой шейдер со скиннингом),
     // как и в редакторе с инструментом.
-    sage::anim::DrawAnimatedModels(scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
-                                   r.Shadow.DepthTexture(), true);
+    sage::anim::DrawAnimatedModels(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true));
 
     if (grid) r.Grid.Draw(view, proj, kEye, *grid);
 
@@ -350,7 +348,7 @@ void TestMsaa(FrameRenderer& r) {
         device.Clear(true, true);
         // Режим 1 (unlit): плоский цвет без освещения и без теней — на кубе не
         // будет ни градиента, ни складок, только силуэт.
-        r.Batch.RenderColor(*scene, view, proj, kEye, env, glm::mat4(1.0f), 0, false, 1);
+        r.Batch.RenderColor(*scene, view, proj, kEye, env, ShadowBinding(), 1);
         sceneFbo.Resolve();
 
         r.Fx.ResetHistory();
@@ -474,8 +472,7 @@ void TestObjectMotionBlur(FrameRenderer& r) {
         sceneFbo.Bind();
         device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
         device.Clear(true, true);
-        r.Batch.RenderColor(*scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
-                            r.Shadow.DepthTexture(), true, 0);
+        r.Batch.RenderColor(*scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
 
         unsigned int velTex = 0;
         if (useVelocity) {
@@ -523,8 +520,7 @@ void TestObjectMotionBlur(FrameRenderer& r) {
         sceneFbo.Bind();
         device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
         device.Clear(true, true);
-        r.Batch.RenderColor(*scene, view, proj, kEye, env, r.Shadow.LightMatrix(),
-                            r.Shadow.DepthTexture(), true, 0);
+        r.Batch.RenderColor(*scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
         r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, sharpFx,
                     &output, 0, 0, kW, kH, 0);
         output.Bind();
@@ -801,6 +797,186 @@ void TestShadowSoftness(FrameRenderer& r, Scene& scene) {
     Check(smoothShare > 85.0, "кромка тени фильтруется, а не ступенчатая");
 }
 
+// --- Каскадные тени --------------------------------------------------------
+
+// Длинная сцена: три широкие стены на разной дальности, каждая кладёт на землю
+// длинную тень. Обычная тестовая сцена для каскадов не годится — она вся
+// умещается в ОДИН ближний каскад, и проверка на ней проходит даже с полностью
+// отключённым выбором каскада (проверено: отключил — тест не заметил).
+//
+// Стены, а не столбы: тень столба на семидесяти метрах занимает десяток
+// пикселей, и померить её нечем. Тень стены — широкая полоса, которую видно и
+// на маленьком тестовом кадре.
+std::unique_ptr<Scene> BuildLongScene() {
+    auto scene = std::make_unique<Scene>("CascadeTest");
+    // Свет летит В СТОРОНУ КАМЕРЫ (+z): иначе тени ложатся за стены, где их с
+    // этой точки съёмки просто не видно, и мерить нечего. На первом заходе
+    // солнце светило от камеры — кадр вышел почти без теней.
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.55f, -0.70f, 0.45f));
+    // Солнце ярче обычного, ambient слабее: мерить будем разницу освещённого и
+    // затенённого, и чем она крупнее в восьми битах, тем меньше шума в числах.
+    scene->Lighting.Sun.Intensity = 3.0f;
+    scene->Lighting.Sun.Color = {1.0f, 0.98f, 0.94f};
+    scene->Lighting.SkyColor = {0.40f, 0.48f, 0.64f};
+    scene->Lighting.GroundColor = {0.20f, 0.17f, 0.15f};
+    scene->Lighting.AmbientStrength = 0.15f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    auto primitive = [](GameObject obj, MeshRef::Type type, glm::vec3 color) {
+        obj.Renderer().Ref = MeshRef{type};
+        obj.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(type);
+        obj.Renderer().Color = color;
+    };
+
+    GameObject ground = scene->CreateObject("Ground");
+    ground.GetTransform().Position = {0.0f, 0.0f, -50.0f};
+    ground.GetTransform().Scale = {60.0f, 1.0f, 120.0f};
+    primitive(ground, MeshRef::Type::Plane, {0.62f, 0.63f, 0.65f});
+
+    // Стены на 8, 35 и 75 метрах: ближний, средний и дальний каскады.
+    const float kZ[] = {-8.0f, -35.0f, -75.0f};
+    for (int i = 0; i < 3; ++i) {
+        GameObject wall = scene->CreateObject("Wall" + std::to_string(i));
+        wall.GetTransform().Position = {2.0f, 2.5f, kZ[i]};
+        wall.GetTransform().Scale = {10.0f, 5.0f, 0.8f};
+        primitive(wall, MeshRef::Type::Cube, {0.78f, 0.76f, 0.72f});
+    }
+    return scene;
+}
+
+// Камера длинной сцены: высоко и с наклоном вниз, чтобы все три тени лежали в
+// кадре как полосы на земле.
+const glm::vec3 kLongEye(0.0f, 14.0f, 22.0f);
+const glm::vec3 kLongTarget(0.0f, 0.0f, -55.0f);
+
+// Рисует кадр ЗАДАННЫМ набором карт теней. Отдельно от RenderFrame, потому что
+// проверять надо именно карты: всё остальное в кадре должно совпадать до
+// пикселя, иначе разница окажется не про каскады. Пост-обработки нет намеренно:
+// тон-маппинг сжимает разницу яркостей, а мерить мы собираемся именно её.
+Image RenderWithShadows(FrameRenderer& r, Scene& scene, ShadowMap& shadows,
+                        const glm::mat4& view, const glm::mat4& proj, const glm::vec3& eye) {
+    Framebuffer sceneFbo(kW, kH);
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+
+    for (int c = 0; c < shadows.CascadeCount(); ++c) {
+        shadows.BeginRender(c);
+        r.Batch.RenderDepth(scene, shadows.LightMatrix(c));
+    }
+    shadows.EndRender(kW, kH);
+
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+    device.Clear(true, true);
+    r.Batch.RenderColor(scene, view, proj, eye, env, ShadowBinding(shadows, true), 0);
+    sceneFbo.Resolve();
+    sceneFbo.Bind();
+    return Capture(kW, kH);
+}
+
+// Сколько пикселей ОСВЕЩЁННОЙ земли базового кадра ушло в тень на проверяемом.
+// Прямой счёт площади новой тени.
+//
+// Первая версия мерила «суммарную недостачу яркости по всему кадру», и это не
+// работало: в сумму входили тёмное небо и сами стены, на их фоне дальняя тень
+// давала меньше процента, то есть тонула в постоянном слагаемом. Считать надо
+// то, что изменилось, а не то, что есть.
+long long NewlyShadowed(const Image& base, const Image& test) {
+    long long count = 0;
+    const size_t n = std::min(base.Pixels.size(), test.Pixels.size());
+    for (size_t i = 0; i < n; i += 3) {
+        const int b = base.Pixels[i];
+        const int t = test.Pixels[i];
+        // 100 отсекает небо и тёмные грани стен: интересует только земля,
+        // которая была освещена. 30 — уверенное потемнение, а не шум сжатия.
+        if (b > 100 && b - t > 30) ++count;
+    }
+    return count;
+}
+
+// Каскады проверяются с ДВУХ сторон, и обе нужны.
+//
+// 1. Тень есть ВДАЛИ. Это проверка ВЫБОРА каскада: если шейдер всегда смотрит в
+//    нулевую карту, дальние стены теряют тень. Первая версия этого теста мерила
+//    только подробность вблизи — и проходила с намеренно сломанным выбором
+//    каскада, то есть не проверяла главного.
+// 2. Вблизи тень ПОДРОБНЕЕ. Одна карта на всю даль даёт тексель в десяток
+//    сантиметров, и ближняя тень едет. Эталон подробности — тесная карта,
+//    натянутая только на ближний кусок.
+void TestShadowCascades(FrameRenderer& r) {
+    std::unique_ptr<Scene> scene = BuildLongScene();
+    const glm::mat4 view = glm::lookAt(kLongEye, kLongTarget, glm::vec3(0, 1, 0));
+    const glm::mat4 proj =
+        glm::perspective(glm::radians(45.0f), (float)kW / (float)kH, 0.1f, 400.0f);
+
+    ShadowMap::CameraView v;
+    v.Position = kLongEye;
+    v.Forward = glm::normalize(kLongTarget - kLongEye);
+    v.Up = glm::vec3(0.0f, 1.0f, 0.0f);
+    v.FovY = glm::radians(45.0f);
+    v.Aspect = (float)kW / (float)kH;
+    v.Near = 0.1f;
+    v.ShadowDistance = 140.0f;
+
+    ShadowMap cascaded(1024, 3);
+    cascaded.SetCascades(scene->Lighting.Sun.Direction, v);
+    const Image multi = RenderWithShadows(r, *scene, cascaded, view, proj, kLongEye);
+
+    // Одна карта РОВНО в размер ближнего каскада: вблизи она идеальна (это и
+    // есть эталон подробности), вдаль не достаёт вовсе.
+    ShadowMap nearOnly(1024, 1);
+    nearOnly.SetLightMatrix(scene->Lighting.Sun.Direction,
+                            kLongEye + v.Forward * cascaded.CascadeRadius(0),
+                            cascaded.CascadeRadius(0));
+    const Image nearImage = RenderWithShadows(r, *scene, nearOnly, view, proj, kLongEye);
+
+    // Одна карта на всю даль: тени есть везде, но тексель крупный.
+    ShadowMap wide(1024, 1);
+    wide.SetLightMatrix(scene->Lighting.Sun.Direction, kLongEye + v.Forward * 70.0f, 80.0f);
+    const Image wideImage = RenderWithShadows(r, *scene, wide, view, proj, kLongEye);
+
+    if (std::getenv("SAGE_DUMP_CASCADES")) {
+        SavePng("cascade_multi.png", multi);
+        SavePng("cascade_near.png", nearImage);
+        SavePng("cascade_wide.png", wideImage);
+    }
+
+    std::printf("    тексель каскадов: %.1f / %.1f / %.1f см; одна карта на ту же даль: %.1f см\n",
+                cascaded.CascadeTexelSize(0) * 100.0, cascaded.CascadeTexelSize(1) * 100.0,
+                cascaded.CascadeTexelSize(2) * 100.0, wide.CascadeTexelSize(0) * 100.0);
+
+    // --- 1. Тень вдали (проверка ВЫБОРА каскада) ---------------------------
+    // За базу берём кадр с одной ближней картой: в нём дальних теней нет
+    // вовсе. Всё, что потемнело относительно него, — это и есть дальняя тень.
+    const long long farWide = NewlyShadowed(nearImage, wideImage);
+    const long long farMulti = NewlyShadowed(nearImage, multi);
+    std::printf("    площадь дальней тени (пикселей): широкая карта %lld, каскады %lld\n",
+                farWide, farMulti);
+
+    // Сначала убеждаемся, что сцена вообще годится для этой проверки: широкой
+    // карте есть что нарисовать вдали. Иначе следующая проверка ничего не
+    // проверяет — ровно эта ошибка и была в первой версии теста.
+    Check(farWide > 300, "сцена действительно проверяет дальнюю тень");
+    // Каскады обязаны вернуть большую часть той тени, до которой ближняя карта
+    // не достаёт. При сломанном выборе каскада здесь будет около нуля.
+    Check(farMulti > farWide / 2, "каскады рисуют тень ВДАЛИ — выбор каскада работает");
+
+    // --- 2. Подробность вблизи ---------------------------------------------
+    // Проверяется размером текселя, а не пикселями кадра. Причина: разница
+    // между грубой и подробной тенью живёт на КРОМКЕ, а кромка занимает доли
+    // процента кадра — попиксельная сумма её не видит (пробовал: 105275 против
+    // 109817, то есть 4% при пятикратной разнице в текселе). Размер текселя —
+    // ровно та величина, которая определяет предел подробности, и меряется
+    // она точно.
+    Check(cascaded.CascadeTexelSize(0) < wide.CascadeTexelSize(0) * 0.35f,
+          "ближний каскад втрое с лишним мельче текселем, чем одна карта на ту же даль");
+
+    // Каскады обязаны РАСТИ: если дальний не крупнее ближнего, деление
+    // дальности не сработало и все карты накрывают одно и то же.
+    Check(cascaded.CascadeRadius(2) > cascaded.CascadeRadius(0) * 2.0f,
+          "дальний каскад заметно больше ближнего");
+}
+
 // --- Кэш ресурсов ----------------------------------------------------------
 
 // Кэш обязан давать РОВНО ТУ ЖЕ модель, что и разбор исходника. Проверять
@@ -980,6 +1156,7 @@ int main(int argc, char** argv) {
         TestMsaa(renderer);
         TestMorphTargets(renderer);
         TestShadowSoftness(renderer, *scene);
+        TestShadowCascades(renderer);
         TestAssetCache();
     }
 

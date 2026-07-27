@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/anim/Skeleton.h"
+#include "sage/render/ShadowMap.h"
 #include "sage/render/Texture.h"
 #include "sage/rhi/Resources.h"
 
@@ -108,15 +109,15 @@ public:
 
     // Рисует все submesh со скиннингом по палитре костей bones (из Animator),
     // с ПОЛНЫМ освещением сцены (ambient/солнце+тени/точечные/прожекторы/туман) —
-    // тем же, что и статические меши. lightMatrix/shadowMap/shadowsEnabled —
-    // карта теней от солнца (как в статическом lit-проходе). Если bones пуст —
+    // тем же, что и статические меши. shadows — карты теней от солнца
+    // (каскады, см. ShadowMap.h), как в статическом lit-проходе. Если bones пуст —
     // bind-поза (единичные кости).
     // morphWeights — веса блендшейпов в порядке MorphNames(); пусто или
     // nullptr — форма как в файле.
     void Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
               const glm::vec3& viewPos, const LightingEnvironment& env,
               const std::vector<glm::mat4>& bones,
-              const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled,
+              const ShadowBinding& shadows,
               const std::vector<float>* morphWeights = nullptr) const;
 
     // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей

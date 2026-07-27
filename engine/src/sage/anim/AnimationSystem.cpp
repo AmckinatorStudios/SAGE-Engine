@@ -65,13 +65,13 @@ void UpdateAnimators(Scene& scene, float dt) {
 
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
-                        const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled) {
+                        const ShadowBinding& shadows) {
     auto v = scene.Registry().view<AnimatedModelComponent, Transform>();
     for (auto e : v) {
         AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
         if (!am.Model) continue;
         am.Model->Draw(scene.WorldMatrix(e), view, proj, viewPos, env, am.Anim.BoneMatrices(),
-                       lightMatrix, shadowMap, shadowsEnabled, &am.MorphWeights);
+                       shadows, &am.MorphWeights);
     }
 }
 

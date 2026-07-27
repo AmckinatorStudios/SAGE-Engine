@@ -1,6 +1,8 @@
 #pragma once
 #include <glm/glm.hpp>
 
+#include "sage/render/ShadowMap.h"
+
 class Scene;
 struct LightingEnvironment;
 
@@ -22,12 +24,11 @@ void UpdateAnimators(Scene& scene, float dt);
 
 // Рисует все анимированные модели сцены в текущий фреймбуфер (после основного
 // прохода сцены — тест глубины включён). Освещение ПОЛНОЕ и совпадает со
-// статическими мешами: передаются позиция камеры, окружение и карта теней
-// солнца (матрица света + нативный хендл depth-текстуры + флаг), как в
-// статическом lit-проходе.
+// статическими мешами: передаются позиция камеры, окружение и карты теней
+// солнца (каскады — см. ShadowMap.h), как в статическом lit-проходе.
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
-                        const glm::mat4& lightMatrix, unsigned int shadowMap, bool shadowsEnabled);
+                        const ShadowBinding& shadows);
 
 // Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
 // внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.

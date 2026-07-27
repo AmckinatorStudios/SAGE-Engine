@@ -1,5 +1,6 @@
 #pragma once
 #include "sage/scene/Light.h"
+#include "sage/render/ShadowMap.h"
 #include "Shader.h"
 #include <glm/glm.hpp>
 #include <algorithm>
@@ -60,13 +61,31 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     shader.SetFloat("uFogEnd", env.Fog.End);
 }
 
-// Заливает uniform'ы карты теней в шейдер-приёмник: матрицу пространства
-// света, номер текстурного юнита карты теней и флаг
-// включённости. Тень применяется только к вкладу солнца (см. .frag).
-// Вызывается после UploadLighting для тех же шейдеров.
-inline void UploadShadowUniforms(Shader& shader, const glm::mat4& lightMatrix,
-                                 int shadowMapUnit, bool enabled) {
-    shader.SetMat4("uLightSpace", lightMatrix);
-    shader.SetInt("uShadowMap", shadowMapUnit);
-    shader.SetInt("uShadowsEnabled", enabled ? 1 : 0);
+// Заливает uniform'ы карт теней в шейдер-приёмник: матрицы пространства света
+// по каскадам, номера текстурных юнитов и флаг включённости. Тень применяется
+// только к вкладу солнца (см. PbrShader.h). Вызывается после UploadLighting
+// для тех же шейдеров.
+//
+// Одна карта — частный случай каскадов с Count == 1: шейдер найдёт фрагмент в
+// нулевом каскаде и дальше не пойдёт. Поэтому отдельного «некаскадного» пути
+// здесь нет и разойтись двум путям негде.
+inline void UploadShadowUniforms(Shader& shader, const ShadowBinding& shadows) {
+    const int count = std::max(1, std::min(shadows.Count, ShadowMap::kMaxCascades));
+    for (int i = 0; i < ShadowMap::kMaxCascades; ++i) {
+        const int src = std::min(i, count - 1);
+        shader.SetMat4("uShadowLightSpace[" + std::to_string(i) + "]", shadows.Matrices[src]);
+        shader.SetInt(i == 0 ? "uShadowMap" : ("uShadowMap" + std::to_string(i)),
+                      ShadowCascadeUnit(i));
+    }
+    shader.SetInt("uShadowCascades", count);
+    shader.SetInt("uShadowsEnabled", shadows.Enabled ? 1 : 0);
+}
+
+// Привязать карты и залить uniform'ы одним вызовом. Разделять эти два шага —
+// значит завести место, где можно сделать один и забыть другой; результат
+// (шейдер сэмплирует чужую текстуру) выглядит как случайные чёрные пятна и
+// ищется долго.
+inline void BindAndUploadShadows(Shader& shader, const ShadowBinding& shadows) {
+    shadows.Bind();
+    UploadShadowUniforms(shader, shadows);
 }

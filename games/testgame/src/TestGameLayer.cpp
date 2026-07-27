@@ -546,7 +546,7 @@ void TestGameLayer::OnAttach() {
     m_sceneShader.emplace("assets/shaders/scene.vert", "assets/shaders/scene.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
     m_postShader.emplace("assets/shaders/post.vert", "assets/shaders/post.frag");
-    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512);
+    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512, cfg.ShadowCascades);
     m_sceneFbo.emplace(window.Width(), window.Height());
     m_post.emplace();
     m_postfx.emplace(); // SSAO + Bloom + виньетка (полная цепочка пост-обработки)
@@ -912,13 +912,33 @@ void TestGameLayer::OnRender() {
 
     // --- 1. Проход теней (глубина из точки зрения солнца) ---
     if (m_shadowsEnabled) {
-        m_shadows->SetLightMatrix(scene->Lighting.Sun.Direction, m_playerPos, 20.0f);
-        m_shadows->BeginRender();
-        m_shadowShader->Use();
-        m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
-        DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false); // монумент
-        m_batch.RenderDepth(*scene, m_shadows->LightMatrix()); // ECS-статика (инстансно+отсечение)
-        sage::anim::DrawAnimatedModelsDepth(*scene, m_shadows->LightMatrix()); // скелеты отбрасывают тень
+        if (m_shadows->CascadeCount() > 1) {
+            // Улица: каскады привязаны к камере, а не к игроку. Тени нужны
+            // там, куда смотрят, — привязка к игроку оставляла бы полкадра
+            // без теней, стоило отвести взгляд.
+            ShadowMap::CameraView v;
+            v.Position = m_camera.Position;
+            v.Forward = m_camera.Front;
+            v.Up = m_camera.Up;
+            v.FovY = glm::radians(m_camera.Fov);
+            v.Aspect = (float)vpW / (float)std::max(vpH, 1);
+            v.Near = m_camera.NearClip;
+            v.ShadowDistance = cfg.ShadowDistance;
+            m_shadows->SetCascades(scene->Lighting.Sun.Direction, v);
+        } else {
+            m_shadows->SetLightMatrix(scene->Lighting.Sun.Direction, m_playerPos, 20.0f);
+        }
+        // Проход глубины — по одному на каскад: каждая карта видит свой кусок
+        // дальности, и геометрию для неё надо нарисовать отдельно. Это и есть
+        // цена каскадов, о которой сказано в ShadowMap.h.
+        for (int c = 0; c < m_shadows->CascadeCount(); ++c) {
+            m_shadows->BeginRender(c);
+            m_shadowShader->Use();
+            m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix(c));
+            DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false); // монумент
+            m_batch.RenderDepth(*scene, m_shadows->LightMatrix(c)); // ECS-статика (инстансно+отсечение)
+            sage::anim::DrawAnimatedModelsDepth(*scene, m_shadows->LightMatrix(c)); // скелеты отбрасывают тень
+        }
         m_shadows->EndRender(window.Width(), window.Height());
     }
 
@@ -946,16 +966,16 @@ void TestGameLayer::OnRender() {
     m_sceneShader->SetMat4("uProjection", proj);
     m_sceneShader->SetVec3("uViewPos", m_camera.Position);
     UploadLighting(*m_sceneShader, lighting);
-    if (m_shadowsEnabled) device.BindTexture2D(1, m_shadows->DepthTexture());
-    UploadShadowUniforms(*m_sceneShader, m_shadows->LightMatrix(), /*unit=*/1, m_shadowsEnabled);
+    const ShadowBinding shadowBinding(*m_shadows, m_shadowsEnabled);
+    BindAndUploadShadows(*m_sceneShader, shadowBinding);
     DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true); // монумент
     // ECS-статика — через RenderBatch (отсечение по фрустуму + инстансинг).
     m_batch.RenderColor(*scene, view, proj, m_camera.Position, lighting,
-                        m_shadows->LightMatrix(), m_shadows->DepthTexture(), m_shadowsEnabled, 0);
+                        shadowBinding, 0);
 
     // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
     sage::anim::DrawAnimatedModels(*scene, view, proj, m_camera.Position, lighting,
-                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), m_shadowsEnabled);
+                                   shadowBinding);
     // Частицы (billboard) — camRight/Up из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
 

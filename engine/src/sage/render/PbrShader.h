@@ -29,7 +29,15 @@ uniform int uNumPointLights;
 uniform SpotLight uSpotLights[MAX_SPOT_LIGHTS];
 uniform int uNumSpotLights;
 uniform vec3 uViewPos;
-uniform sampler2D uShadowMap;
+// Карты теней: по одной на каскад. Массив сэмплеров тут не годится — GLSL 330
+// требует индексировать его константой, а каскад выбирается на лету. Поэтому
+// четыре именованных сэмплера и развёрнутый выбор ниже (см. CalcSunShadow).
+uniform sampler2D uShadowMap;   // каскад 0 — самый ближний и подробный
+uniform sampler2D uShadowMap1;
+uniform sampler2D uShadowMap2;
+uniform sampler2D uShadowMap3;
+uniform mat4 uShadowLightSpace[4];
+uniform int uShadowCascades;    // сколько каскадов реально заполнено (1..4)
 uniform bool uShadowsEnabled;
 uniform int uShadingMode; // 0 lit / 1 unlit / 2 normals (решает вызывающий main)
 uniform bool uFogEnabled;
@@ -58,39 +66,30 @@ vec3 FresnelSchlick(float cosT, vec3 F0) {
 }
 
 // Одно сравнение глубины: 1 — в тени, 0 — на свету.
-float ShadowTest(vec2 uv, float depth, float bias) {
-    return (depth - bias > texture(uShadowMap, uv).r) ? 1.0 : 0.0;
+float ShadowTest(sampler2D map, vec2 uv, float depth, float bias) {
+    return (depth - bias > texture(map, uv).r) ? 1.0 : 0.0;
 }
 
-// БИЛИНЕЙНЫЙ тап. Здесь и была вся «пиксельность»: обычный texture() по карте
-// ГЛУБИНЫ интерполирует расстояния, а не тени, и сравнение с ним всё равно
-// даёт ноль или единицу — граница тени получается лесенкой размером в тексель.
-// Правильно наоборот: сравнить в четырёх соседних текселях, а СМЕШАТЬ уже
-// результаты сравнения. Тогда переход от света к тени идёт плавно внутри
-// одного текселя. Ровно это делает аппаратный sampler2DShadow; здесь то же
-// самое руками, без изменения формата текстуры.
-float ShadowBilinear(vec2 uv, float depth, float bias, vec2 texel) {
+// Билинейная фильтрация СРАВНЕНИЙ, а не глубин. Усреднять глубины соседних
+// текселей бессмысленно: между ступенькой и полом среднее даёт глубину, какой
+// в сцене нет, и получается ореол. Сравнивать надо в каждом из четырёх
+// текселей, а смешивать уже результаты — 0 и 1. Ровно это делает аппаратный
+// sampler2DShadow; здесь то же самое руками, без изменения формата текстуры.
+float ShadowBilinear(sampler2D map, vec2 uv, float depth, float bias, vec2 texel) {
     vec2 grid = uv / texel - 0.5;
     vec2 frac = fract(grid);
     vec2 base = (floor(grid) + 0.5) * texel;
-    float s00 = ShadowTest(base, depth, bias);
-    float s10 = ShadowTest(base + vec2(texel.x, 0.0), depth, bias);
-    float s01 = ShadowTest(base + vec2(0.0, texel.y), depth, bias);
-    float s11 = ShadowTest(base + texel, depth, bias);
+    float s00 = ShadowTest(map, base, depth, bias);
+    float s10 = ShadowTest(map, base + vec2(texel.x, 0.0), depth, bias);
+    float s01 = ShadowTest(map, base + vec2(0.0, texel.y), depth, bias);
+    float s11 = ShadowTest(map, base + texel, depth, bias);
     return mix(mix(s00, s10, frac.x), mix(s01, s11, frac.x), frac.y);
 }
 
-float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
-    vec3 pc = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    pc = pc * 0.5 + 0.5;
-    // За дальней границей карты теней быть не может — там всё освещено.
-    // Проверяем и боковые края: без этого геометрия за пределами ортобокса
-    // берёт крайний тексель и тянет за собой полосу ложной тени.
-    if (pc.z > 1.0 || any(lessThan(pc.xy, vec2(0.0))) || any(greaterThan(pc.xy, vec2(1.0))))
-        return 0.0;
-
-    vec2 texel = 1.0 / textureSize(uShadowMap, 0);
-    float ndl = dot(normal, sunDir);
+// Тень по одной карте. pc — координаты фрагмента в пространстве этого каскада,
+// уже приведённые к [0,1].
+float ShadowPCF(sampler2D map, vec3 pc, vec3 normal, float ndl) {
+    vec2 texel = 1.0 / vec2(textureSize(map, 0));
 
     // Смещение по нормали, а не только по глубине. Наклонная поверхность
     // покрывается текселями по диагонали, и «правильная» глубина внутри одного
@@ -98,8 +97,7 @@ float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
     // ВДОЛЬ НОРМАЛИ на размер текселя убирает их, не отрывая тень от предмета,
     // как это делает большой постоянный bias.
     float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
-    vec2 offset = normal.xz * texel * (0.75 + 2.0 * slope);
-    vec2 uv = pc.xy + offset;
+    vec2 uv = pc.xy + normal.xz * texel * (0.75 + 2.0 * slope);
 
     float bias = max(0.0018 * slope, 0.0004);
 
@@ -109,8 +107,95 @@ float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
     float shadow = 0.0;
     for (int x = -1; x <= 1; ++x)
         for (int y = -1; y <= 1; ++y)
-            shadow += ShadowBilinear(uv + vec2(x, y) * texel, pc.z, bias, texel);
+            shadow += ShadowBilinear(map, uv + vec2(x, y) * texel, pc.z, bias, texel);
     return shadow / 9.0;
+}
+
+// Координаты фрагмента в пространстве каскада, приведённые к [0,1].
+vec3 CascadeCoords(int cascade, vec3 worldPos) {
+    vec4 lp = uShadowLightSpace[cascade] * vec4(worldPos, 1.0);
+    return (lp.xyz / lp.w) * 0.5 + 0.5;
+}
+
+// Влезает ли фрагмент в каскад с запасом на ядро фильтра. Запас обязателен:
+// на самом краю карты тапы 3x3 уходят за её пределы и приносят оттуда мусор,
+// который выглядит как рамка ложной тени по границе каскада.
+bool InsideCascade(vec3 pc, float margin) {
+    return pc.z <= 1.0 &&
+           all(greaterThanEqual(pc.xy, vec2(margin))) &&
+           all(lessThanEqual(pc.xy, vec2(1.0 - margin)));
+}
+
+// Насколько фрагмент близок к краю каскада: 0 — в середине, 1 — на границе.
+// По этому числу ближний и дальний каскады смешиваются в узкой полосе, иначе
+// на стыке видна ступенька: слева тень мягкая и подробная, справа — грубая.
+float CascadeEdge(vec3 pc, float band) {
+    vec2 d = min(pc.xy, vec2(1.0) - pc.xy); // расстояние до ближайшего края
+    float m = min(d.x, d.y);
+    return 1.0 - clamp(m / band, 0.0, 1.0);
+}
+
+float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
+    float ndl = dot(normal, sunDir);
+    const float kMargin = 0.02; // запас под ядро 3x3 у края карты
+    const float kBand = 0.10;   // ширина полосы смешивания каскадов
+
+    // Каскады перебираются от ближнего к дальнему, и берётся ПЕРВЫЙ
+    // подходящий: он самый подробный из тех, что накрывают эту точку.
+    //
+    // Выбор развёрнут вручную и выглядит длинно. Причина не в лени: GLSL 330
+    // запрещает индексировать массив сэмплеров переменной, а sampler нельзя
+    // положить в локальную переменную. Цикл здесь физически невозможен.
+    vec3 pc0 = CascadeCoords(0, worldPos);
+    if (InsideCascade(pc0, kMargin)) {
+        float s = ShadowPCF(uShadowMap, pc0, normal, ndl);
+        if (uShadowCascades > 1) {
+            float w = CascadeEdge(pc0, kBand);
+            if (w > 0.0) {
+                vec3 pc1 = CascadeCoords(1, worldPos);
+                float far = InsideCascade(pc1, kMargin) ? ShadowPCF(uShadowMap1, pc1, normal, ndl) : 0.0;
+                s = mix(s, far, w);
+            }
+        }
+        return s;
+    }
+    if (uShadowCascades > 1) {
+        vec3 pc1 = CascadeCoords(1, worldPos);
+        if (InsideCascade(pc1, kMargin)) {
+            float s = ShadowPCF(uShadowMap1, pc1, normal, ndl);
+            if (uShadowCascades > 2) {
+                float w = CascadeEdge(pc1, kBand);
+                if (w > 0.0) {
+                    vec3 pc2 = CascadeCoords(2, worldPos);
+                    float far = InsideCascade(pc2, kMargin) ? ShadowPCF(uShadowMap2, pc2, normal, ndl) : 0.0;
+                    s = mix(s, far, w);
+                }
+            }
+            return s;
+        }
+    }
+    if (uShadowCascades > 2) {
+        vec3 pc2 = CascadeCoords(2, worldPos);
+        if (InsideCascade(pc2, kMargin)) {
+            float s = ShadowPCF(uShadowMap2, pc2, normal, ndl);
+            if (uShadowCascades > 3) {
+                float w = CascadeEdge(pc2, kBand);
+                if (w > 0.0) {
+                    vec3 pc3 = CascadeCoords(3, worldPos);
+                    float far = InsideCascade(pc3, kMargin) ? ShadowPCF(uShadowMap3, pc3, normal, ndl) : 0.0;
+                    s = mix(s, far, w);
+                }
+            }
+            return s;
+        }
+    }
+    if (uShadowCascades > 3) {
+        vec3 pc3 = CascadeCoords(3, worldPos);
+        if (InsideCascade(pc3, kMargin)) return ShadowPCF(uShadowMap3, pc3, normal, ndl);
+    }
+    // Дальше последнего каскада тени нет — там всё освещено. Тянуть её краем
+    // карты значило бы рисовать полосу ложной тени до горизонта.
+    return 0.0;
 }
 
 vec3 CalcHemisphereAmbient(vec3 normal) {
@@ -168,14 +253,14 @@ vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metall
 // «освещённость/π»: лайтмапа, GI-объём или полусферический ambient; умножает
 // albedo и ao). Прямой свет — realtime: солнце (с тенью) + точечные +
 // прожекторы + туман. shadingMode 1/2 обрабатывает вызывающий main.
-vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough, float ao, vec3 indirect) {
+vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, float ao, vec3 indirect) {
     vec3 V = normalize(uViewPos - fragPos);
     vec3 ambient = indirect * albedo * ao;
     vec3 Lo = vec3(0.0);
 
     // Солнце (направленное) + PCF-тень.
     vec3 sunL = normalize(-uSunDir);
-    float shadow = uShadowsEnabled ? CalcSunShadow(fragPosLightSpace, N, sunL) : 0.0;
+    float shadow = uShadowsEnabled ? CalcSunShadow(fragPos, N, sunL) : 0.0;
     Lo += PbrContrib(N, V, sunL, uSunColor * uSunIntensity * (1.0 - shadow), albedo, metallic, rough);
 
     // Точечные.
@@ -210,13 +295,13 @@ vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float
 
 // Совместимая обёртка: непрямой свет по умолчанию (GI-объём или полусферический
 // ambient). Прежний контракт для путей без собственной лайтмапы.
-vec3 ShadePBRao(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough, float ao) {
-    return ShadePBRgi(N, fragPos, fragPosLightSpace, albedo, metallic, rough, ao, DefaultIndirect(fragPos, N));
+vec3 ShadePBRao(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, float ao) {
+    return ShadePBRgi(N, fragPos, albedo, metallic, rough, ao, DefaultIndirect(fragPos, N));
 }
 
 // Совместимая обёртка без AO (ao = 1.0) — для путей без ambient-occlusion карты.
-vec3 ShadePBR(vec3 N, vec3 fragPos, vec4 fragPosLightSpace, vec3 albedo, float metallic, float rough) {
-    return ShadePBRao(N, fragPos, fragPosLightSpace, albedo, metallic, rough, 1.0);
+vec3 ShadePBR(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough) {
+    return ShadePBRao(N, fragPos, albedo, metallic, rough, 1.0);
 }
 )GLSL";
 

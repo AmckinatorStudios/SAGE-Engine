@@ -6,6 +6,7 @@
 #include <entt/entt.hpp>
 
 #include "sage/render/Mesh.h"
+#include "sage/render/ShadowMap.h"
 
 class Scene;
 struct LightingEnvironment;
@@ -38,8 +39,7 @@ public:
     // освещением. shadingMode: 0 lit / 1 unlit / 2 normals. Возвращает статистику.
     RenderStats RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                             const glm::vec3& viewPos, const LightingEnvironment& env,
-                            const glm::mat4& lightMatrix, unsigned int shadowMap,
-                            bool shadowsEnabled, int shadingMode);
+                            const ShadowBinding& shadows, int shadingMode);
 
     // Depth-проход для карты теней: отсечение по фрустуму СВЕТА + инстансная
     // отрисовка только глубины (без освещения).

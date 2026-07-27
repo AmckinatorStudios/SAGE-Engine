@@ -47,14 +47,12 @@ layout (location = 11) in vec2 aUV2;
 out vec3 FragPos;
 out vec3 Normal;
 out vec3 vColor;
-out vec4 FragPosLightSpace;
 out float vMetallic;
 out float vRoughness;
 out vec2 vUV2;
 
 uniform mat4 uView;
 uniform mat4 uProjection;
-uniform mat4 uLightSpace;
 
 void main() {
     mat4 model = mat4(iM0, iM1, iM2, iM3);
@@ -67,7 +65,6 @@ void main() {
     vMetallic = iMetallic;
     vRoughness = iRoughness;
     vUV2 = aUV2;
-    FragPosLightSpace = uLightSpace * world;
     gl_Position = uProjection * uView * world;
 }
 )";
@@ -77,7 +74,6 @@ std::string LitFragSource() {
 in vec3 FragPos;
 in vec3 Normal;
 in vec3 vColor;
-in vec4 FragPosLightSpace;
 in float vMetallic;
 in float vRoughness;
 in vec2 vUV2;
@@ -94,7 +90,7 @@ void main() {
     // Непрямой свет: лайтмапа (статика) или GI-объём/полусфера (DefaultIndirect).
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
-    FragColor = vec4(ShadePBRgi(N, FragPos, FragPosLightSpace, vColor, vMetallic, vRoughness, 1.0, indirect), 1.0);
+    FragColor = vec4(ShadePBRgi(N, FragPos, vColor, vMetallic, vRoughness, 1.0, indirect), 1.0);
 }
 )";
 }
@@ -110,14 +106,12 @@ layout (location = 11) in vec2 aUV2;
 out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoords;
-out vec4 FragPosLightSpace;
 out mat3 TBN;
 out vec2 vUV2;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-uniform mat4 uLightSpace;
 
 void main() {
     vec4 world = uModel * vec4(aPos, 1.0);
@@ -132,7 +126,6 @@ void main() {
     Normal = N;
     TexCoords = aUV;
     vUV2 = aUV2;
-    FragPosLightSpace = uLightSpace * world;
     gl_Position = uProjection * uView * world;
 }
 )";
@@ -142,7 +135,6 @@ std::string TexFragSource() {
 in vec3 FragPos;
 in vec3 Normal;
 in vec2 TexCoords;
-in vec4 FragPosLightSpace;
 in mat3 TBN;
 in vec2 vUV2;
 out vec4 FragColor;
@@ -185,7 +177,7 @@ void main() {
     if (uShadingMode == 1) { FragColor = vec4(albedo, 1.0); return; }
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
-    FragColor = vec4(ShadePBRgi(N, FragPos, FragPosLightSpace, albedo, metallic, rough, ao, indirect), 1.0);
+    FragColor = vec4(ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect), 1.0);
 }
 )";
 }
@@ -299,8 +291,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
 
 RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                                      const glm::vec3& viewPos, const LightingEnvironment& env,
-                                     const glm::mat4& lightMatrix, unsigned int shadowMap,
-                                     bool shadowsEnabled, int shadingMode) {
+                                     const ShadowBinding& shadows, int shadingMode) {
     m_stats = {};
     CollectVisible(scene, proj * view);
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
@@ -318,8 +309,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // GI-объём проб (или выключение) + юниты сэмплеров GI (обязательны
         // всегда — см. SetGISamplerUnits).
         sage::gi::UploadGIVolume(sh, giVolume);
-        if (shadowsEnabled && shadowMap) device.BindTexture2D(1, shadowMap);
-        UploadShadowUniforms(sh, lightMatrix, /*unit=*/1, shadowsEnabled);
+        BindAndUploadShadows(sh, shadows);
     };
 
     // Привязка лайтмапы группы/сущности (или выключение для незапечённых).

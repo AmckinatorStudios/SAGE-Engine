@@ -1,6 +1,7 @@
 #include "PlayerLayer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <vector>
@@ -54,7 +55,7 @@ void PlayerLayer::OnAttach() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512); // разрешение теней из конфига
+    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512, cfg.ShadowCascades); // разрешение и каскады из конфига
     m_sky.emplace();
     m_particles.emplace();
 
@@ -172,17 +173,6 @@ void PlayerLayer::OnRender() {
     if (!cfg.Skybox) env.Skybox.Enabled = false;
     if (!cfg.Fog) env.Fog.Enabled = false;
 
-    // --- Тени: глубина от солнца (можно отключить в настройках) ---
-    if (cfg.Shadows) {
-        m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
-        m_shadows->BeginRender();
-        m_shadowShader->Use();
-        m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix());
-        m_batch.RenderDepth(*m_scene, m_shadows->LightMatrix()); // статика в карту теней (инстансно+отсечение)
-        sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix()); // скелеты тоже отбрасывают тень
-        m_shadows->EndRender(window.Width(), window.Height());
-    }
-
     // --- Соотношение сторон: letterbox-viewport по центру окна (или весь экран) ---
     int vpX, vpY, vpW, vpH;
     cfg.LetterboxViewport(window.Width(), window.Height(), vpX, vpY, vpW, vpH);
@@ -212,6 +202,40 @@ void PlayerLayer::OnRender() {
         viewPos = m_fallbackCamera.Position;
     }
 
+    // --- Тени: глубина от солнца (можно отключить в настройках) ---
+    // Строго ПОСЛЕ выбора камеры: каскады делят дальность именно её взгляда, и
+    // без неё считать их не из чего. Порядок «тени, потом камера» держался
+    // только на том, что одной карте камера была не нужна.
+    if (cfg.Shadows) {
+        if (m_shadows->CascadeCount() > 1) {
+            ShadowMap::CameraView v;
+            v.Position = viewPos;
+            // Направление и «верх» достаём из матрицы вида: камера здесь может
+            // быть как компонентом сцены, так и запасной, и общего объекта
+            // Camera у них нет.
+            const glm::mat3 basis = glm::mat3(view);
+            v.Forward = -glm::vec3(basis[0][2], basis[1][2], basis[2][2]);
+            v.Up = glm::vec3(basis[0][1], basis[1][1], basis[2][1]);
+            // Угол обзора и ближнюю плоскость восстанавливаем из матрицы
+            // проекции — по той же причине.
+            v.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
+            v.Aspect = aspect;
+            v.Near = proj[3][2] / (proj[2][2] - 1.0f);
+            v.ShadowDistance = cfg.ShadowDistance;
+            m_shadows->SetCascades(env.Sun.Direction, v);
+        } else {
+            m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
+        }
+        for (int c = 0; c < m_shadows->CascadeCount(); ++c) {
+            m_shadows->BeginRender(c);
+            m_shadowShader->Use();
+            m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix(c));
+            m_batch.RenderDepth(*m_scene, m_shadows->LightMatrix(c)); // статика (инстансно+отсечение)
+            sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix(c)); // скелеты тоже отбрасывают тень
+        }
+        m_shadows->EndRender(window.Width(), window.Height());
+    }
+
     // --- Основной проход: полное освещение + тени + туман/скайбокс ---
     // Полосы letterbox чёрные: сперва чистим весь экран, затем рендерим в
     // центральный viewport нужного соотношения.
@@ -235,12 +259,11 @@ void PlayerLayer::OnRender() {
 
     // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
     m_batch.RenderColor(*m_scene, view, proj, viewPos, env,
-                        m_shadows->LightMatrix(), m_shadows->DepthTexture(),
-                        /*shadowsEnabled=*/cfg.Shadows, /*shadingMode=*/0);
+                        ShadowBinding(*m_shadows, cfg.Shadows), /*shadingMode=*/0);
 
     // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
     sage::anim::DrawAnimatedModels(*m_scene, view, proj, viewPos, env,
-                                   m_shadows->LightMatrix(), m_shadows->DepthTexture(), cfg.Shadows);
+                                   ShadowBinding(*m_shadows, cfg.Shadows));
     // Частицы (billboard) — camRight/Up берём из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
 

@@ -102,12 +102,10 @@ layout (location = 4) in vec4 aWeights;
 out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoords;
-out vec4 FragPosLightSpace;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-uniform mat4 uLightSpace;
 const int MAX_BONES = 128;
 uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned; // 0 — bind-поза (без палитры)
@@ -139,7 +137,6 @@ void main() {
     // неравномерном/отрицательном масштабе модели.
     Normal = transpose(inverse(mat3(uModel))) * skinnedNormal;
     TexCoords = aUV;
-    FragPosLightSpace = uLightSpace * worldPos;
     gl_Position = uProjection * uView * worldPos;
 }
 )";
@@ -152,7 +149,6 @@ std::string SkinFragSource() {
 in vec3 FragPos;
 in vec3 Normal;
 in vec2 TexCoords;
-in vec4 FragPosLightSpace;
 out vec4 FragColor;
 
 uniform vec3 uObjectColor;
@@ -166,7 +162,7 @@ void main() {
     vec3 N = normalize(Normal);
     if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
     if (uShadingMode == 1) { FragColor = vec4(albedo, 1.0); return; }
-    FragColor = vec4(ShadePBR(N, FragPos, FragPosLightSpace, albedo, uMetallic, uRoughness), 1.0);
+    FragColor = vec4(ShadePBR(N, FragPos, albedo, uMetallic, uRoughness), 1.0);
 }
 )";
 }
@@ -298,8 +294,8 @@ void UploadMorphs(const Shader& shader, const SkinnedSubMesh& sub,
 void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const std::vector<glm::mat4>& bones,
-                        const glm::mat4& lightMatrix, unsigned int shadowMap,
-                        bool shadowsEnabled, const std::vector<float>* morphWeights) const {
+                        const ShadowBinding& shadows,
+                        const std::vector<float>* morphWeights) const {
     Shader& shader = SkinShader();
     shader.Use();
     shader.SetMat4("uModel", model);
@@ -318,11 +314,8 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     sage::gi::SetGISamplerUnits(shader);
     shader.SetInt("uGIVolumeEnabled", 0);
 
-    // Тени от солнца: карта на юнит 1, матрица света + флаг — как у статики.
-    if (shadowsEnabled && shadowMap) {
-        sage::rhi::GraphicsDevice::Get().BindTexture2D(1, shadowMap);
-    }
-    UploadShadowUniforms(shader, lightMatrix, /*unit=*/1, shadowsEnabled);
+    // Тени от солнца: каскады на свои юниты + матрицы — как у статики.
+    BindAndUploadShadows(shader, shadows);
 
     int boneCount = std::min((int)bones.size(), kMaxBones);
     if (boneCount > 0) {

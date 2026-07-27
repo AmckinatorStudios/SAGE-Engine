@@ -1,6 +1,7 @@
 #include "sage/core/Config.h"
 
 #include <cctype>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 
@@ -102,6 +103,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             // остаются — они почти бесплатны, а картинку держат.
             Shadows = false;
             ShadowResolution = 512;
+            ShadowCascades = 1;
             PostProcessing = false;
             Bloom = false;
             AmbientOcclusion = false;
@@ -111,6 +113,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
         case QualityPreset::Medium:
             Shadows = true;
             ShadowResolution = 1024;
+            ShadowCascades = 1;
             PostProcessing = true;  // тон-маппинг/экспозиция — дёшево и заметно
             Bloom = false;
             AmbientOcclusion = false;
@@ -121,6 +124,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             // Значения по умолчанию движка — всё включено.
             Shadows = true;
             ShadowResolution = 2048;
+            ShadowCascades = 3;
             PostProcessing = true;
             Bloom = true;
             AmbientOcclusion = true;
@@ -130,6 +134,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
         case QualityPreset::Ultra:
             Shadows = true;
             ShadowResolution = 4096;
+            ShadowCascades = 4;
             PostProcessing = true;
             Bloom = true;
             AmbientOcclusion = true;
@@ -167,6 +172,8 @@ bool EngineConfig::LoadFile(const std::string& path) {
     auto gfx = j.value("graphics", json::object());
     Shadows          = gfx.value("shadows", Shadows);
     ShadowResolution = gfx.value("shadowResolution", ShadowResolution);
+    ShadowCascades = std::clamp(gfx.value("shadowCascades", ShadowCascades), 1, 4);
+    ShadowDistance = gfx.value("shadowDistance", ShadowDistance);
     PostProcessing   = gfx.value("postProcessing", PostProcessing);
     Fog              = gfx.value("fog", Fog);
     Skybox           = gfx.value("skybox", Skybox);
@@ -214,6 +221,7 @@ bool EngineConfig::SaveFile(const std::string& path) const {
     };
     j["graphics"] = {
         {"shadows", Shadows}, {"shadowResolution", ShadowResolution},
+        {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
         {"postProcessing", PostProcessing}, {"fog", Fog}, {"skybox", Skybox},
     };
     j["postProcess"] = {
@@ -275,6 +283,9 @@ void EngineConfig::ApplyEnvOverrides() {
     if (std::getenv("SAGE_NO_POST")) PostProcessing = false;
     if (const char* v = std::getenv("SAGE_SHADOWS")) Shadows = EnvBool(v, Shadows);
     if (const char* v = std::getenv("SAGE_SHADOW_RES")) ShadowResolution = std::atoi(v);
+    if (const char* v = std::getenv("SAGE_SHADOW_CASCADES"))
+        ShadowCascades = std::clamp(std::atoi(v), 1, 4);
+    if (const char* v = std::getenv("SAGE_SHADOW_DISTANCE")) ShadowDistance = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_POST")) PostProcessing = EnvBool(v, PostProcessing);
     if (const char* v = std::getenv("SAGE_FOG")) Fog = EnvBool(v, Fog);
     if (const char* v = std::getenv("SAGE_SKYBOX")) Skybox = EnvBool(v, Skybox);
