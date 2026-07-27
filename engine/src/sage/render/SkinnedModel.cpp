@@ -4,6 +4,9 @@
 #include <tiny_gltf.h>
 
 #include "SkinnedModel.h"
+
+#include "sage/assets/AssetCache.h"
+#include "sage/render/ModelData.h"
 #include "sage/gi/GIUpload.h"
 
 #include <algorithm>
@@ -612,7 +615,9 @@ glm::mat4 NodeLocal(const tinygltf::Node& n) {
 
 } // namespace
 
-std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
+// Разбор исходного glTF в ModelData. Ничего не создаёт на видеокарте —
+// поэтому работает и без контекста OpenGL, и результат можно записать в кэш.
+static ModelData ParseGltf(const std::string& path) {
     bool binary = path.size() > 4 && path.substr(path.size() - 4) == ".glb";
 
     tinygltf::TinyGLTF loader;
@@ -625,7 +630,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     if (!ok) throw std::runtime_error("SkinnedModel: не загрузить glTF " + path + ": " + err);
     if (g.skins.empty()) throw std::runtime_error("SkinnedModel: в файле нет скина: " + path);
 
-    auto model = std::unique_ptr<SkinnedModel>(new SkinnedModel());
+    ModelData data;
     const tinygltf::Skin& skin = g.skins[0];
     int jointCount = (int)skin.joints.size();
     if (jointCount > kMaxBones) {
@@ -646,7 +651,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     }
 
     // Скелет: TRS из узлов + родитель из иерархии узлов.
-    Skeleton& sk = model->m_skeleton;
+    Skeleton& sk = data.Skeleton;
     sk.Joints.resize(jointCount);
     for (int i = 0; i < jointCount; ++i) {
         const tinygltf::Node& n = g.nodes[skin.joints[i]];
@@ -669,17 +674,24 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     }
 
     // Меши со скином: собираем все примитивы, у которых есть JOINTS_0/WEIGHTS_0.
-    std::unordered_map<int, std::shared_ptr<Texture>> texCache;
-    auto loadTex = [&](int texIndex) -> std::shared_ptr<Texture> {
-        if (texIndex < 0 || texIndex >= (int)g.textures.size()) return nullptr;
+    // Изображение забирается РАСПАКОВАННЫМ и запоминается по индексу glTF: одна
+    // картинка, использованная десятью материалами, не должна лежать в данных
+    // десять раз — ни в памяти, ни в кэше.
+    std::unordered_map<int, int> imageSlots;
+    auto takeImage = [&](int texIndex) -> int {
+        if (texIndex < 0 || texIndex >= (int)g.textures.size()) return -1;
         int img = g.textures[texIndex].source;
-        auto it = texCache.find(img);
-        if (it != texCache.end()) return it->second;
-        if (img < 0 || img >= (int)g.images.size() || g.images[img].image.empty()) return nullptr;
-        auto t = std::make_shared<Texture>(g.images[img].image.data(), g.images[img].width,
-                                           g.images[img].height, TextureFilter::Trilinear, true);
-        texCache[img] = t;
-        return t;
+        auto it = imageSlots.find(img);
+        if (it != imageSlots.end()) return it->second;
+        if (img < 0 || img >= (int)g.images.size() || g.images[img].image.empty()) return -1;
+        ModelImage out;
+        out.Width = g.images[img].width;
+        out.Height = g.images[img].height;
+        out.Pixels = g.images[img].image;
+        data.Images.push_back(std::move(out));
+        const int slot = (int)data.Images.size() - 1;
+        imageSlots[img] = slot;
+        return slot;
     };
 
     // Ширина текстуры дельт. 1024 — заведомо в пределах любого GL 3.3
@@ -742,8 +754,9 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
             if (prim.indices >= 0) indices = ReadUInts(g, prim.indices, 1);
             else { indices.resize(vc); for (size_t i = 0; i < vc; ++i) indices[i] = (unsigned)i; }
 
-            SkinnedSubMesh sub;
-            sub.Mesh = std::make_shared<SkinnedMesh>(verts, indices);
+            ModelSubMeshData sub;
+            sub.Vertices = std::move(verts);
+            sub.Indices = std::move(indices);
             sub.Tint = glm::vec3(1.0f);
 
             // --- Морф-цели примитива ---
@@ -780,32 +793,19 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
                     }
                 }
 
-                // Nearest и без мипов: выборка идёт texelFetch по точному
-                // индексу вершины, любая фильтрация тут только смешала бы
-                // дельты соседних вершин.
-                sage::rhi::Texture2DDesc desc;
-                desc.Width = kMorphTexWidth;
-                desc.Height = rows * targetCount;
-                desc.Channels = 3;
-                desc.FilterMode = sage::rhi::Filter::Nearest;
-                desc.WrapMode = sage::rhi::Wrap::ClampEdge;
-                desc.GenerateMipmaps = false;
-                desc.FloatPixels = true;
-
-                sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
-                sub.Morphs.Positions = device.CreateTexture2D(desc, posDeltas.data());
-                sub.Morphs.Normals = device.CreateTexture2D(desc, nrmDeltas.data());
-                sub.Morphs.Count = targetCount;
-                sub.Morphs.Width = kMorphTexWidth;
-                sub.Morphs.RowsPerTarget = rows;
+                sub.MorphPositions = std::move(posDeltas);
+                sub.MorphNormals = std::move(nrmDeltas);
+                sub.MorphCount = targetCount;
+                sub.MorphWidth = kMorphTexWidth;
+                sub.MorphRows = rows;
 
                 // Имена и стартовые веса берём у ПЕРВОГО примитива с морфами:
                 // в glTF цели общие для всего меша, а модель у нас одна.
-                if (model->m_morphNames.empty()) {
-                    model->m_morphNames = readTargetNames(mesh, (size_t)targetCount);
-                    model->m_morphDefaults.assign((size_t)targetCount, 0.0f);
-                    for (size_t i = 0; i < mesh.weights.size() && i < model->m_morphDefaults.size(); ++i) {
-                        model->m_morphDefaults[i] = (float)mesh.weights[i];
+                if (data.MorphNames.empty()) {
+                    data.MorphNames = readTargetNames(mesh, (size_t)targetCount);
+                    data.MorphDefaults.assign((size_t)targetCount, 0.0f);
+                    for (size_t i = 0; i < mesh.weights.size() && i < data.MorphDefaults.size(); ++i) {
+                        data.MorphDefaults[i] = (float)mesh.weights[i];
                     }
                 }
             }
@@ -813,18 +813,18 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
                 const auto& pbr = g.materials[prim.material].pbrMetallicRoughness;
                 if (pbr.baseColorFactor.size() == 4)
                     sub.Tint = glm::vec3(pbr.baseColorFactor[0], pbr.baseColorFactor[1], pbr.baseColorFactor[2]);
-                if (pbr.baseColorTexture.index >= 0) sub.Diffuse = loadTex(pbr.baseColorTexture.index);
+                if (pbr.baseColorTexture.index >= 0) sub.Image = takeImage(pbr.baseColorTexture.index);
                 sub.Metallic = (float)pbr.metallicFactor;   // glTF по умолчанию 1.0
                 sub.Roughness = (float)pbr.roughnessFactor; // glTF по умолчанию 1.0
             }
-            model->m_subMeshes.push_back(std::move(sub));
+            data.SubMeshes.push_back(std::move(sub));
         }
     }
 
     // Анимации: каждый channel -> наш AnimChannel (только кости скина).
     for (const auto& anim : g.animations) {
         AnimationClip clip;
-        clip.Name = anim.name.empty() ? ("clip" + std::to_string(model->m_clips.size())) : anim.name;
+        clip.Name = anim.name.empty() ? ("clip" + std::to_string(data.Clips.size())) : anim.name;
         for (const auto& ch : anim.channels) {
             auto jIt = nodeToJoint.find(ch.target_node);
             if (jIt == nodeToJoint.end()) continue; // канал не на кости скина
@@ -849,15 +849,80 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
             }
             clip.Channels.push_back(std::move(out));
         }
-        if (!clip.Channels.empty()) model->m_clips.push_back(std::move(clip));
+        if (!clip.Channels.empty()) data.Clips.push_back(std::move(clip));
     }
 
-    LOG_INFO("Anim") << "SkinnedModel загружен: " << path << " (костей " << jointCount
-                     << ", submesh " << model->m_subMeshes.size()
-                     << ", клипов " << model->m_clips.size() << ")";
-    if (model->m_subMeshes.empty())
+    if (data.SubMeshes.empty())
         throw std::runtime_error("SkinnedModel: в файле нет скиновых мешей: " + path);
+    return data;
+}
+
+// Сборка на видеокарте: вершины в буферы, пиксели в текстуры, дельты морфов в
+// float-текстуры. Отсюда и только отсюда трогается GPU.
+std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
+    auto model = std::unique_ptr<SkinnedModel>(new SkinnedModel());
+    model->m_skeleton = std::move(data.Skeleton);
+    model->m_clips = std::move(data.Clips);
+    model->m_morphNames = std::move(data.MorphNames);
+    model->m_morphDefaults = std::move(data.MorphDefaults);
+
+    std::vector<std::shared_ptr<Texture>> textures;
+    textures.reserve(data.Images.size());
+    for (const ModelImage& img : data.Images) {
+        textures.push_back(std::make_shared<Texture>(img.Pixels.data(), img.Width, img.Height,
+                                                     TextureFilter::Trilinear, true));
+    }
+
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    for (ModelSubMeshData& src : data.SubMeshes) {
+        SkinnedSubMesh sub;
+        sub.Mesh = std::make_shared<SkinnedMesh>(src.Vertices, src.Indices);
+        sub.Tint = src.Tint;
+        sub.Metallic = src.Metallic;
+        sub.Roughness = src.Roughness;
+        if (src.Image >= 0 && src.Image < (int)textures.size()) sub.Diffuse = textures[(size_t)src.Image];
+
+        if (src.MorphCount > 0) {
+            // Nearest и без мипов: выборка идёт texelFetch по точному индексу
+            // вершины, любая фильтрация тут только смешала бы дельты соседних
+            // вершин.
+            sage::rhi::Texture2DDesc desc;
+            desc.Width = src.MorphWidth;
+            desc.Height = src.MorphRows * src.MorphCount;
+            desc.Channels = 3;
+            desc.FilterMode = sage::rhi::Filter::Nearest;
+            desc.WrapMode = sage::rhi::Wrap::ClampEdge;
+            desc.GenerateMipmaps = false;
+            desc.FloatPixels = true;
+            sub.Morphs.Positions = device.CreateTexture2D(desc, src.MorphPositions.data());
+            sub.Morphs.Normals = device.CreateTexture2D(desc, src.MorphNormals.data());
+            sub.Morphs.Count = src.MorphCount;
+            sub.Morphs.Width = src.MorphWidth;
+            sub.Morphs.RowsPerTarget = src.MorphRows;
+        }
+        model->m_subMeshes.push_back(std::move(sub));
+    }
     return model;
+}
+
+std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
+    // Кэш пробуется ПЕРВЫМ. Промах, устаревший или битый кэш — не ошибка:
+    // молча разбираем исходник и перезаписываем кэш. Неверный кэш никогда не
+    // должен приводить к неверной картинке, а его отсутствие — к отказу.
+    ModelData data;
+    if (sage::assets::ReadModelCache(path, data) && !data.Empty()) {
+        LOG_INFO("Anim") << "SkinnedModel из кэша: " << path << " (костей "
+                         << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
+                         << ", клипов " << data.Clips.size() << ")";
+        return BuildFromData(data);
+    }
+
+    data = ParseGltf(path);
+    LOG_INFO("Anim") << "SkinnedModel разобран: " << path << " (костей "
+                     << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
+                     << ", клипов " << data.Clips.size() << ")";
+    sage::assets::WriteModelCache(path, data);
+    return BuildFromData(data);
 }
 
 } // namespace sage::render

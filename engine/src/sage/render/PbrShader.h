@@ -57,19 +57,59 @@ vec3 FresnelSchlick(float cosT, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosT, 0.0, 1.0), 5.0);
 }
 
+// Одно сравнение глубины: 1 — в тени, 0 — на свету.
+float ShadowTest(vec2 uv, float depth, float bias) {
+    return (depth - bias > texture(uShadowMap, uv).r) ? 1.0 : 0.0;
+}
+
+// БИЛИНЕЙНЫЙ тап. Здесь и была вся «пиксельность»: обычный texture() по карте
+// ГЛУБИНЫ интерполирует расстояния, а не тени, и сравнение с ним всё равно
+// даёт ноль или единицу — граница тени получается лесенкой размером в тексель.
+// Правильно наоборот: сравнить в четырёх соседних текселях, а СМЕШАТЬ уже
+// результаты сравнения. Тогда переход от света к тени идёт плавно внутри
+// одного текселя. Ровно это делает аппаратный sampler2DShadow; здесь то же
+// самое руками, без изменения формата текстуры.
+float ShadowBilinear(vec2 uv, float depth, float bias, vec2 texel) {
+    vec2 grid = uv / texel - 0.5;
+    vec2 frac = fract(grid);
+    vec2 base = (floor(grid) + 0.5) * texel;
+    float s00 = ShadowTest(base, depth, bias);
+    float s10 = ShadowTest(base + vec2(texel.x, 0.0), depth, bias);
+    float s01 = ShadowTest(base + vec2(0.0, texel.y), depth, bias);
+    float s11 = ShadowTest(base + texel, depth, bias);
+    return mix(mix(s00, s10, frac.x), mix(s01, s11, frac.x), frac.y);
+}
+
 float CalcSunShadow(vec4 fragPosLightSpace, vec3 normal, vec3 sunDir) {
     vec3 pc = fragPosLightSpace.xyz / fragPosLightSpace.w;
     pc = pc * 0.5 + 0.5;
-    if (pc.z > 1.0) return 0.0;
-    float currentDepth = pc.z;
-    float bias = max(0.0025 * (1.0 - dot(normal, sunDir)), 0.0008);
-    float shadow = 0.0;
+    // За дальней границей карты теней быть не может — там всё освещено.
+    // Проверяем и боковые края: без этого геометрия за пределами ортобокса
+    // берёт крайний тексель и тянет за собой полосу ложной тени.
+    if (pc.z > 1.0 || any(lessThan(pc.xy, vec2(0.0))) || any(greaterThan(pc.xy, vec2(1.0))))
+        return 0.0;
+
     vec2 texel = 1.0 / textureSize(uShadowMap, 0);
+    float ndl = dot(normal, sunDir);
+
+    // Смещение по нормали, а не только по глубине. Наклонная поверхность
+    // покрывается текселями по диагонали, и «правильная» глубина внутри одного
+    // текселя меняется — отсюда полосы самозатенения. Сдвиг точки выборки
+    // ВДОЛЬ НОРМАЛИ на размер текселя убирает их, не отрывая тень от предмета,
+    // как это делает большой постоянный bias.
+    float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
+    vec2 offset = normal.xz * texel * (0.75 + 2.0 * slope);
+    vec2 uv = pc.xy + offset;
+
+    float bias = max(0.0018 * slope, 0.0004);
+
+    // Сетка 3x3 билинейных тапов: мягкая кромка шириной около трёх текселей.
+    // Дороже одного тапа в девять раз, но именно это отличает тень с ровным
+    // краем от лесенки, и платить тут стоит.
+    float shadow = 0.0;
     for (int x = -1; x <= 1; ++x)
-        for (int y = -1; y <= 1; ++y) {
-            float d = texture(uShadowMap, pc.xy + vec2(x, y) * texel).r;
-            shadow += (currentDepth - bias > d) ? 1.0 : 0.0;
-        }
+        for (int y = -1; y <= 1; ++y)
+            shadow += ShadowBilinear(uv + vec2(x, y) * texel, pc.z, bias, texel);
     return shadow / 9.0;
 }
 

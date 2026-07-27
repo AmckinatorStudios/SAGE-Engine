@@ -30,6 +30,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Stats.cpp
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp
+    src/sage/assets/AssetCache.cpp
     src/sage/render/DebugDraw.cpp
     src/sage/render/DebugOverlay.cpp
     src/sage/render/Material.cpp

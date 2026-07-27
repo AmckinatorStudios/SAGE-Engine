@@ -128,6 +128,11 @@ public:
                    const std::vector<float>* morphWeights = nullptr) const;
 
 private:
+    // Сборка модели из уже разобранных данных (ModelData). Частный член, а не
+    // свободная функция: только отсюда заполняются приватные поля, и открывать
+    // их наружу ради одной функции незачем.
+    static std::unique_ptr<SkinnedModel> BuildFromData(struct ModelData& data);
+
     std::vector<SkinnedSubMesh> m_subMeshes;
     sage::anim::Skeleton m_skeleton;
     std::vector<sage::anim::AnimationClip> m_clips;

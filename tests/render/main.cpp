@@ -29,6 +29,13 @@
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
 #include "sage/render/PostFX.h"
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+
+#include "sage/assets/AssetCache.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkinnedModel.h"
@@ -155,9 +162,13 @@ struct FrameRenderer {
 // grid — рисовать ли сетку поверх геометрии (nullptr — не рисовать). Сетка
 // идёт ДО пост-обработки и после геометрии: ровно там же, где во вьюпорте
 // инструмента, иначе тест проверял бы не тот путь.
+// shadowRadius — полусторона ортобокса теней. Параметр, а не константа: от
+// него напрямую зависит размер текселя, а значит и то, ВИДНО ли работу
+// фильтра. На тесной коробке фильтровать почти нечего.
 Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
                   const sage::render::PostFXSettings& fx, int width, int height,
-                  const sage::render::GridSettings* grid = nullptr) {
+                  const sage::render::GridSettings* grid = nullptr,
+                  float shadowRadius = 12.0f) {
     Framebuffer sceneFbo(width, height);
     Framebuffer output(width, height);
 
@@ -165,7 +176,7 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
     const glm::mat4 view = TestView();
 
     // Тени: бокс света центрируем на сцене, радиус с запасом на пол.
-    r.Shadow.SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f, 0.0f, 0.0f), 12.0f);
+    r.Shadow.SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f, 0.0f, 0.0f), shadowRadius);
     r.Shadow.BeginRender();
     r.Batch.RenderDepth(scene, r.Shadow.LightMatrix());
     r.Shadow.EndRender(width, height);
@@ -749,6 +760,184 @@ void TestMorphTargets(FrameRenderer& r) {
 
 } // namespace
 
+// --- Мягкость теней --------------------------------------------------------
+
+// Эталонные кадры к качеству теней ПОЧТИ НЕ ЧУВСТВИТЕЛЬНЫ: правка кромок
+// задевает полпроцента пикселей и укладывается в допуск. То есть тени могли бы
+// вернуться к лесенке, и ни один тест этого не заметил бы.
+//
+// Здесь меряется то, что и отличает хорошую тень от плохой: доля ПЛАВНЫХ
+// переходов яркости на её кромке. У жёсткой тени переход занимает один пиксель
+// (резкий скачок), у фильтрованной — несколько (череда промежуточных значений).
+void TestShadowSoftness(FrameRenderer& r, Scene& scene) {
+    // Радиус НАРОЧНО большой. При тесной коробке (12 м на карту 2048) тексель
+    // и так меньше пикселя, фильтровать нечего, и старый жёсткий вариант
+    // показывает ровно те же числа — первая версия этой проверки на том и
+    // провалилась: она проходила и до правки. Сорок метров дают тексель в
+    // четыре сантиметра, то есть ровно тот случай, ради которого фильтр и
+    // делался.
+    const Image frame = RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH,
+                                    nullptr, /*shadowRadius=*/40.0f);
+
+    int hard = 0, soft = 0;
+    for (int y = frame.Height / 2; y < frame.Height; ++y) {
+        for (int x = 0; x + 1 < frame.Width; ++x) {
+            const int a = frame.Pixels[(size_t)(y * frame.Width + x) * 3];
+            const int b = frame.Pixels[(size_t)(y * frame.Width + x + 1) * 3];
+            const int d = std::abs(a - b);
+            if (d > 18) ++hard;
+            else if (d >= 3) ++soft;
+        }
+    }
+    const double smoothShare = 100.0 * soft / std::max(hard + soft, 1);
+    std::printf("    кромки теней: резких %d, плавных %d (%.1f%% плавных)\n",
+                hard, soft, smoothShare);
+
+    // Порог проверен С ОБЕИХ СТОРОН, а не подобран от достигнутого: на этой
+    // сцене жёсткое сравнение даёт 79.6%, билинейное — 89.3%. Планка в 85%
+    // лежит между ними, то есть возврат к жёсткому сравнению её действительно
+    // роняет. Первая версия ставила 75% и проходила в обоих случаях — такая
+    // проверка не проверяет ничего.
+    Check(smoothShare > 85.0, "кромка тени фильтруется, а не ступенчатая");
+}
+
+// --- Кэш ресурсов ----------------------------------------------------------
+
+// Кэш обязан давать РОВНО ТУ ЖЕ модель, что и разбор исходника. Проверять
+// только скорость бессмысленно: быстрый кэш, отдающий чуть другие вершины, —
+// это тихая порча ассетов, которую заметят через месяц и не свяжут с кэшем.
+void TestAssetCache() {
+    // Путь можно подменить переменной окружения: так тот же замер гоняется на
+    // СВОЕЙ модели, а не только на маленькой тестовой. Разница между ними
+    // принципиальна — вес кэша определяется размером текстур, а он у боевого
+    // ассета на порядок больше.
+    std::string model =
+#ifdef SAGE_TEST_MODEL
+        SAGE_TEST_MODEL;
+#else
+        "assets/test_model.glb";
+#endif
+    if (const char* custom = std::getenv("SAGE_TEST_MODEL_PATH")) model = custom;
+    {
+        std::ifstream probe(model, std::ios::binary);
+        if (!probe) {
+            std::printf("  ПРОПУСК: нет %s\n", model.c_str());
+            return;
+        }
+    }
+
+    const std::string cacheDir = "test_asset_cache";
+    std::error_code ec;
+    std::filesystem::remove_all(cacheDir, ec);
+    sage::assets::SetCacheDirectory(cacheDir);
+    sage::assets::SetCacheEnabled(false);
+
+    using clk = std::chrono::steady_clock;
+    auto ms = [](clk::time_point a, clk::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+
+    // Эталон — разбор исходника при выключенном кэше.
+    auto t0 = clk::now();
+    std::unique_ptr<sage::render::SkinnedModel> direct = sage::render::SkinnedModel::Load(model);
+    const double parseMs = ms(t0, clk::now());
+    Check(direct != nullptr, "модель разобрана из исходника");
+    if (!direct) return;
+
+    sage::assets::SetCacheEnabled(true);
+    sage::assets::ResetCacheStats();
+
+    // Первый заход с включённым кэшем: кэша ещё нет — разбор и запись.
+    t0 = clk::now();
+    std::unique_ptr<sage::render::SkinnedModel> cold = sage::render::SkinnedModel::Load(model);
+    const double coldMs = ms(t0, clk::now());
+    Check(sage::assets::CacheStats().Misses == 1, "первый заход записал кэш");
+    Check(std::filesystem::exists(sage::assets::CachePathFor(model)), "файл кэша создан");
+
+    // Второй: чтение из кэша.
+    t0 = clk::now();
+    std::unique_ptr<sage::render::SkinnedModel> warm = sage::render::SkinnedModel::Load(model);
+    const double warmMs = ms(t0, clk::now());
+    Check(sage::assets::CacheStats().Hits == 1, "второй заход прочитал кэш");
+
+    // --- Совпадение данных ---
+    Check(warm->GetSkeleton().Count() == direct->GetSkeleton().Count(), "костей столько же");
+    Check(warm->SubMeshCount() == direct->SubMeshCount(), "подмешей столько же");
+    Check(warm->Clips().size() == direct->Clips().size(), "клипов столько же");
+
+    bool skeletonSame = warm->GetSkeleton().Count() == direct->GetSkeleton().Count();
+    for (int i = 0; skeletonSame && i < direct->GetSkeleton().Count(); ++i) {
+        const auto& a = direct->GetSkeleton().Joints[(size_t)i];
+        const auto& b = warm->GetSkeleton().Joints[(size_t)i];
+        skeletonSame = a.Name == b.Name && a.Parent == b.Parent &&
+                       glm::length(a.Translation - b.Translation) < 1e-6f &&
+                       glm::length(a.Scale - b.Scale) < 1e-6f &&
+                       std::abs(glm::dot(a.Rotation, b.Rotation)) > 1.0f - 1e-6f;
+    }
+    Check(skeletonSame, "скелет из кэша совпадает с разобранным до имени и позы каждой кости");
+
+    bool clipsSame = warm->Clips().size() == direct->Clips().size();
+    size_t keysChecked = 0;
+    for (size_t c = 0; clipsSame && c < direct->Clips().size(); ++c) {
+        const auto& a = direct->Clips()[c];
+        const auto& b = warm->Clips()[c];
+        clipsSame = a.Name == b.Name && std::abs(a.Duration - b.Duration) < 1e-6f &&
+                    a.Channels.size() == b.Channels.size();
+        for (size_t ch = 0; clipsSame && ch < a.Channels.size(); ++ch) {
+            clipsSame = a.Channels[ch].Joint == b.Channels[ch].Joint &&
+                        a.Channels[ch].Times.size() == b.Channels[ch].Times.size() &&
+                        a.Channels[ch].Values.size() == b.Channels[ch].Values.size();
+            for (size_t k = 0; clipsSame && k < a.Channels[ch].Values.size(); ++k) {
+                clipsSame = glm::length(a.Channels[ch].Values[k] - b.Channels[ch].Values[k]) < 1e-6f;
+                ++keysChecked;
+            }
+        }
+    }
+    Check(clipsSame, "клипы из кэша совпадают покадрово");
+    Check(keysChecked > 0, "сравнение клипов действительно что-то сравнило");
+
+    // --- Устаревание ---
+    // Кэш обязан протухать при правке исходника, иначе правка модели молча не
+    // доезжает до игры, и художник ищет причину где угодно, кроме кэша.
+    const auto stamp = std::filesystem::last_write_time(model, ec);
+    std::filesystem::last_write_time(model, stamp + std::chrono::seconds(120), ec);
+    sage::assets::ResetCacheStats();
+    std::unique_ptr<sage::render::SkinnedModel> after = sage::render::SkinnedModel::Load(model);
+    Check(sage::assets::CacheStats().Hits == 0, "правка исходника обесценила кэш");
+    Check(sage::assets::CacheStats().Misses == 1, "и заставила разобрать заново");
+    std::filesystem::last_write_time(model, stamp, ec);
+
+    // --- Порча ---
+    // Битый кэш не должен ни ронять программу, ни давать неверную модель.
+    {
+        std::ofstream broken(sage::assets::CachePathFor(model), std::ios::binary | std::ios::trunc);
+        broken << "это не кэш";
+    }
+    sage::assets::ResetCacheStats();
+    std::unique_ptr<sage::render::SkinnedModel> repaired = sage::render::SkinnedModel::Load(model);
+    Check(repaired != nullptr, "битый кэш не мешает загрузке");
+    Check(repaired->SubMeshCount() == direct->SubMeshCount(), "и модель получается правильная");
+    Check(sage::assets::CacheStats().Hits == 0, "битый кэш не засчитан как попадание");
+
+    // Раскладываем «из кэша» на две части. Это не любопытство: чтение кэша мы
+    // ускорили, а загрузку на видеокарту — нет, и без разделения непонятно,
+    // осталось ли что улучшать в кэше или упёрлись в GPU.
+    sage::render::ModelData probe;
+    t0 = clk::now();
+    sage::assets::ReadModelCache(model, probe);
+    const double readMs = ms(t0, clk::now());
+    const auto cacheSize = std::filesystem::file_size(sage::assets::CachePathFor(model), ec);
+
+    std::printf("    разбор исходника %.1f мс, первый заход %.1f мс, из кэша %.1f мс (в %.1f раза)\n",
+                parseMs, coldMs, warmMs, warmMs > 0.001 ? parseMs / warmMs : 0.0);
+    std::printf("      в том числе чтение кэша %.1f мс (%.1f МиБ), загрузка на видеокарту %.1f мс\n",
+                readMs, (double)cacheSize / (1024.0 * 1024.0), warmMs - readMs);
+    Check(warmMs < parseMs, "загрузка из кэша быстрее разбора исходника");
+
+    std::filesystem::remove_all(cacheDir, ec);
+    sage::assets::SetCacheDirectory(".sage-cache");
+}
+
 int main(int argc, char** argv) {
     std::string referenceDir = "references";
     for (int i = 1; i < argc; ++i) {
@@ -790,6 +979,8 @@ int main(int argc, char** argv) {
         TestObjectMotionBlur(renderer);
         TestMsaa(renderer);
         TestMorphTargets(renderer);
+        TestShadowSoftness(renderer, *scene);
+        TestAssetCache();
     }
 
     // GPU-ресурсы освобождаем, пока контекст ещё жив: деструктор синглтона
