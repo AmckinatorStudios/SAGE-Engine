@@ -6,6 +6,8 @@
 
 #include "sage/core/Application.h"
 #include "sage/anim/AnimationSystem.h"
+#include "sage/core/Config.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -68,12 +70,7 @@ void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat
 void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env) {
     Window& window = sage::Application::Get().GetWindow();
     m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
-    m_shadows->BeginRender();
-    // Статика в карту теней — батчем (инстансно + отсечение по фрустуму света).
-    m_batch.RenderDepth(scene, m_shadows->LightMatrix());
-    // Скелетные модели тоже отбрасывают тень (свой depth-шейдер, текущая поза).
-    sage::anim::DrawAnimatedModelsDepth(scene, m_shadows->LightMatrix());
-    m_shadows->EndRender(window.Width(), window.Height());
+    sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
 }
 
 void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
@@ -81,8 +78,15 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
     // Статика — RenderBatch (отсечение по фрустуму + инстансный батчинг).
-    m_lastStats = m_batch.RenderColor(scene, view, proj, viewPos, env,
-                                      ShadowBinding(*m_shadows, true), shadingMode);
+    sage::render::SceneColorInput color;
+    color.View = view;
+    color.Proj = proj;
+    color.ViewPos = viewPos;
+    color.Env = &env;
+    color.Shadows = ShadowBinding(*m_shadows, true);
+    color.ShadingMode = shadingMode;
+    color.OcclusionCulling = sage::EngineConfig::Get().OcclusionCulling;
+    m_lastStats = sage::render::RenderSceneColor(scene, m_batch, color);
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 }
 
@@ -262,8 +266,6 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     }
     DrawLit(scene, env, outView, outProj, camera.Position, shadingMode, wireframe);
 
-    sage::anim::DrawAnimatedModels(scene, outView, outProj, camera.Position, env,
-                                   ShadowBinding(*m_shadows, true));
     m_particles->Draw(camera, outView, outProj);
 
     GameObject selectedObj = scene.Get(selectedId);
@@ -329,8 +331,6 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     DrawSky(env, view, proj);
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
-    sage::anim::DrawAnimatedModels(scene, view, proj, camPos, env,
-                                   ShadowBinding(*m_shadows, true));
     m_particles->DrawFromView(view, proj);
 
     m_gamePostApplied = false;

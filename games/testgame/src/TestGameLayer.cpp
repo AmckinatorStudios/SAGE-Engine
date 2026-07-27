@@ -21,6 +21,7 @@
 #include "sage/render/LightingUpload.h"
 #include "sage/render/Material.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UISceneSystem.h"
@@ -931,15 +932,15 @@ void TestGameLayer::OnRender() {
         // Проход глубины — по одному на каскад: каждая карта видит свой кусок
         // дальности, и геометрию для неё надо нарисовать отдельно. Это и есть
         // цена каскадов, о которой сказано в ShadowMap.h.
-        for (int c = 0; c < m_shadows->CascadeCount(); ++c) {
-            m_shadows->BeginRender(c);
-            m_shadowShader->Use();
-            m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix(c));
-            DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false); // монумент
-            m_batch.RenderDepth(*scene, m_shadows->LightMatrix(c)); // ECS-статика (инстансно+отсечение)
-            sage::anim::DrawAnimatedModelsDepth(*scene, m_shadows->LightMatrix(c)); // скелеты отбрасывают тень
-        }
-        m_shadows->EndRender(window.Width(), window.Height());
+        // Монумент рисуется вручную (он не в ECS) — отдаём его обработчиком,
+        // а не копируем весь проход ради одной строки.
+        sage::render::RenderShadowDepth(
+            *m_shadows, *scene, m_batch, window.Width(), window.Height(),
+            [this](const glm::mat4& light) {
+                m_shadowShader->Use();
+                m_shadowShader->SetMat4("uLightSpace", light);
+                DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false);
+            });
     }
 
     // Чёрные полосы letterbox — очищаем всё окно перед рендером в центр.
@@ -968,14 +969,15 @@ void TestGameLayer::OnRender() {
     UploadLighting(*m_sceneShader, lighting);
     const ShadowBinding shadowBinding(*m_shadows, m_shadowsEnabled);
     BindAndUploadShadows(*m_sceneShader, shadowBinding);
-    DrawSceneGeometry(*m_sceneShader, /*colorPass=*/true); // монумент
-    // ECS-статика — через RenderBatch (отсечение по фрустуму + инстансинг).
-    m_batch.RenderColor(*scene, view, proj, m_camera.Position, lighting,
-                        shadowBinding, 0);
 
-    // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
-    sage::anim::DrawAnimatedModels(*scene, view, proj, m_camera.Position, lighting,
-                                   shadowBinding);
+    sage::render::SceneColorInput color;
+    color.View = view;
+    color.Proj = proj;
+    color.ViewPos = m_camera.Position;
+    color.Env = &lighting;
+    color.Shadows = shadowBinding;
+    color.OcclusionCulling = cfg.OcclusionCulling;
+    sage::render::RenderSceneColor(*scene, m_batch, color);
     // Частицы (billboard) — camRight/Up из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
 

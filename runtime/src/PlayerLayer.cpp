@@ -21,6 +21,7 @@
 #include "sage/render/ParticleECS.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/render/Screenshot.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -226,14 +227,8 @@ void PlayerLayer::OnRender() {
         } else {
             m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
         }
-        for (int c = 0; c < m_shadows->CascadeCount(); ++c) {
-            m_shadows->BeginRender(c);
-            m_shadowShader->Use();
-            m_shadowShader->SetMat4("uLightSpace", m_shadows->LightMatrix(c));
-            m_batch.RenderDepth(*m_scene, m_shadows->LightMatrix(c)); // статика (инстансно+отсечение)
-            sage::anim::DrawAnimatedModelsDepth(*m_scene, m_shadows->LightMatrix(c)); // скелеты тоже отбрасывают тень
-        }
-        m_shadows->EndRender(window.Width(), window.Height());
+        sage::render::RenderShadowDepth(*m_shadows, *m_scene, m_batch, window.Width(),
+                                        window.Height());
     }
 
     // --- Основной проход: полное освещение + тени + туман/скайбокс ---
@@ -258,19 +253,15 @@ void PlayerLayer::OnRender() {
     }
 
     // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
-    m_batch.SetOcclusionCulling(cfg.OcclusionCulling);
-    m_batch.RenderColor(*m_scene, view, proj, viewPos, env,
-                        ShadowBinding(*m_shadows, cfg.Shadows), /*shadingMode=*/0);
+    sage::render::SceneColorInput color;
+    color.View = view;
+    color.Proj = proj;
+    color.ViewPos = viewPos;
+    color.Env = &env;
+    color.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+    color.OcclusionCulling = cfg.OcclusionCulling;
+    sage::render::RenderSceneColor(*m_scene, m_batch, color);
 
-    // Проверка перекрытия — СРАЗУ после статики, пока буфер глубины кадра уже
-    // заполнен, а служебные коробки ещё не мешают ничему из того, что рисуется
-    // дальше (они не пишут ни цвет, ни глубину). Результат заберётся следующим
-    // кадром.
-    if (cfg.OcclusionCulling) m_batch.RenderOcclusionProbes(proj * view, viewPos);
-
-    // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
-    sage::anim::DrawAnimatedModels(*m_scene, view, proj, viewPos, env,
-                                   ShadowBinding(*m_shadows, cfg.Shadows));
     // Частицы (billboard) — camRight/Up берём из матрицы вида.
     if (m_particles) m_particles->DrawFromView(view, proj);
 
