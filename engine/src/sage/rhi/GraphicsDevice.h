@@ -126,6 +126,31 @@ public:
     //
     // Реализация не обязательна: бэкенд без таймеров возвращает 0 и не мешает
     // работать. Профилировщик в этом случае показывает только время CPU.
+    // Запись цвета. Выключается на проходах, которым нужна только глубина:
+    // проверка перекрытия рисует коробки-заменители, и попадать в кадр они не
+    // должны — нужен только факт «прошли ли пиксели тест глубины».
+    virtual void SetColorWrite(bool) {}
+
+    // --- Запросы перекрытия (occlusion queries) ----------------------------
+    //
+    // Считают, сколько пикселей нарисованного прошло тест глубины. Ноль
+    // означает, что объект целиком закрыт уже нарисованной геометрией, и в
+    // следующем кадре его можно не рисовать.
+    //
+    // Результат, как и у таймеров, забирается ЧЕРЕЗ КАДР. Спросить сразу —
+    // значит дождаться видеокарты и убить весь смысл: экономия на отрисовке
+    // обошлась бы дороже простоя на ожидании.
+    //
+    // GL_ANY_SAMPLES_PASSED, а не точный счёт пикселей: нам нужен только факт
+    // «видно/не видно», а приблизительный вариант драйверу дешевле.
+    virtual unsigned int CreateOcclusionQuery() { return 0; }
+    virtual void DestroyOcclusionQuery(unsigned int) {}
+    virtual void BeginOcclusionQuery(unsigned int) {}
+    virtual void EndOcclusionQuery() {}
+    virtual bool OcclusionResultReady(unsigned int) { return false; }
+    virtual bool OcclusionVisible(unsigned int) { return true; }
+    virtual bool SupportsOcclusionQueries() const { return false; }
+
     virtual unsigned int CreateTimestampQuery() { return 0; }
     virtual void DestroyTimestampQuery(unsigned int) {}
     virtual void WriteTimestamp(unsigned int) {}

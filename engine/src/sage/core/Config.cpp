@@ -173,6 +173,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Shadows          = gfx.value("shadows", Shadows);
     ShadowResolution = gfx.value("shadowResolution", ShadowResolution);
     ShadowCascades = std::clamp(gfx.value("shadowCascades", ShadowCascades), 1, 4);
+    OcclusionCulling = gfx.value("occlusionCulling", OcclusionCulling);
     ShadowDistance = gfx.value("shadowDistance", ShadowDistance);
     PostProcessing   = gfx.value("postProcessing", PostProcessing);
     Fog              = gfx.value("fog", Fog);
@@ -222,6 +223,7 @@ bool EngineConfig::SaveFile(const std::string& path) const {
     j["graphics"] = {
         {"shadows", Shadows}, {"shadowResolution", ShadowResolution},
         {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
+        {"occlusionCulling", OcclusionCulling},
         {"postProcessing", PostProcessing}, {"fog", Fog}, {"skybox", Skybox},
     };
     j["postProcess"] = {
@@ -283,6 +285,7 @@ void EngineConfig::ApplyEnvOverrides() {
     if (std::getenv("SAGE_NO_POST")) PostProcessing = false;
     if (const char* v = std::getenv("SAGE_SHADOWS")) Shadows = EnvBool(v, Shadows);
     if (const char* v = std::getenv("SAGE_SHADOW_RES")) ShadowResolution = std::atoi(v);
+    if (const char* v = std::getenv("SAGE_OCCLUSION")) OcclusionCulling = EnvBool(v, OcclusionCulling);
     if (const char* v = std::getenv("SAGE_SHADOW_CASCADES"))
         ShadowCascades = std::clamp(std::atoi(v), 1, 4);
     if (const char* v = std::getenv("SAGE_SHADOW_DISTANCE")) ShadowDistance = (float)std::atof(v);

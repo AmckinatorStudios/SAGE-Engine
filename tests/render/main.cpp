@@ -1071,6 +1071,121 @@ void TestLevelsOfDetail(FrameRenderer& r) {
     Check(share < 4.0, "подмена геометрии не видна: изменилось меньше 4% кадра");
 }
 
+// --- Отсечение перекрытием -------------------------------------------------
+
+// Глухая стена вплотную к камере и толпа объектов за ней. Ровно тот случай,
+// ради которого проверка перекрытия и существует: фрустум их не отсекает — они
+// в поле зрения, — и без проверки все они честно рисуются в пиксели, которые
+// тут же перезаписывает стена.
+std::unique_ptr<Scene> BuildOccludedScene() {
+    auto scene = std::make_unique<Scene>("OcclusionTest");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -0.9f, -0.2f));
+    scene->Lighting.Sun.Intensity = 2.0f;
+    scene->Lighting.AmbientStrength = 0.3f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    auto primitive = [](GameObject obj, MeshRef::Type type, glm::vec3 color) {
+        obj.Renderer().Ref = MeshRef{type};
+        obj.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(type);
+        obj.Renderer().Color = color;
+    };
+
+    GameObject wall = scene->CreateObject("Wall");
+    wall.GetTransform().Position = {0.0f, 0.0f, -4.0f};
+    wall.GetTransform().Scale = {40.0f, 40.0f, 0.5f};
+    primitive(wall, MeshRef::Type::Cube, {0.55f, 0.53f, 0.5f});
+
+    // Три куба ПЕРЕД стеной. Без них проверка «кадр не изменился» слепа:
+    // единственным видимым объектом осталась бы сама стена, а она освобождена
+    // от запросов (камера внутри её габаритов), и тест прошёл бы даже если
+    // объявить закрытым вообще всё. Проверено — проходил.
+    for (int i = 0; i < 3; ++i) {
+        GameObject front = scene->CreateObject("Front" + std::to_string(i));
+        front.GetTransform().Position = {-1.6f + 1.6f * (float)i, 0.0f, -2.0f};
+        front.GetTransform().Scale = glm::vec3(0.7f);
+        primitive(front, MeshRef::Type::Cube, {0.25f, 0.7f, 0.85f});
+    }
+
+    // 40 кубов ЗА стеной, в поле зрения камеры.
+    for (int i = 0; i < 40; ++i) {
+        GameObject box = scene->CreateObject("Hidden" + std::to_string(i));
+        box.GetTransform().Position = {-6.0f + 0.6f * (float)(i % 20), -2.0f + 2.5f * (float)(i / 20),
+                                       -8.0f - 0.4f * (float)(i % 7)};
+        box.GetTransform().Scale = glm::vec3(0.5f);
+        primitive(box, MeshRef::Type::Cube, {0.8f, 0.4f, 0.3f});
+    }
+    return scene;
+}
+
+// Проверка перекрытия обязана убрать закрытое И не тронуть открытое. Вторая
+// половина не менее важна первой: «отсекает всё» — это не оптимизация, а
+// пропавшая геометрия.
+void TestOcclusionCulling(FrameRenderer& r) {
+    std::unique_ptr<Scene> scene = BuildOccludedScene();
+    const glm::vec3 eye(0.0f, 0.0f, 1.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj =
+        glm::perspective(glm::radians(60.0f), (float)kW / (float)kH, 0.1f, 200.0f);
+
+    Framebuffer fbo(kW, kH);
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+
+    auto frame = [&](sage::ecs::RenderStats& stats) {
+        fbo.Bind();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        stats = r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0);
+        r.Batch.RenderOcclusionProbes(proj * view, eye);
+        stats = r.Batch.Stats(); // счётчики проверки перекрытия — только после прохода
+        fbo.Resolve();
+        fbo.Bind();
+        return Capture(kW, kH);
+    };
+
+    // Без проверки: рисуется всё, что в поле зрения.
+    r.Batch.SetOcclusionCulling(false);
+    sage::ecs::RenderStats off{};
+    const Image imageOff = frame(off);
+
+    // С проверкой. Первый кадр выдаёт запросы, ответы приходят к следующему,
+    // поэтому кадров нужно несколько — и это не подгонка под тест, а то самое
+    // запаздывание на кадр, о котором сказано в RenderBatch.h.
+    r.Batch.SetOcclusionCulling(true);
+    sage::ecs::RenderStats on{};
+    Image imageOn;
+    for (int i = 0; i < 6; ++i) imageOn = frame(on);
+
+    std::printf("    нарисовано объектов: без проверки %d, с проверкой %d "
+                "(закрытыми признано %d, коробок проверено %d)\n",
+                off.Drawn, on.Drawn, on.CulledOccluded, on.Probes);
+
+    if (!device.SupportsOcclusionQueries()) {
+        std::printf("    ПРОПУСК: драйвер не умеет запросов перекрытия\n");
+        return;
+    }
+
+    // Сцена обязана быть «закрытой»: без этого проверять нечего.
+    Check(off.Drawn >= 44, "сцена содержит стену, объекты перед ней и толпу за ней");
+    // Большая часть спрятанного должна отсечься. Не всё: часть кубов торчит
+    // из-за краёв стены, и коробка-заменитель заведомо больше объекта —
+    // обе ошибки в безопасную сторону «нарисуем лишнее».
+    Check(on.CulledOccluded > 25, "закрытые стеной объекты не рисуются");
+    Check(on.Drawn < off.Drawn / 2, "отрисовка сократилась больше чем вдвое");
+    // Видимое обязано остаться: кубы перед стеной никуда деться не могут.
+    Check(on.Drawn >= 4, "объекты перед стеной продолжают рисоваться");
+
+    // И главное: кадр не изменился. Если бы отсекалось лишнее, картинка
+    // поехала бы — а «отсекает всё» это не оптимизация, а пропавшая геометрия.
+    long long changed = 0;
+    for (size_t i = 0; i < imageOff.Pixels.size(); i += 3) {
+        if (std::abs((int)imageOff.Pixels[i] - (int)imageOn.Pixels[i]) > 12) ++changed;
+    }
+    const double share = 100.0 * (double)changed / (double)(kW * kH);
+    std::printf("    кадр изменился на %.3f%% пикселей\n", share);
+    Check(share < 0.5, "кадр не изменился: отсеклось только невидимое");
+}
+
 // --- Кэш ресурсов ----------------------------------------------------------
 
 // Кэш обязан давать РОВНО ТУ ЖЕ модель, что и разбор исходника. Проверять
@@ -1252,6 +1367,7 @@ int main(int argc, char** argv) {
         TestShadowSoftness(renderer, *scene);
         TestShadowCascades(renderer);
         TestLevelsOfDetail(renderer);
+        TestOcclusionCulling(renderer);
         TestAssetCache();
     }
 

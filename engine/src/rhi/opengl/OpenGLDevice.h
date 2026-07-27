@@ -26,6 +26,15 @@ public:
     void SetCullMode(CullMode mode) override;
     void SetPolygonMode(PolygonMode mode) override;
     void SetSRGBWrite(bool enabled) override;
+    void SetColorWrite(bool enabled) override;
+
+    unsigned int CreateOcclusionQuery() override;
+    void DestroyOcclusionQuery(unsigned int query) override;
+    void BeginOcclusionQuery(unsigned int query) override;
+    void EndOcclusionQuery() override;
+    bool OcclusionResultReady(unsigned int query) override;
+    bool OcclusionVisible(unsigned int query) override;
+    bool SupportsOcclusionQueries() const override { return true; }
     void SetScissor(bool enabled, int x, int y, int w, int h) override;
 
     void BindTexture2D(int unit, unsigned int nativeHandle) override;

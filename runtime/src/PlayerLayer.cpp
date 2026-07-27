@@ -258,8 +258,15 @@ void PlayerLayer::OnRender() {
     }
 
     // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
+    m_batch.SetOcclusionCulling(cfg.OcclusionCulling);
     m_batch.RenderColor(*m_scene, view, proj, viewPos, env,
                         ShadowBinding(*m_shadows, cfg.Shadows), /*shadingMode=*/0);
+
+    // Проверка перекрытия — СРАЗУ после статики, пока буфер глубины кадра уже
+    // заполнен, а служебные коробки ещё не мешают ничему из того, что рисуется
+    // дальше (они не пишут ни цвет, ни глубину). Результат заберётся следующим
+    // кадром.
+    if (cfg.OcclusionCulling) m_batch.RenderOcclusionProbes(proj * view, viewPos);
 
     // Скелетно-анимированные модели — полное освещение + карта теней как у статики.
     sage::anim::DrawAnimatedModels(*m_scene, view, proj, viewPos, env,

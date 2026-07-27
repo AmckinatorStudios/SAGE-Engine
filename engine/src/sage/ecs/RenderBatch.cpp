@@ -266,6 +266,11 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             float radius = c.Mesh_->BoundsRadius() * glm::max(sx, glm::max(sy, sz));
             c.Visible = frustum.IntersectsSphere(center, radius);
 
+            // Ограничивающую сферу запоминаем: её же берёт проход проверки
+            // перекрытия, чтобы построить коробку-заменитель.
+            c.Center = center;
+            c.Radius = radius;
+
             // Уровень детализации считается ЗДЕСЬ ЖЕ, из той же сферы: она уже
             // построена, и второй проход по сцене ради неё был бы работой на
             // ровном месте. Для отсечённых не считаем — их всё равно не рисуем.
@@ -289,12 +294,23 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     m_stats.CulledTiny = 0;
     m_stats.Triangles = 0;
     m_stats.TrianglesAtLod0 = 0;
+    m_stats.CulledOccluded = 0;
     for (CullItem& c : m_cull) {
+        // Ответ прошлого кадра о перекрытии. Применяется ПОСЛЕ фрустума и LOD:
+        // объект, уже отсечённый ими, проверять незачем.
+        if (c.Visible && m_occlusionEnabled) {
+            auto it = m_occlusion.find(c.Entity);
+            if (it != m_occlusion.end() && !it->second.Visible) {
+                c.Visible = false;
+                c.Occluded = true;
+            }
+        }
         if (!c.Visible) {
-            // Отсечённые по экранному размеру считаем отдельно: это другой вид
-            // экономии, и смешав их с фрустумными, нельзя понять, работает ли
-            // порог LOD или просто камера смотрит в стену.
-            if (c.LodInfo && c.Lod < 0) ++m_stats.CulledTiny;
+            // Три вида отсечения считаются РАЗДЕЛЬНО: смешав их, нельзя понять,
+            // что именно сработало — порог LOD, перекрытие или просто камера
+            // смотрит в стену.
+            if (c.Occluded) ++m_stats.CulledOccluded;
+            else if (c.LodInfo && c.Lod < 0) ++m_stats.CulledTiny;
             else ++m_stats.Culled;
             continue;
         }
@@ -490,6 +506,123 @@ void RenderBatch::AdvanceVelocityHistory() {
     m_prevWorld.clear();
     for (const auto& kv : m_worldCache) m_prevWorld[kv.first] = kv.second;
     m_hasPrevFrame = !m_prevWorld.empty();
+}
+
+void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::vec3& viewPos) {
+    if (!m_occlusionEnabled) return;
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    if (!device.SupportsOcclusionQueries()) return;
+
+    ++m_frameIndex;
+    m_stats.Probes = 0;
+
+    // 1) Забираем результаты, выданные в ПРОШЛОМ кадре. Именно прошлом: запрос
+    //    этого кадра ещё выполняется, и спрашивать его сейчас значило бы ждать
+    //    видеокарту — то есть платить за экономию простоем.
+    for (auto& kv : m_occlusion) {
+        OcclusionSlot& slot = kv.second;
+        if (!slot.Pending) continue;
+        if (!device.OcclusionResultReady(slot.Query)) continue;
+        const bool visible = device.OcclusionVisible(slot.Query);
+        slot.Pending = false;
+        slot.HiddenFrames = visible ? 0 : slot.HiddenFrames + 1;
+        slot.Visible = visible;
+    }
+
+    // Коробка-заменитель: единичный куб, растянутый по ограничивающей сфере.
+    // Куб, а не сама геометрия объекта: смысл проверки в том, чтобы она стоила
+    // заметно дешевле отрисовки, и рисовать ради неё тот же меш было бы
+    // самообманом.
+    if (!m_probeBox) m_probeBox = std::make_unique<Mesh>(Mesh::CreateCube());
+
+    // 2) Готовим состояние: пишем только глубину, не трогая ни цвет, ни сам
+    //    буфер глубины. Коробка не должна ни появиться в кадре, ни заслонить
+    //    собой то, что за ней, — иначе следующий проверяемый объект получил бы
+    //    ответ «закрыт» от нашей же служебной коробки.
+    Shader& depth = DepthUModelShader();
+    depth.Use();
+    depth.SetMat4("uLightSpace", viewProj); // имя историческое: это просто viewProj прохода
+    device.SetColorWrite(false);
+    device.SetDepthWrite(false);
+    device.SetDepthTest(true);
+    // Отсечение выключаем: камера может оказаться ВНУТРИ коробки, и тогда с
+    // обычным отсечением задних граней от неё не осталось бы ни одного пикселя,
+    // а объект был бы объявлен закрытым — то есть исчез бы ровно тогда, когда
+    // находится вплотную к зрителю.
+    device.SetCullMode(sage::rhi::CullMode::Off);
+
+    for (const CullItem& c : m_cull) {
+        // Проверяем только то, что прошло фрустум и порог размера. Всё
+        // остальное уже отсечено дешевле.
+        if (c.Radius <= 0.0f) continue;
+        if (!c.Visible && !c.Occluded) continue;
+
+        OcclusionSlot& slot = m_occlusion[c.Entity];
+
+        // КАМЕРА ВНУТРИ ОБЪЕКТА — проверять нельзя, и это не мелкий случай.
+        //
+        // Коробка-заменитель, накрывшая камеру, обрезается ближней плоскостью:
+        // её передняя часть за спиной, задняя — за уже нарисованной геометрией.
+        // Ни одного пикселя не проходит, и объект объявляется закрытым. На
+        // стене, которая и служит главным перекрывателем сцены, это означало
+        // катастрофу: стена исчезала, буфер глубины оставался пустым, и
+        // следующим кадром «видимым» становилось всё подряд — картинка
+        // моргала целиком. Ровно это и происходило до правки.
+        //
+        // Такие объекты считаем видимыми без запроса: они заведомо в кадре.
+        if (glm::distance(viewPos, c.Center) < c.Radius * 1.5f) {
+            slot.Visible = true;
+            slot.Pending = false;
+            continue;
+        }
+
+        if (slot.Pending) continue; // прошлый запрос ещё не созрел
+
+        // Закрытые объекты перепроверяем РЕЖЕ, но обязательно: иначе объект,
+        // однажды признанный закрытым, не вернулся бы никогда, а стена, из-за
+        // которой он не виден, может уехать. Раз в четыре кадра — компромисс
+        // между ценой запросов и задержкой появления.
+        if (!slot.Visible && (m_frameIndex + (unsigned long long)c.Entity) % 4 != 0) continue;
+
+        if (!slot.Query) slot.Query = device.CreateOcclusionQuery();
+        if (!slot.Query) continue;
+
+        // Коробка чуть больше сферы: ошибка в сторону «нарисуем лишнее»
+        // безопасна, ошибка в другую сторону — это пропавший объект.
+        glm::mat4 box(1.0f);
+        box[3] = glm::vec4(c.Center, 1.0f);
+        const float side = c.Radius * 2.1f;
+        box[0][0] = side; box[1][1] = side; box[2][2] = side;
+        depth.SetMat4("uModel", box);
+
+        device.BeginOcclusionQuery(slot.Query);
+        m_probeBox->Draw();
+        device.EndOcclusionQuery();
+        slot.Pending = true;
+        ++m_stats.Probes;
+    }
+
+    device.SetCullMode(sage::rhi::CullMode::Back);
+    device.SetDepthWrite(true);
+    device.SetColorWrite(true);
+
+    // 3) Забываем сущности, которых в кадре больше нет: иначе таблица росла бы
+    //    вместе с историей сцены, а не с её содержимым.
+    if (m_occlusion.size() > m_cull.size() * 2 + 64) {
+        std::unordered_map<entt::entity, OcclusionSlot> alive;
+        alive.reserve(m_cull.size());
+        for (const CullItem& c : m_cull) {
+            auto it = m_occlusion.find(c.Entity);
+            if (it != m_occlusion.end()) alive.emplace(c.Entity, it->second);
+        }
+        // Запросы выброшенных сущностей освобождаем явно: это ресурс драйвера.
+        for (auto& kv : m_occlusion) {
+            if (alive.find(kv.first) == alive.end() && kv.second.Query) {
+                device.DestroyOcclusionQuery(kv.second.Query);
+            }
+        }
+        m_occlusion.swap(alive);
+    }
 }
 
 void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {

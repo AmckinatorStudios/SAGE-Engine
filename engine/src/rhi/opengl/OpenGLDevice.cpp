@@ -151,6 +151,51 @@ std::unique_ptr<RenderTarget> OpenGLDevice::CreateRenderTarget(const RenderTarge
     return std::make_unique<GLRenderTarget>(desc);
 }
 
+// --- Запись цвета -----------------------------------------------------------
+
+void OpenGLDevice::SetColorWrite(bool enabled) {
+    const GLboolean v = enabled ? GL_TRUE : GL_FALSE;
+    glColorMask(v, v, v, v);
+}
+
+// --- Запросы перекрытия -----------------------------------------------------
+
+unsigned int OpenGLDevice::CreateOcclusionQuery() {
+    GLuint query = 0;
+    glGenQueries(1, &query);
+    return query;
+}
+
+void OpenGLDevice::DestroyOcclusionQuery(unsigned int query) {
+    if (query) {
+        GLuint q = query;
+        glDeleteQueries(1, &q);
+    }
+}
+
+void OpenGLDevice::BeginOcclusionQuery(unsigned int query) {
+    // GL_ANY_SAMPLES_PASSED, а не GL_SAMPLES_PASSED: точное число прошедших
+    // пикселей нам не нужно, нужен факт. Приблизительный вариант драйвер вправе
+    // посчитать дешевле, и на плитчатых видеокартах разница заметна.
+    if (query) glBeginQuery(GL_ANY_SAMPLES_PASSED, query);
+}
+
+void OpenGLDevice::EndOcclusionQuery() { glEndQuery(GL_ANY_SAMPLES_PASSED); }
+
+bool OpenGLDevice::OcclusionResultReady(unsigned int query) {
+    if (!query) return false;
+    GLint available = GL_FALSE;
+    glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+    return available == GL_TRUE;
+}
+
+bool OpenGLDevice::OcclusionVisible(unsigned int query) {
+    if (!query) return true; // нет запроса — считаем видимым, это безопасная сторона
+    GLuint result = 0;
+    glGetQueryObjectuiv(query, GL_QUERY_RESULT, &result);
+    return result != 0;
+}
+
 // --- Метки времени GPU ------------------------------------------------------
 
 unsigned int OpenGLDevice::CreateTimestampQuery() {
