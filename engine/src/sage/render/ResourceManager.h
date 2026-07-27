@@ -126,6 +126,37 @@ public:
     // Бюджет VRAM под текстуры. При превышении GetTexture вытесняет LRU
     // НЕИСПОЛЬЗУЕМЫЕ текстуры. 0 — без ограничения (вытеснения не будет).
     void SetTextureBudgetBytes(size_t bytes) { m_textureBudget = bytes; }
+    // Стриминг мип-уровней: когда бюджет исчерпан, а вытеснять нечего (все
+    // текстуры кому-то нужны), уменьшать разрешение вместо того, чтобы молча
+    // превышать бюджет. Слегка размытая текстура лучше вылета по памяти.
+    void SetMipStreaming(bool enabled) { m_mipStreaming = enabled; }
+    bool MipStreaming() const { return m_mipStreaming; }
+
+    // Кандидат на ПОНИЖЕНИЕ разрешения (в отличие от вытеснения — применимо и к
+    // тем, на кого ссылаются: объект Texture остаётся жив, меняется только
+    // картинка внутри).
+    struct DowngradeCandidate {
+        size_t Index = 0;
+        size_t Bytes = 0;
+        uint64_t Tick = 0;
+        int Side = 0;      // текущая длинная сторона в пикселях
+        bool Streamable = false; // можно ли понизить (не в полёте, есть файл)
+    };
+
+    // Кого понизить, чтобы уложиться в бюджет. Как и SelectEvictions — ЧИСТАЯ
+    // функция без GL и без файлов: политику памяти надо уметь проверять
+    // тестами, а не наблюдением за игрой.
+    //
+    // Порядок — по давности обращения (LRU), как у вытеснения: текстура, к
+    // которой давно не обращались, переживёт понижение незаметнее.
+    static std::vector<size_t> SelectDowngrades(const std::vector<DowngradeCandidate>& candidates,
+                                                size_t currentBytes, size_t budget);
+
+    // Уменьшает RGBA8-картинку вдвое по каждой стороне усреднением 2x2.
+    // Отдельной функцией — она чистая и проверяется без GL.
+    static void DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,
+                              std::vector<unsigned char>& dst, int& outW, int& outH);
+
     size_t TextureBudgetBytes() const { return m_textureBudget; }
     size_t ResidentTextureBytes() const { return m_textureBytes; }
 
@@ -138,6 +169,7 @@ public:
         size_t TextureBudget = 0;
         size_t PendingAsync = 0;  // текстур в очереди фоновой загрузки
         size_t Evictions = 0;     // всего вытеснений за жизнь менеджера
+        size_t Downgrades = 0;    // всего понижений разрешения (стриминг мипов)
     };
     Stats GetStats() const;
 
@@ -170,6 +202,7 @@ private:
 
     void StartWorker();          // лениво поднимает фоновый поток декодирования
     void EvictToBudget();        // вытеснить LRU-неиспользуемые до бюджета
+    void DowngradeTexture(const std::string& path); // понизить разрешение вдвое
     uint64_t NextTick() { return ++m_tick; }
 
     std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
@@ -184,6 +217,10 @@ private:
         size_t Bytes = 0;
         uint64_t Tick = 0;
         bool Pending = false;
+        // Ограничение стороны при загрузке. 0 — полное разрешение. Ставится
+        // понижением под нехватку памяти (см. StreamToBudget) и снимается,
+        // когда память освободилась.
+        int MaxSide = 0;
     };
     std::unordered_map<std::string, TextureRecord> m_textures;
 
@@ -191,6 +228,10 @@ private:
     size_t m_textureBytes = 0;       // сумма Bytes резидентных текстур
     uint64_t m_tick = 0;             // монотонный счётчик обращений (LRU)
     size_t m_evictions = 0;
+    size_t m_downgrades = 0;         // сколько раз понижали разрешение
+    // Понижать разрешение, когда вытеснять нечего. Выключается тестами и теми,
+    // кому важнее резкость, чем укладывание в бюджет.
+    bool m_mipStreaming = true;
 
     // --- Асинхронный конвейер (реализация в .cpp, чтобы не тащить <thread>
     //     и очереди во все TU, включающие этот заголовок) ---

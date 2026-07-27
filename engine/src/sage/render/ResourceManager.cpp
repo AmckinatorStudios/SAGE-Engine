@@ -249,6 +249,63 @@ void ResourceManager::ResolveMaterialTextures(Material& m) {
     m.AOTex = GetTexture(m.AOMapPath);
 }
 
+void ResourceManager::DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,
+                                    std::vector<unsigned char>& dst, int& outW, int& outH) {
+    outW = std::max(1, w / 2);
+    outH = std::max(1, h / 2);
+    dst.assign((size_t)outW * outH * 4u, 0);
+    if (w <= 0 || h <= 0 || src.size() < (size_t)w * h * 4u) return;
+
+    // Усреднение 2x2, а не выбрасывание каждого второго пикселя. Прореживание
+    // вдвое дешевле и даёт заметный алиасинг: тонкие линии текстуры то
+    // появляются, то исчезают при движении. Здесь это особенно важно, потому
+    // что понижение применяется к УЖЕ ВИДИМЫМ текстурам — рябь была бы заметна
+    // сразу.
+    for (int y = 0; y < outH; ++y) {
+        for (int x = 0; x < outW; ++x) {
+            const int sx = std::min(x * 2, w - 1);
+            const int sy = std::min(y * 2, h - 1);
+            const int sx1 = std::min(sx + 1, w - 1);
+            const int sy1 = std::min(sy + 1, h - 1);
+            for (int c = 0; c < 4; ++c) {
+                const int a0 = src[((size_t)sy * w + sx) * 4 + c];
+                const int a1 = src[((size_t)sy * w + sx1) * 4 + c];
+                const int a2 = src[((size_t)sy1 * w + sx) * 4 + c];
+                const int a3 = src[((size_t)sy1 * w + sx1) * 4 + c];
+                dst[((size_t)y * outW + x) * 4 + c] = (unsigned char)((a0 + a1 + a2 + a3 + 2) / 4);
+            }
+        }
+    }
+}
+
+std::vector<size_t> ResourceManager::SelectDowngrades(
+    const std::vector<DowngradeCandidate>& candidates, size_t currentBytes, size_t budget) {
+    std::vector<size_t> chosen;
+    if (budget == 0 || currentBytes <= budget) return chosen;
+
+    // Сортируем по давности обращения: та, к которой давно не обращались,
+    // переживёт понижение незаметнее.
+    std::vector<const DowngradeCandidate*> order;
+    order.reserve(candidates.size());
+    for (const DowngradeCandidate& c : candidates) {
+        // Ниже 64 пикселей не опускаемся: дальше экономия копеечная, а текстура
+        // превращается в кашу, и это видно уже не «слегка».
+        if (c.Streamable && c.Side > 64) order.push_back(&c);
+    }
+    std::sort(order.begin(), order.end(),
+              [](const DowngradeCandidate* a, const DowngradeCandidate* b) { return a->Tick < b->Tick; });
+
+    size_t bytes = currentBytes;
+    for (const DowngradeCandidate* c : order) {
+        if (bytes <= budget) break;
+        // Понижение вдвое по стороне — это вчетверо по площади, то есть
+        // освобождается три четверти занятого текстурой.
+        bytes -= std::min(bytes, c->Bytes - c->Bytes / 4);
+        chosen.push_back(c->Index);
+    }
+    return chosen;
+}
+
 void ResourceManager::EvictToBudget() {
     if (m_textureBudget == 0 || m_textureBytes <= m_textureBudget) return;
 
@@ -278,6 +335,67 @@ void ResourceManager::EvictToBudget() {
         m_textures.erase(it);
         ++m_evictions;
     }
+
+    // СТРИМИНГ МИПОВ. Вытеснение бессильно, когда все текстуры кому-то нужны:
+    // выгрузить их нельзя (это висячая ссылка), и бюджет просто молча
+    // превышается — то есть настройка «бюджет VRAM» не работает ровно в том
+    // случае, ради которого её заводили, в тяжёлой сцене.
+    //
+    // Понижение разрешения работает и здесь: объект Texture остаётся жив, у
+    // держателей ничего не рвётся, меняется только картинка внутри.
+    if (!m_mipStreaming || m_textureBytes <= m_textureBudget) return;
+
+    std::vector<DowngradeCandidate> dcands;
+    dcands.reserve(m_textures.size());
+    for (size_t i = 0; i < keys.size(); ++i) {
+        const TextureRecord& rec = m_textures.count(keys[i]) ? m_textures[keys[i]] : TextureRecord{};
+        if (!rec.Tex) continue;
+        DowngradeCandidate d;
+        d.Index = i;
+        d.Bytes = rec.Bytes;
+        d.Tick = rec.Tick;
+        d.Side = std::max(rec.Tex->Width(), rec.Tex->Height());
+        d.Streamable = !rec.Pending;
+        dcands.push_back(d);
+    }
+    for (size_t idx : SelectDowngrades(dcands, m_textureBytes, m_textureBudget)) {
+        DowngradeTexture(keys[idx]);
+    }
+}
+
+void ResourceManager::DowngradeTexture(const std::string& path) {
+    auto it = m_textures.find(path);
+    if (it == m_textures.end() || !it->second.Tex) return;
+    TextureRecord& rec = it->second;
+
+    // Пиксели берём заново с диска: держать их копию в оперативной памяти ради
+    // возможного понижения значило бы экономить видеопамять за счёт обычной,
+    // то есть менять шило на мыло. Чтение синхронное — понижение случается
+    // редко (только при исчерпанном бюджете) и стоит дешевле, чем срыв кадра
+    // из-за нехватки видеопамяти.
+    std::vector<unsigned char> pixels;
+    int w = 0, h = 0;
+    if (!DecodeImageFile(path, pixels, w, h)) return;
+
+    // Целевая сторона — вдвое меньше текущей, а не исходной: понижения
+    // накапливаются, и второй проход должен уменьшать то, что уже уменьшено.
+    int targetSide = std::max(rec.Tex->Width(), rec.Tex->Height()) / 2;
+    targetSide = std::max(targetSide, 64);
+
+    std::vector<unsigned char> scaled;
+    int sw = w, sh = h;
+    while (std::max(sw, sh) > targetSide && std::max(sw, sh) > 1) {
+        DownscaleRGBA(pixels, sw, sh, scaled, sw, sh);
+        pixels.swap(scaled);
+    }
+
+    const size_t before = rec.Bytes;
+    rec.Tex->ReplacePixels(pixels.data(), sw, sh);
+    rec.Bytes = rec.Tex->GpuBytes();
+    rec.MaxSide = std::max(sw, sh);
+    m_textureBytes -= std::min(m_textureBytes, before);
+    m_textureBytes += rec.Bytes;
+    ++m_downgrades;
 }
 
 int ResourceManager::GarbageCollectUnused() {
@@ -317,6 +435,7 @@ int ResourceManager::GarbageCollectUnused() {
 
 ResourceManager::Stats ResourceManager::GetStats() const {
     Stats s;
+    s.Downgrades = m_downgrades;
     s.Textures = m_textures.size();
     s.Models = m_models.size();
     s.Materials = m_materials.size();

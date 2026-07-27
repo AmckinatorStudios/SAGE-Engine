@@ -338,3 +338,75 @@ TEST(profiler_records_nested_scopes) {
     sage::profile::SetEnabled(false);
     sage::rhi::GraphicsDevice::SetCurrent(nullptr);
 }
+
+// Уменьшение картинки вдвое — усреднением 2x2, а не прореживанием. Проверяется
+// без GL: это чистая арифметика над байтами.
+TEST(downscale_averages_and_halves) {
+    // Шахматка 4x4: чёрное и белое через пиксель. При усреднении 2x2 каждый
+    // выходной пиксель обязан стать ровно серединой (127 или 128), а при
+    // прореживании остался бы чёрным или белым — то есть эта проверка ловит
+    // именно подмену усреднения на выбрасывание.
+    std::vector<unsigned char> src((size_t)4 * 4 * 4);
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            const unsigned char v = ((x + y) % 2) ? 255 : 0;
+            for (int c = 0; c < 4; ++c) src[((size_t)y * 4 + x) * 4 + c] = v;
+        }
+    }
+
+    std::vector<unsigned char> dst;
+    int w = 0, h = 0;
+    ResourceManager::DownscaleRGBA(src, 4, 4, dst, w, h);
+    CHECK_TRUE(w == 2 && h == 2);
+    CHECK_TRUE(dst.size() == (size_t)2 * 2 * 4);
+    for (unsigned char v : dst) CHECK_TRUE(v >= 126 && v <= 129);
+
+    // Нечётные стороны и вырожденные размеры встречаются в реальных файлах —
+    // падать на них нельзя.
+    std::vector<unsigned char> odd((size_t)3 * 5 * 4, 200);
+    ResourceManager::DownscaleRGBA(odd, 3, 5, dst, w, h);
+    CHECK_TRUE(w == 1 && h == 2);
+    ResourceManager::DownscaleRGBA(odd, 1, 1, dst, w, h);
+    CHECK_TRUE(w == 1 && h == 1);
+}
+
+// Политика понижения: кого уменьшать, чтобы уложиться в бюджет.
+TEST(downgrade_policy_picks_least_recently_used) {
+    using D = ResourceManager::DowngradeCandidate;
+    // Четыре текстуры по 4 МБ, бюджет 10 МБ. Понижение вдвое по стороне
+    // освобождает три четверти, то есть 3 МБ с каждой.
+    std::vector<D> cands;
+    for (size_t i = 0; i < 4; ++i) {
+        D d;
+        d.Index = i;
+        d.Bytes = 4u * 1024 * 1024;
+        // Порядок обращений НАРОЧНО обратен порядку в списке: иначе проверка
+        // «выбрали самые старые» проходила бы и без сортировки, просто потому
+        // что список уже лежит в нужном порядке.
+        d.Tick = (uint64_t)(100 - i); // индекс 3 — самая старая
+        d.Side = 1024;
+        d.Streamable = true;
+        cands.push_back(d);
+    }
+    const size_t current = 16u * 1024 * 1024;
+    const size_t budget = 10u * 1024 * 1024;
+
+    std::vector<size_t> picked = ResourceManager::SelectDowngrades(cands, current, budget);
+    // 16 - 3 = 13 > 10, 13 - 3 = 10 <= 10: хватает двух.
+    CHECK_TRUE(picked.size() == 2);
+    // И это САМЫЕ СТАРЫЕ: понижение заметнее всего на том, на что смотрят сейчас.
+    CHECK_TRUE(picked[0] == 3 && picked[1] == 2);
+
+    // В бюджете — не трогаем никого.
+    CHECK_TRUE(ResourceManager::SelectDowngrades(cands, budget, budget).empty());
+    // Бюджет 0 означает «без ограничения», а не «уменьшить всё до нуля».
+    CHECK_TRUE(ResourceManager::SelectDowngrades(cands, current, 0).empty());
+
+    // Мелкие текстуры не трогаются: экономия копеечная, а каша заметна.
+    for (D& d : cands) d.Side = 64;
+    CHECK_TRUE(ResourceManager::SelectDowngrades(cands, current, budget).empty());
+
+    // Текстуры в полёте пропускаются — их картинка вот-вот сменится.
+    for (D& d : cands) { d.Side = 1024; d.Streamable = false; }
+    CHECK_TRUE(ResourceManager::SelectDowngrades(cands, current, budget).empty());
+}
