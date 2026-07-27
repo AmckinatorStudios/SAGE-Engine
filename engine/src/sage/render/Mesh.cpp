@@ -64,13 +64,22 @@ static void FixWinding(const std::vector<Vertex>& v, std::vector<unsigned int>& 
     }
 }
 
-Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indicesIn) {
+Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indicesIn,
+           bool keepCpuData) {
     m_indexCount = indicesIn.size();
 
     std::vector<Vertex> vertices = verticesIn;
     std::vector<unsigned int> indices = indicesIn;
     FixWinding(vertices, indices);      // единый CCW-снаружи порядок (не даёт «вывернутых» мешей)
     ComputeTangents(vertices, indices); // касательные для normal mapping
+
+    // Копию сохраняем ПОСЛЕ исправления обхода и подсчёта касательных: уровни
+    // детализации должны строиться из той же геометрии, что ушла в GPU, иначе
+    // грубый уровень отличался бы от подробного не только плотностью.
+    if (keepCpuData) {
+        m_cpuVertices = vertices;
+        m_cpuIndices = indices;
+    }
 
     VertexLayout layout;
     layout.Stride = sizeof(Vertex);
@@ -133,8 +142,8 @@ void Mesh::DrawInstances(size_t count) const {
 
 // Генераторы примитивов живут в MeshData.cpp (CPU, без GL) — здесь только
 // обёртки, заливающие ту же геометрию на GPU.
-Mesh Mesh::CreateCube()                      { auto d = sage::render::BuildCube();              return Mesh(d.Vertices, d.Indices); }
-Mesh Mesh::CreateSphere(int rings, int sectors) { auto d = sage::render::BuildSphere(rings, sectors); return Mesh(d.Vertices, d.Indices); }
-Mesh Mesh::CreatePlane(int subdivisions)     { auto d = sage::render::BuildPlane(subdivisions); return Mesh(d.Vertices, d.Indices); }
-Mesh Mesh::CreateCylinder(int sectors)       { auto d = sage::render::BuildCylinder(sectors);   return Mesh(d.Vertices, d.Indices); }
-Mesh Mesh::CreateCone(int sectors)           { auto d = sage::render::BuildCone(sectors);       return Mesh(d.Vertices, d.Indices); }
+Mesh Mesh::CreateCube(bool keepCpu)          { auto d = sage::render::BuildCube();              return Mesh(d.Vertices, d.Indices, keepCpu); }
+Mesh Mesh::CreateSphere(int rings, int sectors, bool keepCpu) { auto d = sage::render::BuildSphere(rings, sectors); return Mesh(d.Vertices, d.Indices, keepCpu); }
+Mesh Mesh::CreatePlane(int subdivisions, bool keepCpu) { auto d = sage::render::BuildPlane(subdivisions); return Mesh(d.Vertices, d.Indices, keepCpu); }
+Mesh Mesh::CreateCylinder(int sectors, bool keepCpu) { auto d = sage::render::BuildCylinder(sectors);   return Mesh(d.Vertices, d.Indices, keepCpu); }
+Mesh Mesh::CreateCone(int sectors, bool keepCpu) { auto d = sage::render::BuildCone(sectors);       return Mesh(d.Vertices, d.Indices, keepCpu); }

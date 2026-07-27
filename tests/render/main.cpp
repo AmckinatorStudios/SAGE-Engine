@@ -977,6 +977,100 @@ void TestShadowCascades(FrameRenderer& r) {
           "дальний каскад заметно больше ближнего");
 }
 
+// --- Уровни детализации ----------------------------------------------------
+
+// Аллея одинаковых сфер, уходящая вдаль. Именно то, на чём LOD должен работать:
+// ближние сферы занимают полкадра, дальние — единицы пикселей, и рисовать их
+// одной и той же геометрией на тридцать тысяч треугольников бессмысленно.
+std::unique_ptr<Scene> BuildLodScene(std::shared_ptr<Mesh>& sphere, bool withLod) {
+    auto scene = std::make_unique<Scene>("LodTest");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -0.9f, 0.3f));
+    scene->Lighting.Sun.Intensity = 2.2f;
+    scene->Lighting.AmbientStrength = 0.25f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    // Сферу строим САМИ, с копией геометрии: уровни выводятся из неё, а
+    // ResourceManager отдаёт примитивы без копии (и правильно делает — платить
+    // памятью за неё во всей сцене незачем).
+    if (!sphere) sphere = std::make_shared<Mesh>(Mesh::CreateSphere(48, 64, /*keepCpuData=*/true));
+
+    sage::render::LodComponent lodProto;
+    if (withLod) sage::render::BuildAutoLods(lodProto, *sphere, 2);
+
+    for (int i = 0; i < 14; ++i) {
+        GameObject obj = scene->CreateObject("Sphere" + std::to_string(i));
+        // Шаг по глубине растущий: так в кадре оказываются и крупные сферы, и
+        // те, что упираются в порог отсечения по размеру.
+        obj.GetTransform().Position = {(i % 2 ? 1.6f : -1.6f), 0.6f,
+                                       -3.0f - 2.2f * (float)(i * i) / 3.0f};
+        // Дальние сферы ещё и мельче — как реквизит в настоящей сцене. Без
+        // этого порог отсечения по размеру недостижим: сфера радиуса полметра
+        // остаётся крупнее трёх пикселей до самой дальней плоскости отсечения,
+        // то есть проверить отсечение мелочи было бы не на чем.
+        if (i >= 9) obj.GetTransform().Scale = glm::vec3(0.12f);
+        obj.Renderer().Ref = MeshRef{MeshRef::Type::Sphere};
+        obj.Renderer().MeshPtr = sphere;
+        obj.Renderer().Color = {0.72f, 0.68f, 0.6f};
+        if (withLod) scene->Registry().emplace<sage::render::LodComponent>(obj.Entity(), lodProto);
+    }
+    return scene;
+}
+
+const glm::vec3 kLodEye(0.0f, 2.0f, 4.0f);
+const glm::vec3 kLodTarget(0.0f, 0.6f, -40.0f);
+
+// Уровни детализации должны экономить И оставаться незаметными. Проверять
+// только первое нельзя: «нарисовать всё кубиками» тоже экономит.
+void TestLevelsOfDetail(FrameRenderer& r) {
+    const glm::mat4 view = glm::lookAt(kLodEye, kLodTarget, glm::vec3(0, 1, 0));
+    const glm::mat4 proj =
+        glm::perspective(glm::radians(50.0f), (float)kW / (float)kH, 0.1f, 400.0f);
+
+    std::shared_ptr<Mesh> sphere;
+    auto render = [&](bool withLod, sage::ecs::RenderStats& stats) {
+        std::unique_ptr<Scene> scene = BuildLodScene(sphere, withLod);
+        Framebuffer fbo(kW, kH);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        fbo.Bind();
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        stats = r.Batch.RenderColor(*scene, view, proj, kLodEye, env, ShadowBinding(), 0);
+        fbo.Resolve();
+        fbo.Bind();
+        return Capture(kW, kH);
+    };
+
+    sage::ecs::RenderStats full{}, lod{};
+    const Image imageFull = render(/*withLod=*/false, full);
+    const Image imageLod = render(/*withLod=*/true, lod);
+
+    std::printf("    треугольников: без уровней %lld, с уровнями %lld (%.1f%%); "
+                "отсечено по размеру %d из %d\n",
+                full.Triangles, lod.Triangles,
+                full.Triangles > 0 ? 100.0 * (double)lod.Triangles / (double)full.Triangles : 0.0,
+                lod.CulledTiny, lod.Total);
+
+    // Сцена обязана быть тяжёлой: на десяти треугольниках экономить нечего, и
+    // проверка ничего не значила бы.
+    Check(full.Triangles > 50000, "сцена достаточно тяжёлая, чтобы на ней было что экономить");
+    // Экономия должна быть КРУПНОЙ. Половина — не «побольше нуля», а порог, ниже
+    // которого уровни детализации не окупают своей сложности.
+    Check(lod.Triangles * 2 < full.Triangles, "уровни детализации срезают больше половины треугольников");
+    // И отдельно — что отсечение мелочи вообще срабатывает.
+    Check(lod.CulledTiny > 0, "объекты мельче порога не рисуются вовсе");
+
+    // Незаметность. Считаем долю пикселей, изменившихся заметно: подмена
+    // геометрии на дальних сферах обязана прятаться в единицы процентов кадра.
+    long long changed = 0;
+    for (size_t i = 0; i < imageFull.Pixels.size(); i += 3) {
+        if (std::abs((int)imageFull.Pixels[i] - (int)imageLod.Pixels[i]) > 24) ++changed;
+    }
+    const double share = 100.0 * (double)changed / (double)(kW * kH);
+    std::printf("    кадр изменился на %.2f%% пикселей\n", share);
+    Check(share < 4.0, "подмена геометрии не видна: изменилось меньше 4% кадра");
+}
+
 // --- Кэш ресурсов ----------------------------------------------------------
 
 // Кэш обязан давать РОВНО ТУ ЖЕ модель, что и разбор исходника. Проверять
@@ -1157,6 +1251,7 @@ int main(int argc, char** argv) {
         TestMorphTargets(renderer);
         TestShadowSoftness(renderer, *scene);
         TestShadowCascades(renderer);
+        TestLevelsOfDetail(renderer);
         TestAssetCache();
     }
 

@@ -37,6 +37,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/DebugOverlay.cpp
     src/sage/render/Material.cpp
     src/sage/render/Mesh.cpp
+    src/sage/render/LodGroup.cpp
+    src/sage/render/MeshSimplify.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp

@@ -6,6 +6,7 @@
 #include <entt/entt.hpp>
 
 #include "sage/render/Mesh.h"
+#include "sage/render/LodGroup.h"
 #include "sage/render/ShadowMap.h"
 
 class Scene;
@@ -27,10 +28,16 @@ namespace sage::gi { struct GIState; }
 namespace sage::ecs {
 
 struct RenderStats {
-    int Total = 0;    // всего рендерящихся сущностей
-    int Drawn = 0;    // прошли фрустум-отсечение (реально нарисованы)
-    int Culled = 0;   // отсечены фрустумом
-    int Batches = 0;  // инстанс-групп = draw call'ов геометрии
+    int Total = 0;      // всего рендерящихся сущностей
+    int Drawn = 0;      // прошли отсечение (реально нарисованы)
+    int Culled = 0;     // отсечены фрустумом
+    int CulledTiny = 0; // отсечены по размеру на экране (мельче порога LOD)
+    int Batches = 0;    // инстанс-групп = draw call'ов геометрии
+    // Треугольников отправлено на отрисовку и сколько было бы без уровней
+    // детализации. Пара чисел, а не одно: экономия — это разница, и показывать
+    // её надо рядом с тем, от чего считали.
+    long long Triangles = 0;
+    long long TrianglesAtLod0 = 0;
 };
 
 class RenderBatch {
@@ -107,6 +114,13 @@ private:
         // сущности. Больше нигде не используется — отсечению и отрисовке
         // достаточно меша с матрицей.
         entt::entity Entity;
+        // Уровни детализации сущности (nullptr — их нет) и её ИСХОДНЫЙ меш.
+        // Исходный нужен отдельно, потому что Mesh_ по ходу отсечения
+        // подменяется на меш выбранного уровня, а статистика «сколько было бы
+        // без LOD» считается от исходного.
+        const sage::render::LodComponent* LodInfo;
+        Mesh* BaseMesh;
+        int Lod = 0;
     };
 
     // Инстанс-группа одного меша. У запечённой статики меш уникален для

@@ -32,7 +32,23 @@ struct MeshInstance {
 // О графическом API ничего не знает — вся работа с буферами у бэкенда.
 class Mesh {
 public:
-    Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
+    // keepCpuData — сохранить копию вершин и индексов в оперативной памяти.
+    // По умолчанию НЕТ: у обычного меша эти данные после заливки в GPU никому
+    // не нужны, и держать их значило бы удваивать расход памяти на всю сцену.
+    // Нужны они ровно одному потребителю — построению уровней детализации
+    // (см. sage/render/MeshSimplify.h), поэтому и включаются точечно.
+    Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices,
+         bool keepCpuData = false);
+
+    // Копия геометрии в оперативной памяти — nullptr, если её не просили.
+    const std::vector<Vertex>* CpuVertices() const {
+        return m_cpuVertices.empty() ? nullptr : &m_cpuVertices;
+    }
+    const std::vector<unsigned int>* CpuIndices() const {
+        return m_cpuIndices.empty() ? nullptr : &m_cpuIndices;
+    }
+    size_t IndexCount() const { return m_indexCount; }
+    size_t TriangleCount() const { return m_indexCount / 3; }
 
     // GPU-ресурсом владеет единолично (unique_ptr) — копирование запрещено,
     // перемещение безопасно и разрешено.
@@ -57,14 +73,18 @@ public:
     // Процедурные примитивы движка (единичный масштаб, с нормалями и UV).
     // Все вписаны в габарит ~1 вокруг начала координат, чтобы Transform.Scale
     // работал предсказуемо (куб от -0.5 до 0.5, сфера радиуса 0.5 и т.д.).
-    static Mesh CreateCube();
-    static Mesh CreateSphere(int rings = 24, int sectors = 32); // UV-сфера r=0.5
-    static Mesh CreatePlane(int subdivisions = 1);              // 1x1 в плоскости XZ, нормаль +Y
-    static Mesh CreateCylinder(int sectors = 32);               // r=0.5, высота 1 (Y), с крышками
-    static Mesh CreateCone(int sectors = 32);                   // r=0.5 у основания, высота 1 (Y)
+    // keepCpuData — см. конструктор: нужен тем, кому из этого меша ещё строить
+    // уровни детализации.
+    static Mesh CreateCube(bool keepCpuData = false);
+    static Mesh CreateSphere(int rings = 24, int sectors = 32, bool keepCpuData = false); // UV-сфера r=0.5
+    static Mesh CreatePlane(int subdivisions = 1, bool keepCpuData = false);              // 1x1 в плоскости XZ, нормаль +Y
+    static Mesh CreateCylinder(int sectors = 32, bool keepCpuData = false);               // r=0.5, высота 1 (Y), с крышками
+    static Mesh CreateCone(int sectors = 32, bool keepCpuData = false);                   // r=0.5 у основания, высота 1 (Y)
 
 private:
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
+    std::vector<Vertex> m_cpuVertices;        // пусто, если копию не просили
+    std::vector<unsigned int> m_cpuIndices;
     size_t m_indexCount = 0;
     glm::vec3 m_boundsCenter{0.0f};
     float m_boundsRadius = 0.0f;

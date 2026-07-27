@@ -245,8 +245,10 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
                 }
             }
         }
+        const sage::render::LodComponent* lod =
+            scene.Registry().try_get<sage::render::LodComponent>(e);
         m_cull.push_back(CullItem{mesh, model, mat, EffectiveColor(mr), lmPage,
-                                  mat && mat->HasMaps(), /*visible*/ false, e});
+                                  mat && mat->HasMaps(), /*visible*/ false, e, lod, mesh});
     });
 
     // 2) ПАРАЛЛЕЛЬНОЕ отсечение: каждый элемент независим — поток пишет только
@@ -263,15 +265,42 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             float sz = glm::length(glm::vec3(c.Model[2]));
             float radius = c.Mesh_->BoundsRadius() * glm::max(sx, glm::max(sy, sz));
             c.Visible = frustum.IntersectsSphere(center, radius);
+
+            // Уровень детализации считается ЗДЕСЬ ЖЕ, из той же сферы: она уже
+            // построена, и второй проход по сцене ради неё был бы работой на
+            // ровном месте. Для отсечённых не считаем — их всё равно не рисуем.
+            c.Lod = 0;
+            if (c.Visible && c.LodInfo) {
+                const float screen =
+                    sage::render::ProjectedScreenHeight(cullMatrix, center, radius);
+                c.Lod = c.LodInfo->Levels.Select(screen);
+                if (c.Lod < 0) {
+                    c.Visible = false; // мельче порога — не рисуем вовсе
+                } else {
+                    c.Mesh_ = c.LodInfo->MeshFor(c.Lod, c.BaseMesh);
+                }
+            }
         }
     });
 
     // 3) ПОСЛЕДОВАТЕЛЬНОЕ слияние в бакеты — в исходном порядке сбора, так что
     //    результат кадра детерминирован и совпадает с однопоточным.
     m_stats.Total = (int)m_cull.size();
+    m_stats.CulledTiny = 0;
+    m_stats.Triangles = 0;
+    m_stats.TrianglesAtLod0 = 0;
     for (CullItem& c : m_cull) {
-        if (!c.Visible) { ++m_stats.Culled; continue; }
+        if (!c.Visible) {
+            // Отсечённые по экранному размеру считаем отдельно: это другой вид
+            // экономии, и смешав их с фрустумными, нельзя понять, работает ли
+            // порог LOD или просто камера смотрит в стену.
+            if (c.LodInfo && c.Lod < 0) ++m_stats.CulledTiny;
+            else ++m_stats.Culled;
+            continue;
+        }
         ++m_stats.Drawn;
+        m_stats.Triangles += (long long)c.Mesh_->TriangleCount();
+        m_stats.TrianglesAtLod0 += (long long)c.BaseMesh->TriangleCount();
         if (c.Textured) {
             // Есть текстурные карты — индивидуальный текстурный PBR-путь.
             m_textured.push_back({c.Mesh_, c.Model, c.Mat, c.LmPage});

@@ -14,6 +14,7 @@ add_executable(sage_tests
     test_robustness.cpp
     test_config.cpp
     test_ui.cpp
+    test_lod.cpp
     test_resources.cpp
     test_jobsystem.cpp
     test_physics.cpp
