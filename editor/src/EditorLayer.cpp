@@ -130,6 +130,7 @@ void EditorLayer::OnAttach() {
 
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
     if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
+    if (std::getenv("SAGE_EDITOR_OPEN_PROJECT")) RunHeadlessProjectSession();
 
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
@@ -171,6 +172,22 @@ void EditorLayer::OnUpdate(float dt) {
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
     if (m_playState == EditorPlayState::Playing) {
+        // Ввод игре — только пока в фокусе панель Game (см. EditorPlayInput).
+        // В остальное время действия гасятся: клавиши уходят редактору.
+        if (m_playRawInput) {
+            GLFWwindow* handle = sage::Application::Get().GetWindow().Handle();
+            m_playRawInput->SetGameFocused(m_game.Focused());
+            m_playRawInput->SyncCapture();
+            if (m_game.Focused()) m_playInput.Update(handle);
+            else m_playInput.UpdateIdle();
+
+            // ESC отпускает захваченный курсор, не выходя из Play: иначе из
+            // игры от первого лица в редакторе было бы не выбраться мышью.
+            if (m_playRawInput->MouseCaptured() &&
+                glfwGetKey(handle, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+                m_playRawInput->SetMouseCaptured(false);
+            }
+        }
         if (m_playScripts) m_playScripts->UpdateAll(dt);
         if (m_playPhysics) m_playPhysics->Step(*m_scene, dt);
     }
@@ -215,6 +232,32 @@ void EditorLayer::StartPlay() {
     // Паритет с рантаймом: частицы доступны скриптам уже в OnStart
     // (EmitParticles/CreateParticleStream рисуются в предпросмотре сцены).
     m_playScripts->BindParticles(m_renderer.Particles());
+
+    // Ввод — как в собранной игре: действия объявляют сами скрипты (BindAction),
+    // поэтому карту действий начинаем с ЧИСТОГО ЛИСТА на каждый Play (иначе
+    // раскладка прошлого запуска пережила бы правку скрипта), а привязываем ДО
+    // AttachScript — OnStart скриптов зовёт BindAction прямо оттуда.
+    m_playInput = InputSystem();
+    m_playInput.Attach(sage::Application::Get().GetWindow());
+    m_playRawInput = std::make_unique<EditorPlayInput>(m_playInput, sage::Application::Get().GetWindow());
+    m_playScripts->BindInput(m_playInput.Actions());
+    m_playScripts->BindRawInput(*m_playRawInput);
+
+    // Звук — как в собранной игре. Устройство может отсутствовать (headless CI):
+    // AudioEngine в этом случае работает вхолостую, но вызовы из Lua валидны.
+    if (!m_playAudio) m_playAudio = std::make_unique<AudioEngine>();
+    m_playScripts->BindAudio(*m_playAudio);
+
+    // Модули Lua (require "voxel") ищутся в скриптовой папке ОТКРЫТОГО ПРОЕКТА —
+    // тот же контракт, что в собранной игре, где CWD и есть корень проекта.
+    if (m_project.Loaded())
+        m_playScripts->AddScriptSearchPath((m_project.Dir() / "assets" / "scripts").string());
+    m_playScripts->AddScriptSearchPath("assets/scripts"); // скрипты рядом с редактором
+
+    // Параметры запуска игры (LaunchArg в Lua) — до AttachScript, потому что
+    // OnStart скриптов читает их сразу. В редакторе источник один: окружение
+    // (headless-прогон CI ставит SAGE_GAME_ARGS="autopilot=1").
+    if (const char* args = std::getenv("SAGE_GAME_ARGS")) m_playScripts->SetLaunchArgsFromString(args);
 
     // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
     // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные
@@ -267,6 +310,10 @@ void EditorLayer::StopPlay() {
     // его ДО того, как заменить сцену восстановленным снапшотом.
     m_playScripts.reset();
     m_playPhysics.reset();
+    // Курсор возвращается человеку РАНЬШЕ всего остального: игра могла его
+    // захватить, и без этого Stop оставил бы редактор без мыши.
+    if (m_playRawInput) m_playRawInput->ReleaseCapture();
+    m_playRawInput.reset();
     RestoreSceneFromString(m_playSnapshot);
     m_playSnapshot.clear();
     m_playState = EditorPlayState::Editing;

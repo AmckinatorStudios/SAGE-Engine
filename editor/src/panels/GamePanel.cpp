@@ -15,6 +15,11 @@ void GamePanel::Draw(EditorHost& host) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("Game");
 
+    // Фокус запоминаем для ввода Play-режима (см. GamePanel::Focused).
+    // RootAndChildWindows — чтобы клик по изображению внутри панели считался
+    // фокусом самой панели.
+    m_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (!host.HasPrimaryCamera()) {
         ImGui::Dummy(ImVec2(0, avail.y * 0.42f));

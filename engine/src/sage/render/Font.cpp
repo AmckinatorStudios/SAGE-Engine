@@ -56,6 +56,12 @@ constexpr Range kRanges[] = {
 constexpr int kAtlasW = 1024;
 constexpr int kAtlasH = 1024;
 
+// Свободное поле вокруг каждого глифа в атласе. Нужно мип-уровням: на уровне N
+// один тексель усредняет 2^N исходных, и без запаса в атлас-соседа «затекает»
+// краска чужой буквы. 8 текселей хватает на три уровня — ровно тот диапазон
+// уменьшения, в котором живёт интерфейс.
+constexpr int kGlyphPadding = 8;
+
 } // namespace
 
 std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
@@ -88,9 +94,18 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
     font->m_lineHeight = (ascent - descent + lineGap) * vscale;
 
     // Пакуем глифы всех диапазонов в один атлас.
+    //
+    // Отступ между глифами — kGlyphPadding, а не 1. Атлас печётся в один размер
+    // (48px), а интерфейс рисует текст мельче — вплоть до 1/5 базовой высоты.
+    // Такое уменьшение без мип-уровней означает точечную выборку через каждые
+    // несколько текселей: тонкие вертикальные штрихи просто не попадают в
+    // выборку, и буквы теряют стойки — «П» выглядит как «Г», «К» без левой
+    // палки. Мип-уровни это чинят (усреднение вместо пропуска), но требуют
+    // запаса вокруг глифа, иначе на дальних уровнях соседние глифы перетекают
+    // друг в друга.
     std::vector<unsigned char> atlas(kAtlasW * kAtlasH, 0);
     stbtt_pack_context pc;
-    if (!stbtt_PackBegin(&pc, atlas.data(), kAtlasW, kAtlasH, 0, 1, nullptr)) {
+    if (!stbtt_PackBegin(&pc, atlas.data(), kAtlasW, kAtlasH, 0, kGlyphPadding, nullptr)) {
         throw std::runtime_error("Font: stbtt_PackBegin failed");
     }
     stbtt_PackSetOversampling(&pc, 1, 1);
@@ -134,15 +149,17 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
         }
     }
 
-    // Атлас → GPU-текстура (R8, покрытие в красном канале, без мип-уровней —
-    // они размывали бы края и «протекали» между соседними глифами).
+    // Атлас → GPU-текстура (R8, покрытие в красном канале) С мип-уровнями:
+    // интерфейс рисует текст в разы мельче базовой высоты запекания, и без
+    // мипов уменьшение съедает тонкие штрихи букв (см. комментарий у
+    // kGlyphPadding). Отступ между глифами разведён специально под них.
     sage::rhi::Texture2DDesc desc;
     desc.Width = kAtlasW;
     desc.Height = kAtlasH;
     desc.Channels = 1;
-    desc.FilterMode = sage::rhi::Filter::Bilinear;
+    desc.FilterMode = sage::rhi::Filter::Trilinear;
     desc.WrapMode = sage::rhi::Wrap::ClampEdge;
-    desc.GenerateMipmaps = false;
+    desc.GenerateMipmaps = true;
     font->m_atlas = sage::rhi::GraphicsDevice::Get().CreateTexture2D(desc, atlas.data());
 
     LOG_INFO("Font") << "Загружен шрифт " << path << " (" << (int)pixelHeight

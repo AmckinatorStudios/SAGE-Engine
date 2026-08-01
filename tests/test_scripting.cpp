@@ -238,3 +238,151 @@ TEST(Scripting_tween_cancel_all) {
     se.UpdateAll(0.1f);
     CHECK_EQ((int)se.Lua().script("return ActiveTweens()"), 0);
 }
+
+// ===========================================================================
+//  Модули (require), параметры запуска и объявление раскладки из Lua
+//
+//  Всё это появилось, когда на движке начали делать игру целиком на скриптах:
+//  без модулей игра размером больше одного экрана кода не раскладывается,
+//  без параметров запуска её нельзя прогнать в CI, а без BindAction скрипт не
+//  может завести ни одной своей клавиши.
+// ===========================================================================
+
+// require подтягивает соседний .lua из добавленной папки поиска, и модуль
+// видит API движка (Vec3 и т.п.), потому что выполняется в глобальной среде.
+TEST(Scripting_require_loads_module_from_search_path) {
+    WriteTempScript("mod_geometry", R"LUA(
+local M = {}
+function M.Double(v) return Vec3.new(v.x * 2, v.y * 2, v.z * 2) end
+M.NAME = "geometry"
+return M
+)LUA");
+
+    ScriptEngine se;
+    se.AddScriptSearchPath("."); // временные скрипты пишутся в текущую папку
+    std::string name = se.Lua().script("local m = require 'sage_test_mod_geometry' return m.NAME");
+    CHECK_EQ(name, std::string("geometry"));
+    float doubled = se.Lua().script(
+        "local m = require 'sage_test_mod_geometry' return m.Double(Vec3.new(1.5, 0, 0)).x");
+    CHECK_NEAR(doubled, 3.0f, 1e-4);
+
+    std::remove("sage_test_mod_geometry.lua");
+}
+
+// Модуль, загруженный через require, ОДИН на весь ScriptEngine: два скрипта
+// сущностей видят одно и то же состояние. На этом держится общий мир у игры,
+// разложенной по файлам, — иначе у каждого скрипта был бы свой «мир».
+TEST(Scripting_require_shares_module_state_between_scripts) {
+    WriteTempScript("mod_shared", "local M = {count = 0}\nreturn M\n");
+    std::string a = WriteTempScript("uses_shared_a", R"LUA(
+local S = require 'sage_test_mod_shared'
+function OnStart(entity) S.count = S.count + 10 end
+)LUA");
+    std::string b = WriteTempScript("uses_shared_b", R"LUA(
+local S = require 'sage_test_mod_shared'
+function OnStart(entity) S.count = S.count + 5 end
+)LUA");
+
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.AddScriptSearchPath(".");
+    se.AttachScript(scene.CreateObject("A"), a);
+    se.AttachScript(scene.CreateObject("B"), b);
+
+    int count = se.Lua().script("return require('sage_test_mod_shared').count");
+    CHECK_EQ(count, 15);
+
+    std::remove("sage_test_mod_shared.lua");
+    std::remove(a.c_str());
+    std::remove(b.c_str());
+}
+
+// Нативные модули скриптам игры недоступны намеренно: package.cpath пуст.
+TEST(Scripting_native_module_loading_is_disabled) {
+    ScriptEngine se;
+    std::string cpath = se.Lua().script("return package.cpath");
+    CHECK_TRUE(cpath.empty());
+}
+
+// Параметры запуска: строка «ключ=значение» из командной строки/окружения
+// доходит до скрипта как LaunchArg/LaunchFlag.
+TEST(Scripting_launch_args_reach_lua) {
+    ScriptEngine se;
+    se.SetLaunchArgsFromString("--autopilot=1 seed=42 --debug bare=value");
+
+    CHECK_TRUE((bool)se.Lua().script("return LaunchFlag('autopilot')"));
+    CHECK_TRUE((bool)se.Lua().script("return LaunchFlag('debug')")); // голый ключ = включён
+    CHECK_FALSE((bool)se.Lua().script("return LaunchFlag('missing')"));
+
+    int seed = se.Lua().script("return tonumber(LaunchArg('seed'))");
+    CHECK_EQ(seed, 42);
+    std::string bare = se.Lua().script("return LaunchArg('bare')");
+    CHECK_EQ(bare, std::string("value"));
+    CHECK_TRUE((bool)se.Lua().script("return LaunchArg('nope') == nil"));
+}
+
+// Раскладка объявляется из игры: BindAction заводит действие в карте ввода
+// движка, и дальше его читает тот же IsActionDown, что и код на C++.
+TEST(Scripting_bind_action_declares_actions) {
+    ScriptEngine se;
+    InputMap input;
+    se.BindInput(input);
+
+    int bound = se.Lua().script("return BindAction('Jump', 'SPACE')");
+    CHECK_EQ(bound, 1);
+    CHECK_TRUE(input.Has("Jump"));
+
+    // Список клавиш: несколько привязок на одно действие (WASD и стрелки).
+    int many = se.Lua().script("return BindAction('Move Forward', {'W', 'UP'})");
+    CHECK_EQ(many, 2);
+    CHECK_EQ((int)input.Get("Move Forward").Bindings().size(), 2);
+
+    // Кнопки мыши — такие же привязки, как клавиши.
+    CHECK_EQ((int)se.Lua().script("return BindAction('Break', 'MOUSE_LEFT')"), 1);
+
+    // Нераспознанное имя не роняет игру: действие заводится, привязок 0.
+    int bad = se.Lua().script("return BindAction('Nonsense', 'NOT_A_KEY')");
+    CHECK_EQ(bad, 0);
+
+    CHECK_FALSE(input.IsDown("Jump")); // никто ничего не нажимал
+    CHECK_TRUE((bool)se.Lua().script("return HasAction('Jump')"));
+    CHECK_FALSE((bool)se.Lua().script("return HasAction('Never Declared')"));
+}
+
+// «Сырой» ввод: скрипт получает смещение мыши и управляет захватом курсора —
+// без этого вид от первого лица из Lua написать нельзя.
+TEST(Scripting_raw_input_gives_mouse_and_capture) {
+    struct FakeInput : sage::RawInputSource {
+        glm::vec2 Delta{3.0f, -2.0f};
+        bool Captured = false;
+        glm::vec2 MouseDelta() const override { return Delta; }
+        glm::vec2 MousePosition() const override { return {100.0f, 50.0f}; }
+        int ScrollDelta() const override { return -1; }
+        void SetMouseCaptured(bool c) override { Captured = c; }
+        bool MouseCaptured() const override { return Captured; }
+    } fake;
+
+    ScriptEngine se;
+    se.BindRawInput(fake);
+
+    CHECK_NEAR((float)se.Lua().script("return GetMouseDelta().x"), 3.0f, 1e-4);
+    CHECK_NEAR((float)se.Lua().script("return GetMouseDelta().y"), -2.0f, 1e-4);
+    CHECK_NEAR((float)se.Lua().script("return GetMousePosition().x"), 100.0f, 1e-4);
+    CHECK_EQ((int)se.Lua().script("return GetScrollDelta()"), -1);
+
+    CHECK_FALSE((bool)se.Lua().script("return IsMouseCaptured()"));
+    se.Lua().script("SetMouseCaptured(true)");
+    CHECK_TRUE(fake.Captured);
+    CHECK_TRUE((bool)se.Lua().script("return IsMouseCaptured()"));
+}
+
+// Без привязок «сырого» ввода GetMouseDelta обязан внятно ругаться, а не
+// молча отдавать нули: молчаливый ноль выглядит как «мышь не двигают».
+TEST(Scripting_raw_input_without_binding_errors) {
+    ScriptEngine se;
+    auto result = se.Lua().safe_script("return GetMouseDelta()", sol::script_pass_on_error);
+    CHECK_FALSE(result.valid());
+    // Скролл — исключение: он опционален, и ноль для него честный ответ.
+    CHECK_EQ((int)se.Lua().script("return GetScrollDelta()"), 0);
+}

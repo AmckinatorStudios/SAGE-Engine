@@ -6,7 +6,12 @@
 
 std::mutex Log::s_mutex;
 std::ofstream Log::s_file;
-LogLevel Log::s_minLevel = LogLevel::Trace;
+// Debug, а не Trace. Trace — уровень «по строке на каждую созданную сущность»:
+// игра, которая порождает мир скриптом (воксельный ландшафт — тысячи блоков за
+// загрузку), при пороге Trace писала в лог тысячи строк, и вывод стоил дороже
+// самой работы. Всё, что человек ожидает увидеть по умолчанию, живёт на Debug
+// и выше; Trace включается явно через SetMinLevel, когда его действительно ждут.
+LogLevel Log::s_minLevel = LogLevel::Debug;
 bool Log::s_fileEnabled = false;
 Log::Sink Log::s_sink;
 

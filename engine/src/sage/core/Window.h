@@ -51,6 +51,13 @@ public:
     void SetCursorPosCallback(CursorPosFn fn) { m_cursorPosFn = std::move(fn); }
     void SetScrollCallback(ScrollFn fn) { m_scrollFn = std::move(fn); }
 
+    // Захват курсора: мышь прячется и «прилипает» к окну, продолжая отдавать
+    // смещение — режим обзора от первого лица. Без этого игра от первого лица
+    // невозможна в принципе: курсор упирается в край экрана и обзор встаёт.
+    // Отпускание (false) возвращает обычный курсор — меню, пауза, alt-tab.
+    void SetCursorCaptured(bool captured);
+    bool CursorCaptured() const { return m_cursorCaptured; }
+
 private:
     static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
@@ -60,4 +67,5 @@ private:
     int m_height;
     CursorPosFn m_cursorPosFn;
     ScrollFn m_scrollFn;
+    bool m_cursorCaptured = false;
 };

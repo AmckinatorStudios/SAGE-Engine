@@ -96,6 +96,17 @@ void Window::PollEvents() {
     glfwPollEvents();
 }
 
+void Window::SetCursorCaptured(bool captured) {
+    if (!m_handle || captured == m_cursorCaptured) return;
+    m_cursorCaptured = captured;
+    glfwSetInputMode(m_handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    // Сырой ввод мыши, если драйвер умеет: в захвате нам нужно физическое
+    // смещение, а не ускорение/масштабирование рабочего стола — иначе
+    // чувствительность обзора зависит от настроек ОС, а не от игры.
+    if (glfwRawMouseMotionSupported())
+        glfwSetInputMode(m_handle, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
+}
+
 void Window::OnResize(int width, int height) {
     // Только запоминаем новый размер. Обновление viewport под этот размер —
     // задача графического слоя (Application каждый кадр выставляет viewport

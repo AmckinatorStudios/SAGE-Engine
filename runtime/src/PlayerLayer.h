@@ -5,6 +5,8 @@
 #include <string>
 
 #include "sage/core/Layer.h"
+#include "sage/core/InputSystem.h"
+#include "sage/audio/AudioEngine.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
@@ -39,7 +41,9 @@ class ScriptEngine;
 // ---------------------------------------------------------------------------
 class PlayerLayer : public sage::Layer {
 public:
-    explicit PlayerLayer(std::filesystem::path projectDir);
+    // launchArgs — строка вида "autopilot=1 seed=42" из командной строки и/или
+    // SAGE_GAME_ARGS; попадает скриптам как LaunchArg("seed").
+    explicit PlayerLayer(std::filesystem::path projectDir, std::string launchArgs = {});
     ~PlayerLayer() override; // unique_ptr<ScriptEngine> требует полный тип в .cpp
 
     void OnAttach() override;
@@ -52,10 +56,18 @@ private:
 
     std::filesystem::path m_projectDir;
     std::string m_projectName = "SAGE Game";
+    std::string m_launchArgs; // "autopilot=1 seed=42" -> LaunchArg в Lua
 
     std::unique_ptr<Scene> m_scene;
     std::unique_ptr<ScriptEngine> m_scripts;
     std::unique_ptr<PhysicsScene> m_physics; // симуляция физики (игра всегда «в Play»)
+
+    // Ввод игры. Действия объявляют САМИ СКРИПТЫ (BindAction из Lua) — плеер
+    // не знает и не должен знать раскладку конкретной игры; его дело — раз в
+    // кадр опросить устройства и отдать результат скриптам.
+    InputSystem m_input;
+    std::unique_ptr<WindowRawInput> m_rawInput; // мышь/захват курсора для Lua
+    std::unique_ptr<AudioEngine> m_audio;       // звук игры (PlaySound/PlayMusic из Lua)
 
     std::optional<Shader> m_shader;       // lit: ambient+sun+point lights+тени
     std::optional<Shader> m_shadowShader;
@@ -68,6 +80,10 @@ private:
     sage::ecs::RenderBatch m_batch;            // отсечение по фрустуму + инстансинг статики
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
     bool m_warnedNoCamera = false; // предупреждение «нет Primary-камеры» — один раз
+
+    // ESC удерживается несколько кадров — чтобы одно нажатие не «отпустило
+    // курсор и тут же закрыло игру», ждём отпускания клавиши (см. OnUpdate).
+    bool m_escLatched = false;
 
     std::string m_screenshotPath = "player.png";
     int m_autoScreenshotFrame = -1;

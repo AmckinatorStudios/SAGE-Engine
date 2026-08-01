@@ -31,9 +31,20 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     LOG_INFO("Player") << "SAGE Player v" << kSageEngineVersion << " запускается...";
 
     // Порядок поиска проекта: аргумент -> окружение -> ./project -> текущая папка.
+    // Аргументы вида «--ключ=значение» проектом не считаются: это параметры
+    // запуска для скриптов игры (LaunchArg), см. ниже.
     fs::path projectDir;
+    std::string launchArgs;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind("--", 0) == 0) launchArgs += (launchArgs.empty() ? "" : " ") + arg;
+        else if (projectDir.empty()) projectDir = arg;
+    }
+    if (const char* env = std::getenv("SAGE_GAME_ARGS"))
+        launchArgs += (launchArgs.empty() ? "" : " ") + std::string(env);
+
     std::error_code ec;
-    if (argc > 1) projectDir = argv[1];
+    if (!projectDir.empty()) { /* путь взят из аргументов */ }
     else if (const char* env = std::getenv("SAGE_PROJECT")) projectDir = env;
     else if (fs::exists("project/project.sageproj", ec)) projectDir = "project";
     else projectDir = ".";
@@ -52,7 +63,7 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     config.Title = "SAGE Player"; // заменится именем проекта после загрузки
 
     auto* app = new sage::Application(config);
-    app->PushLayer(std::make_unique<PlayerLayer>(projectDir));
+    app->PushLayer(std::make_unique<PlayerLayer>(projectDir, launchArgs));
     return app;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "sage/scene/Scene.h"
 #include "sage/core/InputMap.h"
+#include "sage/core/RawInput.h"
 #include "sage/core/Tween.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ParticleSystem.h"
@@ -22,7 +23,14 @@
 //   - Vec2/Vec3/Vec4 с арифметикой (+, -, *, длина, нормализация) — для игровой математики
 //   - Spawn/Find/Destroy объектов сцены, SetMeshCube/SetMeshModel — можно
 //     порождать/убирать сущности из Lua и назначать им геометрию
-//   - именованным действиям ввода движка (см. core/InputMap.h) — IsActionDown и т.п.
+//   - именованным действиям ввода движка (см. core/InputMap.h) — IsActionDown и т.п.,
+//     объявляемым ПРЯМО ИЗ LUA (BindAction("Jump", "SPACE")) — раскладка игры
+//     живёт в игре, а не зашита в C++
+//   - «сырому» вводу: GetMouseDelta/SetMouseCaptured — вид от первого лица
+//     пишется скриптом, без единой строки C++ (см. core/RawInput.h)
+//   - МОДУЛЯМ: require("voxel") подтягивает соседний .lua из папок, добавленных
+//     через AddScriptSearchPath — игра размером больше одного файла раскладывается
+//     по модулям, а общий код (воксельное ядро, утилиты) пишется ОДИН раз
 //   - Schedule/Repeat — отложенные и повторяющиеся вызовы без хранения таймера вручную
 //   - StartCoroutine + wait(seconds) — последовательности во времени (катсцены,
 //     волны спавна, задержки) пишутся как обычный линейный Lua-код
@@ -68,8 +76,33 @@ public:
     void BindScene(Scene& scene) { m_scene = &scene; }
 
     // Даёт скриптам доступ к именованным действиям ввода движка:
-    // IsActionDown("Jump"), WasActionPressed("BreakOrHook") и т.п.
+    // IsActionDown("Jump"), WasActionPressed("BreakOrHook") и т.п., а также
+    // право ОБЪЯВЛЯТЬ свои действия из Lua — BindAction("Jump", "SPACE").
     void BindInput(InputMap& input) { m_input = &input; }
+
+    // Даёт скриптам «сырой» ввод: GetMouseDelta/GetScrollDelta/SetMouseCaptured.
+    // Без этого из Lua нельзя написать вид от первого лица — именованные
+    // действия дискретны и обзора не дают (см. core/RawInput.h).
+    void BindRawInput(sage::RawInputSource& raw) { m_rawInput = &raw; }
+
+    // Параметр запуска игры: скрипт читает его как LaunchArg("autopilot").
+    // Хост наполняет их из командной строки (--autopilot=1) и переменной
+    // SAGE_GAME_ARGS ("autopilot=1 seed=42"). Зачем: игра целиком на скриптах
+    // не может спросить у ОС ничего сама (библиотеки os/io скриптам намеренно
+    // закрыты), а автопрогон в CI, номер зерна мира и режим отладки задавать
+    // снаружи надо — иначе headless-проверка игры невозможна в принципе.
+    void SetLaunchArg(const std::string& key, const std::string& value);
+
+    // Разбирает строку вида "autopilot=1 seed=42" в набор параметров запуска.
+    // Голый ключ без '=' («--autopilot») получает значение "1".
+    void SetLaunchArgsFromString(const std::string& args);
+
+    // Добавляет папку в путь поиска модулей Lua (require "voxel" найдёт
+    // <dir>/voxel.lua). Вызывается хостом со скриптовой папкой проекта —
+    // так игра раскладывается по модулям вместо одного файла на всё.
+    // Загрузка НАТИВНЫХ модулей (package.cpath) намеренно отключена: скрипты
+    // игры не должны уметь подгружать произвольные .so/.dll.
+    void AddScriptSearchPath(const std::string& dir);
 
     // Даёт скриптам доступ к камере через GetCamera() — читать и менять
     // позицию/угол обзора/FOV, например для программных камера-эффектов
@@ -176,6 +209,7 @@ private:
     void RegisterAudioApi();      // PlaySound/PlayMusic/…
     void RegisterTimerApi();      // Schedule/Repeat/StartCoroutine + wait()
     void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
+    void RegisterLaunchArgsApi(); // LaunchArg/LaunchFlag
     void RegisterMathHelpers();   // Cross/Lerp/Clamp/Radians/Degrees
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
@@ -206,6 +240,7 @@ private:
 
     Scene* m_scene = nullptr;
     InputMap* m_input = nullptr;
+    sage::RawInputSource* m_rawInput = nullptr;
     Camera* m_camera = nullptr;
     ParticleSystem* m_particles = nullptr;
     BillboardSystem* m_billboards = nullptr;
@@ -216,6 +251,10 @@ private:
     // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,
     // умирают вместе с движком скриптов при Stop). Правятся из Lua (Tween*).
     sage::TweenManager m_tweens;
+
+    // Параметры запуска (LaunchArg из Lua). Таблица Lua завести нельзя до
+    // RegisterEngineApi, поэтому храним на стороне C++ и отдаём по запросу.
+    std::unordered_map<std::string, std::string> m_launchArgs;
 
     int m_nextTimerId = 1;
 };

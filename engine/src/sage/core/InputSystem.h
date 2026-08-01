@@ -1,5 +1,6 @@
 #pragma once
 #include "InputMap.h"
+#include "RawInput.h"
 #include "Window.h"
 #include "sage/render/Camera.h"
 #include <GLFW/glfw3.h>
@@ -50,6 +51,17 @@ public:
     // текущее down-состояние; сбрасывает одноразовые mouse-клики и скролл,
     // накопленные колбэками с прошлого кадра.
     void Update(GLFWwindow* window) {
+        // Снимок «сырых» величин на кадр. Копия, а не сам накопитель, потому что
+        // потребителей у мыши теперь несколько (камера игры И скрипты через
+        // RawInputSource), а событие мыши приходит один раз: кто прочитал
+        // первым, тот и обнулил бы её для остальных. Накопитель гасится ЗДЕСЬ,
+        // ровно раз в кадр — читатели весь кадр видят одно и то же значение.
+        m_frameMouseDeltaX = m_mouseDeltaX;
+        m_frameMouseDeltaY = m_mouseDeltaY;
+        m_frameScrollDelta = m_scrollDelta;
+        m_mouseDeltaX = 0.0f;
+        m_mouseDeltaY = 0.0f;
+
         for (auto& [name, action] : m_actions.All()) {
             action.EndFrame(); // гасим pressed/released прошлого кадра
 
@@ -82,21 +94,41 @@ public:
         m_scrollDelta = 0; // одноразовое событие колеса — живёт один кадр
     }
 
-    // Применяет накопленное смещение мыши к камере и сбрасывает его.
-    // Отдельно от Update(), потому что не все сцены имеют камеру
-    // (например, экран паузы без 3D-вида).
-    void ApplyMouseDelta(Camera& camera) {
-        camera.ProcessMouse(m_mouseDeltaX, m_mouseDeltaY);
-        m_mouseDeltaX = 0.0f;
-        m_mouseDeltaY = 0.0f;
+    // Кадр БЕЗ ввода: все действия гасятся так, будто ничего не нажато, а
+    // сырые дельты обнуляются. Нужно хосту, который временами отбирает ввод у
+    // игры — в редакторе фокус уходит из панели Game, и WASD должен уезжать в
+    // переименование сущности, а не в игрока. Простое «не звать Update» не
+    // годится: тогда действия навсегда застыли бы нажатыми.
+    void UpdateIdle() {
+        m_frameMouseDeltaX = m_frameMouseDeltaY = 0.0f;
+        m_frameScrollDelta = 0;
+        m_mouseDeltaX = m_mouseDeltaY = 0.0f;
+        m_scrollDelta = 0;
+        for (auto& [name, action] : m_actions.All()) {
+            action.EndFrame();
+            action.Update(false);
+        }
     }
 
-    float MouseDeltaX() const { return m_mouseDeltaX; }
-    float MouseDeltaY() const { return m_mouseDeltaY; }
+    // Применяет смещение мыши текущего кадра к камере. Отдельно от Update(),
+    // потому что не все сцены имеют камеру (например, экран паузы без 3D-вида).
+    void ApplyMouseDelta(Camera& camera) {
+        camera.ProcessMouse(m_frameMouseDeltaX, m_frameMouseDeltaY);
+    }
+
+    // Смещение мыши ЗА ТЕКУЩИЙ КАДР (снимок сделан в Update). Читать можно
+    // сколько угодно раз и из скольких угодно мест — значение не «съедается».
+    float MouseDeltaX() const { return m_frameMouseDeltaX; }
+    float MouseDeltaY() const { return m_frameMouseDeltaY; }
 
     // Сырой сдвиг колеса за кадр (для UI без привязанных действий — скролл
     // хотбара, скролл списков и т.п.), без ремаппинга
-    int RawScrollDelta() const { return m_scrollDelta; }
+    int RawScrollDelta() const { return m_frameScrollDelta; }
+
+    // Положение курсора в окне, в пикселях от левого верхнего угла (последнее
+    // пришедшее событие мыши).
+    float MouseX() const { return m_lastX; }
+    float MouseY() const { return m_lastY; }
 
 private:
     // Кнопки мыши читаются poll-ом (glfwGetMouseButton) в Update(), не
@@ -117,6 +149,30 @@ private:
 
     bool m_firstMouse = true;
     float m_lastX = 0.0f, m_lastY = 0.0f;
-    float m_mouseDeltaX = 0.0f, m_mouseDeltaY = 0.0f;
+    float m_mouseDeltaX = 0.0f, m_mouseDeltaY = 0.0f; // накопитель между кадрами
     int m_scrollDelta = 0;
+    // Снимок на кадр (см. Update): то, что видят ВСЕ читатели весь кадр.
+    float m_frameMouseDeltaX = 0.0f, m_frameMouseDeltaY = 0.0f;
+    int m_frameScrollDelta = 0;
+};
+
+// ---------------------------------------------------------------------------
+// WindowRawInput — «сырой» ввод скриптам поверх пары InputSystem + Window:
+// смещение мыши берётся из снимка кадра InputSystem, захват курсора отдаётся
+// окну. Реализация интерфейса из core/RawInput.h для настоящей игры (в
+// Play-режиме редактора источник другой — там ввод приходит из панели Game).
+// ---------------------------------------------------------------------------
+class WindowRawInput : public sage::RawInputSource {
+public:
+    WindowRawInput(InputSystem& input, Window& window) : m_input(&input), m_window(&window) {}
+
+    glm::vec2 MouseDelta() const override { return {m_input->MouseDeltaX(), m_input->MouseDeltaY()}; }
+    glm::vec2 MousePosition() const override { return {m_input->MouseX(), m_input->MouseY()}; }
+    int ScrollDelta() const override { return m_input->RawScrollDelta(); }
+    void SetMouseCaptured(bool captured) override { m_window->SetCursorCaptured(captured); }
+    bool MouseCaptured() const override { return m_window->CursorCaptured(); }
+
+private:
+    InputSystem* m_input;
+    Window* m_window;
 };

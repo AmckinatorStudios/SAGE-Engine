@@ -31,8 +31,9 @@
 
 namespace fs = std::filesystem;
 
-PlayerLayer::PlayerLayer(fs::path projectDir)
-    : sage::Layer("Player"), m_projectDir(std::move(projectDir)) {}
+PlayerLayer::PlayerLayer(fs::path projectDir, std::string launchArgs)
+    : sage::Layer("Player"), m_projectDir(std::move(projectDir)),
+      m_launchArgs(std::move(launchArgs)) {}
 PlayerLayer::~PlayerLayer() = default;
 
 fs::path PlayerLayer::FindMainScene() const {
@@ -105,6 +106,33 @@ void PlayerLayer::OnAttach() {
     m_scripts = std::make_unique<ScriptEngine>();
     m_scripts->BindScene(*m_scene);
     if (m_particles) m_scripts->BindParticles(*m_particles); // паритет с Play редактора
+
+    // Ввод — ДО привязки скриптов: раскладку объявляет сам скрипт в OnStart
+    // (BindAction), а OnStart вызывается прямо из AttachScript. Привяжи мы ввод
+    // после, первые же BindAction упали бы с «ввод не привязан».
+    m_input.Attach(app.GetWindow());
+    m_rawInput = std::make_unique<WindowRawInput>(m_input, app.GetWindow());
+    m_scripts->BindInput(m_input.Actions());
+    m_scripts->BindRawInput(*m_rawInput);
+
+    // Звук игры. Отсутствие звукового устройства (CI, headless) — не повод
+    // ронять игру: AudioEngine сам работает вхолостую, а PlaySound из Lua
+    // остаётся вызываемым.
+    m_audio = std::make_unique<AudioEngine>();
+    m_scripts->BindAudio(*m_audio);
+
+    // Модули Lua: require "voxel" найдёт assets/scripts/voxel.lua проекта.
+    // CWD уже внутри проекта, поэтому путь относительный — как и у скриптов
+    // сущностей в .sage.
+    m_scripts->AddScriptSearchPath("assets/scripts");
+
+    // Параметры запуска (--autopilot=1, SAGE_GAME_ARGS) — до AttachScript:
+    // скрипт читает их уже в OnStart, выбирая режим (автопрогон, зерно мира).
+    if (!m_launchArgs.empty()) {
+        m_scripts->SetLaunchArgsFromString(m_launchArgs);
+        LOG_INFO("Player") << "Параметры запуска игры: " << m_launchArgs;
+    }
+
     int attached = 0;
     auto view = m_scene->Registry().view<ScriptComponent>();
     for (auto e : view) {
@@ -152,13 +180,32 @@ void PlayerLayer::OnDetach() {
 
 void PlayerLayer::OnUpdate(float dt) {
     if (!m_scene) return;
+    sage::Application& app = sage::Application::Get();
+    Window& window = app.GetWindow();
+
+    // Ввод опрашиваем ПЕРВЫМ делом в кадре: скрипты ниже читают именно этот
+    // снимок (действия + смещение мыши), и он должен быть одним на весь кадр.
+    m_input.Update(window.Handle());
+
     m_scripts->UpdateAll(dt);
     if (m_physics) m_physics->Step(*m_scene, dt);
     sage::anim::UpdateAnimators(*m_scene, dt);
     if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
+    if (m_audio) m_audio->Update();
 
-    if (glfwGetKey(sage::Application::Get().GetWindow().Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-        sage::Application::Get().Close();
+    // ESC: сперва ОТПУСКАЕТ курсор, и только потом закрывает игру. В игре от
+    // первого лица курсор захвачен — выйти из неё, не вернув курсор, значит
+    // оставить игрока без мыши на рабочем столе; а мгновенный выход по первому
+    // же ESC не даёт даже посмотреть на мир без прицела.
+    if (glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+        if (window.CursorCaptured()) {
+            window.SetCursorCaptured(false);
+            m_escLatched = true;
+        } else if (!m_escLatched) {
+            app.Close();
+        }
+    } else {
+        m_escLatched = false;
     }
 }
 
@@ -201,6 +248,17 @@ void PlayerLayer::OnRender() {
         view = m_fallbackCamera.GetViewMatrix();
         proj = m_fallbackCamera.GetProjectionMatrix(aspect);
         viewPos = m_fallbackCamera.Position;
+    }
+
+    // Слушатель звука — на игровой камере: 3D-звуки (PlaySound3D из Lua) должны
+    // приходить с той стороны, куда игрок реально смотрит. Базис берём из
+    // матрицы вида по той же причине, что и ниже для теней — камера может быть
+    // как компонентом сцены, так и запасной.
+    if (m_audio) {
+        const glm::mat3 basis = glm::mat3(view);
+        glm::vec3 forward = -glm::vec3(basis[0][2], basis[1][2], basis[2][2]);
+        glm::vec3 up = glm::vec3(basis[0][1], basis[1][1], basis[2][1]);
+        m_audio->SetListener(viewPos, forward, up);
     }
 
     // --- Тени: глубина от солнца (можно отключить в настройках) ---

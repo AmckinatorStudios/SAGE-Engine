@@ -5,7 +5,10 @@
 #include "sage/ui/UIShowcase.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/core/KeyNames.h"
 #include <algorithm>
+#include <cctype>
+#include <optional>
 
 namespace {
 // Навешивает на usertype GameObject единый набор аксессоров к компоненту C:
@@ -36,9 +39,29 @@ void BindComponentAccessors(sol::usertype<GameObject>& t, const char* has,
 } // namespace
 
 ScriptEngine::ScriptEngine() {
+    // package открыт ради require: игра крупнее одного экрана кода должна
+    // раскладываться по модулям, а общий код (воксельное ядро, утилиты)
+    // писаться один раз, а не копироваться в каждый скрипт сущности. io/os
+    // по-прежнему закрыты — скриптам игры незачем читать диск и звать процессы.
     m_lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string,
-                          sol::lib::table, sol::lib::coroutine);
+                          sol::lib::table, sol::lib::coroutine, sol::lib::package);
+    // Пути поиска модулей задаёт ХОСТ через AddScriptSearchPath (папка скриптов
+    // проекта). Дефолтный package.path указывает в системные каталоги Lua,
+    // которых у игрока нет, и только мешает диагностике — обнуляем. cpath
+    // обнуляем насовсем: подгрузка нативных .so/.dll из Lua игре не нужна.
+    m_lua["package"]["path"] = "";
+    m_lua["package"]["cpath"] = "";
     RegisterEngineApi();
+}
+
+void ScriptEngine::AddScriptSearchPath(const std::string& dir) {
+    if (dir.empty()) return;
+    std::string pattern = dir;
+    if (pattern.back() != '/' && pattern.back() != '\\') pattern += '/';
+    // <dir>/foo.lua и <dir>/foo/init.lua — обе привычные раскладки модуля.
+    std::string entry = pattern + "?.lua;" + pattern + "?/init.lua";
+    std::string current = m_lua["package"]["path"];
+    m_lua["package"]["path"] = current.empty() ? entry : current + ";" + entry;
 }
 
 void ScriptEngine::RegisterEngineApi() {
@@ -57,6 +80,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterAudioApi();
     RegisterTimerApi();
     RegisterMessagingApi();
+    RegisterLaunchArgsApi();
     RegisterMathHelpers();
     RegisterLightingApi();
     RegisterPhysicsApi();
@@ -410,7 +434,12 @@ void ScriptEngine::RegisterSceneApi() {
     m_lua.set_function("SpawnObject", [this](const std::string& name) -> GameObject {
         if (!m_scene) throw std::runtime_error("SpawnObject: сцена не привязана (ScriptEngine::BindScene не вызван)");
         GameObject obj = m_scene->CreateObject(name);
-        LOG_INFO("Lua") << "Создан объект: " << name << " (id " << obj.Id() << ")";
+        // Уровень Trace, а не Info, НАМЕРЕННО. Скрипт, порождающий мир (воксельный
+        // ландшафт — тысячи блоков за кадр загрузки), давал по строке лога на
+        // каждый блок: консоль редактора забивалась, а сам вывод стоил дороже
+        // создания сущности. Разовые спавны по-прежнему видны — достаточно
+        // опустить порог лога (см. Log.h).
+        LOG_TRACE("Lua") << "Создан объект: " << name << " (id " << obj.Id() << ")";
         return obj;
     });
 
@@ -508,6 +537,67 @@ void ScriptEngine::RegisterInputApi() {
     });
     m_lua.set_function("WasActionReleased", [this](const std::string& name) -> bool {
         return m_input && m_input->Has(name) && m_input->WasReleased(name);
+    });
+    m_lua.set_function("HasAction", [this](const std::string& name) -> bool {
+        return m_input && m_input->Has(name);
+    });
+
+    // --- Раскладка ИЗ ИГРЫ: BindAction("Jump", "SPACE") / BindAction("Move
+    // Forward", {"W", "UP"}). Раньше действия мог объявить только C++-код
+    // хоста, поэтому игра целиком на скриптах не могла завести НИ ОДНОЙ своей
+    // клавиши — весь ввод приходилось согласовывать через правку движка.
+    // Имена клавиш — те же, что в файлах настроек (см. core/KeyNames.h):
+    // "W", "SPACE", "LEFT_SHIFT", "MOUSE_LEFT", "MOUSE_RIGHT", ... Возвращает
+    // число реально распознанных привязок (0 — имя клавиши не понято). ---
+    auto bindOne = [this](const std::string& action, const std::string& key) -> bool {
+        std::optional<InputBinding> binding = KeyNames::Parse(key);
+        if (!binding) {
+            LOG_WARN("Lua") << "BindAction('" << action << "'): неизвестная клавиша '" << key << "'";
+            return false;
+        }
+        m_input->Register(action).Bind(*binding);
+        return true;
+    };
+    m_lua.set_function("BindAction", [this, bindOne](const std::string& action, sol::object keys) -> int {
+        if (!m_input)
+            throw std::runtime_error("BindAction: ввод не привязан (ScriptEngine::BindInput не вызван)");
+        int bound = 0;
+        if (keys.is<std::string>()) {
+            if (bindOne(action, keys.as<std::string>())) ++bound;
+        } else if (keys.is<sol::table>()) {
+            sol::table list = keys.as<sol::table>();
+            for (size_t i = 1; i <= list.size(); ++i) {
+                sol::optional<std::string> key = list[i];
+                if (key && bindOne(action, *key)) ++bound;
+            }
+        } else {
+            throw std::runtime_error("BindAction: вторым аргументом ожидается имя клавиши "
+                                     "или таблица имён");
+        }
+        return bound;
+    });
+
+    // --- «Сырой» ввод: обзор от первого лица. Доступно после BindRawInput. ---
+    m_lua.set_function("GetMouseDelta", [this]() -> glm::vec2 {
+        if (!m_rawInput)
+            throw std::runtime_error("GetMouseDelta: сырой ввод не привязан (BindRawInput не вызван)");
+        return m_rawInput->MouseDelta();
+    });
+    m_lua.set_function("GetMousePosition", [this]() -> glm::vec2 {
+        if (!m_rawInput)
+            throw std::runtime_error("GetMousePosition: сырой ввод не привязан (BindRawInput не вызван)");
+        return m_rawInput->MousePosition();
+    });
+    m_lua.set_function("GetScrollDelta", [this]() -> int {
+        return m_rawInput ? m_rawInput->ScrollDelta() : 0;
+    });
+    m_lua.set_function("SetMouseCaptured", [this](bool captured) {
+        if (!m_rawInput)
+            throw std::runtime_error("SetMouseCaptured: сырой ввод не привязан (BindRawInput не вызван)");
+        m_rawInput->SetMouseCaptured(captured);
+    });
+    m_lua.set_function("IsMouseCaptured", [this]() -> bool {
+        return m_rawInput && m_rawInput->MouseCaptured();
     });
 }
 
@@ -734,6 +824,46 @@ void ScriptEngine::RegisterMessagingApi() {
     });
     m_lua.set_function("Broadcast", [this](const std::string& name, sol::object data) {
         DispatchMessage(-1, name, data);
+    });
+}
+
+void ScriptEngine::SetLaunchArg(const std::string& key, const std::string& value) {
+    if (!key.empty()) m_launchArgs[key] = value;
+}
+
+void ScriptEngine::SetLaunchArgsFromString(const std::string& args) {
+    size_t i = 0;
+    while (i < args.size()) {
+        while (i < args.size() && std::isspace((unsigned char)args[i])) ++i;
+        size_t start = i;
+        while (i < args.size() && !std::isspace((unsigned char)args[i])) ++i;
+        if (start == i) break;
+        std::string token = args.substr(start, i - start);
+        // Ведущие дефисы («--autopilot») отбрасываем: и такая запись, и голое
+        // «autopilot» — привычные способы задать флаг, различать их незачем.
+        size_t dash = token.find_first_not_of('-');
+        if (dash == std::string::npos) continue;
+        token = token.substr(dash);
+        size_t eq = token.find('=');
+        if (eq == std::string::npos) SetLaunchArg(token, "1");
+        else SetLaunchArg(token.substr(0, eq), token.substr(eq + 1));
+    }
+}
+
+void ScriptEngine::RegisterLaunchArgsApi() {
+    // LaunchArg("seed") -> строка или nil; LaunchFlag("autopilot") -> bool
+    // (истина для "1"/"true"/"yes"). Скрипты игры так узнают о режиме запуска,
+    // не имея доступа ни к ОС, ни к командной строке.
+    m_lua.set_function("LaunchArg", [this](const std::string& key) -> sol::optional<std::string> {
+        auto it = m_launchArgs.find(key);
+        if (it == m_launchArgs.end()) return sol::nullopt;
+        return it->second;
+    });
+    m_lua.set_function("LaunchFlag", [this](const std::string& key) -> bool {
+        auto it = m_launchArgs.find(key);
+        if (it == m_launchArgs.end()) return false;
+        const std::string& v = it->second;
+        return v == "1" || v == "true" || v == "yes" || v == "on";
     });
 }
 

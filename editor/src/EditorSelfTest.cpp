@@ -1004,3 +1004,94 @@ end
                                   "play logic [5 coins, messaging, HUD from Lua] + stop restore + build exe)";
     else LOG_ERROR("Editor") << "E2E: FAIL";
 }
+
+// ============================================================================
+//  Headless-сессия над ЧУЖИМ проектом (SAGE_EDITOR_OPEN_PROJECT=<путь>)
+//
+//  ЗАЧЕМ. Self-test и E2E выше проверяют редактор на игре, которую редактор же
+//  и сочинил внутри своего кода. Настоящая игра живёт в отдельном репозитории,
+//  её сцены и скрипты пишет человек — и до сих пор ни одна проверка не открывала
+//  такой проект НАСТОЯЩИМ редактором. Эта функция закрывает дыру: CI игры
+//  запускает SageEditor поверх своего проекта теми же операциями, что и человек
+//  мышкой — Open Project, выбрать сцену, Play, Stop, Build Game.
+//
+//  Управление — переменными окружения (headless, никаких модалок):
+//    SAGE_EDITOR_OPEN_PROJECT=<путь>   папка с project.sageproj (обязательна)
+//    SAGE_EDITOR_OPEN_SCENE=<имя>      сцена в scenes/ (по умолчанию main.sage)
+//    SAGE_EDITOR_PLAY_SECONDS=<сек>    сколько отыграть в Play (0 — не играть)
+//    SAGE_EDITOR_PLAY_STEP=<сек>       шаг симуляции (по умолчанию 1/60)
+//    SAGE_GAME_ARGS="autopilot=1"      параметры запуска для скриптов игры
+//    SAGE_EDITOR_BUILD_TO=<папка>      собрать игру (File > Build Game)
+//  Итог — строкой SESSION: PASS/FAIL в лог, чтобы CI искал её грепом.
+// ============================================================================
+void EditorLayer::RunHeadlessProjectSession() {
+    m_launcher.Dismiss(); // hub проектов в headless-прогоне только закрывает кадр
+
+    const char* projectDir = std::getenv("SAGE_EDITOR_OPEN_PROJECT");
+    std::string err;
+    if (!OpenProject(projectDir, err)) {
+        LOG_ERROR("Editor") << "SESSION: open project failed: " << err;
+        LOG_ERROR("Editor") << "SESSION: FAIL";
+        return;
+    }
+    LOG_INFO("Editor") << "SESSION: opened project '" << m_project.Name() << "' at " << projectDir;
+
+    const char* sceneName = std::getenv("SAGE_EDITOR_OPEN_SCENE");
+    fs::path scenePath = m_project.ScenesDir() / (sceneName ? sceneName : "main.sage");
+    if (!LoadSceneFromFile(scenePath)) {
+        LOG_ERROR("Editor") << "SESSION: load scene failed: " << scenePath.string();
+        LOG_ERROR("Editor") << "SESSION: FAIL";
+        return;
+    }
+    LOG_INFO("Editor") << "SESSION: loaded scene " << scenePath.filename().string()
+                       << " (" << m_scene->Count() << " entities)";
+
+    bool ok = true;
+
+    // --- Play: та же кнопка, что у человека. Время идёт фиксированным шагом,
+    // а не по-настоящему: headless-прогон должен быть воспроизводимым, иначе
+    // «успела ли игра дойти до события» зависело бы от загрузки CI-машины. ---
+    float playSeconds = 0.0f;
+    if (const char* s = std::getenv("SAGE_EDITOR_PLAY_SECONDS")) playSeconds = (float)std::atof(s);
+    if (playSeconds > 0.0f) {
+        float step = 1.0f / 60.0f;
+        if (const char* s = std::getenv("SAGE_EDITOR_PLAY_STEP")) {
+            float parsed = (float)std::atof(s);
+            if (parsed > 0.0f) step = parsed;
+        }
+        // Параметры запуска (SAGE_GAME_ARGS) StartPlay раздаёт скриптам сам —
+        // до их OnStart, иначе автопрогон не успел бы включиться.
+        StartPlay();
+        size_t stepCount = (size_t)(playSeconds / step);
+        for (size_t i = 0; i < stepCount; ++i) {
+            m_playScripts->UpdateAll(step);
+            if (m_playPhysics) m_playPhysics->Step(*m_scene, step);
+        }
+        LOG_INFO("Editor") << "SESSION: played " << playSeconds << "s in " << stepCount
+                           << " steps (" << m_scene->Count() << " entities at the end)";
+        size_t duringPlay = m_scene->Count();
+        StopPlay();
+        // Stop обязан вернуть мир к состоянию до Play. Для игры, которая
+        // порождает мир скриптами (воксельный ландшафт — тысячи сущностей),
+        // это самая содержательная проверка снапшота из всех: если откат течёт,
+        // здесь он потечёт заметно.
+        LOG_INFO("Editor") << "SESSION: stop restored scene to " << m_scene->Count()
+                           << " entities (was " << duringPlay << " during play)";
+    }
+
+    // --- File > Build Game: проект превращается в запускаемую игру ---
+    if (ok) {
+        if (const char* out = std::getenv("SAGE_EDITOR_BUILD_TO")) {
+            std::string buildErr;
+            if (!BuildGame(out, buildErr)) {
+                LOG_ERROR("Editor") << "SESSION: build game failed: " << buildErr;
+                ok = false;
+            } else {
+                LOG_INFO("Editor") << "SESSION: built game into " << out;
+            }
+        }
+    }
+
+    if (ok) LOG_INFO("Editor") << "SESSION: PASS";
+    else LOG_ERROR("Editor") << "SESSION: FAIL";
+}

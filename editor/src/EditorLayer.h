@@ -23,7 +23,11 @@
 #include "sage/core/Config.h"
 #include "sage/ecs/RenderBatch.h"
 
+#include "sage/core/InputSystem.h"
+#include "sage/audio/AudioEngine.h"
+
 #include "EditorHost.h"
+#include "EditorPlayInput.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
 #include "RecentProjects.h"
@@ -162,6 +166,11 @@ private:
     // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +
     // Play + Build Game (собранный бинарник затем гоняет smoke-тест).
     void RunE2EGameTest();
+    // SAGE_EDITOR_OPEN_PROJECT=<путь>: headless-прогон ЧУЖОГО проекта теми же
+    // операциями редактора — открыть, загрузить сцену, отыграть N секунд в
+    // Play, при желании собрать exe. Так CI игры проверяет игру НАСТОЯЩИМ
+    // редактором, не заводя копию её сцен и скриптов внутри движка.
+    void RunHeadlessProjectSession();
 
     bool RestoreSceneFromString(const std::string& snapshot);
 
@@ -190,6 +199,15 @@ private:
     std::string m_playSnapshot;                    // сцена на момент Play — восстанавливается по Stop
     std::unique_ptr<ScriptEngine> m_playScripts;   // живёт только в Play-режиме
     std::unique_ptr<PhysicsScene> m_playPhysics;   // симуляция физики только в Play-режиме
+    // Ввод игры в Play: те же именованные действия и та же мышь, что в
+    // собранной игре, но отдаются игре только при фокусе панели Game
+    // (см. EditorPlayInput). Живут всё время работы редактора — действия
+    // объявляют скрипты при старте Play, карта пересоздаётся вместе с ними.
+    InputSystem m_playInput;
+    std::unique_ptr<EditorPlayInput> m_playRawInput;
+    // Звук Play-режима. Без него PlaySound из Lua падал бы в редакторе и
+    // работал в собранной игре — превью обязано звучать так же, как игра.
+    std::unique_ptr<AudioEngine> m_playAudio;
 
     // --- Undo/Redo ---
     std::vector<std::string> m_undoStack; // JSON-снапшоты «состояние до мутации»
