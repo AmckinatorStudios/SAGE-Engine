@@ -13,6 +13,7 @@
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
+#include "sage/ui/UIInteraction.h"
 #include "sage/ecs/RenderBatch.h"
 #include "sage/scene/Scene.h"
 #include "sage/physics/PhysicsScene.h"
@@ -53,6 +54,8 @@ public:
 
 private:
     std::filesystem::path FindMainScene() const;
+    void UpdateUiInput(float dt);
+    void ResetUiEdits();
 
     std::filesystem::path m_projectDir;
     std::string m_projectName = "SAGE Game";
@@ -77,6 +80,18 @@ private:
     // UI сцены (UIElementComponent из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.
     std::unique_ptr<UIRenderer> m_ui;
+    // Ввод для интерфейса сцены: символы и клавиши редактирования копятся
+    // колбэками окна между кадрами, мышь опрашивается в OnUpdate. Собирается
+    // ЗДЕСЬ, а не в системе UI: та обязана оставаться чистой функцией от
+    // состояния ввода, иначе её нельзя ни прогнать в тесте, ни отдать
+    // редактору с его пересчитанными в панель координатами.
+    sage::ui::UIInputState m_uiInput;
+    sage::ui::UIInputResult m_uiResult;
+    bool m_uiCallbacksBound = false;
+    bool m_uiMouseWasDown = false;
+    // Размер области, в которой нарисован интерфейс (letterbox-viewport). Мышь
+    // сравнивается именно с ним, иначе клики уезжают на ширину чёрных полос.
+    int m_uiWidth = 0, m_uiHeight = 0;
     sage::ecs::RenderBatch m_batch;            // отсечение по фрустуму + инстансинг статики
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
     bool m_warnedNoCamera = false; // предупреждение «нет Primary-камеры» — один раз

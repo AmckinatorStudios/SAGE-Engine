@@ -17,6 +17,16 @@ void Window::ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset) {
     if (win && win->m_scrollFn) win->m_scrollFn(xoffset, yoffset);
 }
 
+void Window::ForwardChar(GLFWwindow* handle, unsigned int codepoint) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (win && win->m_charFn) win->m_charFn(codepoint);
+}
+
+void Window::ForwardKey(GLFWwindow* handle, int key, int, int action, int mods) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (win && win->m_keyFn) win->m_keyFn(key, action, mods);
+}
+
 Window::Window(int width, int height, const std::string& title, Params params)
     : m_width(width), m_height(height) {
 
@@ -73,6 +83,8 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwSetFramebufferSizeCallback(m_handle, FramebufferSizeCallback);
     glfwSetCursorPosCallback(m_handle, &Window::ForwardCursorPos);
     glfwSetScrollCallback(m_handle, &Window::ForwardScroll);
+    glfwSetCharCallback(m_handle, &Window::ForwardChar);
+    glfwSetKeyCallback(m_handle, &Window::ForwardKey);
 
     // Загрузку драйвера (glad) и дефолтное состояние конвейера (depth test,
     // backface culling, бесшовные cubemap) выполняет rhi::GraphicsDevice::Init,

@@ -187,6 +187,11 @@ void PlayerLayer::OnUpdate(float dt) {
     // снимок (действия + смещение мыши), и он должен быть одним на весь кадр.
     m_input.Update(window.Handle());
 
+    // Интерфейс получает ввод РАНЬШЕ скриптов: щелчок по кнопке меню не должен
+    // одновременно стрелять, а буква, набранная в поле имени, — двигать
+    // персонажа. Результат (что съел интерфейс) уходит скриптам.
+    UpdateUiInput(dt);
+
     m_scripts->UpdateAll(dt);
     if (m_physics) m_physics->Step(*m_scene, dt);
     sage::anim::UpdateAnimators(*m_scene, dt);
@@ -208,6 +213,68 @@ void PlayerLayer::OnUpdate(float dt) {
     } else {
         m_escLatched = false;
     }
+}
+
+// Собирает состояние ввода для интерфейса и прогоняет его через UI сцены.
+//
+// Символы и клавиши редактирования приходят СОБЫТИЯМИ (колбэки окна), а не
+// опросом: символ зависит от раскладки и композиции, а у Backspace должен
+// работать автоповтор. Мышь, наоборот, опрашивается — её состояние
+// непрерывно.
+void PlayerLayer::UpdateUiInput(float dt) {
+    if (!m_scene) return;
+    sage::Application& app = sage::Application::Get();
+    Window& window = app.GetWindow();
+
+    if (!m_uiCallbacksBound) {
+        m_uiCallbacksBound = true;
+        window.SetCharCallback(
+            [this](unsigned int cp) { sage::ui::AppendUtf8(m_uiInput.TypedText, cp); });
+        window.SetKeyCallback([this](int key, int action, int) {
+            if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
+            switch (key) {
+                case GLFW_KEY_BACKSPACE: m_uiInput.Backspace = true; break;
+                case GLFW_KEY_DELETE:    m_uiInput.Delete = true; break;
+                case GLFW_KEY_LEFT:      m_uiInput.Left = true; break;
+                case GLFW_KEY_RIGHT:     m_uiInput.Right = true; break;
+                case GLFW_KEY_HOME:      m_uiInput.Home = true; break;
+                case GLFW_KEY_END:       m_uiInput.End = true; break;
+                case GLFW_KEY_ENTER:
+                case GLFW_KEY_KP_ENTER:  m_uiInput.Enter = true; break;
+                case GLFW_KEY_ESCAPE:    m_uiInput.Escape = true; break;
+                case GLFW_KEY_TAB:       m_uiInput.Tab = true; break;
+                default: break;
+            }
+        });
+    }
+
+    auto uiView = m_scene->Registry().view<UIElementComponent>();
+    if (uiView.begin() == uiView.end()) { ResetUiEdits(); return; }
+
+    double mx = 0.0, my = 0.0;
+    glfwGetCursorPos(window.Handle(), &mx, &my);
+    const bool down = glfwGetMouseButton(window.Handle(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    // Захваченный курсор — это режим обзора: экранной точки у мыши нет, и
+    // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
+    const bool captured = window.CursorCaptured();
+    m_uiInput.Mouse = captured ? glm::vec2(-1.0f) : glm::vec2((float)mx, (float)my);
+    m_uiInput.MousePressed = down && !m_uiMouseWasDown && !captured;
+    m_uiInput.MouseReleased = !down && m_uiMouseWasDown && !captured;
+    m_uiInput.MouseDown = down && !captured;
+    m_uiMouseWasDown = down;
+    m_uiInput.DeltaTime = dt;
+
+    m_uiResult = sage::ui::UpdateSceneUI(*m_scene, m_uiInput, m_uiWidth, m_uiHeight);
+    ResetUiEdits();
+}
+
+// Однокадровые события съедены — гасим, иначе следующий кадр повторит ввод.
+void PlayerLayer::ResetUiEdits() {
+    m_uiInput.TypedText.clear();
+    m_uiInput.Backspace = m_uiInput.Delete = false;
+    m_uiInput.Left = m_uiInput.Right = false;
+    m_uiInput.Home = m_uiInput.End = false;
+    m_uiInput.Enter = m_uiInput.Escape = m_uiInput.Tab = false;
 }
 
 void PlayerLayer::OnRender() {
@@ -335,6 +402,8 @@ void PlayerLayer::OnRender() {
     auto uiView = m_scene->Registry().view<UIElementComponent>();
     if (uiView.begin() != uiView.end()) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+        m_uiWidth = vpW;  // тот же прямоугольник, с которым сравнивается мышь
+        m_uiHeight = vpH;
         m_ui->Begin(vpW, vpH);
         sage::ui::DrawSceneUI(*m_scene, *m_ui, vpW, vpH);
         m_ui->End();

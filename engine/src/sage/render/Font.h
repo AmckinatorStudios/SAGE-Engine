@@ -41,7 +41,15 @@ public:
 
     // Загружает шрифт из .ttf/.otf. pixelHeight — базовый размер запекания
     // (крупнее = чётче при увеличении, но больше атлас). Бросает при ошибке.
-    static std::unique_ptr<Font> Load(const std::string& path, float pixelHeight = 48.0f);
+    // pixelArt — шрифт нарисован по пикселям (Minecraft, Sprout Lands и любой
+    // другой из набора). Тогда атлас берётся Nearest и БЕЗ мип-уровней, а
+    // масштаб на отрисовке округляется до целого: полупиксельное увеличение
+    // растягивает одни штрихи буквы на два экранных пикселя, а соседние на
+    // один, и ровный шрифт идёт волнами — ровно то, что видно как «артефакты».
+    static std::unique_ptr<Font> Load(const std::string& path, float pixelHeight = 48.0f,
+                                      bool pixelArt = false);
+
+    bool IsPixelArt() const { return m_pixelArt; }
 
     // Раскладывает UTF-8 строку в квады, начиная с (startX, startY) —
     // startY — координата ВЕРХА строки. scale домножает базовый размер.
@@ -63,12 +71,16 @@ public:
     // подставит «?»), а тому, кто ВЫБИРАЕТ шрифт: пиксельные наборы почти
     // никогда не несут кириллицы, и молча получить экран из вопросительных
     // знаков — худший из возможных ответов.
-    bool HasGlyph(uint32_t codepoint) const { return Find(codepoint) != nullptr; }
+    // ПРЯМОЙ поиск по таблице, не через Find: тот подставляет '?' для всего
+    // неизвестного и потому «находит» любой символ — на такой проверке
+    // отсутствие кириллицы не отличить от её наличия.
+    bool HasGlyph(uint32_t codepoint) const { return m_glyphs.count(codepoint) != 0; }
 
 private:
     const Glyph* Find(uint32_t codepoint) const;
 
     std::unordered_map<uint32_t, Glyph> m_glyphs;
+    bool m_pixelArt = false;
     std::unique_ptr<sage::rhi::Texture2D> m_atlas;
     float m_pixelHeight = 48.0f;
     float m_lineHeight = 0.0f; // ascent - descent + lineGap, в пикселях базового размера

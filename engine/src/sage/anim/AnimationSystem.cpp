@@ -59,6 +59,10 @@ void UpdateAnimators(Scene& scene, float dt) {
             if (am.BlendTime > 0.0f) am.Anim.CrossFade(want, am.BlendTime, am.Loop);
             else am.Anim.Play(want, am.Loop);
         }
+        // Переопределения позы: указатель, а не копия — Animator их не владеет,
+        // а вектор живёт в компоненте и переживает кадр. Пустой вектор снимает
+        // переопределение (иначе снять его было бы нечем).
+        am.Anim.SetPoseOverride(am.PoseOverrides.empty() ? nullptr : &am.PoseOverrides);
         am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
     }
 }

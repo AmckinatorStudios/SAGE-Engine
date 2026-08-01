@@ -1,5 +1,6 @@
 #pragma once
 #include "sage/ui/UIAnchor.h"
+#include "sage/ui/UIInteraction.h"
 #include <entt/entt.hpp>
 
 class Scene;
@@ -35,6 +36,15 @@ UIRect ResolveElementRect(const UIElementComponent& e, const UIRect& parent, glm
 
 // Рисует весь UI сцены. Вызывать между ui.Begin() и ui.End().
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH);
+
+// Один шаг интерактива: подсветка под курсором, нажатие, фокус, набор текста,
+// перетаскивание ползунков. Вызывать РАНЬШЕ игровой логики кадра — по
+// результату (UIInputResult) игра решает, доставать ли ей тот же щелчок.
+//
+// Отдельно от DrawSceneUI намеренно: рисовать интерфейс может и тот, кто не
+// даёт ему ввод (превью в редакторе, скриншот), а обрабатывать ввод надо ровно
+// один раз за кадр, даже если панелей с картинкой две.
+UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW, int screenH);
 
 // Верхний видимый элемент под экранной точкой (x, y): id сущности или -1.
 // Учитывает Layer/порядок отрисовки (возвращается тот, кто нарисован поверх)

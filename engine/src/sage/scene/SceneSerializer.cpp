@@ -366,6 +366,9 @@ static std::string UIKindToString(UIElementComponent::Kind k) {
         case UIElementComponent::Kind::Image: return "image";
         case UIElementComponent::Kind::Bar:   return "bar";
         case UIElementComponent::Kind::Icon:  return "icon";
+        case UIElementComponent::Kind::Input: return "input";
+        case UIElementComponent::Kind::Checkbox: return "checkbox";
+        case UIElementComponent::Kind::Slider: return "slider";
         default: return "panel";
     }
 }
@@ -375,6 +378,9 @@ static UIElementComponent::Kind UIKindFromString(const std::string& s) {
     if (s == "image") return UIElementComponent::Kind::Image;
     if (s == "bar")   return UIElementComponent::Kind::Bar;
     if (s == "icon")  return UIElementComponent::Kind::Icon;
+    if (s == "input") return UIElementComponent::Kind::Input;
+    if (s == "checkbox") return UIElementComponent::Kind::Checkbox;
+    if (s == "slider") return UIElementComponent::Kind::Slider;
     return UIElementComponent::Kind::Panel;
 }
 
@@ -406,6 +412,16 @@ static void SaveUIElement(json& j, const UIElementComponent& u) {
     uj["sliceBorder"] = Vec4ToJson(u.SliceBorder);
     uj["pixelScale"] = u.PixelScale;
     uj["pixelArt"] = u.PixelArt;
+    uj["spriteHover"] = Vec4ToJson(u.SpriteHover);
+    uj["spritePressed"] = Vec4ToJson(u.SpritePressed);
+    uj["interactive"] = u.Interactive;
+    uj["enabled"] = u.Enabled;
+    uj["placeholder"] = u.Placeholder;
+    uj["maxLength"] = u.MaxLength;
+    uj["password"] = u.Password;
+    uj["minValue"] = u.MinValue;
+    uj["maxValue"] = u.MaxValue;
+    uj["wrapText"] = u.WrapText;
     uj["padX"] = u.PadX;
     uj["autoWidth"] = u.AutoWidth;
 }
@@ -445,6 +461,17 @@ static UIElementComponent ParseUIElement(const json& uj) {
     if (uj.contains("sliceBorder")) u.SliceBorder = Vec4FromJson(uj["sliceBorder"], u.SliceBorder);
     u.PixelScale = uj.value("pixelScale", u.PixelScale);
     u.PixelArt = uj.value("pixelArt", u.PixelArt);
+    if (uj.contains("spriteHover")) u.SpriteHover = Vec4FromJson(uj["spriteHover"], u.SpriteHover);
+    if (uj.contains("spritePressed"))
+        u.SpritePressed = Vec4FromJson(uj["spritePressed"], u.SpritePressed);
+    u.Interactive = uj.value("interactive", u.Interactive);
+    u.Enabled = uj.value("enabled", u.Enabled);
+    u.Placeholder = uj.value("placeholder", u.Placeholder);
+    u.MaxLength = uj.value("maxLength", u.MaxLength);
+    u.Password = uj.value("password", u.Password);
+    u.MinValue = uj.value("minValue", u.MinValue);
+    u.MaxValue = uj.value("maxValue", u.MaxValue);
+    u.WrapText = uj.value("wrapText", u.WrapText);
     u.PadX = uj.value("padX", u.PadX);
     u.AutoWidth = uj.value("autoWidth", u.AutoWidth);
     // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).

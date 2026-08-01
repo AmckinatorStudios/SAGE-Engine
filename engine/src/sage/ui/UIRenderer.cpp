@@ -118,7 +118,7 @@ UIRenderer::UIRenderer()
     // это не ошибка.
     bool loaded = false;
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
-    if (!cfg.UiFont.empty()) loaded = SetFont(cfg.UiFont, cfg.UiFontPixelHeight);
+    if (!cfg.UiFont.empty()) loaded = SetFont(cfg.UiFont, cfg.UiFontPixelHeight, cfg.UiFontPixelArt);
     if (!loaded) {
         for (const char* path : kDefaultFontCandidates) {
             if (SetFont(path)) { loaded = true; break; }
@@ -129,9 +129,9 @@ UIRenderer::UIRenderer()
     }
 }
 
-bool UIRenderer::SetFont(const std::string& path, float pixelHeight) {
+bool UIRenderer::SetFont(const std::string& path, float pixelHeight, bool pixelArt) {
     try {
-        m_font = Font::Load(path, pixelHeight);
+        m_font = Font::Load(path, pixelHeight, pixelArt);
         // Предупреждение о кириллице — один раз при загрузке. Пиксельные шрифты
         // из готовых наборов почти всегда только латинские, а надписи в игре
         // русские: без этой строки разработчик видит экран вопросительных знаков
@@ -415,6 +415,20 @@ void UIRenderer::PopClipRect() {
     m_clipStack.pop_back();
 }
 
+// Множитель шрифта относительно базовой высоты запекания.
+//
+// У ПИКСЕЛЬНОГО шрифта он округляется до целого. Полупиксельное увеличение
+// растягивает одни штрихи буквы на два экранных пикселя, а соседние на один:
+// «M» выходит с ножками разной толщины, и весь текст едет волнами. Целый
+// масштаб — единственный способ сохранить рисунок таким, каким его нарисовали;
+// цена — шрифт меняет размер ступенями, и это правильная цена.
+float UIRenderer::FontScale(float scale) const {
+    if (!m_font) return scale;
+    const float raw = (scale * m_scaleToPixels) / m_font->PixelHeight();
+    if (!m_font->IsPixelArt()) return raw;
+    return glm::max(1.0f, glm::floor(raw + 0.001f));
+}
+
 void UIRenderer::Text(float x, float y, float scale, glm::vec3 color, const std::string& text,
                       float alpha) {
     if (text.empty()) return;
@@ -422,7 +436,7 @@ void UIRenderer::Text(float x, float y, float scale, glm::vec3 color, const std:
     if (m_font) {
         CurrentSegment(nullptr); // глифы идут в шрифтовый сегмент
         // Масштаб API → множитель шрифта относительно базовой высоты запекания.
-        float fontScale = (scale * m_scaleToPixels) / m_font->PixelHeight();
+        float fontScale = FontScale(scale);
         std::vector<Font::PositionedGlyph> quads;
         m_font->BuildQuads(text, x, y, fontScale, quads);
         size_t added = 0;
@@ -465,11 +479,15 @@ void UIRenderer::TextEasyFont(float x, float y, float scale, glm::vec3 color, co
     }
 }
 
+float UIRenderer::LineHeight(float scale) const {
+    if (m_font) return m_font->LineHeight(FontScale(scale));
+    return TextHeight(scale) * 1.6f; // без шрифта — векторный fallback
+}
+
 float UIRenderer::MeasureText(const std::string& text, float scale) const {
     if (text.empty()) return 0.0f;
     if (m_font) {
-        float fontScale = (scale * m_scaleToPixels) / m_font->PixelHeight();
-        return m_font->MeasureWidth(text, fontScale);
+        return m_font->MeasureWidth(text, FontScale(scale));
     }
     return stb_easy_font_width(const_cast<char*>(text.c_str())) * scale;
 }

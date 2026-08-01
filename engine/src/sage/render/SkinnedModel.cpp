@@ -546,6 +546,15 @@ namespace {
 
 bool GltfSkinImageLoader(tinygltf::Image* image, const int, std::string* err, std::string*,
                          int, int, const unsigned char* bytes, int size, void*) {
+    // Переворот выключаем ЯВНО. Флаг у stb глобальный, и его выставляет в true
+    // загрузчик обычных текстур (там v=0 внизу — соглашение GL). У glTF
+    // соглашение обратное: v=0 — ВЕРХНЯЯ строка картинки. Унаследовав чужой
+    // флаг, модель получает текстуру вверх ногами — и это не «картинка
+    // зеркальная», а совсем другие тексели: у палитровых моделей все цвета
+    // лежат в одном углу, и после переворота UV попадают в пустоту. Персонаж
+    // становится чёрным, причём ТОЛЬКО если до него успели загрузить любую
+    // другую текстуру — то есть плавающе, в зависимости от порядка загрузки.
+    stbi_set_flip_vertically_on_load(false);
     int w, h, comp;
     unsigned char* data = stbi_load_from_memory(bytes, size, &w, &h, &comp, 4);
     if (!data) { if (err) *err += "Не удалось декодировать изображение glTF\n"; return false; }
@@ -862,8 +871,14 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     std::vector<std::shared_ptr<Texture>> textures;
     textures.reserve(data.Images.size());
     for (const ModelImage& img : data.Images) {
-        textures.push_back(std::make_shared<Texture>(img.Pixels.data(), img.Width, img.Height,
-                                                     TextureFilter::Trilinear, true));
+        // Палитра — тот же атлас: мип-уровни усредняют её целиком, а у
+        // палитровой модели 90% текстуры пусто, и на дальних уровнях от цвета
+        // не остаётся ничего. Мелкие текстуры (палитры, пиксель-арт) берём
+        // ближайшим соседом и без мипов; крупные — как раньше.
+        const bool palette = img.Width <= 128 && img.Height <= 128;
+        textures.push_back(std::make_shared<Texture>(
+            img.Pixels.data(), img.Width, img.Height,
+            palette ? TextureFilter::Nearest : TextureFilter::Trilinear, !palette));
     }
 
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();

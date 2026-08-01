@@ -537,7 +537,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     if (reg.all_of<UIElementComponent>(obj.Entity()) && ImGui::CollapsingHeader("UI Element", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (UIElementComponent* u = reg.try_get<UIElementComponent>(obj.Entity())) {
-            const char* kinds[] = {"Panel", "Label", "Image", "Bar", "Icon"};
+            const char* kinds[] = {"Panel", "Label", "Image", "Bar", "Icon",
+                                   "Input", "Checkbox", "Slider"};
             int kind = (int)u->Type;
             if (ImGui::Combo("Kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
                 host.PushUndoSnapshot();
@@ -599,6 +600,31 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat("Text Scale", &u->TextScale, 0.05f, 0.5f, 12.0f); host.TrackLastImGuiItem();
             ImGui::ColorEdit4("Text Color", &u->TextColor.x); host.TrackLastImGuiItem();
             ImGui::Checkbox("Center Text", &u->TextCentered);
+            ImGui::SameLine();
+            ImGui::Checkbox("Wrap", &u->WrapText);
+
+            ImGui::SeparatorText("Interaction");
+            ImGui::Checkbox("Interactive", &u->Interactive);
+            ImGui::SameLine();
+            ImGui::Checkbox("Enabled", &u->Enabled);
+            if (u->Type == UIElementComponent::Kind::Input) {
+                char phBuf[256];
+                std::snprintf(phBuf, sizeof(phBuf), "%s", u->Placeholder.c_str());
+                if (ImGui::InputText("Placeholder", phBuf, sizeof(phBuf))) u->Placeholder = phBuf;
+                host.TrackLastImGuiItem();
+                ImGui::DragInt("Max Length", &u->MaxLength, 1, 0, 4096);
+                host.TrackLastImGuiItem();
+                ImGui::Checkbox("Password", &u->Password);
+            }
+            if (u->Type == UIElementComponent::Kind::Slider) {
+                ImGui::DragFloat("Min Value", &u->MinValue, 0.1f); host.TrackLastImGuiItem();
+                ImGui::DragFloat("Max Value", &u->MaxValue, 0.1f); host.TrackLastImGuiItem();
+            }
+            if (u->Type == UIElementComponent::Kind::Slider ||
+                u->Type == UIElementComponent::Kind::Checkbox) {
+                ImGui::SliderFloat("Value (0..1)", &u->Value, 0.0f, 1.0f);
+                host.TrackLastImGuiItem();
+            }
             if (u->Type == UIElementComponent::Kind::Image) {
                 ImGui::SeparatorText("Image");
                 char texBuf[512];
@@ -641,6 +667,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ImGui::DragFloat("Pixel Scale", &u->PixelScale, 0.25f, 0.0f, 16.0f);
                 host.TrackLastImGuiItem();
                 ImGui::TextDisabled("0 — stretch to fit; >0 — source pixel size");
+                // Спрайты состояний: в наборах кнопка нарисована трижды, и
+                // подменить картинку правильнее, чем осветлить основную.
+                ImGui::DragFloat4("Hover sprite", &u->SpriteHover.x, 1.0f, 0.0f, 8192.0f);
+                host.TrackLastImGuiItem();
+                ImGui::DragFloat4("Pressed sprite", &u->SpritePressed.x, 1.0f, 0.0f, 8192.0f);
+                host.TrackLastImGuiItem();
             }
             if (u->Type == UIElementComponent::Kind::Bar) {
                 ImGui::SeparatorText("Bar");

@@ -182,6 +182,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     auto ui = j.value("ui", json::object());
     UiFont = ui.value("font", UiFont);
     UiFontPixelHeight = ui.value("fontPixelHeight", UiFontPixelHeight);
+    UiFontPixelArt = ui.value("fontPixelArt", UiFontPixelArt);
 
     auto pp = j.value("postProcess", json::object());
     Exposure   = pp.value("exposure", Exposure);
@@ -232,6 +233,7 @@ bool EngineConfig::SaveFile(const std::string& path) const {
     };
     j["ui"] = {
         {"font", UiFont}, {"fontPixelHeight", UiFontPixelHeight},
+        {"fontPixelArt", UiFontPixelArt},
     };
     j["postProcess"] = {
         {"exposure", Exposure}, {"gamma", Gamma}, {"saturation", Saturation},

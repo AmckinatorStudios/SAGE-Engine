@@ -44,7 +44,7 @@ public:
 
     // Заменить шрифт своим (.ttf/.otf). true при успехе; при ошибке шрифт не
     // меняется (лог + возврат false). pixelHeight — базовый размер запекания.
-    bool SetFont(const std::string& path, float pixelHeight = 48.0f);
+    bool SetFont(const std::string& path, float pixelHeight = 48.0f, bool pixelArt = false);
     // Загружен ли настоящий TrueType-шрифт (иначе — stb_easy_font fallback).
     bool HasFont() const { return m_font != nullptr; }
 
@@ -155,8 +155,16 @@ public:
     // Ширина строки в экранных пикселях при данном масштабе (для вёрстки).
     // Учитывает текущий шрифт (пропорциональные метрики TrueType).
     float MeasureText(const std::string& text, float scale) const;
+    // Множитель шрифта относительно базовой высоты запекания (у пиксельного
+    // шрифта — целый). Открыт наружу, потому что по нему выравнивают вёрстку.
+    float FontScale(float scale) const;
     // Высота строки в пикселях при данном масштабе (для вертикальной вёрстки).
     float TextHeight(float scale) const { return 8.0f * scale; }
+    // Шаг между строками. Берётся у ШРИФТА, а не из TextHeight: та — номинальная
+    // высота строки тулкита (8·scale), к реальному кеглю отношения не имеющая.
+    // На пиксельном шрифте с целым масштабом глиф вдвое выше номинала, и абзац,
+    // разложенный по TextHeight, налезает сам на себя.
+    float LineHeight(float scale) const;
 
     void End();
 

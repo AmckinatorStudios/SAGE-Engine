@@ -64,7 +64,7 @@ constexpr int kGlyphPadding = 8;
 
 } // namespace
 
-std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
+std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, bool pixelArt) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         throw std::runtime_error("Font: не удалось открыть файл шрифта: " + path);
@@ -126,6 +126,14 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
     // Переносим packedchar → наши Glyph (метрики + UV).
     for (size_t r = 0; r < std::size(kRanges); ++r) {
         for (int k = 0; k < kRanges[r].count; ++k) {
+            const uint32_t cp = kRanges[r].first + (uint32_t)k;
+            // Символа НЕТ в шрифте — пропускаем совсем. Иначе stb запекает для
+            // него .notdef (в большинстве шрифтов это рамка или «?»), глиф
+            // выглядит настоящим, и отличить «шрифт не знает кириллицы» от
+            // «шрифт её знает» становится нечем: и тем и другим экран
+            // заполняется одинаковыми значками. Пропущенный символ уходит на
+            // общий фолбэк '?', а HasGlyph начинает говорить правду.
+            if (stbtt_FindGlyphIndex(&info, (int)cp) == 0) continue;
             const stbtt_packedchar& pcd = packed[r][k];
             if (pcd.x1 <= pcd.x0 || pcd.y1 <= pcd.y0) continue; // пустой глиф (напр. пробел без формы)
             Glyph g;
@@ -134,13 +142,14 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
             g.size = {(float)(pcd.x1 - pcd.x0), (float)(pcd.y1 - pcd.y0)};
             g.offset = {pcd.xoff, pcd.yoff};
             g.advance = pcd.xadvance;
-            font->m_glyphs[kRanges[r].first + (uint32_t)k] = g;
+            font->m_glyphs[cp] = g;
         }
         // Пробел и другие «безформенные» глифы — сохраняем только advance,
         // чтобы MeasureWidth/раскладка их учитывали.
         for (int k = 0; k < kRanges[r].count; ++k) {
             uint32_t cp = kRanges[r].first + (uint32_t)k;
             if (font->m_glyphs.count(cp)) continue;
+            if (stbtt_FindGlyphIndex(&info, (int)cp) == 0) continue;
             const stbtt_packedchar& pcd = packed[r][k];
             if (pcd.xadvance <= 0.0f) continue;
             Glyph g;
@@ -157,12 +166,16 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight) {
     desc.Width = kAtlasW;
     desc.Height = kAtlasH;
     desc.Channels = 1;
-    desc.FilterMode = sage::rhi::Filter::Trilinear;
+    // Пиксельному шрифту и то и другое во вред: сглаживание размазывает
+    // однопиксельные штрихи, мип-уровни съедают их совсем.
+    desc.FilterMode = pixelArt ? sage::rhi::Filter::Nearest : sage::rhi::Filter::Trilinear;
     desc.WrapMode = sage::rhi::Wrap::ClampEdge;
-    desc.GenerateMipmaps = true;
+    desc.GenerateMipmaps = !pixelArt;
     font->m_atlas = sage::rhi::GraphicsDevice::Get().CreateTexture2D(desc, atlas.data());
 
-    LOG_INFO("Font") << "Загружен шрифт " << path << " (" << (int)pixelHeight
+    font->m_pixelArt = pixelArt;
+    LOG_INFO("Font") << "Загружен шрифт " << path << (pixelArt ? " [пиксельный] (" : " (")
+                     << (int)pixelHeight
                      << "px, глифов " << font->m_glyphs.size() << ")";
     return font;
 }

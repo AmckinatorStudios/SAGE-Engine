@@ -252,3 +252,154 @@ TEST(Shadow_fade_band_from_distance) {
     CHECK_TRUE(b.FadeEnd >= 1.0f);
     CHECK_TRUE(b.FadeStart < b.FadeEnd);
 }
+
+// --- Интерактив: ввод текста, галка, ползунок, щелчок ----------------------
+// UpdateSceneUI — чистая функция от состояния ввода, поэтому проверяется без
+// окна и без GL. Ровно ради этого ввод и приходит структурой, а не опросом
+// устройств внутри системы UI.
+namespace {
+UIElementComponent MakeInteractive(UIElementComponent::Kind kind, glm::vec2 pos, glm::vec2 size) {
+    UIElementComponent e;
+    e.Type = kind;
+    e.Anchor = UIAnchor::TopLeft;
+    e.Offset = pos;
+    e.Size = size;
+    e.Interactive = true;
+    // Value по умолчанию 1 (это удобный дефолт для шкалы). Галке нужен явный
+    // ноль, иначе тест проверял бы не то, что думает.
+    if (kind == UIElementComponent::Kind::Checkbox) e.Value = 0.0f;
+    return e;
+}
+sage::ui::UIInputState ClickAt(glm::vec2 p) {
+    sage::ui::UIInputState in;
+    in.Mouse = p;
+    in.MouseDown = true;
+    in.MousePressed = true;
+    return in;
+}
+} // namespace
+
+TEST(UI_input_field_typing_and_editing) {
+    Scene scene("U");
+    GameObject field = scene.CreateObject("Name");
+    scene.Registry().emplace<UIElementComponent>(
+        field.Entity(), MakeInteractive(UIElementComponent::Kind::Input, {10, 10}, {200, 40}));
+    auto& e = scene.Registry().get<UIElementComponent>(field.Entity());
+
+    // Пока не кликнули — текст не принимается: поле без фокуса не должно
+    // воровать буквы у игры.
+    sage::ui::UIInputState typing;
+    typing.TypedText = "a";
+    sage::ui::UpdateSceneUI(scene, typing, 800, 600);
+    CHECK_EQ(e.Text, std::string(""));
+    CHECK_FALSE(e.Focused);
+
+    sage::ui::UpdateSceneUI(scene, ClickAt({50, 20}), 800, 600);
+    CHECK_TRUE(e.Focused);
+
+    // Кириллица: приходит символами UTF-8, курсор считается в байтах.
+    sage::ui::UIInputState in;
+    in.TypedText = "Пр";
+    sage::ui::UIInputState res = in;
+    sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, res, 800, 600);
+    CHECK_EQ(e.Text, std::string("Пр"));
+    CHECK_TRUE(r.WantsKeyboard);
+    CHECK_EQ(e.Caret, 4); // две кириллические буквы — четыре байта
+
+    // Backspace удаляет ЦЕЛЫЙ символ, а не байт: иначе в поле остаётся битый UTF-8.
+    sage::ui::UIInputState back;
+    back.Backspace = true;
+    sage::ui::UpdateSceneUI(scene, back, 800, 600);
+    CHECK_EQ(e.Text, std::string("П"));
+    CHECK_EQ(e.Caret, 2);
+
+    // Предел длины считается в символах, а не в байтах.
+    e.MaxLength = 2;
+    sage::ui::UIInputState more;
+    more.TypedText = "ивет";
+    sage::ui::UpdateSceneUI(scene, more, 800, 600);
+    CHECK_EQ(e.Text, std::string("П")); // не влезло целиком — не приняли вовсе
+
+    // Enter снимает фокус.
+    sage::ui::UIInputState enter;
+    enter.Enter = true;
+    sage::ui::UpdateSceneUI(scene, enter, 800, 600);
+    CHECK_FALSE(e.Focused);
+}
+
+TEST(UI_checkbox_and_click_need_press_and_release) {
+    Scene scene("U");
+    GameObject box = scene.CreateObject("Chk");
+    scene.Registry().emplace<UIElementComponent>(
+        box.Entity(), MakeInteractive(UIElementComponent::Kind::Checkbox, {10, 10}, {30, 30}));
+    auto& e = scene.Registry().get<UIElementComponent>(box.Entity());
+    CHECK_NEAR(e.Value, 0.0f, 1e-4);
+
+    // Одного нажатия мало — щелчок это нажать И отпустить НА элементе.
+    sage::ui::UpdateSceneUI(scene, ClickAt({20, 20}), 800, 600);
+    CHECK_TRUE(e.Pressed);
+    CHECK_NEAR(e.Value, 0.0f, 1e-4);
+
+    sage::ui::UIInputState up;
+    up.Mouse = {20, 20};
+    up.MouseReleased = true;
+    sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, up, 800, 600);
+    CHECK_TRUE(e.Clicked);
+    CHECK_NEAR(e.Value, 1.0f, 1e-4);
+    CHECK_EQ(r.ClickedId, box.Id());
+
+    // Флаг живёт ровно один кадр — иначе игра сработает на него дважды.
+    sage::ui::UIInputState idle;
+    idle.Mouse = {20, 20};
+    sage::ui::UpdateSceneUI(scene, idle, 800, 600);
+    CHECK_FALSE(e.Clicked);
+
+    // Увести курсор с кнопки и отпустить — общепринятый способ передумать.
+    sage::ui::UpdateSceneUI(scene, ClickAt({20, 20}), 800, 600);
+    sage::ui::UIInputState away;
+    away.Mouse = {400, 400};
+    away.MouseReleased = true;
+    sage::ui::UpdateSceneUI(scene, away, 800, 600);
+    CHECK_FALSE(e.Clicked);
+    CHECK_NEAR(e.Value, 1.0f, 1e-4); // значение не изменилось
+}
+
+TEST(UI_slider_drags_and_converts_to_game_units) {
+    Scene scene("U");
+    GameObject sld = scene.CreateObject("Vol");
+    UIElementComponent s = MakeInteractive(UIElementComponent::Kind::Slider, {100, 10}, {200, 30});
+    s.MinValue = 0.0f;
+    s.MaxValue = 100.0f;
+    scene.Registry().emplace<UIElementComponent>(sld.Entity(), s);
+    auto& e = scene.Registry().get<UIElementComponent>(sld.Entity());
+
+    // Нажали в середине дорожки.
+    sage::ui::UpdateSceneUI(scene, ClickAt({200, 25}), 800, 600);
+    CHECK_NEAR(e.Value, 0.5f, 1e-3);
+
+    // Тянем ЗА пределы элемента, не отпуская: значение обязано доходить до края,
+    // а не срываться от того, что курсор ушёл вбок.
+    sage::ui::UIInputState drag;
+    drag.Mouse = {1000, 400};
+    drag.MouseDown = true;
+    sage::ui::UpdateSceneUI(scene, drag, 800, 600);
+    CHECK_NEAR(e.Value, 1.0f, 1e-3);
+
+    drag.Mouse = {-50, 400};
+    sage::ui::UpdateSceneUI(scene, drag, 800, 600);
+    CHECK_NEAR(e.Value, 0.0f, 1e-3);
+}
+
+TEST(UI_disabled_element_ignores_mouse) {
+    Scene scene("U");
+    GameObject btn = scene.CreateObject("Quit");
+    UIElementComponent b = MakeInteractive(UIElementComponent::Kind::Panel, {10, 10}, {100, 40});
+    b.Enabled = false;
+    scene.Registry().emplace<UIElementComponent>(btn.Entity(), b);
+    auto& e = scene.Registry().get<UIElementComponent>(btn.Entity());
+
+    sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, ClickAt({50, 20}), 800, 600);
+    CHECK_FALSE(e.Hovered);
+    CHECK_FALSE(e.Pressed);
+    CHECK_FALSE(r.WantsMouse);
+}

@@ -48,8 +48,18 @@ public:
     // FramebufferSizeCallback кастовать чужой указатель к Window* (UB).
     using CursorPosFn = std::function<void(double x, double y)>;
     using ScrollFn = std::function<void(double xoffset, double yoffset)>;
+    // Ввод ТЕКСТА — отдельный поток событий, а не опрос клавиш. Клавиша и
+    // символ это разные вещи: раскладка, Shift, мёртвые клавиши и композиция
+    // (é, ё, иероглифы) превращают нажатия в символы по правилам системы, и
+    // повторять эти правила в движке нельзя. GLFW отдаёт уже готовый codepoint.
+    using CharFn = std::function<void(unsigned int codepoint)>;
+    // Клавиши РЕДАКТИРОВАНИЯ (Backspace, стрелки, Enter…): у них нет символа, а
+    // автоповтор при удержании должен работать — поэтому событием, а не опросом.
+    using KeyFn = std::function<void(int key, int action, int mods)>;
     void SetCursorPosCallback(CursorPosFn fn) { m_cursorPosFn = std::move(fn); }
     void SetScrollCallback(ScrollFn fn) { m_scrollFn = std::move(fn); }
+    void SetCharCallback(CharFn fn) { m_charFn = std::move(fn); }
+    void SetKeyCallback(KeyFn fn) { m_keyFn = std::move(fn); }
 
     // Захват курсора: мышь прячется и «прилипает» к окну, продолжая отдавать
     // смещение — режим обзора от первого лица. Без этого игра от первого лица
@@ -61,11 +71,15 @@ public:
 private:
     static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
+    static void ForwardChar(GLFWwindow* handle, unsigned int codepoint);
+    static void ForwardKey(GLFWwindow* handle, int key, int scancode, int action, int mods);
 
     GLFWwindow* m_handle = nullptr;
     int m_width;
     int m_height;
     CursorPosFn m_cursorPosFn;
     ScrollFn m_scrollFn;
+    CharFn m_charFn;
+    KeyFn m_keyFn;
     bool m_cursorCaptured = false;
 };

@@ -1,6 +1,7 @@
 #include "ScriptEngine.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/render/ParticlePresets.h"
@@ -251,6 +252,9 @@ void ScriptEngine::RegisterComponentTypes() {
     m_lua.new_enum<UIElementComponent::Kind>("UIKind", {
         {"Panel", UIElementComponent::Kind::Panel},
         {"Icon",  UIElementComponent::Kind::Icon},
+        {"Input", UIElementComponent::Kind::Input},
+        {"Checkbox", UIElementComponent::Kind::Checkbox},
+        {"Slider", UIElementComponent::Kind::Slider},
         {"Label", UIElementComponent::Kind::Label},
         {"Image", UIElementComponent::Kind::Image},
         {"Bar",   UIElementComponent::Kind::Bar},
@@ -278,6 +282,7 @@ void ScriptEngine::RegisterComponentTypes() {
         "TextScale", &UIElementComponent::TextScale,
         "TextColor", &UIElementComponent::TextColor,
         "TextCentered", &UIElementComponent::TextCentered,
+        "WrapText", &UIElementComponent::WrapText,
         "Value", &UIElementComponent::Value,
         "BarFillColor", &UIElementComponent::BarFillColor,
         "Icon", &UIElementComponent::Icon,
@@ -285,6 +290,20 @@ void ScriptEngine::RegisterComponentTypes() {
         "GradientColor", &UIElementComponent::GradientColor,
         "ShadowSize", &UIElementComponent::ShadowSize,
         "Sprite", &UIElementComponent::Sprite,
+        "SpriteHover", &UIElementComponent::SpriteHover,
+        "SpritePressed", &UIElementComponent::SpritePressed,
+        "Interactive", &UIElementComponent::Interactive,
+        "Enabled", &UIElementComponent::Enabled,
+        "Placeholder", &UIElementComponent::Placeholder,
+        "MaxLength", &UIElementComponent::MaxLength,
+        "Password", &UIElementComponent::Password,
+        "MinValue", &UIElementComponent::MinValue,
+        "MaxValue", &UIElementComponent::MaxValue,
+        "Hovered", sol::readonly(&UIElementComponent::Hovered),
+        "Pressed", sol::readonly(&UIElementComponent::Pressed),
+        "Focused", &UIElementComponent::Focused,
+        "Clicked", sol::readonly(&UIElementComponent::Clicked),
+        "Changed", sol::readonly(&UIElementComponent::Changed),
         "SliceBorder", &UIElementComponent::SliceBorder,
         "PixelScale", &UIElementComponent::PixelScale,
         "PixelArt", &UIElementComponent::PixelArt,
@@ -327,6 +346,24 @@ void ScriptEngine::RegisterComponentTypes() {
             ui->SliceBorder = glm::vec4(l, t, r, b);
             ui->PixelScale = scale.value_or(0.0f);
         }
+    });
+
+    // Значение ползунка/галки в ЕДИНИЦАХ ИГРЫ. Внутри Value всегда 0..1, а
+    // игре нужно 0..100 или -180..180: перевод обязан быть в одном месте,
+    // иначе он расползётся по вызывающим и где-то разойдётся.
+    m_lua.set_function("GetUIValue", [](GameObject& obj) -> float {
+        if (!obj.Valid()) return 0.0f;
+        const auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity());
+        if (!ui) return 0.0f;
+        return ui->MinValue + (ui->MaxValue - ui->MinValue) * ui->Value;
+    });
+    m_lua.set_function("SetUIValue", [](GameObject& obj, float value) {
+        if (!obj.Valid()) return;
+        auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity());
+        if (!ui) return;
+        const float span = ui->MaxValue - ui->MinValue;
+        ui->Value = std::abs(span) < 1e-6f ? 0.0f
+                                           : glm::clamp((value - ui->MinValue) / span, 0.0f, 1.0f);
     });
 
     // Размер картинки в пикселях — по нему скрипт нарезает лист на спрайты, не
@@ -410,6 +447,77 @@ void ScriptEngine::RegisterComponentTypes() {
     m_lua.set_function("TweenCancel", [this](uint64_t id) { m_tweens.Cancel(id); });
     m_lua.set_function("TweenCancelAll", [this]() { m_tweens.CancelAll(); });
     m_lua.set_function("ActiveTweens", [this]() { return m_tweens.ActiveCount(); });
+
+    // Анимированная модель на сущности: .glb/.gltf со скелетом. Без этого
+    // скрипт не мог поставить в сцену персонажа вовсе — компонент добавлялся
+    // только в редакторе, а игра, которая расставляет NPC сама, обычна.
+    m_lua.set_function("AddAnimatedModel", [](GameObject& obj, const std::string& path) {
+        if (!obj.Valid()) return;
+        auto& am = obj.Registry()->get_or_emplace<AnimatedModelComponent>(obj.Entity());
+        am.Path = path;
+        am.Ready = false; // загрузку и rig сделает UpdateAnimators на первом кадре
+    });
+
+    // --- Скелет напрямую: имена костей и поворот кости из скрипта ----------
+    //
+    // Наборы персонажей сплошь и рядом приходят ОСНАЩЁННЫМИ, но без единого
+    // клипа: анимации продаются отдельно. Без этих функций такой пакет —
+    // набор неподвижных статуй. Они же дают «голова смотрит на курсор» поверх
+    // обычной ходьбы: переопределения накладываются ПОСЛЕ клипа.
+    m_lua.set_function("JointNames", [this](GameObject obj) -> sol::table {
+        sol::table t = m_lua.create_table();
+        if (!obj.Valid()) return t;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return t;
+        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
+        for (int i = 0; i < sk.Count(); ++i) t[i + 1] = sk.Joints[(size_t)i].Name;
+        return t;
+    });
+    m_lua.set_function("JointIndex", [](GameObject obj, const std::string& name) -> int {
+        if (!obj.Valid()) return -1;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return -1;
+        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
+        for (int i = 0; i < sk.Count(); ++i)
+            if (sk.Joints[(size_t)i].Name == name) return i;
+        return -1;
+    });
+    // Поворот кости в ГРАДУСАХ. Индекс, а не имя: скрипт ищет индекс один раз, а
+    // крутит кость каждый кадр, и сравнивать строки шестьдесят раз в секунду на
+    // два десятка костей незачем.
+    //
+    // Поворот ДОБАВЛЯЕТСЯ к позе покоя, а не заменяет её. Заменять нельзя:
+    // у скелета кости уже развёрнуты как надо (руки вдоль тела, ступни по
+    // земле), и «повернуть плечо на 30°» абсолютным кватернионом стирает эту
+    // ориентацию — персонаж встаёт в раскоряку. Игре нужно именно «отклонить
+    // от того, как стоит», и это единственная операция, которая читается
+    // одинаково и на руке, и на голове, и на хвосте.
+    m_lua.set_function("SetJointRotation", [](GameObject obj, int joint, float rx, float ry,
+                                              float rz) {
+        if (!obj.Valid()) return;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return;
+        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
+        if (joint < 0 || joint >= sk.Count()) return;
+        if ((int)am->PoseOverrides.size() != sk.Count())
+            am->PoseOverrides.assign((size_t)sk.Count(), {});
+        sage::anim::JointPose& p = am->PoseOverrides[(size_t)joint];
+        p.HasRotation = true;
+        p.Rotation = sk.Joints[(size_t)joint].Rotation *
+                     glm::quat(glm::radians(glm::vec3(rx, ry, rz)));
+    });
+    m_lua.set_function("ClearJointPoses", [](GameObject obj) {
+        if (!obj.Valid()) return;
+        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+            am->PoseOverrides.clear();
+    });
+    // Сколько клипов в модели — по нему игра решает, играть готовую анимацию
+    // или двигать кости самой.
+    m_lua.set_function("AnimationCount", [](GameObject obj) -> int {
+        if (!obj.Valid()) return 0;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        return (am && am->Model) ? (int)am->Model->Clips().size() : 0;
+    });
 
     // Проиграть клип анимации на сущности с AnimatedModelComponent, плавно
     // перейдя за blend секунд (кросс-фейд; система анимации подхватит смену Clip).

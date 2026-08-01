@@ -78,6 +78,8 @@ struct EngineConfig {
     // шрифт, и высота запекания у него своя — сглаженный контур ей не идёт.
     std::string UiFont;
     float UiFontPixelHeight = 48.0f;
+    // Шрифт нарисован по пикселям: атлас без сглаживания и целый масштаб.
+    bool UiFontPixelArt = false;
 
     // --- Параметры пост-процесса (действуют при PostProcessing=true) ---
     float Exposure = 1.0f;
