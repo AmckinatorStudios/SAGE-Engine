@@ -7,6 +7,7 @@
 #include <entt/entt.hpp>
 
 #include "sage/render/Mesh.h"
+#include "sage/render/Shader.h"
 #include "sage/render/LodGroup.h"
 #include "sage/render/ShadowMap.h"
 
@@ -36,6 +37,7 @@ struct RenderStats {
     int CulledOccluded = 0; // отсечены как закрытые другой геометрией
     int Probes = 0;         // сколько коробок проверено запросами перекрытия
     int Batches = 0;    // инстанс-групп = draw call'ов геометрии
+    int Transparent = 0; // сколько объектов ушло в полупрозрачный проход
     // Треугольников отправлено на отрисовку и сколько было бы без уровней
     // детализации. Пара чисел, а не одно: экономия — это разница, и показывать
     // её надо рядом с тем, от чего считали.
@@ -45,6 +47,11 @@ struct RenderStats {
 
 class RenderBatch {
 public:
+    // Время сцены в секундах: уходит собственным шейдерам как uTime. Без него
+    // ни одна анимация в шейдере (вода, трава, мерцание) не заводится, а
+    // передавать его через параметры материала пришлось бы каждой игре заново.
+    void SetTime(float seconds) { m_time = seconds; }
+
     // Цветной проход: отсечение по камере + инстансная отрисовка с полным
     // освещением. shadingMode: 0 lit / 1 unlit / 2 normals. Возвращает статистику.
     RenderStats RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
@@ -138,7 +145,21 @@ private:
     // Одна видимая текстурная сущность (с albedo/normal-картами) — рисуется
     // индивидуально текстурным PBR-шейдером (нельзя инстансить с текстурами).
     // LmPage >= 0 — сущность лайтмапнута (страница атласа GI).
-    struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; int LmPage; };
+    struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; int LmPage;
+                          float Opacity = 1.0f; };
+
+    // Полупрозрачный кандидат. В отличие от непрозрачных, эти НЕЛЬЗЯ сложить в
+    // бакеты по мешу и нарисовать в любом порядке: результат смешивания зависит
+    // от того, что нарисовано раньше. Поэтому они собираются в отдельный список
+    // и сортируются по расстоянию до камеры — от дальних к ближним.
+    struct TransparentItem {
+        Mesh* Mesh_;
+        MeshInstance Inst;
+        const Material* Mat;   // nullptr — плоский цвет
+        int LmPage;
+        float Depth;           // квадрат расстояния до камеры (сортировка)
+        bool Textured;
+    };
 
     // Кандидат кадра: заполняется ПОСЛЕДОВАТЕЛЬНЫМ проходом по реестру (чтение
     // ECS не потокобезопасно на структурные правки), затем ПАРАЛЛЕЛЬНО
@@ -149,7 +170,10 @@ private:
         Mesh* Mesh_;
         glm::mat4 Model;
         const Material* Mat;
+        Shader* Custom = nullptr;    // собственный шейдер материала (nullptr — штатный)
+        bool HasParamOverride = false; // у сущности есть свои значения юниформ
         glm::vec3 Color;
+        float Opacity;  // < 1 — объект уходит в полупрозрачный проход
         int LmPage;     // страница лайтмапы (-1 — не запечена)
         bool Textured;
         bool Visible;
@@ -178,12 +202,51 @@ private:
         int LmPage = -1;
     };
 
+    // Группа объектов с СОБСТВЕННЫМ шейдером: ключ — пара «меш + программа»,
+    // потому что батчить можно только то, что рисуется одним и тем же шейдером
+    // из одного и того же буфера. Материал держим рядом, чтобы залить его
+    // параметры один раз на группу.
+    struct CustomKey {
+        Mesh* Mesh_ = nullptr;
+        Shader* Program = nullptr;
+        bool operator==(const CustomKey& o) const {
+            return Mesh_ == o.Mesh_ && Program == o.Program;
+        }
+    };
+    struct CustomKeyHash {
+        size_t operator()(const CustomKey& k) const {
+            return std::hash<const void*>()(k.Mesh_) ^ (std::hash<const void*>()(k.Program) << 1);
+        }
+    };
+    struct CustomGroup {
+        std::vector<MeshInstance> Instances;
+        const Material* Mat = nullptr;
+        int LmPage = -1;
+        // Сущности группы — нужны, чтобы наложить их персональные параметры.
+        // Если хоть у одной они есть, группа рисуется поштучно (иначе
+        // «персональный» параметр молча применился бы ко всей пачке).
+        std::vector<entt::entity> Entities;
+        // Квадрат расстояния до камеры на каждый инстанс: полупрозрачная группа
+        // сортируется ВНУТРИ СЕБЯ от дальних к ближним — иначе тысяча плиток
+        // воды смешивалась бы в произвольном порядке. Сортировка пачки дешевле,
+        // чем отказ от инстансинга ради правильного порядка.
+        std::vector<float> Depths;
+        bool AnyOverrides = false;
+        bool Transparent = false; // материал/инстансы не полностью непрозрачны
+    };
+
     // Сбор видимых сущностей: flat (без карт) — в m_groups по мешу (инстансинг),
     // текстурные (с картами) — в m_textured. cullMatrix — фрустум камеры/света.
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
     std::unordered_map<Mesh*, Group> m_groups; // flat-инстансы по мешу
     std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)
+    std::vector<TransparentItem> m_transparent;                    // полупрозрачные (по глубине)
+    std::unordered_map<CustomKey, CustomGroup, CustomKeyHash> m_custom; // свои шейдеры
+    glm::vec3 m_viewPos{0.0f}; // позиция камеры кадра — по ней сортируются прозрачные
+    float m_time = 0.0f;       // время сцены — юниформа uTime собственных шейдеров
+    std::vector<MeshInstance> m_transparentBatch; // буфер пачки прозрачных (переиспользуется)
+    std::vector<unsigned int> m_customOrder;      // перестановка инстансов при сортировке группы
     std::vector<CullItem> m_cull;                                  // кандидаты кадра (переиспользуется)
     // Мировые матрицы кадра (Scene::ComputeWorldMatrices) — один O(n)-проход
     // на сбор вместо рекурсивного WorldMatrix на каждую сущность (см. Scene.h).

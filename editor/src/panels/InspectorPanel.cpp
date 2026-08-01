@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "imgui.h"
 
@@ -13,6 +14,7 @@
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UIIcons.h"
 
 // Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
 // ResourceManager — все сущности с этим материалом обновляются в вьюпорте
@@ -64,6 +66,28 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     }
     ImGui::TextDisabled("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel.");
     ImGui::TextDisabled("Map value multiplies the factor above; Enter applies the path.");
+
+    ImGui::SeparatorText("Transparency");
+    ImGui::SliderFloat("Opacity", &material->Opacity, 0.0f, 1.0f);
+
+    // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
+    // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.
+    ImGui::SeparatorText("Custom Shader");
+    char vsBuf[512];
+    std::snprintf(vsBuf, sizeof(vsBuf), "%s", material->VertexShaderPath.c_str());
+    if (ImGui::InputText("Vertex", vsBuf, sizeof(vsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->VertexShaderPath = vsBuf;
+        material->ShaderPtr.reset();
+    }
+    char fsBuf[512];
+    std::snprintf(fsBuf, sizeof(fsBuf), "%s", material->FragmentShaderPath.c_str());
+    if (ImGui::InputText("Fragment", fsBuf, sizeof(fsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        material->FragmentShaderPath = fsBuf;
+        material->ShaderPtr.reset();
+    }
+    if (material->HasCustomShader() && !material->Params.empty()) {
+        ImGui::TextDisabled("Params: %d (edit in the .sagemat file)", (int)material->Params.size());
+    }
 
     ImGui::SeparatorText("Legacy");
     ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
@@ -132,6 +156,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
         ImGui::ColorEdit3("Color", &mr.Color.x); host.TrackLastImGuiItem();
+        // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
+        // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
+        ImGui::SliderFloat("Opacity", &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();
 
         // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
         const char* kinds[] = {"None", "Cube", "Sphere", "Plane", "Cylinder", "Cone", "Model"};
@@ -510,7 +537,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     if (reg.all_of<UIElementComponent>(obj.Entity()) && ImGui::CollapsingHeader("UI Element", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (UIElementComponent* u = reg.try_get<UIElementComponent>(obj.Entity())) {
-            const char* kinds[] = {"Panel", "Label", "Image", "Bar"};
+            const char* kinds[] = {"Panel", "Label", "Image", "Bar", "Icon"};
             int kind = (int)u->Type;
             if (ImGui::Combo("Kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
                 host.PushUndoSnapshot();
@@ -536,6 +563,33 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat("Border", &u->BorderThickness, 0.25f, 0.0f, 50.0f); host.TrackLastImGuiItem();
             if (u->BorderThickness > 0.0f) {
                 ImGui::ColorEdit4("Border Color", &u->BorderColor.x); host.TrackLastImGuiItem();
+            }
+            ImGui::ColorEdit4("Gradient (a=0 off)", &u->GradientColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Shadow", &u->ShadowSize, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Padding X", &u->PadX, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
+            ImGui::Checkbox("Auto Width", &u->AutoWidth);
+
+            // Иконка выбирается из списка движка, а не вводится строкой: имя с
+            // опечаткой рисует заглушку, и искать её потом дороже, чем показать
+            // здесь готовый перечень.
+            ImGui::SeparatorText("Icon");
+            const std::vector<std::string>& icons = sage::ui::IconNames();
+            std::string current = u->Icon.empty() ? "(none)" : u->Icon;
+            if (ImGui::BeginCombo("Icon", current.c_str())) {
+                if (ImGui::Selectable("(none)", u->Icon.empty())) {
+                    host.PushUndoSnapshot();
+                    u->Icon.clear();
+                }
+                for (const std::string& name : icons) {
+                    if (ImGui::Selectable(name.c_str(), name == u->Icon)) {
+                        host.PushUndoSnapshot();
+                        u->Icon = name;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (!u->Icon.empty()) {
+                ImGui::ColorEdit4("Icon Color", &u->IconColor.x); host.TrackLastImGuiItem();
             }
             ImGui::SeparatorText("Text");
             char textBuf[256];

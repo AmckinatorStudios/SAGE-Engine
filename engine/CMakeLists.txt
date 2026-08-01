@@ -68,6 +68,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/ui/UIRenderer.cpp
+    src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp
     src/sage/ui/UIShowcase.cpp
 )

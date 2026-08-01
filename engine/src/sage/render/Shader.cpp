@@ -1,4 +1,6 @@
 #include "Shader.h"
+#include "PbrShader.h"
+#include <cstring>
 #include "sage/core/Log.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include <fstream>
@@ -16,9 +18,36 @@ std::string Shader::ReadFile(const std::string& path) {
     return ss.str();
 }
 
+namespace {
+// Подстановка встроенных блоков движка в шейдер игры.
+//
+// Освещение движка живёт в C++-строке (render/PbrShader.h), и до сих пор
+// воспользоваться им мог только сам движок: игре, пишущей свой шейдер,
+// оставалось либо копировать сотню строк BRDF к себе, либо освещать объект
+// как умеет. Копия немедленно разошлась бы с оригиналом — а «свой шейдер»
+// нужен ради своей ГЕОМЕТРИИ и своего цвета, а не ради своего PBR.
+//
+// Директива намеренно не похожа на обычный #include с путём: подставляется не
+// файл, а ВСТРОЕННЫЙ блок движка, и версия его меняется вместе с движком.
+std::string ExpandEngineIncludes(std::string src) {
+    struct Block { const char* Directive; const char* Text; };
+    const Block kBlocks[] = {
+        {"#include <sage_pbr>", sage::render::kPbrSharedGlsl},
+    };
+    for (const Block& b : kBlocks) {
+        for (size_t pos = src.find(b.Directive); pos != std::string::npos;
+             pos = src.find(b.Directive, pos)) {
+            src.replace(pos, std::strlen(b.Directive), b.Text);
+            pos += std::strlen(b.Text);
+        }
+    }
+    return src;
+}
+} // namespace
+
 Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
-    std::string vSrc = ReadFile(vertexPath);
-    std::string fSrc = ReadFile(fragmentPath);
+    std::string vSrc = ExpandEngineIncludes(ReadFile(vertexPath));
+    std::string fSrc = ExpandEngineIncludes(ReadFile(fragmentPath));
 
     // Компиляция/линковка — забота бэкенда; при ошибке он бросает исключение
     // с логом компилятора (текст видно и в консоли, и в панели Console редактора).

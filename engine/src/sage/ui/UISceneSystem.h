@@ -25,8 +25,13 @@ struct UIElementComponent;
 namespace sage::ui {
 
 // Итоговый экранный прямоугольник элемента: якорь+отступ внутри parent.
-// Чистая математика (юнит-тестируется без GL).
+// Чистая математика (юнит-тестируется без GL). Размер берётся из LayoutSize,
+// если он посчитан (AutoWidth), иначе из Size.
 UIRect ResolveElementRect(const UIElementComponent& e, const UIRect& parent);
+
+// То же, но с явно заданным размером — вариант для отрисовки, где ширина
+// содержимого уже измерена шрифтом.
+UIRect ResolveElementRect(const UIElementComponent& e, const UIRect& parent, glm::vec2 size);
 
 // Рисует весь UI сцены. Вызывать между ui.Begin() и ui.End().
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH);

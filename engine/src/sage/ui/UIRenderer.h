@@ -75,6 +75,36 @@ public:
     void Image(float x, float y, float w, float h, const Texture* texture,
                glm::vec3 tint = glm::vec3(1.0f), float alpha = 1.0f, float radius = 0.0f);
 
+    // --- Формы (v3) --------------------------------------------------------
+    // Круг и кольцо — частный случай скруглённого прямоугольника с радиусом в
+    // половину стороны: тот же SDF, та же гладкость края, ноль нового кода в
+    // шейдере. Из них и из Quad ниже собирается вся векторная иконография
+    // (см. UIIcons.h) — без единого файла текстуры.
+    void Circle(float cx, float cy, float radius, glm::vec3 color, float alpha = 1.0f);
+    void Ring(float cx, float cy, float radius, float thickness, glm::vec3 color,
+              float alpha = 1.0f);
+
+    // Произвольный четырёхугольник по четырём точкам (по часовой стрелке).
+    // Нужен всему, что не выровнено по осям: наклонная мачта на иконке,
+    // стрелка, треугольник (схлопни две соседние точки), шеврон. Скругления
+    // здесь нет — форму задают сами вершины.
+    void Quad(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, glm::vec2 p3,
+              glm::vec3 color, float alpha = 1.0f);
+    void Triangle(glm::vec2 a, glm::vec2 b, glm::vec2 c, glm::vec3 color, float alpha = 1.0f);
+
+    // Вертикальный градиент: цвет и прозрачность интерполируются от верхней
+    // кромки к нижней. Плоская заливка — самый заметный признак «интерфейс
+    // рисовали наспех»; градиент стоит ровно тех же четырёх вершин.
+    void GradientRect(float x, float y, float w, float h, glm::vec3 top, glm::vec3 bottom,
+                      float alphaTop = 1.0f, float alphaBottom = 1.0f, float radius = 0.0f);
+
+    // Мягкая тень под прямоугольником: несколько расширяющихся скруглённых
+    // прямоугольников с падающей прозрачностью. Отделяет панель от того, что
+    // под ней, — без неё интерфейс «прилипает» к сцене и теряет читаемость на
+    // пёстром фоне.
+    void RectShadow(float x, float y, float w, float h, float radius,
+                    float size = 10.0f, float alpha = 0.35f);
+
     // --- Маски (ножницы): всё между Push и Pop обрезается прямоугольником.
     // Вложенные вызовы пересекаются с текущей маской. Пары обязаны сходиться
     // до End() (незакрытые маски закрываются с предупреждением в лог).
@@ -126,8 +156,15 @@ private:
         glm::vec4 Clip{0.0f}; // x, y, w, h (экранные координаты, верхний левый угол)
     };
 
+    // bottomColor/bottomAlpha — необязательный цвет НИЖНИХ вершин: так один
+    // скруглённый квад становится градиентным, не теряя SDF-скругления.
     void PushQuad(float x, float y, float w, float h, glm::vec3 color, float alpha,
-                  float radius, float border, bool solidUv);
+                  float radius, float border, bool solidUv,
+                  const glm::vec3* bottomColor = nullptr, const float* bottomAlpha = nullptr);
+    // Квад с ЧЕТЫРЬМЯ произвольными вершинами и своим цветом на каждую —
+    // общая основа и для градиента, и для наклонных форм. SDF выключен
+    // (Half = 0): у произвольного четырёхугольника нет «центра и полуразмера».
+    void PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]);
     void PushGlyphQuad(float x0, float y0, float x1, float y1,
                        glm::vec2 uv0, glm::vec2 uv1, glm::vec3 color, float alpha);
     void TextEasyFont(float x, float y, float scale, glm::vec3 color, const std::string& text);

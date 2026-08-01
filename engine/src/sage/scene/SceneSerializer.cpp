@@ -365,6 +365,7 @@ static std::string UIKindToString(UIElementComponent::Kind k) {
         case UIElementComponent::Kind::Label: return "label";
         case UIElementComponent::Kind::Image: return "image";
         case UIElementComponent::Kind::Bar:   return "bar";
+        case UIElementComponent::Kind::Icon:  return "icon";
         default: return "panel";
     }
 }
@@ -373,6 +374,7 @@ static UIElementComponent::Kind UIKindFromString(const std::string& s) {
     if (s == "label") return UIElementComponent::Kind::Label;
     if (s == "image") return UIElementComponent::Kind::Image;
     if (s == "bar")   return UIElementComponent::Kind::Bar;
+    if (s == "icon")  return UIElementComponent::Kind::Icon;
     return UIElementComponent::Kind::Panel;
 }
 
@@ -396,6 +398,12 @@ static void SaveUIElement(json& j, const UIElementComponent& u) {
     uj["texture"] = u.TexturePath;
     uj["value"] = u.Value;
     uj["barFillColor"] = Vec4ToJson(u.BarFillColor);
+    uj["icon"] = u.Icon;
+    uj["iconColor"] = Vec4ToJson(u.IconColor);
+    uj["gradientColor"] = Vec4ToJson(u.GradientColor);
+    uj["shadowSize"] = u.ShadowSize;
+    uj["padX"] = u.PadX;
+    uj["autoWidth"] = u.AutoWidth;
 }
 
 static UIElementComponent ParseUIElement(const json& uj) {
@@ -425,6 +433,12 @@ static UIElementComponent ParseUIElement(const json& uj) {
     u.TexturePath = uj.value("texture", u.TexturePath);
     u.Value = uj.value("value", u.Value);
     if (uj.contains("barFillColor")) u.BarFillColor = Vec4FromJson(uj["barFillColor"], u.BarFillColor);
+    u.Icon = uj.value("icon", u.Icon);
+    if (uj.contains("iconColor")) u.IconColor = Vec4FromJson(uj["iconColor"], u.IconColor);
+    if (uj.contains("gradientColor")) u.GradientColor = Vec4FromJson(uj["gradientColor"], u.GradientColor);
+    u.ShadowSize = uj.value("shadowSize", u.ShadowSize);
+    u.PadX = uj.value("padX", u.PadX);
+    u.AutoWidth = uj.value("autoWidth", u.AutoWidth);
     // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).
     if (!u.TexturePath.empty())
         u.Tex = ResourceManager::Instance().GetTexture(u.TexturePath);
@@ -589,6 +603,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["rotation"] = Vec3ToJson(tr.Rotation);
         j["scale"]    = Vec3ToJson(tr.Scale);
         j["color"]    = Vec3ToJson(mr.Color);
+        j["opacity"]  = mr.Opacity;
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
         j["mesh"]["path"] = mr.Ref.path;
         if (!mr.MaterialPath.empty()) j["material"] = mr.MaterialPath;
@@ -634,6 +649,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("rotation")) tr.Rotation = Vec3FromJson(j["rotation"]);
         if (j.contains("scale"))    tr.Scale    = Vec3FromJson(j["scale"]);
         if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
+        mr.Opacity = j.value("opacity", mr.Opacity);
 
         if (j.contains("mesh")) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));

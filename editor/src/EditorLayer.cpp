@@ -191,6 +191,11 @@ void EditorLayer::OnUpdate(float dt) {
         if (m_playScripts) m_playScripts->UpdateAll(dt);
         if (m_playPhysics) m_playPhysics->Step(*m_scene, dt);
     }
+    // Время сцены для uTime собственных шейдеров + горячая перезагрузка
+    // изменённых .vert/.frag: правка шейдера видна во вьюпорте сразу.
+    m_renderer.Tick(dt);
+    ResourceManager::Instance().ReloadChangedShaders();
+
     // Анимации проигрываются и в режиме правки — чтобы в вьюпорте было видно
     // движение скелетных моделей (превью), не только в Play.
     sage::anim::UpdateAnimators(*m_scene, dt);

@@ -192,6 +192,7 @@ void PlayerLayer::OnUpdate(float dt) {
     sage::anim::UpdateAnimators(*m_scene, dt);
     if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
     if (m_audio) m_audio->Update();
+    m_sceneTime += dt; // uTime собственных шейдеров материалов
 
     // ESC: сперва ОТПУСКАЕТ курсор, и только потом закрывает игру. В игре от
     // первого лица курсор захвачен — выйти из неё, не вернув курсор, значит
@@ -318,6 +319,7 @@ void PlayerLayer::OnRender() {
     color.Env = &env;
     color.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
     color.OcclusionCulling = cfg.OcclusionCulling;
+    color.Time = m_sceneTime;
     sage::render::RenderSceneColor(*m_scene, m_batch, color);
 
     // Частицы (billboard) — camRight/Up берём из матрицы вида.

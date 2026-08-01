@@ -85,6 +85,8 @@ private:
     // курсор и тут же закрыло игру», ждём отпускания клавиши (см. OnUpdate).
     bool m_escLatched = false;
 
+    float m_sceneTime = 0.0f; // секунды с начала игры — uTime шейдеров
+
     std::string m_screenshotPath = "player.png";
     int m_autoScreenshotFrame = -1;
     int m_frameCounter = 0;

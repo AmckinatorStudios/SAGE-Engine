@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "ResourceManager.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
@@ -225,8 +226,67 @@ std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) 
         LOG_ERROR("Resources") << "Материал не загрузился, использую дефолт: " << e.what();
     }
     ResolveMaterialTextures(*material);
+    if (material->HasCustomShader())
+        material->ShaderPtr = GetShader(material->VertexShaderPath, material->FragmentShaderPath);
     m_materials[path] = material;
     return material;
+}
+
+namespace {
+// Время последней правки файла в виде числа; 0 — файла нет/недоступен.
+long long FileStamp(const std::string& path) {
+    std::error_code ec;
+    auto t = std::filesystem::last_write_time(path, ec);
+    if (ec) return 0;
+    return (long long)t.time_since_epoch().count();
+}
+} // namespace
+
+std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath,
+                                                   const std::string& fragmentPath) {
+    if (vertexPath.empty() || fragmentPath.empty()) return nullptr;
+    const std::string key = vertexPath + "|" + fragmentPath;
+    auto it = m_shaders.find(key);
+    if (it != m_shaders.end()) return it->second.Program;
+
+    ShaderEntry entry;
+    entry.VertPath = vertexPath;
+    entry.FragPath = fragmentPath;
+    entry.VertStamp = FileStamp(vertexPath);
+    entry.FragStamp = FileStamp(fragmentPath);
+    try {
+        entry.Program = std::make_shared<Shader>(vertexPath, fragmentPath);
+        LOG_INFO("Resources") << "Шейдер собран: " << vertexPath << " + " << fragmentPath;
+    } catch (const std::exception& e) {
+        // nullptr тоже кэшируем — см. комментарий в заголовке.
+        LOG_ERROR("Resources") << "Шейдер не собрался (" << key << "): " << e.what();
+    }
+    m_shaders[key] = entry;
+    return m_shaders[key].Program;
+}
+
+int ResourceManager::ReloadChangedShaders() {
+    int reloaded = 0;
+    for (auto& [key, entry] : m_shaders) {
+        long long v = FileStamp(entry.VertPath);
+        long long f = FileStamp(entry.FragPath);
+        if (v == entry.VertStamp && f == entry.FragStamp) continue;
+        entry.VertStamp = v;
+        entry.FragStamp = f;
+        try {
+            // Собираем во ВРЕМЕННЫЙ объект и подменяем содержимое только при
+            // успехе: опечатка в шейдере не должна стирать рабочую программу и
+            // оставлять сцену без материала посреди правки.
+            Shader fresh(entry.VertPath, entry.FragPath);
+            if (entry.Program) *entry.Program = std::move(fresh);
+            else entry.Program = std::make_shared<Shader>(std::move(fresh));
+            ++reloaded;
+            LOG_INFO("Resources") << "Шейдер перечитан: " << key;
+        } catch (const std::exception& e) {
+            LOG_WARN("Resources") << "Правка шейдера не собралась, оставляю прежний: " << e.what();
+        }
+    }
+    return reloaded;
 }
 
 std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& path) {
@@ -238,6 +298,8 @@ std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& pat
         LOG_ERROR("Resources") << "Перезагрузка материала не удалась: " << e.what();
     }
     ResolveMaterialTextures(*it->second);
+    if (it->second->HasCustomShader())
+        it->second->ShaderPtr = GetShader(it->second->VertexShaderPath, it->second->FragmentShaderPath);
     return it->second;
 }
 
@@ -467,8 +529,18 @@ void ResourceManager::Clear() {
     m_cylinder.reset();
     m_cone.reset();
     m_models.clear();
+    // Материал держит свою программу через ShaderPtr, а копии shared_ptr на сам
+    // материал живут в сущностях сцены — она переживает Clear(). Снимаем ссылку
+    // у САМОГО материала: тогда программа умрёт здесь, при живом контексте, а
+    // не после main вместе со сценой.
+    for (auto& kv : m_materials)
+        if (kv.second) kv.second->ShaderPtr.reset();
     m_materials.clear();
     m_skyboxes.clear(); // GPU-ресурс: чистится, пока GL-контекст ещё жив
+    // Программы своих шейдеров — тоже GPU-ресурс, и удалить их можно ТОЛЬКО
+    // здесь: кэш живёт в синглтоне, а синглтон умирает после main, когда
+    // контекста уже нет и glDeleteProgram падает.
+    m_shaders.clear();
     m_textures.clear();
     m_textureBytes = 0;
     // m_evictions/m_tick намеренно НЕ сбрасываем — это счётчики за жизнь процесса.

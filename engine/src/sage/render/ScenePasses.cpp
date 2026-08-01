@@ -35,6 +35,7 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
 
     if (input.Wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
+    batch.SetTime(input.Time);
     const sage::ecs::RenderStats stats =
         batch.RenderColor(scene, input.View, input.Proj, input.ViewPos, *input.Env, input.Shadows,
                           input.ShadingMode);

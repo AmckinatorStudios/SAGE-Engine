@@ -6,6 +6,7 @@
 #include "sage/ui/UIAnchor.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIShowcase.h"
+#include "sage/ui/UIIcons.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -47,6 +48,26 @@ TEST(UI_element_rect_nested_in_parent) {
     CHECK_NEAR(r.h, 20.0f, 1e-4);
 }
 
+TEST(UI_layout_size_overrides_declared_size) {
+    // AutoWidth-элемент верстается по ИЗМЕРЕННОЙ ширине (её кладёт отрисовка в
+    // LayoutSize), иначе якорь считался бы от запасного Size и «таблетка»
+    // прыгала бы на кадр раньше, чем в неё поместился текст.
+    UIElementComponent e;
+    e.Anchor = UIAnchor::TopRight;
+    e.Offset = {10, 10};
+    e.Size = {200, 30};
+    e.AutoWidth = true;
+    UIRect screen{0, 0, 800, 600};
+
+    UIRect before = sage::ui::ResolveElementRect(e, screen);
+    CHECK_NEAR(before.w, 200.0f, 1e-4); // ещё не рисовался — запасной размер
+
+    e.LayoutSize = {124.0f, 30.0f};
+    UIRect after = sage::ui::ResolveElementRect(e, screen);
+    CHECK_NEAR(after.w, 124.0f, 1e-4);
+    CHECK_NEAR(after.x, 800.0f - 124.0f - 10.0f, 1e-4);
+}
+
 TEST(UI_component_serialization_roundtrip) {
     Scene scene("U");
     GameObject panel = scene.CreateObject("Hud");
@@ -66,6 +87,8 @@ TEST(UI_component_serialization_roundtrip) {
     u.TextCentered = false;
     u.Value = 0.42f;
     u.BarFillColor = {0.8f, 0.2f, 0.2f, 1.0f};
+    u.PadX = 11.5f;
+    u.AutoWidth = true;
     scene.Registry().emplace<UIElementComponent>(panel.Entity(), u);
 
     std::string json = SceneSerializer::SaveToString(scene);
@@ -89,6 +112,8 @@ TEST(UI_component_serialization_roundtrip) {
         CHECK_FALSE(r->TextCentered);
         CHECK_NEAR(r->Value, 0.42f, 1e-4);
         CHECK_NEAR(r->BarFillColor.r, 0.8f, 1e-4);
+        CHECK_NEAR(r->PadX, 11.5f, 1e-4);
+        CHECK_TRUE(r->AutoWidth);
     }
 }
 
@@ -174,4 +199,26 @@ TEST(UI_showcase_hittest_respects_clip_mask) {
 
     // Точка далеко от обеих панелей (низ-центр экрана) — мимо всего.
     CHECK_EQ(sage::ui::HitTest(scene, W / 2, H - 40, W, H), -1);
+}
+
+// ===========================================================================
+//  Иконки интерфейса
+//
+//  Иконки рисуются кодом, а не грузятся картинками (см. ui/UIIcons.h), поэтому
+//  «есть ли иконка» — вопрос к реестру, а не к файловой системе, и его можно
+//  задавать без GL-контекста.
+// ===========================================================================
+TEST(UI_icon_registry_knows_its_names) {
+    const auto& names = sage::ui::IconNames();
+    CHECK_TRUE(names.size() >= 20); // набор для игрового HUD, а не три штуки
+
+    // Имена отсортированы — редактор показывает их списком, и порядок не должен
+    // прыгать от запуска к запуску.
+    for (size_t i = 1; i < names.size(); ++i) CHECK_TRUE(names[i - 1] < names[i]);
+
+    // Опорные иконки, на которые опирается интерфейс игр.
+    for (const char* n : {"heart", "drop", "flame", "plank", "fish", "lantern"}) {
+        CHECK_TRUE(sage::ui::HasIcon(n));
+    }
+    CHECK_FALSE(sage::ui::HasIcon("нет-такой-иконки"));
 }

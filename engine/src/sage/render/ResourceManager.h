@@ -4,6 +4,7 @@
 #include "Skybox.h"
 #include "ModelLoader.h"
 #include "Texture.h"
+#include "Shader.h"
 #include "sage/core/Log.h"
 #include "sage/scene/Transform.h" // подключаем заранее не обязательно, но пусть будет явный порядок
 #include "sage/scene/Components.h" // MeshRef::Type для GetPrimitive
@@ -97,6 +98,21 @@ public:
     std::shared_ptr<Texture> GetTextureAsync(const std::string& path);
 
     std::shared_ptr<Material> GetMaterial(const std::string& path);
+
+    // Шейдерная программа из пары файлов, кэшируется по этой паре. Возвращает
+    // nullptr, если шейдер не собрался (ошибка уже в логе) — вызывающий рисует
+    // объект штатным шейдером, а не падает и не оставляет дыру в кадре.
+    // Неудачная компиляция тоже кэшируется: иначе битый шейдер пытался бы
+    // собраться каждый кадр, заваливая лог и съедая время.
+    std::shared_ptr<Shader> GetShader(const std::string& vertexPath,
+                                      const std::string& fragmentPath);
+
+    // Перечитать шейдеры, файлы которых изменились с момента загрузки.
+    // Дёшево (stat на файл) и зовётся редактором раз в кадр: правка .frag
+    // видна в сцене сразу, без перезапуска — иначе авторство шейдера
+    // превращается в цикл «правка -> сборка -> перезапуск -> посмотреть».
+    // Возвращает число перезагруженных программ.
+    int ReloadChangedShaders();
 
     // Небо из каталога с гранями px/nx/py/ny/pz/nz. Кэшируется по пути: сцена
     // спрашивает его КАЖДЫЙ кадр, а сборка cubemap — это шесть декодирований
@@ -208,6 +224,15 @@ private:
     std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
+
+    // Кэш шейдерных программ. Ключ — "vert|frag"; вместе с программой держим
+    // пути и время правки файлов, чтобы ReloadChangedShaders понял, что менять.
+    struct ShaderEntry {
+        std::shared_ptr<Shader> Program; // nullptr — не собрался
+        std::string VertPath, FragPath;
+        long long VertStamp = 0, FragStamp = 0;
+    };
+    std::unordered_map<std::string, ShaderEntry> m_shaders;
     std::unordered_map<std::string, std::shared_ptr<Skybox>> m_skyboxes;
 
     // Запись кэша текстуры: сам ресурс + учёт для бюджета/LRU + флаг «ещё

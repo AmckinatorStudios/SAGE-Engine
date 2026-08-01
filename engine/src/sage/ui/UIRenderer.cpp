@@ -156,11 +156,15 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
 }
 
 void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, float alpha,
-                          float radius, float border, bool solidUv) {
-    unsigned char r = static_cast<unsigned char>(glm::clamp(color.r, 0.0f, 1.0f) * 255.0f);
-    unsigned char g = static_cast<unsigned char>(glm::clamp(color.g, 0.0f, 1.0f) * 255.0f);
-    unsigned char b = static_cast<unsigned char>(glm::clamp(color.b, 0.0f, 1.0f) * 255.0f);
-    unsigned char a = static_cast<unsigned char>(glm::clamp(alpha, 0.0f, 1.0f) * 255.0f);
+                          float radius, float border, bool solidUv,
+                          const glm::vec3* bottomColor, const float* bottomAlpha) {
+    auto byte = [](float v) {
+        return static_cast<unsigned char>(glm::clamp(v, 0.0f, 1.0f) * 255.0f);
+    };
+    unsigned char r = byte(color.r), g = byte(color.g), b = byte(color.b), a = byte(alpha);
+    const glm::vec3& bc = bottomColor ? *bottomColor : color;
+    unsigned char r2 = byte(bc.r), g2 = byte(bc.g), b2 = byte(bc.b);
+    unsigned char a2 = byte(bottomAlpha ? *bottomAlpha : alpha);
 
     float hw = w * 0.5f, hh = h * 0.5f;
     // Радиус не может превышать половину меньшей стороны (иначе SDF ломает форму).
@@ -169,10 +173,10 @@ void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, f
     float u0 = solidUv ? -1.0f : 0.0f, v0 = solidUv ? -1.0f : 0.0f;
     float u1 = solidUv ? -1.0f : 1.0f, v1 = solidUv ? -1.0f : 1.0f;
 
-    m_vertices.push_back({x,     y,     0.0f, r, g, b, a, u0, v0, -hw, -hh, hw, hh, rad, border});
-    m_vertices.push_back({x + w, y,     0.0f, r, g, b, a, u1, v0,  hw, -hh, hw, hh, rad, border});
-    m_vertices.push_back({x + w, y + h, 0.0f, r, g, b, a, u1, v1,  hw,  hh, hw, hh, rad, border});
-    m_vertices.push_back({x,     y + h, 0.0f, r, g, b, a, u0, v1, -hw,  hh, hw, hh, rad, border});
+    m_vertices.push_back({x,     y,     0.0f, r,  g,  b,  a,  u0, v0, -hw, -hh, hw, hh, rad, border});
+    m_vertices.push_back({x + w, y,     0.0f, r,  g,  b,  a,  u1, v0,  hw, -hh, hw, hh, rad, border});
+    m_vertices.push_back({x + w, y + h, 0.0f, r2, g2, b2, a2, u1, v1,  hw,  hh, hw, hh, rad, border});
+    m_vertices.push_back({x,     y + h, 0.0f, r2, g2, b2, a2, u0, v1, -hw,  hh, hw, hh, rad, border});
     ++m_quadCount;
 }
 
@@ -219,6 +223,72 @@ void UIRenderer::Image(float x, float y, float w, float h, const Texture* textur
     if (!texture) return;
     CurrentSegment(texture).QuadCount++;
     PushQuad(x, y, w, h, tint, alpha, radius, 0.0f, /*solidUv=*/false);
+}
+
+void UIRenderer::PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]) {
+    for (int i = 0; i < 4; ++i) {
+        unsigned char r = static_cast<unsigned char>(glm::clamp(c[i].r, 0.0f, 1.0f) * 255.0f);
+        unsigned char g = static_cast<unsigned char>(glm::clamp(c[i].g, 0.0f, 1.0f) * 255.0f);
+        unsigned char b = static_cast<unsigned char>(glm::clamp(c[i].b, 0.0f, 1.0f) * 255.0f);
+        unsigned char al = static_cast<unsigned char>(glm::clamp(a[i], 0.0f, 1.0f) * 255.0f);
+        // UV = (-1,-1) — сплошная заливка; Half = 0 — SDF не участвует.
+        m_vertices.push_back({p[i].x, p[i].y, 0.0f, r, g, b, al, -1.0f, -1.0f, 0, 0, 0, 0, 0, 0});
+    }
+    ++m_quadCount;
+}
+
+void UIRenderer::Circle(float cx, float cy, float radius, glm::vec3 color, float alpha) {
+    RoundedRect(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, color, alpha, radius);
+}
+
+void UIRenderer::Ring(float cx, float cy, float radius, float thickness, glm::vec3 color,
+                      float alpha) {
+    RoundedRectOutline(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, radius,
+                       thickness, color, alpha);
+}
+
+void UIRenderer::Quad(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, glm::vec2 p3,
+                      glm::vec3 color, float alpha) {
+    CurrentSegment(nullptr).QuadCount++;
+    const glm::vec2 pts[4] = {p0, p1, p2, p3};
+    const glm::vec3 cols[4] = {color, color, color, color};
+    const float alphas[4] = {alpha, alpha, alpha, alpha};
+    PushFreeQuad(pts, cols, alphas);
+}
+
+void UIRenderer::Triangle(glm::vec2 a, glm::vec2 b, glm::vec2 c, glm::vec3 color, float alpha) {
+    // Треугольник — квад со схлопнутой четвёртой вершиной: отдельный путь
+    // отрисовки ради него заводить незачем, вырожденная сторона не рисуется.
+    Quad(a, b, c, c, color, alpha);
+}
+
+void UIRenderer::GradientRect(float x, float y, float w, float h, glm::vec3 top, glm::vec3 bottom,
+                              float alphaTop, float alphaBottom, float radius) {
+    // ОДИН квад: цвет и так лежит в вершинах, а скругление считает SDF по
+    // локальным координатам — ему всё равно, одноцветный квад или нет.
+    // Собирать градиент полосами (как было) нельзя: полосы приходится класть
+    // внахлёст, чтобы не осталось щелей, а полупрозрачный нахлёст смешивается
+    // дважды — по панели идут тёмные линии на каждой границе полос.
+    CurrentSegment(nullptr).QuadCount++;
+    PushQuad(x, y, w, h, top, alphaTop, radius, 0.0f, /*solidUv=*/true, &bottom, &alphaBottom);
+}
+
+void UIRenderer::RectShadow(float x, float y, float w, float h, float radius,
+                            float size, float alpha) {
+    if (size <= 0.0f || alpha <= 0.0f) return;
+    // Расширяющиеся контуры с падающей прозрачностью. Настоящее размытие
+    // потребовало бы отдельного прохода и буфера — здесь оно не окупается:
+    // тень под панелью интерфейса видна боковым зрением, и разницы между
+    // ступенчатым спадом и гауссом на ней никто не замечает. Ступеней восемь,
+    // а спад квадратичный: с четырьмя линейными по краю тени видны кольца.
+    const int kSteps = 8;
+    for (int i = kSteps; i >= 1; --i) {
+        float t = (float)i / kSteps;
+        float grow = size * t;
+        float a = alpha * (1.0f - t) * (1.0f - t) * 0.9f;
+        RoundedRect(x - grow, y - grow + size * 0.35f, w + grow * 2.0f, h + grow * 2.0f,
+                    glm::vec3(0.0f), a, radius + grow);
+    }
 }
 
 void UIRenderer::PushClipRect(float x, float y, float w, float h) {

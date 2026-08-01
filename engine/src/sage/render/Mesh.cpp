@@ -93,7 +93,8 @@ Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int
         {11, 2, AttribType::Float, (int)offsetof(Vertex, TexCoords2)},
     };
     // Per-instance поток (батчинг): модельная матрица (loc 4..7 — 4 строки) +
-    // цвет (loc 8) + metallic (loc 9) + roughness (loc 10). Divisor 1.
+    // цвет (loc 8) + metallic (loc 9) + roughness (loc 10) + alpha (loc 12).
+    // Divisor 1. (loc 11 занят вторым UV-каналом вершины — лайтмапой.)
     // Не-инстансная отрисовка эти локации не читает.
     layout.InstanceStride = sizeof(MeshInstance);
     layout.InstanceAttributes = {
@@ -104,6 +105,7 @@ Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int
         {8, 3, AttribType::Float, (int)offsetof(MeshInstance, Color)},
         {9, 1, AttribType::Float, (int)offsetof(MeshInstance, Metallic)},
         {10, 1, AttribType::Float, (int)offsetof(MeshInstance, Roughness)},
+        {12, 1, AttribType::Float, (int)offsetof(MeshInstance, Alpha)},
     };
 
     m_geometry = GraphicsDevice::Get().CreateGeometry(layout);

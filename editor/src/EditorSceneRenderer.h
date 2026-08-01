@@ -31,6 +31,11 @@
 // ---------------------------------------------------------------------------
 class EditorSceneRenderer {
 public:
+    // Время сцены для собственных шейдеров материалов (uTime). Идёт и в режиме
+    // правки, а не только в Play: анимированный материал должен шевелиться во
+    // вьюпорте — иначе его не настроить, не запуская игру.
+    void Tick(float dt) { m_sceneTime += dt; }
+
     void Init();
 
     void SetViewportSize(int w, int h) { m_vpW = w; m_vpH = h; }
@@ -63,6 +68,9 @@ public:
                                               const LightingEnvironment& env);
 
 private:
+    float m_sceneTime = 0.0f;
+
+
     // Небо кадра (кубическая текстура или процедурный градиент).
     void DrawSky(const LightingEnvironment& env, const glm::mat4& view, const glm::mat4& proj);
     void DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,

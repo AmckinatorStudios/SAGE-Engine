@@ -5,6 +5,7 @@
 #include "sage/ui/UIShowcase.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UIIcons.h"
 #include "sage/core/KeyNames.h"
 #include <algorithm>
 #include <cctype>
@@ -237,6 +238,7 @@ void ScriptEngine::RegisterComponentTypes() {
     );
     m_lua.new_usertype<MeshRendererComponent>("MeshRendererComponent",
         "Color", &MeshRendererComponent::Color,
+        "Opacity", &MeshRendererComponent::Opacity,
         "MaterialPath", &MeshRendererComponent::MaterialPath
     );
     m_lua.new_usertype<ScriptComponent>("ScriptComponent",
@@ -248,6 +250,7 @@ void ScriptEngine::RegisterComponentTypes() {
     // (здоровье, счёт, таймеры) обновляется из игровой логики. ---
     m_lua.new_enum<UIElementComponent::Kind>("UIKind", {
         {"Panel", UIElementComponent::Kind::Panel},
+        {"Icon",  UIElementComponent::Kind::Icon},
         {"Label", UIElementComponent::Kind::Label},
         {"Image", UIElementComponent::Kind::Image},
         {"Bar",   UIElementComponent::Kind::Bar},
@@ -276,8 +279,27 @@ void ScriptEngine::RegisterComponentTypes() {
         "TextColor", &UIElementComponent::TextColor,
         "TextCentered", &UIElementComponent::TextCentered,
         "Value", &UIElementComponent::Value,
-        "BarFillColor", &UIElementComponent::BarFillColor
+        "BarFillColor", &UIElementComponent::BarFillColor,
+        "Icon", &UIElementComponent::Icon,
+        "IconColor", &UIElementComponent::IconColor,
+        "GradientColor", &UIElementComponent::GradientColor,
+        "ShadowSize", &UIElementComponent::ShadowSize,
+        "PadX", &UIElementComponent::PadX,
+        "AutoWidth", &UIElementComponent::AutoWidth,
+        "LayoutSize", sol::readonly(&UIElementComponent::LayoutSize)
     );
+
+    // Список доступных векторных иконок — чтобы игра могла проверить имя, а не
+    // узнавать об опечатке по пустому месту в интерфейсе.
+    m_lua.set_function("HasIcon", [](const std::string& name) {
+        return sage::ui::HasIcon(name);
+    });
+    m_lua.set_function("IconNames", [this]() -> sol::table {
+        sol::table list = m_lua.create_table();
+        int i = 1;
+        for (const std::string& n : sage::ui::IconNames()) list[i++] = n;
+        return list;
+    });
 
     // Собирает боевой интерфейс (инвентарь + дерево навыков) из UIElementComponent
     // в сцену — плотный реальный экран одним вызовом. Возвращает id корня.
@@ -518,6 +540,56 @@ void ScriptEngine::RegisterMeshApi() {
         mr.Ref = MeshRef{MeshRef::Type::Cone, ""};
         mr.MeshPtr = ResourceManager::Instance().GetCone();
     });
+    // Прозрачность объекта одним вызовом: не заставлять скрипт доставать
+    // компонент ради одного числа, которое меняется чаще всего остального
+    // (затухание подобранного предмета, вода, призрачная подсветка постройки).
+    m_lua.set_function("SetOpacity", [](GameObject& obj, float opacity) {
+        obj.Renderer().Opacity = opacity;
+    });
+    m_lua.set_function("GetOpacity", [](GameObject& obj) {
+        return obj.Renderer().Opacity;
+    });
+
+    // Юниформы собственного шейдера ДЛЯ ОДНОЙ сущности: материал общий, а
+    // «подсвети именно эту доску» — задача штучная. Тип выводится из значения:
+    // число -> float, Vec2/Vec3/Vec4 -> соответствующий вектор.
+    m_lua.set_function("SetShaderParam", [](GameObject& obj, const std::string& name,
+                                            sol::object value) {
+        if (!obj.Valid()) return;
+        auto& comp = obj.Registry()->get_or_emplace<ShaderParamsComponent>(obj.Entity());
+        if (value.is<float>())            comp.Params[name] = ShaderParam::Make(value.as<float>());
+        else if (value.is<glm::vec2>())   comp.Params[name] = ShaderParam::Make(value.as<glm::vec2>());
+        else if (value.is<glm::vec3>())   comp.Params[name] = ShaderParam::Make(value.as<glm::vec3>());
+        else if (value.is<glm::vec4>())   comp.Params[name] = ShaderParam::Make(value.as<glm::vec4>());
+        else throw std::runtime_error("SetShaderParam: значение должно быть числом или Vec2/3/4");
+    });
+    m_lua.set_function("ClearShaderParams", [](GameObject& obj) {
+        if (obj.Valid()) obj.Registry()->remove<ShaderParamsComponent>(obj.Entity());
+    });
+
+    // Материал сущности: путь к .sagemat. Пусто — снять материал и вернуться к
+    // собственному цвету. Через него игра и назначает свой шейдер.
+    m_lua.set_function("SetMaterial", [](GameObject& obj, const std::string& path) {
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.MaterialPath = path;
+        mr.MaterialPtr = path.empty() ? nullptr : ResourceManager::Instance().GetMaterial(path);
+    });
+
+    // Юниформа МАТЕРИАЛА — общая для всех, кто им покрашен. Так вода правит
+    // одно значение на тысячу тайлов, не разбивая их инстансную группу
+    // (штучный SetShaderParam разбил бы). Материал берётся из общего кэша,
+    // поэтому правка видна всем сущностям с этим путём немедленно.
+    m_lua.set_function("SetMaterialParam", [](const std::string& path, const std::string& name,
+                                              sol::object value) {
+        std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(path);
+        if (!mat) throw std::runtime_error("SetMaterialParam: материал не найден: " + path);
+        if (value.is<float>())            mat->Params[name] = ShaderParam::Make(value.as<float>());
+        else if (value.is<glm::vec2>())   mat->Params[name] = ShaderParam::Make(value.as<glm::vec2>());
+        else if (value.is<glm::vec3>())   mat->Params[name] = ShaderParam::Make(value.as<glm::vec3>());
+        else if (value.is<glm::vec4>())   mat->Params[name] = ShaderParam::Make(value.as<glm::vec4>());
+        else throw std::runtime_error("SetMaterialParam: значение должно быть числом или Vec2/3/4");
+    });
+
     m_lua.set_function("SetMeshNone", [](GameObject& obj) {
         MeshRendererComponent& mr = obj.Renderer();
         mr.Ref = MeshRef{MeshRef::Type::None, ""};

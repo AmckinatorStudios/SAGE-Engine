@@ -257,3 +257,60 @@ TEST(Scene_json_encodes_primitive_mesh_ref) {
     }
     CHECK_TRUE(foundCube);
 }
+
+// ===========================================================================
+//  Прозрачность и оформление интерфейса переживают сохранение
+// ===========================================================================
+TEST(Serialization_opacity_and_ui_style_round_trip) {
+    Scene scene("Style");
+    GameObject glass = scene.CreateObject("Glass");
+    // Тип меша оставляем None: тесты идут без GL-контекста, а любой примитив
+    // при загрузке попросил бы у ResourceManager настоящий GPU-меш.
+    glass.Renderer().Opacity = 0.35f;
+
+    GameObject hud = scene.CreateObject("Bar");
+    UIElementComponent ui;
+    ui.Type = UIElementComponent::Kind::Bar;
+    ui.Icon = "heart";
+    ui.IconColor = {0.9f, 0.2f, 0.2f, 1.0f};
+    ui.GradientColor = {0.1f, 0.1f, 0.2f, 0.8f};
+    ui.ShadowSize = 12.0f;
+    scene.Registry().emplace<UIElementComponent>(hud.Entity(), ui);
+
+    std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    GameObject g2 = back->FindByName("Glass");
+    CHECK_NEAR(g2.Renderer().Opacity, 0.35f, 1e-4);
+
+    const auto* u2 = back->Registry().try_get<UIElementComponent>(back->FindByName("Bar").Entity());
+    CHECK_TRUE(u2 != nullptr);
+    CHECK_EQ(u2->Icon, std::string("heart"));
+    CHECK_NEAR(u2->IconColor.r, 0.9f, 1e-4);
+    CHECK_NEAR(u2->GradientColor.a, 0.8f, 1e-4);
+    CHECK_NEAR(u2->ShadowSize, 12.0f, 1e-4);
+    CHECK_TRUE(u2->Type == UIElementComponent::Kind::Bar);
+}
+
+// Материал: своя программа и пользовательские юниформы — тоже данные проекта.
+TEST(Serialization_material_custom_shader_round_trip) {
+    Material m;
+    m.Albedo = {0.2f, 0.4f, 0.9f};
+    m.Opacity = 0.5f;
+    m.VertexShaderPath = "assets/shaders/water.vert";
+    m.FragmentShaderPath = "assets/shaders/water.frag";
+    m.Params["uWaveHeight"] = ShaderParam::Make(0.35f);
+    m.Params["uFoam"] = ShaderParam::Make(glm::vec3(0.8f, 0.9f, 1.0f));
+
+    const std::string path = "sage_test_material.sagemat";
+    m.SaveToFile(path);
+    Material back = Material::LoadFromFile(path);
+    std::remove(path.c_str());
+
+    CHECK_NEAR(back.Opacity, 0.5f, 1e-4);
+    CHECK_TRUE(back.HasCustomShader());
+    CHECK_EQ(back.FragmentShaderPath, std::string("assets/shaders/water.frag"));
+    CHECK_EQ((int)back.Params.size(), 2);
+    CHECK_TRUE(back.Params["uWaveHeight"].Kind == ShaderParam::Type::Float);
+    CHECK_NEAR(back.Params["uWaveHeight"].Value.x, 0.35f, 1e-4);
+    CHECK_TRUE(back.Params["uFoam"].Kind == ShaderParam::Type::Vec3);
+    CHECK_NEAR(back.Params["uFoam"].Value.z, 1.0f, 1e-4);
+}

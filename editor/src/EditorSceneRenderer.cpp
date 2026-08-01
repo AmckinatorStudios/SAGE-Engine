@@ -86,6 +86,7 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     color.Shadows = ShadowBinding(*m_shadows, true);
     color.ShadingMode = shadingMode;
     color.OcclusionCulling = sage::EngineConfig::Get().OcclusionCulling;
+    color.Time = m_sceneTime;
     m_lastStats = sage::render::RenderSceneColor(scene, m_batch, color);
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 }
