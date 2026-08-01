@@ -4,18 +4,7 @@
 #include "ImGuizmo.h"
 
 #include "EditorHost.h"
-
-namespace {
-
-// Кнопка-переключатель: подсвечена акцентом, когда active.
-bool ToggleButton(const char* label, bool active, const ImVec2& size = ImVec2(0, 0)) {
-    if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
-    bool pressed = ImGui::Button(label, size);
-    if (active) ImGui::PopStyleColor();
-    return pressed;
-}
-
-} // namespace
+#include "EditorIcons.h"
 
 void ToolbarPanel::Draw(EditorHost& host, float height) {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
@@ -23,18 +12,28 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     ImGui::BeginChild("##toolbar", ImVec2(0, height), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
     // --- Слева: гизмо (режим / snap / пространство) ---
-    if (ToggleButton("Move", host.GizmoOp() == (int)ImGuizmo::TRANSLATE)) host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
+    // Только иконки: три подписанные кнопки съедали треть тулбара, а форма
+    // стрелки, дуги и рамки читается быстрее слова. Горячая клавиша — в
+    // подсказке, чтобы её не нужно было искать в меню.
+    if (EditorIcons::IconOnlyButton("move", "Перенос (W)",
+                                    host.GizmoOp() == (int)ImGuizmo::TRANSLATE))
+        host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
     ImGui::SameLine();
-    if (ToggleButton("Rotate", host.GizmoOp() == (int)ImGuizmo::ROTATE)) host.GizmoOp() = (int)ImGuizmo::ROTATE;
+    if (EditorIcons::IconOnlyButton("rotate", "Поворот (E)",
+                                    host.GizmoOp() == (int)ImGuizmo::ROTATE))
+        host.GizmoOp() = (int)ImGuizmo::ROTATE;
     ImGui::SameLine();
-    if (ToggleButton("Scale", host.GizmoOp() == (int)ImGuizmo::SCALE)) host.GizmoOp() = (int)ImGuizmo::SCALE;
+    if (EditorIcons::IconOnlyButton("scale", "Масштаб (R)",
+                                    host.GizmoOp() == (int)ImGuizmo::SCALE))
+        host.GizmoOp() = (int)ImGuizmo::SCALE;
     ImGui::SameLine();
 
     ImGui::AlignTextToFramePadding();
     ImGui::Checkbox("Snap", &host.GizmoSnap());
     ImGui::SameLine();
     bool world = host.GizmoSpace() == EditorGizmoSpace::World;
-    if (ToggleButton(world ? "World" : "Local", true)) {
+    if (EditorIcons::Button(world ? "grid" : "cube", world ? "World" : "Local",
+                            "Пространство гизмо: мировое или локальное", true)) {
         host.GizmoSpace() = world ? EditorGizmoSpace::Local : EditorGizmoSpace::World;
     }
 
@@ -45,17 +44,19 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     EditorPlayState state = host.GetPlayState();
     if (state == EditorPlayState::Editing) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
-        if (ImGui::Button("Play")) host.StartPlay();
+        if (EditorIcons::Button("play", "Play", "Запустить сцену (сцена будет восстановлена по Stop)"))
+            host.StartPlay();
         ImGui::PopStyleColor();
     } else {
         if (state == EditorPlayState::Playing) {
-            if (ImGui::Button("Pause")) host.PausePlay();
+            if (EditorIcons::Button("pause", "Pause", "Приостановить")) host.PausePlay();
         } else {
-            if (ImGui::Button("Resume")) host.ResumePlay();
+            if (EditorIcons::Button("play", "Resume", "Продолжить")) host.ResumePlay();
         }
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-        if (ImGui::Button("Stop")) host.StopPlay();
+        if (EditorIcons::Button("stop", "Stop", "Остановить и вернуть сцену как была"))
+            host.StopPlay();
         ImGui::PopStyleColor();
         ImGui::SameLine();
         ImGui::TextColored(state == EditorPlayState::Playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
@@ -67,8 +68,8 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     const char* modes[] = {"Shaded", "Wireframe", "Unlit", "Normals"};
     float rightW = 180.0f;
     ImGui::SameLine(ImGui::GetWindowWidth() - rightW);
-    ImGui::AlignTextToFramePadding();
-    ImGui::Checkbox("Grid", &host.ShowGrid());
+    if (EditorIcons::IconOnlyButton("grid", "Сетка вьюпорта", host.ShowGrid()))
+        host.ShowGrid() = !host.ShowGrid();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110.0f);
     int mode = (int)host.RenderMode();

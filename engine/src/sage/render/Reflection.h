@@ -1,14 +1,17 @@
 #pragma once
 #include <functional>
 #include <memory>
+#include <string>
 
 #include <glm/glm.hpp>
 
 #include "sage/rhi/GraphicsDevice.h"
 
 class Shader;
+class Scene;
 struct LightingEnvironment;
 class SkyRenderer;
+class Skybox;
 
 // ---------------------------------------------------------------------------
 // Отражения.
@@ -105,8 +108,14 @@ public:
     void Capture(const glm::vec3& pos, float nearClip, float farClip, const FaceDraw& draw);
 
     // Быстрый путь: только небо, без геометрии. Для открытых сцен (океан,
-    // поле) этого достаточно, и стоит он шесть заливок градиентом.
-    void CaptureSky(SkyRenderer& sky, const LightingEnvironment& env);
+    // поле) этого достаточно, и стоит он шесть заливок.
+    //
+    // cubemap — загруженный набор граней неба (Skybox.CubemapDir). Если он
+    // есть, в карту отражений уходит ОН, а не процедурный градиент: иначе
+    // сцена с настоящим небом отражала бы совсем другое небо, и расхождение
+    // было бы заметнее всего на воде и хроме — там, где отражение и смотрят.
+    void CaptureSky(SkyRenderer& sky, const LightingEnvironment& env,
+                    const Skybox* cubemap = nullptr);
 
     // Матрицы вида для граней куба в порядке +X,-X,+Y,-Y,+Z,-Z. Публичные,
     // потому что нужны и снаружи: захват зонда в редакторе показывает грани
@@ -214,7 +223,8 @@ class ReflectionSystem {
 public:
     // Небо как источник отражений. Для открытых сцен (океан, поле) этого
     // достаточно, и стоит оно шесть заливок градиентом на изменение.
-    void UpdateSky(SkyRenderer& sky, const LightingEnvironment& env);
+    void UpdateSky(SkyRenderer& sky, const LightingEnvironment& env,
+                   const Skybox* cubemap = nullptr);
 
     // Снять окружение со всей сцены из точки pos: то же, но с геометрией.
     void CaptureScene(const glm::vec3& pos, float nearClip, float farClip,
@@ -243,8 +253,35 @@ private:
     // сравнивается по флагу «грязно»: цвета правит и редактор, и скрипт, и
     // таймлайн, и уговориться, что все они дёргают флаг, не выйдет.
     glm::vec3 m_skyTop{-1.0f}, m_skyHorizon{-1.0f};
+    std::string m_skyCubemap;      // какой набор граней снят сейчас
+    float m_skyIntensity = -1.0f;
+    float m_skyRotation = 0.0f;
     bool m_captured = false;
 };
+
+// --- Зонды отражений в сцене ------------------------------------------------
+//
+// Зонд снимает окружение из своей точки; какой из них действует на кадр,
+// решается по положению камеры. Один на кадр — не от лени: активная карта
+// уходит в шейдер одним samplerCube, а смешивать два зонда пришлось бы либо
+// вторым сэмплером (юниты в GL 3.3 на пересчёт), либо вторым проходом. Резкого
+// переключения при этом не видно ровно потому, что выбирается зонд, В КОРОБКЕ
+// которого находится камера, — переход происходит на границе комнаты, где
+// отражение и так меняется.
+
+// Снимает те зонды, которые этого просят (Dirty или Realtime). draw рисует
+// сцену для одной грани; вызывающий сам решает, что в неё входит.
+//
+// Возвращает, сколько зондов снято за вызов. Ноль — обычное дело: снимать
+// нечего, пока никто ничего не менял.
+int UpdateReflectionProbes(Scene& scene, const EnvironmentMap::FaceDraw& draw,
+                           int maxPerCall = 1);
+
+// Выбирает зонд для камеры: сначала тот, в чьей коробке она стоит (из
+// нескольких — самый тесный, он подробнее), иначе ближайший по центру.
+// nullptr — зондов нет или ни один ещё не снят.
+const EnvironmentMap* PickReflectionProbe(Scene& scene, const glm::vec3& cameraPos,
+                                          float* outIntensity = nullptr);
 
 // Заливает uniform'ы отражений (имена совпадают с PbrShader.h). Выключенный
 // источник обязан быть выключен ЯВНО: невыставленный bool в GLSL равен нулю

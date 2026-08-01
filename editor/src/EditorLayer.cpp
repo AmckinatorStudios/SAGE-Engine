@@ -19,9 +19,11 @@
 #include "ImGuizmo.h"
 
 #include "EditorTheme.h"
+#include "EditorIcons.h"
 #include "sage/core/Application.h"
 #include "sage/core/Systems.h"
 #include "sage/core/Version.h"
+#include "sage/core/CrashHandler.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/LightingUpload.h"
@@ -83,6 +85,65 @@ void EditorLayer::OnAttach() {
 
     // --- Console первой: сток лога ловит все сообщения запуска ---
     m_console.Attach();
+
+    // --- Готовность к падению ---
+    //
+    // До этого падение выглядело так: окно исчезло. Ни файла, ни строки, ни
+    // намёка — и вместе с окном исчезала несохранённая сцена. Для редактора это
+    // худший из отказов: пользователь теряет работу и не может даже сказать, на
+    // чём сломалось.
+    //
+    // Ставится РАНО, сразу после лога: падения на загрузке проекта или на
+    // компиляции шейдера — самые частые, и обработчик, установленный в конце
+    // OnAttach, их бы не застал.
+    {
+        sage::CrashHandler::Config cfg;
+        cfg.AppName = "SAGE Editor";
+        cfg.Version = kSageEngineVersion;
+        cfg.ReportDir = ".";
+        cfg.Context = [this]() {
+            std::string ctx;
+            ctx += "Проект: " + (m_project.Loaded() ? m_project.Dir().string() : "<нет>") + "\n";
+            ctx += "Сцена:  " + (m_scenePath.empty() ? "<без файла>" : m_scenePath.string()) +
+                   (m_sceneDirty ? "  (НЕ СОХРАНЕНА)\n" : "\n");
+            ctx += "Режим:  " + std::string(m_playState == EditorPlayState::Editing ? "Editing"
+                                                                                    : "Play") +
+                   "\n";
+            if (m_scene) ctx += "Сущностей: " + std::to_string(m_scene->Count()) + "\n";
+            return ctx;
+        };
+        cfg.EmergencySave = [this]() -> std::string {
+            // Сцену сбрасываем в ОТДЕЛЬНЫЙ файл, а не поверх исходного: процесс
+            // уже сломан, и записать поверх рабочей сцены повреждённые данные
+            // хуже, чем не записать ничего. Восстановление предлагается при
+            // следующем запуске.
+            if (!m_scene) return {};
+            try {
+                const std::string path = "sage-recovered.sage";
+                SceneSerializer::Save(*m_scene, path);
+                return path;
+            } catch (...) {
+                return {};
+            }
+        };
+        sage::CrashHandler::Install(cfg);
+    }
+
+    // --- Восстановление после прошлого падения ---
+    // Файл на диске — единственный след прошлого запуска: спрашивать некого,
+    // процесс тот уже мёртв. Предложение показывается ОДИН раз; отказ удаляет
+    // файл, иначе редактор спрашивал бы про него до конца времён.
+    {
+        std::error_code ec;
+        for (const char* candidate : {"sage-recovered.sage", "sage-autosave.sage"}) {
+            if (fs::exists(candidate, ec)) {
+                m_recoveryFile = candidate;
+                m_recoveryPrompt = true;
+                LOG_WARN("Editor") << "Найден файл восстановления: " << candidate;
+                break;
+            }
+        }
+    }
 
     // --- Превью-рендер: тени/Viewport/Game/PostFX/гизмо — в EditorSceneRenderer ---
     m_renderer.Init();
@@ -157,6 +218,15 @@ void EditorLayer::OnAttach() {
 }
 
 void EditorLayer::OnDetach() {
+    // Чистое завершение — единственное доказательство, что падения не было:
+    // файл автосохранения снимается, и следующий запуск не спросит про
+    // восстановление. Файл аварийного сброса (sage-recovered.sage) НЕ трогаем —
+    // его удаляет только сам пользователь в диалоге.
+    {
+        std::error_code ec;
+        fs::remove("sage-autosave.sage", ec);
+    }
+    sage::CrashHandler::Uninstall();  // дальше рушить уже нечего, а GL-контекст уходит
     m_console.Detach();    // сток ссылается на панель — снять до разрушения
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
     if (m_imguiReady) {
@@ -169,6 +239,33 @@ void EditorLayer::OnDetach() {
 }
 
 void EditorLayer::OnUpdate(float dt) {
+    // --- Автосохранение ---
+    //
+    // Пишет НЕ поверх рабочей сцены, а в отдельный файл рядом. Поверх нельзя:
+    // автосохранение — это страховка от падения и от собственной ошибки, а
+    // страховка, затирающая оригинал, страховкой не является. Восстановление
+    // предлагается при следующем запуске.
+    //
+    // Только в режиме правки: во время Play сцена живёт по игровым правилам, и
+    // сохранять её состояние значило бы записывать середину игры вместо уровня.
+    if (m_autosaveInterval > 0.0f && m_sceneDirty && m_scene &&
+        m_playState == EditorPlayState::Editing) {
+        m_autosaveTimer += dt;
+        if (m_autosaveTimer >= m_autosaveInterval) {
+            m_autosaveTimer = 0.0f;
+            try {
+                SceneSerializer::Save(*m_scene, "sage-autosave.sage");
+                m_lastAutosave = "sage-autosave.sage";
+                LOG_DEBUG("Editor") << "Автосохранение: sage-autosave.sage";
+            } catch (const std::exception& e) {
+                // Не сумели — не беда для кадра, но сказать надо: молчащее
+                // автосохранение хуже отсутствующего, на него рассчитывают.
+                LOG_WARN("Editor") << "Автосохранение не удалось: " << e.what();
+                m_autosaveInterval = 0.0f;   // не долбить диск каждую минуту
+            }
+        }
+    }
+
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
     if (m_playState == EditorPlayState::Playing) {
@@ -451,6 +548,7 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyComponentIfPresent<ParticleEmitterComponent>(src, dst);
     CopyComponentIfPresent<AnimatedModelComponent>(src, dst);
     CopyComponentIfPresent<IKComponent>(src, dst);
+    CopyComponentIfPresent<ReflectionProbeComponent>(src, dst);
     CopyComponentIfPresent<UIElementComponent>(src, dst);
     if (auto* rb = dst.Registry()->try_get<RigidBodyComponent>(dst.Entity()))
         rb->RuntimeBody = sage::physics::kInvalidBody;
@@ -465,6 +563,12 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     // модель загрузится заново, и цели должны разрешиться по именам с нуля.
     if (auto* ik = dst.Registry()->try_get<IKComponent>(dst.Entity()))
         for (IKGoal& g : ik->Goals) { g.Resolved = false; g.Locked = false; }
+    // Снятая карта принадлежит ТОЧКЕ, а копия стоит в другой: делить её нельзя,
+    // иначе копия отражала бы окружение оригинала.
+    if (auto* rp = dst.Registry()->try_get<ReflectionProbeComponent>(dst.Entity())) {
+        rp->Runtime.reset();
+        rp->Dirty = true;
+    }
     if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity()))
         pe->Accumulator = 0.0f;
 }
@@ -718,6 +822,48 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
     } catch (const std::exception& e) {
         LOG_ERROR("Editor") << "Scene load failed: " << e.what();
         return false;
+    }
+}
+
+// Предложение восстановить сцену после падения или из автосохранения.
+//
+// Модалка, а не тихая загрузка: восстановленная сцена может быть НЕ той, над
+// которой человек работал последней (например, он с тех пор открыл другой
+// проект), и решать это должен он, а не редактор.
+void EditorLayer::DrawRecoveryPrompt() {
+    if (!m_recoveryPrompt) return;
+    ImGui::OpenPopup("Восстановить сцену?");
+    if (ImGui::BeginPopupModal("Восстановить сцену?", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Похоже, прошлый запуск завершился аварийно");
+        ImGui::Spacing();
+        ImGui::Text("Найден файл: %s", m_recoveryFile.c_str());
+        ImGui::TextDisabled("Он не перезаписывал вашу сцену — это отдельная копия.");
+        ImGui::Spacing();
+        if (ImGui::Button("Открыть копию", ImVec2(150, 0))) {
+            if (LoadSceneFromFile(m_recoveryFile)) {
+                // Путь сцены НЕ ставим: иначе первое же Ctrl+S записало бы
+                // восстановленное поверх файла восстановления, а не сцены.
+                m_scenePath.clear();
+                m_sceneDirty = true;
+                UpdateWindowTitle();
+            }
+            m_recoveryPrompt = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Оставить файл", ImVec2(150, 0))) {
+            m_recoveryPrompt = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Удалить", ImVec2(110, 0))) {
+            std::error_code ec;
+            fs::remove(m_recoveryFile, ec);
+            m_recoveryPrompt = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 }
 
@@ -1064,6 +1210,36 @@ void EditorLayer::DrawStatusBar(float height) {
     ImGui::SameLine(); ImGui::TextDisabled("|");
     ImGui::SameLine(); ImGui::TextDisabled("Entities: %zu", m_scene->Count());
 
+    // Ошибки и предупреждения — В СТАТУСНОЙ СТРОКЕ, а не только в консоли.
+    // Консоль легко держать свёрнутой, и тогда единственное предупреждение о
+    // непрочитанном шейдере остаётся незамеченным, а сцена «просто выглядит
+    // не так». Клик открывает консоль уже с нужным фильтром.
+    if (m_console.ErrorCount() > 0 || m_console.WarnCount() > 0) {
+        ImGui::SameLine(); ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        const bool hasErrors = m_console.ErrorCount() > 0;
+        const ImVec4 col = hasErrors ? ImVec4(0.95f, 0.40f, 0.40f, 1.0f)
+                                     : ImVec4(0.95f, 0.80f, 0.30f, 1.0f);
+        EditorIcons::Inline(hasErrors ? "error" : "warn", glm::vec3(col.x, col.y, col.z));
+        ImGui::SameLine();
+        // Склонение по-русски: 1 ошибка, 2 ошибки, 5 ошибок. Мелочь, но
+        // «1 ошибок» в статусной строке читается как недоделка интерфейса.
+        auto plural = [](int n, const char* one, const char* few, const char* many) {
+            const int n100 = n % 100, n10 = n % 10;
+            if (n100 >= 11 && n100 <= 14) return many;
+            if (n10 == 1) return one;
+            if (n10 >= 2 && n10 <= 4) return few;
+            return many;
+        };
+        ImGui::TextColored(col, "%d %s, %d %s", m_console.ErrorCount(),
+                           plural(m_console.ErrorCount(), "ошибка", "ошибки", "ошибок"),
+                           m_console.WarnCount(),
+                           plural(m_console.WarnCount(), "предупреждение", "предупреждения",
+                                  "предупреждений"));
+        if (ImGui::IsItemClicked()) ImGui::SetWindowFocus("Console");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Открыть консоль");
+    }
+
     if (InPlayMode()) {
         ImGui::SameLine(); ImGui::TextDisabled("|");
         ImGui::SameLine();
@@ -1272,6 +1448,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // ID-стеку окна, поэтому открытие и отрисовку нельзя разносить по окнам.
     if (openDialog) m_dialogs.Open(openDialog);
     m_dialogs.Draw(*this);
+    DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     DrawAboutWindow();
 

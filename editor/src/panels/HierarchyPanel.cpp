@@ -11,9 +11,37 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "EditorIcons.h"
 #include "Project.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+
+namespace {
+
+// Какая иконка у сущности. Порядок проверок — от самого «говорящего»
+// компонента к самому общему: у камеры со скриптом важнее, что это камера, а
+// меш есть почти у всего и потому проверяется последним.
+//
+// По иконке иерархия читается одним взглядом: в списке из полусотни «Object»
+// глазу не за что зацепиться, а «свет / камера / зонд / модель» видно сразу.
+const char* EntityIcon(entt::registry& reg, entt::entity e) {
+    if (reg.all_of<CameraComponent>(e)) return "camera";
+    if (reg.all_of<LightComponent>(e)) return "light";
+    if (reg.all_of<ReflectionProbeComponent>(e)) return "probe";
+    if (reg.all_of<ParticleEmitterComponent>(e)) return "particles";
+    if (reg.all_of<AnimatedModelComponent>(e)) return "anim";
+    if (reg.all_of<UIElementComponent>(e)) return "file";
+    if (reg.all_of<RigidBodyComponent>(e) || reg.all_of<ColliderComponent>(e)) return "physics";
+    if (reg.all_of<ScriptComponent>(e)) return "script";
+    if (const MeshRendererComponent* mr = reg.try_get<MeshRendererComponent>(e)) {
+        if (mr->Ref.type == MeshRef::Type::Model) return "model";
+        if (mr->Ref.type == MeshRef::Type::Sphere) return "sphere";
+        if (mr->Ref.type != MeshRef::Type::None) return "cube";
+    }
+    return "file";
+}
+
+} // namespace
 
 // Рекурсивно рисует узел дерева: сам элемент (выбор/ПКМ/drag-drop) + детей.
 void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
@@ -28,7 +56,22 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
     ImGui::PushID(id);
-    bool open = ImGui::TreeNodeEx((void*)(intptr_t)id, flags, "%s", name.c_str());
+    // Иконка рисуется ПОВЕРХ строки узла, а не отдельным элементом: узел ImGui
+    // занимает всю ширину (SpanAvailWidth), и вставить перед ним что-либо
+    // обычным способом нельзя — клик перестал бы попадать в строку.
+    const ImVec2 rowPos = ImGui::GetCursorScreenPos();
+    const float indent = ImGui::GetTreeNodeToLabelSpacing();
+    bool open = ImGui::TreeNodeEx((void*)(intptr_t)id, flags, "  %s", name.c_str());
+    {
+        const float s = ImGui::GetTextLineHeight() * 0.86f;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 save = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(
+            ImVec2(rowPos.x + indent - s * 1.15f, rowPos.y + (ImGui::GetTextLineHeight() - s) * 0.5f));
+        (void)dl;
+        EditorIcons::Inline(EntityIcon(reg, e), glm::vec3(0.62f, 0.72f, 0.85f));
+        ImGui::SetCursorScreenPos(save);
+    }
     // Клик по строке (не по треугольнику раскрытия) — выбор. Ctrl — добавить/
     // убрать из набора (множественный выбор), обычный клик — одиночный.
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {

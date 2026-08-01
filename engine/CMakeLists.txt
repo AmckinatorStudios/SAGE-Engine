@@ -42,6 +42,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/MeshSimplify.cpp
     src/sage/render/ScenePasses.cpp
     src/sage/render/Reflection.cpp
+    src/sage/core/CrashHandler.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
@@ -119,7 +120,8 @@ if (TARGET Jolt)
 endif()
 
 if (WIN32)
-    target_link_libraries(sage_engine PUBLIC opengl32)
+    # dbghelp — символы в стеке вызовов отчёта о падении (CrashHandler).
+    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp)
 elseif (UNIX)
     # m — miniaudio (математика микшера); dl/pthread — GLFW и miniaudio
     # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).

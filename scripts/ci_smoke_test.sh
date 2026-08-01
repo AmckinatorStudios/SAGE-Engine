@@ -24,7 +24,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/6: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/7: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +45,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/6: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/7: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -67,14 +67,14 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/6: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 3/7: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/6: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+echo "=== Smoke-тест 4/7: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
@@ -110,7 +110,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/6: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 5/7: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -139,7 +139,7 @@ if ! grep -q "PLAYER: started" "${PLAYER_LOG}"; then
 fi
 echo "OK: собранная игра запустилась и отрисовала кадр (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 6/6: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 6/7: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -179,5 +179,48 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
     echo "ОШИБКА: скриншот e2e-игры отсутствует или подозрительно мал (${SHOT_SIZE} байт)"; exit 1
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
+
+echo "=== Smoke-тест 7/7: обработчик падений (настоящее падение) ==="
+# Единственный честный способ проверить обработчик падений — уронить процесс.
+# Обычным тестом это не сделать: обработчик по замыслу доводит падение до
+# конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
+# в отдельную программу (tests/crash_probe.cpp), и проверяется здесь.
+# Путь абсолютный: запускаем из каталога отчётов, и относительный
+# указывал бы уже не туда.
+PROBE_EXE="$(cd "$(dirname "${BUILD_DIR}/tests/sage_crash_probe")" && pwd)/sage_crash_probe"
+if [ ! -x "${PROBE_EXE}" ]; then
+    echo "ОШИБКА: ${PROBE_EXE} не собран"; exit 1
+fi
+CRASH_DIR="${SCRATCH_DIR}/crash"
+rm -rf "${CRASH_DIR}"; mkdir -p "${CRASH_DIR}"
+
+for MODE in segv terminate; do
+    STATUS=0
+    ( cd "${CRASH_DIR}" && "${PROBE_EXE}" "${MODE}" "${CRASH_DIR}" ) > "${CRASH_DIR}/${MODE}.log" 2>&1 || STATUS=$?
+    # Падение обязано ОСТАТЬСЯ падением: обработчик пишет отчёт и добивает
+    # процесс тем же сигналом. Проглоти он падение — отладчик и системный
+    # сборщик отчётов его бы не увидели, а код возврата соврал бы сборке.
+    if [ ${STATUS} -lt 128 ]; then
+        echo "ОШИБКА: ${MODE} завершился кодом ${STATUS} — падение проглочено"; exit 1
+    fi
+    REPORT=$(ls -t "${CRASH_DIR}"/sage-crash-*.txt 2>/dev/null | head -1)
+    if [ -z "${REPORT}" ]; then
+        echo "ОШИБКА: после ${MODE} отчёт о падении не создан"; cat "${CRASH_DIR}/${MODE}.log"; exit 1
+    fi
+    # В отчёте должно быть то, ради чего он пишется: причина, контекст от
+    # приложения, стек и хвост лога. Отчёт без них бесполезен так же, как его
+    # отсутствие.
+    for MARKER in "МАРКЕР-КОНТЕКСТА" "Стек вызовов" "МАРКЕР-ЛОГА"; do
+        if ! grep -q "${MARKER}" "${REPORT}"; then
+            echo "ОШИБКА: в отчёте (${MODE}) нет '${MARKER}'"; cat "${REPORT}"; exit 1
+        fi
+    done
+    rm -f "${CRASH_DIR}"/sage-crash-*.txt
+done
+# Аварийное сохранение: работа не должна теряться вместе с процессом.
+if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
+    echo "ОШИБКА: аварийное сохранение не сработало"; exit 1
+fi
+echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
 
 echo "=== Все smoke-тесты прошли ==="

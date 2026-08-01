@@ -68,12 +68,43 @@ void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat
 }
 
 void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnvironment& env) {
-    // Пересъёмка карты окружения. Здесь, а не внутри прохода сцены: захват
+    // Пересъёмка карт отражений. Здесь, а не внутри прохода сцены: захват
     // меняет привязанный буфер и viewport, и посреди отрисовки вьюпорта это
     // писало бы небо в панель редактора.
     m_reflections.SetEnabled(scene.Reflections.Enabled);
     m_reflections.SetIntensity(scene.Reflections.Intensity);
-    if (m_sky) m_reflections.UpdateSky(*m_sky, env);
+    if (!scene.Reflections.Enabled) return;
+
+    // Небо: если у сцены задан набор граней, отражается ОН, а не процедурный
+    // градиент — иначе вода отражала бы совсем другое небо, чем видно в кадре.
+    const Skybox* cubemap = nullptr;
+    std::shared_ptr<Skybox> skyAsset;
+    if (env.Skybox.HasCubemap()) {
+        skyAsset = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir);
+        cubemap = skyAsset.get();
+    }
+    if (m_sky) m_reflections.UpdateSky(*m_sky, env, cubemap);
+
+    // Зонды: не больше одного за кадр. Съёмка — это шесть проходов сцены, и
+    // снять десяток зондов разом означало бы застывший на секунду редактор
+    // ровно в тот момент, когда художник двинул свет.
+    sage::render::UpdateReflectionProbes(
+        scene,
+        [&](const glm::mat4& v, const glm::mat4& p) {
+            sage::rhi::GraphicsDevice& d = sage::Application::Get().Device();
+            d.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            d.Clear(true, true);
+            DrawSky(env, v, p);
+            sage::render::SceneColorInput c;
+            c.View = v;
+            c.Proj = p;
+            c.ViewPos = glm::vec3(glm::inverse(v)[3]);
+            c.Env = &env;
+            c.Shadows = ShadowBinding(*m_shadows, true);
+            c.Time = m_sceneTime;
+            sage::render::RenderSceneColor(scene, m_batch, c);
+        },
+        1);
 }
 
 void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env,
@@ -110,6 +141,14 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     color.OcclusionCulling = sage::EngineConfig::Get().OcclusionCulling;
     color.Time = m_sceneTime;
     color.Reflection = m_reflections.Binding(1, 1);
+    // Зонд перебивает небо: если камера стоит в его коробке, отражается
+    // окружение, снятое им, а не небо вообще.
+    float probeIntensity = 1.0f;
+    if (const sage::render::EnvironmentMap* probe =
+            sage::render::PickReflectionProbe(scene, viewPos, &probeIntensity)) {
+        color.Reflection.Env = probe;
+        color.Reflection.Intensity = probeIntensity;
+    }
     m_lastStats = sage::render::RenderSceneColor(scene, m_batch, color);
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 }
@@ -238,6 +277,23 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         m_debugDraw->WireSphere(wpos, 0.18f, color, 8);
         m_debugDraw->Axes(glm::translate(glm::mat4(1.0f), wpos), 0.4f);
     }
+    // Зонды отражений: сфера-маркер и КОРОБКА ВЛИЯНИЯ. Коробка важнее маркера —
+    // именно она отвечает на вопрос «какой зонд подхватит камера здесь», а
+    // ответить на него по числам в инспекторе нельзя.
+    auto probeView = reg.view<ReflectionProbeComponent, Transform, IdComponent>();
+    for (auto e : probeView) {
+        const bool selected = isSel(probeView.get<IdComponent>(e).Id);
+        const ReflectionProbeComponent& rp = probeView.get<ReflectionProbeComponent>(e);
+        const glm::vec3 wpos = glm::vec3(scene.WorldMatrix(e)[3]);
+        // Не снятый зонд — тускло-красный: «здесь будет отражение, но его ещё
+        // нет». Молчащий маркер выглядел бы как рабочий зонд.
+        const glm::vec3 color = rp.Dirty ? glm::vec3(0.85f, 0.35f, 0.30f)
+                                         : (selected ? glm::vec3(0.45f, 0.95f, 1.0f)
+                                                     : glm::vec3(0.30f, 0.65f, 0.75f));
+        m_debugDraw->WireSphere(wpos, selected ? 0.34f : 0.26f, color, 12);
+        if (selected || rp.Dirty) m_debugDraw->WireBox(wpos, rp.BoxHalfExtents, color * 0.8f);
+    }
+
     // Коллайдеры: каркас формы в масштабе Transform.
     auto colView = reg.view<ColliderComponent, Transform, IdComponent>();
     for (auto e : colView) {

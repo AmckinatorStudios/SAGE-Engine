@@ -360,6 +360,30 @@ static sage::render::ReflectionSettings ReflectionsFromJson(const json& root) {
     return r;
 }
 
+// Зонд отражений: сохраняется ЗАДАНИЕ (где, какой охват, какое разрешение), но
+// не снятая карта — она пересобирается из той же геометрии и того же неба, а
+// шесть картинок в проекте устаревали бы от любой правки уровня.
+static void SaveReflectionProbe(json& j, const ReflectionProbeComponent& p) {
+    j["reflectionProbe"]["resolution"] = p.Resolution;
+    j["reflectionProbe"]["boxHalfExtents"] = Vec3ToJson(p.BoxHalfExtents);
+    j["reflectionProbe"]["intensity"] = p.Intensity;
+    j["reflectionProbe"]["boxParallax"] = p.BoxParallax;
+    j["reflectionProbe"]["farClip"] = p.FarClip;
+    j["reflectionProbe"]["realtime"] = p.Realtime;
+}
+
+static ReflectionProbeComponent ParseReflectionProbe(const json& pj) {
+    ReflectionProbeComponent p;
+    p.Resolution = pj.value("resolution", p.Resolution);
+    if (pj.contains("boxHalfExtents")) p.BoxHalfExtents = Vec3FromJson(pj["boxHalfExtents"]);
+    p.Intensity = pj.value("intensity", p.Intensity);
+    p.BoxParallax = pj.value("boxParallax", p.BoxParallax);
+    p.FarClip = pj.value("farClip", p.FarClip);
+    p.Realtime = pj.value("realtime", p.Realtime);
+    p.Dirty = true;   // после загрузки снять заново — сцена могла измениться
+    return p;
+}
+
 static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
     // Только описательные поля — модель/палитра восстанавливаются загрузкой.
     j["animatedModel"]["path"] = am.Path;
@@ -740,6 +764,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
         if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) SaveAnimatedModel(j, *am);
         if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
+        if (const ReflectionProbeComponent* rp = reg.try_get<ReflectionProbeComponent>(e))
+            SaveReflectionProbe(j, *rp);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
         objectsJson.push_back(j);
@@ -806,6 +832,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
         if (j.contains("ik"))
             obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
+        if (j.contains("reflectionProbe"))
+            obj.Registry()->emplace<ReflectionProbeComponent>(
+                obj.Entity(), ParseReflectionProbe(j["reflectionProbe"]));
         if (j.contains("particles"))
             obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
         if (j.contains("ui"))

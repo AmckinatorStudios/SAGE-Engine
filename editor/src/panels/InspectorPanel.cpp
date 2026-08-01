@@ -493,6 +493,44 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Зонд отражений -----------------------------------------------------
+    if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
+        ImGui::CollapsingHeader("Reflection Probe", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ReflectionProbeComponent* p = reg.try_get<ReflectionProbeComponent>(obj.Entity())) {
+            ImGui::TextDisabled("Captures the scene around this point into a cubemap");
+            // Любая правка охвата или разрешения означает «снять заново»: карта
+            // снята под прежние числа, и оставить её значило бы показывать
+            // отражение, которого в сцене уже нет.
+            const int prevRes = p->Resolution;
+            const char* resNames[] = {"32", "64", "128", "256"};
+            const int resValues[] = {32, 64, 128, 256};
+            int resIdx = 2;
+            for (int i = 0; i < 4; ++i) if (resValues[i] == p->Resolution) resIdx = i;
+            if (ImGui::Combo("Resolution", &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
+            if (p->Resolution != prevRes) p->Dirty = true;
+
+            if (ImGui::DragFloat3("Box Half Extents", &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
+                p->Dirty = true;
+            host.TrackLastImGuiItem();
+            ImGui::TextDisabled("Camera inside this box uses this probe");
+            if (ImGui::Checkbox("Box Parallax", &p->BoxParallax)) p->Dirty = true;
+            ImGui::SliderFloat("Intensity", &p->Intensity, 0.0f, 3.0f);
+            host.TrackLastImGuiItem();
+            if (ImGui::DragFloat("Far Clip", &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
+            host.TrackLastImGuiItem();
+            ImGui::Checkbox("Realtime (re-capture every frame)", &p->Realtime);
+            ImGui::TextDisabled("Realtime = 6 scene passes per frame - use sparingly");
+
+            if (ImGui::Button("Bake Probe")) p->Dirty = true;
+            ImGui::SameLine();
+            ImGui::TextDisabled(p->Dirty ? "queued" : (p->Runtime ? "captured" : "empty"));
+            if (ImGui::Button("Remove Reflection Probe")) {
+                host.PushUndoSnapshot();
+                reg.remove<ReflectionProbeComponent>(obj.Entity());
+            }
+        }
+    }
+
     // --- Обратная кинематика: цели поверх позы клипа ------------------------
     // Кость задаётся ИМЕНЕМ, а не индексом: модель может смениться (или ещё не
     // загрузиться), а имя переживает и то, и другое. Список имён показываем
@@ -817,6 +855,8 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         item("Animated Model", reg.all_of<AnimatedModelComponent>(e),
              [&] { reg.emplace<AnimatedModelComponent>(e); });
         item("IK", reg.all_of<IKComponent>(e), [&] { reg.emplace<IKComponent>(e); });
+        item("Reflection Probe", reg.all_of<ReflectionProbeComponent>(e),
+             [&] { reg.emplace<ReflectionProbeComponent>(e); });
         item("Particle Emitter", reg.all_of<ParticleEmitterComponent>(e), [&] {
             ParticleEmitterComponent em;
             em.Config = ParticlePresets::Registry()[0].Make(); // Fire

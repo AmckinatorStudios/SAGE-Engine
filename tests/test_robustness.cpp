@@ -127,3 +127,71 @@ TEST(Robust_timer_scheduled_in_callback_waits_full_interval) {
     int afterSecond = se.Lua()["inner_fired"];
     CHECK_EQ(afterSecond, 1);
 }
+
+// --- Обработчик падений -------------------------------------------------------
+//
+// Проверять обработчик падений «настоящим падением» внутри теста нельзя: он
+// убивает процесс, и вместе с ним весь прогон. Поэтому здесь проверяется
+// СОДЕРЖИМОЕ отчёта — то, ради чего обработчик и существует, — а сам факт
+// перехвата сигнала проверяется отдельно, дочерним процессом (см. ниже).
+
+#include "sage/core/CrashHandler.h"
+
+TEST(CrashReport_contains_reason_context_and_log_tail) {
+    sage::CrashHandler::Config cfg;
+    cfg.AppName = "SAGE Test";
+    cfg.Version = "9.9.9";
+    cfg.ReportDir = ".";
+    cfg.Context = [] { return std::string("Проект: /tmp/demo\nСцена: main.sage"); };
+    sage::CrashHandler::Install(cfg);
+
+    // Лог пишет в кольцевой буфер отчёта сам (см. Log::WriteLine).
+    LOG_INFO("TestCat") << "строка до падения";
+    LOG_ERROR("TestCat") << "вот это и сломалось";
+
+    const std::string report = sage::CrashHandler::BuildReport("проверка");
+    sage::CrashHandler::Uninstall();
+
+    CHECK_TRUE(report.find("SAGE Test") != std::string::npos);
+    CHECK_TRUE(report.find("9.9.9") != std::string::npos);
+    CHECK_TRUE(report.find("проверка") != std::string::npos);
+    // Контекст — то, что отличает отчёт «упало» от отчёта «упало ВОТ ЗДЕСЬ».
+    CHECK_TRUE(report.find("/tmp/demo") != std::string::npos);
+    CHECK_TRUE(report.find("main.sage") != std::string::npos);
+    // Хвост лога: последняя ошибка перед падением обычно и есть причина.
+    CHECK_TRUE(report.find("вот это и сломалось") != std::string::npos);
+    CHECK_TRUE(report.find("Стек вызовов") != std::string::npos);
+}
+
+TEST(CrashReport_survives_a_throwing_context_provider) {
+    // Контекст собирает вызывающий, и в момент падения он может упасть сам:
+    // процесс уже сломан. Отчёт обязан выйти всё равно — иначе обработчик
+    // подводит ровно тогда, когда он единственный источник информации.
+    sage::CrashHandler::Config cfg;
+    cfg.AppName = "SAGE Test";
+    cfg.ReportDir = ".";
+    cfg.Context = []() -> std::string { throw std::runtime_error("контекст сломан"); };
+    sage::CrashHandler::Install(cfg);
+
+    const std::string report = sage::CrashHandler::BuildReport("падение при сломанном контексте");
+    sage::CrashHandler::Uninstall();
+
+    CHECK_TRUE(report.find("падение при сломанном контексте") != std::string::npos);
+    CHECK_TRUE(report.find("Контекст недоступен") != std::string::npos);
+    CHECK_TRUE(report.find("Стек вызовов") != std::string::npos);
+}
+
+TEST(CrashReport_ring_buffer_keeps_only_the_tail) {
+    sage::CrashHandler::Config cfg;
+    cfg.AppName = "SAGE Test";
+    cfg.ReportDir = ".";
+    sage::CrashHandler::Install(cfg);
+    // Больше, чем вмещает кольцевой буфер: старое обязано вытесняться, а не
+    // расти без предела — в момент падения выделять память нельзя.
+    for (int i = 0; i < 200; ++i) LOG_INFO("Ring") << "сообщение " << i;
+    const std::string report = sage::CrashHandler::BuildReport("кольцо");
+    sage::CrashHandler::Uninstall();
+
+    CHECK_TRUE(report.find("сообщение 199") != std::string::npos);   // хвост на месте
+    CHECK_TRUE(report.find("сообщение 0 ") == std::string::npos);    // голова вытеснена
+}

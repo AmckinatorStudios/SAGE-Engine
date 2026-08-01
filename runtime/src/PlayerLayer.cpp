@@ -335,7 +335,38 @@ void PlayerLayer::OnRender() {
     // происходит только при смене цвета неба.
     m_reflections.SetEnabled(m_scene->Reflections.Enabled);
     m_reflections.SetIntensity(m_scene->Reflections.Intensity);
-    if (m_sky) m_reflections.UpdateSky(*m_sky, env);
+    if (m_sky) {
+        // Настоящее небо сцены (набор граней), если оно задано, — иначе
+        // отражение показывало бы градиент вместо того, что видно в кадре.
+        std::shared_ptr<Skybox> skyAsset;
+        const Skybox* cubemap = nullptr;
+        if (env.Skybox.HasCubemap()) {
+            skyAsset = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir);
+            cubemap = skyAsset.get();
+        }
+        m_reflections.UpdateSky(*m_sky, env, cubemap);
+    }
+
+    // Зонды сцены: не больше одного за кадр (шесть проходов геометрии).
+    if (m_scene->Reflections.Enabled) {
+        sage::render::UpdateReflectionProbes(
+            *m_scene,
+            [&](const glm::mat4& v, const glm::mat4& p) {
+                device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                device.Clear(true, true);
+                if (m_sky && env.Skybox.Enabled)
+                    m_sky->Draw(v, p, env.Skybox.TopColor, env.Skybox.HorizonColor);
+                sage::render::SceneColorInput c;
+                c.View = v;
+                c.Proj = p;
+                c.ViewPos = glm::vec3(glm::inverse(v)[3]);
+                c.Env = &env;
+                c.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+                c.Time = m_sceneTime;
+                sage::render::RenderSceneColor(*m_scene, m_batch, c);
+            },
+            1);
+    }
 
     // --- Тени: глубина от солнца (можно отключить в настройках) ---
     // Строго ПОСЛЕ выбора камеры: каскады делят дальность именно её взгляда, и
@@ -425,6 +456,12 @@ void PlayerLayer::OnRender() {
     color.OcclusionCulling = cfg.OcclusionCulling;
     color.Time = m_sceneTime;
     color.Reflection = m_reflections.Binding(vpW, vpH, m_planar.Texture());
+    float probeIntensity = 1.0f;
+    if (const sage::render::EnvironmentMap* probe =
+            sage::render::PickReflectionProbe(*m_scene, viewPos, &probeIntensity)) {
+        color.Reflection.Env = probe;
+        color.Reflection.Intensity = probeIntensity;
+    }
     sage::render::RenderSceneColor(*m_scene, m_batch, color);
 
     // Частицы (billboard) — camRight/Up берём из матрицы вида.

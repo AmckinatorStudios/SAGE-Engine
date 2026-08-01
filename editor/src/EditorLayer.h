@@ -180,6 +180,16 @@ private:
     std::filesystem::path m_scenePath;   // куда сохранена/откуда открыта текущая сцена
     std::filesystem::path m_assetsCwd;   // текущая папка панели Assets
     bool m_sceneDirty = false;           // есть несохранённые правки (маркер '*')
+    // Автосохранение и восстановление после падения. Оба пишут в ОТДЕЛЬНЫЕ
+    // файлы рядом с редактором, а не поверх сцены (см. OnUpdate).
+    float m_autosaveInterval = 60.0f;    // 0 — выключено
+    float m_autosaveTimer = 0.0f;
+    std::string m_lastAutosave;
+    // Найденный при запуске файл восстановления: показать предложение один раз.
+    std::string m_recoveryFile;
+    bool m_recoveryPrompt = false;
+
+    void DrawRecoveryPrompt();
     std::string m_windowTitle;           // кэш заголовка (не дёргать GLFW каждый кадр)
 
     // --- сцена и рендер превью ---

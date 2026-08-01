@@ -1,4 +1,5 @@
 #include "Log.h"
+#include "sage/core/CrashHandler.h"
 #include <iostream>
 #include <iomanip>
 #include <ctime>
@@ -93,6 +94,14 @@ void Log::WriteLine(LogLevel level, const std::string& category, const std::stri
     }
 
     if (s_sink) s_sink(level, category, message);
+
+    // Копия в кольцевой буфер отчёта о падении. Напрямую, а не через Sink,
+    // намеренно: Sink один, и его забирает консоль редактора — а последние
+    // строки лога нужны в отчёте независимо от того, открыт ли редактор.
+    // Буфер фиксированный и заполняется без выделений: в момент падения ни
+    // файл лога, ни консоль могут быть уже недоступны.
+    sage::CrashHandler::Note(std::string("[") + LevelName(level) + "] [" + category +
+                             "] " + message);
 }
 
 void Log::SetSink(Sink sink) {
