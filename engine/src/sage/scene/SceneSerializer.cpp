@@ -402,6 +402,10 @@ static void SaveUIElement(json& j, const UIElementComponent& u) {
     uj["iconColor"] = Vec4ToJson(u.IconColor);
     uj["gradientColor"] = Vec4ToJson(u.GradientColor);
     uj["shadowSize"] = u.ShadowSize;
+    uj["sprite"] = Vec4ToJson(u.Sprite);
+    uj["sliceBorder"] = Vec4ToJson(u.SliceBorder);
+    uj["pixelScale"] = u.PixelScale;
+    uj["pixelArt"] = u.PixelArt;
     uj["padX"] = u.PadX;
     uj["autoWidth"] = u.AutoWidth;
 }
@@ -437,11 +441,22 @@ static UIElementComponent ParseUIElement(const json& uj) {
     if (uj.contains("iconColor")) u.IconColor = Vec4FromJson(uj["iconColor"], u.IconColor);
     if (uj.contains("gradientColor")) u.GradientColor = Vec4FromJson(uj["gradientColor"], u.GradientColor);
     u.ShadowSize = uj.value("shadowSize", u.ShadowSize);
+    if (uj.contains("sprite")) u.Sprite = Vec4FromJson(uj["sprite"], u.Sprite);
+    if (uj.contains("sliceBorder")) u.SliceBorder = Vec4FromJson(uj["sliceBorder"], u.SliceBorder);
+    u.PixelScale = uj.value("pixelScale", u.PixelScale);
+    u.PixelArt = uj.value("pixelArt", u.PixelArt);
     u.PadX = uj.value("padX", u.PadX);
     u.AutoWidth = uj.value("autoWidth", u.AutoWidth);
     // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).
-    if (!u.TexturePath.empty())
-        u.Tex = ResourceManager::Instance().GetTexture(u.TexturePath);
+    if (!u.TexturePath.empty()) {
+        // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
+        // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний
+        // спрайт.
+        u.Tex = u.PixelArt
+                    ? ResourceManager::Instance().GetTexture(u.TexturePath, TextureFilter::Nearest,
+                                                             /*mipmaps=*/false)
+                    : ResourceManager::Instance().GetTexture(u.TexturePath);
+    }
     return u;
 }
 

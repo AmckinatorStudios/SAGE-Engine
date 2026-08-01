@@ -42,7 +42,9 @@ public:
     void SetGameSize(int w, int h) { m_gameW = w; m_gameH = h; }
 
     // Общий depth-проход солнца (одна карта теней на кадр для обоих окон).
-    void RenderShadow(Scene& scene, const LightingEnvironment& env);
+    // camera — камера ВЬЮПОРТА: карта теней строится вокруг неё, а не вокруг
+    // начала мира, иначе всё, что редактор отлистал в сторону, теней лишается.
+    void RenderShadow(Scene& scene, const LightingEnvironment& env, const Camera& camera);
 
     // Превью сцены редакторской камерой. Возвращает использованные view/proj
     // (нужны вызывающему для гизмо/пикинга). mode/showGrid — из тулбара.

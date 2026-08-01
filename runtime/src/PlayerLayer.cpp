@@ -267,25 +267,27 @@ void PlayerLayer::OnRender() {
     // без неё считать их не из чего. Порядок «тени, потом камера» держался
     // только на том, что одной карте камера была не нужна.
     if (cfg.Shadows) {
-        if (m_shadows->CascadeCount() > 1) {
-            ShadowMap::CameraView v;
-            v.Position = viewPos;
-            // Направление и «верх» достаём из матрицы вида: камера здесь может
-            // быть как компонентом сцены, так и запасной, и общего объекта
-            // Camera у них нет.
-            const glm::mat3 basis = glm::mat3(view);
-            v.Forward = -glm::vec3(basis[0][2], basis[1][2], basis[2][2]);
-            v.Up = glm::vec3(basis[0][1], basis[1][1], basis[2][1]);
-            // Угол обзора и ближнюю плоскость восстанавливаем из матрицы
-            // проекции — по той же причине.
-            v.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
-            v.Aspect = aspect;
-            v.Near = proj[3][2] / (proj[2][2] - 1.0f);
-            v.ShadowDistance = cfg.ShadowDistance;
-            m_shadows->SetCascades(env.Sun.Direction, v);
-        } else {
-            m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
-        }
+        ShadowMap::CameraView v;
+        v.Position = viewPos;
+        // Направление и «верх» достаём из матрицы вида: камера здесь может быть
+        // как компонентом сцены, так и запасной, и общего объекта Camera у них
+        // нет.
+        const glm::mat3 basis = glm::mat3(view);
+        v.Forward = -glm::vec3(basis[0][2], basis[1][2], basis[2][2]);
+        v.Up = glm::vec3(basis[0][1], basis[1][1], basis[2][1]);
+        // Угол обзора и ближнюю плоскость восстанавливаем из матрицы проекции —
+        // по той же причине.
+        v.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
+        v.Aspect = aspect;
+        v.Near = proj[3][2] / (proj[2][2] - 1.0f);
+        v.ShadowDistance = cfg.ShadowDistance;
+        // Одна карта — это тоже карта ВОКРУГ КАМЕРЫ, а не вокруг начала мира:
+        // раньше здесь стоял ортобокс радиусом 24 м в точке (0,0,0), и всё, что
+        // игра успевала отплыть или отойти от неё, оставалось без теней —
+        // молча, потому что это выглядит как «тени просто выключены», а не как
+        // ошибка.
+        if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
+        else m_shadows->FitSingle(env.Sun.Direction, v);
         sage::render::RenderShadowDepth(*m_shadows, *m_scene, m_batch, window.Width(),
                                         window.Height());
     }

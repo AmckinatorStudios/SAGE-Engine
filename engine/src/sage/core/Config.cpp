@@ -179,6 +179,10 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Fog              = gfx.value("fog", Fog);
     Skybox           = gfx.value("skybox", Skybox);
 
+    auto ui = j.value("ui", json::object());
+    UiFont = ui.value("font", UiFont);
+    UiFontPixelHeight = ui.value("fontPixelHeight", UiFontPixelHeight);
+
     auto pp = j.value("postProcess", json::object());
     Exposure   = pp.value("exposure", Exposure);
     Gamma      = pp.value("gamma", Gamma);
@@ -225,6 +229,9 @@ bool EngineConfig::SaveFile(const std::string& path) const {
         {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
         {"occlusionCulling", OcclusionCulling},
         {"postProcessing", PostProcessing}, {"fog", Fog}, {"skybox", Skybox},
+    };
+    j["ui"] = {
+        {"font", UiFont}, {"fontPixelHeight", UiFontPixelHeight},
     };
     j["postProcess"] = {
         {"exposure", Exposure}, {"gamma", Gamma}, {"saturation", Saturation},

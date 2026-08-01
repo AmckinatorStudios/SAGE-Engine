@@ -929,7 +929,7 @@ void EditorLayer::OnRender() {
     // shadow-проход на кадр, Viewport и Game сэмплируют общую карту.
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
-    m_renderer.RenderShadow(*m_scene, env); // общая карта теней (Viewport + Game)
+    m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode, m_showGrid,
                               cfg, m_view, m_proj); // отдаёт view/proj для гизмо/пикинга
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)

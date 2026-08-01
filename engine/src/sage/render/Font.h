@@ -59,6 +59,12 @@ public:
     float PixelHeight() const { return m_pixelHeight; }
     const sage::rhi::Texture2D& Atlas() const { return *m_atlas; }
 
+    // Есть ли в атласе глиф для символа. Нужна не рисованию (оно и так
+    // подставит «?»), а тому, кто ВЫБИРАЕТ шрифт: пиксельные наборы почти
+    // никогда не несут кириллицы, и молча получить экран из вопросительных
+    // знаков — худший из возможных ответов.
+    bool HasGlyph(uint32_t codepoint) const { return Find(codepoint) != nullptr; }
+
 private:
     const Glyph* Find(uint32_t codepoint) const;
 

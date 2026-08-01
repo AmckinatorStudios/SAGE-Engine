@@ -39,6 +39,9 @@ uniform sampler2D uShadowMap3;
 uniform mat4 uShadowLightSpace[4];
 uniform int uShadowCascades;    // сколько каскадов реально заполнено (1..4)
 uniform bool uShadowsEnabled;
+// Где тень начинает растворяться и где её уже нет (метры от камеры).
+uniform float uShadowFadeStart;
+uniform float uShadowFadeEnd;
 uniform int uShadingMode; // 0 lit / 1 unlit / 2 normals (решает вызывающий main)
 uniform bool uFogEnabled;
 uniform vec3 uFogColor;
@@ -129,6 +132,11 @@ bool InsideCascade(vec3 pc, float margin) {
 // Насколько фрагмент близок к краю каскада: 0 — в середине, 1 — на границе.
 // По этому числу ближний и дальний каскады смешиваются в узкой полосе, иначе
 // на стыке видна ступенька: слева тень мягкая и подробная, справа — грубая.
+//
+// Если следующего каскада в этой точке нет, подмешивать НЕЧЕГО — и подмешивать
+// туда ноль (то есть «свет») нельзя: по всей границе каскада тень плавно
+// выцветала бы в освещённую полосу. В этом случае остаётся значение своего
+// каскада — см. CalcSunShadow.
 float CascadeEdge(vec3 pc, float band) {
     vec2 d = min(pc.xy, vec2(1.0) - pc.xy); // расстояние до ближайшего края
     float m = min(d.x, d.y);
@@ -153,7 +161,7 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
             float w = CascadeEdge(pc0, kBand);
             if (w > 0.0) {
                 vec3 pc1 = CascadeCoords(1, worldPos);
-                float far = InsideCascade(pc1, kMargin) ? ShadowPCF(uShadowMap1, pc1, normal, ndl) : 0.0;
+                float far = InsideCascade(pc1, kMargin) ? ShadowPCF(uShadowMap1, pc1, normal, ndl) : s;
                 s = mix(s, far, w);
             }
         }
@@ -167,7 +175,7 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
                 float w = CascadeEdge(pc1, kBand);
                 if (w > 0.0) {
                     vec3 pc2 = CascadeCoords(2, worldPos);
-                    float far = InsideCascade(pc2, kMargin) ? ShadowPCF(uShadowMap2, pc2, normal, ndl) : 0.0;
+                    float far = InsideCascade(pc2, kMargin) ? ShadowPCF(uShadowMap2, pc2, normal, ndl) : s;
                     s = mix(s, far, w);
                 }
             }
@@ -182,7 +190,7 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
                 float w = CascadeEdge(pc2, kBand);
                 if (w > 0.0) {
                     vec3 pc3 = CascadeCoords(3, worldPos);
-                    float far = InsideCascade(pc3, kMargin) ? ShadowPCF(uShadowMap3, pc3, normal, ndl) : 0.0;
+                    float far = InsideCascade(pc3, kMargin) ? ShadowPCF(uShadowMap3, pc3, normal, ndl) : s;
                     s = mix(s, far, w);
                 }
             }
@@ -196,6 +204,20 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
     // Дальше последнего каскада тени нет — там всё освещено. Тянуть её краем
     // карты значило бы рисовать полосу ложной тени до горизонта.
     return 0.0;
+}
+
+// Тень с растворением у предела дальности.
+//
+// Без него граница карты видна как РОВНАЯ ЛИНИЯ поперёк земли: с одной стороны
+// у всех предметов тени есть, с другой — ни у кого. Глаз читает это как ошибку
+// рендера, а не как «дальше тени не считаются», и никакой фильтрацией внутри
+// карты это не лечится — дело не в качестве тени, а в том, что она кончается
+// разом. Узкая полоса, на которой тень гаснет, убирает линию целиком.
+float SunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
+    float s = CalcSunShadow(worldPos, normal, sunDir);
+    if (s <= 0.0) return 0.0;
+    float d = length(uViewPos - worldPos);
+    return s * (1.0 - smoothstep(uShadowFadeStart, uShadowFadeEnd, d));
 }
 
 vec3 CalcHemisphereAmbient(vec3 normal) {
@@ -260,7 +282,7 @@ vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, 
 
     // Солнце (направленное) + PCF-тень.
     vec3 sunL = normalize(-uSunDir);
-    float shadow = uShadowsEnabled ? CalcSunShadow(fragPos, N, sunL) : 0.0;
+    float shadow = uShadowsEnabled ? SunShadow(fragPos, N, sunL) : 0.0;
     Lo += PbrContrib(N, V, sunL, uSunColor * uSunIntensity * (1.0 - shadow), albedo, metallic, rough);
 
     // Точечные.

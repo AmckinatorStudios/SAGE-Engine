@@ -117,16 +117,36 @@ std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
     return GetModel(path);
 }
 
-std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path) {
+std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
+                                                    TextureFilter filter, bool mipmaps) {
     if (path.empty()) return nullptr;
     auto it = m_textures.find(path);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick(); // обращение -> «свежая» для LRU
+        // Тот же файл запросили с другой фильтрацией: пересоздаём картинку НА
+        // МЕСТЕ, чтобы все, кто уже держит на неё shared_ptr, увидели правку.
+        // Ключ кэша остаётся путём к файлу — по нему же идут перезагрузка и
+        // стриминг, и подмешивать в него настройки нельзя.
+        if (it->second.Tex && (it->second.Filter != filter || it->second.Mipmaps != mipmaps)) {
+            try {
+                *it->second.Tex = Texture(path, filter, mipmaps);
+                m_textureBytes -= it->second.Bytes;
+                it->second.Bytes = it->second.Tex->GpuBytes();
+                m_textureBytes += it->second.Bytes;
+                it->second.Filter = filter;
+                it->second.Mipmaps = mipmaps;
+            } catch (const std::exception& e) {
+                LOG_ERROR("Resources") << "Смена фильтрации не удалась (" << path
+                                       << "): " << e.what();
+            }
+        }
         return it->second.Tex;
     }
     TextureRecord rec;
+    rec.Filter = filter;
+    rec.Mipmaps = mipmaps;
     try {
-        rec.Tex = std::make_shared<Texture>(path);
+        rec.Tex = std::make_shared<Texture>(path, filter, mipmaps);
         rec.Bytes = rec.Tex->GpuBytes();
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Текстура не загрузилась (" << path << "): " << e.what();

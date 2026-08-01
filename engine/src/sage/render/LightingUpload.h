@@ -79,6 +79,8 @@ inline void UploadShadowUniforms(Shader& shader, const ShadowBinding& shadows) {
     }
     shader.SetInt("uShadowCascades", count);
     shader.SetInt("uShadowsEnabled", shadows.Enabled ? 1 : 0);
+    shader.SetFloat("uShadowFadeStart", shadows.FadeStart);
+    shader.SetFloat("uShadowFadeEnd", shadows.FadeEnd);
 }
 
 // Привязать карты и залить uniform'ы одним вызовом. Разделять эти два шага —

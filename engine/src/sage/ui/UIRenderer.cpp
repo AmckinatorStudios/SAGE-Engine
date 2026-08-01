@@ -2,6 +2,7 @@
 #include "stb_easy_font.h"
 #include "sage/core/Log.h"
 #include "sage/rhi/GraphicsDevice.h"
+#include "sage/core/Config.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <cstdio>
@@ -68,7 +69,12 @@ void main() {
     }
     if (vHalf.x > 0.0) {
         float d = RoundedBoxSDF(vLocal, vHalf, vParams.x);
-        float aa = 0.75; // полупиксельный антиалиасинг края
+        // Ширина перехода — РЕАЛЬНЫЙ размер пикселя в единицах SDF, а не
+        // константа. Константа верна ровно при одном масштабе интерфейса: на
+        // другом край либо зубчатый (переход уже пикселя), либо мыльный
+        // (шире). fwidth даёт, насколько d меняется между соседними пикселями,
+        // то есть ровно ту ширину, на которой край и должен размываться.
+        float aa = max(fwidth(d), 0.0001) * 0.75;
         if (vParams.y > 0.0) {
             // Рамка: полоса толщиной t внутрь от контура.
             col.a *= (1.0 - smoothstep(-aa, aa, d)) *
@@ -107,10 +113,16 @@ UIRenderer::UIRenderer()
     };
     m_geometry = sage::rhi::GraphicsDevice::Get().CreateGeometry(layout);
 
-    // Пытаемся загрузить шрифт по умолчанию — молча (без шрифта работает
-    // fallback на stb_easy_font, поэтому это не ошибка).
-    for (const char* path : kDefaultFontCandidates) {
-        if (SetFont(path)) break;
+    // Сначала — шрифт из настроек (игра со своим стилем), потом кандидаты по
+    // умолчанию. Молча: без шрифта работает fallback на stb_easy_font, поэтому
+    // это не ошибка.
+    bool loaded = false;
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    if (!cfg.UiFont.empty()) loaded = SetFont(cfg.UiFont, cfg.UiFontPixelHeight);
+    if (!loaded) {
+        for (const char* path : kDefaultFontCandidates) {
+            if (SetFont(path)) { loaded = true; break; }
+        }
     }
     if (!m_font) {
         LOG_WARN("UIRenderer") << "Шрифт по умолчанию не найден — текст через stb_easy_font (ASCII)";
@@ -120,6 +132,14 @@ UIRenderer::UIRenderer()
 bool UIRenderer::SetFont(const std::string& path, float pixelHeight) {
     try {
         m_font = Font::Load(path, pixelHeight);
+        // Предупреждение о кириллице — один раз при загрузке. Пиксельные шрифты
+        // из готовых наборов почти всегда только латинские, а надписи в игре
+        // русские: без этой строки разработчик видит экран вопросительных знаков
+        // и ищет ошибку в движке, а не в шрифте.
+        if (m_font && !m_font->HasGlyph(0x0410 /* А */)) {
+            LOG_WARN("UIRenderer") << "Шрифт без кириллицы (" << path
+                                   << ") — русский текст будет знаками вопроса";
+        }
         return true;
     } catch (const std::exception& e) {
         LOG_DEBUG("UIRenderer") << "SetFont пропущен (" << path << "): " << e.what();
@@ -223,6 +243,89 @@ void UIRenderer::Image(float x, float y, float w, float h, const Texture* textur
     if (!texture) return;
     CurrentSegment(texture).QuadCount++;
     PushQuad(x, y, w, h, tint, alpha, radius, 0.0f, /*solidUv=*/false);
+}
+
+void UIRenderer::PushImageQuad(float x, float y, float w, float h, glm::vec2 uv0, glm::vec2 uv1,
+                               glm::vec3 tint, float alpha) {
+    auto byte = [](float v) {
+        return static_cast<unsigned char>(glm::clamp(v, 0.0f, 1.0f) * 255.0f);
+    };
+    const unsigned char r = byte(tint.r), g = byte(tint.g), b = byte(tint.b), a = byte(alpha);
+    // Half = 0 — SDF выключен: у куска листа нет своей формы, он прямоугольный.
+    m_vertices.push_back({x,     y,     0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({x + w, y,     0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({x + w, y + h, 0.0f, r, g, b, a, uv1.x, uv1.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({x,     y + h, 0.0f, r, g, b, a, uv0.x, uv1.y, 0, 0, 0, 0, 0, 0});
+    ++m_quadCount;
+}
+
+namespace {
+// V-координата пикселя ЛИСТА, считая сверху.
+//
+// Текстуры движка загружаются перевёрнутыми по вертикали (stbi flip): у OpenGL
+// начало координат внизу, и для 3D так правильно. Но спрайт в наборе описан от
+// ВЕРХНЕГО левого угла файла — как его видит человек в редакторе картинок, — и
+// переворот надо снять ровно здесь. Иначе «панель в (11,11)» возьмёт кусок с
+// противоположного края листа, и это выглядит как случайный мусор.
+inline float SheetV(float yPixels, float texHeight) { return 1.0f - yPixels / texHeight; }
+
+// Кусок листа в долях текстуры. Спрайт задан в пикселях исходника — здесь он и
+// переводится, один раз и в одном месте.
+struct SpriteUV { glm::vec2 uv0{0.0f, 1.0f}, uv1{1.0f, 0.0f}; };
+SpriteUV ResolveSprite(const Texture& tex, const UIRenderer::Sprite& s) {
+    SpriteUV out;
+    if (s.Whole() || tex.Width() <= 0 || tex.Height() <= 0) return out;
+    const float tw = (float)tex.Width(), th = (float)tex.Height();
+    out.uv0 = {s.X / tw, SheetV(s.Y, th)};
+    out.uv1 = {(s.X + s.W) / tw, SheetV(s.Y + s.H, th)};
+    return out;
+}
+} // namespace
+
+void UIRenderer::ImageSprite(float x, float y, float w, float h, const Texture* texture,
+                             Sprite src, glm::vec3 tint, float alpha) {
+    if (!texture) return;
+    CurrentSegment(texture).QuadCount++;
+    const SpriteUV uv = ResolveSprite(*texture, src);
+    PushImageQuad(x, y, w, h, uv.uv0, uv.uv1, tint, alpha);
+}
+
+void UIRenderer::ImageNineSlice(float x, float y, float w, float h, const Texture* texture,
+                                Sprite src, glm::vec4 border, float scale, glm::vec3 tint,
+                                float alpha) {
+    if (!texture || texture->Width() <= 0 || texture->Height() <= 0) return;
+    if (src.Whole()) {
+        src = Sprite{0.0f, 0.0f, (float)texture->Width(), (float)texture->Height()};
+    }
+    if (scale <= 0.0f) scale = 1.0f;
+
+    // Углы в пикселях ЭКРАНА. Если рамка не влезает в запрошенный размер (панель
+    // уже собственных углов), доли ужимаются пропорционально — иначе куски
+    // наложились бы друг на друга и рамка вывернулась бы наизнанку.
+    float l = border.x * scale, t = border.y * scale;
+    float r = border.z * scale, b = border.w * scale;
+    const float sumX = l + r, sumY = t + b;
+    if (sumX > w && sumX > 0.0f) { const float k = w / sumX; l *= k; r *= k; }
+    if (sumY > h && sumY > 0.0f) { const float k = h / sumY; t *= k; b *= k; }
+
+    const float tw = (float)texture->Width(), th = (float)texture->Height();
+    // Границы кусков: по X — левый край, конец угла, начало правого угла, край.
+    const float sx[4] = {src.X, src.X + border.x, src.X + src.W - border.z, src.X + src.W};
+    const float sy[4] = {src.Y, src.Y + border.y, src.Y + src.H - border.w, src.Y + src.H};
+    const float dx[4] = {x, x + l, x + w - r, x + w};
+    const float dy[4] = {y, y + t, y + h - b, y + h};
+
+    CurrentSegment(texture).QuadCount += 9;
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const float qw = dx[col + 1] - dx[col];
+            const float qh = dy[row + 1] - dy[row];
+            if (qw <= 0.0f || qh <= 0.0f) { CurrentSegment(texture).QuadCount--; continue; }
+            PushImageQuad(dx[col], dy[row], qw, qh,
+                          {sx[col] / tw, SheetV(sy[row], th)},
+                          {sx[col + 1] / tw, SheetV(sy[row + 1], th)}, tint, alpha);
+        }
+    }
 }
 
 void UIRenderer::PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]) {

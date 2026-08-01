@@ -67,9 +67,22 @@ void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat
     m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
 }
 
-void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env) {
+void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env,
+                                       const Camera& camera) {
     Window& window = sage::Application::Get().GetWindow();
-    m_shadows->SetLightMatrix(env.Sun.Direction, glm::vec3(0.0f), 24.0f);
+    // Карта едет за камерой вьюпорта. Раньше здесь стоял ортобокс радиусом
+    // 24 м в точке (0,0,0): стоило отлететь от начала мира, и сцена оставалась
+    // без теней — что читается как «тени выключены», а не как ошибка.
+    ShadowMap::CameraView v;
+    v.Position = camera.Position;
+    v.Forward = camera.Front;
+    v.Up = camera.Up;
+    v.FovY = glm::radians(camera.Fov);
+    v.Aspect = window.Height() > 0 ? (float)window.Width() / (float)window.Height() : 1.0f;
+    v.Near = camera.NearClip;
+    v.ShadowDistance = sage::EngineConfig::Get().ShadowDistance;
+    if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
+    else m_shadows->FitSingle(env.Sun.Direction, v);
     sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
 }
 

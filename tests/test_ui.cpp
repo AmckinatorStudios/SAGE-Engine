@@ -10,6 +10,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
+#include "sage/render/ShadowMap.h"
 
 using sage::ui::UIRect;
 
@@ -89,6 +90,10 @@ TEST(UI_component_serialization_roundtrip) {
     u.BarFillColor = {0.8f, 0.2f, 0.2f, 1.0f};
     u.PadX = 11.5f;
     u.AutoWidth = true;
+    u.Sprite = {11.0f, 59.0f, 26.0f, 28.0f};
+    u.SliceBorder = {8.0f, 8.0f, 8.0f, 9.0f};
+    u.PixelScale = 3.0f;
+    u.PixelArt = true;
     scene.Registry().emplace<UIElementComponent>(panel.Entity(), u);
 
     std::string json = SceneSerializer::SaveToString(scene);
@@ -114,6 +119,11 @@ TEST(UI_component_serialization_roundtrip) {
         CHECK_NEAR(r->BarFillColor.r, 0.8f, 1e-4);
         CHECK_NEAR(r->PadX, 11.5f, 1e-4);
         CHECK_TRUE(r->AutoWidth);
+        CHECK_NEAR(r->Sprite.x, 11.0f, 1e-4);
+        CHECK_NEAR(r->Sprite.w, 28.0f, 1e-4);
+        CHECK_NEAR(r->SliceBorder.w, 9.0f, 1e-4);
+        CHECK_NEAR(r->PixelScale, 3.0f, 1e-4);
+        CHECK_TRUE(r->PixelArt);
     }
 }
 
@@ -221,4 +231,24 @@ TEST(UI_icon_registry_knows_its_names) {
         CHECK_TRUE(sage::ui::HasIcon(n));
     }
     CHECK_FALSE(sage::ui::HasIcon("нет-такой-иконки"));
+}
+
+// --- Растворение тени у предела дальности ---------------------------------
+// Без него граница карты видна как ровная линия поперёк земли: у всех предметов
+// ближе неё тени есть, дальше — ни у кого. Проверяем саму полосу: она обязана
+// кончаться ровно на дальности и начинаться заметно раньше.
+TEST(Shadow_fade_band_from_distance) {
+    ShadowBinding b;
+    // По умолчанию — «никогда»: карта без подгонки не должна гасить тени.
+    CHECK_TRUE(b.FadeStart > 1e8f);
+
+    b.SetFadeFromDistance(120.0f);
+    CHECK_NEAR(b.FadeEnd, 120.0f, 1e-4);
+    CHECK_TRUE(b.FadeStart < b.FadeEnd);       // полоса, а не точка
+    CHECK_TRUE(b.FadeStart > 0.5f * b.FadeEnd); // но узкая: тени не съедаются заранее
+
+    // Вырожденная дальность не должна давать отрицательную или нулевую полосу.
+    b.SetFadeFromDistance(0.0f);
+    CHECK_TRUE(b.FadeEnd >= 1.0f);
+    CHECK_TRUE(b.FadeStart < b.FadeEnd);
 }

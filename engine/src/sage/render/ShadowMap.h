@@ -106,6 +106,9 @@ public:
     // Если карт заведено несколько, лишние каскады получают ту же матрицу —
     // шейдер найдёт фрагмент в нулевом и до остальных не дойдёт.
     void SetLightMatrix(glm::vec3 sunDir, glm::vec3 center, float radius) {
+        // Карта фиксированного радиуса: дальше него теней нет, и растворять их
+        // надо по нему же, а не по дальности камеры.
+        m_shadowDistance = radius * 2.0f;
         const glm::mat4 m = FitOrtho(sunDir, center, radius);
         for (int i = 0; i < m_cascades; ++i) {
             m_lightMatrix[(size_t)i] = m;
@@ -124,45 +127,38 @@ public:
     void SetCascades(glm::vec3 sunDir, const CameraView& view, float lambda = 0.6f) {
         const float nearZ = std::max(view.Near, 0.01f);
         const float farZ = std::max(view.ShadowDistance, nearZ * 2.0f);
-
-        const glm::vec3 forward = glm::normalize(view.Forward);
-        glm::vec3 right = glm::cross(forward, view.Up);
-        // Вырожденный случай: смотрим точно вдоль up. Берём любую ось,
-        // перпендикулярную forward, — на размер сферы это не влияет.
-        if (glm::dot(right, right) < 1e-8f) right = glm::vec3(1.0f, 0.0f, 0.0f);
-        right = glm::normalize(right);
-        const glm::vec3 up = glm::cross(right, forward);
-
-        const float tanH = std::tan(view.FovY * 0.5f);
-        const float tanW = tanH * view.Aspect;
+        m_shadowDistance = farZ;
 
         float splitNear = nearZ;
         for (int i = 0; i < m_cascades; ++i) {
             const float splitFar = SplitDistance(i, m_cascades, nearZ, farZ, lambda);
-
-            // Центр описанной сферы под-фрустума лежит на оси взгляда. Ищем
-            // его аналитически: точка, равноудалённая от ближнего и дальнего
-            // колец. Если формула выводит центр за пределы отрезка (широкий
-            // угол, короткий кусок), сфера строится вокруг дальнего кольца —
-            // она его и накрывает.
-            const float n = splitNear, f = splitFar;
-            const float k2 = tanH * tanH + tanW * tanW;
-            float center = 0.5f * (n + f) * (1.0f + k2);
+            glm::vec3 worldCenter;
             float radius;
-            if (center >= f) {
-                center = f;
-                radius = f * std::sqrt(k2);
-            } else {
-                const float dx = f - center;
-                radius = std::sqrt(dx * dx + f * f * k2);
-            }
-
-            const glm::vec3 worldCenter = view.Position + forward * center;
+            FrustumSphere(view, splitNear, splitFar, worldCenter, radius);
             m_lightMatrix[(size_t)i] = FitOrtho(sunDir, worldCenter, radius);
             m_radius[(size_t)i] = radius;
             splitNear = splitFar;
         }
         m_activeCascades = m_cascades;
+    }
+
+    // Одна карта, но привязанная к КАМЕРЕ, а не к точке в мире: сфера,
+    // накрывающая видимый кусок до ShadowDistance.
+    //
+    // Нужна потому, что «одна карта» и «карта в начале мира» — разные вещи, а
+    // раньше вызывающие путали их и писали SetLightMatrix(sun, {0,0,0}, 24):
+    // всё, что дальше двадцати четырёх метров от начала координат, теней не
+    // имело и не отбрасывало — не из-за настройки качества, а просто потому,
+    // что уехало из карты. Здесь карта едет за игроком.
+    void FitSingle(glm::vec3 sunDir, const CameraView& view) {
+        const float nearZ = std::max(view.Near, 0.01f);
+        const float farZ = std::max(view.ShadowDistance, nearZ * 2.0f);
+        m_shadowDistance = farZ;
+        glm::vec3 center;
+        float radius;
+        FrustumSphere(view, nearZ, farZ, center, radius);
+        SetLightMatrix(sunDir, center, radius); // выставит m_shadowDistance по радиусу
+        m_shadowDistance = farZ;                // но растворять надо по дальности кадра
     }
 
     // Размер текселя карты в метрах — по нему видно, откуда берётся качество:
@@ -176,15 +172,34 @@ public:
     }
     float CascadeRadius(int cascade) const { return m_radius[(size_t)Clamp(cascade)]; }
 
+    // Насколько далеко ВВЕРХ ПО ЛУЧУ от накрытой области может стоять предмет,
+    // который в неё светит. Ортобокс натянут на то, что ВИДНО, но тень на этот
+    // кусок земли бросает и мачта, чья верхушка на восемнадцать метров выше:
+    // если её не впустить в карту, тень просто обрывается посреди пола. По
+    // глубине это ничего не стоит — ортопроекция линейна, и лишняя сотня метров
+    // на 24-битном буфере даёт точность в микроны.
+    void SetCasterRange(float metres) { m_casterRange = std::max(0.0f, metres); }
+    float CasterRange() const { return m_casterRange; }
+
     void BeginRender(int cascade = 0) {
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
         m_targets[(size_t)Clamp(cascade)]->Bind(); // FBO + viewport под разрешение карты
         device.Clear(/*color=*/false, /*depth=*/true);
-        // Отсечение ЛИЦЕВЫХ граней в проходе глубины (вместо задних):
-        // классический приём против shadow acne — в карту пишется задняя
-        // стенка объекта, а лицевую (освещённую) сравнение уже не самозатеняет.
-        // Работает для замкнутых тел (воксельные кубы, меши-кубы, .obj).
-        device.SetCullMode(sage::rhi::CullMode::Front);
+        // Отсечение задних граней — как в обычном проходе.
+        //
+        // Раньше здесь отсекались ЛИЦЕВЫЕ: классический приём против acne — в
+        // карту пишется дальняя стенка предмета, и его же освещённая сторона
+        // себя не затеняет. Плата за него оказалась хуже болезни. Во-первых,
+        // тень отрывается от предмета ровно на его толщину: куб стоит на полу,
+        // а его тень лежит в метре от него, и между ними полоса света. Во-
+        // вторых, у односторонней геометрии (плоскость, парус, лист) лицевая
+        // грань — единственная, и с таким отсечением она не попадает в карту
+        // вовсе: предмет молча перестаёт отбрасывать тень.
+        //
+        // Самозатенение вместо этого лечится там, где ему и место, — при
+        // выборке: сдвигом точки выборки вдоль нормали и наклонным bias'ом
+        // (см. ShadowPCF в PbrShader.h). Они не отрывают тень от предмета.
+        device.SetCullMode(sage::rhi::CullMode::Back);
     }
 
     void EndRender(int screenW, int screenH) {
@@ -205,9 +220,41 @@ public:
     // Сколько каскадов реально несут разную информацию: после SetLightMatrix
     // это 1, даже если карт заведено больше. Шейдеру важно именно это число.
     int ActiveCascades() const { return m_activeCascades; }
+    // Дальность, на которую построены карты: по ней тень растворяется у края.
+    float ShadowDistance() const { return m_shadowDistance; }
 
 private:
     int Clamp(int cascade) const { return std::clamp(cascade, 0, m_cascades - 1); }
+
+    // Описанная сфера куска фрустума [n, f]. По сфере, а не по коробке: ортобокс,
+    // натянутый на углы под-фрустума, меняет размер при повороте камеры, и тени
+    // «кипят» просто от вращения мышью (см. шапку файла).
+    static void FrustumSphere(const CameraView& view, float n, float f,
+                              glm::vec3& outCenter, float& outRadius) {
+        glm::vec3 forward = glm::normalize(view.Forward);
+        glm::vec3 right = glm::cross(forward, view.Up);
+        // Вырожденный случай: смотрим точно вдоль up. Берём любую ось,
+        // перпендикулярную forward, — на размер сферы это не влияет.
+        if (glm::dot(right, right) < 1e-8f) right = glm::vec3(1.0f, 0.0f, 0.0f);
+
+        const float tanH = std::tan(view.FovY * 0.5f);
+        const float tanW = tanH * view.Aspect;
+        const float k2 = tanH * tanH + tanW * tanW;
+
+        // Центр описанной сферы лежит на оси взгляда: точка, равноудалённая от
+        // ближнего и дальнего колец. Если формула выводит центр за дальнее
+        // кольцо (широкий угол, короткий кусок), сфера строится вокруг него —
+        // она его и накрывает.
+        float center = 0.5f * (n + f) * (1.0f + k2);
+        if (center >= f) {
+            center = f;
+            outRadius = f * std::sqrt(k2);
+        } else {
+            const float dx = f - center;
+            outRadius = std::sqrt(dx * dx + f * f * k2);
+        }
+        outCenter = view.Position + forward * center;
+    }
 
     // Граница i-го каскада: смесь логарифмического и равномерного деления.
     static float SplitDistance(int i, int count, float nearZ, float farZ, float lambda) {
@@ -242,12 +289,17 @@ private:
             center = glm::vec3(glm::inverse(view) * glm::vec4(inLight, 1.0f));
         }
 
-        // «Камеру света» отодвигаем назад по лучу, чтобы видеть весь бокс
-        // снаружи; far берём с запасом на высоту геометрии над центром.
-        const glm::vec3 eye = center - dir * (radius * 2.0f);
+        // «Камеру света» отодвигаем назад по лучу так, чтобы в кадр попал не
+        // только сам бокс, но и всё, что стоит ВЫШЕ него по лучу и светит
+        // внутрь: мачта, стена, крона дерева. Без этого запаса верхушка
+        // отсекается ближней плоскостью, в карту не попадает — и тень
+        // обрывается посреди пола ровно там, где кончается захваченная часть
+        // предмета. Глубине это ничего не стоит: ортопроекция линейна.
+        const float back = radius * 2.0f + m_casterRange;
+        const glm::vec3 eye = center - dir * back;
         const glm::mat4 lightView = glm::lookAt(eye, center, up);
         const glm::mat4 lightProj =
-            glm::ortho(-radius, radius, -radius, radius, 0.1f, radius * 4.0f);
+            glm::ortho(-radius, radius, -radius, radius, 0.1f, back + radius * 2.0f);
         return lightProj * lightView;
     }
 
@@ -257,6 +309,10 @@ private:
     int m_resolution;
     int m_cascades;
     int m_activeCascades = 1;
+    // Сто пятьдесят метров запаса «вверх по лучу». Число щедрое намеренно:
+    // недобор здесь виден как обрыв тени, а перебор не виден вовсе.
+    float m_casterRange = 150.0f;
+    float m_shadowDistance = 1e9f; // выставляется подгонкой карт под кадр
 };
 
 // Текстурные юниты каскадов. Нулевой сидит на юните 1 с тех пор, как тени
@@ -285,6 +341,12 @@ struct ShadowBinding {
     unsigned int Textures[ShadowMap::kMaxCascades] = {0, 0, 0, 0};
     int Count = 1;
     bool Enabled = false;
+    // Где тень начинает растворяться и где её уже нет (метры от камеры).
+    // За последним каскадом карты просто нет, и без этого тень обрывается
+    // ровной линией поперёк земли — самый заметный дефект теней в открытой
+    // сцене: он читается как ошибка рендера, а не как предел дальности.
+    float FadeStart = 1e9f;
+    float FadeEnd = 1e9f;
 
     ShadowBinding() {
         for (glm::mat4& m : Matrices) m = glm::mat4(1.0f);
@@ -304,6 +366,15 @@ struct ShadowBinding {
             Textures[i] = shadows.DepthTexture(i);
         }
         Enabled = enabled;
+        SetFadeFromDistance(shadows.ShadowDistance());
+    }
+
+    // Растворение на последней шестой части дальности. Полоса узкая намеренно:
+    // широкая съедает тени там, где они ещё подробные, а узкой хватает, чтобы
+    // граница перестала быть линией.
+    void SetFadeFromDistance(float distance) {
+        FadeEnd = std::max(distance, 1.0f);
+        FadeStart = FadeEnd * 0.82f;
     }
 
     // Привязывает карты к их юнитам. Незаполненные каскады получают текстуру

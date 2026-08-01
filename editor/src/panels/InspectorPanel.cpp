@@ -606,14 +606,41 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 if (ImGui::InputText("Texture", texBuf, sizeof(texBuf))) u->TexturePath = texBuf;
                 host.TrackLastImGuiItem();
                 ImGui::SameLine();
-                if (ImGui::SmallButton("Load")) {
-                    host.PushUndoSnapshot();
+                auto loadTexture = [&] {
                     u->Tex = u->TexturePath.empty()
                                  ? nullptr
-                                 : ResourceManager::Instance().GetTexture(u->TexturePath);
+                                 : u->PixelArt ? ResourceManager::Instance().GetTexture(
+                                                     u->TexturePath, TextureFilter::Nearest, false)
+                                               : ResourceManager::Instance().GetTexture(
+                                                     u->TexturePath);
+                };
+                if (ImGui::SmallButton("Load")) {
+                    host.PushUndoSnapshot();
+                    loadTexture();
                 }
                 if (!u->TexturePath.empty() && !u->Tex)
                     ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "Texture not loaded (press Load)");
+
+                // Пиксель-арт меняет ФИЛЬТРАЦИЮ загруженной текстуры, поэтому
+                // перезагружаем сразу: иначе галка стоит, а картинка мыльная до
+                // следующего Load, и это выглядит как «галка не работает».
+                if (ImGui::Checkbox("Pixel Art (nearest, no mips)", &u->PixelArt)) {
+                    host.PushUndoSnapshot();
+                    loadTexture();
+                }
+                if (u->Tex) {
+                    ImGui::TextDisabled("Sheet: %d x %d px", u->Tex->Width(), u->Tex->Height());
+                }
+                // Спрайт задаётся в ПИКСЕЛЯХ листа — теми же числами, что
+                // напечатаны в документации набора.
+                ImGui::DragFloat4("Sprite x,y,w,h", &u->Sprite.x, 1.0f, 0.0f, 8192.0f);
+                host.TrackLastImGuiItem();
+                ImGui::TextDisabled("w or h = 0 — the whole file");
+                ImGui::DragFloat4("9-slice l,t,r,b", &u->SliceBorder.x, 0.5f, 0.0f, 512.0f);
+                host.TrackLastImGuiItem();
+                ImGui::DragFloat("Pixel Scale", &u->PixelScale, 0.25f, 0.0f, 16.0f);
+                host.TrackLastImGuiItem();
+                ImGui::TextDisabled("0 — stretch to fit; >0 — source pixel size");
             }
             if (u->Type == UIElementComponent::Kind::Bar) {
                 ImGui::SeparatorText("Bar");

@@ -103,7 +103,25 @@ void DrawElement(const UIElementComponent& e, const UIRect& r, UIRenderer& ui) {
             break; // только иконка (ниже) — подложки у неё нет
         case Kind::Image:
             if (e.Tex) {
-                ui.Image(r.x, r.y, r.w, r.h, e.Tex.get(), fillRgb, e.Color.a, e.Rounding);
+                const UIRenderer::Sprite src{e.Sprite.x, e.Sprite.y, e.Sprite.z, e.Sprite.w};
+                const bool sliced = e.SliceBorder.x > 0.0f || e.SliceBorder.y > 0.0f ||
+                                    e.SliceBorder.z > 0.0f || e.SliceBorder.w > 0.0f;
+                if (sliced) {
+                    // Масштаб пикселя: 0 — «подобрать сам». Для пиксель-арта он
+                    // округляется ВНИЗ до целого — дробный масштаб растягивает
+                    // одни пиксели исходника на два экранных, а соседние на
+                    // один, и ровная рамка идёт волнами.
+                    float scale = e.PixelScale;
+                    if (scale <= 0.0f) {
+                        const float srcH = src.Whole() ? (float)e.Tex->Height() : src.H;
+                        scale = srcH > 0.0f ? r.h / srcH : 1.0f;
+                        if (e.PixelArt) scale = glm::max(1.0f, glm::floor(scale));
+                    }
+                    ui.ImageNineSlice(r.x, r.y, r.w, r.h, e.Tex.get(), src, e.SliceBorder, scale,
+                                      fillRgb, e.Color.a);
+                } else {
+                    ui.ImageSprite(r.x, r.y, r.w, r.h, e.Tex.get(), src, fillRgb, e.Color.a);
+                }
             } else {
                 // Текстура не задана/не загрузилась — заглушка цветом, чтобы
                 // элемент был виден и настраиваем в редакторе.

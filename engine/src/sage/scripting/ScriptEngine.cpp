@@ -284,10 +284,58 @@ void ScriptEngine::RegisterComponentTypes() {
         "IconColor", &UIElementComponent::IconColor,
         "GradientColor", &UIElementComponent::GradientColor,
         "ShadowSize", &UIElementComponent::ShadowSize,
+        "Sprite", &UIElementComponent::Sprite,
+        "SliceBorder", &UIElementComponent::SliceBorder,
+        "PixelScale", &UIElementComponent::PixelScale,
+        "PixelArt", &UIElementComponent::PixelArt,
+        "TexturePath", &UIElementComponent::TexturePath,
         "PadX", &UIElementComponent::PadX,
         "AutoWidth", &UIElementComponent::AutoWidth,
         "LayoutSize", sol::readonly(&UIElementComponent::LayoutSize)
     );
+
+    // Картинка UI-элемента: путь + признак пиксель-арта. Отдельной функцией, а
+    // не полем TexturePath, потому что путь без ЗАГРУЗКИ ничего не рисует, а
+    // загрузить надо с правильной фильтрацией — из скрипта об этом помнить
+    // незачем.
+    m_lua.set_function("SetUIImage", [](GameObject& obj, const std::string& path,
+                                        sol::optional<bool> pixelArt) {
+        if (!obj.Valid()) return;
+        auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity());
+        if (!ui) return;
+        ui->TexturePath = path;
+        ui->PixelArt = pixelArt.value_or(false);
+        ui->Tex = path.empty() ? nullptr
+                  : ui->PixelArt
+                      ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
+                      : ResourceManager::Instance().GetTexture(path);
+    });
+
+    // Спрайт из листа: кусок в ПИКСЕЛЯХ исходника. Так набор интерфейса
+    // описывается ровно теми числами, что напечатаны в его документации.
+    m_lua.set_function("SetUISprite", [](GameObject& obj, float x, float y, float w, float h) {
+        if (!obj.Valid()) return;
+        if (auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity()))
+            ui->Sprite = glm::vec4(x, y, w, h);
+    });
+
+    // Девятина: неподвижные углы в пикселях исходника (лево, верх, право, низ).
+    m_lua.set_function("SetUISlice", [](GameObject& obj, float l, float t, float r, float b,
+                                        sol::optional<float> scale) {
+        if (!obj.Valid()) return;
+        if (auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity())) {
+            ui->SliceBorder = glm::vec4(l, t, r, b);
+            ui->PixelScale = scale.value_or(0.0f);
+        }
+    });
+
+    // Размер картинки в пикселях — по нему скрипт нарезает лист на спрайты, не
+    // зная его размера заранее.
+    m_lua.set_function("ImageSize", [](const std::string& path) {
+        std::shared_ptr<Texture> tex = ResourceManager::Instance().GetTexture(path);
+        if (!tex) return std::make_tuple(0, 0);
+        return std::make_tuple(tex->Width(), tex->Height());
+    });
 
     // Список доступных векторных иконок — чтобы игра могла проверить имя, а не
     // узнавать об опечатке по пустому месту в интерфейсе.
