@@ -362,6 +362,60 @@ static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
     return am;
 }
 
+// IK: сохраняем только ЗАДАНИЕ (какая кость, куда тянем, как), но не результат.
+// EndJoint/MidJoint/RootJoint — это индексы в конкретном скелете, они
+// разрешаются заново после загрузки модели, а Locked/LockedAt — состояние
+// текущего шага, которое переживать перезагрузку сцены не должно.
+static void SaveIK(json& j, const IKComponent& ik) {
+    j["ik"]["enabled"] = ik.Enabled;
+    json goals = json::array();
+    for (const IKGoal& g : ik.Goals) {
+        json gj;
+        gj["bone"] = g.Bone;
+        gj["chainLength"] = g.ChainLength;
+        gj["target"] = Vec3ToJson(g.Target);
+        gj["usePole"] = g.UsePole;
+        gj["pole"] = Vec3ToJson(g.Pole);
+        gj["weight"] = g.Weight;
+        gj["enabled"] = g.Enabled;
+        gj["alignNormal"] = Vec3ToJson(g.AlignNormal);
+        gj["aim"] = g.Aim;
+        gj["aimAxis"] = Vec3ToJson(g.AimAxis);
+        gj["aimMaxAngle"] = g.AimMaxAngle;
+        gj["lock"] = g.Lock;
+        gj["plantHeight"] = g.PlantHeight;
+        gj["releaseTime"] = g.ReleaseTime;
+        goals.push_back(std::move(gj));
+    }
+    j["ik"]["goals"] = std::move(goals);
+}
+
+static IKComponent ParseIK(const json& ij) {
+    IKComponent ik;
+    ik.Enabled = ij.value("enabled", true);
+    if (ij.contains("goals") && ij["goals"].is_array()) {
+        for (const json& gj : ij["goals"]) {
+            IKGoal g;
+            g.Bone = gj.value("bone", std::string());
+            g.ChainLength = gj.value("chainLength", 2);
+            if (gj.contains("target")) g.Target = Vec3FromJson(gj["target"]);
+            g.UsePole = gj.value("usePole", false);
+            if (gj.contains("pole")) g.Pole = Vec3FromJson(gj["pole"]);
+            g.Weight = gj.value("weight", 1.0f);
+            g.Enabled = gj.value("enabled", true);
+            if (gj.contains("alignNormal")) g.AlignNormal = Vec3FromJson(gj["alignNormal"]);
+            g.Aim = gj.value("aim", false);
+            if (gj.contains("aimAxis")) g.AimAxis = Vec3FromJson(gj["aimAxis"]);
+            g.AimMaxAngle = gj.value("aimMaxAngle", 80.0f);
+            g.Lock = gj.value("lock", false);
+            g.PlantHeight = gj.value("plantHeight", 0.12f);
+            g.ReleaseTime = gj.value("releaseTime", 0.12f);
+            ik.Goals.push_back(std::move(g));
+        }
+    }
+    return ik;
+}
+
 static std::string UIKindToString(UIElementComponent::Kind k) {
     switch (k) {
         case UIElementComponent::Kind::Label: return "label";
@@ -661,6 +715,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
         if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
         if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) SaveAnimatedModel(j, *am);
+        if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
         objectsJson.push_back(j);
@@ -724,6 +779,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<JointComponent>(obj.Entity(), ParseJoint(j["joint"]));
         if (j.contains("animatedModel"))
             obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
+        if (j.contains("ik"))
+            obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
         if (j.contains("particles"))
             obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
         if (j.contains("ui"))

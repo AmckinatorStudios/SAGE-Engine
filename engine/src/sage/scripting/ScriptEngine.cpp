@@ -532,6 +532,129 @@ void ScriptEngine::RegisterComponentTypes() {
         return true;
     });
 
+    // --- Обратная кинематика -----------------------------------------------
+    //
+    // Цель задаётся ИМЕНЕМ кости и МИРОВОЙ точкой: игра знает, где у неё пол и
+    // предметы, а в какой кости это отзовётся — дело движка. Возвращает индекс
+    // цели, по нему её потом двигают.
+    m_lua.set_function("AddIKGoal", [](GameObject obj, const std::string& bone,
+                                       sol::optional<int> chainLength) -> int {
+        if (!obj.Valid()) return -1;
+        auto& ik = obj.Registry()->get_or_emplace<IKComponent>(obj.Entity());
+        IKGoal g;
+        g.Bone = bone;
+        g.ChainLength = chainLength.value_or(2);
+        ik.Goals.push_back(std::move(g));
+        return (int)ik.Goals.size() - 1;
+    });
+    // Куда тянуть цель (мировые координаты).
+    m_lua.set_function("SetIKTarget", [](GameObject obj, int goal, const glm::vec3& target) {
+        if (!obj.Valid()) return;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return;
+        ik->Goals[(size_t)goal].Target = target;
+    });
+    // Вес: 0 — цель не влияет, 1 — держим точно. Промежуточные значения нужны,
+    // чтобы IK ВКЛЮЧАЛСЯ плавно: резко поставленная нога дёргается.
+    m_lua.set_function("SetIKWeight", [](GameObject obj, int goal, float weight) {
+        if (!obj.Valid()) return;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return;
+        ik->Goals[(size_t)goal].Weight = glm::clamp(weight, 0.0f, 1.0f);
+    });
+    // Куда смотрит колено/локоть. Без подсказки задача неоднозначна: цепочка
+    // может вращаться вокруг оси «корень-цель», и колено выгибается куда попало.
+    m_lua.set_function("SetIKPole", [](GameObject obj, int goal, const glm::vec3& pole) {
+        if (!obj.Valid()) return;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return;
+        ik->Goals[(size_t)goal].UsePole = true;
+        ik->Goals[(size_t)goal].Pole = pole;
+    });
+    // Нормаль поверхности под ступнёй: она ляжет на склон, а не воткнётся носком.
+    m_lua.set_function("SetIKAlign", [](GameObject obj, int goal, const glm::vec3& normal) {
+        if (!obj.Valid()) return;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return;
+        ik->Goals[(size_t)goal].AlignNormal = normal;
+    });
+    // Прилипание к земле: пока стопа опущена, её мировая точка держится. Это
+    // лекарство от скольжения ног — при переносе анимации с чужого скелета
+    // длина шага не совпадает с корневым движением, и нога едет по полу.
+    m_lua.set_function("SetIKFootLock", [](GameObject obj, int goal, bool on,
+                                           sol::optional<float> plantHeight,
+                                           sol::optional<float> releaseTime) {
+        if (!obj.Valid()) return;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return;
+        ik->Goals[(size_t)goal].Lock = on;
+        if (plantHeight) ik->Goals[(size_t)goal].PlantHeight = *plantHeight;
+        if (releaseTime) ik->Goals[(size_t)goal].ReleaseTime = *releaseTime;
+    });
+    // Держится ли сейчас нога за землю. Игре это нужно не для IK: под «нога
+    // встала» вешают шаги, пыль и тряску камеры — а знает об этом только замок.
+    m_lua.set_function("IKLocked", [](GameObject obj, int goal) -> bool {
+        if (!obj.Valid()) return false;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return false;
+        return ik->Goals[(size_t)goal].Locked;
+    });
+    // Взгляд: кость доворачивается так, чтобы её ось axis смотрела на цель.
+    m_lua.set_function("SetIKAim", [](GameObject obj, int goal, const glm::vec3& axis,
+                                      sol::optional<float> maxAngle) {
+        if (!obj.Valid()) return;
+        auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity());
+        if (!ik || goal < 0 || goal >= (int)ik->Goals.size()) return;
+        IKGoal& g = ik->Goals[(size_t)goal];
+        g.Aim = true;
+        g.AimAxis = axis;
+        g.AimMaxAngle = maxAngle.value_or(80.0f);
+    });
+    m_lua.set_function("SetIKEnabled", [](GameObject obj, bool on) {
+        if (!obj.Valid()) return;
+        if (auto* ik = obj.Registry()->try_get<IKComponent>(obj.Entity())) ik->Enabled = on;
+    });
+    // Мировая позиция кости — по ней игра берёт, где сейчас ступня или кисть
+    // (например, чтобы поставить эффект или проверить опору).
+    m_lua.set_function("BonePosition", [this](GameObject obj, const std::string& bone) -> glm::vec3 {
+        if (!obj.Valid()) return glm::vec3(0.0f);
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return glm::vec3(0.0f);
+        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
+        const std::vector<glm::mat4>& g = am->Anim.GlobalMatrices();
+        for (int i = 0; i < sk.Count() && i < (int)g.size(); ++i) {
+            if (sk.Joints[(size_t)i].Name != bone) continue;
+            // Матрицы аниматора — в пространстве МОДЕЛИ. Игра рассуждает в
+            // мировых координатах (пол, предметы), поэтому переводим через
+            // трансформ сущности. Без сцены отдаём как есть — лучше локальная
+            // позиция, чем ноль.
+            const glm::vec3 local = glm::vec3(g[(size_t)i][3]);
+            if (!m_scene) return local;
+            return glm::vec3(m_scene->WorldMatrix(obj.Entity()) * glm::vec4(local, 1.0f));
+        }
+        return glm::vec3(0.0f);
+    });
+
+    // Куда смотрит ОСЬ кости в мире. Позиции мало: чтобы выпустить пулю из
+    // ствола, поставить взгляд или проверить, куда развернулась голова, нужно
+    // направление, а не точка.
+    m_lua.set_function("BoneAxis", [this](GameObject obj, const std::string& bone,
+                                          const glm::vec3& axis) -> glm::vec3 {
+        if (!obj.Valid()) return glm::vec3(0.0f);
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return glm::vec3(0.0f);
+        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
+        const std::vector<glm::mat4>& g = am->Anim.GlobalMatrices();
+        for (int i = 0; i < sk.Count() && i < (int)g.size(); ++i) {
+            if (sk.Joints[(size_t)i].Name != bone) continue;
+            glm::vec3 dir(g[(size_t)i] * glm::vec4(axis, 0.0f));
+            if (m_scene) dir = glm::vec3(m_scene->WorldMatrix(obj.Entity()) * glm::vec4(dir, 0.0f));
+            const float len = glm::length(dir);
+            return len > 1e-6f ? dir / len : glm::vec3(0.0f);
+        }
+        return glm::vec3(0.0f);
+    });
+
     // Забрать анимации из ЧУЖОГО файла на скелет своей модели. Ровно то, ради
     // чего существуют библиотеки анимаций: один набор движений на любого героя.
     // Возвращает, сколько клипов перенеслось (0 — скелеты не сошлись именами).

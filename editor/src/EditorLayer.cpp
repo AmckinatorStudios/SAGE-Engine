@@ -450,6 +450,7 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyComponentIfPresent<JointComponent>(src, dst);
     CopyComponentIfPresent<ParticleEmitterComponent>(src, dst);
     CopyComponentIfPresent<AnimatedModelComponent>(src, dst);
+    CopyComponentIfPresent<IKComponent>(src, dst);
     CopyComponentIfPresent<UIElementComponent>(src, dst);
     if (auto* rb = dst.Registry()->try_get<RigidBodyComponent>(dst.Entity()))
         rb->RuntimeBody = sage::physics::kInvalidBody;
@@ -460,6 +461,10 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
         am->Anim = sage::anim::Animator{};
         am->Ready = false;
     }
+    // Индексы костей и залипшая опора — состояние ЭТОГО экземпляра: у копии
+    // модель загрузится заново, и цели должны разрешиться по именам с нуля.
+    if (auto* ik = dst.Registry()->try_get<IKComponent>(dst.Entity()))
+        for (IKGoal& g : ik->Goals) { g.Resolved = false; g.Locked = false; }
     if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity()))
         pe->Accumulator = 0.0f;
 }

@@ -768,6 +768,121 @@ TEST(IK_apply_weight_blends_with_existing_pose) {
     CHECK_TRUE(toBind > 1e-3f); // и не осталось в исходной позе
 }
 
+TEST(IK_aim_turns_bone_toward_target) {
+    // Кости рига смотрят вдоль +Y. Просим плечо посмотреть вбок (+X): ось
+    // кости обязана лечь на направление к цели.
+    Skeleton sk = MakeArmRig();
+    const std::vector<glm::mat4> globals = PoseGlobals(sk, {});
+
+    const glm::vec3 target(3.0f, 0.0f, 0.0f);
+    IKResult res = SolveAim(sk, globals, 0, glm::vec3(0, 1, 0), target, 180.0f);
+    CHECK_TRUE(res.Solved);
+
+    std::vector<JointPose> pose;
+    ApplyIK(res, pose, sk.Count());
+    const std::vector<glm::mat4> solved = PoseGlobals(sk, pose);
+
+    // Куда теперь смотрит ось кости — по положению её ребёнка.
+    const glm::vec3 root(solved[0][3]), child(solved[1][3]);
+    const glm::vec3 dir = glm::normalize(child - root);
+    const glm::vec3 want = glm::normalize(target - root);
+    CHECK_NEAR(glm::dot(dir, want), 1.0f, 1e-3);
+}
+
+TEST(IK_aim_respects_cone_limit) {
+    // Цель ровно позади (-Y при исходном +Y) — разворот на 180°. С ограничением
+    // в 45° кость обязана повернуться РОВНО на 45°, а не отказаться работать и
+    // не вывернуться целиком: шея так не гнётся.
+    Skeleton sk = MakeArmRig();
+    const std::vector<glm::mat4> globals = PoseGlobals(sk, {});
+
+    IKResult res = SolveAim(sk, globals, 0, glm::vec3(0, 1, 0), glm::vec3(0.0f, -2.0f, 0.0f), 45.0f);
+    CHECK_TRUE(res.Solved);
+    std::vector<JointPose> pose;
+    ApplyIK(res, pose, sk.Count());
+    const std::vector<glm::mat4> solved = PoseGlobals(sk, pose);
+
+    const glm::vec3 dir = glm::normalize(glm::vec3(solved[1][3]) - glm::vec3(solved[0][3]));
+    const float deg = glm::degrees(std::acos(glm::clamp(glm::dot(dir, glm::vec3(0, 1, 0)), -1.0f, 1.0f)));
+    CHECK_NEAR(deg, 45.0f, 1.0);
+}
+
+TEST(IK_aim_end_sets_end_orientation) {
+    // Доворот конца: кисти задаём мировую (модельную) ориентацию — поворот на
+    // 90° вокруг Z — и проверяем, что она у неё именно такая. Это то, чем
+    // ступню кладут на склон.
+    Skeleton sk = MakeArmRig();
+    const std::vector<glm::mat4> globals = PoseGlobals(sk, {});
+
+    const glm::quat want = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 0, 1));
+    IKResult res = AimEnd(sk, globals, 2, want);
+    CHECK_TRUE(res.Solved);
+
+    std::vector<JointPose> pose;
+    ApplyIK(res, pose, sk.Count());
+    const std::vector<glm::mat4> solved = PoseGlobals(sk, pose);
+    const glm::quat got = glm::normalize(glm::quat_cast(glm::mat3(solved[2])));
+    // Кватернионы q и -q — один поворот, поэтому сравниваем по модулю скалярного.
+    CHECK_NEAR(std::fabs(glm::dot(got, want)), 1.0f, 1e-3);
+}
+
+TEST(IK_foot_lock_holds_contact_point_then_releases) {
+    // Прилипание опорной ноги. Пока стопа внизу, цель не двигается ни на
+    // сантиметр, хотя «свободная» цель уезжает вперёд каждый кадр — это и есть
+    // лекарство от скольжения. Как только стопа поднялась, цель отпускается.
+    bool locked = false;
+    float blend = 0.0f;
+    glm::vec3 lockedAt(0.0f);
+    const glm::vec3 free(9.0f, 9.0f, 9.0f);
+    const float dt = 0.016f, release = 0.12f;
+
+    // Кадр касания: стопа на 0.05 при пороге 0.12.
+    glm::vec3 t0 = FootLockTarget(locked, lockedAt, blend, dt, 0.05f, 0.12f, release,
+                                  glm::vec3(1.0f, 0.0f, 0.0f), free);
+    CHECK_TRUE(locked);
+    CHECK_NEAR(blend, 1.0f, 1e-5);
+    CHECK_NEAR(glm::length(t0 - glm::vec3(1.0f, 0.0f, 0.0f)), 0.0f, 1e-5);
+
+    // Персонаж поехал вперёд, стопа в модели всё ещё внизу — держим ТУ ЖЕ точку.
+    glm::vec3 t1 = FootLockTarget(locked, lockedAt, blend, dt, 0.02f, 0.12f, release,
+                                  glm::vec3(1.4f, 0.0f, 0.0f), free);
+    CHECK_NEAR(glm::length(t1 - t0), 0.0f, 1e-5);
+
+    // Стопа поднялась — замок снят, но цель уезжает к свободной ПОСТЕПЕННО:
+    // мгновенный отпуск дал бы щелчок на один кадр.
+    glm::vec3 t2 = FootLockTarget(locked, lockedAt, blend, dt, 0.40f, 0.12f, release,
+                                  glm::vec3(1.8f, 0.4f, 0.0f), free);
+    CHECK_FALSE(locked);
+    CHECK_TRUE(blend > 0.0f && blend < 1.0f);
+    CHECK_TRUE(glm::length(t2 - t0) > 1e-3f);       // сдвинулась
+    CHECK_TRUE(glm::length(t2 - free) > 1.0f);      // но далеко не дошла
+
+    // Через releaseTime замок отпускает полностью.
+    for (int i = 0; i < 20; ++i)
+        FootLockTarget(locked, lockedAt, blend, dt, 0.40f, 0.12f, release,
+                       glm::vec3(1.8f, 0.4f, 0.0f), free);
+    CHECK_NEAR(blend, 0.0f, 1e-5);
+    glm::vec3 t3 = FootLockTarget(locked, lockedAt, blend, dt, 0.40f, 0.12f, release,
+                                  glm::vec3(1.8f, 0.4f, 0.0f), free);
+    CHECK_NEAR(glm::length(t3 - free), 0.0f, 1e-5);
+
+    // И следующее касание запоминает НОВУЮ точку, а не старую.
+    glm::vec3 t4 = FootLockTarget(locked, lockedAt, blend, dt, 0.01f, 0.12f, release,
+                                  glm::vec3(2.2f, 0.0f, 0.0f), free);
+    CHECK_NEAR(glm::length(t4 - glm::vec3(2.2f, 0.0f, 0.0f)), 0.0f, 1e-5);
+}
+
+TEST(IK_aim_rejects_bad_input) {
+    Skeleton sk = MakeArmRig();
+    const std::vector<glm::mat4> globals = PoseGlobals(sk, {});
+    CHECK_FALSE(SolveAim(sk, globals, -1, glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)).Solved);
+    CHECK_FALSE(SolveAim(sk, globals, 99, glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)).Solved);
+    // Нулевая ось и цель В САМОЙ кости — направления нет, поворачивать не на что.
+    CHECK_FALSE(SolveAim(sk, globals, 0, glm::vec3(0, 0, 0), glm::vec3(1, 0, 0)).Solved);
+    CHECK_FALSE(SolveAim(sk, globals, 0, glm::vec3(0, 1, 0), glm::vec3(0, 0, 0)).Solved);
+    CHECK_FALSE(AimEnd(sk, globals, 99, glm::quat(1, 0, 0, 0)).Solved);
+}
+
 // --- Декодирование звука ------------------------------------------------------
 
 #include "sage/audio/AudioEngine.h"

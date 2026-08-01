@@ -754,6 +754,91 @@ void TestMorphTargets(FrameRenderer& r) {
     Check(meanDiff(back, neutral) < 0.01, "нулевые веса возвращают исходную форму");
 }
 
+// --- Обратная кинематика в ECS ---------------------------------------------
+
+// Солверы проверены в юнит-тестах на голом скелете; здесь проверяется ОБВЯЗКА —
+// то, что между Lua и математикой: поиск кости по имени, перевод цели из мира в
+// пространство модели через трансформ сущности, откат прошлого решения и то,
+// что выключенная цель перестаёт держать кость. Именно на этом слое и ломалось:
+// цепочка набиралась на сустав короче, и корень с серединой схлопывались в одну
+// кость.
+//
+// Модель — процедурный демо-щупалец: цепочка из шести суставов вдоль +Y, без
+// внешних ассетов. GL-контекст нужен потому, что SkinnedModel строит буферы на
+// видеокарте уже при загрузке.
+void TestInverseKinematicsECS() {
+    std::printf("=== IK в ECS: цель в мире -> поза ===\n");
+    auto scene = std::make_unique<Scene>("IKTest");
+
+    GameObject rig = scene->CreateObject("Rig");
+    // Сущность СДВИНУТА и ПОВЁРНУТА: если бы движок считал цель в пространстве
+    // модели, тест бы это поймал — при повороте на 90° промах стал бы метровым.
+    rig.GetTransform().Position = {3.0f, 1.0f, -2.0f};
+    rig.GetTransform().Rotation = {0.0f, 90.0f, 0.0f};
+    AnimatedModelComponent anim;
+    anim.Playing = false;   // поза не должна зависеть от времени
+    scene->Registry().emplace<AnimatedModelComponent>(rig.Entity(), std::move(anim));
+    sage::anim::UpdateAnimators(*scene, 0.0f);
+
+    AnimatedModelComponent& am = scene->Registry().get<AnimatedModelComponent>(rig.Entity());
+    if (!am.Model || am.Model->GetSkeleton().Count() < 3) {
+        std::printf("[FAIL] демо-модель не поднялась — IK проверять не на чем\n");
+        ++g_failed;
+        return;
+    }
+    const sage::anim::Skeleton& sk = am.Model->GetSkeleton();
+    const std::string endBone = sk.Joints[(size_t)sk.Count() - 1].Name;
+
+    auto endWorld = [&] {
+        return glm::vec3(scene->WorldMatrix(rig.Entity()) *
+                         glm::vec4(glm::vec3(am.Anim.GlobalMatrices()[(size_t)sk.Count() - 1][3]),
+                                   1.0f));
+    };
+    const glm::vec3 restWorld = endWorld();
+
+    // Цель — рядом с концом цепочки, чтобы она была достижима на любом риге.
+    const glm::vec3 target = restWorld + glm::vec3(0.35f, -0.25f, 0.15f);
+
+    IKComponent ik;
+    IKGoal goal;
+    goal.Bone = endBone;
+    goal.ChainLength = 3;
+    goal.Target = target;
+    ik.Goals.push_back(goal);
+    scene->Registry().emplace<IKComponent>(rig.Entity(), std::move(ik));
+
+    sage::anim::UpdateAnimators(*scene, 1.0f / 60.0f);
+    const float missed = glm::length(endWorld() - target);
+    std::printf("       промах конца цепочки: %.4f м (был %.3f м)\n", missed,
+                glm::length(restWorld - target));
+    Check(missed < 0.02f, "цель в МИРОВЫХ координатах достигнута сквозь трансформ сущности");
+
+    IKComponent& live = scene->Registry().get<IKComponent>(rig.Entity());
+    Check(live.Goals[0].EndJoint == sk.Count() - 1, "кость найдена по имени");
+    Check(live.Goals[0].RootJoint >= 0 && live.Goals[0].MidJoint > live.Goals[0].RootJoint,
+          "цепочка набралась: корень и середина — РАЗНЫЕ кости");
+
+    // Повторные кадры без движения цели не должны никуда уползать: IK обязан
+    // считаться от позы клипа заново, а не поверх собственного прошлого ответа.
+    for (int i = 0; i < 30; ++i) sage::anim::UpdateAnimators(*scene, 1.0f / 60.0f);
+    const float driftMiss = glm::length(endWorld() - target);
+    std::printf("       после 30 кадров: %.4f м\n", driftMiss);
+    Check(std::fabs(driftMiss - missed) < 0.005f, "решение не уползает от кадра к кадру");
+
+    // Выключенная цель обязана ОТПУСТИТЬ кость обратно в позу клипа. Без отката
+    // прошлого решения она осталась бы висеть в последней точке навсегда.
+    live.Goals[0].Enabled = false;
+    sage::anim::UpdateAnimators(*scene, 1.0f / 60.0f);
+    const float backToRest = glm::length(endWorld() - restWorld);
+    std::printf("       после выключения цели до позы покоя: %.4f м\n", backToRest);
+    Check(backToRest < 0.01f, "выключенная цель возвращает кость в позу клипа");
+
+    // И обратно: включённая цель снова держит.
+    live.Goals[0].Enabled = true;
+    sage::anim::UpdateAnimators(*scene, 1.0f / 60.0f);
+    Check(glm::length(endWorld() - target) < 0.02f, "включённая обратно цель снова держит");
+}
+
 } // namespace
 
 // --- Мягкость теней --------------------------------------------------------
@@ -1364,6 +1449,7 @@ int main(int argc, char** argv) {
         TestObjectMotionBlur(renderer);
         TestMsaa(renderer);
         TestMorphTargets(renderer);
+        TestInverseKinematicsECS();
         TestShadowSoftness(renderer, *scene);
         TestShadowCascades(renderer);
         TestLevelsOfDetail(renderer);

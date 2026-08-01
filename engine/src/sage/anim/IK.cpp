@@ -161,6 +161,56 @@ IKResult SolveTwoBone(const Skeleton& skeleton, const std::vector<glm::mat4>& gl
     return result;
 }
 
+IKResult AimEnd(const Skeleton& skeleton, const std::vector<glm::mat4>& globals, int joint,
+                const glm::quat& targetRotation, float weight) {
+    IKResult out;
+    if (joint < 0 || joint >= (int)globals.size() || joint >= skeleton.Count()) return out;
+
+    const glm::quat parent = ParentGlobalRotation(skeleton, globals, joint);
+    const glm::quat current = GlobalRotation(globals[(size_t)joint]);
+    const glm::quat want = glm::normalize(glm::slerp(current, glm::normalize(targetRotation),
+                                                     glm::clamp(weight, 0.0f, 1.0f)));
+    out.Solved = true;
+    out.Reached = true;
+    out.Joints.push_back(joint);
+    out.Rotations.push_back(glm::normalize(glm::inverse(parent) * want));
+    return out;
+}
+
+IKResult SolveAim(const Skeleton& skeleton, const std::vector<glm::mat4>& globals, int joint,
+                  const glm::vec3& localForward, const glm::vec3& target, float maxAngleDeg) {
+    IKResult out;
+    if (joint < 0 || joint >= (int)globals.size() || joint >= skeleton.Count()) return out;
+    if (glm::length2(localForward) < kEps) return out;
+
+    const glm::mat4& m = globals[(size_t)joint];
+    const glm::vec3 origin = PositionOf(m);
+    glm::vec3 toTarget = target - origin;
+    if (glm::length2(toTarget) < kEps) return out; // цель в самой кости — направления нет
+
+    const glm::quat current = GlobalRotation(m);
+    const glm::vec3 forwardNow = glm::normalize(current * glm::normalize(localForward));
+    toTarget = glm::normalize(toTarget);
+
+    // Ограничение конусом: поворачиваем не больше, чем на maxAngleDeg от того,
+    // куда кость смотрит сейчас. Иначе «посмотри назад» выворачивает шею.
+    const float maxRad = glm::radians(glm::clamp(maxAngleDeg, 0.0f, 180.0f));
+    const float angle = std::acos(glm::clamp(glm::dot(forwardNow, toTarget), -1.0f, 1.0f));
+    glm::quat delta = RotationBetween(forwardNow, toTarget);
+    out.Reached = angle <= maxRad;
+    if (!out.Reached && angle > kEps) {
+        // Тот же поворот, но укороченный до предела — предсказуемее, чем
+        // отказ: персонаж доворачивается насколько может.
+        delta = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), delta, maxRad / angle);
+    }
+
+    const glm::quat parent = ParentGlobalRotation(skeleton, globals, joint);
+    out.Solved = true;
+    out.Joints.push_back(joint);
+    out.Rotations.push_back(glm::normalize(glm::inverse(parent) * (delta * current)));
+    return out;
+}
+
 IKResult SolveChain(const Skeleton& skeleton, const std::vector<glm::mat4>& globals,
                     const std::vector<int>& chain, const glm::vec3& target, int iterations,
                     float tolerance) {
@@ -256,6 +306,23 @@ void ApplyIK(const IKResult& result, std::vector<JointPose>& pose, int skeletonS
                           : glm::slerp(jp.Rotation, result.Rotations[i], w);
         jp.HasRotation = true;
     }
+}
+
+glm::vec3 FootLockTarget(bool& locked, glm::vec3& lockedAt, float& blend, float dt,
+                         float footHeight, float plantHeight, float releaseTime,
+                         const glm::vec3& footWorld, const glm::vec3& freeTarget) {
+    if (footHeight <= plantHeight) {
+        if (!locked) {           // момент касания: запоминаем точку опоры
+            locked = true;
+            lockedAt = footWorld;
+        }
+        blend = 1.0f;
+        return lockedAt;
+    }
+    locked = false;              // нога пошла вверх — отпускаем, но не рывком
+    if (blend <= 0.0f) return freeTarget;
+    blend = releaseTime > 0.0f ? glm::max(0.0f, blend - dt / releaseTime) : 0.0f;
+    return glm::mix(freeTarget, lockedAt, blend);
 }
 
 } // namespace sage::anim

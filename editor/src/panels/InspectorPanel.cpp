@@ -13,6 +13,7 @@
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ParticlePresets.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UIIcons.h"
 
@@ -484,9 +485,100 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (clipCount > 0) {
                 ImGui::TextDisabled("t = %.2f s", am->Anim.Time());
             }
+            ImGui::Checkbox("Root Motion", &am->RootMotion);
             if (ImGui::Button("Remove Animated Model")) {
                 host.PushUndoSnapshot();
                 reg.remove<AnimatedModelComponent>(obj.Entity());
+            }
+        }
+    }
+
+    // --- Обратная кинематика: цели поверх позы клипа ------------------------
+    // Кость задаётся ИМЕНЕМ, а не индексом: модель может смениться (или ещё не
+    // загрузиться), а имя переживает и то, и другое. Список имён показываем
+    // только когда скелет уже есть.
+    if (reg.all_of<IKComponent>(obj.Entity()) && ImGui::CollapsingHeader("IK", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
+            ImGui::Checkbox("IK Enabled", &ik->Enabled);
+            const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity());
+            if (!am) ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
+                                        "No Animated Model - goals do nothing");
+
+            int remove = -1;
+            for (int gi = 0; gi < (int)ik->Goals.size(); ++gi) {
+                IKGoal& g = ik->Goals[(size_t)gi];
+                ImGui::PushID(gi);
+                const std::string title = "Goal " + std::to_string(gi) +
+                                          (g.Bone.empty() ? "" : " (" + g.Bone + ")");
+                if (ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                    char boneBuf[128];
+                    std::snprintf(boneBuf, sizeof(boneBuf), "%s", g.Bone.c_str());
+                    if (ImGui::InputText("Bone", boneBuf, sizeof(boneBuf))) {
+                        g.Bone = boneBuf;
+                        g.Resolved = false;   // имя сменилось — искать заново
+                    }
+                    host.TrackLastImGuiItem();
+                    // Выбор из реального скелета — чтобы не угадывать написание.
+                    if (am && am->Model) {
+                        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
+                        if (sk.Count() > 0 && ImGui::BeginCombo("Pick Bone", g.Bone.c_str())) {
+                            for (int b = 0; b < sk.Count(); ++b) {
+                                const std::string& n = sk.Joints[(size_t)b].Name;
+                                if (ImGui::Selectable(n.c_str(), n == g.Bone) && n != g.Bone) {
+                                    g.Bone = n;
+                                    g.Resolved = false;
+                                }
+                            }
+                            ImGui::EndCombo();
+                        }
+                    }
+                    ImGui::Checkbox("Enabled", &g.Enabled);
+                    ImGui::SameLine();
+                    if (ImGui::Checkbox("Aim (look-at)", &g.Aim)) g.Resolved = false;
+                    if (g.Aim) {
+                        ImGui::DragFloat3("Aim Axis", &g.AimAxis.x, 0.01f);
+                        host.TrackLastImGuiItem();
+                        ImGui::SliderFloat("Max Angle", &g.AimMaxAngle, 0.0f, 180.0f);
+                        host.TrackLastImGuiItem();
+                    } else {
+                        if (ImGui::SliderInt("Chain Length", &g.ChainLength, 2, 8)) g.Resolved = false;
+                        host.TrackLastImGuiItem();
+                        ImGui::TextDisabled("2 = analytic two-bone, more = FABRIK");
+                        ImGui::Checkbox("Use Pole", &g.UsePole);
+                        if (g.UsePole) {
+                            ImGui::DragFloat3("Pole", &g.Pole.x, 0.02f);
+                            host.TrackLastImGuiItem();
+                        }
+                        ImGui::DragFloat3("Align Normal", &g.AlignNormal.x, 0.02f);
+                        host.TrackLastImGuiItem();
+                        ImGui::Checkbox("Foot Lock", &g.Lock);
+                        if (g.Lock) {
+                            ImGui::DragFloat("Plant Height", &g.PlantHeight, 0.005f, 0.0f, 1.0f);
+                            host.TrackLastImGuiItem();
+                            ImGui::DragFloat("Release Time", &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
+                            host.TrackLastImGuiItem();
+                        }
+                    }
+                    ImGui::DragFloat3("Target (world)", &g.Target.x, 0.02f);
+                    host.TrackLastImGuiItem();
+                    ImGui::SliderFloat("Weight", &g.Weight, 0.0f, 1.0f);
+                    host.TrackLastImGuiItem();
+                    if (g.Resolved && g.EndJoint < 0)
+                        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "bone not found in skeleton");
+                    if (ImGui::SmallButton("Remove Goal")) remove = gi;
+                    ImGui::TreePop();
+                }
+                ImGui::PopID();
+            }
+            if (remove >= 0) {
+                host.PushUndoSnapshot();
+                ik->Goals.erase(ik->Goals.begin() + remove);
+            }
+            if (ImGui::Button("Add Goal")) ik->Goals.emplace_back();
+            ImGui::SameLine();
+            if (ImGui::Button("Remove IK")) {
+                host.PushUndoSnapshot();
+                reg.remove<IKComponent>(obj.Entity());
             }
         }
     }
@@ -724,6 +816,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         item("Joint", reg.all_of<JointComponent>(e), [&] { reg.emplace<JointComponent>(e); });
         item("Animated Model", reg.all_of<AnimatedModelComponent>(e),
              [&] { reg.emplace<AnimatedModelComponent>(e); });
+        item("IK", reg.all_of<IKComponent>(e), [&] { reg.emplace<IKComponent>(e); });
         item("Particle Emitter", reg.all_of<ParticleEmitterComponent>(e), [&] {
             ParticleEmitterComponent em;
             em.Config = ParticlePresets::Registry()[0].Make(); // Fire
