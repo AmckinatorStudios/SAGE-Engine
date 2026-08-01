@@ -1,0 +1,142 @@
+name: Сборка редактора для Windows
+
+# Собирает готовый SageEditor.exe и кладёт его в раздел Releases — чтобы
+# посмотреть движок в деле можно было без установки компилятора и CMake.
+#
+# Когда запускается:
+#   • при каждой правке в main — обновляет сборку «windows-latest»;
+#   • по кнопке «Run workflow» на вкладке Actions — если сборка нужна сейчас;
+#   • при теге вида v1.0 — делает отдельный релиз с этим номером.
+on:
+  push:
+    # Не только main: рабочие ветки тоже собираются, иначе готовой программы
+    # для скачивания не существует до слияния. Кнопка «Run workflow» на вкладке
+    # Actions, к слову, показывается только для веток по умолчанию — на неё
+    # рассчитывать нельзя.
+    branches: [main, 'claude/**']
+    tags: ['v*']
+  workflow_dispatch:
+
+# Нужно право записи: работа сама публикует релиз.
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (SageEditor.exe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка кросс-компилятора
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64 ninja-build
+
+      # Кросс-компиляция с Linux, а не сборка на windows-раннере: тулчейн
+      # линкует рантайм СТАТИЧЕСКИ (cmake/mingw-toolchain.cmake), поэтому .exe
+      # запускается на чистой Windows без установки Visual C++ Redistributable
+      # и прочих библиотек. На windows-раннере с MSVC пришлось бы тащить эти
+      # зависимости с собой.
+      - name: Сборка
+        run: |
+          cmake -B build-windows -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/cmake/mingw-toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-windows -j"$(nproc)"
+
+      # Проверяем, что получился именно windows-исполняемый файл С ОКНОМ и что
+      # ему не нужны посторонние DLL. Без этой проверки «сборка прошла» ничего
+      # не значит: получить .exe, который на чистой Windows выдаст «отсутствует
+      # libstdc++-6.dll», очень легко.
+      - name: Проверка результата
+        run: |
+          EXE=build-windows/editor/SageEditor.exe
+          test -f "$EXE" || { echo "::error::SageEditor.exe не собрался"; exit 1; }
+          file "$EXE"
+          file "$EXE" | grep -q "PE32+ executable (GUI)" \
+            || { echo "::error::Это не оконное windows-приложение"; exit 1; }
+
+          DLLS=$(x86_64-w64-mingw32-objdump -p "$EXE" | grep "DLL Name" | awk '{print tolower($3)}' | sort -u)
+          echo "SageEditor.exe требует DLL:"; echo "$DLLS"
+          for dll in $DLLS; do
+            case "$dll" in
+              kernel32.dll|user32.dll|gdi32.dll|shell32.dll|msvcrt.dll|advapi32.dll|ole32.dll|winmm.dll|ws2_32.dll|opengl32.dll|imm32.dll|setupapi.dll|version.dll|dwmapi.dll|comdlg32.dll|oleaut32.dll|uuid.dll|bcrypt.dll|winspool.dll)
+                ;;
+              *)
+                echo "::error::SageEditor.exe просит постороннюю библиотеку $dll — на чистой Windows не запустится"
+                exit 1 ;;
+            esac
+          done
+
+          # Плагин-пример (editor/plugins/example_stats.dll) — ЕДИНСТВЕННЫЙ
+          # компонент архива с динамическим рантаймом: он линкуется на
+          # import-библиотеку SageEditor.exe, чтобы резолвить символы ImGui::,
+          # а тот .exe уже несёт статический рантайм — второй статической копии
+          # компоновщик не даёт (см. комментарий в cmake/mingw-toolchain.cmake).
+          # Поэтому здесь мы не запрещаем libstdc++-6.dll, а проверяем, что
+          # больше ничего постороннего плагин не просит, и кладём эту dll рядом
+          # в шаге упаковки.
+          PLUGIN=build-windows/editor/plugins/example_stats.dll
+          if [ -f "$PLUGIN" ]; then
+            PLUGIN_DLLS=$(x86_64-w64-mingw32-objdump -p "$PLUGIN" | grep "DLL Name" | awk '{print tolower($3)}' | sort -u)
+            echo "example_stats.dll требует DLL:"; echo "$PLUGIN_DLLS"
+            for dll in $PLUGIN_DLLS; do
+              case "$dll" in
+                kernel32.dll|user32.dll|gdi32.dll|shell32.dll|msvcrt.dll|advapi32.dll|ole32.dll|winmm.dll|ws2_32.dll|opengl32.dll|imm32.dll|setupapi.dll|version.dll|dwmapi.dll|comdlg32.dll|oleaut32.dll|uuid.dll|bcrypt.dll|winspool.dll|libstdc++-6.dll|sageeditor.exe)
+                  ;;
+                *)
+                  echo "::error::example_stats.dll просит незнакомую библиотеку $dll"
+                  exit 1 ;;
+              esac
+            done
+          fi
+
+      - name: Сборка архива
+        run: |
+          PKG=SageEditor-Windows
+          mkdir -p "$PKG"
+          cp build-windows/editor/SageEditor.exe "$PKG"/
+          cp -r build-windows/editor/assets "$PKG"/assets
+
+          # Плагин-пример вместе с рантайм-DLL, которого требует именно он (см.
+          # шаг проверки выше) — кладём рядом с SageEditor.exe: без явного
+          # SetDllDirectory загрузчик Windows ищет зависимости плагина в
+          # каталоге ГЛАВНОГО процесса, а не в plugins/.
+          if [ -f build-windows/editor/plugins/example_stats.dll ]; then
+            mkdir -p "$PKG/plugins"
+            cp build-windows/editor/plugins/example_stats.dll "$PKG/plugins/"
+            cp "$(x86_64-w64-mingw32-g++ -print-file-name=libstdc++-6.dll)" "$PKG/"
+          fi
+
+          cp docs/README-windows.txt "$PKG"/README.txt
+          zip -r "$PKG.zip" "$PKG" >/dev/null
+          ls -la "$PKG.zip"
+
+      - name: Загрузить архив (вкладка Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SageEditor-Windows
+          path: SageEditor-Windows.zip
+
+      # Релиз — чтобы ссылка на скачивание была постоянной и лежала на главной
+      # странице репозитория. Заходить на вкладку Actions и искать сборку не
+      # нужно.
+      - name: Опубликовать в Releases
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+            TITLE="SAGE Editor $TAG"
+          else
+            TAG="windows-latest"
+            TITLE="SAGE Editor — последняя сборка для Windows"
+            # Скользящий релиз: старый удаляем, чтобы ссылка всегда вела на
+            # свежую версию, а список релизов не зарастал.
+            gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          fi
+          gh release create "$TAG" SageEditor-Windows.zip \
+            --title "$TITLE" \
+            --notes "Скачайте SageEditor-Windows.zip, распакуйте папку целиком и запустите SageEditor.exe. Устанавливать ничего не нужно."
