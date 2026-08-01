@@ -895,12 +895,23 @@ void ScriptEngine::RegisterLightingApi() {
         "Start", &FogSettings::Start,
         "End", &FogSettings::End
     );
+    // Само НЕБО, а не только засветка от него. Без этого цикл суток из скрипта
+    // выходил половинчатым: свет, туман и вода темнели к ночи, а купол неба
+    // оставался полуденно-синим — закат был виден везде, кроме собственно неба.
+    m_lua.new_usertype<SkyboxSettings>("SkyboxSettings",
+        "Enabled", &SkyboxSettings::Enabled,
+        "TopColor", &SkyboxSettings::TopColor,
+        "HorizonColor", &SkyboxSettings::HorizonColor,
+        "Intensity", &SkyboxSettings::Intensity,
+        "Rotation", &SkyboxSettings::RotationDeg
+    );
     m_lua.new_usertype<LightingEnvironment>("LightingEnvironment",
         "SkyColor", &LightingEnvironment::SkyColor,
         "GroundColor", &LightingEnvironment::GroundColor,
         "AmbientStrength", &LightingEnvironment::AmbientStrength,
         "Sun", &LightingEnvironment::Sun,
-        "Fog", &LightingEnvironment::Fog
+        "Fog", &LightingEnvironment::Fog,
+        "Skybox", &LightingEnvironment::Skybox
     );
     m_lua.set_function("GetLighting", [this]() -> LightingEnvironment& {
         if (!m_scene) throw std::runtime_error("GetLighting: сцена не привязана (BindScene не вызван)");

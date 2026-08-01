@@ -163,3 +163,77 @@ TEST(Physics_scene_builds_joints_from_components) {
     CHECK_TRUE(y > 2.6f);  // удержано тросом (иначе упало бы намного ниже)
     CHECK_TRUE(y < 4.1f);
 }
+
+// ===========================================================================
+//  Живой состав мира: тела заводятся и убираются ПО ХОДУ симуляции
+//
+//  Игра порождает физические объекты в рантайме (скрипт спавнит плавающий
+//  мусор, обломки, брошенные предметы) и удаляет их. Пока тела строились
+//  только в конструкторе PhysicsScene, всё порождённое после старта оставалось
+//  без физики — молча: компонент на месте, тела нет, объект висит в воздухе.
+// ===========================================================================
+
+TEST(Physics_body_created_for_entity_spawned_after_start) {
+    Scene scene("Runtime");
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.Available()) return; // Null-бэкенд: физики нет, проверять нечего
+    CHECK_EQ(physics.BodyCount(), 0);
+
+    // Сущность появляется ПОСЛЕ создания физического мира — как из скрипта.
+    GameObject crate = scene.CreateObject("Crate");
+    crate.GetTransform().Position = {0.0f, 10.0f, 0.0f};
+    scene.Registry().emplace<RigidBodyComponent>(crate.Entity(),
+        RigidBodyComponent{BodyType::Dynamic});
+
+    physics.Step(scene, 1.0f / 60.0f);
+    CHECK_EQ(physics.BodyCount(), 1);
+    CHECK_TRUE(scene.Registry().get<RigidBodyComponent>(crate.Entity()).RuntimeBody != kInvalidBody);
+
+    // И тело действительно живёт: под гравитацией ящик падает.
+    float startY = crate.GetTransform().Position.y;
+    for (int i = 0; i < 60; ++i) physics.Step(scene, 1.0f / 60.0f);
+    CHECK_TRUE(crate.GetTransform().Position.y < startY - 1.0f);
+}
+
+TEST(Physics_body_removed_when_entity_destroyed) {
+    Scene scene("Runtime");
+    GameObject a = scene.CreateObject("A");
+    scene.Registry().emplace<RigidBodyComponent>(a.Entity(), RigidBodyComponent{BodyType::Dynamic});
+    GameObject b = scene.CreateObject("B");
+    scene.Registry().emplace<RigidBodyComponent>(b.Entity(), RigidBodyComponent{BodyType::Dynamic});
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.Available()) return;
+    CHECK_EQ(physics.BodyCount(), 2);
+
+    scene.RemoveObject(b.Id());
+    physics.Step(scene, 1.0f / 60.0f);
+    CHECK_EQ(physics.BodyCount(), 1); // тело удалённой сущности отдано миру
+
+    // Снятый компонент — то же самое: тела быть не должно.
+    scene.Registry().remove<RigidBodyComponent>(a.Entity());
+    physics.Step(scene, 1.0f / 60.0f);
+    CHECK_EQ(physics.BodyCount(), 0);
+}
+
+// Play -> Stop -> Play на одной и той же сцене: второй мир обязан построить
+// тела заново, а не принять протухшие хэндлы первого за живые.
+TEST(Physics_second_simulation_rebuilds_bodies) {
+    Scene scene("Replay");
+    GameObject box = scene.CreateObject("Box");
+    box.GetTransform().Position = {0.0f, 5.0f, 0.0f};
+    scene.Registry().emplace<RigidBodyComponent>(box.Entity(), RigidBodyComponent{BodyType::Dynamic});
+
+    {
+        PhysicsScene first(PhysicsWorld::DefaultBackend(), scene);
+        if (!first.Available()) return;
+        for (int i = 0; i < 30; ++i) first.Step(scene, 1.0f / 60.0f);
+    }
+    // Первая симуляция мертва, но хэндл в компоненте остался.
+    PhysicsScene second(PhysicsWorld::DefaultBackend(), scene);
+    CHECK_EQ(second.BodyCount(), 1);
+
+    float startY = box.GetTransform().Position.y;
+    for (int i = 0; i < 60; ++i) second.Step(scene, 1.0f / 60.0f);
+    CHECK_TRUE(box.GetTransform().Position.y < startY - 0.5f);
+}

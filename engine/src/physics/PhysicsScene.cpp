@@ -74,14 +74,14 @@ PhysicsScene::PhysicsScene(Backend backend, Scene& scene) {
     m_world = PhysicsWorld::Create(backend);
     m_world->SetGravity({0.0f, -9.81f, 0.0f});
 
-    auto view = scene.Registry().view<RigidBodyComponent, Transform>();
-    for (auto e : view) {
-        RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
-        const Transform& tr = view.get<Transform>(e);
-        const ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(e);
-        rb.RuntimeBody = m_world->CreateBody(DescFromEntity(rb, col, tr));
-        ++m_bodyCount;
+    // Хэндлы прошлой симуляции сбрасываем: сцена могла уже играться (Play ->
+    // Stop -> Play), и в компонентах остались указатели на тела УМЕРШЕГО мира.
+    // SyncBodies опознаёт «нет тела» именно по kInvalidBody, так что без этой
+    // чистки второй запуск молча остался бы вообще без физики.
+    for (auto e : scene.Registry().view<RigidBodyComponent>()) {
+        scene.Registry().get<RigidBodyComponent>(e).RuntimeBody = kInvalidBody;
     }
+    SyncBodies(scene);
 
     // Второй проход — соединения (все тела уже созданы, партнёров можно
     // резолвить по id). Требует RigidBodyComponent у самой сущности (BodyA).
@@ -122,8 +122,48 @@ PhysicsScene::PhysicsScene(Backend backend, Scene& scene) {
                         << (m_world->IsAvailable() ? "" : " (симуляция отключена)");
 }
 
+void PhysicsScene::SyncBodies(Scene& scene) {
+    if (!m_world) return;
+
+    // 1. Новые сущности с RigidBodyComponent, но без тела. Признак «нет тела» —
+    // сам RuntimeBody: сущность, пришедшая из сериализатора или порождённая
+    // скриптом, несёт kInvalidBody, и другого маркера не требуется.
+    auto view = scene.Registry().view<RigidBodyComponent, Transform>();
+    for (auto e : view) {
+        RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
+        if (rb.RuntimeBody != kInvalidBody) continue;
+        const Transform& tr = view.get<Transform>(e);
+        const ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(e);
+        rb.RuntimeBody = m_world->CreateBody(DescFromEntity(rb, col, tr));
+        if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
+        m_tracked.emplace_back(e, rb.RuntimeBody);
+        ++m_bodyCount;
+    }
+
+    // 2. Осиротевшие тела: сущность уничтожена или с неё сняли компонент.
+    // Без этого мир копил бы невидимые тела уничтоженных объектов — игра,
+    // которая порождает и убирает предметы каждую секунду, за минуту набивала
+    // бы физический мир мусором, с которым продолжали бы сталкиваться живые.
+    size_t alive = 0;
+    for (size_t i = 0; i < m_tracked.size(); ++i) {
+        const auto& [entity, body] = m_tracked[i];
+        const RigidBodyComponent* rb = scene.Registry().valid(entity)
+            ? scene.Registry().try_get<RigidBodyComponent>(entity) : nullptr;
+        if (rb && rb->RuntimeBody == body) {
+            m_tracked[alive++] = m_tracked[i];
+        } else {
+            m_world->RemoveBody(body);
+            --m_bodyCount;
+        }
+    }
+    m_tracked.resize(alive);
+}
+
 void PhysicsScene::Step(Scene& scene, float dt) {
     if (!m_world || !m_world->IsAvailable()) return;
+
+    // Состав мира мог измениться с прошлого кадра (скрипт спавнит и удаляет).
+    SyncBodies(scene);
 
     // Кинематика: до шага толкаем тела за Transform сущности (её ведёт скрипт).
     auto view = scene.Registry().view<RigidBodyComponent, Transform>();
