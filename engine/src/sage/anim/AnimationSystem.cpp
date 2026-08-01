@@ -3,9 +3,12 @@
 #include <exception>
 
 #include "sage/core/Log.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+
+#include <glm/gtc/quaternion.hpp>
 
 namespace sage::anim {
 
@@ -20,7 +23,9 @@ static void EnsureReady(AnimatedModelComponent& am) {
         if (am.Path.empty()) {
             am.Model = sage::render::SkinnedModel::CreateDemoTentacle(am.DemoSegments);
         } else {
-            am.Model = sage::render::SkinnedModel::Load(am.Path);
+            // Через кэш: дюжина одинаковых NPC — это одна модель, а не дюжина.
+            am.Model = ResourceManager::Instance().GetSkinnedModel(am.Path);
+            if (!am.Model) throw std::runtime_error("модель не загрузилась");
         }
     } catch (const std::exception& e) {
         LOG_ERROR("Anim") << "Не удалось подготовить анимированную модель '"
@@ -63,7 +68,21 @@ void UpdateAnimators(Scene& scene, float dt) {
         // а вектор живёт в компоненте и переживает кадр. Пустой вектор снимает
         // переопределение (иначе снять его было бы нечем).
         am.Anim.SetPoseOverride(am.PoseOverrides.empty() ? nullptr : &am.PoseOverrides);
+        am.Anim.SetRootMotion(am.RootMotion);
         am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
+
+        // Корневое движение переносим на трансформ сущности. Поворотом
+        // сущности — иначе персонаж, развёрнутый на 180°, шёл бы задом наперёд:
+        // клип двигает его «вперёд» в СВОИХ координатах, а куда смотрит
+        // сущность, знает только её трансформ.
+        if (am.RootMotion) {
+            const glm::vec3 delta = am.Anim.ConsumeRootDelta();
+            if (glm::dot(delta, delta) > 0.0f) {
+                Transform& tr = scene.Registry().get<Transform>(e);
+                const glm::mat4 rot = glm::mat4_cast(glm::quat(glm::radians(tr.Rotation)));
+                tr.Position += glm::vec3(rot * glm::vec4(delta * tr.Scale, 0.0f));
+            }
+        }
     }
 }
 

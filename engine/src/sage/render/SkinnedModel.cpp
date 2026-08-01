@@ -7,6 +7,7 @@
 
 #include "sage/assets/AssetCache.h"
 #include "sage/render/ModelData.h"
+#include "sage/anim/Retarget.h"
 #include "sage/gi/GIUpload.h"
 
 #include <algorithm>
@@ -341,6 +342,27 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     }
 }
 
+
+int SkinnedModel::BorrowClipsFrom(const SkinnedModel& source) {
+    if (source.m_clips.empty() || m_skeleton.Count() == 0) return 0;
+    const sage::anim::BoneMap map = sage::anim::MapByName(source.m_skeleton, m_skeleton);
+    if (map.Empty()) {
+        LOG_WARN("Anim") << "Ретаргет: ни одна кость не совпала по имени ("
+                         << source.m_skeleton.Count() << " -> " << m_skeleton.Count() << ")";
+        return 0;
+    }
+    int added = 0;
+    for (const sage::anim::AnimationClip& clip : source.m_clips) {
+        sage::anim::AnimationClip out = sage::anim::Retarget(clip, source.m_skeleton, m_skeleton, map);
+        if (out.Channels.empty()) continue; // переносить нечего — не плодим пустышки
+        m_clips.push_back(std::move(out));
+        ++added;
+    }
+    LOG_INFO("Anim") << "Ретаргет: перенесено клипов " << added << " из "
+                     << source.m_clips.size() << ", костей сопоставлено " << map.Mapped()
+                     << " из " << source.m_skeleton.Count();
+    return added;
+}
 
 void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatrix,
                              const std::vector<glm::mat4>& bones,

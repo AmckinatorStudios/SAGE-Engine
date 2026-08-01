@@ -1,6 +1,8 @@
 #pragma once
 #include "Mesh.h"
 #include "Material.h"
+
+namespace sage::render { class SkinnedModel; }
 #include "Skybox.h"
 #include "ModelLoader.h"
 #include "Texture.h"
@@ -82,6 +84,12 @@ public:
     // Модель по пути. nullptr при ошибке (файл удалён/бит) — вызывающий просто
     // не рисует сущность, а сцена с одной битой моделью грузится ЦЕЛИКОМ.
     std::shared_ptr<Mesh> GetModel(const std::string& path);
+
+    // Анимированная (скиннинг) модель — ОДНА на путь. Раньше её грузила каждая
+    // сущность отдельно: дюжина одинаковых NPC означала дюжину разборов файла,
+    // дюжину загрузок геометрии на видеокарту и дюжину копий всех клипов. Для
+    // библиотеки анимаций это десятки мегабайт ключей на ровном месте.
+    std::shared_ptr<sage::render::SkinnedModel> GetSkinnedModel(const std::string& path);
 
     // Перечитывает модель с диска (после смены её .sageimport-настроек), заменяя
     // кэш-запись. Держатели старого меша сохраняют его; новые запросы — свежий.
@@ -258,6 +266,7 @@ private:
         int MaxSide = 0;
     };
     std::unordered_map<std::string, TextureRecord> m_textures;
+    std::unordered_map<std::string, std::shared_ptr<sage::render::SkinnedModel>> m_skinned;
 
     size_t m_textureBudget = 0;      // 0 = без ограничения (по умолчанию)
     size_t m_textureBytes = 0;       // сумма Bytes резидентных текстур

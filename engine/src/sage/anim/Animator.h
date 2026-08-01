@@ -66,6 +66,26 @@ public:
     // значит корректно работают и во время кросс-фейда, и вообще без клипа
     // (тогда база — дефолтная поза скелета).
     void SetPoseOverride(const std::vector<JointPose>* overrides) { m_overrides = overrides; }
+
+    // --- Корневое движение (root motion) -----------------------------------
+    //
+    // Библиотеки анимаций поставляются в двух вариантах: с запечённым в клип
+    // перемещением персонажа и без него. С запечённым и БЕЗ извлечения меш
+    // уезжает от своей сущности: визуально персонаж идёт, а его коллайдер,
+    // камера и точка звука остаются на месте — потом он телепортируется назад
+    // на стыке цикла. Извлечение снимает перемещение с ПОЗЫ и отдаёт его
+    // наружу, чтобы игра подвинула саму сущность (и физику вместе с ней).
+    void SetRootMotion(bool enabled) { m_rootMotion = enabled; }
+    bool RootMotion() const { return m_rootMotion; }
+
+    // Смещение корня за последний Update, В ЛОКАЛЬНЫХ координатах модели.
+    // Забирается один раз: повторный вызов вернёт ноль, иначе одно и то же
+    // перемещение применилось бы дважды на кадр с двумя читателями.
+    glm::vec3 ConsumeRootDelta() {
+        const glm::vec3 d = m_rootDelta;
+        m_rootDelta = glm::vec3(0.0f);
+        return d;
+    }
     const std::vector<JointPose>* PoseOverride() const { return m_overrides; }
 
     // Пересчитывает позу, не трогая время. Нужно после правки переопределений в
@@ -119,6 +139,10 @@ private:
 
     // Переопределения позы (не владеем — см. SetPoseOverride).
     const std::vector<JointPose>* m_overrides = nullptr;
+    bool m_rootMotion = false;
+    bool m_hasPrevRoot = false;
+    glm::vec3 m_prevRoot{0.0f};  // локальный перенос корня в прошлом кадре
+    glm::vec3 m_rootDelta{0.0f}; // накоплено с последнего ConsumeRootDelta
 
     std::vector<glm::mat4> m_bones;   // палитра (global * inverseBind)
     std::vector<glm::mat4> m_globals; // scratch: глобальные матрицы костей

@@ -860,3 +860,93 @@ TEST(DecodeToMono_rejects_garbage) {
     CHECK_FALSE(AudioEngine::DecodeToMono(nullptr, 0, samples, rate));
     CHECK_FALSE(AudioEngine::DecodeToMono("/tmp/нет-такого-файла.wav", samples, rate));
 }
+
+// --- Синонимы имён костей при ретаргете ------------------------------------
+// Библиотеки анимаций и модели делают разные люди по разным соглашениям:
+// Unreal зовёт бедро thigh_l, Blender — UpperLeg.L, Mixamo — LeftUpLeg.
+// Совпадение по буквам находит только руки и голову, и анимация выходит без ног.
+TEST(Retarget_matches_bones_across_naming_conventions) {
+    using namespace sage::anim;
+    CHECK_EQ(CanonicalBoneName("thighl"), CanonicalBoneName("upperlegl"));
+    CHECK_EQ(CanonicalBoneName("calfr"), CanonicalBoneName("lowerlegr"));
+    CHECK_EQ(CanonicalBoneName("claviclel"), CanonicalBoneName("shoulderl"));
+    CHECK_EQ(CanonicalBoneName("forearml"), CanonicalBoneName("lowerarml"));
+    CHECK_EQ(CanonicalBoneName("pelvis"), CanonicalBoneName("hips"));
+
+    // Сторона не теряется: левое не должно совпасть с правым.
+    CHECK_TRUE(CanonicalBoneName("thighl") != CanonicalBoneName("thighr"));
+    // Незнакомое имя остаётся собой, а не сваливается в общий мешок.
+    CHECK_EQ(CanonicalBoneName("tailtip"), std::string("tailtip"));
+
+    // Скелеты в двух разных соглашениях должны сойтись.
+    Skeleton src, dst;
+    src.Joints = {{"root"}, {"thigh_l"}, {"calf_l"}, {"clavicle_l"}, {"lowerarm_l"}};
+    dst.Joints = {{"root"}, {"UpperLeg.L"}, {"LowerLeg.L"}, {"Shoulder.L"}, {"Forearm.L"}};
+    for (auto& j : src.Joints) j.Parent = -1;
+    for (auto& j : dst.Joints) j.Parent = -1;
+    const BoneMap map = MapByName(src, dst);
+    CHECK_EQ(map.Mapped(), 5);
+
+    // Точное имя главнее синонима: если кость с тем же именем есть, берём её.
+    Skeleton exact;
+    exact.Joints = {{"thigh_l"}, {"UpperLeg.L"}};
+    for (auto& j : exact.Joints) j.Parent = -1;
+    Skeleton one;
+    one.Joints = {{"thigh_l"}};
+    one.Joints[0].Parent = -1;
+    const BoneMap m2 = MapByName(one, exact);
+    CHECK_EQ(m2.SourceToTarget[0], 0);
+}
+
+// --- Извлечение корневого движения -----------------------------------------
+// Клип с запечённым перемещением: без извлечения меш уезжает от своей сущности,
+// с извлечением поза стоит на месте, а смещение отдаётся наружу.
+TEST(Animator_extracts_root_motion_and_survives_loop) {
+    using namespace sage::anim;
+    Skeleton sk;
+    sk.Joints.resize(1);
+    sk.Joints[0].Name = "root";
+    sk.Joints[0].Parent = -1;
+
+    // Корень едет вперёд на 2 метра за 2 секунды и на стыке цикла возвращается.
+    AnimationClip clip;
+    clip.Name = "Walk";
+    clip.Duration = 2.0f;
+    AnimChannel ch;
+    ch.Joint = 0;
+    ch.Target = AnimPath::Translation;
+    ch.Times = {0.0f, 2.0f};
+    ch.Values = {{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 2.0f, 0.0f}};
+    clip.Channels.push_back(ch);
+    std::vector<AnimationClip> clips{clip};
+
+    Animator a;
+    a.SetRig(&sk, &clips);
+    a.SetRootMotion(true);
+    a.Play(0, /*loop=*/true);
+
+    float travelled = 0.0f;
+    for (int i = 0; i < 200; ++i) {           // 4 секунды = два полных цикла
+        a.Update(0.02f);
+        travelled += a.ConsumeRootDelta().z;
+    }
+    // Два цикла по два метра. Откат на стыке не должен вычитаться — иначе
+    // персонаж раз в цикл прыгал бы назад на всю пройденную дистанцию.
+    CHECK_TRUE(travelled > 3.5f);
+    CHECK_TRUE(travelled < 4.5f);
+
+    // Поза при этом стоит на месте: перемещение снято с корня.
+    const glm::mat4& root = a.GlobalMatrices()[0];
+    CHECK_NEAR(root[3][2], 0.0f, 1e-3);
+
+    // Забрали — второй раз не отдаётся: иначе два читателя сдвинули бы дважды.
+    // Два шага, а не один: ровно на стыке цикла шаг приходится на отброшенный
+    // откат, и смещения в этом кадре законно нет.
+    a.Update(0.02f);
+    a.ConsumeRootDelta();
+    a.Update(0.02f);
+    const glm::vec3 first = a.ConsumeRootDelta();
+    const glm::vec3 second = a.ConsumeRootDelta();
+    CHECK_TRUE(glm::length(first) > 0.0f);
+    CHECK_NEAR(glm::length(second), 0.0f, 1e-6);
+}

@@ -57,6 +57,53 @@ std::string NormalizeBoneName(const std::string& name) {
     return out;
 }
 
+std::string CanonicalBoneName(const std::string& normalized) {
+    // Разбираем имя на «сторону» (l/r в конце) и основу: сторона у всех
+    // соглашений в разных местах, а вот основа как раз и различается словами.
+    std::string base = normalized;
+    std::string side;
+    if (base.size() > 1) {
+        const char last = base.back();
+        if (last == 'l' || last == 'r') {
+            // «l» в конце бывает и частью слова (skull, ball) — сторону
+            // признаём только у известных основ, поэтому просто пробуем оба
+            // разбора и ниже берём тот, который нашёлся в таблице.
+            side = std::string(1, last);
+        }
+    }
+
+    static const std::unordered_map<std::string, std::string> kSynonyms = {
+        // плечо-ключица
+        {"clavicle", "shoulder"}, {"shoulder", "shoulder"},
+        // рука
+        {"upperarm", "upperarm"}, {"arm", "upperarm"},
+        {"lowerarm", "lowerarm"}, {"forearm", "lowerarm"},
+        {"hand", "hand"},
+        // нога
+        {"thigh", "upperleg"}, {"upperleg", "upperleg"}, {"upleg", "upperleg"},
+        {"calf", "lowerleg"},  {"lowerleg", "lowerleg"}, {"shin", "lowerleg"},
+        {"foot", "foot"},      {"ankle", "foot"},
+        {"ball", "toe"},       {"toe", "toe"}, {"toebase", "toe"},
+        // корпус
+        {"pelvis", "hips"}, {"hips", "hips"}, {"hip", "hips"},
+        {"spine", "spine"}, {"chest", "spine"}, {"stomach", "spine"},
+        {"neck", "neck"},   {"head", "head"},
+    };
+
+    auto lookup = [&](const std::string& stem, const std::string& sfx) -> std::string {
+        auto it = kSynonyms.find(stem);
+        return it == kSynonyms.end() ? std::string() : it->second + sfx;
+    };
+
+    // Сначала пробуем считать последний символ стороной, потом — частью слова.
+    if (!side.empty()) {
+        const std::string hit = lookup(base.substr(0, base.size() - 1), side);
+        if (!hit.empty()) return hit;
+    }
+    const std::string whole = lookup(base, std::string());
+    return whole.empty() ? normalized : whole;
+}
+
 BoneMap MapByName(const Skeleton& source, const Skeleton& target) {
     BoneMap map;
     map.SourceToTarget.assign((size_t)source.Count(), -1);
@@ -71,11 +118,25 @@ BoneMap MapByName(const Skeleton& source, const Skeleton& target) {
         byName.emplace(key, i);
     }
 
+    // Второй индекс — по каноническим именам: им ловятся кости, названные по
+    // другому соглашению (thigh_l против UpperLeg.L).
+    std::unordered_map<std::string, int> byCanon;
+    for (int i = 0; i < target.Count(); ++i) {
+        const std::string norm = NormalizeBoneName(target.Joints[(size_t)i].Name);
+        if (norm.empty()) continue;
+        byCanon.emplace(CanonicalBoneName(norm), i);
+    }
+
     for (int i = 0; i < source.Count(); ++i) {
         const std::string key = NormalizeBoneName(source.Joints[(size_t)i].Name);
         if (key.empty()) continue;
         auto it = byName.find(key);
-        if (it != byName.end()) map.SourceToTarget[(size_t)i] = it->second;
+        if (it != byName.end()) {
+            map.SourceToTarget[(size_t)i] = it->second; // точное имя главнее
+            continue;
+        }
+        auto c = byCanon.find(CanonicalBoneName(key));
+        if (c != byCanon.end()) map.SourceToTarget[(size_t)i] = c->second;
     }
     return map;
 }

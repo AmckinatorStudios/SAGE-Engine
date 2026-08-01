@@ -1,5 +1,6 @@
 #include <filesystem>
 #include "ResourceManager.h"
+#include "sage/render/SkinnedModel.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
 
@@ -110,6 +111,20 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     }
     m_models[path] = mesh; // в т.ч. nullptr — негативный кэш (не перечитывать битый файл)
     return mesh;
+}
+
+std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
+    const std::string& path) {
+    auto it = m_skinned.find(path);
+    if (it != m_skinned.end()) return it->second;
+    std::shared_ptr<sage::render::SkinnedModel> model;
+    try {
+        model = sage::render::SkinnedModel::Load(path);
+    } catch (const std::exception& e) {
+        LOG_ERROR("Resources") << "Скиннинг-модель не загрузилась (" << path << "): " << e.what();
+    }
+    m_skinned[path] = model; // в т.ч. nullptr — негативный кэш
+    return model;
 }
 
 std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
@@ -549,6 +564,7 @@ void ResourceManager::Clear() {
     m_cylinder.reset();
     m_cone.reset();
     m_models.clear();
+    m_skinned.clear(); // GPU-ресурс: чистится, пока GL-контекст ещё жив
     // Материал держит свою программу через ShaderPtr, а копии shared_ptr на сам
     // материал живут в сущностях сцены — она переживает Clear(). Снимаем ссылку
     // у САМОГО материала: тогда программа умрёт здесь, при живом контексте, а

@@ -345,6 +345,7 @@ static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
     j["animatedModel"]["loop"] = am.Loop;
     j["animatedModel"]["playing"] = am.Playing;
     j["animatedModel"]["blendTime"] = am.BlendTime;
+    j["animatedModel"]["rootMotion"] = am.RootMotion;
 }
 
 static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
@@ -356,6 +357,7 @@ static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
     am.Loop = aj.value("loop", true);
     am.Playing = aj.value("playing", true);
     am.BlendTime = aj.value("blendTime", 0.25f);
+    am.RootMotion = aj.value("rootMotion", false);
     // Model/Anim восстановятся при первом UpdateAnimators (Ready=false).
     return am;
 }

@@ -531,6 +531,116 @@ void ScriptEngine::RegisterComponentTypes() {
         am->Playing = true;
         return true;
     });
+
+    // Забрать анимации из ЧУЖОГО файла на скелет своей модели. Ровно то, ради
+    // чего существуют библиотеки анимаций: один набор движений на любого героя.
+    // Возвращает, сколько клипов перенеслось (0 — скелеты не сошлись именами).
+    m_lua.set_function("BorrowAnimations", [](GameObject obj, const std::string& path) -> int {
+        if (!obj.Valid()) return 0;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return 0; // модель ещё не загрузилась
+        std::shared_ptr<sage::render::SkinnedModel> src =
+            ResourceManager::Instance().GetSkinnedModel(path);
+        if (!src) return 0;
+        const int added = am->Model->BorrowClipsFrom(*src);
+        // Клипы уехали в модель — переустанавливаем rig, чтобы аниматор увидел
+        // новый список (указатель на вектор тот же, но состояние проигрывания
+        // сбрасывать надо: индексы за пределами старого списка теперь валидны).
+        if (added > 0) am->Anim.SetRig(&am->Model->GetSkeleton(), &am->Model->Clips());
+        return added;
+    });
+
+    // --- Клипы по ИМЕНАМ и состояние проигрывания --------------------------
+    //
+    // Библиотека анимаций — это сорок с лишним клипов в одном файле, и
+    // обращаться к ним номерами нельзя: номер зависит от порядка в файле,
+    // молча меняется при переэкспорте, и «клип 17» не читается ни в коде, ни в
+    // логе. Игра знает свои анимации по именам — «Walk_Loop», «Jump_Start».
+    m_lua.set_function("AnimationNames", [this](GameObject obj) -> sol::table {
+        sol::table t = m_lua.create_table();
+        if (!obj.Valid()) return t;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return t;
+        const auto& clips = am->Model->Clips();
+        for (size_t i = 0; i < clips.size(); ++i) t[i + 1] = clips[i].Name;
+        return t;
+    });
+    m_lua.set_function("AnimationIndex", [](GameObject obj, const std::string& name) -> int {
+        if (!obj.Valid()) return -1;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return -1;
+        const auto& clips = am->Model->Clips();
+        for (size_t i = 0; i < clips.size(); ++i)
+            if (clips[i].Name == name) return (int)i;
+        return -1;
+    });
+    m_lua.set_function("PlayAnimationNamed", [](GameObject obj, const std::string& name,
+                                                sol::optional<float> blend) -> bool {
+        if (!obj.Valid()) return false;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return false;
+        const auto& clips = am->Model->Clips();
+        for (size_t i = 0; i < clips.size(); ++i) {
+            if (clips[i].Name != name) continue;
+            am->Clip = (int)i;
+            if (blend) am->BlendTime = *blend;
+            am->Playing = true;
+            return true;
+        }
+        return false; // клипа нет — молчать нельзя, вызывающий обязан узнать
+    });
+    m_lua.set_function("AnimationDuration", [](GameObject obj, int clip) -> float {
+        if (!obj.Valid()) return 0.0f;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Model) return 0.0f;
+        const auto& clips = am->Model->Clips();
+        if (clip < 0 || clip >= (int)clips.size()) return 0.0f;
+        return clips[(size_t)clip].Duration;
+    });
+    // Время внутри клипа: чтение и перемотка. Перемотка нужна всему, что
+    // показывает позу в ПРОИЗВОЛЬНЫЙ момент, а не «через dt от прошлого кадра»:
+    // покадровый рендер, превью, синхронизация двух персонажей.
+    m_lua.set_function("AnimationTime", [](GameObject obj) -> float {
+        if (!obj.Valid()) return 0.0f;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        return am ? am->Anim.Time() : 0.0f;
+    });
+    m_lua.set_function("SeekAnimation", [](GameObject obj, float time) {
+        if (!obj.Valid()) return;
+        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+            am->Anim.Seek(time);
+    });
+    m_lua.set_function("SetAnimationSpeed", [](GameObject obj, float speed) {
+        if (!obj.Valid()) return;
+        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+            am->Speed = speed;
+    });
+    m_lua.set_function("SetAnimationPlaying", [](GameObject obj, bool playing) {
+        if (!obj.Valid()) return;
+        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+            am->Playing = playing;
+    });
+    // Корневое движение: перемещение из клипа применяется к сущности, а не к
+    // мешу. Отдельным переключателем, потому что это ВЫБОР игры: платформеру
+    // нужна своя скорость передвижения, а катсцене — ровно та, что в клипе.
+    m_lua.set_function("SetRootMotion", [](GameObject obj, bool on) {
+        if (!obj.Valid()) return;
+        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+            am->RootMotion = on;
+    });
+    m_lua.set_function("SetAnimationLoop", [](GameObject obj, bool loop) {
+        if (!obj.Valid()) return;
+        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+            am->Loop = loop;
+    });
+    // Идёт ли сейчас кросс-фейд и с каким весом — по нему видно, что переход
+    // действительно СМЕШИВАЕТ позы, а не переключает клип рывком.
+    m_lua.set_function("AnimationFade", [](GameObject obj) -> float {
+        if (!obj.Valid()) return 0.0f;
+        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        if (!am || !am->Anim.Fading()) return 0.0f;
+        return am->Anim.FadeWeight();
+    });
 }
 
 void ScriptEngine::RegisterGameObject() {
