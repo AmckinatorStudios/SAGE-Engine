@@ -364,6 +364,90 @@ void GLTextureCube::Bind(int unit) const {
 }
 
 // ============================================================================
+//  GLCubeRenderTarget
+// ============================================================================
+
+GLCubeRenderTarget::GLCubeRenderTarget(const CubeRenderTargetDesc& desc) {
+    m_size = std::max(1, desc.Size);
+    // Полная цепочка по умолчанию: мип выбирается шероховатостью, и обрывать
+    // её значило бы обрывать шкалу «зеркало → матовое».
+    int full = 1;
+    while ((m_size >> full) > 0) ++full;
+    m_mips = desc.MipLevels > 0 ? std::min(desc.MipLevels, full) : full;
+
+    glGenTextures(1, &m_cube);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cube);
+    for (int face = 0; face < 6; ++face) {
+        for (int mip = 0; mip < m_mips; ++mip) {
+            const int s = std::max(1, m_size >> mip);
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mip, GL_RGB16F, s, s, 0, GL_RGB,
+                         GL_FLOAT, nullptr);
+        }
+    }
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+                    m_mips > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, m_mips - 1);
+    // Швы между гранями. Без этого на каждом стыке куба видна светлая линия —
+    // фильтрация у края грани не может дотянуться до соседней и повторяет
+    // крайний тексель. На размытых мипах, где пятно фильтра шире грани, шов
+    // становится толстым и заметным именно там, где отражение мягкое.
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+    glGenFramebuffers(1, &m_fbo);
+    if (desc.WithDepth) {
+        glGenRenderbuffers(1, &m_depthRbo);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_depthRbo);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, m_size, m_size);
+        m_depthSize = m_size;
+    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+}
+
+GLCubeRenderTarget::~GLCubeRenderTarget() {
+    if (m_fbo) glDeleteFramebuffers(1, &m_fbo);
+    if (m_depthRbo) glDeleteRenderbuffers(1, &m_depthRbo);
+    if (m_cube) glDeleteTextures(1, &m_cube);
+}
+
+void GLCubeRenderTarget::BindFace(int face, int mip) {
+    if (face < 0 || face > 5) return;
+    mip = std::max(0, std::min(mip, m_mips - 1));
+    const int s = std::max(1, m_size >> mip);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, m_cube, mip);
+    if (m_depthRbo) {
+        // Глубина переезжает под размер мипа: FBO требует совпадения размеров
+        // вложений, а мипы мельче нулевого.
+        if (m_depthSize != s) {
+            glBindRenderbuffer(GL_RENDERBUFFER, m_depthRbo);
+            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, s, s);
+            m_depthSize = s;
+        }
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_depthRbo);
+    }
+    glViewport(0, 0, s, s);
+}
+
+void GLCubeRenderTarget::GenerateMips() {
+    if (m_mips <= 1) return;
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cube);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+}
+
+void GLCubeRenderTarget::Bind(int unit) const {
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cube);
+}
+
+// ============================================================================
 //  GLRenderTarget
 // ============================================================================
 

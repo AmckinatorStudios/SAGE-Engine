@@ -11,6 +11,7 @@
 #include "sage/render/DebugDraw.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
+#include "sage/render/Reflection.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/scene/Scene.h"
@@ -44,6 +45,9 @@ public:
     // Общий depth-проход солнца (одна карта теней на кадр для обоих окон).
     // camera — камера ВЬЮПОРТА: карта теней строится вокруг неё, а не вокруг
     // начала мира, иначе всё, что редактор отлистал в сторону, теней лишается.
+    // Готовит отражения кадра (пересъёмка карты окружения при смене неба).
+    // Зовётся ДО любых проходов, рисующих во вьюпорт.
+    void PrepareReflections(Scene& scene, const LightingEnvironment& env);
     void RenderShadow(Scene& scene, const LightingEnvironment& env, const Camera& camera);
 
     // Превью сцены редакторской камерой. Возвращает использованные view/proj
@@ -101,6 +105,9 @@ private:
     bool m_postApplied = false, m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
     std::optional<SkyRenderer> m_sky;
+    // Отражения вьюпорта. Свои, а не общие с рантаймом: карта окружения
+    // снимается из точки и принадлежит виду.
+    sage::render::ReflectionSystem m_reflections;
     std::optional<ParticleSystem> m_particles;
     sage::ecs::RenderBatch m_batch;
     sage::ecs::RenderStats m_lastStats;

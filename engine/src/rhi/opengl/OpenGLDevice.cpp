@@ -151,6 +151,11 @@ std::unique_ptr<RenderTarget> OpenGLDevice::CreateRenderTarget(const RenderTarge
     return std::make_unique<GLRenderTarget>(desc);
 }
 
+std::unique_ptr<CubeRenderTarget> OpenGLDevice::CreateCubeRenderTarget(
+    const CubeRenderTargetDesc& desc) {
+    return std::make_unique<GLCubeRenderTarget>(desc);
+}
+
 // --- Запись цвета -----------------------------------------------------------
 
 void OpenGLDevice::SetColorWrite(bool enabled) {

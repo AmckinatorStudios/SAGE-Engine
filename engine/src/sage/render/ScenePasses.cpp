@@ -38,7 +38,7 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     batch.SetTime(input.Time);
     const sage::ecs::RenderStats stats =
         batch.RenderColor(scene, input.View, input.Proj, input.ViewPos, *input.Env, input.Shadows,
-                          input.ShadingMode);
+                          input.ShadingMode, &input.Reflection);
     if (input.Wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 
     // Проверка перекрытия — СРАЗУ после статики: буфер глубины кадра уже
@@ -50,7 +50,7 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     }
 
     sage::anim::DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
-                                   input.Shadows);
+                                   input.Shadows, &input.Reflection);
     return stats;
 }
 

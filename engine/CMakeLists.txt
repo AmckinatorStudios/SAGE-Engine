@@ -41,6 +41,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/LodGroup.cpp
     src/sage/render/MeshSimplify.cpp
     src/sage/render/ScenePasses.cpp
+    src/sage/render/Reflection.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp

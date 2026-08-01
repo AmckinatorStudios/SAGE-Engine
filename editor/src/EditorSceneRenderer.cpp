@@ -67,6 +67,15 @@ void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat
     m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
 }
 
+void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnvironment& env) {
+    // Пересъёмка карты окружения. Здесь, а не внутри прохода сцены: захват
+    // меняет привязанный буфер и viewport, и посреди отрисовки вьюпорта это
+    // писало бы небо в панель редактора.
+    m_reflections.SetEnabled(scene.Reflections.Enabled);
+    m_reflections.SetIntensity(scene.Reflections.Intensity);
+    if (m_sky) m_reflections.UpdateSky(*m_sky, env);
+}
+
 void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env,
                                        const Camera& camera) {
     Window& window = sage::Application::Get().GetWindow();
@@ -100,6 +109,7 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     color.ShadingMode = shadingMode;
     color.OcclusionCulling = sage::EngineConfig::Get().OcclusionCulling;
     color.Time = m_sceneTime;
+    color.Reflection = m_reflections.Binding(1, 1);
     m_lastStats = sage::render::RenderSceneColor(scene, m_batch, color);
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 }

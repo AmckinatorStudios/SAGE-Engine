@@ -11,6 +11,7 @@
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
+#include "sage/render/Reflection.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
@@ -76,6 +77,10 @@ private:
     std::optional<Shader> m_shadowShader;
     std::optional<ShadowMap> m_shadows;
     std::optional<SkyRenderer> m_sky;     // процедурный скайбокс сцены
+    // Отражения кадра. Карта окружения переснимается только при смене цвета
+    // неба (см. ReflectionSystem), поэтому в кадре это стоит ноль.
+    sage::render::ReflectionSystem m_reflections;
+    sage::render::PlanarReflection m_planar;
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
     // UI сцены (UIElementComponent из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.

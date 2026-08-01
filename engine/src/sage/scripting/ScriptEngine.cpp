@@ -1374,6 +1374,41 @@ void ScriptEngine::RegisterLightingApi() {
         "Fog", &LightingEnvironment::Fog,
         "Skybox", &LightingEnvironment::Skybox
     );
+    // --- Отражения ---------------------------------------------------------
+    //
+    // Игре тут решать две вещи: что отражать (небо само по себе или снятое
+    // зондом окружение) и есть ли в сцене зеркальная плоскость. Всё остальное —
+    // выбор мипа по шероховатости, Френель, параллакс — дело движка.
+    m_lua.set_function("SetReflectionsEnabled", [this](bool on) {
+        if (m_scene) m_scene->Reflections.Enabled = on;
+    });
+    m_lua.set_function("SetReflectionIntensity", [this](float v) {
+        if (m_scene) m_scene->Reflections.Intensity = std::max(0.0f, v);
+    });
+    // Зеркальная плоскость: высота воды. Отражается ВСЯ сцена над ней.
+    m_lua.set_function("SetWaterReflection", [this](float height) {
+        if (!m_scene) return;
+        m_scene->Reflections.PlanarEnabled = true;
+        // dot((0,1,0), p) - height = 0 — плоскость y = height.
+        m_scene->Reflections.Plane = glm::vec4(0.0f, 1.0f, 0.0f, -height);
+    });
+    // Произвольная плоскость (наклонное зеркало, витрина): нормаль + точка на ней.
+    m_lua.set_function("SetPlanarReflection", [this](const glm::vec3& normal,
+                                                     const glm::vec3& point) {
+        if (!m_scene) return;
+        const glm::vec3 n = glm::normalize(normal);
+        m_scene->Reflections.PlanarEnabled = true;
+        m_scene->Reflections.Plane = glm::vec4(n, -glm::dot(n, point));
+    });
+    m_lua.set_function("DisablePlanarReflection", [this]() {
+        if (m_scene) m_scene->Reflections.PlanarEnabled = false;
+    });
+    // Разрешение прохода отражения долей от кадра. Половина почти незаметна на
+    // воде (её и так ломает рябь), а стоит вчетверо дешевле.
+    m_lua.set_function("SetPlanarReflectionScale", [this](float scale) {
+        if (m_scene) m_scene->Reflections.PlanarScale = glm::clamp(scale, 0.1f, 1.0f);
+    });
+
     m_lua.set_function("GetLighting", [this]() -> LightingEnvironment& {
         if (!m_scene) throw std::runtime_error("GetLighting: сцена не привязана (BindScene не вызван)");
         return m_scene->Lighting;

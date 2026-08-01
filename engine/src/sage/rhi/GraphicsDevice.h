@@ -168,6 +168,12 @@ public:
     virtual std::unique_ptr<Texture3D> CreateTexture3D(const Texture3DDesc& desc, const float* pixels) = 0;
     virtual std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) = 0;
     virtual std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) = 0;
+    // Кубический таргет для отражений (см. CubeRenderTarget). Не чисто
+    // виртуальный: бэкенд, который его не умеет, вернёт nullptr, и отражения
+    // просто отключатся, а не уронят сборку.
+    virtual std::unique_ptr<CubeRenderTarget> CreateCubeRenderTarget(const CubeRenderTargetDesc&) {
+        return nullptr;
+    }
 
     // Фабрика бэкенда. Возвращает готовый (но ещё не Init) девайс.
     static std::unique_ptr<GraphicsDevice> Create(Backend backend);

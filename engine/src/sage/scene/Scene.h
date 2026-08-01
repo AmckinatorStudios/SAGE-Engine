@@ -9,6 +9,7 @@
 #include "sage/scene/Transform.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/Components.h"
+#include "sage/render/Reflection.h"
 
 // ---------------------------------------------------------------------------
 // Scene — сцена на базе ECS (entt). Сущности (entity) — это просто id; их
@@ -190,6 +191,10 @@ public:
     // вместе с ней). Пока это единый environment, а не per-entity компонент —
     // так проще и совпадает с прежним поведением.
     LightingEnvironment Lighting;
+
+    // Отражения — тоже свойство сцены, а не рендера: в открытом море отражается
+    // небо, в помещении — снятый зондом куб, а высота воды принадлежит игре.
+    sage::render::ReflectionSettings Reflections;
 
     // Запечённое глобальное освещение (лайтмапы + GI-объём проб, см. sage/gi).
     // nullptr — GI не запекалось. shared_ptr намеренно: снапшоты сцены

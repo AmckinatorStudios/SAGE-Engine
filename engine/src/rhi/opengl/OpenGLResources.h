@@ -91,6 +91,30 @@ private:
     unsigned int m_id = 0;
 };
 
+// Цветной cubemap с мипами, в грани которого можно рисовать. Формат — RGB16F:
+// отражение обязано нести HDR. Небо ярче единицы, и в LDR-кубе солнце и блик
+// на воде превратились бы в плоское белое пятно ещё до тон-маппинга.
+class GLCubeRenderTarget : public CubeRenderTarget {
+public:
+    explicit GLCubeRenderTarget(const CubeRenderTargetDesc& desc);
+    ~GLCubeRenderTarget() override;
+
+    void BindFace(int face, int mip) override;
+    void GenerateMips() override;
+    int Size() const override { return m_size; }
+    int MipLevels() const override { return m_mips; }
+    void Bind(int unit) const override;
+    unsigned int NativeHandle() const override { return m_cube; }
+
+private:
+    int m_size = 0;
+    int m_mips = 1;
+    unsigned int m_cube = 0;
+    unsigned int m_fbo = 0;
+    unsigned int m_depthRbo = 0;
+    int m_depthSize = 0;   // под какой размер выделена глубина сейчас
+};
+
 class GLRenderTarget : public RenderTarget {
 public:
     explicit GLRenderTarget(const RenderTargetDesc& desc);

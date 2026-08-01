@@ -329,6 +329,14 @@ void PlayerLayer::OnRender() {
         m_audio->SetListener(viewPos, forward, up);
     }
 
+    // --- Отражения: карта окружения ---
+    // Строго ДО прохода теней и сцены: захват меняет привязанный буфер и
+    // viewport, и посреди кадра это стоило бы лишних переключений. Пересъёмка
+    // происходит только при смене цвета неба.
+    m_reflections.SetEnabled(m_scene->Reflections.Enabled);
+    m_reflections.SetIntensity(m_scene->Reflections.Intensity);
+    if (m_sky) m_reflections.UpdateSky(*m_sky, env);
+
     // --- Тени: глубина от солнца (можно отключить в настройках) ---
     // Строго ПОСЛЕ выбора камеры: каскады делят дальность именно её взгляда, и
     // без неё считать их не из чего. Порядок «тени, потом камера» держался
@@ -358,6 +366,32 @@ void PlayerLayer::OnRender() {
         sage::render::RenderShadowDepth(*m_shadows, *m_scene, m_batch, window.Width(),
                                         window.Height());
     }
+
+    // --- Плоское отражение (вода, зеркало) ---
+    // Сцена рисуется второй раз зеркально относительно плоскости. Внутри этого
+    // прохода плоского отражения НЕТ: иначе зеркало смотрело бы в себя, и
+    // каждый кадр стоил бы вдвое дороже предыдущего.
+    m_planar.Reset();
+    if (m_scene->Reflections.Enabled && m_scene->Reflections.PlanarEnabled) {
+        const glm::vec4 plane = m_scene->Reflections.Plane;
+        m_planar.Capture(plane, view, proj, vpW, vpH,
+                         [&](const glm::mat4& mv, const glm::mat4& mp) {
+                             const glm::vec3 mirrorEye =
+                                 glm::vec3(glm::inverse(mv)[3]);
+                             if (m_sky && env.Skybox.Enabled)
+                                 m_sky->Draw(mv, mp, env.Skybox.TopColor, env.Skybox.HorizonColor);
+                             sage::render::SceneColorInput rc;
+                             rc.View = mv;
+                             rc.Proj = mp;
+                             rc.ViewPos = mirrorEye;
+                             rc.Env = &env;
+                             rc.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+                             rc.Time = m_sceneTime;
+                             rc.Reflection = m_reflections.Binding(vpW, vpH, 0);
+                             sage::render::RenderSceneColor(*m_scene, m_batch, rc);
+                         });
+    }
+
 
     // --- Основной проход: полное освещение + тени + туман/скайбокс ---
     // Полосы letterbox чёрные: сперва чистим весь экран, затем рендерим в
@@ -389,6 +423,7 @@ void PlayerLayer::OnRender() {
     color.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
     color.OcclusionCulling = cfg.OcclusionCulling;
     color.Time = m_sceneTime;
+    color.Reflection = m_reflections.Binding(vpW, vpH, m_planar.Texture());
     sage::render::RenderSceneColor(*m_scene, m_batch, color);
 
     // Частицы (billboard) — camRight/Up берём из матрицы вида.

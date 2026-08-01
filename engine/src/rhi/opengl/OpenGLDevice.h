@@ -56,6 +56,8 @@ public:
     std::unique_ptr<Texture3D> CreateTexture3D(const Texture3DDesc& desc, const float* pixels) override;
     std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) override;
     std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) override;
+    std::unique_ptr<CubeRenderTarget> CreateCubeRenderTarget(
+        const CubeRenderTargetDesc& desc) override;
 };
 
 } // namespace sage::rhi

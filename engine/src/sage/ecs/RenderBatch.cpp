@@ -386,7 +386,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
 
 RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                                      const glm::vec3& viewPos, const LightingEnvironment& env,
-                                     const ShadowBinding& shadows, int shadingMode) {
+                                     const ShadowBinding& shadows, int shadingMode,
+                                     const sage::render::ReflectionBinding* reflections) {
     m_stats = {};
     m_viewPos = viewPos; // нужна сборке: по ней считается глубина прозрачных
     CollectVisible(scene, proj * view);
@@ -406,6 +407,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // всегда — см. SetGISamplerUnits).
         sage::gi::UploadGIVolume(sh, giVolume);
         BindAndUploadShadows(sh, shadows);
+        // Отражения: пустая привязка тоже заливается — иначе включённый на
+        // прошлом объекте куб остался бы висеть в программе шейдера.
+        sage::render::UploadReflection(sh, reflections ? *reflections
+                                                       : sage::render::ReflectionBinding{});
     };
 
     // Привязка лайтмапы группы/сущности (или выключение для незапечённых).

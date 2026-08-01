@@ -5,6 +5,7 @@
 
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/Reflection.h"
 
 class Scene;
 struct LightingEnvironment;
@@ -51,6 +52,8 @@ struct SceneColorInput {
     glm::vec3 ViewPos{0.0f};
     const LightingEnvironment* Env = nullptr;
     ShadowBinding Shadows;
+    // Источники отражений кадра. Пустая структура — сцена без отражений.
+    ReflectionBinding Reflection;
     int ShadingMode = 0;      // 0 освещённый / 1 плоский цвет / 2 нормали
     bool Wireframe = false;   // каркас поверх режима 1
     bool OcclusionCulling = false;

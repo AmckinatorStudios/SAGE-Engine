@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/render/ShadowMap.h"
+#include "sage/render/Reflection.h"
 
 class Scene;
 struct LightingEnvironment;
@@ -28,7 +29,8 @@ void UpdateAnimators(Scene& scene, float dt);
 // солнца (каскады — см. ShadowMap.h), как в статическом lit-проходе.
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
-                        const ShadowBinding& shadows);
+                        const ShadowBinding& shadows,
+                        const sage::render::ReflectionBinding* reflections = nullptr);
 
 // Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
 // внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.

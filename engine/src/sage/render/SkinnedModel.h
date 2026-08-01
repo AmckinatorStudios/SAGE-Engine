@@ -7,6 +7,7 @@
 
 #include "sage/anim/Skeleton.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/Reflection.h"
 #include "sage/render/Texture.h"
 #include "sage/rhi/Resources.h"
 
@@ -131,6 +132,7 @@ public:
               const glm::vec3& viewPos, const LightingEnvironment& env,
               const std::vector<glm::mat4>& bones,
               const ShadowBinding& shadows,
+              const sage::render::ReflectionBinding* reflections = nullptr,
               const std::vector<float>* morphWeights = nullptr) const;
 
     // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей

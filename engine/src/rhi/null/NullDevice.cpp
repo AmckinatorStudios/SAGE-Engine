@@ -140,6 +140,37 @@ std::unique_ptr<RenderTarget> NullDevice::CreateRenderTarget(const RenderTargetD
     return std::make_unique<NullRenderTarget>(desc);
 }
 
+// Пустышка ведёт себя как настоящий таргет по размерам и мипам: на ней
+// считаются headless-тесты, и «нет отражений» они бы не отличили от «отражения
+// сломаны».
+class NullCubeRenderTarget : public CubeRenderTarget {
+public:
+    explicit NullCubeRenderTarget(const CubeRenderTargetDesc& desc)
+        : m_size(desc.Size > 0 ? desc.Size : 1), m_handle(NextHandle()) {
+        int full = 1;
+        while ((m_size >> full) > 0) ++full;
+        m_mips = desc.MipLevels > 0 ? (desc.MipLevels < full ? desc.MipLevels : full) : full;
+        ++g_counters.RenderTargets;
+    }
+    ~NullCubeRenderTarget() override { --g_counters.RenderTargets; }
+    void BindFace(int, int) override {}
+    void GenerateMips() override {}
+    int Size() const override { return m_size; }
+    int MipLevels() const override { return m_mips; }
+    void Bind(int) const override {}
+    unsigned int NativeHandle() const override { return m_handle; }
+
+private:
+    int m_size = 1;
+    int m_mips = 1;
+    unsigned int m_handle = 0;
+};
+
+std::unique_ptr<CubeRenderTarget> NullDevice::CreateCubeRenderTarget(
+    const CubeRenderTargetDesc& desc) {
+    return std::make_unique<NullCubeRenderTarget>(desc);
+}
+
 NullCounters& NullDevice::Counters() { return g_counters; }
 void NullDevice::ResetCounters() { g_counters = NullCounters{}; }
 

@@ -10,6 +10,7 @@
 #include "sage/render/Shader.h"
 #include "sage/render/LodGroup.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/Reflection.h"
 
 class Scene;
 struct LightingEnvironment;
@@ -54,9 +55,14 @@ public:
 
     // Цветной проход: отсечение по камере + инстансная отрисовка с полным
     // освещением. shadingMode: 0 lit / 1 unlit / 2 normals. Возвращает статистику.
+    //
+    // reflections — источники отражений кадра (куб окружения, SSR, плоское).
+    // Необязательный: сцена без них рисуется ровно как раньше, только без
+    // зеркальной составляющей непрямого света.
     RenderStats RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                             const glm::vec3& viewPos, const LightingEnvironment& env,
-                            const ShadowBinding& shadows, int shadingMode);
+                            const ShadowBinding& shadows, int shadingMode,
+                            const sage::render::ReflectionBinding* reflections = nullptr);
 
     // Depth-проход для карты теней: отсечение по фрустуму СВЕТА + инстансная
     // отрисовка только глубины (без освещения).

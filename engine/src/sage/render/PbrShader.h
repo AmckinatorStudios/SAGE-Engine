@@ -43,6 +43,25 @@ uniform bool uShadowsEnabled;
 uniform float uShadowFadeStart;
 uniform float uShadowFadeEnd;
 uniform int uShadingMode; // 0 lit / 1 unlit / 2 normals (решает вызывающий main)
+// --- Отражения (см. sage/render/Reflection.h) ---
+// Карта окружения: небо и сцена вокруг, запечённые в cubemap с мипами. Мип
+// выбирается ШЕРОХОВАТОСТЬЮ — нулевой это зеркало, дальние размыты.
+uniform samplerCube uEnvMap;
+uniform bool uEnvEnabled;
+uniform float uEnvIntensity;
+uniform float uEnvMaxLod;      // сколько мипов реально есть (шкала шероховатости)
+// Параллакс-коррекция: куб снят из ОДНОЙ точки, а смотрят на него из разных.
+// Без поправки отражение «плывёт» при движении камеры — как будто окружение
+// приклеено к объекту. Поправка ищет пересечение луча с коробкой влияния зонда
+// и берёт направление уже к точке пересечения.
+uniform bool uEnvBoxParallax;
+uniform vec3 uEnvBoxMin;
+uniform vec3 uEnvBoxMax;
+uniform vec3 uEnvProbePos;
+uniform vec2 uScreenTexel;     // 1/размер кадра — экранные буферы читаются по нему
+// Плоское отражение (вода, зеркало): сцена, отражённая относительно плоскости.
+uniform sampler2D uPlanarMap;
+uniform bool uPlanarEnabled;
 uniform bool uFogEnabled;
 uniform vec3 uFogColor;
 uniform float uFogStart;
@@ -257,6 +276,83 @@ vec3 DefaultIndirect(vec3 worldPos, vec3 n) {
     return uGIVolumeEnabled ? EvalGIVolume(worldPos, n) : CalcHemisphereAmbient(n);
 }
 
+// --- Отражение окружения (specular IBL) ------------------------------------
+//
+// До этого непрямой свет был ТОЛЬКО диффузным: ambient = indirect * albedo.
+// Для металла это неверно вдвойне — у него нет диффузной составляющей вовсе, а
+// весь его вид и есть отражение окружения. Хромовый шар в такой модели выходил
+// плоским серым пятном, и никакая настройка света это не чинила.
+//
+// Считается по «split-sum» приближению Karis: интеграл освещения разбивается на
+// (1) предварительно размытое окружение, выбранное по шероховатости, и
+// (2) отклик BRDF, зависящий только от угла и шероховатости. Второй множитель
+// обычно берут из запечённой LUT-текстуры; здесь вместо неё аналитическая
+// аппроксимация Lazarov — она укладывается в несколько операций, не занимает
+// текстурный юнит (их в GL 3.3 и так впритык из-за четырёх карт теней) и не
+// требует шага запекания, без которого движок был бы неработоспособен «из
+// коробки».
+vec2 EnvBRDFApprox(float NdotV, float rough) {
+    const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+    const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+    vec4 r = rough * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
+    return vec2(-1.04, 1.04) * a004 + r.zw;
+}
+
+// Направление выборки куба с поправкой на коробку влияния зонда.
+vec3 ParallaxCorrect(vec3 R, vec3 worldPos) {
+    if (!uEnvBoxParallax) return R;
+    // Пересечение луча с параллелепипедом (slab-метод). Луч всегда изнутри
+    // коробки, поэтому нужен только ДАЛЬНИЙ корень по каждой оси.
+    vec3 inv = 1.0 / max(abs(R), vec3(1e-5)) * sign(R + vec3(1e-9));
+    vec3 tMax = (uEnvBoxMax - worldPos) * inv;
+    vec3 tMin = (uEnvBoxMin - worldPos) * inv;
+    vec3 t = max(tMax, tMin);
+    float dist = min(min(t.x, t.y), t.z);
+    if (dist <= 0.0) return R;      // точка вне коробки — поправлять нечего
+    return normalize((worldPos + R * dist) - uEnvProbePos);
+}
+
+// Плоское отражение читается по ЭКРАННОЙ позиции: отражённая сцена снята той же
+// камерой, только зеркально, поэтому пиксель отражения лежит там же, где сам
+// фрагмент. Смещение uv по нормали даёт рябь на воде.
+vec3 SamplePlanar(vec2 offset) {
+    if (!uPlanarEnabled) return vec3(0.0);
+    vec2 uv = gl_FragCoord.xy * uScreenTexel + offset;
+    return texture(uPlanarMap, clamp(uv, vec2(0.001), vec2(0.999))).rgb;
+}
+
+// Отражённое окружение для фрагмента. Возвращает уже готовый цвет зеркальной
+// составляющей непрямого света.
+//
+// Источников два, и они складываются по УБЫВАНИЮ точности: плоское отражение —
+// настоящая геометрия, отрисованная зеркально, но существует только для своей
+// плоскости; куб знает всё вокруг, включая то, что за камерой, но снят из одной
+// точки. Куб — фундамент, плоское подставляется поверх там, где оно есть.
+vec3 SpecularIBL(vec3 N, vec3 V, vec3 albedo, float metallic, float rough, float ao,
+                 vec3 worldPos, vec3 planar, float planarWeight) {
+    float NdotV = max(dot(N, V), 1e-4);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec2 ab = EnvBRDFApprox(NdotV, rough);
+    vec3 brdf = F0 * ab.x + ab.y;
+
+    vec3 env = vec3(0.0);
+    if (uEnvEnabled) {
+        vec3 R = ParallaxCorrect(reflect(-V, N), worldPos);
+        env = textureLod(uEnvMap, R, rough * uEnvMaxLod).rgb * uEnvIntensity;
+    }
+    // Плоское — поверх куба: если оно есть, оно точнее.
+    env = mix(env, planar, planarWeight);
+
+    // Затенение отражения. Полный ambient occlusion гасить отражение не должен
+    // (щель отражает небо не хуже открытой поверхности), но и не гасить нельзя:
+    // тогда в углах загорается свет, которого там нет. Компромисс — гасим
+    // частично, тем сильнее, чем поверхность шероховатее: у зеркала отражение
+    // приходит из одного направления и щелью почти не перекрывается.
+    float specAO = mix(1.0, ao, rough);
+    return env * brdf * specAO;
+}
+
 // Вклад одного источника (Cook-Torrance): N — нормаль, V — к камере, L — к свету,
 // radiance — цвет*интенсивность источника (с затуханием/тенью, посчитанными выше).
 vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float rough) {
@@ -277,7 +373,15 @@ vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metall
 // прожекторы + туман. shadingMode 1/2 обрабатывает вызывающий main.
 vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, float ao, vec3 indirect) {
     vec3 V = normalize(uViewPos - fragPos);
-    vec3 ambient = indirect * albedo * ao;
+
+    // Диффузный непрямой свет теперь берёт только ту долю, что не ушла в
+    // отражение, и у металла её нет вовсе. Раньше металл получал полный
+    // диффузный ambient — то есть светился как гипс, и одновременно не отражал
+    // ничего. Оба конца этой ошибки чинятся здесь и в SpecularIBL.
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 kD = (vec3(1.0) - FresnelSchlick(max(dot(N, V), 0.0), F0)) * (1.0 - metallic);
+    vec3 ambient = kD * indirect * albedo * ao;
+    ambient += SpecularIBL(N, V, albedo, metallic, rough, ao, fragPos, vec3(0.0), 0.0);
     vec3 Lo = vec3(0.0);
 
     // Солнце (направленное) + PCF-тень.

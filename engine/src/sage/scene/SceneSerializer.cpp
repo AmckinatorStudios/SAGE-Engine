@@ -336,6 +336,30 @@ static JointComponent ParseJoint(const json& jj) {
     return jc;
 }
 
+// Отражения сцены: сохраняется ЗАДАНИЕ, а не снятые кубы — они пересобираются
+// при загрузке из того же неба и той же геометрии.
+static json ReflectionsToJson(const sage::render::ReflectionSettings& r) {
+    json j;
+    j["enabled"] = r.Enabled;
+    j["intensity"] = r.Intensity;
+    j["planarEnabled"] = r.PlanarEnabled;
+    j["plane"] = Vec4ToJson(r.Plane);
+    j["planarScale"] = r.PlanarScale;
+    return j;
+}
+
+static sage::render::ReflectionSettings ReflectionsFromJson(const json& root) {
+    sage::render::ReflectionSettings r;
+    if (!root.contains("reflections")) return r;
+    const json& j = root["reflections"];
+    r.Enabled = j.value("enabled", r.Enabled);
+    r.Intensity = j.value("intensity", r.Intensity);
+    r.PlanarEnabled = j.value("planarEnabled", r.PlanarEnabled);
+    if (j.contains("plane")) r.Plane = Vec4FromJson(j["plane"], r.Plane);
+    r.PlanarScale = j.value("planarScale", r.PlanarScale);
+    return r;
+}
+
 static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
     // Только описательные поля — модель/палитра восстанавливаются загрузкой.
     j["animatedModel"]["path"] = am.Path;
@@ -722,6 +746,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
     }
     root["objects"] = objectsJson;
     root["lighting"] = LightingToJson(scene.Lighting);
+    root["reflections"] = ReflectionsToJson(scene.Reflections);
     if (scene.GI) root["gi"] = GIToJson(*scene.GI, withProbes);
     return root;
 }
@@ -800,6 +825,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
     scene->SetNextId(maxId + 1);
     scene->Lighting = LightingFromJson(root);
+    scene->Reflections = ReflectionsFromJson(root);
     if (root.contains("gi")) scene->GI = GIFromJson(root["gi"]);
 
     return scene;
