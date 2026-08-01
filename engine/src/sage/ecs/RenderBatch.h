@@ -243,6 +243,10 @@ private:
 
     // Сбор видимых сущностей: flat (без карт) — в m_groups по мешу (инстансинг),
     // текстурные (с картами) — в m_textured. cullMatrix — фрустум камеры/света.
+    // Выбрасывать ли зеркальные поверхности из сборки: взводится на время
+    // прохода, снимающего плоское отражение (см. ReflectionBinding).
+    bool m_skipPlanarReflectors = false;
+
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
     std::unordered_map<Mesh*, Group> m_groups; // flat-инстансы по мешу

@@ -1186,6 +1186,134 @@ void TestReflectionSeams() {
     Check(worst < 12, "на стыке граней куба нет шва");
 }
 
+
+// Плоское отражение целиком: снять зеркальный проход и убедиться, что предмет
+// над зеркалом виден В НЁМ, причём на своём месте.
+//
+// Матрица отражения проверена отдельно; здесь проверяется весь путь — смена
+// обхода треугольников, косое отсечение, чтение по экранной позиции. Ошибка в
+// любом из трёх даёт не «нет отражения», а неправильное отражение: изнанку
+// модели, лишнюю геометрию из-под воды или отражение, съехавшее вбок.
+void TestPlanarReflectionRender(FrameRenderer& r) {
+    std::printf("=== Отражения: зеркальный пол ===\n");
+
+    auto scene = std::make_unique<Scene>("PlanarTest");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -1.0f, -0.4f));
+    scene->Lighting.Sun.Intensity = 1.2f;
+    scene->Lighting.AmbientStrength = 0.5f;
+    scene->Lighting.SkyColor = {0.5f, 0.55f, 0.7f};
+    scene->Lighting.GroundColor = {0.2f, 0.2f, 0.2f};
+
+    auto cube = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    auto plane = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Plane);
+
+    // Зеркальный пол на y = 0.
+    GameObject floor = scene->CreateObject("Mirror");
+    floor.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+    floor.GetTransform().Scale = {14.0f, 1.0f, 14.0f};
+    floor.Renderer().Ref = MeshRef{MeshRef::Type::Plane};
+    floor.Renderer().MeshPtr = plane;
+    auto mirrorMat = std::make_shared<Material>();
+    mirrorMat->Albedo = {0.05f, 0.05f, 0.06f};
+    mirrorMat->Roughness = 0.05f;
+    mirrorMat->PlanarReflectivity = 1.0f;
+    floor.Renderer().MaterialPtr = mirrorMat;
+
+    // Ярко-красный столб НАД зеркалом — то, что обязано в нём отразиться.
+    GameObject pillar = scene->CreateObject("Pillar");
+    pillar.GetTransform().Position = {0.0f, 1.6f, 0.0f};
+    pillar.GetTransform().Scale = {0.7f, 3.0f, 0.7f};
+    pillar.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    pillar.Renderer().MeshPtr = cube;
+    auto redMat = std::make_shared<Material>();
+    redMat->Albedo = {0.95f, 0.06f, 0.06f};
+    redMat->Roughness = 0.8f;
+    pillar.Renderer().MaterialPtr = redMat;
+
+    // И ярко-зелёный ПОД зеркалом: он в отражении появиться НЕ должен —
+    // именно это отсекает косая ближняя плоскость. Без неё в зеркале
+    // оказывается то, что лежит под ним.
+    GameObject below = scene->CreateObject("Below");
+    below.GetTransform().Position = {0.0f, -1.6f, 0.0f};
+    below.GetTransform().Scale = {3.0f, 2.6f, 3.0f};
+    below.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    below.Renderer().MeshPtr = cube;
+    auto greenMat = std::make_shared<Material>();
+    greenMat->Albedo = {0.05f, 0.95f, 0.10f};
+    greenMat->Roughness = 0.8f;
+    below.Renderer().MaterialPtr = greenMat;
+
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    // Камера низко над полом: так отражение занимает заметную часть кадра.
+    const glm::vec3 eye(0.0f, 1.1f, 6.5f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f, 0.9f, 0.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = PerspectiveProj();
+
+    sage::render::PlanarReflection planar(1.0f);   // полное разрешение: тест меряет пиксели
+    const glm::vec4 mirrorPlane(0.0f, 1.0f, 0.0f, 0.0f);
+    const bool captured =
+        planar.Capture(mirrorPlane, view, proj, kW, kH, [&](const glm::mat4& mv, const glm::mat4& mp) {
+            sage::rhi::GraphicsDevice& d = sage::rhi::GraphicsDevice::Get();
+            d.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            d.Clear(true, true);
+            r.Batch.RenderColor(*scene, mv, mp, glm::vec3(glm::inverse(mv)[3]), env, ShadowBinding(),
+                                0);
+        });
+    Check(captured, "зеркальный проход снялся");
+
+    Framebuffer fbo(kW, kH), out(kW, kH);
+    fbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.02f, 0.02f, 0.03f, 1.0f);
+    device.Clear(true, true);
+    sage::render::ReflectionBinding binding;
+    binding.PlanarTexture = planar.Texture();
+    binding.ScreenTexel = glm::vec2(1.0f / kW, 1.0f / kH);
+    r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0, &binding);
+    r.Fx.ResetHistory();
+    sage::render::PostFXSettings fx = BaseSettings();
+    fx.BloomEnabled = false;
+    fx.Vignette = 0.0f;
+    r.Fx.Render(fbo.ColorTexture(), fbo.DepthTexture(), kW, kH, proj, view, fx, &out, 0, 0, kW, kH);
+    out.Bind();
+    const Image img = Capture(kW, kH);
+
+    // Считаем красное и зелёное в НИЖНЕЙ половине кадра — там, где пол.
+    long long red = 0, green = 0, floorPixels = 0;
+    for (int y = kH / 2; y < kH; ++y)
+        for (int x = 0; x < kW; ++x) {
+            const size_t i = ((size_t)y * kW + x) * 3;
+            const int rr = img.Pixels[i], gg = img.Pixels[i + 1], bb = img.Pixels[i + 2];
+            ++floorPixels;
+            if (rr - gg > 40 && rr - bb > 40) ++red;
+            if (gg - rr > 40 && gg - bb > 40) ++green;
+        }
+    const double redFrac = (double)red / (double)floorPixels;
+    const double greenFrac = (double)green / (double)floorPixels;
+    std::printf("       в зеркале: красного %.1f%%, зелёного %.1f%%\n", redFrac * 100.0,
+                greenFrac * 100.0);
+    Check(redFrac > 0.02, "столб НАД зеркалом в нём отражается");
+    Check(greenFrac < 0.002, "то, что ПОД зеркалом, в отражение не попадает (косое отсечение)");
+
+    // Отражение обязано стоять ПОД столбом, а не сбоку: столб по центру кадра,
+    // значит и красное в нижней половине должно быть по центру.
+    long long leftRed = 0, rightRed = 0, centerRed = 0;
+    for (int y = kH / 2; y < kH; ++y)
+        for (int x = 0; x < kW; ++x) {
+            const size_t i = ((size_t)y * kW + x) * 3;
+            const int rr = img.Pixels[i], gg = img.Pixels[i + 1], bb = img.Pixels[i + 2];
+            if (!(rr - gg > 40 && rr - bb > 40)) continue;
+            if (x < kW / 3) ++leftRed;
+            else if (x > kW * 2 / 3) ++rightRed;
+            else ++centerRed;
+        }
+    std::printf("       красное по третям: слева %lld, центр %lld, справа %lld\n", leftRed,
+                centerRed, rightRed);
+    Check(centerRed > leftRed + rightRed, "отражение стоит ПОД предметом, а не съехало вбок");
+
+    Report("reflect_planar", CompareWithReference("reflect_planar", img));
+}
+
 // Плоское отражение обязано быть ГЕОМЕТРИЧЕСКИ верным, а не «похожим»:
 // предмет над зеркалом отражается ровно на столько же вниз. Проверяем
 // матрицей — она и есть источник правды, а картинка от неё производная.
@@ -1850,6 +1978,7 @@ int main(int argc, char** argv) {
         TestReflectionProbe(renderer);
         TestReflectionSeams();
         TestPlanarReflectionMath();
+        TestPlanarReflectionRender(renderer);
         TestShadowSoftness(renderer, *scene);
         TestShadowCascades(renderer);
         TestLevelsOfDetail(renderer);

@@ -371,7 +371,8 @@ vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metall
 // «освещённость/π»: лайтмапа, GI-объём или полусферический ambient; умножает
 // albedo и ao). Прямой свет — realtime: солнце (с тенью) + точечные +
 // прожекторы + туман. shadingMode 1/2 обрабатывает вызывающий main.
-vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, float ao, vec3 indirect) {
+vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, float ao,
+                    vec3 indirect, vec3 planar, float planarWeight) {
     vec3 V = normalize(uViewPos - fragPos);
 
     // Диффузный непрямой свет теперь берёт только ту долю, что не ушла в
@@ -381,7 +382,7 @@ vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 kD = (vec3(1.0) - FresnelSchlick(max(dot(N, V), 0.0), F0)) * (1.0 - metallic);
     vec3 ambient = kD * indirect * albedo * ao;
-    ambient += SpecularIBL(N, V, albedo, metallic, rough, ao, fragPos, vec3(0.0), 0.0);
+    ambient += SpecularIBL(N, V, albedo, metallic, rough, ao, fragPos, planar, planarWeight);
     vec3 Lo = vec3(0.0);
 
     // Солнце (направленное) + PCF-тень.
@@ -417,6 +418,12 @@ vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, 
         result = mix(uFogColor, result, f);
     }
     return result;
+}
+
+// Обычный путь: без плоского отражения. Отдельной обёрткой, чтобы «зеркало»
+// оставалось осознанным выбором материала, а не тем, что случайно включилось.
+vec3 ShadePBRgi(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough, float ao, vec3 indirect) {
+    return ShadePBRplanar(N, fragPos, albedo, metallic, rough, ao, indirect, vec3(0.0), 0.0);
 }
 
 // Совместимая обёртка: непрямой свет по умолчанию (GI-объём или полусферический

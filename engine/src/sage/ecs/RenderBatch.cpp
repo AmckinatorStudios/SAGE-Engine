@@ -44,6 +44,7 @@ layout (location = 9) in float iMetallic;
 layout (location = 10) in float iRoughness;
 layout (location = 11) in vec2 aUV2;
 layout (location = 12) in float iAlpha;
+layout (location = 13) in float iPlanar;
 
 out vec3 FragPos;
 out vec3 Normal;
@@ -52,6 +53,7 @@ out float vMetallic;
 out float vRoughness;
 out vec2 vUV2;
 out float vAlpha;
+out float vPlanar;
 
 uniform mat4 uView;
 uniform mat4 uProjection;
@@ -68,6 +70,7 @@ void main() {
     vRoughness = iRoughness;
     vUV2 = aUV2;
     vAlpha = iAlpha;
+    vPlanar = iPlanar;
     gl_Position = uProjection * uView * world;
 }
 )";
@@ -81,6 +84,7 @@ in float vMetallic;
 in float vRoughness;
 in vec2 vUV2;
 in float vAlpha;
+in float vPlanar;
 out vec4 FragColor;
 
 // Лайтмапа GI текущей группы (uLightmapEnabled — группа запечена).
@@ -94,7 +98,8 @@ void main() {
     // Непрямой свет: лайтмапа (статика) или GI-объём/полусфера (DefaultIndirect).
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
-    FragColor = vec4(ShadePBRgi(N, FragPos, vColor, vMetallic, vRoughness, 1.0, indirect), vAlpha);
+    FragColor = vec4(ShadePBRplanar(N, FragPos, vColor, vMetallic, vRoughness, 1.0, indirect,
+                                    SamplePlanar(vec2(0.0)), vPlanar), vAlpha);
 }
 )";
 }
@@ -340,6 +345,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             else ++m_stats.Culled;
             continue;
         }
+        // Зеркало не отражает само себя (см. ReflectionBinding::CapturingPlanar).
+        if (m_skipPlanarReflectors && c.Mat && c.Mat->PlanarReflectivity > 0.0f) continue;
         ++m_stats.Drawn;
         m_stats.Triangles += (long long)c.Mesh_->TriangleCount();
         m_stats.TrianglesAtLod0 += (long long)c.BaseMesh->TriangleCount();
@@ -347,7 +354,11 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         inst.Model = c.Model;
         inst.Color = c.Color;
         inst.Alpha = c.Opacity;
-        if (c.Mat) { inst.Metallic = c.Mat->Metallic; inst.Roughness = c.Mat->Roughness; }
+        if (c.Mat) {
+            inst.Metallic = c.Mat->Metallic;
+            inst.Roughness = c.Mat->Roughness;
+            inst.PlanarReflectivity = c.Mat->PlanarReflectivity;
+        }
 
         if (c.Custom) {
             // Собственный шейдер материала. Батчинг сохраняется: группируем по
@@ -390,6 +401,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                                      const sage::render::ReflectionBinding* reflections) {
     m_stats = {};
     m_viewPos = viewPos; // нужна сборке: по ней считается глубина прозрачных
+    m_skipPlanarReflectors = reflections && reflections->CapturingPlanar;
     CollectVisible(scene, proj * view);
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
 

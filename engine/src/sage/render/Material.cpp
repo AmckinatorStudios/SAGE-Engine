@@ -33,6 +33,7 @@ Material Material::LoadFromFile(const std::string& path) {
     m.Metallic = root.value("metallic", m.Metallic);
     m.Roughness = root.value("roughness", m.Roughness);
     m.Opacity = root.value("opacity", m.Opacity);
+    m.PlanarReflectivity = root.value("planarReflectivity", m.PlanarReflectivity);
     m.DoubleSided = root.value("doubleSided", m.DoubleSided);
     m.VertexShaderPath = root.value("vertexShader", m.VertexShaderPath);
     m.FragmentShaderPath = root.value("fragmentShader", m.FragmentShaderPath);
@@ -68,6 +69,7 @@ void Material::SaveToFile(const std::string& path) const {
     root["metallic"] = Metallic;
     root["roughness"] = Roughness;
     root["opacity"] = Opacity;
+    root["planarReflectivity"] = PlanarReflectivity;
     root["doubleSided"] = DoubleSided;
     root["vertexShader"] = VertexShaderPath;
     root["fragmentShader"] = FragmentShaderPath;
