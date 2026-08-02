@@ -12,6 +12,7 @@
 #include "EditorHost.h"
 
 #include "sage/assets/import/Convert.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/assets/AssetDatabase.h"
 #include "Project.h"
 #include "sage/core/Log.h"
@@ -99,6 +100,46 @@ void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
     }
 }
 
+
+// Превью для карточки. 0 — превью нет (папка, скрипт, сцена): для них тег
+// честнее пустого квадрата.
+//
+// Картинки показываются сами собой, материал — шариком с этим материалом.
+// Материал рендерится НЕ БОЛЬШЕ ОДНОГО ЗА КАДР и запоминается: это полный
+// проход сцены со светом, и делать двадцать таких на открытие папки значит
+// уронить редактор на ровном месте. Остальные карточки получат своё превью в
+// следующих кадрах — за десяток кадров это незаметно глазу.
+uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
+    if (isDir) return 0;
+    const std::string key = path.string();
+
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
+        ext == ".hdr" || ext == ".sagetex") {
+        // Текстуры и так кэшируются менеджером ресурсов — просто спрашиваем.
+        // Негативный кэш там же: битый файл не будет перечитываться каждый кадр.
+        std::shared_ptr<Texture> tex = ResourceManager::Instance().GetTexture(key);
+        return tex ? tex->NativeHandle() : 0;
+    }
+
+    if (ext == ".sagemat") {
+        auto it = m_matThumbs.find(key);
+        if (it != m_matThumbs.end()) return it->second;
+        if (m_thumbRenderedThisFrame) return 0;   // очередь: один материал за кадр
+        std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key);
+        if (!mat) return 0;
+        const uint64_t id = m_preview.RenderMaterial(mat, 96);
+        if (!id) return 0;
+        m_thumbRenderedThisFrame = true;
+        m_matThumbs[key] = id;
+        return id;
+    }
+    return 0;
+}
+
 void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     AssetStyle style = StyleForPath(path, isDir);
     std::string filename = path.filename().string();
@@ -135,12 +176,42 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     if (!hovered && !isSelected) { fill.x *= 0.9f; fill.y *= 0.9f; fill.z *= 0.9f; }
     dl->AddRectFilled(sw0, sw1, ImGui::ColorConvertFloat4ToU32(fill), 6.0f);
 
-    // Тег типа по центру плашки.
-    std::string tagUpper = style.Tag;
-    for (char& c : tagUpper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    ImVec2 tagSize = ImGui::CalcTextSize(tagUpper.c_str());
-    ImVec2 tagPos(sw0.x + (sw1.x - sw0.x - tagSize.x) * 0.5f, sw0.y + (sw1.y - sw0.y - tagSize.y) * 0.5f);
-    dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.96f)), tagUpper.c_str());
+    // Настоящее превью вместо трёхбуквенного тега — там, где его есть из чего
+    // сделать. Тег отвечает на вопрос «какого типа этот файл», а человек в
+    // панели ассетов ищет КОНКРЕТНУЮ картинку или материал среди двух десятков
+    // одинаковых оранжевых прямоугольников с надписью MAT. Имя файла помогает
+    // только если его помнят.
+    const uint64_t thumb = ThumbnailFor(path, isDir);
+    if (thumb) {
+        // Шахматка под картинкой: прозрачные места иначе неотличимы от фона
+        // карточки, и текстура с альфой выглядит просто дырявой.
+        const float checker = 8.0f;
+        dl->PushClipRect(sw0, sw1, true);
+        for (float y = sw0.y; y < sw1.y; y += checker) {
+            for (float x = sw0.x; x < sw1.x; x += checker) {
+                const bool odd = ((int)((x - sw0.x) / checker) + (int)((y - sw0.y) / checker)) % 2;
+                dl->AddRectFilled(ImVec2(x, y), ImVec2(x + checker, y + checker),
+                                  odd ? IM_COL32(70, 70, 76, 255) : IM_COL32(52, 52, 58, 255));
+            }
+        }
+        // Вписываем по меньшей стороне, сохраняя пропорции: растянутое превью
+        // врёт о содержимом.
+        const float availW = sw1.x - sw0.x, availH = sw1.y - sw0.y;
+        const float side = std::min(availW, availH);
+        const ImVec2 c0(sw0.x + (availW - side) * 0.5f, sw0.y + (availH - side) * 0.5f);
+        dl->AddImage((ImTextureID)(std::intptr_t)thumb, c0, ImVec2(c0.x + side, c0.y + side),
+                     ImVec2(0, 1), ImVec2(1, 0));
+        dl->PopClipRect();
+        dl->AddRect(sw0, sw1, IM_COL32(255, 255, 255, 30), 6.0f);
+    } else {
+        // Тег типа по центру плашки.
+        std::string tagUpper = style.Tag;
+        for (char& c : tagUpper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        ImVec2 tagSize = ImGui::CalcTextSize(tagUpper.c_str());
+        ImVec2 tagPos(sw0.x + (sw1.x - sw0.x - tagSize.x) * 0.5f,
+                      sw0.y + (sw1.y - sw0.y - tagSize.y) * 0.5f);
+        dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.96f)), tagUpper.c_str());
+    }
 
     // Имя файла по центру области подписи (внутри границ тайла, с усечением).
     std::string label = TruncateToWidth(filename, kTileW - 8.0f);
@@ -149,6 +220,16 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     ImU32 textCol = ImGui::GetColorU32(isSelected ? ImGuiCol_Text : ImGuiCol_TextDisabled);
     if (hovered) textCol = ImGui::GetColorU32(ImGuiCol_Text);
     dl->AddText(labelPos, textCol, label.c_str());
+
+    // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.
+    // Путь передаётся строкой с завершающим нулём — принимающая сторона получает
+    // ровно то, что открыла бы сама.
+    if (!isDir && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+        const std::string p = path.string();
+        ImGui::SetDragDropPayload("SAGE_ASSET_PATH", p.c_str(), p.size() + 1);
+        ImGui::TextUnformatted(filename.c_str());
+        ImGui::EndDragDropSource();
+    }
 
     if (clicked) m_selected = path;
     if (doubleClicked) {
@@ -411,6 +492,8 @@ void AssetsPanel::DrawModals(EditorHost& host) {
 }
 
 void AssetsPanel::Draw(EditorHost& host) {
+    // Бюджет превью на кадр: см. ThumbnailFor.
+    m_thumbRenderedThisFrame = false;
     Project& project = host.CurrentProject();
     fs::path& cwd = host.AssetsCwd();
 

@@ -607,6 +607,74 @@ void TestFxaa(FrameRenderer& r, Scene& scene) {
 // Проверка «радиус отличается от бесконечной» здесь не формальность: ровно так
 // ловится случай, когда сетка с радиусом гаснет целиком и кадр совпадает с
 // кадром вообще без сетки.
+// --- Прозрачность: порядок граней внутри объекта ---------------------------
+//
+// Прозрачные объекты сортируются МЕЖДУ СОБОЙ, но треугольники внутри одного
+// объекта рисуются в порядке индексов — то есть в произвольном относительно
+// камеры. При выключенном отсечении куб смешивал свои же грани как попало, и на
+// экране это выглядело пятнами: одна половина плотнее другой.
+//
+// Правильная проверка здесь — НЕЗАВИСИМОСТЬ ОТ ПОРЯДКА. Если грани сводятся
+// корректно (задние проходом раньше передних), то перестановка треугольников в
+// буфере индексов не имеет права изменить кадр. Если же они рисуются как
+// попало, перестановка его изменит — потому что именно порядок и определял
+// результат. Тест не знает про реализацию: он спрашивает свойство.
+void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
+    sage::render::MeshData data = sage::render::BuildCube();
+
+    // Тот же куб с ПЕРЕСТАВЛЕННЫМИ треугольниками. Обмотка каждого треугольника
+    // сохраняется (иначе поменялось бы, где у него лицо) — меняется только
+    // очерёдность их рисования.
+    sage::render::MeshData shuffled = data;
+    const size_t triCount = data.Indices.size() / 3;
+    for (size_t t = 0; t < triCount; ++t) {
+        const size_t src = triCount - 1 - t;
+        for (int k = 0; k < 3; ++k) shuffled.Indices[t * 3 + k] = data.Indices[src * 3 + k];
+    }
+
+    auto renderWith = [&](const sage::render::MeshData& md) {
+        Scene local;
+        GameObject cube = local.CreateObject("Glass");
+        MeshRendererComponent& mr = cube.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
+        mr.MeshPtr = std::make_shared<Mesh>(md.Vertices, md.Indices);
+        mr.Color = glm::vec3(0.8f, 0.25f, 0.25f);
+        mr.Opacity = 0.45f;   // полупрозрачный: именно здесь порядок и решает
+        cube.GetTransform().Position = glm::vec3(0.0f, 0.0f, 0.0f);
+        cube.GetTransform().Scale = glm::vec3(2.0f);
+        return RenderFrame(r, local, PerspectiveProj(), BaseSettings(), kW, kH);
+    };
+
+    const Image a = renderWith(data);
+    const Image b = renderWith(shuffled);
+
+    long long sum = 0;
+    for (size_t i = 0; i < a.Pixels.size() && i < b.Pixels.size(); ++i)
+        sum += std::abs((int)a.Pixels[i] - (int)b.Pixels[i]);
+    const double mean = (double)sum / (double)std::max<size_t>(a.Pixels.size(), 1);
+    std::printf("       перестановка граней меняет кадр на %.3f\n", mean);
+    Check(mean < 0.5, "кадр прозрачного объекта не зависит от порядка его треугольников");
+
+    // И проверка, что объект вообще прозрачный: полностью непрозрачная копия
+    // обязана дать ДРУГОЙ кадр. Иначе тест выше прошёл бы и на непрозрачном
+    // кубе, где порядок не важен по определению и доказывать нечего.
+    Scene opaqueScene;
+    GameObject solid = opaqueScene.CreateObject("Solid");
+    MeshRendererComponent& smr = solid.Renderer();
+    smr.Ref = MeshRef{MeshRef::Type::Cube, ""};
+    smr.MeshPtr = std::make_shared<Mesh>(data.Vertices, data.Indices);
+    smr.Color = glm::vec3(0.8f, 0.25f, 0.25f);
+    smr.Opacity = 1.0f;
+    solid.GetTransform().Scale = glm::vec3(2.0f);
+    const Image opaque = RenderFrame(r, opaqueScene, PerspectiveProj(), BaseSettings(), kW, kH);
+    long long diff = 0;
+    for (size_t i = 0; i < a.Pixels.size() && i < opaque.Pixels.size(); ++i)
+        diff += std::abs((int)a.Pixels[i] - (int)opaque.Pixels[i]);
+    const double opaqueMean = (double)diff / (double)std::max<size_t>(a.Pixels.size(), 1);
+    std::printf("       прозрачный против непрозрачного: %.2f\n", opaqueMean);
+    Check(opaqueMean > 2.0, "прозрачность действительно применяется");
+}
+
 void TestGrid(FrameRenderer& r, Scene& scene) {
     const glm::mat4 proj = PerspectiveProj();
 
@@ -2079,6 +2147,7 @@ int main(int argc, char** argv) {
         TestDepthOfField(renderer, *scene);
         TestFxaa(renderer, *scene);
         TestGrid(renderer, *scene);
+        TestTransparentFaceOrder(renderer, *scene);
         TestObjectMotionBlur(renderer);
         TestMsaa(renderer);
         TestMorphTargets(renderer);

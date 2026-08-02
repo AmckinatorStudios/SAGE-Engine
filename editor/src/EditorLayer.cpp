@@ -216,6 +216,15 @@ void EditorLayer::OnAttach() {
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_launcher.Dismiss(); m_showProfiler = true; }
+    // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
+    // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
+    // headless нечем: кликать во вьюпорте в CI некому.
+    if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
+        m_launcher.Dismiss();
+        GameObject obj = m_scene->FindByName(name);
+        if (obj.Valid()) SetSelectedId(obj.Id());
+        else LOG_WARN("Editor") << "SAGE_EDITOR_SELECT_ENTITY: нет сущности с именем " << name;
+    }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
         m_launcher.Dismiss();
         m_assets.Select(a);
@@ -263,6 +272,7 @@ void EditorLayer::OnDetach() {
     // контекста, и редактор падал бы при выходе — после всей работы, когда
     // списать падение уже не на что.
     m_inspector.Shutdown();
+    m_assets.Shutdown();
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
     if (m_imguiReady) {
         ImGui_ImplOpenGL3_Shutdown();
@@ -1019,9 +1029,16 @@ void EditorLayer::UpdateWindowTitle() {
 // ============================================================================
 
 void EditorLayer::PickAtViewport(float u, float v, bool additive) {
+    PickAtViewportWith(m_view, m_proj, u, v, additive);
+}
+
+void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
+                                     bool additive) {
     // Луч из камеры через пиксель вьюпорта: unprojection ближней/дальней точек NDC.
+    // Для ортогональной проекции это работает ровно так же: обе точки уходят в
+    // одну сторону, просто луч получается параллельным, а не расходящимся.
     glm::vec2 ndc(u * 2.0f - 1.0f, 1.0f - v * 2.0f);
-    glm::mat4 invVP = glm::inverse(m_proj * m_view);
+    glm::mat4 invVP = glm::inverse(proj * view);
     glm::vec4 p0 = invVP * glm::vec4(ndc, -1.0f, 1.0f);
     glm::vec4 p1 = invVP * glm::vec4(ndc, 1.0f, 1.0f);
     glm::vec3 ro = glm::vec3(p0) / p0.w;
@@ -1030,9 +1047,9 @@ void EditorLayer::PickAtViewport(float u, float v, bool additive) {
     int bestId = -1;
     float bestDist = 1e30f;
     bool bestExact = false;
-    auto view = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
-    for (auto e : view) {
-        Mesh* mesh = view.get<MeshRendererComponent>(e).MeshPtr.get();
+    auto meshes = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
+    for (auto e : meshes) {
+        Mesh* mesh = meshes.get<MeshRendererComponent>(e).MeshPtr.get();
         if (!mesh) continue;
         // МИРОВАЯ матрица (учёт иерархии родителей): раньше бралась локальная —
         // дочерние сущности выделялись по неверной позиции.
@@ -1052,7 +1069,7 @@ void EditorLayer::PickAtViewport(float u, float v, bool additive) {
         if (!better) continue;
         bestDist = hit.Distance;
         bestExact = hit.Exact;
-        bestId = view.get<IdComponent>(e).Id;
+        bestId = meshes.get<IdComponent>(e).Id;
     }
 
     // Невидимые сущности (камера/свет) кликабельны по маленькому боксу вокруг

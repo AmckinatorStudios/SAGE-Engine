@@ -54,7 +54,9 @@ private:
     OrthoView m_ortho[4];
     int m_activeSlot = 0;   // где сейчас работают гизмо и хоткеи
 
-    bool m_cameraDriving = false; // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)
+    bool m_cameraDriving = false;  // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)
+    // Куда вернуть курсор после захвата (см. ViewportPanel.cpp).
+    ImVec2 m_captureReturnPos{0.0f, 0.0f};
     bool m_gizmoWasUsing = false; // фронт «начали таскать гизмо» -> одна запись undo
     int m_focusFrames = 3;        // >0 — просим фокус (стартовые кадры + после RequestFocus)
 

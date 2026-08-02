@@ -33,21 +33,55 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
     // Превью — квадрат 48x48. Пустой слот рисуется рамкой, а не пустотой: иначе
     // «текстура не назначена» и «текстура назначена, но не загрузилась»
     // выглядят одинаково, а это разные беды с разным лечением.
-    const ImVec2 size(48, 48);
-    if (tex) {
-        ImGui::Image((ImTextureID)(std::intptr_t)tex->NativeHandle(), size, ImVec2(0, 1),
-                     ImVec2(1, 0));
-    } else {
-        const ImVec2 p0 = ImGui::GetCursorScreenPos();
-        ImGui::Dummy(size);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImU32 col = path.empty() ? IM_COL32(110, 110, 120, 160) : IM_COL32(210, 90, 90, 220);
-        dl->AddRect(p0, ImVec2(p0.x + size.x, p0.y + size.y), col, 4.0f, 0, 1.5f);
-        if (!path.empty()) {
-            // Крест — «путь есть, картинки нет».
-            dl->AddLine(ImVec2(p0.x + 12, p0.y + 12), ImVec2(p0.x + 36, p0.y + 36), col, 2.0f);
-            dl->AddLine(ImVec2(p0.x + 36, p0.y + 12), ImVec2(p0.x + 12, p0.y + 36), col, 2.0f);
+    // Превью — КНОПКА, а не картинка: клик по нему открывает выбор файла. Это
+    // первое, во что человек тычет, когда хочет сменить текстуру, и раньше он
+    // не делал ничего.
+    const ImVec2 size(64, 64);
+    const ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##preview", size);
+    const bool previewClicked = ImGui::IsItemClicked();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 p1(p0.x + size.x, p0.y + size.y);
+
+    // Шахматка: без неё прозрачные места картинки сливаются с фоном панели, и
+    // текстура с альфой выглядит просто дырявой.
+    const float checker = 8.0f;
+    dl->PushClipRect(p0, p1, true);
+    for (float y = p0.y; y < p1.y; y += checker)
+        for (float x = p0.x; x < p1.x; x += checker) {
+            const bool odd = ((int)((x - p0.x) / checker) + (int)((y - p0.y) / checker)) % 2;
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + checker, y + checker),
+                              odd ? IM_COL32(68, 68, 74, 255) : IM_COL32(50, 50, 56, 255));
         }
+    dl->PopClipRect();
+
+    if (tex) {
+        dl->AddImage((ImTextureID)(std::intptr_t)tex->NativeHandle(), p0, p1, ImVec2(0, 1),
+                     ImVec2(1, 0));
+        dl->AddRect(p0, p1, IM_COL32(255, 255, 255, 40), 4.0f);
+    } else {
+        // Пустой слот и НЕЗАГРУЗИВШИЙСЯ — разные беды с разным лечением, поэтому
+        // и выглядят по-разному: тусклая рамка против красной с крестом.
+        const ImU32 col = path.empty() ? IM_COL32(110, 110, 120, 160) : IM_COL32(210, 90, 90, 220);
+        dl->AddRect(p0, p1, col, 4.0f, 0, 1.5f);
+        if (path.empty()) {
+            const char* plus = "+";
+            const ImVec2 ts = ImGui::CalcTextSize(plus);
+            dl->AddText(ImVec2(p0.x + (size.x - ts.x) * 0.5f, p0.y + (size.y - ts.y) * 0.5f), col,
+                        plus);
+        } else {
+            dl->AddLine(ImVec2(p0.x + 18, p0.y + 18), ImVec2(p1.x - 18, p1.y - 18), col, 2.0f);
+            dl->AddLine(ImVec2(p1.x - 18, p0.y + 18), ImVec2(p0.x + 18, p1.y - 18), col, 2.0f);
+        }
+    }
+    // Приём перетаскивания из панели Assets — самый короткий путь назначить
+    // текстуру, когда она уже найдена в дереве проекта.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            path.assign((const char*)p->Data, (size_t)p->DataSize);
+            if (!path.empty() && path.back() == '\0') path.pop_back();
+        }
+        ImGui::EndDragDropTarget();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
@@ -64,6 +98,17 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
     ImGui::BeginGroup();
     ImGui::TextUnformatted(label);
 
+    // Полный путь в узком поле нечитаем: у «C:/Users/.../Pictures/frame1.png»
+    // видно ровно начало, то есть самую бесполезную часть. Показываем имя
+    // файла, а весь путь — в подсказке и в поле, когда его правят.
+    if (!path.empty()) {
+        const std::string name = std::filesystem::path(path).filename().string();
+        ImGui::TextDisabled("%s", name.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
+    } else {
+        ImGui::TextDisabled("не назначена");
+    }
+
     char buf[512];
     std::snprintf(buf, sizeof(buf), "%s", path.c_str());
     ImGui::SetNextItemWidth(-1);
@@ -73,7 +118,7 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
             *ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string()));
     }
 
-    if (EditorIcons::Button("folder", "Обзор…")) {
+    if (EditorIcons::Button("folder", "Обзор…") || previewClicked) {
         FileBrowser::Config c;
         c.Title = std::string("Текстура: ") + label;
         c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};

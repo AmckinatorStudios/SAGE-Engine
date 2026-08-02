@@ -565,15 +565,37 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
 
         device.SetBlend(true);
         device.SetDepthWrite(false);
-        // Двусторонняя отрисовка по умолчанию: у прозрачного тела видно и
-        // заднюю стенку, а отсечение задних граней превратило бы стакан в
-        // половину стакана. Замкнутым телам (вода) материал ставит
-        // DoubleSided = false — иначе каждый объект смешивается дважды.
-        auto cullFor = [&device](const Material* mat) {
-            device.SetCullMode(!mat || mat->Render.DoubleSided ? sage::rhi::CullMode::Off
-                                                        : sage::rhi::CullMode::Back);
+        // Двустороннее прозрачное тело рисуется В ДВА ПРОХОДА: сначала задние
+        // грани, потом передние.
+        //
+        // ПОЧЕМУ НЕ ПРОСТО «выключить отсечение». Сортировка идёт по объектам, а
+        // внутри объекта треугольники рисуются в порядке индексов — то есть в
+        // произвольном относительно камеры. При выключенном отсечении куб
+        // смешивает свои же шесть граней как попало, и получается то, что видно
+        // на экране: одна половина выглядит плотнее другой, а грани проступают
+        // пятнами. Сортировать треугольники каждый кадр — слишком дорого и всё
+        // равно неверно при пересечениях.
+        //
+        // Два прохода решают именно этот случай, и решают его ТОЧНО: у выпуклого
+        // тела (куб, сфера, стакан) задние грани всегда дальше передних, поэтому
+        // «сначала все задние, потом все передние» — это и есть правильный
+        // порядок от дальнего к ближнему. Для невыпуклых тел остаётся
+        // приблизительным, но заведомо лучше произвольного.
+        //
+        // Замкнутым телам (вода) материал ставит DoubleSided = false: у них
+        // задней стенки не видно, и второй проход был бы лишней работой.
+        auto passCount = [](const Material* mat) {
+            return (!mat || mat->Render.DoubleSided) ? 2 : 1;
         };
-        device.SetCullMode(sage::rhi::CullMode::Off);
+        auto setCullForPass = [&device](const Material* mat, int pass) {
+            if (mat && !mat->Render.DoubleSided) {
+                device.SetCullMode(sage::rhi::CullMode::Back);
+                return;
+            }
+            // Проход 0 — задние грани (отсекаем передние), проход 1 — передние.
+            device.SetCullMode(pass == 0 ? sage::rhi::CullMode::Front
+                                         : sage::rhi::CullMode::Back);
+        };
 
         // Группы со своим шейдером — первыми: это, как правило, среда (вода,
         // листва), на фоне которой и стоит всё остальное прозрачное. Правильнее
@@ -582,8 +604,11 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         for (auto& kv : m_custom) {
             CustomGroup& g = kv.second;
             if (!g.Transparent || g.Instances.empty()) continue;
-            cullFor(g.Mat);
-            drawCustom(*kv.first.Program, *kv.first.Mesh_, g);
+            const int passes = passCount(g.Mat);
+            for (int pass = 0; pass < passes; ++pass) {
+                setCullForPass(g.Mat, passes == 1 ? 1 : pass);
+                drawCustom(*kv.first.Program, *kv.first.Mesh_, g);
+            }
         }
 
         Shader* texShader = nullptr;
@@ -591,7 +616,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         size_t i = 0;
         while (i < m_transparent.size()) {
             const TransparentItem& head = m_transparent[i];
-            cullFor(head.Mat);
+            const int passes = passCount(head.Mat);
             if (head.Textured) {
                 if (!texShader) { texShader = &TexShader(); setupCommon(*texShader); }
                 Shader& t = *texShader;
@@ -613,8 +638,11 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 if (head.Mat->MetallicTex) head.Mat->MetallicTex->Bind(3);
                 if (head.Mat->RoughnessTex) head.Mat->RoughnessTex->Bind(4);
                 if (head.Mat->AOTex) head.Mat->AOTex->Bind(5);
-                head.Mesh_->Draw();
-                ++m_stats.Batches;
+                for (int pass = 0; pass < passes; ++pass) {
+                    setCullForPass(head.Mat, passes == 1 ? 1 : pass);
+                    head.Mesh_->Draw();
+                    ++m_stats.Batches;
+                }
                 ++i;
                 continue;
             }
@@ -636,8 +664,11 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             lit.Use();
             bindLightmap(lit, head.LmPage);
             head.Mesh_->SetInstances(m_transparentBatch.data(), m_transparentBatch.size());
-            head.Mesh_->DrawInstances(m_transparentBatch.size());
-            ++m_stats.Batches;
+            for (int pass = 0; pass < passes; ++pass) {
+                setCullForPass(head.Mat, passes == 1 ? 1 : pass);
+                head.Mesh_->DrawInstances(m_transparentBatch.size());
+                ++m_stats.Batches;
+            }
             i = j;
         }
 

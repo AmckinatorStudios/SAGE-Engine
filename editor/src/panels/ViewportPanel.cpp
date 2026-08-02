@@ -156,6 +156,12 @@ void ViewportPanel::Draw(EditorHost& host) {
     EditorHost::ViewRequest requests[EditorHost::kMaxViews];
     ImVec2 slotPos[EditorHost::kMaxViews];
     bool slotHovered[EditorHost::kMaxViews] = {false, false, false, false};
+    // Список отрисовки КАЖДОГО слота. Нужен гизмо: рисовать его в список окна
+    // Viewport нельзя — дочерние окна ImGui выводятся ПОСЛЕ родительского, и
+    // картинка сцены накрывает гизмо целиком. Он честно рисовался, просто под
+    // изображением. Указатель на ImDrawList живёт до конца кадра, поэтому его
+    // можно запомнить здесь и отдать ImGuizmo уже снаружи.
+    ImDrawList* slotDrawList[EditorHost::kMaxViews] = {nullptr, nullptr, nullptr, nullptr};
 
     for (int i = 0; i < viewCount; ++i) {
         if (i > 0 && (viewCount == 2 || i % 2 == 1)) ImGui::SameLine(0.0f, gap);
@@ -164,6 +170,7 @@ void ViewportPanel::Draw(EditorHost& host) {
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         slotHovered[i] = ImGui::IsWindowHovered();
         slotPos[i] = ImGui::GetCursorScreenPos();
+        slotDrawList[i] = ImGui::GetWindowDrawList();
 
         const ViewKind kind = m_kinds[i];
         const bool ortho = kind != ViewKind::Perspective;
@@ -255,6 +262,7 @@ void ViewportPanel::Draw(EditorHost& host) {
 
     // --- Камера: ПКМ — осмотр, ПКМ+WASDQE — полёт, Shift — ускорение ---
     bool rmb = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    const bool wasDriving = m_cameraDriving;
     if (perspective && (hovered || m_cameraDriving) && rmb) {
         m_cameraDriving = true;
         camera.ProcessMouse(io.MouseDelta.x, -io.MouseDelta.y);
@@ -268,6 +276,25 @@ void ViewportPanel::Draw(EditorHost& host) {
     } else {
         m_cameraDriving = false;
     }
+
+    // Курсор ЗАХВАТЫВАЕТСЯ на время осмотра правой кнопкой.
+    //
+    // Без захвата обзор упирается в край экрана: мышь доезжает до границы
+    // монитора и камера просто перестаёт вращаться, хотя кнопка ещё зажата.
+    // Развернуться на 360° приходилось в несколько приёмов. В захвате курсор
+    // прячется и не имеет границ — движение мыши приходит как чистое смещение,
+    // и обзор становится непрерывным.
+    //
+    // Переключаем ТОЛЬКО на фронте, а не каждый кадр: SetCursorCaptured сам
+    // отсекает повтор, но и лишний вызов в кадре тут ни к чему.
+    if (m_cameraDriving != wasDriving) {
+        sage::Application::Get().GetWindow().SetCursorCaptured(m_cameraDriving);
+        // Курсор возвращается ТУДА, ОТКУДА начали смотреть: иначе он всплывает
+        // в центре экрана, и следующий клик уходит не по тому объекту.
+        if (m_cameraDriving) m_captureReturnPos = ImGui::GetMousePos();
+        else ImGui::GetIO().MousePos = m_captureReturnPos;
+    }
+
     if (perspective && hovered && io.MouseWheel != 0.0f) {
         camera.Position += camera.Front * io.MouseWheel * 0.8f;
     }
@@ -288,10 +315,24 @@ void ViewportPanel::Draw(EditorHost& host) {
     }
 
     // --- ImGuizmo: манипулятор выбранной сущности (сетка — DebugDraw в FBO) ---
+    //
+    // Матрицы берём У АКТИВНОГО СЛОТА, а не у главного. host.ViewMatrix() — это
+    // всегда слот 0; пока активен он, разницы нет, но стоит перейти в вид сверху
+    // из раскладки на четыре окна, и гизмо считалось бы по чужой камере — ручки
+    // стояли бы не там, где объект.
+    const glm::mat4 activeView =
+        (m_activeSlot == 0 || !requests[m_activeSlot].Ortho) ? host.ViewMatrix()
+                                                             : requests[m_activeSlot].View;
+    const glm::mat4 activeProj =
+        (m_activeSlot == 0 || !requests[m_activeSlot].Ortho) ? host.ProjMatrix()
+                                                             : requests[m_activeSlot].Proj;
+
     // Ортогональному виду нужна своя математика гизмо: с перспективной
     // ручки в нём тянутся не туда, куда едет объект.
     ImGuizmo::SetOrthographic(!perspective);
-    ImGuizmo::SetDrawlist();
+    // Список отрисовки — ИМЕННО активного слота (см. slotDrawList выше).
+    if (slotDrawList[m_activeSlot]) ImGuizmo::SetDrawlist(slotDrawList[m_activeSlot]);
+    else ImGuizmo::SetDrawlist();
     ImGuizmo::SetRect(imgPos.x, imgPos.y, avail.x, avail.y);
 
     GameObject selected = host.SelectedObject();
@@ -377,7 +418,7 @@ void ViewportPanel::Draw(EditorHost& host) {
             op = ImGuizmo::BOUNDS | ImGuizmo::TRANSLATE;
         }
 
-        if (ImGuizmo::Manipulate(glm::value_ptr(host.ViewMatrix()), glm::value_ptr(host.ProjMatrix()),
+        if (ImGuizmo::Manipulate(glm::value_ptr(activeView), glm::value_ptr(activeProj),
                                  op, mode, glm::value_ptr(model),
                                  nullptr, host.GizmoSnap() ? snapValues : nullptr,
                                  boundsPtr, boundsSnapPtr)) {
@@ -422,8 +463,12 @@ void ViewportPanel::Draw(EditorHost& host) {
         ImVec2 mp = ImGui::GetMousePos();
         float u = (mp.x - imgPos.x) / avail.x;
         float v = (mp.y - imgPos.y) / avail.y;
-        if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f)
-            host.PickAtViewport(u, v, io.KeyCtrl); // Ctrl — добавить/убрать из набора
+        if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) {
+            // Теми же матрицами, что и гизмо: иначе в ортогональном виде или в
+            // неглавном слоте луч строился бы по камере другого окна и выбирал
+            // бы объекты «не там, куда щёлкнули».
+            host.PickAtViewportWith(activeView, activeProj, u, v, io.KeyCtrl);
+        }
     }
 
     // Инструменты (режим гизмо, snap, пространство, Play, режим рендера) —

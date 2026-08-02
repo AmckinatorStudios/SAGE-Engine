@@ -168,6 +168,8 @@ public:
         m_code.OpenFile(path);
     }
     void PickAtViewport(float u, float v, bool additive = false) override;
+    void PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
+                            bool additive) override;
 
     // --- EditorHost: панель Game ---
     uint64_t GameTexture() const override { return m_renderer.GameTexture(); }

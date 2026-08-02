@@ -185,6 +185,11 @@ public:
     virtual void OpenCodeFile(const std::filesystem::path& path) = 0;
     // u,v в [0..1] — выбор сущности лучом. additive (Ctrl) — добавить/убрать из набора.
     virtual void PickAtViewport(float u, float v, bool additive = false) = 0;
+    // То же, но ЯВНЫМИ матрицами вида и проекции. Нужно, когда активен не
+    // главный слот раскладки или он показывает ортогональный вид: у панели
+    // матрицы свои, а PickAtViewport берёт всегда матрицы главного слота.
+    virtual void PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
+                                    bool additive) = 0;
 
     // --- панель Game (игровое окно: рендер от Primary-камеры сцены) ---
     virtual uint64_t GameTexture() const = 0;

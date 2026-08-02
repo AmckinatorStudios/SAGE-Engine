@@ -1,6 +1,10 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
+
+#include "AssetPreview.h"
 
 class EditorHost;
 
@@ -15,6 +19,9 @@ public:
 
     void Draw(EditorHost& host);
 
+    // Освободить GPU-ресурсы превью, пока контекст жив (см. AssetPreview).
+    void Shutdown() { m_preview.Shutdown(); }
+
     const std::filesystem::path& Selected() const { return m_selected; }
     // Выбрать ассет программно — нужно headless-прогонам и переходу «показать
     // в Assets» из других панелей.
@@ -27,6 +34,13 @@ public:
                             std::filesystem::path& outCreated, std::string& err);
 
 private:
+    // Превью карточек. Материалы рендерятся по одному за кадр и запоминаются
+    // (см. ThumbnailFor): один такой рендер — полный проход сцены со светом.
+    uint64_t ThumbnailFor(const std::filesystem::path& path, bool isDir);
+    AssetPreview m_preview;
+    std::unordered_map<std::string, uint64_t> m_matThumbs;
+    bool m_thumbRenderedThisFrame = false;
+
     // Конвертация в свои форматы движка (sage/assets/import/Convert.h).
     void ConvertOne(EditorHost& host, const std::filesystem::path& path);
     void ConvertFolderHere(EditorHost& host);
