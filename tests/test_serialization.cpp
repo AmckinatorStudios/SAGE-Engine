@@ -314,3 +314,89 @@ TEST(Serialization_material_custom_shader_round_trip) {
     CHECK_TRUE(back.Params["uFoam"].Kind == ShaderParam::Type::Vec3);
     CHECK_NEAR(back.Params["uFoam"].Value.z, 1.0f, 1e-4);
 }
+
+// --- Версия формата сцены и миграции ------------------------------------------
+//
+// Номер версии писался в файл с самого начала и НИКОГДА не читался. Это худший
+// вариант: он создаёт впечатление, что о совместимости позаботились, а первое
+// же ломающее изменение формата тихо испортило бы все старые сцены — без
+// ошибки, просто «объекты почему-то не там».
+
+#include <nlohmann/json.hpp>
+
+TEST(Scene_migration_upgrades_an_old_file) {
+    // Сцена «версии 1»: тела без слоя и без признака сенсора — этих полей в
+    // первом формате не было вовсе.
+    const std::string oldScene = R"({
+      "name": "Old",
+      "sage_scene_version": 1,
+      "objects": [
+        {"id": 1, "name": "Box",
+         "position": {"x": 0, "y": 2, "z": 0},
+         "rotation": {"x": 0, "y": 0, "z": 0},
+         "scale": {"x": 1, "y": 1, "z": 1},
+         "mesh": {"type": "cube", "path": ""},
+         "rigidBody": {"type": "dynamic", "mass": 2.0}}
+      ]
+    })";
+
+    const std::string migrated = SceneSerializer::MigrateSceneJson(oldScene);
+    const nlohmann::json j = nlohmann::json::parse(migrated);
+
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    const nlohmann::json& rb = j["objects"][0]["rigidBody"];
+    CHECK_TRUE(rb.contains("layer"));
+    CHECK_TRUE(rb.contains("sensor"));
+    CHECK_EQ(rb["layer"].get<unsigned>(), 1u);
+    CHECK_FALSE(rb["sensor"].get<bool>());
+    // Что было — обязано уцелеть: миграция ДОБАВЛЯЕТ, а не переписывает.
+    CHECK_NEAR(rb["mass"].get<float>(), 2.0f, 1e-6);
+    CHECK_TRUE(j["objects"][0]["name"] == "Box");
+}
+
+TEST(Scene_without_version_is_treated_as_the_first_one) {
+    // Сцены, сохранённые до появления проверки, номера не несут. Их не за что
+    // винить, и загружаться они обязаны.
+    const std::string noVersion = R"({"name":"NoVer","objects":[]})";
+    const std::string migrated = SceneSerializer::MigrateSceneJson(noVersion);
+    const nlohmann::json j = nlohmann::json::parse(migrated);
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+}
+
+TEST(Scene_from_the_future_is_refused_not_half_read) {
+    // Файл новее движка читать нельзя: половина полей ему незнакома, и молча
+    // потерять их хуже, чем отказаться. Отказ — единственный честный ответ.
+    const std::string future =
+        R"({"name":"Future","sage_scene_version":9999,"objects":[]})";
+    bool threw = false;
+    try {
+        SceneSerializer::MigrateSceneJson(future);
+    } catch (const std::exception& e) {
+        threw = true;
+        std::printf("       отказ: %s\n", e.what());
+    }
+    CHECK_TRUE(threw);
+}
+
+TEST(Scene_migration_is_idempotent) {
+    // Повторная миграция уже актуального файла не должна ничего менять: иначе
+    // сохранение-загрузка по кругу дрейфовали бы, а это самый неприятный вид
+    // порчи данных — медленный и незаметный.
+    Scene scene("Round");
+    GameObject o = scene.CreateObject("Body");
+    scene.Registry().emplace<RigidBodyComponent>(o.Entity());
+    const std::string saved = SceneSerializer::SaveToString(scene);
+
+    const std::string once = SceneSerializer::MigrateSceneJson(saved);
+    const std::string twice = SceneSerializer::MigrateSceneJson(once);
+    CHECK_TRUE(once == twice);
+}
+
+TEST(Scene_saved_today_declares_the_current_version) {
+    Scene scene("Fresh");
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    // Версия обязана быть больше единицы: иначе «текущая» и «первая» совпадают,
+    // и цепочка миграций не проверяется вовсе.
+    CHECK_TRUE(SceneSerializer::CurrentVersion() >= 2);
+}

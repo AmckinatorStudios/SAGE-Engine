@@ -12,6 +12,8 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
+#include "sage/core/SystemScheduler.h"
+#include "sage/render/FrameGraph.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
@@ -81,6 +83,15 @@ private:
     // неба (см. ReflectionSystem), поэтому в кадре это стоит ноль.
     sage::render::ReflectionSystem m_reflections;
     sage::render::PlanarReflection m_planar;
+
+    // Состав и порядок кадра — см. sage/core/SystemScheduler.h. Игра может
+    // добавить сюда свою систему, не переписывая цикл.
+    sage::SystemScheduler m_systems;
+
+    // Кадр как граф проходов (см. sage/render/FrameGraph.h): описание
+    // пересобирается каждый кадр, потому что состав зависит от настроек сцены.
+    sage::render::FrameGraph m_frame;
+    int m_lastFramePasses = -1;   // описание кадра логируется при СМЕНЕ состава
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
     // UI сцены (UIElementComponent из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.

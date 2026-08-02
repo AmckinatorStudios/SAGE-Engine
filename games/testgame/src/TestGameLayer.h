@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/core/SystemScheduler.h"
 #include <memory>
 #include <optional>
 #include <string>
@@ -84,6 +85,7 @@ private:
     void UpdatePickups();
     void UpdatePatrols(float dt);
     void UpdatePortals(float dt);
+    void RebuildSystems();   // состав кадра под активную комнату
     void UpdateAutopilot(float dt);
     void SwitchRoom(const std::string& target, glm::vec3 spawnPos);
     void DamagePlayer(float amount, glm::vec3 knockFrom);
@@ -98,7 +100,8 @@ private:
     std::string m_activeName;
     std::unordered_map<std::string, std::unique_ptr<ScriptEngine>> m_sceneScripts;
     std::unordered_map<std::string, glm::vec3> m_roomSpawns; // стартовая точка каждой комнаты
-    std::unique_ptr<PhysicsScene> m_physics; // физика активной сцены (Jolt/Simple)
+    std::unique_ptr<PhysicsScene> m_physics;
+    sage::SystemScheduler m_systems;   // порядок кадра — см. SystemScheduler.h // физика активной сцены (Jolt/Simple)
     glm::vec3 m_activeSpawn{0.0f};
 
     // --- игрок (живёт поверх сцен; здоровье — в HealthComponent сущности

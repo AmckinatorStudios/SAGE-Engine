@@ -581,6 +581,7 @@ void TestGameLayer::OnAttach() {
         sage::physics::PhysicsWorld::DefaultBackend(), *m_scenes.Active());
     LOG_INFO("TestGame") << "TESTGAME: physics backend " << m_physics->BackendName()
                          << ", " << m_physics->BodyCount() << " bodies in " << startRoom;
+    RebuildSystems();
 
     // --- ввод: именованные действия через InputSystem (первый реальный
     // потребитель; подписка на мышь — через Window, см. InputSystem::Attach) ---
@@ -761,8 +762,24 @@ void TestGameLayer::SwitchRoom(const std::string& target, glm::vec3 spawnPos) {
     m_physics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), *m_scenes.Active());
 
+    // Комната сменилась — вместе с ней сменились и физика, и скрипты.
+    RebuildSystems();
+
     m_audio->PlaySound2D("assets/audio/portal.wav", 0.9f);
     LOG_INFO("TestGame") << "TESTGAME: portal -> " << target;
+}
+
+// Пересобирает состав кадра под АКТИВНУЮ комнату: у каждой свои тела и свой
+// набор скриптов, а неактивная заморожена. Регистрация по именам — повторная
+// заменяет прежнюю, поэтому дубликатов при смене комнаты не копится.
+void TestGameLayer::RebuildSystems() {
+    sage::CoreSystems core;
+    core.Physics = m_physics.get();
+    core.Particles = m_particles ? &*m_particles : nullptr;
+    auto it = m_sceneScripts.find(m_activeName);
+    core.Scripts = it != m_sceneScripts.end() ? it->second.get() : nullptr;
+    sage::RegisterCoreSystems(m_systems, core);
+    if (!core.Scripts) m_systems.Remove("scripts");
 }
 
 void TestGameLayer::UpdatePortals(float dt) {
@@ -848,16 +865,11 @@ void TestGameLayer::OnUpdate(float dt) {
     UpdatePatrols(dt);
     UpdatePortals(dt); // может сменить комнату (пересобирает m_physics)
 
-    // Физика активной сцены: динамические ящики падают/складываются.
-    if (m_physics) m_physics->Step(*m_scenes.Active(), dt);
-    // Скелетные анимации активной сцены (демо-тотем).
-    sage::anim::UpdateAnimators(*m_scenes.Active(), dt);
-    // Частицы активной сцены (факелы-эмиттеры).
-    if (m_particles) sage::fx::UpdateEmitters(*m_scenes.Active(), *m_particles, dt);
-
-    // Скрипты ТОЛЬКО активной сцены — неактивная комната «заморожена».
-    auto it = m_sceneScripts.find(m_activeName);
-    if (it != m_sceneScripts.end()) it->second->UpdateAll(dt);
+    // Кадр — планировщиком. Раньше эти вызовы стояли здесь руками, и скрипты
+    // шли ПОСЛЕДНИМИ — то есть заданная скриптом скорость применялась физикой
+    // на следующем кадре, в отличие от рантайма. Разница на глаз незаметна и
+    // проявлялась как «управление иногда чуть залипает».
+    m_systems.Run(*m_scenes.Active(), dt);
 
     // Сущность Player следует за C++-позицией (для сериализации/инспекции).
     GameObject player = ActivePlayer();

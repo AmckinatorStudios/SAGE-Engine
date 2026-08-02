@@ -18,6 +18,7 @@
 #include "sage/render/ParticleECS.h"
 #include "sage/render/Mesh.h"
 #include "sage/scene/Scene.h"
+#include "sage/core/SystemScheduler.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/core/Config.h"
@@ -179,6 +180,9 @@ private:
     RecentProjects m_recent;
     std::filesystem::path m_scenePath;   // куда сохранена/откуда открыта текущая сцена
     std::filesystem::path m_assetsCwd;   // текущая папка панели Assets
+    // Состав и порядок кадра (см. sage/core/SystemScheduler.h).
+    sage::SystemScheduler m_systems;
+
     bool m_sceneDirty = false;           // есть несохранённые правки (маркер '*')
     // Автосохранение и восстановление после падения. Оба пишут в ОТДЕЛЬНЫЕ
     // файлы рядом с редактором, а не поверх сцены (см. OnUpdate).

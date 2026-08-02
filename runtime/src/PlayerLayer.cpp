@@ -155,6 +155,16 @@ void PlayerLayer::OnAttach() {
     // после построения мира (RuntimeBody сущностей уже созданы).
     m_scripts->BindPhysics(*m_physics);
 
+    // Состав кадра. Регистрируется здесь, когда все подсистемы уже созданы:
+    // порядок при этом не задаётся — он определён стадиями внутри
+    // RegisterCoreSystems и не зависит от того, кто когда зарегистрировался.
+    sage::CoreSystems core;
+    core.Scripts = m_scripts.get();
+    core.Physics = m_physics.get();
+    core.Particles = m_particles ? &*m_particles : nullptr;
+    core.Audio = m_audio.get();
+    sage::RegisterCoreSystems(m_systems, core);
+
     // Запасная камера, если в сцене НЕТ Primary-камеры. НАРОЧНО отличается от
     // редакторской орбитальной камеры (та — {6.5,5,6.5}, yaw -135, pitch -28):
     // низкий фронтальный ракурс, чтобы «нет камеры» сразу читалось как аварийный
@@ -192,11 +202,12 @@ void PlayerLayer::OnUpdate(float dt) {
     // персонажа. Результат (что съел интерфейс) уходит скриптам.
     UpdateUiInput(dt);
 
-    m_scripts->UpdateAll(dt);
-    if (m_physics) m_physics->Step(*m_scene, dt);
-    sage::anim::UpdateAnimators(*m_scene, dt);
-    if (m_particles) sage::fx::UpdateEmitters(*m_scene, *m_particles, dt);
-    if (m_audio) m_audio->Update();
+    // Логика кадра — планировщиком, а не пятью строками подряд: порядок
+    // «скрипты -> физика -> анимация -> частицы -> звук» записан ОДИН раз в
+    // RegisterCoreSystems и одинаков в рантайме, редакторе и играх. Раньше эти
+    // пять строк были в каждом потребителе своими, и в одной из игр скрипты
+    // стояли ПОСЛЕ физики — управление там отставало на кадр.
+    m_systems.Run(*m_scene, dt);
     m_sceneTime += dt; // uTime собственных шейдеров материалов
 
     // ESC: сперва ОТПУСКАЕТ курсор, и только потом закрывает игру. В игре от
@@ -329,73 +340,113 @@ void PlayerLayer::OnRender() {
         m_audio->SetListener(viewPos, forward, up);
     }
 
+    // --- Кадр как ГРАФ ПРОХОДОВ ---------------------------------------------
+    //
+    // Проходы объявляются данными (что читают, во что пишут), а не порядком
+    // вызовов. Даёт это три вещи, каждая из которых работает уже сегодня:
+    //
+    //   • Проход, результат которого никому не нужен, НЕ ВЫПОЛНЯЕТСЯ. Раньше
+    //     это были ручные `if` перед каждым захватом; теперь условие живёт в
+    //     описании кадра, и забыть его негде.
+    //   • Описание проверяется ДО отрисовки: прочитать то, во что никто не
+    //     писал, — ошибка кадра, и находится она сообщением, а не чёрным
+    //     экраном.
+    //   • На вопрос «что и почему было в кадре» отвечает Describe().
+    //
+    // Порядок при этом задаёт человек — граф его не переставляет (см.
+    // FrameGraph.h): он проверяет, что порядок осмыслен, и выбрасывает лишнее.
+    m_frame.Reset();
+    const auto rShadow = m_frame.DeclareResource("ShadowMap");
+    const auto rEnv = m_frame.DeclareResource("EnvCube");
+    const auto rPlanar = m_frame.DeclareResource("PlanarMirror");
+    const auto rScreen = m_frame.DeclareResource("Screen");
+
+    const bool wantReflections = m_scene->Reflections.Enabled;
+    const bool wantPlanar = wantReflections && m_scene->Reflections.PlanarEnabled;
+
     // --- Отражения: карта окружения ---
     // Строго ДО прохода теней и сцены: захват меняет привязанный буфер и
     // viewport, и посреди кадра это стоило бы лишних переключений. Пересъёмка
     // происходит только при смене цвета неба.
-    m_reflections.SetEnabled(m_scene->Reflections.Enabled);
-    m_reflections.SetIntensity(m_scene->Reflections.Intensity);
-    if (m_sky) {
-        // Настоящее небо сцены (набор граней), если оно задано, — иначе
-        // отражение показывало бы градиент вместо того, что видно в кадре.
-        std::shared_ptr<Skybox> skyAsset;
-        const Skybox* cubemap = nullptr;
-        if (env.Skybox.HasCubemap()) {
-            skyAsset = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir);
-            cubemap = skyAsset.get();
+    {
+        sage::render::RenderPassDesc pass{"Отражения: окружение"};
+        pass.Writes = {rEnv};
+        pass.Enabled = wantReflections;
+        pass.Execute = [&, this] {
+        m_reflections.SetEnabled(m_scene->Reflections.Enabled);
+        m_reflections.SetIntensity(m_scene->Reflections.Intensity);
+        if (m_sky) {
+            // Настоящее небо сцены (набор граней), если оно задано, — иначе
+            // отражение показывало бы градиент вместо того, что видно в кадре.
+            std::shared_ptr<Skybox> skyAsset;
+            const Skybox* cubemap = nullptr;
+            if (env.Skybox.HasCubemap()) {
+                skyAsset = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir);
+                cubemap = skyAsset.get();
+            }
+            m_reflections.UpdateSky(*m_sky, env, cubemap);
         }
-        m_reflections.UpdateSky(*m_sky, env, cubemap);
-    }
 
-    // Зонды сцены: не больше одного за кадр (шесть проходов геометрии).
-    if (m_scene->Reflections.Enabled) {
-        sage::render::UpdateReflectionProbes(
-            *m_scene,
-            [&](const glm::mat4& v, const glm::mat4& p) {
-                device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-                device.Clear(true, true);
-                if (m_sky && env.Skybox.Enabled)
-                    m_sky->Draw(v, p, env.Skybox.TopColor, env.Skybox.HorizonColor);
-                sage::render::SceneColorInput c;
-                c.View = v;
-                c.Proj = p;
-                c.ViewPos = glm::vec3(glm::inverse(v)[3]);
-                c.Env = &env;
-                c.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
-                c.Time = m_sceneTime;
-                sage::render::RenderSceneColor(*m_scene, m_batch, c);
-            },
-            1);
+        // Зонды сцены: не больше одного за кадр (шесть проходов геометрии).
+        if (m_scene->Reflections.Enabled) {
+            sage::render::UpdateReflectionProbes(
+                *m_scene,
+                [&](const glm::mat4& v, const glm::mat4& p) {
+                    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                    device.Clear(true, true);
+                    if (m_sky && env.Skybox.Enabled)
+                        m_sky->Draw(v, p, env.Skybox.TopColor, env.Skybox.HorizonColor);
+                    sage::render::SceneColorInput c;
+                    c.View = v;
+                    c.Proj = p;
+                    c.ViewPos = glm::vec3(glm::inverse(v)[3]);
+                    c.Env = &env;
+                    c.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+                    c.Time = m_sceneTime;
+                    sage::render::RenderSceneColor(*m_scene, m_batch, c);
+                },
+                1);
+        }
+        };
+        m_frame.AddPass(std::move(pass));
     }
 
     // --- Тени: глубина от солнца (можно отключить в настройках) ---
     // Строго ПОСЛЕ выбора камеры: каскады делят дальность именно её взгляда, и
     // без неё считать их не из чего. Порядок «тени, потом камера» держался
     // только на том, что одной карте камера была не нужна.
-    if (cfg.Shadows) {
-        ShadowMap::CameraView v;
-        v.Position = viewPos;
-        // Направление и «верх» достаём из матрицы вида: камера здесь может быть
-        // как компонентом сцены, так и запасной, и общего объекта Camera у них
-        // нет.
-        const glm::mat3 basis = glm::mat3(view);
-        v.Forward = -glm::vec3(basis[0][2], basis[1][2], basis[2][2]);
-        v.Up = glm::vec3(basis[0][1], basis[1][1], basis[2][1]);
-        // Угол обзора и ближнюю плоскость восстанавливаем из матрицы проекции —
-        // по той же причине.
-        v.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
-        v.Aspect = aspect;
-        v.Near = proj[3][2] / (proj[2][2] - 1.0f);
-        v.ShadowDistance = cfg.ShadowDistance;
-        // Одна карта — это тоже карта ВОКРУГ КАМЕРЫ, а не вокруг начала мира:
-        // раньше здесь стоял ортобокс радиусом 24 м в точке (0,0,0), и всё, что
-        // игра успевала отплыть или отойти от неё, оставалось без теней —
-        // молча, потому что это выглядит как «тени просто выключены», а не как
-        // ошибка.
-        if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
-        else m_shadows->FitSingle(env.Sun.Direction, v);
-        sage::render::RenderShadowDepth(*m_shadows, *m_scene, m_batch, window.Width(),
-                                        window.Height());
+    {
+        sage::render::RenderPassDesc pass{"Тени: глубина от солнца"};
+        pass.Writes = {rShadow};
+        pass.Enabled = cfg.Shadows;
+        pass.Execute = [&, this] {
+        if (cfg.Shadows) {
+            ShadowMap::CameraView v;
+            v.Position = viewPos;
+            // Направление и «верх» достаём из матрицы вида: камера здесь может быть
+            // как компонентом сцены, так и запасной, и общего объекта Camera у них
+            // нет.
+            const glm::mat3 basis = glm::mat3(view);
+            v.Forward = -glm::vec3(basis[0][2], basis[1][2], basis[2][2]);
+            v.Up = glm::vec3(basis[0][1], basis[1][1], basis[2][1]);
+            // Угол обзора и ближнюю плоскость восстанавливаем из матрицы проекции —
+            // по той же причине.
+            v.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
+            v.Aspect = aspect;
+            v.Near = proj[3][2] / (proj[2][2] - 1.0f);
+            v.ShadowDistance = cfg.ShadowDistance;
+            // Одна карта — это тоже карта ВОКРУГ КАМЕРЫ, а не вокруг начала мира:
+            // раньше здесь стоял ортобокс радиусом 24 м в точке (0,0,0), и всё, что
+            // игра успевала отплыть или отойти от неё, оставалось без теней —
+            // молча, потому что это выглядит как «тени просто выключены», а не как
+            // ошибка.
+            if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
+            else m_shadows->FitSingle(env.Sun.Direction, v);
+            sage::render::RenderShadowDepth(*m_shadows, *m_scene, m_batch, window.Width(),
+                                            window.Height());
+        }
+        };
+        m_frame.AddPass(std::move(pass));
     }
 
     // --- Плоское отражение (вода, зеркало) ---
@@ -403,69 +454,118 @@ void PlayerLayer::OnRender() {
     // прохода плоского отражения НЕТ: иначе зеркало смотрело бы в себя, и
     // каждый кадр стоил бы вдвое дороже предыдущего.
     m_planar.Reset();
-    if (m_scene->Reflections.Enabled && m_scene->Reflections.PlanarEnabled) {
-        const glm::vec4 plane = m_scene->Reflections.Plane;
-        m_planar.Capture(plane, view, proj, vpW, vpH,
-                         [&](const glm::mat4& mv, const glm::mat4& mp) {
-                             const glm::vec3 mirrorEye =
-                                 glm::vec3(glm::inverse(mv)[3]);
-                             if (m_sky && env.Skybox.Enabled)
-                                 m_sky->Draw(mv, mp, env.Skybox.TopColor, env.Skybox.HorizonColor);
-                             sage::render::SceneColorInput rc;
-                             rc.View = mv;
-                             rc.Proj = mp;
-                             rc.ViewPos = mirrorEye;
-                             rc.Env = &env;
-                             rc.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
-                             rc.Time = m_sceneTime;
-                             rc.Reflection = m_reflections.Binding(vpW, vpH, 0);
-                             rc.Reflection.CapturingPlanar = true;
-                             sage::render::RenderSceneColor(*m_scene, m_batch, rc);
-                         });
+    {
+        // Зеркальный проход ЧИТАЕТ тени и карту окружения: отражённая сцена
+        // освещается тем же светом, что и прямая.
+        sage::render::RenderPassDesc pass{"Плоское отражение"};
+        pass.Reads = {rShadow, rEnv};
+        pass.Writes = {rPlanar};
+        pass.Enabled = wantPlanar;
+        pass.Execute = [&, this] {
+            if (m_scene->Reflections.Enabled && m_scene->Reflections.PlanarEnabled) {
+            const glm::vec4 plane = m_scene->Reflections.Plane;
+            m_planar.Capture(plane, view, proj, vpW, vpH,
+                             [&](const glm::mat4& mv, const glm::mat4& mp) {
+                                 const glm::vec3 mirrorEye =
+                                     glm::vec3(glm::inverse(mv)[3]);
+                                 if (m_sky && env.Skybox.Enabled)
+                                     m_sky->Draw(mv, mp, env.Skybox.TopColor, env.Skybox.HorizonColor);
+                                 sage::render::SceneColorInput rc;
+                                 rc.View = mv;
+                                 rc.Proj = mp;
+                                 rc.ViewPos = mirrorEye;
+                                 rc.Env = &env;
+                                 rc.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+                                 rc.Time = m_sceneTime;
+                                 rc.Reflection = m_reflections.Binding(vpW, vpH, 0);
+                                 rc.Reflection.CapturingPlanar = true;
+                                 sage::render::RenderSceneColor(*m_scene, m_batch, rc);
+                             });
+        }
+        };
+        m_frame.AddPass(std::move(pass));
     }
-
 
     // --- Основной проход: полное освещение + тени + туман/скайбокс ---
     // Полосы letterbox чёрные: сперва чистим весь экран, затем рендерим в
     // центральный viewport нужного соотношения.
-    if (vpX != 0 || vpY != 0) {
-        device.SetViewport(0, 0, window.Width(), window.Height());
-        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    {
+        // Главный проход читает ВСЁ, что насчитали предыдущие. Именно эти
+        // связи и делают отбрасывание лишнего осмысленным: выключи отражения —
+        // и проходы, которые их готовили, перестанут выполняться сами, потому
+        // что их результат больше никто не читает.
+        sage::render::RenderPassDesc pass{"Сцена: освещение, тени, отражения"};
+        pass.Reads = {rShadow};
+        if (wantReflections) pass.Reads.push_back(rEnv);
+        if (wantPlanar) pass.Reads.push_back(rPlanar);
+        pass.Writes = {rScreen};
+        pass.ColorLoad = sage::render::LoadOp::Clear;
+        pass.ClearColor = glm::vec4(env.SkyColor * 0.9f, 1.0f);
+        pass.Execute = [&, this] {
+        if (vpX != 0 || vpY != 0) {
+            device.SetViewport(0, 0, window.Width(), window.Height());
+            device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            device.Clear();
+        }
+        device.SetViewport(vpX, vpY, vpW, vpH);
+        device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
         device.Clear();
+
+        // Сцена рендерится напрямую в экран (HDR-пост-цепочки у рантайма нет) —
+        // включаем аппаратную гамма-коррекцию, иначе линейный цвет шейдеров уходит
+        // на монитор сырым и вся игра выглядит неоправданно тёмной.
+        device.SetSRGBWrite(true);
+
+        if (env.Skybox.Enabled) {
+            m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+        }
+
+        // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
+        sage::render::SceneColorInput color;
+        color.View = view;
+        color.Proj = proj;
+        color.ViewPos = viewPos;
+        color.Env = &env;
+        color.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+        color.OcclusionCulling = cfg.OcclusionCulling;
+        color.Time = m_sceneTime;
+        color.Reflection = m_reflections.Binding(vpW, vpH, m_planar.Texture());
+        float probeIntensity = 1.0f;
+        if (const sage::render::EnvironmentMap* probe =
+                sage::render::PickReflectionProbe(*m_scene, viewPos, &probeIntensity)) {
+            color.Reflection.Env = probe;
+            color.Reflection.Intensity = probeIntensity;
+        }
+        sage::render::RenderSceneColor(*m_scene, m_batch, color);
+
+        // Частицы (billboard) — camRight/Up берём из матрицы вида.
+        if (m_particles) m_particles->DrawFromView(view, proj);
+        };
+        m_frame.AddPass(std::move(pass));
     }
-    device.SetViewport(vpX, vpY, vpW, vpH);
-    device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
-    device.Clear();
 
-    // Сцена рендерится напрямую в экран (HDR-пост-цепочки у рантайма нет) —
-    // включаем аппаратную гамма-коррекцию, иначе линейный цвет шейдеров уходит
-    // на монитор сырым и вся игра выглядит неоправданно тёмной.
-    device.SetSRGBWrite(true);
-
-    if (env.Skybox.Enabled) {
-        m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    // Сборка и выполнение. Ошибка описания кадра — это ошибка программиста, и
+    // сообщить о ней надо ГРОМКО: без графа она проявлялась бы чёрным экраном
+    // или отражением прошлого кадра, то есть чем-то, что легко принять за
+    // «шейдер барахлит».
+    std::string frameError;
+    if (!m_frame.Compile(rScreen, frameError)) {
+        LOG_ERROR("Frame") << "Описание кадра неверно: " << frameError;
+        return;
     }
+    m_frame.Execute();
 
-    // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
-    sage::render::SceneColorInput color;
-    color.View = view;
-    color.Proj = proj;
-    color.ViewPos = viewPos;
-    color.Env = &env;
-    color.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
-    color.OcclusionCulling = cfg.OcclusionCulling;
-    color.Time = m_sceneTime;
-    color.Reflection = m_reflections.Binding(vpW, vpH, m_planar.Texture());
-    float probeIntensity = 1.0f;
-    if (const sage::render::EnvironmentMap* probe =
-            sage::render::PickReflectionProbe(*m_scene, viewPos, &probeIntensity)) {
-        color.Reflection.Env = probe;
-        color.Reflection.Intensity = probeIntensity;
+    // Описание кадра — при каждой смене состава. Ради этого граф во многом и
+    // делается: «почему этот проход не выполнился» — вопрос, на который иначе
+    // отвечать нечем, а гадать по чёрному экрану дороже, чем прочитать строку.
+    const sage::render::FrameGraphStats& fgs = m_frame.Stats();
+    if (fgs.PassesExecuted != m_lastFramePasses) {
+        m_lastFramePasses = fgs.PassesExecuted;
+        LOG_INFO("Frame") << "Состав кадра: " << fgs.PassesExecuted << " из "
+                          << fgs.PassesDeclared << " проходов (отброшено "
+                          << fgs.PassesCulled << ", выключено " << fgs.PassesDisabled << ")\n"
+                          << m_frame.Describe();
     }
-    sage::render::RenderSceneColor(*m_scene, m_batch, color);
-
-    // Частицы (billboard) — camRight/Up берём из матрицы вида.
-    if (m_particles) m_particles->DrawFromView(view, proj);
 
     device.SetSRGBWrite(false); // всё после сцены (UI/оверлеи) — уже в sRGB
 

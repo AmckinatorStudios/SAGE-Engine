@@ -148,6 +148,17 @@ void EditorLayer::OnAttach() {
     // --- Превью-рендер: тени/Viewport/Game/PostFX/гизмо — в EditorSceneRenderer ---
     m_renderer.Init();
 
+    // Системы кадра. В режиме ПРАВКИ живут только анимация и частицы — это
+    // превью: художник должен видеть, как двигается модель и как выглядит
+    // эффект, не запуская игру. Скрипты и физика добавляются на входе в Play и
+    // снимаются на выходе (см. StartPlay/StopPlay) — иначе правка сцены
+    // означала бы её симуляцию, и объект уезжал бы из-под курсора.
+    {
+        sage::CoreSystems preview;
+        preview.Particles = &m_renderer.Particles();
+        sage::RegisterCoreSystems(m_systems, preview);
+    }
+
     m_gizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
 
     NewScene(/*withDemoContent=*/true);
@@ -285,19 +296,16 @@ void EditorLayer::OnUpdate(float dt) {
                 m_playRawInput->SetMouseCaptured(false);
             }
         }
-        if (m_playScripts) m_playScripts->UpdateAll(dt);
-        if (m_playPhysics) m_playPhysics->Step(*m_scene, dt);
     }
     // Время сцены для uTime собственных шейдеров + горячая перезагрузка
     // изменённых .vert/.frag: правка шейдера видна во вьюпорте сразу.
     m_renderer.Tick(dt);
     ResourceManager::Instance().ReloadChangedShaders();
 
-    // Анимации проигрываются и в режиме правки — чтобы в вьюпорте было видно
-    // движение скелетных моделей (превью), не только в Play.
-    sage::anim::UpdateAnimators(*m_scene, dt);
-    // Частицы эмиттеров ECS — тоже живут в режиме правки (превью эффектов).
-    sage::fx::UpdateEmitters(*m_scene, m_renderer.Particles(), dt);
+    // Кадр — планировщиком. В правке это анимация и частицы (превью), в Play к
+    // ним добавляются скрипты и физика, и порядок между ними задан один раз в
+    // RegisterCoreSystems, а не переписан здесь по памяти.
+    m_systems.Run(*m_scene, dt);
     m_plugins.UpdateAll(dt);
 }
 
@@ -410,6 +418,10 @@ void EditorLayer::StopPlay() {
 
     // Порядок важен: ScriptEngine держит указатель на текущую сцену — гасим
     // его ДО того, как заменить сцену восстановленным снапшотом.
+    // Снимаем ДО разрушения объектов: система держит на них указатель, и
+    // оставленная в кадре она обратилась бы к освобождённой памяти.
+    m_systems.Remove("scripts");
+    m_systems.Remove("physics");
     m_playScripts.reset();
     m_playPhysics.reset();
     // Курсор возвращается человеку РАНЬШЕ всего остального: игра могла его

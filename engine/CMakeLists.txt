@@ -43,6 +43,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ScenePasses.cpp
     src/sage/render/Reflection.cpp
     src/sage/core/CrashHandler.cpp
+    src/sage/core/SystemScheduler.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp

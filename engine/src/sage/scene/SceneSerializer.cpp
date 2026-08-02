@@ -6,8 +6,14 @@
 #include <stdexcept>
 #include <algorithm>
 #include <vector>
+#include "sage/core/Log.h"
 
 using json = nlohmann::json;
+
+// Текущая версия формата сцены. Растёт при ЛОМАЮЩЕМ изменении: добавление
+// необязательного поля версию не двигает, потому что старые файлы читаются без
+// него как раньше.
+constexpr int kSceneVersion = 2;
 
 static json Vec3ToJson(const glm::vec3& v) {
     return json{ {"x", v.x}, {"y", v.y}, {"z", v.z} };
@@ -747,7 +753,7 @@ static std::shared_ptr<sage::gi::GIState> GIFromJson(const json& g) {
 
 static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
     json root;
-    root["sage_scene_version"] = 1;
+    root["sage_scene_version"] = kSceneVersion;
     root["name"] = scene.Name();
 
     json objectsJson = json::array();
@@ -806,6 +812,70 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
 }
 
 // Общее восстановление сцены из JSON-дерева — для файлового Load и LoadFromString.
+// ---------------------------------------------------------------------------
+//  Версия формата сцены и миграции
+// ---------------------------------------------------------------------------
+//
+// Номер писался в файл с самого начала и НИКОГДА не читался. Это худший из
+// вариантов: он создаёт впечатление, что о совместимости позаботились, а на
+// деле первое же ломающее изменение формата тихо испортило бы все старые
+// сцены — без ошибки, без предупреждения, просто «объекты почему-то не там».
+//
+// Как это работает теперь. Файл несёт номер версии; загрузчик прогоняет его
+// через цепочку миграций до текущей. Каждая миграция — маленькая функция
+// «из N в N+1», которая правит JSON, а не сцену: правка на уровне JSON не
+// зависит от того, как сегодня выглядят компоненты, и потому не устаревает
+// вместе с ними. Иначе миграцию пришлось бы переписывать каждый раз, когда
+// меняется структура, ради которой она и была написана.
+//
+// Отсутствие номера означает версию 1 — сцены, сохранённые до появления
+// проверки. Их не за что винить, и загружаться они обязаны.
+namespace {
+
+// v1 -> v2. Первая настоящая миграция: в v1 у тел не было ни слоя
+// столкновений, ни признака сенсора, и «нет поля» надо превратить в «слой по
+// умолчанию, не сенсор» ЯВНО. Само по себе это сделали бы и значения по
+// умолчанию при разборе — но именно на таких «и так сработает» миграции и
+// перестают писать, а потом однажды не срабатывает.
+void MigrateV1toV2(json& root) {
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("rigidBody")) continue;
+        json& rb = obj["rigidBody"];
+        if (!rb.contains("layer")) rb["layer"] = 1u;
+        if (!rb.contains("sensor")) rb["sensor"] = false;
+    }
+}
+
+using MigrationFn = void (*)(json&);
+
+// Цепочка миграций: индекс i переводит версию (i+1) в (i+2).
+const MigrationFn kMigrations[] = {
+    &MigrateV1toV2,
+};
+
+} // namespace
+
+static int MigrateJsonInPlace(json& root) {
+    const int from = root.value("sage_scene_version", 1);
+    if (from > kSceneVersion) {
+        throw std::runtime_error(
+            "Сцена сохранена более новой версией движка (формат " + std::to_string(from) +
+            ", движок понимает " + std::to_string(kSceneVersion) +
+            "). Обновите движок — открыть её сейчас значит потерять часть данных.");
+    }
+    if (from < 1) throw std::runtime_error("Повреждённый номер версии сцены");
+    if (!root.contains("objects") || !root["objects"].is_array()) root["objects"] = json::array();
+
+    for (int v = from; v < kSceneVersion; ++v) {
+        kMigrations[v - 1](root);
+    }
+    if (from < kSceneVersion) {
+        LOG_INFO("Scene") << "Сцена обновлена с формата " << from << " до " << kSceneVersion;
+    }
+    root["sage_scene_version"] = kSceneVersion;
+    return from;
+}
+
 static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     auto scene = std::make_unique<Scene>(root.value("name", "Untitled"));
 
@@ -914,6 +984,10 @@ std::unique_ptr<Scene> Load(const std::string& path) {
     } catch (const std::exception& e) {
         throw std::runtime_error("Ошибка парсинга JSON сцены (" + path + "): " + e.what());
     }
+    // Обновление формата — ДО разбора: дальше код читает уже текущую версию и
+    // ничего не знает про старые. Иначе каждая функция разбора обрастала бы
+    // ветками «а если файл старый», и через три версии их стало бы не сосчитать.
+    MigrateJsonInPlace(root);
     std::unique_ptr<Scene> scene = BuildSceneFromJson(root);
     // Восстановление лайтмап: пересчёт развёртки + чтение страниц с диска
     // (при несовпадении отпечатка геометрии бейк помечается устаревшим).
@@ -927,6 +1001,19 @@ std::string SaveToString(const Scene& scene) {
     return BuildSceneJson(scene, /*withProbes=*/false).dump();
 }
 
+int CurrentVersion() { return kSceneVersion; }
+
+std::string MigrateSceneJson(const std::string& jsonText) {
+    json root;
+    try {
+        root = json::parse(jsonText);
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Ошибка парсинга JSON сцены: ") + e.what());
+    }
+    MigrateJsonInPlace(root);
+    return root.dump();
+}
+
 std::unique_ptr<Scene> LoadFromString(const std::string& jsonText) {
     json root;
     try {
@@ -934,6 +1021,9 @@ std::unique_ptr<Scene> LoadFromString(const std::string& jsonText) {
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("Ошибка парсинга JSON сцены (строка): ") + e.what());
     }
+    // Тем же путём, что и файл: снапшоты undo/Play — это тот же формат, и
+    // пропустить их мимо миграции значит завести второй, необновляемый вход.
+    MigrateJsonInPlace(root);
     return BuildSceneFromJson(root);
 }
 

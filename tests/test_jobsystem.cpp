@@ -106,3 +106,106 @@ TEST(JobSystem_dispatch_runs_all_tasks) {
     js.Dispatch(tasks);
     CHECK_EQ(counter.load(), 8);
 }
+
+// --- Планировщик систем -------------------------------------------------------
+//
+// Проверяется главное свойство: ПОРЯДОК не зависит от порядка регистрации.
+// Ради него планировщик и заводился — руками записанный порядок кадра успел
+// разойтись между рантаймом, редактором и игрой, и в игре скрипты выполнялись
+// после физики.
+
+#include "sage/core/SystemScheduler.h"
+#include "sage/scene/Scene.h"
+
+TEST(Scheduler_runs_stages_in_order_regardless_of_registration) {
+    sage::SystemScheduler s;
+    std::vector<std::string> log;
+
+    // Регистрируем в ЗАВЕДОМО неправильном порядке — от последней стадии к первой.
+    s.Add(sage::Stage::LateUpdate, "ui", [&](Scene&, float) { log.push_back("ui"); });
+    s.Add(sage::Stage::Effects, "particles", [&](Scene&, float) { log.push_back("particles"); });
+    s.Add(sage::Stage::Physics, "physics", [&](Scene&, float) { log.push_back("physics"); });
+    s.Add(sage::Stage::Update, "scripts", [&](Scene&, float) { log.push_back("scripts"); });
+    s.Add(sage::Stage::PreUpdate, "input", [&](Scene&, float) { log.push_back("input"); });
+
+    Scene scene("SchedScene");
+    s.Run(scene, 1.0f / 60.0f);
+
+    CHECK_EQ((int)log.size(), 5);
+    CHECK_TRUE(log[0] == "input");
+    CHECK_TRUE(log[1] == "scripts");
+    CHECK_TRUE(log[2] == "physics");   // скрипты СТРОГО раньше физики
+    CHECK_TRUE(log[3] == "particles");
+    CHECK_TRUE(log[4] == "ui");
+}
+
+TEST(Scheduler_orders_within_a_stage_and_keeps_registration_order_on_ties) {
+    sage::SystemScheduler s;
+    std::vector<std::string> log;
+    s.Add(sage::Stage::Effects, "audio", [&](Scene&, float) { log.push_back("audio"); }, 10);
+    s.Add(sage::Stage::Effects, "fx", [&](Scene&, float) { log.push_back("fx"); }, 0);
+    // Две системы с одинаковым порядком: обязаны идти как зарегистрированы.
+    // Неустойчивая сортировка дала бы кадр, зависящий от реализации, — то есть
+    // невоспроизводимый.
+    s.Add(sage::Stage::Effects, "a", [&](Scene&, float) { log.push_back("a"); }, 5);
+    s.Add(sage::Stage::Effects, "b", [&](Scene&, float) { log.push_back("b"); }, 5);
+
+    Scene scene("TieScene");
+    s.Run(scene, 0.016f);
+    CHECK_TRUE(log[0] == "fx");
+    CHECK_TRUE(log[1] == "a");
+    CHECK_TRUE(log[2] == "b");
+    CHECK_TRUE(log[3] == "audio");
+}
+
+TEST(Scheduler_replaces_by_name_instead_of_duplicating) {
+    // Перезапуск Play переподключает скрипты и физику. Если бы регистрация
+    // добавляла вторую систему вместо замены, каждый заход в Play удваивал бы
+    // шаг физики — и мир начал бы идти вдвое быстрее.
+    sage::SystemScheduler s;
+    int calls = 0;
+    s.Add(sage::Stage::Update, "scripts", [&](Scene&, float) { ++calls; });
+    s.Add(sage::Stage::Update, "scripts", [&](Scene&, float) { ++calls; });
+    CHECK_EQ(s.Count(), 1);
+
+    Scene scene("DupScene");
+    s.Run(scene, 0.016f);
+    CHECK_EQ(calls, 1);
+
+    CHECK_TRUE(s.Remove("scripts"));
+    CHECK_FALSE(s.Remove("scripts"));
+    CHECK_EQ(s.Count(), 0);
+}
+
+TEST(Scheduler_survives_a_throwing_system) {
+    // Упавший скрипт не должен уносить с собой физику и рендер: одна опечатка
+    // в Lua обязана стоить строки в консоли, а не чёрного экрана.
+    sage::SystemScheduler s;
+    bool after = false;
+    s.Add(sage::Stage::Update, "bad", [](Scene&, float) { throw std::runtime_error("бум"); });
+    s.Add(sage::Stage::Physics, "good", [&](Scene&, float) { after = true; });
+
+    Scene scene("ThrowScene");
+    s.Run(scene, 0.016f);
+    CHECK_TRUE(after);
+}
+
+TEST(Scheduler_measures_each_system) {
+    // Профайлер движка знает только «Обновление» целиком. Здесь видно, КАКАЯ
+    // система съела кадр, — а это и есть первый вопрос при просадке.
+    sage::SystemScheduler s;
+    s.Add(sage::Stage::Update, "cheap", [](Scene&, float) {});
+    s.Add(sage::Stage::Physics, "busy", [](Scene&, float) {
+        volatile double x = 0.0;
+        for (int i = 0; i < 200000; ++i) x += i * 0.5;
+    });
+    Scene scene("TimeScene");
+    s.Run(scene, 0.016f);
+
+    const auto& t = s.LastTimings();
+    CHECK_EQ((int)t.size(), 2);
+    CHECK_TRUE(t[0].Name == "cheap");
+    CHECK_TRUE(t[1].Name == "busy");
+    std::printf("       cheap %.3f мс, busy %.3f мс\n", t[0].Milliseconds, t[1].Milliseconds);
+    CHECK_TRUE(t[1].Milliseconds >= t[0].Milliseconds);
+}
