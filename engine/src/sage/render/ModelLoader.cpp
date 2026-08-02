@@ -182,9 +182,9 @@ sage::render::MeshData LoadMeshData(const std::string& path) {
                              " (поддерживаются .obj, .gltf, .glb)");
 }
 
-std::shared_ptr<Mesh> LoadMesh(const std::string& path) {
+std::shared_ptr<Mesh> LoadMesh(const std::string& path, bool keepCpuData) {
     sage::render::MeshData d = LoadMeshData(path);
-    return std::make_shared<Mesh>(d.Vertices, d.Indices);
+    return std::make_shared<Mesh>(d.Vertices, d.Indices, keepCpuData);
 }
 
 }
