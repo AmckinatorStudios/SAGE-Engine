@@ -20,6 +20,7 @@ add_executable(sage_tests
     test_jobsystem.cpp
     test_physics.cpp
     test_tween.cpp
+    test_decals.cpp
     test_gi.cpp
     test_picking.cpp
     test_assetformat.cpp

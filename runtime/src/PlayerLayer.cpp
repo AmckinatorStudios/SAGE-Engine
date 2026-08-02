@@ -19,6 +19,7 @@
 #include "sage/scene/Prefab.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
+#include "sage/ecs/DecalSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/anim/AnimationSystem.h"
@@ -384,6 +385,12 @@ void PlayerLayer::OnRender() {
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
     sage::rhi::GraphicsDevice& device = app.Device();
+
+    // Наклейки: пересобираются только помеченные (см. DecalComponent::Dirty),
+    // поэтому вызов каждый кадр стоит обхода их списка и ничего больше. Здесь,
+    // до сбора кадра, чтобы поставленная скриптом наклейка попала в ЭТОТ кадр,
+    // а не появилась через один.
+    sage::ecs::BuildDecals(*m_scene, sage::ecs::MakeDecalMesh);
 
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);

@@ -29,6 +29,7 @@
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
+#include "sage/ecs/DecalSystem.h"
 #include "sage/render/PostFX.h"
 #include "sage/rhi/Conformance.h"
 #include <chrono>
@@ -732,6 +733,61 @@ void TestEmissive(FrameRenderer& r, Scene& scene) {
     const double halo = (double)gain / (double)std::max(1LL, bgCount);
     std::printf("       прирост яркости на фоне (ореол): %.3f по %lld пикселям\n", halo, bgCount);
     Check(halo > 0.5, "свечение даёт ореол вокруг объекта (bloom подхватывает)");
+}
+
+// --- Наклейки ---------------------------------------------------------------
+//
+// Проверяется то, ради чего наклейки существуют: положенная на пол картинка
+// ВИДНА в кадре и не дерётся с ним за глубину. Геометрия проекции проверена
+// юнит-тестами (tests/test_decals.cpp); здесь — что она доезжает до экрана.
+void TestDecals(FrameRenderer& r) {
+    auto build = [&](bool withDecal) {
+        Scene local;
+        GameObject floor = local.CreateObject("Floor");
+        MeshRendererComponent& fmr = floor.Renderer();
+        fmr.Ref = MeshRef{MeshRef::Type::Cube, ""};
+        fmr.MeshPtr = std::make_shared<Mesh>(sage::render::BuildCube().Vertices,
+                                             sage::render::BuildCube().Indices);
+        fmr.Color = glm::vec3(0.25f, 0.25f, 0.28f);
+        floor.GetTransform().Scale = glm::vec3(8.0f, 0.5f, 8.0f);
+
+        if (withDecal) {
+            GameObject d = local.CreateObject("Decal");
+            d.Renderer().Ref = MeshRef{MeshRef::Type::None, ""};
+            // Ярко-красная наклейка на верхней грани (она на y = +0.25).
+            d.Renderer().Color = glm::vec3(1.0f, 0.05f, 0.05f);
+            d.GetTransform().Position = glm::vec3(0.0f, 0.25f, 0.0f);
+            d.GetTransform().Rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+            d.GetTransform().Scale = glm::vec3(3.0f);
+            local.Registry().emplace<DecalComponent>(d.Entity());
+            const sage::ecs::DecalBuildStats st =
+                sage::ecs::BuildDecals(local, sage::ecs::MakeDecalMesh);
+            Check(st.Triangles > 0, "наклейка построила геометрию по сцене");
+        }
+        sage::render::PostFXSettings fx = BaseSettings();
+        fx.BloomEnabled = false;  // ореол размыл бы границу, которую меряем
+        return RenderFrame(r, local, PerspectiveProj(), fx, kW, kH);
+    };
+
+    const Image plain = build(false);
+    const Image decaled = build(true);
+
+    // Красного в кадре с наклейкой обязано стать заметно больше. Считаем
+    // пиксели, где красный ЯВНО перевешивает остальные каналы: пол серый, и
+    // сам по себе таких пикселей не даёт.
+    auto redPixels = [](const Image& im) {
+        long long n = 0;
+        for (size_t i = 0; i + 2 < im.Pixels.size(); i += 3) {
+            const int rr = im.Pixels[i], gg = im.Pixels[i + 1], bb = im.Pixels[i + 2];
+            if (rr > 90 && rr > gg * 2 && rr > bb * 2) ++n;
+        }
+        return n;
+    };
+    const long long before = redPixels(plain);
+    const long long after = redPixels(decaled);
+    std::printf("       красных пикселей: без наклейки %lld, с наклейкой %lld\n", before, after);
+    Check(before < 50, "без наклейки красного в кадре практически нет");
+    Check(after > before + 500, "наклейка видна в кадре");
 }
 
 void TestGrid(FrameRenderer& r, Scene& scene) {
@@ -2208,6 +2264,7 @@ int main(int argc, char** argv) {
         TestGrid(renderer, *scene);
         TestTransparentFaceOrder(renderer, *scene);
         TestEmissive(renderer, *scene);
+        TestDecals(renderer);
         TestObjectMotionBlur(renderer);
         TestMsaa(renderer);
         TestMorphTargets(renderer);

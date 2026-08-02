@@ -100,6 +100,14 @@ void ScriptEngine::RegisterComponentTypes() {
         "EmissiveStrength", &MeshRendererComponent::EmissiveStrength,
         "MaterialPath", &MeshRendererComponent::MaterialPath
     );
+    m_lua.new_usertype<DecalComponent>("DecalComponent",
+        "AngleLimit", &DecalComponent::AngleLimitDeg,
+        "Offset", &DecalComponent::Offset,
+        // Dirty пишут, чтобы пересобрать наклейку после правки; Triangles
+        // читают, чтобы отличить «не видно» от «не на что было лечь».
+        "Dirty", &DecalComponent::Dirty,
+        "Triangles", sol::readonly(&DecalComponent::Triangles)
+    );
     m_lua.new_usertype<ScriptComponent>("ScriptComponent",
         "Path", &ScriptComponent::Path
     );

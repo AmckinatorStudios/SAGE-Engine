@@ -60,6 +60,7 @@ void ScriptEngine::RegisterGameObject() {
     sage::scripting::detail::BindComponentAccessors<MeshRendererComponent>(goType, "HasRenderer", "GetRenderer", "AddRenderer", "RemoveRenderer");
     sage::scripting::detail::BindComponentAccessors<ScriptComponent>(goType, "HasScript", "GetScript", "AddScript", "RemoveScript");
     sage::scripting::detail::BindComponentAccessors<UIElementComponent>(goType, "HasUI", "GetUI", "AddUI", "RemoveUI");
+    sage::scripting::detail::BindComponentAccessors<DecalComponent>(goType, "HasDecal", "GetDecal", "AddDecal", "RemoveDecal");
 
     // --- Иерархия прямо на объекте: e:SetParent(p) / e:Parent() / e:Children() /
     // e:WorldPosition() / e:Destroy(). Всё маршрутизируется через Scene (циклы

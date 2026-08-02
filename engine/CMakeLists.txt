@@ -22,6 +22,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/gi/LightBaker.cpp
     src/sage/gi/LightmapUV.cpp
     src/sage/ecs/CameraView.cpp
+    src/sage/ecs/DecalSystem.cpp
     src/sage/core/Application.cpp
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp
@@ -38,6 +39,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/AssetCache.cpp
     src/sage/assets/AssetDatabase.cpp
     src/sage/render/DebugDraw.cpp
+    src/sage/render/DecalProjection.cpp
     src/sage/render/DebugOverlay.cpp
     src/sage/render/Material.cpp
     src/sage/render/Mesh.cpp

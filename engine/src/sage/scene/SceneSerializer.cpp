@@ -838,6 +838,13 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             SaveAssetRef(j, "script", sc->Path);
         }
+        if (const DecalComponent* dc = reg.try_get<DecalComponent>(e)) {
+            // Сохраняются ПАРАМЕТРЫ проекции, а не её результат: геометрия
+            // наклейки — производная от сцены, и хранить её значило бы держать
+            // в файле копию соседних мешей, устаревающую от любой их правки.
+            j["decal"]["angleLimit"] = dc->AngleLimitDeg;
+            j["decal"]["offset"] = dc->Offset;
+        }
         if (const GIStaticComponent* gs = reg.try_get<GIStaticComponent>(e)) SaveGIStatic(j, *gs);
         if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
@@ -984,6 +991,14 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("mesh")) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));
             mr.Ref.path = LoadAssetRef(j["mesh"], "path");
+        }
+
+        if (j.contains("decal")) {
+            DecalComponent dc;
+            dc.AngleLimitDeg = j["decal"].value("angleLimit", dc.AngleLimitDeg);
+            dc.Offset = j["decal"].value("offset", dc.Offset);
+            dc.Dirty = true; // геометрию строит система после загрузки сцены
+            obj.Registry()->emplace<DecalComponent>(obj.Entity(), dc);
         }
 
         if (j.contains("script")) {

@@ -3,6 +3,8 @@
 #endif
 #include "EditorSceneRenderer.h"
 
+#include "sage/ecs/DecalSystem.h"
+
 #include <algorithm>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -370,6 +372,11 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                                          glm::mat4& outProj, int slot,
                                          const EditorViewOverride& viewOverride) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+
+    // Наклейки — до отрисовки: только помеченные, поэтому вызов дешёвый. В
+    // редакторе это ещё и «правка параметров видна сразу»: инспектор взводит
+    // Dirty, и следующий кадр уже с новой проекцией.
+    sage::ecs::BuildDecals(scene, sage::ecs::MakeDecalMesh);
 
     slot = std::max(0, std::min(slot, kMaxViews - 1));
     const bool primary = (slot == 0);
