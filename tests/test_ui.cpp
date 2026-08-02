@@ -403,3 +403,77 @@ TEST(UI_disabled_element_ignores_mouse) {
     CHECK_FALSE(e.Pressed);
     CHECK_FALSE(r.WantsMouse);
 }
+
+TEST(ui_offset_for_top_left_inverts_anchor) {
+    // Обратная задача к ResolveAnchored: по нужному положению получить Offset.
+    // На ней держится вёрстка мышью — редактор тянет прямоугольник, а хранить
+    // обязан якорь с отступом.
+    //
+    // Проверяем ВСЕ ДЕВЯТЬ якорей, потому что ошибиться можно ровно в них: у
+    // правых и нижних Offset растёт в обратную сторону, у центральных зависит
+    // ещё и от размера. Ошибка в знаке даёт элемент, который при перетаскивании
+    // убегает от курсора — и заметна она только на тех якорях, где знак другой.
+    const sage::ui::UIRect parent{40.0f, 30.0f, 800.0f, 600.0f};
+    const glm::vec2 size(120.0f, 48.0f);
+
+    const UIAnchor all[9] = {UIAnchor::TopLeft,    UIAnchor::TopCenter,    UIAnchor::TopRight,
+                             UIAnchor::CenterLeft, UIAnchor::Center,       UIAnchor::CenterRight,
+                             UIAnchor::BottomLeft, UIAnchor::BottomCenter, UIAnchor::BottomRight};
+
+    const glm::vec2 targets[4] = {
+        {100.0f, 90.0f}, {700.0f, 500.0f}, {40.0f, 30.0f}, {-25.0f, 610.0f}};
+
+    for (UIAnchor a : all) {
+        for (const glm::vec2& want : targets) {
+            const glm::vec2 off = sage::ui::OffsetForTopLeft(a, want, size, parent);
+            const glm::vec2 got = sage::ui::ResolveAnchored(a, off, size, parent);
+            CHECK_NEAR(got.x, want.x, 1e-3f);
+            CHECK_NEAR(got.y, want.y, 1e-3f);
+        }
+    }
+}
+
+TEST(ui_offset_for_top_left_respects_anchor_direction) {
+    // Отдельно — САМО СВОЙСТВО, ради которого функция и нужна: у правого якоря
+    // сдвиг элемента ВПРАВО обязан УМЕНЬШАТЬ Offset. Проверка выше прошла бы и
+    // на функции, которая просто возвращает разность координат для всех якорей
+    // одинаково, — а именно такая ошибка и ломает перетаскивание.
+    const sage::ui::UIRect parent{0.0f, 0.0f, 1000.0f, 800.0f};
+    const glm::vec2 size(100.0f, 40.0f);
+
+    const glm::vec2 leftA = sage::ui::OffsetForTopLeft(UIAnchor::TopLeft, {200, 100}, size, parent);
+    const glm::vec2 leftB = sage::ui::OffsetForTopLeft(UIAnchor::TopLeft, {260, 100}, size, parent);
+    CHECK_TRUE(leftB.x > leftA.x);   // левый якорь: правее — больше отступ
+
+    const glm::vec2 rightA =
+        sage::ui::OffsetForTopLeft(UIAnchor::TopRight, {200, 100}, size, parent);
+    const glm::vec2 rightB =
+        sage::ui::OffsetForTopLeft(UIAnchor::TopRight, {260, 100}, size, parent);
+    CHECK_TRUE(rightB.x < rightA.x); // правый якорь: правее — МЕНЬШЕ отступ
+
+    const glm::vec2 botA =
+        sage::ui::OffsetForTopLeft(UIAnchor::BottomLeft, {200, 100}, size, parent);
+    const glm::vec2 botB =
+        sage::ui::OffsetForTopLeft(UIAnchor::BottomLeft, {200, 160}, size, parent);
+    CHECK_TRUE(botB.y < botA.y);     // нижний якорь: ниже — меньше отступ
+}
+
+TEST(ui_offset_survives_resize_at_far_anchors) {
+    // Изменение размера у правого/нижнего якоря: если тянуть за ЛЕВУЮ грань,
+    // правая обязана остаться на месте. Это и есть то, что человек видит как
+    // «ручка тянет не тот край».
+    const sage::ui::UIRect parent{0.0f, 0.0f, 1000.0f, 800.0f};
+    const glm::vec2 sizeBefore(100.0f, 40.0f);
+    const glm::vec2 topLeftBefore(300.0f, 200.0f);
+
+    // Тянем левую грань влево на 30: левый край уехал, правый остался.
+    const glm::vec2 topLeftAfter(270.0f, 200.0f);
+    const glm::vec2 sizeAfter(130.0f, 40.0f);
+
+    for (UIAnchor a : {UIAnchor::TopRight, UIAnchor::BottomRight, UIAnchor::Center}) {
+        const glm::vec2 off = sage::ui::OffsetForTopLeft(a, topLeftAfter, sizeAfter, parent);
+        const glm::vec2 got = sage::ui::ResolveAnchored(a, off, sizeAfter, parent);
+        CHECK_NEAR(got.x, topLeftAfter.x, 1e-3f);
+        CHECK_NEAR(got.x + sizeAfter.x, topLeftBefore.x + sizeBefore.x, 1e-3f);
+    }
+}

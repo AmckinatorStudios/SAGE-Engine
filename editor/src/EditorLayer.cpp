@@ -219,6 +219,7 @@ void EditorLayer::OnAttach() {
     // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
     // headless нечем: кликать во вьюпорте в CI некому.
+    if (std::getenv("SAGE_EDITOR_UI_MODE")) { m_launcher.Dismiss(); m_uiEditMode = true; }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_launcher.Dismiss();
         GameObject obj = m_scene->FindByName(name);
@@ -559,6 +560,65 @@ void EditorLayer::Redo() {
 // ============================================================================
 //  Сущности
 // ============================================================================
+
+
+// Готовый элемент интерфейса по имени пресета. Значения подобраны так, чтобы
+// созданный элемент был СРАЗУ ВИДЕН и сразу делал то, что обещает названием:
+// кнопка ловит мышь, полоса заполнена наполовину, поле ввода имеет подсказку.
+// Ноль в размере или прозрачный цвет по умолчанию означали бы, что человек
+// создал элемент и не увидел ничего.
+GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
+    GameObject obj = m_scene->CreateObject(preset);
+    UIElementComponent& u = m_scene->Registry().emplace<UIElementComponent>(obj.Entity());
+    u.Anchor = UIAnchor::Center;
+    u.Offset = glm::vec2(0.0f, 0.0f);
+
+    if (preset == "Panel") {
+        u.Type = UIElementComponent::Kind::Panel;
+        u.Size = glm::vec2(260.0f, 140.0f);
+        u.Text.clear();
+    } else if (preset == "Button") {
+        u.Type = UIElementComponent::Kind::Panel;
+        u.Size = glm::vec2(200.0f, 52.0f);
+        u.Text = "Кнопка";
+        u.Interactive = true;   // без этого «кнопка» — просто прямоугольник
+        u.Color = glm::vec4(0.16f, 0.22f, 0.34f, 0.95f);
+        u.BorderThickness = 1.0f;
+    } else if (preset == "Label") {
+        u.Type = UIElementComponent::Kind::Label;
+        u.Size = glm::vec2(220.0f, 40.0f);
+        u.Text = "Текст";
+        u.AutoWidth = true;
+    } else if (preset == "Image") {
+        u.Type = UIElementComponent::Kind::Image;
+        u.Size = glm::vec2(160.0f, 160.0f);
+        u.Color = glm::vec4(1.0f);
+    } else if (preset == "Bar") {
+        u.Type = UIElementComponent::Kind::Bar;
+        u.Size = glm::vec2(240.0f, 26.0f);
+        u.Value = 0.6f;         // наполовину: пустая полоса неотличима от панели
+        u.Rounding = 6.0f;
+    } else if (preset == "Checkbox") {
+        u.Type = UIElementComponent::Kind::Checkbox;
+        u.Size = glm::vec2(200.0f, 36.0f);
+        u.Text = "Галочка";
+        u.Interactive = true;
+    } else if (preset == "Slider") {
+        u.Type = UIElementComponent::Kind::Slider;
+        u.Size = glm::vec2(240.0f, 30.0f);
+        u.Interactive = true;
+        u.MinValue = 0.0f;
+        u.MaxValue = 1.0f;
+        u.Value = 0.5f;
+    } else if (preset == "Input") {
+        u.Type = UIElementComponent::Kind::Input;
+        u.Size = glm::vec2(260.0f, 40.0f);
+        u.Interactive = true;
+        u.Placeholder = "Введите текст";
+        u.TextCentered = false;
+    }
+    return obj;
+}
 
 GameObject EditorLayer::CreateCubeEntity(const std::string& name) {
     return CreatePrimitiveEntity(name, MeshRef::Type::Cube);
@@ -1283,6 +1343,7 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_showBounds);
+    m_renderer.SetDrawUIOverlay(m_uiEditMode);
 
     // ГЛАВНЫЙ слот тоже уважает свой вид. Раньше он рисовался безусловно
     // перспективой, а переопределение применялось только к слотам 1..3 — из-за
@@ -1617,6 +1678,30 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     if (ImGui::MenuItem(p.name)) {
                         PushUndoSnapshot();
                         SetSelectedId(CreatePrimitiveEntity(p.name, p.type).Id());
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            // Готовые элементы интерфейса, а не «добавь компонент и настрой».
+            //
+            // Пустой UIElementComponent — это панель без текста, без размера под
+            // содержимое и без интерактива: чтобы получить из него кнопку, надо
+            // знать, какие пять полей поменять. Меню отдаёт то, что человек и
+            // хотел получить, сразу настроенным; дальше правится всё.
+            if (ImGui::BeginMenu("Create UI")) {
+                struct Preset { const char* Name; const char* Label; };
+                static const Preset kPresets[] = {
+                    {"Panel", "Панель"},   {"Button", "Кнопка"}, {"Label", "Подпись"},
+                    {"Image", "Картинка"}, {"Bar", "Полоса"},    {"Checkbox", "Галочка"},
+                    {"Slider", "Ползунок"}, {"Input", "Поле ввода"},
+                };
+                for (const Preset& p : kPresets) {
+                    if (ImGui::MenuItem(p.Label)) {
+                        PushUndoSnapshot();
+                        SetSelectedId(CreateUIEntity(p.Name).Id());
+                        // Вёрстка включается сама: элемент, которого не видно
+                        // сразу после создания, выглядит как «кнопка не сработала».
+                        m_uiEditMode = true;
                     }
                 }
                 ImGui::EndMenu();

@@ -7,6 +7,8 @@
 
 #include "imgui.h"
 
+#include "UICanvas.h"
+
 class EditorHost;
 
 // Панель Viewport — картинка сцены (редакторская камера) + всё интерактивное:
@@ -54,6 +56,7 @@ private:
     OrthoView m_ortho[4];
     int m_activeSlot = 0;   // где сейчас работают гизмо и хоткеи
 
+    UICanvas m_uiCanvas;   // вёрстка интерфейса мышью (режим UI)
     bool m_cameraDriving = false;  // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)
     // Куда вернуть курсор после захвата (см. ViewportPanel.cpp).
     ImVec2 m_captureReturnPos{0.0f, 0.0f};

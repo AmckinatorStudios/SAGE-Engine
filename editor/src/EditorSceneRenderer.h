@@ -72,6 +72,14 @@ public:
     // вызывается в цикле по всем видам раскладки.
     void SetShowBounds(bool show) { m_showBounds = show; }
 
+    // Рисовать игровой интерфейс поверх сцены во вьюпорте.
+    //
+    // До этого UI рисовался ТОЛЬКО в панели Game — то есть увидеть его можно
+    // было, лишь переключившись в окно, где ничего нельзя выделить и подвинуть.
+    // Верстать интерфейс приходилось вслепую: правишь число в инспекторе,
+    // переключаешься смотреть, переключаешься обратно.
+    void SetDrawUIOverlay(bool draw) { m_drawUIOverlay = draw; }
+
     void RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
                         int selectedId, const std::vector<int>& selection,
                         EditorRenderMode mode, bool showGrid,
@@ -153,5 +161,6 @@ private:
     // накладывается по нему, а у разных видов раскладки размеры разные.
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
+    bool m_drawUIOverlay = false;
     int m_gameW = 1280, m_gameH = 720;
 };

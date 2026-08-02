@@ -70,7 +70,18 @@ std::string TruncateToWidth(const std::string& s, float maxWidth) {
 // плашку), выходила за границы item'а, и строки грида налезали друг на друга
 // («неровность»). Теперь весь тайл — единый item, всё внутри его границ.
 constexpr float kTileW = 104.0f;
-constexpr float kSwatchH = 62.0f;  // цветная плашка (верх карточки)
+constexpr float kTileInset = 8.0f; // внутренний отступ карточки
+// Обложка КВАДРАТНАЯ у всех типов ассетов.
+//
+// Раньше она была 88x54 — вытянутый прямоугольник. Для трёхбуквенного тега это
+// было неважно, но превью в него вписывается по меньшей стороне, то есть по
+// высоте: от карточки шириной 88 под картинку работали 54 пикселя, а остальное
+// оставалось пустым. Квадрат отдаёт превью всю ширину и заодно выравнивает
+// сетку — карточки разных типов перестают отличаться пропорциями.
+//
+// Высота плашки подобрана так, чтобы её ВИДИМАЯ область (kTileW - 2*inset по
+// ширине, kSwatchH - inset по высоте) была квадратом.
+constexpr float kSwatchH = kTileW - kTileInset;
 constexpr float kLabelH = 34.0f;   // область подписи (1-2 строки)
 constexpr float kTileH = kSwatchH + kLabelH + 6.0f; // + внутренний отступ
 constexpr float kTileSpacing = 12.0f;
@@ -169,7 +180,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     }
 
     // Цветная плашка типа с внутренним отступом (верх карточки).
-    constexpr float kInset = 8.0f;
+    constexpr float kInset = kTileInset;
     ImVec2 sw0(cursor.x + kInset, cursor.y + kInset);
     ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + kSwatchH - kInset);
     ImVec4 fill = style.Color;

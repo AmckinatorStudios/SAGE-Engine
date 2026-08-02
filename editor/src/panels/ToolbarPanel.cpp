@@ -102,7 +102,7 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     // просто исчезали с экрана.
     const float leftEnd = ImGui::GetCursorPosX();
     const float playBlockW = 220.0f;
-    const float rightBlockW = 215.0f;
+    const float rightBlockW = 250.0f;
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const float windowW = ImGui::GetWindowWidth();
     float playX = windowW * 0.5f - playBlockW * 0.5f;
@@ -147,6 +147,11 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     // мышью. Включается тогда, когда непонятно, почему клик выбрал не то.
     if (EditorIcons::IconOnlyButton("wire", "Габариты выделенного", host.ShowBounds()))
         host.ShowBounds() = !host.ShowBounds();
+    ImGui::SameLine();
+    // Режим вёрстки интерфейса: UI показывается прямо во вьюпорте и правится
+    // мышью. Раньше его было видно только в панели Game, где ничего не выделить.
+    if (EditorIcons::IconOnlyButton("layout", "Режим вёрстки интерфейса (U)", host.UIEditMode()))
+        host.UIEditMode() = !host.UIEditMode();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110.0f);
     int mode = (int)host.RenderMode();

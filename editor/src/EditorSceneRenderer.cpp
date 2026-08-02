@@ -463,6 +463,21 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     m_debugDraw->Flush(outView, outProj);
 
+    // Игровой интерфейс поверх сцены — В ТОМ ЖЕ буфере и в тех же пикселях, в
+    // которых его увидит игрок. Раскладка UI зависит от размера экрана (якоря,
+    // проценты), поэтому рисовать его надо именно в размер вьюпорта, а не в
+    // какой-нибудь эталонный: иначе редактор показывал бы не то, что получится.
+    if (m_drawUIOverlay && primary) {
+        auto uiView = scene.Registry().view<UIElementComponent>();
+        if (uiView.begin() != uiView.end()) {
+            if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+            device.SetViewport(0, 0, w, h);
+            m_ui->Begin(w, h);
+            sage::ui::DrawSceneUI(scene, *m_ui, w, h);
+            m_ui->End();
+        }
+    }
+
     // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).
     if (!selection.empty()) RenderOutlineMask(scene, selection, outView, outProj, w, h);
 

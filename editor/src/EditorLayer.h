@@ -117,6 +117,8 @@ public:
 
     // --- EditorHost: сущности ---
     GameObject CreateCubeEntity(const std::string& name) override;
+    // Готовый элемент интерфейса по имени пресета (Panel/Button/Label/...).
+    GameObject CreateUIEntity(const std::string& preset);
     GameObject CreatePrimitiveEntity(const std::string& name, MeshRef::Type type);
     GameObject DuplicateEntity(GameObject src); // копия одной сущности (для Duplicate/prefab)
     void DuplicateSelected() override;
@@ -141,6 +143,7 @@ public:
     float& SnapScale() override { return m_snapScale; }
     float SnapStepForCurrentOp() override;
     bool& ShowBounds() override { return m_showBounds; }
+    bool& UIEditMode() override { return m_uiEditMode; }
 
     // --- EditorHost: инструменты над выделением ---
     void FocusSelected() override;
@@ -244,6 +247,7 @@ private:
     float m_snapRotate = 15.0f;
     float m_snapScale = 0.1f;
     bool m_showBounds = false;
+    bool m_uiEditMode = false;
 
     // --- Play-режим ---
     EditorPlayState m_playState = EditorPlayState::Editing;
