@@ -49,6 +49,11 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/SystemScheduler.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/MeshRaycast.cpp
+    src/sage/assets/format/Blob.cpp
+    src/sage/assets/format/MeshFormat.cpp
+    src/sage/assets/import/Importer.cpp
+    src/sage/assets/import/BlockbenchImporter.cpp
+    src/sage/assets/import/BlendImporter.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
     src/sage/render/Font.cpp
@@ -133,6 +138,7 @@ target_link_libraries(sage_engine PRIVATE
     tinygltf
     nlohmann_json::nlohmann_json
     miniaudio
+    miniz
 )
 
 # Физический бэкенд Jolt (основной) — подключается, только если верхний уровень

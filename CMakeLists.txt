@@ -117,6 +117,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyobjloader)
 
+# ---------- miniz (deflate для своих бинарных форматов) ----------
+# Один C-файл без зависимостей. Нужен контейнеру sage::assets (см.
+# engine/src/sage/assets/format/Blob.h): свои форматы жмут куски deflate'ом
+# поверх собственной упаковки. Писать свой энтропийный кодек ради этого не
+# стоит — основную экономию даёт квантование, а универсальное сжатие лишь
+# добирает остаток, и здесь важнее, чтобы оно было заведомо правильным.
+FetchContent_Declare(
+  miniz
+  GIT_REPOSITORY https://github.com/richgel999/miniz.git
+  GIT_TAG 3.0.2
+)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(miniz)
+# PIC: движок линкуется в MODULE-библиотеки плагинов редактора.
+if (TARGET miniz)
+    set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # ---------- nlohmann/json (сериализация сцен) ----------
 FetchContent_Declare(
   json
