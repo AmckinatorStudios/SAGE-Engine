@@ -1,5 +1,6 @@
 #include <filesystem>
 #include "ResourceManager.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/render/SkinnedModel.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
@@ -29,7 +30,15 @@ struct ResourceManager::AsyncImpl {
     std::thread Worker;
     std::mutex JobMx;
     std::condition_variable JobCv;
-    std::deque<std::string> Jobs;
+    // Ключ кэша и путь, который реально открывается, — разные строки (см.
+    // Locate ниже). Разрешение делает главный поток при постановке задачи:
+    // воркеру нельзя трогать базу ассетов, её могут пересканировать в этот же
+    // момент.
+    struct Job {
+        std::string Key;
+        std::string File;
+    };
+    std::deque<Job> Jobs;
 
     std::mutex ResMx;
     std::deque<Decoded> Results;
@@ -39,18 +48,18 @@ struct ResourceManager::AsyncImpl {
 
     void Run() {
         for (;;) {
-            std::string path;
+            Job job;
             {
                 std::unique_lock<std::mutex> lk(JobMx);
                 JobCv.wait(lk, [&] { return Stop.load() || !Jobs.empty(); });
                 if (Stop.load() && Jobs.empty()) return;
                 if (Jobs.empty()) continue;
-                path = std::move(Jobs.front());
+                job = std::move(Jobs.front());
                 Jobs.pop_front();
             }
             Decoded d;
-            d.Path = path;
-            d.Ok = ResourceManager::DecodeImageFile(path, d.Pixels, d.W, d.H);
+            d.Path = job.Key;
+            d.Ok = ResourceManager::DecodeImageFile(job.File, d.Pixels, d.W, d.H);
             {
                 std::lock_guard<std::mutex> lk(ResMx);
                 Results.push_back(std::move(d));
@@ -58,6 +67,17 @@ struct ResourceManager::AsyncImpl {
         }
     }
 };
+
+namespace {
+// Путь из проекта -> путь, который откроется ИЗ ТЕКУЩЕГО каталога процесса.
+//
+// Ключи кэша при этом остаются ИСХОДНЫМИ: по ним приходят повторные запросы,
+// hot-reload и стриминг, и подменять их на разрешённые значило бы, что один и
+// тот же ассет лежит в кэше дважды — под относительным путём и под полным.
+std::string Locate(const std::string& path) {
+    return sage::AssetDatabase::Instance().LocatePath(path);
+}
+} // namespace
 
 // --- GL-независимое декодирование (используется и воркером, и юнит-тестом) ---
 ResourceManager::ResourceManager() = default;
@@ -105,7 +125,7 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     if (it != m_models.end()) return it->second;
     std::shared_ptr<Mesh> mesh;
     try {
-        mesh = ModelLoader::LoadObj(path);
+        mesh = ModelLoader::LoadObj(Locate(path));
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
     }
@@ -119,7 +139,7 @@ std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
     if (it != m_skinned.end()) return it->second;
     std::shared_ptr<sage::render::SkinnedModel> model;
     try {
-        model = sage::render::SkinnedModel::Load(path);
+        model = sage::render::SkinnedModel::Load(Locate(path));
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Скиннинг-модель не загрузилась (" << path << "): " << e.what();
     }
@@ -144,7 +164,7 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
         // стриминг, и подмешивать в него настройки нельзя.
         if (it->second.Tex && (it->second.Filter != filter || it->second.Mipmaps != mipmaps)) {
             try {
-                *it->second.Tex = Texture(path, filter, mipmaps);
+                *it->second.Tex = Texture(Locate(path), filter, mipmaps);
                 m_textureBytes -= it->second.Bytes;
                 it->second.Bytes = it->second.Tex->GpuBytes();
                 m_textureBytes += it->second.Bytes;
@@ -161,7 +181,7 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
     rec.Filter = filter;
     rec.Mipmaps = mipmaps;
     try {
-        rec.Tex = std::make_shared<Texture>(path, filter, mipmaps);
+        rec.Tex = std::make_shared<Texture>(Locate(path), filter, mipmaps);
         rec.Bytes = rec.Tex->GpuBytes();
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Текстура не загрузилась (" << path << "): " << e.what();
@@ -205,7 +225,7 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     StartWorker();
     {
         std::lock_guard<std::mutex> lk(m_async->JobMx);
-        m_async->Jobs.push_back(path);
+        m_async->Jobs.push_back({path, Locate(path)});
     }
     m_async->Pending.fetch_add(1);
     m_async->JobCv.notify_one();
@@ -246,7 +266,7 @@ std::shared_ptr<Skybox> ResourceManager::GetSkybox(const std::string& directory)
     auto it = m_skyboxes.find(directory);
     if (it != m_skyboxes.end()) return it->second; // в т.ч. закэшированный nullptr
 
-    std::shared_ptr<Skybox> sky = Skybox::LoadFromDirectory(directory);
+    std::shared_ptr<Skybox> sky = Skybox::LoadFromDirectory(Locate(directory));
     m_skyboxes[directory] = sky;
     return sky;
 }
@@ -256,7 +276,7 @@ std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) 
     if (it != m_materials.end()) return it->second;
     auto material = std::make_shared<Material>();
     try {
-        *material = Material::LoadFromFile(path);
+        *material = Material::LoadFromFile(Locate(path));
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Материал не загрузился, использую дефолт: " << e.what();
     }
@@ -284,13 +304,17 @@ std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath
     auto it = m_shaders.find(key);
     if (it != m_shaders.end()) return it->second.Program;
 
+    // Ключ кэша — путь как его дали, а хранимые пути — разрешённые: по ним
+    // идут FileStamp и пересборка, и оба обязаны смотреть на ТОТ ЖЕ файл, что
+    // и первая сборка. Иначе в редакторе hot-reload сравнивал бы штампы
+    // несуществующего файла (0 == 0) и молча никогда не срабатывал.
     ShaderEntry entry;
-    entry.VertPath = vertexPath;
-    entry.FragPath = fragmentPath;
-    entry.VertStamp = FileStamp(vertexPath);
-    entry.FragStamp = FileStamp(fragmentPath);
+    entry.VertPath = Locate(vertexPath);
+    entry.FragPath = Locate(fragmentPath);
+    entry.VertStamp = FileStamp(entry.VertPath);
+    entry.FragStamp = FileStamp(entry.FragPath);
     try {
-        entry.Program = std::make_shared<Shader>(vertexPath, fragmentPath);
+        entry.Program = std::make_shared<Shader>(entry.VertPath, entry.FragPath);
         LOG_INFO("Resources") << "Шейдер собран: " << vertexPath << " + " << fragmentPath;
     } catch (const std::exception& e) {
         // nullptr тоже кэшируем — см. комментарий в заголовке.
@@ -328,7 +352,7 @@ std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& pat
     auto it = m_materials.find(path);
     if (it == m_materials.end()) return GetMaterial(path);
     try {
-        *it->second = Material::LoadFromFile(path);
+        *it->second = Material::LoadFromFile(Locate(path));
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Перезагрузка материала не удалась: " << e.what();
     }

@@ -1048,6 +1048,20 @@ void EditorLayer::RunHeadlessProjectSession() {
 
     bool ok = true;
 
+    // --- Save Scene: та же кнопка, что у человека (Ctrl+S). Нужна затем, что
+    // перезапись файла — единственный способ ПОДНЯТЬ его до текущего формата:
+    // миграция при загрузке живёт в памяти и на диск сама не возвращается.
+    // Без этого проект, лежащий в старой версии, так в ней и остаётся, а
+    // проверить «сохранилось ли то, что прочиталось» нечем.
+    if (std::getenv("SAGE_EDITOR_SAVE_SCENE")) {
+        if (!SaveSceneToFile(scenePath)) {
+            LOG_ERROR("Editor") << "SESSION: save scene failed: " << scenePath.string();
+            ok = false;
+        } else {
+            LOG_INFO("Editor") << "SESSION: saved scene " << scenePath.filename().string();
+        }
+    }
+
     // --- Play: та же кнопка, что у человека. Время идёт фиксированным шагом,
     // а не по-настоящему: headless-прогон должен быть воспроизводимым, иначе
     // «успела ли игра дойти до события» зависело бы от загрузки CI-машины. ---

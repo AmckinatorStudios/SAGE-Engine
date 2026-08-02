@@ -410,3 +410,209 @@ TEST(downgrade_policy_picks_least_recently_used) {
     for (D& d : cands) { d.Side = 1024; d.Streamable = false; }
     CHECK_TRUE(ResourceManager::SelectDowngrades(cands, current, budget).empty());
 }
+
+// --- База ассетов: устойчивость к переименованию ------------------------------
+//
+// Раньше ассет опознавался ПУТЁМ. Путь — не личность, а адрес: он меняется от
+// переименования, от переноса в папку, от наведения порядка. Каждое такое
+// движение молча ломало сцены — молча в буквальном смысле: сцена грузилась,
+// объект оставался на месте, просто без модели, и в логе не было ни строчки.
+
+#include "sage/assets/AssetDatabase.h"
+
+#include <filesystem>
+#include <fstream>
+
+namespace {
+namespace afs = std::filesystem;
+
+// Одноразовый проект во временной папке: база работает с файлами на диске, и
+// проверять её на выдуманных путях бессмысленно.
+struct TempProject {
+    afs::path Dir;
+    explicit TempProject(const char* name) {
+        Dir = afs::temp_directory_path() / (std::string("sage_assetdb_") + name);
+        afs::remove_all(Dir);
+        afs::create_directories(Dir / "assets" / "models");
+    }
+    ~TempProject() {
+        std::error_code ec;
+        afs::remove_all(Dir, ec);
+    }
+    std::string Write(const std::string& rel, const std::string& body = "x") {
+        const afs::path full = Dir / rel;
+        afs::create_directories(full.parent_path());
+        std::ofstream(full) << body;
+        return rel;
+    }
+};
+} // namespace
+
+TEST(AssetDatabase_gives_a_file_a_stable_identity) {
+    TempProject p("identity");
+    p.Write("assets/models/hero.glb");
+
+    sage::AssetDatabase db;
+    CHECK_TRUE(db.ScanProject(p.Dir.string()) >= 1);
+
+    const sage::AssetGuid guid = db.GuidOf("assets/models/hero.glb");
+    CHECK_TRUE(guid.Valid());
+    CHECK_TRUE(db.PathOf(guid) == "assets/models/hero.glb");
+
+    // Повторное сканирование НЕ меняет личность: иначе каждый запуск редактора
+    // протухал бы все ссылки разом.
+    sage::AssetDatabase db2;
+    db2.ScanProject(p.Dir.string());
+    CHECK_TRUE(db2.GuidOf("assets/models/hero.glb") == guid);
+}
+
+TEST(AssetDatabase_survives_a_rename) {
+    TempProject p("rename");
+    p.Write("assets/models/hero.glb");
+
+    sage::AssetDatabase db;
+    db.ScanProject(p.Dir.string());
+    const sage::AssetGuid guid = db.GuidOf("assets/models/hero.glb");
+    CHECK_TRUE(guid.Valid());
+
+    // Переименовываем ВМЕСТЕ с сайдкаром — ровно так это делают проводник, git
+    // и любой инструмент, переносящий файлы: .meta лежит рядом и называется
+    // так же, поэтому едет следом сам.
+    afs::rename(p.Dir / "assets/models/hero.glb", p.Dir / "assets/models/protagonist.glb");
+    afs::rename(p.Dir / "assets/models/hero.glb.meta",
+                p.Dir / "assets/models/protagonist.glb.meta");
+
+    db.ScanProject(p.Dir.string());
+    // Тот же GUID — НОВЫЙ путь. Это и есть починка: ссылка в сцене цела.
+    std::printf("       после переименования GUID %s -> %s\n", guid.ToString().c_str(),
+                db.PathOf(guid).c_str());
+    CHECK_TRUE(db.PathOf(guid) == "assets/models/protagonist.glb");
+    CHECK_TRUE(db.GuidOf("assets/models/protagonist.glb") == guid);
+    // Старый путь больше ничего не значит — и это правильно.
+    CHECK_FALSE(db.GuidOf("assets/models/hero.glb").Valid());
+}
+
+TEST(AssetDatabase_resolves_by_guid_after_a_move) {
+    TempProject p("resolve");
+    p.Write("assets/models/box.glb");
+
+    sage::AssetDatabase db;
+    db.ScanProject(p.Dir.string());
+    const sage::AssetGuid guid = db.GuidOf("assets/models/box.glb");
+
+    afs::create_directories(p.Dir / "assets/props");
+    afs::rename(p.Dir / "assets/models/box.glb", p.Dir / "assets/props/box.glb");
+    afs::rename(p.Dir / "assets/models/box.glb.meta", p.Dir / "assets/props/box.glb.meta");
+    db.ScanProject(p.Dir.string());
+
+    // Сцена помнит СТАРЫЙ путь и GUID. Побеждать должен GUID — иначе весь
+    // механизм не имел бы смысла.
+    const std::string resolved = db.Resolve(guid, "assets/models/box.glb");
+    std::printf("       сцена помнит assets/models/box.glb, база отвечает %s\n", resolved.c_str());
+    CHECK_TRUE(resolved == "assets/props/box.glb");
+}
+
+TEST(AssetDatabase_adopts_projects_made_before_it_existed) {
+    // Старый проект: файлы есть, GUID'ов нет, сцена ссылается путём. Отказать
+    // здесь значило бы, что такие проекты просто не открываются.
+    TempProject p("legacy");
+    p.Write("assets/models/old.glb");
+
+    sage::AssetDatabase db;
+    db.ScanProject(p.Dir.string());
+    // Ссылка без GUID, но с живым путём — обязана разрешиться и обзавестись
+    // личностью на будущее.
+    const std::string resolved = db.Resolve(sage::AssetGuid{}, "assets/models/old.glb");
+    CHECK_TRUE(resolved == "assets/models/old.glb");
+    CHECK_TRUE(db.GuidOf("assets/models/old.glb").Valid());
+}
+
+TEST(AssetDatabase_reports_a_missing_asset_instead_of_staying_silent) {
+    TempProject p("missing");
+    sage::AssetDatabase db;
+    db.ScanProject(p.Dir.string());
+
+    const sage::AssetGuid ghost = sage::AssetGuid::Generate();
+    const std::string resolved = db.Resolve(ghost, "assets/models/gone.glb");
+    CHECK_TRUE(resolved.empty());
+    CHECK_EQ((int)db.Broken().size(), 1);
+    CHECK_TRUE(db.Broken()[0].Hint == "assets/models/gone.glb");
+    std::printf("       сломанная ссылка зафиксирована: %s\n", db.Broken()[0].Hint.c_str());
+
+    // Повторное обращение не должно копить одинаковые записи: список читает
+    // человек, и сто копий одной строки в нём бесполезны.
+    db.Resolve(ghost, "assets/models/gone.glb");
+    CHECK_EQ((int)db.Broken().size(), 1);
+}
+
+TEST(AssetDatabase_tracks_who_depends_on_what) {
+    // «Удалить ассет» и «переименовать ассет» — операции с последствиями, и
+    // показать их надо ДО, а не после.
+    TempProject p("deps");
+    p.Write("assets/models/hero.glb");
+    p.Write("assets/materials/skin.sagemat");
+
+    sage::AssetDatabase db;
+    db.ScanProject(p.Dir.string());
+    const sage::AssetGuid model = db.GuidOf("assets/models/hero.glb");
+    const sage::AssetGuid mat = db.GuidOf("assets/materials/skin.sagemat");
+
+    db.AddDependency(model, mat);
+    CHECK_EQ((int)db.Dependents(mat).size(), 1);
+    CHECK_TRUE(db.Dependents(mat)[0] == model);
+    CHECK_EQ((int)db.Dependencies(model).size(), 1);
+
+    // Дубликаты не копятся: одна и та же связь может объявляться при каждой
+    // загрузке сцены.
+    db.AddDependency(model, mat);
+    CHECK_EQ((int)db.Dependents(mat).size(), 1);
+    // Ссылка на себя бессмысленна и должна отбрасываться.
+    db.AddDependency(model, model);
+    CHECK_EQ((int)db.Dependencies(model).size(), 1);
+}
+
+TEST(AssetGuid_round_trips_through_text_and_rejects_garbage) {
+    const sage::AssetGuid g = sage::AssetGuid::Generate();
+    const std::string text = g.ToString();
+    CHECK_EQ((int)text.size(), 32);
+    CHECK_TRUE(sage::AssetGuid::FromString(text) == g);
+
+    // Битый текст даёт невалидный GUID, а не исключение: ссылка на
+    // несуществующий ассет — обычное состояние проекта в работе.
+    CHECK_FALSE(sage::AssetGuid::FromString("").Valid());
+    CHECK_FALSE(sage::AssetGuid::FromString("не-guid").Valid());
+    CHECK_FALSE(sage::AssetGuid::FromString(std::string(32, 'z')).Valid());
+    // Сгенерированный GUID не может быть нулевым: ноль означает «нет ссылки».
+    for (int i = 0; i < 64; ++i) CHECK_TRUE(sage::AssetGuid::Generate().Valid());
+}
+
+// --- Путь, открываемый из чужого каталога -------------------------------------
+//
+// Ловит ровно ту ошибку, которую нашёл живой прогон: пути в проекте
+// относительны его корню, и это верно, пока процесс запущен ИЗ корня. Собранная
+// игра так и работает — а редактор живёт в своём каталоге, и там вода теряла
+// материал и рисовалась серой.
+TEST(AssetDatabase_finds_project_files_from_another_working_directory) {
+    TempProject p("locate");
+    p.Write("assets/models/hero.glb");
+
+    sage::AssetDatabase db;
+    db.ScanProject(p.Dir.string());
+
+    // Путь от корня проекта — из чужого cwd сам по себе не откроется, и база
+    // обязана достроить его до полного.
+    const std::string located = db.LocatePath("assets/models/hero.glb");
+    CHECK_TRUE(afs::exists(located));
+    CHECK_TRUE(located == (p.Dir / "assets/models/hero.glb").string() ||
+               located == "assets/models/hero.glb");
+
+    // Путь, который И ТАК открывается, не трогаем: подмена сломала бы игру,
+    // запущенную из своего каталога.
+    const std::string absolute = (p.Dir / "assets/models/hero.glb").string();
+    CHECK_TRUE(db.LocatePath(absolute) == absolute);
+
+    // Файла нет нигде — возвращаем как дали, чтобы об этом сообщил тот, кто его
+    // ждал, а не эта функция: она не знает, ошибка это или необязательный ассет.
+    CHECK_TRUE(db.LocatePath("assets/models/gone.glb") == "assets/models/gone.glb");
+    CHECK_TRUE(db.LocatePath("").empty());
+}

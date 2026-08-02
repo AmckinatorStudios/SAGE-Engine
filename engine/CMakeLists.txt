@@ -33,6 +33,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Profiler.cpp
     src/rhi/null/NullDevice.cpp
     src/sage/assets/AssetCache.cpp
+    src/sage/assets/AssetDatabase.cpp
     src/sage/render/DebugDraw.cpp
     src/sage/render/DebugOverlay.cpp
     src/sage/render/Material.cpp

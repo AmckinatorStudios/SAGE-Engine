@@ -14,6 +14,7 @@
 
 #include "sage/core/Application.h"
 #include "sage/core/Config.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
@@ -85,6 +86,11 @@ void PlayerLayer::OnAttach() {
         app.Close();
         return;
     }
+    // База ассетов — до загрузки сцены: сцена спрашивает у неё актуальные пути
+    // по GUID'ам, и пустая база означала бы, что все ссылки сломаны.
+    sage::AssetDatabase::Instance().Clear();
+    sage::AssetDatabase::Instance().ScanProject(".");
+
     glfwSetWindowTitle(app.GetWindow().Handle(), m_projectName.c_str());
 
     // 3. Главная сцена.

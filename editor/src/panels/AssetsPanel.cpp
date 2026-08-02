@@ -10,6 +10,7 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "sage/assets/AssetDatabase.h"
 #include "Project.h"
 #include "sage/core/Log.h"
 
@@ -351,6 +352,33 @@ void AssetsPanel::Draw(EditorHost& host) {
 
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##assets_search", "Search...", m_search, sizeof(m_search));
+
+    // Сломанные ссылки — В ПАНЕЛИ, а не только в логе. Именно молчание и было
+    // исходной болезнью: сцена грузилась, объект стоял на месте, просто без
+    // модели, и заметить это можно было лишь случайно.
+    const auto& broken = sage::AssetDatabase::Instance().Broken();
+    if (!broken.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.40f, 0.40f, 1.0f));
+        const bool open = ImGui::CollapsingHeader(
+            ("Битых ссылок: " + std::to_string(broken.size()) + "###brokenrefs").c_str());
+        ImGui::PopStyleColor();
+        if (open) {
+            for (const auto& b : broken) {
+                ImGui::BulletText("%s", b.Hint.empty() ? b.Missing.ToString().c_str()
+                                                       : b.Hint.c_str());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "Файла нет. Верните его на место или переназначьте ассет —\n"
+                        "переименование мимо редактора мог поймать только сайдкар .meta.");
+                }
+            }
+            if (ImGui::SmallButton("Пересканировать проект")) {
+                sage::AssetDatabase::Instance().ClearBroken();
+                if (project.Loaded())
+                    sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
+            }
+        }
+    }
     ImGui::Separator();
 
     ImGui::BeginChild("##assets_scroll");

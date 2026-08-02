@@ -3,6 +3,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include "sage/core/Log.h"
+#include "sage/assets/AssetDatabase.h"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -56,6 +57,13 @@ bool Project::Open(const fs::path& fileOrDir, std::string& error) {
     std::error_code ec;
     fs::create_directories(ScenesDir(), ec);
     fs::create_directories(AssetsDir(), ec);
+
+    // База ассетов: сканируется ДО загрузки сцены, иначе сцена спрашивала бы
+    // про GUID'ы у пустой базы и каждая ссылка выглядела бы сломанной.
+    // Смена проекта сбрасывает базу целиком: записи одного проекта в другом
+    // означают ответы про файлы, которых там нет.
+    sage::AssetDatabase::Instance().Clear();
+    sage::AssetDatabase::Instance().ScanProject(m_dir.string());
 
     LOG_INFO("Editor") << "Project opened: " << m_name << " (" << m_dir.string() << ")";
     return true;

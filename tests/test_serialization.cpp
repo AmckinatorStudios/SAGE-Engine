@@ -400,3 +400,100 @@ TEST(Scene_saved_today_declares_the_current_version) {
     // и цепочка миграций не проверяется вовсе.
     CHECK_TRUE(SceneSerializer::CurrentVersion() >= 2);
 }
+
+// --- Сцена переживает переименование ассета -----------------------------------
+//
+// Главная проверка всей затеи с GUID'ами. Раньше это и было симптомом:
+// переименовал файл — сцена загрузилась, объект остался на месте, просто без
+// модели, и ни строчки в логе.
+
+#include "sage/assets/AssetDatabase.h"
+#include <filesystem>
+#include <fstream>
+
+TEST(Scene_reference_survives_renaming_the_asset_file) {
+    namespace afs = std::filesystem;
+    const afs::path dir = afs::temp_directory_path() / "sage_scene_rename";
+    afs::remove_all(dir);
+    afs::create_directories(dir / "assets" / "models");
+    std::ofstream(dir / "assets/models/hero.glb") << "fake";
+
+    sage::AssetDatabase& db = sage::AssetDatabase::Instance();
+    db.Clear();
+    db.ScanProject(dir.string());
+    const sage::AssetGuid guid = db.GuidOf("assets/models/hero.glb");
+    CHECK_TRUE(guid.Valid());
+
+    // Сцена ссылается на модель — сохраняем её вместе с GUID'ом.
+    Scene scene("RenameScene");
+    GameObject o = scene.CreateObject("Hero");
+    o.Renderer().Ref.type = MeshRef::Type::Model;
+    o.Renderer().Ref.path = "assets/models/hero.glb";
+    const std::string saved = SceneSerializer::SaveToString(scene);
+    CHECK_TRUE(saved.find(guid.ToString()) != std::string::npos);  // GUID реально записан
+
+    // Переименовываем файл вместе с сайдкаром — так это делают проводник и git.
+    afs::rename(dir / "assets/models/hero.glb", dir / "assets/models/protagonist.glb");
+    afs::rename(dir / "assets/models/hero.glb.meta", dir / "assets/models/protagonist.glb.meta");
+    db.ScanProject(dir.string());
+
+    // Загружаем ТУ ЖЕ сцену: она помнит старый путь, но ссылка обязана
+    // разрешиться в новый.
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(saved);
+    GameObject hero = loaded->FindByName("Hero");
+    CHECK_TRUE(hero.Valid());
+    std::printf("       сцена помнила assets/models/hero.glb, получила %s\n",
+                hero.Renderer().Ref.path.c_str());
+    CHECK_TRUE(hero.Renderer().Ref.path == "assets/models/protagonist.glb");
+
+    db.Clear();
+    std::error_code ec;
+    afs::remove_all(dir, ec);
+}
+
+TEST(Scene_migration_v2_to_v3_stamps_guids_onto_old_references) {
+    namespace afs = std::filesystem;
+    const afs::path dir = afs::temp_directory_path() / "sage_scene_v3";
+    afs::remove_all(dir);
+    afs::create_directories(dir / "assets" / "models");
+    std::ofstream(dir / "assets/models/box.glb") << "fake";
+
+    sage::AssetDatabase& db = sage::AssetDatabase::Instance();
+    db.Clear();
+    db.ScanProject(dir.string());
+    const sage::AssetGuid guid = db.GuidOf("assets/models/box.glb");
+
+    // Сцена формата v2: ссылка только путём, GUID'а нет.
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 2,
+      "objects": [{"id": 1, "name": "Box",
+        "position": {"x":0,"y":0,"z":0}, "rotation": {"x":0,"y":0,"z":0},
+        "scale": {"x":1,"y":1,"z":1},
+        "mesh": {"type": "model", "path": "assets/models/box.glb"}}]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    CHECK_TRUE(j["objects"][0]["mesh"].contains("pathGuid"));
+    CHECK_TRUE(j["objects"][0]["mesh"]["pathGuid"].get<std::string>() == guid.ToString());
+
+    db.Clear();
+    std::error_code ec;
+    afs::remove_all(dir, ec);
+}
+
+TEST(Scene_migration_leaves_a_missing_asset_visibly_broken) {
+    // Путь, которого в базе нет, не должен получать выдуманный GUID: сломанная
+    // ссылка обязана остаться видимо сломанной, а не притвориться целой.
+    sage::AssetDatabase::Instance().Clear();
+    const std::string old = R"({
+      "name":"Broken","sage_scene_version":2,
+      "objects":[{"id":1,"name":"Ghost",
+        "position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0},
+        "scale":{"x":1,"y":1,"z":1},
+        "mesh":{"type":"model","path":"assets/models/nope.glb"}}]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_FALSE(j["objects"][0]["mesh"].contains("pathGuid"));
+    // Путь при этом сохраняется — по нему человек поймёт, чего не хватает.
+    CHECK_TRUE(j["objects"][0]["mesh"]["path"].get<std::string>() == "assets/models/nope.glb");
+}

@@ -7,13 +7,14 @@
 #include <algorithm>
 #include <vector>
 #include "sage/core/Log.h"
+#include "sage/assets/AssetDatabase.h"
 
 using json = nlohmann::json;
 
 // Текущая версия формата сцены. Растёт при ЛОМАЮЩЕМ изменении: добавление
 // необязательного поля версию не двигает, потому что старые файлы читаются без
 // него как раньше.
-constexpr int kSceneVersion = 2;
+constexpr int kSceneVersion = 3;
 
 static json Vec3ToJson(const glm::vec3& v) {
     return json{ {"x", v.x}, {"y", v.y}, {"z", v.z} };
@@ -52,6 +53,39 @@ static MeshRef::Type MeshTypeFromString(const std::string& s) {
     if (s == "cone")     return MeshRef::Type::Cone;
     if (s == "model")    return MeshRef::Type::Model;
     return MeshRef::Type::None;
+}
+
+// --- Ссылки на ассеты ---------------------------------------------------------
+//
+// Ассет опознаётся GUID'ом, а путь сохраняется РЯДОМ — как подсказка человеку в
+// diff'е и как запасной вариант для проектов, сделанных до появления базы.
+// Личность у файла одна, и это GUID: путь меняется от переименования, от
+// переноса в другую папку, от наведения порядка, и каждое такое движение
+// раньше молча ломало сцену.
+//
+// Формат: помимо "path"/"material"/"script" в объекте появляется парное поле
+// с суффиксом "Guid". Старые сцены его не имеют — миграция v2->v3 проставляет
+// его по путям, а Resolve всё равно умеет работать по одному только пути.
+static void SaveAssetRef(json& j, const char* key, const std::string& path) {
+    if (path.empty()) return;
+    j[key] = path;
+    const sage::AssetGuid guid = sage::AssetDatabase::Instance().GuidOf(path);
+    if (guid.Valid()) j[std::string(key) + "Guid"] = guid.ToString();
+}
+
+// Возвращает АКТУАЛЬНЫЙ путь: по GUID, если он знаком (файл могли
+// переименовать), иначе по сохранённому пути.
+static std::string LoadAssetRef(const json& j, const char* key) {
+    const std::string path = j.value(key, std::string());
+    const std::string guidText = j.value(std::string(key) + "Guid", std::string());
+    if (path.empty() && guidText.empty()) return {};
+    const sage::AssetGuid guid = sage::AssetGuid::FromString(guidText);
+    const std::string resolved = sage::AssetDatabase::Instance().Resolve(guid, path);
+    // Пусто означает «ассета нет» — и об этом уже сказано в лог внутри Resolve.
+    // Возвращаем исходный путь: пусть загрузчик попробует и сообщит по-своему,
+    // это лучше, чем подсунуть ему пустую строку и получить «нет модели» без
+    // упоминания, какой именно.
+    return resolved.empty() ? path : resolved;
 }
 
 static json LightingToJson(const LightingEnvironment& lighting) {
@@ -418,7 +452,7 @@ static ReflectionProbeComponent ParseReflectionProbe(const json& pj) {
 
 static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
     // Только описательные поля — модель/палитра восстанавливаются загрузкой.
-    j["animatedModel"]["path"] = am.Path;
+    SaveAssetRef(j["animatedModel"], "path", am.Path);
     j["animatedModel"]["demoSegments"] = am.DemoSegments;
     j["animatedModel"]["clip"] = am.Clip;
     j["animatedModel"]["speed"] = am.Speed;
@@ -430,7 +464,7 @@ static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
 
 static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
     AnimatedModelComponent am;
-    am.Path = aj.value("path", std::string());
+    am.Path = LoadAssetRef(aj, "path");
     am.DemoSegments = aj.value("demoSegments", 6);
     am.Clip = aj.value("clip", 0);
     am.Speed = aj.value("speed", 1.0f);
@@ -783,10 +817,10 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["color"]    = Vec3ToJson(mr.Color);
         j["opacity"]  = mr.Opacity;
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
-        j["mesh"]["path"] = mr.Ref.path;
-        if (!mr.MaterialPath.empty()) j["material"] = mr.MaterialPath;
+        SaveAssetRef(j["mesh"], "path", mr.Ref.path);
+        SaveAssetRef(j, "material", mr.MaterialPath);
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
-            j["script"] = sc->Path;
+            SaveAssetRef(j, "script", sc->Path);
         }
         if (const GIStaticComponent* gs = reg.try_get<GIStaticComponent>(e)) SaveGIStatic(j, *gs);
         if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
@@ -846,11 +880,41 @@ void MigrateV1toV2(json& root) {
     }
 }
 
+// v2 -> v3. Ссылки на ассеты обзаводятся GUID'ами. Раньше личностью файла был
+// ПУТЬ, и переименование молча ломало сцену: она грузилась, объект оставался на
+// месте, просто без модели, и в логе не было ни строчки.
+//
+// Миграция проставляет GUID по текущим путям — то есть фиксирует связь ровно в
+// том виде, в каком она сейчас верна. Дальше файл можно переименовывать: GUID
+// живёт в сайдкаре рядом с ним и переезжает вместе.
+//
+// Путь, у которого ассета в базе нет, остаётся БЕЗ GUID'а, а не получает
+// выдуманный: несуществующая ссылка должна остаться видимо сломанной, а не
+// притвориться целой.
+void MigrateV2toV3(json& root) {
+    sage::AssetDatabase& db = sage::AssetDatabase::Instance();
+    auto stamp = [&](json& holder, const char* key) {
+        if (!holder.contains(key) || !holder[key].is_string()) return;
+        const std::string path = holder[key].get<std::string>();
+        if (path.empty()) return;
+        const sage::AssetGuid guid = db.GuidOf(path);
+        if (guid.Valid()) holder[std::string(key) + "Guid"] = guid.ToString();
+    };
+    for (json& obj : root["objects"]) {
+        if (obj.contains("mesh") && obj["mesh"].is_object()) stamp(obj["mesh"], "path");
+        stamp(obj, "material");
+        stamp(obj, "script");
+        if (obj.contains("animatedModel") && obj["animatedModel"].is_object())
+            stamp(obj["animatedModel"], "path");
+    }
+}
+
 using MigrationFn = void (*)(json&);
 
 // Цепочка миграций: индекс i переводит версию (i+1) в (i+2).
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
+    &MigrateV2toV3,
 };
 
 } // namespace
@@ -901,15 +965,16 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
         if (j.contains("mesh")) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));
-            mr.Ref.path = j["mesh"].value("path", "");
+            mr.Ref.path = LoadAssetRef(j["mesh"], "path");
         }
 
         if (j.contains("script")) {
-            obj.Registry()->emplace<ScriptComponent>(obj.Entity(), ScriptComponent{j.value("script", "")});
+            obj.Registry()->emplace<ScriptComponent>(obj.Entity(),
+                                                     ScriptComponent{LoadAssetRef(j, "script")});
         }
 
         // Материал: путь сериализуется, разделяемый экземпляр — из кэша.
-        mr.MaterialPath = j.value("material", "");
+        mr.MaterialPath = LoadAssetRef(j, "material");
         if (!mr.MaterialPath.empty()) {
             mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
         }
