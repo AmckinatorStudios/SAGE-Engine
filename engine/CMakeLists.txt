@@ -72,6 +72,17 @@ set(SAGE_ENGINE_SOURCES
     src/physics/simple/SimpleWorld.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
+    src/sage/scripting/ScriptApi_Math.cpp
+    src/sage/scripting/ScriptApi_Components.cpp
+    src/sage/scripting/ScriptApi_UI.cpp
+    src/sage/scripting/ScriptApi_Tween.cpp
+    src/sage/scripting/ScriptApi_Animation.cpp
+    src/sage/scripting/ScriptApi_Scene.cpp
+    src/sage/scripting/ScriptApi_Input.cpp
+    src/sage/scripting/ScriptApi_Effects.cpp
+    src/sage/scripting/ScriptApi_Runtime.cpp
+    src/sage/scripting/ScriptApi_Lighting.cpp
+    src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp

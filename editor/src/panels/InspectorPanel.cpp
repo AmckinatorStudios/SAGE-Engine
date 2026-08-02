@@ -90,6 +90,21 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         ImGui::TextDisabled("Params: %d (edit in the .sagemat file)", (int)material->Params.size());
     }
 
+    // Свойства рендера рисуются ПО ТАБЛИЦЕ (MaterialRenderFields). Новая
+    // возможность рендера появляется в инспекторе сама — от неё требуется поле
+    // и строка таблицы, а не ещё одна правка здесь. Раньше каждое такое
+    // свойство надо было дописать в пяти местах, и панель редактора отставала
+    // от формата файла чаще всего: её забывали.
+    ImGui::SeparatorText("Рендер");
+    for (const MaterialRenderField& f : MaterialRenderFields()) {
+        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
+            ImGui::Checkbox(f.Label, &(material->Render.*f.AsBool));
+        } else if (f.AsFloat) {
+            ImGui::SliderFloat(f.Label, &(material->Render.*f.AsFloat), f.Min, f.Max);
+        }
+        if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
+    }
+
     ImGui::SeparatorText("Legacy");
     ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
     ImGui::TextDisabled("Edits apply live to every entity using this material.");

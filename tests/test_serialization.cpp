@@ -497,3 +497,69 @@ TEST(Scene_migration_leaves_a_missing_asset_visibly_broken) {
     // Путь при этом сохраняется — по нему человек поймёт, чего не хватает.
     CHECK_TRUE(j["objects"][0]["mesh"]["path"].get<std::string>() == "assets/models/nope.glb");
 }
+
+// --- Свойства рендера материала не могут разойтись между чтением и записью ----
+//
+// Material раньше рос полем на фичу, и дорого было не поле, а его хвост: правку
+// приходилось повторять в пяти местах, из которых ДВА — ручные списки чтения и
+// записи .sagemat. Такие списки обязаны совпадать и рано или поздно расходятся:
+// свойство сохраняется, но не читается, и молча сбрасывается при следующей
+// загрузке. Теперь оба ходят в одну таблицу, и тест закрепляет именно это —
+// проходя по таблице, а не по заранее известным именам. Свойство, добавленное
+// завтра, проверится само.
+TEST(Material_render_properties_survive_a_round_trip_by_table) {
+    const std::vector<MaterialRenderField>& fields = MaterialRenderFields();
+    CHECK_TRUE(!fields.empty());
+
+    Material out;
+    // Ставим каждому свойству значение, ОТЛИЧНОЕ от значения по умолчанию:
+    // совпадающее с умолчанием прошло бы тест даже при полностью потерянном
+    // поле, и проверка была бы декоративной.
+    const Material defaults;
+    for (const MaterialRenderField& f : fields) {
+        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
+            out.Render.*f.AsBool = !(defaults.Render.*f.AsBool);
+        } else if (f.AsFloat) {
+            const float def = defaults.Render.*f.AsFloat;
+            out.Render.*f.AsFloat = (def == f.Max) ? f.Min : f.Max;
+        }
+    }
+
+    const std::string path =
+        (fs::temp_directory_path() / "sage_material_render.sagemat").string();
+    out.SaveToFile(path);
+    const Material in = Material::LoadFromFile(path);
+    fs::remove(path);
+
+    for (const MaterialRenderField& f : fields) {
+        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
+            CHECK_TRUE(in.Render.*f.AsBool == out.Render.*f.AsBool);
+        } else if (f.AsFloat) {
+            CHECK_NEAR(in.Render.*f.AsFloat, out.Render.*f.AsFloat, 1e-5);
+        }
+        // Каждое свойство обязано иметь ключ, подпись и одно (ровно одно) поле.
+        CHECK_TRUE(f.Key != nullptr && f.Label != nullptr);
+        CHECK_TRUE((f.AsBool != nullptr) != (f.AsFloat != nullptr));
+    }
+}
+
+// Старые .sagemat, написанные до разделения на поверхность и поведение, обязаны
+// читаться как были: ключи остались в КОРНЕ файла и не уехали во вложенный
+// объект. Перекладывание ключей ради красоты структуры — ровно та ломающая
+// правка формата, от которой заведены версии.
+TEST(Material_reads_files_written_before_the_split) {
+    const std::string path =
+        (fs::temp_directory_path() / "sage_material_legacy.sagemat").string();
+    {
+        std::ofstream f(path);
+        f << R"({"albedo":[0.5,0.25,0.125],"metallic":0.75,"roughness":0.2,)"
+          << R"("doubleSided":false,"planarReflectivity":0.9})";
+    }
+    const Material m = Material::LoadFromFile(path);
+    fs::remove(path);
+
+    CHECK_NEAR(m.Albedo.r, 0.5f, 1e-5);
+    CHECK_NEAR(m.Metallic, 0.75f, 1e-5);
+    CHECK_FALSE(m.Render.DoubleSided);
+    CHECK_NEAR(m.Render.PlanarReflectivity, 0.9f, 1e-5);
+}

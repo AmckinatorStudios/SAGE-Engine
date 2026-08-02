@@ -14,6 +14,25 @@ static glm::vec3 Vec3FromJson(const json& j, glm::vec3 fallback) {
     return glm::vec3(j[0].get<float>(), j[1].get<float>(), j[2].get<float>());
 }
 
+// Единственный источник правды о свойствах рендера. Читатель, писатель и
+// инспектор ходят СЮДА, а не держат по своему списку: три списка, которые
+// обязаны совпадать, — это три места, где они однажды разойдутся.
+const std::vector<MaterialRenderField>& MaterialRenderFields() {
+    static const std::vector<MaterialRenderField> fields = {
+        {"doubleSided", "Двусторонний", MaterialRenderField::Kind::Bool,
+         &MaterialRender::DoubleSided, nullptr, 0.0f, 1.0f,
+         "Не отсекать задние грани. Стакану и листве — да; замкнутому телу\n"
+         "(плитка воды, ящик стекла) — нет: иначе два слоя смешивания на один\n"
+         "объект, вода темнеет вдвое, а на швах появляется сетка."},
+        {"planarReflectivity", "Плоское отражение", MaterialRenderField::Kind::Float,
+         nullptr, &MaterialRender::PlanarReflectivity, 0.0f, 1.0f,
+         "Насколько поверхность пользуется плоским отражением сцены.\n"
+         "0 — не пользуется, 1 — зеркало. Не выводится из шероховатости:\n"
+         "гладкий шар тоже гладкий, но плоскости он не принадлежит."},
+    };
+    return fields;
+}
+
 Material Material::LoadFromFile(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -33,8 +52,18 @@ Material Material::LoadFromFile(const std::string& path) {
     m.Metallic = root.value("metallic", m.Metallic);
     m.Roughness = root.value("roughness", m.Roughness);
     m.Opacity = root.value("opacity", m.Opacity);
-    m.PlanarReflectivity = root.value("planarReflectivity", m.PlanarReflectivity);
-    m.DoubleSided = root.value("doubleSided", m.DoubleSided);
+    // Свойства рендера читаются ПО ТАБЛИЦЕ. Ключи остались в корне файла, а не
+    // уехали во вложенный объект: старые .sagemat обязаны читаться как были, а
+    // перекладывание ключей ради красоты структуры — ровно та ломающая правка
+    // формата, ради защиты от которой заведены версии сцен.
+    for (const MaterialRenderField& f : MaterialRenderFields()) {
+        if (!root.contains(f.Key)) continue;
+        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
+            m.Render.*f.AsBool = root[f.Key].get<bool>();
+        } else if (f.AsFloat) {
+            m.Render.*f.AsFloat = root[f.Key].get<float>();
+        }
+    }
     m.VertexShaderPath = root.value("vertexShader", m.VertexShaderPath);
     m.FragmentShaderPath = root.value("fragmentShader", m.FragmentShaderPath);
     if (root.contains("params") && root["params"].is_object()) {
@@ -69,8 +98,10 @@ void Material::SaveToFile(const std::string& path) const {
     root["metallic"] = Metallic;
     root["roughness"] = Roughness;
     root["opacity"] = Opacity;
-    root["planarReflectivity"] = PlanarReflectivity;
-    root["doubleSided"] = DoubleSided;
+    for (const MaterialRenderField& f : MaterialRenderFields()) {
+        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) root[f.Key] = Render.*f.AsBool;
+        else if (f.AsFloat) root[f.Key] = Render.*f.AsFloat;
+    }
     root["vertexShader"] = VertexShaderPath;
     root["fragmentShader"] = FragmentShaderPath;
     for (const auto& [name, prm] : Params) {

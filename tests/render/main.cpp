@@ -1217,7 +1217,7 @@ void TestPlanarReflectionRender(FrameRenderer& r) {
     auto mirrorMat = std::make_shared<Material>();
     mirrorMat->Albedo = {0.05f, 0.05f, 0.06f};
     mirrorMat->Roughness = 0.05f;
-    mirrorMat->PlanarReflectivity = 1.0f;
+    mirrorMat->Render.PlanarReflectivity = 1.0f;
     floor.Renderer().MaterialPtr = mirrorMat;
 
     // Ярко-красный столб НАД зеркалом — то, что обязано в нём отразиться.

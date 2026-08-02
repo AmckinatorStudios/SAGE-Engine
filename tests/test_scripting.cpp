@@ -12,6 +12,7 @@
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
+#include "sage/core/Log.h"
 
 namespace {
 // Пишет временный .lua во временную папку, отдаёт путь. Тела скриптов короткие,
@@ -385,4 +386,61 @@ TEST(Scripting_raw_input_without_binding_errors) {
     CHECK_FALSE(result.valid());
     // Скролл — исключение: он опционален, и ноль для него честный ответ.
     CHECK_EQ((int)se.Lua().script("return GetScrollDelta()"), 0);
+}
+
+// --- Пространства имён Lua-API ------------------------------------------------
+//
+// API был ПЛОСКОЙ КУЧЕЙ: 126 глобальных имён, где SetIKFootLock,
+// SetWaterReflection и BorrowAnimations лежали рядом и ничем не отличались от
+// функций самой игры. Теперь каждая функция живёт в модуле sage.<область> и
+// одновременно доступна под прежним глобальным именем.
+TEST(Scripting_api_is_grouped_into_modules) {
+    ScriptEngine se;
+
+    // Модули существуют и являются таблицами.
+    const char* modules[] = {"anim", "ik", "physics", "render", "reflect", "ui",
+                             "input", "audio", "fx", "tween", "time", "msg",
+                             "math", "scene", "camera", "light", "app", "core"};
+    for (const char* m : modules) {
+        const bool isTable = se.Lua().script(std::string("return type(sage.") + m + ") == 'table'");
+        if (!isTable) LOG_ERROR("Test") << "модуль sage." << m << " не таблица";
+        CHECK_TRUE(isTable);
+    }
+
+    // Имя внутри модуля короче и осмысленнее: sage.ik.SetFootLock, а не
+    // SetIKFootLock в общей куче.
+    CHECK_TRUE(se.Lua().script("return type(sage.ik.SetFootLock) == 'function'"));
+    CHECK_TRUE(se.Lua().script("return type(sage.anim.Borrow) == 'function'"));
+    CHECK_TRUE(se.Lua().script("return type(sage.physics.Raycast) == 'function'"));
+    CHECK_TRUE(se.Lua().script("return type(sage.reflect.SetWater) == 'function'"));
+}
+
+// Псевдоним — ТА ЖЕ функция, а не вторая регистрация. Это главное свойство:
+// две регистрации одного поведения — та же болезнь, от которой уходим, только в
+// новой форме, и разойтись они могут молча.
+TEST(Scripting_legacy_names_are_the_same_function_object) {
+    ScriptEngine se;
+    CHECK_TRUE(se.Lua().script("return sage.ik.SetFootLock == SetIKFootLock"));
+    CHECK_TRUE(se.Lua().script("return sage.anim.Borrow == BorrowAnimations"));
+    CHECK_TRUE(se.Lua().script("return sage.physics.Raycast == Raycast"));
+    CHECK_TRUE(se.Lua().script("return sage.tween.Move == TweenMove"));
+    CHECK_TRUE(se.Lua().script("return sage.math.Clamp == Clamp"));
+    CHECK_TRUE(se.Lua().script("return sage.core.log == log"));
+}
+
+// Старые имена не помечены устаревшими и удалять их не планируется: все
+// существующие игры написаны на них. Тест закрепляет это обещание — иначе
+// «наведение порядка» однажды тихо сломает работающие скрипты.
+TEST(Scripting_every_legacy_global_still_answers) {
+    ScriptEngine se;
+    const char* legacy[] = {"SpawnObject", "FindObject", "DestroyObject", "SetMeshCube",
+                            "SetMaterial", "IsActionDown", "GetCamera",   "EmitParticles",
+                            "PlaySound",   "Schedule",     "SendMessage", "LaunchArg",
+                            "Cross",       "GetLighting",  "SetVelocity", "SetUIValue",
+                            "TweenColor",  "PlayAnimation", "AddIKGoal",  "MoveCharacter"};
+    for (const char* name : legacy) {
+        const bool ok = se.Lua().script(std::string("return type(") + name + ") == 'function'");
+        if (!ok) LOG_ERROR("Test") << "потеряно глобальное имя " << name;
+        CHECK_TRUE(ok);
+    }
 }

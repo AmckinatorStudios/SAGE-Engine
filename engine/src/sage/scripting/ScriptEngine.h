@@ -191,14 +191,46 @@ private:
         sol::thread Runner;
     };
 
+    // --- Привязка функций: модуль + псевдоним ------------------------------
+    //
+    // API из Lua раньше был ПЛОСКОЙ КУЧЕЙ: 125 глобальных имён, где
+    // SetIKFootLock, SetWaterReflection и BorrowAnimations лежали рядом и
+    // ничем не отличались от функций самой игры. Плоское пространство имён
+    // плохо не тем, что некрасиво: подсказка редактора бесполезна (список из
+    // 125 несвязанных имён), узнать «что вообще есть про анимацию» можно
+    // только чтением исходника движка, а игра, объявившая свою функцию
+    // Raycast, молча затирает движковую.
+    //
+    // Теперь каждая функция живёт в модуле — sage.ik.SetFootLock,
+    // sage.anim.Borrow, sage.physics.Raycast, — и ОДНОВРЕМЕННО доступна под
+    // прежним глобальным именем. Псевдоним ссылается на ТУ ЖЕ функцию, а не
+    // регистрируется вторым вызовом: две регистрации одного поведения — это
+    // та же болезнь, от которой уходим, только в новой форме.
+    //
+    // Старые имена не помечены устаревшими и удалять их не планируется: все
+    // существующие игры написаны на них, и ломать работающие скрипты ради
+    // порядка в пространстве имён — цена без выгоды.
+    sol::table Module(const char* name);
+
+    template <typename Fn>
+    void Bind(const char* module, const char* name, const char* legacy, Fn&& fn) {
+        sol::table table = Module(module);
+        table.set_function(name, std::forward<Fn>(fn));
+        if (legacy) m_lua[legacy] = table[name];
+    }
+
     // RegisterEngineApi раньше был одной ~600-строчной функцией; теперь это
     // тонкий диспетчер, вызывающий по одному Register*-методу на связную область
-    // API (математика, компоненты, сцена, ввод, камера, частицы, …). Разбивка
-    // чисто организационная — порядок вызова сохраняет прежнее поведение, а найти
-    // и дополнить нужную группу привязок стало на порядок проще.
+    // API (математика, компоненты, сцена, ввод, камера, частицы, …). Порядок
+    // вызова сохраняет прежнее поведение, а определения живут в отдельных
+    // файлах ScriptApi_*.cpp — по файлу на область, чтобы один .cpp не рос до
+    // двух тысяч строк, как было.
     void RegisterEngineApi();
     void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
     void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
+    void RegisterUIApi();         // UIElementComponent + sage.ui.*
+    void RegisterTweenApi();      // Ease + sage.tween.*
+    void RegisterAnimationApi();  // sage.anim.* и sage.ik.*
     void RegisterGameObject();    // GameObject + аксессоры компонентов + иерархия
     void RegisterSceneApi();      // log, Spawn/Find/DestroyObject
     void RegisterMeshApi();       // SetMeshCube/Sphere/…/Model/None

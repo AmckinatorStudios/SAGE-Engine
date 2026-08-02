@@ -348,7 +348,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             continue;
         }
         // Зеркало не отражает само себя (см. ReflectionBinding::CapturingPlanar).
-        if (m_skipPlanarReflectors && c.Mat && c.Mat->PlanarReflectivity > 0.0f) continue;
+        if (m_skipPlanarReflectors && c.Mat && c.Mat->Render.PlanarReflectivity > 0.0f) continue;
         ++m_stats.Drawn;
         m_stats.Triangles += (long long)c.Mesh_->TriangleCount();
         m_stats.TrianglesAtLod0 += (long long)c.BaseMesh->TriangleCount();
@@ -359,7 +359,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         if (c.Mat) {
             inst.Metallic = c.Mat->Metallic;
             inst.Roughness = c.Mat->Roughness;
-            inst.PlanarReflectivity = c.Mat->PlanarReflectivity;
+            inst.PlanarReflectivity = c.Mat->Render.PlanarReflectivity;
         }
 
         if (c.Custom) {
@@ -570,7 +570,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // половину стакана. Замкнутым телам (вода) материал ставит
         // DoubleSided = false — иначе каждый объект смешивается дважды.
         auto cullFor = [&device](const Material* mat) {
-            device.SetCullMode(!mat || mat->DoubleSided ? sage::rhi::CullMode::Off
+            device.SetCullMode(!mat || mat->Render.DoubleSided ? sage::rhi::CullMode::Off
                                                         : sage::rhi::CullMode::Back);
         };
         device.SetCullMode(sage::rhi::CullMode::Off);
