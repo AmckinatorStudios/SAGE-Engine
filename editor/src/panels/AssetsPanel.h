@@ -27,6 +27,10 @@ public:
                             std::filesystem::path& outCreated, std::string& err);
 
 private:
+    // Конвертация в свои форматы движка (sage/assets/import/Convert.h).
+    void ConvertOne(EditorHost& host, const std::filesystem::path& path);
+    void ConvertFolderHere(EditorHost& host);
+
     void DrawBreadcrumb(EditorHost& host);
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
     void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели

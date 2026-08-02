@@ -38,6 +38,7 @@
 
 #include "sage/scene/Prefab.h"
 #include "sage/render/ModelLoader.h"
+#include "sage/assets/import/Convert.h"
 
 namespace fs = std::filesystem;
 
@@ -845,6 +846,79 @@ void EditorLayer::RunSelfTest() {
         SetSelectedId(-1);
     }
 
+    // --- Свои форматы: чужой файл -> .sagemesh -> сущность в сцене ---
+    //
+    // Проверка сквозная и именно в редакторе, потому что тут проверяется не
+    // формат (его проверяют модульные тесты), а ДОСТИЖИМОСТЬ: конвертер, реестр
+    // импортёров и загрузчик моделей должны сойтись так, чтобы сконвертированный
+    // файл ставился в сцену обычным путём. Ровно эта связка и рвалась раньше у
+    // других возможностей движка — они существовали, но из игры до них было не
+    // добраться.
+    if (ok) {
+        const fs::path dir = m_project.Dir() / "assets";
+        std::error_code fec;
+        fs::create_directories(dir, fec);
+
+        // Исходник в чужом формате — один блок Blockbench.
+        const fs::path src = dir / "selftest_block.bbmodel";
+        {
+            std::ofstream f(src);
+            f << R"({"resolution":{"width":16,"height":16},"elements":[{"type":"cube",)"
+              << R"("from":[0,0,0],"to":[16,16,16],"faces":{)"
+              << R"("north":{"uv":[0,0,16,16],"texture":0},"south":{"uv":[0,0,16,16],"texture":0},)"
+              << R"("west":{"uv":[0,0,16,16],"texture":0},"east":{"uv":[0,0,16,16],"texture":0},)"
+              << R"("up":{"uv":[0,0,16,16],"texture":0},"down":{"uv":[0,0,16,16],"texture":0}}}]})";
+        }
+
+        sage::assets::ConvertOptions copts;
+        copts.Overwrite = true;
+        const sage::assets::ConvertResult cr =
+            sage::assets::ConvertAnyToNative(src.string(), {}, copts);
+        if (!cr.Ok || cr.Vertices != 24 || cr.Triangles != 12) {
+            LOG_ERROR("Editor") << "SELFTEST: convert to .sagemesh failed: " << cr.Error
+                                << " (вершин " << cr.Vertices << ", треугольников "
+                                << cr.Triangles << ")";
+            ok = false;
+        }
+
+        // Сконвертированный файл грузится ОБЫЧНЫМ загрузчиком моделей — то есть
+        // тем же, которым сцена грузит любую модель.
+        if (ok) {
+            std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(cr.OutputPath);
+            if (!mesh) {
+                LOG_ERROR("Editor") << "SELFTEST: .sagemesh не загрузился через GetModel";
+                ok = false;
+            } else {
+                // И ставится в сцену как модель, с правильными габаритами: блок
+                // Blockbench — это ровно единица движка, а не шестнадцать.
+                GameObject obj = m_scene->CreateObject("SelftestConverted");
+                MeshRendererComponent& mr = obj.Renderer();
+                mr.Ref = MeshRef{MeshRef::Type::Model, cr.OutputPath};
+                mr.MeshPtr = mesh;
+                const glm::vec3 size = mesh->BoundsMax() - mesh->BoundsMin();
+                if (std::abs(size.x - 1.0f) > 0.01f || std::abs(size.y - 1.0f) > 0.01f) {
+                    LOG_ERROR("Editor") << "SELFTEST: converted block size " << size.x << "x"
+                                        << size.y << ", expected 1x1";
+                    ok = false;
+                }
+                m_scene->RemoveObject(obj.Id());
+            }
+        }
+
+        // Незнакомый формат обязан отказать ВНЯТНО, а не тихо ничего не сделать.
+        if (ok) {
+            const sage::assets::ConvertResult bad =
+                sage::assets::ConvertAnyToNative((dir / "nope.fbx").string(), {}, copts);
+            if (bad.Ok || bad.Error.empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: конвертация .fbx не отказала внятно";
+                ok = false;
+            }
+        }
+
+        fs::remove(src, fec);
+        if (!cr.OutputPath.empty()) fs::remove(cr.OutputPath, fec);
+    }
+
     // --- Префабы: сущность с ребёнком -> .sageprefab -> инстанс восстанавливает
     // поддерево (имя/компонент/иерархия), новые id ---
     if (ok) {
@@ -1056,7 +1130,7 @@ void EditorLayer::RunSelfTest() {
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm + pick + tools, "
+                               << "models + prefab-api + code-editor + confirm + pick + tools + formats, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

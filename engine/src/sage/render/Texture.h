@@ -77,6 +77,9 @@ public:
     static float MaxSupportedAnisotropy();
 
 private:
+    // Загрузка .sagetex — своего формата (см. sage/assets/format/TextureFormat.h).
+    bool LoadFromNative(const std::string& path, TextureFilter filter);
+
     std::unique_ptr<sage::rhi::Texture2D> m_texture;
     int m_width = 0, m_height = 0, m_channels = 0;
     bool m_hasMipmaps = true;

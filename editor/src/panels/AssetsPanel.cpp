@@ -10,6 +10,8 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+
+#include "sage/assets/import/Convert.h"
 #include "sage/assets/AssetDatabase.h"
 #include "Project.h"
 #include "sage/core/Log.h"
@@ -169,11 +171,75 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         m_selected = path;
         if (ImGui::MenuItem("Rename")) { m_renameTarget = path; m_error.clear(); }
         if (ImGui::MenuItem("Delete")) { m_deleteTarget = path; }
+
+        // Конвертация в свой формат — там же, где всё остальное про файл.
+        // Отдельной кнопки в меню нет намеренно: конвертируют КОНКРЕТНЫЙ файл,
+        // и меню файла — единственное место, где не надо объяснять, какой.
+        const std::string p = path.string();
+        const bool model = sage::assets::IsConvertibleModel(p);
+        const bool texture = sage::assets::IsConvertibleTexture(p);
+        if (model || texture) {
+            ImGui::Separator();
+            const char* label = model ? "Конвертировать в .sagemesh"
+                                      : "Конвертировать в .sagetex";
+            if (ImGui::MenuItem(label)) ConvertOne(host, path);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Свой формат движка: грузится без разбора и весит меньше.\n"
+                                  "Исходный файл остаётся на месте.");
+            }
+        }
         ImGui::EndPopup();
     }
     if (hovered && !filename.empty() && label != filename) ImGui::SetTooltip("%s", filename.c_str());
 
     ImGui::PopID();
+}
+
+// Конвертация одного файла. Отчёт уходит в статусную строку: человек нажал
+// пункт меню и обязан увидеть, что получилось, не открывая консоль.
+void AssetsPanel::ConvertOne(EditorHost& host, const fs::path& path) {
+    sage::assets::ConvertOptions opts;
+    opts.Overwrite = true;   // явное действие по одному файлу — перезапись ожидаема
+    const sage::assets::ConvertResult r = sage::assets::ConvertAnyToNative(path.string(), {}, opts);
+    if (!r.Ok) {
+        host.SetStatusMessage("Конвертация не удалась: " + r.Error);
+        return;
+    }
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), "%s -> %s (%.1fx меньше)",
+                  path.filename().string().c_str(),
+                  fs::path(r.OutputPath).filename().string().c_str(), (double)r.Ratio());
+    host.SetStatusMessage(buf);
+    for (const std::string& w : r.Warnings) host.SetStatusMessage("Импорт: " + w);
+}
+
+// Вся текущая папка. Отчёт — одной строкой со сводкой: перечислять полсотни
+// файлов в статусной строке бессмысленно, а подробности уже в консоли.
+void AssetsPanel::ConvertFolderHere(EditorHost& host) {
+    sage::assets::ConvertOptions opts;
+    opts.Overwrite = false;   // пакетная операция не должна затирать правки руками
+    const std::vector<sage::assets::ConvertResult> results =
+        sage::assets::ConvertFolder(host.AssetsCwd().string(), opts);
+
+    size_t ok = 0, failed = 0, srcBytes = 0, outBytes = 0;
+    for (const sage::assets::ConvertResult& r : results) {
+        if (r.Ok) {
+            ++ok;
+            srcBytes += r.SourceBytes;
+            outBytes += r.OutputBytes;
+        } else {
+            ++failed;
+            LOG_WARN("Convert") << r.SourcePath << ": " << r.Error;
+        }
+    }
+    char buf[256];
+    if (ok == 0 && failed == 0) {
+        std::snprintf(buf, sizeof(buf), "Конвертировать нечего: в папке нет моделей и картинок");
+    } else {
+        std::snprintf(buf, sizeof(buf), "Сконвертировано %zu, пропущено %zu; %.1f -> %.1f КБ",
+                      ok, failed, srcBytes / 1024.0, outBytes / 1024.0);
+    }
+    host.SetStatusMessage(buf);
 }
 
 bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const fs::path& dir,
@@ -443,6 +509,12 @@ void AssetsPanel::Draw(EditorHost& host) {
         if (ImGui::MenuItem("New Script (.lua)")) startCreate(CreateKind::Script, "new_script");
         if (ImGui::MenuItem("New Text File (.txt)")) startCreate(CreateKind::TextFile, "notes");
         if (ImGui::MenuItem("New Material (.sagemat)")) startCreate(CreateKind::Material, "NewMaterial");
+        ImGui::Separator();
+        if (ImGui::MenuItem("Конвертировать всю папку в форматы движка")) ConvertFolderHere(host);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Модели и картинки этой папки (включая вложенные) -> .sagemesh/.sagetex.\n"
+                              "Уже сконвертированные пропускаются, исходники остаются.");
+        }
         ImGui::EndPopup();
     }
     ImGui::EndChild();

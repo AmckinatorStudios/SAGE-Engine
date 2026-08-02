@@ -1,4 +1,6 @@
 #include "ModelLoader.h"
+
+#include "sage/assets/import/Importer.h"
 #include "sage/render/MeshData.h"
 #define TINYOBJLOADER_IMPLEMENTATION_ALREADY_IN_LIB
 #include <tiny_obj_loader.h>
@@ -146,8 +148,10 @@ std::string ExtensionLower(const std::string& path) {
 } // namespace
 
 bool IsSupportedModel(const std::string& path) {
-    const std::string ext = ExtensionLower(path);
-    return ext == "obj" || ext == "gltf" || ext == "glb";
+    // Спрашиваем реестр, а не свой список: панель ассетов и диалоги должны
+    // предлагать ровно те форматы, которые движок в самом деле откроет — включая
+    // те, что зарегистрировала игра или плагин.
+    return sage::assets::ImporterRegistry::Instance().CanImport(ExtensionLower(path));
 }
 
 // Реализация в Model.cpp — там развёрнут tinygltf.
@@ -178,8 +182,27 @@ sage::render::MeshData LoadMeshData(const std::string& path) {
     if (ext == "obj") return LoadObjData(path);
     if (ext == "gltf") return LoadGltfData(path, false);
     if (ext == "glb") return LoadGltfData(path, true);
-    throw std::runtime_error("Формат модели не поддерживается: " + path +
-                             " (поддерживаются .obj, .gltf, .glb)");
+
+    // Всё остальное — через реестр импортёров (sage/assets/import/Importer.h).
+    //
+    // Три формата выше разбираются здесь потому, что реестр САМ зовёт эту
+    // функцию для них: рекурсия оборвалась бы не сразу, а на переполнении
+    // стека. Для любого другого расширения — .bbmodel, .blend, .sagemesh и
+    // всего, что зарегистрирует игра или плагин — работает общий путь.
+    //
+    // Это и делает реестр не украшением, а рабочим механизмом: новый формат,
+    // зарегистрированный кем угодно, сразу становится загружаемым везде, где
+    // движок грузит модели, — и в сцене, и в редакторе, и в собранной игре.
+    {
+        sage::assets::ImportedScene scene;
+        std::string err;
+        if (sage::assets::ImporterRegistry::Instance().Import(path, scene, err)) {
+            sage::render::MeshData data = scene.Flatten();
+            if (!data.Empty()) return data;
+            throw std::runtime_error("В файле нет геометрии: " + path);
+        }
+        throw std::runtime_error(err);
+    }
 }
 
 std::shared_ptr<Mesh> LoadMesh(const std::string& path, bool keepCpuData) {
