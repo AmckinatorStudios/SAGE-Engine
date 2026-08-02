@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -109,13 +110,16 @@ public:
     virtual Camera& EditorCamera() = 0;
     virtual const glm::mat4& ViewMatrix() const = 0;
     virtual const glm::mat4& ProjMatrix() const = 0;
-    virtual unsigned int SceneTexture() const = 0;     // цвет FBO сцены (для ImGui::Image)
+    // Сырое число бэкенда для ImGui::Image — единственная легальная дверь
+    // наружу (см. rhi::Texture2D::NativeHandle). Панель показывает кадр сцены
+    // сторонним API, и это бэкенд-специфично по своей природе.
+    virtual uint64_t SceneTexture() const = 0;
     virtual void SetViewportSize(int w, int h) = 0;    // панель сообщает размер под FBO
     // u,v в [0..1] — выбор сущности лучом. additive (Ctrl) — добавить/убрать из набора.
     virtual void PickAtViewport(float u, float v, bool additive = false) = 0;
 
     // --- панель Game (игровое окно: рендер от Primary-камеры сцены) ---
-    virtual unsigned int GameTexture() const = 0;
+    virtual uint64_t GameTexture() const = 0;
     virtual void SetGameViewportSize(int w, int h) = 0;
     virtual bool HasPrimaryCamera() = 0;
 

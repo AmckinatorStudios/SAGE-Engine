@@ -63,7 +63,8 @@ public:
     ~GLTexture2D() override;
 
     void Bind(int unit) const override;
-    unsigned int NativeHandle() const override { return m_id; }
+    sage::rhi::TextureHandle Handle() const override { return {m_id}; }
+    uint64_t NativeHandle() const override { return m_id; }
 
 private:
     unsigned int m_id = 0;
@@ -104,7 +105,7 @@ public:
     int Size() const override { return m_size; }
     int MipLevels() const override { return m_mips; }
     void Bind(int unit) const override;
-    unsigned int NativeHandle() const override { return m_cube; }
+    sage::rhi::TextureHandle Handle() const override { return {m_cube}; }
 
 private:
     int m_size = 0;
@@ -124,8 +125,9 @@ public:
     void Resize(int width, int height) override;
     int Width() const override { return m_width; }
     int Height() const override { return m_height; }
-    unsigned int ColorTextureHandle() const override { return m_colorTex; }
-    unsigned int DepthTextureHandle() const override { return m_depthTex; }
+    sage::rhi::TextureHandle ColorTextureHandle() const override { return {m_colorTex}; }
+    sage::rhi::TextureHandle DepthTextureHandle() const override { return {m_depthTex}; }
+    uint64_t NativeColorHandle() const override { return m_colorTex; }
     void Resolve() override;
     int Samples() const override { return m_samples; }
 

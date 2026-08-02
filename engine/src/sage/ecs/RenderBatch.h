@@ -271,7 +271,7 @@ private:
 
     // --- Проверка перекрытия ------------------------------------------------
     struct OcclusionSlot {
-        unsigned int Query = 0;
+        sage::rhi::QueryHandle Query;
         bool Pending = false;  // запрос выдан, результат ещё не забирали
         bool Visible = true;   // последний известный ответ
         int HiddenFrames = 0;  // сколько кадров подряд объект считается закрытым

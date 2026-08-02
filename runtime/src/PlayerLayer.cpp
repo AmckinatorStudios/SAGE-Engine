@@ -483,7 +483,7 @@ void PlayerLayer::OnRender() {
                                  rc.Env = &env;
                                  rc.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
                                  rc.Time = m_sceneTime;
-                                 rc.Reflection = m_reflections.Binding(vpW, vpH, 0);
+                                 rc.Reflection = m_reflections.Binding(vpW, vpH);
                                  rc.Reflection.CapturingPlanar = true;
                                  sage::render::RenderSceneColor(*m_scene, m_batch, rc);
                              });

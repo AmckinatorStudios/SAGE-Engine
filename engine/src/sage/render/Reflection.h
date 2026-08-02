@@ -161,7 +161,7 @@ public:
     bool Capture(const glm::vec4& plane, const glm::mat4& view, const glm::mat4& proj,
                  int screenW, int screenH, const EnvironmentMap::FaceDraw& draw);
 
-    unsigned int Texture() const;
+    sage::rhi::TextureHandle Texture() const;
     void Reset() { m_valid = false; }
     bool Valid() const { return m_valid; }
 
@@ -185,7 +185,7 @@ struct ReflectionBinding {
     const EnvironmentMap* Env = nullptr;
     float Intensity = 1.0f;
 
-    unsigned int PlanarTexture = 0;   // 0 — плоского отражения нет
+    sage::rhi::TextureHandle PlanarTexture;   // невалидный — плоского отражения нет
     glm::vec2 ScreenTexel{0.0f};      // 1/размер кадра
 
     // Этот проход САМ снимает плоское отражение. Тогда из него выбрасываются
@@ -241,7 +241,8 @@ public:
     const EnvironmentMap* Env() const { return m_env && m_env->Valid() ? m_env.get() : nullptr; }
 
     // Готовая привязка для прохода сцены.
-    ReflectionBinding Binding(int screenW, int screenH, unsigned int planarTexture = 0) const;
+    ReflectionBinding Binding(int screenW, int screenH,
+                              sage::rhi::TextureHandle planarTexture = {}) const;
 
 private:
     EnvironmentMap& Ensure();

@@ -50,7 +50,8 @@ class NullTexture2D : public Texture2D {
 public:
     NullTexture2D() : m_handle(NextHandle()) { ++g_counters.Textures; }
     void Bind(int) const override {}
-    unsigned int NativeHandle() const override { return m_handle; }
+    sage::rhi::TextureHandle Handle() const override { return {m_handle}; }
+    uint64_t NativeHandle() const override { return m_handle; }
 
 private:
     unsigned int m_handle;
@@ -80,8 +81,9 @@ public:
     int Width() const override { return m_width; }
     int Height() const override { return m_height; }
     int Samples() const override { return m_samples; }
-    unsigned int ColorTextureHandle() const override { return m_color; }
-    unsigned int DepthTextureHandle() const override { return m_depth; }
+    sage::rhi::TextureHandle ColorTextureHandle() const override { return {m_color}; }
+    sage::rhi::TextureHandle DepthTextureHandle() const override { return {m_depth}; }
+    uint64_t NativeColorHandle() const override { return m_color; }
 
 private:
     int m_width, m_height, m_samples;
@@ -106,7 +108,7 @@ void NullDevice::SetCullMode(CullMode) { ++g_counters.StateChanges; }
 void NullDevice::SetPolygonMode(PolygonMode) { ++g_counters.StateChanges; }
 void NullDevice::SetScissor(bool, int, int, int, int) { ++g_counters.StateChanges; }
 void NullDevice::SetSRGBWrite(bool) { ++g_counters.StateChanges; }
-void NullDevice::BindTexture2D(int, unsigned int) { ++g_counters.StateChanges; }
+void NullDevice::BindTexture2D(int, sage::rhi::TextureHandle) { ++g_counters.StateChanges; }
 
 void NullDevice::ReadPixelsRGB(int, int, int width, int height, unsigned char* out) {
     // Чёрный кадр, а не мусор: вызывающий имеет право читать всё, что мы
@@ -158,7 +160,7 @@ public:
     int Size() const override { return m_size; }
     int MipLevels() const override { return m_mips; }
     void Bind(int) const override {}
-    unsigned int NativeHandle() const override { return m_handle; }
+    sage::rhi::TextureHandle Handle() const override { return {m_handle}; }
 
 private:
     int m_size = 1;

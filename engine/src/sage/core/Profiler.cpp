@@ -25,8 +25,8 @@ struct Sample {
     int Depth = 0;
     clock::time_point CpuBegin;
     double CpuMs = 0.0;
-    unsigned int GpuBegin = 0; // хендлы меток; 0 — таймеров нет
-    unsigned int GpuEnd = 0;
+    sage::rhi::QueryHandle GpuBegin; // хендлы меток; невалидные — таймеров нет
+    sage::rhi::QueryHandle GpuEnd;
 };
 
 struct FrameSlot {
@@ -39,7 +39,7 @@ struct FrameSlot {
     // ждём, и glQueryCounter сбрасывает их «готовность» обратно в false. На
     // медленной отрисовке метка не успевает созреть НИКОГДА — результат
     // всегда пустой, а времена GPU показываются нулями. Ровно это и было.
-    std::vector<unsigned int> Pool;
+    std::vector<sage::rhi::QueryHandle> Pool;
     size_t PoolUsed = 0;
 };
 
@@ -77,9 +77,9 @@ State& Get() {
 
 // Метка из пула ТЕКУЩЕГО кадра. Пул растёт до числа участков и дальше просто
 // переиспользуется: создавать и удалять запросы каждый кадр дороже.
-unsigned int TakeQuery(FrameSlot& slot) {
+sage::rhi::QueryHandle TakeQuery(FrameSlot& slot) {
     State& s = Get();
-    if (!s.GpuTimers) return 0;
+    if (!s.GpuTimers) return {};
     if (slot.PoolUsed == slot.Pool.size()) {
         slot.Pool.push_back(sage::rhi::GraphicsDevice::Get().CreateTimestampQuery());
     }
@@ -94,7 +94,7 @@ bool Collect(FrameSlot& slot, std::vector<Entry>& out, double& gpuTotal) {
     if (s.GpuTimers) {
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
         for (const Sample& sample : slot.Samples) {
-            if (sample.GpuEnd && !device.TimestampReady(sample.GpuEnd)) return false;
+            if (sample.GpuEnd.Valid() && !device.TimestampReady(sample.GpuEnd)) return false;
         }
     }
 
@@ -108,7 +108,7 @@ bool Collect(FrameSlot& slot, std::vector<Entry>& out, double& gpuTotal) {
         e.Depth = sample.Depth;
         e.CpuMs = sample.CpuMs;
         e.Calls = 1;
-        if (device && sample.GpuBegin && sample.GpuEnd) {
+        if (device && sample.GpuBegin.Valid() && sample.GpuEnd.Valid()) {
             const unsigned long long begin = device->TimestampNs(sample.GpuBegin);
             const unsigned long long end = device->TimestampNs(sample.GpuEnd);
             e.GpuMs = end > begin ? (double)(end - begin) / 1e6 : 0.0;
@@ -191,7 +191,7 @@ void Push(const char* name) {
     sample.Depth = (int)s.Stack.size();
     sample.CpuBegin = clock::now();
     sample.GpuBegin = TakeQuery(slot);
-    if (sample.GpuBegin) sage::rhi::GraphicsDevice::Get().WriteTimestamp(sample.GpuBegin);
+    if (sample.GpuBegin.Valid()) sage::rhi::GraphicsDevice::Get().WriteTimestamp(sample.GpuBegin);
 
     slot.Samples.push_back(std::move(sample));
     s.Stack.push_back((int)slot.Samples.size() - 1);
@@ -206,7 +206,7 @@ void Pop() {
     s.Stack.pop_back();
     sample.CpuMs = std::chrono::duration<double, std::milli>(clock::now() - sample.CpuBegin).count();
     sample.GpuEnd = TakeQuery(slot);
-    if (sample.GpuEnd) sage::rhi::GraphicsDevice::Get().WriteTimestamp(sample.GpuEnd);
+    if (sample.GpuEnd.Valid()) sage::rhi::GraphicsDevice::Get().WriteTimestamp(sample.GpuEnd);
 }
 
 void EndFrame() {

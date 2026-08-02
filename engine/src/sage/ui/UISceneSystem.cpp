@@ -1,4 +1,5 @@
 #include "UISceneSystem.h"
+#include "sage/core/Profiler.h"
 #include "UIRenderer.h"
 #include "UIIcons.h"
 #include "sage/scene/Scene.h"
@@ -458,6 +459,7 @@ void HitSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect,
 } // namespace
 
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
+    SAGE_PROFILE("Интерфейс сцены");
     UIRect screen{0.0f, 0.0f, (float)screenW, (float)screenH};
     for (auto root : SortedUIRoots(scene)) DrawSubtree(scene, root, screen, ui);
 }

@@ -209,3 +209,44 @@ TEST(Scheduler_measures_each_system) {
     std::printf("       cheap %.3f мс, busy %.3f мс\n", t[0].Milliseconds, t[1].Milliseconds);
     CHECK_TRUE(t[1].Milliseconds >= t[0].Milliseconds);
 }
+
+// --- Профилировщик даёт вложенную разбивку ------------------------------------
+//
+// Механизм замеров существовал целиком — и не вызывался НИ РАЗУ: ни одного
+// SetEnabled(true), ни одного читателя результата. Тест закрепляет то, ради
+// чего он написан: участки складываются в дерево, а бэкенд без таймеров GPU не
+// мешает мерить CPU.
+#include "sage/core/Profiler.h"
+#include "sage/rhi/GraphicsDevice.h"
+
+TEST(Profiler_builds_a_nested_breakdown_without_gpu_timers) {
+    // Null-бэкенд таймеров не умеет — ровно тот случай, который обязан работать.
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    sage::rhi::GraphicsDevice::SetCurrent(device.get());
+    sage::profile::SetEnabled(true);
+
+    // Три кадра: результат созревает с задержкой, и первый кадр пуст ПО ЗАМЫСЛУ.
+    for (int i = 0; i < 6; ++i) {
+        sage::profile::BeginFrame();
+        {
+            sage::profile::Scope outer("Отрисовка");
+            { sage::profile::Scope inner("Тени"); }
+            { sage::profile::Scope inner("Геометрия"); }
+        }
+        sage::profile::EndFrame();
+    }
+
+    const std::vector<sage::profile::Entry>& frame = sage::profile::Frame();
+    CHECK_EQ((int)frame.size(), 3);
+    CHECK_TRUE(frame[0].Name == "Отрисовка");
+    CHECK_EQ(frame[0].Depth, 0);
+    CHECK_TRUE(frame[1].Name == "Тени");
+    CHECK_EQ(frame[1].Depth, 1);   // вложенность — то, ради чего метки, а не интервалы
+    CHECK_EQ(frame[2].Depth, 1);
+    // Без таймеров GPU время видеокарты честно нулевое, а CPU — измерено.
+    CHECK_FALSE(sage::profile::GpuTimersAvailable());
+    CHECK_TRUE(sage::profile::FrameCpuMs() >= 0.0);
+
+    sage::profile::SetEnabled(false);
+    sage::rhi::GraphicsDevice::SetCurrent(nullptr);
+}

@@ -28,25 +28,25 @@ public:
     void SetSRGBWrite(bool enabled) override;
     void SetColorWrite(bool enabled) override;
 
-    unsigned int CreateOcclusionQuery() override;
-    void DestroyOcclusionQuery(unsigned int query) override;
-    void BeginOcclusionQuery(unsigned int query) override;
+    sage::rhi::QueryHandle CreateOcclusionQuery() override;
+    void DestroyOcclusionQuery(sage::rhi::QueryHandle query) override;
+    void BeginOcclusionQuery(sage::rhi::QueryHandle query) override;
     void EndOcclusionQuery() override;
-    bool OcclusionResultReady(unsigned int query) override;
-    bool OcclusionVisible(unsigned int query) override;
+    bool OcclusionResultReady(sage::rhi::QueryHandle query) override;
+    bool OcclusionVisible(sage::rhi::QueryHandle query) override;
     bool SupportsOcclusionQueries() const override { return true; }
     void SetScissor(bool enabled, int x, int y, int w, int h) override;
 
-    void BindTexture2D(int unit, unsigned int nativeHandle) override;
+    void BindTexture2D(int unit, sage::rhi::TextureHandle texture) override;
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
     float MaxAnisotropy() override;
 
     // Метки времени GPU (ARB_timer_query, ядро с OpenGL 3.3).
-    unsigned int CreateTimestampQuery() override;
-    void DestroyTimestampQuery(unsigned int query) override;
-    void WriteTimestamp(unsigned int query) override;
-    bool TimestampReady(unsigned int query) override;
-    unsigned long long TimestampNs(unsigned int query) override;
+    sage::rhi::QueryHandle CreateTimestampQuery() override;
+    void DestroyTimestampQuery(sage::rhi::QueryHandle query) override;
+    void WriteTimestamp(sage::rhi::QueryHandle query) override;
+    bool TimestampReady(sage::rhi::QueryHandle query) override;
+    unsigned long long TimestampNs(sage::rhi::QueryHandle query) override;
     bool SupportsGpuTimers() const override { return true; }
 
     std::unique_ptr<ShaderProgram> CreateShaderProgram(const std::string& vertexSrc,

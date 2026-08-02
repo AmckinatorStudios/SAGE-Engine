@@ -57,7 +57,7 @@ public:
     void SetPolygonMode(PolygonMode mode) override;
     void SetScissor(bool enabled, int x = 0, int y = 0, int w = 0, int h = 0) override;
     void SetSRGBWrite(bool enabled) override;
-    void BindTexture2D(int unit, unsigned int nativeHandle) override;
+    void BindTexture2D(int unit, sage::rhi::TextureHandle texture) override;
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
     float MaxAnisotropy() override { return 1.0f; }
 

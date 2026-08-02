@@ -18,8 +18,8 @@
 // D3D12 и Metal это НЕ ТАК, и обещать такое нечестно.
 //
 // Форма интерфейса ниже — это машина состояний OpenGL: SetBlend, SetDepthTest,
-// SetCullMode, BindTexture2D(unit, nativeHandle), где хендл — сырой unsigned
-// int. Современные API устроены иначе: там команды пишутся в буферы, состояние
+// SetCullMode, BindTexture2D. Современные API устроены иначе: там команды
+// пишутся в буферы, состояние
 // собирается в объект конвейера заранее, ресурсы адресуются наборами
 // дескрипторов, а синхронизация задаётся явно барьерами. Реализовать
 // «SetDepthTest» поверх Vulkan можно, но это будет эмуляция состояния с
@@ -30,6 +30,24 @@
 // модель использует, — прежде всего порядок проходов кадра. Null-бэкенд
 // доказывает изоляцию, а не переносимость: он выдержан в той же GL-подобной
 // форме и потому не является свидетельством, что форма годится для Vulkan.
+//
+// СОГЛАШЕНИЯ RHI. Ниже — то, о чём интерфейс раньше молчал, а бэкенд решал по
+// привычкам OpenGL. Молчание здесь опаснее любой протечки типа: несовпадение
+// соглашений не ломает сборку, а даёт перевёрнутую картинку или расползшиеся
+// тени на втором бэкенде, и ищется это неделями, потому что «на OpenGL всё
+// работает». Каждый пункт — обязательство бэкенда пересчитать у себя, а не
+// требование к вызывающему:
+//
+//   • Начало отсчёта прямоугольников (viewport, scissor, ReadPixels) — ЛЕВЫЙ
+//     НИЖНИЙ угол. У D3D и Vulkan оно сверху; пересчёт — забота бэкенда.
+//   • Строки ReadPixelsRGB идут СНИЗУ ВВЕРХ.
+//   • Начало координат текстуры — левый нижний угол (V растёт вверх). Загрузчик
+//     изображений переворачивает пиксели при загрузке, шейдеры это уже знают.
+//   • Диапазон глубины в NDC — [-1, 1]. Это соглашение GL; у Vulkan/D3D он
+//     [0, 1], и бэкенд обязан привести матрицы проекции к своему. Записано
+//     здесь потому, что молчание об этом означало бы, что глубина «почти
+//     работает»: близкие объекты правильно, дальние — со сдвигом.
+//   • Матрицы — по столбцам (как в glm и GLSL).
 //
 // ЕЩЁ ДВА ОГРАНИЧЕНИЯ, о которых надо знать заранее:
 //   • OpenGL 3.3 — это отсутствие вычислительных шейдеров (появились в 4.3).
@@ -88,9 +106,14 @@ public:
     virtual void SetCullMode(CullMode mode) = 0;        // Front — depth-проход теней
     virtual void SetPolygonMode(PolygonMode mode) = 0;  // Line — каркасный рендер (wireframe)
 
-    // Ножницы (scissor): пиксели вне прямоугольника не пишутся. Координаты —
-    // как у glScissor: (x, y) — ЛЕВЫЙ НИЖНИЙ угол в пикселях фреймбуфера.
-    // Используется UI для клип-масок (обрезка детей контейнера).
+    // Ножницы (scissor): пиксели вне прямоугольника не пишутся. Используется UI
+    // для клип-масок (обрезка детей контейнера).
+    //
+    // (x, y) — ЛЕВЫЙ НИЖНИЙ угол в пикселях фреймбуфера. Это соглашение RHI, а
+    // не «как в glScissor»: формулировка через один API означала бы, что второй
+    // бэкенд волен понимать её иначе, и клип-маски интерфейса тихо перевернулись
+    // бы по вертикали. У D3D и Vulkan начало отсчёта сверху — бэкенд обязан
+    // пересчитать сам, зная высоту цели, а не переложить это на вызывающего.
     virtual void SetScissor(bool enabled, int x = 0, int y = 0, int w = 0, int h = 0) = 0;
 
     // Аппаратное sRGB-кодирование при записи в текущий фреймбуфер (гамма-
@@ -101,13 +124,19 @@ public:
     // уже в sRGB и повторное кодирование их пересветит.
     virtual void SetSRGBWrite(bool enabled) = 0;
 
-    // Привязать 2D-текстуру по нативному хендлу (хендлы отдают Texture2D::
-    // NativeHandle и RenderTarget::*TextureHandle) — для сэмплирования
+    // Привязать 2D-текстуру по хендлу (их отдают Texture2D::Handle и
+    // RenderTarget::ColorTextureHandle/DepthTextureHandle) — для сэмплирования
     // вложений рендер-таргетов (карта теней, HDR-сцена) обычными шейдерами.
-    virtual void BindTexture2D(int unit, unsigned int nativeHandle) = 0;
+    // Невалидный хендл означает «отвязать»: юнит остаётся без текстуры.
+    virtual void BindTexture2D(int unit, TextureHandle texture) = 0;
 
     // Дождаться завершения всех команд GPU и прочитать прямоугольник пикселей
     // текущего буфера как плотный RGB8 (для скриншотов).
+    //
+    // Строки идут СНИЗУ ВВЕРХ: первая строка out — нижняя строка изображения.
+    // Соглашение RHI, и записано оно здесь потому, что молчание о нём стоило бы
+    // перевёрнутых скриншотов на втором бэкенде — дефекта, который не воспроизво-
+    // дится на первом и потому ищется долго.
     virtual void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) = 0;
 
     // Максимальная поддерживаемая анизотропия фильтрации (>= 1.0).
@@ -143,19 +172,19 @@ public:
     //
     // GL_ANY_SAMPLES_PASSED, а не точный счёт пикселей: нам нужен только факт
     // «видно/не видно», а приблизительный вариант драйверу дешевле.
-    virtual unsigned int CreateOcclusionQuery() { return 0; }
-    virtual void DestroyOcclusionQuery(unsigned int) {}
-    virtual void BeginOcclusionQuery(unsigned int) {}
+    virtual QueryHandle CreateOcclusionQuery() { return {}; }
+    virtual void DestroyOcclusionQuery(QueryHandle) {}
+    virtual void BeginOcclusionQuery(QueryHandle) {}
     virtual void EndOcclusionQuery() {}
-    virtual bool OcclusionResultReady(unsigned int) { return false; }
-    virtual bool OcclusionVisible(unsigned int) { return true; }
+    virtual bool OcclusionResultReady(QueryHandle) { return false; }
+    virtual bool OcclusionVisible(QueryHandle) { return true; }
     virtual bool SupportsOcclusionQueries() const { return false; }
 
-    virtual unsigned int CreateTimestampQuery() { return 0; }
-    virtual void DestroyTimestampQuery(unsigned int) {}
-    virtual void WriteTimestamp(unsigned int) {}
-    virtual bool TimestampReady(unsigned int) { return false; }
-    virtual unsigned long long TimestampNs(unsigned int) { return 0; }
+    virtual QueryHandle CreateTimestampQuery() { return {}; }
+    virtual void DestroyTimestampQuery(QueryHandle) {}
+    virtual void WriteTimestamp(QueryHandle) {}
+    virtual bool TimestampReady(QueryHandle) { return false; }
+    virtual unsigned long long TimestampNs(QueryHandle) { return 0; }
     virtual bool SupportsGpuTimers() const { return false; }
 
     // --- Фабрики GPU-ресурсов (см. sage/rhi/Resources.h) ---

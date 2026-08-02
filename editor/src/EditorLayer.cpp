@@ -206,6 +206,7 @@ void EditorLayer::OnAttach() {
 
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_launcher.Dismiss(); m_showProfiler = true; }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
     // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
@@ -1438,6 +1439,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (ImGui::MenuItem("Reset Layout")) m_rebuildDockLayout = true;
             ImGui::MenuItem("Show Grid", nullptr, &m_showGrid);
             ImGui::Separator();
+            ImGui::MenuItem("Профилировщик", nullptr, &m_showProfiler);
+            ImGui::Separator();
             ImGui::MenuItem("Settings...", nullptr, &m_showSettings);
             ImGui::EndMenu();
         }
@@ -1462,6 +1465,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_dialogs.Draw(*this);
     DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
+    m_profiler.Draw(&m_showProfiler);
     DrawAboutWindow();
 
     ImGui::End();

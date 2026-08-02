@@ -209,9 +209,9 @@ public:
         device.SetViewport(0, 0, screenW, screenH);
     }
 
-    // Нативный хендл depth-текстуры — для привязки шейдерам-приёмникам
-    // через GraphicsDevice::BindTexture2D.
-    unsigned int DepthTexture(int cascade = 0) const {
+    // Хендл depth-текстуры — для привязки шейдерам-приёмникам через
+    // GraphicsDevice::BindTexture2D.
+    sage::rhi::TextureHandle DepthTexture(int cascade = 0) const {
         return m_targets[(size_t)Clamp(cascade)]->DepthTextureHandle();
     }
     const glm::mat4& LightMatrix(int cascade = 0) const {
@@ -338,7 +338,7 @@ inline int ShadowCascadeUnit(int cascade) {
 // ---------------------------------------------------------------------
 struct ShadowBinding {
     glm::mat4 Matrices[ShadowMap::kMaxCascades];
-    unsigned int Textures[ShadowMap::kMaxCascades] = {0, 0, 0, 0};
+    sage::rhi::TextureHandle Textures[ShadowMap::kMaxCascades];
     int Count = 1;
     bool Enabled = false;
     // Где тень начинает растворяться и где её уже нет (метры от камеры).
@@ -353,7 +353,8 @@ struct ShadowBinding {
     }
 
     // Одна карта — частный случай каскадов с Count == 1.
-    ShadowBinding(const glm::mat4& matrix, unsigned int texture, bool enabled) : ShadowBinding() {
+    ShadowBinding(const glm::mat4& matrix, sage::rhi::TextureHandle texture, bool enabled)
+        : ShadowBinding() {
         Matrices[0] = matrix;
         Textures[0] = texture;
         Enabled = enabled;
@@ -385,8 +386,8 @@ struct ShadowBinding {
         if (!Enabled) return;
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
         for (int i = 0; i < ShadowMap::kMaxCascades; ++i) {
-            const unsigned int tex = Textures[std::min(i, std::max(Count - 1, 0))];
-            if (tex) device.BindTexture2D(ShadowCascadeUnit(i), tex);
+            const sage::rhi::TextureHandle tex = Textures[std::min(i, std::max(Count - 1, 0))];
+            if (tex.Valid()) device.BindTexture2D(ShadowCascadeUnit(i), tex);
         }
     }
 };

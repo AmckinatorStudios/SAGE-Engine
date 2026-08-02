@@ -108,9 +108,12 @@ void OpenGLDevice::SetSRGBWrite(bool enabled) {
     else glDisable(GL_FRAMEBUFFER_SRGB);
 }
 
-void OpenGLDevice::BindTexture2D(int unit, unsigned int nativeHandle) {
+void OpenGLDevice::BindTexture2D(int unit, sage::rhi::TextureHandle texture) {
     glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, nativeHandle);
+    // Невалидный хендл — это «отвязать», а не ошибка: вызывающему сплошь и рядом
+    // нужно снять текстуру с юнита (выключенный эффект, отсутствующая карта), и
+    // требовать для этого отдельного вызова значило бы плодить его копии.
+    glBindTexture(GL_TEXTURE_2D, (GLuint)texture.Value);
 }
 
 void OpenGLDevice::ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) {
@@ -165,78 +168,78 @@ void OpenGLDevice::SetColorWrite(bool enabled) {
 
 // --- Запросы перекрытия -----------------------------------------------------
 
-unsigned int OpenGLDevice::CreateOcclusionQuery() {
+sage::rhi::QueryHandle OpenGLDevice::CreateOcclusionQuery() {
     GLuint query = 0;
     glGenQueries(1, &query);
-    return query;
+    return {query};
 }
 
-void OpenGLDevice::DestroyOcclusionQuery(unsigned int query) {
-    if (query) {
-        GLuint q = query;
+void OpenGLDevice::DestroyOcclusionQuery(sage::rhi::QueryHandle query) {
+    if (query.Valid()) {
+        GLuint q = (GLuint)query.Value;
         glDeleteQueries(1, &q);
     }
 }
 
-void OpenGLDevice::BeginOcclusionQuery(unsigned int query) {
+void OpenGLDevice::BeginOcclusionQuery(sage::rhi::QueryHandle query) {
     // GL_ANY_SAMPLES_PASSED, а не GL_SAMPLES_PASSED: точное число прошедших
     // пикселей нам не нужно, нужен факт. Приблизительный вариант драйвер вправе
     // посчитать дешевле, и на плитчатых видеокартах разница заметна.
-    if (query) glBeginQuery(GL_ANY_SAMPLES_PASSED, query);
+    if (query.Valid()) glBeginQuery(GL_ANY_SAMPLES_PASSED, (GLuint)query.Value);
 }
 
 void OpenGLDevice::EndOcclusionQuery() { glEndQuery(GL_ANY_SAMPLES_PASSED); }
 
-bool OpenGLDevice::OcclusionResultReady(unsigned int query) {
-    if (!query) return false;
+bool OpenGLDevice::OcclusionResultReady(sage::rhi::QueryHandle query) {
+    if (!query.Valid()) return false;
     GLint available = GL_FALSE;
-    glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+    glGetQueryObjectiv((GLuint)query.Value, GL_QUERY_RESULT_AVAILABLE, &available);
     return available == GL_TRUE;
 }
 
-bool OpenGLDevice::OcclusionVisible(unsigned int query) {
-    if (!query) return true; // нет запроса — считаем видимым, это безопасная сторона
+bool OpenGLDevice::OcclusionVisible(sage::rhi::QueryHandle query) {
+    if (!query.Valid()) return true; // нет запроса — считаем видимым, это безопасная сторона
     GLuint result = 0;
-    glGetQueryObjectuiv(query, GL_QUERY_RESULT, &result);
+    glGetQueryObjectuiv((GLuint)query.Value, GL_QUERY_RESULT, &result);
     return result != 0;
 }
 
 // --- Метки времени GPU ------------------------------------------------------
 
-unsigned int OpenGLDevice::CreateTimestampQuery() {
+sage::rhi::QueryHandle OpenGLDevice::CreateTimestampQuery() {
     GLuint query = 0;
     glGenQueries(1, &query);
-    return query;
+    return {query};
 }
 
-void OpenGLDevice::DestroyTimestampQuery(unsigned int query) {
-    if (query) {
-        GLuint q = query;
+void OpenGLDevice::DestroyTimestampQuery(sage::rhi::QueryHandle query) {
+    if (query.Valid()) {
+        GLuint q = (GLuint)query.Value;
         glDeleteQueries(1, &q);
     }
 }
 
-void OpenGLDevice::WriteTimestamp(unsigned int query) {
+void OpenGLDevice::WriteTimestamp(sage::rhi::QueryHandle query) {
     // glQueryCounter, а не glBeginQuery(GL_TIME_ELAPSED): интервальный запрос
     // может быть активен только один за раз, и вложенные проходы им не
     // измерить. Метка просто просит видеокарту записать «когда сюда дошло».
-    if (query) glQueryCounter(query, GL_TIMESTAMP);
+    if (query.Valid()) glQueryCounter((GLuint)query.Value, GL_TIMESTAMP);
 }
 
-bool OpenGLDevice::TimestampReady(unsigned int query) {
-    if (!query) return false;
+bool OpenGLDevice::TimestampReady(sage::rhi::QueryHandle query) {
+    if (!query.Valid()) return false;
     GLint available = GL_FALSE;
-    glGetQueryObjectiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+    glGetQueryObjectiv((GLuint)query.Value, GL_QUERY_RESULT_AVAILABLE, &available);
     return available == GL_TRUE;
 }
 
-unsigned long long OpenGLDevice::TimestampNs(unsigned int query) {
-    if (!query) return 0;
+unsigned long long OpenGLDevice::TimestampNs(sage::rhi::QueryHandle query) {
+    if (!query.Valid()) return 0;
     GLuint64 value = 0;
     // Спрашиваем результат ТОЛЬКО когда он готов (см. TimestampReady): иначе
     // этот вызов блокирует поток до конца работы видеокарты, то есть само
     // измерение и создаёт задержку, которую мы измеряем.
-    glGetQueryObjectui64v(query, GL_QUERY_RESULT, &value);
+    glGetQueryObjectui64v((GLuint)query.Value, GL_QUERY_RESULT, &value);
     return (unsigned long long)value;
 }
 

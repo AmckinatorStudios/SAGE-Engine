@@ -1,4 +1,5 @@
 #include "sage/anim/AnimationSystem.h"
+#include "sage/core/Profiler.h"
 
 #include <algorithm>
 #include <exception>
@@ -261,6 +262,7 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections) {
+    SAGE_PROFILE("Скиннинг");
     auto v = scene.Registry().view<AnimatedModelComponent, Transform>();
     for (auto e : v) {
         AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);

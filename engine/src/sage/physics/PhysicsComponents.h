@@ -1,0 +1,116 @@
+#pragma once
+#include <vector>
+#include <glm/glm.hpp>
+#include "sage/physics/PhysicsTypes.h"
+
+// ---------------------------------------------------------------------------
+// Компоненты живут рядом со своей системой, а не в общем файле.
+//
+// Раньше всё это лежало в scene/Components.h — 583 строки, где соседствовали
+// интерфейс, обратная кинематика, зонды отражений, физика, частицы и анимация.
+// Такой файл растёт при КАЖДОЙ фиче, и это не эстетика: правка одного поля
+// перекомпилирует всё, что вообще знает про ECS, а найти нужный компонент
+// глазами можно только поиском. Здесь — только то, что читает и пишет одна
+// система.
+//
+// scene/Components.h остался ЗОНТИКОМ: он включает эти файлы, и старый
+// `#include "sage/scene/Components.h"` продолжает работать. Ломать три десятка
+// включений ради перестановки — цена без выгоды.
+//
+// Система: sage/physics/PhysicsScene.h.
+// ---------------------------------------------------------------------------
+
+// Физическое тело сущности (см. sage/physics). Тип задаёт роль:
+// Static (пол/стены), Dynamic (падает/сталкивается), Kinematic (двигается
+// скриптом, толкает динамику). Форму столкновения задаёт ColliderComponent
+// (если его нет — берётся единичный бокс по масштабу сущности). Симуляция идёт
+// в Play-режиме редактора и в игре (PhysicsScene): позиция/поворот Dynamic-тел
+// пишутся обратно в Transform. Данные сериализуются; RuntimeBody — рантайм.
+struct RigidBodyComponent {
+    sage::physics::BodyType Type = sage::physics::BodyType::Dynamic;
+    float Mass = 1.0f;
+    float Friction = 0.5f;
+    float Restitution = 0.1f;
+
+    // Слой столкновений — по нему тело находят (или не находят) лучи и запросы.
+    // Без слоёв луч из камеры первым делом упирается в самого игрока, и
+    // «выстрел» не выходит за собственную капсулу.
+    sage::physics::LayerMask Layer = sage::physics::kLayerDefault;
+
+    // Сенсор (триггер-зона): обнаруживает касание, но не отталкивает. «Вошёл в
+    // зону», «наступил на кнопку», «поднял предмет» — это он. Без сенсоров
+    // зону приходится каждый кадр проверять расстоянием в скрипте, и работает
+    // она только для шара.
+    bool Sensor = false;
+
+    sage::physics::BodyHandle RuntimeBody = sage::physics::kInvalidBody; // не сериализуется
+};
+
+// Контроллер персонажа — движение под управлением игрока.
+//
+// Отдельно от RigidBodyComponent намеренно: персонаж физически неправдоподобен
+// по замыслу — мгновенно меняет скорость, не опрокидывается, взбирается на
+// ступеньку и держится на склоне, с которого бочка съехала бы. Выжимать это из
+// динамического тела — известный тупик: выходит либо ватное управление, либо
+// тело, заваливающееся набок.
+//
+// Скорость задаёт ИГРА каждый кадр (Lua: MoveCharacter). Тяготение, прыжок и
+// ускорение — правила игры, а не физики, и держать их здесь значило бы
+// навязывать всем одну модель движения.
+struct CharacterControllerComponent {
+    float Radius = 0.35f;
+    float Height = 1.8f;
+    float StepHeight = 0.35f;      // на какую ступеньку взбирается без прыжка
+    float MaxSlopeDeg = 50.0f;     // круче — соскальзывает
+    float Mass = 70.0f;            // с какой силой толкает динамику
+    sage::physics::LayerMask Layer = sage::physics::kLayerDefault;
+
+    // --- рантайм (не сериализуется) ---
+    sage::physics::CharacterHandle Runtime = sage::physics::kInvalidCharacter;
+    bool Grounded = false;
+    glm::vec3 GroundNormal{0.0f, 1.0f, 0.0f};
+};
+
+// Форма коллайдера. Размеры — ЛОКАЛЬНЫЕ (для единичной сущности); при создании
+// тела умножаются на Transform.Scale. Без RigidBodyComponent коллайдер не
+// участвует в симуляции (но редактор рисует его гизмо).
+struct ColliderComponent {
+    sage::physics::ShapeType Shape = sage::physics::ShapeType::Box;
+    glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
+    float Radius = 0.5f;                     // Sphere / Capsule
+    float HalfHeight = 0.5f;                 // Capsule
+
+    // СОСТАВНАЯ форма: если Parts непусто, тело строится из этих дочерних форм
+    // (каждая со своим локальным смещением/поворотом), а поля выше игнорируются.
+    // Так один твёрдый объект получает несколько примитивов — «молоток»,
+    // Т/Г-образные детали, грубая аппроксимация модели кластером примитивов.
+    struct Part {
+        sage::physics::ShapeType Shape = sage::physics::ShapeType::Box;
+        glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f};
+        float Radius = 0.5f;
+        float HalfHeight = 0.5f;
+        glm::vec3 Offset{0.0f};   // локальное смещение внутри тела
+        glm::vec3 EulerDeg{0.0f}; // локальный поворот (градусы, XYZ)
+    };
+    std::vector<Part> Parts;
+};
+
+// Соединение (constraint/joint) сущности с ДРУГИМ телом или с миром. У сущности
+// должен быть RigidBodyComponent (её тело — BodyA). TargetId — id сущности с
+// телом-партнёром (BodyB); -1 -> прикрепить к неподвижному миру. Anchor —
+// смещение точки крепления от МИРОВОЙ позиции этой сущности; Axis — ось в
+// мировых координатах (петля/ползун — вдоль неё, конус — twist-ось). Строится
+// PhysicsScene вторым проходом (после всех тел). RuntimeJoint — рантайм.
+struct JointComponent {
+    sage::physics::JointType Type = sage::physics::JointType::Point;
+    int TargetId = -1;                  // id партнёра; -1 -> к миру
+    glm::vec3 Anchor{0.0f, 0.0f, 0.0f}; // смещение pivot от позиции сущности (мир)
+    glm::vec3 Axis{0.0f, 1.0f, 0.0f};   // ось (Hinge/Slider/Cone)
+    bool UseLimits = false;
+    float MinLimit = 0.0f;              // Hinge °: [-180..0]; Slider: ед.
+    float MaxLimit = 0.0f;
+    float MinDistance = 0.0f;           // Distance
+    float MaxDistance = 1.0f;
+    float ConeHalfAngle = 45.0f;        // Cone °
+    sage::physics::JointHandle RuntimeJoint = sage::physics::kInvalidJoint; // не сериализуется
+};

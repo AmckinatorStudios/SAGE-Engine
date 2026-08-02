@@ -1,4 +1,5 @@
 #include "sage/render/Reflection.h"
+#include "sage/core/Profiler.h"
 
 #include <algorithm>
 
@@ -72,6 +73,7 @@ void EnvironmentMap::Capture(const glm::vec3& pos, float nearClip, float farClip
 
 void EnvironmentMap::CaptureSky(SkyRenderer& sky, const LightingEnvironment& env,
                                 const Skybox* cubemap) {
+    SAGE_PROFILE("Куб окружения");
     if (!m_cube) return;
     m_position = glm::vec3(0.0f);
     m_hasBox = false;      // небо бесконечно, коробку к нему приложить не к чему
@@ -92,6 +94,7 @@ void EnvironmentMap::CaptureSky(SkyRenderer& sky, const LightingEnvironment& env
 // ---------------------------------------------------------------------------
 
 int UpdateReflectionProbes(Scene& scene, const EnvironmentMap::FaceDraw& draw, int maxPerCall) {
+    SAGE_PROFILE("Зонды отражений");
     if (!draw) return 0;
     int captured = 0;
     auto view = scene.Registry().view<ReflectionProbeComponent, Transform>();
@@ -205,7 +208,7 @@ void ReflectionSystem::SetBox(const glm::vec3& mn, const glm::vec3& mx) { Ensure
 void ReflectionSystem::ClearBox() { if (m_env) m_env->ClearBox(); }
 
 ReflectionBinding ReflectionSystem::Binding(int screenW, int screenH,
-                                            unsigned int planarTexture) const {
+                                            sage::rhi::TextureHandle planarTexture) const {
     ReflectionBinding b;
     if (m_enabled && m_captured) b.Env = Env();
     b.Intensity = m_intensity;
@@ -243,8 +246,8 @@ void UploadReflection(Shader& shader, const ReflectionBinding& b) {
         shader.SetInt("uEnvBoxParallax", 0);
     }
 
-    shader.SetInt("uPlanarEnabled", b.PlanarTexture ? 1 : 0);
-    if (b.PlanarTexture) dev.BindTexture2D(ReflectionBinding::kPlanarUnit, b.PlanarTexture);
+    shader.SetInt("uPlanarEnabled", b.PlanarTexture.Valid() ? 1 : 0);
+    if (b.PlanarTexture.Valid()) dev.BindTexture2D(ReflectionBinding::kPlanarUnit, b.PlanarTexture);
     shader.SetVec2("uScreenTexel", b.ScreenTexel);
 }
 
@@ -294,6 +297,7 @@ glm::mat4 PlanarReflection::ObliqueNearPlane(const glm::mat4& proj, const glm::v
 bool PlanarReflection::Capture(const glm::vec4& plane, const glm::mat4& view,
                                const glm::mat4& proj, int screenW, int screenH,
                                const EnvironmentMap::FaceDraw& draw) {
+    SAGE_PROFILE("Плоское отражение");
     m_valid = false;
     if (!draw || screenW <= 0 || screenH <= 0) return false;
 
@@ -340,8 +344,8 @@ bool PlanarReflection::Capture(const glm::vec4& plane, const glm::mat4& view,
     return true;
 }
 
-unsigned int PlanarReflection::Texture() const {
-    return (m_valid && m_target) ? m_target->ColorTextureHandle() : 0;
+sage::rhi::TextureHandle PlanarReflection::Texture() const {
+    return (m_valid && m_target) ? m_target->ColorTextureHandle() : sage::rhi::TextureHandle{};
 }
 
 } // namespace sage::render

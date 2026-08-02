@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -62,8 +63,8 @@ public:
     void RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg);
 
     // Текстуры для ImGui-панелей: после PostFX — LDR-выход, иначе HDR-цвет FBO.
-    unsigned int ViewportTexture() const;
-    unsigned int GameTexture() const;
+    uint64_t ViewportTexture() const;
+    uint64_t GameTexture() const;
 
     const sage::ecs::RenderStats& LastStats() const { return m_lastStats; }
     ParticleSystem& Particles() { return *m_particles; } // UpdateEmitters + self-test

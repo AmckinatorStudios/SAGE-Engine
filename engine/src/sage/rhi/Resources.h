@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <glm/glm.hpp>
@@ -12,6 +13,41 @@
 // интерфейсы, не меняя потребителей.
 // ---------------------------------------------------------------------------
 namespace sage::rhi {
+
+// --- Хендлы ресурсов --------------------------------------------------------
+//
+// Раньше здесь стоял голый `unsigned int`, и это был не стилистический вопрос.
+// Имя объекта OpenGL — беззнаковое 32-битное целое, и тип «unsigned int» в
+// интерфейсе означал ровно одно: интерфейс говорит на языке одного бэкенда. У
+// Vulkan и Metal хендл — 64-битный указатель на объект, в 32 бита он не влезает
+// в принципе, и первая же попытка второго бэкенда упёрлась бы не в архитектуру,
+// а в арифметику.
+//
+// Хуже была вторая половина: число без типа складывается, сравнивается с нулём
+// и путается с чем угодно другим. Хендл текстуры, хендл запроса, номер юнита и
+// индекс каскада — всё это были «unsigned int», и компилятор не имел ни единого
+// шанса заметить, что их перепутали.
+//
+// Отсюда — отдельный тип с 64-битным полем и БЕЗ неявного приведения к числу.
+// Стоит он ноль (структура из одного поля передаётся в регистре), а даёт то,
+// ради чего абстракция и существует: потребитель больше не может ничего сделать
+// с хендлом, кроме как отдать его обратно в RHI.
+struct TextureHandle {
+    uint64_t Value = 0;
+    bool Valid() const { return Value != 0; }
+    bool operator==(const TextureHandle& o) const { return Value == o.Value; }
+    bool operator!=(const TextureHandle& o) const { return Value != o.Value; }
+};
+
+// Хендл запроса к GPU (перекрытие, метка времени). Отдельный тип от текстурного
+// по той же причине: перепутать их местами — ошибка, которую должен ловить
+// компилятор, а не отладчик.
+struct QueryHandle {
+    uint64_t Value = 0;
+    bool Valid() const { return Value != 0; }
+    bool operator==(const QueryHandle& o) const { return Value == o.Value; }
+    bool operator!=(const QueryHandle& o) const { return Value != o.Value; }
+};
 
 // --- Общие перечисления состояния конвейера ---
 enum class DepthFunc { Less, LessEqual };
@@ -105,8 +141,20 @@ class Texture2D {
 public:
     virtual ~Texture2D() = default;
     virtual void Bind(int unit) const = 0;
-    // Нативный хендл бэкенда (для передачи в сторонние API вроде ImGui::Image).
-    virtual unsigned int NativeHandle() const = 0;
+    // Хендл для привязки через GraphicsDevice::BindTexture2D.
+    virtual TextureHandle Handle() const = 0;
+
+    // ЕДИНСТВЕННАЯ ЛЕГАЛЬНАЯ ДВЕРЬ НАРУЖУ: сырое число бэкенда для стороннего
+    // API, который говорит на языке этого бэкенда, — практически только
+    // ImGui::Image, чей GL-бэкенд принимает имя GL-текстуры.
+    //
+    // Оставлено ИМЕННО как отдельный, отдельно названный вызов, а не как тип
+    // хендла. Передача текстуры в ImGui бэкенд-специфична по своей природе, и
+    // делать вид, что это не так, было бы хуже протечки: тогда бэкенд-зависимое
+    // место выглядело бы переносимым, и найти его при портировании было бы
+    // нечем. Так их ровно столько, сколько вызовов NativeHandle, и они
+    // находятся поиском.
+    virtual uint64_t NativeHandle() const = 0;
 };
 
 // --- Объёмная (3D) текстура — GI-объём световых проб (см. sage/gi) ---
@@ -164,7 +212,7 @@ public:
     virtual int MipLevels() const = 0;
     // Привязать как cubemap-текстуру к юниту (для чтения из шейдера).
     virtual void Bind(int unit) const = 0;
-    virtual unsigned int NativeHandle() const = 0;
+    virtual TextureHandle Handle() const = 0;
 };
 
 struct CubeRenderTargetDesc {
@@ -222,10 +270,14 @@ public:
     virtual void Resize(int width, int height) = 0;
     virtual int Width() const = 0;
     virtual int Height() const = 0;
-    // Нативные хендлы текстур вложений (0 — вложения нет). Используются для
-    // привязки как обычной текстуры (GraphicsDevice::BindTexture2D) и ImGui.
-    virtual unsigned int ColorTextureHandle() const = 0;
-    virtual unsigned int DepthTextureHandle() const = 0;
+    // Хендлы текстур вложений (невалидный — вложения нет). Отдаются обратно в
+    // GraphicsDevice::BindTexture2D, чтобы сэмплировать результат прохода:
+    // карту теней, HDR-кадр, промежуточные буферы пост-обработки.
+    virtual TextureHandle ColorTextureHandle() const = 0;
+    virtual TextureHandle DepthTextureHandle() const = 0;
+    // Сырое число для ImGui — см. Texture2D::NativeHandle. Панели редактора
+    // показывают кадр сцены именно так.
+    virtual uint64_t NativeColorHandle() const = 0;
 };
 
 } // namespace sage::rhi

@@ -7,6 +7,7 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/core/Log.h"
+#include "sage/core/Profiler.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/scripting/ScriptEngine.h"
@@ -69,10 +70,17 @@ void SystemScheduler::Sort() {
 void SystemScheduler::Run(Scene& scene, float dt) {
     if (m_dirty) Sort();
     if (m_profiling) m_timings.clear();
+    SAGE_PROFILE("Системы");
 
     for (const Entry& e : m_systems) {
         const auto start = m_profiling ? std::chrono::steady_clock::now()
                                        : std::chrono::steady_clock::time_point{};
+        // Каждая система — участок профилировщика, а не только строка в
+        // LastTimings. Иначе профилировщик показывал бы «Обновление 9 мс» одним
+        // куском рядом с расписанными по проходам «Тени 0.4» и «Bloom 1.1» — и
+        // на вопрос «что съело кадр» ответа не было бы ровно в той половине, где
+        // живёт игровая логика.
+        sage::profile::Scope scope(e.Name.c_str());
         try {
             e.Fn(scene, dt);
         } catch (const std::exception& ex) {

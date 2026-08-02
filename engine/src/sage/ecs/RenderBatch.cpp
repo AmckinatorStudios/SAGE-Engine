@@ -1,4 +1,5 @@
 #include "sage/ecs/RenderBatch.h"
+#include "sage/core/Profiler.h"
 
 #include <algorithm>
 #include <string>
@@ -234,6 +235,7 @@ Shader& DepthUModelShader() { static Shader* s = new Shader(Shader::FromSource(k
 } // namespace
 
 void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
+    SAGE_PROFILE("Отсечение");
     for (auto& kv : m_groups) kv.second.Instances.clear(); // переиспользуем ёмкость
     m_textured.clear();
     m_transparent.clear();
@@ -744,6 +746,7 @@ void RenderBatch::AdvanceVelocityHistory() {
 }
 
 void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::vec3& viewPos) {
+    SAGE_PROFILE("Проверка перекрытия");
     if (!m_occlusionEnabled) return;
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
     if (!device.SupportsOcclusionQueries()) return;
@@ -819,8 +822,8 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
         // между ценой запросов и задержкой появления.
         if (!slot.Visible && (m_frameIndex + (unsigned long long)c.Entity) % 4 != 0) continue;
 
-        if (!slot.Query) slot.Query = device.CreateOcclusionQuery();
-        if (!slot.Query) continue;
+        if (!slot.Query.Valid()) slot.Query = device.CreateOcclusionQuery();
+        if (!slot.Query.Valid()) continue;
 
         // Коробка чуть больше сферы: ошибка в сторону «нарисуем лишнее»
         // безопасна, ошибка в другую сторону — это пропавший объект.
@@ -852,7 +855,7 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
         }
         // Запросы выброшенных сущностей освобождаем явно: это ресурс драйвера.
         for (auto& kv : m_occlusion) {
-            if (alive.find(kv.first) == alive.end() && kv.second.Query) {
+            if (alive.find(kv.first) == alive.end() && kv.second.Query.Valid()) {
                 device.DestroyOcclusionQuery(kv.second.Query);
             }
         }

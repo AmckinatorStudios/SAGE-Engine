@@ -616,3 +616,29 @@ TEST(AssetDatabase_finds_project_files_from_another_working_directory) {
     CHECK_TRUE(db.LocatePath("assets/models/gone.glb") == "assets/models/gone.glb");
     CHECK_TRUE(db.LocatePath("").empty());
 }
+
+// --- Соответствие RHI: контракт, а не привычка --------------------------------
+//
+// Абстракция с одной реализацией — гипотеза. Пока бэкенд один, «интерфейс» и
+// «то, что делает OpenGL» неразличимы, и отличить обязательство от привычки
+// невозможно. Набор соответствия выносит контракт из комментариев в код: то, о
+// чём интерфейс УЖЕ договорился, обязан выполнять каждый бэкенд.
+#include "sage/rhi/Conformance.h"
+
+TEST(RHI_null_backend_satisfies_the_contract) {
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    device->Init(nullptr);
+
+    sage::rhi::ConformanceOptions options;
+    // Null не растеризует, и пиксельный уровень честно пропускается: заставлять
+    // пустышку «пройти» его значило бы получить зелёный результат, который
+    // ничего не значит.
+    options.Rasterizes = false;
+
+    const sage::rhi::ConformanceResult result = sage::rhi::RunConformance(*device, options);
+    for (const std::string& failure : result.Failures) {
+        LOG_ERROR("Test") << "RHI-соответствие: " << failure;
+    }
+    CHECK_TRUE(result.Ok());
+    CHECK_TRUE(result.Checked > 15);   // набор действительно отработал, а не выродился
+}

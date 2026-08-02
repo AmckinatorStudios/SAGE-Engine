@@ -30,6 +30,7 @@
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
 #include "sage/render/PostFX.h"
+#include "sage/rhi/Conformance.h"
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -477,7 +478,7 @@ void TestObjectMotionBlur(FrameRenderer& r) {
         device.Clear(true, true);
         r.Batch.RenderColor(*scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
 
-        unsigned int velTex = 0;
+        sage::rhi::TextureHandle velTex;
         if (useVelocity) {
             velocity.Bind();
             device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -525,7 +526,7 @@ void TestObjectMotionBlur(FrameRenderer& r) {
         device.Clear(true, true);
         r.Batch.RenderColor(*scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
         r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, sharpFx,
-                    &output, 0, 0, kW, kH, 0);
+                    &output, 0, 0, kW, kH);
         output.Bind();
         sharp = Capture(kW, kH);
     }
@@ -1932,6 +1933,29 @@ void TestAssetCache() {
     sage::assets::SetCacheDirectory(".sage-cache");
 }
 
+// --- Соответствие RHI на НАСТОЯЩЕМ бэкенде ------------------------------------
+//
+// Тот же контракт, что sage_tests гоняет по Null, — но здесь есть контекст, и
+// потому доступен пиксельный уровень: соглашения о системе координат
+// (начало отсчёта ножниц, порядок строк при чтении) проверяются рисованием, а
+// иначе не проверяются никак.
+//
+// Смысл в том, что набор ОДИН. Два бэкенда, прошедшие один и тот же набор, —
+// это уже не «интерфейс совпадает с тем, что делает OpenGL», а обязательство,
+// у которого есть исполнители.
+void TestRhiConformance() {
+    sage::rhi::ConformanceOptions options;
+    options.Rasterizes = true;
+    const sage::rhi::ConformanceResult result =
+        sage::rhi::RunConformance(sage::rhi::GraphicsDevice::Get(), options);
+
+    for (const std::string& failure : result.Failures) {
+        std::printf("       %s\n", failure.c_str());
+    }
+    Check(result.Ok(), "OpenGL-бэкенд соответствует контракту RHI");
+    Check(result.Checked >= 20, "набор соответствия отработал целиком");
+}
+
 int main(int argc, char** argv) {
     std::string referenceDir = "references";
     for (int i = 1; i < argc; ++i) {
@@ -1984,6 +2008,7 @@ int main(int argc, char** argv) {
         TestLevelsOfDetail(renderer);
         TestOcclusionCulling(renderer);
         TestAssetCache();
+        TestRhiConformance();
     }
 
     // GPU-ресурсы освобождаем, пока контекст ещё жив: деструктор синглтона

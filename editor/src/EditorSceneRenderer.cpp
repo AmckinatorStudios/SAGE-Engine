@@ -438,11 +438,13 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     device.BindDefaultFramebuffer();
 }
 
-unsigned int EditorSceneRenderer::ViewportTexture() const {
-    return m_postApplied && m_postFbo ? m_postFbo->ColorTexture() : m_sceneFbo->ColorTexture();
+uint64_t EditorSceneRenderer::ViewportTexture() const {
+    return m_postApplied && m_postFbo ? m_postFbo->NativeColorTexture()
+                                      : m_sceneFbo->NativeColorTexture();
 }
-unsigned int EditorSceneRenderer::GameTexture() const {
-    return m_gamePostApplied && m_gamePostFbo ? m_gamePostFbo->ColorTexture() : m_gameFbo->ColorTexture();
+uint64_t EditorSceneRenderer::GameTexture() const {
+    return m_gamePostApplied && m_gamePostFbo ? m_gamePostFbo->NativeColorTexture()
+                                              : m_gameFbo->NativeColorTexture();
 }
 
 sage::ecs::RenderStats EditorSceneRenderer::RenderColorForTest(Scene& scene, const glm::mat4& view,

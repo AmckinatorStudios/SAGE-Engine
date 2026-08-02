@@ -35,6 +35,7 @@
 #include "PluginAPI.h"
 #include "PluginManager.h"
 #include "panels/ConsolePanel.h"
+#include "panels/ProfilerPanel.h"
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/ViewportPanel.h"
@@ -137,12 +138,12 @@ public:
     Camera& EditorCamera() override { return m_camera; }
     const glm::mat4& ViewMatrix() const override { return m_view; }
     const glm::mat4& ProjMatrix() const override { return m_proj; }
-    unsigned int SceneTexture() const override { return m_renderer.ViewportTexture(); }
+    uint64_t SceneTexture() const override { return m_renderer.ViewportTexture(); }
     void SetViewportSize(int w, int h) override { m_renderer.SetViewportSize(w, h); }
     void PickAtViewport(float u, float v, bool additive = false) override;
 
     // --- EditorHost: панель Game ---
-    unsigned int GameTexture() const override { return m_renderer.GameTexture(); }
+    uint64_t GameTexture() const override { return m_renderer.GameTexture(); }
     void SetGameViewportSize(int w, int h) override { m_renderer.SetGameSize(w, h); }
     bool HasPrimaryCamera() override;
 
@@ -238,6 +239,8 @@ private:
 
     // --- панели (архитектура v3: каждая — независимый класс) ---
     ConsolePanel m_console;
+    ProfilerPanel m_profiler;
+    bool m_showProfiler = false;
     HierarchyPanel m_hierarchy;
     InspectorPanel m_inspector;
     ViewportPanel m_viewport;

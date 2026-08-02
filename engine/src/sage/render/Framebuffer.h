@@ -52,11 +52,13 @@ public:
     // Сколько сэмплов реально выделено (1 — MSAA нет или недоступен).
     int Samples() const { return m_target->Samples(); }
 
-    // Нативный хендл текстуры цвета — для сэмплирования проходом пост-процесса
-    // (GraphicsDevice::BindTexture2D) и показа в ImGui (viewport редактора).
-    unsigned int ColorTexture() const { return m_target->ColorTextureHandle(); }
-    // Нативный хендл depth-текстуры сцены — для SSAO/пост-эффектов, читающих глубину.
-    unsigned int DepthTexture() const { return m_target->DepthTextureHandle(); }
+    // Хендл текстуры цвета — для сэмплирования проходом пост-процесса
+    // (GraphicsDevice::BindTexture2D).
+    sage::rhi::TextureHandle ColorTexture() const { return m_target->ColorTextureHandle(); }
+    // Хендл depth-текстуры сцены — для SSAO/пост-эффектов, читающих глубину.
+    sage::rhi::TextureHandle DepthTexture() const { return m_target->DepthTextureHandle(); }
+    // Сырое число для ImGui (viewport редактора) — см. Texture2D::NativeHandle.
+    uint64_t NativeColorTexture() const { return m_target->NativeColorHandle(); }
     int Width() const { return m_target->Width(); }
     int Height() const { return m_target->Height(); }
 

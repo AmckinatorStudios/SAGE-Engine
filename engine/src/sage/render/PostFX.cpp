@@ -1,5 +1,7 @@
 #include "sage/render/PostFX.h"
 
+#include "sage/core/Profiler.h"
+
 #include <algorithm>
 #include <string>
 
@@ -446,10 +448,11 @@ RenderTarget* PostFX::EnsureAux(std::unique_ptr<RenderTarget>& slot) {
     return slot.get();
 }
 
-void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int h,
-                    const glm::mat4& proj, const glm::mat4& view, const PostFXSettings& s,
-                    Framebuffer* output, int outX, int outY, int outW, int outH,
-                    unsigned int velocityTexture) {
+void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandle sceneDepth,
+                    int w, int h, const glm::mat4& proj, const glm::mat4& view,
+                    const PostFXSettings& s, Framebuffer* output, int outX, int outY, int outW,
+                    int outH, sage::rhi::TextureHandle velocityTexture) {
+    SAGE_PROFILE("Пост-обработка");
     GraphicsDevice& device = GraphicsDevice::Get();
     EnsureTargets(w, h);
     device.SetDepthTest(false); // все проходы — полноэкранные, глубина не нужна
@@ -457,13 +460,13 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     auto drawTri = [&]() { m_fsTri->DrawArrays(3); };
 
     // Все три эффекта, читающие глубину, без depth-текстуры невозможны.
-    const bool haveDepth = sceneDepth != 0;
+    const bool haveDepth = sceneDepth.Valid();
     const bool doAO = s.AOEnabled && haveDepth;
     const bool doDof = s.DofEnabled && haveDepth;
     // С буфером скоростей история прошлого кадра ЗДЕСЬ не нужна — её хранит
     // проход геометрии, у каждой сущности свою. Поэтому m_hasPrevFrame требуется
     // только запасному пути.
-    const bool useVelocity = velocityTexture != 0;
+    const bool useVelocity = velocityTexture.Valid();
     const bool doMotion = s.MotionBlurEnabled && (useVelocity || (haveDepth && m_hasPrevFrame)) &&
                           s.MotionBlurAmount > 0.001f;
     const bool doBloom = s.BloomEnabled;
@@ -472,6 +475,7 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
 
     // --- 1. SSAO из глубины сцены -> m_ao, затем размытие -> m_aoBlur ---
     if (doAO) {
+        SAGE_PROFILE("SSAO");
         glm::mat4 invProj = glm::inverse(proj);
         m_ao->Bind();
         Shader& ao = SsaoShader();
@@ -495,8 +499,9 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     // --- 2. Глубина резкости: размытие по кругу нерезкости из глубины ---
     // colorTex — «текущая картинка» цепочки: каждый следующий проход читает
     // результат предыдущего, а не исходный кадр.
-    unsigned int colorTex = sceneColor;
+    sage::rhi::TextureHandle colorTex = sceneColor;
     if (doDof) {
+        SAGE_PROFILE("Глубина резкости");
         RenderTarget* dof = EnsureAux(m_dof);
         dof->Bind();
         Shader& sh = DofShader();
@@ -516,6 +521,7 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
 
     // --- 3. Motion blur: смаз вдоль вектора репроекции прошлым кадром ---
     if (doMotion) {
+        SAGE_PROFILE("Смаз движения");
         RenderTarget* motion = EnsureAux(m_motion);
         motion->Bind();
         Shader& sh = MotionShader();
@@ -542,6 +548,7 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     // Считается по УЖЕ размытой картинке (см. комментарий к порядку цепочки в
     // PostFX.h): свечение размытого источника не должно быть резким.
     if (doBloom) {
+        SAGE_PROFILE("Bloom");
         int hw = m_bright->Width(), hh = m_bright->Height();
         m_bright->Bind();
         Shader& br = BrightShader();
@@ -555,7 +562,7 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
         blur.Use();
         blur.SetInt("uTex", 0);
         glm::vec2 texel(1.0f / (float)hw, 1.0f / (float)hh);
-        unsigned int src = m_bright->ColorTextureHandle();
+        sage::rhi::TextureHandle src = m_bright->ColorTextureHandle();
         RenderTarget* dstA = m_bloomA.get();
         RenderTarget* dstB = m_bloomB.get();
         for (int i = 0; i < 2; ++i) {
@@ -577,6 +584,8 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     // а читать тот же буфер, в который пишешь, нельзя.
     const bool doFxaa = s.FxaaEnabled;
     RenderTarget* ldr = doFxaa ? EnsureAux(m_ldr) : nullptr;
+    {
+    SAGE_PROFILE("Тон-маппинг");
     if (ldr) {
         ldr->Bind();
     } else if (output) {
@@ -604,9 +613,11 @@ void PostFX::Render(unsigned int sceneColor, unsigned int sceneDepth, int w, int
     if (doBloom) device.BindTexture2D(1, m_bloomB->ColorTextureHandle());
     if (doAO) device.BindTexture2D(2, m_aoBlur->ColorTextureHandle());
     drawTri();
+    }
 
     // --- 6. FXAA -> выход ---
     if (ldr) {
+        SAGE_PROFILE("FXAA");
         if (output) {
             output->Bind();
         } else {
