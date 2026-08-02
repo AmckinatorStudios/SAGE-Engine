@@ -31,6 +31,16 @@
 // пост-обработкой. EditorLayer только оркестрирует: собирает освещение, зовёт
 // RenderShadow → RenderViewport → RenderGame и показывает их текстуры в панелях.
 // ---------------------------------------------------------------------------
+// Явно заданные view/proj для вьюпорта. Нужны ортогональным видам
+// (сверху/спереди/сбоку): у них нет свободной камеры, а есть плоскость, центр и
+// масштаб — то есть матрицы, которые не выводятся из Camera.
+struct EditorViewOverride {
+    bool Use = false;
+    glm::mat4 View{1.0f};
+    glm::mat4 Proj{1.0f};
+    glm::vec3 EyePos{0.0f};   // где «стоит» наблюдатель: блики и отражения
+};
+
 class EditorSceneRenderer {
 public:
     // Время сцены для собственных шейдеров материалов (uTime). Идёт и в режиме
@@ -53,10 +63,21 @@ public:
 
     // Превью сцены редакторской камерой. Возвращает использованные view/proj
     // (нужны вызывающему для гизмо/пикинга). mode/showGrid — из тулбара.
+    //
+    // slot — какой из вьюпортов рисуем (0..kMaxViews-1). У каждого свой буфер:
+    // мультивьюпорт показывает несколько видов ОДНОВРЕМЕННО, и рисовать их в
+    // один буфер значило бы, что видно только последний.
     void RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
                         int selectedId, const std::vector<int>& selection,
                         EditorRenderMode mode, bool showGrid,
-                        const sage::EngineConfig& cfg, glm::mat4& outView, glm::mat4& outProj);
+                        const sage::EngineConfig& cfg, glm::mat4& outView, glm::mat4& outProj,
+                        int slot = 0, const EditorViewOverride& viewOverride = EditorViewOverride());
+
+    // Сколько видов может показываться одновременно. Четыре — классическая
+    // раскладка «перспектива + сверху + спереди + сбоку»; больше на практике не
+    // используют, а каждый вид стоит полного прохода сцены.
+    static constexpr int kMaxViews = 4;
+    void SetViewportSize(int slot, int w, int h);
 
     // Игровое окно от первой Primary-камеры сцены (нет камеры — кадр не рисуется,
     // GameApplied() остаётся false). Всегда Shaded + пост-обработка.
@@ -64,6 +85,8 @@ public:
 
     // Текстуры для ImGui-панелей: после PostFX — LDR-выход, иначе HDR-цвет FBO.
     uint64_t ViewportTexture() const;
+    // Текстура конкретного вида раскладки.
+    uint64_t ViewportTexture(int slot) const;
     uint64_t GameTexture() const;
 
     const sage::ecs::RenderStats& LastStats() const { return m_lastStats; }
@@ -88,7 +111,7 @@ private:
     // прежней «раздутой оболочки» (толщина зависела от размера, только выпуклые).
     // Силуэты ВСЕХ выбранных сущностей в масочный буфер (одна очистка, потом все).
     void RenderOutlineMask(Scene& scene, const std::vector<int>& selection,
-                           const glm::mat4& view, const glm::mat4& proj);
+                           const glm::mat4& view, const glm::mat4& proj, int w, int h);
     void CompositeOutline(Framebuffer& target);
     void DrawEntityGizmos(Scene& scene, const std::vector<int>& selection, float gameAspect);
     static sage::render::PostFXSettings FxFromConfig(const sage::EngineConfig& cfg);
@@ -97,6 +120,13 @@ private:
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo, m_gameFbo;
     std::optional<Framebuffer> m_postFbo, m_gamePostFbo; // LDR-выходы PostFX
+    // Дополнительные виды (слоты 1..3). Слот 0 — это m_sceneFbo/m_postFbo:
+    // одиночный вьюпорт, самый частый случай, не должен платить за раскладку,
+    // которой не пользуются.
+    std::optional<Framebuffer> m_extraFbo[kMaxViews], m_extraPostFbo[kMaxViews];
+    bool m_extraPostApplied[kMaxViews] = {false, false, false, false};
+    int m_extraW[kMaxViews] = {0, 0, 0, 0};
+    int m_extraH[kMaxViews] = {0, 0, 0, 0};
     std::optional<Framebuffer> m_outlineMask;            // силуэт выделенного объекта (аутлайн)
     std::unique_ptr<sage::rhi::Geometry> m_outlineTri;   // полноэкранный треугольник для краевого прохода
     // UI сцены (UIElementComponent) — оверлей в панели Game (WYSIWYG: как в
@@ -114,5 +144,8 @@ private:
     sage::ecs::RenderStats m_lastStats;
 
     int m_vpW = 1280, m_vpH = 720;
+    // Размер, под который последний раз строилась маска выделения: кайма
+    // накладывается по нему, а у разных видов раскладки размеры разные.
+    int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     int m_gameW = 1280, m_gameH = 720;
 };

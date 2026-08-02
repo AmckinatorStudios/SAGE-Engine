@@ -122,6 +122,20 @@ bool Shape(const Pen& p, const char* n) {
     if (is("file"))   { p.Rect(0.24f, 0.14f, 0.76f, 0.86f, 0.08f, 0.05f); p.Line(0.60f, 0.14f, 0.76f, 0.30f, 0.07f); return true; }
     if (is("scene"))  { p.Rect(0.14f, 0.22f, 0.86f, 0.78f, 0.08f, 0.05f); p.Tri(0.24f, 0.68f, 0.46f, 0.38f, 0.62f, 0.68f); p.Disc(0.68f, 0.36f, 0.07f); return true; }
     if (is("material")) { p.Circle(0.50f, 0.50f, 0.32f); p.Disc(0.40f, 0.40f, 0.10f); return true; }
+    if (is("project")) { p.FillRect(0.12f, 0.24f, 0.44f, 0.34f, 0.03f); p.Rect(0.12f, 0.30f, 0.88f, 0.78f, 0.08f, 0.05f); p.Disc(0.50f, 0.54f, 0.09f); return true; }
+    if (is("prefab")) { p.Rect(0.16f, 0.16f, 0.60f, 0.60f, 0.06f, 0.05f); p.Rect(0.40f, 0.40f, 0.84f, 0.84f, 0.06f, 0.05f); return true; }
+    if (is("texture")) { p.Rect(0.14f, 0.20f, 0.86f, 0.80f, 0.08f, 0.05f); p.Tri(0.22f, 0.72f, 0.42f, 0.42f, 0.60f, 0.72f); p.Disc(0.66f, 0.36f, 0.07f); p.Line(0.14f, 0.72f, 0.86f, 0.72f, 0.05f); return true; }
+    if (is("shader")) { p.Circle(0.50f, 0.50f, 0.30f); p.Arc(0.50f, 0.50f, 0.30f, 0.75f, 1.25f, 0.14f); return true; }
+    if (is("audio")) { p.Tri(0.20f, 0.50f, 0.46f, 0.26f, 0.46f, 0.74f); p.Rect(0.20f, 0.40f, 0.34f, 0.60f, 0.02f, 0.05f); p.Arc(0.50f, 0.50f, 0.18f, -0.20f, 0.20f, 0.06f); p.Arc(0.50f, 0.50f, 0.30f, -0.18f, 0.18f, 0.06f); return true; }
+
+    // Навигация и действия файлового диалога.
+    if (is("up")) { p.Line(0.50f, 0.80f, 0.50f, 0.24f, 0.08f); p.Line(0.50f, 0.24f, 0.28f, 0.46f, 0.08f); p.Line(0.50f, 0.24f, 0.72f, 0.46f, 0.08f); return true; }
+    if (is("refresh")) { p.Arc(0.50f, 0.50f, 0.28f, 0.10f, 0.90f, 0.08f); p.Tri(0.62f, 0.16f, 0.86f, 0.26f, 0.62f, 0.38f); return true; }
+    if (is("folder-plus")) { p.FillRect(0.12f, 0.28f, 0.46f, 0.38f, 0.03f); p.Rect(0.12f, 0.32f, 0.88f, 0.76f, 0.08f, 0.05f); p.Line(0.50f, 0.44f, 0.50f, 0.66f, 0.07f); p.Line(0.39f, 0.55f, 0.61f, 0.55f, 0.07f); return true; }
+    if (is("search")) { p.Circle(0.42f, 0.42f, 0.22f); p.Line(0.58f, 0.58f, 0.82f, 0.82f, 0.09f); return true; }
+    if (is("code")) { p.Line(0.36f, 0.30f, 0.18f, 0.50f, 0.08f); p.Line(0.18f, 0.50f, 0.36f, 0.70f, 0.08f); p.Line(0.64f, 0.30f, 0.82f, 0.50f, 0.08f); p.Line(0.82f, 0.50f, 0.64f, 0.70f, 0.08f); p.Line(0.56f, 0.22f, 0.44f, 0.78f, 0.07f); return true; }
+    if (is("question")) { p.Circle(0.50f, 0.50f, 0.34f); p.Arc(0.50f, 0.38f, 0.11f, 0.55f, 1.05f, 0.07f); p.Line(0.50f, 0.49f, 0.50f, 0.60f, 0.07f); p.Disc(0.50f, 0.71f, 0.045f); return true; }
+    if (is("layout")) { p.Rect(0.12f, 0.16f, 0.88f, 0.84f, 0.05f, 0.05f); p.Line(0.50f, 0.16f, 0.50f, 0.84f, 0.05f); p.Line(0.12f, 0.50f, 0.88f, 0.50f, 0.05f); return true; }
     if (is("model"))  { p.Line(0.50f, 0.16f, 0.84f, 0.36f); p.Line(0.84f, 0.36f, 0.50f, 0.56f); p.Line(0.50f, 0.56f, 0.16f, 0.36f); p.Line(0.16f, 0.36f, 0.50f, 0.16f); p.Line(0.16f, 0.36f, 0.16f, 0.64f, 0.06f); p.Line(0.84f, 0.36f, 0.84f, 0.64f, 0.06f); p.Line(0.50f, 0.56f, 0.50f, 0.84f, 0.06f); p.Line(0.16f, 0.64f, 0.50f, 0.84f, 0.06f); p.Line(0.84f, 0.64f, 0.50f, 0.84f, 0.06f); return true; }
 
     // Уровни сообщений.

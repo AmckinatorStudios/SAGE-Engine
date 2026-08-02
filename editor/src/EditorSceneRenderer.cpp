@@ -197,10 +197,13 @@ Shader& OutlineEdgeShader() {
 // Рисует силуэт выбранного меша сплошным белым в масочный буфер (без теста
 // глубины — полный силуэт даже при частичном перекрытии другими объектами).
 void EditorSceneRenderer::RenderOutlineMask(Scene& scene, const std::vector<int>& selection,
-                                            const glm::mat4& view, const glm::mat4& proj) {
+                                            const glm::mat4& view, const glm::mat4& proj, int w,
+                                            int h) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
-    m_outlineMask->Resize(m_vpW, m_vpH);
+    m_outlineMaskW = w;
+    m_outlineMaskH = h;
+    m_outlineMask->Resize(w, h);
     m_outlineMask->Bind();
     device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     device.Clear();
@@ -230,14 +233,14 @@ void EditorSceneRenderer::RenderOutlineMask(Scene& scene, const std::vector<int>
 void EditorSceneRenderer::CompositeOutline(Framebuffer& target) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     target.Bind();
-    device.SetViewport(0, 0, m_vpW, m_vpH);
+    device.SetViewport(0, 0, m_outlineMaskW, m_outlineMaskH);
     device.SetDepthTest(false);
     device.SetBlend(true);
 
     Shader& edge = OutlineEdgeShader();
     edge.Use();
     edge.SetInt("uMask", 0);
-    edge.SetVec2("uTexel", {1.0f / (float)m_vpW, 1.0f / (float)m_vpH});
+    edge.SetVec2("uTexel", {1.0f / (float)m_outlineMaskW, 1.0f / (float)m_outlineMaskH});
     edge.SetVec3("uColor", {1.0f, 0.62f, 0.12f}); // янтарная кайма выделения
     device.BindTexture2D(0, m_outlineMask->ColorTexture());
     m_outlineTri->DrawArrays(3);
@@ -373,16 +376,35 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
 void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
                                          int selectedId, const std::vector<int>& selection,
                                          EditorRenderMode mode, bool showGrid,
-                                         const sage::EngineConfig& cfg, glm::mat4& outView, glm::mat4& outProj) {
+                                         const sage::EngineConfig& cfg, glm::mat4& outView,
+                                         glm::mat4& outProj, int slot,
+                                         const EditorViewOverride& viewOverride) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
 
-    m_sceneFbo->Resize(m_vpW, m_vpH);
-    m_sceneFbo->Bind();
+    slot = std::max(0, std::min(slot, kMaxViews - 1));
+    const bool primary = (slot == 0);
+    const int w = primary ? m_vpW : m_extraW[slot];
+    const int h = primary ? m_vpH : m_extraH[slot];
+    if (w < 8 || h < 8) return;   // панель ещё не разложена — рисовать не во что
+
+    if (!primary && !m_extraFbo[slot]) {
+        m_extraFbo[slot].emplace(w, h);
+        m_extraPostFbo[slot].emplace(w, h);
+    }
+    Framebuffer& sceneFbo = primary ? *m_sceneFbo : *m_extraFbo[slot];
+    Framebuffer& postFbo = primary ? *m_postFbo : *m_extraPostFbo[slot];
+
+    sceneFbo.Resize(w, h);
+    sceneFbo.Bind();
     device.SetClearColor(0.10f, 0.11f, 0.13f, 1.0f);
     device.Clear();
 
-    outView = camera.GetViewMatrix();
-    outProj = camera.GetProjectionMatrix((float)m_vpW / (float)std::max(m_vpH, 1));
+    // Ортогональные виды приходят готовыми матрицами: у них нет свободной
+    // камеры, а есть плоскость, центр и масштаб.
+    outView = viewOverride.Use ? viewOverride.View : camera.GetViewMatrix();
+    outProj = viewOverride.Use ? viewOverride.Proj
+                           : camera.GetProjectionMatrix((float)w / (float)std::max(h, 1));
+    const glm::vec3 eye = viewOverride.Use ? viewOverride.EyePos : camera.Position;
 
     DrawSky(env, outView, outProj);
 
@@ -395,7 +417,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         case EditorRenderMode::Unlit:     shadingMode = 1; break;
         case EditorRenderMode::Normals:   shadingMode = 2; break;
     }
-    DrawLit(scene, env, outView, outProj, camera.Position, shadingMode, wireframe);
+    DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe);
 
     m_particles->Draw(camera, outView, outProj);
 
@@ -421,22 +443,27 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     m_debugDraw->Flush(outView, outProj);
 
     // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).
-    if (!selection.empty()) RenderOutlineMask(scene, selection, outView, outProj);
+    if (!selection.empty()) RenderOutlineMask(scene, selection, outView, outProj, w, h);
 
     // Пост-обработка — только Shaded + включена в конфиге (отладочные режимы как есть).
-    m_postApplied = false;
-    if (cfg.PostProcessing && mode == EditorRenderMode::Shaded) {
-        m_postFbo->Resize(m_vpW, m_vpH);
-        m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
-                         m_sceneFbo->Width(), m_sceneFbo->Height(), outProj, outView,
-                         FxFromConfig(cfg),
-                         /*output=*/&*m_postFbo, 0, 0, m_vpW, m_vpH);
-        m_postApplied = true;
+    //
+    // У ортогональных видов её нет НАМЕРЕННО: свечение и глубина резкости на
+    // схематичном виде сверху мешают попасть по объекту, а именно ради точного
+    // попадания такой вид и открывают.
+    bool postApplied = false;
+    if (cfg.PostProcessing && mode == EditorRenderMode::Shaded && !viewOverride.Use) {
+        postFbo.Resize(w, h);
+        m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
+                         sceneFbo.Height(), outProj, outView, FxFromConfig(cfg),
+                         /*output=*/&postFbo, 0, 0, w, h);
+        postApplied = true;
     }
+    if (primary) m_postApplied = postApplied;
+    else m_extraPostApplied[slot] = postApplied;
 
     // Кайма выделения — поверх ИТОГОВОГО кадра (после поста, постоянная ширина
     // в пикселях, крайне читаемая независимо от размера объекта и дистанции).
-    if (!selection.empty()) CompositeOutline(m_postApplied ? *m_postFbo : *m_sceneFbo);
+    if (!selection.empty()) CompositeOutline(postApplied ? postFbo : sceneFbo);
 
     device.BindDefaultFramebuffer();
 }
@@ -487,6 +514,21 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_ui->End();
     }
     device.BindDefaultFramebuffer();
+}
+
+void EditorSceneRenderer::SetViewportSize(int slot, int w, int h) {
+    if (slot <= 0) { m_vpW = w; m_vpH = h; return; }
+    if (slot >= kMaxViews) return;
+    m_extraW[slot] = w;
+    m_extraH[slot] = h;
+}
+
+uint64_t EditorSceneRenderer::ViewportTexture(int slot) const {
+    if (slot <= 0) return ViewportTexture();
+    if (slot >= kMaxViews || !m_extraFbo[slot]) return 0;
+    return m_extraPostApplied[slot] && m_extraPostFbo[slot]
+               ? m_extraPostFbo[slot]->NativeColorTexture()
+               : m_extraFbo[slot]->NativeColorTexture();
 }
 
 uint64_t EditorSceneRenderer::ViewportTexture() const {

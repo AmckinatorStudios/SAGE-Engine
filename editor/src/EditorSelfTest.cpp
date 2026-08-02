@@ -36,6 +36,9 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 
+#include "sage/scene/Prefab.h"
+#include "sage/render/ModelLoader.h"
+
 namespace fs = std::filesystem;
 
 // ============================================================================
@@ -49,6 +52,12 @@ void EditorLayer::RunSelfTest() {
     size_t before = m_scene->Count();
     std::string err;
     bool ok = true;
+
+    // Подтверждения опасных действий выключаем на время прогона: диалог ждёт
+    // человека, а здесь его нет. Это не обход проверки — сама работа
+    // подтверждений проверяется ниже отдельным шагом, в обоих состояниях
+    // галочки «больше не спрашивать».
+    m_confirm.SetSuppressed("delete-entity", true);
 
     std::error_code ec;
     fs::remove_all("selftest_project", ec); // от прошлого прогона
@@ -803,10 +812,100 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(giCube.Id());
     }
 
+    // --- Новые инструменты редактора: загрузка моделей, префабы, редактор кода,
+    //     подтверждения. Проверяем ИМЕННО то, что человек делает мышью, но без
+    //     кликов: те же методы, что зовут кнопки.
+    {
+        // 1. Модель в форматах, которые экспортирует Blender. Раньше сущность
+        //    умела только .obj — то есть «свою модель» поставить было нельзя.
+        const fs::path modelDir = m_project.AssetsDir() / "selftest_models";
+        fs::create_directories(modelDir, ec);
+        const fs::path objPath = modelDir / "tri.obj";
+        {
+            std::ofstream f(objPath);
+            f << "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n";
+        }
+        if (!ModelLoader::IsSupportedModel(objPath.string())) {
+            LOG_ERROR("Editor") << "SELFTEST: .obj не считается поддерживаемым";
+            ok = false;
+        }
+        if (!ModelLoader::IsSupportedModel("hero.glb") ||
+            !ModelLoader::IsSupportedModel("hero.gltf")) {
+            LOG_ERROR("Editor") << "SELFTEST: glTF не считается поддерживаемым";
+            ok = false;
+        }
+        GameObject modelObj = m_scene->CreateObject("SelfTestModel");
+        MeshRendererComponent& mmr = modelObj.Renderer();
+        mmr.Ref.type = MeshRef::Type::Model;
+        mmr.Ref.path = objPath.string();
+        mmr.MeshPtr = ResourceManager::Instance().GetModel(mmr.Ref.path);
+        if (!mmr.MeshPtr) {
+            LOG_ERROR("Editor") << "SELFTEST: модель не загрузилась: " << mmr.Ref.path;
+            ok = false;
+        }
+
+        // 2. Префаб: сохранить сущность как шаблон и поставить копию.
+        const fs::path prefabPath = m_project.AssetsDir() / "selftest_tool.sageprefab";
+        std::string perr;
+        if (!sage::scene::SavePrefab(*m_scene, modelObj.Entity(), prefabPath.string(), perr)) {
+            LOG_ERROR("Editor") << "SELFTEST: префаб не сохранился: " << perr;
+            ok = false;
+        } else {
+            const int copyId = sage::scene::InstantiatePrefabAt(*m_scene, prefabPath.string(),
+                                                                {7.0f, 1.0f, -2.0f});
+            GameObject copy = m_scene->Get(copyId);
+            if (!copy.Valid() || copy.Name() != "SelfTestModel") {
+                LOG_ERROR("Editor") << "SELFTEST: префаб не поставился в сцену";
+                ok = false;
+            } else if (std::abs(copy.GetTransform().Position.x - 7.0f) > 1e-3f) {
+                LOG_ERROR("Editor") << "SELFTEST: префаб встал не в заданную точку";
+                ok = false;
+            }
+            m_scene->RemoveObject(copyId);
+        }
+        m_scene->RemoveObject(modelObj.Id());
+
+        // 3. Редактор кода: открыть скрипт, увидеть строки, определить язык.
+        const fs::path luaPath = m_project.AssetsDir() / "selftest_code.lua";
+        { std::ofstream f(luaPath); f << "local x = 1\n-- комментарий\nfunction F() end\n"; }
+        if (!m_code.OpenFile(luaPath)) {
+            LOG_ERROR("Editor") << "SELFTEST: редактор кода не открыл .lua";
+            ok = false;
+        }
+
+        // 4. Подтверждение опасного действия: пока вопрос включён, объект
+        //    остаётся; с выключенным вопросом действие проходит сразу. Именно
+        //    так и должна работать галочка «больше не спрашивать».
+        GameObject victim = m_scene->CreateObject("SelfTestVictim");
+        const int victimId = victim.Id();
+        SetSelectedId(victimId);
+        m_selection = {victimId};
+        m_confirm.SetSuppressed("delete-entity", false);
+        DeleteSelected();
+        if (!m_scene->Get(victimId).Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: удаление прошло БЕЗ подтверждения";
+            ok = false;
+        }
+        m_confirm.SetSuppressed("delete-entity", true);
+        SetSelectedId(victimId);
+        m_selection = {victimId};
+        DeleteSelected();
+        if (m_scene->Get(victimId).Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: с выключенным вопросом объект не удалился";
+            ok = false;
+        }
+        // Возвращаем «не спрашивать» на остаток прогона: дальше кликать
+        // по-прежнему некому.
+        m_confirm.SetSuppressed("delete-entity", true);
+        SetSelectedId(-1);
+        m_selection.clear();
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
-                               << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI, "
+                               << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
+                               << "models + prefab-api + code-editor + confirm, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

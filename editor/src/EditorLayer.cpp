@@ -208,6 +208,15 @@ void EditorLayer::OnAttach() {
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_launcher.Dismiss(); m_showProfiler = true; }
+    if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
+        m_launcher.Dismiss();
+        m_assets.Select(a);
+    }
+    if (const char* f = std::getenv("SAGE_EDITOR_OPEN_CODE")) {
+        m_launcher.Dismiss();
+        m_showCode = true;
+        m_code.OpenFile(f);
+    }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
     // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
@@ -241,6 +250,11 @@ void EditorLayer::OnDetach() {
     }
     sage::CrashHandler::Uninstall();  // дальше рушить уже нечего, а GL-контекст уходит
     m_console.Detach();    // сток ссылается на панель — снять до разрушения
+    // GPU-ресурсы панелей — ДО разрушения контекста. Превью материала держит
+    // свой буфер и куб окружения; их деструктор сработал бы уже после смерти
+    // контекста, и редактор падал бы при выходе — после всей работы, когда
+    // списать падение уже не на что.
+    m_inspector.Shutdown();
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
     if (m_imguiReady) {
         ImGui_ImplOpenGL3_Shutdown();
@@ -248,6 +262,12 @@ void EditorLayer::OnDetach() {
         ImGui::DestroyContext();
         m_imguiReady = false;
     }
+    // Кэш префабов держит РАЗОБРАННЫЕ СЦЕНЫ, а в них — меши на GPU. Он
+    // статический и умирает на exit(), то есть уже ПОСЛЕ гибели контекста:
+    // деструктор геометрии зовёт драйвер, которого больше нет. Ровно на этом
+    // редактор и падал при выходе — после всей работы, когда всё сохранено и
+    // списать падение не на что.
+    sage::scene::ClearPrefabCache();
     ResourceManager::Instance().Clear();
 }
 
@@ -580,16 +600,61 @@ void EditorLayer::DuplicateSelected() {
     m_selectedId = copies.empty() ? -1 : copies.back();
 }
 
+namespace {
+// Сколько сущностей под этой в иерархии. Нужно ровно для одного: сказать
+// человеку в вопросе, СКОЛЬКО он на самом деле удаляет.
+int CountDescendants(Scene& scene, entt::entity e) {
+    const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(e);
+    if (!h) return 0;
+    int n = 0;
+    for (entt::entity kid : h->Children) {
+        if (!scene.Registry().valid(kid)) continue;
+        n += 1 + CountDescendants(scene, kid);
+    }
+    return n;
+}
+} // namespace
+
 void EditorLayer::DeleteSelected() {
-    bool any = false;
-    for (int id : m_selection)
-        if (m_scene->Get(id).Valid()) { any = true; break; }
-    if (!any) return;
-    PushUndoSnapshot();
-    for (int id : m_selection)
-        if (m_scene->Get(id).Valid()) m_scene->RemoveObject(id); // удаляет и поддерево
-    SetSelectedId(-1);
-    m_selection.clear();
+    int count = 0;
+    std::string firstName;
+    for (int id : m_selection) {
+        GameObject o = m_scene->Get(id);
+        if (!o.Valid()) continue;
+        if (count == 0) firstName = o.Name();
+        ++count;
+    }
+    if (count == 0) return;
+
+    // Спрашиваем — и считаем ПОДДЕРЕВО, а не только выделенное: удаление
+    // родителя уносит детей, и человек, выделивший одну строку в иерархии,
+    // сплошь и рядом не помнит, сколько под ней.
+    int withChildren = 0;
+    for (int id : m_selection) {
+        GameObject o = m_scene->Get(id);
+        if (!o.Valid()) continue;
+        withChildren += 1 + CountDescendants(*m_scene, o.Entity());
+    }
+
+    std::string message;
+    if (count == 1) {
+        message = "Удалить «" + firstName + "»?";
+        if (withChildren > 1)
+            message += "\nВместе с потомками это " + std::to_string(withChildren) + " сущностей.";
+    } else {
+        message = "Удалить выделенные объекты (" + std::to_string(count) + ")?";
+        if (withChildren > count)
+            message += "\nВместе с потомками это " + std::to_string(withChildren) + " сущностей.";
+    }
+    message += "\nОтменить можно через Ctrl+Z.";
+
+    m_confirm.Ask("delete-entity", "Удаление объекта", message, [this]() {
+        PushUndoSnapshot();
+        for (int id : m_selection)
+            if (m_scene->Get(id).Valid()) m_scene->RemoveObject(id); // удаляет и поддерево
+        SetSelectedId(-1);
+        m_selection.clear();
+    });
 }
 
 void EditorLayer::SetSelectedId(int id) {
@@ -1024,7 +1089,24 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode, m_showGrid,
-                              cfg, m_view, m_proj); // отдаёт view/proj для гизмо/пикинга
+                              cfg, m_view, m_proj);
+
+    // Дополнительные виды раскладки (сверху/спереди/сбоку). Каждый — полный
+    // проход сцены, поэтому рисуются ТОЛЬКО те, что панель попросила: одиночный
+    // вьюпорт, самый частый случай, не платит за раскладку, которой не
+    // пользуются.
+    for (int i = 1; i < m_viewCount; ++i) {
+        const ViewRequest& r = m_viewRequests[i];
+        if (!r.Active || r.W < 8 || r.H < 8) continue;
+        EditorViewOverride ov;
+        ov.Use = r.Ortho;
+        ov.View = r.View;
+        ov.Proj = r.Proj;
+        ov.EyePos = r.EyePos;
+        glm::mat4 v, p;
+        m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode,
+                                  m_showGrid, cfg, v, p, i, ov);
+    } // отдаёт view/proj для гизмо/пикинга
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 
     app.Device().SetViewport(0, 0, app.GetWindow().Width(), app.GetWindow().Height());
@@ -1367,6 +1449,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (ImGui::MenuItem("Reset Layout")) m_rebuildDockLayout = true;
             ImGui::MenuItem("Show Grid", nullptr, &m_showGrid);
             ImGui::Separator();
+            ImGui::MenuItem("Код", nullptr, &m_showCode);
             ImGui::MenuItem("Профилировщик", nullptr, &m_showProfiler);
             ImGui::Separator();
             ImGui::MenuItem("Settings...", nullptr, &m_showSettings);
@@ -1394,6 +1477,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     m_profiler.Draw(&m_showProfiler);
+    m_confirm.Draw();
+    m_code.Draw(&m_showCode);
     DrawAboutWindow();
 
     ImGui::End();

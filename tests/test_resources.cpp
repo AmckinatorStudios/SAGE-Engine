@@ -642,3 +642,58 @@ TEST(RHI_null_backend_satisfies_the_contract) {
     CHECK_TRUE(result.Ok());
     CHECK_TRUE(result.Checked > 15);   // набор действительно отработал, а не выродился
 }
+
+// --- Модели: не только .obj ----------------------------------------------------
+//
+// Сущность сцены держит один Mesh, и грузился он через LoadObj — то есть в
+// редакторе нельзя было поставить в сцену НИ ОДНУ модель в glTF, а это формат,
+// в который экспортирует Blender по умолчанию. Класс Model формат понимал, но
+// он не Mesh и в ECS не подключён; выглядело это как «модели не грузятся».
+TEST(ModelLoader_reads_gltf_not_only_obj) {
+    const afs::path dir = afs::temp_directory_path() / "sage_gltf_test";
+    afs::remove_all(dir);
+    afs::create_directories(dir);
+
+    // Минимальный корректный .gltf: один треугольник, буфер в base64.
+    // Позиции (0,0,0), (1,0,0), (0,1,0) — три vec3 float, 36 байт.
+    const std::string gltf = R"({
+      "asset": {"version": "2.0"},
+      "scene": 0,
+      "scenes": [{"nodes": [0]}],
+      "nodes": [{"mesh": 0}],
+      "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "mode": 4}]}],
+      "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+                     "min": [0,0,0], "max": [1,1,0]}],
+      "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": 36}],
+      "buffers": [{"byteLength": 36,
+        "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAA"}]
+    })";
+    const afs::path path = dir / "tri.gltf";
+    std::ofstream(path) << gltf;
+
+    bool loaded = false;
+    try {
+        const sage::render::MeshData d = ModelLoader::LoadMeshData(path.string());
+        loaded = d.Vertices.size() == 3 && d.Indices.size() == 3;
+    } catch (const std::exception& e) {
+        LOG_ERROR("Test") << "glTF не загрузился: " << e.what();
+    }
+    CHECK_TRUE(loaded);
+    CHECK_TRUE(ModelLoader::IsSupportedModel("hero.glb"));
+    CHECK_TRUE(ModelLoader::IsSupportedModel("HERO.GLTF"));
+    CHECK_TRUE(ModelLoader::IsSupportedModel("hero.obj"));
+    CHECK_FALSE(ModelLoader::IsSupportedModel("hero.fbx"));
+
+    // Три разные причины «не грузится» обязаны звучать по-разному: человеку,
+    // у которого модель не встала в сцену, нужна именно та, что случилась.
+    std::string missingMsg, badExtMsg;
+    try { ModelLoader::LoadMeshData((dir / "нет.obj").string()); }
+    catch (const std::exception& e) { missingMsg = e.what(); }
+    try { ModelLoader::LoadMeshData(path.string() + ".fbx"); }
+    catch (const std::exception& e) { badExtMsg = e.what(); }
+    CHECK_TRUE(missingMsg.find("не найден") != std::string::npos);
+    CHECK_TRUE(badExtMsg.find("не найден") != std::string::npos ||
+               badExtMsg.find("не поддерживается") != std::string::npos);
+
+    afs::remove_all(dir);
+}

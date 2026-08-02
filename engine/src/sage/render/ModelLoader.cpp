@@ -126,4 +126,65 @@ sage::render::MeshData LoadObjData(const std::string& path) {
     return sage::render::MeshData{std::move(vertices), std::move(indices)};
 }
 
+// --- glTF / GLB ---------------------------------------------------------------
+//
+// tinygltf РАЗВЁРНУТ в Model.cpp (там стоит TINYGLTF_IMPLEMENTATION), поэтому
+// здесь только объявления: второе разворачивание дало бы дублирующиеся символы
+// на линковке.
+
+namespace {
+
+std::string ExtensionLower(const std::string& path) {
+    const size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos) return "";
+    std::string ext = path.substr(dot + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return ext;
+}
+
+} // namespace
+
+bool IsSupportedModel(const std::string& path) {
+    const std::string ext = ExtensionLower(path);
+    return ext == "obj" || ext == "gltf" || ext == "glb";
+}
+
+// Реализация в Model.cpp — там развёрнут tinygltf.
+sage::render::MeshData LoadGltfMeshDataImpl(const std::string& path, bool binary);
+
+sage::render::MeshData LoadGltfData(const std::string& path, bool binary) {
+    sage::render::MeshData d = LoadGltfMeshDataImpl(path, binary);
+    // Настройки импорта применяются ко ВСЕМ форматам одинаково: масштаб и
+    // центрирование — свойство ассета, а не формата, и разное поведение у .obj
+    // и .glb означало бы, что одна и та же модель ведёт себя по-разному в
+    // зависимости от того, как её экспортировали.
+    ApplyImportSettings(d.Vertices, LoadImportSettings(path));
+    return d;
+}
+
+sage::render::MeshData LoadMeshData(const std::string& path) {
+    // Отсутствующий файл отличаем от битого ЗДЕСЬ: ниже оба выглядят как
+    // «парсер не смог», а человеку, у которого «модель не грузится», нужно
+    // знать, опечатался он в пути или у него испорченный экспорт.
+    {
+        std::ifstream probe(path, std::ios::binary);
+        if (!probe) {
+            throw std::runtime_error("Файл модели не найден: " + path);
+        }
+    }
+
+    const std::string ext = ExtensionLower(path);
+    if (ext == "obj") return LoadObjData(path);
+    if (ext == "gltf") return LoadGltfData(path, false);
+    if (ext == "glb") return LoadGltfData(path, true);
+    throw std::runtime_error("Формат модели не поддерживается: " + path +
+                             " (поддерживаются .obj, .gltf, .glb)");
+}
+
+std::shared_ptr<Mesh> LoadMesh(const std::string& path) {
+    sage::render::MeshData d = LoadMeshData(path);
+    return std::make_shared<Mesh>(d.Vertices, d.Indices);
+}
+
 }

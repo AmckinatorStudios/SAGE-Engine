@@ -10,6 +10,10 @@
 
 #include "EditorHost.h"
 #include "sage/core/Log.h"
+#include <algorithm>
+
+#include "EditorIcons.h"
+#include "Project.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ParticlePresets.h"
@@ -20,9 +24,124 @@
 // Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
 // ResourceManager — все сущности с этим материалом обновляются в вьюпорте
 // сразу; Save фиксирует значения на диск, Revert перечитывает файл.
+// Слот текстуры: превью + путь + «Обзор…» + «Из Assets» + «Очистить».
+void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::string& path,
+                                     const std::shared_ptr<Texture>& tex, const char* tooltip) {
+    ImGui::PushID(label);
+
+    // Превью — квадрат 48x48. Пустой слот рисуется рамкой, а не пустотой: иначе
+    // «текстура не назначена» и «текстура назначена, но не загрузилась»
+    // выглядят одинаково, а это разные беды с разным лечением.
+    const ImVec2 size(48, 48);
+    if (tex) {
+        ImGui::Image((ImTextureID)(std::intptr_t)tex->NativeHandle(), size, ImVec2(0, 1),
+                     ImVec2(1, 0));
+    } else {
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(size);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImU32 col = path.empty() ? IM_COL32(110, 110, 120, 160) : IM_COL32(210, 90, 90, 220);
+        dl->AddRect(p0, ImVec2(p0.x + size.x, p0.y + size.y), col, 4.0f, 0, 1.5f);
+        if (!path.empty()) {
+            // Крест — «путь есть, картинки нет».
+            dl->AddLine(ImVec2(p0.x + 12, p0.y + 12), ImVec2(p0.x + 36, p0.y + 36), col, 2.0f);
+            dl->AddLine(ImVec2(p0.x + 36, p0.y + 12), ImVec2(p0.x + 12, p0.y + 36), col, 2.0f);
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(label);
+        if (tooltip) ImGui::TextDisabled("%s", tooltip);
+        if (path.empty()) ImGui::TextDisabled("Не назначена");
+        else if (!tex) ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "Не загрузилась: %s",
+                                          path.c_str());
+        else ImGui::TextDisabled("%s", path.c_str());
+        ImGui::EndTooltip();
+    }
+
+    ImGui::SameLine();
+    ImGui::BeginGroup();
+    ImGui::TextUnformatted(label);
+
+    char buf[512];
+    std::snprintf(buf, sizeof(buf), "%s", path.c_str());
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::InputText("##path", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        path = buf;
+        ResourceManager::Instance().ResolveMaterialTextures(
+            *ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string()));
+    }
+
+    if (EditorIcons::Button("folder", "Обзор…")) {
+        FileBrowser::Config c;
+        c.Title = std::string("Текстура: ") + label;
+        c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
+        c.FilterLabel = "Изображения";
+        if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+        m_browser.Open(c);
+        m_browseTarget = &path;
+        m_browseIsShader = false;
+    }
+    // «Из Assets» — то, что выбрано в панели ассетов: самый быстрый путь, когда
+    // текстура уже найдена там.
+    const std::string selExt = host.SelectedAssetPath().extension().string();
+    const bool selIsImage = selExt == ".png" || selExt == ".jpg" || selExt == ".jpeg" ||
+                            selExt == ".tga" || selExt == ".bmp" || selExt == ".hdr";
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!selIsImage);
+    if (EditorIcons::Button("texture", "Из Assets")) {
+        path = host.SelectedAssetPath().string();
+    }
+    ImGui::EndDisabled();
+    if (!selIsImage && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Выберите изображение в панели Assets");
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(path.empty());
+    if (EditorIcons::Button("trash", "Очистить")) path.clear();
+    ImGui::EndDisabled();
+
+    ImGui::EndGroup();
+    ImGui::PopID();
+    ImGui::Spacing();
+}
+
 void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     std::string pathStr = host.SelectedAssetPath().string();
     std::shared_ptr<Material> material = ResourceManager::Instance().GetMaterial(pathStr);
+
+    // --- 3D-превью ------------------------------------------------------------
+    //
+    // Раньше материал показывался КВАДРАТИКОМ ЦВЕТА albedo. По нему нельзя
+    // понять ничего из того, ради чего материал и настраивают: металл или
+    // диэлектрик, гладкий или матовый, как легла карта нормалей. Всё это видно
+    // только на изогнутой поверхности при свете.
+    if (material) {
+        const float side = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
+        const uint64_t tex = m_preview.RenderMaterial(material, (int)side);
+        if (tex) {
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(side, side), ImVec2(0, 1),
+                         ImVec2(1, 0));
+            // Вращение мышью: блик и шероховатость читаются только в движении —
+            // на неподвижной картинке гладкое и почти гладкое неотличимы.
+            if (ImGui::IsItemHovered()) {
+                ImGuiIO& io = ImGui::GetIO();
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                    m_preview.Orbit(io.MouseDelta.x * 0.5f, -io.MouseDelta.y * 0.5f);
+                }
+                if (io.MouseWheel != 0.0f) m_preview.Zoom(io.MouseWheel);
+                ImGui::SetTooltip("ЛКМ — вращать, колесо — приблизить");
+            }
+            (void)p0;
+        }
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextDisabled("Превью");
+        if (ImGui::SmallButton("Сбросить вид")) m_preview.ResetView();
+        ImGui::EndGroup();
+        ImGui::Spacing();
+    }
 
     ImGui::TextDisabled("Material: %s", host.SelectedAssetPath().filename().string().c_str());
     ImGui::ColorEdit3("Albedo", &material->Albedo.x);
@@ -35,36 +154,23 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 
     // Карты: путь правится вручную; по Enter/потере фокуса перезагружаем текстуры
     // материала (albedo/normal), чтобы вьюпорт сразу показал результат.
-    char texBuf[512];
-    std::snprintf(texBuf, sizeof(texBuf), "%s", material->TexturePath.c_str());
-    if (ImGui::InputText("Albedo Map", texBuf, sizeof(texBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->TexturePath = texBuf;
-        ResourceManager::Instance().ResolveMaterialTextures(*material);
-    }
-    char nrmBuf[512];
-    std::snprintf(nrmBuf, sizeof(nrmBuf), "%s", material->NormalMapPath.c_str());
-    if (ImGui::InputText("Normal Map", nrmBuf, sizeof(nrmBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->NormalMapPath = nrmBuf;
-        ResourceManager::Instance().ResolveMaterialTextures(*material);
-    }
-    char metBuf[512];
-    std::snprintf(metBuf, sizeof(metBuf), "%s", material->MetallicMapPath.c_str());
-    if (ImGui::InputText("Metallic Map", metBuf, sizeof(metBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->MetallicMapPath = metBuf;
-        ResourceManager::Instance().ResolveMaterialTextures(*material);
-    }
-    char rghBuf[512];
-    std::snprintf(rghBuf, sizeof(rghBuf), "%s", material->RoughnessMapPath.c_str());
-    if (ImGui::InputText("Roughness Map", rghBuf, sizeof(rghBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->RoughnessMapPath = rghBuf;
-        ResourceManager::Instance().ResolveMaterialTextures(*material);
-    }
-    char aoBuf[512];
-    std::snprintf(aoBuf, sizeof(aoBuf), "%s", material->AOMapPath.c_str());
-    if (ImGui::InputText("AO Map", aoBuf, sizeof(aoBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->AOMapPath = aoBuf;
-        ResourceManager::Instance().ResolveMaterialTextures(*material);
-    }
+        // Слоты текстур: превью, путь, «Обзор…», «Из Assets», «Очистить».
+    //
+    // Раньше здесь стояли пять голых полей ввода, применявшихся по Enter: путь
+    // к текстуре надо было ЗНАТЬ и напечатать без опечатки, а единственной
+    // обратной связью была строчка в консоли. Слот показывает саму картинку —
+    // назначено ли что-то и то ли это, что хотели, видно сразу.
+    DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
+                    "Базовый цвет. Умножается на Albedo выше.");
+    DrawTextureSlot(host, "Normal", material->NormalMapPath, material->NormalTex,
+                    "Карта нормалей, tangent-space (OpenGL: зелёный вверх).");
+    DrawTextureSlot(host, "Metallic", material->MetallicMapPath, material->MetallicTex,
+                    "Канал R. Умножается на фактор Metallic выше.");
+    DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
+                    "Канал R. Умножается на фактор Roughness выше.");
+    DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
+                    "Ambient occlusion, канал R. Пусто — AO = 1.");
+
     ImGui::TextDisabled("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel.");
     ImGui::TextDisabled("Map value multiplies the factor above; Enter applies the path.");
 
@@ -192,14 +298,53 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         if (mr.Ref.type == MeshRef::Type::Model) {
             char pathBuf[512];
             std::snprintf(pathBuf, sizeof(pathBuf), "%s", mr.Ref.path.c_str());
-            if (ImGui::InputText("Path", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##modelpath", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
             host.TrackLastImGuiItem();
+
+            // «Обзор…» вместо «напечатай путь наизусть». Именно на этом шаге
+            // всё и заканчивалось: человек не помнит абсолютный путь к своей
+            // модели, а ошибка в нём давала только строчку в консоли.
+            if (EditorIcons::Button("folder", "Обзор…")) {
+                FileBrowser::Config c;
+                c.Title = "Выбрать модель";
+                c.Filters = {".obj", ".gltf", ".glb"};
+                c.FilterLabel = "Модели (*.obj, *.gltf, *.glb)";
+                if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+                m_browser.Open(c);
+                m_browseTarget = &mr.Ref.path;
+                m_browseIsShader = false;
+                m_browseIsMesh = true;
+            }
             ImGui::SameLine();
-            if (ImGui::Button("Load")) {
-                try {
-                    mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
-                } catch (const std::exception& e) {
-                    LOG_ERROR("Editor") << "Model load failed: " << e.what();
+            const std::string selExt = host.SelectedAssetPath().extension().string();
+            const bool selIsModel = ModelLoader::IsSupportedModel(selExt);
+            ImGui::BeginDisabled(!selIsModel);
+            if (EditorIcons::Button("model", "Из Assets")) {
+                host.PushUndoSnapshot();
+                mr.Ref.path = host.SelectedAssetPath().string();
+                m_pendingMeshLoad = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (EditorIcons::Button("refresh", "Загрузить")) m_pendingMeshLoad = true;
+
+            if (m_pendingMeshLoad) {
+                m_pendingMeshLoad = false;
+                mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+                // GetModel сам логирует причину и отдаёт nullptr — сообщаем об
+                // этом ЗДЕСЬ, в панели: строчку в консоли легко не заметить, а
+                // «модель не появилась» без объяснения выглядит как поломка
+                // редактора.
+                if (!mr.MeshPtr) {
+                    host.SetStatusMessage("Модель не загрузилась: " + mr.Ref.path +
+                                          " — подробности в Console");
+                }
+            }
+            if (!mr.Ref.path.empty() && !mr.MeshPtr) {
+                ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "Меш не загружен");
+                if (!ModelLoader::IsSupportedModel(mr.Ref.path)) {
+                    ImGui::TextDisabled("Поддерживаются .obj, .gltf, .glb");
                 }
             }
         }
@@ -884,6 +1029,23 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
 }
 
 void InspectorPanel::Draw(EditorHost& host) {
+    // Результат обзора приходит через кадр после нажатия — кладём его в то поле,
+    // ради которого диалог открывали.
+    if (m_browser.Draw() && m_browseTarget) {
+        *m_browseTarget = m_browser.Result().string();
+        m_browseTarget = nullptr;
+        if (m_browseIsMesh) {
+            m_browseIsMesh = false;
+            m_pendingMeshLoad = true;   // грузим в том же кадре, ниже по панели
+        }
+        if (m_browseIsShader) {
+            if (std::shared_ptr<Material> m =
+                    ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string())) {
+                m->ShaderPtr.reset();
+            }
+        }
+    }
+
     ImGui::Begin("Inspector");
 
     // Выбранный в Assets материал редактируется здесь же — независимо от

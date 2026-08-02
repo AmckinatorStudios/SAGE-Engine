@@ -1,4 +1,5 @@
 #pragma once
+#include <glm/glm.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -115,6 +116,31 @@ public:
     // сторонним API, и это бэкенд-специфично по своей природе.
     virtual uint64_t SceneTexture() const = 0;
     virtual void SetViewportSize(int w, int h) = 0;    // панель сообщает размер под FBO
+
+    // --- Мультивьюпорт ------------------------------------------------------
+    //
+    // Панель раскладывает виды и говорит хосту, что и какого размера рисовать;
+    // сам рендер идёт в начале СЛЕДУЮЩЕГО кадра — там, где живёт графический
+    // контекст. Кадр задержки здесь был всегда (SetViewportSize работает так же
+    // с самого начала), и на глаз он незаметен: раскладку меняют редко.
+    struct ViewRequest {
+        bool Active = false;
+        int W = 0, H = 0;
+        bool Ortho = false;        // ортогональный вид (сверху/спереди/сбоку)
+        glm::mat4 View{1.0f};
+        glm::mat4 Proj{1.0f};
+        glm::vec3 EyePos{0.0f};
+    };
+    static constexpr int kMaxViews = 4;
+    virtual void SetViewRequests(const ViewRequest* requests, int count) = 0;
+    virtual uint64_t ViewTexture(int slot) const = 0;
+
+    // Открыть файл во встроенном редакторе кода (.lua, .vert, .frag).
+    // Двойной клик по скрипту в Assets должен ОТКРЫВАТЬ его, а не молчать: до
+    // этого редактор умел скрипты только запускать, и править их приходилось во
+    // внешнем редакторе — то есть вся ценность горячей перезагрузки упиралась в
+    // переключение окон.
+    virtual void OpenCodeFile(const std::filesystem::path& path) = 0;
     // u,v в [0..1] — выбор сущности лучом. additive (Ctrl) — добавить/убрать из набора.
     virtual void PickAtViewport(float u, float v, bool additive = false) = 0;
 

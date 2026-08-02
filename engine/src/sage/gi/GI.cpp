@@ -45,7 +45,10 @@ sage::render::MeshData ResolveMeshData(const MeshRef& ref) {
             const std::string& p = ref.path;
             if (p.size() >= 4 && p.compare(p.size() - 4, 4, ".obj") == 0) {
                 try {
-                    return ModelLoader::LoadObjData(p);
+                    // Любой поддерживаемый формат, а не только .obj: иначе
+                    // модель в glTF не отбрасывала бы запечённой тени и не
+                    // получала бы лайтмапу — то есть на бейке исчезала бы.
+                    return ModelLoader::LoadMeshData(p);
                 } catch (const std::exception& e) {
                     LOG_WARN("GI") << "Модель не вошла в бейк (" << p << "): " << e.what();
                 }

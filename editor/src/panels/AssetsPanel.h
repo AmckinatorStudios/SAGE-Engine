@@ -16,6 +16,9 @@ public:
     void Draw(EditorHost& host);
 
     const std::filesystem::path& Selected() const { return m_selected; }
+    // Выбрать ассет программно — нужно headless-прогонам и переходу «показать
+    // в Assets» из других панелей.
+    void Select(const std::filesystem::path& p) { m_selected = p; }
 
     // Создаёт ассет kind с именем name в папке dir (расширение дописывается).
     // false + err при ошибке. Публично: используется и модалкой, и self-test'ом.

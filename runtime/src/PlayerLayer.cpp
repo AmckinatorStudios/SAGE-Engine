@@ -15,6 +15,7 @@
 #include "sage/core/Application.h"
 #include "sage/core/Config.h"
 #include "sage/core/SaveGame.h"
+#include "sage/scene/Prefab.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
@@ -197,6 +198,11 @@ void PlayerLayer::OnAttach() {
 void PlayerLayer::OnDetach() {
     m_physics.reset();
     m_scripts.reset();
+    // Кэш префабов держит разобранные сцены, а в них — меши на GPU. Он
+    // статический и умирает на exit(), уже после гибели контекста: деструктор
+    // геометрии позвал бы драйвер, которого больше нет. Игра, ставящая префабы
+    // (а это любая игра про постройку), падала бы ровно при выходе.
+    sage::scene::ClearPrefabCache();
     ResourceManager::Instance().Clear();
 }
 

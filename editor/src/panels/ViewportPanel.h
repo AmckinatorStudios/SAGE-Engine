@@ -5,6 +5,8 @@
 
 #include <glm/glm.hpp>
 
+#include "imgui.h"
+
 class EditorHost;
 
 // Панель Viewport — картинка сцены (редакторская камера) + всё интерактивное:
@@ -22,7 +24,36 @@ public:
     // открываться на ней, а не на «игровом окне» Game.
     void RequestFocus() { m_focusFrames = 3; }
 
+    // --- Раскладка видов ----------------------------------------------------
+    //
+    // Один вьюпорт заставляет крутить камеру ради каждой проверки «а ровно ли
+    // стоит», и на глаз в перспективе это всё равно не проверить: у неё нет
+    // прямых углов. Ортогональные виды сверху/спереди/сбоку отвечают на такие
+    // вопросы сразу — за это их и держат во всех редакторах.
+    enum class Layout { Single, TwoColumns, Quad };
+    enum class ViewKind { Perspective, Top, Front, Side };
+
+    struct OrthoView {
+        // Центр видимой области в МИРЕ и высота кадра в мировых единицах.
+        // Не камера с позицией и поворотом: у ортогонального вида нет ни того,
+        // ни другого — есть плоскость, по которой ездят, и масштаб.
+        glm::vec3 Center{0.0f};
+        float Height = 20.0f;
+    };
+
 private:
+    void DrawViewToolbar(EditorHost& host);
+    // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
+    // над ним (для взаимодействия).
+    bool DrawViewImage(EditorHost& host, int slot, ViewKind kind, ImVec2 size, ImVec2& outPos);
+    static glm::mat4 OrthoViewMatrix(ViewKind kind, const glm::vec3& center);
+    static const char* ViewKindName(ViewKind kind);
+
+    Layout m_layout = Layout::Single;
+    ViewKind m_kinds[4] = {ViewKind::Perspective, ViewKind::Top, ViewKind::Front, ViewKind::Side};
+    OrthoView m_ortho[4];
+    int m_activeSlot = 0;   // где сейчас работают гизмо и хоткеи
+
     bool m_cameraDriving = false; // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)
     bool m_gizmoWasUsing = false; // фронт «начали таскать гизмо» -> одна запись undo
     int m_focusFrames = 3;        // >0 — просим фокус (стартовые кадры + после RequestFocus)

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <memory>
 #include <string>
 #include "sage/rhi/Resources.h"
@@ -45,6 +46,15 @@ public:
 
     int Width() const { return m_width; }
     int Height() const { return m_height; }
+
+    // Хендл для привязки через GraphicsDevice::BindTexture2D.
+    sage::rhi::TextureHandle Handle() const { return m_texture->Handle(); }
+
+    // Сырое число бэкенда для ImGui::Image — та же единственная легальная дверь
+    // наружу, что и у rhi::Texture2D::NativeHandle. Нужна панелям редактора:
+    // слот текстуры показывает саму картинку, и без этого «назначено» и
+    // «назначено, но не загрузилось» выглядели бы одинаково.
+    uint64_t NativeHandle() const { return m_texture->NativeHandle(); }
 
     // Пересоздаёт GPU-хранилище из уже декодированных RGBA8-пикселей. Ключ
     // асинхронной загрузки: воркер декодирует файл в CPU-буфер, а главный поток

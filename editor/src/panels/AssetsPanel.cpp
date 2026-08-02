@@ -153,6 +153,17 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         if (isDir) host.AssetsCwd() = path;
         else if (path.extension() == ".sage") host.LoadSceneFromFile(path);
         else if (path.extension() == ".sageprefab") host.InstantiatePrefab(path); // инстанс в сцену
+        else {
+            // Код открывается во встроенном редакторе: скрипты и шейдеры правят
+            // постоянно, и уводить человека во внешний редактор на каждую
+            // строчку значит терять горячую перезагрузку, ради которой она и
+            // сделана.
+            const std::string ext = path.extension().string();
+            if (ext == ".lua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
+                ext == ".txt" || ext == ".md" || ext == ".json") {
+                host.OpenCodeFile(path);
+            }
+        }
     }
     if (ImGui::BeginPopupContextItem("##tile_ctx")) {
         m_selected = path;

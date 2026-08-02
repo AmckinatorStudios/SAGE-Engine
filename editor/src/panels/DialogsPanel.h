@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 
+#include "FileBrowser.h"
+
 class EditorHost;
 
 // Панель модальных диалогов File-меню: New Project / Open Project / Save Scene
@@ -33,4 +35,17 @@ private:
     char m_buildDir[512] = "";
     std::string m_error;       // сообщение об ошибке текущей модалки
     std::string m_buildResult; // путь готовой сборки (успех Build Game)
+
+    // Обзор файловой системы. Раньше КАЖДЫЙ путь здесь вводился руками, и это
+    // была не мелочь: человек не помнит абсолютный путь к своему проекту, а
+    // единственной обратной связью на опечатку была строчка в консоли.
+    FileBrowser m_browser;
+    // Куда положить результат обзора: у диалогов свои буферы, и без этого
+    // пришлось бы заводить по браузеру на каждый.
+    char* m_browseTarget = nullptr;
+    size_t m_browseTargetSize = 0;
+    // Открыть обзор с заданной настройкой и писать результат в buffer.
+    void Browse(const FileBrowser::Config& cfg, char* buffer, size_t size);
+    // Кнопка «Обзор…» рядом с полем; сама зовёт Browse.
+    void BrowseButton(const char* id, const FileBrowser::Config& cfg, char* buffer, size_t size);
 };

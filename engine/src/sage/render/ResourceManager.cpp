@@ -125,7 +125,7 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     if (it != m_models.end()) return it->second;
     std::shared_ptr<Mesh> mesh;
     try {
-        mesh = ModelLoader::LoadObj(Locate(path));
+        mesh = ModelLoader::LoadMesh(Locate(path));
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
     }

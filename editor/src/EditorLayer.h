@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <optional>
 #include <memory>
 #include <string>
@@ -36,6 +37,8 @@
 #include "PluginManager.h"
 #include "panels/ConsolePanel.h"
 #include "panels/ProfilerPanel.h"
+#include "ConfirmDialog.h"
+#include "CodeEditor.h"
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/ViewportPanel.h"
@@ -140,6 +143,19 @@ public:
     const glm::mat4& ProjMatrix() const override { return m_proj; }
     uint64_t SceneTexture() const override { return m_renderer.ViewportTexture(); }
     void SetViewportSize(int w, int h) override { m_renderer.SetViewportSize(w, h); }
+    void SetViewRequests(const ViewRequest* requests, int count) override {
+        m_viewCount = std::min(count, kMaxViews);
+        for (int i = 0; i < m_viewCount; ++i) {
+            m_viewRequests[i] = requests[i];
+            if (m_viewRequests[i].Active) m_renderer.SetViewportSize(i, m_viewRequests[i].W,
+                                                                     m_viewRequests[i].H);
+        }
+    }
+    uint64_t ViewTexture(int slot) const override { return m_renderer.ViewportTexture(slot); }
+    void OpenCodeFile(const std::filesystem::path& path) override {
+        m_showCode = true;
+        m_code.OpenFile(path);
+    }
     void PickAtViewport(float u, float v, bool additive = false) override;
 
     // --- EditorHost: панель Game ---
@@ -240,6 +256,13 @@ private:
     // --- панели (архитектура v3: каждая — независимый класс) ---
     ConsolePanel m_console;
     ProfilerPanel m_profiler;
+    ConfirmDialog m_confirm;
+    CodeEditor m_code;
+    bool m_showCode = false;
+    // Запросы мультивьюпорта: панель раскладывает, рендер исполняет в начале
+    // следующего кадра.
+    ViewRequest m_viewRequests[kMaxViews];
+    int m_viewCount = 1;
     bool m_showProfiler = false;
     HierarchyPanel m_hierarchy;
     InspectorPanel m_inspector;

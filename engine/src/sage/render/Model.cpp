@@ -10,6 +10,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <unordered_map>
 #include "sage/core/Log.h"
+#include "sage/render/MeshData.h"
 #include <stdexcept>
 
 // ----------------------------------------------------------------------
@@ -328,6 +329,107 @@ void ProcessNode(const tinygltf::Model& gltfModel, int nodeIndex, const glm::mat
 }
 
 } // namespace
+
+// --- Геометрия glTF без GPU: для ModelLoader::LoadMeshData ---------------------
+//
+// Живёт ЗДЕСЬ, а не в ModelLoader.cpp, потому что tinygltf развёрнут в этом
+// файле (TINYGLTF_IMPLEMENTATION наверху), и второе разворачивание дало бы
+// дублирующиеся символы на линковке.
+//
+// Отдельный обход, а не переиспользование ProcessNode: тот СРАЗУ создаёт
+// GPU-меши и текстуры, а этой функции графический контекст недоступен — её
+// зовут и бейкер GI, и загрузка сцены до создания окна.
+namespace {
+
+void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& prim,
+                      const glm::mat4& world, std::vector<Vertex>& outVerts,
+                      std::vector<unsigned int>& outIdx) {
+    if (prim.mode != TINYGLTF_MODE_TRIANGLES) return;   // линии и точки геометрией не считаем
+    auto posIt = prim.attributes.find("POSITION");
+    if (posIt == prim.attributes.end()) return;
+
+    std::vector<float> positions, normals, texcoords;
+    ReadFloatAccessor(gltf, posIt->second, 3, positions);
+
+    auto normIt = prim.attributes.find("NORMAL");
+    const bool hasNormals = normIt != prim.attributes.end();
+    if (hasNormals) ReadFloatAccessor(gltf, normIt->second, 3, normals);
+
+    auto uvIt = prim.attributes.find("TEXCOORD_0");
+    const bool hasUV = uvIt != prim.attributes.end();
+    if (hasUV) ReadFloatAccessor(gltf, uvIt->second, 2, texcoords);
+
+    const size_t count = positions.size() / 3;
+    const glm::mat3 normalMatrix = glm::mat3(glm::transpose(glm::inverse(world)));
+    const unsigned int base = (unsigned int)outVerts.size();
+
+    for (size_t i = 0; i < count; ++i) {
+        Vertex v{};
+        v.Position = glm::vec3(world * glm::vec4(positions[i * 3], positions[i * 3 + 1],
+                                                 positions[i * 3 + 2], 1.0f));
+        const glm::vec3 n = hasNormals ? glm::vec3(normals[i * 3], normals[i * 3 + 1],
+                                                   normals[i * 3 + 2])
+                                       : glm::vec3(0.0f, 1.0f, 0.0f);
+        v.Normal = glm::normalize(normalMatrix * n);
+        v.TexCoords = hasUV ? glm::vec2(texcoords[i * 2], texcoords[i * 2 + 1]) : glm::vec2(0.0f);
+        outVerts.push_back(v);
+    }
+
+    if (prim.indices >= 0) {
+        std::vector<unsigned int> idx;
+        ReadIndices(gltf, prim.indices, idx);
+        for (unsigned int i : idx) outIdx.push_back(base + i);
+    } else {
+        for (size_t i = 0; i < count; ++i) outIdx.push_back(base + (unsigned int)i);
+    }
+}
+
+void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& parent,
+                 std::vector<Vertex>& outVerts, std::vector<unsigned int>& outIdx) {
+    if (nodeIndex < 0 || nodeIndex >= (int)gltf.nodes.size()) return;
+    const tinygltf::Node& node = gltf.nodes[nodeIndex];
+    const glm::mat4 world = parent * NodeLocalMatrix(node);
+    if (node.mesh >= 0 && node.mesh < (int)gltf.meshes.size()) {
+        for (const auto& prim : gltf.meshes[node.mesh].primitives) {
+            CollectPrimitive(gltf, prim, world, outVerts, outIdx);
+        }
+    }
+    for (int child : node.children) CollectNode(gltf, child, world, outVerts, outIdx);
+}
+
+} // namespace
+
+// Собирает ВСЕ примитивы всех узлов в один буфер. Слияние намеренное: сущность
+// сцены держит один Mesh, а в glTF почти всегда несколько примитивов — по
+// одному на материал. Отдать «первый попавшийся» значило бы показать четверть
+// модели и оставить человека гадать, куда делось остальное.
+namespace ModelLoader {
+sage::render::MeshData LoadGltfMeshDataImpl(const std::string& path, bool binary) {
+    tinygltf::TinyGLTF loader;
+    loader.SetImageLoader(&GltfImageLoader, nullptr);
+    tinygltf::Model gltf;
+    std::string err, warn;
+
+    const bool ok = binary ? loader.LoadBinaryFromFile(&gltf, &err, &warn, path)
+                           : loader.LoadASCIIFromFile(&gltf, &err, &warn, path);
+    if (!warn.empty()) LOG_WARN("Model") << "glTF (" << path << "): " << warn;
+    if (!ok) {
+        throw std::runtime_error("Не удалось разобрать glTF " + path + ": " +
+                                 (err.empty() ? "неизвестная ошибка" : err));
+    }
+    if (gltf.scenes.empty()) throw std::runtime_error("В glTF нет ни одной сцены: " + path);
+
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+    const tinygltf::Scene& scene =
+        gltf.scenes[(gltf.defaultScene >= 0 && gltf.defaultScene < (int)gltf.scenes.size())
+                        ? gltf.defaultScene : 0];
+    for (int node : scene.nodes) CollectNode(gltf, node, glm::mat4(1.0f), vertices, indices);
+
+    if (vertices.empty()) throw std::runtime_error("В glTF нет треугольной геометрии: " + path);
+    return sage::render::MeshData{std::move(vertices), std::move(indices)};
+}
+} // namespace ModelLoader
 
 std::unique_ptr<Model> Model::LoadGltfInternal(const std::string& path, bool binary) {
     tinygltf::TinyGLTF loader;

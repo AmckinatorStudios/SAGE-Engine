@@ -1,6 +1,8 @@
 #include "ViewportPanel.h"
 
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <algorithm>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -42,7 +44,90 @@ void DecomposeToTransform(const glm::mat4& m, Transform& out) {
 
 } // namespace
 
+
+const char* ViewportPanel::ViewKindName(ViewKind kind) {
+    switch (kind) {
+        case ViewKind::Perspective: return "Перспектива";
+        case ViewKind::Top:         return "Сверху";
+        case ViewKind::Front:       return "Спереди";
+        case ViewKind::Side:        return "Сбоку";
+    }
+    return "?";
+}
+
+// Матрица взгляда ортогонального вида. Камера ставится ДАЛЕКО от центра, а не
+// «в бесконечности»: ближняя и дальняя плоскости конечны, и объект, оказавшийся
+// за камерой, просто исчез бы — самый обидный вид пропажи, потому что он
+// выглядит как «объект удалился».
+glm::mat4 ViewportPanel::OrthoViewMatrix(ViewKind kind, const glm::vec3& center) {
+    constexpr float kDist = 500.0f;
+    switch (kind) {
+        case ViewKind::Top:
+            // Смотрим вниз; «верх» экрана — мировой -Z, чтобы вид сверху
+            // читался как карта: X вправо, Z вниз.
+            return glm::lookAt(center + glm::vec3(0.0f, kDist, 0.0f), center,
+                               glm::vec3(0.0f, 0.0f, -1.0f));
+        case ViewKind::Front:
+            return glm::lookAt(center + glm::vec3(0.0f, 0.0f, kDist), center,
+                               glm::vec3(0.0f, 1.0f, 0.0f));
+        case ViewKind::Side:
+            return glm::lookAt(center + glm::vec3(kDist, 0.0f, 0.0f), center,
+                               glm::vec3(0.0f, 1.0f, 0.0f));
+        default:
+            return glm::mat4(1.0f);
+    }
+}
+
+void ViewportPanel::DrawViewToolbar(EditorHost& host) {
+    (void)host;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 3));
+    ImGui::BeginChild("##viewbar", ImVec2(0, ImGui::GetFrameHeight() + 8), false);
+
+    const char* layouts[] = {"Один вид", "Два столбца", "Четыре вида"};
+    int layout = (int)m_layout;
+    ImGui::SetNextItemWidth(150);
+    if (ImGui::Combo("##layout", &layout, layouts, IM_ARRAYSIZE(layouts))) {
+        m_layout = (Layout)layout;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Раскладка вьюпорта.\nКаждый вид — полный проход сцены,\n"
+                          "поэтому лишние виды стоят кадров.");
+    }
+
+    // Вид активного слота: перспектива или одна из ортогональных проекций.
+    ImGui::SameLine();
+    const char* kinds[] = {"Перспектива", "Сверху", "Спереди", "Сбоку"};
+    int kind = (int)m_kinds[m_activeSlot];
+    ImGui::SetNextItemWidth(140);
+    if (ImGui::Combo("##kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
+        m_kinds[m_activeSlot] = (ViewKind)kind;
+    }
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Показать всё")) {
+        // Вписываем сцену в ортогональные виды: без этого человек, отъехавший
+        // колесом далеко, обратно уже не найдёт дорогу.
+        for (OrthoView& v : m_ortho) { v.Center = glm::vec3(0.0f); v.Height = 20.0f; }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("| активен: %s", ViewKindName(m_kinds[m_activeSlot]));
+
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+}
+
 void ViewportPanel::Draw(EditorHost& host) {
+    // Раскладка из переменной окружения — для headless-прогонов и скриншотов
+    // документации: кликнуть в комбо там некому, а проверять раскладку надо.
+    static bool layoutFromEnv = false;
+    if (!layoutFromEnv) {
+        layoutFromEnv = true;
+        if (const char* v = std::getenv("SAGE_EDITOR_VIEW_LAYOUT")) {
+            const std::string mode = v;
+            if (mode == "quad") m_layout = Layout::Quad;
+            else if (mode == "two") m_layout = Layout::TwoColumns;
+        }
+    }
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus(); // вывести Viewport вперёд на старте (см. RequestFocus)
         --m_focusFrames;
@@ -50,15 +135,110 @@ void ViewportPanel::Draw(EditorHost& host) {
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("Viewport");
-    bool hovered = ImGui::IsWindowHovered();
 
-    ImVec2 avail = ImGui::GetContentRegionAvail();
-    if (avail.x >= 8 && avail.y >= 8) host.SetViewportSize((int)avail.x, (int)avail.y);
-    ImVec2 imgPos = ImGui::GetCursorScreenPos();
+    DrawViewToolbar(host);
 
-    // Текстура OpenGL идёт снизу-вверх — переворот по V.
-    ImTextureID tex = (ImTextureID)(std::intptr_t)host.SceneTexture();
-    ImGui::Image(tex, avail, ImVec2(0, 1), ImVec2(1, 0));
+    // --- Раскладка -----------------------------------------------------------
+    //
+    // Слот 0 остаётся ГЛАВНЫМ: в нём живут гизмо, пикинг и полёт камеры, и он
+    // же — единственный при одиночной раскладке. Дополнительные виды
+    // показывают ту же сцену с других сторон и служат для проверки, а не для
+    // манипуляции: два гизмо в двух видах одновременно — это два разных ответа
+    // на вопрос «куда я тащу», и выбрать между ними нечем.
+    const int viewCount = m_layout == Layout::Single ? 1 : (m_layout == Layout::TwoColumns ? 2 : 4);
+    const ImVec2 full = ImGui::GetContentRegionAvail();
+    const float gap = 2.0f;
+    ImVec2 cell = full;
+    if (viewCount == 2) cell.x = (full.x - gap) * 0.5f;
+    else if (viewCount == 4) { cell.x = (full.x - gap) * 0.5f; cell.y = (full.y - gap) * 0.5f; }
+    if (cell.x < 8 || cell.y < 8) { ImGui::End(); ImGui::PopStyleVar(); return; }
+
+    EditorHost::ViewRequest requests[EditorHost::kMaxViews];
+    ImVec2 slotPos[EditorHost::kMaxViews];
+    bool slotHovered[EditorHost::kMaxViews] = {false, false, false, false};
+
+    for (int i = 0; i < viewCount; ++i) {
+        if (i > 0 && (viewCount == 2 || i % 2 == 1)) ImGui::SameLine(0.0f, gap);
+        ImGui::PushID(i);
+        ImGui::BeginChild("##view", cell, false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        slotHovered[i] = ImGui::IsWindowHovered();
+        slotPos[i] = ImGui::GetCursorScreenPos();
+
+        const ViewKind kind = m_kinds[i];
+        const bool ortho = kind != ViewKind::Perspective;
+
+        requests[i].Active = true;
+        requests[i].W = (int)cell.x;
+        requests[i].H = (int)cell.y;
+        requests[i].Ortho = ortho;
+        if (ortho) {
+            const float aspect = cell.x / std::max(cell.y, 1.0f);
+            const float halfH = m_ortho[i].Height * 0.5f;
+            const float halfW = halfH * aspect;
+            requests[i].View = OrthoViewMatrix(kind, m_ortho[i].Center);
+            requests[i].Proj = glm::ortho(-halfW, halfW, -halfH, halfH, 0.1f, 1000.0f);
+            requests[i].EyePos = m_ortho[i].Center;
+        }
+
+        const uint64_t texId = (i == 0) ? host.SceneTexture() : host.ViewTexture(i);
+        if (texId) {
+            ImGui::Image((ImTextureID)(std::intptr_t)texId, cell, ImVec2(0, 1), ImVec2(1, 0));
+        } else {
+            ImGui::Dummy(cell);
+        }
+
+        // Подпись вида поверх картинки и рамка активного: без них в четырёх
+        // одинаковых серых прямоугольниках невозможно понять, где что.
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddText(ImVec2(slotPos[i].x + 8, slotPos[i].y + 6),
+                    i == m_activeSlot ? IM_COL32(255, 210, 120, 230) : IM_COL32(190, 195, 205, 190),
+                    ViewKindName(kind));
+        if (viewCount > 1 && i == m_activeSlot) {
+            dl->AddRect(slotPos[i], ImVec2(slotPos[i].x + cell.x, slotPos[i].y + cell.y),
+                        IM_COL32(255, 175, 60, 200), 0.0f, 0, 2.0f);
+        }
+
+        // Клик по виду делает его активным — дальше в нём работают гизмо и
+        // хоткеи. Без этого в раскладке из четырёх видов работал бы только один.
+        if (slotHovered[i] && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) m_activeSlot = i;
+
+        // Ортогональный вид: колесо — масштаб, средняя кнопка — панорама.
+        if (ortho && slotHovered[i]) {
+            ImGuiIO& vio = ImGui::GetIO();
+            if (vio.MouseWheel != 0.0f) {
+                m_ortho[i].Height =
+                    std::max(0.5f, m_ortho[i].Height * (vio.MouseWheel > 0 ? 0.88f : 1.14f));
+            }
+            const bool panning = ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
+                                 (ImGui::IsMouseDown(ImGuiMouseButton_Right));
+            if (panning && (vio.MouseDelta.x != 0.0f || vio.MouseDelta.y != 0.0f)) {
+                // Перевод пикселей в мир через ту же высоту кадра — иначе
+                // панорама «убегает» при смене масштаба.
+                const float perPixel = m_ortho[i].Height / std::max(cell.y, 1.0f);
+                const float dx = -vio.MouseDelta.x * perPixel;
+                const float dy = vio.MouseDelta.y * perPixel;
+                switch (kind) {
+                    case ViewKind::Top:   m_ortho[i].Center += glm::vec3(dx, 0.0f, -dy); break;
+                    case ViewKind::Front: m_ortho[i].Center += glm::vec3(dx, dy, 0.0f); break;
+                    case ViewKind::Side:  m_ortho[i].Center += glm::vec3(0.0f, dy, -dx); break;
+                    default: break;
+                }
+            }
+        }
+
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+    host.SetViewRequests(requests, viewCount);
+
+    // Дальше — интерактив ГЛАВНОГО слота: гизмо, пикинг, полёт камеры.
+    const bool hovered = slotHovered[m_activeSlot] && m_kinds[m_activeSlot] == ViewKind::Perspective;
+    const ImVec2 imgPos = slotPos[m_activeSlot];
+    const ImVec2 avail = cell;
+    if (m_activeSlot == 0 && m_kinds[0] == ViewKind::Perspective) {
+        host.SetViewportSize((int)cell.x, (int)cell.y);
+    }
 
     ImGuiIO& io = ImGui::GetIO();
     float dt = sage::Application::Get().DeltaTime();
