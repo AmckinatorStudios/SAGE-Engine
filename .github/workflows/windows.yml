@@ -57,11 +57,17 @@ jobs:
           file "$EXE" | grep -q "PE32+ executable (GUI)" \
             || { echo "::error::Это не оконное windows-приложение"; exit 1; }
 
+          # Список разрешённых DLL — это список того, что ЕСТЬ НА ЧИСТОЙ WINDOWS.
+          # Он не декоративный: mingw охотно линкует свои libstdc++/libgcc, и
+          # собранный так exe не запускается ни у кого, кроме собравшего.
+          # dbghelp.dll добавлена вместе с обработчиком падений — она системная
+          # (Debug Help Library, лежит в System32 со времён XP) и нужна, чтобы
+          # отчёт о падении содержал имена функций, а не голые адреса.
           DLLS=$(x86_64-w64-mingw32-objdump -p "$EXE" | grep "DLL Name" | awk '{print tolower($3)}' | sort -u)
           echo "SageEditor.exe требует DLL:"; echo "$DLLS"
           for dll in $DLLS; do
             case "$dll" in
-              kernel32.dll|user32.dll|gdi32.dll|shell32.dll|msvcrt.dll|advapi32.dll|ole32.dll|winmm.dll|ws2_32.dll|opengl32.dll|imm32.dll|setupapi.dll|version.dll|dwmapi.dll|comdlg32.dll|oleaut32.dll|uuid.dll|bcrypt.dll|winspool.dll)
+              kernel32.dll|user32.dll|gdi32.dll|shell32.dll|msvcrt.dll|advapi32.dll|ole32.dll|winmm.dll|ws2_32.dll|opengl32.dll|imm32.dll|setupapi.dll|version.dll|dwmapi.dll|comdlg32.dll|oleaut32.dll|uuid.dll|bcrypt.dll|winspool.dll|dbghelp.dll)
                 ;;
               *)
                 echo "::error::SageEditor.exe просит постороннюю библиотеку $dll — на чистой Windows не запустится"
@@ -83,7 +89,7 @@ jobs:
             echo "example_stats.dll требует DLL:"; echo "$PLUGIN_DLLS"
             for dll in $PLUGIN_DLLS; do
               case "$dll" in
-                kernel32.dll|user32.dll|gdi32.dll|shell32.dll|msvcrt.dll|advapi32.dll|ole32.dll|winmm.dll|ws2_32.dll|opengl32.dll|imm32.dll|setupapi.dll|version.dll|dwmapi.dll|comdlg32.dll|oleaut32.dll|uuid.dll|bcrypt.dll|winspool.dll|libstdc++-6.dll|sageeditor.exe)
+                kernel32.dll|user32.dll|gdi32.dll|shell32.dll|msvcrt.dll|advapi32.dll|ole32.dll|winmm.dll|ws2_32.dll|opengl32.dll|imm32.dll|setupapi.dll|version.dll|dwmapi.dll|comdlg32.dll|oleaut32.dll|uuid.dll|bcrypt.dll|winspool.dll|dbghelp.dll|libstdc++-6.dll|sageeditor.exe)
                   ;;
                 *)
                   echo "::error::example_stats.dll просит незнакомую библиотеку $dll"
