@@ -51,7 +51,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/MeshRaycast.cpp
     src/sage/assets/format/Blob.cpp
     src/sage/assets/format/MeshFormat.cpp
+    src/sage/assets/format/TextureFormat.cpp
     src/sage/assets/import/Importer.cpp
+    src/sage/assets/import/Convert.cpp
     src/sage/assets/import/BlockbenchImporter.cpp
     src/sage/assets/import/BlendImporter.cpp
     src/sage/render/Model.cpp

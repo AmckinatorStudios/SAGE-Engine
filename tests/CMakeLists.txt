@@ -24,6 +24,7 @@ add_executable(sage_tests
     test_picking.cpp
     test_assetformat.cpp
     test_import.cpp
+    test_texformat.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
