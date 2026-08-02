@@ -123,19 +123,40 @@ FetchContent_MakeAvailable(tinyobjloader)
 # поверх собственной упаковки. Писать свой энтропийный кодек ради этого не
 # стоит — основную экономию даёт квантование, а универсальное сжатие лишь
 # добирает остаток, и здесь важнее, чтобы оно было заведомо правильным.
+#
+# Берём ТОЛЬКО исходники и компилируем сами (SOURCE_SUBDIR указывает на
+# несуществующий каталог — «скачай, но не зови add_subdirectory»), как уже
+# сделано для Lua и sol2. Причина не в стиле: CMakeLists самого miniz начинается
+# с `cmake_minimum_required(VERSION 3.0)`, а CMake 4 совместимость с <3.5 убрал
+# совсем — конфигурация падает с ошибкой ещё до компиляции. Так и сломалась
+# сборка игры под Windows: на моей машине CMake старее и всё проходило.
+#
+# Чинить это флагом CMAKE_POLICY_VERSION_MINIMUM можно, но он глобальный и
+# распространился бы на все остальные зависимости, пряча их будущие проблемы.
+# Два C-файла проще собрать самим, чем зависеть от чужого CMake, который в
+# любой момент опять разойдётся с версией инструмента.
 FetchContent_Declare(
-  miniz
+  miniz_src
   GIT_REPOSITORY https://github.com/richgel999/miniz.git
   GIT_TAG 3.0.2
+  SOURCE_SUBDIR do-not-add-to-build
 )
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(miniz)
+FetchContent_MakeAvailable(miniz_src)
+# miniz.h включает miniz_export.h, который обычно генерирует CMake самого miniz
+# (GenerateExportHeader). Для СТАТИЧЕСКОЙ сборки в нём нет ничего, кроме пустого
+# MINIZ_EXPORT: экспортировать из статической библиотеки нечего.
+set(MINIZ_GENERATED_DIR ${CMAKE_BINARY_DIR}/generated/miniz)
+file(WRITE ${MINIZ_GENERATED_DIR}/miniz_export.h
+"#ifndef MINIZ_EXPORT_H\n#define MINIZ_EXPORT_H\n#define MINIZ_EXPORT\n#endif\n")
+add_library(miniz STATIC
+    ${miniz_src_SOURCE_DIR}/miniz.c
+    ${miniz_src_SOURCE_DIR}/miniz_tdef.c
+    ${miniz_src_SOURCE_DIR}/miniz_tinfl.c
+    ${miniz_src_SOURCE_DIR}/miniz_zip.c
+)
+target_include_directories(miniz PUBLIC ${miniz_src_SOURCE_DIR} ${MINIZ_GENERATED_DIR})
 # PIC: движок линкуется в MODULE-библиотеки плагинов редактора.
-if (TARGET miniz)
-    set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endif()
+set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # ---------- nlohmann/json (сериализация сцен) ----------
 FetchContent_Declare(
