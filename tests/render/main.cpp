@@ -675,6 +675,65 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
     Check(opaqueMean > 2.0, "прозрачность действительно применяется");
 }
 
+// --- Свечение и ореол ------------------------------------------------------
+//
+// Emissive лежал в материале с самого начала, но НИКУДА не уходил: ни в один
+// шейдер он не попадал, и выставленное свечение не меняло кадр вообще. Проверка
+// спрашивает ровно два свойства, ради которых оно и нужно: светящийся объект
+// ярче несветящегося, и при силе выше порога он даёт ОРЕОЛ ВОКРУГ СЕБЯ — то
+// есть подхватывается bloom'ом.
+void TestEmissive(FrameRenderer& r, Scene& scene) {
+    auto build = [&](float strength) {
+        Scene local;
+        GameObject cube = local.CreateObject("Glow");
+        MeshRendererComponent& mr = cube.Renderer();
+        mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
+        mr.MeshPtr = std::make_shared<Mesh>(sage::render::BuildCube().Vertices,
+                                            sage::render::BuildCube().Indices);
+        mr.Color = glm::vec3(0.05f, 0.05f, 0.05f);   // тёмный: весь свет — от свечения
+        auto mat = std::make_shared<Material>();
+        mat->Albedo = glm::vec3(0.05f);
+        mat->Emissive = glm::vec3(1.0f, 0.4f, 0.1f);
+        mat->EmissiveStrength = strength;
+        mr.MaterialPtr = mat;
+        cube.GetTransform().Scale = glm::vec3(1.2f);
+        return RenderFrame(r, local, PerspectiveProj(), BaseSettings(), kW, kH);
+    };
+
+    const Image dark = build(0.0f);
+    const Image glow = build(4.0f);
+
+    // Средняя яркость обязана вырасти: свечение — это добавленный свет.
+    auto mean = [](const Image& im) {
+        long long s = 0;
+        for (unsigned char p : im.Pixels) s += p;
+        return (double)s / (double)std::max<size_t>(im.Pixels.size(), 1);
+    };
+    const double dm = mean(dark), gm = mean(glow);
+    std::printf("       средняя яркость: без свечения %.2f, со свечением %.2f\n", dm, gm);
+    Check(gm > dm + 2.0, "свечение делает объект ярче");
+
+    // Ореол: считаем прирост яркости на ФОНЕ — там, где в тёмном кадре почти
+    // чёрное. Если бы свечение просто красило сам куб, фон не изменился бы, и
+    // bloom остался бы неподключённым при формально «работающем» Emissive.
+    //
+    // Именно «фоновые пиксели», а не рамка по краям кадра: ореол — это десятки
+    // пикселей вокруг силуэта, и полоса у границы кадра до него не достаёт.
+    // Первая версия проверки мерила как раз её и показывала ноль на работающем
+    // bloom'е.
+    long long gain = 0;
+    long long bgCount = 0;
+    for (size_t i = 0; i + 2 < dark.Pixels.size() && i + 2 < glow.Pixels.size(); i += 3) {
+        const int d = dark.Pixels[i] + dark.Pixels[i + 1] + dark.Pixels[i + 2];
+        if (d > 24) continue;   // не фон — это сам куб или подсвеченная грань
+        ++bgCount;
+        gain += (glow.Pixels[i] + glow.Pixels[i + 1] + glow.Pixels[i + 2]) - d;
+    }
+    const double halo = (double)gain / (double)std::max(1LL, bgCount);
+    std::printf("       прирост яркости на фоне (ореол): %.3f по %lld пикселям\n", halo, bgCount);
+    Check(halo > 0.5, "свечение даёт ореол вокруг объекта (bloom подхватывает)");
+}
+
 void TestGrid(FrameRenderer& r, Scene& scene) {
     const glm::mat4 proj = PerspectiveProj();
 
@@ -2148,6 +2207,7 @@ int main(int argc, char** argv) {
         TestFxaa(renderer, *scene);
         TestGrid(renderer, *scene);
         TestTransparentFaceOrder(renderer, *scene);
+        TestEmissive(renderer, *scene);
         TestObjectMotionBlur(renderer);
         TestMsaa(renderer);
         TestMorphTargets(renderer);

@@ -84,6 +84,10 @@ void OpenGLDevice::SetCullMode(CullMode mode) {
     glCullFace(mode == CullMode::Front ? GL_FRONT : GL_BACK);
 }
 
+void OpenGLDevice::SetFrontFace(FrontFace face) {
+    glFrontFace(face == FrontFace::Clockwise ? GL_CW : GL_CCW);
+}
+
 void OpenGLDevice::SetPolygonMode(PolygonMode mode) {
     // GL_LINE рисует только рёбра треугольников — каркасный (wireframe) режим.
     // FRONT_AND_BACK: каркас виден с обеих сторон вне зависимости от отсечения.

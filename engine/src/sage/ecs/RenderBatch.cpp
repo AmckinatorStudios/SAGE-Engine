@@ -43,6 +43,7 @@ layout (location = 7) in vec4 iM3;
 layout (location = 8) in vec3 iColor;
 layout (location = 9) in float iMetallic;
 layout (location = 10) in float iRoughness;
+layout (location = 14) in vec3 iEmissive;
 layout (location = 11) in vec2 aUV2;
 layout (location = 12) in float iAlpha;
 layout (location = 13) in float iPlanar;
@@ -50,6 +51,7 @@ layout (location = 13) in float iPlanar;
 out vec3 FragPos;
 out vec3 Normal;
 out vec3 vColor;
+out vec3 vEmissive;
 out float vMetallic;
 out float vRoughness;
 out vec2 vUV2;
@@ -67,6 +69,7 @@ void main() {
     // нормали при неравномерном/отрицательном масштабе (иначе перекос/инверсия).
     Normal = transpose(inverse(mat3(model))) * aNormal;
     vColor = iColor;
+    vEmissive = iEmissive;
     vMetallic = iMetallic;
     vRoughness = iRoughness;
     vUV2 = aUV2;
@@ -81,6 +84,7 @@ std::string LitFragSource() {
 in vec3 FragPos;
 in vec3 Normal;
 in vec3 vColor;
+in vec3 vEmissive;
 in float vMetallic;
 in float vRoughness;
 in vec2 vUV2;
@@ -95,11 +99,14 @@ uniform sampler2D uLightmap;
 void main() {
     vec3 N = normalize(Normal);
     if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
-    if (uShadingMode == 1) { FragColor = vec4(vColor, vAlpha); return; }
+    if (uShadingMode == 1) { FragColor = vec4(vColor + vEmissive, vAlpha); return; }
     // Непрямой свет: лайтмапа (статика) или GI-объём/полусфера (DefaultIndirect).
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
-    FragColor = vec4(ShadePBRplanar(N, FragPos, vColor, vMetallic, vRoughness, 1.0, indirect,
+    // Свечение ДОБАВЛЯЕТСЯ к освещению, а не заменяет его: светящийся предмет
+    // всё так же ловит тени и блики, просто светит и сам. Замена дала бы плоский
+    // силуэт вместо объёма.
+    FragColor = vec4(vEmissive + ShadePBRplanar(N, FragPos, vColor, vMetallic, vRoughness, 1.0, indirect,
                                     SamplePlanar(vec2(0.0)), vPlanar), vAlpha);
 }
 )";
@@ -167,6 +174,9 @@ uniform bool uHasRoughness;
 uniform sampler2D uAOMap;
 uniform bool uHasAO;
 uniform float uOpacity;
+uniform vec3 uEmissive;
+uniform sampler2D uEmissiveMap;
+uniform bool uHasEmissive;
 )") + kPbrSharedGlsl + R"(
 void main() {
     vec3 albedo = uAlbedoFactor;
@@ -185,10 +195,13 @@ void main() {
     float ao = uHasAO ? texture(uAOMap, TexCoords).r : 1.0;
 
     if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
-    if (uShadingMode == 1) { FragColor = vec4(albedo, uOpacity); return; }
+    if (uShadingMode == 1) { FragColor = vec4(albedo + uEmissive, uOpacity); return; }
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
-    FragColor = vec4(ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect), uOpacity);
+    vec3 emissive = uEmissive;
+    if (uHasEmissive) emissive *= texture(uEmissiveMap, TexCoords).rgb;
+    FragColor = vec4(emissive + ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect),
+                     uOpacity);
 }
 )";
 }
@@ -360,6 +373,10 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             inst.Metallic = c.Mat->Metallic;
             inst.Roughness = c.Mat->Roughness;
             inst.PlanarReflectivity = c.Mat->Render.PlanarReflectivity;
+            // Свечение материала — в инстанс, чтобы светящиеся объекты остались
+            // в общей пачке. EmissiveStrength позволяет перешагнуть единицу:
+            // именно с этого начинает работать bloom.
+            inst.Emissive = c.Mat->Emissive * c.Mat->EmissiveStrength;
         }
 
         if (c.Custom) {
@@ -524,6 +541,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             tex.SetInt("uHasMetallic", it.Mat->MetallicTex ? 1 : 0);
             tex.SetInt("uHasRoughness", it.Mat->RoughnessTex ? 1 : 0);
             tex.SetInt("uHasAO", it.Mat->AOTex ? 1 : 0);
+            tex.SetVec3("uEmissive", it.Mat->Emissive * it.Mat->EmissiveStrength);
+            tex.SetInt("uHasEmissive", it.Mat->EmissiveTex ? 1 : 0);
+            tex.SetInt("uEmissiveMap", 6);
+            if (it.Mat->EmissiveTex) it.Mat->EmissiveTex->Bind(6);
             if (it.Mat->AlbedoTex) it.Mat->AlbedoTex->Bind(0);
             if (it.Mat->NormalTex) it.Mat->NormalTex->Bind(2);
             if (it.Mat->MetallicTex) it.Mat->MetallicTex->Bind(3);
@@ -633,6 +654,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetInt("uHasMetallic", head.Mat->MetallicTex ? 1 : 0);
                 t.SetInt("uHasRoughness", head.Mat->RoughnessTex ? 1 : 0);
                 t.SetInt("uHasAO", head.Mat->AOTex ? 1 : 0);
+                t.SetVec3("uEmissive", head.Mat->Emissive * head.Mat->EmissiveStrength);
+                t.SetInt("uHasEmissive", head.Mat->EmissiveTex ? 1 : 0);
+                t.SetInt("uEmissiveMap", 6);
+                if (head.Mat->EmissiveTex) head.Mat->EmissiveTex->Bind(6);
                 if (head.Mat->AlbedoTex) head.Mat->AlbedoTex->Bind(0);
                 if (head.Mat->NormalTex) head.Mat->NormalTex->Bind(2);
                 if (head.Mat->MetallicTex) head.Mat->MetallicTex->Bind(3);

@@ -24,6 +24,7 @@ public:
     void SetDepthWrite(bool enabled) override;
     void SetDepthFunc(DepthFunc func) override;
     void SetCullMode(CullMode mode) override;
+    void SetFrontFace(FrontFace face) override;
     void SetPolygonMode(PolygonMode mode) override;
     void SetSRGBWrite(bool enabled) override;
     void SetColorWrite(bool enabled) override;

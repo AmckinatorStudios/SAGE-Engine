@@ -52,6 +52,10 @@ struct QueryHandle {
 // --- Общие перечисления состояния конвейера ---
 enum class DepthFunc { Less, LessEqual };
 enum class CullMode { Back, Front, Off };
+// Обмотка лицевой стороны. CounterClockwise — соглашение движка и всех его
+// генераторов геометрии; Clockwise нужен зеркальным проходам, где отражение
+// выворачивает обход вершин.
+enum class FrontFace { CounterClockwise, Clockwise };
 enum class PolygonMode { Fill, Line }; // Line — каркасный (wireframe) режим отрисовки
 
 // --- Описание вершинного формата ---

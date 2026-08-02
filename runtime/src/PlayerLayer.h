@@ -115,6 +115,10 @@ private:
     // ESC удерживается несколько кадров — чтобы одно нажатие не «отпустило
     // курсор и тут же закрыло игру», ждём отпускания клавиши (см. OnUpdate).
     bool m_escLatched = false;
+    // Пауза рантайма: мир не тикает, курсор свободен, поверх кадра — меню.
+    bool m_paused = false;
+    bool m_pauseClickLatched = false;
+    void DrawPauseMenu(int vpW, int vpH);
 
     float m_sceneTime = 0.0f; // секунды с начала игры — uTime шейдеров
 

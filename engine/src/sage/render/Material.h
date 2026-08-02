@@ -103,6 +103,15 @@ const std::vector<MaterialRenderField>& MaterialRenderFields();
 struct Material {
     glm::vec3 Albedo{1.0f, 1.0f, 1.0f};
     glm::vec3 Emissive{0.0f, 0.0f, 0.0f};
+    // Множитель свечения. Отдельно от цвета, потому что отвечает на другой
+    // вопрос: цвет — КАКИМ светится, сила — НАСКОЛЬКО. Значение больше единицы
+    // выводит пиксель за порог bloom (см. EngineConfig::BloomThreshold) — без
+    // этого «свечение» остаётся просто светлым цветом и никакого ореола не даёт,
+    // а зажимать цвет в 0..1 в редакторе всё равно нужно.
+    float EmissiveStrength = 1.0f;
+    // Карта свечения: где светится, а где нет. Умножается на цвет и силу.
+    std::string EmissiveMap;
+    std::shared_ptr<Texture> EmissiveTex;   // рантайм
     float Shininess = 32.0f; // legacy (Blinn-Phong) — оставлено для совместимости .sagemat
 
     // --- PBR (metallic-roughness workflow) ---
@@ -156,7 +165,7 @@ struct Material {
     std::shared_ptr<Texture> AOTex;
     // Рисуется текстурным PBR-путём, если задана хотя бы одна карта.
     bool HasMaps() const {
-        return AlbedoTex || NormalTex || MetallicTex || RoughnessTex || AOTex;
+        return AlbedoTex || NormalTex || MetallicTex || RoughnessTex || AOTex || EmissiveTex;
     }
 
     // Читает .sagemat (JSON). Бросает std::runtime_error, если файл не

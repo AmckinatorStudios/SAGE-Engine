@@ -105,6 +105,7 @@ void NullDevice::SetDepthTest(bool) { ++g_counters.StateChanges; }
 void NullDevice::SetDepthWrite(bool) { ++g_counters.StateChanges; }
 void NullDevice::SetDepthFunc(DepthFunc) { ++g_counters.StateChanges; }
 void NullDevice::SetCullMode(CullMode) { ++g_counters.StateChanges; }
+void NullDevice::SetFrontFace(FrontFace) { ++g_counters.StateChanges; }
 void NullDevice::SetPolygonMode(PolygonMode) { ++g_counters.StateChanges; }
 void NullDevice::SetScissor(bool, int, int, int, int) { ++g_counters.StateChanges; }
 void NullDevice::SetSRGBWrite(bool) { ++g_counters.StateChanges; }

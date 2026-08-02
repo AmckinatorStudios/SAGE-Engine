@@ -329,9 +329,20 @@ bool PlanarReflection::Capture(const glm::vec4& plane, const glm::mat4& view,
     sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
     m_target->Bind();
     dev.Clear(true, true);
-    // Отражение выворачивает обход треугольников — без этого видны изнанки.
-    dev.SetCullMode(sage::rhi::CullMode::Front);
+    // Отражение выворачивает обход треугольников: то, что было лицом, стало
+    // изнанкой. Переключаем ОБМОТКУ, а не режим отсечения.
+    //
+    // Раньше здесь стояло SetCullMode(Front) — и не работало. Отсечение
+    // выставляется тут один раз, а батч сцены задаёт своё ВНУТРИ draw
+    // (непрозрачное — Back, двусторонняя прозрачность — по проходу) и затирает
+    // внешнюю установку первым же вызовом. В отражении показывалась изнанка
+    // объектов: у куба — его внутренние стенки вместо наружных.
+    //
+    // Обмотка — независимое состояние: батч по-прежнему говорит «отсекай
+    // заднюю», а какая сторона задняя, решает зеркало.
+    dev.SetFrontFace(sage::rhi::FrontFace::Clockwise);
     draw(mirrorView, mirrorProj);
+    dev.SetFrontFace(sage::rhi::FrontFace::CounterClockwise);
     dev.SetCullMode(sage::rhi::CullMode::Back);
     m_target->Resolve();
     // Возвращаем экранный буфер: проход менял и привязку, и viewport, и

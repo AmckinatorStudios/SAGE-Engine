@@ -200,6 +200,14 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 
     ImGui::ColorEdit3("Albedo", &material->Albedo.x);
     ImGui::ColorEdit3("Emissive", &material->Emissive.x);
+    // Сила свечения отдельным ползунком, и его предел заметно больше единицы:
+    // bloom срабатывает от яркости ВЫШЕ 1 (EngineConfig::BloomThreshold), а цвет
+    // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто
+    // светлым цветом без ореола.
+    ImGui::DragFloat("Emissive Strength", &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Множитель свечения. Значения больше 1 дают ореол (bloom).");
+    }
 
     // PBR (metallic-roughness) — основной путь освещения (Cook-Torrance).
     ImGui::SeparatorText("PBR");
@@ -222,6 +230,8 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
                     "Канал R. Умножается на фактор Metallic выше.");
     DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
                     "Канал R. Умножается на фактор Roughness выше.");
+    DrawTextureSlot(host, "Emissive", material->EmissiveMap, material->EmissiveTex,
+                    "Где светится, а где нет. Умножается на цвет и силу свечения.");
     DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
                     "Ambient occlusion, канал R. Пусто — AO = 1.");
 

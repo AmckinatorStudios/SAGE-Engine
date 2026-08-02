@@ -368,6 +368,7 @@ void ResourceManager::ResolveMaterialTextures(Material& m) {
     m.MetallicTex = GetTexture(m.MetallicMapPath);
     m.RoughnessTex = GetTexture(m.RoughnessMapPath);
     m.AOTex = GetTexture(m.AOMapPath);
+    m.EmissiveTex = GetTexture(m.EmissiveMap);
 }
 
 void ResourceManager::DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,

@@ -107,6 +107,7 @@ Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int
         {10, 1, AttribType::Float, (int)offsetof(MeshInstance, Roughness)},
         {12, 1, AttribType::Float, (int)offsetof(MeshInstance, Alpha)},
         {13, 1, AttribType::Float, (int)offsetof(MeshInstance, PlanarReflectivity)},
+        {14, 3, AttribType::Float, (int)offsetof(MeshInstance, Emissive)},
     };
 
     m_geometry = GraphicsDevice::Get().CreateGeometry(layout);

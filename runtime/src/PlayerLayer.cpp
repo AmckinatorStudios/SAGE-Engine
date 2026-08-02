@@ -195,6 +195,64 @@ void PlayerLayer::OnAttach() {
                        << m_physics->BackendName() << ")";
 }
 
+
+// Меню паузы. Рисуется ПОВЕРХ интерфейса игры и своими средствами, а не
+// сущностями сцены: это меню рантайма, оно обязано работать в любой игре, в том
+// числе в такой, где UI вообще не собран.
+//
+// Мышь опрашивается здесь же, а не в общем обработчике: пока стоит пауза,
+// остальной ввод игры не работает по определению, и заводить ради двух кнопок
+// отдельный слой состояния незачем.
+void PlayerLayer::DrawPauseMenu(int vpW, int vpH) {
+    if (!m_paused) return;
+    if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+
+    sage::Application& app = sage::Application::Get();
+    Window& window = app.GetWindow();
+
+    m_ui->Begin(vpW, vpH);
+    // Затемнение: без него меню читается поверх пёстрой сцены плохо, а главное —
+    // непонятно, что игра остановлена.
+    m_ui->Rect(0.0f, 0.0f, (float)vpW, (float)vpH, glm::vec3(0.0f), 0.55f);
+
+    const float bw = 300.0f, bh = 56.0f, gap = 14.0f;
+    const float cx = vpW * 0.5f - bw * 0.5f;
+    const float cy = vpH * 0.5f - (bh * 2 + gap) * 0.5f;
+
+    double mx = 0.0, my = 0.0;
+    glfwGetCursorPos(window.Handle(), &mx, &my);
+    // Курсор приходит в пикселях ОКНА, а интерфейс живёт в letterbox-области:
+    // без перевода кнопки ловятся со смещением тем большим, чем шире полосы.
+    const float scaleX = (float)vpW / (float)std::max(1, window.Width());
+    const float scaleY = (float)vpH / (float)std::max(1, window.Height());
+    const float px = (float)mx * scaleX;
+    const float py = (float)my * scaleY;
+    const bool click = glfwGetMouseButton(window.Handle(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    const bool clickEdge = click && !m_pauseClickLatched;
+    m_pauseClickLatched = click;
+
+    auto button = [&](float y, const char* label) {
+        const bool hot = px >= cx && px <= cx + bw && py >= y && py <= y + bh;
+        const glm::vec3 bg = hot ? glm::vec3(0.24f, 0.32f, 0.46f) : glm::vec3(0.13f, 0.16f, 0.22f);
+        m_ui->RoundedRect(cx, y, bw, bh, bg, 0.96f, 10.0f);
+        m_ui->RoundedRectOutline(cx, y, bw, bh, 10.0f, 1.0f, glm::vec3(0.55f, 0.62f, 0.75f), 0.8f);
+        m_ui->TextCentered(cx + bw * 0.5f, y + bh * 0.5f - 10.0f, 2.2f, glm::vec3(1.0f), label);
+        return hot && clickEdge;
+    };
+
+    m_ui->TextCentered(cx + bw * 0.5f, cy - 70.0f, 3.0f, glm::vec3(1.0f, 0.86f, 0.6f), "Пауза");
+    if (button(cy, "Продолжить")) {
+        m_paused = false;
+        window.SetCursorCaptured(true);
+    }
+    if (button(cy + bh + gap, "Выйти из игры")) {
+        app.Close();
+    }
+    m_ui->TextCentered(cx + bw * 0.5f, cy + (bh + gap) * 2 + 8.0f, 1.6f,
+                       glm::vec3(0.75f, 0.78f, 0.85f), "ESC — вернуться в игру", 0.9f);
+    m_ui->End();
+}
+
 void PlayerLayer::OnDetach() {
     m_physics.reset();
     m_scripts.reset();
@@ -225,23 +283,31 @@ void PlayerLayer::OnUpdate(float dt) {
     // RegisterCoreSystems и одинаков в рантайме, редакторе и играх. Раньше эти
     // пять строк были в каждом потребителе своими, и в одной из игр скрипты
     // стояли ПОСЛЕ физики — управление там отставало на кадр.
-    m_systems.Run(*m_scene, dt);
-    m_sceneTime += dt; // uTime собственных шейдеров материалов
-
-    // ESC: сперва ОТПУСКАЕТ курсор, и только потом закрывает игру. В игре от
-    // первого лица курсор захвачен — выйти из неё, не вернув курсор, значит
-    // оставить игрока без мыши на рабочем столе; а мгновенный выход по первому
-    // же ESC не даёт даже посмотреть на мир без прицела.
-    if (glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-        if (window.CursorCaptured()) {
-            window.SetCursorCaptured(false);
-            m_escLatched = true;
-        } else if (!m_escLatched) {
-            app.Close();
-        }
-    } else {
-        m_escLatched = false;
+    // В паузе мир НЕ ТИКАЕТ: ни скрипты, ни физика, ни таймеры. Пауза, в
+    // которой продолжает капать голод и тонуть лодка, — не пауза.
+    if (!m_paused) {
+        m_systems.Run(*m_scene, dt);
+        m_sceneTime += dt; // uTime собственных шейдеров материалов
     }
+
+    // ESC открывает ПАУЗУ, а не закрывает игру.
+    //
+    // Раньше первый ESC отпускал курсор, а следующий закрывал игру — молча,
+    // мгновенно и без подтверждения. Со стороны это выглядело как «игра
+    // вылетела»: человек нажимает привычную клавишу «отменить/назад», и окна
+    // просто больше нет. Никакой возможности передумать не было.
+    //
+    // Теперь ESC — переключатель паузы: мир замирает, курсор возвращается,
+    // поверх кадра появляется меню с «Продолжить» и «Выйти». Выход остался, но
+    // стал НАМЕРЕННЫМ действием, а не побочным эффектом клавиши.
+    const bool escDown = glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
+    if (escDown && !m_escLatched) {
+        m_paused = !m_paused;
+        // В паузе курсор нужен для меню; при возврате в игру — обратно в захват,
+        // иначе после «Продолжить» игрок остаётся с курсором посреди экрана.
+        window.SetCursorCaptured(!m_paused);
+    }
+    m_escLatched = escDown;
 }
 
 // Собирает состояние ввода для интерфейса и прогоняет его через UI сцены.
@@ -599,6 +665,8 @@ void PlayerLayer::OnRender() {
         sage::ui::DrawSceneUI(*m_scene, *m_ui, vpW, vpH);
         m_ui->End();
     }
+
+    DrawPauseMenu(vpW, vpH);
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {
