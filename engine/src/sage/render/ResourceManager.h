@@ -46,25 +46,39 @@ public:
         return instance;
     }
 
+    // --- Копия геометрии на стороне процессора --------------------------------
+    //
+    // Включает сохранение вершин/индексов у всех мешей, созданных ПОСЛЕ вызова.
+    // Нужна там, где по геометрии надо что-то посчитать, а не только нарисовать:
+    // точный выбор объекта мышью, подгонка камеры, замеры. Это ровно то, чем
+    // занят редактор — и ровно то, чего не делает игра, поэтому флаг, а не
+    // всегда: копия большой модели весит мегабайты, и платить за неё в
+    // собранной игре не за что.
+    //
+    // Влияет только на новые меши: уже лежащие в кэше не перестраиваются, иначе
+    // держатели shared_ptr получили бы другой объект под тем же путём.
+    void SetKeepMeshCpuData(bool keep) { m_keepMeshCpu = keep; }
+    bool KeepMeshCpuData() const { return m_keepMeshCpu; }
+
     // --- Примитивы (лениво создаются, живут до Clear) ---
     std::shared_ptr<Mesh> GetCube() {
-        if (!m_cube) m_cube = std::make_shared<Mesh>(Mesh::CreateCube());
+        if (!m_cube) m_cube = std::make_shared<Mesh>(Mesh::CreateCube(m_keepMeshCpu));
         return m_cube;
     }
     std::shared_ptr<Mesh> GetSphere() {
-        if (!m_sphere) m_sphere = std::make_shared<Mesh>(Mesh::CreateSphere());
+        if (!m_sphere) m_sphere = std::make_shared<Mesh>(Mesh::CreateSphere(24, 32, m_keepMeshCpu));
         return m_sphere;
     }
     std::shared_ptr<Mesh> GetPlane() {
-        if (!m_plane) m_plane = std::make_shared<Mesh>(Mesh::CreatePlane());
+        if (!m_plane) m_plane = std::make_shared<Mesh>(Mesh::CreatePlane(1, m_keepMeshCpu));
         return m_plane;
     }
     std::shared_ptr<Mesh> GetCylinder() {
-        if (!m_cylinder) m_cylinder = std::make_shared<Mesh>(Mesh::CreateCylinder());
+        if (!m_cylinder) m_cylinder = std::make_shared<Mesh>(Mesh::CreateCylinder(32, m_keepMeshCpu));
         return m_cylinder;
     }
     std::shared_ptr<Mesh> GetCone() {
-        if (!m_cone) m_cone = std::make_shared<Mesh>(Mesh::CreateCone());
+        if (!m_cone) m_cone = std::make_shared<Mesh>(Mesh::CreateCone(32, m_keepMeshCpu));
         return m_cone;
     }
 
@@ -237,6 +251,7 @@ private:
     uint64_t NextTick() { return ++m_tick; }
 
     std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
+    bool m_keepMeshCpu = false;   // см. SetKeepMeshCpuData
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
 

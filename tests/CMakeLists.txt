@@ -21,6 +21,7 @@ add_executable(sage_tests
     test_physics.cpp
     test_tween.cpp
     test_gi.cpp
+    test_picking.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -125,7 +125,8 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     if (it != m_models.end()) return it->second;
     std::shared_ptr<Mesh> mesh;
     try {
-        mesh = ModelLoader::LoadMesh(Locate(path));
+        sage::render::MeshData d = ModelLoader::LoadMeshData(Locate(path));
+        mesh = std::make_shared<Mesh>(d.Vertices, d.Indices, m_keepMeshCpu);
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
     }

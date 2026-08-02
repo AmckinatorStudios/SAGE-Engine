@@ -48,6 +48,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/CrashHandler.cpp
     src/sage/core/SystemScheduler.cpp
     src/sage/render/MeshData.cpp
+    src/sage/render/MeshRaycast.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
     src/sage/render/Font.cpp

@@ -24,6 +24,7 @@
 #include "sage/core/Systems.h"
 #include "sage/core/Version.h"
 #include "sage/core/CrashHandler.h"
+#include "sage/render/MeshRaycast.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/LightingUpload.h"
@@ -69,6 +70,13 @@ constexpr float kToolbarHeight = 34.0f;
 
 void EditorLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
+
+    // Копии геометрии на стороне процессора — до первого запроса любого меша,
+    // иначе примитивы успеют осесть в кэше без них. Нужны для точного выбора
+    // объекта мышью: без копии попадание считается по коробке, и клик в
+    // просвет между деталями модели выбирает модель. В собранной игре флаг не
+    // взводится — там эти мегабайты ни на что не работают.
+    ResourceManager::Instance().SetKeepMeshCpuData(true);
 
     // --- ImGui: docking + multi-viewport (панели можно вытаскивать в
     // отдельные OS-окна — «плавающие» панели становятся полноценными окнами) ---
@@ -1021,24 +1029,30 @@ void EditorLayer::PickAtViewport(float u, float v, bool additive) {
 
     int bestId = -1;
     float bestDist = 1e30f;
+    bool bestExact = false;
     auto view = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
     for (auto e : view) {
         Mesh* mesh = view.get<MeshRendererComponent>(e).MeshPtr.get();
         if (!mesh) continue;
         // МИРОВАЯ матрица (учёт иерархии родителей): раньше бралась локальная —
-        // дочерние сущности выделялись по неверной позиции. AABB меша — из его
-        // собственных границ (center±radius), а не фиксированный единичный куб,
-        // так пикинг попадает по объектам любого размера/формы (модели, плоскости).
+        // дочерние сущности выделялись по неверной позиции.
         glm::mat4 inv = glm::inverse(m_scene->WorldMatrix(e));
         glm::vec3 lro = glm::vec3(inv * glm::vec4(ro, 1.0f));
         glm::vec3 lrd = glm::vec3(inv * glm::vec4(rd, 0.0f)); // без нормализации: t остаётся в масштабе мира
-        glm::vec3 c = mesh->BoundsCenter();
-        glm::vec3 r(mesh->BoundsRadius());
-        float t = RayBox(lro, lrd, c - r, c + r);
-        if (t >= 0.0f && t < bestDist) {
-            bestDist = t;
-            bestId = view.get<IdComponent>(e).Id;
-        }
+
+        sage::render::RayHit hit = sage::render::RayMesh(*mesh, lro, lrd);
+        if (!hit.Hit) continue;
+
+        // Точное попадание (по треугольнику) бьёт приблизительное (по коробке)
+        // ДАЖЕ ЕСЛИ ОНО ДАЛЬШЕ. Иначе объект без копии геометрии перехватывал бы
+        // выбор у соседа просто потому, что его коробка начинается раньше, —
+        // а именно так пол и перекрывал всё, что на нём стоит.
+        const bool better = (hit.Exact && !bestExact) ||
+                            (hit.Exact == bestExact && hit.Distance < bestDist);
+        if (!better) continue;
+        bestDist = hit.Distance;
+        bestExact = hit.Exact;
+        bestId = view.get<IdComponent>(e).Id;
     }
 
     // Невидимые сущности (камера/свет) кликабельны по маленькому боксу вокруг
@@ -1049,7 +1063,15 @@ void EditorLayer::PickAtViewport(float u, float v, bool additive) {
         glm::vec3 lro = glm::vec3(boxInv * glm::vec4(ro, 1.0f));
         glm::vec3 lrd = glm::vec3(boxInv * glm::vec4(rd, 0.0f));
         float t = RayUnitCube(lro, lrd);
-        if (t >= 0.0f && t < bestDist) { bestDist = t; bestId = id; }
+        // Маркер считается ТОЧНЫМ попаданием: у света и камеры нет геометрии,
+        // этот кубик и есть их единственное видимое тело, и промахнуться по
+        // нему нельзя — он ровно там, где нарисован.
+        if (t < 0.0f) return;
+        const bool better = !bestExact || t < bestDist;
+        if (!better) return;
+        bestDist = t;
+        bestExact = true;
+        bestId = id;
     };
     auto camMarkers = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
     for (auto e : camMarkers)

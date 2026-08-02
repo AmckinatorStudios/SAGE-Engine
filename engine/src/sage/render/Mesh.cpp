@@ -120,9 +120,17 @@ Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int
 
     // Ограничивающая сфера в локальных координатах: центр — середина AABB,
     // радиус — макс. расстояние вершины от центра. Для отсечения по фрустуму.
+    //
+    // Сам AABB здесь же и СОХРАНЯЕТСЯ. Раньше он вычислялся и выбрасывался, а
+    // тем, кому нужна была коробка, приходилось строить её из радиуса сферы —
+    // то есть куб со стороной 2R вместо настоящих габаритов. Для куба это на
+    // 73% больше по каждой оси, для вытянутой модели — в разы: ровно поэтому
+    // пикинг в редакторе засчитывал попадания далеко мимо объекта.
     if (!vertices.empty()) {
         glm::vec3 lo = vertices[0].Position, hi = vertices[0].Position;
         for (const Vertex& v : vertices) { lo = glm::min(lo, v.Position); hi = glm::max(hi, v.Position); }
+        m_boundsMin = lo;
+        m_boundsMax = hi;
         m_boundsCenter = (lo + hi) * 0.5f;
         float r2 = 0.0f;
         for (const Vertex& v : vertices) r2 = glm::max(r2, glm::dot(v.Position - m_boundsCenter, v.Position - m_boundsCenter));

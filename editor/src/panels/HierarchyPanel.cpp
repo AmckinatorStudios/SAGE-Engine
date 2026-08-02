@@ -62,16 +62,22 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     const ImVec2 rowPos = ImGui::GetCursorScreenPos();
     const float indent = ImGui::GetTreeNodeToLabelSpacing();
     bool open = ImGui::TreeNodeEx((void*)(intptr_t)id, flags, "  %s", name.c_str());
+
+    // Иконка — Overlay, а НЕ Inline. Inline резервирует место под рисунок через
+    // Dummy, то есть подаёт свой элемент, и «последним элементом» для ImGui
+    // становится иконка. Всё, что спрашивает про последний элемент —
+    // IsItemClicked, BeginDragDropSource, BeginDragDropTarget,
+    // BeginPopupContextItem, — после этого отвечает про квадратик размером с
+    // букву вместо строки дерева. Из-за этого в иерархии НЕ ВЫБИРАЛИСЬ объекты:
+    // клик проверялся у иконки, попасть в которую можно было лишь случайно, а
+    // заодно молча не работали перетаскивание и контекстное меню.
     {
         const float s = ImGui::GetTextLineHeight() * 0.86f;
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImVec2 save = ImGui::GetCursorScreenPos();
-        ImGui::SetCursorScreenPos(
-            ImVec2(rowPos.x + indent - s * 1.15f, rowPos.y + (ImGui::GetTextLineHeight() - s) * 0.5f));
-        (void)dl;
-        EditorIcons::Inline(EntityIcon(reg, e), glm::vec3(0.62f, 0.72f, 0.85f));
-        ImGui::SetCursorScreenPos(save);
+        EditorIcons::Overlay(rowPos.x + indent - s * 1.15f,
+                             rowPos.y + (ImGui::GetTextLineHeight() - s) * 0.5f, s,
+                             EntityIcon(reg, e), glm::vec3(0.62f, 0.72f, 0.85f));
     }
+
     // Клик по строке (не по треугольнику раскрытия) — выбор. Ctrl — добавить/
     // убрать из набора (множественный выбор), обычный клик — одиночный.
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {

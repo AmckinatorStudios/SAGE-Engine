@@ -694,6 +694,90 @@ void EditorLayer::RunSelfTest() {
         SetSelectedId(-1);
     }
 
+    // --- Пикинг: клик по объекту выбирает ЕГО, а не пол под ним ---
+    //
+    // Это проверка по конкретной жалобе: «кликаю прямо по объекту, а точка как
+    // будто ниже». Причина была не в луче, а в габаритах — вместо коробки меша
+    // брался куб со стороной радиуса ограничивающей СФЕРЫ. У пола 20x20 такая
+    // коробка становится кубом 28x28x28, накрывающим сцену вместе с камерой, и
+    // пол выигрывал любой клик просто потому, что его «верхняя грань» ближе к
+    // камере, чем то, на что человек смотрит.
+    //
+    // Сцена нарочно та же, что у человека: пол и кубик на нём. Точки клика
+    // считаются ПРОЕЦИРОВАНИЕМ мировых координат теми же матрицами, что
+    // используются для луча, — тест не подглядывает в реализацию, а спрашивает
+    // «куда попадёт клик по этому пикселю».
+    if (ok) {
+        GameObject floor = CreatePrimitiveEntity("PickFloor", MeshRef::Type::Plane);
+        floor.GetTransform().Scale = glm::vec3(20.0f, 1.0f, 20.0f);
+
+        GameObject box = CreatePrimitiveEntity("PickBox", MeshRef::Type::Cube);
+        box.GetTransform().Position = glm::vec3(0.0f, 0.5f, 0.0f);
+
+        // Камера смотрит на кубик сверху-сбоку — обычный ракурс редактора.
+        const glm::vec3 eye(3.0f, 3.0f, 5.0f);
+        m_view = glm::lookAt(eye, glm::vec3(0.0f, 0.5f, 0.0f), glm::vec3(0, 1, 0));
+        m_proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
+
+        // Мировая точка -> экранные доли (u, v), ровно как их считает вьюпорт.
+        auto project = [&](const glm::vec3& world, float& u, float& v) {
+            glm::vec4 clip = m_proj * m_view * glm::vec4(world, 1.0f);
+            u = (clip.x / clip.w) * 0.5f + 0.5f;
+            v = 0.5f - (clip.y / clip.w) * 0.5f;
+        };
+
+        float u = 0.0f, v = 0.0f;
+        project(glm::vec3(0.0f, 0.5f, 0.0f), u, v);   // центр кубика
+        SetSelectedId(-1);
+        PickAtViewport(u, v, /*additive=*/false);
+        if (m_selectedId != box.Id()) {
+            LOG_ERROR("Editor") << "SELFTEST: pick on box selected " << m_selectedId << ", expected "
+                                << box.Id() << " (box)";
+            ok = false;
+        }
+
+        // Клик по полу далеко от кубика — выбирается пол.
+        if (ok) {
+            project(glm::vec3(-6.0f, 0.0f, -4.0f), u, v);
+            SetSelectedId(-1);
+            PickAtViewport(u, v, false);
+            if (m_selectedId != floor.Id()) {
+                LOG_ERROR("Editor") << "SELFTEST: pick on floor selected " << m_selectedId
+                                    << ", expected " << floor.Id() << " (floor)";
+                ok = false;
+            }
+        }
+
+        // РЯДОМ с кубиком, но мимо него — вот здесь старый пикинг и врал.
+        //
+        // Кубик занимает +-0.5, а его ограничивающая сфера — 0.866: точки пола
+        // на расстоянии 0.75 от центра лежат ВНЕ кубика, но ВНУТРИ старой
+        // коробки. Человек целится в пол вплотную к объекту, а выделяется
+        // объект. Обе точки ниже — на полу; обе обязаны выбрать пол.
+        if (ok) {
+            const glm::vec3 nearMiss[2] = {{0.75f, 0.0f, 0.75f}, {-0.75f, 0.0f, 0.7f}};
+            for (const glm::vec3& p : nearMiss) {
+                if (!ok) break;
+                project(p, u, v);
+                SetSelectedId(-1);
+                PickAtViewport(u, v, false);
+                if (m_selectedId != floor.Id()) {
+                    LOG_ERROR("Editor") << "SELFTEST: pick near box at (" << p.x << "," << p.z
+                                        << ") selected " << m_selectedId << ", expected "
+                                        << floor.Id() << " (floor)";
+                    ok = false;
+                }
+            }
+        }
+
+
+        for (const char* nm : {"PickFloor", "PickBox"}) {
+            GameObject g = m_scene->FindByName(nm);
+            if (g.Valid()) m_scene->RemoveObject(g.Id());
+        }
+        SetSelectedId(-1);
+    }
+
     // --- Префабы: сущность с ребёнком -> .sageprefab -> инстанс восстанавливает
     // поддерево (имя/компонент/иерархия), новые id ---
     if (ok) {
@@ -905,7 +989,7 @@ void EditorLayer::RunSelfTest() {
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm, "
+                               << "models + prefab-api + code-editor + confirm + pick, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

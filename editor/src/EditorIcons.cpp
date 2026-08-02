@@ -232,4 +232,10 @@ void Inline(const char* icon, const glm::vec3& color) {
     ImGui::Dummy(ImVec2(s, s));
 }
 
+void Overlay(float x, float y, float size, const char* icon, const glm::vec3& color) {
+    // Ни курсора, ни Dummy: рисунок ложится в список отрисовки окна, а «последний
+    // элемент» ImGui остаётся тем, что подали до вызова.
+    DrawAt(ImGui::GetWindowDrawList(), ImVec2(x, y), size, icon, Col(color));
+}
+
 } // namespace EditorIcons
