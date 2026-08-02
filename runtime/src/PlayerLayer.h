@@ -15,6 +15,7 @@
 #include "sage/core/SystemScheduler.h"
 #include "sage/render/FrameGraph.h"
 #include "sage/render/ParticleSystem.h"
+#include "sage/render/PostFX.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
 #include "sage/ecs/RenderBatch.h"
@@ -93,6 +94,18 @@ private:
     sage::render::FrameGraph m_frame;
     int m_lastFramePasses = -1;   // описание кадра логируется при СМЕНЕ состава
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
+
+    // --- Пост-обработка ------------------------------------------------------
+    // Сцена рисуется в HDR-буфер, а на экран уходит уже результат цепочки
+    // эффектов (bloom/SSAO/DoF/тон-маппинг/FXAA). Раньше рантайм писал прямо в
+    // экран и всей пост-обработки в игре просто НЕ БЫЛО: движок её объявлял,
+    // конфиг настраивал, окно Game в редакторе показывало — а собранная игра
+    // выглядела иначе, потому что в ней этот кусок не выполнялся ни разу.
+    //
+    // Буфер создаётся лениво и только при cfg.PostProcessing: с выключенным
+    // постом полноразмерный HDR-таргет — чистый расход видеопамяти.
+    std::optional<Framebuffer> m_sceneFbo;
+    std::optional<sage::render::PostFX> m_postfx;
     // UI сцены (UIElementComponent из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.
     std::unique_ptr<UIRenderer> m_ui;

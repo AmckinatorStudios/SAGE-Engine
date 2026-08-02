@@ -93,7 +93,7 @@ const std::vector<MaterialRenderField>& MaterialRenderFields();
 // гарантированно используют Albedo (базовый цвет вместо MeshRenderer.Color,
 // когда материал назначен — см. EffectiveColor в Components.h); Emissive/
 // Shininess/TexturePath сериализуются и доступны шейдерам игр, которые
-// решают сами, что из этого поддерживать (как с PostProcessSettings).
+// решают сами, что из этого поддерживать (как с PostFXSettings).
 //
 // Загруженные материалы кэшируются и РАЗДЕЛЯЮТСЯ через
 // ResourceManager::GetMaterial(path) — редактор правит поля прямо в общем

@@ -3,6 +3,7 @@
 
 #include <glm/glm.hpp>
 
+#include "sage/core/Config.h"
 #include "sage/rhi/Resources.h"
 #include "sage/render/Framebuffer.h"
 
@@ -86,6 +87,13 @@ struct PostFXSettings {
     // низко — размывается текстура, слишком высоко — ступеньки остаются.
     float FxaaContrastThreshold = 0.0625f;
 };
+
+// Настройки цепочки из EngineConfig. Живёт В ДВИЖКЕ, а не в редакторе, ровно
+// потому, что потребителей двое: превью в редакторе и собранная игра. Пока
+// перевод «конфиг -> настройки эффектов» лежал в редакторе, у рантайма его
+// просто НЕ БЫЛО — и вместе с ним не было всей пост-обработки: игра в редакторе
+// и та же игра, запущенная плеером, показывали разную картинку.
+PostFXSettings FxFromConfig(const sage::EngineConfig& cfg);
 
 class PostFX {
 public:

@@ -14,6 +14,25 @@ using namespace sage::rhi;
 
 namespace sage::render {
 
+PostFXSettings FxFromConfig(const sage::EngineConfig& cfg) {
+    PostFXSettings fx;
+    fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
+    fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
+    fx.Vignette = cfg.Vignette;
+    fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
+    fx.BloomIntensity = cfg.BloomIntensity;
+    fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
+    fx.AORadius = cfg.AORadius;
+    fx.DofEnabled = cfg.DepthOfField; fx.FocusDistance = cfg.FocusDistance;
+    fx.Aperture = cfg.Aperture; fx.DofMaxRadius = cfg.DofMaxRadius;
+    fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
+    fx.MotionBlurSamples = cfg.MotionBlurSamples;
+    fx.ChromaticAberration = cfg.ChromaticAberration;
+    fx.FxaaEnabled = cfg.Fxaa;
+    fx.FxaaContrastThreshold = cfg.FxaaContrastThreshold;
+    return fx;
+}
+
 // ============================================================================
 //  Встроенные шейдеры пост-обработки (лениво, не уничтожаются — как остальные
 //  встроенные шейдеры движка: function-local static с деструктором Shader снёс

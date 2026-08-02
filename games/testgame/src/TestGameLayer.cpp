@@ -520,11 +520,6 @@ void TestGameLayer::OnAttach() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_shadowsEnabled = cfg.Shadows;
     m_postEnabled = cfg.PostProcessing;
-    m_postSettings.Exposure = cfg.Exposure;
-    m_postSettings.Gamma = cfg.Gamma;
-    m_postSettings.Saturation = cfg.Saturation;
-    m_postSettings.Contrast = cfg.Contrast;
-    m_postSettings.VignetteStrength = cfg.Vignette;
     // PostFX (SSAO + Bloom + виньетка) — параметры из EngineConfig.
     m_postfxSettings.Exposure = cfg.Exposure;
     m_postfxSettings.Gamma = cfg.Gamma;
@@ -546,10 +541,8 @@ void TestGameLayer::OnAttach() {
     // --- рендер ---
     m_sceneShader.emplace("assets/shaders/scene.vert", "assets/shaders/scene.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-    m_postShader.emplace("assets/shaders/post.vert", "assets/shaders/post.frag");
     m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512, cfg.ShadowCascades);
     m_sceneFbo.emplace(window.Width(), window.Height());
-    m_post.emplace();
     m_postfx.emplace(); // SSAO + Bloom + виньетка (полная цепочка пост-обработки)
     m_monument = Model::Load("assets/models/monument.obj"); // прямой путь Model::Load
     m_particles.emplace(); // пул частиц (эмиттеры-факелы в комнатах)

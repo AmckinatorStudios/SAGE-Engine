@@ -35,23 +35,12 @@ void EditorSceneRenderer::Init() {
     m_outlineTri = sage::rhi::GraphicsDevice::Get().CreateGeometry(sage::rhi::VertexLayout{});
 }
 
+// Перевод конфига в настройки эффектов живёт в движке (sage/render/PostFX.h):
+// его читают и превью редактора, и собранная игра, и разойтись они не должны
+// — «в редакторе одна картинка, в игре другая» началось ровно с того, что этот
+// код был здесь и рантайму был недоступен.
 sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::EngineConfig& cfg) {
-    sage::render::PostFXSettings fx;
-    fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
-    fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
-    fx.Vignette = cfg.Vignette;
-    fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
-    fx.BloomIntensity = cfg.BloomIntensity;
-    fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
-    fx.AORadius = cfg.AORadius;
-    fx.DofEnabled = cfg.DepthOfField; fx.FocusDistance = cfg.FocusDistance;
-    fx.Aperture = cfg.Aperture; fx.DofMaxRadius = cfg.DofMaxRadius;
-    fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
-    fx.MotionBlurSamples = cfg.MotionBlurSamples;
-    fx.ChromaticAberration = cfg.ChromaticAberration;
-    fx.FxaaEnabled = cfg.Fxaa;
-    fx.FxaaContrastThreshold = cfg.FxaaContrastThreshold;
-    return fx;
+    return sage::render::FxFromConfig(cfg);
 }
 
 // Небо кадра: кубическая текстура, если у сцены задан её каталог, иначе

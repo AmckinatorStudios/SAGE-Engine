@@ -595,19 +595,30 @@ void PlayerLayer::OnRender() {
         pass.ColorLoad = sage::render::LoadOp::Clear;
         pass.ClearColor = glm::vec4(env.SkyColor * 0.9f, 1.0f);
         pass.Execute = [&, this] {
-        if (vpX != 0 || vpY != 0) {
+        // Пост-обработка: сцена уходит в HDR-буфер, а на экран — результат
+        // цепочки. Тот же PostFX и те же настройки из конфига, что у окна Game
+        // в редакторе, — иначе превью и игра показывают разное.
+        const bool usePost = cfg.PostProcessing;
+        if (usePost) {
+            if (!m_postfx) m_postfx.emplace();
+            if (!m_sceneFbo) m_sceneFbo.emplace(vpW, vpH);
+            m_sceneFbo->Resize(vpW, vpH);
+            m_sceneFbo->Bind();
+            device.SetViewport(0, 0, vpW, vpH);
+        } else if (vpX != 0 || vpY != 0) {
             device.SetViewport(0, 0, window.Width(), window.Height());
             device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             device.Clear();
         }
-        device.SetViewport(vpX, vpY, vpW, vpH);
+        if (!usePost) device.SetViewport(vpX, vpY, vpW, vpH);
         device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
         device.Clear();
 
-        // Сцена рендерится напрямую в экран (HDR-пост-цепочки у рантайма нет) —
-        // включаем аппаратную гамма-коррекцию, иначе линейный цвет шейдеров уходит
-        // на монитор сырым и вся игра выглядит неоправданно тёмной.
-        device.SetSRGBWrite(true);
+        // Аппаратная гамма-коррекция нужна ТОЛЬКО когда сцена идёт прямо в
+        // экран: иначе линейный цвет шейдеров уходит на монитор сырым и игра
+        // выглядит неоправданно тёмной. С пост-обработкой гамму накладывает
+        // composite-проход, и включать её здесь значило бы применить дважды.
+        device.SetSRGBWrite(!usePost);
 
         if (env.Skybox.Enabled) {
             m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
@@ -634,6 +645,21 @@ void PlayerLayer::OnRender() {
 
         // Частицы (billboard) — camRight/Up берём из матрицы вида.
         if (m_particles) m_particles->DrawFromView(view, proj);
+
+        if (usePost) {
+            m_sceneFbo->Resolve(); // MSAA -> обычные текстуры (без MSAA — пустышка)
+            device.BindDefaultFramebuffer();
+            // Полосы letterbox чистим здесь: цепочка пишет только в свой
+            // прямоугольник, и без этого по краям осталось бы содержимое
+            // прошлого кадра.
+            device.SetViewport(0, 0, window.Width(), window.Height());
+            device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            device.Clear();
+            m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
+                             m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
+                             sage::render::FxFromConfig(cfg),
+                             /*output=*/nullptr, vpX, vpY, vpW, vpH);
+        }
         };
         m_frame.AddPass(std::move(pass));
     }

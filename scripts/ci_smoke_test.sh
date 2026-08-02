@@ -168,6 +168,31 @@ if [ "${SHOT_SIZE2}" -lt 1024 ]; then
 fi
 echo "OK: игра запускается из ЛЮБОЙ папки и понимает путь к project.sageproj (скриншот ${SHOT_SIZE2} байт)"
 
+# Пост-обработка в СОБРАННОЙ ИГРЕ, а не только в редакторе. Движок объявляет её
+# подсистемой, конфиг её настраивает, окно Game редактора её показывает — а
+# плеер рисовал прямо в экран и не выполнял её НИ РАЗУ: игра в редакторе и та же
+# игра, запущенная по-настоящему, выглядели по-разному. Проверка простая и
+# неубиваемая: один и тот же кадр с SAGE_POST=0 и SAGE_POST=1 обязан
+# ОТЛИЧАТЬСЯ. Пока цепочка не подключена, оба кадра совпадают до байта.
+POST_OFF="${SCRATCH_DIR}/post_off.png"
+POST_ON="${SCRATCH_DIR}/post_on.png"
+for MODE in 0 1; do
+    OUT="${POST_OFF}"; [ "${MODE}" = "1" ] && OUT="${POST_ON}"
+    STATUS=0
+    ( cd "${GAME_DIR}" && \
+      run_headless env SAGE_POST="${MODE}" SAGE_SCREENSHOT_AT_FRAME=10 \
+          SAGE_SCREENSHOT_PATH="${OUT}" ./selftest_project ) > /dev/null 2>&1 || STATUS=$?
+    if [ ${STATUS} -ne 0 ]; then
+        echo "ОШИБКА: игра с SAGE_POST=${MODE} завершилась с кодом ${STATUS}"; exit 1
+    fi
+done
+if cmp -s "${POST_OFF}" "${POST_ON}"; then
+    echo "ОШИБКА: кадр с пост-обработкой и без неё СОВПАДАЕТ — цепочка эффектов"
+    echo "        не выполняется в собранной игре (см. PlayerLayer::OnRender)."
+    exit 1
+fi
+echo "OK: пост-обработка выполняется в собранной игре (кадры с SAGE_POST=0/1 различаются)"
+
 echo "=== Smoke-тест 6/7: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,

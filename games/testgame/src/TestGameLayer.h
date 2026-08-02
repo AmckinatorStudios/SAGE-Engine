@@ -13,7 +13,6 @@
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/ShadowMap.h"
-#include "sage/render/PostProcess.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/Model.h"
 #include "sage/render/ParticleSystem.h"
@@ -44,8 +43,8 @@ class AudioEngine;
 //     в headless CI тихо деградирует — IsAvailable()=false, Play* — no-op).
 //   • Модель .obj двумя путями: ECS-энтити через ResourceManager::GetModel и
 //     прямой Model::Load + Model::Draw (мульти-submesh путь).
-//   • Тени (ShadowMap + shadow_depth.*) и пост-процесс (Framebuffer HDR +
-//     PostProcess + post.*) — первый реальный рендер-прогон после RHI-миграции.
+//   • Тени (ShadowMap + shadow_depth.*) и пост-обработка (Framebuffer HDR +
+//     PostFX) — первый реальный рендер-прогон после RHI-миграции.
 //
 // Env-хуки (паттерн движка): SAGE_SCREENSHOT_AT_FRAME/SAGE_SCREENSHOT_PATH,
 // SAGE_NO_SHADOWS, SAGE_NO_POST, SAGE_TESTGAME_AUTOPILOT=1 (бот сам собирает
@@ -122,13 +121,10 @@ private:
     // --- рендер ---
     std::optional<Shader> m_sceneShader;
     std::optional<Shader> m_shadowShader;
-    std::optional<Shader> m_postShader;
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo;
-    std::optional<PostProcess> m_post;
     std::optional<sage::render::PostFX> m_postfx;      // SSAO + Bloom + composite
     sage::render::PostFXSettings m_postfxSettings;     // экспозиция/AO/bloom/виньетка
-    PostProcessSettings m_postSettings;
     bool m_shadowsEnabled = true;
     bool m_postEnabled = true;
     std::unique_ptr<Model> m_monument; // прямой Model::Load путь (комната 2)
