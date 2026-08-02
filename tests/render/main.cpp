@@ -917,17 +917,32 @@ void SkyColorSplit(const Image& img, double& cool, double& warm) {
 // Крутизна самого сильного перехода такой двусмысленности не имеет.
 double Sharpness(const Image& img) {
     std::vector<int> steps;
+    int lo = 255 * 3, hi = 0;
     for (int y = 1; y < img.Height - 1; ++y)
         for (int x = 1; x < img.Width - 1; ++x) {
             int r, g, b;
             if (!BallPixel(img, x, y, r, g, b)) continue;
+            lo = std::min(lo, r + g + b);
+            hi = std::max(hi, r + g + b);
             int r2, g2, b2;
             if (!BallPixel(img, x + 1, y, r2, g2, b2)) continue;
             steps.push_back(std::abs(r - r2) + std::abs(g - g2) + std::abs(b - b2));
         }
     if (steps.empty()) return 0.0;
     std::sort(steps.begin(), steps.end());
-    return (double)steps[(size_t)((steps.size() - 1) * 99 / 100)];
+    const double steepest = (double)steps[(size_t)((steps.size() - 1) * 99 / 100)];
+
+    // Делим на ПОЛНЫЙ размах яркости шара.
+    //
+    // Абсолютный шаг мерит не только размытие, но и контраст, а он с
+    // шероховатостью РАСТЁТ: чем шероховатее металл, тем больше окружения
+    // собирает env-BRDF, и шар в целом становится ярче. Из-за этого абсолютная
+    // мера сначала росла и только потом падала — она мерила две вещи сразу.
+    // Отношение «самый крутой шаг к полному размаху» отвечает ровно на нужный
+    // вопрос: за какую долю всего перепада отвечает один пиксель. Резкая кромка
+    // — за большую, размытая — за малую, и яркость на это не влияет.
+    const double range = (double)(hi - lo);
+    return range > 1.0 ? steepest / range : 0.0;
 }
 
 // Кадр сцены с картой окружения (или без неё, если reflect == nullptr).
@@ -1001,12 +1016,12 @@ void TestReflections(FrameRenderer& r) {
     // расплывается с шероховатостью и попадал бы в ту же меру, которой мы
     // проверяем размытие ОТРАЖЕНИЯ. С выключенным солнцем у металла не
     // остаётся ничего, кроме отражения, — мерить становится нечего лишнего.
-    for (float rough : {0.05f, 0.3f, 0.6f, 1.0f}) {
+    for (float rough : {0.05f, 0.15f, 0.3f, 0.45f, 0.6f, 0.8f, 1.0f}) {
         auto s = MakeReflectionScene(rough, 1.0f, 0.0f);
         sage::render::ReflectionSystem rs;
         const double sharp = Sharpness(RenderReflected(r, *s, &rs, sky, kW, kH));
-        std::printf("       шероховатость %.2f -> резкость перехода %.2f\n", rough, sharp);
-        if (sharp > prev + 0.5) monotone = false;
+        std::printf("       шероховатость %.2f -> резкость перехода %.3f\n", rough, sharp);
+        if (sharp > prev + 0.02) monotone = false;
         prev = sharp;
     }
     Check(monotone, "чем шероховатее, тем размытее отражение");
@@ -1933,6 +1948,76 @@ void TestAssetCache() {
     sage::assets::SetCacheDirectory(".sage-cache");
 }
 
+// --- Небо: направление луча обязано совпадать с камерой ------------------------
+//
+// Вершинный шейдер неба нормализовал направление ДО интерполяции. Луч
+// восстанавливается из точки на дальней плоскости, а растеризатор
+// интерполирует varying ЛИНЕЙНО — линейно интерполировать можно только сами
+// точки плоскости, они на ней и остаются. Нормаль же делит каждую вершину на
+// СВОЮ длину, а у полноэкранного треугольника длины отличаются в разы (NDC
+// идёт от -1 до 3). После такого деления промежуточные значения не
+// соответствуют ни одному лучу камеры: горизонт уезжает и перекашивается, тем
+// сильнее, чем шире кадр.
+//
+// Проверка — сравнение с АНАЛИТИЧЕСКИМ ответом, а не с эталонной картинкой:
+// направление луча камеры считается точно, и правильный результат известен
+// заранее. Такой тест не зависит ни от драйвера, ни от того, что кто-то
+// однажды перезапишет эталон.
+void TestSkyRayDirection() {
+    SkyRenderer sky;
+    constexpr int w = 256, h = 128;
+    const glm::vec3 top(0.05f, 0.10f, 0.55f);
+    const glm::vec3 horizon(1.0f, 0.55f, 0.15f);
+
+    Framebuffer fbo(w, h);
+    fbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear(true, true);
+
+    // Широкий угол — там искажение максимально.
+    const float fov = glm::radians(100.0f);
+    const float aspect = (float)w / (float)h;
+    const glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 500.0f);
+    const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, -1.0f),
+                                       glm::vec3(0.0f, 1.0f, 0.0f));
+    sky.Draw(view, proj, top, horizon);
+
+    const Image img = Capture(w, h);
+    device.BindDefaultFramebuffer();
+
+    // Тот же расчёт, что обязан делать шейдер: луч пинхол-камеры и градиент.
+    const float tanHalf = std::tan(fov * 0.5f);
+    double worst = 0.0;
+    double mean = 0.0;
+    for (int y = 0; y < img.Height; ++y) {
+        for (int x = 0; x < img.Width; ++x) {
+            // Capture переворачивает строки, поэтому строка 0 — ВЕРХ кадра.
+            const float ndcX = ((x + 0.5f) / w) * 2.0f - 1.0f;
+            const float ndcY = 1.0f - ((y + 0.5f) / h) * 2.0f;
+            const glm::vec3 dir =
+                glm::normalize(glm::vec3(ndcX * tanHalf * aspect, ndcY * tanHalf, -1.0f));
+            const float t = glm::clamp(dir.y, 0.0f, 1.0f);
+            // Та же формула, что в шейдере, включая окно сглаживания у горизонта.
+            const float e = glm::clamp(dir.y / 0.25f, 0.0f, 1.0f);
+            const float soften = e * e * (3.0f - 2.0f * e);
+            const glm::vec3 expect = glm::mix(horizon, top, std::pow(t, 0.5f) * soften);
+            for (int c = 0; c < 3; ++c) {
+                const int got = img.Pixels[((size_t)y * img.Width + x) * 3 + c];
+                const double d = std::abs(got - expect[c] * 255.0);
+                worst = std::max(worst, d);
+                mean += d;
+            }
+        }
+    }
+    mean /= (double)img.Pixels.size();
+    std::printf("       отклонение от аналитического неба: средн. %.2f, макс. %.2f (из 255)\n",
+                mean, worst);
+    // До правки максимум доходил до сотни: горизонт стоял не там, где смотрит
+    // камера. Допуск — на округление в 8 бит и точность float в шейдере.
+    Check(worst <= 8.0, "луч неба совпадает с лучом камеры");
+}
+
 // --- Соответствие RHI на НАСТОЯЩЕМ бэкенде ------------------------------------
 //
 // Тот же контракт, что sage_tests гоняет по Null, — но здесь есть контекст, и
@@ -2008,6 +2093,7 @@ int main(int argc, char** argv) {
         TestLevelsOfDetail(renderer);
         TestOcclusionCulling(renderer);
         TestAssetCache();
+        TestSkyRayDirection();
         TestRhiConformance();
     }
 

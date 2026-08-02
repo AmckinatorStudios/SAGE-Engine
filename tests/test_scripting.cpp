@@ -444,3 +444,139 @@ TEST(Scripting_every_legacy_global_still_answers) {
         CHECK_TRUE(ok);
     }
 }
+
+// --- Префабы доступны ИГРЕ, а не только редактору ------------------------------
+//
+// Префабы формально были: «Save as Prefab» в иерархии, двойной клик по файлу.
+// Но код жил внутри EditorLayer.cpp, в безымянном пространстве имён, и потому
+// был недоступен никому, кроме редактора. Для игры про постройку из блоков это
+// значит, что главной её операции — поставить заготовленный объект в мир — из
+// скрипта не существовало.
+#include "sage/scene/Prefab.h"
+#include "sage/core/SaveGame.h"
+
+#include <cstdlib>
+#include <filesystem>
+
+TEST(Prefab_round_trips_through_a_file_and_keeps_the_subtree) {
+    Scene source("src");
+    GameObject root = source.CreateObject("Turret");
+    root.GetTransform().Position = {5.0f, 0.0f, 0.0f};
+    auto& rb = source.Registry().emplace<RigidBodyComponent>(root.Entity());
+    rb.Type = sage::physics::BodyType::Static;
+    rb.RuntimeBody = 4242;   // рантайм-поле: у копии обязано быть сброшено
+
+    GameObject barrel = source.CreateObject("Barrel");
+    barrel.GetTransform().Position = {0.0f, 1.5f, 0.0f};
+    source.SetParent(barrel.Entity(), root.Entity());
+
+    const std::string path = "sage_test_turret.sageprefab";
+    std::string err;
+    CHECK_TRUE(sage::scene::SavePrefab(source, root.Entity(), path, err));
+
+    // Ставим в ДРУГУЮ сцену — ровно так это делает игра.
+    Scene world("world");
+    const int id = sage::scene::InstantiatePrefabAt(world, path, {10.0f, 2.0f, -3.0f});
+    CHECK_TRUE(id > 0);
+
+    GameObject spawned = world.Get(id);
+    CHECK_TRUE(spawned.Valid());
+    CHECK_TRUE(spawned.Name() == "Turret");
+    CHECK_NEAR(spawned.GetTransform().Position.x, 10.0f, 1e-4);
+    CHECK_NEAR(spawned.GetTransform().Position.y, 2.0f, 1e-4);
+
+    // Поддерево на месте.
+    const HierarchyComponent* h = world.Registry().try_get<HierarchyComponent>(spawned.Entity());
+    CHECK_TRUE(h != nullptr && h->Children.size() == 1);
+
+    // Дескриптор тела — состояние ЭКЗЕМПЛЯРА. Скопируй его как есть, и две
+    // сущности делили бы одно тело: удаление одной уносило бы физику другой.
+    const RigidBodyComponent* copied =
+        world.Registry().try_get<RigidBodyComponent>(spawned.Entity());
+    CHECK_TRUE(copied != nullptr);
+    if (copied) CHECK_TRUE(copied->RuntimeBody == sage::physics::kInvalidBody);
+
+    // Второй экземпляр — независимая сущность, а не тот же id.
+    const int id2 = sage::scene::InstantiatePrefab(world, path);
+    CHECK_TRUE(id2 > 0 && id2 != id);
+
+    sage::scene::ClearPrefabCache();
+    std::remove(path.c_str());
+}
+
+TEST(Prefab_is_reachable_from_lua) {
+    ScriptEngine se;
+    Scene scene("world");
+    se.BindScene(scene);
+
+    // Готовим шаблон средствами движка, ставим его из СКРИПТА.
+    GameObject block = scene.CreateObject("Block");
+    std::string err;
+    const std::string path = "sage_test_block.sageprefab";
+    CHECK_TRUE(sage::scene::SavePrefab(scene, block.Entity(), path, err));
+
+    const int spawned = se.Lua().script(
+        "return sage.scene.SpawnPrefab('sage_test_block.sageprefab', Vec3.new(3, 0, 4))");
+    CHECK_TRUE(spawned > 0);
+    GameObject obj = scene.Get(spawned);
+    CHECK_TRUE(obj.Valid() && obj.Name() == "Block");
+    CHECK_NEAR(obj.GetTransform().Position.x, 3.0f, 1e-4);
+
+    // Старое глобальное имя работает наравне с модулем — как и весь остальной API.
+    CHECK_TRUE(se.Lua().script("return sage.scene.SpawnPrefab == SpawnPrefab"));
+
+    sage::scene::ClearPrefabCache();
+    std::remove(path.c_str());
+}
+
+// Прогресс проходит круг ЧЕРЕЗ LUA: игра думает таблицами, а не JSON-текстом.
+TEST(SaveGame_round_trips_a_lua_table) {
+    const std::string sandbox =
+        (std::filesystem::temp_directory_path() / "sage_save_lua").string();
+    std::filesystem::remove_all(sandbox);
+#ifdef _WIN32
+    _putenv_s("APPDATA", sandbox.c_str());
+#else
+    setenv("XDG_DATA_HOME", sandbox.c_str(), 1);
+#endif
+    sage::save::SetGameName("LuaGame");
+
+    ScriptEngine se;
+    CHECK_TRUE(se.Lua().script(R"(
+        return sage.save.Write("main", {
+            day = 12, hp = 80.5, alive = true, name = "Робинзон",
+            inventory = {"доска", "верёвка", "ткань"},
+            base = { x = 3, y = 0, z = -7 },
+        })
+    )"));
+
+    // Нет слота — nil, а не пустая таблица: «сохранения нет» и «сохранение
+    // пустое» — разные вещи, и новый игрок не должен попадать в конец игры.
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('нетакого') == nil"));
+
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('main').day == 12"));
+    // Целое обязано вернуться целым, а не 12.0: иначе интерфейс показывает
+    // «День 12.0» при полностью рабочем сравнении «== 12».
+    CHECK_TRUE(se.Lua().script("return math.type(sage.save.Read('main').day) == 'integer'"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('main').alive == true"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('main').name == 'Робинзон'"));
+    CHECK_TRUE(se.Lua().script("return #sage.save.Read('main').inventory == 3"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('main').inventory[2] == 'верёвка'"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('main').base.z == -7"));
+    CHECK_TRUE(se.Lua().script("return #sage.save.Slots() == 1"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Slots()[1].name == 'main'"));
+
+    // Таблица, ссылающаяся на саму себя, обязана сохраниться без падения.
+    // Одной глубины рекурсии тут мало: каждый уровень держит ОТКРЫТЫЙ обход
+    // таблицы, и три десятка вложенных обходов переполняют стек Lua — игра
+    // падает не здесь, а позже, при закрытии состояния, и связать одно с
+    // другим уже невозможно. Цикл ловится по факту повторной встречи.
+    CHECK_TRUE(se.Lua().script("local t = {a=1}; t.self = t; return sage.save.Write('loop', t)"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('loop').a == 1"));
+    // Взаимная ссылка двух таблиц — тот же случай, только не самоочевидный.
+    CHECK_TRUE(se.Lua().script(
+        "local a = {n=1}; local b = {n=2}; a.b = b; b.a = a; return sage.save.Write('pair', a)"));
+    CHECK_TRUE(se.Lua().script("return sage.save.Read('pair').b.n == 2"));
+
+    std::filesystem::remove_all(sandbox);
+}

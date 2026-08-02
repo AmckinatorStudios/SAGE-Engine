@@ -5,6 +5,7 @@
 #endif
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/euler_angles.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "sage/core/Log.h"
 #include "sage/scene/Scene.h"
@@ -31,8 +32,48 @@ glm::vec3 QuatToEuler(const glm::quat& q) {
     return glm::degrees(glm::vec3(x, y, z));
 }
 
+// Мировой Transform сущности: позиция, поворот и масштаб, УЖЕ учитывающие
+// родителей.
+//
+// Физика раньше брала ЛОКАЛЬНЫЙ Transform, и это работало ровно до первой
+// сущности с родителем. У корневой локальное и мировое совпадают, поэтому
+// ошибка была невидима во всех тестах и во всех сценах, где тела висят на
+// корне. А стоило прицепить объект к другому — и тело оказывалось не там, где
+// объект: на экране всё правильно (рендер-то мировую матрицу учитывает), а
+// столкновения происходят в стороне, будто коллизия «не поворачивается вместе
+// с объектом». Найти это по симптому почти невозможно.
+struct WorldTransform {
+    glm::vec3 Position{0.0f};
+    glm::quat Rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 Scale{1.0f};
+};
+
+WorldTransform DecomposeWorld(const glm::mat4& m) {
+    WorldTransform out;
+    out.Position = glm::vec3(m[3]);
+    // Масштаб — длины столбцов; поворот — те же столбцы, нормированные. Полный
+    // glm::decompose здесь избыточен: скос физике всё равно не передать, у формы
+    // столкновения его нет по определению.
+    glm::vec3 c0(m[0]), c1(m[1]), c2(m[2]);
+    out.Scale = {glm::length(c0), glm::length(c1), glm::length(c2)};
+    if (out.Scale.x > 1e-6f) c0 /= out.Scale.x;
+    if (out.Scale.y > 1e-6f) c1 /= out.Scale.y;
+    if (out.Scale.z > 1e-6f) c2 /= out.Scale.z;
+    glm::mat3 rot(c0, c1, c2);
+    out.Rotation = glm::quat_cast(rot);
+    return out;
+}
+
+// Мировая матрица РОДИТЕЛЯ (единичная, если родителя нет). Нужна для обратного
+// перевода: физика отвечает в мировых координатах, Transform хранит локальные.
+glm::mat4 ParentWorldMatrix(const Scene& scene, entt::entity e) {
+    const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(e);
+    if (!h || h->Parent == entt::null || !scene.Registry().valid(h->Parent)) return glm::mat4(1.0f);
+    return scene.WorldMatrix(h->Parent);
+}
+
 BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* col,
-                        const Transform& tr) {
+                        const WorldTransform& tr) {
     BodyDesc d;
     d.Type = rb.Type;
     d.Mass = rb.Mass;
@@ -41,7 +82,7 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
     d.Layer = rb.Layer;
     d.Sensor = rb.Sensor;
     d.Position = tr.Position;
-    d.Rotation = EulerToQuat(tr.Rotation);
+    d.Rotation = tr.Rotation;
 
     glm::vec3 scale = glm::abs(tr.Scale);
     float uniform = glm::max(scale.x, glm::max(scale.y, scale.z));
@@ -134,7 +175,7 @@ void PhysicsScene::SyncBodies(Scene& scene) {
     for (auto e : view) {
         RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
         if (rb.RuntimeBody != kInvalidBody) continue;
-        const Transform& tr = view.get<Transform>(e);
+        const WorldTransform tr = DecomposeWorld(scene.WorldMatrix(e));
         const ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(e);
         rb.RuntimeBody = m_world->CreateBody(DescFromEntity(rb, col, tr));
         if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
@@ -175,8 +216,8 @@ void PhysicsScene::Step(Scene& scene, float dt) {
     for (auto e : view) {
         RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
         if (rb.Type != BodyType::Kinematic || rb.RuntimeBody == kInvalidBody) continue;
-        const Transform& tr = view.get<Transform>(e);
-        m_world->SetBodyTransform(rb.RuntimeBody, tr.Position, EulerToQuat(tr.Rotation));
+        const WorldTransform tr = DecomposeWorld(scene.WorldMatrix(e));
+        m_world->SetBodyTransform(rb.RuntimeBody, tr.Position, tr.Rotation);
     }
 
     m_world->Step(dt);
@@ -189,8 +230,22 @@ void PhysicsScene::Step(Scene& scene, float dt) {
         glm::vec3 pos;
         glm::quat rot;
         m_world->GetBodyTransform(rb.RuntimeBody, pos, rot);
-        tr.Position = pos;
-        tr.Rotation = QuatToEuler(rot);
+
+        // Физика говорит в МИРОВЫХ координатах, а Transform хранит ЛОКАЛЬНЫЕ.
+        // У корневой сущности это одно и то же, поэтому раньше разницы никто не
+        // замечал; у ребёнка запись мировой позиции в локальное поле означала
+        // бы, что объект каждый кадр уезжает на смещение родителя — и чем
+        // дальше родитель от начала координат, тем быстрее.
+        const glm::mat4 parent = ParentWorldMatrix(scene, e);
+        if (parent == glm::mat4(1.0f)) {
+            tr.Position = pos;
+            tr.Rotation = QuatToEuler(rot);
+        } else {
+            const glm::mat4 world = glm::translate(glm::mat4(1.0f), pos) * glm::mat4_cast(rot);
+            const WorldTransform local = DecomposeWorld(glm::inverse(parent) * world);
+            tr.Position = local.Position;
+            tr.Rotation = QuatToEuler(local.Rotation);
+        }
     }
 
     PullCharacters(scene);

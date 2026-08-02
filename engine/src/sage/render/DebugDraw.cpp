@@ -88,6 +88,49 @@ void DebugDraw::WireBox(glm::vec3 center, glm::vec3 halfExtents, glm::vec3 color
     WireBox(m, color);
 }
 
+void DebugDraw::WireCapsule(const glm::mat4& transform, float radius, float halfHeight,
+                            glm::vec3 color, int segments) {
+    if (segments < 6) segments = 6;
+    const float twoPi = glm::two_pi<float>();
+    auto at = [&](const glm::vec3& local) {
+        return glm::vec3(transform * glm::vec4(local, 1.0f));
+    };
+
+    // Два кольца по торцам цилиндра.
+    for (int i = 0; i < segments; ++i) {
+        const float a0 = twoPi * i / segments;
+        const float a1 = twoPi * (i + 1) / segments;
+        const glm::vec2 p0(std::cos(a0) * radius, std::sin(a0) * radius);
+        const glm::vec2 p1(std::cos(a1) * radius, std::sin(a1) * radius);
+        for (float y : {-halfHeight, halfHeight}) {
+            Line(at({p0.x, y, p0.y}), at({p1.x, y, p1.y}), color);
+        }
+    }
+
+    // Четыре образующие цилиндра — по осям X и Z.
+    for (int i = 0; i < 4; ++i) {
+        const float a = twoPi * i / 4.0f;
+        const glm::vec3 off(std::cos(a) * radius, 0.0f, std::sin(a) * radius);
+        Line(at(off + glm::vec3(0, -halfHeight, 0)), at(off + glm::vec3(0, halfHeight, 0)), color);
+    }
+
+    // Полусферы: две дуги на каждом торце (в плоскостях XY и ZY).
+    const int arc = segments / 2 + 1;
+    for (int i = 0; i < arc; ++i) {
+        const float t0 = glm::half_pi<float>() * i / arc;
+        const float t1 = glm::half_pi<float>() * (i + 1) / arc;
+        const float c0 = std::cos(t0) * radius, s0 = std::sin(t0) * radius;
+        const float c1 = std::cos(t1) * radius, s1 = std::sin(t1) * radius;
+        for (float sign : {1.0f, -1.0f}) {
+            const float y = sign * halfHeight;
+            Line(at({c0, y + sign * s0, 0}), at({c1, y + sign * s1, 0}), color);
+            Line(at({-c0, y + sign * s0, 0}), at({-c1, y + sign * s1, 0}), color);
+            Line(at({0, y + sign * s0, c0}), at({0, y + sign * s1, c1}), color);
+            Line(at({0, y + sign * s0, -c0}), at({0, y + sign * s1, -c1}), color);
+        }
+    }
+}
+
 void DebugDraw::WireSphere(glm::vec3 center, float radius, glm::vec3 color, int segments) {
     if (segments < 4) segments = 4;
     float twoPi = glm::two_pi<float>();

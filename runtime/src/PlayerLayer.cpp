@@ -14,6 +14,7 @@
 
 #include "sage/core/Application.h"
 #include "sage/core/Config.h"
+#include "sage/core/SaveGame.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
@@ -92,6 +93,11 @@ void PlayerLayer::OnAttach() {
     sage::AssetDatabase::Instance().ScanProject(".");
 
     glfwSetWindowTitle(app.GetWindow().Handle(), m_projectName.c_str());
+
+    // Имя игры определяет папку сохранений. Ставится ДО загрузки сцены: скрипт
+    // с OnStart вправе сразу прочитать прогресс, и к этому моменту он обязан
+    // знать, откуда читать.
+    sage::save::SetGameName(m_projectName);
 
     // 3. Главная сцена.
     fs::path scenePath = FindMainScene();

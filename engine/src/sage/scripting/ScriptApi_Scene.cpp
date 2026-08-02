@@ -3,6 +3,8 @@
 
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/assets/AssetDatabase.h"
+#include "sage/scene/Prefab.h"
 #include "sage/ui/UISceneSystem.h"
 
 // ---------------------------------------------------------------------------
@@ -133,6 +135,38 @@ void ScriptEngine::RegisterSceneApi() {
         // (никакого use-after-free, даже если скрипт уничтожает сам себя).
         m_scene->RemoveObject(id);
     });
+
+    // --- Префабы: заготовленный объект в мир --------------------------------
+    //
+    // Формально префабы были и раньше — но только в редакторе, внутри его
+    // безымянного пространства имён. Для игры про постройку из блоков это
+    // значит, что главной её операции не существовало: поставить готовый
+    // объект в мир из скрипта было нечем, и приходилось каждый раз собирать
+    // его по компонентам заново.
+    //
+    // Разобранный префаб кэшируется, поэтому тысяча блоков — это один разбор
+    // JSON, а не тысяча.
+    Bind("scene", "SpawnPrefab", "SpawnPrefab",
+         [this](const std::string& path, sol::optional<glm::vec3> at) -> int {
+             if (!m_scene) throw std::runtime_error("SpawnPrefab: сцена не привязана");
+             const std::string file = sage::AssetDatabase::Instance().LocatePath(path);
+             return at ? sage::scene::InstantiatePrefabAt(*m_scene, file, *at)
+                       : sage::scene::InstantiatePrefab(*m_scene, file);
+         });
+
+    // Сохранить сущность (с потомками) как шаблон прямо из игры. Нужно не для
+    // симметрии: редактор карт, сделанный НА движке, — обычная часть игры про
+    // постройку, и без записи префабов он невозможен.
+    Bind("scene", "SavePrefab", "SavePrefab",
+         [this](int id, const std::string& path) -> bool {
+             if (!m_scene) throw std::runtime_error("SavePrefab: сцена не привязана");
+             GameObject obj = m_scene->Get(id);
+             if (!obj.Valid()) return false;
+             std::string err;
+             if (sage::scene::SavePrefab(*m_scene, obj.Entity(), path, err)) return true;
+             LOG_ERROR("Prefab") << "Не удалось сохранить префаб " << path << ": " << err;
+             return false;
+         });
 }
 
 void ScriptEngine::RegisterMeshApi() {

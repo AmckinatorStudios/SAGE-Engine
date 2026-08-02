@@ -67,6 +67,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterParticleApi();
     RegisterBillboardApi();
     RegisterAudioApi();
+    RegisterSaveApi();
     RegisterTimerApi();
     RegisterMessagingApi();
     RegisterLaunchArgsApi();

@@ -239,6 +239,7 @@ private:
     void RegisterParticleApi();   // ParticleConfig, пресеты, Emit/Stream
     void RegisterBillboardApi();  // AddBillboard/…
     void RegisterAudioApi();      // PlaySound/PlayMusic/…
+    void RegisterSaveApi();       // sage.save.* — прогресс игрока
     void RegisterTimerApi();      // Schedule/Repeat/StartCoroutine + wait()
     void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
     void RegisterLaunchArgsApi(); // LaunchArg/LaunchFlag

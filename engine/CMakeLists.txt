@@ -31,6 +31,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp
     src/sage/core/Profiler.cpp
+    src/sage/core/SaveGame.cpp
     src/rhi/Conformance.cpp
     src/rhi/null/NullDevice.cpp
     src/sage/assets/AssetCache.cpp
@@ -70,6 +71,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/PhysicsScene.cpp
     src/physics/Ragdoll.cpp
     src/physics/simple/SimpleWorld.cpp
+    src/sage/scene/Prefab.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/scripting/ScriptApi_Math.cpp

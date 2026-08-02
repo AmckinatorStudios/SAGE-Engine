@@ -4,6 +4,8 @@
 #include <nlohmann/json.hpp>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/core/SaveGame.h"
+#include "sage/scene/Prefab.h"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -64,6 +66,12 @@ bool Project::Open(const fs::path& fileOrDir, std::string& error) {
     // означают ответы про файлы, которых там нет.
     sage::AssetDatabase::Instance().Clear();
     sage::AssetDatabase::Instance().ScanProject(m_dir.string());
+
+    // Сохранения Play-режима идут в ту же папку, что и у собранной игры: иначе
+    // проверить работу сохранений в редакторе было бы нечем — она писала бы в
+    // одно место, а игра читала из другого.
+    sage::save::SetGameName(m_name);
+    sage::scene::ClearPrefabCache();   // префабы прошлого проекта тут ни при чём
 
     LOG_INFO("Editor") << "Project opened: " << m_name << " (" << m_dir.string() << ")";
     return true;

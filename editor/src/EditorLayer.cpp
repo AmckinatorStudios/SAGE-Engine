@@ -33,6 +33,7 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
+#include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 
 namespace fs = std::filesystem;
@@ -546,60 +547,12 @@ void CopyComponentIfPresent(GameObject& src, GameObject& copy) {
 } // namespace
 
 namespace {
-// Копирует ВСЕ компоненты (кроме имени/иерархии) из src в dst — может быть в
-// ДРУГОЙ сцене (CopyComponentIfPresent работает по реестрам независимо). Рантайм-
-// поля копии сбрасываются: тело физики/сустав/анимация/эмиттер строятся заново.
-void CopyAllComponents(GameObject& src, GameObject& dst) {
-    dst.GetTransform() = src.GetTransform();
-    dst.Renderer() = src.Renderer();
-    CopyComponentIfPresent<ScriptComponent>(src, dst);
-    CopyComponentIfPresent<CameraComponent>(src, dst);
-    CopyComponentIfPresent<LightComponent>(src, dst);
-    CopyComponentIfPresent<RigidBodyComponent>(src, dst);
-    CopyComponentIfPresent<ColliderComponent>(src, dst);
-    CopyComponentIfPresent<JointComponent>(src, dst);
-    CopyComponentIfPresent<ParticleEmitterComponent>(src, dst);
-    CopyComponentIfPresent<AnimatedModelComponent>(src, dst);
-    CopyComponentIfPresent<IKComponent>(src, dst);
-    CopyComponentIfPresent<ReflectionProbeComponent>(src, dst);
-    CopyComponentIfPresent<UIElementComponent>(src, dst);
-    if (auto* rb = dst.Registry()->try_get<RigidBodyComponent>(dst.Entity()))
-        rb->RuntimeBody = sage::physics::kInvalidBody;
-    if (auto* jc = dst.Registry()->try_get<JointComponent>(dst.Entity()))
-        jc->RuntimeJoint = sage::physics::kInvalidJoint;
-    if (auto* am = dst.Registry()->try_get<AnimatedModelComponent>(dst.Entity())) {
-        am->Model.reset();
-        am->Anim = sage::anim::Animator{};
-        am->Ready = false;
-    }
-    // Индексы костей и залипшая опора — состояние ЭТОГО экземпляра: у копии
-    // модель загрузится заново, и цели должны разрешиться по именам с нуля.
-    if (auto* ik = dst.Registry()->try_get<IKComponent>(dst.Entity()))
-        for (IKGoal& g : ik->Goals) { g.Resolved = false; g.Locked = false; }
-    // Снятая карта принадлежит ТОЧКЕ, а копия стоит в другой: делить её нельзя,
-    // иначе копия отражала бы окружение оригинала.
-    if (auto* rp = dst.Registry()->try_get<ReflectionProbeComponent>(dst.Entity())) {
-        rp->Runtime.reset();
-        rp->Dirty = true;
-    }
-    if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity()))
-        pe->Accumulator = 0.0f;
-}
-
-// Рекурсивно копирует поддерево (src.srcE + потомки) в dst под dstParent,
-// сохраняя иерархию. Новые сущности получают новые id. Возвращает корень копии.
-GameObject CopySubtree(Scene& src, entt::entity srcE, Scene& dst, entt::entity dstParent) {
-    GameObject s(&src.Registry(), srcE);
-    GameObject d = dst.CreateObject(s.Name());
-    CopyAllComponents(s, d);
-    if (dstParent != entt::null) dst.SetParent(d.Entity(), dstParent);
-    if (const HierarchyComponent* h = src.Registry().try_get<HierarchyComponent>(srcE)) {
-        std::vector<entt::entity> kids = h->Children; // копия: SetParent мутирует список
-        for (entt::entity k : kids)
-            if (src.Registry().valid(k)) CopySubtree(src, k, dst, d.Entity());
-    }
-    return d;
-}
+// Копирование сущностей и поддеревьев переехало в движок (sage/scene/Prefab.h):
+// ровно то же самое нужно игре, а жило оно здесь, в безымянном пространстве
+// имён редактора, и потому было недоступно никому, кроме него. Здесь остались
+// короткие псевдонимы, чтобы не править два десятка мест вызова.
+using sage::scene::CopyAllComponents;
+using sage::scene::CopySubtree;
 } // namespace
 
 // Копирует одну сущность (без детей) со всеми компонентами; сдвиг, чтобы копия
@@ -668,41 +621,16 @@ void EditorLayer::ToggleSelection(int id) {
 bool EditorLayer::SaveSelectedAsPrefab(const fs::path& path, std::string& err) {
     GameObject root = m_scene->Get(m_selectedId);
     if (!root.Valid()) { err = "ничего не выбрано"; return false; }
-    Scene temp("Prefab");
-    CopySubtree(*m_scene, root.Entity(), temp, entt::null); // корень + потомки
-    try {
-        SceneSerializer::Save(temp, path.string());
-    } catch (const std::exception& e) {
-        err = e.what();
-        return false;
-    }
+    if (!sage::scene::SavePrefab(*m_scene, root.Entity(), path.string(), err)) return false;
     SetStatusMessage("Префаб сохранён: " + path.filename().string());
     return true;
 }
 
 int EditorLayer::InstantiatePrefab(const fs::path& path) {
-    std::unique_ptr<Scene> loaded;
-    try {
-        loaded = SceneSerializer::Load(path.string());
-    } catch (const std::exception& e) {
-        LOG_ERROR("Editor") << "Префаб не загрузился (" << path.string() << "): " << e.what();
-        return -1;
-    }
     PushUndoSnapshot();
-    // Копируем ВСЕ корни префаба в текущую сцену (новые id, сохранена иерархия).
-    int firstRootId = -1;
-    auto& reg = loaded->Registry();
-    std::vector<entt::entity> roots;
-    for (auto e : reg.view<IdComponent>()) {
-        const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
-        if (!h || h->Parent == entt::null || !reg.valid(h->Parent)) roots.push_back(e);
-    }
-    for (entt::entity r : roots) {
-        GameObject copy = CopySubtree(*loaded, r, *m_scene, entt::null);
-        if (firstRootId == -1) firstRootId = copy.Id();
-    }
-    if (firstRootId != -1) SetSelectedId(firstRootId);
-    return firstRootId;
+    const int rootId = sage::scene::InstantiatePrefab(*m_scene, path.string());
+    if (rootId != -1) SetSelectedId(rootId);
+    return rootId;
 }
 
 // ============================================================================

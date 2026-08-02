@@ -1,8 +1,12 @@
+#ifndef GLM_ENABLE_EXPERIMENTAL
+#define GLM_ENABLE_EXPERIMENTAL
+#endif
 #include "EditorSceneRenderer.h"
 
 #include <algorithm>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 #include "sage/core/Application.h"
 #include "sage/anim/AnimationSystem.h"
@@ -294,27 +298,74 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         if (selected || rp.Dirty) m_debugDraw->WireBox(wpos, rp.BoxHalfExtents, color * 0.8f);
     }
 
-    // Коллайдеры: каркас формы в масштабе Transform.
+    // Коллайдеры: каркас формы в МИРОВОМ трансформе сущности.
+    //
+    // Раньше здесь стояли tr.Position и tr.Scale — то есть ЛОКАЛЬНЫЙ трансформ
+    // и ни следа поворота. Получался осевой ящик, который у повёрнутого объекта
+    // висит сам по себе, а у дочерней сущности ещё и не в том месте. Это не
+    // косметика: гизмо — единственный способ увидеть, где на самом деле форма
+    // столкновения, и врущее гизмо хуже отсутствующего — по нему принимают
+    // решения.
     auto colView = reg.view<ColliderComponent, Transform, IdComponent>();
     for (auto e : colView) {
-        const Transform& tr = colView.get<Transform>(e);
         const ColliderComponent& col = colView.get<ColliderComponent>(e);
         bool selected = isSel(colView.get<IdComponent>(e).Id);
         glm::vec3 color = selected ? glm::vec3(0.3f, 1.0f, 0.4f) : glm::vec3(0.25f, 0.55f, 0.30f);
-        glm::vec3 scale = glm::abs(tr.Scale);
+
+        const glm::mat4 world = scene.WorldMatrix(e);
+        const glm::vec3 wpos = glm::vec3(world[3]);
+        // Масштаб — длины столбцов мировой матрицы: он мог прийти и от родителя.
+        const glm::vec3 scale(glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])),
+                              glm::length(glm::vec3(world[2])));
+        const float uniform = glm::max(scale.x, glm::max(scale.y, scale.z));
+        // Мировой поворот без масштаба: масштаб уже учтён в размерах формы, и
+        // умножать на него второй раз значило бы раздувать каркас квадратично.
+        glm::mat4 rot = world;
+        for (int i = 0; i < 3; ++i) {
+            const float len = scale[i] > 1e-6f ? scale[i] : 1.0f;
+            rot[i] /= len;
+        }
+        rot[3] = glm::vec4(wpos, 1.0f);
+
         switch (col.Shape) {
             case sage::physics::ShapeType::Box:
-                m_debugDraw->WireBox(tr.Position, col.HalfExtents * scale, color);
+                m_debugDraw->WireBox(rot * glm::scale(glm::mat4(1.0f),
+                                                      col.HalfExtents * scale * 2.0f),
+                                     color);
                 break;
             case sage::physics::ShapeType::Sphere:
-                m_debugDraw->WireSphere(tr.Position,
-                    col.Radius * glm::max(scale.x, glm::max(scale.y, scale.z)), color);
+                // Шар поворачивать незачем — он от поворота не меняется.
+                m_debugDraw->WireSphere(wpos, col.Radius * uniform, color);
                 break;
             case sage::physics::ShapeType::Capsule:
-                m_debugDraw->WireBox(tr.Position,
-                    glm::vec3(col.Radius * scale.x, (col.HalfHeight + col.Radius) * scale.y,
-                              col.Radius * scale.z), color);
+                m_debugDraw->WireCapsule(rot, col.Radius * uniform, col.HalfHeight * scale.y,
+                                         color);
                 break;
+        }
+
+        // Составная форма: каждая часть в своём локальном смещении и повороте.
+        // Без этого у молотка или Т-образной детали гизмо показывало ОДИН ящик
+        // по полям, которые физика в этом случае вообще игнорирует.
+        for (const ColliderComponent::Part& p : col.Parts) {
+            const glm::mat4 partWorld =
+                rot * glm::translate(glm::mat4(1.0f), p.Offset * scale) *
+                glm::eulerAngleXYZ(glm::radians(p.EulerDeg.x), glm::radians(p.EulerDeg.y),
+                                   glm::radians(p.EulerDeg.z));
+            switch (p.Shape) {
+                case sage::physics::ShapeType::Box:
+                    m_debugDraw->WireBox(
+                        partWorld * glm::scale(glm::mat4(1.0f), p.HalfExtents * scale * 2.0f),
+                        color * 0.8f);
+                    break;
+                case sage::physics::ShapeType::Sphere:
+                    m_debugDraw->WireSphere(glm::vec3(partWorld[3]), p.Radius * uniform,
+                                            color * 0.8f);
+                    break;
+                case sage::physics::ShapeType::Capsule:
+                    m_debugDraw->WireCapsule(partWorld, p.Radius * uniform, p.HalfHeight * scale.y,
+                                             color * 0.8f);
+                    break;
+            }
         }
     }
 }

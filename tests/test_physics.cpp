@@ -590,3 +590,62 @@ TEST(PhysicsScene_drives_a_character_controller_from_components) {
     CHECK_TRUE(pos.x > 1.0f);
     CHECK_TRUE(cc.Grounded);
 }
+
+// --- Физика на ДОЧЕРНЕЙ сущности ----------------------------------------------
+//
+// Тело создавалось из ЛОКАЛЬНОГО Transform: d.Position = tr.Position. Для
+// корневой сущности локальное и мировое совпадают, и потому всё выглядело
+// исправным — ровно до первой сущности с родителем. Тогда тело оказывалось не
+// там, где объект: коллизия «не следует за объектом», хотя на экране объект
+// стоит правильно, потому что рендер-то мировую матрицу учитывает.
+TEST(Physics_body_of_a_child_entity_starts_at_its_world_position) {
+    Scene scene("child");
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.Available() || !physics.SupportsQueries()) return;
+
+    GameObject parent = scene.CreateObject("Parent");
+    parent.GetTransform().Position = {10.0f, 0.0f, -5.0f};
+
+    GameObject child = scene.CreateObject("Child");
+    child.GetTransform().Position = {0.0f, 3.0f, 0.0f}; // локально — над родителем
+    scene.SetParent(child.Entity(), parent.Entity());
+
+    auto& rb = scene.Registry().emplace<RigidBodyComponent>(child.Entity());
+    rb.Type = sage::physics::BodyType::Static;   // статика не падает — позиция не «уедет»
+
+    physics.Step(scene, 1.0f / 60.0f);
+
+    // Мировая позиция ребёнка — (10, 3, -5). Именно там обязано стоять тело.
+    PhysicsScene::EntityHit hit =
+        physics.Raycast({10.0f, 10.0f, -5.0f}, {0.0f, -1.0f, 0.0f}, 20.0f);
+    CHECK_TRUE(hit.Hit);
+    if (hit.Hit) CHECK_TRUE(hit.Entity == child.Entity());
+}
+
+// Поворот родителя обязан поворачивать и тело ребёнка. Проверяем длинным
+// коллайдером: осевой луч попадает в него только при верном повороте.
+TEST(Physics_child_body_follows_parent_rotation) {
+    Scene scene("childrot");
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.Available() || !physics.SupportsQueries()) return;
+
+    GameObject parent = scene.CreateObject("Parent");
+    parent.GetTransform().Rotation = {0.0f, 90.0f, 0.0f}; // разворот вокруг Y
+
+    GameObject child = scene.CreateObject("Child");
+    child.GetTransform().Position = {4.0f, 0.0f, 0.0f};   // локально — по +X
+    scene.SetParent(child.Entity(), parent.Entity());
+
+    auto& rb = scene.Registry().emplace<RigidBodyComponent>(child.Entity());
+    rb.Type = sage::physics::BodyType::Static;
+    auto& col = scene.Registry().emplace<ColliderComponent>(child.Entity());
+    col.HalfExtents = {0.5f, 0.5f, 0.5f};
+
+    physics.Step(scene, 1.0f / 60.0f);
+
+    // Поворот на 90° вокруг Y переносит локальный +X в мировой -Z.
+    PhysicsScene::EntityHit hit =
+        physics.Raycast({0.0f, 5.0f, -4.0f}, {0.0f, -1.0f, 0.0f}, 20.0f);
+    CHECK_TRUE(hit.Hit);
+    if (hit.Hit) CHECK_TRUE(hit.Entity == child.Entity());
+}

@@ -105,3 +105,83 @@ TEST(Config_preset_roundtrip_through_file) {
 
     std::remove(path);
 }
+
+// --- Сохранения игры: прогресс игрока, а не сцена ------------------------------
+//
+// Сериализовалась только сцена — редакторный формат. Сохранять прогресс было
+// нечем, и игре оставалось либо писать файлы в обход движка, либо не
+// сохраняться вовсе.
+#include "sage/core/SaveGame.h"
+
+#include <cstdlib>
+#include <filesystem>
+#include <vector>
+
+TEST(SaveGame_round_trips_progress_and_lists_slots) {
+    // Уводим каталог сохранений во временный: тест не должен трогать реальный
+    // прогресс того, кто его запускает.
+    const std::string sandbox =
+        (std::filesystem::temp_directory_path() / "sage_save_test").string();
+    std::filesystem::remove_all(sandbox);
+#ifdef _WIN32
+    _putenv_s("APPDATA", sandbox.c_str());
+#else
+    setenv("XDG_DATA_HOME", sandbox.c_str(), 1);
+#endif
+    sage::save::SetGameName("TestGame");
+
+    CHECK_FALSE(sage::save::Exists("slot1"));
+    CHECK_TRUE(sage::save::Write("slot1", R"({"day":12,"hp":80})", 3));
+    CHECK_TRUE(sage::save::Exists("slot1"));
+
+    std::string payload;
+    int version = 0;
+    CHECK_TRUE(sage::save::Read("slot1", payload, &version));
+    CHECK_EQ(version, 3);
+    CHECK_TRUE(payload.find("\"day\"") != std::string::npos);
+
+    // Слот виден в списке — по нему строится меню «Продолжить».
+    std::vector<sage::save::SlotInfo> slots = sage::save::Slots();
+    CHECK_EQ((int)slots.size(), 1);
+    if (!slots.empty()) {
+        CHECK_TRUE(slots[0].Name == "slot1");
+        CHECK_EQ(slots[0].Version, 3);
+        CHECK_TRUE(slots[0].SavedAtUnix > 0);
+    }
+
+    // Перезапись слота не плодит второй файл и обновляет содержимое.
+    CHECK_TRUE(sage::save::Write("slot1", R"({"day":13})", 3));
+    CHECK_EQ((int)sage::save::Slots().size(), 1);
+    CHECK_TRUE(sage::save::Read("slot1", payload, nullptr));
+    CHECK_TRUE(payload.find("13") != std::string::npos);
+
+    CHECK_TRUE(sage::save::Delete("slot1"));
+    CHECK_FALSE(sage::save::Exists("slot1"));
+    std::filesystem::remove_all(sandbox);
+}
+
+// Имя слота приходит из игры и может прийти откуда угодно — из поля ввода, из
+// имени персонажа, из сети. Путь наружу («../../.bashrc») означал бы запись за
+// пределы папки сохранений, то есть порчу чужих файлов именем персонажа.
+TEST(SaveGame_refuses_to_escape_its_directory) {
+    const std::string sandbox =
+        (std::filesystem::temp_directory_path() / "sage_save_escape").string();
+    std::filesystem::remove_all(sandbox);
+#ifdef _WIN32
+    _putenv_s("APPDATA", sandbox.c_str());
+#else
+    setenv("XDG_DATA_HOME", sandbox.c_str(), 1);
+#endif
+    sage::save::SetGameName("TestGame");
+
+    CHECK_TRUE(sage::save::Write("../../pwned", R"({"x":1})"));
+    // Файл обязан лежать ВНУТРИ каталога сохранений, как бы его ни назвали.
+    const std::filesystem::path dir = sage::save::Directory();
+    int found = 0;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() == ".sagesave") ++found;
+    }
+    CHECK_EQ(found, 1);
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path(sandbox) / "pwned.sagesave"));
+    std::filesystem::remove_all(sandbox);
+}
