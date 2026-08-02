@@ -106,6 +106,15 @@ target_include_directories(sage_engine PUBLIC
 # В Debug включаем GL_CHECK (см. sage/core/GLDebug.h); в Release макрос пуст.
 target_compile_definitions(sage_engine PUBLIC $<$<CONFIG:Debug>:SAGE_DEBUG>)
 
+# NOMINMAX — PUBLIC, а не «уже задано сверху»: заголовки движка тянут <windows.h>
+# (через glad), поэтому от макросов min/max ломается не только сам движок, но и
+# любая игра, включившая его заголовок. Верхний add_compile_definitions
+# действует только на свой каталог и ниже — при подключении движка через
+# add_subdirectory в чужой проект исходники ИГРЫ остались бы без него.
+if (WIN32)
+    target_compile_definitions(sage_engine PUBLIC NOMINMAX)
+endif()
+
 # PUBLIC — то, что торчит в публичных заголовках движка (окно/ввод/математика/
 # ECS/скриптинг/текстуры): линкующая цель должна видеть их транзитивно.
 target_link_libraries(sage_engine PUBLIC
