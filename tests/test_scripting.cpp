@@ -51,6 +51,39 @@ TEST(Scripting_component_add_get_has_remove) {
     CHECK_TRUE(getNil);
 }
 
+// Свечение объекта пишется из скрипта так же, как цвет. Тест ловит ровно ту
+// ошибку, из-за которой светящиеся фонари не работали: `obj.Emissive = ...`
+// падал с "cannot set (new_index) into this object", потому что свойство было
+// только у компонента-рендерера, а у GameObject его не было — притом что
+// СОСЕДНЯЯ строка `obj.Color = ...` работала.
+TEST(Scripting_emissive_is_settable_on_the_object_like_color) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject o = scene.CreateObject("Lantern");
+    se.Lua()["e"] = o;
+
+    se.Lua().script("e.Color = Vec3.new(0.2, 0.3, 0.4)\n"
+                    "e.Emissive = Vec3.new(1.0, 0.72, 0.34)\n"
+                    "e.EmissiveStrength = 2.6");
+
+    const MeshRendererComponent& mr = scene.Registry().get<MeshRendererComponent>(o.Entity());
+    CHECK_NEAR(mr.Emissive.x, 1.0f, 1e-4);
+    CHECK_NEAR(mr.Emissive.y, 0.72f, 1e-4);
+    CHECK_NEAR(mr.Emissive.z, 0.34f, 1e-4);
+    CHECK_NEAR(mr.EmissiveStrength, 2.6f, 1e-4);
+
+    // И читается обратно, и правится покомпонентно — как Color.
+    se.Lua().script("e.Emissive.y = 0.5");
+    CHECK_NEAR(mr.Emissive.y, 0.5f, 1e-4);
+    float strength = se.Lua().script("return e.EmissiveStrength");
+    CHECK_NEAR(strength, 2.6f, 1e-4);
+
+    // Итоговое свечение больше единицы — иначе bloom не сработает и «светящийся»
+    // объект окажется просто светлым.
+    CHECK_TRUE(EffectiveEmissive(mr).x > 1.0f);
+}
+
 TEST(Scripting_enum_values_bound) {
     ScriptEngine se;
     Scene scene("S");

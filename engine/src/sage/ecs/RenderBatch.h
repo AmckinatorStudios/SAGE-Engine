@@ -179,6 +179,7 @@ private:
         Shader* Custom = nullptr;    // собственный шейдер материала (nullptr — штатный)
         bool HasParamOverride = false; // у сущности есть свои значения юниформ
         glm::vec3 Color;
+        glm::vec3 Emissive{0.0f};   // своё свечение объекта + материала
         float Opacity;  // < 1 — объект уходит в полупрозрачный проход
         int LmPage;     // страница лайтмапы (-1 — не запечена)
         bool Textured;

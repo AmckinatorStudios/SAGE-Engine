@@ -37,6 +37,16 @@ void ScriptEngine::RegisterGameObject() {
         "Color", sol::property(
             [](GameObject& o) -> glm::vec3& { return o.ColorRef(); },
             [](GameObject& o, const glm::vec3& c) { o.ColorRef() = c; }),
+        // Свечение — ровно как Color: ссылкой (можно писать по компонентам) и
+        // целым значением. Живёт оно в рендерере, но для скрипта это свойство
+        // объекта: строка `lamp.Emissive = Vec3(...)` рядом с `lamp.Color =
+        // Vec3(...)` не должна вдруг требовать другого способа обращения.
+        "Emissive", sol::property(
+            [](GameObject& o) -> glm::vec3& { return o.EmissiveRef(); },
+            [](GameObject& o, const glm::vec3& c) { o.EmissiveRef() = c; }),
+        "EmissiveStrength", sol::property(
+            [](GameObject& o) { return o.EmissiveStrengthRef(); },
+            [](GameObject& o, float v) { o.EmissiveStrengthRef() = v; }),
         "Valid", [](GameObject& o) { return o.Valid(); }
     );
 

@@ -293,7 +293,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         Shader* custom = (mat && mat->ShaderPtr) ? mat->ShaderPtr.get() : nullptr;
         bool paramOverride = scene.Registry().all_of<ShaderParamsComponent>(e);
         m_cull.push_back(CullItem{mesh, model, mat, custom, paramOverride,
-                                  EffectiveColor(mr), EffectiveOpacity(mr),
+                                  EffectiveColor(mr), EffectiveEmissive(mr),
+                                  EffectiveOpacity(mr),
                                   lmPage, mat && mat->HasMaps(), /*visible*/ false, e, lod, mesh});
     });
 
@@ -369,14 +370,11 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         inst.Model = c.Model;
         inst.Color = c.Color;
         inst.Alpha = c.Opacity;
+        inst.Emissive = c.Emissive;
         if (c.Mat) {
             inst.Metallic = c.Mat->Metallic;
             inst.Roughness = c.Mat->Roughness;
             inst.PlanarReflectivity = c.Mat->Render.PlanarReflectivity;
-            // Свечение материала — в инстанс, чтобы светящиеся объекты остались
-            // в общей пачке. EmissiveStrength позволяет перешагнуть единицу:
-            // именно с этого начинает работать bloom.
-            inst.Emissive = c.Mat->Emissive * c.Mat->EmissiveStrength;
         }
 
         if (c.Custom) {

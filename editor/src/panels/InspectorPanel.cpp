@@ -339,7 +339,16 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
-        ImGui::ColorEdit3("Color", &mr.Color.x); host.TrackLastImGuiItem();
+        ImGui::ColorEdit3("Color", &mr.Color.x);
+            host.TrackLastImGuiItem();
+            // Свечение объекта — отдельно от материала: сотня одинаковых ламп с
+            // разной яркостью не должна означать сотню материалов.
+            ImGui::ColorEdit3("Emissive", &mr.Emissive.x);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat("Emissive Strength", &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Больше 1 — объект даёт ореол (bloom)."); host.TrackLastImGuiItem();
         // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
         // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
         ImGui::SliderFloat("Opacity", &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();

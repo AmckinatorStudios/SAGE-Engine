@@ -68,7 +68,8 @@ void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat
         // Каталог задан, но не читается — падать на этом нельзя, поэтому
         // молча остаёмся на градиенте (причина уже в логе от ResourceManager).
     }
-    m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+    m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
+                CelestialsFromEnvironment(env));
 }
 
 void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnvironment& env) {

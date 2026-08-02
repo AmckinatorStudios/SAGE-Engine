@@ -165,6 +165,30 @@ void LightingPanel::Draw(EditorHost& host) {
         if (ImGui::Checkbox("Enable Skybox", &env.Skybox.Enabled)) host.PushUndoSnapshot();
         ImGui::ColorEdit3("Sky Top", &env.Skybox.TopColor.x); host.TrackLastImGuiItem();
         ImGui::ColorEdit3("Sky Horizon", &env.Skybox.HorizonColor.x); host.TrackLastImGuiItem();
+
+        // Светила. Направление НЕ дублируется: солнце на небе рисуется по тому
+        // же DirectionalLight, который освещает сцену, — иначе тени и солнце
+        // рано или поздно разъедутся.
+        ImGui::Separator();
+        if (ImGui::Checkbox("Солнце и луна на небе", &env.Skybox.Celestials))
+            host.PushUndoSnapshot();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Диск солнца по направлению Sun Direction, луна противоходом,\n"
+                              "звёзды проступают, когда солнце уходит за горизонт.");
+        }
+        if (env.Skybox.Celestials) {
+            ImGui::ColorEdit3("Цвет солнца", &env.Skybox.SunColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Размер солнца", &env.Skybox.SunSize, 0.002f, 0.005f, 0.4f, "%.3f");
+            host.TrackLastImGuiItem();
+            ImGui::Checkbox("Луна", &env.Skybox.Moon);
+            if (env.Skybox.Moon) {
+                ImGui::ColorEdit3("Цвет луны", &env.Skybox.MoonColor.x); host.TrackLastImGuiItem();
+                ImGui::DragFloat("Размер луны", &env.Skybox.MoonSize, 0.002f, 0.005f, 0.4f, "%.3f");
+                host.TrackLastImGuiItem();
+            }
+            ImGui::DragFloat("Звёзды", &env.Skybox.StarIntensity, 0.02f, 0.0f, 3.0f, "%.2f");
+            host.TrackLastImGuiItem();
+        }
         ImGui::TextDisabled("Procedural gradient (top -> horizon), no textures");
     }
 

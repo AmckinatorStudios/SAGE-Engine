@@ -5,11 +5,49 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <filesystem>
+#include <fstream>
+
 #include "sage/core/Config.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Systems.h"
 
 using sage::EngineConfig;
 using sage::QualityPreset;
+
+// Ресурсы движка ищутся рядом с БИНАРНИКОМ, а не в текущей папке. Это тот самый
+// перекос, из-за которого SAGE Player нельзя было запустить откуда угодно:
+// шейдеры лежали рядом с ним, а искал он их от CWD — и падал насмерть, стоило
+// сменить папку (а он её меняет сам, уходя в проект).
+TEST(Paths_engine_assets_are_found_next_to_the_binary_not_in_cwd) {
+    namespace fs = std::filesystem;
+    const fs::path exeDir = sage::ExecutableDir();
+    CHECK_FALSE(exeDir.empty());
+    CHECK_TRUE(fs::exists(exeDir));
+
+    // Кладём файл рядом с бинарником и уходим в заведомо другую папку.
+    const fs::path marker = exeDir / "sage_paths_probe.txt";
+    { std::ofstream f(marker); f << "probe"; }
+    std::error_code ec;
+    const fs::path saved = fs::current_path(ec);
+    const fs::path elsewhere = fs::temp_directory_path(ec);
+    fs::current_path(elsewhere, ec);
+
+    const std::string resolved = sage::EngineAssetPath("sage_paths_probe.txt");
+    const bool found = fs::exists(resolved, ec);
+
+    fs::current_path(saved, ec);
+    fs::remove(marker, ec);
+
+    CHECK_TRUE(found);
+    // Именно РАЗРЕШИЛСЯ в абсолютный путь, а не «вернулся как был»: иначе тест
+    // прошёл бы и на сломанной реализации, если запускать его из папки сборки.
+    CHECK_TRUE(fs::path(resolved).is_absolute());
+
+    // Чего рядом с бинарником нет — возвращается как есть, чтобы прежние
+    // раскладки (ассеты в текущей папке) продолжали работать.
+    CHECK_TRUE(sage::EngineAssetPath("no/such/engine/asset.bin") == "no/such/engine/asset.bin");
+}
 
 TEST(Systems_registry_all_v1_and_valid) {
     const auto& systems = sage::EngineSystems();

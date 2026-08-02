@@ -139,6 +139,35 @@ if ! grep -q "PLAYER: started" "${PLAYER_LOG}"; then
 fi
 echo "OK: собранная игра запустилась и отрисовала кадр (скриншот ${SHOT_SIZE} байт)"
 
+# ...и ещё раз — ИЗ ЧУЖОЙ ПАПКИ, по пути к самому project.sageproj. Так игру и
+# запускают на самом деле: ярлыком, из другого каталога, перетаскиванием файла
+# проекта. До появления sage/core/Paths.h такой запуск умирал на первом же
+# шейдере («не удалось открыть файл шейдера: assets/shaders/lit.vert»), потому
+# что плеер искал СВОИ ресурсы от текущей папки, а не от места установки, — и
+# вдобавок не понимал путь к файлу проекта, требуя непременно папку.
+PLAYER_LOG2="${SCRATCH_DIR}/player_elsewhere.log"
+PLAYER_SHOT2="${SCRATCH_DIR}/player_elsewhere.png"
+GAME_ABS=$(cd "${GAME_DIR}" && pwd)
+STATUS=0
+( cd "${SCRATCH_DIR}" && \
+  run_headless env SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${PLAYER_SHOT2}" \
+      "${GAME_ABS}/selftest_project" "${GAME_ABS}/project/project.sageproj" ) \
+  > "${PLAYER_LOG2}" 2>&1 || STATUS=$?
+if [ ${STATUS} -ne 0 ]; then
+    echo "ОШИБКА: запуск игры из другой папки (по пути к .sageproj) завершился с кодом ${STATUS}"
+    cat "${PLAYER_LOG2}"; exit 1
+fi
+if ! grep -q "PLAYER: started" "${PLAYER_LOG2}"; then
+    echo "ОШИБКА: игра, запущенная из другой папки, не стартовала"
+    cat "${PLAYER_LOG2}"; exit 1
+fi
+SHOT_SIZE2=$(stat -c%s "${PLAYER_SHOT2}" 2>/dev/null || echo 0)
+if [ "${SHOT_SIZE2}" -lt 1024 ]; then
+    echo "ОШИБКА: игра из другой папки не отрисовала кадр (скриншот ${SHOT_SIZE2} байт)"
+    cat "${PLAYER_LOG2}"; exit 1
+fi
+echo "OK: игра запускается из ЛЮБОЙ папки и понимает путь к project.sageproj (скриншот ${SHOT_SIZE2} байт)"
+
 echo "=== Smoke-тест 6/7: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,

@@ -37,7 +37,16 @@ void ScriptEngine::RegisterLightingApi() {
         "TopColor", &SkyboxSettings::TopColor,
         "HorizonColor", &SkyboxSettings::HorizonColor,
         "Intensity", &SkyboxSettings::Intensity,
-        "Rotation", &SkyboxSettings::RotationDeg
+        "Rotation", &SkyboxSettings::RotationDeg,
+        // Светила: направление берётся у солнца сцены, поэтому дублировать его
+        // в скрипте не нужно — только включить и настроить вид.
+        "Celestials", &SkyboxSettings::Celestials,
+        "SunColor", &SkyboxSettings::SunColor,
+        "SunSize", &SkyboxSettings::SunSize,
+        "Moon", &SkyboxSettings::Moon,
+        "MoonColor", &SkyboxSettings::MoonColor,
+        "MoonSize", &SkyboxSettings::MoonSize,
+        "StarIntensity", &SkyboxSettings::StarIntensity
     );
     m_lua.new_usertype<LightingEnvironment>("LightingEnvironment",
         "SkyColor", &LightingEnvironment::SkyColor,

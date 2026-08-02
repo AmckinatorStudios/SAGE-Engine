@@ -140,6 +140,13 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["skybox"]["cubemapDir"] = lighting.Skybox.CubemapDir;
     j["skybox"]["intensity"] = lighting.Skybox.Intensity;
     j["skybox"]["rotation"] = lighting.Skybox.RotationDeg;
+    j["skybox"]["celestials"] = lighting.Skybox.Celestials;
+    j["skybox"]["sunColor"] = Vec3ToJson(lighting.Skybox.SunColor);
+    j["skybox"]["sunSize"] = lighting.Skybox.SunSize;
+    j["skybox"]["moon"] = lighting.Skybox.Moon;
+    j["skybox"]["moonColor"] = Vec3ToJson(lighting.Skybox.MoonColor);
+    j["skybox"]["moonSize"] = lighting.Skybox.MoonSize;
+    j["skybox"]["stars"] = lighting.Skybox.StarIntensity;
     return j;
 }
 
@@ -204,6 +211,13 @@ static LightingEnvironment LightingFromJson(const json& root) {
         lighting.Skybox.CubemapDir = sj.value("cubemapDir", lighting.Skybox.CubemapDir);
         lighting.Skybox.Intensity = sj.value("intensity", lighting.Skybox.Intensity);
         lighting.Skybox.RotationDeg = sj.value("rotation", lighting.Skybox.RotationDeg);
+        lighting.Skybox.Celestials = sj.value("celestials", lighting.Skybox.Celestials);
+        if (sj.contains("sunColor")) lighting.Skybox.SunColor = Vec3FromJson(sj["sunColor"]);
+        lighting.Skybox.SunSize = sj.value("sunSize", lighting.Skybox.SunSize);
+        lighting.Skybox.Moon = sj.value("moon", lighting.Skybox.Moon);
+        if (sj.contains("moonColor")) lighting.Skybox.MoonColor = Vec3FromJson(sj["moonColor"]);
+        lighting.Skybox.MoonSize = sj.value("moonSize", lighting.Skybox.MoonSize);
+        lighting.Skybox.StarIntensity = sj.value("stars", lighting.Skybox.StarIntensity);
     }
     return lighting;
 }
@@ -816,6 +830,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["scale"]    = Vec3ToJson(tr.Scale);
         j["color"]    = Vec3ToJson(mr.Color);
         j["opacity"]  = mr.Opacity;
+        j["emissive"] = Vec3ToJson(mr.Emissive);
+        j["emissiveStrength"] = mr.EmissiveStrength;
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
         SaveAssetRef(j["mesh"], "path", mr.Ref.path);
         SaveAssetRef(j, "material", mr.MaterialPath);
@@ -962,6 +978,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("scale"))    tr.Scale    = Vec3FromJson(j["scale"]);
         if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
         mr.Opacity = j.value("opacity", mr.Opacity);
+        if (j.contains("emissive")) mr.Emissive = Vec3FromJson(j["emissive"]);
+        mr.EmissiveStrength = j.value("emissiveStrength", mr.EmissiveStrength);
 
         if (j.contains("mesh")) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));

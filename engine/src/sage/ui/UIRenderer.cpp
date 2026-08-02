@@ -1,6 +1,7 @@
 #include "UIRenderer.h"
 #include "stb_easy_font.h"
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/core/Config.h"
 #include <glm/gtc/matrix_transform.hpp>
@@ -120,8 +121,12 @@ UIRenderer::UIRenderer()
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     if (!cfg.UiFont.empty()) loaded = SetFont(cfg.UiFont, cfg.UiFontPixelHeight, cfg.UiFontPixelArt);
     if (!loaded) {
+        // EngineAssetPath — потому что «рядом с бинарником» и «в текущей папке»
+        // это разные места: плеер уходит в папку проекта, и свой шрифт по
+        // относительному пути там уже не находился (текст молча падал на
+        // stb_easy_font, то есть терял кириллицу).
         for (const char* path : kDefaultFontCandidates) {
-            if (SetFont(path)) { loaded = true; break; }
+            if (SetFont(sage::EngineAssetPath(path))) { loaded = true; break; }
         }
     }
     if (!m_font) {

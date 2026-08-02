@@ -4,6 +4,8 @@
 #include "TestFramework.h"
 
 #include "sage/ui/UIAnchor.h"
+#include "sage/render/SkyRenderer.h"
+#include "sage/scene/Light.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UIIcons.h"
@@ -476,4 +478,37 @@ TEST(ui_offset_survives_resize_at_far_anchors) {
         CHECK_NEAR(got.x, topLeftAfter.x, 1e-3f);
         CHECK_NEAR(got.x + sizeAfter.x, topLeftBefore.x + sizeBefore.x, 1e-3f);
     }
+}
+
+TEST(sky_celestials_sun_points_where_light_comes_from) {
+    // У направленного света хранится, КУДА он светит; солнце на небе надо
+    // нарисовать там, ОТКУДА. Знак здесь перепутать проще всего, и ошибка даёт
+    // солнце ровно в противоположной точке неба — то есть тени идут в одну
+    // сторону, а светило висит в другой.
+    LightingEnvironment env;
+    env.Skybox.Celestials = true;
+
+    // Свет падает вниз => солнце в зените.
+    env.Sun.Direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    SkyCelestials c = CelestialsFromEnvironment(env);
+    CHECK_TRUE(c.Enabled);
+    CHECK_NEAR(c.SunDir.y, 1.0f, 1e-4f);
+
+    // Свет идёт с запада на восток => солнце на западе.
+    env.Sun.Direction = glm::normalize(glm::vec3(1.0f, -0.2f, 0.0f));
+    c = CelestialsFromEnvironment(env);
+    CHECK_TRUE(c.SunDir.x < 0.0f);
+    CHECK_TRUE(c.SunDir.y > 0.0f);
+    CHECK_NEAR(glm::length(c.SunDir), 1.0f, 1e-4f);
+
+    // Вырожденное направление не должно давать NaN: небо обязано рисоваться
+    // даже у сцены, где солнце забыли настроить.
+    env.Sun.Direction = glm::vec3(0.0f);
+    c = CelestialsFromEnvironment(env);
+    CHECK_NEAR(glm::length(c.SunDir), 1.0f, 1e-4f);
+
+    // Выключенные светила остаются выключенными — старые сцены не должны вдруг
+    // обзавестись солнцем там, где автор его не ставил.
+    env.Skybox.Celestials = false;
+    CHECK_FALSE(CelestialsFromEnvironment(env).Enabled);
 }

@@ -2,6 +2,7 @@
 #include "PbrShader.h"
 #include <cstring>
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include <fstream>
 #include <sstream>
@@ -9,6 +10,16 @@
 
 std::string Shader::ReadFile(const std::string& path) {
     std::ifstream file(path);
+    // Не нашлось от текущей папки — ищем рядом с бинарником. Шейдеры движка
+    // поставляются вместе с программой, а текущая папка к моменту загрузки
+    // может быть какой угодно: SAGE Player, например, СПЕЦИАЛЬНО уходит в
+    // папку проекта, чтобы игровые пути были относительны ему. До этой строки
+    // плеер, запущенный не из своей папки, падал с фатальной ошибкой на
+    // собственном lit.vert, лежащем ровно там, где ему и положено.
+    if (!file.is_open()) {
+        const std::string nearExe = sage::EngineAssetPath(path);
+        if (nearExe != path) file.open(nearExe);
+    }
     if (!file.is_open()) {
         LOG_ERROR("Shader") << "Не удалось открыть файл шейдера: " << path;
         throw std::runtime_error("Не удалось открыть файл шейдера: " + path);

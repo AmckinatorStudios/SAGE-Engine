@@ -14,6 +14,7 @@
 
 #include "sage/core/Application.h"
 #include "sage/core/Config.h"
+#include "sage/core/Paths.h"
 #include "sage/core/SaveGame.h"
 #include "sage/scene/Prefab.h"
 #include "sage/assets/AssetDatabase.h"
@@ -56,8 +57,14 @@ fs::path PlayerLayer::FindMainScene() const {
 void PlayerLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
 
-    // 1. Шейдеры плеера — рядом с бинарником, грузим ДО перехода в проект.
+    // 1. Шейдеры плеера — рядом с бинарником. Именно «рядом с бинарником», а не
+    // «в текущей папке»: путь считается от места установки плеера (см.
+    // sage/core/Paths.h). Раньше здесь стояли голые относительные пути, и плеер
+    // работал только когда его запускали из его собственной папки — запуск
+    // ярлыком или из папки игры валился с «не удалось открыть файл шейдера».
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    // (Сам поиск «рядом с бинарником» живёт в Shader::ReadFile — один раз на
+    // все шейдеры движка, а не по копии в каждом месте загрузки.)
     m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
     m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512, cfg.ShadowCascades); // разрешение и каскады из конфига
@@ -479,7 +486,8 @@ void PlayerLayer::OnRender() {
                     device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                     device.Clear(true, true);
                     if (m_sky && env.Skybox.Enabled)
-                        m_sky->Draw(v, p, env.Skybox.TopColor, env.Skybox.HorizonColor);
+                        m_sky->Draw(v, p, env.Skybox.TopColor, env.Skybox.HorizonColor,
+                                    CelestialsFromEnvironment(env));
                     sage::render::SceneColorInput c;
                     c.View = v;
                     c.Proj = p;
@@ -553,7 +561,8 @@ void PlayerLayer::OnRender() {
                                  const glm::vec3 mirrorEye =
                                      glm::vec3(glm::inverse(mv)[3]);
                                  if (m_sky && env.Skybox.Enabled)
-                                     m_sky->Draw(mv, mp, env.Skybox.TopColor, env.Skybox.HorizonColor);
+                                     m_sky->Draw(mv, mp, env.Skybox.TopColor, env.Skybox.HorizonColor,
+                                                 CelestialsFromEnvironment(env));
                                  sage::render::SceneColorInput rc;
                                  rc.View = mv;
                                  rc.Proj = mp;
@@ -601,7 +610,8 @@ void PlayerLayer::OnRender() {
         device.SetSRGBWrite(true);
 
         if (env.Skybox.Enabled) {
-            m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+            m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
+                        CelestialsFromEnvironment(env));
         }
 
         // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.

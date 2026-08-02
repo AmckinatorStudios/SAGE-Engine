@@ -49,6 +49,18 @@ struct MeshRendererComponent {
     // прозрачность — разные вещи, их правят в разных местах и по разным
     // причинам, и старые сцены с vec3-цветом продолжают читаться как были.
     float Opacity = 1.0f;
+
+    // Собственное свечение ОБЪЕКТА, отдельно от материала.
+    //
+    // Материал — общий ресурс: сделать один фонарь ярче другого через материал
+    // значит завести материал на каждый фонарь. А светящиеся объекты в игре
+    // именно такие: сотня одинаковых ламп, у каждой своя яркость, и меняется она
+    // в рантайме (лампа гаснет, угли остывают). Поэтому свечение живёт и здесь.
+    //
+    // Складывается со свечением материала, а не заменяет его: материал задаёт
+    // «каким светится этот предмет вообще», объект — «насколько именно этот».
+    glm::vec3 Emissive{0.0f, 0.0f, 0.0f};
+    float EmissiveStrength = 1.0f;
     // Runtime-указатель на GPU-меш. Не сериализуется — заполняется
     // ResourceManager'ом на основе Ref при загрузке сцены или назначении меша.
     std::shared_ptr<Mesh> MeshPtr;
@@ -71,6 +83,14 @@ inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr) {
 // Итоговая непрозрачность: как и с цветом, назначенный материал главнее — но
 // множится на собственную прозрачность сущности, чтобы «затухание» одного
 // объекта не требовало отдельной копии материала.
+// Итоговое свечение: своё у объекта плюс материала. Единая точка, чтобы рендер,
+// редактор и скрипты считали его одинаково.
+inline glm::vec3 EffectiveEmissive(const MeshRendererComponent& mr) {
+    glm::vec3 e = mr.Emissive * mr.EmissiveStrength;
+    if (mr.MaterialPtr) e += mr.MaterialPtr->Emissive * mr.MaterialPtr->EmissiveStrength;
+    return e;
+}
+
 inline float EffectiveOpacity(const MeshRendererComponent& mr) {
     return mr.MaterialPtr ? mr.MaterialPtr->Opacity * mr.Opacity : mr.Opacity;
 }

@@ -46,6 +46,13 @@ public:
     MeshRendererComponent& Renderer() { return Comp<MeshRendererComponent>(); }
     const MeshRendererComponent& Renderer() const { return Comp<MeshRendererComponent>(); }
     glm::vec3& ColorRef() { return Comp<MeshRendererComponent>().Color; }
+    // Свечение — рядом с цветом и по той же причине: и то и другое живёт в
+    // рендерере, но со стороны скрипта это свойство САМОГО объекта («фонарь
+    // светится»), и заставлять писать obj:GetRenderer().Emissive там, где
+    // соседняя строка — obj.Color, значило бы разложить одно и то же понятие
+    // на два разных способа обращения.
+    glm::vec3& EmissiveRef() { return Comp<MeshRendererComponent>().Emissive; }
+    float& EmissiveStrengthRef() { return Comp<MeshRendererComponent>().EmissiveStrength; }
 
 private:
     template <typename T>
