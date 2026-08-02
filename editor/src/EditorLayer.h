@@ -276,7 +276,10 @@ private:
     ProfilerPanel m_profiler;
     ConfirmDialog m_confirm;
     CodeEditor m_code;
-    bool m_showCode = false;
+    // Вкладка «Код» открыта с самого начала: она докнута третьей рядом с
+    // Viewport и Game, и её отсутствие означало бы, что вкладки в раскладке то
+    // две, то три. Пустой редактор показывает подсказку, как открыть файл.
+    bool m_showCode = true;
     // Запросы мультивьюпорта: панель раскладывает, рендер исполняет в начале
     // следующего кадра.
     ViewRequest m_viewRequests[kMaxViews];

@@ -232,13 +232,22 @@ void ViewportPanel::Draw(EditorHost& host) {
     }
     host.SetViewRequests(requests, viewCount);
 
-    // Дальше — интерактив ГЛАВНОГО слота: гизмо, пикинг, полёт камеры.
-    const bool hovered = slotHovered[m_activeSlot] && m_kinds[m_activeSlot] == ViewKind::Perspective;
+    // Дальше — интерактив АКТИВНОГО слота.
+    //
+    // Гизмо и выбор мышью работают в ЛЮБОМ виде, включая ортогональные: луч
+    // строится обратной матрицей вида-проекции, и для ортогональной проекции она
+    // ничем не хуже. Раньше весь интерактив выключался вне перспективы — то есть
+    // вид сверху и сбоку показывали сцену, но ничего в ней сделать не давали.
+    // Полёт камеры остаётся только в перспективе: в ортогональном виде за
+    // навигацию отвечают колесо (масштаб) и средняя кнопка (панорама).
+    const bool perspective = m_kinds[m_activeSlot] == ViewKind::Perspective;
+    const bool hovered = slotHovered[m_activeSlot];
     const ImVec2 imgPos = slotPos[m_activeSlot];
     const ImVec2 avail = cell;
-    if (m_activeSlot == 0 && m_kinds[0] == ViewKind::Perspective) {
-        host.SetViewportSize((int)cell.x, (int)cell.y);
-    }
+    // Размер буфера главного слота обновляется ВСЕГДА, а не только в перспективе:
+    // иначе при смене вида на ортогональный кадр остаётся прежнего размера и
+    // растягивается по панели.
+    if (m_activeSlot == 0) host.SetViewportSize((int)cell.x, (int)cell.y);
 
     ImGuiIO& io = ImGui::GetIO();
     float dt = sage::Application::Get().DeltaTime();
@@ -246,7 +255,7 @@ void ViewportPanel::Draw(EditorHost& host) {
 
     // --- Камера: ПКМ — осмотр, ПКМ+WASDQE — полёт, Shift — ускорение ---
     bool rmb = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-    if ((hovered || m_cameraDriving) && rmb) {
+    if (perspective && (hovered || m_cameraDriving) && rmb) {
         m_cameraDriving = true;
         camera.ProcessMouse(io.MouseDelta.x, -io.MouseDelta.y);
         float speed = camera.MovementSpeed * (io.KeyShift ? 3.0f : 1.0f) * dt;
@@ -259,7 +268,7 @@ void ViewportPanel::Draw(EditorHost& host) {
     } else {
         m_cameraDriving = false;
     }
-    if (hovered && io.MouseWheel != 0.0f) {
+    if (perspective && hovered && io.MouseWheel != 0.0f) {
         camera.Position += camera.Front * io.MouseWheel * 0.8f;
     }
 
@@ -269,6 +278,7 @@ void ViewportPanel::Draw(EditorHost& host) {
         if (ImGui::IsKeyPressed(ImGuiKey_E)) host.GizmoOp() = (int)ImGuizmo::ROTATE;
         if (ImGui::IsKeyPressed(ImGuiKey_R)) host.GizmoOp() = (int)ImGuizmo::SCALE;
         if (ImGui::IsKeyPressed(ImGuiKey_T)) host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
+        if (ImGui::IsKeyPressed(ImGuiKey_Y)) host.GizmoOp() = (int)ImGuizmo::BOUNDS;
         // F — показать выделенное в кадре, End — посадить на поверхность.
         // Обе операции до этого делались правкой чисел в инспекторе: подвести
         // камеру к далёкому объекту и посадить его ровно на пол — самые частые
@@ -278,7 +288,9 @@ void ViewportPanel::Draw(EditorHost& host) {
     }
 
     // --- ImGuizmo: манипулятор выбранной сущности (сетка — DebugDraw в FBO) ---
-    ImGuizmo::SetOrthographic(false);
+    // Ортогональному виду нужна своя математика гизмо: с перспективной
+    // ручки в нём тянутся не туда, куда едет объект.
+    ImGuizmo::SetOrthographic(!perspective);
     ImGuizmo::SetDrawlist();
     ImGuizmo::SetRect(imgPos.x, imgPos.y, avail.x, avail.y);
 
@@ -327,9 +339,48 @@ void ViewportPanel::Draw(EditorHost& host) {
             }
         }
 
+        // --- Rect/Bounds: рамка с ручками по углам габаритной коробки ----------
+        //
+        // Отдельное гизмо, а не режим масштаба, потому что отвечает на другой
+        // вопрос. Scale тянет объект ОТ ЦЕНТРА и одинаково по обе стороны;
+        // рамка тянет ОДНУ ГРАНЬ, оставляя противоположную на месте. Для
+        // постройки из блоков это основная операция: подогнать стену к проёму
+        // масштабом означает попасть одновременно двумя краями, а рамкой —
+        // одним.
+        //
+        // Коробка берётся настоящая (BoundsMin/BoundsMax меша), поэтому ручки
+        // сидят на реальных гранях объекта, а не на условном единичном кубе.
+        const float* boundsPtr = nullptr;
+        const float* boundsSnapPtr = nullptr;
+        float localBounds[6] = {-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f};
+        float boundsSnap[3] = {0.0f, 0.0f, 0.0f};
+        if (op == ImGuizmo::BOUNDS) {
+            if (const MeshRendererComponent* mr =
+                    scene.Registry().try_get<MeshRendererComponent>(selected.Entity())) {
+                if (mr->MeshPtr) {
+                    const glm::vec3 bmin = mr->MeshPtr->BoundsMin();
+                    const glm::vec3 bmax = mr->MeshPtr->BoundsMax();
+                    for (int i = 0; i < 3; ++i) {
+                        localBounds[i] = bmin[i];
+                        localBounds[i + 3] = bmax[i];
+                    }
+                }
+            }
+            boundsPtr = localBounds;
+            if (host.GizmoSnap()) {
+                boundsSnap[0] = boundsSnap[1] = boundsSnap[2] = host.SnapMove();
+                boundsSnapPtr = boundsSnap;
+            }
+            // BOUNDS без сопутствующей операции ImGuizmo не рисует ручки
+            // перемещения — добавляем перенос, иначе объект можно только
+            // растягивать, но не двигать, и рамка становится ловушкой.
+            op = ImGuizmo::BOUNDS | ImGuizmo::TRANSLATE;
+        }
+
         if (ImGuizmo::Manipulate(glm::value_ptr(host.ViewMatrix()), glm::value_ptr(host.ProjMatrix()),
                                  op, mode, glm::value_ptr(model),
-                                 nullptr, host.GizmoSnap() ? snapValues : nullptr)) {
+                                 nullptr, host.GizmoSnap() ? snapValues : nullptr,
+                                 boundsPtr, boundsSnapPtr)) {
             // Мировая -> локальная: убираем вклад родителя.
             glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
             DecomposeToTransform(local, tr);

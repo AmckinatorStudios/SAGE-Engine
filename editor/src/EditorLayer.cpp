@@ -1266,8 +1266,25 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_showBounds);
+
+    // ГЛАВНЫЙ слот тоже уважает свой вид. Раньше он рисовался безусловно
+    // перспективой, а переопределение применялось только к слотам 1..3 — из-за
+    // чего выпадающий список вида в одиночной раскладке (Top/Front/Side) не
+    // делал НИЧЕГО: человек выбирал «вид сбоку», а вьюпорт оставался
+    // перспективным. Ортогональные виды работали только там, где их и так
+    // видно рядом с перспективой, то есть в раскладке на два и четыре окна.
+    EditorViewOverride primaryOv;
+    {
+        const ViewRequest& r0 = m_viewRequests[0];
+        if (r0.Active && r0.Ortho) {
+            primaryOv.Use = true;
+            primaryOv.View = r0.View;
+            primaryOv.Proj = r0.Proj;
+            primaryOv.EyePos = r0.EyePos;
+        }
+    }
     m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode, m_showGrid,
-                              cfg, m_view, m_proj);
+                              cfg, m_view, m_proj, 0, primaryOv);
 
     // Дополнительные виды раскладки (сверху/спереди/сбоку). Каждый — полный
     // проход сцены, поэтому рисуются ТОЛЬКО те, что панель попросила: одиночный
@@ -1302,6 +1319,11 @@ void EditorLayer::OnRender() {
     m_lighting.Draw(*this);
     m_viewport.Draw(*this);
     m_game.Draw(*this);
+    // Код подаётся ПОСЛЕ Viewport и Game, потому что порядок вкладок в узле
+    // доккинга — это порядок подачи окон в кадре, а не порядок DockBuilder'а.
+    // Пока он подавался раньше (внутри окна-хоста), вкладка «Код» вставала
+    // первой, и раскладка читалась как «Код | Viewport | Game».
+    m_code.Draw(&m_showCode);
     m_console.Draw();
     m_assets.Draw(*this);
     m_plugins.ImGuiAll();
@@ -1357,6 +1379,11 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     // вперёд при входе в Play (GamePanel::RequestFocus).
     ImGui::DockBuilderDockWindow("Viewport", center);
     ImGui::DockBuilderDockWindow("Game", center);
+    // Код — третьей вкладкой рядом с Viewport и Game, а не отдельным плавающим
+    // окном. Правка скрипта и проверка результата — это одно занятие, и
+    // «редактор кода поверх сцены» заставлял таскать окно с места на место
+    // ровно так же, как раньше заставлял alt-tab во внешний редактор.
+    ImGui::DockBuilderDockWindow("Код", center);
     ImGui::DockBuilderFinish(dockspaceId);
 
     ImGui::SetWindowFocus("Viewport");
@@ -1656,7 +1683,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_settingsPanel.Draw(*this, m_showSettings);
     m_profiler.Draw(&m_showProfiler);
     m_confirm.Draw();
-    m_code.Draw(&m_showCode);
     DrawAboutWindow();
 
     ImGui::End();

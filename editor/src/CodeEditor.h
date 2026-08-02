@@ -69,6 +69,11 @@ private:
 
     std::vector<Tab> m_tabs;
     int m_active = -1;
+    // Одноразовый: переключить вкладку СЕЙЧАС (открытие файла, переход к строке).
+    // Постоянный SetSelected залипает — см. DrawTabBar.
+    bool m_forceActive = false;
+    // Вывести окно вперёд: вкладка «Код» соседствует с Viewport и Game.
+    bool m_requestFocus = false;
     char m_find[128] = {0};
     char m_gotoLine[16] = {0};
     bool m_showFind = false;

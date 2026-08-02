@@ -1,5 +1,7 @@
 #include "ToolbarPanel.h"
 
+#include <algorithm>
+
 #include "imgui.h"
 #include "ImGuizmo.h"
 
@@ -32,6 +34,12 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     if (EditorIcons::IconOnlyButton("universal", "Всё сразу (T): перенос + поворот + масштаб",
                                     host.GizmoOp() == (int)ImGuizmo::UNIVERSAL))
         host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
+    ImGui::SameLine();
+    // Рамка (Y): тянет ОДНУ грань, оставляя противоположную на месте — в
+    // отличие от масштаба, который тянет от центра сразу в обе стороны.
+    if (EditorIcons::IconOnlyButton("rect", "Рамка (Y): тянуть за грани габаритной коробки",
+                                    host.GizmoOp() == (int)ImGuizmo::BOUNDS))
+        host.GizmoOp() = (int)ImGuizmo::BOUNDS;
     ImGui::SameLine();
 
     ImGui::AlignTextToFramePadding();
@@ -83,9 +91,27 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     }
 
     // --- По центру: Play / Pause / Stop ---
-    // Ширина блока плей-контролов оценивается, чтобы отцентрировать его.
-    float playBlockW = 220.0f;
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.5f + ImGui::GetCursorPosX() - playBlockW * 0.5f);
+    //
+    // Центрирование считается ОТ ОКНА и зажимается между левым и правым блоками.
+    //
+    // Раньше здесь было `GetContentRegionAvail().x * 0.5f + GetCursorPosX()` —
+    // то есть середина ОСТАВШЕГОСЯ места. Пока слева было три кнопки, это
+    // выглядело как центр; стоило добавить инструменты, и требуемая позиция
+    // уехала левее текущего курсора. ImGui::SameLine(x) в таком случае честно
+    // ставит курсор назад, и блок Play рисуется ПОВЕРХ кнопок гизмо — они
+    // просто исчезали с экрана.
+    const float leftEnd = ImGui::GetCursorPosX();
+    const float playBlockW = 220.0f;
+    const float rightBlockW = 215.0f;
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float windowW = ImGui::GetWindowWidth();
+    float playX = windowW * 0.5f - playBlockW * 0.5f;
+    // Зажим: центр уступает и левому блоку, и правому. Если места нет вовсе,
+    // блок просто идёт следом за левым — лучше несимметрично, чем внахлёст.
+    const float playMax = windowW - rightBlockW - playBlockW - spacing;
+    if (playX > playMax) playX = playMax;
+    if (playX < leftEnd + spacing) playX = leftEnd + spacing;
+    ImGui::SameLine(playX);
     EditorPlayState state = host.GetPlayState();
     if (state == EditorPlayState::Editing) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
@@ -111,8 +137,9 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
 
     // --- Справа: режим рендера + сетка ---
     const char* modes[] = {"Shaded", "Wireframe", "Unlit", "Normals"};
-    float rightW = 215.0f;
-    ImGui::SameLine(ImGui::GetWindowWidth() - rightW);
+    // Та же защита: правый блок не заезжает на то, что уже нарисовано.
+    const float rightX = std::max(ImGui::GetCursorPosX() + spacing, windowW - rightBlockW);
+    ImGui::SameLine(rightX);
     if (EditorIcons::IconOnlyButton("grid", "Сетка вьюпорта", host.ShowGrid()))
         host.ShowGrid() = !host.ShowGrid();
     ImGui::SameLine();

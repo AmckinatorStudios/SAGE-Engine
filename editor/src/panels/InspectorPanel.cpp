@@ -1079,8 +1079,8 @@ void InspectorPanel::Draw(EditorHost& host) {
     // не получает, а сравнение состояния даёт ровно тот же ответ.
     const int entityId = hasEntity ? host.SelectedObject().Id() : -1;
     const std::string assetPath = host.SelectedAssetPath().string();
-    if (entityId != m_lastEntityId && hasEntity) m_focus = Focus::Object;
-    if (assetPath != m_lastAssetPath && hasAsset) m_focus = Focus::Asset;
+    if (entityId != m_lastEntityId && hasEntity) { m_focus = Focus::Object; m_forceFocus = true; }
+    if (assetPath != m_lastAssetPath && hasAsset) { m_focus = Focus::Asset; m_forceFocus = true; }
     m_lastEntityId = entityId;
     m_lastAssetPath = assetPath;
 
@@ -1100,15 +1100,24 @@ void InspectorPanel::Draw(EditorHost& host) {
     } else if (!hasEntity && hasAsset) {
         DrawAssetSection(host, assetKind);
     } else if (ImGui::BeginTabBar("##inspector_tabs", ImGuiTabBarFlags_None)) {
-        ImGuiTabItemFlags objFlags =
-            m_focus == Focus::Object ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        // SetSelected ставится РОВНО НА ОДИН КАДР — тот, в котором сменился
+        // выбор. Передавать его каждый кадр, пока m_focus равен вкладке, нельзя:
+        // человек щёлкает по «Ассету», ImGui его открывает, а на следующем кадре
+        // флаг у «Объекта» всё ещё выставлен и утаскивает выбор обратно. Вкладка
+        // выглядела намертво залипшей — ровно так эта панель и сломалась.
+        const bool force = m_forceFocus;
+        m_forceFocus = false;
+        const ImGuiTabItemFlags objFlags = (force && m_focus == Focus::Object)
+                                               ? ImGuiTabItemFlags_SetSelected
+                                               : ImGuiTabItemFlags_None;
         if (ImGui::BeginTabItem("Объект", nullptr, objFlags)) {
             m_focus = Focus::Object;
             DrawObjectSection(host);
             ImGui::EndTabItem();
         }
-        ImGuiTabItemFlags assetFlags =
-            m_focus == Focus::Asset ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        const ImGuiTabItemFlags assetFlags = (force && m_focus == Focus::Asset)
+                                                 ? ImGuiTabItemFlags_SetSelected
+                                                 : ImGuiTabItemFlags_None;
         if (ImGui::BeginTabItem("Ассет", nullptr, assetFlags)) {
             m_focus = Focus::Asset;
             DrawAssetSection(host, assetKind);

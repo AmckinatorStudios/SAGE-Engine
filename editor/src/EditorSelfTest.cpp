@@ -846,6 +846,48 @@ void EditorLayer::RunSelfTest() {
         SetSelectedId(-1);
     }
 
+    // --- Ортогональный вид ГЛАВНОГО слота ---
+    //
+    // Проверка по конкретной поломке: выпадающий список вида (Top/Front/Side) в
+    // одиночной раскладке не делал ничего. Слоты 1..3 получали переопределение
+    // матриц, а слот 0 рисовался безусловно перспективой — то есть
+    // ортогональные виды работали только там, где рядом и так была перспектива.
+    //
+    // Проверяем то, что видно снаружи: после запроса ортогонального вида для
+    // слота 0 матрица проекции обязана СТАТЬ ортогональной. У ортогональной
+    // проекции нижняя строка равна (0,0,0,1), у перспективной там -1 в третьем
+    // столбце — это и отличает их без всяких допущений.
+    if (ok) {
+        ViewRequest req[kMaxViews];
+        req[0].Active = true;
+        req[0].W = 640;
+        req[0].H = 360;
+        req[0].Ortho = true;
+        req[0].View = glm::lookAt(glm::vec3(0.0f, 20.0f, 0.0f), glm::vec3(0.0f),
+                                  glm::vec3(0.0f, 0.0f, -1.0f));   // вид сверху
+        req[0].Proj = glm::ortho(-10.0f, 10.0f, -6.0f, 6.0f, 0.1f, 1000.0f);
+        req[0].EyePos = glm::vec3(0.0f, 20.0f, 0.0f);
+        SetViewRequests(req, 1);
+
+        OnRender();   // кадр целиком: именно он и раскладывает виды
+
+        const bool orthoNow = std::abs(m_proj[2][3]) < 1e-6f && std::abs(m_proj[3][3] - 1.0f) < 1e-6f;
+        if (!orthoNow) {
+            LOG_ERROR("Editor") << "SELFTEST: главный слот остался перспективным при запросе "
+                                   "ортогонального вида (proj[2][3]=" << m_proj[2][3] << ")";
+            ok = false;
+        }
+
+        // И обратно: снятый запрос возвращает перспективу, иначе вид залипал бы.
+        req[0].Ortho = false;
+        SetViewRequests(req, 1);
+        OnRender();
+        if (std::abs(m_proj[2][3] + 1.0f) > 1e-6f) {
+            LOG_ERROR("Editor") << "SELFTEST: главный слот не вернулся в перспективу";
+            ok = false;
+        }
+    }
+
     // --- Свои форматы: чужой файл -> .sagemesh -> сущность в сцене ---
     //
     // Проверка сквозная и именно в редакторе, потому что тут проверяется не
@@ -1130,7 +1172,7 @@ void EditorLayer::RunSelfTest() {
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm + pick + tools + formats, "
+                               << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

@@ -169,6 +169,8 @@ bool CodeEditor::OpenFile(const fs::path& path) {
     for (int i = 0; i < (int)m_tabs.size(); ++i) {
         if (m_tabs[i].Path == path) {
             m_active = i;
+            m_forceActive = true;
+            m_requestFocus = true;
             return true;
         }
     }
@@ -189,6 +191,8 @@ bool CodeEditor::OpenFile(const fs::path& path) {
     if (tab.Lines.empty()) tab.Lines.push_back("");
     m_tabs.push_back(std::move(tab));
     m_active = (int)m_tabs.size() - 1;
+    m_forceActive = true;
+    m_requestFocus = true;
     return true;
 }
 
@@ -246,13 +250,19 @@ void CodeEditor::DrawTabBar() {
                                               ImGuiTabBarFlags_FittingPolicyScroll)) {
         return;
     }
+    const bool forceThisFrame = m_forceActive;
+    m_forceActive = false;
     for (int i = 0; i < (int)m_tabs.size();) {
         Tab& tab = m_tabs[i];
         bool open = true;
         std::string label = tab.Path.filename().string();
         if (tab.Dirty) label += " *";
         label += "###tab" + std::to_string(i);
-        ImGuiTabItemFlags flags = (i == m_active) ? ImGuiTabItemFlags_SetSelected : 0;
+        // SetSelected — только на кадр смены (GoToLine/OpenFile), не постоянно:
+        // иначе активная вкладка каждый кадр утаскивает выбор к себе и щёлкнуть
+        // по соседней невозможно (см. ту же ошибку в InspectorPanel).
+        ImGuiTabItemFlags flags =
+            (forceThisFrame && i == m_active) ? ImGuiTabItemFlags_SetSelected : 0;
         if (ImGui::BeginTabItem(label.c_str(), &open, flags)) {
             m_active = i;
             ImGui::EndTabItem();
@@ -332,6 +342,7 @@ void CodeEditor::DrawToolbar(Tab& tab) {
 void CodeEditor::HandleInput(Tab& tab) {
     ImGuiIO& io = ImGui::GetIO();
     const bool ctrl = io.KeyCtrl;
+    const bool alt = io.KeyAlt;
 
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_S)) { Save(tab); return; }
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_F)) { m_showFind = true; return; }
@@ -430,8 +441,76 @@ void CodeEditor::HandleInput(Tab& tab) {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Tab)) {
         PushUndo(tab);
-        line.insert(tab.CursorCol, "    ");   // четыре пробела: так же, как в коде движка
-        tab.CursorCol += 4;
+        if (ImGui::GetIO().KeyShift) {
+            // Shift+Tab — убрать отступ. Без него единственный способ сдвинуть
+            // строку влево — четыре раза Backspace, целясь в начало строки.
+            int remove = 0;
+            while (remove < 4 && remove < (int)line.size() && line[(size_t)remove] == ' ') ++remove;
+            if (remove > 0) {
+                line.erase(0, (size_t)remove);
+                tab.CursorCol = std::max(0, tab.CursorCol - remove);
+            }
+        } else {
+            line.insert(tab.CursorCol, "    ");   // четыре пробела: так же, как в коде движка
+            tab.CursorCol += 4;
+        }
+        tab.Dirty = true;
+        return;
+    }
+    // Ctrl+/ — закомментировать строку и обратно. Самая частая правка при
+    // отладке скрипта: выключить строчку, посмотреть, вернуть.
+    if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Slash)) {
+        PushUndo(tab);
+        const char* marker = (tab.Kind == Syntax::Lua) ? "--" : "//";
+        const size_t markerLen = 2;
+        const size_t firstNonSpace = line.find_first_not_of(" \t");
+        if (firstNonSpace != std::string::npos &&
+            line.compare(firstNonSpace, markerLen, marker) == 0) {
+            line.erase(firstNonSpace, markerLen);
+            tab.CursorCol = std::max(0, tab.CursorCol - (int)markerLen);
+        } else {
+            const size_t at = (firstNonSpace == std::string::npos) ? 0 : firstNonSpace;
+            line.insert(at, marker);
+            tab.CursorCol += (int)markerLen;
+        }
+        tab.Dirty = true;
+        return;
+    }
+    // Ctrl+D — продублировать строку.
+    if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
+        PushUndo(tab);
+        tab.Lines.insert(tab.Lines.begin() + tab.CursorLine + 1, line);
+        ++tab.CursorLine;
+        tab.Dirty = true;
+        return;
+    }
+    // Ctrl+L — удалить строку целиком.
+    if (ctrl && ImGui::IsKeyPressed(ImGuiKey_L)) {
+        PushUndo(tab);
+        if (tab.Lines.size() > 1) {
+            tab.Lines.erase(tab.Lines.begin() + tab.CursorLine);
+            if (tab.CursorLine >= (int)tab.Lines.size()) tab.CursorLine = (int)tab.Lines.size() - 1;
+        } else {
+            tab.Lines[0].clear();
+        }
+        tab.CursorCol = 0;
+        tab.Dirty = true;
+        return;
+    }
+    // Alt+Up/Down — переставить строку. Порядок блоков в скрипте правят чаще,
+    // чем сами блоки, а вырезать-вставить руками — это четыре действия.
+    if (alt && ImGui::IsKeyPressed(ImGuiKey_UpArrow) && tab.CursorLine > 0) {
+        PushUndo(tab);
+        std::swap(tab.Lines[tab.CursorLine], tab.Lines[tab.CursorLine - 1]);
+        --tab.CursorLine;
+        tab.Dirty = true;
+        return;
+    }
+    if (alt && ImGui::IsKeyPressed(ImGuiKey_DownArrow) &&
+        tab.CursorLine + 1 < (int)tab.Lines.size()) {
+        PushUndo(tab);
+        std::swap(tab.Lines[tab.CursorLine], tab.Lines[tab.CursorLine + 1]);
+        ++tab.CursorLine;
         tab.Dirty = true;
         return;
     }
@@ -591,6 +670,13 @@ void CodeEditor::DrawText(Tab& tab) {
 void CodeEditor::Draw(bool* open) {
     if (!open || !*open) return;
     ImGui::SetNextWindowSize(ImVec2(900, 600), ImGuiCond_FirstUseEver);
+    // Открытие файла выводит вкладку вперёд: она соседствует с Viewport и Game,
+    // и без этого двойной клик по скрипту в Assets выглядел бы как «ничего не
+    // произошло» — файл открылся во вкладке, которую не видно.
+    if (m_requestFocus) {
+        ImGui::SetNextWindowFocus();
+        m_requestFocus = false;
+    }
     if (!ImGui::Begin("Код", open)) {
         ImGui::End();
         return;
@@ -598,7 +684,12 @@ void CodeEditor::Draw(bool* open) {
 
     if (m_tabs.empty()) {
         ImGui::TextDisabled("Нет открытых файлов.");
-        ImGui::TextDisabled("Откройте .lua или .vert/.frag двойным кликом в панели Assets.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Двойной клик по .lua, .vert, .frag или .glsl в панели Assets открывает "
+                           "файл здесь.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("Ctrl+S — сохранить, Ctrl+F — найти, Ctrl+/ — комментарий,");
+        ImGui::TextDisabled("Ctrl+D — дублировать строку, Alt+Up/Down — переставить строку.");
         ImGui::End();
         return;
     }
@@ -608,7 +699,24 @@ void CodeEditor::Draw(bool* open) {
     Tab& tab = m_tabs[m_active];
     DrawToolbar(tab);
     ImGui::Separator();
+
+    // Текст занимает всё, кроме строки состояния снизу: без резерва она
+    // уезжала бы за край окна и её никто бы не увидел.
+    const float statusH = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("##codebody", ImVec2(0, -statusH), false);
     DrawText(tab);
+    ImGui::EndChild();
+
+    // Строка состояния: где курсор, какой язык, сохранён ли файл. «Что сейчас
+    // происходит» — то, чего в редакторе не хватало сильнее всего: несохранённый
+    // файл отличался от сохранённого одной звёздочкой в заголовке вкладки.
+    ImGui::Separator();
+    const char* syntax = tab.Kind == Syntax::Lua    ? "Lua"
+                         : tab.Kind == Syntax::Glsl ? "GLSL"
+                                                    : "текст";
+    ImGui::TextDisabled("Строка %d, столбец %d  |  строк: %zu  |  %s  |  %s",
+                        tab.CursorLine + 1, tab.CursorCol + 1, tab.Lines.size(), syntax,
+                        tab.Dirty ? "не сохранён" : "сохранён");
 
     ImGui::End();
 }

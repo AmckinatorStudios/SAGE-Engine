@@ -42,6 +42,8 @@ private:
     void DrawAssetSection(EditorHost& host, AssetKind kind);
 
     Focus m_focus = Focus::Object;
+    // Одноразовый: переключить вкладку СЕЙЧАС. Постоянный SetSelected залипает.
+    bool m_forceFocus = false;
     int m_lastEntityId = -1;
     std::string m_lastAssetPath;
 

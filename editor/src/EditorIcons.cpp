@@ -76,6 +76,15 @@ bool Shape(const Pen& p, const char* n) {
         p.Rect(0.62f, 0.62f, 0.86f, 0.86f, 0.07f);
         return true;
     }
+    // Рамка: прямоугольник с ручками по углам — то, за что её и тянут.
+    if (is("rect")) {
+        p.Rect(0.24f, 0.28f, 0.76f, 0.72f, 0.07f);
+        p.FillRect(0.16f, 0.20f, 0.32f, 0.36f);
+        p.FillRect(0.68f, 0.20f, 0.84f, 0.36f);
+        p.FillRect(0.16f, 0.64f, 0.32f, 0.80f);
+        p.FillRect(0.68f, 0.64f, 0.84f, 0.80f);
+        return true;
+    }
     // Выравнивание: три бруска, прижатых к одной линии.
     if (is("align")) {
         p.Line(0.18f, 0.14f, 0.18f, 0.86f, 0.08f);
