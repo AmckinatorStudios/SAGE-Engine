@@ -67,6 +67,11 @@ public:
     // slot — какой из вьюпортов рисуем (0..kMaxViews-1). У каждого свой буфер:
     // мультивьюпорт показывает несколько видов ОДНОВРЕМЕННО, и рисовать их в
     // один буфер значило бы, что видно только последний.
+    // Рисовать габаритную коробку выделенного. Флагом, а не ещё одним
+    // параметром RenderViewport: тот и так принимает девять аргументов и
+    // вызывается в цикле по всем видам раскладки.
+    void SetShowBounds(bool show) { m_showBounds = show; }
+
     void RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
                         int selectedId, const std::vector<int>& selection,
                         EditorRenderMode mode, bool showGrid,
@@ -147,5 +152,6 @@ private:
     // Размер, под который последний раз строилась маска выделения: кайма
     // накладывается по нему, а у разных видов раскладки размеры разные.
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
+    bool m_showBounds = false;
     int m_gameW = 1280, m_gameH = 720;
 };

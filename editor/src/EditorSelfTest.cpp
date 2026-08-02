@@ -771,6 +771,73 @@ void EditorLayer::RunSelfTest() {
         }
 
 
+        // --- Инструменты над выделением: габариты, посадка, выравнивание, кадр ---
+        if (ok) {
+            // Габариты считаются по мировой матрице, а не по локальной коробке:
+            // кубик поднят на 0.5 и стоит на полу, значит его коробка — от 0 до 1.
+            SetSelectedId(box.Id());
+            glm::vec3 lo(0.0f), hi(0.0f);
+            bool boundsOk = SelectionBounds(lo, hi) && std::abs(lo.y) < 1e-4f &&
+                            std::abs(hi.y - 1.0f) < 1e-4f && std::abs(hi.x - 0.5f) < 1e-4f;
+            if (!boundsOk) {
+                LOG_ERROR("Editor") << "SELFTEST: selection bounds wrong: y " << lo.y << ".." << hi.y
+                                    << ", x max " << hi.x;
+                ok = false;
+            }
+        }
+
+        // Поднимаем кубик в воздух и роняем на пол: он обязан встать НИЗОМ на
+        // поверхность, а не центром — иначе половина куба ушла бы под пол.
+        if (ok) {
+            // Место выбрано в стороне от начала координат: в сцене self-test'а
+            // над центром уже стоят объекты предыдущих шагов, и кубик сел бы на
+            // них — проверка молча измеряла бы не то.
+            box.GetTransform().Position = glm::vec3(-8.0f, 6.0f, -8.0f);
+            SetSelectedId(box.Id());
+            DropSelectedToSurface();
+            const float y = box.GetTransform().Position.y;
+            if (std::abs(y - 0.5f) > 1e-3f) {
+                LOG_ERROR("Editor") << "SELFTEST: drop to surface put box at y=" << y
+                                    << ", expected 0.5 (bottom on floor)";
+                ok = false;
+            }
+            box.GetTransform().Position = glm::vec3(0.0f, 0.5f, 0.0f);   // вернуть для шагов ниже
+        }
+
+        // Выравнивание: вторая сущность подтягивается по оси X к первичной.
+        if (ok) {
+            GameObject other = CreatePrimitiveEntity("PickBox2", MeshRef::Type::Cube);
+            other.GetTransform().Position = glm::vec3(4.0f, 0.5f, 2.0f);
+            SetSelectedId(other.Id());
+            ToggleSelection(box.Id());   // первичная — box (x = 0)
+            AlignSelection(0);
+            const glm::vec3 p = other.GetTransform().Position;
+            // По X подтянулась, остальные оси не тронуты.
+            if (std::abs(p.x) > 1e-3f || std::abs(p.z - 2.0f) > 1e-3f) {
+                LOG_ERROR("Editor") << "SELFTEST: align X gave (" << p.x << "," << p.z
+                                    << "), expected (0, 2)";
+                ok = false;
+            }
+            m_scene->RemoveObject(other.Id());
+            SetSelectedId(-1);
+        }
+
+        // Фокус: камера отъезжает от объекта, но смотрит на него — проверяем,
+        // что объект оказался ПЕРЕД камерой и на разумной дистанции.
+        if (ok) {
+            SetSelectedId(box.Id());
+            m_camera.Position = glm::vec3(50.0f, 50.0f, 50.0f);
+            FocusSelected();
+            const glm::vec3 toBox = glm::vec3(0.0f, 0.5f, 0.0f) - m_camera.Position;
+            const float dist = glm::length(toBox);
+            const bool inFront = glm::dot(glm::normalize(toBox), m_camera.Front) > 0.99f;
+            if (!inFront || dist > 20.0f || dist < 0.5f) {
+                LOG_ERROR("Editor") << "SELFTEST: focus left camera at distance " << dist
+                                    << ", in front: " << inFront;
+                ok = false;
+            }
+        }
+
         for (const char* nm : {"PickFloor", "PickBox"}) {
             GameObject g = m_scene->FindByName(nm);
             if (g.Valid()) m_scene->RemoveObject(g.Id());
@@ -989,7 +1056,7 @@ void EditorLayer::RunSelfTest() {
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm + pick, "
+                               << "models + prefab-api + code-editor + confirm + pick + tools, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

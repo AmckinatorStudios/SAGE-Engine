@@ -268,6 +268,13 @@ void ViewportPanel::Draw(EditorHost& host) {
         if (ImGui::IsKeyPressed(ImGuiKey_W)) host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
         if (ImGui::IsKeyPressed(ImGuiKey_E)) host.GizmoOp() = (int)ImGuizmo::ROTATE;
         if (ImGui::IsKeyPressed(ImGuiKey_R)) host.GizmoOp() = (int)ImGuizmo::SCALE;
+        if (ImGui::IsKeyPressed(ImGuiKey_T)) host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
+        // F — показать выделенное в кадре, End — посадить на поверхность.
+        // Обе операции до этого делались правкой чисел в инспекторе: подвести
+        // камеру к далёкому объекту и посадить его ровно на пол — самые частые
+        // и самые муторные действия при сборке сцены.
+        if (ImGui::IsKeyPressed(ImGuiKey_F)) host.FocusSelected();
+        if (ImGui::IsKeyPressed(ImGuiKey_End)) host.DropSelectedToSurface();
     }
 
     // --- ImGuizmo: манипулятор выбранной сущности (сетка — DebugDraw в FBO) ---
@@ -293,10 +300,13 @@ void ViewportPanel::Draw(EditorHost& host) {
             host.CapturePendingSnapshot();
         }
 
-        float snapT = 0.5f, snapR = 15.0f, snapS = 0.1f;
-        float snapValues[3];
+        // Шаг привязки берём у хоста: он настраивается в тулбаре и запоминается
+        // с проектом. Раньше это были три константы, зашитые здесь, — и для
+        // постройки из блоков размером в единицу шаг 0.5 означал, что половина
+        // построек встаёт со сдвигом на полблока.
         auto op = (ImGuizmo::OPERATION)host.GizmoOp();
-        float snapUnit = (op == ImGuizmo::ROTATE) ? snapR : (op == ImGuizmo::SCALE ? snapS : snapT);
+        float snapValues[3];
+        const float snapUnit = host.SnapStepForCurrentOp();
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
 
         // Scale всегда в локальном пространстве (ImGuizmo игнорит WORLD для scale);

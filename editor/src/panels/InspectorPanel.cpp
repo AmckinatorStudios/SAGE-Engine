@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <system_error>
 #include <memory>
 #include <string>
 #include <vector>
@@ -110,6 +111,15 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     std::string pathStr = host.SelectedAssetPath().string();
     std::shared_ptr<Material> material = ResourceManager::Instance().GetMaterial(pathStr);
 
+    // Файл мог не прочитаться (удалён, битый JSON) — тогда весь редактор ниже
+    // разыменовывал бы nullptr. Выбор испорченного .sagemat в Assets ронял
+    // редактор: превью-то от null защищалось, а первое же поле — нет.
+    if (!material) {
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "Материал не читается");
+        ImGui::TextDisabled("Файл удалён или повреждён — подробности в консоли.");
+        return;
+    }
+
     // --- 3D-превью ------------------------------------------------------------
     //
     // Раньше материал показывался КВАДРАТИКОМ ЦВЕТА albedo. По нему нельзя
@@ -143,7 +153,6 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         ImGui::Spacing();
     }
 
-    ImGui::TextDisabled("Material: %s", host.SelectedAssetPath().filename().string().c_str());
     ImGui::ColorEdit3("Albedo", &material->Albedo.x);
     ImGui::ColorEdit3("Emissive", &material->Emissive.x);
 
@@ -232,8 +241,6 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 // сущности сцены, использующие эту модель.
 void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
     std::string path = host.SelectedAssetPath().string();
-    ImGui::Text("Model Import: %s", host.SelectedAssetPath().filename().string().c_str());
-
     ModelLoader::ImportSettings s = ModelLoader::LoadImportSettings(path);
     ImGui::DragFloat("Import Scale", &s.Scale, 0.01f, 0.001f, 1000.0f);
     ImGui::Checkbox("Recenter (AABB -> origin)", &s.Recenter);
@@ -1048,31 +1055,143 @@ void InspectorPanel::Draw(EditorHost& host) {
 
     ImGui::Begin("Inspector");
 
-    // Выбранный в Assets материал редактируется здесь же — независимо от
-    // того, выбрана ли сущность.
-    if (host.SelectedAssetPath().extension() == ".sagemat") {
-        DrawMaterialEditor(host);
-        ImGui::Separator();
-    }
-    // Выбранная модель — настройки импорта (масштаб/центрирование/нормализация).
-    std::string ext = host.SelectedAssetPath().extension().string();
-    if (ext == ".obj" || ext == ".gltf" || ext == ".glb") {
-        DrawModelImportEditor(host);
-        ImGui::Separator();
+    // ------------------------------------------------------------------------
+    // Две ПРИНЦИПИАЛЬНО разные вещи — в две вкладки, а не в одну простыню.
+    //
+    // Раньше панель просто складывала одно под другое: сверху редактор
+    // материала, выбранного в Assets, снизу свойства выбранной сущности, между
+    // ними голая черта. Это два независимых предмета правки — файл на диске и
+    // объект в сцене, — и у них даже разная область действия: материал общий
+    // для всех, кто им покрашен, а Transform принадлежит одной сущности.
+    // Соседство без границы читалось как один список свойств одного объекта, и
+    // человек не понимал, что именно он сейчас меняет.
+    //
+    // Вкладка САМА переключается на то, что человек выбрал последним: щёлкнул
+    // по объекту в сцене — открыт объект, щёлкнул по файлу в Assets — открыт
+    // ассет. Иначе за разделение пришлось бы платить лишним кликом на каждое
+    // переключение, и оно бы только мешало.
+    // ------------------------------------------------------------------------
+    const AssetKind assetKind = ClassifyAsset(host.SelectedAssetPath());
+    const bool hasEntity = host.SelectedObject().Valid();
+    const bool hasAsset = assetKind != AssetKind::None;
+
+    // Что выбрали последним. Сравниваем с прошлым кадром: событий выбора панель
+    // не получает, а сравнение состояния даёт ровно тот же ответ.
+    const int entityId = hasEntity ? host.SelectedObject().Id() : -1;
+    const std::string assetPath = host.SelectedAssetPath().string();
+    if (entityId != m_lastEntityId && hasEntity) m_focus = Focus::Object;
+    if (assetPath != m_lastAssetPath && hasAsset) m_focus = Focus::Asset;
+    m_lastEntityId = entityId;
+    m_lastAssetPath = assetPath;
+
+    if (!hasEntity && !hasAsset) {
+        ImGui::TextDisabled("Ничего не выбрано");
+        ImGui::Spacing();
+        // TextWrapped, а не две строки текста: панель узкая и её ширину меняют,
+        // а обрезанная посередине подсказка бесполезнее отсутствующей.
+        ImGui::TextWrapped("Выберите объект во вьюпорте или в Hierarchy, либо файл в Assets.");
+        ImGui::End();
+        return;
     }
 
-    if (host.SelectedObject().Valid()) {
-        // Мультивыделение: правим первичную, но подсказываем размер набора
-        // (гизмо двигает все; Delete/Duplicate — по всем выбранным).
-        if (host.Selection().size() > 1) {
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
-                               "%zu selected — editing primary", host.Selection().size());
-            ImGui::Separator();
+    // Одна сущность выбрана — вкладки не нужны: они бы только съедали строку.
+    if (hasEntity && !hasAsset) {
+        DrawObjectSection(host);
+    } else if (!hasEntity && hasAsset) {
+        DrawAssetSection(host, assetKind);
+    } else if (ImGui::BeginTabBar("##inspector_tabs", ImGuiTabBarFlags_None)) {
+        ImGuiTabItemFlags objFlags =
+            m_focus == Focus::Object ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        if (ImGui::BeginTabItem("Объект", nullptr, objFlags)) {
+            m_focus = Focus::Object;
+            DrawObjectSection(host);
+            ImGui::EndTabItem();
         }
-        DrawEntityProperties(host);
-    } else {
-        ImGui::TextDisabled("Nothing selected");
+        ImGuiTabItemFlags assetFlags =
+            m_focus == Focus::Asset ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        if (ImGui::BeginTabItem("Ассет", nullptr, assetFlags)) {
+            m_focus = Focus::Asset;
+            DrawAssetSection(host, assetKind);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
 
     ImGui::End();
+}
+
+// Заголовок раздела: что именно правится. Без него вкладка «Ассет» с полями
+// Albedo/Metallic ничем не отличается от материала, назначенного объекту, —
+// а это разные вещи: здесь правится ФАЙЛ, общий для всех, кто им покрашен.
+void InspectorPanel::DrawSectionHeader(const char* icon, const char* kind, const std::string& name,
+                                       const std::string& subtitle) {
+    ImGui::Spacing();
+    const float s = ImGui::GetTextLineHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    EditorIcons::Overlay(p.x, p.y + s * 0.15f, s, icon, glm::vec3(0.62f, 0.72f, 0.85f));
+    ImGui::Dummy(ImVec2(s * 1.35f, s));
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::TextUnformatted(name.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s)", kind);
+    if (!subtitle.empty()) {
+        ImGui::TextDisabled("%s", subtitle.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", subtitle.c_str());
+    }
+    ImGui::Separator();
+    ImGui::Spacing();
+}
+
+InspectorPanel::AssetKind InspectorPanel::ClassifyAsset(const std::filesystem::path& path) {
+    if (path.empty()) return AssetKind::None;
+    const std::string ext = path.extension().string();
+    if (ext == ".sagemat") return AssetKind::Material;
+    if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return AssetKind::Model;
+    return AssetKind::Other;
+}
+
+void InspectorPanel::DrawObjectSection(EditorHost& host) {
+    GameObject obj = host.SelectedObject();
+    DrawSectionHeader("cube", "объект сцены", obj.Name(),
+                      "Свойства этой сущности — только её.");
+
+    // Мультивыделение: правим первичную, но подсказываем размер набора
+    // (гизмо двигает все; Delete/Duplicate — по всем выбранным).
+    if (host.Selection().size() > 1) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Выбрано %zu — правим первичный",
+                           host.Selection().size());
+        ImGui::Separator();
+    }
+    DrawEntityProperties(host);
+}
+
+void InspectorPanel::DrawAssetSection(EditorHost& host, AssetKind kind) {
+    const std::filesystem::path& path = host.SelectedAssetPath();
+    const std::string name = path.filename().string();
+
+    switch (kind) {
+        case AssetKind::Material:
+            DrawSectionHeader("material", "материал", name,
+                              "Файл на диске — изменится у ВСЕХ объектов с этим материалом.");
+            DrawMaterialEditor(host);
+            break;
+        case AssetKind::Model:
+            DrawSectionHeader("model", "модель", name,
+                              "Настройки импорта запекаются в меш при загрузке.");
+            DrawModelImportEditor(host);
+            break;
+        default: {
+            // Для остальных типов редактора нет — но пустая вкладка выглядит как
+            // поломка, поэтому показываем то, что известно о файле.
+            DrawSectionHeader("file", "файл", name, path.string());
+            std::error_code ec;
+            const auto size = std::filesystem::file_size(path, ec);
+            if (!ec) ImGui::TextDisabled("Размер: %llu байт", (unsigned long long)size);
+            ImGui::Spacing();
+            ImGui::TextDisabled("Для этого типа файла редактора нет.");
+            ImGui::TextDisabled("Материалы (.sagemat) и модели (.obj/.gltf/.glb)");
+            ImGui::TextDisabled("правятся здесь же.");
+            break;
+        }
+    }
 }

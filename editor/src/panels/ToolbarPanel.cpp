@@ -27,14 +27,59 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
                                     host.GizmoOp() == (int)ImGuizmo::SCALE))
         host.GizmoOp() = (int)ImGuizmo::SCALE;
     ImGui::SameLine();
+    // Универсальное гизмо: перенос, поворот и масштаб одновременно. Экономит
+    // самое частое действие в редакторе — переключение режима ради одной правки.
+    if (EditorIcons::IconOnlyButton("universal", "Всё сразу (T): перенос + поворот + масштаб",
+                                    host.GizmoOp() == (int)ImGuizmo::UNIVERSAL))
+        host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
+    ImGui::SameLine();
 
     ImGui::AlignTextToFramePadding();
     ImGui::Checkbox("Snap", &host.GizmoSnap());
+    ImGui::SameLine();
+    // Шаг привязки — того режима, который сейчас включён: три поля разом
+    // занимали бы полтулбара, а нужно всегда ровно одно.
+    {
+        const auto op = (ImGuizmo::OPERATION)host.GizmoOp();
+        float* step = (op == ImGuizmo::ROTATE)  ? &host.SnapRotate()
+                      : (op == ImGuizmo::SCALE) ? &host.SnapScale()
+                                                : &host.SnapMove();
+        const char* fmt = (op == ImGuizmo::ROTATE) ? "%.0f°" : "%.2f";
+        ImGui::BeginDisabled(!host.GizmoSnap());
+        ImGui::SetNextItemWidth(70.0f);
+        ImGui::DragFloat("##snapstep", step, 0.05f, 0.01f, 360.0f, fmt);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Шаг привязки для текущего режима.\n"
+                              "Для постройки из блоков ставьте его равным размеру блока.");
+        }
+    }
     ImGui::SameLine();
     bool world = host.GizmoSpace() == EditorGizmoSpace::World;
     if (EditorIcons::Button(world ? "grid" : "cube", world ? "World" : "Local",
                             "Пространство гизмо: мировое или локальное", true)) {
         host.GizmoSpace() = world ? EditorGizmoSpace::Local : EditorGizmoSpace::World;
+    }
+    ImGui::SameLine();
+    // Инструменты над выделением. Отключены, когда выделения нет: серая кнопка
+    // честнее кнопки, которая молча ничего не делает.
+    ImGui::BeginDisabled(host.Selection().empty());
+    if (EditorIcons::IconOnlyButton("eye", "Показать в кадре (F)")) host.FocusSelected();
+    ImGui::SameLine();
+    if (EditorIcons::IconOnlyButton("drop", "Опустить на поверхность (End)"))
+        host.DropSelectedToSurface();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(host.Selection().size() < 2);
+    if (EditorIcons::IconOnlyButton("align", "Выровнять выделенные по первичному"))
+        ImGui::OpenPopup("##align_axis");
+    ImGui::EndDisabled();
+    if (ImGui::BeginPopup("##align_axis")) {
+        ImGui::TextDisabled("Выровнять по оси");
+        if (ImGui::MenuItem("X")) host.AlignSelection(0);
+        if (ImGui::MenuItem("Y")) host.AlignSelection(1);
+        if (ImGui::MenuItem("Z")) host.AlignSelection(2);
+        ImGui::EndPopup();
     }
 
     // --- По центру: Play / Pause / Stop ---
@@ -66,10 +111,15 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
 
     // --- Справа: режим рендера + сетка ---
     const char* modes[] = {"Shaded", "Wireframe", "Unlit", "Normals"};
-    float rightW = 180.0f;
+    float rightW = 215.0f;
     ImGui::SameLine(ImGui::GetWindowWidth() - rightW);
     if (EditorIcons::IconOnlyButton("grid", "Сетка вьюпорта", host.ShowGrid()))
         host.ShowGrid() = !host.ShowGrid();
+    ImGui::SameLine();
+    // Габариты выделенного — та самая коробка, по которой считается попадание
+    // мышью. Включается тогда, когда непонятно, почему клик выбрал не то.
+    if (EditorIcons::IconOnlyButton("wire", "Габариты выделенного", host.ShowBounds()))
+        host.ShowBounds() = !host.ShowBounds();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110.0f);
     int mode = (int)host.RenderMode();

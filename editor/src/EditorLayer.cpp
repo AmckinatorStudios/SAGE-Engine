@@ -1089,6 +1089,161 @@ void EditorLayer::PickAtViewport(float u, float v, bool additive) {
     }
 }
 
+// ============================================================================
+//  Инструменты над выделением
+// ============================================================================
+
+float EditorLayer::SnapStepForCurrentOp() {
+    switch ((ImGuizmo::OPERATION)m_gizmoOp) {
+        case ImGuizmo::ROTATE: return m_snapRotate;
+        case ImGuizmo::SCALE:  return m_snapScale;
+        default:               return m_snapMove;
+    }
+}
+
+namespace {
+
+// Мировой AABB одной сущности: восемь углов локальной коробки через мировую
+// матрицу. Не «центр ± радиус»: при повороте коробка перестаёт быть выровненной
+// по осям, и охватывающая её мировая коробка строится только по углам.
+bool EntityWorldBounds(Scene& scene, entt::entity e, glm::vec3& lo, glm::vec3& hi) {
+    const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(e);
+    if (!mr || !mr->MeshPtr) return false;
+    const glm::vec3 bmin = mr->MeshPtr->BoundsMin();
+    const glm::vec3 bmax = mr->MeshPtr->BoundsMax();
+    const glm::mat4 world = scene.WorldMatrix(e);
+    bool any = false;
+    for (int c = 0; c < 8; ++c) {
+        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x, (c & 2) ? bmax.y : bmin.y,
+                               (c & 4) ? bmax.z : bmin.z);
+        const glm::vec3 w = glm::vec3(world * glm::vec4(corner, 1.0f));
+        lo = any ? glm::min(lo, w) : w;
+        hi = any ? glm::max(hi, w) : w;
+        any = true;
+    }
+    return any;
+}
+
+} // namespace
+
+bool EditorLayer::SelectionBounds(glm::vec3& outMin, glm::vec3& outMax) {
+    bool any = false;
+    for (int id : m_selection) {
+        GameObject o = m_scene->Get(id);
+        if (!o.Valid()) continue;
+        glm::vec3 lo, hi;
+        if (!EntityWorldBounds(*m_scene, o.Entity(), lo, hi)) continue;
+        outMin = any ? glm::min(outMin, lo) : lo;
+        outMax = any ? glm::max(outMax, hi) : hi;
+        any = true;
+    }
+    return any;
+}
+
+void EditorLayer::FocusSelected() {
+    glm::vec3 lo, hi;
+    glm::vec3 target;
+    float radius = 1.0f;
+    if (SelectionBounds(lo, hi)) {
+        target = (lo + hi) * 0.5f;
+        radius = std::max(glm::length(hi - lo) * 0.5f, 0.1f);
+    } else {
+        // Выделено что-то без геометрии (свет, камера, пустышка) — подводим
+        // камеру к его позиции: маркер всё равно нарисован, и добраться до него
+        // человек хочет ровно так же.
+        GameObject o = SelectedObject();
+        if (!o.Valid()) return;
+        target = glm::vec3(m_scene->WorldMatrix(o.Entity())[3]);
+    }
+
+    // Расстояние — из вертикального угла обзора, чтобы объект занял кадр
+    // примерно на 70%: впритык он упирался бы в края, а «с запасом» съедало бы
+    // смысл операции.
+    const float fov = glm::radians(std::max(m_camera.Fov, 10.0f));
+    const float dist = std::max(radius / std::tan(fov * 0.5f) / 0.7f, radius + 0.5f);
+    m_camera.Position = target - m_camera.Front * dist;
+}
+
+void EditorLayer::DropSelectedToSurface() {
+    if (m_selection.empty()) return;
+    PushUndoSnapshot();
+
+    int moved = 0;
+    for (int id : m_selection) {
+        GameObject o = m_scene->Get(id);
+        if (!o.Valid()) continue;
+        glm::vec3 lo, hi;
+        if (!EntityWorldBounds(*m_scene, o.Entity(), lo, hi)) continue;
+
+        // Луч вниз из центра НИЖНЕЙ грани: из центра объекта он сначала прошёл
+        // бы сквозь него самого, а из угла — промахнулся бы мимо опоры.
+        const glm::vec3 bottom((lo.x + hi.x) * 0.5f, lo.y, (lo.z + hi.z) * 0.5f);
+        const glm::vec3 ro = bottom + glm::vec3(0.0f, 0.001f, 0.0f);
+        const glm::vec3 rd(0.0f, -1.0f, 0.0f);
+
+        float bestT = 1e30f;
+        bool found = false;
+        auto view = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
+        for (auto e : view) {
+            // Себя и других выделенных пропускаем: они едут вместе с этим, и
+            // опираться на них значило бы ставить объект сам на себя.
+            if (IsSelected(view.get<IdComponent>(e).Id)) continue;
+            Mesh* mesh = view.get<MeshRendererComponent>(e).MeshPtr.get();
+            if (!mesh) continue;
+            const glm::mat4 inv = glm::inverse(m_scene->WorldMatrix(e));
+            const glm::vec3 lro = glm::vec3(inv * glm::vec4(ro, 1.0f));
+            const glm::vec3 lrd = glm::vec3(inv * glm::vec4(rd, 0.0f));
+            sage::render::RayHit hit = sage::render::RayMesh(*mesh, lro, lrd);
+            if (hit.Hit && hit.Distance < bestT) {
+                bestT = hit.Distance;
+                found = true;
+            }
+        }
+        if (!found) continue;
+
+        // Двигаем на дельту в МИРЕ, а потом переводим в локальные координаты:
+        // у сущности с родителем прибавление к Transform.Position означало бы
+        // смещение в системе родителя, то есть не туда.
+        const float dropBy = bestT;
+        Transform& tr = o.GetTransform();
+        const entt::entity parent = m_scene->ParentOf(o.Entity());
+        if (parent == entt::null) {
+            tr.Position.y -= dropBy;
+        } else {
+            glm::mat4 world = m_scene->WorldMatrix(o.Entity());
+            world[3].y -= dropBy;
+            const glm::mat4 local = glm::inverse(m_scene->WorldMatrix(parent)) * world;
+            tr.Position = glm::vec3(local[3]);
+        }
+        ++moved;
+    }
+    SetStatusMessage(moved ? ("Опущено на поверхность: " + std::to_string(moved))
+                           : "Под выделенным нет поверхности");
+}
+
+void EditorLayer::AlignSelection(int axis) {
+    if (m_selection.size() < 2 || axis < 0 || axis > 2) return;
+    GameObject primary = SelectedObject();
+    if (!primary.Valid()) return;
+    PushUndoSnapshot();
+
+    // Эталон — первичная сущность (та, вокруг которой стоит гизмо): выравнивать
+    // «по среднему» бессмысленно, человек всегда равняет ПО ЧЕМУ-ТО.
+    const float target = m_scene->WorldMatrix(primary.Entity())[3][axis];
+    for (int id : m_selection) {
+        if (id == primary.Id()) continue;
+        GameObject o = m_scene->Get(id);
+        if (!o.Valid()) continue;
+        glm::mat4 world = m_scene->WorldMatrix(o.Entity());
+        world[3][axis] = target;
+        const entt::entity parent = m_scene->ParentOf(o.Entity());
+        const glm::mat4 local =
+            (parent == entt::null) ? world : glm::inverse(m_scene->WorldMatrix(parent)) * world;
+        o.GetTransform().Position = glm::vec3(local[3]);
+    }
+    SetStatusMessage(std::string("Выровнено по оси ") + "XYZ"[axis]);
+}
+
 bool EditorLayer::HasPrimaryCamera() {
     auto view = m_scene->Registry().view<CameraComponent, Transform>();
     for (auto e : view) {
@@ -1110,6 +1265,7 @@ void EditorLayer::OnRender() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
+    m_renderer.SetShowBounds(m_showBounds);
     m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode, m_showGrid,
                               cfg, m_view, m_proj);
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -11,8 +12,15 @@ class GameObject;
 class Texture;
 
 // Панель Inspector — свойства выбранной сущности (имя/Transform/MeshRenderer/
-// Material/компоненты с Add/Remove) и редактор материала, выбранного в панели
-// Assets (.sagemat правится живьём в разделяемом экземпляре, Save пишет на диск).
+// Material/компоненты с Add/Remove) и редактор выбранного в Assets файла
+// (.sagemat правится живьём в разделяемом экземпляре, Save пишет на диск).
+//
+// Это ДВА РАЗНЫХ ПРЕДМЕТА ПРАВКИ, и панель держит их в разных вкладках. Раньше
+// они шли одной простынёй, разделённые чертой: сверху материал из Assets, снизу
+// свойства сущности. Читалось как один список свойств одного объекта — при том
+// что область действия у них разная (файл материала общий для всех, кто им
+// покрашен, а Transform принадлежит одной сущности), и человек не понимал, что
+// именно он сейчас меняет.
 class InspectorPanel {
 public:
     void Draw(EditorHost& host);
@@ -21,6 +29,22 @@ public:
     void Shutdown() { m_preview.Shutdown(); }
 
 private:
+    // Что за файл выбран в Assets — по нему выбирается редактор.
+    enum class AssetKind { None, Material, Model, Other };
+    // Какая вкладка открыта. Следует за последним выбором человека, иначе
+    // разделение стоило бы лишнего клика на каждое переключение.
+    enum class Focus { Object, Asset };
+
+    static AssetKind ClassifyAsset(const std::filesystem::path& path);
+    static void DrawSectionHeader(const char* icon, const char* kind, const std::string& name,
+                                  const std::string& subtitle);
+    void DrawObjectSection(EditorHost& host);
+    void DrawAssetSection(EditorHost& host, AssetKind kind);
+
+    Focus m_focus = Focus::Object;
+    int m_lastEntityId = -1;
+    std::string m_lastAssetPath;
+
     void DrawMaterialEditor(EditorHost& host);
 
     // Слот текстуры: превью, путь, «Обзор…», «Из Assets», «Очистить».

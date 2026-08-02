@@ -136,6 +136,17 @@ public:
     EditorGizmoSpace& GizmoSpace() override { return m_gizmoSpace; }
     bool& ShowGrid() override { return m_showGrid; }
     EditorRenderMode& RenderMode() override { return m_renderMode; }
+    float& SnapMove() override { return m_snapMove; }
+    float& SnapRotate() override { return m_snapRotate; }
+    float& SnapScale() override { return m_snapScale; }
+    float SnapStepForCurrentOp() override;
+    bool& ShowBounds() override { return m_showBounds; }
+
+    // --- EditorHost: инструменты над выделением ---
+    void FocusSelected() override;
+    void DropSelectedToSurface() override;
+    void AlignSelection(int axis) override;
+    bool SelectionBounds(glm::vec3& outMin, glm::vec3& outMax) override;
 
     // --- EditorHost: вьюпорт/камера ---
     Camera& EditorCamera() override { return m_camera; }
@@ -224,6 +235,13 @@ private:
     EditorGizmoSpace m_gizmoSpace = EditorGizmoSpace::Local;
     bool m_showGrid = true;
     EditorRenderMode m_renderMode = EditorRenderMode::Shaded;
+    // Шаг привязки. Перенос — 1.0: движок строит примитивы размером в единицу,
+    // и для постройки из блоков это единственный шаг, при котором блоки встают
+    // вплотную без щелей и нахлёстов.
+    float m_snapMove = 1.0f;
+    float m_snapRotate = 15.0f;
+    float m_snapScale = 0.1f;
+    bool m_showBounds = false;
 
     // --- Play-режим ---
     EditorPlayState m_playState = EditorPlayState::Editing;

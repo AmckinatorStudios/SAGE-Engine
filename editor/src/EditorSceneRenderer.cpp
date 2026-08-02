@@ -440,6 +440,27 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
             }
         }
     }
+    // Габариты выделенного — ровно та коробка, по которой считается попадание
+    // мышью (sage::render::RayMesh). Показывать её незачем всегда, но когда
+    // «клик выбрал не то» непонятен, увидеть её — самый короткий ответ.
+    if (m_showBounds) {
+        for (int id : selection) {
+            GameObject o = scene.Get(id);
+            if (!o.Valid()) continue;
+            const MeshRendererComponent* mr =
+                scene.Registry().try_get<MeshRendererComponent>(o.Entity());
+            if (!mr || !mr->MeshPtr) continue;
+            const glm::vec3 bmin = mr->MeshPtr->BoundsMin();
+            const glm::vec3 bmax = mr->MeshPtr->BoundsMax();
+            // Коробка рисуется в ЛОКАЛЬНЫХ осях объекта (мировая матрица целиком,
+            // включая поворот) — именно в них её и проверяет пикинг.
+            const glm::mat4 box = scene.WorldMatrix(o.Entity()) *
+                                  glm::translate(glm::mat4(1.0f), (bmin + bmax) * 0.5f) *
+                                  glm::scale(glm::mat4(1.0f), bmax - bmin);
+            m_debugDraw->WireBox(box, glm::vec3(1.0f, 0.65f, 0.2f));
+        }
+    }
+
     m_debugDraw->Flush(outView, outProj);
 
     // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).
