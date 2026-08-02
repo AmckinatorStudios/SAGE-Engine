@@ -1,5 +1,8 @@
 #pragma once
+#include <set>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 #include <vector>
 #include "sage/physics/PhysicsWorld.h"
 
@@ -36,6 +39,21 @@ public:
     void RemoveJoint(JointHandle joint) override;
     bool SupportsJoints() const override { return false; }
 
+    // Луч по AABB тел (slab-метод). Форма здесь и так приближается коробкой,
+    // поэтому луч точен ровно настолько же, насколько и вся эта физика.
+    //
+    // Реализован не «для галочки»: на Simple идут headless-тесты и сборки без
+    // Jolt, и если бы луч работал только у Jolt, половина проверок движка не
+    // могла бы его касаться вовсе.
+    bool Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+                 RayHit& out, LayerMask mask) const override;
+    int OverlapSphere(const glm::vec3& center, float radius, std::vector<BodyHandle>& out,
+                      LayerMask mask) const override;
+    bool SupportsQueries() const override { return true; }
+
+    void PollContacts(std::vector<ContactEvent>& out) override;
+    bool SupportsContacts() const override { return true; }
+
 private:
     struct Body {
         BodyType Type;
@@ -46,6 +64,8 @@ private:
         float InvMass;       // 0 для static/kinematic
         float Friction;
         float Restitution;
+        LayerMask Layer = kLayerDefault;
+        bool Sensor = false;
         bool Alive = true;
     };
 
@@ -53,6 +73,14 @@ private:
 
     glm::vec3 m_gravity{0.0f, -9.81f, 0.0f};
     std::unordered_map<BodyHandle, Body> m_bodies;
+
+    // Пары, которые касались на прошлом шаге, — по ним отличается «начал
+    // касаться» от «продолжает». Без этого событие Begin приходило бы каждый
+    // кадр, пока предмет лежит на полу, и «звук удара» звучал бы непрерывно.
+    void NoteTouching(BodyHandle a, BodyHandle b, const Body& ba, const Body& bb);
+    void NoteSeparated(BodyHandle a, BodyHandle b);
+    std::set<std::pair<BodyHandle, BodyHandle>> m_touching;
+    std::vector<ContactEvent> m_events;
     BodyHandle m_next = 1;
     float m_accum = 0.0f;
     bool m_warnedNoJoints = false; // предупреждение о неподдержке joints — один раз

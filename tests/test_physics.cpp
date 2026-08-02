@@ -237,3 +237,356 @@ TEST(Physics_second_simulation_rebuilds_bodies) {
     for (int i = 0; i < 60; ++i) second.Step(scene, 1.0f / 60.0f);
     CHECK_TRUE(box.GetTransform().Position.y < startY - 0.5f);
 }
+
+// --- Запросы к миру: луч и сфера ----------------------------------------------
+//
+// Луч проверяется на ОБОИХ бэкендах (Simple всегда доступен, Jolt — если
+// собран): headless-прогоны и сборки без Jolt идут на Simple, и работающий
+// только у Jolt луч оставил бы половину движка без проверки.
+
+namespace {
+// Гоняет один и тот же сценарий на каждом доступном бэкенде: разница между
+// ними — предмет отдельного разговора, а контракт обязан быть один.
+template <typename Fn>
+void ForEachBackend(Fn&& fn) {
+    fn(Backend::Simple, "Simple");
+    if (PhysicsWorld::HasJolt()) fn(Backend::Jolt, "Jolt");
+}
+
+BodyHandle MakeStaticBox(PhysicsWorld& w, glm::vec3 pos, glm::vec3 half,
+                         LayerMask layer = kLayerDefault, bool sensor = false) {
+    BodyDesc d;
+    d.Type = BodyType::Static;
+    d.Shape = ShapeType::Box;
+    d.HalfExtents = half;
+    d.Position = pos;
+    d.Layer = layer;
+    d.Sensor = sensor;
+    return w.CreateBody(d);
+}
+} // namespace
+
+TEST(Physics_raycast_hits_the_nearest_body) {
+    ForEachBackend([](Backend backend, const char* name) {
+        auto w = PhysicsWorld::Create(backend);
+        if (!w->SupportsQueries()) return;
+
+        // Две стены на пути луча: попасть обязан в БЛИЖНЮЮ. Одна стена такой
+        // проверкой не была бы — «нашёл хоть что-то» и «нашёл ближайшее» это
+        // разные утверждения, и второе ломается чаще.
+        const BodyHandle near_ = MakeStaticBox(*w, {0.0f, 0.0f, -3.0f}, {2.0f, 2.0f, 0.2f});
+        MakeStaticBox(*w, {0.0f, 0.0f, -8.0f}, {2.0f, 2.0f, 0.2f});
+        w->Step(1.0f / 60.0f);
+
+        RayHit hit;
+        const bool ok = w->Raycast({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, 50.0f, hit);
+        std::printf("       [%s] попадание=%d дистанция=%.2f нормаль=(%.1f %.1f %.1f)\n", name,
+                    (int)ok, hit.Distance, hit.Normal.x, hit.Normal.y, hit.Normal.z);
+        CHECK_TRUE(ok);
+        CHECK_EQ((int)hit.Body, (int)near_);
+        CHECK_NEAR(hit.Distance, 2.8f, 0.15);
+        // Нормаль смотрит НАВСТРЕЧУ лучу — иначе рикошет и следы от пуль
+        // уходили бы внутрь стены.
+        CHECK_TRUE(hit.Normal.z > 0.5f);
+    });
+}
+
+TEST(Physics_raycast_misses_and_respects_distance) {
+    ForEachBackend([](Backend backend, const char* name) {
+        auto w = PhysicsWorld::Create(backend);
+        if (!w->SupportsQueries()) return;
+        MakeStaticBox(*w, {0.0f, 0.0f, -10.0f}, {1.0f, 1.0f, 0.5f});
+        w->Step(1.0f / 60.0f);
+
+        RayHit hit;
+        // Мимо: луч уходит вбок.
+        CHECK_FALSE(w->Raycast({0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, 50.0f, hit));
+        // По направлению, но КОРОЧЕ цели: дальность обязана ограничивать, иначе
+        // «дострелить» можно было бы до чего угодно.
+        CHECK_FALSE(w->Raycast({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, 5.0f, hit));
+        CHECK_TRUE(w->Raycast({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, 20.0f, hit));
+        std::printf("       [%s] ограничение дальности работает\n", name);
+    });
+}
+
+TEST(Physics_raycast_layer_mask_skips_other_layers) {
+    ForEachBackend([](Backend backend, const char* name) {
+        auto w = PhysicsWorld::Create(backend);
+        if (!w->SupportsQueries()) return;
+
+        constexpr LayerMask kPlayer = 1u << 1;
+        constexpr LayerMask kWorld = 1u << 2;
+        // Ближе — «игрок», дальше — стена. Без масок луч из камеры первым делом
+        // упирается в собственную капсулу, и выстрел не выходит за неё.
+        MakeStaticBox(*w, {0.0f, 0.0f, -1.0f}, {0.5f, 0.5f, 0.5f}, kPlayer);
+        const BodyHandle wall = MakeStaticBox(*w, {0.0f, 0.0f, -6.0f}, {2.0f, 2.0f, 0.3f}, kWorld);
+        w->Step(1.0f / 60.0f);
+
+        RayHit hit;
+        CHECK_TRUE(w->Raycast({0, 0, 0}, {0, 0, -1}, 50.0f, hit, kWorld));
+        CHECK_EQ((int)hit.Body, (int)wall);
+        std::printf("       [%s] маска пропустила игрока и нашла стену на %.1f м\n", name,
+                    hit.Distance);
+
+        // А без маски — попадает в ближнее.
+        CHECK_TRUE(w->Raycast({0, 0, 0}, {0, 0, -1}, 50.0f, hit, kAllLayers));
+        CHECK_TRUE((int)hit.Body != (int)wall);
+    });
+}
+
+TEST(Physics_overlap_sphere_finds_bodies_in_range) {
+    ForEachBackend([](Backend backend, const char* name) {
+        auto w = PhysicsWorld::Create(backend);
+        if (!w->SupportsQueries()) return;
+        MakeStaticBox(*w, {0.0f, 0.0f, 0.0f}, {0.5f, 0.5f, 0.5f});
+        MakeStaticBox(*w, {3.0f, 0.0f, 0.0f}, {0.5f, 0.5f, 0.5f});
+        MakeStaticBox(*w, {20.0f, 0.0f, 0.0f}, {0.5f, 0.5f, 0.5f});
+        w->Step(1.0f / 60.0f);
+
+        std::vector<BodyHandle> found;
+        const int n = w->OverlapSphere({0.0f, 0.0f, 0.0f}, 4.0f, found);
+        std::printf("       [%s] в сфере радиуса 4: %d тел\n", name, n);
+        CHECK_EQ(n, 2);   // третье в двадцати метрах — не должно попасть
+    });
+}
+
+// --- События столкновений -----------------------------------------------------
+
+TEST(Physics_reports_contact_when_bodies_meet) {
+    ForEachBackend([](Backend backend, const char* name) {
+        auto w = PhysicsWorld::Create(backend);
+        if (!w->SupportsContacts()) return;
+        w->SetGravity({0.0f, -9.81f, 0.0f});
+
+        MakeStaticBox(*w, {0.0f, -0.5f, 0.0f}, {10.0f, 0.5f, 10.0f});
+        BodyDesc falling;
+        falling.Type = BodyType::Dynamic;
+        falling.Shape = ShapeType::Box;
+        falling.HalfExtents = {0.4f, 0.4f, 0.4f};
+        falling.Position = {0.0f, 3.0f, 0.0f};
+        const BodyHandle ball = w->CreateBody(falling);
+
+        std::vector<ContactEvent> events;
+        int begins = 0;
+        for (int i = 0; i < 180; ++i) {
+            w->Step(1.0f / 60.0f);
+            w->PollContacts(events);
+            for (const ContactEvent& e : events)
+                if (e.When == ContactEvent::Phase::Begin && (e.A == ball || e.B == ball)) ++begins;
+        }
+        std::printf("       [%s] событий касания пола: %d\n", name, begins);
+        CHECK_TRUE(begins >= 1);
+        // Ключевое: «начал касаться» приходит НЕ каждый кадр, пока предмет
+        // лежит. Иначе звук удара звучал бы непрерывно всё время лежания.
+        CHECK_TRUE(begins < 30);
+    });
+}
+
+TEST(Physics_sensor_detects_without_pushing) {
+    ForEachBackend([](Backend backend, const char* name) {
+        auto w = PhysicsWorld::Create(backend);
+        if (!w->SupportsContacts()) return;
+        w->SetGravity({0.0f, -9.81f, 0.0f});
+
+        // Зона-сенсор на пути падения: обязана заметить и НЕ остановить.
+        MakeStaticBox(*w, {0.0f, 1.0f, 0.0f}, {2.0f, 0.3f, 2.0f}, kLayerDefault, /*sensor=*/true);
+        BodyDesc falling;
+        falling.Type = BodyType::Dynamic;
+        falling.Shape = ShapeType::Box;
+        falling.HalfExtents = {0.3f, 0.3f, 0.3f};
+        falling.Position = {0.0f, 4.0f, 0.0f};
+        const BodyHandle ball = w->CreateBody(falling);
+
+        std::vector<ContactEvent> events;
+        bool sawSensor = false;
+        for (int i = 0; i < 120; ++i) {
+            w->Step(1.0f / 60.0f);
+            w->PollContacts(events);
+            for (const ContactEvent& e : events)
+                if (e.Sensor && (e.A == ball || e.B == ball)) sawSensor = true;
+        }
+        glm::vec3 pos;
+        glm::quat rot;
+        w->GetBodyTransform(ball, pos, rot);
+        std::printf("       [%s] сенсор заметил=%d, тело упало до y=%.2f\n", name, (int)sawSensor,
+                    pos.y);
+        CHECK_TRUE(sawSensor);
+        // Проверка «не остановил»: тело обязано провалиться НИЖЕ зоны.
+        CHECK_TRUE(pos.y < 0.5f);
+    });
+}
+
+// --- Контроллер персонажа -----------------------------------------------------
+
+TEST(Character_walks_stands_and_is_stopped_by_walls) {
+    if (!PhysicsWorld::HasJolt()) return;   // контроллер есть только у Jolt
+    auto w = PhysicsWorld::Create(Backend::Jolt);
+    if (!w->SupportsCharacters()) return;
+    w->SetGravity({0.0f, -9.81f, 0.0f});
+
+    MakeStaticBox(*w, {0.0f, -0.5f, 0.0f}, {20.0f, 0.5f, 20.0f});   // пол
+    MakeStaticBox(*w, {4.0f, 1.5f, 0.0f}, {0.5f, 2.0f, 6.0f});      // стена справа
+
+    CharacterDesc cd;
+    cd.Position = {0.0f, 0.2f, 0.0f};
+    const CharacterHandle ch = w->CreateCharacter(cd);
+    CHECK_TRUE(ch != kInvalidCharacter);
+
+    // 1. Стоит на полу и не проваливается.
+    for (int i = 0; i < 60; ++i) {
+        w->MoveCharacter(ch, {0.0f, -1.0f, 0.0f}, 1.0f / 60.0f);
+        w->Step(1.0f / 60.0f);
+    }
+    CharacterState st = w->GetCharacterState(ch);
+    std::printf("       стоит: y=%.2f опора=%d\n", st.Position.y, (int)st.Grounded);
+    CHECK_TRUE(st.Grounded);
+    CHECK_TRUE(st.Position.y > -0.1f && st.Position.y < 0.3f);
+
+    // 2. Идёт вперёд — и доходит.
+    for (int i = 0; i < 60; ++i) {
+        w->MoveCharacter(ch, {2.0f, -1.0f, 0.0f}, 1.0f / 60.0f);
+        w->Step(1.0f / 60.0f);
+    }
+    st = w->GetCharacterState(ch);
+    std::printf("       прошёл до x=%.2f\n", st.Position.x);
+    CHECK_TRUE(st.Position.x > 1.0f);
+
+    // 3. Упирается в стену, а не проходит сквозь. Ради этого контроллер и
+    //    существует: динамическое тело здесь бы либо застряло, либо опрокинулось.
+    for (int i = 0; i < 240; ++i) {
+        w->MoveCharacter(ch, {4.0f, -1.0f, 0.0f}, 1.0f / 60.0f);
+        w->Step(1.0f / 60.0f);
+    }
+    st = w->GetCharacterState(ch);
+    std::printf("       уперся в стену на x=%.2f (стена на 3.5)\n", st.Position.x);
+    CHECK_TRUE(st.Position.x < 3.6f);
+    CHECK_TRUE(st.Grounded);
+}
+
+TEST(Character_climbs_a_step_it_would_trip_over) {
+    if (!PhysicsWorld::HasJolt()) return;
+    auto w = PhysicsWorld::Create(Backend::Jolt);
+    if (!w->SupportsCharacters()) return;
+    w->SetGravity({0.0f, -9.81f, 0.0f});
+
+    MakeStaticBox(*w, {0.0f, -0.5f, 0.0f}, {20.0f, 0.5f, 20.0f});
+    // Ступенька 25 см — ниже StepHeight (35 см): на неё нужно ВЗОЙТИ.
+    MakeStaticBox(*w, {3.0f, 0.125f, 0.0f}, {2.0f, 0.125f, 4.0f});
+
+    CharacterDesc cd;
+    cd.Position = {0.0f, 0.2f, 0.0f};
+    cd.StepHeight = 0.35f;
+    const CharacterHandle ch = w->CreateCharacter(cd);
+
+    // Идём ровно до СЕРЕДИНЫ ступеньки (она занимает x от 1 до 5) и там
+    // останавливаемся: пройти её насквозь и слезть обратно на пол — тоже успех
+    // подъёма, но проверить по конечной высоте его уже нельзя.
+    for (int i = 0; i < 110; ++i) {
+        w->MoveCharacter(ch, {2.0f, -2.0f, 0.0f}, 1.0f / 60.0f);
+        w->Step(1.0f / 60.0f);
+    }
+    for (int i = 0; i < 30; ++i) {   // дать опоре устояться на месте
+        w->MoveCharacter(ch, {0.0f, -2.0f, 0.0f}, 1.0f / 60.0f);
+        w->Step(1.0f / 60.0f);
+    }
+    const CharacterState st = w->GetCharacterState(ch);
+    std::printf("       после ступеньки: x=%.2f y=%.2f опора=%d\n", st.Position.x, st.Position.y,
+                (int)st.Grounded);
+    // Взошёл: и продвинулся по x, и поднялся по y.
+    CHECK_TRUE(st.Position.x > 1.5f && st.Position.x < 5.0f);
+    CHECK_TRUE(st.Position.y > 0.15f);   // стоит НА ступеньке, а не перед ней
+}
+
+// --- Сквозной путь через ECS: сущности, а не дескрипторы ----------------------
+//
+// Мир физики отвечает дескрипторами тел, а игра думает сущностями. Перевод
+// делается в PhysicsScene, и именно он ломается незаметнее всего: попадание в
+// «никуда» выглядит как промах, а не как сбой.
+
+TEST(PhysicsScene_raycast_returns_the_entity_that_was_hit) {
+    Scene scene("RayScene");
+    GameObject wall = scene.CreateObject("Wall");
+    wall.GetTransform().Position = {0.0f, 0.0f, -5.0f};
+    wall.GetTransform().Scale = {4.0f, 4.0f, 0.5f};
+    scene.Registry().emplace<RigidBodyComponent>(wall.Entity(),
+                                                 RigidBodyComponent{BodyType::Static});
+    scene.Registry().emplace<ColliderComponent>(wall.Entity());
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.SupportsQueries()) return;
+    physics.Step(scene, 1.0f / 60.0f);
+
+    const PhysicsScene::EntityHit hit = physics.Raycast({0, 0, 0}, {0, 0, -1}, 50.0f);
+    std::printf("       попал в сущность=%d на %.2f м\n", (int)hit.Hit, hit.Distance);
+    CHECK_TRUE(hit.Hit);
+    CHECK_TRUE(hit.Entity == wall.Entity());   // именно ТА сущность, а не «какая-то»
+
+    // Удалённая сущность не должна отдаваться лучом: её тело снимается тем же
+    // Step, и попадание в мёртвый объект — худший вид ответа.
+    scene.RemoveObject(wall.Id());
+    physics.Step(scene, 1.0f / 60.0f);
+    CHECK_FALSE(physics.Raycast({0, 0, 0}, {0, 0, -1}, 50.0f).Hit);
+}
+
+TEST(PhysicsScene_reports_contacts_between_entities) {
+    Scene scene("ContactScene");
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Position = {0.0f, -0.5f, 0.0f};
+    floor.GetTransform().Scale = {20.0f, 1.0f, 20.0f};
+    scene.Registry().emplace<RigidBodyComponent>(floor.Entity(),
+                                                 RigidBodyComponent{BodyType::Static});
+    scene.Registry().emplace<ColliderComponent>(floor.Entity());
+
+    GameObject box = scene.CreateObject("Box");
+    box.GetTransform().Position = {0.0f, 3.0f, 0.0f};
+    scene.Registry().emplace<RigidBodyComponent>(box.Entity());
+    scene.Registry().emplace<ColliderComponent>(box.Entity());
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.SupportsContacts()) return;
+
+    bool sawPair = false;
+    for (int i = 0; i < 240; ++i) {
+        physics.Step(scene, 1.0f / 60.0f);
+        for (const PhysicsScene::EntityContact& c : physics.Contacts()) {
+            const bool pair = (c.A == box.Entity() && c.B == floor.Entity()) ||
+                              (c.B == box.Entity() && c.A == floor.Entity());
+            if (pair && c.Begin) sawPair = true;
+        }
+    }
+    std::printf("       столкновение ящика с полом замечено=%d\n", (int)sawPair);
+    CHECK_TRUE(sawPair);
+}
+
+TEST(PhysicsScene_drives_a_character_controller_from_components) {
+    if (!PhysicsWorld::HasJolt()) return;
+    Scene scene("CharScene");
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Position = {0.0f, -0.5f, 0.0f};
+    floor.GetTransform().Scale = {40.0f, 1.0f, 40.0f};
+    scene.Registry().emplace<RigidBodyComponent>(floor.Entity(),
+                                                 RigidBodyComponent{BodyType::Static});
+    scene.Registry().emplace<ColliderComponent>(floor.Entity());
+
+    GameObject hero = scene.CreateObject("Hero");
+    hero.GetTransform().Position = {0.0f, 0.2f, 0.0f};
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.SupportsCharacters()) return;
+    physics.Step(scene, 1.0f / 60.0f);
+
+    auto& cc = scene.Registry().get<CharacterControllerComponent>(hero.Entity());
+    CHECK_TRUE(cc.Runtime != kInvalidCharacter);   // контроллер завёлся сам
+
+    for (int i = 0; i < 120; ++i) {
+        physics.MoveCharacter(cc.Runtime, {1.5f, -2.0f, 0.0f}, 1.0f / 60.0f);
+        physics.Step(scene, 1.0f / 60.0f);
+    }
+    // Положение обязано вернуться В TRANSFORM сущности: игра работает с ним, а
+    // не с дескриптором внутри физики.
+    const glm::vec3 pos = hero.GetTransform().Position;
+    std::printf("       персонаж дошёл до x=%.2f, опора=%d\n", pos.x, (int)cc.Grounded);
+    CHECK_TRUE(pos.x > 1.0f);
+    CHECK_TRUE(cc.Grounded);
+}

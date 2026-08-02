@@ -54,7 +54,30 @@ public:
     void RemoveJoint(JointHandle joint) override;
     bool SupportsJoints() const override { return true; }
 
+    bool Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+                 RayHit& out, LayerMask mask) const override;
+    int OverlapSphere(const glm::vec3& center, float radius, std::vector<BodyHandle>& out,
+                      LayerMask mask) const override;
+    bool SupportsQueries() const override { return true; }
+
+    void PollContacts(std::vector<ContactEvent>& out) override;
+    bool SupportsContacts() const override { return true; }
+
+    CharacterHandle CreateCharacter(const CharacterDesc& desc) override;
+    void RemoveCharacter(CharacterHandle character) override;
+    void MoveCharacter(CharacterHandle character, const glm::vec3& velocity, float dt) override;
+    CharacterState GetCharacterState(CharacterHandle character) const override;
+    void SetCharacterPosition(CharacterHandle character, const glm::vec3& position) override;
+    bool SupportsCharacters() const override { return true; }
+
+    // Наш дескриптор по Jolt BodyID — нужен слушателю контактов и лучам,
+    // которые возвращают наружу только наши хендлы, а не внутренние ID.
+    BodyHandle HandleOf(uint32_t joltId) const;
+    LayerMask LayerOf(BodyHandle body) const;
+
 private:
+    class ContactCollector;   // слушатель контактов Jolt (см. .cpp)
+    struct CharacterEntry;
     std::unique_ptr<JPH::PhysicsSystem> m_system;
     std::unique_ptr<JPH::TempAllocator> m_tempAllocator;
     std::unique_ptr<JPH::JobSystem> m_jobSystem;
@@ -71,6 +94,18 @@ private:
     std::unordered_map<JointHandle, JPH::Constraint*> m_joints;
     JointHandle m_nextJoint = 1;
     float m_accum = 0.0f;
+
+    // Обратная карта Jolt BodyID -> наш хендл и слои тел. Слои держим у себя, а
+    // не в системе слоёв Jolt: та отвечает за то, ЧТО с чем сталкивается на
+    // уровне широкой фазы, и переучивать её под пользовательские маски значит
+    // трогать самую хрупкую часть настройки. Фильтровать результат запроса
+    // одним `&` дешевле и ничего не ломает.
+    std::unordered_map<uint32_t, BodyHandle> m_byJoltId;
+    std::unordered_map<BodyHandle, LayerMask> m_layers;
+
+    std::unique_ptr<ContactCollector> m_contacts;
+    std::unordered_map<CharacterHandle, std::unique_ptr<CharacterEntry>> m_characters;
+    CharacterHandle m_nextCharacter = 1;
 };
 
 } // namespace sage::physics

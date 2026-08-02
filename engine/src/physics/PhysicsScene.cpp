@@ -38,6 +38,8 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
     d.Mass = rb.Mass;
     d.Friction = rb.Friction;
     d.Restitution = rb.Restitution;
+    d.Layer = rb.Layer;
+    d.Sensor = rb.Sensor;
     d.Position = tr.Position;
     d.Rotation = EulerToQuat(tr.Rotation);
 
@@ -137,6 +139,7 @@ void PhysicsScene::SyncBodies(Scene& scene) {
         rb.RuntimeBody = m_world->CreateBody(DescFromEntity(rb, col, tr));
         if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
         m_tracked.emplace_back(e, rb.RuntimeBody);
+        m_bodyToEntity[rb.RuntimeBody] = e;
         ++m_bodyCount;
     }
 
@@ -153,6 +156,7 @@ void PhysicsScene::SyncBodies(Scene& scene) {
             m_tracked[alive++] = m_tracked[i];
         } else {
             m_world->RemoveBody(body);
+            m_bodyToEntity.erase(body);
             --m_bodyCount;
         }
     }
@@ -164,6 +168,7 @@ void PhysicsScene::Step(Scene& scene, float dt) {
 
     // Состав мира мог измениться с прошлого кадра (скрипт спавнит и удаляет).
     SyncBodies(scene);
+    SyncCharacters(scene);
 
     // Кинематика: до шага толкаем тела за Transform сущности (её ведёт скрипт).
     auto view = scene.Registry().view<RigidBodyComponent, Transform>();
@@ -187,4 +192,113 @@ void PhysicsScene::Step(Scene& scene, float dt) {
         tr.Position = pos;
         tr.Rotation = QuatToEuler(rot);
     }
+
+    PullCharacters(scene);
+
+    // События столкновений: забираем накопленное за шаг и переводим в сущности.
+    // Именно здесь, а не по запросу: очередь бэкенда одна, и кто прочитал её
+    // первым, тот и забрал события у всех остальных. Список живёт до
+    // следующего Step — читать его можно откуда угодно и сколько угодно раз.
+    m_contacts.clear();
+    if (m_world->SupportsContacts()) {
+        m_world->PollContacts(m_rawContacts);
+        m_contacts.reserve(m_rawContacts.size());
+        for (const ContactEvent& raw : m_rawContacts) {
+            auto ia = m_bodyToEntity.find(raw.A);
+            auto ib = m_bodyToEntity.find(raw.B);
+            // Тело без сущности — не ошибка: сущность могли удалить в этом же
+            // кадре, и событие про неё игре уже не адресовать.
+            if (ia == m_bodyToEntity.end() || ib == m_bodyToEntity.end()) continue;
+            EntityContact c;
+            c.Begin = raw.When == ContactEvent::Phase::Begin;
+            c.A = ia->second;
+            c.B = ib->second;
+            c.Point = raw.Point;
+            c.Normal = raw.Normal;
+            c.Impulse = raw.Impulse;
+            c.Sensor = raw.Sensor;
+            m_contacts.push_back(c);
+        }
+    }
+}
+
+// Заводит контроллеры для сущностей, у которых есть компонент, но ещё нет
+// контроллера, и снимает осиротевшие — ровно как SyncBodies для тел.
+void PhysicsScene::SyncCharacters(Scene& scene) {
+    if (!m_world || !m_world->SupportsCharacters()) return;
+
+    auto view = scene.Registry().view<CharacterControllerComponent, Transform>();
+    for (auto e : view) {
+        CharacterControllerComponent& cc = view.get<CharacterControllerComponent>(e);
+        if (cc.Runtime != kInvalidCharacter) continue;
+        const Transform& tr = view.get<Transform>(e);
+        CharacterDesc d;
+        d.Radius = cc.Radius;
+        d.Height = cc.Height;
+        d.StepHeight = cc.StepHeight;
+        d.MaxSlopeDeg = cc.MaxSlopeDeg;
+        d.Mass = cc.Mass;
+        d.Layer = cc.Layer;
+        d.Position = tr.Position;
+        cc.Runtime = m_world->CreateCharacter(d);
+        if (cc.Runtime != kInvalidCharacter) m_characters.emplace_back(e, cc.Runtime);
+    }
+
+    size_t alive = 0;
+    for (size_t i = 0; i < m_characters.size(); ++i) {
+        const auto& [entity, handle] = m_characters[i];
+        const CharacterControllerComponent* cc =
+            scene.Registry().valid(entity)
+                ? scene.Registry().try_get<CharacterControllerComponent>(entity)
+                : nullptr;
+        if (cc && cc->Runtime == handle) m_characters[alive++] = m_characters[i];
+        else m_world->RemoveCharacter(handle);
+    }
+    m_characters.resize(alive);
+}
+
+// Переносит положение контроллеров в Transform сущностей и обновляет флаг
+// опоры. После шага: до него положение ведёт игра (через MoveCharacter), после
+// — физика, и путать эти два момента значит терять то одно, то другое.
+void PhysicsScene::PullCharacters(Scene& scene) {
+    if (!m_world || !m_world->SupportsCharacters()) return;
+    for (const auto& [entity, handle] : m_characters) {
+        if (!scene.Registry().valid(entity)) continue;
+        auto* cc = scene.Registry().try_get<CharacterControllerComponent>(entity);
+        auto* tr = scene.Registry().try_get<Transform>(entity);
+        if (!cc || !tr) continue;
+        const sage::physics::CharacterState st = m_world->GetCharacterState(handle);
+        tr->Position = st.Position;
+        cc->Grounded = st.Grounded;
+        cc->GroundNormal = st.GroundNormal;
+    }
+}
+
+PhysicsScene::EntityHit PhysicsScene::Raycast(const glm::vec3& origin, const glm::vec3& direction,
+                                              float maxDistance, LayerMask mask) const {
+    EntityHit out;
+    if (!m_world) return out;
+    RayHit hit;
+    if (!m_world->Raycast(origin, direction, maxDistance, hit, mask)) return out;
+    auto it = m_bodyToEntity.find(hit.Body);
+    if (it == m_bodyToEntity.end()) return out;   // тело без сущности игре не адресовать
+    out.Hit = true;
+    out.Entity = it->second;
+    out.Point = hit.Point;
+    out.Normal = hit.Normal;
+    out.Distance = hit.Distance;
+    return out;
+}
+
+int PhysicsScene::OverlapSphere(const glm::vec3& center, float radius,
+                                std::vector<entt::entity>& out, LayerMask mask) const {
+    out.clear();
+    if (!m_world) return 0;
+    std::vector<BodyHandle> bodies;
+    m_world->OverlapSphere(center, radius, bodies, mask);
+    for (BodyHandle b : bodies) {
+        auto it = m_bodyToEntity.find(b);
+        if (it != m_bodyToEntity.end()) out.push_back(it->second);
+    }
+    return (int)out.size();
 }

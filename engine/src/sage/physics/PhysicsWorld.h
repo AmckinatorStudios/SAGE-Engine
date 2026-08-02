@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <vector>
 #include "sage/physics/PhysicsTypes.h"
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,73 @@ public:
 
     // Поддерживает ли бэкенд настоящие соединения (Jolt — да; Simple/Null — нет).
     virtual bool SupportsJoints() const = 0;
+
+    // --- Запросы к миру -----------------------------------------------------
+    //
+    // Луч — самая нужная операция физики после самого шага, и её отсутствие
+    // видно сразу: без неё нельзя ни выстрелить, ни подобрать предмет
+    // прицелом, ни узнать высоту пола под ногой. Последнее не гипотетика:
+    // система IK вынуждена требовать высоту опоры ОТ ИГРЫ ровно потому, что
+    // спросить её у движка было не у кого.
+    //
+    // dir не обязан быть нормализован. mask — какие слои интересуют.
+    // Возвращает ближайшее попадание; false — луч ушёл в пустоту.
+    virtual bool Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+                         RayHit& out, LayerMask mask = kAllLayers) const {
+        (void)origin; (void)direction; (void)maxDistance; (void)mask;
+        out = RayHit{};
+        return false;
+    }
+
+    // Все тела, пересекающие сферу. Взрыв, зона подбора, «кто рядом» — это он.
+    // Возвращает число найденных (не больше вместимости out).
+    virtual int OverlapSphere(const glm::vec3& center, float radius,
+                              std::vector<BodyHandle>& out,
+                              LayerMask mask = kAllLayers) const {
+        (void)center; (void)radius; (void)mask;
+        out.clear();
+        return 0;
+    }
+
+    // Умеет ли бэкенд запросы (луч/сфера). Null — нет.
+    virtual bool SupportsQueries() const { return false; }
+
+    // --- События столкновений -----------------------------------------------
+    //
+    // Забирает события, накопленные с прошлого вызова, и очищает очередь.
+    // Опрос, а не колбэк: бэкенд зовёт свои обработчики из рабочих потоков
+    // посреди шага, и трогать оттуда сцену или скрипты нельзя.
+    virtual void PollContacts(std::vector<ContactEvent>& out) { out.clear(); }
+    virtual bool SupportsContacts() const { return false; }
+
+    // --- Контроллер персонажа -----------------------------------------------
+    //
+    // Почему не «динамическое тело в форме капсулы»: персонаж под управлением
+    // игрока физически неправдоподобен по замыслу — мгновенно меняет скорость,
+    // не опрокидывается, взбирается на ступеньку и держится на склоне, с
+    // которого бочка съехала бы. Из динамики это выжимается либо ватным
+    // управлением, либо телом, заваливающимся набок.
+    virtual CharacterHandle CreateCharacter(const CharacterDesc& desc) {
+        (void)desc;
+        return kInvalidCharacter;
+    }
+    virtual void RemoveCharacter(CharacterHandle character) { (void)character; }
+
+    // Двигает персонажа с заданной скоростью, разбираясь со стенами, ступенями
+    // и склонами. Скорость ЗАДАЁТСЯ, а не накапливается: тяготение, прыжок и
+    // ускорение — правила игры, а не физики, и держать их здесь значило бы
+    // навязывать всем одну модель движения.
+    virtual void MoveCharacter(CharacterHandle character, const glm::vec3& velocity, float dt) {
+        (void)character; (void)velocity; (void)dt;
+    }
+    virtual CharacterState GetCharacterState(CharacterHandle character) const {
+        (void)character;
+        return CharacterState{};
+    }
+    virtual void SetCharacterPosition(CharacterHandle character, const glm::vec3& position) {
+        (void)character; (void)position;
+    }
+    virtual bool SupportsCharacters() const { return false; }
 
     // Фабрика бэкенда. Если запрошен Jolt, но он не скомпилирован — вернёт
     // встроенный Simple (с предупреждением в лог), чтобы код не падал.

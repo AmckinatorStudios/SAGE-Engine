@@ -44,6 +44,8 @@ BodyHandle SimpleWorld::CreateBody(const BodyDesc& desc) {
     b.InvMass = (desc.Type == BodyType::Dynamic && desc.Mass > 0.0f) ? 1.0f / desc.Mass : 0.0f;
     b.Friction = desc.Friction;
     b.Restitution = desc.Restitution;
+    b.Layer = desc.Layer;
+    b.Sensor = desc.Sensor;
     BodyHandle h = m_next++;
     m_bodies[h] = b;
     return h;
@@ -100,7 +102,14 @@ void SimpleWorld::SubStep(float dt) {
             glm::vec3 delta = d.Position - s.Position;
             glm::vec3 sum = d.Half + s.Half;
             glm::vec3 overlap = sum - glm::abs(delta);
-            if (overlap.x <= 0.0f || overlap.y <= 0.0f || overlap.z <= 0.0f) continue;
+            if (overlap.x <= 0.0f || overlap.y <= 0.0f || overlap.z <= 0.0f) {
+                // Разошлись — если пара касалась, это событие «вышел».
+                NoteSeparated(hd, hs);
+                continue;
+            }
+            NoteTouching(hd, hs, d, s);
+            // Сенсор обнаруживает касание, но не отталкивает: он зона, а не стена.
+            if (s.Sensor || d.Sensor) continue;
 
             // Ось минимального проникновения — выталкиваем по ней.
             int axis = 0;
@@ -120,6 +129,106 @@ void SimpleWorld::SubStep(float dt) {
             }
         }
     }
+}
+
+
+// --- Запросы и события --------------------------------------------------------
+
+// Луч против AABB (slab-метод). Форма в этом бэкенде и так приближается
+// коробкой, так что луч ровно настолько же точен, насколько и вся его физика —
+// и это честнее, чем аккуратный луч по коробке, которая всё равно неточна.
+static bool RayVsAabb(const glm::vec3& o, const glm::vec3& d, const glm::vec3& mn,
+                      const glm::vec3& mx, float maxT, float& outT, glm::vec3& outN) {
+    float tmin = 0.0f, tmax = maxT;
+    int axis = 0;
+    float sign = 1.0f;
+    for (int i = 0; i < 3; ++i) {
+        if (std::abs(d[i]) < 1e-8f) {
+            // Луч параллелен паре плоскостей: либо внутри полосы, либо мимо.
+            if (o[i] < mn[i] || o[i] > mx[i]) return false;
+            continue;
+        }
+        const float inv = 1.0f / d[i];
+        float t1 = (mn[i] - o[i]) * inv;
+        float t2 = (mx[i] - o[i]) * inv;
+        float s = -1.0f;
+        if (t1 > t2) { std::swap(t1, t2); s = 1.0f; }
+        if (t1 > tmin) { tmin = t1; axis = i; sign = s; }
+        tmax = std::min(tmax, t2);
+        if (tmin > tmax) return false;
+    }
+    outT = tmin;
+    outN = glm::vec3(0.0f);
+    outN[axis] = sign;
+    return true;
+}
+
+bool SimpleWorld::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+                          RayHit& out, LayerMask mask) const {
+    out = RayHit{};
+    const float len = glm::length(direction);
+    if (len < 1e-6f || maxDistance <= 0.0f) return false;
+    const glm::vec3 dir = direction / len;
+
+    float best = maxDistance;
+    for (const auto& [h, b] : m_bodies) {
+        if (!b.Alive || (b.Layer & mask) == 0) continue;
+        float t = 0.0f;
+        glm::vec3 n(0.0f);
+        if (!RayVsAabb(origin, dir, b.Position - b.Half, b.Position + b.Half, best, t, n)) continue;
+        if (t >= best) continue;
+        best = t;
+        out.Hit = true;
+        out.Body = h;
+        out.Point = origin + dir * t;
+        out.Normal = n;
+        out.Distance = t;
+    }
+    return out.Hit;
+}
+
+int SimpleWorld::OverlapSphere(const glm::vec3& center, float radius, std::vector<BodyHandle>& out,
+                               LayerMask mask) const {
+    out.clear();
+    if (radius <= 0.0f) return 0;
+    for (const auto& [h, b] : m_bodies) {
+        if (!b.Alive || (b.Layer & mask) == 0) continue;
+        // Ближайшая точка коробки к центру сферы — классическая проверка
+        // сфера-AABB без корней до самого конца.
+        const glm::vec3 closest = glm::clamp(center, b.Position - b.Half, b.Position + b.Half);
+        const glm::vec3 d2 = closest - center;
+        if (glm::dot(d2, d2) <= radius * radius) out.push_back(h);
+    }
+    return (int)out.size();
+}
+
+void SimpleWorld::NoteTouching(BodyHandle a, BodyHandle b, const Body& ba, const Body& bb) {
+    const auto key = std::minmax(a, b);
+    if (!m_touching.insert(key).second) return;   // уже касались — не событие
+    ContactEvent e;
+    e.When = ContactEvent::Phase::Begin;
+    e.A = a;
+    e.B = b;
+    e.Point = (ba.Position + bb.Position) * 0.5f;
+    e.Normal = glm::normalize(bb.Position - ba.Position + glm::vec3(1e-6f));
+    e.Sensor = ba.Sensor || bb.Sensor;
+    e.Impulse = e.Sensor ? 0.0f : glm::length(ba.Velocity - bb.Velocity);
+    m_events.push_back(e);
+}
+
+void SimpleWorld::NoteSeparated(BodyHandle a, BodyHandle b) {
+    const auto key = std::minmax(a, b);
+    if (m_touching.erase(key) == 0) return;
+    ContactEvent e;
+    e.When = ContactEvent::Phase::End;
+    e.A = a;
+    e.B = b;
+    m_events.push_back(e);
+}
+
+void SimpleWorld::PollContacts(std::vector<ContactEvent>& out) {
+    out.swap(m_events);
+    m_events.clear();
 }
 
 void SimpleWorld::GetBodyTransform(BodyHandle body, glm::vec3& position, glm::quat& rotation) const {

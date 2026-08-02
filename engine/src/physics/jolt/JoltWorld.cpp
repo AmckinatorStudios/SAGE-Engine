@@ -13,6 +13,15 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/CollidePointResult.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+#include <mutex>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Constraints/FixedConstraint.h>
@@ -164,6 +173,244 @@ JPH::Vec3 PerpendicularTo(const JPH::Vec3& axis) {
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+//  Слушатель контактов
+// ---------------------------------------------------------------------------
+//
+// Jolt зовёт эти методы ИЗ РАБОЧИХ ПОТОКОВ посреди шага симуляции. Делать здесь
+// что-либо, кроме записи в защищённый буфер, нельзя: сцена в этот момент
+// принадлежит физике, а скрипты вообще однопоточные. Поэтому события только
+// копятся, а разбирает их главный поток в PollContacts.
+class JoltWorld::ContactCollector : public JPH::ContactListener {
+public:
+    explicit ContactCollector(JoltWorld* owner) : m_owner(owner) {}
+
+    void OnContactAdded(const JPH::Body& a, const JPH::Body& b,
+                        const JPH::ContactManifold& manifold,
+                        JPH::ContactSettings& settings) override {
+        (void)settings;
+        Push(a, b, manifold, ContactEvent::Phase::Begin);
+    }
+
+    void OnContactRemoved(const JPH::SubShapeIDPair& pair) override {
+        ContactEvent e;
+        e.When = ContactEvent::Phase::End;
+        e.A = m_owner->HandleOf(pair.GetBody1ID().GetIndexAndSequenceNumber());
+        e.B = m_owner->HandleOf(pair.GetBody2ID().GetIndexAndSequenceNumber());
+        if (e.A == kInvalidBody || e.B == kInvalidBody) return;  // тело уже удалили
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_events.push_back(e);
+    }
+
+    void Take(std::vector<ContactEvent>& out) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        out.swap(m_events);
+        m_events.clear();
+    }
+
+private:
+    void Push(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& manifold,
+              ContactEvent::Phase phase) {
+        ContactEvent e;
+        e.When = phase;
+        e.A = m_owner->HandleOf(a.GetID().GetIndexAndSequenceNumber());
+        e.B = m_owner->HandleOf(b.GetID().GetIndexAndSequenceNumber());
+        if (e.A == kInvalidBody || e.B == kInvalidBody) return;
+        const JPH::Vec3 p = manifold.GetWorldSpaceContactPointOn1(0);
+        e.Point = glm::vec3(p.GetX(), p.GetY(), p.GetZ());
+        const JPH::Vec3 n = manifold.mWorldSpaceNormal;
+        e.Normal = glm::vec3(n.GetX(), n.GetY(), n.GetZ());
+        e.Sensor = a.IsSensor() || b.IsSensor();
+        // Сила удара — по скорости сближения и массам. Точное значение импульса
+        // Jolt отдаёт только в OnContactPersisted следующего шага, а событие
+        // «врезался» нужно в тот же кадр: игра по нему играет звук и трясёт
+        // камеру, и опоздание на кадр слышно.
+        if (!e.Sensor) {
+            const JPH::Vec3 va = a.GetLinearVelocity();
+            const JPH::Vec3 vb = b.GetLinearVelocity();
+            const JPH::Vec3 rel = va - vb;
+            const float closing = std::abs(rel.Dot(manifold.mWorldSpaceNormal));
+            const float ma = a.GetMotionType() == JPH::EMotionType::Dynamic
+                                 ? 1.0f / std::max(a.GetMotionProperties()->GetInverseMass(), 1e-6f)
+                                 : 0.0f;
+            const float mb = b.GetMotionType() == JPH::EMotionType::Dynamic
+                                 ? 1.0f / std::max(b.GetMotionProperties()->GetInverseMass(), 1e-6f)
+                                 : 0.0f;
+            const float m = (ma > 0.0f && mb > 0.0f) ? (ma * mb) / (ma + mb) : std::max(ma, mb);
+            e.Impulse = closing * m;
+        }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        // Предохранитель: за шаг может случиться сколько угодно контактов, а
+        // очередь читает главный поток. Расти без предела ей нельзя — иначе
+        // куча песка на полу съедает память быстрее, чем игра успевает читать.
+        if (m_events.size() < 8192) m_events.push_back(e);
+    }
+
+    JoltWorld* m_owner;
+    std::vector<ContactEvent> m_events;
+    std::mutex m_mutex;
+};
+
+// Виртуальный контроллер персонажа Jolt плюс наши настройки.
+struct JoltWorld::CharacterEntry {
+    JPH::Ref<JPH::CharacterVirtual> Ptr;
+    LayerMask CollidesWith = kAllLayers;
+};
+
+BodyHandle JoltWorld::HandleOf(uint32_t joltId) const {
+    auto it = m_byJoltId.find(joltId);
+    return it == m_byJoltId.end() ? kInvalidBody : it->second;
+}
+
+LayerMask JoltWorld::LayerOf(BodyHandle body) const {
+    auto it = m_layers.find(body);
+    return it == m_layers.end() ? kLayerDefault : it->second;
+}
+
+// Фильтр тел по НАШЕЙ маске слоёв. Отдельный фильтр, а не проверка результата
+// постфактум: узкая фаза, отбросив тело сразу, не считает по нему пересечение,
+// а «ближайшее» в её ответе уже учитывает отбор — иначе пришлось бы повторять
+// запрос с обрезанной дальностью, пока не найдётся подходящее.
+namespace {
+class MaskBodyFilter : public JPH::BodyFilter {
+public:
+    MaskBodyFilter(const JoltWorld* world, LayerMask mask) : m_world(world), m_mask(mask) {}
+    bool ShouldCollideLocked(const JPH::Body& body) const override {
+        const BodyHandle h = m_world->HandleOf(body.GetID().GetIndexAndSequenceNumber());
+        return h != kInvalidBody && (m_world->LayerOf(h) & m_mask) != 0;
+    }
+
+private:
+    const JoltWorld* m_world;
+    LayerMask m_mask;
+};
+} // namespace
+
+bool JoltWorld::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+                        RayHit& out, LayerMask mask) const {
+    out = RayHit{};
+    if (!m_system) return false;
+    const float len = glm::length(direction);
+    if (len < 1e-6f || maxDistance <= 0.0f) return false;
+    const glm::vec3 dir = direction / len;
+
+    const JPH::RRayCast ray{
+        JPH::RVec3(origin.x, origin.y, origin.z),
+        JPH::Vec3(dir.x * maxDistance, dir.y * maxDistance, dir.z * maxDistance)};
+
+    JPH::RayCastResult hit;
+    const MaskBodyFilter filter(this, mask);
+    if (!m_system->GetNarrowPhaseQuery().CastRay(ray, hit, {}, {}, filter)) return false;
+
+    const BodyHandle handle = HandleOf(hit.mBodyID.GetIndexAndSequenceNumber());
+    if (handle == kInvalidBody) return false;
+
+    const JPH::RVec3 point = ray.GetPointOnRay(hit.mFraction);
+    out.Hit = true;
+    out.Body = handle;
+    out.Point = glm::vec3(point.GetX(), point.GetY(), point.GetZ());
+    out.Distance = hit.mFraction * maxDistance;
+    // Нормаль спрашиваем у тела под блокировкой: узкая фаза отдаёт только
+    // дескриптор подформы, а поверхность знает само тело в своей позе.
+    JPH::BodyLockRead lock(m_system->GetBodyLockInterface(), hit.mBodyID);
+    if (lock.Succeeded()) {
+        const JPH::Vec3 n = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point);
+        out.Normal = glm::vec3(n.GetX(), n.GetY(), n.GetZ());
+    }
+    return true;
+}
+
+int JoltWorld::OverlapSphere(const glm::vec3& center, float radius, std::vector<BodyHandle>& out,
+                             LayerMask mask) const {
+    out.clear();
+    if (!m_system || radius <= 0.0f) return 0;
+    JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> bodies;
+    m_system->GetBroadPhaseQuery().CollideSphere(JPH::Vec3(center.x, center.y, center.z), radius,
+                                                 bodies);
+    for (const JPH::BodyID& id : bodies.mHits) {
+        const BodyHandle handle = HandleOf(id.GetIndexAndSequenceNumber());
+        if (handle == kInvalidBody || (LayerOf(handle) & mask) == 0) continue;
+        out.push_back(handle);
+    }
+    return (int)out.size();
+}
+
+void JoltWorld::PollContacts(std::vector<ContactEvent>& out) {
+    out.clear();
+    if (m_contacts) m_contacts->Take(out);
+}
+
+CharacterHandle JoltWorld::CreateCharacter(const CharacterDesc& desc) {
+    if (!m_system) return kInvalidCharacter;
+    // Капсула стоит на земле нижней точкой, а начало координат Jolt держит в
+    // центре: поэтому форма поднимается на половину высоты. Иначе персонаж
+    // рождается по пояс в полу и первым же шагом выталкивается вверх.
+    const float halfCyl = std::max(0.05f, desc.Height * 0.5f - desc.Radius);
+    JPH::Ref<JPH::Shape> shape =
+        JPH::RotatedTranslatedShapeSettings(JPH::Vec3(0, halfCyl + desc.Radius, 0),
+                                            JPH::Quat::sIdentity(),
+                                            new JPH::CapsuleShape(halfCyl, desc.Radius))
+            .Create()
+            .Get();
+
+    JPH::Ref<JPH::CharacterVirtualSettings> settings = new JPH::CharacterVirtualSettings();
+    settings->mShape = shape;
+    settings->mMaxSlopeAngle = glm::radians(desc.MaxSlopeDeg);
+    settings->mMass = desc.Mass;
+    // Плоскость опоры чуть ниже подошвы: без неё контроллер «не видит» пол,
+    // когда стоит на нём вплотную, и считает себя в воздухе через кадр.
+    settings->mSupportingVolume = JPH::Plane(JPH::Vec3(0, 1, 0), -desc.Radius);
+
+    auto entry = std::make_unique<CharacterEntry>();
+    entry->CollidesWith = desc.CollidesWith;
+    entry->Ptr = new JPH::CharacterVirtual(
+        settings, JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
+        JPH::Quat::sIdentity(), m_system.get());
+
+    const CharacterHandle handle = m_nextCharacter++;
+    m_characters[handle] = std::move(entry);
+    return handle;
+}
+
+void JoltWorld::RemoveCharacter(CharacterHandle character) { m_characters.erase(character); }
+
+void JoltWorld::MoveCharacter(CharacterHandle character, const glm::vec3& velocity, float dt) {
+    auto it = m_characters.find(character);
+    if (it == m_characters.end() || !m_system || dt <= 0.0f) return;
+    JPH::CharacterVirtual* ch = it->second->Ptr;
+    ch->SetLinearVelocity(JPH::Vec3(velocity.x, velocity.y, velocity.z));
+
+    JPH::CharacterVirtual::ExtendedUpdateSettings upd;
+    // Шаг вверх/вниз — то, чем контроллер отличается от капсулы на пружине:
+    // на ступеньку он ВЗБИРАЕТСЯ, а не упирается и не подпрыгивает.
+    upd.mWalkStairsStepUp = JPH::Vec3(0, 0.35f, 0);
+    ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
+                       m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
+                       m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), {}, {}, *m_tempAllocator);
+}
+
+CharacterState JoltWorld::GetCharacterState(CharacterHandle character) const {
+    CharacterState st;
+    auto it = m_characters.find(character);
+    if (it == m_characters.end()) return st;
+    const JPH::CharacterVirtual* ch = it->second->Ptr;
+    const JPH::RVec3 p = ch->GetPosition();
+    const JPH::Vec3 v = ch->GetLinearVelocity();
+    const JPH::Vec3 n = ch->GetGroundNormal();
+    st.Position = glm::vec3(p.GetX(), p.GetY(), p.GetZ());
+    st.Velocity = glm::vec3(v.GetX(), v.GetY(), v.GetZ());
+    st.GroundNormal = glm::vec3(n.GetX(), n.GetY(), n.GetZ());
+    st.Grounded = ch->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround;
+    st.OnSteepSlope = ch->GetGroundState() == JPH::CharacterBase::EGroundState::OnSteepGround;
+    return st;
+}
+
+void JoltWorld::SetCharacterPosition(CharacterHandle character, const glm::vec3& position) {
+    auto it = m_characters.find(character);
+    if (it == m_characters.end()) return;
+    it->second->Ptr->SetPosition(JPH::RVec3(position.x, position.y, position.z));
+}
+
 JoltWorld::JoltWorld() {
     EnsureJoltGlobals();
 
@@ -184,6 +431,11 @@ JoltWorld::JoltWorld() {
     const JPH::uint kMaxContacts = 4096;
     m_system->Init(kMaxBodies, kNumBodyMutexes, kMaxBodyPairs, kMaxContacts,
                    *m_bpLayers, *m_objectVsBpFilter, *m_objectLayerFilter);
+
+    // Слушатель контактов ставится сразу: события копятся с первого же шага, и
+    // «включить их потом» значило бы потерять всё, что случилось до включения.
+    m_contacts = std::make_unique<ContactCollector>(this);
+    m_system->SetContactListener(m_contacts.get());
 }
 
 JoltWorld::~JoltWorld() {
@@ -194,10 +446,15 @@ JoltWorld::~JoltWorld() {
     m_joints.clear();
     // Тела удаляются вместе с PhysicsSystem. Глобальную фабрику Jolt намеренно
     // НЕ рушим — она разделяется всеми мирами на время жизни процесса.
+    // Персонажи держат ссылку на систему — снимаем их ДО неё.
+    m_characters.clear();
+    if (m_system) m_system->SetContactListener(nullptr);
     m_system.reset();
+    m_contacts.reset();
     m_jobSystem.reset();
     m_tempAllocator.reset();
 }
+
 
 void JoltWorld::SetGravity(const glm::vec3& gravity) {
     if (m_system) m_system->SetGravity(JPH::Vec3(gravity.x, gravity.y, gravity.z));
@@ -253,6 +510,11 @@ BodyHandle JoltWorld::CreateBody(const BodyDesc& desc) {
                                        motion, layer);
     settings.mFriction = desc.Friction;
     settings.mRestitution = desc.Restitution;
+    // Сенсор обнаруживает касание, но не отталкивает. Событие о нём приходит
+    // тем же PollContacts — игре незачем знать, зона это или стена, пока она
+    // не решит, что с этим делать.
+    settings.mIsSensor = desc.Sensor;
+    if (desc.Sensor) settings.mCollideKinematicVsNonDynamic = true;
     if (desc.Type == BodyType::Dynamic && desc.Mass > 0.0f) {
         settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
         settings.mMassPropertiesOverride.mMass = desc.Mass;
@@ -265,7 +527,10 @@ BodyHandle JoltWorld::CreateBody(const BodyDesc& desc) {
     if (id.IsInvalid()) return kInvalidBody;
 
     BodyHandle h = m_next++;
-    m_bodies[h] = id.GetIndexAndSequenceNumber();
+    const uint32_t joltId = id.GetIndexAndSequenceNumber();
+    m_bodies[h] = joltId;
+    m_byJoltId[joltId] = h;
+    m_layers[h] = desc.Layer;
     return h;
 }
 
@@ -276,6 +541,8 @@ void JoltWorld::RemoveBody(BodyHandle body) {
     JPH::BodyInterface& bi = m_system->GetBodyInterface();
     bi.RemoveBody(id);
     bi.DestroyBody(id);
+    m_byJoltId.erase(it->second);
+    m_layers.erase(body);
     m_bodies.erase(it);
 }
 

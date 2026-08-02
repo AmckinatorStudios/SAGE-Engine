@@ -241,6 +241,8 @@ static void SaveRigidBody(json& j, const RigidBodyComponent& rb) {
     j["rigidBody"]["mass"] = rb.Mass;
     j["rigidBody"]["friction"] = rb.Friction;
     j["rigidBody"]["restitution"] = rb.Restitution;
+    j["rigidBody"]["layer"] = (unsigned)rb.Layer;
+    j["rigidBody"]["sensor"] = rb.Sensor;
 }
 
 static RigidBodyComponent ParseRigidBody(const json& rj) {
@@ -252,6 +254,8 @@ static RigidBodyComponent ParseRigidBody(const json& rj) {
     rb.Mass = rj.value("mass", rb.Mass);
     rb.Friction = rj.value("friction", rb.Friction);
     rb.Restitution = rj.value("restitution", rb.Restitution);
+    rb.Layer = rj.value("layer", (unsigned)rb.Layer);
+    rb.Sensor = rj.value("sensor", rb.Sensor);
     return rb;
 }
 
@@ -363,6 +367,28 @@ static sage::render::ReflectionSettings ReflectionsFromJson(const json& root) {
 // Зонд отражений: сохраняется ЗАДАНИЕ (где, какой охват, какое разрешение), но
 // не снятая карта — она пересобирается из той же геометрии и того же неба, а
 // шесть картинок в проекте устаревали бы от любой правки уровня.
+// Контроллер персонажа: сохраняются размеры и правила ходьбы, но не сам
+// контроллер — он живёт в физическом мире и создаётся заново при запуске.
+static void SaveCharacter(json& j, const CharacterControllerComponent& c) {
+    j["character"]["radius"] = c.Radius;
+    j["character"]["height"] = c.Height;
+    j["character"]["stepHeight"] = c.StepHeight;
+    j["character"]["maxSlopeDeg"] = c.MaxSlopeDeg;
+    j["character"]["mass"] = c.Mass;
+    j["character"]["layer"] = (unsigned)c.Layer;
+}
+
+static CharacterControllerComponent ParseCharacter(const json& cj) {
+    CharacterControllerComponent c;
+    c.Radius = cj.value("radius", c.Radius);
+    c.Height = cj.value("height", c.Height);
+    c.StepHeight = cj.value("stepHeight", c.StepHeight);
+    c.MaxSlopeDeg = cj.value("maxSlopeDeg", c.MaxSlopeDeg);
+    c.Mass = cj.value("mass", c.Mass);
+    c.Layer = cj.value("layer", (unsigned)c.Layer);
+    return c;
+}
+
 static void SaveReflectionProbe(json& j, const ReflectionProbeComponent& p) {
     j["reflectionProbe"]["resolution"] = p.Resolution;
     j["reflectionProbe"]["boxHalfExtents"] = Vec3ToJson(p.BoxHalfExtents);
@@ -766,6 +792,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
         if (const ReflectionProbeComponent* rp = reg.try_get<ReflectionProbeComponent>(e))
             SaveReflectionProbe(j, *rp);
+        if (const CharacterControllerComponent* cc = reg.try_get<CharacterControllerComponent>(e))
+            SaveCharacter(j, *cc);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
         objectsJson.push_back(j);
@@ -832,6 +860,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
         if (j.contains("ik"))
             obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
+        if (j.contains("character"))
+            obj.Registry()->emplace<CharacterControllerComponent>(obj.Entity(),
+                                                                  ParseCharacter(j["character"]));
         if (j.contains("reflectionProbe"))
             obj.Registry()->emplace<ReflectionProbeComponent>(
                 obj.Entity(), ParseReflectionProbe(j["reflectionProbe"]));
