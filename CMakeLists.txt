@@ -224,9 +224,28 @@ if (SAGE_PHYSICS_JOLT)
     set(USE_AVX OFF CACHE BOOL "" FORCE)
     set(USE_F16C OFF CACHE BOOL "" FORCE)
     set(USE_FMADD OFF CACHE BOOL "" FORCE)
+    # Предупреждения Jolt НЕ должны быть ошибками.
+    #
+    # Jolt собирается с /W4 /WX (или -Wall -Werror), и это его право — но
+    # ломается на этом НАШ выпуск. Windows SDK 10.0.26100 выдаёт C4865 внутри
+    # СВОЕГО же wingdi.h, /WX превращает это в ошибку, и сборка для Windows
+    # падает целиком — на коде, которого нет ни в движке, ни в Jolt.
+    #
+    # Чужой код нам чинить нечем, а зависеть от того, что в следующей версии
+    # SDK предупреждение исчезнет, — значит снова остаться без сборки в самый
+    # неподходящий момент. Собственный код движка при этом продолжает собираться
+    # со своими предупреждениями: это послабление касается ТОЛЬКО зависимости.
+    set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(jolt)
     if (TARGET Jolt)
         message(STATUS "SAGE: физический бэкенд Jolt включён (v5.3.0)")
+        # На случай, если версия Jolt не знает про ENABLE_ALL_WARNINGS: снимаем
+        # флаг «предупреждения как ошибки» с самой цели.
+        if (MSVC)
+            target_compile_options(Jolt PRIVATE /WX-)
+        else()
+            target_compile_options(Jolt PRIVATE -Wno-error)
+        endif()
     else()
         message(WARNING "SAGE: Jolt запрошен, но цель не создана — собираю без него")
     endif()
