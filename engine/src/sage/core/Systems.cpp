@@ -9,7 +9,7 @@ const std::vector<SystemVersion>& EngineSystems() {
     // — от фундамента к прикладным системам (как их видит инженер движка).
     static const std::vector<SystemVersion> systems = {
         {"Core",           1, "Application/Layer/Window, главный цикл и тайминг"},
-        {"RHI",            1, "абстракция графики (OpenGL 3.3 бэкенд)"},
+        {"RHI",            1, "абстракция графики (бэкенды: OpenGL 3.3, Vulkan, Null)"},
         {"ECS / Scene",    1, "сущности+компоненты (entt), иерархия, мировые матрицы"},
         {"Serialization",  1, "сцены/материалы/конфиг в JSON (.sage/.sagemat/sage.cfg)"},
         {"Resources",      1, "кэш мешей/моделей/материалов/текстур"},

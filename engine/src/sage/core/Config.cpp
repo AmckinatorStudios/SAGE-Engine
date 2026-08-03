@@ -170,6 +170,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     RenderScale = disp.value("renderScale", RenderScale);
 
     auto gfx = j.value("graphics", json::object());
+    Backend          = gfx.value("backend", Backend);
     Shadows          = gfx.value("shadows", Shadows);
     ShadowResolution = gfx.value("shadowResolution", ShadowResolution);
     ShadowCascades = std::clamp(gfx.value("shadowCascades", ShadowCascades), 1, 4);
@@ -226,6 +227,7 @@ std::string EngineConfig::ToJsonString() const {
         {"aspect", AspectToStr(Aspect)}, {"renderScale", RenderScale},
     };
     j["graphics"] = {
+        {"backend", Backend},
         {"shadows", Shadows}, {"shadowResolution", ShadowResolution},
         {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
         {"occlusionCulling", OcclusionCulling},
@@ -286,6 +288,10 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_VSYNC")) VSync = EnvBool(v, VSync);
     if (const char* v = std::getenv("SAGE_FRAME_CAP")) FrameCap = std::atoi(v);
     if (const char* v = std::getenv("SAGE_MSAA")) Msaa = std::atoi(v);
+    // Графический бэкенд из окружения — то, чем переключают его в тестах и в
+    // отчёте об ошибке у игрока («запустите с SAGE_BACKEND=opengl»), не трогая
+    // файл настроек.
+    if (const char* v = std::getenv("SAGE_BACKEND")) Backend = v;
 
     // Дисплей
     if (const char* v = std::getenv("SAGE_ASPECT")) Aspect = AspectFromStr(v);

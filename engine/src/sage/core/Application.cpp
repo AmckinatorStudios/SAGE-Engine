@@ -13,6 +13,53 @@
 
 namespace sage {
 
+namespace {
+
+// Какой бэкенд действительно поднимать. Настройка приходит СТРОКОЙ — из
+// sage.cfg, из SAGE_BACKEND, в конечном счёте от человека, — и ошибиться в ней
+// можно тремя способами: опечататься, попросить бэкенд, которого нет в этой
+// сборке, и попросить тот, для которого на машине нет драйвера. Ни один из трёх
+// не должен мешать запуску: движок берёт OpenGL и говорит почему.
+//
+// Отказ запускаться из-за строчки в конфиге — самый дорогой из возможных
+// исходов. Человек, у которого игра перестала открываться после обновления
+// драйвера, не станет читать лог: он удалит игру.
+rhi::Backend ChooseBackend(const std::string& requested) {
+    rhi::Backend backend = rhi::Backend::OpenGL;
+    if (!rhi::GraphicsDevice::ParseBackend(requested, backend)) {
+        LOG_WARN("RHI") << "неизвестный графический бэкенд '" << requested
+                        << "' — беру OpenGL (доступны: opengl, vulkan, null)";
+        return rhi::Backend::OpenGL;
+    }
+    if (backend == rhi::Backend::OpenGL) return backend;
+
+    if (!rhi::GraphicsDevice::Available(backend)) {
+        LOG_WARN("RHI") << "бэкенд " << rhi::GraphicsDevice::BackendId(backend)
+                        << " на этой машине недоступен (нет драйвера или сборка без него)"
+                           " — беру OpenGL";
+        return rhi::Backend::OpenGL;
+    }
+
+    // Vulkan-бэкенд ЕЩЁ НЕ ДОДЕЛАН: устройство поднимается, ресурсы — нет.
+    // Пока это так, он берётся только по явной просьбе, а обычный выбор в
+    // настройках откатывается на OpenGL с объяснением.
+    //
+    // Гейт стоит здесь, а не в Available(): «Vulkan на машине есть» и «наш
+    // Vulkan умеет рисовать» — разные утверждения, и подменять первое вторым
+    // значило бы соврать в диагностике. Снимается вместе с последним этапом
+    // бэкенда — тогда же уходит и эта ветка.
+    if (backend == rhi::Backend::Vulkan && !std::getenv("SAGE_VULKAN_EXPERIMENTAL")) {
+        LOG_WARN("RHI") << "бэкенд vulkan в этой сборке ещё не доделан (нет ресурсов и "
+                           "конвейеров) — беру OpenGL. Принудительно: SAGE_VULKAN_EXPERIMENTAL=1";
+        return rhi::Backend::OpenGL;
+    }
+
+    LOG_INFO("RHI") << "графический бэкенд: " << rhi::GraphicsDevice::BackendId(backend);
+    return backend;
+}
+
+} // namespace
+
 Application* Application::s_instance = nullptr;
 
 Application::Application(const AppConfig& config) : m_config(config) {
@@ -32,7 +79,7 @@ Application::Application(const AppConfig& config) : m_config(config) {
     wp.Msaa = config.Msaa;
     m_window = std::make_unique<Window>(config.Width, config.Height, config.Title, wp);
 
-    m_device = rhi::GraphicsDevice::Create(rhi::Backend::OpenGL);
+    m_device = rhi::GraphicsDevice::Create(ChooseBackend(config.Backend));
     m_device->Init(reinterpret_cast<rhi::ProcLoader>(glfwGetProcAddress));
     // Реальный размер окна может отличаться от запрошенного (fullscreen/borderless
     // берут разрешение монитора) — берём фактический.

@@ -157,6 +157,23 @@ if (TARGET Jolt)
     target_link_libraries(sage_engine PRIVATE Jolt)
 endif()
 
+# Графический бэкенд Vulkan (второй, рядом с OpenGL) — по той же схеме, что и
+# Jolt: подключается, только если верхний уровень создал цель volk (option
+# SAGE_VULKAN). SAGE_HAS_VULKAN включает ветку в фабрике GraphicsDevice::Create;
+# всё, что знает про Vulkan, изолировано в src/rhi/vulkan/.
+#
+# PRIVATE, а не PUBLIC: заголовки Vulkan не должны протекать ни в игры, ни в
+# редактор. Внешний мир видит только rhi::Backend::Vulkan — перечисление без
+# единого типа из vulkan.h.
+if (TARGET volk)
+    target_sources(sage_engine PRIVATE
+        src/rhi/vulkan/VulkanCommon.cpp
+        src/rhi/vulkan/VulkanDevice.cpp
+    )
+    target_compile_definitions(sage_engine PRIVATE SAGE_HAS_VULKAN)
+    target_link_libraries(sage_engine PRIVATE volk)
+endif()
+
 if (WIN32)
     # dbghelp — символы в стеке вызовов отчёта о падении (CrashHandler).
     target_link_libraries(sage_engine PUBLIC opengl32 dbghelp)

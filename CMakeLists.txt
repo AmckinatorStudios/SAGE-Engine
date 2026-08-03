@@ -256,6 +256,52 @@ add_library(imguizmo STATIC external/imguizmo/ImGuizmo.cpp)
 target_include_directories(imguizmo PUBLIC external/imguizmo)
 target_link_libraries(imguizmo PUBLIC imgui)
 
+# ---------- Vulkan (второй графический бэкенд) ----------
+#
+# НИ SDK, НИ БИБЛИОТЕКИ ДЛЯ ЛИНКОВКИ НЕ ТРЕБУЕТСЯ, и это принципиально. Обычный
+# путь — find_package(Vulkan) и линковка с vulkan-1.lib из LunarG SDK — означал
+# бы, что собрать движок нельзя без установки полутора гигабайт стороннего
+# пакета. Вместо этого:
+#
+#   • заголовки берём у Khronos напрямую (header-only, ~2 МБ);
+#   • сам загрузчик (vulkan-1.dll / libvulkan.so.1) открываем в РАНТАЙМЕ через
+#     volk. Тогда бинарник запускается и на машине без Vulkan вообще — просто
+#     сообщает, что бэкенд недоступен, и откатывается на OpenGL, вместо отказа
+#     запускаться с «не найден vulkan-1.dll».
+#
+# Выключается -DSAGE_VULKAN=OFF: сборка без сети и окружения, где второй бэкенд
+# не нужен, не должны за него платить.
+option(SAGE_VULKAN "Собрать графический бэкенд Vulkan (второй, рядом с OpenGL)" ON)
+if (SAGE_VULKAN)
+    FetchContent_Declare(
+      vulkan_headers
+      GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+      GIT_TAG v1.3.290
+    )
+    FetchContent_MakeAvailable(vulkan_headers)
+
+    # volk — загрузчик точек входа Vulkan (MIT, два файла). Берём только
+    # исходники и компилируем сами: свой CMake volk'а ищет SDK, который мы как
+    # раз и не хотим требовать.
+    FetchContent_Declare(
+      volk_src
+      GIT_REPOSITORY https://github.com/zeux/volk.git
+      GIT_TAG 1.3.270
+      SOURCE_SUBDIR do-not-configure-volk
+    )
+    FetchContent_MakeAvailable(volk_src)
+    add_library(volk STATIC ${volk_src_SOURCE_DIR}/volk.c)
+    target_include_directories(volk PUBLIC ${volk_src_SOURCE_DIR})
+    target_link_libraries(volk PUBLIC Vulkan-Headers)
+    if (WIN32)
+        target_compile_definitions(volk PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+    endif()
+    if (UNIX AND NOT APPLE)
+        target_compile_definitions(volk PUBLIC VK_USE_PLATFORM_XLIB_KHR)
+        target_link_libraries(volk PUBLIC ${CMAKE_DL_LIBS})
+    endif()
+endif()
+
 # ---------- Jolt Physics (основной физический бэкенд) ----------
 # Физика движка — подключаемая (см. sage/physics/PhysicsWorld.h): встроенный
 # Simple-бэкенд работает всегда без зависимостей, а Jolt — основной, «взрослый»

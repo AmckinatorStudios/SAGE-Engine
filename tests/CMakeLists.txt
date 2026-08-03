@@ -27,6 +27,7 @@ add_executable(sage_tests
     test_import.cpp
     test_modelmaterial.cpp
     test_texformat.cpp
+    test_rhi.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

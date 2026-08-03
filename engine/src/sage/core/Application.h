@@ -12,6 +12,11 @@ namespace sage {
 // Начальная конфигурация приложения — то, что нужно движку до создания окна.
 // Оконные параметры удобно заполнять из EngineConfig (см. FromEngineConfig).
 struct AppConfig {
+    // Желаемый графический бэкенд ("opengl"/"vulkan"/"null"). Строка, а не
+    // enum: сюда она приходит из настроек, а сверка со списком бэкендов —
+    // забота RHI. Недоступный бэкенд не мешает запуску, движок берёт OpenGL.
+    std::string Backend = "opengl";
+
     int Width = 1280;
     int Height = 720;
     std::string Title = "SAGE Engine";
@@ -33,6 +38,7 @@ struct AppConfig {
         a.Width = cfg.Width; a.Height = cfg.Height; a.Title = cfg.Title;
         a.Mode = cfg.Mode; a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
         a.FrameCap = cfg.FrameCap; a.Msaa = cfg.Msaa;
+        a.Backend = cfg.Backend;
         a.WorkerThreads = cfg.WorkerThreads; a.MultithreadedRender = cfg.MultithreadedRender;
         return a;
     }

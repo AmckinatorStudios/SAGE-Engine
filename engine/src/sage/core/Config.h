@@ -35,6 +35,19 @@ enum class AspectMode { Free, R16x9, R16x10, R4x3, R21x9 };
 enum class QualityPreset { Low, Medium, High, Ultra };
 
 struct EngineConfig {
+    // --- Графический бэкенд ---
+    //
+    // "opengl" (по умолчанию), "vulkan" или "null". Строкой, а не
+    // перечислением: EngineConfig читается из sage.cfg и пишется обратно, и
+    // список бэкендов принадлежит RHI (sage::rhi::GraphicsDevice::ParseBackend),
+    // а не настройкам. Дублировать enum здесь значило бы завести второе место,
+    // которое надо не забыть дописать.
+    //
+    // Недоступный бэкенд НЕ является ошибкой запуска: Application спрашивает
+    // rhi::GraphicsDevice::Available и молча берёт OpenGL. Игрок, у которого нет
+    // драйвера Vulkan, должен получить игру, а не окно с сообщением.
+    std::string Backend = "opengl";
+
     // --- Окно ---
     int Width = 1280;
     int Height = 720;
