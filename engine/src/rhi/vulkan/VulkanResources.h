@@ -1,0 +1,113 @@
+#pragma once
+#include "VulkanDevice.h"
+#include "VulkanImage.h"
+#include "sage/rhi/Resources.h"
+
+// ---------------------------------------------------------------------------
+// RHI-ресурсы на Vulkan: текстуры и рендер-таргеты.
+//
+// ЧТО ЗДЕСЬ ОТЛИЧАЕТСЯ ОТ OpenGL ПО СУЩЕСТВУ, а не по синтаксису:
+//
+//   • Трёхканальных форматов практически нет. VK_FORMAT_R8G8B8_UNORM на
+//     большинстве устройств не поддерживается вовсе, поэтому RGB расширяется до
+//     RGBA при загрузке. В GL это делал драйвер молча.
+//
+//   • Параметры фильтрации — не свойство текстуры, а отдельный объект
+//     (VkSampler). Кэш живёт в устройстве: одинаковых сочетаний на всю сцену
+//     единицы, а сэмплер на текстуру упёрся бы в maxSamplerAllocationCount.
+//
+//   • У рендер-таргета есть VkRenderPass — описание того, что происходит с
+//     вложениями в начале и конце прохода. В GL этого понятия нет: там просто
+//     привязывают FBO. Проход создаётся один раз вместе с таргетом.
+//
+//   • Начало отсчёта по вертикали у Vulkan СВЕРХУ, а RHI договорился о нижнем
+//     (см. GraphicsDevice.h). Пересчёт — обязанность бэкенда, и делается он в
+//     одном месте: при выставлении viewport/scissor через отрицательную высоту
+//     viewport'а (VK_KHR_maintenance1, ядро с 1.1).
+// ---------------------------------------------------------------------------
+namespace sage::rhi {
+
+// Формат и число байт на пиксель для описания текстуры. Возвращает false, если
+// такое сочетание каналов не поддерживается.
+bool PixelFormatFor(int channels, bool floatPixels, VkFormat& format, int& bytesPerPixel,
+                    bool& needsExpandToRgba);
+
+class VulkanTexture2D final : public Texture2D {
+public:
+    VulkanTexture2D(VulkanDevice& device, const Texture2DDesc& desc, const void* pixels);
+    ~VulkanTexture2D() override;
+
+    void Bind(int unit) const override;
+    TextureHandle Handle() const override { return m_handle; }
+    // Для ImGui. У Vulkan «нативный хендл» текстуры — это VkDescriptorSet,
+    // которого без бэкенда ImGui ещё нет. Отдаём значение нашего хендла: оно
+    // ненулевое (этого требует набор соответствия) и осмысленно внутри бэкенда.
+    uint64_t NativeHandle() const override { return m_handle.Value; }
+
+private:
+    VulkanDevice& m_device;
+    VulkanImage m_image;
+    TextureHandle m_handle{};
+};
+
+class VulkanTexture3D final : public Texture3D {
+public:
+    VulkanTexture3D(VulkanDevice& device, const Texture3DDesc& desc, const float* pixels);
+    ~VulkanTexture3D() override;
+    void Bind(int unit) const override;
+
+private:
+    VulkanDevice& m_device;
+    VulkanImage m_image;
+    TextureHandle m_handle{};
+};
+
+class VulkanTextureCube final : public TextureCube {
+public:
+    VulkanTextureCube(VulkanDevice& device, const CubeFacePixels faces[6]);
+    ~VulkanTextureCube() override;
+    void Bind(int unit) const override;
+
+private:
+    VulkanDevice& m_device;
+    VulkanImage m_image;
+    TextureHandle m_handle{};
+};
+
+class VulkanRenderTarget final : public RenderTarget {
+public:
+    VulkanRenderTarget(VulkanDevice& device, const RenderTargetDesc& desc);
+    ~VulkanRenderTarget() override;
+
+    void Bind() const override;
+    void Resize(int width, int height) override;
+    void Resolve() override;
+    int Samples() const override { return m_samples; }
+    int Width() const override { return m_width; }
+    int Height() const override { return m_height; }
+    TextureHandle ColorTextureHandle() const override { return m_colorHandle; }
+    TextureHandle DepthTextureHandle() const override { return m_depthHandle; }
+    uint64_t NativeColorHandle() const override { return m_colorHandle.Value; }
+
+    VkRenderPass Pass() const { return m_pass; }
+    VkFramebuffer Framebuffer() const { return m_framebuffer; }
+
+private:
+    bool CreateStorage();
+    void DestroyStorage();
+
+    VulkanDevice& m_device;
+    RenderTargetKind m_kind = RenderTargetKind::ColorHDRWithDepth;
+    int m_width = 0, m_height = 0, m_samples = 1;
+
+    VulkanImage m_color;        // однократный цвет (или приёмник разрешения MSAA)
+    VulkanImage m_depth;
+    VulkanImage m_colorMs;      // многосэмпловый цвет — рисуют СЮДА
+    VulkanImage m_depthMs;
+    VkRenderPass m_pass = VK_NULL_HANDLE;
+    VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
+    TextureHandle m_colorHandle{};
+    TextureHandle m_depthHandle{};
+};
+
+} // namespace sage::rhi

@@ -2,6 +2,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "VulkanCommon.h"
@@ -46,6 +47,11 @@
 struct VmaAllocator_T;
 
 namespace sage::rhi {
+
+// Объявление НА УРОВНЕ ПРОСТРАНСТВА ИМЁН, а не внутри класса: `class X;` в теле
+// класса объявляет ВЛОЖЕННЫЙ тип VulkanDevice::X, и дальше всё разъезжается —
+// метод принимает один тип, а фабрика возвращает другой с тем же именем.
+class VulkanRenderTarget;
 
 class VulkanDevice final : public GraphicsDevice {
 public:
@@ -109,6 +115,49 @@ public:
     // Медленно по определению — только для инициализации ресурсов, не для кадра.
     void SubmitImmediate(const std::function<void(VkCommandBuffer)>& record);
 
+    // --- Сэмплеры ----------------------------------------------------------
+    //
+    // В OpenGL параметры фильтрации живут В ТЕКСТУРЕ; в Vulkan это отдельный
+    // объект, и одинаковых сочетаний на всю сцену — единицы. Кэшируем: сэмплер
+    // на текстуру означал бы тысячи одинаковых объектов и упор в
+    // maxSamplerAllocationCount (на части устройств он всего 4000).
+    struct SamplerKey {
+        Filter FilterMode = Filter::Trilinear;
+        Wrap WrapMode = Wrap::Repeat;
+        bool Mips = true;
+        // Белая рамка за границей — карта теней: вне покрытия «освещено»
+        // (см. RenderTargetKind::DepthOnly в GL-бэкенде).
+        bool WhiteBorder = false;
+        bool operator==(const SamplerKey& o) const {
+            return FilterMode == o.FilterMode && WrapMode == o.WrapMode && Mips == o.Mips &&
+                   WhiteBorder == o.WhiteBorder;
+        }
+    };
+    VkSampler SamplerFor(const SamplerKey& key);
+
+    // --- Реестр текстурных хендлов -----------------------------------------
+    //
+    // RHI отдаёт наружу непрозрачный 64-битный TextureHandle, а Vulkan для
+    // выборки нужна ПАРА (представление, сэмплер). Указатель на объект в
+    // хендле не годится: хендлы переживают свои текстуры (кадр опаздывает на
+    // два), и разыменование мёртвого указателя — это падение вместо чёрного
+    // квадрата. Счётчик с таблицей даёт то же самое, но промах по нему —
+    // просто «текстуры нет».
+    struct TextureBinding {
+        VkImageView View = VK_NULL_HANDLE;
+        VkSampler Sampler = VK_NULL_HANDLE;
+    };
+    TextureHandle RegisterTexture(VkImageView view, VkSampler sampler);
+    void UpdateTexture(TextureHandle handle, VkImageView view, VkSampler sampler);
+    void UnregisterTexture(TextureHandle handle);
+    const TextureBinding* LookupTexture(TextureHandle handle) const;
+
+    // Текущая цель отрисовки. Пока это только запоминание: открытие прохода и
+    // запись команд появятся вместе с конвейерами. Отдельный метод, а не
+    // публичное поле, потому что вместе с проходом сюда переедет закрытие
+    // предыдущего — и вызывающим об этом знать не нужно.
+    void BindRenderTarget(const VulkanRenderTarget* target);
+
 private:
     // Всё состояние конвейера, которое движок задаёт сеттерами. Ключ кэша
     // конвейеров: одинаковое состояние + одинаковый шейдер = один VkPipeline.
@@ -137,6 +186,27 @@ private:
     VkPhysicalDeviceMemoryProperties m_memProps{};
     VkDebugUtilsMessengerEXT m_debug = VK_NULL_HANDLE;
     ::VmaAllocator_T* m_allocator = nullptr;
+
+    struct SamplerKeyHash {
+        size_t operator()(const SamplerKey& k) const {
+            return ((size_t)k.FilterMode << 3) ^ ((size_t)k.WrapMode << 2) ^ ((size_t)k.Mips << 1) ^
+                   (size_t)k.WhiteBorder;
+        }
+    };
+    std::unordered_map<SamplerKey, VkSampler, SamplerKeyHash> m_samplers;
+    std::unordered_map<uint64_t, TextureBinding> m_textures;
+    uint64_t m_nextTextureHandle = 1; // 0 зарезервирован под «невалидный»
+
+    const VulkanRenderTarget* m_target = nullptr;
+
+    // Что привязано к текстурным юнитам. В OpenGL это состояние держал драйвер;
+    // в Vulkan привязка живёт в наборе дескрипторов, который собирается в
+    // момент отрисовки — значит до тех пор её надо где-то помнить.
+    //
+    // 16 юнитов — минимум, гарантированный спецификацией GL 3.3
+    // (GL_MAX_TEXTURE_IMAGE_UNITS), и движок больше не использует.
+    static constexpr int kMaxTextureUnits = 16;
+    TextureHandle m_boundTextures[kMaxTextureUnits]{};
 
     State m_state;
     float m_clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};

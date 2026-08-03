@@ -10,10 +10,12 @@
 #include "TestFramework.h"
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <string>
 
+#include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
 
 using sage::rhi::Backend;
@@ -86,4 +88,39 @@ TEST(Rhi_vulkan_availability_matches_what_the_device_can_do) {
     CHECK_TRUE(version.size() > 8);
     CHECK_TRUE(std::isdigit((unsigned char)version[7]) != 0);
     CHECK_TRUE(dev->MaxAnisotropy() >= 1.0f);
+}
+
+// Набор соответствия RHI на Vulkan — тот же исполняемый контракт, который
+// проходят Null и OpenGL. Это и есть настоящая приёмка бэкенда: пока
+// реализация одна, «интерфейс» и «то, что делает OpenGL» неразличимы, и только
+// второй бэкенд, прошедший тот же набор, превращает абстракцию из гипотезы в
+// абстракцию.
+//
+// Уровень структурный: хендлы, дескрипторы, времена жизни, безопасность вызовов
+// с невалидным аргументом. Пиксельный (соглашения о системе координат)
+// требует отрисовки — она появится вместе с конвейерами, и тогда Rasterizes
+// станет true.
+TEST(Rhi_vulkan_passes_the_structural_conformance_suite) {
+    if (!GraphicsDevice::Available(Backend::Vulkan)) return; // нет драйвера — нечего проверять
+
+    std::unique_ptr<GraphicsDevice> dev = GraphicsDevice::Create(Backend::Vulkan);
+    CHECK_TRUE(dev != nullptr);
+    dev->Init(nullptr);
+
+    sage::rhi::ConformanceOptions options;
+    options.Rasterizes = false;
+    const sage::rhi::ConformanceResult result = sage::rhi::RunConformance(*dev, options);
+
+    // Каждый провал печатается отдельно: «набор не прошёл» без списка означало
+    // бы читать код набора, чтобы понять, что именно сломано.
+    for (const std::string& failure : result.Failures) {
+        ::sagetest::ReportFail(__FILE__, __LINE__, "соответствие RHI (Vulkan): " + failure);
+    }
+    CHECK_TRUE(result.Ok());
+    // Порог, а не «больше нуля»: набор, который молча пропустил почти всё,
+    // выглядел бы пройденным. Столько проверок структурного уровня он делает
+    // на Null-бэкенде — значит и Vulkan обязан пройти не меньше.
+    CHECK_TRUE(result.Checked >= 15);
+    std::printf("      (соответствие RHI на Vulkan: проверок %d, пропущено %d)\n",
+                result.Checked, result.Skipped);
 }

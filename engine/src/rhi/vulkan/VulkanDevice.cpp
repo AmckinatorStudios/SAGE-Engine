@@ -1,5 +1,6 @@
 #include "VulkanDevice.h"
 #include "VulkanMemory.h"
+#include "VulkanResources.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -105,6 +106,8 @@ VulkanDevice::~VulkanDevice() {
         vkDeviceWaitIdle(m_device);
         // Распределитель — ПОСЛЕ всех ресурсов и ДО устройства: он держит
         // выделения, а они принадлежат устройству.
+        for (auto& [key, sampler] : m_samplers) vkDestroySampler(m_device, sampler, nullptr);
+        m_samplers.clear();
         DestroyAllocator(m_allocator);
         m_allocator = nullptr;
         if (m_pool != VK_NULL_HANDLE) vkDestroyCommandPool(m_device, m_pool, nullptr);
@@ -358,6 +361,74 @@ void VulkanDevice::SubmitImmediate(const std::function<void(VkCommandBuffer)>& r
     vkFreeCommandBuffers(m_device, m_pool, 1, &cmd);
 }
 
+// --- Сэмплеры и реестр текстур ------------------------------------------------
+
+VkSampler VulkanDevice::SamplerFor(const SamplerKey& key) {
+    auto it = m_samplers.find(key);
+    if (it != m_samplers.end()) return it->second;
+
+    VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    const bool nearest = key.FilterMode == Filter::Nearest;
+    info.magFilter = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    info.minFilter = info.magFilter;
+    // Trilinear и Anisotropic отличаются от Bilinear именно интерполяцией МЕЖДУ
+    // мипами; без мипов разницы нет, и просить её было бы враньём.
+    const bool between = key.Mips && (key.FilterMode == Filter::Trilinear ||
+                                      key.FilterMode == Filter::Anisotropic);
+    info.mipmapMode = between ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    const VkSamplerAddressMode address =
+        key.WhiteBorder ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+                        : (key.WrapMode == Wrap::ClampEdge ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+                                                           : VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    info.addressModeU = info.addressModeV = info.addressModeW = address;
+    info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    info.maxLod = key.Mips ? VK_LOD_CLAMP_NONE : 0.0f;
+    if (key.FilterMode == Filter::Anisotropic && m_maxAnisotropy > 1.0f) {
+        info.anisotropyEnable = VK_TRUE;
+        info.maxAnisotropy = m_maxAnisotropy;
+    }
+
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreateSampler(m_device, &info, nullptr, &sampler), "vkCreateSampler")) {
+        return VK_NULL_HANDLE;
+    }
+    m_samplers.emplace(key, sampler);
+    return sampler;
+}
+
+TextureHandle VulkanDevice::RegisterTexture(VkImageView view, VkSampler sampler) {
+    const uint64_t id = m_nextTextureHandle++;
+    m_textures[id] = TextureBinding{view, sampler};
+    return TextureHandle{id};
+}
+
+void VulkanDevice::UpdateTexture(TextureHandle handle, VkImageView view, VkSampler sampler) {
+    auto it = m_textures.find(handle.Value);
+    if (it != m_textures.end()) it->second = TextureBinding{view, sampler};
+}
+
+void VulkanDevice::UnregisterTexture(TextureHandle handle) {
+    m_textures.erase(handle.Value);
+}
+
+const VulkanDevice::TextureBinding* VulkanDevice::LookupTexture(TextureHandle handle) const {
+    auto it = m_textures.find(handle.Value);
+    return it == m_textures.end() ? nullptr : &it->second;
+}
+
+void VulkanDevice::BindTexture2D(int unit, TextureHandle texture) {
+    if (unit < 0 || unit >= kMaxTextureUnits) return;
+    // Невалидный хендл — «отвязать», ровно как договорился RHI. Молча
+    // игнорировать его нельзя: тогда в юните остался бы прошлый кадр, и на
+    // экране появилась бы чужая текстура вместо честно пустого места.
+    m_boundTextures[unit] = texture.Valid() && LookupTexture(texture) ? texture : TextureHandle{};
+}
+
+void VulkanDevice::BindRenderTarget(const VulkanRenderTarget* target) {
+    m_target = target;
+    if (target) SetViewport(0, 0, target->Width(), target->Height());
+}
+
 // --- Состояние ---------------------------------------------------------------
 
 void VulkanDevice::SetViewport(int x, int y, int width, int height) {
@@ -394,7 +465,7 @@ void OnceNotImplemented(const char* what) {
 
 void VulkanDevice::Clear(bool, bool) { OnceNotImplemented("Clear"); }
 void VulkanDevice::BindDefaultFramebuffer() { OnceNotImplemented("BindDefaultFramebuffer"); }
-void VulkanDevice::BindTexture2D(int, TextureHandle) { OnceNotImplemented("BindTexture2D"); }
+
 
 void VulkanDevice::ReadPixelsRGB(int, int, int width, int height, unsigned char* out) {
     OnceNotImplemented("ReadPixelsRGB");
@@ -409,21 +480,23 @@ std::unique_ptr<Geometry> VulkanDevice::CreateGeometry(const VertexLayout&) {
     OnceNotImplemented("CreateGeometry");
     return nullptr;
 }
-std::unique_ptr<Texture2D> VulkanDevice::CreateTexture2D(const Texture2DDesc&, const void*) {
-    OnceNotImplemented("CreateTexture2D");
-    return nullptr;
+std::unique_ptr<Texture2D> VulkanDevice::CreateTexture2D(const Texture2DDesc& desc,
+                                                         const void* pixels) {
+    if (!Ready()) return nullptr;
+    return std::make_unique<VulkanTexture2D>(*this, desc, pixels);
 }
-std::unique_ptr<Texture3D> VulkanDevice::CreateTexture3D(const Texture3DDesc&, const float*) {
-    OnceNotImplemented("CreateTexture3D");
-    return nullptr;
+std::unique_ptr<Texture3D> VulkanDevice::CreateTexture3D(const Texture3DDesc& desc,
+                                                         const float* pixels) {
+    if (!Ready()) return nullptr;
+    return std::make_unique<VulkanTexture3D>(*this, desc, pixels);
 }
-std::unique_ptr<TextureCube> VulkanDevice::CreateTextureCube(const CubeFacePixels[6]) {
-    OnceNotImplemented("CreateTextureCube");
-    return nullptr;
+std::unique_ptr<TextureCube> VulkanDevice::CreateTextureCube(const CubeFacePixels faces[6]) {
+    if (!Ready()) return nullptr;
+    return std::make_unique<VulkanTextureCube>(*this, faces);
 }
-std::unique_ptr<RenderTarget> VulkanDevice::CreateRenderTarget(const RenderTargetDesc&) {
-    OnceNotImplemented("CreateRenderTarget");
-    return nullptr;
+std::unique_ptr<RenderTarget> VulkanDevice::CreateRenderTarget(const RenderTargetDesc& desc) {
+    if (!Ready()) return nullptr;
+    return std::make_unique<VulkanRenderTarget>(*this, desc);
 }
 
 } // namespace sage::rhi
