@@ -200,29 +200,27 @@ float ShadowPCF(sampler2D map, vec3 pc, float ndl, float rotation, float baseBia
 //
 // В мире же нормаль есть нормаль: отступаем от поверхности на размер текселя
 // ЭТОГО каскада (в метрах) и только потом проецируем.
-// footprint — размер одного ЭКРАННОГО пикселя в мире (см. CalcSunShadow).
+// БЕЗ ПРОИЗВОДНЫХ (dFdx/dFdy/fwidth). Здесь стоял размер экранного пикселя в
+// мире — length(fwidth(worldPos)), — чтобы у горизонта, где один пиксель
+// накрывает десятки текселей карты, отступать на большую неопределённость. Идея
+// верная, место негодное: CalcSunShadow вызывается из тернарника
+// `uShadowsEnabled ? … : 0.0`, и хотя условие однородное, компилятор вправе
+// собрать его настоящей ВЕТКОЙ — а производные внутри ветвления спецификация
+// объявляет неопределёнными. На программном растеризаторе (и в эталонных кадрах
+// CI) это работало, на настоящей видеокарте вернуло мусор: NaN уезжал в тень,
+// оттуда в яркость, ACES зажимал NaN в ноль — и ВСЯ освещённая геометрия
+// становилась чёрной. Небо и сетка при этом рисовались, потому что идут мимо
+// PBR: ровно та картинка, которую видно на скриншоте.
 //
-// Он здесь не для красоты. Пол, уходящий к горизонту, виден под скользящим
-// углом: ближе к горизонту один пиксель экрана накрывает не долю текселя карты,
-// а десятки текселей, и записанная в них глубина разбегается на всю эту
-// ширину. Отступа «на полтора текселя» там не хватает никак — по дальней
-// половине пола идёт мелкая рябь самозатенения, тем гуще, чем дальше. Раньше её
-// прятала фильтрация (сетка 3x3, каждый тап билинейный — сорок текселей
-// усреднения), но прятала вместе с самой тенью: за мягкость платили и тем, и
-// другим. Честный ответ — отступать на ту неопределённость, которая
-// действительно есть в этой точке кадра.
-vec3 CascadeCoords(int cascade, vec3 worldPos, vec3 normal, float ndl, float footprint) {
+// Отступ считается от размера текселя каскада — величины, известной на стороне
+// процессора. Скользящий угол закрывает запас по глубине (uShadowDepthBias), он
+// тоже считается из текселя и диапазона ортобокса.
+vec3 CascadeCoords(int cascade, vec3 worldPos, vec3 normal, float ndl) {
     float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
-    float texel = uShadowTexelWorld[cascade];
     // Множитель 1.5 к радиусу фильтра — это диагональ квадрата текселя
     // (sqrt(2), с запасом): крайний тап диска может уйти по диагонали, и
     // отступ обязан перекрывать именно её, а не сторону.
-    //
-    // Вклад пикселя ограничен восемью текселями: без потолка пол у горизонта
-    // получал бы отступ в метры, и тень отрывалась бы от предмета — лечение
-    // хуже болезни, тем более что там она и так растворяется по дальности.
-    float offset = (texel * kShadowFilterTexels * 1.5 + min(footprint, texel * 8.0)) *
-                   (1.0 + 2.0 * slope);
+    float offset = uShadowTexelWorld[cascade] * kShadowFilterTexels * 1.5 * (1.0 + 2.0 * slope);
     vec4 lp = uShadowLightSpace[cascade] * vec4(worldPos + normal * offset, 1.0);
     return (lp.xyz / lp.w) * 0.5 + 0.5;
 }
@@ -274,26 +272,19 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
                                              vec2(0.06711056, 0.00583715))));
     float rot = ign * 6.2831853;
 
-    // Размер одного пикселя экрана в мире. Производные здесь законны:
-    // CalcSunShadow вызывается из ветки по ОДНОРОДНОМУ условию (uShadowsEnabled
-    // — uniform), то есть все фрагменты идут по одному пути. Считаем один раз на
-    // фрагмент и передаём вниз: внутри выбора каскада ветвление уже
-    // неоднородное, и там производные брать нельзя.
-    float footprint = length(fwidth(worldPos));
-
     // Каскады перебираются от ближнего к дальнему, и берётся ПЕРВЫЙ
     // подходящий: он самый подробный из тех, что накрывают эту точку.
     //
     // Выбор развёрнут вручную и выглядит длинно. Причина не в лени: GLSL 330
     // запрещает индексировать массив сэмплеров переменной, а sampler нельзя
     // положить в локальную переменную. Цикл здесь физически невозможен.
-    vec3 pc0 = CascadeCoords(0, worldPos, normal, ndl, footprint);
+    vec3 pc0 = CascadeCoords(0, worldPos, normal, ndl);
     if (InsideCascade(pc0, kMargin)) {
         float s = ShadowPCF(uShadowMap, pc0, ndl, rot, uShadowDepthBias[0]);
         if (uShadowCascades > 1) {
             float w = CascadeEdge(pc0, kBand);
             if (w > 0.0) {
-                vec3 pc1 = CascadeCoords(1, worldPos, normal, ndl, footprint);
+                vec3 pc1 = CascadeCoords(1, worldPos, normal, ndl);
                 float far = InsideCascade(pc1, kMargin) ? ShadowPCF(uShadowMap1, pc1, ndl, rot, uShadowDepthBias[1]) : s;
                 s = mix(s, far, w);
             }
@@ -301,13 +292,13 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
         return s;
     }
     if (uShadowCascades > 1) {
-        vec3 pc1 = CascadeCoords(1, worldPos, normal, ndl, footprint);
+        vec3 pc1 = CascadeCoords(1, worldPos, normal, ndl);
         if (InsideCascade(pc1, kMargin)) {
             float s = ShadowPCF(uShadowMap1, pc1, ndl, rot, uShadowDepthBias[1]);
             if (uShadowCascades > 2) {
                 float w = CascadeEdge(pc1, kBand);
                 if (w > 0.0) {
-                    vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl, footprint);
+                    vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl);
                     float far = InsideCascade(pc2, kMargin) ? ShadowPCF(uShadowMap2, pc2, ndl, rot, uShadowDepthBias[2]) : s;
                     s = mix(s, far, w);
                 }
@@ -316,13 +307,13 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
         }
     }
     if (uShadowCascades > 2) {
-        vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl, footprint);
+        vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl);
         if (InsideCascade(pc2, kMargin)) {
             float s = ShadowPCF(uShadowMap2, pc2, ndl, rot, uShadowDepthBias[2]);
             if (uShadowCascades > 3) {
                 float w = CascadeEdge(pc2, kBand);
                 if (w > 0.0) {
-                    vec3 pc3 = CascadeCoords(3, worldPos, normal, ndl, footprint);
+                    vec3 pc3 = CascadeCoords(3, worldPos, normal, ndl);
                     float far = InsideCascade(pc3, kMargin) ? ShadowPCF(uShadowMap3, pc3, ndl, rot, uShadowDepthBias[3]) : s;
                     s = mix(s, far, w);
                 }
@@ -331,7 +322,7 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
         }
     }
     if (uShadowCascades > 3) {
-        vec3 pc3 = CascadeCoords(3, worldPos, normal, ndl, footprint);
+        vec3 pc3 = CascadeCoords(3, worldPos, normal, ndl);
         if (InsideCascade(pc3, kMargin)) return ShadowPCF(uShadowMap3, pc3, ndl, rot, uShadowDepthBias[3]);
     }
     // Дальше последнего каскада тени нет — там всё освещено. Тянуть её краем

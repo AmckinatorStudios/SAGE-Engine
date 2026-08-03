@@ -9,3 +9,10 @@ dist/
 .vs/
 .vscode/
 *.user
+
+# Вывод сравнения кадров: пишется каждым прогоном tests/render, не исходник.
+tests/render/references/*.actual.png
+tests/render/references/*.diff.png
+
+# Раскладка окон редактора: своя у каждого, пишется при выходе.
+sage_editor_imgui.ini

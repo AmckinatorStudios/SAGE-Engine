@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "EditorIcons.h"
+#include "sage/core/Paths.h"
 #include "imgui.h"
 
 namespace fs = std::filesystem;
@@ -60,30 +61,61 @@ void FileBrowser::Open(const Config& config) {
     if (start.empty() || !fs::is_directory(start, ec)) start = fs::current_path(ec);
     GoTo(start);
 
-    // Быстрые места. Домашний каталог и корень проекта — то, откуда человек
-    // почти всегда и начинает; без них диалог заставляет карабкаться вверх по
-    // дереву кликами.
+    // --- Быстрый доступ ------------------------------------------------------
+    //
+    // Список делится на ГРУППЫ, и это не украшение: «Документы» и «диск D:» —
+    // разные по смыслу места, а вперемешку они превращаются в один длинный
+    // столбец, по которому надо читать глазами.
+    //
+    // Папки пользователя спрашиваются у системы (см. sage::UserFolders): их
+    // имена локализованы и переносимы, собрать их из «дом плюс Documents»
+    // нельзя. Несуществующие не показываются вовсе — кнопка в никуда хуже
+    // отсутствующей.
     m_places.clear();
-    if (const char* home = std::getenv(
-#ifdef _WIN32
-            "USERPROFILE"
-#else
-            "HOME"
-#endif
-            )) {
-        if (fs::is_directory(home, ec)) m_places.emplace_back("Домой", home);
+    auto group = [&](const char* title) { m_places.push_back({title, {}, true}); };
+    auto place = [&](const std::string& label, const fs::path& p) {
+        m_places.push_back({label, p, false});
+    };
+
+    const std::vector<sage::UserFolder> userFolders = sage::UserFolders();
+    if (!userFolders.empty()) {
+        group("Папки");
+        for (const sage::UserFolder& f : userFolders) place(f.Label, f.Path);
     }
-    const fs::path cwd = fs::current_path(ec);
-    if (!ec) m_places.emplace_back("Здесь", cwd);
-    if (!m_cfg.StartDir.empty() && fs::is_directory(m_cfg.StartDir, ec))
-        m_places.emplace_back("Проект", m_cfg.StartDir);
+
+    // Места, относящиеся к работе: папка проекта и та, откуда запущен редактор.
+    bool workGroup = false;
+    auto workPlace = [&](const char* label, const fs::path& p) {
+        if (p.empty() || !fs::is_directory(p, ec)) return;
+        if (!workGroup) { group("Проект"); workGroup = true; }
+        place(label, p);
+    };
+    workPlace("Ассеты проекта", m_cfg.StartDir);
+    workPlace("Папка запуска", fs::current_path(ec));
+
+    group("Диски");
 #ifdef _WIN32
     for (char drive = 'A'; drive <= 'Z'; ++drive) {
         const std::string root = std::string(1, drive) + ":\\";
-        if (fs::exists(root, ec)) m_places.emplace_back(root, root);
+        if (fs::exists(root, ec)) place(root, root);
     }
 #else
-    m_places.emplace_back("/", "/");
+    place("Корень /", "/");
+    // Смонтированные носители: флешка и внешний диск — самые частые источники
+    // чужих ассетов, и до них иначе идти вслепую через /media.
+    for (const char* mountRoot : {"/media", "/mnt", "/run/media"}) {
+        if (!fs::is_directory(mountRoot, ec)) continue;
+        for (const fs::directory_entry& e : fs::directory_iterator(mountRoot, ec)) {
+            if (!e.is_directory(ec)) continue;
+            // /run/media/<пользователь>/<носитель> — на уровень глубже.
+            bool leaf = true;
+            for (const fs::directory_entry& sub : fs::directory_iterator(e.path(), ec)) {
+                if (sub.is_directory(ec)) { place(sub.path().filename().string(), sub.path()); leaf = false; }
+                break;
+            }
+            if (leaf) place(e.path().filename().string(), e.path());
+        }
+    }
 #endif
 
     m_open = true;
@@ -138,11 +170,21 @@ void FileBrowser::Refresh() {
 }
 
 void FileBrowser::DrawPlaces() {
-    ImGui::BeginChild("##places", ImVec2(150, -ImGui::GetFrameHeightWithSpacing() * 2.2f), true);
-    ImGui::TextDisabled("Быстрый доступ");
-    ImGui::Separator();
-    for (const auto& [label, path] : m_places) {
-        if (EditorIcons::Button("folder", label.c_str())) GoTo(path);
+    ImGui::BeginChild("##places", ImVec2(190, -ImGui::GetFrameHeightWithSpacing() * 2.2f), true);
+    for (const Place& p : m_places) {
+        if (p.IsGroup) {
+            ImGui::Spacing();
+            ImGui::TextDisabled("%s", p.Label.c_str());
+            ImGui::Separator();
+            continue;
+        }
+        // Текущее место подсвечено: в списке из полутора десятков папок иначе
+        // не видно, где ты находишься.
+        const bool here = !p.Path.empty() && p.Path == m_dir;
+        if (here) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.35f, 1.0f));
+        if (EditorIcons::Button("folder", p.Label.c_str())) GoTo(p.Path);
+        if (here) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.Path.string().c_str());
     }
     ImGui::EndChild();
 }

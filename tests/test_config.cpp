@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,8 @@
 #include "sage/core/Paths.h"
 #include "sage/core/Systems.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/PbrShader.h"
+#include <cstring>
 
 using sage::EngineConfig;
 using sage::QualityPreset;
@@ -49,6 +52,60 @@ TEST(Paths_engine_assets_are_found_next_to_the_binary_not_in_cwd) {
     // раскладки (ассеты в текущей папке) продолжали работать.
     CHECK_TRUE(sage::EngineAssetPath("no/such/engine/asset.bin") == "no/such/engine/asset.bin");
 }
+
+#if !defined(_WIN32)
+// Быстрый доступ файлового диалога («Документы», «Загрузки») собирается не из
+// «дом плюс английское имя»: на локализованной системе этих папок под такими
+// именами НЕТ. Имена лежат в ~/.config/user-dirs.dirs, и читать надо их.
+//
+// Проверяем на подставном доме: сама ошибка «взяли английское имя» тихая —
+// список просто оказывается наполовину пустым, и заметить это можно только
+// на системе не с английской локалью.
+TEST(Paths_user_folders_come_from_xdg_not_from_english_names) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path home = fs::temp_directory_path(ec) / "sage_xdg_home";
+    fs::remove_all(home, ec);
+    fs::create_directories(home / ".config", ec);
+    fs::create_directories(home / "Документы", ec);
+    fs::create_directories(home / "Загрузки", ec);
+    // «Рабочий стол» НЕ создаём: он объявлен в user-dirs.dirs, но не существует —
+    // такой пункт показывать нельзя, он ведёт в пустоту.
+    {
+        std::ofstream f(home / ".config" / "user-dirs.dirs");
+        f << "# сгенерировано xdg-user-dirs\n"
+          << "XDG_DESKTOP_DIR=\"$HOME/Рабочий стол\"\n"
+          << "XDG_DOCUMENTS_DIR=\"$HOME/Документы\"\n"
+          << "XDG_DOWNLOAD_DIR=\"$HOME/Загрузки\"\n";
+    }
+
+    const char* savedHome = std::getenv("HOME");
+    const std::string restore = savedHome ? savedHome : "";
+    setenv("HOME", home.string().c_str(), 1);
+
+    const std::vector<sage::UserFolder> folders = sage::UserFolders();
+    auto pathOf = [&](const char* label) -> fs::path {
+        for (const sage::UserFolder& f : folders)
+            if (std::strcmp(f.Label, label) == 0) return f.Path;
+        return {};
+    };
+    const fs::path docs = pathOf("Документы");
+    const fs::path downloads = pathOf("Загрузки");
+    const fs::path desktop = pathOf("Рабочий стол");
+    const fs::path projects = sage::DefaultProjectsDir();
+
+    if (restore.empty()) unsetenv("HOME");
+    else setenv("HOME", restore.c_str(), 1);
+    fs::remove_all(home, ec);
+
+    CHECK_TRUE(docs == home / "Документы");
+    CHECK_TRUE(downloads == home / "Загрузки");
+    CHECK_TRUE(desktop.empty());                 // объявлена, но не существует
+    CHECK_TRUE(pathOf("Домой") == home);
+    // Новые проекты — в «Документы», а не рядом с бинарником редактора.
+    CHECK_TRUE(projects == home / "Документы" / "SAGE Projects");
+}
+#endif
 
 TEST(Systems_registry_all_v1_and_valid) {
     const auto& systems = sage::EngineSystems();
@@ -153,6 +210,7 @@ TEST(Config_preset_roundtrip_through_file) {
 #include "sage/core/SaveGame.h"
 
 #include <cstdlib>
+#include <vector>
 #include <filesystem>
 #include <vector>
 
@@ -268,4 +326,46 @@ TEST(Config_ultra_preset_really_enables_msaa) {
     cfg.ApplyPreset(sage::QualityPreset::Ultra);
     CHECK_TRUE(sage::render::SceneSamples(cfg) > 1);
     CHECK_TRUE(cfg.ShadowResolution >= 2048);
+}
+
+// --- Производные в общем блоке освещения запрещены -------------------------
+//
+// kPbrSharedGlsl встраивается в ШЕСТЬ разных шейдеров, и ни один из них не
+// контролирует, из какого места вызовется освещение. Внутри него уже стоит
+// ветвление по каскадам, а сам вызов приходит из тернарника по uniform-условию,
+// который компилятор вправе собрать настоящей веткой, — и производные там
+// спецификация объявляет неопределёнными.
+//
+// Это не теория. Ровно так и случилось: length(fwidth(worldPos)) в расчёте тени
+// работал на программном растеризаторе (и в эталонных кадрах CI), а на
+// настоящей видеокарте вернул мусор — NaN уехал в тень, оттуда в яркость, ACES
+// зажал NaN в ноль, и ВСЯ освещённая геометрия стала чёрной. Небо и сетка
+// рисовались как ни в чём не бывало: они идут мимо PBR. Ни один тест этого не
+// заметил, потому что проверять картинку было не на чем.
+//
+// Проверка текстовая и потому ловит это ДО сборки шейдера, на любой машине.
+TEST(PbrShader_has_no_screen_space_derivatives) {
+    const std::string glsl = sage::render::kPbrSharedGlsl;
+    for (const char* fn : {"dFdx", "dFdy", "fwidth"}) {
+        const size_t at = glsl.find(fn);
+        if (at != std::string::npos) {
+            // Упоминание в комментарии — законно (там объясняется, почему их
+            // тут нет). Ищем только вызовы: имя, за которым идёт скобка.
+            size_t p = at;
+            bool call = false;
+            while (p != std::string::npos) {
+                const size_t after = p + std::strlen(fn);
+                if (after < glsl.size() && glsl[after] == '(') {
+                    // Строка, в которой нашли, — комментарий?
+                    const size_t lineStart = glsl.rfind('\n', p);
+                    const std::string line =
+                        glsl.substr(lineStart == std::string::npos ? 0 : lineStart + 1,
+                                    p - (lineStart == std::string::npos ? 0 : lineStart + 1));
+                    if (line.find("//") == std::string::npos) { call = true; break; }
+                }
+                p = glsl.find(fn, p + 1);
+            }
+            CHECK_FALSE(call);
+        }
+    }
 }
