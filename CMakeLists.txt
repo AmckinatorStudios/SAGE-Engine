@@ -314,6 +314,30 @@ if (SAGE_VULKAN)
     # ровно тот SDK, ради избавления от которого взят volk.
     target_compile_definitions(vma INTERFACE VK_NO_PROTOTYPES)
 
+    # glslang — компиляция GLSL в SPIR-V В РАНТАЙМЕ.
+    #
+    # Офлайн-компиляции недостаточно, и это не вопрос удобства. Движок позволяет
+    # писать СВОИ шейдеры материалов (см. docs/custom_shaders.md) — они приходят
+    # из проекта пользователя и компилируются при загрузке. Заранее их не
+    # собрать: их ещё не существует, когда собирается движок.
+    #
+    # Собираем минимально: без бинарников, без тестов, без HLSL и без
+    # оптимизатора SPIRV-Tools. Оптимизатор — самая долгая часть сборки, а
+    # выигрыш от него на наших шейдерах меньше, чем стоимость его присутствия в
+    # каждом прогоне CI.
+    set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+    set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      glslang
+      GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+      GIT_TAG 14.3.0
+    )
+    FetchContent_MakeAvailable(glslang)
+
     add_library(volk STATIC ${volk_src_SOURCE_DIR}/volk.c)
     target_include_directories(volk PUBLIC ${volk_src_SOURCE_DIR})
     target_link_libraries(volk PUBLIC Vulkan-Headers)

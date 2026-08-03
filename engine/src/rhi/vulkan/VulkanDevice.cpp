@@ -1,6 +1,7 @@
 #include "VulkanDevice.h"
 #include "VulkanMemory.h"
 #include "VulkanResources.h"
+#include "VulkanShader.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -424,6 +425,8 @@ void VulkanDevice::BindTexture2D(int unit, TextureHandle texture) {
     m_boundTextures[unit] = texture.Valid() && LookupTexture(texture) ? texture : TextureHandle{};
 }
 
+void VulkanDevice::BindShader(const VulkanShaderProgram* shader) { m_shader = shader; }
+
 void VulkanDevice::BindRenderTarget(const VulkanRenderTarget* target) {
     m_target = target;
     if (target) SetViewport(0, 0, target->Width(), target->Height());
@@ -472,9 +475,15 @@ void VulkanDevice::ReadPixelsRGB(int, int, int width, int height, unsigned char*
     if (out && width > 0 && height > 0) std::memset(out, 0, (size_t)width * height * 3);
 }
 
-std::unique_ptr<ShaderProgram> VulkanDevice::CreateShaderProgram(const std::string&, const std::string&) {
-    OnceNotImplemented("CreateShaderProgram");
-    return nullptr;
+std::unique_ptr<ShaderProgram> VulkanDevice::CreateShaderProgram(const std::string& vertexSrc,
+                                                                 const std::string& fragmentSrc) {
+    if (!Ready()) return nullptr;
+    auto program = std::make_unique<VulkanShaderProgram>(*this, vertexSrc, fragmentSrc);
+    // Несобравшийся шейдер отдаётся как nullptr, а не как нерабочий объект:
+    // вызывающий уже умеет обходиться без шейдера (в GL-бэкенде так же), а
+    // объект, который молча ничего не делает, дал бы чёрный экран без причины.
+    if (!program->Valid()) return nullptr;
+    return program;
 }
 std::unique_ptr<Geometry> VulkanDevice::CreateGeometry(const VertexLayout&) {
     OnceNotImplemented("CreateGeometry");

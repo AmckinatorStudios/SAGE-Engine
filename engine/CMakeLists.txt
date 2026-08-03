@@ -172,9 +172,11 @@ if (TARGET volk)
         src/rhi/vulkan/VulkanImage.cpp
         src/rhi/vulkan/VulkanMemory.cpp
         src/rhi/vulkan/VulkanResources.cpp
+        src/rhi/vulkan/VulkanShader.cpp
     )
     target_compile_definitions(sage_engine PRIVATE SAGE_HAS_VULKAN)
-    target_link_libraries(sage_engine PRIVATE volk vma)
+    target_link_libraries(sage_engine PRIVATE volk vma
+        glslang glslang-default-resource-limits SPIRV)
 endif()
 
 if (WIN32)

@@ -15,6 +15,9 @@
 #include <memory>
 #include <string>
 
+#include <glm/glm.hpp>
+
+#include "sage/render/PbrShader.h"
 #include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
 
@@ -123,4 +126,77 @@ TEST(Rhi_vulkan_passes_the_structural_conformance_suite) {
     CHECK_TRUE(result.Checked >= 15);
     std::printf("      (соответствие RHI на Vulkan: проверок %d, пропущено %d)\n",
                 result.Checked, result.Skipped);
+}
+
+// --- Компиляция шейдеров движка под Vulkan ----------------------------------
+//
+// САМОЕ РИСКОВАННОЕ МЕСТО ВСЕГО БЭКЕНДА. Движок написан на GLSL 3.30 со
+// СВОБОДНЫМИ униформами (`uniform mat4 uModel;` вне блока) и задаёт их ПО ИМЕНИ.
+// В Vulkan такого не бывает вовсе: униформа обязана лежать в блоке и
+// адресоваться смещением. Держится это на одной возможности glslang —
+// ослабленных правилах (setEnvInputVulkanRulesRelaxed), которые сами собирают
+// свободные униформы в блок.
+//
+// Проверяем не игрушечный шейдер, а НАСТОЯЩИЙ общий PBR-блок движка
+// (kPbrSharedGlsl): массивы, samplerCube, sampler3D, каскады теней. Если
+// ослабленные правила где-то не справятся, выяснить это надо здесь, а не на
+// чёрном экране.
+TEST(Rhi_vulkan_compiles_the_engine_pbr_shader) {
+    if (!GraphicsDevice::Available(Backend::Vulkan)) return;
+
+    std::unique_ptr<GraphicsDevice> dev = GraphicsDevice::Create(Backend::Vulkan);
+    dev->Init(nullptr);
+
+    const std::string vert = R"(#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProjection;
+out vec3 FragPos;
+out vec3 Normal;
+void main() {
+    vec4 world = uModel * vec4(aPos, 1.0);
+    FragPos = world.xyz;
+    Normal = aNormal;
+    gl_Position = uProjection * uView * world;
+}
+)";
+
+    // Преамбула — ровно та, в которой блок живёт в движке (см. RenderBatch.cpp).
+    const std::string frag = std::string(R"(#version 330 core
+in vec3 FragPos;
+in vec3 Normal;
+out vec4 FragColor;
+uniform bool uLightmapEnabled;
+uniform sampler2D uLightmap;
+)") + sage::render::kPbrSharedGlsl + R"(
+void main() {
+    vec3 N = normalize(Normal);
+    vec3 indirect = uLightmapEnabled ? texture(uLightmap, vec2(0.5)).rgb
+                                     : DefaultIndirect(FragPos, N);
+    FragColor = vec4(indirect, 1.0);
+}
+)";
+
+    std::unique_ptr<sage::rhi::ShaderProgram> program = dev->CreateShaderProgram(vert, frag);
+    CHECK_TRUE(program != nullptr);
+    if (!program) return;
+
+    // Установка униформы по имени обязана быть безопасной И для существующей, и
+    // для несуществующей: в GL промах по имени молча игнорировался, и весь
+    // движок на это рассчитывает.
+    program->Use();
+    program->SetMat4("uModel", glm::mat4(1.0f));
+    program->SetMat4("uView", glm::mat4(1.0f));
+    program->SetVec3("uSunColor", glm::vec3(1.0f));
+    program->SetFloat("нет-такой-униформы", 1.0f);
+    program->SetInt("uLightmap", 3); // сэмплер: номер юнита, а не значение
+
+    // Заведомо битый шейдер обязан дать nullptr, а не «что-нибудь». Без этой
+    // половины тест прошёл бы и на реализации, которая всегда возвращает
+    // объект: успех компиляции нечем было бы отличить от её отсутствия.
+    std::unique_ptr<sage::rhi::ShaderProgram> broken =
+        dev->CreateShaderProgram(vert, "#version 330 core\nвот это не шейдер\n");
+    CHECK_TRUE(broken == nullptr);
 }

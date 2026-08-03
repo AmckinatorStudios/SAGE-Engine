@@ -52,6 +52,7 @@ namespace sage::rhi {
 // класса объявляет ВЛОЖЕННЫЙ тип VulkanDevice::X, и дальше всё разъезжается —
 // метод принимает один тип, а фабрика возвращает другой с тем же именем.
 class VulkanRenderTarget;
+class VulkanShaderProgram;
 
 class VulkanDevice final : public GraphicsDevice {
 public:
@@ -158,6 +159,10 @@ public:
     // предыдущего — и вызывающим об этом знать не нужно.
     void BindRenderTarget(const VulkanRenderTarget* target);
 
+    // Текущая шейдерная программа. Как и цель отрисовки, пока запоминается:
+    // конвейер по ней ищется в момент вызова отрисовки.
+    void BindShader(const VulkanShaderProgram* shader);
+
 private:
     // Всё состояние конвейера, которое движок задаёт сеттерами. Ключ кэша
     // конвейеров: одинаковое состояние + одинаковый шейдер = один VkPipeline.
@@ -198,6 +203,7 @@ private:
     uint64_t m_nextTextureHandle = 1; // 0 зарезервирован под «невалидный»
 
     const VulkanRenderTarget* m_target = nullptr;
+    const VulkanShaderProgram* m_shader = nullptr;
 
     // Что привязано к текстурным юнитам. В OpenGL это состояние держал драйвер;
     // в Vulkan привязка живёт в наборе дескрипторов, который собирается в
