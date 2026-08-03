@@ -98,13 +98,10 @@ void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float w
         if (!exists) ImGui::BeginDisabled();
         if (ImGui::Button("##row", ImVec2(rowW, rowH))) {
             std::string err;
-            if (host.OpenProject(path, err)) {
-                if (!exists) ImGui::EndDisabled();
-                ImGui::PopID();
-                ImGui::EndChild();
-                return;
-            }
-            m_error = err;
+            // Ранний выход отсюда запрещён (см. DrawCreate): кадр обязан
+            // достроиться. Дорисовать оставшиеся строки не мешает — список
+            // выше взят копией именно на этот случай.
+            if (!host.OpenProject(path, err)) m_error = err;
         }
         if (!exists) ImGui::EndDisabled();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
@@ -181,11 +178,15 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
         // Projects», которой при первом запуске ещё нет, и требовать от
         // человека создать её вручную было бы издевательством.
         fs::create_directories(m_newDir, ec);
-        if (host.CreateProject(m_newDir, m_newName, err)) {
-            m_error.clear();
-            return;
-        }
-        m_error = err;
+        // ВЫХОДИТЬ ОТСЮДА НЕЛЬЗЯ, даже когда всё получилось: мы внутри
+        // BeginDisabled, внутри дочернего окна, внутри окна launcher'а. Ранний
+        // return пропускал EndDisabled/EndChild/End — и кадр уходил в отрисовку
+        // с незакрытыми окнами. Именно так выглядела ошибка «создал проект —
+        // и весь редактор стал чёрным прямоугольником». Кадр обязан
+        // ДОСТРОИТЬСЯ; launcher не покажется уже следующим кадром, потому что
+        // проект открыт.
+        if (host.CreateProject(m_newDir, m_newName, err)) m_error.clear();
+        else m_error = err;
     }
     ImGui::EndDisabled();
 }
@@ -214,11 +215,10 @@ void LauncherPanel::DrawOpen(EditorHost& host) {
     ImGui::BeginDisabled(m_openPath[0] == '\0');
     if (ImGui::Button("Открыть", ImVec2(-1.0f, 0.0f))) {
         std::string err;
-        if (host.OpenProject(m_openPath, err)) {
-            m_error.clear();
-            return;
-        }
-        m_error = err;
+        // Ранний выход запрещён по той же причине, что и в DrawCreate: мы
+        // внутри BeginDisabled и двух окон, кадр надо достроить.
+        if (host.OpenProject(m_openPath, err)) m_error.clear();
+        else m_error = err;
     }
     ImGui::EndDisabled();
 }

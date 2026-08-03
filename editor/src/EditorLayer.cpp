@@ -86,6 +86,22 @@ void EditorLayer::OnAttach() {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename = "sage_editor_imgui.ini"; // своё имя, чтобы не пересекаться с другими ImGui-приложениями
+
+    // Претензии самого ImGui — в наш лог, то есть в консоль редактора.
+    //
+    // ImGui умеет ловить незакрытые Begin/End, PushID без Pop, лишний
+    // BeginDisabled — но по умолчанию пишет об этом только во внутренний
+    // отладочный лог, которого в редакторе никто не видит. А последствие у
+    // такой ошибки не косметическое: кадр с незакрытым окном уходит в
+    // отрисовку обрубленным, и человек получает ЧЁРНЫЙ прямоугольник вместо
+    // редактора — ровно так ломалось создание проекта из стартового окна.
+    // Пусть в следующий раз в консоли будет написано, ЧТО и В КАКОМ окне.
+    ImGui::GetCurrentContext()->ErrorCallback = [](ImGuiContext* ctx, void*, const char* msg) {
+        const ImGuiWindow* w = ctx->CurrentWindow;
+        LOG_ERROR("ImGui") << "кадр интерфейса собран неверно — окно '"
+                           << (w ? w->Name : "<нет>") << "': " << msg;
+    };
+
     EditorTheme::LoadFont();
     EditorTheme::Apply();
     ImGui_ImplGlfw_InitForOpenGL(app.GetWindow().Handle(), true);
@@ -202,7 +218,11 @@ void EditorLayer::OnAttach() {
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) {
         m_autoScreenshotFrame = std::atoi(f);
-        m_launcher.Dismiss(); // headless-скриншот — hub проектов не нужен, показываем сцену
+        // Headless-скриншот обычно снимает сцену, и hub проектов ему только
+        // закрывает кадр. Но снять НАДО и сам hub (и файловый диалог из него) —
+        // иначе стартовое окно остаётся единственной частью редактора, которую
+        // нечем проверить, кроме как открыть глазами на своей машине.
+        if (!std::getenv("SAGE_SHOW_LAUNCHER")) m_launcher.Dismiss();
     }
     // Начальный режим рендера (для headless-скриншотов/CI): shaded|wireframe|unlit|normals.
     if (const char* m = std::getenv("SAGE_EDITOR_RENDER_MODE")) {
