@@ -39,6 +39,12 @@
 // машине без Vulkan не падает: Available() отвечает false, и Application
 // откатывается на OpenGL.
 // ---------------------------------------------------------------------------
+// Распределитель VMA объявляется в ГЛОБАЛЬНОЙ области, как он и определён
+// (VK_DEFINE_HANDLE в vk_mem_alloc.h). Написать `struct VmaAllocator_T*` внутри
+// namespace нельзя: это объявит НОВЫЙ тип sage::rhi::VmaAllocator_T, сборка
+// пройдёт, а линковка упадёт на несовпадении сигнатур — что и случилось.
+struct VmaAllocator_T;
+
 namespace sage::rhi {
 
 class VulkanDevice final : public GraphicsDevice {
@@ -95,6 +101,10 @@ public:
     // Тип памяти под требования + желаемые свойства. UINT32_MAX — не нашлось.
     uint32_t FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const;
 
+    // Распределитель видеопамяти (VMA). Владеет устройство: время жизни
+    // распределителя обязано покрывать время жизни всех ресурсов.
+    ::VmaAllocator_T* Allocator() const { return m_allocator; }
+
     // Разовая отправка команд с ожиданием (загрузка текстур, смена раскладок).
     // Медленно по определению — только для инициализации ресурсов, не для кадра.
     void SubmitImmediate(const std::function<void(VkCommandBuffer)>& record);
@@ -126,6 +136,7 @@ private:
     VkCommandPool m_pool = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties m_memProps{};
     VkDebugUtilsMessengerEXT m_debug = VK_NULL_HANDLE;
+    ::VmaAllocator_T* m_allocator = nullptr;
 
     State m_state;
     float m_clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};

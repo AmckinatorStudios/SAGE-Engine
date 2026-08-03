@@ -169,9 +169,10 @@ if (TARGET volk)
     target_sources(sage_engine PRIVATE
         src/rhi/vulkan/VulkanCommon.cpp
         src/rhi/vulkan/VulkanDevice.cpp
+        src/rhi/vulkan/VulkanMemory.cpp
     )
     target_compile_definitions(sage_engine PRIVATE SAGE_HAS_VULKAN)
-    target_link_libraries(sage_engine PRIVATE volk)
+    target_link_libraries(sage_engine PRIVATE volk vma)
 endif()
 
 if (WIN32)

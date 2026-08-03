@@ -290,6 +290,30 @@ if (SAGE_VULKAN)
       SOURCE_SUBDIR do-not-configure-volk
     )
     FetchContent_MakeAvailable(volk_src)
+    # VMA — распределитель видеопамяти от AMD (MIT, один заголовок).
+    #
+    # Своего здесь быть не должно. Vulkan даёт сырое vkAllocateMemory с
+    # ограничением maxMemoryAllocationCount (на десктопе обычно 4096): выделять
+    # блок под КАЖДУЮ текстуру нельзя, кончится на средней сцене. Значит нужен
+    # субаллокатор с пулами по типам памяти, выравниванием, дефрагментацией
+    # линейных и нелинейных ресурсов — три сотни строк, которые ошибаются молча
+    # и проявляются на чужой видеокарте через полгода. VMA это и есть, только
+    # написанный теми, кто пишет драйвер.
+    FetchContent_Declare(
+      vma_src
+      GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+      GIT_TAG v3.1.0
+      SOURCE_SUBDIR do-not-configure-vma
+    )
+    FetchContent_MakeAvailable(vma_src)
+    add_library(vma INTERFACE)
+    target_include_directories(vma INTERFACE ${vma_src_SOURCE_DIR}/include)
+    target_link_libraries(vma INTERFACE Vulkan-Headers)
+    # Заголовок VMA включает vulkan.h сам. Без VK_NO_PROTOTYPES он притащит
+    # обычные прототипы, и сборка потребует линковки с vulkan-1.lib — то есть
+    # ровно тот SDK, ради избавления от которого взят volk.
+    target_compile_definitions(vma INTERFACE VK_NO_PROTOTYPES)
+
     add_library(volk STATIC ${volk_src_SOURCE_DIR}/volk.c)
     target_include_directories(volk PUBLIC ${volk_src_SOURCE_DIR})
     target_link_libraries(volk PUBLIC Vulkan-Headers)

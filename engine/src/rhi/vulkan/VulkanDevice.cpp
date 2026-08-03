@@ -1,4 +1,5 @@
 #include "VulkanDevice.h"
+#include "VulkanMemory.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -102,6 +103,10 @@ VulkanDevice::VulkanDevice() = default;
 VulkanDevice::~VulkanDevice() {
     if (m_device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device);
+        // Распределитель — ПОСЛЕ всех ресурсов и ДО устройства: он держит
+        // выделения, а они принадлежат устройству.
+        DestroyAllocator(m_allocator);
+        m_allocator = nullptr;
         if (m_pool != VK_NULL_HANDLE) vkDestroyCommandPool(m_device, m_pool, nullptr);
         vkDestroyDevice(m_device, nullptr);
     }
@@ -310,6 +315,14 @@ void VulkanDevice::Init(ProcLoader /*loader*/) {
     if (!CreateInstance()) return;
     if (!PickGpu()) return;
     if (!CreateLogicalDevice()) return;
+    m_allocator = CreateAllocator(m_instance, m_gpu, m_device);
+    if (!m_allocator) {
+        // Без распределителя ресурсы не создать — устройство честно считается
+        // непригодным, а не «почти работающим».
+        vkDestroyDevice(m_device, nullptr);
+        m_device = VK_NULL_HANDLE;
+        m_apiVersion = "Vulkan (распределитель памяти не создан)";
+    }
 }
 
 uint32_t VulkanDevice::FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const {

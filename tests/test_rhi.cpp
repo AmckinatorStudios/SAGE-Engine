@@ -9,6 +9,7 @@
 // строка → бэкенд → доступен ли → откат.
 #include "TestFramework.h"
 
+#include <cctype>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -75,10 +76,14 @@ TEST(Rhi_vulkan_availability_matches_what_the_device_can_do) {
     dev->Init(nullptr);
 
     const std::string version = dev->ApiVersion();
-    // Строка версии должна называть API и устройство, а не остаться заглушкой:
-    // именно её показывают в «О программе» и в отчёте о падении, и «Vulkan (не
-    // инициализирован)» там означало бы, что мы не заметили отказа драйвера.
+    // Строка версии должна называть API И ВЕРСИЮ ЧИСЛОМ («Vulkan 1.3.280 — …»),
+    // а не остаться сообщением об отказе. Проверять «начинается с Vulkan»
+    // недостаточно: с этого начинаются и строки неудачи («Vulkan (не
+    // инициализирован)»), то есть тест прошёл бы на устройстве, которое не
+    // поднялось. Именно эту строку показывают в «О программе» и в отчёте о
+    // падении — она обязана быть правдой.
     CHECK_TRUE(version.rfind("Vulkan ", 0) == 0);
-    CHECK_TRUE(version.find("не инициализирован") == std::string::npos);
+    CHECK_TRUE(version.size() > 8);
+    CHECK_TRUE(std::isdigit((unsigned char)version[7]) != 0);
     CHECK_TRUE(dev->MaxAnisotropy() >= 1.0f);
 }
