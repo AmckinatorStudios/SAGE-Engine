@@ -61,6 +61,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/import/BlendImporter.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
+    src/sage/render/ModelMaterial.cpp
     src/sage/render/Font.cpp
     src/sage/render/GridRenderer.cpp
     src/sage/render/ParticleECS.cpp

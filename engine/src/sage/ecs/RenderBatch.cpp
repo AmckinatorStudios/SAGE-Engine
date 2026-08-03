@@ -401,7 +401,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
                                      c.Textured});
         } else if (c.Textured) {
             // Есть текстурные карты — индивидуальный текстурный PBR-путь.
-            m_textured.push_back({c.Mesh_, c.Model, c.Mat, c.LmPage, c.Opacity});
+            m_textured.push_back({c.Mesh_, c.Model, c.Mat, c.LmPage, c.Opacity,
+                                  c.Color, c.Emissive});
         } else {
             // Плоский цвет — быстрый инстансный путь. Metallic/roughness из
             // материала (если назначен), иначе дефолты MeshInstance.
@@ -531,7 +532,9 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         for (const TexturedItem& it : m_textured) {
             bindLightmap(tex, it.LmPage);
             tex.SetMat4("uModel", it.Model);
-            tex.SetVec3("uAlbedoFactor", it.Mat->Albedo);
+            // Свёрнутое значение, а не it.Mat->Albedo: тон экземпляра обязан
+            // работать и на текстурном пути (см. TexturedItem в заголовке).
+            tex.SetVec3("uAlbedoFactor", it.Color);
             tex.SetFloat("uMetallic", it.Mat->Metallic);
             tex.SetFloat("uRoughness", it.Mat->Roughness);
             tex.SetInt("uHasAlbedo", it.Mat->AlbedoTex ? 1 : 0);
@@ -539,7 +542,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             tex.SetInt("uHasMetallic", it.Mat->MetallicTex ? 1 : 0);
             tex.SetInt("uHasRoughness", it.Mat->RoughnessTex ? 1 : 0);
             tex.SetInt("uHasAO", it.Mat->AOTex ? 1 : 0);
-            tex.SetVec3("uEmissive", it.Mat->Emissive * it.Mat->EmissiveStrength);
+            tex.SetVec3("uEmissive", it.Emissive);
             tex.SetInt("uHasEmissive", it.Mat->EmissiveTex ? 1 : 0);
             tex.SetInt("uEmissiveMap", 6);
             if (it.Mat->EmissiveTex) it.Mat->EmissiveTex->Bind(6);
@@ -643,7 +646,9 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetInt("uMetallicMap", 3); t.SetInt("uRoughnessMap", 4); t.SetInt("uAOMap", 5);
                 bindLightmap(t, head.LmPage);
                 t.SetMat4("uModel", head.Inst.Model);
-                t.SetVec3("uAlbedoFactor", head.Mat->Albedo);
+                // Тон и свечение — из инстанса (свёрнутые), как на всех
+                // остальных путях; см. TexturedItem в заголовке.
+                t.SetVec3("uAlbedoFactor", head.Inst.Color);
                 t.SetFloat("uMetallic", head.Mat->Metallic);
                 t.SetFloat("uRoughness", head.Mat->Roughness);
                 t.SetFloat("uOpacity", head.Inst.Alpha);
@@ -652,7 +657,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetInt("uHasMetallic", head.Mat->MetallicTex ? 1 : 0);
                 t.SetInt("uHasRoughness", head.Mat->RoughnessTex ? 1 : 0);
                 t.SetInt("uHasAO", head.Mat->AOTex ? 1 : 0);
-                t.SetVec3("uEmissive", head.Mat->Emissive * head.Mat->EmissiveStrength);
+                t.SetVec3("uEmissive", head.Inst.Emissive);
                 t.SetInt("uHasEmissive", head.Mat->EmissiveTex ? 1 : 0);
                 t.SetInt("uEmissiveMap", 6);
                 if (head.Mat->EmissiveTex) head.Mat->EmissiveTex->Bind(6);

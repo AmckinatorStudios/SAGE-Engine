@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -11,6 +12,7 @@
 #include "sage/render/Mesh.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ScenePasses.h"
+#include "sage/scene/Prefab.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
@@ -69,6 +71,7 @@ void AssetPreview::Init() {
 
 void AssetPreview::Shutdown() {
     m_fbo.reset();
+    m_targets.clear();
     m_sphere.reset();
     m_sky.reset();
     m_reflections = sage::render::ReflectionSystem{};
@@ -90,30 +93,36 @@ void AssetPreview::ResetView() {
     m_distance = 3.0f;
 }
 
-uint64_t AssetPreview::RenderMaterial(const std::shared_ptr<Material>& material, int size) {
+uint64_t AssetPreview::RenderMaterial(const std::shared_ptr<Material>& material, int size,
+                                      const std::string& key) {
     Init();
     if (!m_sphere) return 0;
-    return Render(m_sphere, material, size, 1.0f);
+    return Render(m_sphere, material, size, 1.0f, key);
 }
 
-uint64_t AssetPreview::RenderMesh(const std::shared_ptr<Mesh>& mesh, int size) {
+uint64_t AssetPreview::RenderMesh(const std::shared_ptr<Mesh>& mesh, int size,
+                                  const std::string& key) {
     Init();
     if (!mesh) return 0;
-    return Render(mesh, nullptr, size, BoundingRadius(*mesh));
+    return Render(mesh, nullptr, size, BoundingRadius(*mesh), key);
+}
+
+void AssetPreview::ReleaseTarget(const std::string& key) { m_targets.erase(key); }
+
+Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
+    if (key.empty()) {
+        if (!m_fbo) m_fbo.emplace(size, size);
+        return *m_fbo;
+    }
+    auto it = m_targets.find(key);
+    if (it == m_targets.end()) it = m_targets.emplace(key, Framebuffer(size, size)).first;
+    return it->second;
 }
 
 uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
                               const std::shared_ptr<Material>& material, int size,
-                              float fitRadius) {
+                              float fitRadius, const std::string& key) {
     if (!mesh) return 0;
-    size = std::clamp(size, 32, 1024);
-    if (!m_fbo) m_fbo.emplace(size, size);
-    m_fbo->Resize(size, size);
-    m_fbo->Bind();
-
-    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-    device.SetClearColor(0.13f, 0.14f, 0.17f, 1.0f);
-    device.Clear();
 
     // Сцена превью строится заново каждый кадр и живёт один вызов. Это дёшево
     // (одна сущность) и избавляет от целого класса ошибок: превью не может
@@ -129,13 +138,79 @@ uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
     } else {
         mr.Color = glm::vec3(0.78f, 0.78f, 0.80f);
     }
+    return RenderScene(scene, size, fitRadius, glm::vec3(0.0f), key);
+}
+
+uint64_t AssetPreview::RenderPrefab(const std::string& path, int size, const std::string& key) {
+    Init();
+    if (path.empty()) return 0;
+
+    // Префаб — мини-сцена, и ставится он в превью тем же InstantiatePrefab, что
+    // и в настоящую сцену. Отдельный «облегчённый разбор для картинки» означал
+    // бы второй загрузчик префабов, который надо держать в согласии с первым, —
+    // и обложка расходилась бы с тем, что человек получит, положив префаб в мир.
+    Scene scene("prefab-preview");
+    if (sage::scene::InstantiatePrefab(scene, path) < 0) return 0;
+
+    // Меши восстанавливает не сериализатор, а ResourceManager по MeshRef —
+    // без этого шага превью было бы пустым кадром (сущности есть, рисовать
+    // нечего).
+    glm::vec3 lo(std::numeric_limits<float>::max());
+    glm::vec3 hi(std::numeric_limits<float>::lowest());
+    bool anyGeometry = false;
+    scene.Registry().view<MeshRendererComponent>().each(
+        [&](entt::entity e, MeshRendererComponent& mr) {
+            if (!mr.MeshPtr) {
+                if (mr.Ref.type == MeshRef::Type::Model && !mr.Ref.path.empty())
+                    mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+                else if (mr.Ref.type != MeshRef::Type::None)
+                    mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);
+            }
+            if (!mr.MaterialPtr && !mr.MaterialPath.empty())
+                mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+            if (!mr.MeshPtr) return;
+
+            // Габариты — по МИРОВЫМ углам коробки каждого меша: префаб из
+            // нескольких деталей должен влезать в кадр целиком, а его детали
+            // стоят не в начале координат.
+            const glm::mat4 world = scene.WorldMatrix(e);
+            const glm::vec3 bmin = mr.MeshPtr->BoundsMin();
+            const glm::vec3 bmax = mr.MeshPtr->BoundsMax();
+            for (int corner = 0; corner < 8; ++corner) {
+                const glm::vec3 local((corner & 1) ? bmax.x : bmin.x, (corner & 2) ? bmax.y : bmin.y,
+                                      (corner & 4) ? bmax.z : bmin.z);
+                const glm::vec3 p = glm::vec3(world * glm::vec4(local, 1.0f));
+                lo = glm::min(lo, p);
+                hi = glm::max(hi, p);
+            }
+            anyGeometry = true;
+        });
+
+    if (!anyGeometry) return 0;   // префаб без видимой геометрии — обложке взяться неоткуда
+
+    const glm::vec3 center = (lo + hi) * 0.5f;
+    const float radius = std::max(glm::length(hi - lo) * 0.5f, 0.05f);
+    return RenderScene(scene, size, radius, center, key);
+}
+
+uint64_t AssetPreview::RenderScene(Scene& scene, int size, float fitRadius,
+                                   const glm::vec3& focus, const std::string& key) {
+    size = std::clamp(size, 32, 1024);
+    Framebuffer& target = TargetFor(key, size);
+    target.Resize(size, size);
+    target.Bind();
+
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+    device.SetClearColor(0.13f, 0.14f, 0.17f, 1.0f);
+    device.Clear();
 
     const float yaw = glm::radians(m_yaw);
     const float pitch = glm::radians(m_pitch);
     const float dist = m_distance * fitRadius;
-    const glm::vec3 eye(dist * std::cos(pitch) * std::sin(yaw), dist * std::sin(pitch),
-                        dist * std::cos(pitch) * std::cos(yaw));
-    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    const glm::vec3 eye = focus + glm::vec3(dist * std::cos(pitch) * std::sin(yaw),
+                                            dist * std::sin(pitch),
+                                            dist * std::cos(pitch) * std::cos(yaw));
+    const glm::mat4 view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::mat4 proj =
         glm::perspective(glm::radians(35.0f), 1.0f, 0.05f, dist * 8.0f + 10.0f);
 
@@ -157,5 +232,5 @@ uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
     sage::render::RenderSceneColor(scene, m_batch, input);
 
     device.BindDefaultFramebuffer();
-    return m_fbo->NativeColorTexture();
+    return target.NativeColorTexture();
 }

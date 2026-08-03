@@ -4,8 +4,11 @@
 #include <cctype>
 #include <cstdio>
 #include <fstream>
+#include <sstream>
 #include <system_error>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "imgui.h"
 
@@ -136,19 +139,48 @@ uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
         return tex ? tex->NativeHandle() : 0;
     }
 
-    if (ext == ".sagemat") {
-        auto it = m_matThumbs.find(key);
-        if (it != m_matThumbs.end()) return it->second;
-        if (m_thumbRenderedThisFrame) return 0;   // очередь: один материал за кадр
-        std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key);
-        if (!mat) return 0;
-        const uint64_t id = m_preview.RenderMaterial(mat, 96);
-        if (!id) return 0;
-        m_thumbRenderedThisFrame = true;
-        m_matThumbs[key] = id;
-        return id;
+    // Материал — шариком, префаб — собой, модель — своей геометрией. Все трое
+    // идут через один кэш и одну очередь «не больше одного рендера за кадр»:
+    // каждый такой рендер это полный проход сцены со светом, и папка с двумя
+    // десятками префабов иначе уронила бы кадр при первом же открытии.
+    const bool renderable = ext == ".sagemat" || ext == ".sageprefab" ||
+                            sage::assets::IsConvertibleModel(key) || ext == ".sagemesh";
+    if (!renderable) return 0;
+
+    std::error_code ec;
+    const auto write = fs::last_write_time(path, ec);
+    const long long stamp = ec ? 0 : (long long)write.time_since_epoch().count();
+
+    auto it = m_thumbs.find(key);
+    if (it != m_thumbs.end() && it->second.Stamp == stamp) return it->second.Id;
+    if (m_thumbRenderedThisFrame) {
+        // Очередь занята — отдаём прошлую обложку, если она была. Мигание
+        // «пусто -> картинка» на каждой правке файла заметнее, чем кадр
+        // устаревшего превью.
+        return it != m_thumbs.end() ? it->second.Id : 0;
     }
-    return 0;
+
+    // Ключ = путь: у каждой обложки СВОЙ буфер. С общим буфером все запомненные
+    // хендлы указывали бы на одну текстуру, и вся папка показывала бы то, что
+    // нарисовали последним (см. комментарий про key в AssetPreview).
+    uint64_t id = 0;
+    if (ext == ".sagemat") {
+        if (std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key))
+            id = m_preview.RenderMaterial(mat, 96, key);
+    } else if (ext == ".sageprefab") {
+        id = m_preview.RenderPrefab(key, 96, key);
+    } else {
+        // Модель: копия геометрии на стороне процессора нужна, чтобы вписать её
+        // в кадр по габаритам (см. AssetPreview::RenderMesh).
+        if (std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(key))
+            id = m_preview.RenderMesh(mesh, 96, key);
+    }
+    // Ноль тоже запоминаем — иначе битый или пустой ассет пытался бы
+    // отрисоваться каждый кадр, съедая всю очередь превью и не давая остальным
+    // карточкам получить свои обложки.
+    m_thumbs[key] = Thumb{id, stamp};
+    if (id) m_thumbRenderedThisFrame = true;
+    return id;
 }
 
 void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
@@ -332,6 +364,215 @@ void AssetsPanel::ConvertFolderHere(EditorHost& host) {
                       ok, failed, srcBytes / 1024.0, outBytes / 1024.0);
     }
     host.SetStatusMessage(buf);
+}
+
+// ============================================================================
+//  Внесение чужих файлов в проект
+// ============================================================================
+namespace {
+
+// Файлы, на которые ссылается .mtl (map_Kd, norm, bump, …). Разбираем сами, а
+// не через tinyobj: нужен СПИСОК ИМЁН, а не разобранный материал, и делать ради
+// него полный разбор геометрии — платить кратно больше, чем стоит задача.
+std::vector<std::string> MtlTextureNames(const fs::path& mtl) {
+    std::vector<std::string> names;
+    std::ifstream in(mtl);
+    if (!in) return names;
+    std::string line;
+    while (std::getline(in, line)) {
+        // Ключевые слова карт: всё, что начинается на map_, плюс bump/norm/disp/refl.
+        std::istringstream ls(line);
+        std::string key;
+        ls >> key;
+        const bool isMap = key.rfind("map_", 0) == 0 || key == "bump" || key == "norm" ||
+                           key == "disp" || key == "refl";
+        if (!isMap) continue;
+        // У карты бывают опции («map_Kd -bm 0.2 stone.png») — имя файла это
+        // ПОСЛЕДНИЙ токен строки, а не первый после ключевого слова.
+        std::string token, last;
+        while (ls >> token) last = token;
+        if (!last.empty() && last[0] != '-') names.push_back(last);
+    }
+    return names;
+}
+
+// Внешние файлы, на которые ссылается .gltf: uri у buffers[] и images[].
+// Разбираем как JSON — .gltf это он и есть. Разбор может не удаться (битый
+// файл): тогда спутников просто не будет, а сам файл всё равно переедет.
+std::vector<std::string> GltfExternalUris(const fs::path& gltf) {
+    std::vector<std::string> uris;
+    std::ifstream in(gltf);
+    if (!in) return uris;
+    nlohmann::json j;
+    try {
+        in >> j;
+    } catch (const std::exception&) {
+        return uris;
+    }
+    for (const char* section : {"buffers", "images"}) {
+        if (!j.contains(section) || !j[section].is_array()) continue;
+        for (const auto& entry : j[section]) {
+            const std::string uri = entry.value("uri", std::string{});
+            // data:… — содержимое лежит внутри самого файла, копировать нечего.
+            if (uri.empty() || uri.rfind("data:", 0) == 0) continue;
+            uris.push_back(uri);
+        }
+    }
+    return uris;
+}
+
+// Регистрация в базе ассетов ждёт путь ОТНОСИТЕЛЬНО корня проекта: по нему она
+// кладёт сайдкар .meta и по нему же потом отвечает на «где этот файл». Отдать
+// ей абсолютный путь значит записать ассет под ключом, которого в проекте нет.
+void RegisterInDatabase(const fs::path& file) {
+    sage::AssetDatabase& db = sage::AssetDatabase::Instance();
+    const std::string root = db.ProjectDir();
+    if (root.empty()) return;   // проект не открыт — регистрировать некуда
+    std::error_code ec;
+    const fs::path rel = fs::relative(file, fs::path(root), ec);
+    if (ec || rel.empty()) return;
+    db.Register(rel.generic_string());
+}
+
+} // namespace
+
+AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const fs::path& destDir) {
+    ImportReport report;
+    std::error_code ec;
+
+    if (!fs::exists(source, ec) || fs::is_directory(source, ec)) {
+        report.Error = "Файл не найден: " + source.string();
+        return report;
+    }
+    fs::create_directories(destDir, ec);
+    if (ec) {
+        report.Error = "Папка недоступна: " + ec.message();
+        return report;
+    }
+
+    // Уже в проекте — вносить нечего. Это не ошибка: человек мог выбрать файл в
+    // папке проекта просто потому, что диалог там и открылся.
+    const fs::path canonicalSrc = fs::weakly_canonical(source, ec);
+    const fs::path canonicalDst = fs::weakly_canonical(destDir / source.filename(), ec);
+    if (!ec && canonicalSrc == canonicalDst) {
+        report.Ok = true;
+        report.Created = canonicalDst;
+        return report;
+    }
+
+    // Спутники ищем ДО копирования: если модель ссылается на файлы, которых нет,
+    // сказать об этом надо про исходную папку, а не про проект.
+    const fs::path srcDir = source.parent_path();
+    std::string ext = ToLower(source.extension().string());
+    std::vector<std::string> companions;
+    if (ext == ".obj") {
+        // .mtl обычно называется как модель, но в файле может стоять и другое
+        // имя — читаем mtllib, а одноимённый добавляем на всякий случай.
+        std::ifstream obj(source);
+        std::string line;
+        while (std::getline(obj, line)) {
+            std::istringstream ls(line);
+            std::string key, name;
+            ls >> key;
+            if (key != "mtllib") continue;
+            while (ls >> name) companions.push_back(name);
+        }
+        companions.push_back(source.stem().string() + ".mtl");
+    } else if (ext == ".gltf") {
+        companions = GltfExternalUris(source);
+    }
+
+    // Картинки, на которые ссылаются найденные .mtl — второй уровень.
+    std::vector<std::string> nested;
+    for (const std::string& c : companions) {
+        if (ToLower(fs::path(c).extension().string()) != ".mtl") continue;
+        for (const std::string& tex : MtlTextureNames(srcDir / c)) nested.push_back(tex);
+    }
+    companions.insert(companions.end(), nested.begin(), nested.end());
+
+    auto copyOne = [&](const fs::path& from, const fs::path& to) -> bool {
+        std::error_code cec;
+        fs::create_directories(to.parent_path(), cec);
+        // Существующий файл НЕ перезаписываем: повторный импорт не должен
+        // затирать текстуру, которую после первого раза поправили.
+        if (fs::exists(to, cec)) return true;
+        fs::copy_file(from, to, cec);
+        return !cec;
+    };
+
+    const fs::path mainDst = destDir / source.filename();
+    if (!copyOne(source, mainDst)) {
+        report.Error = "Не удалось скопировать: " + source.filename().string();
+        return report;
+    }
+    report.Created = mainDst;
+    RegisterInDatabase(mainDst);
+
+    for (const std::string& rel : companions) {
+        // Путь спутника относительный — сохраняем его форму, иначе .gltf,
+        // ссылающийся на «textures/wood.png», после импорта не нашёл бы файл.
+        const fs::path from = srcDir / rel;
+        if (!fs::exists(from, ec) || fs::is_directory(from, ec)) {
+            report.Missing.push_back(rel);
+            continue;
+        }
+        const fs::path to = destDir / rel;
+        if (copyOne(from, to)) {
+            report.Extra.push_back(to);
+            RegisterInDatabase(to);
+        } else {
+            report.Missing.push_back(rel);
+        }
+    }
+
+    report.Ok = true;
+    return report;
+}
+
+void AssetsPanel::DrawImportButton(EditorHost& host) {
+    Project& project = host.CurrentProject();
+    ImGui::BeginDisabled(!project.Loaded());
+    if (ImGui::SmallButton("Импорт…")) {
+        FileBrowser::Config c;
+        c.Title = "Внести файл в проект";
+        // Пусто — показывать всё: в проект вносят и модели, и картинки, и звук,
+        // и чужие скрипты, а перечислять их фильтром значит однажды забыть
+        // формат, который движок уже понимает.
+        c.FilterLabel = "Все файлы";
+        m_importBrowser.Open(c);
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            project.Loaded()
+                ? "Скопировать файл со стороны в текущую папку проекта.\n"
+                  "Модель переезжает вместе со своими .mtl/.bin и текстурами."
+                : "Сначала откройте проект (File > New Project…)");
+    }
+
+    if (!m_importBrowser.Draw()) return;
+
+    const ImportReport r = ImportAsset(m_importBrowser.Result(), host.AssetsCwd());
+    if (!r.Ok) {
+        host.SetStatusMessage("Импорт не удался: " + r.Error);
+        LOG_ERROR("Editor") << "Импорт не удался: " << r.Error;
+        return;
+    }
+    m_selected = r.Created;
+
+    std::string message = "Внесено: " + r.Created.filename().string();
+    if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + " спутник(ов))";
+    if (!r.Missing.empty()) {
+        // Недостающие спутники — это будущее «модель без текстуры», и узнать о
+        // них надо здесь. Список уходит в консоль целиком: в статусной строке
+        // ему не поместиться, а первое имя уже подсказывает, что искать.
+        message += "; не найдено: " + r.Missing.front();
+        if (r.Missing.size() > 1) message += " и ещё " + std::to_string(r.Missing.size() - 1);
+        for (const std::string& m : r.Missing)
+            LOG_WARN("Editor") << "Импорт: спутник не найден — " << m;
+    }
+    host.SetStatusMessage(message);
+    LOG_INFO("Editor") << "Импорт: " << r.Created.string();
 }
 
 bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const fs::path& dir,
@@ -521,6 +762,15 @@ void AssetsPanel::Draw(EditorHost& host) {
     ImGui::SameLine();
     DrawBreadcrumb(host);
 
+    // Внесение файлов со стороны. До сих пор этого не было вовсе: панель умела
+    // ходить по папкам проекта и создавать пустые ассеты, а положить в проект
+    // СВОЮ модель или картинку можно было только мимо редактора — проводником.
+    // Человек при этом обычно шёл другим путём: выбирал файл прямо из «Загрузок»
+    // через «Обзор…», получал в сцене абсолютный путь и рабочий вид ровно до
+    // первой сборки игры (см. Project::AssetRef).
+    ImGui::SameLine();
+    DrawImportButton(host);
+
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##assets_search", "Search...", m_search, sizeof(m_search));
 
@@ -585,6 +835,20 @@ void AssetsPanel::Draw(EditorHost& host) {
     for (const auto& d : dirs) if (matches(d.path())) placeTile(d.path(), true);
     for (const auto& f : files) if (matches(f.path())) placeTile(f.path(), false);
     ImGui::PopStyleVar();
+
+    // Обложки файлов, которых в этой папке нет, больше не нужны — отпускаем и
+    // их буферы. Иначе за сеанс блуждания по проекту накопился бы буфер на
+    // КАЖДЫЙ ассет, который когда-либо показали, и все они висели бы в
+    // видеопамяти до выхода из редактора.
+    for (auto it = m_thumbs.begin(); it != m_thumbs.end();) {
+        std::error_code exists;
+        if (fs::path(it->first).parent_path() == cwd && fs::exists(it->first, exists)) {
+            ++it;
+            continue;
+        }
+        m_preview.ReleaseTarget(it->first);
+        it = m_thumbs.erase(it);
+    }
     if (!any) {
         ImGui::Spacing();
         ImGui::TextDisabled(m_search[0] ? "Nothing matches the search." : "This folder is empty.");

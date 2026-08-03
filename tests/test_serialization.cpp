@@ -563,3 +563,70 @@ TEST(Material_reads_files_written_before_the_split) {
     CHECK_FALSE(m.Render.DoubleSided);
     CHECK_NEAR(m.Render.PlanarReflectivity, 0.9f, 1e-5);
 }
+
+// --- v3 -> v4: цвет экземпляра стал множителем albedo, а не заменой ----------
+//
+// Правило наложения поменялось, и без миграции ЛЮБАЯ уже сделанная сцена
+// перекрасилась бы при первом открытии: мёртвый до сих пор color домножил бы
+// albedo материала. Проверяем обе стороны — у сущности с материалом он
+// обнуляется в нейтральный белый, у сущности без материала остаётся как был
+// (там color и был цветом объекта).
+TEST(Scene_migration_v3_to_v4_neutralises_a_dead_instance_colour) {
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 3,
+      "objects": [
+        {"id": 1, "name": "Painted",
+         "position": {"x":0,"y":0,"z":0}, "rotation": {"x":0,"y":0,"z":0},
+         "scale": {"x":1,"y":1,"z":1},
+         "color": [1.0, 0.05, 0.05],
+         "material": "assets/red.sagemat"},
+        {"id": 2, "name": "Plain",
+         "position": {"x":0,"y":0,"z":0}, "rotation": {"x":0,"y":0,"z":0},
+         "scale": {"x":1,"y":1,"z":1},
+         "color": [1.0, 0.05, 0.05]}
+      ]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+
+    // С материалом: цвет был мёртвым, стал нейтральным — вид сцены не изменился.
+    const nlohmann::json& painted = j["objects"][0]["color"];
+    CHECK_NEAR(painted[0].get<float>(), 1.0f, 1e-5f);
+    CHECK_NEAR(painted[1].get<float>(), 1.0f, 1e-5f);
+    CHECK_NEAR(painted[2].get<float>(), 1.0f, 1e-5f);
+
+    // Без материала цвет трогать нельзя — он и был цветом объекта.
+    const nlohmann::json& plain = j["objects"][1]["color"];
+    CHECK_NEAR(plain[1].get<float>(), 0.05f, 1e-5f);
+}
+
+// А это уже само правило: поправка МОДУЛИРУЕТ материал, одинаково у всех трёх
+// величин. Раньше правил было три разных, и цвет из них молчал громче всех.
+TEST(MeshRenderer_instance_overrides_modulate_the_material) {
+    MeshRendererComponent mr;
+    auto mat = std::make_shared<Material>();
+    mat->Albedo = {0.5f, 0.5f, 0.5f};
+    mat->Opacity = 0.8f;
+    mat->Emissive = {0.1f, 0.0f, 0.0f};
+    mat->EmissiveStrength = 1.0f;
+    mr.MaterialPtr = mat;
+
+    // Нейтральные поправки = «как в материале»: включение группы само по себе
+    // ничего не меняет.
+    CHECK_NEAR(EffectiveColor(mr).r, 0.5f, 1e-5f);
+    CHECK_NEAR(EffectiveOpacity(mr), 0.8f, 1e-5f);
+    CHECK_NEAR(EffectiveEmissive(mr).r, 0.1f, 1e-5f);
+
+    mr.Color = {1.0f, 0.5f, 0.0f};
+    mr.Opacity = 0.5f;
+    mr.Emissive = {0.2f, 0.0f, 0.0f};
+    CHECK_NEAR(EffectiveColor(mr).r, 0.5f, 1e-5f);    // 0.5 * 1.0
+    CHECK_NEAR(EffectiveColor(mr).g, 0.25f, 1e-5f);   // 0.5 * 0.5
+    CHECK_NEAR(EffectiveOpacity(mr), 0.4f, 1e-5f);    // 0.8 * 0.5
+    CHECK_NEAR(EffectiveEmissive(mr).r, 0.3f, 1e-5f); // 0.1 + 0.2
+
+    // Без материала поправка задаёт вид целиком — как и раньше.
+    mr.MaterialPtr = nullptr;
+    CHECK_NEAR(EffectiveColor(mr).g, 0.5f, 1e-5f);
+    CHECK_NEAR(EffectiveOpacity(mr), 0.5f, 1e-5f);
+}

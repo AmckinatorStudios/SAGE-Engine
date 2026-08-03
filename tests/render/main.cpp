@@ -1254,7 +1254,11 @@ void TestReflectionProbe(FrameRenderer& r) {
         o.GetTransform().Scale = scale;
         o.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
         o.Renderer().MeshPtr = cube;
-        o.Renderer().Color = color;
+        // Цвет задаётся ТОЛЬКО материалом. Раньше здесь стояло и
+        // `Renderer().Color = color` — при старом правиле «материал замещает
+        // цвет» лишняя строка ни на что не влияла, а по нынешнему (поправка
+        // экземпляра МОДУЛИРУЕТ материал, см. ecs/RenderComponents.h) она
+        // возвела бы цвет стены в квадрат.
         auto m = std::make_shared<Material>();
         m->Albedo = color;
         m->Roughness = 1.0f;

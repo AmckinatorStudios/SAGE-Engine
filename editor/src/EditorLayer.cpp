@@ -447,6 +447,29 @@ void EditorLayer::StartPlay() {
     // уже существовали к первому OnUpdate.
     m_playScripts->BindPhysics(*m_playPhysics);
 
+    // Состав кадра на время Play — ТОТ ЖЕ, что у собранной игры (см.
+    // PlayerLayer): скрипты, физика, анимация, частицы, звук в порядке,
+    // заданном один раз в RegisterCoreSystems.
+    //
+    // Без этой регистрации Play выглядел запущенным и не был им: AttachScript
+    // выше зовёт OnStart (и в консоли честно появляется «spin.lua attached
+    // to: …»), но UpdateAll не звал НИКТО — планировщик о скриптах не знал.
+    // То есть скрипт «привязывался и ничего не делал», а физика не считала ни
+    // одного шага. StopPlay при этом снимал системы "scripts"/"physics",
+    // которых никогда не добавляли, — по коду выхода из Play было видно
+    // намерение, но входа в него не было.
+    {
+        sage::CoreSystems core;
+        core.Scripts = m_playScripts.get();
+        core.Physics = m_playPhysics.get();
+        core.Particles = &m_renderer.Particles();
+        core.Audio = m_playAudio.get();
+        // Анимация уже зарегистрирована набором режима правки (превью) и
+        // повторной регистрацией только заменилась бы сама на себя.
+        core.Animation = false;
+        sage::RegisterCoreSystems(m_systems, core);
+    }
+
     m_playState = EditorPlayState::Playing;
     m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
     LOG_INFO("Editor") << "Play started (" << attached << " script(s), "
@@ -461,8 +484,11 @@ void EditorLayer::StopPlay() {
     // его ДО того, как заменить сцену восстановленным снапшотом.
     // Снимаем ДО разрушения объектов: система держит на них указатель, и
     // оставленная в кадре она обратилась бы к освобождённой памяти.
+    // Ровно то, что добавил StartPlay. "particles" и "animation" остаются: это
+    // превью режима правки, а не игровые системы.
     m_systems.Remove("scripts");
     m_systems.Remove("physics");
+    m_systems.Remove("audio");
     m_playScripts.reset();
     m_playPhysics.reset();
     // Курсор возвращается человеку РАНЬШЕ всего остального: игра могла его

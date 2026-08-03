@@ -10,6 +10,7 @@
 class EditorHost;
 class GameObject;
 class Texture;
+struct MeshRendererComponent;
 
 // Панель Inspector — свойства выбранной сущности (имя/Transform/MeshRenderer/
 // Material/компоненты с Add/Remove) и редактор выбранного в Assets файла
@@ -30,7 +31,7 @@ public:
 
 private:
     // Что за файл выбран в Assets — по нему выбирается редактор.
-    enum class AssetKind { None, Material, Model, Other };
+    enum class AssetKind { None, Material, Prefab, Model, Other };
     // Какая вкладка открыта. Следует за последним выбором человека, иначе
     // разделение стоило бы лишнего клика на каждое переключение.
     enum class Focus { Object, Asset };
@@ -48,6 +49,8 @@ private:
     std::string m_lastAssetPath;
 
     void DrawMaterialEditor(EditorHost& host);
+    // Префаб: вращаемая 3D-обложка + постановка в сцену (см. AssetPreview::RenderPrefab).
+    void DrawPrefabPreview(EditorHost& host);
 
     // Слот текстуры: превью, путь, «Обзор…», «Из Assets», «Очистить».
     //
@@ -66,8 +69,21 @@ private:
     std::string* m_browseTarget = nullptr;
     bool m_browseIsShader = false;   // после выбора шейдера нужен ShaderPtr.reset()
     bool m_browseIsMesh = false;     // после выбора модели её надо загрузить
+    bool m_browseIsMaterial = false; // после выбора материала его надо подгрузить
     bool m_pendingMeshLoad = false;  // загрузку делаем в кадре, а не из колбэка диалога
     void DrawModelImportEditor(EditorHost& host); // настройки импорта выбранной модели
+
+    // Mesh Renderer одной секцией, в порядке самой структуры компонента:
+    // ЧТО рисуем -> ЧЕМ красим -> чем ЭТОТ экземпляр отличается от других.
+    // Раньше первое и третье лежали вперемешку под заголовком «Mesh Renderer»,
+    // а второе — отдельным заголовком «Material», как будто это другой
+    // компонент; см. комментарий на месте вызова.
+    void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr);
+    void DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr);
+    void DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr);
+    // Материал модели — вместе с моделью: .sagemat рядом с файлом модели, если
+    // его ещё нет, и назначение его сущности.
+    void AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr);
     void DrawEntityProperties(EditorHost& host);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
 };

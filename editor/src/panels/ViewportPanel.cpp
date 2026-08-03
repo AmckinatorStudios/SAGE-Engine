@@ -359,10 +359,19 @@ void ViewportPanel::Draw(EditorHost& host) {
         glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
         glm::mat4 model = scene.WorldMatrix(selected.Entity());
 
+        const bool rectTool = (ImGuizmo::OPERATION)host.GizmoOp() == ImGuizmo::BOUNDS;
+
         // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
         // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
         // должен быть взят раньше него.
-        if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !host.InPlayMode()) {
+        //
+        // ImGuizmo::IsOver() НЕ ЗНАЕТ про ручки рамки (см. IsOver в ImGuizmo.cpp
+        // — там опрошены только translate/rotate/scale), поэтому для рамки
+        // снапшот берём по нажатию во вьюпорте. Без этого растягивание рамкой
+        // было единственной правкой сцены, которую нельзя отменить.
+        if (!ImGuizmo::IsUsing() && !host.InPlayMode() &&
+            (ImGuizmo::IsOver() ||
+             (rectTool && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)))) {
             host.CapturePendingSnapshot();
         }
 
@@ -408,7 +417,7 @@ void ViewportPanel::Draw(EditorHost& host) {
         const float* boundsSnapPtr = nullptr;
         float localBounds[6] = {-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f};
         float boundsSnap[3] = {0.0f, 0.0f, 0.0f};
-        if (op == ImGuizmo::BOUNDS) {
+        if (rectTool) {
             if (const MeshRendererComponent* mr =
                     scene.Registry().try_get<MeshRendererComponent>(selected.Entity())) {
                 if (mr->MeshPtr) {
@@ -425,16 +434,44 @@ void ViewportPanel::Draw(EditorHost& host) {
                 boundsSnap[0] = boundsSnap[1] = boundsSnap[2] = host.SnapMove();
                 boundsSnapPtr = boundsSnap;
             }
-            // BOUNDS без сопутствующей операции ImGuizmo не рисует ручки
-            // перемещения — добавляем перенос, иначе объект можно только
-            // растягивать, но не двигать, и рамка становится ловушкой.
+
+            // ОДИН инструмент, а не два поверх друг друга.
+            //
+            // BOUNDS сам по себе даёт только ручки растягивания, и рамка без
+            // переноса была бы ловушкой: объект можно растянуть, но не сдвинуть.
+            // Поэтому перенос нужен — но добавленный «как есть», он приносил с
+            // собой ВЕСЬ гизмо перемещения: три цветные стрелки и три квадрата
+            // плоскостей ровно там же, где рамка. Две системы ручек в одном
+            // месте перекрывают друг друга, и попасть по углу рамки, не задев
+            // стрелку, было делом везения — рамка выглядела «смешанной» с
+            // обычным гизмо и вела себя как он.
+            //
+            // Маска осей гасит и стрелки, и плоскости (ComputeTripodAxisAnd-
+            // Visibility в ImGuizmo проверяет её и для отрисовки, и для попадания),
+            // оставляя от переноса РОВНО центральный кружок — перетаскивание в
+            // плоскости экрана. Получается инструмент как в любом другом
+            // редакторе: рамка тянет грани, центр двигает целиком.
+            //
+            // Маска глобальна для ImGuizmo, поэтому снимается сразу после
+            // Manipulate — иначе следующий кадр с обычным гизмо остался бы без
+            // стрелок.
+            ImGuizmo::SetAxisMask(true, true, true);
             op = ImGuizmo::BOUNDS | ImGuizmo::TRANSLATE;
+
+            // Рамка считает ручки по СОБСТВЕННЫМ осям объекта (mModelSource в
+            // ImGuizmo), поэтому и центр обязан двигаться в том же
+            // пространстве: в WORLD повёрнутый объект уезжал бы не туда, куда
+            // его тянут. Та же причина, по которой LOCAL принудителен для Scale.
+            mode = ImGuizmo::LOCAL;
         }
 
-        if (ImGuizmo::Manipulate(glm::value_ptr(activeView), glm::value_ptr(activeProj),
+        const bool manipulated =
+            ImGuizmo::Manipulate(glm::value_ptr(activeView), glm::value_ptr(activeProj),
                                  op, mode, glm::value_ptr(model),
                                  nullptr, host.GizmoSnap() ? snapValues : nullptr,
-                                 boundsPtr, boundsSnapPtr)) {
+                                 boundsPtr, boundsSnapPtr);
+
+        if (manipulated) {
             // Мировая -> локальная: убираем вклад родителя.
             glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
             DecomposeToTransform(local, tr);
@@ -471,6 +508,12 @@ void ViewportPanel::Draw(EditorHost& host) {
     }
 
     // --- Пикинг ЛКМ (не по гизмо и не во время манипуляции) ---
+    //
+    // Маска осей снимается ПОСЛЕ этой проверки, а не сразу за Manipulate:
+    // ImGuizmo::IsOver() опрашивает попадание заново, и по снятой маске он
+    // «увидел» бы стрелки перемещения, которых у рамки не нарисовано. Клик
+    // рядом с невидимой осью не выбирал бы объект под курсором — тем более
+    // странно, что видимой причины для этого на экране нет.
     if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
         !ImGuizmo::IsOver() && !ImGuizmo::IsUsing()) {
         ImVec2 mp = ImGui::GetMousePos();
@@ -483,6 +526,11 @@ void ViewportPanel::Draw(EditorHost& host) {
             host.PickAtViewportWith(activeView, activeProj, u, v, io.KeyCtrl);
         }
     }
+
+    // Маска осей глобальна для ImGuizmo — снимаем её здесь, когда все опросы
+    // попадания этого кадра уже сделаны. Оставить её значило бы следующий кадр
+    // с обычным гизмо без стрелок.
+    ImGuizmo::SetAxisMask(false, false, false);
 
     // Инструменты (режим гизмо, snap, пространство, Play, режим рендера) —
     // в верхнем тулбаре редактора (ToolbarPanel), не оверлеем во вьюпорте.

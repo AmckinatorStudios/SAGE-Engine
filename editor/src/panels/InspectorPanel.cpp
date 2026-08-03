@@ -17,10 +17,14 @@
 #include "Project.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ModelLoader.h"
+#include "sage/render/ModelMaterial.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UIIcons.h"
+
+namespace fs = std::filesystem;
 
 // Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
 // ResourceManager — все сущности с этим материалом обновляются в вьюпорте
@@ -78,8 +82,11 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
     // текстуру, когда она уже найдена в дереве проекта.
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            path.assign((const char*)p->Data, (size_t)p->DataSize);
-            if (!path.empty() && path.back() == '\0') path.pop_back();
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            // Относительно проекта: абсолютный путь текстуры живёт ровно до
+            // сборки игры (см. Project::AssetRef).
+            path = host.CurrentProject().AssetRef(dropped);
         }
         ImGui::EndDragDropTarget();
     }
@@ -136,7 +143,7 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
     ImGui::SameLine();
     ImGui::BeginDisabled(!selIsImage);
     if (EditorIcons::Button("texture", "Из Assets")) {
-        path = host.SelectedAssetPath().string();
+        path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
     }
     ImGui::EndDisabled();
     if (!selIsImage && ImGui::IsItemHovered())
@@ -319,6 +326,329 @@ void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
     ImGui::TextDisabled("Baked into the mesh on load — affects editor and built game");
 }
 
+// Материал модели — вместе с моделью.
+//
+// ЗАЧЕМ. Файл .gltf/.glb/.obj несёт не только треугольники: там лежит материал
+// с albedo, металличностью, шероховатостью и картами — всё то, чем движок и так
+// умеет рисовать. До сих пор всё это выбрасывалось: в сцену приезжала белая
+// болванка, а привести её в тот вид, в котором её экспортировали, значило
+// вручную завести .sagemat и вручную прописать шесть путей к картинкам, ещё и
+// зная, что glTF пакует металличность и шероховатость в разные каналы одной
+// текстуры. Это и есть «модели не так развиты, как PBR-текстуры»: возможности
+// рендера были на месте, а дороги от файла модели до них не было.
+//
+// ЧТО ИМЕННО ДЕЛАЕТСЯ. Рядом с моделью появляется <имя>.sagemat, если его там
+// ещё нет, и назначается сущности. Уже существующий файл НЕ перезаписывается:
+// материал после импорта правят, и повторное «Загрузить» не повод стирать эту
+// правку — оно просто назначает готовое. Материал, назначенный человеком
+// вручную, тоже не трогается.
+void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr) {
+    if (mr.Ref.path.empty()) return;
+    if (!mr.MaterialPath.empty()) return;   // выбор человека главнее импорта
+
+    // Путь к самому файлу модели: в Ref он относительный (см. Project::AssetRef),
+    // а читать надо настоящий файл на диске.
+    const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(mr.Ref.path);
+    const fs::path matPath = fs::path(modelPath).replace_extension(".sagemat");
+
+    std::error_code ec;
+    if (!fs::exists(matPath, ec)) {
+        const ModelLoader::ExtractedMaterial ex = ModelLoader::ExtractMaterial(modelPath);
+        if (!ex.Found) {
+            // Нет материала в файле — и не надо: белая болванка это честный
+            // результат «в модели материала нет», а не поломка.
+            if (!ex.Warnings.empty())
+                host.SetStatusMessage("Материал модели: " + ex.Warnings.front());
+            return;
+        }
+
+        Material mat;
+        mat.Albedo = ex.Albedo;
+        mat.Emissive = ex.Emissive;
+        mat.EmissiveStrength = ex.EmissiveStrength;
+        mat.Metallic = ex.Metallic;
+        mat.Roughness = ex.Roughness;
+        mat.Opacity = ex.Opacity;
+        // Пути карт — относительно проекта: материал переживёт сборку игры и
+        // переезд проекта (см. Project::AssetRef).
+        const Project& project = host.CurrentProject();
+        mat.TexturePath = project.AssetRef(ex.AlbedoMap);
+        mat.NormalMapPath = project.AssetRef(ex.NormalMap);
+        mat.MetallicMapPath = project.AssetRef(ex.MetallicMap);
+        mat.RoughnessMapPath = project.AssetRef(ex.RoughnessMap);
+        mat.AOMapPath = project.AssetRef(ex.AOMap);
+        mat.EmissiveMap = project.AssetRef(ex.EmissiveMap);
+
+        try {
+            mat.SaveToFile(matPath.string());
+        } catch (const std::exception& e) {
+            LOG_ERROR("Editor") << "Материал модели не сохранён: " << e.what();
+            host.SetStatusMessage("Материал модели не сохранён — подробности в Console");
+            return;
+        }
+        sage::AssetDatabase::Instance().Register(matPath.string(), "material");
+        host.SetStatusMessage("Материал модели импортирован: " +
+                              matPath.filename().string() +
+                              (ex.HasAnyMap() ? " (с картами)" : ""));
+        LOG_INFO("Editor") << "Материал модели импортирован: " << matPath.string();
+    }
+
+    mr.MaterialPath = host.CurrentProject().AssetRef(matPath);
+    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+}
+
+// --- Mesh Renderer, часть 1: ЧТО рисуем --------------------------------------
+void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
+    ImGui::SeparatorText("Меш");
+
+    // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
+    const char* kinds[] = {"Нет", "Куб", "Сфера", "Плоскость", "Цилиндр", "Конус", "Модель"};
+    int kind = (int)mr.Ref.type;
+    if (ImGui::Combo("Источник", &kind, kinds, IM_ARRAYSIZE(kinds))) {
+        host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
+        mr.Ref.type = (MeshRef::Type)kind;
+        if (mr.Ref.type != MeshRef::Type::Model) {
+            mr.Ref.path.clear();
+            mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type); // Нет -> nullptr
+        }
+        // Model — путь задаётся ниже и грузится кнопкой.
+    }
+
+    if (mr.Ref.type == MeshRef::Type::Model) {
+        char pathBuf[512];
+        std::snprintf(pathBuf, sizeof(pathBuf), "%s", mr.Ref.path.c_str());
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##modelpath", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
+        host.TrackLastImGuiItem();
+        // Перетаскивание из панели Assets — тот же способ назначить файл, что и
+        // у слотов текстур материала. Раньше модель этого не умела, хотя тайл в
+        // Assets уже был источником перетаскивания.
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+                std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+                if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+                if (ModelLoader::IsSupportedModel(dropped)) {
+                    host.PushUndoSnapshot();
+                    mr.Ref.path = host.CurrentProject().AssetRef(dropped);
+                    m_pendingMeshLoad = true;
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        // «Обзор…» вместо «напечатай путь наизусть». Именно на этом шаге
+        // всё и заканчивалось: человек не помнит абсолютный путь к своей
+        // модели, а ошибка в нём давала только строчку в консоли.
+        if (EditorIcons::Button("folder", "Обзор…")) {
+            FileBrowser::Config c;
+            c.Title = "Выбрать модель";
+            c.Filters = {".obj", ".gltf", ".glb", ".sagemesh"};
+            c.FilterLabel = "Модели (*.obj, *.gltf, *.glb, *.sagemesh)";
+            if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+            m_browser.Open(c);
+            m_browseTarget = &mr.Ref.path;
+            m_browseIsShader = false;
+            m_browseIsMesh = true;
+        }
+        ImGui::SameLine();
+        const bool selIsModel = ModelLoader::IsSupportedModel(
+            host.SelectedAssetPath().extension().string());
+        ImGui::BeginDisabled(!selIsModel);
+        if (EditorIcons::Button("model", "Из Assets")) {
+            host.PushUndoSnapshot();
+            mr.Ref.path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
+            m_pendingMeshLoad = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (EditorIcons::Button("refresh", "Загрузить")) m_pendingMeshLoad = true;
+
+        if (m_pendingMeshLoad) {
+            m_pendingMeshLoad = false;
+            mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+            // GetModel сам логирует причину и отдаёт nullptr — сообщаем об
+            // этом ЗДЕСЬ, в панели: строчку в консоли легко не заметить, а
+            // «модель не появилась» без объяснения выглядит как поломка
+            // редактора.
+            if (!mr.MeshPtr) {
+                host.SetStatusMessage("Модель не загрузилась: " + mr.Ref.path +
+                                      " — подробности в Console");
+            } else {
+                // Материал модели — вместе с моделью, а не «потом руками».
+                // Подробности см. в AutoAssignModelMaterial.
+                AutoAssignModelMaterial(host, mr);
+            }
+        }
+        if (!mr.Ref.path.empty() && !mr.MeshPtr) {
+            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "Меш не загружен");
+            if (!ModelLoader::IsSupportedModel(mr.Ref.path)) {
+                ImGui::TextDisabled("Поддерживаются .obj, .gltf, .glb, .sagemesh");
+            }
+        }
+        // Абсолютный путь работает в редакторе и НЕ работает нигде больше —
+        // говорим об этом сразу, а не после сборки игры.
+        if (!mr.Ref.path.empty() && host.CurrentProject().Loaded() &&
+            std::filesystem::path(mr.Ref.path).is_absolute()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "Файл вне проекта");
+            ImGui::TextDisabled("В собранной игре не найдётся. Внесите его в проект:");
+            ImGui::TextDisabled("Assets -> Импорт…");
+        }
+    }
+
+    if (mr.MeshPtr) {
+        const glm::vec3 size = mr.MeshPtr->BoundsMax() - mr.MeshPtr->BoundsMin();
+        ImGui::TextDisabled("Треугольников: %d, габарит %.2f x %.2f x %.2f",
+                            (int)(mr.MeshPtr->IndexCount() / 3), size.x, size.y, size.z);
+    }
+}
+
+// --- Mesh Renderer, часть 2: ЧЕМ красим --------------------------------------
+void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr) {
+    ImGui::SeparatorText("Материал");
+
+    // Превью материала — шариком, а не квадратиком цвета: по квадратику не
+    // отличить металл от диэлектрика и гладкое от матового, то есть ровно то,
+    // ради чего материал и назначают. Тот же рендер, что в редакторе материала.
+    const float side = 64.0f;
+    if (mr.MaterialPtr) {
+        const uint64_t thumb = m_preview.RenderMaterial(mr.MaterialPtr, (int)side);
+        if (thumb) {
+            ImGui::Image((ImTextureID)(std::intptr_t)thumb, ImVec2(side, side), ImVec2(0, 1),
+                         ImVec2(1, 0));
+        } else {
+            ImGui::ColorButton("##mat_preview",
+                               ImVec4(mr.MaterialPtr->Albedo.r, mr.MaterialPtr->Albedo.g,
+                                      mr.MaterialPtr->Albedo.b, 1.0f),
+                               0, ImVec2(side, side));
+        }
+        ImGui::SameLine();
+    }
+
+    ImGui::BeginGroup();
+    if (mr.MaterialPath.empty()) {
+        ImGui::TextDisabled("Не назначен");
+        ImGui::TextDisabled("Объект рисуется поправками ниже как есть.");
+    } else {
+        ImGui::TextUnformatted(std::filesystem::path(mr.MaterialPath).filename().string().c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mr.MaterialPath.c_str());
+        if (!mr.MaterialPtr)
+            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "Файл не читается");
+    }
+
+    auto assign = [&](const std::string& raw) {
+        host.PushUndoSnapshot();
+        mr.MaterialPath = host.CurrentProject().AssetRef(raw);
+        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+    };
+
+    const bool selIsMaterial = host.SelectedAssetPath().extension() == ".sagemat";
+    ImGui::BeginDisabled(!selIsMaterial);
+    if (EditorIcons::Button("material", "Из Assets")) assign(host.SelectedAssetPath().string());
+    ImGui::EndDisabled();
+    if (!selIsMaterial && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Выберите .sagemat в панели Assets");
+    ImGui::SameLine();
+    if (EditorIcons::Button("folder", "Обзор…")) {
+        FileBrowser::Config c;
+        c.Title = "Выбрать материал";
+        c.Filters = {".sagemat"};
+        c.FilterLabel = "Материалы (*.sagemat)";
+        if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+        m_browser.Open(c);
+        m_browseTarget = &mr.MaterialPath;
+        m_browseIsShader = false;
+        m_browseIsMesh = false;
+        m_browseIsMaterial = true;
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(mr.MaterialPath.empty());
+    if (EditorIcons::Button("trash", "Убрать")) {
+        host.PushUndoSnapshot();
+        mr.MaterialPath.clear();
+        mr.MaterialPtr = nullptr;
+    }
+    ImGui::EndDisabled();
+    ImGui::EndGroup();
+
+    // Приём перетаскивания на всю группу выше — материал из Assets мышью.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            if (std::filesystem::path(dropped).extension() == ".sagemat") assign(dropped);
+        }
+        ImGui::EndDragDropTarget();
+    }
+}
+
+// --- Mesh Renderer, часть 3: чем ЭТОТ экземпляр отличается -------------------
+void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr) {
+    ImGui::SeparatorText("Поправки экземпляра");
+    // Одна подпись на всю группу вместо трёх разных правил, которые надо было
+    // помнить (см. EffectiveColor/EffectiveEmissive/EffectiveOpacity).
+    ImGui::TextDisabled(mr.MaterialPtr ? "Накладываются поверх материала."
+                                       : "Материала нет — задают вид объекта целиком.");
+
+    ImGui::ColorEdit3("Тон", &mr.Color.x); host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Множится на albedo материала. Белый — как в материале.");
+
+    ImGui::ColorEdit3("Свечение", &mr.Emissive.x); host.TrackLastImGuiItem();
+    ImGui::DragFloat("Сила свечения", &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Прибавляется к свечению материала. Больше 1 — ореол (bloom).");
+
+    // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
+    // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
+    ImGui::SliderFloat("Непрозрачность", &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Множится на непрозрачность материала.");
+
+    // Кнопка «как в материале» — вернуть поправки в нейтраль. Без неё «я где-то
+    // подкрутил цвет этому объекту» лечится только вспоминанием исходных чисел.
+    const bool neutral = mr.Color == glm::vec3(1.0f) && mr.Emissive == glm::vec3(0.0f) &&
+                         mr.Opacity >= 0.999f;
+    ImGui::BeginDisabled(neutral);
+    if (ImGui::SmallButton("Сбросить поправки")) {
+        host.PushUndoSnapshot();
+        mr.Color = glm::vec3(1.0f);
+        mr.Emissive = glm::vec3(0.0f);
+        mr.EmissiveStrength = 1.0f;
+        mr.Opacity = 1.0f;
+    }
+    ImGui::EndDisabled();
+}
+
+// Префаб в инспекторе: та же вращаемая обложка, что у материала. Крупнее, чем в
+// панели Assets, потому что здесь на неё и смотрят — выбирают, тот ли это ящик.
+void InspectorPanel::DrawPrefabPreview(EditorHost& host) {
+    const std::string path = host.SelectedAssetPath().string();
+    const float side = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
+    const uint64_t tex = m_preview.RenderPrefab(path, (int)side);
+    if (!tex) {
+        ImGui::TextDisabled("Обложки нет: в префабе не нашлось видимой геометрии");
+        ImGui::TextDisabled("(или файл не читается — подробности в Console).");
+    } else {
+        ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(side, side), ImVec2(0, 1),
+                     ImVec2(1, 0));
+        if (ImGui::IsItemHovered()) {
+            ImGuiIO& io = ImGui::GetIO();
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                m_preview.Orbit(io.MouseDelta.x * 0.5f, -io.MouseDelta.y * 0.5f);
+            if (io.MouseWheel != 0.0f) m_preview.Zoom(io.MouseWheel);
+            ImGui::SetTooltip("ЛКМ — вращать, колесо — приблизить");
+        }
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextDisabled("Превью");
+        if (ImGui::SmallButton("Сбросить вид")) m_preview.ResetView();
+        ImGui::EndGroup();
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Поставить в сцену", ImVec2(-1, 0))) host.InstantiatePrefab(path);
+}
+
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.SelectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
@@ -337,125 +667,22 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         ImGui::DragFloat3("Scale", &tr.Scale.x, 0.05f, 0.01f, 100.0f); host.TrackLastImGuiItem();
     }
 
+    // --- Mesh Renderer: ОДНА секция на весь компонент -------------------------
+    //
+    // Раньше их было две — «Mesh Renderer» и «Material», — и вторая выглядела
+    // отдельным компонентом, хотя правила ТЕ ЖЕ два поля того же
+    // MeshRendererComponent. Хуже того, они противоречили друг другу: сверху
+    // стоял Color, снизу подпись «материал заменяет Color», и после назначения
+    // материала верхний ползунок цвета переставал что-либо делать — молча.
+    //
+    // Теперь порядок повторяет саму структуру компонента (см.
+    // ecs/RenderComponents.h): ЧТО рисуем -> ЧЕМ красим -> чем ЭТОТ экземпляр
+    // отличается от других таких же.
     if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
-        ImGui::ColorEdit3("Color", &mr.Color.x);
-            host.TrackLastImGuiItem();
-            // Свечение объекта — отдельно от материала: сотня одинаковых ламп с
-            // разной яркостью не должна означать сотню материалов.
-            ImGui::ColorEdit3("Emissive", &mr.Emissive.x);
-            host.TrackLastImGuiItem();
-            ImGui::DragFloat("Emissive Strength", &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Больше 1 — объект даёт ореол (bloom)."); host.TrackLastImGuiItem();
-        // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
-        // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
-        ImGui::SliderFloat("Opacity", &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();
-
-        // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
-        const char* kinds[] = {"None", "Cube", "Sphere", "Plane", "Cylinder", "Cone", "Model"};
-        int kind = (int)mr.Ref.type;
-        if (ImGui::Combo("Mesh", &kind, kinds, IM_ARRAYSIZE(kinds))) {
-            host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
-            mr.Ref.type = (MeshRef::Type)kind;
-            if (mr.Ref.type == MeshRef::Type::Model) {
-                // Model — путь задаётся ниже и грузится по кнопке Load.
-            } else {
-                mr.Ref.path.clear();
-                mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type); // None -> nullptr
-            }
-        }
-        if (mr.Ref.type == MeshRef::Type::Model) {
-            char pathBuf[512];
-            std::snprintf(pathBuf, sizeof(pathBuf), "%s", mr.Ref.path.c_str());
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::InputText("##modelpath", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
-            host.TrackLastImGuiItem();
-
-            // «Обзор…» вместо «напечатай путь наизусть». Именно на этом шаге
-            // всё и заканчивалось: человек не помнит абсолютный путь к своей
-            // модели, а ошибка в нём давала только строчку в консоли.
-            if (EditorIcons::Button("folder", "Обзор…")) {
-                FileBrowser::Config c;
-                c.Title = "Выбрать модель";
-                c.Filters = {".obj", ".gltf", ".glb"};
-                c.FilterLabel = "Модели (*.obj, *.gltf, *.glb)";
-                if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
-                m_browser.Open(c);
-                m_browseTarget = &mr.Ref.path;
-                m_browseIsShader = false;
-                m_browseIsMesh = true;
-            }
-            ImGui::SameLine();
-            const std::string selExt = host.SelectedAssetPath().extension().string();
-            const bool selIsModel = ModelLoader::IsSupportedModel(selExt);
-            ImGui::BeginDisabled(!selIsModel);
-            if (EditorIcons::Button("model", "Из Assets")) {
-                host.PushUndoSnapshot();
-                mr.Ref.path = host.SelectedAssetPath().string();
-                m_pendingMeshLoad = true;
-            }
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            if (EditorIcons::Button("refresh", "Загрузить")) m_pendingMeshLoad = true;
-
-            if (m_pendingMeshLoad) {
-                m_pendingMeshLoad = false;
-                mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
-                // GetModel сам логирует причину и отдаёт nullptr — сообщаем об
-                // этом ЗДЕСЬ, в панели: строчку в консоли легко не заметить, а
-                // «модель не появилась» без объяснения выглядит как поломка
-                // редактора.
-                if (!mr.MeshPtr) {
-                    host.SetStatusMessage("Модель не загрузилась: " + mr.Ref.path +
-                                          " — подробности в Console");
-                }
-            }
-            if (!mr.Ref.path.empty() && !mr.MeshPtr) {
-                ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "Меш не загружен");
-                if (!ModelLoader::IsSupportedModel(mr.Ref.path)) {
-                    ImGui::TextDisabled("Поддерживаются .obj, .gltf, .glb");
-                }
-            }
-        }
-    }
-
-    // --- Материал (.sagemat): заменяет Color, общий для всех сущностей с ним ---
-    if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
-        MeshRendererComponent& mr = obj.Renderer();
-        if (mr.MaterialPath.empty()) {
-            ImGui::TextDisabled("No material (entity uses Color above)");
-        } else {
-            if (mr.MaterialPtr) {
-                ImGui::ColorButton("##mat_preview",
-                                   ImVec4(mr.MaterialPtr->Albedo.r, mr.MaterialPtr->Albedo.g,
-                                          mr.MaterialPtr->Albedo.b, 1.0f));
-                ImGui::SameLine();
-            }
-            ImGui::TextWrapped("%s", mr.MaterialPath.c_str());
-        }
-
-        // Назначение: выбери .sagemat в Assets (клик по тайлу) — тут появится
-        // кнопка Assign. Отдельного файлового диалога нет намеренно: панель
-        // Assets и есть браузер файлов проекта.
-        if (host.SelectedAssetPath().extension() == ".sagemat") {
-            std::string label = "Assign \"" + host.SelectedAssetPath().filename().string() + "\"";
-            if (ImGui::Button(label.c_str())) {
-                host.PushUndoSnapshot();
-                mr.MaterialPath = host.SelectedAssetPath().string();
-                mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
-            }
-        } else {
-            ImGui::TextDisabled("Select a .sagemat in Assets to assign it");
-        }
-        if (!mr.MaterialPath.empty()) {
-            if (ImGui::Button("Clear Material")) {
-                host.PushUndoSnapshot();
-                mr.MaterialPath.clear();
-                mr.MaterialPtr = nullptr;
-            }
-        }
+        DrawMeshSlot(host, mr);
+        DrawMaterialSlot(host, mr);
+        DrawInstanceOverrides(host, mr);
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
@@ -1144,11 +1371,24 @@ void InspectorPanel::Draw(EditorHost& host) {
     // Результат обзора приходит через кадр после нажатия — кладём его в то поле,
     // ради которого диалог открывали.
     if (m_browser.Draw() && m_browseTarget) {
-        *m_browseTarget = m_browser.Result().string();
+        // AssetRef, а не Result().string(): диалог отдаёт АБСОЛЮТНЫЙ путь, и в
+        // таком виде он до сих пор уезжал в сцену — работая в этом редакторе на
+        // этой машине и нигде больше (см. Project::AssetRef).
+        *m_browseTarget = host.CurrentProject().AssetRef(m_browser.Result());
         m_browseTarget = nullptr;
         if (m_browseIsMesh) {
             m_browseIsMesh = false;
             m_pendingMeshLoad = true;   // грузим в том же кадре, ниже по панели
+        }
+        if (m_browseIsMaterial) {
+            m_browseIsMaterial = false;
+            // Материал грузим сразу: без указателя объект остался бы с путём и
+            // без вида, и это выглядело бы как «выбрал материал, ничего не произошло».
+            if (GameObject sel = host.SelectedObject(); sel.Valid()) {
+                MeshRendererComponent& mr = sel.Renderer();
+                if (!mr.MaterialPath.empty())
+                    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+            }
         }
         if (m_browseIsShader) {
             if (std::shared_ptr<Material> m =
@@ -1260,6 +1500,7 @@ InspectorPanel::AssetKind InspectorPanel::ClassifyAsset(const std::filesystem::p
     if (path.empty()) return AssetKind::None;
     const std::string ext = path.extension().string();
     if (ext == ".sagemat") return AssetKind::Material;
+    if (ext == ".sageprefab") return AssetKind::Prefab;
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return AssetKind::Model;
     return AssetKind::Other;
 }
@@ -1288,6 +1529,11 @@ void InspectorPanel::DrawAssetSection(EditorHost& host, AssetKind kind) {
             DrawSectionHeader("material", "материал", name,
                               "Файл на диске — изменится у ВСЕХ объектов с этим материалом.");
             DrawMaterialEditor(host);
+            break;
+        case AssetKind::Prefab:
+            DrawSectionHeader("cube", "префаб", name,
+                              "Заготовка-поддерево: двойной клик в Assets ставит копию в сцену.");
+            DrawPrefabPreview(host);
             break;
         case AssetKind::Model:
             DrawSectionHeader("model", "модель", name,

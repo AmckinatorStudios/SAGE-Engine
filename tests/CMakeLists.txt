@@ -25,6 +25,7 @@ add_executable(sage_tests
     test_picking.cpp
     test_assetformat.cpp
     test_import.cpp
+    test_modelmaterial.cpp
     test_texformat.cpp
 )
 

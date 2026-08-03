@@ -3,10 +3,13 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "AssetPreview.h"
+#include "FileBrowser.h"
 
 class EditorHost;
+class Project;
 
 // Панель Assets — браузер файлов проекта: breadcrumb, сетка цветных тайлов по
 // типу файла, поиск, создание (New Folder/Script/Text/Material по ПКМ),
@@ -33,12 +36,44 @@ public:
                             const std::filesystem::path& dir,
                             std::filesystem::path& outCreated, std::string& err);
 
+    // Что получилось при внесении файла в проект.
+    struct ImportReport {
+        bool Ok = false;
+        std::filesystem::path Created;               // главный файл в проекте
+        std::vector<std::filesystem::path> Extra;    // спутники (.mtl, .bin, текстуры)
+        std::vector<std::string> Missing;            // спутники, которых не нашлось
+        std::string Error;
+    };
+
+    // Вносит ЧУЖОЙ файл в проект: копирует его в destDir вместе со спутниками и
+    // регистрирует в базе ассетов.
+    //
+    // ЗАЧЕМ ЭТО ОТДЕЛЬНАЯ ОПЕРАЦИЯ, А НЕ «просто скопируй файл». Модель почти
+    // никогда не один файл: у .obj рядом лежит .mtl, у него — картинки, у
+    // .gltf — .bin с геометрией и те же картинки. Скопировать один .obj значит
+    // получить в проекте модель, которая грузится без материала и без текстур,
+    // причём молча. Здесь спутники разбираются и переезжают вместе с ним, а те,
+    // что не нашлись, попадают в отчёт — «чего-то не хватает» человек должен
+    // узнать сейчас, а не по виду модели в сцене.
+    //
+    // Публично: используется и панелью, и self-test'ом редактора.
+    static ImportReport ImportAsset(const std::filesystem::path& source,
+                                    const std::filesystem::path& destDir);
+
 private:
-    // Превью карточек. Материалы рендерятся по одному за кадр и запоминаются
-    // (см. ThumbnailFor): один такой рендер — полный проход сцены со светом.
+    // Превью карточек. Материалы, префабы и модели рендерятся по одному за кадр
+    // и запоминаются (см. ThumbnailFor): один такой рендер — полный проход
+    // сцены со светом.
     uint64_t ThumbnailFor(const std::filesystem::path& path, bool isDir);
     AssetPreview m_preview;
-    std::unordered_map<std::string, uint64_t> m_matThumbs;
+    struct Thumb {
+        uint64_t Id = 0;      // 0 — превью не получилось (негативный кэш)
+        long long Stamp = 0;  // время правки файла на момент съёмки
+    };
+    // Ключ — путь к файлу. Штамп времени в значении: правка материала или
+    // пересохранение префаба обязаны обновить обложку, иначе в панели остаётся
+    // картинка того, чего в файле уже нет.
+    std::unordered_map<std::string, Thumb> m_thumbs;
     bool m_thumbRenderedThisFrame = false;
 
     // Конвертация в свои форматы движка (sage/assets/import/Convert.h).
@@ -48,6 +83,10 @@ private:
     void DrawBreadcrumb(EditorHost& host);
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
     void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели
+
+    // Внесение чужих файлов в проект: диалог + отчёт в статусную строку.
+    void DrawImportButton(EditorHost& host);
+    FileBrowser m_importBrowser;
 
     char m_search[128] = "";
     std::filesystem::path m_selected;      // выделенный тайл

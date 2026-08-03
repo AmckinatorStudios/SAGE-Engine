@@ -40,7 +40,9 @@
 
 #include "sage/scene/Prefab.h"
 #include "sage/render/ModelLoader.h"
+#include "sage/render/ModelMaterial.h"
 #include "sage/assets/import/Convert.h"
+#include "AssetPreview.h"
 
 namespace fs = std::filesystem;
 
@@ -437,8 +439,14 @@ void EditorLayer::RunSelfTest() {
             float rotBefore = green.GetTransform().Rotation.y;
 
             StartPlay();
-            // Несколько тиков «вручную» — self-test выполняется до главного цикла.
-            for (int i = 0; i < 5; ++i) m_playScripts->UpdateAll(0.1f);
+            // Тики ЧЕРЕЗ ПЛАНИРОВЩИК, а не вызовом m_playScripts->UpdateAll:
+            // self-test выполняется до главного цикла, но проверять он обязан
+            // тот же путь, которым идёт настоящий кадр (см. OnUpdate). Прямой
+            // вызов проверял только сам ScriptEngine — и потому пропустил
+            // ровно ту поломку, ради которой этот тест и написан: StartPlay не
+            // регистрировал скрипты в планировщике, Play «работал» в тесте и
+            // не делал ничего в редакторе.
+            for (int i = 0; i < 5; ++i) m_systems.Run(*m_scene, 0.1f);
             float rotDuring = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
             StopPlay();
             float rotAfter = m_scene->FindByName("Green Cube").GetTransform().Rotation.y;
@@ -470,7 +478,8 @@ void EditorLayer::RunSelfTest() {
                 LOG_ERROR("Editor") << "SELFTEST: physics failed - no bodies created";
                 ok = false;
             }
-            for (int i = 0; i < 10; ++i) m_playPhysics->Step(*m_scene, 0.1f);
+            // Тоже через планировщик — по той же причине, что и скрипты выше.
+            for (int i = 0; i < 10; ++i) m_systems.Run(*m_scene, 0.1f);
             float yDuring = m_scene->FindByName("Green Cube").GetTransform().Position.y;
             StopPlay();
             float yAfter = m_scene->FindByName("Green Cube").GetTransform().Position.y;
@@ -1231,11 +1240,119 @@ void EditorLayer::RunSelfTest() {
         m_selection.clear();
     }
 
+    // --- Свои ассеты: внесение файла со стороны и переносимость ссылок --------
+    //
+    // Ровно тот путь, на котором «не грузятся мои ассеты» и заканчивалось:
+    // модель лежит НЕ в проекте, в редакторе она открывается, а в собранной
+    // игре её нет — потому что в сцену уехал абсолютный путь этой машины.
+    if (ok) {
+        // Чужая папка: не проект и не рядом с ним.
+        const fs::path outside = fs::temp_directory_path() / "sage_selftest_outside";
+        fs::remove_all(outside, ec);
+        fs::create_directories(outside, ec);
+
+        // Модель со спутниками: .obj -> .mtl -> текстура. Именно этот случай
+        // ломался при «просто скопируй файл»: модель без .mtl приезжает без
+        // материала, и молча.
+        { std::ofstream f(outside / "crate.obj");
+          f << "mtllib crate.mtl\nusemtl painted\n"
+               "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n"; }
+        { std::ofstream f(outside / "crate.mtl");
+          f << "newmtl painted\nKd 0.2 0.6 0.9\nmap_Kd crate_albedo.png\n"; }
+        { std::ofstream f(outside / "crate_albedo.png", std::ios::binary); f << "png-заглушка"; }
+
+        const fs::path destDir = m_project.AssetsDir() / "selftest_import";
+        const AssetsPanel::ImportReport rep = AssetsPanel::ImportAsset(outside / "crate.obj", destDir);
+        if (!rep.Ok) {
+            LOG_ERROR("Editor") << "SELFTEST: импорт не удался: " << rep.Error;
+            ok = false;
+        } else if (!fs::exists(destDir / "crate.obj", ec) ||
+                   !fs::exists(destDir / "crate.mtl", ec) ||
+                   !fs::exists(destDir / "crate_albedo.png", ec)) {
+            LOG_ERROR("Editor") << "SELFTEST: импорт не принёс спутников модели (.mtl/текстура)";
+            ok = false;
+        } else if (!rep.Missing.empty()) {
+            LOG_ERROR("Editor") << "SELFTEST: импорт потерял спутник: " << rep.Missing.front();
+            ok = false;
+        }
+
+        // Ссылка на внесённый файл обязана быть ОТНОСИТЕЛЬНОЙ: именно так её
+        // найдёт собранная игра, делающая chdir в свою папку.
+        if (ok) {
+            const std::string ref = m_project.AssetRef(destDir / "crate.obj");
+            if (ref.empty() || fs::path(ref).is_absolute() ||
+                ref != "assets/selftest_import/crate.obj") {
+                LOG_ERROR("Editor") << "SELFTEST: ссылка на ассет не относительна проекту: " << ref;
+                ok = false;
+            }
+            // ...а на файл ВНЕ проекта — остаться как есть: врать про
+            // относительный путь там, где его нет, хуже, чем честный абсолютный.
+            const std::string outsideRef = m_project.AssetRef(outside / "crate.obj");
+            if (!fs::path(outsideRef).is_absolute()) {
+                LOG_ERROR("Editor") << "SELFTEST: путь вне проекта подменён: " << outsideRef;
+                ok = false;
+            }
+            // И по относительной ссылке файл обязан НАХОДИТЬСЯ — иначе она
+            // переносима, но бесполезна.
+            if (ok && !ModelLoader::IsSupportedModel(ref)) {
+                LOG_ERROR("Editor") << "SELFTEST: относительная ссылка не опознана как модель";
+                ok = false;
+            }
+            if (ok && !ResourceManager::Instance().GetModel(ref)) {
+                LOG_ERROR("Editor") << "SELFTEST: модель не грузится по относительной ссылке " << ref;
+                ok = false;
+            }
+        }
+
+        // Материал модели приезжает ВМЕСТЕ с ней: .sagemat рядом, с albedo из
+        // .mtl. Без этого модель в сцене — белая болванка.
+        if (ok) {
+            const ModelLoader::ExtractedMaterial ex =
+                ModelLoader::ExtractMaterial((destDir / "crate.obj").string());
+            if (!ex.Found || std::abs(ex.Albedo.g - 0.6f) > 1e-3f) {
+                LOG_ERROR("Editor") << "SELFTEST: материал модели не прочитан из .mtl";
+                ok = false;
+            }
+        }
+        fs::remove_all(outside, ec);
+    }
+
+    // --- 3D-обложка префаба ---------------------------------------------------
+    //
+    // У материала обложка была, у префаба — синий прямоугольник с надписью
+    // PREFAB, одинаковый у всех. Проверяем, что теперь префаб реально
+    // снимается: непустой хендл текстуры — это состоявшийся проход рендера.
+    if (ok) {
+        GameObject box = m_scene->CreateObject("SelfTestPrefabCover");
+        MeshRendererComponent& bmr = box.Renderer();
+        bmr.Ref.type = MeshRef::Type::Cube;
+        bmr.MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        const fs::path coverPrefab = m_project.AssetsDir() / "selftest_cover.sageprefab";
+        std::string cerr;
+        if (!sage::scene::SavePrefab(*m_scene, box.Entity(), coverPrefab.string(), cerr)) {
+            LOG_ERROR("Editor") << "SELFTEST: префаб для обложки не сохранился: " << cerr;
+            ok = false;
+        } else {
+            // Своё превью, а не панельное: self-test идёт до первого кадра, и
+            // панели ещё ничего не рисовали. Shutdown обязателен здесь же —
+            // буфер превью это объект драйвера, а контекст жив только сейчас.
+            AssetPreview cover;
+            const uint64_t tex = cover.RenderPrefab(coverPrefab.string(), 96);
+            cover.Shutdown();
+            if (tex == 0) {
+                LOG_ERROR("Editor") << "SELFTEST: 3D-обложка префаба не отрисовалась";
+                ok = false;
+            }
+        }
+        m_scene->RemoveObject(box.Id());
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho, "
+                               << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
+                               << "import + asset-refs + model-material + prefab-cover, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
