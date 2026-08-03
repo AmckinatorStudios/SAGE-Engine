@@ -215,7 +215,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     return true;
 }
 
-bool EngineConfig::SaveFile(const std::string& path) const {
+std::string EngineConfig::ToJsonString() const {
     json j;
     j["window"] = {
         {"width", Width}, {"height", Height}, {"title", Title},
@@ -251,13 +251,16 @@ bool EngineConfig::SaveFile(const std::string& path) const {
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
     };
+    return j.dump(2);
+}
 
+bool EngineConfig::SaveFile(const std::string& path) const {
     std::ofstream f(path);
     if (!f) {
         LOG_ERROR("Config") << "Не удалось записать настройки: " << path;
         return false;
     }
-    f << j.dump(2) << "\n";
+    f << ToJsonString() << "\n";
     LOG_INFO("Config") << "Сохранены настройки: " << path;
     return true;
 }

@@ -28,9 +28,30 @@ PostFXSettings FxFromConfig(const sage::EngineConfig& cfg) {
     fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
     fx.MotionBlurSamples = cfg.MotionBlurSamples;
     fx.ChromaticAberration = cfg.ChromaticAberration;
-    fx.FxaaEnabled = cfg.Fxaa;
     fx.FxaaContrastThreshold = cfg.FxaaContrastThreshold;
+
+    // FXAA и MSAA НЕ СКЛАДЫВАЮТСЯ.
+    //
+    // Это и есть «сглаживание не работает, а картинка мыльная»: они лечат одно
+    // и то же разными способами, и второй проход поверх первого уже нечего
+    // сглаживать — зато он честно размывает всё, что похоже на кромку, включая
+    // текстуры и мелкие детали. MSAA решает задачу в источнике (растеризатор
+    // считает покрытие пикселя геометрией), FXAA — по готовым пикселям, гадая
+    // по яркости; когда работает первый, второй только портит.
+    fx.FxaaEnabled = cfg.Fxaa && SceneSamples(cfg) <= 1;
     return fx;
+}
+
+int SceneSamples(const sage::EngineConfig& cfg) {
+    // Ступени растеризатора: всё, что между ними, округляем ВНИЗ — обещать
+    // человеку 8x и молча дать 4x хуже, чем дать ровно то, что он выбрал из
+    // доступного. Выше 8 не поднимаемся: выигрыш уже неразличим, а цена растёт
+    // линейно по памяти буфера.
+    const int m = cfg.Msaa;
+    if (m >= 8) return 8;
+    if (m >= 4) return 4;
+    if (m >= 2) return 2;
+    return 1;
 }
 
 // ============================================================================
@@ -59,6 +80,7 @@ uniform sampler2D uDepth;
 uniform mat4 uProj;
 uniform mat4 uInvProj;
 uniform float uRadius;
+uniform vec2 uTexel;   // 1/размер кадра — по нему берутся соседи для нормали
 
 vec3 ViewPos(vec2 uv) {
     float d = texture(uDepth, uv).r;
@@ -66,13 +88,37 @@ vec3 ViewPos(vec2 uv) {
     return c.xyz / c.w;
 }
 
+// Нормаль из глубины по ЛУЧШИМ соседям, а не по производным.
+//
+// Раньше здесь стояло normalize(cross(dFdx(P), dFdy(P))). На ровной
+// поверхности это верно, а на СИЛУЭТЕ — там, где в соседнем пикселе лежит
+// объект в трёх метрах позади, — производная берётся между двумя разными
+// поверхностями, и «нормаль» получается случайной. Дальше по этой нормали
+// строится полусфера выборки, и она смотрит куда попало: вдоль каждого контура
+// в кадре идёт кайма из шума. Ровно это и читается как «АО грязный» — грязь
+// собирается не по площадям, а по краям предметов.
+//
+// Лечится тем, что из двух соседей по каждой оси берётся БЛИЖЕ ПО ГЛУБИНЕ к
+// центральному: он почти наверняка лежит на той же поверхности, а тот, что
+// перепрыгнул на другой объект, отбрасывается.
+vec3 NormalFromDepth(vec2 uv, vec3 P) {
+    vec3 l = ViewPos(uv - vec2(uTexel.x, 0.0));
+    vec3 r = ViewPos(uv + vec2(uTexel.x, 0.0));
+    vec3 d = ViewPos(uv - vec2(0.0, uTexel.y));
+    vec3 u = ViewPos(uv + vec2(0.0, uTexel.y));
+    vec3 dx = (abs(l.z - P.z) < abs(r.z - P.z)) ? (P - l) : (r - P);
+    vec3 dy = (abs(d.z - P.z) < abs(u.z - P.z)) ? (P - d) : (u - P);
+    vec3 n = cross(dx, dy);
+    float len2 = dot(n, n);
+    return len2 > 1e-12 ? n * inversesqrt(len2) : vec3(0.0, 0.0, 1.0);
+}
+
 void main() {
     float d = texture(uDepth, vUV).r;
     if (d >= 1.0) { FragColor = vec4(1.0); return; } // фон — без затенения
 
     vec3 P = ViewPos(vUV);
-    // Нормаль из производных вид-позиции (не нужен отдельный G-буфер нормалей).
-    vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+    vec3 N = NormalFromDepth(vUV, P);
     if (dot(N, -P) < 0.0) N = -N; // ориентируем к камере (камера в начале координат)
 
     // Пер-пиксельный угол дизеринга (interleaved gradient noise).
@@ -101,26 +147,68 @@ void main() {
 
         float sampleZ = ViewPos(suv).z; // реальная глубина сцены в этой точке экрана
         // Затенён, если реальная поверхность ближе к камере, чем сэмпл (z больше).
+        //
+        // Допуск ПРОПОРЦИОНАЛЕН радиусу, а не постоянные два сантиметра. Радиус
+        // задаётся в метрах и его правят: при 0.1 м фиксированный допуск съедал
+        // пятую часть проб (мелкие щели переставали затеняться), при 3 м не
+        // спасал от самозатенения на пологих поверхностях — те самые разводы,
+        // которые видно на полу.
+        float bias = max(uRadius * 0.02, 0.005);
         float rangeCheck = smoothstep(0.0, 1.0, uRadius / max(abs(P.z - sampleZ), 1e-4));
-        occ += (sampleZ >= sp.z + 0.02 ? 1.0 : 0.0) * rangeCheck;
+        occ += (sampleZ >= sp.z + bias ? 1.0 : 0.0) * rangeCheck;
     }
     float ao = 1.0 - occ / float(N_SAMPLES);
-    FragColor = vec4(vec3(ao), 1.0);
+    // Линейная глубина в альфу — по ней размытие ниже отличает свою поверхность
+    // от чужой. Отдельный проход ради этого не нужен: канал уже есть и пустует.
+    FragColor = vec4(vec3(ao), -P.z);
 }
 )";
 
-// Размытие AO (4x4 бокс) — убирает шум выборки.
+// Размытие AO с УЧЁТОМ ГЛУБИНЫ (bilateral), крестом 4+4.
+//
+// Что было не так с простым боксом. Во-первых, он усреднял через силуэты:
+// затенение из-под ножки стула размазывалось на стену в трёх метрах позади, и
+// вокруг каждого предмета появлялся серый ореол — второй по заметности дефект
+// после шума. Во-вторых, окно `for (x = -2; x < 2)` даёт смещения -2,-1,0,1 —
+// оно НЕ СИММЕТРИЧНО, и всё изображение AO уезжало на полпикселя вверх-влево.
+// На градиенте это видно как тонкая тёмная кайма с одной стороны предмета и
+// светлая с другой.
+//
+// Разделённый крест (сначала по горизонтали, потом по вертикали) даёт то же
+// сглаживание за 9 выборок вместо 16 — при этом отбрасывая соседей, чья
+// глубина далеко от центральной.
 const char* kAoBlurFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
 uniform sampler2D uAO;
 uniform vec2 uTexel;
+uniform vec2 uDirection;   // (1,0) — горизонтальный проход, (0,1) — вертикальный
+
 void main() {
-    float sum = 0.0;
-    for (int x = -2; x < 2; ++x)
-        for (int y = -2; y < 2; ++y)
-            sum += texture(uAO, vUV + vec2(float(x), float(y)) * uTexel).r;
-    FragColor = vec4(vec3(sum / 16.0), 1.0);
+    // Затенение в R, линейная глубина в ALPHA (см. проход SSAO выше). Читать
+    // надо именно .ra: в .g лежит та же величина затенения, и фильтр по ней
+    // сравнивал бы AO сам с собой — то есть бережно сохранял бы ровно тот шум,
+    // ради которого его и завели.
+    vec2 c = texture(uAO, vUV).ra;
+    float centerDepth = c.y;
+    float sum = c.x;
+    float weight = 1.0;
+
+    // Порог «та же поверхность» пропорционален глубине: на десяти метрах
+    // сантиметровая разница — это та же стена, на десяти сантиметрах — уже
+    // другая. Постоянный порог работал бы ровно на одной дистанции.
+    float tolerance = max(centerDepth * 0.02, 0.02);
+
+    for (int i = 1; i <= 4; ++i) {
+        vec2 step = uDirection * uTexel * float(i);
+        for (int s = -1; s <= 1; s += 2) {
+            vec2 t = texture(uAO, vUV + step * float(s)).ra;
+            float w = abs(t.y - centerDepth) < tolerance ? 1.0 : 0.0;
+            sum += t.x * w;
+            weight += w;
+        }
+    }
+    FragColor = vec4(vec3(sum / weight), centerDepth);
 }
 )";
 
@@ -353,18 +441,78 @@ void main() {
     // продолжает работать, но смешивает пиксель с СОБСТВЕННОЙ стороной кромки
     // и почти ничего не меняет.
     float stepLen = horizontal ? uTexel.y : uTexel.x;
-    if (grad1 > grad2) stepLen = -stepLen;
+    float lOther = l2;
+    if (grad1 > grad2) { stepLen = -stepLen; lOther = l1; }
 
-    // Вес смешивания — насколько пиксель отличается от среднего по окрестности.
-    // Возведение в квадрат сохраняет резкими явные контуры и сглаживает слабые
-    // ступеньки, ради которых всё и затевалось.
+    // --- ПОИСК ВДОЛЬ КРОМКИ ---------------------------------------------------
+    //
+    // Без него всё вышенаписанное сглаживает ровно ОДИН пиксель: берётся сосед
+    // через полтекселя и подмешивается по силе локального контраста. Ступенька
+    // при этом остаётся ступенькой — она длиной в несколько пикселей, а
+    // подмешали мы одинаково по всей её длине, — зато вся картинка получает
+    // лёгкое размытие. Ровно это и читается как «сглаживание не работает, а
+    // картинка мыльная»: цена заплачена, эффекта нет.
+    //
+    // Настоящий FXAA сначала идёт ВДОЛЬ кромки в обе стороны и ищет, где она
+    // кончается. Зная расстояние до обоих концов и то, с какой стороны стоит
+    // текущий пиксель, можно посчитать, КАКУЮ ЧАСТЬ пикселя кромка накрывает, —
+    // и подмешать ровно её. Тогда длинная пологая ступенька превращается в
+    // ровный градиент вдоль всей своей длины, а плоские места не трогаются
+    // вовсе.
+    vec2 edgeDir = horizontal ? vec2(uTexel.x, 0.0) : vec2(0.0, uTexel.y);
+    vec2 halfStep = horizontal ? vec2(0.0, stepLen * 0.5) : vec2(stepLen * 0.5, 0.0);
+    // Яркость НА САМОЙ кромке (между двумя её сторонами) и допуск, по которому
+    // мы считаем, что кромка ещё продолжается.
+    float lEdge = (lM + lOther) * 0.5;
+    float gradScaled = 0.25 * max(abs(lOther - lM), 1e-5);
+
+    vec2 posN = vUV + halfStep - edgeDir;
+    vec2 posP = vUV + halfStep + edgeDir;
+    float endN = 0.0, endP = 0.0;
+    bool doneN = false, doneP = false;
+
+    // Двенадцати шагов хватает: кромка длиннее двенадцати пикселей на экране
+    // почти горизонтальна, и остаток всё равно неразличим. Потолок обязателен —
+    // цикл без него на «кромке» через весь экран стоил бы сотен выборок.
+    const int kMaxSteps = 12;
+    for (int i = 1; i <= kMaxSteps; ++i) {
+        if (!doneN) {
+            endN = luma(texture(uTex, posN).rgb) - lEdge;
+            if (abs(endN) >= gradScaled) doneN = true; else posN -= edgeDir;
+        }
+        if (!doneP) {
+            endP = luma(texture(uTex, posP).rgb) - lEdge;
+            if (abs(endP) >= gradScaled) doneP = true; else posP += edgeDir;
+        }
+        if (doneN && doneP) break;
+    }
+
+    float distN = horizontal ? (vUV.x - posN.x) : (vUV.y - posN.y);
+    float distP = horizontal ? (posP.x - vUV.x) : (posP.y - vUV.y);
+    float distMin = min(distN, distP);
+    float spanLen = distN + distP;
+
+    // С какой стороны кромки мы стоим. Если ближний конец «повернул» в ту же
+    // сторону, что и текущий пиксель, — мы на светлой (или тёмной) стороне, и
+    // подмешивать не надо: сглаживается только та половина, что кромка режет.
+    bool lumaMLess = (lM - lEdge) < 0.0;
+    bool nearEndFlips = ((distN < distP) ? endN : endP) < 0.0;
+    float pixelBlend = (nearEndFlips == lumaMLess) ? 0.0
+                                                  : (0.5 - distMin / max(spanLen, 1e-5));
+    pixelBlend = max(pixelBlend, 0.0);
+
+    // Второй кандидат — старая оценка по локальному контрасту. Она нужна там,
+    // где поиск не нашёл концов (кромка ушла за потолок шагов): без неё такие
+    // места остались бы вовсе несглаженными.
     float lAvg = (2.0 * (lN + lS + lW + lE) + lNW + lNE + lSW + lSE) / 12.0;
-    float blend = clamp(abs(lAvg - lM) / max(range, 1e-5), 0.0, 1.0);
-    blend = blend * blend * 0.75;
+    float localBlend = clamp(abs(lAvg - lM) / max(range, 1e-5), 0.0, 1.0);
+    localBlend = localBlend * localBlend * 0.75;
 
-    vec2 offset = horizontal ? vec2(0.0, stepLen * 0.5) : vec2(stepLen * 0.5, 0.0);
-    vec3 rgbEdge = texture(uTex, vUV + offset).rgb;
-    FragColor = vec4(mix(rgbM, rgbEdge, blend), 1.0);
+    float blend = max(pixelBlend, localBlend);
+    if (blend <= 0.0) { FragColor = vec4(rgbM, 1.0); return; }
+
+    vec2 offset = horizontal ? vec2(0.0, stepLen * blend) : vec2(stepLen * blend, 0.0);
+    FragColor = vec4(texture(uTex, vUV + offset).rgb, 1.0);
 }
 )";
 
@@ -504,14 +652,26 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
         ao.SetMat4("uProj", proj);
         ao.SetMat4("uInvProj", invProj);
         ao.SetFloat("uRadius", s.AORadius);
+        const glm::vec2 texel(1.0f / (float)w, 1.0f / (float)h);
+        ao.SetVec2("uTexel", texel);
         drawTri();
 
-        m_aoBlur->Bind();
+        // Размытие РАЗДЕЛЁННОЕ: горизонталь в m_aoBlur, вертикаль обратно в
+        // m_ao. Два прохода по 9 выборок вместо одного по 16 — и дешевле, и
+        // шире окно (сглаживает шум выборки, который квадрат 4x4 оставлял).
         Shader& aob = AoBlurShader();
         aob.Use();
         aob.SetInt("uAO", 0);
+        aob.SetVec2("uTexel", texel);
+
+        m_aoBlur->Bind();
+        aob.SetVec2("uDirection", glm::vec2(1.0f, 0.0f));
         device.BindTexture2D(0, m_ao->ColorTextureHandle());
-        aob.SetVec2("uTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
+        drawTri();
+
+        m_ao->Bind();
+        aob.SetVec2("uDirection", glm::vec2(0.0f, 1.0f));
+        device.BindTexture2D(0, m_aoBlur->ColorTextureHandle());
         drawTri();
     }
 
@@ -630,7 +790,9 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     comp.SetFloat("uChromatic", glm::max(s.ChromaticAberration, 0.0f));
     device.BindTexture2D(0, colorTex);
     if (doBloom) device.BindTexture2D(1, m_bloomB->ColorTextureHandle());
-    if (doAO) device.BindTexture2D(2, m_aoBlur->ColorTextureHandle());
+    // ГОТОВОЕ размытое AO лежит в m_ao: вертикальный проход пишет обратно в
+    // него (m_aoBlur — промежуточный буфер горизонтали, см. шаг 1).
+    if (doAO) device.BindTexture2D(2, m_ao->ColorTextureHandle());
     drawTri();
     }
 

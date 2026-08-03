@@ -84,6 +84,10 @@ private:
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
     void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели
 
+    // Перенос файла в папку броском (вместе с сайдкарами .meta/.sageimport).
+    void MoveIntoFolder(EditorHost& host, const std::filesystem::path& source,
+                        const std::filesystem::path& folder);
+
     // Внесение чужих файлов в проект: диалог + отчёт в статусную строку.
     void DrawImportButton(EditorHost& host);
     FileBrowser m_importBrowser;

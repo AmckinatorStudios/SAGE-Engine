@@ -789,6 +789,41 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", sc->Path.c_str());
             if (ImGui::InputText("Lua file", scriptBuf, sizeof(scriptBuf))) sc->Path = scriptBuf;
             host.TrackLastImGuiItem();
+            // Перетаскивание .lua из Assets — как у моделей и текстур. Печатать
+            // путь к скрипту наизусть незачем, он тут же в дереве проекта.
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+                    std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+                    if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+                    if (std::filesystem::path(dropped).extension() == ".lua") {
+                        host.PushUndoSnapshot();
+                        sc->Path = host.CurrentProject().AssetRef(dropped);
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+            if (EditorIcons::Button("folder", "Обзор…")) {
+                FileBrowser::Config c;
+                c.Title = "Выбрать скрипт";
+                c.Filters = {".lua"};
+                c.FilterLabel = "Скрипты (*.lua)";
+                if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+                m_browser.Open(c);
+                // Цель — СУЩНОСТЬ, а не указатель на поле компонента: диалог
+                // отвечает через кадр, а за этот кадр сцену могут перезагрузить
+                // (undo, открытие другой сцены), и указатель повис бы.
+                m_browseTarget = nullptr;
+                m_browseScriptEntity = obj.Id();
+                m_browseIsShader = false;
+                m_browseIsMesh = false;
+                m_browseIsMaterial = false;
+            }
+            ImGui::SameLine();
+            if (EditorIcons::Button("script", "Из Assets") &&
+                host.SelectedAssetPath().extension() == ".lua") {
+                host.PushUndoSnapshot();
+                sc->Path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
+            }
             ImGui::TextDisabled("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)");
             if (ImGui::Button("Remove Script")) {
                 host.PushUndoSnapshot();
@@ -1368,32 +1403,48 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
 }
 
 void InspectorPanel::Draw(EditorHost& host) {
-    // Результат обзора приходит через кадр после нажатия — кладём его в то поле,
-    // ради которого диалог открывали.
-    if (m_browser.Draw() && m_browseTarget) {
+    // Результат обзора приходит через кадр после нажатия — кладём его туда, ради
+    // чего диалог открывали. Draw() зовётся РОВНО ОДИН РАЗ за кадр: у модалки
+    // ImGui одно состояние на всю панель, и второй вызов открывал бы её поверх
+    // себя же.
+    if (m_browser.Draw()) {
         // AssetRef, а не Result().string(): диалог отдаёт АБСОЛЮТНЫЙ путь, и в
         // таком виде он до сих пор уезжал в сцену — работая в этом редакторе на
         // этой машине и нигде больше (см. Project::AssetRef).
-        *m_browseTarget = host.CurrentProject().AssetRef(m_browser.Result());
-        m_browseTarget = nullptr;
-        if (m_browseIsMesh) {
-            m_browseIsMesh = false;
-            m_pendingMeshLoad = true;   // грузим в том же кадре, ниже по панели
-        }
-        if (m_browseIsMaterial) {
-            m_browseIsMaterial = false;
-            // Материал грузим сразу: без указателя объект остался бы с путём и
-            // без вида, и это выглядело бы как «выбрал материал, ничего не произошло».
-            if (GameObject sel = host.SelectedObject(); sel.Valid()) {
-                MeshRendererComponent& mr = sel.Renderer();
-                if (!mr.MaterialPath.empty())
-                    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+        const std::string picked = host.CurrentProject().AssetRef(m_browser.Result());
+
+        if (m_browseScriptEntity >= 0) {
+            // Скрипт адресован СУЩНОСТИ, а не полю: за кадр ожидания сцену могли
+            // перезагрузить, и указатель на поле компонента уже никуда не годился бы.
+            GameObject target = host.CurrentScene().Get(m_browseScriptEntity);
+            m_browseScriptEntity = -1;
+            if (target.Valid()) {
+                host.PushUndoSnapshot();
+                host.CurrentScene().Registry().emplace_or_replace<ScriptComponent>(
+                    target.Entity(), ScriptComponent{picked});
             }
-        }
-        if (m_browseIsShader) {
-            if (std::shared_ptr<Material> m =
-                    ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string())) {
-                m->ShaderPtr.reset();
+        } else if (m_browseTarget) {
+            *m_browseTarget = picked;
+            m_browseTarget = nullptr;
+            if (m_browseIsMesh) {
+                m_browseIsMesh = false;
+                m_pendingMeshLoad = true;   // грузим в том же кадре, ниже по панели
+            }
+            if (m_browseIsMaterial) {
+                m_browseIsMaterial = false;
+                // Материал грузим сразу: без указателя объект остался бы с путём
+                // и без вида — «выбрал материал, ничего не произошло».
+                if (GameObject sel = host.SelectedObject(); sel.Valid()) {
+                    MeshRendererComponent& mr = sel.Renderer();
+                    if (!mr.MaterialPath.empty())
+                        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+                }
+            }
+            if (m_browseIsShader) {
+                if (std::shared_ptr<Material> m =
+                        ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string())) {
+                    m->ShaderPtr.reset();
+                }
             }
         }
     }

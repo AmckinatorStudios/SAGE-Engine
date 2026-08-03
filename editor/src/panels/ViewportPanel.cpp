@@ -195,6 +195,30 @@ void ViewportPanel::Draw(EditorHost& host) {
             ImGui::Dummy(cell);
         }
 
+        // --- Приём перетаскивания ассета В СЦЕНУ ----------------------------
+        //
+        // Тащат туда, где смотрят: модель и префаб встают на поверхность под
+        // курсором, материал — на объект, на который его уронили. Раньше
+        // вьюпорт перетаскивание не принимал вовсе, и «поставить свою модель»
+        // означало создать пустую сущность, найти её в инспекторе и напечатать
+        // там путь.
+        //
+        // Цель обязана сидеть здесь, на item'е картинки: ImGui адресует приём
+        // ПОСЛЕДНИМ нарисованным элементом. Сама постановка отложена до места,
+        // где посчитаны матрицы активного вида, — бросок в неактивный вид
+        // заодно делает его активным, и считать по чужой камере нельзя.
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+                std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+                if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+                m_activeSlot = i;
+                m_pendingDrop.Active = true;
+                m_pendingDrop.Path = dropped;
+                m_pendingDrop.Pos = ImGui::GetMousePos();
+            }
+            ImGui::EndDragDropTarget();
+        }
+
         // Подпись вида поверх картинки и рамка активного: без них в четырёх
         // одинаковых серых прямоугольниках невозможно понять, где что.
         ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -505,6 +529,21 @@ void ViewportPanel::Draw(EditorHost& host) {
         m_gizmoWasUsing = usingNow;
     } else {
         m_gizmoWasUsing = false;
+    }
+
+    // Ассет, бро́шенный в этот вид, ставится в сцену (см. приём ниже, у
+    // ImGui::Image): матрицы к этому месту уже посчитаны, а сам приём обязан
+    // сидеть на item'е картинки — ImGui адресует цель последним нарисованным
+    // элементом, и здесь это уже не она.
+    if (m_pendingDrop.Active) {
+        const float du = (m_pendingDrop.Pos.x - imgPos.x) / avail.x;
+        const float dv = (m_pendingDrop.Pos.y - imgPos.y) / avail.y;
+        if (du >= 0.0f && du <= 1.0f && dv >= 0.0f && dv <= 1.0f) {
+            if (!host.DropAssetAtViewport(activeView, activeProj, du, dv, m_pendingDrop.Path)) {
+                host.SetStatusMessage("В сцену можно бросить модель, префаб или материал");
+            }
+        }
+        m_pendingDrop = {};
     }
 
     // --- Пикинг ЛКМ (не по гизмо и не во время манипуляции) ---

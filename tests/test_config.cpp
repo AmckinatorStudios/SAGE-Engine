@@ -11,6 +11,7 @@
 #include "sage/core/Config.h"
 #include "sage/core/Paths.h"
 #include "sage/core/Systems.h"
+#include "sage/render/PostFX.h"
 
 using sage::EngineConfig;
 using sage::QualityPreset;
@@ -222,4 +223,49 @@ TEST(SaveGame_refuses_to_escape_its_directory) {
     CHECK_EQ(found, 1);
     CHECK_FALSE(std::filesystem::exists(std::filesystem::path(sandbox) / "pwned.sagesave"));
     std::filesystem::remove_all(sandbox);
+}
+
+// --- Сглаживание: настройка обязана доезжать до буфера сцены ----------------
+//
+// `msaa` в конфиге читался, сохранялся и ставился пресетом Ultra в 4 — и не
+// делал НИЧЕГО: сглаживание растеризатора работает на буфере, в котором
+// геометрия растеризуется, а сцена рисуется в свой offscreen-буфер, который
+// заводился всегда односэмпловым. Проверяем перевод настройки в число сэмплов
+// и то, что FXAA при работающем MSAA выключается: два сглаживания подряд —
+// это ровно та «мыльная картинка», от которой второе и не спасает.
+TEST(Config_msaa_maps_to_scene_sample_count) {
+    sage::EngineConfig cfg;
+    cfg.Msaa = 0;  CHECK_EQ(sage::render::SceneSamples(cfg), 1);
+    cfg.Msaa = 1;  CHECK_EQ(sage::render::SceneSamples(cfg), 1);
+    cfg.Msaa = 2;  CHECK_EQ(sage::render::SceneSamples(cfg), 2);
+    cfg.Msaa = 4;  CHECK_EQ(sage::render::SceneSamples(cfg), 4);
+    cfg.Msaa = 8;  CHECK_EQ(sage::render::SceneSamples(cfg), 8);
+    // Значение приходит от человека (файл, переменная окружения) — округляем
+    // вниз до ступени растеризатора, а не притворяемся, что дали запрошенное.
+    cfg.Msaa = 3;  CHECK_EQ(sage::render::SceneSamples(cfg), 2);
+    cfg.Msaa = 64; CHECK_EQ(sage::render::SceneSamples(cfg), 8);
+}
+
+TEST(Config_fxaa_and_msaa_do_not_stack) {
+    sage::EngineConfig cfg;
+    cfg.Fxaa = true;
+
+    cfg.Msaa = 0;
+    CHECK_TRUE(sage::render::FxFromConfig(cfg).FxaaEnabled);
+
+    cfg.Msaa = 4;
+    CHECK_FALSE(sage::render::FxFromConfig(cfg).FxaaEnabled);
+
+    // Выключенный руками FXAA не должен включаться сам от отсутствия MSAA.
+    cfg.Fxaa = false;
+    cfg.Msaa = 0;
+    CHECK_FALSE(sage::render::FxFromConfig(cfg).FxaaEnabled);
+}
+
+// Пресет Ultra обещает MSAA — и обещание должно доходить до буфера сцены.
+TEST(Config_ultra_preset_really_enables_msaa) {
+    sage::EngineConfig cfg;
+    cfg.ApplyPreset(sage::QualityPreset::Ultra);
+    CHECK_TRUE(sage::render::SceneSamples(cfg) > 1);
+    CHECK_TRUE(cfg.ShadowResolution >= 2048);
 }

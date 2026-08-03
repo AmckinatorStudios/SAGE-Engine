@@ -608,8 +608,10 @@ void PlayerLayer::OnRender() {
         const bool usePost = cfg.PostProcessing;
         if (usePost) {
             if (!m_postfx) m_postfx.emplace();
-            if (!m_sceneFbo) m_sceneFbo.emplace(vpW, vpH);
-            m_sceneFbo->Resize(vpW, vpH);
+            // Число сэмплов — по конфигу и той же функцией, что у редактора:
+            // MSAA работает на буфере СЦЕНЫ (в нём растеризуется геометрия), а
+            // не на экранном, куда уходит уже готовая картинка.
+            EnsureFramebuffer(m_sceneFbo, vpW, vpH, sage::render::SceneSamples(cfg));
             m_sceneFbo->Bind();
             device.SetViewport(0, 0, vpW, vpH);
         } else if (vpX != 0 || vpY != 0) {

@@ -182,6 +182,23 @@ void EditorLayer::OnAttach() {
 
     m_recent.Load();
 
+    // Настройки движка ДО первого кадра: файл рядом с редактором, поверх него —
+    // переменные окружения (как это делает рантайм в своём main). Без этого
+    // редактор рисовал по умолчаниям, что бы ни лежало в sage.cfg и что бы ни
+    // задали через SAGE_*.
+    m_settings.LoadFile("sage.cfg");
+    m_settings.ApplyEnvOverrides();
+    ApplyEngineSettings();
+
+    // Файлы, брошенные в окно из проводника, — самый короткий путь внести своё
+    // в проект: тащат туда, где смотрят, а не ищут пункт меню. Разбор отложен
+    // до кадра (см. HandleDroppedFiles): колбэк приходит из недр GLFW, а
+    // импорт может открыть модалку и подвинуть выбор в панелях.
+    sage::Application::Get().GetWindow().SetFileDropCallback(
+        [this](const std::vector<std::string>& paths) {
+            m_droppedFiles.insert(m_droppedFiles.end(), paths.begin(), paths.end());
+        });
+
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) {
         m_autoScreenshotFrame = std::atoi(f);
@@ -348,6 +365,13 @@ void EditorLayer::OnUpdate(float dt) {
     // RegisterCoreSystems, а не переписан здесь по памяти.
     m_systems.Run(*m_scene, dt);
     m_plugins.UpdateAll(dt);
+
+    // Правка в окне Settings обязана быть видна В КАДРЕ, а не после
+    // перезапуска: ползунок, который «сработает потом», невозможно настроить.
+    ApplyEngineSettings();
+
+    // Файлы, брошенные в окно с прошлого кадра (см. HandleDroppedFiles).
+    HandleDroppedFiles();
 }
 
 // ============================================================================
@@ -366,6 +390,106 @@ const char* EditorLayer::PluginContextImpl::SelectedEntityName() const {
 
 void EditorLayer::PluginContextImpl::SetStatusMessage(const char* message) {
     m_owner.m_pluginStatusMessage = message ? message : "";
+}
+
+namespace {
+// Расширение файла в нижнем регистре, с точкой. Файлы приходят от человека и
+// от системы, и «.SAGE» с «.sage» — один и тот же формат.
+std::string ToLowerExt(const fs::path& p) {
+    std::string ext = p.extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    return ext;
+}
+} // namespace
+
+// Настройки движка из окна Settings — В САМ ДВИЖОК.
+//
+// ЧЕГО НЕ ХВАТАЛО. Окно Settings правило m_settings — СВОЮ копию EngineConfig, —
+// а весь рендер читает глобальный EngineConfig::Get(). Эти два объекта не были
+// связаны ничем, и потому окно настроек в редакторе не делало НИЧЕГО: тени,
+// каскады, сглаживание, AO, свечение, пост-обработка оставались на значениях по
+// умолчанию, что ни выбирай. Пресет «Ultra» честно записывал 4096 и MSAA 4x —
+// и они никуда не уходили. В собранной игре те же настройки работали (рантайм
+// читает файл и зовёт EngineConfig::Set), поэтому со стороны это выглядело как
+// «в редакторе картинка хуже, чем в игре», а не как потерянная связь.
+//
+// Переносим по ОТПЕЧАТКУ, а не каждый кадр: EngineConfig — простая структура
+// без уведомлений, сравнивать её посимвольно дешевле, чем копировать вслепую,
+// и заодно видно, когда настройки правда менялись (пересоздание карт теней и
+// буферов сцены цепляется за это же).
+void EditorLayer::ApplyEngineSettings() {
+    const std::string stamp = m_settings.ToJsonString();
+    if (stamp == m_settingsStamp) return;
+    m_settingsStamp = stamp;
+    sage::EngineConfig::Set(m_settings);
+}
+
+// ============================================================================
+//  Файлы, брошенные в окно из проводника системы
+// ============================================================================
+//
+// ЧТО ЭТО ЗА ОПЕРАЦИЯ. «Перетащить в редактор» — первое, что человек пробует со
+// своей моделью, и до сих пор окно на это не отзывалось никак: файл надо было
+// класть в папку проекта мимо редактора, а потом искать в панели. Здесь
+// брошенное разбирается по смыслу, а не сваливается в одну кучу.
+//
+// РАЗБОР ПО СМЫСЛУ. Проект и сцена — не ассеты, их не «вносят», их ОТКРЫВАЮТ:
+// бросить .sageproj и получить его копию в assets/ было бы бессмысленно.
+// Остальное копируется в текущую папку панели Assets вместе со спутниками
+// (см. AssetsPanel::ImportAsset) — модель приезжает со своими .mtl и
+// текстурами, а не голым файлом, который потом не грузится.
+void EditorLayer::HandleDroppedFiles() {
+    if (m_droppedFiles.empty()) return;
+    std::vector<std::string> dropped;
+    dropped.swap(m_droppedFiles);
+
+    int imported = 0;
+    std::string lastError;
+    for (const std::string& raw : dropped) {
+        const fs::path path(raw);
+        std::error_code ec;
+
+        // Папку не вносим: рекурсивная копия чужого дерева в проект — не то, чего
+        // ждут, бросая её на окно, и отменить это нечем.
+        if (fs::is_directory(path, ec)) {
+            SetStatusMessage("Папку перетащить нельзя — бросьте файлы");
+            continue;
+        }
+
+        const std::string ext = ToLowerExt(path);
+        if (ext == ".sageproj") {
+            std::string err;
+            if (!OpenProject(path.string(), err)) SetStatusMessage("Проект не открылся: " + err);
+            continue;
+        }
+        if (ext == ".sage") {
+            // Сцена ОТКРЫВАЕТСЯ. Если она из другого проекта, ссылки внутри неё
+            // указывают в тот проект, и об этом честнее сказать сразу.
+            if (m_project.Loaded() && m_project.AssetRef(path) == path.generic_string())
+                SetStatusMessage("Сцена не из этого проекта — ассеты могут не найтись");
+            LoadSceneFromFile(path);
+            continue;
+        }
+
+        if (!m_project.Loaded()) {
+            SetStatusMessage("Сначала откройте проект — вносить файл некуда");
+            continue;
+        }
+
+        const AssetsPanel::ImportReport rep = AssetsPanel::ImportAsset(path, m_assetsCwd);
+        if (!rep.Ok) {
+            lastError = rep.Error;
+            continue;
+        }
+        ++imported;
+        m_assets.Select(rep.Created);
+        for (const std::string& missing : rep.Missing)
+            LOG_WARN("Editor") << "Перетаскивание: спутник не найден — " << missing;
+    }
+
+    if (imported == 1) SetStatusMessage("Внесено в проект: " + m_assets.Selected().filename().string());
+    else if (imported > 1) SetStatusMessage("Внесено в проект файлов: " + std::to_string(imported));
+    else if (!lastError.empty()) SetStatusMessage("Импорт не удался: " + lastError);
 }
 
 // ============================================================================
@@ -1011,6 +1135,8 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     // (остаются значения по умолчанию).
     m_settings = sage::EngineConfig{};
     m_settings.LoadFile((m_project.Dir() / "sage.cfg").string());
+    m_settings.ApplyEnvOverrides();   // SAGE_* поверх файла — как у рантайма
+    ApplyEngineSettings();
 
     // Автозагрузка первой сцены проекта (по алфавиту) — открытый проект сразу
     // показывает свой контент, а не осиротевшую демо-сцену.
@@ -1116,6 +1242,190 @@ void EditorLayer::UpdateWindowTitle() {
 
 void EditorLayer::PickAtViewport(float u, float v, bool additive) {
     PickAtViewportWith(m_view, m_proj, u, v, additive);
+}
+
+bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
+    GameObject obj = m_scene->Get(entityId);
+    if (!obj.Valid()) return false;
+
+    const std::string ext = ToLowerExt(asset);
+    const std::string ref = m_project.AssetRef(asset);
+
+    if (ext == ".sagemat") {
+        PushUndoSnapshot();
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.MaterialPath = ref;
+        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(ref);
+        SetStatusMessage("Материал назначен: " + asset.filename().string());
+        return true;
+    }
+    if (ext == ".lua") {
+        PushUndoSnapshot();
+        m_scene->Registry().emplace_or_replace<ScriptComponent>(obj.Entity(), ScriptComponent{ref});
+        SetStatusMessage("Скрипт назначен: " + asset.filename().string());
+        return true;
+    }
+    if (ModelLoader::IsSupportedModel(ext)) {
+        std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(ref);
+        if (!mesh) {
+            SetStatusMessage("Модель не загрузилась: " + asset.filename().string() +
+                             " — подробности в Console");
+            return true;
+        }
+        PushUndoSnapshot();
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref.type = MeshRef::Type::Model;
+        mr.Ref.path = ref;
+        mr.MeshPtr = std::move(mesh);
+        SetStatusMessage("Меш заменён: " + asset.filename().string());
+        return true;
+    }
+    // Префаб на сущность НЕ применяется: он сам себе поддерево, и «применить» его
+    // к чужой сущности значило бы её заменить. Ставится он в сцену — броском во
+    // вьюпорт или в список.
+    SetStatusMessage("Этот файл на объект не назначается");
+    return false;
+}
+
+bool EditorLayer::AddAssetToScene(const fs::path& asset) {
+    const std::string ext = ToLowerExt(asset);
+    const std::string ref = m_project.AssetRef(asset);
+
+    int newId = -1;
+    if (ext == ".sageprefab") {
+        PushUndoSnapshot();
+        newId = sage::scene::InstantiatePrefab(*m_scene, ref);
+        if (newId < 0) {
+            SetStatusMessage("Префаб не поставился: " + asset.filename().string());
+            return true;
+        }
+    } else if (ModelLoader::IsSupportedModel(ext)) {
+        std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(ref);
+        if (!mesh) {
+            SetStatusMessage("Модель не загрузилась: " + asset.filename().string() +
+                             " — подробности в Console");
+            return true;
+        }
+        PushUndoSnapshot();
+        GameObject obj = m_scene->CreateObject(asset.stem().string());
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref.type = MeshRef::Type::Model;
+        mr.Ref.path = ref;
+        mr.MeshPtr = std::move(mesh);
+        newId = obj.Id();
+    } else {
+        return false;
+    }
+
+    SetSelectedId(newId);
+    m_selection = {newId};
+    m_sceneDirty = true;
+    UpdateWindowTitle();
+    SetStatusMessage("Добавлено в сцену: " + asset.filename().string());
+    return true;
+}
+
+bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& proj, float u,
+                                      float v, const fs::path& asset) {
+    const std::string ext = ToLowerExt(asset);
+    const std::string ref = m_project.AssetRef(asset);
+
+    const bool isModel = ModelLoader::IsSupportedModel(ext);
+    const bool isPrefab = ext == ".sageprefab";
+    const bool isMaterial = ext == ".sagemat";
+    if (!isModel && !isPrefab && !isMaterial) return false;
+
+    // Луч через точку, где отпустили кнопку. Та же математика, что у выбора
+    // мышью (см. PickAtViewportWith), и это важно: место, куда встанет объект,
+    // обязано совпадать с тем, по чему бы кликнули.
+    const glm::vec2 ndc(u * 2.0f - 1.0f, 1.0f - v * 2.0f);
+    const glm::mat4 invVP = glm::inverse(proj * view);
+    glm::vec4 p0 = invVP * glm::vec4(ndc, -1.0f, 1.0f);
+    glm::vec4 p1 = invVP * glm::vec4(ndc, 1.0f, 1.0f);
+    const glm::vec3 ro = glm::vec3(p0) / p0.w;
+    const glm::vec3 rd = glm::normalize(glm::vec3(p1) / p1.w - ro);
+
+    // Ближайшая поверхность под курсором: и точка постановки, и объект, которому
+    // достанется материал.
+    float bestT = 1e30f;
+    entt::entity bestEntity = entt::null;
+    auto meshes = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
+    for (auto e : meshes) {
+        Mesh* mesh = meshes.get<MeshRendererComponent>(e).MeshPtr.get();
+        if (!mesh) continue;
+        const glm::mat4 inv = glm::inverse(m_scene->WorldMatrix(e));
+        const glm::vec3 lro = glm::vec3(inv * glm::vec4(ro, 1.0f));
+        const glm::vec3 lrd = glm::vec3(inv * glm::vec4(rd, 0.0f));
+        const sage::render::RayHit hit = sage::render::RayMesh(*mesh, lro, lrd);
+        if (hit.Hit && hit.Distance < bestT) {
+            bestT = hit.Distance;
+            bestEntity = e;
+        }
+    }
+
+    if (isMaterial) {
+        // Материал ложится на то, НА ЧТО его уронили. В пустоту ронять его
+        // бессмысленно — там нечего красить, и создавать ради этого объект было
+        // бы сюрпризом.
+        if (bestEntity == entt::null) {
+            SetStatusMessage("Материал ронять некуда — под курсором нет объекта");
+            return true;
+        }
+        PushUndoSnapshot();
+        MeshRendererComponent& mr = m_scene->Registry().get<MeshRendererComponent>(bestEntity);
+        mr.MaterialPath = ref;
+        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(ref);
+        const int id = m_scene->Registry().get<IdComponent>(bestEntity).Id;
+        SetSelectedId(id);
+        m_selection = {id};
+        SetStatusMessage("Материал назначен: " + asset.filename().string());
+        return true;
+    }
+
+    // Точка постановки: поверхность под курсором, а если её нет — точка на луче
+    // в паре метров от камеры. Ронять в бесконечность нельзя, а «в начало
+    // координат» означало бы, что объект исчез из виду.
+    const bool onSurface = bestEntity != entt::null;
+    const glm::vec3 point = onSurface ? (ro + rd * bestT) : (ro + rd * 8.0f);
+
+    PushUndoSnapshot();
+    int newId = -1;
+    if (isPrefab) {
+        newId = sage::scene::InstantiatePrefabAt(*m_scene, ref, point);
+        if (newId < 0) {
+            SetStatusMessage("Префаб не поставился: " + asset.filename().string());
+            return true;
+        }
+    } else {
+        GameObject obj = m_scene->CreateObject(asset.stem().string());
+        MeshRendererComponent& mr = obj.Renderer();
+        mr.Ref.type = MeshRef::Type::Model;
+        mr.Ref.path = ref;
+        mr.MeshPtr = ResourceManager::Instance().GetModel(ref);
+        if (!mr.MeshPtr) {
+            m_scene->RemoveObject(obj.Id());
+            SetStatusMessage("Модель не загрузилась: " + asset.filename().string() +
+                             " — подробности в Console");
+            return true;
+        }
+        obj.GetTransform().Position = point;
+        newId = obj.Id();
+
+        // Ставим НА поверхность, а не центром в точку попадания: иначе половина
+        // модели уходит под пол, и первое, что приходится делать после
+        // перетаскивания, — поднимать её вручную.
+        if (onSurface) {
+            const glm::vec3 bmin = mr.MeshPtr->BoundsMin();
+            obj.GetTransform().Position.y -= bmin.y * obj.GetTransform().Scale.y;
+        }
+    }
+
+    SetSelectedId(newId);
+    m_selection = {newId};
+    m_sceneDirty = true;
+    UpdateWindowTitle();
+    SetStatusMessage("Поставлено в сцену: " + asset.filename().string());
+    return true;
 }
 
 void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,

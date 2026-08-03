@@ -27,6 +27,19 @@ void Window::ForwardKey(GLFWwindow* handle, int key, int, int action, int mods) 
     if (win && win->m_keyFn) win->m_keyFn(key, action, mods);
 }
 
+void Window::ForwardFileDrop(GLFWwindow* handle, int count, const char** paths) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (!win || !win->m_fileDropFn || count <= 0 || !paths) return;
+    // Копируем СЕЙЧАС: GLFW владеет этими строками только на время колбэка, а
+    // подписчик почти наверняка отложит работу до кадра (открыть диалог,
+    // спросить подтверждение). Указатели к тому моменту уже недействительны.
+    std::vector<std::string> list;
+    list.reserve((size_t)count);
+    for (int i = 0; i < count; ++i)
+        if (paths[i]) list.emplace_back(paths[i]);
+    if (!list.empty()) win->m_fileDropFn(list);
+}
+
 Window::Window(int width, int height, const std::string& title, Params params)
     : m_width(width), m_height(height) {
 
@@ -85,6 +98,7 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwSetScrollCallback(m_handle, &Window::ForwardScroll);
     glfwSetCharCallback(m_handle, &Window::ForwardChar);
     glfwSetKeyCallback(m_handle, &Window::ForwardKey);
+    glfwSetDropCallback(m_handle, &Window::ForwardFileDrop);
 
     // Загрузку драйвера (glad) и дефолтное состояние конвейера (depth test,
     // backface culling, бесшовные cubemap) выполняет rhi::GraphicsDevice::Init,

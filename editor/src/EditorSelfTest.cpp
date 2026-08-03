@@ -41,6 +41,7 @@
 #include "sage/scene/Prefab.h"
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
+#include "sage/render/PostFX.h"
 #include "sage/assets/import/Convert.h"
 #include "AssetPreview.h"
 
@@ -1347,12 +1348,144 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(box.Id());
     }
 
+    // --- Перетаскивание: те же операции, что делает мышь ----------------------
+    //
+    // Кликов в headless-прогоне нет, но кликают-то они по этим методам — их и
+    // проверяем. Перетаскивание раньше упиралось в то, что принимать его было
+    // некому: вьюпорт и иерархия целей не имели вовсе, а окно не слышало
+    // проводник системы.
+    if (ok) {
+        const fs::path modelPath = m_project.AssetsDir() / "selftest_import" / "crate.obj";
+        const fs::path matPath = m_assetsCwd / "selftest_mat.sagemat";
+
+        // 1. Бросок модели в СПИСОК сцены: появляется новая сущность с этим мешем.
+        const int before = m_scene->Count();
+        if (!AddAssetToScene(modelPath)) {
+            LOG_ERROR("Editor") << "SELFTEST: модель не добавилась в сцену перетаскиванием";
+            ok = false;
+        } else if (m_scene->Count() != before + 1) {
+            LOG_ERROR("Editor") << "SELFTEST: перетаскивание модели не создало сущность";
+            ok = false;
+        }
+        const int droppedId = m_selectedId;
+
+        // 2. Материал НА СУЩНОСТЬ: назначается ей, а не выбранной в панели.
+        if (ok && fs::exists(matPath, ec)) {
+            if (!ApplyAssetToEntity(droppedId, matPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: материал не назначился перетаскиванием";
+                ok = false;
+            } else {
+                GameObject o = m_scene->Get(droppedId);
+                if (!o.Valid() || o.Renderer().MaterialPath.empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: материал перетаскиванием не записался";
+                    ok = false;
+                }
+            }
+        }
+
+        // 3. Скрипт НА СУЩНОСТЬ — тем же путём, что материал и модель.
+        if (ok) {
+            const fs::path luaPath = m_project.AssetsDir() / "selftest_code.lua";
+            if (!ApplyAssetToEntity(droppedId, luaPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: скрипт не назначился перетаскиванием";
+                ok = false;
+            } else if (!m_scene->Registry().all_of<ScriptComponent>(m_scene->Get(droppedId).Entity())) {
+                LOG_ERROR("Editor") << "SELFTEST: ScriptComponent не появился";
+                ok = false;
+            }
+        }
+
+        // 4. Бросок ВО ВЬЮПОРТ: объект встаёт туда, куда показывает луч. Целимся
+        //    в центр кадра — там пол демо-сцены, и объект обязан оказаться НА
+        //    нём, а не в начале координат и не под ним.
+        if (ok) {
+            const glm::mat4 v = m_camera.GetViewMatrix();
+            const glm::mat4 p = m_camera.GetProjectionMatrix(16.0f / 9.0f);
+            const int countBefore = m_scene->Count();
+            if (!DropAssetAtViewport(v, p, 0.5f, 0.5f, modelPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: вьюпорт не принял модель";
+                ok = false;
+            } else if (m_scene->Count() != countBefore + 1) {
+                LOG_ERROR("Editor") << "SELFTEST: бросок во вьюпорт не создал сущность";
+                ok = false;
+            } else {
+                GameObject placed = m_scene->Get(m_selectedId);
+                // Луч из редакторской камеры в центр кадра упирается в пол демо-
+                // сцены: объект обязан оказаться не в начале координат.
+                if (!placed.Valid()) {
+                    LOG_ERROR("Editor") << "SELFTEST: брошенный объект невалиден";
+                    ok = false;
+                } else if (glm::length(placed.GetTransform().Position) < 1e-3f) {
+                    LOG_ERROR("Editor") << "SELFTEST: брошенный объект встал в начало координат, "
+                                        << "а не под курсор";
+                    ok = false;
+                }
+                if (ok) m_scene->RemoveObject(placed.Id());
+            }
+        }
+
+        // 5. Файл, брошенный В ОКНО из проводника, вносится в проект.
+        if (ok) {
+            const fs::path outside = fs::temp_directory_path() / "sage_selftest_drop";
+            fs::remove_all(outside, ec);
+            fs::create_directories(outside, ec);
+            { std::ofstream f(outside / "dropped.png", std::ios::binary); f << "png-заглушка"; }
+            m_droppedFiles.push_back((outside / "dropped.png").string());
+            HandleDroppedFiles();
+            if (!fs::exists(m_assetsCwd / "dropped.png", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: брошенный в окно файл не внесён в проект";
+                ok = false;
+            }
+            // Заглушка не картинка, и панель ассетов будет честно ругаться на
+            // неё каждый кадр — убираем, проверка уже состоялась.
+            fs::remove(m_assetsCwd / "dropped.png", ec);
+            fs::remove(m_assetsCwd / "dropped.png.meta", ec);
+            fs::remove_all(outside, ec);
+        }
+
+        if (ok) m_scene->RemoveObject(droppedId);
+        SetSelectedId(-1);
+        m_selection.clear();
+    }
+
+    // --- Настройки движка действуют НА КАРТИНКУ, а не только на своё окно ----
+    //
+    // Окно Settings правило собственную копию EngineConfig, а весь рендер читал
+    // глобальный: тени, каскады, сглаживание и пост-обработка оставались на
+    // умолчаниях, что ни выбирай. Проверяем связь в обе стороны — и что она
+    // переживает пересборку зависящих от неё объектов (карта теней).
+    if (ok) {
+        const sage::EngineConfig saved = m_settings;
+
+        m_settings.ShadowResolution = 1024;
+        m_settings.ShadowCascades = 2;
+        m_settings.Msaa = 4;
+        ApplyEngineSettings();
+
+        const sage::EngineConfig& live = sage::EngineConfig::Get();
+        if (live.ShadowResolution != 1024 || live.ShadowCascades != 2 || live.Msaa != 4) {
+            LOG_ERROR("Editor") << "SELFTEST: настройки не доехали до движка "
+                                << "(тени " << live.ShadowResolution << "/" << live.ShadowCascades
+                                << ", msaa " << live.Msaa << ")";
+            ok = false;
+        }
+        // Число сэмплов буфера сцены считается ИЗ конфига одной функцией на
+        // редактор и рантайм — иначе «в редакторе гладко, в игре лесенка».
+        if (ok && sage::render::SceneSamples(live) != 4) {
+            LOG_ERROR("Editor") << "SELFTEST: MSAA из настроек не превратился в сэмплы";
+            ok = false;
+        }
+
+        m_settings = saved;
+        ApplyEngineSettings();
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
-                               << "import + asset-refs + model-material + prefab-cover, "
+                               << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

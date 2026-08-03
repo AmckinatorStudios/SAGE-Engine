@@ -172,6 +172,29 @@ public:
     }
     float CascadeRadius(int cascade) const { return m_radius[(size_t)Clamp(cascade)]; }
 
+    // Глубина ортобокса каскада в метрах (far - near его проекции, см. FitOrtho).
+    // По ней мировые величины переводятся в единицы записанной глубины: pc.z в
+    // шейдере — это доля ИМЕННО этого диапазона.
+    float CascadeDepthRange(int cascade) const {
+        return m_radius[(size_t)Clamp(cascade)] * 4.0f + m_casterRange;
+    }
+
+    // Запас по глубине для сравнения с картой, в единицах pc.z.
+    //
+    // ЗАЧЕМ СЧИТАТЬ, А НЕ ПОДБИРАТЬ КОНСТАНТУ. Запас должен покрывать ошибку
+    // квантования: точка на поверхности попадает в тексель шириной texel метров,
+    // а записана в нём одна глубина на весь тексель. Величина ошибки — мировая
+    // (доли метра), а сравнение идёт в долях диапазона ортобокса, и коэффициент
+    // между ними у каждого каскада СВОЙ: у ближнего диапазон в разы короче.
+    // Одна константа на всех поэтому не существует — она либо мала для дальнего
+    // каскада (рябь самозатенения по всему полу), либо велика для ближнего
+    // (тень отрывается от предмета). Здесь она считается из тех самых чисел,
+    // которыми карта и построена.
+    float CascadeDepthBias(int cascade) const {
+        const float texel = CascadeTexelSize(cascade);
+        return (texel * 2.0f) / std::max(CascadeDepthRange(cascade), 1e-3f);
+    }
+
     // Насколько далеко ВВЕРХ ПО ЛУЧУ от накрытой области может стоять предмет,
     // который в неё светит. Ортобокс натянут на то, что ВИДНО, но тень на этот
     // кусок земли бросает и мачта, чья верхушка на восемнадцать метров выше:
@@ -339,6 +362,14 @@ inline int ShadowCascadeUnit(int cascade) {
 struct ShadowBinding {
     glm::mat4 Matrices[ShadowMap::kMaxCascades];
     sage::rhi::TextureHandle Textures[ShadowMap::kMaxCascades];
+    // Размер текселя каждой карты В МЕТРАХ. Шейдер отступает по нормали ровно
+    // на него (см. CascadeCoords в PbrShader.h): у дальнего каскада тексель в
+    // разы крупнее ближнего, и общий отступ на всех либо не спасает ближний от
+    // полос самозатенения, либо отрывает тень в дальнем.
+    float TexelWorld[ShadowMap::kMaxCascades];
+    // Запас по глубине каждого каскада в единицах записанной глубины — считается
+    // из размера текселя и диапазона ортобокса (см. ShadowMap::CascadeDepthBias).
+    float DepthBias[ShadowMap::kMaxCascades];
     int Count = 1;
     bool Enabled = false;
     // Где тень начинает растворяться и где её уже нет (метры от камеры).
@@ -350,6 +381,13 @@ struct ShadowBinding {
 
     ShadowBinding() {
         for (glm::mat4& m : Matrices) m = glm::mat4(1.0f);
+        // Ноль, а не «какой-нибудь» размер: у привязки без карт отступать не от
+        // чего, и выдуманное значение сдвигало бы выборку неизвестно куда.
+        for (float& t : TexelWorld) t = 0.0f;
+        // Запас по умолчанию — на случай привязки, собранной вручную (см.
+        // конструктор с одной матрицей): без карт посчитать его не из чего, а
+        // ноль означал бы самозатенение на всей сцене.
+        for (float& b : DepthBias) b = 0.0005f;
     }
 
     // Одна карта — частный случай каскадов с Count == 1.
@@ -365,6 +403,8 @@ struct ShadowBinding {
         for (int i = 0; i < Count; ++i) {
             Matrices[i] = shadows.LightMatrix(i);
             Textures[i] = shadows.DepthTexture(i);
+            TexelWorld[i] = shadows.CascadeTexelSize(i);
+            DepthBias[i] = shadows.CascadeDepthBias(i);
         }
         Enabled = enabled;
         SetFadeFromDistance(shadows.ShadowDistance());

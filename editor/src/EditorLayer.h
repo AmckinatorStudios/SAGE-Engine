@@ -77,6 +77,9 @@ public:
     EditorLayer() : sage::Layer("Editor") {}
 
     void OnAttach() override;
+    // Файлы, брошенные в окно из проводника: проект/сцена открываются,
+    // остальное вносится в проект. Разбирается в кадре, а не в колбэке GLFW.
+    void HandleDroppedFiles();
     void OnDetach() override;
     void OnUpdate(float dt) override;
     void OnRender() override;
@@ -106,6 +109,8 @@ public:
     std::filesystem::path& AssetsCwd() override { return m_assetsCwd; }
 
     // --- EditorHost: настройки и статус ---
+    // ВНИМАНИЕ: возвращается ГЛОБАЛЬНЫЙ конфиг движка, а не отдельная копия
+    // редактора. Копия здесь и была всей бедой — см. ApplyEngineSettings.
     sage::EngineConfig& Settings() override { return m_settings; }
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
 
@@ -171,6 +176,10 @@ public:
         m_code.OpenFile(path);
     }
     void PickAtViewport(float u, float v, bool additive = false) override;
+    bool DropAssetAtViewport(const glm::mat4& view, const glm::mat4& proj, float u, float v,
+                             const std::filesystem::path& asset) override;
+    bool ApplyAssetToEntity(int entityId, const std::filesystem::path& asset) override;
+    bool AddAssetToScene(const std::filesystem::path& asset) override;
     void PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                             bool additive) override;
 
@@ -296,6 +305,8 @@ private:
     ViewportPanel m_viewport;
     GamePanel m_game;
     AssetsPanel m_assets;
+    // Накопитель брошенных путей: колбэк окна складывает сюда, кадр разбирает.
+    std::vector<std::string> m_droppedFiles;
     LauncherPanel m_launcher;
     LightingPanel m_lighting;
     ToolbarPanel m_toolbar;
@@ -307,6 +318,12 @@ private:
     //     в <проект>/sage.cfg; Build Game кладёт их в собранную игру). Буферы
     //     полей модалок File-меню теперь живут внутри DialogsPanel. ---
     sage::EngineConfig m_settings;
+    // Отпечаток m_settings, по которому видно, что настройки правили: конфиг —
+    // простая структура без сигналов, а перекладывать её в глобальную каждый
+    // кадр значило бы копировать её на ровном месте.
+    std::string m_settingsStamp;
+    // Переносит m_settings в глобальный EngineConfig, если они разошлись.
+    void ApplyEngineSettings();
     bool m_showSettings = false;
     bool m_showAbout = false; // Help > About SAGE (версии подсистем)
 

@@ -70,6 +70,10 @@ private:
     bool m_browseIsShader = false;   // после выбора шейдера нужен ShaderPtr.reset()
     bool m_browseIsMesh = false;     // после выбора модели её надо загрузить
     bool m_browseIsMaterial = false; // после выбора материала его надо подгрузить
+    // Сущность, которой достанется выбранный в диалоге скрипт. Id, а не
+    // указатель на поле компонента: диалог отвечает через кадр, а сцену за это
+    // время могут перезагрузить (undo, открытие другой сцены).
+    int m_browseScriptEntity = -1;
     bool m_pendingMeshLoad = false;  // загрузку делаем в кадре, а не из колбэка диалога
     void DrawModelImportEditor(EditorHost& host); // настройки импорта выбранной модели
 

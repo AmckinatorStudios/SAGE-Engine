@@ -14,6 +14,7 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/core/Config.h"
 #include "sage/render/ScenePasses.h"
+#include "sage/render/PostFX.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -23,7 +24,7 @@
 
 void EditorSceneRenderer::Init() {
     m_outlineShader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
-    m_shadows.emplace(2048);
+    EnsureShadowMap();   // разрешение и каскады — из конфига (см. ниже)
     m_sceneFbo.emplace(m_vpW, m_vpH);
     m_gameFbo.emplace(m_gameW, m_gameH);
     m_postFbo.emplace(m_vpW, m_vpH);
@@ -103,9 +104,37 @@ void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnviron
         1);
 }
 
+void EditorSceneRenderer::EnsureShadowMap() {
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    const int wantRes = cfg.Shadows ? cfg.ShadowResolution : 512;
+    const int wantCascades = std::clamp(cfg.ShadowCascades, 1, ShadowMap::kMaxCascades);
+    if (m_shadows && m_shadowRes == wantRes && m_shadowCascades == wantCascades) return;
+    m_shadows.emplace(wantRes, wantCascades);
+    m_shadowRes = wantRes;
+    m_shadowCascades = wantCascades;
+}
+
 void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env,
                                        const Camera& camera) {
     Window& window = sage::Application::Get().GetWindow();
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+
+    // Разрешение и КАСКАДЫ — из конфига, как у рантайма и у игр.
+    //
+    // Здесь стояло `m_shadows.emplace(2048)`, то есть одна карта 2048 и ноль
+    // связи с настройками. Одна карта обязана растянуть свой тексель на всю
+    // дальность теней: при ShadowDistance 120 м сфера кадра выходит радиусом
+    // под сотню метров, и тексель получается около десяти САНТИМЕТРОВ. Никакая
+    // фильтрация этого не лечит — информации в карте просто нет, и тень от
+    // столба под ногами превращается в мыльную лесенку. Ровно то, что видно в
+    // редакторе, и ровно то, чего не видно в собранной игре: она-то каскады из
+    // конфига читала. Пресеты качества при этом честно писали 4096 и три
+    // каскада, и всё это пропадало впустую.
+    //
+    // Пересоздаём только при смене настроек: карты — это память видеокарты, а
+    // не покадровый объект.
+    EnsureShadowMap();
+
     // Карта едет за камерой вьюпорта. Раньше здесь стоял ортобокс радиусом
     // 24 м в точке (0,0,0): стоило отлететь от начала мира, и сцена оставалась
     // без теней — что читается как «тени выключены», а не как ошибка.
@@ -116,7 +145,7 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& 
     v.FovY = glm::radians(camera.Fov);
     v.Aspect = window.Height() > 0 ? (float)window.Width() / (float)window.Height() : 1.0f;
     v.Near = camera.NearClip;
-    v.ShadowDistance = sage::EngineConfig::Get().ShadowDistance;
+    v.ShadowDistance = cfg.ShadowDistance;
     if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
     else m_shadows->FitSingle(env.Sun.Direction, v);
     sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
@@ -384,14 +413,23 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     const int h = primary ? m_vpH : m_extraH[slot];
     if (w < 8 || h < 8) return;   // панель ещё не разложена — рисовать не во что
 
-    if (!primary && !m_extraFbo[slot]) {
-        m_extraFbo[slot].emplace(w, h);
-        m_extraPostFbo[slot].emplace(w, h);
-    }
+    // MSAA — на буфере СЦЕНЫ, а не экранного окна.
+    //
+    // Раньше настройка `msaa` жила в конфиге, читалась, сохранялась и даже
+    // ставилась пресетом Ultra в 4 — и не делала ничего: сглаживание
+    // растеризатора работает там, где растеризуется геометрия, а сцена рисуется
+    // в свой offscreen-буфер, который заводился всегда односэмпловым. Экранный
+    // буфер, к которому эту настройку обычно и привязывают (GLFW_SAMPLES), в
+    // цепочке с пост-обработкой не участвует вовсе — в него уходит уже готовая
+    // картинка одним треугольником, сглаживать в нём нечего.
+    //
+    // Буферы пост-обработки остаются односэмпловыми: у них нет геометрии.
+    const int samples = sage::render::SceneSamples(cfg);
+    EnsureFramebuffer(primary ? m_sceneFbo : m_extraFbo[slot], w, h, samples);
+    EnsureFramebuffer(primary ? m_postFbo : m_extraPostFbo[slot], w, h);
     Framebuffer& sceneFbo = primary ? *m_sceneFbo : *m_extraFbo[slot];
     Framebuffer& postFbo = primary ? *m_postFbo : *m_extraPostFbo[slot];
 
-    sceneFbo.Resize(w, h);
     sceneFbo.Bind();
     device.SetClearColor(0.10f, 0.11f, 0.13f, 1.0f);
     device.Clear();
@@ -478,6 +516,13 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).
     if (!selection.empty()) RenderOutlineMask(scene, selection, outView, outProj, w, h);
 
+    // Сведение многосэмплового буфера в обычные текстуры — ПОСЛЕ всей отрисовки
+    // сцены и ДО первого чтения. Без него весь пост-процесс (и сам показ кадра
+    // в панели) читал бы пустую текстуру: при MSAA рисование идёт в
+    // многосэмпловые renderbuffer'ы, а наружу отдаются разрешённые копии.
+    // Без MSAA это пустышка.
+    sceneFbo.Resolve();
+
     // Пост-обработка — только Shaded + включена в конфиге (отладочные режимы как есть).
     //
     // У ортогональных видов её нет НАМЕРЕННО: свечение и глубина резкости на
@@ -514,7 +559,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     glm::vec3 camPos = frame.Position;
 
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-    m_gameFbo->Resize(m_gameW, m_gameH);
+    EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg));
     m_gameFbo->Bind();
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
@@ -523,6 +568,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
     m_particles->DrawFromView(view, proj);
+
+    m_gameFbo->Resolve();   // MSAA -> обычные текстуры (без MSAA — пустышка)
 
     m_gamePostApplied = false;
     if (cfg.PostProcessing) {

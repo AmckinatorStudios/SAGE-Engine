@@ -1,5 +1,7 @@
 #pragma once
+#include <algorithm>
 #include <memory>
+#include <optional>
 #include "sage/rhi/GraphicsDevice.h"
 
 // ---------------------------------------------------------------------
@@ -65,3 +67,20 @@ public:
 private:
     std::unique_ptr<sage::rhi::RenderTarget> m_target;
 };
+
+// Приводит буфер к нужным размеру И числу сэмплов.
+//
+// ЗАЧЕМ ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ ПРОСТО Resize. Размер вложений меняется на
+// месте, а число сэмплов задаётся при СОЗДАНИИ хранилища — поменять его у
+// живого таргета нельзя. Настройка же правится на лету (ползунок MSAA в
+// настройках редактора), и без пересоздания она молча не действовала бы до
+// перезапуска. Пересоздание происходит только когда число сэмплов реально
+// изменилось: это не покадровая операция.
+inline void EnsureFramebuffer(std::optional<Framebuffer>& fbo, int width, int height,
+                              int samples = 1) {
+    if (width <= 0 || height <= 0) return;
+    samples = std::max(samples, 1);
+    if (fbo && fbo->Samples() != samples) fbo.reset();
+    if (!fbo) fbo.emplace(width, height, samples);
+    else fbo->Resize(width, height);
+}

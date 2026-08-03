@@ -270,8 +270,29 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     if (!isDir && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
         const std::string p = path.string();
         ImGui::SetDragDropPayload("SAGE_ASSET_PATH", p.c_str(), p.size() + 1);
+        // Под курсором — обложка и имя, а не одно имя: тащат обычно из десятка
+        // похожих файлов, и по картинке видно, что именно ухватили.
+        const uint64_t dragThumb = ThumbnailFor(path, false);
+        if (dragThumb) {
+            ImGui::Image((ImTextureID)(std::intptr_t)dragThumb, ImVec2(48, 48), ImVec2(0, 1),
+                         ImVec2(1, 0));
+            ImGui::SameLine();
+        }
         ImGui::TextUnformatted(filename.c_str());
         ImGui::EndDragDropSource();
+    }
+
+    // Папка принимает файлы: бросок ПЕРЕМЕЩАЕТ, а не копирует — это раскладка
+    // уже своих ассетов по местам, и вторая копия тут никому не нужна. Ссылки
+    // в сценах переживают переезд: они держатся за GUID из сайдкара .meta,
+    // который едет вместе с файлом (см. sage/assets/AssetDatabase.h).
+    if (isDir && ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            MoveIntoFolder(host, dropped, path);
+        }
+        ImGui::EndDragDropTarget();
     }
 
     if (clicked) m_selected = path;
@@ -435,6 +456,41 @@ void RegisterInDatabase(const fs::path& file) {
 }
 
 } // namespace
+
+// Перенос файла в папку броском. Вместе с ним едет сайдкар .meta (личность
+// ассета — по нему ссылки в сценах остаются целыми) и .sageimport (настройки
+// импорта модели): оставить их на старом месте значило бы, что переехавшая
+// модель потеряла и свой GUID, и свой масштаб.
+void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const fs::path& folder) {
+    std::error_code ec;
+    if (!fs::exists(source, ec) || fs::is_directory(source, ec)) return;
+    const fs::path target = folder / source.filename();
+    if (fs::weakly_canonical(source, ec) == fs::weakly_canonical(target, ec)) return;
+    if (fs::exists(target, ec)) {
+        host.SetStatusMessage("В папке уже есть " + source.filename().string());
+        return;
+    }
+
+    fs::rename(source, target, ec);
+    if (ec) {
+        host.SetStatusMessage("Перенос не удался: " + ec.message());
+        LOG_ERROR("Editor") << "Перенос ассета не удался: " << ec.message();
+        return;
+    }
+    for (const char* sidecar : {".meta", ".sageimport"}) {
+        const fs::path from = source.string() + sidecar;
+        std::error_code sec;
+        if (fs::exists(from, sec)) fs::rename(from, target.string() + sidecar, sec);
+    }
+
+    if (m_selected == source) m_selected = target;
+    // Пересканировать проект: база ассетов помнит пути, и после переезда её
+    // ответ на «где этот файл» обязан измениться.
+    Project& project = host.CurrentProject();
+    if (project.Loaded()) sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
+    host.SetStatusMessage("Перенесено в " + folder.filename().string() + ": " +
+                          source.filename().string());
+}
 
 AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const fs::path& destDir) {
     ImportReport report;

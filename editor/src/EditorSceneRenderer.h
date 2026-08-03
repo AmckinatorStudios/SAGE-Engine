@@ -125,12 +125,19 @@ private:
     // Силуэты ВСЕХ выбранных сущностей в масочный буфер (одна очистка, потом все).
     void RenderOutlineMask(Scene& scene, const std::vector<int>& selection,
                            const glm::mat4& view, const glm::mat4& proj, int w, int h);
+    // Приводит карту теней к настройкам конфига (разрешение и число каскадов
+    // задаются при создании — поменять их у живой карты нельзя).
+    void EnsureShadowMap();
     void CompositeOutline(Framebuffer& target);
     void DrawEntityGizmos(Scene& scene, const std::vector<int>& selection, float gameAspect);
     static sage::render::PostFXSettings FxFromConfig(const sage::EngineConfig& cfg);
 
     std::optional<Shader> m_outlineShader;   // lit-шейдер как flat-цвет каймы выделения
     std::optional<ShadowMap> m_shadows;
+    // С какими настройками создана карта теней — по ним видно, что пора
+    // пересоздать (разрешение и число каскадов задаются при создании).
+    int m_shadowRes = 0;
+    int m_shadowCascades = 0;
     std::optional<Framebuffer> m_sceneFbo, m_gameFbo;
     std::optional<Framebuffer> m_postFbo, m_gamePostFbo; // LDR-выходы PostFX
     // Дополнительные виды (слоты 1..3). Слот 0 — это m_sceneFbo/m_postFbo:

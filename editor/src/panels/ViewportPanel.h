@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -44,6 +45,15 @@ public:
     };
 
 private:
+    // Бросок ассета во вьюпорт: приём сидит на item'е картинки, а постановка
+    // происходит ниже по кадру, где уже посчитаны матрицы активного вида.
+    struct PendingDrop {
+        bool Active = false;
+        std::string Path;
+        ImVec2 Pos{0.0f, 0.0f};
+    };
+    PendingDrop m_pendingDrop;
+
     void DrawViewToolbar(EditorHost& host);
     // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
     // над ним (для взаимодействия).

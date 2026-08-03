@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <string>
 #include <functional>
+#include <vector>
 
 #include "sage/core/Config.h"
 
@@ -56,10 +57,20 @@ public:
     // Клавиши РЕДАКТИРОВАНИЯ (Backspace, стрелки, Enter…): у них нет символа, а
     // автоповтор при удержании должен работать — поэтому событием, а не опросом.
     using KeyFn = std::function<void(int key, int action, int mods)>;
+    // Файлы, брошенные В ОКНО из проводника системы.
+    //
+    // Это единственный способ узнать о таком перетаскивании: оконная система
+    // сообщает о нём событием, опросить его нельзя. Внутреннее перетаскивание
+    // (мышью между панелями) к этому отношения не имеет — им занимается ImGui,
+    // который про существование файлов вне окна ничего не знает.
+    //
+    // Приходит СПИСОК: бросают обычно выделенную пачку, а не один файл.
+    using FileDropFn = std::function<void(const std::vector<std::string>& paths)>;
     void SetCursorPosCallback(CursorPosFn fn) { m_cursorPosFn = std::move(fn); }
     void SetScrollCallback(ScrollFn fn) { m_scrollFn = std::move(fn); }
     void SetCharCallback(CharFn fn) { m_charFn = std::move(fn); }
     void SetKeyCallback(KeyFn fn) { m_keyFn = std::move(fn); }
+    void SetFileDropCallback(FileDropFn fn) { m_fileDropFn = std::move(fn); }
 
     // Захват курсора: мышь прячется и «прилипает» к окну, продолжая отдавать
     // смещение — режим обзора от первого лица. Без этого игра от первого лица
@@ -73,6 +84,7 @@ private:
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
     static void ForwardChar(GLFWwindow* handle, unsigned int codepoint);
     static void ForwardKey(GLFWwindow* handle, int key, int scancode, int action, int mods);
+    static void ForwardFileDrop(GLFWwindow* handle, int count, const char** paths);
 
     GLFWwindow* m_handle = nullptr;
     int m_width;
@@ -81,5 +93,6 @@ private:
     ScrollFn m_scrollFn;
     CharFn m_charFn;
     KeyFn m_keyFn;
+    FileDropFn m_fileDropFn;
     bool m_cursorCaptured = false;
 };

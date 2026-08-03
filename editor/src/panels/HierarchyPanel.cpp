@@ -100,6 +100,15 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 scene.SetParentById(childId, id);
             }
         }
+        // Ассет, брошенный НА СУЩНОСТЬ, относится к ней: материал красит её,
+        // скрипт вешается на неё, модель заменяет её меш. Бросок в пустое место
+        // списка (ниже) означает другое — «добавить в сцену», — и различает их
+        // именно то, на что попали.
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            host.ApplyAssetToEntity(id, dropped);
+        }
         ImGui::EndDragDropTarget();
     }
 
@@ -169,13 +178,23 @@ void HierarchyPanel::Draw(EditorHost& host) {
     std::sort(roots.begin(), roots.end());
     for (auto& [id, e] : roots) DrawNode(host, scene, e);
 
-    // Зона «в корень»: бросок сюда открепляет сущность от родителя.
+    // Зона «в корень»: бросок сюда открепляет сущность от родителя, а
+    // брошенный ассет добавляется в сцену как новый объект.
     ImGui::Dummy(ImVec2(-1.0f, 24.0f));
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY")) {
             int childId = *(const int*)p->Data;
             host.PushUndoSnapshot();
             scene.SetParentById(childId, -1); // -1 -> entt::null (в корень)
+        }
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            // Точки под курсором тут нет — список это не трёхмерный вид,
+            // — поэтому объект встаёт в начало координат, как при создании
+            // через меню Entity.
+            if (!host.AddAssetToScene(dropped))
+                host.SetStatusMessage("В сцену можно добавить модель или префаб");
         }
         ImGui::EndDragDropTarget();
     }
