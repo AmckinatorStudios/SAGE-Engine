@@ -296,6 +296,38 @@ TEST(DecalSystem_follows_the_object_it_is_attached_to) {
     CHECK_NEAR(lo0.z, lo1.z, 1e-3); CHECK_NEAR(hi0.z, hi1.z, 1e-3);
 }
 
+TEST(DecalSystem_rebuilds_when_moved_but_not_when_carried) {
+    // Два разных случая, которые легко перепутать:
+    //   • наклейку ДВИНУЛИ (гизмо в редакторе) — пересобрать обязательно,
+    //     иначе перетаскивание не меняет ровно ничего;
+    //   • наклейку ВЕЗЁТ родитель (борт корабля) — пересобирать нечего, она
+    //     лежит на том же месте, и пересборка каждый кадр была бы пустой
+    //     тратой на ровном месте.
+    Scene scene("move");
+    GameObject ship = scene.CreateObject("Ship");
+    ship.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    ship.GetTransform().Scale = glm::vec3(4.0f);
+
+    GameObject decal = scene.CreateObject("Decal");
+    decal.Renderer().Ref = MeshRef{MeshRef::Type::None, ""};
+    decal.GetTransform().Position = glm::vec3(0.0f, 0.5f, 0.0f);
+    decal.GetTransform().Rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+    decal.GetTransform().Scale = glm::vec3(0.25f);
+    scene.Registry().emplace<DecalComponent>(decal.Entity());
+    scene.SetParent(decal.Entity(), ship.Entity());
+
+    CHECK_TRUE(sage::ecs::BuildDecals(scene, nullptr).Rebuilt == 1); // первая сборка
+    CHECK_TRUE(sage::ecs::BuildDecals(scene, nullptr).Rebuilt == 0); // ничего не менялось
+
+    // Родитель уехал — наклейку ВЕЗЁТ, пересборки быть не должно.
+    ship.GetTransform().Position = glm::vec3(30.0f, 0.0f, 12.0f);
+    CHECK_TRUE(sage::ecs::BuildDecals(scene, nullptr).Rebuilt == 0);
+
+    // А вот саму наклейку подвинули — обязана пересобраться сама, без флага.
+    decal.GetTransform().Position.x += 0.1f;
+    CHECK_TRUE(sage::ecs::BuildDecals(scene, nullptr).Rebuilt == 1);
+}
+
 TEST(DecalSystem_reports_zero_when_it_hits_nothing) {
     // Наклейка в пустоте. Не ошибка и не падение — просто ноль треугольников,
     // и это видно снаружи: «не построилась» отличимо от «не видно».

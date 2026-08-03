@@ -47,7 +47,16 @@ DecalBuildStats BuildDecals(
     auto decals = reg.view<DecalComponent, MeshRendererComponent>();
     for (auto decalEntity : decals) {
         DecalComponent& dc = decals.get<DecalComponent>(decalEntity);
+        // Наклейку подвинули — пересобрать, даже если флаг никто не взводил.
+        const Transform& tr = reg.get<Transform>(decalEntity);
+        if (tr.Position != dc.BuiltPosition || tr.Rotation != dc.BuiltRotation ||
+            tr.Scale != dc.BuiltScale) {
+            dc.Dirty = true;
+        }
         if (!dc.Dirty) continue;
+        dc.BuiltPosition = tr.Position;
+        dc.BuiltRotation = tr.Rotation;
+        dc.BuiltScale = tr.Scale;
 
         const glm::mat4 decalToWorld = scene.WorldMatrix(decalEntity);
         const glm::mat4 worldToDecal = glm::inverse(decalToWorld);

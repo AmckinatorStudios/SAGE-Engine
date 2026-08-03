@@ -1682,6 +1682,26 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 }
                 ImGui::EndMenu();
             }
+            // Наклейка ставится в СЕРЕДИНУ вида и смотрит туда же, куда
+            // камера: поставленная в начало координат, она чаще всего оказалась
+            // бы внутри пола или далеко за спиной, и первое, что пришлось бы
+            // делать, — искать её.
+            if (ImGui::MenuItem("Create Decal")) {
+                PushUndoSnapshot();
+                GameObject d = m_scene->CreateObject("Decal");
+                d.Renderer().Ref = MeshRef{MeshRef::Type::None, ""};
+                d.GetTransform().Position = m_camera.Position + m_camera.Front * 4.0f;
+                // Ось Z наклейки — навстречу камере: проекция идёт вдоль -Z, то
+                // есть от зрителя вглубь сцены, как и смотрит человек.
+                const glm::vec3 f = -m_camera.Front;
+                d.GetTransform().Rotation =
+                    glm::vec3(glm::degrees(std::asin(glm::clamp(f.y, -1.0f, 1.0f))),
+                              glm::degrees(std::atan2(f.x, f.z)), 0.0f);
+                d.GetTransform().Scale = glm::vec3(1.0f);
+                m_scene->Registry().emplace<DecalComponent>(d.Entity());
+                SetSelectedId(d.Id());
+            }
+
             // Готовые элементы интерфейса, а не «добавь компонент и настрой».
             //
             // Пустой UIElementComponent — это панель без текста, без размера под

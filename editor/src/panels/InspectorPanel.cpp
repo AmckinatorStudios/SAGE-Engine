@@ -502,6 +502,47 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Наклейка (проекция картинки на геометрию сцены) ---
+    if (reg.all_of<DecalComponent>(obj.Entity()) &&
+        ImGui::CollapsingHeader("Decal", ImGuiTreeNodeFlags_DefaultOpen)) {
+        DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
+        bool changed = false;
+        changed |= ImGui::DragFloat("Angle Limit", &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
+        host.TrackLastImGuiItem();
+        changed |= ImGui::DragFloat("Surface Offset", &dc.Offset, 0.001f, 0.0f, 0.5f, "%.3f");
+        host.TrackLastImGuiItem();
+
+        // Треугольники — главный ответ на «почему наклейки не видно». Ноль
+        // значит, что под коробкой не оказалось подходящей геометрии, а не что
+        // сломался рендер, и лечится это перемещением, а не настройками.
+        //
+        // Подсказки — с переносом по ширине панели. Без него текст просто
+        // обрезается на границе: панель у людей узкая, и «размер задаёт Scal»
+        // читается как поломка редактора, а не как совет.
+        if (dc.Triangles > 0) {
+            ImGui::TextDisabled("Спроецировано треугольников: %d", dc.Triangles);
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.3f, 1.0f));
+            ImGui::TextWrapped("Ни на что не легла: под коробкой нет геометрии, либо она "
+                               "отвёрнута от наклейки.");
+            ImGui::PopStyleColor();
+        }
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+        ImGui::TextWrapped("Проекция идёт вдоль -Z; размер задаёт Scale");
+        ImGui::PopStyleColor();
+        if (ImGui::Button("Rebuild##decal")) changed = true;
+        ImGui::SameLine();
+        if (ImGui::Button("Remove##decal")) {
+            host.PushUndoSnapshot();
+            reg.remove<DecalComponent>(obj.Entity());
+            changed = false;
+        }
+        // Правка параметров обязана быть видна сразу: наклейка пересобирается
+        // по флагу, и без него ползунок угла не менял бы вообще ничего.
+        if (changed && reg.all_of<DecalComponent>(obj.Entity()))
+            reg.get<DecalComponent>(obj.Entity()).Dirty = true;
+    }
+
     // --- Скрипт (поведение в Play-режиме) ---
     if (reg.all_of<GIStaticComponent>(obj.Entity()) && ImGui::CollapsingHeader("GI Static", ImGuiTreeNodeFlags_DefaultOpen)) {
         GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());

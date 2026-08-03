@@ -13,6 +13,8 @@
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
 
+#include "sage/ecs/DecalSystem.h"
+
 #include <cstdlib>
 #include <cstdio>
 #include <algorithm>
@@ -252,6 +254,67 @@ void EditorLayer::RunSelfTest() {
                 LOG_ERROR("Editor") << "SELFTEST: primitive/environment round-trip failed (mesh "
                                     << meshOk << ", fog " << fogOk << ", sky " << skyOk << ")";
                 ok = false;
+            }
+        }
+    }
+
+    // --- Наклейки: строятся по сцене и переживают save/load ---
+    //
+    // Проверяется тот самый путь, которым наклейкой пользуются в редакторе:
+    // поставили над полом -> она сама нашла геометрию -> сохранили сцену ->
+    // перечитали -> она построилась заново. Геометрия проекции проверена
+    // юнит-тестами; здесь важно, что параметры доезжают до файла и обратно, а
+    // система собирает наклейку после загрузки без единого клика.
+    if (ok) {
+        GameObject floorObj = m_scene->CreateObject("Decal Floor");
+        MeshRendererComponent& fmr = floorObj.Renderer();
+        fmr.Ref = MeshRef{MeshRef::Type::Cube, ""};
+        fmr.MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        floorObj.GetTransform().Position = {20.0f, 0.0f, 0.0f};
+        floorObj.GetTransform().Scale = {6.0f, 0.5f, 6.0f};
+
+        GameObject dec = m_scene->CreateObject("Selftest Decal");
+        dec.Renderer().Ref = MeshRef{MeshRef::Type::None, ""};
+        dec.GetTransform().Position = {20.0f, 0.25f, 0.0f}; // верхняя грань пола
+        dec.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f}; // -Z смотрит вниз
+        dec.GetTransform().Scale = {2.0f, 2.0f, 2.0f};
+        DecalComponent dcInit;
+        dcInit.AngleLimitDeg = 70.0f;
+        dcInit.Offset = 0.012f;
+        m_scene->Registry().emplace<DecalComponent>(dec.Entity(), dcInit);
+
+        sage::ecs::BuildDecals(*m_scene, sage::ecs::MakeDecalMesh);
+        const DecalComponent& built = m_scene->Registry().get<DecalComponent>(dec.Entity());
+        if (built.Triangles <= 0 || !dec.Renderer().MeshPtr) {
+            LOG_ERROR("Editor") << "SELFTEST: decal did not project onto the floor (triangles "
+                                << built.Triangles << ")";
+            ok = false;
+        }
+
+        if (ok) {
+            fs::path decalScene = m_project.ScenesDir() / "selftest_decal.sage";
+            if (!SaveSceneToFile(decalScene) || !LoadSceneFromFile(decalScene)) ok = false;
+            if (ok) {
+                GameObject back = m_scene->FindByName("Selftest Decal");
+                const DecalComponent* dc =
+                    back.Valid() ? m_scene->Registry().try_get<DecalComponent>(back.Entity())
+                                 : nullptr;
+                if (!dc || std::abs(dc->AngleLimitDeg - 70.0f) > 0.01f ||
+                    std::abs(dc->Offset - 0.012f) > 1e-4f) {
+                    LOG_ERROR("Editor") << "SELFTEST: decal params lost in scene round-trip";
+                    ok = false;
+                } else {
+                    // Геометрии в файле нет и быть не должно — она пересобирается.
+                    sage::ecs::BuildDecals(*m_scene, sage::ecs::MakeDecalMesh);
+                    const DecalComponent& rebuilt =
+                        m_scene->Registry().get<DecalComponent>(back.Entity());
+                    if (rebuilt.Triangles <= 0 || !back.Renderer().MeshPtr) {
+                        LOG_ERROR("Editor")
+                            << "SELFTEST: decal not rebuilt after load (triangles "
+                            << rebuilt.Triangles << ")";
+                        ok = false;
+                    }
+                }
             }
         }
     }
