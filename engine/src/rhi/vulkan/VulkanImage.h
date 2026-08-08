@@ -68,6 +68,15 @@ public:
     VkImageView FaceView(VulkanDevice& device, uint32_t layer, uint32_t mip);
     VkFormat Format() const { return m_desc.Format; }
     VkImageLayout Layout() const { return m_layout; }
+    // Сообщить объекту, что раскладку сменил КТО-ТО ДРУГОЙ — на практике
+    // проход, у которого finalLayout прописан в описании вложения.
+    //
+    // Без этого следующий переход считался бы от UNDEFINED, а UNDEFINED как
+    // исходная раскладка официально разрешает драйверу ВЫБРОСИТЬ содержимое.
+    // Это не гипотетическая придирка: ровно так чтение пикселей вернуло бы
+    // чёрный кадр, причём не на всяком драйвере — на том, который решит
+    // воспользоваться разрешением.
+    void SetTrackedLayout(VkImageLayout layout) { m_layout = layout; }
     int Width() const { return m_desc.Width; }
     int Height() const { return m_desc.Height; }
     uint32_t Mips() const { return m_desc.Mips; }

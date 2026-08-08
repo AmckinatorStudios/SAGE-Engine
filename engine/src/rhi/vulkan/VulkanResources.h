@@ -111,6 +111,9 @@ public:
     bool HasDepth() const { return m_kind != RenderTargetKind::ColorHDR; }
     // Изображение, из которого читаются пиксели (после разрешения MSAA).
     VulkanImage& ColorImage() { return m_color; }
+    // Проход закончился: привести отслеживаемые раскладки в соответствие с
+    // finalLayout вложений (см. VulkanImage::SetTrackedLayout).
+    void OnPassEnded();
 
 private:
     bool CreateStorage();

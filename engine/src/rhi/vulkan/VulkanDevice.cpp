@@ -107,6 +107,7 @@ VulkanDevice::~VulkanDevice() {
         vkDeviceWaitIdle(m_device);
         // Распределитель — ПОСЛЕ всех ресурсов и ДО устройства: он держит
         // выделения, а они принадлежат устройству.
+        if (m_fence != VK_NULL_HANDLE) vkDestroyFence(m_device, m_fence, nullptr);
         for (auto& [key, sampler] : m_samplers) vkDestroySampler(m_device, sampler, nullptr);
         m_samplers.clear();
         DestroyAllocator(m_allocator);
@@ -427,7 +428,239 @@ void VulkanDevice::BindTexture2D(int unit, TextureHandle texture) {
 
 void VulkanDevice::BindShader(const VulkanShaderProgram* shader) { m_shader = shader; }
 
+// ============================================================================
+//  Запись команд
+// ============================================================================
+
+void VulkanDevice::EnsureCommandBuffer() {
+    if (m_recording) return;
+    if (m_cmd == VK_NULL_HANDLE) {
+        VkCommandBufferAllocateInfo alloc{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        alloc.commandPool = m_pool;
+        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc.commandBufferCount = 1;
+        if (!vk::Check(vkAllocateCommandBuffers(m_device, &alloc, &m_cmd),
+                       "vkAllocateCommandBuffers (кадр)")) {
+            return;
+        }
+        VkFenceCreateInfo fence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        vk::Check(vkCreateFence(m_device, &fence, nullptr, &m_fence), "vkCreateFence");
+    }
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkResetCommandBuffer(m_cmd, 0);
+    vkBeginCommandBuffer(m_cmd, &begin);
+    m_recording = true;
+}
+
+void VulkanDevice::ApplyViewportAndScissor() {
+    if (!m_inPass) return;
+    const int targetH = m_target ? m_target->Height() : m_viewport[3];
+
+    // ОТРИЦАТЕЛЬНАЯ ВЫСОТА — и это не трюк, а штатный способ (VK_KHR_maintenance1,
+    // ядро с Vulkan 1.1). У Vulkan начало отсчёта сверху, у RHI — снизу
+    // (см. GraphicsDevice.h). Перевернув viewport, мы приводим весь бэкенд к
+    // соглашению RHI один раз здесь, вместо того чтобы переворачивать каждую
+    // матрицу проекции и каждую текстурную координату по всему движку.
+    VkViewport vp{};
+    vp.x = (float)m_viewport[0];
+    vp.y = (float)(targetH - m_viewport[1]);
+    vp.width = (float)m_viewport[2];
+    vp.height = -(float)m_viewport[3];
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+    vkCmdSetViewport(m_cmd, 0, 1, &vp);
+
+    // Ножницы переворачиваются вручную: у них нет отрицательной высоты, а
+    // договорённость та же — (x, y) считается от ЛЕВОГО НИЖНЕГО угла.
+    VkRect2D rect{};
+    if (m_scissorOn) {
+        rect.offset.x = std::max(m_scissor[0], 0);
+        rect.offset.y = std::max(targetH - m_scissor[1] - m_scissor[3], 0);
+        rect.extent.width = (uint32_t)std::max(m_scissor[2], 0);
+        rect.extent.height = (uint32_t)std::max(m_scissor[3], 0);
+    } else {
+        rect.extent.width = (uint32_t)std::max(m_viewport[2], 0);
+        rect.extent.height = (uint32_t)std::max(m_viewport[3], 0);
+    }
+    vkCmdSetScissor(m_cmd, 0, 1, &rect);
+}
+
+void VulkanDevice::EnsureRenderPass(bool wantClear) {
+    if (m_inPass || !m_target) return;
+    EnsureCommandBuffer();
+    if (!m_recording) return;
+
+    VkClearValue clears[3]{};
+    clears[0].color = {{m_clear[0], m_clear[1], m_clear[2], m_clear[3]}};
+    clears[1].depthStencil = {1.0f, 0};
+    clears[2].color = {{m_clear[0], m_clear[1], m_clear[2], m_clear[3]}};
+
+    VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    info.renderPass = wantClear ? m_target->ClearPass() : m_target->LoadPass();
+    info.framebuffer = m_target->Framebuffer();
+    info.renderArea.extent = {(uint32_t)m_target->Width(), (uint32_t)m_target->Height()};
+    info.clearValueCount = 3;
+    info.pClearValues = clears;
+    vkCmdBeginRenderPass(m_cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
+    m_inPass = true;
+    ApplyViewportAndScissor();
+}
+
+void VulkanDevice::EndRenderPass() {
+    if (!m_inPass) return;
+    vkCmdEndRenderPass(m_cmd);
+    m_inPass = false;
+    // Проход сменил раскладки вложений по своему описанию — объекты об этом
+    // сами не узнают, а следующий барьер обязан считать от правильной.
+    if (m_target) const_cast<VulkanRenderTarget*>(m_target)->OnPassEnded();
+}
+
+void VulkanDevice::FlushCommands() {
+    EndRenderPass();
+    if (!m_recording) return;
+    vkEndCommandBuffer(m_cmd);
+    m_recording = false;
+
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &m_cmd;
+    vkResetFences(m_device, 1, &m_fence);
+    vkQueueSubmit(m_queue, 1, &submit, m_fence);
+    // Ждём здесь и не притворяемся, что это быстро: пока результат кадра
+    // забирают чтением пикселей, ждать всё равно придётся, а барьер в одном
+    // месте лучше, чем гонка в нескольких.
+    vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX);
+}
+
+void VulkanDevice::Clear(bool color, bool depth) {
+    if (!m_target) return;
+    // Очистка ВСЕГО таргета без ножниц и до всяких команд — это ровно тот
+    // случай, ради которого существует проход с loadOp = CLEAR: драйвер не
+    // читает старое содержимое вовсе. Открываем проход с очисткой.
+    if (!m_inPass && !m_scissorOn) {
+        EnsureRenderPass(/*wantClear=*/true);
+        return;
+    }
+    // Иначе очищаем внутри уже открытого прохода — здесь очистка уважает
+    // ножницы, как того и требует контракт RHI.
+    EnsureRenderPass(/*wantClear=*/false);
+    if (!m_inPass) return;
+
+    VkClearAttachment attach[2]{};
+    uint32_t count = 0;
+    if (color && m_target->HasColor()) {
+        attach[count].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        attach[count].colorAttachment = 0;
+        attach[count].clearValue.color = {{m_clear[0], m_clear[1], m_clear[2], m_clear[3]}};
+        ++count;
+    }
+    if (depth && m_target->HasDepth()) {
+        attach[count].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        attach[count].clearValue.depthStencil = {1.0f, 0};
+        ++count;
+    }
+    if (count == 0) return;
+
+    const int targetH = m_target->Height();
+    VkClearRect rect{};
+    rect.layerCount = 1;
+    if (m_scissorOn) {
+        rect.rect.offset.x = std::max(m_scissor[0], 0);
+        rect.rect.offset.y = std::max(targetH - m_scissor[1] - m_scissor[3], 0);
+        rect.rect.extent.width = (uint32_t)std::max(m_scissor[2], 0);
+        rect.rect.extent.height = (uint32_t)std::max(m_scissor[3], 0);
+    } else {
+        rect.rect.extent = {(uint32_t)m_target->Width(), (uint32_t)targetH};
+    }
+    vkCmdClearAttachments(m_cmd, count, attach, 1, &rect);
+}
+
+void VulkanDevice::BindDefaultFramebuffer() {
+    // Экранного буфера у бэкенда пока нет (swapchain — следующий этап).
+    // Отвязываем цель и закрываем проход: движок зовёт это в конце кадра, и
+    // «ничего не делать» здесь означало бы оставить проход открытым навсегда.
+    EndRenderPass();
+    m_target = nullptr;
+}
+
+void VulkanDevice::ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) {
+    if (!out || width <= 0 || height <= 0) return;
+    std::memset(out, 0, (size_t)width * height * 3);
+    if (!m_target || !m_target->HasColor()) return;
+
+    // Всё записанное обязано ИСПОЛНИТЬСЯ до чтения. В OpenGL за это отвечал
+    // glFinish внутри бэкенда; здесь — закрытие прохода, отправка и ожидание.
+    const VulkanRenderTarget* target = m_target;
+    FlushCommands();
+
+    VulkanImage& image = const_cast<VulkanRenderTarget*>(target)->ColorImage();
+    const int targetH = target->Height();
+
+    VulkanBuffer readback;
+    // Цвет таргета — RGBA16F (см. CreateStorage), то есть 8 байт на пиксель.
+    const VkDeviceSize bytes = (VkDeviceSize)width * height * 8;
+    if (!readback.Create(*this, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemoryUse::GpuToCpu)) {
+        return;
+    }
+
+    SubmitImmediate([&](VkCommandBuffer cmd) {
+        image.TransitionTo(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        // Строки RHI идут СНИЗУ ВВЕРХ, у изображения — сверху вниз. Читаем
+        // прямоугольник, перевёрнутый по вертикали, и разворачиваем ниже.
+        region.imageOffset = {x, std::max(targetH - y - height, 0), 0};
+        region.imageExtent = {(uint32_t)width, (uint32_t)height, 1};
+        vkCmdCopyImageToBuffer(cmd, image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               readback.Handle(), 1, &region);
+        image.TransitionTo(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    });
+
+    const uint16_t* src = static_cast<const uint16_t*>(readback.Mapped());
+    if (!src) return;
+
+    // Половинная точность → байты. Своя распаковка half: тянуть ради неё
+    // зависимость незачем, а формат прост — знак, пять бит порядка, десять
+    // мантиссы. Денормали и бесконечности здесь не встречаются (цвет кадра
+    // после тон-маппинга лежит в [0,1]), но обрабатываются, чтобы мусор в
+    // буфере не превращался в случайные яркие точки.
+    auto halfToFloat = [](uint16_t h) -> float {
+        const uint32_t sign = (uint32_t)(h & 0x8000) << 16;
+        uint32_t exp = (h >> 10) & 0x1F;
+        uint32_t mant = h & 0x3FF;
+        if (exp == 0) {
+            if (mant == 0) { float f; uint32_t bits = sign; std::memcpy(&f, &bits, 4); return f; }
+            // Денормаль: нормализуем сдвигом.
+            while (!(mant & 0x400)) { mant <<= 1; --exp; }
+            ++exp;
+            mant &= 0x3FF;
+        } else if (exp == 31) {
+            const uint32_t bits = sign | 0x7F800000u | (mant << 13);
+            float f; std::memcpy(&f, &bits, 4); return f;
+        }
+        const uint32_t bits = sign | ((exp + 112) << 23) | (mant << 13);
+        float f; std::memcpy(&f, &bits, 4); return f;
+    };
+
+    for (int row = 0; row < height; ++row) {
+        // Переворот: первая строка выхода — нижняя строка изображения.
+        const uint16_t* line = src + (size_t)(height - 1 - row) * width * 4;
+        unsigned char* dst = out + (size_t)row * width * 3;
+        for (int col = 0; col < width; ++col) {
+            for (int c = 0; c < 3; ++c) {
+                const float v = halfToFloat(line[col * 4 + c]);
+                dst[col * 3 + c] = (unsigned char)std::clamp(v * 255.0f + 0.5f, 0.0f, 255.0f);
+            }
+        }
+    }
+}
+
 void VulkanDevice::BindRenderTarget(const VulkanRenderTarget* target) {
+    // Смена цели закрывает открытый проход: рисовать в два таргета одним
+    // проходом нельзя, а «забыть закрыть» — это отказ валидации при отправке.
+    if (target != m_target) EndRenderPass();
     m_target = target;
     if (target) SetViewport(0, 0, target->Width(), target->Height());
 }
@@ -436,6 +669,7 @@ void VulkanDevice::BindRenderTarget(const VulkanRenderTarget* target) {
 
 void VulkanDevice::SetViewport(int x, int y, int width, int height) {
     m_viewport[0] = x; m_viewport[1] = y; m_viewport[2] = width; m_viewport[3] = height;
+    ApplyViewportAndScissor();
 }
 
 void VulkanDevice::SetClearColor(float r, float g, float b, float a) {
@@ -445,6 +679,7 @@ void VulkanDevice::SetClearColor(float r, float g, float b, float a) {
 void VulkanDevice::SetScissor(bool enabled, int x, int y, int w, int h) {
     m_scissorOn = enabled;
     m_scissor[0] = x; m_scissor[1] = y; m_scissor[2] = w; m_scissor[3] = h;
+    ApplyViewportAndScissor();
 }
 
 // --- Пока не реализовано -----------------------------------------------------
@@ -466,14 +701,10 @@ void OnceNotImplemented(const char* what) {
 }
 } // namespace
 
-void VulkanDevice::Clear(bool, bool) { OnceNotImplemented("Clear"); }
-void VulkanDevice::BindDefaultFramebuffer() { OnceNotImplemented("BindDefaultFramebuffer"); }
 
 
-void VulkanDevice::ReadPixelsRGB(int, int, int width, int height, unsigned char* out) {
-    OnceNotImplemented("ReadPixelsRGB");
-    if (out && width > 0 && height > 0) std::memset(out, 0, (size_t)width * height * 3);
-}
+
+
 
 std::unique_ptr<ShaderProgram> VulkanDevice::CreateShaderProgram(const std::string& vertexSrc,
                                                                  const std::string& fragmentSrc) {

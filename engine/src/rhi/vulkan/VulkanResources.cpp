@@ -459,6 +459,19 @@ void VulkanRenderTarget::Resolve() {
     // Метод остаётся, потому что он часть контракта RHI и вызывается всегда.
 }
 
+void VulkanRenderTarget::OnPassEnded() {
+    // Значения обязаны совпадать с finalLayout из CreateStorage — иначе
+    // рассинхрон, и следующий барьер будет неправильным.
+    if (m_hasColorRef) {
+        m_color.SetTrackedLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (m_samples > 1) m_colorMs.SetTrackedLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    }
+    if (m_hasDepthRef) {
+        VulkanImage& depth = m_samples > 1 ? m_depthMs : m_depth;
+        depth.SetTrackedLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    }
+}
+
 void VulkanRenderTarget::Bind() const {
     // Проход открывает запись команд — этим занимается устройство, которое
     // ведёт текущий командный буфер. Здесь только сообщаем ему, куда рисовать.
