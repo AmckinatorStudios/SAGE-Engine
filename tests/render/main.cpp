@@ -40,6 +40,7 @@
 #include "sage/assets/AssetCache.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/ShadowAtlas.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
@@ -2205,6 +2206,128 @@ void TestSkyRayDirection() {
     Check(worst <= 8.0, "луч неба совпадает с лучом камеры");
 }
 
+
+// --- Тени прожектора и точечного света ---------------------------------------
+//
+// ЧТО ИМЕННО ПРОВЕРЯЕТСЯ. Не «картинка изменилась» — этого мало: проход теней
+// меняет картинку и когда он просто затемняет всё подряд. Проверяется, что
+// потемнение идёт ОТ ГЕОМЕТРИИ. Поэтому кадров четыре: с перекрытием и без,
+// каждый — с тенями и без них. Тень обязана появиться там, где между лампой и
+// полом стоит плита, и НЕ появиться там, где её убрали.
+//
+// Контрольная пара (без перекрытия) — главная часть теста. Без неё проверку
+// прошла бы любая ошибка, дающая тень из ниоткуда: пустая плитка атласа,
+// перепутанная грань куба, сбитая на пол-плитки выборка.
+std::unique_ptr<Scene> MakeLampScene(LightComponent::Type kind, bool withBlocker) {
+    auto scene = std::make_unique<Scene>("LampShadow");
+
+    // Солнца нет: иначе его тень смешалась бы с ламповой, и разница между
+    // кадрами перестала бы означать что-то одно. Засветка почти нулевая — по
+    // той же причине.
+    scene->Lighting.Sun.Intensity = 0.0f;
+    scene->Lighting.SkyColor = {0.05f, 0.05f, 0.06f};
+    scene->Lighting.GroundColor = {0.04f, 0.04f, 0.05f};
+    scene->Lighting.AmbientStrength = 0.15f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    auto primitive = [](GameObject obj, MeshRef::Type type, glm::vec3 color) {
+        obj.Renderer().Ref = MeshRef{type};
+        obj.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(type);
+        obj.Renderer().Color = color;
+    };
+
+    GameObject ground = scene->CreateObject("Ground");
+    ground.GetTransform().Scale = {14.0f, 1.0f, 14.0f};
+    primitive(ground, MeshRef::Type::Plane, {0.62f, 0.62f, 0.64f});
+
+    if (withBlocker) {
+        GameObject blocker = scene->CreateObject("Blocker");
+        blocker.GetTransform().Position = {0.0f, 2.0f, 0.0f};
+        blocker.GetTransform().Scale = {1.6f, 0.2f, 1.6f};
+        primitive(blocker, MeshRef::Type::Cube, {0.55f, 0.55f, 0.58f});
+    }
+
+    GameObject lamp = scene->CreateObject("Lamp");
+    lamp.GetTransform().Position = {0.0f, 4.0f, 0.0f};
+    lamp.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f}; // «вперёд» строго вниз
+    LightComponent& lc = lamp.Registry()->emplace<LightComponent>(lamp.Entity());
+    lc.Kind = kind;
+    lc.Color = {1.0f, 0.97f, 0.92f};
+    lc.Intensity = 40.0f;
+    lc.Range = 24.0f;
+    lc.InnerConeDeg = 30.0f;
+    lc.OuterConeDeg = 45.0f;
+    return scene;
+}
+
+// atlas == nullptr — тот же кадр без теней ламп (база для сравнения).
+Image RenderWithLampShadows(FrameRenderer& r, Scene& scene,
+                            sage::render::LocalShadowAtlas* atlas) {
+    Framebuffer sceneFbo(kW, kH);
+    LightingEnvironment env = sage::ecs::CollectLighting(scene);
+
+    if (atlas) {
+        // Раздача мест ИЗМЕНЯЕТ env: каждому источнику проставляется его плитка.
+        atlas->Prepare(env);
+        for (int p = 0; p < atlas->PassCount(); ++p) {
+            atlas->BeginPass(p);
+            r.Batch.RenderDepth(scene, atlas->PassMatrix(p));
+        }
+        atlas->End(kW, kH);
+    }
+
+    ShadowBinding shadows(r.Shadow, /*enabled=*/false); // солнечных теней тут нет
+    if (atlas) shadows.Local = atlas->Binding();
+
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.02f, 0.02f, 0.03f, 1.0f);
+    device.Clear(true, true);
+    const glm::mat4 view = TestView();
+    r.Batch.RenderColor(scene, view, PerspectiveProj(), kEye, env, shadows, 0);
+    sceneFbo.Resolve();
+    sceneFbo.Bind();
+    return Capture(kW, kH);
+}
+
+void TestLocalShadowsOfKind(FrameRenderer& r, LightComponent::Type kind, const char* label,
+                            const char* dumpPrefix) {
+    sage::render::LocalShadowAtlas atlas(1024, 256);
+    Check(atlas.Valid(), "атлас локальных теней создан");
+
+    std::unique_ptr<Scene> blocked = MakeLampScene(kind, true);
+    const Image litBlocked = RenderWithLampShadows(r, *blocked, nullptr);
+    const Image shadowedBlocked = RenderWithLampShadows(r, *blocked, &atlas);
+
+    std::unique_ptr<Scene> open = MakeLampScene(kind, false);
+    const Image litOpen = RenderWithLampShadows(r, *open, nullptr);
+    const Image shadowedOpen = RenderWithLampShadows(r, *open, &atlas);
+
+    if (std::getenv("SAGE_DUMP_LOCAL_SHADOWS")) {
+        SavePng(std::string(dumpPrefix) + "_lit.png", litBlocked);
+        SavePng(std::string(dumpPrefix) + "_shadowed.png", shadowedBlocked);
+    }
+
+    const long long darkened = NewlyShadowed(litBlocked, shadowedBlocked);
+    const long long phantom = NewlyShadowed(litOpen, shadowedOpen);
+    std::printf("    %s: затенено пикселей %lld, без перекрытия %lld\n", label, darkened, phantom);
+
+    // Тень есть и она заметная. Порог в сотни пикселей, а не в единицы: плита
+    // 1.6 на высоте 2 под лампой на высоте 4 даёт на полу пятно вдвое больше
+    // себя, и оно занимает изрядную часть кадра.
+    Check(darkened > 400, (std::string(label) + ": лампа отбрасывает тень").c_str());
+    // А без перекрытия проход теней не смеет затемнить НИЧЕГО. Полсотни
+    // пикселей допуска — на самозатенение по кромке пола у самого горизонта.
+    Check(phantom < 50, (std::string(label) + ": без перекрытия тени не возникает").c_str());
+}
+
+void TestLocalShadows(FrameRenderer& r) {
+    TestLocalShadowsOfKind(r, LightComponent::Type::Spot, "прожектор", "local_spot");
+    // Точечный — отдельная механика: шесть граней куба, разложенных в тот же
+    // атлас, и выбор грани по наибольшей компоненте вектора в шейдере.
+    TestLocalShadowsOfKind(r, LightComponent::Type::Point, "точечный", "local_point");
+}
+
 // --- Соответствие RHI на НАСТОЯЩЕМ бэкенде ------------------------------------
 //
 // Тот же контракт, что sage_tests гоняет по Null, — но здесь есть контекст, и
@@ -2280,6 +2403,7 @@ int main(int argc, char** argv) {
         TestPlanarReflectionRender(renderer);
         TestShadowSoftness(renderer, *scene);
         TestShadowCascades(renderer);
+        TestLocalShadows(renderer);
         TestLevelsOfDetail(renderer);
         TestOcclusionCulling(renderer);
         TestAssetCache();

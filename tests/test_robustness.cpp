@@ -48,7 +48,12 @@ TEST(Robust_scene_load_with_duplicate_ids) {
         ]
     })";
     auto scene = SceneSerializer::LoadFromString(json);
-    CHECK_EQ((int)scene->Count(), 2);
+    // Три, а не две: миграция v4->v5 переносит солнце из настроек сцены в
+    // сущность, и у любой сцены старого формата появляется объект «Солнце»
+    // (см. MigrateV4toV5). Пересчёт именно здесь — самое дешёвое место
+    // заметить, если миграция вдруг заведёт солнце ДВАЖДЫ.
+    CHECK_EQ((int)scene->Count(), 3);
+    CHECK_TRUE(scene->FindByName("Солнце").Valid());
     // Обе сущности живы и имена не потеряны.
     CHECK_TRUE(scene->FindByName("First").Valid());
     CHECK_TRUE(scene->FindByName("Second").Valid());
@@ -68,7 +73,7 @@ TEST(Robust_missing_model_does_not_abort_scene_load) {
         ]
     })";
     auto scene = SceneSerializer::LoadFromString(json);
-    CHECK_EQ((int)scene->Count(), 2);
+    CHECK_EQ((int)scene->Count(), 3); // + перенесённое миграцией солнце
     GameObject broken = scene->FindByName("Broken");
     CHECK_TRUE(broken.Valid());
     CHECK_TRUE(broken.Renderer().MeshPtr == nullptr); // битая модель -> без меша, не краш

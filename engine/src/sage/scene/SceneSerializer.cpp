@@ -1,5 +1,6 @@
 #include "SceneSerializer.h"
 #include "sage/assets/Pack.h"
+#include "sage/ecs/LightSystem.h"
 #include "sage/render/LodGroup.h"
 #include "sage/gi/GI.h"
 #include "sage/render/ResourceManager.h"
@@ -16,7 +17,7 @@ using json = nlohmann::json;
 // Текущая версия формата сцены. Растёт при ЛОМАЮЩЕМ изменении: добавление
 // необязательного поля версию не двигает, потому что старые файлы читаются без
 // него как раньше.
-constexpr int kSceneVersion = 4;
+constexpr int kSceneVersion = 5;
 
 static json Vec3ToJson(const glm::vec3& v) {
     return json{ {"x", v.x}, {"y", v.y}, {"z", v.z} };
@@ -270,24 +271,39 @@ static CameraComponent ParseCamera(const json& cj) {
     return cam;
 }
 
+static const char* LightTypeToString(LightComponent::Type kind) {
+    switch (kind) {
+        case LightComponent::Type::Spot: return "spot";
+        case LightComponent::Type::Directional: return "directional";
+        default: return "point";
+    }
+}
+
+static LightComponent::Type LightTypeFromString(const std::string& text) {
+    if (text == "spot") return LightComponent::Type::Spot;
+    if (text == "directional") return LightComponent::Type::Directional;
+    return LightComponent::Type::Point;
+}
+
 static void SaveLight(json& j, const LightComponent& light) {
-    j["light"]["type"] = (light.Kind == LightComponent::Type::Spot) ? "spot" : "point";
+    j["light"]["type"] = LightTypeToString(light.Kind);
     j["light"]["color"] = Vec3ToJson(light.Color);
     j["light"]["intensity"] = light.Intensity;
     j["light"]["range"] = light.Range;
     j["light"]["innerCone"] = light.InnerConeDeg;
     j["light"]["outerCone"] = light.OuterConeDeg;
+    j["light"]["castShadows"] = light.CastShadows;
 }
 
 static LightComponent ParseLight(const json& lj) {
     LightComponent light;
-    if (lj.value("type", std::string("point")) == "spot")
-        light.Kind = LightComponent::Type::Spot;
+    light.Kind = LightTypeFromString(lj.value("type", std::string("point")));
     if (lj.contains("color")) light.Color = Vec3FromJson(lj["color"]);
     light.Intensity = lj.value("intensity", light.Intensity);
     light.Range = lj.value("range", light.Range);
     light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
     light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
+    light.CastShadows = lj.value("castShadows", light.CastShadows);
     return light;
 }
 
@@ -1020,6 +1036,59 @@ void MigrateV3toV4(json& root) {
     }
 }
 
+// v4 -> v5. Солнце переехало из НАСТРОЕК СЦЕНЫ в обычную сущность.
+//
+// ПОЧЕМУ ПОМЕНЯЛОСЬ. Направленный свет был единственным источником, который не
+// являлся объектом: его нельзя было выбрать в иерархии, повернуть гизмо,
+// анимировать, привязать к родителю или положить в префаб, и второго такого
+// света в сцене быть не могло. Всё это движок умеет делать с сущностями — и не
+// умел с солнцем ровно потому, что солнце сущностью не было. Разбор — в
+// комментарии к LightComponent (ecs/CameraLightComponents.h).
+//
+// ЧТО ДЕЛАЕТ МИГРАЦИЯ. Заводит объект «Солнце» с направленным светом, переносит
+// в него цвет, яркость и направление (направление превращается в ПОВОРОТ: у
+// сущности нет поля «куда светит», у неё есть ориентация), и обнуляет яркость
+// старого поля.
+//
+// Обнуление обязательно, и это не уборка. Настройка сцены осталась основанием
+// кадра — её перекрывает направленный свет-сущность, но если такую сущность
+// удалить, основание проступит обратно. Сцена, где человек удалил солнце и
+// продолжает видеть солнечный свет, объяснима только чтением исходников.
+void MigrateV4toV5(json& root) {
+    json sun = json::object();
+    if (root.contains("lighting") && root["lighting"].contains("sun")) sun = root["lighting"]["sun"];
+
+    const DirectionalLight defaults;
+    glm::vec3 direction = defaults.Direction;
+    glm::vec3 color = defaults.Color;
+    float intensity = defaults.Intensity;
+    if (sun.contains("direction")) direction = Vec3FromJson(sun["direction"]);
+    if (sun.contains("color")) color = Vec3FromJson(sun["color"]);
+    intensity = sun.value("intensity", intensity);
+
+    // Свободный id: сущность добавляется к уже существующим, и совпадение
+    // сломало бы связи иерархии (родитель ищется по id).
+    int maxId = 0;
+    for (const json& obj : root["objects"]) maxId = std::max(maxId, obj.value("id", 0));
+
+    json entity;
+    entity["id"] = maxId + 1;
+    entity["name"] = "Солнце";
+    // Позиция ни на что не влияет (свет из бесконечности), но объект без
+    // позиции неудобно найти в сцене — ставим его над началом мира.
+    entity["position"] = Vec3ToJson(glm::vec3(0.0f, 10.0f, 0.0f));
+    entity["rotation"] = Vec3ToJson(sage::ecs::EulerFromForward(direction));
+    entity["scale"] = Vec3ToJson(glm::vec3(1.0f));
+    entity["mesh"]["type"] = "none";
+    entity["light"]["type"] = "directional";
+    entity["light"]["color"] = Vec3ToJson(color);
+    entity["light"]["intensity"] = intensity;
+    entity["light"]["castShadows"] = true;
+    root["objects"].push_back(entity);
+
+    root["lighting"]["sun"]["intensity"] = 0.0f;
+}
+
 using MigrationFn = void (*)(json&);
 
 // Цепочка миграций: индекс i переводит версию (i+1) в (i+2).
@@ -1027,6 +1096,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
     &MigrateV3toV4,
+    &MigrateV4toV5,
 };
 
 } // namespace

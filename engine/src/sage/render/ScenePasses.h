@@ -5,6 +5,7 @@
 
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/ShadowAtlas.h"
 #include "sage/render/Reflection.h"
 
 class Scene;
@@ -44,6 +45,18 @@ using DepthDrawCallback = std::function<void(const glm::mat4& lightMatrix)>;
 void RenderShadowDepth(ShadowMap& shadows, Scene& scene, sage::ecs::RenderBatch& batch,
                        int screenWidth, int screenHeight,
                        const DepthDrawCallback& extra = {});
+
+// Проход глубины для теней ЛОКАЛЬНЫХ источников: по плитке на прожектор и по
+// шесть на точечный (см. render/ShadowAtlas.h). Места и матрицы должны быть уже
+// розданы (LocalShadowAtlas::Prepare) — раздача меняет env, а решать, какой
+// кадр она описывает, обязан тот, кто этот кадр собирает.
+//
+// Тот же обработчик ручной геометрии и по той же причине, что у солнца: игра,
+// рисующая часть мира мимо ECS, обязана отбрасывать тень и от ламп тоже —
+// иначе её геометрия светилась бы сквозь себя.
+void RenderLocalShadowDepth(LocalShadowAtlas& atlas, Scene& scene, sage::ecs::RenderBatch& batch,
+                            int screenWidth, int screenHeight,
+                            const DepthDrawCallback& extra = {});
 
 // Что нужно цветному проходу сцены.
 struct SceneColorInput {

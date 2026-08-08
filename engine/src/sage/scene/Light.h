@@ -12,6 +12,7 @@ struct DirectionalLight {
     glm::vec3 Direction{-0.4f, -1.0f, -0.3f}; // направление, КУДА летит свет (не откуда)
     glm::vec3 Color{1.0f, 0.95f, 0.85f};
     float Intensity = 1.0f;
+    bool CastShadows = true; // каскадные карты (см. ShadowMap.h)
 };
 
 // Точечный источник света — фонарь, факел, лампа. Затухает с расстоянием
@@ -23,6 +24,15 @@ struct PointLight {
     glm::vec3 Color{1.0f};
     float Intensity = 1.0f;
     float Range = 12.0f;
+    // Просит ли источник тень. ПРОСИТ, а не получает: мест в атласе конечное
+    // число (см. render/ShadowAtlas.h), и кто их занял, решает распределитель.
+    bool CastShadows = true;
+    // Занятое место в атласе теней, -1 — тени нет. Заполняется покадрово при
+    // раздаче мест и НЕ сериализуется: это состояние кадра, а не свойство
+    // источника. Держится здесь, потому что шейдеру нужно знать номер места
+    // ровно для того источника, чей вклад он считает, — а связывает их индекс
+    // в этом же массиве.
+    int ShadowSlot = -1;
 
     float Constant() const { return 1.0f; }
     float Linear() const { return 4.5f / Range; }
@@ -42,6 +52,8 @@ struct SpotLight {
     float Range = 12.0f;
     float InnerAngleDeg = 20.0f; // полная яркость внутри этого полуугла
     float OuterAngleDeg = 30.0f; // край конуса (яркость -> 0)
+    bool CastShadows = true;     // см. PointLight::CastShadows
+    int ShadowSlot = -1;         // место в атласе теней кадра, -1 — нет
 
     float Constant() const { return 1.0f; }
     float Linear() const { return 4.5f / Range; }

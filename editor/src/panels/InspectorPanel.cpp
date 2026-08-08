@@ -711,29 +711,48 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    // --- Свет (позиция — Transform сущности; тип: точечный / прожектор) ---
-    if (reg.all_of<LightComponent>(obj.Entity()) && ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
+    if (reg.all_of<LightComponent>(obj.Entity()) && ImGui::CollapsingHeader("Свет", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
-            const char* types[] = {"Point", "Spot"};
+            const char* types[] = {"Точечный", "Прожектор", "Направленный (солнце)"};
             int kind = (int)light->Kind;
-            if (ImGui::Combo("Type", &kind, types, 2)) {
+            if (ImGui::Combo("Тип", &kind, types, 3)) {
                 host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
                 light->Kind = (LightComponent::Type)kind;
             }
-            ImGui::ColorEdit3("Light Color", &light->Color.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Intensity", &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Range", &light->Range, 0.1f, 0.5f, 100.0f); host.TrackLastImGuiItem();
+            ImGui::ColorEdit3("Цвет", &light->Color.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat("Яркость", &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
+            // Дальность и углы конуса у направленного света не значат ничего:
+            // он светит из бесконечности. Показывать поля, которые ни на что не
+            // влияют, — обманывать; поэтому их тут просто нет.
+            const bool directional = light->Kind == LightComponent::Type::Directional;
+            if (!directional) {
+                ImGui::DragFloat("Дальность", &light->Range, 0.1f, 0.5f, 100.0f);
+                host.TrackLastImGuiItem();
+            }
             if (light->Kind == LightComponent::Type::Spot) {
-                ImGui::DragFloat("Inner Cone", &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
-                ImGui::DragFloat("Outer Cone", &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat("Внутренний конус", &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat("Внешний конус", &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
                 // Внешний угол не должен быть уже внутреннего (иначе конус
                 // «выворачивается»): подтягиваем внешний до внутреннего.
                 if (light->OuterConeDeg < light->InnerConeDeg) light->OuterConeDeg = light->InnerConeDeg;
-                ImGui::TextDisabled("Cone points along the entity's forward (-Z rotation)");
-            } else {
-                ImGui::TextDisabled("Point light at this entity's position");
             }
-            if (ImGui::Button("Remove Light")) {
+            if (ImGui::Checkbox("Отбрасывает тени", &light->CastShadows)) host.PushUndoSnapshot();
+            if (directional) {
+                HintWrapped("Солнце: светит вдоль «вперёд» объекта (-Z поворота) из "
+                            "бесконечности, дальности не имеет. Тени — каскадные карты. "
+                            "Солнцем считается направленный свет с наименьшим номером в "
+                            "иерархии; второй такой свет в кадре не участвует.");
+            } else if (light->Kind == LightComponent::Type::Spot) {
+                HintWrapped("Конус светит вдоль «вперёд» объекта (-Z поворота). Тень — "
+                            "отдельная карта в атласе: их немного, и достаются они самым "
+                            "ярким источникам.");
+            } else {
+                HintWrapped("Точечный свет в позиции объекта. Тень стоит шести проходов "
+                            "геометрии (по грани куба), поэтому её лучше оставлять только "
+                            "тем лампам, у которых есть что затенять.");
+            }
+            if (ImGui::Button("Удалить свет")) {
                 host.PushUndoSnapshot();
                 reg.remove<LightComponent>(obj.Entity());
             }

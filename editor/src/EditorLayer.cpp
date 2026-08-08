@@ -1035,6 +1035,19 @@ void EditorLayer::NewScene(bool withDemoContent) {
         camObj.GetTransform().Rotation = {-6.0f, 0.0f, 0.0f}; // чуть вниз, вдоль -Z
         m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
 
+        // Солнце — такая же сущность, как всё остальное. Раньше его роль играли
+        // три поля в настройках сцены; теперь его видно в иерархии, можно
+        // повернуть гизмо и увидеть, как поехали тени.
+        GameObject sun = m_scene->CreateObject("Солнце");
+        sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
+        sun.GetTransform().Rotation =
+            sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
+        LightComponent sunLc;
+        sunLc.Kind = LightComponent::Type::Directional;
+        sunLc.Color = {1.0f, 0.95f, 0.85f};
+        sunLc.Intensity = 1.0f;
+        m_scene->Registry().emplace<LightComponent>(sun.Entity(), sunLc);
+
         // Тёплая лампа — демонстрация точечного света-сущности (LightComponent).
         GameObject lamp = m_scene->CreateObject("Lamp");
         lamp.GetTransform().Position = {2.4f, 1.6f, 1.8f};
@@ -2149,12 +2162,46 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
                 SetSelectedId(camObj.Id());
             }
-            if (ImGui::MenuItem("Create Light")) {
-                PushUndoSnapshot();
-                GameObject lightObj = m_scene->CreateObject("Light");
-                lightObj.GetTransform().Position = {0.0f, 2.5f, 0.0f};
-                m_scene->Registry().emplace<LightComponent>(lightObj.Entity());
-                SetSelectedId(lightObj.Id());
+            // Свет — подменю по типам. Одного пункта «Create Light» было мало:
+            // он всегда создавал точечный, а прожектор и солнце приходилось
+            // делать через инспектор, догадавшись, что тип там переключается.
+            if (ImGui::BeginMenu("Create Light")) {
+                struct LightPreset {
+                    const char* item;
+                    const char* name;
+                    LightComponent::Type kind;
+                    glm::vec3 position;
+                    glm::vec3 rotation;
+                };
+                const LightPreset presets[] = {
+                    {"Точечный", "Light", LightComponent::Type::Point,
+                     {0.0f, 2.5f, 0.0f}, {0.0f, 0.0f, 0.0f}},
+                    // Прожектор смотрит вниз: поворот -90° по X направляет
+                    // «вперёд» (-Z) в -Y. Созданный «в никуда», он выглядел бы
+                    // как свет, который не работает.
+                    {"Прожектор", "Spotlight", LightComponent::Type::Spot,
+                     {0.0f, 5.0f, 0.0f}, {-90.0f, 0.0f, 0.0f}},
+                    {"Направленный (солнце)", "Солнце", LightComponent::Type::Directional,
+                     {0.0f, 10.0f, 0.0f}, {-55.0f, -25.0f, 0.0f}},
+                };
+                for (const LightPreset& p : presets) {
+                    if (!ImGui::MenuItem(p.item)) continue;
+                    PushUndoSnapshot();
+                    GameObject lightObj = m_scene->CreateObject(p.name);
+                    lightObj.GetTransform().Position = p.position;
+                    lightObj.GetTransform().Rotation = p.rotation;
+                    LightComponent lc;
+                    lc.Kind = p.kind;
+                    if (p.kind == LightComponent::Type::Directional) {
+                        lc.Color = {1.0f, 0.95f, 0.85f};
+                        lc.Intensity = 1.0f;
+                    } else if (p.kind == LightComponent::Type::Spot) {
+                        lc.Intensity = 4.0f;
+                    }
+                    m_scene->Registry().emplace<LightComponent>(lightObj.Entity(), lc);
+                    SetSelectedId(lightObj.Id());
+                }
+                ImGui::EndMenu();
             }
             ImGui::Separator();
             // Физический куб: меш + динамическое тело + бокс-коллайдер — падает

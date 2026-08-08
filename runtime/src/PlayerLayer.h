@@ -10,6 +10,7 @@
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/ShadowAtlas.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
 #include "sage/core/SystemScheduler.h"
@@ -93,6 +94,12 @@ private:
     std::optional<Shader> m_shader;       // lit: ambient+sun+point lights+тени
     std::optional<Shader> m_shadowShader;
     std::optional<ShadowMap> m_shadows;
+    // Атлас теней прожекторов и точечных источников (см. render/ShadowAtlas.h).
+    std::optional<sage::render::LocalShadowAtlas> m_localShadows;
+    // Тени кадра целиком: каскады солнца + атлас ламп. Одна точка сборки —
+    // иначе очередной проход рано или поздно соберёт привязку без атласа, и в
+    // нём одном лампы перестанут отбрасывать тень.
+    ShadowBinding FrameShadows(bool sunEnabled) const;
     std::optional<SkyRenderer> m_sky;     // процедурный скайбокс сцены
     // Отражения кадра. Карта окружения переснимается только при смене цвета
     // неба (см. ReflectionSystem), поэтому в кадре это стоит ноль.

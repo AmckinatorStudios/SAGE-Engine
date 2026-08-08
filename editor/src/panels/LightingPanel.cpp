@@ -9,6 +9,7 @@
 #include "sage/core/Log.h"
 #include "sage/gi/GI.h"
 #include "sage/physics/PhysicsTypes.h"
+#include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
 
 LightingPanel::~LightingPanel() {
@@ -141,6 +142,62 @@ void LightingPanel::DrawGISection(EditorHost& host) {
     ImGui::TextDisabled("volume (dynamic); direct light stays realtime");
 }
 
+// Солнце сцены. Раньше здесь стояли три поля прямо в настройках освещения —
+// направление, цвет, яркость. Теперь солнце это ОБЪЕКТ (сущность с
+// LightComponent{Directional}), и панель не редактирует его копию, а показывает,
+// какой именно объект светит, и уводит к нему.
+//
+// Почему не оставить дубль полей здесь «для удобства». Потому что дубля не
+// бывает: сущность можно повернуть гизмо, привязать к родителю и анимировать, а
+// три поля в панели про это не знают. Панель, которая правит одно, а показывает
+// другое, — худший вид удобства.
+void LightingPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env) {
+    if (!ImGui::CollapsingHeader("Солнце", ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+    // Ищем то же солнце, что возьмёт рендер: направленный свет с наименьшим id
+    // (см. sage::ecs::CollectLighting).
+    entt::registry& reg = scene.Registry();
+    int sunId = 0;
+    entt::entity sunEntity = entt::null;
+    for (auto e : reg.view<LightComponent>()) {
+        const LightComponent& lc = reg.get<LightComponent>(e);
+        if (lc.Kind != LightComponent::Type::Directional) continue;
+        const IdComponent* id = reg.try_get<IdComponent>(e);
+        const int candidate = id ? id->Id : 0;
+        if (sunEntity != entt::null && candidate >= sunId) continue;
+        sunEntity = e;
+        sunId = candidate;
+    }
+
+    if (sunEntity == entt::null) {
+        ImGui::TextWrapped("В сцене нет направленного света — солнца нет. "
+                           "Направление, цвет и яркость задаются на самом объекте.");
+        if (ImGui::Button("Создать солнце")) {
+            host.PushUndoSnapshot();
+            GameObject sun = scene.CreateObject("Солнце");
+            sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
+            sun.GetTransform().Rotation =
+                sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
+            LightComponent lc;
+            lc.Kind = LightComponent::Type::Directional;
+            lc.Color = {1.0f, 0.95f, 0.85f};
+            lc.Intensity = 1.0f;
+            reg.emplace<LightComponent>(sun.Entity(), lc);
+            host.SetSelectedId(sun.Id());
+        }
+        return;
+    }
+
+    const LightComponent& lc = reg.get<LightComponent>(sunEntity);
+    const NameComponent* name = reg.try_get<NameComponent>(sunEntity);
+    ImGui::Text("Светит объект: %s", name ? name->Name.c_str() : "?");
+    ImGui::SameLine();
+    if (ImGui::Button("Выбрать")) host.SetSelectedId(sunId);
+    ImGui::Text("Яркость %.2f, направление (%.2f, %.2f, %.2f)", lc.Intensity,
+                env.Sun.Direction.x, env.Sun.Direction.y, env.Sun.Direction.z);
+    ImGui::TextDisabled("Правится в инспекторе объекта; направление — его поворот");
+}
+
 void LightingPanel::Draw(EditorHost& host) {
     Scene& scene = host.CurrentScene();
     LightingEnvironment& env = scene.Lighting;
@@ -154,12 +211,7 @@ void LightingPanel::Draw(EditorHost& host) {
         ImGui::TextDisabled("Sky tints upward faces, Ground — downward");
     }
 
-    if (ImGui::CollapsingHeader("Sun (directional)", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::DragFloat3("Direction", &env.Sun.Direction.x, 0.02f, -1.0f, 1.0f); host.TrackLastImGuiItem();
-        ImGui::ColorEdit3("Color", &env.Sun.Color.x); host.TrackLastImGuiItem();
-        ImGui::DragFloat("Intensity", &env.Sun.Intensity, 0.02f, 0.0f, 5.0f); host.TrackLastImGuiItem();
-        ImGui::TextDisabled("Direction is where light TRAVELS; casts shadows");
-    }
+    DrawSun(host, scene, env);
 
     if (ImGui::CollapsingHeader("Skybox", ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ImGui::Checkbox("Enable Skybox", &env.Skybox.Enabled)) host.PushUndoSnapshot();

@@ -104,6 +104,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             Shadows = false;
             ShadowResolution = 512;
             ShadowCascades = 1;
+            LocalShadows = false;
             PostProcessing = false;
             Bloom = false;
             AmbientOcclusion = false;
@@ -114,6 +115,11 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             Shadows = true;
             ShadowResolution = 1024;
             ShadowCascades = 1;
+            // Тени ламп на средних настройках выключены: каждый точечный свет
+            // стоит шести проходов геометрии, и это ровно та цена, ради которой
+            // выбирают «средне».
+            LocalShadows = false;
+            LocalShadowResolution = 1024;
             PostProcessing = true;  // тон-маппинг/экспозиция — дёшево и заметно
             Bloom = false;
             AmbientOcclusion = false;
@@ -125,6 +131,8 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             Shadows = true;
             ShadowResolution = 2048;
             ShadowCascades = 3;
+            LocalShadows = true;
+            LocalShadowResolution = 2048;
             PostProcessing = true;
             Bloom = true;
             AmbientOcclusion = true;
@@ -134,7 +142,12 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
         case QualityPreset::Ultra:
             Shadows = true;
             ShadowResolution = 4096;
-            ShadowCascades = 4;
+            // Три, а не четыре: четвёртый каскад упирался в текстурный юнит,
+            // который нужен карте самосвечения (см. render/ShadowMap.h). На
+            // «ультре» разрешение вдвое выше, и подробность берётся оттуда.
+            ShadowCascades = 3;
+            LocalShadows = true;
+            LocalShadowResolution = 4096;
             PostProcessing = true;
             Bloom = true;
             AmbientOcclusion = true;
@@ -173,7 +186,9 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Backend          = gfx.value("backend", Backend);
     Shadows          = gfx.value("shadows", Shadows);
     ShadowResolution = gfx.value("shadowResolution", ShadowResolution);
-    ShadowCascades = std::clamp(gfx.value("shadowCascades", ShadowCascades), 1, 4);
+    ShadowCascades = std::clamp(gfx.value("shadowCascades", ShadowCascades), 1, 3);
+    LocalShadows = gfx.value("localShadows", LocalShadows);
+    LocalShadowResolution = gfx.value("localShadowResolution", LocalShadowResolution);
     OcclusionCulling = gfx.value("occlusionCulling", OcclusionCulling);
     ShadowDistance = gfx.value("shadowDistance", ShadowDistance);
     PostProcessing   = gfx.value("postProcessing", PostProcessing);
@@ -230,6 +245,7 @@ std::string EngineConfig::ToJsonString() const {
         {"backend", Backend},
         {"shadows", Shadows}, {"shadowResolution", ShadowResolution},
         {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
+        {"localShadows", LocalShadows}, {"localShadowResolution", LocalShadowResolution},
         {"occlusionCulling", OcclusionCulling},
         {"postProcessing", PostProcessing}, {"fog", Fog}, {"skybox", Skybox},
     };
@@ -305,7 +321,8 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_SHADOW_RES")) ShadowResolution = std::atoi(v);
     if (const char* v = std::getenv("SAGE_OCCLUSION")) OcclusionCulling = EnvBool(v, OcclusionCulling);
     if (const char* v = std::getenv("SAGE_SHADOW_CASCADES"))
-        ShadowCascades = std::clamp(std::atoi(v), 1, 4);
+        ShadowCascades = std::clamp(std::atoi(v), 1, 3);
+    if (const char* v = std::getenv("SAGE_LOCAL_SHADOWS")) LocalShadows = EnvBool(v, LocalShadows);
     if (const char* v = std::getenv("SAGE_SHADOW_DISTANCE")) ShadowDistance = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_POST")) PostProcessing = EnvBool(v, PostProcessing);
     if (const char* v = std::getenv("SAGE_FOG")) Fog = EnvBool(v, Fog);

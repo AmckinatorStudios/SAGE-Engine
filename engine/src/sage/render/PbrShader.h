@@ -13,10 +13,20 @@ namespace sage::render {
 inline const char* kPbrSharedGlsl = R"GLSL(
 #define MAX_POINT_LIGHTS 8
 #define MAX_SPOT_LIGHTS 8
+// Сколько локальных источников могут отбрасывать тень одновременно. Меньше,
+// чем самих источников, и намеренно: карта прожектора стоит целого прохода
+// геометрии, карта точечного — шести (см. render/ShadowAtlas.h). Кто попал в
+// это число, решает распределитель мест по яркости, а не порядок в сцене.
+#define MAX_SPOT_SHADOWS 4
+#define MAX_POINT_SHADOWS 2
 const float PI = 3.14159265359;
 
-struct PointLight { vec3 position; vec3 color; float intensity; float constant; float linear; float quadratic; };
-struct SpotLight  { vec3 position; vec3 direction; vec3 color; float intensity; float constant; float linear; float quadratic; float cosInner; float cosOuter; };
+// shadowSlot — номер места в атласе теней, -1 если тени у источника нет.
+// Он ЧАСТЬ ИСТОЧНИКА, а не отдельный массив: иначе связь «эта лампа — эта
+// плитка» держалась бы на совпадении двух порядков, а они расходятся при
+// первом же источнике, которому места не досталось.
+struct PointLight { vec3 position; vec3 color; float intensity; float constant; float linear; float quadratic; int shadowSlot; };
+struct SpotLight  { vec3 position; vec3 direction; vec3 color; float intensity; float constant; float linear; float quadratic; float cosInner; float cosOuter; int shadowSlot; };
 
 uniform vec3 uAmbientSky;
 uniform vec3 uAmbientGround;
@@ -29,26 +39,36 @@ uniform int uNumPointLights;
 uniform SpotLight uSpotLights[MAX_SPOT_LIGHTS];
 uniform int uNumSpotLights;
 uniform vec3 uViewPos;
-// Карты теней: по одной на каскад. Массив сэмплеров тут не годится — GLSL 330
-// требует индексировать его константой, а каскад выбирается на лету. Поэтому
-// четыре именованных сэмплера и развёрнутый выбор ниже (см. CalcSunShadow).
+// Карты теней СОЛНЦА: по одной на каскад. Массив сэмплеров тут не годится —
+// GLSL 330 требует индексировать его константой, а каскад выбирается на лету.
+// Поэтому три именованных сэмплера и развёрнутый выбор ниже (см. CalcSunShadow).
 uniform sampler2D uShadowMap;   // каскад 0 — самый ближний и подробный
 uniform sampler2D uShadowMap1;
 uniform sampler2D uShadowMap2;
-uniform sampler2D uShadowMap3;
-uniform mat4 uShadowLightSpace[4];
+uniform mat4 uShadowLightSpace[3];
 // Размер текселя карты каскада В МЕТРАХ. Нужен, чтобы отступить от поверхности
 // вдоль нормали ровно на тексель этого каскада: у дальнего каскада тексель в
 // разы крупнее, и один общий отступ для всех либо не спасает ближний от полос
 // самозатенения, либо отрывает тень в дальнем.
-uniform float uShadowTexelWorld[4];
+uniform float uShadowTexelWorld[3];
 // Запас по глубине каждого каскада, уже в единицах записанной глубины.
 // Считается из размера текселя и глубины ортобокса на стороне процессора
 // (ShadowMap::CascadeDepthBias): одной константы на все каскады не существует —
 // у ближнего и дальнего разный масштаб и по ширине текселя, и по диапазону.
-uniform float uShadowDepthBias[4];
-uniform int uShadowCascades;    // сколько каскадов реально заполнено (1..4)
+uniform float uShadowDepthBias[3];
+uniform int uShadowCascades;    // сколько каскадов реально заполнено (1..3)
 uniform bool uShadowsEnabled;
+// --- Тени локальных источников (см. render/ShadowAtlas.h) ------------------
+// Один атлас на все прожекторы и точечные: юнитов под карту-на-источник в
+// OpenGL 3.3 просто нет. Плитку источника задаёт прямоугольник в uv атласа.
+uniform sampler2D uLocalShadowAtlas;
+uniform bool uLocalShadowsEnabled;
+uniform float uLocalAtlasTexel;                     // 1 / сторона атласа
+uniform mat4 uSpotShadowMat[MAX_SPOT_SHADOWS];
+uniform vec4 uSpotShadowRect[MAX_SPOT_SHADOWS];     // xy — угол плитки, z — сторона
+uniform vec3 uSpotShadowParams[MAX_SPOT_SHADOWS];   // x near, y far, z тексель/единица дальности
+uniform vec4 uPointShadowRect[MAX_POINT_SHADOWS * 6];
+uniform vec3 uPointShadowParams[MAX_POINT_SHADOWS];
 // Где тень начинает растворяться и где её уже нет (метры от камеры).
 uniform float uShadowFadeStart;
 uniform float uShadowFadeEnd;
@@ -182,6 +202,140 @@ float ShadowPCF(sampler2D map, vec3 pc, float ndl, float rotation, float baseBia
     return shadow / float(kTaps);
 }
 
+// Угол поворота диска выборки — свой у каждого пикселя (interleaved gradient
+// noise). Без него все пиксели берут пробы в одних и тех же местах, и полутень
+// получает считаное число ступеней яркости, которые на пологой кромке видны
+// полосами. С поворотом те же ступени рассыпаются в мелкий шум, а глаз
+// собирает его в ровный градиент. Общий для солнца и для локальных теней:
+// разные повороты у разных источников дали бы разный характер шума на одной
+// поверхности.
+float ShadowRotation() {
+    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy,
+                                             vec2(0.06711056, 0.00583715))));
+    return ign * 6.2831853;
+}
+
+// --- Тени локальных источников ---------------------------------------------
+//
+// Отличие от солнца одно, но оно меняет всю арифметику: проекция ПЕРСПЕКТИВНАЯ.
+// У солнца тексель карты — одна величина на весь каскад, и отступы считаются
+// один раз на процессоре. Здесь тексель растёт линейно с расстоянием от лампы:
+// у самой лампы он миллиметровый, у границы дальности — дециметровый. Поэтому
+// и отступ вдоль нормали, и запас по глубине считаются ЗДЕСЬ, из расстояния до
+// источника, а с процессора приходит только «сколько метров текселя на метр
+// дальности» (uSpotShadowParams[].z).
+
+// Глубина, записанная в карту, для точки на расстоянии dist вдоль оси взгляда
+// источника. Повторяет то, что делает перспективная матрица: глубина в буфере
+// нелинейна, и сравнивать с ней метры нельзя.
+float PerspectiveDepth01(float dist, float nearZ, float farZ) {
+    float denom = max(farZ - nearZ, 1e-4);
+    float ndc = ((farZ + nearZ) - 2.0 * farZ * nearZ / max(dist, 1e-4)) / denom;
+    return ndc * 0.5 + 0.5;
+}
+
+// Перевод мирового запаса (метры) в единицы записанной глубины на расстоянии
+// dist. Производная PerspectiveDepth01 по dist: near*far/((far-near)*dist^2).
+// Константы здесь не существует в принципе — у поверхности в метре от лампы и
+// в двадцати метрах один и тот же запас отличается в четыреста раз.
+float LocalDepthBias(float dist, float nearZ, float farZ, float slackMetres) {
+    float denom = max(farZ - nearZ, 1e-4);
+    return slackMetres * (nearZ * farZ) / (denom * max(dist * dist, 1e-4));
+}
+
+// Выборка из ПЛИТКИ атласа: тот же диск Вогеля и та же билинейная фильтрация
+// сравнений, что у солнца, но с зажимом в границы своей плитки.
+//
+// Зажим обязателен и не имеет аналога в солнечном пути. Там каждый каскад —
+// отдельная текстура, и уход фильтра за край даёт лишь повтор крайнего текселя.
+// Здесь за краем плитки лежит карта ДРУГОЙ лампы, и один-единственный тап,
+// перешагнувший границу, приносит её глубину — то есть тень предмета из другого
+// конца уровня, отпечатанную поперёк пола.
+float AtlasShadowPCF(vec4 rect, vec2 uv, float depth, float bias, float rotation) {
+    vec2 texel = vec2(uLocalAtlasTexel);
+    // Полтора текселя запаса: билинейная выборка читает соседний тексель, и
+    // зажимать надо с учётом её тапов, а не только центра.
+    vec2 lo = rect.xy + texel * 1.5;
+    vec2 hi = rect.xy + vec2(rect.z) - texel * 1.5;
+
+    const int kTaps = 8;
+    const float kGoldenAngle = 2.39996323;
+    float shadow = 0.0;
+    for (int i = 0; i < kTaps; ++i) {
+        float r = kShadowFilterTexels * sqrt((float(i) + 0.5) / float(kTaps));
+        float a = float(i) * kGoldenAngle + rotation;
+        vec2 p = rect.xy + uv * rect.z + vec2(cos(a), sin(a)) * r * texel;
+        shadow += ShadowBilinear(uLocalShadowAtlas, clamp(p, lo, hi), depth, bias, texel);
+    }
+    return shadow / float(kTaps);
+}
+
+// Тень прожектора. dist — расстояние от фрагмента до лампы (у вызывающего оно
+// уже посчитано для затухания, и считать его второй раз незачем).
+float SpotShadow(int slot, vec3 worldPos, vec3 normal, float ndl, float dist, float rotation) {
+    vec3 prm = uSpotShadowParams[slot];
+    float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
+    float texelWorld = dist * prm.z;
+    float offset = texelWorld * kShadowFilterTexels * 1.5 * (1.0 + 2.0 * slope);
+    vec4 lp = uSpotShadowMat[slot] * vec4(worldPos + normal * offset, 1.0);
+    // За спиной у лампы (w <= 0) карты нет. Делить на такое w — значит получить
+    // координаты, зеркально отражённые в её плитку, то есть чужую тень.
+    if (lp.w <= 0.0) return 0.0;
+    vec3 pc = (lp.xyz / lp.w) * 0.5 + 0.5;
+    if (pc.z > 1.0) return 0.0;  // дальше дальности лампы — она туда не светит
+    float bias = LocalDepthBias(dist, prm.x, prm.y, texelWorld * (1.0 + 3.0 * slope));
+    return AtlasShadowPCF(uSpotShadowRect[slot], pc.xy, pc.z, bias, rotation);
+}
+
+// Грань куба точечного света и координаты внутри её плитки. Ручной аналог того,
+// что делает samplerCube: наибольшая по модулю компонента задаёт грань, две
+// другие — положение внутри неё. Через настоящий samplerCube это стоило бы
+// отдельного текстурного юнита на КАЖДУЮ лампу; здесь все грани всех ламп
+// лежат в одном атласе.
+//
+// Таблица граней та же, что на процессоре (см. CubeFaces() в ShadowAtlas.h) —
+// разъехаться им нельзя, поэтому она проверена тестом, сравнивающим эту
+// формулу с настоящими матрицами граней.
+int PointFace(vec3 v, out vec2 uv, out float axis) {
+    vec3 a = abs(v);
+    vec2 sc;
+    int face;
+    if (a.x >= a.y && a.x >= a.z) {
+        axis = a.x;
+        if (v.x > 0.0) { face = 0; sc = vec2(-v.z, -v.y); }
+        else           { face = 1; sc = vec2( v.z, -v.y); }
+    } else if (a.y >= a.z) {
+        axis = a.y;
+        if (v.y > 0.0) { face = 2; sc = vec2(v.x,  v.z); }
+        else           { face = 3; sc = vec2(v.x, -v.z); }
+    } else {
+        axis = a.z;
+        if (v.z > 0.0) { face = 4; sc = vec2( v.x, -v.y); }
+        else           { face = 5; sc = vec2(-v.x, -v.y); }
+    }
+    // Угол грани ровно 90°: tan(45°) == 1, и проекция сводится к делению.
+    uv = sc / max(axis, 1e-4) * 0.5 + 0.5;
+    return face;
+}
+
+float PointShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightPos, float ndl, float rotation) {
+    vec3 prm = uPointShadowParams[slot];
+    float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
+    float dist = length(worldPos - lightPos);
+    float texelWorld = dist * prm.z;
+    float offset = texelWorld * kShadowFilterTexels * 1.5 * (1.0 + 2.0 * slope);
+    vec3 v = (worldPos + normal * offset) - lightPos;
+
+    vec2 uv;
+    float axis;
+    int face = PointFace(v, uv, axis);
+    if (axis <= prm.x) return 0.0;   // ближе ближней плоскости — в карту не писалось
+    float depth = PerspectiveDepth01(axis, prm.x, prm.y);
+    if (depth > 1.0) return 0.0;     // дальше дальности лампы
+    float bias = LocalDepthBias(axis, prm.x, prm.y, texelWorld * (1.0 + 3.0 * slope));
+    return AtlasShadowPCF(uPointShadowRect[slot * 6 + face], uv, depth, bias, rotation);
+}
+
 // Координаты фрагмента в пространстве каскада, приведённые к [0,1], со
 // смещением точки выборки ВДОЛЬ НОРМАЛИ.
 //
@@ -263,14 +417,7 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
     const float kMargin = 0.02; // запас под диск фильтра у края карты
     const float kBand = 0.10;   // ширина полосы смешивания каскадов
 
-    // Угол поворота диска выборки — свой у каждого пикселя (interleaved
-    // gradient noise). Без него все пиксели берут пробы в одних и тех же
-    // местах, и полутень получает ровно тринадцать ступеней яркости, которые
-    // на пологой кромке видны полосами. С поворотом те же тринадцать ступеней
-    // рассыпаются в мелкий шум, а глаз собирает его в ровный градиент.
-    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy,
-                                             vec2(0.06711056, 0.00583715))));
-    float rot = ign * 6.2831853;
+    float rot = ShadowRotation();
 
     // Каскады перебираются от ближнего к дальнему, и берётся ПЕРВЫЙ
     // подходящий: он самый подробный из тех, что накрывают эту точку.
@@ -308,22 +455,7 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
     }
     if (uShadowCascades > 2) {
         vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl);
-        if (InsideCascade(pc2, kMargin)) {
-            float s = ShadowPCF(uShadowMap2, pc2, ndl, rot, uShadowDepthBias[2]);
-            if (uShadowCascades > 3) {
-                float w = CascadeEdge(pc2, kBand);
-                if (w > 0.0) {
-                    vec3 pc3 = CascadeCoords(3, worldPos, normal, ndl);
-                    float far = InsideCascade(pc3, kMargin) ? ShadowPCF(uShadowMap3, pc3, ndl, rot, uShadowDepthBias[3]) : s;
-                    s = mix(s, far, w);
-                }
-            }
-            return s;
-        }
-    }
-    if (uShadowCascades > 3) {
-        vec3 pc3 = CascadeCoords(3, worldPos, normal, ndl);
-        if (InsideCascade(pc3, kMargin)) return ShadowPCF(uShadowMap3, pc3, ndl, rot, uShadowDepthBias[3]);
+        if (InsideCascade(pc2, kMargin)) return ShadowPCF(uShadowMap2, pc2, ndl, rot, uShadowDepthBias[2]);
     }
     // Дальше последнего каскада тени нет — там всё освещено. Тянуть её краем
     // карты значило бы рисовать полосу ложной тени до горизонта.
@@ -495,13 +627,25 @@ vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rou
     float shadow = uShadowsEnabled ? SunShadow(fragPos, N, sunL) : 0.0;
     Lo += PbrContrib(N, V, sunL, uSunColor * uSunIntensity * (1.0 - shadow), albedo, metallic, rough);
 
+    // Поворот диска выборки считается ОДИН раз на фрагмент и раздаётся всем
+    // источникам: он зависит только от экранных координат.
+    float localRot = ShadowRotation();
+
     // Точечные.
     for (int i = 0; i < uNumPointLights; ++i) {
         vec3 tl = uPointLights[i].position - fragPos;
         float dist = length(tl);
         vec3 L = tl / max(dist, 1e-4);
+        float ndl = dot(N, L);
         float att = 1.0 / (uPointLights[i].constant + uPointLights[i].linear * dist + uPointLights[i].quadratic * dist * dist);
-        Lo += PbrContrib(N, V, L, uPointLights[i].color * uPointLights[i].intensity * att, albedo, metallic, rough);
+        // Тень считается только для граней, ОБРАЩЁННЫХ к лампе: отвёрнутая
+        // грань всё равно получает от неё ноль (множитель max(dot(N,L),0)), а
+        // выборка стоит восьми чтений атласа.
+        float sh = 0.0;
+        if (uLocalShadowsEnabled && uPointLights[i].shadowSlot >= 0 && ndl > 0.0) {
+            sh = PointShadow(uPointLights[i].shadowSlot, fragPos, N, uPointLights[i].position, ndl, localRot);
+        }
+        Lo += PbrContrib(N, V, L, uPointLights[i].color * uPointLights[i].intensity * att * (1.0 - sh), albedo, metallic, rough);
     }
     // Прожекторы (конус).
     for (int i = 0; i < uNumSpotLights; ++i) {
@@ -512,8 +656,13 @@ vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rou
         float eps = max(uSpotLights[i].cosInner - uSpotLights[i].cosOuter, 0.0001);
         float cone = clamp((theta - uSpotLights[i].cosOuter) / eps, 0.0, 1.0);
         if (cone <= 0.0) continue;
+        float ndl = dot(N, L);
         float att = 1.0 / (uSpotLights[i].constant + uSpotLights[i].linear * dist + uSpotLights[i].quadratic * dist * dist);
-        Lo += PbrContrib(N, V, L, uSpotLights[i].color * uSpotLights[i].intensity * att * cone, albedo, metallic, rough);
+        float sh = 0.0;
+        if (uLocalShadowsEnabled && uSpotLights[i].shadowSlot >= 0 && ndl > 0.0) {
+            sh = SpotShadow(uSpotLights[i].shadowSlot, fragPos, N, ndl, dist, localRot);
+        }
+        Lo += PbrContrib(N, V, L, uSpotLights[i].color * uSpotLights[i].intensity * att * cone * (1.0 - sh), albedo, metallic, rough);
     }
 
     vec3 result = ambient + Lo;

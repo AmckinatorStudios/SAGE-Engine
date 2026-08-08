@@ -31,6 +31,7 @@ add_executable(sage_tests
     test_pack.cpp
     test_components.cpp
     test_assetcache.cpp
+    test_lighting.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

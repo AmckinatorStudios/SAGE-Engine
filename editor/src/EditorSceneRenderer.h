@@ -11,6 +11,7 @@
 #include "sage/render/PostFX.h"
 #include "sage/render/DebugDraw.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/render/ShadowAtlas.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
 #include "sage/render/ParticleSystem.h"
@@ -59,7 +60,16 @@ public:
     // Готовит отражения кадра (пересъёмка карты окружения при смене неба).
     // Зовётся ДО любых проходов, рисующих во вьюпорт.
     void PrepareReflections(Scene& scene, const LightingEnvironment& env);
-    void RenderShadow(Scene& scene, const LightingEnvironment& env, const Camera& camera);
+    // env НЕ const: проход теней раздаёт локальным источникам места в атласе и
+    // записывает номер места в сам источник (см. LocalShadowAtlas::Prepare).
+    // Иначе связь «эта лампа — эта плитка» пришлось бы возвращать отдельным
+    // списком и не потерять его по дороге до цветного прохода.
+    void RenderShadow(Scene& scene, LightingEnvironment& env, const Camera& camera);
+    // Тени кадра одной строкой: каскады солнца + атлас локальных источников.
+    // Собирать ShadowBinding вручную на каждом месте отрисовки — значит однажды
+    // забыть про атлас, и лампы перестанут отбрасывать тень ровно в том окне,
+    // где забыли.
+    ShadowBinding FrameShadows() const;
 
     // Превью сцены редакторской камерой. Возвращает использованные view/proj
     // (нужны вызывающему для гизмо/пикинга). mode/showGrid — из тулбара.
@@ -134,6 +144,8 @@ private:
 
     std::optional<Shader> m_outlineShader;   // lit-шейдер как flat-цвет каймы выделения
     std::optional<ShadowMap> m_shadows;
+    std::optional<sage::render::LocalShadowAtlas> m_localShadows;
+    int m_localShadowRes = 0;
     // С какими настройками создана карта теней — по ним видно, что пора
     // пересоздать (разрешение и число каскадов задаются при создании).
     int m_shadowRes = 0;

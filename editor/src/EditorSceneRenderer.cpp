@@ -97,7 +97,7 @@ void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnviron
             c.Proj = p;
             c.ViewPos = glm::vec3(glm::inverse(v)[3]);
             c.Env = &env;
-            c.Shadows = ShadowBinding(*m_shadows, true);
+            c.Shadows = FrameShadows();
             c.Time = m_sceneTime;
             sage::render::RenderSceneColor(scene, m_batch, c);
         },
@@ -108,13 +108,31 @@ void EditorSceneRenderer::EnsureShadowMap() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     const int wantRes = cfg.Shadows ? cfg.ShadowResolution : 512;
     const int wantCascades = std::clamp(cfg.ShadowCascades, 1, ShadowMap::kMaxCascades);
-    if (m_shadows && m_shadowRes == wantRes && m_shadowCascades == wantCascades) return;
-    m_shadows.emplace(wantRes, wantCascades);
-    m_shadowRes = wantRes;
-    m_shadowCascades = wantCascades;
+    if (!m_shadows || m_shadowRes != wantRes || m_shadowCascades != wantCascades) {
+        m_shadows.emplace(wantRes, wantCascades);
+        m_shadowRes = wantRes;
+        m_shadowCascades = wantCascades;
+    }
+
+    // Атлас локальных теней. Плитка — четверть стороны: шестнадцать мест, ровно
+    // под четыре прожектора и два точечных источника (см. ShadowAtlas.h).
+    const int wantLocal = cfg.LocalShadows ? cfg.LocalShadowResolution : 0;
+    if (m_localShadowRes == wantLocal) return;
+    m_localShadowRes = wantLocal;
+    if (wantLocal <= 0) {
+        m_localShadows.reset();
+        return;
+    }
+    m_localShadows.emplace(wantLocal, std::max(wantLocal / 4, 64));
 }
 
-void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& env,
+ShadowBinding EditorSceneRenderer::FrameShadows() const {
+    ShadowBinding b(*m_shadows, true);
+    if (m_localShadows) b.Local = m_localShadows->Binding();
+    return b;
+}
+
+void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
                                        const Camera& camera) {
     Window& window = sage::Application::Get().GetWindow();
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
@@ -149,6 +167,14 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, const LightingEnvironment& 
     if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
     else m_shadows->FitSingle(env.Sun.Direction, v);
     sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
+
+    // Тени ламп — своим проходом и по своим правилам: у них нет ни каскадов, ни
+    // привязки к камере, зато есть раздача мест в атласе.
+    if (m_localShadows) {
+        m_localShadows->Prepare(env);
+        sage::render::RenderLocalShadowDepth(*m_localShadows, scene, m_batch, window.Width(),
+                                             window.Height());
+    }
 }
 
 void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
@@ -161,7 +187,7 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     color.Proj = proj;
     color.ViewPos = viewPos;
     color.Env = &env;
-    color.Shadows = ShadowBinding(*m_shadows, true);
+    color.Shadows = FrameShadows();
     color.ShadingMode = shadingMode;
     color.OcclusionCulling = sage::EngineConfig::Get().OcclusionCulling;
     color.Time = m_sceneTime;
@@ -624,5 +650,5 @@ sage::ecs::RenderStats EditorSceneRenderer::RenderColorForTest(Scene& scene, con
                                                               const glm::mat4& proj, const glm::vec3& viewPos,
                                                               const LightingEnvironment& env) {
     return m_batch.RenderColor(scene, view, proj, viewPos, env,
-                               ShadowBinding(*m_shadows, true), 0);
+                               FrameShadows(), 0);
 }

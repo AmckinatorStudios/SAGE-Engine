@@ -544,8 +544,12 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             tex.SetInt("uHasAO", it.Mat->AOTex ? 1 : 0);
             tex.SetVec3("uEmissive", it.Emissive);
             tex.SetInt("uHasEmissive", it.Mat->EmissiveTex ? 1 : 0);
-            tex.SetInt("uEmissiveMap", 6);
-            if (it.Mat->EmissiveTex) it.Mat->EmissiveTex->Bind(6);
+            // Юнит 12, а не 6: на шестом сидят три текстуры GI-объёма
+            // (sampler3D), и карта самосвечения занимала его же — один юнит,
+            // два разных типа сэмплера, то есть неопределённое поведение по
+            // спецификации. Раскладка юнитов целиком — в render/ShadowMap.h.
+            tex.SetInt("uEmissiveMap", kEmissiveUnit);
+            if (it.Mat->EmissiveTex) it.Mat->EmissiveTex->Bind(kEmissiveUnit);
             if (it.Mat->AlbedoTex) it.Mat->AlbedoTex->Bind(0);
             if (it.Mat->NormalTex) it.Mat->NormalTex->Bind(2);
             if (it.Mat->MetallicTex) it.Mat->MetallicTex->Bind(3);
@@ -659,8 +663,8 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetInt("uHasAO", head.Mat->AOTex ? 1 : 0);
                 t.SetVec3("uEmissive", head.Inst.Emissive);
                 t.SetInt("uHasEmissive", head.Mat->EmissiveTex ? 1 : 0);
-                t.SetInt("uEmissiveMap", 6);
-                if (head.Mat->EmissiveTex) head.Mat->EmissiveTex->Bind(6);
+                t.SetInt("uEmissiveMap", kEmissiveUnit);
+                if (head.Mat->EmissiveTex) head.Mat->EmissiveTex->Bind(kEmissiveUnit);
                 if (head.Mat->AlbedoTex) head.Mat->AlbedoTex->Bind(0);
                 if (head.Mat->NormalTex) head.Mat->NormalTex->Bind(2);
                 if (head.Mat->MetallicTex) head.Mat->MetallicTex->Bind(3);

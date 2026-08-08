@@ -29,6 +29,21 @@ void RenderShadowDepth(ShadowMap& shadows, Scene& scene, sage::ecs::RenderBatch&
     shadows.EndRender(screenWidth, screenHeight);
 }
 
+void RenderLocalShadowDepth(LocalShadowAtlas& atlas, Scene& scene, sage::ecs::RenderBatch& batch,
+                            int screenWidth, int screenHeight, const DepthDrawCallback& extra) {
+    if (atlas.PassCount() <= 0) return;
+    SAGE_PROFILE("Тени ламп");
+
+    for (int p = 0; p < atlas.PassCount(); ++p) {
+        atlas.BeginPass(p);
+        const glm::mat4& light = atlas.PassMatrix(p);
+        if (extra) extra(light);
+        batch.RenderDepth(scene, light);
+        sage::anim::DrawAnimatedModelsDepth(scene, light);
+    }
+    atlas.End(screenWidth, screenHeight);
+}
+
 sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& batch,
                                         const SceneColorInput& input) {
     SAGE_PROFILE("Геометрия");

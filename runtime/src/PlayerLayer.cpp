@@ -66,7 +66,15 @@ void PlayerLayer::OnAttach() {
     // все шейдеры движка, а не по копии в каждом месте загрузки.)
     m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
     m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512, cfg.ShadowCascades); // разрешение и каскады из конфига
+    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512,
+                      std::clamp(cfg.ShadowCascades, 1, ShadowMap::kMaxCascades));
+    // Атлас локальных теней заводится только если они включены: это отдельная
+    // текстура глубины на десятки мегабайт, и держать её ради выключенной
+    // настройки — значит платить памятью за то, чего в кадре нет.
+    if (cfg.LocalShadows) {
+        m_localShadows.emplace(cfg.LocalShadowResolution,
+                               std::max(cfg.LocalShadowResolution / 4, 64));
+    }
     m_sky.emplace();
     m_particles.emplace();
 
@@ -471,6 +479,12 @@ void PlayerLayer::ResetUiEdits() {
     m_uiInput.Enter = m_uiInput.Escape = m_uiInput.Tab = false;
 }
 
+ShadowBinding PlayerLayer::FrameShadows(bool sunEnabled) const {
+    ShadowBinding b(*m_shadows, sunEnabled);
+    if (m_localShadows) b.Local = m_localShadows->Binding();
+    return b;
+}
+
 void PlayerLayer::OnRender() {
     if (!m_scene) return;
     sage::Application& app = sage::Application::Get();
@@ -591,7 +605,7 @@ void PlayerLayer::OnRender() {
                     c.Proj = p;
                     c.ViewPos = glm::vec3(glm::inverse(v)[3]);
                     c.Env = &env;
-                    c.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+                    c.Shadows = FrameShadows(cfg.Shadows);
                     c.Time = m_sceneTime;
                     sage::render::RenderSceneColor(*m_scene, m_batch, c);
                 },
@@ -606,9 +620,13 @@ void PlayerLayer::OnRender() {
     // без неё считать их не из чего. Порядок «тени, потом камера» держался
     // только на том, что одной карте камера была не нужна.
     {
-        sage::render::RenderPassDesc pass{"Тени: глубина от солнца"};
+        sage::render::RenderPassDesc pass{"Тени: глубина"};
         pass.Writes = {rShadow};
-        pass.Enabled = cfg.Shadows;
+        // Тени ламп НЕ привязаны к солнечным: сцена без солнца (подвал, ночь,
+        // интерьер) — самое место для теней от прожекторов, и выключать их
+        // заодно с солнцем значило бы отнимать тени ровно там, где кроме них
+        // ничего нет.
+        pass.Enabled = cfg.Shadows || m_localShadows.has_value();
         pass.Execute = [&, this] {
         if (cfg.Shadows) {
             ShadowMap::CameraView v;
@@ -634,6 +652,11 @@ void PlayerLayer::OnRender() {
             else m_shadows->FitSingle(env.Sun.Direction, v);
             sage::render::RenderShadowDepth(*m_shadows, *m_scene, m_batch, window.Width(),
                                             window.Height());
+        }
+        if (m_localShadows) {
+            m_localShadows->Prepare(env);
+            sage::render::RenderLocalShadowDepth(*m_localShadows, *m_scene, m_batch,
+                                                 window.Width(), window.Height());
         }
         };
         m_frame.AddPass(std::move(pass));
@@ -666,7 +689,7 @@ void PlayerLayer::OnRender() {
                                  rc.Proj = mp;
                                  rc.ViewPos = mirrorEye;
                                  rc.Env = &env;
-                                 rc.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+                                 rc.Shadows = FrameShadows(cfg.Shadows);
                                  rc.Time = m_sceneTime;
                                  rc.Reflection = m_reflections.Binding(vpW, vpH);
                                  rc.Reflection.CapturingPlanar = true;
@@ -731,7 +754,7 @@ void PlayerLayer::OnRender() {
         color.Proj = proj;
         color.ViewPos = viewPos;
         color.Env = &env;
-        color.Shadows = ShadowBinding(*m_shadows, cfg.Shadows);
+        color.Shadows = FrameShadows(cfg.Shadows);
         color.OcclusionCulling = cfg.OcclusionCulling;
         color.Time = m_sceneTime;
         color.Reflection = m_reflections.Binding(vpW, vpH, m_planar.Texture());

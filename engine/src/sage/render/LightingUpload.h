@@ -34,6 +34,9 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         shader.SetFloat(prefix + "constant", light.Constant());
         shader.SetFloat(prefix + "linear", light.Linear());
         shader.SetFloat(prefix + "quadratic", light.Quadratic());
+        // Место в атласе теней. Раздаётся покадрово (см. LocalShadowAtlas::
+        // Prepare); -1 означает «тени у этого источника в этом кадре нет».
+        shader.SetInt(prefix + "shadowSlot", light.ShadowSlot);
     }
 
     // Прожекторы (spot): то же затухание, плюс направление конуса и косинусы
@@ -52,6 +55,7 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         shader.SetFloat(prefix + "quadratic", light.Quadratic());
         shader.SetFloat(prefix + "cosInner", light.CosInner());
         shader.SetFloat(prefix + "cosOuter", light.CosOuter());
+        shader.SetInt(prefix + "shadowSlot", light.ShadowSlot);
     }
 
     // Туман (атмосфера сцены) — применяется только в режиме полного освещения.
@@ -59,6 +63,33 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     shader.SetVec3("uFogColor", env.Fog.Color);
     shader.SetFloat("uFogStart", env.Fog.Start);
     shader.SetFloat("uFogEnd", env.Fog.End);
+}
+
+// Тени прожекторов и точечных источников: один атлас, по прямоугольнику на
+// плитку (см. render/ShadowAtlas.h).
+//
+// Незанятые места заливаются нулевым прямоугольником осознанно: до них шейдер
+// не доходит (у источника без места shadowSlot == -1), но оставить там мусор
+// от прошлого кадра значило бы, что первая же ошибка в раздаче мест проявится
+// не как отсутствие тени, а как тень из ниоткуда.
+inline void UploadLocalShadowUniforms(Shader& shader, const sage::render::LocalShadowBinding& local) {
+    shader.SetInt("uLocalShadowAtlas", sage::render::kLocalShadowUnit);
+    shader.SetInt("uLocalShadowsEnabled", local.Enabled ? 1 : 0);
+    shader.SetFloat("uLocalAtlasTexel", local.AtlasTexel);
+    for (int i = 0; i < sage::render::LocalShadowBinding::kMaxSpot; ++i) {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        shader.SetMat4("uSpotShadowMat" + idx, local.SpotMatrix[i]);
+        shader.SetVec4("uSpotShadowRect" + idx, local.SpotRect[i]);
+        shader.SetVec3("uSpotShadowParams" + idx, local.SpotParams[i]);
+    }
+    for (int i = 0; i < sage::render::LocalShadowBinding::kMaxPoint; ++i) {
+        shader.SetVec3("uPointShadowParams[" + std::to_string(i) + "]", local.PointParams[i]);
+    }
+    const int rects =
+        sage::render::LocalShadowBinding::kMaxPoint * sage::render::LocalShadowBinding::kFaces;
+    for (int i = 0; i < rects; ++i) {
+        shader.SetVec4("uPointShadowRect[" + std::to_string(i) + "]", local.PointRect[i]);
+    }
 }
 
 // Заливает uniform'ы карт теней в шейдер-приёмник: матрицы пространства света
@@ -83,6 +114,7 @@ inline void UploadShadowUniforms(Shader& shader, const ShadowBinding& shadows) {
     shader.SetInt("uShadowsEnabled", shadows.Enabled ? 1 : 0);
     shader.SetFloat("uShadowFadeStart", shadows.FadeStart);
     shader.SetFloat("uShadowFadeEnd", shadows.FadeEnd);
+    UploadLocalShadowUniforms(shader, shadows.Local);
 }
 
 // Привязать карты и залить uniform'ы одним вызовом. Разделять эти два шага —

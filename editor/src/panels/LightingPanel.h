@@ -8,11 +8,13 @@
 #include "sage/gi/GI.h"
 
 class EditorHost;
+class Scene;
+struct LightingEnvironment;
 
 // Панель Lighting — окружение сцены (Scene::Lighting): полусферический
-// ambient (небо/земля/сила) и направленное «солнце». Точечные света — это
-// СУЩНОСТИ с LightComponent (Inspector > Light, Entity > Create Light), их
-// панель только перечисляет. Всё сериализуется со сценой, правки попадают в
+// ambient (небо/земля/сила), туман и небо. ВСЕ источники света, включая
+// солнце, — это СУЩНОСТИ с LightComponent (Inspector > Свет, Entity > Create
+// Light); панель показывает, какой объект работает солнцем, и уводит к нему. Всё сериализуется со сценой, правки попадают в
 // undo через TrackLastImGuiItem.
 //
 // Здесь же — запечённое глобальное освещение (GI, sage/gi): настройки бейка,
@@ -25,6 +27,7 @@ public:
 
 private:
     void DrawGISection(EditorHost& host);
+    void DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env);
     void StartBake(EditorHost& host, const sage::gi::GISettings& settings);
 
     std::thread m_bakeThread;
