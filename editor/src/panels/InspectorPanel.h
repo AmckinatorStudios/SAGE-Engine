@@ -89,5 +89,7 @@ private:
     // его ещё нет, и назначение его сущности.
     void AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr);
     void DrawEntityProperties(EditorHost& host);
+    // Серое пояснение с переносом строк (см. пояснение в .cpp).
+    static void HintWrapped(const char* fmt, ...);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
 };

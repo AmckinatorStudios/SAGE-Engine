@@ -1,3 +1,4 @@
+#include <cstdarg>
 #include "InspectorPanel.h"
 
 #include <cmath>
@@ -497,7 +498,7 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
 
     if (mr.MeshPtr) {
         const glm::vec3 size = mr.MeshPtr->BoundsMax() - mr.MeshPtr->BoundsMin();
-        ImGui::TextDisabled("Треугольников: %d, габарит %.2f x %.2f x %.2f",
+        HintWrapped("Треугольников: %d, габарит %.2f x %.2f x %.2f",
                             (int)(mr.MeshPtr->IndexCount() / 3), size.x, size.y, size.z);
     }
 }
@@ -526,8 +527,8 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
 
     ImGui::BeginGroup();
     if (mr.MaterialPath.empty()) {
-        ImGui::TextDisabled("Не назначен");
-        ImGui::TextDisabled("Объект рисуется поправками ниже как есть.");
+        HintWrapped("Не назначен");
+        HintWrapped("Объект рисуется поправками ниже как есть.");
     } else {
         ImGui::TextUnformatted(std::filesystem::path(mr.MaterialPath).filename().string().c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mr.MaterialPath.c_str());
@@ -584,10 +585,19 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
 // --- Mesh Renderer, часть 3: чем ЭТОТ экземпляр отличается -------------------
 void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr) {
     ImGui::SeparatorText("Поправки экземпляра");
+
+    // Ширина полей считается от САМОЙ ДЛИННОЙ подписи группы, а не берётся по
+    // умолчанию. У ImGui подпись стоит справа от поля, и на узкой панели
+    // инспектора «Непрозрачность» не помещалась — обрезалась до
+    // «Непрозрачнос». Резервируем ей место здесь, вместо того чтобы надеяться,
+    // что панель достаточно широкая: её ширину задаёт человек мышью.
+    const float labelWidth = ImGui::CalcTextSize("Непрозрачность").x +
+                             ImGui::GetStyle().ItemInnerSpacing.x * 2.0f;
+    ImGui::PushItemWidth(-labelWidth);
     // Одна подпись на всю группу вместо трёх разных правил, которые надо было
     // помнить (см. EffectiveColor/EffectiveEmissive/EffectiveOpacity).
-    ImGui::TextDisabled(mr.MaterialPtr ? "Накладываются поверх материала."
-                                       : "Материала нет — задают вид объекта целиком.");
+    HintWrapped("%s", mr.MaterialPtr ? "Накладываются поверх материала."
+                                     : "Материала нет — задают вид объекта целиком.");
 
     ImGui::ColorEdit3("Тон", &mr.Color.x); host.TrackLastImGuiItem();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Множится на albedo материала. Белый — как в материале.");
@@ -609,6 +619,7 @@ void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererCompone
     const bool neutral = mr.Color == glm::vec3(1.0f) && mr.Emissive == glm::vec3(0.0f) &&
                          mr.Opacity >= 0.999f;
     ImGui::BeginDisabled(neutral);
+    ImGui::PopItemWidth();
     if (ImGui::SmallButton("Сбросить поправки")) {
         host.PushUndoSnapshot();
         mr.Color = glm::vec3(1.0f);
@@ -925,6 +936,46 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::Button("Remove Collider")) {
                 host.PushUndoSnapshot();
                 reg.remove<ColliderComponent>(obj.Entity());
+            }
+        }
+    }
+
+    // --- Контроллер персонажа ------------------------------------------------
+    //
+    // Секции здесь не было ВООБЩЕ: компонент сериализовался, исполнялся физикой
+    // и был доступен из Lua, но настроить его мышью было нельзя — только
+    // скриптом или правкой .sage руками. Компонент, который нельзя увидеть в
+    // редакторе, для человека, работающего в редакторе, не существует.
+    if (reg.all_of<CharacterControllerComponent>(obj.Entity()) &&
+        ImGui::CollapsingHeader("Character Controller", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (CharacterControllerComponent* ch =
+                reg.try_get<CharacterControllerComponent>(obj.Entity())) {
+            ImGui::DragFloat("Radius", &ch->Radius, 0.01f, 0.05f, 5.0f);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat("Height", &ch->Height, 0.02f, 0.1f, 10.0f);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat("Step Height", &ch->StepHeight, 0.01f, 0.0f, 2.0f);
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("На какую ступеньку персонаж взбирается без прыжка");
+            }
+            ImGui::DragFloat("Max Slope", &ch->MaxSlopeDeg, 0.5f, 0.0f, 89.0f, "%.0f°");
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Круче — персонаж соскальзывает");
+            ImGui::DragFloat("Mass", &ch->Mass, 0.5f, 0.1f, 1000.0f);
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("С какой силой персонаж толкает динамические тела");
+            }
+
+            // Состояние из физики — только для чтения: правка «стоит на земле»
+            // из интерфейса не имеет смысла, его вычисляет симуляция.
+            ImGui::Separator();
+            ImGui::TextDisabled("На земле: %s", ch->Grounded ? "да" : "нет");
+
+            if (ImGui::Button("Remove Character Controller")) {
+                host.PushUndoSnapshot();
+                reg.remove<CharacterControllerComponent>(obj.Entity());
             }
         }
     }
@@ -1361,6 +1412,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
 // Кнопка «Add Component» + попап со списком компонентов, которых у сущности ещё
 // нет. Так добавление унифицировано (а удаление — кнопкой Remove в самой секции).
+// Серое пояснение, КОТОРОЕ ПЕРЕНОСИТСЯ. Панель инспектора узкая (её ширину
+// задаёт раскладка доккинга), а TextDisabled не переносит — поэтому пояснения
+// обрезались по краю панели прямо посередине слова: «габарит 1.00 x 1.00 x 1.0(»,
+// «задаём вид объекта целик». Пропадал ровно тот текст, ради которого их писали.
+void InspectorPanel::HintWrapped(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrappedV(fmt, args);
+    ImGui::PopStyleColor();
+    va_end(args);
+}
+
 void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
     entt::registry& reg = host.CurrentScene().Registry();
     entt::entity e = obj.Entity();
@@ -1378,6 +1442,18 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
                 ImGui::CloseCurrentPopup();
             }
         };
+        // Mesh Renderer, Decal и Character Controller ДОЛГО ОТСУТСТВОВАЛИ в этом
+        // списке, и получалось противоречие: наклейку можно создать через
+        // «Entity > Create Decal», но нельзя добавить к уже существующему
+        // объекту; у пустой сущности нельзя завести меш, хотя он есть у каждого
+        // примитива; персонаж настраивается только из скрипта. Компонент, у
+        // которого есть секция в инспекторе, обязан быть и в этом списке —
+        // иначе редактор противоречит сам себе.
+        item("Mesh Renderer", reg.all_of<MeshRendererComponent>(e),
+             [&] { reg.emplace<MeshRendererComponent>(e); });
+        item("Decal", reg.all_of<DecalComponent>(e), [&] { reg.emplace<DecalComponent>(e); });
+        item("Character Controller", reg.all_of<CharacterControllerComponent>(e),
+             [&] { reg.emplace<CharacterControllerComponent>(e); });
         item("GI Static", reg.all_of<GIStaticComponent>(e), [&] { reg.emplace<GIStaticComponent>(e); });
         item("Camera", reg.all_of<CameraComponent>(e), [&] { reg.emplace<CameraComponent>(e); });
         item("Light", reg.all_of<LightComponent>(e), [&] { reg.emplace<LightComponent>(e); });

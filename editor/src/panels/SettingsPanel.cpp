@@ -1,4 +1,6 @@
 #include "SettingsPanel.h"
+
+#include <cfloat>
 #include "EditorHost.h"
 #include "Project.h"
 
@@ -12,12 +14,24 @@
 // ============================================================================
 void SettingsPanel::Draw(EditorHost& host, bool& open) {
     if (!open) return;
-    ImGui::SetNextWindowSize(ImVec2(420, 560), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Settings", &open)) { ImGui::End(); return; }
+    // 640 в ширину, а не 420. Причина не в красоте: у ImGui подпись стоит СПРАВА
+    // от поля, поэтому «Shadow Resolution» и «Frame Cap (0=off)» вместе со своим
+    // полем требуют места, которого в 420 точках нет — подписи обрезались
+    // посередине слова, и настройка превращалась в «Shadow Resolutic».
+    ImGui::SetNextWindowSize(ImVec2(640, 620), ImGuiCond_FirstUseEver);
+    // И нижняя граница: окно меньше этого показывает половину раздела, а полос
+    // прокрутки у разделов нет.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(520, 360), ImVec2(FLT_MAX, FLT_MAX));
+    if (!ImGui::Begin("Настройки игры", &open)) { ImGui::End(); return; }
 
     sage::EngineConfig& c = host.Settings();
 
-    ImGui::TextDisabled("Гибкая конфигурация игры (сохраняется в проект как sage.cfg).");
+    // TextWrapped, а не TextDisabled: пояснения длиннее строки, и без переноса
+    // они обрезались по краю окна — то есть пропадал ровно тот текст, ради
+    // которого их писали.
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("Гибкая конфигурация игры (сохраняется в проект как sage.cfg).");
+    ImGui::PopStyleColor();
     ImGui::Separator();
 
     // Пресеты качества: один клик выставляет display/graphics/post разом
@@ -58,7 +72,9 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
         if (ImGui::Combo("MSAA", &msaaIdx, msaa, IM_ARRAYSIZE(msaa)))
             c.Msaa = kMsaaVals[msaaIdx];
-        ImGui::TextDisabled("Оконные параметры применяются при запуске игры.");
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("Оконные параметры применяются при запуске игры.");
+        ImGui::PopStyleColor();
     }
 
     if (ImGui::CollapsingHeader("Display / Дисплей", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -66,7 +82,9 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         int a = (int)c.Aspect;
         if (ImGui::Combo("Aspect Ratio", &a, aspects, IM_ARRAYSIZE(aspects))) c.Aspect = (sage::AspectMode)a;
         ImGui::SliderFloat("Render Scale", &c.RenderScale, 0.25f, 2.0f, "%.2fx");
-        ImGui::TextDisabled("Render Scale < 1 — быстрее; > 1 — суперсэмплинг (чётче).");
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("Render Scale < 1 — быстрее; > 1 — суперсэмплинг (чётче).");
+        ImGui::PopStyleColor();
     }
 
     if (ImGui::CollapsingHeader("Graphics / Графика", ImGuiTreeNodeFlags_DefaultOpen)) {

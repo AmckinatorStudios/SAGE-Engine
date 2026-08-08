@@ -423,6 +423,9 @@ void EditorLayer::RunSelfTest() {
             // Проверяем и то, что папки нет: положить рядом и пакет, и россыпь
             // значило бы, что какой из них прочтут — дело случая.
             if (!fs::exists(exe, ec) || !fs::exists(gameDir / "game.sagepak", ec) ||
+                // Манифест игры лежит РЯДОМ с exe, а не в пакете: на него
+                // указывают при запуске из другой папки.
+                !fs::exists(gameDir / "project.sageproj", ec) ||
                 fs::exists(gameDir / "project", ec) ||
                 !fs::exists(gameDir / "assets" / "shaders" / "lit.frag", ec)) {
                 LOG_ERROR("Editor") << "SELFTEST: built game layout incomplete in " << gameDir.string();

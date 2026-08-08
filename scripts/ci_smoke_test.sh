@@ -239,7 +239,7 @@ GAME_ABS=$(cd "${GAME_DIR}" && pwd)
 STATUS=0
 ( cd "${SCRATCH_DIR}" && \
   run_headless env SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${PLAYER_SHOT2}" \
-      "${GAME_ABS}/selftest_project" "${GAME_ABS}/project/project.sageproj" ) \
+      "${GAME_ABS}/selftest_project" "${GAME_ABS}/project.sageproj" ) \
   > "${PLAYER_LOG2}" 2>&1 || STATUS=$?
 if [ ${STATUS} -ne 0 ]; then
     echo "ОШИБКА: запуск игры из другой папки (по пути к .sageproj) завершился с кодом ${STATUS}"

@@ -1267,9 +1267,24 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     // ходит, а место они занимают.
     {
         sage::assets::PackWriter pack;
-        const size_t packed = pack.AddDirectory(m_project.Dir(), {".meta", ".sageimport"});
+        // project.sageproj в пакет НЕ кладётся, а копируется рядом с exe. Это
+        // манифест игры: по нему плеер узнаёт её имя, и на него указывают,
+        // когда запускают игру из другой папки или перетаскивают файл на
+        // плеер. Спрятав его в пакет, мы отняли бы этот способ запуска — что и
+        // случилось, и поймал это smoke-тест «игра запускается из ЛЮБОЙ папки».
+        //
+        // Копия одна, а не две: файла нет в пакете, поэтому правила «пакет
+        // против россыпи» он не нарушает.
+        const size_t packed =
+            pack.AddDirectory(m_project.Dir(), {".meta", ".sageimport", "project.sageproj"});
         if (!pack.Save(gameDir / "game.sagepak")) {
             err = "Не удалось записать пакет игры";
+            return false;
+        }
+        fs::copy_file(m_project.Dir() / "project.sageproj", gameDir / "project.sageproj",
+                      fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            err = "Не удалось скопировать файл проекта: " + ec.message();
             return false;
         }
         LOG_INFO("Editor") << "Пакет игры: " << packed << " файлов";
