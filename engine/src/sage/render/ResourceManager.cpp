@@ -120,6 +120,16 @@ std::vector<size_t> ResourceManager::SelectEvictions(const std::vector<EvictCand
     return result;
 }
 
+namespace {
+// Время последней правки файла в виде числа; 0 — файла нет/недоступен.
+long long FileStamp(const std::string& path) {
+    std::error_code ec;
+    auto t = std::filesystem::last_write_time(path, ec);
+    if (ec) return 0;
+    return (long long)t.time_since_epoch().count();
+}
+} // namespace
+
 std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     auto it = m_models.find(path);
     if (it != m_models.end()) return it->second;
@@ -130,6 +140,7 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
         LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
     }
     m_models[path] = mesh; // в т.ч. nullptr — негативный кэш (не перечитывать битый файл)
+    m_modelStamps[path] = FileStamp(Locate(path));
     return mesh;
 }
 
@@ -149,7 +160,55 @@ std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
 
 std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
     m_models.erase(path); // сброс кэша -> GetModel перечитает с диска (новый .sageimport)
+    m_modelStamps.erase(path);
     return GetModel(path);
+}
+
+int ResourceManager::ReloadChangedAssets() {
+    int reloaded = 0;
+
+    // Списки путей собираются ЗАРАНЕЕ: перезагрузка меняет те самые
+    // контейнеры, по которым идёт обход, и обходить их на ходу — обращение по
+    // недействительному итератору.
+    std::vector<std::string> staleModels;
+    for (const auto& [path, stamp] : m_modelStamps) {
+        if (FileStamp(Locate(path)) != stamp) staleModels.push_back(path);
+    }
+    std::vector<std::string> staleMaterials;
+    for (const auto& [path, stamp] : m_materialStamps) {
+        if (FileStamp(Locate(path)) != stamp) staleMaterials.push_back(path);
+    }
+
+    for (const std::string& path : staleModels) {
+        // Меш подменяется НА МЕСТЕ (по тому же shared_ptr), а не заводится
+        // заново: на прежний указывают компоненты сцены, и заменив запись в
+        // кэше, мы оставили бы их со старой геометрией — то есть починили бы
+        // кэш и не починили картинку.
+        std::shared_ptr<Mesh> existing = m_models[path];
+        m_models.erase(path);
+        m_modelStamps.erase(path);
+        std::shared_ptr<Mesh> fresh = GetModel(path);
+        if (existing && fresh && existing != fresh) {
+            *existing = std::move(*fresh);
+            m_models[path] = existing;
+        }
+        ++reloaded;
+        LOG_INFO("Resources") << "Модель перечитана: " << path;
+    }
+
+    for (const std::string& path : staleMaterials) {
+        std::shared_ptr<Material> existing = m_materials[path];
+        m_materials.erase(path);
+        m_materialStamps.erase(path);
+        std::shared_ptr<Material> fresh = GetMaterial(path);
+        if (existing && fresh && existing != fresh) {
+            *existing = *fresh;
+            m_materials[path] = existing;
+        }
+        ++reloaded;
+        LOG_INFO("Resources") << "Материал перечитан: " << path;
+    }
+    return reloaded;
 }
 
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
@@ -284,18 +343,10 @@ std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) 
     if (material->HasCustomShader())
         material->ShaderPtr = GetShader(material->VertexShaderPath, material->FragmentShaderPath);
     m_materials[path] = material;
+    m_materialStamps[path] = FileStamp(Locate(path));
     return material;
 }
 
-namespace {
-// Время последней правки файла в виде числа; 0 — файла нет/недоступен.
-long long FileStamp(const std::string& path) {
-    std::error_code ec;
-    auto t = std::filesystem::last_write_time(path, ec);
-    if (ec) return 0;
-    return (long long)t.time_since_epoch().count();
-}
-} // namespace
 
 std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath,
                                                    const std::string& fragmentPath) {

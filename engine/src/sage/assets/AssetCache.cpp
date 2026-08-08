@@ -110,7 +110,15 @@ bool FingerprintOf(const std::string& path, Fingerprint& out) {
 
 } // namespace
 
-void SetCacheDirectory(const std::string& directory) { Get().Directory = directory; }
+void SetCacheDirectory(const std::string& directory) {
+    // Каталог кэша запоминается АБСОЛЮТНЫМ. Относительный («.sage-cache»)
+    // считается от текущего каталога, а его меняют на ходу: плеер уходит в
+    // папку проекта сразу после старта. Кэш, записанный до смены, искался бы
+    // после неё в другом месте — снова «пишется, но не читается».
+    std::error_code ec;
+    const fs::path absolute = fs::absolute(directory, ec);
+    Get().Directory = ec ? directory : absolute.string();
+}
 const std::string& CacheDirectory() { return Get().Directory; }
 void SetCacheEnabled(bool enabled) { Get().Enabled = enabled; }
 bool CacheEnabled() { return Get().Enabled; }
@@ -119,21 +127,34 @@ void ResetCacheStats() { Get().CacheStats = Stats{}; }
 
 std::string CachePathFor(const std::string& sourcePath) {
     std::error_code ec;
-    const fs::path absolute = fs::absolute(sourcePath, ec);
-    const std::string key = ec ? sourcePath : absolute.string();
+    // weakly_canonical, а НЕ absolute. absolute только приписывает текущий
+    // каталог, оставляя «.», «..» и символические ссылки как есть — то есть
+    // ключ получается от НАПИСАНИЯ пути, а не от файла.
+    //
+    // Один и тот же файл движок называет по-разному: сцена хранит путь
+    // относительно проекта ("assets/hero.gltf"), файловый диалог отдаёт
+    // абсолютный, склейка каталогов даёт "./assets/../assets/hero.gltf". С
+    // ключом от написания запись и чтение попадали в РАЗНЫЕ файлы: кэш
+    // исправно писался и никогда не читался, а на диске росло по копии на
+    // каждое написание. Снаружи это выглядело как «кэш не работает».
+    fs::path key = fs::weakly_canonical(sourcePath, ec);
+    if (ec || key.empty()) {
+        key = fs::absolute(sourcePath, ec);
+        if (ec) key = sourcePath;
+    }
+    const std::string keyText = key.generic_string();
 
     // Имя файла = имя модели + хэш полного пути. Имя нужно человеку (в каталоге
     // кэша видно, что от чего), хэш — чтобы две модели с одинаковым именем из
     // разных папок не затирали друг друга.
     unsigned long long hash = 1469598103934665603ull; // FNV-1a
-    for (unsigned char c : key) {
+    for (unsigned char c : keyText) {
         hash ^= c;
         hash *= 1099511628211ull;
     }
     char suffix[24];
     std::snprintf(suffix, sizeof(suffix), "%016llx", hash);
-    return (fs::path(Get().Directory) / (fs::path(key).stem().string() + "_" + suffix + ".sagemc"))
-        .string();
+    return (fs::path(Get().Directory) / (key.stem().string() + "_" + suffix + ".sagemc")).string();
 }
 
 bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out) {
