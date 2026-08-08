@@ -212,6 +212,38 @@ private:
     // порядка в пространстве имён — цена без выгоды.
     sol::table Module(const char* name);
 
+public:
+    // --- Что запросила игра за кадр (спрашивает хозяин кадра) ---------------
+    //
+    // Забирающие геттеры: запрос действует ОДИН раз. Скрипт, попросивший
+    // сменить сцену дважды за кадр, не должен получить две загрузки.
+    bool TakeSceneRequest(std::string& sceneName) {
+        if (!m_sceneRequested) return false;
+        m_sceneRequested = false;
+        sceneName = m_pendingScene;
+        return true;
+    }
+    bool TakeRestartRequest() {
+        const bool r = m_restartRequested;
+        m_restartRequested = false;
+        return r;
+    }
+    bool TakeQuitRequest() {
+        const bool r = m_quitRequested;
+        m_quitRequested = false;
+        return r;
+    }
+    // Пауза и масштаб времени — состояние, а не запрос: их спрашивают каждый
+    // кадр, и «забрать» их было бы неверно.
+    bool Paused() const { return m_paused; }
+    void SetPaused(bool paused) { m_paused = paused; }
+    float TimeScale() const { return m_timeScale; }
+    // Множитель кадра с учётом паузы: 0 на паузе. Одно место, где эти два
+    // понятия сводятся вместе, — иначе каждый вызывающий сводил бы их сам и
+    // однажды забыл про паузу.
+    float FrameTimeScale() const { return m_paused ? 0.0f : m_timeScale; }
+
+private:
     template <typename Fn>
     void Bind(const char* module, const char* name, const char* legacy, Fn&& fn) {
         sol::table table = Module(module);
@@ -243,6 +275,7 @@ private:
     void RegisterTimerApi();      // Schedule/Repeat/StartCoroutine + wait()
     void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
     void RegisterLaunchArgsApi(); // LaunchArg/LaunchFlag
+    void RegisterGameFlowApi();   // sage.scene.Load, sage.game.*, sage.time.SetScale
     void RegisterMathHelpers();   // Cross/Lerp/Clamp/Radians/Degrees
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
@@ -288,6 +321,24 @@ private:
     // Параметры запуска (LaunchArg из Lua). Таблица Lua завести нельзя до
     // RegisterEngineApi, поэтому храним на стороне C++ и отдаём по запросу.
     std::unordered_map<std::string, std::string> m_launchArgs;
+
+    // --- Ход игры: смена сцены, пауза, масштаб времени ---------------------
+    //
+    // ПОЧЕМУ ЗАПРОС, А НЕ ДЕЙСТВИЕ. Скрипт зовёт sage.scene.Load("level2")
+    // изнутри OnUpdate — то есть в момент, когда движок ИДЁТ ПО СУЩНОСТЯМ ЭТОЙ
+    // ЖЕ СЦЕНЫ, а сам скрипт держит на них ссылки. Загрузить новую сцену прямо
+    // там значит уничтожить реестр под ногами у обхода и оставить скрипту
+    // висячий GameObject: падение в лучшем случае, тихая порча памяти в худшем.
+    //
+    // Поэтому запрос ЗАПОМИНАЕТСЯ, а выполняет его хозяин кадра (плеер или
+    // Play-режим редактора) между кадрами, когда ни один скрипт не исполняется.
+    // Ровно та же причина, по которой удаление сущностей отложено.
+    std::string m_pendingScene;
+    bool m_sceneRequested = false;
+    bool m_restartRequested = false;
+    bool m_quitRequested = false;
+    bool m_paused = false;
+    float m_timeScale = 1.0f;
 
     int m_nextTimerId = 1;
 };

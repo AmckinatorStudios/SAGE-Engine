@@ -123,68 +123,8 @@ void PlayerLayer::OnAttach() {
         return;
     }
 
-    // 4. Скрипты: игра стартует сразу (Play всегда включён).
-    m_scripts = std::make_unique<ScriptEngine>();
-    m_scripts->BindScene(*m_scene);
-    if (m_particles) m_scripts->BindParticles(*m_particles); // паритет с Play редактора
-
-    // Ввод — ДО привязки скриптов: раскладку объявляет сам скрипт в OnStart
-    // (BindAction), а OnStart вызывается прямо из AttachScript. Привяжи мы ввод
-    // после, первые же BindAction упали бы с «ввод не привязан».
-    m_input.Attach(app.GetWindow());
-    m_rawInput = std::make_unique<WindowRawInput>(m_input, app.GetWindow());
-    m_scripts->BindInput(m_input.Actions());
-    m_scripts->BindRawInput(*m_rawInput);
-
-    // Звук игры. Отсутствие звукового устройства (CI, headless) — не повод
-    // ронять игру: AudioEngine сам работает вхолостую, а PlaySound из Lua
-    // остаётся вызываемым.
-    m_audio = std::make_unique<AudioEngine>();
-    m_scripts->BindAudio(*m_audio);
-
-    // Модули Lua: require "voxel" найдёт assets/scripts/voxel.lua проекта.
-    // CWD уже внутри проекта, поэтому путь относительный — как и у скриптов
-    // сущностей в .sage.
-    m_scripts->AddScriptSearchPath("assets/scripts");
-
-    // Параметры запуска (--autopilot=1, SAGE_GAME_ARGS) — до AttachScript:
-    // скрипт читает их уже в OnStart, выбирая режим (автопрогон, зерно мира).
-    if (!m_launchArgs.empty()) {
-        m_scripts->SetLaunchArgsFromString(m_launchArgs);
-        LOG_INFO("Player") << "Параметры запуска игры: " << m_launchArgs;
-    }
-
-    int attached = 0;
-    auto view = m_scene->Registry().view<ScriptComponent>();
-    for (auto e : view) {
-        const std::string& path = view.get<ScriptComponent>(e).Path;
-        if (path.empty()) continue;
-        try {
-            m_scripts->AttachScript(GameObject(&m_scene->Registry(), e), path);
-            ++attached;
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Player") << "Скрипт не привязался: " << ex.what();
-        }
-    }
-
-    // Физика: строим мир по сущностям с RigidBodyComponent (бэкенд по умолчанию —
-    // Jolt, если собран, иначе встроенный Simple). Игра всегда «в Play».
-    m_physics = std::make_unique<PhysicsScene>(
-        sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
-
-    // Скрипты рулят физикой времени выполнения (SetVelocity/SetGravity) — доступно
-    // после построения мира (RuntimeBody сущностей уже созданы).
-    m_scripts->BindPhysics(*m_physics);
-
-    // Состав кадра. Регистрируется здесь, когда все подсистемы уже созданы:
-    // порядок при этом не задаётся — он определён стадиями внутри
-    // RegisterCoreSystems и не зависит от того, кто когда зарегистрировался.
-    sage::CoreSystems core;
-    core.Scripts = m_scripts.get();
-    core.Physics = m_physics.get();
-    core.Particles = m_particles ? &*m_particles : nullptr;
-    core.Audio = m_audio.get();
-    sage::RegisterCoreSystems(m_systems, core);
+    m_scenePath = scenePath;
+    BuildSceneRuntime();
 
     // Запасная камера, если в сцене НЕТ Primary-камеры. НАРОЧНО отличается от
     // редакторской орбитальной камеры (та — {6.5,5,6.5}, yaw -135, pitch -28):
@@ -198,8 +138,7 @@ void PlayerLayer::OnAttach() {
 
     LOG_INFO("Player") << "PLAYER: started '" << m_projectName << "', scene "
                        << scenePath.filename().string() << " (" << m_scene->Count()
-                       << " entities, " << attached << " scripts, "
-                       << m_physics->BodyCount() << " physics bodies on "
+                       << " entities, " << m_physics->BodyCount() << " physics bodies on "
                        << m_physics->BackendName() << ")";
 }
 
@@ -272,6 +211,140 @@ void PlayerLayer::OnDetach() {
     ResourceManager::Instance().Clear();
 }
 
+
+// ---------------------------------------------------------------------------
+//  Подъём рантайма под загруженную сцену
+//
+//  Один и тот же код поднимает и первую сцену игры, и каждую следующую. Это не
+//  вкусовщина: два пути подъёма неизбежно разъезжаются, и разница вылезает не
+//  на первом уровне, а на втором — у игрока.
+// ---------------------------------------------------------------------------
+void PlayerLayer::BuildSceneRuntime() {
+    sage::Application& app = sage::Application::Get();
+
+    // 4. Скрипты: игра стартует сразу (Play всегда включён).
+    m_scripts = std::make_unique<ScriptEngine>();
+    m_scripts->BindScene(*m_scene);
+    if (m_particles) m_scripts->BindParticles(*m_particles); // паритет с Play редактора
+
+    // Ввод — ДО привязки скриптов: раскладку объявляет сам скрипт в OnStart
+    // (BindAction), а OnStart вызывается прямо из AttachScript. Привяжи мы ввод
+    // после, первые же BindAction упали бы с «ввод не привязан».
+    m_input.Attach(app.GetWindow());
+    m_rawInput = std::make_unique<WindowRawInput>(m_input, app.GetWindow());
+    m_scripts->BindInput(m_input.Actions());
+    m_scripts->BindRawInput(*m_rawInput);
+
+    // Звук игры. Отсутствие звукового устройства (CI, headless) — не повод
+    // ронять игру: AudioEngine сам работает вхолостую, а PlaySound из Lua
+    // остаётся вызываемым.
+    m_audio = std::make_unique<AudioEngine>();
+    m_scripts->BindAudio(*m_audio);
+
+    // Модули Lua: require "voxel" найдёт assets/scripts/voxel.lua проекта.
+    // CWD уже внутри проекта, поэтому путь относительный — как и у скриптов
+    // сущностей в .sage.
+    m_scripts->AddScriptSearchPath("assets/scripts");
+
+    // Параметры запуска (--autopilot=1, SAGE_GAME_ARGS) — до AttachScript:
+    // скрипт читает их уже в OnStart, выбирая режим (автопрогон, зерно мира).
+    if (!m_launchArgs.empty()) {
+        m_scripts->SetLaunchArgsFromString(m_launchArgs);
+        LOG_INFO("Player") << "Параметры запуска игры: " << m_launchArgs;
+    }
+
+    int attached = 0;
+    auto view = m_scene->Registry().view<ScriptComponent>();
+    for (auto e : view) {
+        const std::string& path = view.get<ScriptComponent>(e).Path;
+        if (path.empty()) continue;
+        try {
+            m_scripts->AttachScript(GameObject(&m_scene->Registry(), e), path);
+            ++attached;
+        } catch (const std::exception& ex) {
+            LOG_ERROR("Player") << "Скрипт не привязался: " << ex.what();
+        }
+    }
+
+    // Физика: строим мир по сущностям с RigidBodyComponent (бэкенд по умолчанию —
+    // Jolt, если собран, иначе встроенный Simple). Игра всегда «в Play».
+    m_physics = std::make_unique<PhysicsScene>(
+        sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
+
+    // Скрипты рулят физикой времени выполнения (SetVelocity/SetGravity) — доступно
+    // после построения мира (RuntimeBody сущностей уже созданы).
+    m_scripts->BindPhysics(*m_physics);
+
+    // Состав кадра. Регистрируется здесь, когда все подсистемы уже созданы:
+    // порядок при этом не задаётся — он определён стадиями внутри
+    // RegisterCoreSystems и не зависит от того, кто когда зарегистрировался.
+    sage::CoreSystems core;
+    core.Scripts = m_scripts.get();
+    core.Physics = m_physics.get();
+    core.Particles = m_particles ? &*m_particles : nullptr;
+    core.Audio = m_audio.get();
+    sage::RegisterCoreSystems(m_systems, core);
+
+}
+
+bool PlayerLayer::SwitchScene(const std::string& sceneName) {
+    namespace fs = std::filesystem;
+    fs::path path = m_scenePath;
+    if (!sceneName.empty()) {
+        // Имя, а не путь: скрипт не знает и не должен знать, где лежат сцены.
+        path = fs::path("scenes") / (sceneName + ".sage");
+        std::error_code ec;
+        if (!fs::exists(path, ec)) {
+            LOG_ERROR("Player") << "сцена не найдена: " << path.string()
+                                << " — остаюсь в текущей";
+            return false;
+        }
+    }
+
+    std::unique_ptr<Scene> loaded;
+    try {
+        loaded = SceneSerializer::Load(path.string());
+    } catch (const std::exception& e) {
+        // Битая сцена НЕ обрывает игру: остаёмся в текущей и говорим почему.
+        // Вылет на середине уровня хуже, чем не открывшаяся дверь.
+        LOG_ERROR("Player") << "сцена не загрузилась (" << path.string() << "): " << e.what();
+        return false;
+    }
+
+    // Порядок разрушения важен. Сначала снимаем состав кадра: он держит
+    // указатели на скрипты и физику, и оставить его на снесённые подсистемы
+    // означало бы обращение по мёртвому адресу в первом же кадре новой сцены.
+    m_systems.Clear();
+    m_physics.reset();
+    m_scripts.reset();   // вместе с ним уходит всё состояние скриптов уровня
+    m_scene = std::move(loaded);
+    m_scenePath = path;
+    m_sceneTime = 0.0f;
+
+    BuildSceneRuntime();
+    LOG_INFO("Player") << "сцена: " << path.filename().string() << " (" << m_scene->Count()
+                       << " сущностей)";
+    return true;
+}
+
+void PlayerLayer::ApplyGameFlowRequests() {
+    if (!m_scripts) return;
+
+    if (m_scripts->TakeQuitRequest()) {
+        sage::Application::Get().Close();
+        return;   // дальше делать нечего: игра закрывается
+    }
+    // Перезапуск разбирается ДО смены сцены: если скрипт попросил и то и
+    // другое, побеждает более конкретное — переход на названную сцену.
+    const bool restart = m_scripts->TakeRestartRequest();
+    std::string sceneName;
+    if (m_scripts->TakeSceneRequest(sceneName)) {
+        SwitchScene(sceneName);
+    } else if (restart) {
+        SwitchScene({});   // пустое имя — та же сцена заново
+    }
+}
+
 void PlayerLayer::OnUpdate(float dt) {
     if (!m_scene) return;
     sage::Application& app = sage::Application::Get();
@@ -293,10 +366,21 @@ void PlayerLayer::OnUpdate(float dt) {
     // стояли ПОСЛЕ физики — управление там отставало на кадр.
     // В паузе мир НЕ ТИКАЕТ: ни скрипты, ни физика, ни таймеры. Пауза, в
     // которой продолжает капать голод и тонуть лодка, — не пауза.
-    if (!m_paused) {
-        m_systems.Run(*m_scene, dt);
-        m_sceneTime += dt; // uTime собственных шейдеров материалов
+    // Масштаб времени игры (sage.time.SetScale) и её собственная пауза
+    // (sage.game.Pause) — поверх паузы плеера по ESC. Оба сводятся в одном
+    // множителе: разводить их по разным местам значило бы однажды учесть один
+    // и забыть другой.
+    const float scale = m_scripts ? m_scripts->FrameTimeScale() : 1.0f;
+    const float scaledDt = dt * scale;
+    if (!m_paused && scaledDt > 0.0f) {
+        m_systems.Run(*m_scene, scaledDt);
+        m_sceneTime += scaledDt; // uTime собственных шейдеров материалов
     }
+
+    // То, что игра запросила за кадр, выполняется ЗДЕСЬ — после того, как все
+    // скрипты отработали и ни один из них не находится на стеке.
+    ApplyGameFlowRequests();
+    if (!m_scene) return;
 
     // ESC открывает ПАУЗУ, а не закрывает игру.
     //

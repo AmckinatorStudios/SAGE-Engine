@@ -613,3 +613,87 @@ TEST(SaveGame_round_trips_a_lua_table) {
 
     std::filesystem::remove_all(sandbox);
 }
+
+// --- Ход игры: смена сцены, пауза, масштаб времени --------------------------
+//
+// БЕЗ ЭТОГО ИГРА НА ДВИЖКЕ БЫЛА ДЛИНОЙ В ОДНУ СЦЕНУ. Меню → уровень 1 →
+// уровень 2 → титры собрать было нельзя: SceneManager существовал только в
+// C++, и обойти это из скрипта было нечем.
+//
+// Проверяется здесь именно МЕХАНИКА ЗАПРОСА, а не сама загрузка. Загружает
+// хозяин кадра (плеер), и делает это МЕЖДУ кадрами — потому что скрипт зовёт
+// Load изнутри OnUpdate, когда движок идёт по сущностям этой же сцены и сам
+// скрипт держит на них ссылки. Сменить сцену прямо там значит уничтожить
+// реестр под ногами у обхода.
+TEST(Scripting_scene_load_is_a_request_taken_once) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    std::string name;
+    CHECK_FALSE(se.TakeSceneRequest(name)); // никто не просил
+
+    se.Lua().script("sage.scene.Load('level2')");
+    CHECK_TRUE(se.TakeSceneRequest(name));
+    CHECK_TRUE(name == "level2");
+    // Забрали — значит выполнено. Второй раз запрос повторяться не должен:
+    // иначе сцена грузилась бы каждый кадр до скончания века.
+    CHECK_FALSE(se.TakeSceneRequest(name));
+
+    // Два вызова за кадр — одна загрузка, последняя. Скрипт, дважды
+    // передумавший, не должен получить две смены сцены подряд.
+    se.Lua().script("sage.scene.Load('a'); sage.scene.Load('b')");
+    CHECK_TRUE(se.TakeSceneRequest(name));
+    CHECK_TRUE(name == "b");
+    CHECK_FALSE(se.TakeSceneRequest(name));
+
+    // Пустое имя игнорируется: это почти наверняка ошибка в скрипте, и
+    // выполнить её значило бы перезагрузить уровень на ровном месте.
+    se.Lua().script("sage.scene.Load('')");
+    CHECK_FALSE(se.TakeSceneRequest(name));
+}
+
+TEST(Scripting_restart_and_quit_are_taken_once) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    CHECK_FALSE(se.TakeRestartRequest());
+    se.Lua().script("sage.game.Restart()");
+    CHECK_TRUE(se.TakeRestartRequest());
+    CHECK_FALSE(se.TakeRestartRequest());
+
+    CHECK_FALSE(se.TakeQuitRequest());
+    se.Lua().script("sage.game.Quit()");
+    CHECK_TRUE(se.TakeQuitRequest());
+    CHECK_FALSE(se.TakeQuitRequest());
+}
+
+TEST(Scripting_time_scale_and_pause_fold_into_one_multiplier) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    CHECK_NEAR(se.TimeScale(), 1.0f, 1e-6);
+    CHECK_NEAR(se.FrameTimeScale(), 1.0f, 1e-6);
+
+    se.Lua().script("sage.time.SetScale(0.5)");
+    CHECK_NEAR(se.TimeScale(), 0.5f, 1e-6);
+    CHECK_NEAR(se.FrameTimeScale(), 0.5f, 1e-6);
+
+    // Пауза бьёт масштаб: множитель кадра — ноль, что бы ни стояло в SetScale.
+    se.Lua().script("sage.game.Pause(true)");
+    CHECK_TRUE(se.Paused());
+    CHECK_NEAR(se.FrameTimeScale(), 0.0f, 1e-6);
+    // Но САМ масштаб пауза не трогает: сняли паузу — вернулось замедление,
+    // которое просила игра, а не единица.
+    CHECK_NEAR(se.TimeScale(), 0.5f, 1e-6);
+    se.Lua().script("sage.game.Pause(false)");
+    CHECK_NEAR(se.FrameTimeScale(), 0.5f, 1e-6);
+
+    // Отрицательный масштаб зажимается в ноль. Обратное время звучит заманчиво,
+    // но физика, анимация и таймеры к нему не готовы: вышла бы не перемотка, а
+    // разъезжающееся состояние.
+    se.Lua().script("sage.time.SetScale(-3)");
+    CHECK_NEAR(se.TimeScale(), 0.0f, 1e-6);
+}

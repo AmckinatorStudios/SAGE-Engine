@@ -119,6 +119,42 @@ if [ ! -x "${GAME_EXE}" ]; then
     echo "ОШИБКА: собранная игра не найдена: ${GAME_EXE} (self-test редактора должен был её собрать)"
     exit 1
 fi
+# Второй уровень и скрипт-переключатель: без смены сцены игра на движке была бы
+# длиной ровно в одну сцену, и проверить это можно только запуском — механика
+# запроса (модульные тесты) не доказывает, что хозяин кадра его выполняет.
+python3 - "${GAME_DIR}/project" <<'PYEOF'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+scenes = root / "scenes"
+main_file = scenes / "main.sage"
+if not main_file.exists():
+    main_file = sorted(scenes.glob("*.sage"))[0]
+main = json.loads(main_file.read_text())
+
+level2 = json.loads(json.dumps(main))
+level2["name"] = "level2"
+(scenes / "level2.sage").write_text(json.dumps(level2, indent=2))
+
+scripts = root / "assets" / "scripts"
+scripts.mkdir(parents=True, exist_ok=True)
+(scripts / "switcher.lua").write_text(
+    "local frames = 0\n"
+    "function OnUpdate(entity, dt)\n"
+    "    frames = frames + 1\n"
+    "    if frames == 3 then sage.scene.Load('level2') end\n"
+    "end\n")
+
+key = "objects" if "objects" in main else "entities"
+main[key].append({
+    "name": "Switcher", "id": 9999,
+    "transform": {"position": {"x": 0, "y": 0, "z": 0},
+                  "rotation": {"x": 0, "y": 0, "z": 0},
+                  "scale": {"x": 1, "y": 1, "z": 1}},
+    "script": "assets/scripts/switcher.lua"})
+main["name"] = "main"
+(scenes / "main.sage").write_text(json.dumps(main, indent=2))
+PYEOF
+
 PLAYER_LOG="${SCRATCH_DIR}/player.log"
 PLAYER_SHOT="${SCRATCH_DIR}/player.png"
 STATUS=0
@@ -137,7 +173,15 @@ if ! grep -q "PLAYER: started" "${PLAYER_LOG}"; then
     echo "ОШИБКА: в логе плеера нет маркера 'PLAYER: started'"
     cat "${PLAYER_LOG}"; exit 1
 fi
-echo "OK: собранная игра запустилась и отрисовала кадр (скриншот ${SHOT_SIZE} байт)"
+# Смена сцены из скрипта. Проверяем по маркеру в логе: игра стартовала в main и
+# перешла в level2 по просьбе скрипта. Без этого «игра длиннее одного уровня»
+# держалась бы только на модульных тестах механики запроса.
+if ! grep -q "сцена: level2.sage" "${PLAYER_LOG}"; then
+    echo "ОШИБКА: смена сцены из скрипта не сработала (нет перехода в level2)"
+    cat "${PLAYER_LOG}"; exit 1
+fi
+echo "OK: собранная игра запустилась, отрисовала кадр и сменила сцену из скрипта"
+echo "    (скриншот ${SHOT_SIZE} байт, main.sage -> level2.sage)"
 
 # ...и ещё раз — ИЗ ЧУЖОЙ ПАПКИ, по пути к самому project.sageproj. Так игру и
 # запускают на самом деле: ярлыком, из другого каталога, перетаскиванием файла

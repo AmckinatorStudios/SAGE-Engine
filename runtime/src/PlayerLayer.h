@@ -66,6 +66,20 @@ private:
     std::string m_launchArgs; // "autopilot=1 seed=42" -> LaunchArg в Lua
 
     std::unique_ptr<Scene> m_scene;
+
+    // Собирает рантайм под ЗАГРУЖЕННУЮ сцену: скрипты, ввод, звук, физика,
+    // состав кадра. Вынесено из OnAttach ради смены сцены: уровень должен
+    // подниматься ровно тем же кодом, что и первый, — иначе второй уровень
+    // однажды окажется собран чуть иначе, и разница вылезет только у игрока.
+    void BuildSceneRuntime();
+    // Меняет сцену по ИМЕНИ (без пути и расширения) — то, что просит скрипт
+    // через sage.scene.Load. Пустое имя означает перезагрузку текущей.
+    bool SwitchScene(const std::string& sceneName);
+    // Выполняет то, что игра запросила за кадр (смена сцены, перезапуск,
+    // выход). Зовётся МЕЖДУ кадрами, когда ни один скрипт не исполняется.
+    void ApplyGameFlowRequests();
+
+    std::filesystem::path m_scenePath;   // что сейчас загружено
     std::unique_ptr<ScriptEngine> m_scripts;
     std::unique_ptr<PhysicsScene> m_physics; // симуляция физики (игра всегда «в Play»)
 

@@ -71,6 +71,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterTimerApi();
     RegisterMessagingApi();
     RegisterLaunchArgsApi();
+    RegisterGameFlowApi();
     RegisterMathHelpers();
     RegisterLightingApi();
     RegisterPhysicsApi();
