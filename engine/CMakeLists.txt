@@ -172,6 +172,7 @@ if (TARGET volk)
         src/rhi/vulkan/VulkanImage.cpp
         src/rhi/vulkan/VulkanMemory.cpp
         src/rhi/vulkan/VulkanResources.cpp
+        src/rhi/vulkan/VulkanPipeline.cpp
         src/rhi/vulkan/VulkanShader.cpp
     )
     target_compile_definitions(sage_engine PRIVATE SAGE_HAS_VULKAN)

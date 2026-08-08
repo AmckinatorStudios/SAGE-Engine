@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "VulkanCommon.h"
+#include "VulkanMemory.h"
 #include "sage/rhi/GraphicsDevice.h"
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,7 @@ namespace sage::rhi {
 // метод принимает один тип, а фабрика возвращает другой с тем же именем.
 class VulkanRenderTarget;
 class VulkanShaderProgram;
+class VulkanGeometry;
 
 class VulkanDevice final : public GraphicsDevice {
 public:
@@ -104,6 +106,9 @@ public:
     VkQueue GraphicsQueue() const { return m_queue; }
     uint32_t QueueFamily() const { return m_queueFamily; }
     bool Ready() const { return m_device != VK_NULL_HANDLE; }
+    // Умеет ли устройство диапазон глубины OpenGL. Без него бэкенд не
+    // поднимается вовсе (см. CreateLogicalDevice) — геттер нужен конвейерам.
+    bool DepthClipControl() const { return m_depthClipControl; }
 
     // Тип памяти под требования + желаемые свойства. UINT32_MAX — не нашлось.
     uint32_t FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const;
@@ -177,6 +182,8 @@ public:
     void UpdateTexture(TextureHandle handle, VkImageView view, VkSampler sampler);
     void UnregisterTexture(TextureHandle handle);
     const TextureBinding* LookupTexture(TextureHandle handle) const;
+    // Что сейчас привязано к текстурному юниту (nullptr — ничего).
+    const TextureBinding* BoundTexture(int unit) const;
 
     // Текущая цель отрисовки. Пока это только запоминание: открытие прохода и
     // запись команд появятся вместе с конвейерами. Отдельный метод, а не
@@ -187,6 +194,16 @@ public:
     // Текущая шейдерная программа. Как и цель отрисовки, пока запоминается:
     // конвейер по ней ищется в момент вызова отрисовки.
     void BindShader(const VulkanShaderProgram* shader);
+
+    // Единая точка отрисовки: сюда сходятся все шесть вариантов Draw* из
+    // Geometry. Здесь ищется конвейер под текущее состояние, собирается набор
+    // дескрипторов и пишутся команды.
+    //
+    // topology передаётся отдельно, потому что линии (DebugDraw, сетка) — это
+    // не флаг состояния в RHI, а отдельный вызов отрисовки; в Vulkan же
+    // топология запечена в конвейер, то есть входит в ключ кэша.
+    void Draw(const VulkanGeometry& geometry, VkPrimitiveTopology topology, uint32_t vertexCount,
+              uint32_t indexCount, uint32_t firstIndex, uint32_t instanceCount);
 
 private:
     // Всё состояние конвейера, которое движок задаёт сеттерами. Ключ кэша
@@ -240,6 +257,49 @@ private:
     bool m_recording = false;
     bool m_inPass = false;
 
+    // --- Кэш конвейеров ----------------------------------------------------
+    struct PipelineKey {
+        VkShaderModule Vertex = VK_NULL_HANDLE;
+        VkShaderModule Fragment = VK_NULL_HANDLE;
+        VkPipelineLayout Layout = VK_NULL_HANDLE;
+        VkRenderPass Pass = VK_NULL_HANDLE;
+        size_t LayoutHash = 0;
+        VkPrimitiveTopology Topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT;
+        uint32_t StateBits = 0;   // упакованное State (см. PackState)
+        bool operator==(const PipelineKey& o) const {
+            return Vertex == o.Vertex && Fragment == o.Fragment && Layout == o.Layout &&
+                   Pass == o.Pass && LayoutHash == o.LayoutHash && Topology == o.Topology &&
+                   Samples == o.Samples && StateBits == o.StateBits;
+        }
+    };
+    struct PipelineKeyHash {
+        size_t operator()(const PipelineKey& k) const {
+            size_t h = std::hash<void*>{}((void*)k.Vertex);
+            auto mix = [&h](size_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
+            mix(std::hash<void*>{}((void*)k.Fragment));
+            mix(std::hash<void*>{}((void*)k.Pass));
+            mix(k.LayoutHash);
+            mix((size_t)k.Topology);
+            mix((size_t)k.Samples);
+            mix(k.StateBits);
+            return h;
+        }
+    };
+    uint32_t PackState() const;
+    VkPipeline PipelineFor(const PipelineKey& key, const VulkanGeometry& geometry);
+    // Набор дескрипторов под текущий шейдер: буфер униформ + связанные текстуры.
+    VkDescriptorSet DescriptorSetFor(const VulkanShaderProgram& shader);
+
+    std::unordered_map<PipelineKey, VkPipeline, PipelineKeyHash> m_pipelines;
+    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+    // Кольцевой буфер униформ кадра: каждый вызов отрисовки получает свой
+    // кусок. Один буфер на всех означал бы, что значения следующего вызова
+    // затирают значения предыдущего ДО того, как GPU его исполнил.
+    VulkanBuffer m_uniformRing;
+    VkDeviceSize m_uniformOffset = 0;
+    VkDeviceSize m_uniformAlignment = 256;
+
     // Что привязано к текстурным юнитам. В OpenGL это состояние держал драйвер;
     // в Vulkan привязка живёт в наборе дескрипторов, который собирается в
     // момент отрисовки — значит до тех пор её надо где-то помнить.
@@ -255,6 +315,7 @@ private:
     bool m_scissorOn = false;
     int m_scissor[4] = {0, 0, 0, 0};
     float m_maxAnisotropy = 1.0f;
+    bool m_depthClipControl = false;
     std::string m_apiVersion = "Vulkan (не инициализирован)";
 };
 

@@ -18,6 +18,8 @@
 #include <glm/glm.hpp>
 
 #include "sage/render/PbrShader.h"
+#include <vector>
+
 #include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
 
@@ -204,4 +206,86 @@ void main() {
     std::unique_ptr<sage::rhi::ShaderProgram> broken =
         dev->CreateShaderProgram(vert, "#version 330 core\nвот это не шейдер\n");
     CHECK_TRUE(broken == nullptr);
+}
+
+// --- Отрисовка через Vulkan: от вершин до пикселей ---------------------------
+//
+// Набор соответствия проверяет очистку и систему координат, но не рисование.
+// Здесь — полный путь: формат вершин → конвейер → набор дескрипторов → команда
+// отрисовки → чтение пикселей. Если сломано хоть одно звено, картинка выйдет
+// не той, а сборка и валидация об этом молчат.
+//
+// Треугольник закрывает ЛЕВУЮ половину: так проверяется не только «что-то
+// нарисовалось», но и ориентация — перевёрнутый по вертикали viewport дал бы
+// ту же заливку, а перепутанные оси X/Y — нет.
+TEST(Rhi_vulkan_draws_a_triangle_where_asked) {
+    if (!GraphicsDevice::Available(Backend::Vulkan)) return;
+
+    std::unique_ptr<GraphicsDevice> dev = GraphicsDevice::Create(Backend::Vulkan);
+    dev->Init(nullptr);
+
+    const std::string vert = R"(#version 330 core
+layout(location = 0) in vec2 aPos;
+uniform vec2 uOffset;
+void main() { gl_Position = vec4(aPos + uOffset, 0.0, 1.0); }
+)";
+    const std::string frag = R"(#version 330 core
+out vec4 FragColor;
+uniform vec3 uColor;
+void main() { FragColor = vec4(uColor, 1.0); }
+)";
+
+    std::unique_ptr<sage::rhi::ShaderProgram> shader = dev->CreateShaderProgram(vert, frag);
+    CHECK_TRUE(shader != nullptr);
+    if (!shader) return;
+
+    sage::rhi::VertexLayout layout;
+    layout.Stride = sizeof(float) * 2;
+    layout.Attributes.push_back({0, 2, sage::rhi::AttribType::Float, 0});
+    std::unique_ptr<sage::rhi::Geometry> geometry = dev->CreateGeometry(layout);
+    CHECK_TRUE(geometry != nullptr);
+    if (!geometry) return;
+
+    // Треугольник, накрывающий левую половину экрана целиком.
+    const float verts[] = {-1.0f, -3.0f, -1.0f, 3.0f, 0.0f, 0.0f};
+    geometry->SetVertexData(verts, sizeof(verts), /*dynamic=*/false);
+
+    constexpr int kW = 16, kH = 16;
+    sage::rhi::RenderTargetDesc desc;
+    desc.Width = kW;
+    desc.Height = kH;
+    desc.Kind = sage::rhi::RenderTargetKind::ColorHDR;
+    std::unique_ptr<sage::rhi::RenderTarget> rt = dev->CreateRenderTarget(desc);
+    CHECK_TRUE(rt != nullptr);
+    if (!rt) return;
+
+    rt->Bind();
+    dev->SetScissor(false);
+    dev->SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    dev->Clear(true, false);
+
+    dev->SetDepthTest(false);
+    dev->SetCullMode(sage::rhi::CullMode::Off);
+    dev->SetBlend(false);
+    shader->Use();
+    shader->SetVec3("uColor", glm::vec3(0.0f, 1.0f, 0.0f));
+    shader->SetVec2("uOffset", glm::vec2(0.0f, 0.0f));
+    geometry->DrawArrays(3);
+
+    std::vector<unsigned char> pixels((size_t)kW * kH * 3, 0);
+    dev->ReadPixelsRGB(0, 0, kW, kH, pixels.data());
+
+    auto green = [&](int col, int row) {
+        const size_t i = ((size_t)row * kW + (size_t)col) * 3;
+        return pixels[i] < 96 && pixels[i + 1] > 128 && pixels[i + 2] < 96;
+    };
+
+    // Левая половина закрашена, правая — нет, и так на обеих границах по высоте:
+    // проверка одной строки прошла бы и при перевёрнутой картинке.
+    CHECK_TRUE(green(1, 1));
+    CHECK_TRUE(green(1, kH - 2));
+    CHECK_FALSE(green(kW - 2, 1));
+    CHECK_FALSE(green(kW - 2, kH - 2));
+
+    dev->BindDefaultFramebuffer();
 }

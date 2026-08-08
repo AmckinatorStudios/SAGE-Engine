@@ -1,6 +1,7 @@
 #include "VulkanDevice.h"
 #include "VulkanMemory.h"
 #include "VulkanResources.h"
+#include "VulkanPipeline.h"
 #include "VulkanShader.h"
 
 #include <algorithm>
@@ -107,6 +108,12 @@ VulkanDevice::~VulkanDevice() {
         vkDeviceWaitIdle(m_device);
         // Распределитель — ПОСЛЕ всех ресурсов и ДО устройства: он держит
         // выделения, а они принадлежат устройству.
+        for (auto& [key, pipeline] : m_pipelines) vkDestroyPipeline(m_device, pipeline, nullptr);
+        m_pipelines.clear();
+        if (m_descriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+        }
+        m_uniformRing.Destroy();
         if (m_fence != VK_NULL_HANDLE) vkDestroyFence(m_device, m_fence, nullptr);
         for (auto& [key, sampler] : m_samplers) vkDestroySampler(m_device, sampler, nullptr);
         m_samplers.clear();
@@ -280,19 +287,58 @@ bool VulkanDevice::CreateLogicalDevice() {
     if (!have.samplerAnisotropy) m_maxAnisotropy = 1.0f;
 
     std::vector<const char*> extensions;
-    // Список расширений устройства: swapchain нужен только окну, и его наличие
-    // проверяется отдельно — headless-прогону он ни к чему.
     uint32_t extCount = 0;
     vkEnumerateDeviceExtensionProperties(m_gpu, nullptr, &extCount, nullptr);
     std::vector<VkExtensionProperties> available(extCount);
     vkEnumerateDeviceExtensionProperties(m_gpu, nullptr, &extCount, available.data());
-    for (const VkExtensionProperties& e : available) {
-        if (std::strcmp(e.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) {
-            extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    auto has = [&](const char* name) {
+        for (const VkExtensionProperties& e : available) {
+            if (std::strcmp(e.extensionName, name) == 0) return true;
         }
+        return false;
+    };
+    // swapchain нужен только окну — headless-прогону он ни к чему.
+    if (has(VK_KHR_SWAPCHAIN_EXTENSION_NAME)) extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+
+    // --- Диапазон глубины: [-1, 1] против [0, 1] ---------------------------
+    //
+    // RHI договорился о диапазоне OpenGL: NDC-глубина от -1 до 1 (см.
+    // GraphicsDevice.h). У Vulkan он [0, 1], и матрицы проекции движка,
+    // построенные glm по правилам GL, дают там неверную глубину — БЛИЗКИЕ
+    // объекты рисуются правильно, а дальние уезжают. Дефект, который на первый
+    // взгляд выглядит как «что-то с камерой».
+    //
+    // VK_EXT_depth_clip_control разрешает попросить у Vulkan диапазон GL. Это
+    // единственный способ не трогать ни одну матрицу в движке.
+    //
+    // ЕСЛИ РАСШИРЕНИЯ НЕТ — устройство честно считается непригодным, и
+    // Application откатывается на OpenGL. Альтернатива (переписывать
+    // gl_Position.z в каждом вершинном шейдере) работала бы везде, но это
+    // текстовая правка чужого кода, которую здесь нечем проверить: на этой
+    // машине расширение есть, значит ветка без него осталась бы непроверенной.
+    // Правильный OpenGL лучше непроверенного Vulkan.
+    VkPhysicalDeviceDepthClipControlFeaturesEXT depthClip{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT};
+    if (has(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME)) {
+        VkPhysicalDeviceDepthClipControlFeaturesEXT probe{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT};
+        VkPhysicalDeviceFeatures2 all{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        all.pNext = &probe;
+        vkGetPhysicalDeviceFeatures2(m_gpu, &all);
+        if (probe.depthClipControl) {
+            extensions.push_back(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME);
+            depthClip.depthClipControl = VK_TRUE;
+            m_depthClipControl = true;
+        }
+    }
+    if (!m_depthClipControl) {
+        LOG_WARN("Vulkan") << "нет VK_EXT_depth_clip_control — диапазон глубины OpenGL "
+                              "([-1,1]) запросить нечем, бэкенд непригоден";
+        return false;
     }
 
     VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    info.pNext = &depthClip;
     info.queueCreateInfoCount = 1;
     info.pQueueCreateInfos = &queue;
     info.pEnabledFeatures = &want;
@@ -321,6 +367,32 @@ void VulkanDevice::Init(ProcLoader /*loader*/) {
     if (!PickGpu()) return;
     if (!CreateLogicalDevice()) return;
     m_allocator = CreateAllocator(m_instance, m_gpu, m_device);
+    if (m_allocator) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(m_gpu, &props);
+        m_uniformAlignment = std::max<VkDeviceSize>(props.limits.minUniformBufferOffsetAlignment, 4);
+
+        // Кольцо униформ на кадр. 8 МиБ — с большим запасом: тяжёлый кадр
+        // движка делает порядка тысячи вызовов отрисовки, блок униформ у
+        // самого крупного шейдера меньше килобайта.
+        m_uniformRing.Create(*this, 8u << 20, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                             MemoryUse::CpuToGpu);
+
+        // Пул дескрипторов. Сбрасывается целиком при отправке кадра — по набору
+        // на вызов отрисовки, освобождать поштучно незачем.
+        const uint32_t kSets = 4096;
+        VkDescriptorPoolSize sizes[2]{};
+        sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        sizes[0].descriptorCount = kSets;
+        sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sizes[1].descriptorCount = kSets * 8;
+        VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        pool.maxSets = kSets;
+        pool.poolSizeCount = 2;
+        pool.pPoolSizes = sizes;
+        vk::Check(vkCreateDescriptorPool(m_device, &pool, nullptr, &m_descriptorPool),
+                  "vkCreateDescriptorPool");
+    }
     if (!m_allocator) {
         // Без распределителя ресурсы не создать — устройство честно считается
         // непригодным, а не «почти работающим».
@@ -416,6 +488,11 @@ void VulkanDevice::UnregisterTexture(TextureHandle handle) {
 const VulkanDevice::TextureBinding* VulkanDevice::LookupTexture(TextureHandle handle) const {
     auto it = m_textures.find(handle.Value);
     return it == m_textures.end() ? nullptr : &it->second;
+}
+
+const VulkanDevice::TextureBinding* VulkanDevice::BoundTexture(int unit) const {
+    if (unit < 0 || unit >= kMaxTextureUnits) return nullptr;
+    return LookupTexture(m_boundTextures[unit]);
 }
 
 void VulkanDevice::BindTexture2D(int unit, TextureHandle texture) {
@@ -531,6 +608,12 @@ void VulkanDevice::FlushCommands() {
     // забирают чтением пикселей, ждать всё равно придётся, а барьер в одном
     // месте лучше, чем гонка в нескольких.
     vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX);
+
+    // Кадр исполнен — наборы дескрипторов и кольцо униформ свободны. Сброс
+    // ЗДЕСЬ, после ожидания: сбросить их раньше значило бы отобрать у GPU то,
+    // что он ещё читает.
+    if (m_descriptorPool != VK_NULL_HANDLE) vkResetDescriptorPool(m_device, m_descriptorPool, 0);
+    m_uniformOffset = 0;
 }
 
 void VulkanDevice::Clear(bool color, bool depth) {
@@ -716,9 +799,9 @@ std::unique_ptr<ShaderProgram> VulkanDevice::CreateShaderProgram(const std::stri
     if (!program->Valid()) return nullptr;
     return program;
 }
-std::unique_ptr<Geometry> VulkanDevice::CreateGeometry(const VertexLayout&) {
-    OnceNotImplemented("CreateGeometry");
-    return nullptr;
+std::unique_ptr<Geometry> VulkanDevice::CreateGeometry(const VertexLayout& layout) {
+    if (!Ready()) return nullptr;
+    return std::make_unique<VulkanGeometry>(*this, layout);
 }
 std::unique_ptr<Texture2D> VulkanDevice::CreateTexture2D(const Texture2DDesc& desc,
                                                          const void* pixels) {
