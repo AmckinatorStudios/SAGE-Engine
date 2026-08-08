@@ -65,37 +65,58 @@ void ScriptEngine::RegisterGameObject() {
     // --- Иерархия прямо на объекте: e:SetParent(p) / e:Parent() / e:Children() /
     // e:WorldPosition() / e:Destroy(). Всё маршрутизируется через Scene (циклы
     // предотвращаются, мировая матрица считается по цепочке родителей). ---
-    goType["SetParent"] = [this](GameObject& child, GameObject& parent) {
+    // РАБОТА С УНИЧТОЖЕННОЙ СУЩНОСТЬЮ — ОШИБКА, А НЕ ТИХИЙ ОТВЕТ.
+    //
+    // Самая частая ошибка живого игрового кода: скрипт запомнил врага, враг
+    // умер, скрипт на следующем кадре трогает его. Поля сущности (e.Transform,
+    // e.Name) об этом сообщали всегда — движок бросает исключение, sol2
+    // превращает его в ошибку Lua с именем файла и строкой. А методы иерархии
+    // молчали: WorldPosition() мёртвой сущности возвращал (0,0,0), SetParent
+    // ничего не делал. Ноль здесь хуже ошибки: он выглядит как настоящая
+    // координата, и объект уезжает в начало мира — «предметы иногда
+    // телепортируются в центр карты», ищи потом причину.
+    //
+    // Единственное исключение — Destroy(): удалить уже удалённое не ошибка, а
+    // обычная ситуация двух скриптов, целящихся в одного врага.
+    auto requireAlive = [](const GameObject& o, const char* who) {
+        if (!o.Valid()) throw std::runtime_error(std::string(who) + ": сущность уже уничтожена");
+    };
+    goType["SetParent"] = [this, requireAlive](GameObject& child, GameObject& parent) {
         if (!m_scene) throw std::runtime_error("SetParent: сцена не привязана (BindScene не вызван)");
-        if (child.Valid())
-            m_scene->SetParent(child.Entity(), parent.Valid() ? parent.Entity() : entt::null);
+        requireAlive(child, "SetParent");
+        m_scene->SetParent(child.Entity(), parent.Valid() ? parent.Entity() : entt::null);
     };
-    goType["Unparent"] = [this](GameObject& child) {
-        if (m_scene && child.Valid()) m_scene->SetParent(child.Entity(), entt::null);
+    goType["Unparent"] = [this, requireAlive](GameObject& child) {
+        if (!m_scene) throw std::runtime_error("Unparent: сцена не привязана (BindScene не вызван)");
+        requireAlive(child, "Unparent");
+        m_scene->SetParent(child.Entity(), entt::null);
     };
-    goType["Parent"] = [this](GameObject& o) -> sol::optional<GameObject> {
-        if (!m_scene || !o.Valid()) return sol::nullopt;
+    goType["Parent"] = [this, requireAlive](GameObject& o) -> sol::optional<GameObject> {
+        if (!m_scene) throw std::runtime_error("Parent: сцена не привязана (BindScene не вызван)");
+        requireAlive(o, "Parent");
         entt::entity p = m_scene->ParentOf(o.Entity());
-        if (p == entt::null) return sol::nullopt;
+        if (p == entt::null) return sol::nullopt; // нет родителя — законный ответ
         return GameObject(&m_scene->Registry(), p);
     };
-    goType["Children"] = [this](GameObject& o) -> sol::table {
+    goType["Children"] = [this, requireAlive](GameObject& o) -> sol::table {
+        if (!m_scene) throw std::runtime_error("Children: сцена не привязана (BindScene не вызван)");
+        requireAlive(o, "Children");
         sol::table list = m_lua.create_table();
-        if (m_scene && o.Valid()) {
-            if (auto* h = m_scene->Registry().try_get<HierarchyComponent>(o.Entity())) {
-                int i = 1;
-                for (auto c : h->Children)
-                    if (m_scene->Registry().valid(c)) list[i++] = GameObject(&m_scene->Registry(), c);
-            }
+        if (auto* h = m_scene->Registry().try_get<HierarchyComponent>(o.Entity())) {
+            int i = 1;
+            for (auto c : h->Children)
+                if (m_scene->Registry().valid(c)) list[i++] = GameObject(&m_scene->Registry(), c);
         }
-        return list;
+        return list; // пустой список — законный ответ: детей нет
     };
-    goType["WorldPosition"] = [this](GameObject& o) -> glm::vec3 {
-        if (!m_scene || !o.Valid()) return glm::vec3(0.0f);
+    goType["WorldPosition"] = [this, requireAlive](GameObject& o) -> glm::vec3 {
+        if (!m_scene) throw std::runtime_error("WorldPosition: сцена не привязана (BindScene не вызван)");
+        requireAlive(o, "WorldPosition");
         return glm::vec3(m_scene->WorldMatrix(o.Entity())[3]);
     };
     goType["Destroy"] = [this](GameObject& o) {
-        if (m_scene && o.Valid()) m_scene->RemoveObject(o.Id());
+        if (!m_scene) throw std::runtime_error("Destroy: сцена не привязана (BindScene не вызван)");
+        if (o.Valid()) m_scene->RemoveObject(o.Id()); // повторное удаление — не ошибка
     };
 }
 

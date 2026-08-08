@@ -667,3 +667,30 @@ TEST(ScriptLife_api_without_its_binding_errors_cleanly) {
     CHECK_TRUE(input.valid());
     CHECK_FALSE(input.get<bool>());
 }
+
+// --- Обращение к УНИЧТОЖЕННОЙ сущности из скрипта ----------------------------
+//
+// Самая частая ошибка живого игрового кода: скрипт запомнил врага, враг умер,
+// скрипт на следующем кадре трогает его Transform. Ответ обязан быть ошибкой
+// Lua — с именем файла и строкой, — а не фатальным завершением процесса: у
+// игрока это выглядит как вылет игры, у автора сцены в редакторе — как потеря
+// несохранённой работы.
+TEST(ScriptLife_touching_a_destroyed_entity_is_an_error_not_a_crash) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    scene.CreateObject("Victim");
+
+    const char* uses[] = {
+        "local e = FindObject('Victim') DestroyObject(e) return e.Transform.Position.x",
+        "local e = SpawnObject('T') DestroyObject(e) e.Transform.Position.x = 1",
+        "local e = SpawnObject('T') DestroyObject(e) return e.Name",
+        "local e = SpawnObject('T') DestroyObject(e) e:SetParent(SpawnObject('P'))",
+        "local e = SpawnObject('T') DestroyObject(e) return e:WorldPosition()",
+    };
+    for (const char* code : uses) {
+        auto result = se.Lua().safe_script(code, sol::script_pass_on_error);
+        if (result.valid()) std::printf("       МЁРТВАЯ СУЩНОСТЬ БЕЗ ОШИБКИ: %s\n", code);
+        CHECK_FALSE(result.valid());
+    }
+}
