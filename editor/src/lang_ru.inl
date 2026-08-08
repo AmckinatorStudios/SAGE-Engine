@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 720.
+// Язык: Русский. Строк: 721.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -358,8 +358,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Создайте проект справа — он появится здесь и будет открываться одним щелчком."},
     {"Create a sun",
      "Создать солнце"},
+    {"Create material",
+     "Создать материал"},
     {"Creates <Location>/<Name>/project.sageproj + scenes/ + assets/",
      "Создаст <Папка>/<Имя>/project.sageproj + scenes/ + assets/"},
+    {"Creates a .sagemat next to the project assets and moves the current colour of this object into it.",
+     "Создаёт .sagemat в ассетах проекта и переносит в него текущий цвет этого объекта."},
     {"Ctrl+D duplicates a line, Alt+Up/Down moves it.",
      "Ctrl+D — дублировать строку, Alt+Up/Down — переставить строку."},
     {"Ctrl+S saves, Ctrl+F finds, Ctrl+/ comments,",
@@ -670,8 +674,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Локальное"},
     {"Location",
      "Папка"},
-    {"Look of the object",
-     "Вид объекта"},
     {"Loop",
      "Зациклить"},
     {"Low",
@@ -694,6 +696,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Материал назначен: "},
     {"Material cannot be read",
      "Материал не читается"},
+    {"Material created: ",
+     "Материал создан: "},
     {"Materials (*.sagemat)",
      "Материалы (*.sagemat)"},
     {"Materials (.sagemat) and models (.obj/.gltf/.glb)",
@@ -1038,8 +1042,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Пересканировать проект"},
     {"Reset Layout",
      "Сбросить раскладку"},
-    {"Reset overrides",
-     "Сбросить поправки"},
     {"Reset to Defaults",
      "Вернуть значения по умолчанию"},
     {"Reset view",
@@ -1272,12 +1274,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка недоступна: "},
     {"The look comes from the material. Turn the switch on only to make THIS object differ from others sharing the same material.",
      "Вид берётся из материала. Включайте переключатель, только чтобы ЭТОТ объект отличался от других с тем же материалом."},
+    {"The look of an object is defined by its material.",
+     "Вид объекта задаёт материал."},
     {"The model failed to load: ",
      "Модель не загрузилась: "},
     {"The model material was not saved — details in Console",
      "Материал модели не сохранён — подробности в Console"},
-    {"The object is drawn by the overrides below as they are.",
-     "Объект рисуется поправками ниже как есть."},
     {"The prefab could not be placed: ",
      "Префаб не поставился: "},
     {"The previous session seems to have crashed",
@@ -1286,8 +1288,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Свойства этой сущности — только её."},
     {"There is no editor for this file type.",
      "Для этого типа файла редактора нет."},
-    {"There is no material — these fields define the whole look. Assign a material to get metal, roughness and texture maps.",
-     "Материала нет — эти поля задают вид объекта целиком. Назначьте материал, чтобы появились металличность, шероховатость и карты текстур."},
     {"There is no surface under the selection",
      "Под выделенным нет поверхности"},
     {"This cannot be undone.",
@@ -1366,6 +1366,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Куда создать проект"},
     {"Where to put the project",
      "Куда положить проект"},
+    {"Where to save the material",
+     "Куда сохранить материал"},
     {"Width",
      "Ширина"},
     {"Will create:",

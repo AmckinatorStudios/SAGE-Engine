@@ -523,6 +523,78 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
     }
 }
 
+// Создать материал для объекта, у которого его ещё нет.
+//
+// КУДА ПИШЕМ. В ассеты проекта, если проект открыт, — там ему и место, и
+// собранная игра его найдёт. Без проекта пишем рядом со сценой; если и сцена
+// не сохранена, спрашиваем путь диалогом. Молча отказать («сначала откройте
+// проект») здесь нельзя: демо-сцена редактора живёт без проекта, и именно в
+// ней человек первым делом пробует покрасить куб.
+void InspectorPanel::CreateMaterialForObject(EditorHost& host, MeshRendererComponent& mr) {
+    namespace fs = std::filesystem;
+
+    // Имя — по объекту: «Red Cube» -> Red Cube.sagemat. Так в панели ассетов
+    // видно, чей это материал, без открытия файла.
+    std::string name = "Material";
+    if (GameObject sel = host.SelectedObject(); sel.Valid()) name = sel.Name();
+    for (char& c : name) {
+        if (std::string("/\\:*?\"<>|").find(c) != std::string::npos) c = '_';
+    }
+
+    fs::path dir;
+    std::error_code ec;
+    if (host.CurrentProject().Loaded()) dir = host.CurrentProject().AssetsDir();
+
+    if (dir.empty()) {
+        // Проекта нет — спрашиваем, куда положить. Молча отказать («сначала
+        // откройте проект») нельзя: демо-сцена редактора живёт без проекта, и
+        // именно в ней человек первым делом пробует покрасить куб.
+        FileBrowser::Config c;
+        c.Mode = FileBrowser::PickMode::SaveFile;
+        c.Title = T("Where to save the material");
+        c.Filters = {".sagemat"};
+        c.FilterLabel = T("Materials (*.sagemat)");
+        c.DefaultName = name + ".sagemat";
+        m_browser.Open(c);
+        m_browseTarget = &mr.MaterialPath;
+        m_browseIsShader = false;
+        m_browseIsMesh = false;
+        m_browseIsMaterial = true;
+        m_browseCreateMaterial = true; // после выбора пути файл ещё надо записать
+        return;
+    }
+
+    fs::create_directories(dir, ec);
+    fs::path path = dir / (name + ".sagemat");
+    for (int i = 2; fs::exists(path, ec) && i < 1000; ++i) {
+        path = dir / (name + " " + std::to_string(i) + ".sagemat");
+    }
+    WriteMaterialFromOverrides(host, mr, path.string());
+}
+
+// Записывает материал по указанному пути, забирая себе поправки объекта.
+void InspectorPanel::WriteMaterialFromOverrides(EditorHost& host, MeshRendererComponent& mr,
+                                                const std::string& path) {
+    Material material;
+    material.Albedo = mr.Color;
+    material.Emissive = mr.Emissive;
+    material.EmissiveStrength = mr.EmissiveStrength;
+    material.Opacity = mr.Opacity;
+    material.SaveToFile(path);
+
+    host.PushUndoSnapshot();
+    mr.MaterialPath = host.CurrentProject().AssetRef(path);
+    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+    // Поправки — в нейтраль: их вид теперь несёт материал, и оставить их
+    // значило бы покрасить объект дважды.
+    mr.Color = glm::vec3(1.0f);
+    mr.Emissive = glm::vec3(0.0f);
+    mr.EmissiveStrength = 1.0f;
+    mr.Opacity = 1.0f;
+    host.SetStatusMessage(std::string(T("Material created: ")) +
+                          std::filesystem::path(path).filename().string());
+}
+
 // --- Mesh Renderer, часть 2: ЧЕМ красим --------------------------------------
 void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr) {
     ImGui::SeparatorText(T("Material"));
@@ -548,7 +620,13 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
     ImGui::BeginGroup();
     if (mr.MaterialPath.empty()) {
         HintWrapped(T("Not assigned"));
-        HintWrapped(T("The object is drawn by the overrides below as they are."));
+        // Раньше здесь стояло «объект рисуется поправками ниже», и ниже
+        // показывались цвет, свечение и прозрачность — то есть вид объекта
+        // задавался в ДВУХ местах. Одного из них быть не должно: вид объекта
+        // задаёт материал, и точка. Кнопка ниже делает его в один щелчок,
+        // перенося в него текущий цвет, — чтобы объект не побелел от того, что
+        // мы навели порядок.
+        HintWrapped(T("The look of an object is defined by its material."));
     } else {
         ImGui::TextUnformatted(std::filesystem::path(mr.MaterialPath).filename().string().c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mr.MaterialPath.c_str());
@@ -589,6 +667,24 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
         mr.MaterialPtr = nullptr;
     }
     ImGui::EndDisabled();
+
+    // СОЗДАТЬ материал — отдельной строкой, а не четвёртой кнопкой в ряду.
+    // Во-первых, четыре кнопки не влезают в панель инспектора и последняя
+    // обрезается («Создать м…»). Во-вторых, это другое действие: кнопки выше
+    // НАЗНАЧАЮТ существующий материал, эта ДЕЛАЕТ новый.
+    //
+    // Без неё требование «вид задаёт материал» означало бы: иди в панель
+    // ассетов, создай файл, вернись, назначь — четыре шага там, где раньше был
+    // один щелчок по цвету. Новый материал забирает СЕБЕ текущие поправки
+    // объекта (цвет, свечение, прозрачность), а сами поправки возвращаются в
+    // нейтраль: иначе объект либо побелел бы, либо покрасился дважды.
+    if (mr.MaterialPath.empty()) {
+        if (EditorIcons::Button("material", T("Create material"))) CreateMaterialForObject(host, mr);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Creates a .sagemat next to the project assets and moves "
+                                      "the current colour of this object into it."));
+        }
+    }
     ImGui::EndGroup();
 
     // Приём перетаскивания на всю группу выше — материал из Assets мышью.
@@ -667,19 +763,11 @@ void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererCompone
         mr.Opacity = 1.0f;
     };
 
-    // --- Материала нет: эти поля И ЕСТЬ вид объекта ------------------------
-    if (!mr.MaterialPtr) {
-        ImGui::SeparatorText(T("Look of the object"));
-        HintWrapped("%s", T("There is no material — these fields define the whole look. "
-                            "Assign a material to get metal, roughness and texture maps."));
-        pushWidth();
-        fields();
-        ImGui::PopItemWidth();
-        ImGui::BeginDisabled(neutral);
-        if (ImGui::SmallButton(T("Reset overrides"))) reset();
-        ImGui::EndDisabled();
-        return;
-    }
+    // Материала нет — переопределять НЕЧЕГО, и показывать здесь цвет со
+    // свечением нельзя: ровно это и делало вид объекта задаваемым в двух
+    // местах. Что делать вместо, сказано в слоте материала выше — там же
+    // кнопка «Создать материал».
+    if (!mr.MaterialPtr) return;
 
     // --- Материал есть: поправки — по требованию ---------------------------
     ImGui::SeparatorText(T("Instance overrides"));
@@ -1613,7 +1701,14 @@ void InspectorPanel::Draw(EditorHost& host) {
                 m_browseIsMesh = false;
                 m_pendingMeshLoad = true;   // грузим в том же кадре, ниже по панели
             }
-            if (m_browseIsMaterial) {
+            if (m_browseIsMaterial && m_browseCreateMaterial) {
+                // Путь спросили ради СОЗДАНИЯ: файла ещё нет, его надо записать.
+                m_browseIsMaterial = false;
+                m_browseCreateMaterial = false;
+                if (GameObject sel = host.SelectedObject(); sel.Valid()) {
+                    WriteMaterialFromOverrides(host, sel.Renderer(), m_browser.Result().string());
+                }
+            } else if (m_browseIsMaterial) {
                 m_browseIsMaterial = false;
                 // Материал грузим сразу: без указателя объект остался бы с путём
                 // и без вида — «выбрал материал, ничего не произошло».

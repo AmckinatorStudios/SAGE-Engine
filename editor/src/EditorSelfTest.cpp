@@ -561,6 +561,44 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(missingId);
     }
 
+    // --- Скрипт, падающий КАЖДЫЙ КАДР, не заливает консоль -----------------
+    //
+    // Проверка живёт здесь, а не в модульных тестах движка, потому что смотрят
+    // на это в РЕДАКТОРЕ: ошибка в OnUpdate повторяется шестьдесят раз в
+    // секунду, и без ограничения панель Console за минуту получает три с
+    // половиной тысячи одинаковых строк — в ней перестаёт быть видно всё
+    // остальное. Считаем по самой панели: именно её читает человек.
+    if (ok) {
+        {
+            std::ofstream f(m_project.Dir() / "assets" / "scripts" / "selftest_boom.lua");
+            f << "function OnUpdate(entity, dt) error('selftest boom') end\n";
+        }
+        GameObject boom = m_scene->CreateObject("SelftestBoom");
+        m_scene->Registry().emplace<ScriptComponent>(boom.Entity(),
+                                                     ScriptComponent{"assets/scripts/selftest_boom.lua"});
+        const int boomId = boom.Id();
+
+        const int errorsBefore = m_console.ErrorCount();
+        StartPlay();
+        for (int i = 0; i < 60; ++i) m_systems.Run(*m_scene, 1.0f / 60.0f); // секунда игры
+        StopPlay();
+        const int added = m_console.ErrorCount() - errorsBefore;
+
+        // Ожидаем два сообщения: сама ошибка и «скрипт отключён». Порог с
+        // запасом (пять), но НАМНОГО меньше шестидесяти — иначе проверка не
+        // отличала бы починенное поведение от прежнего.
+        if (added > 5) {
+            LOG_ERROR("Editor") << "SELFTEST: broken script flooded the console with " << added
+                                << " errors in one second of play";
+            ok = false;
+        }
+        if (ok && added == 0) {
+            LOG_ERROR("Editor") << "SELFTEST: broken script produced NO error in the console";
+            ok = false;
+        }
+        m_scene->RemoveObject(boomId);
+    }
+
     // --- Физика: динамическое тело падает под гравитацией, Stop откатывает ---
     if (ok) {
         GameObject green = m_scene->FindByName("Green Cube");
@@ -1582,7 +1620,7 @@ void EditorLayer::RunSelfTest() {
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
-                               << "project-scripts + broken-scripts + replay, "
+                               << "project-scripts + broken-scripts + replay + error-flood, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

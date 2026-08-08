@@ -70,6 +70,7 @@ private:
     bool m_browseIsShader = false;   // после выбора шейдера нужен ShaderPtr.reset()
     bool m_browseIsMesh = false;     // после выбора модели её надо загрузить
     bool m_browseIsMaterial = false; // после выбора материала его надо подгрузить
+    bool m_browseCreateMaterial = false; // путь спрошен ради СОЗДАНИЯ файла
     // Сущность, которой достанется выбранный в диалоге скрипт. Id, а не
     // указатель на поле компонента: диалог отвечает через кадр, а сцену за это
     // время могут перезагрузить (undo, открытие другой сцены).
@@ -84,6 +85,9 @@ private:
     // компонент; см. комментарий на месте вызова.
     void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr);
     void DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr);
+    void CreateMaterialForObject(EditorHost& host, MeshRendererComponent& mr);
+    void WriteMaterialFromOverrides(EditorHost& host, MeshRendererComponent& mr,
+                                    const std::string& path);
     void DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr, int entityId);
     // У какой сущности человек РАСКРЫЛ поправки экземпляра вручную. Состояние
     // интерфейса, а не сцены: сохранять его в файл значило бы записывать туда,
