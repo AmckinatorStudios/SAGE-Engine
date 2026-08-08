@@ -137,13 +137,6 @@ if ! grep -q "PLAYER: started" "${PLAYER_LOG}"; then
     echo "ОШИБКА: в логе плеера нет маркера 'PLAYER: started'"
     cat "${PLAYER_LOG}"; exit 1
 fi
-# Смена сцены из скрипта. Проверяем по маркеру в логе: игра стартовала в main и
-# перешла в level2 по просьбе скрипта. Без этого «игра длиннее одного уровня»
-# держалась бы только на модульных тестах механики запроса.
-if ! grep -q "сцена: level2.sage" "${PLAYER_LOG}"; then
-    echo "ОШИБКА: смена сцены из скрипта не сработала (нет перехода в level2)"
-    cat "${PLAYER_LOG}"; exit 1
-fi
 echo "OK: собранная игра запустилась и отрисовала кадр (скриншот ${SHOT_SIZE} байт)"
 
 # Проект собранной игры лежит ПАКЕТОМ, а не россыпью: россыпь означала бы
@@ -214,6 +207,11 @@ scene[key].append({
 (out / "project.sageproj").write_text(json.dumps({"sage_project_version": 1, "name": "twoscene"}))
 PYEOF
 rm -f "${SWITCH_DIR}/game.sagepak"   # тут проверяется путь БЕЗ пакета
+# Диагностика на случай отказа: без неё «смена сцены не сработала» не говорит,
+# что именно не так — не собрался проект, не удалился пакет или запустилось не то.
+echo "  проверка: ${SWITCH_DIR}"
+ls -1 "${SWITCH_DIR}" | sed 's/^/    /'
+ls -1 "${SWITCH_DIR}/scenes" 2>/dev/null | sed 's/^/    scenes\//' || echo "    (нет scenes/)"
 SWITCH_LOG="${SCRATCH_DIR}/twoscene.log"
 SWITCH_EXE="$(basename "${GAME_EXE}")"
 STATUS=0

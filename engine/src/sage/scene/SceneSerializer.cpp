@@ -1,5 +1,6 @@
 #include "SceneSerializer.h"
 #include "sage/assets/Pack.h"
+#include "sage/render/LodGroup.h"
 #include "sage/gi/GI.h"
 #include "sage/render/ResourceManager.h"
 #include <nlohmann/json.hpp>
@@ -465,6 +466,65 @@ static ReflectionProbeComponent ParseReflectionProbe(const json& pj) {
     return p;
 }
 
+// --- Уровни детализации ------------------------------------------------------
+//
+// Сериализуются НАСТРОЙКИ, а не сами упрощённые меши: геометрия уровней
+// строится из исходного меша (BuildAutoLods) и хранить её в сцене — значит
+// хранить копию модели, которая устареет от первой же её замены.
+//
+// До этого LodComponent не сохранялся ВООБЩЕ: пороги, выставленные для объекта,
+// жили ровно до закрытия сцены. Ни сборка, ни тесты этого не замечали — рендер
+// просто каждый раз строил уровни по умолчанию.
+static void SaveLod(json& j, const sage::render::LodComponent& lod) {
+    j["lod"]["auto"] = lod.Auto;
+    j["lod"]["autoCount"] = lod.AutoCount;
+    j["lod"]["cullBelow"] = lod.Levels.CullBelow;
+    j["lod"]["screenHeights"] = lod.Levels.ScreenHeights;
+}
+
+static sage::render::LodComponent ParseLod(const json& lj) {
+    sage::render::LodComponent lod;
+    lod.Auto = lj.value("auto", lod.Auto);
+    lod.AutoCount = lj.value("autoCount", lod.AutoCount);
+    lod.Levels.CullBelow = lj.value("cullBelow", lod.Levels.CullBelow);
+    if (lj.contains("screenHeights") && lj["screenHeights"].is_array()) {
+        lod.Levels.ScreenHeights = lj["screenHeights"].get<std::vector<float>>();
+    }
+    return lod;
+}
+
+// --- Поправки параметров шейдера на ЭКЗЕМПЛЯР --------------------------------
+//
+// Тоже не сохранялись вовсе. Скрипт выставлял «мигает именно эта кнопка», это
+// работало до сохранения сцены — и исчезало после. Хуже того, дефект выглядел
+// как «параметр не применился», хотя применялся он исправно.
+static void SaveShaderParams(json& j, const ShaderParamsComponent& sp) {
+    json params = json::object();
+    for (const auto& [name, value] : sp.Params) {
+        params[name] = {{"kind", (int)value.Kind},
+                        {"value", {value.Value.x, value.Value.y, value.Value.z, value.Value.w}}};
+    }
+    j["shaderParams"] = params;
+}
+
+static ShaderParamsComponent ParseShaderParams(const json& sj) {
+    ShaderParamsComponent sp;
+    if (!sj.is_object()) return sp;
+    for (auto it = sj.begin(); it != sj.end(); ++it) {
+        const json& v = it.value();
+        if (!v.is_object() || !v.contains("value")) continue;
+        ShaderParam param;
+        param.Kind = (ShaderParam::Type)v.value("kind", 0);
+        const json& arr = v["value"];
+        if (arr.is_array() && arr.size() == 4) {
+            param.Value = glm::vec4(arr[0].get<float>(), arr[1].get<float>(),
+                                    arr[2].get<float>(), arr[3].get<float>());
+        }
+        sp.Params[it.key()] = param;
+    }
+    return sp;
+}
+
 static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
     // Только описательные поля — модель/палитра восстанавливаются загрузкой.
     SaveAssetRef(j["animatedModel"], "path", am.Path);
@@ -858,6 +918,10 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             SaveReflectionProbe(j, *rp);
         if (const CharacterControllerComponent* cc = reg.try_get<CharacterControllerComponent>(e))
             SaveCharacter(j, *cc);
+        if (const sage::render::LodComponent* lod = reg.try_get<sage::render::LodComponent>(e))
+            SaveLod(j, *lod);
+        if (const ShaderParamsComponent* sp = reg.try_get<ShaderParamsComponent>(e))
+            SaveShaderParams(j, *sp);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
         objectsJson.push_back(j);
@@ -1059,6 +1123,11 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("reflectionProbe"))
             obj.Registry()->emplace<ReflectionProbeComponent>(
                 obj.Entity(), ParseReflectionProbe(j["reflectionProbe"]));
+        if (j.contains("lod"))
+            obj.Registry()->emplace<sage::render::LodComponent>(obj.Entity(), ParseLod(j["lod"]));
+        if (j.contains("shaderParams"))
+            obj.Registry()->emplace<ShaderParamsComponent>(obj.Entity(),
+                                                           ParseShaderParams(j["shaderParams"]));
         if (j.contains("particles"))
             obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
         if (j.contains("ui"))
