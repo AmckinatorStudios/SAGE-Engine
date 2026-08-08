@@ -245,123 +245,42 @@ VulkanRenderTarget::~VulkanRenderTarget() { DestroyStorage(); }
 void VulkanRenderTarget::DestroyStorage() {
     if (m_colorHandle.Valid()) { m_device.UnregisterTexture(m_colorHandle); m_colorHandle = {}; }
     if (m_depthHandle.Valid()) { m_device.UnregisterTexture(m_depthHandle); m_depthHandle = {}; }
-    if (m_framebuffer != VK_NULL_HANDLE) {
-        vkDestroyFramebuffer(m_device.Handle(), m_framebuffer, nullptr);
-        m_framebuffer = VK_NULL_HANDLE;
-    }
-    if (m_pass != VK_NULL_HANDLE) {
-        vkDestroyRenderPass(m_device.Handle(), m_pass, nullptr);
-        m_pass = VK_NULL_HANDLE;
-    }
+    VkDevice dev = m_device.Handle();
+    if (m_framebuffer != VK_NULL_HANDLE) { vkDestroyFramebuffer(dev, m_framebuffer, nullptr); m_framebuffer = VK_NULL_HANDLE; }
+    if (m_passClear != VK_NULL_HANDLE) { vkDestroyRenderPass(dev, m_passClear, nullptr); m_passClear = VK_NULL_HANDLE; }
+    if (m_passLoad != VK_NULL_HANDLE) { vkDestroyRenderPass(dev, m_passLoad, nullptr); m_passLoad = VK_NULL_HANDLE; }
+    m_attachments.clear();
     m_color.Destroy();
     m_depth.Destroy();
     m_colorMs.Destroy();
     m_depthMs.Destroy();
 }
 
-bool VulkanRenderTarget::CreateStorage() {
-    if (!m_device.Ready() || m_width <= 0 || m_height <= 0) return false;
-
-    const bool wantColor = m_kind == RenderTargetKind::ColorHDRWithDepth ||
-                           m_kind == RenderTargetKind::ColorHDR;
-    const bool wantDepth = m_kind == RenderTargetKind::ColorHDRWithDepth ||
-                           m_kind == RenderTargetKind::DepthOnly;
-    const bool ms = m_samples > 1;
-    const VkFormat colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT; // HDR, как в GL-бэкенде
-    const VkFormat depthFormat = PickDepthFormat(m_device.Gpu());
-
-    std::vector<VkAttachmentDescription> attachments;
-    std::vector<VkImageView> views;
-    VkAttachmentReference colorRef{}, depthRef{}, resolveRef{};
-    bool hasColor = false, hasDepth = false, hasResolve = false;
-
-    if (wantColor) {
-        VulkanImageDesc c;
-        c.Width = m_width; c.Height = m_height; c.Format = colorFormat;
-        c.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        if (!m_color.Create(m_device, c)) return false;
-
-        if (ms) {
-            VulkanImageDesc cm = c;
-            cm.Samples = (VkSampleCountFlagBits)m_samples;
-            // Многосэмпловое вложение не сэмплируется шейдером напрямую — из
-            // него только разрешают в обычное. Просить SAMPLED значит требовать
-            // поддержки, которая нам не нужна и есть не везде.
-            cm.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-            if (!m_colorMs.Create(m_device, cm)) return false;
-        }
-
-        VkAttachmentDescription a{};
-        a.format = colorFormat;
-        a.samples = ms ? (VkSampleCountFlagBits)m_samples : VK_SAMPLE_COUNT_1_BIT;
-        a.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        a.finalLayout = ms ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        colorRef.attachment = (uint32_t)attachments.size();
-        colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        attachments.push_back(a);
-        views.push_back(ms ? m_colorMs.View() : m_color.View());
-        hasColor = true;
+// Описание прохода. Строится ДВАЖДЫ из одного набора вложений — с очисткой на
+// входе и с сохранением содержимого (см. пояснение у ClearPass/LoadPass).
+VkRenderPass VulkanRenderTarget::BuildPass(bool clearOnLoad) {
+    std::vector<VkAttachmentDescription> attachments = m_attachments;
+    for (VkAttachmentDescription& a : attachments) {
+        a.loadOp = clearOnLoad ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        // initialLayout зависит от того же выбора. При очистке прежнее
+        // содержимое не нужно, и UNDEFINED — самый дешёвый вариант: драйвер
+        // вправе не читать старую память вовсе. При сохранении раскладка обязана
+        // совпасть с той, в которой изображение оставил предыдущий проход
+        // (finalLayout), иначе содержимое официально становится неопределённым.
+        a.initialLayout = clearOnLoad ? VK_IMAGE_LAYOUT_UNDEFINED : a.finalLayout;
     }
-
-    if (wantDepth) {
-        VulkanImageDesc d;
-        d.Width = m_width; d.Height = m_height; d.Format = depthFormat;
-        d.Samples = ms ? (VkSampleCountFlagBits)m_samples : VK_SAMPLE_COUNT_1_BIT;
-        d.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        VulkanImage& target = ms ? m_depthMs : m_depth;
-        if (!target.Create(m_device, d)) return false;
-
-        // Карта теней и SSAO читают глубину как текстуру, поэтому её надо
-        // ХРАНИТЬ после прохода (storeOp = STORE). У обычного depth-буфера это
-        // выглядит избыточным, но у нас другого и нет.
-        VkAttachmentDescription a{};
-        a.format = depthFormat;
-        a.samples = d.Samples;
-        a.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        a.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        depthRef.attachment = (uint32_t)attachments.size();
-        depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        attachments.push_back(a);
-        views.push_back(target.View());
-        hasDepth = true;
-    }
-
-    if (ms && hasColor) {
-        // Разрешение MSAA описывается ПРЯМО В ПРОХОДЕ: драйвер делает его на
-        // выходе из подпрохода, без отдельной команды и без лишнего чтения
-        // памяти. В GL для этого нужен был отдельный blit между двумя FBO.
-        VkAttachmentDescription a{};
-        a.format = colorFormat;
-        a.samples = VK_SAMPLE_COUNT_1_BIT;
-        a.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        a.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        resolveRef.attachment = (uint32_t)attachments.size();
-        resolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        attachments.push_back(a);
-        views.push_back(m_color.View());
-        hasResolve = true;
+    // Приёмник разрешения MSAA всегда пишется целиком — сохранять его нечего.
+    if (m_hasResolve && !attachments.empty()) {
+        attachments.back().loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments.back().initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
 
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = hasColor ? 1u : 0u;
-    subpass.pColorAttachments = hasColor ? &colorRef : nullptr;
-    subpass.pDepthStencilAttachment = hasDepth ? &depthRef : nullptr;
-    subpass.pResolveAttachments = hasResolve ? &resolveRef : nullptr;
+    subpass.colorAttachmentCount = m_hasColorRef ? 1u : 0u;
+    subpass.pColorAttachments = m_hasColorRef ? &m_colorRef : nullptr;
+    subpass.pDepthStencilAttachment = m_hasDepthRef ? &m_depthRef : nullptr;
+    subpass.pResolveAttachments = m_hasResolve ? &m_resolveRef : nullptr;
 
     // Зависимости на входе и выходе: содержимое таргета читают следующим
     // проходом как текстуру, и без явного барьера чтение может начаться до
@@ -379,10 +298,12 @@ bool VulkanRenderTarget::CreateStorage() {
     deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
     deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    // Не только шейдер: содержимое ещё и КОПИРУЮТ (чтение пикселей), а
+    // забытый этап переноса — это гонка, которую видно не на всякой видеокарте.
+    deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
     deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
 
     VkRenderPassCreateInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
     pass.attachmentCount = (uint32_t)attachments.size();
@@ -391,13 +312,111 @@ bool VulkanRenderTarget::CreateStorage() {
     pass.pSubpasses = &subpass;
     pass.dependencyCount = 2;
     pass.pDependencies = deps;
-    if (!vk::Check(vkCreateRenderPass(m_device.Handle(), &pass, nullptr, &m_pass),
-                   "vkCreateRenderPass")) {
-        return false;
+
+    VkRenderPass result = VK_NULL_HANDLE;
+    vk::Check(vkCreateRenderPass(m_device.Handle(), &pass, nullptr, &result), "vkCreateRenderPass");
+    return result;
+}
+
+bool VulkanRenderTarget::CreateStorage() {
+    if (!m_device.Ready() || m_width <= 0 || m_height <= 0) return false;
+
+    const bool wantColor = m_kind == RenderTargetKind::ColorHDRWithDepth ||
+                           m_kind == RenderTargetKind::ColorHDR;
+    const bool wantDepth = m_kind == RenderTargetKind::ColorHDRWithDepth ||
+                           m_kind == RenderTargetKind::DepthOnly;
+    const bool ms = m_samples > 1;
+    const VkFormat colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT; // HDR, как в GL-бэкенде
+    const VkFormat depthFormat = PickDepthFormat(m_device.Gpu());
+
+    m_attachments.clear();
+    std::vector<VkImageView> views;
+    m_hasColorRef = m_hasDepthRef = m_hasResolve = false;
+
+    if (wantColor) {
+        VulkanImageDesc c;
+        c.Width = m_width; c.Height = m_height; c.Format = colorFormat;
+        c.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (!m_color.Create(m_device, c)) return false;
+
+        if (ms) {
+            VulkanImageDesc cm = c;
+            cm.Samples = (VkSampleCountFlagBits)m_samples;
+            // Многосэмпловое вложение не сэмплируется шейдером напрямую — из
+            // него только разрешают в обычное. Просить SAMPLED значит требовать
+            // поддержки, которая нам не нужна и есть не везде.
+            cm.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            if (!m_colorMs.Create(m_device, cm)) return false;
+        }
+
+        VkAttachmentDescription a{};
+        a.format = colorFormat;
+        a.samples = ms ? (VkSampleCountFlagBits)m_samples : VK_SAMPLE_COUNT_1_BIT;
+        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.finalLayout = ms ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        m_colorRef.attachment = (uint32_t)m_attachments.size();
+        m_colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        m_attachments.push_back(a);
+        views.push_back(ms ? m_colorMs.View() : m_color.View());
+        m_hasColorRef = true;
     }
 
+    if (wantDepth) {
+        VulkanImageDesc d;
+        d.Width = m_width; d.Height = m_height; d.Format = depthFormat;
+        d.Samples = ms ? (VkSampleCountFlagBits)m_samples : VK_SAMPLE_COUNT_1_BIT;
+        d.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        VulkanImage& target = ms ? m_depthMs : m_depth;
+        if (!target.Create(m_device, d)) return false;
+
+        // Карта теней и SSAO читают глубину как текстуру, поэтому её надо
+        // ХРАНИТЬ после прохода (storeOp = STORE). У обычного depth-буфера это
+        // выглядело бы избыточным, но у нас другого и нет.
+        VkAttachmentDescription a{};
+        a.format = depthFormat;
+        a.samples = d.Samples;
+        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        m_depthRef.attachment = (uint32_t)m_attachments.size();
+        m_depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        m_attachments.push_back(a);
+        views.push_back(target.View());
+        m_hasDepthRef = true;
+    }
+
+    if (ms && m_hasColorRef) {
+        // Разрешение MSAA описывается ПРЯМО В ПРОХОДЕ: драйвер делает его на
+        // выходе из подпрохода, без отдельной команды и без лишнего чтения
+        // памяти. В GL для этого нужен был отдельный blit между двумя FBO.
+        VkAttachmentDescription a{};
+        a.format = colorFormat;
+        a.samples = VK_SAMPLE_COUNT_1_BIT;
+        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        m_resolveRef.attachment = (uint32_t)m_attachments.size();
+        m_resolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        m_attachments.push_back(a);
+        views.push_back(m_color.View());
+        m_hasResolve = true;
+    }
+
+    m_passClear = BuildPass(/*clearOnLoad=*/true);
+    m_passLoad = BuildPass(/*clearOnLoad=*/false);
+    if (m_passClear == VK_NULL_HANDLE || m_passLoad == VK_NULL_HANDLE) return false;
+
     VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    fb.renderPass = m_pass;
+    // Кадровый буфер совместим с ЛЮБЫМ проходом такого же состава вложений —
+    // спецификация требует совпадения форматов и числа сэмплов, а не самого
+    // объекта прохода. Поэтому один кадровый буфер на оба описания.
+    fb.renderPass = m_passClear;
     fb.attachmentCount = (uint32_t)views.size();
     fb.pAttachments = views.data();
     fb.width = (uint32_t)m_width;
@@ -410,12 +429,12 @@ bool VulkanRenderTarget::CreateStorage() {
 
     // Хендлы вложений — то, чем движок сэмплирует результат прохода. У карты
     // теней сэмплер с белой рамкой: за пределами покрытия «освещено».
-    if (hasColor) {
+    if (m_hasColorRef) {
         VkSampler s = m_device.SamplerFor(
             VulkanDevice::SamplerKey{Filter::Bilinear, Wrap::ClampEdge, false, false});
         m_colorHandle = m_device.RegisterTexture(m_color.View(), s);
     }
-    if (hasDepth) {
+    if (m_hasDepthRef) {
         const bool shadow = m_kind == RenderTargetKind::DepthOnly;
         VkSampler s = m_device.SamplerFor(VulkanDevice::SamplerKey{
             shadow ? Filter::Bilinear : Filter::Nearest, Wrap::ClampEdge, false, shadow});

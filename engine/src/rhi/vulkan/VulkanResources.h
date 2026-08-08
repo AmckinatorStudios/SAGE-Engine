@@ -1,4 +1,6 @@
 #pragma once
+#include <vector>
+
 #include "VulkanDevice.h"
 #include "VulkanImage.h"
 #include "sage/rhi/Resources.h"
@@ -89,11 +91,30 @@ public:
     TextureHandle DepthTextureHandle() const override { return m_depthHandle; }
     uint64_t NativeColorHandle() const override { return m_colorHandle.Value; }
 
-    VkRenderPass Pass() const { return m_pass; }
+    // Два описания прохода на один таргет, и это не дублирование.
+    //
+    // В Vulkan судьба содержимого вложения решается ПРИ ВХОДЕ в проход:
+    // loadOp = CLEAR затирает, LOAD сохраняет. В OpenGL такого выбора не было —
+    // там привязывают буфер, а очищают отдельной командой и когда захотят.
+    // Один проход с CLEAR стирал бы кадр каждый раз, когда таргет просто
+    // сделали активным (а движок так делает: сначала рисует небо, потом
+    // возвращается к тому же таргету за геометрией). Один проход с LOAD, наоборот,
+    // требовал бы отдельной команды очистки даже на полноэкранную — а это
+    // медленнее и лишает драйвер возможности не читать старое содержимое вовсе.
+    //
+    // Поэтому оба, а какой открыть — решает устройство по тому, что попросили
+    // первым: очистку всего таргета или что-то ещё.
+    VkRenderPass ClearPass() const { return m_passClear; }
+    VkRenderPass LoadPass() const { return m_passLoad; }
     VkFramebuffer Framebuffer() const { return m_framebuffer; }
+    bool HasColor() const { return m_kind != RenderTargetKind::DepthOnly; }
+    bool HasDepth() const { return m_kind != RenderTargetKind::ColorHDR; }
+    // Изображение, из которого читаются пиксели (после разрешения MSAA).
+    VulkanImage& ColorImage() { return m_color; }
 
 private:
     bool CreateStorage();
+    VkRenderPass BuildPass(bool clearOnLoad);
     void DestroyStorage();
 
     VulkanDevice& m_device;
@@ -104,7 +125,14 @@ private:
     VulkanImage m_depth;
     VulkanImage m_colorMs;      // многосэмпловый цвет — рисуют СЮДА
     VulkanImage m_depthMs;
-    VkRenderPass m_pass = VK_NULL_HANDLE;
+    // Состав вложений: собирается один раз в CreateStorage и переиспользуется
+    // обоими описаниями прохода. Членом, а не глобалью: таргетов в кадре
+    // несколько, и общее состояние они бы затирали друг у друга.
+    std::vector<VkAttachmentDescription> m_attachments;
+    VkAttachmentReference m_colorRef{}, m_depthRef{}, m_resolveRef{};
+    bool m_hasColorRef = false, m_hasDepthRef = false, m_hasResolve = false;
+    VkRenderPass m_passClear = VK_NULL_HANDLE;
+    VkRenderPass m_passLoad = VK_NULL_HANDLE;
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
     TextureHandle m_colorHandle{};
     TextureHandle m_depthHandle{};
