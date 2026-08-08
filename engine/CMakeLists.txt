@@ -61,6 +61,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/import/Convert.cpp
     src/sage/assets/import/BlockbenchImporter.cpp
     src/sage/assets/import/BlendImporter.cpp
+    src/sage/assets/import/FbxImporter.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
     src/sage/render/ModelMaterial.cpp

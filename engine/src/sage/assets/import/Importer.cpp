@@ -167,6 +167,10 @@ void RegisterBuiltinImporters(ImporterRegistry& registry) {
     registry.Register(".glb", "glTF 2.0 (binary)", &ImportGltf);
     registry.Register(".bbmodel", "Blockbench", &ImportBlockbench);
     registry.Register(".blend", "Blender", &ImportBlend);
+    // FBX — то, во что по умолчанию экспортируют Blender, Maya, 3ds Max,
+    // Mixamo и любой ассет-стор. Без него «своя модель» чаще всего не
+    // открывалась вовсе (см. FbxImporter.cpp).
+    registry.Register(".fbx", "Autodesk FBX", &ImportFbx);
     registry.Register(".sagemesh", "SAGE mesh", &ImportSageMesh);
 }
 

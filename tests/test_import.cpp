@@ -56,13 +56,14 @@ TEST(importer_registry_knows_its_formats) {
     // Регистр букв не должен иметь значения: файлы приходят от людей.
     CHECK_TRUE(reg.CanImport(".BBMODEL"));
     CHECK_TRUE(reg.CanImport("obj"));   // и точка необязательна
-    CHECK_FALSE(reg.CanImport(".fbx"));
+    CHECK_TRUE(reg.CanImport(".fbx"));   // самый частый формат обмена
+    CHECK_FALSE(reg.CanImport(".3ds"));  // а этого движок не умеет
 
-    // Отказ обязан перечислить, что движок умеет: человеку с .fbx нужно знать,
-    // во что пересохранить, а не только что его не приняли.
+    // Отказ обязан перечислить, что движок умеет: человеку с чужим форматом
+    // нужно знать, во что пересохранить, а не только что его не приняли.
     ImportedScene scene;
     std::string err;
-    CHECK_FALSE(reg.Import("nothing.fbx", scene, err));
+    CHECK_FALSE(reg.Import("nothing.3ds", scene, err));
     CHECK_TRUE(err.find(".bbmodel") != std::string::npos);
 }
 

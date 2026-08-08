@@ -17,6 +17,7 @@
 #include "EditorIcons.h"
 #include "Project.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/assets/import/Importer.h"
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
@@ -444,8 +445,19 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
         if (EditorIcons::Button("folder", T("Browse..."))) {
             FileBrowser::Config c;
             c.Title = T("Choose a model");
-            c.Filters = {".obj", ".gltf", ".glb", ".sagemesh"};
-            c.FilterLabel = T("Models (*.obj, *.gltf, *.glb, *.sagemesh)");
+            // Список берётся у РЕЕСТРА импортёров, а не пишется здесь руками.
+            // Пока он был жёстким, добавленный в движок формат (или свой, из
+            // плагина) в диалог не попадал — файл лежал рядом и не показывался,
+            // из чего честно следовал вывод «свою модель загрузить нельзя».
+            c.Filters = sage::assets::ImporterRegistry::Instance().Extensions();
+            std::string label = T("Models");
+            label += " (";
+            for (size_t i = 0; i < c.Filters.size(); ++i) {
+                if (i) label += ", ";
+                label += "*" + c.Filters[i];
+            }
+            label += ")";
+            c.FilterLabel = label;
             if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
             m_browser.Open(c);
             m_browseTarget = &mr.Ref.path;
@@ -484,7 +496,14 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
         if (!mr.Ref.path.empty() && !mr.MeshPtr) {
             ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("Mesh not loaded"));
             if (!ModelLoader::IsSupportedModel(mr.Ref.path)) {
-                ImGui::TextDisabled("%s", T("Supported: .obj, .gltf, .glb, .sagemesh"));
+                // Тот же реестр, что и в диалоге: подсказка обязана называть
+                // ровно те форматы, которые движок в самом деле откроет.
+                std::string list;
+                for (const std::string& ext : sage::assets::ImporterRegistry::Instance().Extensions()) {
+                    if (!list.empty()) list += ", ";
+                    list += ext;
+                }
+                ImGui::TextDisabled("%s %s", T("Supported:"), list.c_str());
             }
         }
         // Абсолютный путь работает в редакторе и НЕ работает нигде больше —
@@ -584,60 +603,118 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
 }
 
 // --- Mesh Renderer, часть 3: чем ЭТОТ экземпляр отличается -------------------
-void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr) {
-    ImGui::SeparatorText(T("Instance overrides"));
-
-    // Ширина полей считается от САМОЙ ДЛИННОЙ подписи группы, а не берётся по
-    // умолчанию. У ImGui подпись стоит справа от поля, и на узкой панели
-    // инспектора «Непрозрачность» не помещалась — обрезалась до
-    // «Непрозрачнос». Резервируем ей место здесь, вместо того чтобы надеяться,
-    // что панель достаточно широкая: её ширину задаёт человек мышью.
-    // Берётся МАКСИМУМ по подписям группы, а не одна из них. Пока интерфейс
-    // был русским, самой длинной всегда оказывалась «Непрозрачность», и хватало
-    // её одной. С переводом длиннее стала «Emissive Strength» — и подпись
-    // обрезалась ровно в английском, то есть у того, кто про русскую константу
-    // и не знал. Длина подписи зависит от языка, значит и считать её надо по
-    // тем строкам, которые реально нарисуются.
-    float labelWidth = 0.0f;
-    for (const char* label : {T("Tint"), T("Emissive"), T("Emissive Strength"), T("Opacity")}) {
-        labelWidth = std::max(labelWidth, ImGui::CalcTextSize(label).x);
-    }
-    labelWidth += ImGui::GetStyle().ItemInnerSpacing.x * 2.0f;
-    ImGui::PushItemWidth(-labelWidth);
-    // Одна подпись на всю группу вместо трёх разных правил, которые надо было
-    // помнить (см. EffectiveColor/EffectiveEmissive/EffectiveOpacity).
-    HintWrapped("%s", mr.MaterialPtr ? T("Applied on top of the material.")
-                                     : T("There is no material — they define the whole look of the object."));
-
-    ImGui::ColorEdit3(T("Tint"), &mr.Color.x); host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Multiplies the material albedo. White means as in the material."));
-
-    ImGui::ColorEdit3(T("Emissive"), &mr.Emissive.x); host.TrackLastImGuiItem();
-    ImGui::DragFloat(T("Emissive Strength"), &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
-    host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Added to the material emissive. Above 1 gives a bloom halo."));
-
-    // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
-    // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
-    ImGui::SliderFloat(T("Opacity"), &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Multiplies the material opacity."));
-
-    // Кнопка «как в материале» — вернуть поправки в нейтраль. Без неё «я где-то
-    // подкрутил цвет этому объекту» лечится только вспоминанием исходных чисел.
+//
+// ПОЧЕМУ ЭТИ ПОЛЯ ВООБЩЕ ЕСТЬ, ЕСЛИ ЗА ВИД ОТВЕЧАЕТ МАТЕРИАЛ. Вопрос
+// справедливый, и ответ у него ровно два случая — а путаница была оттого, что
+// раньше панель показывала оба одинаково.
+//
+//   • Материала НЕТ. Тогда эти поля и есть вид объекта: цвет, свечение,
+//     прозрачность. Куб, поставленный в сцену за две секунды, не должен
+//     требовать заводить .sagemat-файл ради того, чтобы стать красным.
+//
+//   • Материал ЕСТЬ. Тогда поля — поправка ПОВЕРХ него, и нужна она ровно для
+//     одного: сто объектов с одним материалом и разными оттенками не должны
+//     требовать ста файлов материалов. Тон умножает albedo, свечение
+//     прибавляется, непрозрачность умножается.
+//
+// Что было не так: четыре поля показывались всегда и выглядели точь-в-точь как
+// свойства материала — то есть предлагали задать цвет в ДВУХ местах, ничего не
+// сказав о том, какое из них главнее. Теперь при назначенном материале они
+// спрятаны за выключателем, который выключен, пока поправок нет; вместо них
+// видно, ЧТО реально красит объект.
+void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr,
+                                           int entityId) {
     const bool neutral = mr.Color == glm::vec3(1.0f) && mr.Emissive == glm::vec3(0.0f) &&
                          mr.Opacity >= 0.999f;
-    ImGui::BeginDisabled(neutral);
-    ImGui::PopItemWidth();
-    if (ImGui::SmallButton(T("Reset overrides"))) {
+
+    // Ширина полей считается по САМОЙ ДЛИННОЙ подписи группы — и по подписям
+    // ТЕКУЩЕГО ЯЗЫКА. У ImGui подпись стоит справа от поля, и на узкой панели
+    // инспектора она обрезалась: пока интерфейс был русским, длиннее всех была
+    // «Непрозрачность», а в английском — «Emissive Strength».
+    auto pushWidth = []() {
+        float labelWidth = 0.0f;
+        for (const char* label : {T("Tint"), T("Emissive"), T("Emissive Strength"), T("Opacity")}) {
+            labelWidth = std::max(labelWidth, ImGui::CalcTextSize(label).x);
+        }
+        ImGui::PushItemWidth(-(labelWidth + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f));
+    };
+
+    auto fields = [&]() {
+        ImGui::ColorEdit3(T("Tint"), &mr.Color.x);
+        host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Multiplies the material albedo. White means as in the material."));
+
+        ImGui::ColorEdit3(T("Emissive"), &mr.Emissive.x);
+        host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Emissive Strength"), &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+        host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Added to the material emissive. Above 1 gives a bloom halo."));
+
+        // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
+        // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
+        ImGui::SliderFloat(T("Opacity"), &mr.Opacity, 0.0f, 1.0f);
+        host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Multiplies the material opacity."));
+    };
+
+    auto reset = [&]() {
         host.PushUndoSnapshot();
         mr.Color = glm::vec3(1.0f);
         mr.Emissive = glm::vec3(0.0f);
         mr.EmissiveStrength = 1.0f;
         mr.Opacity = 1.0f;
+    };
+
+    // --- Материала нет: эти поля И ЕСТЬ вид объекта ------------------------
+    if (!mr.MaterialPtr) {
+        ImGui::SeparatorText(T("Look of the object"));
+        HintWrapped("%s", T("There is no material — these fields define the whole look. "
+                            "Assign a material to get metal, roughness and texture maps."));
+        pushWidth();
+        fields();
+        ImGui::PopItemWidth();
+        ImGui::BeginDisabled(neutral);
+        if (ImGui::SmallButton(T("Reset overrides"))) reset();
+        ImGui::EndDisabled();
+        return;
     }
-    ImGui::EndDisabled();
+
+    // --- Материал есть: поправки — по требованию ---------------------------
+    ImGui::SeparatorText(T("Instance overrides"));
+
+    // Выключатель НЕ хранится в сцене: он выведен из самих значений. Ненейтральные
+    // поправки — значит, они включены; человек, открывший их вручную, держится
+    // отдельным полем панели (состояние интерфейса, а не данные объекта).
+    bool open = !neutral || m_overridesOpenFor == entityId;
+    if (ImGui::Checkbox(T("Override the material"), &open)) {
+        if (open) {
+            m_overridesOpenFor = entityId;
+        } else {
+            m_overridesOpenFor = -1;
+            // Выключить — значит вернуть вид материалу. Оставлять поправки
+            // «выключенными, но действующими» значило бы завести третье
+            // состояние, которого никто не ждёт.
+            if (!neutral) reset();
+        }
+    }
+
+    if (!open) {
+        // Вместо четырёх полей — то, что реально красит объект.
+        const glm::vec3 albedo = mr.MaterialPtr->Albedo;
+        ImGui::ColorButton("##effective_albedo", ImVec4(albedo.r, albedo.g, albedo.b, 1.0f),
+                           ImGuiColorEditFlags_NoTooltip, ImVec2(18, 18));
+        ImGui::SameLine();
+        HintWrapped("%s", T("The look comes from the material. Turn the switch on only to make "
+                            "THIS object differ from others sharing the same material."));
+        return;
+    }
+
+    pushWidth();
+    fields();
+    ImGui::PopItemWidth();
+    HintWrapped("%s", T("Applied on top of the material."));
 }
 
 // Префаб в инспекторе: та же вращаемая обложка, что у материала. Крупнее, чем в
@@ -703,7 +780,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, mr);
         DrawMaterialSlot(host, mr);
-        DrawInstanceOverrides(host, mr);
+        DrawInstanceOverrides(host, mr, obj.Id());
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---

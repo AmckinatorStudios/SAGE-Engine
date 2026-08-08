@@ -84,7 +84,11 @@ private:
     // компонент; см. комментарий на месте вызова.
     void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr);
     void DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr);
-    void DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr);
+    void DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr, int entityId);
+    // У какой сущности человек РАСКРЫЛ поправки экземпляра вручную. Состояние
+    // интерфейса, а не сцены: сохранять его в файл значило бы записывать туда,
+    // какие секции были открыты, — это не свойство объекта.
+    int m_overridesOpenFor = -1;
     // Материал модели — вместе с моделью: .sagemat рядом с файлом модели, если
     // его ещё нет, и назначение его сущности.
     void AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr);

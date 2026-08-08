@@ -108,6 +108,7 @@ bool ImportObj(const std::string& path, ImportedScene& out, std::string& err);
 bool ImportGltf(const std::string& path, ImportedScene& out, std::string& err);
 bool ImportBlockbench(const std::string& path, ImportedScene& out, std::string& err);
 bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err);
+bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err);
 bool ImportSageMesh(const std::string& path, ImportedScene& out, std::string& err);
 
 } // namespace sage::assets

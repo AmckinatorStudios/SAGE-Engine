@@ -682,7 +682,11 @@ TEST(ModelLoader_reads_gltf_not_only_obj) {
     CHECK_TRUE(ModelLoader::IsSupportedModel("hero.glb"));
     CHECK_TRUE(ModelLoader::IsSupportedModel("HERO.GLTF"));
     CHECK_TRUE(ModelLoader::IsSupportedModel("hero.obj"));
-    CHECK_FALSE(ModelLoader::IsSupportedModel("hero.fbx"));
+    CHECK_TRUE(ModelLoader::IsSupportedModel("hero.fbx"));
+    // А вот этого движок не умеет — и пример неподдерживаемого формата обязан
+    // быть НАСТОЯЩИМ: пока им был .fbx, тест закрепляло ровно то, на что
+    // жаловались («свою модель не загрузить»).
+    CHECK_FALSE(ModelLoader::IsSupportedModel("hero.3ds"));
 
     // Три разные причины «не грузится» обязаны звучать по-разному: человеку,
     // у которого модель не встала в сцену, нужна именно та, что случилась.

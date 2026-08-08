@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 717.
+// Язык: Русский. Строк: 720.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -670,6 +670,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Локальное"},
     {"Location",
      "Папка"},
+    {"Look of the object",
+     "Вид объекта"},
     {"Loop",
      "Зациклить"},
     {"Low",
@@ -736,8 +738,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Материал модели импортирован: "},
     {"Model material: ",
      "Материал модели: "},
-    {"Models (*.obj, *.gltf, *.glb, *.sagemesh)",
-     "Модели (*.obj, *.gltf, *.glb, *.sagemesh)"},
+    {"Models",
+     "Модели"},
     {"Models and images in this folder (including nested) -> .sagemesh/.sagetex.\nAlready converted files are skipped, sources stay in place.",
      "Модели и картинки этой папки (включая вложенные) -> .sagemesh/.sagetex.\nУже сконвертированные пропускаются, исходники остаются."},
     {"Moon",
@@ -860,6 +862,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Внешний конус"},
     {"Output dir",
      "Папка вывода"},
+    {"Override the material",
+     "Переопределить материал"},
     {"PBR",
      "PBR"},
     {"Packages SagePlayer + project '%s' into a runnable game",
@@ -1222,8 +1226,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Размер солнца"},
     {"Sun: shines along the object's forward (-Z of its rotation) from infinity and has no range. Shadows are cascaded maps. The sun is the directional light with the lowest number in the hierarchy; a second one takes no part in the frame.",
      "Солнце: светит вдоль «вперёд» объекта (-Z поворота) из бесконечности, дальности не имеет. Тени — каскадные карты. Солнцем считается направленный свет с наименьшим номером в иерархии; второй такой свет в кадре не участвует."},
-    {"Supported: .obj, .gltf, .glb, .sagemesh",
-     "Поддерживаются .obj, .gltf, .glb, .sagemesh"},
+    {"Supported:",
+     "Поддерживаются:"},
     {"Surface Offset",
      "Отступ от поверхности"},
     {"Target (world)",
@@ -1266,6 +1270,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "В папке уже есть "},
     {"The folder is not accessible: ",
      "Папка недоступна: "},
+    {"The look comes from the material. Turn the switch on only to make THIS object differ from others sharing the same material.",
+     "Вид берётся из материала. Включайте переключатель, только чтобы ЭТОТ объект отличался от других с тем же материалом."},
     {"The model failed to load: ",
      "Модель не загрузилась: "},
     {"The model material was not saved — details in Console",
@@ -1280,8 +1286,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Свойства этой сущности — только её."},
     {"There is no editor for this file type.",
      "Для этого типа файла редактора нет."},
-    {"There is no material — they define the whole look of the object.",
-     "Материала нет — задают вид объекта целиком."},
+    {"There is no material — these fields define the whole look. Assign a material to get metal, roughness and texture maps.",
+     "Материала нет — эти поля задают вид объекта целиком. Назначьте материал, чтобы появились металличность, шероховатость и карты текстур."},
     {"There is no surface under the selection",
      "Под выделенным нет поверхности"},
     {"This cannot be undone.",
