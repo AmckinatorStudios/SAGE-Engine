@@ -27,7 +27,11 @@ namespace {
 // глазу не за что зацепиться, а «свет / камера / зонд / модель» видно сразу.
 const char* EntityIcon(entt::registry& reg, entt::entity e) {
     if (reg.all_of<CameraComponent>(e)) return "camera";
-    if (reg.all_of<LightComponent>(e)) return "light";
+    // Солнце — не лампа. Направленный свет один на сцену и задаёт всё её
+    // настроение, поэтому в списке он обязан отличаться с первого взгляда.
+    if (const LightComponent* lc = reg.try_get<LightComponent>(e)) {
+        return lc->Kind == LightComponent::Type::Directional ? "sun" : "light";
+    }
     if (reg.all_of<ReflectionProbeComponent>(e)) return "probe";
     if (reg.all_of<ParticleEmitterComponent>(e)) return "particles";
     if (reg.all_of<AnimatedModelComponent>(e)) return "anim";

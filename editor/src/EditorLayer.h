@@ -322,6 +322,7 @@ private:
     ViewRequest m_viewRequests[kMaxViews];
     int m_viewCount = 1;
     bool m_showProfiler = false;
+    bool m_showIconSheet = false; // страница со всеми иконками (Window > Icon sheet)
     HierarchyPanel m_hierarchy;
     InspectorPanel m_inspector;
     ViewportPanel m_viewport;

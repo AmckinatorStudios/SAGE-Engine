@@ -268,6 +268,7 @@ void EditorLayer::OnAttach() {
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_launcher.Dismiss(); m_showProfiler = true; }
+    if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_launcher.Dismiss(); m_showIconSheet = true; }
     // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
     // headless нечем: кликать во вьюпорте в CI некому.
@@ -2350,6 +2351,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Lighting"), nullptr, &m_showLighting);
             ImGui::MenuItem(T("Code"), nullptr, &m_showCode);
             ImGui::MenuItem(T("Profiler"), nullptr, &m_showProfiler);
+            ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
             ImGui::MenuItem(T("Settings..."), nullptr, &m_showSettings);
 
@@ -2396,6 +2398,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     m_profiler.Draw(&m_showProfiler);
+    if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
     DrawAboutWindow();
 

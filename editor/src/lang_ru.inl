@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 724.
+// Язык: Русский. Строк: 726.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -422,6 +422,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Динамическое"},
     {"Dynamic falls under gravity; Static/Kinematic don't",
      "Динамическое падает под гравитацией; статическое и кинематическое — нет"},
+    {"Each icon at the sizes it is actually used at.",
+     "Каждая иконка на тех размерах, на которых она и работает."},
     {"Edit",
      "Правка"},
     {"Edited in the object inspector; direction is its rotation",
@@ -598,6 +600,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Значок"},
     {"Icon Color",
      "Цвет значка"},
+    {"Icon sheet",
+     "Страница иконок"},
     {"Id: %d",
      "Номер: %d"},
     {"Image",
