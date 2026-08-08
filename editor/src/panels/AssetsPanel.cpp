@@ -13,6 +13,7 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "../AssetSlot.h"
 #include "../EditorIcons.h"
 
 #include "sage/assets/import/Convert.h"
@@ -343,17 +344,10 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // Путь передаётся строкой с завершающим нулём — принимающая сторона получает
     // ровно то, что открыла бы сама.
     if (!isDir && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-        const std::string p = path.string();
-        ImGui::SetDragDropPayload("SAGE_ASSET_PATH", p.c_str(), p.size() + 1);
-        // Под курсором — обложка и имя, а не одно имя: тащат обычно из десятка
-        // похожих файлов, и по картинке видно, что именно ухватили.
-        const uint64_t dragThumb = ThumbnailFor(path, false);
-        if (dragThumb) {
-            ImGui::Image((ImTextureID)(std::intptr_t)dragThumb, ImVec2(48, 48), ImVec2(0, 1),
-                         ImVec2(1, 0));
-            ImGui::SameLine();
-        }
-        ImGui::TextUnformatted(filename.c_str());
+        // Полезная нагрузка и карточка под курсором — общие для всего
+        // редактора (см. AssetSlot.h): и панель, и слоты компонентов начинают
+        // перетаскивание одинаково, поэтому и принимающая сторона у них одна.
+        assetslot::BeginDrag(path, &m_preview);
         ImGui::EndDragDropSource();
     }
 

@@ -227,4 +227,10 @@ public:
 
     // --- выбор в Assets (нужен Inspector'у для назначения материала) ---
     virtual const std::filesystem::path& SelectedAssetPath() const = 0;
+
+    // Показать файл в панели Assets: перейти в его папку, выделить его и
+    // открыть панель, если её закрыли. Слот ассета отвечает этим на вопрос «а
+    // где он лежит?» — иначе на него отвечали поиском по дереву проекта,
+    // держа имя из слота в голове.
+    virtual void ShowAssetInPanel(const std::filesystem::path& path) = 0;
 };

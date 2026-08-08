@@ -14,6 +14,7 @@
 #include "sage/core/Log.h"
 #include <algorithm>
 
+#include "AssetSlot.h"
 #include "EditorIcons.h"
 #include "Project.h"
 #include "sage/render/ResourceManager.h"
@@ -33,131 +34,49 @@ namespace fs = std::filesystem;
 // ResourceManager — все сущности с этим материалом обновляются в вьюпорте
 // сразу; Save фиксирует значения на диск, Revert перечитывает файл.
 // Слот текстуры: превью + путь + «Обзор…» + «Из Assets» + «Очистить».
+// Слот текстуры материала. Вся механика — общий виджет (см. AssetSlot.h): и
+// превью, и приём перетаскивания с проверкой типа, и «показать в Assets», и
+// очистка. Здесь остаётся только то, что своё у карт материала: подпись, к
+// какому каналу карта относится, и перезагрузка текстур материала после правки.
+//
+// Раньше этот слот был написан отдельно от слотов меша и материала и вёл себя
+// иначе: путь правился полем ввода по Enter, бросок файла не того типа молча
+// ничего не делал, а «где лежит эта текстура» узнавалось поиском по проекту.
 void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::string& path,
                                      const std::shared_ptr<Texture>& tex, const char* tooltip) {
     ImGui::PushID(label);
-
-    // Превью — квадрат 48x48. Пустой слот рисуется рамкой, а не пустотой: иначе
-    // «текстура не назначена» и «текстура назначена, но не загрузилась»
-    // выглядят одинаково, а это разные беды с разным лечением.
-    // Превью — КНОПКА, а не картинка: клик по нему открывает выбор файла. Это
-    // первое, во что человек тычет, когда хочет сменить текстуру, и раньше он
-    // не делал ничего.
-    const ImVec2 size(64, 64);
-    const ImVec2 p0 = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##preview", size);
-    const bool previewClicked = ImGui::IsItemClicked();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 p1(p0.x + size.x, p0.y + size.y);
-
-    // Шахматка: без неё прозрачные места картинки сливаются с фоном панели, и
-    // текстура с альфой выглядит просто дырявой.
-    const float checker = 8.0f;
-    dl->PushClipRect(p0, p1, true);
-    for (float y = p0.y; y < p1.y; y += checker)
-        for (float x = p0.x; x < p1.x; x += checker) {
-            const bool odd = ((int)((x - p0.x) / checker) + (int)((y - p0.y) / checker)) % 2;
-            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + checker, y + checker),
-                              odd ? IM_COL32(68, 68, 74, 255) : IM_COL32(50, 50, 56, 255));
-        }
-    dl->PopClipRect();
-
-    if (tex) {
-        dl->AddImage((ImTextureID)(std::intptr_t)tex->NativeHandle(), p0, p1, ImVec2(0, 1),
-                     ImVec2(1, 0));
-        dl->AddRect(p0, p1, IM_COL32(255, 255, 255, 40), 4.0f);
-    } else {
-        // Пустой слот и НЕЗАГРУЗИВШИЙСЯ — разные беды с разным лечением, поэтому
-        // и выглядят по-разному: тусклая рамка против красной с крестом.
-        const ImU32 col = path.empty() ? IM_COL32(110, 110, 120, 160) : IM_COL32(210, 90, 90, 220);
-        dl->AddRect(p0, p1, col, 4.0f, 0, 1.5f);
-        if (path.empty()) {
-            const char* plus = "+";
-            const ImVec2 ts = ImGui::CalcTextSize(plus);
-            dl->AddText(ImVec2(p0.x + (size.x - ts.x) * 0.5f, p0.y + (size.y - ts.y) * 0.5f), col,
-                        plus);
-        } else {
-            dl->AddLine(ImVec2(p0.x + 18, p0.y + 18), ImVec2(p1.x - 18, p1.y - 18), col, 2.0f);
-            dl->AddLine(ImVec2(p1.x - 18, p0.y + 18), ImVec2(p0.x + 18, p1.y - 18), col, 2.0f);
-        }
-    }
-    // Приём перетаскивания из панели Assets — самый короткий путь назначить
-    // текстуру, когда она уже найдена в дереве проекта.
-    if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            // Относительно проекта: абсолютный путь текстуры живёт ровно до
-            // сборки игры (см. Project::AssetRef).
-            path = host.CurrentProject().AssetRef(dropped);
-        }
-        ImGui::EndDragDropTarget();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(label);
-        if (tooltip) ImGui::TextDisabled("%s", tooltip);
-        if (path.empty()) ImGui::TextDisabled("%s", T("Not assigned"));
-        else if (!tex) ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), T("Failed to load: %s"),
-                                          path.c_str());
-        else ImGui::TextDisabled("%s", path.c_str());
-        ImGui::EndTooltip();
-    }
-
-    ImGui::SameLine();
-    ImGui::BeginGroup();
     ImGui::TextUnformatted(label);
+    if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
 
-    // Полный путь в узком поле нечитаем: у «C:/Users/.../Pictures/frame1.png»
-    // видно ровно начало, то есть самую бесполезную часть. Показываем имя
-    // файла, а весь путь — в подсказке и в поле, когда его правят.
-    if (!path.empty()) {
-        const std::string name = std::filesystem::path(path).filename().string();
-        ImGui::TextDisabled("%s", name.c_str());
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
-    } else {
-        ImGui::TextDisabled("%s", T("not assigned"));
+    const assetslot::Result r =
+        assetslot::Draw(host, label, assetslot::Kind::Texture, path, &m_preview);
+    if (r.Changed) {
+        host.PushUndoSnapshot();
+        path = r.Path;
+        // Материал держит СВОИ указатели на текстуры: без пересборки картинка в
+        // слоте новая, а объект в сцене остаётся со старой.
+        if (std::shared_ptr<Material> mat =
+                ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string())) {
+            ResourceManager::Instance().ResolveMaterialTextures(*mat);
+        }
     }
-
-    char buf[512];
-    std::snprintf(buf, sizeof(buf), "%s", path.c_str());
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::InputText("##path", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        path = buf;
-        ResourceManager::Instance().ResolveMaterialTextures(
-            *ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string()));
-    }
-
-    if (EditorIcons::Button("folder", T("Browse...")) || previewClicked) {
+    if (r.BrowseRequested) {
         FileBrowser::Config c;
         c.Title = std::string(T("Texture: ")) + label;
-        c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
+        c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
         c.FilterLabel = T("Images");
         if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
         m_browser.Open(c);
         m_browseTarget = &path;
         m_browseIsShader = false;
+        m_browseIsMesh = false;
+        m_browseIsMaterial = false;
     }
-    // «Из Assets» — то, что выбрано в панели ассетов: самый быстрый путь, когда
-    // текстура уже найдена там.
-    const std::string selExt = host.SelectedAssetPath().extension().string();
-    const bool selIsImage = selExt == ".png" || selExt == ".jpg" || selExt == ".jpeg" ||
-                            selExt == ".tga" || selExt == ".bmp" || selExt == ".hdr";
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!selIsImage);
-    if (EditorIcons::Button("texture", T("From Assets"))) {
-        path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
+    // Путь есть, а текстуры нет — файл не прочитался. Слот показывает сам факт,
+    // а причина уходит в консоль загрузчиком.
+    if (!path.empty() && !tex) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), T("Failed to load: %s"), path.c_str());
     }
-    ImGui::EndDisabled();
-    if (!selIsImage && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Pick an image in the Assets panel"));
-
-    ImGui::SameLine();
-    ImGui::BeginDisabled(path.empty());
-    if (EditorIcons::Button("trash", T("Clear"))) path.clear();
-    ImGui::EndDisabled();
-
-    ImGui::EndGroup();
     ImGui::PopID();
     ImGui::Spacing();
 }
@@ -418,38 +337,30 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
     }
 
     if (mr.Ref.type == MeshRef::Type::Model) {
-        char pathBuf[512];
-        std::snprintf(pathBuf, sizeof(pathBuf), "%s", mr.Ref.path.c_str());
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::InputText("##modelpath", pathBuf, sizeof(pathBuf))) mr.Ref.path = pathBuf;
-        host.TrackLastImGuiItem();
-        // Перетаскивание из панели Assets — тот же способ назначить файл, что и
-        // у слотов текстур материала. Раньше модель этого не умела, хотя тайл в
-        // Assets уже был источником перетаскивания.
-        if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-                std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-                if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-                if (ModelLoader::IsSupportedModel(dropped)) {
-                    host.PushUndoSnapshot();
-                    mr.Ref.path = host.CurrentProject().AssetRef(dropped);
-                    m_pendingMeshLoad = true;
-                }
+        // Слот модели — тот же виджет, что у материала и текстур (см.
+        // AssetSlot.h). Раньше здесь было поле ввода пути: путь к своей модели
+        // надо было ЗНАТЬ и напечатать без опечатки, обложки не было, а бросок
+        // файла не той породы молча не делал ничего.
+        const assetslot::Result r =
+            assetslot::Draw(host, "mesh", assetslot::Kind::Model, mr.Ref.path, &m_preview,
+                            T("No model assigned"));
+        if (r.Changed) {
+            host.PushUndoSnapshot();
+            mr.Ref.path = r.Path;
+            if (r.Cleared) {
+                mr.MeshPtr = nullptr;
+            } else {
+                m_pendingMeshLoad = true;
             }
-            ImGui::EndDragDropTarget();
         }
-
-        // «Обзор…» вместо «напечатай путь наизусть». Именно на этом шаге
-        // всё и заканчивалось: человек не помнит абсолютный путь к своей
-        // модели, а ошибка в нём давала только строчку в консоли.
-        if (EditorIcons::Button("folder", T("Browse..."))) {
+        if (r.BrowseRequested) {
             FileBrowser::Config c;
             c.Title = T("Choose a model");
             // Список берётся у РЕЕСТРА импортёров, а не пишется здесь руками.
             // Пока он был жёстким, добавленный в движок формат (или свой, из
             // плагина) в диалог не попадал — файл лежал рядом и не показывался,
             // из чего честно следовал вывод «свою модель загрузить нельзя».
-            c.Filters = sage::assets::ImporterRegistry::Instance().Extensions();
+            c.Filters = assetslot::Extensions(assetslot::Kind::Model);
             std::string label = T("Models");
             label += " (";
             for (size_t i = 0; i < c.Filters.size(); ++i) {
@@ -464,18 +375,6 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
             m_browseIsShader = false;
             m_browseIsMesh = true;
         }
-        ImGui::SameLine();
-        const bool selIsModel = ModelLoader::IsSupportedModel(
-            host.SelectedAssetPath().extension().string());
-        ImGui::BeginDisabled(!selIsModel);
-        if (EditorIcons::Button("model", T("From Assets"))) {
-            host.PushUndoSnapshot();
-            mr.Ref.path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
-            m_pendingMeshLoad = true;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (EditorIcons::Button("refresh", T("Load"))) m_pendingMeshLoad = true;
 
         if (m_pendingMeshLoad) {
             m_pendingMeshLoad = false;
@@ -495,11 +394,13 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
         }
         if (!mr.Ref.path.empty() && !mr.MeshPtr) {
             ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("Mesh not loaded"));
+            ImGui::SameLine();
+            if (EditorIcons::Button("refresh", T("Load"))) m_pendingMeshLoad = true;
             if (!ModelLoader::IsSupportedModel(mr.Ref.path)) {
                 // Тот же реестр, что и в диалоге: подсказка обязана называть
                 // ровно те форматы, которые движок в самом деле откроет.
                 std::string list;
-                for (const std::string& ext : sage::assets::ImporterRegistry::Instance().Extensions()) {
+                for (const std::string& ext : assetslot::Extensions(assetslot::Kind::Model)) {
                     if (!list.empty()) list += ", ";
                     list += ext;
                 }
@@ -599,58 +500,23 @@ void InspectorPanel::WriteMaterialFromOverrides(EditorHost& host, MeshRendererCo
 void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr) {
     ImGui::SeparatorText(T("Material"));
 
-    // Превью материала — шариком, а не квадратиком цвета: по квадратику не
-    // отличить металл от диэлектрика и гладкое от матового, то есть ровно то,
-    // ради чего материал и назначают. Тот же рендер, что в редакторе материала.
-    const float side = 64.0f;
-    if (mr.MaterialPtr) {
-        const uint64_t thumb = m_preview.RenderMaterial(mr.MaterialPtr, (int)side);
-        if (thumb) {
-            ImGui::Image((ImTextureID)(std::intptr_t)thumb, ImVec2(side, side), ImVec2(0, 1),
-                         ImVec2(1, 0));
-        } else {
-            ImGui::ColorButton("##mat_preview",
-                               ImVec4(mr.MaterialPtr->Albedo.r, mr.MaterialPtr->Albedo.g,
-                                      mr.MaterialPtr->Albedo.b, 1.0f),
-                               0, ImVec2(side, side));
-        }
-        ImGui::SameLine();
-    }
-
-    ImGui::BeginGroup();
-    if (mr.MaterialPath.empty()) {
-        HintWrapped(T("Not assigned"));
-        // Раньше здесь стояло «объект рисуется поправками ниже», и ниже
-        // показывались цвет, свечение и прозрачность — то есть вид объекта
-        // задавался в ДВУХ местах. Одного из них быть не должно: вид объекта
-        // задаёт материал, и точка. Кнопка ниже делает его в один щелчок,
-        // перенося в него текущий цвет, — чтобы объект не побелел от того, что
-        // мы навели порядок.
-        HintWrapped(T("The look of an object is defined by its material."));
-    } else {
-        ImGui::TextUnformatted(std::filesystem::path(mr.MaterialPath).filename().string().c_str());
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mr.MaterialPath.c_str());
-        if (!mr.MaterialPtr)
-            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("File cannot be read"));
-    }
-
-    auto assign = [&](const std::string& raw) {
+    // Общий слот ассета: обложка (материал показывается шариком — по квадратику
+    // цвета не отличить металл от диэлектрика и гладкое от матового, то есть
+    // ровно то, ради чего материал и назначают), приём перетаскивания с
+    // проверкой типа, «показать в Assets», очистка.
+    const assetslot::Result r =
+        assetslot::Draw(host, "material", assetslot::Kind::Material, mr.MaterialPath, &m_preview,
+                        T("The look of an object is defined by its material."));
+    if (r.Changed) {
         host.PushUndoSnapshot();
-        mr.MaterialPath = host.CurrentProject().AssetRef(raw);
-        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
-    };
-
-    const bool selIsMaterial = host.SelectedAssetPath().extension() == ".sagemat";
-    ImGui::BeginDisabled(!selIsMaterial);
-    if (EditorIcons::Button("material", T("From Assets"))) assign(host.SelectedAssetPath().string());
-    ImGui::EndDisabled();
-    if (!selIsMaterial && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Pick a .sagemat in the Assets panel"));
-    ImGui::SameLine();
-    if (EditorIcons::Button("folder", T("Browse..."))) {
+        mr.MaterialPath = r.Path;
+        mr.MaterialPtr = r.Path.empty() ? nullptr
+                                        : ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+    }
+    if (r.BrowseRequested) {
         FileBrowser::Config c;
         c.Title = T("Choose a material");
-        c.Filters = {".sagemat"};
+        c.Filters = assetslot::Extensions(assetslot::Kind::Material);
         c.FilterLabel = T("Materials (*.sagemat)");
         if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
         m_browser.Open(c);
@@ -659,19 +525,13 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
         m_browseIsMesh = false;
         m_browseIsMaterial = true;
     }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(mr.MaterialPath.empty());
-    if (EditorIcons::Button("trash", T("Remove"))) {
-        host.PushUndoSnapshot();
-        mr.MaterialPath.clear();
-        mr.MaterialPtr = nullptr;
+    if (!mr.MaterialPath.empty() && !mr.MaterialPtr) {
+        ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("File cannot be read"));
     }
-    ImGui::EndDisabled();
 
-    // СОЗДАТЬ материал — отдельной строкой, а не четвёртой кнопкой в ряду.
-    // Во-первых, четыре кнопки не влезают в панель инспектора и последняя
-    // обрезается («Создать м…»). Во-вторых, это другое действие: кнопки выше
-    // НАЗНАЧАЮТ существующий материал, эта ДЕЛАЕТ новый.
+    // СОЗДАТЬ материал — отдельной строкой, а не ещё одной кнопкой в слоте.
+    // Это другое действие: слот НАЗНАЧАЕТ существующий материал, эта кнопка
+    // ДЕЛАЕТ новый.
     //
     // Без неё требование «вид задаёт материал» означало бы: иди в панель
     // ассетов, создай файл, вернись, назначь — четыре шага там, где раньше был
@@ -685,39 +545,8 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
                                       "the current colour of this object into it."));
         }
     }
-    ImGui::EndGroup();
-
-    // Приём перетаскивания на всю группу выше — материал из Assets мышью.
-    if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            if (std::filesystem::path(dropped).extension() == ".sagemat") assign(dropped);
-        }
-        ImGui::EndDragDropTarget();
-    }
 }
 
-// --- Mesh Renderer, часть 3: чем ЭТОТ экземпляр отличается -------------------
-//
-// ПОЧЕМУ ЭТИ ПОЛЯ ВООБЩЕ ЕСТЬ, ЕСЛИ ЗА ВИД ОТВЕЧАЕТ МАТЕРИАЛ. Вопрос
-// справедливый, и ответ у него ровно два случая — а путаница была оттого, что
-// раньше панель показывала оба одинаково.
-//
-//   • Материала НЕТ. Тогда эти поля и есть вид объекта: цвет, свечение,
-//     прозрачность. Куб, поставленный в сцену за две секунды, не должен
-//     требовать заводить .sagemat-файл ради того, чтобы стать красным.
-//
-//   • Материал ЕСТЬ. Тогда поля — поправка ПОВЕРХ него, и нужна она ровно для
-//     одного: сто объектов с одним материалом и разными оттенками не должны
-//     требовать ста файлов материалов. Тон умножает albedo, свечение
-//     прибавляется, непрозрачность умножается.
-//
-// Что было не так: четыре поля показывались всегда и выглядели точь-в-точь как
-// свойства материала — то есть предлагали задать цвет в ДВУХ местах, ничего не
-// сказав о том, какое из них главнее. Теперь при назначенном материале они
-// спрятаны за выключателем, который выключен, пока поправок нет; вместо них
-// видно, ЧТО реально красит объект.
 void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr,
                                            int entityId) {
     const bool neutral = mr.Color == glm::vec3(1.0f) && mr.Emissive == glm::vec3(0.0f) &&
@@ -990,27 +819,21 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     if (reg.all_of<ScriptComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
-            char scriptBuf[512];
-            std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", sc->Path.c_str());
-            if (ImGui::InputText(T("Lua file"), scriptBuf, sizeof(scriptBuf))) sc->Path = scriptBuf;
-            host.TrackLastImGuiItem();
-            // Перетаскивание .lua из Assets — как у моделей и текстур. Печатать
-            // путь к скрипту наизусть незачем, он тут же в дереве проекта.
-            if (ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-                    std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-                    if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-                    if (std::filesystem::path(dropped).extension() == ".lua") {
-                        host.PushUndoSnapshot();
-                        sc->Path = host.CurrentProject().AssetRef(dropped);
-                    }
-                }
-                ImGui::EndDragDropTarget();
+            // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
+            // обложка, приём перетаскивания с проверкой типа, «показать в
+            // Assets». Раньше здесь было поле ввода пути, и .lua приходилось
+            // печатать наизусть, хотя он тут же в дереве проекта.
+            const assetslot::Result r =
+                assetslot::Draw(host, "script", assetslot::Kind::Script, sc->Path, &m_preview,
+                                T("No script attached"));
+            if (r.Changed) {
+                host.PushUndoSnapshot();
+                sc->Path = r.Path;
             }
-            if (EditorIcons::Button("folder", T("Browse..."))) {
+            if (r.BrowseRequested) {
                 FileBrowser::Config c;
                 c.Title = T("Choose a script");
-                c.Filters = {".lua"};
+                c.Filters = assetslot::Extensions(assetslot::Kind::Script);
                 c.FilterLabel = T("Scripts (*.lua)");
                 if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
                 m_browser.Open(c);
@@ -1023,11 +846,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 m_browseIsMesh = false;
                 m_browseIsMaterial = false;
             }
-            ImGui::SameLine();
-            if (EditorIcons::Button("script", T("From Assets")) &&
-                host.SelectedAssetPath().extension() == ".lua") {
-                host.PushUndoSnapshot();
-                sc->Path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
+            if (!sc->Path.empty() && EditorIcons::Button("code", T("Open in editor"))) {
+                host.OpenCodeFile(sc->Path);
             }
             ImGui::TextDisabled("%s", T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"));
             if (ImGui::Button(T("Remove Script"))) {

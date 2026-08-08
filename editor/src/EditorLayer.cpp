@@ -969,6 +969,27 @@ void EditorLayer::DeleteSelected() {
     });
 }
 
+// «Показать в Assets»: перейти в папку файла, выделить его и открыть панель.
+//
+// Путь в компоненте относительный (см. Project::AssetRef), а текущая папка
+// процесса — не обязательно корень проекта, поэтому сначала превращаем ссылку в
+// настоящий путь. Панель открываем принудительно: команда «покажи, где лежит»,
+// после которой ничего не появилось (панель была закрыта), выглядит как
+// поломка.
+void EditorLayer::ShowAssetInPanel(const fs::path& path) {
+    if (path.empty()) return;
+    fs::path full = path;
+    std::error_code ec;
+    if (!fs::exists(full, ec) && m_project.Loaded()) full = m_project.Dir() / path;
+    if (!fs::exists(full, ec)) {
+        SetStatusMessage(T("File not found: ") + path.string());
+        return;
+    }
+    m_showAssets = true;
+    m_assetsCwd = full.parent_path();
+    m_assets.Select(full);
+}
+
 void EditorLayer::SetSelectedId(int id) {
     m_selectedId = id;
     m_selection.clear();

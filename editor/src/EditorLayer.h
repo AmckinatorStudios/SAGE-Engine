@@ -190,6 +190,7 @@ public:
 
     // --- EditorHost: выбор в Assets ---
     const std::filesystem::path& SelectedAssetPath() const override { return m_assets.Selected(); }
+    void ShowAssetInPanel(const std::filesystem::path& path) override;
 
 private:
     // --- undo/redo (вызываются меню и хоткеями) ---

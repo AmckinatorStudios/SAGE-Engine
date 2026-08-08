@@ -11,6 +11,7 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "AssetSlot.h"
 #include "EditorIcons.h"
 #include "Project.h"
 #include "sage/scene/Components.h"
@@ -109,10 +110,33 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         // скрипт вешается на неё, модель заменяет её меш. Бросок в пустое место
         // списка (ниже) означает другое — «добавить в сцену», — и различает их
         // именно то, на что попали.
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+        // Ответ даётся ДО отпускания кнопки: подсказка говорит, что именно
+        // произойдёт с этим файлом на этой сущности. Раньше бросок был
+        // «наугад»: материал красил, модель заменяла меш, а .txt не делал
+        // ничего — и все три случая выглядели одинаково, пока не отпустишь.
+        const ImGuiDragDropFlags peek =
+            ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH", peek)) {
             std::string dropped((const char*)p->Data, (size_t)p->DataSize);
             if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            host.ApplyAssetToEntity(id, dropped);
+            const char* what = nullptr;
+            switch (assetslot::KindOf(dropped)) {
+                case assetslot::Kind::Material: what = T("Assign the material to this object"); break;
+                case assetslot::Kind::Model:    what = T("Replace this object's mesh"); break;
+                case assetslot::Kind::Script:   what = T("Attach the script to this object"); break;
+                case assetslot::Kind::Prefab:   what = T("Add the prefab as a child"); break;
+                default: break;
+            }
+            ImGui::BeginTooltip();
+            if (what) ImGui::TextUnformatted(what);
+            else ImGui::TextDisabled("%s", T("This file cannot be applied to an object"));
+            ImGui::EndTooltip();
+            if (what) {
+                const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+                ImGui::GetWindowDrawList()->AddRect(r0, r1, IM_COL32(120, 210, 130, 255), 3.0f, 0,
+                                                    1.5f);
+            }
+            if (p->IsDelivery() && what) host.ApplyAssetToEntity(id, dropped);
         }
         ImGui::EndDragDropTarget();
     }
