@@ -7,6 +7,7 @@
 #include "EditorIcons.h"
 #include "sage/core/Paths.h"
 #include "imgui.h"
+#include "Localization.h"
 
 namespace fs = std::filesystem;
 
@@ -14,11 +15,11 @@ namespace {
 
 std::string HumanSize(uintmax_t bytes) {
     char buf[64];
-    if (bytes < 1024) std::snprintf(buf, sizeof(buf), "%llu Б", (unsigned long long)bytes);
-    else if (bytes < 1024 * 1024) std::snprintf(buf, sizeof(buf), "%.1f КиБ", bytes / 1024.0);
+    if (bytes < 1024) std::snprintf(buf, sizeof(buf), T("%llu B"), (unsigned long long)bytes);
+    else if (bytes < 1024 * 1024) std::snprintf(buf, sizeof(buf), T("%.1f KiB"), bytes / 1024.0);
     else if (bytes < 1024ull * 1024 * 1024)
-        std::snprintf(buf, sizeof(buf), "%.1f МиБ", bytes / (1024.0 * 1024.0));
-    else std::snprintf(buf, sizeof(buf), "%.1f ГиБ", bytes / (1024.0 * 1024.0 * 1024.0));
+        std::snprintf(buf, sizeof(buf), T("%.1f MiB"), bytes / (1024.0 * 1024.0));
+    else std::snprintf(buf, sizeof(buf), T("%.1f GiB"), bytes / (1024.0 * 1024.0 * 1024.0));
     return buf;
 }
 
@@ -79,7 +80,7 @@ void FileBrowser::Open(const Config& config) {
 
     const std::vector<sage::UserFolder> userFolders = sage::UserFolders();
     if (!userFolders.empty()) {
-        group("Папки");
+        group(T("Folders"));
         for (const sage::UserFolder& f : userFolders) place(f.Label, f.Path);
     }
 
@@ -87,20 +88,20 @@ void FileBrowser::Open(const Config& config) {
     bool workGroup = false;
     auto workPlace = [&](const char* label, const fs::path& p) {
         if (p.empty() || !fs::is_directory(p, ec)) return;
-        if (!workGroup) { group("Проект"); workGroup = true; }
+        if (!workGroup) { group(T("Project")); workGroup = true; }
         place(label, p);
     };
-    workPlace("Ассеты проекта", m_cfg.StartDir);
-    workPlace("Папка запуска", fs::current_path(ec));
+    workPlace(T("Project assets"), m_cfg.StartDir);
+    workPlace(T("Startup folder"), fs::current_path(ec));
 
-    group("Диски");
+    group(T("Drives"));
 #ifdef _WIN32
     for (char drive = 'A'; drive <= 'Z'; ++drive) {
         const std::string root = std::string(1, drive) + ":\\";
         if (fs::exists(root, ec)) place(root, root);
     }
 #else
-    place("Корень /", "/");
+    place(T("Root /"), "/");
     // Смонтированные носители: флешка и внешний диск — самые частые источники
     // чужих ассетов, и до них иначе идти вслепую через /media.
     for (const char* mountRoot : {"/media", "/mnt", "/run/media"}) {
@@ -145,7 +146,7 @@ void FileBrowser::Refresh() {
     std::error_code ec;
     fs::directory_iterator it(m_dir, fs::directory_options::skip_permission_denied, ec);
     if (ec) {
-        m_error = "Каталог недоступен: " + ec.message();
+        m_error = T("The folder is not accessible: ") + ec.message();
         return;
     }
     for (const fs::directory_entry& e : it) {
@@ -225,30 +226,30 @@ bool FileBrowser::Draw() {
     bool stayOpen = true;
     if (ImGui::BeginPopupModal(m_cfg.Title.c_str(), &stayOpen)) {
         // --- Панель навигации ---
-        if (EditorIcons::Button("up", "Вверх")) {
+        if (EditorIcons::Button("up", T("Up"))) {
             if (m_dir.has_parent_path() && m_dir.parent_path() != m_dir) GoTo(m_dir.parent_path());
         }
         ImGui::SameLine();
-        if (EditorIcons::Button("refresh", "Обновить")) Refresh();
+        if (EditorIcons::Button("refresh", T("Refresh"))) Refresh();
         ImGui::SameLine();
-        if (EditorIcons::Button("folder-plus", "Новая папка")) ImGui::OpenPopup("##newfolder");
+        if (EditorIcons::Button("folder-plus", T("New Folder"))) ImGui::OpenPopup("##newfolder");
         ImGui::SameLine();
-        ImGui::Checkbox("Скрытые", &m_showHidden);
+        ImGui::Checkbox(T("Hidden"), &m_showHidden);
         if (ImGui::IsItemDeactivatedAfterEdit()) Refresh();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(180);
-        ImGui::InputTextWithHint("##search", "Поиск...", m_search, sizeof(m_search));
+        ImGui::InputTextWithHint("##search", T("Search..."), m_search, sizeof(m_search));
 
         if (ImGui::BeginPopup("##newfolder")) {
-            ImGui::InputText("Имя", m_newFolder, sizeof(m_newFolder));
-            if (ImGui::Button("Создать") && m_newFolder[0]) {
+            ImGui::InputText(T("Name"), m_newFolder, sizeof(m_newFolder));
+            if (ImGui::Button(T("Create")) && m_newFolder[0]) {
                 std::error_code ec;
                 if (fs::create_directory(m_dir / m_newFolder, ec)) {
                     Refresh();
                     m_newFolder[0] = '\0';
                     ImGui::CloseCurrentPopup();
                 } else {
-                    m_error = "Не удалось создать папку: " + ec.message();
+                    m_error = T("Could not create the folder: ") + ec.message();
                 }
             }
             ImGui::EndPopup();
@@ -292,7 +293,7 @@ bool FileBrowser::Draw() {
             }
             ImGui::PopID();
         }
-        if (m_entries.empty()) ImGui::TextDisabled("Пусто");
+        if (m_entries.empty()) ImGui::TextDisabled("%s", T("Empty"));
         ImGui::EndChild();
 
         // --- Имя и кнопки ---
@@ -302,14 +303,14 @@ bool FileBrowser::Draw() {
             ImGui::SameLine();
             if (!m_cfg.FilterLabel.empty()) ImGui::TextDisabled("%s", m_cfg.FilterLabel.c_str());
         } else {
-            ImGui::TextDisabled("Будет выбрана: %s", m_dir.string().c_str());
+            ImGui::TextDisabled(T("Will select: %s"), m_dir.string().c_str());
         }
 
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
 
-        const char* okLabel = m_cfg.Mode == PickMode::SaveFile     ? "Сохранить"
-                              : m_cfg.Mode == PickMode::PickFolder ? "Выбрать папку"
-                                                               : "Открыть";
+        const char* okLabel = m_cfg.Mode == PickMode::SaveFile     ? T("Save")
+                              : m_cfg.Mode == PickMode::PickFolder ? T("Choose folder")
+                                                               : T("Open");
         if (ImGui::Button(okLabel, ImVec2(140, 0))) {
             if (m_cfg.Mode == PickMode::PickFolder) {
                 m_result = m_dir;
@@ -325,17 +326,17 @@ bool FileBrowser::Draw() {
                 }
                 std::error_code ec;
                 if (m_cfg.Mode == PickMode::OpenFile && !fs::exists(candidate, ec)) {
-                    m_error = "Файла нет: " + candidate.string();
+                    m_error = T("No such file: ") + candidate.string();
                 } else {
                     m_result = candidate;
                     confirmed = true;
                 }
             } else {
-                m_error = "Укажите имя файла";
+                m_error = T("Enter a file name");
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Отмена", ImVec2(140, 0))) {
+        if (ImGui::Button(T("Cancel"), ImVec2(140, 0))) {
             m_open = false;
             ImGui::CloseCurrentPopup();
         }

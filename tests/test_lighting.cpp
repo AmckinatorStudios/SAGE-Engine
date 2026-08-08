@@ -131,7 +131,7 @@ TEST(Lighting_old_scene_sun_migrates_into_an_entity) {
     CHECK_TRUE(scene != nullptr);
     if (!scene) return;
 
-    GameObject sun = scene->FindByName("Солнце");
+    GameObject sun = scene->FindByName("Sun");
     CHECK_TRUE(sun.Valid());
     if (!sun.Valid()) return;
     const LightComponent* lc = sun.Registry()->try_get<LightComponent>(sun.Entity());

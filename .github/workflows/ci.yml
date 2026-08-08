@@ -24,6 +24,12 @@ jobs:
       - name: RHI boundary check (no gl* outside the backend)
         run: python3 scripts/check_rhi_boundary.py
 
+      # Локализация редактора: каждая подпись обёрнута в T(), каждой есть
+      # перевод, спецификаторы формата у ключа и перевода совпадают. Тоже до
+      # сборки: проверка читает исходники и падает за секунду.
+      - name: Localization check (every editor string is translated)
+        run: python3 scripts/check_localization.py
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

@@ -53,7 +53,7 @@ TEST(Robust_scene_load_with_duplicate_ids) {
     // (см. MigrateV4toV5). Пересчёт именно здесь — самое дешёвое место
     // заметить, если миграция вдруг заведёт солнце ДВАЖДЫ.
     CHECK_EQ((int)scene->Count(), 3);
-    CHECK_TRUE(scene->FindByName("Солнце").Valid());
+    CHECK_TRUE(scene->FindByName("Sun").Valid());
     // Обе сущности живы и имена не потеряны.
     CHECK_TRUE(scene->FindByName("First").Valid());
     CHECK_TRUE(scene->FindByName("Second").Valid());

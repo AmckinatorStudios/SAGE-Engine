@@ -5,6 +5,7 @@
 
 #include "imgui.h"
 #include "sage/core/Profiler.h"
+#include "../Localization.h"
 
 namespace {
 
@@ -56,31 +57,32 @@ void ProfilerPanel::Draw(bool* open) {
     }
     if (!wantEnabled) return;
 
-    if (!ImGui::Begin("Профилировщик", open)) {
+    if (!ImGui::Begin(T("Profiler" "###Profiler"), open)) {
         ImGui::End();
         return;
     }
 
     const bool gpu = sage::profile::GpuTimersAvailable();
 
-    ImGui::Text("Кадр: CPU %.2f мс", sage::profile::FrameCpuMs());
+    ImGui::Text(T("Frame: CPU %.2f ms"), sage::profile::FrameCpuMs());
     if (gpu) {
         ImGui::SameLine();
-        ImGui::Text("| GPU %.2f мс", sage::profile::FrameGpuMs());
+        ImGui::Text(T("| GPU %.2f ms"), sage::profile::FrameGpuMs());
     } else {
         ImGui::SameLine();
-        ImGui::TextDisabled("| таймеров GPU нет");
+        ImGui::TextDisabled("%s", T("| no GPU timers"));
     }
 
-    ImGui::Checkbox("Усреднять", &m_averaged);
+    ImGui::Checkbox(T("Average"), &m_averaged);
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Покадровые значения скачут на десятки процентов от планировщика ОС.\n"
-            "Усреднение по 30 кадрам — то, по чему и смотрят.\n\n"
-            "Время GPU отстаёт на три кадра: спросить его сразу значит дождаться\n"
-            "видеокарты, то есть своим измерением создать измеряемую задержку.");
+            "%s", T("Per-frame numbers swing by tens of percent because of the OS scheduler.\n"
+              "The 30-frame average is what you actually read.\n"
+              "\n"
+              "GPU time lags three frames behind: asking for it right away means waiting\n"
+              "for the card, that is, creating the delay you are measuring."));
     }
 
     const std::vector<sage::profile::Entry>& entries =
@@ -88,7 +90,7 @@ void ProfilerPanel::Draw(bool* open) {
 
     if (entries.empty()) {
         ImGui::Separator();
-        ImGui::TextDisabled("Метки ещё не созрели — подождите несколько кадров.");
+        ImGui::TextDisabled("%s", T("Timestamps are not ready yet — wait a few frames."));
         ImGui::End();
         return;
     }
@@ -107,9 +109,9 @@ void ProfilerPanel::Draw(bool* open) {
     const ImGuiTableFlags flags =
         ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY;
     if (ImGui::BeginTable("##profile", 4, flags)) {
-        ImGui::TableSetupColumn("Участок", ImGuiTableColumnFlags_WidthStretch, 0.45f);
-        ImGui::TableSetupColumn("CPU, мс", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-        ImGui::TableSetupColumn("GPU, мс", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn(T("Section"), ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableSetupColumn(T("CPU, ms"), ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn(T("GPU, ms"), ImGuiTableColumnFlags_WidthFixed, 70.0f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.35f);
         ImGui::TableHeadersRow();
         for (const sage::profile::Entry& e : entries) DrawRow(e, maxMs, gpu);

@@ -7,6 +7,7 @@
 #include "imgui.h"
 
 #include "EditorIcons.h"
+#include "../Localization.h"
 
 void ConsolePanel::Attach() {
     Log::SetSink([this](LogLevel level, const std::string& cat, const std::string& msg) {
@@ -52,15 +53,15 @@ bool ConsolePanel::Passes(const Entry& e) const {
 }
 
 void ConsolePanel::Draw() {
-    ImGui::Begin("Console");
+    ImGui::Begin(T("Console" "###Console"));
     if (ImGui::IsWindowFocused()) MarkSeen();
 
-    if (EditorIcons::Button("trash", "Clear", "Очистить консоль")) {
+    if (EditorIcons::Button("trash", T("Clear"), T("Clear the console"))) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_entries.clear();
     }
     ImGui::SameLine();
-    if (EditorIcons::Button("copy", "Copy", "Скопировать видимые строки в буфер обмена")) {
+    if (EditorIcons::Button("copy", T("Copy"), T("Copy the visible lines to the clipboard"))) {
         std::string all;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -79,18 +80,18 @@ void ConsolePanel::Draw() {
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
-    ImGui::Checkbox("Debug", &m_showDebug);
+    ImGui::Checkbox(T("Debug"), &m_showDebug);
     ImGui::SameLine();
-    ImGui::Checkbox("Info", &m_showInfo);
+    ImGui::Checkbox(T("Info"), &m_showInfo);
     ImGui::SameLine();
     char warnLabel[48];
-    std::snprintf(warnLabel, sizeof(warnLabel), "Warn (%d)", m_warnCount);
+    std::snprintf(warnLabel, sizeof(warnLabel), T("Warn (%d)"), m_warnCount);
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.30f, 1.0f));
     ImGui::Checkbox(warnLabel, &m_showWarn);
     ImGui::PopStyleColor();
     ImGui::SameLine();
     char errLabel[48];
-    std::snprintf(errLabel, sizeof(errLabel), "Error (%d)", m_errorCount);
+    std::snprintf(errLabel, sizeof(errLabel), T("Error (%d)"), m_errorCount);
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.40f, 0.40f, 1.0f));
     ImGui::Checkbox(errLabel, &m_showError);
     ImGui::PopStyleColor();
@@ -98,12 +99,12 @@ void ConsolePanel::Draw() {
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
-    ImGui::Checkbox("Collapse", &m_collapse);
+    ImGui::Checkbox(T("Collapse"), &m_collapse);
     ImGui::SameLine();
-    ImGui::Checkbox("Auto-scroll", &m_autoScroll);
+    ImGui::Checkbox(T("Auto-scroll"), &m_autoScroll);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::InputTextWithHint("##filter", "поиск...", m_filter, sizeof(m_filter));
+    ImGui::InputTextWithHint("##filter", T("Search..."), m_filter, sizeof(m_filter));
     ImGui::Separator();
 
     ImGui::BeginChild("##console_scroll", ImVec2(0, 0), ImGuiChildFlags_None,
@@ -123,7 +124,7 @@ void ConsolePanel::Draw() {
             EditorIcons::Inline(icon, glm::vec3(color.x, color.y, color.z));
             ImGui::SameLine();
             if (m_collapse && e.Repeats > 1) {
-                ImGui::TextColored(color, "[%s] %s  (x%d)", e.Category.c_str(), e.Message.c_str(),
+                ImGui::TextColored(color, T("[%s] %s  (x%d)"), e.Category.c_str(), e.Message.c_str(),
                                    e.Repeats);
             } else {
                 ImGui::TextColored(color, "[%s] %s", e.Category.c_str(), e.Message.c_str());
@@ -135,8 +136,8 @@ void ConsolePanel::Draw() {
             }
         }
         if (shown == 0) {
-            ImGui::TextDisabled(m_filter[0] ? "Ничего не найдено по фильтру"
-                                            : "Нет сообщений выбранного уровня");
+            ImGui::TextDisabled(m_filter[0] ? T("The filter matched nothing")
+                                            : T("No messages of the selected level"));
         }
     }
     if (m_autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {

@@ -2,6 +2,7 @@
 
 #include "EditorIcons.h"
 #include "imgui.h"
+#include "Localization.h"
 
 bool ConfirmDialog::IsSuppressed(const char* kind) const {
     auto it = m_suppressed.find(kind);
@@ -22,7 +23,7 @@ void ConfirmDialog::Ask(const char* kind, std::string title, std::string message
     m_kind = kind;
     m_title = std::move(title);
     m_message = std::move(message);
-    m_confirmLabel = confirmLabel ? confirmLabel : "Продолжить";
+    m_confirmLabel = confirmLabel ? confirmLabel : T("Continue");
     m_action = std::move(onConfirm);
     m_dontAskAgain = false;
     m_open = true;
@@ -45,9 +46,9 @@ void ConfirmDialog::Draw() {
         ImGui::SameLine();
         ImGui::TextWrapped("%s", m_message.c_str());
         ImGui::Spacing();
-        ImGui::Checkbox("Больше не спрашивать об этом действии", &m_dontAskAgain);
+        ImGui::Checkbox(T("Do not ask about this action again"), &m_dontAskAgain);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Вернуть вопрос можно в Window -> Settings.");
+            ImGui::SetTooltip("%s", T("You can bring the question back in Window -> Settings."));
         }
         ImGui::Separator();
 
@@ -55,7 +56,7 @@ void ConfirmDialog::Draw() {
         // и Enter отменяет: человек, у которого сработала мышечная память на
         // «Enter = согласен», не должен этим удалять свою работу.
         ImGui::SetItemDefaultFocus();
-        if (ImGui::Button("Отмена", ImVec2(140, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (ImGui::Button(T("Cancel"), ImVec2(140, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             m_open = false;
             m_action = nullptr;
             ImGui::CloseCurrentPopup();

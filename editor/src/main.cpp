@@ -10,10 +10,16 @@
 #include "sage/core/GameModule.h"
 #include "sage/core/Log.h"
 #include "EditorLayer.h"
+#include "Localization.h"
 
 sage::Application* sage::CreateApplication(int /*argc*/, char** /*argv*/) {
     Log::Init("sage_editor.log");
     LOG_INFO("Editor") << "SAGE Editor запускается...";
+
+    // Язык интерфейса — ДО создания слоя: первая же панель спросит перевод, а
+    // каталог обязан быть готов. Выбор берётся из настроек редактора, а при
+    // первом запуске — из SAGE_EDITOR_LANG или английский.
+    sage::editor::InitLocalization();
 
     sage::AppConfig config;
     config.Width = 1600;

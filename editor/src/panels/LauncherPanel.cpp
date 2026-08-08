@@ -14,6 +14,7 @@
 #include "Project.h"
 #include "RecentProjects.h"
 #include "sage/core/Paths.h"
+#include "../Localization.h"
 
 namespace fs = std::filesystem;
 
@@ -29,13 +30,13 @@ std::string HowLongAgo(const fs::path& projectFile) {
     if (ec) return {};
     const auto age = decltype(stamp)::clock::now() - stamp;
     const long long hours = std::chrono::duration_cast<std::chrono::hours>(age).count();
-    if (hours < 1) return "только что";
-    if (hours < 24) return std::to_string(hours) + " ч назад";
+    if (hours < 1) return T("just now");
+    if (hours < 24) return std::to_string(hours) + T(" h ago");
     const long long days = hours / 24;
-    if (days == 1) return "вчера";
-    if (days < 30) return std::to_string(days) + " дн назад";
+    if (days == 1) return T("yesterday");
+    if (days < 30) return std::to_string(days) + T(" d ago");
     const long long months = days / 30;
-    return std::to_string(months) + " мес назад";
+    return std::to_string(months) + T(" mo ago");
 }
 
 // Путь, укороченный с НАЧАЛА: конец информативнее начала. У
@@ -49,34 +50,33 @@ std::string ShortPath(const std::string& path, size_t maxLen) {
 } // namespace
 
 std::string LauncherPanel::CreateBlockedReason() const {
-    if (m_newName[0] == '\0') return "Введите имя проекта";
-    if (m_newDir[0] == '\0') return "Выберите папку";
+    if (m_newName[0] == '\0') return T("Enter a project name");
+    if (m_newDir[0] == '\0') return T("Choose a folder");
 
     // Имя проекта становится именем ПАПКИ — символы, которых файловая система
     // не примет, надо отсечь здесь, а не получить невнятную ошибку записи.
     for (const char* c = m_newName; *c; ++c) {
-        if (std::strchr("/\\:*?\"<>|", *c)) return "В имени нельзя использовать / \\ : * ? \" < > |";
+        if (std::strchr("/\\:*?\"<>|", *c)) return T("A name cannot contain / \\ : * ? \" < > |");
     }
 
     std::error_code ec;
     const fs::path parent(m_newDir);
     const fs::path target = parent / m_newName;
-    if (fs::exists(target, ec) && !fs::is_empty(target, ec)) return "Такая папка уже есть и не пуста";
+    if (fs::exists(target, ec) && !fs::is_empty(target, ec)) return T("That folder already exists and is not empty");
     return {};
 }
 
 void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float width) {
     ImGui::BeginChild("##recent", ImVec2(width, 300), true);
-    ImGui::TextDisabled("НЕДАВНИЕ");
+    ImGui::TextDisabled("%s", T("RECENT"));
     ImGui::Separator();
 
     // Копия списка: открытие/удаление меняет recent прямо во время обхода.
     const std::vector<std::string> items = recent.List();
     if (items.empty()) {
         ImGui::Spacing();
-        ImGui::TextDisabled("Пока пусто.");
-        ImGui::TextWrapped("Создайте проект справа — он появится здесь и будет открываться "
-                           "одним щелчком.");
+        ImGui::TextDisabled("%s", T("Nothing here yet."));
+        ImGui::TextWrapped("%s", T("Create a project on the right — it will appear here and open in one click."));
         ImGui::EndChild();
         return;
     }
@@ -113,7 +113,7 @@ void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float w
                     ImGui::GetColorU32(exists ? ImGuiCol_Text : ImGuiCol_TextDisabled),
                     name.c_str());
         const std::string sub = exists ? (ShortPath(path, 52) + "   ·   " + HowLongAgo(projectFile))
-                                       : (ShortPath(path, 52) + "   ·   папки больше нет");
+                                       : (ShortPath(path, 52) + T("   \u00b7   the folder is gone"));
         dl->AddText(ImVec2(rowStart.x + 8, rowStart.y + 4 + ImGui::GetTextLineHeight() + 2),
                     ImGui::GetColorU32(ImGuiCol_TextDisabled), sub.c_str());
 
@@ -121,7 +121,7 @@ void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float w
         // строке её задевают при открытии проекта.
         ImGui::SameLine(0.0f, 6.0f);
         if (EditorIcons::Button("trash", "")) removeAfter = path;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Убрать из списка (проект не удаляется)");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Remove from the list (the project is not deleted)"));
         ImGui::PopID();
     }
     if (!removeAfter.empty()) recent.Remove(removeAfter);
@@ -135,22 +135,22 @@ void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float w
 static float BrowseButtonWidth() {
     const ImGuiStyle& st = ImGui::GetStyle();
     const float iconW = ImGui::GetFrameHeight() * 0.68f;
-    return ImGui::CalcTextSize("Обзор").x + iconW + st.FramePadding.x * 3.0f + st.ItemSpacing.x;
+    return ImGui::CalcTextSize(T("Browse")).x + iconW + st.FramePadding.x * 3.0f + st.ItemSpacing.x;
 }
 
 void LauncherPanel::DrawCreate(EditorHost& host) {
-    ImGui::TextDisabled("НОВЫЙ ПРОЕКТ");
+    ImGui::TextDisabled("%s", T("NEW PROJECT"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##name", "Имя проекта", m_newName, sizeof(m_newName));
+    ImGui::InputTextWithHint("##name", T("Project name"), m_newName, sizeof(m_newName));
 
     ImGui::SetNextItemWidth(-BrowseButtonWidth());
-    ImGui::InputTextWithHint("##dir", "Папка", m_newDir, sizeof(m_newDir));
+    ImGui::InputTextWithHint("##dir", T("Folder"), m_newDir, sizeof(m_newDir));
     ImGui::SameLine();
-    if (EditorIcons::Button("folder", "Обзор")) {
+    if (EditorIcons::Button("folder", T("Browse"))) {
         FileBrowser::Config c;
-        c.Title = "Куда положить проект";
+        c.Title = T("Where to put the project");
         c.Mode = FileBrowser::PickMode::PickFolder;
         c.StartDir = m_newDir;
         m_browser.Open(c);
@@ -163,7 +163,7 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
     // складывает, а ошибиться папкой на один уровень — обычное дело.
     std::error_code ec;
     const fs::path target = fs::path(m_newDir) / m_newName;
-    ImGui::TextDisabled("Будет создано:");
+    ImGui::TextDisabled("%s", T("Will create:"));
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.80f, 0.92f, 1.0f));
     ImGui::TextWrapped("%s", target.generic_string().c_str());
     ImGui::PopStyleColor();
@@ -172,7 +172,7 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
     if (!blocked.empty()) ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "%s", blocked.c_str());
 
     ImGui::BeginDisabled(!blocked.empty());
-    if (ImGui::Button("Создать", ImVec2(-1.0f, 0.0f))) {
+    if (ImGui::Button(T("Create"), ImVec2(-1.0f, 0.0f))) {
         std::string err;
         // Папку под проекты создаём сами: по умолчанию это «Документы/SAGE
         // Projects», которой при первом запуске ещё нет, и требовать от
@@ -193,18 +193,18 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
 
 void LauncherPanel::DrawOpen(EditorHost& host) {
     ImGui::Spacing();
-    ImGui::TextDisabled("ОТКРЫТЬ ДРУГОЙ");
+    ImGui::TextDisabled("%s", T("OPEN ANOTHER"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(-BrowseButtonWidth());
-    ImGui::InputTextWithHint("##open", "Папка проекта или .sageproj", m_openPath,
+    ImGui::InputTextWithHint("##open", T("Project folder or .sageproj"), m_openPath,
                              sizeof(m_openPath));
     ImGui::SameLine();
-    if (EditorIcons::Button("folder", "Обзор")) {
+    if (EditorIcons::Button("folder", T("Browse"))) {
         FileBrowser::Config c;
-        c.Title = "Открыть проект";
+        c.Title = T("Open project");
         c.Filters = {".sageproj"};
-        c.FilterLabel = "Проекты SAGE (*.sageproj)";
+        c.FilterLabel = T("SAGE projects (*.sageproj)");
         c.StartDir = m_openPath[0] ? fs::path(m_openPath) : sage::DefaultProjectsDir();
         m_browser.Open(c);
         m_browseTarget = m_openPath;
@@ -213,7 +213,7 @@ void LauncherPanel::DrawOpen(EditorHost& host) {
     }
 
     ImGui::BeginDisabled(m_openPath[0] == '\0');
-    if (ImGui::Button("Открыть", ImVec2(-1.0f, 0.0f))) {
+    if (ImGui::Button(T("Open"), ImVec2(-1.0f, 0.0f))) {
         std::string err;
         // Ранний выход запрещён по той же причине, что и в DrawCreate: мы
         // внутри BeginDisabled и двух окон, кадр надо достроить.
@@ -246,11 +246,10 @@ void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(940, 470), ImGuiCond_Appearing);
-    ImGui::Begin("SAGE Engine", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking);
+    ImGui::Begin(T("SAGE Engine" "###SAGE Engine"), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking);
 
-    ImGui::TextUnformatted("Проект хранит сцены, ассеты и материалы в одной папке.");
-    ImGui::TextDisabled("Без него редактор тоже работает, но ссылки на файлы будут "
-                        "непереносимыми.");
+    ImGui::TextUnformatted(T("A project keeps scenes, assets and materials in one folder."));
+    ImGui::TextDisabled("%s", T("The editor works without one, but file references will not be portable."));
     ImGui::Spacing();
 
     // Два столбца: слева самое частое действие (открыть вчерашнее), справа —
@@ -271,10 +270,10 @@ void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
     }
 
     ImGui::Separator();
-    if (ImGui::SmallButton("Работать без проекта")) m_dismissed = true;
+    if (ImGui::SmallButton(T("Work without a project"))) m_dismissed = true;
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Откроется демо-сцена. Ассеты можно будет подключать только по\n"
-                          "абсолютным путям — в собранной игре они не найдутся.");
+        ImGui::SetTooltip("%s", T("A demo scene will open. Assets can only be referenced by\n"
+          "absolute paths — the built game will not find them."));
     }
 
     ImGui::End();

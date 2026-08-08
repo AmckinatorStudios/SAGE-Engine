@@ -19,6 +19,7 @@
 #include "sage/assets/AssetDatabase.h"
 #include "Project.h"
 #include "sage/core/Log.h"
+#include "../Localization.h"
 
 namespace fs = std::filesystem;
 
@@ -314,8 +315,8 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     }
     if (ImGui::BeginPopupContextItem("##tile_ctx")) {
         m_selected = path;
-        if (ImGui::MenuItem("Rename")) { m_renameTarget = path; m_error.clear(); }
-        if (ImGui::MenuItem("Delete")) { m_deleteTarget = path; }
+        if (ImGui::MenuItem(T("Rename"))) { m_renameTarget = path; m_error.clear(); }
+        if (ImGui::MenuItem(T("Delete"))) { m_deleteTarget = path; }
 
         // Конвертация в свой формат — там же, где всё остальное про файл.
         // Отдельной кнопки в меню нет намеренно: конвертируют КОНКРЕТНЫЙ файл,
@@ -325,12 +326,12 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         const bool texture = sage::assets::IsConvertibleTexture(p);
         if (model || texture) {
             ImGui::Separator();
-            const char* label = model ? "Конвертировать в .sagemesh"
-                                      : "Конвертировать в .sagetex";
+            const char* label = model ? T("Convert to .sagemesh")
+                                      : T("Convert to .sagetex");
             if (ImGui::MenuItem(label)) ConvertOne(host, path);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Свой формат движка: грузится без разбора и весит меньше.\n"
-                                  "Исходный файл остаётся на месте.");
+                ImGui::SetTooltip("%s", T("The engine's own format: loads without parsing and weighs less.\n"
+                  "The source file stays where it is."));
             }
         }
         ImGui::EndPopup();
@@ -347,15 +348,15 @@ void AssetsPanel::ConvertOne(EditorHost& host, const fs::path& path) {
     opts.Overwrite = true;   // явное действие по одному файлу — перезапись ожидаема
     const sage::assets::ConvertResult r = sage::assets::ConvertAnyToNative(path.string(), {}, opts);
     if (!r.Ok) {
-        host.SetStatusMessage("Конвертация не удалась: " + r.Error);
+        host.SetStatusMessage(T("Conversion failed: ") + r.Error);
         return;
     }
     char buf[256];
-    std::snprintf(buf, sizeof(buf), "%s -> %s (%.1fx меньше)",
+    std::snprintf(buf, sizeof(buf), T("%s -> %s (%.1fx smaller)"),
                   path.filename().string().c_str(),
                   fs::path(r.OutputPath).filename().string().c_str(), (double)r.Ratio());
     host.SetStatusMessage(buf);
-    for (const std::string& w : r.Warnings) host.SetStatusMessage("Импорт: " + w);
+    for (const std::string& w : r.Warnings) host.SetStatusMessage(T("Import: ") + w);
 }
 
 // Вся текущая папка. Отчёт — одной строкой со сводкой: перечислять полсотни
@@ -379,9 +380,9 @@ void AssetsPanel::ConvertFolderHere(EditorHost& host) {
     }
     char buf[256];
     if (ok == 0 && failed == 0) {
-        std::snprintf(buf, sizeof(buf), "Конвертировать нечего: в папке нет моделей и картинок");
+        std::snprintf(buf, sizeof(buf), "%s", T("Nothing to convert: no models or images in the folder"));
     } else {
-        std::snprintf(buf, sizeof(buf), "Сконвертировано %zu, пропущено %zu; %.1f -> %.1f КБ",
+        std::snprintf(buf, sizeof(buf), T("Converted %zu, skipped %zu; %.1f -> %.1f KB"),
                       ok, failed, srcBytes / 1024.0, outBytes / 1024.0);
     }
     host.SetStatusMessage(buf);
@@ -467,13 +468,13 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
     const fs::path target = folder / source.filename();
     if (fs::weakly_canonical(source, ec) == fs::weakly_canonical(target, ec)) return;
     if (fs::exists(target, ec)) {
-        host.SetStatusMessage("В папке уже есть " + source.filename().string());
+        host.SetStatusMessage(T("The folder already contains ") + source.filename().string());
         return;
     }
 
     fs::rename(source, target, ec);
     if (ec) {
-        host.SetStatusMessage("Перенос не удался: " + ec.message());
+        host.SetStatusMessage(T("Moving failed: ") + ec.message());
         LOG_ERROR("Editor") << "Перенос ассета не удался: " << ec.message();
         return;
     }
@@ -488,7 +489,7 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
     // ответ на «где этот файл» обязан измениться.
     Project& project = host.CurrentProject();
     if (project.Loaded()) sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
-    host.SetStatusMessage("Перенесено в " + folder.filename().string() + ": " +
+    host.SetStatusMessage(T("Moved into ") + folder.filename().string() + ": " +
                           source.filename().string());
 }
 
@@ -497,12 +498,12 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
     std::error_code ec;
 
     if (!fs::exists(source, ec) || fs::is_directory(source, ec)) {
-        report.Error = "Файл не найден: " + source.string();
+        report.Error = T("File not found: ") + source.string();
         return report;
     }
     fs::create_directories(destDir, ec);
     if (ec) {
-        report.Error = "Папка недоступна: " + ec.message();
+        report.Error = T("The folder is not accessible: ") + ec.message();
         return report;
     }
 
@@ -558,7 +559,7 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
 
     const fs::path mainDst = destDir / source.filename();
     if (!copyOne(source, mainDst)) {
-        report.Error = "Не удалось скопировать: " + source.filename().string();
+        report.Error = T("Could not copy: ") + source.filename().string();
         return report;
     }
     report.Created = mainDst;
@@ -588,42 +589,42 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
 void AssetsPanel::DrawImportButton(EditorHost& host) {
     Project& project = host.CurrentProject();
     ImGui::BeginDisabled(!project.Loaded());
-    if (ImGui::SmallButton("Импорт…")) {
+    if (ImGui::SmallButton(T("Import..."))) {
         FileBrowser::Config c;
-        c.Title = "Внести файл в проект";
+        c.Title = T("Bring a file into the project");
         // Пусто — показывать всё: в проект вносят и модели, и картинки, и звук,
         // и чужие скрипты, а перечислять их фильтром значит однажды забыть
         // формат, который движок уже понимает.
-        c.FilterLabel = "Все файлы";
+        c.FilterLabel = T("All files");
         m_importBrowser.Open(c);
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            project.Loaded()
-                ? "Скопировать файл со стороны в текущую папку проекта.\n"
-                  "Модель переезжает вместе со своими .mtl/.bin и текстурами."
-                : "Сначала откройте проект (File > New Project…)");
+            "%s", project.Loaded()
+                      ? T("Copy an outside file into the current project folder.\n"
+                          "A model moves together with its .mtl/.bin files and textures.")
+                      : T("Open a project first (File > New Project...)"));
     }
 
     if (!m_importBrowser.Draw()) return;
 
     const ImportReport r = ImportAsset(m_importBrowser.Result(), host.AssetsCwd());
     if (!r.Ok) {
-        host.SetStatusMessage("Импорт не удался: " + r.Error);
+        host.SetStatusMessage(T("Import failed: ") + r.Error);
         LOG_ERROR("Editor") << "Импорт не удался: " << r.Error;
         return;
     }
     m_selected = r.Created;
 
-    std::string message = "Внесено: " + r.Created.filename().string();
-    if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + " спутник(ов))";
+    std::string message = T("Brought in: ") + r.Created.filename().string();
+    if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + T(" companion file(s))");
     if (!r.Missing.empty()) {
         // Недостающие спутники — это будущее «модель без текстуры», и узнать о
         // них надо здесь. Список уходит в консоль целиком: в статусной строке
         // ему не поместиться, а первое имя уже подсказывает, что искать.
-        message += "; не найдено: " + r.Missing.front();
-        if (r.Missing.size() > 1) message += " и ещё " + std::to_string(r.Missing.size() - 1);
+        message += T("; not found: ") + r.Missing.front();
+        if (r.Missing.size() > 1) message += T(" and ") + std::to_string(r.Missing.size() - 1);
         for (const std::string& m : r.Missing)
             LOG_WARN("Editor") << "Импорт: спутник не найден — " << m;
     }
@@ -707,7 +708,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::OpenPopup("Create Asset");
     }
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Create Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(T("Create Asset" "###Create Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         const char* kindLabel = "";
         switch (m_createKind) {
             case CreateKind::Folder:   kindLabel = "Folder"; break;
@@ -717,10 +718,10 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             default: break;
         }
         ImGui::TextDisabled("%s in %s", kindLabel, host.AssetsCwd().filename().string().c_str());
-        bool enterPressed = ImGui::InputText("Name", m_createName, sizeof(m_createName),
+        bool enterPressed = ImGui::InputText(T("Name"), m_createName, sizeof(m_createName),
                                               ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (enterPressed || ImGui::Button("Create", ImVec2(120, 0))) {
+        if (enterPressed || ImGui::Button(T("Create"), ImVec2(120, 0))) {
             fs::path created;
             if (CreateAsset(m_createKind, m_createName, host.AssetsCwd(), created, m_error)) {
                 m_selected = created;
@@ -730,7 +731,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) {
             m_createKind = CreateKind::None;
             m_error.clear();
             ImGui::CloseCurrentPopup();
@@ -742,16 +743,16 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::OpenPopup("Rename Asset");
     }
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Rename Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(T("Rename Asset" "###Rename Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextDisabled("%s", m_renameTarget.filename().string().c_str());
         if (ImGui::IsWindowAppearing()) {
             std::snprintf(m_renameBuf, sizeof(m_renameBuf), "%s",
                           m_renameTarget.filename().string().c_str());
         }
-        bool enterPressed = ImGui::InputText("New name", m_renameBuf, sizeof(m_renameBuf),
+        bool enterPressed = ImGui::InputText(T("New name"), m_renameBuf, sizeof(m_renameBuf),
                                               ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (enterPressed || ImGui::Button("Rename", ImVec2(120, 0))) {
+        if (enterPressed || ImGui::Button(T("Rename"), ImVec2(120, 0))) {
             fs::path target = m_renameTarget.parent_path() / m_renameBuf;
             std::error_code ec;
             fs::rename(m_renameTarget, target, ec);
@@ -765,7 +766,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) {
             m_renameTarget.clear();
             m_error.clear();
             ImGui::CloseCurrentPopup();
@@ -777,11 +778,11 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::OpenPopup("Delete Asset");
     }
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Delete Asset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Delete \"%s\"?", m_deleteTarget.filename().string().c_str());
-        ImGui::TextDisabled("This cannot be undone.");
+    if (ImGui::BeginPopupModal(T("Delete Asset" "###Delete Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text(T("Delete \"%s\"?"), m_deleteTarget.filename().string().c_str());
+        ImGui::TextDisabled("%s", T("This cannot be undone."));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-        if (ImGui::Button("Delete", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Delete"), ImVec2(120, 0))) {
             std::error_code ec;
             fs::remove_all(m_deleteTarget, ec);
             if (ec) LOG_ERROR("Editor") << "Asset delete failed: " << ec.message();
@@ -791,7 +792,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         }
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) {
             m_deleteTarget.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -805,16 +806,16 @@ void AssetsPanel::Draw(EditorHost& host) {
     Project& project = host.CurrentProject();
     fs::path& cwd = host.AssetsCwd();
 
-    ImGui::Begin("Assets");
+    ImGui::Begin(T("Assets" "###Assets"));
 
     if (!project.Loaded()) {
-        ImGui::TextDisabled("No project open.");
-        ImGui::TextDisabled("File > New Project... to create one; browsing current dir:");
+        ImGui::TextDisabled("%s", T("No project open."));
+        ImGui::TextDisabled("%s", T("File > New Project... to create one; browsing current dir:"));
     }
 
     fs::path root = project.Loaded() ? project.Dir() : fs::path("/");
     bool canGoUp = cwd.has_parent_path() && cwd != root;
-    if (canGoUp && ImGui::SmallButton("Up")) cwd = cwd.parent_path();
+    if (canGoUp && ImGui::SmallButton(T("Up"))) cwd = cwd.parent_path();
     ImGui::SameLine();
     DrawBreadcrumb(host);
 
@@ -828,7 +829,7 @@ void AssetsPanel::Draw(EditorHost& host) {
     DrawImportButton(host);
 
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##assets_search", "Search...", m_search, sizeof(m_search));
+    ImGui::InputTextWithHint("##assets_search", T("Search..."), m_search, sizeof(m_search));
 
     // Сломанные ссылки — В ПАНЕЛИ, а не только в логе. Именно молчание и было
     // исходной болезнью: сцена грузилась, объект стоял на месте, просто без
@@ -837,7 +838,7 @@ void AssetsPanel::Draw(EditorHost& host) {
     if (!broken.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.40f, 0.40f, 1.0f));
         const bool open = ImGui::CollapsingHeader(
-            ("Битых ссылок: " + std::to_string(broken.size()) + "###brokenrefs").c_str());
+            (T("Broken references: ") + std::to_string(broken.size()) + "###brokenrefs").c_str());
         ImGui::PopStyleColor();
         if (open) {
             for (const auto& b : broken) {
@@ -845,11 +846,11 @@ void AssetsPanel::Draw(EditorHost& host) {
                                                        : b.Hint.c_str());
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip(
-                        "Файла нет. Верните его на место или переназначьте ассет —\n"
-                        "переименование мимо редактора мог поймать только сайдкар .meta.");
+                        "%s", T("The file is missing. Put it back or reassign the asset —\n"
+                          "only the .meta sidecar could have caught a rename made outside the editor."));
                 }
             }
-            if (ImGui::SmallButton("Пересканировать проект")) {
+            if (ImGui::SmallButton(T("Rescan project"))) {
                 sage::AssetDatabase::Instance().ClearBroken();
                 if (project.Loaded())
                     sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
@@ -908,7 +909,7 @@ void AssetsPanel::Draw(EditorHost& host) {
     if (!any) {
         ImGui::Spacing();
         ImGui::TextDisabled(m_search[0] ? "Nothing matches the search." : "This folder is empty.");
-        ImGui::TextDisabled("Right-click to create a folder, script, material or text file.");
+        ImGui::TextDisabled("%s", T("Right-click to create a folder, script, material or text file."));
     }
 
     // Создание ассетов — ПКМ по пустому месту (не по тайлу: у тайлов своё меню).
@@ -919,15 +920,15 @@ void AssetsPanel::Draw(EditorHost& host) {
             std::snprintf(m_createName, sizeof(m_createName), "%s", defaultName);
             m_error.clear();
         };
-        if (ImGui::MenuItem("New Folder")) startCreate(CreateKind::Folder, "NewFolder");
-        if (ImGui::MenuItem("New Script (.lua)")) startCreate(CreateKind::Script, "new_script");
-        if (ImGui::MenuItem("New Text File (.txt)")) startCreate(CreateKind::TextFile, "notes");
-        if (ImGui::MenuItem("New Material (.sagemat)")) startCreate(CreateKind::Material, "NewMaterial");
+        if (ImGui::MenuItem(T("New Folder"))) startCreate(CreateKind::Folder, "NewFolder");
+        if (ImGui::MenuItem(T("New Script (.lua)"))) startCreate(CreateKind::Script, "new_script");
+        if (ImGui::MenuItem(T("New Text File (.txt)"))) startCreate(CreateKind::TextFile, "notes");
+        if (ImGui::MenuItem(T("New Material (.sagemat)"))) startCreate(CreateKind::Material, "NewMaterial");
         ImGui::Separator();
-        if (ImGui::MenuItem("Конвертировать всю папку в форматы движка")) ConvertFolderHere(host);
+        if (ImGui::MenuItem(T("Convert the whole folder to engine formats"))) ConvertFolderHere(host);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Модели и картинки этой папки (включая вложенные) -> .sagemesh/.sagetex.\n"
-                              "Уже сконвертированные пропускаются, исходники остаются.");
+            ImGui::SetTooltip("%s", T("Models and images in this folder (including nested) -> .sagemesh/.sagetex.\n"
+              "Already converted files are skipped, sources stay in place."));
         }
         ImGui::EndPopup();
     }

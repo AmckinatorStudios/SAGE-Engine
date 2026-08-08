@@ -10,6 +10,7 @@
 #include "EditorIcons.h"
 #include "imgui.h"
 #include "sage/core/Log.h"
+#include "Localization.h"
 
 namespace fs = std::filesystem;
 
@@ -282,12 +283,12 @@ void CodeEditor::DrawTabBar() {
 }
 
 void CodeEditor::DrawToolbar(Tab& tab) {
-    if (EditorIcons::Button("save", "Сохранить")) Save(tab);
+    if (EditorIcons::Button("save", T("Save"))) Save(tab);
     ImGui::SameLine();
-    if (EditorIcons::Button("search", "Найти")) m_showFind = !m_showFind;
+    if (EditorIcons::Button("search", T("Find"))) m_showFind = !m_showFind;
     ImGui::SameLine();
     ImGui::BeginDisabled(tab.Undo.empty());
-    if (EditorIcons::Button("rotate", "Отменить")) {
+    if (EditorIcons::Button("rotate", T("Undo"))) {
         tab.Redo.push_back({tab.Lines, tab.CursorLine, tab.CursorCol});
         const UndoStep& step = tab.Undo.back();
         tab.Lines = step.Lines;
@@ -298,7 +299,7 @@ void CodeEditor::DrawToolbar(Tab& tab) {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::TextDisabled("| строк: %d | %s", (int)tab.Lines.size(),
+    ImGui::TextDisabled(T("| lines: %d | %s"), (int)tab.Lines.size(),
                         tab.Kind == Syntax::Lua    ? "Lua"
                         : tab.Kind == Syntax::Glsl ? "GLSL"
                                                    : "текст");
@@ -309,7 +310,7 @@ void CodeEditor::DrawToolbar(Tab& tab) {
 
     if (m_showFind) {
         ImGui::SetNextItemWidth(240);
-        if (ImGui::InputTextWithHint("##find", "Найти (Enter — следующее)", m_find, sizeof(m_find),
+        if (ImGui::InputTextWithHint("##find", T("Find (Enter for next)"), m_find, sizeof(m_find),
                                      ImGuiInputTextFlags_EnterReturnsTrue) &&
             m_find[0]) {
             // Ищем со следующей строки, чтобы Enter шёл вперёд, а не топтался.
@@ -327,7 +328,7 @@ void CodeEditor::DrawToolbar(Tab& tab) {
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80);
-        if (ImGui::InputTextWithHint("##goto", "Строка", m_gotoLine, sizeof(m_gotoLine),
+        if (ImGui::InputTextWithHint("##goto", T("Line"), m_gotoLine, sizeof(m_gotoLine),
                                      ImGuiInputTextFlags_EnterReturnsTrue |
                                          ImGuiInputTextFlags_CharsDecimal)) {
             const int line = std::atoi(m_gotoLine);
@@ -677,19 +678,18 @@ void CodeEditor::Draw(bool* open) {
         ImGui::SetNextWindowFocus();
         m_requestFocus = false;
     }
-    if (!ImGui::Begin("Код", open)) {
+    if (!ImGui::Begin(T("Code" "###Code"), open)) {
         ImGui::End();
         return;
     }
 
     if (m_tabs.empty()) {
-        ImGui::TextDisabled("Нет открытых файлов.");
+        ImGui::TextDisabled("%s", T("No open files."));
         ImGui::Spacing();
-        ImGui::TextWrapped("Двойной клик по .lua, .vert, .frag или .glsl в панели Assets открывает "
-                           "файл здесь.");
+        ImGui::TextWrapped("%s", T("Double-click a .lua, .vert, .frag or .glsl file in Assets to open it here."));
         ImGui::Spacing();
-        ImGui::TextDisabled("Ctrl+S — сохранить, Ctrl+F — найти, Ctrl+/ — комментарий,");
-        ImGui::TextDisabled("Ctrl+D — дублировать строку, Alt+Up/Down — переставить строку.");
+        ImGui::TextDisabled("%s", T("Ctrl+S saves, Ctrl+F finds, Ctrl+/ comments,"));
+        ImGui::TextDisabled("%s", T("Ctrl+D duplicates a line, Alt+Up/Down moves it."));
         ImGui::End();
         return;
     }
@@ -714,7 +714,7 @@ void CodeEditor::Draw(bool* open) {
     const char* syntax = tab.Kind == Syntax::Lua    ? "Lua"
                          : tab.Kind == Syntax::Glsl ? "GLSL"
                                                     : "текст";
-    ImGui::TextDisabled("Строка %d, столбец %d  |  строк: %zu  |  %s  |  %s",
+    ImGui::TextDisabled(T("Line %d, column %d  |  lines: %zu  |  %s  |  %s"),
                         tab.CursorLine + 1, tab.CursorCol + 1, tab.Lines.size(), syntax,
                         tab.Dirty ? "не сохранён" : "сохранён");
 

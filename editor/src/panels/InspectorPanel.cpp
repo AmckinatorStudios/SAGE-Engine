@@ -24,6 +24,7 @@
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UIIcons.h"
+#include "../Localization.h"
 
 namespace fs = std::filesystem;
 
@@ -95,8 +96,8 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(label);
         if (tooltip) ImGui::TextDisabled("%s", tooltip);
-        if (path.empty()) ImGui::TextDisabled("Не назначена");
-        else if (!tex) ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "Не загрузилась: %s",
+        if (path.empty()) ImGui::TextDisabled("%s", T("Not assigned"));
+        else if (!tex) ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), T("Failed to load: %s"),
                                           path.c_str());
         else ImGui::TextDisabled("%s", path.c_str());
         ImGui::EndTooltip();
@@ -114,7 +115,7 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
         ImGui::TextDisabled("%s", name.c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path.c_str());
     } else {
-        ImGui::TextDisabled("не назначена");
+        ImGui::TextDisabled("%s", T("not assigned"));
     }
 
     char buf[512];
@@ -126,11 +127,11 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
             *ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string()));
     }
 
-    if (EditorIcons::Button("folder", "Обзор…") || previewClicked) {
+    if (EditorIcons::Button("folder", T("Browse...")) || previewClicked) {
         FileBrowser::Config c;
-        c.Title = std::string("Текстура: ") + label;
+        c.Title = std::string(T("Texture: ")) + label;
         c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
-        c.FilterLabel = "Изображения";
+        c.FilterLabel = T("Images");
         if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
         m_browser.Open(c);
         m_browseTarget = &path;
@@ -143,16 +144,16 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
                             selExt == ".tga" || selExt == ".bmp" || selExt == ".hdr";
     ImGui::SameLine();
     ImGui::BeginDisabled(!selIsImage);
-    if (EditorIcons::Button("texture", "Из Assets")) {
+    if (EditorIcons::Button("texture", T("From Assets"))) {
         path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
     }
     ImGui::EndDisabled();
     if (!selIsImage && ImGui::IsItemHovered())
-        ImGui::SetTooltip("Выберите изображение в панели Assets");
+        ImGui::SetTooltip("%s", T("Pick an image in the Assets panel"));
 
     ImGui::SameLine();
     ImGui::BeginDisabled(path.empty());
-    if (EditorIcons::Button("trash", "Очистить")) path.clear();
+    if (EditorIcons::Button("trash", T("Clear"))) path.clear();
     ImGui::EndDisabled();
 
     ImGui::EndGroup();
@@ -168,8 +169,8 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // разыменовывал бы nullptr. Выбор испорченного .sagemat в Assets ронял
     // редактор: превью-то от null защищалось, а первое же поле — нет.
     if (!material) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "Материал не читается");
-        ImGui::TextDisabled("Файл удалён или повреждён — подробности в консоли.");
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s", T("Material cannot be read"));
+        ImGui::TextDisabled("%s", T("The file is gone or damaged — details in the console."));
         return;
     }
 
@@ -194,33 +195,33 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
                     m_preview.Orbit(io.MouseDelta.x * 0.5f, -io.MouseDelta.y * 0.5f);
                 }
                 if (io.MouseWheel != 0.0f) m_preview.Zoom(io.MouseWheel);
-                ImGui::SetTooltip("ЛКМ — вращать, колесо — приблизить");
+                ImGui::SetTooltip("%s", T("LMB orbits, wheel zooms"));
             }
             (void)p0;
         }
         ImGui::SameLine();
         ImGui::BeginGroup();
-        ImGui::TextDisabled("Превью");
-        if (ImGui::SmallButton("Сбросить вид")) m_preview.ResetView();
+        ImGui::TextDisabled("%s", T("Preview"));
+        if (ImGui::SmallButton(T("Reset view"))) m_preview.ResetView();
         ImGui::EndGroup();
         ImGui::Spacing();
     }
 
-    ImGui::ColorEdit3("Albedo", &material->Albedo.x);
-    ImGui::ColorEdit3("Emissive", &material->Emissive.x);
+    ImGui::ColorEdit3(T("Albedo"), &material->Albedo.x);
+    ImGui::ColorEdit3(T("Emissive"), &material->Emissive.x);
     // Сила свечения отдельным ползунком, и его предел заметно больше единицы:
     // bloom срабатывает от яркости ВЫШЕ 1 (EngineConfig::BloomThreshold), а цвет
     // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто
     // светлым цветом без ореола.
-    ImGui::DragFloat("Emissive Strength", &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    ImGui::DragFloat(T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Множитель свечения. Значения больше 1 дают ореол (bloom).");
+        ImGui::SetTooltip("%s", T("Emissive multiplier. Values above 1 produce a bloom halo."));
     }
 
     // PBR (metallic-roughness) — основной путь освещения (Cook-Torrance).
-    ImGui::SeparatorText("PBR");
-    ImGui::SliderFloat("Metallic", &material->Metallic, 0.0f, 1.0f);
-    ImGui::SliderFloat("Roughness", &material->Roughness, 0.0f, 1.0f);
+    ImGui::SeparatorText(T("PBR"));
+    ImGui::SliderFloat(T("Metallic"), &material->Metallic, 0.0f, 1.0f);
+    ImGui::SliderFloat(T("Roughness"), &material->Roughness, 0.0f, 1.0f);
 
     // Карты: путь правится вручную; по Enter/потере фокуса перезагружаем текстуры
     // материала (albedo/normal), чтобы вьюпорт сразу показал результат.
@@ -231,41 +232,41 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // обратной связью была строчка в консоли. Слот показывает саму картинку —
     // назначено ли что-то и то ли это, что хотели, видно сразу.
     DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
-                    "Базовый цвет. Умножается на Albedo выше.");
+                    T("Base colour. Multiplied by the Albedo above."));
     DrawTextureSlot(host, "Normal", material->NormalMapPath, material->NormalTex,
-                    "Карта нормалей, tangent-space (OpenGL: зелёный вверх).");
+                    T("Normal map, tangent space (OpenGL: green is up)."));
     DrawTextureSlot(host, "Metallic", material->MetallicMapPath, material->MetallicTex,
-                    "Канал R. Умножается на фактор Metallic выше.");
+                    T("Channel R. Multiplied by the Metallic factor above."));
     DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
-                    "Канал R. Умножается на фактор Roughness выше.");
+                    T("Channel R. Multiplied by the Roughness factor above."));
     DrawTextureSlot(host, "Emissive", material->EmissiveMap, material->EmissiveTex,
-                    "Где светится, а где нет. Умножается на цвет и силу свечения.");
+                    T("Where it glows and where it does not. Multiplied by the emissive colour and strength."));
     DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
-                    "Ambient occlusion, канал R. Пусто — AO = 1.");
+                    T("Ambient occlusion, channel R. Empty means AO = 1."));
 
-    ImGui::TextDisabled("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel.");
-    ImGui::TextDisabled("Map value multiplies the factor above; Enter applies the path.");
+    ImGui::TextDisabled("%s", T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));
+    ImGui::TextDisabled("%s", T("Map value multiplies the factor above; Enter applies the path."));
 
-    ImGui::SeparatorText("Transparency");
-    ImGui::SliderFloat("Opacity", &material->Opacity, 0.0f, 1.0f);
+    ImGui::SeparatorText(T("Transparency"));
+    ImGui::SliderFloat(T("Opacity"), &material->Opacity, 0.0f, 1.0f);
 
     // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
     // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.
-    ImGui::SeparatorText("Custom Shader");
+    ImGui::SeparatorText(T("Custom Shader"));
     char vsBuf[512];
     std::snprintf(vsBuf, sizeof(vsBuf), "%s", material->VertexShaderPath.c_str());
-    if (ImGui::InputText("Vertex", vsBuf, sizeof(vsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+    if (ImGui::InputText(T("Vertex"), vsBuf, sizeof(vsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
         material->VertexShaderPath = vsBuf;
         material->ShaderPtr.reset();
     }
     char fsBuf[512];
     std::snprintf(fsBuf, sizeof(fsBuf), "%s", material->FragmentShaderPath.c_str());
-    if (ImGui::InputText("Fragment", fsBuf, sizeof(fsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+    if (ImGui::InputText(T("Fragment"), fsBuf, sizeof(fsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
         material->FragmentShaderPath = fsBuf;
         material->ShaderPtr.reset();
     }
     if (material->HasCustomShader() && !material->Params.empty()) {
-        ImGui::TextDisabled("Params: %d (edit in the .sagemat file)", (int)material->Params.size());
+        ImGui::TextDisabled(T("Params: %d (edit in the .sagemat file)"), (int)material->Params.size());
     }
 
     // Свойства рендера рисуются ПО ТАБЛИЦЕ (MaterialRenderFields). Новая
@@ -273,7 +274,7 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // и строка таблицы, а не ещё одна правка здесь. Раньше каждое такое
     // свойство надо было дописать в пяти местах, и панель редактора отставала
     // от формата файла чаще всего: её забывали.
-    ImGui::SeparatorText("Рендер");
+    ImGui::SeparatorText(T("Render"));
     for (const MaterialRenderField& f : MaterialRenderFields()) {
         if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
             ImGui::Checkbox(f.Label, &(material->Render.*f.AsBool));
@@ -283,11 +284,11 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
     }
 
-    ImGui::SeparatorText("Legacy");
-    ImGui::DragFloat("Shininess", &material->Shininess, 0.5f, 1.0f, 256.0f);
-    ImGui::TextDisabled("Edits apply live to every entity using this material.");
+    ImGui::SeparatorText(T("Legacy"));
+    ImGui::DragFloat(T("Shininess"), &material->Shininess, 0.5f, 1.0f, 256.0f);
+    ImGui::TextDisabled("%s", T("Edits apply live to every entity using this material."));
 
-    if (ImGui::Button("Save Material")) {
+    if (ImGui::Button(T("Save Material"))) {
         try {
             material->SaveToFile(pathStr);
             LOG_INFO("Editor") << "Material saved: " << pathStr;
@@ -296,7 +297,7 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Revert")) ResourceManager::Instance().ReloadMaterial(pathStr);
+    if (ImGui::Button(T("Revert"))) ResourceManager::Instance().ReloadMaterial(pathStr);
 }
 
 // Настройки импорта выбранной модели (.obj/.gltf/.glb): масштаб/центрирование/
@@ -305,11 +306,11 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
     std::string path = host.SelectedAssetPath().string();
     ModelLoader::ImportSettings s = ModelLoader::LoadImportSettings(path);
-    ImGui::DragFloat("Import Scale", &s.Scale, 0.01f, 0.001f, 1000.0f);
-    ImGui::Checkbox("Recenter (AABB -> origin)", &s.Recenter);
-    ImGui::Checkbox("Normalize size (max side = 1)", &s.NormalizeSize);
+    ImGui::DragFloat(T("Import Scale"), &s.Scale, 0.01f, 0.001f, 1000.0f);
+    ImGui::Checkbox(T("Recenter (AABB -> origin)"), &s.Recenter);
+    ImGui::Checkbox(T("Normalize size (max side = 1)"), &s.NormalizeSize);
 
-    if (ImGui::Button("Reimport")) {
+    if (ImGui::Button(T("Reimport"))) {
         if (!ModelLoader::SaveImportSettings(path, s)) {
             host.SetStatusMessage("Import settings save failed");
         } else {
@@ -324,7 +325,7 @@ void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
             host.SetStatusMessage("Reimported: " + host.SelectedAssetPath().filename().string());
         }
     }
-    ImGui::TextDisabled("Baked into the mesh on load — affects editor and built game");
+    ImGui::TextDisabled("%s", T("Baked into the mesh on load — affects editor and built game"));
 }
 
 // Материал модели — вместе с моделью.
@@ -359,7 +360,7 @@ void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererCompo
             // Нет материала в файле — и не надо: белая болванка это честный
             // результат «в модели материала нет», а не поломка.
             if (!ex.Warnings.empty())
-                host.SetStatusMessage("Материал модели: " + ex.Warnings.front());
+                host.SetStatusMessage(T("Model material: ") + ex.Warnings.front());
             return;
         }
 
@@ -384,13 +385,13 @@ void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererCompo
             mat.SaveToFile(matPath.string());
         } catch (const std::exception& e) {
             LOG_ERROR("Editor") << "Материал модели не сохранён: " << e.what();
-            host.SetStatusMessage("Материал модели не сохранён — подробности в Console");
+            host.SetStatusMessage(T("The model material was not saved — details in Console"));
             return;
         }
         sage::AssetDatabase::Instance().Register(matPath.string(), "material");
-        host.SetStatusMessage("Материал модели импортирован: " +
+        host.SetStatusMessage(T("Model material imported: ") +
                               matPath.filename().string() +
-                              (ex.HasAnyMap() ? " (с картами)" : ""));
+                              (ex.HasAnyMap() ? T(" (with maps)") : ""));
         LOG_INFO("Editor") << "Материал модели импортирован: " << matPath.string();
     }
 
@@ -400,12 +401,12 @@ void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererCompo
 
 // --- Mesh Renderer, часть 1: ЧТО рисуем --------------------------------------
 void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
-    ImGui::SeparatorText("Меш");
+    ImGui::SeparatorText(T("Mesh"));
 
     // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
-    const char* kinds[] = {"Нет", "Куб", "Сфера", "Плоскость", "Цилиндр", "Конус", "Модель"};
+    const char* kinds[] = {T("None"), T("Cube"), T("Sphere"), T("Plane"), T("Cylinder"), T("Cone"), T("Model")};
     int kind = (int)mr.Ref.type;
-    if (ImGui::Combo("Источник", &kind, kinds, IM_ARRAYSIZE(kinds))) {
+    if (ImGui::Combo(T("Source"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
         host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
         mr.Ref.type = (MeshRef::Type)kind;
         if (mr.Ref.type != MeshRef::Type::Model) {
@@ -440,11 +441,11 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
         // «Обзор…» вместо «напечатай путь наизусть». Именно на этом шаге
         // всё и заканчивалось: человек не помнит абсолютный путь к своей
         // модели, а ошибка в нём давала только строчку в консоли.
-        if (EditorIcons::Button("folder", "Обзор…")) {
+        if (EditorIcons::Button("folder", T("Browse..."))) {
             FileBrowser::Config c;
-            c.Title = "Выбрать модель";
+            c.Title = T("Choose a model");
             c.Filters = {".obj", ".gltf", ".glb", ".sagemesh"};
-            c.FilterLabel = "Модели (*.obj, *.gltf, *.glb, *.sagemesh)";
+            c.FilterLabel = T("Models (*.obj, *.gltf, *.glb, *.sagemesh)");
             if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
             m_browser.Open(c);
             m_browseTarget = &mr.Ref.path;
@@ -455,14 +456,14 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
         const bool selIsModel = ModelLoader::IsSupportedModel(
             host.SelectedAssetPath().extension().string());
         ImGui::BeginDisabled(!selIsModel);
-        if (EditorIcons::Button("model", "Из Assets")) {
+        if (EditorIcons::Button("model", T("From Assets"))) {
             host.PushUndoSnapshot();
             mr.Ref.path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
             m_pendingMeshLoad = true;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (EditorIcons::Button("refresh", "Загрузить")) m_pendingMeshLoad = true;
+        if (EditorIcons::Button("refresh", T("Load"))) m_pendingMeshLoad = true;
 
         if (m_pendingMeshLoad) {
             m_pendingMeshLoad = false;
@@ -472,8 +473,8 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
             // «модель не появилась» без объяснения выглядит как поломка
             // редактора.
             if (!mr.MeshPtr) {
-                host.SetStatusMessage("Модель не загрузилась: " + mr.Ref.path +
-                                      " — подробности в Console");
+                host.SetStatusMessage(T("The model failed to load: ") + mr.Ref.path +
+                                      T(" — details in Console"));
             } else {
                 // Материал модели — вместе с моделью, а не «потом руками».
                 // Подробности см. в AutoAssignModelMaterial.
@@ -481,31 +482,31 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
             }
         }
         if (!mr.Ref.path.empty() && !mr.MeshPtr) {
-            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "Меш не загружен");
+            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("Mesh not loaded"));
             if (!ModelLoader::IsSupportedModel(mr.Ref.path)) {
-                ImGui::TextDisabled("Поддерживаются .obj, .gltf, .glb, .sagemesh");
+                ImGui::TextDisabled("%s", T("Supported: .obj, .gltf, .glb, .sagemesh"));
             }
         }
         // Абсолютный путь работает в редакторе и НЕ работает нигде больше —
         // говорим об этом сразу, а не после сборки игры.
         if (!mr.Ref.path.empty() && host.CurrentProject().Loaded() &&
             std::filesystem::path(mr.Ref.path).is_absolute()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "Файл вне проекта");
-            ImGui::TextDisabled("В собранной игре не найдётся. Внесите его в проект:");
-            ImGui::TextDisabled("Assets -> Импорт…");
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "%s", T("File outside the project"));
+            ImGui::TextDisabled("%s", T("The built game will not find it. Bring it into the project:"));
+            ImGui::TextDisabled("%s", T("Assets -> Import..."));
         }
     }
 
     if (mr.MeshPtr) {
         const glm::vec3 size = mr.MeshPtr->BoundsMax() - mr.MeshPtr->BoundsMin();
-        HintWrapped("Треугольников: %d, габарит %.2f x %.2f x %.2f",
+        HintWrapped(T("Triangles: %d, bounds %.2f x %.2f x %.2f"),
                             (int)(mr.MeshPtr->IndexCount() / 3), size.x, size.y, size.z);
     }
 }
 
 // --- Mesh Renderer, часть 2: ЧЕМ красим --------------------------------------
 void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr) {
-    ImGui::SeparatorText("Материал");
+    ImGui::SeparatorText(T("Material"));
 
     // Превью материала — шариком, а не квадратиком цвета: по квадратику не
     // отличить металл от диэлектрика и гладкое от матового, то есть ровно то,
@@ -527,13 +528,13 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
 
     ImGui::BeginGroup();
     if (mr.MaterialPath.empty()) {
-        HintWrapped("Не назначен");
-        HintWrapped("Объект рисуется поправками ниже как есть.");
+        HintWrapped(T("Not assigned"));
+        HintWrapped(T("The object is drawn by the overrides below as they are."));
     } else {
         ImGui::TextUnformatted(std::filesystem::path(mr.MaterialPath).filename().string().c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mr.MaterialPath.c_str());
         if (!mr.MaterialPtr)
-            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "Файл не читается");
+            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("File cannot be read"));
     }
 
     auto assign = [&](const std::string& raw) {
@@ -544,16 +545,16 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
 
     const bool selIsMaterial = host.SelectedAssetPath().extension() == ".sagemat";
     ImGui::BeginDisabled(!selIsMaterial);
-    if (EditorIcons::Button("material", "Из Assets")) assign(host.SelectedAssetPath().string());
+    if (EditorIcons::Button("material", T("From Assets"))) assign(host.SelectedAssetPath().string());
     ImGui::EndDisabled();
     if (!selIsMaterial && ImGui::IsItemHovered())
-        ImGui::SetTooltip("Выберите .sagemat в панели Assets");
+        ImGui::SetTooltip("%s", T("Pick a .sagemat in the Assets panel"));
     ImGui::SameLine();
-    if (EditorIcons::Button("folder", "Обзор…")) {
+    if (EditorIcons::Button("folder", T("Browse..."))) {
         FileBrowser::Config c;
-        c.Title = "Выбрать материал";
+        c.Title = T("Choose a material");
         c.Filters = {".sagemat"};
-        c.FilterLabel = "Материалы (*.sagemat)";
+        c.FilterLabel = T("Materials (*.sagemat)");
         if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
         m_browser.Open(c);
         m_browseTarget = &mr.MaterialPath;
@@ -563,7 +564,7 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(mr.MaterialPath.empty());
-    if (EditorIcons::Button("trash", "Убрать")) {
+    if (EditorIcons::Button("trash", T("Remove"))) {
         host.PushUndoSnapshot();
         mr.MaterialPath.clear();
         mr.MaterialPtr = nullptr;
@@ -584,35 +585,44 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
 
 // --- Mesh Renderer, часть 3: чем ЭТОТ экземпляр отличается -------------------
 void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr) {
-    ImGui::SeparatorText("Поправки экземпляра");
+    ImGui::SeparatorText(T("Instance overrides"));
 
     // Ширина полей считается от САМОЙ ДЛИННОЙ подписи группы, а не берётся по
     // умолчанию. У ImGui подпись стоит справа от поля, и на узкой панели
     // инспектора «Непрозрачность» не помещалась — обрезалась до
     // «Непрозрачнос». Резервируем ей место здесь, вместо того чтобы надеяться,
     // что панель достаточно широкая: её ширину задаёт человек мышью.
-    const float labelWidth = ImGui::CalcTextSize("Непрозрачность").x +
-                             ImGui::GetStyle().ItemInnerSpacing.x * 2.0f;
+    // Берётся МАКСИМУМ по подписям группы, а не одна из них. Пока интерфейс
+    // был русским, самой длинной всегда оказывалась «Непрозрачность», и хватало
+    // её одной. С переводом длиннее стала «Emissive Strength» — и подпись
+    // обрезалась ровно в английском, то есть у того, кто про русскую константу
+    // и не знал. Длина подписи зависит от языка, значит и считать её надо по
+    // тем строкам, которые реально нарисуются.
+    float labelWidth = 0.0f;
+    for (const char* label : {T("Tint"), T("Emissive"), T("Emissive Strength"), T("Opacity")}) {
+        labelWidth = std::max(labelWidth, ImGui::CalcTextSize(label).x);
+    }
+    labelWidth += ImGui::GetStyle().ItemInnerSpacing.x * 2.0f;
     ImGui::PushItemWidth(-labelWidth);
     // Одна подпись на всю группу вместо трёх разных правил, которые надо было
     // помнить (см. EffectiveColor/EffectiveEmissive/EffectiveOpacity).
-    HintWrapped("%s", mr.MaterialPtr ? "Накладываются поверх материала."
-                                     : "Материала нет — задают вид объекта целиком.");
+    HintWrapped("%s", mr.MaterialPtr ? T("Applied on top of the material.")
+                                     : T("There is no material — they define the whole look of the object."));
 
-    ImGui::ColorEdit3("Тон", &mr.Color.x); host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Множится на albedo материала. Белый — как в материале.");
+    ImGui::ColorEdit3(T("Tint"), &mr.Color.x); host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Multiplies the material albedo. White means as in the material."));
 
-    ImGui::ColorEdit3("Свечение", &mr.Emissive.x); host.TrackLastImGuiItem();
-    ImGui::DragFloat("Сила свечения", &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    ImGui::ColorEdit3(T("Emissive"), &mr.Emissive.x); host.TrackLastImGuiItem();
+    ImGui::DragFloat(T("Emissive Strength"), &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
     host.TrackLastImGuiItem();
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Прибавляется к свечению материала. Больше 1 — ореол (bloom).");
+        ImGui::SetTooltip("%s", T("Added to the material emissive. Above 1 gives a bloom halo."));
 
     // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
     // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
-    ImGui::SliderFloat("Непрозрачность", &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();
+    ImGui::SliderFloat(T("Opacity"), &mr.Opacity, 0.0f, 1.0f); host.TrackLastImGuiItem();
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Множится на непрозрачность материала.");
+        ImGui::SetTooltip("%s", T("Multiplies the material opacity."));
 
     // Кнопка «как в материале» — вернуть поправки в нейтраль. Без неё «я где-то
     // подкрутил цвет этому объекту» лечится только вспоминанием исходных чисел.
@@ -620,7 +630,7 @@ void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererCompone
                          mr.Opacity >= 0.999f;
     ImGui::BeginDisabled(neutral);
     ImGui::PopItemWidth();
-    if (ImGui::SmallButton("Сбросить поправки")) {
+    if (ImGui::SmallButton(T("Reset overrides"))) {
         host.PushUndoSnapshot();
         mr.Color = glm::vec3(1.0f);
         mr.Emissive = glm::vec3(0.0f);
@@ -637,8 +647,8 @@ void InspectorPanel::DrawPrefabPreview(EditorHost& host) {
     const float side = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
     const uint64_t tex = m_preview.RenderPrefab(path, (int)side);
     if (!tex) {
-        ImGui::TextDisabled("Обложки нет: в префабе не нашлось видимой геометрии");
-        ImGui::TextDisabled("(или файл не читается — подробности в Console).");
+        ImGui::TextDisabled("%s", T("No cover: the prefab has no visible geometry"));
+        ImGui::TextDisabled("%s", T("(or the file cannot be read — details in Console)."));
     } else {
         ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(side, side), ImVec2(0, 1),
                      ImVec2(1, 0));
@@ -647,17 +657,17 @@ void InspectorPanel::DrawPrefabPreview(EditorHost& host) {
             if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
                 m_preview.Orbit(io.MouseDelta.x * 0.5f, -io.MouseDelta.y * 0.5f);
             if (io.MouseWheel != 0.0f) m_preview.Zoom(io.MouseWheel);
-            ImGui::SetTooltip("ЛКМ — вращать, колесо — приблизить");
+            ImGui::SetTooltip("%s", T("LMB orbits, wheel zooms"));
         }
         ImGui::SameLine();
         ImGui::BeginGroup();
-        ImGui::TextDisabled("Превью");
-        if (ImGui::SmallButton("Сбросить вид")) m_preview.ResetView();
+        ImGui::TextDisabled("%s", T("Preview"));
+        if (ImGui::SmallButton(T("Reset view"))) m_preview.ResetView();
         ImGui::EndGroup();
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Поставить в сцену", ImVec2(-1, 0))) host.InstantiatePrefab(path);
+    if (ImGui::Button(T("Place in scene"), ImVec2(-1, 0))) host.InstantiatePrefab(path);
 }
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
@@ -666,16 +676,16 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     char buf[128];
     std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-    if (ImGui::InputText("Name", buf, sizeof(buf))) obj.SetName(buf);
+    if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
     host.TrackLastImGuiItem();
-    ImGui::TextDisabled("Id: %d", obj.Id());
+    ImGui::TextDisabled(T("Id: %d"), obj.Id());
     ImGui::Separator();
 
-    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
         Transform& tr = obj.GetTransform();
-        ImGui::DragFloat3("Position", &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
-        ImGui::DragFloat3("Rotation", &tr.Rotation.x, 0.5f); host.TrackLastImGuiItem();
-        ImGui::DragFloat3("Scale", &tr.Scale.x, 0.05f, 0.01f, 100.0f); host.TrackLastImGuiItem();
+        ImGui::DragFloat3(T("Position"), &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
+        ImGui::DragFloat3(T("Rotation"), &tr.Rotation.x, 0.5f); host.TrackLastImGuiItem();
+        ImGui::DragFloat3(T("Scale"), &tr.Scale.x, 0.05f, 0.01f, 100.0f); host.TrackLastImGuiItem();
     }
 
     // --- Mesh Renderer: ОДНА секция на весь компонент -------------------------
@@ -689,7 +699,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Теперь порядок повторяет саму структуру компонента (см.
     // ecs/RenderComponents.h): ЧТО рисуем -> ЧЕМ красим -> чем ЭТОТ экземпляр
     // отличается от других таких же.
-    if (ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader(T("Mesh Renderer" "###Mesh Renderer"), ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, mr);
         DrawMaterialSlot(host, mr);
@@ -697,14 +707,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
-    if (reg.all_of<CameraComponent>(obj.Entity()) && ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<CameraComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (CameraComponent* cam = reg.try_get<CameraComponent>(obj.Entity())) {
-            ImGui::DragFloat("FOV", &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Near", &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Far", &cam->FarClip, 1.0f, 1.0f, 5000.0f); host.TrackLastImGuiItem();
-            if (ImGui::Checkbox("Primary", &cam->Primary)) host.PushUndoSnapshot();
-            ImGui::TextDisabled("Game panel renders from the first Primary camera");
-            if (ImGui::Button("Remove Camera")) {
+            ImGui::DragFloat(T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Far"), &cam->FarClip, 1.0f, 1.0f, 5000.0f); host.TrackLastImGuiItem();
+            if (ImGui::Checkbox(T("Primary"), &cam->Primary)) host.PushUndoSnapshot();
+            ImGui::TextDisabled("%s", T("Game panel renders from the first Primary camera"));
+            if (ImGui::Button(T("Remove Camera"))) {
                 host.PushUndoSnapshot();
                 reg.remove<CameraComponent>(obj.Entity());
             }
@@ -712,47 +722,47 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
-    if (reg.all_of<LightComponent>(obj.Entity()) && ImGui::CollapsingHeader("Свет", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<LightComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
-            const char* types[] = {"Точечный", "Прожектор", "Направленный (солнце)"};
+            const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)")};
             int kind = (int)light->Kind;
-            if (ImGui::Combo("Тип", &kind, types, 3)) {
+            if (ImGui::Combo(T("Type"), &kind, types, 3)) {
                 host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
                 light->Kind = (LightComponent::Type)kind;
             }
-            ImGui::ColorEdit3("Цвет", &light->Color.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Яркость", &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
+            ImGui::ColorEdit3(T("Colour"), &light->Color.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Intensity"), &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
             // Дальность и углы конуса у направленного света не значат ничего:
             // он светит из бесконечности. Показывать поля, которые ни на что не
             // влияют, — обманывать; поэтому их тут просто нет.
             const bool directional = light->Kind == LightComponent::Type::Directional;
             if (!directional) {
-                ImGui::DragFloat("Дальность", &light->Range, 0.1f, 0.5f, 100.0f);
+                ImGui::DragFloat(T("Range"), &light->Range, 0.1f, 0.5f, 100.0f);
                 host.TrackLastImGuiItem();
             }
             if (light->Kind == LightComponent::Type::Spot) {
-                ImGui::DragFloat("Внутренний конус", &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
-                ImGui::DragFloat("Внешний конус", &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Inner Cone"), &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Outer Cone"), &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
                 // Внешний угол не должен быть уже внутреннего (иначе конус
                 // «выворачивается»): подтягиваем внешний до внутреннего.
                 if (light->OuterConeDeg < light->InnerConeDeg) light->OuterConeDeg = light->InnerConeDeg;
             }
-            if (ImGui::Checkbox("Отбрасывает тени", &light->CastShadows)) host.PushUndoSnapshot();
+            if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();
             if (directional) {
-                HintWrapped("Солнце: светит вдоль «вперёд» объекта (-Z поворота) из "
-                            "бесконечности, дальности не имеет. Тени — каскадные карты. "
-                            "Солнцем считается направленный свет с наименьшим номером в "
-                            "иерархии; второй такой свет в кадре не участвует.");
+                HintWrapped(T("Sun: shines along the object's forward (-Z of its rotation) from "
+                              "infinity and has no range. Shadows are cascaded maps. "
+                              "The sun is the directional light with the lowest number in "
+                              "the hierarchy; a second one takes no part in the frame."));
             } else if (light->Kind == LightComponent::Type::Spot) {
-                HintWrapped("Конус светит вдоль «вперёд» объекта (-Z поворота). Тень — "
-                            "отдельная карта в атласе: их немного, и достаются они самым "
-                            "ярким источникам.");
+                HintWrapped(T("The cone shines along the object's forward (-Z of its rotation). "
+                              "Its shadow is a separate map in the atlas: there are few, and they "
+                              "go to the brightest sources."));
             } else {
-                HintWrapped("Точечный свет в позиции объекта. Тень стоит шести проходов "
-                            "геометрии (по грани куба), поэтому её лучше оставлять только "
-                            "тем лампам, у которых есть что затенять.");
+                HintWrapped(T("A point light at the object's position. Its shadow costs six passes "
+                              "of geometry (one per cube face), so it is best left only to "
+                              "the lamps that have something to occlude."));
             }
-            if (ImGui::Button("Удалить свет")) {
+            if (ImGui::Button(T("Remove Light"))) {
                 host.PushUndoSnapshot();
                 reg.remove<LightComponent>(obj.Entity());
             }
@@ -761,12 +771,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
-        ImGui::CollapsingHeader("Decal", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::CollapsingHeader(T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
         bool changed = false;
-        changed |= ImGui::DragFloat("Angle Limit", &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
+        changed |= ImGui::DragFloat(T("Angle Limit"), &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
         host.TrackLastImGuiItem();
-        changed |= ImGui::DragFloat("Surface Offset", &dc.Offset, 0.001f, 0.0f, 0.5f, "%.3f");
+        changed |= ImGui::DragFloat(T("Surface Offset"), &dc.Offset, 0.001f, 0.0f, 0.5f, "%.3f");
         host.TrackLastImGuiItem();
 
         // Треугольники — главный ответ на «почему наклейки не видно». Ноль
@@ -777,19 +787,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         // обрезается на границе: панель у людей узкая, и «размер задаёт Scal»
         // читается как поломка редактора, а не как совет.
         if (dc.Triangles > 0) {
-            ImGui::TextDisabled("Спроецировано треугольников: %d", dc.Triangles);
+            ImGui::TextDisabled(T("Projected triangles: %d"), dc.Triangles);
         } else {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.3f, 1.0f));
-            ImGui::TextWrapped("Ни на что не легла: под коробкой нет геометрии, либо она "
-                               "отвёрнута от наклейки.");
+            ImGui::TextWrapped("%s", T("Landed on nothing: there is no geometry under the box, or it faces away from "
+              "the decal."));
             ImGui::PopStyleColor();
         }
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-        ImGui::TextWrapped("Проекция идёт вдоль -Z; размер задаёт Scale");
+        ImGui::TextWrapped("%s", T("Projection goes along -Z; Scale sets the size"));
         ImGui::PopStyleColor();
-        if (ImGui::Button("Rebuild##decal")) changed = true;
+        if (ImGui::Button(T("Rebuild##decal"))) changed = true;
         ImGui::SameLine();
-        if (ImGui::Button("Remove##decal")) {
+        if (ImGui::Button(T("Remove##decal"))) {
             host.PushUndoSnapshot();
             reg.remove<DecalComponent>(obj.Entity());
             changed = false;
@@ -801,23 +811,23 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
-    if (reg.all_of<GIStaticComponent>(obj.Entity()) && ImGui::CollapsingHeader("GI Static", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<GIStaticComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("GI Static" "###GI Static"), ImGuiTreeNodeFlags_DefaultOpen)) {
         GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
-        ImGui::Checkbox("Lightmapped", &gs.Lightmapped); host.TrackLastImGuiItem();
-        ImGui::DragFloat("Texel Scale", &gs.TexelScale, 0.05f, 0.1f, 8.0f); host.TrackLastImGuiItem();
-        ImGui::TextDisabled("Static occluder for baked GI; lightmapped = has own lightmap");
-        ImGui::TextDisabled("Re-bake lighting after changes (Lighting panel)");
-        if (ImGui::Button("Remove##gistatic")) {
+        ImGui::Checkbox(T("Lightmapped"), &gs.Lightmapped); host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Texel Scale"), &gs.TexelScale, 0.05f, 0.1f, 8.0f); host.TrackLastImGuiItem();
+        ImGui::TextDisabled("%s", T("Static occluder for baked GI; lightmapped = has own lightmap"));
+        ImGui::TextDisabled("%s", T("Re-bake lighting after changes (Lighting panel)"));
+        if (ImGui::Button(T("Remove##gistatic"))) {
             host.PushUndoSnapshot();
             reg.remove<GIStaticComponent>(obj.Entity());
         }
     }
 
-    if (reg.all_of<ScriptComponent>(obj.Entity()) && ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<ScriptComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             char scriptBuf[512];
             std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", sc->Path.c_str());
-            if (ImGui::InputText("Lua file", scriptBuf, sizeof(scriptBuf))) sc->Path = scriptBuf;
+            if (ImGui::InputText(T("Lua file"), scriptBuf, sizeof(scriptBuf))) sc->Path = scriptBuf;
             host.TrackLastImGuiItem();
             // Перетаскивание .lua из Assets — как у моделей и текстур. Печатать
             // путь к скрипту наизусть незачем, он тут же в дереве проекта.
@@ -832,11 +842,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 }
                 ImGui::EndDragDropTarget();
             }
-            if (EditorIcons::Button("folder", "Обзор…")) {
+            if (EditorIcons::Button("folder", T("Browse..."))) {
                 FileBrowser::Config c;
-                c.Title = "Выбрать скрипт";
+                c.Title = T("Choose a script");
                 c.Filters = {".lua"};
-                c.FilterLabel = "Скрипты (*.lua)";
+                c.FilterLabel = T("Scripts (*.lua)");
                 if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
                 m_browser.Open(c);
                 // Цель — СУЩНОСТЬ, а не указатель на поле компонента: диалог
@@ -849,13 +859,13 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 m_browseIsMaterial = false;
             }
             ImGui::SameLine();
-            if (EditorIcons::Button("script", "Из Assets") &&
+            if (EditorIcons::Button("script", T("From Assets")) &&
                 host.SelectedAssetPath().extension() == ".lua") {
                 host.PushUndoSnapshot();
                 sc->Path = host.CurrentProject().AssetRef(host.SelectedAssetPath());
             }
-            ImGui::TextDisabled("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)");
-            if (ImGui::Button("Remove Script")) {
+            ImGui::TextDisabled("%s", T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"));
+            if (ImGui::Button(T("Remove Script"))) {
                 host.PushUndoSnapshot();
                 reg.remove<ScriptComponent>(obj.Entity());
             }
@@ -863,20 +873,20 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
-    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && ImGui::CollapsingHeader("Rigid Body", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::BodyType.
-            const char* types[] = {"Static", "Dynamic", "Kinematic"};
+            const char* types[] = {T("Static"), T("Dynamic"), T("Kinematic")};
             int kind = (int)rb->Type;
-            if (ImGui::Combo("Body Type", &kind, types, IM_ARRAYSIZE(types))) {
+            if (ImGui::Combo(T("Body Type"), &kind, types, IM_ARRAYSIZE(types))) {
                 host.PushUndoSnapshot();
                 rb->Type = (sage::physics::BodyType)kind;
             }
-            ImGui::DragFloat("Mass", &rb->Mass, 0.05f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Friction", &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Restitution", &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::TextDisabled("Dynamic falls under gravity; Static/Kinematic don't");
-            if (ImGui::Button("Remove Rigid Body")) {
+            ImGui::DragFloat(T("Mass"), &rb->Mass, 0.05f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            ImGui::TextDisabled("%s", T("Dynamic falls under gravity; Static/Kinematic don't"));
+            if (ImGui::Button(T("Remove Rigid Body"))) {
                 host.PushUndoSnapshot();
                 reg.remove<RigidBodyComponent>(obj.Entity());
             }
@@ -884,61 +894,61 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
-    if (reg.all_of<ColliderComponent>(obj.Entity()) && ImGui::CollapsingHeader("Collider", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<ColliderComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::ShapeType.
-            const char* shapes[] = {"Box", "Sphere", "Capsule"};
+            const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule")};
             int shape = (int)col->Shape;
-            if (ImGui::Combo("Shape", &shape, shapes, IM_ARRAYSIZE(shapes))) {
+            if (ImGui::Combo(T("Shape"), &shape, shapes, IM_ARRAYSIZE(shapes))) {
                 host.PushUndoSnapshot();
                 col->Shape = (sage::physics::ShapeType)shape;
             }
             if (col->Shape == sage::physics::ShapeType::Box) {
-                ImGui::DragFloat3("Half Extents", &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
+                ImGui::DragFloat3(T("Half Extents"), &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             } else if (col->Shape == sage::physics::ShapeType::Sphere) {
-                ImGui::DragFloat("Radius", &col->Radius, 0.02f, 0.001f, 100.0f);
+                ImGui::DragFloat(T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             } else { // Capsule
-                ImGui::DragFloat("Radius", &col->Radius, 0.02f, 0.001f, 100.0f);
+                ImGui::DragFloat(T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
-                ImGui::DragFloat("Half Height", &col->HalfHeight, 0.02f, 0.001f, 100.0f);
+                ImGui::DragFloat(T("Half Height"), &col->HalfHeight, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             }
-            ImGui::TextDisabled("Sizes are scaled by the entity's Transform scale");
+            ImGui::TextDisabled("%s", T("Sizes are scaled by the entity's Transform scale"));
 
             // --- Составная (compound) форма: список дочерних примитивов ---
             ImGui::Separator();
-            ImGui::Text("Compound parts: %d", (int)col->Parts.size());
+            ImGui::Text(T("Compound parts: %d"), (int)col->Parts.size());
             if (!col->Parts.empty())
-                ImGui::TextDisabled("Parts override the single shape above");
-            const char* shapeNames[] = {"Box", "Sphere", "Capsule"};
+                ImGui::TextDisabled("%s", T("Parts override the single shape above"));
+            const char* shapeNames[] = {T("Box"), T("Sphere"), T("Capsule")};
             int removePart = -1;
             for (int pi = 0; pi < (int)col->Parts.size(); ++pi) {
                 ColliderComponent::Part& p = col->Parts[pi];
                 ImGui::PushID(pi);
-                if (ImGui::TreeNodeEx("part", ImGuiTreeNodeFlags_DefaultOpen, "Part %d", pi)) {
+                if (ImGui::TreeNodeEx(T("part" "###part"), ImGuiTreeNodeFlags_DefaultOpen, "Part %d", pi)) {
                     int ps = (int)p.Shape;
-                    if (ImGui::Combo("Shape", &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
+                    if (ImGui::Combo(T("Shape"), &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
                         host.PushUndoSnapshot();
                         p.Shape = (sage::physics::ShapeType)ps;
                     }
                     if (p.Shape == sage::physics::ShapeType::Box) {
-                        ImGui::DragFloat3("Half Extents", &p.HalfExtents.x, 0.02f, 0.001f, 100.0f);
+                        ImGui::DragFloat3(T("Half Extents"), &p.HalfExtents.x, 0.02f, 0.001f, 100.0f);
                         host.TrackLastImGuiItem();
                     } else {
-                        ImGui::DragFloat("Radius", &p.Radius, 0.02f, 0.001f, 100.0f);
+                        ImGui::DragFloat(T("Radius"), &p.Radius, 0.02f, 0.001f, 100.0f);
                         host.TrackLastImGuiItem();
                         if (p.Shape == sage::physics::ShapeType::Capsule) {
-                            ImGui::DragFloat("Half Height", &p.HalfHeight, 0.02f, 0.001f, 100.0f);
+                            ImGui::DragFloat(T("Half Height"), &p.HalfHeight, 0.02f, 0.001f, 100.0f);
                             host.TrackLastImGuiItem();
                         }
                     }
-                    ImGui::DragFloat3("Offset", &p.Offset.x, 0.02f);
+                    ImGui::DragFloat3(T("Offset"), &p.Offset.x, 0.02f);
                     host.TrackLastImGuiItem();
-                    ImGui::DragFloat3("Rotation", &p.EulerDeg.x, 0.5f);
+                    ImGui::DragFloat3(T("Rotation"), &p.EulerDeg.x, 0.5f);
                     host.TrackLastImGuiItem();
-                    if (ImGui::SmallButton("Remove Part")) removePart = pi;
+                    if (ImGui::SmallButton(T("Remove Part"))) removePart = pi;
                     ImGui::TreePop();
                 }
                 ImGui::PopID();
@@ -947,12 +957,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 col->Parts.erase(col->Parts.begin() + removePart);
             }
-            if (ImGui::Button("Add Part")) {
+            if (ImGui::Button(T("Add Part"))) {
                 host.PushUndoSnapshot();
                 col->Parts.push_back(ColliderComponent::Part{});
             }
 
-            if (ImGui::Button("Remove Collider")) {
+            if (ImGui::Button(T("Remove Collider"))) {
                 host.PushUndoSnapshot();
                 reg.remove<ColliderComponent>(obj.Entity());
             }
@@ -966,33 +976,33 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // скриптом или правкой .sage руками. Компонент, который нельзя увидеть в
     // редакторе, для человека, работающего в редакторе, не существует.
     if (reg.all_of<CharacterControllerComponent>(obj.Entity()) &&
-        ImGui::CollapsingHeader("Character Controller", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::CollapsingHeader(T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (CharacterControllerComponent* ch =
                 reg.try_get<CharacterControllerComponent>(obj.Entity())) {
-            ImGui::DragFloat("Radius", &ch->Radius, 0.01f, 0.05f, 5.0f);
+            ImGui::DragFloat(T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
             host.TrackLastImGuiItem();
-            ImGui::DragFloat("Height", &ch->Height, 0.02f, 0.1f, 10.0f);
+            ImGui::DragFloat(T("Height"), &ch->Height, 0.02f, 0.1f, 10.0f);
             host.TrackLastImGuiItem();
-            ImGui::DragFloat("Step Height", &ch->StepHeight, 0.01f, 0.0f, 2.0f);
+            ImGui::DragFloat(T("Step Height"), &ch->StepHeight, 0.01f, 0.0f, 2.0f);
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("На какую ступеньку персонаж взбирается без прыжка");
+                ImGui::SetTooltip("%s", T("How tall a step the character climbs without jumping"));
             }
-            ImGui::DragFloat("Max Slope", &ch->MaxSlopeDeg, 0.5f, 0.0f, 89.0f, "%.0f°");
+            ImGui::DragFloat(T("Max Slope"), &ch->MaxSlopeDeg, 0.5f, 0.0f, 89.0f, "%.0f°");
             host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Круче — персонаж соскальзывает");
-            ImGui::DragFloat("Mass", &ch->Mass, 0.5f, 0.1f, 1000.0f);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Steeper than this and the character slides"));
+            ImGui::DragFloat(T("Mass"), &ch->Mass, 0.5f, 0.1f, 1000.0f);
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("С какой силой персонаж толкает динамические тела");
+                ImGui::SetTooltip("%s", T("How hard the character pushes dynamic bodies"));
             }
 
             // Состояние из физики — только для чтения: правка «стоит на земле»
             // из интерфейса не имеет смысла, его вычисляет симуляция.
             ImGui::Separator();
-            ImGui::TextDisabled("На земле: %s", ch->Grounded ? "да" : "нет");
+            ImGui::TextDisabled(T("Grounded: %s"), ch->Grounded ? T("yes") : T("no"));
 
-            if (ImGui::Button("Remove Character Controller")) {
+            if (ImGui::Button(T("Remove Character Controller"))) {
                 host.PushUndoSnapshot();
                 reg.remove<CharacterControllerComponent>(obj.Entity());
             }
@@ -1000,42 +1010,43 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Соединение (constraint/joint) с другим телом или миром ---
-    if (reg.all_of<JointComponent>(obj.Entity()) && ImGui::CollapsingHeader("Joint", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<JointComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (JointComponent* jc = reg.try_get<JointComponent>(obj.Entity())) {
-            const char* types[] = {"Fixed", "Point", "Hinge", "Slider", "Distance", "Cone"};
+            const char* types[] = {T("Fixed"), T("Point"), T("Hinge"), T("Slider"),
+                                   T("Distance"), T("Cone")};
             int t = (int)jc->Type;
-            if (ImGui::Combo("Type", &t, types, IM_ARRAYSIZE(types))) {
+            if (ImGui::Combo(T("Type"), &t, types, IM_ARRAYSIZE(types))) {
                 host.PushUndoSnapshot();
                 jc->Type = (sage::physics::JointType)t;
             }
-            ImGui::DragInt("Target Id (-1 = world)", &jc->TargetId, 0.1f, -1, 100000);
+            ImGui::DragInt(T("Target Id (-1 = world)"), &jc->TargetId, 0.1f, -1, 100000);
             host.TrackLastImGuiItem();
-            ImGui::DragFloat3("Anchor (offset)", &jc->Anchor.x, 0.02f);
+            ImGui::DragFloat3(T("Anchor (offset)"), &jc->Anchor.x, 0.02f);
             host.TrackLastImGuiItem();
             using JT = sage::physics::JointType;
             if (jc->Type == JT::Hinge || jc->Type == JT::Slider || jc->Type == JT::Cone) {
-                ImGui::DragFloat3("Axis", &jc->Axis.x, 0.02f);
+                ImGui::DragFloat3(T("Axis"), &jc->Axis.x, 0.02f);
                 host.TrackLastImGuiItem();
             }
             if (jc->Type == JT::Hinge || jc->Type == JT::Slider) {
-                ImGui::Checkbox("Use Limits", &jc->UseLimits);
+                ImGui::Checkbox(T("Use Limits"), &jc->UseLimits);
                 if (jc->UseLimits) {
-                    ImGui::DragFloat("Min", &jc->MinLimit, 0.5f);
+                    ImGui::DragFloat(T("Min"), &jc->MinLimit, 0.5f);
                     host.TrackLastImGuiItem();
-                    ImGui::DragFloat("Max", &jc->MaxLimit, 0.5f);
+                    ImGui::DragFloat(T("Max"), &jc->MaxLimit, 0.5f);
                     host.TrackLastImGuiItem();
                 }
             } else if (jc->Type == JT::Distance) {
-                ImGui::DragFloat("Min Distance", &jc->MinDistance, 0.02f, 0.0f, 100.0f);
+                ImGui::DragFloat(T("Min Distance"), &jc->MinDistance, 0.02f, 0.0f, 100.0f);
                 host.TrackLastImGuiItem();
-                ImGui::DragFloat("Max Distance", &jc->MaxDistance, 0.02f, 0.0f, 100.0f);
+                ImGui::DragFloat(T("Max Distance"), &jc->MaxDistance, 0.02f, 0.0f, 100.0f);
                 host.TrackLastImGuiItem();
             } else if (jc->Type == JT::Cone) {
-                ImGui::DragFloat("Cone Half Angle", &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
+                ImGui::DragFloat(T("Cone Half Angle"), &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
                 host.TrackLastImGuiItem();
             }
-            ImGui::TextDisabled("Needs a Rigid Body; only the Jolt backend simulates joints");
-            if (ImGui::Button("Remove Joint")) {
+            ImGui::TextDisabled("%s", T("Needs a Rigid Body; only the Jolt backend simulates joints"));
+            if (ImGui::Button(T("Remove Joint"))) {
                 host.PushUndoSnapshot();
                 reg.remove<JointComponent>(obj.Entity());
             }
@@ -1043,19 +1054,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скелетно-анимированная модель (.glb/.gltf или процедурное демо) ---
-    if (reg.all_of<AnimatedModelComponent>(obj.Entity()) && ImGui::CollapsingHeader("Animated Model", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<AnimatedModelComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Animated Model" "###Animated Model"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity())) {
             char pathBuf[512];
             std::snprintf(pathBuf, sizeof(pathBuf), "%s", am->Path.c_str());
-            if (ImGui::InputText("Model (.glb)", pathBuf, sizeof(pathBuf))) am->Path = pathBuf;
+            if (ImGui::InputText(T("Model (.glb)"), pathBuf, sizeof(pathBuf))) am->Path = pathBuf;
             host.TrackLastImGuiItem();
-            ImGui::TextDisabled("Empty path = procedural demo (\"tentacle\")");
+            ImGui::TextDisabled("%s", T("Empty path = procedural demo (\"tentacle\")"));
             if (am->Path.empty()) {
-                if (ImGui::SliderInt("Demo Segments", &am->DemoSegments, 2, 16)) {
+                if (ImGui::SliderInt(T("Demo Segments"), &am->DemoSegments, 2, 16)) {
                     am->Ready = false; am->Model = nullptr; // пересобрать демо
                 }
             }
-            if (ImGui::Button("Reload")) { am->Ready = false; am->Model = nullptr; }
+            if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
 
             // Список клипов — из проигрывателя (модель уже загружена системой).
             int clipCount = am->Anim.ClipCount();
@@ -1074,23 +1085,23 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                     }
                     ImGui::EndCombo();
                 }
-                ImGui::DragFloat("Blend Time", &am->BlendTime, 0.01f, 0.0f, 2.0f);
+                ImGui::DragFloat(T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
                 host.TrackLastImGuiItem();
                 if (am->Anim.Fading())
-                    ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), "cross-fading %.0f%%",
+                    ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), T("cross-fading %.0f%%"),
                                        am->Anim.FadeWeight() * 100.0f);
             } else {
-                ImGui::TextDisabled("No animation clips (bind pose)");
+                ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
             }
-            ImGui::DragFloat("Speed", &am->Speed, 0.02f, 0.0f, 8.0f); host.TrackLastImGuiItem();
-            if (ImGui::Checkbox("Loop", &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
+            ImGui::DragFloat(T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f); host.TrackLastImGuiItem();
+            if (ImGui::Checkbox(T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
             ImGui::SameLine();
-            ImGui::Checkbox("Playing", &am->Playing);
+            ImGui::Checkbox(T("Playing"), &am->Playing);
             if (clipCount > 0) {
-                ImGui::TextDisabled("t = %.2f s", am->Anim.Time());
+                ImGui::TextDisabled(T("t = %.2f s"), am->Anim.Time());
             }
-            ImGui::Checkbox("Root Motion", &am->RootMotion);
-            if (ImGui::Button("Remove Animated Model")) {
+            ImGui::Checkbox(T("Root Motion"), &am->RootMotion);
+            if (ImGui::Button(T("Remove Animated Model"))) {
                 host.PushUndoSnapshot();
                 reg.remove<AnimatedModelComponent>(obj.Entity());
             }
@@ -1099,9 +1110,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Зонд отражений -----------------------------------------------------
     if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
-        ImGui::CollapsingHeader("Reflection Probe", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::CollapsingHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ReflectionProbeComponent* p = reg.try_get<ReflectionProbeComponent>(obj.Entity())) {
-            ImGui::TextDisabled("Captures the scene around this point into a cubemap");
+            ImGui::TextDisabled("%s", T("Captures the scene around this point into a cubemap"));
             // Любая правка охвата или разрешения означает «снять заново»: карта
             // снята под прежние числа, и оставить её значило бы показывать
             // отражение, которого в сцене уже нет.
@@ -1110,25 +1121,25 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             const int resValues[] = {32, 64, 128, 256};
             int resIdx = 2;
             for (int i = 0; i < 4; ++i) if (resValues[i] == p->Resolution) resIdx = i;
-            if (ImGui::Combo("Resolution", &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
+            if (ImGui::Combo(T("Resolution"), &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
             if (p->Resolution != prevRes) p->Dirty = true;
 
-            if (ImGui::DragFloat3("Box Half Extents", &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
+            if (ImGui::DragFloat3(T("Box Half Extents"), &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
                 p->Dirty = true;
             host.TrackLastImGuiItem();
-            ImGui::TextDisabled("Camera inside this box uses this probe");
-            if (ImGui::Checkbox("Box Parallax", &p->BoxParallax)) p->Dirty = true;
-            ImGui::SliderFloat("Intensity", &p->Intensity, 0.0f, 3.0f);
+            ImGui::TextDisabled("%s", T("Camera inside this box uses this probe"));
+            if (ImGui::Checkbox(T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
+            ImGui::SliderFloat(T("Intensity"), &p->Intensity, 0.0f, 3.0f);
             host.TrackLastImGuiItem();
-            if (ImGui::DragFloat("Far Clip", &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
+            if (ImGui::DragFloat(T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
             host.TrackLastImGuiItem();
-            ImGui::Checkbox("Realtime (re-capture every frame)", &p->Realtime);
-            ImGui::TextDisabled("Realtime = 6 scene passes per frame - use sparingly");
+            ImGui::Checkbox(T("Realtime (re-capture every frame)"), &p->Realtime);
+            ImGui::TextDisabled("%s", T("Realtime = 6 scene passes per frame - use sparingly"));
 
-            if (ImGui::Button("Bake Probe")) p->Dirty = true;
+            if (ImGui::Button(T("Bake Probe"))) p->Dirty = true;
             ImGui::SameLine();
             ImGui::TextDisabled(p->Dirty ? "queued" : (p->Runtime ? "captured" : "empty"));
-            if (ImGui::Button("Remove Reflection Probe")) {
+            if (ImGui::Button(T("Remove Reflection Probe"))) {
                 host.PushUndoSnapshot();
                 reg.remove<ReflectionProbeComponent>(obj.Entity());
             }
@@ -1139,12 +1150,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Кость задаётся ИМЕНЕМ, а не индексом: модель может смениться (или ещё не
     // загрузиться), а имя переживает и то, и другое. Список имён показываем
     // только когда скелет уже есть.
-    if (reg.all_of<IKComponent>(obj.Entity()) && ImGui::CollapsingHeader("IK", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<IKComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
-            ImGui::Checkbox("IK Enabled", &ik->Enabled);
+            ImGui::Checkbox(T("IK Enabled"), &ik->Enabled);
             const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity());
             if (!am) ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
-                                        "No Animated Model - goals do nothing");
+                                        "%s", T("No Animated Model - goals do nothing"));
 
             int remove = -1;
             for (int gi = 0; gi < (int)ik->Goals.size(); ++gi) {
@@ -1155,7 +1166,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 if (ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
                     char boneBuf[128];
                     std::snprintf(boneBuf, sizeof(boneBuf), "%s", g.Bone.c_str());
-                    if (ImGui::InputText("Bone", boneBuf, sizeof(boneBuf))) {
+                    if (ImGui::InputText(T("Bone"), boneBuf, sizeof(boneBuf))) {
                         g.Bone = boneBuf;
                         g.Resolved = false;   // имя сменилось — искать заново
                     }
@@ -1174,40 +1185,40 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                             ImGui::EndCombo();
                         }
                     }
-                    ImGui::Checkbox("Enabled", &g.Enabled);
+                    ImGui::Checkbox(T("Enabled"), &g.Enabled);
                     ImGui::SameLine();
-                    if (ImGui::Checkbox("Aim (look-at)", &g.Aim)) g.Resolved = false;
+                    if (ImGui::Checkbox(T("Aim (look-at)"), &g.Aim)) g.Resolved = false;
                     if (g.Aim) {
-                        ImGui::DragFloat3("Aim Axis", &g.AimAxis.x, 0.01f);
+                        ImGui::DragFloat3(T("Aim Axis"), &g.AimAxis.x, 0.01f);
                         host.TrackLastImGuiItem();
-                        ImGui::SliderFloat("Max Angle", &g.AimMaxAngle, 0.0f, 180.0f);
+                        ImGui::SliderFloat(T("Max Angle"), &g.AimMaxAngle, 0.0f, 180.0f);
                         host.TrackLastImGuiItem();
                     } else {
-                        if (ImGui::SliderInt("Chain Length", &g.ChainLength, 2, 8)) g.Resolved = false;
+                        if (ImGui::SliderInt(T("Chain Length"), &g.ChainLength, 2, 8)) g.Resolved = false;
                         host.TrackLastImGuiItem();
-                        ImGui::TextDisabled("2 = analytic two-bone, more = FABRIK");
-                        ImGui::Checkbox("Use Pole", &g.UsePole);
+                        ImGui::TextDisabled("%s", T("2 = analytic two-bone, more = FABRIK"));
+                        ImGui::Checkbox(T("Use Pole"), &g.UsePole);
                         if (g.UsePole) {
-                            ImGui::DragFloat3("Pole", &g.Pole.x, 0.02f);
+                            ImGui::DragFloat3(T("Pole"), &g.Pole.x, 0.02f);
                             host.TrackLastImGuiItem();
                         }
-                        ImGui::DragFloat3("Align Normal", &g.AlignNormal.x, 0.02f);
+                        ImGui::DragFloat3(T("Align Normal"), &g.AlignNormal.x, 0.02f);
                         host.TrackLastImGuiItem();
-                        ImGui::Checkbox("Foot Lock", &g.Lock);
+                        ImGui::Checkbox(T("Foot Lock"), &g.Lock);
                         if (g.Lock) {
-                            ImGui::DragFloat("Plant Height", &g.PlantHeight, 0.005f, 0.0f, 1.0f);
+                            ImGui::DragFloat(T("Plant Height"), &g.PlantHeight, 0.005f, 0.0f, 1.0f);
                             host.TrackLastImGuiItem();
-                            ImGui::DragFloat("Release Time", &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
+                            ImGui::DragFloat(T("Release Time"), &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
                             host.TrackLastImGuiItem();
                         }
                     }
-                    ImGui::DragFloat3("Target (world)", &g.Target.x, 0.02f);
+                    ImGui::DragFloat3(T("Target (world)"), &g.Target.x, 0.02f);
                     host.TrackLastImGuiItem();
-                    ImGui::SliderFloat("Weight", &g.Weight, 0.0f, 1.0f);
+                    ImGui::SliderFloat(T("Weight"), &g.Weight, 0.0f, 1.0f);
                     host.TrackLastImGuiItem();
                     if (g.Resolved && g.EndJoint < 0)
-                        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "bone not found in skeleton");
-                    if (ImGui::SmallButton("Remove Goal")) remove = gi;
+                        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", T("bone not found in skeleton"));
+                    if (ImGui::SmallButton(T("Remove Goal"))) remove = gi;
                     ImGui::TreePop();
                 }
                 ImGui::PopID();
@@ -1216,9 +1227,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 ik->Goals.erase(ik->Goals.begin() + remove);
             }
-            if (ImGui::Button("Add Goal")) ik->Goals.emplace_back();
+            if (ImGui::Button(T("Add Goal"))) ik->Goals.emplace_back();
             ImGui::SameLine();
-            if (ImGui::Button("Remove IK")) {
+            if (ImGui::Button(T("Remove IK"))) {
                 host.PushUndoSnapshot();
                 reg.remove<IKComponent>(obj.Entity());
             }
@@ -1226,7 +1237,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Эмиттер частиц (огонь/дым/искры/…): пресеты + тонкая настройка ---
-    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && ImGui::CollapsingHeader("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
             ParticleEmitterConfig& cfg = em->Config;
             // Пресеты: применяют готовый конфиг, дальше его можно править.
@@ -1243,75 +1254,75 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 }
                 ImGui::EndCombo();
             }
-            ImGui::Checkbox("Active", &em->Active);
+            ImGui::Checkbox(T("Active"), &em->Active);
             ImGui::SameLine();
-            ImGui::Checkbox("Continuous", &em->Continuous);
+            ImGui::Checkbox(T("Continuous"), &em->Continuous);
             if (em->Continuous) {
-                ImGui::DragFloat("Rate (p/s)", &cfg.EmissionRate, 0.5f, 0.0f, 500.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Rate (p/s)"), &cfg.EmissionRate, 0.5f, 0.0f, 500.0f); host.TrackLastImGuiItem();
             } else {
-                ImGui::DragInt("Burst Count", &em->BurstCount, 1, 1, 500); host.TrackLastImGuiItem();
-                ImGui::DragFloat("Burst Interval", &em->BurstInterval, 0.05f, 0.05f, 30.0f); host.TrackLastImGuiItem();
+                ImGui::DragInt(T("Burst Count"), &em->BurstCount, 1, 1, 500); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Burst Interval"), &em->BurstInterval, 0.05f, 0.05f, 30.0f); host.TrackLastImGuiItem();
             }
             ImGui::DragFloatRange2("Speed", &cfg.SpeedMin, &cfg.SpeedMax, 0.05f, 0.0f, 50.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Gravity", &cfg.Gravity, 0.05f, -30.0f, 30.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Gravity"), &cfg.Gravity, 0.05f, -30.0f, 30.0f); host.TrackLastImGuiItem();
             ImGui::DragFloatRange2("Lifetime", &cfg.LifetimeMin, &cfg.LifetimeMax, 0.02f, 0.02f, 20.0f); host.TrackLastImGuiItem();
             ImGui::DragFloatRange2("Start Size", &cfg.StartSizeMin, &cfg.StartSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
             ImGui::DragFloatRange2("End Size", &cfg.EndSizeMin, &cfg.EndSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
-            ImGui::ColorEdit4("Start Color", &cfg.StartColor.x); host.TrackLastImGuiItem();
-            ImGui::ColorEdit4("End Color", &cfg.EndColor.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat3("Dir Min", &cfg.DirectionMin.x, 0.02f); host.TrackLastImGuiItem();
-            ImGui::DragFloat3("Dir Max", &cfg.DirectionMax.x, 0.02f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Spin", &cfg.AngularVelocityMax, 0.05f, 0.0f, 20.0f); host.TrackLastImGuiItem();
-            if (ImGui::Button("Remove Emitter")) {
+            ImGui::ColorEdit4(T("Start Color"), &cfg.StartColor.x); host.TrackLastImGuiItem();
+            ImGui::ColorEdit4(T("End Color"), &cfg.EndColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat3(T("Dir Min"), &cfg.DirectionMin.x, 0.02f); host.TrackLastImGuiItem();
+            ImGui::DragFloat3(T("Dir Max"), &cfg.DirectionMax.x, 0.02f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Spin"), &cfg.AngularVelocityMax, 0.05f, 0.0f, 20.0f); host.TrackLastImGuiItem();
+            if (ImGui::Button(T("Remove Emitter"))) {
                 host.PushUndoSnapshot();
                 reg.remove<ParticleEmitterComponent>(obj.Entity());
             }
         }
     }
 
-    if (reg.all_of<UIElementComponent>(obj.Entity()) && ImGui::CollapsingHeader("UI Element", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<UIElementComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (UIElementComponent* u = reg.try_get<UIElementComponent>(obj.Entity())) {
-            const char* kinds[] = {"Panel", "Label", "Image", "Bar", "Icon",
-                                   "Input", "Checkbox", "Slider"};
+            const char* kinds[] = {T("Panel"), T("Label"), T("Image"), T("Bar"), T("Icon"),
+                                   T("Input"), T("Checkbox"), T("Slider")};
             int kind = (int)u->Type;
-            if (ImGui::Combo("Kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
+            if (ImGui::Combo(T("Kind"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
                 host.PushUndoSnapshot();
                 u->Type = (UIElementComponent::Kind)kind;
             }
-            const char* anchors[] = {"Top Left", "Top Center", "Top Right",
-                                     "Center Left", "Center", "Center Right",
-                                     "Bottom Left", "Bottom Center", "Bottom Right"};
+            const char* anchors[] = {T("Top Left"), T("Top Center"), T("Top Right"),
+                                     T("Center Left"), T("Center"), T("Center Right"),
+                                     T("Bottom Left"), T("Bottom Center"), T("Bottom Right")};
             int anchor = (int)u->Anchor;
-            if (ImGui::Combo("Anchor", &anchor, anchors, IM_ARRAYSIZE(anchors))) {
+            if (ImGui::Combo(T("Anchor"), &anchor, anchors, IM_ARRAYSIZE(anchors))) {
                 host.PushUndoSnapshot();
                 u->Anchor = (UIAnchor)anchor;
             }
-            ImGui::DragFloat2("Offset", &u->Offset.x, 1.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat2("Size", &u->Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
-            ImGui::DragInt("Layer", &u->Layer, 1); host.TrackLastImGuiItem();
-            ImGui::Checkbox("Visible", &u->Visible);
+            ImGui::DragFloat2(T("Offset"), &u->Offset.x, 1.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat2(T("Size"), &u->Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
+            ImGui::DragInt(T("Layer"), &u->Layer, 1); host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Visible"), &u->Visible);
             ImGui::SameLine();
-            ImGui::Checkbox("Clip Children", &u->ClipChildren);
-            ImGui::SeparatorText("Style");
-            ImGui::ColorEdit4("Fill / Tint", &u->Color.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Rounding", &u->Rounding, 0.5f, 0.0f, 200.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Border", &u->BorderThickness, 0.25f, 0.0f, 50.0f); host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Clip Children"), &u->ClipChildren);
+            ImGui::SeparatorText(T("Style"));
+            ImGui::ColorEdit4(T("Fill / Tint"), &u->Color.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Rounding"), &u->Rounding, 0.5f, 0.0f, 200.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Border"), &u->BorderThickness, 0.25f, 0.0f, 50.0f); host.TrackLastImGuiItem();
             if (u->BorderThickness > 0.0f) {
-                ImGui::ColorEdit4("Border Color", &u->BorderColor.x); host.TrackLastImGuiItem();
+                ImGui::ColorEdit4(T("Border Color"), &u->BorderColor.x); host.TrackLastImGuiItem();
             }
-            ImGui::ColorEdit4("Gradient (a=0 off)", &u->GradientColor.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Shadow", &u->ShadowSize, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat("Padding X", &u->PadX, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
-            ImGui::Checkbox("Auto Width", &u->AutoWidth);
+            ImGui::ColorEdit4(T("Gradient (a=0 off)"), &u->GradientColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Shadow"), &u->ShadowSize, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Padding X"), &u->PadX, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Auto Width"), &u->AutoWidth);
 
             // Иконка выбирается из списка движка, а не вводится строкой: имя с
             // опечаткой рисует заглушку, и искать её потом дороже, чем показать
             // здесь готовый перечень.
-            ImGui::SeparatorText("Icon");
+            ImGui::SeparatorText(T("Icon"));
             const std::vector<std::string>& icons = sage::ui::IconNames();
             std::string current = u->Icon.empty() ? "(none)" : u->Icon;
             if (ImGui::BeginCombo("Icon", current.c_str())) {
-                if (ImGui::Selectable("(none)", u->Icon.empty())) {
+                if (ImGui::Selectable(T("(none)"), u->Icon.empty())) {
                     host.PushUndoSnapshot();
                     u->Icon.clear();
                 }
@@ -1324,46 +1335,46 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ImGui::EndCombo();
             }
             if (!u->Icon.empty()) {
-                ImGui::ColorEdit4("Icon Color", &u->IconColor.x); host.TrackLastImGuiItem();
+                ImGui::ColorEdit4(T("Icon Color"), &u->IconColor.x); host.TrackLastImGuiItem();
             }
-            ImGui::SeparatorText("Text");
+            ImGui::SeparatorText(T("Text"));
             char textBuf[256];
             std::snprintf(textBuf, sizeof(textBuf), "%s", u->Text.c_str());
-            if (ImGui::InputText("Text", textBuf, sizeof(textBuf))) u->Text = textBuf;
+            if (ImGui::InputText(T("Text"), textBuf, sizeof(textBuf))) u->Text = textBuf;
             host.TrackLastImGuiItem();
-            ImGui::DragFloat("Text Scale", &u->TextScale, 0.05f, 0.5f, 12.0f); host.TrackLastImGuiItem();
-            ImGui::ColorEdit4("Text Color", &u->TextColor.x); host.TrackLastImGuiItem();
-            ImGui::Checkbox("Center Text", &u->TextCentered);
+            ImGui::DragFloat(T("Text Scale"), &u->TextScale, 0.05f, 0.5f, 12.0f); host.TrackLastImGuiItem();
+            ImGui::ColorEdit4(T("Text Color"), &u->TextColor.x); host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Center Text"), &u->TextCentered);
             ImGui::SameLine();
-            ImGui::Checkbox("Wrap", &u->WrapText);
+            ImGui::Checkbox(T("Wrap"), &u->WrapText);
 
-            ImGui::SeparatorText("Interaction");
-            ImGui::Checkbox("Interactive", &u->Interactive);
+            ImGui::SeparatorText(T("Interaction"));
+            ImGui::Checkbox(T("Interactive"), &u->Interactive);
             ImGui::SameLine();
-            ImGui::Checkbox("Enabled", &u->Enabled);
+            ImGui::Checkbox(T("Enabled"), &u->Enabled);
             if (u->Type == UIElementComponent::Kind::Input) {
                 char phBuf[256];
                 std::snprintf(phBuf, sizeof(phBuf), "%s", u->Placeholder.c_str());
-                if (ImGui::InputText("Placeholder", phBuf, sizeof(phBuf))) u->Placeholder = phBuf;
+                if (ImGui::InputText(T("Placeholder"), phBuf, sizeof(phBuf))) u->Placeholder = phBuf;
                 host.TrackLastImGuiItem();
-                ImGui::DragInt("Max Length", &u->MaxLength, 1, 0, 4096);
+                ImGui::DragInt(T("Max Length"), &u->MaxLength, 1, 0, 4096);
                 host.TrackLastImGuiItem();
-                ImGui::Checkbox("Password", &u->Password);
+                ImGui::Checkbox(T("Password"), &u->Password);
             }
             if (u->Type == UIElementComponent::Kind::Slider) {
-                ImGui::DragFloat("Min Value", &u->MinValue, 0.1f); host.TrackLastImGuiItem();
-                ImGui::DragFloat("Max Value", &u->MaxValue, 0.1f); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Min Value"), &u->MinValue, 0.1f); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Max Value"), &u->MaxValue, 0.1f); host.TrackLastImGuiItem();
             }
             if (u->Type == UIElementComponent::Kind::Slider ||
                 u->Type == UIElementComponent::Kind::Checkbox) {
-                ImGui::SliderFloat("Value (0..1)", &u->Value, 0.0f, 1.0f);
+                ImGui::SliderFloat(T("Value (0..1)"), &u->Value, 0.0f, 1.0f);
                 host.TrackLastImGuiItem();
             }
             if (u->Type == UIElementComponent::Kind::Image) {
-                ImGui::SeparatorText("Image");
+                ImGui::SeparatorText(T("Image"));
                 char texBuf[512];
                 std::snprintf(texBuf, sizeof(texBuf), "%s", u->TexturePath.c_str());
-                if (ImGui::InputText("Texture", texBuf, sizeof(texBuf))) u->TexturePath = texBuf;
+                if (ImGui::InputText(T("Texture"), texBuf, sizeof(texBuf))) u->TexturePath = texBuf;
                 host.TrackLastImGuiItem();
                 ImGui::SameLine();
                 auto loadTexture = [&] {
@@ -1374,46 +1385,46 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                                                : ResourceManager::Instance().GetTexture(
                                                      u->TexturePath);
                 };
-                if (ImGui::SmallButton("Load")) {
+                if (ImGui::SmallButton(T("Load"))) {
                     host.PushUndoSnapshot();
                     loadTexture();
                 }
                 if (!u->TexturePath.empty() && !u->Tex)
-                    ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "Texture not loaded (press Load)");
+                    ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", T("Texture not loaded (press Load)"));
 
                 // Пиксель-арт меняет ФИЛЬТРАЦИЮ загруженной текстуры, поэтому
                 // перезагружаем сразу: иначе галка стоит, а картинка мыльная до
                 // следующего Load, и это выглядит как «галка не работает».
-                if (ImGui::Checkbox("Pixel Art (nearest, no mips)", &u->PixelArt)) {
+                if (ImGui::Checkbox(T("Pixel Art (nearest, no mips)"), &u->PixelArt)) {
                     host.PushUndoSnapshot();
                     loadTexture();
                 }
                 if (u->Tex) {
-                    ImGui::TextDisabled("Sheet: %d x %d px", u->Tex->Width(), u->Tex->Height());
+                    ImGui::TextDisabled(T("Sheet: %d x %d px"), u->Tex->Width(), u->Tex->Height());
                 }
                 // Спрайт задаётся в ПИКСЕЛЯХ листа — теми же числами, что
                 // напечатаны в документации набора.
-                ImGui::DragFloat4("Sprite x,y,w,h", &u->Sprite.x, 1.0f, 0.0f, 8192.0f);
+                ImGui::DragFloat4(T("Sprite x,y,w,h"), &u->Sprite.x, 1.0f, 0.0f, 8192.0f);
                 host.TrackLastImGuiItem();
-                ImGui::TextDisabled("w or h = 0 — the whole file");
-                ImGui::DragFloat4("9-slice l,t,r,b", &u->SliceBorder.x, 0.5f, 0.0f, 512.0f);
+                ImGui::TextDisabled("%s", T("w or h = 0 — the whole file"));
+                ImGui::DragFloat4(T("9-slice l,t,r,b"), &u->SliceBorder.x, 0.5f, 0.0f, 512.0f);
                 host.TrackLastImGuiItem();
-                ImGui::DragFloat("Pixel Scale", &u->PixelScale, 0.25f, 0.0f, 16.0f);
+                ImGui::DragFloat(T("Pixel Scale"), &u->PixelScale, 0.25f, 0.0f, 16.0f);
                 host.TrackLastImGuiItem();
-                ImGui::TextDisabled("0 — stretch to fit; >0 — source pixel size");
+                ImGui::TextDisabled("%s", T("0 — stretch to fit; >0 — source pixel size"));
                 // Спрайты состояний: в наборах кнопка нарисована трижды, и
                 // подменить картинку правильнее, чем осветлить основную.
-                ImGui::DragFloat4("Hover sprite", &u->SpriteHover.x, 1.0f, 0.0f, 8192.0f);
+                ImGui::DragFloat4(T("Hover sprite"), &u->SpriteHover.x, 1.0f, 0.0f, 8192.0f);
                 host.TrackLastImGuiItem();
-                ImGui::DragFloat4("Pressed sprite", &u->SpritePressed.x, 1.0f, 0.0f, 8192.0f);
+                ImGui::DragFloat4(T("Pressed sprite"), &u->SpritePressed.x, 1.0f, 0.0f, 8192.0f);
                 host.TrackLastImGuiItem();
             }
             if (u->Type == UIElementComponent::Kind::Bar) {
-                ImGui::SeparatorText("Bar");
-                ImGui::SliderFloat("Value", &u->Value, 0.0f, 1.0f); host.TrackLastImGuiItem();
-                ImGui::ColorEdit4("Fill Color", &u->BarFillColor.x); host.TrackLastImGuiItem();
+                ImGui::SeparatorText(T("Bar"));
+                ImGui::SliderFloat(T("Value"), &u->Value, 0.0f, 1.0f); host.TrackLastImGuiItem();
+                ImGui::ColorEdit4(T("Fill Color"), &u->BarFillColor.x); host.TrackLastImGuiItem();
             }
-            if (ImGui::Button("Remove UI Element")) {
+            if (ImGui::Button(T("Remove UI Element"))) {
                 host.PushUndoSnapshot();
                 reg.remove<UIElementComponent>(obj.Entity());
             }
@@ -1425,7 +1436,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-    if (ImGui::Button("Delete Entity", ImVec2(-1, 0))) host.DeleteSelected();
+    if (ImGui::Button(T("Delete Entity"), ImVec2(-1, 0))) host.DeleteSelected();
     ImGui::PopStyleColor();
 }
 
@@ -1449,7 +1460,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
     entt::entity e = obj.Entity();
 
     ImGui::Separator();
-    if (ImGui::Button("Add Component", ImVec2(-1, 0))) ImGui::OpenPopup("##add_component");
+    if (ImGui::Button(T("Add Component"), ImVec2(-1, 0))) ImGui::OpenPopup("##add_component");
     if (ImGui::BeginPopup("##add_component")) {
         bool any = false;
         auto item = [&](const char* label, bool present, auto addFn) {
@@ -1483,7 +1494,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         item("Joint", reg.all_of<JointComponent>(e), [&] { reg.emplace<JointComponent>(e); });
         item("Animated Model", reg.all_of<AnimatedModelComponent>(e),
              [&] { reg.emplace<AnimatedModelComponent>(e); });
-        item("IK", reg.all_of<IKComponent>(e), [&] { reg.emplace<IKComponent>(e); });
+        item(T("IK"), reg.all_of<IKComponent>(e), [&] { reg.emplace<IKComponent>(e); });
         item("Reflection Probe", reg.all_of<ReflectionProbeComponent>(e),
              [&] { reg.emplace<ReflectionProbeComponent>(e); });
         item("Particle Emitter", reg.all_of<ParticleEmitterComponent>(e), [&] {
@@ -1492,7 +1503,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
             reg.emplace<ParticleEmitterComponent>(e, em);
         });
         item("UI Element", reg.all_of<UIElementComponent>(e), [&] { reg.emplace<UIElementComponent>(e); });
-        if (!any) ImGui::TextDisabled("All components already added");
+        if (!any) ImGui::TextDisabled("%s", T("All components already added"));
         ImGui::EndPopup();
     }
 }
@@ -1544,7 +1555,7 @@ void InspectorPanel::Draw(EditorHost& host) {
         }
     }
 
-    ImGui::Begin("Inspector");
+    ImGui::Begin(T("Inspector" "###Inspector"));
 
     // ------------------------------------------------------------------------
     // Две ПРИНЦИПИАЛЬНО разные вещи — в две вкладки, а не в одну простыню.
@@ -1576,11 +1587,11 @@ void InspectorPanel::Draw(EditorHost& host) {
     m_lastAssetPath = assetPath;
 
     if (!hasEntity && !hasAsset) {
-        ImGui::TextDisabled("Ничего не выбрано");
+        ImGui::TextDisabled("%s", T("Nothing selected"));
         ImGui::Spacing();
         // TextWrapped, а не две строки текста: панель узкая и её ширину меняют,
         // а обрезанная посередине подсказка бесполезнее отсутствующей.
-        ImGui::TextWrapped("Выберите объект во вьюпорте или в Hierarchy, либо файл в Assets.");
+        ImGui::TextWrapped("%s", T("Select an object in the viewport or Hierarchy, or a file in Assets."));
         ImGui::End();
         return;
     }
@@ -1601,7 +1612,7 @@ void InspectorPanel::Draw(EditorHost& host) {
         const ImGuiTabItemFlags objFlags = (force && m_focus == Focus::Object)
                                                ? ImGuiTabItemFlags_SetSelected
                                                : ImGuiTabItemFlags_None;
-        if (ImGui::BeginTabItem("Объект", nullptr, objFlags)) {
+        if (ImGui::BeginTabItem(T("Object" "###Object"), nullptr, objFlags)) {
             m_focus = Focus::Object;
             DrawObjectSection(host);
             ImGui::EndTabItem();
@@ -1609,7 +1620,7 @@ void InspectorPanel::Draw(EditorHost& host) {
         const ImGuiTabItemFlags assetFlags = (force && m_focus == Focus::Asset)
                                                  ? ImGuiTabItemFlags_SetSelected
                                                  : ImGuiTabItemFlags_None;
-        if (ImGui::BeginTabItem("Ассет", nullptr, assetFlags)) {
+        if (ImGui::BeginTabItem(T("Asset" "###Asset"), nullptr, assetFlags)) {
             m_focus = Focus::Asset;
             DrawAssetSection(host, assetKind);
             ImGui::EndTabItem();
@@ -1653,13 +1664,13 @@ InspectorPanel::AssetKind InspectorPanel::ClassifyAsset(const std::filesystem::p
 
 void InspectorPanel::DrawObjectSection(EditorHost& host) {
     GameObject obj = host.SelectedObject();
-    DrawSectionHeader("cube", "объект сцены", obj.Name(),
-                      "Свойства этой сущности — только её.");
+    DrawSectionHeader("cube", T("scene object"), obj.Name(),
+                      T("The properties of this entity belong to it alone."));
 
     // Мультивыделение: правим первичную, но подсказываем размер набора
     // (гизмо двигает все; Delete/Duplicate — по всем выбранным).
     if (host.Selection().size() > 1) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Выбрано %zu — правим первичный",
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), T("%zu selected — editing the primary one"),
                            host.Selection().size());
         ImGui::Separator();
     }
@@ -1672,31 +1683,31 @@ void InspectorPanel::DrawAssetSection(EditorHost& host, AssetKind kind) {
 
     switch (kind) {
         case AssetKind::Material:
-            DrawSectionHeader("material", "материал", name,
-                              "Файл на диске — изменится у ВСЕХ объектов с этим материалом.");
+            DrawSectionHeader("material", T("material"), name,
+                              T("A file on disk — the change affects EVERY object using this material."));
             DrawMaterialEditor(host);
             break;
         case AssetKind::Prefab:
-            DrawSectionHeader("cube", "префаб", name,
-                              "Заготовка-поддерево: двойной клик в Assets ставит копию в сцену.");
+            DrawSectionHeader("cube", T("prefab"), name,
+                              T("A subtree template: double-clicking in Assets places a copy into the scene."));
             DrawPrefabPreview(host);
             break;
         case AssetKind::Model:
-            DrawSectionHeader("model", "модель", name,
-                              "Настройки импорта запекаются в меш при загрузке.");
+            DrawSectionHeader("model", T("model"), name,
+                              T("Import settings are baked into the mesh on load."));
             DrawModelImportEditor(host);
             break;
         default: {
             // Для остальных типов редактора нет — но пустая вкладка выглядит как
             // поломка, поэтому показываем то, что известно о файле.
-            DrawSectionHeader("file", "файл", name, path.string());
+            DrawSectionHeader("file", T("file"), name, path.string());
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
-            if (!ec) ImGui::TextDisabled("Размер: %llu байт", (unsigned long long)size);
+            if (!ec) ImGui::TextDisabled(T("Size: %llu bytes"), (unsigned long long)size);
             ImGui::Spacing();
-            ImGui::TextDisabled("Для этого типа файла редактора нет.");
-            ImGui::TextDisabled("Материалы (.sagemat) и модели (.obj/.gltf/.glb)");
-            ImGui::TextDisabled("правятся здесь же.");
+            ImGui::TextDisabled("%s", T("There is no editor for this file type."));
+            ImGui::TextDisabled("%s", T("Materials (.sagemat) and models (.obj/.gltf/.glb)"));
+            ImGui::TextDisabled("%s", T("and are edited right here."));
             break;
         }
     }

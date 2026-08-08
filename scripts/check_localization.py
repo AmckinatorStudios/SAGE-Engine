@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Проверка локализации редактора. Гоняется в CI вместе с остальными.
+
+ЧТО ПРОВЕРЯЕТСЯ И ПОЧЕМУ ИМЕННО ЭТО.
+
+1. НЕОБЁРНУТЫЕ СТРОКИ. Подпись, попавшая в ImGui мимо T(), выходит на экран
+   по-английски при любом языке. Сборка на это не жалуется, тесты тоже: строка
+   рабочая, просто не переведённая. Через десяток правок интерфейс снова
+   становится наполовину английским — ровно то состояние, из которого его
+   вытаскивали. Проверка ловит это в момент появления.
+
+2. РАСХОЖДЕНИЕ СПЕЦИФИКАТОРОВ ФОРМАТА. Половина строк — форматы («Объектов:
+   %zu»), и ImGui передаёт их в printf. Перевод, потерявший «%zu» или
+   поменявший его на «%d», — это не опечатка, а чтение чужой памяти. Компилятор
+   проверить это не может: он видит указатель, а не литерал. Здесь проверяется,
+   что у ключа и перевода СОВПАДАЕТ последовательность спецификаторов.
+
+3. МЁРТВЫЕ СТРОКИ КАТАЛОГА. Перевод, которому нет ключа в коде, — это работа
+   впустую и подсказка, что строку в коде переименовали, а каталог забыли.
+   Не ошибка, но сообщается.
+
+    python3 scripts/check_localization.py
+"""
+import json
+import os
+import re
+import sys
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIRS = [os.path.join(REPO, 'editor', 'src'), os.path.join(REPO, 'editor', 'src', 'panels')]
+CATALOG = os.path.join(REPO, 'editor', 'lang', 'ru.json')
+
+# Вызовы ImGui, у которых первый строковый аргумент виден на экране.
+WIDGETS = """Text TextWrapped TextDisabled TextUnformatted Button SmallButton MenuItem BeginMenu
+Checkbox Combo SliderFloat SliderInt SliderAngle DragFloat DragFloat2 DragFloat3 DragFloat4
+DragInt InputText InputTextMultiline InputFloat InputInt InputDouble Selectable SetTooltip
+SetItemTooltip ColorEdit3 ColorEdit4 RadioButton LabelText BulletText SeparatorText
+InputTextWithHint Begin BeginChild BeginPopupModal BeginTabItem BeginTabBar CollapsingHeader
+TreeNode TreeNodeEx""".split()
+
+LITERAL = r'(?:\s*"(?:[^"\\]|\\.)*")+'
+FMT = re.compile(r'%[-+ #0-9.*hlLqjzt]*[a-zA-Z%]')
+TEXT_IN_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def visible_text(raw):
+    """Видимая часть подписи: до «##» (дальше идёт скрытый идентификатор ImGui)."""
+    return raw.split('##')[0]
+
+
+def worth_translating(raw):
+    text = visible_text(raw)
+    stripped = FMT.sub('', text)
+    if not re.search(r'[A-Za-zЀ-ӿ]', stripped):
+        return False           # чистый идентификатор, формат или знаки
+    return len(stripped.strip()) > 2   # «X», «Y», «Z» одинаковы во всех языках
+
+
+def source_files():
+    for d in SRC_DIRS:
+        for name in sorted(os.listdir(d)):
+            if name.endswith('.cpp') and not name.startswith('Localization'):
+                yield os.path.join(d, name)
+
+
+def collect():
+    """(необёрнутые, ключи из T())"""
+    unwrapped = []
+    keys = set()
+    call = re.compile(r'ImGui::(' + '|'.join(sorted(WIDGETS, key=len, reverse=True)) +
+                      r')\s*\(\s*(' + LITERAL + r')')
+    # У InputTextWithHint видима ПОДСКАЗКА (второй аргумент), а первый — всегда
+    # скрытый идентификатор. Отдельным выражением, потому что общее правило
+    # «первый строковый аргумент» здесь как раз не работает.
+    hint = re.compile(r'ImGui::InputTextWithHint\s*\(\s*' + LITERAL + r'\s*,\s*(' + LITERAL + r')')
+    twrap = re.compile(r'\bT\(\s*(' + LITERAL + r')\s*\)')
+    for path in source_files():
+        src = open(path, encoding='utf-8').read()
+        rel = os.path.relpath(path, REPO)
+        for m in call.finditer(src):
+            raw = ''.join(TEXT_IN_LITERAL.findall(m.group(2)))
+            if not worth_translating(raw):
+                continue
+            line = src.count('\n', 0, m.start()) + 1
+            unwrapped.append('%s:%d: ImGui::%s("%s")' % (rel, line, m.group(1), raw[:60]))
+        for m in hint.finditer(src):
+            raw = ''.join(TEXT_IN_LITERAL.findall(m.group(1)))
+            if not worth_translating(raw):
+                continue
+            line = src.count('\n', 0, m.start()) + 1
+            unwrapped.append('%s:%d: подсказка InputTextWithHint("%s")' % (rel, line, raw[:60]))
+        for m in twrap.finditer(src):
+            raw = ''.join(TEXT_IN_LITERAL.findall(m.group(1)))
+            if visible_text(raw):
+                keys.add(visible_text(raw))
+    return unwrapped, keys
+
+
+def decode(text):
+    """C-экранирование -> строка, как её увидит программа. Включая \\uXXXX:
+    типографские кавычки в исходнике пишутся именно так."""
+    out, i = [], 0
+    while i < len(text):
+        if text[i] == '\\' and i + 1 < len(text):
+            if text[i+1] == 'u' and i + 5 < len(text):
+                out.append(chr(int(text[i+2:i+6], 16)))
+                i += 6
+                continue
+            out.append({'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\'}.get(text[i+1], text[i+1]))
+            i += 2
+        else:
+            out.append(text[i]); i += 1
+    return ''.join(out)
+
+
+def main():
+    unwrapped, keys = collect()
+    keys = {decode(k) for k in keys}
+    with open(CATALOG, encoding='utf-8') as f:
+        strings = json.load(f).get('strings', {})
+
+    failures = 0
+
+    if unwrapped:
+        print('НЕ ОБЁРНУТО в T() — эти подписи не переводятся:')
+        for u in unwrapped:
+            print('   ', u)
+        failures += len(unwrapped)
+
+    mismatched = []
+    for key, value in strings.items():
+        if FMT.findall(key) != FMT.findall(value):
+            mismatched.append((key, value))
+    if mismatched:
+        print('СПЕЦИФИКАТОРЫ ФОРМАТА РАСХОДЯТСЯ (перевод уйдёт в printf как есть):')
+        for key, value in mismatched:
+            print('    %r -> %r' % (key, value))
+        failures += len(mismatched)
+
+    missing = sorted(k for k in keys if k not in strings)
+    if missing:
+        print('БЕЗ ПЕРЕВОДА (%d):' % len(missing))
+        for k in missing:
+            print('   ', repr(k))
+        failures += len(missing)
+
+    dead = sorted(k for k in strings if k not in keys)
+    if dead:
+        print('в каталоге есть строки, которых нет в коде (%d) — не ошибка, но повод убрать:'
+              % len(dead))
+        for k in dead[:20]:
+            print('   ', repr(k))
+
+    if failures:
+        print('\nлокализация: замечаний %d' % failures)
+        return 1
+    print('локализация: строк в коде %d, все переведены, форматы совпадают' % len(keys))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

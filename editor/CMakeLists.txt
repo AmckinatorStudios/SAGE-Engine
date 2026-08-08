@@ -20,6 +20,7 @@ add_executable(SageEditor WIN32
     src/Project.cpp
     src/PluginManager.cpp
     src/RecentProjects.cpp
+    src/Localization.cpp
     src/panels/ConsolePanel.cpp
     src/panels/HierarchyPanel.cpp
     src/panels/InspectorPanel.cpp

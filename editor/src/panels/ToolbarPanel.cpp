@@ -7,6 +7,7 @@
 
 #include "EditorHost.h"
 #include "EditorIcons.h"
+#include "../Localization.h"
 
 void ToolbarPanel::Draw(EditorHost& host, float height) {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
@@ -17,33 +18,33 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     // Только иконки: три подписанные кнопки съедали треть тулбара, а форма
     // стрелки, дуги и рамки читается быстрее слова. Горячая клавиша — в
     // подсказке, чтобы её не нужно было искать в меню.
-    if (EditorIcons::IconOnlyButton("move", "Перенос (W)",
+    if (EditorIcons::IconOnlyButton("move", T("Move (W)"),
                                     host.GizmoOp() == (int)ImGuizmo::TRANSLATE))
         host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
     ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("rotate", "Поворот (E)",
+    if (EditorIcons::IconOnlyButton("rotate", T("Rotate (E)"),
                                     host.GizmoOp() == (int)ImGuizmo::ROTATE))
         host.GizmoOp() = (int)ImGuizmo::ROTATE;
     ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("scale", "Масштаб (R)",
+    if (EditorIcons::IconOnlyButton("scale", T("Scale (R)"),
                                     host.GizmoOp() == (int)ImGuizmo::SCALE))
         host.GizmoOp() = (int)ImGuizmo::SCALE;
     ImGui::SameLine();
     // Универсальное гизмо: перенос, поворот и масштаб одновременно. Экономит
     // самое частое действие в редакторе — переключение режима ради одной правки.
-    if (EditorIcons::IconOnlyButton("universal", "Всё сразу (T): перенос + поворот + масштаб",
+    if (EditorIcons::IconOnlyButton("universal", T("All at once (T): move + rotate + scale"),
                                     host.GizmoOp() == (int)ImGuizmo::UNIVERSAL))
         host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
     ImGui::SameLine();
     // Рамка (Y): тянет ОДНУ грань, оставляя противоположную на месте — в
     // отличие от масштаба, который тянет от центра сразу в обе стороны.
-    if (EditorIcons::IconOnlyButton("rect", "Рамка (Y): тянуть за грани габаритной коробки",
+    if (EditorIcons::IconOnlyButton("rect", T("Rect (Y): drag the faces of the bounding box"),
                                     host.GizmoOp() == (int)ImGuizmo::BOUNDS))
         host.GizmoOp() = (int)ImGuizmo::BOUNDS;
     ImGui::SameLine();
 
     ImGui::AlignTextToFramePadding();
-    ImGui::Checkbox("Snap", &host.GizmoSnap());
+    ImGui::Checkbox(T("Snap"), &host.GizmoSnap());
     ImGui::SameLine();
     // Шаг привязки — того режима, который сейчас включён: три поля разом
     // занимали бы полтулбара, а нужно всегда ровно одно.
@@ -58,32 +59,32 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
         ImGui::DragFloat("##snapstep", step, 0.05f, 0.01f, 360.0f, fmt);
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Шаг привязки для текущего режима.\n"
-                              "Для постройки из блоков ставьте его равным размеру блока.");
+            ImGui::SetTooltip("%s", T("Snap step for the current mode.\n"
+              "When building from blocks, set it to the block size."));
         }
     }
     ImGui::SameLine();
     bool world = host.GizmoSpace() == EditorGizmoSpace::World;
-    if (EditorIcons::Button(world ? "grid" : "cube", world ? "World" : "Local",
-                            "Пространство гизмо: мировое или локальное", true)) {
+    if (EditorIcons::Button(world ? "grid" : "cube", world ? T("World") : T("Local"),
+                            T("Gizmo space: world or local"), true)) {
         host.GizmoSpace() = world ? EditorGizmoSpace::Local : EditorGizmoSpace::World;
     }
     ImGui::SameLine();
     // Инструменты над выделением. Отключены, когда выделения нет: серая кнопка
     // честнее кнопки, которая молча ничего не делает.
     ImGui::BeginDisabled(host.Selection().empty());
-    if (EditorIcons::IconOnlyButton("eye", "Показать в кадре (F)")) host.FocusSelected();
+    if (EditorIcons::IconOnlyButton("eye", T("Frame the selection (F)"))) host.FocusSelected();
     ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("drop", "Опустить на поверхность (End)"))
+    if (EditorIcons::IconOnlyButton("drop", T("Drop onto the surface (End)")))
         host.DropSelectedToSurface();
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(host.Selection().size() < 2);
-    if (EditorIcons::IconOnlyButton("align", "Выровнять выделенные по первичному"))
+    if (EditorIcons::IconOnlyButton("align", T("Align the selection to the primary object")))
         ImGui::OpenPopup("##align_axis");
     ImGui::EndDisabled();
     if (ImGui::BeginPopup("##align_axis")) {
-        ImGui::TextDisabled("Выровнять по оси");
+        ImGui::TextDisabled("%s", T("Align to axis"));
         if (ImGui::MenuItem("X")) host.AlignSelection(0);
         if (ImGui::MenuItem("Y")) host.AlignSelection(1);
         if (ImGui::MenuItem("Z")) host.AlignSelection(2);
@@ -115,18 +116,18 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     EditorPlayState state = host.GetPlayState();
     if (state == EditorPlayState::Editing) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
-        if (EditorIcons::Button("play", "Play", "Запустить сцену (сцена будет восстановлена по Stop)"))
+        if (EditorIcons::Button("play", T("Play"), T("Run the scene (it is restored on Stop)")))
             host.StartPlay();
         ImGui::PopStyleColor();
     } else {
         if (state == EditorPlayState::Playing) {
-            if (EditorIcons::Button("pause", "Pause", "Приостановить")) host.PausePlay();
+            if (EditorIcons::Button("pause", T("Pause"), T("Pause"))) host.PausePlay();
         } else {
-            if (EditorIcons::Button("play", "Resume", "Продолжить")) host.ResumePlay();
+            if (EditorIcons::Button("play", T("Resume"), T("Resume"))) host.ResumePlay();
         }
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
-        if (EditorIcons::Button("stop", "Stop", "Остановить и вернуть сцену как была"))
+        if (EditorIcons::Button("stop", T("Stop"), T("Stop and restore the scene")))
             host.StopPlay();
         ImGui::PopStyleColor();
         ImGui::SameLine();
@@ -136,21 +137,21 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     }
 
     // --- Справа: режим рендера + сетка ---
-    const char* modes[] = {"Shaded", "Wireframe", "Unlit", "Normals"};
+    const char* modes[] = {T("Shaded"), T("Wireframe"), T("Unlit"), T("Normals")};
     // Та же защита: правый блок не заезжает на то, что уже нарисовано.
     const float rightX = std::max(ImGui::GetCursorPosX() + spacing, windowW - rightBlockW);
     ImGui::SameLine(rightX);
-    if (EditorIcons::IconOnlyButton("grid", "Сетка вьюпорта", host.ShowGrid()))
+    if (EditorIcons::IconOnlyButton("grid", T("Viewport grid"), host.ShowGrid()))
         host.ShowGrid() = !host.ShowGrid();
     ImGui::SameLine();
     // Габариты выделенного — та самая коробка, по которой считается попадание
     // мышью. Включается тогда, когда непонятно, почему клик выбрал не то.
-    if (EditorIcons::IconOnlyButton("wire", "Габариты выделенного", host.ShowBounds()))
+    if (EditorIcons::IconOnlyButton("wire", T("Bounds of the selection"), host.ShowBounds()))
         host.ShowBounds() = !host.ShowBounds();
     ImGui::SameLine();
     // Режим вёрстки интерфейса: UI показывается прямо во вьюпорте и правится
     // мышью. Раньше его было видно только в панели Game, где ничего не выделить.
-    if (EditorIcons::IconOnlyButton("layout", "Режим вёрстки интерфейса (U)", host.UIEditMode()))
+    if (EditorIcons::IconOnlyButton("layout", T("UI layout mode (U)"), host.UIEditMode()))
         host.UIEditMode() = !host.UIEditMode();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110.0f);

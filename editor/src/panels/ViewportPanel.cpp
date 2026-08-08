@@ -16,6 +16,7 @@
 #include "EditorHost.h"
 #include "sage/core/Application.h"
 #include "sage/scene/Components.h"
+#include "../Localization.h"
 
 namespace {
 
@@ -47,10 +48,10 @@ void DecomposeToTransform(const glm::mat4& m, Transform& out) {
 
 const char* ViewportPanel::ViewKindName(ViewKind kind) {
     switch (kind) {
-        case ViewKind::Perspective: return "Перспектива";
-        case ViewKind::Top:         return "Сверху";
-        case ViewKind::Front:       return "Спереди";
-        case ViewKind::Side:        return "Сбоку";
+        case ViewKind::Perspective: return T("Perspective");
+        case ViewKind::Top:         return T("Top");
+        case ViewKind::Front:       return T("Front");
+        case ViewKind::Side:        return T("Side");
     }
     return "?";
 }
@@ -83,20 +84,21 @@ void ViewportPanel::DrawViewToolbar(EditorHost& host) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 3));
     ImGui::BeginChild("##viewbar", ImVec2(0, ImGui::GetFrameHeight() + 8), false);
 
-    const char* layouts[] = {"Один вид", "Два столбца", "Четыре вида"};
+    const char* layouts[] = {T("Single view"), T("Two columns"), T("Four views")};
     int layout = (int)m_layout;
     ImGui::SetNextItemWidth(150);
     if (ImGui::Combo("##layout", &layout, layouts, IM_ARRAYSIZE(layouts))) {
         m_layout = (Layout)layout;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Раскладка вьюпорта.\nКаждый вид — полный проход сцены,\n"
-                          "поэтому лишние виды стоят кадров.");
+        ImGui::SetTooltip("%s", T("Viewport layout.\n"
+          "Each view is a full scene pass,\n"
+          "so extra views cost frames."));
     }
 
     // Вид активного слота: перспектива или одна из ортогональных проекций.
     ImGui::SameLine();
-    const char* kinds[] = {"Перспектива", "Сверху", "Спереди", "Сбоку"};
+    const char* kinds[] = {T("Perspective"), T("Top"), T("Front"), T("Side")};
     int kind = (int)m_kinds[m_activeSlot];
     ImGui::SetNextItemWidth(140);
     if (ImGui::Combo("##kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
@@ -104,13 +106,13 @@ void ViewportPanel::DrawViewToolbar(EditorHost& host) {
     }
 
     ImGui::SameLine();
-    if (ImGui::SmallButton("Показать всё")) {
+    if (ImGui::SmallButton(T("Show all"))) {
         // Вписываем сцену в ортогональные виды: без этого человек, отъехавший
         // колесом далеко, обратно уже не найдёт дорогу.
         for (OrthoView& v : m_ortho) { v.Center = glm::vec3(0.0f); v.Height = 20.0f; }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("| активен: %s", ViewKindName(m_kinds[m_activeSlot]));
+    ImGui::TextDisabled(T("| active: %s"), ViewKindName(m_kinds[m_activeSlot]));
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -134,7 +136,7 @@ void ViewportPanel::Draw(EditorHost& host) {
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("Viewport");
+    ImGui::Begin(T("Viewport" "###Viewport"));
 
     DrawViewToolbar(host);
 
@@ -540,7 +542,7 @@ void ViewportPanel::Draw(EditorHost& host) {
         const float dv = (m_pendingDrop.Pos.y - imgPos.y) / avail.y;
         if (du >= 0.0f && du <= 1.0f && dv >= 0.0f && dv <= 1.0f) {
             if (!host.DropAssetAtViewport(activeView, activeProj, du, dv, m_pendingDrop.Path)) {
-                host.SetStatusMessage("В сцену можно бросить модель, префаб или материал");
+                host.SetStatusMessage(T("You can drop a model, a prefab or a material into the scene"));
             }
         }
         m_pendingDrop = {};

@@ -15,6 +15,7 @@
 #include "Project.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include "../Localization.h"
 
 namespace {
 
@@ -117,16 +118,16 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
         // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
         if (!host.IsSelected(id)) host.SetSelectedId(id);
-        if (ImGui::MenuItem("Create Child")) {
+        if (ImGui::MenuItem(T("Create Child"))) {
             host.PushUndoSnapshot();
             GameObject child = scene.CreateObject("Child");
             scene.SetParent(child.Entity(), e);
             host.SetSelectedId(child.Id());
         }
-        if (ImGui::MenuItem("Duplicate")) host.DuplicateSelected();
+        if (ImGui::MenuItem(T("Duplicate"))) host.DuplicateSelected();
         // Сохранить выбранную сущность (с детьми) как переиспользуемый префаб в
         // assets/ проекта. Имя файла — по имени сущности.
-        if (ImGui::MenuItem("Save as Prefab")) {
+        if (ImGui::MenuItem(T("Save as Prefab"))) {
             std::error_code ec;
             std::filesystem::path dir = host.CurrentProject().Dir() / "assets";
             std::filesystem::create_directories(dir, ec);
@@ -137,12 +138,12 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 host.SetStatusMessage("Prefab save failed: " + perr);
         }
         bool hasParent = h && h->Parent != entt::null;
-        if (ImGui::MenuItem("Unparent", nullptr, false, hasParent)) {
+        if (ImGui::MenuItem(T("Unparent"), nullptr, false, hasParent)) {
             host.PushUndoSnapshot();
             scene.SetParent(e, entt::null);
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Delete")) host.DeleteSelected();
+        if (ImGui::MenuItem(T("Delete"))) host.DeleteSelected();
         ImGui::EndPopup();
     }
 
@@ -163,8 +164,8 @@ void HierarchyPanel::Draw(EditorHost& host) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
-    ImGui::Begin("Hierarchy");
-    ImGui::TextDisabled("Scene: %s  |  Entities: %zu", scene.Name().c_str(), scene.Count());
+    ImGui::Begin(T("Hierarchy" "###Hierarchy"));
+    ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
     ImGui::Separator();
 
     // Корни (без родителя) в стабильном порядке по id.
@@ -194,7 +195,7 @@ void HierarchyPanel::Draw(EditorHost& host) {
             // — поэтому объект встаёт в начало координат, как при создании
             // через меню Entity.
             if (!host.AddAssetToScene(dropped))
-                host.SetStatusMessage("В сцену можно добавить модель или префаб");
+                host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
         }
         ImGui::EndDragDropTarget();
     }
@@ -202,11 +203,11 @@ void HierarchyPanel::Draw(EditorHost& host) {
     // Контекстное меню пустого места — создание корневых сущностей.
     if (ImGui::BeginPopupContextWindow("##hierarchy_ctx",
                                        ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        if (ImGui::MenuItem("Create Empty")) {
+        if (ImGui::MenuItem(T("Create Empty"))) {
             host.PushUndoSnapshot();
             host.SetSelectedId(scene.CreateObject("Empty").Id());
         }
-        if (ImGui::MenuItem("Create Cube")) {
+        if (ImGui::MenuItem(T("Create Cube"))) {
             host.PushUndoSnapshot();
             host.SetSelectedId(host.CreateCubeEntity("Cube").Id());
         }

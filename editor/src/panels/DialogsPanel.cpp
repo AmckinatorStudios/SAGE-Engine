@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include <cstdio>
+#include "../Localization.h"
 
 namespace fs = std::filesystem;
 
@@ -46,7 +47,7 @@ void DialogsPanel::BrowseButton(const char* id, const FileBrowser::Config& cfg, 
                                 size_t size) {
     ImGui::SameLine();
     ImGui::PushID(id);
-    if (EditorIcons::Button("folder", "Обзор…")) Browse(cfg, buffer, size);
+    if (EditorIcons::Button("folder", T("Browse..."))) Browse(cfg, buffer, size);
     ImGui::PopID();
 }
 
@@ -62,18 +63,18 @@ void DialogsPanel::Draw(EditorHost& host) {
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("New Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("Name", m_projectName, sizeof(m_projectName));
-        ImGui::InputText("Location", m_projectDir, sizeof(m_projectDir));
+    if (ImGui::BeginPopupModal(T("New Project" "###New Project"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::InputText(T("Name"), m_projectName, sizeof(m_projectName));
+        ImGui::InputText(T("Location"), m_projectDir, sizeof(m_projectDir));
         {
             FileBrowser::Config c;
-            c.Title = "Куда создать проект";
+            c.Title = T("Where to create the project");
             c.Mode = FileBrowser::PickMode::PickFolder;
             BrowseButton("newproj", c, m_projectDir, sizeof(m_projectDir));
         }
-        ImGui::TextDisabled("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/");
+        ImGui::TextDisabled("%s", T("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/"));
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (ImGui::Button("Create", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Create"), ImVec2(120, 0))) {
             std::string err;
             if (host.CreateProject(m_projectDir, m_projectName, err)) {
                 ImGui::CloseCurrentPopup();
@@ -82,31 +83,31 @@ void DialogsPanel::Draw(EditorHost& host) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Open Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("Path", m_openPath, sizeof(m_openPath));
+    if (ImGui::BeginPopupModal(T("Open Project" "###Open Project"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::InputText(T("Path"), m_openPath, sizeof(m_openPath));
         {
             FileBrowser::Config c;
-            c.Title = "Открыть проект";
+            c.Title = T("Open project");
             c.Mode = FileBrowser::PickMode::OpenFile;
             c.Filters = {".sageproj"};
-            c.FilterLabel = "Проекты (*.sageproj)";
+            c.FilterLabel = T("Projects (*.sageproj)");
             BrowseButton("openproj", c, m_openPath, sizeof(m_openPath));
         }
         ImGui::SameLine();
         {
             FileBrowser::Config c;
-            c.Title = "Открыть папку проекта";
+            c.Title = T("Open the project folder");
             c.Mode = FileBrowser::PickMode::PickFolder;
             BrowseButton("openprojdir", c, m_openPath, sizeof(m_openPath));
         }
-        ImGui::TextDisabled("Путь к project.sageproj или к папке проекта");
+        ImGui::TextDisabled("%s", T("Path to project.sageproj or to a project folder"));
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (ImGui::Button("Open", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Open"), ImVec2(120, 0))) {
             std::string err;
             if (host.OpenProject(m_openPath, err)) {
                 ImGui::CloseCurrentPopup();
@@ -115,38 +116,38 @@ void DialogsPanel::Draw(EditorHost& host) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Save Scene As", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("File name", m_sceneName, sizeof(m_sceneName));
+    if (ImGui::BeginPopupModal(T("Save Scene As" "###Save Scene As"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::InputText(T("File name"), m_sceneName, sizeof(m_sceneName));
         Project& project = host.CurrentProject();
         fs::path target = project.Loaded()
             ? project.ScenesDir() / (std::string(m_sceneName) + ".sage")
             : fs::path(std::string(m_sceneName) + ".sage");
         ImGui::TextDisabled("-> %s", target.string().c_str());
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (ImGui::Button("Save", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Save"), ImVec2(120, 0))) {
             host.CurrentScene().SetName(m_sceneName);
             if (host.SaveSceneToFile(target)) ImGui::CloseCurrentPopup();
             else m_error = "Save failed (see Console)";
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Build Game", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(T("Build Game" "###Build Game"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         Project& project = host.CurrentProject();
-        ImGui::TextDisabled("Packages SagePlayer + project '%s' into a runnable game",
+        ImGui::TextDisabled(T("Packages SagePlayer + project '%s' into a runnable game"),
                             project.Name().c_str());
-        ImGui::InputText("Output dir", m_buildDir, sizeof(m_buildDir));
+        ImGui::InputText(T("Output dir"), m_buildDir, sizeof(m_buildDir));
         {
             FileBrowser::Config c;
-            c.Title = "Куда собрать игру";
+            c.Title = T("Where to build the game");
             c.Mode = FileBrowser::PickMode::PickFolder;
             BrowseButton("builddir", c, m_buildDir, sizeof(m_buildDir));
         }
@@ -154,8 +155,8 @@ void DialogsPanel::Draw(EditorHost& host) {
                             project.Name().c_str());
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (!m_buildResult.empty())
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1), "Built: %s", m_buildResult.c_str());
-        if (ImGui::Button("Build", ImVec2(120, 0))) {
+            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1), T("Built: %s"), m_buildResult.c_str());
+        if (ImGui::Button(T("Build"), ImVec2(120, 0))) {
             std::string err;
             if (host.BuildGame(m_buildDir, err)) {
                 m_error.clear();
@@ -165,29 +166,29 @@ void DialogsPanel::Draw(EditorHost& host) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Close"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Open Scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::InputText("Path", m_openPath, sizeof(m_openPath));
+    if (ImGui::BeginPopupModal(T("Open Scene" "###Open Scene"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::InputText(T("Path"), m_openPath, sizeof(m_openPath));
         {
             FileBrowser::Config c;
-            c.Title = "Открыть сцену";
+            c.Title = T("Open scene");
             c.Filters = {".sage"};
-            c.FilterLabel = "Сцены (*.sage)";
+            c.FilterLabel = T("Scenes (*.sage)");
             if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().ScenesDir();
             BrowseButton("openscene", c, m_openPath, sizeof(m_openPath));
         }
-        ImGui::TextDisabled("Путь к файлу .sage (или двойной клик в панели Assets)");
+        ImGui::TextDisabled("%s", T("Path to a .sage file (or double-click in the Assets panel)"));
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (ImGui::Button("Open", ImVec2(120, 0))) {
+        if (ImGui::Button(T("Open"), ImVec2(120, 0))) {
             if (host.LoadSceneFromFile(m_openPath)) ImGui::CloseCurrentPopup();
             else m_error = "Load failed (see Console)";
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 }
