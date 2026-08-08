@@ -36,6 +36,16 @@ public:
                             const std::filesystem::path& dir,
                             std::filesystem::path& outCreated, std::string& err);
 
+    // Переименование и удаление ассета ВМЕСТЕ С САЙДКАРАМИ (.meta, .sageimport).
+    //
+    // Отдельными функциями, а не пятью строками внутри модалки: сайдкар .meta —
+    // это личность ассета (GUID, по которому его находят сцены), и если он
+    // отстанет при переименовании, файл станет для проекта новым, а все ссылки
+    // на него — битыми. Такое надо проверять тестом, а модалку тест не нажмёт.
+    static bool RenameAsset(const std::filesystem::path& path, const std::string& newName,
+                            std::filesystem::path& outRenamed, std::string& err);
+    static void DeleteAsset(const std::filesystem::path& path);
+
     // Что получилось при внесении файла в проект.
     struct ImportReport {
         bool Ok = false;

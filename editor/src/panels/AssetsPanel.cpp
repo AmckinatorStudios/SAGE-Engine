@@ -13,6 +13,7 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "../EditorIcons.h"
 
 #include "sage/assets/import/Convert.h"
 #include "sage/render/ResourceManager.h"
@@ -25,10 +26,20 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// Цветная плашка + короткий тег по типу файла — свой минимализм панели Assets
-// вместо иконочного шрифта: ImDrawList::AddRectFilled с закруглением плюс
-// 2-4 символа расширения по центру.
-struct AssetStyle { ImVec4 Color; std::string Tag; };
+// Как выглядит карточка ассета: значок типа, цвет типа и короткий тег.
+//
+// РАНЬШЕ ТИП ПОКАЗЫВАЛСЯ ЗАЛИВКОЙ ВО ВСЮ КАРТОЧКУ. Папка с двумя десятками
+// файлов превращалась в мозаику из насыщенных оранжевых, зелёных, бирюзовых и
+// малиновых прямоугольников — глазу не за что зацепиться, а разница между
+// «выделено» и «просто жёлтое» терялась совсем. Цвет остался как признак типа,
+// но теперь он живёт в маленькой метке с расширением и в оттенке значка; поле
+// обложки у всех карточек одинаково нейтральное — на нём видно САМО превью, а
+// не краску вокруг него.
+struct AssetStyle {
+    ImVec4 Color;
+    std::string Tag;
+    const char* Icon;
+};
 
 std::string ToLower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -36,20 +47,25 @@ std::string ToLower(std::string s) {
 }
 
 AssetStyle StyleForPath(const fs::path& path, bool isDir) {
-    if (isDir) return { ImVec4(0.80f, 0.60f, 0.20f, 1.0f), "DIR" };
+    if (isDir) return { ImVec4(0.85f, 0.68f, 0.32f, 1.0f), "", "folder" };
     std::string ext = ToLower(path.extension().string());
-    if (ext == ".sage") return { ImVec4(0.25f, 0.45f, 0.85f, 1.0f), "SCENE" };
-    if (ext == ".sageprefab") return { ImVec4(0.35f, 0.55f, 0.95f, 1.0f), "PREFAB" };
-    if (ext == ".sagemat") return { ImVec4(0.75f, 0.45f, 0.20f, 1.0f), "MAT" };
-    if (ext == ".sageimport") return { ImVec4(0.45f, 0.40f, 0.30f, 1.0f), "IMPORT" };
-    if (ext == ".lua") return { ImVec4(0.25f, 0.70f, 0.30f, 1.0f), "LUA" };
-    if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return { ImVec4(0.55f, 0.35f, 0.80f, 1.0f), "MESH" };
-    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp")
-        return { ImVec4(0.20f, 0.65f, 0.65f, 1.0f), ext.substr(1) };
-    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return { ImVec4(0.80f, 0.30f, 0.55f, 1.0f), "AUDIO" };
-    if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return { ImVec4(0.50f, 0.50f, 0.55f, 1.0f), "GLSL" };
-    std::string tag = ext.empty() ? "FILE" : ToLower(ext.substr(1));
-    return { ImVec4(0.45f, 0.45f, 0.48f, 1.0f), tag };
+    if (ext == ".sage") return { ImVec4(0.45f, 0.62f, 0.95f, 1.0f), "scene", "scene" };
+    if (ext == ".sageprefab") return { ImVec4(0.55f, 0.70f, 1.00f, 1.0f), "prefab", "prefab" };
+    if (ext == ".sagemat") return { ImVec4(0.90f, 0.62f, 0.35f, 1.0f), "mat", "material" };
+    if (ext == ".sageimport") return { ImVec4(0.62f, 0.58f, 0.48f, 1.0f), "import", "file" };
+    if (ext == ".lua") return { ImVec4(0.45f, 0.82f, 0.50f, 1.0f), "lua", "script" };
+    if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
+        ext == ".bbmodel" || ext == ".sagemesh")
+        return { ImVec4(0.70f, 0.55f, 0.92f, 1.0f), ext.substr(1), "model" };
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
+        ext == ".hdr" || ext == ".sagetex")
+        return { ImVec4(0.40f, 0.80f, 0.80f, 1.0f), ext.substr(1), "texture" };
+    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3")
+        return { ImVec4(0.92f, 0.52f, 0.70f, 1.0f), ext.substr(1), "audio" };
+    if (ext == ".vert" || ext == ".frag" || ext == ".glsl")
+        return { ImVec4(0.68f, 0.68f, 0.74f, 1.0f), ext.substr(1), "shader" };
+    std::string tag = ext.empty() ? "" : ToLower(ext.substr(1));
+    return { ImVec4(0.66f, 0.66f, 0.70f, 1.0f), tag, "file" };
 }
 
 // Обрезает строку многоточием справа, чтобы уместиться в maxWidth.
@@ -86,7 +102,10 @@ constexpr float kTileInset = 8.0f; // внутренний отступ карт
 // Высота плашки подобрана так, чтобы её ВИДИМАЯ область (kTileW - 2*inset по
 // ширине, kSwatchH - inset по высоте) была квадратом.
 constexpr float kSwatchH = kTileW - kTileInset;
-constexpr float kLabelH = 34.0f;   // область подписи (1-2 строки)
+// Подпись — РОВНО ОДНА строка. Раньше под неё отводилось 34 пикселя «на одну-две
+// строки», но рисовалась всегда одна: каждая карточка несла полторы строки
+// пустоты, и сетка выглядела рыхлой.
+constexpr float kLabelH = 22.0f;
 constexpr float kTileH = kSwatchH + kLabelH + 6.0f; // + внутренний отступ
 constexpr float kTileSpacing = 12.0f;
 
@@ -105,14 +124,53 @@ void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
     }
     std::reverse(chain.begin(), chain.end());
 
-    for (size_t i = 0; i < chain.size(); ++i) {
+    // Хвост, а не вся цепочка, и хвост ПО ШИРИНЕ ОКНА. Без проекта cwd — это
+    // абсолютный путь вроде /home/user/work/<длинный-uuid>/assets: полная
+    // цепочка съедала строку целиком и выталкивала за край окна всё, что стояло
+    // правее. Начало пути всё равно никому не нужно — нужно то место, где
+    // стоишь, и дорога на пару шагов назад. Сколько шагов поместится, столько и
+    // показываем: панель Assets сужают до трети экрана, и фиксированное число
+    // сегментов при такой ширине снова полезло бы за край.
+    const float avail = ImGui::GetContentRegionAvail().x - 24.0f; // запас под «…/»
+    const float sepW = ImGui::CalcTextSize(" / ").x;
+    float used = 0.0f;
+    size_t first = chain.size();
+    while (first > 0) {
+        std::string seg = chain[first - 1].filename().string();
+        if (seg.empty()) seg = chain[first - 1].string();
+        const float w = ImGui::CalcTextSize(seg.c_str()).x + 8.0f + sepW;
+        if (first < chain.size() && used + w > avail) break;
+        used += w;
+        --first;
+    }
+
+    // Кнопки хлебных крошек — без рамки: это путь, а не ряд кнопок. Рамка
+    // появляется под курсором, чтобы было видно, что по сегменту можно кликнуть.
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, ImGui::GetStyle().FramePadding.y));
+    if (first > 0) {
+        ImGui::TextDisabled("...");
+        ImGui::SameLine(0, 2);
+        ImGui::TextDisabled("/");
+        ImGui::SameLine(0, 2);
+    }
+    for (size_t i = first; i < chain.size(); ++i) {
         std::string seg = chain[i].filename().string();
         if (seg.empty()) seg = chain[i].string();
         ImGui::PushID(static_cast<int>(i));
-        if (ImGui::SmallButton(seg.c_str())) cwd = chain[i];
+        // Текущая папка — не кнопка: щёлкать по ней некуда, и подсветка при
+        // наведении обещала бы переход, которого не будет.
+        if (i + 1 == chain.size()) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(seg.c_str());
+        } else if (ImGui::Button(seg.c_str())) {
+            cwd = chain[i];
+        }
         ImGui::PopID();
         if (i + 1 < chain.size()) { ImGui::SameLine(0, 2); ImGui::TextDisabled("/"); ImGui::SameLine(0, 2); }
     }
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
 }
 
 
@@ -212,13 +270,12 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         dl->AddRect(cursor, tileMax, ImGui::GetColorU32(ImGuiCol_NavHighlight), 8.0f, 0, 1.6f);
     }
 
-    // Цветная плашка типа с внутренним отступом (верх карточки).
+    // Поле обложки — нейтральное у ВСЕХ типов (см. AssetStyle). Тип читается по
+    // значку и метке, а не по цвету всей карточки.
     constexpr float kInset = kTileInset;
     ImVec2 sw0(cursor.x + kInset, cursor.y + kInset);
     ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + kSwatchH - kInset);
-    ImVec4 fill = style.Color;
-    if (!hovered && !isSelected) { fill.x *= 0.9f; fill.y *= 0.9f; fill.z *= 0.9f; }
-    dl->AddRectFilled(sw0, sw1, ImGui::ColorConvertFloat4ToU32(fill), 6.0f);
+    dl->AddRectFilled(sw0, sw1, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.28f)), 6.0f);
 
     // Настоящее превью вместо трёхбуквенного тега — там, где его есть из чего
     // сделать. Тег отвечает на вопрос «какого типа этот файл», а человек в
@@ -248,21 +305,38 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         dl->PopClipRect();
         dl->AddRect(sw0, sw1, IM_COL32(255, 255, 255, 30), 6.0f);
     } else {
-        // Тег типа по центру плашки.
-        std::string tagUpper = style.Tag;
-        for (char& c : tagUpper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        ImVec2 tagSize = ImGui::CalcTextSize(tagUpper.c_str());
-        ImVec2 tagPos(sw0.x + (sw1.x - sw0.x - tagSize.x) * 0.5f,
-                      sw0.y + (sw1.y - sw0.y - tagSize.y) * 0.5f);
-        dl->AddText(tagPos, ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 1, 0.96f)), tagUpper.c_str());
+        // Значок типа по центру поля — тот же набор, что в иерархии, тулбаре и
+        // инспекторе. Три буквы «MAT»/«LUA» приходилось читать, значок узнаётся.
+        const float glyph = std::floor((sw1.y - sw0.y) * 0.52f);
+        const ImVec4 tint = hovered || isSelected
+                                ? style.Color
+                                : ImVec4(style.Color.x * 0.82f, style.Color.y * 0.82f,
+                                         style.Color.z * 0.82f, 1.0f);
+        EditorIcons::Overlay(std::floor(sw0.x + (sw1.x - sw0.x - glyph) * 0.5f),
+                             std::floor(sw0.y + (sw1.y - sw0.y - glyph) * 0.5f), glyph,
+                             style.Icon, glm::vec3(tint.x, tint.y, tint.z));
+    }
+
+    // Метка расширения в углу поля: тип отличим и когда вместо значка стоит
+    // превью (у .png и .sagetex обложка одинаковая — сама картинка).
+    if (!style.Tag.empty()) {
+        const std::string tag = style.Tag;
+        const ImVec2 size = ImGui::CalcTextSize(tag.c_str());
+        const ImVec2 p1(sw1.x - 4.0f, sw1.y - 4.0f);
+        const ImVec2 p0(p1.x - size.x - 8.0f, p1.y - size.y - 2.0f);
+        dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 150), 4.0f);
+        dl->AddText(ImVec2(p0.x + 4.0f, p0.y + 1.0f),
+                    ImGui::ColorConvertFloat4ToU32(style.Color), tag.c_str());
     }
 
     // Имя файла по центру области подписи (внутри границ тайла, с усечением).
     std::string label = TruncateToWidth(filename, kTileW - 8.0f);
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
-    ImVec2 labelPos(cursor.x + (kTileW - labelSize.x) * 0.5f, sw1.y + 7.0f);
-    ImU32 textCol = ImGui::GetColorU32(isSelected ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    if (hovered) textCol = ImGui::GetColorU32(ImGuiCol_Text);
+    ImVec2 labelPos(std::floor(cursor.x + (kTileW - labelSize.x) * 0.5f), sw1.y + 5.0f);
+    // Имя — главное, что читают в этой панели, поэтому оно нормального цвета
+    // всегда. Приглушённой была ВСЯ сетка, и найти файл глазами по бледным
+    // подписям было тяжелее, чем по цветной мозаике плашек.
+    ImU32 textCol = ImGui::GetColorU32(ImGuiCol_Text, isSelected || hovered ? 1.0f : 0.85f);
     dl->AddText(labelPos, textCol, label.c_str());
 
     // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.
@@ -493,6 +567,50 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
                           source.filename().string());
 }
 
+// Переименование ассета вместе с сайдкарами. Сайдкар .meta — это личность
+// файла: в нём лежит GUID, по которому сцены его и находят. Оставить .meta под
+// старым именем значит превратить переименование в «удалили один ассет,
+// создали другой»: все ссылки на него в сценах становятся битыми, а рядом
+// навсегда поселяется запись про файл, которого нет. В панели такая запись
+// теперь даже не видна — сайдкары в сетке скрыты.
+bool AssetsPanel::RenameAsset(const fs::path& path, const std::string& newName,
+                              fs::path& outRenamed, std::string& err) {
+    if (newName.empty()) {
+        err = T("The name cannot be empty");
+        return false;
+    }
+    const fs::path target = path.parent_path() / newName;
+    std::error_code ec;
+    if (fs::exists(target, ec)) {
+        err = T("A file with this name already exists");
+        return false;
+    }
+    fs::rename(path, target, ec);
+    if (ec) {
+        err = "Rename failed: " + ec.message();
+        return false;
+    }
+    for (const char* sidecar : {".meta", ".sageimport"}) {
+        const fs::path from = path.string() + sidecar;
+        std::error_code sec;
+        if (fs::exists(from, sec)) fs::rename(from, target.string() + sidecar, sec);
+    }
+    outRenamed = target;
+    return true;
+}
+
+// Удаление ассета вместе с сайдкарами: иначе от него остаётся невидимая запись
+// .meta, которую база ассетов честно считает существующим ассетом.
+void AssetsPanel::DeleteAsset(const fs::path& path) {
+    std::error_code ec;
+    fs::remove_all(path, ec);
+    if (ec) LOG_ERROR("Editor") << "Asset delete failed: " << ec.message();
+    for (const char* sidecar : {".meta", ".sageimport"}) {
+        std::error_code sec;
+        fs::remove(path.string() + sidecar, sec);
+    }
+}
+
 AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const fs::path& destDir) {
     ImportReport report;
     std::error_code ec;
@@ -589,7 +707,7 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
 void AssetsPanel::DrawImportButton(EditorHost& host) {
     Project& project = host.CurrentProject();
     ImGui::BeginDisabled(!project.Loaded());
-    if (ImGui::SmallButton(T("Import..."))) {
+    if (EditorIcons::Button("open", T("Import..."))) {
         FileBrowser::Config c;
         c.Title = T("Bring a file into the project");
         // Пусто — показывать всё: в проект вносят и модели, и картинки, и звук,
@@ -753,13 +871,14 @@ void AssetsPanel::DrawModals(EditorHost& host) {
                                               ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (enterPressed || ImGui::Button(T("Rename"), ImVec2(120, 0))) {
-            fs::path target = m_renameTarget.parent_path() / m_renameBuf;
-            std::error_code ec;
-            fs::rename(m_renameTarget, target, ec);
-            if (ec) {
-                m_error = "Rename failed: " + ec.message();
-                LOG_ERROR("Editor") << "Asset rename failed: " << ec.message();
+            fs::path target;
+            if (!RenameAsset(m_renameTarget, m_renameBuf, target, m_error)) {
+                LOG_ERROR("Editor") << "Asset rename failed: " << m_error;
             } else {
+                if (m_selected == m_renameTarget) m_selected = target;
+                Project& project = host.CurrentProject();
+                if (project.Loaded())
+                    sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
                 m_renameTarget.clear();
                 m_error.clear();
                 ImGui::CloseCurrentPopup();
@@ -783,9 +902,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::TextDisabled("%s", T("This cannot be undone."));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
         if (ImGui::Button(T("Delete"), ImVec2(120, 0))) {
-            std::error_code ec;
-            fs::remove_all(m_deleteTarget, ec);
-            if (ec) LOG_ERROR("Editor") << "Asset delete failed: " << ec.message();
+            DeleteAsset(m_deleteTarget);
             if (m_selected == m_deleteTarget) m_selected.clear();
             m_deleteTarget.clear();
             ImGui::CloseCurrentPopup();
@@ -813,10 +930,21 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
         ImGui::TextDisabled("%s", T("File > New Project... to create one; browsing current dir:"));
     }
 
+    // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
+    //
+    // Раньше здесь в одну строку выкладывались SmallButton «Вверх», хлебные
+    // крошки, обычная кнопка «Импорт…» и следом поле поиска во всю ширину.
+    // Виджеты разной высоты в одном ряду и строка поиска, ничем не отделённая
+    // от содержимого, и читались как «интерфейс кривой и смешанный»: глазу не
+    // за что зацепиться, потому что группы не выделены. Теперь первая строка —
+    // ТОЛЬКО навигация (где я нахожусь), вторая — ТОЛЬКО действия над этой
+    // папкой (что я здесь ищу и что приношу), и все виджеты в ряду одной высоты.
     fs::path root = project.Loaded() ? project.Dir() : fs::path("/");
     bool canGoUp = cwd.has_parent_path() && cwd != root;
-    if (canGoUp && ImGui::SmallButton(T("Up"))) cwd = cwd.parent_path();
-    ImGui::SameLine();
+    ImGui::BeginDisabled(!canGoUp);
+    if (EditorIcons::IconOnlyButton("up", T("Up"))) cwd = cwd.parent_path();
+    ImGui::EndDisabled();
+    ImGui::SameLine(0, 6);
     DrawBreadcrumb(host);
 
     // Внесение файлов со стороны. До сих пор этого не было вовсе: панель умела
@@ -825,11 +953,13 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // Человек при этом обычно шёл другим путём: выбирал файл прямо из «Загрузок»
     // через «Обзор…», получал в сцене абсолютный путь и рабочий вид ровно до
     // первой сборки игры (см. Project::AssetRef).
+    const float importW = ImGui::CalcTextSize(T("Import...")).x +
+                          ImGui::GetFrameHeight() * 0.68f + ImGui::GetStyle().FramePadding.x * 3.0f;
+    ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - importW -
+                                                 ImGui::GetStyle().ItemSpacing.x));
+    ImGui::InputTextWithHint("##assets_search", T("Search..."), m_search, sizeof(m_search));
     ImGui::SameLine();
     DrawImportButton(host);
-
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##assets_search", T("Search..."), m_search, sizeof(m_search));
 
     // Сломанные ссылки — В ПАНЕЛИ, а не только в логе. Именно молчание и было
     // исходной болезнью: сцена грузилась, объект стоял на месте, просто без
@@ -863,6 +993,13 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     std::error_code ec;
     std::vector<fs::directory_entry> dirs, files;
     for (const auto& entry : fs::directory_iterator(cwd, ec)) {
+        // Сайдкары .meta в сетке не показываем. Это служебная запись движка
+        // (GUID ассета, см. AssetDatabase) — по одной НА КАЖДЫЙ файл: папка с
+        // двадцатью ассетами показывала сорок карточек, половина из которых
+        // одинаковые серые «meta», которые нельзя ни открыть, ни осмысленно
+        // править. Файл при этом никуда не девается и переезжает вместе с
+        // ассетом при переносе и переименовании.
+        if (!entry.is_directory(ec) && entry.path().extension() == ".meta") continue;
         (entry.is_directory(ec) ? dirs : files).push_back(entry);
     }
     auto byName = [](const fs::directory_entry& a, const fs::directory_entry& b) {
@@ -908,7 +1045,8 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     }
     if (!any) {
         ImGui::Spacing();
-        ImGui::TextDisabled(m_search[0] ? "Nothing matches the search." : "This folder is empty.");
+        ImGui::TextDisabled("%s", m_search[0] ? T("Nothing matches the search.")
+                                             : T("This folder is empty."));
         ImGui::TextDisabled("%s", T("Right-click to create a folder, script, material or text file."));
     }
 

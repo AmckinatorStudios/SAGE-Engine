@@ -192,6 +192,56 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Переименование и удаление тащат за собой сайдкары ---
+    //
+    // Рядом с ассетом лежит .meta — его личность (GUID, по которому сцены его и
+    // находят). Панель показывает файл, а не его сайдкар, поэтому отстать
+    // сайдкар может только молча: переименованный ассет стал бы для проекта
+    // новым (все ссылки на него — битыми), а рядом осталась бы невидимая запись
+    // про файл, которого нет.
+    if (ok) {
+        const fs::path original = m_assetsCwd / "selftest_rename.lua";
+        std::ofstream(original) << "-- selftest\n";
+        std::ofstream(original.string() + ".meta") << "{\"guid\":\"selftest\"}\n";
+
+        fs::path renamed;
+        std::string renameErr;
+        if (!AssetsPanel::RenameAsset(original, "selftest_renamed.lua", renamed, renameErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: переименование ассета не удалось: " << renameErr;
+            ok = false;
+        } else if (!fs::exists(renamed.string() + ".meta", ec) ||
+                   fs::exists(original.string() + ".meta", ec)) {
+            LOG_ERROR("Editor") << "SELFTEST: сайдкар .meta не поехал за переименованным ассетом";
+            ok = false;
+        }
+
+        // Имя занято и пустое имя — отказ с объяснением, а не молчаливая потеря
+        // файла поверх соседа.
+        if (ok) {
+            fs::path clash;
+            std::string clashErr;
+            std::ofstream(m_assetsCwd / "selftest_busy.lua") << "-- busy\n";
+            if (AssetsPanel::RenameAsset(renamed, "selftest_busy.lua", clash, clashErr) ||
+                clashErr.empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: переименование поверх существующего файла прошло молча";
+                ok = false;
+            }
+            if (ok && AssetsPanel::RenameAsset(renamed, "", clash, clashErr)) {
+                LOG_ERROR("Editor") << "SELFTEST: пустое имя принято";
+                ok = false;
+            }
+            fs::remove(m_assetsCwd / "selftest_busy.lua", ec);
+        }
+
+        if (ok) {
+            AssetsPanel::DeleteAsset(renamed);
+            if (fs::exists(renamed, ec) || fs::exists(renamed.string() + ".meta", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: после удаления ассета остался он сам или его .meta";
+                ok = false;
+            }
+        }
+    }
+
     // --- Материалы: правка разделяемого экземпляра + назначение + сохранение
     // сцены + перезагрузка => путь и albedo восстановлены ---
     if (ok) {
@@ -1647,7 +1697,7 @@ void EditorLayer::RunSelfTest() {
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
-                               << "project-scripts + broken-scripts + replay + error-flood + panels, "
+                               << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 726.
+// Язык: Русский. Строк: 730.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -64,6 +64,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Откроется демо-сцена. Ассеты можно будет подключать только по\nабсолютным путям — в собранной игре они не найдутся."},
     {"A file on disk — the change affects EVERY object using this material.",
      "Файл на диске — изменится у ВСЕХ объектов с этим материалом."},
+    {"A file with this name already exists",
+     "Файл с таким именем уже есть"},
     {"A folder cannot be dragged in — drop files",
      "Папку перетащить нельзя — бросьте файлы"},
     {"A modular 3D engine: ECS, RHI, PBR, physics, scripting, UI.",
@@ -826,6 +828,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не запечено (статичных объектов: %d)"},
     {"Nothing here yet.",
      "Пока пусто."},
+    {"Nothing matches the search.",
+     "Ничего не найдено по запросу."},
     {"Nothing selected",
      "Ничего не выбрано"},
     {"Nothing to convert: no models or images in the folder",
@@ -1288,6 +1292,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Модель не загрузилась: "},
     {"The model material was not saved — details in Console",
      "Материал модели не сохранён — подробности в Console"},
+    {"The name cannot be empty",
+     "Имя не может быть пустым"},
     {"The prefab could not be placed: ",
      "Префаб не поставился: "},
     {"The previous session seems to have crashed",
@@ -1302,6 +1308,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Это действие необратимо."},
     {"This file cannot be assigned to an object",
      "Этот файл на объект не назначается"},
+    {"This folder is empty.",
+     "Папка пуста."},
     {"This scene is not from this project — assets may not be found",
      "Сцена не из этого проекта — ассеты могут не найтись"},
     {"Timestamps are not ready yet — wait a few frames.",
