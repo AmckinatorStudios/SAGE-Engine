@@ -9,6 +9,7 @@
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UIIcons.h"
+#include "sage/ui/UIPresets.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -511,4 +512,44 @@ TEST(sky_celestials_sun_points_where_light_comes_from) {
     // обзавестись солнцем там, где автор его не ставил.
     env.Skybox.Celestials = false;
     CHECK_FALSE(CelestialsFromEnvironment(env).Enabled);
+}
+
+
+TEST(UI_presets_are_the_same_everywhere) {
+    // «Кнопка» — это не вид элемента, а набор значений: панель с Interactive,
+    // надписью и рамкой. Знание об этом жило в функции РЕДАКТОРА, то есть
+    // кнопку можно было получить только мышью: скрипт, собирающий интерфейс на
+    // лету, повторял те же присваивания у себя, а игра без редактора не имела
+    // к ним доступа вовсе. Теперь таблица одна на движок — и проверяется здесь,
+    // а не «на глаз в редакторе».
+    UIElementComponent button;
+    CHECK_TRUE(sage::ui::ApplyPreset(button, "Button"));
+    CHECK_TRUE(button.Interactive);           // иначе это просто прямоугольник
+    CHECK_TRUE(!button.Text.empty());         // кнопка без надписи не читается
+    CHECK_TRUE(button.Size.x > 0.0f && button.Size.y > 0.0f);
+
+    // Полоса заполнена наполовину: пустая неотличима от панели, и человек
+    // решает, что элемент не создался.
+    UIElementComponent bar;
+    CHECK_TRUE(sage::ui::ApplyPreset(bar, "Bar"));
+    CHECK_TRUE(bar.Type == UIElementComponent::Kind::Bar);
+    CHECK_TRUE(bar.Value > 0.0f && bar.Value < 1.0f);
+
+    // Поле ввода: текст влево (по центру набирать непривычно) и подсказка.
+    UIElementComponent input;
+    CHECK_TRUE(sage::ui::ApplyPreset(input, "Input"));
+    CHECK_FALSE(input.TextCentered);
+    CHECK_TRUE(!input.Placeholder.empty());
+
+    // Неизвестное имя — честный отказ, а не молча пустой элемент.
+    UIElementComponent unknown;
+    CHECK_FALSE(sage::ui::ApplyPreset(unknown, "Соврёшь"));
+
+    // Каждая заготовка из списка применяется и даёт ВИДИМЫЙ элемент: нулевой
+    // размер означал бы «создал и не увидел ничего».
+    for (const std::string& name : sage::ui::PresetNames()) {
+        UIElementComponent e;
+        CHECK_TRUE(sage::ui::ApplyPreset(e, name));
+        CHECK_TRUE(e.Size.x > 0.0f && e.Size.y > 0.0f);
+    }
 }

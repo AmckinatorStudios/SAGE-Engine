@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <system_error>
 #include <memory>
 #include <string>
@@ -1265,154 +1266,10 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    if (reg.all_of<UIElementComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<UIElementComponent>(obj.Entity()) &&
+        ImGui::CollapsingHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (UIElementComponent* u = reg.try_get<UIElementComponent>(obj.Entity())) {
-            const char* kinds[] = {T("Panel"), T("Label"), T("Image"), T("Bar"), T("Icon"),
-                                   T("Input"), T("Checkbox"), T("Slider")};
-            int kind = (int)u->Type;
-            if (ImGui::Combo(T("Kind"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
-                host.PushUndoSnapshot();
-                u->Type = (UIElementComponent::Kind)kind;
-            }
-            const char* anchors[] = {T("Top Left"), T("Top Center"), T("Top Right"),
-                                     T("Center Left"), T("Center"), T("Center Right"),
-                                     T("Bottom Left"), T("Bottom Center"), T("Bottom Right")};
-            int anchor = (int)u->Anchor;
-            if (ImGui::Combo(T("Anchor"), &anchor, anchors, IM_ARRAYSIZE(anchors))) {
-                host.PushUndoSnapshot();
-                u->Anchor = (UIAnchor)anchor;
-            }
-            ImGui::DragFloat2(T("Offset"), &u->Offset.x, 1.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat2(T("Size"), &u->Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
-            ImGui::DragInt(T("Layer"), &u->Layer, 1); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Visible"), &u->Visible);
-            ImGui::SameLine();
-            ImGui::Checkbox(T("Clip Children"), &u->ClipChildren);
-            ImGui::SeparatorText(T("Style"));
-            ImGui::ColorEdit4(T("Fill / Tint"), &u->Color.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Rounding"), &u->Rounding, 0.5f, 0.0f, 200.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Border"), &u->BorderThickness, 0.25f, 0.0f, 50.0f); host.TrackLastImGuiItem();
-            if (u->BorderThickness > 0.0f) {
-                ImGui::ColorEdit4(T("Border Color"), &u->BorderColor.x); host.TrackLastImGuiItem();
-            }
-            ImGui::ColorEdit4(T("Gradient (a=0 off)"), &u->GradientColor.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Shadow"), &u->ShadowSize, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Padding X"), &u->PadX, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Auto Width"), &u->AutoWidth);
-
-            // Иконка выбирается из списка движка, а не вводится строкой: имя с
-            // опечаткой рисует заглушку, и искать её потом дороже, чем показать
-            // здесь готовый перечень.
-            ImGui::SeparatorText(T("Icon"));
-            const std::vector<std::string>& icons = sage::ui::IconNames();
-            std::string current = u->Icon.empty() ? "(none)" : u->Icon;
-            if (ImGui::BeginCombo("Icon", current.c_str())) {
-                if (ImGui::Selectable(T("(none)"), u->Icon.empty())) {
-                    host.PushUndoSnapshot();
-                    u->Icon.clear();
-                }
-                for (const std::string& name : icons) {
-                    if (ImGui::Selectable(name.c_str(), name == u->Icon)) {
-                        host.PushUndoSnapshot();
-                        u->Icon = name;
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            if (!u->Icon.empty()) {
-                ImGui::ColorEdit4(T("Icon Color"), &u->IconColor.x); host.TrackLastImGuiItem();
-            }
-            ImGui::SeparatorText(T("Text"));
-            char textBuf[256];
-            std::snprintf(textBuf, sizeof(textBuf), "%s", u->Text.c_str());
-            if (ImGui::InputText(T("Text"), textBuf, sizeof(textBuf))) u->Text = textBuf;
-            host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Text Scale"), &u->TextScale, 0.05f, 0.5f, 12.0f); host.TrackLastImGuiItem();
-            ImGui::ColorEdit4(T("Text Color"), &u->TextColor.x); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Center Text"), &u->TextCentered);
-            ImGui::SameLine();
-            ImGui::Checkbox(T("Wrap"), &u->WrapText);
-
-            ImGui::SeparatorText(T("Interaction"));
-            ImGui::Checkbox(T("Interactive"), &u->Interactive);
-            ImGui::SameLine();
-            ImGui::Checkbox(T("Enabled"), &u->Enabled);
-            if (u->Type == UIElementComponent::Kind::Input) {
-                char phBuf[256];
-                std::snprintf(phBuf, sizeof(phBuf), "%s", u->Placeholder.c_str());
-                if (ImGui::InputText(T("Placeholder"), phBuf, sizeof(phBuf))) u->Placeholder = phBuf;
-                host.TrackLastImGuiItem();
-                ImGui::DragInt(T("Max Length"), &u->MaxLength, 1, 0, 4096);
-                host.TrackLastImGuiItem();
-                ImGui::Checkbox(T("Password"), &u->Password);
-            }
-            if (u->Type == UIElementComponent::Kind::Slider) {
-                ImGui::DragFloat(T("Min Value"), &u->MinValue, 0.1f); host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Max Value"), &u->MaxValue, 0.1f); host.TrackLastImGuiItem();
-            }
-            if (u->Type == UIElementComponent::Kind::Slider ||
-                u->Type == UIElementComponent::Kind::Checkbox) {
-                ImGui::SliderFloat(T("Value (0..1)"), &u->Value, 0.0f, 1.0f);
-                host.TrackLastImGuiItem();
-            }
-            if (u->Type == UIElementComponent::Kind::Image) {
-                ImGui::SeparatorText(T("Image"));
-                char texBuf[512];
-                std::snprintf(texBuf, sizeof(texBuf), "%s", u->TexturePath.c_str());
-                if (ImGui::InputText(T("Texture"), texBuf, sizeof(texBuf))) u->TexturePath = texBuf;
-                host.TrackLastImGuiItem();
-                ImGui::SameLine();
-                auto loadTexture = [&] {
-                    u->Tex = u->TexturePath.empty()
-                                 ? nullptr
-                                 : u->PixelArt ? ResourceManager::Instance().GetTexture(
-                                                     u->TexturePath, TextureFilter::Nearest, false)
-                                               : ResourceManager::Instance().GetTexture(
-                                                     u->TexturePath);
-                };
-                if (ImGui::SmallButton(T("Load"))) {
-                    host.PushUndoSnapshot();
-                    loadTexture();
-                }
-                if (!u->TexturePath.empty() && !u->Tex)
-                    ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", T("Texture not loaded (press Load)"));
-
-                // Пиксель-арт меняет ФИЛЬТРАЦИЮ загруженной текстуры, поэтому
-                // перезагружаем сразу: иначе галка стоит, а картинка мыльная до
-                // следующего Load, и это выглядит как «галка не работает».
-                if (ImGui::Checkbox(T("Pixel Art (nearest, no mips)"), &u->PixelArt)) {
-                    host.PushUndoSnapshot();
-                    loadTexture();
-                }
-                if (u->Tex) {
-                    ImGui::TextDisabled(T("Sheet: %d x %d px"), u->Tex->Width(), u->Tex->Height());
-                }
-                // Спрайт задаётся в ПИКСЕЛЯХ листа — теми же числами, что
-                // напечатаны в документации набора.
-                ImGui::DragFloat4(T("Sprite x,y,w,h"), &u->Sprite.x, 1.0f, 0.0f, 8192.0f);
-                host.TrackLastImGuiItem();
-                ImGui::TextDisabled("%s", T("w or h = 0 — the whole file"));
-                ImGui::DragFloat4(T("9-slice l,t,r,b"), &u->SliceBorder.x, 0.5f, 0.0f, 512.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Pixel Scale"), &u->PixelScale, 0.25f, 0.0f, 16.0f);
-                host.TrackLastImGuiItem();
-                ImGui::TextDisabled("%s", T("0 — stretch to fit; >0 — source pixel size"));
-                // Спрайты состояний: в наборах кнопка нарисована трижды, и
-                // подменить картинку правильнее, чем осветлить основную.
-                ImGui::DragFloat4(T("Hover sprite"), &u->SpriteHover.x, 1.0f, 0.0f, 8192.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat4(T("Pressed sprite"), &u->SpritePressed.x, 1.0f, 0.0f, 8192.0f);
-                host.TrackLastImGuiItem();
-            }
-            if (u->Type == UIElementComponent::Kind::Bar) {
-                ImGui::SeparatorText(T("Bar"));
-                ImGui::SliderFloat(T("Value"), &u->Value, 0.0f, 1.0f); host.TrackLastImGuiItem();
-                ImGui::ColorEdit4(T("Fill Color"), &u->BarFillColor.x); host.TrackLastImGuiItem();
-            }
-            if (ImGui::Button(T("Remove UI Element"))) {
-                host.PushUndoSnapshot();
-                reg.remove<UIElementComponent>(obj.Entity());
-            }
+            DrawUIElement(host, obj, *u);
         }
     }
 
@@ -1440,57 +1297,423 @@ void InspectorPanel::HintWrapped(const char* fmt, ...) {
     va_end(args);
 }
 
+// --- Реестр компонентов: ТАБЛИЦА, а не лестница if-ов ---------------------
+//
+// Список компонентов в меню «Добавить компонент» был написан подряд, строкой на
+// каждый, и отставал от движка чаще всего: Mesh Renderer, Decal и Character
+// Controller ДОЛГО в нём отсутствовали, хотя секции в инспекторе у них были.
+// Получалось противоречие — наклейку можно создать через «Объект > Создать
+// наклейку», но нельзя добавить к существующему объекту.
+//
+// Теперь это данные: строка таблицы — имя, раздел, значок, ОДНА строка о том,
+// что компонент делает, и две операции. Новый компонент = новая строка. Отсюда
+// же берётся поиск (компонентов два десятка, и листать их глазами дороже, чем
+// набрать три буквы) и разбиение по разделам: «Свет» и «Твёрдое тело» в одном
+// плоском списке стоят рядом только потому, что их так написали.
+namespace {
+
+struct ComponentEntry {
+    const char* Name;
+    const char* Category;
+    const char* Icon;
+    const char* Hint;
+    bool (*Has)(entt::registry&, entt::entity);
+    void (*Add)(entt::registry&, entt::entity);
+};
+
+template <typename T>
+bool HasComp(entt::registry& reg, entt::entity e) {
+    return reg.all_of<T>(e);
+}
+template <typename T>
+void AddComp(entt::registry& reg, entt::entity e) {
+    reg.emplace<T>(e);
+}
+
+const std::vector<ComponentEntry>& ComponentRegistry() {
+    static const std::vector<ComponentEntry> kEntries = {
+        {"Mesh Renderer", "Render", "cube",
+         "Draws a mesh with a material", HasComp<MeshRendererComponent>, AddComp<MeshRendererComponent>},
+        {"Decal", "Render", "texture",
+         "Projects a texture onto surfaces underneath", HasComp<DecalComponent>, AddComp<DecalComponent>},
+        {"GI Static", "Render", "sun",
+         "Marks the object as static for the light bake", HasComp<GIStaticComponent>, AddComp<GIStaticComponent>},
+        {"Particle Emitter", "Render", "particles",
+         "Fire, smoke, sparks", HasComp<ParticleEmitterComponent>,
+         [](entt::registry& reg, entt::entity e) {
+             ParticleEmitterComponent em;
+             em.Config = ParticlePresets::Registry()[0].Make(); // Fire
+             reg.emplace<ParticleEmitterComponent>(e, em);
+         }},
+        {"Reflection Probe", "Render", "probe",
+         "Captures the surroundings for reflections", HasComp<ReflectionProbeComponent>,
+         AddComp<ReflectionProbeComponent>},
+
+        {"Camera", "View", "camera",
+         "The game looks through this object", HasComp<CameraComponent>, AddComp<CameraComponent>},
+        {"Light", "View", "light",
+         "Point, spot or directional light", HasComp<LightComponent>, AddComp<LightComponent>},
+
+        {"Rigid Body", "Physics", "physics",
+         "The object falls and collides", HasComp<RigidBodyComponent>, AddComp<RigidBodyComponent>},
+        {"Collider", "Physics", "physics",
+         "The shape physics uses for collisions", HasComp<ColliderComponent>, AddComp<ColliderComponent>},
+        {"Joint", "Physics", "ik",
+         "Ties this body to another one", HasComp<JointComponent>, AddComp<JointComponent>},
+        {"Character Controller", "Physics", "physics",
+         "Walking, jumping, stairs", HasComp<CharacterControllerComponent>,
+         AddComp<CharacterControllerComponent>},
+
+        {"Animated Model", "Animation", "anim",
+         "Skeletal animation clips", HasComp<AnimatedModelComponent>, AddComp<AnimatedModelComponent>},
+        {"IK", "Animation", "ik",
+         "Bones reach for a target", HasComp<IKComponent>, AddComp<IKComponent>},
+
+        {"Script", "Logic", "script",
+         "Lua: OnStart and OnUpdate on this object", HasComp<ScriptComponent>,
+         [](entt::registry& reg, entt::entity e) {
+             reg.emplace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
+         }},
+        {"UI Element", "Interface", "rect",
+         "Panel, label, image or bar on screen", HasComp<UIElementComponent>,
+         AddComp<UIElementComponent>},
+    };
+    return kEntries;
+}
+
+} // namespace
+
+// Якорь — сеткой 3x3, а не списком из девяти строк.
+//
+// Якорь ЕСТЬ положение на экране: «сверху слева», «по центру», «снизу справа».
+// Выпадающий список заставлял читать девять названий и держать в голове, какое
+// из них соответствует нужному углу; сетка показывает это буквально — кнопка
+// стоит там же, где встанет элемент.
+bool InspectorPanel::DrawAnchorPicker(UIAnchor& anchor) {
+    bool changed = false;
+    const float cell = ImGui::GetFrameHeight();
+    ImGui::BeginGroup();
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const int index = row * 3 + col;
+            if (col) ImGui::SameLine(0.0f, 2.0f);
+            ImGui::PushID(index);
+            const bool active = (int)anchor == index;
+            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            if (ImGui::Button("##anchor", ImVec2(cell, cell))) {
+                anchor = (UIAnchor)index;
+                changed = true;
+            }
+            if (active) ImGui::PopStyleColor();
+            // Точка внутри кнопки — в том углу, который эта кнопка и означает.
+            const float px = p0.x + cell * (0.25f + 0.25f * (float)col);
+            const float py = p0.y + cell * (0.25f + 0.25f * (float)row);
+            ImGui::GetWindowDrawList()->AddCircleFilled(
+                ImVec2(px, py), 2.5f,
+                ImGui::GetColorU32(active ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndGroup();
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(T("Anchor"));
+    return changed;
+}
+
+// Инспектор элемента интерфейса.
+//
+// РАНЬШЕ ЗДЕСЬ БЫЛА ПРОСТЫНЯ ИЗ ТРИДЦАТИ ПЯТИ ПОЛЕЙ, одна на все виды
+// элементов. У надписи спрашивали скругление углов, толщину рамки, градиент,
+// тень и внутренний отступ; у полосы прогресса — подсказку поля ввода; у любого
+// элемента — предел длины текста и пароль. Работающими из них были три-четыре,
+// а какие именно — приходилось выяснять опытом. Отсюда и ощущение «компоненты
+// странные»: компонент один, а элементов интерфейса восемь, и он показывал
+// объединение всех их свойств сразу.
+//
+// Теперь показывается только то, что этот вид элемента в самом деле читает
+// (см. sage/ui/UIRenderer.h), сгруппированное по смыслу: положение, вид, текст,
+// поведение. Сам компонент не тронут: он общий для всех видов и сериализуется
+// как раньше — иначе пришлось бы ломать формат сцен, скриптовый API и префабы
+// ради вида инспектора.
+void InspectorPanel::DrawUIElement(EditorHost& host, GameObject obj, UIElementComponent& u) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    using Kind = UIElementComponent::Kind;
+
+    // Что читает этот вид элемента.
+    const bool hasText = u.Type != Kind::Image;         // надпись есть у всех, кроме картинки
+    const bool hasFill = u.Type != Kind::Label;         // подложка (у надписи фона нет)
+    const bool hasSprite = u.Type == Kind::Image;
+    const bool hasBar = u.Type == Kind::Bar;
+    const bool hasInput = u.Type == Kind::Input;
+    const bool hasRange = u.Type == Kind::Slider;
+    const bool interactive = u.Type == Kind::Panel || u.Type == Kind::Input ||
+                             u.Type == Kind::Checkbox || u.Type == Kind::Slider ||
+                             u.Type == Kind::Image;
+
+    const char* kinds[] = {T("Panel"), T("Label"), T("Image"), T("Bar"), T("Icon"),
+                           T("Input"), T("Checkbox"), T("Slider")};
+    int kind = (int)u.Type;
+    if (ImGui::Combo(T("Kind"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
+        host.PushUndoSnapshot();
+        u.Type = (Kind)kind;
+    }
+
+    // --- Положение --------------------------------------------------------
+    ImGui::SeparatorText(T("Layout"));
+    if (DrawAnchorPicker(u.Anchor)) host.PushUndoSnapshot();
+    ImGui::DragFloat2(T("Offset"), &u.Offset.x, 1.0f); host.TrackLastImGuiItem();
+    ImGui::BeginDisabled(u.AutoWidth);
+    ImGui::DragFloat2(T("Size"), &u.Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
+    ImGui::EndDisabled();
+    ImGui::DragInt(T("Layer"), &u.Layer, 1); host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
+    ImGui::Checkbox(T("Visible"), &u.Visible);
+    ImGui::SameLine();
+    ImGui::Checkbox(T("Clip Children"), &u.ClipChildren);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", T("The subtree is masked by this rectangle (lists, minimaps)"));
+    }
+    if (hasText) {
+        ImGui::Checkbox(T("Auto Width"), &u.AutoWidth);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Width follows the content"));
+    }
+
+    // --- Вид ---------------------------------------------------------------
+    if (hasFill || hasSprite) {
+        ImGui::SeparatorText(T("Appearance"));
+        ImGui::ColorEdit4(hasSprite ? T("Tint") : T("Fill"), &u.Color.x); host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Rounding"), &u.Rounding, 0.5f, 0.0f, 200.0f); host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Border"), &u.BorderThickness, 0.25f, 0.0f, 50.0f); host.TrackLastImGuiItem();
+        if (u.BorderThickness > 0.0f) {
+            ImGui::ColorEdit4(T("Border Color"), &u.BorderColor.x); host.TrackLastImGuiItem();
+        }
+        ImGui::ColorEdit4(T("Gradient (a=0 off)"), &u.GradientColor.x); host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Shadow"), &u.ShadowSize, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Padding X"), &u.PadX, 0.5f, 0.0f, 64.0f); host.TrackLastImGuiItem();
+    }
+
+    // Значок — у любого вида: заданный на панели или полосе, он рисуется у
+    // левого края, а текст сдвигается за ним (см. UIComponents.h).
+    ImGui::SeparatorText(T("Icon"));
+    const std::vector<std::string>& icons = sage::ui::IconNames();
+    std::string current = u.Icon.empty() ? T("(none)") : u.Icon;
+    if (ImGui::BeginCombo(T("Icon"), current.c_str())) {
+        if (ImGui::Selectable(T("(none)"), u.Icon.empty())) {
+            host.PushUndoSnapshot();
+            u.Icon.clear();
+        }
+        for (const std::string& name : icons) {
+            if (ImGui::Selectable(name.c_str(), name == u.Icon)) {
+                host.PushUndoSnapshot();
+                u.Icon = name;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (!u.Icon.empty()) {
+        ImGui::ColorEdit4(T("Icon Color"), &u.IconColor.x); host.TrackLastImGuiItem();
+    }
+
+    // --- Текст --------------------------------------------------------------
+    if (hasText) {
+        ImGui::SeparatorText(T("Text"));
+        char textBuf[256];
+        std::snprintf(textBuf, sizeof(textBuf), "%s", u.Text.c_str());
+        if (ImGui::InputText(T("Text"), textBuf, sizeof(textBuf))) u.Text = textBuf;
+        host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Text Scale"), &u.TextScale, 0.05f, 0.5f, 12.0f); host.TrackLastImGuiItem();
+        ImGui::ColorEdit4(T("Text Color"), &u.TextColor.x); host.TrackLastImGuiItem();
+        ImGui::Checkbox(T("Center Text"), &u.TextCentered);
+        ImGui::SameLine();
+        ImGui::Checkbox(T("Wrap"), &u.WrapText);
+    }
+
+    // --- Картинка -----------------------------------------------------------
+    if (hasSprite) {
+        ImGui::SeparatorText(T("Image"));
+        auto loadTexture = [&] {
+            u.Tex = u.TexturePath.empty()
+                        ? nullptr
+                        : u.PixelArt ? ResourceManager::Instance().GetTexture(
+                                           u.TexturePath, TextureFilter::Nearest, false)
+                                     : ResourceManager::Instance().GetTexture(u.TexturePath);
+        };
+        // Тот же слот, что у мешей и материалов: перетащить картинку из Assets,
+        // увидеть её тут же, узнать, где она лежит.
+        const assetslot::Result r = assetslot::Draw(host, "ui_tex", assetslot::Kind::Texture,
+                                                    u.TexturePath, &m_preview);
+        if (r.Changed) {
+            host.PushUndoSnapshot();
+            u.TexturePath = r.Path;
+            loadTexture();
+        }
+        if (r.BrowseRequested) {
+            FileBrowser::Config c;
+            c.Title = T("Choose an image");
+            c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
+            c.FilterLabel = T("Images");
+            if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+            m_browser.Open(c);
+            m_browseTarget = &u.TexturePath;
+            m_browseIsShader = false;
+            m_browseIsMesh = false;
+            m_browseIsMaterial = false;
+        }
+        if (!u.TexturePath.empty() && !u.Tex) {
+            ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", T("Texture not loaded (press Load)"));
+            ImGui::SameLine();
+            if (EditorIcons::Button("refresh", T("Load"))) {
+                host.PushUndoSnapshot();
+                loadTexture();
+            }
+        }
+        // Пиксель-арт меняет ФИЛЬТРАЦИЮ загруженной текстуры, поэтому
+        // перезагружаем сразу: иначе галка стоит, а картинка мыльная до
+        // следующего Load, и это выглядит как «галка не работает».
+        if (ImGui::Checkbox(T("Pixel Art (nearest, no mips)"), &u.PixelArt)) {
+            host.PushUndoSnapshot();
+            loadTexture();
+        }
+        if (u.Tex) ImGui::TextDisabled(T("Sheet: %d x %d px"), u.Tex->Width(), u.Tex->Height());
+
+        // Спрайт с листа — под своим заголовком: это отдельная тема, и на
+        // цельной картинке все эти поля лишние.
+        if (ImGui::TreeNode(T("Sprite from a sheet"))) {
+            ImGui::DragFloat4(T("Sprite x,y,w,h"), &u.Sprite.x, 1.0f, 0.0f, 8192.0f);
+            host.TrackLastImGuiItem();
+            ImGui::TextDisabled("%s", T("w or h = 0 — the whole file"));
+            ImGui::DragFloat4(T("9-slice l,t,r,b"), &u.SliceBorder.x, 0.5f, 0.0f, 512.0f);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Pixel Scale"), &u.PixelScale, 0.25f, 0.0f, 16.0f);
+            host.TrackLastImGuiItem();
+            ImGui::TextDisabled("%s", T("0 — stretch to fit; >0 — source pixel size"));
+            ImGui::DragFloat4(T("Hover sprite"), &u.SpriteHover.x, 1.0f, 0.0f, 8192.0f);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat4(T("Pressed sprite"), &u.SpritePressed.x, 1.0f, 0.0f, 8192.0f);
+            host.TrackLastImGuiItem();
+            ImGui::TreePop();
+        }
+    }
+
+    // --- Полоса -------------------------------------------------------------
+    if (hasBar) {
+        ImGui::SeparatorText(T("Bar"));
+        ImGui::SliderFloat(T("Value"), &u.Value, 0.0f, 1.0f); host.TrackLastImGuiItem();
+        ImGui::ColorEdit4(T("Fill Color"), &u.BarFillColor.x); host.TrackLastImGuiItem();
+    }
+
+    // --- Поведение ----------------------------------------------------------
+    if (interactive) {
+        ImGui::SeparatorText(T("Interaction"));
+        ImGui::Checkbox(T("Interactive"), &u.Interactive);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Reacts to the mouse: hover, press, focus"));
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!u.Interactive);
+        ImGui::Checkbox(T("Enabled"), &u.Enabled);
+        ImGui::EndDisabled();
+        if (hasInput) {
+            char phBuf[256];
+            std::snprintf(phBuf, sizeof(phBuf), "%s", u.Placeholder.c_str());
+            if (ImGui::InputText(T("Placeholder"), phBuf, sizeof(phBuf))) u.Placeholder = phBuf;
+            host.TrackLastImGuiItem();
+            ImGui::DragInt(T("Max Length"), &u.MaxLength, 1, 0, 4096);
+            host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Password"), &u.Password);
+        }
+        if (hasRange) {
+            ImGui::DragFloat(T("Min Value"), &u.MinValue, 0.1f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Max Value"), &u.MaxValue, 0.1f); host.TrackLastImGuiItem();
+        }
+        if (hasRange || u.Type == Kind::Checkbox) {
+            ImGui::SliderFloat(T("Value (0..1)"), &u.Value, 0.0f, 1.0f);
+            host.TrackLastImGuiItem();
+        }
+    }
+
+    ImGui::Separator();
+    // Вёрстка правится прямо в кадре — рамками и ручками поверх картинки (см.
+    // UICanvas). Кнопка здесь потому, что элемент, которого не видно, ищут
+    // именно отсюда.
+    ImGui::Checkbox(T("Edit layout in the viewport"), &host.UIEditMode());
+    if (ImGui::Button(T("Remove UI Element"))) {
+        host.PushUndoSnapshot();
+        reg.remove<UIElementComponent>(obj.Entity());
+    }
+}
+
 void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
     entt::registry& reg = host.CurrentScene().Registry();
     entt::entity e = obj.Entity();
 
     ImGui::Separator();
-    if (ImGui::Button(T("Add Component"), ImVec2(-1, 0))) ImGui::OpenPopup("##add_component");
-    if (ImGui::BeginPopup("##add_component")) {
-        bool any = false;
-        auto item = [&](const char* label, bool present, auto addFn) {
-            if (present) return;
-            any = true;
-            if (ImGui::MenuItem(label)) {
-                host.PushUndoSnapshot();
-                addFn();
-                ImGui::CloseCurrentPopup();
-            }
-        };
-        // Mesh Renderer, Decal и Character Controller ДОЛГО ОТСУТСТВОВАЛИ в этом
-        // списке, и получалось противоречие: наклейку можно создать через
-        // «Entity > Create Decal», но нельзя добавить к уже существующему
-        // объекту; у пустой сущности нельзя завести меш, хотя он есть у каждого
-        // примитива; персонаж настраивается только из скрипта. Компонент, у
-        // которого есть секция в инспекторе, обязан быть и в этом списке —
-        // иначе редактор противоречит сам себе.
-        item("Mesh Renderer", reg.all_of<MeshRendererComponent>(e),
-             [&] { reg.emplace<MeshRendererComponent>(e); });
-        item("Decal", reg.all_of<DecalComponent>(e), [&] { reg.emplace<DecalComponent>(e); });
-        item("Character Controller", reg.all_of<CharacterControllerComponent>(e),
-             [&] { reg.emplace<CharacterControllerComponent>(e); });
-        item("GI Static", reg.all_of<GIStaticComponent>(e), [&] { reg.emplace<GIStaticComponent>(e); });
-        item("Camera", reg.all_of<CameraComponent>(e), [&] { reg.emplace<CameraComponent>(e); });
-        item("Light", reg.all_of<LightComponent>(e), [&] { reg.emplace<LightComponent>(e); });
-        item("Script", reg.all_of<ScriptComponent>(e),
-             [&] { reg.emplace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"}); });
-        item("Rigid Body", reg.all_of<RigidBodyComponent>(e), [&] { reg.emplace<RigidBodyComponent>(e); });
-        item("Collider", reg.all_of<ColliderComponent>(e), [&] { reg.emplace<ColliderComponent>(e); });
-        item("Joint", reg.all_of<JointComponent>(e), [&] { reg.emplace<JointComponent>(e); });
-        item("Animated Model", reg.all_of<AnimatedModelComponent>(e),
-             [&] { reg.emplace<AnimatedModelComponent>(e); });
-        item(T("IK"), reg.all_of<IKComponent>(e), [&] { reg.emplace<IKComponent>(e); });
-        item("Reflection Probe", reg.all_of<ReflectionProbeComponent>(e),
-             [&] { reg.emplace<ReflectionProbeComponent>(e); });
-        item("Particle Emitter", reg.all_of<ParticleEmitterComponent>(e), [&] {
-            ParticleEmitterComponent em;
-            em.Config = ParticlePresets::Registry()[0].Make(); // Fire
-            reg.emplace<ParticleEmitterComponent>(e, em);
-        });
-        item("UI Element", reg.all_of<UIElementComponent>(e), [&] { reg.emplace<UIElementComponent>(e); });
-        if (!any) ImGui::TextDisabled("%s", T("All components already added"));
-        ImGui::EndPopup();
+    if (ImGui::Button(T("Add Component"), ImVec2(-1, 0))) {
+        ImGui::OpenPopup("##add_component");
+        m_addComponentFilter[0] = '\0';
+        m_addComponentFocus = true;
     }
+    if (!ImGui::BeginPopup("##add_component")) return;
+
+    ImGui::SetNextItemWidth(280.0f);
+    if (m_addComponentFocus) {
+        ImGui::SetKeyboardFocusHere(); // курсор сразу в поиске — руки уже на клавиатуре
+        m_addComponentFocus = false;
+    }
+    ImGui::InputTextWithHint("##filter", T("Search..."), m_addComponentFilter,
+                             sizeof(m_addComponentFilter));
+    ImGui::Separator();
+
+    std::string filter = m_addComponentFilter;
+    std::transform(filter.begin(), filter.end(), filter.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    auto matches = [&](const ComponentEntry& c) {
+        if (filter.empty()) return true;
+        std::string hay = std::string(c.Name) + " " + c.Hint + " " + c.Category;
+        std::transform(hay.begin(), hay.end(), hay.begin(),
+                       [](unsigned char ch) { return (char)std::tolower(ch); });
+        return hay.find(filter) != std::string::npos;
+    };
+
+    const char* lastCategory = nullptr;
+    int shown = 0;
+    for (const ComponentEntry& c : ComponentRegistry()) {
+        if (c.Has(reg, e) || !matches(c)) continue;
+        if (!lastCategory || std::strcmp(lastCategory, c.Category) != 0) {
+            if (lastCategory) ImGui::Spacing();
+            ImGui::TextDisabled("%s", T(c.Category));
+            lastCategory = c.Category;
+        }
+        ImGui::PushID(c.Name);
+        const ImVec2 rowPos = ImGui::GetCursorScreenPos();
+        const float iconSize = ImGui::GetTextLineHeight();
+        // Строка — один Selectable на две строки текста: имя и что оно делает.
+        // Без второй строки список компонентов читается только теми, кто и так
+        // знает, что такое «GI Static».
+        const bool picked = ImGui::Selectable("##row", false, ImGuiSelectableFlags_None,
+                                              ImVec2(300.0f, iconSize * 2.0f + 4.0f));
+        EditorIcons::Overlay(rowPos.x + 2.0f, rowPos.y + iconSize * 0.5f - 1.0f, iconSize, c.Icon,
+                             glm::vec3(0.62f, 0.72f, 0.85f));
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddText(ImVec2(rowPos.x + iconSize + 10.0f, rowPos.y + 1.0f),
+                    ImGui::GetColorU32(ImGuiCol_Text), T(c.Name));
+        dl->AddText(ImVec2(rowPos.x + iconSize + 10.0f, rowPos.y + iconSize + 2.0f),
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled), T(c.Hint));
+        if (picked) {
+            host.PushUndoSnapshot();
+            c.Add(reg, e);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopID();
+        ++shown;
+    }
+    if (shown == 0) {
+        ImGui::TextDisabled("%s", filter.empty() ? T("All components already added")
+                                                 : T("Nothing matches the search."));
+    }
+    ImGui::EndPopup();
 }
 
 void InspectorPanel::Draw(EditorHost& host, bool* open) {

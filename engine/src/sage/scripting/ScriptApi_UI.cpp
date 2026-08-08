@@ -5,6 +5,7 @@
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIIcons.h"
+#include "sage/ui/UIPresets.h"
 
 // ---------------------------------------------------------------------------
 // Интерфейс сцены: UIElementComponent и sage.ui.*
@@ -85,6 +86,27 @@ void ScriptEngine::RegisterUIApi() {
         "AutoWidth", &UIElementComponent::AutoWidth,
         "LayoutSize", sol::readonly(&UIElementComponent::LayoutSize)
     );
+
+    // Заготовка элемента: одной строкой то, для чего иначе нужно знать, какие
+    // семь полей поменять у панели, чтобы получилась кнопка. Таблица заготовок
+    // — общая с редактором (sage/ui/UIPresets.h), поэтому Button из скрипта и
+    // Button из меню редактора — один и тот же элемент, а не два похожих.
+    Bind("ui", "Preset", "SetUIPreset", [](GameObject& obj, const std::string& preset) {
+        if (!obj.Valid()) throw std::runtime_error("ui.Preset: сущность недействительна");
+        auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity());
+        if (!ui) ui = &obj.Registry()->emplace<UIElementComponent>(obj.Entity());
+        if (!sage::ui::ApplyPreset(*ui, preset)) {
+            // Молчаливый отказ означал бы «элемент создан, но выглядит не так»
+            // — и искать причину пришлось бы в отрисовке.
+            std::string known;
+            for (const std::string& n : sage::ui::PresetNames()) {
+                if (!known.empty()) known += ", ";
+                known += n;
+            }
+            throw std::runtime_error("ui.Preset: неизвестная заготовка '" + preset +
+                                     "'; есть: " + known);
+        }
+    });
 
     // Картинка UI-элемента: путь + признак пиксель-арта. Отдельной функцией, а
     // не полем TexturePath, потому что путь без ЗАГРУЗКИ ничего не рисует, а

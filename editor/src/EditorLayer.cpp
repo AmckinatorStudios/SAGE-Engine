@@ -35,6 +35,7 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UIPresets.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
@@ -807,50 +808,28 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     u.Anchor = UIAnchor::Center;
     u.Offset = glm::vec2(0.0f, 0.0f);
 
-    if (preset == "Panel") {
-        u.Type = UIElementComponent::Kind::Panel;
-        u.Size = glm::vec2(260.0f, 140.0f);
-        u.Text.clear();
-    } else if (preset == "Button") {
-        u.Type = UIElementComponent::Kind::Panel;
-        u.Size = glm::vec2(200.0f, 52.0f);
-        u.Text = T("Button");
-        u.Interactive = true;   // без этого «кнопка» — просто прямоугольник
-        u.Color = glm::vec4(0.16f, 0.22f, 0.34f, 0.95f);
-        u.BorderThickness = 1.0f;
-    } else if (preset == "Label") {
-        u.Type = UIElementComponent::Kind::Label;
-        u.Size = glm::vec2(220.0f, 40.0f);
-        u.Text = T("Text");
-        u.AutoWidth = true;
-    } else if (preset == "Image") {
-        u.Type = UIElementComponent::Kind::Image;
-        u.Size = glm::vec2(160.0f, 160.0f);
-        u.Color = glm::vec4(1.0f);
-    } else if (preset == "Bar") {
-        u.Type = UIElementComponent::Kind::Bar;
-        u.Size = glm::vec2(240.0f, 26.0f);
-        u.Value = 0.6f;         // наполовину: пустая полоса неотличима от панели
-        u.Rounding = 6.0f;
-    } else if (preset == "Checkbox") {
-        u.Type = UIElementComponent::Kind::Checkbox;
-        u.Size = glm::vec2(200.0f, 36.0f);
-        u.Text = T("Checkbox");
-        u.Interactive = true;
-    } else if (preset == "Slider") {
-        u.Type = UIElementComponent::Kind::Slider;
-        u.Size = glm::vec2(240.0f, 30.0f);
-        u.Interactive = true;
-        u.MinValue = 0.0f;
-        u.MaxValue = 1.0f;
-        u.Value = 0.5f;
-    } else if (preset == "Input") {
-        u.Type = UIElementComponent::Kind::Input;
-        u.Size = glm::vec2(260.0f, 40.0f);
-        u.Interactive = true;
-        u.Placeholder = T("Enter text");
-        u.TextCentered = false;
+    // Новый элемент становится ДОЧЕРНИМ к выделенному элементу интерфейса.
+    //
+    // Интерфейс собирается из вложенных прямоугольников: панель, а в ней
+    // надпись, кнопка и полоса. Раньше каждый созданный элемент вставал в
+    // корень, то есть отсчитывался от края ЭКРАНА, и собрать панель означало
+    // создать элементы, а потом перетащить каждый в иерархии на панель, помня,
+    // что до этого они лежали не там. Самый частый шаг верстки требовал
+    // отдельного ручного действия — и именно это ощущается как «неудобно
+    // прикреплять».
+    if (m_selectedId >= 0) {
+        GameObject sel = m_scene->Get(m_selectedId);
+        if (sel.Valid() && m_scene->Registry().all_of<UIElementComponent>(sel.Entity())) {
+            m_scene->SetParent(obj.Entity(), sel.Entity());
+        }
     }
+
+    // Что именно значит «кнопка» или «полоса», знает ДВИЖОК (sage/ui/UIPresets.h).
+    // Раньше это знание жило только здесь, и получить кнопку можно было лишь
+    // мышью в редакторе: скрипт, собирающий интерфейс на лету, повторял те же
+    // семь присваиваний у себя.
+    sage::ui::ApplyPreset(u, preset);
+
     return obj;
 }
 

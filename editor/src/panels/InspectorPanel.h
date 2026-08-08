@@ -11,6 +11,8 @@ class EditorHost;
 class GameObject;
 class Texture;
 struct MeshRendererComponent;
+struct UIElementComponent;
+enum class UIAnchor;
 
 // Панель Inspector — свойства выбранной сущности (имя/Transform/MeshRenderer/
 // Material/компоненты с Add/Remove) и редактор выбранного в Assets файла
@@ -97,7 +99,14 @@ private:
     // его ещё нет, и назначение его сущности.
     void AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr);
     void DrawEntityProperties(EditorHost& host);
+    // Инспектор элемента интерфейса — отдельно от общей простыни свойств:
+    // у него своя логика «что показывать при этом виде элемента».
+    void DrawUIElement(EditorHost& host, GameObject obj, UIElementComponent& u);
+    // Выбор якоря сеткой 3x3 — так же, как якорь выглядит на экране.
+    bool DrawAnchorPicker(UIAnchor& anchor);
     // Серое пояснение с переносом строк (см. пояснение в .cpp).
     static void HintWrapped(const char* fmt, ...);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
+    char m_addComponentFilter[64] = ""; // поиск в списке компонентов
+    bool m_addComponentFocus = false;   // поставить курсор в поиск при открытии
 };
