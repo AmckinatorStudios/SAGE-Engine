@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "sage/assets/Pack.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -1254,10 +1255,24 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
         err = "Runtime assets copy failed: " + ec.message();
         return false;
     }
-    fs::copy(m_project.Dir(), gameDir / "project", fs::copy_options::recursive, ec);
-    if (ec) {
-        err = "Project copy failed: " + ec.message();
-        return false;
+    // Проект едет в игру ПАКЕТОМ (game.sagepak), а не россыпью файлов.
+    //
+    // Копирование папки как есть означало три вещи сразу: медленный старт
+    // (тысяча мелких файлов открывается дольше одного большого), игру, которую
+    // открывают блокнотом (исходные .lua и .sage лежат рядом с exe), и лишний
+    // размер (текстовые сцены и скрипты жмутся в разы).
+    //
+    // Файлы .meta и .sageimport в пакет не кладутся: это служебные данные
+    // редактора (GUID'ы ассетов, параметры импорта), в игре по ним никто не
+    // ходит, а место они занимают.
+    {
+        sage::assets::PackWriter pack;
+        const size_t packed = pack.AddDirectory(m_project.Dir(), {".meta", ".sageimport"});
+        if (!pack.Save(gameDir / "game.sagepak")) {
+            err = "Не удалось записать пакет игры";
+            return false;
+        }
+        LOG_INFO("Editor") << "Пакет игры: " << packed << " файлов";
     }
 
     // Настройки проекта — рядом с exe игры (sage.cfg), чтобы игрок мог править их

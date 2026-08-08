@@ -1,4 +1,5 @@
 #include "SceneSerializer.h"
+#include "sage/assets/Pack.h"
 #include "sage/gi/GI.h"
 #include "sage/render/ResourceManager.h"
 #include <nlohmann/json.hpp>
@@ -1096,13 +1097,17 @@ void Save(const Scene& scene, const std::string& path) {
 }
 
 std::unique_ptr<Scene> Load(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    // Через vfs, а не напрямую: в собранной игре сцены лежат в пакете, в
+    // редакторе — на диске, и загрузчик обязан быть ОДИН. Два пути загрузки
+    // означали бы, что половина кода проверяется не в том виде, в каком её
+    // увидит игрок.
+    std::string text;
+    if (!sage::assets::vfs::ReadText(path, text)) {
         throw std::runtime_error("Не удалось открыть файл сцены: " + path);
     }
     json root;
     try {
-        file >> root;
+        root = json::parse(text);
     } catch (const std::exception& e) {
         throw std::runtime_error("Ошибка парсинга JSON сцены (" + path + "): " + e.what());
     }

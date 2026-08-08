@@ -1,4 +1,5 @@
 #include "sage/render/Material.h"
+#include "sage/assets/Pack.h"
 
 #include <fstream>
 #include <stdexcept>
@@ -34,13 +35,14 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
 }
 
 Material Material::LoadFromFile(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    // Через vfs — см. пояснение в SceneSerializer::Load.
+    std::string text;
+    if (!sage::assets::vfs::ReadText(path, text)) {
         throw std::runtime_error("Не удалось открыть материал: " + path);
     }
     json root;
     try {
-        file >> root;
+        root = json::parse(text);
     } catch (const std::exception& e) {
         throw std::runtime_error("Ошибка парсинга материала (" + path + "): " + e.what());
     }

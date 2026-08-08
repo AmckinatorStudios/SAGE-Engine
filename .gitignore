@@ -16,3 +16,7 @@ tests/render/references/*.diff.png
 
 # Раскладка окон редактора: своя у каждого, пишется при выходе.
 sage_editor_imgui.ini
+
+# Побочные файлы прогонов редактора в корне репозитория.
+sage-autosave.sage
+/selftest_project/

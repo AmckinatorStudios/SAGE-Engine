@@ -119,42 +119,6 @@ if [ ! -x "${GAME_EXE}" ]; then
     echo "ОШИБКА: собранная игра не найдена: ${GAME_EXE} (self-test редактора должен был её собрать)"
     exit 1
 fi
-# Второй уровень и скрипт-переключатель: без смены сцены игра на движке была бы
-# длиной ровно в одну сцену, и проверить это можно только запуском — механика
-# запроса (модульные тесты) не доказывает, что хозяин кадра его выполняет.
-python3 - "${GAME_DIR}/project" <<'PYEOF'
-import json, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-scenes = root / "scenes"
-main_file = scenes / "main.sage"
-if not main_file.exists():
-    main_file = sorted(scenes.glob("*.sage"))[0]
-main = json.loads(main_file.read_text())
-
-level2 = json.loads(json.dumps(main))
-level2["name"] = "level2"
-(scenes / "level2.sage").write_text(json.dumps(level2, indent=2))
-
-scripts = root / "assets" / "scripts"
-scripts.mkdir(parents=True, exist_ok=True)
-(scripts / "switcher.lua").write_text(
-    "local frames = 0\n"
-    "function OnUpdate(entity, dt)\n"
-    "    frames = frames + 1\n"
-    "    if frames == 3 then sage.scene.Load('level2') end\n"
-    "end\n")
-
-key = "objects" if "objects" in main else "entities"
-main[key].append({
-    "name": "Switcher", "id": 9999,
-    "transform": {"position": {"x": 0, "y": 0, "z": 0},
-                  "rotation": {"x": 0, "y": 0, "z": 0},
-                  "scale": {"x": 1, "y": 1, "z": 1}},
-    "script": "assets/scripts/switcher.lua"})
-main["name"] = "main"
-(scenes / "main.sage").write_text(json.dumps(main, indent=2))
-PYEOF
-
 PLAYER_LOG="${SCRATCH_DIR}/player.log"
 PLAYER_SHOT="${SCRATCH_DIR}/player.png"
 STATUS=0
@@ -180,8 +144,90 @@ if ! grep -q "сцена: level2.sage" "${PLAYER_LOG}"; then
     echo "ОШИБКА: смена сцены из скрипта не сработала (нет перехода в level2)"
     cat "${PLAYER_LOG}"; exit 1
 fi
-echo "OK: собранная игра запустилась, отрисовала кадр и сменила сцену из скрипта"
-echo "    (скриншот ${SHOT_SIZE} байт, main.sage -> level2.sage)"
+echo "OK: собранная игра запустилась и отрисовала кадр (скриншот ${SHOT_SIZE} байт)"
+
+# Проект собранной игры лежит ПАКЕТОМ, а не россыпью: россыпь означала бы
+# медленный старт, игру, открываемую блокнотом, и лишний размер.
+if [ ! -f "${GAME_DIR}/game.sagepak" ]; then
+    echo "ОШИБКА: в собранной игре нет пакета game.sagepak"; ls -la "${GAME_DIR}"; exit 1
+fi
+if [ -d "${GAME_DIR}/project" ]; then
+    echo "ОШИБКА: рядом с игрой осталась распакованная папка project/ —"
+    echo "        значит сборка положила и пакет, и россыпь, и что из них прочтут, дело случая"
+    exit 1
+fi
+PACK_SIZE=$(stat -c%s "${GAME_DIR}/game.sagepak")
+echo "OK: проект упакован в game.sagepak (${PACK_SIZE} байт), россыпи рядом нет"
+
+# --- Смена сцены из скрипта -------------------------------------------------
+#
+# Отдельным проектом НА ДИСКЕ, а не правкой собранной игры: содержимое той
+# теперь в пакете, дописать в него второй уровень нечем. Заодно это проверяет
+# вторую половину vfs — что игра одинаково читается и без пакета.
+# Копируем ВСЮ собранную игру и убираем из неё пакет: плееру нужны его
+# собственные шейдеры рядом с exe (см. sage/core/Paths.h), а не только сцены.
+SWITCH_DIR="${SCRATCH_DIR}/twoscene"
+rm -rf "${SWITCH_DIR}"
+cp -r "${GAME_DIR}" "${SWITCH_DIR}"
+mkdir -p "${SWITCH_DIR}/scenes" "${SWITCH_DIR}/assets/scripts"
+python3 - "${GAME_DIR}/game.sagepak" "${SWITCH_DIR}" <<'PYEOF'
+import json, pathlib, struct, sys
+pack, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+
+# Достаём сцену из пакета — тем же форматом, которым его пишет движок.
+# Разбор здесь СВОЙ и намеренно: если формат разъедется с описанием, тест
+# упадёт, а не «просто не найдёт сцену».
+import zlib
+data = pack.read_bytes()
+count = struct.unpack_from("<I", data, 8)[0]
+index_off = struct.unpack_from("<Q", data, 16)[0]
+p = index_off
+scene = None
+for _ in range(count):
+    n = struct.unpack_from("<I", data, p)[0]; p += 4
+    name = data[p:p+n].decode(); p += n
+    off, stored, orig, comp = struct.unpack_from("<QQQI", data, p); p += 28
+    if name.endswith(".sage") and scene is None:
+        raw = data[off:off+stored]
+        scene = json.loads(zlib.decompress(raw) if comp else raw)
+assert scene is not None, "в пакете нет ни одной сцены"
+
+level2 = json.loads(json.dumps(scene)); level2["name"] = "level2"
+(out / "scenes" / "level2.sage").write_text(json.dumps(level2, indent=2))
+
+(out / "assets" / "scripts" / "switcher.lua").write_text(
+    "local frames = 0\n"
+    "function OnUpdate(entity, dt)\n"
+    "    frames = frames + 1\n"
+    "    if frames == 3 then sage.scene.Load('level2') end\n"
+    "end\n")
+
+key = "objects" if "objects" in scene else "entities"
+scene["name"] = "main"
+scene[key].append({
+    "name": "Switcher", "id": 9999,
+    "transform": {"position": {"x": 0, "y": 0, "z": 0},
+                  "rotation": {"x": 0, "y": 0, "z": 0},
+                  "scale": {"x": 1, "y": 1, "z": 1}},
+    "script": "assets/scripts/switcher.lua"})
+(out / "scenes" / "main.sage").write_text(json.dumps(scene, indent=2))
+(out / "project.sageproj").write_text(json.dumps({"sage_project_version": 1, "name": "twoscene"}))
+PYEOF
+rm -f "${SWITCH_DIR}/game.sagepak"   # тут проверяется путь БЕЗ пакета
+SWITCH_LOG="${SCRATCH_DIR}/twoscene.log"
+SWITCH_EXE="$(basename "${GAME_EXE}")"
+STATUS=0
+( cd "${SWITCH_DIR}" && run_headless env SAGE_SCREENSHOT_AT_FRAME=10 \
+      SAGE_SCREENSHOT_PATH="${SCRATCH_DIR}/twoscene.png" "./${SWITCH_EXE}" . ) \
+    > "${SWITCH_LOG}" 2>&1 || STATUS=$?
+if [ ${STATUS} -ne 0 ]; then
+    echo "ОШИБКА: игра с двумя сценами завершилась с кодом ${STATUS}"; cat "${SWITCH_LOG}"; exit 1
+fi
+if ! grep -q "сцена: level2.sage" "${SWITCH_LOG}"; then
+    echo "ОШИБКА: смена сцены из скрипта не сработала (нет перехода в level2)"
+    cat "${SWITCH_LOG}"; exit 1
+fi
+echo "OK: смена сцены из скрипта работает (main.sage -> level2.sage)"
 
 # ...и ещё раз — ИЗ ЧУЖОЙ ПАПКИ, по пути к самому project.sageproj. Так игру и
 # запускают на самом деле: ярлыком, из другого каталога, перетаскиванием файла

@@ -1,4 +1,5 @@
 #include "ScriptEngine.h"
+#include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/SkinnedModel.h"
@@ -80,7 +81,15 @@ void ScriptEngine::RegisterEngineApi() {
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
     sol::environment env(m_lua, sol::create, m_lua.globals());
 
-    auto result = m_lua.script_file(scriptPath, env, sol::script_pass_on_error);
+    // Текст скрипта берётся через vfs: в собранной игре .lua лежат в пакете.
+    // Имя файла передаётся вторым аргументом, чтобы ошибки Lua по-прежнему
+    // ссылались на «assets/scripts/hero.lua:12», а не на «string:12» — без
+    // этого любая ошибка в скрипте становится неотлаживаемой.
+    std::string source;
+    if (!sage::assets::vfs::ReadText(scriptPath, source)) {
+        throw std::runtime_error("Скрипт не найден: " + scriptPath);
+    }
+    auto result = m_lua.script(source, env, sol::script_pass_on_error, "@" + scriptPath);
     if (!result.valid()) {
         sol::error err = result;
         throw std::runtime_error("Ошибка загрузки скрипта " + scriptPath + ": " + err.what());
@@ -115,7 +124,15 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
 void ScriptEngine::RunScript(const std::string& scriptPath) {
     sol::environment env(m_lua, sol::create, m_lua.globals());
 
-    auto result = m_lua.script_file(scriptPath, env, sol::script_pass_on_error);
+    // Текст скрипта берётся через vfs: в собранной игре .lua лежат в пакете.
+    // Имя файла передаётся вторым аргументом, чтобы ошибки Lua по-прежнему
+    // ссылались на «assets/scripts/hero.lua:12», а не на «string:12» — без
+    // этого любая ошибка в скрипте становится неотлаживаемой.
+    std::string source;
+    if (!sage::assets::vfs::ReadText(scriptPath, source)) {
+        throw std::runtime_error("Скрипт не найден: " + scriptPath);
+    }
+    auto result = m_lua.script(source, env, sol::script_pass_on_error, "@" + scriptPath);
     if (!result.valid()) {
         sol::error err = result;
         throw std::runtime_error("Ошибка загрузки скрипта " + scriptPath + ": " + err.what());

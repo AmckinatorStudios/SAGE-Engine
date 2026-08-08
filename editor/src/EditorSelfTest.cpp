@@ -419,8 +419,11 @@ void EditorLayer::RunSelfTest() {
 #else
             fs::path exe = gameDir / m_project.Name();
 #endif
-            if (!fs::exists(exe, ec) ||
-                !fs::exists(gameDir / "project" / "project.sageproj", ec) ||
+            // Проект едет ПАКЕТОМ (game.sagepak), а не папкой project/.
+            // Проверяем и то, что папки нет: положить рядом и пакет, и россыпь
+            // значило бы, что какой из них прочтут — дело случая.
+            if (!fs::exists(exe, ec) || !fs::exists(gameDir / "game.sagepak", ec) ||
+                fs::exists(gameDir / "project", ec) ||
                 !fs::exists(gameDir / "assets" / "shaders" / "lit.frag", ec)) {
                 LOG_ERROR("Editor") << "SELFTEST: built game layout incomplete in " << gameDir.string();
                 ok = false;

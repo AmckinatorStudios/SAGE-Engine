@@ -1,4 +1,6 @@
 #include "PlayerLayer.h"
+#include "sage/assets/Pack.h"
+#include "sage/core/Paths.h"
 
 #include <algorithm>
 #include <cmath>
@@ -42,17 +44,13 @@ PlayerLayer::PlayerLayer(fs::path projectDir, std::string launchArgs)
 PlayerLayer::~PlayerLayer() = default;
 
 fs::path PlayerLayer::FindMainScene() const {
-    fs::path scenesDir = "scenes"; // CWD уже внутри проекта
-    fs::path preferred = scenesDir / "main.sage";
-    std::error_code ec;
-    if (fs::exists(preferred, ec)) return preferred;
-
-    std::vector<fs::path> scenes;
-    for (const auto& entry : fs::directory_iterator(scenesDir, ec)) {
-        if (entry.path().extension() == ".sage") scenes.push_back(entry.path());
-    }
-    std::sort(scenes.begin(), scenes.end());
-    return scenes.empty() ? fs::path() : scenes.front();
+    // Через vfs, а не через directory_iterator: в собранной игре проект лежит
+    // ПАКЕТОМ, каталога scenes/ на диске нет, и обход вернул бы пустоту — игра
+    // честно не нашла бы ни одной сцены и не запустилась.
+    if (sage::assets::vfs::Exists("scenes/main.sage")) return fs::path("scenes/main.sage");
+    const std::vector<std::string> scenes =
+        sage::assets::vfs::ListFiles("scenes", ".sage");
+    return scenes.empty() ? fs::path() : fs::path(scenes.front());
 }
 
 void PlayerLayer::OnAttach() {
@@ -77,8 +75,17 @@ void PlayerLayer::OnAttach() {
     // Скриншот пишется до смены CWD? Нет — путь может быть абсолютным (CI так
     // и делает). Относительный путь окажется внутри папки проекта — норма.
 
-    // 2. Проект: имя из project.sageproj + CWD в корень проекта.
+    // 2. Проект. Сначала — пакет: собранная игра везёт содержимое проекта
+    // одним файлом game.sagepak рядом с exe. Его отсутствие не ошибка: так
+    // запускают игру из папки проекта во время разработки, и всё читается с
+    // диска (см. sage::assets::vfs).
     std::error_code ec;
+    const fs::path packFile = m_projectDir / "game.sagepak";
+    if (!sage::assets::vfs::Mount(packFile)) {
+        const fs::path beside = sage::ExecutableDir() / "game.sagepak";
+        sage::assets::vfs::Mount(beside);
+    }
+
     fs::path projectFile = m_projectDir / "project.sageproj";
     if (fs::exists(projectFile, ec)) {
         try {
