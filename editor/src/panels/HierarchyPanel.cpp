@@ -160,11 +160,11 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     ImGui::PopID();
 }
 
-void HierarchyPanel::Draw(EditorHost& host) {
+void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
-    ImGui::Begin(T("Hierarchy" "###Hierarchy"));
+    ImGui::Begin(T("Hierarchy" "###Hierarchy"), open);
     ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
     ImGui::Separator();
 

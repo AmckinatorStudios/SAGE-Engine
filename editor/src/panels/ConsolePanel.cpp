@@ -52,8 +52,8 @@ bool ConsolePanel::Passes(const Entry& e) const {
     return true;
 }
 
-void ConsolePanel::Draw() {
-    ImGui::Begin(T("Console" "###Console"));
+void ConsolePanel::Draw(bool* open) {
+    ImGui::Begin(T("Console" "###Console"), open);
     if (ImGui::IsWindowFocused()) MarkSeen();
 
     if (EditorIcons::Button("trash", T("Clear"), T("Clear the console"))) {
@@ -136,8 +136,8 @@ void ConsolePanel::Draw() {
             }
         }
         if (shown == 0) {
-            ImGui::TextDisabled(m_filter[0] ? T("The filter matched nothing")
-                                            : T("No messages of the selected level"));
+            ImGui::TextDisabled("%s", m_filter[0] ? T("The filter matched nothing")
+                                                  : T("No messages of the selected level"));
         }
     }
     if (m_autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {

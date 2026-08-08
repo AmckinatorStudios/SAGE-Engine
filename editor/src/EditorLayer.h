@@ -286,6 +286,28 @@ private:
     // --- docking ---
     bool m_rebuildDockLayout = false; // форс-перестройка (Window > Reset Layout)
 
+    // Видимость панелей. У каждой докнутой панели ImGui рисует крестик на
+    // вкладке, и закрытая панель раньше исчезала НАВСЕГДА: в меню Window её не
+    // было, а раскладка сохранялась в sage_editor_imgui.ini — то есть закрытое
+    // окно не возвращалось и после перезапуска. Закрыв вкладки одну за другой,
+    // человек оставался с пустым серым прямоугольником и делал вывод, что
+    // «свернул весь редактор» и сломал его. Флаг на панель + пункт в меню
+    // Window делают закрытие обратимым, а ShowAllPanels() — «Reset Layout» и
+    // подсказка на пустом доке — возвращают всё одним действием.
+    bool m_showHierarchy = true;
+    bool m_showInspector = true;
+    bool m_showLighting = true;
+    bool m_showViewport = true;
+    bool m_showGame = true;
+    bool m_showConsole = true;
+    bool m_showAssets = true;
+    void ShowAllPanels();         // вернуть все панели на экран
+    bool AnyPanelVisible() const; // осталась ли на экране хоть одна панель
+    // Подсказка на пустом доке. Прямоугольник передаётся числами, а не ImVec2:
+    // imgui.h в этот заголовок не входит, и тянуть его сюда ради двух точек —
+    // значит навязать его всем, кто включает EditorLayer.h.
+    void DrawEmptyDockHint(float minX, float minY, float maxX, float maxY);
+
     // --- панели (архитектура v3: каждая — независимый класс) ---
     ConsolePanel m_console;
     ProfilerPanel m_profiler;

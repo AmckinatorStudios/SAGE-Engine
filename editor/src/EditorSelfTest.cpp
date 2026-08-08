@@ -1614,13 +1614,40 @@ void EditorLayer::RunSelfTest() {
         ApplyEngineSettings();
     }
 
+    // --- Видимость панелей: закрыть можно, но выход обязан быть ---
+    //
+    // Крестик на вкладке закрывал панель навсегда: в меню Window её не было, а
+    // раскладка лежала в ini — то есть закрытое окно не возвращалось и после
+    // перезапуска. Закрыв вкладки одну за другой, человек получал пустой
+    // прямоугольник и решал, что «свернул весь редактор». Проверяем ровно это:
+    // после закрытия ВСЕХ панелей редактор знает, что показывать нечего, а
+    // ShowAllPanels() — то, что делают и «Сбросить раскладку», и кнопка на
+    // пустом доке, — возвращает каждую панель.
+    if (ok) {
+        const bool visibleBefore = AnyPanelVisible();
+        m_showHierarchy = m_showInspector = m_showLighting = false;
+        m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
+        m_showCode = m_showProfiler = false;
+        const bool visibleAfterClose = AnyPanelVisible();
+        ShowAllPanels();
+        const bool restored = m_showHierarchy && m_showInspector && m_showLighting &&
+                              m_showViewport && m_showGame && m_showConsole && m_showAssets &&
+                              m_showCode;
+        if (!visibleBefore || visibleAfterClose || !restored) {
+            LOG_ERROR("Editor") << "SELFTEST: закрытые панели не возвращаются "
+                                << "(до " << visibleBefore << ", после закрытия " << visibleAfterClose
+                                << ", восстановлены " << restored << ")";
+            ok = false;
+        }
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
-                               << "project-scripts + broken-scripts + replay + error-flood, "
+                               << "project-scripts + broken-scripts + replay + error-flood + panels, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

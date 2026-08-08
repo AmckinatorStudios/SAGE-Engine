@@ -88,6 +88,13 @@ void EditorLayer::OnAttach() {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     io.IniFilename = "sage_editor_imgui.ini"; // своё имя, чтобы не пересекаться с другими ImGui-приложениями
+    // Панель таскается только за заголовок/вкладку. По умолчанию ImGui двигает
+    // окно перетаскиванием ЛЮБОГО пустого места в нём — а в редакторе пустого
+    // места полно: поля Инспектора, пустая область Иерархии, промежутки между
+    // плитками Assets. Промах мимо виджета на пару пикселей выдёргивал панель
+    // из дока, и раскладка «разъезжалась» сама собой, без единого осознанного
+    // действия.
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
 
     // Претензии самого ImGui — в наш лог, то есть в консоль редактора.
     //
@@ -279,6 +286,16 @@ void EditorLayer::OnAttach() {
         m_launcher.Dismiss();
         m_showCode = true;
         m_code.OpenFile(f);
+    }
+    // Закрыть все панели — состояние, в которое человек попадал крестиками и из
+    // которого раньше не было выхода. Проверять его иначе нечем: кликать по
+    // крестикам в CI некому, а именно на этом кадре должна быть видна подсказка
+    // «Все панели закрыты» с кнопкой возврата.
+    if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
+        m_launcher.Dismiss();
+        m_showHierarchy = m_showInspector = m_showLighting = false;
+        m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
+        m_showCode = m_showProfiler = false;
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
@@ -1836,18 +1853,20 @@ void EditorLayer::OnRender() {
     ImGuizmo::BeginFrame();
 
     DrawDockspaceAndMenu(); // включая модалки (m_dialogs) и окно настроек (m_settingsPanel)
-    m_hierarchy.Draw(*this);
-    m_inspector.Draw(*this);
-    m_lighting.Draw(*this);
-    m_viewport.Draw(*this);
-    m_game.Draw(*this);
+    // Панель подаётся в кадр только когда она открыта: закрытая вкладка иначе
+    // возвращалась бы сама собой на следующем кадре, и крестик не работал бы.
+    if (m_showHierarchy) m_hierarchy.Draw(*this, &m_showHierarchy);
+    if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
+    if (m_showLighting) m_lighting.Draw(*this, &m_showLighting);
+    if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
+    if (m_showGame) m_game.Draw(*this, &m_showGame);
     // Код подаётся ПОСЛЕ Viewport и Game, потому что порядок вкладок в узле
     // доккинга — это порядок подачи окон в кадре, а не порядок DockBuilder'а.
     // Пока он подавался раньше (внутри окна-хоста), вкладка «Код» вставала
     // первой, и раскладка читалась как «Код | Viewport | Game».
-    m_code.Draw(&m_showCode);
-    m_console.Draw();
-    m_assets.Draw(*this);
+    if (m_showCode) m_code.Draw(&m_showCode);
+    if (m_showConsole) m_console.Draw(&m_showConsole);
+    if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
     m_plugins.ImGuiAll();
 
     // Стартовый launcher проектов: пока проект не открыт (и не отклонён).
@@ -2015,6 +2034,64 @@ void EditorLayer::DrawStatusBar(float height) {
     ImGui::PopStyleVar();
 }
 
+bool EditorLayer::AnyPanelVisible() const {
+    return m_showHierarchy || m_showInspector || m_showLighting || m_showViewport || m_showGame ||
+           m_showConsole || m_showAssets || m_showCode || m_showProfiler;
+}
+
+void EditorLayer::ShowAllPanels() {
+    m_showHierarchy = m_showInspector = m_showLighting = true;
+    m_showViewport = m_showGame = m_showConsole = m_showAssets = true;
+    m_showCode = true;
+    // Профайлер сюда НЕ входит: он служебный и по умолчанию закрыт, а «вернуть
+    // панели» не должно означать «открыть то, чего человек не открывал».
+}
+
+void EditorLayer::DrawEmptyDockHint(float minX, float minY, float maxX, float maxY) {
+    const char* title = T("All panels are closed");
+    const char* body = T("Windows menu returns any panel, or restore the default layout.");
+    const char* action = T("Restore panels");
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 titleSize = ImGui::CalcTextSize(title);
+    const ImVec2 bodySize = ImGui::CalcTextSize(body);
+    const float buttonHeight = ImGui::GetFrameHeight();
+    const float buttonWidth = ImGui::CalcTextSize(action).x + style.FramePadding.x * 6.0f;
+    const float blockWidth = std::max(std::max(titleSize.x, bodySize.x), buttonWidth);
+    const float blockHeight =
+        titleSize.y + bodySize.y + buttonHeight + style.ItemSpacing.y * 4.0f;
+
+    // Окно ровно по размеру подсказки и по центру пустого дока: полноэкранное
+    // прозрачное окно перехватывало бы клики по всему редактору.
+    ImGui::SetNextWindowPos(ImVec2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f), ImGuiCond_Always,
+                            ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(blockWidth + style.WindowPadding.x * 2.0f,
+                                    blockHeight + style.WindowPadding.y * 2.0f));
+    ImGui::SetNextWindowBgAlpha(0.0f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoFocusOnAppearing;
+    if (!ImGui::Begin("##SageEmptyDockHint", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+
+    auto centered = [blockWidth](float width) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (blockWidth - width) * 0.5f);
+    };
+    centered(titleSize.x);
+    ImGui::TextDisabled("%s", title);
+    centered(bodySize.x);
+    ImGui::TextDisabled("%s", body);
+    ImGui::Spacing();
+    centered(buttonWidth);
+    if (ImGui::Button(action, ImVec2(buttonWidth, buttonHeight))) {
+        ShowAllPanels();
+        m_rebuildDockLayout = true; // панель могла быть закрыта вместе со своим узлом
+    }
+    ImGui::End();
+}
+
 void EditorLayer::DrawDockspaceAndMenu() {
     // Полноэкранное окно-хост под dockspace: без рамок/заголовка, на весь
     // рабочий вьюпорт, с menu bar. Стандартный приём из демо ImGui.
@@ -2044,7 +2121,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
         BuildDefaultDockLayout(dockspaceId);
     }
     // Док-пространство занимает всё между тулбаром и статус-баром.
+    const ImVec2 dockMin = ImGui::GetCursorScreenPos();
     ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight), ImGuiDockNodeFlags_None);
+    const ImVec2 dockMax = ImGui::GetItemRectMax();
     DrawStatusBar(kStatusBarHeight);
 
     // ВАЖНО: OpenPopup нельзя звать изнутри BeginMenu (другой ID-стек — модалка
@@ -2251,9 +2330,24 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(T("Window"))) {
-            if (ImGui::MenuItem(T("Reset Layout"))) m_rebuildDockLayout = true;
+            // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
+            // не восстанавливалась «сбросом», хотя именно этого от него ждут.
+            if (ImGui::MenuItem(T("Reset Layout"))) {
+                ShowAllPanels();
+                m_rebuildDockLayout = true;
+            }
             ImGui::MenuItem(T("Show Grid"), nullptr, &m_showGrid);
             ImGui::Separator();
+            // Каждая панель — переключатель. Это единственный путь назад после
+            // крестика на вкладке, поэтому здесь перечислены ВСЕ панели, а не
+            // только служебные.
+            ImGui::MenuItem(T("Hierarchy"), nullptr, &m_showHierarchy);
+            ImGui::MenuItem(T("Inspector"), nullptr, &m_showInspector);
+            ImGui::MenuItem(T("Viewport"), nullptr, &m_showViewport);
+            ImGui::MenuItem(T("Game"), nullptr, &m_showGame);
+            ImGui::MenuItem(T("Assets"), nullptr, &m_showAssets);
+            ImGui::MenuItem(T("Console"), nullptr, &m_showConsole);
+            ImGui::MenuItem(T("Lighting"), nullptr, &m_showLighting);
             ImGui::MenuItem(T("Code"), nullptr, &m_showCode);
             ImGui::MenuItem(T("Profiler"), nullptr, &m_showProfiler);
             ImGui::Separator();
@@ -2306,6 +2400,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawAboutWindow();
 
     ImGui::End();
+
+    // Все панели закрыты — на месте редактора пустой прямоугольник. Молчать
+    // здесь нельзя: человек видит серое поле и не знает, что перед ним
+    // результат его же крестиков, а не поломка. Подсказка рисуется ПОСЛЕ
+    // окна-хоста и отдельным окном: внутри хоста её накрывает фон пустого
+    // док-узла, который ImGui кладёт в фоновый канал списка отрисовки.
+    if (!AnyPanelVisible()) DrawEmptyDockHint(dockMin.x, dockMin.y, dockMax.x, dockMax.y);
 
     // Глобальные хоткеи (когда не печатаем в поле ввода).
     ImGuiIO& io = ImGui::GetIO();

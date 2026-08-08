@@ -12,7 +12,7 @@ class Scene;
 // Без собственного состояния — всё через EditorHost/Scene.
 class HierarchyPanel {
 public:
-    void Draw(EditorHost& host);
+    void Draw(EditorHost& host, bool* open);
 
 private:
     void DrawNode(EditorHost& host, Scene& scene, entt::entity e);

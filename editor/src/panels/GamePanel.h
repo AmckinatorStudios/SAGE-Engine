@@ -8,7 +8,7 @@ class EditorHost;
 // Game выходит на передний план, как в привычных редакторах.
 class GamePanel {
 public:
-    void Draw(EditorHost& host);
+    void Draw(EditorHost& host, bool* open);
 
     // Запросить фокус панели (вызывается при StartPlay). Держим запрос
     // несколько кадров: одноразовый SetNextWindowFocus проигрывает фокусу

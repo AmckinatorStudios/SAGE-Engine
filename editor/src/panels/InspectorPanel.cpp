@@ -1673,7 +1673,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
     }
 }
 
-void InspectorPanel::Draw(EditorHost& host) {
+void InspectorPanel::Draw(EditorHost& host, bool* open) {
     // Результат обзора приходит через кадр после нажатия — кладём его туда, ради
     // чего диалог открывали. Draw() зовётся РОВНО ОДИН РАЗ за кадр: у модалки
     // ImGui одно состояние на всю панель, и второй вызов открывал бы её поверх
@@ -1727,7 +1727,7 @@ void InspectorPanel::Draw(EditorHost& host) {
         }
     }
 
-    ImGui::Begin(T("Inspector" "###Inspector"));
+    ImGui::Begin(T("Inspector" "###Inspector"), open);
 
     // ------------------------------------------------------------------------
     // Две ПРИНЦИПИАЛЬНО разные вещи — в две вкладки, а не в одну простыню.

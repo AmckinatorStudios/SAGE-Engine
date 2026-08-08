@@ -118,7 +118,7 @@ void ViewportPanel::DrawViewToolbar(EditorHost& host) {
     ImGui::PopStyleVar();
 }
 
-void ViewportPanel::Draw(EditorHost& host) {
+void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Раскладка из переменной окружения — для headless-прогонов и скриншотов
     // документации: кликнуть в комбо там некому, а проверять раскладку надо.
     static bool layoutFromEnv = false;
@@ -136,7 +136,7 @@ void ViewportPanel::Draw(EditorHost& host) {
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(T("Viewport" "###Viewport"));
+    ImGui::Begin(T("Viewport" "###Viewport"), open);
 
     DrawViewToolbar(host);
 

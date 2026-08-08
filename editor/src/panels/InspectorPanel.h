@@ -24,7 +24,7 @@ struct MeshRendererComponent;
 // именно он сейчас меняет.
 class InspectorPanel {
 public:
-    void Draw(EditorHost& host);
+    void Draw(EditorHost& host, bool* open);
 
     // Освободить GPU-ресурсы превью, пока контекст жив (см. AssetPreview).
     void Shutdown() { m_preview.Shutdown(); }

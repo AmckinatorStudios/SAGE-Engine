@@ -199,11 +199,11 @@ void LightingPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment&
     ImGui::TextDisabled("%s", T("Edited in the object inspector; direction is its rotation"));
 }
 
-void LightingPanel::Draw(EditorHost& host) {
+void LightingPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     LightingEnvironment& env = scene.Lighting;
 
-    ImGui::Begin(T("Lighting" "###Lighting"));
+    ImGui::Begin(T("Lighting" "###Lighting"), open);
 
     if (ImGui::CollapsingHeader(T("Ambient (hemisphere)" "###Ambient (hemisphere)"), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();

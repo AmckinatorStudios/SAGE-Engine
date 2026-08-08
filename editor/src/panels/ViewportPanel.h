@@ -19,7 +19,7 @@ class EditorHost;
 // и применяет. Свои — только эфемерные флаги взаимодействия.
 class ViewportPanel {
 public:
-    void Draw(EditorHost& host);
+    void Draw(EditorHost& host, bool* open);
 
     // Просит вывести таб Viewport вперёд (несколько кадров SetNextWindowFocus —
     // одноразовый проигрывает раскладке доков). По умолчанию активно на старте:

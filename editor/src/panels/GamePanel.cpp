@@ -7,14 +7,14 @@
 #include "EditorHost.h"
 #include "../Localization.h"
 
-void GamePanel::Draw(EditorHost& host) {
+void GamePanel::Draw(EditorHost& host, bool* open) {
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(T("Game" "###Game"));
+    ImGui::Begin(T("Game" "###Game"), open);
 
     // Фокус запоминаем для ввода Play-режима (см. GamePanel::Focused).
     // RootAndChildWindows — чтобы клик по изображению внутри панели считался

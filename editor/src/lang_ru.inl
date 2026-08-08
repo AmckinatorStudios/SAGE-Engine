@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 721.
+// Язык: Русский. Строк: 724.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -118,6 +118,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Все компоненты уже добавлены"},
     {"All files",
      "Все файлы"},
+    {"All panels are closed",
+     "Все панели закрыты"},
     {"Ambient (hemisphere)",
      "Засветка (полусфера)"},
     {"Ambient Occlusion",
@@ -1052,6 +1054,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Разрешение"},
     {"Restitution",
      "Упругость"},
+    {"Restore panels",
+     "Вернуть панели"},
     {"Restore scene?",
      "Восстановить сцену?"},
     {"Resume",
@@ -1380,6 +1384,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Оконные параметры применяются при запуске игры."},
     {"Windowed",
      "В окне"},
+    {"Windows menu returns any panel, or restore the default layout.",
+     "Любую панель вернёт меню «Окна», а раскладку по умолчанию — «Сбросить раскладку»."},
     {"Wireframe",
      "Каркас"},
     {"Work without a project",

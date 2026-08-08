@@ -800,13 +800,13 @@ void AssetsPanel::DrawModals(EditorHost& host) {
     }
 }
 
-void AssetsPanel::Draw(EditorHost& host) {
+void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // Бюджет превью на кадр: см. ThumbnailFor.
     m_thumbRenderedThisFrame = false;
     Project& project = host.CurrentProject();
     fs::path& cwd = host.AssetsCwd();
 
-    ImGui::Begin(T("Assets" "###Assets"));
+    ImGui::Begin(T("Assets" "###Assets"), open);
 
     if (!project.Loaded()) {
         ImGui::TextDisabled("%s", T("No project open."));

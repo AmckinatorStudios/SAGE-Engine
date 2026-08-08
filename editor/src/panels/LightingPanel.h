@@ -23,7 +23,7 @@ struct LightingEnvironment;
 class LightingPanel {
 public:
     ~LightingPanel();
-    void Draw(EditorHost& host);
+    void Draw(EditorHost& host, bool* open);
 
 private:
     void DrawGISection(EditorHost& host);
