@@ -119,7 +119,13 @@ void ScriptEngine::RegisterSceneApi() {
     });
 
     Bind("scene", "Find", "FindObject", [this](const std::string& name) -> sol::optional<GameObject> {
-        if (!m_scene) return sol::nullopt;
+        // Сцены НЕТ — это не «объект не найден», а не настроенный хозяин кадра
+        // (забыли BindScene). Разница существенная: nil здесь читается скриптом
+        // как «такого объекта в сцене нет», и он спокойно идёт дальше по ветке
+        // «ну и ладно» — а на самом деле для него нет вообще ничего. Соседние
+        // SpawnObject/DestroyObject об этом честно сообщают, и обещание в
+        // заголовке ScriptEngine.h ровно такое же.
+        if (!m_scene) throw std::runtime_error("FindObject: сцена не привязана (ScriptEngine::BindScene не вызван)");
         GameObject obj = m_scene->FindByName(name);
         if (!obj.Valid()) return sol::nullopt;
         return obj;
@@ -137,8 +143,31 @@ void ScriptEngine::RegisterSceneApi() {
             return obj;
         });
 
-    Bind("scene", "Destroy", "DestroyObject", [this](int id) {
+    // Принимает СУЩНОСТЬ ИЛИ ЕЁ НОМЕР, как и SendMessage.
+    //
+    // Раньше здесь стоял только `int id`, и это была тихая ловушка. Самый
+    // естественный код на Lua —
+    //
+    //     local v = FindObject("Victim")
+    //     DestroyObject(v)
+    //
+    // — не удалял НИЧЕГО и не сообщал об этом: FindObject отдаёт GameObject,
+    // а sol2 без включённых проверок превращал userdata в число нулём. То есть
+    // движок исправно удалял сущность с номером 0, которой не бывает. Ошибка
+    // при этом выглядела как «удаление не работает через раз»: через
+    // entity:Destroy() всё получалось, через DestroyObject(entity) — нет.
+    Bind("scene", "Destroy", "DestroyObject", [this](sol::object target) {
         if (!m_scene) throw std::runtime_error("DestroyObject: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        int id = -1;
+        if (target.is<GameObject>()) {
+            GameObject o = target.as<GameObject>();
+            if (!o.Valid()) return; // уже удалён — не ошибка: в игре так бывает
+            id = o.Id();
+        } else if (target.is<int>()) {
+            id = target.as<int>();
+        } else {
+            throw std::runtime_error("DestroyObject: ожидается сущность или её номер");
+        }
         // RemoveObject уничтожает сущность в ECS-registry. Зависимые
         // ScriptInstance держат дескриптор {registry, entity}, а не сырой
         // указатель, поэтому после уничтожения их Object.Valid() станет false —

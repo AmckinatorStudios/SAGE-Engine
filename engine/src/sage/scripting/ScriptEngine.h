@@ -164,6 +164,13 @@ private:
         // {registry, entity} стабилен всё время жизни скрипта, кэш корректен.
         sol::object EntityRef;
         std::string Path; // для сообщений об ошибках
+        // Сколько раз OnUpdate этого скрипта уже упал и не зовём ли мы его
+        // больше. Ошибка в OnUpdate повторяется КАЖДЫЙ КАДР — шестьдесят
+        // одинаковых строк в секунду забивают консоль так, что в ней не видно
+        // ни второй ошибки, ни чего-либо ещё, ради чего в неё смотрят (см.
+        // kMaxUpdateErrors в .cpp).
+        int UpdateErrors = 0;
+        bool UpdateDisabled = false;
         // Когда сущность объекта уничтожена (DestroyObject), Object.Valid()
         // становится false: UpdateAll() пропускает такую запись, не обращаясь к
         // мёртвой сущности, и убирает её из m_instances после прохода. Так как
@@ -178,12 +185,18 @@ private:
         float Interval = 0.0f; // > 0 для Repeat, 0 для одноразового Schedule
         bool Repeating = false;
         bool Cancelled = false;
+        // То же, что у скриптов: повторяющийся таймер с ошибкой в теле — это
+        // поток одинаковых сообщений с частотой своего интервала.
+        int Errors = 0;
         sol::protected_function Fn;
     };
 
     struct CoroutineInstance {
         sol::coroutine Co;
         float WaitTime = 0.0f; // сколько ещё ждать перед следующим resume
+        // Корутина доиграла или упала. Снимаются такие ОДНИМ проходом в конце
+        // кадра, а не по месту: см. UpdateCoroutines в .cpp.
+        bool Dead = false;
         // Отдельный Lua-поток, на котором реально резюмится Co (см.
         // StartCoroutine в ScriptEngine.cpp) — держит его живым для GC, пока
         // жива сама корутина; без этого поля поток мог бы быть собран сборщиком
@@ -302,7 +315,8 @@ private:
     sol::state m_lua;
     std::vector<ScriptInstance> m_instances;
     std::vector<ScheduledCall> m_scheduled;
-    std::vector<CoroutineInstance> m_coroutines;
+    // ЧЕРЕЗ УКАЗАТЕЛЬ, а не по значению: см. UpdateCoroutines в .cpp.
+    std::vector<std::shared_ptr<CoroutineInstance>> m_coroutines;
 
     Scene* m_scene = nullptr;
     InputMap* m_input = nullptr;

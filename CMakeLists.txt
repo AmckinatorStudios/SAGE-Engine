@@ -202,6 +202,21 @@ FetchContent_MakeAvailable(sol2_src)
 add_library(sol2 INTERFACE)
 target_include_directories(sol2 INTERFACE ${sol2_src_SOURCE_DIR}/include)
 target_link_libraries(sol2 INTERFACE lua54)
+# ПРОВЕРКИ ТИПОВ ВКЛЮЧЕНЫ НАМЕРЕННО, и это не «на всякий случай».
+#
+# По умолчанию sol2 аргументы из Lua НЕ ПРОВЕРЯЕТ: функция, объявленная как
+# (GameObject&), получив из скрипта число, приводит это число к указателю и
+# разыменовывает его. То есть ОПЕЧАТКА В СКРИПТЕ роняет процесс — редактор с
+# несохранённой сценой или игру у игрока. Проверено: SetMeshCube(5) из Lua
+# давал SIGSEGV. Функция, объявленная как (int), получив сущность, наоборот,
+# молча получала ноль — DestroyObject(entity) не удалял ничего и не жаловался.
+#
+# С проверками то же самое становится обычной ошибкой Lua с внятным текстом,
+# которую движок ловит (все вызовы идут через protected_function) и пишет в
+# консоль с именем файла и строкой. Цена — проверка типа на аргумент вызова;
+# для скриптового API, который зовут десятки раз за кадр, это ничто по
+# сравнению с падением.
+target_compile_definitions(sol2 INTERFACE SOL_ALL_SAFETIES_ON=1)
 
 # ---------- glad (загрузчик функций OpenGL) ----------
 add_library(glad STATIC external/glad/src/glad.c)

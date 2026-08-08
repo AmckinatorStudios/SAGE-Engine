@@ -471,6 +471,96 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+    // --- Скрипты глазами РЕДАКТОРА: путь проекта, поломка, повторный Play ---
+    //
+    // Проверка выше показывает, что Play вообще исполняет скрипт. Здесь — то,
+    // на чём Play спотыкается в жизни:
+    //
+    //   • скрипт лежит В ПРОЕКТЕ и записан относительным путём. Текущая папка
+    //     редактора — не папка проекта, и без отдельного разрешения пути такой
+    //     скрипт работал бы в собранной игре и молчал в Play;
+    //   • один скрипт сломан. Play обязан запуститься и отработать остальные:
+    //     иначе одна опечатка в одном объекте выключает игру целиком;
+    //   • Play нажимают ДВАЖДЫ. Второй запуск обязан дать тот же результат, а
+    //     не удвоенный (два экземпляра скрипта на сущности) и не нулевой.
+    if (ok) {
+        std::error_code scriptEc;
+        fs::create_directories(m_project.Dir() / "assets" / "scripts", scriptEc);
+        {
+            std::ofstream f(m_project.Dir() / "assets" / "scripts" / "selftest_move.lua");
+            f << "function OnUpdate(entity, dt)\n"
+              << "    entity.Transform.Position.x = entity.Transform.Position.x + dt\n"
+              << "end\n";
+        }
+        {
+            // Синтаксически битый — намеренно.
+            std::ofstream f(m_project.Dir() / "assets" / "scripts" / "selftest_broken.lua");
+            f << "function OnUpdate( end\n";
+        }
+
+        GameObject mover = m_scene->CreateObject("SelftestMover");
+        m_scene->Registry().emplace<ScriptComponent>(mover.Entity(),
+                                                     ScriptComponent{"assets/scripts/selftest_move.lua"});
+        GameObject broken = m_scene->CreateObject("SelftestBroken");
+        m_scene->Registry().emplace<ScriptComponent>(broken.Entity(),
+                                                     ScriptComponent{"assets/scripts/selftest_broken.lua"});
+        GameObject missing = m_scene->CreateObject("SelftestMissing");
+        m_scene->Registry().emplace<ScriptComponent>(
+            missing.Entity(), ScriptComponent{"assets/scripts/selftest_no_such_file.lua"});
+
+        // ТОЛЬКО номера, не дескрипторы: Stop восстанавливает сцену из снапшота,
+        // то есть создаёт НОВЫЙ реестр ECS, а старые GameObject держат указатель
+        // на разрушенный — обращение к ним после Stop это чтение освобождённой
+        // памяти. Проверено падением: первая версия этой проверки уносила
+        // редактор в SIGSEGV на строке уборки объектов.
+        const int moverId = mover.Id();
+        const int brokenId = broken.Id();
+        const int missingId = missing.Id();
+        const float xBefore = mover.GetTransform().Position.x;
+
+        float xFirst = xBefore;
+        for (int run = 0; run < 2 && ok; ++run) {
+            StartPlay();
+            for (int i = 0; i < 10; ++i) m_systems.Run(*m_scene, 0.1f);
+            const float xDuring = m_scene->Get(moverId).GetTransform().Position.x;
+            StopPlay();
+
+            const float moved = xDuring - xBefore;
+            // Ожидаем ~1.0 (десять кадров по 0.1). Допуск широкий, но верхняя
+            // граница ОБЯЗАТЕЛЬНА: без неё двойная привязка скрипта (два
+            // экземпляра на сущности) прошла бы проверку незамеченной.
+            if (moved < 0.5f || moved > 1.5f) {
+                LOG_ERROR("Editor") << "SELFTEST: script from project moved entity by " << moved
+                                    << " (expected ~1.0) on play run " << (run + 1);
+                ok = false;
+            }
+            if (run == 0) xFirst = moved;
+            else if (ok && std::abs(moved - xFirst) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: second play run differs (" << xFirst << " -> "
+                                    << moved << ")";
+                ok = false;
+            }
+        }
+
+        // Снятый компонент — снятое поведение: следующий Play уже не двигает.
+        if (ok) {
+            m_scene->Registry().remove<ScriptComponent>(m_scene->Get(moverId).Entity());
+            const float xIdle = m_scene->Get(moverId).GetTransform().Position.x;
+            StartPlay();
+            for (int i = 0; i < 5; ++i) m_systems.Run(*m_scene, 0.1f);
+            const float xAfterIdle = m_scene->Get(moverId).GetTransform().Position.x;
+            StopPlay();
+            if (std::abs(xAfterIdle - xIdle) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: script kept running after component removal";
+                ok = false;
+            }
+        }
+
+        m_scene->RemoveObject(moverId);
+        m_scene->RemoveObject(brokenId);
+        m_scene->RemoveObject(missingId);
+    }
+
     // --- Физика: динамическое тело падает под гравитацией, Stop откатывает ---
     if (ok) {
         GameObject green = m_scene->FindByName("Green Cube");
@@ -1491,7 +1581,8 @@ void EditorLayer::RunSelfTest() {
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
-                               << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live, "
+                               << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
+                               << "project-scripts + broken-scripts + replay, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

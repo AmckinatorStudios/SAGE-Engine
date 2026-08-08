@@ -181,12 +181,12 @@ void ScriptEngine::RegisterTimerApi() {
     // "сколько осталось" в самом скрипте. Возвращают id для CancelTimer. ---
     Bind("time", "Schedule", "Schedule", [this](float seconds, sol::protected_function fn) -> int {
         int id = m_nextTimerId++;
-        m_scheduled.push_back({id, seconds, 0.0f, false, false, std::move(fn)});
+        m_scheduled.push_back({id, seconds, 0.0f, false, false, 0, std::move(fn)});
         return id;
     });
     Bind("time", "Repeat", "Repeat", [this](float intervalSeconds, sol::protected_function fn) -> int {
         int id = m_nextTimerId++;
-        m_scheduled.push_back({id, intervalSeconds, intervalSeconds, true, false, std::move(fn)});
+        m_scheduled.push_back({id, intervalSeconds, intervalSeconds, true, false, 0, std::move(fn)});
         return id;
     });
     Bind("time", "Cancel", "CancelTimer", [this](int id) {
@@ -222,7 +222,8 @@ void ScriptEngine::RegisterTimerApi() {
         fn.push();
         lua_xmove(fn.lua_state(), runnerState, 1);
         sol::coroutine co(runnerState, -1);
-        m_coroutines.push_back({std::move(co), 0.0f, std::move(runner)});
+        m_coroutines.push_back(std::make_shared<CoroutineInstance>(
+            CoroutineInstance{std::move(co), 0.0f, /*Dead=*/false, std::move(runner)}));
     });
 
     // wait(seconds) — именованная обёртка над coroutine.yield для читаемости тела
@@ -245,14 +246,23 @@ void ScriptEngine::RegisterMessagingApi() {
     // data — любое значение Lua (число/строка/таблица) или отсутствует (nil).
     // Так поведения связываются без глобальных переменных и жёстких ссылок. ---
     Bind("msg", "Send", "SendMessage", [this](sol::object target, const std::string& name, sol::object data) {
-        int id = -1;
         if (target.is<GameObject>()) {
             GameObject o = target.as<GameObject>();
-            if (o.Valid()) id = o.Id();
-        } else if (target.is<int>()) {
-            id = target.as<int>();
+            // Мёртвый адресат — не ошибка: враг мог умереть между кадром и
+            // сообщением, и требовать от игрового кода проверки на это значит
+            // требовать её в каждой второй строке.
+            if (o.Valid()) DispatchMessage(o.Id(), name, data);
+            return;
         }
-        if (id >= 0) DispatchMessage(id, name, data);
+        if (target.is<int>()) {
+            const int id = target.as<int>();
+            if (id >= 0) DispatchMessage(id, name, data);
+            return;
+        }
+        // А вот таблица или строка в адресате — это ОПЕЧАТКА, а не игровая
+        // ситуация. Молчать про неё значит оставить скрипт, который «шлёт
+        // сообщения», и получателя, который их не видит, — и ни одной зацепки.
+        throw std::runtime_error("SendMessage: адресат — сущность или её номер");
     });
     Bind("msg", "Broadcast", "Broadcast", [this](const std::string& name, sol::object data) {
         DispatchMessage(-1, name, data);

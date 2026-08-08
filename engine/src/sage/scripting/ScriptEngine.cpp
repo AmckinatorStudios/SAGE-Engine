@@ -117,6 +117,29 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
         }
     }
 
+    // Повторная привязка ТОГО ЖЕ скрипта к ТОЙ ЖЕ сущности ЗАМЕНЯЕТ прежний
+    // экземпляр, а не добавляет второй.
+    //
+    // Два экземпляра одного скрипта на одном объекте — это всегда ошибка
+    // вызывающего (в сцене у сущности ровно один ScriptComponent), но
+    // проявляется она мерзко: OnUpdate зовётся дважды за кадр, объект движется
+    // вдвое быстрее, счётчики растут вдвое. Ищут такое где угодно — в физике, в
+    // дельте времени, в самой формуле, — только не в числе привязок. Замена
+    // заодно даёт естественный смысл «перепривязать» для перезагрузки скрипта
+    // после правки файла: OnStart выполнится заново, старое состояние уйдёт.
+    for (ScriptInstance& existing : m_instances) {
+        if (!existing.HasObject || existing.Path != scriptPath) continue;
+        if (existing.Object.Entity() != object.Entity()) continue;
+        existing.Env = std::move(env);
+        existing.UpdateFn = std::move(updateFn);
+        existing.MessageFn = std::move(messageFn);
+        existing.EntityRef = std::move(entityRef);
+        existing.Object = object;
+        existing.UpdateErrors = 0;
+        existing.UpdateDisabled = false;
+        return;
+    }
+
     m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn),
                             std::move(messageFn), std::move(entityRef), scriptPath });
 }
@@ -191,11 +214,24 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
     --m_messageDepth;
 }
 
+// Сколько раз подряд OnUpdate может упасть, прежде чем движок перестанет его
+// звать. Три, а не один: разовая ошибка бывает от переходного состояния (объект
+// ещё не создан, цель ещё не найдена), и гасить скрипт из-за одного кадра —
+// перебор. Но три раза подряд — это уже не случайность, а сломанный скрипт, и
+// звать его ещё пятьдесят семь раз за эту же секунду незачем.
+//
+// ПОЧЕМУ ВООБЩЕ ГАСИМ. Ошибка в OnUpdate повторяется каждый кадр. Одна опечатка
+// давала три с половиной тысячи одинаковых строк в минуту: консоль редактора
+// переставала быть читаемой, и найти в этом потоке вторую ошибку было нельзя.
+// Само сообщение при этом печатается ОДИН раз — повторы ничего не добавляют.
+static constexpr int kMaxUpdateErrors = 3;
+
 void ScriptEngine::UpdateAll(float deltaTime) {
     for (auto& instance : m_instances) {
         // Объект уничтожен через DestroyObject() — сущность больше не валидна.
         if (instance.HasObject && !instance.Object.Valid()) continue;
         if (!instance.UpdateFn.valid()) continue; // скрипт без OnUpdate — легитимно (см. AttachScript)
+        if (instance.UpdateDisabled) continue;    // погашен после серии ошибок
 
         // Объектные скрипты получают entity первым аргументом, уровневые — нет.
         // EntityRef — кэшированный userdata (см. ScriptInstance): без него sol2
@@ -205,7 +241,23 @@ void ScriptEngine::UpdateAll(float deltaTime) {
         if (!result.valid()) {
             sol::error err = result;
             std::string who = (instance.HasObject && instance.Object.Valid()) ? instance.Object.Name() : instance.Path;
-            LOG_ERROR("ScriptEngine") << "Ошибка в OnUpdate (" << who << "): " << err.what();
+            ++instance.UpdateErrors;
+            // Печатаем ПЕРВУЮ ошибку целиком — в ней стек и номер строки.
+            if (instance.UpdateErrors == 1) {
+                LOG_ERROR("ScriptEngine") << "Ошибка в OnUpdate (" << who << "): " << err.what();
+            }
+            if (instance.UpdateErrors >= kMaxUpdateErrors) {
+                instance.UpdateDisabled = true;
+                LOG_ERROR("ScriptEngine")
+                    << "OnUpdate скрипта " << instance.Path << " отключён после "
+                    << instance.UpdateErrors
+                    << " ошибок подряд — исправьте скрипт и перезапустите игру";
+            }
+        } else {
+            // Кадр без ошибки обнуляет счётчик: скрипт, споткнувшийся один раз
+            // на переходном состоянии, не должен копить путь к отключению
+            // через всю сессию.
+            instance.UpdateErrors = 0;
         }
     }
 
@@ -253,7 +305,20 @@ void ScriptEngine::UpdateTimers(float dt) {
         auto result = fn();
         if (!result.valid()) {
             sol::error err = result;
-            LOG_ERROR("ScriptEngine") << "Ошибка в таймере (id " << id << "): " << err.what();
+            // Тот же довод, что и у OnUpdate: повторяющийся таймер с ошибкой в
+            // теле — это поток одинаковых строк с частотой своего интервала.
+            ++m_scheduled[i].Errors;
+            if (m_scheduled[i].Errors == 1) {
+                LOG_ERROR("ScriptEngine") << "Ошибка в таймере (id " << id << "): " << err.what();
+            }
+            if (m_scheduled[i].Errors >= kMaxUpdateErrors) {
+                LOG_ERROR("ScriptEngine") << "Таймер (id " << id << ") отменён после "
+                                          << m_scheduled[i].Errors << " ошибок подряд";
+                m_scheduled[i].Cancelled = true;
+                continue;
+            }
+        } else {
+            m_scheduled[i].Errors = 0;
         }
 
         // m_scheduled могла реаллоцироваться внутри fn() — обращаемся к
@@ -281,33 +346,63 @@ void ScriptEngine::UpdateCoroutines(float dt) {
     // вектора, реаллокация ВНУТРИ самого вызова оборвала бы его раньше, чем
     // вызов успеет завершиться. Индекс остаётся корректным после реаллокации
     // (erase здесь — только для текущего/уже пройденных элементов).
-    for (size_t i = 0; i < m_coroutines.size(); ) {
-        m_coroutines[i].WaitTime -= dt;
-        if (m_coroutines[i].WaitTime > 0.0f) { ++i; continue; }
+    // ДВА ПРАВИЛА, И ОБА КУПЛЕНЫ ДОРОГО.
+    //
+    // 1. КОРУТИНЫ ХРАНЯТСЯ ЧЕРЕЗ УКАЗАТЕЛЬ (см. m_coroutines), а не по
+    //    значению. CoroutineInstance владеет двумя объектами sol2 —
+    //    sol::coroutine и sol::thread, — и любое ПЕРЕМЕЩЕНИЕ такой структуры
+    //    внутри вектора (удаление соседа, реаллокация) переставляет ссылки на
+    //    Lua-поток. На практике это выглядело так: одна корутина упала с
+    //    ошибкой, её сняли — и СЛЕДУЮЩАЯ при первом же резюме получала «cannot
+    //    resume dead coroutine» и молча умирала навсегда. В игре это читается
+    //    как «катсцена иногда не доигрывает», и найти концы почти невозможно:
+    //    ошибка видна у одной корутины, а перестаёт работать другая.
+    //    С указателем сами объекты sol2 не двигаются никогда.
+    //
+    // 2. ПОМЕТИТЬ И СМЕСТИ, а не «удалить по месту».
+    //
+    //    Отработавшая или упавшая корутина раньше удалялась ПРЯМО В ЦИКЛЕ
+    //    (erase(begin + i); continue), то есть индексы ехали под ногами у
+    //    обхода. Здесь тот же приём, что уже применён к скриптам и таймерам
+    //    выше: во время прохода ничего не удаляем, только помечаем, а чистим
+    //    одним erase-remove после.
+    for (size_t i = 0; i < m_coroutines.size(); ++i) {
+        if (m_coroutines[i]->Dead) continue;
+        m_coroutines[i]->WaitTime -= dt;
+        if (m_coroutines[i]->WaitTime > 0.0f) continue;
 
-        sol::coroutine co = m_coroutines[i].Co;
-        auto result = co();
-
-        if (!result.valid()) {
-            sol::error err = result;
-            LOG_ERROR("ScriptEngine") << "Ошибка в корутине: " << err.what();
-            m_coroutines.erase(m_coroutines.begin() + i);
-            continue;
+        sol::coroutine co = m_coroutines[i]->Co;
+        bool failed = false;
+        std::string error;
+        {
+            // Результат вызова живёт в своей области видимости и разрушается
+            // ДО того, как мы тронем вектор: он держит ссылку на стек того же
+            // Lua-потока, и трогать вектор, пока он жив, — значит смешивать
+            // два владения одним и тем же.
+            auto result = co();
+            if (!result.valid()) {
+                sol::error err = result;
+                error = err.what();
+                failed = true;
+            } else if (co.status() == sol::call_status::yielded) {
+                // wait(seconds) вернул через yield время следующей паузы.
+                // m_coroutines могла реаллоцироваться внутри co() — обращаемся к
+                // элементу заново по тому же индексу, не через старую ссылку.
+                const float nextWait = result.get<sol::optional<float>>().value_or(0.0f);
+                m_coroutines[i]->Co = co;
+                m_coroutines[i]->WaitTime = nextWait;
+                continue;
+            }
         }
 
-        if (co.status() == sol::call_status::yielded) {
-            // wait(seconds) вернул через yield время следующей паузы.
-            // m_coroutines могла реаллоцироваться внутри co() — обращаемся к
-            // элементу заново по тому же индексу, не через старую ссылку.
-            float nextWait = result.get<sol::optional<float>>().value_or(0.0f);
-            m_coroutines[i].Co = co;
-            m_coroutines[i].WaitTime = nextWait;
-            ++i;
-        } else {
-            // Корутина дошла до конца функции — больше резюмировать нечего
-            m_coroutines.erase(m_coroutines.begin() + i);
-        }
+        if (failed) LOG_ERROR("ScriptEngine") << "Ошибка в корутине: " << error;
+        m_coroutines[i]->Dead = true; // доиграла или упала — снимем в конце прохода
     }
+
+    m_coroutines.erase(
+        std::remove_if(m_coroutines.begin(), m_coroutines.end(),
+                       [](const std::shared_ptr<CoroutineInstance>& c) { return c->Dead; }),
+        m_coroutines.end());
 }
 
 const Texture* ScriptEngine::GetOrLoadBillboardTexture(const std::string& path) {
