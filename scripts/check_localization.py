@@ -20,6 +20,14 @@
    впустую и подсказка, что строку в коде переименовали, а каталог забыли.
    Не ошибка, но сообщается.
 
+4. УСТАРЕВШИЙ СГЕНЕРИРОВАННЫЙ КАТАЛОГ. Редактор читает переводы НЕ из JSON, а
+   из lang_ru.inl, который делает scripts/gen_lang.py. Пока эти два файла
+   расходятся, проверка выше отчитывается «все переведены», а на экране строки
+   остаются английскими — и увидеть это можно только глазами, запустив
+   редактор по-русски. Ровно так и случилось: в JSON накопилось 80 новых строк,
+   которых в .inl не было, и переведённый заголовок «START FROM» выходил
+   по-английски. Здесь сверяется, что .inl собран из текущего JSON.
+
     python3 scripts/check_localization.py
 """
 import json
@@ -30,6 +38,8 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIRS = [os.path.join(REPO, 'editor', 'src'), os.path.join(REPO, 'editor', 'src', 'panels')]
 CATALOG = os.path.join(REPO, 'editor', 'lang', 'ru.json')
+# Тот самый файл, который редактор реально компилирует в себя (см. gen_lang.py).
+GENERATED = os.path.join(REPO, 'editor', 'src', 'lang_ru.inl')
 
 # Вызовы ImGui, у которых первый строковый аргумент виден на экране.
 WIDGETS = """Text TextWrapped TextDisabled TextUnformatted Button SmallButton MenuItem BeginMenu
@@ -114,6 +124,14 @@ def decode(text):
     return ''.join(out)
 
 
+# Ключ так, как его записывает gen_lang.py в C-литерал. Сравнивать надо именно
+# экранированный вид: в ключах есть переводы строк и кавычки.
+def encode_c(text):
+    out = text.replace('\\', '\\\\').replace('"', '\\"')
+    out = out.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
+    return '"' + out + '"'
+
+
 def main():
     unwrapped, keys = collect()
     keys = {decode(k) for k in keys}
@@ -144,6 +162,28 @@ def main():
         for k in missing:
             print('   ', repr(k))
         failures += len(missing)
+
+    # Сгенерированный каталог обязан соответствовать JSON (см. пункт 4 в шапке).
+    stale = []
+    try:
+        with open(GENERATED, encoding='utf-8') as f:
+            generated = f.read()
+    except OSError:
+        generated = None
+        print('НЕ НАЙДЕН %s — редактор соберётся без переводов' % GENERATED)
+        failures += 1
+    if generated is not None:
+        for key in strings:
+            if encode_c(key) not in generated:
+                stale.append(key)
+    if stale:
+        print('СГЕНЕРИРОВАННЫЙ КАТАЛОГ УСТАРЕЛ (%d строк из JSON в нём нет).'
+              % len(stale))
+        print('    Редактор читает именно его — эти строки выйдут на экран по-английски.')
+        print('    Лечится: python3 scripts/gen_lang.py')
+        for k in stale[:10]:
+            print('   ', repr(k))
+        failures += len(stale)
 
     dead = sorted(k for k in strings if k not in keys)
     if dead:

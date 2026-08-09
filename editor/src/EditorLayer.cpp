@@ -281,6 +281,19 @@ void EditorLayer::OnAttach() {
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_launcher.Dismiss(); m_showProfiler = true; }
     if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_launcher.Dismiss(); m_showIconSheet = true; }
+    if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
+        m_launcher.Dismiss();
+        m_pendingDialog = dlg;   // откроется в кадре, на уровне окна-хоста
+    }
+    // Открыть редактор СРАЗУ на нужном шаблоне — чтобы на шаблон можно было
+    // ПОСМОТРЕТЬ, а не поверить описанию. Проверять шаблоны числом сущностей
+    // (это делает самопроверка) недостаточно: «пусто» и «пусто, но остался
+    // скайбокс» дают одинаковый ноль, а выглядят по-разному.
+    if (const char* tplId = std::getenv("SAGE_EDITOR_TEMPLATE")) {
+        m_launcher.Dismiss();
+        if (const ProjectTemplate* tpl = FindProjectTemplate(tplId)) NewScene(tpl->Kind);
+        else LOG_WARN("Editor") << "SAGE_EDITOR_TEMPLATE: нет шаблона с именем " << tplId;
+    }
     // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
     // headless нечем: кликать во вьюпорте в CI некому.
@@ -2636,6 +2649,18 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // Модалки диалогов и окно настроек — самостоятельные панели, но рисуются
     // ЗДЕСЬ, на уровне окна-хоста: модалка ImGui совпадает с OpenPopup по
     // ID-стеку окна, поэтому открытие и отрисовку нельзя разносить по окнам.
+    // Открыть диалог по имени из переменной окружения — тем же путём, каким его
+    // открывает пункт меню. Нужно затем же, зачем SAGE_EDITOR_ICON_SHEET:
+    // модалку нельзя увидеть headless, а значит, нечем проверить, как она
+    // выглядит; открывалась она только мышью.
+    // Не в первом кадре: на первых кадрах редактор перестраивает раскладку
+    // доков, а это фокусирует окна панелей — и ImGui закрывает всплывающие
+    // окна, открытые над окном-хостом. Модалка, открытая в кадре 1, исчезала
+    // ровно поэтому, и на скриншоте её не было.
+    if (!openDialog && m_pendingDialog && m_frameCounter > 4) {
+        openDialog = m_pendingDialog;
+        m_pendingDialog = nullptr;
+    }
     if (openDialog) m_dialogs.Open(openDialog);
     m_dialogs.Draw(*this);
     DrawRecoveryPrompt();

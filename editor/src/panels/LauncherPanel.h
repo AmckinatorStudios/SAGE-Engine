@@ -43,7 +43,7 @@ public:
     void Dismiss() { m_dismissed = true; } // headless-режимы (AUTOPLAY) скрывают hub
 
 private:
-    void DrawRecent(EditorHost& host, RecentProjects& recent, float width);
+    void DrawRecent(EditorHost& host, RecentProjects& recent, float width, float height);
     void DrawCreate(EditorHost& host);
     void DrawOpen(EditorHost& host);
     // Почему новый проект создать нельзя (пусто — можно). Считается каждый

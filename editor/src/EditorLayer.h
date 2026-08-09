@@ -212,6 +212,10 @@ private:
     // Новая сцена по ШАБЛОНУ (см. ProjectTemplates.h). Empty — пустая; она же
     // используется пунктом «Новая сцена» и самопроверкой.
     void NewScene(ProjectTemplateKind content);
+
+    // Диалог, который надо открыть в ближайшем кадре (SAGE_EDITOR_OPEN_DIALOG).
+    // Открывать сразу нельзя: OpenPopup обязан звучать на уровне окна-хоста.
+    const char* m_pendingDialog = nullptr;
     void UpdateWindowTitle();
     void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +

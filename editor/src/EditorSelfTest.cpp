@@ -108,10 +108,30 @@ void EditorLayer::RunSelfTest() {
                 ok = false;
                 break;
             }
-            if (c.Empty && m_scene->Count() != 0) {
-                LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс " << m_scene->Count()
-                                    << " сущностей";
-                ok = false;
+            if (c.Empty) {
+                // ПУСТОЙ ЗНАЧИТ ПУСТОЙ. Проверяются три разных «ничего», потому
+                // что спрятаться содержимое может в каждом по отдельности:
+                //   • сущности — объекты сцены;
+                //   • элементы интерфейса — они живут компонентами НА сущностях,
+                //     то есть считаются вместе с ними, и отдельная проверка
+                //     нужна как обещание: интерфейс здесь тоже не появится;
+                //   • настройки сцены — они НЕ сущности, и скайбокс, включённый
+                //     «за компанию» с остальными шаблонами, дал бы пустому
+                //     проекту небо при нулевом счётчике объектов.
+                if (m_scene->Count() != 0) {
+                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс " << m_scene->Count()
+                                        << " сущностей";
+                    ok = false;
+                }
+                const auto uiView = m_scene->Registry().view<sage::ui::Transform>();
+                if (uiView.begin() != uiView.end()) {
+                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс элементы интерфейса";
+                    ok = false;
+                }
+                if (m_scene->Lighting.Skybox.Enabled) {
+                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон включил скайбокс";
+                    ok = false;
+                }
             }
             if (c.Expect && !m_scene->FindByName(c.Expect).Valid()) {
                 LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не принёс " << c.Expect;

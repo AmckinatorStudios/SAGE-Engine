@@ -1,7 +1,10 @@
 #include "LauncherPanel.h"
 
 #include "../ProjectTemplates.h"
+#include "../ProjectTemplateCover.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <chrono>
@@ -68,8 +71,9 @@ std::string LauncherPanel::CreateBlockedReason() const {
     return {};
 }
 
-void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float width) {
-    ImGui::BeginChild("##recent", ImVec2(width, 300), true);
+void LauncherPanel::DrawRecent(EditorHost& host, RecentProjects& recent, float width,
+                               float height) {
+    ImGui::BeginChild("##recent", ImVec2(width, height), true);
     ImGui::TextDisabled("%s", T("RECENT"));
     ImGui::Separator();
 
@@ -141,6 +145,16 @@ static float BrowseButtonWidth() {
 }
 
 void LauncherPanel::DrawCreate(EditorHost& host) {
+    // Своё пространство идентификаторов на весь раздел.
+    //
+    // Здесь и в DrawOpen стоит кнопка «Обзор» с ОДИНАКОВОЙ подписью, а ImGui
+    // берёт идентификатор из подписи — два элемента с одним id в одном окне.
+    // Сторож редактора (CheckDuplicateId) честно ругался на это в консоль
+    // КАЖДЫЙ КАДР: полсотни красных строк к тому моменту, как человек успевал
+    // прочитать заголовок. Хуже ругани последствия: одинаковый id означает
+    // общее состояние наведения и нажатия, то есть нажатие на одну кнопку
+    // подсвечивает другую.
+    ImGui::PushID("create");
     ImGui::TextDisabled("%s", T("NEW PROJECT"));
     ImGui::Separator();
 
@@ -172,11 +186,21 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
 
     // Шаблон: с чего начнётся проект. Тот же список, что в диалоге «Новый
     // проект», — он один на редактор (см. ProjectTemplates.h).
+    //
+    // КАРТОЧКАМИ С ОБЛОЖКОЙ, а не радиокнопками: три подписи в столбик не
+    // говорят, чем «Demo scene» отличается от «Menu and HUD», и выбирают их
+    // наугад (см. ProjectTemplateCover.h). Ряд по горизонтали — чтобы
+    // варианты сравнивались взглядом, а не пролистыванием.
     ImGui::Spacing();
     ImGui::TextDisabled("%s", T("START FROM"));
-    for (const ProjectTemplate& tpl : ProjectTemplates()) {
-        if (ImGui::RadioButton(T(tpl.Name), m_templateId == tpl.Id)) m_templateId = tpl.Id;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(tpl.Summary));
+    const size_t count = ProjectTemplates().size();
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    const float cardW =
+        std::floor((ImGui::GetContentRegionAvail().x - gap * (float)(count - 1)) / (float)count);
+    for (size_t i = 0; i < count; ++i) {
+        const ProjectTemplate& tpl = ProjectTemplates()[i];
+        if (i > 0) ImGui::SameLine(0.0f, gap);
+        if (ProjectTemplateCard(tpl, m_templateId == tpl.Id, cardW)) m_templateId = tpl.Id;
     }
     ImGui::Spacing();
 
@@ -201,9 +225,11 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
         else m_error = err;
     }
     ImGui::EndDisabled();
+    ImGui::PopID();
 }
 
 void LauncherPanel::DrawOpen(EditorHost& host) {
+    ImGui::PushID("open"); // см. DrawCreate: обе кнопки обзора зовутся «Обзор»
     ImGui::Spacing();
     ImGui::TextDisabled("%s", T("OPEN ANOTHER"));
     ImGui::Separator();
@@ -233,6 +259,7 @@ void LauncherPanel::DrawOpen(EditorHost& host) {
         else m_error = err;
     }
     ImGui::EndDisabled();
+    ImGui::PopID();
 }
 
 void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
@@ -257,7 +284,30 @@ void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
 
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(940, 470), ImGuiCond_Appearing);
+    // ВЫСОТА ОКНА СЧИТАЕТСЯ, А НЕ НАЗНАЧЕНА ЧИСЛОМ.
+    //
+    // Числом она и была — 940x470, — и правый столбец в неё не влезал: раздел
+    // «Открыть другой» обрезался нижним краем дочернего окна, то есть поле пути
+    // и кнопка «Открыть» не были видны вовсе. Зашитое число живёт ровно до
+    // первой смены шрифта, масштаба интерфейса или языка (по-русски подписи
+    // длиннее и переносятся), а обложки шаблонов добавили в столбец целый ряд.
+    //
+    // Считается по тому, что в столбце лежит: девять строк форм и подписей,
+    // ряд карточек и запас под строку ошибки и нижнюю кнопку.
+    const float windowW = 980.0f;
+    const float columnW = windowW * 0.5f;   // столбцы делят окно пополам (см. ниже)
+    const float cardW = columnW / 3.0f - ImGui::GetStyle().ItemSpacing.x;
+    const float frameH = ImGui::GetFrameHeightWithSpacing();
+    const float lineH = ImGui::GetTextLineHeightWithSpacing();
+    // Правый столбец: семь рамок (два поля и кнопка обзора формы создания, поле
+    // и кнопка формы открытия, кнопка «Создать», кнопка «Открыть») и шесть
+    // строк текста (два заголовка разделов, «Будет создано», сам путь,
+    // «Начать с», строка запрета), плюс ряд карточек.
+    const float columnH = frameH * 7.0f + lineH * 6.0f + ProjectTemplateCardHeight(cardW);
+    // Сверх столбца: заголовок окна, две строки пояснения над столбцами и
+    // подвал с кнопкой «Работать без проекта».
+    const float chromeH = ImGui::GetFrameHeight() + lineH * 2.0f + frameH * 2.0f;
+    ImGui::SetNextWindowSize(ImVec2(windowW, columnH + chromeH), ImGuiCond_Appearing);
     ImGui::Begin(T("SAGE Engine" "###SAGE Engine"), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking);
 
     ImGui::TextUnformatted(T("A project keeps scenes, assets and materials in one folder."));
@@ -267,11 +317,15 @@ void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
     // Два столбца: слева самое частое действие (открыть вчерашнее), справа —
     // редкое. Раньше всё шло простынёй сверху вниз, и список недавних ничем не
     // выделялся среди двух форм ввода.
-    const float leftW = ImGui::GetContentRegionAvail().x * 0.54f;
-    DrawRecent(host, recent, leftW);
+    // Столбцы одной высоты, и высота эта — остаток окна за вычетом того, что
+    // рисуется под ними (строка ошибки, разделитель, «работать без проекта»).
+    const float footer = ImGui::GetFrameHeightWithSpacing() * 2.5f;
+    const float colH = std::max(260.0f, ImGui::GetContentRegionAvail().y - footer);
+    const float leftW = ImGui::GetContentRegionAvail().x * 0.50f;
+    DrawRecent(host, recent, leftW, colH);
 
     ImGui::SameLine();
-    ImGui::BeginChild("##actions", ImVec2(0, 300), false);
+    ImGui::BeginChild("##actions", ImVec2(0, colH), false);
     DrawCreate(host);
     DrawOpen(host);
     ImGui::EndChild();

@@ -1,6 +1,7 @@
 #include "DialogsPanel.h"
 
 #include "../ProjectTemplates.h"
+#include "../ProjectTemplateCover.h"
 #include "EditorHost.h"
 #include "Project.h"
 
@@ -80,10 +81,13 @@ void DialogsPanel::Draw(EditorHost& host) {
         // проект начинался с девяти демо-объектов, которые первым делом
         // удаляли.
         ImGui::SeparatorText(T("Start from"));
-        for (const ProjectTemplate& tpl : ProjectTemplates()) {
-            if (ImGui::RadioButton(T(tpl.Name), m_templateId == tpl.Id)) m_templateId = tpl.Id;
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", T(tpl.Summary));
+        // Карточками с обложкой — тем же виджетом, что и в стартовом окне.
+        // Двух похожих списков шаблонов в редакторе быть не должно: они
+        // разъедутся ровно так же, как разъезжались подписи и порядок.
+        for (size_t i = 0; i < ProjectTemplates().size(); ++i) {
+            const ProjectTemplate& tpl = ProjectTemplates()[i];
+            if (i > 0) ImGui::SameLine();
+            if (ProjectTemplateCard(tpl, m_templateId == tpl.Id, 190.0f)) m_templateId = tpl.Id;
         }
 
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
