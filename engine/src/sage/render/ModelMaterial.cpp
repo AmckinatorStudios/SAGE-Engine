@@ -6,6 +6,8 @@
 
 #include "sage/render/ModelMaterial.h"
 
+#include "sage/assets/import/Importer.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -310,6 +312,66 @@ void ExtractObj(const std::string& path, ExtractedMaterial& out) {
 
 } // namespace
 
+// Материал FBX берётся у ИМПОРТЁРА: он уже разбирает блоки Material, Texture и
+// связи между ними (Texture --OP--> Material --OO--> Model). Второй разборщик
+// того же формата здесь означал бы две реализации одной задачи, которые
+// разойдутся на первом же экспортёре с непривычными именами слотов.
+//
+// Пути к картам в FBX почти всегда чужие и абсолютные («C:\\Users\\...»),
+// поэтому картинка ищется по ИМЕНИ ФАЙЛА рядом с моделью и в её подпапках:
+// набор, скачанный одной папкой (source/ + textures/), собирается сам.
+void ExtractFbx(const std::string& modelPath, ExtractedMaterial& out) {
+    sage::assets::ImportedScene scene;
+    std::string err;
+    if (!sage::assets::ImporterRegistry::Instance().Import(modelPath, scene, err)) {
+        out.Warnings.push_back("материал FBX не прочитан: " + err);
+        return;
+    }
+    if (scene.Materials.empty()) return;
+
+    const sage::assets::ImportedMaterial& m = scene.Materials.front();
+    if (scene.Materials.size() > 1) {
+        out.Warnings.push_back("в модели материалов: " + std::to_string(scene.Materials.size()) +
+                               " — взят первый (объект держит один материал)");
+    }
+
+    const fs::path modelDir = fs::path(modelPath).parent_path();
+    auto locate = [&](const std::string& ref) -> std::string {
+        if (ref.empty()) return {};
+        std::error_code ec;
+        const fs::path direct = modelDir / ref;
+        if (fs::exists(direct, ec) && !fs::is_directory(direct, ec)) return direct.generic_string();
+        const std::string name = fs::path(ref).filename().string();
+        // Пустая ссылка вида «.» — не картинка. Экспортёры оставляют такие
+        // заглушки у материалов без текстур, и без этой проверки путь
+        // разрешался бы в САМУ ПАПКУ модели: слот «есть, но не грузится».
+        if (name.empty() || name == "." || name == "..") return {};
+        // Соседние папки: у наборов из сети текстуры лежат в textures/, а
+        // модель — в source/, то есть на уровень выше и вбок.
+        const fs::path roots[] = {modelDir, modelDir / "textures", modelDir.parent_path(),
+                                  modelDir.parent_path() / "textures"};
+        for (const fs::path& root : roots) {
+            if (root.empty()) continue;
+            const fs::path candidate = root / name;
+            if (fs::exists(candidate, ec)) return candidate.generic_string();
+        }
+        out.Warnings.push_back("текстура не найдена рядом с моделью: " + name);
+        return {};
+    };
+
+    out.Found = true;
+    out.Name = m.Name;
+    out.Albedo = m.Albedo;
+    out.Metallic = m.Metallic;
+    out.Roughness = m.Roughness;
+    out.AlbedoMap = locate(m.AlbedoTexture);
+    out.NormalMap = locate(m.NormalTexture);
+    out.MetallicMap = locate(m.MetallicTexture);
+    out.RoughnessMap = locate(m.RoughnessTexture);
+    out.AOMap = locate(m.AOTexture);
+    out.EmissiveMap = locate(m.EmissiveTexture);
+}
+
 ExtractedMaterial ExtractMaterial(const std::string& modelPath, const std::string& textureDir) {
     ExtractedMaterial out;
 
@@ -329,6 +391,7 @@ ExtractedMaterial ExtractMaterial(const std::string& modelPath, const std::strin
         if (ext == "gltf") ExtractGltf(modelPath, false, sink, out);
         else if (ext == "glb") ExtractGltf(modelPath, true, sink, out);
         else if (ext == "obj") ExtractObj(modelPath, out);
+        else if (ext == "fbx") ExtractFbx(modelPath, out);
         // Прочие форматы (свой .sagemesh, .bbmodel, что зарегистрирует игра)
         // материал не несут — молчание здесь правильное, предупреждать не о чем.
     } catch (const std::exception& e) {

@@ -532,11 +532,117 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
         return m;
     };
 
+    // --- Материалы и текстуры -------------------------------------------
+    //
+    // FBX держит их ОТДЕЛЬНЫМИ объектами, связанными через Connections:
+    // Texture --OP("DiffuseColor")--> Material --OO--> Model. Пока эти блоки не
+    // читались, материала у FBX не было вовсе: модель приезжала серой, а лежащие
+    // рядом карты (albedo, normal, roughness) движок в глаза не видел — их
+    // приходилось назначать руками по одной.
+    struct FbxTexture {
+        std::string File;      // RelativeFilename либо FileName
+    };
+    std::unordered_map<int64_t, FbxTexture> textures;
+    for (const Node& n : objects->Children) {
+        if (n.Name != "Texture" || n.Props.empty()) continue;
+        FbxTexture tex;
+        if (const Node* rel = n.Find("RelativeFilename")) {
+            if (!rel->Props.empty()) tex.File = rel->Props[0].Text;
+        }
+        if (tex.File.empty()) {
+            if (const Node* abs = n.Find("FileName")) {
+                if (!abs->Props.empty()) tex.File = abs->Props[0].Text;
+            }
+        }
+        // Пути в FBX почти всегда windows-овые и почти всегда чужие
+        // («C:\Users\...\bag_albedo.png»): берём ИМЯ ФАЙЛА и ищем его рядом
+        // с моделью — так набор, скачанный одной папкой, собирается сам.
+        for (char& c : tex.File) if (c == '\\') c = '/';
+        if (!tex.File.empty()) textures[(int64_t)n.Props[0].Number] = tex;
+    }
+
+    struct FbxMaterial {
+        std::string Name;
+        glm::vec3 Diffuse{1.0f};
+        float Shininess = -1.0f;
+        std::unordered_map<std::string, int64_t> Slots; // имя свойства -> uid текстуры
+    };
+    std::unordered_map<int64_t, FbxMaterial> materials;
+    for (const Node& n : objects->Children) {
+        if (n.Name != "Material" || n.Props.empty()) continue;
+        FbxMaterial m;
+        m.Name = n.Props.size() > 1 ? n.Props[1].Text : std::string();
+        const size_t sep = m.Name.find('\0');
+        if (sep != std::string::npos) m.Name = m.Name.substr(0, sep);
+        m.Diffuse = Property70Vec(&n, "DiffuseColor", glm::vec3(1.0f));
+        m.Shininess = (float)Property70(&n, "Shininess", -1.0);
+        materials[(int64_t)n.Props[0].Number] = m;
+    }
+
+    // Связи «по свойству» (OP): текстура привязана к КОНКРЕТНОМУ слоту
+    // материала, и без имени свойства нормаль неотличима от альбедо.
+    std::unordered_multimap<int64_t, int64_t> materialOfModel;
+    if (const Node* conns = root.Find("Connections")) {
+        for (const Node& c : conns->Children) {
+            if (c.Name != "C" || c.Props.size() < 3) continue;
+            const int64_t child = (int64_t)c.Props[1].Number;
+            const int64_t parent = (int64_t)c.Props[2].Number;
+            if (c.Props[0].Text == "OP" && c.Props.size() >= 4) {
+                auto mat = materials.find(parent);
+                if (mat != materials.end() && textures.count(child)) {
+                    mat->second.Slots[c.Props[3].Text] = child;
+                }
+            } else if (c.Props[0].Text == "OO") {
+                if (materials.count(child)) materialOfModel.emplace(parent, child);
+            }
+        }
+    }
+
+    // Слот FBX -> карта движка. Имена свойств у экспортёров разнятся, поэтому
+    // проверяется несколько вариантов на каждую карту.
+    auto slotFile = [&](const FbxMaterial& m, std::initializer_list<const char*> names) {
+        for (const char* name : names) {
+            auto it = m.Slots.find(name);
+            if (it == m.Slots.end()) continue;
+            auto tex = textures.find(it->second);
+            if (tex != textures.end() && !tex->second.File.empty()) return tex->second.File;
+        }
+        return std::string();
+    };
+
+    std::unordered_map<int64_t, int> materialIndexOf; // uid материала -> индекс в out.Materials
+    auto materialIndex = [&](int64_t uid) {
+        auto known = materialIndexOf.find(uid);
+        if (known != materialIndexOf.end()) return known->second;
+        auto it = materials.find(uid);
+        if (it == materials.end()) return -1;
+        const FbxMaterial& m = it->second;
+        ImportedMaterial out_m;
+        out_m.Name = m.Name;
+        out_m.Albedo = m.Diffuse;
+        // Блеск Phong -> шероховатость PBR. Точного перевода нет ни у кого;
+        // важно лишь, чтобы отполированный металл не приезжал матовым.
+        if (m.Shininess > 0.0f) {
+            out_m.Roughness = std::clamp(1.0f - std::sqrt(m.Shininess / 100.0f), 0.04f, 1.0f);
+        }
+        out_m.AlbedoTexture = slotFile(m, {"DiffuseColor", "Maya|baseColor", "BaseColor"});
+        out_m.NormalTexture = slotFile(m, {"NormalMap", "Bump", "Maya|normalCamera"});
+        out_m.MetallicTexture = slotFile(m, {"Maya|metalness", "MetalnessMap", "ReflectionFactor"});
+        out_m.RoughnessTexture = slotFile(m, {"Maya|specularRoughness", "ShininessExponent"});
+        out_m.AOTexture = slotFile(m, {"AmbientColor", "Maya|ambientOcclusion"});
+        out_m.EmissiveTexture = slotFile(m, {"EmissiveColor"});
+        out.Materials.push_back(out_m);
+        const int index = (int)out.Materials.size() - 1;
+        materialIndexOf[uid] = index;
+        return index;
+    };
+
     size_t geometryIndex = 0;
     for (const Node& n : objects->Children) {
         if (n.Name != "Geometry") continue;
         glm::mat4 xform(1.0f);
         std::string nodeName;
+        int meshMaterial = -1;
         if (!n.Props.empty()) {
             auto owner = parentOf.find((int64_t)n.Props[0].Number);
             if (owner != parentOf.end()) {
@@ -544,6 +650,8 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
                 if (mi != models.end()) {
                     xform = worldOf(owner->second) * mi->second.Geometric;
                     nodeName = mi->second.Name;
+                    auto mat = materialOfModel.find(owner->second);
+                    if (mat != materialOfModel.end()) meshMaterial = materialIndex(mat->second);
                 }
             }
         }
@@ -559,6 +667,7 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
                                ? modelNames[geometryIndex]
                                : fs::path(path).stem().string());
         node.Mesh = std::move(mesh);
+        node.MaterialIndex = meshMaterial;
         out.Nodes.push_back(std::move(node));
         ++geometryIndex;
     }

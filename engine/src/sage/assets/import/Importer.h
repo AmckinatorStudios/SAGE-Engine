@@ -42,7 +42,15 @@ struct ImportedMaterial {
     glm::vec3 Albedo{1.0f};
     float Metallic = 0.0f;
     float Roughness = 0.8f;
-    std::string AlbedoTexture;   // путь относительно файла-источника
+    // Карты — путями относительно файла-источника (или просто именем файла:
+    // экспортёры пишут чужие абсолютные пути, и искать картинку приходится
+    // рядом с моделью). Пусто — карты нет.
+    std::string AlbedoTexture;
+    std::string NormalTexture;
+    std::string MetallicTexture;
+    std::string RoughnessTexture;
+    std::string AOTexture;
+    std::string EmissiveTexture;
 };
 
 // Один объект сцены: геометрия + куда её поставить.
