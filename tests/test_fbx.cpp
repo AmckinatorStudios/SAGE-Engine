@@ -188,3 +188,34 @@ TEST(Fbx_goes_through_the_same_door_as_every_other_model) {
     CHECK_EQ((int)triangles, 12); // куб
     CHECK_TRUE(ModelLoader::IsSupportedModel("собственная модель.FBX")); // и регистр букв не важен
 }
+
+TEST(Fbx_node_transform_places_and_scales_the_mesh) {
+    // Импортёр читал только Geometry и ИГНОРИРОВАЛ узлы Model, то есть их
+    // положение, поворот и масштаб. Для файла с одним мешем это сходило с рук;
+    // настоящая модель состоит из нескольких частей — и все они сваливались в
+    // начало координат без своего масштаба. Проверено на живом ассете: рюкзак
+    // из 53 деталей приезжал кучей размером 3.5 см вместо собранной сумки, и
+    // тот же рюкзак в .glb был в сто раз крупнее — два формата одной модели
+    // расходились в сто раз.
+    const std::string path = MakeFbx("sage_test_node_xform.fbx", "--offset 5 0 0 --node-scale 2");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+
+    CHECK_TRUE(ok);
+    if (!ok || scene.Nodes.empty()) return;
+
+    glm::vec3 mn(1e9f), mx(-1e9f);
+    for (const Vertex& v : scene.Nodes[0].Mesh.Vertices) {
+        mn = glm::min(mn, v.Position);
+        mx = glm::max(mx, v.Position);
+    }
+    // Масштаб узла 2 -> куб со стороной 1 приезжает стороной 2.
+    CHECK_NEAR(mx.x - mn.x, 2.0f, 1e-3f);
+    // Смещение узла 5 по X -> центр куба там же (единицы = метры при
+    // UnitScaleFactor 100).
+    CHECK_NEAR((mn.x + mx.x) * 0.5f, 5.0f, 1e-3f);
+    CHECK_NEAR((mn.y + mx.y) * 0.5f, 0.0f, 1e-3f);
+}

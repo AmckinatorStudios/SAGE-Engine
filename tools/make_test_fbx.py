@@ -91,6 +91,14 @@ def count_props(props):
     return n
 
 
+def p70v(name, values):
+    """Свойство-вектор (Lcl Translation и подобные): три числа подряд."""
+    props = prop_string(name) + prop_string('Lcl Translation') + prop_string('') + prop_string('A')
+    for v in values:
+        props += prop_double(float(v))
+    return node('P', props)
+
+
 def p70(name, kind, value):
     props = prop_string(name) + prop_string(kind) + prop_string('') + prop_string('')
     props += prop_int(value) if isinstance(value, int) else prop_double(value)
@@ -108,7 +116,7 @@ QUADS = [
 ]
 
 
-def build(path, zup=False, unit=100.0, ascii_mode=False):
+def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0), scale=1.0):
     if ascii_mode:
         with open(path, 'w', encoding='utf-8') as f:
             f.write('; FBX 6.1.0 project file\n; текстовый вариант — импортёр обязан сказать об этом прямо\n')
@@ -166,13 +174,25 @@ def build(path, zup=False, unit=100.0, ascii_mode=False):
             ]),
         ])
 
-    model = node('Model', prop_long(4321) + prop_string('TestCube\x00\x01Model') + prop_string('Mesh'))
+    # Узел Model с трансформом и СВЯЗЬЮ с геометрией: без связи импортёр не
+    # знает, чьим узлом является меш, и трансформ применить не к чему.
+    model_props = prop_long(4321) + prop_string('TestCube\x00\x01Model') + prop_string('Mesh')
+    model = node('Model', model_props, [
+        node('Properties70', b'', [
+            p70v('Lcl Translation', offset),
+            p70v('Lcl Scaling', (scale, scale, scale)),
+        ]),
+    ])
     objects = node('Objects', b'', [geometry, model])
+    # Connections: Geometry (1234) -> Model (4321)
+    connections = node('Connections', b'', [
+        node('C', prop_string('OO') + prop_long(1234) + prop_long(4321)),
+    ])
 
     header = b'Kaydara FBX Binary  \x00\x1a\x00' + struct.pack('<I', VERSION)
     body = b''
     cursor = len(header)
-    for top in (settings, objects):
+    for top in (settings, objects, connections):
         blob = top(cursor)
         body += blob
         cursor += len(blob)
@@ -188,6 +208,9 @@ if __name__ == '__main__':
     ap.add_argument('--zup', action='store_true', help='ось Z вверх (как в 3ds Max)')
     ap.add_argument('--unit', type=float, default=100.0, help='UnitScaleFactor (см на единицу)')
     ap.add_argument('--ascii', action='store_true', help='текстовый FBX (для проверки отказа)')
+    ap.add_argument('--offset', nargs=3, type=float, default=[0.0, 0.0, 0.0],
+                    help='Lcl Translation узла Model')
+    ap.add_argument('--node-scale', type=float, default=1.0, help='Lcl Scaling узла Model')
     args = ap.parse_args()
-    build(args.out, args.zup, args.unit, args.ascii)
+    build(args.out, args.zup, args.unit, args.ascii, tuple(args.offset), args.node_scale)
     print('записан', args.out)

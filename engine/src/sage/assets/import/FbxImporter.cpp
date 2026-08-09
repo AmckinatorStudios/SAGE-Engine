@@ -7,6 +7,10 @@
 #include <unordered_map>
 #include <vector>
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/euler_angles.hpp>
+
 #include "sage/assets/format/Blob.h"
 #include "sage/assets/import/Importer.h"
 #include "sage/core/Log.h"
@@ -322,6 +326,7 @@ LayerData ReadLayer(const Node* layer, const char* valuesName, const char* index
 
 // Геометрия одного узла Geometry -> MeshData.
 sage::render::MeshData BuildMesh(const Node& geometry, float unitScale, bool zUp,
+                                 const glm::mat4& nodeXform,
                                  std::vector<std::string>& warnings) {
     sage::render::MeshData mesh;
     const std::vector<double>* verts = Doubles(geometry.Find("Vertices"));
@@ -330,6 +335,10 @@ sage::render::MeshData BuildMesh(const Node& geometry, float unitScale, bool zUp
 
     const LayerData normals =
         ReadLayer(geometry.Find("LayerElementNormal"), "Normals", "NormalsIndex", 3);
+    // Нормали переводит матрица, ОБРАТНАЯ транспонированной: при неравномерном
+    // масштабе узла обычная матрица перекашивает их, и объект освещается так,
+    // будто его поверхность смотрит не туда.
+    const glm::mat3 normalXform = glm::transpose(glm::inverse(glm::mat3(nodeXform)));
     const LayerData uvs = ReadLayer(geometry.Find("LayerElementUV"), "UV", "UVIndex", 2);
     if (normals.Empty()) warnings.push_back("в FBX нет нормалей — посчитаны по граням");
 
@@ -343,6 +352,11 @@ sage::render::MeshData BuildMesh(const Node& geometry, float unitScale, bool zUp
         // сырых координатах: сделай его позже, и нормали с трансформами узлов
         // остались бы в чужой системе — модель выглядела бы правильно и
         // освещалась неправильно.
+        // Трансформ УЗЛА (Lcl Translation/Rotation/Scaling у Model, плюс
+        // геометрическое смещение). Без него все части модели сваливаются в
+        // начало координат и теряют свой масштаб: рюкзак из 53 деталей
+        // приезжал кучей в три сантиметра, а не собранной сумкой.
+        p = glm::vec3(nodeXform * glm::vec4(p, 1.0f));
         p *= unitScale;
         if (zUp) p = glm::vec3(p.x, p.z, -p.y);
         return p;
@@ -367,7 +381,7 @@ sage::render::MeshData BuildMesh(const Node& geometry, float unitScale, bool zUp
                 Vertex v;
                 v.Position = controlPoint(cp);
                 if (!normals.Empty()) {
-                    glm::vec3 n = normals.At(pv, cp);
+                    glm::vec3 n = normalXform * normals.At(pv, cp);
                     if (zUp) n = glm::vec3(n.x, n.z, -n.y);
                     const float len = glm::length(n);
                     v.Normal = len > 1e-6f ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
@@ -452,30 +466,98 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
         return false;
     }
 
-    // Имена узлов Model — по связям Connections было бы точнее, но для одного
-    // меша на файл (самый частый случай) достаточно порядка: имя i-й геометрии
-    // берём у i-й модели, если она есть.
-    std::vector<std::string> modelNames;
+    // --- Узлы Model: имя и ТРАНСФОРМ -----------------------------------
+    //
+    // Раньше отсюда бралось только имя, а положение, поворот и масштаб узла
+    // игнорировались вовсе. Для файла с одним мешем это сходило с рук; модель
+    // из нескольких частей — а это любая настоящая модель — приезжала кучей в
+    // начале координат: 53 детали рюкзака ложились друг на друга, и весь он
+    // получался размером с одну деталь.
+    struct ModelInfo {
+        std::string Name;
+        glm::mat4 Local{1.0f};
+        glm::mat4 Geometric{1.0f};
+    };
+    std::unordered_map<int64_t, ModelInfo> models;
+    std::vector<std::string> modelNames; // порядок — запасной путь сопоставления
     for (const Node& n : objects->Children) {
         if (n.Name != "Model") continue;
         std::string name = n.Props.size() > 1 ? n.Props[1].Text : std::string();
         const size_t sep = name.find('\0');
         if (sep != std::string::npos) name = name.substr(0, sep);
         modelNames.push_back(name);
+
+        ModelInfo info;
+        info.Name = name;
+        auto compose = [](const glm::vec3& t, const glm::vec3& r, const glm::vec3& s) {
+            // Порядок поворота FBX по умолчанию — XYZ, то есть Rz * Ry * Rx.
+            glm::mat4 m = glm::translate(glm::mat4(1.0f), t);
+            m *= glm::eulerAngleZYX(glm::radians(r.z), glm::radians(r.y), glm::radians(r.x));
+            return glm::scale(m, s);
+        };
+        info.Local = compose(Property70Vec(&n, "Lcl Translation", glm::vec3(0.0f)),
+                             Property70Vec(&n, "Lcl Rotation", glm::vec3(0.0f)),
+                             Property70Vec(&n, "Lcl Scaling", glm::vec3(1.0f)));
+        // Геометрический трансформ применяется ТОЛЬКО к мешу узла и не
+        // наследуется детьми — этим он и отличается от Lcl.
+        info.Geometric = compose(Property70Vec(&n, "GeometricTranslation", glm::vec3(0.0f)),
+                                 Property70Vec(&n, "GeometricRotation", glm::vec3(0.0f)),
+                                 Property70Vec(&n, "GeometricScaling", glm::vec3(1.0f)));
+        if (!n.Props.empty()) models[(int64_t)n.Props[0].Number] = info;
     }
+
+    // Связи: какой объект чей ребёнок. Ими же геометрия привязывается к своей
+    // модели — по порядку это угадывалось и ломалось на файлах, где Geometry и
+    // Model перечислены вперемешку.
+    std::unordered_map<int64_t, int64_t> parentOf;
+    if (const Node* conns = root.Find("Connections")) {
+        for (const Node& c : conns->Children) {
+            if (c.Name != "C" || c.Props.size() < 3) continue;
+            if (c.Props[0].Text != "OO") continue;
+            parentOf[(int64_t)c.Props[1].Number] = (int64_t)c.Props[2].Number;
+        }
+    }
+    // Мировая матрица модели — произведение локальных вверх по цепочке.
+    auto worldOf = [&](int64_t uid) {
+        glm::mat4 m(1.0f);
+        int guard = 0;
+        for (int64_t cur = uid; cur != 0 && guard++ < 64;) {
+            auto it = models.find(cur);
+            if (it == models.end()) break;
+            m = it->second.Local * m;
+            auto p = parentOf.find(cur);
+            if (p == parentOf.end()) break;
+            cur = p->second;
+        }
+        return m;
+    };
 
     size_t geometryIndex = 0;
     for (const Node& n : objects->Children) {
         if (n.Name != "Geometry") continue;
-        sage::render::MeshData mesh = BuildMesh(n, unitScale, zUp, out.Warnings);
+        glm::mat4 xform(1.0f);
+        std::string nodeName;
+        if (!n.Props.empty()) {
+            auto owner = parentOf.find((int64_t)n.Props[0].Number);
+            if (owner != parentOf.end()) {
+                auto mi = models.find(owner->second);
+                if (mi != models.end()) {
+                    xform = worldOf(owner->second) * mi->second.Geometric;
+                    nodeName = mi->second.Name;
+                }
+            }
+        }
+        sage::render::MeshData mesh = BuildMesh(n, unitScale, zUp, xform, out.Warnings);
         if (mesh.Empty()) {
             ++geometryIndex;
             continue;
         }
         ImportedNode node;
-        node.Name = geometryIndex < modelNames.size() && !modelNames[geometryIndex].empty()
-                        ? modelNames[geometryIndex]
-                        : fs::path(path).stem().string();
+        node.Name = !nodeName.empty()
+                        ? nodeName
+                        : (geometryIndex < modelNames.size() && !modelNames[geometryIndex].empty()
+                               ? modelNames[geometryIndex]
+                               : fs::path(path).stem().string());
         node.Mesh = std::move(mesh);
         out.Nodes.push_back(std::move(node));
         ++geometryIndex;
