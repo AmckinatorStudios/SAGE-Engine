@@ -4,6 +4,29 @@
 
 namespace sage::render {
 
+sage::rhi::TextureHandle DummyShadowTexture() {
+    // Живёт до конца процесса: текстура в один пиксель, зато сэмплеры никогда
+    // не смотрят в пустоту.
+    // Указатель, а НЕ unique_ptr: статический объект уничтожается при выходе из
+    // процесса, когда графического контекста уже нет, и удаление текстуры в
+    // этот момент роняет программу (тот же капкан, из-за которого у панелей
+    // редактора появился Shutdown). Один пиксель, живущий до конца процесса, —
+    // честная плата за то, чтобы не падать на выходе.
+    static sage::rhi::Texture2D* white = [] {
+        sage::rhi::Texture2DDesc desc;
+        desc.Width = 1;
+        desc.Height = 1;
+        desc.Channels = 4;
+        desc.FilterMode = sage::rhi::Filter::Nearest;
+        desc.WrapMode = sage::rhi::Wrap::ClampEdge;
+        desc.GenerateMipmaps = false;
+        const unsigned char pixel[4] = {255, 255, 255, 255};
+        return sage::rhi::GraphicsDevice::Get().CreateTexture2D(desc, pixel).release();
+    }();
+    return white ? white->Handle() : sage::rhi::TextureHandle{};
+}
+
+
 int PointFaceUV(const glm::vec3& v, glm::vec2& outUV) {
     const glm::vec3 a = glm::abs(v);
     float axis;

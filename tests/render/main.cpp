@@ -247,6 +247,44 @@ void TestScenePerspective(FrameRenderer& r, Scene& scene) {
                                     RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH)));
 }
 
+// Выключенные тени НЕ ДОЛЖНЫ означать чёрную сцену.
+//
+// Привязка теней оставляла юниты сэмплеров пустыми, когда тени выключены. На
+// программном растеризаторе (на котором идут эти тесты) непривязанный юнит
+// ведёт себя смирно, а на настоящем GPU отдаёт ноль — то есть «всё в тени», и
+// сцена с живым солнцем выходит ЧЁРНОЙ. Поймать это эталоном нельзя: эталон
+// снят на том же растеризаторе. Поэтому проверяется СВОЙСТВО — кадр без теней
+// не темнее кадра с тенями и вообще не чёрный.
+void TestShadowsOffIsNotBlack(FrameRenderer& r, Scene& scene) {
+    Framebuffer sceneFbo(kW, kH);
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    const glm::mat4 view = TestView();
+
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+    device.Clear(true, true);
+    // Тени ВЫКЛЮЧЕНЫ: ShadowBinding по умолчанию — ни одной живой карты.
+    r.Batch.RenderColor(scene, view, PerspectiveProj(), kEye, env, ShadowBinding(), 0);
+    const Image frame = Capture(kW, kH);
+    device.BindDefaultFramebuffer();
+
+    double sum = 0.0;
+    for (size_t i = 0; i < frame.Pixels.size(); ++i) sum += frame.Pixels[i];
+    const double mean = frame.Pixels.empty() ? 0.0 : sum / (double)frame.Pixels.size();
+
+    // Фон сам по себе тёмный (0.05..0.08), поэтому порог берём заметно выше
+    // него: освещённая геометрия обязана поднять среднее.
+    if (mean > 24.0) {
+        ++g_passed;
+        std::printf("[ ok ] %-28s среднее %.1f (сцена освещена)\n", "shadows_off_not_black", mean);
+    } else {
+        ++g_failed;
+        std::printf("[FAIL] %-28s среднее %.1f — сцена ЧЁРНАЯ при выключенных тенях\n",
+                    "shadows_off_not_black", mean);
+    }
+}
+
 void TestSceneOrthographic(FrameRenderer& r, Scene& scene) {
     // Ортокамера — новая возможность движка, и «работает» для неё значит
     // «даёт правильную картинку», а не «компилируется».
@@ -2384,6 +2422,7 @@ int main(int argc, char** argv) {
         std::unique_ptr<Scene> scene = MakeScene();
         FrameRenderer renderer;
         TestScenePerspective(renderer, *scene);
+        TestShadowsOffIsNotBlack(renderer, *scene);
         TestSceneOrthographic(renderer, *scene);
         TestNoPostFX(renderer, *scene);
         TestDepthOfField(renderer, *scene);

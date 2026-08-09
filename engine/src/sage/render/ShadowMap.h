@@ -462,13 +462,22 @@ struct ShadowBinding {
         // сцена вполне может быть без солнца (подвал, ночь) и при этом с
         // прожекторами, и связывать их одним `if` значило бы выключать тени
         // ламп ровно там, где кроме них ничего нет.
+        const sage::rhi::TextureHandle dummy = sage::render::DummyShadowTexture();
         if (Local.Enabled && Local.Texture.Valid()) {
             device.BindTexture2D(sage::render::kLocalShadowUnit, Local.Texture);
+        } else {
+            device.BindTexture2D(sage::render::kLocalShadowUnit, dummy);
         }
-        if (!Enabled) return;
+        // ВЫКЛЮЧЕННЫЕ тени тоже привязывают текстуру — заглушку «ничего не
+        // загораживает». Раньше здесь стоял ранний выход, и юниты каскадов
+        // оставались пустыми: на настоящем GPU непривязанный сэмплер отдаёт
+        // ноль, тень получается сплошной, и сцена с живым солнцем выходит
+        // ЧЁРНОЙ. Комментарий выше предупреждал ровно об этом — а код делал
+        // ровно это.
         for (int i = 0; i < ShadowMap::kMaxCascades; ++i) {
-            const sage::rhi::TextureHandle tex = Textures[std::min(i, std::max(Count - 1, 0))];
-            if (tex.Valid()) device.BindTexture2D(ShadowCascadeUnit(i), tex);
+            const sage::rhi::TextureHandle tex =
+                Enabled ? Textures[std::min(i, std::max(Count - 1, 0))] : sage::rhi::TextureHandle{};
+            device.BindTexture2D(ShadowCascadeUnit(i), tex.Valid() ? tex : dummy);
         }
     }
 };
