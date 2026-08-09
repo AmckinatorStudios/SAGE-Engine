@@ -1,5 +1,12 @@
 #include "AssetPreview.h"
 
+#include <filesystem>
+#include <system_error>
+#include <unordered_map>
+
+#include "sage/render/ModelMaterial.h"
+#include "sage/render/ResourceManager.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -101,10 +108,47 @@ uint64_t AssetPreview::RenderMaterial(const std::shared_ptr<Material>& material,
 }
 
 uint64_t AssetPreview::RenderMesh(const std::shared_ptr<Mesh>& mesh, int size,
-                                  const std::string& key) {
+                                  const std::string& key,
+                                  const std::shared_ptr<Material>& material) {
     Init();
     if (!mesh) return 0;
-    return Render(mesh, nullptr, size, BoundingRadius(*mesh), key);
+    return Render(mesh, material, size, BoundingRadius(*mesh), key);
+}
+
+std::shared_ptr<Material> AssetPreview::MaterialForModel(const std::string& path) {
+    static std::unordered_map<std::string, std::shared_ptr<Material>> cache;
+    auto it = cache.find(path);
+    if (it != cache.end()) return it->second;
+
+    std::shared_ptr<Material> material;
+    // Картинки, встроенные в .glb, ExtractMaterial распаковывает в файлы. Класть
+    // их РЯДОМ С МОДЕЛЬЮ нельзя: обложка — действие пассивное, человек просто
+    // открыл папку, а движок насорил бы в ней png-шками (и в чужой папке, куда
+    // писать вообще не звали). Поэтому у превью свой временный каталог.
+    std::error_code ec;
+    const std::filesystem::path cacheDir =
+        std::filesystem::temp_directory_path() / "sage_preview_textures";
+    std::filesystem::create_directories(cacheDir, ec);
+    const ModelLoader::ExtractedMaterial extracted =
+        ModelLoader::ExtractMaterial(path, cacheDir.string());
+    if (extracted.Found) {
+        material = std::make_shared<Material>();
+        material->Albedo = extracted.Albedo;
+        material->Emissive = extracted.Emissive;
+        material->EmissiveStrength = extracted.EmissiveStrength;
+        material->Metallic = extracted.Metallic;
+        material->Roughness = extracted.Roughness;
+        material->Opacity = extracted.Opacity;
+        material->TexturePath = extracted.AlbedoMap;
+        material->NormalMapPath = extracted.NormalMap;
+        material->MetallicMapPath = extracted.MetallicMap;
+        material->RoughnessMapPath = extracted.RoughnessMap;
+        material->AOMapPath = extracted.AOMap;
+        material->EmissiveMap = extracted.EmissiveMap;
+        ResourceManager::Instance().ResolveMaterialTextures(*material);
+    }
+    cache[path] = material; // и пустой ответ тоже: иначе файл разбирался бы каждый кадр
+    return material;
 }
 
 void AssetPreview::ReleaseTarget(const std::string& key) { m_targets.erase(key); }

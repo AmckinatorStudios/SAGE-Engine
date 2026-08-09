@@ -89,7 +89,7 @@ uint64_t Thumbnail(AssetPreview* preview, const fs::path& path, int size) {
         id = preview->RenderPrefab(key, size, bufferKey);
     } else {
         if (std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(key))
-            id = preview->RenderMesh(mesh, size, bufferKey);
+            id = preview->RenderMesh(mesh, size, bufferKey, AssetPreview::MaterialForModel(key));
     }
     lastRenderFrame = frame;
     cache[key] = Cached{id, stamp, frame};

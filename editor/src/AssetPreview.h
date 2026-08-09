@@ -68,7 +68,21 @@ public:
                             const std::string& key = {});
 
     // То же для модели: меш вписывается в кадр по своим габаритам.
-    uint64_t RenderMesh(const std::shared_ptr<Mesh>& mesh, int size, const std::string& key = {});
+    uint64_t RenderMesh(const std::shared_ptr<Mesh>& mesh, int size, const std::string& key = {},
+                        const std::shared_ptr<Material>& material = nullptr);
+
+    // Материал модели по её файлу: albedo/metallic/roughness и карты, как их
+    // описал автор в .gltf/.glb/.obj.
+    //
+    // ЗАЧЕМ ОТДЕЛЬНО. Превью модели рисовалось материалом ПО УМОЛЧАНИЮ —
+    // серым пластиком. Не «текстуры не подтянулись», а их и не спрашивали:
+    // Render() материал принимает, а RenderMesh передавал nullptr. В сетке
+    // ассетов из этого следует, что любая модель выглядит одинаково серой, и
+    // отличить по обложке текстурированного персонажа от болванки нельзя.
+    //
+    // Разбор файла кэшируется по пути: ExtractMaterial читает модель целиком, а
+    // обложек в папке бывает два десятка.
+    static std::shared_ptr<Material> MaterialForModel(const std::string& path);
 
     // Отпустить буфер именованного превью. Зовётся, когда обложка больше не
     // нужна (ушли из папки): без этого буферы копились бы по одному на каждый
