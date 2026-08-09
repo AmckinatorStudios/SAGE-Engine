@@ -10,6 +10,7 @@
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
+#include "sage/ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -552,4 +553,178 @@ TEST(UI_presets_are_the_same_everywhere) {
         CHECK_TRUE(sage::ui::ApplyPreset(e, name));
         CHECK_TRUE(e.Size.x > 0.0f && e.Size.y > 0.0f);
     }
+}
+
+// ===========================================================================
+//  Новая система интерфейса: раскладка, растяжение, маски, холст
+//  (sage/ui/UI.h — компоненты вместо одного компонента на всё)
+// ===========================================================================
+
+TEST(UI2_stretch_follows_the_parent) {
+    // Растяжения не было вовсе: элемент имел фиксированный размер, и «панель во
+    // всю ширину с отступом 24» приходилось пересчитывать скриптом на каждое
+    // изменение окна. Якорь держал угол, ширину не держал никто.
+    sage::ui::Transform t;
+    t.Mode = sage::ui::Transform::Stretch::Horizontal;
+    t.Margin = {24.0f, 10.0f, 24.0f, 0.0f};
+    t.Size = {100.0f, 40.0f};
+
+    const UIRect screen{0, 0, 800, 600};
+    UIRect r = sage::ui::Resolve(t, screen, sage::ui::ResolveSize(t, screen));
+    CHECK_NEAR(r.x, 24.0f, 1e-4f);
+    CHECK_NEAR(r.w, 752.0f, 1e-4f); // 800 - 24 - 24
+    CHECK_NEAR(r.h, 40.0f, 1e-4f);  // по вертикали не растягивали
+
+    // Родитель другого размера — тот же элемент, другая ширина, без единой
+    // правки данных.
+    const UIRect narrow{0, 0, 400, 600};
+    r = sage::ui::Resolve(t, narrow, sage::ui::ResolveSize(t, narrow));
+    CHECK_NEAR(r.w, 352.0f, 1e-4f);
+
+    // Поля больше родителя не дают отрицательной ширины: вывернутый наизнанку
+    // прямоугольник рисуется мусором и ловит мышь там, где его не видно.
+    const UIRect tiny{0, 0, 30, 30};
+    r = sage::ui::Resolve(t, tiny, sage::ui::ResolveSize(t, tiny));
+    CHECK_TRUE(r.w >= 0.0f);
+}
+
+TEST(UI2_pivot_moves_the_element_by_its_own_size) {
+    // Pivot (0.5,0.5) — «якорь держит СЕРЕДИНУ элемента». Без него подпись,
+    // растущая от центра, требовала пересчёта Offset при каждой смене текста.
+    const UIRect screen{0, 0, 1000, 500};
+    sage::ui::Transform t;
+    t.Anchor = UIAnchor::TopLeft;
+    t.Offset = {100.0f, 50.0f};
+    t.Size = {200.0f, 40.0f};
+
+    UIRect a = sage::ui::Resolve(t, screen, t.Size);
+    CHECK_NEAR(a.x, 100.0f, 1e-4f);
+
+    t.Pivot = {0.5f, 0.5f};
+    UIRect b = sage::ui::Resolve(t, screen, t.Size);
+    CHECK_NEAR(b.x, 0.0f, 1e-4f);   // 100 - 200*0.5
+    CHECK_NEAR(b.y, 30.0f, 1e-4f);  // 50 - 40*0.5
+}
+
+TEST(UI2_layout_lays_children_out_by_itself) {
+    // Меню из пяти кнопок раскладывалось вручную: каждому ребёнку свой Offset,
+    // посчитанный на бумаге. Шестая кнопка означала пересчитать пять чужих
+    // отступов.
+    sage::ui::Layout column;
+    column.Direction = sage::ui::Layout::Flow::Vertical;
+    column.Spacing = 10.0f;
+    column.Padding = {8.0f, 8.0f, 8.0f, 8.0f};
+
+    std::vector<sage::ui::LayoutSlot> slots(3);
+    for (auto& s : slots) s.Size = {100.0f, 40.0f};
+
+    const UIRect box{0, 0, 200, 300};
+    const glm::vec2 used = sage::ui::ApplyLayout(column, box, slots);
+
+    CHECK_NEAR(slots[0].Pos.y, 8.0f, 1e-4f);
+    CHECK_NEAR(slots[1].Pos.y, 58.0f, 1e-4f);  // 8 + 40 + 10
+    CHECK_NEAR(slots[2].Pos.y, 108.0f, 1e-4f);
+    CHECK_NEAR(used.y, 140.0f, 1e-4f);         // 3*40 + 2*10
+    // StretchCross по умолчанию: ширина детей = ширине контейнера без полей.
+    CHECK_NEAR(slots[0].Size.x, 184.0f, 1e-4f);
+
+    // Ряд с «раздать свободное место между детьми»: первый прижат влево,
+    // последний — вправо. Именно так выглядит строка «Назад ... Далее».
+    sage::ui::Layout row;
+    row.Direction = sage::ui::Layout::Flow::Horizontal;
+    row.Justify = sage::ui::Layout::Align::SpaceBetween;
+    row.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
+    row.StretchCross = false;
+    std::vector<sage::ui::LayoutSlot> two(2);
+    two[0].Size = {100.0f, 30.0f};
+    two[1].Size = {100.0f, 30.0f};
+    sage::ui::ApplyLayout(row, UIRect{0, 0, 500, 100}, two);
+    CHECK_NEAR(two[0].Pos.x, 0.0f, 1e-4f);
+    CHECK_NEAR(two[1].Pos.x, 400.0f, 1e-4f);
+
+    // Сетка: перенос по столбцам.
+    sage::ui::Layout grid;
+    grid.Direction = sage::ui::Layout::Flow::Grid;
+    grid.Columns = 2;
+    grid.Spacing = 4.0f;
+    grid.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<sage::ui::LayoutSlot> cells(4);
+    for (auto& c : cells) c.Size = {50.0f, 50.0f};
+    sage::ui::ApplyLayout(grid, UIRect{0, 0, 104, 200}, cells);
+    CHECK_NEAR(cells[0].Pos.y, 0.0f, 1e-4f);
+    CHECK_NEAR(cells[2].Pos.y, 54.0f, 1e-4f); // вторая строка
+    CHECK_NEAR(cells[1].Pos.x, cells[3].Pos.x, 1e-4f); // один столбец
+}
+
+TEST(UI2_masks_intersect_and_never_go_negative) {
+    // Вложенные маски режут друг друга: список внутри окна виден только там,
+    // где окно и список пересекаются.
+    const UIRect a{0, 0, 100, 100};
+    const UIRect b{50, 50, 100, 100};
+    UIRect i = sage::ui::Intersect(a, b);
+    CHECK_NEAR(i.x, 50.0f, 1e-4f);
+    CHECK_NEAR(i.w, 50.0f, 1e-4f);
+
+    // Непересекающиеся окна дают ПУСТОЙ прямоугольник, а не отрицательный:
+    // отрицательная ширина ниже по коду означала бы «обрезки нет», то есть
+    // содержимое маски вылезло бы на весь экран.
+    UIRect none = sage::ui::Intersect(UIRect{0, 0, 10, 10}, UIRect{100, 100, 10, 10});
+    CHECK_TRUE(none.w == 0.0f && none.h == 0.0f);
+
+    // Поля маски сжимают окно внутрь.
+    sage::ui::Mask m;
+    m.Padding = {4.0f, 4.0f, 4.0f, 4.0f};
+    UIRect w = sage::ui::MaskWindow(m, UIRect{0, 0, 100, 100});
+    CHECK_NEAR(w.x, 4.0f, 1e-4f);
+    CHECK_NEAR(w.w, 92.0f, 1e-4f);
+}
+
+TEST(UI2_canvas_scales_symmetrically) {
+    // Интерфейс жил в пикселях экрана: кнопка 200x52, выставленная на 1920x1080,
+    // на 4K занимала четверть прежнего места. Холст задаёт опорное разрешение.
+    sage::ui::Canvas c;
+    c.Mode = sage::ui::Canvas::Scale::ScaleWithSize;
+    c.Reference = {1920.0f, 1080.0f};
+
+    CHECK_NEAR(sage::ui::CanvasScale(c, {1920.0f, 1080.0f}), 1.0f, 1e-4f);
+    CHECK_NEAR(sage::ui::CanvasScale(c, {3840.0f, 2160.0f}), 2.0f, 1e-3f);
+    CHECK_NEAR(sage::ui::CanvasScale(c, {960.0f, 540.0f}), 0.5f, 1e-3f);
+
+    // Симметрия: вдвое уже и вдвое шире дают взаимно обратные множители.
+    // При линейном смешивании это не так, и «сузили» с «расширили» на одну и ту
+    // же долю меняли размер по-разному.
+    c.MatchWidthOrHeight = 0.5f;
+    const float wide = sage::ui::CanvasScale(c, {3840.0f, 1080.0f});
+    const float narrow = sage::ui::CanvasScale(c, {960.0f, 1080.0f});
+    CHECK_NEAR(wide * narrow, 1.0f, 1e-3f);
+
+    // Режим «в пикселях» ничего не масштабирует — старые сцены не должны вдруг
+    // поехать.
+    sage::ui::Canvas pixels;
+    CHECK_NEAR(sage::ui::CanvasScale(pixels, {800.0f, 600.0f}), 1.0f, 1e-6f);
+}
+
+TEST(UI2_presets_build_real_elements) {
+    // Заготовка — данные, а не код редактора: одинаковую кнопку обязаны
+    // собирать и меню редактора, и скрипт, и игра без редактора.
+    const sage::ui::Preset* button = sage::ui::FindPreset("Button");
+    CHECK_TRUE(button != nullptr);
+    if (button) {
+        CHECK_TRUE(button->HasFill && button->HasLabel && button->HasInteractable);
+        CHECK_TRUE(!button->LabelStyle.Text.empty());
+    }
+
+    // Список — это маска плюс раскладка: то, что раньше собиралось вручную из
+    // пяти сущностей и отдельного скрипта прокрутки.
+    const sage::ui::Preset* list = sage::ui::FindPreset("Vertical List");
+    CHECK_TRUE(list != nullptr);
+    if (list) CHECK_TRUE(list->HasMask && list->HasLayout);
+
+    // Полноэкранная подложка растягивается, а не задана числом.
+    const sage::ui::Preset* screen = sage::ui::FindPreset("Screen");
+    CHECK_TRUE(screen != nullptr);
+    if (screen) CHECK_TRUE(screen->Xf.Mode == sage::ui::Transform::Stretch::Both);
+
+    CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
+    CHECK_TRUE(sage::ui::PresetNames().size() >= 8);
 }

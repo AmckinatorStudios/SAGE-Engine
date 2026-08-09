@@ -5,6 +5,7 @@
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIIcons.h"
+#include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 
 // ---------------------------------------------------------------------------

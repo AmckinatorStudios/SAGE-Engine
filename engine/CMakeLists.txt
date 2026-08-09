@@ -104,6 +104,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp
     src/sage/ui/UIPresets.cpp
+    src/sage/ui/UI.cpp
     src/sage/ui/UIShowcase.cpp
 )
 

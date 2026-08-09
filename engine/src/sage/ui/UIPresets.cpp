@@ -1,97 +1,88 @@
 #include "sage/ui/UIPresets.h"
 
+#include "sage/ui/UI.h"
 #include "sage/ui/UIComponents.h"
 
 namespace sage::ui {
 
-namespace {
-
-using Kind = UIElementComponent::Kind;
-
-// Таблица заготовок. Одна строка — один узнаваемый элемент интерфейса.
+// ---------------------------------------------------------------------------
+// Переходник со СТАРОГО компонента на новую систему.
 //
-// Значения подобраны так, чтобы созданный элемент БЫЛО ВИДНО и он делал то, что
-// обещает имя: у кнопки включено Interactive (без него это просто
-// прямоугольник), у полосы Value = 0.6 (пустая полоса неотличима от панели), у
-// поля ввода текст прижат влево (по центру набирать неудобно и непривычно).
-struct Preset {
-    const char* Name;
-    void (*Apply)(UIElementComponent&);
-};
-
-const Preset kPresets[] = {
-    {"Panel", [](UIElementComponent& u) {
-         u.Type = Kind::Panel;
-         u.Size = {260.0f, 140.0f};
-         u.Text.clear();
-     }},
-    {"Button", [](UIElementComponent& u) {
-         u.Type = Kind::Panel;
-         u.Size = {200.0f, 52.0f};
-         u.Text = "Button";
-         u.Interactive = true; // без этого «кнопка» — просто прямоугольник
-         u.Color = {0.16f, 0.22f, 0.34f, 0.95f};
-         u.BorderThickness = 1.0f;
-     }},
-    {"Label", [](UIElementComponent& u) {
-         u.Type = Kind::Label;
-         u.Size = {220.0f, 40.0f};
-         u.Text = "Text";
-         u.AutoWidth = true;
-     }},
-    {"Image", [](UIElementComponent& u) {
-         u.Type = Kind::Image;
-         u.Size = {160.0f, 160.0f};
-         u.Color = {1.0f, 1.0f, 1.0f, 1.0f};
-     }},
-    {"Bar", [](UIElementComponent& u) {
-         u.Type = Kind::Bar;
-         u.Size = {240.0f, 26.0f};
-         u.Value = 0.6f; // наполовину: пустая полоса неотличима от панели
-         u.Rounding = 6.0f;
-     }},
-    {"Checkbox", [](UIElementComponent& u) {
-         u.Type = Kind::Checkbox;
-         u.Size = {200.0f, 36.0f};
-         u.Text = "Checkbox";
-         u.Interactive = true;
-     }},
-    {"Slider", [](UIElementComponent& u) {
-         u.Type = Kind::Slider;
-         u.Size = {240.0f, 30.0f};
-         u.Interactive = true;
-         u.MinValue = 0.0f;
-         u.MaxValue = 1.0f;
-         u.Value = 0.5f;
-     }},
-    {"Input", [](UIElementComponent& u) {
-         u.Type = Kind::Input;
-         u.Size = {260.0f, 40.0f};
-         u.Interactive = true;
-         u.Placeholder = "Enter text";
-         u.TextCentered = false;
-     }},
-};
-
-} // namespace
-
-const std::vector<std::string>& PresetNames() {
-    static const std::vector<std::string> names = [] {
-        std::vector<std::string> out;
-        for (const Preset& p : kPresets) out.emplace_back(p.Name);
-        return out;
-    }();
-    return names;
-}
-
+// Заготовки теперь живут в одном месте — sage/ui/UI.cpp — и описаны НАБОРОМ
+// компонентов (Transform + Fill + Label + Interactable для кнопки). Пока в
+// движке ещё жив прежний UIElementComponent на сорок полей, ему нужен тот же
+// «Button», что и новой системе: две таблицы заготовок разошлись бы на первой
+// же правке, и кнопка из редактора перестала бы совпадать с кнопкой из
+// скрипта. Поэтому таблица одна, а здесь она укладывается в старый компонент.
+//
+// Файл исчезнет вместе со старым компонентом.
+// ---------------------------------------------------------------------------
 bool ApplyPreset(UIElementComponent& element, const std::string& preset) {
-    for (const Preset& p : kPresets) {
-        if (preset == p.Name) {
-            p.Apply(element);
-            return true;
-        }
+    const Preset* p = FindPreset(preset);
+    if (!p) return false;
+
+    element.Anchor = p->Xf.Anchor;
+    element.Offset = p->Xf.Offset;
+    element.Size = p->Xf.Size;
+    element.Layer = p->Xf.Layer;
+    element.Visible = p->Xf.Visible;
+
+    // Вид элемента у старого компонента один на всё, поэтому он выводится из
+    // набора: есть картинка — Image, есть шкала — Bar, есть поле ввода — Input.
+    if (p->HasImage) element.Type = UIElementComponent::Kind::Image;
+    else if (p->HasBar) element.Type = UIElementComponent::Kind::Bar;
+    else if (p->HasInput) element.Type = UIElementComponent::Kind::Input;
+    else if (p->HasRange) {
+        element.Type = p->RangeValue.Toggle ? UIElementComponent::Kind::Checkbox
+                                            : UIElementComponent::Kind::Slider;
+    } else if (p->HasLabel && !p->HasFill) element.Type = UIElementComponent::Kind::Label;
+    else element.Type = UIElementComponent::Kind::Panel;
+
+    if (p->HasFill) {
+        element.Color = p->FillStyle.Color;
+        element.Rounding = p->FillStyle.Rounding;
+        element.BorderThickness = p->FillStyle.BorderThickness;
+        element.BorderColor = p->FillStyle.BorderColor;
+        element.GradientColor = p->FillStyle.Gradient;
+        element.ShadowSize = p->FillStyle.ShadowSize;
     }
-    return false;
+    if (p->HasLabel) {
+        element.Text = p->LabelStyle.Text;
+        element.TextScale = p->LabelStyle.Scale;
+        element.TextColor = p->LabelStyle.Color;
+        element.TextCentered = p->LabelStyle.Horizontal == Label::Align::Center;
+        element.WrapText = p->LabelStyle.Wrap;
+        element.AutoWidth = p->LabelStyle.AutoWidth;
+        element.PadX = p->LabelStyle.PadX;
+    }
+    if (p->HasImage) {
+        element.TexturePath = p->ImageStyle.Path;
+        element.Color = p->ImageStyle.Tint;
+        element.Sprite = p->ImageStyle.Sprite;
+        element.SliceBorder = p->ImageStyle.SliceBorder;
+        element.PixelScale = p->ImageStyle.PixelScale;
+        element.PixelArt = p->ImageStyle.PixelArt;
+    }
+    if (p->HasBar) {
+        element.Value = p->BarStyle.Value;
+        element.BarFillColor = p->BarStyle.FillColor;
+    }
+    element.Interactive = p->HasInteractable;
+    if (p->HasInteractable) element.Enabled = p->Interact.Enabled;
+    if (p->HasInput) {
+        element.Placeholder = p->Input.Placeholder;
+        element.MaxLength = p->Input.MaxLength;
+        element.Password = p->Input.Password;
+    }
+    if (p->HasRange) {
+        element.MinValue = p->RangeValue.Min;
+        element.MaxValue = p->RangeValue.Max;
+        element.Value = p->RangeValue.Value;
+    }
+    // Маска и раскладка старому компоненту недоступны целиком: у него есть
+    // только флаг «обрезать детей», а расставлять их он не умеет вовсе.
+    element.ClipChildren = p->HasMask;
+    return true;
 }
 
 } // namespace sage::ui
