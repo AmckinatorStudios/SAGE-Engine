@@ -694,3 +694,69 @@ TEST(ScriptLife_touching_a_destroyed_entity_is_an_error_not_a_crash) {
         CHECK_FALSE(result.valid());
     }
 }
+
+// --- Выход из игры ------------------------------------------------------------
+//
+// Без хука OnQuit игра узнавала о закрытии НИКОГДА: окно закрывали крестиком,
+// меню звало Application::Close(), редактор жал Stop — и во всех трёх случаях
+// движок скриптов просто уничтожался. Для игры с сохранением это потеря всего,
+// что случилось после последнего автосохранения, причём молчаливая.
+TEST(ScriptLife_quit_hook_reaches_object_and_level_scripts_once) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    sol::table probe = MakeProbe(se);
+    probe["object"] = 0;
+    probe["level"] = 0;
+
+    const std::string objectScript = WriteScript("quit_object", R"(
+        function OnQuit(entity)
+            probe.object = probe.object + 1
+            probe.name = entity.Name
+        end
+    )");
+    const std::string levelScript = WriteScript("quit_level", R"(
+        function OnQuit()
+            probe.level = probe.level + 1
+        end
+    )");
+
+    se.AttachScript(scene.CreateObject("World"), objectScript);
+    se.RunScript(levelScript);
+
+    CHECK_EQ(ProbeInt(probe, "object"), 0);   // до выхода — ни разу
+    se.DispatchQuit();
+    CHECK_EQ(ProbeInt(probe, "object"), 1);
+    CHECK_EQ(ProbeInt(probe, "level"), 1);
+    // Объектный скрипт получает свою сущность — внутри OnQuit ещё можно
+    // спросить у мира, что в нём произошло, и записать это в сохранение.
+    CHECK_TRUE(probe["name"].get<std::string>() == "World");
+
+    // Повторный вызов ничего не делает: путей выхода несколько (кнопка меню,
+    // крестик окна), и звать хук на каждом — правильно, а сохраняться дважды —
+    // нет.
+    se.DispatchQuit();
+    CHECK_EQ(ProbeInt(probe, "object"), 1);
+    CHECK_EQ(ProbeInt(probe, "level"), 1);
+}
+
+// Ошибка в OnQuit не должна мешать выходу: игра уже закрывается, и падать на
+// прощание — худшее, что можно сделать. Сообщаем и идём дальше.
+TEST(ScriptLife_error_in_quit_hook_is_reported_not_fatal) {
+    LogCapture log;
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    sol::table probe = MakeProbe(se);
+    probe["ok"] = 0;
+
+    se.AttachScript(scene.CreateObject("Broken"),
+                    WriteScript("quit_broken", "function OnQuit() error('bang') end"));
+    se.AttachScript(scene.CreateObject("Fine"),
+                    WriteScript("quit_fine", "function OnQuit() probe.ok = 1 end"));
+
+    se.DispatchQuit();
+    CHECK_EQ(log.ErrorsContaining("OnQuit"), 1);
+    // И сосед по сцене всё равно сохранился.
+    CHECK_EQ(ProbeInt(probe, "ok"), 1);
+}

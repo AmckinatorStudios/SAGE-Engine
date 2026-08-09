@@ -142,6 +142,11 @@ private:
     // Размер области, в которой нарисован интерфейс (letterbox-viewport). Мышь
     // сравнивается именно с ним, иначе клики уезжают на ширину чёрных полос.
     int m_uiWidth = 0, m_uiHeight = 0;
+    // Левый верхний угол кадра внутри окна: с фиксированным соотношением сторон
+    // кадр стоит между чёрными полосами, и курсор окна к нему не приложить.
+    int m_uiOffsetX = 0, m_uiOffsetY = 0;
+    // Курсор в координатах игрового кадра (см. определение).
+    glm::vec2 CursorInViewport() const;
     sage::ecs::RenderBatch m_batch;            // отсечение по фрустуму + инстансинг статики
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
     bool m_warnedNoCamera = false; // предупреждение «нет Primary-камеры» — один раз
@@ -153,6 +158,11 @@ private:
     bool m_paused = false;
     bool m_pauseClickLatched = false;
     void DrawPauseMenu(int vpW, int vpH);
+    // Показывать ли ВСТРОЕННОЕ меню паузы: игра со своим меню его выключает
+    // (sage.game.SetPauseMenu(false)) и забирает ESC себе.
+    bool PauseMenuWanted() const;
+    // Единственный путь закрытия игры: сперва OnQuit скриптам, потом окно.
+    void QuitGame();
 
     float m_sceneTime = 0.0f; // секунды с начала игры — uTime шейдеров
 

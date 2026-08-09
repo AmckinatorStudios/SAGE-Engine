@@ -141,6 +141,9 @@ public:
     void PausePlay() override { if (m_playState == EditorPlayState::Playing) m_playState = EditorPlayState::Paused; }
     void ResumePlay() override { if (m_playState == EditorPlayState::Paused) m_playState = EditorPlayState::Playing; }
     void StopPlay() override;
+    // Ввод интерфейсу ИГРЫ в Play-режиме: курсор панели Game, переведённый в
+    // координаты игрового кадра, плюс набранный текст (см. определение).
+    void UpdatePlayUiInput(float dt);
 
     // --- EditorHost: общее состояние инструментов (тулбар + вьюпорт) ---
     int& GizmoOp() override { return m_gizmoOp; }
@@ -358,6 +361,9 @@ private:
     InspectorPanel m_inspector;
     ViewportPanel m_viewport;
     GamePanel m_game;
+    // Левая кнопка на прошлом кадре: из «удерживается» и «удерживалась»
+    // получаются «нажата» и «отпущена», а без них щелчка не существует.
+    bool m_playUiMouseWasDown = false;
     AssetsPanel m_assets;
     // Накопитель брошенных путей: колбэк окна складывает сюда, кадр разбирает.
     std::vector<std::string> m_droppedFiles;

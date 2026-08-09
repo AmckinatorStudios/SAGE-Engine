@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 class EditorHost;
 
 // Панель Game — «игровое окно»: изображение сцены от ИГРОВОЙ камеры (первая
@@ -21,7 +23,31 @@ public:
     // время правки сцены.
     bool Focused() const { return m_focused; }
 
+    // --- Ввод для ИНТЕРФЕЙСА игры ------------------------------------------
+    //
+    // ЗАЧЕМ ЭТО ЗДЕСЬ. Интерфейс игры (кнопки меню, слоты инвентаря) в
+    // Play-режиме редактора не работал вовсе: сцена его РИСОВАЛА, но
+    // sage::ui::UpdateSceneUI не звал никто — этот вызов был только в плеере.
+    // Со стороны человека это выглядело так: в собранной игре меню кликается, в
+    // редакторе — нет, и понять, чья это поломка (игры или движка), неоткуда.
+    //
+    // Курсор при этом живёт в координатах ОКНА РЕДАКТОРА, а интерфейс — в
+    // координатах игрового кадра, и знает про перевод между ними только сама
+    // панель: она одна знает, где нарисована её картинка.
+    bool MouseInside() const { return m_mouseInside; }
+    float MouseX() const { return m_mouseX; }
+    float MouseY() const { return m_mouseY; }
+    bool MouseDown() const { return m_mouseDown; }
+    // Набранный за кадр текст (UTF-8) — для полей ввода в интерфейсе игры.
+    const std::string& TypedText() const { return m_typed; }
+
 private:
     int m_focusFrames = 0;
     bool m_focused = false;
+    // Положение курсора В ПИКСЕЛЯХ ИГРОВОГО КАДРА (левый верхний угол картинки
+    // — начало координат), а не окна редактора.
+    bool m_mouseInside = false;
+    float m_mouseX = -1.0f, m_mouseY = -1.0f;
+    bool m_mouseDown = false;
+    std::string m_typed;
 };

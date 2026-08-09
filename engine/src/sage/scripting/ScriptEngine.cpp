@@ -27,14 +27,68 @@ ScriptEngine::ScriptEngine() {
     // обнуляем насовсем: подгрузка нативных .so/.dll из Lua игре не нужна.
     m_lua["package"]["path"] = "";
     m_lua["package"]["cpath"] = "";
+    RegisterModuleLoader();
     RegisterEngineApi();
+}
+
+// --- require ЧЕРЕЗ vfs --------------------------------------------------------
+//
+// СОБРАННАЯ ИГРА НЕ МОГЛА ЗАГРУЗИТЬ НИ ОДНОГО МОДУЛЯ. Скрипт сущности движок
+// читает через vfs (в собранной игре проект лежит одним файлом game.sagepak, и
+// с диска читать нечего), а `require` шёл штатным загрузчиком Lua — то есть по
+// package.path, то есть по НАСТОЯЩЕМУ диску. В редакторе и при запуске из папки
+// проекта всё работало, потому что файлы там действительно лежат; в собранной
+// игре первый же `require "blocks"` падал с «module not found», и игра не
+// стартовала вовсе.
+//
+// Заметить это по коду было почти нельзя: обе половины по отдельности
+// правильны, и расходятся они только там, где файлов на диске нет. Поэтому
+// поиск модулей теперь идёт тем же путём, что и всё остальное чтение игры, —
+// через vfs, который сам решает, пакет это или диск.
+void ScriptEngine::RegisterModuleLoader() {
+    sol::table searchers = m_lua["package"]["searchers"];
+    // Своим искателем ЗАМЕНЯЕМ штатный поиск по package.path (второй в списке):
+    // держать оба значило бы иметь два ответа на вопрос «где лежит модуль» —
+    // и в собранной игре они дают разное.
+    searchers[2] = [this](const std::string& name) -> sol::object {
+        // "world.gen" -> "world/gen": точки в имени модуля — это каталоги.
+        std::string rel = name;
+        std::replace(rel.begin(), rel.end(), '.', '/');
+
+        std::string tried;
+        for (const std::string& dir : m_scriptSearchPaths) {
+            const std::string candidates[] = {dir + rel + ".lua", dir + rel + "/init.lua"};
+            for (const std::string& path : candidates) {
+                std::string source;
+                if (!sage::assets::vfs::ReadText(path, source)) {
+                    tried += "\n\tнет файла '" + path + "'";
+                    continue;
+                }
+                // Имя куска с '@' — чтобы ошибки внутри модуля ссылались на его
+                // файл и строку, а не на «[string \"...\"]».
+                sol::load_result chunk = m_lua.load(source, "@" + path);
+                if (!chunk.valid()) {
+                    sol::error err = chunk;
+                    // Синтаксическая ошибка в модуле — это ошибка, а не «модуля
+                    // нет»: вернув её строкой, мы покажем человеку причину, а не
+                    // список мест, где не нашли.
+                    return sol::make_object(m_lua, std::string("\n\t") + err.what());
+                }
+                return sol::make_object(m_lua, chunk.get<sol::protected_function>());
+            }
+        }
+        if (tried.empty()) tried = "\n\tпути поиска модулей не заданы (AddScriptSearchPath)";
+        return sol::make_object(m_lua, tried);
+    };
 }
 
 void ScriptEngine::AddScriptSearchPath(const std::string& dir) {
     if (dir.empty()) return;
     std::string pattern = dir;
     if (pattern.back() != '/' && pattern.back() != '\\') pattern += '/';
-    // <dir>/foo.lua и <dir>/foo/init.lua — обе привычные раскладки модуля.
+    m_scriptSearchPaths.push_back(pattern);
+    // package.path остаётся заполненным ради сообщений об ошибках и чужого
+    // кода, который на него смотрит; сам поиск идёт искателем выше.
     std::string entry = pattern + "?.lua;" + pattern + "?/init.lua";
     std::string current = m_lua["package"]["path"];
     m_lua["package"]["path"] = current.empty() ? entry : current + ";" + entry;
@@ -212,6 +266,32 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
     }
 
     --m_messageDepth;
+}
+
+// Игра закрывается: последний вызов, который скрипты ещё увидят.
+//
+// Обработчик ищется в окружении скрипта здесь, а не запоминается при привязке:
+// он зовётся один раз за всю жизнь движка, и держать ради этого поле в каждом
+// экземпляре — плата за каждый скрипт ради того, что случится однажды.
+//
+// Ошибка внутри OnQuit НЕ мешает выходу: игра уже закрывается, и падать на
+// прощание — худшее, что можно сделать. Сообщаем и идём дальше.
+void ScriptEngine::DispatchQuit() {
+    if (m_quitDispatched) return;
+    m_quitDispatched = true;
+
+    for (ScriptInstance& inst : m_instances) {
+        sol::protected_function quitFn = inst.Env["OnQuit"];
+        if (!quitFn.valid()) continue;
+        // Сущность могла умереть раньше выхода — уровневым скриптам её и так
+        // не передают, а объектному вместо мёртвой ссылки не передаём ничего.
+        const bool alive = inst.HasObject && inst.Object.Valid();
+        auto result = alive ? quitFn(inst.EntityRef) : quitFn();
+        if (!result.valid()) {
+            sol::error err = result;
+            LOG_ERROR("ScriptEngine") << "Ошибка в OnQuit (" << inst.Path << "): " << err.what();
+        }
+    }
 }
 
 // Сколько раз подряд OnUpdate может упасть, прежде чем движок перестанет его

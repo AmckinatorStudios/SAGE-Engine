@@ -1,4 +1,5 @@
 #include "sage/assets/AssetDatabase.h"
+#include "sage/assets/Pack.h"
 
 #include <algorithm>
 #include <chrono>
@@ -297,7 +298,13 @@ std::string AssetDatabase::Resolve(const AssetGuid& guid, const std::string& pat
         const std::string rel = Normalize(pathHint);
         const std::string full = m_projectDir.empty() ? rel : m_projectDir + "/" + rel;
         std::error_code ec;
-        if (fs::exists(full, ec) || fs::exists(rel, ec)) {
+        // Через vfs — тоже: в СОБРАННОЙ игре проект лежит одним файлом
+        // game.sagepak, файлов на диске нет, и проверка «есть ли такой путь»
+        // отвечала «нет» вообще на всё. Сцена при этом работала (скрипт и меш
+        // читаются через vfs), но каждая ссылка объявлялась битой и печатала
+        // ОШИБКУ в лог — то есть собранная игра ругалась на саму себя.
+        if (fs::exists(full, ec) || fs::exists(rel, ec) || assets::vfs::Exists(rel) ||
+            assets::vfs::Exists(pathHint)) {
             const AssetGuid fresh = Register(rel);
             if (referencedBy.Valid()) AddDependency(referencedBy, fresh);
             // Отдаём путь РОВНО ТАКИМ, каким его дали. Нормализация нужна

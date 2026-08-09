@@ -10,6 +10,7 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UILegacy.h"
 
+#include <algorithm>
 #include <cmath>
 
 // ---------------------------------------------------------------------------
@@ -150,6 +151,44 @@ sol::object UIOf(GameObject& obj, sol::this_state ts) {
     return sol::make_object(ts, UIRef{obj.Registry(), obj.Entity()});
 }
 
+// --- Раскладка, холст и группа из скрипта ------------------------------------
+//
+// Эти три компонента существовали в движке с самого появления новой системы
+// интерфейса, но добраться до них можно было ТОЛЬКО из редактора: инспектор их
+// показывал, а Lua-API — нет. Для игры, которая собирает свои экраны скриптом
+// (а такая игра на этом движке одна и есть — «The Boat»), это означало, что
+// сетка инвентаря раскладывается вручную по формуле «i-й слот в столбце
+// i % columns», меню паузы рисуется поверх худа только если угадать номер слоя,
+// а спрятать панель целиком нечем, кроме обхода всех её детей.
+//
+// Разбор таблицы, а не десяток отдельных функций: раскладка задаётся ОДНИМ
+// решением («это сетка по пять в ряд с зазором шесть»), и разносить его по
+// пяти вызовам значило бы дать возможность настроить половину.
+sage::ui::Layout::Flow FlowFromName(const std::string& name) {
+    if (name == "row" || name == "horizontal") return sage::ui::Layout::Flow::Horizontal;
+    if (name == "grid") return sage::ui::Layout::Flow::Grid;
+    return sage::ui::Layout::Flow::Vertical;
+}
+
+sage::ui::Layout::Align AlignFromName(const std::string& name) {
+    if (name == "center") return sage::ui::Layout::Align::Center;
+    if (name == "end") return sage::ui::Layout::Align::End;
+    if (name == "between" || name == "space-between") return sage::ui::Layout::Align::SpaceBetween;
+    return sage::ui::Layout::Align::Start;
+}
+
+// Поля контейнера: число («со всех сторон одинаково») или Vec4 (л, в, п, н).
+// Одно число покрывает девять случаев из десяти, и требовать ради него вектор
+// значило бы делать типичный вызов длиннее ради редкого.
+glm::vec4 PaddingFrom(const sol::object& value, glm::vec4 fallback) {
+    if (value.is<float>()) {
+        const float p = value.as<float>();
+        return {p, p, p, p};
+    }
+    if (value.is<glm::vec4>()) return value.as<glm::vec4>();
+    return fallback;
+}
+
 } // namespace
 
 void ScriptEngine::RegisterUIApi() {
@@ -173,6 +212,15 @@ void ScriptEngine::RegisterUIApi() {
         {"BottomLeft", UIAnchor::BottomLeft}, {"BottomCenter", UIAnchor::BottomCenter},
         {"BottomRight", UIAnchor::BottomRight},
     });
+    // Растяжение: панель во всю ширину экрана — это ОДНО поле, а не пересчёт
+    // размера скриптом на каждое изменение окна. Затемнение под меню паузы
+    // иначе приходится каждый кадр подгонять под разрешение вручную.
+    m_lua.new_enum<sage::ui::Transform::Stretch>("UIStretch", {
+        {"None", sage::ui::Transform::Stretch::None},
+        {"Horizontal", sage::ui::Transform::Stretch::Horizontal},
+        {"Vertical", sage::ui::Transform::Stretch::Vertical},
+        {"Both", sage::ui::Transform::Stretch::Both},
+    });
 
     m_lua.new_usertype<UIRef>("UIElement",
         // Где стоит.
@@ -181,6 +229,15 @@ void ScriptEngine::RegisterUIApi() {
         "Size", UI_FIELD(sage::ui::Transform, Size),
         "Layer", UI_FIELD(sage::ui::Transform, Layer),
         "Visible", UI_FIELD(sage::ui::Transform, Visible),
+        // Растяжение и поля: «на весь экран с отступом 24» задаётся здесь, а не
+        // пересчитывается скриптом при каждом изменении размера окна.
+        "Stretch", UI_FIELD(sage::ui::Transform, Mode),
+        "Margin", UI_FIELD(sage::ui::Transform, Margin),
+        "Pivot", UI_FIELD(sage::ui::Transform, Pivot),
+        // Групповые свойства поддерева: спрятать плавно — одно число на корне
+        // панели вместо прохода по всем её детям с правкой альфы у каждого.
+        "Alpha", UI_FIELD(sage::ui::Group, Alpha),
+        "BlockRaycasts", UI_FIELD(sage::ui::Group, BlockRaycasts),
         "LayoutSize", sol::readonly_property([](UIRef& r) {
             const sage::ui::Transform* t = r.Peek<sage::ui::Transform>();
             return t ? t->LayoutSize : glm::vec2(0.0f);
@@ -234,6 +291,10 @@ void ScriptEngine::RegisterUIApi() {
         "BarFillColor", UI_FIELD(sage::ui::Bar, FillColor),
         "Icon", UI_FIELD(sage::ui::Icon, Name),
         "IconColor", UI_FIELD(sage::ui::Icon, Color),
+        // Размер значка в пикселях; 0 — «во всю высоту элемента», как было.
+        // Без него значок рядом с подписью всегда ростом с элемент, и на
+        // кнопке меню высотой в полсотни пикселей он забивает саму подпись.
+        "IconSize", UI_FIELD(sage::ui::Icon, Size),
         // Значение (полоса/ползунок/галка).
         "Value", sol::property(&GetValue, &SetValue),
         "MinValue", UI_FIELD(sage::ui::Range, Min),
@@ -280,6 +341,53 @@ void ScriptEngine::RegisterUIApi() {
             throw std::runtime_error("ui.Preset: неизвестная заготовка '" + preset +
                                      "'; есть: " + known);
         }
+    });
+
+    // Раскладка детей: ряд, столбец, сетка. Родитель сам расставляет детей по
+    // порядку Layer, а размеры и зазоры заданы один раз.
+    //
+    // Ради чего это в скриптах: сетка инвентаря и меню из пяти кнопок иначе
+    // раскладываются формулой «x = -total/2 + i * (slot + gap)», посчитанной в
+    // самом скрипте. Формула не ошибается ровно до первого изменения размера
+    // слота — а дальше её надо править в стольких местах, сколько сеток в игре.
+    //
+    //   sage.ui.SetLayout(panel, {dir = "grid", columns = 5, spacing = 6,
+    //                             padding = 10, justify = "center", fit = true})
+    Bind("ui", "SetLayout", "SetUILayout", [](GameObject& obj, sol::table opts) {
+        if (!obj.Valid()) throw std::runtime_error("ui.SetLayout: сущность недействительна");
+        obj.Registry()->get_or_emplace<sage::ui::Transform>(obj.Entity());
+        sage::ui::Layout& layout = obj.Registry()->get_or_emplace<sage::ui::Layout>(obj.Entity());
+        layout.Direction = FlowFromName(opts.get_or<std::string>("dir", "column"));
+        layout.Justify = AlignFromName(opts.get_or<std::string>("justify", "start"));
+        layout.Spacing = opts.get_or("spacing", layout.Spacing);
+        layout.Padding = PaddingFrom(opts.get<sol::object>("padding"), layout.Padding);
+        layout.Columns = std::max(1, opts.get_or("columns", layout.Columns));
+        layout.StretchCross = opts.get_or("stretch", layout.StretchCross);
+        layout.FitContent = opts.get_or("fit", layout.FitContent);
+    });
+    Bind("ui", "ClearLayout", "ClearUILayout", [](GameObject& obj) {
+        if (obj.Valid()) obj.Registry()->remove<sage::ui::Layout>(obj.Entity());
+    });
+
+    // Холст: масштаб интерфейса и порядок МЕЖДУ корнями.
+    //
+    // Порядок — не украшение: меню паузы обязано быть поверх худа, а диалог —
+    // поверх меню. Между корнями его задаёт только Canvas::SortOrder, и без
+    // доступа к нему из скрипта игра могла лишь надеяться, что её меню создано
+    // позже худа (порядок при равном SortOrder решает номер сущности).
+    //
+    //   sage.ui.SetCanvas(menuRoot, {order = 100, scale = true})
+    Bind("ui", "SetCanvas", "SetUICanvas", [](GameObject& obj, sol::table opts) {
+        if (!obj.Valid()) throw std::runtime_error("ui.SetCanvas: сущность недействительна");
+        obj.Registry()->get_or_emplace<sage::ui::Transform>(obj.Entity());
+        sage::ui::Canvas& canvas = obj.Registry()->get_or_emplace<sage::ui::Canvas>(obj.Entity());
+        canvas.SortOrder = opts.get_or("order", canvas.SortOrder);
+        if (opts["scale"].valid()) {
+            canvas.Mode = opts.get_or("scale", false) ? sage::ui::Canvas::Scale::ScaleWithSize
+                                                      : sage::ui::Canvas::Scale::Pixels;
+        }
+        if (opts["reference"].valid()) canvas.Reference = opts.get<glm::vec2>("reference");
+        canvas.MatchWidthOrHeight = opts.get_or("match", canvas.MatchWidthOrHeight);
     });
 
     // Картинка UI-элемента: путь + признак пиксель-арта. Отдельной функцией, а
@@ -395,6 +503,18 @@ void ScriptEngine::RegisterUIApi() {
         return {};
     });
 
+    // Что под курсором — тем же именем действия. Пара к ClickedAction, и нужна
+    // ровно там же, где она: подсказка о предмете, из чего он делается и чего
+    // не хватает, показывается ДО щелчка, а не после. Без этого игре пришлось
+    // бы опрашивать поле Hovered у каждого слота инвентаря каждый кадр.
+    Bind("ui", "HoveredAction", "UIHoveredAction", [this]() -> std::string {
+        if (!m_scene) return {};
+        for (auto e : m_scene->Registry().view<sage::ui::Interactable>()) {
+            const auto& act = m_scene->Registry().get<sage::ui::Interactable>(e);
+            if (act.Runtime.Hovered && !act.Action.empty()) return act.Action;
+        }
+        return {};
+    });
 }
 
 

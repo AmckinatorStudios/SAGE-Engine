@@ -369,3 +369,40 @@ TEST(PbrShader_has_no_screen_space_derivatives) {
         }
     }
 }
+
+// Запись сохранения не оставляет за собой временный файл и переживает
+// перезапись «на живую».
+//
+// Временный файл — механизм атомарной замены (пишем рядом, потом
+// переименовываем), и если он остаётся на диске, значит замена не состоялась:
+// прогресс записан «куда-то», а слот остался прежним. Заметить это по игре
+// нельзя — она сообщает об успехе, — поэтому проверяем каталог.
+TEST(SaveGame_leaves_no_temporary_file_behind) {
+    const std::string sandbox =
+        (std::filesystem::temp_directory_path() / "sage_save_tmpcheck").string();
+    std::filesystem::remove_all(sandbox);
+#ifdef _WIN32
+    _putenv_s("APPDATA", sandbox.c_str());
+#else
+    setenv("XDG_DATA_HOME", sandbox.c_str(), 1);
+#endif
+    sage::save::SetGameName("TestGame");
+
+    for (int i = 0; i < 3; ++i) {
+        CHECK_TRUE(sage::save::Write("slot", R"({"n":1})", 1));
+    }
+
+    int saves = 0, temps = 0;
+    for (const auto& e : std::filesystem::directory_iterator(sage::save::Directory())) {
+        if (e.path().extension() == ".sagesave") ++saves;
+        if (e.path().extension() == ".tmp") ++temps;
+    }
+    CHECK_EQ(saves, 1);
+    CHECK_EQ(temps, 0);
+
+    // И содержимое читается целиком, а не обрывается на середине.
+    std::string payload;
+    CHECK_TRUE(sage::save::Read("slot", payload, nullptr));
+    CHECK_TRUE(payload.find("\"n\"") != std::string::npos);
+    std::filesystem::remove_all(sandbox);
+}

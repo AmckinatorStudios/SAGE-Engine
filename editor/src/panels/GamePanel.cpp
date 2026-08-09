@@ -6,6 +6,7 @@
 
 #include "EditorHost.h"
 #include "../Localization.h"
+#include "sage/ui/UIInteraction.h"
 
 void GamePanel::Draw(EditorHost& host, bool* open) {
     if (m_focusFrames > 0) {
@@ -37,6 +38,30 @@ void GamePanel::Draw(EditorHost& host, bool* open) {
         // Текстура OpenGL идёт снизу-вверх — переворот по V.
         ImTextureID tex = (ImTextureID)(std::intptr_t)host.GameTexture();
         ImGui::Image(tex, avail, ImVec2(0, 1), ImVec2(1, 0));
+
+        // Курсор в координатах ИГРОВОГО КАДРА: интерфейс игры сверстан под
+        // размер картинки, а мышь приходит в координатах окна редактора.
+        // Перевод возможен только здесь — где картинка нарисована.
+        const ImVec2 origin = ImGui::GetItemRectMin();
+        const ImVec2 mouse = ImGui::GetMousePos();
+        m_mouseX = mouse.x - origin.x;
+        m_mouseY = mouse.y - origin.y;
+        m_mouseInside = ImGui::IsItemHovered() && m_mouseX >= 0.0f && m_mouseY >= 0.0f &&
+                        m_mouseX < avail.x && m_mouseY < avail.y;
+        m_mouseDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    } else {
+        m_mouseInside = false;
+    }
+
+    // Символы — очередью ImGui, а не опросом клавиш: буква зависит от раскладки
+    // и композиции, и собрать её из кодов клавиш нельзя (ровно та же причина,
+    // по которой плеер слушает char-колбэк окна, а не GLFW_KEY_*).
+    m_typed.clear();
+    if (m_focused) {
+        const ImGuiIO& io = ImGui::GetIO();
+        for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
+            sage::ui::AppendUtf8(m_typed, (unsigned int)io.InputQueueCharacters[i]);
+        }
     }
 
     ImGui::End();

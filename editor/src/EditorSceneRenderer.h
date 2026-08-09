@@ -53,6 +53,10 @@ public:
 
     void SetViewportSize(int w, int h) { m_vpW = w; m_vpH = h; }
     void SetGameSize(int w, int h) { m_gameW = w; m_gameH = h; }
+    // Размер игрового кадра: под него сверстан интерфейс игры, и с ним же
+    // сравнивается курсор, переведённый панелью Game в его координаты.
+    int GameWidth() const { return m_gameW; }
+    int GameHeight() const { return m_gameH; }
 
     // Общий depth-проход солнца (одна карта теней на кадр для обоих окон).
     // camera — камера ВЬЮПОРТА: карта теней строится вокруг неё, а не вокруг

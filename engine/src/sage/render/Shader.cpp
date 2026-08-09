@@ -3,12 +3,24 @@
 #include <cstring>
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
+#include "sage/assets/Pack.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 
 std::string Shader::ReadFile(const std::string& path) {
+    // Сперва — через vfs: в СОБРАННОЙ игре проект лежит одним файлом
+    // game.sagepak, и шейдера игры на диске нет вовсе. Пока этой ветки не было,
+    // собственный шейдер материала (та самая вода с волнами) не загружался
+    // ровно в собранной игре: в редакторе и при запуске из папки проекта файл
+    // читался с диска и всё работало, а игрок получал ошибку в логе и материал
+    // без шейдера. vfs без смонтированного пакета читает тот же диск, поэтому
+    // для всех остальных случаев ничего не меняется.
+    {
+        std::string packed;
+        if (sage::assets::vfs::ReadText(path, packed)) return packed;
+    }
     std::ifstream file(path);
     // Не нашлось от текущей папки — ищем рядом с бинарником. Шейдеры движка
     // поставляются вместе с программой, а текущая папка к моменту загрузки

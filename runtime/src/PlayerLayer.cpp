@@ -167,7 +167,7 @@ void PlayerLayer::OnAttach() {
 // остальной ввод игры не работает по определению, и заводить ради двух кнопок
 // отдельный слой состояния незачем.
 void PlayerLayer::DrawPauseMenu(int vpW, int vpH) {
-    if (!m_paused) return;
+    if (!m_paused || !PauseMenuWanted()) return;
     if (!m_ui) m_ui = std::make_unique<UIRenderer>();
 
     sage::Application& app = sage::Application::Get();
@@ -182,14 +182,9 @@ void PlayerLayer::DrawPauseMenu(int vpW, int vpH) {
     const float cx = vpW * 0.5f - bw * 0.5f;
     const float cy = vpH * 0.5f - (bh * 2 + gap) * 0.5f;
 
-    double mx = 0.0, my = 0.0;
-    glfwGetCursorPos(window.Handle(), &mx, &my);
-    // Курсор приходит в пикселях ОКНА, а интерфейс живёт в letterbox-области:
-    // без перевода кнопки ловятся со смещением тем большим, чем шире полосы.
-    const float scaleX = (float)vpW / (float)std::max(1, window.Width());
-    const float scaleY = (float)vpH / (float)std::max(1, window.Height());
-    const float px = (float)mx * scaleX;
-    const float py = (float)my * scaleY;
+    const glm::vec2 cursor = CursorInViewport();
+    const float px = cursor.x;
+    const float py = cursor.y;
     const bool click = glfwGetMouseButton(window.Handle(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     const bool clickEdge = click && !m_pauseClickLatched;
     m_pauseClickLatched = click;
@@ -209,14 +204,64 @@ void PlayerLayer::DrawPauseMenu(int vpW, int vpH) {
         window.SetCursorCaptured(true);
     }
     if (button(cy + bh + gap, "Выйти из игры")) {
-        app.Close();
+        // Скрипты узнают о выходе ДО закрытия окна — иначе игра с сохранением
+        // теряет всё, что случилось после последнего автосохранения, и теряет
+        // молча (см. ScriptEngine::DispatchQuit).
+        QuitGame();
     }
     m_ui->TextCentered(cx + bw * 0.5f, cy + (bh + gap) * 2 + 8.0f, 1.6f,
                        glm::vec3(0.75f, 0.78f, 0.85f), "ESC — вернуться в игру", 0.9f);
     m_ui->End();
 }
 
+// Курсор из координат ОКНА в координаты ИГРОВОГО КАДРА.
+//
+// Три системы координат, и путать их нельзя. glfwGetCursorPos отдаёт точку в
+// «экранных» координатах окна; кадр рисуется в пикселях буфера, которых на
+// HiDPI-экране вдвое больше; а сам кадр — это letterbox-прямоугольник ВНУТРИ
+// буфера, если в настройках задано фиксированное соотношение сторон. Пока
+// перевода не было, интерфейс сцены сравнивал курсор окна прямо с
+// прямоугольниками кадра: кнопки ловились мимо — на HiDPI вдвое ближе к левому
+// верхнему углу, а с чёрными полосами — со сдвигом на их ширину.
+glm::vec2 PlayerLayer::CursorInViewport() const {
+    Window& window = sage::Application::Get().GetWindow();
+    double mx = 0.0, my = 0.0;
+    glfwGetCursorPos(window.Handle(), &mx, &my);
+
+    // Window::Width() — размер БУФЕРА (окно слушает FramebufferSizeCallback), а
+    // курсор приходит в размерах ОКНА: их отношение и есть множитель HiDPI.
+    int winW = 0, winH = 0;
+    glfwGetWindowSize(window.Handle(), &winW, &winH);
+    const float toPixels = winW > 0 ? (float)window.Width() / (float)winW : 1.0f;
+    const float toPixelsY = winH > 0 ? (float)window.Height() / (float)winH : 1.0f;
+
+    return {(float)mx * toPixels - (float)m_uiOffsetX,
+            (float)my * toPixelsY - (float)m_uiOffsetY};
+}
+
+// Выход из игры одним путём для всех кнопок и клавиш.
+//
+// Путей закрытия у плеера три — кнопка меню, sage.game.Quit из скрипта и
+// крестик окна, — и каждый из них обязан дать игре сохраниться. Пока это было
+// написано в двух местах из трёх, третий (крестик) молча терял прогресс: со
+// стороны игрока «игра не сохранила последние двадцать минут», со стороны кода
+// — просто отсутствующая строка.
+void PlayerLayer::QuitGame() {
+    if (m_scripts) m_scripts->DispatchQuit();
+    sage::Application::Get().Close();
+}
+
+// Своё меню паузы у игры — значит встроенного нет: два меню на один ESC хуже,
+// чем ни одного.
+bool PlayerLayer::PauseMenuWanted() const {
+    return !m_scripts || m_scripts->PauseMenuEnabled();
+}
+
 void PlayerLayer::OnDetach() {
+    // Закрытие окна крестиком приходит сюда, минуя меню и скрипты: последний
+    // шанс игре сохраниться. Повторный вызов безвреден — DispatchQuit
+    // срабатывает один раз.
+    if (m_scripts) m_scripts->DispatchQuit();
     m_physics.reset();
     m_scripts.reset();
     // Кэш префабов держит разобранные сцены, а в них — меши на GPU. Он
@@ -347,7 +392,7 @@ void PlayerLayer::ApplyGameFlowRequests() {
     if (!m_scripts) return;
 
     if (m_scripts->TakeQuitRequest()) {
-        sage::Application::Get().Close();
+        QuitGame();
         return;   // дальше делать нечего: игра закрывается
     }
     // Перезапуск разбирается ДО смены сцены: если скрипт попросил и то и
@@ -408,6 +453,15 @@ void PlayerLayer::OnUpdate(float dt) {
     // Теперь ESC — переключатель паузы: мир замирает, курсор возвращается,
     // поверх кадра появляется меню с «Продолжить» и «Выйти». Выход остался, но
     // стал НАМЕРЕННЫМ действием, а не побочным эффектом клавиши.
+    //
+    // Игра со СВОИМ меню (sage.game.SetPauseMenu(false)) забирает ESC себе
+    // целиком: перехватывать клавишу и показывать поверх её меню ещё одно —
+    // ровно то, из-за чего своё меню было невозможно сделать.
+    if (!PauseMenuWanted()) {
+        m_escLatched = glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
+        m_paused = false;
+        return;
+    }
     const bool escDown = glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
     if (escDown && !m_escLatched) {
         m_paused = !m_paused;
@@ -454,13 +508,11 @@ void PlayerLayer::UpdateUiInput(float dt) {
     auto uiView = m_scene->Registry().view<sage::ui::Transform>();
     if (uiView.begin() == uiView.end()) { ResetUiEdits(); return; }
 
-    double mx = 0.0, my = 0.0;
-    glfwGetCursorPos(window.Handle(), &mx, &my);
     const bool down = glfwGetMouseButton(window.Handle(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     // Захваченный курсор — это режим обзора: экранной точки у мыши нет, и
     // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
     const bool captured = window.CursorCaptured();
-    m_uiInput.Mouse = captured ? glm::vec2(-1.0f) : glm::vec2((float)mx, (float)my);
+    m_uiInput.Mouse = captured ? glm::vec2(-1.0f) : CursorInViewport();
     m_uiInput.MousePressed = down && !m_uiMouseWasDown && !captured;
     m_uiInput.MouseReleased = !down && m_uiMouseWasDown && !captured;
     m_uiInput.MouseDown = down && !captured;
@@ -821,6 +873,8 @@ void PlayerLayer::OnRender() {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         m_uiWidth = vpW;  // тот же прямоугольник, с которым сравнивается мышь
         m_uiHeight = vpH;
+        m_uiOffsetX = vpX;
+        m_uiOffsetY = vpY;
         m_ui->Begin(vpW, vpH);
         sage::ui::DrawSceneUI(*m_scene, *m_ui, vpW, vpH);
         m_ui->End();

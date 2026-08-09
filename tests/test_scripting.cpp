@@ -13,6 +13,10 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/core/Log.h"
+#include "sage/ui/UI.h"
+#include "sage/assets/Pack.h"
+
+#include <filesystem>
 
 namespace {
 // Пишет временный .lua во временную папку, отдаёт путь. Тела скриптов короткие,
@@ -696,4 +700,152 @@ TEST(Scripting_time_scale_and_pause_fold_into_one_multiplier) {
     // разъезжающееся состояние.
     se.Lua().script("sage.time.SetScale(-3)");
     CHECK_NEAR(se.TimeScale(), 0.0f, 1e-6);
+}
+
+// --- Интерфейс из скрипта: раскладка, холст, группа ---------------------------
+//
+// Компоненты Layout/Canvas/Group существовали с самого появления новой системы
+// интерфейса, но были доступны ТОЛЬКО из редактора. Игре, которая собирает свои
+// экраны скриптом, это означало: сетку инвентаря раскладывать формулой в
+// самом скрипте, порядок «меню поверх худа» — угадывать по порядку создания
+// сущностей, а спрятать панель целиком — обходить всех её детей.
+TEST(Scripting_ui_layout_canvas_and_group_are_reachable) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject panel = scene.CreateObject("Panel");
+    se.Lua()["panel"] = panel;
+
+    se.Lua().script(R"(
+        local e = panel:AddUI()
+        e.Type = UIKind.Panel
+        e.Stretch = UIStretch.Both
+        e.Margin = Vec4(4, 8, 12, 16)
+        e.Pivot = Vec2(0.5, 0.5)
+        e.Alpha = 0.25
+        e.IconSize = 18.0
+        sage.ui.SetLayout(panel, {dir = "grid", columns = 5, spacing = 6,
+                                  padding = 3.0, stretch = false, fit = true})
+        sage.ui.SetCanvas(panel, {order = 7, scale = true, reference = Vec2(1280, 720),
+                                  match = 0.25})
+    )");
+
+    const entt::entity e = panel.Entity();
+    const auto& xf = scene.Registry().get<sage::ui::Transform>(e);
+    CHECK_TRUE(xf.Mode == sage::ui::Transform::Stretch::Both);
+    CHECK_NEAR(xf.Margin.z, 12.0f, 1e-4f);
+    CHECK_NEAR(xf.Pivot.x, 0.5f, 1e-4f);
+
+    const auto& group = scene.Registry().get<sage::ui::Group>(e);
+    CHECK_NEAR(group.Alpha, 0.25f, 1e-4f);
+    // Прозрачность группы НЕ должна попутно запрещать ввод: панель, показанная
+    // наполовину, обязана оставаться нажимаемой.
+    CHECK_TRUE(group.Interactable);
+
+    CHECK_NEAR(scene.Registry().get<sage::ui::Icon>(e).Size, 18.0f, 1e-4f);
+
+    const auto& layout = scene.Registry().get<sage::ui::Layout>(e);
+    CHECK_TRUE(layout.Direction == sage::ui::Layout::Flow::Grid);
+    CHECK_EQ(layout.Columns, 5);
+    CHECK_NEAR(layout.Spacing, 6.0f, 1e-4f);
+    CHECK_NEAR(layout.Padding.w, 3.0f, 1e-4f);
+    CHECK_FALSE(layout.StretchCross);
+    CHECK_TRUE(layout.FitContent);
+
+    const auto& canvas = scene.Registry().get<sage::ui::Canvas>(e);
+    CHECK_EQ(canvas.SortOrder, 7);
+    CHECK_TRUE(canvas.Mode == sage::ui::Canvas::Scale::ScaleWithSize);
+    CHECK_NEAR(canvas.Reference.x, 1280.0f, 1e-4f);
+    CHECK_NEAR(canvas.MatchWidthOrHeight, 0.25f, 1e-4f);
+
+    // Снять раскладку так же просто, как поставить: иначе «сделать из сетки
+    // обычную панель» означало бы пересоздать её.
+    se.Lua().script("sage.ui.ClearLayout(panel)");
+    CHECK_FALSE(scene.Registry().all_of<sage::ui::Layout>(e));
+}
+
+// Что под курсором — по ИМЕНИ ДЕЙСТВИЯ, как и что нажато. Без этого подсказка
+// «из чего делается предмет» требует опрашивать поле Hovered у каждой ячейки
+// инвентаря каждый кадр.
+TEST(Scripting_ui_hovered_action_answers_by_name) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject slot = scene.CreateObject("Slot");
+    se.Lua()["slot"] = slot;
+    se.Lua().script(R"(
+        local e = slot:AddUI()
+        e.Type = UIKind.Panel
+        e.Interactive = true
+        e.Action = "craft:plank"
+    )");
+
+    std::string hovered = se.Lua().script("return sage.ui.HoveredAction()");
+    CHECK_TRUE(hovered.empty());
+
+    scene.Registry().get<sage::ui::Interactable>(slot.Entity()).Runtime.Hovered = true;
+    hovered = se.Lua().script("return sage.ui.HoveredAction()");
+    CHECK_TRUE(hovered == "craft:plank");
+}
+
+// Встроенное меню паузы плеера выключается игрой, у которой меню своё. Пока
+// выключить его было нечем, «своё меню» означало два меню сразу: ESC
+// перехватывал плеер, а до скрипта клавиша не доходила.
+TEST(Scripting_game_can_turn_off_the_builtin_pause_menu) {
+    ScriptEngine se;
+    CHECK_TRUE(se.PauseMenuEnabled());
+    se.Lua().script("sage.game.SetPauseMenu(false)");
+    CHECK_FALSE(se.PauseMenuEnabled());
+    bool asked = se.Lua().script("return sage.game.HasPauseMenu()");
+    CHECK_FALSE(asked);
+    se.Lua().script("sage.game.SetPauseMenu(true)");
+    CHECK_TRUE(se.PauseMenuEnabled());
+}
+
+// --- Модули в СОБРАННОЙ игре --------------------------------------------------
+//
+// Собранная игра не могла загрузить ни одного модуля, и это ломало её целиком:
+// скрипт сущности движок читает через vfs (проект в собранной игре лежит одним
+// файлом game.sagepak), а require шёл штатным загрузчиком Lua — по настоящему
+// диску, где файлов нет. В редакторе и при запуске из папки проекта всё
+// работало, потому что там файлы есть; игрок же получал «module 'blocks' not
+// found» на первой строке первого скрипта.
+//
+// Тест воспроизводит ровно ту обстановку: модуль ТОЛЬКО в пакете, на диске его
+// нет.
+TEST(Scripting_require_finds_modules_inside_the_game_package) {
+    const std::filesystem::path sandbox =
+        std::filesystem::temp_directory_path() / "sage_pack_require";
+    std::filesystem::remove_all(sandbox);
+    std::filesystem::create_directories(sandbox / "assets" / "scripts");
+
+    {
+        std::ofstream f(sandbox / "assets" / "scripts" / "greet.lua");
+        f << "local M = {}\nfunction M.Hello() return 'из пакета' end\nreturn M\n";
+    }
+
+    sage::assets::PackWriter pack;
+    pack.AddDirectory(sandbox);
+    const std::filesystem::path packFile = sandbox / "game.sagepak";
+    CHECK_TRUE(pack.Save(packFile));
+
+    // Файлы с диска убираем: остаётся только пакет — как в собранной игре.
+    std::filesystem::remove_all(sandbox / "assets");
+    CHECK_TRUE(sage::assets::vfs::Mount(packFile));
+
+    {
+        ScriptEngine se;
+        se.AddScriptSearchPath("assets/scripts");
+        std::string greeting = se.Lua().script("return require('greet').Hello()");
+        CHECK_TRUE(greeting == "из пакета");
+
+        // Ошибка «модуля нет» обязана называть, где искали, — иначе она
+        // неотличима от опечатки в имени.
+        auto missing = se.Lua().script("return pcall(require, 'nosuch')",
+                                       sol::script_pass_on_error);
+        CHECK_TRUE(missing.valid());
+    }
+
+    sage::assets::vfs::Unmount();
+    std::filesystem::remove_all(sandbox);
 }

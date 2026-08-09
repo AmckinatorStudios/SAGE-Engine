@@ -499,6 +499,7 @@ void EditorLayer::OnUpdate(float dt) {
                 m_playRawInput->SetMouseCaptured(false);
             }
         }
+        UpdatePlayUiInput(dt);
     }
     // Время сцены для uTime собственных шейдеров + горячая перезагрузка
     // изменённых .vert/.frag: правка шейдера видна во вьюпорте сразу.
@@ -802,6 +803,55 @@ void EditorLayer::StartPlay() {
                        << m_playPhysics->BackendName() << ")";
 }
 
+// Ввод ИНТЕРФЕЙСУ ИГРЫ в Play-режиме редактора.
+//
+// Раньше этого не было вовсе, и это была не мелочь, а разница между «игра
+// работает» и «игра работает только собранной»: панель Game РИСОВАЛА интерфейс
+// сцены (DrawSceneUI), но UpdateSceneUI звал только плеер. Кнопка меню в
+// редакторе не нажималась, слот инвентаря не подсвечивался, поле ввода не
+// принимало текст — молча, без единой строки в логе. Проверить меню можно было
+// только собрав игру, то есть ровно в том месте, где редактор обязан заменять
+// сборку.
+//
+// Координаты курсора приходят уже переведёнными в кадр игры (см. GamePanel):
+// панель — единственный, кто знает, где нарисована её картинка.
+void EditorLayer::UpdatePlayUiInput(float dt) {
+    if (!m_scene) return;
+    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
+    if (uiView.begin() == uiView.end()) return;
+
+    // Захваченный курсор — режим обзора: экранной точки у мыши нет, и
+    // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
+    const bool captured = m_playRawInput && m_playRawInput->MouseCaptured();
+    const bool usable = m_game.MouseInside() && !captured;
+    const bool down = usable && m_game.MouseDown();
+
+    sage::ui::UIInputState input;
+    input.Mouse = usable ? glm::vec2(m_game.MouseX(), m_game.MouseY()) : glm::vec2(-1.0f);
+    input.MouseDown = down;
+    input.MousePressed = down && !m_playUiMouseWasDown;
+    input.MouseReleased = !down && m_playUiMouseWasDown;
+    input.TypedText = m_game.TypedText();
+    input.DeltaTime = dt;
+    m_playUiMouseWasDown = down;
+
+    // Клавиши редактирования — из ImGui: он уже слушает окно, и второй
+    // обработчик на те же клавиши спорил бы с ним за автоповтор.
+    if (m_game.Focused()) {
+        input.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+        input.Delete = ImGui::IsKeyPressed(ImGuiKey_Delete, true);
+        input.Left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true);
+        input.Right = ImGui::IsKeyPressed(ImGuiKey_RightArrow, true);
+        input.Home = ImGui::IsKeyPressed(ImGuiKey_Home, true);
+        input.End = ImGui::IsKeyPressed(ImGuiKey_End, true);
+        input.Enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+        input.Escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        input.Tab = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
+    }
+
+    sage::ui::UpdateSceneUI(*m_scene, input, m_renderer.GameWidth(), m_renderer.GameHeight());
+}
+
 void EditorLayer::StopPlay() {
     if (!InPlayMode()) return;
 
@@ -811,6 +861,11 @@ void EditorLayer::StopPlay() {
     // оставленная в кадре она обратилась бы к освобождённой памяти.
     // Ровно то, что добавил StartPlay. "particles" и "animation" остаются: это
     // превью режима правки, а не игровые системы.
+    // Stop — это для игры «выход»: скрипты обязаны узнать о нём раньше, чем
+    // исчезнут. Без этого проверить сохранение при выходе можно было только в
+    // собранной игре: в Play-режиме прогресс за последние секунды пропадал, и
+    // выглядело это как «сохранение не работает в редакторе».
+    if (m_playScripts) m_playScripts->DispatchQuit();
     m_systems.Remove("scripts");
     m_systems.Remove("physics");
     m_systems.Remove("audio");

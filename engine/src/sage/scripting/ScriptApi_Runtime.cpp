@@ -349,6 +349,18 @@ void ScriptEngine::RegisterGameFlowApi() {
     Bind("game", "Pause", nullptr, [this](bool paused) { m_paused = paused; });
     Bind("game", "IsPaused", nullptr, [this]() { return m_paused; });
 
+    // Встроенное меню паузы плеера: выключается игрой, у которой меню своё.
+    //
+    // Пока выключить его было нечем, «своё меню» означало ДВА меню: ESC
+    // перехватывал плеер, показывал своё и ставил игру на паузу, а скрипт про
+    // нажатие даже не узнавал. Игра при этом честно объявляла действие на
+    // ESCAPE — и оно молча не работало, что выглядит как поломка ввода, а не
+    // как решение движка.
+    Bind("game", "SetPauseMenu", "SetPauseMenu", [this](bool enabled) {
+        m_pauseMenuEnabled = enabled;
+    });
+    Bind("game", "HasPauseMenu", nullptr, [this]() { return m_pauseMenuEnabled; });
+
     // Масштаб времени: 0.5 — замедление, 2 — ускорение, 0 — стоп.
     //
     // Отрицательный не принимаем. Обратное время звучит заманчиво, но физика,

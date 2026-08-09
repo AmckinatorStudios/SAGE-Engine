@@ -2,6 +2,7 @@
 #include "UIRenderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <unordered_map>
 
@@ -266,6 +267,50 @@ void IconBag(const Pen& p) {
     p.Ring(0.5f, 0.34f, 0.19f, 0.08f);
 }
 
+// --- Меню -------------------------------------------------------------------
+//
+// Значки экранов, а не мира: продолжить, сохранить, настроить, выйти, собрать.
+// Без них меню игры собирается из одних надписей — а «Продолжить» и «Выйти»,
+// набранные одинаковым текстом в одинаковых прямоугольниках, различаются
+// только чтением, и промахнуться по ним легко именно там, где цена промаха
+// наибольшая (выход из игры стоит рядом с продолжением).
+void IconPlay(const Pen& p) { p.Tri(0.28f, 0.16f, 0.28f, 0.84f, 0.84f, 0.50f); }
+void IconPause(const Pen& p) {
+    p.Box(0.26f, 0.18f, 0.16f, 0.64f, 0.04f);
+    p.Box(0.58f, 0.18f, 0.16f, 0.64f, 0.04f);
+}
+void IconGear(const Pen& p) {
+    // Зубцы — восемь коротких отрезков по кругу, вокруг кольца: рисовать
+    // настоящую шестерню многоугольником здесь нечем, а на двадцати пикселях
+    // разницы всё равно не видно.
+    for (int i = 0; i < 8; ++i) {
+        const float ang = (float)i * 3.14159265f / 4.0f;
+        const float cx = std::cos(ang), cy = std::sin(ang);
+        p.Line(0.5f + cx * 0.26f, 0.5f + cy * 0.26f, 0.5f + cx * 0.46f, 0.5f + cy * 0.46f, 0.16f);
+    }
+    p.Ring(0.5f, 0.5f, 0.28f, 0.13f);
+}
+void IconSave(const Pen& p) { // дискета: узнаётся даже теми, кто их не застал
+    p.Box(0.14f, 0.14f, 0.72f, 0.72f, 0.08f);
+    Pen inner = p;
+    inner.c = glm::mix(p.c, glm::vec3(0.0f), 0.55f);
+    inner.Box(0.30f, 0.16f, 0.40f, 0.24f, 0.03f);  // шторка
+    inner.Box(0.24f, 0.52f, 0.52f, 0.32f, 0.03f);  // наклейка
+}
+void IconExit(const Pen& p) { // дверь со стрелкой наружу
+    p.Box(0.14f, 0.12f, 0.38f, 0.76f, 0.06f);
+    p.Line(0.56f, 0.50f, 0.88f, 0.50f, 0.10f);
+    p.Tri(0.72f, 0.30f, 0.72f, 0.70f, 0.94f, 0.50f);
+}
+void IconHammer(const Pen& p) { // крафт
+    p.Line(0.30f, 0.86f, 0.66f, 0.36f, 0.11f);
+    p.Quad4(0.44f, 0.22f, 0.72f, 0.06f, 0.90f, 0.32f, 0.62f, 0.48f);
+}
+void IconLamp(const Pen& p) { // фонарик в руке: конус света
+    p.Box(0.12f, 0.38f, 0.30f, 0.24f, 0.06f);
+    p.Tri(0.44f, 0.18f, 0.44f, 0.82f, 0.88f, 0.50f);
+}
+
 const std::unordered_map<std::string, IconFn>& Table() {
     static const std::unordered_map<std::string, IconFn> kTable = {
         {"heart", IconHeart}, {"drop", IconDrop}, {"flame", IconFlame},
@@ -282,6 +327,9 @@ const std::unordered_map<std::string, IconFn>& Table() {
         {"boat", IconBoat},
         {"plus", IconPlus},   {"minus", IconMinus}, {"check", IconCheck},
         {"cross", IconCross}, {"warn", IconWarn}, {"bag", IconBag},
+        {"play", IconPlay},   {"pause", IconPause}, {"gear", IconGear},
+        {"save", IconSave},   {"exit", IconExit}, {"hammer", IconHammer},
+        {"lamp", IconLamp},
     };
     return kTable;
 }

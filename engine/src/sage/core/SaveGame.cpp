@@ -7,6 +7,13 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #include "sage/core/Log.h"
 
 namespace fs = std::filesystem;
@@ -52,6 +59,24 @@ std::string UserDataRoot() {
 
 std::string SlotPath(const std::string& slot) {
     return Directory() + "/" + SafeSlot(slot) + ".sagesave";
+}
+
+// Сбросить содержимое файла на носитель. Платформенное, потому что
+// стандартной библиотеке такого понятия не известно вовсе: ofstream::flush()
+// доводит байты только до ядра.
+void SyncToDisk(const std::string& path) {
+#ifdef _WIN32
+    HANDLE h = CreateFileA(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    FlushFileBuffers(h);
+    CloseHandle(h);
+#else
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) return;
+    ::fsync(fd);
+    ::close(fd);
+#endif
 }
 
 long long NowUnix() {
@@ -110,6 +135,14 @@ bool Write(const std::string& slot, const std::string& payloadJson, int version)
             return false;
         }
     }
+    // Содержимое — НА ДИСК, и только потом переименование.
+    //
+    // Без этого «атомарная замена» атомарна лишь наполовину: flush() отдаёт
+    // байты ядру, а не носителю. Ядро вправе держать их в кэше минуты, и при
+    // отключении питания сразу после сохранения на диск успевает лечь только
+    // переименование — то есть на месте прошлого сохранения оказывается ПУСТОЙ
+    // файл. Это хуже, чем не сохраниться: старое уже стёрто, нового нет.
+    SyncToDisk(tempPath);
     fs::rename(tempPath, finalPath, ec);
     if (ec) {
         LOG_ERROR("Save") << "Не удалось заменить " << finalPath << ": " << ec.message();
