@@ -6,6 +6,7 @@
 #include "EditorHost.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 
 namespace {
@@ -22,9 +23,9 @@ UIRect ParentRect(Scene& scene, entt::entity e, const UIRect& screen) {
     entt::registry& reg = scene.Registry();
     const entt::entity parent = scene.ParentOf(e);
     if (parent == entt::null || !reg.valid(parent)) return screen;
-    const UIElementComponent* pu = reg.try_get<UIElementComponent>(parent);
+    const sage::ui::Transform* pu = reg.try_get<sage::ui::Transform>(parent);
     if (!pu) return screen;
-    return sage::ui::ResolveElementRect(*pu, ParentRect(scene, parent, screen));
+    return sage::ui::Resolve(*pu, ParentRect(scene, parent, screen));
 }
 
 } // namespace
@@ -56,11 +57,11 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     UIRect selRect{};
     bool haveSel = false;
 
-    auto view = reg.view<UIElementComponent, IdComponent>();
+    auto view = reg.view<sage::ui::Transform, IdComponent>();
     for (auto e : view) {
-        const UIElementComponent& u = view.get<UIElementComponent>(e);
+        const sage::ui::Transform& u = view.get<sage::ui::Transform>(e);
         const int id = view.get<IdComponent>(e).Id;
-        const UIRect r = sage::ui::ResolveElementRect(u, ParentRect(scene, e, screen));
+        const UIRect r = sage::ui::Resolve(u, ParentRect(scene, e, screen));
         const ImVec2 a = toScreen(r.x, r.y);
         const ImVec2 b = toScreen(r.x + r.w, r.y + r.h);
         const bool sel = (id == selectedId);
@@ -134,7 +135,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
             const ImVec2 d(mouse.x - handles[i].Pos.x, mouse.y - handles[i].Pos.y);
             if (std::fabs(d.x) <= kHandleGrab && std::fabs(d.y) <= kHandleGrab) {
                 if (GameObject sel = scene.Get(selectedId); sel.Valid()) {
-                    if (UIElementComponent* u = reg.try_get<UIElementComponent>(sel.Entity())) {
+                    if (sage::ui::Transform* u = reg.try_get<sage::ui::Transform>(sel.Entity())) {
                         m_drag = handles[i].Kind;
                         m_dragId = selectedId;
                         m_dragStartMouse = mouse;
@@ -154,13 +155,13 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         if (hit >= 0) {
             host.SetSelectedId(hit);
             if (GameObject sel = scene.Get(hit); sel.Valid()) {
-                if (UIElementComponent* u = reg.try_get<UIElementComponent>(sel.Entity())) {
+                if (sage::ui::Transform* u = reg.try_get<sage::ui::Transform>(sel.Entity())) {
                     m_drag = Drag::Move;
                     m_dragId = hit;
                     m_dragStartMouse = mouse;
                     m_dragStartOffset = ImVec2(u->Offset.x, u->Offset.y);
                     const UIRect r =
-                        sage::ui::ResolveElementRect(*u, ParentRect(scene, sel.Entity(), screen));
+                        sage::ui::Resolve(*u, ParentRect(scene, sel.Entity(), screen));
                     m_dragStartSize = ImVec2(r.w, r.h);
                     m_pushedUndo = false;
                 }
@@ -179,7 +180,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     }
     GameObject obj = scene.Get(m_dragId);
     if (!obj.Valid()) { m_drag = Drag::None; return; }
-    UIElementComponent* u = reg.try_get<UIElementComponent>(obj.Entity());
+    sage::ui::Transform* u = reg.try_get<sage::ui::Transform>(obj.Entity());
     if (!u) { m_drag = Drag::None; return; }
 
     // Одна запись undo на всё перетаскивание, и берётся она в первый кадр
@@ -234,5 +235,11 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     // AutoWidth и ручной размер противоречат друг другу: пока ширину считает
     // содержимое, тянуть её мышью бессмысленно — молча снимаем флаг, раз человек
     // явно взялся за ручку.
-    if (m_drag != Drag::Move && u->AutoWidth) u->AutoWidth = false;
+    if (m_drag != Drag::Move) {
+        // Авто-ширина живёт у надписи (sage::ui::Label): её считает содержимое,
+        // и пока она включена, тянуть ширину мышью бессмысленно. Раз человек
+        // явно взялся за ручку — снимаем.
+        if (sage::ui::Label* label = reg.try_get<sage::ui::Label>(obj.Entity()))
+            label->AutoWidth = false;
+    }
 }

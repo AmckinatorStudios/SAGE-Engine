@@ -1,5 +1,7 @@
 #include "ScriptEngine.h"
 
+#include "sage/ui/UI.h"
+
 #include "sage/core/Log.h"
 
 // ---------------------------------------------------------------------------
@@ -58,12 +60,12 @@ void ScriptEngine::RegisterTweenApi() {
     Bind("tween", "UIValue", "TweenUIValue", [this, easeOr](GameObject obj, float to, float dur,
                                                       sol::optional<sage::Easing> ease) -> uint64_t {
         if (!obj.Valid()) return 0;
-        auto* ui = obj.Registry()->try_get<UIElementComponent>(obj.Entity());
+        auto* ui = obj.Registry()->try_get<sage::ui::Bar>(obj.Entity());
         if (!ui) return 0;
         return m_tweens.To<float>(ui->Value, to, dur, easeOr(ease, sage::Easing::QuadOut),
             [obj](const float& v) mutable {
                 if (!obj.Valid()) return;
-                if (auto* u = obj.Registry()->try_get<UIElementComponent>(obj.Entity())) u->Value = v;
+                if (auto* u = obj.Registry()->try_get<sage::ui::Bar>(obj.Entity())) u->Value = v;
             });
     });
     Bind("tween", "Cancel", "TweenCancel", [this](uint64_t id) { m_tweens.Cancel(id); });

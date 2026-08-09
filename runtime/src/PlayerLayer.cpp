@@ -34,6 +34,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/ecs/CameraView.h"
+#include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 
 namespace fs = std::filesystem;
@@ -450,7 +451,7 @@ void PlayerLayer::UpdateUiInput(float dt) {
         });
     }
 
-    auto uiView = m_scene->Registry().view<UIElementComponent>();
+    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
     if (uiView.begin() == uiView.end()) { ResetUiEdits(); return; }
 
     double mx = 0.0, my = 0.0;
@@ -812,10 +813,10 @@ void PlayerLayer::OnRender() {
 
     device.SetSRGBWrite(false); // всё после сцены (UI/оверлеи) — уже в sRGB
 
-    // UI сцены (UIElementComponent из .sage): худ/меню, собранные в редакторе.
+    // UI сцены (компоненты интерфейса из .sage): худ/меню, собранные в редакторе.
     // Рисуется в letterbox-viewport с его размерами — якоря совпадают с панелью
     // Game редактора (WYSIWYG).
-    auto uiView = m_scene->Registry().view<UIElementComponent>();
+    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
     if (uiView.begin() != uiView.end()) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         m_uiWidth = vpW;  // тот же прямоугольник, с которым сравнивается мышь

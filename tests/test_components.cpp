@@ -24,6 +24,7 @@
 #include "sage/render/ParticleComponents.h"
 #include "sage/render/ReflectionComponents.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptComponent.h"
@@ -85,7 +86,8 @@ TEST(Components_survive_a_scene_round_trip) {
     probe.Registry()->emplace<ReflectionProbeComponent>(probe.Entity()).Resolution = 64;
 
     GameObject ui = scene.CreateObject("UI");
-    ui.Registry()->emplace<UIElementComponent>(ui.Entity()).Text = "кнопка";
+    ui.Registry()->emplace<sage::ui::Transform>(ui.Entity());
+    ui.Registry()->emplace<sage::ui::Label>(ui.Entity()).Text = "кнопка";
 
     std::unique_ptr<Scene> loaded = RoundTrip(scene, "core");
     CHECK_TRUE(loaded != nullptr);
@@ -131,9 +133,11 @@ TEST(Components_survive_a_scene_round_trip) {
         CHECK_EQ(pr.Registry()->get<ReflectionProbeComponent>(pr.Entity()).Resolution, 64);
     }
 
-    GameObject u = Find<UIElementComponent>(*loaded);
+    // Интерфейс хранится НАБОРОМ компонентов: надпись кнопки живёт в Label, а
+    // не в общем поле «текст» у всего подряд.
+    GameObject u = Find<sage::ui::Label>(*loaded);
     CHECK_TRUE(u.Valid());
-    if (u.Valid()) CHECK_TRUE(u.Registry()->get<UIElementComponent>(u.Entity()).Text == "кнопка");
+    if (u.Valid()) CHECK_TRUE(u.Registry()->get<sage::ui::Label>(u.Entity()).Text == "кнопка");
 }
 
 // --- Компоненты, которых сериализация НЕ ЗНАЕТ -------------------------------

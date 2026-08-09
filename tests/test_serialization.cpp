@@ -14,6 +14,7 @@
 #include "sage/render/Material.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
+#include "sage/ui/UI.h"
 
 namespace fs = std::filesystem;
 
@@ -269,25 +270,37 @@ TEST(Serialization_opacity_and_ui_style_round_trip) {
     glass.Renderer().Opacity = 0.35f;
 
     GameObject hud = scene.CreateObject("Bar");
-    UIElementComponent ui;
-    ui.Type = UIElementComponent::Kind::Bar;
-    ui.Icon = "heart";
-    ui.IconColor = {0.9f, 0.2f, 0.2f, 1.0f};
-    ui.GradientColor = {0.1f, 0.1f, 0.2f, 0.8f};
-    ui.ShadowSize = 12.0f;
-    scene.Registry().emplace<UIElementComponent>(hud.Entity(), ui);
+    entt::registry& reg = scene.Registry();
+    reg.emplace<sage::ui::Transform>(hud.Entity(), sage::ui::Transform{});
+    sage::ui::Fill fill;
+    fill.Gradient = {0.1f, 0.1f, 0.2f, 0.8f};
+    fill.ShadowSize = 12.0f;
+    reg.emplace<sage::ui::Fill>(hud.Entity(), fill);
+    sage::ui::Icon icon;
+    icon.Name = "heart";
+    icon.Color = {0.9f, 0.2f, 0.2f, 1.0f};
+    reg.emplace<sage::ui::Icon>(hud.Entity(), icon);
+    reg.emplace<sage::ui::Bar>(hud.Entity(), sage::ui::Bar{});
 
     std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
     GameObject g2 = back->FindByName("Glass");
     CHECK_NEAR(g2.Renderer().Opacity, 0.35f, 1e-4);
 
-    const auto* u2 = back->Registry().try_get<UIElementComponent>(back->FindByName("Bar").Entity());
-    CHECK_TRUE(u2 != nullptr);
-    CHECK_EQ(u2->Icon, std::string("heart"));
-    CHECK_NEAR(u2->IconColor.r, 0.9f, 1e-4);
-    CHECK_NEAR(u2->GradientColor.a, 0.8f, 1e-4);
-    CHECK_NEAR(u2->ShadowSize, 12.0f, 1e-4);
-    CHECK_TRUE(u2->Type == UIElementComponent::Kind::Bar);
+    entt::registry& r2 = back->Registry();
+    const entt::entity e2 = back->FindByName("Bar").Entity();
+    const auto* icon2 = r2.try_get<sage::ui::Icon>(e2);
+    const auto* fill2 = r2.try_get<sage::ui::Fill>(e2);
+    CHECK_TRUE(icon2 != nullptr);
+    CHECK_TRUE(fill2 != nullptr);
+    if (icon2) {
+        CHECK_EQ(icon2->Name, std::string("heart"));
+        CHECK_NEAR(icon2->Color.r, 0.9f, 1e-4);
+    }
+    if (fill2) {
+        CHECK_NEAR(fill2->Gradient.a, 0.8f, 1e-4);
+        CHECK_NEAR(fill2->ShadowSize, 12.0f, 1e-4);
+    }
+    CHECK_TRUE(r2.all_of<sage::ui::Bar>(e2));
 }
 
 // Материал: своя программа и пользовательские юниформы — тоже данные проекта.

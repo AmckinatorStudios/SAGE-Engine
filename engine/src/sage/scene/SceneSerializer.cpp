@@ -11,6 +11,7 @@
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/ui/UIBridge.h"
 
 using json = nlohmann::json;
 
@@ -748,6 +749,319 @@ static UIElementComponent ParseUIElement(const json& uj) {
     return u;
 }
 
+// --- Интерфейс: КОМПОНЕНТЫ ---------------------------------------------------
+//
+// Элемент интерфейса — это набор компонентов (см. sage/ui/UI.h), и в файле он
+// выглядит так же: под "ui" лежат только те части, которые у элемента ЕСТЬ.
+// Кнопка — это transform + fill + label + interactable, надпись — transform +
+// label. Раньше писался один плоский блок на сорок полей, и у каждой надписи в
+// файле честно хранились скругление, девятина, предел длины поля ввода и
+// границы ползунка — поля, ничего для неё не значащие.
+//
+// СТАРЫЙ ФОРМАТ ЧИТАЕТСЯ. Признак — ключ "kind": он был видом элемента и в
+// новой записи не встречается. Такой блок разбирается прежним разбором и
+// раскладывается по компонентам (ui::Decompose), поэтому сцены, сделанные до
+// перехода, открываются без единой правки руками.
+
+static json Vec2ToJson(const glm::vec2& v) { return json{{"x", v.x}, {"y", v.y}}; }
+
+static glm::vec2 Vec2FromJson(const json& j, const glm::vec2& fallback) {
+    if (!j.is_object()) return fallback;
+    return {j.value("x", fallback.x), j.value("y", fallback.y)};
+}
+
+static void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
+    const sage::ui::Transform* t = reg.try_get<sage::ui::Transform>(e);
+    if (!t) return;
+    json& uj = j["ui"];
+
+    json& tj = uj["transform"];
+    tj["anchor"] = (int)t->Anchor;
+    tj["stretch"] = (int)t->Mode;
+    tj["offset"] = Vec2ToJson(t->Offset);
+    tj["size"] = Vec2ToJson(t->Size);
+    tj["margin"] = Vec4ToJson(t->Margin);
+    tj["pivot"] = Vec2ToJson(t->Pivot);
+    tj["layer"] = t->Layer;
+    tj["visible"] = t->Visible;
+    // LayoutSize не пишется: это след последнего кадра, а не настройка.
+
+    if (const sage::ui::Fill* f = reg.try_get<sage::ui::Fill>(e)) {
+        json& fj = uj["fill"];
+        fj["color"] = Vec4ToJson(f->Color);
+        fj["rounding"] = f->Rounding;
+        fj["borderThickness"] = f->BorderThickness;
+        fj["borderColor"] = Vec4ToJson(f->BorderColor);
+        fj["gradient"] = Vec4ToJson(f->Gradient);
+        fj["shadowSize"] = f->ShadowSize;
+        fj["shadowColor"] = Vec4ToJson(f->ShadowColor);
+    }
+    if (const sage::ui::Label* l = reg.try_get<sage::ui::Label>(e)) {
+        json& lj = uj["label"];
+        lj["text"] = l->Text;
+        lj["scale"] = l->Scale;
+        lj["color"] = Vec4ToJson(l->Color);
+        lj["horizontal"] = (int)l->Horizontal;
+        lj["vertical"] = (int)l->Vertical;
+        lj["wrap"] = l->Wrap;
+        lj["autoWidth"] = l->AutoWidth;
+        lj["padX"] = l->PadX;
+    }
+    if (const sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) {
+        json& ij = uj["image"];
+        SaveAssetRef(ij, "path", im->Path);
+        ij["tint"] = Vec4ToJson(im->Tint);
+        ij["sprite"] = Vec4ToJson(im->Sprite);
+        ij["sliceBorder"] = Vec4ToJson(im->SliceBorder);
+        ij["pixelScale"] = im->PixelScale;
+        ij["pixelArt"] = im->PixelArt;
+        ij["spriteHover"] = Vec4ToJson(im->SpriteHover);
+        ij["spritePressed"] = Vec4ToJson(im->SpritePressed);
+    }
+    if (const sage::ui::Bar* b = reg.try_get<sage::ui::Bar>(e)) {
+        json& bj = uj["bar"];
+        bj["value"] = b->Value;
+        bj["fillColor"] = Vec4ToJson(b->FillColor);
+        bj["grow"] = (int)b->Grow;
+        bj["smoothing"] = b->Smoothing;
+    }
+    if (const sage::ui::Icon* ic = reg.try_get<sage::ui::Icon>(e)) {
+        json& icj = uj["icon"];
+        icj["name"] = ic->Name;
+        icj["color"] = Vec4ToJson(ic->Color);
+        icj["size"] = ic->Size;
+    }
+    if (const sage::ui::Interactable* a = reg.try_get<sage::ui::Interactable>(e)) {
+        json& aj = uj["interactable"];
+        aj["enabled"] = a->Enabled;
+        aj["hoverBrightness"] = a->HoverBrightness;
+        aj["pressedBrightness"] = a->PressedBrightness;
+        aj["disabledAlpha"] = a->DisabledAlpha;
+        aj["cursor"] = a->Cursor;
+        aj["action"] = a->Action;
+        // Runtime (наведение, нажатие, каретка) не пишется по определению — он
+        // лежит отдельным полем именно для того, чтобы его нечего было забыть
+        // исключить.
+    }
+    if (const sage::ui::TextInput* in = reg.try_get<sage::ui::TextInput>(e)) {
+        json& inj = uj["input"];
+        inj["placeholder"] = in->Placeholder;
+        inj["maxLength"] = in->MaxLength;
+        inj["password"] = in->Password;
+        inj["readOnly"] = in->ReadOnly;
+    }
+    if (const sage::ui::Range* r = reg.try_get<sage::ui::Range>(e)) {
+        json& rj = uj["range"];
+        rj["min"] = r->Min;
+        rj["max"] = r->Max;
+        rj["value"] = r->Value;
+        rj["step"] = r->Step;
+        rj["toggle"] = r->Toggle;
+    }
+    if (const sage::ui::Mask* m = reg.try_get<sage::ui::Mask>(e)) {
+        json& mj = uj["mask"];
+        mj["form"] = (int)m->Form;
+        mj["rounding"] = m->Rounding;
+        mj["padding"] = Vec4ToJson(m->Padding);
+        mj["showOutside"] = m->ShowOutside;
+    }
+    if (const sage::ui::Layout* lay = reg.try_get<sage::ui::Layout>(e)) {
+        json& lj = uj["layout"];
+        lj["direction"] = (int)lay->Direction;
+        lj["justify"] = (int)lay->Justify;
+        lj["spacing"] = lay->Spacing;
+        lj["padding"] = Vec4ToJson(lay->Padding);
+        lj["columns"] = lay->Columns;
+        lj["stretchCross"] = lay->StretchCross;
+        lj["fitContent"] = lay->FitContent;
+    }
+    if (const sage::ui::Canvas* c = reg.try_get<sage::ui::Canvas>(e)) {
+        json& cj = uj["canvas"];
+        cj["mode"] = (int)c->Mode;
+        cj["reference"] = Vec2ToJson(c->Reference);
+        cj["matchWidthOrHeight"] = c->MatchWidthOrHeight;
+        cj["sortOrder"] = c->SortOrder;
+    }
+    if (const sage::ui::Group* g = reg.try_get<sage::ui::Group>(e)) {
+        json& gj = uj["group"];
+        gj["alpha"] = g->Alpha;
+        gj["interactable"] = g->Interactable;
+        gj["blockRaycasts"] = g->BlockRaycasts;
+    }
+}
+
+// Загружает текстуру картинки элемента (рантайм-поле, в файл не пишется).
+static void ResolveUIImage(sage::ui::Image& im) {
+    if (im.Path.empty()) return;
+    // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
+    // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
+    im.Tex = im.PixelArt ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
+                                                                 /*mipmaps=*/false)
+                         : ResourceManager::Instance().GetTexture(im.Path);
+}
+
+static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
+
+    // Старая запись (плоский элемент с "kind") — разбираем прежним разбором и
+    // раскладываем по компонентам. Отдельная ветка, а не «дочитать недостающее»:
+    // это два разных формата, и делать вид, что один плавно переходит в другой,
+    // значит получить третий.
+    if (uj.contains("kind")) {
+        sage::ui::Decompose(ParseUIElement(uj), reg, e);
+        if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
+        return;
+    }
+
+    sage::ui::Transform t;
+    if (uj.contains("transform")) {
+        const json& tj = uj["transform"];
+        const int anchor = tj.value("anchor", 0);
+        if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
+        const int stretch = tj.value("stretch", 0);
+        if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Transform::Stretch)stretch;
+        t.Offset = Vec2FromJson(tj.value("offset", json::object()), t.Offset);
+        t.Size = Vec2FromJson(tj.value("size", json::object()), t.Size);
+        if (tj.contains("margin")) t.Margin = Vec4FromJson(tj["margin"], t.Margin);
+        t.Pivot = Vec2FromJson(tj.value("pivot", json::object()), t.Pivot);
+        t.Layer = tj.value("layer", t.Layer);
+        t.Visible = tj.value("visible", t.Visible);
+    }
+    reg.emplace_or_replace<sage::ui::Transform>(e, t);
+
+    if (uj.contains("fill")) {
+        const json& fj = uj["fill"];
+        sage::ui::Fill f;
+        if (fj.contains("color")) f.Color = Vec4FromJson(fj["color"], f.Color);
+        f.Rounding = fj.value("rounding", f.Rounding);
+        f.BorderThickness = fj.value("borderThickness", f.BorderThickness);
+        if (fj.contains("borderColor")) f.BorderColor = Vec4FromJson(fj["borderColor"], f.BorderColor);
+        if (fj.contains("gradient")) f.Gradient = Vec4FromJson(fj["gradient"], f.Gradient);
+        f.ShadowSize = fj.value("shadowSize", f.ShadowSize);
+        if (fj.contains("shadowColor")) f.ShadowColor = Vec4FromJson(fj["shadowColor"], f.ShadowColor);
+        reg.emplace_or_replace<sage::ui::Fill>(e, f);
+    }
+    if (uj.contains("label")) {
+        const json& lj = uj["label"];
+        sage::ui::Label l;
+        l.Text = lj.value("text", l.Text);
+        l.Scale = lj.value("scale", l.Scale);
+        if (lj.contains("color")) l.Color = Vec4FromJson(lj["color"], l.Color);
+        const int h = lj.value("horizontal", (int)l.Horizontal);
+        const int v = lj.value("vertical", (int)l.Vertical);
+        if (h >= 0 && h <= 2) l.Horizontal = (sage::ui::Label::Align)h;
+        if (v >= 0 && v <= 2) l.Vertical = (sage::ui::Label::Align)v;
+        l.Wrap = lj.value("wrap", l.Wrap);
+        l.AutoWidth = lj.value("autoWidth", l.AutoWidth);
+        l.PadX = lj.value("padX", l.PadX);
+        reg.emplace_or_replace<sage::ui::Label>(e, l);
+    }
+    if (uj.contains("image")) {
+        const json& ij = uj["image"];
+        sage::ui::Image im;
+        im.Path = LoadAssetRef(ij, "path");
+        if (ij.contains("tint")) im.Tint = Vec4FromJson(ij["tint"], im.Tint);
+        if (ij.contains("sprite")) im.Sprite = Vec4FromJson(ij["sprite"], im.Sprite);
+        if (ij.contains("sliceBorder")) im.SliceBorder = Vec4FromJson(ij["sliceBorder"], im.SliceBorder);
+        im.PixelScale = ij.value("pixelScale", im.PixelScale);
+        im.PixelArt = ij.value("pixelArt", im.PixelArt);
+        if (ij.contains("spriteHover")) im.SpriteHover = Vec4FromJson(ij["spriteHover"], im.SpriteHover);
+        if (ij.contains("spritePressed"))
+            im.SpritePressed = Vec4FromJson(ij["spritePressed"], im.SpritePressed);
+        ResolveUIImage(im);
+        reg.emplace_or_replace<sage::ui::Image>(e, im);
+    }
+    if (uj.contains("bar")) {
+        const json& bj = uj["bar"];
+        sage::ui::Bar b;
+        b.Value = bj.value("value", b.Value);
+        if (bj.contains("fillColor")) b.FillColor = Vec4FromJson(bj["fillColor"], b.FillColor);
+        const int grow = bj.value("grow", (int)b.Grow);
+        if (grow >= 0 && grow <= 3) b.Grow = (sage::ui::Bar::Direction)grow;
+        b.Smoothing = bj.value("smoothing", b.Smoothing);
+        reg.emplace_or_replace<sage::ui::Bar>(e, b);
+    }
+    if (uj.contains("icon")) {
+        const json& icj = uj["icon"];
+        sage::ui::Icon ic;
+        ic.Name = icj.value("name", ic.Name);
+        if (icj.contains("color")) ic.Color = Vec4FromJson(icj["color"], ic.Color);
+        ic.Size = icj.value("size", ic.Size);
+        reg.emplace_or_replace<sage::ui::Icon>(e, ic);
+    }
+    if (uj.contains("interactable")) {
+        const json& aj = uj["interactable"];
+        sage::ui::Interactable a;
+        a.Enabled = aj.value("enabled", a.Enabled);
+        a.HoverBrightness = aj.value("hoverBrightness", a.HoverBrightness);
+        a.PressedBrightness = aj.value("pressedBrightness", a.PressedBrightness);
+        a.DisabledAlpha = aj.value("disabledAlpha", a.DisabledAlpha);
+        a.Cursor = aj.value("cursor", a.Cursor);
+        a.Action = aj.value("action", a.Action);
+        reg.emplace_or_replace<sage::ui::Interactable>(e, a);
+    }
+    if (uj.contains("input")) {
+        const json& inj = uj["input"];
+        sage::ui::TextInput in;
+        in.Placeholder = inj.value("placeholder", in.Placeholder);
+        in.MaxLength = inj.value("maxLength", in.MaxLength);
+        in.Password = inj.value("password", in.Password);
+        in.ReadOnly = inj.value("readOnly", in.ReadOnly);
+        reg.emplace_or_replace<sage::ui::TextInput>(e, in);
+    }
+    if (uj.contains("range")) {
+        const json& rj = uj["range"];
+        sage::ui::Range r;
+        r.Min = rj.value("min", r.Min);
+        r.Max = rj.value("max", r.Max);
+        r.Value = rj.value("value", r.Value);
+        r.Step = rj.value("step", r.Step);
+        r.Toggle = rj.value("toggle", r.Toggle);
+        reg.emplace_or_replace<sage::ui::Range>(e, r);
+    }
+    if (uj.contains("mask")) {
+        const json& mj = uj["mask"];
+        sage::ui::Mask m;
+        const int form = mj.value("form", (int)m.Form);
+        if (form >= 0 && form <= 1) m.Form = (sage::ui::Mask::Shape)form;
+        m.Rounding = mj.value("rounding", m.Rounding);
+        if (mj.contains("padding")) m.Padding = Vec4FromJson(mj["padding"], m.Padding);
+        m.ShowOutside = mj.value("showOutside", m.ShowOutside);
+        reg.emplace_or_replace<sage::ui::Mask>(e, m);
+    }
+    if (uj.contains("layout")) {
+        const json& lj = uj["layout"];
+        sage::ui::Layout lay;
+        const int dir = lj.value("direction", (int)lay.Direction);
+        if (dir >= 0 && dir <= 2) lay.Direction = (sage::ui::Layout::Flow)dir;
+        const int just = lj.value("justify", (int)lay.Justify);
+        if (just >= 0 && just <= 3) lay.Justify = (sage::ui::Layout::Align)just;
+        lay.Spacing = lj.value("spacing", lay.Spacing);
+        if (lj.contains("padding")) lay.Padding = Vec4FromJson(lj["padding"], lay.Padding);
+        lay.Columns = lj.value("columns", lay.Columns);
+        lay.StretchCross = lj.value("stretchCross", lay.StretchCross);
+        lay.FitContent = lj.value("fitContent", lay.FitContent);
+        reg.emplace_or_replace<sage::ui::Layout>(e, lay);
+    }
+    if (uj.contains("canvas")) {
+        const json& cj = uj["canvas"];
+        sage::ui::Canvas c;
+        const int mode = cj.value("mode", (int)c.Mode);
+        if (mode >= 0 && mode <= 1) c.Mode = (sage::ui::Canvas::Scale)mode;
+        c.Reference = Vec2FromJson(cj.value("reference", json::object()), c.Reference);
+        c.MatchWidthOrHeight = cj.value("matchWidthOrHeight", c.MatchWidthOrHeight);
+        c.SortOrder = cj.value("sortOrder", c.SortOrder);
+        reg.emplace_or_replace<sage::ui::Canvas>(e, c);
+    }
+    if (uj.contains("group")) {
+        const json& gj = uj["group"];
+        sage::ui::Group g;
+        g.Alpha = gj.value("alpha", g.Alpha);
+        g.Interactable = gj.value("interactable", g.Interactable);
+        g.BlockRaycasts = gj.value("blockRaycasts", g.BlockRaycasts);
+        reg.emplace_or_replace<sage::ui::Group>(e, g);
+    }
+}
+
 static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
     json& pj = j["particles"];
     pj["preset"] = pe.Preset;
@@ -956,7 +1270,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const ShaderParamsComponent* sp = reg.try_get<ShaderParamsComponent>(e))
             SaveShaderParams(j, *sp);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
-        if (const UIElementComponent* uie = reg.try_get<UIElementComponent>(e)) SaveUIElement(j, *uie);
+        SaveUIComponents(j, reg, e);
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -1233,7 +1547,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("particles"))
             obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
         if (j.contains("ui"))
-            obj.Registry()->emplace<UIElementComponent>(obj.Entity(), ParseUIElement(j["ui"]));
+            LoadUIComponents(j["ui"], *obj.Registry(), obj.Entity());
 
         // Пересоздаём GPU-ресурс на основе описания
         if (mr.Ref.type == MeshRef::Type::Model) {

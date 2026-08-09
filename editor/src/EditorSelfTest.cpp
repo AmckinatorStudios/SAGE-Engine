@@ -36,6 +36,7 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -1692,11 +1693,7 @@ void EditorLayer::RunSelfTest() {
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/selftest_script.lua"});
-        {
-            UIElementComponent ui;
-            sage::ui::ApplyPreset(ui, "Button");
-            reg.emplace_or_replace<UIElementComponent>(e, ui);
-        }
+        sage::ui::ApplyPreset(reg, e, "Button");
         {
             ParticleEmitterComponent em;
             em.Config = ParticlePresets::Registry()[0].Make();
@@ -1738,7 +1735,7 @@ void EditorLayer::RunSelfTest() {
                     {"IK", r2.all_of<IKComponent>(e2)},
                     {"ReflectionProbe", r2.all_of<ReflectionProbeComponent>(e2)},
                     {"Script", r2.all_of<ScriptComponent>(e2)},
-                    {"UIElement", r2.all_of<UIElementComponent>(e2)},
+                    {"UIElement", r2.all_of<sage::ui::Transform>(e2)},
                     {"ParticleEmitter", r2.all_of<ParticleEmitterComponent>(e2)},
                 };
                 for (const Check& c : checks) {
@@ -1751,8 +1748,11 @@ void EditorLayer::RunSelfTest() {
                 // Значения, а не только наличие: заготовка кнопки обязана
                 // остаться кнопкой, а не панелью с чужими полями.
                 if (ok) {
-                    const UIElementComponent* ui = r2.try_get<UIElementComponent>(e2);
-                    if (!ui || !ui->Interactive || ui->Text.empty()) {
+                    // Кнопка — это набор частей, и проверять надо именно его:
+                    // прямоугольник с надписью, который не ловит мышь, кнопкой
+                    // не является, сколько бы полей у него ни было.
+                    const sage::ui::Label* label = r2.try_get<sage::ui::Label>(e2);
+                    if (!r2.all_of<sage::ui::Interactable>(e2) || !label || label->Text.empty()) {
                         LOG_ERROR("Editor") << "SELFTEST: элемент интерфейса приехал не кнопкой";
                         ok = false;
                     }
@@ -1916,29 +1916,36 @@ end
     cam.GetTransform().Rotation = {-12.0f, 0.0f, 0.0f};
     m_scene->Registry().emplace<CameraComponent>(cam.Entity());
 
+    entt::registry& uiReg = m_scene->Registry();
     GameObject hud = m_scene->CreateObject("HUD");
-    UIElementComponent hudUi;
-    hudUi.Type = UIElementComponent::Kind::Panel;
-    hudUi.Offset = {16.0f, 16.0f};
-    hudUi.Size = {240.0f, 64.0f};
-    hudUi.Rounding = 12.0f;
-    hudUi.BorderThickness = 2.0f;
-    hudUi.Text = "Score: 0 / 5";
-    hudUi.TextCentered = false;
-    m_scene->Registry().emplace<UIElementComponent>(hud.Entity(), hudUi);
-    m_scene->Registry().emplace<ScriptComponent>(hud.Entity(), ScriptComponent{"assets/scripts/hud.lua"});
+    sage::ui::Transform hudXf;
+    hudXf.Offset = {16.0f, 16.0f};
+    hudXf.Size = {240.0f, 64.0f};
+    uiReg.emplace<sage::ui::Transform>(hud.Entity(), hudXf);
+    sage::ui::Fill hudFill;
+    hudFill.Rounding = 12.0f;
+    hudFill.BorderThickness = 2.0f;
+    uiReg.emplace<sage::ui::Fill>(hud.Entity(), hudFill);
+    sage::ui::Label hudLabel;
+    hudLabel.Text = "Score: 0 / 5";
+    hudLabel.Horizontal = sage::ui::Label::Align::Start;
+    uiReg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
+    uiReg.emplace<ScriptComponent>(hud.Entity(), ScriptComponent{"assets/scripts/hud.lua"});
 
     GameObject bar = m_scene->CreateObject("Score Bar");
-    UIElementComponent barUi;
-    barUi.Type = UIElementComponent::Kind::Bar;
-    barUi.Anchor = UIAnchor::BottomLeft;
-    barUi.Offset = {12.0f, 8.0f};
-    barUi.Size = {216.0f, 16.0f};
-    barUi.Rounding = 7.0f;
-    barUi.Color = {0.0f, 0.0f, 0.0f, 0.55f};
-    barUi.Value = 0.0f;
-    barUi.BarFillColor = {0.95f, 0.80f, 0.20f, 1.0f};
-    m_scene->Registry().emplace<UIElementComponent>(bar.Entity(), barUi);
+    sage::ui::Transform barXf;
+    barXf.Anchor = UIAnchor::BottomLeft;
+    barXf.Offset = {12.0f, 8.0f};
+    barXf.Size = {216.0f, 16.0f};
+    uiReg.emplace<sage::ui::Transform>(bar.Entity(), barXf);
+    sage::ui::Fill barFill;
+    barFill.Rounding = 7.0f;
+    barFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
+    uiReg.emplace<sage::ui::Fill>(bar.Entity(), barFill);
+    sage::ui::Bar barBar;
+    barBar.Value = 0.0f;
+    barBar.FillColor = {0.95f, 0.80f, 0.20f, 1.0f};
+    uiReg.emplace<sage::ui::Bar>(bar.Entity(), barBar);
     m_scene->SetParent(bar.Entity(), hud.Entity());
 
     // --- 4. Сохранить и ПЕРЕЧИТАТЬ с диска: играем то, что реально в файле ---
@@ -1955,11 +1962,11 @@ end
         bool coinsGone = true;
         for (int i = 1; i <= 5; ++i)
             if (m_scene->FindByName("Coin" + std::to_string(i)).Valid()) coinsGone = false;
-        const UIElementComponent* hudNow =
-            m_scene->Registry().try_get<UIElementComponent>(m_scene->FindByName("HUD").Entity());
+        const sage::ui::Label* hudNow =
+            m_scene->Registry().try_get<sage::ui::Label>(m_scene->FindByName("HUD").Entity());
         bool scoreOk = hudNow && hudNow->Text == "Score: 5 / 5";
-        const UIElementComponent* barNow =
-            m_scene->Registry().try_get<UIElementComponent>(m_scene->FindByName("Score Bar").Entity());
+        const sage::ui::Bar* barNow =
+            m_scene->Registry().try_get<sage::ui::Bar>(m_scene->FindByName("Score Bar").Entity());
         bool barOk = barNow && std::abs(barNow->Value - 1.0f) < 0.001f;
         if (!coinsGone || !scoreOk || !barOk) {
             LOG_ERROR("Editor") << "E2E: play logic failed (coinsGone=" << coinsGone

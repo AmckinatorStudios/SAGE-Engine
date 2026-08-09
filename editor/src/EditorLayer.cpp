@@ -39,6 +39,8 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UI.h"
+#include "sage/ui/UIBridge.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
@@ -334,9 +336,7 @@ void EditorLayer::OnAttach() {
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
-        UIElementComponent ui;
-        sage::ui::ApplyPreset(ui, "Button");
-        reg.emplace_or_replace<UIElementComponent>(e, ui);
+        sage::ui::ApplyPreset(reg, e, "Button");
         ParticleEmitterComponent em;
         em.Config = ParticlePresets::Registry()[0].Make();
         reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
@@ -898,9 +898,7 @@ void EditorLayer::Redo() {
 // создал элемент и не увидел ничего.
 GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     GameObject obj = m_scene->CreateObject(preset);
-    UIElementComponent& u = m_scene->Registry().emplace<UIElementComponent>(obj.Entity());
-    u.Anchor = UIAnchor::Center;
-    u.Offset = glm::vec2(0.0f, 0.0f);
+    entt::registry& reg = m_scene->Registry();
 
     // Новый элемент становится ДОЧЕРНИМ к выделенному элементу интерфейса.
     //
@@ -913,7 +911,7 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     // прикреплять».
     if (m_selectedId >= 0) {
         GameObject sel = m_scene->Get(m_selectedId);
-        if (sel.Valid() && m_scene->Registry().all_of<UIElementComponent>(sel.Entity())) {
+        if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity())) {
             m_scene->SetParent(obj.Entity(), sel.Entity());
         }
     }
@@ -922,7 +920,12 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     // Раньше это знание жило только здесь, и получить кнопку можно было лишь
     // мышью в редакторе: скрипт, собирающий интерфейс на лету, повторял те же
     // семь присваиваний у себя.
-    sage::ui::ApplyPreset(u, preset);
+    sage::ui::ApplyPreset(reg, obj.Entity(), preset);
+    // Новый элемент появляется в центре родителя: у края экрана его легко не
+    // заметить и решить, что «ничего не создалось».
+    sage::ui::Transform& xf = reg.get<sage::ui::Transform>(obj.Entity());
+    xf.Anchor = UIAnchor::Center;
+    xf.Offset = glm::vec2(0.0f, 0.0f);
 
     return obj;
 }
@@ -1194,32 +1197,44 @@ void EditorLayer::NewScene(bool withDemoContent) {
         spotLc.OuterConeDeg = 30.0f;
         m_scene->Registry().emplace<LightComponent>(spot.Entity(), spotLc);
 
-        // Демо-худ (UIElementComponent): панель со скруглением и рамкой + полоса
-        // здоровья ребёнком — показывает UI-систему сразу в панели Game и служит
-        // стартовой точкой для своего интерфейса (правится в Inspector).
+        // Демо-худ: панель со скруглением и рамкой + полоса здоровья ребёнком.
+        // Показывает систему интерфейса сразу в панели Game и служит стартовой
+        // точкой для своего интерфейса (правится в Inspector).
+        //
+        // Собирается ИЗ ЧАСТЕЙ — так же, как это делает человек в инспекторе:
+        // панель это прямоугольник + подложка + надпись, полоса — прямоугольник
+        // + подложка + шкала.
+        entt::registry& reg = m_scene->Registry();
         GameObject hud = m_scene->CreateObject("HUD Panel");
-        UIElementComponent hudUi;
-        hudUi.Type = UIElementComponent::Kind::Panel;
-        hudUi.Anchor = UIAnchor::TopLeft;
-        hudUi.Offset = {16.0f, 16.0f};
-        hudUi.Size = {230.0f, 64.0f};
-        hudUi.Rounding = 12.0f;
-        hudUi.BorderThickness = 2.0f;
-        hudUi.Text = "SAGE UI";
-        hudUi.TextCentered = false;
-        m_scene->Registry().emplace<UIElementComponent>(hud.Entity(), hudUi);
+        sage::ui::Transform hudXf;
+        hudXf.Anchor = UIAnchor::TopLeft;
+        hudXf.Offset = {16.0f, 16.0f};
+        hudXf.Size = {230.0f, 64.0f};
+        reg.emplace<sage::ui::Transform>(hud.Entity(), hudXf);
+        sage::ui::Fill hudFill;
+        hudFill.Rounding = 12.0f;
+        hudFill.BorderThickness = 2.0f;
+        reg.emplace<sage::ui::Fill>(hud.Entity(), hudFill);
+        sage::ui::Label hudLabel;
+        hudLabel.Text = "SAGE UI";
+        hudLabel.Horizontal = sage::ui::Label::Align::Start;
+        reg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
 
         GameObject hp = m_scene->CreateObject("HP Bar");
-        UIElementComponent hpUi;
-        hpUi.Type = UIElementComponent::Kind::Bar;
-        hpUi.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
-        hpUi.Offset = {12.0f, 8.0f};
-        hpUi.Size = {206.0f, 18.0f};
-        hpUi.Rounding = 8.0f;
-        hpUi.Color = {0.0f, 0.0f, 0.0f, 0.55f};
-        hpUi.Value = 0.72f;
-        hpUi.BarFillColor = {0.85f, 0.30f, 0.30f, 1.0f};
-        m_scene->Registry().emplace<UIElementComponent>(hp.Entity(), hpUi);
+        sage::ui::Transform hpXf;
+        hpXf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
+        hpXf.Offset = {12.0f, 8.0f};
+        hpXf.Size = {206.0f, 18.0f};
+        reg.emplace<sage::ui::Transform>(hp.Entity(), hpXf);
+        sage::ui::Fill hpFill;
+        hpFill.Rounding = 8.0f;
+        hpFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
+        reg.emplace<sage::ui::Fill>(hp.Entity(), hpFill);
+        sage::ui::Bar hpBar;
+        hpBar.Value = 0.72f;
+        hpBar.FillColor = {0.85f, 0.30f, 0.30f, 1.0f};
+        hpBar.Smoothing = 3.0f;
+        reg.emplace<sage::ui::Bar>(hp.Entity(), hpBar);
         m_scene->SetParent(hp.Entity(), hud.Entity());
 
         // Что-то выбрано сразу — гизмо видно, Inspector не пустой. Выбираем
@@ -2383,10 +2398,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
 
             // Готовые элементы интерфейса, а не «добавь компонент и настрой».
             //
-            // Пустой UIElementComponent — это панель без текста, без размера под
-            // содержимое и без интерактива: чтобы получить из него кнопку, надо
-            // знать, какие пять полей поменять. Меню отдаёт то, что человек и
-            // хотел получить, сразу настроенным; дальше правится всё.
+            // Голый прямоугольник — это ещё не элемент: чтобы получить из него
+            // кнопку, надо добавить подложку, надпись и реакцию на мышь. Меню
+            // отдаёт то, что человек и хотел получить, сразу собранным; дальше
+            // правится всё, вплоть до состава частей.
             if (ImGui::BeginMenu(T("Create UI"))) {
                 struct Preset { const char* Name; const char* Label; };
                 static const Preset kPresets[] = {

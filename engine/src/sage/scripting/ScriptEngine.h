@@ -273,7 +273,14 @@ private:
     void RegisterEngineApi();
     void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
     void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
-    void RegisterUIApi();         // UIElementComponent + sage.ui.*
+    void RegisterUIApi();         // элемент интерфейса + sage.ui.*
+    // Аксессоры интерфейса на GameObject (HasUI/GetUI/AddUI/RemoveUI).
+    //
+    // Отдельным вызовом, а не строкой в RegisterGameObject, потому что элемент
+    // интерфейса — это НАБОР компонентов, и общий BindComponentAccessors<T> тут
+    // не подходит: отдавать скрипту один компонент из набора значило бы врать
+    // ему о том, что такое элемент. Тело живёт рядом с прокси (ScriptApi_UI.cpp).
+    void BindUIAccessors(sol::usertype<GameObject>& t);
     void RegisterTweenApi();      // Ease + sage.tween.*
     void RegisterAnimationApi();  // sage.anim.* и sage.ik.*
     void RegisterGameObject();    // GameObject + аксессоры компонентов + иерархия

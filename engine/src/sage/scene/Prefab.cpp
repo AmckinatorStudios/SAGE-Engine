@@ -6,6 +6,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -71,7 +72,22 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<AnimatedModelComponent>(src, dst);
     CopyIfPresent<IKComponent>(src, dst);
     CopyIfPresent<ReflectionProbeComponent>(src, dst);
-    CopyIfPresent<UIElementComponent>(src, dst);
+    // Интерфейс — набор компонентов, и копировать его надо целиком: пропустить
+    // одну часть значит получить префаб-кнопку, которая не нажимается, или
+    // панель без надписи.
+    CopyIfPresent<sage::ui::Transform>(src, dst);
+    CopyIfPresent<sage::ui::Fill>(src, dst);
+    CopyIfPresent<sage::ui::Label>(src, dst);
+    CopyIfPresent<sage::ui::Image>(src, dst);
+    CopyIfPresent<sage::ui::Bar>(src, dst);
+    CopyIfPresent<sage::ui::Icon>(src, dst);
+    CopyIfPresent<sage::ui::Interactable>(src, dst);
+    CopyIfPresent<sage::ui::TextInput>(src, dst);
+    CopyIfPresent<sage::ui::Range>(src, dst);
+    CopyIfPresent<sage::ui::Mask>(src, dst);
+    CopyIfPresent<sage::ui::Layout>(src, dst);
+    CopyIfPresent<sage::ui::Canvas>(src, dst);
+    CopyIfPresent<sage::ui::Group>(src, dst);
     CopyIfPresent<GIStaticComponent>(src, dst);
     CopyIfPresent<CharacterControllerComponent>(src, dst);
     CopyIfPresent<ShaderParamsComponent>(src, dst);

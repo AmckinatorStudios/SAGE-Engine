@@ -5,6 +5,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UIBridge.h"
 
 namespace sage::ui {
 
@@ -12,10 +13,16 @@ namespace {
 
 using UI = UIElementComponent;
 
-// Создаёт UI-сущность с компонентом и (опционально) родителем; возвращает её.
+// Создаёт UI-сущность и (опционально) родителя; возвращает её.
+//
+// Описание элемента здесь остаётся ПЛОСКИМ, а в сцену кладётся разбором на
+// компоненты. Это витрина: она нарочно набита элементами всех видов, и
+// расписывать каждый из полусотни набором компонентов значило бы утроить файл,
+// ничего не показав сверх того, что он показывает сейчас. Как выглядит сборка
+// ИЗ компонентов, показывают демо-сцены (assets/demos) и заготовки UI.h.
 GameObject MakeUI(Scene& scene, const std::string& name, const UI& ui, GameObject parent) {
     GameObject e = scene.CreateObject(name);
-    scene.Registry().emplace<UI>(e.Entity(), ui);
+    Decompose(ui, scene.Registry(), e.Entity());
     if (parent.Valid()) scene.SetParent(e.Entity(), parent.Entity());
     return e;
 }
@@ -27,7 +34,7 @@ UI Panel(UIAnchor a, glm::vec2 off, glm::vec2 size, glm::vec4 color, float round
     return u;
 }
 
-UI Label(UIAnchor a, glm::vec2 off, const std::string& text, float scale, glm::vec4 col) {
+UI TextLine(UIAnchor a, glm::vec2 off, const std::string& text, float scale, glm::vec4 col) {
     UI u;
     u.Type = UI::Kind::Label;
     u.Anchor = a; u.Offset = off; u.Size = {180.0f, 24.0f};
@@ -48,7 +55,7 @@ int BuildShowcase(Scene& scene) {
     invUi.BorderThickness = 2.0f; invUi.BorderColor = {0.85f, 0.80f, 0.62f, 0.9f};
     GameObject inv = MakeUI(scene, "Inventory", invUi, root);
 
-    MakeUI(scene, "InvTitle", Label(UIAnchor::TopLeft, {18, 14}, "INVENTORY", 3.0f, {1, 0.95f, 0.8f, 1}), inv);
+    MakeUI(scene, "InvTitle", TextLine(UIAnchor::TopLeft, {18, 14}, "INVENTORY", 3.0f, {1, 0.95f, 0.8f, 1}), inv);
 
     // Обрезающий контейнер-«вьюпорт» сетки (ClipChildren — маска): слоты за его
     // границей не рисуются (список прокручиваемых предметов).
@@ -80,7 +87,7 @@ int BuildShowcase(Scene& scene) {
                 icon.Type = UI::Kind::Panel;
                 MakeUI(scene, "Icon" + std::to_string(slotIndex), icon, slot);
                 // Счётчик в углу.
-                UI cnt = Label(UIAnchor::BottomRight, {4, 2},
+                UI cnt = TextLine(UIAnchor::BottomRight, {4, 2},
                                "x" + std::to_string((slotIndex * 3) % 9 + 1), 1.4f, {1, 1, 1, 1});
                 cnt.Size = {28, 16};
                 MakeUI(scene, "Count" + std::to_string(slotIndex), cnt, slot);
@@ -89,7 +96,7 @@ int BuildShowcase(Scene& scene) {
     }
 
     // Полоса веса внизу инвентаря.
-    MakeUI(scene, "WeightLabel", Label(UIAnchor::BottomLeft, {18, 40}, "Weight", 1.6f, {0.8f, 0.85f, 0.9f, 1}), inv);
+    MakeUI(scene, "WeightLabel", TextLine(UIAnchor::BottomLeft, {18, 40}, "Weight", 1.6f, {0.8f, 0.85f, 0.9f, 1}), inv);
     UI weightBar = Panel(UIAnchor::BottomLeft, {18, 14}, {336, 20}, {0.10f, 0.11f, 0.15f, 1.0f}, 6.0f);
     weightBar.Type = UI::Kind::Bar;
     weightBar.Value = 0.62f;
@@ -101,7 +108,7 @@ int BuildShowcase(Scene& scene) {
     skillUi.BorderThickness = 2.0f; skillUi.BorderColor = {0.55f, 0.80f, 0.95f, 0.9f};
     GameObject skills = MakeUI(scene, "SkillTree", skillUi, root);
 
-    MakeUI(scene, "SkillTitle", Label(UIAnchor::TopLeft, {18, 14}, "SKILL TREE  -  3 pts", 2.6f, {0.75f, 0.9f, 1, 1}), skills);
+    MakeUI(scene, "SkillTitle", TextLine(UIAnchor::TopLeft, {18, 14}, "SKILL TREE  -  3 pts", 2.6f, {0.75f, 0.9f, 1, 1}), skills);
 
     // Узлы дерева (позиции внутри панели) + связи родитель->ребёнок.
     struct Node { const char* Name; float X, Y; int Parent; bool Unlocked; };

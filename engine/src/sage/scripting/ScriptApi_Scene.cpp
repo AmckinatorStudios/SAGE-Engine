@@ -59,7 +59,7 @@ void ScriptEngine::RegisterGameObject() {
     sage::scripting::detail::BindComponentAccessors<ParticleEmitterComponent>(goType, "HasEmitter", "GetEmitter", "AddEmitter", "RemoveEmitter");
     sage::scripting::detail::BindComponentAccessors<MeshRendererComponent>(goType, "HasRenderer", "GetRenderer", "AddRenderer", "RemoveRenderer");
     sage::scripting::detail::BindComponentAccessors<ScriptComponent>(goType, "HasScript", "GetScript", "AddScript", "RemoveScript");
-    sage::scripting::detail::BindComponentAccessors<UIElementComponent>(goType, "HasUI", "GetUI", "AddUI", "RemoveUI");
+    BindUIAccessors(goType);
     sage::scripting::detail::BindComponentAccessors<DecalComponent>(goType, "HasDecal", "GetDecal", "AddDecal", "RemoveDecal");
 
     // --- Иерархия прямо на объекте: e:SetParent(p) / e:Parent() / e:Children() /

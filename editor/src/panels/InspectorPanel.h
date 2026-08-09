@@ -11,7 +11,6 @@ class EditorHost;
 class GameObject;
 class Texture;
 struct MeshRendererComponent;
-struct UIElementComponent;
 enum class UIAnchor;
 
 // Панель Inspector — свойства выбранной сущности (имя/Transform/MeshRenderer/
@@ -103,9 +102,11 @@ private:
     // его ещё нет, и назначение его сущности.
     void AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr);
     void DrawEntityProperties(EditorHost& host);
-    // Инспектор элемента интерфейса — отдельно от общей простыни свойств:
-    // у него своя логика «что показывать при этом виде элемента».
-    void DrawUIElement(EditorHost& host, GameObject obj, UIElementComponent& u);
+    // Инспектор элемента интерфейса: посекционно по ЧАСТЯМ, из которых элемент
+    // собран (sage::ui::Fill/Label/Image/...). Раньше здесь была одна простыня
+    // на сорок полей с ветками «что показывать при этом виде элемента»; теперь
+    // показывается ровно то, из чего элемент сделан, и там же это меняется.
+    void DrawUIElement(EditorHost& host, GameObject obj);
     // Выбор якоря сеткой 3x3 — так же, как якорь выглядит на экране.
     bool DrawAnchorPicker(UIAnchor& anchor);
     // Серое пояснение с переносом строк (см. пояснение в .cpp).

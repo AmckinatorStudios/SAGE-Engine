@@ -46,11 +46,11 @@ std::vector<entt::entity> SortedUIChildren(Scene& scene, entt::entity parent) {
     entt::registry& reg = scene.Registry();
     if (const auto* h = reg.try_get<HierarchyComponent>(parent)) {
         for (auto c : h->Children)
-            if (reg.valid(c) && reg.all_of<UIElementComponent>(c)) kids.push_back(c);
+            if (IsElement(reg, c)) kids.push_back(c);
     }
     std::stable_sort(kids.begin(), kids.end(), [&reg](entt::entity a, entt::entity b) {
-        const auto& ta = reg.get<UIElementComponent>(a);
-        const auto& tb = reg.get<UIElementComponent>(b);
+        const Transform& ta = reg.get<Transform>(a);
+        const Transform& tb = reg.get<Transform>(b);
         if (ta.Layer != tb.Layer) return ta.Layer < tb.Layer;
         return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
     });
@@ -67,9 +67,9 @@ std::vector<entt::entity> SortedUIChildren(Scene& scene, entt::entity parent) {
 std::vector<entt::entity> SortedUIRoots(Scene& scene) {
     std::vector<entt::entity> roots;
     entt::registry& reg = scene.Registry();
-    for (auto e : reg.view<UIElementComponent>()) {
+    for (auto e : reg.view<Transform>()) {
         entt::entity parent = scene.ParentOf(e);
-        if (parent == entt::null || !reg.all_of<UIElementComponent>(parent)) roots.push_back(e);
+        if (parent == entt::null || !IsElement(reg, parent)) roots.push_back(e);
     }
     auto canvasOrder = [&reg](entt::entity e) {
         const Canvas* c = reg.try_get<Canvas>(e);
@@ -78,8 +78,8 @@ std::vector<entt::entity> SortedUIRoots(Scene& scene) {
     std::stable_sort(roots.begin(), roots.end(), [&](entt::entity a, entt::entity b) {
         const int ca = canvasOrder(a), cb = canvasOrder(b);
         if (ca != cb) return ca < cb;
-        const auto& ta = reg.get<UIElementComponent>(a);
-        const auto& tb = reg.get<UIElementComponent>(b);
+        const Transform& ta = reg.get<Transform>(a);
+        const Transform& tb = reg.get<Transform>(b);
         if (ta.Layer != tb.Layer) return ta.Layer < tb.Layer;
         return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
     });
@@ -443,6 +443,12 @@ void DrawElement(const UIElementComponent& e, const UIRect& r, UIRenderer& ui) {
 // попадание и ввод читают её результат.
 struct Solved {
     entt::entity Entity;
+    // Плоское описание элемента, собранное из его компонентов ОДИН раз за
+    // проход (см. UIBridge.h). Хранится здесь, а не пересобирается у каждого
+    // потребителя: отрисовка, попадание курсором и ввод смотрят на одно и то
+    // же, и собрать его трижды значило бы снова завести три расходящихся
+    // взгляда на один элемент.
+    UIElementComponent Flat;
     UIRect Rect;
     UIRect Clip;      // окно обрезки (нулевая ширина/высота — не обрезан)
     bool Clipped = false;
@@ -464,13 +470,16 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                   bool clipped, const UIRect& clip, float alpha, bool interactive,
                   const UIRect* forced, std::vector<Solved>& out) {
     entt::registry& reg = scene.Registry();
-    UIElementComponent& e = reg.get<UIElementComponent>(ent);
+    UIElementComponent e = Compose(reg, ent);
     if (!e.Visible) return; // невидимый прячет и всё поддерево
 
     glm::vec2 size = MeasureElement(e, ui);
     UIRect r = forced ? *forced : ResolveElementRect(e, parentRect, size);
     if (forced) size = {forced->w, forced->h};
+    // Фактический размер запоминается в САМОМ элементе: его читают попадание
+    // курсором и следующий кадр, когда шрифта под рукой может не оказаться.
     e.LayoutSize = size;
+    reg.get<Transform>(ent).LayoutSize = size;
 
     // Групповые свойства накапливаются вниз по дереву: спрятать панель — это
     // одно число на ней, а не проход скриптом по каждому её ребёнку.
@@ -481,7 +490,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
         if (!g->Interactable || !g->BlockRaycasts) myInteractive = false;
     }
 
-    out.push_back(Solved{ent, r, clip, clipped, myAlpha, myInteractive});
+    out.push_back(Solved{ent, e, r, clip, clipped, myAlpha, myInteractive});
 
     std::vector<entt::entity> kids = SortedUIChildren(scene, ent);
     if (kids.empty()) return;
@@ -504,7 +513,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     if (const Layout* layout = reg.try_get<Layout>(ent)) {
         std::vector<LayoutSlot> slots(kids.size());
         for (size_t i = 0; i < kids.size(); ++i) {
-            slots[i].Size = MeasureElement(reg.get<UIElementComponent>(kids[i]), ui);
+            slots[i].Size = MeasureElement(Compose(reg, kids[i]), ui);
         }
         ApplyLayout(*layout, r, slots);
         for (size_t i = 0; i < kids.size(); ++i) {
@@ -551,10 +560,9 @@ bool PointIn(const UIRect& r, glm::vec2 p) {
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
     SAGE_PROFILE("Интерфейс сцены");
     const std::vector<Solved> items = SolveScene(scene, &ui, screenW, screenH);
-    const entt::registry& reg = scene.Registry();
 
     for (const Solved& it : items) {
-        UIElementComponent flat = reg.get<UIElementComponent>(it.Entity);
+        UIElementComponent flat = it.Flat;
         if (it.Alpha < 1.0f) {
             // Прозрачность группы умножается на все цвета элемента, а не
             // подменяет их: панель с полупрозрачным фоном не должна становиться
@@ -591,13 +599,23 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     entt::registry& reg = scene.Registry();
     const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH);
 
-    auto stateOf = [&reg](entt::entity e) -> UIElementComponent* {
-        return reg.try_get<UIElementComponent>(e);
+    // Состояние взаимодействия живёт в Interactable::Runtime, и его НЕТ у
+    // элементов, которые мышь не ловят. Это не мелочь: раньше поля Hovered,
+    // Pressed и Caret были у каждой надписи и каждой рамки, и «под курсором» у
+    // подписи означало ровно ничего — но проверить это было нельзя, потому что
+    // поле есть у всех.
+    auto stateOf = [&reg](entt::entity e) -> State* {
+        Interactable* act = reg.try_get<Interactable>(e);
+        return act ? &act->Runtime : nullptr;
     };
     auto usable = [&reg](entt::entity e) {
-        const UIElementComponent* el = reg.try_get<UIElementComponent>(e);
-        return el && el->Interactive && el->Enabled;
+        const Interactable* act = reg.try_get<Interactable>(e);
+        return act && act->Enabled;
     };
+    // Текст поля ввода — это надпись элемента: у поля без надписи набирать
+    // некуда, и заводить ей отдельное хранилище значило бы держать две строки,
+    // из которых видна одна.
+    auto textOf = [&reg](entt::entity e) -> Label* { return reg.try_get<Label>(e); };
 
     // Кто под курсором: последний нарисованный из тех, кто ловит мышь и не
     // обрезан своей маской.
@@ -611,7 +629,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     // Флаги «за этот кадр» гасим у всех: их читает игра сразу после нас, и
     // оставшийся с прошлого кадра Clicked сработал бы второй раз.
     for (const Solved& it : items) {
-        if (UIElementComponent* st = stateOf(it.Entity)) {
+        if (State* st = stateOf(it.Entity)) {
             st->Clicked = false;
             st->Changed = false;
             st->Hovered = (it.Entity == hovered);
@@ -623,15 +641,16 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     // Нажатие: назначает фокус (полю ввода) и «прижимает» элемент.
     if (input.MousePressed) {
         for (const Solved& it : items) {
-            UIElementComponent* st = stateOf(it.Entity);
+            State* st = stateOf(it.Entity);
             if (!st) continue;
             const bool hit = (it.Entity == hovered);
             if (st->Focused && !hit) st->Focused = false; // клик мимо снимает фокус
             if (!hit) continue;
             st->Pressed = true;
-            if (st->Type == UIElementComponent::Kind::Input) {
+            if (reg.all_of<TextInput>(it.Entity)) {
                 st->Focused = true;
-                st->Caret = (int)st->Text.size();
+                const Label* lbl = textOf(it.Entity);
+                st->Caret = lbl ? (int)lbl->Text.size() : 0;
                 st->CaretBlink = 0.0f;
             }
         }
@@ -641,12 +660,16 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     // щелчком не считается: увести палец с кнопки — общепринятый способ
     // передумать, и ломать его нельзя.
     if (input.MouseReleased && hovered != entt::null) {
-        if (UIElementComponent* st = stateOf(hovered)) {
+        if (State* st = stateOf(hovered)) {
             if (st->Pressed) {
                 st->Clicked = true;
                 result.ClickedId = reg.get<IdComponent>(hovered).Id;
-                if (st->Type == UIElementComponent::Kind::Checkbox) {
-                    st->Value = st->Value >= 0.5f ? 0.0f : 1.0f;
+                result.ClickedAction = reg.get<Interactable>(hovered).Action;
+                // Галка — тот же диапазон, у которого два конца: щелчок
+                // перекидывает значение между ними.
+                if (Range* range = reg.try_get<Range>(hovered); range && range->Toggle) {
+                    const float mid = (range->Min + range->Max) * 0.5f;
+                    range->Value = range->Value >= mid ? range->Min : range->Max;
                     st->Changed = true;
                 }
             }
@@ -656,51 +679,59 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     // Ползунок: тянется, пока кнопка удерживается, даже если курсор ушёл за
     // пределы дорожки — иначе значение срывается от малейшего движения вбок.
     for (const Solved& it : items) {
-        UIElementComponent* st = stateOf(it.Entity);
-        if (!st || st->Type != UIElementComponent::Kind::Slider || !usable(it.Entity)) continue;
+        Range* range = reg.try_get<Range>(it.Entity);
+        State* st = stateOf(it.Entity);
+        if (!range || range->Toggle || !st || !usable(it.Entity)) continue;
         if (!st->Pressed || !input.MouseDown) continue;
         const float w = glm::max(it.Rect.w, 1.0f);
-        const float v = glm::clamp((input.Mouse.x - it.Rect.x) / w, 0.0f, 1.0f);
-        if (v != st->Value) { st->Value = v; st->Changed = true; }
+        const float t = glm::clamp((input.Mouse.x - it.Rect.x) / w, 0.0f, 1.0f);
+        float v = range->Min + t * (range->Max - range->Min);
+        // Шаг: громкость по 5% должна прилипать к пятёркам, иначе ползунок
+        // выдаёт 0.4732 там, где человек ждёт 0.45.
+        if (range->Step > 0.0f) v = range->Min + std::round((v - range->Min) / range->Step) * range->Step;
+        v = glm::clamp(v, glm::min(range->Min, range->Max), glm::max(range->Min, range->Max));
+        if (v != range->Value) { range->Value = v; st->Changed = true; }
         result.WantsMouse = true;
     }
 
     // Ввод текста — только в поле с фокусом.
     for (const Solved& it : items) {
-        UIElementComponent* st = stateOf(it.Entity);
-        if (!st || st->Type != UIElementComponent::Kind::Input || !st->Focused || !st->Enabled)
-            continue;
+        const TextInput* field = reg.try_get<TextInput>(it.Entity);
+        State* st = stateOf(it.Entity);
+        Label* lbl = textOf(it.Entity);
+        if (!field || !st || !lbl || !st->Focused || !usable(it.Entity)) continue;
         result.WantsKeyboard = true;
         st->CaretBlink += input.DeltaTime;
-        st->Caret = glm::clamp(st->Caret, 0, (int)st->Text.size());
+        st->Caret = glm::clamp(st->Caret, 0, (int)lbl->Text.size());
+        if (field->ReadOnly) continue;   // показывать можно, править нельзя
 
         if (!input.TypedText.empty()) {
-            const bool room = st->MaxLength <= 0 ||
-                              Utf8Length(st->Text) + Utf8Length(input.TypedText) <= st->MaxLength;
+            const bool room = field->MaxLength <= 0 ||
+                              Utf8Length(lbl->Text) + Utf8Length(input.TypedText) <= field->MaxLength;
             if (room) {
-                st->Text.insert((size_t)st->Caret, input.TypedText);
+                lbl->Text.insert((size_t)st->Caret, input.TypedText);
                 st->Caret += (int)input.TypedText.size();
                 st->Changed = true;
                 st->CaretBlink = 0.0f;
             }
         }
         if (input.Backspace && st->Caret > 0) {
-            const int prev = PrevCharBoundary(st->Text, st->Caret);
-            st->Text.erase((size_t)prev, (size_t)(st->Caret - prev));
+            const int prev = PrevCharBoundary(lbl->Text, st->Caret);
+            lbl->Text.erase((size_t)prev, (size_t)(st->Caret - prev));
             st->Caret = prev;
             st->Changed = true;
             st->CaretBlink = 0.0f;
         }
-        if (input.Delete && st->Caret < (int)st->Text.size()) {
-            const int next = NextCharBoundary(st->Text, st->Caret);
-            st->Text.erase((size_t)st->Caret, (size_t)(next - st->Caret));
+        if (input.Delete && st->Caret < (int)lbl->Text.size()) {
+            const int next = NextCharBoundary(lbl->Text, st->Caret);
+            lbl->Text.erase((size_t)st->Caret, (size_t)(next - st->Caret));
             st->Changed = true;
             st->CaretBlink = 0.0f;
         }
-        if (input.Left) { st->Caret = PrevCharBoundary(st->Text, st->Caret); st->CaretBlink = 0.0f; }
-        if (input.Right) { st->Caret = NextCharBoundary(st->Text, st->Caret); st->CaretBlink = 0.0f; }
+        if (input.Left) { st->Caret = PrevCharBoundary(lbl->Text, st->Caret); st->CaretBlink = 0.0f; }
+        if (input.Right) { st->Caret = NextCharBoundary(lbl->Text, st->Caret); st->CaretBlink = 0.0f; }
         if (input.Home) { st->Caret = 0; st->CaretBlink = 0.0f; }
-        if (input.End) { st->Caret = (int)st->Text.size(); st->CaretBlink = 0.0f; }
+        if (input.End) { st->Caret = (int)lbl->Text.size(); st->CaretBlink = 0.0f; }
         if (input.Enter || input.Escape) st->Focused = false;
     }
 
@@ -719,7 +750,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     // до него Pressed ещё нужен, чтобы отличить щелчок от «отпустил в стороне».
     if (!input.MouseDown) {
         for (const Solved& it : items) {
-            if (UIElementComponent* st = stateOf(it.Entity)) st->Pressed = false;
+            if (State* st = stateOf(it.Entity)) st->Pressed = false;
         }
     }
 

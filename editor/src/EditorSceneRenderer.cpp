@@ -20,6 +20,7 @@
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
 #include "sage/ecs/CameraView.h"
+#include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 
 void EditorSceneRenderer::Init() {
@@ -529,7 +530,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // проценты), поэтому рисовать его надо именно в размер вьюпорта, а не в
     // какой-нибудь эталонный: иначе редактор показывал бы не то, что получится.
     if (m_drawUIOverlay && primary) {
-        auto uiView = scene.Registry().view<UIElementComponent>();
+        auto uiView = scene.Registry().view<sage::ui::Transform>();
         if (uiView.begin() != uiView.end()) {
             if (!m_ui) m_ui = std::make_unique<UIRenderer>();
             device.SetViewport(0, 0, w, h);
@@ -607,9 +608,9 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_gamePostApplied = true;
     }
 
-    // UI сцены (UIElementComponent) — поверх ИТОГОВОЙ картинки (после поста),
+    // UI сцены (компоненты интерфейса) — поверх ИТОГОВОЙ картинки (после поста),
     // ровно как его увидит игрок в собранной игре (WYSIWYG панели Game).
-    auto uiView = scene.Registry().view<UIElementComponent>();
+    auto uiView = scene.Registry().view<sage::ui::Transform>();
     if (uiView.begin() != uiView.end()) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         Framebuffer& target = m_gamePostApplied ? *m_gamePostFbo : *m_gameFbo;

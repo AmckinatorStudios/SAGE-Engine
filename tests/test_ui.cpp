@@ -11,12 +11,33 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIBridge.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/render/ShadowMap.h"
 
 using sage::ui::UIRect;
+
+namespace {
+// Элемент кладётся в сцену РАЗБОРОМ плоского описания на компоненты — тем самым
+// путём, которым в сцену приезжают файлы, записанные до перехода на компоненты
+// (см. sage::ui::Decompose). Тесты ниже проверяют ПОВЕДЕНИЕ, и способ сборки им
+// безразличен; то, что этот путь раскладывает всё по нужным компонентам,
+// проверяется отдельно.
+void PutElement(Scene& scene, GameObject obj, const UIElementComponent& flat) {
+    sage::ui::Decompose(flat, scene.Registry(), obj.Entity());
+}
+sage::ui::State& StateOf(Scene& scene, GameObject obj) {
+    return scene.Registry().get<sage::ui::Interactable>(obj.Entity()).Runtime;
+}
+std::string& TextOf(Scene& scene, GameObject obj) {
+    return scene.Registry().get<sage::ui::Label>(obj.Entity()).Text;
+}
+sage::ui::Range& RangeOf(Scene& scene, GameObject obj) {
+    return scene.Registry().get<sage::ui::Range>(obj.Entity());
+}
+} // namespace
 
 TEST(UI_anchor_corners_and_center) {
     UIRect screen{0, 0, 1000, 500};
@@ -76,59 +97,148 @@ TEST(UI_layout_size_overrides_declared_size) {
 TEST(UI_component_serialization_roundtrip) {
     Scene scene("U");
     GameObject panel = scene.CreateObject("Hud");
-    UIElementComponent u;
-    u.Type = UIElementComponent::Kind::Bar;
-    u.Anchor = UIAnchor::BottomLeft;
-    u.Offset = {24, 18};
-    u.Size = {220, 26};
-    u.Layer = 3;
-    u.ClipChildren = true;
-    u.Color = {0.1f, 0.2f, 0.3f, 0.8f};
-    u.Rounding = 13.0f;
-    u.BorderThickness = 2.5f;
-    u.BorderColor = {0.9f, 0.8f, 0.1f, 1.0f};
-    u.Text = "HP";
-    u.TextScale = 1.75f;
-    u.TextCentered = false;
-    u.Value = 0.42f;
-    u.BarFillColor = {0.8f, 0.2f, 0.2f, 1.0f};
-    u.PadX = 11.5f;
-    u.AutoWidth = true;
-    u.Sprite = {11.0f, 59.0f, 26.0f, 28.0f};
-    u.SliceBorder = {8.0f, 8.0f, 8.0f, 9.0f};
-    u.PixelScale = 3.0f;
-    u.PixelArt = true;
-    scene.Registry().emplace<UIElementComponent>(panel.Entity(), u);
+    entt::registry& reg = scene.Registry();
+
+    // Элемент собирается из ЧАСТЕЙ — ровно так, как он теперь и хранится.
+    sage::ui::Transform t;
+    t.Anchor = UIAnchor::BottomLeft;
+    t.Offset = {24, 18};
+    t.Size = {220, 26};
+    t.Layer = 3;
+    t.Mode = sage::ui::Transform::Stretch::Horizontal;
+    t.Margin = {12.0f, 0.0f, 12.0f, 0.0f};
+    t.Pivot = {0.5f, 0.5f};
+    reg.emplace<sage::ui::Transform>(panel.Entity(), t);
+
+    sage::ui::Fill fill;
+    fill.Color = {0.1f, 0.2f, 0.3f, 0.8f};
+    fill.Rounding = 13.0f;
+    fill.BorderThickness = 2.5f;
+    fill.BorderColor = {0.9f, 0.8f, 0.1f, 1.0f};
+    reg.emplace<sage::ui::Fill>(panel.Entity(), fill);
+
+    sage::ui::Label label;
+    label.Text = "HP";
+    label.Scale = 1.75f;
+    label.Horizontal = sage::ui::Label::Align::Start;
+    label.Vertical = sage::ui::Label::Align::End;
+    label.PadX = 11.5f;
+    label.AutoWidth = true;
+    reg.emplace<sage::ui::Label>(panel.Entity(), label);
+
+    sage::ui::Bar bar;
+    bar.Value = 0.42f;
+    bar.FillColor = {0.8f, 0.2f, 0.2f, 1.0f};
+    bar.Grow = sage::ui::Bar::Direction::BottomToTop;
+    bar.Smoothing = 4.0f;
+    reg.emplace<sage::ui::Bar>(panel.Entity(), bar);
+
+    reg.emplace<sage::ui::Mask>(panel.Entity(), sage::ui::Mask{});
 
     std::string json = SceneSerializer::SaveToString(scene);
     auto loaded = SceneSerializer::LoadFromString(json);
     GameObject back = loaded->FindByName("Hud");
     CHECK_TRUE(back.Valid());
-    const UIElementComponent* r = loaded->Registry().try_get<UIElementComponent>(back.Entity());
-    CHECK_TRUE(r != nullptr);
-    if (r) {
-        CHECK_TRUE(r->Type == UIElementComponent::Kind::Bar);
-        CHECK_TRUE(r->Anchor == UIAnchor::BottomLeft);
-        CHECK_NEAR(r->Offset.x, 24.0f, 1e-4);
-        CHECK_NEAR(r->Size.y, 26.0f, 1e-4);
-        CHECK_EQ(r->Layer, 3);
-        CHECK_TRUE(r->ClipChildren);
-        CHECK_NEAR(r->Color.a, 0.8f, 1e-4);
-        CHECK_NEAR(r->Rounding, 13.0f, 1e-4);
-        CHECK_NEAR(r->BorderThickness, 2.5f, 1e-4);
-        CHECK_EQ(r->Text, std::string("HP"));
-        CHECK_NEAR(r->TextScale, 1.75f, 1e-4);
-        CHECK_FALSE(r->TextCentered);
-        CHECK_NEAR(r->Value, 0.42f, 1e-4);
-        CHECK_NEAR(r->BarFillColor.r, 0.8f, 1e-4);
-        CHECK_NEAR(r->PadX, 11.5f, 1e-4);
-        CHECK_TRUE(r->AutoWidth);
-        CHECK_NEAR(r->Sprite.x, 11.0f, 1e-4);
-        CHECK_NEAR(r->Sprite.w, 28.0f, 1e-4);
-        CHECK_NEAR(r->SliceBorder.w, 9.0f, 1e-4);
-        CHECK_NEAR(r->PixelScale, 3.0f, 1e-4);
-        CHECK_TRUE(r->PixelArt);
+    entt::registry& r2 = loaded->Registry();
+
+    const auto* t2 = r2.try_get<sage::ui::Transform>(back.Entity());
+    CHECK_TRUE(t2 != nullptr);
+    if (t2) {
+        CHECK_TRUE(t2->Anchor == UIAnchor::BottomLeft);
+        CHECK_TRUE(t2->Mode == sage::ui::Transform::Stretch::Horizontal);
+        CHECK_NEAR(t2->Offset.x, 24.0f, 1e-4);
+        CHECK_NEAR(t2->Size.y, 26.0f, 1e-4);
+        CHECK_NEAR(t2->Margin.z, 12.0f, 1e-4);
+        CHECK_NEAR(t2->Pivot.y, 0.5f, 1e-4);
+        CHECK_EQ(t2->Layer, 3);
     }
+    const auto* f2 = r2.try_get<sage::ui::Fill>(back.Entity());
+    CHECK_TRUE(f2 != nullptr);
+    if (f2) {
+        CHECK_NEAR(f2->Color.a, 0.8f, 1e-4);
+        CHECK_NEAR(f2->Rounding, 13.0f, 1e-4);
+        CHECK_NEAR(f2->BorderThickness, 2.5f, 1e-4);
+    }
+    const auto* l2 = r2.try_get<sage::ui::Label>(back.Entity());
+    CHECK_TRUE(l2 != nullptr);
+    if (l2) {
+        CHECK_EQ(l2->Text, std::string("HP"));
+        CHECK_NEAR(l2->Scale, 1.75f, 1e-4);
+        CHECK_TRUE(l2->Horizontal == sage::ui::Label::Align::Start);
+        CHECK_TRUE(l2->Vertical == sage::ui::Label::Align::End);
+        CHECK_NEAR(l2->PadX, 11.5f, 1e-4);
+        CHECK_TRUE(l2->AutoWidth);
+    }
+    const auto* b2 = r2.try_get<sage::ui::Bar>(back.Entity());
+    CHECK_TRUE(b2 != nullptr);
+    if (b2) {
+        CHECK_NEAR(b2->Value, 0.42f, 1e-4);
+        CHECK_NEAR(b2->FillColor.r, 0.8f, 1e-4);
+        CHECK_TRUE(b2->Grow == sage::ui::Bar::Direction::BottomToTop);
+        CHECK_NEAR(b2->Smoothing, 4.0f, 1e-4);
+    }
+    CHECK_TRUE(r2.all_of<sage::ui::Mask>(back.Entity()));
+    // Части, которых у элемента НЕТ, не появляются из ниоткуда: в этом и был
+    // смысл разделения — у полосы не должно быть ни поля ввода, ни ползунка.
+    CHECK_FALSE(r2.all_of<sage::ui::TextInput>(back.Entity()));
+    CHECK_FALSE(r2.all_of<sage::ui::Range>(back.Entity()));
+    CHECK_FALSE(r2.all_of<sage::ui::Interactable>(back.Entity()));
+}
+
+// Сцена, записанная ДО перехода на компоненты, читается и раскладывается по
+// частям. Без этого обновление движка означало бы «интерфейс исчез», причём
+// без единого сообщения: элемент в файле есть, а рисовать его некому.
+TEST(UI_old_flat_scene_migrates_to_components) {
+    const std::string old = R"({
+      "sage_scene_version": 1,
+      "name": "Legacy",
+      "objects": [{
+        "id": 1, "name": "Button",
+        "position": {"x":0,"y":0,"z":0}, "rotation": {"x":0,"y":0,"z":0},
+        "scale": {"x":1,"y":1,"z":1},
+        "mesh": {"type": "none"},
+        "ui": {
+          "kind": "slider", "anchor": 4, "offset": {"x": 30, "y": 40},
+          "size": {"x": 180, "y": 32}, "layer": 2, "visible": true,
+          "text": "Громкость", "value": 0.25, "minValue": 0, "maxValue": 100,
+          "interactive": true, "enabled": true, "rounding": 6,
+          "clipChildren": true
+        }
+      }]
+    })";
+
+    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(old);
+    CHECK_TRUE(scene != nullptr);
+    GameObject obj = scene->FindByName("Button");
+    CHECK_TRUE(obj.Valid());
+    entt::registry& reg = scene->Registry();
+
+    const auto* t = reg.try_get<sage::ui::Transform>(obj.Entity());
+    CHECK_TRUE(t != nullptr);
+    if (t) {
+        CHECK_NEAR(t->Offset.x, 30.0f, 1e-4);
+        CHECK_NEAR(t->Size.x, 180.0f, 1e-4);
+        CHECK_EQ(t->Layer, 2);
+    }
+    // Ползунок стал диапазоном, и доля 0..1 развернулась в игровые единицы.
+    const auto* range = reg.try_get<sage::ui::Range>(obj.Entity());
+    CHECK_TRUE(range != nullptr);
+    if (range) {
+        CHECK_NEAR(range->Min, 0.0f, 1e-4);
+        CHECK_NEAR(range->Max, 100.0f, 1e-4);
+        CHECK_NEAR(range->Value, 25.0f, 1e-3);
+        CHECK_FALSE(range->Toggle);
+    }
+    CHECK_TRUE(reg.all_of<sage::ui::Interactable>(obj.Entity()));
+    CHECK_TRUE(reg.all_of<sage::ui::Mask>(obj.Entity()));   // был флаг clipChildren
+    const auto* label = reg.try_get<sage::ui::Label>(obj.Entity());
+    CHECK_TRUE(label != nullptr);
+    if (label) CHECK_EQ(label->Text, std::string("Громкость"));
+
+    // И записывается такая сцена уже в новом виде: старый ключ не возвращается.
+    const std::string again = SceneSerializer::SaveToString(*scene);
+    CHECK_TRUE(again.find("\"kind\"") == std::string::npos);
+    CHECK_TRUE(again.find("\"range\"") != std::string::npos);
 }
 
 TEST(UI_hit_test_layers_and_visibility) {
@@ -137,12 +247,12 @@ TEST(UI_hit_test_layers_and_visibility) {
     GameObject below = scene.CreateObject("Below");
     UIElementComponent b;
     b.Anchor = UIAnchor::TopLeft; b.Offset = {0, 0}; b.Size = {100, 100}; b.Layer = 0;
-    scene.Registry().emplace<UIElementComponent>(below.Entity(), b);
+    PutElement(scene, below, b);
 
     GameObject above = scene.CreateObject("Above");
     UIElementComponent a;
     a.Anchor = UIAnchor::TopLeft; a.Offset = {50, 50}; a.Size = {100, 100}; a.Layer = 5;
-    scene.Registry().emplace<UIElementComponent>(above.Entity(), a);
+    PutElement(scene, above, a);
 
     // Точка в пересечении — выигрывает верхний слой.
     CHECK_EQ(sage::ui::HitTest(scene, 75, 75, 800, 600), above.Id());
@@ -152,7 +262,7 @@ TEST(UI_hit_test_layers_and_visibility) {
     CHECK_EQ(sage::ui::HitTest(scene, 400, 400, 800, 600), -1);
 
     // Невидимый элемент не ловит точки.
-    scene.Registry().get<UIElementComponent>(above.Entity()).Visible = false;
+    scene.Registry().get<sage::ui::Transform>(above.Entity()).Visible = false;
     CHECK_EQ(sage::ui::HitTest(scene, 75, 75, 800, 600), below.Id());
 }
 
@@ -162,14 +272,14 @@ TEST(UI_hit_test_child_and_clip_mask) {
     UIElementComponent p;
     p.Anchor = UIAnchor::TopLeft; p.Offset = {100, 100}; p.Size = {200, 100};
     p.ClipChildren = true; // маска
-    scene.Registry().emplace<UIElementComponent>(parent.Entity(), p);
+    PutElement(scene, parent, p);
 
     GameObject child = scene.CreateObject("Button");
     UIElementComponent c;
     // Ребёнок наполовину ВЫСОВЫВАЕТСЯ за родителя вправо: якорь TopLeft
     // родителя + offset за его край.
     c.Anchor = UIAnchor::TopLeft; c.Offset = {150, 20}; c.Size = {100, 40};
-    scene.Registry().emplace<UIElementComponent>(child.Entity(), c);
+    PutElement(scene, child, c);
     scene.SetParent(child.Entity(), parent.Entity());
 
     // Точка внутри родителя И ребёнка — ребёнок (нарисован поверх).
@@ -178,7 +288,9 @@ TEST(UI_hit_test_child_and_clip_mask) {
     // обрезает — попадания нет.
     CHECK_EQ(sage::ui::HitTest(scene, 320, 130, 800, 600), -1);
     // Без маски та же точка попадает в ребёнка.
-    scene.Registry().get<UIElementComponent>(parent.Entity()).ClipChildren = false;
+    // Маска — отдельный компонент: снять её значит снять его, а не погасить флаг
+    // у элемента, который к обрезке отношения не имеет.
+    scene.Registry().remove<sage::ui::Mask>(parent.Entity());
     CHECK_EQ(sage::ui::HitTest(scene, 320, 130, 800, 600), child.Id());
 }
 
@@ -286,77 +398,77 @@ sage::ui::UIInputState ClickAt(glm::vec2 p) {
 TEST(UI_input_field_typing_and_editing) {
     Scene scene("U");
     GameObject field = scene.CreateObject("Name");
-    scene.Registry().emplace<UIElementComponent>(
-        field.Entity(), MakeInteractive(UIElementComponent::Kind::Input, {10, 10}, {200, 40}));
-    auto& e = scene.Registry().get<UIElementComponent>(field.Entity());
+    PutElement(scene, field, MakeInteractive(UIElementComponent::Kind::Input, {10, 10}, {200, 40}));
+    sage::ui::State& st = StateOf(scene, field);
+    std::string& text = TextOf(scene, field);
 
     // Пока не кликнули — текст не принимается: поле без фокуса не должно
     // воровать буквы у игры.
     sage::ui::UIInputState typing;
     typing.TypedText = "a";
     sage::ui::UpdateSceneUI(scene, typing, 800, 600);
-    CHECK_EQ(e.Text, std::string(""));
-    CHECK_FALSE(e.Focused);
+    CHECK_EQ(text, std::string(""));
+    CHECK_FALSE(st.Focused);
 
     sage::ui::UpdateSceneUI(scene, ClickAt({50, 20}), 800, 600);
-    CHECK_TRUE(e.Focused);
+    CHECK_TRUE(st.Focused);
 
     // Кириллица: приходит символами UTF-8, курсор считается в байтах.
     sage::ui::UIInputState in;
     in.TypedText = "Пр";
     sage::ui::UIInputState res = in;
     sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, res, 800, 600);
-    CHECK_EQ(e.Text, std::string("Пр"));
+    CHECK_EQ(text, std::string("Пр"));
     CHECK_TRUE(r.WantsKeyboard);
-    CHECK_EQ(e.Caret, 4); // две кириллические буквы — четыре байта
+    CHECK_EQ(st.Caret, 4); // две кириллические буквы — четыре байта
 
     // Backspace удаляет ЦЕЛЫЙ символ, а не байт: иначе в поле остаётся битый UTF-8.
     sage::ui::UIInputState back;
     back.Backspace = true;
     sage::ui::UpdateSceneUI(scene, back, 800, 600);
-    CHECK_EQ(e.Text, std::string("П"));
-    CHECK_EQ(e.Caret, 2);
+    CHECK_EQ(text, std::string("П"));
+    CHECK_EQ(st.Caret, 2);
 
     // Предел длины считается в символах, а не в байтах.
-    e.MaxLength = 2;
+    scene.Registry().get<sage::ui::TextInput>(field.Entity()).MaxLength = 2;
     sage::ui::UIInputState more;
     more.TypedText = "ивет";
     sage::ui::UpdateSceneUI(scene, more, 800, 600);
-    CHECK_EQ(e.Text, std::string("П")); // не влезло целиком — не приняли вовсе
+    CHECK_EQ(text, std::string("П")); // не влезло целиком — не приняли вовсе
 
     // Enter снимает фокус.
     sage::ui::UIInputState enter;
     enter.Enter = true;
     sage::ui::UpdateSceneUI(scene, enter, 800, 600);
-    CHECK_FALSE(e.Focused);
+    CHECK_FALSE(st.Focused);
 }
 
 TEST(UI_checkbox_and_click_need_press_and_release) {
     Scene scene("U");
     GameObject box = scene.CreateObject("Chk");
-    scene.Registry().emplace<UIElementComponent>(
-        box.Entity(), MakeInteractive(UIElementComponent::Kind::Checkbox, {10, 10}, {30, 30}));
-    auto& e = scene.Registry().get<UIElementComponent>(box.Entity());
-    CHECK_NEAR(e.Value, 0.0f, 1e-4);
+    PutElement(scene, box, MakeInteractive(UIElementComponent::Kind::Checkbox, {10, 10}, {30, 30}));
+    sage::ui::State& st = StateOf(scene, box);
+    sage::ui::Range& value = RangeOf(scene, box);
+    CHECK_NEAR(value.Value, 0.0f, 1e-4);
 
     // Одного нажатия мало — щелчок это нажать И отпустить НА элементе.
     sage::ui::UpdateSceneUI(scene, ClickAt({20, 20}), 800, 600);
-    CHECK_TRUE(e.Pressed);
-    CHECK_NEAR(e.Value, 0.0f, 1e-4);
+    CHECK_TRUE(st.Pressed);
+    CHECK_NEAR(value.Value, 0.0f, 1e-4);
 
     sage::ui::UIInputState up;
     up.Mouse = {20, 20};
     up.MouseReleased = true;
     sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, up, 800, 600);
-    CHECK_TRUE(e.Clicked);
-    CHECK_NEAR(e.Value, 1.0f, 1e-4);
+    CHECK_TRUE(st.Clicked);
+    CHECK_NEAR(value.Value, 1.0f, 1e-4);
     CHECK_EQ(r.ClickedId, box.Id());
 
     // Флаг живёт ровно один кадр — иначе игра сработает на него дважды.
     sage::ui::UIInputState idle;
     idle.Mouse = {20, 20};
     sage::ui::UpdateSceneUI(scene, idle, 800, 600);
-    CHECK_FALSE(e.Clicked);
+    CHECK_FALSE(st.Clicked);
 
     // Увести курсор с кнопки и отпустить — общепринятый способ передумать.
     sage::ui::UpdateSceneUI(scene, ClickAt({20, 20}), 800, 600);
@@ -364,8 +476,8 @@ TEST(UI_checkbox_and_click_need_press_and_release) {
     away.Mouse = {400, 400};
     away.MouseReleased = true;
     sage::ui::UpdateSceneUI(scene, away, 800, 600);
-    CHECK_FALSE(e.Clicked);
-    CHECK_NEAR(e.Value, 1.0f, 1e-4); // значение не изменилось
+    CHECK_FALSE(st.Clicked);
+    CHECK_NEAR(value.Value, 1.0f, 1e-4); // значение не изменилось
 }
 
 TEST(UI_slider_drags_and_converts_to_game_units) {
@@ -374,12 +486,14 @@ TEST(UI_slider_drags_and_converts_to_game_units) {
     UIElementComponent s = MakeInteractive(UIElementComponent::Kind::Slider, {100, 10}, {200, 30});
     s.MinValue = 0.0f;
     s.MaxValue = 100.0f;
-    scene.Registry().emplace<UIElementComponent>(sld.Entity(), s);
-    auto& e = scene.Registry().get<UIElementComponent>(sld.Entity());
+    PutElement(scene, sld, s);
+    sage::ui::Range& value = RangeOf(scene, sld);
 
-    // Нажали в середине дорожки.
+    // Нажали в середине дорожки. Значение — В ИГРОВЫХ ЕДИНИЦАХ: раньше элемент
+    // хранил долю 0..1, и переводить её в громкость 0..100 приходилось каждому
+    // читателю отдельно — то есть где-то перевод рано или поздно расходился.
     sage::ui::UpdateSceneUI(scene, ClickAt({200, 25}), 800, 600);
-    CHECK_NEAR(e.Value, 0.5f, 1e-3);
+    CHECK_NEAR(value.Value, 50.0f, 1e-1);
 
     // Тянем ЗА пределы элемента, не отпуская: значение обязано доходить до края,
     // а не срываться от того, что курсор ушёл вбок.
@@ -387,11 +501,11 @@ TEST(UI_slider_drags_and_converts_to_game_units) {
     drag.Mouse = {1000, 400};
     drag.MouseDown = true;
     sage::ui::UpdateSceneUI(scene, drag, 800, 600);
-    CHECK_NEAR(e.Value, 1.0f, 1e-3);
+    CHECK_NEAR(value.Value, 100.0f, 1e-1);
 
     drag.Mouse = {-50, 400};
     sage::ui::UpdateSceneUI(scene, drag, 800, 600);
-    CHECK_NEAR(e.Value, 0.0f, 1e-3);
+    CHECK_NEAR(value.Value, 0.0f, 1e-1);
 }
 
 TEST(UI_disabled_element_ignores_mouse) {
@@ -399,12 +513,12 @@ TEST(UI_disabled_element_ignores_mouse) {
     GameObject btn = scene.CreateObject("Quit");
     UIElementComponent b = MakeInteractive(UIElementComponent::Kind::Panel, {10, 10}, {100, 40});
     b.Enabled = false;
-    scene.Registry().emplace<UIElementComponent>(btn.Entity(), b);
-    auto& e = scene.Registry().get<UIElementComponent>(btn.Entity());
+    PutElement(scene, btn, b);
+    sage::ui::State& st = StateOf(scene, btn);
 
     sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, ClickAt({50, 20}), 800, 600);
-    CHECK_FALSE(e.Hovered);
-    CHECK_FALSE(e.Pressed);
+    CHECK_FALSE(st.Hovered);
+    CHECK_FALSE(st.Pressed);
     CHECK_FALSE(r.WantsMouse);
 }
 
