@@ -5,10 +5,9 @@
 
 class Scene;
 class UIRenderer;
-struct UIElementComponent;
 
 // ---------------------------------------------------------------------
-// Система интерфейса сцены: рисует сущности с UIElementComponent (см.
+// Система интерфейса сцены: рисует сущности с компонентами интерфейса (см.
 // scene/Components.h) поверх кадра и отвечает на «что под точкой?».
 //
 //   • Вёрстка: якорь + отступ внутри РОДИТЕЛЯ (HierarchyComponent) — вложенные
@@ -25,14 +24,17 @@ struct UIElementComponent;
 // ---------------------------------------------------------------------
 namespace sage::ui {
 
-// Итоговый экранный прямоугольник элемента: якорь+отступ внутри parent.
-// Чистая математика (юнит-тестируется без GL). Размер берётся из LayoutSize,
-// если он посчитан (AutoWidth), иначе из Size.
-UIRect ResolveElementRect(const UIElementComponent& e, const UIRect& parent);
+// Есть ли у сущности интерфейсная часть.
+//
+// Обязательная часть ровно одна — прямоугольник (sage::ui::Transform): без него
+// элемент негде рисовать, а всё остальное (подложка, надпись, картинка)
+// необязательно и добавляется по надобности. Отдельная функция, а не
+// all_of<Transform> по месту, потому что «что считается элементом» — это
+// правило, и оно должно быть записано один раз.
+bool IsElement(const entt::registry& reg, entt::entity e);
 
-// То же, но с явно заданным размером — вариант для отрисовки, где ширина
-// содержимого уже измерена шрифтом.
-UIRect ResolveElementRect(const UIElementComponent& e, const UIRect& parent, glm::vec2 size);
+// Прямоугольник элемента внутри родителя считает sage::ui::Resolve (UI.h) —
+// чистая математика по его Transform, без ECS и без GL.
 
 // Рисует весь UI сцены. Вызывать между ui.Begin() и ui.End().
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH);

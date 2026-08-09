@@ -28,7 +28,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptComponent.h"
-#include "sage/ui/UIComponents.h"
+#include "sage/ui/UI.h"
 #include "sage/physics/PhysicsComponents.h"
 
 namespace fs = std::filesystem;

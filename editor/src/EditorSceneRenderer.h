@@ -161,7 +161,7 @@ private:
     int m_extraH[kMaxViews] = {0, 0, 0, 0};
     std::optional<Framebuffer> m_outlineMask;            // силуэт выделенного объекта (аутлайн)
     std::unique_ptr<sage::rhi::Geometry> m_outlineTri;   // полноэкранный треугольник для краевого прохода
-    // UI сцены (UIElementComponent) — оверлей в панели Game (WYSIWYG: как в
+    // UI сцены (компоненты sage::ui) — оверлей в панели Game (WYSIWYG: как в
     // собранной игре). Лениво: создаётся при первом кадре с UI-сущностями.
     std::unique_ptr<UIRenderer> m_ui;
     std::optional<sage::render::PostFX> m_postfx, m_gamePostfx;

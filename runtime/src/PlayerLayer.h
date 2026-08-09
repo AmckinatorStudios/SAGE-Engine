@@ -127,7 +127,7 @@ private:
     // постом полноразмерный HDR-таргет — чистый расход видеопамяти.
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<sage::render::PostFX> m_postfx;
-    // UI сцены (UIElementComponent из .sage) — рисуется поверх кадра; лениво,
+    // UI сцены (компоненты sage::ui из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.
     std::unique_ptr<UIRenderer> m_ui;
     // Ввод для интерфейса сцены: символы и клавиши редактирования копятся

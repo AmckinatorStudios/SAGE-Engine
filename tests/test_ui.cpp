@@ -1,5 +1,5 @@
 // Тесты UI-системы: математика якорей (ResolveAnchored), вёрстка элементов
-// внутри родителя (ResolveElementRect), сериализация UIElementComponent,
+// внутри родителя (ui::Resolve), сериализация компонентов интерфейса,
 // HitTest по слоям/маскам/видимости. Всё на CPU, БЕЗ GL (рендер не трогаем).
 #include "TestFramework.h"
 
@@ -15,7 +15,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UI.h"
-#include "sage/ui/UIBridge.h"
+#include "sage/ui/UILegacy.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -24,12 +24,11 @@
 using sage::ui::UIRect;
 
 namespace {
-// Элемент кладётся в сцену РАЗБОРОМ плоского описания на компоненты — тем самым
-// путём, которым в сцену приезжают файлы, записанные до перехода на компоненты
-// (см. sage::ui::Decompose). Тесты ниже проверяют ПОВЕДЕНИЕ, и способ сборки им
-// безразличен; то, что этот путь раскладывает всё по нужным компонентам,
-// проверяется отдельно.
-void PutElement(Scene& scene, GameObject obj, const UIElementComponent& flat) {
+// Элемент кладётся в сцену разбором ОПИСАНИЯ СТАРОГО ФОРМАТА на компоненты
+// (sage::ui::Decompose) — тем самым путём, которым в сцену приезжают файлы,
+// записанные до перехода. Тесты ввода ниже проверяют ПОВЕДЕНИЕ, и способ сборки
+// им безразличен; заодно этот путь оказывается прогнан на каждом из них.
+void PutElement(Scene& scene, GameObject obj, const sage::ui::LegacyElement& flat) {
     sage::ui::Decompose(flat, scene.Registry(), obj.Entity());
 }
 sage::ui::State& StateOf(Scene& scene, GameObject obj) {
@@ -66,12 +65,12 @@ TEST(UI_anchor_corners_and_center) {
 
 TEST(UI_element_rect_nested_in_parent) {
     // Ребёнок якорится к прямоугольнику РОДИТЕЛЯ, а не к экрану.
-    UIElementComponent child;
+    sage::ui::Transform child;
     child.Anchor = UIAnchor::BottomRight;
     child.Offset = {8, 8};
     child.Size = {40, 20};
     UIRect parent{100, 100, 200, 100};
-    UIRect r = sage::ui::ResolveElementRect(child, parent);
+    UIRect r = sage::ui::Resolve(child, parent);
     CHECK_NEAR(r.x, 100.0f + 200.0f - 40.0f - 8.0f, 1e-4);
     CHECK_NEAR(r.y, 100.0f + 100.0f - 20.0f - 8.0f, 1e-4);
     CHECK_NEAR(r.w, 40.0f, 1e-4);
@@ -82,18 +81,17 @@ TEST(UI_layout_size_overrides_declared_size) {
     // AutoWidth-элемент верстается по ИЗМЕРЕННОЙ ширине (её кладёт отрисовка в
     // LayoutSize), иначе якорь считался бы от запасного Size и «таблетка»
     // прыгала бы на кадр раньше, чем в неё поместился текст.
-    UIElementComponent e;
+    sage::ui::Transform e;
     e.Anchor = UIAnchor::TopRight;
     e.Offset = {10, 10};
     e.Size = {200, 30};
-    e.AutoWidth = true;
     UIRect screen{0, 0, 800, 600};
 
-    UIRect before = sage::ui::ResolveElementRect(e, screen);
+    UIRect before = sage::ui::Resolve(e, screen);
     CHECK_NEAR(before.w, 200.0f, 1e-4); // ещё не рисовался — запасной размер
 
     e.LayoutSize = {124.0f, 30.0f};
-    UIRect after = sage::ui::ResolveElementRect(e, screen);
+    UIRect after = sage::ui::Resolve(e, screen);
     CHECK_NEAR(after.w, 124.0f, 1e-4);
     CHECK_NEAR(after.x, 800.0f - 124.0f - 10.0f, 1e-4);
 }
@@ -205,6 +203,7 @@ TEST(UI_old_flat_scene_migrates_to_components) {
           "kind": "slider", "anchor": 4, "offset": {"x": 30, "y": 40},
           "size": {"x": 180, "y": 32}, "layer": 2, "visible": true,
           "text": "Громкость", "value": 0.25, "minValue": 0, "maxValue": 100,
+          "barFillColor": {"x": 0.2, "y": 0.7, "z": 0.9, "w": 1.0},
           "interactive": true, "enabled": true, "rounding": 6,
           "clipChildren": true
         }
@@ -235,6 +234,12 @@ TEST(UI_old_flat_scene_migrates_to_components) {
     }
     CHECK_TRUE(reg.all_of<sage::ui::Interactable>(obj.Entity()));
     CHECK_TRUE(reg.all_of<sage::ui::Mask>(obj.Entity()));   // был флаг clipChildren
+    // Цвет заполнения ползунка жил в том же поле, что у полосы, и должен был
+    // куда-то приехать: у нового элемента акцентный цвет хранит полоса. Без
+    // этого перенесённый ползунок молча позеленел бы в умолчание.
+    const auto* accent = reg.try_get<sage::ui::Bar>(obj.Entity());
+    CHECK_TRUE(accent != nullptr);
+    if (accent) CHECK_NEAR(accent->FillColor.g, 0.7f, 1e-3f);
     const auto* label = reg.try_get<sage::ui::Label>(obj.Entity());
     CHECK_TRUE(label != nullptr);
     if (label) CHECK_EQ(label->Text, std::string("Громкость"));
@@ -249,12 +254,12 @@ TEST(UI_hit_test_layers_and_visibility) {
     Scene scene("U");
     // Две перекрывающиеся панели: Layer решает, кто сверху.
     GameObject below = scene.CreateObject("Below");
-    UIElementComponent b;
+    sage::ui::LegacyElement b;
     b.Anchor = UIAnchor::TopLeft; b.Offset = {0, 0}; b.Size = {100, 100}; b.Layer = 0;
     PutElement(scene, below, b);
 
     GameObject above = scene.CreateObject("Above");
-    UIElementComponent a;
+    sage::ui::LegacyElement a;
     a.Anchor = UIAnchor::TopLeft; a.Offset = {50, 50}; a.Size = {100, 100}; a.Layer = 5;
     PutElement(scene, above, a);
 
@@ -273,13 +278,13 @@ TEST(UI_hit_test_layers_and_visibility) {
 TEST(UI_hit_test_child_and_clip_mask) {
     Scene scene("U");
     GameObject parent = scene.CreateObject("Panel");
-    UIElementComponent p;
+    sage::ui::LegacyElement p;
     p.Anchor = UIAnchor::TopLeft; p.Offset = {100, 100}; p.Size = {200, 100};
     p.ClipChildren = true; // маска
     PutElement(scene, parent, p);
 
     GameObject child = scene.CreateObject("Button");
-    UIElementComponent c;
+    sage::ui::LegacyElement c;
     // Ребёнок наполовину ВЫСОВЫВАЕТСЯ за родителя вправо: якорь TopLeft
     // родителя + offset за его край.
     c.Anchor = UIAnchor::TopLeft; c.Offset = {150, 20}; c.Size = {100, 40};
@@ -378,8 +383,9 @@ TEST(Shadow_fade_band_from_distance) {
 // окна и без GL. Ровно ради этого ввод и приходит структурой, а не опросом
 // устройств внутри системы UI.
 namespace {
-UIElementComponent MakeInteractive(UIElementComponent::Kind kind, glm::vec2 pos, glm::vec2 size) {
-    UIElementComponent e;
+sage::ui::LegacyElement MakeInteractive(sage::ui::LegacyElement::Kind kind, glm::vec2 pos,
+                                       glm::vec2 size) {
+    sage::ui::LegacyElement e;
     e.Type = kind;
     e.Anchor = UIAnchor::TopLeft;
     e.Offset = pos;
@@ -387,7 +393,7 @@ UIElementComponent MakeInteractive(UIElementComponent::Kind kind, glm::vec2 pos,
     e.Interactive = true;
     // Value по умолчанию 1 (это удобный дефолт для шкалы). Галке нужен явный
     // ноль, иначе тест проверял бы не то, что думает.
-    if (kind == UIElementComponent::Kind::Checkbox) e.Value = 0.0f;
+    if (kind == sage::ui::LegacyElement::Kind::Checkbox) e.Value = 0.0f;
     return e;
 }
 sage::ui::UIInputState ClickAt(glm::vec2 p) {
@@ -402,7 +408,7 @@ sage::ui::UIInputState ClickAt(glm::vec2 p) {
 TEST(UI_input_field_typing_and_editing) {
     Scene scene("U");
     GameObject field = scene.CreateObject("Name");
-    PutElement(scene, field, MakeInteractive(UIElementComponent::Kind::Input, {10, 10}, {200, 40}));
+    PutElement(scene, field, MakeInteractive(sage::ui::LegacyElement::Kind::Input, {10, 10}, {200, 40}));
     sage::ui::State& st = StateOf(scene, field);
     std::string& text = TextOf(scene, field);
 
@@ -450,7 +456,7 @@ TEST(UI_input_field_typing_and_editing) {
 TEST(UI_checkbox_and_click_need_press_and_release) {
     Scene scene("U");
     GameObject box = scene.CreateObject("Chk");
-    PutElement(scene, box, MakeInteractive(UIElementComponent::Kind::Checkbox, {10, 10}, {30, 30}));
+    PutElement(scene, box, MakeInteractive(sage::ui::LegacyElement::Kind::Checkbox, {10, 10}, {30, 30}));
     sage::ui::State& st = StateOf(scene, box);
     sage::ui::Range& value = RangeOf(scene, box);
     CHECK_NEAR(value.Value, 0.0f, 1e-4);
@@ -487,7 +493,7 @@ TEST(UI_checkbox_and_click_need_press_and_release) {
 TEST(UI_slider_drags_and_converts_to_game_units) {
     Scene scene("U");
     GameObject sld = scene.CreateObject("Vol");
-    UIElementComponent s = MakeInteractive(UIElementComponent::Kind::Slider, {100, 10}, {200, 30});
+    sage::ui::LegacyElement s = MakeInteractive(sage::ui::LegacyElement::Kind::Slider, {100, 10}, {200, 30});
     s.MinValue = 0.0f;
     s.MaxValue = 100.0f;
     PutElement(scene, sld, s);
@@ -515,7 +521,7 @@ TEST(UI_slider_drags_and_converts_to_game_units) {
 TEST(UI_disabled_element_ignores_mouse) {
     Scene scene("U");
     GameObject btn = scene.CreateObject("Quit");
-    UIElementComponent b = MakeInteractive(UIElementComponent::Kind::Panel, {10, 10}, {100, 40});
+    sage::ui::LegacyElement b = MakeInteractive(sage::ui::LegacyElement::Kind::Panel, {10, 10}, {100, 40});
     b.Enabled = false;
     PutElement(scene, btn, b);
     sage::ui::State& st = StateOf(scene, btn);
@@ -635,41 +641,60 @@ TEST(sky_celestials_sun_points_where_light_comes_from) {
 
 
 TEST(UI_presets_are_the_same_everywhere) {
-    // «Кнопка» — это не вид элемента, а набор значений: панель с Interactive,
-    // надписью и рамкой. Знание об этом жило в функции РЕДАКТОРА, то есть
-    // кнопку можно было получить только мышью: скрипт, собирающий интерфейс на
-    // лету, повторял те же присваивания у себя, а игра без редактора не имела
-    // к ним доступа вовсе. Теперь таблица одна на движок — и проверяется здесь,
-    // а не «на глаз в редакторе».
-    UIElementComponent button;
-    CHECK_TRUE(sage::ui::ApplyPreset(button, "Button"));
-    CHECK_TRUE(button.Interactive);           // иначе это просто прямоугольник
-    CHECK_TRUE(!button.Text.empty());         // кнопка без надписи не читается
-    CHECK_TRUE(button.Size.x > 0.0f && button.Size.y > 0.0f);
+    // «Кнопка» — это не вид элемента, а НАБОР ЧАСТЕЙ. Знание об этом жило в
+    // функции РЕДАКТОРА, то есть кнопку можно было получить только мышью:
+    // скрипт, собирающий интерфейс на лету, повторял те же присваивания у себя,
+    // а игра без редактора не имела к ним доступа вовсе. Теперь таблица одна на
+    // движок — и проверяется здесь, а не «на глаз в редакторе».
+    Scene scene("presets");
+    entt::registry& reg = scene.Registry();
+
+    GameObject button = scene.CreateObject("Button");
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Button"));
+    CHECK_TRUE(reg.all_of<sage::ui::Interactable>(button.Entity())); // иначе просто прямоугольник
+    CHECK_TRUE(reg.all_of<sage::ui::Fill>(button.Entity()));
+    const auto* buttonLabel = reg.try_get<sage::ui::Label>(button.Entity());
+    CHECK_TRUE(buttonLabel != nullptr);
+    if (buttonLabel) CHECK_TRUE(!buttonLabel->Text.empty()); // без надписи не читается
+    const auto& buttonXf = reg.get<sage::ui::Transform>(button.Entity());
+    CHECK_TRUE(buttonXf.Size.x > 0.0f && buttonXf.Size.y > 0.0f);
 
     // Полоса заполнена наполовину: пустая неотличима от панели, и человек
     // решает, что элемент не создался.
-    UIElementComponent bar;
-    CHECK_TRUE(sage::ui::ApplyPreset(bar, "Bar"));
-    CHECK_TRUE(bar.Type == UIElementComponent::Kind::Bar);
-    CHECK_TRUE(bar.Value > 0.0f && bar.Value < 1.0f);
+    GameObject bar = scene.CreateObject("Bar");
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, bar.Entity(), "Bar"));
+    const auto* barPart = reg.try_get<sage::ui::Bar>(bar.Entity());
+    CHECK_TRUE(barPart != nullptr);
+    if (barPart) CHECK_TRUE(barPart->Value > 0.0f && barPart->Value < 1.0f);
 
     // Поле ввода: текст влево (по центру набирать непривычно) и подсказка.
-    UIElementComponent input;
-    CHECK_TRUE(sage::ui::ApplyPreset(input, "Input"));
-    CHECK_FALSE(input.TextCentered);
-    CHECK_TRUE(!input.Placeholder.empty());
+    GameObject input = scene.CreateObject("Input");
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Input"));
+    const auto* field = reg.try_get<sage::ui::TextInput>(input.Entity());
+    const auto* inputLabel = reg.try_get<sage::ui::Label>(input.Entity());
+    CHECK_TRUE(field != nullptr);
+    CHECK_TRUE(inputLabel != nullptr);
+    if (field) CHECK_TRUE(!field->Placeholder.empty());
+    if (inputLabel) CHECK_TRUE(inputLabel->Horizontal == sage::ui::Label::Align::Start);
+
+    // Заготовка СНИМАЕТ чужие части: «сделать из кнопки надпись» не должно
+    // оставить надпись нажимаемой и с подложкой.
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Label"));
+    CHECK_FALSE(reg.all_of<sage::ui::Interactable>(button.Entity()));
+    CHECK_FALSE(reg.all_of<sage::ui::Fill>(button.Entity()));
 
     // Неизвестное имя — честный отказ, а не молча пустой элемент.
-    UIElementComponent unknown;
-    CHECK_FALSE(sage::ui::ApplyPreset(unknown, "Соврёшь"));
+    GameObject unknown = scene.CreateObject("Unknown");
+    CHECK_FALSE(sage::ui::ApplyPreset(reg, unknown.Entity(), "Соврёшь"));
+    CHECK_FALSE(reg.all_of<sage::ui::Transform>(unknown.Entity()));
 
     // Каждая заготовка из списка применяется и даёт ВИДИМЫЙ элемент: нулевой
     // размер означал бы «создал и не увидел ничего».
     for (const std::string& name : sage::ui::PresetNames()) {
-        UIElementComponent e;
-        CHECK_TRUE(sage::ui::ApplyPreset(e, name));
-        CHECK_TRUE(e.Size.x > 0.0f && e.Size.y > 0.0f);
+        GameObject e = scene.CreateObject(name);
+        CHECK_TRUE(sage::ui::ApplyPreset(reg, e.Entity(), name));
+        const auto& xf = reg.get<sage::ui::Transform>(e.Entity());
+        CHECK_TRUE(xf.Size.x > 0.0f && xf.Size.y > 0.0f);
     }
 }
 

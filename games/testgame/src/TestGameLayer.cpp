@@ -1003,7 +1003,7 @@ void TestGameLayer::OnRender() {
     //        поверх возможных чёрных полос letterbox ---
     device.SetViewport(0, 0, window.Width(), window.Height());
     m_ui->Begin(window.Width(), window.Height());
-    // UI сцены (инвентарь + дерево навыков из UIElementComponent активной комнаты)
+    // UI сцены (инвентарь + дерево навыков активной комнаты)
     // — тот же путь, что в собранной игре/редакторе; под кастомным HUD игры.
     if (m_scenes.Active())
         sage::ui::DrawSceneUI(*m_scenes.Active(), *m_ui, window.Width(), window.Height());

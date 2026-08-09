@@ -11,7 +11,7 @@
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/ui/UIBridge.h"
+#include "sage/ui/UILegacy.h"
 
 using json = nlohmann::json;
 
@@ -622,74 +622,25 @@ static IKComponent ParseIK(const json& ij) {
     return ik;
 }
 
-static std::string UIKindToString(UIElementComponent::Kind k) {
-    switch (k) {
-        case UIElementComponent::Kind::Label: return "label";
-        case UIElementComponent::Kind::Image: return "image";
-        case UIElementComponent::Kind::Bar:   return "bar";
-        case UIElementComponent::Kind::Icon:  return "icon";
-        case UIElementComponent::Kind::Input: return "input";
-        case UIElementComponent::Kind::Checkbox: return "checkbox";
-        case UIElementComponent::Kind::Slider: return "slider";
-        default: return "panel";
-    }
+// --- Интерфейс: ЧТЕНИЕ СТАРОГО ФОРМАТА ---------------------------------------
+//
+// Разбор блока "ui" с ключом "kind" — так элемент выглядел в файлах до перехода
+// на компоненты. Пишется всё уже компонентами (см. ниже), поэтому здесь только
+// чтение: однажды открытая и сохранённая сцена сюда больше не возвращается.
+
+static sage::ui::LegacyElement::Kind UIKindFromString(const std::string& s) {
+    if (s == "label") return sage::ui::LegacyElement::Kind::Label;
+    if (s == "image") return sage::ui::LegacyElement::Kind::Image;
+    if (s == "bar")   return sage::ui::LegacyElement::Kind::Bar;
+    if (s == "icon")  return sage::ui::LegacyElement::Kind::Icon;
+    if (s == "input") return sage::ui::LegacyElement::Kind::Input;
+    if (s == "checkbox") return sage::ui::LegacyElement::Kind::Checkbox;
+    if (s == "slider") return sage::ui::LegacyElement::Kind::Slider;
+    return sage::ui::LegacyElement::Kind::Panel;
 }
 
-static UIElementComponent::Kind UIKindFromString(const std::string& s) {
-    if (s == "label") return UIElementComponent::Kind::Label;
-    if (s == "image") return UIElementComponent::Kind::Image;
-    if (s == "bar")   return UIElementComponent::Kind::Bar;
-    if (s == "icon")  return UIElementComponent::Kind::Icon;
-    if (s == "input") return UIElementComponent::Kind::Input;
-    if (s == "checkbox") return UIElementComponent::Kind::Checkbox;
-    if (s == "slider") return UIElementComponent::Kind::Slider;
-    return UIElementComponent::Kind::Panel;
-}
-
-static void SaveUIElement(json& j, const UIElementComponent& u) {
-    json& uj = j["ui"];
-    uj["kind"] = UIKindToString(u.Type);
-    uj["anchor"] = (int)u.Anchor; // 0..8 (см. UIAnchor)
-    uj["offset"] = json{{"x", u.Offset.x}, {"y", u.Offset.y}};
-    uj["size"] = json{{"x", u.Size.x}, {"y", u.Size.y}};
-    uj["layer"] = u.Layer;
-    uj["visible"] = u.Visible;
-    uj["clipChildren"] = u.ClipChildren;
-    uj["color"] = Vec4ToJson(u.Color);
-    uj["rounding"] = u.Rounding;
-    uj["borderThickness"] = u.BorderThickness;
-    uj["borderColor"] = Vec4ToJson(u.BorderColor);
-    uj["text"] = u.Text;
-    uj["textScale"] = u.TextScale;
-    uj["textColor"] = Vec4ToJson(u.TextColor);
-    uj["textCentered"] = u.TextCentered;
-    uj["texture"] = u.TexturePath;
-    uj["value"] = u.Value;
-    uj["barFillColor"] = Vec4ToJson(u.BarFillColor);
-    uj["icon"] = u.Icon;
-    uj["iconColor"] = Vec4ToJson(u.IconColor);
-    uj["gradientColor"] = Vec4ToJson(u.GradientColor);
-    uj["shadowSize"] = u.ShadowSize;
-    uj["sprite"] = Vec4ToJson(u.Sprite);
-    uj["sliceBorder"] = Vec4ToJson(u.SliceBorder);
-    uj["pixelScale"] = u.PixelScale;
-    uj["pixelArt"] = u.PixelArt;
-    uj["spriteHover"] = Vec4ToJson(u.SpriteHover);
-    uj["spritePressed"] = Vec4ToJson(u.SpritePressed);
-    uj["interactive"] = u.Interactive;
-    uj["enabled"] = u.Enabled;
-    uj["placeholder"] = u.Placeholder;
-    uj["maxLength"] = u.MaxLength;
-    uj["password"] = u.Password;
-    uj["minValue"] = u.MinValue;
-    uj["maxValue"] = u.MaxValue;
-    uj["wrapText"] = u.WrapText;
-    uj["padX"] = u.PadX;
-    uj["autoWidth"] = u.AutoWidth;
-}
-
-static UIElementComponent ParseUIElement(const json& uj) {
-    UIElementComponent u;
+static sage::ui::LegacyElement ParseUIElement(const json& uj) {
+    sage::ui::LegacyElement u;
     u.Type = UIKindFromString(uj.value("kind", "panel"));
     int anchor = uj.value("anchor", 0);
     if (anchor >= 0 && anchor <= 8) u.Anchor = (UIAnchor)anchor;

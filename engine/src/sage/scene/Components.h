@@ -35,5 +35,5 @@
 #include "sage/physics/PhysicsComponents.h"    // тело, коллайдер, соединение, персонаж
 #include "sage/anim/AnimationComponents.h"     // скелетная анимация и IK
 #include "sage/render/ReflectionComponents.h"  // зонды отражений
-#include "sage/ui/UIComponents.h"              // элементы интерфейса сцены
+#include "sage/ui/UI.h"                        // элементы интерфейса сцены (компоненты)
 #include "sage/render/ParticleComponents.h"    // эмиттеры частиц

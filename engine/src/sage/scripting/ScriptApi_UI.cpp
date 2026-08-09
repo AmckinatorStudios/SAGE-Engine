@@ -8,12 +8,12 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
-#include "sage/ui/UIBridge.h"
+#include "sage/ui/UILegacy.h"
 
 #include <cmath>
 
 // ---------------------------------------------------------------------------
-// Интерфейс сцены: UIElementComponent и sage.ui.*
+// Интерфейс сцены: элемент из компонентов и sage.ui.*
 //
 // Часть Lua-API движка. Раньше ВСЕ привязки жили в одном ScriptEngine.cpp на
 // 1800 строк: 126 функций, восемнадцать областей, и чтобы дописать одну
@@ -39,6 +39,10 @@ namespace {
 // чего плоский компонент не умел: ЗАПИСЬ СОЗДАЁТ ЧАСТЬ. `ui.Text = "Дальше"`
 // на голой панели заводит ей надпись — раньше поле существовало всегда и
 // молча ничего не значило, если вид элемента был не тот.
+// Вид элемента, как его видит Lua. Держится здесь, а не в движке: сам движок
+// видами не оперирует — он оперирует частями.
+enum class UIKind { Panel, Label, Image, Bar, Icon, Input, Checkbox, Slider };
+
 struct UIRef {
     entt::registry* Reg = nullptr;
     entt::entity E = entt::null;
@@ -71,11 +75,27 @@ struct UIRef {
                       if (!r.Alive()) return;                                        \
                       if (on) r.Part<Comp>(); else r.Drop<Comp>(); })
 
-// Вид элемента: у набора компонентов его нет, он ВЫВОДИТСЯ (см. UIBridge).
-// Присваивание понимается как «сделай из этого вот такой элемент»: ставится
-// определяющая часть и снимаются чужие определяющие.
-void SetKind(UIRef& r, UIElementComponent::Kind kind) {
-    using Kind = UIElementComponent::Kind;
+// «Вид элемента» для Lua. У набора компонентов вида НЕТ — он выводится из
+// того, из чего элемент собран, и существует ровно ради обратной совместимости
+// скриптов: `ui.Type == UIKind.Bar` писали до перехода на компоненты.
+//
+// Читается как ответ на вопрос «чем этот элемент является в первую очередь»,
+// пишется как «сделай из этого вот такой элемент»: ставится определяющая часть
+// и снимаются чужие определяющие.
+UIKind KindOf(const UIRef& r) {
+    using namespace sage::ui;
+    if (r.Peek<sage::ui::Image>()) return UIKind::Image;
+    if (r.Peek<TextInput>()) return UIKind::Input;
+    if (const Range* range = r.Peek<Range>())
+        return range->Toggle ? UIKind::Checkbox : UIKind::Slider;
+    if (r.Peek<Bar>()) return UIKind::Bar;
+    if (r.Peek<Icon>() && !r.Peek<Fill>() && !r.Peek<Label>()) return UIKind::Icon;
+    if (r.Peek<Label>() && !r.Peek<Fill>()) return UIKind::Label;
+    return UIKind::Panel;
+}
+
+void SetKind(UIRef& r, UIKind kind) {
+    using Kind = UIKind;
     using namespace sage::ui;
     if (!r.Alive()) return;
     r.Drop<sage::ui::Image>();
@@ -136,15 +156,15 @@ void ScriptEngine::RegisterUIApi() {
     // --- UI: интерфейс сцены (набор компонентов, см. sage/ui/UI.h).
     // Скрипты правят текст/значение/видимость через ссылку на элемент — так худ
     // (здоровье, счёт, таймеры) обновляется из игровой логики. ---
-    m_lua.new_enum<UIElementComponent::Kind>("UIKind", {
-        {"Panel", UIElementComponent::Kind::Panel},
-        {"Icon",  UIElementComponent::Kind::Icon},
-        {"Input", UIElementComponent::Kind::Input},
-        {"Checkbox", UIElementComponent::Kind::Checkbox},
-        {"Slider", UIElementComponent::Kind::Slider},
-        {"Label", UIElementComponent::Kind::Label},
-        {"Image", UIElementComponent::Kind::Image},
-        {"Bar",   UIElementComponent::Kind::Bar},
+    m_lua.new_enum<UIKind>("UIKind", {
+        {"Panel", UIKind::Panel},
+        {"Icon",  UIKind::Icon},
+        {"Input", UIKind::Input},
+        {"Checkbox", UIKind::Checkbox},
+        {"Slider", UIKind::Slider},
+        {"Label", UIKind::Label},
+        {"Image", UIKind::Image},
+        {"Bar",   UIKind::Bar},
     });
     m_lua.new_enum<UIAnchor>("UIAnchor", {
         {"TopLeft", UIAnchor::TopLeft},       {"TopCenter", UIAnchor::TopCenter},
@@ -228,8 +248,7 @@ void ScriptEngine::RegisterUIApi() {
         "Action", UI_FIELD(sage::ui::Interactable, Action),
         "ClipChildren", UI_HAS(sage::ui::Mask),
         // Вид элемента — производная от набора частей (см. SetKind).
-        "Type", sol::property([](UIRef& r) { return sage::ui::Compose(*r.Reg, r.E).Type; },
-                              &SetKind),
+        "Type", sol::property(&KindOf, &SetKind),
         // Состояние взаимодействия — только чтение.
         "Hovered", UI_STATE(Hovered),
         "Pressed", UI_STATE(Pressed),
@@ -338,7 +357,7 @@ void ScriptEngine::RegisterUIApi() {
         return list;
     });
 
-    // Собирает боевой интерфейс (инвентарь + дерево навыков) из UIElementComponent
+    // Собирает боевой интерфейс (инвентарь + дерево навыков) из компонентов
     // в сцену — плотный реальный экран одним вызовом. Возвращает id корня.
     Bind("ui", "SpawnShowcase", "SpawnUIShowcase", [this]() -> int {
         if (!m_scene) throw std::runtime_error("SpawnUIShowcase: сцена не привязана");
