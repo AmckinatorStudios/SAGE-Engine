@@ -23,6 +23,7 @@
 #include "EditorIcons.h"
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
+#include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Systems.h"
 #include "sage/core/Version.h"
@@ -340,6 +341,31 @@ void EditorLayer::OnAttach() {
         reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
         SetSelectedId(all.Id());
         LOG_INFO("Editor") << "SAGE_EDITOR_ALL_COMPONENTS: сущность со всеми компонентами создана";
+    }
+    // Выложить модели в сцену тем же путём, каким это делает перетаскивание
+    // (AddAssetToScene): пути через ';'. Нужно для проверки на живых ассетах —
+    // как модель встаёт, что с её материалом и развёрткой.
+    if (const char* list = std::getenv("SAGE_EDITOR_LOAD_MODELS")) {
+        m_launcher.Dismiss();
+        std::string rest = list;
+        float x = -6.0f;
+        while (!rest.empty()) {
+            const size_t sep = rest.find(';');
+            std::string one = rest.substr(0, sep);
+            rest = (sep == std::string::npos) ? std::string() : rest.substr(sep + 1);
+            if (one.empty()) continue;
+            if (!AddAssetToScene(one)) {
+                LOG_ERROR("Editor") << "SAGE_EDITOR_LOAD_MODELS: не встала модель " << one;
+                continue;
+            }
+            // Раскладываем в ряд: иначе всё оказывается в начале координат.
+            GameObject obj = m_scene->Get(m_selectedId);
+            if (obj.Valid()) {
+                obj.GetTransform().Position = glm::vec3(x, 0.0f, 0.0f);
+                LOG_INFO("Editor") << "загружено: " << one;
+            }
+            x += 3.0f;
+        }
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
@@ -1511,6 +1537,49 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
     return false;
 }
 
+// Материал модели — сразу при её появлении в сцене.
+//
+// Раньше это делал ТОЛЬКО инспектор, когда модель назначали через его слот. Три
+// других пути — перетаскивание в список сцены, во вьюпорт и на объект — материал
+// не назначали вовсе, и модель с текстурами вставала белой болванкой. Один и тот
+// же ассет выглядел по-разному в зависимости от того, каким жестом его принесли,
+// и «текстуры не работают» было честным выводом из увиденного.
+void EditorLayer::AssignModelMaterial(MeshRendererComponent& mr) {
+    if (mr.Ref.path.empty() || !mr.MaterialPath.empty()) return;
+    const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(mr.Ref.path);
+    if (modelPath.empty()) return;
+    const fs::path matPath = fs::path(modelPath).replace_extension(".sagemat");
+
+    std::error_code ec;
+    if (!fs::exists(matPath, ec)) {
+        const ModelLoader::ExtractedMaterial ex = ModelLoader::ExtractMaterial(modelPath);
+        // Нет материала в файле — и не надо: белая болванка это честный результат
+        // «в модели материала нет», а не поломка.
+        if (!ex.Found) return;
+        Material mat;
+        mat.Albedo = ex.Albedo;
+        mat.Emissive = ex.Emissive;
+        mat.EmissiveStrength = ex.EmissiveStrength;
+        mat.Metallic = ex.Metallic;
+        mat.Roughness = ex.Roughness;
+        mat.Opacity = ex.Opacity;
+        mat.TexturePath = m_project.AssetRef(ex.AlbedoMap);
+        mat.NormalMapPath = m_project.AssetRef(ex.NormalMap);
+        mat.MetallicMapPath = m_project.AssetRef(ex.MetallicMap);
+        mat.RoughnessMapPath = m_project.AssetRef(ex.RoughnessMap);
+        mat.AOMapPath = m_project.AssetRef(ex.AOMap);
+        mat.EmissiveMap = m_project.AssetRef(ex.EmissiveMap);
+        try {
+            mat.SaveToFile(matPath.string());
+        } catch (const std::exception& e) {
+            LOG_ERROR("Editor") << "материал модели не сохранён: " << e.what();
+            return;
+        }
+    }
+    mr.MaterialPath = m_project.AssetRef(matPath);
+    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+}
+
 bool EditorLayer::AddAssetToScene(const fs::path& asset) {
     const std::string ext = ToLowerExt(asset);
     const std::string ref = m_project.AssetRef(asset);
@@ -1536,6 +1605,7 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         mr.Ref.type = MeshRef::Type::Model;
         mr.Ref.path = ref;
         mr.MeshPtr = std::move(mesh);
+        AssignModelMaterial(mr);
         newId = obj.Id();
     } else {
         return false;

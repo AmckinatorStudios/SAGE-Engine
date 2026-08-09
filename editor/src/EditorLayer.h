@@ -239,6 +239,8 @@ private:
     std::string m_recoveryFile;
     bool m_recoveryPrompt = false;
 
+    // Достаёт материал из файла модели и назначает его меш-рендеру (см. .cpp).
+    void AssignModelMaterial(MeshRendererComponent& mr);
     void DrawRecoveryPrompt();
     std::string m_windowTitle;           // кэш заголовка (не дёргать GLFW каждый кадр)
 
