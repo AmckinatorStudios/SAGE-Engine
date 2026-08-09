@@ -41,6 +41,8 @@ add_executable(SageEditor WIN32
     src/ConfirmDialog.cpp
     src/CodeEditor.cpp
     src/UICanvas.cpp
+    src/UILayoutOps.cpp
+    src/panels/UIToolsPanel.cpp
     src/AssetPreview.cpp
 )
 

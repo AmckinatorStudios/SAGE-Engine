@@ -49,6 +49,7 @@
 #include "panels/AssetsPanel.h"
 #include "panels/LauncherPanel.h"
 #include "panels/LightingPanel.h"
+#include "panels/UIToolsPanel.h"
 #include "panels/ToolbarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/DialogsPanel.h"
@@ -153,6 +154,7 @@ public:
     float SnapStepForCurrentOp() override;
     bool& ShowBounds() override { return m_showBounds; }
     bool& UIEditMode() override { return m_uiEditMode; }
+    UIToolSettings& UITools() override { return m_uiTools; }
     bool& ColliderEditMode() override { return m_colliderEdit; }
 
     // --- EditorHost: инструменты над выделением ---
@@ -271,6 +273,16 @@ private:
     float m_snapScale = 0.1f;
     bool m_showBounds = false;
     bool m_uiEditMode = false;
+    UIToolSettings m_uiTools;   // сетка и привязки вёрстки (см. UIToolSettings.h)
+    // Режим вёрстки в ПРОШЛОМ кадре: по фронту включения открывается панель
+    // «Вёрстка». Включить режим и не увидеть инструментов — ровно то, из-за
+    // чего их потом ищут в меню.
+    bool m_uiEditModePrev = false;
+    // Сколько кадров ещё просить фокус для панели вёрстки. Не флаг на один
+    // кадр: на первых кадрах редактор перестраивает раскладку доков и в конце
+    // сам ставит фокус на Viewport — запрос, поданный ровно в тот кадр,
+    // затирался, и панель открывалась за вкладкой иерархии.
+    int m_focusUITools = 0;
     bool m_colliderEdit = false; // гизмо тянет коллайдер, а не объект
 
     // --- Play-режим ---
@@ -312,6 +324,10 @@ private:
     bool m_showHierarchy = true;
     bool m_showInspector = true;
     bool m_showLighting = true;
+    // Панель «Вёрстка» — по умолчанию закрыта: она нужна, только когда собирают
+    // интерфейс, а места занимает как инспектор. Открывается вместе с режимом
+    // вёрстки (клавиша U) и через меню Window.
+    bool m_showUITools = false;
     bool m_showViewport = true;
     bool m_showGame = true;
     bool m_showConsole = true;
@@ -352,6 +368,7 @@ private:
     static std::function<void(const std::vector<std::string>&)> s_dropSink;
     LauncherPanel m_launcher;
     LightingPanel m_lighting;
+    UIToolsPanel m_uiToolsPanel;
     ToolbarPanel m_toolbar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)

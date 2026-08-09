@@ -38,6 +38,8 @@
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
+#include "sage/ui/UISceneSystem.h"
+#include "UILayoutOps.h"
 #include "sage/scene/SceneSerializer.h"
 
 #include "sage/scene/Prefab.h"
@@ -1859,6 +1861,124 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+
+    // --- Инструменты вёрстки: выравнивание, распределение, якорь -----------
+    //
+    // Проверяется ПУТЬ ЦЕЛИКОМ, а не только математика (она проверена
+    // юнит-тестами в tests/test_ui.cpp): выделение -> операция -> запись в
+    // компоненты -> прямоугольник, который увидит игра. Между «формула верна» и
+    // «кнопка в панели работает» лежит ровно то, что здесь и ломается: якорь,
+    // масштаб холста и обратный перевод пикселей в опорные единицы.
+    //
+    // Кликать по самим кнопкам панели в CI нечем, но кнопка не делает ничего,
+    // кроме вызова uiops::*, — и вызывается он здесь тем же способом.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        entt::registry& reg = m_scene->Registry();
+
+        // Экран-родитель на весь кадр и три элемента разной ширины в нём.
+        GameObject screen = m_scene->CreateObject("UIRoot");
+        sage::ui::Transform rootXf;
+        rootXf.Anchor = UIAnchor::TopLeft;
+        rootXf.Offset = {0.0f, 0.0f};
+        rootXf.Mode = sage::ui::Transform::Stretch::Both;
+        reg.emplace<sage::ui::Transform>(screen.Entity(), rootXf);
+
+        auto makeBox = [&](const char* name, glm::vec2 pos, glm::vec2 size) {
+            GameObject o = m_scene->CreateObject(name);
+            sage::ui::Transform xf;
+            xf.Anchor = UIAnchor::TopLeft;
+            xf.Offset = pos;
+            xf.Size = size;
+            reg.emplace<sage::ui::Transform>(o.Entity(), xf);
+            reg.emplace<sage::ui::Fill>(o.Entity());
+            m_scene->SetParent(o.Entity(), screen.Entity());
+            return o;
+        };
+        GameObject a = makeBox("BoxA", {10.0f, 10.0f}, {40.0f, 20.0f});
+        GameObject b = makeBox("BoxB", {200.0f, 60.0f}, {80.0f, 20.0f});
+        GameObject c = makeBox("BoxC", {500.0f, 120.0f}, {40.0f, 20.0f});
+
+        // Кадр вёрстки задаётся явно: в headless панель вьюпорта его ещё не
+        // сообщала, а от него зависят прямоугольники (см. UIToolSettings).
+        m_uiTools.FrameSize = {1280.0f, 720.0f};
+
+        auto offsetOf = [&](GameObject o) {
+            return reg.get<sage::ui::Transform>(o.Entity()).Offset;
+        };
+
+        // Выравнивание по левому краю первичного (последнего кликнутого).
+        // Первичный — тот, кого выделили последним, то есть BoxC.
+        SetSelectedId(a.Id());
+        ToggleSelection(b.Id());
+        ToggleSelection(c.Id());
+        uiops::Align(*this, sage::ui::AlignEdge::Left);
+        if (std::abs(offsetOf(a).x - 500.0f) > 0.01f ||
+            std::abs(offsetOf(b).x - 500.0f) > 0.01f ||
+            std::abs(offsetOf(c).x - 500.0f) > 0.01f) {
+            LOG_ERROR("Editor") << "SELFTEST: выравнивание по левому краю не сработало ("
+                                << offsetOf(a).x << ", " << offsetOf(b).x << ", "
+                                << offsetOf(c).x << ")";
+            ok = false;
+        }
+        // Выравнивание по горизонтали не имеет права двигать по вертикали.
+        if (ok && std::abs(offsetOf(a).y - 10.0f) > 0.01f) {
+            LOG_ERROR("Editor") << "SELFTEST: выравнивание сдвинуло элемент по чужой оси";
+            ok = false;
+        }
+
+        // Распределение по вертикали: крайние стоят, средний встаёт посередине.
+        if (ok) {
+            uiops::Distribute(*this, /*horizontal=*/false, /*byCenters=*/false);
+            const float ya = offsetOf(a).y, yb = offsetOf(b).y, yc = offsetOf(c).y;
+            // Занято 60 из (140 - 10) + 20 = 130 по высоте: зазоры по 35.
+            if (std::abs(ya - 10.0f) > 0.01f || std::abs(yc - 120.0f) > 0.01f ||
+                std::abs(yb - 65.0f) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: распределение по вертикали дало " << ya << ", "
+                                    << yb << ", " << yc;
+                ok = false;
+            }
+        }
+
+        // Смена якоря обязана ОСТАВИТЬ элемент на месте.
+        if (ok) {
+            SetSelectedId(b.Id());
+            const std::vector<sage::ui::ElementRect> before2 =
+                sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
+            sage::ui::UIRect was{};
+            for (const auto& e : before2)
+                if (e.Entity == b.Entity()) was = e.Rect;
+            uiops::SetAnchorKeepingPlace(*this, UIAnchor::BottomRight);
+            const std::vector<sage::ui::ElementRect> after2 =
+                sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
+            sage::ui::UIRect now{};
+            for (const auto& e : after2)
+                if (e.Entity == b.Entity()) now = e.Rect;
+            if (reg.get<sage::ui::Transform>(b.Entity()).Anchor != UIAnchor::BottomRight ||
+                std::abs(was.x - now.x) > 0.01f || std::abs(was.y - now.y) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: смена якоря сдвинула элемент ("
+                                    << was.x << "," << was.y << " -> " << now.x << "," << now.y
+                                    << ")";
+                ok = false;
+            }
+        }
+
+        // «Растянуть на родителя с полем» — размер и место считаются от
+        // родителя, а не от экрана: элемент внутри панели обязан остаться внутри.
+        if (ok) {
+            SetSelectedId(c.Id());
+            uiops::StretchToParent(*this, 16.0f);
+            const sage::ui::Transform& t = reg.get<sage::ui::Transform>(c.Entity());
+            if (std::abs(t.Size.x - (1280.0f - 32.0f)) > 0.01f ||
+                std::abs(t.Size.y - (720.0f - 32.0f)) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: растяжение на родителя дало " << t.Size.x << "x"
+                                    << t.Size.y;
+                ok = false;
+            }
+        }
+        SetSelectedId(-1);
+    }
+
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
                                << "materials + camera + light + primitives + environment + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
@@ -1866,7 +1986,7 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip, "
+                               << "all-components-roundtrip + ui-layout-tools, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

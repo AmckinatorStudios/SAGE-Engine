@@ -106,6 +106,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UISceneSystem.cpp
     src/sage/ui/UIPresets.cpp
     src/sage/ui/UI.cpp
+    src/sage/ui/UILayoutTools.cpp
     src/sage/ui/UILegacy.cpp
     src/sage/ui/UIDemos.cpp
     src/sage/ui/UIShowcase.cpp

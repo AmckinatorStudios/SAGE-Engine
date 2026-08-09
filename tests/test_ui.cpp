@@ -15,6 +15,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UILayoutTools.h"
 #include "sage/ui/UILegacy.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
@@ -1155,4 +1156,180 @@ TEST(UI_fit_content_keeps_children_inside) {
     // которое принадлежит панели, а не пустоте.
     CHECK_EQ(sage::ui::HitTest(scene, 100, 105, 1000, 1000), lastId);
     CHECK_EQ(sage::ui::HitTest(scene, 100, 125, 1000, 1000), panel.Id());
+}
+
+// ---------------------------------------------------------------------------
+// Инструменты вёрстки: привязка, выравнивание, распределение.
+//
+// Проверяется числами именно потому, что в редакторе это ощущается «на глаз»:
+// элемент дёрнулся к соседу — и непонятно, притянулся он или просто мышь
+// дрогнула. Здесь у притяжки есть точная величина, и её видно.
+// ---------------------------------------------------------------------------
+
+TEST(UITools_snap_to_grid_rounds_to_the_step) {
+    sage::ui::SnapSettings s;
+    s.ToGrid = true;
+    s.GridStep = 10.0f;
+    s.ToEdges = false;
+    s.Threshold = 6.0f;
+
+    // Размеры кратны шагу (40 и 20): тогда левый край, центр и правый край
+    // отстоят от своих узлов одинаково, и проверяется именно округление, а не
+    // то, какая из трёх подвижных координат оказалась ближе.
+    const sage::ui::UIRect moving{103.0f, 47.0f, 40.0f, 20.0f};
+    const sage::ui::SnapResult r = sage::ui::Snap(moving, sage::ui::SnapEdges::Whole(),
+                                                  sage::ui::UIRect{0, 0, 800, 600}, {}, s);
+    CHECK_NEAR(r.Delta.x, -3.0f, 1e-3f);
+    CHECK_NEAR(r.Delta.y, 3.0f, 1e-3f);   // 47 -> 50
+    // Направляющих от сетки не бывает: сетка нарисована и так.
+    CHECK_EQ((int)r.Guides.size(), 0);
+}
+
+TEST(UITools_grid_does_not_pull_from_far_away) {
+    sage::ui::SnapSettings s;
+    s.ToGrid = true;
+    s.GridStep = 100.0f;
+    s.ToEdges = false;
+    s.Threshold = 4.0f;
+
+    // До ближайшего узла 50 пикселей — притяжка обязана промолчать, иначе
+    // поставить элемент между узлами было бы невозможно.
+    const sage::ui::UIRect moving{150.0f, 150.0f, 20.0f, 20.0f};
+    const sage::ui::SnapResult r = sage::ui::Snap(moving, sage::ui::SnapEdges::Whole(),
+                                                  sage::ui::UIRect{0, 0, 800, 600}, {}, s);
+    CHECK_NEAR(r.Delta.x, 0.0f, 1e-3f);
+    CHECK_NEAR(r.Delta.y, 0.0f, 1e-3f);
+}
+
+TEST(UITools_snap_lines_up_with_a_neighbour) {
+    sage::ui::SnapSettings s;
+    s.ToGrid = false;
+    s.ToEdges = true;
+    s.Threshold = 8.0f;
+
+    const sage::ui::UIRect neighbour{100.0f, 100.0f, 60.0f, 30.0f};
+    // Левый край на 104 — до левого края соседа четыре пикселя.
+    const sage::ui::UIRect moving{104.0f, 200.0f, 60.0f, 30.0f};
+    const sage::ui::SnapResult r =
+        sage::ui::Snap(moving, sage::ui::SnapEdges::Whole(), sage::ui::UIRect{0, 0, 800, 600},
+                       {neighbour}, s);
+    CHECK_NEAR(r.Delta.x, -4.0f, 1e-3f);
+
+    // И направляющая показана — иначе притяжка выглядит как самоуправство.
+    bool haveX = false;
+    for (const sage::ui::SnapGuide& g : r.Guides) {
+        if (g.Along == sage::ui::SnapGuide::Axis::X) {
+            haveX = true;
+            CHECK_NEAR(g.Position, 100.0f, 1e-3f);
+            CHECK_TRUE(g.From == sage::ui::SnapGuide::Source::Sibling);
+            // Отрезок соединяет то, что совпало: от верха соседа до низа нашего.
+            CHECK_NEAR(g.Begin, 100.0f, 1e-3f);
+            CHECK_NEAR(g.End, 230.0f, 1e-3f);
+        }
+    }
+    CHECK_TRUE(haveX);
+}
+
+TEST(UITools_resize_snaps_only_the_dragged_edge) {
+    sage::ui::SnapSettings s;
+    s.ToGrid = true;
+    s.GridStep = 10.0f;
+    s.ToEdges = false;
+    s.Threshold = 6.0f;
+
+    // Тянут ПРАВЫЙ край. Левый стоит на 103 и до узла ему три пикселя, но он
+    // не при делах: подвинуть его значило бы поехать всем элементом.
+    sage::ui::SnapEdges edges;
+    edges.Right = true;
+    const sage::ui::UIRect moving{103.0f, 50.0f, 44.0f, 20.0f};  // правый край 147
+    const sage::ui::SnapResult r = sage::ui::Snap(moving, edges,
+                                                  sage::ui::UIRect{0, 0, 800, 600}, {}, s);
+    CHECK_NEAR(r.Delta.x, 3.0f, 1e-3f);   // 147 -> 150, а не 103 -> 100
+    CHECK_NEAR(r.Delta.y, 0.0f, 1e-3f);   // по вертикали ничего не ведут
+}
+
+TEST(UITools_snap_axes_are_independent) {
+    sage::ui::SnapSettings s;
+    s.ToGrid = true;
+    s.GridStep = 50.0f;
+    s.ToEdges = true;
+    s.Threshold = 6.0f;
+
+    // Сосед стоит СИЛЬНО ниже: по вертикали он не должен участвовать вовсе,
+    // иначе его край окажется ближе узла сетки и проверка выйдет не про оси.
+    const sage::ui::UIRect neighbour{300.0f, 400.0f, 40.0f, 40.0f};
+    // По X ближе край соседа (300), по Y — узел сетки (100).
+    const sage::ui::UIRect moving{297.0f, 98.0f, 40.0f, 40.0f};
+    const sage::ui::SnapResult r =
+        sage::ui::Snap(moving, sage::ui::SnapEdges::Whole(), sage::ui::UIRect{0, 0, 800, 600},
+                       {neighbour}, s);
+    CHECK_NEAR(r.Delta.x, 3.0f, 1e-3f);   // к краю соседа
+    CHECK_NEAR(r.Delta.y, 2.0f, 1e-3f);   // к узлу сетки
+}
+
+TEST(UITools_align_moves_along_one_axis_only) {
+    const sage::ui::UIRect target{100.0f, 100.0f, 200.0f, 100.0f};
+    const sage::ui::UIRect r{10.0f, 20.0f, 40.0f, 30.0f};
+
+    glm::vec2 d = sage::ui::AlignDelta(r, target, sage::ui::AlignEdge::Left);
+    CHECK_NEAR(d.x, 90.0f, 1e-3f);
+    CHECK_NEAR(d.y, 0.0f, 1e-3f);
+
+    d = sage::ui::AlignDelta(r, target, sage::ui::AlignEdge::Right);
+    CHECK_NEAR(d.x, 250.0f, 1e-3f);   // правый край цели 300, наш 50
+
+    d = sage::ui::AlignDelta(r, target, sage::ui::AlignEdge::CenterY);
+    CHECK_NEAR(d.x, 0.0f, 1e-3f);
+    CHECK_NEAR(d.y, 115.0f, 1e-3f);   // центр 150, наш 35
+}
+
+TEST(UITools_distribute_equalises_gaps_and_keeps_the_outer_ones) {
+    // Три кнопки разной ширины: 20, 40, 20. Крайние стоят намертво.
+    std::vector<sage::ui::UIRect> rects = {
+        {0.0f, 0.0f, 20.0f, 10.0f},
+        {30.0f, 0.0f, 40.0f, 10.0f},
+        {200.0f, 0.0f, 20.0f, 10.0f},
+    };
+    const std::vector<float> d = sage::ui::DistributeGapDeltas(rects, true);
+    CHECK_NEAR(d[0], 0.0f, 1e-3f);
+    CHECK_NEAR(d[2], 0.0f, 1e-3f);
+    // Занято 80 из 220, свободного 140 на два зазора — по 70.
+    // Средний обязан встать на 20 + 70 = 90.
+    CHECK_NEAR(rects[1].x + d[1], 90.0f, 1e-3f);
+}
+
+TEST(UITools_distribute_uses_the_order_on_screen_not_the_order_of_selection) {
+    // Подали вразнобой — распределение не имеет права переставить их местами.
+    std::vector<sage::ui::UIRect> rects = {
+        {200.0f, 0.0f, 20.0f, 10.0f},
+        {0.0f, 0.0f, 20.0f, 10.0f},
+        {33.0f, 0.0f, 20.0f, 10.0f},
+    };
+    const std::vector<float> d = sage::ui::DistributeGapDeltas(rects, true);
+    CHECK_NEAR(d[0], 0.0f, 1e-3f);   // самый правый — крайний, стоит
+    CHECK_NEAR(d[1], 0.0f, 1e-3f);   // самый левый — тоже
+    // Свободного 220 - 60 = 160 на два зазора — по 80; средний встаёт на 100.
+    CHECK_NEAR(rects[2].x + d[2], 100.0f, 1e-3f);
+}
+
+TEST(UITools_distribute_centers_differs_from_gaps_for_uneven_sizes) {
+    std::vector<sage::ui::UIRect> rects = {
+        {0.0f, 0.0f, 20.0f, 10.0f},
+        {50.0f, 0.0f, 60.0f, 10.0f},
+        {200.0f, 0.0f, 20.0f, 10.0f},
+    };
+    const std::vector<float> d = sage::ui::DistributeCenterDeltas(rects, true);
+    // Центры крайних: 10 и 210, шаг 100 — средний центр обязан быть 110.
+    CHECK_NEAR(rects[1].x + d[1] + rects[1].w * 0.5f, 110.0f, 1e-3f);
+    CHECK_NEAR(d[0], 0.0f, 1e-3f);
+    CHECK_NEAR(d[2], 0.0f, 1e-3f);
+}
+
+TEST(UITools_union_covers_everything) {
+    const sage::ui::UIRect u = sage::ui::Union({{10.0f, 20.0f, 30.0f, 40.0f},
+                                                {-5.0f, 100.0f, 10.0f, 10.0f}});
+    CHECK_NEAR(u.x, -5.0f, 1e-3f);
+    CHECK_NEAR(u.y, 20.0f, 1e-3f);
+    CHECK_NEAR(u.w, 45.0f, 1e-3f);   // от -5 до 40
+    CHECK_NEAR(u.h, 90.0f, 1e-3f);   // от 20 до 110
 }

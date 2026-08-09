@@ -320,7 +320,7 @@ void EditorLayer::OnAttach() {
     // «Все панели закрыты» с кнопкой возврата.
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
         m_launcher.Dismiss();
-        m_showHierarchy = m_showInspector = m_showLighting = false;
+        m_showHierarchy = m_showInspector = m_showLighting = m_showUITools = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
         m_showCode = m_showProfiler = false;
     }
@@ -2064,6 +2064,15 @@ void EditorLayer::OnRender() {
     if (m_showHierarchy) m_hierarchy.Draw(*this, &m_showHierarchy);
     if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
     if (m_showLighting) m_lighting.Draw(*this, &m_showLighting);
+    // Режим вёрстки включили — показываем инструменты. Только по ФРОНТУ:
+    // иначе закрытую крестиком панель возвращало бы каждым кадром.
+    if (m_uiEditMode && !m_uiEditModePrev) {
+        m_showUITools = true;
+        m_focusUITools = 4;   // и ВПЕРЁД: иначе откроется за вкладкой иерархии
+    }
+    m_uiEditModePrev = m_uiEditMode;
+    if (m_showUITools) m_uiToolsPanel.Draw(*this, &m_showUITools, m_focusUITools > 0);
+    if (m_focusUITools > 0) --m_focusUITools;
     if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
     if (m_showGame) m_game.Draw(*this, &m_showGame);
     // Код подаётся ПОСЛЕ Viewport и Game, потому что порядок вкладок в узле
@@ -2139,6 +2148,10 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28f, nullptr, &center);
 
     ImGui::DockBuilderDockWindow("Hierarchy", left);
+    // Панель вёрстки — вкладкой к иерархии слева, а не плавающим окном. Плавать
+    // ей нельзя: она открывается сама вместе с режимом вёрстки и накрывала бы
+    // собой ровно тот вьюпорт, ради которого её и открыли.
+    ImGui::DockBuilderDockWindow("Layout", left);
     ImGui::DockBuilderDockWindow("Lighting", right);
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Console", bottom);
@@ -2265,12 +2278,16 @@ void EditorLayer::DrawStatusBar(float height) {
 }
 
 bool EditorLayer::AnyPanelVisible() const {
-    return m_showHierarchy || m_showInspector || m_showLighting || m_showViewport || m_showGame ||
+    return m_showHierarchy || m_showInspector || m_showLighting || m_showUITools ||
+           m_showViewport || m_showGame ||
            m_showConsole || m_showAssets || m_showCode || m_showProfiler;
 }
 
 void EditorLayer::ShowAllPanels() {
     m_showHierarchy = m_showInspector = m_showLighting = true;
+    // Панель вёрстки в «показать все» НЕ входит: она инструмент под задачу, а
+    // не часть постоянной раскладки, и открывать её вместе со всем остальным
+    // значит отдать ей место у человека, который сейчас собирает сцену.
     m_showViewport = m_showGame = m_showConsole = m_showAssets = true;
     m_showCode = true;
     // Профайлер сюда НЕ входит: он служебный и по умолчанию закрыт, а «вернуть
@@ -2605,6 +2622,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Assets"), nullptr, &m_showAssets);
             ImGui::MenuItem(T("Console"), nullptr, &m_showConsole);
             ImGui::MenuItem(T("Lighting"), nullptr, &m_showLighting);
+            ImGui::MenuItem(T("UI Layout"), nullptr, &m_showUITools);
             ImGui::MenuItem(T("Code"), nullptr, &m_showCode);
             ImGui::MenuItem(T("Profiler"), nullptr, &m_showProfiler);
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);

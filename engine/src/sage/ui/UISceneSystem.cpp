@@ -617,6 +617,10 @@ struct Solved {
     // задано рядом с прямоугольником, но не выводится из него: кегль шрифта,
     // скругление, толщина рамки.
     float Scale = 1.0f;
+    // Виден ли элемент сам по себе. Рантайму это не нужно (невидимые в список
+    // не попадают вовсе), а редактору нужно: выключенный элемент надо ПОКАЗАТЬ
+    // рамкой, иначе его нельзя найти и включить обратно.
+    bool Visible = true;
 };
 
 // Рекурсивный обход: считает прямоугольники, применяет раскладку, маски и
@@ -624,10 +628,13 @@ struct Solved {
 // (nullptr — элемент стоит по своему якорю).
 void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRenderer* ui,
                   bool clipped, const UIRect& clip, float alpha, bool interactive,
-                  const UIRect* forced, std::vector<Solved>& out) {
+                  const UIRect* forced, bool includeHidden, std::vector<Solved>& out) {
     entt::registry& reg = scene.Registry();
     const Transform& t = reg.get<Transform>(ent);
-    if (!t.Visible) return; // невидимый прячет и всё поддерево
+    // Невидимый прячет и всё поддерево — но только в игре. Редактор просит
+    // includeHidden и получает выключенные элементы тоже: иначе выключить
+    // элемент значило бы потерять его насовсем.
+    if (!t.Visible && !includeHidden) return;
 
     // ГЕОМЕТРИЯ БЕРЁТСЯ ИЗ Transform, а не из плоского описания.
     //
@@ -657,6 +664,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     const size_t self = out.size();
     out.push_back(Solved{ent, ViewOf(reg, ent, myAlpha), r, clip, clipped, myAlpha,
                          myInteractive});
+    out.back().Visible = t.Visible;
 
     std::vector<entt::entity> kids = SortedUIChildren(scene, ent);
     if (kids.empty()) return;
@@ -719,20 +727,21 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
         for (size_t i = 0; i < kids.size(); ++i) {
             const UIRect kr{slots[i].Pos.x, slots[i].Pos.y, slots[i].Size.x, slots[i].Size.y};
             SolveSubtree(scene, kids[i], r, ui, childClipped, childClip, myAlpha, myInteractive,
-                         &kr, out);
+                         &kr, includeHidden, out);
         }
         return;
     }
 
     for (auto k : kids) {
         SolveSubtree(scene, k, r, ui, childClipped, childClip, myAlpha, myInteractive, nullptr,
-                     out);
+                     includeHidden, out);
     }
 }
 
 // Все элементы сцены в ПОРЯДКЕ ОТРИСОВКИ. ui нужен для измерения текста; без
 // него берётся размер, посчитанный на прошлом кадре.
-std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int screenH) {
+std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int screenH,
+                              bool includeHidden = false) {
     std::vector<Solved> out;
     entt::registry& reg = scene.Registry();
     for (auto root : SortedUIRoots(scene)) {
@@ -749,7 +758,8 @@ std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int sc
             }
         }
         const size_t first = out.size();
-        SolveSubtree(scene, root, screen, ui, false, UIRect{}, 1.0f, true, nullptr, out);
+        SolveSubtree(scene, root, screen, ui, false, UIRect{}, 1.0f, true, nullptr, includeHidden,
+                     out);
         // ПЕРЕВОД В ЭКРАННЫЕ КООРДИНАТЫ. Раскладка считалась в опорных единицах
         // холста — иначе вёрстка под 1920x1080 не сохранила бы пропорции на
         // другом разрешении. Дальше её читают отрисовка, попадание курсором и
@@ -768,6 +778,41 @@ std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int sc
     }
     return out;
 }
+
+} // namespace
+
+std::vector<ElementRect> SolveSceneRects(Scene& scene, int screenW, int screenH,
+                                         bool includeHidden) {
+    entt::registry& reg = scene.Registry();
+    // Без UIRenderer: авто-ширину надписи меряет шрифт, а его здесь нет.
+    // Прошлый кадр её уже посчитал и положил в Transform::LayoutSize, поэтому
+    // рамка редактора отстаёт от изменившегося текста ровно на один кадр —
+    // цена за то, что редактор не тащит за собой отрисовку.
+    const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH, includeHidden);
+
+    std::vector<ElementRect> out;
+    out.reserve(items.size());
+    for (const Solved& it : items) {
+        ElementRect e;
+        e.Entity = it.Entity;
+        e.Rect = it.Rect;
+        e.Scale = it.Scale;
+        e.Visible = it.Visible;
+        // Прямоугольник родителя ищется среди уже посчитанных: считать его
+        // заново значило бы завести вторую версию тех же формул.
+        const entt::entity parent = scene.ParentOf(it.Entity);
+        e.Parent = UIRect{0.0f, 0.0f, (float)screenW, (float)screenH};
+        if (parent != entt::null && reg.valid(parent)) {
+            for (const Solved& p : items)
+                if (p.Entity == parent) { e.Parent = p.Rect; break; }
+            e.InLayout = reg.all_of<Layout>(parent);
+        }
+        out.push_back(e);
+    }
+    return out;
+}
+
+namespace {
 
 bool PointIn(const UIRect& r, glm::vec2 p) {
     return p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
