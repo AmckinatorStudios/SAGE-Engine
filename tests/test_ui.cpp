@@ -1047,3 +1047,112 @@ TEST(UI_demo_survives_a_scene_round_trip) {
     // Раскладка панели тоже пережила файл — иначе строки разъехались бы.
     CHECK_TRUE(back->Registry().all_of<sage::ui::Layout>(back->FindByName("SettingsPanel").Entity()));
 }
+
+// Холст пересчитывает вёрстку под размер экрана — и попадание курсором обязано
+// считаться в ТЕХ ЖЕ координатах, что и отрисовка.
+//
+// Тест написан по следам настоящей ошибки, которую не поймал ни один из
+// остальных: решатель раскладывал интерфейс в опорных единицах холста (1920 в
+// ширину), а рисовался он один к одному в окно 1280 — и всё меню уезжало
+// вправо-вниз за край. Проверки по числам этого не видели, потому что каждая
+// смотрела на свою половину; увидел скриншот.
+TEST(UI_canvas_layout_lands_in_screen_pixels) {
+    Scene scene("canvas");
+    entt::registry& reg = scene.Registry();
+
+    GameObject root = scene.CreateObject("Screen");
+    sage::ui::Transform screenXf;
+    screenXf.Offset = {0.0f, 0.0f};
+    screenXf.Mode = sage::ui::Transform::Stretch::Both;
+    reg.emplace<sage::ui::Transform>(root.Entity(), screenXf);
+    sage::ui::Canvas canvas;
+    canvas.Mode = sage::ui::Canvas::Scale::ScaleWithSize;
+    canvas.Reference = {1920.0f, 1080.0f};
+    reg.emplace<sage::ui::Canvas>(root.Entity(), canvas);
+
+    // Кнопка ровно по центру опорного экрана.
+    GameObject button = scene.CreateObject("Button");
+    sage::ui::Transform xf;
+    xf.Anchor = UIAnchor::Center;
+    xf.Offset = {0.0f, 0.0f};   // отступ по умолчанию {16,16} сдвинул бы «центр»
+    xf.Size = {320.0f, 100.0f};
+    reg.emplace<sage::ui::Transform>(button.Entity(), xf);
+    reg.emplace<sage::ui::Fill>(button.Entity());
+    reg.emplace<sage::ui::Interactable>(button.Entity());
+    // Кнопка — ВНУТРИ холста: масштаб холста действует на его поддерево, а
+    // сущность без родителя-элемента сама себе корень и живёт в пикселях экрана.
+    scene.SetParent(button.Entity(), root.Entity());
+
+    // На опорном разрешении центр экрана — это кнопка, а угол — мимо.
+    CHECK_EQ(sage::ui::HitTest(scene, 960, 540, 1920, 1080), button.Id());
+    CHECK_EQ(sage::ui::HitTest(scene, 20, 20, 1920, 1080), root.Id());
+
+    // На вдвое меньшем окне — ТО ЖЕ САМОЕ: центр попадает, а точка за краем
+    // окна не попадает никуда. Именно это и было сломано: элемент считался в
+    // опорных единицах и оказывался за границей окна.
+    CHECK_EQ(sage::ui::HitTest(scene, 480, 270, 960, 540), button.Id());
+    CHECK_EQ(sage::ui::HitTest(scene, 950, 530, 960, 540), root.Id());
+
+    // Кнопка ужалась вместе с экраном, а не осталась прежних 320 пикселей.
+    sage::ui::UpdateSceneUI(scene, sage::ui::UIInputState{}, 960, 540);
+    const glm::vec2 size = reg.get<sage::ui::Transform>(button.Entity()).LayoutSize;
+    CHECK_NEAR(size.x, 320.0f, 1e-3f);   // в опорных единицах размер прежний
+    // А на экране она занимает половину: середина её левого края лежит внутри,
+    // а точка на 320/2 пикселей левее центра — уже снаружи.
+    CHECK_EQ(sage::ui::HitTest(scene, 480 - 79, 270, 960, 540), button.Id());
+    CHECK_EQ(sage::ui::HitTest(scene, 480 - 81, 270, 960, 540), root.Id());
+}
+
+// Контейнер с FitContent обнимает содержимое ВМЕСТЕ СО СВОИМИ ПОЛЯМИ.
+//
+// Тоже по следам настоящей ошибки, и тоже увиденной глазами, а не числом:
+// ApplyLayout отдаёт место, занятое ДЕТЬМИ, — без полей контейнера. Панель
+// подгонялась ровно по нему, дети при этом начинались с отступа сверху, и
+// последний из них вылезал за нижний край панели ровно на величину полей: в
+// демо «Настройки» кнопка «Применить» висела под панелью в воздухе.
+TEST(UI_fit_content_keeps_children_inside) {
+    Scene scene("fit");
+    entt::registry& reg = scene.Registry();
+
+    GameObject panel = scene.CreateObject("Panel");
+    sage::ui::Transform panelXf;
+    panelXf.Anchor = UIAnchor::TopLeft;
+    panelXf.Offset = {0.0f, 0.0f};
+    panelXf.Size = {200.0f, 500.0f}; // заведомо неверная высота — её и подгоняют
+    reg.emplace<sage::ui::Transform>(panel.Entity(), panelXf);
+    reg.emplace<sage::ui::Fill>(panel.Entity());
+    reg.emplace<sage::ui::Interactable>(panel.Entity());
+    sage::ui::Layout layout;
+    layout.Direction = sage::ui::Layout::Flow::Vertical;
+    layout.Spacing = 10.0f;
+    layout.Padding = {20.0f, 20.0f, 20.0f, 20.0f};
+    layout.FitContent = true;
+    reg.emplace<sage::ui::Layout>(panel.Entity(), layout);
+
+    int lastId = 0;
+    for (int i = 0; i < 2; ++i) {
+        GameObject row = scene.CreateObject("Row" + std::to_string(i));
+        sage::ui::Transform xf;
+        xf.Anchor = UIAnchor::TopLeft;
+        xf.Offset = {0.0f, 0.0f};
+        xf.Size = {160.0f, 40.0f};
+        reg.emplace<sage::ui::Transform>(row.Entity(), xf);
+        reg.emplace<sage::ui::Fill>(row.Entity());
+        reg.emplace<sage::ui::Interactable>(row.Entity());
+        scene.SetParent(row.Entity(), panel.Entity());
+        lastId = row.Id();
+    }
+
+    sage::ui::UpdateSceneUI(scene, sage::ui::UIInputState{}, 1000, 1000);
+
+    // 40 + 10 + 40 = 90 занимают дети, плюс по 20 сверху и снизу — 130.
+    // До починки здесь было 90, и нижняя строка кончалась за краем панели.
+    const glm::vec2 size = reg.get<sage::ui::Transform>(panel.Entity()).LayoutSize;
+    CHECK_NEAR(size.y, 130.0f, 1e-3f);
+    CHECK_NEAR(size.x, 200.0f, 1e-3f); // поперёк FitContent ничего не трогает
+
+    // Нижняя строка (70..110) — внутри панели, а под ней ещё поле в 20 пикселей,
+    // которое принадлежит панели, а не пустоте.
+    CHECK_EQ(sage::ui::HitTest(scene, 100, 105, 1000, 1000), lastId);
+    CHECK_EQ(sage::ui::HitTest(scene, 100, 125, 1000, 1000), panel.Id());
+}

@@ -54,6 +54,7 @@ int BuildMenu(Scene& scene) {
 
     Transform screenXf;
     screenXf.Anchor = UIAnchor::TopLeft;
+    screenXf.Offset = {0.0f, 0.0f};
     screenXf.Mode = Transform::Stretch::Both;
     GameObject screen = Element(scene, "MenuScreen", root, screenXf);
     Add(scene, screen, PanelFill({0.04f, 0.05f, 0.08f, 0.88f}, 0.0f));
@@ -76,7 +77,10 @@ int BuildMenu(Scene& scene) {
 
     Transform listXf;
     // Якорь Center уже центрирует элемент — Pivot здесь не нужен (см. Layout.h).
+    // А вот отступ обнулить НАДО: по умолчанию он {16,16} (разумно для угла), и
+    // с ним «по центру» оказывается на шестнадцать пикселей правее и ниже.
     listXf.Anchor = UIAnchor::Center;
+    listXf.Offset = {0.0f, 0.0f};
     listXf.Size = {320.0f, 260.0f};
     GameObject list = Element(scene, "MenuButtons", screen, listXf);
     Layout layout;
@@ -116,6 +120,7 @@ int BuildHud(Scene& scene) {
 
     Transform screenXf;
     screenXf.Anchor = UIAnchor::TopLeft;
+    screenXf.Offset = {0.0f, 0.0f};
     screenXf.Mode = Transform::Stretch::Both;
     GameObject screen = Element(scene, "HudScreen", root, screenXf);
     Canvas canvas;
@@ -189,6 +194,7 @@ int BuildSettings(Scene& scene) {
 
     Transform panelXf;
     panelXf.Anchor = UIAnchor::Center;
+    panelXf.Offset = {0.0f, 0.0f};   // см. меню: у якоря Center отступ обнуляем
     panelXf.Size = {420.0f, 340.0f};
     GameObject panel = Element(scene, "SettingsPanel", root, panelXf);
     Add(scene, panel, PanelFill({0.07f, 0.08f, 0.12f, 0.95f}, 14.0f, 16.0f));
@@ -200,6 +206,9 @@ int BuildSettings(Scene& scene) {
     layout.Direction = Layout::Flow::Vertical;
     layout.Spacing = 10.0f;
     layout.Padding = {18.0f, 18.0f, 18.0f, 18.0f};
+    // Панель обнимает содержимое: высота 340 в Transform — лишь запасная, на
+    // случай пустой панели. Добавили строку — панель подросла сама.
+    layout.FitContent = true;
     Add(scene, panel, layout);
 
     int layer = 0;
@@ -210,14 +219,37 @@ int BuildSettings(Scene& scene) {
         return Element(scene, name, panel, xf);
     };
 
+    // Строка настройки: слева подпись, справа сам элемент.
+    //
+    // Именно ДВУМЯ элементами, а не подписью поверх ползунка: дорожка занимает
+    // всю ширину элемента, и надпись на ней тонет под заполнением — это сразу
+    // видно на первом же кадре. Раскладка строки расставляет обе части сама.
+    auto labelledRow = [&](const std::string& name, const std::string& caption, float height) {
+        GameObject line = row(name + "Row", height);
+        Layout inner;
+        inner.Direction = Layout::Flow::Horizontal;
+        inner.Spacing = 10.0f;
+        inner.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
+        Add(scene, line, inner);
+
+        Transform capXf;
+        capXf.Size = {150.0f, height};
+        GameObject cap = Element(scene, name + "Caption", line, capXf);
+        Add(scene, cap, Text(caption, 1.6f, {0.9f, 0.92f, 1.0f, 1.0f}, Label::Align::Start));
+
+        Transform ctlXf;
+        ctlXf.Size = {224.0f, height};
+        ctlXf.Layer = 1;
+        return Element(scene, name, line, ctlXf);
+    };
+
     GameObject title = row("SettingsTitle", 40.0f);
     Add(scene, title, Text("Настройки", 3.0f, {1.0f, 0.95f, 0.85f, 1.0f}, Label::Align::Start));
 
     // Громкость: значение В ИГРОВЫХ ЕДИНИЦАХ и шаг. Раньше ползунок хранил долю
     // 0..1, и «громкость 45%» приходилось пересчитывать каждому читателю.
-    GameObject volume = row("VolumeSlider", 32.0f);
+    GameObject volume = labelledRow("VolumeSlider", "Громкость", 30.0f);
     Add(scene, volume, PanelFill({0.13f, 0.15f, 0.20f, 1.0f}, 8.0f));
-    Add(scene, volume, Text("Громкость", 1.6f, {0.9f, 0.92f, 1.0f, 1.0f}, Label::Align::Start));
     Add(scene, volume, Interactable{});
     Range volumeRange;
     volumeRange.Min = 0.0f;
@@ -226,9 +258,8 @@ int BuildSettings(Scene& scene) {
     volumeRange.Step = 5.0f;
     Add(scene, volume, volumeRange);
 
-    GameObject sens = row("SensitivitySlider", 32.0f);
+    GameObject sens = labelledRow("SensitivitySlider", "Чувствительность", 30.0f);
     Add(scene, sens, PanelFill({0.13f, 0.15f, 0.20f, 1.0f}, 8.0f));
-    Add(scene, sens, Text("Чувствительность", 1.6f, {0.9f, 0.92f, 1.0f, 1.0f}, Label::Align::Start));
     Add(scene, sens, Interactable{});
     Range sensRange;
     sensRange.Min = 0.1f;
@@ -237,10 +268,12 @@ int BuildSettings(Scene& scene) {
     Add(scene, sens, sensRange);
 
     // Галка — тот же диапазон с шагом в единицу: отдельного вида элемента для
-    // двух значений заводить незачем.
-    GameObject fullscreen = row("FullscreenToggle", 32.0f);
+    // двух значений заводить незачем. Подпись у неё СВОЯ: квадратик занимает
+    // левый край, и текст встаёт за ним (см. DrawElement), не перекрываясь.
+    GameObject fullscreen = row("FullscreenToggle", 30.0f);
     Add(scene, fullscreen, PanelFill({0.13f, 0.15f, 0.20f, 1.0f}, 8.0f));
-    Add(scene, fullscreen, Text("Полный экран", 1.6f, {0.9f, 0.92f, 1.0f, 1.0f}, Label::Align::Start));
+    Add(scene, fullscreen, Text("Полный экран", 1.6f, {0.9f, 0.92f, 1.0f, 1.0f},
+                                Label::Align::Start));
     Add(scene, fullscreen, Interactable{});
     Range toggle;
     toggle.Toggle = true;
@@ -248,7 +281,7 @@ int BuildSettings(Scene& scene) {
     toggle.Value = 1.0f;
     Add(scene, fullscreen, toggle);
 
-    GameObject name = row("PlayerName", 38.0f);
+    GameObject name = labelledRow("PlayerName", "Имя", 34.0f);
     Add(scene, name, PanelFill({0.10f, 0.11f, 0.16f, 1.0f}, 8.0f));
     Add(scene, name, Text("", 1.8f, {1.0f, 1.0f, 1.0f, 1.0f}, Label::Align::Start));
     Add(scene, name, Interactable{});
@@ -257,7 +290,7 @@ int BuildSettings(Scene& scene) {
     field.MaxLength = 24;
     Add(scene, name, field);
 
-    GameObject apply = row("SettingsApply", 44.0f);
+    GameObject apply = row("SettingsApply", 40.0f);
     Add(scene, apply, PanelFill({0.18f, 0.34f, 0.24f, 1.0f}, 10.0f));
     Add(scene, apply, Text("Применить", 2.0f, {0.95f, 1.0f, 0.95f, 1.0f}));
     Interactable act;

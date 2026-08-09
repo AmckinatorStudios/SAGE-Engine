@@ -278,13 +278,15 @@ float AlphaOf(const ElementView& v, float channelAlpha) {
 }
 
 // Картинка: спрайт с листа, девятина, пиксель-арт.
-void DrawImage(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer& ui) {
+void DrawImage(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb,
+               UIRenderer& ui) {
     const Image& img = *v.ImagePart;
     const float alpha = AlphaOf(v, img.Tint.a);
     if (!img.Tex) {
         // Текстура не задана/не загрузилась — заглушка тоном, чтобы элемент был
         // виден и настраиваем в редакторе.
-        ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha, v.FillPart ? v.FillPart->Rounding : 0.0f);
+        ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha,
+                       v.FillPart ? v.FillPart->Rounding * scale : 0.0f);
         return;
     }
     const UIRenderer::Sprite src = StateSprite(v);
@@ -294,13 +296,13 @@ void DrawImage(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer&
         // Масштаб пикселя: 0 — «подобрать сам». Для пиксель-арта он округляется
         // ВНИЗ до целого — дробный масштаб растягивает одни пиксели исходника на
         // два экранных, а соседние на один, и ровная рамка идёт волнами.
-        float scale = img.PixelScale;
-        if (scale <= 0.0f) {
+        float pixels = img.PixelScale * scale;
+        if (pixels <= 0.0f) {
             const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
-            scale = srcH > 0.0f ? r.h / srcH : 1.0f;
-            if (img.PixelArt) scale = glm::max(1.0f, glm::floor(scale));
+            pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
+            if (img.PixelArt) pixels = glm::max(1.0f, glm::floor(pixels));
         }
-        ui.ImageNineSlice(r.x, r.y, r.w, r.h, img.Tex.get(), src, img.SliceBorder, scale, rgb,
+        ui.ImageNineSlice(r.x, r.y, r.w, r.h, img.Tex.get(), src, img.SliceBorder, pixels, rgb,
                           alpha);
         return;
     }
@@ -311,17 +313,17 @@ void DrawImage(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer&
     // элемент при этом может остаться больше картинки, и это честнее, чем её
     // испортить.
     UIRect dst = r;
-    float scale = img.PixelScale;
-    if (img.PixelArt || scale > 0.0f) {
+    float pixels = img.PixelScale * scale;
+    if (img.PixelArt || pixels > 0.0f) {
         const float sw = src.Whole() ? (float)img.Tex->Width() : src.W;
         const float sh = src.Whole() ? (float)img.Tex->Height() : src.H;
         if (sw > 0.0f && sh > 0.0f) {
-            if (scale <= 0.0f) {
-                scale = glm::min(r.w / sw, r.h / sh);
-                if (img.PixelArt) scale = glm::max(1.0f, glm::floor(scale));
+            if (pixels <= 0.0f) {
+                pixels = glm::min(r.w / sw, r.h / sh);
+                if (img.PixelArt) pixels = glm::max(1.0f, glm::floor(pixels));
             }
-            dst.w = sw * scale;
-            dst.h = sh * scale;
+            dst.w = sw * pixels;
+            dst.h = sh * pixels;
             dst.x = r.x + glm::floor((r.w - dst.w) * 0.5f);
             dst.y = r.y + glm::floor((r.h - dst.h) * 0.5f);
         }
@@ -336,14 +338,17 @@ UIRect ToggleBox(const UIRect& r) {
     return {r.x, r.y + (r.h - side) * 0.5f, side, side};
 }
 
-void DrawToggle(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer& ui) {
+void DrawToggle(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb,
+                UIRenderer& ui) {
     const UIRect box = ToggleBox(r);
-    const float rounding = v.FillPart ? glm::min(v.FillPart->Rounding, box.h * 0.5f) : 4.0f;
+    const float rounding =
+        v.FillPart ? glm::min(v.FillPart->Rounding * scale, box.h * 0.5f) : 4.0f * scale;
     if (v.FillPart) FillRect(*v.FillPart, box, rounding, rgb, AlphaOf(v, v.FillPart->Color.a), ui);
     if (v.FillPart && v.FillPart->BorderThickness > 0.0f && v.FillPart->BorderColor.a > 0.0f) {
         const glm::vec4& b = v.FillPart->BorderColor;
-        ui.RoundedRectOutline(box.x, box.y, box.w, box.h, rounding, v.FillPart->BorderThickness,
-                              {b.r, b.g, b.b}, AlphaOf(v, b.a));
+        ui.RoundedRectOutline(box.x, box.y, box.w, box.h, rounding,
+                              v.FillPart->BorderThickness * scale, {b.r, b.g, b.b},
+                              AlphaOf(v, b.a));
     }
     // Включена — если значение ближе к верхнему концу диапазона.
     const Range& range = *v.RangePart;
@@ -357,7 +362,8 @@ void DrawToggle(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer
 
 // Ползунок: дорожка тонкая и по центру, ручка — во всю высоту. Попасть в тонкую
 // полоску мышью трудно, а ловит нажатие весь элемент.
-void DrawSlider(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer& ui) {
+void DrawSlider(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb,
+                UIRenderer& ui) {
     const float track = glm::max(r.h * 0.28f, 4.0f);
     const UIRect bar{r.x, r.y + (r.h - track) * 0.5f, r.w, track};
     if (v.FillPart) {
@@ -375,14 +381,14 @@ void DrawSlider(const ElementView& v, const UIRect& r, glm::vec3 rgb, UIRenderer
     ui.Circle(kx, r.y + r.h * 0.5f, knob, fill, AlphaOf(v, 1.0f));
     if (v.FillPart && v.FillPart->BorderThickness > 0.0f && v.FillPart->BorderColor.a > 0.0f) {
         const glm::vec4& b = v.FillPart->BorderColor;
-        ui.Ring(kx, r.y + r.h * 0.5f, knob, v.FillPart->BorderThickness, {b.r, b.g, b.b},
+        ui.Ring(kx, r.y + r.h * 0.5f, knob, v.FillPart->BorderThickness * scale, {b.r, b.g, b.b},
                 AlphaOf(v, b.a));
     }
 }
 
 // Полоса: заполнение растёт в свою сторону. Направление — не украшение:
 // вертикальная шкала (мана сбоку, столбик громкости) без него невозможна.
-void DrawBar(const ElementView& v, const UIRect& r, UIRenderer& ui) {
+void DrawBar(const ElementView& v, const UIRect& r, float scale, UIRenderer& ui) {
     const Bar& bar = *v.BarPart;
     const float t = glm::clamp(BarShown(bar), 0.0f, 1.0f);
     const float alpha = AlphaOf(v, bar.FillColor.a);
@@ -390,7 +396,7 @@ void DrawBar(const ElementView& v, const UIRect& r, UIRenderer& ui) {
 
     // Заполнение с небольшим внутренним отступом, радиус — согласованный.
     const float pad = glm::min(2.0f, glm::min(r.w, r.h) * 0.15f);
-    const float rounding = v.FillPart ? glm::max(v.FillPart->Rounding - pad, 0.0f) : 0.0f;
+    const float rounding = v.FillPart ? glm::max(v.FillPart->Rounding * scale - pad, 0.0f) : 0.0f;
     const UIRect inner{r.x + pad, r.y + pad, r.w - pad * 2.0f, r.h - pad * 2.0f};
     UIRect fillRect = inner;
     switch (bar.Grow) {
@@ -437,17 +443,23 @@ std::string InputShownText(const ElementView& v, bool& isPlaceholder) {
     return v.InputPart->Password ? MaskText(text) : text;
 }
 
-void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
+// scale — множитель холста (см. Canvas): раскладка считается в ОПОРНЫХ
+// единицах, а рисуется в экранных. Прямоугольник сюда приходит уже переведённым,
+// а всё, что задано числом рядом с ним — скругление, рамка, тень, кегль
+// шрифта, отступы, — обязано переводиться здесь. Иначе на 4K панель станет
+// вдвое больше, а её рамка и надпись останутся прежними.
+void DrawElement(const ElementView& v, const UIRect& r, float scale, UIRenderer& ui) {
     // --- Подложка -----------------------------------------------------------
     const glm::vec4 fillColor = v.FillPart ? v.FillPart->Color : glm::vec4(0.0f);
     const glm::vec3 baseRgb =
         v.ImagePart ? glm::vec3(v.ImagePart->Tint) : glm::vec3(fillColor);
     const glm::vec3 tinted = StateTint(v, baseRgb);
-    const float rounding = v.FillPart ? v.FillPart->Rounding : 0.0f;
+    const float rounding = v.FillPart ? v.FillPart->Rounding * scale : 0.0f;
+    const float border = v.FillPart ? v.FillPart->BorderThickness * scale : 0.0f;
 
     // Тень — под всем остальным, поэтому первой.
     if (v.FillPart && v.FillPart->ShadowSize > 0.0f) {
-        ui.RectShadow(r.x, r.y, r.w, r.h, rounding, v.FillPart->ShadowSize);
+        ui.RectShadow(r.x, r.y, r.w, r.h, rounding, v.FillPart->ShadowSize * scale);
     }
 
     // ЧТО ИМЕННО занимает фон элемента, решается по его частям — и это
@@ -455,11 +467,11 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
     const bool toggle = v.RangePart && v.RangePart->Toggle;
     const bool slider = v.RangePart && !v.RangePart->Toggle;
     if (toggle) {
-        DrawToggle(v, r, tinted, ui);
+        DrawToggle(v, r, scale, tinted, ui);
     } else if (slider) {
-        DrawSlider(v, r, tinted, ui);
+        DrawSlider(v, r, scale, tinted, ui);
     } else if (v.ImagePart) {
-        DrawImage(v, r, tinted, ui);
+        DrawImage(v, r, scale, tinted, ui);
     } else if (v.FillPart) {
         FillRect(*v.FillPart, r, rounding, tinted, AlphaOf(v, fillColor.a), ui);
     }
@@ -468,14 +480,13 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
     // своя отрисовка значения (дорожка, галочка), и вторая шкала поверх неё
     // была бы тем же числом, нарисованным дважды: у ползунка полоса участвует
     // только цветом (см. AccentColor).
-    if (v.BarPart && !v.RangePart) DrawBar(v, r, ui);
+    if (v.BarPart && !v.RangePart) DrawBar(v, r, scale, ui);
 
     // Рамка — по всему элементу; у галки она уже нарисована вокруг квадратика.
-    if (!toggle && v.FillPart && v.FillPart->BorderThickness > 0.0f &&
-        v.FillPart->BorderColor.a > 0.0f) {
+    if (!toggle && border > 0.0f && v.FillPart->BorderColor.a > 0.0f) {
         const glm::vec4& b = v.FillPart->BorderColor;
-        ui.RoundedRectOutline(r.x, r.y, r.w, r.h, rounding, v.FillPart->BorderThickness,
-                              {b.r, b.g, b.b}, AlphaOf(v, b.a));
+        ui.RoundedRectOutline(r.x, r.y, r.w, r.h, rounding, border, {b.r, b.g, b.b},
+                              AlphaOf(v, b.a));
     }
 
     // --- Значок -------------------------------------------------------------
@@ -484,7 +495,7 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
     // левого края, и текст начинается за ним. Так «значок + подпись + шкала»
     // остаётся ОДНИМ элементом, а не тремя сущностями, которые надо держать
     // выровненными вручную.
-    const float padX = v.LabelPart ? v.LabelPart->PadX : 8.0f;
+    const float padX = (v.LabelPart ? v.LabelPart->PadX : 8.0f) * scale;
     float textLeft = r.x + padX;
     if (v.IconPart && !v.IconPart->Name.empty() && v.IconPart->Color.a > 0.0f) {
         const glm::vec4& c = v.IconPart->Color;
@@ -492,13 +503,14 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
         const float alpha = AlphaOf(v, c.a);
         const bool alone = !v.LabelPart && !v.ImagePart && !v.BarPart && !v.RangePart;
         if (alone) {
-            const float side = v.IconPart->Size > 0.0f ? v.IconPart->Size : glm::min(r.w, r.h);
+            const float side =
+                v.IconPart->Size > 0.0f ? v.IconPart->Size * scale : glm::min(r.w, r.h);
             DrawIcon(ui, v.IconPart->Name, r.x + (r.w - side) * 0.5f, r.y + (r.h - side) * 0.5f,
                      side, rgb, alpha);
         } else {
             const float pad = glm::min(4.0f, r.h * 0.18f);
-            const float side =
-                v.IconPart->Size > 0.0f ? v.IconPart->Size : glm::max(r.h - pad * 2.0f, 4.0f);
+            const float side = v.IconPart->Size > 0.0f ? v.IconPart->Size * scale
+                                                       : glm::max(r.h - pad * 2.0f, 4.0f);
             DrawIcon(ui, v.IconPart->Name, r.x + pad, r.y + pad, side, rgb, alpha);
             textLeft = r.x + pad * 2.0f + side;
         }
@@ -508,17 +520,18 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
 
     if (!v.LabelPart) return;
     const Label& label = *v.LabelPart;
+    const float textScale = label.Scale * scale;
 
     // --- Поле ввода ---------------------------------------------------------
     if (v.InputPart) {
         bool placeholder = false;
         const std::string draw = InputShownText(v, placeholder);
         const glm::vec3 rgb{label.Color.r, label.Color.g, label.Color.b};
-        const float textY = r.y + (r.h - ui.TextHeight(label.Scale)) * 0.5f;
+        const float textY = r.y + (r.h - ui.TextHeight(textScale)) * 0.5f;
         if (!draw.empty()) {
             // Подсказка бледнее содержимого — иначе пустое поле выглядит
             // заполненным, и человек стирает то, чего не вводил.
-            ui.Text(textLeft, textY, label.Scale, rgb, draw,
+            ui.Text(textLeft, textY, textScale, rgb, draw,
                     AlphaOf(v, label.Color.a) * (placeholder ? 0.45f : 1.0f));
         }
         // Курсор мигает только в фокусе и только когда поле включено.
@@ -526,13 +539,13 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
             const int caret = glm::clamp(v.Act->Runtime.Caret, 0, (int)label.Text.size());
             const std::string head = label.Text.substr(0, (size_t)caret);
             const std::string before = v.InputPart->Password ? MaskText(head) : head;
-            const float cx = textLeft + ui.MeasureText(before, label.Scale);
+            const float cx = textLeft + ui.MeasureText(before, textScale);
             // Полсекунды виден, полсекунды нет — привычный ритм; после каждой
             // правки счётчик сбрасывается, чтобы курсор не пропал ровно тогда,
             // когда на него смотрят.
             if (std::fmod(v.Act->Runtime.CaretBlink, 1.0f) < 0.5f) {
-                const float ch = ui.TextHeight(label.Scale) * 1.15f;
-                ui.Rect(cx, r.y + (r.h - ch) * 0.5f, glm::max(label.Scale, 1.0f), ch, rgb,
+                const float ch = ui.TextHeight(textScale) * 1.15f;
+                ui.Rect(cx, r.y + (r.h - ch) * 0.5f, glm::max(textScale, 1.0f), ch, rgb,
                         AlphaOf(v, label.Color.a));
             }
         }
@@ -548,9 +561,9 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
 
     std::vector<std::string> lines;
     if (label.Wrap) {
-        lines = WrapLines(label.Text, avail, label.Scale, ui);
+        lines = WrapLines(label.Text, avail, textScale, ui);
     } else if (label.Text.find('\n') != std::string::npos) {
-        lines = WrapLines(label.Text, 0.0f, label.Scale, ui); // только по явным \n
+        lines = WrapLines(label.Text, 0.0f, textScale, ui); // только по явным \n
     } else {
         lines.push_back(label.Text);
     }
@@ -558,8 +571,8 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
     // Однострочный текст центрируется по высоте элемента — иначе подпись рядом
     // с иконкой висит выше неё, и строка «иконка + текст» выглядит
     // развалившейся. Многострочный блок выравнивается целиком.
-    const float lineH = ui.LineHeight(label.Scale);
-    const float blockH = lineH * (float)(lines.size() - 1) + ui.TextHeight(label.Scale);
+    const float lineH = ui.LineHeight(textScale);
+    const float blockH = lineH * (float)(lines.size() - 1) + ui.TextHeight(textScale);
     float textY = AlignY(label.Vertical, r, blockH);
 
     // Перенесённый текст ОБРЕЗАЕТСЯ своим элементом. Он переносился под эту
@@ -571,8 +584,8 @@ void DrawElement(const ElementView& v, const UIRect& r, UIRenderer& ui) {
     for (const std::string& line : lines) {
         if (!line.empty()) {
             const float x = AlignX(label.Horizontal, textLeft, avail,
-                                   ui.MeasureText(line, label.Scale));
-            ui.Text(x, textY, label.Scale, textRgb, line, textA);
+                                   ui.MeasureText(line, textScale));
+            ui.Text(x, textY, textScale, textRgb, line, textA);
         }
         textY += lineH;
     }
@@ -599,6 +612,11 @@ struct Solved {
     bool Clipped = false;
     float Alpha = 1.0f;      // накопленная прозрачность групп
     bool Interactive = true; // группа может запретить ввод всему поддереву
+    // Масштаб холста этого корня: раскладка считается в опорных единицах, а
+    // прямоугольник ниже — уже экранный. Число нужно отрисовке для всего, что
+    // задано рядом с прямоугольником, но не выводится из него: кегль шрифта,
+    // скругление, толщина рамки.
+    float Scale = 1.0f;
 };
 
 // Рекурсивный обход: считает прямоугольники, применяет раскладку, маски и
@@ -636,6 +654,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
         if (!g->Interactable || !g->BlockRaycasts) myInteractive = false;
     }
 
+    const size_t self = out.size();
     out.push_back(Solved{ent, ViewOf(reg, ent, myAlpha), r, clip, clipped, myAlpha,
                          myInteractive});
 
@@ -659,12 +678,44 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     // работают — в том и смысл, что позиции считает родитель.
     if (const Layout* layout = reg.try_get<Layout>(ent)) {
         std::vector<LayoutSlot> slots(kids.size());
-        for (size_t i = 0; i < kids.size(); ++i) {
-            const Transform& kt = reg.get<Transform>(kids[i]);
-            slots[i].Size = ResolveSize(kt, r);
-            if (ui) slots[i].Size = MeasuredWidth(reg, kids[i], slots[i].Size, *ui);
+        auto measure = [&] {
+            for (size_t i = 0; i < kids.size(); ++i) {
+                const Transform& kt = reg.get<Transform>(kids[i]);
+                slots[i].Size = ResolveSize(kt, r);
+                if (ui) slots[i].Size = MeasuredWidth(reg, kids[i], slots[i].Size, *ui);
+            }
+        };
+        measure();
+        const glm::vec2 content = ApplyLayout(*layout, r, slots);
+
+        // FitContent: контейнер обнимает содержимое. Без этого панель задавалась
+        // числом, которое разъезжается при добавлении строки — а настройка в
+        // инспекторе была, и не делала ничего.
+        //
+        // Раскладка считается ВТОРОЙ раз: от размера контейнера зависят и
+        // положение детей, и растяжение поперёк, поэтому подогнать его и
+        // оставить прежние места нельзя.
+        if (layout->FitContent && content.x > 0.0f && content.y > 0.0f) {
+            // ApplyLayout возвращает место, занятое ДЕТЬМИ, — без полей
+            // контейнера. Подогнать панель ровно по нему значит обрезать её на
+            // величину полей: дети начинаются с отступа сверху, а панель
+            // кончается там же, где последний ребёнок, и он вылезает наружу.
+            const glm::vec2 padded{content.x + layout->Padding.x + layout->Padding.z,
+                                   content.y + layout->Padding.y + layout->Padding.w};
+            const glm::vec2 fitted =
+                layout->Direction == Layout::Flow::Horizontal
+                    ? glm::vec2{padded.x, r.h}
+                    : (layout->Direction == Layout::Flow::Vertical ? glm::vec2{r.w, padded.y}
+                                                                   : padded);
+            if (fitted != glm::vec2{r.w, r.h}) {
+                r = forced ? UIRect{r.x, r.y, fitted.x, fitted.y}
+                           : Resolve(t, parentRect, fitted);
+                reg.get<Transform>(ent).LayoutSize = fitted;
+                out[self].Rect = r;
+                measure();
+                ApplyLayout(*layout, r, slots);
+            }
         }
-        ApplyLayout(*layout, r, slots);
         for (size_t i = 0; i < kids.size(); ++i) {
             const UIRect kr{slots[i].Pos.x, slots[i].Pos.y, slots[i].Size.x, slots[i].Size.y};
             SolveSubtree(scene, kids[i], r, ui, childClipped, childClip, myAlpha, myInteractive,
@@ -688,14 +739,32 @@ std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int sc
         // Холст задаёт масштаб интерфейса: свёрстанное под 1920x1080 не должно
         // сжиматься вчетверо на 4K.
         UIRect screen{0.0f, 0.0f, (float)screenW, (float)screenH};
+        float scale = 1.0f;
         if (const Canvas* c = reg.try_get<Canvas>(root)) {
-            const float scale = CanvasScale(*c, {(float)screenW, (float)screenH});
-            if (scale > 0.0f && scale != 1.0f) {
+            const float k = CanvasScale(*c, {(float)screenW, (float)screenH});
+            if (k > 0.0f && k != 1.0f) {
+                scale = k;
                 screen.w = (float)screenW / scale;
                 screen.h = (float)screenH / scale;
             }
         }
+        const size_t first = out.size();
         SolveSubtree(scene, root, screen, ui, false, UIRect{}, 1.0f, true, nullptr, out);
+        // ПЕРЕВОД В ЭКРАННЫЕ КООРДИНАТЫ. Раскладка считалась в опорных единицах
+        // холста — иначе вёрстка под 1920x1080 не сохранила бы пропорции на
+        // другом разрешении. Дальше её читают отрисовка, попадание курсором и
+        // ввод, и всем троим нужны настоящие пиксели: пока перевода не было,
+        // интерфейс с холстом уезжал за край экрана.
+        if (scale != 1.0f) {
+            for (size_t i = first; i < out.size(); ++i) {
+                Solved& it = out[i];
+                it.Rect = {it.Rect.x * scale, it.Rect.y * scale, it.Rect.w * scale,
+                           it.Rect.h * scale};
+                it.Clip = {it.Clip.x * scale, it.Clip.y * scale, it.Clip.w * scale,
+                           it.Clip.h * scale};
+                it.Scale = scale;
+            }
+        }
     }
     return out;
 }
@@ -718,7 +787,7 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
         // Прозрачность группы едет внутри вида и множится на КАЖДЫЙ цвет: панель
         // с полупрозрачным фоном не должна становиться непрозрачной от того, что
         // группу показали наполовину.
-        DrawElement(it.View, it.Rect, ui);
+        DrawElement(it.View, it.Rect, it.Scale, ui);
         if (it.Clipped) ui.PopClipRect();
     }
 }
