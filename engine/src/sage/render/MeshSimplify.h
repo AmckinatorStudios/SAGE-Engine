@@ -35,6 +35,13 @@ namespace sage::render {
 struct SimplifyResult {
     std::vector<Vertex> Vertices;
     std::vector<unsigned int> Indices;
+    // Разметка по материалам, пересчитанная на упрощённую геометрию. Пусто,
+    // если её не было на входе или она не годится (см. ниже).
+    //
+    // Без неё грубый уровень многоматериальной модели красился бы одним
+    // материалом, и переход на LOD выглядел бы как смена цвета всей модели —
+    // то есть самый заметный из возможных артефактов подмены.
+    std::vector<Submesh> Submeshes;
     int SourceTriangles = 0;
     int Triangles = 0;
     // Фактическая доля оставшихся треугольников. Может заметно отличаться от
@@ -45,14 +52,22 @@ struct SimplifyResult {
 
 // Кластеризация с сеткой gridSize ячеек по длинной стороне габарита.
 // Меньше gridSize — грубее результат.
+//
+// submeshes — разметка входной геометрии по материалам. Треугольники
+// выпускаются в исходном порядке (выбрасываются только выродившиеся), поэтому
+// разметка переносится пересчётом длин отрезков. Она сохраняется, только если
+// отрезки идут подряд и не пересекаются; в остальных случаях результат
+// приходит без разметки, а не с наугад расставленными границами.
 SimplifyResult SimplifyByClustering(const std::vector<Vertex>& vertices,
-                                    const std::vector<unsigned int>& indices, int gridSize);
+                                    const std::vector<unsigned int>& indices, int gridSize,
+                                    const std::vector<Submesh>& submeshes = {});
 
 // Подбирает сетку так, чтобы получить примерно targetRatio треугольников от
 // исходного (0..1). Подбор — двоичным поиском по размеру сетки за несколько
 // проб: прямой формулы «сетка → число треугольников» нет, она зависит от того,
 // как геометрия распределена в пространстве.
 SimplifyResult SimplifyToRatio(const std::vector<Vertex>& vertices,
-                               const std::vector<unsigned int>& indices, float targetRatio);
+                               const std::vector<unsigned int>& indices, float targetRatio,
+                               const std::vector<Submesh>& submeshes = {});
 
 } // namespace sage::render

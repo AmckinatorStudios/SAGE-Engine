@@ -104,24 +104,24 @@ uint64_t AssetPreview::RenderMaterial(const std::shared_ptr<Material>& material,
                                       const std::string& key) {
     Init();
     if (!m_sphere) return 0;
-    return Render(m_sphere, material, size, 1.0f, key);
+    return Render(m_sphere, {material}, size, 1.0f, key);
 }
 
 uint64_t AssetPreview::RenderMesh(const std::shared_ptr<Mesh>& mesh, int size,
                                   const std::string& key,
-                                  const std::shared_ptr<Material>& material) {
+                                  const std::vector<std::shared_ptr<Material>>& materials) {
     Init();
     if (!mesh) return 0;
-    return Render(mesh, material, size, BoundingRadius(*mesh), key);
+    return Render(mesh, materials, size, BoundingRadius(*mesh), key);
 }
 
-std::shared_ptr<Material> AssetPreview::MaterialForModel(const std::string& path) {
-    static std::unordered_map<std::string, std::shared_ptr<Material>> cache;
+const std::vector<std::shared_ptr<Material>>& AssetPreview::MaterialsForModel(
+    const std::string& path) {
+    static std::unordered_map<std::string, std::vector<std::shared_ptr<Material>>> cache;
     auto it = cache.find(path);
     if (it != cache.end()) return it->second;
 
-    std::shared_ptr<Material> material;
-    // Картинки, встроенные в .glb, ExtractMaterial распаковывает в файлы. Класть
+    // Картинки, встроенные в .glb, ExtractMaterials распаковывает в файлы. Класть
     // их РЯДОМ С МОДЕЛЬЮ нельзя: обложка — действие пассивное, человек просто
     // открыл папку, а движок насорил бы в ней png-шками (и в чужой папке, куда
     // писать вообще не звали). Поэтому у превью свой временный каталог.
@@ -129,10 +129,15 @@ std::shared_ptr<Material> AssetPreview::MaterialForModel(const std::string& path
     const std::filesystem::path cacheDir =
         std::filesystem::temp_directory_path() / "sage_preview_textures";
     std::filesystem::create_directories(cacheDir, ec);
-    const ModelLoader::ExtractedMaterial extracted =
-        ModelLoader::ExtractMaterial(path, cacheDir.string());
-    if (extracted.Found) {
-        material = std::make_shared<Material>();
+
+    std::vector<std::shared_ptr<Material>> materials;
+    for (const ModelLoader::ExtractedMaterial& extracted :
+         ModelLoader::ExtractMaterials(path, cacheDir.string()).Materials) {
+        // Порядок сохраняется даже для непрочитавшихся материалов (nullptr):
+        // индекс здесь — индекс из разметки меша, и сжать список значило бы
+        // покрасить части модели чужими материалами.
+        if (!extracted.Found) { materials.push_back(nullptr); continue; }
+        auto material = std::make_shared<Material>();
         material->Albedo = extracted.Albedo;
         material->Emissive = extracted.Emissive;
         material->EmissiveStrength = extracted.EmissiveStrength;
@@ -146,9 +151,10 @@ std::shared_ptr<Material> AssetPreview::MaterialForModel(const std::string& path
         material->AOMapPath = extracted.AOMap;
         material->EmissiveMap = extracted.EmissiveMap;
         ResourceManager::Instance().ResolveMaterialTextures(*material);
+        materials.push_back(std::move(material));
     }
-    cache[path] = material; // и пустой ответ тоже: иначе файл разбирался бы каждый кадр
-    return material;
+    // И пустой ответ кэшируется: иначе файл разбирался бы каждый кадр.
+    return cache.emplace(path, std::move(materials)).first->second;
 }
 
 void AssetPreview::ReleaseTarget(const std::string& key) { m_targets.erase(key); }
@@ -164,7 +170,7 @@ Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
 }
 
 uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
-                              const std::shared_ptr<Material>& material, int size,
+                              const std::vector<std::shared_ptr<Material>>& materials, int size,
                               float fitRadius, const std::string& key) {
     if (!mesh) return 0;
 
@@ -176,9 +182,29 @@ uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
     MeshRendererComponent& mr = obj.Renderer();
     mr.MeshPtr = mesh;
     mr.Ref.type = MeshRef::Type::Sphere;
-    if (material) {
-        mr.MaterialPtr = material;
+
+    std::shared_ptr<Material> first;
+    for (const std::shared_ptr<Material>& m : materials) {
+        if (m) { first = m; break; }
+    }
+    if (first) {
+        mr.MaterialPtr = first;
         mr.MaterialPath = "preview";
+        // Части модели — по своим материалам: обложка обязана показывать то же,
+        // что человек увидит, поставив модель в сцену. Разметки нет (шарик
+        // материала, одноматериальная модель) — слоты не нужны, всё красится
+        // материалом объекта.
+        if (mesh->HasExplicitSubmeshes()) {
+            const std::vector<sage::render::Submesh>& subs = mesh->Submeshes();
+            mr.Slots.resize(subs.size());
+            for (size_t i = 0; i < subs.size(); ++i) {
+                const int index = subs[i].Material;
+                if (index < 0 || (size_t)index >= materials.size() || !materials[(size_t)index])
+                    continue;
+                mr.Slots[i].Path = "preview";
+                mr.Slots[i].Ptr = materials[(size_t)index];
+            }
+        }
     } else {
         mr.Color = glm::vec3(0.78f, 0.78f, 0.80f);
     }

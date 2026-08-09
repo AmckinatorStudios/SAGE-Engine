@@ -20,8 +20,12 @@ constexpr int kLightmapUnit = 9;
 
 // GPU-меш сущности с лайтмап-UV (создаётся при первом рендере после бейка).
 inline ::Mesh* GetOrCreateGpuMesh(EntityBake& eb) {
+    // Разметка по материалам переносится из исходной геометрии: запечённый меш
+    // отличается от неё лайтмап-развёрткой, а не составом частей, и потерять
+    // здесь границы означало бы, что запечённая многоматериальная модель
+    // красится одним материалом.
     if (!eb.GpuMesh && !eb.Mesh.Empty())
-        eb.GpuMesh = std::make_shared<::Mesh>(eb.Mesh.Vertices, eb.Mesh.Indices);
+        eb.GpuMesh = std::make_shared<::Mesh>(eb.Mesh.Vertices, eb.Mesh.Indices, eb.Mesh.Submeshes);
     return eb.GpuMesh.get();
 }
 

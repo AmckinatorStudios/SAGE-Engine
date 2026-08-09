@@ -17,6 +17,7 @@
 
 #include "AssetSlot.h"
 #include "EditorIcons.h"
+#include "ModelMaterialImport.h"
 #include "Project.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/assets/import/Importer.h"
@@ -266,58 +267,16 @@ void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
 // правку — оно просто назначает готовое. Материал, назначенный человеком
 // вручную, тоже не трогается.
 void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr) {
-    if (mr.Ref.path.empty()) return;
-    if (!mr.MaterialPath.empty()) return;   // выбор человека главнее импорта
-
-    // Путь к самому файлу модели: в Ref он относительный (см. Project::AssetRef),
-    // а читать надо настоящий файл на диске.
-    const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(mr.Ref.path);
-    const fs::path matPath = fs::path(modelPath).replace_extension(".sagemat");
-
-    std::error_code ec;
-    if (!fs::exists(matPath, ec)) {
-        const ModelLoader::ExtractedMaterial ex = ModelLoader::ExtractMaterial(modelPath);
-        if (!ex.Found) {
-            // Нет материала в файле — и не надо: белая болванка это честный
-            // результат «в модели материала нет», а не поломка.
-            if (!ex.Warnings.empty())
-                host.SetStatusMessage(T("Model material: ") + ex.Warnings.front());
-            return;
-        }
-
-        Material mat;
-        mat.Albedo = ex.Albedo;
-        mat.Emissive = ex.Emissive;
-        mat.EmissiveStrength = ex.EmissiveStrength;
-        mat.Metallic = ex.Metallic;
-        mat.Roughness = ex.Roughness;
-        mat.Opacity = ex.Opacity;
-        // Пути карт — относительно проекта: материал переживёт сборку игры и
-        // переезд проекта (см. Project::AssetRef).
-        const Project& project = host.CurrentProject();
-        mat.TexturePath = project.AssetRef(ex.AlbedoMap);
-        mat.NormalMapPath = project.AssetRef(ex.NormalMap);
-        mat.MetallicMapPath = project.AssetRef(ex.MetallicMap);
-        mat.RoughnessMapPath = project.AssetRef(ex.RoughnessMap);
-        mat.AOMapPath = project.AssetRef(ex.AOMap);
-        mat.EmissiveMap = project.AssetRef(ex.EmissiveMap);
-
-        try {
-            mat.SaveToFile(matPath.string());
-        } catch (const std::exception& e) {
-            LOG_ERROR("Editor") << "Материал модели не сохранён: " << e.what();
-            host.SetStatusMessage(T("The model material was not saved — details in Console"));
-            return;
-        }
-        sage::AssetDatabase::Instance().Register(matPath.string(), "material");
-        host.SetStatusMessage(T("Model material imported: ") +
-                              matPath.filename().string() +
-                              (ex.HasAnyMap() ? T(" (with maps)") : ""));
-        LOG_INFO("Editor") << "Материал модели импортирован: " << matPath.string();
+    const ModelMaterialImportResult r = ImportModelMaterials(host.CurrentProject(), mr);
+    if (r.Assigned == 0) {
+        if (!r.FirstWarning.empty()) host.SetStatusMessage(T("Model material: ") + r.FirstWarning);
+        return;
     }
-
-    mr.MaterialPath = host.CurrentProject().AssetRef(matPath);
-    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+    if (r.Created > 0) {
+        host.SetStatusMessage(T("Model materials imported: ") + std::to_string(r.Created) +
+                              (r.AnyMaps ? T(" (with maps)") : ""));
+        LOG_INFO("Editor") << "Материалов модели импортировано: " << r.Created;
+    }
 }
 
 // --- Mesh Renderer, часть 1: ЧТО рисуем --------------------------------------
@@ -545,6 +504,69 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
             ImGui::SetTooltip("%s", T("Creates a .sagemat next to the project assets and moves "
                                       "the current colour of this object into it."));
         }
+    }
+
+    DrawSubmeshMaterials(host, mr);
+}
+
+// --- Материалы ЧАСТЕЙ модели --------------------------------------------------
+//
+// ЗАЧЕМ ЭТО ЗДЕСЬ. Модель из редактора почти никогда не одноматериальна: у
+// персонажа отдельно кожа, отдельно ткань, отдельно глаза. Пока сущность
+// держала один материал, всё это красилось одним — и выглядело как «текстуры не
+// работают», хотя текстуры были на месте: не было места, где сказать, какая
+// часть чем красится. Оно здесь.
+//
+// Слот на КАЖДУЮ часть меша, в порядке разметки. Пустой слот — не дыра: часть
+// красится материалом объекта (см. MaterialForSubmesh), поэтому очистка слота
+// возвращает часть к общему виду, а не делает её невидимой.
+void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponent& mr) {
+    if (!mr.MeshPtr || !mr.MeshPtr->HasExplicitSubmeshes()) return;
+    const std::vector<sage::render::Submesh>& subs = mr.MeshPtr->Submeshes();
+
+    ImGui::SeparatorText(T("Model parts"));
+    ImGui::TextDisabled("%s", T("Each part of the model has its own material. Empty means "
+                                "the object material above."));
+
+    // Слоты держим ровно по числу частей: меш могли переимпортировать, и число
+    // частей меняется вместе с ним. Лишние обрезаем, недостающие добавляем —
+    // молча, потому что это не решение человека, а следствие правки модели.
+    if (mr.Slots.size() != subs.size()) mr.Slots.resize(subs.size());
+
+    for (size_t i = 0; i < subs.size(); ++i) {
+        ImGui::PushID((int)i);
+        // Подпись — имя части из файла модели: по нему видно, что красим, а по
+        // «Slot 3» — нет.
+        const std::string label = subs[i].Name.empty()
+                                      ? std::string(T("Part ")) + std::to_string(i + 1)
+                                      : subs[i].Name;
+        ImGui::TextUnformatted(label.c_str());
+        const assetslot::Result r =
+            assetslot::Draw(host, "submesh_material", assetslot::Kind::Material, mr.Slots[i].Path,
+                            &m_preview, T("Painted with the object material."));
+        if (r.Changed) {
+            host.PushUndoSnapshot();
+            mr.Slots[i].Path = r.Path;
+            mr.Slots[i].Ptr = r.Path.empty()
+                                  ? nullptr
+                                  : ResourceManager::Instance().GetMaterial(r.Path);
+        }
+        if (r.BrowseRequested) {
+            FileBrowser::Config c;
+            c.Title = T("Choose a material");
+            c.Filters = assetslot::Extensions(assetslot::Kind::Material);
+            c.FilterLabel = T("Materials (*.sagemat)");
+            if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+            m_browser.Open(c);
+            m_browseTarget = &mr.Slots[i].Path;
+            m_browseIsShader = false;
+            m_browseIsMesh = false;
+            m_browseIsMaterial = true;
+        }
+        if (!mr.Slots[i].Path.empty() && !mr.Slots[i].Ptr) {
+            ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("File cannot be read"));
+        }
+        ImGui::PopID();
     }
 }
 
@@ -1763,6 +1785,14 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
                     MeshRendererComponent& mr = sel.Renderer();
                     if (!mr.MaterialPath.empty())
                         mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+                    // Выбирали могли и для слота части модели. Какой именно это
+                    // был слот, здесь уже не известно — путь ушёл прямо в поле, —
+                    // а перечитать их все стоит одного обращения к кэшу на слот.
+                    for (MaterialSlot& slot : mr.Slots) {
+                        slot.Ptr = slot.Path.empty()
+                                       ? nullptr
+                                       : ResourceManager::Instance().GetMaterial(slot.Path);
+                    }
                 }
             }
             if (m_browseIsShader) {

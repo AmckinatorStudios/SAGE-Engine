@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <glm/glm.hpp>
 #include "sage/render/Mesh.h"
 #include "sage/render/Material.h"
@@ -58,6 +59,13 @@ struct MeshRef {
 // инспекторе перестало влиять на что-либо, молча), прозрачность множил,
 // свечение складывал. Три соседних поля с тремя разными смыслами — это и
 // читалось как «зачем тут дубликат материала».
+// Один слот материала: материал ОДНОГО подмеша (см. sage::render::Submesh).
+// Путь сериализуется, указатель — runtime (ResourceManager::GetMaterial).
+struct MaterialSlot {
+    std::string Path;
+    std::shared_ptr<Material> Ptr;
+};
+
 struct MeshRendererComponent {
     // --- 1. Меш ------------------------------------------------------------
     MeshRef Ref;
@@ -69,8 +77,23 @@ struct MeshRendererComponent {
     // Путь сериализуется; Ptr — runtime, восстанавливается
     // ResourceManager::GetMaterial при загрузке сцены. Пусто — объект рисуется
     // поправками ниже как есть (белый диэлектрик, затонированный Color).
+    //
+    // Это материал ОБЪЕКТА: им красится всё, для чего не задан свой слот ниже.
     std::string MaterialPath;
     std::shared_ptr<Material> MaterialPtr;
+
+    // Материалы ПОДМЕШЕЙ: слот i красит подмеш i меша (Mesh::Submeshes()).
+    //
+    // ЗАЧЕМ ОТДЕЛЬНЫМ СПИСКОМ, А НЕ ЗАМЕНОЙ ПОЛЮ ВЫШЕ. Подавляющее большинство
+    // объектов сцены одноматериальны — куб, стена, ящик, — и заводить им вектор
+    // из одного элемента значило бы платить аллокацией за каждый объект ради
+    // случая, которого у них не бывает. Пустой список означает ровно «объект
+    // красится своим единственным материалом», то есть поведение до подмешей.
+    //
+    // Слот, оставленный пустым (Path пуст), НЕ означает «не рисовать»: подмеш
+    // красится материалом объекта. Модель, у которой прописали материал только
+    // для головы, обязана остаться целой.
+    std::vector<MaterialSlot> Slots;
 
     // --- 3. Поправки экземпляра поверх материала ---------------------------
     // Тон: множится на albedo материала. Белый (по умолчанию) = «как в
@@ -92,23 +115,46 @@ struct MeshRendererComponent {
 // материал. Рендер, редактор, превью и скрипты обязаны считать это одинаково —
 // иначе объект в инспекторе выглядит не так, как во вьюпорте.
 
+// Материал ПОДМЕША: свой слот, а если его нет или он пуст — материал объекта.
+//
+// Правило падения на материал объекта — здесь и только здесь. Оно и делает
+// слоты необязательными: старая сцена, где у модели один материал на всё,
+// рисуется ровно как раньше, а слоты добавляются по мере надобности.
+inline const Material* MaterialForSubmesh(const MeshRendererComponent& mr, size_t submesh) {
+    if (submesh < mr.Slots.size() && mr.Slots[submesh].Ptr) return mr.Slots[submesh].Ptr.get();
+    return mr.MaterialPtr.get();
+}
+
 // Базовый цвет: albedo материала, затонированный Color экземпляра. Без
 // материала albedo = белый, то есть результат — сам Color (как и было).
-inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr) {
-    return mr.MaterialPtr ? mr.MaterialPtr->Albedo * mr.Color : mr.Color;
+inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr, const Material* mat) {
+    return mat ? mat->Albedo * mr.Color : mr.Color;
 }
 
 // Свечение: своё у объекта ПЛЮС материала.
-inline glm::vec3 EffectiveEmissive(const MeshRendererComponent& mr) {
+inline glm::vec3 EffectiveEmissive(const MeshRendererComponent& mr, const Material* mat) {
     glm::vec3 e = mr.Emissive * mr.EmissiveStrength;
-    if (mr.MaterialPtr) e += mr.MaterialPtr->Emissive * mr.MaterialPtr->EmissiveStrength;
+    if (mat) e += mat->Emissive * mat->EmissiveStrength;
     return e;
 }
 
 // Непрозрачность: своя УМНОЖАЕТСЯ на материаловую — «затухание» одного объекта
 // не требует отдельной копии материала.
+inline float EffectiveOpacity(const MeshRendererComponent& mr, const Material* mat) {
+    return mat ? mat->Opacity * mr.Opacity : mr.Opacity;
+}
+
+// Те же три вопроса про ОБЪЕКТ ЦЕЛИКОМ — то есть про его материал по
+// умолчанию. Ими пользуются инспектор, превью и скрипты: там речь идёт о
+// сущности, а не об отдельной её части.
+inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr) {
+    return EffectiveColor(mr, mr.MaterialPtr.get());
+}
+inline glm::vec3 EffectiveEmissive(const MeshRendererComponent& mr) {
+    return EffectiveEmissive(mr, mr.MaterialPtr.get());
+}
 inline float EffectiveOpacity(const MeshRendererComponent& mr) {
-    return mr.MaterialPtr ? mr.MaterialPtr->Opacity * mr.Opacity : mr.Opacity;
+    return EffectiveOpacity(mr, mr.MaterialPtr.get());
 }
 
 // Порог, ниже которого объект считается полупрозрачным и уходит в отдельный

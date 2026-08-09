@@ -1,6 +1,7 @@
 #pragma once
 #include "Mesh.h"
 #include "MeshData.h"
+#include "sage/assets/import/Importer.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,14 +50,22 @@ namespace ModelLoader {
     // тесты, а сужать их до подмножества нового API значило бы менять смысл
     // существующих вызовов.
     std::shared_ptr<Mesh> LoadObj(const std::string& path);
-    sage::render::MeshData LoadObjData(const std::string& path);
+    // materialsOut — список материалов .mtl В ПОРЯДКЕ ФАЙЛА, если он нужен.
+    // Порядок здесь не деталь: MeshData::Submeshes[i].Material — это индекс
+    // именно в нём (и в том же порядке отдаёт материалы ExtractMaterials).
+    sage::render::MeshData LoadObjData(
+        const std::string& path,
+        std::vector<sage::assets::ImportedMaterial>* materialsOut = nullptr);
 
-    // Геометрия glTF/GLB, слитая в ОДИН меш.
+    // Геометрия glTF/GLB в ОДНОМ меше — но С ГРАНИЦАМИ по материалам.
     //
-    // Слитая намеренно: MeshRendererComponent держит ровно один Mesh, а в файле
-    // glTF почти всегда несколько примитивов (по одному на материал). Отдать
-    // «первый попавшийся» значило бы показать четверть модели и оставить
-    // человека гадать, куда делось остальное.
+    // Один меш: MeshRendererComponent держит ровно один Mesh, а в файле glTF
+    // почти всегда несколько примитивов (по одному на материал). Отдать «первый
+    // попавшийся» значило бы показать четверть модели.
+    //
+    // С границами: слить их БЕЗ разметки, как было раньше, значит покрасить всю
+    // модель одним материалом — тем, что попался импортёру первым. Разметку
+    // строит ImportedScene::Flatten() из узлов (см. GltfImporter.cpp).
     sage::render::MeshData LoadGltfData(const std::string& path, bool binary);
 
     // --- Сайдкар настроек импорта (GL-независимо) ---

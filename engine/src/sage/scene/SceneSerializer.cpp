@@ -912,6 +912,23 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
         SaveAssetRef(j["mesh"], "path", mr.Ref.path);
         SaveAssetRef(j, "material", mr.MaterialPath);
+        // Материалы подмешей — массивом, по слоту на элемент разметки меша.
+        // Пишется, только если слоты есть: у одноматериального объекта пустой
+        // массив в каждом узле сцены был бы шумом в файле, который люди читают
+        // и сравнивают в системе контроля версий.
+        //
+        // Пустой слот сохраняется как пустой объект, а не пропускается: слоты
+        // адресуются НОМЕРОМ подмеша, и сжать дырки значило бы сдвинуть все
+        // последующие материалы на одну часть модели.
+        if (!mr.Slots.empty()) {
+            json slots = json::array();
+            for (const MaterialSlot& slot : mr.Slots) {
+                json sj = json::object();
+                SaveAssetRef(sj, "path", slot.Path);
+                slots.push_back(std::move(sj));
+            }
+            j["materialSlots"] = std::move(slots);
+        }
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             SaveAssetRef(j, "script", sc->Path);
         }
@@ -1174,6 +1191,16 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         mr.MaterialPath = LoadAssetRef(j, "material");
         if (!mr.MaterialPath.empty()) {
             mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+        }
+        if (j.contains("materialSlots") && j["materialSlots"].is_array()) {
+            mr.Slots.clear();
+            for (const json& sj : j["materialSlots"]) {
+                MaterialSlot slot;
+                slot.Path = sj.is_object() ? LoadAssetRef(sj, "path") : std::string();
+                if (!slot.Path.empty())
+                    slot.Ptr = ResourceManager::Instance().GetMaterial(slot.Path);
+                mr.Slots.push_back(std::move(slot));
+            }
         }
 
         if (j.contains("giStatic"))

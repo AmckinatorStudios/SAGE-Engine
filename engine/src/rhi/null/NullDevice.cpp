@@ -43,6 +43,7 @@ public:
     void DrawArrays(size_t) const override { ++g_counters.DrawCalls; }
     void DrawInstanced(size_t, size_t) const override { ++g_counters.DrawCalls; }
     void DrawIndexedInstanced(size_t, size_t) const override { ++g_counters.DrawCalls; }
+    void DrawIndexedInstancedRange(size_t, size_t, size_t) const override { ++g_counters.DrawCalls; }
     void DrawLines(size_t) const override { ++g_counters.DrawCalls; }
 };
 

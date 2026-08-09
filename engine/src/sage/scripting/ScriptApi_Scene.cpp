@@ -309,6 +309,34 @@ void ScriptEngine::RegisterMeshApi() {
         mr.MaterialPtr = path.empty() ? nullptr : ResourceManager::Instance().GetMaterial(path);
     });
 
+    // Материал ОДНОЙ ЧАСТИ модели (подмеша). Нужен ровно тем, для чего слоты и
+    // заведены: у персонажа сменить куртку, не трогая кожу и глаза.
+    //
+    // Номер части — с ЕДИНИЦЫ, как всё в Lua. Пустой путь возвращает часть к
+    // материалу объекта, а не делает её невидимой: слот — это уточнение, а не
+    // выключатель (см. MaterialForSubmesh).
+    Bind("render", "SetSubmeshMaterial", "SetSubmeshMaterial",
+         [](GameObject& obj, int part, const std::string& path) {
+             MeshRendererComponent& mr = obj.Renderer();
+             const size_t count = mr.MeshPtr ? mr.MeshPtr->SubmeshCount() : 0;
+             if (part < 1 || (size_t)part > count) {
+                 throw std::runtime_error("SetSubmeshMaterial: у модели " +
+                                          std::to_string(count) + " частей, запрошена " +
+                                          std::to_string(part));
+             }
+             if (mr.Slots.size() < count) mr.Slots.resize(count);
+             MaterialSlot& slot = mr.Slots[(size_t)part - 1];
+             slot.Path = path;
+             slot.Ptr = path.empty() ? nullptr : ResourceManager::Instance().GetMaterial(path);
+         });
+
+    // Сколько частей у модели: без этого числа предыдущий вызов пришлось бы
+    // звать наугад и ловить ошибку.
+    Bind("render", "SubmeshCount", "SubmeshCount", [](GameObject& obj) -> int {
+        const MeshRendererComponent& mr = obj.Renderer();
+        return mr.MeshPtr ? (int)mr.MeshPtr->SubmeshCount() : 0;
+    });
+
     // Юниформа МАТЕРИАЛА — общая для всех, кто им покрашен. Так вода правит
     // одно значение на тысячу тайлов, не разбивая их инстансную группу
     // (штучный SetShaderParam разбил бы). Материал берётся из общего кэша,

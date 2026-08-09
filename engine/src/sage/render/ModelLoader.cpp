@@ -70,10 +70,11 @@ void ApplyImportSettings(std::vector<Vertex>& vertices, const ImportSettings& s)
 
 std::shared_ptr<Mesh> LoadObj(const std::string& path) {
     sage::render::MeshData d = LoadObjData(path);
-    return std::make_shared<Mesh>(d.Vertices, d.Indices);
+    return std::make_shared<Mesh>(d.Vertices, d.Indices, d.Submeshes);
 }
 
-sage::render::MeshData LoadObjData(const std::string& path) {
+sage::render::MeshData LoadObjData(const std::string& path,
+                                   std::vector<sage::assets::ImportedMaterial>* materialsOut) {
     tinyobj::ObjReaderConfig config;
     tinyobj::ObjReader reader;
 
@@ -84,9 +85,30 @@ sage::render::MeshData LoadObjData(const std::string& path) {
 
     const auto& attrib = reader.GetAttrib();
     const auto& shapes = reader.GetShapes();
+    const auto& materials = reader.GetMaterials();
 
-    std::vector<Vertex> vertices;
-    std::vector<unsigned int> indices;
+    if (materialsOut) {
+        materialsOut->clear();
+        materialsOut->reserve(materials.size());
+        for (const tinyobj::material_t& m : materials) {
+            sage::assets::ImportedMaterial im;
+            im.Name = m.name;
+            im.Albedo = glm::vec3(m.diffuse[0], m.diffuse[1], m.diffuse[2]);
+            im.Emissive = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
+            im.Metallic = m.metallic;
+            // Roughness в .mtl есть далеко не всегда, и ноль по умолчанию
+            // означал бы зеркало на каждой модели без PBR-полей.
+            im.Roughness = m.roughness > 0.0f ? m.roughness : 0.5f;
+            im.Opacity = m.dissolve;
+            im.AlbedoTexture = m.diffuse_texname;
+            im.NormalTexture = !m.normal_texname.empty() ? m.normal_texname : m.bump_texname;
+            im.MetallicTexture = m.metallic_texname;
+            im.RoughnessTexture = m.roughness_texname;
+            im.AOTexture = m.ambient_texname;
+            im.EmissiveTexture = m.emissive_texname;
+            materialsOut->push_back(std::move(im));
+        }
+    }
 
     // Границы массивов атрибутов — индексы из битого/вредоносного .obj обязаны
     // проверяться, иначе чтение за границей буфера (crash/UB на крафтовом файле).
@@ -94,38 +116,85 @@ sage::render::MeshData LoadObjData(const std::string& path) {
     const size_t normalCount = attrib.normals.size() / 3;
     const size_t texCount = attrib.texcoords.size() / 2;
 
+    // Грани раскладываются по СВОИМ материалам. Раньше всё складывалось в один
+    // буфер, и модель с отдельными материалами на корпус, стекло и колёса
+    // приезжала одноцветной болванкой: разметки, по которой их можно было бы
+    // покрасить порознь, просто не существовало.
+    //
+    // Ключ — material_id из .obj; порядок групп — порядок появления в файле.
+    struct Bucket {
+        int Material = -1;
+        std::vector<Vertex> Vertices;
+    };
+    std::vector<Bucket> buckets;
+    auto bucketFor = [&buckets](int material) -> Bucket& {
+        for (Bucket& b : buckets)
+            if (b.Material == material) return b;
+        buckets.push_back(Bucket{material, {}});
+        return buckets.back();
+    };
+
     for (const auto& shape : shapes) {
-        for (const auto& idx : shape.mesh.indices) {
-            if (idx.vertex_index < 0 || (size_t)idx.vertex_index >= vertexCount) continue;
-            Vertex v{};
-            v.Position = {
-                attrib.vertices[3 * idx.vertex_index + 0],
-                attrib.vertices[3 * idx.vertex_index + 1],
-                attrib.vertices[3 * idx.vertex_index + 2]
-            };
-            if (idx.normal_index >= 0 && (size_t)idx.normal_index < normalCount) {
-                v.Normal = {
-                    attrib.normals[3 * idx.normal_index + 0],
-                    attrib.normals[3 * idx.normal_index + 1],
-                    attrib.normals[3 * idx.normal_index + 2]
+        size_t corner = 0;
+        for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f) {
+            const size_t faceVerts = (size_t)shape.mesh.num_face_vertices[f];
+            const int material =
+                f < shape.mesh.material_ids.size() ? shape.mesh.material_ids[f] : -1;
+            Bucket& bucket =
+                bucketFor(material >= 0 && (size_t)material < materials.size() ? material : -1);
+
+            for (size_t c = 0; c < faceVerts && corner + c < shape.mesh.indices.size(); ++c) {
+                const tinyobj::index_t& idx = shape.mesh.indices[corner + c];
+                if (idx.vertex_index < 0 || (size_t)idx.vertex_index >= vertexCount) continue;
+                Vertex v{};
+                v.Position = {
+                    attrib.vertices[3 * idx.vertex_index + 0],
+                    attrib.vertices[3 * idx.vertex_index + 1],
+                    attrib.vertices[3 * idx.vertex_index + 2]
                 };
+                if (idx.normal_index >= 0 && (size_t)idx.normal_index < normalCount) {
+                    v.Normal = {
+                        attrib.normals[3 * idx.normal_index + 0],
+                        attrib.normals[3 * idx.normal_index + 1],
+                        attrib.normals[3 * idx.normal_index + 2]
+                    };
+                }
+                if (idx.texcoord_index >= 0 && (size_t)idx.texcoord_index < texCount) {
+                    v.TexCoords = {
+                        attrib.texcoords[2 * idx.texcoord_index + 0],
+                        attrib.texcoords[2 * idx.texcoord_index + 1]
+                    };
+                }
+                bucket.Vertices.push_back(v);
             }
-            if (idx.texcoord_index >= 0 && (size_t)idx.texcoord_index < texCount) {
-                v.TexCoords = {
-                    attrib.texcoords[2 * idx.texcoord_index + 0],
-                    attrib.texcoords[2 * idx.texcoord_index + 1]
-                };
-            }
-            vertices.push_back(v);
-            indices.push_back(static_cast<unsigned int>(indices.size()));
+            corner += faceVerts;
         }
     }
 
+    sage::render::MeshData out;
+    for (const Bucket& b : buckets) {
+        if (b.Vertices.empty()) continue;
+        sage::render::Submesh sub;
+        sub.Material = b.Material;
+        sub.Name = (b.Material >= 0 && (size_t)b.Material < materials.size())
+                       ? materials[(size_t)b.Material].name : std::string();
+        sub.FirstIndex = (unsigned int)out.Indices.size();
+        sub.IndexCount = (unsigned int)b.Vertices.size();
+        for (const Vertex& v : b.Vertices) {
+            out.Indices.push_back((unsigned int)out.Vertices.size());
+            out.Vertices.push_back(v);
+        }
+        out.Submeshes.push_back(std::move(sub));
+    }
+    // Одна группа без материала — это «геометрия без .mtl», то есть состояние по
+    // умолчанию, а не разметка (см. ImportedScene::Flatten).
+    if (out.Submeshes.size() == 1 && out.Submeshes[0].Material < 0) out.Submeshes.clear();
+
     // Применяем настройки импорта из сайдкара (масштаб/центрирование/нормализация)
     // ДО создания GPU-меша — модель приходит в сцену уже приведённой.
-    ApplyImportSettings(vertices, LoadImportSettings(path));
+    ApplyImportSettings(out.Vertices, LoadImportSettings(path));
 
-    return sage::render::MeshData{std::move(vertices), std::move(indices)};
+    return out;
 }
 
 // --- glTF / GLB ---------------------------------------------------------------
@@ -154,11 +223,22 @@ bool IsSupportedModel(const std::string& path) {
     return sage::assets::ImporterRegistry::Instance().CanImport(ExtensionLower(path));
 }
 
-// Реализация в Model.cpp — там развёрнут tinygltf.
-sage::render::MeshData LoadGltfMeshDataImpl(const std::string& path, bool binary);
+sage::render::MeshData LoadGltfData(const std::string& path, bool) {
+    // Разбор — у импортёра (assets/import/GltfImporter.cpp): он читает файл
+    // УЗЛАМИ, с именами, трансформами и материалами. Здесь узлы склеиваются в
+    // один меш, потому что сущность сцены держит один Mesh, — но границы частей
+    // и их материалы Flatten() сохраняет, и модель остаётся многоматериальной.
+    //
+    // Флаг binary больше не нужен (формат определяется по расширению внутри
+    // импортёра), но параметр оставлен: на LoadGltfData ссылается существующий
+    // код, и менять его сигнатуру ради одного неиспользуемого аргумента значило
+    // бы трогать всех вызывающих без всякой для них пользы.
+    sage::assets::ImportedScene scene;
+    std::string err;
+    if (!sage::assets::ImportGltf(path, scene, err)) throw std::runtime_error(err);
 
-sage::render::MeshData LoadGltfData(const std::string& path, bool binary) {
-    sage::render::MeshData d = LoadGltfMeshDataImpl(path, binary);
+    sage::render::MeshData d = scene.Flatten();
+    if (d.Empty()) throw std::runtime_error("В файле нет геометрии: " + path);
     // Настройки импорта применяются ко ВСЕМ форматам одинаково: масштаб и
     // центрирование — свойство ассета, а не формата, и разное поведение у .obj
     // и .glb означало бы, что одна и та же модель ведёт себя по-разному в
@@ -207,7 +287,10 @@ sage::render::MeshData LoadMeshData(const std::string& path) {
 
 std::shared_ptr<Mesh> LoadMesh(const std::string& path, bool keepCpuData) {
     sage::render::MeshData d = LoadMeshData(path);
-    return std::make_shared<Mesh>(d.Vertices, d.Indices, keepCpuData);
+    // Разметка по материалам едет на видеокарту вместе с геометрией: без неё
+    // многоматериальная модель рисовалась бы одним материалом — тем самым, из-за
+    // которого «текстуры не работают».
+    return std::make_shared<Mesh>(d.Vertices, d.Indices, d.Submeshes, keepCpuData);
 }
 
 }

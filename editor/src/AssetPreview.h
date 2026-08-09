@@ -68,11 +68,15 @@ public:
                             const std::string& key = {});
 
     // То же для модели: меш вписывается в кадр по своим габаритам.
+    //
+    // materials — материалы ФАЙЛА модели (см. MaterialsForModel), а не один
+    // материал на весь меш: части модели раскладываются по ним через её
+    // разметку. Пустой список — превью серым пластиком, как у голой геометрии.
     uint64_t RenderMesh(const std::shared_ptr<Mesh>& mesh, int size, const std::string& key = {},
-                        const std::shared_ptr<Material>& material = nullptr);
+                        const std::vector<std::shared_ptr<Material>>& materials = {});
 
-    // Материал модели по её файлу: albedo/metallic/roughness и карты, как их
-    // описал автор в .gltf/.glb/.obj.
+    // ВСЕ материалы модели по её файлу, в порядке файла: albedo/metallic/
+    // roughness и карты, как их описал автор в .gltf/.glb/.obj/.fbx.
     //
     // ЗАЧЕМ ОТДЕЛЬНО. Превью модели рисовалось материалом ПО УМОЛЧАНИЮ —
     // серым пластиком. Не «текстуры не подтянулись», а их и не спрашивали:
@@ -80,9 +84,16 @@ public:
     // ассетов из этого следует, что любая модель выглядит одинаково серой, и
     // отличить по обложке текстурированного персонажа от болванки нельзя.
     //
-    // Разбор файла кэшируется по пути: ExtractMaterial читает модель целиком, а
+    // ПОЧЕМУ ВСЕ, А НЕ ПЕРВЫЙ. Обложка отвечает на вопрос «что это за файл», и
+    // персонаж, у которого кожа, ткань и глаза покрашены одним материалом,
+    // отвечает на него неправильно — ровно так же неправильно, как выглядела бы
+    // такая модель в сцене до появления подмешей. Индекс в этом списке — тот
+    // же, что в разметке меша (sage::render::Submesh::Material).
+    //
+    // Разбор файла кэшируется по пути: ExtractMaterials читает модель целиком, а
     // обложек в папке бывает два десятка.
-    static std::shared_ptr<Material> MaterialForModel(const std::string& path);
+    static const std::vector<std::shared_ptr<Material>>& MaterialsForModel(
+        const std::string& path);
 
     // Отпустить буфер именованного превью. Зовётся, когда обложка больше не
     // нужна (ушли из папки): без этого буферы копились бы по одному на каждый
@@ -111,8 +122,11 @@ public:
     void ResetView();
 
 private:
-    uint64_t Render(const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<Material>& material,
-                    int size, float fitRadius, const std::string& key);
+    // materials — материалы файла модели по индексам её разметки; для превью
+    // одного материала (шарик) передаётся список из одного элемента.
+    uint64_t Render(const std::shared_ptr<Mesh>& mesh,
+                    const std::vector<std::shared_ptr<Material>>& materials, int size,
+                    float fitRadius, const std::string& key);
     // Общий низ всех превью: снять ГОТОВУЮ сцену в буфер. Одиночный меш и
     // префаб отличаются только тем, что в сцене, — свет, камера, окружение и
     // проход у них обязаны быть одни и те же, иначе «превью» и «превью» стали

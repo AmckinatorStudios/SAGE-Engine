@@ -21,6 +21,7 @@
 
 #include "EditorTheme.h"
 #include "EditorIcons.h"
+#include "ModelMaterialImport.h"
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
 #include "sage/render/ModelMaterial.h"
@@ -1545,39 +1546,7 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
 // же ассет выглядел по-разному в зависимости от того, каким жестом его принесли,
 // и «текстуры не работают» было честным выводом из увиденного.
 void EditorLayer::AssignModelMaterial(MeshRendererComponent& mr) {
-    if (mr.Ref.path.empty() || !mr.MaterialPath.empty()) return;
-    const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(mr.Ref.path);
-    if (modelPath.empty()) return;
-    const fs::path matPath = fs::path(modelPath).replace_extension(".sagemat");
-
-    std::error_code ec;
-    if (!fs::exists(matPath, ec)) {
-        const ModelLoader::ExtractedMaterial ex = ModelLoader::ExtractMaterial(modelPath);
-        // Нет материала в файле — и не надо: белая болванка это честный результат
-        // «в модели материала нет», а не поломка.
-        if (!ex.Found) return;
-        Material mat;
-        mat.Albedo = ex.Albedo;
-        mat.Emissive = ex.Emissive;
-        mat.EmissiveStrength = ex.EmissiveStrength;
-        mat.Metallic = ex.Metallic;
-        mat.Roughness = ex.Roughness;
-        mat.Opacity = ex.Opacity;
-        mat.TexturePath = m_project.AssetRef(ex.AlbedoMap);
-        mat.NormalMapPath = m_project.AssetRef(ex.NormalMap);
-        mat.MetallicMapPath = m_project.AssetRef(ex.MetallicMap);
-        mat.RoughnessMapPath = m_project.AssetRef(ex.RoughnessMap);
-        mat.AOMapPath = m_project.AssetRef(ex.AOMap);
-        mat.EmissiveMap = m_project.AssetRef(ex.EmissiveMap);
-        try {
-            mat.SaveToFile(matPath.string());
-        } catch (const std::exception& e) {
-            LOG_ERROR("Editor") << "материал модели не сохранён: " << e.what();
-            return;
-        }
-    }
-    mr.MaterialPath = m_project.AssetRef(matPath);
-    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+    ImportModelMaterials(m_project, mr);
 }
 
 bool EditorLayer::AddAssetToScene(const fs::path& asset) {

@@ -15,6 +15,7 @@
 class Scene;
 struct LightingEnvironment;
 struct Material;
+struct MeshRendererComponent;
 namespace sage::gi { struct GIState; }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +157,12 @@ private:
     // всегда брал их из MeshInstance, а текстурный читал материал напрямую — и
     // получалось, что тон и свечение отдельного объекта работают ровно до тех
     // пор, пока материалу не назначили ни одной карты.
-    struct TexturedItem { Mesh* Mesh_; glm::mat4 Model; const Material* Mat; int LmPage;
+    //
+    // Submesh — какую ЧАСТЬ меша рисует этот элемент. Многоматериальная модель
+    // даёт по элементу на часть: у каждой свой материал, а значит и свои карты,
+    // и слить их в один вызов нельзя (см. sage::render::Submesh).
+    struct TexturedItem { Mesh* Mesh_; unsigned int Submesh; glm::mat4 Model;
+                          const Material* Mat; int LmPage;
                           float Opacity = 1.0f;
                           glm::vec3 Color{1.0f}; glm::vec3 Emissive{0.0f}; };
 
@@ -166,6 +172,7 @@ private:
     // и сортируются по расстоянию до камеры — от дальних к ближним.
     struct TransparentItem {
         Mesh* Mesh_;
+        unsigned int Submesh;  // часть меша со своим материалом
         MeshInstance Inst;
         const Material* Mat;   // nullptr — плоский цвет
         int LmPage;
@@ -181,14 +188,18 @@ private:
     struct CullItem {
         Mesh* Mesh_;
         glm::mat4 Model;
-        const Material* Mat;
-        Shader* Custom = nullptr;    // собственный шейдер материала (nullptr — штатный)
+        // Источник материалов сущности: свой на каждый подмеш (Slots) плюс
+        // материал объекта как запасной. Держим компонент, а не свёрнутые
+        // цвет/металличность, потому что у многоматериальной модели их столько
+        // же, сколько частей, и сворачивать их до слияния в бакеты значило бы
+        // считать одно и то же дважды.
+        //
+        // Указатель живёт РОВНО кадр: список пересобирается каждым сбором, а
+        // между сбором и отрисовкой сцена структурно не меняется (то же
+        // допущение, на котором здесь держатся Mat и LodInfo).
+        const MeshRendererComponent* MR = nullptr;
         bool HasParamOverride = false; // у сущности есть свои значения юниформ
-        glm::vec3 Color;
-        glm::vec3 Emissive{0.0f};   // своё свечение объекта + материала
-        float Opacity;  // < 1 — объект уходит в полупрозрачный проход
         int LmPage;     // страница лайтмапы (-1 — не запечена)
-        bool Textured;
         bool Visible;
         // Нужна проходу скоростей: по ней ищется матрица ПРОШЛОГО кадра этой же
         // сущности. Больше нигде не используется — отсечению и отрисовке
@@ -208,7 +219,24 @@ private:
         bool Occluded = false;
     };
 
-    // Инстанс-группа одного меша. У запечённой статики меш уникален для
+    // Что именно рисуем одним вызовом: ЧАСТЬ конкретного меша. Ключ бакетов
+    // инстансинга — пара, а не один меш: две части одной модели с разными
+    // материалами обязаны попасть в разные пачки, иначе вторая покрасилась бы
+    // первой.
+    struct MeshSlotKey {
+        Mesh* Mesh_ = nullptr;
+        unsigned int Submesh = 0;
+        bool operator==(const MeshSlotKey& o) const {
+            return Mesh_ == o.Mesh_ && Submesh == o.Submesh;
+        }
+    };
+    struct MeshSlotKeyHash {
+        size_t operator()(const MeshSlotKey& k) const {
+            return std::hash<const void*>()(k.Mesh_) ^ (std::hash<unsigned int>()(k.Submesh) << 1);
+        }
+    };
+
+    // Инстанс-группа одной части меша. У запечённой статики меш уникален для
     // сущности (свои лайтмап-UV), так что LmPage один на группу.
     struct Group {
         std::vector<MeshInstance> Instances;
@@ -221,14 +249,16 @@ private:
     // параметры один раз на группу.
     struct CustomKey {
         Mesh* Mesh_ = nullptr;
+        unsigned int Submesh = 0;
         Shader* Program = nullptr;
         bool operator==(const CustomKey& o) const {
-            return Mesh_ == o.Mesh_ && Program == o.Program;
+            return Mesh_ == o.Mesh_ && Submesh == o.Submesh && Program == o.Program;
         }
     };
     struct CustomKeyHash {
         size_t operator()(const CustomKey& k) const {
-            return std::hash<const void*>()(k.Mesh_) ^ (std::hash<const void*>()(k.Program) << 1);
+            return std::hash<const void*>()(k.Mesh_) ^ (std::hash<const void*>()(k.Program) << 1) ^
+                   (std::hash<unsigned int>()(k.Submesh) << 2);
         }
     };
     struct CustomGroup {
@@ -256,7 +286,7 @@ private:
 
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
-    std::unordered_map<Mesh*, Group> m_groups; // flat-инстансы по мешу
+    std::unordered_map<MeshSlotKey, Group, MeshSlotKeyHash> m_groups; // flat-инстансы по части меша
     std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)
     std::vector<TransparentItem> m_transparent;                    // полупрозрачные (по глубине)
     std::unordered_map<CustomKey, CustomGroup, CustomKeyHash> m_custom; // свои шейдеры

@@ -87,6 +87,10 @@ private:
     // компонент; см. комментарий на месте вызова.
     void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr);
     void DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr);
+    // Слоты материалов по ЧАСТЯМ модели (см. sage::render::Submesh). Рисуются
+    // только у моделей, которые разметку несут: у куба и одноматериального
+    // ассета показывать было бы нечего.
+    void DrawSubmeshMaterials(EditorHost& host, MeshRendererComponent& mr);
     void CreateMaterialForObject(EditorHost& host, MeshRendererComponent& mr);
     void WriteMaterialFromOverrides(EditorHost& host, MeshRendererComponent& mr,
                                     const std::string& path);

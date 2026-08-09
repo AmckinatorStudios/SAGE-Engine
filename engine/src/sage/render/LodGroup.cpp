@@ -33,10 +33,16 @@ bool BuildAutoLods(LodComponent& lod, const Mesh& source, int coarseLevels) {
         ratio *= 0.25f;
         screenHeight *= 0.5f;
 
-        SimplifyResult r = SimplifyToRatio(*verts, *idx, ratio);
+        // Разметку по материалам передаём вниз: грубый уровень
+        // многоматериальной модели обязан остаться многоматериальным, иначе
+        // переход на LOD выглядел бы как перекраска всей модели разом.
+        SimplifyResult r = SimplifyToRatio(*verts, *idx, ratio,
+                                           source.HasExplicitSubmeshes()
+                                               ? source.Submeshes()
+                                               : std::vector<Submesh>{});
         if (r.Triangles < 4) break; // дальше упрощать нечего — уровень был бы пустым
 
-        lod.Meshes.push_back(std::make_shared<Mesh>(r.Vertices, r.Indices));
+        lod.Meshes.push_back(std::make_shared<Mesh>(r.Vertices, r.Indices, r.Submeshes));
         lod.Levels.Add(screenHeight);
     }
 

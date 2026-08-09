@@ -28,17 +28,40 @@ struct Cluster {
     unsigned int Index = 0; // номер в выходном массиве вершин
 };
 
+// Годится ли разметка для переноса на упрощённую геометрию: отрезки кратны
+// треугольнику, идут подряд и покрывают буфер без дыр и наложений.
+//
+// Требование строгое намеренно. Перенос держится на том, что треугольники
+// выпускаются в исходном порядке; на разметке с дырами или перехлёстами это
+// перестаёт работать, и границы поехали бы — то есть части модели покрасились
+// бы чужими материалами. Отдать грубый уровень без разметки честнее.
+bool MarkupIsSequential(const std::vector<Submesh>& submeshes, size_t indexCount) {
+    if (submeshes.empty()) return false;
+    size_t cursor = 0;
+    for (const Submesh& s : submeshes) {
+        if (s.FirstIndex != cursor) return false;
+        if (s.IndexCount % 3 != 0) return false;
+        cursor += s.IndexCount;
+        if (cursor > indexCount) return false;
+    }
+    return cursor == indexCount;
+}
+
 } // namespace
 
 SimplifyResult SimplifyByClustering(const std::vector<Vertex>& vertices,
-                                    const std::vector<unsigned int>& indices, int gridSize) {
+                                    const std::vector<unsigned int>& indices, int gridSize,
+                                    const std::vector<Submesh>& submeshes) {
     SimplifyResult out;
     out.SourceTriangles = (int)(indices.size() / 3);
     out.Triangles = out.SourceTriangles;
 
+    const bool keepMarkup = MarkupIsSequential(submeshes, indices.size());
+
     if (vertices.empty() || indices.size() < 3 || gridSize < 1) {
         out.Vertices = vertices;
         out.Indices = indices;
+        if (keepMarkup) out.Submeshes = submeshes;   // геометрия не менялась
         return out;
     }
 
@@ -107,8 +130,31 @@ SimplifyResult SimplifyByClustering(const std::vector<Vertex>& vertices,
     }
 
     // 3) Переписываем треугольники, выбрасывая схлопнувшиеся.
+    //
+    // Порядок сохраняется, поэтому границы подмешей переносятся простым счётом:
+    // сколько треугольников отрезка дожило до выхода, столько и занимает его
+    // отрезок там.
     out.Indices.reserve(indices.size());
+    size_t nextBoundary = 0;      // конец текущего входного отрезка (в индексах)
+    size_t submeshCursor = 0;     // какой отрезок сейчас разбираем
+    unsigned int emittedStart = 0;// начало его выходного отрезка
+    if (keepMarkup) nextBoundary = submeshes[0].IndexCount;
+
     for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        if (keepMarkup) {
+            // Закрываем отрезки, которые закончились на этом треугольнике.
+            // Цикл, а не if: пустой подмеш (материал без геометрии) закрывается
+            // тем же треугольником, что и предыдущий.
+            while (submeshCursor < submeshes.size() && i >= nextBoundary) {
+                Submesh s = submeshes[submeshCursor];
+                s.FirstIndex = emittedStart;
+                s.IndexCount = (unsigned int)out.Indices.size() - emittedStart;
+                out.Submeshes.push_back(s);
+                emittedStart = (unsigned int)out.Indices.size();
+                if (++submeshCursor < submeshes.size())
+                    nextBoundary += submeshes[submeshCursor].IndexCount;
+            }
+        }
         const std::uint64_t k0 = vertexCell[indices[i]];
         const std::uint64_t k1 = vertexCell[indices[i + 1]];
         const std::uint64_t k2 = vertexCell[indices[i + 2]];
@@ -118,6 +164,15 @@ SimplifyResult SimplifyByClustering(const std::vector<Vertex>& vertices,
         out.Indices.push_back(clusters[k0].Index);
         out.Indices.push_back(clusters[k1].Index);
         out.Indices.push_back(clusters[k2].Index);
+    }
+    // Хвост: отрезки, закрывшиеся вместе с концом буфера.
+    while (keepMarkup && submeshCursor < submeshes.size()) {
+        Submesh s = submeshes[submeshCursor];
+        s.FirstIndex = emittedStart;
+        s.IndexCount = (unsigned int)out.Indices.size() - emittedStart;
+        out.Submeshes.push_back(s);
+        emittedStart = (unsigned int)out.Indices.size();
+        ++submeshCursor;
     }
 
     // 4) Выкидываем вершины, на которые больше никто не ссылается: после отсева
@@ -143,11 +198,13 @@ SimplifyResult SimplifyByClustering(const std::vector<Vertex>& vertices,
 }
 
 SimplifyResult SimplifyToRatio(const std::vector<Vertex>& vertices,
-                               const std::vector<unsigned int>& indices, float targetRatio) {
+                               const std::vector<unsigned int>& indices, float targetRatio,
+                               const std::vector<Submesh>& submeshes) {
     targetRatio = std::clamp(targetRatio, 0.01f, 1.0f);
     SimplifyResult best;
     best.Vertices = vertices;
     best.Indices = indices;
+    if (MarkupIsSequential(submeshes, indices.size())) best.Submeshes = submeshes;
     best.SourceTriangles = (int)(indices.size() / 3);
     best.Triangles = best.SourceTriangles;
     if (targetRatio >= 0.999f || indices.size() < 3) return best;
@@ -161,7 +218,7 @@ SimplifyResult SimplifyToRatio(const std::vector<Vertex>& vertices,
     float bestErr = 1e9f;
     for (int probe = 0; probe < 8 && loGrid <= hiGrid; ++probe) {
         const int mid = (loGrid + hiGrid) / 2;
-        SimplifyResult r = SimplifyByClustering(vertices, indices, mid);
+        SimplifyResult r = SimplifyByClustering(vertices, indices, mid, submeshes);
         const float err = std::fabs(r.Ratio - targetRatio);
         if (err < bestErr && r.Triangles > 0) {
             bestErr = err;

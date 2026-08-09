@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string>
 #include <vector>
 #include <glm/glm.hpp>
 #include "sage/rhi/Resources.h"
@@ -44,6 +45,30 @@ struct MeshInstance {
     glm::vec3 Emissive{0.0f, 0.0f, 0.0f};
 };
 
+// Часть геометрии, которая красится СВОИМ материалом, — подмеш.
+//
+// ЗАЧЕМ. Модель из редактора почти никогда не одноматериальна: у персонажа
+// отдельно кожа, отдельно ткань, отдельно глаза и зубы. Раньше весь файл
+// сливался в один буфер без разметки, сущность держала один материал, и
+// четырнадцать материалов модели превращались в один — она рисовалась целиком
+// той картой, которая попалась импортёру первой. Это была не потеря текстур, а
+// потеря ГРАНИЦ между ними.
+//
+// Граница — это отрезок общего индексного буфера. Именно отрезок, а не
+// отдельный буфер на материал: геометрия остаётся ОДНОЙ загрузкой на
+// видеокарту, инстансинг сохраняется (rhi::Geometry::DrawIndexedInstancedRange),
+// а «нарисовать только эту часть» стоит смены смещения.
+namespace sage::render {
+struct Submesh {
+    std::string Name;            // имя примитива/узла в исходном файле — для инспектора
+    unsigned int FirstIndex = 0; // смещение в индексном буфере
+    unsigned int IndexCount = 0;
+    // Индекс материала в списке материалов ИСТОЧНИКА (ImportedScene::Materials,
+    // он же порядок ExtractMaterials). -1 — у части нет материала в файле.
+    int Material = -1;
+};
+} // namespace sage::render
+
 // Хранит геометрию на GPU (через rhi::Geometry) и умеет себя отрисовать.
 // О графическом API ничего не знает — вся работа с буферами у бэкенда.
 class Mesh {
@@ -55,6 +80,16 @@ public:
     // (см. sage/render/MeshSimplify.h), поэтому и включаются точечно.
     Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices,
          bool keepCpuData = false);
+
+    // Тот же меш, но С РАЗМЕТКОЙ по материалам. Пустой список подмешей
+    // равнозначен конструктору выше: вся геометрия — один подмеш.
+    //
+    // Разметка проверяется здесь и только здесь: отрезок, вылезающий за
+    // индексный буфер, отбрасывается. Битый .glb не должен стоить чтения за
+    // границей буфера на видеокарте, а «часть модели не нарисовалась» — ошибка,
+    // которую видно, в отличие от порчи чужой памяти.
+    Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices,
+         const std::vector<sage::render::Submesh>& submeshes, bool keepCpuData = false);
 
     // Копия геометрии в оперативной памяти — nullptr, если её не просили.
     const std::vector<Vertex>* CpuVertices() const {
@@ -80,6 +115,21 @@ public:
     // одним draw call'ом. Данные перезаливаются каждый кадр (STREAM).
     void SetInstances(const MeshInstance* data, size_t count) const;
     void DrawInstances(size_t count) const;
+
+    // --- Подмеши: части геометрии со своими материалами ----------------------
+    //
+    // Их ВСЕГДА хотя бы один. Меш без разметки отдаёт один подмеш на всю
+    // геометрию, поэтому потребителю (рендеру, инспектору, сериализатору) не
+    // нужна ветка «а если подмешей нет» — она была бы у каждого своя.
+    const std::vector<sage::render::Submesh>& Submeshes() const { return m_submeshes; }
+    size_t SubmeshCount() const { return m_submeshes.size(); }
+    // Разметка пришла из файла модели, а не подставлена как «всё одним куском».
+    // Нужна ровно там, где надо отличить «модель одноматериальна» от «формат
+    // материалов не несёт».
+    bool HasExplicitSubmeshes() const { return m_explicitSubmeshes; }
+
+    void DrawSubmesh(size_t index) const;
+    void DrawSubmeshInstances(size_t index, size_t count) const;
 
     // --- Ограничивающая сфера в ЛОКАЛЬНЫХ координатах (для отсечения по
     //     фрустуму). Мировая сфера = центр*model, радиус*max|scale|. ---
@@ -112,6 +162,9 @@ private:
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
     std::vector<Vertex> m_cpuVertices;        // пусто, если копию не просили
     std::vector<unsigned int> m_cpuIndices;
+    // Всегда непустой: без разметки — один подмеш на всю геометрию (см. Submeshes()).
+    std::vector<sage::render::Submesh> m_submeshes;
+    bool m_explicitSubmeshes = false;
     size_t m_indexCount = 0;
     glm::vec3 m_boundsCenter{0.0f};
     float m_boundsRadius = 0.0f;

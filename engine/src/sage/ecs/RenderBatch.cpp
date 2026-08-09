@@ -274,7 +274,6 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
         auto wit = m_worldCache.find(e);
         glm::mat4 model = wit != m_worldCache.end() ? wit->second : scene.WorldMatrix(e);
-        const Material* mat = mr.MaterialPtr.get();
         Mesh* mesh = mr.MeshPtr.get();
         int lmPage = -1;
         if (gi) {
@@ -290,12 +289,9 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         }
         const sage::render::LodComponent* lod =
             scene.Registry().try_get<sage::render::LodComponent>(e);
-        Shader* custom = (mat && mat->ShaderPtr) ? mat->ShaderPtr.get() : nullptr;
         bool paramOverride = scene.Registry().all_of<ShaderParamsComponent>(e);
-        m_cull.push_back(CullItem{mesh, model, mat, custom, paramOverride,
-                                  EffectiveColor(mr), EffectiveEmissive(mr),
-                                  EffectiveOpacity(mr),
-                                  lmPage, mat && mat->HasMaps(), /*visible*/ false, e, lod, mesh});
+        m_cull.push_back(CullItem{mesh, model, &mr, paramOverride, lmPage,
+                                  /*visible*/ false, e, lod, mesh});
     });
 
     // 2) ПАРАЛЛЕЛЬНОЕ отсечение: каждый элемент независим — поток пишет только
@@ -361,54 +357,72 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             else ++m_stats.Culled;
             continue;
         }
-        // Зеркало не отражает само себя (см. ReflectionBinding::CapturingPlanar).
-        if (m_skipPlanarReflectors && c.Mat && c.Mat->Render.PlanarReflectivity > 0.0f) continue;
         ++m_stats.Drawn;
-        m_stats.Triangles += (long long)c.Mesh_->TriangleCount();
         m_stats.TrianglesAtLod0 += (long long)c.BaseMesh->TriangleCount();
-        MeshInstance inst;
-        inst.Model = c.Model;
-        inst.Color = c.Color;
-        inst.Alpha = c.Opacity;
-        inst.Emissive = c.Emissive;
-        if (c.Mat) {
-            inst.Metallic = c.Mat->Metallic;
-            inst.Roughness = c.Mat->Roughness;
-            inst.PlanarReflectivity = c.Mat->Render.PlanarReflectivity;
-        }
 
-        if (c.Custom) {
-            // Собственный шейдер материала. Батчинг сохраняется: группируем по
-            // паре «меш + программа», и тысяча объектов со своим шейдером
-            // остаётся одним draw call'ом — иначе своим шейдером нельзя было бы
-            // рисовать воду или траву, то есть именно то, ради чего он и нужен.
-            CustomGroup& g = m_custom[CustomKey{c.Mesh_, c.Custom}];
-            g.Instances.push_back(inst);
-            g.Entities.push_back(c.Entity);
-            g.Depths.push_back(glm::dot(c.Center - m_viewPos, c.Center - m_viewPos));
-            g.Mat = c.Mat;
-            g.LmPage = c.LmPage;
-            if (c.HasParamOverride) g.AnyOverrides = true;
-            // Свой шейдер НЕ отменяет прозрачность: материал воды с opacity 0.8
-            // обязан смешиваться, а не рисоваться поверх. Признак группы —
-            // непрозрачность материала или любого её инстанса.
-            if (c.Opacity < 0.996f) g.Transparent = true;
-        } else if (c.Opacity < 0.996f) {
-            // Полупрозрачный — в отдельный список, рисуется после всей
-            // непрозрачной геометрии и в своём порядке (см. RenderColor).
-            m_transparent.push_back({c.Mesh_, inst, c.Mat, c.LmPage,
-                                     glm::dot(c.Center - m_viewPos, c.Center - m_viewPos),
-                                     c.Textured});
-        } else if (c.Textured) {
-            // Есть текстурные карты — индивидуальный текстурный PBR-путь.
-            m_textured.push_back({c.Mesh_, c.Model, c.Mat, c.LmPage, c.Opacity,
-                                  c.Color, c.Emissive});
-        } else {
-            // Плоский цвет — быстрый инстансный путь. Metallic/roughness из
-            // материала (если назначен), иначе дефолты MeshInstance.
-            Group& g = m_groups[c.Mesh_];
-            g.Instances.push_back(inst);
-            g.LmPage = c.LmPage; // у запечённой статики меш уникален — страница одна
+        // РАЗБОР ПО ЧАСТЯМ. Дальше речь идёт не о сущности, а о подмешах её
+        // меша: у каждого свой материал, а значит свой путь отрисовки (плоский,
+        // текстурный, прозрачный, со своим шейдером) и своя пачка. Объект с
+        // одним материалом даёт ровно один проход этого цикла — то есть ровно
+        // то, что было до подмешей.
+        const MeshRendererComponent& mr = *c.MR;
+        const std::vector<sage::render::Submesh>& subs = c.Mesh_->Submeshes();
+        for (unsigned int si = 0; si < (unsigned int)subs.size(); ++si) {
+            const Material* mat = MaterialForSubmesh(mr, si);
+            // Зеркало не отражает само себя (см. ReflectionBinding::CapturingPlanar).
+            if (m_skipPlanarReflectors && mat && mat->Render.PlanarReflectivity > 0.0f) continue;
+
+            const float opacity = EffectiveOpacity(mr, mat);
+            const bool textured = mat && mat->HasMaps();
+            Shader* custom = (mat && mat->ShaderPtr) ? mat->ShaderPtr.get() : nullptr;
+
+            m_stats.Triangles += (long long)(subs[si].IndexCount / 3);
+
+            MeshInstance inst;
+            inst.Model = c.Model;
+            inst.Color = EffectiveColor(mr, mat);
+            inst.Alpha = opacity;
+            inst.Emissive = EffectiveEmissive(mr, mat);
+            if (mat) {
+                inst.Metallic = mat->Metallic;
+                inst.Roughness = mat->Roughness;
+                inst.PlanarReflectivity = mat->Render.PlanarReflectivity;
+            }
+
+            if (custom) {
+                // Собственный шейдер материала. Батчинг сохраняется: группируем
+                // по тройке «часть меша + программа», и тысяча объектов со
+                // своим шейдером остаётся одним draw call'ом — иначе своим
+                // шейдером нельзя было бы рисовать воду или траву, то есть
+                // именно то, ради чего он и нужен.
+                CustomGroup& g = m_custom[CustomKey{c.Mesh_, si, custom}];
+                g.Instances.push_back(inst);
+                g.Entities.push_back(c.Entity);
+                g.Depths.push_back(glm::dot(c.Center - m_viewPos, c.Center - m_viewPos));
+                g.Mat = mat;
+                g.LmPage = c.LmPage;
+                if (c.HasParamOverride) g.AnyOverrides = true;
+                // Свой шейдер НЕ отменяет прозрачность: материал воды с opacity
+                // 0.8 обязан смешиваться, а не рисоваться поверх. Признак
+                // группы — непрозрачность материала или любого её инстанса.
+                if (opacity < 0.996f) g.Transparent = true;
+            } else if (opacity < 0.996f) {
+                // Полупрозрачный — в отдельный список, рисуется после всей
+                // непрозрачной геометрии и в своём порядке (см. RenderColor).
+                m_transparent.push_back({c.Mesh_, si, inst, mat, c.LmPage,
+                                         glm::dot(c.Center - m_viewPos, c.Center - m_viewPos),
+                                         textured});
+            } else if (textured) {
+                // Есть текстурные карты — индивидуальный текстурный PBR-путь.
+                m_textured.push_back({c.Mesh_, si, c.Model, mat, c.LmPage, opacity,
+                                      inst.Color, inst.Emissive});
+            } else {
+                // Плоский цвет — быстрый инстансный путь. Metallic/roughness из
+                // материала (если назначен), иначе дефолты MeshInstance.
+                Group& g = m_groups[MeshSlotKey{c.Mesh_, si}];
+                g.Instances.push_back(inst);
+                g.LmPage = c.LmPage; // у запечённой статики меш уникален — страница одна
+            }
         }
     }
 }
@@ -459,7 +473,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // Отрисовка одной группы «меш + своя программа». Вынесена, потому что
     // непрозрачные группы рисуются до общего прозрачного прохода, а
     // полупрозрачные — внутри него, с блендингом и в своём порядке.
-    auto drawCustom = [&](Shader& sh, Mesh& mesh, CustomGroup& g) {
+    auto drawCustom = [&](Shader& sh, Mesh& mesh, unsigned int submesh, CustomGroup& g) {
         setupCommon(sh);
         sh.SetFloat("uTime", m_time);
         bindLightmap(sh, g.LmPage);
@@ -484,10 +498,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 m_transparentBatch.reserve(g.Instances.size());
                 for (unsigned int k : m_customOrder) m_transparentBatch.push_back(g.Instances[k]);
                 mesh.SetInstances(m_transparentBatch.data(), m_transparentBatch.size());
-                mesh.DrawInstances(m_transparentBatch.size());
+                mesh.DrawSubmeshInstances(submesh, m_transparentBatch.size());
             } else {
                 mesh.SetInstances(g.Instances.data(), g.Instances.size());
-                mesh.DrawInstances(g.Instances.size());
+                mesh.DrawSubmeshInstances(submesh, g.Instances.size());
             }
             ++m_stats.Batches;
         } else {
@@ -501,7 +515,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                     UploadParams(sh, ov->Params);
                 }
                 mesh.SetInstances(&g.Instances[k], 1);
-                mesh.DrawInstances(1);
+                mesh.DrawSubmeshInstances(submesh, 1);
                 ++m_stats.Batches;
                 if (g.Mat) UploadParams(sh, g.Mat->Params); // вернуть общие значения
             }
@@ -514,8 +528,8 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     for (auto& kv : m_groups) {
         if (kv.second.Instances.empty()) continue;
         bindLightmap(lit, kv.second.LmPage);
-        kv.first->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
-        kv.first->DrawInstances(kv.second.Instances.size());
+        kv.first.Mesh_->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
+        kv.first.Mesh_->DrawSubmeshInstances(kv.first.Submesh, kv.second.Instances.size());
         ++m_stats.Batches;
     }
 
@@ -556,7 +570,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             if (it.Mat->RoughnessTex) it.Mat->RoughnessTex->Bind(4);
             if (it.Mat->AOTex) it.Mat->AOTex->Bind(5);
             tex.SetFloat("uOpacity", it.Opacity);
-            it.Mesh_->Draw();
+            it.Mesh_->DrawSubmesh(it.Submesh);
             ++m_stats.Batches;
         }
     }
@@ -567,7 +581,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // Непрозрачные — здесь; полупрозрачные ждут прохода 4 (см. ниже).
     for (auto& kv : m_custom) {
         if (kv.second.Instances.empty() || kv.second.Transparent) continue;
-        drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.second);
+        drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, kv.second);
     }
 
     // Есть ли вообще что смешивать в этом кадре — от этого зависит, поднимать ли
@@ -633,7 +647,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             const int passes = passCount(g.Mat);
             for (int pass = 0; pass < passes; ++pass) {
                 setCullForPass(g.Mat, passes == 1 ? 1 : pass);
-                drawCustom(*kv.first.Program, *kv.first.Mesh_, g);
+                drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, g);
             }
         }
 
@@ -672,7 +686,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 if (head.Mat->AOTex) head.Mat->AOTex->Bind(5);
                 for (int pass = 0; pass < passes; ++pass) {
                     setCullForPass(head.Mat, passes == 1 ? 1 : pass);
-                    head.Mesh_->Draw();
+                    head.Mesh_->DrawSubmesh(head.Submesh);
                     ++m_stats.Batches;
                 }
                 ++i;
@@ -689,7 +703,9 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             size_t j = i;
             m_transparentBatch.clear();
             while (j < m_transparent.size() && !m_transparent[j].Textured &&
-                   m_transparent[j].Mesh_ == head.Mesh_ && m_transparent[j].Mat == head.Mat) {
+                   m_transparent[j].Mesh_ == head.Mesh_ &&
+                   m_transparent[j].Submesh == head.Submesh &&
+                   m_transparent[j].Mat == head.Mat) {
                 m_transparentBatch.push_back(m_transparent[j].Inst);
                 ++j;
             }
@@ -698,7 +714,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             head.Mesh_->SetInstances(m_transparentBatch.data(), m_transparentBatch.size());
             for (int pass = 0; pass < passes; ++pass) {
                 setCullForPass(head.Mat, passes == 1 ? 1 : pass);
-                head.Mesh_->DrawInstances(m_transparentBatch.size());
+                head.Mesh_->DrawSubmeshInstances(head.Submesh, m_transparentBatch.size());
                 ++m_stats.Batches;
             }
             i = j;
@@ -936,8 +952,8 @@ void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
     di.SetMat4("uLightSpace", lightMatrix);
     for (auto& kv : m_groups) {
         if (kv.second.Instances.empty()) continue;
-        kv.first->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
-        kv.first->DrawInstances(kv.second.Instances.size());
+        kv.first.Mesh_->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
+        kv.first.Mesh_->DrawSubmeshInstances(kv.first.Submesh, kv.second.Instances.size());
     }
     // Полупрозрачные: тень отбрасывают только ПЛОТНЫЕ из них. Карта теней
     // бинарна — она не умеет «половину тени», — поэтому выбор всегда между
@@ -951,7 +967,7 @@ void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
         for (const TransparentItem& it : m_transparent) {
             if (it.Inst.Alpha < 0.5f) continue;
             du.SetMat4("uModel", it.Inst.Model);
-            it.Mesh_->Draw();
+            it.Mesh_->DrawSubmesh(it.Submesh);
         }
     }
 
@@ -962,7 +978,7 @@ void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
         du.SetMat4("uLightSpace", lightMatrix);
         for (const TexturedItem& it : m_textured) {
             du.SetMat4("uModel", it.Model);
-            it.Mesh_->Draw();
+            it.Mesh_->DrawSubmesh(it.Submesh);
         }
     }
 }

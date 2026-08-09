@@ -59,15 +59,35 @@ std::string ExtLower(const std::string& path) {
     return ext;
 }
 
+// Имя, годное для файла: пробелы и разделители из имени материала в Blender
+// («Suit Teeth», «body/skin») в путь класть нельзя.
+std::string FileSafe(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (unsigned char c : name) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+                        (c >= 'a' && c <= 'z') || c == '-' || c == '_' || c >= 0x80;
+        out.push_back(ok ? (char)c : '_');
+    }
+    return out;
+}
+
 // Куда класть создаваемые картинки и как их называть. Имя привязано к модели, а
 // не к номеру текстуры: две модели в одной папке не должны затирать карты друг
 // друга, а по имени файла должно быть видно, чьё оно.
+//
+// Slot — различитель МАТЕРИАЛА внутри модели. Пуст у одноматериальной модели
+// (имена остаются прежними — <модель>_albedo.png), а у многоматериальной
+// обязателен: без него четырнадцать albedo-карт Springbonnie написали бы друг
+// поверх друга в один файл, и модель получила бы одну случайную текстуру на
+// всё — то есть ровно тот симптом, за которым сюда и пришли.
 struct TextureSink {
     fs::path Dir;
     std::string Stem;
+    std::string Slot;
 
     fs::path PathFor(const char* usage) const {
-        return Dir / (Stem + "_" + usage + ".png");
+        return Dir / (Stem + (Slot.empty() ? "" : "_" + Slot) + "_" + usage + ".png");
     }
 };
 
@@ -130,39 +150,9 @@ struct GltfImageAccess {
     }
 };
 
-void ExtractGltf(const std::string& path, bool binary, const TextureSink& sink,
-                 ExtractedMaterial& out) {
-    tinygltf::TinyGLTF loader;
-    loader.SetImageLoader(&DecodeImage, nullptr);
-    tinygltf::Model model;
-    std::string err, warn;
-    const bool ok = binary ? loader.LoadBinaryFromFile(&model, &err, &warn, path)
-                           : loader.LoadASCIIFromFile(&model, &err, &warn, path);
-    if (!ok) {
-        out.Warnings.push_back("материал не прочитан: " + (err.empty() ? "разбор glTF" : err));
-        return;
-    }
-    if (model.materials.empty()) return;   // геометрия без материала — законно
-
-    // Материал ПЕРВОГО примитива, у которого он есть: см. ExtractMaterial.
-    int index = -1;
-    for (const tinygltf::Mesh& mesh : model.meshes) {
-        for (const tinygltf::Primitive& prim : mesh.primitives) {
-            if (prim.material >= 0 && prim.material < (int)model.materials.size()) {
-                index = prim.material;
-                break;
-            }
-        }
-        if (index >= 0) break;
-    }
-    if (index < 0) index = 0;
-    if (model.materials.size() > 1) {
-        out.Warnings.push_back("в модели материалов: " + std::to_string(model.materials.size()) +
-                               "; взят «" + model.materials[index].name +
-                               "» — сущность держит один материал");
-    }
-
-    const tinygltf::Material& m = model.materials[index];
+void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
+                         const tinygltf::Material& m, const TextureSink& sink,
+                         ExtractedMaterial& out) {
     out.Found = true;
     out.Name = m.name;
 
@@ -252,27 +242,51 @@ void ExtractGltf(const std::string& path, bool binary, const TextureSink& sink,
     if (!out.EmissiveMap.empty() && out.Emissive == glm::vec3(0.0f)) out.Emissive = glm::vec3(1.0f);
 }
 
-// --- OBJ + MTL ---------------------------------------------------------------
+// Различитель материала в именах создаваемых картинок. Имя, а не номер: по
+// <модель>_SuitTeeth_albedo.png видно, чья это карта, а по <модель>_7_albedo.png
+// — нет. Номер идёт в ход, только если имени нет или оно повторяется (в .glb
+// одинаковые имена материалов встречаются).
+std::string SlotName(const std::vector<std::string>& taken, const std::string& name, size_t index) {
+    std::string slot = FileSafe(name);
+    if (slot.empty() || std::find(taken.begin(), taken.end(), slot) != taken.end())
+        slot = "mat" + std::to_string(index);
+    return slot;
+}
 
-void ExtractObj(const std::string& path, ExtractedMaterial& out) {
-    const fs::path dir = fs::path(path).parent_path();
-
-    tinyobj::ObjReaderConfig config;
-    config.mtl_search_path = dir.empty() ? "." : dir.string();
-    tinyobj::ObjReader reader;
-    if (!reader.ParseFromFile(path, config)) {
-        out.Warnings.push_back("материал не прочитан: " +
-                               (reader.Error().empty() ? std::string("разбор OBJ") : reader.Error()));
+void ExtractGltf(const std::string& path, bool binary, const TextureSink& base,
+                 ExtractedMaterialSet& out) {
+    tinygltf::TinyGLTF loader;
+    loader.SetImageLoader(&DecodeImage, nullptr);
+    tinygltf::Model model;
+    std::string err, warn;
+    const bool ok = binary ? loader.LoadBinaryFromFile(&model, &err, &warn, path)
+                           : loader.LoadASCIIFromFile(&model, &err, &warn, path);
+    if (!ok) {
+        out.Warnings.push_back("материалы не прочитаны: " + (err.empty() ? "разбор glTF" : err));
         return;
     }
-    const std::vector<tinyobj::material_t>& mats = reader.GetMaterials();
-    if (mats.empty()) return;   // нет .mtl — законно
+    if (model.materials.empty()) return;   // геометрия без материала — законно
 
-    if (mats.size() > 1) {
-        out.Warnings.push_back("в модели материалов: " + std::to_string(mats.size()) + "; взят «" +
-                               mats[0].name + "» — сущность держит один материал");
+    // ВСЕ материалы и СТРОГО В ПОРЯДКЕ ФАЙЛА: индекс здесь — тот же индекс, что
+    // стоит в разметке меша (sage::render::Submesh::Material).
+    const bool many = model.materials.size() > 1;
+    std::vector<std::string> slots;
+    for (size_t i = 0; i < model.materials.size(); ++i) {
+        const tinygltf::Material& m = model.materials[i];
+        TextureSink sink = base;
+        if (many) {
+            sink.Slot = SlotName(slots, m.name, i);
+            slots.push_back(sink.Slot);
+        }
+        ExtractedMaterial extracted;
+        ExtractGltfMaterial(model, path, m, sink, extracted);
+        out.Materials.push_back(std::move(extracted));
     }
-    const tinyobj::material_t& m = mats[0];
+}
+
+// --- OBJ + MTL ---------------------------------------------------------------
+
+void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, ExtractedMaterial& out) {
     out.Found = true;
     out.Name = m.name;
     out.Albedo = glm::vec3(m.diffuse[0], m.diffuse[1], m.diffuse[2]);
@@ -310,6 +324,29 @@ void ExtractObj(const std::string& path, ExtractedMaterial& out) {
     if (!out.EmissiveMap.empty() && out.Emissive == glm::vec3(0.0f)) out.Emissive = glm::vec3(1.0f);
 }
 
+void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
+    const fs::path dir = fs::path(path).parent_path();
+
+    tinyobj::ObjReaderConfig config;
+    config.mtl_search_path = dir.empty() ? "." : dir.string();
+    tinyobj::ObjReader reader;
+    if (!reader.ParseFromFile(path, config)) {
+        out.Warnings.push_back("материалы не прочитаны: " +
+                               (reader.Error().empty() ? std::string("разбор OBJ") : reader.Error()));
+        return;
+    }
+    const std::vector<tinyobj::material_t>& mats = reader.GetMaterials();
+    if (mats.empty()) return;   // нет .mtl — законно
+
+    // Порядок tinyobj — порядок .mtl, он же индекс в разметке меша
+    // (LoadObjData ставит в Submesh::Material тот же material_id).
+    for (const tinyobj::material_t& m : mats) {
+        ExtractedMaterial extracted;
+        ExtractObjMaterial(dir, m, extracted);
+        out.Materials.push_back(std::move(extracted));
+    }
+}
+
 } // namespace
 
 // Материал FBX берётся у ИМПОРТЁРА: он уже разбирает блоки Material, Texture и
@@ -320,64 +357,70 @@ void ExtractObj(const std::string& path, ExtractedMaterial& out) {
 // Пути к картам в FBX почти всегда чужие и абсолютные («C:\\Users\\...»),
 // поэтому картинка ищется по ИМЕНИ ФАЙЛА рядом с моделью и в её подпапках:
 // набор, скачанный одной папкой (source/ + textures/), собирается сам.
-void ExtractFbx(const std::string& modelPath, ExtractedMaterial& out) {
+void ExtractFbx(const std::string& modelPath, ExtractedMaterialSet& set) {
     sage::assets::ImportedScene scene;
     std::string err;
     if (!sage::assets::ImporterRegistry::Instance().Import(modelPath, scene, err)) {
-        out.Warnings.push_back("материал FBX не прочитан: " + err);
+        set.Warnings.push_back("материалы FBX не прочитаны: " + err);
         return;
     }
     if (scene.Materials.empty()) return;
 
-    const sage::assets::ImportedMaterial& m = scene.Materials.front();
-    if (scene.Materials.size() > 1) {
-        out.Warnings.push_back("в модели материалов: " + std::to_string(scene.Materials.size()) +
-                               " — взят первый (объект держит один материал)");
-    }
-
     const fs::path modelDir = fs::path(modelPath).parent_path();
-    auto locate = [&](const std::string& ref) -> std::string {
-        if (ref.empty()) return {};
-        std::error_code ec;
-        const fs::path direct = modelDir / ref;
-        if (fs::exists(direct, ec) && !fs::is_directory(direct, ec)) return direct.generic_string();
-        const std::string name = fs::path(ref).filename().string();
-        // Пустая ссылка вида «.» — не картинка. Экспортёры оставляют такие
-        // заглушки у материалов без текстур, и без этой проверки путь
-        // разрешался бы в САМУ ПАПКУ модели: слот «есть, но не грузится».
-        if (name.empty() || name == "." || name == "..") return {};
-        // Соседние папки: у наборов из сети текстуры лежат в textures/, а
-        // модель — в source/, то есть на уровень выше и вбок.
-        const fs::path roots[] = {modelDir, modelDir / "textures", modelDir.parent_path(),
-                                  modelDir.parent_path() / "textures"};
-        for (const fs::path& root : roots) {
-            if (root.empty()) continue;
-            const fs::path candidate = root / name;
-            if (fs::exists(candidate, ec)) return candidate.generic_string();
-        }
-        out.Warnings.push_back("текстура не найдена рядом с моделью: " + name);
-        return {};
-    };
 
-    out.Found = true;
-    out.Name = m.Name;
-    out.Albedo = m.Albedo;
-    out.Metallic = m.Metallic;
-    out.Roughness = m.Roughness;
-    out.AlbedoMap = locate(m.AlbedoTexture);
-    out.NormalMap = locate(m.NormalTexture);
-    out.MetallicMap = locate(m.MetallicTexture);
-    out.RoughnessMap = locate(m.RoughnessTexture);
-    out.AOMap = locate(m.AOTexture);
-    out.EmissiveMap = locate(m.EmissiveTexture);
+    // Порядок импортёра — порядок материалов в файле, он же индекс в разметке
+    // меша: FBX едет в движок через тот же ImportedScene::Flatten().
+    for (const sage::assets::ImportedMaterial& m : scene.Materials) {
+        ExtractedMaterial out;
+
+        auto locate = [&](const std::string& ref) -> std::string {
+            if (ref.empty()) return {};
+            std::error_code ec;
+            const fs::path direct = modelDir / ref;
+            if (fs::exists(direct, ec) && !fs::is_directory(direct, ec))
+                return direct.generic_string();
+            const std::string name = fs::path(ref).filename().string();
+            // Пустая ссылка вида «.» — не картинка. Экспортёры оставляют такие
+            // заглушки у материалов без текстур, и без этой проверки путь
+            // разрешался бы в САМУ ПАПКУ модели: слот «есть, но не грузится».
+            if (name.empty() || name == "." || name == "..") return {};
+            // Соседние папки: у наборов из сети текстуры лежат в textures/, а
+            // модель — в source/, то есть на уровень выше и вбок.
+            const fs::path roots[] = {modelDir, modelDir / "textures", modelDir.parent_path(),
+                                      modelDir.parent_path() / "textures"};
+            for (const fs::path& root : roots) {
+                if (root.empty()) continue;
+                const fs::path candidate = root / name;
+                if (fs::exists(candidate, ec)) return candidate.generic_string();
+            }
+            out.Warnings.push_back("текстура не найдена рядом с моделью: " + name);
+            return {};
+        };
+
+        out.Found = true;
+        out.Name = m.Name;
+        out.Albedo = m.Albedo;
+        out.Emissive = m.Emissive;
+        out.Metallic = m.Metallic;
+        out.Roughness = m.Roughness;
+        out.Opacity = m.Opacity;
+        out.AlbedoMap = locate(m.AlbedoTexture);
+        out.NormalMap = locate(m.NormalTexture);
+        out.MetallicMap = locate(m.MetallicTexture);
+        out.RoughnessMap = locate(m.RoughnessTexture);
+        out.AOMap = locate(m.AOTexture);
+        out.EmissiveMap = locate(m.EmissiveTexture);
+        set.Materials.push_back(std::move(out));
+    }
 }
 
-ExtractedMaterial ExtractMaterial(const std::string& modelPath, const std::string& textureDir) {
-    ExtractedMaterial out;
+ExtractedMaterialSet ExtractMaterials(const std::string& modelPath, const std::string& textureDir) {
+    ExtractedMaterialSet out;
 
     std::error_code ec;
     if (!fs::exists(modelPath, ec)) {
         out.Warnings.push_back("файл модели не найден: " + modelPath);
+        LOG_WARN("Model") << modelPath << ": " << out.Warnings.back();
         return out;
     }
 
@@ -395,13 +438,33 @@ ExtractedMaterial ExtractMaterial(const std::string& modelPath, const std::strin
         // Прочие форматы (свой .sagemesh, .bbmodel, что зарегистрирует игра)
         // материал не несут — молчание здесь правильное, предупреждать не о чем.
     } catch (const std::exception& e) {
-        // Импорт материала не должен ронять уже удавшуюся загрузку геометрии.
-        out.Warnings.push_back(std::string("материал не прочитан: ") + e.what());
-        out.Found = false;
+        // Импорт материалов не должен ронять уже удавшуюся загрузку геометрии.
+        out.Warnings.push_back(std::string("материалы не прочитаны: ") + e.what());
+        out.Materials.clear();
     }
 
     for (const std::string& w : out.Warnings) LOG_WARN("Model") << modelPath << ": " << w;
+    for (const ExtractedMaterial& m : out.Materials)
+        for (const std::string& w : m.Warnings)
+            LOG_WARN("Model") << modelPath << " [" << m.Name << "]: " << w;
     return out;
+}
+
+ExtractedMaterial ExtractMaterial(const std::string& modelPath, const std::string& textureDir) {
+    ExtractedMaterialSet set = ExtractMaterials(modelPath, textureDir);
+    if (set.Materials.empty()) {
+        // Материалов нет — отдаём пустой результат, но с причиной: «модель
+        // белая» без объяснения это тупик, в котором человек ищет ошибку у себя.
+        ExtractedMaterial empty;
+        empty.Warnings = std::move(set.Warnings);
+        return empty;
+    }
+    ExtractedMaterial first = std::move(set.Materials.front());
+    // Предупреждения разбора (не привязанные к материалу) остаются видны и
+    // здесь: иначе они пропадали бы ровно у того вызова, который чаще всего и
+    // делают.
+    first.Warnings.insert(first.Warnings.begin(), set.Warnings.begin(), set.Warnings.end());
+    return first;
 }
 
 } // namespace ModelLoader

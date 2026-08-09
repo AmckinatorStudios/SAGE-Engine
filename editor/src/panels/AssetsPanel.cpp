@@ -235,7 +235,7 @@ uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
         if (std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(key)) {
             // Обложка модели — с ЕЁ материалом, а не серым пластиком: иначе
             // текстурированный персонаж и болванка в сетке неотличимы.
-            id = m_preview.RenderMesh(mesh, 96, key, AssetPreview::MaterialForModel(key));
+            id = m_preview.RenderMesh(mesh, 96, key, AssetPreview::MaterialsForModel(key));
         }
     }
     // Ноль тоже запоминаем — иначе битый или пустой ассет пытался бы

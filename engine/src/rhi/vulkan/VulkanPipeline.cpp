@@ -97,6 +97,11 @@ void VulkanGeometry::DrawIndexedInstanced(size_t indexCount, size_t instanceCoun
     m_device.Draw(*this, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, (uint32_t)indexCount, 0,
                   (uint32_t)instanceCount);
 }
+void VulkanGeometry::DrawIndexedInstancedRange(size_t firstIndex, size_t indexCount,
+                                               size_t instanceCount) const {
+    m_device.Draw(*this, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, (uint32_t)indexCount,
+                  (uint32_t)firstIndex, (uint32_t)instanceCount);
+}
 void VulkanGeometry::DrawLines(size_t vertexCount) const {
     m_device.Draw(*this, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, (uint32_t)vertexCount, 0, 0, 1);
 }

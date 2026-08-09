@@ -203,6 +203,18 @@ void GLGeometry::DrawIndexedInstanced(size_t indexCount, size_t instanceCount) c
     glBindVertexArray(0);
 }
 
+void GLGeometry::DrawIndexedInstancedRange(size_t firstIndex, size_t indexCount,
+                                           size_t instanceCount) const {
+    ++g_renderStats.DrawCalls;
+    glBindVertexArray(m_vao);
+    // Смещение — в БАЙТАХ внутри индексного буфера (u32-индексы), как и у
+    // DrawIndexedRange.
+    glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT,
+                            (const void*)(firstIndex * sizeof(unsigned int)),
+                            (GLsizei)instanceCount);
+    glBindVertexArray(0);
+}
+
 void GLGeometry::DrawLines(size_t vertexCount) const {
     ++g_renderStats.DrawCalls;
     glBindVertexArray(m_vao);

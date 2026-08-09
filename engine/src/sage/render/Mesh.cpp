@@ -1,4 +1,5 @@
 #include "Mesh.h"
+#include "sage/core/Log.h"
 #include "sage/render/MeshData.h"
 #include "sage/rhi/GraphicsDevice.h"
 
@@ -65,8 +66,38 @@ static void FixWinding(const std::vector<Vertex>& v, std::vector<unsigned int>& 
 }
 
 Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indicesIn,
-           bool keepCpuData) {
+           bool keepCpuData)
+    : Mesh(verticesIn, indicesIn, std::vector<sage::render::Submesh>{}, keepCpuData) {}
+
+Mesh::Mesh(const std::vector<Vertex>& verticesIn, const std::vector<unsigned int>& indicesIn,
+           const std::vector<sage::render::Submesh>& submeshes, bool keepCpuData) {
     m_indexCount = indicesIn.size();
+
+    // Разметка по материалам. Отрезки проверяются ЗДЕСЬ, у входа: дальше они
+    // уходят прямо в смещение draw call'а, и битый .glb иначе стоил бы чтения
+    // за границей индексного буфера.
+    //
+    // Плохой отрезок отменяет разметку ЦЕЛИКОМ, а не выбрасывается поодиночке.
+    // Выбросить один — значит потерять кусок модели молча; отменить всю —
+    // значит нарисовать модель одним материалом, то есть заметно и целиком.
+    // Из двух неправильных ответов второй хотя бы виден.
+    bool markupOk = true;
+    for (const sage::render::Submesh& s : submeshes) {
+        if ((size_t)s.FirstIndex + s.IndexCount > m_indexCount) { markupOk = false; break; }
+        if (s.IndexCount == 0) continue;   // пустая часть — не подмеш, но и не ошибка
+        m_submeshes.push_back(s);
+    }
+    if (!markupOk) {
+        LOG_WARN("Mesh") << "Разметка по материалам не годится (отрезок за границей "
+                            "индексного буфера) — меш рисуется одним материалом";
+        m_submeshes.clear();
+    }
+    m_explicitSubmeshes = !m_submeshes.empty();
+    if (m_submeshes.empty()) {
+        // Один подмеш на всю геометрию: потребителю не нужна ветка «а если
+        // разметки нет» — см. Mesh::Submeshes().
+        m_submeshes.push_back(sage::render::Submesh{{}, 0u, (unsigned int)m_indexCount, -1});
+    }
 
     std::vector<Vertex> vertices = verticesIn;
     std::vector<unsigned int> indices = indicesIn;
@@ -150,6 +181,24 @@ void Mesh::SetInstances(const MeshInstance* data, size_t count) const {
 void Mesh::DrawInstances(size_t count) const {
     if (count == 0) return;
     m_geometry->DrawIndexedInstanced(m_indexCount, count);
+}
+
+void Mesh::DrawSubmesh(size_t index) const {
+    if (index >= m_submeshes.size()) return;
+    const sage::render::Submesh& s = m_submeshes[index];
+    // Один подмеш на всю геометрию рисуем ОБЫЧНЫМ вызовом, без смещения: это
+    // самый частый случай (все примитивы движка, любая одноматериальная
+    // модель), и гонять его через путь с диапазоном значило бы платить за
+    // многоматериальность там, где её нет.
+    if (m_submeshes.size() == 1) { m_geometry->DrawIndexed(m_indexCount); return; }
+    m_geometry->DrawIndexedRange(s.FirstIndex, s.IndexCount);
+}
+
+void Mesh::DrawSubmeshInstances(size_t index, size_t count) const {
+    if (count == 0 || index >= m_submeshes.size()) return;
+    const sage::render::Submesh& s = m_submeshes[index];
+    if (m_submeshes.size() == 1) { m_geometry->DrawIndexedInstanced(m_indexCount, count); return; }
+    m_geometry->DrawIndexedInstancedRange(s.FirstIndex, s.IndexCount, count);
 }
 
 // Генераторы примитивов живут в MeshData.cpp (CPU, без GL) — здесь только
