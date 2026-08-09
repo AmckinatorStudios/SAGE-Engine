@@ -1,5 +1,7 @@
 #include "LauncherPanel.h"
 
+#include "../ProjectTemplates.h"
+
 #include <cstdio>
 #include <cstring>
 #include <chrono>
@@ -168,6 +170,16 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
     ImGui::TextWrapped("%s", target.generic_string().c_str());
     ImGui::PopStyleColor();
 
+    // Шаблон: с чего начнётся проект. Тот же список, что в диалоге «Новый
+    // проект», — он один на редактор (см. ProjectTemplates.h).
+    ImGui::Spacing();
+    ImGui::TextDisabled("%s", T("START FROM"));
+    for (const ProjectTemplate& tpl : ProjectTemplates()) {
+        if (ImGui::RadioButton(T(tpl.Name), m_templateId == tpl.Id)) m_templateId = tpl.Id;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(tpl.Summary));
+    }
+    ImGui::Spacing();
+
     const std::string blocked = CreateBlockedReason();
     if (!blocked.empty()) ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "%s", blocked.c_str());
 
@@ -185,7 +197,7 @@ void LauncherPanel::DrawCreate(EditorHost& host) {
         // и весь редактор стал чёрным прямоугольником». Кадр обязан
         // ДОСТРОИТЬСЯ; launcher не покажется уже следующим кадром, потому что
         // проект открыт.
-        if (host.CreateProject(m_newDir, m_newName, err)) m_error.clear();
+        if (host.CreateProject(m_newDir, m_newName, m_templateId, err)) m_error.clear();
         else m_error = err;
     }
     ImGui::EndDisabled();

@@ -69,7 +69,7 @@ void EditorLayer::RunSelfTest() {
 
     std::error_code ec;
     fs::remove_all("selftest_project", ec); // от прошлого прогона
-    if (!CreateProject(".", "selftest_project", err)) {
+    if (!CreateProject(".", "selftest_project", DefaultProjectTemplate(), err)) {
         LOG_ERROR("Editor") << "SELFTEST: create project failed: " << err;
         ok = false;
     }
@@ -78,12 +78,58 @@ void EditorLayer::RunSelfTest() {
         fs::path scenePath = m_project.ScenesDir() / "selftest.sage";
         if (!SaveSceneToFile(scenePath)) ok = false;
         if (ok) {
-            NewScene(false); // пустая сцена — убеждаемся, что загрузка реально восстанавливает
+            NewScene(ProjectTemplateKind::Empty); // пустая сцена — убеждаемся, что загрузка реально восстанавливает
             if (!LoadSceneFromFile(scenePath)) ok = false;
         }
         if (ok && m_scene->Count() != before) {
             LOG_ERROR("Editor") << "SELFTEST: entity count mismatch: saved " << before
                                 << ", loaded " << m_scene->Count();
+            ok = false;
+        }
+    }
+
+    // --- Шаблоны проекта: каждый даёт то, что обещает ---------------------
+    //
+    // Проверяется не «функция вернула true», а содержимое стартовой сцены:
+    // пустой шаблон обязан быть ПУСТЫМ (иначе его выбор ничего не значит), а
+    // интерфейсный — принести готовые экраны. Пока выбор был булевым флагом,
+    // проверять было нечего: вариантов было два, и один из них никто не звал.
+    if (ok) {
+        struct TemplateCheck { const char* Id; bool Empty; const char* Expect; };
+        const TemplateCheck checks[] = {
+            {"empty", true, nullptr},
+            {"ui", false, "MenuButtons"},
+        };
+        for (const TemplateCheck& c : checks) {
+            fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
+            std::string tplErr;
+            if (!CreateProject(".", std::string("selftest_tpl_") + c.Id, c.Id, tplErr)) {
+                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не создался: " << tplErr;
+                ok = false;
+                break;
+            }
+            if (c.Empty && m_scene->Count() != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс " << m_scene->Count()
+                                    << " сущностей";
+                ok = false;
+            }
+            if (c.Expect && !m_scene->FindByName(c.Expect).Valid()) {
+                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не принёс " << c.Expect;
+                ok = false;
+            }
+            fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
+            if (!ok) break;
+        }
+        // Неизвестное имя шаблона — отказ, а не «создам что-нибудь».
+        std::string bogusErr;
+        if (ok && CreateProject(".", "selftest_tpl_bogus", "нет-такого", bogusErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: неизвестный шаблон создал проект";
+            fs::remove_all("selftest_tpl_bogus", ec);
+            ok = false;
+        }
+        // Вернуться в проект самопроверки: дальше идут его шаги.
+        if (ok && !OpenProject("selftest_project", err)) {
+            LOG_ERROR("Editor") << "SELFTEST: не удалось вернуться в проект: " << err;
             ok = false;
         }
     }
@@ -1706,7 +1752,7 @@ void EditorLayer::RunSelfTest() {
             ok = false;
         }
         if (ok) {
-            NewScene(false); // пустая сцена — чтобы «сохранилось» не путать с «осталось в памяти»
+            NewScene(ProjectTemplateKind::Empty); // пустая сцена — чтобы «сохранилось» не путать с «осталось в памяти»
             if (!LoadSceneFromFile(allPath)) {
                 LOG_ERROR("Editor") << "SELFTEST: сцена со всеми компонентами не загрузилась";
                 ok = false;
@@ -1825,7 +1871,9 @@ void EditorLayer::RunE2EGameTest() {
 
     // --- 1. Проект (File > New Project) ---
     std::string err;
-    if (!CreateProject(".", "e2e_game", err)) {
+    // E2E собирает игру САМ, поэтому берёт пустой шаблон: демо-объекты
+    // чужого шаблона в его проверках только мешали бы.
+    if (!CreateProject(".", "e2e_game", "empty", err)) {
         LOG_ERROR("Editor") << "E2E: create project failed: " << err;
         LOG_ERROR("Editor") << "E2E: FAIL";
         return;
@@ -1889,7 +1937,7 @@ end
 )LUA");
 
     // --- 3. Сцена игры — редакторскими операциями создания сущностей ---
-    NewScene(false);
+    NewScene(ProjectTemplateKind::Empty);
     m_scene->Lighting.Skybox.Enabled = true;
 
     GameObject ground = CreatePrimitiveEntity("Ground", MeshRef::Type::Cube);

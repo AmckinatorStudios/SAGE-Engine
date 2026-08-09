@@ -19,6 +19,7 @@ add_executable(SageEditor WIN32
     src/EditorIcons.cpp
     src/AssetSlot.cpp
     src/ModelMaterialImport.cpp
+    src/ProjectTemplates.cpp
     src/Project.cpp
     src/PluginManager.cpp
     src/RecentProjects.cpp

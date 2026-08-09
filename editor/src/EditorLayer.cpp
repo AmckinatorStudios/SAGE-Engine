@@ -209,7 +209,7 @@ void EditorLayer::OnAttach() {
 
     m_gizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
 
-    NewScene(/*withDemoContent=*/true);
+    NewScene(ProjectTemplateKind::Demo);
 
     m_camera.Position = {6.5f, 5.0f, 6.5f};
     m_camera.Yaw = -135.0f;
@@ -1112,7 +1112,7 @@ int EditorLayer::InstantiatePrefab(const fs::path& path) {
 //  Сцена / проект
 // ============================================================================
 
-void EditorLayer::NewScene(bool withDemoContent) {
+void EditorLayer::NewScene(ProjectTemplateKind content) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
     m_undoStack.clear();
     m_redoStack.clear();
@@ -1121,7 +1121,7 @@ void EditorLayer::NewScene(bool withDemoContent) {
     m_scenePath.clear();
     m_sceneDirty = false;
 
-    if (withDemoContent) {
+    if (content == ProjectTemplateKind::Demo) {
         // Скайбокс включён по умолчанию — сцена сразу с атмосферным фоном.
         m_scene->Lighting.Skybox.Enabled = true;
 
@@ -1238,6 +1238,37 @@ void EditorLayer::NewScene(bool withDemoContent) {
         reg.emplace<sage::ui::Bar>(hp.Entity(), hpBar);
         m_scene->SetParent(hp.Entity(), hud.Entity());
 
+    } else if (content == ProjectTemplateKind::UIStarter) {
+        // Стартер интерфейса: сцены как таковой нет, зато есть камера, свет и
+        // два готовых экрана. С этого начинают те, кому нужна не витрина
+        // движка, а меню и худ, — и раньше им приходилось сначала удалить
+        // девять чужих объектов, а потом собрать экраны с нуля.
+        m_scene->Lighting.Skybox.Enabled = true;
+
+        GameObject ground = CreatePrimitiveEntity("Ground", MeshRef::Type::Plane);
+        ground.GetTransform().Scale = {12.0f, 1.0f, 12.0f};
+        ground.Renderer().Color = {0.30f, 0.32f, 0.36f};
+
+        GameObject camObj = m_scene->CreateObject("Main Camera");
+        camObj.GetTransform().Position = {0.0f, 1.6f, 6.0f};
+        camObj.GetTransform().Rotation = {-8.0f, 0.0f, 0.0f};
+        m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
+
+        GameObject sun = m_scene->CreateObject("Sun");
+        sun.GetTransform().Rotation =
+            sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
+        LightComponent sunLc;
+        sunLc.Kind = LightComponent::Type::Directional;
+        sunLc.Color = {1.0f, 0.95f, 0.85f};
+        m_scene->Registry().emplace<LightComponent>(sun.Entity(), sunLc);
+
+        // Те же самые демо-экраны, что и в меню «Create UI»: одна реализация,
+        // а не «похожий интерфейс, собранный отдельно для шаблона».
+        sage::ui::BuildDemo(*m_scene, "hud");
+        sage::ui::BuildDemo(*m_scene, "menu");
+    }
+
+    if (content == ProjectTemplateKind::Demo) {
         // Что-то выбрано сразу — гизмо видно, Inspector не пустой. Выбираем
         // криволинейный примитив: сразу демонстрирует аутлайн на изогнутом
         // силуэте (кайма строится из силуэта меша — точна для любой формы).
@@ -1324,11 +1355,25 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
     }
 }
 
-bool EditorLayer::CreateProject(const std::string& dir, const std::string& name, std::string& err) {
+bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
+                               const std::string& templateId, std::string& err) {
+    // Шаблон разбирается ДО создания папок: получить проект и узнать, что имя
+    // шаблона не то, — худший из порядков.
+    const ProjectTemplate* tpl = FindProjectTemplate(templateId);
+    if (!tpl) {
+        std::string known;
+        for (const ProjectTemplate& t : ProjectTemplates()) {
+            if (!known.empty()) known += ", ";
+            known += t.Id;
+        }
+        err = "Unknown project template '" + templateId + "'; known: " + known;
+        return false;
+    }
     if (!m_project.CreateNew(dir, name, err)) return false;
+    const ProjectTemplateKind kind = tpl->Kind;
     m_assetsCwd = m_project.Dir();
     m_recent.Add(m_project.Dir().string());
-    NewScene(/*withDemoContent=*/true);
+    NewScene(kind);
     UpdateWindowTitle();
     return true;
 }
@@ -2308,7 +2353,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (ImGui::MenuItem(T("Open Project..."))) openDialog = "Open Project";
             if (ImGui::MenuItem(T("Project Launcher..."))) m_launcherRequested = true;
             ImGui::Separator();
-            if (ImGui::MenuItem(T("New Scene"))) NewScene(false);
+            if (ImGui::MenuItem(T("New Scene"))) NewScene(ProjectTemplateKind::Empty);
             if (ImGui::MenuItem(T("Open Scene..."))) openDialog = "Open Scene";
 
             // Сцены открытого проекта — прямой доступ без файлового диалога.

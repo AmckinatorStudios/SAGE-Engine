@@ -31,6 +31,7 @@
 #include "sage/audio/AudioEngine.h"
 
 #include "EditorHost.h"
+#include "ProjectTemplates.h"
 #include "EditorPlayInput.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
@@ -103,7 +104,8 @@ public:
     Project& CurrentProject() override { return m_project; }
     bool LoadSceneFromFile(const std::filesystem::path& path) override;
     bool SaveSceneToFile(const std::filesystem::path& path) override;
-    bool CreateProject(const std::string& dir, const std::string& name, std::string& err) override;
+    bool CreateProject(const std::string& dir, const std::string& name,
+                       const std::string& templateId, std::string& err) override;
     bool OpenProject(const std::string& path, std::string& err) override;
     // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
     // рантайм-ассеты + project/. false + err при ошибке.
@@ -207,7 +209,9 @@ private:
     void DrawAboutWindow(); // Help > About: версия движка + версии подсистем (v1)
 
     // --- сцена / рендер (превью-рендер вынесен в EditorSceneRenderer) ---
-    void NewScene(bool withDemoContent);
+    // Новая сцена по ШАБЛОНУ (см. ProjectTemplates.h). Empty — пустая; она же
+    // используется пунктом «Новая сцена» и самопроверкой.
+    void NewScene(ProjectTemplateKind content);
     void UpdateWindowTitle();
     void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +

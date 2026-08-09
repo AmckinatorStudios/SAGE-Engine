@@ -64,7 +64,11 @@ public:
     virtual Project& CurrentProject() = 0;
     virtual bool LoadSceneFromFile(const std::filesystem::path& path) = 0;
     virtual bool SaveSceneToFile(const std::filesystem::path& path) = 0;
-    virtual bool CreateProject(const std::string& dir, const std::string& name, std::string& err) = 0;
+    // Создать проект по ШАБЛОНУ (идентификатор из ProjectTemplates.h).
+    // Шаблон приходит строкой, а не флагом: вариантов больше двух, и список
+    // читают три места сразу (диалог, стартовое окно, самопроверка).
+    virtual bool CreateProject(const std::string& dir, const std::string& name,
+                               const std::string& templateId, std::string& err) = 0;
     virtual bool OpenProject(const std::string& path, std::string& err) = 0;
     // Упаковывает открытый проект в готовую к запуску игру (SagePlayer + ассеты).
     // false + err при ошибке. Нужен панели диалогов (Build Game...).

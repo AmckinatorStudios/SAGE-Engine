@@ -1,4 +1,5 @@
 #pragma once
+#include "../ProjectTemplates.h"
 #include <filesystem>
 #include <string>
 
@@ -50,6 +51,8 @@ private:
     std::string CreateBlockedReason() const;
 
     char m_newName[128] = "MyGame";
+    // Шаблон нового проекта (см. ProjectTemplates.h).
+    std::string m_templateId = DefaultProjectTemplate();
     char m_newDir[512] = "";
     char m_openPath[512] = "";
     std::string m_error;

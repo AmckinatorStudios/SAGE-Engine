@@ -1,4 +1,6 @@
 #include "DialogsPanel.h"
+
+#include "../ProjectTemplates.h"
 #include "EditorHost.h"
 #include "Project.h"
 
@@ -73,10 +75,21 @@ void DialogsPanel::Draw(EditorHost& host) {
             BrowseButton("newproj", c, m_projectDir, sizeof(m_projectDir));
         }
         ImGui::TextDisabled("%s", T("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/"));
+
+        // Шаблон — С ЧЕГО начинается проект. Пока выбора не было, каждый новый
+        // проект начинался с девяти демо-объектов, которые первым делом
+        // удаляли.
+        ImGui::SeparatorText(T("Start from"));
+        for (const ProjectTemplate& tpl : ProjectTemplates()) {
+            if (ImGui::RadioButton(T(tpl.Name), m_templateId == tpl.Id)) m_templateId = tpl.Id;
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", T(tpl.Summary));
+        }
+
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (ImGui::Button(T("Create"), ImVec2(120, 0))) {
             std::string err;
-            if (host.CreateProject(m_projectDir, m_projectName, err)) {
+            if (host.CreateProject(m_projectDir, m_projectName, m_templateId, err)) {
                 ImGui::CloseCurrentPopup();
             } else {
                 m_error = err;
