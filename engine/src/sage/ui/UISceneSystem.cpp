@@ -470,11 +470,21 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                   bool clipped, const UIRect& clip, float alpha, bool interactive,
                   const UIRect* forced, std::vector<Solved>& out) {
     entt::registry& reg = scene.Registry();
+    const Transform& t = reg.get<Transform>(ent);
     UIElementComponent e = Compose(reg, ent);
     if (!e.Visible) return; // невидимый прячет и всё поддерево
 
-    glm::vec2 size = MeasureElement(e, ui);
-    UIRect r = forced ? *forced : ResolveElementRect(e, parentRect, size);
+    // ГЕОМЕТРИЯ БЕРЁТСЯ ИЗ Transform, а не из плоского описания.
+    //
+    // Плоское описание — это то, чем элемент РИСУЕТСЯ, и растяжения, полей и
+    // точки привязки в нём нет: у прежнего компонента их не было вовсе.
+    // Считать по нему раскладку значило бы, что панель «во всю ширину экрана»
+    // молча остаётся размером 200x56 — то есть самая заметная возможность
+    // новой системы не работает, и понять почему неоткуда.
+    glm::vec2 size = ResolveSize(t, parentRect);
+    // Ширина по содержимому — единственное, что знает шрифт, а не раскладка.
+    if (e.AutoWidth && ui) size.x = MeasuredSize(e, *ui).x;
+    UIRect r = forced ? *forced : Resolve(t, parentRect, size);
     if (forced) size = {forced->w, forced->h};
     // Фактический размер запоминается в САМОМ элементе: его читают попадание
     // курсором и следующий кадр, когда шрифта под рукой может не оказаться.
@@ -513,7 +523,10 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     if (const Layout* layout = reg.try_get<Layout>(ent)) {
         std::vector<LayoutSlot> slots(kids.size());
         for (size_t i = 0; i < kids.size(); ++i) {
-            slots[i].Size = MeasureElement(Compose(reg, kids[i]), ui);
+            const Transform& kt = reg.get<Transform>(kids[i]);
+            slots[i].Size = ResolveSize(kt, r);
+            const UIElementComponent kid = Compose(reg, kids[i]);
+            if (kid.AutoWidth && ui) slots[i].Size.x = MeasuredSize(kid, *ui).x;
         }
         ApplyLayout(*layout, r, slots);
         for (size_t i = 0; i < kids.size(); ++i) {

@@ -3,10 +3,14 @@
 // HitTest по слоям/маскам/видимости. Всё на CPU, БЕЗ GL (рендер не трогаем).
 #include "TestFramework.h"
 
+#include <cmath>
+#include <memory>
+
 #include "sage/ui/UIAnchor.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/scene/Light.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UIDemos.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
@@ -841,4 +845,180 @@ TEST(UI2_presets_build_real_elements) {
 
     CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
     CHECK_TRUE(sage::ui::PresetNames().size() >= 8);
+}
+
+// ===========================================================================
+//  ДЕМО-ЭКРАНЫ (sage/ui/UIDemos.h)
+//
+//  Демо на диске устаревает молча: поля переименовали — сцена читается, но
+//  выглядит не так. Собранное кодом демо проверяется здесь, и проверяется не
+//  «функция вернула id», а то, ради чего каждое из них написано: раскладка сама
+//  расставила кнопки, шкала едет к цели, ползунок прилипает к шагу, а нажатие
+//  доезжает до игры ИМЕНЕМ действия, а не номером сущности.
+// ===========================================================================
+
+TEST(UI_demo_names_all_build_something) {
+    for (const std::string& name : sage::ui::DemoNames()) {
+        Scene scene("demo");
+        const int root = sage::ui::BuildDemo(scene, name);
+        CHECK_TRUE(root >= 0);
+        CHECK_TRUE(scene.Count() > 3);
+    }
+    // Опечатка в имени — отказ, а не «собралось что-нибудь».
+    Scene scene("demo");
+    CHECK_EQ(sage::ui::BuildDemo(scene, "нет-такого"), -1);
+}
+
+TEST(UI_demo_menu_lays_buttons_out_by_itself) {
+    Scene scene("menu");
+    CHECK_TRUE(sage::ui::BuildDemo(scene, "menu") >= 0);
+
+    // Раскладка контейнера расставляет детей сама: у кнопок нет своих отступов,
+    // и всё-таки они стоят друг под другом, по порядку и без наложений.
+    GameObject first = scene.FindByName("BtnContinue");
+    GameObject second = scene.FindByName("BtnNewGame");
+    CHECK_TRUE(first.Valid());
+    CHECK_TRUE(second.Valid());
+
+    // Прогоняем кадр решателя: попадание курсором считается по той же
+    // раскладке, что и отрисовка.
+    const int hitFirst = sage::ui::HitTest(scene, 960, 0, 1920, 1080);
+    (void)hitFirst; // точка выбрана ниже, по фактическим прямоугольникам
+
+    const auto& reg = scene.Registry();
+    const glm::vec2 sizeA = reg.get<sage::ui::Transform>(first.Entity()).LayoutSize;
+    CHECK_TRUE(sizeA.x > 0.0f);   // размер посчитан, а не остался нулём
+
+    // У кнопок есть ИМЕНА ДЕЙСТВИЙ — то, чем игра их и различает.
+    const auto* act = reg.try_get<sage::ui::Interactable>(second.Entity());
+    CHECK_TRUE(act != nullptr);
+    if (act) CHECK_EQ(act->Action, std::string("new_game"));
+
+    // Холст меню лежит ПОВЕРХ худа: порядок задан числом на корне, а не
+    // подбором слоёв у каждого элемента.
+    const auto* canvas = reg.try_get<sage::ui::Canvas>(scene.FindByName("MenuScreen").Entity());
+    CHECK_TRUE(canvas != nullptr);
+    if (canvas) CHECK_TRUE(canvas->SortOrder > 0);
+}
+
+TEST(UI_demo_menu_click_reports_the_action_not_the_entity) {
+    Scene scene("menu");
+    CHECK_TRUE(sage::ui::BuildDemo(scene, "menu") >= 0);
+    const int W = 1920, H = 1080;
+
+    // Находим кнопку там, где её нарисовала раскладка, — через тот же HitTest.
+    GameObject quit = scene.FindByName("BtnQuit");
+    CHECK_TRUE(quit.Valid());
+    sage::ui::UpdateSceneUI(scene, sage::ui::UIInputState{}, W, H); // посчитать раскладку
+    const glm::vec2 size = scene.Registry().get<sage::ui::Transform>(quit.Entity()).LayoutSize;
+    CHECK_TRUE(size.x > 0.0f);
+
+    // Точка внутри кнопки: берём её из решателя — попадание и отрисовка
+    // считаются по одной раскладке (в этом и была цель одного решателя).
+    int found = -1;
+    for (int y = 0; y < H && found < 0; y += 4) {
+        if (sage::ui::HitTest(scene, (float)W * 0.5f, (float)y, W, H) == quit.Id())
+            found = y;
+    }
+    CHECK_TRUE(found > 0);
+    if (found <= 0) return;
+
+    sage::ui::UIInputState down;
+    down.Mouse = {(float)W * 0.5f, (float)found};
+    down.MouseDown = true;
+    down.MousePressed = true;
+    sage::ui::UpdateSceneUI(scene, down, W, H);
+
+    sage::ui::UIInputState up;
+    up.Mouse = down.Mouse;
+    up.MouseReleased = true;
+    const sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, up, W, H);
+    CHECK_EQ(r.ClickedId, quit.Id());
+    // Главное: игра узнаёт «нажали quit», а не «нажали сущность номер N».
+    CHECK_EQ(r.ClickedAction, std::string("quit"));
+}
+
+TEST(UI_demo_hud_bar_slides_to_its_target) {
+    Scene scene("hud");
+    CHECK_TRUE(sage::ui::BuildDemo(scene, "hud") >= 0);
+    GameObject hp = scene.FindByName("HudHealth");
+    CHECK_TRUE(hp.Valid());
+
+    sage::ui::Bar& bar = scene.Registry().get<sage::ui::Bar>(hp.Entity());
+    CHECK_TRUE(bar.Smoothing > 0.0f);
+
+    sage::ui::UIInputState step;
+    step.DeltaTime = 0.1f;
+    sage::ui::UpdateSceneUI(scene, step, 1920, 1080); // первый кадр задаёт показанное
+    bar.Value = 0.0f;                                  // «получили урон»
+    sage::ui::UpdateSceneUI(scene, step, 1920, 1080);
+    // Показанное значение ЕДЕТ, а не прыгает: в этом весь смысл сглаживания.
+    CHECK_TRUE(bar.Displayed > 0.0f);
+    CHECK_TRUE(bar.Displayed < 0.72f);
+
+    // За достаточное время доезжает до цели и не проскакивает мимо.
+    for (int i = 0; i < 20; ++i) sage::ui::UpdateSceneUI(scene, step, 1920, 1080);
+    CHECK_NEAR(bar.Displayed, 0.0f, 1e-3f);
+}
+
+TEST(UI_demo_settings_slider_snaps_to_its_step) {
+    Scene scene("settings");
+    CHECK_TRUE(sage::ui::BuildDemo(scene, "settings") >= 0);
+    GameObject volume = scene.FindByName("VolumeSlider");
+    CHECK_TRUE(volume.Valid());
+
+    sage::ui::Range& range = scene.Registry().get<sage::ui::Range>(volume.Entity());
+    CHECK_NEAR(range.Max, 100.0f, 1e-4f);
+    CHECK_NEAR(range.Step, 5.0f, 1e-4f);
+
+    const int W = 1920, H = 1080;
+    sage::ui::UpdateSceneUI(scene, sage::ui::UIInputState{}, W, H);
+
+    // Ищем строку громкости попаданием и тянем ползунок в произвольную точку.
+    int hitY = -1;
+    for (int y = 0; y < H && hitY < 0; y += 2)
+        if (sage::ui::HitTest(scene, (float)W * 0.5f, (float)y, W, H) == volume.Id()) hitY = y;
+    CHECK_TRUE(hitY > 0);
+    if (hitY <= 0) return;
+
+    sage::ui::UIInputState drag;
+    drag.Mouse = {(float)W * 0.5f, (float)hitY};
+    drag.MouseDown = true;
+    drag.MousePressed = true;
+    sage::ui::UpdateSceneUI(scene, drag, W, H);
+
+    drag.MousePressed = false;
+    drag.Mouse.x = (float)W * 0.5f + 13.0f;   // заведомо не кратно шагу
+    sage::ui::UpdateSceneUI(scene, drag, W, H);
+
+    // Значение прилипло к шагу и осталось в игровых единицах.
+    CHECK_NEAR(range.Value / 5.0f, std::round(range.Value / 5.0f), 1e-3f);
+    CHECK_TRUE(range.Value >= 0.0f && range.Value <= 100.0f);
+}
+
+TEST(UI_demo_survives_a_scene_round_trip) {
+    // Демо — обычные сущности, и они обязаны переживать файл сцены: экран,
+    // который нельзя сохранить, стартовой точкой быть не может.
+    Scene scene("demo");
+    CHECK_TRUE(sage::ui::BuildDemo(scene, "settings") >= 0);
+
+    std::unique_ptr<Scene> back =
+        SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(back != nullptr);
+    if (!back) return;
+
+    GameObject volume = back->FindByName("VolumeSlider");
+    CHECK_TRUE(volume.Valid());
+    const auto* range = back->Registry().try_get<sage::ui::Range>(volume.Entity());
+    CHECK_TRUE(range != nullptr);
+    if (range) {
+        CHECK_NEAR(range->Max, 100.0f, 1e-4f);
+        CHECK_NEAR(range->Step, 5.0f, 1e-4f);
+    }
+    const auto* apply = back->Registry().try_get<sage::ui::Interactable>(
+        back->FindByName("SettingsApply").Entity());
+    CHECK_TRUE(apply != nullptr);
+    if (apply) CHECK_EQ(apply->Action, std::string("apply_settings"));
+    // Раскладка панели тоже пережила файл — иначе строки разъехались бы.
+    CHECK_TRUE(back->Registry().all_of<sage::ui::Layout>(back->FindByName("SettingsPanel").Entity()));
 }

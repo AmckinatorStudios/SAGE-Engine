@@ -2,6 +2,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/ui/UIDemos.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIIcons.h"
@@ -342,6 +343,37 @@ void ScriptEngine::RegisterUIApi() {
     Bind("ui", "SpawnShowcase", "SpawnUIShowcase", [this]() -> int {
         if (!m_scene) throw std::runtime_error("SpawnUIShowcase: сцена не привязана");
         return sage::ui::BuildShowcase(*m_scene);
+    });
+
+    // Готовый экран интерфейса: «menu», «hud», «settings» (см. sage/ui/UIDemos.h).
+    // Не украшение: это работающий образец того, как из частей собирают экран, —
+    // его можно поставить в сцену и разобрать в инспекторе.
+    Bind("ui", "SpawnDemo", "SpawnUIDemo", [this](const std::string& name) -> int {
+        if (!m_scene) throw std::runtime_error("SpawnUIDemo: сцена не привязана");
+        const int id = sage::ui::BuildDemo(*m_scene, name);
+        if (id < 0) {
+            std::string known;
+            for (const std::string& n : sage::ui::DemoNames()) {
+                if (!known.empty()) known += ", ";
+                known += n;
+            }
+            throw std::runtime_error("SpawnUIDemo: нет демо '" + name + "'; есть: " + known);
+        }
+        return id;
+    });
+
+    // Что нажали в интерфейсе за этот кадр — ПО ИМЕНИ ДЕЙСТВИЯ.
+    //
+    // Раньше игра узнавала о нажатии по номеру сущности, который меняется при
+    // любой пересборке сцены: связь меню с логикой держалась на числе, которое
+    // нигде не записано. Имя задаётся рядом с кнопкой в инспекторе.
+    Bind("ui", "ClickedAction", "UIClickedAction", [this]() -> std::string {
+        if (!m_scene) return {};
+        for (auto e : m_scene->Registry().view<sage::ui::Interactable>()) {
+            const auto& act = m_scene->Registry().get<sage::ui::Interactable>(e);
+            if (act.Runtime.Clicked && !act.Action.empty()) return act.Action;
+        }
+        return {};
     });
 
 }

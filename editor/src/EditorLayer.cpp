@@ -40,6 +40,7 @@
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIDemos.h"
 #include "sage/ui/UIBridge.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/scene/Prefab.h"
@@ -2417,6 +2418,33 @@ void EditorLayer::DrawDockspaceAndMenu() {
                         // сразу после создания, выглядит как «кнопка не сработала».
                         m_uiEditMode = true;
                     }
+                }
+
+                // Готовые ЭКРАНЫ, а не отдельные элементы.
+                //
+                // Заготовка отвечает на вопрос «что такое кнопка»; оставшийся —
+                // «как из кнопок собирают меню» — до сих пор оставался без
+                // ответа, и каждый отвечал на него сам. Демо ставится в сцену и
+                // разбирается в инспекторе: холст, раскладка, группа и имена
+                // действий видны на работающем экране (см. sage/ui/UIDemos.h).
+                ImGui::Separator();
+                if (ImGui::BeginMenu(T("Demo screens"))) {
+                    struct Demo { const char* Key; const char* Label; };
+                    static const Demo kDemos[] = {
+                        {"menu", T("Main menu")},
+                        {"hud", T("HUD")},
+                        {"settings", T("Settings")},
+                    };
+                    for (const Demo& d : kDemos) {
+                        if (ImGui::MenuItem(d.Label)) {
+                            PushUndoSnapshot();
+                            const int id = sage::ui::BuildDemo(*m_scene, d.Key);
+                            if (id >= 0) SetSelectedId(id);
+                            m_uiEditMode = true;
+                            m_sceneDirty = true;
+                        }
+                    }
+                    ImGui::EndMenu();
                 }
                 ImGui::EndMenu();
             }
