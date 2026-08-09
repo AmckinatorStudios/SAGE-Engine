@@ -23,6 +23,7 @@
 #include "EditorIcons.h"
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/core/Systems.h"
 #include "sage/core/Version.h"
 #include "sage/core/CrashHandler.h"
@@ -227,6 +228,10 @@ void EditorLayer::OnAttach() {
     // в проект: тащат туда, где смотрят, а не ищут пункт меню. Разбор отложен
     // до кадра (см. HandleDroppedFiles): колбэк приходит из недр GLFW, а
     // импорт может открыть модалку и подвинуть выбор в панелях.
+    // Тот же приёмник, что и у окон панелей (см. цикл по Viewports ниже).
+    s_dropSink = [this](const std::vector<std::string>& paths) {
+        m_droppedFiles.insert(m_droppedFiles.end(), paths.begin(), paths.end());
+    };
     sage::Application::Get().GetWindow().SetFileDropCallback(
         [this](const std::vector<std::string>& paths) {
             m_droppedFiles.insert(m_droppedFiles.end(), paths.begin(), paths.end());
@@ -275,6 +280,7 @@ void EditorLayer::OnAttach() {
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
     // headless нечем: кликать во вьюпорте в CI некому.
     if (std::getenv("SAGE_EDITOR_UI_MODE")) { m_launcher.Dismiss(); m_uiEditMode = true; }
+    if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_launcher.Dismiss(); m_colliderEdit = true; }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_launcher.Dismiss();
         GameObject obj = m_scene->FindByName(name);
@@ -559,6 +565,8 @@ void EditorLayer::ApplyEngineSettings() {
 // Остальное копируется в текущую папку панели Assets вместе со спутниками
 // (см. AssetsPanel::ImportAsset) — модель приезжает со своими .mtl и
 // текстурами, а не голым файлом, который потом не грузится.
+std::function<void(const std::vector<std::string>&)> EditorLayer::s_dropSink;
+
 void EditorLayer::HandleDroppedFiles() {
     if (m_droppedFiles.empty()) return;
     std::vector<std::string> dropped;
@@ -570,10 +578,33 @@ void EditorLayer::HandleDroppedFiles() {
         const fs::path path(raw);
         std::error_code ec;
 
-        // Папку не вносим: рекурсивная копия чужого дерева в проект — не то, чего
-        // ждут, бросая её на окно, и отменить это нечем.
+        // Папка вносится ЦЕЛИКОМ, вместе с содержимым.
+        //
+        // Раньше редактор отвечал на неё отказом «папку перетащить нельзя —
+        // бросьте файлы». Со стороны это выглядело как «ничего не происходит»:
+        // строку состояния внизу окна при перетаскивании никто не читает. А
+        // именно папкой приходит любой скачанный набор — модель со своими
+        // текстурами, набор интерфейса, тайлсет. Раскладывать его по файлам
+        // вручную, чтобы движок согласился их принять, — работа на ровном месте.
         if (fs::is_directory(path, ec)) {
-            SetStatusMessage(T("A folder cannot be dragged in — drop files"));
+            if (!m_project.Loaded()) {
+                SetStatusMessage(T("Open a project first — there is nowhere to bring the file"));
+                continue;
+            }
+            const fs::path dest = m_assetsCwd / path.filename();
+            std::error_code copyEc;
+            fs::copy(path, dest, fs::copy_options::recursive, copyEc);
+            if (copyEc) {
+                lastError = copyEc.message();
+                LOG_ERROR("Editor") << "Перетаскивание папки: " << copyEc.message();
+                continue;
+            }
+            // База ассетов должна узнать о новых файлах сразу: иначе ссылки на
+            // них считаются битыми до следующего открытия проекта.
+            sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+            ++imported;
+            m_assets.Select(dest);
+            LOG_INFO("Editor") << "Внесена папка: " << dest.string();
             continue;
         }
 
@@ -1952,6 +1983,30 @@ void EditorLayer::OnRender() {
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         GLFWwindow* backup = glfwGetCurrentContext();
         ImGui::UpdatePlatformWindows();
+
+        // Приём файлов из проводника — на КАЖДОЕ окно, а не только на главное.
+        //
+        // Панель, вытащенную из дока, ImGui показывает в отдельном OS-окне, и
+        // GLFW-колбэк перетаскивания на него никто не вешал: ни бэкенд ImGui
+        // (он ставит фокус, курсор, кнопки и клавиши — но не drop), ни мы. Файл,
+        // брошенный на плавающую панель Assets, просто пропадал — «ничего не
+        // происходит» в самом чистом виде, потому что событие не доходило даже
+        // до редактора.
+        for (ImGuiViewport* vp : ImGui::GetPlatformIO().Viewports) {
+            if (!vp->PlatformHandle) continue;
+            GLFWwindow* w = (GLFWwindow*)vp->PlatformHandle;
+            if (m_dropWindows.insert(w).second) {
+                glfwSetDropCallback(w, [](GLFWwindow*, int count, const char** paths) {
+                    if (!s_dropSink || count <= 0 || !paths) return;
+                    std::vector<std::string> list;
+                    list.reserve((size_t)count);
+                    for (int i = 0; i < count; ++i)
+                        if (paths[i]) list.emplace_back(paths[i]);
+                    if (!list.empty()) s_dropSink(list);
+                });
+            }
+        }
+
         ImGui::RenderPlatformWindowsDefault();
         glfwMakeContextCurrent(backup);
     }

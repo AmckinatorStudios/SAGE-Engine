@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <functional>
+#include <set>
 
 #include "sage/core/Layer.h"
 #include "sage/core/Log.h"
@@ -149,6 +151,7 @@ public:
     float SnapStepForCurrentOp() override;
     bool& ShowBounds() override { return m_showBounds; }
     bool& UIEditMode() override { return m_uiEditMode; }
+    bool& ColliderEditMode() override { return m_colliderEdit; }
 
     // --- EditorHost: инструменты над выделением ---
     void FocusSelected() override;
@@ -258,6 +261,7 @@ private:
     float m_snapScale = 0.1f;
     bool m_showBounds = false;
     bool m_uiEditMode = false;
+    bool m_colliderEdit = false; // гизмо тянет коллайдер, а не объект
 
     // --- Play-режим ---
     EditorPlayState m_playState = EditorPlayState::Editing;
@@ -331,6 +335,11 @@ private:
     AssetsPanel m_assets;
     // Накопитель брошенных путей: колбэк окна складывает сюда, кадр разбирает.
     std::vector<std::string> m_droppedFiles;
+    // Окна, которым уже повесили приём файлов (панели, вытащенные из дока).
+    std::set<void*> m_dropWindows;
+    // Приёмник для колбэка GLFW: он статический по природе (C-функция), а
+    // редактор в процессе один.
+    static std::function<void(const std::vector<std::string>&)> s_dropSink;
     LauncherPanel m_launcher;
     LightingPanel m_lighting;
     ToolbarPanel m_toolbar;

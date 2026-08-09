@@ -165,12 +165,29 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // можно запомнить здесь и отдать ImGuizmo уже снаружи.
     ImDrawList* slotDrawList[EditorHost::kMaxViews] = {nullptr, nullptr, nullptr, nullptr};
 
+    // Захват мыши слотом: пока кнопка зажата, взаимодействие получает ТОЛЬКО
+    // тот вид, в котором её нажали. Отпустили — захват снят.
+    const bool anyMouseDown = ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
+                              ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                              ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    if (!anyMouseDown) m_dragSlot = -1;
+    bool slotOwnsMouse[EditorHost::kMaxViews] = {false, false, false, false};
+
     for (int i = 0; i < viewCount; ++i) {
         if (i > 0 && (viewCount == 2 || i % 2 == 1)) ImGui::SameLine(0.0f, gap);
         ImGui::PushID(i);
         ImGui::BeginChild("##view", cell, false,
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         slotHovered[i] = ImGui::IsWindowHovered();
+        // Нажали в этом виде — он и владеет мышью до отпускания. Пока никто не
+        // тянет, владеет тот, над которым курсор.
+        if (m_dragSlot < 0 && slotHovered[i] &&
+            (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+             ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+             ImGui::IsMouseClicked(ImGuiMouseButton_Middle))) {
+            m_dragSlot = i;
+        }
+        slotOwnsMouse[i] = (m_dragSlot >= 0) ? (m_dragSlot == i) : slotHovered[i];
         slotPos[i] = ImGui::GetCursorScreenPos();
         slotDrawList[i] = ImGui::GetWindowDrawList();
 
@@ -234,10 +251,10 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
 
         // Клик по виду делает его активным — дальше в нём работают гизмо и
         // хоткеи. Без этого в раскладке из четырёх видов работал бы только один.
-        if (slotHovered[i] && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) m_activeSlot = i;
+        if (slotOwnsMouse[i] && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) m_activeSlot = i;
 
         // Ортогональный вид: колесо — масштаб, средняя кнопка — панорама.
-        if (ortho && slotHovered[i]) {
+        if (ortho && slotOwnsMouse[i]) {
             ImGuiIO& vio = ImGui::GetIO();
             if (vio.MouseWheel != 0.0f) {
                 m_ortho[i].Height =
@@ -274,7 +291,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Полёт камеры остаётся только в перспективе: в ортогональном виде за
     // навигацию отвечают колесо (масштаб) и средняя кнопка (панорама).
     const bool perspective = m_kinds[m_activeSlot] == ViewKind::Perspective;
-    const bool hovered = slotHovered[m_activeSlot];
+    // «Мышь у активного вида» — с учётом захвата: иначе гизмо, начатое в одном
+    // виде, продолжало тянуться в соседнем, стоило курсору пересечь границу.
+    const bool hovered = slotOwnsMouse[m_activeSlot];
     const ImVec2 imgPos = slotPos[m_activeSlot];
     const ImVec2 avail = cell;
     // Размер буфера главного слота обновляется ВСЕГДА, а не только в перспективе:
@@ -332,6 +351,10 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         if (ImGui::IsKeyPressed(ImGuiKey_R)) host.GizmoOp() = (int)ImGuizmo::SCALE;
         if (ImGui::IsKeyPressed(ImGuiKey_T)) host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
         if (ImGui::IsKeyPressed(ImGuiKey_Y)) host.GizmoOp() = (int)ImGuizmo::BOUNDS;
+        // C — правка коллайдера. Рядом с остальными инструментами: это такой же
+        // режим гизмо, только тянет он форму столкновения.
+        if (ImGui::IsKeyPressed(ImGuiKey_C) && !ImGui::GetIO().KeyCtrl)
+            host.ColliderEditMode() = !host.ColliderEditMode();
         // F — показать выделенное в кадре, End — посадить на поверхность.
         // Обе операции до этого делались правкой чисел в инспекторе: подвести
         // камеру к далёкому объекту и посадить его ровно на пол — самые частые
@@ -384,6 +407,88 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         entt::entity parent = scene.ParentOf(selected.Entity());
         glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
         glm::mat4 model = scene.WorldMatrix(selected.Entity());
+
+        // --- Гизмо КОЛЛАЙДЕРА ------------------------------------------
+        //
+        // Размеры формы столкновения правились только числами в инспекторе:
+        // человек тянул поле HalfExtents, смотрел на зелёный каркас во
+        // вьюпорте, возвращался к полю. Здесь тот же масштаб, но тянет он
+        // ФОРМУ, а не объект — путать их нельзя: масштаб объекта растягивает и
+        // картинку, и коллайдер вместе с ней.
+        if (host.ColliderEditMode()) {
+            ColliderComponent* col =
+                scene.Registry().try_get<ColliderComponent>(selected.Entity());
+            if (col) {
+                const glm::vec3 wpos = glm::vec3(model[3]);
+                const glm::vec3 sc(glm::length(glm::vec3(model[0])),
+                                   glm::length(glm::vec3(model[1])),
+                                   glm::length(glm::vec3(model[2])));
+                const float uniform = glm::max(sc.x, glm::max(sc.y, sc.z));
+                // Поворот без масштаба: масштаб уже сидит в размерах формы, и
+                // умножать на него второй раз — раздувать каркас квадратично.
+                glm::mat4 rot = model;
+                for (int k = 0; k < 3; ++k) {
+                    const float len = sc[k] > 1e-6f ? sc[k] : 1.0f;
+                    rot[k] /= len;
+                }
+                rot[3] = glm::vec4(wpos, 1.0f);
+
+                glm::vec3 size(1.0f);
+                switch (col->Shape) {
+                    case sage::physics::ShapeType::Box:
+                        size = col->HalfExtents * sc * 2.0f;
+                        break;
+                    case sage::physics::ShapeType::Sphere:
+                        size = glm::vec3(col->Radius * uniform * 2.0f);
+                        break;
+                    case sage::physics::ShapeType::Capsule:
+                        size = glm::vec3(col->Radius * uniform * 2.0f,
+                                         (col->HalfHeight * sc.y + col->Radius * uniform) * 2.0f,
+                                         col->Radius * uniform * 2.0f);
+                        break;
+                }
+                size = glm::max(size, glm::vec3(1e-3f));
+                glm::mat4 shape = rot * glm::scale(glm::mat4(1.0f), size);
+
+                if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !host.InPlayMode()) {
+                    host.CapturePendingSnapshot();
+                }
+                const float step = host.SnapStepForCurrentOp();
+                const float colliderSnap[3] = {step, step, step};
+                const bool changed = ImGuizmo::Manipulate(
+                    glm::value_ptr(activeView), glm::value_ptr(activeProj), ImGuizmo::SCALE,
+                    ImGuizmo::LOCAL, glm::value_ptr(shape), nullptr,
+                    host.GizmoSnap() ? colliderSnap : nullptr);
+                if (changed && !host.InPlayMode()) {
+                    const glm::vec3 out(glm::length(glm::vec3(shape[0])),
+                                        glm::length(glm::vec3(shape[1])),
+                                        glm::length(glm::vec3(shape[2])));
+                    // Обратно в ЛОКАЛЬНЫЕ размеры: делим на масштаб объекта,
+                    // иначе коллайдер у растянутого родителя рос бы вдвое.
+                    const glm::vec3 safe = glm::max(sc, glm::vec3(1e-4f));
+                    const float safeU = glm::max(uniform, 1e-4f);
+                    switch (col->Shape) {
+                        case sage::physics::ShapeType::Box:
+                            col->HalfExtents = glm::max(out / safe * 0.5f, glm::vec3(1e-3f));
+                            break;
+                        case sage::physics::ShapeType::Sphere:
+                            col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
+                            break;
+                        case sage::physics::ShapeType::Capsule: {
+                            col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
+                            const float half = out.y * 0.5f - col->Radius * safeU;
+                            col->HalfHeight = glm::max(half / safe.y, 0.0f);
+                            break;
+                        }
+                    }
+                }
+                if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.CommitPendingSnapshot();
+                m_gizmoWasUsing = ImGuizmo::IsUsing();
+                ImGui::End(); // Viewport
+                ImGui::PopStyleVar();
+                return;
+            }
+        }
 
         const bool rectTool = (ImGuizmo::OPERATION)host.GizmoOp() == ImGuizmo::BOUNDS;
 

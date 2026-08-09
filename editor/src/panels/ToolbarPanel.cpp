@@ -42,6 +42,13 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
                                     host.GizmoOp() == (int)ImGuizmo::BOUNDS))
         host.GizmoOp() = (int)ImGuizmo::BOUNDS;
     ImGui::SameLine();
+    // Коллайдер (C): гизмо тянет ФОРМУ СТОЛКНОВЕНИЯ, а не объект. До этого
+    // размеры коллайдера правились только числами в инспекторе — вслепую,
+    // сверяясь с зелёным каркасом во вьюпорте и возвращаясь к полям.
+    if (EditorIcons::IconOnlyButton("physics", T("Collider (C): drag the collision shape"),
+                                    host.ColliderEditMode()))
+        host.ColliderEditMode() = !host.ColliderEditMode();
+    ImGui::SameLine();
 
     ImGui::AlignTextToFramePadding();
     ImGui::Checkbox(T("Snap"), &host.GizmoSnap());
