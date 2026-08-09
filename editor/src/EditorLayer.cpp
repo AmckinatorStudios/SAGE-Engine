@@ -22,6 +22,7 @@
 #include "EditorTheme.h"
 #include "EditorIcons.h"
 #include "sage/core/Application.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Systems.h"
 #include "sage/core/Version.h"
 #include "sage/core/CrashHandler.h"
@@ -298,6 +299,41 @@ void EditorLayer::OnAttach() {
         m_showHierarchy = m_showInspector = m_showLighting = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
         m_showCode = m_showProfiler = false;
+    }
+    // Сущность СО ВСЕМИ компонентами сразу — для жёсткой проверки инспектора.
+    //
+    // Каждая секция инспектора рисуется только когда нужный компонент есть, а
+    // компоненты в демо-сцене раскиданы по разным объектам: проверка «открыли
+    // редактор, ничего не сломалось» задевала от силы половину секций. Ошибки
+    // вроде двух элементов с одинаковым ID, незакрытого Begin/End или падения
+    // на пустом указателе живут именно в редко открываемых секциях. Здесь все
+    // они подаются в одном кадре.
+    if (std::getenv("SAGE_EDITOR_ALL_COMPONENTS")) {
+        m_launcher.Dismiss();
+        GameObject all = m_scene->CreateObject("All Components");
+        entt::registry& reg = m_scene->Registry();
+        const entt::entity e = all.Entity();
+        reg.emplace_or_replace<MeshRendererComponent>(e);
+        reg.emplace_or_replace<DecalComponent>(e);
+        reg.emplace_or_replace<GIStaticComponent>(e);
+        reg.emplace_or_replace<CameraComponent>(e);
+        reg.emplace_or_replace<LightComponent>(e);
+        reg.emplace_or_replace<RigidBodyComponent>(e);
+        reg.emplace_or_replace<ColliderComponent>(e);
+        reg.emplace_or_replace<JointComponent>(e);
+        reg.emplace_or_replace<CharacterControllerComponent>(e);
+        reg.emplace_or_replace<AnimatedModelComponent>(e);
+        reg.emplace_or_replace<IKComponent>(e);
+        reg.emplace_or_replace<ReflectionProbeComponent>(e);
+        reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
+        UIElementComponent ui;
+        sage::ui::ApplyPreset(ui, "Button");
+        reg.emplace_or_replace<UIElementComponent>(e, ui);
+        ParticleEmitterComponent em;
+        em.Config = ParticlePresets::Registry()[0].Make();
+        reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
+        SetSelectedId(all.Id());
+        LOG_INFO("Editor") << "SAGE_EDITOR_ALL_COMPONENTS: сущность со всеми компонентами создана";
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
@@ -1268,20 +1304,51 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     const char* playerName = "SagePlayer";
     std::string exeSuffix;
 #endif
+    // Ищем ОТ СВОЕГО БИНАРНИКА, а не от текущей папки.
+    //
+    // Здесь стояли только относительные пути («./SagePlayer», «../runtime/
+    // SagePlayer»), то есть поиск шёл от ТЕКУЩЕЙ ПАПКИ ПРОЦЕССА. В дереве
+    // сборки это совпадало с папкой редактора и работало, а у человека,
+    // запустившего установленный редактор ярлыком, текущей папкой оказывались
+    // «Документы» — и сборка игры падала с «SagePlayer not found» при плеере,
+    // лежащем в двух шагах, рядом с самим редактором. Текущая папка — это
+    // откуда ЗАПУСКАЮТ, а не куда УСТАНОВЛЕНО (ровно та же ошибка, из-за
+    // которой появился sage/core/Paths.h).
+    const fs::path exeDir = sage::ExecutableDir();
     std::vector<fs::path> candidates;
     if (const char* p = std::getenv("SAGE_PLAYER_PATH")) candidates.push_back(p);
-    candidates.push_back(fs::path("..") / "runtime" / playerName);
+    if (!exeDir.empty()) {
+        candidates.push_back(exeDir / playerName);                        // установка: рядом с редактором
+        candidates.push_back(exeDir / "runtime" / playerName);            // установка с подпапками
+        candidates.push_back(exeDir.parent_path() / "runtime" / playerName); // дерево сборки
+        candidates.push_back(exeDir / ".." / "runtime" / playerName);
+    }
+    candidates.push_back(fs::path("..") / "runtime" / playerName); // запуск из папки сборки
     candidates.push_back(fs::path(".") / playerName);
 
     std::error_code ec;
     fs::path player;
     for (const fs::path& candidate : candidates) {
-        if (fs::exists(candidate, ec)) { player = candidate; break; }
+        if (fs::exists(candidate, ec) && !fs::is_directory(candidate, ec)) {
+            player = candidate;
+            break;
+        }
     }
     if (player.empty()) {
-        err = "SagePlayer not found (build the SagePlayer target or set SAGE_PLAYER_PATH)";
+        // Сообщение называет ВСЕ просмотренные места. «Не найдено» без списка
+        // не отличает «плеер не собран» от «редактор ищет не там», а починить
+        // надо разное.
+        std::string where;
+        for (const fs::path& candidate : candidates) {
+            where += "\n  " + fs::weakly_canonical(candidate, ec).string();
+        }
+        err = std::string(T("SagePlayer not found. Put it next to the editor, build the SagePlayer "
+                            "target, or set SAGE_PLAYER_PATH. Looked in:")) +
+              where;
+        LOG_ERROR("Editor") << "Сборка игры: плеер не найден. Искали:" << where;
         return false;
     }
+    LOG_INFO("Editor") << "Сборка игры: плеер " << fs::weakly_canonical(player, ec).string();
 
     // 2. Слепить папку игры: <out>/<Name>/{<Name>, assets/(рантайм), project/}.
     fs::path gameDir = outputDir / m_project.Name();

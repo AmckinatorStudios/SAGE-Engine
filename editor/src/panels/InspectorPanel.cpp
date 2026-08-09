@@ -1369,11 +1369,15 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"IK", "Animation", "ik",
          "Bones reach for a target", HasComp<IKComponent>, AddComp<IKComponent>},
 
+        // Скрипт добавляется ПУСТЫМ. Раньше сюда подставлялся путь
+        // «assets/scripts/spin.lua» — демонстрационный скрипт движка, которого
+        // в проекте человека нет: компонент добавлялся уже сломанным, и при
+        // первом же Play в консоль летело «Скрипт не найден». Пустой слот
+        // честно говорит «скрипт не прикреплён» и ждёт, когда в него бросят
+        // файл.
         {"Script", "Logic", "script",
          "Lua: OnStart and OnUpdate on this object", HasComp<ScriptComponent>,
-         [](entt::registry& reg, entt::entity e) {
-             reg.emplace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
-         }},
+         AddComp<ScriptComponent>},
         {"UI Element", "Interface", "rect",
          "Panel, label, image or bar on screen", HasComp<UIElementComponent>,
          AddComp<UIElementComponent>},

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 771.
+// Язык: Русский. Строк: 772.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1150,6 +1150,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "SAGE Engine %s"},
     {"SAGE projects (*.sageproj)",
      "Проекты SAGE (*.sageproj)"},
+    {"SagePlayer not found. Put it next to the editor, build the SagePlayer target, or set SAGE_PLAYER_PATH. Looked in:",
+     "SagePlayer не найден. Положите его рядом с редактором, соберите цель SagePlayer или задайте SAGE_PLAYER_PATH. Искали:"},
     {"Samples / texel",
      "Выборок на тексель"},
     {"Saturation",

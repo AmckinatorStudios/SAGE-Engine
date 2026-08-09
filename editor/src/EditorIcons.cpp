@@ -3,11 +3,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 
 #include "imgui.h"
 #include "imgui_internal.h"
 
 #include "Localization.h"
+#include "sage/core/Log.h"
 
 namespace EditorIcons {
 
@@ -551,10 +553,41 @@ const char* NameAt(int index) {
     return (index >= 0 && index < Count()) ? kNames[index] : nullptr;
 }
 
+// Совпадающие ID — В ЛОГ, а не только под курсор.
+//
+// ImGui умеет ловить два видимых элемента с одинаковым ID, но замечает это
+// ТОЛЬКО когда мышь стоит на одном из них: проверка привязана к наведённому
+// элементу. Поэтому дефект живёт в редакторе месяцами и всплывает у человека
+// красным окном «Programmer error: 2 visible items with conflicting ID» ровно в
+// тот момент, когда он навёл мышь на кнопку — и выглядит это как поломка
+// редактора, а не как наша опечатка. А последствие настоящее: у двух кнопок с
+// одним ID нажатие достаётся одной, и вторая просто не работает.
+//
+// Здесь проверка идёт ПО ФАКТУ ПОДАЧИ элемента, без всякого наведения: значит,
+// её видит headless-прогон, и конфликт ловится в CI, а не глазами пользователя.
+// Кнопки редактора почти все проходят через EditorIcons, а имя подписи сразу
+// говорит, какие именно две кнопки столкнулись.
+void CheckDuplicateId(const char* what) {
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (!window) return;
+    const ImGuiID id = window->GetID("##btn_probe");
+    static std::unordered_map<ImGuiID, int> seen;
+    auto it = seen.find(id);
+    if (it != seen.end() && it->second == g.FrameCount) {
+        LOG_ERROR("Editor") << "одинаковый ID у двух элементов интерфейса: '" << what
+                            << "' в окне '" << window->Name
+                            << "' — нажатие достанется только одному из них "
+                               "(нужен PushID или ##суффикс)";
+    }
+    seen[id] = g.FrameCount;
+}
+
 bool Button(const char* icon, const char* label, const char* tooltip, bool active) {
     const float h = ImGui::GetFrameHeight();
     const float icon_s = std::floor(h * 0.68f);
     ImGui::PushID(label);
+    CheckDuplicateId(label);
     if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
 
     // Место под иконку резервируется отступом слева — так подпись не наезжает
@@ -581,6 +614,7 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
 bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const glm::vec3& tint) {
     const float h = ImGui::GetFrameHeight();
     ImGui::PushID(icon);
+    CheckDuplicateId(icon);
     if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::Button("##ibtn", ImVec2(h, h));

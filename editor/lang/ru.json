@@ -572,6 +572,7 @@
   "SAGE Engine": "SAGE Engine",
   "SAGE Engine %s": "SAGE Engine %s",
   "SAGE projects (*.sageproj)": "Проекты SAGE (*.sageproj)",
+  "SagePlayer not found. Put it next to the editor, build the SagePlayer target, or set SAGE_PLAYER_PATH. Looked in:": "SagePlayer не найден. Положите его рядом с редактором, соберите цель SagePlayer или задайте SAGE_PLAYER_PATH. Искали:",
   "Samples / texel": "Выборок на тексель",
   "Saturation": "Насыщенность",
   "Save": "Сохранить",

@@ -36,6 +36,7 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
+#include "sage/ui/UIPresets.h"
 #include "sage/scene/SceneSerializer.h"
 
 #include "sage/scene/Prefab.h"
@@ -1664,6 +1665,107 @@ void EditorLayer::RunSelfTest() {
         ApplyEngineSettings();
     }
 
+    // --- Каждый компонент переживает сохранение и загрузку сцены ---
+    //
+    // Проверки выше берут компоненты по одному и там, где они уже стоят в
+    // демо-сцене. Компонент, который забыли записать в сериализатор, так не
+    // ловится: сцена сохраняется, открывается, всё на месте — кроме того, что
+    // никто не проверял. А узнаётся об этом позже всего: человек настраивает
+    // сустав или контроллер персонажа, сохраняет сцену, открывает назавтра — и
+    // настройки нет. Здесь на одной сущности собраны ВСЕ компоненты сразу, и
+    // после круга «сохранить -> новая сцена -> загрузить» каждый обязан
+    // вернуться.
+    if (ok) {
+        GameObject all = m_scene->CreateObject("All Components");
+        entt::registry& reg = m_scene->Registry();
+        entt::entity e = all.Entity();
+        reg.emplace_or_replace<MeshRendererComponent>(e);
+        reg.emplace_or_replace<DecalComponent>(e);
+        reg.emplace_or_replace<GIStaticComponent>(e);
+        reg.emplace_or_replace<CameraComponent>(e);
+        reg.emplace_or_replace<LightComponent>(e);
+        reg.emplace_or_replace<RigidBodyComponent>(e);
+        reg.emplace_or_replace<ColliderComponent>(e);
+        reg.emplace_or_replace<JointComponent>(e);
+        reg.emplace_or_replace<CharacterControllerComponent>(e);
+        reg.emplace_or_replace<AnimatedModelComponent>(e);
+        reg.emplace_or_replace<IKComponent>(e);
+        reg.emplace_or_replace<ReflectionProbeComponent>(e);
+        reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/selftest_script.lua"});
+        {
+            UIElementComponent ui;
+            sage::ui::ApplyPreset(ui, "Button");
+            reg.emplace_or_replace<UIElementComponent>(e, ui);
+        }
+        {
+            ParticleEmitterComponent em;
+            em.Config = ParticlePresets::Registry()[0].Make();
+            reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
+        }
+
+        const fs::path allPath = m_project.ScenesDir() / "selftest_all_components.sage";
+        if (!SaveSceneToFile(allPath)) {
+            LOG_ERROR("Editor") << "SELFTEST: сцена со всеми компонентами не сохранилась";
+            ok = false;
+        }
+        if (ok) {
+            NewScene(false); // пустая сцена — чтобы «сохранилось» не путать с «осталось в памяти»
+            if (!LoadSceneFromFile(allPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: сцена со всеми компонентами не загрузилась";
+                ok = false;
+            }
+        }
+        if (ok) {
+            GameObject loaded = m_scene->FindByName("All Components");
+            if (!loaded.Valid()) {
+                LOG_ERROR("Editor") << "SELFTEST: сущность со всеми компонентами потерялась";
+                ok = false;
+            } else {
+                entt::registry& r2 = m_scene->Registry();
+                const entt::entity e2 = loaded.Entity();
+                struct Check { const char* Name; bool Present; };
+                const Check checks[] = {
+                    {"MeshRenderer", r2.all_of<MeshRendererComponent>(e2)},
+                    {"Decal", r2.all_of<DecalComponent>(e2)},
+                    {"GIStatic", r2.all_of<GIStaticComponent>(e2)},
+                    {"Camera", r2.all_of<CameraComponent>(e2)},
+                    {"Light", r2.all_of<LightComponent>(e2)},
+                    {"RigidBody", r2.all_of<RigidBodyComponent>(e2)},
+                    {"Collider", r2.all_of<ColliderComponent>(e2)},
+                    {"Joint", r2.all_of<JointComponent>(e2)},
+                    {"CharacterController", r2.all_of<CharacterControllerComponent>(e2)},
+                    {"AnimatedModel", r2.all_of<AnimatedModelComponent>(e2)},
+                    {"IK", r2.all_of<IKComponent>(e2)},
+                    {"ReflectionProbe", r2.all_of<ReflectionProbeComponent>(e2)},
+                    {"Script", r2.all_of<ScriptComponent>(e2)},
+                    {"UIElement", r2.all_of<UIElementComponent>(e2)},
+                    {"ParticleEmitter", r2.all_of<ParticleEmitterComponent>(e2)},
+                };
+                for (const Check& c : checks) {
+                    if (!c.Present) {
+                        LOG_ERROR("Editor") << "SELFTEST: компонент " << c.Name
+                                            << " не пережил сохранение и загрузку сцены";
+                        ok = false;
+                    }
+                }
+                // Значения, а не только наличие: заготовка кнопки обязана
+                // остаться кнопкой, а не панелью с чужими полями.
+                if (ok) {
+                    const UIElementComponent* ui = r2.try_get<UIElementComponent>(e2);
+                    if (!ui || !ui->Interactive || ui->Text.empty()) {
+                        LOG_ERROR("Editor") << "SELFTEST: элемент интерфейса приехал не кнопкой";
+                        ok = false;
+                    }
+                    const ScriptComponent* sc = r2.try_get<ScriptComponent>(e2);
+                    if (!sc || sc->Path != "assets/selftest_script.lua") {
+                        LOG_ERROR("Editor") << "SELFTEST: путь скрипта не сохранился";
+                        ok = false;
+                    }
+                }
+            }
+        }
+    }
+
     // --- Видимость панелей: закрыть можно, но выход обязан быть ---
     //
     // Крестик на вкладке закрывал панель навсегда: в меню Window её не было, а
@@ -1697,7 +1799,8 @@ void EditorLayer::RunSelfTest() {
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
-                               << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars, "
+                               << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
+                               << "all-components-roundtrip, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
