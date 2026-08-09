@@ -630,3 +630,52 @@ TEST(MeshRenderer_instance_overrides_modulate_the_material) {
     CHECK_NEAR(EffectiveColor(mr).g, 0.5f, 1e-5f);
     CHECK_NEAR(EffectiveOpacity(mr), 0.5f, 1e-5f);
 }
+
+// --- Материалы частей модели -------------------------------------------------
+
+// Слоты подмешей обязаны переживать сохранение сцены: без этого «покрасил
+// куртку персонажа» жило бы ровно до перезагрузки, и разбираться пришлось бы не
+// с рендером, а с файлом сцены.
+TEST(MeshRenderer_submesh_material_slots_survive_the_scene_file) {
+    Scene scene("slots");
+    GameObject obj = scene.CreateObject("Character");
+    MeshRendererComponent& mr = obj.Renderer();
+    mr.MaterialPath = "materials/skin.sagemat";
+    mr.Slots.resize(3);
+    mr.Slots[0].Path = "materials/jacket.sagemat";
+    // Слот 1 намеренно ПУСТ: он означает «красится материалом объекта», и
+    // сжать его при сохранении нельзя — слоты адресуются номером части, и
+    // пропуск сдвинул бы все последующие материалы на одну часть модели.
+    mr.Slots[2].Path = "materials/eyes.sagemat";
+
+    std::unique_ptr<Scene> back =
+        SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(back != nullptr);
+
+    GameObject loaded = back->Get(obj.Id());
+    CHECK_TRUE(loaded.Valid());
+    const MeshRendererComponent& lm = loaded.Renderer();
+    CHECK_EQ(lm.MaterialPath, std::string("materials/skin.sagemat"));
+    CHECK_EQ(lm.Slots.size(), (size_t)3);
+    CHECK_EQ(lm.Slots[0].Path, std::string("materials/jacket.sagemat"));
+    CHECK_EQ(lm.Slots[1].Path, std::string());
+    CHECK_EQ(lm.Slots[2].Path, std::string("materials/eyes.sagemat"));
+}
+
+// Сцена, записанная ДО появления слотов, читается как раньше: слотов нет,
+// объект целиком красится своим материалом. Иначе обновление движка означало бы
+// перебор всех сцен проекта.
+TEST(MeshRenderer_scene_without_slots_still_loads) {
+    Scene scene("legacy");
+    GameObject obj = scene.CreateObject("Crate");
+    obj.Renderer().MaterialPath = "materials/wood.sagemat";
+
+    std::string text = SceneSerializer::SaveToString(scene);
+    CHECK_TRUE(text.find("materialSlots") == std::string::npos);   // шума в файле нет
+
+    std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(text);
+    CHECK_TRUE(back != nullptr);
+    const MeshRendererComponent& lm = back->Get(obj.Id()).Renderer();
+    CHECK_TRUE(lm.Slots.empty());
+    CHECK_EQ(lm.MaterialPath, std::string("materials/wood.sagemat"));
+}

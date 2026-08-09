@@ -1525,9 +1525,7 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         }
         PushUndoSnapshot();
         MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref.type = MeshRef::Type::Model;
-        mr.Ref.path = ref;
-        mr.MeshPtr = std::move(mesh);
+        SetEntityMesh(mr, MeshRef::Type::Model, ref, std::move(mesh));
         SetStatusMessage(T("Mesh replaced: ") + asset.filename().string());
         return true;
     }
@@ -1571,9 +1569,7 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         PushUndoSnapshot();
         GameObject obj = m_scene->CreateObject(asset.stem().string());
         MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref.type = MeshRef::Type::Model;
-        mr.Ref.path = ref;
-        mr.MeshPtr = std::move(mesh);
+        SetEntityMesh(mr, MeshRef::Type::Model, ref, std::move(mesh));
         AssignModelMaterial(mr);
         newId = obj.Id();
     } else {
@@ -1662,9 +1658,7 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     } else {
         GameObject obj = m_scene->CreateObject(asset.stem().string());
         MeshRendererComponent& mr = obj.Renderer();
-        mr.Ref.type = MeshRef::Type::Model;
-        mr.Ref.path = ref;
-        mr.MeshPtr = ResourceManager::Instance().GetModel(ref);
+        SetEntityMesh(mr, MeshRef::Type::Model, ref, ResourceManager::Instance().GetModel(ref));
         if (!mr.MeshPtr) {
             m_scene->RemoveObject(obj.Id());
             SetStatusMessage(T("The model failed to load: ") + asset.filename().string() +

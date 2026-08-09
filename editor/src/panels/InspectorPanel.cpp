@@ -288,10 +288,12 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
     int kind = (int)mr.Ref.type;
     if (ImGui::Combo(T("Source"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
         host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
-        mr.Ref.type = (MeshRef::Type)kind;
-        if (mr.Ref.type != MeshRef::Type::Model) {
-            mr.Ref.path.clear();
-            mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type); // Нет -> nullptr
+        const MeshRef::Type chosen = (MeshRef::Type)kind;
+        if (chosen != MeshRef::Type::Model) {
+            // Примитив вместо модели: путь и слоты её частей уходят вместе с ней.
+            SetEntityMesh(mr, chosen, {}, ResourceManager::Instance().GetPrimitive(chosen));
+        } else {
+            mr.Ref.type = chosen;   // Model — путь задаётся ниже и грузится кнопкой
         }
         // Model — путь задаётся ниже и грузится кнопкой.
     }
@@ -306,12 +308,10 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
                             T("No model assigned"));
         if (r.Changed) {
             host.PushUndoSnapshot();
-            mr.Ref.path = r.Path;
-            if (r.Cleared) {
-                mr.MeshPtr = nullptr;
-            } else {
-                m_pendingMeshLoad = true;
-            }
+            // Сам меш подгружается ниже (m_pendingMeshLoad) — здесь важно, что
+            // вместе со сменой модели сбрасываются слоты её частей.
+            SetEntityMesh(mr, MeshRef::Type::Model, r.Path, nullptr);
+            if (!r.Cleared) m_pendingMeshLoad = true;
         }
         if (r.BrowseRequested) {
             FileBrowser::Config c;

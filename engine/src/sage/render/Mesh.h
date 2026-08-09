@@ -159,6 +159,10 @@ public:
     static Mesh CreateCone(int sectors = 32, bool keepCpuData = false);                   // r=0.5 у основания, высота 1 (Y)
 
 private:
+    // Покрывает ли подмеш весь индексный буфер (тогда отрисовка идёт без
+    // смещения — см. DrawSubmesh).
+    bool SubmeshIsWholeMesh(const sage::render::Submesh& s) const;
+
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
     std::vector<Vertex> m_cpuVertices;        // пусто, если копию не просили
     std::vector<unsigned int> m_cpuIndices;

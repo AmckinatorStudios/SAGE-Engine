@@ -183,21 +183,29 @@ void Mesh::DrawInstances(size_t count) const {
     m_geometry->DrawIndexedInstanced(m_indexCount, count);
 }
 
+// Подмеш занимает ВЕСЬ индексный буфер — значит, рисовать его можно обычным
+// вызовом, без смещения. Это самый частый случай (все примитивы движка, любая
+// одноматериальная модель), и гонять его через путь с диапазоном значило бы
+// платить за многоматериальность там, где её нет.
+//
+// Проверяется именно покрытие, а не «подмеш ровно один»: единственный подмеш
+// вполне может покрывать лишь часть буфера, и тогда сокращение нарисовало бы
+// заодно и чужую геометрию.
+bool Mesh::SubmeshIsWholeMesh(const sage::render::Submesh& s) const {
+    return s.FirstIndex == 0 && (size_t)s.IndexCount == m_indexCount;
+}
+
 void Mesh::DrawSubmesh(size_t index) const {
     if (index >= m_submeshes.size()) return;
     const sage::render::Submesh& s = m_submeshes[index];
-    // Один подмеш на всю геометрию рисуем ОБЫЧНЫМ вызовом, без смещения: это
-    // самый частый случай (все примитивы движка, любая одноматериальная
-    // модель), и гонять его через путь с диапазоном значило бы платить за
-    // многоматериальность там, где её нет.
-    if (m_submeshes.size() == 1) { m_geometry->DrawIndexed(m_indexCount); return; }
+    if (SubmeshIsWholeMesh(s)) { m_geometry->DrawIndexed(m_indexCount); return; }
     m_geometry->DrawIndexedRange(s.FirstIndex, s.IndexCount);
 }
 
 void Mesh::DrawSubmeshInstances(size_t index, size_t count) const {
     if (count == 0 || index >= m_submeshes.size()) return;
     const sage::render::Submesh& s = m_submeshes[index];
-    if (m_submeshes.size() == 1) { m_geometry->DrawIndexedInstanced(m_indexCount, count); return; }
+    if (SubmeshIsWholeMesh(s)) { m_geometry->DrawIndexedInstanced(m_indexCount, count); return; }
     m_geometry->DrawIndexedInstancedRange(s.FirstIndex, s.IndexCount, count);
 }
 

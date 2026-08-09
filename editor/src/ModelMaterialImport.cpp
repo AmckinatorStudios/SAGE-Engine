@@ -87,8 +87,8 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     const std::vector<sage::render::Submesh> submeshes =
         mr.MeshPtr ? mr.MeshPtr->Submeshes() : std::vector<sage::render::Submesh>{};
 
-    // Материала объекта нет и разметки нет — старый однослотовый случай: модель
-    // получает один материал, и слоты ей не нужны.
+    // Одна часть (или разметки нет вовсе) — старый однослотовый случай: модель
+    // получает один материал ОБЪЕКТА, и слоты ей не нужны.
     const bool singleMaterial = submeshes.size() <= 1;
     if (singleMaterial && !mr.MaterialPath.empty()) return result; // выбор человека главнее
 
@@ -121,7 +121,13 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     };
 
     if (singleMaterial) {
-        const std::string ref = fileFor(0);
+        // Берётся материал, на который ССЫЛАЕТСЯ эта часть, а не первый в
+        // файле: в .glb с четырьмя материалами единственный примитив вполне
+        // может пользоваться четвёртым, и «первый» покрасил бы его чужим.
+        // Разметки нет — материал в файле один, и его индекс ноль.
+        const int index = (submeshes.size() == 1 && submeshes[0].Material >= 0)
+                              ? submeshes[0].Material : 0;
+        const std::string ref = fileFor(index);
         if (ref.empty()) return result;
         mr.MaterialPath = ref;
         mr.MaterialPtr = ResourceManager::Instance().GetMaterial(ref);
@@ -142,4 +148,15 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
         ++result.Assigned;
     }
     return result;
+}
+
+void SetEntityMesh(MeshRendererComponent& mr, MeshRef::Type type, const std::string& path,
+                   std::shared_ptr<Mesh> mesh) {
+    const bool sameModel = mr.Ref.type == type && mr.Ref.path == path;
+    mr.Ref.type = type;
+    mr.Ref.path = path;
+    mr.MeshPtr = std::move(mesh);
+    // Слоты — это материалы частей ЭТОЙ модели. Другая модель — другие части, и
+    // старые слоты покрасили бы их наугад.
+    if (!sameModel) mr.Slots.clear();
 }
