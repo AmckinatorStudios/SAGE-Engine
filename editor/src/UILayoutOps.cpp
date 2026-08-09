@@ -1,5 +1,6 @@
 #include "UILayoutOps.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -145,6 +146,23 @@ void SetAnchorKeepingPlace(EditorHost& host, UIAnchor anchor) {
         // на месте: новый Offset считается под новый якорь из старого места.
         u->Offset = sage::ui::OffsetForTopLeft(anchor, glm::vec2(t.Rect.x, t.Rect.y),
                                                glm::vec2(t.Rect.w, t.Rect.h), t.Parent);
+    }
+}
+
+void BringIntoView(EditorHost& host) {
+    std::vector<Target> targets = Collect(host);
+    if (targets.empty()) return;
+    const glm::vec2 frame = host.UITools().FrameSize;
+    Scene& scene = host.CurrentScene();
+
+    host.PushUndoSnapshot();
+    for (const Target& t : targets) {
+        // Прижимаем к экрану по каждой оси отдельно: элемент, вышедший только
+        // вправо, не должен ещё и прыгнуть по вертикали.
+        float x = std::min(std::max(t.Rect.x, 0.0f), std::max(0.0f, frame.x - t.Rect.w));
+        float y = std::min(std::max(t.Rect.y, 0.0f), std::max(0.0f, frame.y - t.Rect.h));
+        if (x == t.Rect.x && y == t.Rect.y) continue;
+        Place(scene, t, glm::vec2(x, y), glm::vec2(t.Rect.w, t.Rect.h));
     }
 }
 

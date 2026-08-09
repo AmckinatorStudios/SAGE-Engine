@@ -534,8 +534,33 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         if (uiView.begin() != uiView.end()) {
             if (!m_ui) m_ui = std::make_unique<UIRenderer>();
             device.SetViewport(0, 0, w, h);
-            m_ui->Begin(w, h);
-            sage::ui::DrawSceneUI(scene, *m_ui, w, h);
+
+            // РАЗМЕР ЭКРАНА НЕ МЕНЯЕТСЯ — меняется только показ.
+            //
+            // Это важнее, чем кажется. Экран игры (w x h) — то, подо что
+            // сверстан интерфейс: от него считаются якоря, растяжения и
+            // проценты. Возьми мы «экран побольше, чтобы влезло поле», вёрстка
+            // пересчиталась бы под другое разрешение — и человек правил бы не
+            // ту раскладку, которую увидит игрок. Поэтому экран прежний, а
+            // масштаб уходит в матрицу вывода: холст занимает середину кадра, а
+            // по краям остаётся поле, где ВИДНО всё, что вышло за границу.
+            const int sw = w, sh = h;
+            const glm::vec2 origin(((float)w - (float)w * m_uiZoom) * 0.5f + m_uiPan.x,
+                                   ((float)h - (float)h * m_uiZoom) * 0.5f + m_uiPan.y);
+
+            // Подложка рисуется ТЕМ ЖЕ проходом, но БЕЗ смотрового
+            // преобразования и на весь кадр: она закрывает сцену, а не экран
+            // интерфейса, и не должна ужиматься вместе с ним.
+            if (m_uiBackdrop > 0.0f) {
+                m_ui->Begin(w, h);
+                m_ui->Rect(0.0f, 0.0f, (float)w, (float)h, glm::vec3(0.10f, 0.11f, 0.13f),
+                           m_uiBackdrop);
+                m_ui->End();
+            }
+
+            m_ui->Begin(sw, sh);
+            m_ui->SetView(origin, m_uiZoom, w, h);
+            sage::ui::DrawSceneUI(scene, *m_ui, sw, sh);
             m_ui->End();
         }
     }

@@ -152,9 +152,23 @@ bool UIRenderer::SetFont(const std::string& path, float pixelHeight, bool pixelA
     }
 }
 
+void UIRenderer::SetView(glm::vec2 originPx, float scale, int fbWidth, int fbHeight) {
+    m_viewOrigin = originPx;
+    m_viewScale = scale > 0.0f ? scale : 1.0f;
+    m_fbWidth = fbWidth > 0 ? fbWidth : m_screenWidth;
+    m_fbHeight = fbHeight > 0 ? fbHeight : m_screenHeight;
+}
+
 void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
+    // Каждый кадр начинается с тождественного вида: смотровое преобразование —
+    // это свойство ОДНОЙ отрисовки (редактор в режиме вёрстки), а не состояние,
+    // которое должно пережить кадр и уехать в игру.
+    m_viewOrigin = glm::vec2(0.0f);
+    m_viewScale = 1.0f;
+    m_fbWidth = screenWidth;
+    m_fbHeight = screenHeight;
     m_vertices.clear();
     m_segments.clear();
     m_clipStack.clear();
@@ -529,7 +543,12 @@ void UIRenderer::End() {
     device.SetCullMode(sage::rhi::CullMode::Off);
     device.SetBlend(true);
 
-    glm::mat4 proj = glm::ortho(0.0f, (float)m_screenWidth, (float)m_screenHeight, 0.0f, -1.0f, 1.0f);
+    // Вершины лежат в пикселях ЭКРАНА ИНТЕРФЕЙСА; вид переводит их в пиксели
+    // КАДРА, ortho — в нормализованные координаты. При тождественном виде это
+    // ровно прежняя матрица.
+    glm::mat4 proj = glm::ortho(0.0f, (float)m_fbWidth, (float)m_fbHeight, 0.0f, -1.0f, 1.0f);
+    proj = glm::translate(proj, glm::vec3(m_viewOrigin, 0.0f));
+    proj = glm::scale(proj, glm::vec3(m_viewScale, m_viewScale, 1.0f));
     m_shader.Use();
     m_shader.SetMat4("uProjection", proj);
     m_shader.SetInt("uTex", 0);
@@ -542,9 +561,17 @@ void UIRenderer::End() {
     for (const Segment& seg : m_segments) {
         if (seg.QuadCount == 0) continue;
         if (seg.Clipped) {
+            // Ножницы работают в пикселях КАДРА, а маска задана в пикселях
+            // экрана интерфейса — значит, к ней надо применить тот же вид, что
+            // и к вершинам. Без этого при отдалении холста в редакторе списки
+            // обрезались бы по своим прежним местам, а не по нарисованным.
+            const float cx = m_viewOrigin.x + seg.Clip.x * m_viewScale;
+            const float cy = m_viewOrigin.y + seg.Clip.y * m_viewScale;
+            const float cw = seg.Clip.z * m_viewScale;
+            const float ch = seg.Clip.w * m_viewScale;
             // glScissor ждёт левый НИЖНИЙ угол — переворачиваем Y.
-            int sy = m_screenHeight - (int)(seg.Clip.y + seg.Clip.w);
-            device.SetScissor(true, (int)seg.Clip.x, sy, (int)seg.Clip.z, (int)seg.Clip.w);
+            const int sy = m_fbHeight - (int)(cy + ch);
+            device.SetScissor(true, (int)cx, sy, (int)cw, (int)ch);
         } else {
             device.SetScissor(false);
         }

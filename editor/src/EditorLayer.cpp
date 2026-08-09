@@ -298,6 +298,14 @@ void EditorLayer::OnAttach() {
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
     // headless нечем: кликать во вьюпорте в CI некому.
     if (std::getenv("SAGE_EDITOR_UI_MODE")) { m_launcher.Dismiss(); m_uiEditMode = true; }
+    // Масштаб холста вёрстки — для скриншот-проверок: колесом мыши в CI крутить
+    // некому, а увидеть отдалённый холст с полем вокруг экрана надо.
+    if (const char* z = std::getenv("SAGE_EDITOR_UI_ZOOM")) {
+        const float v = (float)std::atof(z);
+        if (v > 0.0f) m_uiTools.Zoom = v;
+    }
+    if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
+        m_uiTools.Backdrop = (float)std::atof(b);
     if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_launcher.Dismiss(); m_colliderEdit = true; }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_launcher.Dismiss();
@@ -2011,6 +2019,13 @@ void EditorLayer::OnRender() {
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_showBounds);
     m_renderer.SetDrawUIOverlay(m_uiEditMode);
+    // Вид холста вёрстки: подложка и масштаб (см. UIToolSettings). Вне режима
+    // вёрстки — тождественный, иначе панель Game показывала бы отдалённый
+    // интерфейс на ровном фоне вместо игры.
+    if (m_uiEditMode)
+        m_renderer.SetUICanvasView(m_uiTools.Backdrop, m_uiTools.Zoom, m_uiTools.Pan);
+    else
+        m_renderer.SetUICanvasView(0.0f, 1.0f, glm::vec2(0.0f));
 
     // ГЛАВНЫЙ слот тоже уважает свой вид. Раньше он рисовался безусловно
     // перспективой, а переопределение применялось только к слотам 1..3 — из-за

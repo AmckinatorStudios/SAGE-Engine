@@ -136,6 +136,26 @@ void UIToolsPanel::Draw(EditorHost& host, bool* open, bool focus) {
         ImGui::Spacing();
     }
 
+    // --- Вид холста ----------------------------------------------------------
+    //
+    // Первым разделом, а не последним: это ответ на два самых частых вопроса
+    // новичка — «почему сквозь меню видно траву» и «куда делся элемент».
+    ImGui::SeparatorText(T("Canvas view"));
+    ImGui::SetNextItemWidth(-90.0f);
+    ImGui::SliderFloat(T("Backdrop"), &tools.Backdrop, 0.0f, 1.0f, "%.2f");
+    Hint(T("1 — a flat backdrop instead of the 3D scene; 0 — design the HUD over the game."));
+
+    ImGui::SetNextItemWidth(-90.0f);
+    float zoomPercent = tools.Zoom * 100.0f;
+    if (ImGui::SliderFloat(T("Zoom"), &zoomPercent, 15.0f, 300.0f, "%.0f%%"))
+        tools.Zoom = zoomPercent / 100.0f;
+    if (ImGui::Button(T("1:1 (Home)"))) { tools.Zoom = 1.0f; tools.Pan = glm::vec2(0.0f); }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Bring back on screen"))) uiops::BringIntoView(host);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Pushes the selected elements back inside the screen."));
+    Hint(T("Wheel zooms, middle button pans, Shift+F fits everything including what ran off."));
+
     // --- Сетка и привязки ----------------------------------------------------
     ImGui::SeparatorText(T("Grid and snapping"));
     ImGui::Checkbox(T("Show the grid"), &tools.ShowGrid);

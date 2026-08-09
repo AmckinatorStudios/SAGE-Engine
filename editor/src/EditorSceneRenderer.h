@@ -90,6 +90,22 @@ public:
     // переключаешься смотреть, переключаешься обратно.
     void SetDrawUIOverlay(bool draw) { m_drawUIOverlay = draw; }
 
+    // Вид ХОЛСТА ВЁРСТКИ: подложка под интерфейсом, масштаб и сдвиг.
+    //
+    // backdrop — насколько закрасить сцену под интерфейсом (0 — видно 3D как
+    // раньше, 1 — ровный фон и ничего кроме интерфейса). Так и должно быть по
+    // умолчанию: когда верстают меню, трёхмерный мир за ним — не подсказка, а
+    // помеха; глаз цепляется за траву и сетку пола вместо кнопок. Но у худа
+    // всё наоборот: его смотрят ПОВЕРХ игры, и там подложку убирают.
+    //
+    // zoom < 1 отдаляет холст, оставляя вокруг экрана поле: в нём становится
+    // видно всё, что уехало за границу (см. UIRenderer::SetView).
+    void SetUICanvasView(float backdrop, float zoom, glm::vec2 panPx) {
+        m_uiBackdrop = backdrop;
+        m_uiZoom = zoom > 0.0f ? zoom : 1.0f;
+        m_uiPan = panPx;
+    }
+
     void RenderViewport(Scene& scene, Camera& camera, const LightingEnvironment& env,
                         int selectedId, const std::vector<int>& selection,
                         EditorRenderMode mode, bool showGrid,
@@ -181,5 +197,8 @@ private:
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
     bool m_drawUIOverlay = false;
+    float m_uiBackdrop = 0.0f;    // непрозрачность подложки холста вёрстки
+    float m_uiZoom = 1.0f;        // масштаб холста (< 1 — отдалить)
+    glm::vec2 m_uiPan{0.0f, 0.0f};
     int m_gameW = 1280, m_gameH = 720;
 };

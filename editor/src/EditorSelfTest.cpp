@@ -1976,6 +1976,25 @@ void EditorLayer::RunSelfTest() {
                 ok = false;
             }
         }
+        // «Вернуть на экран»: элемент, уехавший за границу, придвигается внутрь.
+        // Проверяется именно то, ради чего кнопка и появилась, — что элемент
+        // становится ВИДИМЫМ, а не просто меняет числа.
+        if (ok) {
+            SetSelectedId(a.Id());
+            sage::ui::Transform& ta = reg.get<sage::ui::Transform>(a.Entity());
+            ta.Offset = {5000.0f, -300.0f};   // далеко за краем
+            uiops::BringIntoView(*this);
+            const std::vector<sage::ui::ElementRect> back =
+                sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
+            sage::ui::UIRect r{};
+            for (const auto& e : back)
+                if (e.Entity == a.Entity()) r = e.Rect;
+            if (r.x < 0.0f || r.y < 0.0f || r.x + r.w > 1280.0f || r.y + r.h > 720.0f) {
+                LOG_ERROR("Editor") << "SELFTEST: «вернуть на экран» оставило элемент снаружи ("
+                                    << r.x << "," << r.y << " " << r.w << "x" << r.h << ")";
+                ok = false;
+            }
+        }
         SetSelectedId(-1);
     }
 

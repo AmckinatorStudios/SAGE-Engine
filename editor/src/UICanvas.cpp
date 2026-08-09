@@ -112,21 +112,54 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     entt::registry& reg = scene.Registry();
     UIToolSettings& tools = host.UITools();
 
+    // --- Где на экране лежит холст ------------------------------------------
+    //
+    // ПОВТОРЯЕТ РАСЧЁТ ОТРИСОВКИ (EditorSceneRenderer::SetUICanvasView), и это
+    // обязано быть так: рамки редактора и сам интерфейс рисуются разными
+    // подсистемами, и разойдись они хоть на пиксель — мышь будет ловить не то,
+    // что видно. Формула одна, записана дважды и помечена с обеих сторон.
+    const float zoom = tools.Zoom > 0.0f ? tools.Zoom : 1.0f;
+    // Экран игры не зависит от масштаба показа (см. EditorSceneRenderer).
+    const int screenW = frameW, screenH = frameH;
+    const glm::vec2 origin(((float)frameW - (float)frameW * zoom) * 0.5f + tools.Pan.x,
+                           ((float)frameH - (float)frameH * zoom) * 0.5f + tools.Pan.y);
+
+    // Пиксель кадра -> пиксель панели (кадр может быть показан не один к одному).
     const float sx = imgSize.x / (float)frameW;
     const float sy = imgSize.y / (float)frameH;
     auto toScreen = [&](float x, float y) {
-        return ImVec2(imgPos.x + x * sx, imgPos.y + y * sy);
+        return ImVec2(imgPos.x + (origin.x + x * zoom) * sx,
+                      imgPos.y + (origin.y + y * zoom) * sy);
     };
     auto toUI = [&](ImVec2 p) {
-        return glm::vec2((p.x - imgPos.x) / std::max(sx, 1e-6f),
-                         (p.y - imgPos.y) / std::max(sy, 1e-6f));
+        return glm::vec2(((p.x - imgPos.x) / std::max(sx, 1e-6f) - origin.x) / zoom,
+                         ((p.y - imgPos.y) / std::max(sy, 1e-6f) - origin.y) / zoom);
     };
 
     // Панель «Вёрстка» считает выравнивание в ТЕХ ЖЕ пикселях (см. UIToolSettings).
-    tools.FrameSize = glm::vec2((float)frameW, (float)frameH);
+    tools.FrameSize = glm::vec2((float)screenW, (float)screenH);
 
-    Collect(scene, host, frameW, frameH);
-    if (tools.ShowGrid) DrawGrid(dl, imgPos, imgSize, tools, sx, sy);
+    Collect(scene, host, screenW, screenH);
+
+    // --- Границы холста ------------------------------------------------------
+    //
+    // Экран игры — это ПРЯМОУГОЛЬНИК, и его надо видеть. Пока холст занимал
+    // весь вьюпорт, границы не было вовсе: непонятно, что попадёт в кадр, а что
+    // уже за ним. Всё, что снаружи, приглушено, а сама граница — сплошная линия.
+    const ImVec2 canvasA = toScreen(0.0f, 0.0f);
+    const ImVec2 canvasB = toScreen((float)screenW, (float)screenH);
+    if (zoom < 0.999f) {
+        const ImU32 outside = IM_COL32(0, 0, 0, 90);
+        const ImVec2 pa = imgPos, pb = ImVec2(imgPos.x + imgSize.x, imgPos.y + imgSize.y);
+        dl->AddRectFilled(pa, ImVec2(pb.x, canvasA.y), outside);
+        dl->AddRectFilled(ImVec2(pa.x, canvasB.y), pb, outside);
+        dl->AddRectFilled(ImVec2(pa.x, canvasA.y), ImVec2(canvasA.x, canvasB.y), outside);
+        dl->AddRectFilled(ImVec2(canvasB.x, canvasA.y), ImVec2(pb.x, canvasB.y), outside);
+    }
+
+    if (tools.ShowGrid) DrawGrid(dl, canvasA, ImVec2(canvasB.x - canvasA.x, canvasB.y - canvasA.y),
+                                 tools, sx * zoom, sy * zoom);
+    dl->AddRect(canvasA, canvasB, IM_COL32(255, 255, 255, 120), 0.0f, 0, 1.0f);
 
     const int selectedId = host.SelectedId();
     const ImVec2 mouse = ImGui::GetMousePos();
@@ -149,11 +182,21 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         // Невидимые элементы показываются приглушённо, а не прячутся:
         // «элемента нет» и «элемент выключен» — разные вещи, и второе надо
         // видеть, иначе выключенный элемент невозможно найти и включить обратно.
+        // Элемент, целиком вышедший за экран, помечается ОТДЕЛЬНЫМ цветом: он
+        // существует, но в игре его не увидят. Раньше он просто пропадал, и
+        // единственным следом оставалась строка в иерархии.
+        const bool offscreen = it.Rect.x + it.Rect.w <= 0.0f || it.Rect.y + it.Rect.h <= 0.0f ||
+                               it.Rect.x >= (float)screenW || it.Rect.y >= (float)screenH;
         ImU32 col = primary   ? IM_COL32(255, 170, 60, 255)
                     : it.Selected ? IM_COL32(255, 200, 120, 190)
+                    : offscreen   ? IM_COL32(255, 90, 90, 170)
                     : it.Visible  ? IM_COL32(120, 190, 255, 110)
                                   : IM_COL32(150, 150, 160, 70);
         dl->AddRect(a, b, col, 0.0f, 0, it.Selected ? 2.0f : 1.0f);
+        if (offscreen) {
+            dl->AddLine(a, b, IM_COL32(255, 90, 90, 110), 1.0f);
+            dl->AddLine(ImVec2(b.x, a.y), ImVec2(a.x, b.y), IM_COL32(255, 90, 90, 110), 1.0f);
+        }
 
         if (!primary) continue;
         havePrimary = true;
@@ -243,6 +286,62 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     }
     m_guides.clear();
 
+    // --- Вид холста: колесо, панорама, «вписать» ----------------------------
+    //
+    // Без этого отдалять холст было бы нечем, кроме ползунка в панели, — а
+    // отдаляют его именно тогда, когда что-то потерялось, то есть в спешке.
+    if (hovered && m_drag == Drag::None && !m_marquee) {
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0.0f) {
+            // Приближаем К КУРСОРУ: точка под мышью остаётся на месте. Масштаб
+            // «от центра» заставляет после каждого шага догонять панорамой то,
+            // на что смотрел.
+            const glm::vec2 before = toUI(mouse);
+            const float next = std::clamp(zoom * (wheel > 0.0f ? 1.15f : 1.0f / 1.15f), 0.15f, 3.0f);
+            tools.Zoom = next;
+            // Пересчёт с новым масштабом — теми же формулами, что выше.
+            const glm::vec2 base(((float)frameW - (float)frameW * next) * 0.5f,
+                                 ((float)frameH - (float)frameH * next) * 0.5f);
+            const glm::vec2 mouseFrame((mouse.x - imgPos.x) / std::max(sx, 1e-6f),
+                                       (mouse.y - imgPos.y) / std::max(sy, 1e-6f));
+            tools.Pan = mouseFrame - base - before * next;
+        }
+        // Панорама средней кнопкой — как в любом холсте.
+        if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+            const ImVec2 d = ImGui::GetIO().MouseDelta;
+            tools.Pan += glm::vec2(d.x / std::max(sx, 1e-6f), d.y / std::max(sy, 1e-6f));
+        }
+        // Home — вернуть холст на место: один к одному, без сдвига. Клавиша
+        // нужна, потому что панорамой можно уехать так, что холста не видно.
+        if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
+            tools.Zoom = 1.0f;
+            tools.Pan = glm::vec2(0.0f);
+        }
+        // Shift+F — вписать в окно ВСЁ, включая то, что вышло за границы
+        // экрана. Это и есть ответ на «элемент уехал, что теперь делать»:
+        // одна клавиша показывает его вместе с экраном.
+        if (ImGui::IsKeyPressed(ImGuiKey_F) && ImGui::GetIO().KeyShift) {
+            UIRect all{0.0f, 0.0f, (float)screenW, (float)screenH};
+            for (const Item& it : m_items) {
+                const float x0 = std::min(all.x, it.Rect.x);
+                const float y0 = std::min(all.y, it.Rect.y);
+                const float x1 = std::max(all.x + all.w, it.Rect.x + it.Rect.w);
+                const float y1 = std::max(all.y + all.h, it.Rect.y + it.Rect.h);
+                all = UIRect{x0, y0, x1 - x0, y1 - y0};
+            }
+            // Запас по краям, чтобы рамки не упирались в границу панели.
+            const float pad = 0.06f;
+            const float fit = std::clamp(std::min((float)frameW / (all.w * (1.0f + pad)),
+                                                  (float)frameH / (all.h * (1.0f + pad))),
+                                         0.15f, 1.0f);
+            tools.Zoom = fit;
+            const glm::vec2 base(((float)frameW - (float)frameW * fit) * 0.5f,
+                                 ((float)frameH - (float)frameH * fit) * 0.5f);
+            const glm::vec2 centre(all.x + all.w * 0.5f, all.y + all.h * 0.5f);
+            tools.Pan = glm::vec2((float)frameW * 0.5f, (float)frameH * 0.5f) - base - centre * fit;
+        }
+    }
+
     // --- Клавиатура: точная доводка -----------------------------------------
     //
     // Мышью попасть в пиксель нельзя в принципе, а именно пиксель и решает,
@@ -308,7 +407,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         // Иначе — элемент под курсором тем же попаданием, каким его считает
         // игра: одно правило на редактор и на рантайм.
         const glm::vec2 ui = toUI(mouse);
-        const int hit = sage::ui::HitTest(scene, ui.x, ui.y, frameW, frameH);
+        const int hit = sage::ui::HitTest(scene, ui.x, ui.y, screenW, screenH);
         if (hit < 0) {
             // Пустое место — рамка выделения. Прежде здесь просто сбрасывался
             // выбор, и выбрать десяток элементов можно было только кликами.

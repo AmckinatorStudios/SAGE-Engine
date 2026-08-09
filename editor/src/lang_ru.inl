@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 897.
+// Язык: Русский. Строк: 905.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -56,6 +56,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "0 — плавно; больше нуля — прилипать к шагу"},
     {"0 — stretch to fit; >0 — source pixel size",
      "0 — растянуть по размеру; >0 — размер пикселя исходника"},
+    {"1 — a flat backdrop instead of the 3D scene; 0 — design the HUD over the game.",
+     "1 — ровный фон вместо трёхмерной сцены; 0 — верстать худ поверх игры."},
+    {"1:1 (Home)",
+     "1:1 (Home)"},
     {"2 = analytic two-bone, more = FABRIK",
      "2 — аналитическое решение на две кости, больше — FABRIK"},
     {"9-slice l,t,r,b",
@@ -186,6 +190,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Усреднять"},
     {"Axis",
      "Ось"},
+    {"Backdrop",
+     "Подложка"},
     {"Bake GI",
      "Запечь GI"},
     {"Bake Probe",
@@ -252,6 +258,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поправка на коробку"},
     {"Bring a file into the project",
      "Внести файл в проект"},
+    {"Bring back on screen",
+     "Вернуть на экран"},
     {"Broken references: ",
      "Битых ссылок: "},
     {"Brought in: ",
@@ -288,6 +296,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Отмена"},
     {"Canvas",
      "Холст"},
+    {"Canvas view",
+     "Вид холста"},
     {"Capsule",
      "Капсула"},
     {"Captures the scene around this point into a cubemap",
@@ -1178,6 +1188,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Проекты (*.sageproj)"},
     {"Projects a texture onto surfaces underneath",
      "Проецирует текстуру на поверхности под собой"},
+    {"Pushes the selected elements back inside the screen.",
+     "Придвигает выделенные элементы обратно внутрь экрана."},
     {"Quick actions",
      "Быстрые действия"},
     {"RECENT",
@@ -1696,6 +1708,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Предупр. (%d)"},
     {"Weight",
      "Вес"},
+    {"Wheel zooms, middle button pans, Shift+F fits everything including what ran off.",
+     "Колесо — масштаб, средняя кнопка — панорама, Shift+F — вписать всё, включая уехавшее."},
     {"Where it glows and where it does not. Multiplied by the emissive colour and strength.",
      "Где светится, а где нет. Умножается на цвет и силу свечения."},
     {"Where the element holds on when the screen changes size.",
@@ -1738,6 +1752,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вернуть вопрос можно в Window -> Settings."},
     {"You can drop a model, a prefab or a material into the scene",
      "В сцену можно бросить модель, префаб или материал"},
+    {"Zoom",
+     "Масштаб"},
     {"[%s] %s  (x%d)",
      "[%s] %s  (x%d)"},
     {"and are edited right here.",
