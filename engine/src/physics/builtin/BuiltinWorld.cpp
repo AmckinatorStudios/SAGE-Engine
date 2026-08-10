@@ -363,6 +363,8 @@ void BuiltinWorld::BuildContacts(float dt) {
 
                 ContactConstraint c;
                 c.Key = {ha, hb, i, j};
+                c.A = a;
+                c.B = b;
                 c.M = m;
                 // Трение и упругость пары: среднее геометрическое трения и
                 // максимум упругости — общепринятая пара правил. Резиновый мяч
@@ -403,8 +405,8 @@ void BuiltinWorld::BuildContacts(float dt) {
 void BuiltinWorld::WarmStart() {
     for (ContactConstraint& c : m_contacts) {
         if (c.Sensor) continue;
-        Body* a = Find(c.Key.A);
-        Body* b = Find(c.Key.B);
+        Body* a = c.A;
+        Body* b = c.B;
         if (!a || !b) continue;
         glm::vec3 t1, t2;
         TangentBasis(c.M.Normal, t1, t2);
@@ -428,8 +430,8 @@ void BuiltinWorld::SolveVelocities(float dt, int iterations, bool useBias) {
 
         for (ContactConstraint& c : m_contacts) {
             if (c.Sensor) continue;
-            Body* a = Find(c.Key.A);
-            Body* b = Find(c.Key.B);
+            Body* a = c.A;
+            Body* b = c.B;
             if (!a || !b) continue;
             if (a->Sleeping && b->Sleeping) continue;
 
@@ -521,8 +523,8 @@ void BuiltinWorld::SolveVelocities(float dt, int iterations, bool useBias) {
 void BuiltinWorld::ApplyRestitution() {
     for (ContactConstraint& c : m_contacts) {
         if (c.Sensor || c.Restitution <= 0.0f) continue;
-        Body* a = Find(c.Key.A);
-        Body* b = Find(c.Key.B);
+        Body* a = c.A;
+        Body* b = c.B;
         if (!a || !b) continue;
         const glm::vec3& n = c.M.Normal;
 

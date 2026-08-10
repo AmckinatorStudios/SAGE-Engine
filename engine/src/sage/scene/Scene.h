@@ -7,6 +7,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include "sage/scene/Transform.h"
+#include "sage/scene/WorldMatrices.h"
 #include "sage/scene/Light.h"
 #include "sage/ui/UIInteraction.h"
 #include "sage/scene/Components.h"
@@ -27,6 +28,7 @@
 // Id/Name/Transform/Color, что и раньше, — сменилась только реализация под ним.
 // ---------------------------------------------------------------------------
 namespace sage::gi { struct GIState; } // запечённое GI сцены (см. sage/gi/GI.h)
+
 
 class GameObject {
 public:
@@ -170,9 +172,17 @@ public:
     // проходе — тени/вьюпорт/игра; общие родительские цепочки пересчитывались
     // многократно). out переиспользуется вызывающим между кадрами — ёмкость
     // хэш-таблицы не переаллоцируется.
-    void ComputeWorldMatrices(std::unordered_map<entt::entity, glm::mat4>& out) const {
-        out.clear();
+    void ComputeWorldMatrices(sage::WorldMatrices& out) const {
+        out.Clear();
         auto view = m_registry.view<Transform>();
+        // Быстрый путь для сцен БЕЗ иерархии — а это подавляющее большинство
+        // сущностей в любой сцене. У них мировая матрица равна локальной, и
+        // рекурсия с проверкой родителя стоит дороже самой матрицы.
+        auto hier = m_registry.view<HierarchyComponent>();
+        if (hier.empty()) {
+            for (auto e : view) out.Set(e, view.get<Transform>(e).GetMatrix());
+            return;
+        }
         for (auto e : view) WorldMatrixMemo(e, out);
     }
 
@@ -225,15 +235,14 @@ private:
 
     // Рекурсия WorldMatrix с мемо-таблицей: каждая сущность (и каждый общий
     // родитель) считается ровно один раз за проход ComputeWorldMatrices.
-    glm::mat4 WorldMatrixMemo(entt::entity e, std::unordered_map<entt::entity, glm::mat4>& memo) const {
-        auto it = memo.find(e);
-        if (it != memo.end()) return it->second;
+    glm::mat4 WorldMatrixMemo(entt::entity e, sage::WorldMatrices& memo) const {
+        if (const glm::mat4* done = memo.Find(e)) return *done;
         const Transform* tr = m_registry.try_get<Transform>(e);
         glm::mat4 world = tr ? tr->GetMatrix() : glm::mat4(1.0f);
         const auto* h = m_registry.try_get<HierarchyComponent>(e);
         if (h && h->Parent != entt::null && m_registry.valid(h->Parent))
             world = WorldMatrixMemo(h->Parent, memo) * world;
-        memo.emplace(e, world);
+        memo.Set(e, world);
         return world;
     }
     // Является ли node потомком ancestor (поднимаясь по родителям node, встретим ancestor).

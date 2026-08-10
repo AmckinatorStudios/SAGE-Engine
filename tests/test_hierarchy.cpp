@@ -153,14 +153,15 @@ TEST(Hierarchy_compute_world_matrices_matches_recursive) {
     scene.SetParent(mid.Entity(), root.Entity());
     scene.SetParent(leaf.Entity(), mid.Entity());
 
-    std::unordered_map<entt::entity, glm::mat4> memo;
+    sage::WorldMatrices memo;
     scene.ComputeWorldMatrices(memo);
 
     for (GameObject o : {root, mid, leaf, lone}) {
-        auto it = memo.find(o.Entity());
-        CHECK_TRUE(it != memo.end());
+        const glm::mat4* found = memo.Find(o.Entity());
+        CHECK_TRUE(found != nullptr);
+        if (!found) continue;
         glm::mat4 expect = scene.WorldMatrix(o.Entity());
-        const glm::mat4& got = it->second;
+        const glm::mat4& got = *found;
         for (int c2 = 0; c2 < 4; ++c2)
             for (int r = 0; r < 4; ++r)
                 CHECK_NEAR(got[c2][r], expect[c2][r], 1e-4);

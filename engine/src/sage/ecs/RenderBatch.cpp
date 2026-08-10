@@ -286,8 +286,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     // 1) ПОСЛЕДОВАТЕЛЬНЫЙ сбор: итерация реестра (не потокобезопасна на
     //    структурные правки) в плоский список — только указатели/матрицы/цвет.
     ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
-        auto wit = m_worldCache.find(e);
-        glm::mat4 model = wit != m_worldCache.end() ? wit->second : scene.WorldMatrix(e);
+        const glm::mat4* cached = m_worldCache.Find(e);
+        glm::mat4 model = cached ? *cached : scene.WorldMatrix(e);
         Mesh* mesh = mr.MeshPtr.get();
         int lmPage = -1;
         if (gi) {
@@ -802,7 +802,7 @@ Shader& VelocityShader() {
 } // namespace
 
 void RenderBatch::ResetVelocityHistory() {
-    m_prevWorld.clear();
+    m_prevWorld.Clear();
     m_hasPrevFrame = false;
 }
 
@@ -820,8 +820,7 @@ void RenderBatch::RenderVelocity(const glm::mat4& viewProj, const glm::mat4& pre
         // не было. То же на первом кадре после сброса истории.
         glm::mat4 prev = c.Model;
         if (m_hasPrevFrame) {
-            auto it = m_prevWorld.find(c.Entity);
-            if (it != m_prevWorld.end()) prev = it->second;
+            if (const glm::mat4* was = m_prevWorld.Find(c.Entity)) prev = *was;
         }
         sh.SetMat4("uModel", c.Model);
         sh.SetMat4("uPrevModel", prev);
@@ -836,10 +835,10 @@ void RenderBatch::AdvanceVelocityHistory() {
     // и на первом же кадре возврата дал бы нулевую скорость посреди движения.
     //
     // Таблица строится заново, а не дополняется: иначе удалённые сущности
-    // копились бы в ней бесконечно.
-    m_prevWorld.clear();
-    for (const auto& kv : m_worldCache) m_prevWorld[kv.first] = kv.second;
-    m_hasPrevFrame = !m_prevWorld.empty();
+    // копились бы в ней бесконечно. С плотным хранением это обычное
+    // копирование массива, а не перестройка хэш-таблицы на каждую сущность.
+    m_prevWorld = m_worldCache;
+    m_hasPrevFrame = !m_prevWorld.Empty();
 }
 
 void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::vec3& viewPos) {

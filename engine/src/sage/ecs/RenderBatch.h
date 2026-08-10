@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
 
+#include "sage/scene/WorldMatrices.h"
 #include "sage/render/Mesh.h"
 #include "sage/render/Shader.h"
 #include "sage/render/LodGroup.h"
@@ -300,12 +301,12 @@ private:
     // Мировые матрицы кадра (Scene::ComputeWorldMatrices) — один O(n)-проход
     // на сбор вместо рекурсивного WorldMatrix на каждую сущность (см. Scene.h).
     // Переиспользуется между кадрами, чтобы не переаллоцировать хэш-таблицу.
-    std::unordered_map<entt::entity, glm::mat4> m_worldCache;
+    sage::WorldMatrices m_worldCache;
     // Мировые матрицы ПРОШЛОГО кадра — источник скоростей объектов. Держим
     // отдельной таблицей, а не полем сущности: скорость нужна только рендеру,
     // и складывать её в ECS значило бы платить за неё во всех сценах, включая
     // те, где смаза нет вовсе.
-    std::unordered_map<entt::entity, glm::mat4> m_prevWorld;
+    sage::WorldMatrices m_prevWorld;
     bool m_hasPrevFrame = false;
 
     // --- Проверка перекрытия ------------------------------------------------

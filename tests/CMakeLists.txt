@@ -63,3 +63,18 @@ option(SAGE_BUILD_RENDER_TESTS "Собрать тесты эталонных к�
 if (SAGE_BUILD_RENDER_TESTS)
     add_subdirectory(render)
 endif()
+
+# ============================================================================
+#  sage_bench — сколько стоят горячие места движка.
+#
+#  Отдельная программа, а не тест, и это принципиально: тест обязан отвечать
+#  «работает/нет», а замер печатает число. Замер, оформленный тестом, начинает
+#  падать от загрузки машины сборщика — и ему перестают верить ровно тогда,
+#  когда он впервые скажет правду.
+# ============================================================================
+add_executable(sage_bench
+    ${CMAKE_CURRENT_SOURCE_DIR}/../bench/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../bench/Cases.cpp
+)
+target_include_directories(sage_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../bench)
+target_link_libraries(sage_bench PRIVATE sage::engine nlohmann_json::nlohmann_json)
