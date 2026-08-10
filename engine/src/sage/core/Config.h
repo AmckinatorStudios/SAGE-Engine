@@ -140,6 +140,22 @@ struct EngineConfig {
     float VolumetricScale = 0.5f;   // доля разрешения прохода (0.5 — половина)
     bool VolumetricDebug = false;   // показать поле видимости солнца вместо кадра
 
+    // --- Блик в объективе (см. render/LensFlare.h) ---
+    // Выключен по умолчанию: блик — сильное авторское заявление о том, что
+    // кадр снят камерой, и подходит он не всякой игре.
+    bool LensFlare = false;
+    float LensFlareIntensity = 1.0f;
+    int LensFlareGhosts = 6;            // переотражений в цепочке призраков
+    float LensFlareGhostSpacing = 0.32f;
+    float LensFlareGhostSize = 0.055f;
+    int LensFlareBlades = 6;            // лепестков диафрагмы (форма призрака)
+    float LensFlareHalo = 0.55f;
+    float LensFlareHaloRadius = 0.42f;
+    float LensFlareStarburst = 0.5f;
+    float LensFlareGlare = 0.45f;
+    float LensFlareChroma = 0.55f;
+    float LensFlareThreshold = 1.1f;    // яркость, начиная с которой это «солнце»
+
     // Отладочный вид кадра (см. render/DebugView.h): "none", "normals",
     // "cascades", "roughness"… Строкой, а не числом: число в файле настроек
     // ничего не говорит тому, кто его читает.

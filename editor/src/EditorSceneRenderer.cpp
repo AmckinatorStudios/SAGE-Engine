@@ -559,6 +559,15 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                               m_sceneTime);
     }
 
+    // Блик — после объёма, чтобы облако его гасило, и до пост-обработки, чтобы
+    // он прошёл через bloom вместе с кадром.
+    if (!flatCanvas && cfg.LensFlare && cfg.PostProcessing) {
+        sceneFbo.Resolve();
+        if (!m_lensFlare) m_lensFlare.emplace();
+        m_lensFlare->Render(sceneFbo, sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h,
+                            outProj, outView, env, sage::render::LensFlareFromConfig(cfg));
+    }
+
     // Игровой интерфейс поверх сцены — В ТОМ ЖЕ буфере и в тех же пикселях, в
     // которых его увидит игрок. Раскладка UI зависит от размера экрана (якоря,
     // проценты), поэтому рисовать его надо именно в размер вьюпорта, а не в

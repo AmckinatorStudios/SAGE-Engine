@@ -225,6 +225,18 @@ bool EngineConfig::LoadFile(const std::string& path) {
     CloudBottom        = pp.value("cloudBottom", CloudBottom);
     CloudTop           = pp.value("cloudTop", CloudTop);
     VolumetricScale    = pp.value("volumetricScale", VolumetricScale);
+    LensFlare             = pp.value("lensFlare", LensFlare);
+    LensFlareIntensity    = pp.value("lensFlareIntensity", LensFlareIntensity);
+    LensFlareGhosts       = pp.value("lensFlareGhosts", LensFlareGhosts);
+    LensFlareGhostSpacing = pp.value("lensFlareGhostSpacing", LensFlareGhostSpacing);
+    LensFlareGhostSize    = pp.value("lensFlareGhostSize", LensFlareGhostSize);
+    LensFlareBlades       = pp.value("lensFlareBlades", LensFlareBlades);
+    LensFlareHalo         = pp.value("lensFlareHalo", LensFlareHalo);
+    LensFlareHaloRadius   = pp.value("lensFlareHaloRadius", LensFlareHaloRadius);
+    LensFlareStarburst    = pp.value("lensFlareStarburst", LensFlareStarburst);
+    LensFlareGlare        = pp.value("lensFlareGlare", LensFlareGlare);
+    LensFlareChroma       = pp.value("lensFlareChroma", LensFlareChroma);
+    LensFlareThreshold    = pp.value("lensFlareThreshold", LensFlareThreshold);
     AmbientOcclusion = pp.value("ao", AmbientOcclusion);
     AOStrength       = pp.value("aoStrength", AOStrength);
     AORadius         = pp.value("aoRadius", AORadius);
@@ -282,6 +294,13 @@ std::string EngineConfig::ToJsonString() const {
         {"cloudSteps", CloudSteps}, {"cloudCoverage", CloudCoverage},
         {"cloudBottom", CloudBottom}, {"cloudTop", CloudTop},
         {"volumetricScale", VolumetricScale},
+        {"lensFlare", LensFlare}, {"lensFlareIntensity", LensFlareIntensity},
+        {"lensFlareGhosts", LensFlareGhosts},
+        {"lensFlareGhostSpacing", LensFlareGhostSpacing},
+        {"lensFlareGhostSize", LensFlareGhostSize}, {"lensFlareBlades", LensFlareBlades},
+        {"lensFlareHalo", LensFlareHalo}, {"lensFlareHaloRadius", LensFlareHaloRadius},
+        {"lensFlareStarburst", LensFlareStarburst}, {"lensFlareGlare", LensFlareGlare},
+        {"lensFlareChroma", LensFlareChroma}, {"lensFlareThreshold", LensFlareThreshold},
         {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
         {"depthOfField", DepthOfField}, {"focusDistance", FocusDistance},
         {"aperture", Aperture}, {"dofMaxRadius", DofMaxRadius},
@@ -349,6 +368,9 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_CLOUD_COVERAGE")) CloudCoverage = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_DEBUG")) VolumetricDebug = EnvBool(v, VolumetricDebug);
     if (const char* v = std::getenv("SAGE_DEBUG_VIEW")) DebugView = v;
+    if (const char* v = std::getenv("SAGE_LENS_FLARE")) LensFlare = EnvBool(v, LensFlare);
+    if (const char* v = std::getenv("SAGE_LENS_FLARE_INTENSITY"))
+        LensFlareIntensity = (float)std::atof(v);
 
     // Графика. SAGE_NO_SHADOWS / SAGE_NO_POST оставлены для обратной
     // совместимости (их наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…

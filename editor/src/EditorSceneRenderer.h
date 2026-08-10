@@ -9,6 +9,7 @@
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/LensFlare.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/render/DebugDraw.h"
 #include "sage/render/ShadowMap.h"
@@ -187,6 +188,7 @@ private:
     std::unique_ptr<UIRenderer> m_ui;
     std::optional<sage::render::PostFX> m_postfx, m_gamePostfx;
     std::optional<sage::render::Volumetrics> m_volumetrics;
+    std::optional<sage::render::LensFlare> m_lensFlare;
     bool m_postApplied = false, m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
     std::optional<SkyRenderer> m_sky;

@@ -30,6 +30,7 @@
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
 #include "sage/ecs/DecalSystem.h"
+#include "sage/render/LensFlare.h"
 #include "sage/render/PostFX.h"
 #include "sage/rhi/Conformance.h"
 #include <chrono>
@@ -1380,6 +1381,138 @@ void TestReflectionProbe(FrameRenderer& r) {
     Report("reflect_probe", CompareWithReference("reflect_probe", img));
 }
 
+// --- Блик в объективе --------------------------------------------------------
+//
+// Проверяем не «красиво ли», а те три утверждения, ради которых блик вообще
+// написан отдельным проходом, а не нарисован спрайтом поверх кадра:
+//
+//   1. солнце в кадре — блик есть, и он ярче кадра без блика;
+//   2. солнце ЗАКРЫТО геометрией — блика нет. Это главное: блик, горящий
+//      сквозь стену, — самая заметная неправда эффекта;
+//   3. солнце за спиной — блика нет вовсе.
+//
+// Сцена своя и предельно простая: пустое небо, известное направление на солнце
+// и камера, смотрящая точно на него. На общей тестовой сцене солнце уходит за
+// край кадра, и проверять было бы нечего.
+namespace {
+
+// Кадр «с солнцем в объективе». blocker — поставить ли перед солнцем стену.
+Image RenderFlareFrame(FrameRenderer& r, bool flareOn, bool blocker, bool behind,
+                       float& outMeanLuma) {
+    constexpr int w = 256, h = 192;
+    Framebuffer sceneFbo(w, h);
+    Framebuffer output(w, h);
+
+    Scene scene("LensFlare");
+    // Солнце низко и почти прямо по оси -Z: так оно попадает в кадр камеры,
+    // которая смотрит туда же.
+    const glm::vec3 toSun = glm::normalize(glm::vec3(0.0f, 0.22f, -1.0f));
+    scene.Lighting.Sun.Direction = -toSun;
+    scene.Lighting.Sun.Intensity = 3.0f;
+    scene.Lighting.Sun.Color = {1.0f, 0.95f, 0.85f};
+    scene.Lighting.SkyColor = {0.35f, 0.52f, 0.78f};
+    scene.Lighting.AmbientStrength = 0.4f;
+    // Небо настоящее, со светилом: проход видимости спрашивает у кадра, ярко
+    // ли ТАМ, ГДЕ солнце. Ровная заливка на весь фон ответила бы «ярко везде»
+    // — то есть не ответила бы ничего, и тест проверял бы блик без проверки.
+    scene.Lighting.Skybox.Enabled = true;
+    scene.Lighting.Skybox.Celestials = true;
+    scene.Lighting.Skybox.TopColor = {0.22f, 0.38f, 0.68f};
+    scene.Lighting.Skybox.HorizonColor = {0.62f, 0.70f, 0.80f};
+    scene.Lighting.Skybox.SunColor = {1.0f, 0.94f, 0.80f};
+    scene.Lighting.Skybox.SunSize = 0.055f;
+
+    if (blocker) {
+        // Стена ровно между камерой и солнцем. Не «где-то в кадре»: тест
+        // проверяет перекрытие, а не наличие геометрии.
+        GameObject wall = scene.CreateObject("Blocker");
+        wall.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        wall.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        wall.Renderer().Color = {0.10f, 0.10f, 0.10f};
+        wall.GetTransform().Position = {0.0f, 1.6f, -6.0f};
+        wall.GetTransform().Scale = {8.0f, 8.0f, 0.4f};
+    }
+
+    const glm::vec3 eye(0.0f, 0.6f, 4.0f);
+    // Смотрим НЕ точно на солнце, а мимо: призраки ложатся на прямую «солнце —
+    // центр кадра», и при солнце ровно в центре этой прямой нет — вся цепочка
+    // схлопывается в одну точку, и проверять было бы нечего.
+    const glm::vec3 aim = glm::normalize(toSun + glm::vec3(0.30f, -0.10f, 0.0f));
+    const glm::vec3 look = behind ? eye - aim : eye + aim;
+    const glm::mat4 view = glm::lookAt(eye, look, glm::vec3(0, 1, 0));
+    CameraComponent cam;
+    cam.Fov = 60.0f;
+    cam.NearClip = 0.1f;
+    cam.FarClip = 200.0f;
+    const glm::mat4 proj = cam.ProjectionMatrix((float)w / (float)h);
+
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear(true, true);
+    SkyRenderer sky;
+    sky.Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
+             CelestialsFromEnvironment(env));
+    r.Batch.RenderColor(scene, view, proj, eye, env, ShadowBinding(r.Shadow, false), 0);
+
+    if (flareOn) {
+        sage::render::LensFlareSettings s;
+        s.Enabled = true;
+        s.Intensity = 1.0f;
+        sage::render::LensFlare flare;
+        flare.Render(sceneFbo, sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view,
+                     env, s);
+    }
+
+    sage::render::PostFXSettings fx = BaseSettings();
+    fx.Vignette = 0.0f;      // виньетка съедает призраки у края и мешает считать
+    fx.BloomEnabled = false; // свечение размазало бы разницу, которую мы меряем
+    r.Fx.ResetHistory();
+    r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, fx, &output, 0,
+                0, w, h);
+
+    output.Bind();
+    Image img = Capture(w, h);
+
+    double sum = 0.0;
+    for (size_t i = 0; i + 2 < img.Pixels.size(); i += 4)
+        sum += 0.2126 * img.Pixels[i] + 0.7152 * img.Pixels[i + 1] + 0.0722 * img.Pixels[i + 2];
+    outMeanLuma = (float)(sum / (double)(w * h));
+    return img;
+}
+
+} // namespace
+
+void TestLensFlare(FrameRenderer& r) {
+    std::printf("=== Блик в объективе ===\n");
+
+    float lumaOff = 0.0f, lumaOn = 0.0f, lumaBlocked = 0.0f, lumaBehind = 0.0f;
+    RenderFlareFrame(r, /*flareOn=*/false, /*blocker=*/false, /*behind=*/false, lumaOff);
+    Image on = RenderFlareFrame(r, true, false, false, lumaOn);
+    RenderFlareFrame(r, true, true, false, lumaBlocked);
+    float lumaBlockedOff = 0.0f;
+    RenderFlareFrame(r, false, true, false, lumaBlockedOff);
+    RenderFlareFrame(r, true, false, true, lumaBehind);
+    float lumaBehindOff = 0.0f;
+    RenderFlareFrame(r, false, false, true, lumaBehindOff);
+
+    std::printf("       средняя яркость: без блика %.2f, с бликом %.2f\n", lumaOff, lumaOn);
+    Check(lumaOn > lumaOff + 1.0f, "блик добавляет свет в кадр");
+
+    std::printf("       солнце за стеной: без блика %.2f, с бликом %.2f\n", lumaBlockedOff,
+                lumaBlocked);
+    Check(std::abs(lumaBlocked - lumaBlockedOff) < 0.35f,
+          "закрытое геометрией солнце блика не даёт");
+
+    std::printf("       солнце за спиной: без блика %.2f, с бликом %.2f\n", lumaBehindOff,
+                lumaBehind);
+    Check(std::abs(lumaBehind - lumaBehindOff) < 0.05f, "солнце за спиной блика не даёт");
+
+    Report("lens_flare", CompareWithReference("lens_flare", on));
+}
+
 // Швы куба — главный артефакт карт окружения. Грани снимаются по отдельности, и
 // на стыке фильтрация не может дотянуться до соседней грани: получается светлая
 // или тёмная линия, тем толще, чем размытее мип. Проверяем ЧИСЛЕННО: читаем
@@ -2435,6 +2568,7 @@ int main(int argc, char** argv) {
         TestMsaa(renderer);
         TestMorphTargets(renderer);
         TestInverseKinematicsECS();
+        TestLensFlare(renderer);
         TestReflections(renderer);
         TestReflectionProbe(renderer);
         TestReflectionSeams();

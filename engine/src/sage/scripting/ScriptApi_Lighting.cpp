@@ -2,6 +2,7 @@
 
 #include "sage/core/Config.h"
 #include "sage/core/Log.h"
+#include "sage/ecs/LightSystem.h"
 
 // ---------------------------------------------------------------------------
 // Освещение и отражения: sage.light.*, sage.reflect.*
@@ -104,6 +105,64 @@ void ScriptEngine::RegisterLightingApi() {
         return m_scene->Lighting;
     });
 
+    // --- Солнце: писать НАДО сюда, а не в GetLighting().Sun -----------------
+    //
+    // Направленный свет-СУЩНОСТЬ перекрывает солнце из настроек сцены (см.
+    // ecs::CollectLighting), и в сценах, прошедших миграцию до пятой версии,
+    // такая сущность есть всегда: её заводит сам движок. Скрипт, который
+    // честно писал GetLighting().Sun.Direction каждый кадр, при этом не менял
+    // НИЧЕГО — и понять это по картинке нельзя: цвет неба и туман он менял
+    // теми же строками рядом, а солнце с тенями стояло на месте. Ровно так и
+    // потерялся ход солнца в «Корабле»: сутки шли, небо краснело, тени не
+    // двигались.
+    //
+    // Эта функция пишет ТУДА, ОТКУДА КАДР ЧИТАЕТ: есть направленный свет
+    // сущностью — правим его (в том числе поворот, из которого берётся
+    // направление), нет — правим настройки сцены.
+    Bind("light", "SetSun", "SetSun", [this](sol::table t) {
+        if (!m_scene) throw std::runtime_error("SetSun: сцена не привязана (BindScene не вызван)");
+
+        const sol::optional<glm::vec3> dir = t["direction"];
+        const sol::optional<glm::vec3> color = t["color"];
+        const sol::optional<float> intensity = t["intensity"];
+
+        // Тот же выбор солнца, что и у CollectLighting: наименьший id, то есть
+        // первый направленный свет в иерархии. Иначе скрипт правил бы одно
+        // солнце, а кадр рисовался бы по другому.
+        entt::entity best = entt::null;
+        int bestId = 0;
+        auto view = m_scene->Registry().view<LightComponent, Transform>();
+        for (auto e : view) {
+            if (view.get<LightComponent>(e).Kind != LightComponent::Type::Directional) continue;
+            const IdComponent* id = m_scene->Registry().try_get<IdComponent>(e);
+            const int candidate = id ? id->Id : 0;
+            if (best != entt::null && candidate >= bestId) continue;
+            best = e;
+            bestId = candidate;
+        }
+
+        if (best != entt::null) {
+            LightComponent& lc = m_scene->Registry().get<LightComponent>(best);
+            if (color) lc.Color = *color;
+            if (intensity) lc.Intensity = *intensity;
+            if (dir) {
+                // Направление у сущности живёт в ПОВОРОТЕ: свет светит туда,
+                // куда смотрит объект. Пишем поворот, а не воображаемое поле
+                // направления, — иначе гизмо в редакторе показывало бы одно, а
+                // кадр освещался бы по другому.
+                m_scene->Registry().get<Transform>(best).Rotation =
+                    sage::ecs::EulerFromForward(*dir);
+            }
+        }
+
+        // Основание правим ВСЕГДА, даже когда сущность нашлась: удаление
+        // солнца-объекта должно возвращать сцену к настройкам, а не к тем
+        // значениям, что лежали в файле при загрузке.
+        if (dir) m_scene->Lighting.Sun.Direction = *dir;
+        if (color) m_scene->Lighting.Sun.Color = *color;
+        if (intensity && best == entt::null) m_scene->Lighting.Sun.Intensity = *intensity;
+    });
+
     // --- Объём: лучи и облака (см. render/Volumetrics.h) --------------------
     //
     // Из скрипта, а не только из файла настроек: включать самый дорогой проход
@@ -135,6 +194,31 @@ void ScriptEngine::RegisterLightingApi() {
     });
     Bind("volumetric", "Enabled", "VolumetricsEnabled", []() -> bool {
         return sage::EngineConfig::Get().Volumetrics;
+    });
+
+    // --- Блик в объективе (см. render/LensFlare.h) --------------------------
+    //
+    // Из скрипта по той же причине, что и объём: блик уместен не всегда, и
+    // решает это игра. У «Корабля» он живёт ровно на восходе и закате, когда
+    // солнце низко и смотришь на него в упор, — днём в зените он был бы
+    // грязью на весь кадр.
+    Bind("lensflare", "Set", "SetLensFlare", [](sol::table t) {
+        sage::EngineConfig& cfg = sage::EngineConfig::Get();
+        cfg.LensFlare = t.get_or("enabled", cfg.LensFlare);
+        cfg.LensFlareIntensity = t.get_or("intensity", cfg.LensFlareIntensity);
+        cfg.LensFlareGhosts = t.get_or("ghosts", cfg.LensFlareGhosts);
+        cfg.LensFlareGhostSpacing = t.get_or("ghostSpacing", cfg.LensFlareGhostSpacing);
+        cfg.LensFlareGhostSize = t.get_or("ghostSize", cfg.LensFlareGhostSize);
+        cfg.LensFlareBlades = t.get_or("blades", cfg.LensFlareBlades);
+        cfg.LensFlareHalo = t.get_or("halo", cfg.LensFlareHalo);
+        cfg.LensFlareHaloRadius = t.get_or("haloRadius", cfg.LensFlareHaloRadius);
+        cfg.LensFlareStarburst = t.get_or("starburst", cfg.LensFlareStarburst);
+        cfg.LensFlareGlare = t.get_or("glare", cfg.LensFlareGlare);
+        cfg.LensFlareChroma = t.get_or("chroma", cfg.LensFlareChroma);
+        cfg.LensFlareThreshold = t.get_or("threshold", cfg.LensFlareThreshold);
+    });
+    Bind("lensflare", "Enabled", "LensFlareEnabled", []() -> bool {
+        return sage::EngineConfig::Get().LensFlare;
     });
 }
 

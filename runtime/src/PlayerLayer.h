@@ -17,6 +17,7 @@
 #include "sage/render/FrameGraph.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/LensFlare.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
@@ -129,6 +130,7 @@ private:
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<sage::render::PostFX> m_postfx;
     std::optional<sage::render::Volumetrics> m_volumetrics;
+    std::optional<sage::render::LensFlare> m_lensFlare;
     // UI сцены (компоненты sage::ui из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.
     std::unique_ptr<UIRenderer> m_ui;

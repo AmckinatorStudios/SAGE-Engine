@@ -31,6 +31,7 @@
 #include "sage/render/ShadowAtlas.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
+#include "sage/scripting/ScriptEngine.h"
 
 namespace {
 
@@ -248,4 +249,50 @@ TEST(PerspectiveDepth_spans_the_whole_range) {
     // глубине считается из расстояния: середина диапазона по МЕТРАМ лежит
     // далеко за серединой по глубине.
     CHECK_TRUE(sage::render::PerspectiveDepth01((n + f) * 0.5f, n, f) > 0.9f);
+}
+
+// --- sage.light.SetSun: писать надо туда, откуда кадр читает -----------------
+//
+// ЛОВУШКА, ИЗ-ЗА КОТОРОЙ ЭТОТ ТЕСТ ЕСТЬ. Сцена, прошедшая миграцию до пятой
+// версии, всегда содержит солнце ОТДЕЛЬНОЙ СУЩНОСТЬЮ, и эта сущность
+// перекрывает солнце из настроек сцены. Скрипт суточного цикла при этом писал
+// GetLighting().Sun.Direction — то есть в перекрытое основание, — и не менял
+// ничего. Заметить это по картинке нельзя: соседние строки того же скрипта
+// красили небо и туман и слушались, а солнце с тенями стояло на месте весь
+// игровой день. Ровно так ход солнца и потерялся в «Корабле».
+//
+// Проверяем то единственное, что здесь важно: после SetSun кадр видит НОВОЕ
+// направление — не поле в настройках, а результат CollectLighting.
+TEST(Lighting_set_sun_reaches_the_frame_through_the_light_entity) {
+    ScriptEngine se;
+    Scene scene("СолнцеСущностью");
+    se.BindScene(scene);
+
+    scene.Lighting.Sun.Direction = glm::normalize(glm::vec3(0.0f, -1.0f, 0.0f));
+    GameObject sun = MakeLight(scene, "Sun", LightComponent::Type::Directional);
+    sun.GetTransform().Rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+
+    se.Lua().script("sage.light.SetSun{direction = Vec3(1, -1, 0), intensity = 2.5,"
+                    "                  color = Vec3(1, 0.5, 0.25)}");
+
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    const glm::vec3 want = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f));
+    CHECK_NEAR(env.Sun.Direction.x, want.x, 1e-3);
+    CHECK_NEAR(env.Sun.Direction.y, want.y, 1e-3);
+    CHECK_NEAR(env.Sun.Intensity, 2.5f, 1e-4);
+    CHECK_NEAR(env.Sun.Color.g, 0.5f, 1e-4);
+}
+
+// И тот же вызов обязан работать там, где солнца-сущности нет вовсе: сцены,
+// собранные кодом (превью ассетов, тесты, маленькие игры), живут на настройках.
+TEST(Lighting_set_sun_falls_back_to_scene_settings) {
+    ScriptEngine se;
+    Scene scene("СолнцеНастройкой");
+    se.BindScene(scene);
+
+    se.Lua().script("sage.light.SetSun{direction = Vec3(0, -1, -1), intensity = 0.75}");
+
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    CHECK_NEAR(env.Sun.Intensity, 0.75f, 1e-4);
+    CHECK_NEAR(glm::normalize(env.Sun.Direction).z, -0.7071f, 1e-3);
 }

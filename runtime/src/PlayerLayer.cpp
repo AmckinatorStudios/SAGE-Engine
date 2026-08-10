@@ -872,6 +872,18 @@ void PlayerLayer::OnRender() {
                                   m_sceneTime);
         }
 
+        // Блик в объективе — ПОСЛЕ объёма: облако, закрывшее солнце, обязано
+        // погасить и блик, а до объёма его в кадре ещё нет. И до пост-обработки:
+        // блик должен пройти через bloom и тон-маппинг вместе со всем кадром.
+        if (usePost && cfg.LensFlare) {
+            m_sceneFbo->Resolve();
+            if (!m_lensFlare) m_lensFlare.emplace();
+            m_lensFlare->Render(*m_sceneFbo, m_sceneFbo->ColorTexture(),
+                                m_sceneFbo->DepthTexture(), m_sceneFbo->Width(),
+                                m_sceneFbo->Height(), proj, view, env,
+                                sage::render::LensFlareFromConfig(cfg));
+        }
+
         if (usePost) {
             m_sceneFbo->Resolve(); // MSAA -> обычные текстуры (без MSAA — пустышка)
             device.BindDefaultFramebuffer();
