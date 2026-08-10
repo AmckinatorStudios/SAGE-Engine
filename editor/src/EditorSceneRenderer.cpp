@@ -164,7 +164,9 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
     v.FovY = glm::radians(camera.Fov);
     v.Aspect = window.Height() > 0 ? (float)window.Width() / (float)window.Height() : 1.0f;
     v.Near = camera.NearClip;
-    v.ShadowDistance = cfg.ShadowDistance;
+    // Дальность теней: сцена главнее настроек. Масштаб мира знает игра, а не
+    // игрок в меню качества (см. sage::ShadowSettings).
+    v.ShadowDistance = env.Shadows.Distance > 0.0f ? env.Shadows.Distance : cfg.ShadowDistance;
     if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
     else m_shadows->FitSingle(env.Sun.Direction, v);
     sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());

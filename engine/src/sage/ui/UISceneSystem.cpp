@@ -894,6 +894,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
 
     // Нажатие: назначает фокус (полю ввода) и «прижимает» элемент.
     if (input.MousePressed) {
+        if (hovered != entt::null) result.PressedAction = reg.get<Interactable>(hovered).Action;
         for (const Solved& it : items) {
             State* st = stateOf(it.Entity);
             if (!st) continue;
@@ -914,6 +915,9 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     // щелчком не считается: увести палец с кнопки — общепринятый способ
     // передумать, и ломать его нельзя.
     if (input.MouseReleased && hovered != entt::null) {
+        // Отпустили НАД этим элементом — независимо от того, где нажали.
+        // Именно этим щелчок отличается от переноса, и знать надо оба.
+        result.ReleasedAction = reg.get<Interactable>(hovered).Action;
         if (State* st = stateOf(hovered)) {
             if (st->Pressed) {
                 st->Clicked = true;
@@ -1009,6 +1013,12 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     }
 
     if (hovered != entt::null) result.WantsMouse = true;
+
+    // Что видела мышь в этом кадре — в саму сцену: игра читает это через
+    // sage.ui.* и не зависит от того, кто именно крутит кадр (см. Scene::UiFrame).
+    result.Cursor = input.Mouse;
+    result.MouseDown = input.MouseDown;
+    scene.UiFrame = result;
     return result;
 }
 

@@ -487,7 +487,7 @@ void PlayerLayer::UpdateUiInput(float dt) {
         m_uiCallbacksBound = true;
         window.SetCharCallback(
             [this](unsigned int cp) { sage::ui::AppendUtf8(m_uiInput.TypedText, cp); });
-        window.SetKeyCallback([this](int key, int action, int) {
+        window.AddKeyCallback([this](int key, int action, int) {
             if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
             switch (key) {
                 case GLFW_KEY_BACKSPACE: m_uiInput.Backspace = true; break;
@@ -695,7 +695,12 @@ void PlayerLayer::OnRender() {
             v.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
             v.Aspect = aspect;
             v.Near = proj[3][2] / (proj[2][2] - 1.0f);
-            v.ShadowDistance = cfg.ShadowDistance;
+            // Дальность теней: сцена главнее настроек. Сто двадцать метров на
+            // тридцатиметровую лодку — это карта теней, четыре пятых которой
+            // ушли в пустую воду, и оторванная от предмета тень (см.
+            // sage::ShadowSettings).
+            v.ShadowDistance =
+                env.Shadows.Distance > 0.0f ? env.Shadows.Distance : cfg.ShadowDistance;
             // Одна карта — это тоже карта ВОКРУГ КАМЕРЫ, а не вокруг начала мира:
             // раньше здесь стоял ортобокс радиусом 24 м в точке (0,0,0), и всё, что
             // игра успевала отплыть или отойти от неё, оставалось без теней —

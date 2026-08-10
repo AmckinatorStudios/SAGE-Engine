@@ -14,6 +14,9 @@
 #include "sage/core/Systems.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/PbrShader.h"
+#include "sage/scene/Scene.h"
+#include "sage/scene/SceneSerializer.h"
+#include "sage/ecs/RenderComponents.h"
 #include <cstring>
 
 using sage::EngineConfig;
@@ -405,4 +408,32 @@ TEST(SaveGame_leaves_no_temporary_file_behind) {
     CHECK_TRUE(sage::save::Read("slot", payload, nullptr));
     CHECK_TRUE(payload.find("\"n\"") != std::string::npos);
     std::filesystem::remove_all(sandbox);
+}
+
+// Дальность теней и флаги «не отбрасывать тень / не отражаться» переживают
+// запись сцены. Оба поля появились ради вида от первого лица и масштаба мира —
+// и оба бесполезны, если теряются при сохранении.
+TEST(Scene_keeps_shadow_distance_and_renderer_flags) {
+    Scene scene("S");
+    scene.Lighting.Shadows.Distance = 45.0f;
+    GameObject hand = scene.CreateObject("Hand");
+    MeshRendererComponent& mr = hand.Renderer();
+    // Меш НЕ назначаем: тест про поля, а куб при загрузке потянул бы за собой
+    // ресурсы, то есть графический девайс, которого в модульных тестах нет.
+    mr.Ref = MeshRef{MeshRef::Type::None, ""};
+    mr.CastShadows = false;
+    mr.InReflections = false;
+
+    const std::string text = SceneSerializer::SaveToString(scene);
+    std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(text);
+    CHECK_NEAR(back->Lighting.Shadows.Distance, 45.0f, 1e-4f);
+
+    bool found = false;
+    for (auto e : back->Registry().view<MeshRendererComponent>()) {
+        const MeshRendererComponent& r = back->Registry().get<MeshRendererComponent>(e);
+        found = true;
+        CHECK_FALSE(r.CastShadows);
+        CHECK_FALSE(r.InReflections);
+    }
+    CHECK_TRUE(found);
 }

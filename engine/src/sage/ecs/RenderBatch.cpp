@@ -366,6 +366,10 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         // одним материалом даёт ровно один проход этого цикла — то есть ровно
         // то, что было до подмешей.
         const MeshRendererComponent& mr = *c.MR;
+        // Предметы «на камере» (рука, оружие) в карту теней и в зеркало не
+        // идут: см. MeshRendererComponent::CastShadows / InReflections.
+        if (m_collectingShadows && !mr.CastShadows) continue;
+        if (m_skipPlanarReflectors && !mr.InReflections) continue;
         const std::vector<sage::render::Submesh>& subs = c.Mesh_->Submeshes();
         for (unsigned int si = 0; si < (unsigned int)subs.size(); ++si) {
             const Material* mat = MaterialForSubmesh(mr, si);
@@ -944,7 +948,9 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
 
 void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
     m_stats = {};
+    m_collectingShadows = true;
     CollectVisible(scene, lightMatrix); // отсечение по фрустуму света
+    m_collectingShadows = false;
 
     // Flat — инстансно.
     Shader& di = DepthInstShader();

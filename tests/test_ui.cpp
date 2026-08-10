@@ -1333,3 +1333,46 @@ TEST(UITools_union_covers_everything) {
     CHECK_NEAR(u.w, 45.0f, 1e-3f);   // от -5 до 40
     CHECK_NEAR(u.h, 90.0f, 1e-3f);   // от 20 до 110
 }
+
+// --- Перетаскивание: нажали на одном, отпустили на другом ---------------------
+//
+// Щелчок — это нажатие и отпускание на ОДНОМ элементе; перенос вещи из ячейки в
+// ячейку — на разных. Пока интерфейс сообщал только «щёлкнули по такому-то
+// действию», второго случая для игры не существовало, и перетаскивание в
+// инвентаре было невозможно написать в принципе.
+TEST(UI_press_and_release_name_both_ends_of_a_drag) {
+    Scene scene("U");
+    GameObject from = scene.CreateObject("SlotA");
+    sage::ui::LegacyElement a =
+        MakeInteractive(sage::ui::LegacyElement::Kind::Panel, {10, 10}, {60, 60});
+    PutElement(scene, from, a);
+    scene.Registry().get<sage::ui::Interactable>(from.Entity()).Action = "slot:1";
+
+    GameObject to = scene.CreateObject("SlotB");
+    sage::ui::LegacyElement b =
+        MakeInteractive(sage::ui::LegacyElement::Kind::Panel, {200, 10}, {60, 60});
+    PutElement(scene, to, b);
+    scene.Registry().get<sage::ui::Interactable>(to.Entity()).Action = "slot:7";
+
+    // Нажали на первой ячейке.
+    sage::ui::UIInputResult down = sage::ui::UpdateSceneUI(scene, ClickAt({30, 30}), 800, 600);
+    CHECK_TRUE(down.PressedAction == "slot:1");
+    CHECK_TRUE(down.ReleasedAction.empty());
+    // Курсор отдаётся игре в тех же координатах, в которых свёрстан интерфейс:
+    // ей рисовать по нему то, что «в руке».
+    CHECK_NEAR(down.Cursor.x, 30.0f, 1e-4f);
+    CHECK_TRUE(down.MouseDown);
+
+    // Довели до второй и отпустили.
+    sage::ui::UIInputState up;
+    up.Mouse = {230, 30};
+    up.MouseReleased = true;
+    sage::ui::UIInputResult drop = sage::ui::UpdateSceneUI(scene, up, 800, 600);
+    CHECK_TRUE(drop.ReleasedAction == "slot:7");
+    CHECK_TRUE(drop.PressedAction.empty());
+    // Щелчком это НЕ считается: отпустили не там, где нажали.
+    CHECK_TRUE(drop.ClickedAction.empty());
+
+    // И то же самое видно из сцены — оттуда это читает игра (sage.ui.*).
+    CHECK_TRUE(scene.UiFrame.ReleasedAction == "slot:7");
+}

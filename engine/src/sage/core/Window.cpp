@@ -24,7 +24,14 @@ void Window::ForwardChar(GLFWwindow* handle, unsigned int codepoint) {
 
 void Window::ForwardKey(GLFWwindow* handle, int key, int, int action, int mods) {
     auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
-    if (win && win->m_keyFn) win->m_keyFn(key, action, mods);
+    if (!win) return;
+    for (const KeyFn& fn : win->m_keyFns) fn(key, action, mods);
+}
+
+void Window::ForwardMouseButton(GLFWwindow* handle, int button, int action, int mods) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (!win) return;
+    for (const MouseButtonFn& fn : win->m_mouseButtonFns) fn(button, action, mods);
 }
 
 void Window::ForwardFileDrop(GLFWwindow* handle, int count, const char** paths) {
@@ -98,6 +105,7 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwSetScrollCallback(m_handle, &Window::ForwardScroll);
     glfwSetCharCallback(m_handle, &Window::ForwardChar);
     glfwSetKeyCallback(m_handle, &Window::ForwardKey);
+    glfwSetMouseButtonCallback(m_handle, &Window::ForwardMouseButton);
     glfwSetDropCallback(m_handle, &Window::ForwardFileDrop);
 
     // Загрузку драйвера (glad) и дефолтное состояние конвейера (depth test,

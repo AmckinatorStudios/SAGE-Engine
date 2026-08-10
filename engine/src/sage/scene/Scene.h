@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 #include "sage/scene/Transform.h"
 #include "sage/scene/Light.h"
+#include "sage/ui/UIInteraction.h"
 #include "sage/scene/Components.h"
 #include "sage/render/Reflection.h"
 
@@ -202,6 +203,13 @@ public:
     // Отражения — тоже свойство сцены, а не рендера: в открытом море отражается
     // небо, в помещении — снятый зондом куб, а высота воды принадлежит игре.
     sage::render::ReflectionSettings Reflections;
+
+    // Что интерфейс сцены увидел от мыши в этом кадре (курсор, нажатие,
+    // отпускание). Живёт в сцене, а не в хозяине кадра, потому что читает это
+    // ИГРА через sage.ui.*, а хозяев кадра двое — плеер и панель Game
+    // редактора: держать состояние у каждого значило бы, что в редакторе
+    // перетаскивание предметов работает иначе, чем в игре, или не работает.
+    sage::ui::UIInputResult UiFrame;
 
     // Запечённое глобальное освещение (лайтмапы + GI-объём проб, см. sage/gi).
     // nullptr — GI не запекалось. shared_ptr намеренно: снапшоты сцены

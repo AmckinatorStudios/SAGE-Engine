@@ -48,13 +48,20 @@ void ScriptEngine::RegisterLightingApi() {
         "MoonSize", &SkyboxSettings::MoonSize,
         "StarIntensity", &SkyboxSettings::StarIntensity
     );
+    // Дальность теней — свойство МИРА, а не настроек качества: масштаб сцены
+    // знает игра. Ноль означает «взять из настроек движка» (см.
+    // sage::ShadowSettings).
+    m_lua.new_usertype<ShadowSettings>("ShadowSettings",
+        "Distance", &ShadowSettings::Distance
+    );
     m_lua.new_usertype<LightingEnvironment>("LightingEnvironment",
         "SkyColor", &LightingEnvironment::SkyColor,
         "GroundColor", &LightingEnvironment::GroundColor,
         "AmbientStrength", &LightingEnvironment::AmbientStrength,
         "Sun", &LightingEnvironment::Sun,
         "Fog", &LightingEnvironment::Fog,
-        "Skybox", &LightingEnvironment::Skybox
+        "Skybox", &LightingEnvironment::Skybox,
+        "Shadows", &LightingEnvironment::Shadows
     );
     // --- Отражения ---------------------------------------------------------
     //

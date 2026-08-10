@@ -4,6 +4,7 @@
 #include "Window.h"
 #include "sage/render/Camera.h"
 #include <GLFW/glfw3.h>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------
 // InputSystem — мост между "сырым" GLFW и именованными действиями
@@ -41,6 +42,30 @@ public:
             // порядка в списках (вверх = к началу = меньший индекс)
             m_scrollDelta += (yoffset > 0) ? -1 : 1;
         });
+        // --- ЗАЩЁЛКИ КОРОТКИХ НАЖАТИЙ ---------------------------------------
+        //
+        // Действия решаются ОПРОСОМ: раз в кадр движок спрашивает у окна,
+        // нажата ли клавиша сейчас. Нажатие, которое началось и кончилось
+        // МЕЖДУ двумя опросами, при этом не существует вовсе — WasPressed не
+        // сработает ни разу.
+        //
+        // На шестидесяти кадрах это редкость, но проседания кадра случаются у
+        // всех (загрузка чанка, alt-tab, слабая машина, программный
+        // растеризатор), а теряются при этом ровно те клавиши, которые
+        // ЖМУТ КОРОТКО: инвентарь, меню, прыжок, выстрел. Со стороны человека
+        // это «игра иногда не реагирует» — самый неприятный вид поломки, потому
+        // что воспроизводится через раз и списывается на «показалось».
+        //
+        // Событие нажатия приходит колбэком окна и защёлкивается здесь; опрос
+        // следующего кадра видит клавишу нажатой, даже если физически её уже
+        // отпустили. Отпускание при этом обработается кадром позже — то есть
+        // короткий тап превращается ровно в один кадр «нажато», чего и ждут.
+        window.AddKeyCallback([this](int key, int action, int) {
+            if (action == GLFW_PRESS) m_keyLatch.insert(key);
+        });
+        window.AddMouseButtonCallback([this](int button, int action, int) {
+            if (action == GLFW_PRESS) m_mouseLatch.insert(button);
+        });
     }
 
     InputMap& Actions() { return m_actions; }
@@ -69,10 +94,12 @@ public:
             for (const InputBinding& binding : action.Bindings()) {
                 switch (binding.Kind) {
                     case BindingKind::Keyboard:
-                        down = down || (glfwGetKey(window, binding.Code) == GLFW_PRESS);
+                        down = down || (glfwGetKey(window, binding.Code) == GLFW_PRESS) ||
+                               m_keyLatch.count(binding.Code) > 0;
                         break;
                     case BindingKind::MouseButton:
-                        down = down || (glfwGetMouseButton(window, binding.Code) == GLFW_PRESS);
+                        down = down || (glfwGetMouseButton(window, binding.Code) == GLFW_PRESS) ||
+                               m_mouseLatch.count(binding.Code) > 0;
                         break;
                     case BindingKind::ScrollUp:
                         if (m_scrollDelta < 0) action.PulseOnce(); // вверх = отрицательный yoffset по конвенции движка
@@ -92,6 +119,10 @@ public:
             if (hasDiscreteBinding) action.Update(down);
         }
         m_scrollDelta = 0; // одноразовое событие колеса — живёт один кадр
+        // Защёлки живут ровно один кадр: их дело — донести нажатие до опроса,
+        // а не удерживать клавишу дольше, чем её держал человек.
+        m_keyLatch.clear();
+        m_mouseLatch.clear();
     }
 
     // Кадр БЕЗ ввода: все действия гасятся так, будто ничего не нажато, а
@@ -104,6 +135,11 @@ public:
         m_frameScrollDelta = 0;
         m_mouseDeltaX = m_mouseDeltaY = 0.0f;
         m_scrollDelta = 0;
+        // И защёлки тоже: клавиши, нажатые пока ввод был не у игры, ей не
+        // принадлежат — иначе клик по инспектору «доедет» до игрока, как только
+        // фокус вернётся.
+        m_keyLatch.clear();
+        m_mouseLatch.clear();
         for (auto& [name, action] : m_actions.All()) {
             action.EndFrame();
             action.Update(false);
@@ -131,8 +167,8 @@ public:
     float MouseY() const { return m_lastY; }
 
 private:
-    // Кнопки мыши читаются poll-ом (glfwGetMouseButton) в Update(), не
-    // колбэком — тем же способом, что и клавиатура.
+    // Кнопки мыши и клавиши читаются опросом в Update() — плюс защёлки
+    // коротких нажатий из колбэков окна (см. Attach).
     void OnMouseMove(double xpos, double ypos) {
         if (m_firstMouse) {
             m_lastX = (float)xpos;
@@ -151,6 +187,9 @@ private:
     float m_lastX = 0.0f, m_lastY = 0.0f;
     float m_mouseDeltaX = 0.0f, m_mouseDeltaY = 0.0f; // накопитель между кадрами
     int m_scrollDelta = 0;
+    // Клавиши и кнопки, НАЖАТЫЕ СОБЫТИЕМ с прошлого опроса (см. Attach).
+    std::unordered_set<int> m_keyLatch;
+    std::unordered_set<int> m_mouseLatch;
     // Снимок на кадр (см. Update): то, что видят ВСЕ читатели весь кадр.
     float m_frameMouseDeltaX = 0.0f, m_frameMouseDeltaY = 0.0f;
     int m_frameScrollDelta = 0;

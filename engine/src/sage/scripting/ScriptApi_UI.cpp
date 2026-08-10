@@ -503,6 +503,27 @@ void ScriptEngine::RegisterUIApi() {
         return {};
     });
 
+    // Курсор в координатах интерфейса и то, что мышь сделала за кадр.
+    //
+    // Ради перетаскивания предметов: пока игра знала только «щёлкнули по
+    // такому-то действию», перенести вещь из ячейки в ячейку было нечем —
+    // щелчок это нажатие и отпускание на ОДНОМ элементе, а перенос на разных.
+    // Плюс сам предмет надо нарисовать под курсором, а точки курсора в
+    // координатах кадра у скрипта не было вовсе: у окна свои координаты, у
+    // letterbox-кадра свои, у холста свой масштаб.
+    Bind("ui", "Cursor", "UICursor", [this]() -> glm::vec2 {
+        return m_scene ? m_scene->UiFrame.Cursor : glm::vec2(-1.0f);
+    });
+    Bind("ui", "MouseDown", "UIMouseDown", [this]() -> bool {
+        return m_scene && m_scene->UiFrame.MouseDown;
+    });
+    Bind("ui", "PressedAction", "UIPressedAction", [this]() -> std::string {
+        return m_scene ? m_scene->UiFrame.PressedAction : std::string();
+    });
+    Bind("ui", "ReleasedAction", "UIReleasedAction", [this]() -> std::string {
+        return m_scene ? m_scene->UiFrame.ReleasedAction : std::string();
+    });
+
     // Что под курсором — тем же именем действия. Пара к ClickedAction, и нужна
     // ровно там же, где она: подсказка о предмете, из чего он делается и чего
     // не хватает, показывается ДО щелчка, а не после. Без этого игре пришлось

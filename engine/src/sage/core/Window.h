@@ -57,6 +57,9 @@ public:
     // Клавиши РЕДАКТИРОВАНИЯ (Backspace, стрелки, Enter…): у них нет символа, а
     // автоповтор при удержании должен работать — поэтому событием, а не опросом.
     using KeyFn = std::function<void(int key, int action, int mods)>;
+    // Кнопки мыши — тем же событием и по той же причине, что клавиши: щелчок
+    // короче кадра существует, а опрос его не видит (см. AddKeyCallback).
+    using MouseButtonFn = std::function<void(int button, int action, int mods)>;
     // Файлы, брошенные В ОКНО из проводника системы.
     //
     // Это единственный способ узнать о таком перетаскивании: оконная система
@@ -69,7 +72,13 @@ public:
     void SetCursorPosCallback(CursorPosFn fn) { m_cursorPosFn = std::move(fn); }
     void SetScrollCallback(ScrollFn fn) { m_scrollFn = std::move(fn); }
     void SetCharCallback(CharFn fn) { m_charFn = std::move(fn); }
-    void SetKeyCallback(KeyFn fn) { m_keyFn = std::move(fn); }
+    // Слушателей клавиш НЕСКОЛЬКО, и это не удобство, а необходимость: их
+    // двое сразу — ввод игры (защёлкивает короткие нажатия, см.
+    // InputSystem::Attach) и поле ввода интерфейса (Backspace со
+    // автоповтором). Пока слот был один, второй подписчик молча отменял
+    // первого, и что именно сломается, зависело от порядка инициализации.
+    void AddKeyCallback(KeyFn fn) { m_keyFns.push_back(std::move(fn)); }
+    void AddMouseButtonCallback(MouseButtonFn fn) { m_mouseButtonFns.push_back(std::move(fn)); }
     void SetFileDropCallback(FileDropFn fn) { m_fileDropFn = std::move(fn); }
 
     // Захват курсора: мышь прячется и «прилипает» к окну, продолжая отдавать
@@ -84,6 +93,7 @@ private:
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
     static void ForwardChar(GLFWwindow* handle, unsigned int codepoint);
     static void ForwardKey(GLFWwindow* handle, int key, int scancode, int action, int mods);
+    static void ForwardMouseButton(GLFWwindow* handle, int button, int action, int mods);
     static void ForwardFileDrop(GLFWwindow* handle, int count, const char** paths);
 
     GLFWwindow* m_handle = nullptr;
@@ -92,7 +102,8 @@ private:
     CursorPosFn m_cursorPosFn;
     ScrollFn m_scrollFn;
     CharFn m_charFn;
-    KeyFn m_keyFn;
+    std::vector<KeyFn> m_keyFns;
+    std::vector<MouseButtonFn> m_mouseButtonFns;
     FileDropFn m_fileDropFn;
     bool m_cursorCaptured = false;
 };

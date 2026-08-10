@@ -151,6 +151,10 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["skybox"]["moonColor"] = Vec3ToJson(lighting.Skybox.MoonColor);
     j["skybox"]["moonSize"] = lighting.Skybox.MoonSize;
     j["skybox"]["stars"] = lighting.Skybox.StarIntensity;
+
+    // Дальность теней сцены. Ноль (по умолчанию) — «взять из настроек движка»,
+    // и такие сцены ведут себя ровно как до появления поля.
+    j["shadows"]["distance"] = lighting.Shadows.Distance;
     return j;
 }
 
@@ -186,6 +190,10 @@ static LightingEnvironment LightingFromJson(const json& root) {
         light.Intensity = pj.value("intensity", light.Intensity);
         light.Range = pj.value("range", light.Range);
         lighting.PointLights.push_back(light);
+    }
+
+    if (j.contains("shadows")) {
+        lighting.Shadows.Distance = j["shadows"].value("distance", lighting.Shadows.Distance);
     }
 
     for (const auto& sj : j.value("spotLights", json::array())) {
@@ -1172,6 +1180,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["scale"]    = Vec3ToJson(tr.Scale);
         j["color"]    = Vec3ToJson(mr.Color);
         j["opacity"]  = mr.Opacity;
+        j["castShadows"] = mr.CastShadows;
+        j["inReflections"] = mr.InReflections;
         j["emissive"] = Vec3ToJson(mr.Emissive);
         j["emissiveStrength"] = mr.EmissiveStrength;
         j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
@@ -1431,6 +1441,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("scale"))    tr.Scale    = Vec3FromJson(j["scale"]);
         if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
         mr.Opacity = j.value("opacity", mr.Opacity);
+        mr.CastShadows = j.value("castShadows", mr.CastShadows);
+        mr.InReflections = j.value("inReflections", mr.InReflections);
         if (j.contains("emissive")) mr.Emissive = Vec3FromJson(j["emissive"]);
         mr.EmissiveStrength = j.value("emissiveStrength", mr.EmissiveStrength);
 

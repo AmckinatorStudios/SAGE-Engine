@@ -283,6 +283,8 @@ private:
     // Выбрасывать ли зеркальные поверхности из сборки: взводится на время
     // прохода, снимающего плоское отражение (см. ReflectionBinding).
     bool m_skipPlanarReflectors = false;
+    // Сбор идёт для КАРТЫ ТЕНЕЙ: объекты с CastShadows = false пропускаются.
+    bool m_collectingShadows = false;
 
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
