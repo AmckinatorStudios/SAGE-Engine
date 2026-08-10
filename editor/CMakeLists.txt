@@ -33,6 +33,9 @@ add_executable(SageEditor WIN32
     src/panels/ConsolePanel.cpp
     src/panels/HierarchyPanel.cpp
     src/panels/InspectorPanel.cpp
+    src/panels/InspectorPanel_Material.cpp
+    src/panels/InspectorPanel_Entity.cpp
+    src/panels/InspectorPanel_Ui.cpp
     src/panels/ViewportPanel.cpp
     src/panels/GamePanel.cpp
     src/panels/AssetsPanel.cpp
