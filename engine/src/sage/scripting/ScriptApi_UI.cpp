@@ -531,6 +531,13 @@ void ScriptEngine::RegisterUIApi() {
     Bind("ui", "Cursor", "UICursor", [this]() -> glm::vec2 {
         return m_scene ? m_scene->UiFrame.Cursor : glm::vec2(-1.0f);
     });
+    // Размер кадра в координатах интерфейса. Нужен всему, что игра ставит
+    // ПОД КУРСОР: подсказке и перетаскиваемой вещи надо отпрыгивать от краёв,
+    // а размера кадра у скрипта нет — окно, letterbox и масштаб холста дают
+    // три разных числа.
+    Bind("ui", "ScreenSize", "UIScreenSize", [this]() -> glm::vec2 {
+        return m_scene ? m_scene->UiFrame.Size : glm::vec2(0.0f);
+    });
     Bind("ui", "MouseDown", "UIMouseDown", [this]() -> bool {
         return m_scene && m_scene->UiFrame.MouseDown;
     });

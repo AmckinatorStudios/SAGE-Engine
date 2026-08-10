@@ -854,6 +854,7 @@ int HitTest(Scene& scene, float x, float y, int screenW, int screenH) {
 
 UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW, int screenH) {
     UIInputResult result;
+    result.Size = glm::vec2((float)screenW, (float)screenH);
     entt::registry& reg = scene.Registry();
     const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH);
 
