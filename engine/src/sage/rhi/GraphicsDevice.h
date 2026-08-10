@@ -105,6 +105,15 @@ public:
 
     // Стандартный alpha-blending (src_alpha, 1 - src_alpha) вкл/выкл.
     virtual void SetBlend(bool enabled) = 0;
+
+    // Режим смешивания. Alpha — обычный (цвет ещё не умножен на альфу);
+    // Premultiplied — цвет УЖЕ умножен, поэтому складывается как есть, а фон
+    // гасится на альфу. Второй нужен там, где в одном проходе идут и
+    // добавляющий свет, и закрывающая его геометрия: объёмные лучи плюс
+    // облака поверх неба композитятся одной формулой, без второго прохода.
+    // Additive — только сложение (искры, лучи без перекрытия).
+    enum class BlendMode { Alpha, Premultiplied, Additive };
+    virtual void SetBlendMode(BlendMode mode) { (void)mode; }
     virtual void SetDepthTest(bool enabled) = 0;
     virtual void SetDepthWrite(bool enabled) = 0;
     virtual void SetDepthFunc(DepthFunc func) = 0;      // LessEqual нужен skybox'у

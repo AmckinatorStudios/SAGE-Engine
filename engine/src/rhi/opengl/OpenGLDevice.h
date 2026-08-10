@@ -20,6 +20,7 @@ public:
     void BindDefaultFramebuffer() override;
 
     void SetBlend(bool enabled) override;
+    void SetBlendMode(BlendMode mode) override;
     void SetDepthTest(bool enabled) override;
     void SetDepthWrite(bool enabled) override;
     void SetDepthFunc(DepthFunc func) override;

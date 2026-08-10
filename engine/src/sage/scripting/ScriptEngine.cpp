@@ -130,6 +130,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterMathHelpers();
     RegisterLightingApi();
     RegisterPhysicsApi();
+    RegisterEventsApi();
 }
 
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
@@ -187,6 +188,8 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
         existing.Env = std::move(env);
         existing.UpdateFn = std::move(updateFn);
         existing.MessageFn = std::move(messageFn);
+        existing.FixedUpdateFn = existing.Env["OnFixedUpdate"];
+        existing.LateUpdateFn = existing.Env["OnLateUpdate"];
         existing.EntityRef = std::move(entityRef);
         existing.Object = object;
         existing.UpdateErrors = 0;
@@ -196,6 +199,8 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
 
     m_instances.push_back({ object, /*HasObject=*/true, std::move(env), std::move(updateFn),
                             std::move(messageFn), std::move(entityRef), scriptPath });
+    m_instances.back().FixedUpdateFn = m_instances.back().Env["OnFixedUpdate"];
+    m_instances.back().LateUpdateFn = m_instances.back().Env["OnLateUpdate"];
 }
 
 void ScriptEngine::RunScript(const std::string& scriptPath) {
@@ -228,6 +233,8 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
 
     m_instances.push_back({ GameObject{}, /*HasObject=*/false, std::move(env), std::move(updateFn),
                             sol::protected_function{}, sol::object{}, scriptPath });
+    m_instances.back().FixedUpdateFn = m_instances.back().Env["OnFixedUpdate"];
+    m_instances.back().LateUpdateFn = m_instances.back().Env["OnLateUpdate"];
 }
 
 void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::object data) {
@@ -277,6 +284,7 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
 // Ошибка внутри OnQuit НЕ мешает выходу: игра уже закрывается, и падать на
 // прощание — худшее, что можно сделать. Сообщаем и идём дальше.
 void ScriptEngine::DispatchQuit() {
+    if (!m_quitDispatched) DispatchEvent("quit");
     if (m_quitDispatched) return;
     m_quitDispatched = true;
 
@@ -350,9 +358,37 @@ void ScriptEngine::UpdateAll(float deltaTime) {
             [](const ScriptInstance& i) { return i.HasObject && !i.Object.Valid(); }),
         m_instances.end());
 
+    CallHook(&ScriptInstance::LateUpdateFn, deltaTime);
+
     UpdateTimers(deltaTime);
     UpdateCoroutines(deltaTime);
     m_tweens.Update(deltaTime); // твины геймплея — в такт со скриптами
+}
+
+// OnFixedUpdate: постоянный шаг с накоплением остатка. Потолок в восемь шагов
+// не даёт тяжёлому кадру утянуть кадр следующий — иначе просадка нарастает
+// сама себя.
+void ScriptEngine::UpdateFixed(float deltaTime) {
+    m_fixedAccum += deltaTime;
+    const float cap = m_fixedStep * 8.0f;
+    if (m_fixedAccum > cap) m_fixedAccum = cap;
+    while (m_fixedAccum >= m_fixedStep) {
+        CallHook(&ScriptInstance::FixedUpdateFn, m_fixedStep);
+        m_fixedAccum -= m_fixedStep;
+    }
+}
+
+void ScriptEngine::CallHook(sol::protected_function ScriptInstance::*hook, float dt) {
+    for (auto& instance : m_instances) {
+        if (instance.HasObject && !instance.Object.Valid()) continue;
+        sol::protected_function& fn = instance.*hook;
+        if (!fn.valid()) continue;
+        auto r = instance.HasObject ? fn(instance.EntityRef, dt) : fn(dt);
+        if (r.valid()) continue;
+        const sol::error err = r;
+        LOG_ERROR("ScriptEngine") << "Ошибка в хуке (" << instance.Path << "): " << err.what();
+        fn = sol::protected_function{};   // гасим, чтобы не залить лог за кадр
+    }
 }
 
 void ScriptEngine::UpdateTimers(float dt) {

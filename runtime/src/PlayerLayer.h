@@ -17,6 +17,7 @@
 #include "sage/render/FrameGraph.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/Volumetrics.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
 #include "sage/ecs/RenderBatch.h"
@@ -127,6 +128,7 @@ private:
     // постом полноразмерный HDR-таргет — чистый расход видеопамяти.
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<sage::render::PostFX> m_postfx;
+    std::optional<sage::render::Volumetrics> m_volumetrics;
     // UI сцены (компоненты sage::ui из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.
     std::unique_ptr<UIRenderer> m_ui;

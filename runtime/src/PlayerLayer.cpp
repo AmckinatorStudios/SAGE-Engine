@@ -827,6 +827,18 @@ void PlayerLayer::OnRender() {
         // Частицы (billboard) — camRight/Up берём из матрицы вида.
         if (m_particles) m_particles->DrawFromView(view, proj);
 
+        // Объём — после геометрии и ДО пост-обработки: лучи обязаны попасть в
+        // bloom, иначе солнце светится, а его лучи нет. Работает только с
+        // буфером сцены: без пост-обработки читать глубину неоткуда.
+        if (usePost && cfg.Volumetrics) {
+            m_sceneFbo->Resolve();
+            if (!m_volumetrics) m_volumetrics.emplace();
+            m_volumetrics->Render(*m_sceneFbo, m_sceneFbo->DepthTexture(), m_sceneFbo->Width(),
+                                  m_sceneFbo->Height(), proj, view, viewPos, env,
+                                  color.Shadows, sage::render::VolumetricsFromConfig(cfg),
+                                  m_sceneTime);
+        }
+
         if (usePost) {
             m_sceneFbo->Resolve(); // MSAA -> обычные текстуры (без MSAA — пустышка)
             device.BindDefaultFramebuffer();

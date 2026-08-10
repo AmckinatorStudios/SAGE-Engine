@@ -71,6 +71,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ParticleECS.cpp
     src/sage/render/ParticleSystem.cpp
     src/sage/render/PostFX.cpp
+    src/sage/render/Volumetrics.cpp
     src/sage/render/ResourceManager.cpp
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
@@ -102,6 +103,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Effects.cpp
     src/sage/scripting/ScriptApi_Runtime.cpp
     src/sage/scripting/ScriptApi_Lighting.cpp
+    src/sage/scripting/ScriptApi_Events.cpp
     src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UIIcons.cpp

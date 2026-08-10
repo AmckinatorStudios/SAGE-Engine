@@ -129,6 +129,10 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
     if (systems.Scripts) {
         ScriptEngine* scripts = systems.Scripts;
         scheduler.Add(Stage::Update, "scripts", [scripts](Scene&, float dt) {
+            // События кадра — перед OnUpdate: реакция на удар обязана попасть в
+            // тот же кадр, что и удар. Контакты берутся с прошлого шага физики.
+            scripts->DispatchFrameEvents();
+            scripts->UpdateFixed(dt);
             scripts->UpdateAll(dt);
         });
     }

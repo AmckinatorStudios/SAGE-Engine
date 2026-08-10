@@ -146,6 +146,12 @@ public:
     // резюмирует активные корутины (StartCoroutine/wait).
     void UpdateAll(float deltaTime);
 
+    // Тикает OnFixedUpdate постоянным шагом (накапливая остаток кадра).
+    // Отдельно от UpdateAll: хозяин кадра зовёт это рядом с физикой, а не со
+    // скриптами, — постоянный шаг на то и постоянный.
+    void UpdateFixed(float deltaTime);
+    void SetFixedStep(float seconds) { m_fixedStep = seconds > 0.0f ? seconds : m_fixedStep; }
+
     // Игра закрывается — последний кадр, в котором скрипты ещё живы.
     //
     // ЗАЧЕМ ЭТО ПОЯВИЛОСЬ. Без такого хука игра узнавала о закрытии НИКОГДА:
@@ -162,6 +168,20 @@ public:
     // sage.save.Write. Хозяин кадра обязан позвать его на КАЖДОМ пути выхода —
     // иначе один из путей снова станет тем, на котором прогресс теряется.
     void DispatchQuit();
+
+    // --- События движка ------------------------------------------------------
+    //
+    // Рассылает встроенные события кадра (столкновения, зоны, края контроллера
+    // персонажа, нажатия действий) подписчикам sage.events. Зовётся хозяином
+    // кадра ПОСЛЕ физики и ввода, но ДО OnUpdate: скрипт обязан отреагировать
+    // на удар в том же кадре, в котором удар случился, иначе взрыв отстаёт от
+    // столкновения на кадр, и это видно.
+    void DispatchFrameEvents();
+
+    // Разослать событие из C++ — тем же путём, каким это делает игра из
+    // sage.events.Emit. Хозяин кадра шлёт так "pause" и "quit".
+    void DispatchEvent(const std::string& name, sol::object payload = sol::nil);
+    void DispatchEvent(const std::string& name, bool flag);
 
     // Доступ к состоянию Lua — на случай если игре нужно зарегистрировать
     // свою собственную API-функцию/тип в дополнение к базовой
@@ -188,6 +208,14 @@ private:
         // kMaxUpdateErrors в .cpp).
         int UpdateErrors = 0;
         bool UpdateDisabled = false;
+
+        // OnFixedUpdate(dt) — постоянный шаг: то, что накапливается, нельзя
+        // считать по кадровому dt, иначе результат зависит от производительности
+        // машины. OnLateUpdate(dt) — после всех OnUpdate кадра: камере, следящей
+        // за игроком, нужен порядок, а между скриптами он не определён.
+        // Присваиваются после конструирования — поля идут после позиционных.
+        sol::protected_function FixedUpdateFn;
+        sol::protected_function LateUpdateFn;
         // Когда сущность объекта уничтожена (DestroyObject), Object.Valid()
         // становится false: UpdateAll() пропускает такую запись, не обращаясь к
         // мёртвой сущности, и убирает её из m_instances после прохода. Так как
@@ -327,9 +355,14 @@ private:
     void RegisterMathHelpers();   // Cross/Lerp/Clamp/Radians/Degrees
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
+    void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
 
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
+    // Общий вызов необязательного хука у всех скриптов (OnFixedUpdate,
+    // OnLateUpdate). Один код на все хуки: три копии одного цикла с гашением
+    // ошибок разъезжаются при первой же правке.
+    void CallHook(sol::protected_function ScriptInstance::*hook, float dt);
 
     // Доставляет сообщение обработчикам OnMessage привязанных объектных скриптов.
     // targetId < 0 — широковещательно (всем); иначе — только скриптам сущности с
@@ -343,6 +376,7 @@ private:
     int m_messageDepth = 0; // текущая глубина вложенных DispatchMessage
     bool m_quitDispatched = false; // OnQuit уже разослан (см. DispatchQuit)
 
+
     // Текстуры для билбордов, заказанных из Lua по пути к файлу, кэшируются
     // здесь (по пути) и живут, пока жив ScriptEngine — билборды в
     // BillboardSystem хранят на них НЕвладеющий указатель (см. AddBillboard).
@@ -353,6 +387,28 @@ private:
     std::vector<ScheduledCall> m_scheduled;
     // ЧЕРЕЗ УКАЗАТЕЛЬ, а не по значению: см. UpdateCoroutines в .cpp.
     std::vector<std::shared_ptr<CoroutineInstance>> m_coroutines;
+
+    // --- Шина событий (sage.events) -----------------------------------------
+    //
+    // ПОСЛЕ m_lua намеренно: обработчики держат ссылки в реестр Lua, а члены
+    // уничтожаются в обратном порядке объявления. Объявленные раньше состояния
+    // они пережили бы его и на выходе снимали бы ссылки в уже разрушенном
+    // интерпретаторе — падение при завершении игры, когда всё уже сделано.
+    struct Handler {
+        int Id = 0;
+        sol::protected_function Fn;
+        bool Once = false;
+        bool Dead = false;   // снят; убирается одним проходом после рассылки
+    };
+    std::unordered_map<std::string, std::vector<Handler>> m_handlers;
+    int m_nextHandler = 1;
+    int m_eventDepth = 0;
+    static constexpr int kMaxEventDepth = 8;
+
+    // Накопитель постоянного шага для OnFixedUpdate: остаток переносится на
+    // следующий кадр, иначе шаг «плавает» вместе с кадром.
+    float m_fixedAccum = 0.0f;
+    float m_fixedStep = 1.0f / 60.0f;
 
     Scene* m_scene = nullptr;
     InputMap* m_input = nullptr;

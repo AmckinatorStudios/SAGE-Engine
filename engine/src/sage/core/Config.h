@@ -113,6 +113,19 @@ struct EngineConfig {
     bool Bloom = true;             // свечение ярких участков
     float BloomThreshold = 1.0f;   // яркость, выше которой пиксель светится
     float BloomIntensity = 0.55f;  // сила добавляемого свечения
+    // --- Объёмный свет и облака (бета, см. render/Volumetrics.h) ---
+    // Выключено по умолчанию: это самый дорогой проход кадра, и игра включает
+    // его сама, когда он ей нужен и когда она проверила его на своём железе.
+    bool Volumetrics = false;
+    bool VolumetricShafts = true;   // лучи света в воздухе
+    bool VolumetricClouds = true;   // объёмные облака
+    float VolumetricDensity = 0.02f;
+    float VolumetricIntensity = 1.0f;
+    int VolumetricSteps = 28;       // шагов марша по лучу взгляда
+    int CloudSteps = 40;            // шагов марша сквозь слой облаков
+    float CloudCoverage = 0.56f;    // 0 — ясно, 1 — сплошная облачность
+    float VolumetricScale = 0.5f;   // доля разрешения прохода (0.5 — половина)
+
     bool AmbientOcclusion = true;  // SSAO — затемнение щелей/контактов
     float AOStrength = 1.0f;       // сила SSAO (0 — выкл)
     float AORadius = 0.5f;         // радиус выборки SSAO (мировые единицы)

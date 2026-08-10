@@ -760,3 +760,131 @@ TEST(ScriptLife_error_in_quit_hook_is_reported_not_fatal) {
     // И сосед по сцене всё равно сохранился.
     CHECK_EQ(ProbeInt(probe, "ok"), 1);
 }
+
+// --- Шина событий -------------------------------------------------------------
+
+TEST(Events_deliver_to_every_subscriber_and_carry_a_payload) {
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    scripts.Lua().script(R"(
+        seen = {}
+        sage.events.On("boom", function(e) seen[#seen+1] = "a" .. tostring(e.power) end)
+        sage.events.On("boom", function(e) seen[#seen+1] = "b" .. tostring(e.power) end)
+        sage.events.Emit("boom", {power = 7})
+    )");
+    sol::table seen = scripts.Lua()["seen"];
+    CHECK_EQ((int)seen.size(), 2);
+    CHECK_EQ(seen[1].get<std::string>(), std::string("a7"));
+    CHECK_EQ(seen[2].get<std::string>(), std::string("b7"));
+}
+
+TEST(Events_can_be_unsubscribed_and_Once_fires_exactly_once) {
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    scripts.Lua().script(R"(
+        n, m = 0, 0
+        local id = sage.events.On("tick", function() n = n + 1 end)
+        sage.events.Once("tick", function() m = m + 1 end)
+        sage.events.Emit("tick")
+        sage.events.Emit("tick")
+        sage.events.Off(id)
+        sage.events.Emit("tick")
+    )");
+    CHECK_EQ(scripts.Lua()["n"].get<int>(), 2);
+    CHECK_EQ(scripts.Lua()["m"].get<int>(), 1);   // Once — ровно один раз
+}
+
+TEST(Events_survive_subscribing_from_inside_a_handler) {
+    // Подписка изнутри обработчика меняет тот самый вектор, по которому идёт
+    // рассылка. Без копии списка это висячая ссылка и падение.
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    scripts.Lua().script(R"(
+        n = 0
+        sage.events.On("x", function()
+            n = n + 1
+            if n < 3 then sage.events.On("x", function() n = n + 10 end) end
+        end)
+        sage.events.Emit("x")
+        sage.events.Emit("x")
+    )");
+    CHECK_TRUE(scripts.Lua()["n"].get<int>() >= 2);
+}
+
+TEST(Events_stop_a_handler_loop_instead_of_crashing) {
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    // Два обработчика шлют событие друг другу — без потолка глубины это
+    // переполнение стека C++, то есть падение движка из-за ошибки в скрипте.
+    scripts.Lua().script(R"(
+        sage.events.On("ping", function() sage.events.Emit("pong") end)
+        sage.events.On("pong", function() sage.events.Emit("ping") end)
+        sage.events.Emit("ping")
+        ok = true
+    )");
+    CHECK_TRUE(scripts.Lua()["ok"].get<bool>());
+}
+
+TEST(Events_error_in_a_handler_is_reported_not_fatal) {
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    scripts.Lua().script(R"(
+        after = 0
+        sage.events.On("e", function() error("bang") end)
+        sage.events.On("e", function() after = after + 1 end)
+        sage.events.Emit("e")
+    )");
+    // Упавший обработчик не мешает остальным получить событие.
+    CHECK_EQ(scripts.Lua()["after"].get<int>(), 1);
+}
+
+TEST(Fixed_update_runs_at_a_constant_step_regardless_of_frame_length) {
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    scripts.SetFixedStep(1.0f / 50.0f);
+
+    const std::string path = WriteScript("fixed", R"(
+        _G.steps = 0
+        _G.total = 0.0
+        function OnFixedUpdate(dt) _G.steps = _G.steps + 1; _G.total = _G.total + dt end
+    )");
+    scripts.RunScript(path);
+
+    // Один длинный кадр и десять коротких — суммарно одно и то же время.
+    scripts.UpdateFixed(0.1f);
+    for (int i = 0; i < 10; ++i) scripts.UpdateFixed(0.01f);
+
+    const int steps = scripts.Lua()["steps"].get<int>();
+    const float total = scripts.Lua()["total"].get<float>();
+    std::printf("       шагов: %d, суммарное время: %.4f (реальное 0.2)\n", steps, total);
+    CHECK_EQ(steps, 10);                          // 0.2 с / 0.02 = ровно десять
+    CHECK_TRUE(std::abs(total - 0.2f) < 0.001f);
+}
+
+TEST(Late_update_runs_after_every_regular_update) {
+    ScriptEngine scripts;
+    Scene scene;
+    scripts.BindScene(scene);
+    const std::string a = WriteScript("order_a", R"(
+        _G.order = {}
+        function OnUpdate(dt) _G.order[#_G.order+1] = "update" end
+        function OnLateUpdate(dt) _G.order[#_G.order+1] = "late" end
+    )");
+    scripts.RunScript(a);
+    const std::string b = WriteScript("order_b", R"(
+        function OnUpdate(dt) _G.order[#_G.order+1] = "update2" end
+    )");
+    scripts.RunScript(b);
+
+    scripts.UpdateAll(1.0f / 60.0f);
+    sol::table order = scripts.Lua()["order"];
+    CHECK_EQ((int)order.size(), 3);
+    // Поздний хук — последним, после ОБОИХ обычных.
+    CHECK_EQ(order[3].get<std::string>(), std::string("late"));
+}

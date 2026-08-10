@@ -209,6 +209,15 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Bloom            = pp.value("bloom", Bloom);
     BloomThreshold   = pp.value("bloomThreshold", BloomThreshold);
     BloomIntensity   = pp.value("bloomIntensity", BloomIntensity);
+    Volumetrics        = pp.value("volumetrics", Volumetrics);
+    VolumetricShafts   = pp.value("volumetricShafts", VolumetricShafts);
+    VolumetricClouds   = pp.value("volumetricClouds", VolumetricClouds);
+    VolumetricDensity  = pp.value("volumetricDensity", VolumetricDensity);
+    VolumetricIntensity= pp.value("volumetricIntensity", VolumetricIntensity);
+    VolumetricSteps    = pp.value("volumetricSteps", VolumetricSteps);
+    CloudSteps         = pp.value("cloudSteps", CloudSteps);
+    CloudCoverage      = pp.value("cloudCoverage", CloudCoverage);
+    VolumetricScale    = pp.value("volumetricScale", VolumetricScale);
     AmbientOcclusion = pp.value("ao", AmbientOcclusion);
     AOStrength       = pp.value("aoStrength", AOStrength);
     AORadius         = pp.value("aoRadius", AORadius);
@@ -257,6 +266,11 @@ std::string EngineConfig::ToJsonString() const {
         {"exposure", Exposure}, {"gamma", Gamma}, {"saturation", Saturation},
         {"contrast", Contrast}, {"vignette", Vignette},
         {"bloom", Bloom}, {"bloomThreshold", BloomThreshold}, {"bloomIntensity", BloomIntensity},
+        {"volumetrics", Volumetrics}, {"volumetricShafts", VolumetricShafts},
+        {"volumetricClouds", VolumetricClouds}, {"volumetricDensity", VolumetricDensity},
+        {"volumetricIntensity", VolumetricIntensity}, {"volumetricSteps", VolumetricSteps},
+        {"cloudSteps", CloudSteps}, {"cloudCoverage", CloudCoverage},
+        {"volumetricScale", VolumetricScale},
         {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
         {"depthOfField", DepthOfField}, {"focusDistance", FocusDistance},
         {"aperture", Aperture}, {"dofMaxRadius", DofMaxRadius},
@@ -312,6 +326,13 @@ void EngineConfig::ApplyEnvOverrides() {
     // Дисплей
     if (const char* v = std::getenv("SAGE_ASPECT")) Aspect = AspectFromStr(v);
     if (const char* v = std::getenv("SAGE_RENDER_SCALE")) RenderScale = (float)std::atof(v);
+    // Объём — самый дорогой проход кадра, и на слабой машине (или в headless-
+    // прогоне на программном растеризаторе) его надо уметь придавить снаружи,
+    // не трогая ни файл настроек, ни скрипты игры.
+    if (const char* v = std::getenv("SAGE_VOLUMETRICS")) Volumetrics = EnvBool(v, Volumetrics);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_STEPS")) VolumetricSteps = std::atoi(v);
+    if (const char* v = std::getenv("SAGE_CLOUD_STEPS")) CloudSteps = std::atoi(v);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_SCALE")) VolumetricScale = (float)std::atof(v);
 
     // Графика. SAGE_NO_SHADOWS / SAGE_NO_POST оставлены для обратной
     // совместимости (их наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…

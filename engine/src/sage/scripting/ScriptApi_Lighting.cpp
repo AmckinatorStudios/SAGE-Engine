@@ -1,5 +1,6 @@
 #include "ScriptEngine.h"
 
+#include "sage/core/Config.h"
 #include "sage/core/Log.h"
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,31 @@ void ScriptEngine::RegisterLightingApi() {
     Bind("light", "Get", "GetLighting", [this]() -> LightingEnvironment& {
         if (!m_scene) throw std::runtime_error("GetLighting: сцена не привязана (BindScene не вызван)");
         return m_scene->Lighting;
+    });
+
+    // --- Объём: лучи и облака (см. render/Volumetrics.h) --------------------
+    //
+    // Из скрипта, а не только из файла настроек: включать самый дорогой проход
+    // кадра решает игра, и решает по обстановке. У «Корабля» это, например,
+    // время суток — на закате лучи и облака делают весь кадр, ночью их не
+    // видно, а платить за них приходится одинаково.
+    //
+    // Таблицей с необязательными полями: игре почти всегда нужно поправить
+    // одно-два числа, а не перечислять все двенадцать.
+    Bind("volumetric", "Set", "SetVolumetrics", [](sol::table t) {
+        sage::EngineConfig& cfg = sage::EngineConfig::Get();
+        cfg.Volumetrics = t.get_or("enabled", cfg.Volumetrics);
+        cfg.VolumetricShafts = t.get_or("shafts", cfg.VolumetricShafts);
+        cfg.VolumetricClouds = t.get_or("clouds", cfg.VolumetricClouds);
+        cfg.VolumetricDensity = t.get_or("density", cfg.VolumetricDensity);
+        cfg.VolumetricIntensity = t.get_or("intensity", cfg.VolumetricIntensity);
+        cfg.VolumetricSteps = t.get_or("steps", cfg.VolumetricSteps);
+        cfg.CloudSteps = t.get_or("cloudSteps", cfg.CloudSteps);
+        cfg.CloudCoverage = t.get_or("coverage", cfg.CloudCoverage);
+        cfg.VolumetricScale = t.get_or("scale", cfg.VolumetricScale);
+    });
+    Bind("volumetric", "Enabled", "VolumetricsEnabled", []() -> bool {
+        return sage::EngineConfig::Get().Volumetrics;
     });
 }
 
