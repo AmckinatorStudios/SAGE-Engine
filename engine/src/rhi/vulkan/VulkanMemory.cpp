@@ -51,7 +51,7 @@ VmaAllocationCreateFlags ToVmaFlags(MemoryUse use) {
         case MemoryUse::CpuToGpu:
             // Отображается один раз на всё время жизни: буфер, который пишут
             // каждый кадр, не должен отображаться и снимать отображение на
-            // каждую запись — это обращение к драйверу на ровном месте.
+            // каждую запись — это обращение к драйверу .
             return VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                    VMA_ALLOCATION_CREATE_MAPPED_BIT;
         case MemoryUse::GpuToCpu:
