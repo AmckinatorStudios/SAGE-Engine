@@ -8,8 +8,14 @@
 #  (подробности — в RenderTestHarness.h).
 # ============================================================================
 add_executable(sage_render_tests
-    main.cpp
-    RenderTestHarness.cpp
+    main.cpp                 # только порядок прогона
+    Fixture.cpp              # общая оснастка: сцена, камера, проход, учёт
+    Checks_Frame.cpp         # кадр и пост-обработка
+    Checks_Animation.cpp     # морфинг и обратная кинематика
+    Checks_Reflections.cpp   # отражения и блик
+    Checks_Shadows.cpp       # тени
+    Checks_Scene.cpp         # детализация, отсечение, кэш, небо, RHI
+    RenderTestHarness.cpp    # сравнение картинок и запись эталонов
 )
 
 target_include_directories(sage_render_tests PRIVATE
