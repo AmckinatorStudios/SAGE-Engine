@@ -286,6 +286,10 @@ void PhysicsScene::SyncCharacters(Scene& scene) {
     for (auto e : view) {
         CharacterControllerComponent& cc = view.get<CharacterControllerComponent>(e);
         if (cc.Runtime != kInvalidCharacter) continue;
+        // У персонажа СВОЙ мир (игра сама отвечает, где твердь) — физике он не
+        // принадлежит, и заводить ему тело в бэкенде значило бы столкнуть два
+        // разных представления мира в одном теле.
+        if (cc.Solid) continue;
         const Transform& tr = view.get<Transform>(e);
         CharacterDesc d;
         d.Radius = cc.Radius;

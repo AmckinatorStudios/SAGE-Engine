@@ -1,5 +1,7 @@
 #include "physics/jolt/JoltWorld.h"
 
+#include <algorithm>
+
 // Jolt требует, чтобы его собственный зонтичный заголовок включался ПЕРВЫМ.
 #include <Jolt/Jolt.h>
 
@@ -255,6 +257,11 @@ private:
 struct JoltWorld::CharacterEntry {
     JPH::Ref<JPH::CharacterVirtual> Ptr;
     LayerMask CollidesWith = kAllLayers;
+    // Высота ступеньки хранится ЗДЕСЬ, потому что Jolt получает её не при
+    // создании контроллера, а на каждый шаг (ExtendedUpdateSettings). Раньше в
+    // этом месте стояла константа 0.35, и поле CharacterDesc::StepHeight не
+    // читал никто: игра выставляла ступеньку, движок её молча игнорировал.
+    float StepHeight = 0.35f;
 };
 
 BodyHandle JoltWorld::HandleOf(uint32_t joltId) const {
@@ -363,6 +370,9 @@ CharacterHandle JoltWorld::CreateCharacter(const CharacterDesc& desc) {
 
     auto entry = std::make_unique<CharacterEntry>();
     entry->CollidesWith = desc.CollidesWith;
+    // Не выше девяти десятых роста: ступенька в собственный рост — это уже не
+    // шаг, а перепрыгивание препятствия целиком, и лечится оно прыжком.
+    entry->StepHeight = std::clamp(desc.StepHeight, 0.0f, desc.Height * 0.9f);
     entry->Ptr = new JPH::CharacterVirtual(
         settings, JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
         JPH::Quat::sIdentity(), m_system.get());
@@ -382,8 +392,10 @@ void JoltWorld::MoveCharacter(CharacterHandle character, const glm::vec3& veloci
 
     JPH::CharacterVirtual::ExtendedUpdateSettings upd;
     // Шаг вверх/вниз — то, чем контроллер отличается от капсулы на пружине:
-    // на ступеньку он ВЗБИРАЕТСЯ, а не упирается и не подпрыгивает.
-    upd.mWalkStairsStepUp = JPH::Vec3(0, 0.35f, 0);
+    // на ступеньку он ВЗБИРАЕТСЯ, а не упирается и не подпрыгивает. Высоту
+    // задаёт игра (CharacterDesc::StepHeight); здесь стояла константа, и
+    // настройка не работала вовсе.
+    upd.mWalkStairsStepUp = JPH::Vec3(0, it->second->StepHeight, 0);
     ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
                        m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
                        m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), {}, {}, *m_tempAllocator);
@@ -549,7 +561,7 @@ void JoltWorld::RemoveBody(BodyHandle body) {
 void JoltWorld::Step(float dt) {
     if (!m_system) return;
     // Фиксированный внутренний шаг 1/60 с аккумулятором — стабильность симуляции
-    // не зависит от кадрового dt (как в Simple-бэкенде).
+    // не зависит от кадрового dt (как и во встроенном бэкенде).
     const float fixed = 1.0f / 60.0f;
     m_accum += glm::min(dt, 0.25f);
     int guard = 0;

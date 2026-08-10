@@ -764,7 +764,7 @@ void EditorLayer::StartPlay() {
     }
 
     // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
-    // Jolt, если собран, иначе встроенный Simple (см. PhysicsWorld::DefaultBackend).
+    // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).
     m_playPhysics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
 

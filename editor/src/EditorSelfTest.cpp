@@ -768,7 +768,7 @@ void EditorLayer::RunSelfTest() {
         } else {
             float yBefore = root.GetTransform().Position.y;
             StartPlay();
-            // На Jolt суставы реально строятся; на Simple — их нет (ожидаемо).
+            // Суставы строятся и на Jolt, и на встроенном движке.
             bool jointsOk = !m_playPhysics->SupportsJoints() || m_playPhysics->JointCount() >= 6;
             for (int i = 0; i < 40; ++i) m_playPhysics->Step(*m_scene, 1.0f / 60.0f);
             float yAfter = m_scene->Get(rootId).GetTransform().Position.y;

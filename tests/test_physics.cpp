@@ -56,8 +56,15 @@ TEST(Physics_compound_body_rests_on_floor) {
 }
 
 TEST(Physics_backend_reports_joint_support) {
-    auto simple = PhysicsWorld::Create(Backend::Simple);
-    CHECK_FALSE(simple->SupportsJoints()); // аркадный бэкенд — без соединений
+    // Соединения обязаны быть у ОБОИХ бэкендов. Раньше встроенный отвечал
+    // «не поддерживаю», и половина возможностей движка существовала только
+    // при собранном Jolt: сборка без него теряла петли, ползуны и тряпичных
+    // кукол целиком.
+    auto builtin = PhysicsWorld::Create(Backend::Builtin);
+    CHECK_TRUE(builtin->SupportsJoints());
+    CHECK_TRUE(builtin->SupportsCharacters());
+    CHECK_TRUE(builtin->SupportsQueries());
+    CHECK_TRUE(builtin->SupportsContacts());
     if (PhysicsWorld::HasJolt()) {
         auto jolt = PhysicsWorld::Create(Backend::Jolt);
         CHECK_TRUE(jolt->SupportsJoints());
@@ -66,7 +73,7 @@ TEST(Physics_backend_reports_joint_support) {
 
 TEST(Physics_point_joint_pins_body_in_place) {
     auto w = PhysicsWorld::Create(PhysicsWorld::DefaultBackend());
-    if (!w->SupportsJoints()) return; // Simple — нечего проверять
+    if (!w->SupportsJoints()) return;
     w->SetGravity({0, -9.81f, 0});
 
     BodyDesc d; d.Type = BodyType::Dynamic; d.Position = {0, 5, 0}; d.Mass = 1.0f;
@@ -152,7 +159,7 @@ TEST(Physics_scene_builds_joints_from_components) {
     scene.Registry().emplace<JointComponent>(hang.Entity(), jc);
 
     PhysicsScene phys(PhysicsWorld::DefaultBackend(), scene);
-    if (!phys.SupportsJoints()) return; // Simple — соединения не строятся
+    if (!phys.SupportsJoints()) return;
 
     CHECK_EQ(phys.JointCount(), 1);
     // Прогоняем симуляцию: висящее тело держится тросом у якоря. Точка крепления
@@ -240,8 +247,8 @@ TEST(Physics_second_simulation_rebuilds_bodies) {
 
 // --- Запросы к миру: луч и сфера ----------------------------------------------
 //
-// Луч проверяется на ОБОИХ бэкендах (Simple всегда доступен, Jolt — если
-// собран): headless-прогоны и сборки без Jolt идут на Simple, и работающий
+// Луч проверяется на ОБОИХ бэкендах (встроенный доступен всегда, Jolt — если
+// собран): headless-прогоны и сборки без Jolt идут на встроенном, и работающий
 // только у Jolt луч оставил бы половину движка без проверки.
 
 namespace {
@@ -249,7 +256,7 @@ namespace {
 // ними — предмет отдельного разговора, а контракт обязан быть один.
 template <typename Fn>
 void ForEachBackend(Fn&& fn) {
-    fn(Backend::Simple, "Simple");
+    fn(Backend::Builtin, "Builtin");
     if (PhysicsWorld::HasJolt()) fn(Backend::Jolt, "Jolt");
 }
 
