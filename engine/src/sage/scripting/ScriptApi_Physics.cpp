@@ -257,9 +257,13 @@ void ScriptEngine::RegisterPhysicsApi() {
     });
     // Телепорт: перенос персонажа мимо симуляции (респавн, переход по уровню).
     Bind("physics", "SetCharacterPosition", "SetCharacterPosition", [this](GameObject& obj, const glm::vec3& pos) {
-        if (!obj.Valid() || !m_physics) return;
+        if (!obj.Valid()) return;
         auto* cc = obj.Registry()->try_get<CharacterControllerComponent>(obj.Entity());
-        if (cc && cc->Runtime != sage::physics::kInvalidCharacter)
+        if (!cc) return;
+        // Свой мир — переносим мотор; иначе телепорт молча не срабатывал бы, а
+        // персонаж возвращался бы на место следующим же шагом.
+        if (cc->Motor) cc->Motor->SetPosition(pos);
+        else if (m_physics && cc->Runtime != sage::physics::kInvalidCharacter)
             m_physics->SetCharacterPosition(cc->Runtime, pos);
         if (auto* tr = obj.Registry()->try_get<Transform>(obj.Entity())) tr->Position = pos;
     });
