@@ -89,7 +89,13 @@ public:
     void SetFloat(const std::string& name, float v) const override;
     void SetInt(const std::string& name, int v) const override;
 
-    bool Valid() const { return m_vertex != VK_NULL_HANDLE && m_fragment != VK_NULL_HANDLE; }
+    // Раскладка — часть годности, а не отдельная деталь: без неё нельзя ни
+    // выделить набор дескрипторов, ни собрать конвейер. Программа без неё
+    // молча рисовала бы ничем.
+    bool Valid() const {
+        return m_vertex != VK_NULL_HANDLE && m_fragment != VK_NULL_HANDLE &&
+               m_pipelineLayout != VK_NULL_HANDLE;
+    }
     VkShaderModule VertexModule() const { return m_vertex; }
     VkShaderModule FragmentModule() const { return m_fragment; }
     VkDescriptorSetLayout SetLayout() const { return m_setLayout; }

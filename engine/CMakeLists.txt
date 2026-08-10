@@ -70,6 +70,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/GridRenderer.cpp
     src/sage/render/ParticleECS.cpp
     src/sage/render/ParticleSystem.cpp
+    src/sage/render/DebugView.cpp
     src/sage/render/PostFX.cpp
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp

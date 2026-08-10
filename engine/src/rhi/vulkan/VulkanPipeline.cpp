@@ -271,54 +271,117 @@ VkPipeline VulkanDevice::PipelineFor(const PipelineKey& key, const VulkanGeometr
     return pipeline;
 }
 
+bool VulkanDevice::AddUniformBlock() {
+    auto block = std::make_unique<VulkanBuffer>();
+    if (!block->Create(*this, kUniformBlockBytes, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                       MemoryUse::CpuToGpu)) {
+        LOG_ERROR("Vulkan") << "не удалось выделить ещё блок униформ ("
+                            << (kUniformBlockBytes >> 20) << " МиБ)";
+        return false;
+    }
+    m_uniformBlocks.push_back(std::move(block));
+    return true;
+}
+
+bool VulkanDevice::ReserveUniforms(VkDeviceSize size, const void* data,
+                                   VkDescriptorBufferInfo& out) {
+    if (size > kUniformBlockBytes) return false;   // блок униформ крупнее целого блока — не бывает
+    if (m_uniformBlocks.empty() && !AddUniformBlock()) return false;
+
+    VkDeviceSize aligned =
+        (m_uniformOffset + m_uniformAlignment - 1) / m_uniformAlignment * m_uniformAlignment;
+    if (aligned + size > m_uniformBlocks[m_uniformBlock]->Size()) {
+        // Текущий блок кончился — переходим к следующему. Он либо уже есть с
+        // прошлых кадров, либо создаётся сейчас и остаётся навсегда.
+        if (m_uniformBlock + 1 >= m_uniformBlocks.size() && !AddUniformBlock()) return false;
+        ++m_uniformBlock;
+        m_uniformOffset = 0;
+        aligned = 0;
+    }
+
+    VulkanBuffer& block = *m_uniformBlocks[m_uniformBlock];
+    m_uniformOffset = aligned + size;
+    block.Upload(*this, data, size, aligned);
+
+    out.buffer = block.Handle();
+    out.offset = aligned;
+    out.range = size;
+    return true;
+}
+
+bool VulkanDevice::AddDescriptorPool() {
+    VkDescriptorPoolSize sizes[2]{};
+    sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    sizes[0].descriptorCount = kDescriptorSetsPerPool;
+    sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sizes[1].descriptorCount = kDescriptorSetsPerPool * 8;
+
+    VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    info.maxSets = kDescriptorSetsPerPool;
+    info.poolSizeCount = 2;
+    info.pPoolSizes = sizes;
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    if (!vk::Check(vkCreateDescriptorPool(m_device, &info, nullptr, &pool),
+                   "vkCreateDescriptorPool")) {
+        return false;
+    }
+    m_descriptors.Blocks.push_back(pool);
+    return true;
+}
+
+VkDescriptorSet VulkanDevice::AllocateDescriptorSet(VkDescriptorSetLayout layout) {
+    if (m_descriptors.Blocks.empty() && !AddDescriptorPool()) return VK_NULL_HANDLE;
+
+    // Не больше одного нового пула за вызов: если и из свежего пула набор не
+    // достался, дело не в его размере, и плодить пулы бессмысленно.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        alloc.descriptorPool = m_descriptors.Blocks[m_descriptors.Current];
+        alloc.descriptorSetCount = 1;
+        alloc.pSetLayouts = &layout;
+
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        const VkResult r = vkAllocateDescriptorSets(m_device, &alloc, &set);
+        if (r == VK_SUCCESS) return set;
+        if (r != VK_ERROR_OUT_OF_POOL_MEMORY && r != VK_ERROR_FRAGMENTED_POOL) {
+            vk::Check(r, "vkAllocateDescriptorSets");
+            return VK_NULL_HANDLE;
+        }
+        if (m_descriptors.Current + 1 >= m_descriptors.Blocks.size() && !AddDescriptorPool())
+            return VK_NULL_HANDLE;
+        ++m_descriptors.Current;
+    }
+    return VK_NULL_HANDLE;
+}
+
 VkDescriptorSet VulkanDevice::DescriptorSetFor(const VulkanShaderProgram& shader) {
-    if (m_descriptorPool == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+    const CompiledShader& compiled = shader.Compiled();
 
-    VkDescriptorSetLayout layout = shader.SetLayout();
-    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    alloc.descriptorPool = m_descriptorPool;
-    alloc.descriptorSetCount = 1;
-    alloc.pSetLayouts = &layout;
-
-    VkDescriptorSet set = VK_NULL_HANDLE;
-    const VkResult result = vkAllocateDescriptorSets(m_device, &alloc, &set);
-    if (result != VK_SUCCESS) {
-        // Пул кончился. Это не ошибка программиста, а нормальное состояние
-        // тяжёлого кадра — и молча рисовать без набора нельзя: получится
-        // случайная текстура. Честно пропускаем вызов и говорим один раз.
+    // Униформы резервируются ДО набора дескрипторов.
+    //
+    // Иначе выход из-за нехватки места в кольце оставлял бы уже выделенный
+    // набор висеть в пуле до конца кадра: пул выедался ещё быстрее — и на
+    // llvmpipe исчерпанный пул валит vkAllocateDescriptorSets с порчей кучи,
+    // а не возвращает ошибку.
+    VkDescriptorBufferInfo bufferInfo{};
+    const bool wantUniforms = compiled.UniformBlockSize > 0;
+    if (wantUniforms &&
+        !ReserveUniforms(compiled.UniformBlockSize, shader.UniformShadow().data(), bufferInfo)) {
         static bool said = false;
         if (!said) {
             said = true;
-            LOG_WARN("Vulkan") << "пул дескрипторов исчерпан за кадр — часть вызовов пропущена";
+            LOG_WARN("Vulkan") << "не нашлось места под униформы — вызов отрисовки пропущен";
         }
         return VK_NULL_HANDLE;
     }
 
+    VkDescriptorSet set = AllocateDescriptorSet(shader.SetLayout());
+    if (set == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+
     std::vector<VkWriteDescriptorSet> writes;
-    VkDescriptorBufferInfo bufferInfo{};
-    const CompiledShader& compiled = shader.Compiled();
 
-    if (compiled.UniformBlockSize > 0 && m_uniformRing.Valid()) {
-        // Кусок кольца под ЭТОТ вызов: значения следующего не должны затирать
-        // наши, пока GPU не дошёл до нас.
-        const VkDeviceSize size = compiled.UniformBlockSize;
-        const VkDeviceSize aligned =
-            (m_uniformOffset + m_uniformAlignment - 1) / m_uniformAlignment * m_uniformAlignment;
-        if (aligned + size > m_uniformRing.Size()) {
-            static bool said = false;
-            if (!said) {
-                said = true;
-                LOG_WARN("Vulkan") << "кольцо униформ кончилось за кадр — часть вызовов пропущена";
-            }
-            return VK_NULL_HANDLE;
-        }
-        m_uniformOffset = aligned + size;
-        m_uniformRing.Upload(*this, shader.UniformShadow().data(), size, aligned);
-
-        bufferInfo.buffer = m_uniformRing.Handle();
-        bufferInfo.offset = aligned;
-        bufferInfo.range = size;
-
+    if (wantUniforms) {
         VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstSet = set;
         w.dstBinding = compiled.UniformBinding;

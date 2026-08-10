@@ -128,6 +128,30 @@ float fbm(vec3 p) {
     return s;
 }
 
+// Тот же шум в две октавы вместо четырёх — для марша К СОЛНЦУ.
+//
+// Там детали не нужны: считается, сколько света дошло до точки, а это величина
+// низкочастотная по своей природе. Разницы в кадре нет, а стоит она половину:
+// световой марш зовётся по нескольку раз на КАЖДЫЙ шаг основного, и именно он
+// делает облака самым дорогим местом прохода.
+float fbmLow(vec3 p) {
+    float a = 0.5, s = 0.0;
+    for (int i = 0; i < 2; ++i) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
+    return s * 1.33;   // подгон под средний уровень четырёхоктавного
+}
+
+// Плотность для светового марша: без мелкой эрозии и по дешёвому шуму.
+float cloudLightDensity(vec3 p) {
+    float h = (p.y - uCloudBottom) / max(uCloudTop - uCloudBottom, 1.0);
+    if (h < 0.0 || h > 1.0) return 0.0;
+    float profile = smoothstep(0.0, 0.18, h) * smoothstep(1.0, 0.55, h);
+    vec3 q = p * uCloudScale + vec3(uWind.x, 0.0, uWind.y) * uTime * 0.004;
+    float gate = smoothstep(0.36, 0.62, fbmLow(q * 0.85 + 19.3));
+    if (gate <= 0.0) return 0.0;
+    float d = clamp((fbmLow(q) * profile - (1.0 - uCoverage)) / max(uCoverage, 0.05), 0.0, 1.0);
+    return d * gate * uCloudDensity * 0.03;
+}
+
 // Плотность облака в точке. Профиль по высоте даёт плоское основание и пухлый
 // верх — без него слой выглядит одинаковой ватой сверху донизу.
 float cloudAt(vec3 p) {
@@ -174,7 +198,7 @@ float cloudLight(vec3 p) {
     for (int i = 0; i < 8; ++i) {
         if (i >= uCloudLightSteps) break;
         t += step;
-        dens += cloudAt(p + uSunDir * t) * step;
+        dens += cloudLightDensity(p + uSunDir * t) * step;
     }
     return exp(-dens * 0.9);
 }
@@ -272,7 +296,10 @@ void main() {
                 vec3 p = uCamPos + dir * t;
                 float d = cloudAt(p);
                 if (d > 0.001) {
-                    float lit = cloudLight(p);
+                    // Световой марш — самое дорогое место прохода. На еле
+                    // заметном облаке его результат всё равно тонет в альфе,
+                    // поэтому там берём приближение вместо десятка выборок.
+                    float lit = d > 0.004 ? cloudLight(p) : 0.85;
                     // Powder: у самой кромки свет успевает рассеяться назад, и
                     // край облака на просвет ярче середины. Множится только на
                     // ПРЯМОЙ свет — на подсветку неба он не влияет, и без этого

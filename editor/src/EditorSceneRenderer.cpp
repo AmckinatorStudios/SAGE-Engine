@@ -13,6 +13,7 @@
 #include "sage/core/Application.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/core/Config.h"
+#include "sage/render/DebugView.h"
 #include "sage/render/ScenePasses.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/ParticleECS.h"
@@ -490,14 +491,16 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         DrawSky(env, outView, outProj);
     }
 
-    // Режим рендера из тулбара: Shaded(0)/Unlit(1)/Normals(2); Wireframe — unlit + линии.
+    // Режим рендера из тулбара. Shaded — обычная отрисовка, Wireframe — тот же
+    // unlit плюс линии, всё остальное переводится в DebugView сдвигом на один:
+    // после Shaded в списке стоит Wireframe, которого в DebugView нет.
     int shadingMode = 0;
     bool wireframe = false;
-    switch (mode) {
-        case EditorRenderMode::Shaded:    shadingMode = 0; break;
-        case EditorRenderMode::Wireframe: shadingMode = 1; wireframe = true; break;
-        case EditorRenderMode::Unlit:     shadingMode = 1; break;
-        case EditorRenderMode::Normals:   shadingMode = 2; break;
+    if (mode == EditorRenderMode::Wireframe) {
+        shadingMode = (int)sage::render::DebugView::Unlit;
+        wireframe = true;
+    } else if (mode != EditorRenderMode::Shaded) {
+        shadingMode = (int)mode - 1;
     }
     if (!flatCanvas) {
         DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe);

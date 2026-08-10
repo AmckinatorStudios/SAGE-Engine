@@ -1,4 +1,5 @@
 #include "PlayerLayer.h"
+#include "sage/render/DebugView.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Paths.h"
 
@@ -617,8 +618,23 @@ void PlayerLayer::OnRender() {
     const auto rPlanar = m_frame.DeclareResource("PlanarMirror");
     const auto rScreen = m_frame.DeclareResource("Screen");
 
-    const bool wantReflections = m_scene->Reflections.Enabled;
-    const bool wantPlanar = wantReflections && m_scene->Reflections.PlanarEnabled;
+    const bool wantReflections = m_scene->Reflections.Enabled && cfg.Reflections;
+    const bool wantPlanar =
+        wantReflections && m_scene->Reflections.PlanarEnabled && cfg.PlanarReflections;
+
+    // Отладочный вид кадра (SAGE_DEBUG_VIEW / настройка debugView): показать
+    // одну величину вместо освещения. В игре он нужен не меньше, чем в
+    // редакторе, — «в редакторе нормально, в игре тёмно» разбирают именно так.
+    sage::render::DebugView debugView = sage::render::DebugView::None;
+    if (!sage::render::ParseDebugView(cfg.DebugView.c_str(), debugView) &&
+        !cfg.DebugView.empty() && cfg.DebugView != "none") {
+        static std::string said;
+        if (said != cfg.DebugView) {
+            said = cfg.DebugView;
+            LOG_WARN("Render") << "неизвестный debugView '" << cfg.DebugView << "'";
+        }
+    }
+    const bool debugging = debugView != sage::render::DebugView::None;
 
     // --- Отражения: карта окружения ---
     // Строго ДО прохода теней и сцены: захват меняет привязанный буфер и
@@ -629,7 +645,7 @@ void PlayerLayer::OnRender() {
         pass.Writes = {rEnv};
         pass.Enabled = wantReflections;
         pass.Execute = [&, this] {
-        m_reflections.SetEnabled(m_scene->Reflections.Enabled);
+        m_reflections.SetEnabled(wantReflections);
         m_reflections.SetIntensity(m_scene->Reflections.Intensity);
         if (m_sky) {
             // Настоящее небо сцены (набор граней), если оно задано, — иначе
@@ -644,7 +660,7 @@ void PlayerLayer::OnRender() {
         }
 
         // Зонды сцены: не больше одного за кадр (шесть проходов геометрии).
-        if (m_scene->Reflections.Enabled) {
+        if (wantReflections) {
             sage::render::UpdateReflectionProbes(
                 *m_scene,
                 [&](const glm::mat4& v, const glm::mat4& p) {
@@ -733,7 +749,7 @@ void PlayerLayer::OnRender() {
         pass.Writes = {rPlanar};
         pass.Enabled = wantPlanar;
         pass.Execute = [&, this] {
-            if (m_scene->Reflections.Enabled && m_scene->Reflections.PlanarEnabled) {
+            if (wantPlanar) {
             const glm::vec4 plane = m_scene->Reflections.Plane;
             m_planar.Capture(plane, view, proj, vpW, vpH,
                              [&](const glm::mat4& mv, const glm::mat4& mp) {
@@ -777,7 +793,13 @@ void PlayerLayer::OnRender() {
         // Пост-обработка: сцена уходит в HDR-буфер, а на экран — результат
         // цепочки. Тот же PostFX и те же настройки из конфига, что у окна Game
         // в редакторе, — иначе превью и игра показывают разное.
-        const bool usePost = cfg.PostProcessing;
+        //
+        // В отладочном виде пост-обработка ВЫКЛЮЧЕНА, и это не экономия.
+        // Тон-маппинг, гамма, виньетка и насыщенность придуманы для картинки, а
+        // здесь на экране не картинка, а величина: 0.2 шероховатости обязаны
+        // остаться 0.2, иначе вид отвечает не на тот вопрос, ради которого его
+        // включили. Кадр глубины после ACES и гаммы становился почти белым.
+        const bool usePost = cfg.PostProcessing && !debugging;
         if (usePost) {
             if (!m_postfx) m_postfx.emplace();
             // Число сэмплов — по конфигу и той же функцией, что у редактора:
@@ -822,13 +844,17 @@ void PlayerLayer::OnRender() {
         color.Shadows = FrameShadows(cfg.Shadows);
         color.OcclusionCulling = cfg.OcclusionCulling;
         color.Time = m_sceneTime;
-        color.Reflection = m_reflections.Binding(vpW, vpH, m_planar.Texture());
-        float probeIntensity = 1.0f;
-        if (const sage::render::EnvironmentMap* probe =
-                sage::render::PickReflectionProbe(*m_scene, viewPos, &probeIntensity)) {
-            color.Reflection.Env = probe;
-            color.Reflection.Intensity = probeIntensity;
+        color.Reflection = m_reflections.Binding(
+            vpW, vpH, wantPlanar ? m_planar.Texture() : sage::rhi::TextureHandle{});
+        if (wantReflections) {
+            float probeIntensity = 1.0f;
+            if (const sage::render::EnvironmentMap* probe =
+                    sage::render::PickReflectionProbe(*m_scene, viewPos, &probeIntensity)) {
+                color.Reflection.Env = probe;
+                color.Reflection.Intensity = probeIntensity;
+            }
         }
+        color.ShadingMode = (int)debugView;
         sage::render::RenderSceneColor(*m_scene, m_batch, color);
 
         // Частицы (billboard) — camRight/Up берём из матрицы вида.

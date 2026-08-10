@@ -22,6 +22,7 @@
 #include "EditorTheme.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
+#include "sage/render/DebugView.h"
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
 #include "sage/render/ModelMaterial.h"
@@ -251,12 +252,23 @@ void EditorLayer::OnAttach() {
         // нечем проверить, кроме как открыть глазами на своей машине.
         if (!std::getenv("SAGE_SHOW_LAUNCHER")) m_launcher.Dismiss();
     }
-    // Начальный режим рендера (для headless-скриншотов/CI): shaded|wireframe|unlit|normals.
+    // Начальный режим рендера (для headless-скриншотов/CI): shaded, wireframe
+    // или любой отладочный вид по его имени из DebugView.h (normals, cascades,
+    // roughness…). Имена берутся оттуда же, что и у игры: два разных написания
+    // одного и того же режима в редакторе и в плеере — лишний источник «а у
+    // меня не так».
     if (const char* m = std::getenv("SAGE_EDITOR_RENDER_MODE")) {
-        std::string mode = m;
-        if (mode == "wireframe") m_renderMode = EditorRenderMode::Wireframe;
-        else if (mode == "unlit") m_renderMode = EditorRenderMode::Unlit;
-        else if (mode == "normals") m_renderMode = EditorRenderMode::Normals;
+        const std::string mode = m;
+        sage::render::DebugView dv = sage::render::DebugView::None;
+        if (mode == "wireframe") {
+            m_renderMode = EditorRenderMode::Wireframe;
+        } else if (sage::render::ParseDebugView(mode.c_str(), dv)) {
+            m_renderMode = dv == sage::render::DebugView::None
+                               ? EditorRenderMode::Shaded
+                               : (EditorRenderMode)((int)dv + 1);
+        } else {
+            LOG_WARN("Editor") << "неизвестный SAGE_EDITOR_RENDER_MODE '" << mode << "'";
+        }
     }
 
     LOG_INFO("Editor") << "SAGE Editor started (entities: " << m_scene->Count() << ")";

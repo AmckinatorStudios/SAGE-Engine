@@ -98,8 +98,14 @@ uniform sampler2D uLightmap;
 )") + kPbrSharedGlsl + R"(
 void main() {
     vec3 N = normalize(Normal);
-    if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
-    if (uShadingMode == 1) { FragColor = vec4(vColor + vEmissive, vAlpha); return; }
+    if (uShadingMode != 0) {
+        vec4 dbg;
+        if (DebugShade(uShadingMode, N, FragPos, vColor, vMetallic, vRoughness, 1.0, vEmissive,
+                       CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
+            FragColor = vec4(dbg.rgb, vAlpha);
+            return;
+        }
+    }
     // Непрямой свет: лайтмапа (статика) или GI-объём/полусфера (DefaultIndirect).
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
@@ -194,8 +200,16 @@ void main() {
     if (uHasRoughness) rough *= texture(uRoughnessMap, TexCoords).r;
     float ao = uHasAO ? texture(uAOMap, TexCoords).r : 1.0;
 
-    if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
-    if (uShadingMode == 1) { FragColor = vec4(albedo + uEmissive, uOpacity); return; }
+    if (uShadingMode != 0) {
+        vec4 dbg;
+        vec3 dbgEmissive = uEmissive;
+        if (uHasEmissive) dbgEmissive *= texture(uEmissiveMap, TexCoords).rgb;
+        if (DebugShade(uShadingMode, N, FragPos, albedo, metallic, rough, ao, dbgEmissive,
+                       CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
+            FragColor = vec4(dbg.rgb, uOpacity);
+            return;
+        }
+    }
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
     vec3 emissive = uEmissive;

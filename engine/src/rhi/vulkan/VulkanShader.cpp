@@ -78,6 +78,16 @@ CompiledShader CompileGlsl(const std::string& vertexSrc, const std::string& frag
         // потому что GLSL 3.30 их и не требует.
         s->setAutoMapBindings(true);
         s->setAutoMapLocations(true);
+        // Нумерация у каждого вида ресурсов своя и КАЖДАЯ начинается с нуля.
+        // Блок свободных униформ (его собрал setEnvInputVulkanRulesRelaxed) —
+        // это ubo с привязкой 0, и первый же sampler2D получал ту же нулевую
+        // привязку. Две записи с одним номером в раскладке набора — запрещённое
+        // состояние: llvmpipe на нём читал за концом массива и портил кучу,
+        // а падало потом в первом попавшемся malloc. Сдвигаем текстуры за
+        // блок униформ, чтобы номера не пересекались.
+        s->setShiftBinding(glslang::EResTexture, 1);
+        s->setShiftBinding(glslang::EResSampler, 1);
+        s->setShiftBinding(glslang::EResImage, 1);
     }
 
     const EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
@@ -166,7 +176,7 @@ VulkanShaderProgram::VulkanShaderProgram(VulkanDevice& device, const std::string
     };
     m_vertex = makeModule(m_compiled.Vertex);
     m_fragment = makeModule(m_compiled.Fragment);
-    if (!Valid()) return;
+    if (m_vertex == VK_NULL_HANDLE || m_fragment == VK_NULL_HANDLE) return;
 
     m_shadow.assign(m_compiled.UniformBlockSize, 0);
 
@@ -191,6 +201,19 @@ VulkanShaderProgram::VulkanShaderProgram(VulkanDevice& device, const std::string
         b.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         bindings.push_back(b);
         m_samplerUnits[binding] = 0; // юнит назначит SetInt
+    }
+
+    // Два ресурса с одним номером привязки — запрещённая раскладка, и драйвер
+    // на ней не обязан ни ругаться, ни выжить: llvmpipe читает за концом
+    // массива и портит кучу, а падает потом где угодно. Проверяем сами: лучше
+    // отказать в шейдере с внятной причиной, чем искать это по стеку в malloc.
+    for (size_t i = 0; i < bindings.size(); ++i) {
+        for (size_t j = i + 1; j < bindings.size(); ++j) {
+            if (bindings[i].binding != bindings[j].binding) continue;
+            LOG_ERROR("Vulkan") << "две записи набора дескрипторов с привязкой "
+                                << bindings[i].binding << " — шейдер отклонён";
+            return;
+        }
     }
 
     VkDescriptorSetLayoutCreateInfo setInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};

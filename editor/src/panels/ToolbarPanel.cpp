@@ -8,6 +8,7 @@
 #include "EditorHost.h"
 #include "EditorIcons.h"
 #include "../Localization.h"
+#include "sage/render/DebugView.h"
 
 void ToolbarPanel::Draw(EditorHost& host, float height) {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
@@ -110,7 +111,7 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     // просто исчезали с экрана.
     const float leftEnd = ImGui::GetCursorPosX();
     const float playBlockW = 220.0f;
-    const float rightBlockW = 250.0f;
+    const float rightBlockW = 290.0f;   // в правом блоке подрос список режимов
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const float windowW = ImGui::GetWindowWidth();
     float playX = windowW * 0.5f - playBlockW * 0.5f;
@@ -144,7 +145,14 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     }
 
     // --- Справа: режим рендера + сетка ---
-    const char* modes[] = {T("Shaded"), T("Wireframe"), T("Unlit"), T("Normals")};
+    // Имена отладочных видов берутся из самого движка (DebugViewName), а не
+    // переписываются здесь: разойдясь однажды, список в тулбаре начнёт врать о
+    // том, что показывает шейдер.
+    const char* modes[(int)EditorRenderMode::Count];
+    modes[0] = T("Shaded");
+    modes[1] = T("Wireframe");
+    for (int i = 2; i < (int)EditorRenderMode::Count; ++i)
+        modes[i] = sage::render::DebugViewName((sage::render::DebugView)(i - 1));
     // Та же защита: правый блок не заезжает на то, что уже нарисовано.
     const float rightX = std::max(ImGui::GetCursorPosX() + spacing, windowW - rightBlockW);
     ImGui::SameLine(rightX);
@@ -161,7 +169,7 @@ void ToolbarPanel::Draw(EditorHost& host, float height) {
     if (EditorIcons::IconOnlyButton("layout", T("UI layout mode (U)"), host.UIEditMode()))
         host.UIEditMode() = !host.UIEditMode();
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(110.0f);
+    ImGui::SetNextItemWidth(150.0f);   // в список влезли отладочные виды
     int mode = (int)host.RenderMode();
     if (ImGui::Combo("##rendermode", &mode, modes, IM_ARRAYSIZE(modes))) {
         host.RenderMode() = (EditorRenderMode)mode;

@@ -208,6 +208,46 @@ void main() {
     CHECK_TRUE(broken == nullptr);
 }
 
+// --- Номера привязок не сталкиваются -----------------------------------------
+//
+// Свободные униформы движка glslang собирает в блок, и блок этот получает
+// привязку 0. Сэмплерам номера раздаются СВОЕЙ нумерацией, тоже с нуля, —
+// значит первый же sampler2D норовит занять ту же нулевую привязку. Две записи
+// с одним номером в раскладке набора запрещены, но ни glslang, ни слой
+// валидации об этом не скажут: набор соберётся, а драйвер прочитает за концом
+// массива. На llvmpipe это портило кучу, и падало потом в постороннем malloc —
+// стек указывал куда угодно, только не на шейдер.
+//
+// Проверяем самый обычный случай: униформа плюс две текстуры. Если номера
+// снова столкнутся, программа не соберётся (см. VulkanShaderProgram) и тест
+// упадёт здесь — рядом с причиной.
+TEST(Rhi_vulkan_uniform_and_sampler_bindings_do_not_collide) {
+    if (!GraphicsDevice::Available(Backend::Vulkan)) return;
+
+    std::unique_ptr<GraphicsDevice> dev = GraphicsDevice::Create(Backend::Vulkan);
+    dev->Init(nullptr);
+
+    const std::string vert = R"(#version 330 core
+layout(location = 0) in vec2 aPos;
+uniform mat4 uModel;
+out vec2 vUV;
+void main() { vUV = aPos; gl_Position = uModel * vec4(aPos, 0.0, 1.0); }
+)";
+    const std::string frag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uAlbedo;
+uniform sampler2D uMask;
+uniform vec3 uTint;
+void main() {
+    FragColor = vec4(texture(uAlbedo, vUV).rgb * uTint, texture(uMask, vUV).r);
+}
+)";
+
+    std::unique_ptr<sage::rhi::ShaderProgram> program = dev->CreateShaderProgram(vert, frag);
+    CHECK_TRUE(program != nullptr);
+}
+
 // --- Отрисовка через Vulkan: от вершин до пикселей ---------------------------
 //
 // Набор соответствия проверяет очистку и систему координат, но не рисование.

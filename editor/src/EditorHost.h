@@ -19,9 +19,28 @@ enum class EditorPlayState { Editing, Playing, Paused };
 // Режим отображения сцены во вьюпорте (View > Render Mode / тулбар).
 //   Shaded    — полное освещение (по умолчанию);
 //   Wireframe — каркас (полигоны линиями), плоский цвет для читаемости;
-//   Unlit     — плоский базовый цвет без освещения;
-//   Normals   — визуализация нормалей цветом (отладка).
-enum class EditorRenderMode { Shaded, Wireframe, Unlit, Normals };
+//   дальше    — отладочные виды из sage/render/DebugView.h: вместо результата
+//               освещения показывается одно его слагаемое.
+//
+// Порядок первых двух зафиксирован (на них завязан каркасный режим), остальные
+// идут ровно как в DebugView и переводятся в него сдвигом — держать два разных
+// порядка значило бы однажды показать шероховатость под именем нормалей.
+enum class EditorRenderMode {
+    Shaded,
+    Wireframe,
+    Unlit,
+    Normals,
+    Albedo,
+    Roughness,
+    Metallic,
+    Emissive,
+    AmbientOcclusion,
+    Shadow,
+    Depth,
+    Cascades,
+    WorldGrid,
+    Count
+};
 
 // Пространство манипулятора гизмо: Local — оси объекта, World — оси мира.
 enum class EditorGizmoSpace { Local, World };

@@ -190,6 +190,8 @@ bool EngineConfig::LoadFile(const std::string& path) {
     LocalShadows = gfx.value("localShadows", LocalShadows);
     LocalShadowResolution = gfx.value("localShadowResolution", LocalShadowResolution);
     OcclusionCulling = gfx.value("occlusionCulling", OcclusionCulling);
+    Reflections      = gfx.value("reflections", Reflections);
+    PlanarReflections= gfx.value("planarReflections", PlanarReflections);
     ShadowDistance = gfx.value("shadowDistance", ShadowDistance);
     PostProcessing   = gfx.value("postProcessing", PostProcessing);
     Fog              = gfx.value("fog", Fog);
@@ -215,6 +217,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     VolumetricDensity  = pp.value("volumetricDensity", VolumetricDensity);
     VolumetricIntensity= pp.value("volumetricIntensity", VolumetricIntensity);
     VolumetricSteps    = pp.value("volumetricSteps", VolumetricSteps);
+    DebugView          = pp.value("debugView", DebugView);
     VolumetricMaxDistance = pp.value("volumetricMaxDistance", VolumetricMaxDistance);
     VolumetricHeightFalloff = pp.value("volumetricHeightFalloff", VolumetricHeightFalloff);
     CloudSteps         = pp.value("cloudSteps", CloudSteps);
@@ -260,6 +263,7 @@ std::string EngineConfig::ToJsonString() const {
         {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
         {"localShadows", LocalShadows}, {"localShadowResolution", LocalShadowResolution},
         {"occlusionCulling", OcclusionCulling},
+        {"reflections", Reflections}, {"planarReflections", PlanarReflections},
         {"postProcessing", PostProcessing}, {"fog", Fog}, {"skybox", Skybox},
     };
     j["ui"] = {
@@ -344,6 +348,7 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_INTENSITY")) VolumetricIntensity = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_CLOUD_COVERAGE")) CloudCoverage = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_DEBUG")) VolumetricDebug = EnvBool(v, VolumetricDebug);
+    if (const char* v = std::getenv("SAGE_DEBUG_VIEW")) DebugView = v;
 
     // Графика. SAGE_NO_SHADOWS / SAGE_NO_POST оставлены для обратной
     // совместимости (их наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…
@@ -357,6 +362,20 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_LOCAL_SHADOWS")) LocalShadows = EnvBool(v, LocalShadows);
     if (const char* v = std::getenv("SAGE_SHADOW_DISTANCE")) ShadowDistance = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_POST")) PostProcessing = EnvBool(v, PostProcessing);
+    // Отдельные эффекты — переменными окружения: проверять их поодиночке
+    // (и особенно сравнивать «с ним» и «без него» на одном кадре) иначе
+    // приходится правкой файла настроек между запусками.
+    if (const char* v = std::getenv("SAGE_BLOOM")) Bloom = EnvBool(v, Bloom);
+    if (const char* v = std::getenv("SAGE_EXPOSURE")) Exposure = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_SATURATION")) Saturation = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_CONTRAST")) Contrast = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_SSAO")) AmbientOcclusion = EnvBool(v, AmbientOcclusion);
+    if (const char* v = std::getenv("SAGE_FXAA")) Fxaa = EnvBool(v, Fxaa);
+    if (const char* v = std::getenv("SAGE_DOF")) DepthOfField = EnvBool(v, DepthOfField);
+    if (const char* v = std::getenv("SAGE_MOTION_BLUR")) MotionBlur = EnvBool(v, MotionBlur);
+    if (const char* v = std::getenv("SAGE_REFLECTIONS")) Reflections = EnvBool(v, Reflections);
+    if (const char* v = std::getenv("SAGE_PLANAR_REFLECTIONS"))
+        PlanarReflections = EnvBool(v, PlanarReflections);
     if (const char* v = std::getenv("SAGE_FOG")) Fog = EnvBool(v, Fog);
     if (const char* v = std::getenv("SAGE_SKYBOX")) Skybox = EnvBool(v, Skybox);
 }

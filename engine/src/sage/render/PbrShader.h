@@ -72,7 +72,9 @@ uniform vec3 uPointShadowParams[MAX_POINT_SHADOWS];
 // Где тень начинает растворяться и где её уже нет (метры от камеры).
 uniform float uShadowFadeStart;
 uniform float uShadowFadeEnd;
-uniform int uShadingMode; // 0 lit / 1 unlit / 2 normals (решает вызывающий main)
+// Режим отладочного показа. 0 — обычная отрисовка, всё остальное — разбор
+// кадра по слагаемым (см. sage/render/DebugView.h и DebugShade ниже).
+uniform int uShadingMode;
 // --- Отражения (см. sage/render/Reflection.h) ---
 // Карта окружения: небо и сцена вокруг, запечённые в cubemap с мипами. Мип
 // выбирается ШЕРОХОВАТОСТЬЮ — нулевой это зеркало, дальние размыты.
@@ -400,6 +402,76 @@ float CascadeEdge(vec3 pc, float band) {
     vec2 d = min(pc.xy, vec2(1.0) - pc.xy); // расстояние до ближайшего края
     float m = min(d.x, d.y);
     return 1.0 - clamp(m / band, 0.0, 1.0);
+}
+
+// --- Отладочные виды -----------------------------------------------------
+//
+// Разбор кадра по слагаемым: показать ровно одну величину вместо результата
+// освещения. Нужен затем, что «слишком тёмно» — не диагноз: причиной бывает и
+// albedo, и нормаль, и шероховатость, и тень, и AO, и все они на готовом кадре
+// выглядят одинаково. Здесь каждую видно отдельно.
+//
+// Живёт в общем блоке, а не в конкретном шейдере: путей отрисовки два
+// (инстансный батч и материал), и вид, сделанный в одном, молча отсутствовал бы
+// в другом.
+//
+// Возвращает true, если режим отладочный и цвет уже посчитан.
+bool DebugShade(int mode, vec3 N, vec3 worldPos, vec3 albedo, float metallic,
+                float roughness, float ao, vec3 emissive, float shadow, out vec4 outColor) {
+    outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    if (mode == 0) return false;
+    if (mode == 1) { outColor = vec4(albedo + emissive, 1.0); return true; }
+    if (mode == 2) { outColor = vec4(N * 0.5 + 0.5, 1.0); return true; }
+    if (mode == 3) { outColor = vec4(albedo, 1.0); return true; }
+    if (mode == 4) { outColor = vec4(vec3(roughness), 1.0); return true; }
+    if (mode == 5) { outColor = vec4(vec3(metallic), 1.0); return true; }
+    if (mode == 6) { outColor = vec4(emissive, 1.0); return true; }
+    if (mode == 7) { outColor = vec4(vec3(ao), 1.0); return true; }
+    if (mode == 8) { outColor = vec4(vec3(1.0 - shadow), 1.0); return true; }
+    if (mode == 9) {
+        // Глубина от камеры трёхцветной шкалой: близко синее, десяток метров —
+        // зелёное, дальше красное и к сотне метров чёрное.
+        //
+        // Не серый градиент: на открытой сцене почти всё попадает в первые
+        // проценты шкалы, и серым это неотличимо от однотонной заливки. По
+        // смене ЦВЕТА расстояние читается там, где по яркости уже не читается.
+        // Плюс метровые риски — по ним видно и масштаб, и что шкала линейна.
+        float d = length(worldPos - uViewPos);
+        float t = clamp(d / 100.0, 0.0, 1.0);
+        vec3 ramp = t < 0.5 ? mix(vec3(0.1, 0.3, 1.0), vec3(0.2, 1.0, 0.3), t * 2.0)
+                            : mix(vec3(0.2, 1.0, 0.3), vec3(1.0, 0.2, 0.1), t * 2.0 - 1.0);
+        float tick = smoothstep(0.94, 1.0, abs(fract(d * 0.1) * 2.0 - 1.0));
+        outColor = vec4(mix(ramp * (1.0 - t * 0.75), vec3(1.0), tick * 0.35), 1.0);
+        return true;
+    }
+    if (mode == 10) {
+        // Каскад тени, в который попал фрагмент: красный/зелёный/синий от
+        // ближнего к дальнему, серый — тени нет. По этой картинке сразу видно,
+        // не растянут ли ближний каскад на весь кадр.
+        for (int i = 0; i < 3; ++i) {
+            if (i >= uShadowCascades) break;
+            vec3 pc = CascadeCoords(i, worldPos, N, 1.0);
+            if (InsideCascade(pc, 0.02)) {
+                vec3 tint = i == 0 ? vec3(1.0, 0.35, 0.3)
+                          : i == 1 ? vec3(0.35, 1.0, 0.4)
+                                   : vec3(0.4, 0.55, 1.0);
+                outColor = vec4(tint * (0.35 + 0.65 * dot(N, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.3), 1.0);
+                return true;
+            }
+        }
+        outColor = vec4(vec3(0.25), 1.0);
+        return true;
+    }
+    if (mode == 11) {
+        // Мировые координаты по модулю метра: клетка размером в метр. По ней
+        // видно и масштаб модели, и разрывы развёртки, и то, что объект
+        // случайно смасштабирован в сто раз.
+        vec3 g = abs(fract(worldPos) - 0.5);
+        float line = smoothstep(0.46, 0.5, max(max(g.x, g.y), g.z));
+        outColor = vec4(mix(albedo * 0.6 + 0.2, vec3(1.0, 0.85, 0.3), line), 1.0);
+        return true;
+    }
+    return false;
 }
 
 float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {

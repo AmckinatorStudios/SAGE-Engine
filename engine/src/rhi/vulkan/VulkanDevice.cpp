@@ -110,10 +110,10 @@ VulkanDevice::~VulkanDevice() {
         // выделения, а они принадлежат устройству.
         for (auto& [key, pipeline] : m_pipelines) vkDestroyPipeline(m_device, pipeline, nullptr);
         m_pipelines.clear();
-        if (m_descriptorPool != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
-        }
-        m_uniformRing.Destroy();
+        for (VkDescriptorPool pool : m_descriptors.Blocks)
+            vkDestroyDescriptorPool(m_device, pool, nullptr);
+        m_descriptors.Blocks.clear();
+        m_uniformBlocks.clear();
         if (m_fence != VK_NULL_HANDLE) vkDestroyFence(m_device, m_fence, nullptr);
         for (auto& [key, sampler] : m_samplers) vkDestroySampler(m_device, sampler, nullptr);
         m_samplers.clear();
@@ -372,26 +372,12 @@ void VulkanDevice::Init(ProcLoader /*loader*/) {
         vkGetPhysicalDeviceProperties(m_gpu, &props);
         m_uniformAlignment = std::max<VkDeviceSize>(props.limits.minUniformBufferOffsetAlignment, 4);
 
-        // Кольцо униформ на кадр. 8 МиБ — с большим запасом: тяжёлый кадр
-        // движка делает порядка тысячи вызовов отрисовки, блок униформ у
-        // самого крупного шейдера меньше килобайта.
-        m_uniformRing.Create(*this, 8u << 20, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                             MemoryUse::CpuToGpu);
-
-        // Пул дескрипторов. Сбрасывается целиком при отправке кадра — по набору
-        // на вызов отрисовки, освобождать поштучно незачем.
-        const uint32_t kSets = 4096;
-        VkDescriptorPoolSize sizes[2]{};
-        sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        sizes[0].descriptorCount = kSets;
-        sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        sizes[1].descriptorCount = kSets * 8;
-        VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-        pool.maxSets = kSets;
-        pool.poolSizeCount = 2;
-        pool.pPoolSizes = sizes;
-        vk::Check(vkCreateDescriptorPool(m_device, &pool, nullptr, &m_descriptorPool),
-                  "vkCreateDescriptorPool");
+        // Первый блок кольца униформ и первый пул дескрипторов. Дальше цепочки
+        // дорастают сами по мере того, как кадр оказывается тяжелее (см.
+        // ReserveUniforms/AllocateDescriptorSet) — предугадывать нагрузку
+        // сцены здесь нечем.
+        AddUniformBlock();
+        AddDescriptorPool();
     }
     if (!m_allocator) {
         // Без распределителя ресурсы не создать — устройство честно считается
@@ -612,7 +598,10 @@ void VulkanDevice::FlushCommands() {
     // Кадр исполнен — наборы дескрипторов и кольцо униформ свободны. Сброс
     // ЗДЕСЬ, после ожидания: сбросить их раньше значило бы отобрать у GPU то,
     // что он ещё читает.
-    if (m_descriptorPool != VK_NULL_HANDLE) vkResetDescriptorPool(m_device, m_descriptorPool, 0);
+    // Сами блоки остаются: их набрали ровно столько, сколько кадру нужно.
+    for (VkDescriptorPool pool : m_descriptors.Blocks) vkResetDescriptorPool(m_device, pool, 0);
+    m_descriptors.Current = 0;
+    m_uniformBlock = 0;
     m_uniformOffset = 0;
 }
 

@@ -290,13 +290,39 @@ private:
     VkPipeline PipelineFor(const PipelineKey& key, const VulkanGeometry& geometry);
     // Набор дескрипторов под текущий шейдер: буфер униформ + связанные текстуры.
     VkDescriptorSet DescriptorSetFor(const VulkanShaderProgram& shader);
+    // Кусок кольца униформ под один вызов. false — места не нашлось и добавить
+    // блок не вышло.
+    bool ReserveUniforms(VkDeviceSize size, const void* data, VkDescriptorBufferInfo& out);
+    // Пустой набор из текущего пула; при исчерпании заводит следующий пул.
+    VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout);
+    bool AddDescriptorPool();
+    bool AddUniformBlock();
 
     std::unordered_map<PipelineKey, VkPipeline, PipelineKeyHash> m_pipelines;
-    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
-    // Кольцевой буфер униформ кадра: каждый вызов отрисовки получает свой
-    // кусок. Один буфер на всех означал бы, что значения следующего вызова
-    // затирают значения предыдущего ДО того, как GPU его исполнил.
-    VulkanBuffer m_uniformRing;
+
+    // Кадровые распределители — цепочки блоков, а не по одному буферу на всё.
+    //
+    // Один блок фиксированного размера означает жёсткий потолок на кадр: как
+    // только он кончится, вызовы отрисовки придётся выбрасывать, и кадр молча
+    // станет неправильным. Сколько именно нужно, заранее не знает никто:
+    // отражения, каскады теней и зонды умножают число вызовов на порядок, и
+    // зависит это от сцены, а не от движка. Поэтому блоки добавляются по
+    // требованию и НЕ освобождаются между кадрами — за несколько кадров цепочка
+    // дорастает до нужной длины и перестаёт расти.
+    static constexpr VkDeviceSize kUniformBlockBytes = 8u << 20;
+    static constexpr uint32_t kDescriptorSetsPerPool = 4096;
+
+    struct DescriptorPools {
+        std::vector<VkDescriptorPool> Blocks;
+        size_t Current = 0;   // из какого блока сейчас берём
+    };
+    DescriptorPools m_descriptors;
+
+    // Кольцо униформ кадра: каждый вызов отрисовки получает свой кусок. Один
+    // буфер на всех означал бы, что значения следующего вызова затирают
+    // значения предыдущего ДО того, как GPU его исполнил.
+    std::vector<std::unique_ptr<VulkanBuffer>> m_uniformBlocks;
+    size_t m_uniformBlock = 0;
     VkDeviceSize m_uniformOffset = 0;
     VkDeviceSize m_uniformAlignment = 256;
 
