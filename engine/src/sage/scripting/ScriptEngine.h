@@ -70,6 +70,14 @@ class ScriptEngine {
 public:
     ScriptEngine();
 
+    // Снимает со сцены всё, что держит ссылки в состояние Lua, пока это
+    // состояние ещё живо. Обязателен: колбэк «занят ли объём» у контроллера
+    // персонажа (sage.physics.SetCharacterWorld) лежит В КОМПОНЕНТЕ, а сцена
+    // переживает движок скриптов — при её разрушении такой колбэк снимал бы
+    // ссылку в уже мёртвом интерпретаторе. Это падение на выходе из Play, то
+    // есть после того, как вся работа сделана.
+    ~ScriptEngine();
+
     // Даёт скриптам доступ к сцене: SpawnObject/FindObject/DestroyObject
     // из Lua будут работать с этой сценой. Без BindScene эти функции
     // бросают ошибку при вызове из Lua — понятную, не сегфолт.
@@ -357,6 +365,8 @@ private:
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
     void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
+
+    void ReleaseSceneReferences();
 
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);

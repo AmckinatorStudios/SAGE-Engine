@@ -134,6 +134,20 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterRenderTextureApi();
 }
 
+// Всё, что держит Lua-ссылки внутри сцены, снимается здесь — до разрушения
+// состояния Lua (оно член и умирает после тела деструктора).
+void ScriptEngine::ReleaseSceneReferences() {
+    if (!m_scene) return;
+    auto view = m_scene->Registry().view<CharacterControllerComponent>();
+    for (auto e : view) {
+        CharacterControllerComponent& cc = view.get<CharacterControllerComponent>(e);
+        cc.Solid = nullptr;
+        cc.Motor.reset();
+    }
+}
+
+ScriptEngine::~ScriptEngine() { ReleaseSceneReferences(); }
+
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
     sol::environment env(m_lua, sol::create, m_lua.globals());
 
