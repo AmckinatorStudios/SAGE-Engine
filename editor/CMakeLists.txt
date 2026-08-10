@@ -13,6 +13,11 @@
 add_executable(SageEditor WIN32
     src/main.cpp
     src/EditorLayer.cpp
+    src/EditorLayer_Project.cpp
+    src/EditorLayer_Play.cpp
+    src/EditorLayer_Edit.cpp
+    src/EditorLayer_Assets.cpp
+    src/EditorLayer_Ui.cpp
     src/EditorSelfTest.cpp
     src/EditorSceneRenderer.cpp
     src/EditorTheme.cpp
