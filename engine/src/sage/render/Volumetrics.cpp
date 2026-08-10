@@ -5,6 +5,7 @@
 
 #include "sage/core/Config.h"
 #include "sage/core/Profiler.h"
+#include "sage/core/Log.h"
 #include "sage/render/Shader.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Light.h"
@@ -62,6 +63,7 @@ uniform vec3  uTint;
 uniform int   uCloudSteps;
 uniform int   uCloudLightSteps;
 
+uniform int   uDebug;        // 1 — показать поле видимости солнца
 uniform int   uShadowsOn;
 uniform int   uCascades;
 uniform mat4  uLightMat[4];
@@ -138,7 +140,12 @@ float cloudAt(vec3 p) {
     // Крупная карта решает, ГДЕ облака есть, а где чистое небо. Без неё шум
     // одной частоты даёт ровную пелену от края до края: отдельных облаков с
     // просветами между ними не получается ни при какой плотности.
-    float gate = smoothstep(0.38, 0.66, fbm(q * 0.3));
+    //
+    // Частота карты — того же порядка, что и у самих клубов. Была втрое ниже,
+    // и это было хуже, чем бесполезно: на масштабе полутора километров вся
+    // видимая часть неба попадала в ОДНО значение карты, и небо целиком
+    // оказывалось либо затянутым, либо пустым — чаще пустым.
+    float gate = smoothstep(0.36, 0.62, fbm(q * 0.85 + 19.3));
     if (gate <= 0.0) return 0.0;
 
     // Порог по покрытию с ПЕРЕНОРМИРОВКОЙ: остаток растягивается обратно на
@@ -194,7 +201,28 @@ void main() {
     vec2 px = uv / max(uJitter, vec2(1e-6));
     float dither = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
 
+    // Отладка: вместо результата показываем, что марш ВИДИТ как тень. Чёрное —
+    // затенённый воздух, белое — освещённый. Без такой картинки «лучей нет»
+    // неотличимо от «карта теней в этот проход не пришла».
+    if (uDebug == 1) {
+        float march = min(sceneDist, uMaxDist);
+        float acc = 0.0;
+        for (int i = 0; i < 32; ++i) {
+            acc += sunVisibility(uCamPos + dir * (march * (float(i) + 0.5) / 32.0));
+        }
+        // Альфа 1 — предумноженное смешивание ЗАМЕНИТ кадр, а не добавит к
+        // нему: поверх светлой сцены добавка всегда белая и ничего не говорит.
+        FragColor = vec4(vec3(acc / 32.0), 1.0);
+        return;
+    }
+
     vec3 scatter = vec3(0.0);
+    // Сколько света ПРОХОДИТ сквозь дымку от геометрии к глазу. Без этого
+    // множителя проход только добавляет свет и ничего не отнимает: при
+    // сколько-нибудь заметной плотности кадр уходит в белое, потому что энергия
+    // берётся из ниоткуда. Дымка обязана и подсвечивать, и приглушать то, что
+    // за ней.
+    float aerial = 1.0;
 
     // --- Лучи в воздухе ---
     if (uShafts != 0) {
@@ -220,6 +248,7 @@ void main() {
         // нельзя, иначе взгляд в сторону солнца даёт вспышку в разы ярче
         // самого солнца и весь кадр уходит в белое.
         scatter *= uIntensity;
+        aerial = transmittance;
     }
 
     // --- Облака ---
@@ -275,7 +304,11 @@ void main() {
         }
     }
 
-    FragColor = vec4(cloudColor + scatter, clamp(cloudAlpha, 0.0, 1.0));
+    // Итог в предумноженной альфе. Альфа — насколько кадр за проходом закрыт:
+    // дымкой (1 − aerial) и облаком, вместе. Облако вдобавок приглушается той
+    // же дымкой — оно за ней.
+    float a = 1.0 - aerial * (1.0 - clamp(cloudAlpha, 0.0, 1.0));
+    FragColor = vec4(scatter + cloudColor * aerial, clamp(a, 0.0, 1.0));
 }
 )";
 
@@ -341,6 +374,11 @@ VolumetricSettings VolumetricsFromConfig(const sage::EngineConfig& cfg) {
     v.CloudSteps = cfg.CloudSteps;
     v.Coverage = cfg.CloudCoverage;
     v.Scale = cfg.VolumetricScale;
+    v.Debug = cfg.VolumetricDebug;
+    v.MaxDistance = cfg.VolumetricMaxDistance;
+    v.HeightFalloff = cfg.VolumetricHeightFalloff;
+    v.CloudBottom = cfg.CloudBottom;
+    v.CloudTop = cfg.CloudTop;
     return v;
 }
 
@@ -390,6 +428,7 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     march.SetFloat("uTime", time);
     march.SetVec2("uJitter", glm::vec2(1.0f / (float)lw, 1.0f / (float)lh));
 
+    march.SetInt("uDebug", s.Debug ? 1 : 0);
     march.SetInt("uShafts", s.LightShafts ? 1 : 0);
     march.SetFloat("uDensity", s.Density);
     march.SetFloat("uAniso", glm::clamp(s.Anisotropy, -0.95f, 0.95f));

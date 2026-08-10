@@ -215,8 +215,12 @@ bool EngineConfig::LoadFile(const std::string& path) {
     VolumetricDensity  = pp.value("volumetricDensity", VolumetricDensity);
     VolumetricIntensity= pp.value("volumetricIntensity", VolumetricIntensity);
     VolumetricSteps    = pp.value("volumetricSteps", VolumetricSteps);
+    VolumetricMaxDistance = pp.value("volumetricMaxDistance", VolumetricMaxDistance);
+    VolumetricHeightFalloff = pp.value("volumetricHeightFalloff", VolumetricHeightFalloff);
     CloudSteps         = pp.value("cloudSteps", CloudSteps);
     CloudCoverage      = pp.value("cloudCoverage", CloudCoverage);
+    CloudBottom        = pp.value("cloudBottom", CloudBottom);
+    CloudTop           = pp.value("cloudTop", CloudTop);
     VolumetricScale    = pp.value("volumetricScale", VolumetricScale);
     AmbientOcclusion = pp.value("ao", AmbientOcclusion);
     AOStrength       = pp.value("aoStrength", AOStrength);
@@ -269,7 +273,10 @@ std::string EngineConfig::ToJsonString() const {
         {"volumetrics", Volumetrics}, {"volumetricShafts", VolumetricShafts},
         {"volumetricClouds", VolumetricClouds}, {"volumetricDensity", VolumetricDensity},
         {"volumetricIntensity", VolumetricIntensity}, {"volumetricSteps", VolumetricSteps},
+        {"volumetricMaxDistance", VolumetricMaxDistance},
+        {"volumetricHeightFalloff", VolumetricHeightFalloff},
         {"cloudSteps", CloudSteps}, {"cloudCoverage", CloudCoverage},
+        {"cloudBottom", CloudBottom}, {"cloudTop", CloudTop},
         {"volumetricScale", VolumetricScale},
         {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
         {"depthOfField", DepthOfField}, {"focusDistance", FocusDistance},
@@ -333,6 +340,10 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_STEPS")) VolumetricSteps = std::atoi(v);
     if (const char* v = std::getenv("SAGE_CLOUD_STEPS")) CloudSteps = std::atoi(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_SCALE")) VolumetricScale = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_DENSITY")) VolumetricDensity = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_INTENSITY")) VolumetricIntensity = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_CLOUD_COVERAGE")) CloudCoverage = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_DEBUG")) VolumetricDebug = EnvBool(v, VolumetricDebug);
 
     // Графика. SAGE_NO_SHADOWS / SAGE_NO_POST оставлены для обратной
     // совместимости (их наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…

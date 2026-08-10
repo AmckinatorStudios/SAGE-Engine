@@ -124,6 +124,14 @@ void ScriptEngine::RegisterLightingApi() {
         cfg.CloudSteps = t.get_or("cloudSteps", cfg.CloudSteps);
         cfg.CloudCoverage = t.get_or("coverage", cfg.CloudCoverage);
         cfg.VolumetricScale = t.get_or("scale", cfg.VolumetricScale);
+        // Дальность марша и убывание с высотой — главные ручки против
+        // «молока»: у сцены обычно уже есть свой туман по глубине, и объём,
+        // считающий дымку на всю сотню метров, складывается с ним и съедает
+        // горизонт.
+        cfg.VolumetricMaxDistance = t.get_or("maxDistance", cfg.VolumetricMaxDistance);
+        cfg.VolumetricHeightFalloff = t.get_or("heightFalloff", cfg.VolumetricHeightFalloff);
+        cfg.CloudBottom = t.get_or("cloudBottom", cfg.CloudBottom);
+        cfg.CloudTop = t.get_or("cloudTop", cfg.CloudTop);
     });
     Bind("volumetric", "Enabled", "VolumetricsEnabled", []() -> bool {
         return sage::EngineConfig::Get().Volumetrics;

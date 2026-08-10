@@ -121,10 +121,15 @@ struct EngineConfig {
     bool VolumetricClouds = true;   // объёмные облака
     float VolumetricDensity = 0.02f;
     float VolumetricIntensity = 1.0f;
+    float VolumetricMaxDistance = 120.0f; // дальше по лучу не маршируем, м
+    float VolumetricHeightFalloff = 0.06f; // убывание плотности с высотой, 1/м
     int VolumetricSteps = 28;       // шагов марша по лучу взгляда
     int CloudSteps = 40;            // шагов марша сквозь слой облаков
     float CloudCoverage = 0.56f;    // 0 — ясно, 1 — сплошная облачность
+    float CloudBottom = 180.0f;     // нижняя граница слоя облаков, м
+    float CloudTop = 520.0f;        // верхняя граница
     float VolumetricScale = 0.5f;   // доля разрешения прохода (0.5 — половина)
+    bool VolumetricDebug = false;   // показать поле видимости солнца вместо кадра
 
     bool AmbientOcclusion = true;  // SSAO — затемнение щелей/контактов
     float AOStrength = 1.0f;       // сила SSAO (0 — выкл)

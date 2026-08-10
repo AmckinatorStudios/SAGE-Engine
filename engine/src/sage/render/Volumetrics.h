@@ -64,6 +64,9 @@ struct VolumetricSettings {
 
     // Доля разрешения для прохода: 1 — полное, 0.5 — половина стороны.
     float Scale = 0.5f;
+
+    // Показать поле видимости солнца вместо результата (отладка теней в марше).
+    bool Debug = false;
 };
 
 VolumetricSettings VolumetricsFromConfig(const sage::EngineConfig& cfg);
