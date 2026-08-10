@@ -26,3 +26,5 @@ sage-autosave.sage
 /sage_test_*.lua
 /sage_life_*.lua
 /sage-crash-*.txt
+# Сборка с санитайзерами (ASan/UBSan) — временная, рядом с обычной.
+build-asan/

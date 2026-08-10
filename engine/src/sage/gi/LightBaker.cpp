@@ -448,8 +448,15 @@ std::shared_ptr<GIState> Bake(const BakeInput& input, const ProgressFn& progress
     ParallelChunks(jobs.size(), [&](size_t begin, size_t end) {
         for (size_t i = begin; i < end; ++i) {
             const TexelJob& j = jobs[i];
-            uint32_t seed = Hash((uint32_t)(j.Page * 73856093) ^ (uint32_t)(j.X * 19349663) ^
-                                 (uint32_t)(j.Y * 83492791) ^ s.Seed);
+            // Умножения — в БЕЗЗНАКОВОМ типе. В int они переполняются уже на
+            // странице шириной в пару тысяч текселей, а знаковое переполнение
+            // — неопределённое поведение: компилятор вправе считать, что его не
+            // бывает, и посчитать хэш иначе при другом уровне оптимизации.
+            // Для бейка, который обещан ДЕТЕРМИНИРОВАННЫМ, это означало бы
+            // разный результат у двух сборок одного и того же кода.
+            const uint32_t seed = Hash((uint32_t)j.Page * 73856093u ^
+                                       (uint32_t)j.X * 19349663u ^
+                                       (uint32_t)j.Y * 83492791u ^ s.Seed);
             glm::vec3 v = GatherSurface(bvh, input.Env, j.Pos, j.N,
                                         s.SampleCount, s.Bounces, seed);
             state->Pages[j.Page].Texels[(size_t)j.Y * pageSize + j.X] = v;

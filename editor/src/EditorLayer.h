@@ -222,7 +222,17 @@ private:
     // Открывать сразу нельзя: OpenPopup обязан звучать на уровне окна-хоста.
     const char* m_pendingDialog = nullptr;
     void UpdateWindowTitle();
-    void RunSelfTest(); // SAGE_EDITOR_SELFTEST=1 (для CI)
+    void RunSelfTest();
+    // Блоки самопроверки по областям. Возвращают свой итог и выполняются ВСЕ,
+    // независимо друг от друга: прогон обязан показать все поломки разом, а не
+    // остановиться на первой. Раньше это была одна функция на две тысячи строк
+    // с общим флагом, и после первой ошибки половина проверок молча
+    // пропускалась.
+    bool SelfTestProjectAndAssets();
+    bool SelfTestSceneAndPlay();
+    bool SelfTestSystems();
+    bool SelfTestSelection();
+    bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +
     // Play + Build Game (собранный бинарник затем гоняет smoke-тест).
     void RunE2EGameTest();

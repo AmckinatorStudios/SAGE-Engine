@@ -66,7 +66,11 @@ struct Reader {
 
     bool Raw(void* out, size_t bytes) {
         if (!Ok || At + bytes > Size) { Ok = false; return false; }
-        std::memcpy(out, Data + At, bytes);
+        // Ноль байт — законный случай (пустой массив в файле), но memcpy с
+        // нулевым указателем не определён ДАЖЕ при нулевой длине: стандарт
+        // требует валидных указателей независимо от count. Пустой кэш давал
+        // ровно это — Data == nullptr, bytes == 0.
+        if (bytes > 0) std::memcpy(out, Data + At, bytes);
         At += bytes;
         return true;
     }

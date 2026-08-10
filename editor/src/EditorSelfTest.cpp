@@ -90,6 +90,44 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
+
+    // Дальше — блоки проверок по областям. Каждый возвращает свой итог, и
+    // ВСЕ они выполняются независимо от того, упал ли предыдущий: прогон
+    // должен показать ВСЕ поломки разом, а не первую. Раньше это была одна
+    // функция на две тысячи строк с общим флагом ok, и половина проверок
+    // молча пропускалась после первой же ошибки.
+    if (ok) {
+        ok = SelfTestProjectAndAssets() && ok;
+        ok = SelfTestSceneAndPlay() && ok;
+        ok = SelfTestSystems() && ok;
+        ok = SelfTestSelection() && ok;
+        ok = SelfTestTools() && ok;
+    }
+
+    if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
+                               << "materials + camera + light + primitives + environment + build + "
+                               << "recent + dirty + play + physics + animation + config + particles + "
+                               << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
+                               << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
+                               << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
+                               << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
+                               << "all-components-roundtrip + ui-layout-tools, "
+                               << before << " entities)";
+    else LOG_ERROR("Editor") << "SELFTEST: FAIL";
+}
+
+// --- проект, шаблоны, ассеты и материалы -----------------------------------
+//
+// Первая половина того, что редактор обязан уметь до всякой сцены: создать
+// проект, дать обещанный шаблоном старт, сохранить и загрузить, переименовать
+// файл вместе с его сайдкаром, назначить материал. Ошибка здесь означает, что
+// работать в редакторе нельзя вообще, поэтому этот блок идёт первым.
+bool EditorLayer::SelfTestProjectAndAssets() {
+    bool ok = true;
+    std::error_code ec;
+    std::string err;
+    (void)ec; (void)err;
+
     // --- Шаблоны проекта: каждый даёт то, что обещает ---------------------
     //
     // Проверяется не «функция вернула true», а содержимое стартовой сцены:
@@ -380,6 +418,22 @@ void EditorLayer::RunSelfTest() {
             }
         }
     }
+
+    return ok;
+}
+
+
+// --- наклейки, память, сборка игры и режим Play ----------------------------
+//
+// Всё, что происходит ВОКРУГ сцены: подгрузка и вытеснение ресурсов, сборка
+// игры в запускаемую папку, запуск сцены и возврат её по Stop, поведение
+// сломанного скрипта. Общее у них — время: каждая проверка здесь чего-то ждёт
+// или что-то откатывает.
+bool EditorLayer::SelfTestSceneAndPlay() {
+    bool ok = true;
+    std::error_code ec;
+    std::string err;
+    (void)ec; (void)err;
 
     // --- Наклейки: строятся по сцене и переживают save/load ---
     //
@@ -719,6 +773,22 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(boomId);
     }
 
+    return ok;
+}
+
+
+// --- физика, анимация, частицы, отсечение, настройки -----------------------
+//
+// Подсистемы движка глазами редактора: тело падает, кукла собирается, скелет
+// проигрывается, эмиттер рождает частицы, отсечение отбрасывает невидимое,
+// пресет качества доходит до картинки. Проверяется не сама подсистема (на это
+// есть тесты движка), а то, что редактор её ЗАПУСКАЕТ.
+bool EditorLayer::SelfTestSystems() {
+    bool ok = true;
+    std::error_code ec;
+    std::string err;
+    (void)ec; (void)err;
+
     // --- Физика: динамическое тело падает под гравитацией, Stop откатывает ---
     if (ok) {
         GameObject green = m_scene->FindByName("Green Cube");
@@ -935,6 +1005,21 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(src.Id());
         SetSelectedId(-1);
     }
+
+    return ok;
+}
+
+
+// --- иерархия, выделение, попадание мышью, форматы и префабы ---------------
+//
+// Работа руками: выбрать объект щелчком, выбрать два, удалить и вернуть,
+// перенести за родителем, сохранить в префаб и поставить обратно. Здесь же
+// собственные форматы и запекание GI — они попадают в сцену тем же путём.
+bool EditorLayer::SelfTestSelection() {
+    bool ok = true;
+    std::error_code ec;
+    std::string err;
+    (void)ec; (void)err;
 
     // --- Иерархия: мировая позиция ребёнка складывается из родителя, удаление
     // родителя сносит поддерево, undo возвращает обоих со связью ---
@@ -1406,6 +1491,22 @@ void EditorLayer::RunSelfTest() {
         m_scene->RemoveObject(giCube.Id());
     }
 
+    return ok;
+}
+
+
+// --- инструменты, перетаскивание, панели и вёрстка интерфейса --------------
+//
+// Инструменты редактора и его собственный интерфейс: редактор кода, обложки
+// префабов, перетаскивание, видимость панелей, выравнивание элементов UI.
+// Последний блок не по важности, а по порядку: он опирается на всё, что
+// проверено выше.
+bool EditorLayer::SelfTestTools() {
+    bool ok = true;
+    std::error_code ec;
+    std::string err;
+    (void)ec; (void)err;
+
     // --- Новые инструменты редактора: загрузка моделей, префабы, редактор кода,
     //     подтверждения. Проверяем ИМЕННО то, что человек делает мышью, но без
     //     кликов: те же методы, что зовут кнопки.
@@ -1861,7 +1962,6 @@ void EditorLayer::RunSelfTest() {
         }
     }
 
-
     // --- Инструменты вёрстки: выравнивание, распределение, якорь -----------
     //
     // Проверяется ПУТЬ ЦЕЛИКОМ, а не только математика (она проверена
@@ -1998,17 +2098,9 @@ void EditorLayer::RunSelfTest() {
         SetSelectedId(-1);
     }
 
-    if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + build + "
-                               << "recent + dirty + play + physics + animation + config + particles + "
-                               << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
-                               << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
-                               << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools, "
-                               << before << " entities)";
-    else LOG_ERROR("Editor") << "SELFTEST: FAIL";
+    return ok;
 }
+
 
 // ============================================================================
 //  E2E: полная игра через редактор (SAGE_EDITOR_E2E=1, headless CI)
