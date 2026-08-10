@@ -283,8 +283,12 @@ void DrawImage(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb
     const Image& img = *v.ImagePart;
     const float alpha = AlphaOf(v, img.Tint.a);
     if (!img.Tex) {
-        // Текстура не задана/не загрузилась — заглушка тоном, чтобы элемент был
-        // виден и настраиваем в редакторе.
+        // Пустой путь — картинки просто нет, и рисовать нечего. Заглушка здесь
+        // была бы хуже пустоты: она закрашивает элемент сплошным прямоугольником
+        // и прячет всё остальное, что на нём есть.
+        if (img.Path.empty()) return;
+        // Путь задан, а текстуры нет — вот это уже стоит показать: иначе
+        // «не загрузилось» и «не назначено» выглядят одинаково.
         ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha,
                        v.FillPart ? v.FillPart->Rounding * scale : 0.0f);
         return;

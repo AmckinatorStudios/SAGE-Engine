@@ -90,4 +90,13 @@ struct SceneColorInput {
 sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& batch,
                                         const SceneColorInput& input);
 
+// Съёмка сцены в именованные текстуры (RenderTextureComponent): по проходу на
+// каждую сущность, которой это заказано. Зовётся ДО основного прохода кадра —
+// картинка должна быть готова к тому моменту, когда её покажут.
+//
+// Возвращает, сколько текстур обновилось: ноль — обычное дело (всё разовое уже
+// снято), и по этому числу видно, что проход не работает вхолостую.
+int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,
+                       const LightingEnvironment& env, float time);
+
 } // namespace sage::render

@@ -87,6 +87,30 @@ bool Texture::LoadFromNative(const std::string& path, TextureFilter filter) {
     return true;
 }
 
+namespace {
+// Невладеющая обёртка над чужим GL-именем: Bind работает, деструктор ничего не
+// удаляет. Хранилищем распоряжается рендер-таргет.
+class BorrowedTexture2D : public sage::rhi::Texture2D {
+public:
+    BorrowedTexture2D(sage::rhi::TextureHandle h) : m_handle(h) {}
+    void Bind(int unit) const override { sage::rhi::GraphicsDevice::Get().BindTexture2D(unit, m_handle); }
+    sage::rhi::TextureHandle Handle() const override { return m_handle; }
+    uint64_t NativeHandle() const override { return m_handle.Value; }
+private:
+    sage::rhi::TextureHandle m_handle;
+};
+} // namespace
+
+std::shared_ptr<Texture> Texture::Wrap(sage::rhi::TextureHandle handle, int width, int height) {
+    std::shared_ptr<Texture> t(new Texture());
+    t->m_texture = std::make_unique<BorrowedTexture2D>(handle);
+    t->m_width = width;
+    t->m_height = height;
+    t->m_channels = 4;
+    t->m_hasMipmaps = false;
+    return t;
+}
+
 Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, TextureFilter filter, bool generateMipmaps) {
     m_width = width;
     m_height = height;

@@ -356,6 +356,7 @@ private:
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
     void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
+    void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
 
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);

@@ -71,6 +71,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ParticleECS.cpp
     src/sage/render/ParticleSystem.cpp
     src/sage/render/PostFX.cpp
+    src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
     src/sage/render/ResourceManager.cpp
     src/sage/render/Screenshot.cpp

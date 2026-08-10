@@ -480,7 +480,15 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                            : camera.GetProjectionMatrix((float)w / (float)std::max(h, 1));
     const glm::vec3 eye = viewOverride.Use ? viewOverride.EyePos : camera.Position;
 
-    if (!flatCanvas) DrawSky(env, outView, outProj);
+    if (!flatCanvas) {
+        // Съёмка в именованные картинки — до сцены и в свои буферы; после неё
+        // возвращаем буфер сцены и его вьюпорт.
+        if (primary && sage::render::RenderTextureViews(scene, m_batch, env, m_sceneTime) > 0) {
+            sceneFbo.Bind();
+            device.SetViewport(0, 0, w, h);
+        }
+        DrawSky(env, outView, outProj);
+    }
 
     // Режим рендера из тулбара: Shaded(0)/Unlit(1)/Normals(2); Wireframe — unlit + линии.
     int shadingMode = 0;

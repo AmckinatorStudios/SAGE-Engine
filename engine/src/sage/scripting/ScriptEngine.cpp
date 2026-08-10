@@ -131,6 +131,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterLightingApi();
     RegisterPhysicsApi();
     RegisterEventsApi();
+    RegisterRenderTextureApi();
 }
 
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {

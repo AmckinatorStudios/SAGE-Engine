@@ -801,6 +801,13 @@ void PlayerLayer::OnRender() {
         // composite-проход, и включать её здесь значило бы применить дважды.
         device.SetSRGBWrite(!usePost);
 
+        // Съёмка сцены в именованные картинки (иконки, экраны, зеркала) — до
+        // основного прохода: показать их собираются в этом же кадре.
+        if (sage::render::RenderTextureViews(*m_scene, m_batch, env, m_sceneTime) > 0 && usePost) {
+            m_sceneFbo->Bind();
+            device.SetViewport(0, 0, vpW, vpH);
+        }
+
         if (env.Skybox.Enabled) {
             m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
                         CelestialsFromEnvironment(env));

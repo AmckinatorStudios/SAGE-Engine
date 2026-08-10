@@ -1,6 +1,7 @@
 #include "ScriptEngine.h"
 
 #include "sage/core/Log.h"
+#include "sage/render/RenderTexture.h"
 
 // ---------------------------------------------------------------------------
 // События: sage.events.*
@@ -239,4 +240,54 @@ void ScriptEngine::DispatchFrameEvents() {
             }
         }
     }
+}
+
+// --- Рендер-текстуры: sage.rt.* -----------------------------------------------
+//
+// Съёмка сцены в именованную картинку. Сама съёмка идёт проходом рендера
+// (render/ScenePasses.h, RenderTextureViews); отсюда её только заказывают.
+void ScriptEngine::RegisterRenderTextureApi() {
+    // Навесить съёмку на сущность: точка съёмки — её позиция.
+    Bind("rt", "Attach", "AddRenderTexture", [](GameObject& obj, sol::table t) {
+        if (!obj.Valid()) return;
+        auto& rt = obj.Registry()->get_or_emplace<RenderTextureComponent>(obj.Entity());
+        rt.Target = t.get_or("name", rt.Target);
+        rt.Width = t.get_or("width", rt.Width);
+        rt.Height = t.get_or("height", rt.Height);
+        rt.Ortho = t.get_or("ortho", rt.Ortho);
+        rt.OrthoSize = t.get_or("size", rt.OrthoSize);
+        rt.Fov = t.get_or("fov", rt.Fov);
+        rt.Near = t.get_or("near", rt.Near);
+        rt.Far = t.get_or("far", rt.Far);
+        rt.Continuous = t.get_or("continuous", rt.Continuous);
+        rt.StudioLight = t.get_or("studio", rt.StudioLight);
+        rt.LightIntensity = t.get_or("lightIntensity", rt.LightIntensity);
+        rt.Ambient = t.get_or("ambient", rt.Ambient);
+        if (sol::optional<glm::vec3> ld = t["lightDir"]) rt.LightDir = *ld;
+        if (sol::optional<glm::vec3> look = t["look"]) rt.LookAt = *look;
+        if (sol::optional<glm::vec4> clear = t["clear"]) rt.ClearColor = *clear;
+        rt.Dirty = true;
+
+        // Картинку заводим СРАЗУ, не дожидаясь первого прохода рендера.
+        // Иначе интерфейс, собранный в OnStart (а он всегда собирается там),
+        // спрашивает «готова ли иконка», получает «нет» и навсегда остаётся с
+        // плоским значком: сам себя он не перестраивает.
+        if (!rt.Target.empty())
+            sage::render::RenderTextureRegistry::Instance().GetOrCreate(rt.Target, rt.Width,
+                                                                        rt.Height);
+    });
+
+    // Пересобрать картинку. Разовая съёмка иначе застыла бы навсегда — а
+    // иконка обязана обновиться, когда предмет перекрасили.
+    Bind("rt", "Refresh", "RefreshRenderTexture", [](GameObject& obj) {
+        if (!obj.Valid()) return;
+        if (auto* rt = obj.Registry()->try_get<RenderTextureComponent>(obj.Entity()))
+            rt->Dirty = true;
+    });
+
+    // Готова ли картинка с таким именем. По ней интерфейс решает, показывать
+    // объёмную иконку или обойтись плоским значком.
+    Bind("rt", "Ready", "RenderTextureReady", [](const std::string& name) -> bool {
+        return sage::render::RenderTextureRegistry::Instance().Find(name) != nullptr;
+    });
 }

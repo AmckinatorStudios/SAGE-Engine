@@ -76,7 +76,18 @@ public:
     // видеокарта/драйвер (обычно 4, 8 или 16).
     static float MaxSupportedAnisotropy();
 
+    // Обёртка вокруг ЧУЖОЙ текстуры — той, что уже живёт в рендер-таргете.
+    // Ничем не владеет: удалит её тот, кто создал.
+    //
+    // Нужна затем, что интерфейс и материалы принимают именно Texture, а
+    // результат прохода в текстуру — это rhi-хендл. Без обёртки картинку,
+    // нарисованную движком, нельзя было показать в интерфейсе вообще: только
+    // файл с диска.
+    static std::shared_ptr<Texture> Wrap(sage::rhi::TextureHandle handle, int width, int height);
+
 private:
+    Texture() = default;   // для Wrap: хранилище не создаётся
+
     // Загрузка .sagetex — своего формата (см. sage/assets/format/TextureFormat.h).
     bool LoadFromNative(const std::string& path, TextureFilter filter);
 

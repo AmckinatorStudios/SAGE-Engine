@@ -1,5 +1,7 @@
 #include "ScriptEngine.h"
 
+#include "sage/render/RenderTexture.h"
+
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/ui/UIDemos.h"
@@ -400,10 +402,25 @@ void ScriptEngine::RegisterUIApi() {
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
         im.Path = path;
         im.PixelArt = pixelArt.value_or(false);
-        im.Tex = path.empty() ? nullptr
-                 : im.PixelArt
-                     ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
-                     : ResourceManager::Instance().GetTexture(path);
+        // "rt:<имя>" — картинка, которую движок рисует сам (см. render/
+        // RenderTexture.h). Проверяется ПЕРЕД диском: иначе объёмная иконка
+        // искалась бы файлом, не находилась и молча становилась заглушкой.
+        if (auto rt = sage::render::RenderTextureRegistry::Resolve(path)) {
+            im.Tex = rt;
+        } else {
+            im.Tex = path.empty() ? nullptr
+                     : im.PixelArt
+                         ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
+                         : ResourceManager::Instance().GetTexture(path);
+        }
+    });
+
+    // Убрать картинку с элемента СОВСЕМ. Не то же, что пустой путь: пока
+    // компонент на элементе, он участвует в отрисовке, и переключить слот
+    // обратно на плоский значок, не сняв его, нельзя.
+    Bind("ui", "ClearImage", "ClearUIImage", [](GameObject& obj) {
+        if (!obj.Valid()) return;
+        obj.Registry()->remove<sage::ui::Image>(obj.Entity());
     });
 
     // Спрайт из листа: кусок в ПИКСЕЛЯХ исходника. Так набор интерфейса
