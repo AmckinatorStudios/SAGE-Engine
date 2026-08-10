@@ -888,3 +888,37 @@ TEST(Late_update_runs_after_every_regular_update) {
     // Поздний хук — последним, после ОБОИХ обычных.
     CHECK_EQ(order[3].get<std::string>(), std::string("late"));
 }
+
+TEST(Character_world_callback_outlives_the_script_engine_safely) {
+    // Сцена переживает движок скриптов: так устроен выход из Play в редакторе
+    // (сначала гаснут скрипты, потом восстанавливается сцена). Колбэк «занят ли
+    // объём» лежит в компоненте сущности и держал ссылку в реестр Lua — при
+    // разрушении сцены она снималась в уже мёртвом интерпретаторе, и редактор
+    // падал на Stop, после того как вся работа сделана.
+    Scene scene;
+    GameObject hero = scene.CreateObject("Hero");
+
+    {
+        ScriptEngine scripts;
+        scripts.BindScene(scene);
+        scripts.Lua()["hero"] = hero;
+        scripts.Lua().script(R"(
+            sage.physics.SetCharacterShape(hero, {radius = 0.3, height = 1.8})
+            sage.physics.SetCharacterWorld(hero, function(x0, y0, z0, x1, y1, z1)
+                return y0 < 0.0
+            end)
+        )");
+        const auto* cc = scene.Registry().try_get<CharacterControllerComponent>(hero.Entity());
+        CHECK_TRUE(cc != nullptr && (bool)cc->Solid);
+        CHECK_TRUE(cc->Solid(glm::vec3(0, -1, 0), glm::vec3(1, 0, 1)));   // работает
+    }
+
+    // Движка скриптов больше нет. Колбэк обязан оставаться ВЫЗЫВАЕМЫМ и честно
+    // отвечать «занято»: так персонаж встанет там, где стоял, а не провалится
+    // сквозь исчезнувший мир.
+    const auto* cc = scene.Registry().try_get<CharacterControllerComponent>(hero.Entity());
+    CHECK_TRUE(cc != nullptr && (bool)cc->Solid);
+    CHECK_TRUE(cc->Solid(glm::vec3(0, 5, 0), glm::vec3(1, 6, 1)));
+    // И разрушение сцены после этого не должно падать — проверяется самим
+    // выходом из теста.
+}

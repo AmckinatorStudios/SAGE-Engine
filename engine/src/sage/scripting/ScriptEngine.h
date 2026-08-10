@@ -70,13 +70,6 @@ class ScriptEngine {
 public:
     ScriptEngine();
 
-    // Снимает со сцены всё, что держит ссылки в состояние Lua, пока это
-    // состояние ещё живо. Обязателен: колбэк «занят ли объём» у контроллера
-    // персонажа (sage.physics.SetCharacterWorld) лежит В КОМПОНЕНТЕ, а сцена
-    // переживает движок скриптов — при её разрушении такой колбэк снимал бы
-    // ссылку в уже мёртвом интерпретаторе. Это падение на выходе из Play, то
-    // есть после того, как вся работа сделана.
-    ~ScriptEngine();
 
     // Даёт скриптам доступ к сцене: SpawnObject/FindObject/DestroyObject
     // из Lua будут работать с этой сценой. Без BindScene эти функции
@@ -366,8 +359,6 @@ private:
     void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
 
-    void ReleaseSceneReferences();
-
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
     // Общий вызов необязательного хука у всех скриптов (OnFixedUpdate,
@@ -420,6 +411,18 @@ private:
     // следующий кадр, иначе шаг «плавает» вместе с кадром.
     float m_fixedAccum = 0.0f;
     float m_fixedStep = 1.0f / 60.0f;
+
+    // --- Запросы «занят ли объём» для контроллеров персонажа ----------------
+    //
+    // Сами функции Lua лежат ЗДЕСЬ, а компонент сущности держит только слабую
+    // ссылку на этот блок и номер. Причина в порядке разрушения: сцена
+    // переживает движок скриптов, и если бы sol-функция лежала в компоненте,
+    // при разрушении сцены она снимала бы ссылку в уже мёртвом интерпретаторе.
+    // Слабая ссылка после смерти блока просто не разыменовывается.
+    struct SolidQueries {
+        std::vector<sol::protected_function> Fns;
+    };
+    std::shared_ptr<SolidQueries> m_solidQueries = std::make_shared<SolidQueries>();
 
     Scene* m_scene = nullptr;
     InputMap* m_input = nullptr;

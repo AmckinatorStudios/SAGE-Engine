@@ -155,13 +155,24 @@ void ScriptEngine::RegisterPhysicsApi() {
             cc.Motor.reset();
             return;
         }
-        sol::protected_function query = fn.as<sol::protected_function>();
+        // Функция Lua кладётся в блок ДВИЖКА, а замыкание компонента держит
+        // только слабую ссылку на него и номер. Иначе sol-объект оказался бы в
+        // компоненте, а сцена переживает движок скриптов: её разрушение сняло
+        // бы ссылку в уже мёртвом интерпретаторе.
+        m_solidQueries->Fns.push_back(fn.as<sol::protected_function>());
+        const size_t index = m_solidQueries->Fns.size() - 1;
+        std::weak_ptr<SolidQueries> weak = m_solidQueries;
         // Жалуемся ОДИН раз на контроллер: ошибка внутри запроса повторяется на
         // каждую пробу, то есть десятки раз за кадр — в таком потоке не видно
         // ни первой строки, ни чего-либо ещё.
         auto warned = std::make_shared<bool>(false);
-        cc.Solid = [query, warned](const glm::vec3& min, const glm::vec3& max) -> bool {
-            sol::protected_function_result r = query(min.x, min.y, min.z, max.x, max.y, max.z);
+        cc.Solid = [weak, index, warned](const glm::vec3& min, const glm::vec3& max) -> bool {
+            const std::shared_ptr<SolidQueries> owner = weak.lock();
+            // Движок скриптов уже умер — мира больше нет; «занято» останавливает
+            // персонажа там, где он стоял, вместо падения сквозь пустоту.
+            if (!owner || index >= owner->Fns.size()) return true;
+            sol::protected_function_result r =
+                owner->Fns[index](min.x, min.y, min.z, max.x, max.y, max.z);
             if (!r.valid()) {
                 if (!*warned) {
                     *warned = true;
@@ -169,9 +180,6 @@ void ScriptEngine::RegisterPhysicsApi() {
                     LOG_ERROR("ScriptEngine")
                         << "SetCharacterWorld: ошибка в запросе тверди: " << err.what();
                 }
-                // Считаем объём занятым: персонаж остановится там, где стоял.
-                // Обратное решение уронило бы его сквозь мир — и виноватой
-                // выглядела бы физика, а не сломанный скрипт.
                 return true;
             }
             return r.get<bool>();
