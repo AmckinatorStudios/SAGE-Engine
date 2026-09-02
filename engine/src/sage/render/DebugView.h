@@ -41,4 +41,13 @@ const char* DebugViewHint(DebugView view);
 // смотреть на нормальный кадр и думать, что режим сломан.
 bool ParseDebugView(const char* text, DebugView& out);
 
+// Имя вида для настроек и командной строки ("none", "normals", ...). Пара к
+// ParseDebugView: без неё режим можно только ВКЛЮЧИТЬ по строке, а узнать, как
+// зовётся текущий, — нет, и вызывающий заводил бы свою копию списка.
+const char* DebugViewId(DebugView view);
+
+// Сколько всего видов. Обход идёт по (DebugView)i от нуля: нумерация видов —
+// это значение uShadingMode в шейдере, дырок в ней нет и быть не может.
+inline constexpr std::size_t DebugViewCount() { return (std::size_t)DebugView::Count; }
+
 } // namespace sage::render

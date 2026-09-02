@@ -116,5 +116,45 @@ void ScriptEngine::RegisterComponentTypes() {
         "Path", &ScriptComponent::Path
     );
 
+    // --- Материал -----------------------------------------------------------
+    //
+    // ЗАЧЕМ СКРИПТУ МАТЕРИАЛ ЦЕЛИКОМ, А НЕ ПОЛЯ НА РЕНДЕРЕРЕ. Металличность и
+    // шероховатость на первый взгляд просятся в MeshRendererComponent рядом с
+    // Color — и это была бы ошибка, которую потом не отыграть: это свойства
+    // ПОВЕРХНОСТИ, а поверхность в движке одна на всех, кто ей покрашен. Держи
+    // их на сущности — и тысяча плиток пола станет тысячей разных материалов,
+    // то есть тысячей инстансных групп вместо одной.
+    //
+    // Поэтому скрипт получает сам материал: заводит его (sage.render.NewMaterial),
+    // настраивает поля здесь и назначает нужным объектам. Правка видна всем
+    // сразу — тем же способом, каким её видит редактор.
+    m_lua.new_usertype<MaterialRender>("MaterialRender",
+        "DoubleSided", &MaterialRender::DoubleSided,
+        "PlanarReflectivity", &MaterialRender::PlanarReflectivity,
+        // Повтор текстуры по развёртке: без него картинка на большом объекте
+        // растягивается, и пол приходится собирать из тысяч плиток-объектов.
+        "UVScaleX", &MaterialRender::UVScaleX,
+        "UVScaleY", &MaterialRender::UVScaleY
+    );
+    m_lua.new_usertype<Material>("Material",
+        "Albedo", &Material::Albedo,
+        "Metallic", &Material::Metallic,
+        "Roughness", &Material::Roughness,
+        "Opacity", &Material::Opacity,
+        "Emissive", &Material::Emissive,
+        "EmissiveStrength", &Material::EmissiveStrength,
+        // Поведение рендера — вложенной таблицей, как и в C++: список полей
+        // здесь растёт, и плоские дубликаты пришлось бы дописывать дважды.
+        "Render", &Material::Render,
+        // Карты. Присваивание пути ещё НЕ грузит текстуру: её подтягивает
+        // sage.render.ResolveMaterialTextures — один вызов после того, как
+        // проставлены все пути, вместо загрузки на каждое присваивание.
+        "TexturePath", &Material::TexturePath,
+        "NormalMapPath", &Material::NormalMapPath,
+        "MetallicMapPath", &Material::MetallicMapPath,
+        "RoughnessMapPath", &Material::RoughnessMapPath,
+        "AOMapPath", &Material::AOMapPath,
+        "EmissiveMap", &Material::EmissiveMap
+    );
 }
 

@@ -15,6 +15,7 @@
 #include "sage/render/Reflection.h"
 #include "sage/core/SystemScheduler.h"
 #include "sage/render/FrameGraph.h"
+#include "sage/render/BillboardSystem.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/LensFlare.h"
@@ -117,6 +118,10 @@ private:
     sage::render::FrameGraph m_frame;
     int m_lastFramePasses = -1;   // описание кадра логируется при СМЕНЕ состава
     std::optional<ParticleSystem> m_particles; // пул частиц сцены (эмиттеры ECS)
+    // Именованные спрайты в мире (маркеры, иконки над предметами): их заводит
+    // игра через sage.fx.AddBillboard. Держит их плеер, а не скрипт: спрайт
+    // живёт до тех пор, пока его не сняли, то есть переживает любой скрипт.
+    std::optional<BillboardSystem> m_billboards;
 
     // --- Пост-обработка ------------------------------------------------------
     // Сцена рисуется в HDR-буфер, а на экран уходит уже результат цепочки

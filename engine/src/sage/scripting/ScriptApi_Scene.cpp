@@ -1,8 +1,11 @@
 #include "ScriptEngine.h"
 #include "ScriptApiCommon.h"
 
+#include "sage/core/Config.h"
 #include "sage/core/Log.h"
+#include "sage/render/DebugView.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/TextureGen.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/scene/Prefab.h"
 #include "sage/ui/UISceneSystem.h"
@@ -300,6 +303,130 @@ void ScriptEngine::RegisterMeshApi() {
     Bind("render", "ClearShaderParams", "ClearShaderParams", [](GameObject& obj) {
         if (obj.Valid()) obj.Registry()->remove<ShaderParamsComponent>(obj.Entity());
     });
+
+    // --- Процедурные текстуры (см. render/TextureGen.h) ----------------------
+    //
+    // Скрипт описывает картинку таблицей и получает ИМЯ, под которым она легла
+    // в кэш ресурсов; дальше это обычная текстура — её ставят материалу
+    // (m.TexturePath = имя), она участвует в мипмапах и фильтрации, её видит
+    // редактор.
+    //
+    //   local id = sage.texture.Generate("floor", {
+    //       pattern = "checker", width = 1024, tilesX = 8, tilesY = 8,
+    //       colorA = Vec3(0.82, 0.82, 0.84), colorB = Vec3(0.30, 0.31, 0.34),
+    //   })
+    //
+    // Повторный вызов с тем же именем ПЕРЕСЧИТЫВАЕТ картинку: ровно затем её и
+    // зовут второй раз — поменять размер клетки или цвет.
+    Bind("texture", "Generate", "GenerateTexture",
+         [](const std::string& name, sol::table t) -> std::string {
+             if (name.empty()) throw std::runtime_error("texture.Generate: имя не может быть пустым");
+             sage::render::TextureRecipe r;
+             const std::string pattern = t.get_or("pattern", std::string("checker"));
+             if (!sage::render::ParseTexturePattern(pattern, r.Kind)) {
+                 throw std::runtime_error("texture.Generate: неизвестный узор '" + pattern +
+                                          "' (solid/checker/grid/noise/gradient/bricks/dots)");
+             }
+             r.Width = t.get_or("width", r.Width);
+             r.Height = t.get_or("height", r.Width);   // квадрат по умолчанию
+             if (sol::optional<glm::vec3> a = t["colorA"]) r.ColorA = glm::vec4(*a, 1.0f);
+             if (sol::optional<glm::vec3> b = t["colorB"]) r.ColorB = glm::vec4(*b, 1.0f);
+             if (sol::optional<glm::vec4> a = t["colorA"]) r.ColorA = *a;
+             if (sol::optional<glm::vec4> b = t["colorB"]) r.ColorB = *b;
+             r.TilesX = t.get_or("tilesX", r.TilesX);
+             r.TilesY = t.get_or("tilesY", r.TilesX);
+             r.LineWidth = t.get_or("lineWidth", r.LineWidth);
+             r.Offset = t.get_or("offset", r.Offset);
+             r.Angle = t.get_or("angle", r.Angle);
+             r.Radial = t.get_or("radial", r.Radial);
+             r.Octaves = t.get_or("octaves", r.Octaves);
+             r.Frequency = t.get_or("frequency", r.Frequency);
+             r.Persistence = t.get_or("persistence", r.Persistence);
+             r.Seed = (unsigned int)t.get_or("seed", (int)r.Seed);
+             r.Grain = t.get_or("grain", r.Grain);
+             r.AsNormal = t.get_or("normal", r.AsNormal);
+             r.NormalStrength = t.get_or("strength", r.NormalStrength);
+
+             // Анизотропия по умолчанию: пол и стены видны под острым углом
+             // чаще всего остального, и без неё дальняя половина пола
+             // превращается в мыло — то есть ровно там, где текстура и нужна.
+             std::shared_ptr<Texture> tex =
+                 sage::render::GenerateTexture(r, TextureFilter::Anisotropic, true);
+             ResourceManager::Instance().RegisterTexture(name, tex);
+             return name;
+         });
+
+    // --- Отладочный вид кадра ------------------------------------------------
+    //
+    // Игра включает разбор кадра по слагаемым (нормали, шероховатость, тени,
+    // каскады — см. render/DebugView.h) сама. Раньше это умели только
+    // настройки и переменная окружения, то есть посмотреть на нормали можно
+    // было, лишь перезапустив игру, — а нужно это ровно наоборот: не отходя от
+    // того места, где картинка выглядит странно.
+    //
+    // Возвращает false на незнакомое имя, а не молча включает обычный вид:
+    // иначе опечатка выглядела бы как «режим не работает».
+    Bind("render", "SetDebugView", "SetDebugView", [](const std::string& name) -> bool {
+        sage::render::DebugView view = sage::render::DebugView::None;
+        if (!sage::render::ParseDebugView(name.c_str(), view)) return false;
+        sage::EngineConfig::Get().DebugView = name;
+        return true;
+    });
+    Bind("render", "GetDebugView", "GetDebugView", []() -> std::string {
+        return sage::EngineConfig::Get().DebugView;
+    });
+    // Список видов: имя для настроек, подпись человеку и что в нём смотреть.
+    // Скрипту он нужен, чтобы перебирать виды по клавише, не заводя свою копию
+    // списка — которая разойдётся с движком на первом же новом виде.
+    Bind("render", "DebugViews", "DebugViews", [this]() {
+        sol::table list = m_lua.create_table();
+        for (std::size_t i = 0; i < sage::render::DebugViewCount(); ++i) {
+            const auto view = (sage::render::DebugView)i;
+            sol::table item = m_lua.create_table();
+            item["id"] = sage::render::DebugViewId(view);
+            item["name"] = sage::render::DebugViewName(view);
+            item["hint"] = sage::render::DebugViewHint(view);
+            list[i + 1] = item;
+        }
+        return list;
+    });
+
+    // Материал, собранный СКРИПТОМ, без файла на диске. Возвращает его же —
+    // поля правятся сразу (см. usertype Material), назначается он обычным
+    // SetMaterial по тому же имени.
+    //
+    //   local m = sage.render.NewMaterial("demo/gold")
+    //   m.Albedo = Vec3(0.94, 0.78, 0.36); m.Metallic = 1.0; m.Roughness = 0.18
+    //   sage.render.SetMaterial(obj, "demo/gold")
+    //
+    // Повторный вызов с тем же именем отдаёт ТОТ ЖЕ материал, а не чистый: так
+    // сетку материалов можно строить в цикле, не заводя её заранее.
+    Bind("render", "NewMaterial", "NewMaterial",
+         [](const std::string& name) -> std::shared_ptr<Material> {
+             if (name.empty()) throw std::runtime_error("NewMaterial: имя не может быть пустым");
+             return ResourceManager::Instance().MakeMaterial(name);
+         });
+
+    // Материал по пути — тот самый разделяемый экземпляр из кэша. Им правят
+    // ассет проекта на ходу: изменение видно всем объектам с этим материалом.
+    Bind("render", "GetMaterial", "GetMaterial",
+         [](const std::string& path) -> std::shared_ptr<Material> {
+             return ResourceManager::Instance().GetMaterial(path);
+         });
+
+    // Материал, которым покрашен объект (nil — материала нет, объект рисуется
+    // своим цветом). Нужен, чтобы не хранить имена материалов в скрипте
+    // параллельно с движком.
+    Bind("render", "MaterialOf", "MaterialOf",
+         [](GameObject& obj) -> std::shared_ptr<Material> { return obj.Renderer().MaterialPtr; });
+
+    // Подтянуть текстуры материала по проставленным путям. Отдельным вызовом,
+    // а не на каждое присваивание пути: у материала до шести карт, и грузить
+    // его шесть раз подряд ради последней — это шесть проходов по диску.
+    Bind("render", "ResolveMaterialTextures", "ResolveMaterialTextures",
+         [](const std::shared_ptr<Material>& mat) {
+             if (mat) ResourceManager::Instance().ResolveMaterialTextures(*mat);
+         });
 
     // Материал сущности: путь к .sagemat. Пусто — снять материал и вернуться к
     // собственному цвету. Через него игра и назначает свой шейдер.

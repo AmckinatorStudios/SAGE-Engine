@@ -167,6 +167,10 @@ uniform bool uLightmapEnabled;
 uniform sampler2D uLightmap;
 
 uniform vec3 uAlbedoFactor;
+// Повтор текстуры по развёртке (см. MaterialRender::UVScale*). Умножается
+// ЗДЕСЬ, а не в вершинном шейдере: TBN и вторая развёртка (лайтмапа) повтора
+// не знают и знать не должны — лайтмапа уникальна на объект по построению.
+uniform vec2 uUVScale;
 uniform float uMetallic;
 uniform float uRoughness;
 uniform sampler2D uAlbedoMap;
@@ -185,25 +189,26 @@ uniform sampler2D uEmissiveMap;
 uniform bool uHasEmissive;
 )") + kPbrSharedGlsl + R"(
 void main() {
+    vec2 uv = TexCoords * uUVScale;
     vec3 albedo = uAlbedoFactor;
-    if (uHasAlbedo) albedo *= texture(uAlbedoMap, TexCoords).rgb;
+    if (uHasAlbedo) albedo *= texture(uAlbedoMap, uv).rgb;
 
     vec3 N = normalize(Normal);
     if (uHasNormal) {
-        vec3 n = texture(uNormalMap, TexCoords).rgb * 2.0 - 1.0;
+        vec3 n = texture(uNormalMap, uv).rgb * 2.0 - 1.0;
         N = normalize(TBN * n);
     }
     // metallic/roughness/ao — из карт (R-канал) × фактор, иначе только фактор.
     float metallic = uMetallic;
-    if (uHasMetallic) metallic *= texture(uMetallicMap, TexCoords).r;
+    if (uHasMetallic) metallic *= texture(uMetallicMap, uv).r;
     float rough = uRoughness;
-    if (uHasRoughness) rough *= texture(uRoughnessMap, TexCoords).r;
-    float ao = uHasAO ? texture(uAOMap, TexCoords).r : 1.0;
+    if (uHasRoughness) rough *= texture(uRoughnessMap, uv).r;
+    float ao = uHasAO ? texture(uAOMap, uv).r : 1.0;
 
     if (uShadingMode != 0) {
         vec4 dbg;
         vec3 dbgEmissive = uEmissive;
-        if (uHasEmissive) dbgEmissive *= texture(uEmissiveMap, TexCoords).rgb;
+        if (uHasEmissive) dbgEmissive *= texture(uEmissiveMap, uv).rgb;
         if (DebugShade(uShadingMode, N, FragPos, albedo, metallic, rough, ao, dbgEmissive,
                        CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
             FragColor = vec4(dbg.rgb, uOpacity);
@@ -213,7 +218,7 @@ void main() {
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
     vec3 emissive = uEmissive;
-    if (uHasEmissive) emissive *= texture(uEmissiveMap, TexCoords).rgb;
+    if (uHasEmissive) emissive *= texture(uEmissiveMap, uv).rgb;
     FragColor = vec4(emissive + ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect),
                      uOpacity);
 }
@@ -577,6 +582,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             // Свёрнутое значение, а не it.Mat->Albedo: тон экземпляра обязан
             // работать и на текстурном пути (см. TexturedItem в заголовке).
             tex.SetVec3("uAlbedoFactor", it.Color);
+            tex.SetVec2("uUVScale", glm::vec2(it.Mat->Render.UVScaleX, it.Mat->Render.UVScaleY));
             tex.SetFloat("uMetallic", it.Mat->Metallic);
             tex.SetFloat("uRoughness", it.Mat->Roughness);
             tex.SetInt("uHasAlbedo", it.Mat->AlbedoTex ? 1 : 0);
@@ -695,6 +701,8 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 // Тон и свечение — из инстанса (свёрнутые), как на всех
                 // остальных путях; см. TexturedItem в заголовке.
                 t.SetVec3("uAlbedoFactor", head.Inst.Color);
+                t.SetVec2("uUVScale",
+                          glm::vec2(head.Mat->Render.UVScaleX, head.Mat->Render.UVScaleY));
                 t.SetFloat("uMetallic", head.Mat->Metallic);
                 t.SetFloat("uRoughness", head.Mat->Roughness);
                 t.SetFloat("uOpacity", head.Inst.Alpha);

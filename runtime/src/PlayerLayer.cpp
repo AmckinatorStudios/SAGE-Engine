@@ -79,6 +79,7 @@ void PlayerLayer::OnAttach() {
     }
     m_sky.emplace();
     m_particles.emplace();
+    m_billboards.emplace();
 
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
@@ -288,6 +289,7 @@ void PlayerLayer::BuildSceneRuntime() {
     m_scripts = std::make_unique<ScriptEngine>();
     m_scripts->BindScene(*m_scene);
     if (m_particles) m_scripts->BindParticles(*m_particles); // паритет с Play редактора
+    if (m_billboards) m_scripts->BindBillboards(*m_billboards);
 
     // Ввод — ДО привязки скриптов: раскладку объявляет сам скрипт в OnStart
     // (BindAction), а OnStart вызывается прямо из AttachScript. Привяжи мы ввод
@@ -859,6 +861,10 @@ void PlayerLayer::OnRender() {
 
         // Частицы (billboard) — camRight/Up берём из матрицы вида.
         if (m_particles) m_particles->DrawFromView(view, proj);
+        // Спрайты-маркеры — тем же способом и сразу после частиц: и те и
+        // другие полупрозрачные и не пишут глубину, поэтому идут после всей
+        // непрозрачной геометрии и до пост-обработки.
+        if (m_billboards) m_billboards->DrawFromView(view, proj);
 
         // Объём — после геометрии и ДО пост-обработки: лучи обязаны попасть в
         // bloom, иначе солнце светится, а его лучи нет. Работает только с

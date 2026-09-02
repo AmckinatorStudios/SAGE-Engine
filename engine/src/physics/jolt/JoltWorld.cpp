@@ -681,9 +681,17 @@ JointHandle JoltWorld::CreateJoint(const JointDesc& desc) {
             break;
         }
         case JointType::Distance: {
+            // Трос: точка крепления — на ВТОРОМ теле (крюк, столб, мир), а
+            // первое тело держится за свой ЦЕНТР. Крепить оба конца к одной
+            // точке, как у остальных соединений, здесь нельзя: длина между
+            // ними тогда равна нулю, ограничение расталкивает тела в
+            // произвольную сторону, а тело уезжает на длину троса плюс вылет
+            // своего крепления — маятник ложится на пол вместо того, чтобы
+            // качаться.
             JPH::DistanceConstraintSettings s;
             s.mSpace = JPH::EConstraintSpace::WorldSpace;
-            s.mPoint1 = s.mPoint2 = anchor;
+            s.mPoint1 = a->GetCenterOfMassPosition();
+            s.mPoint2 = anchor;
             s.mMinDistance = desc.MinDistance;
             s.mMaxDistance = desc.MaxDistance;
             constraint = s.Create(*a, *b);
