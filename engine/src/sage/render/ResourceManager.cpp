@@ -330,6 +330,22 @@ std::shared_ptr<Skybox> ResourceManager::GetSkybox(const std::string& directory)
     return sky;
 }
 
+void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture) {
+    if (name.empty() || !texture) return;
+    auto it = m_textures.find(name);
+    if (it != m_textures.end()) {
+        m_textureBytes -= std::min(m_textureBytes, it->second.Bytes);
+        m_textures.erase(it);
+    }
+    TextureRecord rec;
+    rec.Bytes = texture->GpuBytes();
+    rec.Tick = NextTick();
+    rec.Generated = true;
+    rec.Tex = std::move(texture);
+    m_textureBytes += rec.Bytes;
+    m_textures[name] = std::move(rec);
+}
+
 std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) {
     auto it = m_materials.find(path);
     if (it != m_materials.end()) return it->second;
@@ -344,6 +360,17 @@ std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) 
         material->ShaderPtr = GetShader(material->VertexShaderPath, material->FragmentShaderPath);
     m_materials[path] = material;
     m_materialStamps[path] = FileStamp(Locate(path));
+    return material;
+}
+
+std::shared_ptr<Material> ResourceManager::MakeMaterial(const std::string& name) {
+    auto it = m_materials.find(name);
+    if (it != m_materials.end()) return it->second;
+    auto material = std::make_shared<Material>();
+    m_materials[name] = material;
+    // Штамп НЕ ставим: у материала нет файла, и ReloadChangedAssets, увидев
+    // штамп 0 против несуществующего файла, перечитывал бы его каждый кадр,
+    // затирая всё, что скрипт в нём настроил.
     return material;
 }
 
@@ -495,7 +522,7 @@ void ResourceManager::EvictToBudget() {
         c.Index = keys.size();
         c.Bytes = rec.Bytes;
         c.Tick = rec.Tick;
-        c.Evictable = rec.Tex && !rec.Pending && rec.Tex.use_count() == 1;
+        c.Evictable = rec.Tex && !rec.Pending && !rec.Generated && rec.Tex.use_count() == 1;
         cands.push_back(c);
         keys.push_back(kv.first);
     }
@@ -528,7 +555,7 @@ void ResourceManager::EvictToBudget() {
         d.Bytes = rec.Bytes;
         d.Tick = rec.Tick;
         d.Side = std::max(rec.Tex->Width(), rec.Tex->Height());
-        d.Streamable = !rec.Pending;
+        d.Streamable = !rec.Pending && !rec.Generated;
         dcands.push_back(d);
     }
     for (size_t idx : SelectDowngrades(dcands, m_textureBytes, m_textureBudget)) {
@@ -586,7 +613,11 @@ int ResourceManager::GarbageCollectUnused() {
     }
     for (auto it = m_textures.begin(); it != m_textures.end();) {
         TextureRecord& rec = it->second;
-        const bool unused = !rec.Tex || (!rec.Pending && rec.Tex.use_count() == 1);
+        // Посчитанная текстура остаётся даже неиспользуемой: перечитать её
+        // неоткуда, а собрана она была ровно затем, чтобы ею вот-вот покрасили
+        // объект (материал заводят и назначают разными вызовами).
+        const bool unused = !rec.Generated &&
+                            (!rec.Tex || (!rec.Pending && rec.Tex.use_count() == 1));
         if (unused) {
             m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
             it = m_textures.erase(it);

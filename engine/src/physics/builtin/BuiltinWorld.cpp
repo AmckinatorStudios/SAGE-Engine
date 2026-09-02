@@ -214,7 +214,16 @@ JointHandle BuiltinWorld::CreateJoint(const JointDesc& desc) {
     j.Desc = desc;
     // Мировой якорь переводим в системы обоих тел ОДИН раз: дальше соединение
     // держит именно локальные точки, и поворот тела уносит крепление с собой.
-    j.LocalAnchorA = glm::conjugate(a->Rotation) * (desc.Anchor - a->Position);
+    // ТРОС — ОСОБЫЙ СЛУЧАЙ. У всех остальных соединений якорь — это точка,
+    // в которой тела СХОДЯТСЯ, поэтому она одна и общая. У троса точка одна
+    // (крюк на потолке), а второй конец — САМО ТЕЛО, и крепить его к той же
+    // точке значит получить нулевую длину: ограничение развернёт тела в
+    // произвольную сторону, а тело сможет уехать на длину троса ПЛЮС вылет
+    // своего крепления. Маятник в этом случае просто ложится на пол — что и
+    // происходило до этой правки.
+    const bool rope = desc.Type == JointType::Distance;
+    j.LocalAnchorA = rope ? glm::vec3(0.0f)
+                          : glm::conjugate(a->Rotation) * (desc.Anchor - a->Position);
     j.LocalAxisA = glm::conjugate(a->Rotation) * glm::normalize(desc.Axis + glm::vec3(0.0f, 1e-9f, 0.0f));
     if (b) {
         j.LocalAnchorB = glm::conjugate(b->Rotation) * (desc.Anchor - b->Position);

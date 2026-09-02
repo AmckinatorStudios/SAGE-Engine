@@ -49,6 +49,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/MeshSimplify.cpp
     src/sage/render/ScenePasses.cpp
     src/sage/render/ShadowAtlas.cpp
+    src/sage/render/BillboardSystem.cpp
+    src/sage/render/TextureGen.cpp
     src/sage/render/Reflection.cpp
     src/sage/core/CrashHandler.cpp
     src/sage/core/SystemScheduler.cpp

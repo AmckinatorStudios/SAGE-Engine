@@ -30,6 +30,7 @@ add_executable(sage_tests
     test_modelmaterial.cpp
     test_submesh.cpp
     test_texformat.cpp
+    test_texturegen.cpp
     test_rhi.cpp
     test_pack.cpp
     test_components.cpp

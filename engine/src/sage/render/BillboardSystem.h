@@ -109,9 +109,30 @@ public:
         system.EndBatch();
     }
 
+    // Отрисовка ВСТРОЕННЫМ шейдером, без ассетов и без объекта Camera: оси
+    // камеры берутся прямо из матрицы вида.
+    //
+    // ЗАЧЕМ. До этого нарисовать билборд мог только тот, кто принёс СВОЙ
+    // billboard.vert/.frag, — и не принёс никто: ни плеер, ни редактор, ни
+    // игры. Система жила в движке, скрипты её звали (sage.fx.AddBillboard), а
+    // в кадре не появлялось ничего, и понять, почему, было невозможно: ошибок
+    // не было, спрайты честно лежали в списке. Своим шейдером — ровно как у
+    // частиц (ParticleSystem::BuiltinShader) — система становится работающей
+    // сама по себе, а не заготовкой.
+    void DrawFromView(const glm::mat4& view, const glm::mat4& proj) {
+        if (m_sprites.empty()) return;
+        Camera cam;
+        cam.Right = glm::normalize(glm::vec3(view[0][0], view[1][0], view[2][0]));
+        cam.Up = glm::normalize(glm::vec3(view[0][1], view[1][1], view[2][1]));
+        Draw(BuiltinShader(), cam, view, proj);
+    }
+
     size_t Count() const { return m_sprites.size(); }
 
 private:
+    // Встроенный шейдер билбордов (общий, ленивая компиляция; определён в .cpp).
+    static Shader& BuiltinShader();
+
     void BeginBatch(Shader& shader, const Camera& camera, const glm::mat4& view, const glm::mat4& proj) {
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
         device.SetBlend(true);

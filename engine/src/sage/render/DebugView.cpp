@@ -45,6 +45,12 @@ const char* DebugViewHint(DebugView view) {
     return "";
 }
 
+const char* DebugViewId(DebugView view) {
+    for (const Entry& e : kEntries)
+        if (e.View == view) return e.Id;
+    return "none";
+}
+
 bool ParseDebugView(const char* text, DebugView& out) {
     if (!text || !*text) return false;
     std::string want;
