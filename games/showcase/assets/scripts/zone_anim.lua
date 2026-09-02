@@ -58,8 +58,7 @@ function Z.Build()
     SetMeshCube(base)
     base.Transform.Position = Vec3(cx, 0.15, cz)
     base.Transform.Scale = Vec3(16.0, 0.3, 12.0)
-    base.Color = Vec3(0.15, 0.16, 0.19)
-    Mat.Apply(base, 0.0, 0.7)
+    Mat.Concrete(base, Vec3(0.30, 0.31, 0.35))
     base:SetParent(root)
 
     -- Модель со скином. Она же проверяет загрузчик glTF: скин, кости, клипы и

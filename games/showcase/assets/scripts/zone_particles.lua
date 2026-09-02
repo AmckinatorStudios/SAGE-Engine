@@ -58,8 +58,11 @@ local function smokeConfig()
     c.LifetimeMin, c.LifetimeMax = 2.2, 3.8
     c.StartSizeMin, c.StartSizeMax = 0.25, 0.45
     c.EndSizeMin, c.EndSizeMax = 1.4, 2.1
-    c.StartColor = Vec4(0.32, 0.30, 0.29, 0.55)
-    c.EndColor = Vec4(0.55, 0.56, 0.58, 0.0)
+    -- Дым СВЕТЛЫЙ и полупрозрачный. Тёмный столб на светлом небе читается не
+    -- как дым, а как дыра в кадре: на просвет настоящий дым почти всегда
+    -- светлее фона, а не темнее.
+    c.StartColor = Vec4(0.62, 0.61, 0.60, 0.30)
+    c.EndColor = Vec4(0.78, 0.78, 0.80, 0.0)
     -- Вверх, но слабее огня: дым легче воздуха, а не выстреливает из костра.
     c.Gravity = 0.9
     -- Снос вбок задаётся разбросом направления: гравитация в движке — одно
@@ -92,8 +95,7 @@ function Z.Build()
     SetMeshCylinder(pit)
     pit.Transform.Position = Vec3(cx - 6.0, 0.08, cz)
     pit.Transform.Scale = Vec3(2.4, 0.16, 2.4)
-    pit.Color = Vec3(0.14, 0.13, 0.12)
-    Mat.Apply(pit, 0.0, 0.9)
+    Mat.Concrete(pit, Vec3(0.28, 0.26, 0.24))
     pit:SetParent(root)
 
     for i = 0, 7 do
