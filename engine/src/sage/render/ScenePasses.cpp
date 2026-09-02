@@ -60,6 +60,11 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
 
     if (input.Wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
     batch.SetTime(input.Time);
+    // Режим и НОМЕР ВИДА выставляются ДО сбора, а не после него: сбор сам
+    // читает ответы о перекрытии, и до этой строки он читал их от прошлого
+    // прохода — то есть от чужой камеры. Раньше вызов стоял ниже, и работало
+    // это лишь потому, что вид в кадре был один.
+    batch.SetOcclusionCulling(input.OcclusionCulling, input.ViewId);
     const sage::ecs::RenderStats stats =
         batch.RenderColor(scene, input.View, input.Proj, input.ViewPos, *input.Env, input.Shadows,
                           input.ShadingMode, &input.Reflection);
@@ -68,7 +73,6 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     // Проверка перекрытия — СРАЗУ после статики: буфер глубины кадра уже
     // заполнен, а служебные коробки не пишут ни цвет, ни глубину и потому не
     // мешают тому, что рисуется дальше. Результат заберётся следующим кадром.
-    batch.SetOcclusionCulling(input.OcclusionCulling);
     if (input.OcclusionCulling) {
         batch.RenderOcclusionProbes(input.Proj * input.View, input.ViewPos);
     }

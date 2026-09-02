@@ -107,8 +107,26 @@ public:
 
     // Включить/выключить проверку перекрытия. Выключенная не стоит ничего:
     // запросы не создаются, коробки не рисуются.
-    void SetOcclusionCulling(bool enabled) { m_occlusionEnabled = enabled; }
+    //
+    // viewId — КАКОЙ ВИД сейчас рисуется, и это не украшение.
+    //
+    // «Закрыт» — свойство не объекта, а ПАРЫ «объект и точка, откуда смотрят».
+    // Один батч обслуживает несколько видов подряд (вьюпорт редактора, его
+    // ортогональные окна, панель Game, съёмка в текстуру), и пока ответы
+    // лежали в одной таблице, последний вид кадра решал за всех: объект,
+    // закрытый стеной от игровой камеры, пропадал и в редакторском вьюпорте,
+    // где стены между ним и наблюдателем нет. Виден он там или нет, игровая
+    // камера знать не может.
+    //
+    // Тот же довод уже записан для скоростей (RenderVelocity): матрица прошлого
+    // кадра принадлежит виду, а не батчу. Ответы о перекрытии — ровно такое же
+    // состояние вида, и теперь они хранятся так же.
+    void SetOcclusionCulling(bool enabled, int viewId = 0) {
+        m_occlusionEnabled = enabled;
+        m_occlusionViewId = viewId;
+    }
     bool OcclusionCulling() const { return m_occlusionEnabled; }
+    int OcclusionViewId() const { return m_occlusionViewId; }
 
     // ------------------------------------------------------------------------
     // Проход СКОРОСТЕЙ: экранное смещение каждого пикселя между прошлым кадром
@@ -319,9 +337,17 @@ private:
     // Состояние по сущностям, а не по индексам списка: порядок в списке
     // меняется от кадра к кадру (объекты появляются и исчезают), и привязка к
     // позиции означала бы, что ответ про один объект применяется к другому.
-    std::unordered_map<entt::entity, OcclusionSlot> m_occlusion;
+    //
+    // И отдельная таблица НА КАЖДЫЙ ВИД: «закрыт» верно только для той точки,
+    // из которой запрос выдавался (см. SetOcclusionCulling). Видов немного и
+    // номера у них маленькие (вьюпорт, его окна раскладки, панель Game),
+    // поэтому это обычная карта по номеру, а не что-то с вытеснением.
+    using OcclusionTable = std::unordered_map<entt::entity, OcclusionSlot>;
+    std::unordered_map<int, OcclusionTable> m_occlusionByView;
+    OcclusionTable& OcclusionSlots() { return m_occlusionByView[m_occlusionViewId]; }
     std::unique_ptr<Mesh> m_probeBox;  // единичный куб-заменитель
     bool m_occlusionEnabled = false;
+    int m_occlusionViewId = 0;
     unsigned long long m_frameIndex = 0;
 
     RenderStats m_stats;

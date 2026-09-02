@@ -129,7 +129,12 @@ void EditorSceneRenderer::EnsureShadowMap() {
 }
 
 ShadowBinding EditorSceneRenderer::FrameShadows() const {
-    ShadowBinding b(*m_shadows, true);
+    // Тени включены — по НАСТРОЙКЕ, а не всегда. Здесь стояло жёсткое true, и
+    // выключенные тени в настройках редактор игнорировал: в собранной игре их
+    // не было, а во вьюпорте и в панели Game они оставались. То есть настройка
+    // качества, которую человек трогает первой, когда картинка кажется слишком
+    // тёмной, ничего в редакторе не меняла.
+    ShadowBinding b(*m_shadows, sage::EngineConfig::Get().Shadows);
     if (m_localShadows) b.Local = m_localShadows->Binding();
     return b;
 }
@@ -168,9 +173,18 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
     // Дальность теней: сцена главнее настроек. Масштаб мира знает игра, а не
     // игрок в меню качества (см. sage::ShadowSettings).
     v.ShadowDistance = env.Shadows.Distance > 0.0f ? env.Shadows.Distance : cfg.ShadowDistance;
-    if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
-    else m_shadows->FitSingle(env.Sun.Direction, v);
-    sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
+    // Солнце — только при включённых тенях, ровно как в рантайме. Раньше проход
+    // шёл всегда: карта честно заполнялась и честно стоила своего времени, а
+    // привязка объявляла тени включёнными независимо от настройки (см.
+    // FrameShadows), — то есть выключить их в редакторе было нельзя.
+    // Тени ЛАМП живут по своей настройке (LocalShadows) и здесь ни при чём:
+    // рантайм разделяет их так же.
+    if (cfg.Shadows) {
+        if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
+        else m_shadows->FitSingle(env.Sun.Direction, v);
+        sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(),
+                                        window.Height());
+    }
 
     // Тени ламп — своим проходом и по своим правилам: у них нет ни каскадов, ни
     // привязки к камере, зато есть раздача мест в атласе.
@@ -182,7 +196,8 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
 }
 
 void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
-                                  const glm::mat4& proj, glm::vec3 viewPos, int shadingMode, bool wireframe) {
+                                  const glm::mat4& proj, glm::vec3 viewPos, int shadingMode,
+                                  bool wireframe, int viewId) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
     // Статика — RenderBatch (отсечение по фрустуму + инстансный батчинг).
@@ -194,6 +209,10 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     color.Shadows = FrameShadows();
     color.ShadingMode = shadingMode;
     color.OcclusionCulling = sage::EngineConfig::Get().OcclusionCulling;
+    // Своя таблица перекрытия на каждое окно. Общая означала бы, что игровая
+    // камера решает за редакторскую: объект, закрытый от неё стеной, исчезал
+    // бы и во вьюпорте — там, где между ним и наблюдателем ничего нет.
+    color.ViewId = viewId;
     color.Time = m_sceneTime;
     color.Reflection = m_reflections.Binding(1, 1);
     // Зонд перебивает небо: если камера стоит в его коробке, отражается
@@ -297,6 +316,12 @@ void EditorSceneRenderer::CompositeOutline(Framebuffer& target) {
     m_outlineTri->DrawArrays(3);
 
     device.SetDepthTest(true);
+    // Смешивание ОБЯЗАНО выключиться здесь же. Это последний проход вьюпорта, и
+    // оставленное включённым оно утекало в следующий кадр и в панель Game: там
+    // сцена рисуется поверх заливки фона, и чей-нибудь материал с alpha < 1
+    // (или небо) начинал смешиваться с ней вместо того, чтобы её заменить.
+    // Состояние, выставленное проходом, снимает тот же проход.
+    device.SetBlend(false);
 }
 
 // Гизмо невидимых/физических сущностей (камера/свет/эмиттер/коллайдер) — всегда
@@ -503,7 +528,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         shadingMode = (int)mode - 1;
     }
     if (!flatCanvas) {
-        DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe);
+        DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe, /*viewId=*/slot);
         m_particles->Draw(camera, outView, outProj);
     }
 
@@ -662,7 +687,15 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Кайма выделения — поверх ИТОГОВОГО кадра (после поста, постоянная ширина
     // в пикселях, крайне читаемая независимо от размера объекта и дистанции).
-    if (!selection.empty()) CompositeOutline(postApplied ? postFbo : sceneFbo);
+    if (!selection.empty()) {
+        CompositeOutline(postApplied ? postFbo : sceneFbo);
+        // Без пост-обработки итоговый кадр — это САМ буфер сцены, а он при MSAA
+        // многосэмпловый: кайма легла в него уже ПОСЛЕ Resolve, то есть мимо той
+        // текстуры, которую показывает панель. Выделение просто не появлялось —
+        // в любом отладочном виде и в любом ортогональном окне, где поста нет.
+        // Сводим ещё раз: проход дописал в буфер, значит и свести надо заново.
+        if (!postApplied) sceneFbo.Resolve();
+    }
 
     device.BindDefaultFramebuffer();
 }
@@ -687,8 +720,36 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
 
     DrawSky(env, view, proj);
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
-    DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false);
+    DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false,
+            /*viewId=*/kGameViewId);
     m_particles->DrawFromView(view, proj);
+
+    // Объём и блик — ТЕ ЖЕ ДВА ПРОХОДА, что у собранной игры (см. PlayerLayer),
+    // и в том же порядке: объём после геометрии, блик после объёма, оба до
+    // пост-обработки.
+    //
+    // Их здесь не было вовсе, и это ломало ровно то, ради чего панель Game
+    // существует. Включив объёмный свет, человек видел туман во вьюпорте и
+    // чистый кадр в окне игры — при том что в собранной игре туман есть. Панель,
+    // которая обещает показать игру, показывала третью картинку, не совпадающую
+    // ни с редактором, ни с игрой; и «в редакторе тёмно, а в игре нормально»
+    // начиналось именно с этого расхождения.
+    if (cfg.PostProcessing && (cfg.Volumetrics || cfg.LensFlare)) {
+        if (cfg.Volumetrics) {
+            m_gameFbo->Resolve();
+            if (!m_volumetrics) m_volumetrics.emplace();
+            m_volumetrics->Render(*m_gameFbo, m_gameFbo->DepthTexture(), m_gameW, m_gameH, proj,
+                                  view, camPos, env, FrameShadows(),
+                                  sage::render::VolumetricsFromConfig(cfg), m_sceneTime);
+        }
+        if (cfg.LensFlare) {
+            m_gameFbo->Resolve();
+            if (!m_lensFlare) m_lensFlare.emplace();
+            m_lensFlare->Render(*m_gameFbo, m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
+                                m_gameW, m_gameH, proj, view, env,
+                                sage::render::LensFlareFromConfig(cfg));
+        }
+    }
 
     m_gameFbo->Resolve();   // MSAA -> обычные текстуры (без MSAA — пустышка)
 

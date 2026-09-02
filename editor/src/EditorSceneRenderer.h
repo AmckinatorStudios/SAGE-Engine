@@ -148,8 +148,15 @@ private:
 
     // Небо кадра (кубическая текстура или процедурный градиент).
     void DrawSky(const LightingEnvironment& env, const glm::mat4& view, const glm::mat4& proj);
+    // viewId — какое окно рисуется. Уходит в проверку перекрытия: ответ «этот
+    // объект закрыт» принадлежит ТОЧКЕ, из которой смотрят, и вьюпорт с панелью
+    // Game обязаны вести его раздельно (см. RenderBatch::SetOcclusionCulling).
     void DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
-                 const glm::mat4& proj, glm::vec3 viewPos, int shadingMode, bool wireframe);
+                 const glm::mat4& proj, glm::vec3 viewPos, int shadingMode, bool wireframe,
+                 int viewId);
+    // Номер вида для панели Game: сразу за слотами вьюпорта, чтобы ни с одним
+    // из них не совпасть.
+    static constexpr int kGameViewId = kMaxViews;
     // Аутлайн выделения — робастный пост-проход: силуэт объекта в масочный
     // буфер, затем краевая дилатация ПОСТОЯННОЙ ширины в пикселях поверх кадра.
     // Работает для любых мешей (модели/плоскости/невыпуклые), в отличие от

@@ -30,6 +30,7 @@
 #include "sage/render/LensFlare.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/Reflection.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/ShadowMap.h"
@@ -252,6 +253,174 @@ void TestOcclusionCulling(FrameRenderer& r) {
     const double share = 100.0 * (double)changed / (double)(kW * kH);
     std::printf("    кадр изменился на %.3f%% пикселей\n", share);
     Check(share < 0.5, "кадр не изменился: отсеклось только невидимое");
+}
+
+// Сцена для проверки «ответ принадлежит виду»: стена и РЕДКАЯ цепочка кубов за
+// ней. Редкая намеренно — кубы не должны закрывать друг друга, иначе камера,
+// которой открыто всё, честно отсечёт половину сама, и проверка перестанет
+// отличать свои ответы от чужих.
+std::unique_ptr<Scene> BuildTwoViewScene() {
+    auto scene = std::make_unique<Scene>("TwoViewOcclusion");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -0.9f, -0.2f));
+    scene->Lighting.Sun.Intensity = 2.0f;
+    scene->Lighting.AmbientStrength = 0.3f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    auto primitive = [](GameObject obj, glm::vec3 color) {
+        obj.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        obj.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        obj.Renderer().Color = color;
+    };
+
+    GameObject wall = scene->CreateObject("Wall");
+    wall.GetTransform().Position = {0.0f, 0.0f, -4.0f};
+    wall.GetTransform().Scale = {40.0f, 40.0f, 0.5f};
+    primitive(wall, {0.55f, 0.53f, 0.5f});
+
+    for (int i = 0; i < 5; ++i) {
+        GameObject box = scene->CreateObject("Behind" + std::to_string(i));
+        box.GetTransform().Position = {-5.0f + 2.5f * (float)i, 0.0f, -20.0f};
+        box.GetTransform().Scale = glm::vec3(0.6f);
+        primitive(box, {0.8f, 0.4f, 0.3f});
+    }
+    return scene;
+}
+
+// Проверка перекрытия ведётся ОТДЕЛЬНО ДЛЯ КАЖДОГО ВИДА.
+//
+// ЧТО ЭТО ЗА ДЕФЕКТ. «Объект закрыт» — свойство пары «объект и точка, откуда
+// смотрят», а не самого объекта. Батч у редактора один, а видов за кадр
+// несколько: вьюпорт, окна раскладки, панель Game. Пока ответы лежали в одной
+// таблице, их переписывал ПОСЛЕДНИЙ вид кадра — то есть игровая камера, — и
+// следующий кадр вьюпорта выбрасывал всё, чего не видно ЕЙ. Снаружи это
+// выглядит как «в редакторе вьюпорт чёрный, а окно игры в порядке»: геометрия
+// из вьюпорта пропадает, остаётся почти чёрная заливка фона, а панель Game
+// показывает ровно то, по чьим ответам всё и отсеклось.
+//
+// Проверяется тем же способом, каким дефект и виден: две камеры смотрят на одну
+// сцену через ОДИН батч в одном кадре. Игровой стена закрывает кубы, вид сверху
+// смотрит на них с открытой стороны. Второй обязан рисовать их все.
+void TestOcclusionIsPerView() {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    if (!device.SupportsOcclusionQueries()) {
+        std::printf("    ПРОПУСК: драйвер не умеет запросов перекрытия\n");
+        return;
+    }
+
+    std::unique_ptr<Scene> scene = BuildTwoViewScene();
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    const glm::mat4 proj =
+        glm::perspective(glm::radians(60.0f), (float)kW / (float)kH, 0.1f, 200.0f);
+    // Батч СВОЙ: общий несёт ответы прошлых проверок, а номера сущностей у
+    // новой сцены начинаются с нуля и совпадают с чужими.
+    sage::ecs::RenderBatch batch;
+
+    // Камера ИГРЫ: перед стеной, кубы за ней закрыты целиком.
+    const glm::vec3 gameEye(0.0f, 0.0f, 1.0f);
+    const glm::mat4 gameView =
+        glm::lookAt(gameEye, glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0, 1, 0));
+    // Камера ВЬЮПОРТА: сверху над кубами — между ней и ними нет ничего.
+    const glm::vec3 editorEye(0.0f, 9.0f, -20.0f);
+    const glm::mat4 editorView =
+        glm::lookAt(editorEye, glm::vec3(0.0f, 0.0f, -20.0f), glm::vec3(0, 0, -1));
+
+    Framebuffer fbo(kW, kH);
+    auto pass = [&](const glm::mat4& view, const glm::vec3& eye, int viewId) {
+        fbo.Bind();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        sage::render::SceneColorInput input;
+        input.View = view;
+        input.Proj = proj;
+        input.ViewPos = eye;
+        input.Env = &env;
+        input.OcclusionCulling = true;
+        input.ViewId = viewId;
+        sage::render::RenderSceneColor(*scene, batch, input);
+        // Чтение кадра — не ради пикселей, а ради синхронизации: без него
+        // программный растеризатор не доводит запросы до готовности, и ответы
+        // не приходят никогда.
+        fbo.Resolve();
+        fbo.Bind();
+        Capture(kW, kH);
+        return batch.Stats();
+    };
+
+    // Порядок как в редакторе: сначала вьюпорт, следом панель Game. Ответы
+    // игровой камеры ложатся последними — их-то вьюпорт и подхватывал.
+    sage::ecs::RenderStats editorStats{};
+    sage::ecs::RenderStats gameStats{};
+    for (int i = 0; i < 6; ++i) {
+        editorStats = pass(editorView, editorEye, /*viewId=*/0);
+        gameStats = pass(gameView, gameEye, /*viewId=*/1);
+    }
+
+    std::printf("    вьюпорт: нарисовано %d (закрытыми признано %d); "
+                "игра: нарисовано %d (закрытыми признано %d)\n",
+                editorStats.Drawn, editorStats.CulledOccluded, gameStats.Drawn,
+                gameStats.CulledOccluded);
+
+    // Игровая камера обязана отсечь всё, что за стеной, — иначе проверять нечего.
+    Check(gameStats.CulledOccluded >= 5, "игровая камера отсекает закрытое стеной");
+    // А вид сверху — не потерять НИЧЕГО: перед ним открыто всё.
+    Check(editorStats.CulledOccluded == 0,
+          "вьюпорт не теряет геометрию из-за ответов чужой камеры");
+    Check(editorStats.Drawn >= 5, "вьюпорт рисует всю видимую ему сцену");
+}
+
+// Проход теней не смотрит на ответы о перекрытии.
+//
+// Сбор для карты теней идёт из точки СВЕТА, а ответы получены из точки камеры.
+// Объект, спрятанный за стеной от зрителя, солнце всё так же освещает, и его
+// тень вполне может лежать на видимом месте. Пока проверка применялась и здесь,
+// включённое отсечение перекрытием молча выедало тени.
+void TestOcclusionDoesNotEatShadows() {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    if (!device.SupportsOcclusionQueries()) {
+        std::printf("    ПРОПУСК: драйвер не умеет запросов перекрытия\n");
+        return;
+    }
+
+    std::unique_ptr<Scene> scene = BuildOccludedScene();
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    const glm::vec3 eye(0.0f, 0.0f, 1.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f, 0.0f, -10.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj =
+        glm::perspective(glm::radians(60.0f), (float)kW / (float)kH, 0.1f, 200.0f);
+
+    Framebuffer fbo(kW, kH);
+    sage::ecs::RenderBatch batch;
+    ShadowMap shadow(1024);
+    // Несколько кадров: ответы о перекрытии приходят со сдвигом на кадр.
+    int shadowDrawn = 0;
+    for (int i = 0; i < 6; ++i) {
+        fbo.Bind();
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        sage::render::SceneColorInput input;
+        input.View = view;
+        input.Proj = proj;
+        input.ViewPos = eye;
+        input.Env = &env;
+        input.OcclusionCulling = true;
+        sage::render::RenderSceneColor(*scene, batch, input);
+        fbo.Resolve();
+        fbo.Bind();
+        Capture(kW, kH);   // синхронизация: без неё ответы запросов не созревают
+
+        // Проход глубины света — тем же хелпером, каким его зовёт кадр.
+        ShadowMap::CameraView cv;
+        cv.Position = eye;
+        cv.Forward = glm::vec3(0.0f, 0.0f, -1.0f);
+        cv.ShadowDistance = 60.0f;
+        shadow.FitSingle(env.Sun.Direction, cv);
+        sage::render::RenderShadowDepth(shadow, *scene, batch, kW, kH);
+        shadowDrawn = batch.Stats().Drawn;
+    }
+
+    std::printf("    в карту теней попало объектов: %d\n", shadowDrawn);
+    // Сцена — стена, три куба перед ней и сорок за ней: тень отбрасывают все.
+    Check(shadowDrawn >= 44, "закрытые от камеры объекты продолжают отбрасывать тень");
 }
 
 // --- Кэш ресурсов ----------------------------------------------------------
@@ -489,6 +658,8 @@ void TestRhiConformance() {
 void RunSceneChecks(FrameRenderer& r) {
     TestLevelsOfDetail(r);
     TestOcclusionCulling(r);
+    TestOcclusionIsPerView();
+    TestOcclusionDoesNotEatShadows();
     TestAssetCache();
     TestSkyRayDirection();
     TestRhiConformance();

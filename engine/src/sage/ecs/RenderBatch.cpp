@@ -352,12 +352,22 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     m_stats.Triangles = 0;
     m_stats.TrianglesAtLod0 = 0;
     m_stats.CulledOccluded = 0;
+    // Ответы о перекрытии — ТАБЛИЦА ЭТОГО ВИДА, и берётся она один раз до цикла:
+    // внутри это был бы лишний поиск по хэшу на каждую сущность кадра.
+    //
+    // В ПРОХОДЕ ТЕНЕЙ ответов нет вовсе. Там сбор идёт из точки СВЕТА, а ответ
+    // получен из точки камеры: объект, спрятанный за стеной от зрителя,
+    // остаётся освещённым солнцем и обязан отбрасывать тень — та вполне может
+    // лежать на видимом месте. Пока проверка применялась и здесь, включённое
+    // отсечение перекрытием молча выедало тени.
+    const OcclusionTable* occlusion =
+        (m_occlusionEnabled && !m_collectingShadows) ? &OcclusionSlots() : nullptr;
     for (CullItem& c : m_cull) {
         // Ответ прошлого кадра о перекрытии. Применяется ПОСЛЕ фрустума и LOD:
         // объект, уже отсечённый ими, проверять незачем.
-        if (c.Visible && m_occlusionEnabled) {
-            auto it = m_occlusion.find(c.Entity);
-            if (it != m_occlusion.end() && !it->second.Visible) {
+        if (c.Visible && occlusion) {
+            auto it = occlusion->find(c.Entity);
+            if (it != occlusion->end() && !it->second.Visible) {
                 c.Visible = false;
                 c.Occluded = true;
             }
@@ -850,10 +860,14 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
     ++m_frameIndex;
     m_stats.Probes = 0;
 
+    // Таблица ЭТОГО вида: ответы соседних видов к нему отношения не имеют
+    // (см. SetOcclusionCulling).
+    OcclusionTable& slots = OcclusionSlots();
+
     // 1) Забираем результаты, выданные в ПРОШЛОМ кадре. Именно прошлом: запрос
     //    этого кадра ещё выполняется, и спрашивать его сейчас значило бы ждать
     //    видеокарту — то есть платить за экономию простоем.
-    for (auto& kv : m_occlusion) {
+    for (auto& kv : slots) {
         OcclusionSlot& slot = kv.second;
         if (!slot.Pending) continue;
         if (!device.OcclusionResultReady(slot.Query)) continue;
@@ -891,7 +905,7 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
         if (c.Radius <= 0.0f) continue;
         if (!c.Visible && !c.Occluded) continue;
 
-        OcclusionSlot& slot = m_occlusion[c.Entity];
+        OcclusionSlot& slot = slots[c.Entity];
 
         // КАМЕРА ВНУТРИ ОБЪЕКТА — проверять нельзя, и это не мелкий случай.
         //
@@ -942,20 +956,20 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
 
     // 3) Забываем сущности, которых в кадре больше нет: иначе таблица росла бы
     //    вместе с историей сцены, а не с её содержимым.
-    if (m_occlusion.size() > m_cull.size() * 2 + 64) {
-        std::unordered_map<entt::entity, OcclusionSlot> alive;
+    if (slots.size() > m_cull.size() * 2 + 64) {
+        OcclusionTable alive;
         alive.reserve(m_cull.size());
         for (const CullItem& c : m_cull) {
-            auto it = m_occlusion.find(c.Entity);
-            if (it != m_occlusion.end()) alive.emplace(c.Entity, it->second);
+            auto it = slots.find(c.Entity);
+            if (it != slots.end()) alive.emplace(c.Entity, it->second);
         }
         // Запросы выброшенных сущностей освобождаем явно: это ресурс драйвера.
-        for (auto& kv : m_occlusion) {
+        for (auto& kv : slots) {
             if (alive.find(kv.first) == alive.end() && kv.second.Query.Valid()) {
                 device.DestroyOcclusionQuery(kv.second.Query);
             }
         }
-        m_occlusion.swap(alive);
+        slots.swap(alive);
     }
 }
 
