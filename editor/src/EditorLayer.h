@@ -120,6 +120,7 @@ public:
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
 
     // --- EditorHost: undo/redo ---
+    void MergeScriptVars(GameObject object) override;
     void PushUndoSnapshot() override;
     void CapturePendingSnapshot() override;
     void CommitPendingSnapshot() override;

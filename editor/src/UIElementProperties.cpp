@@ -22,6 +22,7 @@
 
 #include "AssetPreview.h"
 #include "AssetSlot.h"
+#include "VarsEditor.h"
 #include "EditorHost.h"
 #include "EditorIcons.h"
 #include "FileBrowser.h"
@@ -240,6 +241,24 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                 ImGui::EndCombo();
             }
             break;
+        }
+
+        case K::Bindings: {
+            // Связи «когда здесь случилось X — сделать Y». Тот же вид поля, что
+            // и остальные, и это главное: они попадают в сцену и в инспектор по
+            // ОБЩЕЙ таблице, а не отдельной веткой в сериализаторе и второй —
+            // здесь. Своя часть игры получает собственные события одной
+            // строкой в своей таблице полей.
+            sage::events::Bindings& v = ui::FieldAs<sage::events::Bindings>(data, f);
+            if (ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
+                if (varsui::DrawBindings(host, f.Key, v, sage::events::UITriggers(), ctx.Preview))
+                    host.PushUndoSnapshot();
+                ImGui::TreePop();
+            }
+            // Подсказка уже показана внутри — общий хвост её бы задублировал.
+            ImGui::PopID();
+            return;
         }
     }
     if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));

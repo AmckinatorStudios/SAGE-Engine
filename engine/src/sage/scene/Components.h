@@ -32,6 +32,7 @@
 #include "sage/ecs/CameraLightComponents.h"    // камера и свет
 #include "sage/gi/GIComponents.h"              // участие в запечённом GI
 #include "sage/scripting/ScriptComponent.h"    // поведение на Lua
+#include "sage/vars/VarsComponent.h"          // публичные переменные и ссылки
 #include "sage/physics/PhysicsComponents.h"    // тело, коллайдер, соединение, персонаж
 #include "sage/anim/AnimationComponents.h"     // скелетная анимация и IK
 #include "sage/render/ReflectionComponents.h"  // зонды отражений

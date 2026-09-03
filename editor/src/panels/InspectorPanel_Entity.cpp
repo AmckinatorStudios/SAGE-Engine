@@ -23,6 +23,7 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "VarsEditor.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
 #include <algorithm>
@@ -326,6 +327,30 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 reg.remove<ScriptComponent>(obj.Entity());
             }
+        }
+    }
+
+    // --- ПУБЛИЧНЫЕ ПЕРЕМЕННЫЕ И ССЫЛКИ ---------------------------------------
+    //
+    // Показываются у объекта СО СКРИПТОМ (скрипт их объявляет) и у любого, у
+    // кого они уже есть: публичные данные нужны и объекту без скрипта — точке
+    // появления с именем волны, зоне с названием следующего уровня, кнопке с
+    // аргументом события.
+    //
+    // Секция идёт СРАЗУ ЗА СКРИПТОМ намеренно: «какой скрипт» и «с какими
+    // настройками» — один вопрос, и разносить их по разным концам списка
+    // значит заставлять прокручивать инспектор туда-обратно.
+    {
+        const bool hasScript = reg.all_of<ScriptComponent>(obj.Entity());
+        const bool hasVars = reg.all_of<VarsComponent>(obj.Entity());
+        if ((hasScript || hasVars) &&
+            ImGui::CollapsingHeader(T("Variables" "###Variables"), ImGuiTreeNodeFlags_DefaultOpen)) {
+            VarsComponent& vc = reg.get_or_emplace<VarsComponent>(obj.Entity());
+            // Объявление скрипта подмешивается ПЕРЕД показом, а не однажды при
+            // назначении: файл правят снаружи редактора, и переменная,
+            // добавленная в скрипт минуту назад, обязана появиться здесь сама.
+            if (hasScript) host.MergeScriptVars(obj);
+            if (varsui::DrawTable(host, obj, vc.Values, &m_preview)) host.PushUndoSnapshot();
         }
     }
 

@@ -40,6 +40,8 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/events/Events.h"
+#include "sage/vars/VarsComponent.h"
 #include "UILayoutOps.h"
 #include "EditorPrefs.h"
 #include "Localization.h"
@@ -114,7 +116,8 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign, "
+                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
+                               << "vars-refs-events, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2323,6 +2326,129 @@ bool EditorLayer::SelfTestTools() {
             }
         }
         SetSelectedId(-1);
+    }
+
+    // --- Публичные переменные, ссылки и события кнопки ----------------------
+    //
+    // Проверяется путь ЦЕЛИКОМ и именно в редакторе: скрипт объявил переменные
+    // -> инспектор их подмешал -> человек выставил значение и ссылку -> всё это
+    // пережило сохранение и загрузку -> кнопка со связью послала событие сама,
+    // без единого скрипта-опросчика. Каждый из шагов ломается молча: связь,
+    // теряющаяся при сохранении, работает до перезапуска редактора, а
+    // объявление, не дошедшее до инспектора, выглядит как «переменных нет».
+    if (ok) {
+        const fs::path scriptPath = m_project.AssetsDir() / "selftest_vars.lua";
+        {
+            std::ofstream f(scriptPath);
+            f << "Vars = {\n"
+              << "    speed = 3.0,\n"
+              << "    damage = { 10, min = 0, max = 100, label = \"Урон\" },\n"
+              << "    target = { kind = \"entity\" },\n"
+              << "}\n"
+              << "function OnUpdate(entity, dt) end\n";
+        }
+
+        GameObject door = m_scene->CreateObject("SelfTestDoor");
+        GameObject key = m_scene->CreateObject("SelfTestKey");
+        m_scene->Registry().emplace_or_replace<ScriptComponent>(
+            door.Entity(), ScriptComponent{m_project.AssetRef(scriptPath)});
+
+        // Тот же вызов, что делает инспектор перед показом секции.
+        MergeScriptVars(door);
+        VarsComponent* vc = m_scene->Registry().try_get<VarsComponent>(door.Entity());
+        if (!vc || vc->Values.Size() != 3) {
+            LOG_ERROR("Editor") << "SELFTEST: объявление скрипта не дошло до переменных объекта";
+            ok = false;
+        } else {
+            if (vc->Values.Find("damage") == nullptr ||
+                std::abs(vc->Values.Find("damage")->Max - 100.0f) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: границы объявленной переменной потерялись";
+                ok = false;
+            }
+            // Человек правит значения в инспекторе.
+            vc->Values.Set("speed", sage::vars::Value(9.5f));
+            vc->Values.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+        }
+
+        // Кнопка со связью: щёлкнули — послала событие и позвала метод двери.
+        GameObject button = m_scene->CreateObject("SelfTestButton");
+        {
+            sage::ui::Transform t;
+            t.Anchor = UIAnchor::TopLeft;
+            t.Offset = {0.0f, 0.0f};
+            t.Size = {200.0f, 100.0f};
+            m_scene->Registry().emplace_or_replace<sage::ui::Transform>(button.Entity(), t);
+            m_scene->Registry().emplace_or_replace<sage::ui::Fill>(button.Entity());
+            sage::ui::Interactable& act =
+                m_scene->Registry().emplace_or_replace<sage::ui::Interactable>(button.Entity());
+            sage::events::Binding b;
+            b.Trigger = "click";
+            b.Event = "selftest.open";
+            b.Target = sage::vars::EntityRef{door.Id()};
+            b.Method = "Open";
+            b.Arg = sage::vars::Value(std::string("тихо"));
+            act.Events.push_back(b);
+        }
+
+        // Сохранение и загрузка: связи и переменные — данные, и терять их при
+        // записи нельзя.
+        const fs::path scenePath = m_project.ScenesDir() / "selftest_vars.sage";
+        if (ok && !SaveSceneToFile(scenePath)) {
+            LOG_ERROR("Editor") << "SELFTEST: сцена с переменными не сохранилась";
+            ok = false;
+        }
+        if (ok) {
+            NewScene(ProjectTemplateKind::Empty);
+            if (!LoadSceneFromFile(scenePath)) {
+                LOG_ERROR("Editor") << "SELFTEST: сцена с переменными не загрузилась";
+                ok = false;
+            }
+        }
+        if (ok) {
+            GameObject loadedDoor = m_scene->FindByName("SelfTestDoor");
+            GameObject loadedKey = m_scene->FindByName("SelfTestKey");
+            GameObject loadedBtn = m_scene->FindByName("SelfTestButton");
+            const VarsComponent* lv =
+                loadedDoor.Valid()
+                    ? m_scene->Registry().try_get<VarsComponent>(loadedDoor.Entity())
+                    : nullptr;
+            if (!lv || std::abs(lv->Values.Get("speed").AsFloat() - 9.5f) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: значение переменной не пережило сохранение";
+                ok = false;
+            } else if (lv->Values.Get("target").AsEntity().Id != loadedKey.Id()) {
+                LOG_ERROR("Editor") << "SELFTEST: ссылка на объект не пережила сохранение";
+                ok = false;
+            }
+
+            // ЩЕЛЧОК: кнопка обязана послать событие САМА.
+            int heard = 0;
+            std::string arg;
+            int sender = 0;
+            m_scene->Events.On("selftest.open", [&](const sage::events::Event& e) {
+                ++heard;
+                arg = e.Arg.AsString();
+                sender = e.Sender;
+            });
+            sage::ui::UIInputState down;
+            down.Mouse = {50.0f, 50.0f};
+            down.MouseDown = true;
+            down.MousePressed = true;
+            sage::ui::UpdateSceneUI(*m_scene, down, 1280, 720);
+            sage::ui::UIInputState up;
+            up.Mouse = down.Mouse;
+            up.MouseReleased = true;
+            sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
+
+            if (heard != 1 || arg != "тихо") {
+                LOG_ERROR("Editor") << "SELFTEST: кнопка не послала своё событие (получено "
+                                    << heard << ")";
+                ok = false;
+            } else if (loadedBtn.Valid() && sender != loadedBtn.Id()) {
+                LOG_ERROR("Editor") << "SELFTEST: в событии не тот отправитель";
+                ok = false;
+            }
+        }
+        fs::remove(scriptPath, ec);
     }
 
     return ok;

@@ -23,6 +23,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/gi/LightmapUV.cpp
     src/sage/ecs/CameraView.cpp
     src/sage/ecs/DecalSystem.cpp
+    src/sage/vars/Value.cpp
+    src/sage/vars/Table.cpp
+    src/sage/vars/ScriptVars.cpp
+    src/sage/events/Events.cpp
     src/sage/core/Application.cpp
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp
@@ -106,6 +110,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Net.cpp
     src/sage/scripting/ScriptApi_Components.cpp
     src/sage/scripting/ScriptApi_UI.cpp
+    src/sage/scripting/ScriptApi_Vars.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
     src/sage/scripting/ScriptApi_Animation.cpp
     src/sage/scripting/ScriptApi_Scene.cpp

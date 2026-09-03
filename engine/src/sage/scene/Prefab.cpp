@@ -63,6 +63,9 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     dst.GetTransform() = src.GetTransform();
     dst.Renderer() = src.Renderer();
     CopyIfPresent<ScriptComponent>(src, dst);
+    // Публичные переменные едут с объектом: префаб без своих настроек — это
+    // объект, который после постановки в сцену надо настраивать заново.
+    CopyIfPresent<VarsComponent>(src, dst);
     CopyIfPresent<CameraComponent>(src, dst);
     CopyIfPresent<LightComponent>(src, dst);
     CopyIfPresent<RigidBodyComponent>(src, dst);
