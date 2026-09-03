@@ -117,7 +117,7 @@ void EditorLayer::RunSelfTest() {
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
-                               << "vars-refs-events, "
+                               << "vars-refs-events + prefab-refs, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2449,6 +2449,112 @@ bool EditorLayer::SelfTestTools() {
             }
         }
         fs::remove(scriptPath, ec);
+    }
+
+    // --- Заготовка со связями внутри неё ------------------------------------
+    //
+    // Префаб ставят в сцену много раз, а ссылка хранит НОМЕР объекта. Не
+    // переписав номера у копии, получаем заготовку, работающую ровно один раз:
+    // вторая дверь открывается кнопкой первой, а десятая не открывается вовсе.
+    // Молчит это полностью — в инспекторе ссылка заполнена и ведёт на
+    // существующий объект.
+    if (ok) {
+        GameObject door = m_scene->CreateObject("PrefabDoor");
+        GameObject knob = m_scene->CreateObject("PrefabKnob");
+        GameObject outsider = m_scene->CreateObject("PrefabOutsider");
+        m_scene->SetParent(knob.Entity(), door.Entity());
+
+        sage::vars::Table& vars =
+            m_scene->Registry().emplace_or_replace<VarsComponent>(knob.Entity()).Values;
+        vars.Set("opens", sage::vars::Value(sage::vars::EntityRef{door.Id()}));
+        vars.Set("watch", sage::vars::Value(sage::vars::EntityRef{outsider.Id()}));
+        sage::events::Binding b;
+        b.Trigger = "click";
+        b.Event = "prefab.open";
+        b.Target = sage::vars::EntityRef{door.Id()};
+        b.Method = "Open";
+        // Прямоугольник обязателен: без него сущность не элемент интерфейса, и
+        // сериализатор её части не пишет (см. SaveUIComponents). Кнопка без
+        // прямоугольника — не кнопка, и проверять на такой нечего.
+        m_scene->Registry().emplace_or_replace<sage::ui::Transform>(knob.Entity());
+        m_scene->Registry()
+            .emplace_or_replace<sage::ui::Interactable>(knob.Entity())
+            .Events.push_back(b);
+
+        const fs::path pf = m_project.AssetsDir() / "selftest_door.sageprefab";
+        std::string perr;
+        SetSelectedId(door.Id());
+        if (!SaveSelectedAsPrefab(pf, perr)) {
+            LOG_ERROR("Editor") << "SELFTEST: заготовка не сохранилась";
+            ok = false;
+        }
+        if (ok) {
+            sage::scene::ClearPrefabCache();
+            const int copyId = InstantiatePrefab(pf);
+            GameObject copy = m_scene->Get(copyId);
+            if (!copy.Valid()) {
+                LOG_ERROR("Editor") << "SELFTEST: заготовка не поставилась в сцену";
+                ok = false;
+            } else {
+                const HierarchyComponent* h =
+                    m_scene->Registry().try_get<HierarchyComponent>(copy.Entity());
+                if (!h || h->Children.size() != 1) {
+                    LOG_ERROR("Editor") << "SELFTEST: у копии заготовки нет дочерней кнопки";
+                    ok = false;
+                } else {
+                    const entt::entity copyKnob = h->Children[0];
+                    const VarsComponent* cv =
+                        m_scene->Registry().try_get<VarsComponent>(copyKnob);
+                    const sage::ui::Interactable* ca =
+                        m_scene->Registry().try_get<sage::ui::Interactable>(copyKnob);
+                    if (!cv || cv->Values.Get("opens").AsEntity().Id != copy.Id()) {
+                        LOG_ERROR("Editor") << "SELFTEST: ссылка внутри копии ведёт не в копию";
+                        ok = false;
+                    }
+                    if (!ca || ca->Events.empty() || ca->Events[0].Target.Id != copy.Id()) {
+                        LOG_ERROR("Editor") << "SELFTEST: адресат связи в копии не переписан";
+                        ok = false;
+                    }
+                    // Ссылка наружу заготовки обрывается при сохранении: номер
+                    // из исходной сцены в другой сцене попал бы в посторонний
+                    // объект, и такая связь неотличима от настоящей.
+                    if (cv && cv->Values.Get("watch").AsEntity().Valid()) {
+                        LOG_ERROR("Editor") << "SELFTEST: внешняя ссылка уехала в заготовку";
+                        ok = false;
+                    }
+                }
+            }
+        }
+        // Дублирование идёт тем же путём — проверяем и его: Ctrl+D у объекта со
+        // связями обязан давать вторую пару, а не вторую кнопку к первой двери.
+        if (ok) {
+            SetSelectedId(door.Id());
+            DuplicateSelected();
+            const std::vector<int>& sel = Selection();
+            GameObject dup = sel.empty() ? GameObject{} : m_scene->Get(sel.front());
+            const HierarchyComponent* dh =
+                dup.Valid() ? m_scene->Registry().try_get<HierarchyComponent>(dup.Entity())
+                            : nullptr;
+            if (!dh || dh->Children.size() != 1) {
+                LOG_ERROR("Editor") << "SELFTEST: дубликат двери потерял кнопку";
+                ok = false;
+            } else if (const VarsComponent* dv =
+                           m_scene->Registry().try_get<VarsComponent>(dh->Children[0])) {
+                if (dv->Values.Get("opens").AsEntity().Id != dup.Id()) {
+                    LOG_ERROR("Editor") << "SELFTEST: дубликат ссылается на оригинал";
+                    ok = false;
+                }
+                // А ссылка НАРУЖУ у дубликата остаётся: дублируя лампу,
+                // светящую на игрока, человек ждёт вторую такую же лампу.
+                if (dv->Values.Get("watch").AsEntity().Id != outsider.Id()) {
+                    LOG_ERROR("Editor") << "SELFTEST: дубликат потерял внешнюю ссылку";
+                    ok = false;
+                }
+            }
+            SetSelectedId(-1);
+        }
+        fs::remove(pf, ec);
+        sage::scene::ClearPrefabCache();
     }
 
     return ok;

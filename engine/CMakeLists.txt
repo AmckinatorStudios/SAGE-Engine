@@ -26,6 +26,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/vars/Value.cpp
     src/sage/vars/Table.cpp
     src/sage/vars/ScriptVars.cpp
+    src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/core/Application.cpp
     src/sage/core/Config.cpp

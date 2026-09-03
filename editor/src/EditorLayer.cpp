@@ -8,6 +8,9 @@
 #include <cmath>
 #include <fstream>
 
+#include "sage/events/Events.h"
+#include "sage/vars/VarsComponent.h"
+
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -302,7 +305,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
             "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_COLLIDER_MODE", "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
-            "SAGE_EDITOR_AUTOPLAY",
+            "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -404,6 +407,129 @@ void EditorLayer::OnAttach() {
         SetSelectedId(all.Id());
         LOG_INFO("Editor") << "SAGE_EDITOR_ALL_COMPONENTS: сущность со всеми компонентами создана";
     }
+    // Показать в инспекторе ПУБЛИЧНЫЕ ПЕРЕМЕННЫЕ и СВЯЗИ СОБЫТИЙ на живом
+    // примере: дверь со скриптом, объявляющим переменные, ключ, на который она
+    // ссылается, и кнопка, которая её открывает.
+    //
+    // Зачем хук, а не «сделайте руками»: проверить эти две секции глазами иначе
+    // нечем — они появляются только у объекта, у которого уже есть скрипт с
+    // объявлением и настроенная связь, а собрать такой объект в headless-прогоне
+    // некому. Секция, которая молча не показывается (объявление не дошло,
+    // список связей не нарисовался), не роняет ни один тест.
+    if (std::getenv("SAGE_EDITOR_VARS_DEMO")) {
+        m_headlessProject = true;
+        const std::filesystem::path scriptPath = m_project.AssetsDir() / "door.lua";
+        {
+            std::ofstream f(scriptPath);
+            f << "-- Дверь: что у неё настраивается снаружи\n"
+              << "Vars = {\n"
+              << "    speed  = { 2.5, min = 0.5, max = 10, label = \"Скорость\" },\n"
+              << "    locked = true,\n"
+              << "    title  = \"Ворота замка\",\n"
+              << "    needs  = { kind = \"entity\", label = \"Нужен ключ\" },\n"
+              << "    sound  = { kind = \"asset\", label = \"Звук\" },\n"
+              << "}\n\n"
+              << "function OnMessage(entity, name, data)\n"
+              << "    if name == \"Open\" then entity:Vars().locked = false end\n"
+              << "end\n";
+        }
+        GameObject key = m_scene->CreateObject("Ключ");
+        GameObject door = m_scene->CreateObject("Дверь");
+        entt::registry& reg = m_scene->Registry();
+        reg.emplace_or_replace<ScriptComponent>(door.Entity(),
+                                                ScriptComponent{m_project.AssetRef(scriptPath)});
+        MergeScriptVars(door);
+        if (VarsComponent* vc = reg.try_get<VarsComponent>(door.Entity()))
+            vc->Values.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+
+        GameObject button = m_scene->CreateObject("Кнопка «Открыть»");
+        sage::ui::Transform t;
+        t.Anchor = UIAnchor::Center;
+        t.Offset = {0.0f, 0.0f};
+        t.Size = {220.0f, 56.0f};
+        reg.emplace_or_replace<sage::ui::Transform>(button.Entity(), t);
+        reg.emplace_or_replace<sage::ui::Fill>(button.Entity());
+        sage::ui::Interactable& act =
+            reg.emplace_or_replace<sage::ui::Interactable>(button.Entity());
+        sage::events::Binding open;
+        open.Trigger = "click";
+        open.Event = "door.open";
+        open.Target = sage::vars::EntityRef{door.Id()};
+        open.Method = "Open";
+        open.Arg = sage::vars::Value(std::string("медленно"));
+        act.Events.push_back(open);
+        sage::events::Binding sound;
+        sound.Trigger = "hoverIn";
+        sound.Event = "ui.hover";
+        act.Events.push_back(sound);
+
+        const char* mode = std::getenv("SAGE_EDITOR_VARS_DEMO");
+
+        // SAGE_EDITOR_VARS_DEMO=prefab — тот же набор, но пропущенный через
+        // ЗАГОТОВКУ: дверь с кнопкой сохраняется префабом и ставится в сцену
+        // второй раз. Смотреть надо на ссылку копии: она обязана вести в СВОЮ
+        // дверь, а не в первую. Ошибка здесь молчит — в инспекторе ссылка
+        // выглядит заполненной и даже указывает на существующий объект.
+        if (mode && std::string(mode) == "prefab") {
+            m_scene->SetParent(button.Entity(), door.Entity());
+            const std::filesystem::path pf = m_project.AssetsDir() / "door.sageprefab";
+            std::string perr;
+            if (!sage::scene::SavePrefab(*m_scene, door.Entity(), pf.string(), perr)) {
+                LOG_ERROR("Editor") << "SAGE_EDITOR_VARS_DEMO=prefab: префаб не сохранился: "
+                                    << perr;
+            } else {
+                sage::scene::ClearPrefabCache();
+                const int copyId = sage::scene::InstantiatePrefab(*m_scene, pf.string());
+                GameObject copy = m_scene->Get(copyId);
+                if (copy.Valid()) {
+                    copy.SetName("Дверь (копия)");
+                    // Кнопку копии переименовываем тоже: в дереве две «Кнопки»
+                    // рядом неразличимы, а смотреть надо именно на копию.
+                    if (const HierarchyComponent* h =
+                            m_scene->Registry().try_get<HierarchyComponent>(copy.Entity())) {
+                        for (entt::entity k : h->Children)
+                            GameObject(&m_scene->Registry(), k).SetName("Кнопка (копия)");
+                    }
+                }
+            }
+        }
+
+        // SAGE_EDITOR_VARS_DEMO=play — не просто показать настройку, а ПРОВЕРИТЬ
+        // её глазами: запустить игру, щёлкнуть по кнопке и посмотреть в
+        // инспекторе, что переменная двери изменилась.
+        //
+        // Это ровно то, что нельзя увидеть на статичном скриншоте: связь может
+        // быть красиво нарисована в инспекторе и при этом никуда не доходить —
+        // событие не послано, адресат не найден, скрипт не получил метод.
+        // Здесь щёлкает не человек, но щёлкает НАСТОЯЩИЙ путь ввода интерфейса,
+        // тот же, что и от мыши.
+        if (mode && std::string(mode) == "play") {
+            StartPlay();
+            if (m_playScripts) m_playScripts->UpdateAll(0.016f);
+            sage::ui::UIInputState down;
+            down.Mouse = {640.0f, 360.0f};   // центр экрана — там стоит кнопка
+            down.MouseDown = true;
+            down.MousePressed = true;
+            sage::ui::UpdateSceneUI(*m_scene, down, 1280, 720);
+            sage::ui::UIInputState up;
+            up.Mouse = down.Mouse;
+            up.MouseReleased = true;
+            sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
+            if (m_playScripts) m_playScripts->UpdateAll(0.016f);
+        }
+
+        // Выбор: дверь по умолчанию, но SAGE_EDITOR_SELECT_ENTITY сильнее — он
+        // отрабатывает ВЫШЕ, когда этих объектов ещё нет, и без повтора здесь
+        // посмотреть на кнопку было бы нельзя. Ищем ПО ИМЕНИ ещё раз: Play
+        // пересоздаёт сцену из снимка, и прежние дескрипторы уже чужие.
+        GameObject wanted;
+        if (const char* pick = std::getenv("SAGE_EDITOR_SELECT_ENTITY"))
+            wanted = m_scene->FindByName(pick);
+        if (!wanted.Valid()) wanted = m_scene->FindByName("Дверь");
+        if (wanted.Valid()) SetSelectedId(wanted.Id());
+        LOG_INFO("Editor") << "SAGE_EDITOR_VARS_DEMO: дверь, ключ и кнопка со связями созданы";
+    }
+
     // Выложить модели в сцену тем же путём, каким это делает перетаскивание
     // (AddAssetToScene): пути через ';'. Нужно для проверки на живых ассетах —
     // как модель встаёт, что с её материалом и развёрткой.

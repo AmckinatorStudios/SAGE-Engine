@@ -1,5 +1,7 @@
 #pragma once
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
@@ -38,6 +40,15 @@ void CopyAllComponents(GameObject& src, GameObject& dst);
 // Рекурсивно копирует поддерево (srcRoot и потомков) в dst под dstParent,
 // сохраняя иерархию. Новые сущности получают новые id. Возвращает корень копии.
 GameObject CopySubtree(Scene& src, entt::entity srcRoot, Scene& dst, entt::entity dstParent);
+
+// Переписывает ссылки на объекты у перечисленных сущностей по карте
+// «старый id -> новый id». Ссылка, которой в карте нет, остаётся как была.
+//
+// Публичной её делает не префаб, а ВСТАВКА: копирование через буфер обмена и
+// импорт куска сцены переносят объекты так же и обязаны чинить ссылки тем же
+// правилом. Второе такое правило рядом разошлось бы с этим при первой правке.
+void RemapEntityRefs(Scene& scene, const std::vector<entt::entity>& entities,
+                     const std::unordered_map<int, int>& idMap);
 
 // Сохраняет сущность с потомками в файл префаба. false + err при ошибке.
 bool SavePrefab(Scene& scene, entt::entity root, const std::string& path, std::string& err);
