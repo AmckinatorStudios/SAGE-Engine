@@ -70,7 +70,28 @@ void ScriptEngine::RegisterEventsApi() {
     // аргументов переменной длины заставил бы каждого подписчика знать
     // порядок и число полей отправителя, а таблица позволяет добавить поле,
     // не сломав никого.
+    // Рассылка идёт В ШИНУ СЦЕНЫ, а не сразу подписчикам Lua: иначе разговоров
+    // снова два — событие, посланное скриптом, не услышал бы код на C++, а
+    // событие кнопки не увидел бы тот, кто слушает шину. Мост (OnBusEvent)
+    // вернёт его сюда и раздаст подписчикам sage.events.
+    //
+    // Без привязанной сцены шины нет — тогда рассылаем напрямую: скрипт,
+    // запущенный вне сцены (инструмент, тест), обязан работать так же.
     Bind("events", "Emit", "EmitEvent", [this](const std::string& name, sol::object payload) {
+        if (m_scene) {
+            // Сначала в шину — но БЕЗ обратной раздачи в Lua: мост (OnBusEvent)
+            // позвал бы подписчиков sage.events во второй раз, и обработчик,
+            // считающий очки, насчитал бы вдвое.
+            sage::events::Event e;
+            e.Name = name;
+            e.Arg = ValueFromLua(payload);
+            m_bridgeMuted = true;
+            m_scene->Events.Emit(e);
+            m_bridgeMuted = false;
+        }
+        // Потом подписчикам Lua — С ИСХОДНОЙ нагрузкой. Через шину она поехала
+        // бы одним значением, а скрипты шлют таблицы: терять поля ради
+        // единообразия значило бы сломать всё, что уже написано.
         DispatchEvent(name, payload);
     });
 
@@ -273,4 +294,44 @@ void ScriptEngine::RegisterRenderTextureApi() {
     Bind("rt", "Ready", "RenderTextureReady", [](const std::string& name) -> bool {
         return sage::render::RenderTextureRegistry::Instance().Find(name) != nullptr;
     });
+}
+
+// --- Мост «шина сцены -> скрипты» -------------------------------------------
+//
+// Шина принадлежит сцене, а не движку: подписки уровня обязаны исчезнуть
+// вместе с ним. Поэтому мост ставится здесь, при привязке сцены, и снимается
+// со старой шины — иначе события следующего уровня доходили бы до
+// обработчиков предыдущего, а объекты, на которые те ссылаются, уже мертвы.
+void ScriptEngine::BindScene(Scene& scene) {
+    if (m_scene && m_busSubscription) m_scene->Events.Off(m_busSubscription);
+    m_scene = &scene;
+    m_busSubscription = scene.Events.OnAny([this](const sage::events::Event& e) {
+        OnBusEvent(e);
+    });
+}
+
+void ScriptEngine::OnBusEvent(const sage::events::Event& event) {
+    // Событие, которое сам скрипт только что послал: подписчиков Lua позовёт
+    // sage.events.Emit — со своей, неурезанной нагрузкой (см. там же).
+    if (m_bridgeMuted) return;
+
+    // Полезная нагрузка — таблица, а не голое значение: подписчик «нажали
+    // кнопку» обязан знать, КАКУЮ нажали, и добавить поле в таблицу можно, не
+    // сломав тех, кто читает остальные.
+    sol::table payload = m_lua.create_table();
+    payload["value"] = ValueToLua(event.Arg);
+    payload["sender"] = event.Sender;
+    if (m_scene && event.Sender > 0) {
+        GameObject from = m_scene->Get(event.Sender);
+        if (from.Valid()) payload["object"] = from;
+    }
+    if (event.Target.Valid()) payload["target"] = event.Target.Id;
+
+    // Сначала адресная часть: связь настраивали ради неё («эта кнопка открывает
+    // эту дверь»), и обработчик по имени, успевший сменить сцену, не должен
+    // отменить главное действие.
+    if (event.Target.Valid() && !event.Method.empty())
+        DispatchMessage(event.Target.Id, event.Method, payload);
+
+    DispatchEvent(event.Name, payload);
 }

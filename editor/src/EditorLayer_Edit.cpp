@@ -12,6 +12,11 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+
+#include <fstream>
+
+#include "sage/vars/ScriptVars.h"
+#include "sage/vars/VarsComponent.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -87,6 +92,37 @@ constexpr float kStatusBarHeight = 26.0f;
 
 } // namespace
 
+
+// Публичные переменные объекта = ЕГО значения + ОБЪЯВЛЕНИЕ его скрипта.
+//
+// Читается перед показом секции, каждый кадр показа. Дорого ли это: файл
+// скрипта — это килобайты, разбор — один проход по строке, и делается он
+// только пока секция открыта у ВЫБРАННОГО объекта. Кэш здесь был бы вреднее:
+// .lua правят снаружи редактора (в чужом редакторе, git-ом), и переменная,
+// добавленная минуту назад, обязана появиться сама — а не после
+// переназначения файла, о котором никто не догадается.
+void EditorLayer::MergeScriptVars(GameObject object) {
+    if (!object.Valid()) return;
+    entt::registry& reg = m_scene->Registry();
+    const ScriptComponent* sc = reg.try_get<ScriptComponent>(object.Entity());
+    if (!sc || sc->Path.empty()) return;
+
+    // Путь в сцене относителен корню проекта — тем же способом, каким его
+    // разрешают меш, материал и текстура.
+    std::filesystem::path full = sc->Path;
+    if (full.is_relative() && m_project.Loaded()) full = m_project.Dir() / full;
+    std::error_code ec;
+    if (!std::filesystem::exists(full, ec)) return;
+
+    std::ifstream in(full, std::ios::binary);
+    if (!in) return;
+    const std::string source((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+    const sage::vars::Table declaration = sage::vars::ParseDeclaration(source);
+    if (declaration.Empty()) return;
+
+    reg.get_or_emplace<VarsComponent>(object.Entity()).Values.MergeDeclaration(declaration);
+}
 
 void EditorLayer::PushUndoSnapshot() {
     if (InPlayMode()) return; // правки в Play эфемерны — Stop их и так откатит

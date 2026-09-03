@@ -131,6 +131,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterLightingApi();
     RegisterPhysicsApi();
     RegisterEventsApi();
+    RegisterVarsApi();
     RegisterRenderTextureApi();
     RegisterNetApi();
 }

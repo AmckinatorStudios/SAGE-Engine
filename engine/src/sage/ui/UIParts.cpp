@@ -531,6 +531,10 @@ const std::vector<PartField>& InteractableFields() {
          offsetof(Interactable, PressedBrightness), 0.5f, 2.0f},
         {"disabledAlpha", SAGE_UI_TEXT("Disabled alpha"), PartField::Kind::Float,
          offsetof(Interactable, DisabledAlpha), 0.0f, 1.0f},
+        {"events", SAGE_UI_TEXT("Events"), PartField::Kind::Bindings, offsetof(Interactable, Events),
+         0.0f, 0.0f,
+         "What the button does itself: send an event, call a method on another\n"
+         "object. Without this a button needs a script polling it every frame."},
     };
     return f;
 }

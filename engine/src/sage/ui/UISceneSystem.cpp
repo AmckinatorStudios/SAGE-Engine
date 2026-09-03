@@ -443,13 +443,45 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (PointIn(it.Rect, input.Mouse)) hovered = it.Entity;
     }
 
+    // СВЯЗИ СОБЫТИЙ. Кнопка делает то, что у неё настроено, САМА — не дожидаясь
+    // скрипта, который каждый кадр спрашивал бы «не нажали ли». Отправка идёт в
+    // шину сцены (Scene::Events), которую слушают и Lua, и код на C++.
+    //
+    // Отправитель — Id элемента: без него обработчик «нажали кнопку» не узнает,
+    // КАКУЮ нажали, и каждой кнопке пришлось бы придумывать своё имя события.
+    auto fire = [&](entt::entity e, const char* trigger) {
+        const Interactable* act = reg.try_get<Interactable>(e);
+        if (!act || act->Events.empty()) return;
+        const int sender = reg.all_of<IdComponent>(e) ? reg.get<IdComponent>(e).Id : 0;
+        for (const sage::events::Binding* b : sage::events::ForTrigger(act->Events, trigger)) {
+            sage::events::Event ev;
+            // Имя события не задано — берём имя триггера: связь, у которой
+            // забыли вписать событие, должна быть заметна, а не молчать.
+            ev.Name = b->Event.empty() ? std::string(trigger) : b->Event;
+            ev.Arg = b->Arg;
+            ev.Sender = sender;
+            // Адресная часть едет В ТОМ ЖЕ событии: настроить связь дважды —
+            // отдельно «кому» и отдельно «что» — значит однажды поправить одно
+            // и забыть другое.
+            ev.Target = b->Target;
+            ev.Method = b->Method;
+            scene.Events.Emit(ev);
+        }
+    };
+
     // Флаги «за этот кадр» гасим у всех: их читает игра сразу после нас, и
     // оставшийся с прошлого кадра Clicked сработал бы второй раз.
     for (const Solved& it : items) {
         if (State* st = stateOf(it.Entity)) {
+            const bool wasHovered = st->Hovered;
             st->Clicked = false;
             st->Changed = false;
             st->Hovered = (it.Entity == hovered);
+            // Вход и выход курсора — отдельные события: подсветка соседа,
+            // подсказка и звук наведения нужны именно на переходе, а не каждый
+            // кадр, пока курсор стоит на месте.
+            if (st->Hovered && !wasHovered) fire(it.Entity, "hoverIn");
+            if (!st->Hovered && wasHovered) fire(it.Entity, "hoverOut");
             // Pressed здесь НЕ сбрасываем: в кадре отпускания кнопка уже не
             // удерживается, и сброс до разбора отпускания съел бы сам щелчок.
         }
@@ -457,7 +489,10 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
 
     // Нажатие: назначает фокус (полю ввода) и «прижимает» элемент.
     if (input.MousePressed) {
-        if (hovered != entt::null) result.PressedAction = reg.get<Interactable>(hovered).Action;
+        if (hovered != entt::null) {
+            result.PressedAction = reg.get<Interactable>(hovered).Action;
+            fire(hovered, "press");
+        }
         for (const Solved& it : items) {
             State* st = stateOf(it.Entity);
             if (!st) continue;
@@ -481,6 +516,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         // Отпустили НАД этим элементом — независимо от того, где нажали.
         // Именно этим щелчок отличается от переноса, и знать надо оба.
         result.ReleasedAction = reg.get<Interactable>(hovered).Action;
+        fire(hovered, "release");
         if (State* st = stateOf(hovered)) {
             if (st->Pressed) {
                 st->Clicked = true;
@@ -493,6 +529,10 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
                     range->Value = range->Value >= mid ? range->Min : range->Max;
                     st->Changed = true;
                 }
+                fire(hovered, "click");
+                // Значение изменилось щелчком по галке — это то же «change»,
+                // что и у ползунка: слушателю всё равно, чем его подвинули.
+                if (st->Changed) fire(hovered, "change");
             }
         }
     }
@@ -511,7 +551,11 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         // выдаёт 0.4732 там, где человек ждёт 0.45.
         if (range->Step > 0.0f) v = range->Min + std::round((v - range->Min) / range->Step) * range->Step;
         v = glm::clamp(v, glm::min(range->Min, range->Max), glm::max(range->Min, range->Max));
-        if (v != range->Value) { range->Value = v; st->Changed = true; }
+        if (v != range->Value) {
+            range->Value = v;
+            st->Changed = true;
+            fire(it.Entity, "change");
+        }
         result.WantsMouse = true;
     }
 

@@ -76,7 +76,7 @@ public:
     // Даёт скриптам доступ к сцене: SpawnObject/FindObject/DestroyObject
     // из Lua будут работать с этой сценой. Без BindScene эти функции
     // бросают ошибку при вызове из Lua — понятную, не сегфолт.
-    void BindScene(Scene& scene) { m_scene = &scene; }
+    void BindScene(Scene& scene);
 
     // Даёт скриптам доступ к именованным действиям ввода движка:
     // IsActionDown("Jump"), WasActionPressed("BreakOrHook") и т.п., а также
@@ -192,6 +192,22 @@ public:
     // sage.events.Emit. Хозяин кадра шлёт так "pause" и "quit".
     void DispatchEvent(const std::string& name, sol::object payload = sol::nil);
     void DispatchEvent(const std::string& name, bool flag);
+
+    // --- Мост в шину сцены ---------------------------------------------------
+    //
+    // События движка живут в sage::events::Bus у сцены (Scene::Events): их шлют
+    // кнопки интерфейса и код на C++, у которого нет и не должно быть доступа к
+    // Lua. Здесь шина ПОДКЛЮЧАЕТСЯ к скриптам, чтобы разговор был один, а не
+    // два: событие кнопки слышат подписчики sage.events.On, а адресная часть
+    // (кому и какой метод) доставляется как обычное сообщение объекту.
+    //
+    // Подписка ставится в BindScene и снимается при смене сцены: обработчики
+    // выгруженного уровня, доживи они до следующего, звали бы мёртвые объекты.
+    void OnBusEvent(const sage::events::Event& event);
+
+    // Перевод значений движка в Lua и обратно (см. ScriptApi_Vars.cpp).
+    sol::object ValueToLua(const sage::vars::Value& value);
+    sage::vars::Value ValueFromLua(const sol::object& object);
 
     // Доступ к состоянию Lua — на случай если игре нужно зарегистрировать
     // свою собственную API-функцию/тип в дополнение к базовой
@@ -366,6 +382,7 @@ private:
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
     void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
+    void RegisterVarsApi();       // obj:Vars() — публичные переменные и ссылки
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
     void RegisterNetApi();        // Net.* — мультиплеер (см. ScriptApi_Net.cpp)
 
@@ -420,6 +437,12 @@ private:
     std::unordered_map<std::string, std::vector<Handler>> m_handlers;
     int m_nextHandler = 1;
     int m_eventDepth = 0;
+    // Номер подписки моста на шину сцены: при смене сцены её надо снять, иначе
+    // мост остался бы висеть на старой шине (а она уже чужая).
+    int m_busSubscription = 0;
+    // Мост молчит, пока событие в шину шлёт сам скрипт: иначе его подписчики
+    // услышали бы одно событие дважды (см. sage.events.Emit).
+    bool m_bridgeMuted = false;
     static constexpr int kMaxEventDepth = 8;
 
     // Накопитель постоянного шага для OnFixedUpdate: остаток переносится на

@@ -15,6 +15,8 @@
 #include "sage/core/Log.h"
 #include "sage/ui/UI.h"
 #include "sage/assets/Pack.h"
+#include "sage/vars/VarsComponent.h"
+#include "sage/events/Events.h"
 
 #include <filesystem>
 
@@ -848,4 +850,182 @@ TEST(Scripting_require_finds_modules_inside_the_game_package) {
 
     sage::assets::vfs::Unmount();
     std::filesystem::remove_all(sandbox);
+}
+
+// ===========================================================================
+//  ПУБЛИЧНЫЕ ПЕРЕМЕННЫЕ, ССЫЛКИ И СОБЫТИЯ В СКРИПТАХ
+// ===========================================================================
+
+// Скрипт читает и пишет настройку СВОЕГО объекта. Именно это отличает
+// публичную переменную от числа в коде: скрипт один, а значение у каждой двери
+// своё, видно в инспекторе и лежит в сцене.
+TEST(Scripting_public_variables_are_read_and_written_from_lua) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject door = scene.CreateObject("Door");
+    VarsComponent& vc = scene.Registry().emplace<VarsComponent>(door.Entity());
+    vc.Values.Set("speed", sage::vars::Value(2.0f));
+    vc.Values.Set("title", sage::vars::Value(std::string("Ворота")));
+
+    se.Lua()["e"] = door;
+    float speed = se.Lua().script("return e:Vars().speed");
+    CHECK_NEAR(speed, 2.0f, 1e-4f);
+    std::string title = se.Lua().script("return e:Vars().title");
+    CHECK_EQ(title, std::string("Ворота"));
+
+    se.Lua().script("e:Vars().speed = 7.5");
+    CHECK_NEAR(vc.Values.Get("speed").AsFloat(), 7.5f, 1e-4f);
+
+    // Вид переменной за ней и остаётся: скрипт, положивший строку в числовую
+    // настройку, ошибся, и молча менять тип поля — значит спрятать ошибку.
+    se.Lua().script("e:Vars().speed = 'три'");
+    CHECK_TRUE(vc.Values.Find("speed")->Data.Type() == sage::vars::Kind::Float);
+
+    // Переменной нет — nil, а не ошибка: проверять существование обычным `if`
+    // должно быть можно.
+    bool missing = se.Lua().script("return e:Vars().nosuch == nil");
+    CHECK_TRUE(missing);
+    bool has = se.Lua().script("return e:HasVar('title')");
+    CHECK_TRUE(has);
+}
+
+// ССЫЛКА ОТДАЁТСЯ ОБЪЕКТОМ, а не номером: скрипт пишет `Vars.target:SetName(…)`,
+// а не ищет сущность по номеру. И держится она за Id — переименование объекта
+// в редакторе больше не ломает уровень молча, как ломал FindByName.
+TEST(Scripting_a_reference_variable_hands_back_the_object_itself) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject door = scene.CreateObject("Door");
+    GameObject key = scene.CreateObject("Key");
+    scene.Registry().emplace<VarsComponent>(door.Entity()).Values.Set(
+        "needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+
+    se.Lua()["e"] = door;
+    std::string name = se.Lua().script("return e:Vars().needs.Name");
+    CHECK_EQ(name, std::string("Key"));
+
+    // Присваивание объектом кладёт ссылку, а не копию.
+    se.Lua()["other"] = scene.CreateObject("Chest");
+    se.Lua().script("e:Vars().needs = other");
+    const VarsComponent& vc = scene.Registry().get<VarsComponent>(door.Entity());
+    CHECK_EQ(scene.Get(vc.Values.Get("needs").AsEntity().Id).Name(), std::string("Chest"));
+
+    // Ссылка на удалённый объект — nil, а не «объект, у которого всё падает».
+    scene.RemoveObject(vc.Values.Get("needs").AsEntity().Id);
+    bool gone = se.Lua().script("return e:Vars().needs == nil");
+    CHECK_TRUE(gone);
+}
+
+// ОДНА ШИНА НА ВСЕХ. Событие, посланное из C++ (так его шлёт кнопка
+// интерфейса), обязано дойти до подписчика на Lua — иначе разговоров два, и
+// кнопка не может позвать игровую логику без скрипта-опросчика.
+TEST(Scripting_an_event_from_cpp_reaches_a_lua_subscriber) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        heard = 0
+        gotSender = -1
+        gotValue = ""
+        sage.events.On("game.start", function(p)
+            heard = heard + 1
+            gotSender = p.sender
+            gotValue = p.value
+        end)
+    )");
+
+    scene.Events.Emit("game.start", sage::vars::Value(std::string("level1")), 42);
+    int heard = se.Lua()["heard"];
+    int sender = se.Lua()["gotSender"];
+    std::string value = se.Lua()["gotValue"];
+    CHECK_EQ(heard, 1);
+    CHECK_EQ(sender, 42);
+    CHECK_EQ(value, std::string("level1"));
+}
+
+// И обратно: событие, посланное скриптом, слышит код на C++. Без этого
+// подсистема движка не может отреагировать на игровое событие, не зная Lua.
+TEST(Scripting_an_event_from_lua_reaches_a_cpp_subscriber) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    int heard = 0;
+    std::string arg;
+    scene.Events.On("player.died", [&](const sage::events::Event& e) {
+        ++heard;
+        arg = e.Arg.AsString();
+    });
+    se.Lua().script("sage.events.Emit('player.died', 'в лаву')");
+    CHECK_EQ(heard, 1);
+    CHECK_EQ(arg, std::string("в лаву"));
+}
+
+// Подписчик Lua слышит событие РОВНО ОДИН РАЗ, хотя оно и проходит через шину:
+// без защиты мост позвал бы его вторично, и обработчик, считающий очки,
+// насчитал бы вдвое.
+TEST(Scripting_a_lua_event_is_not_heard_twice) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        count = 0
+        sage.events.On("ping", function() count = count + 1 end)
+        sage.events.Emit("ping")
+    )");
+    int count = se.Lua()["count"];
+    CHECK_EQ(count, 1);
+}
+
+// АДРЕСНАЯ ЧАСТЬ СВЯЗИ: «эта кнопка открывает эту дверь». Приходит скрипту
+// объекта тем же путём, что и SendMessage, — второй механизм для этого заводить
+// незачем.
+TEST(Scripting_an_addressed_event_calls_the_method_of_the_target_object) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject door = scene.CreateObject("Door");
+
+    // Скрипт двери докладывает о вызове ОБРАТНО В ШИНУ: заглядывать в его
+    // окружение из теста значило бы проверять не тот путь, которым связь
+    // работает в игре.
+    const std::string path = WriteTempScript("door_target", R"(
+        function OnMessage(entity, name, data)
+            if name == "Open" then
+                sage.events.Emit("door.opened", data.value)
+            end
+        end
+    )");
+    se.AttachScript(door, path);
+
+    int opened = 0;
+    std::string howLong;
+    scene.Events.On("door.opened", [&](const sage::events::Event& e) {
+        ++opened;
+        howLong = e.Arg.AsString();
+    });
+
+    sage::events::Event e;
+    e.Name = "door.open";
+    e.Target = sage::vars::EntityRef{door.Id()};
+    e.Method = "Open";
+    e.Arg = sage::vars::Value(std::string("медленно"));
+    scene.Events.Emit(e);
+    CHECK_EQ(opened, 1);
+    CHECK_EQ(howLong, std::string("медленно"));
+
+    // Каждое событие — свой вызов: связь срабатывает всякий раз, а не однажды.
+    scene.Events.Emit(e);
+    CHECK_EQ(opened, 2);
+
+    // Чужой объект метод не получает: адрес на то и адрес.
+    GameObject other = scene.CreateObject("Window");
+    sage::events::Event miss = e;
+    miss.Target = sage::vars::EntityRef{other.Id()};
+    scene.Events.Emit(miss);
+    CHECK_EQ(opened, 2);
+
+    std::remove(path.c_str());
 }
