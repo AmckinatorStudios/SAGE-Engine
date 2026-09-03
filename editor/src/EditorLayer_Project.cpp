@@ -85,7 +85,6 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
 }
 
 constexpr float kStatusBarHeight = 26.0f;
-constexpr float kToolbarHeight = 34.0f;
 
 } // namespace
 

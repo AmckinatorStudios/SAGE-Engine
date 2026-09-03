@@ -490,6 +490,15 @@ bool Shape(const Pen& p, const char* n) {
         p.Line(0.125f, 0.5f, 0.875f, 0.5f, 0.05f);
         return true;
     }
+    // Магнит — привязка к шагу. Подкова, а не слово «Snap»: подпись занимала в
+    // строке инструментов вчетверо больше места, чем сама галка.
+    if (is("magnet")) {
+        p.Arc(0.5f, 0.5625f, 0.28f, 0.5f, 1.0f, 0.13f);
+        p.Line(0.22f, 0.5625f, 0.22f, 0.8125f, 0.13f);
+        p.Line(0.78f, 0.5625f, 0.78f, 0.8125f, 0.13f);
+        return true;
+    }
+
     // Шестерня — настройки. Зубья считаются, а не выписываются: восемь
     // одинаковых лучей от руки разъезжаются по углу, и на 16 пикселях это
     // видно как «мятая» иконка.
@@ -632,6 +641,7 @@ const char* const kNames[] = {
     "folder", "file", "scene", "material", "project", "prefab", "texture", "shader", "audio",
     "model",
     "up", "refresh", "folder-plus", "search", "code", "question", "layout", "gear",
+    "magnet",
     "warn", "error", "info", "debug",
     "trash", "copy", "save", "open", "plus", "eye", "lock",
 };

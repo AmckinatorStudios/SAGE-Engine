@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <algorithm>
+#include <iterator>
 #include <chrono>
 #include <fstream>
 #include <thread>
@@ -40,6 +41,8 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "UILayoutOps.h"
+#include "EditorPrefs.h"
+#include "Localization.h"
 #include "sage/scene/SceneSerializer.h"
 
 #include "sage/scene/Prefab.h"
@@ -111,7 +114,7 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools, "
+                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2016,6 +2019,71 @@ bool EditorLayer::SelfTestTools() {
             LOG_ERROR("Editor") << "SELFTEST: закрытые панели не возвращаются "
                                 << "(до " << visibleBefore << ", после закрытия " << visibleAfterClose
                                 << ", восстановлены " << restored << ")";
+            ok = false;
+        }
+    }
+
+    // --- Кнопка в верхней панели и галка в меню — ОДНО И ТО ЖЕ поле --------
+    //
+    // Верхняя панель включает окна через PanelVisible(EditorPanel), меню Window
+    // — через него же. Пока это был switch, руками сопоставляющий пункт
+    // перечисления с полем, ошибка в одной строке означала бы кнопку, которая
+    // открывает не своё окно, и галку, которая отмечает чужое. Проверяется
+    // ТОЧНО: сравниваются адреса — ссылка обязана вести ровно в то поле,
+    // которое рисует крестик на вкладке, и у двух разных панелей они не имеют
+    // права совпасть.
+    if (ok) {
+        struct Mapping { EditorPanel Panel; bool* Field; const char* Name; };
+        const Mapping mapping[] = {
+            {EditorPanel::Hierarchy, &m_showHierarchy, "Hierarchy"},
+            {EditorPanel::Inspector, &m_showInspector, "Inspector"},
+            {EditorPanel::Environment, &m_showEnvironment, "Environment"},
+            {EditorPanel::Assets, &m_showAssets, "Assets"},
+            {EditorPanel::Console, &m_showConsole, "Console"},
+            {EditorPanel::Code, &m_showCode, "Code"},
+            {EditorPanel::Profiler, &m_showProfiler, "Profiler"},
+            {EditorPanel::Game, &m_showGame, "Game"},
+            {EditorPanel::Viewport, &m_showViewport, "Viewport"},
+            {EditorPanel::UITools, &m_showUITools, "UI Layout"},
+            {EditorPanel::Settings, &m_showSettings, "Settings"},
+        };
+        for (const Mapping& m : mapping) {
+            if (&PanelVisible(m.Panel) != m.Field) {
+                LOG_ERROR("Editor") << "SELFTEST: PanelVisible ведёт не в своё поле: " << m.Name;
+                ok = false;
+            }
+        }
+        // И ни одна панель не делит поле с другой: такая пара переключалась бы
+        // парой, и одна из двух кнопок выглядела бы сломанной.
+        for (size_t i = 0; i < std::size(mapping) && ok; ++i)
+            for (size_t j = i + 1; j < std::size(mapping); ++j)
+                if (mapping[i].Field == mapping[j].Field) {
+                    LOG_ERROR("Editor") << "SELFTEST: панели " << mapping[i].Name << " и "
+                                        << mapping[j].Name << " делят один флаг";
+                    ok = false;
+                }
+    }
+
+    // --- Настройки редактора переживают запись и чтение ---------------------
+    //
+    // На них держится состав строки инструментов во вьюпорте: человек выключил
+    // ненужную группу — и она обязана остаться выключенной после перезапуска.
+    // Файл общий с языком и списком недавних проектов, поэтому проверяется
+    // ИМЕННО чтение-правка-запись: запись состава не имеет права стереть
+    // соседнюю настройку. Ключ после прогона возвращается как был.
+    if (ok) {
+        namespace prefs = sage::editor::prefs;
+        const char* key = "selftest.roundtrip";
+        const std::string lang = sage::editor::CurrentLanguageCode();
+        prefs::SetBool(key, false);
+        const bool readBackFalse = prefs::GetBool(key, true);
+        prefs::SetBool(key, true);
+        const bool readBackTrue = prefs::GetBool(key, false);
+        const bool langKept = sage::editor::CurrentLanguageCode() == lang;
+        if (readBackFalse || !readBackTrue || !langKept) {
+            LOG_ERROR("Editor") << "SELFTEST: настройки редактора не сохраняются (false -> "
+                                << readBackFalse << ", true -> " << readBackTrue
+                                << ", язык цел " << langKept << ")";
             ok = false;
         }
     }

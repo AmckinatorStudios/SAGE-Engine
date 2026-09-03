@@ -41,6 +41,7 @@ add_executable(SageEditor WIN32
     src/panels/AssetsPanel.cpp
     src/panels/LauncherPanel.cpp
     src/panels/EnvironmentPanel.cpp
+    src/EditorPrefs.cpp
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
     src/panels/SettingsPanel.cpp
