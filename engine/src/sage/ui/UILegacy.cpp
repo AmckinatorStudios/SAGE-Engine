@@ -13,9 +13,13 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
     t.Visible = flat.Visible;
     reg.emplace_or_replace<Transform>(e, t);
 
-    // Подложка есть у всех, кроме чистой надписи и чистой картинки: у них фон
-    // не рисовался и в старой системе.
-    if (flat.Type != Kind::Label && flat.Type != Kind::Image && flat.Type != Kind::Icon) {
+    // Подложка есть у всех, кроме чистой надписи, чистой картинки и элементов
+    // ДИАПАЗОНА: у первых фон не рисовался и в старой системе, а у ползунка с
+    // галкой цвет подложки уходил в дорожку и квадратик — теперь эти цвета
+    // хранит сам диапазон (см. ниже), и вторая заливка во весь элемент
+    // закрасила бы то, поверх чего он рисуется.
+    if (flat.Type != Kind::Label && flat.Type != Kind::Image && flat.Type != Kind::Icon &&
+        flat.Type != Kind::Slider && flat.Type != Kind::Checkbox) {
         Fill fill;
         fill.Color = flat.Color;
         fill.Rounding = flat.Rounding;
@@ -74,13 +78,6 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
         reg.emplace_or_replace<TextInput>(e, input);
     }
     if (flat.Type == Kind::Slider || flat.Type == Kind::Checkbox) {
-        // Цвет заполнения ползунка и галочки жил в том же поле, что у полосы.
-        // Кладём его в полосу и здесь: у неё он и есть «акцентный цвет
-        // элемента», и без этого перенесённый ползунок позеленел бы в
-        // умолчание (см. AccentColor в UISceneSystem.cpp).
-        Bar accent;
-        accent.FillColor = flat.BarFillColor;
-        reg.emplace_or_replace<Bar>(e, accent);
         Range range;
         range.Min = flat.MinValue;
         range.Max = flat.MaxValue;
@@ -88,6 +85,15 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
         range.Value = flat.MinValue + flat.Value * (flat.MaxValue - flat.MinValue);
         range.Toggle = flat.Type == Kind::Checkbox;
         if (range.Toggle) range.Step = 1.0f;
+        // Цвета старого элемента ложатся ПРЯМО В ДИАПАЗОН: подложка была
+        // дорожкой и квадратиком, а цвет заполнения полосы — ручкой и
+        // галочкой. Раньше ради второго рядом заводилась пустая шкала, и
+        // «перекрасить ползунок» означало «повесить на него полосу».
+        range.TrackColor = flat.Color;
+        range.AccentColor = flat.BarFillColor;
+        range.BorderColor = flat.BorderColor;
+        range.BorderThickness = flat.BorderThickness;
+        range.Rounding = flat.Rounding;
         reg.emplace_or_replace<Range>(e, range);
     }
     if (flat.ClipChildren) reg.emplace_or_replace<Mask>(e, Mask{});

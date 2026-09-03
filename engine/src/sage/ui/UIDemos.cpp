@@ -129,24 +129,40 @@ int BuildHud(Scene& scene) {
     Add(scene, screen, canvas);
     // Прозрачной подложки у худа нет: он не должен затемнять игру.
 
-    // Полоса здоровья: значок, подпись и шкала — ОДИН элемент, а не три
-    // сущности, которые надо держать выровненными руками.
+    // Полоса здоровья: подложка, значок и шкала — ТРИ ОБЪЕКТА, вложенных друг в
+    // друга, а не три части на одной сущности. Раньше значок сам отодвигал бы
+    // шкалу вправо — правилом, зашитым в отрисовку; теперь он занимает свой
+    // прямоугольник, а шкала — свой, и любой из них можно подвинуть, убрать
+    // или заменить, не трогая соседей.
     Transform hpXf;
     hpXf.Anchor = UIAnchor::TopLeft;
     hpXf.Offset = {24.0f, 24.0f};
     hpXf.Size = {320.0f, 34.0f};
     GameObject hp = Element(scene, "HudHealth", screen, hpXf);
     Add(scene, hp, PanelFill({0.0f, 0.0f, 0.0f, 0.45f}, 8.0f));
+
+    Transform heartXf;
+    heartXf.Anchor = UIAnchor::CenterLeft;
+    heartXf.Offset = {6.0f, 0.0f};
+    heartXf.Size = {26.0f, 26.0f};
+    GameObject heartObj = Element(scene, "HudHealthIcon", hp, heartXf);
     Icon heart;
     heart.Name = "heart";
     heart.Color = {0.95f, 0.35f, 0.35f, 1.0f};
-    Add(scene, hp, heart);
+    Add(scene, heartObj, heart);
+
+    Transform barXf;
+    barXf.Anchor = UIAnchor::TopLeft;
+    barXf.Mode = Transform::Stretch::Both;
+    barXf.Margin = {38.0f, 6.0f, 8.0f, 6.0f};   // место слева — под значок
+    GameObject barObj = Element(scene, "HudHealthBar", hp, barXf);
+    Add(scene, barObj, PanelFill({0.12f, 0.05f, 0.05f, 0.7f}, 5.0f));
     Bar bar;
     bar.Value = 0.72f;
     bar.FillColor = {0.85f, 0.25f, 0.25f, 1.0f};
     // Сглаживание: шкала едет к цели за четверть секунды, а не прыгает рывком.
     bar.Smoothing = 3.0f;
-    Add(scene, hp, bar);
+    Add(scene, barObj, bar);
 
     // Патроны: ширина по содержимому — «7 / 30» и «120 / 240» не должны
     // плавать в панели одного размера.
@@ -248,38 +264,49 @@ int BuildSettings(Scene& scene) {
 
     // Громкость: значение В ИГРОВЫХ ЕДИНИЦАХ и шаг. Раньше ползунок хранил долю
     // 0..1, и «громкость 45%» приходилось пересчитывать каждому читателю.
-    GameObject volume = labelledRow("VolumeSlider", "Громкость", 30.0f);
-    Add(scene, volume, PanelFill({0.13f, 0.15f, 0.20f, 1.0f}, 8.0f));
-    Add(scene, volume, Interactable{});
+    //
+    // Цвет дорожки — У САМОГО ползунка, а не у подложки рядом: подложка
+    // закрашивает элемент ЦЕЛИКОМ, а дорожка тонкая и по центру.
     Range volumeRange;
     volumeRange.Min = 0.0f;
     volumeRange.Max = 100.0f;
     volumeRange.Value = 70.0f;
     volumeRange.Step = 5.0f;
+    volumeRange.TrackColor = {0.13f, 0.15f, 0.20f, 1.0f};
+    GameObject volume = labelledRow("VolumeSlider", "Громкость", 30.0f);
+    Add(scene, volume, Interactable{});
     Add(scene, volume, volumeRange);
 
-    GameObject sens = labelledRow("SensitivitySlider", "Чувствительность", 30.0f);
-    Add(scene, sens, PanelFill({0.13f, 0.15f, 0.20f, 1.0f}, 8.0f));
-    Add(scene, sens, Interactable{});
     Range sensRange;
     sensRange.Min = 0.1f;
     sensRange.Max = 5.0f;
     sensRange.Value = 1.5f;
+    sensRange.TrackColor = {0.13f, 0.15f, 0.20f, 1.0f};
+    GameObject sens = labelledRow("SensitivitySlider", "Чувствительность", 30.0f);
+    Add(scene, sens, Interactable{});
     Add(scene, sens, sensRange);
 
     // Галка — тот же диапазон с шагом в единицу: отдельного вида элемента для
-    // двух значений заводить незачем. Подпись у неё СВОЯ: квадратик занимает
-    // левый край, и текст встаёт за ним (см. DrawElement), не перекрываясь.
+    // двух значений заводить незачем. А подпись к ней — ОТДЕЛЬНЫЙ ОБЪЕКТ
+    // рядом. Раньше текст жил на той же сущности и начинался «за квадратиком»
+    // по правилу из отрисовки; теперь его видно в дереве и можно поставить
+    // хоть слева от галки, хоть под ней.
     GameObject fullscreen = row("FullscreenToggle", 30.0f);
-    Add(scene, fullscreen, PanelFill({0.13f, 0.15f, 0.20f, 1.0f}, 8.0f));
-    Add(scene, fullscreen, Text("Полный экран", 1.6f, {0.9f, 0.92f, 1.0f, 1.0f},
-                                Label::Align::Start));
     Add(scene, fullscreen, Interactable{});
     Range toggle;
     toggle.Toggle = true;
     toggle.Step = 1.0f;
     toggle.Value = 1.0f;
+    toggle.TrackColor = {0.13f, 0.15f, 0.20f, 1.0f};
     Add(scene, fullscreen, toggle);
+
+    Transform fsTextXf;
+    fsTextXf.Anchor = UIAnchor::TopLeft;
+    fsTextXf.Mode = Transform::Stretch::Both;
+    fsTextXf.Margin = {38.0f, 0.0f, 0.0f, 0.0f};   // место слева — под квадратик
+    GameObject fsText = Element(scene, "FullscreenCaption", fullscreen, fsTextXf);
+    Add(scene, fsText, Text("Полный экран", 1.6f, {0.9f, 0.92f, 1.0f, 1.0f},
+                            Label::Align::Start));
 
     GameObject name = labelledRow("PlayerName", "Имя", 34.0f);
     Add(scene, name, PanelFill({0.10f, 0.11f, 0.16f, 1.0f}, 8.0f));

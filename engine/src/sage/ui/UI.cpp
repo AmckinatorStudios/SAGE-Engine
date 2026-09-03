@@ -160,6 +160,20 @@ namespace {
 std::vector<Preset> BuildPresets() {
     std::vector<Preset> out;
 
+    // Ребёнок-надпись: тем, кому нужен текст на подложке, он достаётся ОБЪЕКТОМ,
+    // а не полем внутри подложки. Помощником, потому что это самый частый
+    // ребёнок и повторять пять присваиваний в каждой заготовке незачем.
+    auto TextChild = [](const char* name, const char* text) {
+        Preset child;
+        child.Name = name;
+        child.Xf.Anchor = UIAnchor::TopLeft;
+        child.Xf.Mode = Transform::Stretch::Both;   // на всю подложку
+        child.Xf.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
+        child.HasLabel = true;
+        child.LabelStyle.Text = text;
+        return child;
+    };
+
     auto add = [&out](const char* name) -> Preset& {
         out.push_back(Preset{});
         out.back().Name = name;
@@ -174,14 +188,16 @@ std::vector<Preset> BuildPresets() {
         p.HasFill = true;
     }
     {
+        // Кнопка = подложка, реагирующая на мышь, ПЛЮС отдельный объект-надпись
+        // внутри. Не «подложка со встроенным текстом»: надпись видно в дереве,
+        // её можно подвинуть, покрасить, заменить значком или убрать.
         Preset& p = add("Button");
         p.Xf.Size = {200.0f, 52.0f};
         p.HasFill = true;
         p.FillStyle.Color = {0.16f, 0.22f, 0.34f, 0.95f};
         p.FillStyle.BorderThickness = 1.0f;
-        p.HasLabel = true;
-        p.LabelStyle.Text = "Button";
         p.HasInteractable = true; // без этого «кнопка» — просто прямоугольник
+        p.Children.push_back(TextChild("Текст", "Button"));
     }
     {
         Preset& p = add("Label");
@@ -204,24 +220,34 @@ std::vector<Preset> BuildPresets() {
         p.BarStyle.Value = 0.6f; // пустая полоса неотличима от панели
     }
     {
+        // Галка = квадратик слева ПЛЮС подпись рядом отдельным объектом.
+        // Раньше подпись жила внутри и начиналась «за квадратиком» по правилу,
+        // зашитому в отрисовку; теперь её можно поставить и слева, и под галкой.
         Preset& p = add("Checkbox");
         p.Xf.Size = {200.0f, 36.0f};
-        p.HasFill = true;
-        p.HasLabel = true;
-        p.LabelStyle.Text = "Checkbox";
-        p.LabelStyle.Horizontal = Label::Align::Start;
         p.HasInteractable = true;
         p.HasRange = true;
         p.RangeValue.Toggle = true;
         p.RangeValue.Step = 1.0f;
         p.RangeValue.Value = 0.0f;
+        // Подложки (Fill) у галки НЕТ: она закрасила бы весь элемент вместе с
+        // местом под подпись. Квадратик рисует сама галка своим цветом.
+        p.RangeValue.BorderThickness = 1.0f;
+        p.RangeValue.BorderColor = {0.55f, 0.60f, 0.72f, 0.9f};
+        Preset text = TextChild("Текст", "Checkbox");
+        text.Xf.Anchor = UIAnchor::CenterLeft;
+        text.Xf.Offset = {44.0f, 0.0f};      // правее квадратика
+        text.Xf.Size = {150.0f, 28.0f};
+        text.LabelStyle.Horizontal = Label::Align::Start;
+        p.Children.push_back(text);
     }
     {
         Preset& p = add("Slider");
         p.Xf.Size = {240.0f, 30.0f};
-        p.HasFill = true;
         p.HasInteractable = true;
         p.HasRange = true;
+        // Дорожка и ручка — цвета САМОГО ползунка. Подложка здесь закрасила бы
+        // прямоугольник во всю высоту, а дорожка тонкая и по центру.
     }
     {
         Preset& p = add("Input");

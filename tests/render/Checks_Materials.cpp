@@ -14,6 +14,7 @@
 #include "Fixture.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -309,6 +310,91 @@ void TestEmissiveShows(FrameRenderer& r) {
     Check(glowing.g > dark.g + 0.15f, "свечение материала видно на объекте");
 }
 
+// --- 7. Карта альбедо и её ПОВТОР ------------------------------------------
+//
+// Текстурный путь отрисовки — отдельный от плоского цвета (см. RenderBatch:
+// материал с картами уходит в него), и сломать его можно, не задев цветной.
+// А повтор (UVScale) — то, без чего текстурированный пол невозможен: развёртка
+// примитивов движка 0..1 на грань, и одна плитка растягивается на сто метров.
+//
+// Проверяется по КРОМКАМ, а не по среднему цвету: повтор не меняет среднюю
+// яркость шахматки, он меняет число переходов. Средним такую проверку не
+// написать — она прошла бы и при полностью потерянном множителе.
+void TestAlbedoMapAndTiling(FrameRenderer& r) {
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "sage_mattex";
+    fs::create_directories(dir, ec);
+    const fs::path file = dir / "checker.png";
+
+    // Шахматка 64x64 клетками по 8 пикселей: она сама себе эталон — по числу
+    // кромок видно, сколько раз её уложили.
+    Image checker;
+    checker.Width = 64;
+    checker.Height = 64;
+    checker.Pixels.assign((size_t)checker.Width * checker.Height * 3, 0);
+    for (int y = 0; y < checker.Height; ++y) {
+        for (int x = 0; x < checker.Width; ++x) {
+            const bool light = ((x / 8) + (y / 8)) % 2 == 0;
+            const size_t i = ((size_t)y * checker.Width + x) * 3;
+            checker.Pixels[i] = checker.Pixels[i + 1] = checker.Pixels[i + 2] = light ? 235 : 60;
+        }
+    }
+    if (!SavePng(file.string(), checker)) {
+        std::printf("       не удалось записать шахматку — проверка пропущена\n");
+        CountFail();
+        return;
+    }
+
+    GameObject ball;
+    std::unique_ptr<Scene> scene = MakeMaterialScene(ball);
+    // Плоскость, а не шар: повтор смотрят на полу, и на плоскости кромки
+    // считаются без искажений сферической развёртки.
+    ball.GetTransform().Position = {0.0f, 0.02f, 0.0f};
+    ball.GetTransform().Scale = {6.0f, 1.0f, 6.0f};
+    ball.Renderer().Ref = MeshRef{MeshRef::Type::Plane};
+    ball.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Plane);
+
+    auto material = std::make_shared<Material>();
+    material->Albedo = {1.0f, 1.0f, 1.0f};
+    material->Roughness = 0.9f;
+    material->TexturePath = file.string();
+    ResourceManager::Instance().ResolveMaterialTextures(*material);
+    if (!material->AlbedoTex) {
+        std::printf("       карта альбедо не загрузилась\n");
+        CountFail();
+        fs::remove_all(dir, ec);
+        return;
+    }
+    ball.Renderer().MaterialPtr = material;
+
+    // Число кромок в кадре: сумма модулей разностей соседних пикселей.
+    auto edges = [](const Image& img) {
+        long long sum = 0;
+        for (int y = 0; y < img.Height; ++y) {
+            for (int x = 1; x < img.Width; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                sum += std::abs((int)img.Pixels[i] - (int)img.Pixels[i - 3]);
+            }
+        }
+        return (double)sum / (double)(img.Width * img.Height);
+    };
+
+    material->Render.UVScaleX = material->Render.UVScaleY = 1.0f;
+    const Image once = Shot(r, *scene);
+    const double e1 = edges(once);
+
+    material->Render.UVScaleX = material->Render.UVScaleY = 6.0f;
+    const Image many = Shot(r, *scene);
+    const double e6 = edges(many);
+
+    std::printf("       кромок: один повтор %.2f, шесть повторов %.2f\n", e1, e6);
+    Check(e1 > 1.0, "карта альбедо видна на объекте");
+    Check(e6 > e1 * 1.5, "повтор текстуры (UVScale) доходит до шейдера");
+
+    ResourceManager::Instance().Clear();
+    fs::remove_all(dir, ec);
+}
+
 } // namespace
 
 void RunMaterialChecks(FrameRenderer& r) {
@@ -318,6 +404,7 @@ void RunMaterialChecks(FrameRenderer& r) {
     TestOpacityBlends(r);
     TestSaveReloadKeepsTheLook(r);
     TestEmissiveShows(r);
+    TestAlbedoMapAndTiling(r);
 }
 
 } // namespace sage::rendertest

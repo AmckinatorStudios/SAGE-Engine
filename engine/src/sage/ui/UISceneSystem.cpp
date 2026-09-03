@@ -1,4 +1,5 @@
 #include "UISceneSystem.h"
+#include "sage/ui/UIPart.h"
 
 #include "sage/ui/UI.h"
 #include "sage/ui/UILegacy.h"
@@ -100,12 +101,6 @@ int NextCharBoundary(const std::string& s, int i) {
     while (i < n && (static_cast<unsigned char>(s[(size_t)i]) & 0xC0) == 0x80) ++i;
     return i;
 }
-int Utf8Length(const std::string& s) {
-    int n = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) ++n;
-    return n;
-}
 
 // Что показывать вместо содержимого поля-пароля. Точки, а не звёздочки: в
 // пиксельных шрифтах звёздочка часто выше строки и ломает базовую линию.
@@ -116,484 +111,52 @@ std::string MaskText(const std::string& text) {
     return out;
 }
 
-// Разбивает текст на строки по ширине. Перенос по СЛОВАМ; слово, которое не
-// влезает целиком, режется по символам — иначе одно длинное слово молча уехало
-// бы за край, то есть ровно то, от чего перенос и спасает. Явные \n уважаются.
-std::vector<std::string> WrapLines(const std::string& text, float maxWidth, float scale,
-                                   UIRenderer& ui) {
-    std::vector<std::string> lines;
-    if (maxWidth <= 0.0f) { lines.push_back(text); return lines; }
 
-    size_t start = 0;
-    while (start <= text.size()) {
-        size_t nl = text.find('\n', start);
-        const std::string paragraph = text.substr(start, nl == std::string::npos ? std::string::npos
-                                                                                : nl - start);
-        std::string line;
-        size_t i = 0;
-        while (i < paragraph.size()) {
-            // Следующее слово вместе с ведущими пробелами.
-            size_t wordEnd = paragraph.find(' ', i);
-            if (wordEnd == std::string::npos) wordEnd = paragraph.size();
-            const std::string word = paragraph.substr(i, wordEnd - i);
-            const std::string candidate = line.empty() ? word : line + " " + word;
-            if (ui.MeasureText(candidate, scale) <= maxWidth || line.empty()) {
-                if (ui.MeasureText(candidate, scale) > maxWidth && line.empty()) {
-                    // Слово шире строки — режем по символам (по границам UTF-8).
-                    std::string chunk;
-                    size_t c = 0;
-                    while (c < word.size()) {
-                        const size_t next = (size_t)NextCharBoundary(word, (int)c);
-                        const std::string grown = chunk + word.substr(c, next - c);
-                        if (!chunk.empty() && ui.MeasureText(grown, scale) > maxWidth) {
-                            lines.push_back(chunk);
-                            chunk.clear();
-                            continue;
-                        }
-                        chunk = grown;
-                        c = next;
-                    }
-                    line = chunk;
-                } else {
-                    line = candidate;
-                }
-            } else {
-                lines.push_back(line);
-                line = word;
-            }
-            i = wordEnd + 1;
-        }
-        lines.push_back(line);
-        if (nl == std::string::npos) break;
-        start = nl + 1;
-    }
-    return lines;
-}
-
-// --- ЧТО РИСУЕМ: части элемента ---------------------------------------------
+// ОТРИСОВКА ЭЛЕМЕНТА — ПО РЕЕСТРУ ЧАСТЕЙ, а не по списку в этой функции.
 //
-// Отрисовка складывает СЛОИ, а не выбирает ветку по «виду элемента». Это и есть
-// разница между прежней моделью и нынешней: раньше кнопка, полоса и поле ввода
-// были значениями перечисления, и «шкала с иконкой и подписью» не выражалась
-// вовсе — вид один, а нужно три. Здесь каждая часть рисует своё поверх
-// предыдущих, и любое их сочетание осмысленно само по себе.
-struct ElementView {
-    const Fill* FillPart = nullptr;
-    const Label* LabelPart = nullptr;
-    const Image* ImagePart = nullptr;
-    const Bar* BarPart = nullptr;
-    const Icon* IconPart = nullptr;
-    const Interactable* Act = nullptr;
-    const TextInput* InputPart = nullptr;
-    const Range* RangePart = nullptr;
-    // Накопленная прозрачность групп: умножается на КАЖДЫЙ цвет элемента.
-    // Отдельным полем, а не правкой цветов на месте: части общие и константные,
-    // копировать их ради одного множителя было бы расточительством на каждый
-    // элемент каждого кадра.
-    float Alpha = 1.0f;
-
-    bool Hovered() const { return Act && Act->Runtime.Hovered; }
-    bool Pressed() const { return Act && Act->Runtime.Pressed; }
-    bool Focused() const { return Act && Act->Runtime.Focused; }
-    bool Enabled() const { return !Act || Act->Enabled; }
-};
-
-ElementView ViewOf(const entt::registry& reg, entt::entity e, float alpha) {
-    ElementView v;
-    v.FillPart = reg.try_get<Fill>(e);
-    v.LabelPart = reg.try_get<Label>(e);
-    v.ImagePart = reg.try_get<Image>(e);
-    v.BarPart = reg.try_get<Bar>(e);
-    v.IconPart = reg.try_get<Icon>(e);
-    v.Act = reg.try_get<Interactable>(e);
-    v.InputPart = reg.try_get<TextInput>(e);
-    v.RangePart = reg.try_get<Range>(e);
-    v.Alpha = alpha;
-    return v;
-}
-
-// Цвет «переднего плана»: заполнение ползунка, галочка в квадратике.
+// Здесь была функция на триста строк, которая знала все части наперечёт и
+// заодно решала, как они влияют друг на друга: значок сдвигал текст, галка
+// сдвигала текст, картинка отменяла подложку, рамка рисовалась после шкалы, но
+// до значка. Каждая новая часть означала правку этого клубка — то есть
+// набор частей был ЗАШИТ В ДВИЖОК.
 //
-// Берётся у полосы, если она есть, — так у элемента остаётся ОДНО место, где
-// задан его акцентный цвет. Значение по умолчанию совпадает с прежним цветом
-// заполнения, поэтому перенесённые из старых сцен галки и ползунки выглядят
-// как раньше (см. Decompose: он кладёт их цвет именно в полосу).
-glm::vec4 AccentColor(const ElementView& v) {
-    if (v.BarPart) return v.BarPart->FillColor;
-    return {0.36f, 0.75f, 0.42f, 1.0f};
-}
-
-// Значение полосы с учётом сглаживания: показывается то, что доехало.
-float BarShown(const Bar& bar) {
-    return (bar.Smoothing > 0.0f && bar.Displayed >= 0.0f) ? bar.Displayed : bar.Value;
-}
-
-// Доля 0..1 у диапазона — то, чем ползунок и рисуется.
-float RangeFraction(const Range& range) {
-    const float span = range.Max - range.Min;
-    if (std::fabs(span) < 1e-6f) return 0.0f;
-    return glm::clamp((range.Value - range.Min) / span, 0.0f, 1.0f);
-}
-
-// Заливка прямоугольника подложкой: плоская или градиентная.
-void FillRect(const Fill& fill, const UIRect& r, float rounding, glm::vec3 rgb, float alpha,
-              UIRenderer& ui) {
-    if (alpha <= 0.0f) return;
-    if (fill.Gradient.a > 0.0f) {
-        ui.GradientRect(r.x, r.y, r.w, r.h, rgb,
-                        {fill.Gradient.r, fill.Gradient.g, fill.Gradient.b}, alpha,
-                        fill.Gradient.a * (alpha / glm::max(fill.Color.a, 1e-4f)), rounding);
-    } else {
-        ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha, rounding);
-    }
-}
-
-// Спрайт под текущее состояние. Набор интерфейса обычно рисует кнопку трижды —
-// обычную, под курсором, нажатую, — и подменить картинку правильнее, чем
-// осветлить основную: художник уже решил, как выглядит нажатие.
-UIRenderer::Sprite StateSprite(const ElementView& v) {
-    const Image& img = *v.ImagePart;
-    const glm::vec4* src = &img.Sprite;
-    if (v.Pressed() && img.SpritePressed.z > 0.0f) src = &img.SpritePressed;
-    else if (v.Hovered() && img.SpriteHover.z > 0.0f) src = &img.SpriteHover;
-    return {src->x, src->y, src->z, src->w};
-}
-
-// Подкраска под состояние — запасной путь для тех, у кого своих спрайтов
-// состояний нет (сплошные панели, элементы из примитивов). Множители берутся у
-// самого элемента: «на 12% ярче» подходит не всякому набору интерфейса.
-glm::vec3 StateTint(const ElementView& v, glm::vec3 base) {
-    if (!v.Act) return base;
-    if (!v.Act->Enabled) return glm::mix(base, glm::vec3(0.5f), 0.5f);
-    if (v.Pressed()) return base * v.Act->PressedBrightness;
-    if (v.Hovered()) return glm::mix(base, glm::vec3(1.0f), v.Act->HoverBrightness - 1.0f);
-    return base;
-}
-
-// Прозрачность части с учётом группы и выключенного состояния.
-float AlphaOf(const ElementView& v, float channelAlpha) {
-    float a = channelAlpha * v.Alpha;
-    if (v.Act && !v.Act->Enabled) a *= v.Act->DisabledAlpha;
-    return a;
-}
-
-// Картинка: спрайт с листа, девятина, пиксель-арт.
-void DrawImage(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb,
-               UIRenderer& ui) {
-    const Image& img = *v.ImagePart;
-    const float alpha = AlphaOf(v, img.Tint.a);
-    if (!img.Tex) {
-        // Пустой путь — картинки просто нет, и рисовать нечего. Заглушка здесь
-        // была бы хуже пустоты: она закрашивает элемент сплошным прямоугольником
-        // и прячет всё остальное, что на нём есть.
-        if (img.Path.empty()) return;
-        // Путь задан, а текстуры нет — вот это уже стоит показать: иначе
-        // «не загрузилось» и «не назначено» выглядят одинаково.
-        ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha,
-                       v.FillPart ? v.FillPart->Rounding * scale : 0.0f);
-        return;
-    }
-    const UIRenderer::Sprite src = StateSprite(v);
-    const bool sliced = img.SliceBorder.x > 0.0f || img.SliceBorder.y > 0.0f ||
-                        img.SliceBorder.z > 0.0f || img.SliceBorder.w > 0.0f;
-    if (sliced) {
-        // Масштаб пикселя: 0 — «подобрать сам». Для пиксель-арта он округляется
-        // ВНИЗ до целого — дробный масштаб растягивает одни пиксели исходника на
-        // два экранных, а соседние на один, и ровная рамка идёт волнами.
-        float pixels = img.PixelScale * scale;
-        if (pixels <= 0.0f) {
-            const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
-            pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
-            if (img.PixelArt) pixels = glm::max(1.0f, glm::floor(pixels));
-        }
-        ui.ImageNineSlice(r.x, r.y, r.w, r.h, img.Tex.get(), src, img.SliceBorder, pixels, rgb,
-                          alpha);
-        return;
-    }
-    // Спрайт БЕЗ девятины: у пиксель-арта его нельзя просто растянуть под
-    // элемент. Растяжение 24x15 в 36x24 даёт разный масштаб по осям и дробный
-    // по каждой — сердце выходит с рваными краями и обрезанным боком. Поэтому
-    // берётся ЦЕЛЫЙ масштаб, влезающий в элемент, и спрайт ставится по центру;
-    // элемент при этом может остаться больше картинки, и это честнее, чем её
-    // испортить.
-    UIRect dst = r;
-    float pixels = img.PixelScale * scale;
-    if (img.PixelArt || pixels > 0.0f) {
-        const float sw = src.Whole() ? (float)img.Tex->Width() : src.W;
-        const float sh = src.Whole() ? (float)img.Tex->Height() : src.H;
-        if (sw > 0.0f && sh > 0.0f) {
-            if (pixels <= 0.0f) {
-                pixels = glm::min(r.w / sw, r.h / sh);
-                if (img.PixelArt) pixels = glm::max(1.0f, glm::floor(pixels));
-            }
-            dst.w = sw * pixels;
-            dst.h = sh * pixels;
-            dst.x = r.x + glm::floor((r.w - dst.w) * 0.5f);
-            dst.y = r.y + glm::floor((r.h - dst.h) * 0.5f);
-        }
-    }
-    ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, img.Tex.get(), src, rgb, alpha);
-}
-
-// Галка: квадратная коробка у левого края. Квадратная и прижатая потому, что
-// рядом обычно стоит подпись, и растягивать саму галку на всю ширину незачем.
-UIRect ToggleBox(const UIRect& r) {
-    const float side = glm::min(r.w, r.h);
-    return {r.x, r.y + (r.h - side) * 0.5f, side, side};
-}
-
-void DrawToggle(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb,
-                UIRenderer& ui) {
-    const UIRect box = ToggleBox(r);
-    const float rounding =
-        v.FillPart ? glm::min(v.FillPart->Rounding * scale, box.h * 0.5f) : 4.0f * scale;
-    if (v.FillPart) FillRect(*v.FillPart, box, rounding, rgb, AlphaOf(v, v.FillPart->Color.a), ui);
-    if (v.FillPart && v.FillPart->BorderThickness > 0.0f && v.FillPart->BorderColor.a > 0.0f) {
-        const glm::vec4& b = v.FillPart->BorderColor;
-        ui.RoundedRectOutline(box.x, box.y, box.w, box.h, rounding,
-                              v.FillPart->BorderThickness * scale, {b.r, b.g, b.b},
-                              AlphaOf(v, b.a));
-    }
-    // Включена — если значение ближе к верхнему концу диапазона.
-    const Range& range = *v.RangePart;
-    if (range.Value >= (range.Min + range.Max) * 0.5f) {
-        const float pad = box.h * 0.18f;
-        const glm::vec4 accent = AccentColor(v);
-        DrawIcon(ui, "check", box.x + pad, box.y + pad, box.h - pad * 2.0f,
-                 StateTint(v, {accent.r, accent.g, accent.b}), AlphaOf(v, accent.a));
-    }
-}
-
-// Ползунок: дорожка тонкая и по центру, ручка — во всю высоту. Попасть в тонкую
-// полоску мышью трудно, а ловит нажатие весь элемент.
-void DrawSlider(const ElementView& v, const UIRect& r, float scale, glm::vec3 rgb,
-                UIRenderer& ui) {
-    const float track = glm::max(r.h * 0.28f, 4.0f);
-    const UIRect bar{r.x, r.y + (r.h - track) * 0.5f, r.w, track};
-    if (v.FillPart) {
-        FillRect(*v.FillPart, bar, track * 0.5f, rgb, AlphaOf(v, v.FillPart->Color.a), ui);
-    }
-    const float t = RangeFraction(*v.RangePart);
-    const glm::vec4 accent = AccentColor(v);
-    const glm::vec3 fill = StateTint(v, {accent.r, accent.g, accent.b});
-    const float fillA = AlphaOf(v, accent.a);
-    if (t > 0.0f && fillA > 0.0f) {
-        ui.RoundedRect(bar.x, bar.y, bar.w * t, bar.h, fill, fillA, track * 0.5f);
-    }
-    const float knob = r.h * 0.5f;
-    const float kx = r.x + (r.w - knob * 2.0f) * t + knob;
-    ui.Circle(kx, r.y + r.h * 0.5f, knob, fill, AlphaOf(v, 1.0f));
-    if (v.FillPart && v.FillPart->BorderThickness > 0.0f && v.FillPart->BorderColor.a > 0.0f) {
-        const glm::vec4& b = v.FillPart->BorderColor;
-        ui.Ring(kx, r.y + r.h * 0.5f, knob, v.FillPart->BorderThickness * scale, {b.r, b.g, b.b},
-                AlphaOf(v, b.a));
-    }
-}
-
-// Полоса: заполнение растёт в свою сторону. Направление — не украшение:
-// вертикальная шкала (мана сбоку, столбик громкости) без него невозможна.
-void DrawBar(const ElementView& v, const UIRect& r, float scale, UIRenderer& ui) {
-    const Bar& bar = *v.BarPart;
-    const float t = glm::clamp(BarShown(bar), 0.0f, 1.0f);
-    const float alpha = AlphaOf(v, bar.FillColor.a);
-    if (t <= 0.0f || alpha <= 0.0f) return;
-
-    // Заполнение с небольшим внутренним отступом, радиус — согласованный.
-    const float pad = glm::min(2.0f, glm::min(r.w, r.h) * 0.15f);
-    const float rounding = v.FillPart ? glm::max(v.FillPart->Rounding * scale - pad, 0.0f) : 0.0f;
-    const UIRect inner{r.x + pad, r.y + pad, r.w - pad * 2.0f, r.h - pad * 2.0f};
-    UIRect fillRect = inner;
-    switch (bar.Grow) {
-        case Bar::Direction::LeftToRight: fillRect.w = inner.w * t; break;
-        case Bar::Direction::RightToLeft:
-            fillRect.w = inner.w * t;
-            fillRect.x = inner.x + inner.w - fillRect.w;
-            break;
-        case Bar::Direction::BottomToTop:
-            fillRect.h = inner.h * t;
-            fillRect.y = inner.y + inner.h - fillRect.h;
-            break;
-        case Bar::Direction::TopToBottom: fillRect.h = inner.h * t; break;
-    }
-    const glm::vec3 fill{bar.FillColor.r, bar.FillColor.g, bar.FillColor.b};
-    // Заполнение всегда с градиентом к более тёмному краю: плоская полоса
-    // выглядит нарисованной в редакторе, а не «налитой».
-    ui.GradientRect(fillRect.x, fillRect.y, fillRect.w, fillRect.h,
-                    glm::mix(fill, glm::vec3(1.0f), 0.22f), fill * 0.78f, alpha, alpha, rounding);
-}
-
-// Смещение строки по горизонтали внутри отведённой полосы.
-float AlignX(Label::Align align, float left, float avail, float textWidth) {
-    switch (align) {
-        case Label::Align::Center: return left + (avail - textWidth) * 0.5f;
-        case Label::Align::End: return left + avail - textWidth;
-        default: return left;
-    }
-}
-
-float AlignY(Label::Align align, const UIRect& r, float blockH) {
-    switch (align) {
-        case Label::Align::Start: return r.y;
-        case Label::Align::End: return r.y + r.h - blockH;
-        default: return r.y + (r.h - blockH) * 0.5f;
-    }
-}
-
-// Что показывать в поле ввода: содержимое, подсказку или точки пароля.
-std::string InputShownText(const ElementView& v, bool& isPlaceholder) {
-    const std::string& text = v.LabelPart ? v.LabelPart->Text : std::string();
-    isPlaceholder = text.empty();
-    if (isPlaceholder) return v.InputPart->Placeholder;
-    return v.InputPart->Password ? MaskText(text) : text;
-}
-
+// Теперь движок не знает ни одной части. Он перебирает реестр (UIPart.h) в
+// порядке Order и даёт каждой нарисовать себя в прямоугольнике элемента; вторым
+// проходом идут слои «поверх всего» (рамка подложки). Своя часть — файл рядом с
+// UIParts.cpp, ни строки правок здесь.
+//
 // scale — множитель холста (см. Canvas): раскладка считается в ОПОРНЫХ
-// единицах, а рисуется в экранных. Прямоугольник сюда приходит уже переведённым,
-// а всё, что задано числом рядом с ним — скругление, рамка, тень, кегль
-// шрифта, отступы, — обязано переводиться здесь. Иначе на 4K панель станет
-// вдвое больше, а её рамка и надпись останутся прежними.
-void DrawElement(const ElementView& v, const UIRect& r, float scale, UIRenderer& ui) {
-    // --- Подложка -----------------------------------------------------------
-    const glm::vec4 fillColor = v.FillPart ? v.FillPart->Color : glm::vec4(0.0f);
-    const glm::vec3 baseRgb =
-        v.ImagePart ? glm::vec3(v.ImagePart->Tint) : glm::vec3(fillColor);
-    const glm::vec3 tinted = StateTint(v, baseRgb);
-    const float rounding = v.FillPart ? v.FillPart->Rounding * scale : 0.0f;
-    const float border = v.FillPart ? v.FillPart->BorderThickness * scale : 0.0f;
+// единицах, а рисуется в экранных. Прямоугольник приходит уже переведённым, а
+// всё, что задано числом рядом с ним (скругление, рамка, кегль), переводит
+// сама часть — иначе на 4K панель станет вдвое больше, а её рамка останется.
+void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, float scale,
+                 float alpha, UIRenderer& ui) {
+    const Interactable* act = reg.try_get<Interactable>(e);
 
-    // Тень — под всем остальным, поэтому первой.
-    if (v.FillPart && v.FillPart->ShadowSize > 0.0f) {
-        ui.RectShadow(r.x, r.y, r.w, r.h, rounding, v.FillPart->ShadowSize * scale);
+    PartDrawContext c;
+    c.Reg = &reg;
+    c.Entity = e;
+    c.Rect = r;
+    c.Scale = scale;
+    c.Alpha = alpha;
+    c.Ui = &ui;
+    // Состояние — у ЭЛЕМЕНТА, а не у части: нажали не «подложку», а элемент, и
+    // потемнеть должны все его слои разом.
+    c.Hovered = act && act->Runtime.Hovered;
+    c.Pressed = act && act->Runtime.Pressed;
+    c.Focused = act && act->Runtime.Focused;
+    c.Enabled = !act || act->Enabled;
+
+    for (const PartType& p : Parts()) {
+        if (!p.Draw || !p.Has || !p.Has(reg, e)) continue;
+        c.Data = p.Get(reg, e);
+        p.Draw(c);
     }
-
-    // ЧТО ИМЕННО занимает фон элемента, решается по его частям — и это
-    // единственное место, где такой выбор вообще делается.
-    const bool toggle = v.RangePart && v.RangePart->Toggle;
-    const bool slider = v.RangePart && !v.RangePart->Toggle;
-    if (toggle) {
-        DrawToggle(v, r, scale, tinted, ui);
-    } else if (slider) {
-        DrawSlider(v, r, scale, tinted, ui);
-    } else if (v.ImagePart) {
-        DrawImage(v, r, scale, tinted, ui);
-    } else if (v.FillPart) {
-        FillRect(*v.FillPart, r, rounding, tinted, AlphaOf(v, fillColor.a), ui);
+    for (const PartType& p : Parts()) {
+        if (!p.DrawOver || !p.Has || !p.Has(reg, e)) continue;
+        c.Data = p.Get(reg, e);
+        p.DrawOver(c);
     }
-
-    // Полоса рисуется ПОВЕРХ подложки — Fill + Bar это и значит. У диапазона
-    // своя отрисовка значения (дорожка, галочка), и вторая шкала поверх неё
-    // была бы тем же числом, нарисованным дважды: у ползунка полоса участвует
-    // только цветом (см. AccentColor).
-    if (v.BarPart && !v.RangePart) DrawBar(v, r, scale, ui);
-
-    // Рамка — по всему элементу; у галки она уже нарисована вокруг квадратика.
-    if (!toggle && border > 0.0f && v.FillPart->BorderColor.a > 0.0f) {
-        const glm::vec4& b = v.FillPart->BorderColor;
-        ui.RoundedRectOutline(r.x, r.y, r.w, r.h, rounding, border, {b.r, b.g, b.b},
-                              AlphaOf(v, b.a));
-    }
-
-    // --- Значок -------------------------------------------------------------
-    //
-    // Один в элементе — занимает его целиком; рядом с чем-то ещё — квадрат у
-    // левого края, и текст начинается за ним. Так «значок + подпись + шкала»
-    // остаётся ОДНИМ элементом, а не тремя сущностями, которые надо держать
-    // выровненными вручную.
-    const float padX = (v.LabelPart ? v.LabelPart->PadX : 8.0f) * scale;
-    float textLeft = r.x + padX;
-    if (v.IconPart && !v.IconPart->Name.empty() && v.IconPart->Color.a > 0.0f) {
-        const glm::vec4& c = v.IconPart->Color;
-        const glm::vec3 rgb{c.r, c.g, c.b};
-        const float alpha = AlphaOf(v, c.a);
-        const bool alone = !v.LabelPart && !v.ImagePart && !v.BarPart && !v.RangePart;
-        if (alone) {
-            const float side =
-                v.IconPart->Size > 0.0f ? v.IconPart->Size * scale : glm::min(r.w, r.h);
-            DrawIcon(ui, v.IconPart->Name, r.x + (r.w - side) * 0.5f, r.y + (r.h - side) * 0.5f,
-                     side, rgb, alpha);
-        } else {
-            const float pad = glm::min(4.0f, r.h * 0.18f);
-            const float side = v.IconPart->Size > 0.0f ? v.IconPart->Size * scale
-                                                       : glm::max(r.h - pad * 2.0f, 4.0f);
-            DrawIcon(ui, v.IconPart->Name, r.x + pad, r.y + pad, side, rgb, alpha);
-            textLeft = r.x + pad * 2.0f + side;
-        }
-    }
-    // У галки текст начинается за квадратиком — иначе подпись легла бы на него.
-    if (toggle) textLeft = glm::max(textLeft, ToggleBox(r).x + ToggleBox(r).w + padX);
-
-    if (!v.LabelPart) return;
-    const Label& label = *v.LabelPart;
-    const float textScale = label.Scale * scale;
-
-    // --- Поле ввода ---------------------------------------------------------
-    if (v.InputPart) {
-        bool placeholder = false;
-        const std::string draw = InputShownText(v, placeholder);
-        const glm::vec3 rgb{label.Color.r, label.Color.g, label.Color.b};
-        const float textY = r.y + (r.h - ui.TextHeight(textScale)) * 0.5f;
-        if (!draw.empty()) {
-            // Подсказка бледнее содержимого — иначе пустое поле выглядит
-            // заполненным, и человек стирает то, чего не вводил.
-            ui.Text(textLeft, textY, textScale, rgb, draw,
-                    AlphaOf(v, label.Color.a) * (placeholder ? 0.45f : 1.0f));
-        }
-        // Курсор мигает только в фокусе и только когда поле включено.
-        if (v.Focused() && v.Enabled()) {
-            const int caret = glm::clamp(v.Act->Runtime.Caret, 0, (int)label.Text.size());
-            const std::string head = label.Text.substr(0, (size_t)caret);
-            const std::string before = v.InputPart->Password ? MaskText(head) : head;
-            const float cx = textLeft + ui.MeasureText(before, textScale);
-            // Полсекунды виден, полсекунды нет — привычный ритм; после каждой
-            // правки счётчик сбрасывается, чтобы курсор не пропал ровно тогда,
-            // когда на него смотрят.
-            if (std::fmod(v.Act->Runtime.CaretBlink, 1.0f) < 0.5f) {
-                const float ch = ui.TextHeight(textScale) * 1.15f;
-                ui.Rect(cx, r.y + (r.h - ch) * 0.5f, glm::max(textScale, 1.0f), ch, rgb,
-                        AlphaOf(v, label.Color.a));
-            }
-        }
-        return; // общий путь текста ниже полю ввода не нужен
-    }
-
-    // --- Надпись ------------------------------------------------------------
-    if (label.Text.empty() || label.Color.a <= 0.0f) return;
-    const glm::vec3 textRgb{label.Color.r, label.Color.g, label.Color.b};
-    const float textA = AlphaOf(v, label.Color.a);
-    const float right = r.x + r.w - padX;
-    const float avail = glm::max(right - textLeft, 1.0f);
-
-    std::vector<std::string> lines;
-    if (label.Wrap) {
-        lines = WrapLines(label.Text, avail, textScale, ui);
-    } else if (label.Text.find('\n') != std::string::npos) {
-        lines = WrapLines(label.Text, 0.0f, textScale, ui); // только по явным \n
-    } else {
-        lines.push_back(label.Text);
-    }
-
-    // Однострочный текст центрируется по высоте элемента — иначе подпись рядом
-    // с иконкой висит выше неё, и строка «иконка + текст» выглядит
-    // развалившейся. Многострочный блок выравнивается целиком.
-    const float lineH = ui.LineHeight(textScale);
-    const float blockH = lineH * (float)(lines.size() - 1) + ui.TextHeight(textScale);
-    float textY = AlignY(label.Vertical, r, blockH);
-
-    // Перенесённый текст ОБРЕЗАЕТСЯ своим элементом. Он переносился под эту
-    // ширину — значит, и по высоте обязан остаться внутри: абзац, вылезший из
-    // панели на фон, выглядит хуже, чем обрезанный по её краю, и главное —
-    // сразу виден как ошибка вёрстки, а не как «так и было задумано».
-    const bool clipText = label.Wrap && blockH > r.h;
-    if (clipText) ui.PushClipRect(r.x, r.y, r.w, r.h);
-    for (const std::string& line : lines) {
-        if (!line.empty()) {
-            const float x = AlignX(label.Horizontal, textLeft, avail,
-                                   ui.MeasureText(line, textScale));
-            ui.Text(x, textY, textScale, textRgb, line, textA);
-        }
-        textY += lineH;
-    }
-    if (clipText) ui.PopClipRect();
 }
 
 // --- Один решатель на три задачи ------------------------------------------
@@ -606,11 +169,6 @@ void DrawElement(const ElementView& v, const UIRect& r, float scale, UIRenderer&
 // попадание и ввод читают её результат.
 struct Solved {
     entt::entity Entity;
-    // Части элемента, собранные ОДИН раз за проход. Хранятся здесь, а не
-    // выбираются заново у каждого потребителя: отрисовка, попадание курсором и
-    // ввод смотрят на одно и то же, и собрать это трижды значило бы снова
-    // завести три расходящихся взгляда на один элемент.
-    ElementView View;
     UIRect Rect;
     UIRect Clip;      // окно обрезки (нулевая ширина/высота — не обрезан)
     bool Clipped = false;
@@ -666,8 +224,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     }
 
     const size_t self = out.size();
-    out.push_back(Solved{ent, ViewOf(reg, ent, myAlpha), r, clip, clipped, myAlpha,
-                         myInteractive});
+    out.push_back(Solved{ent, r, clip, clipped, myAlpha, myInteractive});
     out.back().Visible = t.Visible;
 
     std::vector<entt::entity> kids = SortedUIChildren(scene, ent);
@@ -827,16 +384,17 @@ bool PointIn(const UIRect& r, glm::vec2 p) {
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
     SAGE_PROFILE("Интерфейс сцены");
     const std::vector<Solved> items = SolveScene(scene, &ui, screenW, screenH);
+    const entt::registry& reg = scene.Registry();
 
     for (const Solved& it : items) {
         if (it.Clipped) {
             if (it.Clip.w <= 0.0f || it.Clip.h <= 0.0f) continue; // полностью обрезан
             ui.PushClipRect(it.Clip.x, it.Clip.y, it.Clip.w, it.Clip.h);
         }
-        // Прозрачность группы едет внутри вида и множится на КАЖДЫЙ цвет: панель
-        // с полупрозрачным фоном не должна становиться непрозрачной от того, что
-        // группу показали наполовину.
-        DrawElement(it.View, it.Rect, it.Scale, ui);
+        // Прозрачность группы идёт отдельным числом и множится на КАЖДЫЙ цвет:
+        // панель с полупрозрачным фоном не должна становиться непрозрачной от
+        // того, что группу показали наполовину.
+        DrawElement(reg, it.Entity, it.Rect, it.Scale, it.Alpha, ui);
         if (it.Clipped) ui.PopClipRect();
     }
 }

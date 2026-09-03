@@ -74,6 +74,26 @@ def source_files():
                 yield os.path.join(d, name)
 
 
+# Строки, которые ДВИЖОК отдаёт редактору на показ: названия частей элемента
+# интерфейса, их поля и подсказки (см. SAGE_UI_TEXT в sage/ui/UIPart.h).
+# Редактор рисует их через T(), но ключа-литерала у него нет — он приходит
+# указателем. Без этого списка перевод новой части молча не появлялся бы, и
+# заметить это можно было бы только глазами, открыв инспектор по-русски.
+ENGINE_TEXT_FILES = [os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UIParts.cpp')]
+ENGINE_TEXT = re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
+
+
+def engine_keys():
+    keys = set()
+    for path in ENGINE_TEXT_FILES:
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding='utf-8') as f:
+            for m in ENGINE_TEXT.finditer(f.read()):
+                keys.add(m.group(1))
+    return keys
+
+
 def collect():
     """(необёрнутые, ключи из T())"""
     unwrapped = []
@@ -135,6 +155,8 @@ def encode_c(text):
 def main():
     unwrapped, keys = collect()
     keys = {decode(k) for k in keys}
+    # Плюс строки, которые движок отдаёт редактору на показ (SAGE_UI_TEXT).
+    keys |= {decode(k) for k in engine_keys()}
     with open(CATALOG, encoding='utf-8') as f:
         strings = json.load(f).get('strings', {})
 
