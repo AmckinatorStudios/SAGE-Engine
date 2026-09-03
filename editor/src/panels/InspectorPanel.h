@@ -111,6 +111,8 @@ private:
     bool DrawAnchorPicker(UIAnchor& anchor);
     // Серое пояснение с переносом строк (см. пояснение в .cpp).
     static void HintWrapped(const char* fmt, ...);
+    // Солнце сцены: азимут/высота и диск в небе — на самом объекте (см. .cpp).
+    static void DrawSunSection(EditorHost& host, GameObject obj);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
     char m_addComponentFilter[64] = ""; // поиск в списке компонентов
     bool m_addComponentFocus = false;   // поставить курсор в поиск при открытии

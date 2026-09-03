@@ -1,5 +1,7 @@
 #include "sage/net/NetHost.h"
 
+#include <algorithm>
+
 #include "sage/core/Log.h"
 
 namespace sage::net {
@@ -42,9 +44,11 @@ constexpr double kConnectRetry = 0.3; // повтор ConnectRequest, сек
 bool NetServer::Start(uint16_t port, int maxClients) {
     Stop();
     if (!m_socket.Open(port)) return false;
-    m_maxClients = maxClients;
+    // Потолок — 255, а не сколько попросят: id уходит на провод одним байтом,
+    // и 256-й клиент получил бы чужой номер вместо отказа.
+    m_maxClients = std::max(1, std::min(maxClients, 255));
     LOG_INFO("Net") << "Сервер слушает UDP-порт " << m_socket.LocalPort()
-                    << " (максимум клиентов: " << maxClients << ")";
+                    << " (максимум клиентов: " << m_maxClients << ")";
     return true;
 }
 
@@ -79,8 +83,13 @@ void NetServer::Update(double now) {
                 SendBare(m_socket, from, PacketType::ConnectDeny);
                 continue;
             }
+            const int newId = AllocateClientId();
+            if (newId == 0) {
+                SendBare(m_socket, from, PacketType::ConnectDeny);
+                continue;
+            }
             auto client = std::make_unique<Client>();
-            client->Id = m_nextClientId++;
+            client->Id = newId;
             client->Conn.Reset(from, now);
             uint8_t id = (uint8_t)client->Id;
             SendBare(m_socket, from, PacketType::ConnectAccept, &id, 1);
@@ -117,6 +126,21 @@ void NetServer::Update(double now) {
         m_events.push_back({NetEvent::Type::ClientDisconnected, it->second->Id, {}});
         m_clients.erase(it);
     }
+}
+
+int NetServer::AllocateClientId() const {
+    // Наименьший свободный, а не следующий по счёту: id занят ровно теми, кто
+    // сейчас подключён, поэтому вышедший клиент возвращает свой номер в оборот
+    // и одним байтом на проводе они не кончаются (см. заголовок).
+    for (int id = 1; id <= 255; ++id) {
+        bool taken = false;
+        for (const auto& [addr, client] : m_clients) {
+            (void)addr;
+            if (client->Id == id) { taken = true; break; }
+        }
+        if (!taken) return id;
+    }
+    return 0;
 }
 
 bool NetServer::Send(int clientId, const void* data, size_t bytes, bool reliable) {

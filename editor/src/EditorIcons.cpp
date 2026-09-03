@@ -490,6 +490,21 @@ bool Shape(const Pen& p, const char* n) {
         p.Line(0.125f, 0.5f, 0.875f, 0.5f, 0.05f);
         return true;
     }
+    // Шестерня — настройки. Зубья считаются, а не выписываются: восемь
+    // одинаковых лучей от руки разъезжаются по углу, и на 16 пикселях это
+    // видно как «мятая» иконка.
+    if (is("gear")) {
+        constexpr int kTeeth = 8;
+        for (int i = 0; i < kTeeth; ++i) {
+            const float a = (float)i * (6.2831853f / (float)kTeeth);
+            const float ca = std::cos(a), sa = std::sin(a);
+            p.Line(0.5f + ca * 0.24f, 0.5f + sa * 0.24f,
+                   0.5f + ca * 0.42f, 0.5f + sa * 0.42f, 0.11f);
+        }
+        p.Circle(0.5f, 0.5f, 0.26f, 0.10f);
+        p.Circle(0.5f, 0.5f, 0.10f, 0.08f);
+        return true;
+    }
 
     // --- Уровни сообщений (цвет несёт смысл наравне с формой) ---
     // Предупреждение и ошибка — ОДНА СЕМЬЯ со «справкой» и «вопросом»: контур
@@ -616,7 +631,7 @@ const char* const kNames[] = {
     "physics",
     "folder", "file", "scene", "material", "project", "prefab", "texture", "shader", "audio",
     "model",
-    "up", "refresh", "folder-plus", "search", "code", "question", "layout",
+    "up", "refresh", "folder-plus", "search", "code", "question", "layout", "gear",
     "warn", "error", "info", "debug",
     "trash", "copy", "save", "open", "plus", "eye", "lock",
 };

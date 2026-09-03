@@ -48,9 +48,9 @@
 #include "panels/GamePanel.h"
 #include "panels/AssetsPanel.h"
 #include "panels/LauncherPanel.h"
-#include "panels/LightingPanel.h"
+#include "panels/EnvironmentPanel.h"
 #include "panels/UIToolsPanel.h"
-#include "panels/ToolbarPanel.h"
+#include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/DialogsPanel.h"
 
@@ -195,6 +195,27 @@ public:
 
     // --- EditorHost: панель Game ---
     void ShowSettingsWindow() override { m_showSettings = true; }
+    bool& PanelVisible(EditorPanel panel) override {
+        switch (panel) {
+            case EditorPanel::Hierarchy:   return m_showHierarchy;
+            case EditorPanel::Inspector:   return m_showInspector;
+            case EditorPanel::Environment: return m_showEnvironment;
+            case EditorPanel::Assets:      return m_showAssets;
+            case EditorPanel::Console:     return m_showConsole;
+            case EditorPanel::Code:        return m_showCode;
+            case EditorPanel::Profiler:    return m_showProfiler;
+            case EditorPanel::Game:        return m_showGame;
+            case EditorPanel::Viewport:    return m_showViewport;
+            case EditorPanel::UITools:     return m_showUITools;
+            case EditorPanel::Settings:    return m_showSettings;
+            default:                       return m_showViewport;
+        }
+    }
+    std::string CurrentSceneName() const override {
+        return m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
+    }
+    bool SceneDirty() const override { return m_sceneDirty; }
+
     uint64_t GameTexture() const override { return m_renderer.GameTexture(); }
     void SetGameViewportSize(int w, int h) override { m_renderer.SetGameSize(w, h); }
     bool HasPrimaryCamera() override;
@@ -337,7 +358,7 @@ private:
     // подсказка на пустом доке — возвращают всё одним действием.
     bool m_showHierarchy = true;
     bool m_showInspector = true;
-    bool m_showLighting = true;
+    bool m_showEnvironment = true;
     // Панель «Вёрстка» — по умолчанию закрыта: она нужна, только когда собирают
     // интерфейс, а места занимает как инспектор. Открывается вместе с режимом
     // вёрстки (клавиша U) и через меню Window.
@@ -384,9 +405,9 @@ private:
     // редактор в процессе один.
     static std::function<void(const std::vector<std::string>&)> s_dropSink;
     LauncherPanel m_launcher;
-    LightingPanel m_lighting;
+    EnvironmentPanel m_environment;
     UIToolsPanel m_uiToolsPanel;
-    ToolbarPanel m_toolbar;
+    TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)
     bool m_launcherRequested = false; // Window > Project Launcher

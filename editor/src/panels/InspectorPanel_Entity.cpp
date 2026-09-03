@@ -24,6 +24,7 @@
 
 #include "EditorHost.h"
 #include "sage/core/Log.h"
+#include "sage/ecs/LightSystem.h"
 #include <algorithm>
 
 #include "AssetSlot.h"
@@ -44,6 +45,88 @@
 #include "../Localization.h"
 
 namespace fs = std::filesystem;
+
+// --- СОЛНЦЕ СЦЕНЫ ----------------------------------------------------------
+//
+// Солнце — это ОБЪЕКТ, а не строчка в отдельном окне. Раньше его направление и
+// цвет правились в панели Lighting, и это было не просто неудобно, а неверно:
+// направленный свет-сущность ПЕРЕКРЫВАЕТ солнце из настроек сцены (см.
+// ecs::CollectLighting), поэтому у сцены с объектом-солнцем те ползунки молча
+// не делали НИЧЕГО. Человек крутил направление и смотрел на неподвижные тени.
+//
+// Теперь всё, что относится к солнцу, лежит здесь — на объекте:
+//   • куда светит (поворот объекта, плюс азимут и высота, которыми это удобно
+//     задавать словами «утро» и «полдень», а не тремя углами Эйлера);
+//   • диск в небе — его размер и цвет: небо рисует солнце ТАМ ЖЕ, куда светит
+//     этот источник (см. CelestialsFromEnvironment), и держать их порознь
+//     значило бы уметь развести свет и его источник в разные стороны.
+void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
+    Scene& scene = host.CurrentScene();
+    const entt::entity sun = sage::ecs::FindSunEntity(scene);
+    const bool isSun = sun == obj.Entity();
+
+    if (!isSun) {
+        ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "%s",
+                           T("Not the scene's sun: a directional light with a lower number in "
+                             "the hierarchy is already the sun, and only one takes part in "
+                             "the frame."));
+        if (sun != entt::null) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton(T("Show the sun"))) {
+                const IdComponent* id = scene.Registry().try_get<IdComponent>(sun);
+                if (id) host.SetSelectedId(id->Id);
+            }
+        }
+        return;
+    }
+
+    ImGui::SeparatorText(T("Sun of the scene"));
+    HintWrapped(T("This light IS the sun: it casts the cascaded shadows and it is where the "
+                  "procedural sky draws its disc. Point it by rotating the object, or by "
+                  "azimuth and elevation below."));
+
+    // Азимут и высота вместо трёх углов Эйлера. Так солнце и ставят: «с юга,
+    // низко» — это утро, «сверху» — полдень. Считаются из направления и
+    // записываются обратно поворотом объекта, поэтому гизмо во вьюпорте и эти
+    // два поля — одно и то же, а не два способа с разными результатами.
+    Transform& tr = obj.GetTransform();
+    const glm::vec3 fwd = sage::ecs::ForwardFromEuler(tr.Rotation);
+    const glm::vec3 toSun = -fwd;   // светит ОТТУДА, куда смотрит, со знаком минус
+    float elevation = glm::degrees(std::asin(glm::clamp(toSun.y, -1.0f, 1.0f)));
+    float azimuth = glm::degrees(std::atan2(toSun.x, toSun.z));
+
+    bool changed = false;
+    changed |= ImGui::SliderFloat(T("Elevation"), &elevation, -20.0f, 90.0f, "%.0f°");
+    host.TrackLastImGuiItem();
+    changed |= ImGui::SliderFloat(T("Azimuth"), &azimuth, -180.0f, 180.0f, "%.0f°");
+    host.TrackLastImGuiItem();
+    if (changed) {
+        const float e = glm::radians(elevation), a = glm::radians(azimuth);
+        const glm::vec3 dir(std::cos(e) * std::sin(a), std::sin(e), std::cos(e) * std::cos(a));
+        tr.Rotation = sage::ecs::EulerFromForward(-dir);   // светит ПРОТИВ направления на солнце
+    }
+
+    // Диск в небе. Живёт в настройках неба сцены, но правят его здесь: это
+    // внешность ЭТОГО источника, а не отдельное светило.
+    LightingEnvironment& env = scene.Lighting;
+    ImGui::BeginDisabled(!env.Skybox.Enabled || !env.Skybox.Celestials);
+    ImGui::ColorEdit3(T("Disc Colour"), &env.Skybox.SunColor.x); host.TrackLastImGuiItem();
+    ImGui::SliderFloat(T("Disc Size"), &env.Skybox.SunSize, 0.005f, 0.2f, "%.3f");
+    host.TrackLastImGuiItem();
+    ImGui::EndDisabled();
+    if (!env.Skybox.Enabled || !env.Skybox.Celestials) {
+        ImGui::TextDisabled("%s", T("The sky or its celestials are off — see Environment."));
+        // Кнопка прямо здесь, а не только адрес окна: две галки в другом окне —
+        // ровно тот путь, из-за которого «где настраивается солнце» и стало
+        // вопросом. Правка чужая (свойства сцены), поэтому со снимком undo.
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Turn on"))) {
+            host.PushUndoSnapshot();
+            env.Skybox.Enabled = true;
+            env.Skybox.Celestials = true;
+        }
+    }
+}
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.SelectedObject();
@@ -97,6 +180,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
+
     if (reg.all_of<LightComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
             const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)")};
@@ -124,10 +208,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             }
             if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();
             if (directional) {
-                HintWrapped(T("Sun: shines along the object's forward (-Z of its rotation) from "
-                              "infinity and has no range. Shadows are cascaded maps. "
-                              "The sun is the directional light with the lowest number in "
-                              "the hierarchy; a second one takes no part in the frame."));
+                DrawSunSection(host, obj);
             } else if (light->Kind == LightComponent::Type::Spot) {
                 HintWrapped(T("The cone shines along the object's forward (-Z of its rotation). "
                               "Its shadow is a separate map in the atlas: there are few, and they "

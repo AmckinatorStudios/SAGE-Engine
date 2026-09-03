@@ -50,6 +50,31 @@ inline glm::vec3 EulerFromForward(const glm::vec3& dir) {
     return glm::degrees(glm::vec3(pitch, yaw, 0.0f));
 }
 
+// Какая сущность СЕЙЧАС является солнцем сцены, или entt::null.
+//
+// Правило одно на весь движок и на редактор: солнце — направленный свет с
+// НАИМЕНЬШИМ номером объекта. Пока это правило жило только внутри
+// CollectLighting, редактор не мог ни показать «вот это солнце», ни
+// предупредить «а этот направленный свет в кадре не участвует» — и человек
+// крутил второй источник, глядя на неподвижную картинку.
+//
+// Порядок обхода ECS-view для выбора не годится: entt его не обещает и меняет
+// при удалении сущностей (см. комментарий в CollectLighting).
+inline entt::entity FindSunEntity(Scene& scene) {
+    entt::entity sun = entt::null;
+    int sunId = 0;
+    auto view = scene.Registry().view<LightComponent, Transform>();
+    for (auto e : view) {
+        if (view.get<LightComponent>(e).Kind != LightComponent::Type::Directional) continue;
+        const IdComponent* id = scene.Registry().try_get<IdComponent>(e);
+        const int candidate = id ? id->Id : 0;
+        if (sun != entt::null && candidate >= sunId) continue;
+        sun = e;
+        sunId = candidate;
+    }
+    return sun;
+}
+
 inline LightingEnvironment CollectLighting(Scene& scene) {
     LightingEnvironment env = scene.Lighting;
     // Направленный свет-сущность ПЕРЕКРЫВАЕТ солнце из настроек сцены, а не

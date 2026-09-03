@@ -341,7 +341,7 @@ void EditorLayer::OnAttach() {
     // «Все панели закрыты» с кнопкой возврата.
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
         m_launcher.Dismiss();
-        m_showHierarchy = m_showInspector = m_showLighting = m_showUITools = false;
+        m_showHierarchy = m_showInspector = m_showEnvironment = m_showUITools = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
         m_showCode = m_showProfiler = false;
     }
@@ -694,7 +694,7 @@ void EditorLayer::OnRender() {
     // возвращалась бы сама собой на следующем кадре, и крестик не работал бы.
     if (m_showHierarchy) m_hierarchy.Draw(*this, &m_showHierarchy);
     if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
-    if (m_showLighting) m_lighting.Draw(*this, &m_showLighting);
+    if (m_showEnvironment) m_environment.Draw(*this, &m_showEnvironment);
     // Режим вёрстки включили — показываем инструменты. Только по ФРОНТУ:
     // иначе закрытую крестиком панель возвращало бы каждым кадром.
     if (m_uiEditMode && !m_uiEditModePrev) {

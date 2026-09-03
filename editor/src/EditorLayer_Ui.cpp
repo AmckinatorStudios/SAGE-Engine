@@ -232,13 +232,13 @@ void EditorLayer::DrawStatusBar(float height) {
 }
 
 bool EditorLayer::AnyPanelVisible() const {
-    return m_showHierarchy || m_showInspector || m_showLighting || m_showUITools ||
+    return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUITools ||
            m_showViewport || m_showGame ||
            m_showConsole || m_showAssets || m_showCode || m_showProfiler;
 }
 
 void EditorLayer::ShowAllPanels() {
-    m_showHierarchy = m_showInspector = m_showLighting = true;
+    m_showHierarchy = m_showInspector = m_showEnvironment = true;
     // Панель вёрстки в «показать все» НЕ входит: она инструмент под задачу, а
     // не часть постоянной раскладки, и открывать её вместе со всем остальным
     // значит отдать ей место у человека, который сейчас собирает сцену.
@@ -310,9 +310,14 @@ void EditorLayer::DrawDockspaceAndMenu() {
     ImGui::Begin("##SageEditorHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
-    // Тулбар — горизонтальный бар сразу под меню-баром (инструменты гизмо,
-    // Play, режим рендера). Рисуется ДО dockspace, чтобы занять свою полосу.
-    m_toolbar.Draw(*this, kToolbarHeight);
+    // Верхняя панель — полоса сразу под меню-баром: Play/Pause/Stop и кнопки
+    // окон. Рисуется ДО dockspace, чтобы занять свою полосу.
+    //
+    // ИНСТРУМЕНТОВ здесь больше нет: гизмо, привязка, показ и раскладка видов
+    // переехали виджетом ПОВЕРХ вьюпорта (ViewportTools.cpp) — туда, где ими
+    // работают. Раньше за сеткой и шагом привязки мышь ездила от объекта к
+    // верхнему краю окна и обратно.
+    m_topBar.Draw(*this, kToolbarHeight);
 
     ImGuiID dockspaceId = ImGui::GetID("SageDockSpace");
     // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)
@@ -569,19 +574,26 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // Каждая панель — переключатель. Это единственный путь назад после
             // крестика на вкладке, поэтому здесь перечислены ВСЕ панели, а не
             // только служебные.
-            ImGui::MenuItem(T("Hierarchy"), nullptr, &m_showHierarchy);
-            ImGui::MenuItem(T("Inspector"), nullptr, &m_showInspector);
-            ImGui::MenuItem(T("Viewport"), nullptr, &m_showViewport);
-            ImGui::MenuItem(T("Game"), nullptr, &m_showGame);
-            ImGui::MenuItem(T("Assets"), nullptr, &m_showAssets);
-            ImGui::MenuItem(T("Console"), nullptr, &m_showConsole);
-            ImGui::MenuItem(T("Lighting"), nullptr, &m_showLighting);
-            ImGui::MenuItem(T("UI Layout"), nullptr, &m_showUITools);
-            ImGui::MenuItem(T("Code"), nullptr, &m_showCode);
-            ImGui::MenuItem(T("Profiler"), nullptr, &m_showProfiler);
+            //
+            // Флаги берутся через PanelVisible(EditorPanel) — тем же путём, что
+            // и у кнопок верхней панели. Два списка полей рядом однажды
+            // разъедутся: кнопка будет открывать одно окно, а галка меню —
+            // отмечать другое.
+            ImGui::MenuItem(T("Hierarchy"), nullptr, &PanelVisible(EditorPanel::Hierarchy));
+            ImGui::MenuItem(T("Inspector"), nullptr, &PanelVisible(EditorPanel::Inspector));
+            ImGui::MenuItem(T("Viewport"), nullptr, &PanelVisible(EditorPanel::Viewport));
+            ImGui::MenuItem(T("Game"), nullptr, &PanelVisible(EditorPanel::Game));
+            ImGui::MenuItem(T("Assets"), nullptr, &PanelVisible(EditorPanel::Assets));
+            ImGui::MenuItem(T("Console"), nullptr, &PanelVisible(EditorPanel::Console));
+            // «Освещение» стало «Средой»: в окне остались небо, воздух и
+            // окружающий свет, а сами источники света — на объектах сцены.
+            ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
+            ImGui::MenuItem(T("UI Layout"), nullptr, &PanelVisible(EditorPanel::UITools));
+            ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanel::Code));
+            ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
-            ImGui::MenuItem(T("Settings..."), nullptr, &m_showSettings);
+            ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanel::Settings));
 
             // Язык интерфейса. Здесь, а не в окне Settings: то окно правит
             // настройки ИГРЫ и сохраняется в проект, а язык — настройка

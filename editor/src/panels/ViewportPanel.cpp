@@ -79,45 +79,6 @@ glm::mat4 ViewportPanel::OrthoViewMatrix(ViewKind kind, const glm::vec3& center)
     }
 }
 
-void ViewportPanel::DrawViewToolbar(EditorHost& host) {
-    (void)host;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 3));
-    ImGui::BeginChild("##viewbar", ImVec2(0, ImGui::GetFrameHeight() + 8), false);
-
-    const char* layouts[] = {T("Single view"), T("Two columns"), T("Four views")};
-    int layout = (int)m_layout;
-    ImGui::SetNextItemWidth(150);
-    if (ImGui::Combo("##layout", &layout, layouts, IM_ARRAYSIZE(layouts))) {
-        m_layout = (Layout)layout;
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Viewport layout.\n"
-          "Each view is a full scene pass,\n"
-          "so extra views cost frames."));
-    }
-
-    // Вид активного слота: перспектива или одна из ортогональных проекций.
-    ImGui::SameLine();
-    const char* kinds[] = {T("Perspective"), T("Top"), T("Front"), T("Side")};
-    int kind = (int)m_kinds[m_activeSlot];
-    ImGui::SetNextItemWidth(140);
-    if (ImGui::Combo("##kind", &kind, kinds, IM_ARRAYSIZE(kinds))) {
-        m_kinds[m_activeSlot] = (ViewKind)kind;
-    }
-
-    ImGui::SameLine();
-    if (ImGui::SmallButton(T("Show all"))) {
-        // Вписываем сцену в ортогональные виды: без этого человек, отъехавший
-        // колесом далеко, обратно уже не найдёт дорогу.
-        for (OrthoView& v : m_ortho) { v.Center = glm::vec3(0.0f); v.Height = 20.0f; }
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled(T("| active: %s"), ViewKindName(m_kinds[m_activeSlot]));
-
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
-}
-
 void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Раскладка из переменной окружения — для headless-прогонов и скриншотов
     // документации: кликнуть в комбо там некому, а проверять раскладку надо.
@@ -138,7 +99,14 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin(T("Viewport" "###Viewport"), open);
 
-    DrawViewToolbar(host);
+    // Мышь НА ВИДЖЕТЕ инструментов? Ректом прошлого кадра — сам виджет
+    // рисуется в конце, поверх видов, а знать об этом надо здесь: клик по его
+    // кнопке не должен заодно выбирать объект под ней и хватать гизмо.
+    {
+        const ImVec2 mp = ImGui::GetMousePos();
+        m_toolsHovered = mp.x >= m_toolsMin.x && mp.x <= m_toolsMax.x &&
+                         mp.y >= m_toolsMin.y && mp.y <= m_toolsMax.y;
+    }
 
     // --- Раскладка -----------------------------------------------------------
     //
@@ -149,6 +117,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // на вопрос «куда я тащу», и выбрать между ними нечем.
     const int viewCount = m_layout == Layout::Single ? 1 : (m_layout == Layout::TwoColumns ? 2 : 4);
     const ImVec2 full = ImGui::GetContentRegionAvail();
+    // Левый верхний угол области видов: к нему прижимается виджет инструментов
+    // (он рисуется в конце кадра, когда курсор ImGui уже уехал).
+    const ImVec2 viewsOrigin = ImGui::GetCursorScreenPos();
     const float gap = 2.0f;
     ImVec2 cell = full;
     if (viewCount == 2) cell.x = (full.x - gap) * 0.5f;
@@ -240,8 +211,10 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
 
         // Подпись вида поверх картинки и рамка активного: без них в четырёх
         // одинаковых серых прямоугольниках невозможно понять, где что.
+        // Подпись — ВНИЗУ слева, а не вверху: сверху теперь лежит виджет
+        // инструментов и накрывал бы её в главном виде.
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddText(ImVec2(slotPos[i].x + 8, slotPos[i].y + 6),
+        dl->AddText(ImVec2(slotPos[i].x + 8, slotPos[i].y + cell.y - ImGui::GetTextLineHeight() - 6),
                     i == m_activeSlot ? IM_COL32(255, 210, 120, 230) : IM_COL32(190, 195, 205, 190),
                     ViewKindName(kind));
         if (viewCount > 1 && i == m_activeSlot) {
@@ -293,7 +266,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     const bool perspective = m_kinds[m_activeSlot] == ViewKind::Perspective;
     // «Мышь у активного вида» — с учётом захвата: иначе гизмо, начатое в одном
     // виде, продолжало тянуться в соседнем, стоило курсору пересечь границу.
-    const bool hovered = slotOwnsMouse[m_activeSlot];
+    // Виджет инструментов ПЕРЕХВАТЫВАЕТ мышь — но только пока ничего не тянут:
+    // иначе полёт камеры или гизмо, начатые в сцене, обрывались бы на полпути,
+    // стоило курсору пройти над виджетом.
+    const bool toolsBlock = m_toolsHovered && m_dragSlot < 0;
+    const bool hovered = slotOwnsMouse[m_activeSlot] && !toolsBlock;
     const ImVec2 imgPos = slotPos[m_activeSlot];
     const ImVec2 avail = cell;
     // Размер буфера главного слота обновляется ВСЕГДА, а не только в перспективе:
@@ -371,6 +348,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     if (host.UIEditMode()) {
         m_uiCanvas.Draw(host, slotDrawList[m_activeSlot], imgPos, avail, (int)avail.x,
                         (int)avail.y, hovered && perspective);
+        DrawToolsOverlay(host, viewsOrigin);
         ImGui::End();
         ImGui::PopStyleVar();
         return;
@@ -392,6 +370,10 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Ортогональному виду нужна своя математика гизмо: с перспективной
     // ручки в нём тянутся не туда, куда едет объект.
     ImGuizmo::SetOrthographic(!perspective);
+    // Пока мышь на виджете инструментов, гизмо не слушает её вовсе: ImGuizmo
+    // считает попадание по голым координатам и об окнах ImGui не знает — без
+    // этого клик по кнопке «Повернуть» заодно хватал бы ручку под ней.
+    ImGuizmo::Enable(!toolsBlock);
     // Список отрисовки — ИМЕННО активного слота (см. slotDrawList выше).
     if (slotDrawList[m_activeSlot]) ImGuizmo::SetDrawlist(slotDrawList[m_activeSlot]);
     else ImGuizmo::SetDrawlist();
@@ -678,8 +660,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // с обычным гизмо без стрелок.
     ImGuizmo::SetAxisMask(false, false, false);
 
-    // Инструменты (режим гизмо, snap, пространство, Play, режим рендера) —
-    // в верхнем тулбаре редактора (ToolbarPanel), не оверлеем во вьюпорте.
+    ImGuizmo::Enable(true);
+
+    // Инструменты — ПОСЛЕДНИМИ в кадре: дочерние окна ImGui рисуются в порядке
+    // подачи, и виджет обязан лечь поверх картинки сцены и поверх гизмо.
+    DrawToolsOverlay(host, viewsOrigin);
 
     ImGui::End(); // Viewport
     ImGui::PopStyleVar();

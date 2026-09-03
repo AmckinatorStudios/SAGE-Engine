@@ -1,9 +1,11 @@
 #include "TestFramework.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -564,5 +566,81 @@ TEST(Net_interpolation_actually_smooths_motion) {
     for (size_t i = 1; i < seen.size(); ++i) CHECK_TRUE(seen[i] >= seen[i - 1] - 1e-3f);
 
     client.Stop();
+    server.Stop();
+}
+
+// Id клиента уходит на провод ОДНИМ БАЙТОМ (ConnectAccept), а сервер держит
+// его как int. Пока id выдавался растущим счётчиком, эти два числа расходились
+// после 255 подключений за сессию: сервер помнил 256, клиенту уезжал 0. Дальше
+// клиент считал бы своими чужие объекты — реплицируемые сущности адресуются
+// именно владельцем.
+//
+// Сессия сервера длиннее одного матча: 256 входов и выходов набираются за
+// вечер. Поэтому id берётся из СВОБОДНЫХ: вышедший клиент возвращает номер.
+TEST(Net_client_ids_never_leave_one_byte) {
+    NetServer server;
+    CHECK_TRUE(server.Start(0, 2));
+
+    int maxId = 0;
+    for (int round = 0; round < 300; ++round) {
+        NetClient client;
+        CHECK_TRUE(client.Connect(NetAddress::Loopback(server.Port())));
+        double now = (double)round * 10.0;   // свои часы у каждого круга
+        Pump(server, client, now, 8);
+        CHECK_TRUE(client.Connected());
+
+        // Обе стороны обязаны звать клиента ОДНИМ И ТЕМ ЖЕ числом.
+        std::vector<int> ids = server.ClientIds();
+        CHECK_EQ(ids.size(), (size_t)1);
+        if (!ids.empty()) CHECK_EQ(ids[0], client.ClientId());
+        maxId = std::max(maxId, client.ClientId());
+
+        client.Disconnect();
+        Pump(server, client, now, 3);
+        CHECK_EQ(server.ClientCount(), 0);
+        server.DrainEvents();
+    }
+
+    // Триста подключений — и ни одного номера вне байта.
+    std::printf("       300 подключений подряд, наибольший выданный id: %d\n", maxId);
+    CHECK_TRUE(maxId <= 255);
+    server.Stop();
+}
+
+// Больше 255 одновременных клиентов адресовать нечем — сервер обязан не
+// принять лишних, а не выдать 256-му чужой номер. Проверяем настоящими
+// сокетами: 260 клиентов на loopback, и ни одного повторного id.
+TEST(Net_server_caps_max_clients_at_one_byte) {
+    NetServer server;
+    CHECK_TRUE(server.Start(0, 1000));   // просим заведомо больше, чем влезает
+    const NetAddress addr = NetAddress::Loopback(server.Port());
+
+    std::vector<std::unique_ptr<NetClient>> clients;
+    for (int i = 0; i < 260; ++i) {
+        auto c = std::make_unique<NetClient>();
+        if (!c->Connect(addr)) break;   // кончились дескрипторы — не беда теста
+        clients.push_back(std::move(c));
+    }
+
+    double now = 0.0;
+    for (int i = 0; i < 20; ++i) {
+        now += 0.02;
+        for (auto& c : clients) c->Update(now);
+        server.Update(now);
+    }
+
+    // Принятых не больше, чем влезает в байт, и все номера РАЗНЫЕ.
+    std::vector<int> ids;
+    for (auto& c : clients)
+        if (c->Connected()) ids.push_back(c->ClientId());
+    std::printf("       клиентов заведено %d, принято %d\n", (int)clients.size(), (int)ids.size());
+    CHECK_TRUE((int)ids.size() <= 255);
+    for (int id : ids) CHECK_TRUE(id >= 1 && id <= 255);
+    std::vector<int> sorted = ids;
+    std::sort(sorted.begin(), sorted.end());
+    CHECK_TRUE(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
+    CHECK_EQ((size_t)server.ClientCount(), ids.size());
+
+    for (auto& c : clients) c->Disconnect();
     server.Stop();
 }

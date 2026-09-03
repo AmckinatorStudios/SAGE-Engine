@@ -50,9 +50,15 @@ private:
         NetConnection Conn;
     };
 
+    // Свободный id из 1..255, наименьший. НЕ счётчик: id уходит на провод
+    // ОДНИМ БАЙТОМ (ConnectAccept), и растущий счётчик после 255 подключений за
+    // сессию выдавал бы клиенту одно число, а у себя держал другое — клиент
+    // считал бы чужие объекты своими. Сервер живёт долго, а 256 входов и
+    // выходов набираются за вечер. 0 — свободных нет (отвечаем ConnectDeny).
+    int AllocateClientId() const;
+
     UdpSocket m_socket;
     int m_maxClients = 8;
-    int m_nextClientId = 1;
     std::unordered_map<NetAddress, std::unique_ptr<Client>> m_clients;
     std::vector<NetEvent> m_events;
 };

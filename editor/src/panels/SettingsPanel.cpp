@@ -27,11 +27,20 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
 
     sage::EngineConfig& c = host.Settings();
 
+    // ЧТО ЗДЕСЬ, А ЧТО В ДРУГОМ ОКНЕ. Граница проходит по смыслу: здесь
+    // ЦЕНА картинки (что включено и в каком качестве) — она принадлежит
+    // проекту и едет в sage.cfg. Как выглядит мир сцены — небо, воздух,
+    // окружающий свет — в окне Environment и едет в .sage. Источники света —
+    // объекты сцены. Пока это лежало вперемешку, на вопрос «где настраивается
+    // освещение» честного ответа не было.
+    //
     // TextWrapped, а не TextDisabled: пояснения длиннее строки, и без переноса
-    // они обрезались по краю окна — то есть пропадал ровно тот текст, ради
-    // которого их писали.
+    // они обрезались бы по краю окна — то есть пропадал бы ровно тот текст,
+    // ради которого их писали.
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped("%s", T("Game configuration (saved into the project as sage.cfg)."));
+    ImGui::TextWrapped("%s", T("Quality and cost of the frame — saved into the project as "
+                               "sage.cfg. The look of the scene (sky, fog, ambient) is in "
+                               "Environment; light sources are objects in the hierarchy."));
     ImGui::PopStyleColor();
     ImGui::Separator();
 
@@ -89,6 +98,10 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     }
 
     if (ImGui::CollapsingHeader(T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("%s", T("Whether a pass runs at all and at what resolution. Which "
+                                   "light casts those shadows is a property of the light object."));
+        ImGui::PopStyleColor();
         ImGui::Checkbox(T("Shadows"), &c.Shadows);
         static const int kShadowVals[] = {512, 1024, 2048, 4096};
         const char* shadowRes[] = {"512", "1024", "2048", "4096"};

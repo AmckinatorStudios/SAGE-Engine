@@ -54,7 +54,10 @@ private:
     };
     PendingDrop m_pendingDrop;
 
-    void DrawViewToolbar(EditorHost& host);
+    // Инструменты — ВИДЖЕТОМ ПОВЕРХ вьюпорта (ViewportTools.cpp): гизмо,
+    // привязка, показ, раскладка видов. origin — левый верхний угол области
+    // видов в экранных координатах.
+    void DrawToolsOverlay(EditorHost& host, ImVec2 origin);
     // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
     // над ним (для взаимодействия).
     bool DrawViewImage(EditorHost& host, int slot, ViewKind kind, ImVec2 size, ImVec2& outPos);
@@ -73,6 +76,16 @@ private:
     // тянуть уже другой вид, а объект прыгал. Мышь принадлежит тому виду, в
     // котором нажали, и до отпускания кнопки не переходит никуда.
     int m_dragSlot = -1;
+
+    // --- Виджет инструментов поверх картинки ---------------------------------
+    bool m_toolsExpanded = true;         // вторая строка (показ и раскладка видов)
+    // Экранный прямоугольник виджета, снятый в КОНЦЕ прошлого кадра. Нужен до
+    // того, как виджет нарисован: мышь над ним не должна ни выбирать объект, ни
+    // хватать гизмо, а ImGuizmo про окна ImGui ничего не знает и считает
+    // попадание по голым координатам.
+    ImVec2 m_toolsMin{0.0f, 0.0f};
+    ImVec2 m_toolsMax{0.0f, 0.0f};
+    bool m_toolsHovered = false;
 
     UICanvas m_uiCanvas;   // вёрстка интерфейса мышью (режим UI)
     bool m_cameraDriving = false;  // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)

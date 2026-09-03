@@ -2004,12 +2004,12 @@ bool EditorLayer::SelfTestTools() {
     // пустом доке, — возвращает каждую панель.
     if (ok) {
         const bool visibleBefore = AnyPanelVisible();
-        m_showHierarchy = m_showInspector = m_showLighting = false;
+        m_showHierarchy = m_showInspector = m_showEnvironment = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
         m_showCode = m_showProfiler = false;
         const bool visibleAfterClose = AnyPanelVisible();
         ShowAllPanels();
-        const bool restored = m_showHierarchy && m_showInspector && m_showLighting &&
+        const bool restored = m_showHierarchy && m_showInspector && m_showEnvironment &&
                               m_showViewport && m_showGame && m_showConsole && m_showAssets &&
                               m_showCode;
         if (!visibleBefore || visibleAfterClose || !restored) {

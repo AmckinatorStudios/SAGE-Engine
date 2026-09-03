@@ -1,4 +1,4 @@
-#include "LightingPanel.h"
+#include "EnvironmentPanel.h"
 
 #include <string>
 #include <vector>
@@ -13,13 +13,13 @@
 #include "sage/scene/Components.h"
 #include "../Localization.h"
 
-LightingPanel::~LightingPanel() {
+EnvironmentPanel::~EnvironmentPanel() {
     // Дожидаемся фонового бейка: его вход самодостаточен, но поток обязан
     // завершиться до разрушения атомиков/мьютекса панели.
     if (m_bakeThread.joinable()) m_bakeThread.join();
 }
 
-void LightingPanel::StartBake(EditorHost& host, const sage::gi::GISettings& settings) {
+void EnvironmentPanel::StartBake(EditorHost& host, const sage::gi::GISettings& settings) {
     if (m_bakeRunning) return;
     if (m_bakeThread.joinable()) m_bakeThread.join();
 
@@ -49,7 +49,7 @@ void LightingPanel::StartBake(EditorHost& host, const sage::gi::GISettings& sett
     });
 }
 
-void LightingPanel::DrawGISection(EditorHost& host) {
+void EnvironmentPanel::DrawGISection(EditorHost& host) {
     if (!ImGui::CollapsingHeader(T("Global Illumination (baked)" "###Global Illumination (baked)"), ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
@@ -152,7 +152,7 @@ void LightingPanel::DrawGISection(EditorHost& host) {
 // бывает: сущность можно повернуть гизмо, привязать к родителю и анимировать, а
 // три поля в панели про это не знают. Панель, которая правит одно, а показывает
 // другое, — худший вид удобства.
-void LightingPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env) {
+void EnvironmentPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env) {
     if (!ImGui::CollapsingHeader(T("Sun" "###Sun"), ImGuiTreeNodeFlags_DefaultOpen)) return;
 
     // Ищем то же солнце, что возьмёт рендер: направленный свет с наименьшим id
@@ -199,11 +199,32 @@ void LightingPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment&
     ImGui::TextDisabled("%s", T("Edited in the object inspector; direction is its rotation"));
 }
 
-void LightingPanel::Draw(EditorHost& host, bool* open) {
+void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     LightingEnvironment& env = scene.Lighting;
 
-    ImGui::Begin(T("Lighting" "###Lighting"), open);
+    ImGui::Begin(T("Environment" "###Lighting"), open);
+
+    // ГДЕ ЧТО НАСТРАИВАЕТСЯ — первым же абзацем.
+    //
+    // Раньше окно называлось «Lighting» и содержало вперемешку то, что
+    // принадлежит СЦЕНЕ (небо, туман, окружающий свет), и то, что было
+    // свойством объекта (солнце). Рядом жило окно «Game Settings» с качеством
+    // теней и пост-обработкой — и на вопрос «где настраивается освещение?»
+    // честного ответа не было: в двух местах и ещё в третьем, на объекте.
+    //
+    // Теперь граница проходит по СМЫСЛУ, а не по истории:
+    //   • здесь — как выглядит МИР сцены: небо, воздух, окружающий свет. Едет
+    //     в .sage вместе со сценой;
+    //   • источники света — ОБЪЕКТЫ сцены со своими компонентами (солнце тоже);
+    //   • сколько это стоит (разрешение теней, пост-обработка, объём) — Game
+    //     Settings, они едут в sage.cfg вместе с проектом.
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s", T("The look of the scene's world: sky, air, ambient light. Saved with "
+                               "the scene. Light SOURCES are objects — see the hierarchy. Quality "
+                               "and cost are in Game Settings."));
+    ImGui::PopStyleColor();
+    ImGui::Separator();
 
     if (ImGui::CollapsingHeader(T("Ambient (hemisphere)" "###Ambient (hemisphere)"), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();
@@ -230,9 +251,12 @@ void LightingPanel::Draw(EditorHost& host, bool* open) {
               "stars appear as the sun goes below the horizon."));
         }
         if (env.Skybox.Celestials) {
-            ImGui::ColorEdit3(T("Sun colour"), &env.Skybox.SunColor.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Sun size"), &env.Skybox.SunSize, 0.002f, 0.005f, 0.4f, "%.3f");
-            host.TrackLastImGuiItem();
+            // Диска солнца здесь НЕТ намеренно: он принадлежит объекту-солнцу и
+            // правится в его инспекторе вместе с направлением, цветом и
+            // интенсивностью. Две ручки одного светила в разных окнах — это
+            // ровно та путаница, из-за которой окно и переделано.
+            ImGui::TextDisabled("%s", T("The sun's disc, direction and colour are on the sun "
+                                        "object — select it in the hierarchy."));
             ImGui::Checkbox(T("Moon"), &env.Skybox.Moon);
             if (env.Skybox.Moon) {
                 ImGui::ColorEdit3(T("Moon colour"), &env.Skybox.MoonColor.x); host.TrackLastImGuiItem();
