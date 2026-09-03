@@ -1,7 +1,9 @@
 #include "ProjectTemplateCover.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
+#include <string>
 
 #include "imgui.h"
 
@@ -217,10 +219,26 @@ bool ProjectTemplateCard(const ProjectTemplate& tpl, bool selected, float width)
 
     // Кнопка ПОДАЁТСЯ ПЕРВОЙ, а рисуется поверх неё: так вся карточка целиком —
     // одна нажимаемая область, и попасть в неё проще, чем в кружок радиокнопки.
+    // ШАБЛОН, КОТОРОГО НЕТ НА ДИСКЕ, ВЫГЛЯДИТ ИНАЧЕ.
+    //
+    // Карточка витрины показывалась одинаково, стоит её папка рядом с
+    // редактором или нет; выбор проходил, а «Создать» отказывало сообщением на
+    // английском — то есть шаблон «есть, но не работает», и почему, узнать было
+    // неоткуда. Недоступность обязана быть видна ДО нажатия и объяснена там же.
+    const bool available = ProjectTemplateAvailable(tpl);
+
     ImGui::PushID(tpl.Id.c_str());
     const bool pressed = ImGui::InvisibleButton("##card", ImVec2(width, height));
     const bool hovered = ImGui::IsItemHovered();
-    if (hovered) ImGui::SetTooltip("%s", T(tpl.Summary));
+    if (hovered) {
+        if (available) {
+            ImGui::SetTooltip("%s", T(tpl.Summary));
+        } else {
+            ImGui::SetTooltip("%s\n\n%s\n%s", T(tpl.Summary),
+                              T("This template is not installed next to the editor:"),
+                              (ProjectTemplatesRoot() / tpl.SourceDir).string().c_str());
+        }
+    }
     ImGui::PopID();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -242,16 +260,55 @@ bool ProjectTemplateCard(const ProjectTemplate& tpl, bool selected, float width)
     const float coverH = std::floor(width * 9.0f / 16.0f) - st.FramePadding.y;
     DrawProjectTemplateCover(tpl.Kind, a.x + pad, a.y + st.FramePadding.y, coverW, coverH);
 
-    // Название под обложкой, по центру и с обрезкой: имена шаблонов
-    // переводятся, и по-русски они длиннее — вылезать за карточку им нельзя.
-    const char* name = T(tpl.Name);
-    const ImVec2 ts = ImGui::CalcTextSize(name);
+    // Недоступный — притушен и подписан поперёк обложки. Притушить мало: серая
+    // карточка читается как «не выбрана», а не как «нельзя».
+    if (!available) {
+        dl->AddRectFilled(ImVec2(a.x + pad, a.y + st.FramePadding.y),
+                          ImVec2(a.x + pad + coverW, a.y + st.FramePadding.y + coverH),
+                          Col(0.06f, 0.07f, 0.09f, 0.72f), 3.0f);
+        const char* mark = T("not installed");
+        const ImVec2 ms = ImGui::CalcTextSize(mark);
+        dl->AddText(ImVec2(a.x + pad + (coverW - ms.x) * 0.5f,
+                           a.y + st.FramePadding.y + (coverH - ms.y) * 0.5f),
+                    Col(1.0f, 0.72f, 0.35f, 1.0f), mark);
+    }
+
+    // Название под обложкой, по центру. Имена шаблонов переводятся, и по-русски
+    // они длиннее — не влезающее УКОРАЧИВАЕТСЯ С МНОГОТОЧИЕМ, а не режется по
+    // краю карточки. Разница не косметическая: обрезанное «Menu and HUD»
+    // выходило как «Menu and HUI» и читалось опечаткой, а не «здесь не всё».
+    std::string name = T(tpl.Name);
+    const float room = width - pad * 2.0f;
+    ImFont* font = ImGui::GetFont();
+    float size = ImGui::GetFontSize();
+
+    // СНАЧАЛА УМЕНЬШАЕМ ШРИФТ, и только потом режем. «Menu and HUD» и «Empty
+    // project» не влезают в карточку ряда из четырёх, и обрезка превращала их
+    // в «Menu and H...» — читается как поломка, а не как длинное имя. Ужатое
+    // на пятую часть имя читается целиком и остаётся именем.
+    const float minSize = size * 0.78f;
+    while (size > minSize &&
+           font->CalcTextSizeA(size, FLT_MAX, 0.0f, name.c_str()).x > room) {
+        size -= 1.0f;
+    }
+    // Не помогло (очень длинный перевод) — тогда многоточие: пусть будет видно,
+    // что имя не целиком, а не половина слова у края.
+    if (font->CalcTextSizeA(size, FLT_MAX, 0.0f, name.c_str()).x > room) {
+        const std::string tail = "...";
+        while (!name.empty() &&
+               font->CalcTextSizeA(size, FLT_MAX, 0.0f, (name + tail).c_str()).x > room) {
+            // По границе UTF-8: половина символа кириллицы — это не текст.
+            do { name.pop_back(); }
+            while (!name.empty() && (static_cast<unsigned char>(name.back()) & 0xC0) == 0x80);
+        }
+        name += tail;
+    }
+    const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, name.c_str());
     const ImVec2 textPos(a.x + std::max(pad, (width - ts.x) * 0.5f),
                          a.y + st.FramePadding.y + coverH + 2.0f);
-    dl->PushClipRect(ImVec2(a.x + pad, textPos.y), ImVec2(b.x - pad, b.y), true);
-    dl->AddText(textPos, ImGui::GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled),
-                name);
-    dl->PopClipRect();
+    dl->AddText(font, size, textPos,
+                ImGui::GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled),
+                name.c_str());
 
     return pressed;
 }

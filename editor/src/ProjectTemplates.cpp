@@ -27,6 +27,8 @@ const std::vector<ProjectTemplate>& Table() {
          "Camera, light and ready-made interface screens"},
         {"showcase", ProjectTemplateKind::Copy, "Showcase",
          "A whole working project: eight zones on Lua you can walk through and edit",
+         "The world of this project is built by scripts. Press Play to walk through the zones;\n"
+         "in the stopped editor the scene holds only the world root and the player.",
          "showcase"},
     };
     return table;

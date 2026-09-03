@@ -336,6 +336,21 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
     }
 }
 
+// Заметка шаблона — В КОНСОЛЬ, а не только в диалог.
+//
+// Из стартового окна проект создают без диалога, и пояснение там показать
+// негде; а именно там его и не хватает: витрина строит мир скриптами, и
+// созданный проект выглядит пустым. Строка в консоли — то место, куда человек
+// смотрит, когда что-то «не работает», и она обязана быть там раньше вопроса.
+void EditorLayer::AnnounceTemplateNote(const ProjectTemplate& tpl) {
+    m_templateNote.clear();
+    if (tpl.Note[0] == '\0') return;
+    m_templateNote = sage::editor::T(tpl.Note);
+    // Через T(): заметка — строка ИНТЕРФЕЙСА, и в консоли она обязана быть на
+    // том же языке, что и всё остальное.
+    LOG_INFO("Editor") << sage::editor::T(tpl.Note);
+}
+
 bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
                                const std::string& templateId, std::string& err) {
     // Шаблон разбирается ДО создания папок: получить проект и узнать, что имя
@@ -400,11 +415,13 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
         }
         LOG_INFO("Editor") << "Project created from template '" << tpl->Id << "': "
                            << m_project.Dir().string();
+        AnnounceTemplateNote(*tpl);
         UpdateWindowTitle();
         return true;
     }
 
     NewScene(kind);
+    AnnounceTemplateNote(*tpl);
     UpdateWindowTitle();
     return true;
 }

@@ -32,6 +32,8 @@
 
 #include "EditorHost.h"
 #include "ProjectTemplates.h"
+
+namespace sage { class Application; }
 #include "EditorPlayInput.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
@@ -120,7 +122,15 @@ public:
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
 
     // --- EditorHost: undo/redo ---
+    const std::string& TemplateNote() const override { return m_templateNote; }
+    void ClearTemplateNote() override { m_templateNote.clear(); }
     void MergeScriptVars(GameObject object) override;
+    // Сообщает в консоль заметку шаблона (см. ProjectTemplate::Note).
+    void AnnounceTemplateNote(const ProjectTemplate& tpl);
+    std::string m_templateNote;   // «что делать дальше» после создания проекта
+    // Снимок кадра по SAGE_SCREENSHOT_AT_FRAME. Отдельной функцией, потому что
+    // кадр заканчивается в ДВУХ местах: со стартовым окном и с редактором.
+    void TakeAutoScreenshot(sage::Application& app);
     void PushUndoSnapshot() override;
     void CapturePendingSnapshot() override;
     void CommitPendingSnapshot() override;

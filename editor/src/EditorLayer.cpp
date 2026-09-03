@@ -334,8 +334,22 @@ void EditorLayer::OnAttach() {
     // скайбокс» дают одинаковый ноль, а выглядят по-разному.
     if (const char* tplId = std::getenv("SAGE_EDITOR_TEMPLATE")) {
         m_headlessProject = true;
-        if (const ProjectTemplate* tpl = FindProjectTemplate(tplId)) NewScene(tpl->Kind);
-        else LOG_WARN("Editor") << "SAGE_EDITOR_TEMPLATE: нет шаблона с именем " << tplId;
+        // СОЗДАЁМ ПРОЕКТ, а не «пересобираем сцену по виду шаблона».
+        //
+        // Раньше здесь звался NewScene(tpl->Kind), и для готового проекта
+        // (Kind::Copy) это не значило ничего: NewScene умеет строить сцену
+        // кодом, а витрина — файлы на диске. Хук молча отдавал ПУСТУЮ сцену,
+        // то есть проверял глазами не тот шаблон, который просили, — и именно
+        // на этом «шаблон showcase не работает» и выглядело правдой.
+        std::string tplErr;
+        const std::string dir = std::string("sage_template_") + tplId;
+        std::error_code rmEc;
+        std::filesystem::remove_all(dir, rmEc);
+        if (!CreateProject(".", dir, tplId, tplErr))
+            LOG_ERROR("Editor") << "SAGE_EDITOR_TEMPLATE: " << tplErr;
+        else
+            LOG_INFO("Editor") << "SAGE_EDITOR_TEMPLATE: создан проект по шаблону '" << tplId
+                               << "', сущностей " << m_scene->Count();
     }
     // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
@@ -860,6 +874,13 @@ void EditorLayer::OnRender() {
         m_dialogs.Draw(*this);   // диалог обзора папок открывается отсюда же
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        // СНИМОК ДЕЛАЕТСЯ И ЗДЕСЬ. Ранний выход пропускал счётчик кадров вместе
+        // со скриншотом, и стартовое окно оказывалось единственной частью
+        // редактора, которую нельзя проверить иначе как открыв её глазами на
+        // своей машине — при том, что SAGE_SHOW_LAUNCHER заведён ровно для
+        // этого. Ровно поэтому список шаблонов и прожил с карточкой, которая не
+        // смотрела, установлен ли шаблон: смотреть на неё в прогоне было нечем.
+        TakeAutoScreenshot(app);
         return;
     }
 
@@ -926,10 +947,13 @@ void EditorLayer::OnRender() {
         glfwMakeContextCurrent(backup);
     }
 
+    TakeAutoScreenshot(app);
+}
+
+void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     ++m_frameCounter;
-    if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {
-        Window& win = app.GetWindow();
-        SaveScreenshot(m_screenshotPath, win.Width(), win.Height());
-        app.Close();
-    }
+    if (m_autoScreenshotFrame < 0 || m_frameCounter != m_autoScreenshotFrame) return;
+    Window& win = app.GetWindow();
+    SaveScreenshot(m_screenshotPath, win.Width(), win.Height());
+    app.Close();
 }

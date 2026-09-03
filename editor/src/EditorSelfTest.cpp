@@ -117,7 +117,7 @@ void EditorLayer::RunSelfTest() {
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
-                               << "vars-refs-events + prefab-refs, "
+                               << "vars-refs-events + prefab-refs + templates, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -142,8 +142,12 @@ bool EditorLayer::SelfTestProjectAndAssets() {
     // проверять было нечего: вариантов было два, и один из них никто не звал.
     if (ok) {
         struct TemplateCheck { const char* Id; bool Empty; const char* Expect; };
+        // ВСЕ шаблоны, строящие сцену кодом, а не два из трёх. «Демо» не
+        // проверялся вообще — при том, что он предлагается по умолчанию и
+        // именно его видит человек, открывший редактор впервые.
         const TemplateCheck checks[] = {
             {"empty", true, nullptr},
+            {"demo", false, "Green Cube"},
             {"ui", false, "MenuButtons"},
         };
         for (const TemplateCheck& c : checks) {
@@ -241,6 +245,23 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                     }
                 }
                 fs::remove_all("selftest_tpl_copy", ec);
+            }
+        }
+
+        // --- Доступность шаблона — часть ВЫБОРА, а не сюрприз после нажатия ---
+        //
+        // Карточка витрины показывалась одинаково, стоит её папка рядом с
+        // редактором или нет: выбор проходил, «Создать» отказывало сообщением
+        // на английском, и человек читал это как «шаблон не работает». Признак
+        // обязан быть у самих данных, и здесь проверяется он, а не рисунок.
+        if (ok) {
+            for (const ProjectTemplate& t : ProjectTemplates()) {
+                if (t.Kind == ProjectTemplateKind::Copy) continue;
+                if (!ProjectTemplateAvailable(t)) {
+                    LOG_ERROR("Editor") << "SELFTEST: шаблон " << t.Id
+                                        << " объявил себя недоступным, хотя не требует файлов";
+                    ok = false;
+                }
             }
         }
 
@@ -2556,6 +2577,62 @@ bool EditorLayer::SelfTestTools() {
         fs::remove(pf, ec);
         sage::scene::ClearPrefabCache();
     }
+
+// --- Заметка «что делать дальше» после создания проекта -----------------
+    //
+    // Идёт ПОСЛЕДНЕЙ намеренно: витрина за один Play затягивает десятки
+    // мегабайт текстур, а проверка бюджета видеопамяти выше ставит бюджет в
+    // одну текстуру и меряет ОБЩИЙ резидентный размер — с чужой сценой в руках
+    // она провалилась бы не из-за вытеснения, а из-за нас.
+    //
+    // Витрина строит мир скриптами, и сразу после создания её проект
+    // выглядит пустым. Заметка — единственное, что отличает это от
+    // поломки, и она обязана дойти до редактора, а не остаться в таблице.
+    if (ok) {
+        const ProjectTemplate* showcase = FindProjectTemplate("showcase");
+        if (showcase && ProjectTemplateAvailable(*showcase)) {
+            fs::remove_all("selftest_tpl_note", ec);
+            std::string noteErr;
+            if (!CreateProject(".", "selftest_tpl_note", "showcase", noteErr)) {
+                LOG_ERROR("Editor") << "SELFTEST: витрина не создалась: " << noteErr;
+                ok = false;
+            } else {
+                if (TemplateNote().empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: заметка шаблона не дошла до редактора";
+                    ok = false;
+                }
+                // Play отвечает на вопрос «почему пусто» делом — заметке
+                // дальше висеть незачем.
+                StartPlay();
+                if (!TemplateNote().empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: заметка пережила запуск игры";
+                    ok = false;
+                }
+                StopPlay();
+            }
+            // Витрина за один Play затягивает десятки мегабайт текстур, и
+            // они остаются ЗАНЯТЫМИ, пока её сцена жива. Проверка бюджета
+            // видеопамяти ниже ставит бюджет в одну текстуру и меряет
+            // резидентный размер — с чужой сценой в руках она провалится не
+            // из-за вытеснения, а из-за нас. Убираем за собой сразу.
+            NewScene(ProjectTemplateKind::Empty);
+            ResourceManager::Instance().GarbageCollectUnused();
+            fs::remove_all("selftest_tpl_note", ec);
+        }
+        // А у шаблона, который показывает себя сам, заметки быть не должно:
+        // строка «что делать дальше» там, где и так всё видно, — шум.
+        if (ok) {
+            fs::remove_all("selftest_tpl_plain", ec);
+            std::string plainErr;
+            if (CreateProject(".", "selftest_tpl_plain", "demo", plainErr) &&
+                !TemplateNote().empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: у демо-шаблона появилась заметка";
+                ok = false;
+            }
+            fs::remove_all("selftest_tpl_plain", ec);
+        }
+    }
+
 
     return ok;
 }
