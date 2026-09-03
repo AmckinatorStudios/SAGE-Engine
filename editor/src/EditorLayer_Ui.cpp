@@ -84,7 +84,6 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
 }
 
 constexpr float kStatusBarHeight = 26.0f;
-constexpr float kToolbarHeight = 34.0f;
 
 } // namespace
 
@@ -317,7 +316,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // переехали виджетом ПОВЕРХ вьюпорта (ViewportTools.cpp) — туда, где ими
     // работают. Раньше за сеткой и шагом привязки мышь ездила от объекта к
     // верхнему краю окна и обратно.
-    m_topBar.Draw(*this, kToolbarHeight);
+    m_topBar.Draw(*this, TopBarPanel::kHeight);
 
     ImGuiID dockspaceId = ImGui::GetID("SageDockSpace");
     // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)

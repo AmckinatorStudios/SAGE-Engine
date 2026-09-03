@@ -18,7 +18,7 @@
 // Имена: play, pause, stop, move, rotate, scale, grid, cube, sphere, light,
 // camera, script, particles, anim, ik, probe, folder, file, scene, material,
 // model, warn, error, info, debug, trash, copy, save, open, plus, eye, lock,
-// wire, sun, universal, align, drop, rect, gear.
+// wire, sun, universal, align, drop, rect, gear, magnet.
 // ---------------------------------------------------------------------------
 namespace EditorIcons {
 
