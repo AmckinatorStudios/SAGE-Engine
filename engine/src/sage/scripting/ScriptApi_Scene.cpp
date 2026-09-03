@@ -431,9 +431,11 @@ void ScriptEngine::RegisterMeshApi() {
     // Материал сущности: путь к .sagemat. Пусто — снять материал и вернуться к
     // собственному цвету. Через него игра и назначает свой шейдер.
     Bind("render", "SetMaterial", "SetMaterial", [](GameObject& obj, const std::string& path) {
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.MaterialPath = path;
-        mr.MaterialPtr = path.empty() ? nullptr : ResourceManager::Instance().GetMaterial(path);
+        // Через AssignMaterial — как и редактор: назначение материала
+        // возвращает поправки экземпляра в нейтраль, иначе назначенный из
+        // скрипта материал показывался бы умноженным на прежний тон объекта.
+        AssignMaterial(obj.Renderer(), path,
+                       path.empty() ? nullptr : ResourceManager::Instance().GetMaterial(path));
     });
 
     // Материал ОДНОЙ ЧАСТИ модели (подмеша). Нужен ровно тем, для чего слоты и

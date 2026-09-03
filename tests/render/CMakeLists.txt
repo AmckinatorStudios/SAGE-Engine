@@ -15,6 +15,7 @@ add_executable(sage_render_tests
     Checks_Reflections.cpp   # отражения и блик
     Checks_Shadows.cpp       # тени
     Checks_Scene.cpp         # детализация, отсечение, кэш, небо, RHI
+    Checks_Materials.cpp     # материал: от файла до пикселей
     Checks_Volumetrics.cpp   # объёмный свет: зерно, полосы, кайма
     RenderTestHarness.cpp    # сравнение картинок и запись эталонов
 )

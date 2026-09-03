@@ -485,17 +485,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     Framebuffer& sceneFbo = primary ? *m_sceneFbo : *m_extraFbo[slot];
     Framebuffer& postFbo = primary ? *m_postFbo : *m_extraPostFbo[slot];
 
-    // Режим вёрстки с непрозрачным холстом — это ПЛОСКИЙ РАБОЧИЙ СТОЛ, а не
-    // сцена с плёнкой поверх. Пока сцена рисовалась под полупрозрачной
-    // подложкой, она проступала сквозь неё: мир выглядел залитым чернотой
-    // (объекты «почернели»), а глаз цеплялся за геометрию вместо кнопок.
-    // Здесь трёхмерный проход просто не выполняется — заодно вёрстка перестаёт
-    // стоить полного кадра сцены.
-    const bool flatCanvas = primary && m_drawUIOverlay && m_uiBackdrop >= 0.999f;
-
     sceneFbo.Bind();
-    device.SetClearColor(flatCanvas ? 0.16f : 0.10f, flatCanvas ? 0.17f : 0.11f,
-                         flatCanvas ? 0.20f : 0.13f, 1.0f);
+    device.SetClearColor(0.10f, 0.11f, 0.13f, 1.0f);
     device.Clear();
 
     // Ортогональные виды приходят готовыми матрицами: у них нет свободной
@@ -506,15 +497,13 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                            : camera.GetProjectionMatrix((float)w / (float)std::max(h, 1));
     const glm::vec3 eye = viewOverride.Use ? viewOverride.EyePos : camera.Position;
 
-    if (!flatCanvas) {
-        // Съёмка в именованные картинки — до сцены и в свои буферы; после неё
-        // возвращаем буфер сцены и его вьюпорт.
-        if (primary && sage::render::RenderTextureViews(scene, m_batch, env, m_sceneTime) > 0) {
-            sceneFbo.Bind();
-            device.SetViewport(0, 0, w, h);
-        }
-        DrawSky(env, outView, outProj);
+    // Съёмка в именованные картинки — до сцены и в свои буферы; после неё
+    // возвращаем буфер сцены и его вьюпорт.
+    if (primary && sage::render::RenderTextureViews(scene, m_batch, env, m_sceneTime) > 0) {
+        sceneFbo.Bind();
+        device.SetViewport(0, 0, w, h);
     }
+    DrawSky(env, outView, outProj);
 
     // Режим рендера из тулбара. Shaded — обычная отрисовка, Wireframe — тот же
     // unlit плюс линии, всё остальное переводится в DebugView сдвигом на один:
@@ -527,17 +516,15 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     } else if (mode != EditorRenderMode::Shaded) {
         shadingMode = (int)mode - 1;
     }
-    if (!flatCanvas) {
-        DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe, /*viewId=*/slot);
-        m_particles->Draw(camera, outView, outProj);
-    }
+    DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe, /*viewId=*/slot);
+    m_particles->Draw(camera, outView, outProj);
 
     GameObject selectedObj = scene.Get(selectedId);
 
     // Гизмо-графика (DebugDraw) — в тот же буфер, с тестом глубины (объекты заслоняют сетку).
-    if (showGrid && !flatCanvas) m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
-    if (!flatCanvas) DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
-    if (selectedObj.Valid() && !flatCanvas) {
+    if (showGrid) m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
+    DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
+    if (selectedObj.Valid()) {
         glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());
         m_debugDraw->Axes(world, 1.4f);
         if (const LightComponent* light = scene.Registry().try_get<LightComponent>(selectedObj.Entity())) {
@@ -554,7 +541,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // Габариты выделенного — ровно та коробка, по которой считается попадание
     // мышью (sage::render::RayMesh). Показывать её незачем всегда, но когда
     // «клик выбрал не то» непонятен, увидеть её — самый короткий ответ.
-    if (m_showBounds && !flatCanvas) {
+    if (m_showBounds) {
         for (int id : selection) {
             GameObject o = scene.Get(id);
             if (!o.Valid()) continue;
@@ -576,7 +563,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Объём — после геометрии и до пост-обработки: свечение лучей должно
     // попасть в bloom. В плоском холсте вёрстки его нет — там нет и сцены.
-    if (!flatCanvas && cfg.Volumetrics && cfg.PostProcessing) {
+    if (cfg.Volumetrics && cfg.PostProcessing) {
         sceneFbo.Resolve();
         if (!m_volumetrics) m_volumetrics.emplace();
         m_volumetrics->Render(sceneFbo, sceneFbo.DepthTexture(), w, h, outProj, outView, eye, env,
@@ -586,77 +573,11 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Блик — после объёма, чтобы облако его гасило, и до пост-обработки, чтобы
     // он прошёл через bloom вместе с кадром.
-    if (!flatCanvas && cfg.LensFlare && cfg.PostProcessing) {
+    if (cfg.LensFlare && cfg.PostProcessing) {
         sceneFbo.Resolve();
         if (!m_lensFlare) m_lensFlare.emplace();
         m_lensFlare->Render(sceneFbo, sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h,
                             outProj, outView, env, sage::render::LensFlareFromConfig(cfg));
-    }
-
-    // Игровой интерфейс поверх сцены — В ТОМ ЖЕ буфере и в тех же пикселях, в
-    // которых его увидит игрок. Раскладка UI зависит от размера экрана (якоря,
-    // проценты), поэтому рисовать его надо именно в размер вьюпорта, а не в
-    // какой-нибудь эталонный: иначе редактор показывал бы не то, что получится.
-    if (m_drawUIOverlay && primary) {
-        // Рисуем ВСЕГДА, а не только когда в сцене уже есть элементы: пустой
-        // холст — нормальное начало работы, и человек должен видеть, куда
-        // класть первый элемент, а не смотреть в трёхмерную сцену.
-        {
-            if (!m_ui) m_ui = std::make_unique<UIRenderer>();
-            device.SetViewport(0, 0, w, h);
-
-            // РАЗМЕР ЭКРАНА НЕ МЕНЯЕТСЯ — меняется только показ.
-            //
-            // Это важнее, чем кажется. Экран игры (w x h) — то, подо что
-            // сверстан интерфейс: от него считаются якоря, растяжения и
-            // проценты. Возьми мы «экран побольше, чтобы влезло поле», вёрстка
-            // пересчиталась бы под другое разрешение — и человек правил бы не
-            // ту раскладку, которую увидит игрок. Поэтому экран прежний, а
-            // масштаб уходит в матрицу вывода: холст занимает середину кадра, а
-            // по краям остаётся поле, где ВИДНО всё, что вышло за границу.
-            const int sw = w, sh = h;
-            const glm::vec2 origin(((float)w - (float)w * m_uiZoom) * 0.5f + m_uiPan.x,
-                                   ((float)h - (float)h * m_uiZoom) * 0.5f + m_uiPan.y);
-
-            // Рабочий стол вёрстки: тёмное поле вокруг и СВЕТЛЕЕ внутри
-            // прямоугольника экрана. Без этой пары человек не видит, где
-            // кончается экран игры, — а именно по его границам считаются
-            // якоря, и элемент, «случайно» уехавший за край, на глаз ничем не
-            // отличается от стоящего у края.
-            //
-            // При Backdrop < 1 (правят худ поверх игры) полупрозрачная плёнка
-            // остаётся: там сцена под интерфейсом и нужна.
-            if (m_uiBackdrop > 0.0f) {
-                m_ui->Begin(w, h);
-                if (m_uiBackdrop < 0.999f) {
-                    m_ui->Rect(0.0f, 0.0f, (float)w, (float)h, glm::vec3(0.10f, 0.11f, 0.13f),
-                               m_uiBackdrop);
-                } else {
-                    const float sx = ((float)w - (float)w * m_uiZoom) * 0.5f + m_uiPan.x;
-                    const float sy = ((float)h - (float)h * m_uiZoom) * 0.5f + m_uiPan.y;
-                    const float sw2 = (float)w * m_uiZoom, sh2 = (float)h * m_uiZoom;
-                    // Экран игры и рамка вокруг него.
-                    m_ui->Rect(sx, sy, sw2, sh2, glm::vec3(0.115f, 0.125f, 0.15f), 1.0f);
-                    const float b = 1.0f;
-                    const glm::vec3 edge(0.42f, 0.47f, 0.56f);
-                    m_ui->Rect(sx - b, sy - b, sw2 + 2.0f * b, b, edge, 1.0f);
-                    m_ui->Rect(sx - b, sy + sh2, sw2 + 2.0f * b, b, edge, 1.0f);
-                    m_ui->Rect(sx - b, sy, b, sh2, edge, 1.0f);
-                    m_ui->Rect(sx + sw2, sy, b, sh2, edge, 1.0f);
-                    // Осевые линии по центру: по ним ставят то, что должно быть
-                    // ровно посередине, и промах в один пиксель виден сразу.
-                    const glm::vec3 mid(0.24f, 0.27f, 0.33f);
-                    m_ui->Rect(sx + sw2 * 0.5f, sy, 1.0f, sh2, mid, 1.0f);
-                    m_ui->Rect(sx, sy + sh2 * 0.5f, sw2, 1.0f, mid, 1.0f);
-                }
-                m_ui->End();
-            }
-
-            m_ui->Begin(sw, sh);
-            m_ui->SetView(origin, m_uiZoom, w, h);
-            sage::ui::DrawSceneUI(scene, *m_ui, sw, sh);
-            m_ui->End();
-        }
     }
 
     // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).

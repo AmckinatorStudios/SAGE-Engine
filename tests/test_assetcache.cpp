@@ -181,12 +181,18 @@ TEST(ResourceManager_reloads_a_material_edited_outside_the_editor) {
     fs::current_path(dir, ec);
 
     const fs::path file = dir / "wall.sagemat";
-    { std::ofstream f(file); f << R"({"albedo":{"x":1.0,"y":0.0,"z":0.0},"metallic":0.0})"; }
+    // Цвет — МАССИВОМ [r,g,b]: таков формат .sagemat. Раньше здесь стоял
+    // объект {"x":..}, который читатель законно игнорирует, — и проверки
+    // альбедо ниже сравнивали значение по умолчанию само с собой.
+    { std::ofstream f(file); f << R"({"albedo":[1.0,0.0,0.0],"metallic":0.0})"; }
 
     ResourceManager& rm = ResourceManager::Instance();
     std::shared_ptr<Material> first = rm.GetMaterial("wall.sagemat");
     CHECK_TRUE(first != nullptr);
-    if (first) CHECK_NEAR(first->Albedo.x, 1.0f, 1e-4);
+    if (first) {
+        CHECK_NEAR(first->Albedo.x, 1.0f, 1e-4);
+        CHECK_NEAR(first->Albedo.y, 0.0f, 1e-4); // а не «единица по умолчанию»
+    }
 
     // Тот же путь — обязан прийти ТОТ ЖЕ объект: на него ссылаются компоненты
     // сцены, и подменять указатель при каждом обращении нельзя.
@@ -196,7 +202,7 @@ TEST(ResourceManager_reloads_a_material_edited_outside_the_editor) {
     // файловых системах с разрешением в секунду две записи подряд неотличимы,
     // и тест ловил бы не дефект, а гранулярность часов.
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    { std::ofstream f(file); f << R"({"albedo":{"x":0.0,"y":1.0,"z":0.0},"metallic":0.5})"; }
+    { std::ofstream f(file); f << R"({"albedo":[0.0,1.0,0.0],"metallic":0.5})"; }
 
     const int reloaded = rm.ReloadChangedAssets();
     CHECK_TRUE(reloaded >= 1);
@@ -204,6 +210,7 @@ TEST(ResourceManager_reloads_a_material_edited_outside_the_editor) {
     // И главное: правка видна ЧЕРЕЗ ПРЕЖНИЙ указатель. Если бы мы просто
     // положили в кэш новый объект, сцена осталась бы со старым материалом —
     // то есть кэш починился бы, а картинка нет.
+    CHECK_NEAR(first->Albedo.x, 0.0f, 1e-4);
     CHECK_NEAR(first->Albedo.y, 1.0f, 1e-4);
     CHECK_NEAR(first->Metallic, 0.5f, 1e-4);
 
@@ -214,4 +221,54 @@ TEST(ResourceManager_reloads_a_material_edited_outside_the_editor) {
     rm.Clear();
     fs::current_path(saved, ec);
     fs::remove_all(dir, ec);
+}
+
+// ОДИН ФАЙЛ — ОДИН МАТЕРИАЛ, как бы к нему ни обратились.
+//
+// Из-за этого «редактор материалов не работал». Сущность держит ссылку
+// ОТНОСИТЕЛЬНО ПРОЕКТА ("assets/wall.sagemat" — так пишет Project::AssetRef, и
+// так она уезжает в .sage), а панель ассетов работает НАСТОЯЩИМ путём в
+// файловой системе ("<проект>/assets/wall.sagemat"). Ключом кэша был путь «как
+// дали», поэтому у одного файла заводилось ДВА объекта Material: редактор
+// правил один, а рендер рисовал другой. Со стороны это выглядело как «правки
+// не применяются» — и не применялись они никогда, ни к одному полю.
+//
+// Проверяется самое сильное утверждение, какое здесь можно сделать: любые
+// написания пути к одному файлу дают ОДИН И ТОТ ЖЕ указатель.
+TEST(ResourceManager_one_file_is_one_material_however_it_is_spelled) {
+    const fs::path dir = MakeDir("sage_matkey");
+    std::error_code ec;
+    const fs::path saved = fs::current_path(ec);
+    fs::current_path(dir, ec);
+
+    fs::create_directories("assets", ec);
+    { std::ofstream f("assets/wall.sagemat"); f << R"({"albedo":[1.0,0.0,0.0]})"; }
+
+    ResourceManager& rm = ResourceManager::Instance();
+    std::shared_ptr<Material> byRef = rm.GetMaterial("assets/wall.sagemat");
+    CHECK_TRUE(byRef != nullptr);
+
+    // Те же самые байты на диске, четыре способа их назвать.
+    CHECK_TRUE(rm.GetMaterial("./assets/wall.sagemat") == byRef);
+    CHECK_TRUE(rm.GetMaterial("assets/../assets/wall.sagemat") == byRef);
+    CHECK_TRUE(rm.GetMaterial((fs::current_path(ec) / "assets/wall.sagemat").string()) == byRef);
+    // Обратный слэш здесь НЕ проверяется намеренно: на POSIX это законный
+    // символ имени, то есть «assets\\wall.sagemat» — другой файл, а не другое
+    // написание того же. На Windows разделители сводит сама файловая система.
+
+    // И правка через одно написание видна через другое — это и есть то, чего
+    // ждут от редактора материалов.
+    // Значение НАРОЧНО не совпадает ни с одним значением по умолчанию: иначе
+    // «тот же объект» и «новый объект с дефолтом» дали бы одинаковый ответ.
+    byRef->Albedo = glm::vec3(0.25f, 0.5f, 0.75f);
+    std::shared_ptr<Material> again = rm.GetMaterial("./assets/wall.sagemat");
+    CHECK_TRUE(again != nullptr);
+    if (again) {
+        CHECK_NEAR(again->Albedo.x, 0.25f, 1e-4);
+        CHECK_NEAR(again->Albedo.y, 0.50f, 1e-4);
+        CHECK_NEAR(again->Albedo.z, 0.75f, 1e-4);
+    }
+
+    rm.Clear();
+    fs::current_path(saved, ec);
 }

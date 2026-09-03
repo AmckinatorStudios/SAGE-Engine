@@ -196,7 +196,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     }
 
     ImGui::Separator();
-    bool haveProject = host.CurrentProject().Loaded();
+    const bool haveProject = true; // проект есть всегда (см. LauncherPanel.h)
     ImGui::BeginDisabled(!haveProject);
     if (ImGui::Button(T("Save to Project"))) {
         std::string path = (host.CurrentProject().Dir() / "sage.cfg").string();

@@ -140,10 +140,8 @@ void DialogsPanel::Draw(EditorHost& host) {
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal(T("Save Scene As" "###Save Scene As"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::InputText(T("File name"), m_sceneName, sizeof(m_sceneName));
-        Project& project = host.CurrentProject();
-        fs::path target = project.Loaded()
-            ? project.ScenesDir() / (std::string(m_sceneName) + ".sage")
-            : fs::path(std::string(m_sceneName) + ".sage");
+        fs::path target =
+            host.CurrentProject().ScenesDir() / (std::string(m_sceneName) + ".sage");
         ImGui::TextDisabled("-> %s", target.string().c_str());
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (ImGui::Button(T("Save"), ImVec2(120, 0))) {
@@ -195,7 +193,7 @@ void DialogsPanel::Draw(EditorHost& host) {
             c.Title = T("Open scene");
             c.Filters = {".sage"};
             c.FilterLabel = T("Scenes (*.sage)");
-            if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().ScenesDir();
+            c.StartDir = host.CurrentProject().ScenesDir();
             BrowseButton("openscene", c, m_openPath, sizeof(m_openPath));
         }
         ImGui::TextDisabled("%s", T("Path to a .sage file (or double-click in the Assets panel)"));

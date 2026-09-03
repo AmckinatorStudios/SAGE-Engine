@@ -57,7 +57,7 @@ const char* ViewportPanel::ToolGroupTitle(ToolGroup g) {
         case ToolGroup::Space:      return T("Gizmo axes: object or world");
         case ToolGroup::Snap:       return T("Snapping and its step");
         case ToolGroup::Selection:  return T("Frame, drop, align");
-        case ToolGroup::Display:    return T("Grid, bounds, UI layout");
+        case ToolGroup::Display:    return T("Grid and bounds of the selection");
         case ToolGroup::RenderMode: return T("Render mode");
         case ToolGroup::Views:      return T("View layout and projection");
         default:                    return "?";
@@ -240,11 +240,6 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
         // мышью. Включается тогда, когда непонятно, почему клик выбрал не то.
         if (EditorIcons::IconOnlyButton("wire", T("Bounds of the selection"), host.ShowBounds()))
             host.ShowBounds() = !host.ShowBounds();
-        ImGui::SameLine();
-        // Режим вёрстки интерфейса: UI показывается прямо во вьюпорте и правится
-        // мышью. Раньше его было видно только в панели Game, где ничего не выделить.
-        if (EditorIcons::IconOnlyButton("layout", T("UI layout mode (U)"), host.UIEditMode()))
-            host.UIEditMode() = !host.UIEditMode();
         anyDrawn = true;
     }
 

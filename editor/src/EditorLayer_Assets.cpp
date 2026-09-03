@@ -109,10 +109,6 @@ void EditorLayer::HandleDroppedFiles() {
         // текстурами, набор интерфейса, тайлсет. Раскладывать его по файлам
         // вручную, чтобы движок согласился их принять, — работа .
         if (fs::is_directory(path, ec)) {
-            if (!m_project.Loaded()) {
-                SetStatusMessage(T("Open a project first — there is nowhere to bring the file"));
-                continue;
-            }
             const fs::path dest = m_assetsCwd / path.filename();
             std::error_code copyEc;
             fs::copy(path, dest, fs::copy_options::recursive, copyEc);
@@ -139,14 +135,9 @@ void EditorLayer::HandleDroppedFiles() {
         if (ext == ".sage") {
             // Сцена ОТКРЫВАЕТСЯ. Если она из другого проекта, ссылки внутри неё
             // указывают в тот проект, и об этом честнее сказать сразу.
-            if (m_project.Loaded() && m_project.AssetRef(path) == path.generic_string())
+            if (m_project.AssetRef(path) == path.generic_string())
                 SetStatusMessage(T("This scene is not from this project — assets may not be found"));
             LoadSceneFromFile(path);
-            continue;
-        }
-
-        if (!m_project.Loaded()) {
-            SetStatusMessage(T("Open a project first — there is nowhere to bring the file"));
             continue;
         }
 
@@ -177,7 +168,7 @@ void EditorLayer::ShowAssetInPanel(const fs::path& path) {
     if (path.empty()) return;
     fs::path full = path;
     std::error_code ec;
-    if (!fs::exists(full, ec) && m_project.Loaded()) full = m_project.Dir() / path;
+    if (!fs::exists(full, ec)) full = m_project.Dir() / path;
     if (!fs::exists(full, ec)) {
         SetStatusMessage(T("File not found: ") + path.string());
         return;
@@ -204,9 +195,10 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
 
     if (ext == ".sagemat") {
         PushUndoSnapshot();
-        MeshRendererComponent& mr = obj.Renderer();
-        mr.MaterialPath = ref;
-        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(ref);
+        // AssignMaterial, а не три присваивания: он же возвращает в нейтраль
+        // поправки экземпляра. Красный материал на зелёном кубе иначе даёт
+        // бурое пятно — цвет объекта множится на albedo материала.
+        AssignMaterial(obj.Renderer(), ref, ResourceManager::Instance().GetMaterial(ref));
         SetStatusMessage(T("Material assigned: ") + asset.filename().string());
         return true;
     }
@@ -332,8 +324,7 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         }
         PushUndoSnapshot();
         MeshRendererComponent& mr = m_scene->Registry().get<MeshRendererComponent>(bestEntity);
-        mr.MaterialPath = ref;
-        mr.MaterialPtr = ResourceManager::Instance().GetMaterial(ref);
+        AssignMaterial(mr, ref, ResourceManager::Instance().GetMaterial(ref));
         const int id = m_scene->Registry().get<IdComponent>(bestEntity).Id;
         SetSelectedId(id);
         m_selection = {id};

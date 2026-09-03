@@ -49,7 +49,7 @@
 #include "panels/AssetsPanel.h"
 #include "panels/LauncherPanel.h"
 #include "panels/EnvironmentPanel.h"
-#include "panels/UIToolsPanel.h"
+#include "panels/UIEditorPanel.h"
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/DialogsPanel.h"
@@ -127,8 +127,6 @@ public:
 
     // --- EditorHost: сущности ---
     GameObject CreateCubeEntity(const std::string& name) override;
-    // Готовый элемент интерфейса по имени пресета (Panel/Button/Label/...).
-    GameObject CreateUIEntity(const std::string& preset);
     GameObject CreatePrimitiveEntity(const std::string& name, MeshRef::Type type);
     GameObject DuplicateEntity(GameObject src); // копия одной сущности (для Duplicate/prefab)
     void DuplicateSelected() override;
@@ -156,8 +154,8 @@ public:
     float& SnapScale() override { return m_snapScale; }
     float SnapStepForCurrentOp() override;
     bool& ShowBounds() override { return m_showBounds; }
-    bool& UIEditMode() override { return m_uiEditMode; }
     UIToolSettings& UITools() override { return m_uiTools; }
+    GameObject CreateUIEntity(const std::string& preset) override;
     bool& ColliderEditMode() override { return m_colliderEdit; }
 
     // --- EditorHost: инструменты над выделением ---
@@ -206,7 +204,7 @@ public:
             case EditorPanel::Profiler:    return m_showProfiler;
             case EditorPanel::Game:        return m_showGame;
             case EditorPanel::Viewport:    return m_showViewport;
-            case EditorPanel::UITools:     return m_showUITools;
+            case EditorPanel::UIEditor:    return m_showUIEditor;
             case EditorPanel::Settings:    return m_showSettings;
             default:                       return m_showViewport;
         }
@@ -307,17 +305,7 @@ private:
     float m_snapRotate = 15.0f;
     float m_snapScale = 0.1f;
     bool m_showBounds = false;
-    bool m_uiEditMode = false;
     UIToolSettings m_uiTools;   // сетка и привязки вёрстки (см. UIToolSettings.h)
-    // Режим вёрстки в ПРОШЛОМ кадре: по фронту включения открывается панель
-    // «Вёрстка». Включить режим и не увидеть инструментов — ровно то, из-за
-    // чего их потом ищут в меню.
-    bool m_uiEditModePrev = false;
-    // Сколько кадров ещё просить фокус для панели вёрстки. Не флаг на один
-    // кадр: на первых кадрах редактор перестраивает раскладку доков и в конце
-    // сам ставит фокус на Viewport — запрос, поданный ровно в тот кадр,
-    // затирался, и панель открывалась за вкладкой иерархии.
-    int m_focusUITools = 0;
     bool m_colliderEdit = false; // гизмо тянет коллайдер, а не объект
 
     // --- Play-режим ---
@@ -359,10 +347,9 @@ private:
     bool m_showHierarchy = true;
     bool m_showInspector = true;
     bool m_showEnvironment = true;
-    // Панель «Вёрстка» — по умолчанию закрыта: она нужна, только когда собирают
-    // интерфейс, а места занимает как инспектор. Открывается вместе с режимом
-    // вёрстки (клавиша U) и через меню Window.
-    bool m_showUITools = false;
+    // Редактор интерфейса — по умолчанию закрыт: это отдельный инструмент под
+    // отдельную задачу, и открывают его, когда садятся верстать.
+    bool m_showUIEditor = false;
     bool m_showViewport = true;
     bool m_showGame = true;
     bool m_showConsole = true;
@@ -406,11 +393,15 @@ private:
     static std::function<void(const std::vector<std::string>&)> s_dropSink;
     LauncherPanel m_launcher;
     EnvironmentPanel m_environment;
-    UIToolsPanel m_uiToolsPanel;
+    UIEditorPanel m_uiEditor;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)
     bool m_launcherRequested = false; // Window > Project Launcher
+    // Прогон без человека (скриншот, самопроверка, автоигра) попросил не
+    // показывать стартовое окно. Раз работы без проекта больше нет, это значит
+    // «создай рабочий проект сам» — см. конец OnAttach.
+    bool m_headlessProject = false;
 
     // --- гибкие настройки движка (редактируются панелью Settings, сохраняются
     //     в <проект>/sage.cfg; Build Game кладёт их в собранную игру). Буферы

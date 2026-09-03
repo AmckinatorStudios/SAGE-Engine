@@ -319,10 +319,8 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
         // текущая папка процесса — не обязательно корень проекта, поэтому
         // ищем в обоих местах.
         std::error_code ec;
-        const bool missing =
-            !fs::exists(assetPath, ec) &&
-            !(host.CurrentProject().Loaded() &&
-              fs::exists(host.CurrentProject().Dir() / assetPath, ec));
+        const bool missing = !fs::exists(assetPath, ec) &&
+                             !fs::exists(host.CurrentProject().Dir() / assetPath, ec);
         if (missing) {
             ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", T("File not found"));
         } else {

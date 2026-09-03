@@ -70,12 +70,42 @@ struct ResourceManager::AsyncImpl {
 
 namespace {
 // Путь из проекта -> путь, который откроется ИЗ ТЕКУЩЕГО каталога процесса.
-//
-// Ключи кэша при этом остаются ИСХОДНЫМИ: по ним приходят повторные запросы,
-// hot-reload и стриминг, и подменять их на разрешённые значило бы, что один и
-// тот же ассет лежит в кэше дважды — под относительным путём и под полным.
 std::string Locate(const std::string& path) {
     return sage::AssetDatabase::Instance().LocatePath(path);
+}
+
+// КЛЮЧ КЭША: один файл — одна запись, как бы путь ни написали.
+//
+// Ключом раньше был путь «как дали», и это ломало редактор материалов
+// НАСМЕРТЬ. Сущность держит ссылку относительно проекта («assets/wall.sagemat»
+// — так пишет Project::AssetRef, так она уезжает в .sage), а панель ассетов
+// работает настоящим путём в файловой системе («<проект>/assets/wall.sagemat»).
+// Два написания — две записи в кэше — ДВА РАЗНЫХ объекта Material на один файл:
+// редактор правил свой, рендер рисовал свой. Со стороны это выглядело как
+// «правки материала не применяются» — и не применялись они никогда, ни к
+// одному полю. Тем же путём один и тот же меш и одна и та же текстура ложились
+// в память по два раза.
+//
+// Сначала Locate (ссылка проекта -> открывающийся путь), затем
+// weakly_canonical: он убирает «.», «..», разницу разделителей и символические
+// ссылки, и НЕ требует существования файла — несуществующий путь тоже получает
+// одно каноническое написание, поэтому негативный кэш работает так же.
+//
+// Загрузка при этом идёт по-прежнему через Locate(исходный путь): ключ — дело
+// кэша, а чем открыть файл, решает база ассетов.
+//
+// Цена — около двух микросекунд на вызов (Locate плюс weakly_canonical, обе
+// ходят в файловую систему), и её НЕ НАДО прятать за таблицей запомненных
+// ответов: ключ считается только при загрузке ассета и при назначении его
+// объекту, а не в кадре — в кадре материалы и текстуры уже разобраны в
+// shared_ptr. Таблица же добавила бы устаревание, привязанное к текущему
+// каталогу процесса и к корню проекта: файл при этом существует, просто не тот.
+std::string CacheKey(const std::string& path) {
+    if (path.empty()) return path;
+    std::error_code ec;
+    const std::filesystem::path full = std::filesystem::weakly_canonical(Locate(path), ec);
+    if (ec || full.empty()) return std::filesystem::path(path).lexically_normal().generic_string();
+    return full.generic_string();
 }
 } // namespace
 
@@ -131,7 +161,8 @@ long long FileStamp(const std::string& path) {
 } // namespace
 
 std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
-    auto it = m_models.find(path);
+    const std::string key = CacheKey(path);
+    auto it = m_models.find(key);
     if (it != m_models.end()) return it->second;
     std::shared_ptr<Mesh> mesh;
     try {
@@ -139,14 +170,15 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
     }
-    m_models[path] = mesh; // в т.ч. nullptr — негативный кэш (не перечитывать битый файл)
-    m_modelStamps[path] = FileStamp(Locate(path));
+    m_models[key] = mesh; // в т.ч. nullptr — негативный кэш (не перечитывать битый файл)
+    m_modelStamps[key] = FileStamp(Locate(path));
     return mesh;
 }
 
 std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
     const std::string& path) {
-    auto it = m_skinned.find(path);
+    const std::string key = CacheKey(path);
+    auto it = m_skinned.find(key);
     if (it != m_skinned.end()) return it->second;
     std::shared_ptr<sage::render::SkinnedModel> model;
     try {
@@ -154,13 +186,14 @@ std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Скиннинг-модель не загрузилась (" << path << "): " << e.what();
     }
-    m_skinned[path] = model; // в т.ч. nullptr — негативный кэш
+    m_skinned[key] = model; // в т.ч. nullptr — негативный кэш
     return model;
 }
 
 std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
-    m_models.erase(path); // сброс кэша -> GetModel перечитает с диска (новый .sageimport)
-    m_modelStamps.erase(path);
+    const std::string key = CacheKey(path);
+    m_models.erase(key); // сброс кэша -> GetModel перечитает с диска (новый .sageimport)
+    m_modelStamps.erase(key);
     return GetModel(path);
 }
 
@@ -214,7 +247,8 @@ int ResourceManager::ReloadChangedAssets() {
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
                                                     TextureFilter filter, bool mipmaps) {
     if (path.empty()) return nullptr;
-    auto it = m_textures.find(path);
+    const std::string key = CacheKey(path);
+    auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick(); // обращение -> «свежая» для LRU
         // Тот же файл запросили с другой фильтрацией: пересоздаём картинку НА
@@ -250,14 +284,15 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
     rec.Tick = NextTick();
     std::shared_ptr<Texture> result = rec.Tex; // держим ссылку -> не вытеснится ниже
     m_textureBytes += rec.Bytes;
-    m_textures[path] = std::move(rec);
+    m_textures[key] = std::move(rec);
     EvictToBudget();
     return result;
 }
 
 std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& path) {
     if (path.empty()) return nullptr;
-    auto it = m_textures.find(path);
+    const std::string key = CacheKey(path);
+    auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick();
         return it->second.Tex; // готовая или ещё грузящийся плейсхолдер
@@ -271,7 +306,7 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
         rec.Tex = std::make_shared<Texture>(kPlaceholder, 1, 1, TextureFilter::Bilinear, false);
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Не удалось создать плейсхолдер текстуры (" << path << "): " << e.what();
-        m_textures[path] = TextureRecord{}; // негативный кэш
+        m_textures[key] = TextureRecord{}; // негативный кэш
         return nullptr;
     }
     rec.Bytes = rec.Tex->GpuBytes();
@@ -279,12 +314,14 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     rec.Pending = true;
     std::shared_ptr<Texture> result = rec.Tex;
     m_textureBytes += rec.Bytes;
-    m_textures[path] = std::move(rec);
+    m_textures[key] = std::move(rec);
 
     StartWorker();
     {
+        // Ключ задачи — тот же канонический: результат ищется в кэше по нему,
+        // и разойдись они, готовые пиксели не нашли бы своей записи.
         std::lock_guard<std::mutex> lk(m_async->JobMx);
-        m_async->Jobs.push_back({path, Locate(path)});
+        m_async->Jobs.push_back({key, Locate(path)});
     }
     m_async->Pending.fetch_add(1);
     m_async->JobCv.notify_one();
@@ -322,11 +359,12 @@ int ResourceManager::PumpAsyncUploads() {
 
 std::shared_ptr<Skybox> ResourceManager::GetSkybox(const std::string& directory) {
     if (directory.empty()) return nullptr;
-    auto it = m_skyboxes.find(directory);
+    const std::string key = CacheKey(directory);
+    auto it = m_skyboxes.find(key);
     if (it != m_skyboxes.end()) return it->second; // в т.ч. закэшированный nullptr
 
     std::shared_ptr<Skybox> sky = Skybox::LoadFromDirectory(Locate(directory));
-    m_skyboxes[directory] = sky;
+    m_skyboxes[key] = sky;
     return sky;
 }
 
@@ -347,7 +385,8 @@ void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<T
 }
 
 std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) {
-    auto it = m_materials.find(path);
+    const std::string key = CacheKey(path);
+    auto it = m_materials.find(key);
     if (it != m_materials.end()) return it->second;
     auto material = std::make_shared<Material>();
     try {
@@ -358,8 +397,8 @@ std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) 
     ResolveMaterialTextures(*material);
     if (material->HasCustomShader())
         material->ShaderPtr = GetShader(material->VertexShaderPath, material->FragmentShaderPath);
-    m_materials[path] = material;
-    m_materialStamps[path] = FileStamp(Locate(path));
+    m_materials[key] = material;
+    m_materialStamps[key] = FileStamp(Locate(path));
     return material;
 }
 
@@ -378,7 +417,9 @@ std::shared_ptr<Material> ResourceManager::MakeMaterial(const std::string& name)
 std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath,
                                                    const std::string& fragmentPath) {
     if (vertexPath.empty() || fragmentPath.empty()) return nullptr;
-    const std::string key = vertexPath + "|" + fragmentPath;
+    // Ключ — из КАНОНИЧЕСКИХ путей: одна и та же пара файлов, названная
+    // по-разному, не должна собираться дважды.
+    const std::string key = CacheKey(vertexPath) + "|" + CacheKey(fragmentPath);
     auto it = m_shaders.find(key);
     if (it != m_shaders.end()) return it->second.Program;
 
@@ -427,7 +468,7 @@ int ResourceManager::ReloadChangedShaders() {
 }
 
 std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& path) {
-    auto it = m_materials.find(path);
+    auto it = m_materials.find(CacheKey(path));
     if (it == m_materials.end()) return GetMaterial(path);
     try {
         *it->second = Material::LoadFromFile(Locate(path));

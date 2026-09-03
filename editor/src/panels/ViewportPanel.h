@@ -8,7 +8,6 @@
 
 #include "imgui.h"
 
-#include "UICanvas.h"
 
 class EditorHost;
 
@@ -113,7 +112,6 @@ private:
     ImVec2 m_toolsMax{0.0f, 0.0f};
     bool m_toolsHovered = false;
 
-    UICanvas m_uiCanvas;   // вёрстка интерфейса мышью (режим UI)
     bool m_cameraDriving = false;  // ПКМ-полёт активен (перехватывает WASD у хоткеев гизмо)
     // Куда вернуть курсор после захвата (см. ViewportPanel.cpp).
     ImVec2 m_captureReturnPos{0.0f, 0.0f};

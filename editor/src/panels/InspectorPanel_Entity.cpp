@@ -307,7 +307,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 c.Title = T("Choose a script");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Script);
                 c.FilterLabel = T("Scripts (*.lua)");
-                if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+                c.StartDir = host.CurrentProject().AssetsDir();
                 m_browser.Open(c);
                 // Цель — СУЩНОСТЬ, а не указатель на поле компонента: диалог
                 // отвечает через кадр, а за этот кадр сцену могут перезагрузить
