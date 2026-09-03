@@ -266,8 +266,16 @@ using sage::scene::CopySubtree;
 // Копирует одну сущность (без детей) со всеми компонентами; сдвиг, чтобы копия
 // не сливалась с оригиналом. Возвращает копию.
 GameObject EditorLayer::DuplicateEntity(GameObject src) {
-    GameObject copy = m_scene->CreateObject(src.Name() + " Copy");
-    CopyAllComponents(src, copy);
+    // ПОДДЕРЕВО, а не одна сущность. Копировались только компоненты выбранного
+    // объекта, и его потомки в копию не попадали: Ctrl+D на панели интерфейса
+    // давал панель БЕЗ надписи, на двери — дверь без ручки, на составном
+    // персонаже — один корень. Заметить это можно было только по тому, что
+    // копия «пустая», а причина не видна нигде.
+    //
+    // Заодно копирование поддерева переписывает ссылки внутрь копии
+    // (см. sage::scene::CopySubtree): дубликат двери открывается СВОЕЙ кнопкой.
+    GameObject copy = CopySubtree(*m_scene, src.Entity(), *m_scene, entt::null);
+    copy.SetName(src.Name() + " Copy");
     copy.GetTransform().Position.x += 0.5f;
     return copy;
 }

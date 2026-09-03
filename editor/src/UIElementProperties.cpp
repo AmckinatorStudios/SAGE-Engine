@@ -252,8 +252,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             sage::events::Bindings& v = ui::FieldAs<sage::events::Bindings>(data, f);
             if (ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen)) {
                 if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
-                if (varsui::DrawBindings(host, f.Key, v, sage::events::UITriggers(), ctx.Preview))
-                    host.PushUndoSnapshot();
+                varsui::DrawBindings(host, f.Key, v, sage::events::UITriggers(), ctx.Preview);
                 ImGui::TreePop();
             }
             // Подсказка уже показана внутри — общий хвост её бы задублировал.

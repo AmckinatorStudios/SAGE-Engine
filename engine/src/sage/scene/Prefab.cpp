@@ -7,6 +7,8 @@
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIPart.h"
+#include "sage/vars/Refs.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 
@@ -75,22 +77,16 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<AnimatedModelComponent>(src, dst);
     CopyIfPresent<IKComponent>(src, dst);
     CopyIfPresent<ReflectionProbeComponent>(src, dst);
-    // Интерфейс — набор компонентов, и копировать его надо целиком: пропустить
-    // одну часть значит получить префаб-кнопку, которая не нажимается, или
-    // панель без надписи.
-    CopyIfPresent<sage::ui::Transform>(src, dst);
-    CopyIfPresent<sage::ui::Fill>(src, dst);
-    CopyIfPresent<sage::ui::Label>(src, dst);
-    CopyIfPresent<sage::ui::Image>(src, dst);
-    CopyIfPresent<sage::ui::Bar>(src, dst);
-    CopyIfPresent<sage::ui::Icon>(src, dst);
-    CopyIfPresent<sage::ui::Interactable>(src, dst);
-    CopyIfPresent<sage::ui::TextInput>(src, dst);
-    CopyIfPresent<sage::ui::Range>(src, dst);
-    CopyIfPresent<sage::ui::Mask>(src, dst);
-    CopyIfPresent<sage::ui::Layout>(src, dst);
-    CopyIfPresent<sage::ui::Canvas>(src, dst);
-    CopyIfPresent<sage::ui::Group>(src, dst);
+    // Интерфейс — ПО РЕЕСТРУ ЧАСТЕЙ, а не списком руками.
+    //
+    // Список здесь был, и он молча устаревал: часть, зарегистрированную игрой
+    // (sage::ui::RegisterPart), он не знал по определению — такая часть
+    // переживала сохранение сцены и пропадала при дублировании объекта.
+    // Объяснить это можно было только чтением исходников движка.
+    CopyIfPresent<sage::ui::Transform>(src, dst);   // прямоугольник — не часть, а сам элемент
+    for (const sage::ui::PartType& part : sage::ui::Parts()) {
+        if (part.Copy) part.Copy(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
+    }
     CopyIfPresent<GIStaticComponent>(src, dst);
     CopyIfPresent<CharacterControllerComponent>(src, dst);
     CopyIfPresent<ShaderParamsComponent>(src, dst);
@@ -125,16 +121,58 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
         pe->Accumulator = 0.0f;
 }
 
-GameObject CopySubtree(Scene& src, entt::entity srcRoot, Scene& dst, entt::entity dstParent) {
+namespace {
+
+// Копирует поддерево и заодно собирает «старый id -> новый id» и список
+// созданных сущностей: без них ссылки внутри копии переписать нечем.
+GameObject CopySubtreeCollecting(Scene& src, entt::entity srcRoot, Scene& dst,
+                                 entt::entity dstParent, std::unordered_map<int, int>& idMap,
+                                 std::vector<entt::entity>& made) {
     GameObject s(&src.Registry(), srcRoot);
     GameObject d = dst.CreateObject(s.Name());
     CopyAllComponents(s, d);
     if (dstParent != entt::null) dst.SetParent(d.Entity(), dstParent);
+    if (const IdComponent* srcId = src.Registry().try_get<IdComponent>(srcRoot))
+        idMap[srcId->Id] = d.Id();
+    made.push_back(d.Entity());
     if (const HierarchyComponent* h = src.Registry().try_get<HierarchyComponent>(srcRoot)) {
         std::vector<entt::entity> kids = h->Children; // копия: SetParent мутирует список
         for (entt::entity k : kids)
-            if (src.Registry().valid(k)) CopySubtree(src, k, dst, d.Entity());
+            if (src.Registry().valid(k))
+                CopySubtreeCollecting(src, k, dst, d.Entity(), idMap, made);
     }
+    return d;
+}
+
+} // namespace
+
+// ССЫЛКИ ВНУТРИ КОПИИ ВЕДУТ В КОПИЮ.
+//
+// Ссылка хранит номер объекта, а у копии номера другие. Не переписав их, мы
+// получаем заготовку, которая работает ровно один раз: вторая поставленная
+// дверь открывается кнопкой ПЕРВОЙ, а десятая не открывается вовсе, потому что
+// такого номера в сцене уже нет. Ломается это молча — в инспекторе ссылка
+// выглядит заполненной, и она даже указывает на существующий объект.
+//
+// Ссылка НАРУЖУ поддерева остаётся как была: дублируя лампу, которая светит на
+// игрока, человек ждёт вторую лампу, светящую на того же игрока, а не
+// оборванную ссылку.
+void RemapEntityRefs(Scene& scene, const std::vector<entt::entity>& entities,
+                     const std::unordered_map<int, int>& idMap) {
+    for (entt::entity e : entities) {
+        if (!scene.Registry().valid(e)) continue;
+        sage::vars::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
+            auto it = idMap.find(ref.Id);
+            if (it != idMap.end()) ref.Id = it->second;
+        });
+    }
+}
+
+GameObject CopySubtree(Scene& src, entt::entity srcRoot, Scene& dst, entt::entity dstParent) {
+    std::unordered_map<int, int> idMap;
+    std::vector<entt::entity> made;
+    GameObject d = CopySubtreeCollecting(src, srcRoot, dst, dstParent, idMap, made);
+    RemapEntityRefs(dst, made, idMap);
     return d;
 }
 
@@ -144,7 +182,41 @@ bool SavePrefab(Scene& scene, entt::entity root, const std::string& path, std::s
         return false;
     }
     Scene temp("Prefab");
-    CopySubtree(scene, root, temp, entt::null);
+    std::unordered_map<int, int> idMap;
+    std::vector<entt::entity> made;
+    CopySubtreeCollecting(scene, root, temp, entt::null, idMap, made);
+
+    // ССЫЛКИ НАРУЖУ ЗАГОТОВКИ ОБРЫВАЮТСЯ, И ЭТО НЕ ПОТЕРЯ ДАННЫХ.
+    //
+    // Префаб — файл, который ставят в ЛЮБУЮ сцену и сколько угодно раз. Ссылка
+    // на объект, оставшийся в исходной сцене, там не значит ничего: номер либо
+    // не найдётся, либо — что хуже — попадёт в посторонний объект, случайно
+    // получивший его. Второе не отличить от работающей связи ни в инспекторе,
+    // ни глазами: заготовка «дверь» будет исправно дёргать чей-то фонарь.
+    //
+    // Поэтому такие ссылки обнуляются, а автор узнаёт об этом из лога — молча
+    // обрубить связь значило бы поменять поведение заготовки без предупреждения.
+    // Обрыв идёт ДО переписывания номеров и решается ПО КАРТЕ, а не поиском в
+    // получившейся заготовке. Разница не тонкая: номера в заготовке начинаются
+    // с единицы, и «внешний» номер из исходной сцены запросто совпадёт с
+    // номером объекта ВНУТРИ неё — тогда проверка «а есть ли такой?» ответит
+    // «есть», и ссылка на игрока молча превратится в ссылку на дверную ручку.
+    int dropped = 0;
+    for (entt::entity e : made) {
+        if (!temp.Registry().valid(e)) continue;
+        sage::vars::VisitEntityRefs(temp.Registry(), e, [&](sage::vars::EntityRef& ref) {
+            if (!ref.Valid()) return;
+            if (idMap.count(ref.Id) != 0) return;   // внутрь заготовки — оставляем
+            ref.Id = 0;
+            ++dropped;
+        });
+    }
+    RemapEntityRefs(temp, made, idMap);
+    if (dropped > 0) {
+        LOG_WARN("Prefab") << "В заготовке " << path << " оборвано ссылок наружу: " << dropped
+                           << " — префаб ставят в любую сцену, и объекта из исходной там нет";
+    }
+
     try {
         SceneSerializer::Save(temp, path);
     } catch (const std::exception& e) {
@@ -160,11 +232,28 @@ int InstantiatePrefab(Scene& scene, const std::string& path) {
     std::shared_ptr<Scene> prefab = LoadCached(path);
     if (!prefab) return -1;
 
+    // ВСЕ корни префаба переносятся ОДНОЙ операцией, и карта номеров у них
+    // общая: связь между двумя корнями одного файла (кнопка в одном, дверь в
+    // другом) иначе указывала бы наружу — то есть в чужой объект сцены,
+    // случайно получивший тот же номер.
+    std::unordered_map<int, int> idMap;
+    std::vector<entt::entity> made;
     int firstRootId = -1;
     for (entt::entity r : RootsOf(*prefab)) {
-        GameObject copy = CopySubtree(*prefab, r, scene, entt::null);
+        GameObject copy = CopySubtreeCollecting(*prefab, r, scene, entt::null, idMap, made);
         if (firstRootId == -1) firstRootId = copy.Id();
     }
+    // Ссылка, которой в карте нет, в ЗАГОТОВКЕ означать может только одно —
+    // что файл сделан до того, как обрыв внешних ссылок появился при
+    // сохранении. Оставить её нельзя: номер из чужой сцены попадёт в
+    // посторонний объект этой, и «работающая» связь будет дёргать не то.
+    for (entt::entity e : made) {
+        if (!scene.Registry().valid(e)) continue;
+        sage::vars::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
+            if (ref.Valid() && idMap.count(ref.Id) == 0) ref.Id = 0;
+        });
+    }
+    RemapEntityRefs(scene, made, idMap);
     return firstRootId;
 }
 

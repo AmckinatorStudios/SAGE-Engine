@@ -350,7 +350,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             // назначении: файл правят снаружи редактора, и переменная,
             // добавленная в скрипт минуту назад, обязана появиться здесь сама.
             if (hasScript) host.MergeScriptVars(obj);
-            if (varsui::DrawTable(host, obj, vc.Values, &m_preview)) host.PushUndoSnapshot();
+            // Снимок для отмены берут сами поля (см. VarsEditor.cpp): у
+            // ползунка он нужен ДО перетаскивания, а не после.
+            varsui::DrawTable(host, obj, vc.Values, &m_preview);
         }
     }
 

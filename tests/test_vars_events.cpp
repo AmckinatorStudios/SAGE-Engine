@@ -7,6 +7,7 @@
 // её каждый кадр.
 #include "TestFramework.h"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -15,7 +16,9 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
+#include "sage/scene/Prefab.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/vars/ScriptVars.h"
 #include "sage/vars/VarsComponent.h"
@@ -494,4 +497,168 @@ TEST(Events_a_disabled_binding_stays_silent) {
     scene.Events.On("game.start", [&](const sage::events::Event&) { ++heard; });
     ClickAt(scene, {50.0f, 50.0f});
     CHECK_EQ(heard, 0);
+}
+
+// ===========================================================================
+//  ПРЕФАБЫ: СВЯЗИ ВНУТРИ ЗАГОТОВКИ ОБЯЗАНЫ ОСТАВАТЬСЯ ВНУТРИ НЕЁ
+// ===========================================================================
+
+// Префаб — это ШАБЛОН, который ставят в сцену много раз. Ссылка внутри него
+// (кнопка открывает СВОЮ дверь) хранится номером объекта, и при постановке
+// копии номера меняются. Если их не переписать, вторая копия будет открывать
+// дверь ПЕРВОЙ — а десятая не откроет ничего, потому что такого номера в сцене
+// нет. Ломается это молча: в инспекторе ссылка выглядит заполненной.
+TEST(Prefab_a_link_inside_the_prefab_points_at_the_copy_not_the_original) {
+    Scene scene("world");
+    GameObject door = scene.CreateObject("Door");
+    GameObject button = scene.CreateObject("Button");
+    scene.SetParent(button.Entity(), door.Entity());   // кнопка — часть двери
+
+    scene.Registry().emplace<VarsComponent>(button.Entity()).Values.Set(
+        "opens", Value(EntityRef{door.Id()}));
+    sage::events::Binding b;
+    b.Trigger = "click";
+    b.Event = "door.open";
+    b.Target = EntityRef{door.Id()};
+    b.Method = "Open";
+    scene.Registry().emplace<sage::ui::Interactable>(button.Entity()).Events.push_back(b);
+
+    // Копия поддерева — тем же путём, каким работают и «Дублировать», и префаб.
+    GameObject copyRoot = sage::scene::CopySubtree(scene, door.Entity(), scene, entt::null);
+    CHECK_TRUE(copyRoot.Valid());
+    CHECK_TRUE(copyRoot.Id() != door.Id());
+
+    // Находим кнопку-копию: она ребёнок копии двери.
+    const HierarchyComponent* h =
+        scene.Registry().try_get<HierarchyComponent>(copyRoot.Entity());
+    CHECK_TRUE(h != nullptr && h->Children.size() == 1);
+    if (!h || h->Children.empty()) return;
+    const entt::entity copyButton = h->Children[0];
+
+    const VarsComponent& cv = scene.Registry().get<VarsComponent>(copyButton);
+    const sage::ui::Interactable& ca = scene.Registry().get<sage::ui::Interactable>(copyButton);
+    CHECK_EQ(cv.Values.Get("opens").AsEntity().Id, copyRoot.Id());
+    CHECK_EQ(ca.Events.size(), (size_t)1);
+    if (!ca.Events.empty()) CHECK_EQ(ca.Events[0].Target.Id, copyRoot.Id());
+
+    // А оригинал не тронут: копирование не должно править то, с чего копируют.
+    const VarsComponent& ov = scene.Registry().get<VarsComponent>(button.Entity());
+    CHECK_EQ(ov.Values.Get("opens").AsEntity().Id, door.Id());
+}
+
+// Ссылка НАРУЖУ поддерева остаётся как была. Дублируя лампу, которая светит на
+// игрока, человек ждёт вторую лампу, светящую на того же игрока, — а не
+// оборванную ссылку.
+TEST(Prefab_a_link_outside_the_subtree_is_kept_as_is) {
+    Scene scene("world");
+    GameObject player = scene.CreateObject("Player");
+    GameObject lamp = scene.CreateObject("Lamp");
+    scene.Registry().emplace<VarsComponent>(lamp.Entity()).Values.Set(
+        "watch", Value(EntityRef{player.Id()}));
+
+    GameObject copy = sage::scene::CopySubtree(scene, lamp.Entity(), scene, entt::null);
+    const VarsComponent& cv = scene.Registry().get<VarsComponent>(copy.Entity());
+    CHECK_EQ(cv.Values.Get("watch").AsEntity().Id, player.Id());
+}
+
+// Своя часть игры, зарегистрированная в реестре, обязана ехать в префаб и в
+// дубликат. Раньше список копируемых частей был написан руками — то есть часть,
+// которой в нём нет, переживала сохранение сцены, но пропадала при дублировании.
+namespace {
+struct PrefabMark {
+    float Power = 1.0f;
+    std::string Tag;
+};
+const std::vector<sage::ui::PartField>& PrefabMarkFields() {
+    static const std::vector<sage::ui::PartField> f = {
+        {"power", "Power", sage::ui::PartField::Kind::Float, offsetof(PrefabMark, Power), 0.0f, 10.0f},
+        {"tag", "Tag", sage::ui::PartField::Kind::String, offsetof(PrefabMark, Tag)},
+    };
+    return f;
+}
+} // namespace
+
+TEST(Prefab_a_game_part_survives_copying) {
+    sage::ui::RegisterPart(
+        sage::ui::MakePart<PrefabMark>("prefabMark", "Prefab Mark", 95, &PrefabMarkFields()));
+
+    Scene scene("world");
+    GameObject src = scene.CreateObject("Marked");
+    scene.Registry().emplace<sage::ui::Transform>(src.Entity());
+    PrefabMark mark;
+    mark.Power = 4.5f;
+    mark.Tag = "особая";
+    scene.Registry().emplace<PrefabMark>(src.Entity(), mark);
+
+    GameObject copy = sage::scene::CopySubtree(scene, src.Entity(), scene, entt::null);
+    const PrefabMark* copied = scene.Registry().try_get<PrefabMark>(copy.Entity());
+    CHECK_TRUE(copied != nullptr);
+    if (copied) {
+        CHECK_NEAR(copied->Power, 4.5f, 1e-4f);
+        CHECK_EQ(copied->Tag, std::string("особая"));
+    }
+}
+
+// Ссылка НАРУЖУ заготовки при сохранении обрывается. Это не потеря данных, а
+// единственный честный исход: номер объекта из исходной сцены в другой сцене
+// либо не найдётся, либо попадёт в посторонний объект — и такая «работающая»
+// связь неотличима от настоящей ни в инспекторе, ни глазами.
+TEST(Prefab_a_link_pointing_outside_the_prefab_is_dropped_when_saving) {
+    Scene scene("world");
+    GameObject player = scene.CreateObject("Player");
+    GameObject door = scene.CreateObject("Door");
+    GameObject knob = scene.CreateObject("Knob");
+    scene.SetParent(knob.Entity(), door.Entity());
+
+    sage::vars::Table& vars = scene.Registry().emplace<VarsComponent>(knob.Entity()).Values;
+    vars.Set("opens", Value(EntityRef{door.Id()}));      // внутрь заготовки
+    vars.Set("watch", Value(EntityRef{player.Id()}));    // наружу
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "sage_test_link.sageprefab").string();
+    std::string err;
+    CHECK_TRUE(sage::scene::SavePrefab(scene, door.Entity(), path, err));
+
+    Scene fresh("other");
+    sage::scene::ClearPrefabCache();
+    const int rootId = sage::scene::InstantiatePrefab(fresh, path);
+    CHECK_TRUE(rootId > 0);
+    GameObject newDoor = fresh.Get(rootId);
+    CHECK_TRUE(newDoor.Valid());
+    const HierarchyComponent* h = fresh.Registry().try_get<HierarchyComponent>(newDoor.Entity());
+    CHECK_TRUE(h != nullptr && h->Children.size() == 1);
+    if (!h || h->Children.empty()) return;
+
+    const VarsComponent& nv = fresh.Registry().get<VarsComponent>(h->Children[0]);
+    // Внутренняя связь ведёт в НОВУЮ дверь, а не в номер из старой сцены.
+    CHECK_EQ(nv.Values.Get("opens").AsEntity().Id, rootId);
+    // Внешняя — пуста, а не указывает в случайный объект новой сцены.
+    CHECK_FALSE(nv.Values.Get("watch").AsEntity().Valid());
+
+    std::filesystem::remove(path);
+    sage::scene::ClearPrefabCache();
+}
+
+// Дублирование берёт ПОДДЕРЕВО. Копировались только компоненты выбранного
+// объекта: Ctrl+D на панели интерфейса давал панель без надписи, на двери —
+// дверь без ручки. Проверка живёт здесь, а не в редакторе, потому что копирует
+// поддерево движок, а редактор — лишь один из его потребителей.
+TEST(Prefab_copying_a_subtree_takes_the_children_too) {
+    Scene scene("world");
+    GameObject panel = scene.CreateObject("Panel");
+    GameObject text = scene.CreateObject("Text");
+    GameObject icon = scene.CreateObject("Icon");
+    scene.SetParent(text.Entity(), panel.Entity());
+    scene.SetParent(icon.Entity(), text.Entity());   // внук: копия обязана дойти и до него
+
+    const size_t before = scene.Count();
+    GameObject copy = sage::scene::CopySubtree(scene, panel.Entity(), scene, entt::null);
+    CHECK_EQ(scene.Count(), before + 3);
+
+    const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(copy.Entity());
+    CHECK_TRUE(h != nullptr && h->Children.size() == 1);
+    if (!h || h->Children.empty()) return;
+    const HierarchyComponent* grand =
+        scene.Registry().try_get<HierarchyComponent>(h->Children[0]);
+    CHECK_TRUE(grand != nullptr && grand->Children.size() == 1);
 }

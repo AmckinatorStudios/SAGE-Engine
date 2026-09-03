@@ -149,6 +149,16 @@ struct PartType {
     const void* (*Get)(const entt::registry&, entt::entity) = nullptr;
     void* (*GetMutable)(entt::registry&, entt::entity) = nullptr;
 
+    // Перенести часть с одной сущности на другую — можно между реестрами.
+    //
+    // ЗАЧЕМ ЭТО В РЕЕСТРЕ. Копирование объекта (дублирование, префаб) шло по
+    // СПИСКУ ЧАСТЕЙ, написанному руками в Prefab.cpp. Список этот молча
+    // устаревает: своя часть игры переживала сохранение сцены (её пишет
+    // реестр), но пропадала при дублировании — и объяснить это можно было
+    // только чтением исходников движка. Раз реестр уже знает, как часть
+    // записать и как показать, он обязан знать и как её скопировать.
+    void (*Copy)(const entt::registry&, entt::entity, entt::registry&, entt::entity) = nullptr;
+
     // Рисование. nullptr — часть невидимая (поведение, раскладка, маска).
     void (*Draw)(const PartDrawContext&) = nullptr;
     // Второй слой — ПОВЕРХ всех частей элемента: рамка подложки, курсор поля
@@ -206,6 +216,9 @@ PartType MakePart(const char* id, const char* title, int order,
         return r.try_get<T>(e);
     };
     p.GetMutable = [](entt::registry& r, entt::entity e) -> void* { return r.try_get<T>(e); };
+    p.Copy = [](const entt::registry& sr, entt::entity se, entt::registry& dr, entt::entity de) {
+        if (const T* c = sr.try_get<T>(se)) dr.emplace_or_replace<T>(de, *c);
+    };
     return p;
 }
 
