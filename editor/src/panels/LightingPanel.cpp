@@ -252,6 +252,14 @@ void LightingPanel::Draw(EditorHost& host, bool* open) {
         ImGui::DragFloat(T("Fog End"), &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
         if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;
         ImGui::TextDisabled("%s", T("Linear distance fog (applied in Shaded mode)"));
+
+        // Объёмный свет живёт в настройках ДВИЖКА, а ищут его здесь — рядом с
+        // туманом, потому что для человека это одно и то же явление: воздух,
+        // который видно. Ссылка дешевле, чем вторая копия десятка ползунков в
+        // другом окне.
+        ImGui::TextDisabled("%s", T("Volumetric light and clouds are a frame cost, not a scene "
+                                    "property — they live in the engine settings."));
+        if (ImGui::Button(T("Volumetric Light..."))) host.ShowSettingsWindow();
     }
 
     DrawGISection(host);

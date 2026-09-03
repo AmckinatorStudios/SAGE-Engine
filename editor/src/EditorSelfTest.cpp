@@ -180,6 +180,64 @@ bool EditorLayer::SelfTestProjectAndAssets() {
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
             if (!ok) break;
         }
+        // --- Шаблон-КОПИЯ: готовый проект приезжает целиком -----------------
+        //
+        // У него другая природа: сцену строит не код редактора, а файлы на
+        // диске. Поэтому и проверять надо другое — что скрипты и сцена реально
+        // скопировались, а не что «функция вернула true». Пустая папка
+        // templates/ (сборка без витрины) — не провал: шаблон объявляет себя
+        // недоступным, и это тоже проверяется.
+        if (ok) {
+            const ProjectTemplate* showcase = FindProjectTemplate("showcase");
+            if (!showcase) {
+                LOG_ERROR("Editor") << "SELFTEST: шаблона showcase нет в списке";
+                ok = false;
+            } else if (!ProjectTemplateAvailable(*showcase)) {
+                LOG_WARN("Editor") << "SELFTEST: шаблон showcase не установлен рядом с "
+                                      "редактором — пропускаю (templates/showcase)";
+                // И отказ обязан быть ВНЯТНЫМ, а не пустым проектом.
+                std::string copyErr;
+                fs::remove_all("selftest_tpl_copy", ec);
+                if (CreateProject(".", "selftest_tpl_copy", "showcase", copyErr)) {
+                    LOG_ERROR("Editor") << "SELFTEST: недоступный шаблон всё равно создал проект";
+                    ok = false;
+                }
+                fs::remove_all("selftest_tpl_copy", ec);
+            } else {
+                fs::remove_all("selftest_tpl_copy", ec);
+                std::string copyErr;
+                if (!CreateProject(".", "selftest_tpl_copy", "showcase", copyErr)) {
+                    LOG_ERROR("Editor") << "SELFTEST: шаблон-копия не создался: " << copyErr;
+                    ok = false;
+                } else {
+                    // Сцена открыта из КОПИИ, а не осталась демо-сценой редактора.
+                    if (m_scene->Count() == 0) {
+                        LOG_ERROR("Editor") << "SELFTEST: шаблон-копия открыл пустую сцену";
+                        ok = false;
+                    }
+                    // Скрипты — то, ради чего копия и нужна: без них это не
+                    // проект, а его каркас.
+                    const fs::path scripts = fs::path("selftest_tpl_copy") / "assets" / "scripts";
+                    int lua = 0;
+                    for (const auto& e : fs::directory_iterator(scripts, ec))
+                        if (e.path().extension() == ".lua") ++lua;
+                    if (lua < 5) {
+                        LOG_ERROR("Editor") << "SELFTEST: в копии шаблона только " << lua
+                                            << " скриптов";
+                        ok = false;
+                    }
+                    // Имя проекта — ТО, КОТОРОЕ ПОПРОСИЛИ, а не имя шаблона:
+                    // копируется содержимое, а не чужая вывеска.
+                    if (m_project.Name() != "selftest_tpl_copy") {
+                        LOG_ERROR("Editor") << "SELFTEST: копия шаблона назвалась '"
+                                            << m_project.Name() << "'";
+                        ok = false;
+                    }
+                }
+                fs::remove_all("selftest_tpl_copy", ec);
+            }
+        }
+
         // Неизвестное имя шаблона — отказ, а не «создам что-нибудь».
         std::string bogusErr;
         if (ok && CreateProject(".", "selftest_tpl_bogus", "нет-такого", bogusErr)) {

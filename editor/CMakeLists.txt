@@ -86,6 +86,29 @@ add_custom_command(TARGET SageEditor POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:SageEditor>/assets
     COMMENT "Копирование ассетов редактора рядом с бинарником")
 
+# ГОТОВЫЕ ПРОЕКТЫ-ШАБЛОНЫ — рядом с бинарником, в templates/<id>.
+#
+# Копией, а не второй версией в editor/assets: источник у витрины ОДИН
+# (games/showcase), она собирается, гоняется автопрогоном и правится как
+# обычный проект. Держать её вторую копию внутри редактора значило бы
+# обновлять обе руками — и однажды забыть.
+#
+# docs/ (скриншоты для README витрины) не копируем: человеку, который создал
+# из неё проект, они не нужны, а весят они больше всего остального вместе.
+add_custom_command(TARGET SageEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            $<TARGET_FILE_DIR:SageEditor>/templates/showcase
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_SOURCE_DIR}/games/showcase/project.sageproj
+            $<TARGET_FILE_DIR:SageEditor>/templates/showcase/project.sageproj
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/games/showcase/scenes
+            $<TARGET_FILE_DIR:SageEditor>/templates/showcase/scenes
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/games/showcase/assets
+            $<TARGET_FILE_DIR:SageEditor>/templates/showcase/assets
+    COMMENT "Копирование шаблона-витрины в templates/ редактора")
+
 # Плагины редактора (см. src/PluginAPI.h) — каждый sage_add_editor_plugin()
 # ниже собирается отдельной динамической библиотекой и копируется в plugins/
 # рядом с SageEditor; должны идти ПОСЛЕ add_executable(SageEditor) выше — их

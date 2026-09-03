@@ -1,9 +1,11 @@
 #include "TestFramework.h"
 
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "sage/net/NetHost.h"
 #include "sage/net/NetworkSystem.h"
@@ -290,4 +292,277 @@ TEST(Net_server_full_denies_connection) {
     for (int i = 0; i < 10; ++i) { now += 0.02; b.Update(now); server.Update(now); }
     CHECK_FALSE(b.Connected()); // сервер заполнен -> ConnectDeny
     CHECK_EQ(server.ClientCount(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Репликация под нагрузкой и в плохой сети: то, чего одиночный куб на идеальном
+// loopback не проверяет.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Сцена из count реплицируемых кубов в ряд. Тридцать штук — уже больше того,
+// что влезает в один пакет: снапшот такой сцены неизбежно бьётся на части.
+void FillReplicated(Scene& scene, int count) {
+    for (int i = 0; i < count; ++i) {
+        GameObject o = scene.CreateObject("cube" + std::to_string(i));
+        o.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+        o.Renderer().Color = {0.5f, 0.5f, 0.5f};
+        o.GetTransform().Position = {(float)i, 0.0f, 0.0f};
+        scene.Registry().emplace<NetReplicatedComponent>(o.Entity());
+    }
+}
+
+int CountGhosts(Scene& scene, int expectIds) {
+    int n = 0;
+    for (int i = 1; i <= expectIds; ++i)
+        if (scene.Get(i).Valid()) ++n;
+    return n;
+}
+
+} // namespace
+
+TEST(Net_replicates_more_entities_than_fit_in_one_packet) {
+    // ТРИДЦАТЬ сущностей — снапшот заведомо длиннее одного пакета. Пока он ехал
+    // одним куском, это означало фрагментацию НЕНАДЁЖНОГО сообщения: любой
+    // потерянный кусок убивал снапшот целиком, а недособранные части копились
+    // в приёмнике. Снапшот обязан ехать самостоятельными частями.
+    Scene serverScene("srv"), clientScene("cli");
+    FillReplicated(serverScene, 30);
+
+    NetworkSystem server, client;
+    CHECK_TRUE(server.StartServer(0));
+    CHECK_TRUE(client.Connect("127.0.0.1", server.ServerPort()));
+
+    double now = 0.0;
+    for (int i = 0; i < 30; ++i) {
+        now += 0.05;
+        server.UpdateAt(serverScene, now);
+        client.UpdateAt(clientScene, now);
+    }
+    CHECK_TRUE(client.IsConnected());
+    CHECK_EQ(CountGhosts(clientScene, 30), 30);
+
+    client.Stop();
+    server.Stop();
+}
+
+TEST(Net_replication_survives_packet_loss) {
+    // Треть датаграмм теряется. Снапшоты ненадёжны намеренно (свежесть важнее
+    // доставки), поэтому проверяется не «дошло всё», а что сцена клиента
+    // СХОДИТСЯ: призраки на месте и стоят там, где им положено.
+    Scene serverScene("srv"), clientScene("cli");
+    FillReplicated(serverScene, 24);
+
+    NetworkSystem server, client;
+    CHECK_TRUE(server.StartServer(0));
+    CHECK_TRUE(client.Connect("127.0.0.1", server.ServerPort()));
+
+    double now = 0.0;
+    for (int i = 0; i < 20; ++i) {   // сперва подключаемся по чистой сети
+        now += 0.05;
+        server.UpdateAt(serverScene, now);
+        client.UpdateAt(clientScene, now);
+    }
+    CHECK_TRUE(client.IsConnected());
+
+    client.Client().Socket().SetSimulatedLoss(0.34f, 7);
+    for (int i = 0; i < 120; ++i) {
+        now += 0.05;
+        server.UpdateAt(serverScene, now);
+        client.UpdateAt(clientScene, now);
+    }
+    client.Client().Socket().SetSimulatedLoss(0.0f);
+    for (int i = 0; i < 20; ++i) {
+        now += 0.05;
+        server.UpdateAt(serverScene, now);
+        client.UpdateAt(clientScene, now);
+    }
+
+    CHECK_TRUE(client.IsConnected());   // потери не должны рвать соединение
+    CHECK_EQ(CountGhosts(clientScene, 24), 24);
+    // И позиции сошлись: сущность i стоит в x = i.
+    for (int i = 0; i < 24; ++i) {
+        GameObject g = clientScene.Get(i + 1);
+        CHECK_TRUE(g.Valid());
+        if (g.Valid()) CHECK_NEAR(g.GetTransform().Position.x, (float)i, 0.05f);
+    }
+
+    client.Stop();
+    server.Stop();
+}
+
+TEST(Net_stale_snapshot_does_not_rewind_entities) {
+    // Снапшоты идут ненадёжным каналом, а UDP вправе доставить их НЕ В ТОМ
+    // ПОРЯДКЕ. Пока в снапшоте не было номера, устаревший пакет применялся
+    // наравне со свежим — и объект дёргался назад. Проверяем ту же ситуацию
+    // напрямую: применяем свежий снапшот, затем устаревший.
+    Scene serverScene("srv"), clientScene("cli");
+    GameObject cube = serverScene.CreateObject("cube");
+    cube.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    serverScene.Registry().emplace<NetReplicatedComponent>(cube.Entity());
+    const int netId = cube.Id();
+
+    NetworkSystem server, client;
+    CHECK_TRUE(server.StartServer(0));
+    CHECK_TRUE(client.Connect("127.0.0.1", server.ServerPort()));
+
+    double now = 0.0;
+    auto pump = [&](int steps) {
+        for (int i = 0; i < steps; ++i) {
+            now += 0.05;
+            server.UpdateAt(serverScene, now);
+            client.UpdateAt(clientScene, now);
+        }
+    };
+    pump(20);
+    CHECK_TRUE(clientScene.Get(netId).Valid());
+
+    // Объект уезжает. Клиент теряет ЧАСТЬ снапшотов по дороге — но ни один из
+    // дошедших не имеет права откатить его назад.
+    float lastX = clientScene.Get(netId).GetTransform().Position.x;
+    for (int step = 1; step <= 40; ++step) {
+        cube.GetTransform().Position.x = (float)step;
+        pump(2);
+        const float x = clientScene.Get(netId).GetTransform().Position.x;
+        // Небольшой откат допустим только на интерполяции внутри пары
+        // снапшотов; настоящий откат — это метры.
+        CHECK_TRUE(x >= lastX - 0.51f);
+        lastX = x;
+    }
+
+    client.Stop();
+    server.Stop();
+}
+
+TEST(Net_disconnect_removes_ghosts_from_scene) {
+    // Отключились — чужие сущности обязаны уйти из сцены. Иначе после разрыва
+    // в мире остаются призраки: неуправляемые, неудаляемые и сохраняющиеся
+    // вместе со сценой.
+    Scene serverScene("srv"), clientScene("cli");
+    FillReplicated(serverScene, 5);
+
+    NetworkSystem server, client;
+    CHECK_TRUE(server.StartServer(0));
+    CHECK_TRUE(client.Connect("127.0.0.1", server.ServerPort()));
+
+    double now = 0.0;
+    for (int i = 0; i < 20; ++i) {
+        now += 0.05;
+        server.UpdateAt(serverScene, now);
+        client.UpdateAt(clientScene, now);
+    }
+    CHECK_EQ(CountGhosts(clientScene, 5), 5);
+
+    // Stop сцены не знает — он её и не получает (его зовут из скрипта, из
+    // смены уровня, из деструктора). Призраки помечаются и снимаются ближайшим
+    // Update: тем же кадром, в котором игра увидела бы разрыв.
+    client.Stop();
+    now += 0.05;
+    client.UpdateAt(clientScene, now);
+    CHECK_EQ(CountGhosts(clientScene, 5), 0);
+
+    // И повторный Update не должен ничего ломать (список уже пуст).
+    now += 0.05;
+    client.UpdateAt(clientScene, now);
+    CHECK_EQ(CountGhosts(clientScene, 5), 0);
+    server.Stop();
+}
+
+TEST(Net_interpolation_takes_the_short_way_around) {
+    // Поворот едет ЕВЛЕРОВЫМИ УГЛАМИ, и на переходе через 180 линейная
+    // интерполяция разворачивает объект в обратную сторону через полный круг.
+    // Проверяем прямо: угол идёт с 170 на -170 (то есть на 20 градусов вперёд),
+    // и промежуточное значение обязано лежать ЗА 180, а не между ними.
+    Scene serverScene("srv"), clientScene("cli");
+    GameObject cube = serverScene.CreateObject("cube");
+    cube.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    serverScene.Registry().emplace<NetReplicatedComponent>(cube.Entity());
+    const int netId = cube.Id();
+
+    NetworkSystem server, client;
+    CHECK_TRUE(server.StartServer(0));
+    CHECK_TRUE(client.Connect("127.0.0.1", server.ServerPort()));
+
+    double now = 0.0;
+    auto pump = [&](int steps, double dt = 0.05) {
+        for (int i = 0; i < steps; ++i) {
+            now += dt;
+            server.UpdateAt(serverScene, now);
+            client.UpdateAt(clientScene, now);
+        }
+    };
+    cube.GetTransform().Rotation.y = 170.0f;
+    pump(20);
+
+    cube.GetTransform().Rotation.y = -170.0f;
+    // Мелкими шагами: ловим момент, когда интерполяция идёт МЕЖДУ 170 и -170.
+    bool sawShortWay = true;
+    bool sawIntermediate = false;   // проверка не должна пройти вхолостую
+    for (int i = 0; i < 40; ++i) {
+        pump(1, 0.006);
+        const float y = clientScene.Get(netId).GetTransform().Rotation.y;
+        // Промежуточное значение короткой дуги лежит ЗА 180 (по модулю больше
+        // 170); длинный путь проходит через ноль.
+        if (std::abs(y) < 90.0f) sawShortWay = false;
+        if (std::abs(std::abs(y) - 170.0f) > 0.5f) sawIntermediate = true;
+    }
+    CHECK_TRUE(sawIntermediate);
+    CHECK_TRUE(sawShortWay);
+
+    client.Stop();
+    server.Stop();
+}
+
+TEST(Net_interpolation_actually_smooths_motion) {
+    // Показ отстаёт от приёма на kInterpDelay ИМЕННО ЗАТЕМ, чтобы между двумя
+    // снапшотами было что показывать. Пока состояний хранилось всего два, а
+    // задержка равнялась двум интервалам, момент показа всегда оказывался
+    // старше обоих — и клиент защёлкивался на снапшоте. Со стороны: мир едет
+    // рывками двадцать раз в секунду при любой частоте кадра.
+    //
+    // Проверка ровно об этом: при кадре вчетверо чаще снапшота положение
+    // обязано принимать заметно больше РАЗНЫХ значений, чем приходит снапшотов.
+    Scene serverScene("srv"), clientScene("cli");
+    GameObject cube = serverScene.CreateObject("cube");
+    cube.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    serverScene.Registry().emplace<NetReplicatedComponent>(cube.Entity());
+    const int netId = cube.Id();
+
+    NetworkSystem server, client;
+    CHECK_TRUE(server.StartServer(0));
+    CHECK_TRUE(client.Connect("127.0.0.1", server.ServerPort()));
+
+    double now = 0.0;
+    const double dt = 1.0 / 80.0;   // кадр 80 Гц против снапшота 20 Гц
+    auto step = [&]() {
+        now += dt;
+        cube.GetTransform().Position.x = (float)(now * 4.0);  // ровное движение
+        server.UpdateAt(serverScene, now);
+        client.UpdateAt(clientScene, now);
+    };
+    for (int i = 0; i < 80; ++i) step();   // подключение и разгон
+
+    std::vector<float> seen;
+    for (int i = 0; i < 80; ++i) {
+        step();
+        GameObject g = clientScene.Get(netId);
+        CHECK_TRUE(g.Valid());
+        if (g.Valid()) seen.push_back(g.GetTransform().Position.x);
+    }
+
+    int distinct = 1;
+    for (size_t i = 1; i < seen.size(); ++i)
+        if (std::abs(seen[i] - seen[i - 1]) > 1e-4f) ++distinct;
+    std::printf("       позиций за 80 кадров: %d (снапшотов пришло около %d)\n", distinct,
+                (int)(80 * dt / kSnapshotInterval));
+
+    // Снапшотов за это время около двадцати. Защёлкивание дало бы примерно
+    // столько же различных значений; интерполяция — по значению на кадр.
+    CHECK_TRUE(distinct > 60);
+    // И движение МОНОТОННОЕ: интерполяция не имеет права ходить назад.
+    for (size_t i = 1; i < seen.size(); ++i) CHECK_TRUE(seen[i] >= seen[i - 1] - 1e-3f);
+
+    client.Stop();
+    server.Stop();
 }

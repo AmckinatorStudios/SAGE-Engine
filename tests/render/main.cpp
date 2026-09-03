@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
         RunReflectionChecks(renderer);
         RunShadowChecks(renderer, *scene);
         RunSceneChecks(renderer);
+        RunVolumetricChecks();
     }
 
     // GPU-ресурсы освобождаем, пока контекст ещё жив: деструктор синглтона

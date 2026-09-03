@@ -194,6 +194,7 @@ public:
                             bool additive) override;
 
     // --- EditorHost: панель Game ---
+    void ShowSettingsWindow() override { m_showSettings = true; }
     uint64_t GameTexture() const override { return m_renderer.GameTexture(); }
     void SetGameViewportSize(int w, int h) override { m_renderer.SetGameSize(w, h); }
     bool HasPrimaryCamera() override;

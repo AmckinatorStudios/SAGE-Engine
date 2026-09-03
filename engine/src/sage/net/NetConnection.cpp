@@ -154,6 +154,7 @@ void NetConnection::HandleMessage(const uint8_t* body, size_t len) {
     if (fb.Count == 0) {
         fb.Count = count;
         fb.Parts.resize(count);
+        fb.Seen = ++m_fragmentOrder;
     }
     if (fb.Count != count || !fb.Parts[idx].empty()) return; // мусор/дубликат
     fb.Parts[idx].assign(body + r.Pos, body + len);
@@ -166,8 +167,16 @@ void NetConnection::HandleMessage(const uint8_t* body, size_t len) {
         m_received.push_back(std::move(full));
     }
 
-    // Защита от накопления брошенных сборок (потерянные ненадёжные фрагменты).
-    if (m_fragments.size() > 64) m_fragments.clear();
+    // Брошенные сборки (у ненадёжного сообщения потерялся кусок) копятся, и
+    // выбрасывать надо ИМЕННО ИХ — самые старые. Полная очистка уносила заодно
+    // ту сборку, которой оставался один кусок: сообщение не собиралось никогда,
+    // и чем хуже сеть, тем вернее.
+    while (m_fragments.size() > 64) {
+        auto oldest = m_fragments.begin();
+        for (auto it = m_fragments.begin(); it != m_fragments.end(); ++it)
+            if (it->second.Seen < oldest->second.Seen) oldest = it;
+        m_fragments.erase(oldest);
+    }
 }
 
 void NetConnection::AckPacket(uint16_t seq) {

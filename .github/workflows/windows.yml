@@ -53,6 +53,12 @@ jobs:
         run: |
           EXE=build-windows/editor/SageEditor.exe
           test -f "$EXE" || { echo "::error::SageEditor.exe не собрался"; exit 1; }
+          # Плеер и шаблоны — часть поставки, а не приятное дополнение: без
+          # первого не работает Build Game, без вторых — шаблон «Витрина».
+          test -f build-windows/runtime/SagePlayer.exe \
+            || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
+          test -f build-windows/editor/templates/showcase/project.sageproj \
+            || { echo "::error::шаблон-витрина не скопировался в templates/"; exit 1; }
           file "$EXE"
           file "$EXE" | grep -q "PE32+ executable (GUI)" \
             || { echo "::error::Это не оконное windows-приложение"; exit 1; }
@@ -104,6 +110,24 @@ jobs:
           mkdir -p "$PKG"
           cp build-windows/editor/SageEditor.exe "$PKG"/
           cp -r build-windows/editor/assets "$PKG"/assets
+
+          # ПЛЕЕР — ВМЕСТЕ С РЕДАКТОРОМ, в подпапку runtime/.
+          #
+          # Без него File > Build Game в скачанном редакторе отказывала: собрать
+          # игру нечем, потому что собирать её и значит «положить рядом с
+          # проектом SagePlayer». Подпапка, а не корень архива, потому что
+          # сборка копирует в игру ассеты ИЗ ПАПКИ ПЛЕЕРА (шейдеры рантайма) —
+          # лёжа в корне, он утащил бы туда ассеты редактора.
+          mkdir -p "$PKG/runtime"
+          cp build-windows/runtime/SagePlayer.exe "$PKG/runtime/"
+          cp -r build-windows/runtime/assets "$PKG/runtime/assets"
+
+          # Готовые проекты-шаблоны (templates/<id>): без них «Витрина» в окне
+          # создания проекта честно объявляет себя недоступной — то есть пункт
+          # есть, а нажать его нельзя.
+          if [ -d build-windows/editor/templates ]; then
+            cp -r build-windows/editor/templates "$PKG/templates"
+          fi
 
           # Плагин-пример вместе с рантайм-DLL, которого требует именно он (см.
           # шаг проверки выше) — кладём рядом с SageEditor.exe: без явного

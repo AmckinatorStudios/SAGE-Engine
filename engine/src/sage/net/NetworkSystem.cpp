@@ -1,6 +1,7 @@
 #include "sage/net/NetworkSystem.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
@@ -33,6 +34,21 @@ glm::vec3 ReadVec3(ByteReader& r) {
     return v;
 }
 
+// Интерполяция УГЛА по короткой дуге.
+//
+// Поворот едет эйлеровыми углами, и линейная смесь 170 -> -170 идёт не на
+// двадцать градусов вперёд, а на триста сорок назад — через ноль. На экране это
+// объект, который на переходе через 180 разворачивается кругом и возвращается.
+// Разница приводится к (-180, 180] и добавляется к началу.
+float LerpAngle(float a, float b, float t) {
+    float d = std::fmod(b - a + 540.0f, 360.0f) - 180.0f;
+    return a + d * t;
+}
+
+glm::vec3 LerpAngles(const glm::vec3& a, const glm::vec3& b, float t) {
+    return {LerpAngle(a.x, b.x, t), LerpAngle(a.y, b.y, t), LerpAngle(a.z, b.z, t)};
+}
+
 } // namespace
 
 bool NetworkSystem::StartServer(uint16_t port, int maxClients) {
@@ -60,11 +76,28 @@ void NetworkSystem::Stop() {
     m_client.DrainEvents(); // событие Disconnected от Stop скриптам не нужно
     m_mode = Mode::Offline;
     m_interp.clear();
+    // Призраки — ЧУЖИЕ сущности, и без связи они не имеют права оставаться в
+    // сцене: управлять ими некому, удалить их игрок не может, а сохранение
+    // унесёт их на диск. Сцены здесь нет, поэтому помечаем — снимет следующий
+    // Update (см. RemovePendingGhosts).
+    m_removeGhosts.insert(m_ghosts.begin(), m_ghosts.end());
     m_ghosts.clear();
+    m_haveTick = false;
+    m_chunkMask = 0;
+    m_tickSeen.clear();
+}
+
+void NetworkSystem::RemovePendingGhosts(Scene& scene) {
+    if (m_removeGhosts.empty()) return;
+    for (int id : m_removeGhosts) scene.RemoveObject(id);
+    m_removeGhosts.clear();
 }
 
 void NetworkSystem::UpdateAt(Scene& scene, double now) {
     m_now = now;
+    // ПЕРЕД ранним выходом: связи уже нет, а призраков со сцены снять надо
+    // именно поэтому.
+    RemovePendingGhosts(scene);
     if (m_mode == Mode::Offline) return;
 
     if (m_mode == Mode::Server) {
@@ -95,6 +128,14 @@ void NetworkSystem::UpdateAt(Scene& scene, double now) {
                     break;
                 case NetEvent::Type::ClientDisconnected:
                     m_scriptEvents.push_back({ScriptNetEvent::Type::Disconnected, 0, {}, {}});
+                    // Связь оборвалась сама (таймаут, сервер ушёл) — чужие
+                    // сущности из сцены уходят так же, как при явном Stop.
+                    m_removeGhosts.insert(m_ghosts.begin(), m_ghosts.end());
+                    m_ghosts.clear();
+                    m_interp.clear();
+                    m_haveTick = false;
+                    m_chunkMask = 0;
+                    m_tickSeen.clear();
                     break;
                 case NetEvent::Type::Message:
                     HandleMessage(0, ev.Data, scene, now);
@@ -108,41 +149,83 @@ void NetworkSystem::UpdateAt(Scene& scene, double now) {
 // --- Снапшоты ---------------------------------------------------------------
 
 void NetworkSystem::BuildAndSendSnapshot(Scene& scene) {
-    std::vector<uint8_t> msg;
-    msg.push_back(kMsgSnapshot);
-
-    uint32_t count = 0;
-    size_t countPos = msg.size();
-    WriteU32(msg, 0); // заполним после подсчёта
-
+    // Снапшот едет САМОСТОЯТЕЛЬНЫМИ ЧАСТЯМИ (см. kSnapshotChunkEntities).
+    // Каждая несёт номер снапшота, свой номер и общее число частей — этого
+    // хватает и чтобы отбросить устаревшую часть, и чтобы понять, собран ли
+    // снапшот целиком (только тогда можно удалять пропавшие сущности).
+    //
+    // Формат части:
+    //   [u8 kMsgSnapshot][u32 tick][u16 index][u16 count][u16 entities] + тела
     auto view = scene.Registry().view<NetReplicatedComponent, Transform, IdComponent>();
-    for (auto e : view) {
-        const Transform& tr = view.get<Transform>(e);
-        const auto* mr = scene.Registry().try_get<MeshRendererComponent>(e);
-        WriteU32(msg, (uint32_t)view.get<IdComponent>(e).Id);
-        WriteU8(msg, mr ? MeshTypeToWire(mr->Ref.type) : 0);
-        WriteVec3(msg, mr ? EffectiveColor(*mr) : glm::vec3(1.0f));
-        WriteVec3(msg, tr.Position);
-        WriteVec3(msg, tr.Rotation);
-        WriteVec3(msg, tr.Scale);
-        ++count;
-    }
-    // Число сущностей — на своё место.
-    msg[countPos] = (uint8_t)(count & 0xFF);
-    msg[countPos + 1] = (uint8_t)((count >> 8) & 0xFF);
-    msg[countPos + 2] = (uint8_t)((count >> 16) & 0xFF);
-    msg[countPos + 3] = (uint8_t)((count >> 24) & 0xFF);
 
-    // Ненадёжно: снапшот ценен свежестью, потерянный заменит следующий (50 мс).
-    m_server.Broadcast(msg.data(), msg.size(), /*reliable=*/false);
+    std::vector<entt::entity> entities;
+    for (auto e : view) entities.push_back(e);
+
+    const int perChunk = kSnapshotChunkEntities;
+    int chunkCount = (int)((entities.size() + perChunk - 1) / perChunk);
+    if (chunkCount == 0) chunkCount = 1;   // пустой снапшот — тоже снапшот: по
+                                           // нему клиент снимает всё, что ушло
+    if (chunkCount > kMaxSnapshotChunks) {
+        LOG_WARN("Net") << "Реплицируется " << entities.size()
+                        << " сущностей — больше, чем помещается в снапшот ("
+                        << kMaxSnapshotChunks * perChunk << "); лишние не поедут";
+        chunkCount = kMaxSnapshotChunks;
+    }
+
+    const uint32_t tick = m_nextSnapshotTick++;
+    for (int c = 0; c < chunkCount; ++c) {
+        std::vector<uint8_t> msg;
+        msg.push_back(kMsgSnapshot);
+        WriteU32(msg, tick);
+        WriteU16(msg, (uint16_t)c);
+        WriteU16(msg, (uint16_t)chunkCount);
+
+        const size_t first = (size_t)c * perChunk;
+        const size_t last = std::min(first + (size_t)perChunk, entities.size());
+        WriteU16(msg, (uint16_t)(last > first ? last - first : 0));
+
+        for (size_t i = first; i < last; ++i) {
+            const entt::entity e = entities[i];
+            const Transform& tr = view.get<Transform>(e);
+            const auto* mr = scene.Registry().try_get<MeshRendererComponent>(e);
+            WriteU32(msg, (uint32_t)view.get<IdComponent>(e).Id);
+            WriteU8(msg, mr ? MeshTypeToWire(mr->Ref.type) : 0);
+            WriteVec3(msg, mr ? EffectiveColor(*mr) : glm::vec3(1.0f));
+            WriteVec3(msg, tr.Position);
+            WriteVec3(msg, tr.Rotation);
+            WriteVec3(msg, tr.Scale);
+        }
+
+        // Ненадёжно: снапшот ценен свежестью, потерянный заменит следующий.
+        m_server.Broadcast(msg.data(), msg.size(), /*reliable=*/false);
+    }
 }
 
 void NetworkSystem::ApplySnapshot(Scene& scene, const uint8_t* data, size_t bytes, double now) {
     ByteReader r{data, bytes, 0, true};
-    uint32_t count = r.U32();
-    std::unordered_set<int> seen;
+    const uint32_t tick = r.U32();
+    const uint16_t index = r.U16();
+    const uint16_t chunkCount = r.U16();
+    const uint16_t count = r.U16();
+    if (!r.Ok || chunkCount == 0 || index >= chunkCount) return;
 
-    for (uint32_t i = 0; i < count && r.Ok; ++i) {
+    // УСТАРЕВШАЯ ЧАСТЬ — В МУСОР. Части едут ненадёжным каналом и вправе
+    // прийти не в том порядке; применить старую поверх новой значит откатить
+    // объект назад на кадр сервера. Именно так и выглядит «дёргание» в сети.
+    if (m_haveTick && tick < m_snapshotTick) return;
+
+    if (!m_haveTick || tick > m_snapshotTick) {
+        m_snapshotTick = tick;
+        m_haveTick = true;
+        m_chunkMask = 0;
+        m_chunkCount = chunkCount;
+        m_tickSeen.clear();
+    }
+    const uint64_t bit = index < 64 ? (uint64_t)1 << index : 0;
+    if (bit && (m_chunkMask & bit)) return;   // дубликат части
+    m_chunkMask |= bit;
+
+    for (uint16_t i = 0; i < count && r.Ok; ++i) {
         EntityState st;
         st.Id = (int)r.U32();
         st.MeshType = r.U8();
@@ -151,7 +234,7 @@ void NetworkSystem::ApplySnapshot(Scene& scene, const uint8_t* data, size_t byte
         st.Rotation = ReadVec3(r);
         st.Scale = ReadVec3(r);
         if (!r.Ok) break;
-        seen.insert(st.Id);
+        m_tickSeen.insert(st.Id);
 
         GameObject obj = scene.Get(st.Id);
         if (!obj.Valid()) {
@@ -164,24 +247,29 @@ void NetworkSystem::ApplySnapshot(Scene& scene, const uint8_t* data, size_t byte
         }
         obj.Renderer().Color = st.Color;
 
-        // Интерполяция: копим пару последних состояний.
+        // Копим состояния с их временем прихода. Старше момента показа на
+        // полсекунды — уже мусор: столько не бывает ни задержки, ни просадки,
+        // после которой имело бы смысл интерполировать, а не защёлкнуться.
         InterpState& is = m_interp[st.Id];
-        if (is.TimeB == 0.0) {
-            is.A = is.B = st;
-            is.TimeA = is.TimeB = now;
-        } else {
-            is.A = is.B;
-            is.TimeA = is.TimeB;
-            is.B = st;
-            is.TimeB = now;
+        is.Samples.push_back({st, now});
+        while (is.Samples.size() > 2 &&
+               is.Samples[1].Time < now - kInterpDelay - 0.5) {
+            is.Samples.pop_front();
         }
+        if (is.Samples.size() > 16) is.Samples.pop_front();
     }
 
-    // Сущности, пропавшие из снапшота: призраков удаляем; свои (из локальной
-    // сцены) не трогаем — их судьба принадлежит локальной игре.
+    // УДАЛЕНИЕ — ТОЛЬКО ПО ПОЛНОМУ СНАПШОТУ. Пока пришли не все части, «этой
+    // сущности в снапшоте нет» значит лишь «её часть ещё в пути»; снести её по
+    // такому основанию — это мигание объектов при каждой потере пакета.
+    int have = 0;
+    for (int i = 0; i < m_chunkCount && i < 64; ++i)
+        if (m_chunkMask & ((uint64_t)1 << i)) ++have;
+    if (have < m_chunkCount) return;
+
     std::vector<int> gone;
     for (auto& [id, st] : m_interp)
-        if (!seen.count(id)) gone.push_back(id);
+        if (!m_tickSeen.count(id)) gone.push_back(id);
     for (int id : gone) {
         m_interp.erase(id);
         if (m_ghosts.count(id)) {
@@ -194,23 +282,43 @@ void NetworkSystem::ApplySnapshot(Scene& scene, const uint8_t* data, size_t byte
 void NetworkSystem::InterpolateRemote(Scene& scene, double now) {
     const double renderTime = now - kInterpDelay;
     for (auto& [id, is] : m_interp) {
+        if (is.Samples.empty()) continue;
         GameObject obj = scene.Get(id);
         if (!obj.Valid()) continue;
         Transform& tr = obj.GetTransform();
-        if (is.TimeB <= is.TimeA || renderTime >= is.TimeB) {
-            tr.Position = is.B.Position;
-            tr.Rotation = is.B.Rotation;
-            tr.Scale = is.B.Scale;
-        } else if (renderTime <= is.TimeA) {
-            tr.Position = is.A.Position;
-            tr.Rotation = is.A.Rotation;
-            tr.Scale = is.A.Scale;
-        } else {
-            float t = (float)((renderTime - is.TimeA) / (is.TimeB - is.TimeA));
-            tr.Position = glm::mix(is.A.Position, is.B.Position, t);
-            tr.Rotation = glm::mix(is.A.Rotation, is.B.Rotation, t); // углы близких снапшотов
-            tr.Scale = glm::mix(is.A.Scale, is.B.Scale, t);
+
+        // Пара, между которой лежит момент показа. Ищем последнее состояние не
+        // позже него и первое после — это и есть отрезок интерполяции.
+        const Sample* a = nullptr;
+        const Sample* b = nullptr;
+        for (const Sample& s : is.Samples) {
+            if (s.Time <= renderTime) a = &s;
+            else { b = &s; break; }
         }
+
+        if (!a) {
+            // Момент показа старше всего, что мы получили: показывать нечего,
+            // кроме самого раннего известного состояния.
+            const EntityState& st = is.Samples.front().State;
+            tr.Position = st.Position;
+            tr.Rotation = st.Rotation;
+            tr.Scale = st.Scale;
+            continue;
+        }
+        if (!b) {
+            // Свежих состояний нет (сервер молчит или сеть встала) — стоим на
+            // последнем известном, а не экстраполируем в никуда.
+            tr.Position = a->State.Position;
+            tr.Rotation = a->State.Rotation;
+            tr.Scale = a->State.Scale;
+            continue;
+        }
+
+        const double span = b->Time - a->Time;
+        const float t = span > 1e-6 ? (float)((renderTime - a->Time) / span) : 1.0f;
+        tr.Position = glm::mix(a->State.Position, b->State.Position, t);
+        tr.Rotation = LerpAngles(a->State.Rotation, b->State.Rotation, t);
+        tr.Scale = glm::mix(a->State.Scale, b->State.Scale, t);
     }
 }
 

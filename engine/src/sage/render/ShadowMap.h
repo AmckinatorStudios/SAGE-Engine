@@ -399,6 +399,11 @@ struct ShadowBinding {
     float DepthBias[ShadowMap::kMaxCascades];
     int Count = 1;
     bool Enabled = false;
+    // Сторона карты в текселях. Нужна тем, кто фильтрует выборку САМ: объёмный
+    // свет берёт четыре точки вокруг, и шаг между ними — это тексель карты, а
+    // не выдуманное число. Мировой размер текселя (TexelWorld) для этого не
+    // годится: он в метрах, а выборка идёт в UV.
+    int Resolution = 0;
     // Где тень начинает растворяться и где её уже нет (метры от камеры).
     // За последним каскадом карты просто нет, и без этого тень обрывается
     // ровной линией поперёк земли — самый заметный дефект теней в открытой
@@ -434,6 +439,7 @@ struct ShadowBinding {
 
     ShadowBinding(const ShadowMap& shadows, bool enabled) : ShadowBinding() {
         Count = shadows.ActiveCascades();
+        Resolution = shadows.Resolution();
         for (int i = 0; i < Count; ++i) {
             Matrices[i] = shadows.LightMatrix(i);
             Textures[i] = shadows.DepthTexture(i);

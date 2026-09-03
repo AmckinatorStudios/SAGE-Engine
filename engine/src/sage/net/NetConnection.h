@@ -101,13 +101,21 @@ private:
     std::vector<std::vector<uint8_t>> m_received;
 
     // Сборка фрагментов: ключ -> {count, собрано, тела}.
+    //
+    // Seen — порядковый номер прихода первой части. По нему выбрасываются
+    // СТАРЕЙШИЕ недособранные сборки, когда их накопилось слишком много.
+    // Раньше на переполнении таблица очищалась ЦЕЛИКОМ — вместе с той сборкой,
+    // которой не хватало одного куска: под потерями это означало, что большое
+    // сообщение не собиралось вообще никогда.
     struct FragmentBuffer {
         uint16_t Count = 0;
         uint16_t Have = 0;
+        uint64_t Seen = 0;
         std::vector<std::vector<uint8_t>> Parts;
     };
     std::unordered_map<uint32_t, FragmentBuffer> m_fragments;
     uint32_t m_nextFragKey = 1;
+    uint64_t m_fragmentOrder = 0;   // счётчик прихода (см. FragmentBuffer::Seen)
 };
 
 // --- Утилиты записи/чтения little-endian (общие для sage/net) --------------

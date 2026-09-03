@@ -125,6 +125,63 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::EndDisabled();
     }
 
+    // --- Объёмный свет ------------------------------------------------------
+    //
+    // Отдельным разделом, а не строчкой в «Графике»: у объёма десяток ручек, и
+    // настраивают его глядя в кадр — включил, покрутил плотность, посмотрел на
+    // лучи. Пока раздела не было, единственным способом попробовать объём в
+    // редакторе была переменная окружения при запуске: то есть перезапуск на
+    // каждое значение.
+    if (ImGui::CollapsingHeader(T("Volumetric Light" "###Volumetrics"))) {
+        ImGui::Checkbox(T("Volumetrics"), &c.Volumetrics);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("The most expensive pass of the frame: light in the air and\n"
+                                      "volumetric clouds. Visible in the viewport and in the Game\n"
+                                      "panel exactly as in the built game."));
+        }
+        ImGui::BeginDisabled(!c.Volumetrics);
+
+        ImGui::Checkbox(T("Light Shafts"), &c.VolumetricShafts);
+        ImGui::SameLine();
+        ImGui::Checkbox(T("Clouds"), &c.VolumetricClouds);
+
+        ImGui::SeparatorText(T("Air"));
+        ImGui::BeginDisabled(!c.VolumetricShafts);
+        ImGui::SliderFloat(T("Density"), &c.VolumetricDensity, 0.0f, 0.3f, "%.3f");
+        ImGui::SliderFloat(T("Volumetric Intensity"), &c.VolumetricIntensity, 0.0f, 4.0f);
+        ImGui::SliderFloat(T("Forward Scattering"), &c.VolumetricAnisotropy, -0.95f, 0.95f);
+        ImGui::SliderFloat(T("Max Distance"), &c.VolumetricMaxDistance, 10.0f, 500.0f, "%.0f m");
+        ImGui::SliderFloat(T("Height Falloff"), &c.VolumetricHeightFalloff, 0.0f, 0.4f, "%.3f");
+        ImGui::EndDisabled();
+
+        ImGui::SeparatorText(T("Clouds"));
+        ImGui::BeginDisabled(!c.VolumetricClouds);
+        ImGui::SliderFloat(T("Coverage"), &c.CloudCoverage, 0.0f, 1.0f);
+        ImGui::SliderFloat(T("Cloud Density"), &c.CloudDensity, 0.1f, 4.0f);
+        ImGui::SliderFloat(T("Cloud Bottom"), &c.CloudBottom, 20.0f, 1000.0f, "%.0f m");
+        ImGui::SliderFloat(T("Cloud Top"), &c.CloudTop, 40.0f, 2000.0f, "%.0f m");
+        ImGui::SliderInt(T("Cloud Steps"), &c.CloudSteps, 8, 128);
+        ImGui::EndDisabled();
+
+        ImGui::SeparatorText(T("Quality"));
+        ImGui::SliderInt(T("Ray Steps"), &c.VolumetricSteps, 4, 128);
+        ImGui::SliderFloat(T("Volumetric Scale"), &c.VolumetricScale, 0.25f, 1.0f, "%.2fx");
+        ImGui::Checkbox(T("Temporal Accumulation"), &c.VolumetricTemporal);
+        ImGui::BeginDisabled(!c.VolumetricTemporal);
+        ImGui::SliderFloat(T("Temporal Blend"), &c.VolumetricTemporalBlend, 0.5f, 0.98f);
+        ImGui::EndDisabled();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("%s", T("Steps decide banding, accumulation decides grain, scale decides "
+                                   "sharpness. Turn accumulation off and the same number of steps "
+                                   "becomes visibly noisy."));
+        ImGui::PopStyleColor();
+
+        ImGui::Checkbox(T("Debug: sun visibility"), &c.VolumetricDebug);
+        ImGui::EndDisabled();
+    }
+
     ImGui::Separator();
     bool haveProject = host.CurrentProject().Loaded();
     ImGui::BeginDisabled(!haveProject);

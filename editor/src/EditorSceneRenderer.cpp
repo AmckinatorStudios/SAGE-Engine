@@ -581,7 +581,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         if (!m_volumetrics) m_volumetrics.emplace();
         m_volumetrics->Render(sceneFbo, sceneFbo.DepthTexture(), w, h, outProj, outView, eye, env,
                               FrameShadows(), sage::render::VolumetricsFromConfig(cfg),
-                              m_sceneTime);
+                              m_sceneTime, /*viewId=*/slot);
     }
 
     // Блик — после объёма, чтобы облако его гасило, и до пост-обработки, чтобы
@@ -740,7 +740,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
             if (!m_volumetrics) m_volumetrics.emplace();
             m_volumetrics->Render(*m_gameFbo, m_gameFbo->DepthTexture(), m_gameW, m_gameH, proj,
                                   view, camPos, env, FrameShadows(),
-                                  sage::render::VolumetricsFromConfig(cfg), m_sceneTime);
+                                  sage::render::VolumetricsFromConfig(cfg), m_sceneTime,
+                                  /*viewId=*/kGameViewId);
         }
         if (cfg.LensFlare) {
             m_gameFbo->Resolve();

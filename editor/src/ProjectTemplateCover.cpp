@@ -126,7 +126,41 @@ void DrawProjectTemplateCover(ProjectTemplateKind kind, float x, float y, float 
         dl->AddCircleFilled(ImVec2(x + w * 0.83f, y + h * 0.18f), h * 0.075f,
                             Col(1.0f, 0.93f, 0.72f, 0.95f));
 
-        if (kind == ProjectTemplateKind::Demo) {
+        if (kind == ProjectTemplateKind::Copy) {
+            // ВИТРИНА: платформа с участками. Ряд подиумов уходит вглубь, на
+            // каждом свой предмет — это и есть обещание шаблона: не одна сцена,
+            // а несколько готовых уголков, по которым ходят.
+            const float base = y + h * 0.84f;
+            const float ph = h * 0.06f;   // высота подиума
+            struct Zone { float u; float scale; ImVec4 color; int shape; };
+            const Zone zones[] = {
+                {0.16f, 1.00f, {0.82f, 0.42f, 0.34f, 1}, 0},   // куб
+                {0.38f, 0.88f, {0.42f, 0.70f, 0.85f, 1}, 1},   // шар
+                {0.60f, 0.78f, {0.55f, 0.80f, 0.48f, 1}, 2},   // столб
+                {0.80f, 0.68f, {0.86f, 0.74f, 0.40f, 1}, 1},
+            };
+            for (const Zone& z : zones) {
+                const float cx = x + w * z.u;
+                const float top = base - (1.0f - z.scale) * h * 0.16f;
+                const float pw = w * 0.13f * z.scale;
+                // Подиум — плоская плита: она отделяет участок от пола и
+                // читается как «здесь что-то показывают».
+                dl->AddRectFilled(ImVec2(cx - pw, top - ph), ImVec2(cx + pw, top),
+                                  Col(0.30f, 0.32f, 0.38f, 1.0f), ph * 0.35f);
+                const float s = h * 0.17f * z.scale;
+                if (z.shape == 0) {
+                    Box(dl, ImVec2(cx, top - ph), s, s, z.color);
+                } else if (z.shape == 1) {
+                    dl->AddCircleFilled(ImVec2(cx, top - ph - s * 0.5f), s * 0.5f, Shade(z.color, 1.0f));
+                } else {
+                    Box(dl, ImVec2(cx, top - ph), s * 0.45f, s * 1.5f, z.color);
+                }
+            }
+            // Худ витрины в углу — по нему видно, что интерфейс в проекте тоже
+            // есть и тоже на скриптах.
+            UIBar(dl, ImVec2(x + w * 0.06f, y + h * 0.09f), ImVec2(x + w * 0.40f, y + h * 0.17f),
+                  Col(0.0f, 0.0f, 0.0f, 0.55f), Col(0.42f, 0.62f, 0.85f), 0.62f);
+        } else if (kind == ProjectTemplateKind::Demo) {
             // Те же цвета, что у объектов демо-сцены (см. EditorLayer::NewScene).
             const float base = y + h * 0.80f;
             const float cube = h * 0.22f;

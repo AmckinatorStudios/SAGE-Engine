@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include "sage/core/Config.h"
 #include "sage/core/Profiler.h"
@@ -24,7 +25,57 @@ void main() {
 }
 )";
 
-// --- Марш по лучу: рассеяние в воздухе + облака -------------------------------
+// --- 1. Глубина прохода -------------------------------------------------------
+//
+// Марш и подъём обязаны видеть ОДНУ И ТУ ЖЕ глубину, иначе вес билатерального
+// фильтра считается по одному, а содержимое взято по другому — и фильтр
+// превращается в размытие. Поэтому глубина прохода готовится здесь один раз:
+//   R — расстояние от камеры до поверхности вдоль луча (метры),
+//   G — 1, если луч ушёл в небо.
+// Из блока берётся БЛИЖАЙШАЯ поверхность: потерять тонкий предмет (перила,
+// трос) хуже, чем чуть занизить расстояние на его краю.
+const char* kDepthFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform sampler2D uDepth;
+uniform mat4 uInvViewProj;
+uniform vec3 uCamPos;
+uniform vec2 uFullTexel;   // размер пикселя ПОЛНОГО буфера
+uniform int  uBlock;       // сторона блока в полных пикселях (1 — без уменьшения)
+uniform float uMaxDist;
+
+float distAt(vec2 uv, out bool sky) {
+    float d = texture(uDepth, uv).r;
+    sky = d >= 0.9999;
+    if (sky) return uMaxDist;
+    vec4 wp = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    return length(wp.xyz / wp.w - uCamPos);
+}
+
+void main() {
+    bool sky = true;
+    float best = 1e30;
+    bool anySolid = false;
+    for (int y = 0; y < 4; ++y) {
+        if (y >= uBlock) break;
+        for (int x = 0; x < 4; ++x) {
+            if (x >= uBlock) break;
+            vec2 uv = vUV + (vec2(float(x), float(y)) - float(uBlock - 1) * 0.5) * uFullTexel;
+            bool s;
+            float dist = distAt(uv, s);
+            if (!s) {
+                anySolid = true;
+                best = min(best, dist);
+            }
+        }
+    }
+    if (anySolid) FragColor = vec4(best, 0.0, 0.0, 1.0);
+    else FragColor = vec4(uMaxDist, 1.0, 0.0, 1.0);
+}
+)";
+
+// --- 2. Марш по лучу: рассеяние в воздухе + облака -----------------------------
 //
 // Результат ПРЕДУМНОЖЕН на альфу: rgb — уже пришедший к глазу свет, a — сколько
 // неба закрыто облаком. Так композит делается одной формулой смешивания и без
@@ -33,7 +84,7 @@ const char* kMarchFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
 
-uniform sampler2D uDepth;
+uniform sampler2D uSceneDist;   // R — расстояние до поверхности, G — небо
 uniform mat4 uInvViewProj;
 uniform vec3 uCamPos;
 uniform vec3 uSunDir;        // направление НА солнце
@@ -42,6 +93,7 @@ uniform vec3 uSkyTop;
 uniform vec3 uSkyHorizon;
 uniform float uTime;
 uniform vec2 uJitter;        // размер пикселя уменьшенного буфера
+uniform float uFrameJitter;  // сдвиг шума этого кадра (накопление по времени)
 
 uniform int   uShafts;
 uniform float uDensity;
@@ -67,6 +119,7 @@ uniform int   uDebug;        // 1 — показать поле видимост
 uniform int   uShadowsOn;
 uniform int   uCascades;
 uniform mat4  uLightMat[4];
+uniform vec2  uShadowTexel[4];
 uniform sampler2D uShadow0;
 uniform sampler2D uShadow1;
 uniform sampler2D uShadow2;
@@ -81,18 +134,33 @@ float phaseHG(float c, float g) {
     return (1.0 - g2) / (12.566370614 * max(d * sqrt(max(d, 1e-4)), 1e-4));
 }
 
+float shadowTap(int i, vec2 uv, float z) {
+    float d;
+    if (i == 0) d = texture(uShadow0, uv).r;
+    else if (i == 1) d = texture(uShadow1, uv).r;
+    else if (i == 2) d = texture(uShadow2, uv).r;
+    else d = texture(uShadow3, uv).r;
+    // Запас по глубине больше, чем у поверхностей: точка в воздухе не лежит на
+    // геометрии, и жёсткий порог давал бы в лучах полосы.
+    return (z - 0.0025 > d) ? 0.0 : 1.0;
+}
+
+// Мягкая выборка каскада: четыре точки по углам текселя вместо одной.
+//
+// Бинарная выборка давала лучу край в ОДИН пиксель — ступеньку, которую не
+// лечит ни число шагов, ни накопление по кадрам: она не шум, а точный ответ на
+// слишком грубый вопрос. Четыре точки превращают её в полутон, и кромка луча
+// становится мягкой, как у настоящего света в пыли.
 float sampleCascade(int i, vec3 world) {
     vec4 lp = uLightMat[i] * vec4(world, 1.0);
     vec3 uv = lp.xyz / max(lp.w, 1e-6) * 0.5 + 0.5;
     if (uv.x < 0.02 || uv.x > 0.98 || uv.y < 0.02 || uv.y > 0.98 || uv.z > 1.0) return -1.0;
-    float d;
-    if (i == 0) d = texture(uShadow0, uv.xy).r;
-    else if (i == 1) d = texture(uShadow1, uv.xy).r;
-    else if (i == 2) d = texture(uShadow2, uv.xy).r;
-    else d = texture(uShadow3, uv.xy).r;
-    // Запас по глубине больше, чем у поверхностей: точка в воздухе не лежит на
-    // геометрии, и жёсткий порог давал бы в лучах полосы.
-    return (uv.z - 0.0025 > d) ? 0.0 : 1.0;
+    vec2 t = uShadowTexel[i];
+    float s = shadowTap(i, uv.xy + vec2(-0.5, -0.5) * t, uv.z)
+            + shadowTap(i, uv.xy + vec2( 0.5, -0.5) * t, uv.z)
+            + shadowTap(i, uv.xy + vec2(-0.5,  0.5) * t, uv.z)
+            + shadowTap(i, uv.xy + vec2( 0.5,  0.5) * t, uv.z);
+    return s * 0.25;
 }
 
 // Освещён ли этот кусочек воздуха. Каскады перебираются от ближнего: первый,
@@ -164,11 +232,6 @@ float cloudAt(vec3 p) {
     // Крупная карта решает, ГДЕ облака есть, а где чистое небо. Без неё шум
     // одной частоты даёт ровную пелену от края до края: отдельных облаков с
     // просветами между ними не получается ни при какой плотности.
-    //
-    // Частота карты — того же порядка, что и у самих клубов. Была втрое ниже,
-    // и это было хуже, чем бесполезно: на масштабе полутора километров вся
-    // видимая часть неба попадала в ОДНО значение карты, и небо целиком
-    // оказывалось либо затянутым, либо пустым — чаще пустым.
     float gate = smoothstep(0.36, 0.62, fbm(q * 0.85 + 19.3));
     if (gate <= 0.0) return 0.0;
 
@@ -190,8 +253,8 @@ float cloudAt(vec3 p) {
     return max(d, 0.0) * uCloudDensity * 0.03;
 }
 
-// Сколько света доходит до точки внутри облака. Пять шагов к солнцу — этого
-// хватает на объём: важен не точный интеграл, а то, что низ темнее верха.
+// Сколько света доходит до точки внутри облака. Несколько шагов к солнцу —
+// этого хватает на объём: важен не точный интеграл, а то, что низ темнее верха.
 float cloudLight(vec3 p) {
     float t = 0.0, dens = 0.0;
     float step = (uCloudTop - uCloudBottom) / float(max(uCloudLightSteps, 1)) * 0.6;
@@ -205,25 +268,24 @@ float cloudLight(vec3 p) {
 
 void main() {
     vec2 uv = vUV;
-    float depth = texture(uDepth, uv).r;
+    vec2 sceneInfo = texture(uSceneDist, uv).rg;
+    float sceneDist = sceneInfo.r;
+    bool sky = sceneInfo.g > 0.5;
 
     // Мировой луч через пиксель.
     vec4 far = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
     vec3 farPos = far.xyz / far.w;
     vec3 dir = normalize(farPos - uCamPos);
 
-    // Расстояние до геометрии: при depth == 1 луч ушёл в небо.
-    float sceneDist = uMaxDist;
-    bool sky = depth >= 0.9999;
-    if (!sky) {
-        vec4 wp = uInvViewProj * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-        sceneDist = length(wp.xyz / wp.w - uCamPos);
-    }
-
-    // Упорядоченный шум по пикселю: сдвигает начало марша, и «ступени» от
-    // малого числа шагов рассыпаются вместо того, чтобы стоять кольцами.
+    // Сдвиг начала марша: упорядоченный шум по пикселю ПЛЮС сдвиг кадра.
+    //
+    // Без пиксельной части малое число шагов даёт кольца-«ступени». Без
+    // КАДРОВОЙ части шум замирает узором на экране — та самая «зернистость,
+    // которая не уходит». Меняя его каждый кадр и усредняя историей (см.
+    // проход накопления), получаем и отсутствие полос, и отсутствие зерна.
     vec2 px = uv / max(uJitter, vec2(1e-6));
-    float dither = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
+    float dither = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y)
+                         + uFrameJitter);
 
     // Отладка: вместо результата показываем, что марш ВИДИТ как тень. Чёрное —
     // затенённый воздух, белое — освещённый. Без такой картинки «лучей нет»
@@ -251,22 +313,39 @@ void main() {
     // --- Лучи в воздухе ---
     if (uShafts != 0) {
         float march = min(sceneDist, uMaxDist);
-        float dt = march / float(max(uSteps, 1));
-        float t = dt * dither;
-        float transmittance = 1.0;
+        int steps = max(uSteps, 1);
         float ph = phaseHG(dot(dir, uSunDir), uAniso);
-        for (int i = 0; i < 64; ++i) {
-            if (i >= uSteps || t >= march) break;
-            vec3 p = uCamPos + dir * t;
+
+        // РАСТУЩИЙ ШАГ. Равномерный тратит поровну на первый метр и на сотый, а
+        // видно их по-разному: плотность падает с высотой и с расстоянием, и
+        // ошибка ближнего шага стоит полосы поперёк кадра, дальнего — ничего.
+        // Ряд с постоянным отношением даёт вдвое более мелкий шаг у камеры при
+        // том же числе выборок.
+        float growth = 1.05;
+        float norm = (pow(growth, float(steps)) - 1.0) / (growth - 1.0);
+        float dt = march / norm;   // длина ПЕРВОГО шага
+
+        float t = 0.0;
+        float transmittance = 1.0;
+        for (int i = 0; i < 128; ++i) {
+            if (i >= steps || t >= march) break;
+            float seg = min(dt, march - t);
+            vec3 p = uCamPos + dir * (t + seg * dither);
             // Плотность падает с высотой: у воды дымка густая, наверху её нет.
             float d = uDensity * exp(-max(p.y - uBaseHeight, 0.0) * uHeightFalloff);
             if (d > 1e-5) {
                 float vis = sunVisibility(p);
-                scatter += uSunColor * (vis * ph * d * dt * transmittance);
-                transmittance *= exp(-d * dt);
+                // Аналитическое интегрирование отрезка вместо «плотность на
+                // длину»: при густой дымке и длинном шаге прямоугольник
+                // переоценивает вклад в разы, и дальние шаги светятся ярче
+                // ближних — ровно наоборот тому, как ведёт себя среда.
+                float att = exp(-d * seg);
+                scatter += uSunColor * (vis * ph * transmittance * (1.0 - att));
+                transmittance *= att;
                 if (transmittance < 0.02) break;   // дальше вклада уже не видно
             }
-            t += dt;
+            t += seg;
+            dt *= growth;
         }
         // Фаза уже нормирована (интеграл по сфере = 1) — домножать на 4π
         // нельзя, иначе взгляд в сторону солнца даёт вспышку в разы ярче
@@ -291,7 +370,7 @@ void main() {
             float t = t0 + dt * dither;
             float trans = 1.0;
             float ph = phaseHG(dot(dir, uSunDir), 0.35);
-            for (int i = 0; i < 64; ++i) {
+            for (int i = 0; i < 128; ++i) {
                 if (i >= uCloudSteps || trans < 0.02) break;
                 vec3 p = uCamPos + dir * t;
                 float d = cloudAt(p);
@@ -339,44 +418,150 @@ void main() {
 }
 )";
 
-// --- Подъём результата в полный размер ----------------------------------------
+// --- 3. Накопление по кадрам --------------------------------------------------
+//
+// Марш сдвигает начало шага случайно, поэтому ОДИН кадр всегда зернист: это
+// цена отсутствия полос. Усреднение по времени убирает зерно, не возвращая
+// полос, — но только если история честно перепроецирована в текущий кадр и
+// отброшена там, где перепроецировать нечего.
+//
+// Ограничение окрестностью (neighborhood clamp) вместо сравнения глубин: у
+// объёма нет одной поверхности, к которой можно привязать проверку, зато есть
+// простое правило — накопленное значение не имеет права выходить за пределы
+// того, что даёт текущий кадр рядом. При резком повороте или выходе объекта
+// из-за угла история сама сжимается к новому ответу за пару кадров, и «шлейфа»
+// не остаётся.
+const char* kTemporalFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform sampler2D uCurrent;
+uniform sampler2D uHistory;
+uniform sampler2D uSceneDist;
+uniform mat4 uInvViewProj;
+uniform mat4 uPrevViewProj;
+uniform vec3 uCamPos;
+uniform vec2 uTexel;
+uniform float uBlend;      // доля истории
+uniform int   uHasHistory;
+
+void main() {
+    vec4 cur = texture(uCurrent, vUV);
+    if (uHasHistory == 0) { FragColor = cur; return; }
+
+    vec2 info = texture(uSceneDist, vUV).rg;
+    // Точка, по которой ищем этот же пиксель в прошлом кадре. Для геометрии —
+    // сама поверхность; для неба — очень далёкая точка вдоль луча: облака стоят
+    // фактически на бесконечности, и привязывать их к дальности марша значило
+    // бы тащить их за камерой при каждом шаге вбок.
+    vec4 far = uInvViewProj * vec4(vUV * 2.0 - 1.0, 1.0, 1.0);
+    vec3 dir = normalize(far.xyz / far.w - uCamPos);
+    float dist = info.g > 0.5 ? 5000.0 : info.r;
+    vec3 world = uCamPos + dir * dist;
+
+    vec4 clip = uPrevViewProj * vec4(world, 1.0);
+    if (clip.w <= 0.0) { FragColor = cur; return; }
+    vec2 prevUV = (clip.xy / clip.w) * 0.5 + 0.5;
+    if (prevUV.x < 0.0 || prevUV.x > 1.0 || prevUV.y < 0.0 || prevUV.y > 1.0) {
+        FragColor = cur;   // в прошлом кадре этого пикселя не было
+        return;
+    }
+
+    // Границы допустимого — по окрестности 3x3 текущего кадра.
+    vec4 lo = cur, hi = cur;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec4 s = texture(uCurrent, vUV + vec2(float(x), float(y)) * uTexel);
+            lo = min(lo, s);
+            hi = max(hi, s);
+        }
+    }
+    vec4 hist = clamp(texture(uHistory, prevUV), lo, hi);
+    FragColor = mix(cur, hist, uBlend);
+}
+)";
+
+// --- 4. Подъём в полный размер и композит -------------------------------------
 //
 // Обычная билинейная фильтрация протекла бы через силуэты: за краем мачты
 // лежит небо, и половина выборок пришла бы оттуда — вокруг тонких предметов
-// появилась бы светящаяся кайма. Поэтому выборки взвешиваются по близости
-// глубины: чужая глубина — почти нулевой вес.
+// появилась бы светящаяся кайма. Здесь берутся ЧЕТЫРЕ ближайших текселя
+// уменьшенного буфера с билинейными весами, домноженными на близость
+// расстояния до поверхности. На ровной поверхности веса совпадают с чистой
+// билинейной выборкой (ничего не размывается), на силуэте — выигрывают
+// совпавшие выборки.
 const char* kUpsampleFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
 
 uniform sampler2D uVolume;
-uniform sampler2D uDepthLow;
+uniform sampler2D uSceneDistLow;
 uniform sampler2D uDepthFull;
-uniform vec2 uLowTexel;
+uniform mat4 uInvViewProj;
+uniform vec3 uCamPos;
+uniform vec2 uLowSize;     // размер уменьшенного буфера в текселях
+uniform float uMaxDist;
 
 void main() {
     float dFull = texture(uDepthFull, vUV).r;
+    float distFull = uMaxDist;
+    if (dFull < 0.9999) {
+        vec4 wp = uInvViewProj * vec4(vUV * 2.0 - 1.0, dFull * 2.0 - 1.0, 1.0);
+        distFull = length(wp.xyz / wp.w - uCamPos);
+    }
+
+    // Координаты в текселях уменьшенного буфера и четыре ближайших центра.
+    vec2 st = vUV * uLowSize - 0.5;
+    vec2 base = floor(st);
+    vec2 f = st - base;
+
     vec4 sum = vec4(0.0);
     float wsum = 0.0;
-    for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-            vec2 o = vec2(float(x), float(y)) * uLowTexel;
-            float dLow = texture(uDepthLow, vUV + o).r;
-            float w = 1.0 / (1.0 + abs(dLow - dFull) * 900.0);
-            sum += texture(uVolume, vUV + o) * w;
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            vec2 texel = base + vec2(float(x), float(y)) + 0.5;
+            vec2 uv = texel / uLowSize;
+            float bilinear = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
+            float distLow = texture(uSceneDistLow, uv).r;
+            // Порог по РАЗНИЦЕ РАССТОЯНИЙ, а не по абсолютной глубине: на
+            // ровной стене соседи отличаются на сантиметры и вес не падает, на
+            // силуэте разница — метры, и чужая выборка выбывает.
+            float w = bilinear / (1.0 + abs(distLow - distFull) * 2.0);
+            sum += texture(uVolume, uv) * w;
             wsum += w;
         }
     }
-    FragColor = sum / max(wsum, 1e-4);
+    FragColor = sum / max(wsum, 1e-5);
 }
 )";
 
+// Прямая копия: при полном разрешении подъёма нет вовсе, и любой фильтр здесь
+// был бы чистой потерей резкости.
+const char* kBlitFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uVolume;
+void main() { FragColor = texture(uVolume, vUV); }
+)";
+
+Shader& DepthShader() {
+    static Shader* s = new Shader(Shader::FromSource(kVert, kDepthFrag, "Volumetrics.Depth"));
+    return *s;
+}
 Shader& MarchShader() {
     static Shader* s = new Shader(Shader::FromSource(kVert, kMarchFrag, "Volumetrics.March"));
     return *s;
 }
+Shader& TemporalShader() {
+    static Shader* s = new Shader(Shader::FromSource(kVert, kTemporalFrag, "Volumetrics.Temporal"));
+    return *s;
+}
 Shader& UpsampleShader() {
     static Shader* s = new Shader(Shader::FromSource(kVert, kUpsampleFrag, "Volumetrics.Upsample"));
+    return *s;
+}
+Shader& BlitShader() {
+    static Shader* s = new Shader(Shader::FromSource(kVert, kBlitFrag, "Volumetrics.Blit"));
     return *s;
 }
 
@@ -406,20 +591,44 @@ VolumetricSettings VolumetricsFromConfig(const sage::EngineConfig& cfg) {
     v.HeightFalloff = cfg.VolumetricHeightFalloff;
     v.CloudBottom = cfg.CloudBottom;
     v.CloudTop = cfg.CloudTop;
+    v.Temporal = cfg.VolumetricTemporal;
+    v.TemporalBlend = cfg.VolumetricTemporalBlend;
+    v.Anisotropy = cfg.VolumetricAnisotropy;
+    v.CloudDensity = cfg.CloudDensity;
     return v;
 }
 
-void Volumetrics::EnsureTargets(int w, int h) {
-    if (w == m_w && h == m_h && m_march) return;
+void Volumetrics::ResetHistory() {
+    for (auto& kv : m_history) kv.second.Valid = false;
+}
+
+void Volumetrics::EnsureShared(int w, int h) {
+    if (w == m_w && h == m_h && m_march && m_depthLow) return;
     m_w = w;
     m_h = h;
     m_march = MakeColor(w, h);
+    m_depthLow = MakeColor(w, h);
+    // Размер прохода изменился — накопленное описывает другой растр.
+    ResetHistory();
+}
+
+Volumetrics::ViewHistory& Volumetrics::HistoryFor(int viewId, int w, int h) {
+    ViewHistory& v = m_history[viewId];
+    if (v.Width != w || v.Height != h || !v.Accum[0] || !v.Accum[1]) {
+        v.Accum[0] = MakeColor(w, h);
+        v.Accum[1] = MakeColor(w, h);
+        v.Width = w;
+        v.Height = h;
+        v.Valid = false;
+        v.Current = 0;
+    }
+    return v;
 }
 
 void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDepth, int w, int h,
                          const glm::mat4& proj, const glm::mat4& view, const glm::vec3& camPos,
                          const LightingEnvironment& env, const ShadowBinding& shadows,
-                         const VolumetricSettings& s, float time) {
+                         const VolumetricSettings& s, float time, int viewId) {
     if (!s.Enabled || (!s.LightShafts && !s.Clouds)) return;
     if (!sceneDepth.Valid() || w < 8 || h < 8) return;
     SAGE_PROFILE("Объёмный свет");
@@ -430,22 +639,40 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     const float scale = glm::clamp(s.Scale, 0.25f, 1.0f);
     const int lw = std::max(8, (int)((float)w * scale));
     const int lh = std::max(8, (int)((float)h * scale));
-    EnsureTargets(lw, lh);
+    const bool fullRes = (lw == w && lh == h);
+    EnsureShared(lw, lh);
+    ++m_frame;
 
-    const glm::mat4 invViewProj = glm::inverse(proj * view);
+    const glm::mat4 viewProj = proj * view;
+    const glm::mat4 invViewProj = glm::inverse(viewProj);
     const glm::vec3 sunDir = glm::normalize(-env.Sun.Direction);   // НА солнце
+    const float maxDist = std::max(s.MaxDistance, 1.0f);
 
-    // --- Марш в уменьшенном буфере ---
-    m_march->Bind();
     device.SetDepthTest(false);
     device.SetBlend(false);
+
+    // --- 1. Глубина прохода: расстояние до поверхности + признак неба ---
+    m_depthLow->Bind();
+    Shader& dep = DepthShader();
+    dep.Use();
+    dep.SetInt("uDepth", 0);
+    device.BindTexture2D(0, sceneDepth);
+    dep.SetMat4("uInvViewProj", invViewProj);
+    dep.SetVec3("uCamPos", camPos);
+    dep.SetVec2("uFullTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
+    dep.SetInt("uBlock", glm::clamp((int)std::lround(1.0f / scale), 1, 4));
+    dep.SetFloat("uMaxDist", maxDist);
+    m_fsTri->DrawArrays(3);
+
+    // --- 2. Марш в буфере прохода ---
+    m_march->Bind();
     device.SetClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     device.Clear();
 
     Shader& march = MarchShader();
     march.Use();
-    march.SetInt("uDepth", 0);
-    device.BindTexture2D(0, sceneDepth);
+    march.SetInt("uSceneDist", 0);
+    device.BindTexture2D(0, m_depthLow->ColorTextureHandle());
     march.SetMat4("uInvViewProj", invViewProj);
     march.SetVec3("uCamPos", camPos);
     march.SetVec3("uSunDir", sunDir);
@@ -454,16 +681,21 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     march.SetVec3("uSkyHorizon", glm::vec3(env.Fog.Color));
     march.SetFloat("uTime", time);
     march.SetVec2("uJitter", glm::vec2(1.0f / (float)lw, 1.0f / (float)lh));
+    // Золотое сечение по номеру кадра: последовательность равномерно
+    // заполняет отрезок и не повторяется коротким периодом, поэтому история
+    // усредняет РАЗНЫЕ сдвиги, а не два-три одних и тех же.
+    march.SetFloat("uFrameJitter", s.Temporal ? std::fmod((float)m_frame * 0.6180339887f, 1.0f)
+                                              : 0.0f);
 
     march.SetInt("uDebug", s.Debug ? 1 : 0);
     march.SetInt("uShafts", s.LightShafts ? 1 : 0);
     march.SetFloat("uDensity", s.Density);
     march.SetFloat("uAniso", glm::clamp(s.Anisotropy, -0.95f, 0.95f));
-    march.SetFloat("uMaxDist", s.MaxDistance);
+    march.SetFloat("uMaxDist", maxDist);
     march.SetFloat("uIntensity", s.Intensity);
     march.SetFloat("uHeightFalloff", s.HeightFalloff);
     march.SetFloat("uBaseHeight", s.BaseHeight);
-    march.SetInt("uSteps", glm::clamp(s.Steps, 4, 64));
+    march.SetInt("uSteps", glm::clamp(s.Steps, 4, 128));
 
     march.SetInt("uClouds", s.Clouds ? 1 : 0);
     march.SetFloat("uCloudBottom", s.CloudBottom);
@@ -473,15 +705,20 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     march.SetFloat("uCloudScale", s.CloudScale);
     march.SetVec2("uWind", s.Wind);
     march.SetVec3("uTint", s.Tint);
-    march.SetInt("uCloudSteps", glm::clamp(s.CloudSteps, 8, 64));
+    march.SetInt("uCloudSteps", glm::clamp(s.CloudSteps, 8, 128));
     march.SetInt("uCloudLightSteps", glm::clamp(s.CloudLightSteps, 1, 8));
 
     const bool useShadows = shadows.Enabled && s.LightShafts;
     march.SetInt("uShadowsOn", useShadows ? 1 : 0);
     march.SetInt("uCascades", useShadows ? std::min(shadows.Count, 4) : 0);
     for (int i = 0; i < 4; ++i) {
-        const std::string idx = "uLightMat[" + std::to_string(i) + "]";
-        march.SetMat4(idx.c_str(), shadows.Matrices[std::min(i, ShadowMap::kMaxCascades - 1)]);
+        const int src = std::min(i, ShadowMap::kMaxCascades - 1);
+        march.SetMat4(("uLightMat[" + std::to_string(i) + "]").c_str(), shadows.Matrices[src]);
+        // Размер текселя каскада — для мягкой выборки. Берётся из привязки, а
+        // не угадывается: у каскадов разные карты и разные масштабы.
+        const float res = shadows.Resolution > 0 ? (float)shadows.Resolution : 1024.0f;
+        march.SetVec2(("uShadowTexel[" + std::to_string(i) + "]").c_str(),
+                      glm::vec2(1.0f / res, 1.0f / res));
         const std::string name = "uShadow" + std::to_string(i);
         march.SetInt(name.c_str(), 1 + i);
         if (useShadows && i < shadows.Count)
@@ -491,7 +728,38 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     }
     m_fsTri->DrawArrays(3);
 
-    // --- Композит в буфер сцены ---
+    // --- 3. Накопление по кадрам ---
+    sage::rhi::TextureHandle volume = m_march->ColorTextureHandle();
+    ViewHistory& hist = HistoryFor(viewId, lw, lh);
+    if (s.Temporal && !s.Debug) {
+        RenderTarget& dst = *hist.Accum[hist.Current];
+        RenderTarget& prev = *hist.Accum[1 - hist.Current];
+        dst.Bind();
+        Shader& tmp = TemporalShader();
+        tmp.Use();
+        tmp.SetInt("uCurrent", 0);
+        tmp.SetInt("uHistory", 1);
+        tmp.SetInt("uSceneDist", 2);
+        device.BindTexture2D(0, m_march->ColorTextureHandle());
+        device.BindTexture2D(1, prev.ColorTextureHandle());
+        device.BindTexture2D(2, m_depthLow->ColorTextureHandle());
+        tmp.SetMat4("uInvViewProj", invViewProj);
+        tmp.SetMat4("uPrevViewProj", hist.PrevViewProj);
+        tmp.SetVec3("uCamPos", camPos);
+        tmp.SetVec2("uTexel", glm::vec2(1.0f / (float)lw, 1.0f / (float)lh));
+        tmp.SetFloat("uBlend", glm::clamp(s.TemporalBlend, 0.0f, 0.98f));
+        tmp.SetInt("uHasHistory", hist.Valid ? 1 : 0);
+        m_fsTri->DrawArrays(3);
+
+        volume = dst.ColorTextureHandle();
+        hist.Current = 1 - hist.Current;
+        hist.Valid = true;
+        hist.PrevViewProj = viewProj;
+    } else {
+        hist.Valid = false;
+    }
+
+    // --- 4. Композит в буфер сцены ---
     //
     // Смешивание для ПРЕДУМНОЖЕННОЙ альфы: цвет складывается, а закрытое
     // облаком небо гасится ровно на его непрозрачность. Одна формула на оба
@@ -500,18 +768,25 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     device.SetBlend(true);
     device.SetBlendMode(GraphicsDevice::BlendMode::Premultiplied);
 
-    Shader& up = UpsampleShader();
-    up.Use();
-    up.SetInt("uVolume", 0);
-    up.SetInt("uDepthLow", 1);
-    up.SetInt("uDepthFull", 2);
-    device.BindTexture2D(0, m_march->ColorTextureHandle());
-    // Глубина у прохода одна и та же (марш читает полноразмерную): «низкая»
-    // выборка отличается только смещением на тексель уменьшенного буфера, и
-    // этого достаточно, чтобы вес упал на чужом силуэте.
-    device.BindTexture2D(1, sceneDepth);
-    device.BindTexture2D(2, sceneDepth);
-    up.SetVec2("uLowTexel", glm::vec2(1.0f / (float)lw, 1.0f / (float)lh));
+    if (fullRes) {
+        Shader& blit = BlitShader();
+        blit.Use();
+        blit.SetInt("uVolume", 0);
+        device.BindTexture2D(0, volume);
+    } else {
+        Shader& up = UpsampleShader();
+        up.Use();
+        up.SetInt("uVolume", 0);
+        up.SetInt("uSceneDistLow", 1);
+        up.SetInt("uDepthFull", 2);
+        device.BindTexture2D(0, volume);
+        device.BindTexture2D(1, m_depthLow->ColorTextureHandle());
+        device.BindTexture2D(2, sceneDepth);
+        up.SetMat4("uInvViewProj", invViewProj);
+        up.SetVec3("uCamPos", camPos);
+        up.SetVec2("uLowSize", glm::vec2((float)lw, (float)lh));
+        up.SetFloat("uMaxDist", maxDist);
+    }
     m_fsTri->DrawArrays(3);
 
     device.SetBlendMode(GraphicsDevice::BlendMode::Alpha);

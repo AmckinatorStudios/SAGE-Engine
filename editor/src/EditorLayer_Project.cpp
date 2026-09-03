@@ -351,10 +351,60 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
         err = "Unknown project template '" + templateId + "'; known: " + known;
         return false;
     }
+    // Готовый проект обязан быть на диске ДО создания папок: иначе человек
+    // получил бы пустой проект с именем «Витрина» и никакого объяснения.
+    if (tpl->Kind == ProjectTemplateKind::Copy && !ProjectTemplateAvailable(*tpl)) {
+        err = "Template '" + tpl->Id + "' is not installed next to the editor (" +
+              (ProjectTemplatesRoot() / tpl->SourceDir).string() + ")";
+        return false;
+    }
     if (!m_project.CreateNew(dir, name, err)) return false;
     const ProjectTemplateKind kind = tpl->Kind;
     m_assetsCwd = m_project.Dir();
     m_recent.Add(m_project.Dir().string());
+
+    if (kind == ProjectTemplateKind::Copy) {
+        // Копия ГОТОВОГО проекта: сцены, скрипты, модели и настройки — как
+        // есть. Имя проекта при этом остаётся тем, которое выбрал человек:
+        // копируется содержимое, а не чужая вывеска.
+        const fs::path src = ProjectTemplatesRoot() / tpl->SourceDir;
+        std::error_code ec;
+        for (const fs::directory_entry& e : fs::directory_iterator(src, ec)) {
+            // Файл проекта пропускаем — он уже создан с нужным именем.
+            if (e.path().filename() == "project.sageproj") continue;
+            fs::copy(e.path(), m_project.Dir() / e.path().filename(),
+                     fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                err = "Failed to copy template '" + tpl->Id + "': " + ec.message();
+                return false;
+            }
+        }
+        m_project.Adopt();          // папки на месте, база ассетов знает корень
+        m_settings = sage::EngineConfig{};
+        m_settings.LoadFile((m_project.Dir() / "sage.cfg").string());
+        m_settings.ApplyEnvOverrides();
+        ApplyEngineSettings();
+        // Открываем первую сцену копии — иначе человек видит демо-сцену
+        // редактора вместо проекта, который только что попросил.
+        std::vector<fs::path> scenes;
+        for (const fs::directory_entry& e : fs::directory_iterator(m_project.ScenesDir(), ec)) {
+            if (e.path().extension() == ".sage") scenes.push_back(e.path());
+        }
+        std::sort(scenes.begin(), scenes.end());
+        if (scenes.empty()) {
+            err = "Template '" + tpl->Id + "' has no scenes";
+            return false;
+        }
+        if (!LoadSceneFromFile(scenes.front())) {
+            err = "Failed to load the template scene: " + scenes.front().string();
+            return false;
+        }
+        LOG_INFO("Editor") << "Project created from template '" << tpl->Id << "': "
+                           << m_project.Dir().string();
+        UpdateWindowTitle();
+        return true;
+    }
+
     NewScene(kind);
     UpdateWindowTitle();
     return true;

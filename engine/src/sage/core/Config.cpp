@@ -110,6 +110,11 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             AmbientOcclusion = false;
             Msaa = 0;
             RenderScale = 0.75f;
+            // Объём не выключаем — его включает игра, а не пресет, — но на
+            // слабой машине он идёт в половине стороны и с коротким маршем.
+            VolumetricScale = 0.5f;
+            VolumetricSteps = 20;
+            CloudSteps = 32;
             break;
         case QualityPreset::Medium:
             Shadows = true;
@@ -125,6 +130,9 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             AmbientOcclusion = false;
             Msaa = 0;
             RenderScale = 1.0f;
+            VolumetricScale = 0.5f;
+            VolumetricSteps = 28;
+            CloudSteps = 40;
             break;
         case QualityPreset::High:
             // Значения по умолчанию движка — всё включено.
@@ -138,6 +146,9 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             AmbientOcclusion = true;
             Msaa = 0;
             RenderScale = 1.0f;
+            VolumetricScale = 1.0f;
+            VolumetricSteps = 32;
+            CloudSteps = 48;
             break;
         case QualityPreset::Ultra:
             Shadows = true;
@@ -153,6 +164,9 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             AmbientOcclusion = true;
             Msaa = 4;
             RenderScale = 1.0f;
+            VolumetricScale = 1.0f;
+            VolumetricSteps = 48;
+            CloudSteps = 64;
             break;
     }
 }
@@ -225,6 +239,10 @@ bool EngineConfig::LoadFile(const std::string& path) {
     CloudBottom        = pp.value("cloudBottom", CloudBottom);
     CloudTop           = pp.value("cloudTop", CloudTop);
     VolumetricScale    = pp.value("volumetricScale", VolumetricScale);
+    VolumetricAnisotropy = pp.value("volumetricAnisotropy", VolumetricAnisotropy);
+    VolumetricTemporal = pp.value("volumetricTemporal", VolumetricTemporal);
+    VolumetricTemporalBlend = pp.value("volumetricTemporalBlend", VolumetricTemporalBlend);
+    CloudDensity       = pp.value("cloudDensity", CloudDensity);
     LensFlare             = pp.value("lensFlare", LensFlare);
     LensFlareIntensity    = pp.value("lensFlareIntensity", LensFlareIntensity);
     LensFlareGhosts       = pp.value("lensFlareGhosts", LensFlareGhosts);
@@ -294,6 +312,10 @@ std::string EngineConfig::ToJsonString() const {
         {"cloudSteps", CloudSteps}, {"cloudCoverage", CloudCoverage},
         {"cloudBottom", CloudBottom}, {"cloudTop", CloudTop},
         {"volumetricScale", VolumetricScale},
+        {"volumetricAnisotropy", VolumetricAnisotropy},
+        {"volumetricTemporal", VolumetricTemporal},
+        {"volumetricTemporalBlend", VolumetricTemporalBlend},
+        {"cloudDensity", CloudDensity},
         {"lensFlare", LensFlare}, {"lensFlareIntensity", LensFlareIntensity},
         {"lensFlareGhosts", LensFlareGhosts},
         {"lensFlareGhostSpacing", LensFlareGhostSpacing},
@@ -363,6 +385,11 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_STEPS")) VolumetricSteps = std::atoi(v);
     if (const char* v = std::getenv("SAGE_CLOUD_STEPS")) CloudSteps = std::atoi(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_SCALE")) VolumetricScale = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_TEMPORAL"))
+        VolumetricTemporal = EnvBool(v, VolumetricTemporal);
+    if (const char* v = std::getenv("SAGE_VOLUMETRIC_ANISOTROPY"))
+        VolumetricAnisotropy = (float)std::atof(v);
+    if (const char* v = std::getenv("SAGE_CLOUD_DENSITY")) CloudDensity = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_DENSITY")) VolumetricDensity = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_INTENSITY")) VolumetricIntensity = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_CLOUD_COVERAGE")) CloudCoverage = (float)std::atof(v);
