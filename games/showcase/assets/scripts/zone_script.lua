@@ -66,8 +66,7 @@ function Z.Build()
     SetMeshCube(base)
     base.Transform.Position = Vec3(cx, 0.15, cz)
     base.Transform.Scale = Vec3(14.0, 0.3, 10.0)
-    base.Color = Vec3(0.14, 0.15, 0.18)
-    Mat.Apply(base, 0.0, 0.75)
+    Mat.Concrete(base, Vec3(0.28, 0.29, 0.33))
     base:SetParent(root)
 
     -- Ряд ламп: шкала времени, разложенная в пространстве.

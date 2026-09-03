@@ -113,8 +113,7 @@ function Z.Build()
         SetMeshCube(leg)
         leg.Transform.Position = Vec3(cx + sx * W * 0.5, H * 0.5, cz)
         leg.Transform.Scale = Vec3(0.8, H, 0.8)
-        leg.Color = Vec3(0.22, 0.23, 0.26)
-        Mat.Apply(leg, 0.35, 0.55)
+        Mat.Concrete(leg, Vec3(0.36, 0.37, 0.40))
         leg:SetParent(root)
     end
     for i = 0, 8 do
@@ -122,8 +121,7 @@ function Z.Build()
         SetMeshCube(rib)
         rib.Transform.Position = Vec3(cx - W * 0.5 + (i + 0.5) * (W / 9.0), H - 0.5, cz)
         rib.Transform.Scale = Vec3(0.5, 1.0, 3.4)
-        rib.Color = Vec3(0.26, 0.27, 0.30)
-        Mat.Apply(rib, 0.35, 0.55)
+        Mat.Concrete(rib, Vec3(0.40, 0.41, 0.44))
         rib:SetParent(root)
     end
 
@@ -137,8 +135,7 @@ function Z.Build()
         o.Transform.Position = Vec3(cx + math.cos(a) * 9.0, 1.4, cz + math.sin(a) * 9.0)
         o.Transform.Rotation = Vec3(0, -math.deg(a), 0)
         o.Transform.Scale = Vec3(3.0, 2.8, 0.3)
-        o.Color = Vec3(0.80, 0.80, 0.82)
-        Mat.Apply(o, 0.0, 0.55)
+        Mat.Concrete(o, Vec3(0.95, 0.95, 0.96))
         o:SetParent(root)
     end
 

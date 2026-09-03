@@ -100,8 +100,7 @@ function Z.Build()
     SetMeshCube(base)
     base.Transform.Position = Vec3(cx, 0.15, cz)
     base.Transform.Scale = Vec3(#PATTERNS * PAIR_PITCH + 2.0, 0.3, 5.0)
-    base.Color = Vec3(0.13, 0.14, 0.16)
-    Mat.Apply(base, 0.0, 0.75)
+    Mat.Concrete(base, Vec3(0.26, 0.27, 0.31))
     base:SetParent(root)
 
     for i, p in ipairs(PATTERNS) do

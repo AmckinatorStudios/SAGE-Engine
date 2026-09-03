@@ -54,8 +54,7 @@ local function column(x, z, height)
     SetMeshCylinder(o)
     o.Transform.Position = Vec3(x, height * 0.5, z)
     o.Transform.Scale = Vec3(0.7, height, 0.7)
-    o.Color = Vec3(0.78, 0.78, 0.80)
-    Mat.Apply(o, 0.0, 0.45)
+    Mat.Concrete(o, Vec3(0.92, 0.92, 0.94))
     o:SetParent(root)
     return o
 end
@@ -80,8 +79,7 @@ function Z.Build()
     SetMeshCube(beam)
     beam.Transform.Position = Vec3(cx, 5.2, cz)
     beam.Transform.Scale = Vec3(COLUMNS * 2.6, 0.3, 1.0)
-    beam.Color = Vec3(0.24, 0.25, 0.28)
-    Mat.Apply(beam, 0.2, 0.6)
+    Mat.Concrete(beam, Vec3(0.34, 0.35, 0.38))
     beam:SetParent(root)
 
     -- Бегущие источники. Сферы при них ВИДИМЫЕ: невидимый источник света
@@ -126,7 +124,9 @@ function Z.Build()
         SetMeshCube(s)
         s.Transform.Position = Vec3(cx - 7.0 + i * 2.8, 0.06, cz + 9.5)
         s.Transform.Scale = Vec3(2.0, 0.08, 0.35)
-        Mat.Glow(s, Vec3(0.35, 0.85, 1.0), 2.6)
+        -- Сила свечения умеренная: за двойкой цвет уходит в белый, и синяя
+        -- полоса перестаёт быть синей — остаётся белая с синим ореолом.
+        Mat.Glow(s, Vec3(0.35, 0.85, 1.0), 1.5)
         s.Color = Vec3(0.35, 0.85, 1.0)
         s:SetParent(root)
         strips[#strips + 1] = s

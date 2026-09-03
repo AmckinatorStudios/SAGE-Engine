@@ -53,8 +53,9 @@ local function crate(x, y, z, size, tint)
     SetMeshCube(o)
     o.Transform.Position = Vec3(x, y, z)
     o.Transform.Scale = Vec3(size, size, size)
-    o.Color = tint
-    Mat.Apply(o, 0.0, 0.72)
+    -- Ящики — доски: на них видно и рельеф швов, и то, как они крутятся при
+    -- падении (у ровно закрашенного куба вращение читается плохо).
+    Mat.Planks(o, tint)
     body(o, size * size * size * 24.0, Vec3(size * 0.5, size * 0.5, size * 0.5))
     o:SetParent(root)
     boxes[#boxes + 1] = o
@@ -103,8 +104,7 @@ function Z.Build()
     SetMeshCube(post)
     post.Transform.Position = Vec3(cx + 6.5, 3.0, cz - 3.0)
     post.Transform.Scale = Vec3(0.25, 6.0, 0.25)
-    post.Color = Vec3(0.22, 0.23, 0.26)
-    Mat.Apply(post, 0.8, 0.35)
+    Mat.Brushed(post, Vec3(0.55, 0.58, 0.64))
     local prb = post:AddRigidBody()
     prb.Type = BodyType.Static
     local pc = post:AddCollider()
