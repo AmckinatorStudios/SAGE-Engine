@@ -2013,7 +2013,9 @@ bool EditorLayer::SelfTestTools() {
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/selftest_script.lua"});
-        sage::ui::ApplyPreset(reg, e, "Button");
+        // Со СЦЕНОЙ, а не с реестром: у кнопки есть ребёнок-надпись, и создать
+        // объект умеет только сцена (см. UIPresets.h).
+        sage::ui::ApplyPreset(*m_scene, e, "Button");
         {
             ParticleEmitterComponent em;
             em.Config = ParticlePresets::Registry()[0].Make();
@@ -2068,11 +2070,20 @@ bool EditorLayer::SelfTestTools() {
                 // Значения, а не только наличие: заготовка кнопки обязана
                 // остаться кнопкой, а не панелью с чужими полями.
                 if (ok) {
-                    // Кнопка — это набор частей, и проверять надо именно его:
-                    // прямоугольник с надписью, который не ловит мышь, кнопкой
-                    // не является, сколько бы полей у него ни было.
-                    const sage::ui::Label* label = r2.try_get<sage::ui::Label>(e2);
-                    if (!r2.all_of<sage::ui::Interactable>(e2) || !label || label->Text.empty()) {
+                    // Кнопка — это набор частей ПЛЮС объект-надпись внутри:
+                    // подложка, не ловящая мышь, кнопкой не является, а надпись
+                    // у кнопки больше не встроена — она отдельный ребёнок, и
+                    // потеряться при сохранении может именно он.
+                    bool button = r2.all_of<sage::ui::Interactable>(e2) &&
+                                  r2.all_of<sage::ui::Fill>(e2);
+                    bool caption = false;
+                    if (const auto* h = r2.try_get<HierarchyComponent>(e2)) {
+                        for (entt::entity child : h->Children) {
+                            const sage::ui::Label* l = r2.try_get<sage::ui::Label>(child);
+                            if (l && !l->Text.empty()) caption = true;
+                        }
+                    }
+                    if (!button || !caption) {
                         LOG_ERROR("Editor") << "SELFTEST: элемент интерфейса приехал не кнопкой";
                         ok = false;
                     }

@@ -78,6 +78,7 @@ void RunAnimationChecks(FrameRenderer& r);                  // морфинг и
 void RunReflectionChecks(FrameRenderer& r);                 // отражения и блик
 void RunShadowChecks(FrameRenderer& r, Scene& scene);       // тени: мягкость, каскады, лампы
 void RunSceneChecks(FrameRenderer& r);                      // уровни детализации, кэш, небо, RHI
+void RunUIChecks();                                         // интерфейс: части рисуют себя и только себя
 void RunMaterialChecks(FrameRenderer& r);                   // материал: от файла до пикселей
 void RunVolumetricChecks();                                 // объёмный свет: зерно, полосы, кайма
 

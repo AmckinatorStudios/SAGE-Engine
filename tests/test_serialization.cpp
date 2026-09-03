@@ -692,3 +692,144 @@ TEST(MeshRenderer_scene_without_slots_still_loads) {
     CHECK_TRUE(lm.Slots.empty());
     CHECK_EQ(lm.MaterialPath, std::string("materials/wood.sagemat"));
 }
+
+// --- v5 -> v6: части перестали двигать и перекрашивать друг друга ------------
+//
+// Без миграции каждая уже сделанная галка и каждая строка «значок + подпись»
+// съехали бы при первом открытии: текст лёг бы на квадратик и на значок, а
+// подложка закрасила бы галку целиком. Проверяем все три перевода по
+// отдельности — одна формула может быть верной, а вторая нет.
+TEST(Scene_migration_v5_to_v6_moves_a_shifted_label_into_a_child) {
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 5,
+      "objects": [
+        {"id": 1, "name": "Check",
+         "ui": {"transform": {"size": {"x": 200, "y": 40}, "layer": 3},
+                "fill": {"color": {"x":0.1,"y":0.1,"z":0.1,"w":1.0}, "rounding": 6.0},
+                "range": {"toggle": true},
+                "label": {"text": "Звук", "padX": 8.0}}},
+        {"id": 2, "name": "Button",
+         "ui": {"transform": {"size": {"x": 200, "y": 40}},
+                "fill": {},
+                "label": {"text": "OK", "padX": 8.0}}}
+      ]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    CHECK_EQ(j["objects"].size(), (size_t)3);   // родился ровно один объект-надпись
+
+    // У галки надписи больше нет — она стала ребёнком.
+    CHECK_FALSE(j["objects"][0]["ui"].contains("label"));
+    // Подложка ушла в цвет квадратика: раньше она и рисовалась только там, а
+    // теперь закрасила бы весь элемент вместе с местом под подпись.
+    CHECK_FALSE(j["objects"][0]["ui"].contains("fill"));
+    CHECK_NEAR(j["objects"][0]["ui"]["range"]["trackColor"]["x"].get<float>(), 0.1f, 1e-4f);
+    CHECK_NEAR(j["objects"][0]["ui"]["range"]["rounding"].get<float>(), 6.0f, 1e-4f);
+    // У обычной кнопки текст рисовался по всему элементу и раньше: не трогаем.
+    CHECK_TRUE(j["objects"][1]["ui"].contains("label"));
+    CHECK_TRUE(j["objects"][1]["ui"].contains("fill"));
+
+    const nlohmann::json& child = j["objects"][2];
+    CHECK_EQ(child["parent"].get<int>(), 1);
+    CHECK_EQ(child["ui"]["label"]["text"].get<std::string>(), std::string("Звук"));
+    // Растянут на родителя: иначе подпись зависела бы от размера, записанного
+    // однажды, и разъезжалась бы при растяжении самой галки.
+    CHECK_EQ(child["ui"]["transform"]["stretch"].get<int>(),
+             (int)sage::ui::Transform::Stretch::Both);
+    // Левое поле = прежний сдвиг (сторона квадратика 40 + отступ 8) минус
+    // боковой отступ надписи, который надпись добавит сама.
+    CHECK_NEAR(child["ui"]["transform"]["margin"]["x"].get<float>(), 40.0f, 1e-4f);
+    CHECK_NEAR(child["ui"]["transform"]["margin"]["y"].get<float>(), 0.0f, 1e-4f);
+    // Слой берётся у родителя: надпись обязана лечь поверх того же, поверх чего
+    // лежала галка, а не всплыть на нулевой слой холста.
+    CHECK_EQ(child["ui"]["transform"]["layer"].get<int>(), 3);
+}
+
+// Значок рядом с подписью: он и сам съезжает в свой объект (раньше жался
+// квадратиком к левому краю, теперь занимал бы элемент целиком), и подпись
+// сдвигает — по формуле, отличной от галкиной.
+TEST(Scene_migration_v5_to_v6_keeps_the_icon_shift) {
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 5,
+      "objects": [
+        {"id": 7, "name": "Health",
+         "ui": {"transform": {"size": {"x": 240, "y": 32}},
+                "icon": {"name": "sun", "size": 20.0},
+                "label": {"text": "100", "padX": 6.0}}}
+      ]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_EQ(j["objects"].size(), (size_t)3);   // значок и надпись — два ребёнка
+    CHECK_FALSE(j["objects"][0]["ui"].contains("label"));
+    CHECK_FALSE(j["objects"][0]["ui"].contains("icon"));
+
+    // pad = min(4, 32*0.18) = 4; значок стоял в (pad, pad) стороной 20.
+    const nlohmann::json& iconChild = j["objects"][1];
+    CHECK_EQ(iconChild["parent"].get<int>(), 7);
+    CHECK_TRUE(iconChild["ui"].contains("icon"));
+    CHECK_NEAR(iconChild["ui"]["transform"]["offset"]["x"].get<float>(), 4.0f, 1e-4f);
+    CHECK_NEAR(iconChild["ui"]["transform"]["size"]["x"].get<float>(), 20.0f, 1e-4f);
+
+    const nlohmann::json& textChild = j["objects"][2];
+    CHECK_EQ(textChild["parent"].get<int>(), 7);
+    // сдвиг = pad*2 + 20 = 28; минус боковой отступ надписи 6.
+    CHECK_NEAR(textChild["ui"]["transform"]["margin"]["x"].get<float>(), 22.0f, 1e-4f);
+    // id детей свободны: совпадение порвало бы связи иерархии.
+    CHECK_TRUE(iconChild["id"].get<int>() > 7);
+    CHECK_TRUE(textChild["id"].get<int>() > iconChild["id"].get<int>());
+}
+
+// Значок ОДИН в элементе занимал его целиком и раньше — трогать нечего. Иначе
+// миграция плодила бы лишний объект на каждую иконку в проекте.
+TEST(Scene_migration_v5_to_v6_leaves_a_lone_icon_in_place) {
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 5,
+      "objects": [
+        {"id": 3, "name": "Gear",
+         "ui": {"transform": {"size": {"x": 32, "y": 32}}, "icon": {"name": "gear"}}}
+      ]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_EQ(j["objects"].size(), (size_t)1);
+    CHECK_TRUE(j["objects"][0]["ui"].contains("icon"));
+}
+
+// Ползунок со шкалой рядом: шкала не рисовалась вовсе, а её цвет был цветом
+// ручки. После миграции цвет живёт у ползунка, а шкалы на элементе нет — иначе
+// поверх дорожки легла бы вторая полоса.
+TEST(Scene_migration_v5_to_v6_folds_a_bar_colour_into_the_slider) {
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 5,
+      "objects": [
+        {"id": 4, "name": "Volume",
+         "ui": {"transform": {"size": {"x": 240, "y": 30}},
+                "fill": {"color": {"x":0.2,"y":0.2,"z":0.2,"w":1.0}},
+                "bar": {"fillColor": {"x":0.9,"y":0.4,"z":0.1,"w":1.0}},
+                "range": {"toggle": false, "value": 0.5}}}
+      ]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    const nlohmann::json& ui = j["objects"][0]["ui"];
+    CHECK_FALSE(ui.contains("bar"));
+    CHECK_FALSE(ui.contains("fill"));
+    CHECK_NEAR(ui["range"]["accentColor"]["x"].get<float>(), 0.9f, 1e-4f);
+    CHECK_NEAR(ui["range"]["trackColor"]["x"].get<float>(), 0.2f, 1e-4f);
+}
+
+// Поле ввода рисует свой текст САМО (его прячут точками, обрезают кареткой).
+// Вынести его к ребёнку значит показать рядом с полем вторую, неживую копию.
+TEST(Scene_migration_v5_to_v6_leaves_a_text_input_alone) {
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 5,
+      "objects": [
+        {"id": 1, "name": "Field",
+         "ui": {"transform": {"size": {"x": 200, "y": 40}},
+                "icon": {"name": "sun"},
+                "textInput": {},
+                "label": {"text": "abc"}}}
+      ]
+    })";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    CHECK_TRUE(j["objects"][0]["ui"].contains("label"));   // текст остался у поля
+    CHECK_EQ(j["objects"].size(), (size_t)2);              // но значок всё же съехал
+}

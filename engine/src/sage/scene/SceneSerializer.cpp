@@ -12,13 +12,14 @@
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/ui/UILegacy.h"
+#include "sage/ui/UIPart.h"
 
 using json = nlohmann::json;
 
 // Текущая версия формата сцены. Растёт при ЛОМАЮЩЕМ изменении: добавление
 // необязательного поля версию не двигает, потому что старые файлы читаются без
 // него как раньше.
-constexpr int kSceneVersion = 5;
+constexpr int kSceneVersion = 6;
 
 static json Vec3ToJson(const glm::vec3& v) {
     return json{ {"x", v.x}, {"y", v.y}, {"z", v.z} };
@@ -729,11 +730,79 @@ static glm::vec2 Vec2FromJson(const json& j, const glm::vec2& fallback) {
     return {j.value("x", fallback.x), j.value("y", fallback.y)};
 }
 
+// --- Части элемента — ПО РЕЕСТРУ (sage/ui/UIPart.h) -------------------------
+//
+// Здесь было двести строк «поле за полем» на запись и столько же на чтение, и
+// два этих списка обязаны были совпадать. Рано или поздно они расходятся:
+// свойство сохраняется, но не читается, и молча сбрасывается при следующей
+// загрузке — самая незаметная из поломок формата.
+//
+// Теперь оба идут по одной таблице полей, объявленной рядом с самой частью.
+// Своя часть игры сериализуется без единой правки здесь: она есть в реестре —
+// значит, она есть в файле.
+
+// Одно поле части -> json.
+static void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
+    using K = sage::ui::PartField::Kind;
+    switch (f.Type) {
+        case K::Bool: out[f.Key] = sage::ui::FieldAs<bool>(data, f); break;
+        case K::Int: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
+        case K::Float: out[f.Key] = sage::ui::FieldAs<float>(data, f); break;
+        case K::String: out[f.Key] = sage::ui::FieldAs<std::string>(data, f); break;
+        case K::Color:
+        case K::Vec4: out[f.Key] = Vec4ToJson(sage::ui::FieldAs<glm::vec4>(data, f)); break;
+        case K::Vec2: out[f.Key] = Vec2ToJson(sage::ui::FieldAs<glm::vec2>(data, f)); break;
+        // Перечисление пишется ЧИСЛОМ: имена значений живут в таблице полей и
+        // нужны человеку, а файл должен пережить их переименование.
+        case K::Enum: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
+    }
+}
+
+static void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
+    if (!in.contains(f.Key)) return; // нет ключа — остаётся значение по умолчанию
+    using K = sage::ui::PartField::Kind;
+    const json& v = in[f.Key];
+    switch (f.Type) {
+        case K::Bool:
+            if (v.is_boolean()) sage::ui::FieldAs<bool>(data, f) = v.get<bool>();
+            break;
+        case K::Int:
+            if (v.is_number()) sage::ui::FieldAs<int>(data, f) = v.get<int>();
+            break;
+        case K::Float:
+            if (v.is_number()) sage::ui::FieldAs<float>(data, f) = v.get<float>();
+            break;
+        case K::String:
+            if (v.is_string()) sage::ui::FieldAs<std::string>(data, f) = v.get<std::string>();
+            break;
+        case K::Color:
+        case K::Vec4:
+            sage::ui::FieldAs<glm::vec4>(data, f) =
+                Vec4FromJson(v, sage::ui::FieldAs<glm::vec4>(data, f));
+            break;
+        case K::Vec2:
+            sage::ui::FieldAs<glm::vec2>(data, f) =
+                Vec2FromJson(v, sage::ui::FieldAs<glm::vec2>(data, f));
+            break;
+        case K::Enum:
+            // Значение из файла зажимается по списку имён: чужой номер (файл от
+            // будущей версии) не должен превращаться в мусорное перечисление.
+            if (v.is_number()) {
+                const int n = v.get<int>();
+                if (f.EnumCount <= 0 || (n >= 0 && n < f.EnumCount))
+                    sage::ui::FieldAs<int>(data, f) = n;
+            }
+            break;
+    }
+}
+
 static void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     const sage::ui::Transform* t = reg.try_get<sage::ui::Transform>(e);
     if (!t) return;
     json& uj = j["ui"];
 
+    // Прямоугольник — не «часть», а сам элемент: без него элемента нет, и в
+    // реестре частей ему делать нечего.
     json& tj = uj["transform"];
     tj["anchor"] = (int)t->Anchor;
     tj["stretch"] = (int)t->Mode;
@@ -745,107 +814,12 @@ static void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e)
     tj["visible"] = t->Visible;
     // LayoutSize не пишется: это след последнего кадра, а не настройка.
 
-    if (const sage::ui::Fill* f = reg.try_get<sage::ui::Fill>(e)) {
-        json& fj = uj["fill"];
-        fj["color"] = Vec4ToJson(f->Color);
-        fj["rounding"] = f->Rounding;
-        fj["borderThickness"] = f->BorderThickness;
-        fj["borderColor"] = Vec4ToJson(f->BorderColor);
-        fj["gradient"] = Vec4ToJson(f->Gradient);
-        fj["shadowSize"] = f->ShadowSize;
-        fj["shadowColor"] = Vec4ToJson(f->ShadowColor);
-    }
-    if (const sage::ui::Label* l = reg.try_get<sage::ui::Label>(e)) {
-        json& lj = uj["label"];
-        lj["text"] = l->Text;
-        lj["scale"] = l->Scale;
-        lj["color"] = Vec4ToJson(l->Color);
-        lj["horizontal"] = (int)l->Horizontal;
-        lj["vertical"] = (int)l->Vertical;
-        lj["wrap"] = l->Wrap;
-        lj["autoWidth"] = l->AutoWidth;
-        lj["padX"] = l->PadX;
-    }
-    if (const sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) {
-        json& ij = uj["image"];
-        SaveAssetRef(ij, "path", im->Path);
-        ij["tint"] = Vec4ToJson(im->Tint);
-        ij["sprite"] = Vec4ToJson(im->Sprite);
-        ij["sliceBorder"] = Vec4ToJson(im->SliceBorder);
-        ij["pixelScale"] = im->PixelScale;
-        ij["pixelArt"] = im->PixelArt;
-        ij["spriteHover"] = Vec4ToJson(im->SpriteHover);
-        ij["spritePressed"] = Vec4ToJson(im->SpritePressed);
-    }
-    if (const sage::ui::Bar* b = reg.try_get<sage::ui::Bar>(e)) {
-        json& bj = uj["bar"];
-        bj["value"] = b->Value;
-        bj["fillColor"] = Vec4ToJson(b->FillColor);
-        bj["grow"] = (int)b->Grow;
-        bj["smoothing"] = b->Smoothing;
-    }
-    if (const sage::ui::Icon* ic = reg.try_get<sage::ui::Icon>(e)) {
-        json& icj = uj["icon"];
-        icj["name"] = ic->Name;
-        icj["color"] = Vec4ToJson(ic->Color);
-        icj["size"] = ic->Size;
-    }
-    if (const sage::ui::Interactable* a = reg.try_get<sage::ui::Interactable>(e)) {
-        json& aj = uj["interactable"];
-        aj["enabled"] = a->Enabled;
-        aj["hoverBrightness"] = a->HoverBrightness;
-        aj["pressedBrightness"] = a->PressedBrightness;
-        aj["disabledAlpha"] = a->DisabledAlpha;
-        aj["cursor"] = a->Cursor;
-        aj["action"] = a->Action;
-        // Runtime (наведение, нажатие, каретка) не пишется по определению — он
-        // лежит отдельным полем именно для того, чтобы его нечего было забыть
-        // исключить.
-    }
-    if (const sage::ui::TextInput* in = reg.try_get<sage::ui::TextInput>(e)) {
-        json& inj = uj["input"];
-        inj["placeholder"] = in->Placeholder;
-        inj["maxLength"] = in->MaxLength;
-        inj["password"] = in->Password;
-        inj["readOnly"] = in->ReadOnly;
-    }
-    if (const sage::ui::Range* r = reg.try_get<sage::ui::Range>(e)) {
-        json& rj = uj["range"];
-        rj["min"] = r->Min;
-        rj["max"] = r->Max;
-        rj["value"] = r->Value;
-        rj["step"] = r->Step;
-        rj["toggle"] = r->Toggle;
-    }
-    if (const sage::ui::Mask* m = reg.try_get<sage::ui::Mask>(e)) {
-        json& mj = uj["mask"];
-        mj["form"] = (int)m->Form;
-        mj["rounding"] = m->Rounding;
-        mj["padding"] = Vec4ToJson(m->Padding);
-        mj["showOutside"] = m->ShowOutside;
-    }
-    if (const sage::ui::Layout* lay = reg.try_get<sage::ui::Layout>(e)) {
-        json& lj = uj["layout"];
-        lj["direction"] = (int)lay->Direction;
-        lj["justify"] = (int)lay->Justify;
-        lj["spacing"] = lay->Spacing;
-        lj["padding"] = Vec4ToJson(lay->Padding);
-        lj["columns"] = lay->Columns;
-        lj["stretchCross"] = lay->StretchCross;
-        lj["fitContent"] = lay->FitContent;
-    }
-    if (const sage::ui::Canvas* c = reg.try_get<sage::ui::Canvas>(e)) {
-        json& cj = uj["canvas"];
-        cj["mode"] = (int)c->Mode;
-        cj["reference"] = Vec2ToJson(c->Reference);
-        cj["matchWidthOrHeight"] = c->MatchWidthOrHeight;
-        cj["sortOrder"] = c->SortOrder;
-    }
-    if (const sage::ui::Group* g = reg.try_get<sage::ui::Group>(e)) {
-        json& gj = uj["group"];
-        gj["alpha"] = g->Alpha;
-        gj["interactable"] = g->Interactable;
-        gj["blockRaycasts"] = g->BlockRaycasts;
+    for (const sage::ui::PartType& p : sage::ui::Parts()) {
+        if (!p.Fields || !p.Has || !p.Has(reg, e)) continue;  // без полей писать нечего
+        const void* data = p.Get(reg, e);
+        if (!data) continue;
+        json& pj = uj[p.Id];
+        for (const sage::ui::PartField& f : *p.Fields) SaveField(pj, data, f);
     }
 }
 
@@ -860,11 +834,10 @@ static void ResolveUIImage(sage::ui::Image& im) {
 }
 
 static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
-
     // Старая запись (плоский элемент с "kind") — разбираем прежним разбором и
-    // раскладываем по компонентам. Отдельная ветка, а не «дочитать недостающее»:
-    // это два разных формата, и делать вид, что один плавно переходит в другой,
-    // значит получить третий.
+    // раскладываем по компонентам. Отдельная ветка, а не «дочитать
+    // недостающее»: это два разных формата, и делать вид, что один плавно
+    // переходит в другой, значит получить третий.
     if (uj.contains("kind")) {
         sage::ui::Decompose(ParseUIElement(uj), reg, e);
         if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
@@ -874,9 +847,9 @@ static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e
     sage::ui::Transform t;
     if (uj.contains("transform")) {
         const json& tj = uj["transform"];
-        const int anchor = tj.value("anchor", 0);
+        const int anchor = tj.value("anchor", (int)t.Anchor);
         if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
-        const int stretch = tj.value("stretch", 0);
+        const int stretch = tj.value("stretch", (int)t.Mode);
         if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Transform::Stretch)stretch;
         t.Offset = Vec2FromJson(tj.value("offset", json::object()), t.Offset);
         t.Size = Vec2FromJson(tj.value("size", json::object()), t.Size);
@@ -887,138 +860,21 @@ static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e
     }
     reg.emplace_or_replace<sage::ui::Transform>(e, t);
 
-    if (uj.contains("fill")) {
-        const json& fj = uj["fill"];
-        sage::ui::Fill f;
-        if (fj.contains("color")) f.Color = Vec4FromJson(fj["color"], f.Color);
-        f.Rounding = fj.value("rounding", f.Rounding);
-        f.BorderThickness = fj.value("borderThickness", f.BorderThickness);
-        if (fj.contains("borderColor")) f.BorderColor = Vec4FromJson(fj["borderColor"], f.BorderColor);
-        if (fj.contains("gradient")) f.Gradient = Vec4FromJson(fj["gradient"], f.Gradient);
-        f.ShadowSize = fj.value("shadowSize", f.ShadowSize);
-        if (fj.contains("shadowColor")) f.ShadowColor = Vec4FromJson(fj["shadowColor"], f.ShadowColor);
-        reg.emplace_or_replace<sage::ui::Fill>(e, f);
+    // Части — по реестру. Ключ, которого реестр не знает (часть из другой
+    // сборки игры), ПРОПУСКАЕТСЯ молча и остаётся в файле нетронутым: терять
+    // чужие данные при открытии сцены нельзя.
+    for (const sage::ui::PartType& p : sage::ui::Parts()) {
+        if (!p.Fields || !p.Id || !uj.contains(p.Id)) continue;
+        p.Add(reg, e);
+        void* data = p.GetMutable(reg, e);
+        if (!data) continue;
+        const json& pj = uj[p.Id];
+        for (const sage::ui::PartField& f : *p.Fields) LoadField(pj, data, f);
     }
-    if (uj.contains("label")) {
-        const json& lj = uj["label"];
-        sage::ui::Label l;
-        l.Text = lj.value("text", l.Text);
-        l.Scale = lj.value("scale", l.Scale);
-        if (lj.contains("color")) l.Color = Vec4FromJson(lj["color"], l.Color);
-        const int h = lj.value("horizontal", (int)l.Horizontal);
-        const int v = lj.value("vertical", (int)l.Vertical);
-        if (h >= 0 && h <= 2) l.Horizontal = (sage::ui::Label::Align)h;
-        if (v >= 0 && v <= 2) l.Vertical = (sage::ui::Label::Align)v;
-        l.Wrap = lj.value("wrap", l.Wrap);
-        l.AutoWidth = lj.value("autoWidth", l.AutoWidth);
-        l.PadX = lj.value("padX", l.PadX);
-        reg.emplace_or_replace<sage::ui::Label>(e, l);
-    }
-    if (uj.contains("image")) {
-        const json& ij = uj["image"];
-        sage::ui::Image im;
-        im.Path = LoadAssetRef(ij, "path");
-        if (ij.contains("tint")) im.Tint = Vec4FromJson(ij["tint"], im.Tint);
-        if (ij.contains("sprite")) im.Sprite = Vec4FromJson(ij["sprite"], im.Sprite);
-        if (ij.contains("sliceBorder")) im.SliceBorder = Vec4FromJson(ij["sliceBorder"], im.SliceBorder);
-        im.PixelScale = ij.value("pixelScale", im.PixelScale);
-        im.PixelArt = ij.value("pixelArt", im.PixelArt);
-        if (ij.contains("spriteHover")) im.SpriteHover = Vec4FromJson(ij["spriteHover"], im.SpriteHover);
-        if (ij.contains("spritePressed"))
-            im.SpritePressed = Vec4FromJson(ij["spritePressed"], im.SpritePressed);
-        ResolveUIImage(im);
-        reg.emplace_or_replace<sage::ui::Image>(e, im);
-    }
-    if (uj.contains("bar")) {
-        const json& bj = uj["bar"];
-        sage::ui::Bar b;
-        b.Value = bj.value("value", b.Value);
-        if (bj.contains("fillColor")) b.FillColor = Vec4FromJson(bj["fillColor"], b.FillColor);
-        const int grow = bj.value("grow", (int)b.Grow);
-        if (grow >= 0 && grow <= 3) b.Grow = (sage::ui::Bar::Direction)grow;
-        b.Smoothing = bj.value("smoothing", b.Smoothing);
-        reg.emplace_or_replace<sage::ui::Bar>(e, b);
-    }
-    if (uj.contains("icon")) {
-        const json& icj = uj["icon"];
-        sage::ui::Icon ic;
-        ic.Name = icj.value("name", ic.Name);
-        if (icj.contains("color")) ic.Color = Vec4FromJson(icj["color"], ic.Color);
-        ic.Size = icj.value("size", ic.Size);
-        reg.emplace_or_replace<sage::ui::Icon>(e, ic);
-    }
-    if (uj.contains("interactable")) {
-        const json& aj = uj["interactable"];
-        sage::ui::Interactable a;
-        a.Enabled = aj.value("enabled", a.Enabled);
-        a.HoverBrightness = aj.value("hoverBrightness", a.HoverBrightness);
-        a.PressedBrightness = aj.value("pressedBrightness", a.PressedBrightness);
-        a.DisabledAlpha = aj.value("disabledAlpha", a.DisabledAlpha);
-        a.Cursor = aj.value("cursor", a.Cursor);
-        a.Action = aj.value("action", a.Action);
-        reg.emplace_or_replace<sage::ui::Interactable>(e, a);
-    }
-    if (uj.contains("input")) {
-        const json& inj = uj["input"];
-        sage::ui::TextInput in;
-        in.Placeholder = inj.value("placeholder", in.Placeholder);
-        in.MaxLength = inj.value("maxLength", in.MaxLength);
-        in.Password = inj.value("password", in.Password);
-        in.ReadOnly = inj.value("readOnly", in.ReadOnly);
-        reg.emplace_or_replace<sage::ui::TextInput>(e, in);
-    }
-    if (uj.contains("range")) {
-        const json& rj = uj["range"];
-        sage::ui::Range r;
-        r.Min = rj.value("min", r.Min);
-        r.Max = rj.value("max", r.Max);
-        r.Value = rj.value("value", r.Value);
-        r.Step = rj.value("step", r.Step);
-        r.Toggle = rj.value("toggle", r.Toggle);
-        reg.emplace_or_replace<sage::ui::Range>(e, r);
-    }
-    if (uj.contains("mask")) {
-        const json& mj = uj["mask"];
-        sage::ui::Mask m;
-        const int form = mj.value("form", (int)m.Form);
-        if (form >= 0 && form <= 1) m.Form = (sage::ui::Mask::Shape)form;
-        m.Rounding = mj.value("rounding", m.Rounding);
-        if (mj.contains("padding")) m.Padding = Vec4FromJson(mj["padding"], m.Padding);
-        m.ShowOutside = mj.value("showOutside", m.ShowOutside);
-        reg.emplace_or_replace<sage::ui::Mask>(e, m);
-    }
-    if (uj.contains("layout")) {
-        const json& lj = uj["layout"];
-        sage::ui::Layout lay;
-        const int dir = lj.value("direction", (int)lay.Direction);
-        if (dir >= 0 && dir <= 2) lay.Direction = (sage::ui::Layout::Flow)dir;
-        const int just = lj.value("justify", (int)lay.Justify);
-        if (just >= 0 && just <= 3) lay.Justify = (sage::ui::Layout::Align)just;
-        lay.Spacing = lj.value("spacing", lay.Spacing);
-        if (lj.contains("padding")) lay.Padding = Vec4FromJson(lj["padding"], lay.Padding);
-        lay.Columns = lj.value("columns", lay.Columns);
-        lay.StretchCross = lj.value("stretchCross", lay.StretchCross);
-        lay.FitContent = lj.value("fitContent", lay.FitContent);
-        reg.emplace_or_replace<sage::ui::Layout>(e, lay);
-    }
-    if (uj.contains("canvas")) {
-        const json& cj = uj["canvas"];
-        sage::ui::Canvas c;
-        const int mode = cj.value("mode", (int)c.Mode);
-        if (mode >= 0 && mode <= 1) c.Mode = (sage::ui::Canvas::Scale)mode;
-        c.Reference = Vec2FromJson(cj.value("reference", json::object()), c.Reference);
-        c.MatchWidthOrHeight = cj.value("matchWidthOrHeight", c.MatchWidthOrHeight);
-        c.SortOrder = cj.value("sortOrder", c.SortOrder);
-        reg.emplace_or_replace<sage::ui::Canvas>(e, c);
-    }
-    if (uj.contains("group")) {
-        const json& gj = uj["group"];
-        sage::ui::Group g;
-        g.Alpha = gj.value("alpha", g.Alpha);
-        g.Interactable = gj.value("interactable", g.Interactable);
-        g.BlockRaycasts = gj.value("blockRaycasts", g.BlockRaycasts);
-        reg.emplace_or_replace<sage::ui::Group>(e, g);
-    }
+
+    // Картинке нужен рантайм-указатель на текстуру: путь в файле есть, а
+    // загрузить его — дело загрузчика сцены.
+    if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
 }
 
 static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
@@ -1387,6 +1243,152 @@ void MigrateV4toV5(json& root) {
     root["lighting"]["sun"]["intensity"] = 0.0f;
 }
 
+// v5 -> v6. Части перестали двигать и перекрашивать друг друга.
+//
+// ПОЧЕМУ ПОМЕНЯЛОСЬ. Часть рисует себя в прямоугольнике СВОЕГО элемента и
+// ничего не знает о соседях. Раньше было наоборот, и правила жили только в
+// исходниках отрисовки: значок сдвигал подпись вправо на свою ширину, галка —
+// на сторону квадратика, ползунок красился подложкой соседа, а «акцент» брал у
+// шкалы, которую для этого надо было повесить рядом; при этом подложка,
+// оказавшись рядом с диапазоном, переставала закрашивать элемент целиком. Ни
+// одно из этих правил нельзя было увидеть в инспекторе или отменить.
+//
+// ЧТО ДЕЛАЕТ МИГРАЦИЯ — три перевода, каждый сохраняет прежний ВИД:
+//   1. Диапазон забирает себе цвета, которые брал у подложки и шкалы, а сами
+//      подложка и шкала с такого элемента убираются: раньше их всё равно не
+//      рисовали (подложка шла в дорожку, шкала не рисовалась вовсе), а теперь
+//      нарисовали бы поверх.
+//   2. Значок, стоявший рядом с чем-то ещё, переезжает в свой дочерний объект
+//      того же размера и на то же место — раньше он в этом случае жался
+//      квадратиком к левому краю, а один в элементе занимал его целиком.
+//   3. Подпись, которую двигали значок или галка, переезжает в дочерний объект,
+//      растянутый на родителя, с левым полем ровно в прежний сдвиг.
+//
+// Чего миграция НЕ трогает: элементы без значка и галки (там текст и раньше
+// рисовался по всему прямоугольнику) и поля ввода — их текст рисует САМО ПОЛЕ
+// (он бывает скрыт точками и обрезан кареткой), и вынос его к ребёнку показал
+// бы рядом вторую, неживую копию.
+void MigrateV5toV6(json& root) {
+    int maxId = 0;
+    for (const json& obj : root["objects"]) maxId = std::max(maxId, obj.value("id", 0));
+
+    // Дети собираются отдельно: дописывать в массив, по которому идёт цикл, —
+    // это ссылки, протухшие при первом же расширении вектора.
+    std::vector<json> born;
+
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
+        json& uj = obj["ui"];
+        const int ownerId = obj.value("id", 0);
+        if (ownerId <= 0) continue; // без id ребёнка не к чему привязать
+
+        const bool hasLabel = uj.contains("label") && uj["label"].is_object();
+        const bool hasInput = uj.contains("textInput");
+        const bool hasImage = uj.contains("image") && uj["image"].is_object();
+        const bool hasBar = uj.contains("bar") && uj["bar"].is_object();
+        const bool hasRange = uj.contains("range") && uj["range"].is_object();
+        const bool hasIcon = uj.contains("icon") && uj["icon"].is_object() &&
+                             !uj["icon"].value("name", std::string()).empty();
+
+        const json tj = uj.value("transform", json::object());
+        const glm::vec2 size = Vec2FromJson(tj.value("size", json::object()), {200.0f, 56.0f});
+        const float w = size.x > 0.0f ? size.x : 200.0f;
+        const float h = size.y > 0.0f ? size.y : 56.0f;
+        const int layer = tj.value("layer", 0);
+
+        // Заготовка дочернего элемента: те же поля, что пишет SaveUIComponents,
+        // — иначе загрузчик подставит СВОИ умолчания вместо наших.
+        auto makeChild = [&](const char* name) {
+            json child;
+            child["id"] = ++maxId;
+            // Имя латиницей: это ДАННЫЕ сцены, а не строка интерфейса (см.
+            // «Sun» в миграции v4->v5) — от смены языка редактора имя объекта
+            // меняться не должно.
+            child["name"] = name;
+            child["parent"] = ownerId;
+            child["mesh"]["type"] = "none";
+            json& cu = child["ui"];
+            cu["transform"]["anchor"] = (int)UIAnchor::TopLeft;
+            cu["transform"]["stretch"] = (int)sage::ui::Transform::Stretch::None;
+            cu["transform"]["offset"] = Vec2ToJson({0.0f, 0.0f});
+            cu["transform"]["size"] = Vec2ToJson(size);
+            cu["transform"]["margin"] = Vec4ToJson(glm::vec4(0.0f));
+            cu["transform"]["pivot"] = Vec2ToJson({0.0f, 0.0f});
+            // Слой берётся у родителя: часть обязана лечь поверх того же, поверх
+            // чего лежала, а не всплыть на нулевой слой холста.
+            cu["transform"]["layer"] = layer;
+            cu["transform"]["visible"] = true;
+            return child;
+        };
+
+        // --- 1. Диапазон забирает чужие цвета себе --------------------------
+        if (hasRange) {
+            json& rj = uj["range"];
+            if (uj.contains("fill") && uj["fill"].is_object()) {
+                const json& fj = uj["fill"];
+                if (fj.contains("color")) rj["trackColor"] = fj["color"];
+                if (fj.contains("rounding")) rj["rounding"] = fj["rounding"];
+                if (fj.contains("borderColor")) rj["borderColor"] = fj["borderColor"];
+                if (fj.contains("borderThickness"))
+                    rj["borderThickness"] = fj["borderThickness"];
+                uj.erase("fill");
+            }
+            if (hasBar) {
+                if (uj["bar"].contains("fillColor")) rj["accentColor"] = uj["bar"]["fillColor"];
+                uj.erase("bar");
+            }
+        }
+
+        // Сдвиг подписи считается ТЕМИ ЖЕ формулами, что были в старой
+        // отрисовке, — иначе «выглядит как раньше» станет «примерно как раньше».
+        const float iconPad = std::min(4.0f, h * 0.18f);
+        const float declaredIcon = hasIcon ? uj["icon"].value("size", 0.0f) : 0.0f;
+        const float iconSide =
+            declaredIcon > 0.0f ? declaredIcon : std::max(h - iconPad * 2.0f, 4.0f);
+
+        // --- 2. Значок рядом с чем-то ещё — в свой объект --------------------
+        if (hasIcon && (hasLabel || hasImage || hasBar || hasRange)) {
+            json child = makeChild("Icon");
+            child["ui"]["transform"]["offset"] = Vec2ToJson({iconPad, iconPad});
+            child["ui"]["transform"]["size"] = Vec2ToJson({iconSide, iconSide});
+            child["ui"]["icon"] = uj["icon"];
+            uj.erase("icon");
+            born.push_back(std::move(child));
+        }
+
+        // --- 3. Сдвинутая подпись — в свой объект ----------------------------
+        if (hasLabel && !hasInput) {
+            const float padX = uj["label"].value("padX", 8.0f);
+            float left = padX;
+            bool shifted = false;
+            if (hasIcon) {
+                left = iconPad * 2.0f + iconSide;
+                shifted = true;
+            }
+            if (hasRange && uj["range"].value("toggle", false)) {
+                left = std::max(left, std::min(w, h) + padX);
+                shifted = true;
+            }
+            if (shifted) {
+                json child = makeChild("Text");
+                json& ctj = child["ui"]["transform"];
+                // Растянут на родителя: иначе подпись зависела бы от размера,
+                // записанного однажды, и разъезжалась бы при растяжении самого
+                // элемента.
+                ctj["stretch"] = (int)sage::ui::Transform::Stretch::Both;
+                // Левое поле — прежний сдвиг МИНУС боковой отступ надписи: его
+                // надпись добавит сама, и без вычитания он посчитался бы дважды.
+                ctj["margin"] = Vec4ToJson({std::max(left - padX, 0.0f), 0.0f, 0.0f, 0.0f});
+                child["ui"]["label"] = uj["label"];
+                uj.erase("label");
+                born.push_back(std::move(child));
+            }
+        }
+    }
+
+    for (json& child : born) root["objects"].push_back(std::move(child));
+}
+
 using MigrationFn = void (*)(json&);
 
 // Цепочка миграций: индекс i переводит версию (i+1) в (i+2).
@@ -1395,6 +1397,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV2toV3,
     &MigrateV3toV4,
     &MigrateV4toV5,
+    &MigrateV5toV6,
 };
 
 } // namespace

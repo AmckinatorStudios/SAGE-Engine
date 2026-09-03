@@ -22,6 +22,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
+#include "sage/ui/UIPart.h"
 #include "sage/render/ShadowMap.h"
 
 using sage::ui::UIRect;
@@ -238,11 +239,14 @@ TEST(UI_old_flat_scene_migrates_to_components) {
     CHECK_TRUE(reg.all_of<sage::ui::Interactable>(obj.Entity()));
     CHECK_TRUE(reg.all_of<sage::ui::Mask>(obj.Entity()));   // был флаг clipChildren
     // Цвет заполнения ползунка жил в том же поле, что у полосы, и должен был
-    // куда-то приехать: у нового элемента акцентный цвет хранит полоса. Без
+    // куда-то приехать: теперь акцентный цвет — поле САМОГО диапазона. Без
     // этого перенесённый ползунок молча позеленел бы в умолчание.
-    const auto* accent = reg.try_get<sage::ui::Bar>(obj.Entity());
-    CHECK_TRUE(accent != nullptr);
-    if (accent) CHECK_NEAR(accent->FillColor.g, 0.7f, 1e-3f);
+    if (range) CHECK_NEAR(range->AccentColor.g, 0.7f, 1e-3f);
+    // И пустой полосы рядом с ним больше НЕ ЗАВОДИТСЯ: она существовала только
+    // как место для этого цвета, а рисовалась бы теперь поверх дорожки.
+    CHECK_FALSE(reg.all_of<sage::ui::Bar>(obj.Entity()));
+    // Подложки у диапазона тоже нет — её цвет стал цветом дорожки.
+    CHECK_FALSE(reg.all_of<sage::ui::Fill>(obj.Entity()));
     const auto* label = reg.try_get<sage::ui::Label>(obj.Entity());
     CHECK_TRUE(label != nullptr);
     if (label) CHECK_EQ(label->Text, std::string("Громкость"));
@@ -679,11 +683,25 @@ TEST(UI_presets_are_the_same_everywhere) {
     Scene scene("presets");
     entt::registry& reg = scene.Registry();
 
+    // НАДПИСЬ НА КНОПКЕ — ОТДЕЛЬНЫЙ ОБЪЕКТ, а не поле внутри подложки.
+    //
+    // Раньше кнопка была Fill + Label на одной сущности, то есть «подложка со
+    // встроенным текстом»: текст нельзя было ни подвинуть, ни покрасить иначе,
+    // ни заменить значком, ни добавить второй — он двигался по правилам,
+    // зашитым в отрисовку. Теперь это подложка, реагирующая на мышь, И объект
+    // с текстом внутри неё; собирается заготовкой через СЦЕНУ, потому что
+    // создать объект и назначить родителя умеет только она.
     GameObject button = scene.CreateObject("Button");
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Button"));
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, button.Entity(), "Button"));
     CHECK_TRUE(reg.all_of<sage::ui::Interactable>(button.Entity())); // иначе просто прямоугольник
     CHECK_TRUE(reg.all_of<sage::ui::Fill>(button.Entity()));
-    const auto* buttonLabel = reg.try_get<sage::ui::Label>(button.Entity());
+    CHECK_FALSE(reg.all_of<sage::ui::Label>(button.Entity())); // текст — у ребёнка
+
+    const sage::ui::Label* buttonLabel = nullptr;
+    if (const auto* h = reg.try_get<HierarchyComponent>(button.Entity())) {
+        for (entt::entity c : h->Children)
+            if (const auto* l = reg.try_get<sage::ui::Label>(c)) buttonLabel = l;
+    }
     CHECK_TRUE(buttonLabel != nullptr);
     if (buttonLabel) CHECK_TRUE(!buttonLabel->Text.empty()); // без надписи не читается
     const auto& buttonXf = reg.get<sage::ui::Transform>(button.Entity());
@@ -883,8 +901,15 @@ TEST(UI2_presets_build_real_elements) {
     const sage::ui::Preset* button = sage::ui::FindPreset("Button");
     CHECK_TRUE(button != nullptr);
     if (button) {
-        CHECK_TRUE(button->HasFill && button->HasLabel && button->HasInteractable);
-        CHECK_TRUE(!button->LabelStyle.Text.empty());
+        CHECK_TRUE(button->HasFill && button->HasInteractable);
+        // Текста в самой заготовке НЕТ — он у ребёнка. Это и есть отказ от
+        // встроенности: панель не носит в себе надпись, надпись — объект.
+        CHECK_FALSE(button->HasLabel);
+        CHECK_EQ(button->Children.size(), (size_t)1);
+        if (!button->Children.empty()) {
+            CHECK_TRUE(button->Children[0].HasLabel);
+            CHECK_TRUE(!button->Children[0].LabelStyle.Text.empty());
+        }
     }
 
     // Список — это маска плюс раскладка: то, что раньше собиралось вручную из
@@ -900,6 +925,52 @@ TEST(UI2_presets_build_real_elements) {
 
     CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
     CHECK_TRUE(sage::ui::PresetNames().size() >= 8);
+}
+
+// Диапазон рисует себя СВОИМИ цветами и в своём прямоугольнике.
+//
+// Раньше галка и ползунок брали цвет дорожки у подложки, а цвет ручки — у
+// шкалы, повешенной рядом; при этом подложка, оказавшись на таком элементе,
+// переставала закрашивать его целиком. Одна часть меняла смысл другой — и
+// проверить это можно только здесь: собери галку с подложкой, и она закрасит
+// весь ряд вместе с местом под подпись.
+TEST(UI2_a_range_carries_its_own_colours) {
+    const sage::ui::Preset* box = sage::ui::FindPreset("Checkbox");
+    CHECK_TRUE(box != nullptr);
+    if (box) {
+        CHECK_TRUE(box->HasRange && box->RangeValue.Toggle);
+        CHECK_FALSE(box->HasFill);   // иначе заливка легла бы на весь ряд
+        CHECK_FALSE(box->HasLabel);  // подпись — отдельный объект-ребёнок
+        CHECK_EQ(box->Children.size(), (size_t)1);
+        CHECK_TRUE(box->RangeValue.BorderThickness > 0.0f);
+    }
+    const sage::ui::Preset* slider = sage::ui::FindPreset("Slider");
+    CHECK_TRUE(slider != nullptr);
+    if (slider) {
+        CHECK_TRUE(slider->HasRange && !slider->RangeValue.Toggle);
+        CHECK_FALSE(slider->HasFill);
+        // Цвета есть у самого диапазона, а не «где-то рядом»: дорожка тёмная,
+        // акцент — видимый, и оба меняются в инспекторе своей части.
+        CHECK_TRUE(slider->RangeValue.TrackColor.a > 0.0f);
+        CHECK_TRUE(slider->RangeValue.AccentColor.a > 0.0f);
+    }
+
+    // И это переживает запись на диск: цвета — обычные поля части.
+    Scene scene("range");
+    GameObject e = scene.CreateObject("Volume");
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, e.Entity(), "Slider"));
+    sage::ui::Range& r = scene.Registry().get<sage::ui::Range>(e.Entity());
+    r.AccentColor = {0.9f, 0.4f, 0.1f, 1.0f};
+    std::unique_ptr<Scene> back =
+        SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(back != nullptr);
+    if (back) {
+        GameObject loaded = back->FindByName("Volume");
+        CHECK_TRUE(loaded.Valid());
+        const sage::ui::Range& lr = back->Registry().get<sage::ui::Range>(loaded.Entity());
+        CHECK_NEAR(lr.AccentColor.r, 0.9f, 1e-4f);
+        CHECK_NEAR(lr.AccentColor.g, 0.4f, 1e-4f);
+    }
 }
 
 // ===========================================================================
@@ -996,7 +1067,9 @@ TEST(UI_demo_menu_click_reports_the_action_not_the_entity) {
 TEST(UI_demo_hud_bar_slides_to_its_target) {
     Scene scene("hud");
     CHECK_TRUE(sage::ui::BuildDemo(scene, "hud") >= 0);
-    GameObject hp = scene.FindByName("HudHealth");
+    // Шкала живёт в СВОЁМ объекте внутри панели здоровья: значок и полоса
+    // больше не делят один прямоугольник (см. BuildHud).
+    GameObject hp = scene.FindByName("HudHealthBar");
     CHECK_TRUE(hp.Valid());
 
     sage::ui::Bar& bar = scene.Registry().get<sage::ui::Bar>(hp.Entity());
@@ -1404,4 +1477,92 @@ TEST(UI_press_and_release_name_both_ends_of_a_drag) {
 
     // И то же самое видно из сцены — оттуда это читает игра (sage.ui.*).
     CHECK_TRUE(scene.UiFrame.ReleasedAction == "slot:7");
+}
+
+// ---------------------------------------------------------------------------
+// СВОЯ ЧАСТЬ ЭЛЕМЕНТА — БЕЗ ЕДИНОЙ ПРАВКИ В ДВИЖКЕ.
+//
+// Ради этого реестр частей и заведён. Раньше набор частей был зашит в движок
+// четырьмя списками сразу — отрисовка, запись в .sage, чтение из .sage,
+// инспектор редактора, — и «добавить свою часть» означало вписаться в каждый.
+// Проверка идёт ровно тем путём, каким пойдёт игра: объявить компонент, описать
+// его поля таблицей, позвать RegisterPart. Ни строки в engine/ и editor/.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Часть, которой в движке нет и не будет: «искры» поверх элемента.
+struct Sparkle {
+    float Density = 0.5f;
+    glm::vec4 Colour{1.0f, 0.9f, 0.4f, 1.0f};
+    bool Twinkle = true;
+    int Seed = 7;
+};
+
+const std::vector<sage::ui::PartField>& SparkleFields() {
+    using F = sage::ui::PartField;
+    static const std::vector<F> fields = {
+        {"density", "Density", F::Kind::Float, offsetof(Sparkle, Density), 0.0f, 1.0f},
+        {"colour", "Colour", F::Kind::Color, offsetof(Sparkle, Colour)},
+        {"twinkle", "Twinkle", F::Kind::Bool, offsetof(Sparkle, Twinkle)},
+        {"seed", "Seed", F::Kind::Int, offsetof(Sparkle, Seed), 0.0f, 1000.0f},
+    };
+    return fields;
+}
+
+} // namespace
+
+TEST(UI_a_game_can_add_its_own_part) {
+    // Регистрация — одна строка. Отрисовки у части нет (nullptr): проверяется
+    // не рисование, а то, что движок принял чужую часть как свою.
+    sage::ui::RegisterPart(
+        sage::ui::MakePart<Sparkle>("sparkle", "Sparkle", 55, &SparkleFields()));
+
+    // 1. Часть ЕСТЬ В РЕЕСТРЕ — а значит, она есть и в списке «добавить часть»
+    //    в редакторе, и в обходе отрисовки: оба идут по одному списку.
+    const sage::ui::PartType* type = sage::ui::FindPart("sparkle");
+    CHECK_TRUE(type != nullptr);
+    if (!type) return;
+    CHECK_TRUE(type->Fields != nullptr && type->Fields->size() == 4);
+
+    // Порядок соблюдён: 55 — между значком (50) и текстом (60).
+    int before = -1, after = -1, mine = -1;
+    for (size_t i = 0; i < sage::ui::Parts().size(); ++i) {
+        const std::string id = sage::ui::Parts()[i].Id;
+        if (id == "icon") before = (int)i;
+        if (id == "sparkle") mine = (int)i;
+        if (id == "label") after = (int)i;
+    }
+    CHECK_TRUE(before >= 0 && mine > before && after > mine);
+
+    // 2. Часть переживает СОХРАНЕНИЕ И ЗАГРУЗКУ сцены — тем же кодом, что и
+    //    встроенные: сериализатор идёт по реестру и о «sparkle» ничего не знает.
+    Scene scene("sparkle");
+    GameObject obj = scene.CreateObject("Glow");
+    scene.Registry().emplace<sage::ui::Transform>(obj.Entity());
+    Sparkle authored;
+    authored.Density = 0.75f;
+    authored.Colour = {0.2f, 0.4f, 0.6f, 0.8f};
+    authored.Twinkle = false;
+    authored.Seed = 42;
+    scene.Registry().emplace<Sparkle>(obj.Entity(), authored);
+    const int id = obj.Id();
+
+    const std::string path = "sage_sparkle_test.sage";
+    SceneSerializer::Save(scene, path);
+    std::unique_ptr<Scene> loaded = SceneSerializer::Load(path);
+    CHECK_TRUE(loaded != nullptr);
+    if (loaded) {
+        GameObject back = loaded->Get(id);
+        CHECK_TRUE(back.Valid());
+        const Sparkle* got = back.Valid() ? loaded->Registry().try_get<Sparkle>(back.Entity())
+                                          : nullptr;
+        CHECK_TRUE(got != nullptr);
+        if (got) {
+            CHECK_NEAR(got->Density, 0.75f, 1e-4);
+            CHECK_NEAR(got->Colour.b, 0.6f, 1e-4);
+            CHECK_FALSE(got->Twinkle);
+            CHECK_EQ(got->Seed, 42);
+        }
+    }
+    std::remove(path.c_str());
 }
