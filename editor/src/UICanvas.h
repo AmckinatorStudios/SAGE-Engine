@@ -66,9 +66,13 @@ public:
     void Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgSize, int frameW,
               int frameH, bool hovered);
 
-    // Тащим ли мы что-то прямо сейчас — вьюпорт не должен в это время
-    // обрабатывать выбор объектов и полёт камеры.
+    // Тащим ли мы что-то прямо сейчас — окно не должно в это время
+    // масштабировать и панорамировать холст.
     bool IsUsing() const { return m_drag != Drag::None || m_marquee; }
+
+    // Границы ВСЕГО содержимого в пикселях кадра: сам экран плюс всё, что за
+    // него вышло. По ним окно вписывает холст («Вписать», Shift+F).
+    sage::ui::UIRect ContentBounds(int frameW, int frameH) const;
 
 private:
     // Что именно тащим. Ручки нумеруются по сторонам света, чтобы код

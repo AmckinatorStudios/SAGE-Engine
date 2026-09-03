@@ -104,7 +104,6 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     // Панель вёрстки — вкладкой к иерархии слева, а не плавающим окном. Плавать
     // ей нельзя: она открывается сама вместе с режимом вёрстки и накрывала бы
     // собой ровно тот вьюпорт, ради которого её и открыли.
-    ImGui::DockBuilderDockWindow("Layout", left);
     ImGui::DockBuilderDockWindow("Lighting", right);
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Console", bottom);
@@ -121,6 +120,9 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     // «редактор кода поверх сцены» заставлял таскать окно с места на место
     // ровно так же, как раньше заставлял alt-tab во внешний редактор.
     ImGui::DockBuilderDockWindow("Code", center);
+    // Редактор интерфейса — вкладкой в центр, к вьюпорту и игре: это
+    // такой же основной рабочий вид, только для другого предмета работы.
+    ImGui::DockBuilderDockWindow("UIEditor", center);
     ImGui::DockBuilderFinish(dockspaceId);
 
     ImGui::SetWindowFocus("Viewport");
@@ -167,7 +169,7 @@ void EditorLayer::DrawStatusBar(float height) {
                       ImGuiWindowFlags_NoScrollbar);
     ImGui::AlignTextToFramePadding();
 
-    ImGui::TextDisabled("%s", m_project.Loaded() ? m_project.Name().c_str() : T("No project"));
+    ImGui::TextDisabled("%s", m_project.Name().c_str());
     ImGui::SameLine(); ImGui::TextDisabled("|");
     ImGui::SameLine();
     std::string scene = m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
@@ -231,7 +233,7 @@ void EditorLayer::DrawStatusBar(float height) {
 }
 
 bool EditorLayer::AnyPanelVisible() const {
-    return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUITools ||
+    return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUIEditor ||
            m_showViewport || m_showGame ||
            m_showConsole || m_showAssets || m_showCode || m_showProfiler;
 }
@@ -345,7 +347,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (ImGui::MenuItem(T("Open Scene..."))) openDialog = "Open Scene";
 
             // Сцены открытого проекта — прямой доступ без файлового диалога.
-            if (m_project.Loaded() && ImGui::BeginMenu(T("Project Scenes"))) {
+            if (ImGui::BeginMenu(T("Project Scenes"))) {
                 std::error_code ec;
                 std::vector<fs::path> scenes;
                 for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
@@ -368,7 +370,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             }
             if (ImGui::MenuItem(T("Save Scene As..."))) openDialog = "Save Scene As";
             ImGui::Separator();
-            if (ImGui::MenuItem(T("Build Game..."), nullptr, false, m_project.Loaded())) {
+            if (ImGui::MenuItem(T("Build Game..."))) {
                 openDialog = "Build Game";
             }
             ImGui::Separator();
@@ -447,9 +449,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     if (ImGui::MenuItem(p.Label)) {
                         PushUndoSnapshot();
                         SetSelectedId(CreateUIEntity(p.Name).Id());
-                        // Вёрстка включается сама: элемент, которого не видно
-                        // сразу после создания, выглядит как «кнопка не сработала».
-                        m_uiEditMode = true;
+                        // И сразу открывается редактор интерфейса: элемент,
+                        // которого не видно после создания, выглядит как
+                        // «кнопка не сработала».
+                        m_showUIEditor = true;
+                        m_uiEditor.RequestFocus();
                     }
                 }
 
@@ -473,7 +477,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
                             PushUndoSnapshot();
                             const int id = sage::ui::BuildDemo(*m_scene, d.Key);
                             if (id >= 0) SetSelectedId(id);
-                            m_uiEditMode = true;
+                            m_showUIEditor = true;
+                            m_uiEditor.RequestFocus();
                             m_sceneDirty = true;
                         }
                     }
@@ -587,7 +592,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // «Освещение» стало «Средой»: в окне остались небо, воздух и
             // окружающий свет, а сами источники света — на объектах сцены.
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
-            ImGui::MenuItem(T("UI Layout"), nullptr, &PanelVisible(EditorPanel::UITools));
+            ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
             ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanel::Code));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
@@ -619,9 +624,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
         }
 
         // Статус проекта справа в меню-баре.
-        std::string status = m_project.Loaded()
-                                 ? (std::string(T("Project:")) + " " + m_project.Name())
-                                 : T("No project");
+        std::string status = std::string(T("Project:")) + " " + m_project.Name();
         float w = ImGui::CalcTextSize(status.c_str()).x + 16.0f;
         ImGui::SameLine(ImGui::GetWindowWidth() - w);
         ImGui::TextDisabled("%s", status.c_str());

@@ -105,6 +105,20 @@ void UICanvas::MoveSelection(EditorHost& host, Scene& scene, glm::vec2 delta) {
     }
 }
 
+sage::ui::UIRect UICanvas::ContentBounds(int frameW, int frameH) const {
+    // Экран плюс всё, что за него вышло. Нужен окну для «вписать»: элемент,
+    // уехавший за границу, иначе не найти — его не видно, значит не выделить.
+    sage::ui::UIRect all{0.0f, 0.0f, (float)frameW, (float)frameH};
+    for (const Item& it : m_items) {
+        const float x0 = std::min(all.x, it.Rect.x);
+        const float y0 = std::min(all.y, it.Rect.y);
+        const float x1 = std::max(all.x + all.w, it.Rect.x + it.Rect.w);
+        const float y1 = std::max(all.y + all.h, it.Rect.y + it.Rect.h);
+        all = sage::ui::UIRect{x0, y0, x1 - x0, y1 - y0};
+    }
+    return all;
+}
+
 void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgSize, int frameW,
                     int frameH, bool hovered) {
     if (!dl || frameW <= 0 || frameH <= 0) return;
@@ -114,26 +128,25 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
 
     // --- Где на экране лежит холст ------------------------------------------
     //
-    // ПОВТОРЯЕТ РАСЧЁТ ОТРИСОВКИ (EditorSceneRenderer::SetUICanvasView), и это
-    // обязано быть так: рамки редактора и сам интерфейс рисуются разными
-    // подсистемами, и разойдись они хоть на пиксель — мышь будет ловить не то,
-    // что видно. Формула одна, записана дважды и помечена с обеих сторон.
-    const float zoom = tools.Zoom > 0.0f ? tools.Zoom : 1.0f;
-    // Экран игры не зависит от масштаба показа (см. EditorSceneRenderer).
+    // ОДНО преобразование, и оно здесь: прямоугольник imgPos/imgSize — это
+    // ровно то место, куда панель вывела игровой кадр, а frameW/frameH — размер
+    // этого кадра в пикселях игры. Масштаб показа и панорама уже учтены в
+    // imgSize/imgPos самой панелью.
+    //
+    // Раньше формула была записана ДВАЖДЫ: здесь и в отрисовке интерфейса
+    // (EditorSceneRenderer масштабировал холст сам), и обе половины надо было
+    // держать в согласии — разойдись они на пиксель, мышь ловила бы не то, что
+    // видно. Холст переехал в своё окно, кадр рисуется один к одному, и второй
+    // половины больше нет.
     const int screenW = frameW, screenH = frameH;
-    const glm::vec2 origin(((float)frameW - (float)frameW * zoom) * 0.5f + tools.Pan.x,
-                           ((float)frameH - (float)frameH * zoom) * 0.5f + tools.Pan.y);
-
-    // Пиксель кадра -> пиксель панели (кадр может быть показан не один к одному).
     const float sx = imgSize.x / (float)frameW;
     const float sy = imgSize.y / (float)frameH;
     auto toScreen = [&](float x, float y) {
-        return ImVec2(imgPos.x + (origin.x + x * zoom) * sx,
-                      imgPos.y + (origin.y + y * zoom) * sy);
+        return ImVec2(imgPos.x + x * sx, imgPos.y + y * sy);
     };
     auto toUI = [&](ImVec2 p) {
-        return glm::vec2(((p.x - imgPos.x) / std::max(sx, 1e-6f) - origin.x) / zoom,
-                         ((p.y - imgPos.y) / std::max(sy, 1e-6f) - origin.y) / zoom);
+        return glm::vec2((p.x - imgPos.x) / std::max(sx, 1e-6f),
+                         (p.y - imgPos.y) / std::max(sy, 1e-6f));
     };
 
     // Панель «Вёрстка» считает выравнивание в ТЕХ ЖЕ пикселях (см. UIToolSettings).
@@ -148,17 +161,9 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     // уже за ним. Всё, что снаружи, приглушено, а сама граница — сплошная линия.
     const ImVec2 canvasA = toScreen(0.0f, 0.0f);
     const ImVec2 canvasB = toScreen((float)screenW, (float)screenH);
-    if (zoom < 0.999f) {
-        const ImU32 outside = IM_COL32(0, 0, 0, 90);
-        const ImVec2 pa = imgPos, pb = ImVec2(imgPos.x + imgSize.x, imgPos.y + imgSize.y);
-        dl->AddRectFilled(pa, ImVec2(pb.x, canvasA.y), outside);
-        dl->AddRectFilled(ImVec2(pa.x, canvasB.y), pb, outside);
-        dl->AddRectFilled(ImVec2(pa.x, canvasA.y), ImVec2(canvasA.x, canvasB.y), outside);
-        dl->AddRectFilled(ImVec2(canvasB.x, canvasA.y), ImVec2(pb.x, canvasB.y), outside);
-    }
 
     if (tools.ShowGrid) DrawGrid(dl, canvasA, ImVec2(canvasB.x - canvasA.x, canvasB.y - canvasA.y),
-                                 tools, sx * zoom, sy * zoom);
+                                 tools, sx, sy);
     dl->AddRect(canvasA, canvasB, IM_COL32(255, 255, 255, 120), 0.0f, 0, 1.0f);
 
     const int selectedId = host.SelectedId();
@@ -286,61 +291,10 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     }
     m_guides.clear();
 
-    // --- Вид холста: колесо, панорама, «вписать» ----------------------------
-    //
-    // Без этого отдалять холст было бы нечем, кроме ползунка в панели, — а
-    // отдаляют его именно тогда, когда что-то потерялось, то есть в спешке.
-    if (hovered && m_drag == Drag::None && !m_marquee) {
-        const float wheel = ImGui::GetIO().MouseWheel;
-        if (wheel != 0.0f) {
-            // Приближаем К КУРСОРУ: точка под мышью остаётся на месте. Масштаб
-            // «от центра» заставляет после каждого шага догонять панорамой то,
-            // на что смотрел.
-            const glm::vec2 before = toUI(mouse);
-            const float next = std::clamp(zoom * (wheel > 0.0f ? 1.15f : 1.0f / 1.15f), 0.15f, 3.0f);
-            tools.Zoom = next;
-            // Пересчёт с новым масштабом — теми же формулами, что выше.
-            const glm::vec2 base(((float)frameW - (float)frameW * next) * 0.5f,
-                                 ((float)frameH - (float)frameH * next) * 0.5f);
-            const glm::vec2 mouseFrame((mouse.x - imgPos.x) / std::max(sx, 1e-6f),
-                                       (mouse.y - imgPos.y) / std::max(sy, 1e-6f));
-            tools.Pan = mouseFrame - base - before * next;
-        }
-        // Панорама средней кнопкой — как в любом холсте.
-        if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
-            const ImVec2 d = ImGui::GetIO().MouseDelta;
-            tools.Pan += glm::vec2(d.x / std::max(sx, 1e-6f), d.y / std::max(sy, 1e-6f));
-        }
-        // Home — вернуть холст на место: один к одному, без сдвига. Клавиша
-        // нужна, потому что панорамой можно уехать так, что холста не видно.
-        if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
-            tools.Zoom = 1.0f;
-            tools.Pan = glm::vec2(0.0f);
-        }
-        // Shift+F — вписать в окно ВСЁ, включая то, что вышло за границы
-        // экрана. Это и есть ответ на «элемент уехал, что теперь делать»:
-        // одна клавиша показывает его вместе с экраном.
-        if (ImGui::IsKeyPressed(ImGuiKey_F) && ImGui::GetIO().KeyShift) {
-            UIRect all{0.0f, 0.0f, (float)screenW, (float)screenH};
-            for (const Item& it : m_items) {
-                const float x0 = std::min(all.x, it.Rect.x);
-                const float y0 = std::min(all.y, it.Rect.y);
-                const float x1 = std::max(all.x + all.w, it.Rect.x + it.Rect.w);
-                const float y1 = std::max(all.y + all.h, it.Rect.y + it.Rect.h);
-                all = UIRect{x0, y0, x1 - x0, y1 - y0};
-            }
-            // Запас по краям, чтобы рамки не упирались в границу панели.
-            const float pad = 0.06f;
-            const float fit = std::clamp(std::min((float)frameW / (all.w * (1.0f + pad)),
-                                                  (float)frameH / (all.h * (1.0f + pad))),
-                                         0.15f, 1.0f);
-            tools.Zoom = fit;
-            const glm::vec2 base(((float)frameW - (float)frameW * fit) * 0.5f,
-                                 ((float)frameH - (float)frameH * fit) * 0.5f);
-            const glm::vec2 centre(all.x + all.w * 0.5f, all.y + all.h * 0.5f);
-            tools.Pan = glm::vec2((float)frameW * 0.5f, (float)frameH * 0.5f) - base - centre * fit;
-        }
-    }
+    // Вид холста (масштаб, панорама, «вписать») — НЕ ЗДЕСЬ. Он принадлежит
+    // окну, которое показывает кадр: это свойство показа, а не вёрстки.
+    // Раньше холст жил во вьюпорте и масштабировал себя сам, отчего одна и та
+    // же формула была записана в двух подсистемах сразу (см. выше).
 
     // --- Клавиатура: точная доводка -----------------------------------------
     //

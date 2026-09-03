@@ -122,8 +122,7 @@ void EditorLayer::StartPlay() {
 
     // Модули Lua (require "voxel") ищутся в скриптовой папке ОТКРЫТОГО ПРОЕКТА —
     // тот же контракт, что в собранной игре, где CWD и есть корень проекта.
-    if (m_project.Loaded())
-        m_playScripts->AddScriptSearchPath((m_project.Dir() / "assets" / "scripts").string());
+    m_playScripts->AddScriptSearchPath((m_project.Dir() / "assets" / "scripts").string());
     m_playScripts->AddScriptSearchPath("assets/scripts"); // скрипты рядом с редактором
 
     // Параметры запуска игры (LaunchArg в Lua) — до AttachScript, потому что
@@ -146,7 +145,7 @@ void EditorLayer::StartPlay() {
         // этого скрипты проекта работали бы в собранной игре, но НЕ в Play.
         std::string resolved = path;
         std::error_code scriptEc;
-        if (!fs::exists(resolved, scriptEc) && m_project.Loaded()) {
+        if (!fs::exists(resolved, scriptEc)) {
             fs::path inProject = m_project.Dir() / path;
             if (fs::exists(inProject, scriptEc)) resolved = inProject.string();
         }

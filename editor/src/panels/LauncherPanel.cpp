@@ -304,22 +304,22 @@ void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
     // строк текста (два заголовка разделов, «Будет создано», сам путь,
     // «Начать с», строка запрета), плюс ряд карточек.
     const float columnH = frameH * 7.0f + lineH * 6.0f + ProjectTemplateCardHeight(cardW);
-    // Сверх столбца: заголовок окна, две строки пояснения над столбцами и
-    // подвал с кнопкой «Работать без проекта».
-    const float chromeH = ImGui::GetFrameHeight() + lineH * 2.0f + frameH * 2.0f;
+    // Сверх столбца: заголовок окна и две строки пояснения над ними.
+    const float chromeH = ImGui::GetFrameHeight() + lineH * 2.0f + frameH;
     ImGui::SetNextWindowSize(ImVec2(windowW, columnH + chromeH), ImGuiCond_Appearing);
     ImGui::Begin(T("SAGE Engine" "###SAGE Engine"), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking);
 
     ImGui::TextUnformatted(T("A project keeps scenes, assets and materials in one folder."));
-    ImGui::TextDisabled("%s", T("The editor works without one, but file references will not be portable."));
+    ImGui::TextDisabled("%s", T("Everything in the editor works inside a project: asset paths, "
+                                "building the game, templates."));
     ImGui::Spacing();
 
     // Два столбца: слева самое частое действие (открыть вчерашнее), справа —
     // редкое. Раньше всё шло простынёй сверху вниз, и список недавних ничем не
     // выделялся среди двух форм ввода.
-    // Столбцы одной высоты, и высота эта — остаток окна за вычетом того, что
-    // рисуется под ними (строка ошибки, разделитель, «работать без проекта»).
-    const float footer = ImGui::GetFrameHeightWithSpacing() * 2.5f;
+    // Столбцы одной высоты, и высота эта — остаток окна за вычетом строки
+    // ошибки под ними.
+    const float footer = ImGui::GetFrameHeightWithSpacing() * 1.5f;
     const float colH = std::max(260.0f, ImGui::GetContentRegionAvail().y - footer);
     const float leftW = ImGui::GetContentRegionAvail().x * 0.50f;
     DrawRecent(host, recent, leftW, colH);
@@ -333,13 +333,6 @@ void LauncherPanel::Draw(EditorHost& host, RecentProjects& recent) {
     if (!m_error.empty()) {
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-    }
-
-    ImGui::Separator();
-    if (ImGui::SmallButton(T("Work without a project"))) m_dismissed = true;
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("A demo scene will open. Assets can only be referenced by\n"
-          "absolute paths — the built game will not find them."));
     }
 
     ImGui::End();

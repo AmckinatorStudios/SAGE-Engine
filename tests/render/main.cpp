@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
         RunReflectionChecks(renderer);
         RunShadowChecks(renderer, *scene);
         RunSceneChecks(renderer);
+        RunMaterialChecks(renderer);
         RunVolumetricChecks();
     }
 

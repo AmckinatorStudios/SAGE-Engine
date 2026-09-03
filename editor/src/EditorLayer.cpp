@@ -152,7 +152,7 @@ void EditorLayer::OnAttach() {
             // совпадали с тем, что ищут по исходникам.
             std::string ctx;
             ctx += std::string("Project: ") +
-                   (m_project.Loaded() ? m_project.Dir().string() : "<none>") + "\n";
+                   m_project.Dir().string() + "\n";
             ctx += std::string("Scene:  ") +
                    (m_scenePath.empty() ? "<no file>" : m_scenePath.string()) +
                    (m_sceneDirty ? "  (NOT SAVED)\n" : "\n");
@@ -250,7 +250,7 @@ void EditorLayer::OnAttach() {
         // закрывает кадр. Но снять НАДО и сам hub (и файловый диалог из него) —
         // иначе стартовое окно остаётся единственной частью редактора, которую
         // нечем проверить, кроме как открыть глазами на своей машине.
-        if (!std::getenv("SAGE_SHOW_LAUNCHER")) m_launcher.Dismiss();
+        if (!std::getenv("SAGE_SHOW_LAUNCHER")) m_headlessProject = true;
     }
     // Начальный режим рендера (для headless-скриншотов/CI): shaded, wireframe
     // или любой отладочный вид по его имени из DebugView.h (normals, cascades,
@@ -289,12 +289,40 @@ void EditorLayer::OnAttach() {
     if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
     if (std::getenv("SAGE_EDITOR_OPEN_PROJECT")) RunHeadlessProjectSession();
 
+    // ПРОЕКТ — ДО ОСТАЛЬНЫХ ХУКОВ, а не после.
+    //
+    // Работы без проекта больше нет (см. LauncherPanel.h), поэтому прогону без
+    // человека проект создаётся сам. Сделать это в конце нельзя: создание
+    // проекта загружает его сцену, а хуки ниже выбирают в сцене сущность и
+    // ассет — выбор просто затирался бы новой сценой, и скриншот выходил бы
+    // «ничего не выделено».
+    {
+        static const char* const kHeadless[] = {
+            "SAGE_SCREENSHOT_AT_FRAME", "SAGE_EDITOR_SHOW_SETTINGS", "SAGE_EDITOR_SHOW_PROFILER",
+            "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
+            "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_COLLIDER_MODE", "SAGE_EDITOR_SELECT_ENTITY",
+            "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
+            "SAGE_EDITOR_AUTOPLAY",
+        };
+        for (const char* name : kHeadless) {
+            if (std::getenv(name)) { m_headlessProject = true; break; }
+        }
+        // Стартовое окно снимают НАМЕРЕННО (SAGE_SHOW_LAUNCHER) — тогда проект
+        // создавать не надо, иначе снимать будет нечего.
+        if (std::getenv("SAGE_SHOW_LAUNCHER")) m_headlessProject = false;
+        if (m_headlessProject && !m_project.Loaded()) {
+            std::string err;
+            if (!CreateProject(".", "sage_headless_project", DefaultProjectTemplate(), err))
+                LOG_ERROR("Editor") << "Не удалось создать проект для headless-прогона: " << err;
+        }
+    }
+
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
-    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_launcher.Dismiss(); m_showSettings = true; }
-    if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_launcher.Dismiss(); m_showProfiler = true; }
-    if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_launcher.Dismiss(); m_showIconSheet = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_showSettings = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_showProfiler = true; }
+    if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_headlessProject = true; m_showIconSheet = true; }
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         m_pendingDialog = dlg;   // откроется в кадре, на уровне окна-хоста
     }
     // Открыть редактор СРАЗУ на нужном шаблоне — чтобы на шаблон можно было
@@ -302,35 +330,34 @@ void EditorLayer::OnAttach() {
     // (это делает самопроверка) недостаточно: «пусто» и «пусто, но остался
     // скайбокс» дают одинаковый ноль, а выглядят по-разному.
     if (const char* tplId = std::getenv("SAGE_EDITOR_TEMPLATE")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         if (const ProjectTemplate* tpl = FindProjectTemplate(tplId)) NewScene(tpl->Kind);
         else LOG_WARN("Editor") << "SAGE_EDITOR_TEMPLATE: нет шаблона с именем " << tplId;
     }
     // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
     // headless нечем: кликать во вьюпорте в CI некому.
-    if (std::getenv("SAGE_EDITOR_UI_MODE")) { m_launcher.Dismiss(); m_uiEditMode = true; }
-    // Масштаб холста вёрстки — для скриншот-проверок: колесом мыши в CI крутить
-    // некому, а увидеть отдалённый холст с полем вокруг экрана надо.
-    if (const char* z = std::getenv("SAGE_EDITOR_UI_ZOOM")) {
-        const float v = (float)std::atof(z);
-        if (v > 0.0f) m_uiTools.Zoom = v;
+    // Открыть редактор интерфейса при старте — для скриншот-проверок.
+    if (std::getenv("SAGE_EDITOR_UI_EDITOR")) {
+        m_headlessProject = true;
+        m_showUIEditor = true;
+        m_uiEditor.RequestFocus();
     }
     if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
         m_uiTools.Backdrop = (float)std::atof(b);
-    if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_launcher.Dismiss(); m_colliderEdit = true; }
+    if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_headlessProject = true; m_colliderEdit = true; }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         GameObject obj = m_scene->FindByName(name);
         if (obj.Valid()) SetSelectedId(obj.Id());
         else LOG_WARN("Editor") << "SAGE_EDITOR_SELECT_ENTITY: нет сущности с именем " << name;
     }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         m_assets.Select(a);
     }
     if (const char* f = std::getenv("SAGE_EDITOR_OPEN_CODE")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         m_showCode = true;
         m_code.OpenFile(f);
     }
@@ -339,8 +366,8 @@ void EditorLayer::OnAttach() {
     // крестикам в CI некому, а именно на этом кадре должна быть видна подсказка
     // «Все панели закрыты» с кнопкой возврата.
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
-        m_launcher.Dismiss();
-        m_showHierarchy = m_showInspector = m_showEnvironment = m_showUITools = false;
+        m_headlessProject = true;
+        m_showHierarchy = m_showInspector = m_showEnvironment = m_showUIEditor = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
         m_showCode = m_showProfiler = false;
     }
@@ -353,7 +380,7 @@ void EditorLayer::OnAttach() {
     // на пустом указателе живут именно в редко открываемых секциях. Здесь все
     // они подаются в одном кадре.
     if (std::getenv("SAGE_EDITOR_ALL_COMPONENTS")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         GameObject all = m_scene->CreateObject("All Components");
         entt::registry& reg = m_scene->Registry();
         const entt::entity e = all.Entity();
@@ -381,7 +408,7 @@ void EditorLayer::OnAttach() {
     // (AddAssetToScene): пути через ';'. Нужно для проверки на живых ассетах —
     // как модель встаёт, что с её материалом и развёрткой.
     if (const char* list = std::getenv("SAGE_EDITOR_LOAD_MODELS")) {
-        m_launcher.Dismiss();
+        m_headlessProject = true;
         std::string rest = list;
         float x = -6.0f;
         while (!rest.empty()) {
@@ -403,7 +430,7 @@ void EditorLayer::OnAttach() {
         }
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
-    if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_launcher.Dismiss(); m_showAbout = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_headlessProject = true; m_showAbout = true; }
     // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_GAME")) m_game.RequestFocus();
 
@@ -411,7 +438,7 @@ void EditorLayer::OnAttach() {
     // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
     // а в тулбаре гореть PLAYING. Launcher в этом режиме не показываем.
     if (std::getenv("SAGE_EDITOR_AUTOPLAY")) {
-        m_launcher.Dismiss(); // headless-прогон — hub не должен закрывать кадр
+        m_headlessProject = true; // headless-прогон: проект нужен, но выбирать его некому
         GameObject green = m_scene->FindByName("Green Cube");
         if (green.Valid()) {
             m_scene->Registry().emplace_or_replace<ScriptComponent>(
@@ -419,6 +446,14 @@ void EditorLayer::OnAttach() {
             SetSelectedId(green.Id());
         }
         StartPlay();
+    }
+
+    // Подстраховка: хук мог поднять флаг уже после блока выше (например,
+    // автоигра). Проект всё равно должен быть — работы без него нет.
+    if (m_headlessProject && !m_project.Loaded()) {
+        std::string err;
+        if (!CreateProject(".", "sage_headless_project", DefaultProjectTemplate(), err))
+            LOG_ERROR("Editor") << "Не удалось создать проект для headless-прогона: " << err;
     }
 
     UpdateWindowTitle();
@@ -633,14 +668,9 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_showBounds);
-    m_renderer.SetDrawUIOverlay(m_uiEditMode);
-    // Вид холста вёрстки: подложка и масштаб (см. UIToolSettings). Вне режима
-    // вёрстки — тождественный, иначе панель Game показывала бы отдалённый
-    // интерфейс на ровном фоне вместо игры.
-    if (m_uiEditMode)
-        m_renderer.SetUICanvasView(m_uiTools.Backdrop, m_uiTools.Zoom, m_uiTools.Pan);
-    else
-        m_renderer.SetUICanvasView(0.0f, 1.0f, glm::vec2(0.0f));
+    // Игровой интерфейс во ВЬЮПОРТЕ больше не рисуется: холст вёрстки — это
+    // окно «Интерфейс», где показан игровой кадр в разрешении игры. Вьюпорт
+    // остался вьюпортом, а не наполовину холстом.
 
     // ГЛАВНЫЙ слот тоже уважает свой вид. Раньше он рисовался безусловно
     // перспективой, а переопределение применялось только к слотам 1..3 — из-за
@@ -688,21 +718,32 @@ void EditorLayer::OnRender() {
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
 
+    // ПОКА ПРОЕКТА НЕТ, РЕДАКТОРА НЕТ — только стартовое окно.
+    //
+    // Раньше панели рисовались и без проекта, и каждая несла свою ветку «а
+    // если проекта нет»: панель ассетов показывала корень диска, слоты
+    // сохраняли абсолютные пути, сборка игры отказывала, шаблоны были
+    // недоступны. Это и было состояние «без проекта» — не режим, а набор
+    // оговорок, размазанный по всему редактору.
+    //
+    // Проект теперь есть всегда, а «всегда» стоит ровно столько, сколько стоит
+    // это условие: до открытия проекта показывать нечего, потому что и работать
+    // не с чем.
+    if (!m_project.Loaded()) {
+        m_launcher.Draw(*this, m_recent);
+        m_dialogs.Draw(*this);   // диалог обзора папок открывается отсюда же
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+
     DrawDockspaceAndMenu(); // включая модалки (m_dialogs) и окно настроек (m_settingsPanel)
     // Панель подаётся в кадр только когда она открыта: закрытая вкладка иначе
     // возвращалась бы сама собой на следующем кадре, и крестик не работал бы.
     if (m_showHierarchy) m_hierarchy.Draw(*this, &m_showHierarchy);
     if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
     if (m_showEnvironment) m_environment.Draw(*this, &m_showEnvironment);
-    // Режим вёрстки включили — показываем инструменты. Только по ФРОНТУ:
-    // иначе закрытую крестиком панель возвращало бы каждым кадром.
-    if (m_uiEditMode && !m_uiEditModePrev) {
-        m_showUITools = true;
-        m_focusUITools = 4;   // и ВПЕРЁД: иначе откроется за вкладкой иерархии
-    }
-    m_uiEditModePrev = m_uiEditMode;
-    if (m_showUITools) m_uiToolsPanel.Draw(*this, &m_showUITools, m_focusUITools > 0);
-    if (m_focusUITools > 0) --m_focusUITools;
+    if (m_showUIEditor) m_uiEditor.Draw(*this, &m_showUIEditor);
     if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
     if (m_showGame) m_game.Draw(*this, &m_showGame);
     // Код подаётся ПОСЛЕ Viewport и Game, потому что порядок вкладок в узле
@@ -714,10 +755,12 @@ void EditorLayer::OnRender() {
     if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
     m_plugins.ImGuiAll();
 
-    // Стартовый launcher проектов: пока проект не открыт (и не отклонён).
-    if ((!m_project.Loaded() && !m_launcher.Dismissed()) || m_launcherRequested) {
+    // Стартовое окно по просьбе (Window > Стартовое окно): проект уже открыт,
+    // но человек хочет открыть другой.
+    if (m_launcherRequested) {
+        const std::string was = m_project.Dir().string();
         m_launcher.Draw(*this, m_recent);
-        if (m_project.Loaded()) m_launcherRequested = false;
+        if (m_project.Dir().string() != was) m_launcherRequested = false;
     }
 
     ImGui::Render();

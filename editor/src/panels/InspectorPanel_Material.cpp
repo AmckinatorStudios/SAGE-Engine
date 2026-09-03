@@ -81,7 +81,7 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
         c.Title = std::string(T("Texture: ")) + label;
         c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
         c.FilterLabel = T("Images");
-        if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+        c.StartDir = host.CurrentProject().AssetsDir();
         m_browser.Open(c);
         m_browseTarget = &path;
         m_browseIsShader = false;
@@ -343,7 +343,7 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
             }
             label += ")";
             c.FilterLabel = label;
-            if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+            c.StartDir = host.CurrentProject().AssetsDir();
             m_browser.Open(c);
             m_browseTarget = &mr.Ref.path;
             m_browseIsShader = false;
@@ -383,8 +383,7 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
         }
         // Абсолютный путь работает в редакторе и НЕ работает нигде больше —
         // говорим об этом сразу, а не после сборки игры.
-        if (!mr.Ref.path.empty() && host.CurrentProject().Loaded() &&
-            std::filesystem::path(mr.Ref.path).is_absolute()) {
+        if (!mr.Ref.path.empty() && std::filesystem::path(mr.Ref.path).is_absolute()) {
             ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "%s", T("File outside the project"));
             ImGui::TextDisabled("%s", T("The built game will not find it. Bring it into the project:"));
             ImGui::TextDisabled("%s", T("Assets -> Import..."));
@@ -418,7 +417,7 @@ void InspectorPanel::CreateMaterialForObject(EditorHost& host, MeshRendererCompo
 
     fs::path dir;
     std::error_code ec;
-    if (host.CurrentProject().Loaded()) dir = host.CurrentProject().AssetsDir();
+    dir = host.CurrentProject().AssetsDir();
 
     if (dir.empty()) {
         // Проекта нет — спрашиваем, куда положить. Молча отказать («сначала
@@ -483,16 +482,19 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
                         T("The look of an object is defined by its material."));
     if (r.Changed) {
         host.PushUndoSnapshot();
-        mr.MaterialPath = r.Path;
-        mr.MaterialPtr = r.Path.empty() ? nullptr
-                                        : ResourceManager::Instance().GetMaterial(mr.MaterialPath);
+        // Через AssignMaterial: назначение материала возвращает поправки
+        // экземпляра в нейтраль (см. RenderComponents.h). Иначе назначенный
+        // материал показывался бы умноженным на старый тон объекта.
+        AssignMaterial(mr, r.Path,
+                       r.Path.empty() ? nullptr
+                                      : ResourceManager::Instance().GetMaterial(r.Path));
     }
     if (r.BrowseRequested) {
         FileBrowser::Config c;
         c.Title = T("Choose a material");
         c.Filters = assetslot::Extensions(assetslot::Kind::Material);
         c.FilterLabel = T("Materials (*.sagemat)");
-        if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+        c.StartDir = host.CurrentProject().AssetsDir();
         m_browser.Open(c);
         m_browseTarget = &mr.MaterialPath;
         m_browseIsShader = false;
@@ -570,7 +572,7 @@ void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponen
             c.Title = T("Choose a material");
             c.Filters = assetslot::Extensions(assetslot::Kind::Material);
             c.FilterLabel = T("Materials (*.sagemat)");
-            if (host.CurrentProject().Loaded()) c.StartDir = host.CurrentProject().AssetsDir();
+            c.StartDir = host.CurrentProject().AssetsDir();
             m_browser.Open(c);
             m_browseTarget = &mr.Slots[i].Path;
             m_browseIsShader = false;

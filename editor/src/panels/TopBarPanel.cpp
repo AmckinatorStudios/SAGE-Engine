@@ -106,8 +106,8 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     PanelToggle(host, EditorPanel::Settings, "gear", T("Game Settings"),
                 T("Game Settings: quality and cost of the frame (saved with the project)"),
                 style.Labels);
-    PanelToggle(host, EditorPanel::UITools, "rect", T("UI Layout"), T("UI layout tools"),
-                style.Labels);
+    PanelToggle(host, EditorPanel::UIEditor, "rect", T("Interface"),
+                T("Interface editor: the game frame at its own resolution"), style.Labels);
     ImGui::NewLine();
     ImGui::EndGroup();
 

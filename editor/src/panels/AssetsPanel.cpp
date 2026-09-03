@@ -115,7 +115,7 @@ constexpr float kTileSpacing = 12.0f;
 void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
     Project& project = host.CurrentProject();
     fs::path& cwd = host.AssetsCwd();
-    fs::path root = project.Loaded() ? project.Dir().parent_path() : cwd.root_path();
+    const fs::path root = project.Dir().parent_path();
 
     // Собираем цепочку сегментов от текущей папки вверх до корня.
     std::vector<fs::path> chain;
@@ -558,8 +558,7 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
     if (m_selected == source) m_selected = target;
     // Пересканировать проект: база ассетов помнит пути, и после переезда её
     // ответ на «где этот файл» обязан измениться.
-    Project& project = host.CurrentProject();
-    if (project.Loaded()) sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
+    sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
     host.SetStatusMessage(T("Moved into ") + folder.filename().string() + ": " +
                           source.filename().string());
 }
@@ -703,7 +702,7 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
 
 void AssetsPanel::DrawImportButton(EditorHost& host) {
     Project& project = host.CurrentProject();
-    ImGui::BeginDisabled(!project.Loaded());
+
     if (EditorIcons::Button("open", T("Import..."))) {
         FileBrowser::Config c;
         c.Title = T("Bring a file into the project");
@@ -713,13 +712,9 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
         c.FilterLabel = T("All files");
         m_importBrowser.Open(c);
     }
-    ImGui::EndDisabled();
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "%s", project.Loaded()
-                      ? T("Copy an outside file into the current project folder.\n"
-                          "A model moves together with its .mtl/.bin files and textures.")
-                      : T("Open a project first (File > New Project...)"));
+        ImGui::SetTooltip("%s", T("Copy an outside file into the current project folder.\n"
+                                  "A model moves together with its .mtl/.bin files and textures."));
     }
 
     if (!m_importBrowser.Draw()) return;
@@ -873,9 +868,8 @@ void AssetsPanel::DrawModals(EditorHost& host) {
                 LOG_ERROR("Editor") << "Asset rename failed: " << m_error;
             } else {
                 if (m_selected == m_renameTarget) m_selected = target;
-                Project& project = host.CurrentProject();
-                if (project.Loaded())
-                    sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
+                sage::AssetDatabase::Instance().ScanProject(
+                    host.CurrentProject().Dir().string());
                 m_renameTarget.clear();
                 m_error.clear();
                 ImGui::CloseCurrentPopup();
@@ -922,11 +916,6 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
 
     ImGui::Begin(T("Assets" "###Assets"), open);
 
-    if (!project.Loaded()) {
-        ImGui::TextDisabled("%s", T("No project open."));
-        ImGui::TextDisabled("%s", T("File > New Project... to create one; browsing current dir:"));
-    }
-
     // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
     //
     // Раньше здесь в одну строку выкладывались SmallButton «Вверх», хлебные
@@ -936,7 +925,9 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // за что зацепиться, потому что группы не выделены. Теперь первая строка —
     // ТОЛЬКО навигация (где я нахожусь), вторая — ТОЛЬКО действия над этой
     // папкой (что я здесь ищу и что приношу), и все виджеты в ряду одной высоты.
-    fs::path root = project.Loaded() ? project.Dir() : fs::path("/");
+    // Выше корня проекта панель не поднимается: снаружи проекта её файлы
+    // редактору не принадлежат, а ссылка на них не переживёт сборку игры.
+    const fs::path root = project.Dir();
     bool canGoUp = cwd.has_parent_path() && cwd != root;
     ImGui::BeginDisabled(!canGoUp);
     if (EditorIcons::IconOnlyButton("up", T("Up"))) cwd = cwd.parent_path();
@@ -979,8 +970,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
             }
             if (ImGui::SmallButton(T("Rescan project"))) {
                 sage::AssetDatabase::Instance().ClearBroken();
-                if (project.Loaded())
-                    sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
+                sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
             }
         }
     }

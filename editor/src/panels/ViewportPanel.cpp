@@ -340,20 +340,6 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         if (ImGui::IsKeyPressed(ImGuiKey_End)) host.DropSelectedToSurface();
     }
 
-    // --- Режим вёрстки интерфейса -------------------------------------------
-    //
-    // Идёт ДО 3D-гизмо и вместо него: пока верстают интерфейс, стрелки
-    // перемещения объекта в тех же пикселях экрана только мешают, а клик обязан
-    // выбирать элемент UI, а не то, что за ним в сцене.
-    if (host.UIEditMode()) {
-        m_uiCanvas.Draw(host, slotDrawList[m_activeSlot], imgPos, avail, (int)avail.x,
-                        (int)avail.y, hovered && perspective);
-        DrawToolsOverlay(host, viewsOrigin);
-        ImGui::End();
-        ImGui::PopStyleVar();
-        return;
-    }
-
     // --- ImGuizmo: манипулятор выбранной сущности (сетка — DebugDraw в FBO) ---
     //
     // Матрицы берём У АКТИВНОГО СЛОТА, а не у главного. host.ViewMatrix() — это

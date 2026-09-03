@@ -114,7 +114,7 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs, "
+                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -447,6 +447,96 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                     reloaded.MaterialPtr = nullptr;
                 }
             }
+        }
+    }
+
+    // --- Материал НАЗНАЧАЕТСЯ ТАК ЖЕ, КАК В РЕДАКТОРЕ, и правится из панели ---
+    //
+    // Ровно этот путь и был сломан. Сущность держит ссылку ОТНОСИТЕЛЬНО
+    // ПРОЕКТА (Project::AssetRef — так она уезжает в .sage), а панель ассетов
+    // открывает материал НАСТОЯЩИМ путём в файловой системе. Пока ключом кэша
+    // был путь «как дали», на один файл заводилось два объекта Material:
+    // редактор правил свой, рендер рисовал свой, и правки материала не
+    // применялись НИКОГДА — ни к одному полю.
+    //
+    // Проверка идёт по настоящим операциям редактора: ApplyAssetToEntity — то,
+    // что делает бросок материала на объект, а GetMaterial(полный путь) — то,
+    // что делает редактор материалов при выборе файла в Assets.
+    if (ok) {
+        const fs::path matFile = m_assetsCwd / "selftest_assign.sagemat";
+        Material authored;
+        authored.Albedo = {0.9f, 0.1f, 0.1f};
+        authored.Metallic = 0.25f;
+        authored.Roughness = 0.75f;
+        try {
+            authored.SaveToFile(matFile.string());
+        } catch (const std::exception& e) {
+            LOG_ERROR("Editor") << "SELFTEST: не записался материал: " << e.what();
+            ok = false;
+        }
+
+        GameObject cube = ok ? m_scene->FindByName("Green Cube") : GameObject{};
+        if (ok && !cube.Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: нет объекта для назначения материала";
+            ok = false;
+        }
+        if (ok && !ApplyAssetToEntity(cube.Id(), matFile)) {
+            LOG_ERROR("Editor") << "SELFTEST: материал не назначился объекту";
+            ok = false;
+        }
+        if (ok) {
+            MeshRendererComponent& mr = cube.Renderer();
+            // Ссылка обязана быть относительной: абсолютный путь уехал бы в
+            // .sage и не открылся бы ни на другой машине, ни после переноса.
+            const bool refRelative = !mr.MaterialPath.empty() &&
+                                     !fs::path(mr.MaterialPath).is_absolute();
+            // А теперь — тот же файл глазами панели ассетов.
+            std::shared_ptr<Material> asPanelSeesIt =
+                ResourceManager::Instance().GetMaterial(matFile.string());
+            const bool sameObject = asPanelSeesIt && asPanelSeesIt == mr.MaterialPtr;
+            if (!refRelative || !sameObject) {
+                LOG_ERROR("Editor") << "SELFTEST: материал раздвоился между панелью и сценой "
+                                    << "(ссылка '" << mr.MaterialPath << "', относительная "
+                                    << refRelative << ", один объект " << sameObject << ")";
+                ok = false;
+            }
+
+            // Правка «ползунком» в редакторе материалов — и она обязана дойти
+            // до того, чем красится объект. EffectiveColor — то же самое, что
+            // читает рендер.
+            if (ok) {
+                asPanelSeesIt->Albedo = {0.1f, 0.2f, 0.95f};
+                const glm::vec3 shown = EffectiveColor(mr);
+                if (std::abs(shown.b - 0.95f) > 0.001f || shown.r > 0.2f) {
+                    LOG_ERROR("Editor") << "SELFTEST: правка материала не дошла до объекта ("
+                                        << shown.r << ", " << shown.g << ", " << shown.b << ")";
+                    ok = false;
+                }
+            }
+
+            // И сохранение: записали, выбросили из кэша, прочитали заново.
+            if (ok) {
+                try {
+                    asPanelSeesIt->SaveToFile(matFile.string());
+                } catch (const std::exception& e) {
+                    LOG_ERROR("Editor") << "SELFTEST: материал не сохранился: " << e.what();
+                    ok = false;
+                }
+            }
+            if (ok) {
+                const Material reread = Material::LoadFromFile(matFile.string());
+                const bool kept = std::abs(reread.Albedo.b - 0.95f) < 0.001f &&
+                                  std::abs(reread.Metallic - 0.25f) < 0.001f &&
+                                  std::abs(reread.Roughness - 0.75f) < 0.001f;
+                if (!kept) {
+                    LOG_ERROR("Editor") << "SELFTEST: сохранённый материал прочитался иначе";
+                    ok = false;
+                }
+            }
+            // Возвращаем объект как был: дальше идут проверки, рассчитанные на
+            // прежнюю сцену.
+            mr.MaterialPath.clear();
+            mr.MaterialPtr = nullptr;
         }
     }
 
@@ -2044,7 +2134,7 @@ bool EditorLayer::SelfTestTools() {
             {EditorPanel::Profiler, &m_showProfiler, "Profiler"},
             {EditorPanel::Game, &m_showGame, "Game"},
             {EditorPanel::Viewport, &m_showViewport, "Viewport"},
-            {EditorPanel::UITools, &m_showUITools, "UI Layout"},
+            {EditorPanel::UIEditor, &m_showUIEditor, "UI Editor"},
             {EditorPanel::Settings, &m_showSettings, "Settings"},
         };
         for (const Mapping& m : mapping) {
@@ -2451,8 +2541,6 @@ end
 //  Итог — строкой SESSION: PASS/FAIL в лог, чтобы CI искал её грепом.
 // ============================================================================
 void EditorLayer::RunHeadlessProjectSession() {
-    m_launcher.Dismiss(); // hub проектов в headless-прогоне только закрывает кадр
-
     const char* projectDir = std::getenv("SAGE_EDITOR_OPEN_PROJECT");
     std::string err;
     if (!OpenProject(projectDir, err)) {
