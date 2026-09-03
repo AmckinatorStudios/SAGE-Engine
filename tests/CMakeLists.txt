@@ -18,6 +18,7 @@ add_executable(sage_tests
     test_lod.cpp
     test_resources.cpp
     test_jobsystem.cpp
+    test_net.cpp
     test_builtinphysics.cpp
     test_character.cpp
     test_physics.cpp

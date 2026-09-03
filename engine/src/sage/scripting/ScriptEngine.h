@@ -9,6 +9,8 @@
 #include "sage/render/Texture.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/physics/PhysicsScene.h"
+
+namespace sage::net { class NetworkSystem; }
 #include <sol/sol.hpp>
 #include <memory>
 #include <unordered_map>
@@ -127,6 +129,13 @@ public:
     // создаётся PhysicsScene (Play-режим редактора, рантайм игры). Без BindPhysics
     // эти функции бросают понятную ошибку при вызове из Lua.
     void BindPhysics(PhysicsScene& physics) { m_physics = &physics; }
+
+    // Сеть (см. sage/net/NetworkSystem): открывает скриптам таблицу Net.* и
+    // хуки OnNetMessage / OnClientConnected / OnClientDisconnected /
+    // OnNetConnected / OnNetDisconnected — события доставляются из UpdateAll.
+    // Без BindNetwork таблица Net есть, но её вызовы бросают понятную ошибку:
+    // скрипт должен узнать «сеть не привязана», а не спотыкаться о nil.
+    void BindNetwork(sage::net::NetworkSystem& network) { m_network = &network; }
 
     // Загружает .lua файл и привязывает его к объекту. Скрипт должен
     // определить глобальную функцию OnUpdate(entity, dt) — она будет
@@ -358,6 +367,12 @@ private:
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
     void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
+    void RegisterNetApi();        // Net.* — мультиплеер (см. ScriptApi_Net.cpp)
+
+    // Доставляет события сети (сообщения и подключения) в хуки скриптов.
+    // Зовётся из UpdateAll: сеть прокачивается кадром, и её события обязаны
+    // дойти до скриптов в том же кадре, а не следующем.
+    void DispatchNetEvents();
 
     void UpdateTimers(float dt);
     void UpdateCoroutines(float dt);
@@ -432,6 +447,9 @@ private:
     BillboardSystem* m_billboards = nullptr;
     AudioEngine* m_audio = nullptr;
     PhysicsScene* m_physics = nullptr;
+    // Сеть кадра — НЕвладеющий указатель, как и остальные привязки: её создаёт
+    // и держит тот, кто ведёт игру (рантайм, тест), а не движок скриптов.
+    sage::net::NetworkSystem* m_network = nullptr;
     std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
 
     // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,

@@ -23,6 +23,7 @@
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
 #include "sage/ecs/RenderBatch.h"
+#include "sage/net/NetworkSystem.h"
 #include "sage/scene/Scene.h"
 #include "sage/physics/PhysicsScene.h"
 
@@ -85,6 +86,10 @@ private:
 
     std::filesystem::path m_scenePath;   // что сейчас загружено
     std::unique_ptr<ScriptEngine> m_scripts;
+    // Сеть игры (Lua: Net.*). По значению, а не по указателю: она ничего не
+    // стоит в офлайне — ни сокета, ни потока, — пока скрипт не позвал Net.Host
+    // или Net.Connect.
+    sage::net::NetworkSystem m_network;
     std::unique_ptr<PhysicsScene> m_physics; // симуляция физики (игра всегда «в Play»)
 
     // Ввод игры. Действия объявляют САМИ СКРИПТЫ (BindAction из Lua) — плеер

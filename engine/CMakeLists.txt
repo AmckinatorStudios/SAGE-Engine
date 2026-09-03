@@ -34,6 +34,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Window.cpp
     src/sage/core/Profiler.cpp
     src/sage/core/SaveGame.cpp
+    src/sage/net/NetConnection.cpp
+    src/sage/net/NetHost.cpp
+    src/sage/net/NetworkSystem.cpp
+    src/sage/net/UdpSocket.cpp
     src/rhi/Conformance.cpp
     src/rhi/null/NullDevice.cpp
     src/sage/assets/AssetCache.cpp
@@ -99,6 +103,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/scripting/ScriptApi_Math.cpp
+    src/sage/scripting/ScriptApi_Net.cpp
     src/sage/scripting/ScriptApi_Components.cpp
     src/sage/scripting/ScriptApi_UI.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
@@ -200,7 +205,8 @@ endif()
 
 if (WIN32)
     # dbghelp — символы в стеке вызовов отчёта о падении (CrashHandler).
-    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp)
+    # ws2_32 — Winsock: UDP-сокеты сетевого модуля (sage/net/UdpSocket).
+    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32)
 elseif (UNIX)
     # m — miniaudio (математика микшера); dl/pthread — GLFW и miniaudio
     # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).

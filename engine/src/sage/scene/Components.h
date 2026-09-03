@@ -37,3 +37,4 @@
 #include "sage/render/ReflectionComponents.h"  // зонды отражений
 #include "sage/ui/UI.h"                        // элементы интерфейса сцены (компоненты)
 #include "sage/render/ParticleComponents.h"    // эмиттеры частиц
+#include "sage/net/NetComponents.h"         // участие в сетевой репликации

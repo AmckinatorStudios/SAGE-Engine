@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 905.
+// Язык: Русский. Строк: 909.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -956,6 +956,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Нужно твёрдое тело; суставы считает только бэкенд Jolt"},
     {"Needs three elements or more.",
      "Нужно три элемента или больше."},
+    {"Net Replicated",
+     "Сетевая репликация"},
     {"New Folder",
      "Новая папка"},
     {"New Material (.sagemat)",
@@ -1138,6 +1140,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Направляющая"},
     {"Position",
      "Позиция"},
+    {"Position, rotation, scale, color and primitive are replicated",
+     "Передаются позиция, поворот, масштаб, цвет и вид примитива"},
     {"Post-Process",
      "Пост-эффекты"},
     {"Post-Processing",
@@ -1596,6 +1600,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Похоже, прошлый запуск завершился аварийно"},
     {"The properties of this entity belong to it alone.",
      "Свойства этой сущности — только её."},
+    {"The server replicates this object to clients",
+     "Сервер реплицирует этот объект клиентам"},
+    {"The server sends this object to clients; they follow it",
+     "Сервер рассылает этот объект клиентам, они повторяют его движение"},
     {"The shape physics uses for collisions",
      "Форма, которой физика считает столкновения"},
     {"The subtree is masked by this rectangle",

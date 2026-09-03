@@ -338,6 +338,7 @@ void PlayerLayer::BuildSceneRuntime() {
     // Скрипты рулят физикой времени выполнения (SetVelocity/SetGravity) — доступно
     // после построения мира (RuntimeBody сущностей уже созданы).
     m_scripts->BindPhysics(*m_physics);
+    m_scripts->BindNetwork(m_network); // Net.* в Lua: хост/подключение из скриптов
 
     // Состав кадра. Регистрируется здесь, когда все подсистемы уже созданы:
     // порядок при этом не задаётся — он определён стадиями внутри
@@ -437,6 +438,11 @@ void PlayerLayer::OnUpdate(float dt) {
     const float scale = m_scripts ? m_scripts->FrameTimeScale() : 1.0f;
     const float scaledDt = dt * scale;
     if (!m_paused && scaledDt > 0.0f) {
+        // Сеть — ДО систем кадра и по НЕмасштабированному времени: транспорт
+        // живёт в реальных секундах (таймауты, темп снапшотов), и замедление
+        // игры не должно замедлять её связь с сервером. В паузе не тикает
+        // вместе со всем миром — иначе пауза одного игрока рвала бы соединение.
+        m_network.Update(*m_scene, dt);
         m_systems.Run(*m_scene, scaledDt);
         m_sceneTime += scaledDt; // uTime собственных шейдеров материалов
     }

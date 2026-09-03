@@ -198,6 +198,16 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    if (reg.all_of<NetReplicatedComponent>(obj.Entity()) &&
+        ImGui::CollapsingHeader(T("Net Replicated" "###Net Replicated"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextDisabled("%s", T("The server sends this object to clients; they follow it"));
+        ImGui::TextDisabled("%s", T("Position, rotation, scale, color and primitive are replicated"));
+        if (ImGui::Button(T("Remove##netreplicated"))) {
+            host.PushUndoSnapshot();
+            reg.remove<NetReplicatedComponent>(obj.Entity());
+        }
+    }
+
     if (reg.all_of<ScriptComponent>(obj.Entity()) && ImGui::CollapsingHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
@@ -741,6 +751,9 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Script", "Logic", "script",
          "Lua: OnStart and OnUpdate on this object", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},
+        {"Net Replicated", "Logic", "net",
+         "The server replicates this object to clients", HasComp<NetReplicatedComponent>,
+         AddComp<NetReplicatedComponent>},
         // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего
         // элемент состоит дальше, выбирается в самом инспекторе (или заготовкой).
         {"UI Element", "Interface", "rect",
