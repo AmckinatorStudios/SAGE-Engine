@@ -1,4 +1,5 @@
 #include "TestGameLayer.h"
+#include "GameIcons.h"
 
 #include <algorithm>
 #include <cctype>
@@ -511,6 +512,11 @@ void TestGameLayer::SetupHud() {
 void TestGameLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
+
+    // Предметные иконки ЭТОЙ игры — в движок, до первого кадра интерфейса.
+    // Движок держит у себя только нейтральный набор (см. sage/ui/UIIcons.h);
+    // доска, бочка, парус и остальной инвентарь принадлежат игре.
+    RegisterGameIcons();
 
     // --- env-хуки (паттерн движка) ---
     if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;

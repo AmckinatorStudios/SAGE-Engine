@@ -751,7 +751,7 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Script", "Logic", "script",
          "Lua: OnStart and OnUpdate on this object", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},
-        {"Net Replicated", "Logic", "net",
+        {"Net Replicated", "Logic", "network",
          "The server replicates this object to clients", HasComp<NetReplicatedComponent>,
          AddComp<NetReplicatedComponent>},
         // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего

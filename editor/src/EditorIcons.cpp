@@ -331,6 +331,15 @@ bool Shape(const Pen& p, const char* n) {
         return true;
     }
     // Зонд отражений: шар в габаритной коробке.
+    // Сеть: два узла и связь между ними. Не «глобус» и не «шестерёнка»: узел,
+    // канал, узел — единственная форма, которая читается как связь машин, а не
+    // как интернет вообще.
+    if (is("network")) {
+        p.Line(0.25f, 0.30f, 0.75f, 0.70f, 0.055f);
+        p.Disc(0.25f, 0.30f, 0.15f);
+        p.Circle(0.75f, 0.70f, 0.15f, 0.07f);
+        return true;
+    }
     if (is("probe")) {
         p.Rect(0.125f, 0.125f, 0.875f, 0.875f, 0.05f, 0.0625f);
         p.Circle(0.5f, 0.5f, 0.25f, 0.07f);
@@ -603,6 +612,7 @@ const char* const kNames[] = {
     "move", "rotate", "scale", "universal", "rect", "align", "drop",
     "grid", "wire",
     "cube", "sphere", "light", "sun", "camera", "script", "particles", "anim", "ik", "probe",
+    "network",
     "physics",
     "folder", "file", "scene", "material", "project", "prefab", "texture", "shader", "audio",
     "model",

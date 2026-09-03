@@ -3,6 +3,8 @@
 // HitTest по слоям/маскам/видимости. Всё на CPU, БЕЗ GL (рендер не трогаем).
 #include "TestFramework.h"
 
+#include <algorithm>
+
 #include <cmath>
 #include <memory>
 
@@ -346,17 +348,44 @@ TEST(UI_showcase_hittest_respects_clip_mask) {
 // ===========================================================================
 TEST(UI_icon_registry_knows_its_names) {
     const auto& names = sage::ui::IconNames();
-    CHECK_TRUE(names.size() >= 20); // набор для игрового HUD, а не три штуки
+    CHECK_TRUE(names.size() >= 15); // набор для интерфейса, а не три штуки
 
     // Имена отсортированы — редактор показывает их списком, и порядок не должен
     // прыгать от запуска к запуску.
     for (size_t i = 1; i < names.size(); ++i) CHECK_TRUE(names[i - 1] < names[i]);
 
-    // Опорные иконки, на которые опирается интерфейс игр.
-    for (const char* n : {"heart", "drop", "flame", "plank", "fish", "lantern"}) {
+    // Опорные иконки движка: управление, разметка, состояние.
+    for (const char* n : {"heart", "drop", "flame", "check", "warn", "gear", "play"}) {
         CHECK_TRUE(sage::ui::HasIcon(n));
     }
     CHECK_FALSE(sage::ui::HasIcon("нет-такой-иконки"));
+
+    // А ПРЕДМЕТОВ КОНКРЕТНОЙ ИГРЫ в движке быть не должно. Доска, парус,
+    // водоочиститель и остальной чужой инвентарь жили здесь же, в общей
+    // таблице, и ехали в каждую сборку любого проекта. Теперь их приносит игра
+    // (RegisterIcon), и эта проверка следит, чтобы они не вернулись.
+    for (const char* n : {"plank", "sail", "purifier", "boat", "lantern", "fish"}) {
+        CHECK_FALSE(sage::ui::HasIcon(n));
+    }
+}
+
+// Игра приносит движку СВОИ иконки, и они становятся полноправными: их видно в
+// HasIcon, они попадают в список имён (редактор показывает его в инспекторе), и
+// они рисуются наравне со встроенными.
+TEST(UI_game_can_register_its_own_icons) {
+    CHECK_FALSE(sage::ui::HasIcon("тестовая-иконка"));
+    const size_t before = sage::ui::IconNames().size();
+
+    sage::ui::RegisterIcon("тестовая-иконка", [](const sage::ui::IconPen& p) {
+        p.Box(0.2f, 0.2f, 0.6f, 0.6f);
+    });
+
+    CHECK_TRUE(sage::ui::HasIcon("тестовая-иконка"));
+    const auto& names = sage::ui::IconNames();
+    CHECK_EQ(names.size(), before + 1); // список пересобрался, а не остался кэшем
+    CHECK_TRUE(std::find(names.begin(), names.end(), std::string("тестовая-иконка")) !=
+               names.end());
+    for (size_t i = 1; i < names.size(); ++i) CHECK_TRUE(names[i - 1] < names[i]);
 }
 
 // --- Растворение тени у предела дальности ---------------------------------

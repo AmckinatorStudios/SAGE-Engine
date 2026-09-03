@@ -5,5 +5,6 @@ sage_add_game(
     SOURCES
         src/main.cpp
         src/TestGameLayer.cpp
+        src/GameIcons.cpp
     ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets
 )
