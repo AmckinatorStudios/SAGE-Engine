@@ -79,6 +79,43 @@ glm::mat4 ViewportPanel::OrthoViewMatrix(ViewKind kind, const glm::vec3& center)
     }
 }
 
+
+// Полоса с заметкой шаблона и крестиком. Рисуется поверх картинки вида, а не
+// подаётся элементом ImGui: вид — это Image во всю ячейку, и любой элемент
+// после него уехал бы вниз, растянув панель.
+static void DrawTemplateNote(EditorHost& host, ImVec2 pos, ImVec2 cell) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const std::string& note = host.TemplateNote();
+    const float pad = 10.0f;
+    const float wrap = std::max(cell.x - pad * 4.0f - 24.0f, 120.0f);
+    const ImVec2 ts = ImGui::CalcTextSize(note.c_str(), nullptr, false, wrap);
+
+    // ВНИЗУ И ПО ЦЕНТРУ. Сверху лежит виджет инструментов и накрыл бы заметку
+    // (первая попытка так и выглядела: из-под тулбара торчала половина строки),
+    // а нижний левый угол занят подписью вида.
+    const float boxW = ts.x + pad * 2.0f + 24.0f;
+    const float boxH = ts.y + pad;
+    const ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f),
+                   pos.y + cell.y - boxH - pad * 2.6f);
+    const ImVec2 b(a.x + boxW, a.y + boxH);
+    dl->AddRectFilled(a, b, IM_COL32(24, 28, 38, 235), 5.0f);
+    dl->AddRect(a, b, IM_COL32(255, 190, 90, 180), 5.0f);
+    dl->AddText(nullptr, 0.0f, ImVec2(a.x + pad, a.y + pad * 0.5f), IM_COL32(235, 238, 245, 255),
+                note.c_str(), nullptr, wrap);
+
+    // Крестик — настоящей кнопкой: заметка обязана закрываться, иначе она
+    // превращается в мусор поверх сцены.
+    const ImVec2 close(b.x - 20.0f, a.y + 4.0f);
+    ImGui::SetCursorScreenPos(close);
+    ImGui::PushID("##tplnote");
+    if (ImGui::InvisibleButton("x", ImVec2(16.0f, 16.0f))) host.ClearTemplateNote();
+    const bool hot = ImGui::IsItemHovered();
+    ImGui::PopID();
+    const ImU32 col = hot ? IM_COL32(255, 220, 140, 255) : IM_COL32(180, 185, 195, 220);
+    dl->AddLine(ImVec2(close.x + 4, close.y + 4), ImVec2(close.x + 12, close.y + 12), col, 1.6f);
+    dl->AddLine(ImVec2(close.x + 12, close.y + 4), ImVec2(close.x + 4, close.y + 12), col, 1.6f);
+}
+
 void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Раскладка из переменной окружения — для headless-прогонов и скриншотов
     // документации: кликнуть в комбо там некому, а проверять раскладку надо.
@@ -221,6 +258,14 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             dl->AddRect(slotPos[i], ImVec2(slotPos[i].x + cell.x, slotPos[i].y + cell.y),
                         IM_COL32(255, 175, 60, 200), 0.0f, 0, 2.0f);
         }
+
+        // ЗАМЕТКА ТОЛЬКО ЧТО СОЗДАННОГО ПРОЕКТА — поверх главного вида.
+        //
+        // Витрина строит свой мир скриптами, и сразу после создания её проект
+        // выглядит пустым: белый вьюпорт и две строки в дереве. Со стороны это
+        // неотличимо от «шаблон сломан», и смотрят в этот момент именно сюда —
+        // не в консоль. Одна строка на месте вопроса снимает его целиком.
+        if (i == 0 && !host.TemplateNote().empty()) DrawTemplateNote(host, slotPos[0], cell);
 
         // Клик по виду делает его активным — дальше в нём работают гизмо и
         // хоткеи. Без этого в раскладке из четырёх видов работал бы только один.

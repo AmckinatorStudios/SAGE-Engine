@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1077.
+// Язык: Русский. Строк: 1081.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1898,6 +1898,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поддерево обрезается этим прямоугольником (списки, миникарты)"},
     {"The sun's disc, direction and colour are on the sun object — select it in the hierarchy.",
      "Диск солнца, его направление и цвет — на самом объекте-солнце: выберите его в иерархии."},
+    {"The world of this project is built by scripts. Press Play to walk through the zones;\nin the stopped editor the scene holds only the world root and the player.",
+     "Мир этого проекта собирают скрипты. Нажмите Play, чтобы пройтись по зонам;\nв остановленном редакторе в сцене лежат только корень мира и игрок."},
     {"There are no interface elements yet. Add one with the Element button above.",
      "Элементов интерфейса пока нет. Добавьте кнопкой «Элемент» выше."},
     {"There are unsaved changes (Ctrl+S)",
@@ -1918,6 +1920,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Этот свет и есть солнце: он отбрасывает каскадные тени, и по нему процедурное небо рисует диск. Направляют его поворотом объекта или азимутом и высотой ниже."},
     {"This scene is not from this project — assets may not be found",
      "Сцена не из этого проекта — ассеты могут не найтись"},
+    {"This template is not installed next to the editor",
+     "Этот шаблон не установлен рядом с редактором"},
+    {"This template is not installed next to the editor:",
+     "Этот шаблон не установлен рядом с редактором:"},
     {"Three numbers",
      "Три числа"},
     {"Tidies up a screen that was built before snapping was on.",
@@ -2122,6 +2128,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "модель"},
     {"no",
      "нет"},
+    {"not installed",
+     "не установлен"},
     {"nothing selected",
      "ничего не выбрано"},
     {"part",

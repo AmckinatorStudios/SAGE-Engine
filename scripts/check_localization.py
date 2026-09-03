@@ -59,9 +59,16 @@ def visible_text(raw):
     return raw.split('##')[0]
 
 
+ESCAPES = re.compile(r'\\[ntr\\"]')
+
+
 def worth_translating(raw):
     text = visible_text(raw)
     stripped = FMT.sub('', text)
+    # Экранированные последовательности — НЕ буквы. Без этого «%s\n\n%s» (чистый
+    # формат, склеивающий три уже переведённых куска) считался подписью:
+    # обратный слэш убирался, а «n» оставалась и проходила за букву.
+    stripped = ESCAPES.sub('', stripped)
     if not re.search(r'[A-Za-zЀ-ӿ]', stripped):
         return False           # чистый идентификатор, формат или знаки
     return len(stripped.strip()) > 2   # «X», «Y», «Z» одинаковы во всех языках

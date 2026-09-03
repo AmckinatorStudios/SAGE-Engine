@@ -64,6 +64,14 @@ std::string LauncherPanel::CreateBlockedReason() const {
         if (std::strchr("/\\:*?\"<>|", *c)) return T("A name cannot contain / \\ : * ? \" < > |");
     }
 
+    // Выбран шаблон, которого нет на диске: кнопка обязана быть выключена
+    // ЗДЕСЬ, а не отказывать после нажатия. Отказ после нажатия человек читает
+    // как поломку редактора — он ведь выбрал предложенное.
+    if (const ProjectTemplate* tpl = FindProjectTemplate(m_templateId)) {
+        if (!ProjectTemplateAvailable(*tpl))
+            return T("This template is not installed next to the editor");
+    }
+
     std::error_code ec;
     const fs::path parent(m_newDir);
     const fs::path target = parent / m_newName;
