@@ -59,6 +59,8 @@ jobs:
             || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
           test -f build-windows/editor/templates/showcase/project.sageproj \
             || { echo "::error::шаблон-витрина не скопировался в templates/"; exit 1; }
+          test -f build-windows/editor/themes/example-amber.json \
+            || { echo "::error::темы оформления не скопировались в themes/"; exit 1; }
           file "$EXE"
           file "$EXE" | grep -q "PE32+ executable (GUI)" \
             || { echo "::error::Это не оконное windows-приложение"; exit 1; }
@@ -127,6 +129,15 @@ jobs:
           # есть, а нажать его нельзя.
           if [ -d build-windows/editor/templates ]; then
             cp -r build-windows/editor/templates "$PKG/templates"
+          fi
+
+          # Темы оформления (themes/*.json): встроенные темы работают и без
+          # этой папки, но вместе с ней уезжает ВОЗМОЖНОСТЬ сделать свою —
+          # пример и описание формата. Без неё «Окно > Оформление > Выгрузить
+          # тему» пишет в несуществующий каталог, и вся затея с темами файлами
+          # для скачавшего сборку остаётся на словах.
+          if [ -d build-windows/editor/themes ]; then
+            cp -r build-windows/editor/themes "$PKG/themes"
           fi
 
           # Плагин-пример вместе с рантайм-DLL, которого требует именно он (см.
