@@ -128,6 +128,15 @@ public:
     // Сообщает в консоль заметку шаблона (см. ProjectTemplate::Note).
     void AnnounceTemplateNote(const ProjectTemplate& tpl);
     std::string m_templateNote;   // «что делать дальше» после создания проекта
+    // Съёмка обложек шаблонов (SAGE_EDITOR_TEMPLATE_SHOTS): куда складывать,
+    // что снимаем прямо сейчас и снялось ли. Живёт в слое, потому что снимок
+    // делается ПОСЛЕ RenderGame, а шаблоны перебираются в кадре.
+    std::string m_coverShotDir;
+    std::string m_coverShotPath;
+    bool m_coverShotDone = false;
+    int m_coverShotIndex = -1;
+    int m_coverShotWait = 0;
+    void TickTemplateShots();
     // Снимок кадра по SAGE_SCREENSHOT_AT_FRAME. Отдельной функцией, потому что
     // кадр заканчивается в ДВУХ местах: со стартовым окном и с редактором.
     void TakeAutoScreenshot(sage::Application& app);

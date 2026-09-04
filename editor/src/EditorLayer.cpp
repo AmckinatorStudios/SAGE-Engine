@@ -306,6 +306,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_COLLIDER_MODE", "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
+            "SAGE_EDITOR_TEMPLATE_SHOTS",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -332,7 +333,29 @@ void EditorLayer::OnAttach() {
     // ПОСМОТРЕТЬ, а не поверить описанию. Проверять шаблоны числом сущностей
     // (это делает самопроверка) недостаточно: «пусто» и «пусто, но остался
     // скайбокс» дают одинаковый ноль, а выглядят по-разному.
-    if (const char* tplId = std::getenv("SAGE_EDITOR_TEMPLATE")) {
+    // ОБЛОЖКИ ШАБЛОНОВ — НАСТОЯЩИЕ СНИМКИ, а не рисунки.
+    //
+    // Обложка рисовалась кодом (десяток примитивов в ImDrawList) и обещала то,
+    // чего в шаблоне может уже не быть: рисунок правят руками отдельно от
+    // самого шаблона, и разъезжаются они молча. Снимок так не умеет — он
+    // делается ИЗ ТОГО ЖЕ шаблона, который создаётся кнопкой.
+    //
+    // Пересоздаются одной командой:
+    //   SAGE_EDITOR_TEMPLATE_SHOTS=<папка> SageEditor
+    // и кладутся в editor/assets/templates/<id>.png. Хук, а не шаг сборки:
+    // снимать кадр нужно с живым графическим контекстом и настоящей сценой, то
+    // есть самим редактором, и делать это на каждой сборке — платить минутой
+    // за картинку, которая меняется раз в полгода.
+    if (const char* outDir = std::getenv("SAGE_EDITOR_TEMPLATE_SHOTS")) {
+        m_headlessProject = true;
+        m_coverShotDir = outDir;
+        std::error_code shotEc;
+        std::filesystem::create_directories(m_coverShotDir, shotEc);
+        LOG_INFO("Editor") << "Съёмка обложек шаблонов в " << m_coverShotDir;
+    }
+
+    if (const char* tplId = std::getenv("SAGE_EDITOR_TEMPLATE");
+        tplId && m_coverShotDir.empty()) {
         m_headlessProject = true;
         // СОЗДАЁМ ПРОЕКТ, а не «пересобираем сцену по виду шаблона».
         //
@@ -835,6 +858,11 @@ void EditorLayer::OnRender() {
     // проход сцены, поэтому рисуются ТОЛЬКО те, что панель попросила: одиночный
     // вьюпорт, самый частый случай, не платит за раскладку, которой не
     // пользуются.
+    // Съёмка обложек шаблонов идёт ДО кадра: она меняет проект и сцену, и делать
+    // это посреди сбора кадра значило бы рисовать половину одной сцены и
+    // половину другой.
+    TickTemplateShots();
+
     for (int i = 1; i < m_viewCount; ++i) {
         const ViewRequest& r = m_viewRequests[i];
         if (!r.Active || r.W < 8 || r.H < 8) continue;
@@ -848,6 +876,17 @@ void EditorLayer::OnRender() {
                                   m_showGrid, cfg, v, p, i, ov);
     } // отдаёт view/proj для гизмо/пикинга
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
+
+    // Снимок обложки шаблона делается ЗДЕСЬ и только здесь: игровой кадр
+    // существует ровно после RenderGame, а до неё это прошлогодняя картинка.
+    if (!m_coverShotPath.empty()) {
+        if (m_renderer.SaveGameFrame(m_coverShotPath))
+            LOG_INFO("Editor") << "Обложка шаблона снята: " << m_coverShotPath;
+        else
+            LOG_ERROR("Editor") << "Обложка шаблона не снялась: игрового кадра нет";
+        m_coverShotPath.clear();
+        m_coverShotDone = true;
+    }
 
     app.Device().SetViewport(0, 0, app.GetWindow().Width(), app.GetWindow().Height());
     app.Device().SetClearColor(0.05f, 0.05f, 0.06f, 1.0f);

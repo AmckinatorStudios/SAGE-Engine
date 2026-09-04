@@ -3,11 +3,19 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <system_error>
+#include <filesystem>
+#include <unordered_map>
+#include <memory>
 #include <string>
 
 #include "imgui.h"
 
 #include "Localization.h"
+
+#include "sage/core/Paths.h"
+#include "sage/render/ResourceManager.h"
+#include "sage/render/Texture.h"
 
 namespace {
 
@@ -212,6 +220,26 @@ float ProjectTemplateCardHeight(float width) {
            st.FramePadding.y * 2.0f + st.ItemSpacing.y;
 }
 
+
+// Снимок шаблона: assets/templates/<id>.png рядом с редактором. Пусто — снимка
+// нет, и карточка рисует обложку кодом.
+//
+// Через ResourceManager, а не своей загрузкой: снимки живут ровно столько же,
+// сколько остальные текстуры редактора, и второй кэш картинок здесь был бы
+// вторым местом, где они текут.
+static const std::shared_ptr<Texture>& TemplateShot(const ProjectTemplate& tpl) {
+    static std::unordered_map<std::string, std::shared_ptr<Texture>> cache;
+    auto it = cache.find(tpl.Id);
+    if (it != cache.end()) return it->second;
+    const std::filesystem::path path =
+        sage::EngineAssetPath("assets/templates/" + tpl.Id + ".png");
+    std::shared_ptr<Texture> tex;
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec))
+        tex = ResourceManager::Instance().GetTexture(path.string());
+    return cache.emplace(tpl.Id, std::move(tex)).first->second;
+}
+
 bool ProjectTemplateCard(const ProjectTemplate& tpl, bool selected, float width) {
     const ImGuiStyle& st = ImGui::GetStyle();
     const float height = ProjectTemplateCardHeight(width);
@@ -258,7 +286,34 @@ bool ProjectTemplateCard(const ProjectTemplate& tpl, bool selected, float width)
     const float pad = st.FramePadding.x;
     const float coverW = width - pad * 2.0f;
     const float coverH = std::floor(width * 9.0f / 16.0f) - st.FramePadding.y;
-    DrawProjectTemplateCover(tpl.Kind, a.x + pad, a.y + st.FramePadding.y, coverW, coverH);
+    // СНИМОК, если он есть; рисунок — запасной вариант.
+    //
+    // Рисованная обложка обещает то, чего в шаблоне может уже не быть: её
+    // правят руками отдельно от самого шаблона, и разъезжаются они молча.
+    // Снимок так не умеет — он сделан ИЗ ТОГО ЖЕ шаблона, который создаётся
+    // кнопкой (см. SAGE_EDITOR_TEMPLATE_SHOTS). Рисунок остаётся для тех, кого
+    // снять нельзя: у пустого шаблона нет ни камеры, ни сцены, и «фотография
+    // пустоты» была бы чёрным прямоугольником без смысла.
+    if (const std::shared_ptr<Texture>& shot = TemplateShot(tpl)) {
+        // ВПИСЫВАЕМ, а не растягиваем: снимок 16:9, обложка тоже, но при другом
+        // масштабе интерфейса пропорция карточки уезжает, и растянутый кадр
+        // сразу читается как «картинка от другого шаблона».
+        const float sw = (float)shot->Width(), sh = (float)shot->Height();
+        const float scale = std::min(coverW / std::max(sw, 1.0f), coverH / std::max(sh, 1.0f));
+        const float dw = sw * scale, dh = sh * scale;
+        const ImVec2 p0(a.x + pad + (coverW - dw) * 0.5f,
+                        a.y + st.FramePadding.y + (coverH - dh) * 0.5f);
+        dl->AddRectFilled(ImVec2(a.x + pad, a.y + st.FramePadding.y),
+                          ImVec2(a.x + pad + coverW, a.y + st.FramePadding.y + coverH),
+                          Col(0.04f, 0.05f, 0.06f, 1.0f), 3.0f);
+        // UV перевёрнуты по вертикали: загрузчик текстур движка кладёт
+        // картинку так, как её ждёт GL (снизу вверх), а ImGui рисует сверху
+        // вниз — без этого обложка встаёт вверх ногами.
+        dl->AddImage((ImTextureID)(std::intptr_t)shot->NativeHandle(), p0,
+                     ImVec2(p0.x + dw, p0.y + dh), ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+    } else {
+        DrawProjectTemplateCover(tpl.Kind, a.x + pad, a.y + st.FramePadding.y, coverW, coverH);
+    }
 
     // Недоступный — притушен и подписан поперёк обложки. Притушить мало: серая
     // карточка читается как «не выбрана», а не как «нельзя».
