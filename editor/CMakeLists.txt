@@ -93,6 +93,14 @@ add_custom_command(TARGET SageEditor POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:SageEditor>/assets
     COMMENT "Копирование ассетов редактора рядом с бинарником")
 
+# ТЕМЫ ОФОРМЛЕНИЯ — рядом с бинарником, в themes/. Читаются при запуске, а не
+# вкомпилированы: добавить своё оформление можно, ничего не собирая (см.
+# editor/themes/README.txt и EditorTheme.h).
+add_custom_command(TARGET SageEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/themes $<TARGET_FILE_DIR:SageEditor>/themes
+    COMMENT "Копирование тем оформления рядом с бинарником")
+
 # ГОТОВЫЕ ПРОЕКТЫ-ШАБЛОНЫ — рядом с бинарником, в templates/<id>.
 #
 # Копией, а не второй версией в editor/assets: источник у витрины ОДИН

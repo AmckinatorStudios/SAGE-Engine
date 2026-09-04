@@ -27,5 +27,11 @@ bool GetBool(const std::string& key, bool fallback);
 void SetBool(const std::string& key, bool value);
 int GetInt(const std::string& key, int fallback);
 void SetInt(const std::string& key, int value);
+float GetFloat(const std::string& key, float fallback);
+void SetFloat(const std::string& key, float value);
+// Строка — для выбора из списка (тема оформления, язык): числом такой выбор
+// хранить нельзя, порядок в списке меняется от сборки к сборке, а имя — нет.
+std::string GetString(const std::string& key, const std::string& fallback);
+void SetString(const std::string& key, const std::string& value);
 
 } // namespace sage::editor::prefs

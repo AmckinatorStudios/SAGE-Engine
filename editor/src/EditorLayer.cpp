@@ -124,7 +124,9 @@ void EditorLayer::OnAttach() {
     };
 
     EditorTheme::LoadFont();
-    EditorTheme::Apply();
+    // Init, а не Apply: он собирает список тем (встроенные + themes/*.json) и
+    // применяет ту, что человек выбрал в прошлый раз, вместе с масштабом.
+    EditorTheme::Init();
     ImGui_ImplGlfw_InitForOpenGL(app.GetWindow().Handle(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
     m_imguiReady = true;

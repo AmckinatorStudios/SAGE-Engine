@@ -1,4 +1,5 @@
 #include "SettingsPanel.h"
+#include "EditorTheme.h"
 
 #include <cfloat>
 #include "EditorHost.h"
@@ -67,7 +68,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     }
     ImGui::Separator();
 
-    if (ImGui::CollapsingHeader(T("Window" "###Window settings"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Window" "###Window settings"), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::InputInt(T("Width"), &c.Width);
         ImGui::InputInt(T("Height"), &c.Height);
         const char* modes[] = {T("Windowed"), T("Borderless"), T("Fullscreen")};
@@ -87,7 +88,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::PopStyleColor();
     }
 
-    if (ImGui::CollapsingHeader(T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen)) {
         const char* aspects[] = {T("Free"), "16:9", "16:10", "4:3", "21:9"};
         int a = (int)c.Aspect;
         if (ImGui::Combo(T("Aspect Ratio"), &a, aspects, IM_ARRAYSIZE(aspects))) c.Aspect = (sage::AspectMode)a;
@@ -97,7 +98,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::PopStyleColor();
     }
 
-    if (ImGui::CollapsingHeader(T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::TextWrapped("%s", T("Whether a pass runs at all and at what resolution. Which "
                                    "light casts those shadows is a property of the light object."));
@@ -114,7 +115,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::Checkbox(T("Skybox"), &c.Skybox);
     }
 
-    if (ImGui::CollapsingHeader(T("Post-Process" "###Post-Process"))) {
+    if (EditorTheme::SectionHeader(T("Post-Process" "###Post-Process"))) {
         ImGui::BeginDisabled(!c.PostProcessing);
         ImGui::SliderFloat(T("Exposure"), &c.Exposure, 0.1f, 4.0f);
         ImGui::SliderFloat(T("Gamma"), &c.Gamma, 1.0f, 3.0f);
@@ -145,7 +146,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // лучи. Пока раздела не было, единственным способом попробовать объём в
     // редакторе была переменная окружения при запуске: то есть перезапуск на
     // каждое значение.
-    if (ImGui::CollapsingHeader(T("Volumetric Light" "###Volumetrics"))) {
+    if (EditorTheme::SectionHeader(T("Volumetric Light" "###Volumetrics"))) {
         ImGui::Checkbox(T("Volumetrics"), &c.Volumetrics);
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");

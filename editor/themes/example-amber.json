@@ -1,0 +1,12 @@
+{
+  "id": "amber",
+  "name": "Amber (пример)",
+  "base": "modern-dark",
+  "dark": true,
+  "colors": {
+    "accent": "#E0862C",
+    "accentHover": "#F09A42",
+    "accentActive": "#BF6D1C",
+    "info": "#C9A227"
+  }
+}

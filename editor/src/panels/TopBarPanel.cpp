@@ -1,4 +1,5 @@
 #include "TopBarPanel.h"
+#include "EditorTheme.h"
 
 #include <algorithm>
 
@@ -162,7 +163,9 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
         default:                       GroupTitle(style, T("Run")); break;
     }
     if (state == EditorPlayState::Editing) {
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
+        // Цвет — по смыслу («утвердительное действие»), а не константой:
+        // иначе в светлой теме кнопка осталась бы тёмно-зелёной на белом.
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Ok));
         if (EditorIcons::Button("play", T("Play"), T("Run the scene (it is restored on Stop)")))
             host.StartPlay();
         ImGui::PopStyleColor();
@@ -173,7 +176,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
             if (EditorIcons::Button("play", T("Resume"), T("Resume"))) host.ResumePlay();
         }
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Danger));
         if (EditorIcons::Button("stop", T("Stop"), T("Stop and restore the scene")))
             host.StopPlay();
         ImGui::PopStyleColor();
@@ -194,7 +197,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     ImGui::AlignTextToFramePadding();
     const bool dirty = host.SceneDirty();
     if (dirty) {
-        ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.35f, 1.0f), "%s *",
+        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s *",
                            host.CurrentSceneName().c_str());
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("There are unsaved changes (Ctrl+S)"));
