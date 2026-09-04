@@ -92,6 +92,28 @@ add_custom_command(TARGET SageEditor POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:SageEditor>/assets
     COMMENT "Копирование ассетов редактора рядом с бинарником")
 
+# ШРИФТ ДВИЖКА — рядом с редактором, ровно как рядом с любой игрой.
+#
+# Его клал только sage_add_game, а редактор собирается своим add_executable —
+# и в поставке редактора шрифта не было ВООБЩЕ. Текст при этом не пропадал, и
+# именно поэтому дефект дожил до релиза: UIRenderer молча перебирает системные
+# кандидаты и на Windows находит Segoe UI. Но:
+#
+#   • на машине, где по этим путям шрифта нет, текст падает на stb_easy_font —
+#     то есть теряет кириллицу целиком, а редактор у нас русский;
+#   • «свой шрифт с гарантированной кириллицей» переставал быть гарантией:
+#     как выглядит интерфейс, решал набор шрифтов чужой системы.
+#
+# Идёт ПОСЛЕ копирования ассетов редактора: тот же порядок, что в
+# sage_add_game, — сначала свои ассеты, потом дефолт движка, чтобы редактор мог
+# положить собственный шрифт под тем же именем и победить.
+add_custom_command(TARGET SageEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:SageEditor>/assets/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${SAGE_ENGINE_ROOT}/engine/assets/fonts/sage-default.ttf
+            $<TARGET_FILE_DIR:SageEditor>/assets/fonts/sage-default.ttf
+    COMMENT "Копирование шрифта движка рядом с SageEditor")
+
 # ГОТОВЫЕ ПРОЕКТЫ-ШАБЛОНЫ — рядом с бинарником, в templates/<id>.
 #
 # Копией, а не второй версией в editor/assets: источник у витрины ОДИН
