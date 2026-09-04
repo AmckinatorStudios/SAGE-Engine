@@ -24,7 +24,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/7: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/8: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +45,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/7: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/8: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -67,14 +67,14 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/7: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 3/8: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/7: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+echo "=== Smoke-тест 4/8: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
@@ -110,7 +110,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/7: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 5/8: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -281,7 +281,7 @@ if cmp -s "${POST_OFF}" "${POST_ON}"; then
 fi
 echo "OK: пост-обработка выполняется в собранной игре (кадры с SAGE_POST=0/1 различаются)"
 
-echo "=== Smoke-тест 6/7: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 6/8: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -322,7 +322,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 7/7: обработчик падений (настоящее падение) ==="
+echo "=== Smoke-тест 7/8: обработчик падений (настоящее падение) ==="
 # Единственный честный способ проверить обработчик падений — уронить процесс.
 # Обычным тестом это не сделать: обработчик по замыслу доводит падение до
 # конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
@@ -364,5 +364,39 @@ if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
     echo "ОШИБКА: аварийное сохранение не сработало"; exit 1
 fi
 echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
+
+echo "=== Smoke-тест 8/8: отказ запуска слышно ==="
+# «Просто запускаю — ничего не происходит, даже ошибки нет, а в логе только
+# строка о старте». Так выглядел ЛЮБОЙ отказ запуска: причина уходила в stderr,
+# которого у окна Windows нет, и в лог не попадала вовсе.
+#
+# Проверяем самым честным способом — запускаем редактор БЕЗ дисплея. Это тот же
+# путь, что и «драйвер не умеет OpenGL 3.3» на чужом ПК: окно не создаётся,
+# наружу летит исключение.
+STARTFAIL_DIR="${SCRATCH_DIR}/startfail"
+rm -rf "${STARTFAIL_DIR}"; mkdir -p "${STARTFAIL_DIR}"
+STATUS=0
+# Путь АБСОЛЮТНЫЙ: заходим в чужую папку, и относительный тут превратился бы
+# в «команда не найдена» — то есть проверка мерила бы не то.
+EDITOR_ABS="$(cd "$(dirname "${EDITOR_EXE}")" && pwd)/$(basename "${EDITOR_EXE}")"
+( cd "${STARTFAIL_DIR}" && env -u DISPLAY -u WAYLAND_DISPLAY \
+    "${EDITOR_ABS}" ) > "${STARTFAIL_DIR}/out.txt" 2>&1 || STATUS=$?
+if [ ${STATUS} -eq 0 ]; then
+    echo "ОШИБКА: редактор без дисплея завершился успешно — отказ не обнаружен"; exit 1
+fi
+if [ ! -f "${STARTFAIL_DIR}/sage_editor.log" ]; then
+    echo "ОШИБКА: лог не создан — причину отказа человеку взять неоткуда"; exit 1
+fi
+# В логе обязаны быть ДВЕ вещи: слова самого GLFW (почему именно) и отметка о
+# фатальном отказе (что запуск не состоялся). Без первого причина неизвестна,
+# без второго лог выглядит просто оборванным.
+if ! grep -q "ФАТАЛЬНАЯ ОШИБКА ПРИ ЗАПУСКЕ" "${STARTFAIL_DIR}/sage_editor.log"; then
+    echo "ОШИБКА: фатальный отказ не записан в лог"; cat "${STARTFAIL_DIR}/sage_editor.log"; exit 1
+fi
+if ! grep -q "GLFW" "${STARTFAIL_DIR}/sage_editor.log"; then
+    echo "ОШИБКА: в логе нет объяснения от GLFW — причина отказа потеряна"
+    cat "${STARTFAIL_DIR}/sage_editor.log"; exit 1
+fi
+echo "OK: отказ запуска записан в лог с причиной от GLFW (код ${STATUS})"
 
 echo "=== Все smoke-тесты прошли ==="

@@ -1,4 +1,6 @@
 #include "sage/core/Application.h"
+
+#include "sage/core/CrashHandler.h"
 #include "sage/core/Log.h"
 #include "sage/core/Systems.h"
 #include "sage/core/JobSystem.h"
@@ -80,6 +82,16 @@ Application::Application(const AppConfig& config) : m_config(config) {
     m_window = std::make_unique<Window>(config.Width, config.Height, config.Title, wp);
 
     m_device = rhi::GraphicsDevice::Create(ChooseBackend(config.Backend));
+    // Шаги запуска отмечаются в логе НЕ ради болтливости. Когда на чужой машине
+    // «ничего не происходит», единственный доступный факт — докуда дошёл лог; без
+    // отметок он обрывается на первой строке, и место отказа определить нечем.
+    // Обработчик падений ставится в main ДО всего (см. SAGE_MAIN), но лог к
+    // тому моменту ещё не открыт — сказать об этом можно только здесь. Строка
+    // не декоративная: по ней видно, что отчёт о падении будет, а если её нет —
+    // что искать его бессмысленно.
+    LOG_INFO("Engine") << "Обработчик падений: "
+                       << (CrashHandler::Installed() ? "установлен" : "НЕ УСТАНОВЛЕН");
+    LOG_INFO("Engine") << "Запуск: окно готово, поднимаю графическое устройство";
     m_device->Init(reinterpret_cast<rhi::ProcLoader>(glfwGetProcAddress));
     // Реальный размер окна может отличаться от запрошенного (fullscreen/borderless
     // берут разрешение монитора) — берём фактический.
@@ -93,6 +105,7 @@ Application::Application(const AppConfig& config) : m_config(config) {
 
     // Состав и версии подсистем — в лог любой сборки (игра/редактор/рантайм).
     LogEngineSystems();
+    LOG_INFO("Engine") << "Запуск: движок готов, передаю управление слоям";
 }
 
 Application::~Application() {
@@ -114,8 +127,15 @@ Application::~Application() {
 
 Layer* Application::PushLayer(std::unique_ptr<Layer> layer) {
     Layer* raw = layer.get();
+    const std::string name = raw->Name();
     m_layers.push_back(std::move(layer));
+    // Отметки вокруг OnAttach: именно там живёт самая долгая и самая хрупкая
+    // часть запуска (шейдеры, шрифты, проект, ассеты). Если лог обрывается
+    // между этими двумя строками — известно и КТО упал, и что это случилось не
+    // в движке, а в слое.
+    LOG_INFO("Engine") << "Запуск слоя '" << name << "'";
     raw->OnAttach();
+    LOG_INFO("Engine") << "Слой '" << name << "' запущен";
     return raw;
 }
 
