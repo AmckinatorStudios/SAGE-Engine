@@ -42,7 +42,20 @@ function(sage_add_game)
         message(FATAL_ERROR "sage_add_game(${GAME_NAME}): не заданы SOURCES")
     endif()
 
-    add_executable(${GAME_NAME} ${GAME_SOURCES})
+    # WIN32 — приложение с ОКНОМ, а не консольное. Без этого рядом с игрой на
+    # Windows вылезает чёрное окно терминала, которое нельзя закрыть отдельно
+    # от самой игры: закроешь — вместе с ней закроется и игра.
+    #
+    # Редактор этот флаг себе поставил давно (editor/CMakeLists.txt), а всё,
+    # что движок отдаёт РАЗРАБОТЧИКУ ИГРЫ, оставалось консольным — включая
+    # SagePlayer, то есть каждую игру, собранную кнопкой File > Build Game.
+    # Получалось, что инструмент делает себе лучше, чем своему потребителю, а
+    # обойти это автор игры мог только собственным add_executable, то есть
+    # отказавшись от хелпера.
+    #
+    # Вывод от этого не теряется: движок пишет его в лог рядом с бинарником
+    # (Log::Init в main игры). На Linux флаг игнорируется — ветвление не нужно.
+    add_executable(${GAME_NAME} WIN32 ${GAME_SOURCES})
     sage_windows_manifest(${GAME_NAME})
     target_link_libraries(${GAME_NAME} PRIVATE sage::engine)
     target_include_directories(${GAME_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

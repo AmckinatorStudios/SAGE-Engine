@@ -57,6 +57,14 @@ jobs:
           # первого не работает Build Game, без вторых — шаблон «Витрина».
           test -f build-windows/runtime/SagePlayer.exe \
             || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
+          # Плеер — это КАЖДАЯ игра, собранная кнопкой Build Game. Он обязан
+          # быть оконным приложением ровно по той же причине, что и редактор:
+          # иначе игрок получает рядом с игрой чёрное окно консоли, закрыть
+          # которое можно только вместе с игрой. Проверяется отдельно, потому
+          # что подсистему задаёт хелпер sage_add_game, и потерять там один
+          # флаг ничего не стоит — а заметит это игрок, а не сборка.
+          file build-windows/runtime/SagePlayer.exe | grep -q "PE32+ executable (GUI)" \
+            || { echo "::error::SagePlayer.exe консольный — у игр будет лишнее окно терминала"; exit 1; }
           test -f build-windows/editor/templates/showcase/project.sageproj \
             || { echo "::error::шаблон-витрина не скопировался в templates/"; exit 1; }
           # Командная строка — тоже часть поставки. Движком пользуются двумя
