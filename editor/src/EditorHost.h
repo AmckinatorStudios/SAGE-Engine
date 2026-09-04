@@ -135,6 +135,11 @@ public:
     // иначе нечем. Гасится закрытием и запуском игры — она отвечает ровно на
     // один вопрос и не должна висеть дальше.
     virtual const std::string& TemplateNote() const = 0;
+
+    // Что с рендером не так — одной строкой, для показа В КАДРЕ. Пусто — всё в
+    // порядке. Человек, у которого чёрный вьюпорт, смотрит во вьюпорт, а не в
+    // консоль: «не понятно из-за чего» начинается ровно с молчания на экране.
+    virtual const std::string& RenderWarning() const = 0;
     virtual void ClearTemplateNote() = 0;
 
     virtual void MergeScriptVars(GameObject object) = 0;

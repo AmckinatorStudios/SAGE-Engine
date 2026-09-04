@@ -159,6 +159,35 @@ void EditorSceneRenderer::FitSunShadows(Scene& scene, const LightingEnvironment&
     sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
 }
 
+
+// РАБОТАЕТ ЛИ ПОСТ-ОБРАБОТКА НА ЭТОЙ ВИДЕОКАРТЕ.
+//
+// Обычный вид отличается от отладочных ровно одним: у отладочных
+// пост-обработки нет. Поэтому её отказ выглядит не как «пропало свечение», а
+// как «во вьюпорте ВСЕ ОБЪЕКТЫ ЧЁРНЫЕ, а отладочные режимы работают» — то есть
+// как поломка шейдинга, которой нет. Именно с этим и пришли: на одной машине
+// всё хорошо, на другой чёрный экран и никаких следов в логе.
+//
+// Проверяем один раз на заведомо сером кадре (PostFX::CheckPipeline) и при
+// отказе показываем кадр БЕЗ эффектов. Картинка без свечения — это картинка;
+// чёрный экран — это неработающий редактор.
+bool EditorSceneRenderer::PostWorks() {
+    if (!m_postfx) return false;
+    const sage::render::PostFX::SelfCheck& check = m_postfx->CheckPipeline();
+    if (!check.Ran) return true;
+    if (!check.Ok && !m_postWarned) {
+        m_postWarned = true;
+        m_renderWarning =
+            "Пост-обработка на этой видеокарте не работает — кадр показывается без эффектов "
+            "(подробности в консоли). Отладочные режимы вида её не используют.";
+        LOG_ERROR("Render") << "Пост-обработка на этой видеокарте не работает ("
+                            << check.Reason << ") — кадр показывается без эффектов. "
+                            << "Отладочные режимы вида её не используют и потому выглядели "
+                            << "исправными.";
+    }
+    return check.Ok;
+}
+
 void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
                                        const Camera& camera) {
     Window& window = sage::Application::Get().GetWindow();
@@ -611,7 +640,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // схематичном виде сверху мешают попасть по объекту, а именно ради точного
     // попадания такой вид и открывают.
     bool postApplied = false;
-    if (cfg.PostProcessing && mode == EditorRenderMode::Shaded && !viewOverride.Use) {
+    if (cfg.PostProcessing && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
+        PostWorks()) {
         postFbo.Resize(w, h);
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
                          sceneFbo.Height(), outProj, outView, FxFromConfig(cfg),
@@ -713,7 +743,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     m_gameFbo->Resolve();   // MSAA -> обычные текстуры (без MSAA — пустышка)
 
     m_gamePostApplied = false;
-    if (cfg.PostProcessing) {
+    if (cfg.PostProcessing && PostWorks()) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
                              m_gameFbo->Width(), m_gameFbo->Height(), proj, view,

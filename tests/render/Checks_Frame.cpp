@@ -699,9 +699,72 @@ void TestGrid(FrameRenderer& r, Scene& scene) {
 
 } // namespace
 
+
+// --- Обычный вид с пост-обработкой не может быть чёрным ---------------------
+//
+// Ровно тот отказ, с которым пришли: во вьюпорте ВСЕ ОБЪЕКТЫ ЧЁРНЫЕ, а
+// отладочные режимы работают. Разгадка в том, что отладочные режимы рисуются
+// БЕЗ пост-обработки — то есть чёрным был не шейдинг, а цепочка эффектов.
+// Проверок на «кадр без поста не чёрный» было две, а на кадр С ПОСТОМ — ни
+// одной, хотя именно его видит человек по умолчанию.
+void TestShadedWithPostIsNotBlack(FrameRenderer& r, Scene& scene) {
+    Framebuffer sceneFbo(kW, kH);
+    Framebuffer outFbo(kW, kH);
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    const glm::mat4 view = TestView();
+    const glm::mat4 proj = PerspectiveProj();
+
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+    device.Clear(true, true);
+    r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(), 0);
+    sceneFbo.Resolve();
+
+    sage::render::PostFXSettings fx = BaseSettings();
+    r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, fx, &outFbo,
+                0, 0, kW, kH);
+    outFbo.Resolve();
+    outFbo.Bind();
+    const Image frame = Capture(kW, kH);
+    device.BindDefaultFramebuffer();
+
+    double sum = 0.0;
+    for (unsigned char c : frame.Pixels) sum += c;
+    const double mean = frame.Pixels.empty() ? 0.0 : sum / (double)frame.Pixels.size();
+    if (mean > 24.0) {
+        CountPass();
+        std::printf("[ ok ] %-28s среднее %.1f (кадр с постом освещён)\n", "post_not_black", mean);
+    } else {
+        CountFail();
+        std::printf("[FAIL] %-28s среднее %.1f — кадр С ПОСТ-ОБРАБОТКОЙ ЧЁРНЫЙ\n",
+                    "post_not_black", mean);
+    }
+}
+
+// --- Самопроверка цепочки эффектов ------------------------------------------
+//
+// Тот же вопрос, но задаваемый самим движком на чужой машине: цепочку прогоняют
+// по заведомо серому кадру и смотрят, не пропала ли картинка. Здесь проверяется,
+// что проверка НЕ ЛЖЁТ — на исправной машине она обязана говорить «работает»,
+// иначе редактор молча отключит эффекты у всех.
+void TestPostSelfCheck(FrameRenderer& r) {
+    const sage::render::PostFX::SelfCheck& check = r.Fx.CheckPipeline();
+    if (check.Ran && check.Ok) {
+        CountPass();
+        std::printf("[ ok ] %-28s цепочка эффектов признала себя рабочей\n", "post_self_check");
+    } else {
+        CountFail();
+        std::printf("[FAIL] %-28s самопроверка поста не прошла: %s\n", "post_self_check",
+                    check.Reason.empty() ? "(без причины)" : check.Reason.c_str());
+    }
+}
+
 void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestScenePerspective(r, scene);
     TestShadowsOffIsNotBlack(r, scene);
+    TestShadedWithPostIsNotBlack(r, scene);
+    TestPostSelfCheck(r);
     TestSceneOrthographic(r, scene);
     TestNoPostFX(r, scene);
     TestDepthOfField(r, scene);

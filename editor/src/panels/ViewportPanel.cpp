@@ -1,5 +1,7 @@
 #include "ViewportPanel.h"
 
+#include <cmath>
+
 #include <cstdint>
 #include <cstdlib>
 #include <string>
@@ -116,6 +118,24 @@ static void DrawTemplateNote(EditorHost& host, ImVec2 pos, ImVec2 cell) {
     dl->AddLine(ImVec2(close.x + 12, close.y + 4), ImVec2(close.x + 4, close.y + 12), col, 1.6f);
 }
 
+
+// Полоса с предупреждением рендера — вверху по центру, поверх кадра.
+static void DrawRenderWarning(const std::string& text, ImVec2 pos, ImVec2 cell) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float pad = 8.0f;
+    const float wrap = std::max(cell.x * 0.7f, 160.0f);
+    const ImVec2 ts = ImGui::CalcTextSize(text.c_str(), nullptr, false, wrap);
+    const float boxW = ts.x + pad * 2.0f;
+    const float boxH = ts.y + pad;
+    // Ниже виджета инструментов: он занимает верх кадра слева.
+    const ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f), pos.y + 46.0f);
+    const ImVec2 b(a.x + boxW, a.y + boxH);
+    dl->AddRectFilled(a, b, IM_COL32(48, 26, 20, 240), 5.0f);
+    dl->AddRect(a, b, IM_COL32(255, 140, 90, 220), 5.0f);
+    dl->AddText(nullptr, 0.0f, ImVec2(a.x + pad, a.y + pad * 0.5f), IM_COL32(255, 226, 210, 255),
+                text.c_str(), nullptr, wrap);
+}
+
 void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Раскладка из переменной окружения — для headless-прогонов и скриншотов
     // документации: кликнуть в комбо там некому, а проверять раскладку надо.
@@ -161,6 +181,17 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     ImVec2 cell = full;
     if (viewCount == 2) cell.x = (full.x - gap) * 0.5f;
     else if (viewCount == 4) { cell.x = (full.x - gap) * 0.5f; cell.y = (full.y - gap) * 0.5f; }
+    // РАЗМЕР ЯЧЕЙКИ — ЦЕЛОЕ ЧИСЛО ПИКСЕЛЕЙ.
+    //
+    // Буфер сцены заводится целым (int от ширины), а картинка показывалась в
+    // ДРОБНУЮ ячейку: 1234 пикселя растягивались на 1234.6, и каждый пиксель
+    // кадра приходился между двумя пикселями экрана. Это и есть та самая
+    // «мыльность»: изображение мылится билинейной фильтрацией, а тонкие линии
+    // (сетка, кайма выделения, текст отладки) вдобавок мерцают при малейшем
+    // изменении размера панели. Никакой настройкой качества это не лечится —
+    // дело не в эффектах, а в том, что кадр показывают не в свой размер.
+    cell.x = std::floor(cell.x);
+    cell.y = std::floor(cell.y);
     if (cell.x < 8 || cell.y < 8) { ImGui::End(); ImGui::PopStyleVar(); return; }
 
     EditorHost::ViewRequest requests[EditorHost::kMaxViews];
@@ -266,6 +297,12 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         // неотличимо от «шаблон сломан», и смотрят в этот момент именно сюда —
         // не в консоль. Одна строка на месте вопроса снимает его целиком.
         if (i == 0 && !host.TemplateNote().empty()) DrawTemplateNote(host, slotPos[0], cell);
+
+        // ПРЕДУПРЕЖДЕНИЕ РЕНДЕРА — поверх кадра и без крестика: это не совет, а
+        // сообщение о том, что картинка сейчас НЕ ТАКАЯ, какой должна быть.
+        // Закрывать его нечем — оно исчезнет само, когда исчезнет причина.
+        if (i == 0 && !host.RenderWarning().empty())
+            DrawRenderWarning(host.RenderWarning(), slotPos[0], cell);
 
         // Клик по виду делает его активным — дальше в нём работают гизмо и
         // хоткеи. Без этого в раскладке из четырёх видов работал бы только один.
