@@ -414,12 +414,19 @@ UNI_ROOT="${SCRATCH_DIR}/Пользователи/Владимир"
 UNI_PROJECT="${UNI_ROOT}/Документы/SAGE Projects/Моя игра"
 mkdir -p "${UNI_ROOT}/.config" "${UNI_PROJECT}"
 UNI_LOG="${SCRATCH_DIR}/unicode_editor.log"
+UNI_EDITOR_SHOT="${UNI_ROOT}/снимок редактора.png"
 STATUS=0
 # HOME и XDG_CONFIG_HOME с кириллицей — это и есть аналог APPDATA у
 # «Владимира»: редактор кладёт по ним свои настройки и список проектов.
+#
+# SAGE_SCREENSHOT_AT_FRAME обязателен: самопроверка НЕ завершает редактор сама
+# (она пишет вердикт в лог и продолжает работать), и без этого хука прогон
+# висел бы до таймаута. Заодно кадр пишется по русскому пути — то есть
+# проверяется и запись файла, а не только чтение.
 ( cd "$(dirname "${EDITOR_EXE}")" && \
   run_headless env HOME="${UNI_ROOT}" XDG_CONFIG_HOME="${UNI_ROOT}/.config" \
       SAGE_EDITOR_SELFTEST=1 SAGE_EDITOR_LANG=ru \
+      SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${UNI_EDITOR_SHOT}" \
       "./$(basename "${EDITOR_EXE}")" ) > "${UNI_LOG}" 2>&1 || STATUS=$?
 if [ ${STATUS} -ne 0 ]; then
     echo "ОШИБКА: редактор с кириллицей в HOME завершился кодом ${STATUS}"
@@ -438,6 +445,13 @@ fi
 if [ ! -f "${UNI_ROOT}/.config/sage/editor_prefs.json" ]; then
     echo "ОШИБКА: настройки не записались в папку с кириллицей"
     find "${UNI_ROOT}" -type f | head; exit 1
+fi
+# И кадр по русскому пути записался: чтение — половина дела, писать по такому
+# пути программа обязана тоже.
+UNI_ED_SHOT_SIZE=$(stat -c%s "${UNI_EDITOR_SHOT}" 2>/dev/null || echo 0)
+if [ "${UNI_ED_SHOT_SIZE}" -lt 1024 ]; then
+    echo "ОШИБКА: редактор не записал кадр по пути с кириллицей (${UNI_ED_SHOT_SIZE} байт)"
+    cat "${UNI_LOG}"; exit 1
 fi
 
 # Вторая половина: СОБРАННАЯ ИГРА лежит по пути с кириллицей, и путь к её
