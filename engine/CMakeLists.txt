@@ -32,6 +32,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/FatalReport.cpp
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp
+    src/sage/core/Keys.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
     src/sage/core/Tween.cpp
@@ -105,6 +106,8 @@ set(SAGE_ENGINE_SOURCES
     src/physics/Ragdoll.cpp
     src/physics/builtin/BuiltinWorld.cpp
     src/physics/builtin/Collide.cpp
+    src/sage/project/Project.cpp
+    src/sage/project/ProjectWatcher.cpp
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scripting/ScriptEngine.cpp

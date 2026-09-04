@@ -5,7 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <glm/glm.hpp>
+#include "sage/core/Math.h"
 
 #include "sage/core/Layer.h"
 #include "sage/core/InputSystem.h"

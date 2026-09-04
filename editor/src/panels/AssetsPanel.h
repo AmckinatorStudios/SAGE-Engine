@@ -9,7 +9,10 @@
 #include "FileBrowser.h"
 
 class EditorHost;
-class Project;
+// Проект — класс ДВИЖКА (sage::project::Project), см. editor/src/Project.h.
+// Поэтому не предобъявление, а включение: у псевдонима типа предобъявления
+// не бывает, а «class Project;» рядом с ним — уже другой, несуществующий тип.
+#include "Project.h"
 
 // Панель Assets — браузер файлов проекта: breadcrumb, сетка цветных тайлов по
 // типу файла, поиск, создание (New Folder/Script/Text/Material по ПКМ),

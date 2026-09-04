@@ -37,6 +37,7 @@ namespace sage { class Application; }
 #include "EditorPlayInput.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
+#include "sage/project/ProjectWatcher.h"
 #include "RecentProjects.h"
 #include "PluginAPI.h"
 #include "PluginManager.h"
@@ -386,6 +387,16 @@ private:
     ConsolePanel m_console;
     ProfilerPanel m_profiler;
     ConfirmDialog m_confirm;
+
+    // --- Правки проекта СНАРУЖИ ---------------------------------------------
+    //
+    // Редактор и код (SDK) работают с одним каталогом проекта — в этом и смысл
+    // того, что проект живёт в движке. Значит сцену, открытую в редакторе,
+    // прямо сейчас может править скрипт в соседнем терминале. Без слежения
+    // первое же «Сохранить» затрёт его работу молча.
+    sage::project::ProjectWatcher m_projectWatcher;
+    double m_watchClock = 0.0;   // своё время: вотчеру нужен монотонный счёт секунд
+    void PollProjectChanges(float dt);
     CodeEditor m_code;
     // Вкладка «Код» открыта с самого начала: она докнута третьей рядом с
     // Viewport и Game, и её отсутствие означало бы, что вкладки в раскладке то

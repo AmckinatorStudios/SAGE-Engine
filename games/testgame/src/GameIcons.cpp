@@ -2,7 +2,7 @@
 
 #include "sage/ui/UIIcons.h"
 
-#include <glm/glm.hpp>
+#include "sage/core/Math.h"
 
 // Формы описаны в НОРМАЛИЗОВАННЫХ координатах 0..1 внутри своего квадрата —
 // см. sage::ui::IconPen. Одна и та же иконка одинаково резка и в 16, и в 64

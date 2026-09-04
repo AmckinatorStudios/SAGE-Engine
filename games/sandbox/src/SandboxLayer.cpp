@@ -3,8 +3,7 @@
 #include <cstdlib>
 #include <cmath>
 
-#include <GLFW/glfw3.h>
-#include <glm/glm.hpp>
+#include "sage/core/Math.h"
 
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
@@ -83,7 +82,7 @@ void SandboxLayer::OnUpdate(float dt) {
     // Медленный авто-облёт сцены вокруг центра — тот же приём, что в
     // EditorLayer::OnUpdate: превью читается как живой 3D-рендер без
     // необходимости подключать InputSystem ради минимального примера.
-    float t = (float)glfwGetTime();
+    float t = (float)sage::Application::Get().Time();
     float radius = 8.5f;
     m_camera.Position = {std::cos(t * 0.25f) * radius, 5.0f, std::sin(t * 0.25f) * radius};
     glm::vec3 dir = glm::normalize(glm::vec3(0.0f, 1.0f, 0.0f) - m_camera.Position);

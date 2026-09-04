@@ -59,6 +59,13 @@ jobs:
             || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
           test -f build-windows/editor/templates/showcase/project.sageproj \
             || { echo "::error::шаблон-витрина не скопировался в templates/"; exit 1; }
+          # Командная строка — тоже часть поставки. Движком пользуются двумя
+          # способами, и второй (проект создаётся кодом, редактор открывает его
+          # как есть) скачавшему недоступен, если в архиве лежит только
+          # редактор: собирать движок из исходников ради `sage project create`
+          # никто не станет.
+          test -f build-windows/tools/sage_cli/sage.exe \
+            || { echo "::error::sage.exe не собрался — работа без редактора недоступна"; exit 1; }
           file "$EXE"
           file "$EXE" | grep -q "PE32+ executable (GUI)" \
             || { echo "::error::Это не оконное windows-приложение"; exit 1; }
@@ -121,6 +128,11 @@ jobs:
           mkdir -p "$PKG/runtime"
           cp build-windows/runtime/SagePlayer.exe "$PKG/runtime/"
           cp -r build-windows/runtime/assets "$PKG/runtime/assets"
+
+          # КОМАНДНАЯ СТРОКА — в корень архива, рядом с редактором: её набирают
+          # руками, и путь вида tools/sage_cli/sage.exe этому мешает. Своих
+          # ассетов у неё нет (ни окна, ни OpenGL), утащить чужие она не может.
+          cp build-windows/tools/sage_cli/sage.exe "$PKG"/
 
           # Готовые проекты-шаблоны (templates/<id>): без них «Витрина» в окне
           # создания проекта честно объявляет себя недоступной — то есть пункт
@@ -204,7 +216,7 @@ jobs:
             --title "$TITLE" \
             --notes "$(printf '%s\n\n%s\n\n%s\n%s\n%s' \
               'Скачайте SageEditor-Windows.zip, распакуйте папку целиком и запустите SageEditor.exe. Устанавливать ничего не нужно.' \
-              'В архиве: редактор, плеер (runtime/), шаблоны проектов и плагин-пример.' \
+              'В архиве: редактор, плеер (runtime/), командная строка sage.exe, шаблоны проектов и плагин-пример.' \
               "Собрано из: $SHORT — $SUBJECT" \
               "Дата коммита: $WHEN" \
               'Если что-то не запускается — рядом с exe появляется sage_editor.log, в нём написана причина.')"

@@ -325,6 +325,11 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
         std::error_code ec;
         if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
         SceneSerializer::Save(*m_scene, path.string());
+        // Своя запись — не «правка снаружи». Без этой отметки каждое
+        // «Сохранить» возвращалось бы вопросом «файл изменён снаружи,
+        // перезагрузить?», и человек перестал бы читать этот вопрос вообще —
+        // включая тот раз, когда он настоящий.
+        m_projectWatcher.MarkOwnWrite(path);
         m_scenePath = path;
         m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene saved: " << path.string();
@@ -441,7 +446,7 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
               (ProjectTemplatesRoot() / tpl->SourceDir).string() + ")";
         return false;
     }
-    if (!m_project.CreateNew(dir, name, err)) return false;
+    if (!m_project.Create(dir, name, err)) return false;
     const ProjectTemplateKind kind = tpl->Kind;
     m_assetsCwd = m_project.Dir();
     m_recent.Add(m_project.Dir().string());
@@ -495,6 +500,74 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+//  Правки проекта СНАРУЖИ
+//
+//  Проект общий с кодом (SDK): его файлы правит не только редактор. Что с этим
+//  делать, зависит от того, есть ли чем рисковать, и три случая здесь РАЗНЫЕ:
+//
+//    • открытая сцена изменилась, а несохранённых правок у нас нет — берём
+//      новую версию молча. Спрашивать не о чем: терять нечего, а вопрос,
+//      заданный без нужды, приучает отвечать не глядя;
+//    • открытая сцена изменилась, и у нас есть несохранённые правки — спросить
+//      ОБЯЗАНЫ. Это единственный случай, где решение принадлежит человеку:
+//      только он знает, что важнее — его последние десять минут или то, что
+//      сделал скрипт. Молча не делаем ни того, ни другого;
+//    • изменилось что-то ещё (другая сцена, скрипт, материал) — обновляем базу
+//      ассетов и пишем в консоль. Диалог здесь был бы шумом: под угрозой
+//      ничего.
+// ---------------------------------------------------------------------------
+void EditorLayer::PollProjectChanges(float dt) {
+    if (!m_projectWatcher.Watching()) return;
+    // Во время Play сцена живёт по игровым правилам и будет восстановлена из
+    // снимка при Stop. Перезагружать её из файла посреди игры значило бы
+    // подменить мир под ногами у скриптов.
+    if (m_playState != EditorPlayState::Editing) return;
+
+    m_watchClock += (double)dt;
+    const std::vector<sage::project::Change> changes = m_projectWatcher.Poll(m_watchClock);
+    if (changes.empty()) return;
+
+    const std::string openScene =
+        m_scenePath.empty() ? std::string{}
+                            : fs::relative(m_scenePath, m_project.Dir()).generic_string();
+
+    bool openSceneTouched = false;
+    for (const sage::project::Change& change : changes) {
+        if (!openScene.empty() && change.Path == openScene &&
+            change.Kind != sage::project::ChangeKind::Removed) {
+            openSceneTouched = true;
+        }
+    }
+
+    // База ассетов — всегда: ссылки в сценах ходят через неё, и новый файл,
+    // положенный скриптом, обязан стать видимым без перезапуска редактора.
+    sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+
+    for (const sage::project::Change& change : changes) {
+        LOG_INFO("Editor") << "снаружи изменено: " << change.Path;
+    }
+
+    if (!openSceneTouched) return;
+
+    const fs::path path = m_scenePath;
+    if (!m_sceneDirty) {
+        LOG_INFO("Editor") << sage::editor::T("Scene changed on disk - reloaded");
+        LoadSceneFromFile(path);
+        return;
+    }
+
+    // Есть что терять — спрашиваем. Ключ подтверждения свой, и подавлять его
+    // галочкой «больше не спрашивать» нельзя: «всегда перезагружать» здесь
+    // означает «всегда молча выбрасывать мою несохранённую работу».
+    m_confirm.Ask("reload-scene-external",
+                  sage::editor::T("Scene changed outside the editor"),
+                  sage::editor::T("The scene file was changed by another program, and you have "
+                                  "unsaved changes. Reloading discards your changes."),
+                  [this, path]() { LoadSceneFromFile(path); },
+                  sage::editor::T("Reload"));
+}
+
 bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     if (!m_project.Open(path, err)) return false;
     m_assetsCwd = m_project.Dir();
@@ -507,15 +580,22 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     m_settings.ApplyEnvOverrides();   // SAGE_* поверх файла — как у рантайма
     ApplyEngineSettings();
 
-    // Автозагрузка первой сцены проекта (по алфавиту) — открытый проект сразу
-    // показывает свой контент, а не осиротевшую демо-сцену.
-    std::error_code ec;
-    std::vector<fs::path> scenes;
-    for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
-        if (entry.path().extension() == ".sage") scenes.push_back(entry.path());
-    }
-    std::sort(scenes.begin(), scenes.end());
-    if (!scenes.empty()) LoadSceneFromFile(scenes.front());
+    // Автозагрузка стартовой сцены — открытый проект сразу показывает свой
+    // контент, а не осиротевшую демо-сцену.
+    //
+    // ПРАВИЛО СПРАШИВАЕМ У ПРОЕКТА, а не перебираем каталог сами. Здесь стоял
+    // третий по счёту способ ответить на вопрос «какая сцена главная»: свой был
+    // у плеера, свой у редактора, и они уже расходились — плеер знал про
+    // main.sage, редактор брал первую по алфавиту. То есть человек правил в
+    // редакторе одну сцену, а запускал игру с другой. Теперь правило одно и
+    // живёт в движке (Project::StartSceneName), и автор игры может задать его
+    // явно полем start_scene.
+    const fs::path startScene = m_project.StartScenePath();
+    if (!startScene.empty()) LoadSceneFromFile(startScene);
+
+    // Следим за правками снаружи: проект общий с SDK, и его файлы меняются не
+    // только через нас.
+    m_projectWatcher.Watch(m_project);
 
     UpdateWindowTitle();
     return true;

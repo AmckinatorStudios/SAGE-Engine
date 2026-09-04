@@ -20,7 +20,7 @@
 //   InputSystem input;
 //   input.Attach(window);
 //   InputMap& actions = input.Actions();
-//   actions.Register("Jump").Bind(InputBinding::Key(GLFW_KEY_SPACE));
+//   actions.Register("Jump").Bind(InputBinding::Key(sage::Key::Space));
 //   ...
 //   // каждый кадр, в начале цикла:
 //   input.Update(window.Handle());

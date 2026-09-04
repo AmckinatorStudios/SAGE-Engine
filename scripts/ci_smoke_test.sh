@@ -11,6 +11,7 @@ set -euo pipefail
 BUILD_DIR="${1:-build}"
 SANDBOX_EXE="${BUILD_DIR}/games/sandbox/Sandbox"
 EDITOR_EXE="${BUILD_DIR}/editor/SageEditor"
+PLAYER_EXE="${BUILD_DIR}/runtime/SagePlayer"
 SCRATCH_DIR=$(mktemp -d)
 trap 'rm -rf "${SCRATCH_DIR}"' EXIT
 
@@ -24,7 +25,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/10: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/11: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +46,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/10: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/11: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -67,14 +68,14 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/10: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 3/11: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/10: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+echo "=== Smoke-тест 4/11: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
@@ -110,7 +111,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/10: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 5/11: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -281,7 +282,7 @@ if cmp -s "${POST_OFF}" "${POST_ON}"; then
 fi
 echo "OK: пост-обработка выполняется в собранной игре (кадры с SAGE_POST=0/1 различаются)"
 
-echo "=== Smoke-тест 6/10: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 6/11: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -322,7 +323,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 7/10: обработчик падений (настоящее падение) ==="
+echo "=== Smoke-тест 7/11: обработчик падений (настоящее падение) ==="
 # Единственный честный способ проверить обработчик падений — уронить процесс.
 # Обычным тестом это не сделать: обработчик по замыслу доводит падение до
 # конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
@@ -365,7 +366,7 @@ if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
 fi
 echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
 
-echo "=== Smoke-тест 8/10: отказ запуска слышно ==="
+echo "=== Smoke-тест 8/11: отказ запуска слышно ==="
 # «Просто запускаю — ничего не происходит, даже ошибки нет, а в логе только
 # строка о старте». Так выглядел ЛЮБОЙ отказ запуска: причина уходила в stderr,
 # которого у окна Windows нет, и в лог не попадала вовсе.
@@ -399,7 +400,7 @@ if ! grep -q "GLFW" "${STARTFAIL_DIR}/sage_editor.log"; then
 fi
 echo "OK: отказ запуска записан в лог с причиной от GLFW (код ${STATUS})"
 
-echo "=== Smoke-тест 9/10: путь с кириллицей (имя пользователя по-русски) ==="
+echo "=== Smoke-тест 9/11: путь с кириллицей (имя пользователя по-русски) ==="
 # ЭТО ПРОВЕРКА ТОЙ САМОЙ ОШИБКИ, из-за которой редактор не запускался на
 # русской Windows: «filesystem error: Cannot convert character sequence».
 # Причина — путь с кириллицей, пришедший из окружения (APPDATA у пользователя
@@ -485,7 +486,7 @@ fi
 echo "OK: кириллица в пути работает везде — настройки редактора, папка проекта,"
 echo "    аргумент командной строки и запись кадра (${UNI_SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 10/10: выход из игры без падения (кэш ресурсов) ==="
+echo "=== Smoke-тест 10/11: выход из игры без падения (кэш ресурсов) ==="
 # Единственная проверка, которой достаточно кода возврата, — и это не лень.
 #
 # Кэш ресурсов (ResourceManager) — глобальный синглтон, то есть функция-статик.
@@ -525,5 +526,83 @@ if ! grep -q "EXITPROBE: слой отсоединён" "${EXIT_PROBE_DIR}/sage_
     cat "${EXIT_PROBE_DIR}/probe.log"; exit 1
 fi
 echo "OK: игра, не зовущая ResourceManager::Clear() сама, выходит с кодом 0"
+
+echo "=== Smoke-тест 11/11: проект из командной строки открывается редактором и плеером ==="
+# ГЛАВНАЯ АРХИТЕКТУРНАЯ ПРОВЕРКА: SDK, редактор и плеер работают с ОДНИМ
+# проектом, без конвертации и без второй копии.
+#
+# Раньше проверить это было нечем, потому что проект существовал в двух
+# реализациях: класс в редакторе и ручной разбор project.sageproj в плеере.
+# Теперь класс один (sage::project::Project), и здесь это проверяется делом:
+# проект создаётся программой БЕЗ ГРАФИКИ, открывается редактором и
+# запускается плеером — одна и та же папка на всех троих.
+SAGE_CLI="${BUILD_DIR}/tools/sage_cli/sage"
+if [ ! -x "${SAGE_CLI}" ]; then
+    echo "ОШИБКА: не найден ${SAGE_CLI}"; exit 1
+fi
+SAGE_CLI="$(cd "$(dirname "${SAGE_CLI}")" && pwd)/sage"
+
+# Имя с кириллицей и пробелом — то, как проект назовёт живой человек.
+SDK_ROOT="${SCRATCH_DIR}/sdk"
+mkdir -p "${SDK_ROOT}"
+SDK_NAME="Моя Игра"
+( cd "${SDK_ROOT}" && "${SAGE_CLI}" project create "${SDK_NAME}" ) > "${SCRATCH_DIR}/cli.log" 2>&1
+SDK_PROJECT="${SDK_ROOT}/${SDK_NAME}"
+if [ ! -f "${SDK_PROJECT}/project.sageproj" ]; then
+    echo "ОШИБКА: командная строка не создала проект"; cat "${SCRATCH_DIR}/cli.log"; exit 1
+fi
+if [ ! -f "${SDK_PROJECT}/scenes/main.sage" ]; then
+    echo "ОШИБКА: в созданном проекте нет стартовой сцены"; cat "${SCRATCH_DIR}/cli.log"; exit 1
+fi
+
+# Вторая сцена и явный выбор стартовой — то самое поле, которого раньше не
+# существовало и о котором редактор и плеер думали по-разному.
+( cd "${SDK_PROJECT}" && "${SAGE_CLI}" scene create Уровень2 ) >> "${SCRATCH_DIR}/cli.log" 2>&1
+( cd "${SDK_PROJECT}" && "${SAGE_CLI}" project set-start-scene Уровень2 ) >> "${SCRATCH_DIR}/cli.log" 2>&1
+if ! grep -q "Уровень2" "${SDK_PROJECT}/project.sageproj"; then
+    echo "ОШИБКА: стартовая сцена не записана в project.sageproj"
+    cat "${SDK_PROJECT}/project.sageproj"; exit 1
+fi
+# И командная строка читает свой же файл обратно — то есть класс проекта один
+# и тот же на запись и на чтение.
+( cd "${SDK_PROJECT}" && "${SAGE_CLI}" project info ) > "${SCRATCH_DIR}/cli_info.log" 2>&1
+if ! grep -q "Уровень2.sage   <- стартовая" "${SCRATCH_DIR}/cli_info.log"; then
+    echo "ОШИБКА: инструмент не видит собственную стартовую сцену"
+    cat "${SCRATCH_DIR}/cli_info.log"; exit 1
+fi
+echo "OK: проект создан без графики (${SDK_NAME}), стартовая сцена назначена"
+
+# РЕДАКТОР открывает его КАК ЕСТЬ — ни импорта, ни конвертации.
+EDITOR_DIR="$(cd "$(dirname "${EDITOR_EXE}")" && pwd)"
+rm -f "${EDITOR_DIR}/sage_editor.log"
+( cd "${EDITOR_DIR}" && \
+  SAGE_EDITOR_OPEN_PROJECT="${SDK_PROJECT}" SAGE_EDITOR_OPEN_SCENE="Уровень2.sage" \
+  SAGE_EDITOR_SAVE_SCENE=1 SAGE_EDITOR_PLAY_SECONDS=1 \
+  SAGE_SCREENSHOT_AT_FRAME=20 SAGE_SCREENSHOT_PATH="${SCRATCH_DIR}/sdk_editor.png" \
+  run_headless ./SageEditor ) > "${SCRATCH_DIR}/sdk_editor.log" 2>&1 || true
+if ! grep -q "SESSION: PASS" "${EDITOR_DIR}/sage_editor.log"; then
+    echo "ОШИБКА: редактор не открыл проект, созданный командной строкой"
+    grep -E "SESSION:|ERROR" "${EDITOR_DIR}/sage_editor.log" | tail -10; exit 1
+fi
+echo "OK: редактор открыл, сохранил и проиграл тот же проект (SESSION: PASS)"
+
+# ПЛЕЕР запускает его же — и берёт ту стартовую сцену, которую назначил SDK.
+PLAYER_DIR="$(cd "$(dirname "${PLAYER_EXE}")" && pwd)"
+rm -f "${PLAYER_DIR}/sage_player.log"
+( cd "${PLAYER_DIR}" && \
+  SAGE_SCREENSHOT_AT_FRAME=5 SAGE_SCREENSHOT_PATH="${SCRATCH_DIR}/sdk_player.png" \
+  run_headless ./SagePlayer "${SDK_PROJECT}" ) > "${SCRATCH_DIR}/sdk_player.log" 2>&1
+if [ ! -s "${SCRATCH_DIR}/sdk_player.png" ]; then
+    echo "ОШИБКА: плеер не отрисовал кадр проекта из командной строки"
+    tail -20 "${PLAYER_DIR}/sage_player.log" 2>/dev/null || true
+    tail -20 "${SCRATCH_DIR}/sdk_player.log"; exit 1
+fi
+# Именно ТУ сцену: правило стартовой сцены общее, и плеер обязан подчиняться
+# полю, которое записал SDK, а не своему прежнему «main.sage или первая».
+if ! grep -q "Уровень2" "${PLAYER_DIR}/sage_player.log"; then
+    echo "ОШИБКА: плеер запустил не ту сцену, что назначил SDK"
+    grep -iE "сцен|scene" "${PLAYER_DIR}/sage_player.log" | tail -10; exit 1
+fi
+echo "OK: плеер запустил тот же проект и ту же стартовую сцену"
 
 echo "=== Все smoke-тесты прошли ==="
