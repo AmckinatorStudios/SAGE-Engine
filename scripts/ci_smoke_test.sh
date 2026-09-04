@@ -511,7 +511,11 @@ else
         --note "Мир строят скрипты." --version "smoke" > /dev/null
     TPL_SIZE=$(stat -c%s "${TPL_DIR}/showcase.sagetemplate")
 
-    PORT=8731
+    # Порт выбирает ОС, а не мы. Прибитый гвоздями номер однажды окажется
+    # занят чужим сервером — и проверка не упадёт, а тихо скачает чужой
+    # каталог и объявит, что всё работает. Ровно это здесь и случилось на
+    # первом же прогоне.
+    PORT=$(python3 -c "import socket;s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1]);s.close()")
     python3 - "$PORT" "$TPL_SIZE" > "${TPL_DIR}/templates.json" <<'PYEOF'
 import json, sys
 port, size = sys.argv[1], int(sys.argv[2])
@@ -524,7 +528,21 @@ PYEOF
 
     ( cd "${TPL_DIR}" && python3 -m http.server "${PORT}" --bind 127.0.0.1 >/dev/null 2>&1 &
       echo $! > "${TPL_DIR}/server.pid" )
-    sleep 2
+
+    # Дождаться сервера и убедиться, что отвечает ИМЕННО ОН, а не кто-то
+    # другой на том же порту: маркер "smoke" есть только в нашем каталоге.
+    SERVED=""
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        SERVED=$(curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/templates.json" 2>/dev/null || true)
+        [ -n "${SERVED}" ] && break
+        sleep 0.5
+    done
+    if ! printf '%s' "${SERVED}" | grep -q '"version": *"smoke"'; then
+        echo "ОШИБКА: на порту ${PORT} отвечает не наш каталог — проверять нечего"
+        printf '%s\n' "${SERVED}" | head -5
+        kill "$(cat "${TPL_DIR}/server.pid")" 2>/dev/null || true
+        exit 1
+    fi
 
     rm -rf "$(dirname "${EDITOR_EXE}")/templates"
     TPL_LOG="${SCRATCH_DIR}/template_download.log"
