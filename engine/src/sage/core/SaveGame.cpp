@@ -15,6 +15,7 @@
 #endif
 
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -41,15 +42,20 @@ std::string SafeSlot(const std::string& slot) {
 }
 
 std::string UserDataRoot() {
+    // Через EnvPath, а не getenv: на Windows узкое окружение приходит в ANSI, и
+    // «C:\Users\Вова\AppData\Roaming» такими байтами убивает конструктор
+    // std::filesystem::path (см. Paths.h). Сохранения игрока — не то место, где
+    // можно позволить себе падение из-за имени пользователя.
 #ifdef _WIN32
-    if (const char* appdata = std::getenv("APPDATA")) return appdata;
-    if (const char* profile = std::getenv("USERPROFILE"))
-        return std::string(profile) + "/AppData/Roaming";
+    if (const fs::path appdata = EnvPath("APPDATA"); !appdata.empty())
+        return PathToUtf8(appdata);
+    if (const fs::path profile = EnvPath("USERPROFILE"); !profile.empty())
+        return PathToUtf8(profile / "AppData" / "Roaming");
 #else
-    if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
-        if (xdg[0] != '\0') return xdg;
-    }
-    if (const char* home = std::getenv("HOME")) return std::string(home) + "/.local/share";
+    if (const fs::path xdg = EnvPath("XDG_DATA_HOME"); !xdg.empty())
+        return PathToUtf8(xdg);
+    if (const fs::path home = EnvPath("HOME"); !home.empty())
+        return PathToUtf8(home / ".local" / "share");
 #endif
     // Ни одной переменной нет — редкий случай (служба, урезанное окружение).
     // Пишем рядом, но НЕ молча: иначе игрок не поймёт, куда делся прогресс.

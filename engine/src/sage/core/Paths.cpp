@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 #if defined(_WIN32)
@@ -45,12 +46,117 @@ fs::path ExecutableDir() {
     return cached;
 }
 
+// ---------------------------------------------------------------------------
+//  Кодировки: система <-> UTF-8 (подробности — в Paths.h)
+// ---------------------------------------------------------------------------
+#if defined(_WIN32)
+namespace {
+
+// Широкая строка -> UTF-8. WideCharToMultiByte, а не codecvt: он не бросает
+// и не зависит от текущей локали процесса.
+std::string WideToUtf8(const wchar_t* w, int len) {
+    if (!w || len == 0) return {};
+    const int need = ::WideCharToMultiByte(CP_UTF8, 0, w, len, nullptr, 0, nullptr, nullptr);
+    if (need <= 0) return {};
+    std::string out((size_t)need, '\0');
+    ::WideCharToMultiByte(CP_UTF8, 0, w, len, out.data(), need, nullptr, nullptr);
+    return out;
+}
+
+// Узкая строка в заданной кодировке -> широкая. Пусто, если байты этой
+// кодировке не соответствуют (флаг MB_ERR_INVALID_CHARS: без него функция
+// молча подставляет «?» и отличить успех от порчи нельзя).
+std::wstring NarrowToWide(std::string_view s, UINT codepage, bool strict) {
+    if (s.empty()) return {};
+    const DWORD flags = strict ? MB_ERR_INVALID_CHARS : 0;
+    const int need = ::MultiByteToWideChar(codepage, flags, s.data(), (int)s.size(), nullptr, 0);
+    if (need <= 0) return {};
+    std::wstring out((size_t)need, L'\0');
+    ::MultiByteToWideChar(codepage, flags, s.data(), (int)s.size(), out.data(), need);
+    return out;
+}
+
+} // namespace
+#endif
+
+std::string SystemToUtf8(const char* bytes) {
+    if (!bytes || !*bytes) return {};
+#if defined(_WIN32)
+    // Если ANSI-кодировка процесса и так UTF-8 (манифест приложения, см.
+    // cmake/windows/sage.manifest), обе перекодировки — тождественные, и
+    // строка проходит насквозь.
+    const std::wstring wide = NarrowToWide(bytes, CP_ACP, /*strict=*/false);
+    if (wide.empty()) return bytes;
+    return WideToUtf8(wide.c_str(), (int)wide.size());
+#else
+    return bytes;
+#endif
+}
+
+std::string PathToUtf8(const fs::path& p) {
+#if defined(_WIN32)
+    const std::wstring& native = p.native();
+    return WideToUtf8(native.c_str(), (int)native.size());
+#else
+    return p.native();
+#endif
+}
+
+fs::path PathFromUtf8(std::string_view utf8) {
+    if (utf8.empty()) return {};
+#if defined(_WIN32)
+    // Порядок попыток — от самого вероятного к самому терпимому:
+    //   1) честный UTF-8 (так выглядит всё, что программа писала сама);
+    //   2) ANSI — сюда попадает то, что пришло от системы мимо EnvPath;
+    //   3) UTF-8 «как получится», с U+FFFD вместо мусора.
+    // Третий шаг существует ради одного: НИ ПРИ КАКИХ байтах не бросить.
+    // Испорченное имя файла — это ненайденный файл, и это переживаемо;
+    // исключение отсюда убивало всю программу.
+    if (std::wstring w = NarrowToWide(utf8, CP_UTF8, /*strict=*/true); !w.empty())
+        return fs::path(std::move(w));
+    if (std::wstring w = NarrowToWide(utf8, CP_ACP, /*strict=*/true); !w.empty())
+        return fs::path(std::move(w));
+    if (std::wstring w = NarrowToWide(utf8, CP_UTF8, /*strict=*/false); !w.empty())
+        return fs::path(std::move(w));
+    return {};
+#else
+    // На Unix путь — просто байты, перекодировать нечего и падать не на чем.
+    return fs::path(std::string(utf8));
+#endif
+}
+
+fs::path EnvPath(const char* name) {
+    if (!name) return {};
+#if defined(_WIN32)
+    // _wgetenv, а НЕ getenv: узкое окружение приходит в ANSI, и путь с
+    // кириллицей в нём — не UTF-8, то есть верная смерть конструктора path.
+    if (const wchar_t* w = _wgetenv(NarrowToWide(name, CP_UTF8, false).c_str()))
+        if (*w) return fs::path(w);
+    return {};
+#else
+    if (const char* v = std::getenv(name)) {
+        if (*v) return fs::path(v);
+    }
+    return {};
+#endif
+}
+
+std::string EnvString(const char* name) {
+#if defined(_WIN32)
+    const fs::path p = EnvPath(name);
+    return p.empty() ? std::string() : PathToUtf8(p);
+#else
+    if (const char* v = std::getenv(name)) return v;
+    return {};
+#endif
+}
+
 std::string EngineAssetPath(const std::string& relative) {
     const fs::path dir = ExecutableDir();
     if (dir.empty()) return relative;
     std::error_code ec;
     const fs::path candidate = dir / relative;
-    if (fs::exists(candidate, ec)) return candidate.string();
+    if (fs::exists(candidate, ec)) return PathToUtf8(candidate);
     return relative;
 }
 
@@ -106,8 +212,8 @@ fs::path XdgUserDir(const char* key, const fs::path& home) {
 fs::path KnownFolder(const char* xdgKey, const char* fallbackName, const fs::path& home) {
 #if defined(_WIN32)
     (void)xdgKey;
-    if (const char* env = std::getenv("USERPROFILE")) {
-        const fs::path guess = fs::path(env) / fallbackName;
+    if (const fs::path env = EnvPath("USERPROFILE"); !env.empty()) {
+        const fs::path guess = env / fallbackName;
         if (IsUsableDir(guess)) return guess;
     }
 #else
@@ -127,12 +233,15 @@ fs::path KnownFolder(const char* xdgKey, const char* fallbackName, const fs::pat
 // тесты, и так же ведут себя запуски из-под другого пользователя).
 fs::path HomeDir() {
 #if defined(_WIN32)
-    if (const char* p = std::getenv("USERPROFILE")) return fs::path(p);
-    const char* drive = std::getenv("HOMEDRIVE");
-    const char* rest = std::getenv("HOMEPATH");
-    if (drive && rest) return fs::path(std::string(drive) + rest);
+    if (const fs::path p = EnvPath("USERPROFILE"); !p.empty()) return p;
+    // HOMEDRIVE = «C:», HOMEPATH = «\\Users\\Вова» — их СКЛЕИВАЮТ, а не
+    // соединяют через «/»: «C:» — это диск без корня, и operator/ дал бы
+    // «C:Users/Вова», то есть путь относительно текущей папки на диске C.
+    const fs::path drive = EnvPath("HOMEDRIVE");
+    const fs::path rest = EnvPath("HOMEPATH");
+    if (!drive.empty() && !rest.empty()) return fs::path(drive.native() + rest.native());
 #else
-    if (const char* p = std::getenv("HOME")) return fs::path(p);
+    if (const fs::path p = EnvPath("HOME"); !p.empty()) return p;
 #endif
     return fs::path();
 }

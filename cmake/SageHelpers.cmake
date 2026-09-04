@@ -2,6 +2,27 @@
 #  SageHelpers.cmake — вспомогательные функции сборки SAGE Engine.
 # ============================================================================
 
+# sage_windows_manifest(<target>)
+#
+# Встраивает в windows-исполняемый файл манифест приложения SAGE
+# (cmake/windows/sage.manifest). Ради одной его строки: activeCodePage=UTF-8,
+# без которой узкие функции Windows (fopen, а значит и std::ifstream от
+# std::string) читают наши UTF-8 пути как CP1251 и не открывают ни одного файла
+# по пути с кириллицей. Подробности — в комментарии внутри самого манифеста.
+#
+# Вызывается для КАЖДОГО исполняемого файла: манифест — свойство процесса, и
+# редактору он нужен ровно так же, как плееру и любой игре. На не-Windows
+# ничего не делает.
+function(sage_windows_manifest target)
+    if (NOT WIN32)
+        return()
+    endif()
+    set(SAGE_WINDOWS_MANIFEST "${SAGE_ENGINE_ROOT}/cmake/windows/sage.manifest")
+    set(rc "${CMAKE_CURRENT_BINARY_DIR}/${target}_manifest.rc")
+    configure_file("${SAGE_ENGINE_ROOT}/cmake/windows/sage_manifest.rc.in" "${rc}" @ONLY)
+    target_sources(${target} PRIVATE "${rc}")
+endfunction()
+
 # sage_add_game(NAME <exe-name> SOURCES <files...> [ASSETS <dir>])
 #
 # Объявляет исполняемый файл конкретной игры поверх движка. Игра линкует
@@ -22,6 +43,7 @@ function(sage_add_game)
     endif()
 
     add_executable(${GAME_NAME} ${GAME_SOURCES})
+    sage_windows_manifest(${GAME_NAME})
     target_link_libraries(${GAME_NAME} PRIVATE sage::engine)
     target_include_directories(${GAME_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 

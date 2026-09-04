@@ -79,6 +79,9 @@ target_include_directories(SageEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # флаг линковщика --export-all-symbols передаётся напрямую. На Linux/macOS
 # ENABLE_EXPORTS/этот флаг не действуют, там резолвинг ImGui:: символов
 # плагина — рантаймовый (dlopen против уже загруженного процесса).
+# Манифест с activeCodePage=UTF-8 — см. sage_windows_manifest.
+sage_windows_manifest(SageEditor)
+
 set_target_properties(SageEditor PROPERTIES ENABLE_EXPORTS ON)
 if (WIN32)
     target_link_options(SageEditor PRIVATE -Wl,--export-all-symbols)

@@ -26,6 +26,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "sage/core/Application.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -2861,7 +2862,7 @@ end
 //  Итог — строкой SESSION: PASS/FAIL в лог, чтобы CI искал её грепом.
 // ============================================================================
 void EditorLayer::RunHeadlessProjectSession() {
-    const char* projectDir = std::getenv("SAGE_EDITOR_OPEN_PROJECT");
+    const std::string projectDir = sage::EnvString("SAGE_EDITOR_OPEN_PROJECT");
     std::string err;
     if (!OpenProject(projectDir, err)) {
         LOG_ERROR("Editor") << "SESSION: open project failed: " << err;
@@ -2929,7 +2930,7 @@ void EditorLayer::RunHeadlessProjectSession() {
 
     // --- File > Build Game: проект превращается в запускаемую игру ---
     if (ok) {
-        if (const char* out = std::getenv("SAGE_EDITOR_BUILD_TO")) {
+        if (const std::string out = sage::EnvString("SAGE_EDITOR_BUILD_TO"); !out.empty()) {
             std::string buildErr;
             if (!BuildGame(out, buildErr)) {
                 LOG_ERROR("Editor") << "SESSION: build game failed: " << buildErr;

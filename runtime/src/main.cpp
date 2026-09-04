@@ -38,16 +38,23 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     fs::path projectDir;
     std::string launchArgs;
     for (int i = 1; i < argc; ++i) {
+        // argv здесь уже в UTF-8: SAGE_MAIN зовёт NormalizeArgs (см.
+        // GameModule.h). До этого путь к проекту с кириллицей приходил байтами
+        // ANSI, и строка ниже валила плеер исключением fs::path — то есть
+        // запуск игры из русской папки не работал вовсе.
         std::string arg = argv[i];
         if (arg.rfind("--", 0) == 0) launchArgs += (launchArgs.empty() ? "" : " ") + arg;
-        else if (projectDir.empty()) projectDir = arg;
+        else if (projectDir.empty()) projectDir = sage::PathFromUtf8(arg);
     }
-    if (const char* env = std::getenv("SAGE_GAME_ARGS"))
-        launchArgs += (launchArgs.empty() ? "" : " ") + std::string(env);
+    // Тоже через EnvString: аргументы запуска — это текст, который игра
+    // показывает и сравнивает, и приходить он должен в той же кодировке, что и
+    // всё остальное в программе.
+    if (const std::string env = sage::EnvString("SAGE_GAME_ARGS"); !env.empty())
+        launchArgs += (launchArgs.empty() ? "" : " ") + env;
 
     std::error_code ec;
     if (!projectDir.empty()) { /* путь взят из аргументов */ }
-    else if (const char* env = std::getenv("SAGE_PROJECT")) projectDir = env;
+    else if (const fs::path env = sage::EnvPath("SAGE_PROJECT"); !env.empty()) projectDir = env;
     else if (fs::exists("project/project.sageproj", ec)) projectDir = "project";
     else projectDir = ".";
     projectDir = fs::absolute(projectDir, ec);
@@ -64,7 +71,7 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     cfg.Title = "SAGE Player";
     cfg.LoadFile("sage.cfg");
     cfg.LoadFile(sage::EngineAssetPath("sage.cfg")); // настройки, положенные рядом с самим плеером
-    cfg.LoadFile((projectDir / "sage.cfg").string());
+    cfg.LoadFile(sage::PathToUtf8(projectDir / "sage.cfg"));
     cfg.ApplyEnvOverrides();
     sage::EngineConfig::Set(cfg);
 

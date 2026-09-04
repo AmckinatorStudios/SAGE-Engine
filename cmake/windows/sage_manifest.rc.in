@@ -1,0 +1,5 @@
+/* Ресурс с манифестом приложения (см. sage.manifest рядом).
+   Номер 1 и тип 24 (RT_MANIFEST) — то, что загрузчик Windows ищет в EXE. */
+#define RT_MANIFEST 24
+#define CREATEPROCESS_MANIFEST_RESOURCE_ID 1
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "@SAGE_WINDOWS_MANIFEST@"

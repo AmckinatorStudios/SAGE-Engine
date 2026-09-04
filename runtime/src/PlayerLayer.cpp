@@ -132,7 +132,8 @@ void PlayerLayer::OnAttach() {
     m_particles.emplace();
     m_billboards.emplace();
 
-    if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
+    if (const std::string p = sage::EnvString("SAGE_SCREENSHOT_PATH"); !p.empty())
+        m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
     // Скриншот пишется до смены CWD? Нет — путь может быть абсолютным (CI так
     // и делает). Относительный путь окажется внутри папки проекта — норма.

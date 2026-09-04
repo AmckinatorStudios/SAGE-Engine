@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -15,11 +16,15 @@ using json = nlohmann::json;
 std::string RecentProjects::StoragePath() {
     // XDG-стиль на Unix, APPDATA на Windows, cwd как последний шанс.
     fs::path base;
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME")) base = xdg;
-    else if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".config";
-    else if (const char* appdata = std::getenv("APPDATA")) base = appdata;
-    else base = fs::current_path();
-    return (base / "sage" / "recent_projects.json").string();
+    // sage::EnvPath, а не getenv: на Windows «C:\Users\Вова\AppData\Roaming»
+    // приходит в узкое окружение байтами ANSI, и std::filesystem::path на них
+    // бросает исключение (см. Paths.h). Именно здесь редактор и умирал на
+    // русской Windows — до создания окна, ещё до первой панели.
+    if (const fs::path xdg = sage::EnvPath("XDG_CONFIG_HOME"); !xdg.empty()) base = xdg;
+    else if (const fs::path home = sage::EnvPath("HOME"); !home.empty()) base = home / ".config";
+    else if (const fs::path appdata = sage::EnvPath("APPDATA"); !appdata.empty()) base = appdata;
+    else { std::error_code ec; base = fs::current_path(ec); }
+    return sage::PathToUtf8(base / "sage" / "recent_projects.json");
 }
 
 void RecentProjects::Load() {
