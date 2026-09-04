@@ -41,6 +41,7 @@ public:
 
     void BindTexture2D(int unit, sage::rhi::TextureHandle texture) override;
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
+    bool ReadPixelsRGBA(int x, int y, int width, int height, unsigned char* out) override;
     float MaxAnisotropy() override;
     void EndFrameDiagnostics(unsigned long long frame) override;
 

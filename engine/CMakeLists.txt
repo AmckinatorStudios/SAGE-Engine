@@ -106,6 +106,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/Ragdoll.cpp
     src/physics/builtin/BuiltinWorld.cpp
     src/physics/builtin/Collide.cpp
+    src/sage/paint/PaintCanvas.cpp
     src/sage/project/Project.cpp
     src/sage/project/ProjectWatcher.cpp
     src/sage/scene/Prefab.cpp

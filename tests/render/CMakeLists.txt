@@ -18,6 +18,7 @@ add_executable(sage_render_tests
     Checks_Materials.cpp     # материал: от файла до пикселей
     Checks_UI.cpp            # интерфейс: части не наезжают и не красят друг друга
     Checks_Volumetrics.cpp   # объёмный свет: зерно, полосы, кайма
+    Checks_Paint.cpp         # рисование в 3D: кисть, мазок, заливка, ластик
     RenderTestHarness.cpp    # сравнение картинок и запись эталонов
 )
 

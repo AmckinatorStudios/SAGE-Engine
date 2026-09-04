@@ -112,7 +112,10 @@ public:
     // добавляющий свет, и закрывающая его геометрия: объёмные лучи плюс
     // облака поверх неба композитятся одной формулой, без второго прохода.
     // Additive — только сложение (искры, лучи без перекрытия).
-    enum class BlendMode { Alpha, Premultiplied, Additive };
+    // Erase — ЛАСТИК: снимает с цели столько, сколько принёс источник
+    // (0, 1-srcA). Нужен рисованию: без него «стереть краску» пришлось бы
+    // подделывать закрашиванием фоном, а на прозрачном холсте фона нет.
+    enum class BlendMode { Alpha, Premultiplied, Additive, Erase };
     virtual void SetBlendMode(BlendMode mode) { (void)mode; }
     virtual void SetDepthTest(bool enabled) = 0;
     virtual void SetDepthWrite(bool enabled) = 0;
@@ -164,6 +167,19 @@ public:
     // перевёрнутых скриншотов на втором бэкенде — дефекта, который не воспроизво-
     // дится на первом и потому ищется долго.
     virtual void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) = 0;
+
+    // То же, но С АЛЬФОЙ. Отдельным методом, а не заменой: почти всем читателям
+    // (скриншот, эталонные кадры) альфа не нужна, и заставлять их выделять на
+    // треть больше памяти незачем.
+    //
+    // Нужна она рисованию (sage/paint): у холста прозрачность — не служебный
+    // канал, а сами данные, «здесь краски нет». Прочитать RGB и подставить
+    // альфу 255 значило бы соврать, поэтому бэкенд, который так не умеет,
+    // отвечает false, а не выдумывает.
+    virtual bool ReadPixelsRGBA(int x, int y, int width, int height, unsigned char* out) {
+        (void)x; (void)y; (void)width; (void)height; (void)out;
+        return false;
+    }
 
     // Максимальная поддерживаемая анизотропия фильтрации (>= 1.0).
     virtual float MaxAnisotropy() = 0;

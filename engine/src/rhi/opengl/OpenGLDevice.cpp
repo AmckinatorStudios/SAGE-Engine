@@ -119,6 +119,7 @@ void OpenGLDevice::SetBlendMode(BlendMode mode) {
     switch (mode) {
         case BlendMode::Premultiplied: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
         case BlendMode::Additive:      glBlendFunc(GL_ONE, GL_ONE); break;
+        case BlendMode::Erase:         glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA); break;
         default:                       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); break;
     }
 }
@@ -187,6 +188,13 @@ void OpenGLDevice::ReadPixelsRGB(int x, int y, int width, int height, unsigned c
     glFinish();
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, out);
+}
+
+bool OpenGLDevice::ReadPixelsRGBA(int x, int y, int width, int height, unsigned char* out) {
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out);
+    return true;
 }
 
 float OpenGLDevice::MaxAnisotropy() {
