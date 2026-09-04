@@ -23,6 +23,7 @@
 #include "ImGuizmo.h"
 
 #include "EditorTheme.h"
+#include "TemplateStore.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "sage/render/DebugView.h"
@@ -183,6 +184,11 @@ void EditorLayer::OnAttach() {
         sage::CrashHandler::Install(cfg);
     }
 
+    // Отчёт о прошлом падении — ищем сразу после установки обработчика: если
+    // прошлый запуск умер, человек должен узнать об этом первым делом, а не
+    // после того, как заново соберёт сцену.
+    FindCrashReport();
+
     // --- Восстановление после прошлого падения ---
     // Файл на диске — единственный след прошлого запуска: спрашивать некого,
     // процесс тот уже мёртв. Предложение показывается ОДИН раз; отказ удаляет
@@ -292,6 +298,44 @@ void EditorLayer::OnAttach() {
         LOG_INFO("Editor") << "Плагины редактора отключены (SAGE_EDITOR_PLUGINS не задан)";
     }
 
+    // Скачивание шаблона из каталога — БЕЗ ЧЕЛОВЕКА.
+    //
+    // Сеть — единственная часть системы шаблонов, которую нельзя проверить ни
+    // модульным тестом, ни самопроверкой: там нет ни сервера, ни щелчка по
+    // кнопке. Эти два хука дают smoke-тесту поднять свой http-сервер, положить
+    // на него каталог и убедиться, что редактор действительно скачал и
+    // поставил шаблон, — то есть проверить ровно тот путь, которым пойдёт
+    // человек, а не соседний.
+    if (const std::string url = sage::EnvString("SAGE_EDITOR_TEMPLATE_CATALOG"); !url.empty()) {
+        sage::editor::templates::SetCatalogUrl(url);
+        LOG_INFO("Editor") << "Каталог шаблонов: " << url;
+    }
+    if (const std::string want = sage::EnvString("SAGE_EDITOR_INSTALL_TEMPLATE"); !want.empty()) {
+        m_headlessProject = true;
+        std::vector<sage::editor::templates::Manifest> list;
+        std::string tplErr;
+        if (!sage::editor::templates::FetchCatalog(list, tplErr)) {
+            LOG_ERROR("Editor") << "TEMPLATE: каталог не получен: " << tplErr;
+        } else {
+            bool done = false;
+            for (const sage::editor::templates::Manifest& m : list) {
+                if (m.Id != want) continue;
+                if (sage::editor::templates::Download(m, tplErr)) {
+                    RefreshProjectTemplates();
+                    const ProjectTemplate* put = FindProjectTemplate(want);
+                    LOG_INFO("Editor") << "TEMPLATE: установлен " << m.Name << ", в списке: "
+                                       << (put ? "да" : "НЕТ");
+                    done = put != nullptr;
+                } else {
+                    LOG_ERROR("Editor") << "TEMPLATE: не скачался: " << tplErr;
+                }
+                break;
+            }
+            if (!done) LOG_ERROR("Editor") << "TEMPLATE: FAIL";
+            else LOG_INFO("Editor") << "TEMPLATE: OK";
+        }
+    }
+
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
     if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
     if (std::getenv("SAGE_EDITOR_OPEN_PROJECT")) RunHeadlessProjectSession();
@@ -310,7 +354,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_COLLIDER_MODE", "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
-            "SAGE_EDITOR_TEMPLATE_SHOTS",
+            "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -599,6 +643,10 @@ void EditorLayer::OnAttach() {
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_headlessProject = true; m_showAbout = true; }
+    // Окно шаблонов — тем же способом, что и остальные: увидеть его иначе можно
+    // только руками на своей машине, а значит и проверить, как оно выглядит,
+    // будет нечем.
+    if (std::getenv("SAGE_EDITOR_SHOW_TEMPLATES")) { m_headlessProject = true; m_showTemplates = true; }
     // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_GAME")) m_game.RequestFocus();
 

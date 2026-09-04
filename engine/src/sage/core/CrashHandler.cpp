@@ -1,5 +1,6 @@
 #include "sage/core/CrashHandler.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -7,6 +8,7 @@
 #include <ctime>
 #include <exception>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "sage/core/Log.h"
@@ -137,8 +139,9 @@ void WriteReport(const char* reason) {
 
     // Аварийное сохранение — последним: оно самое рискованное (выделяет память,
     // трогает диск), и отчёт к этому моменту уже записан.
+    std::string saved;
     if (s.Cfg.EmergencySave) {
-        const std::string saved = s.Cfg.EmergencySave();
+        saved = s.Cfg.EmergencySave();
         if (!saved.empty()) {
             const std::string note = "\nEMERGENCY SAVE: " + saved + "\n";
             if (FILE* f = std::fopen(path.c_str(), "a")) {
@@ -150,6 +153,46 @@ void WriteReport(const char* reason) {
 #endif
         }
     }
+
+#ifdef _WIN32
+    // ОКНО В МОМЕНТ ПАДЕНИЯ.
+    //
+    // У GUI-приложения Windows консоли нет, и всё, что написано выше, уходит в
+    // никуда: со стороны падение выглядит как «окно просто исчезло». Человек не
+    // узнаёт ни что случилось, ни что работа сохранена, ни куда смотреть, —
+    // и в лучшем случае напишет «редактор закрылся сам», в худшем начнёт
+    // заново.
+    //
+    // Риск здесь есть и он осознан: процесс уже сломан, а MessageBoxW крутит
+    // цикл сообщений. Но аварийное сохранение выше рискует ровно так же и
+    // делается по той же причине — потерять работу молча хуже. Текст короткий,
+    // подробности уже на диске; окно НЕ пытается показать сам отчёт, чтобы не
+    // трогать лишнего в разрушенной куче.
+    {
+        const std::string message =
+            std::string("Программа аварийно завершилась.\n\nПричина: ") + (reason ? reason : "?") +
+            "\n\nПодробный отчёт: " + path +
+            (saved.empty() ? std::string()
+                           : std::string("\nРабота сохранена: ") + saved) +
+            "\n\nОтчёт покажется целиком при следующем запуске.";
+        const int need =
+            ::MultiByteToWideChar(CP_UTF8, 0, message.data(), (int)message.size(), nullptr, 0);
+        if (need > 0) {
+            std::wstring wide((size_t)need, L'\0');
+            ::MultiByteToWideChar(CP_UTF8, 0, message.data(), (int)message.size(), wide.data(),
+                                  need);
+            const std::string title = s.Cfg.AppName + " — аварийное завершение";
+            const int tneed =
+                ::MultiByteToWideChar(CP_UTF8, 0, title.data(), (int)title.size(), nullptr, 0);
+            std::wstring wtitle((size_t)std::max(tneed, 0), L'\0');
+            if (tneed > 0)
+                ::MultiByteToWideChar(CP_UTF8, 0, title.data(), (int)title.size(), wtitle.data(),
+                                      tneed);
+            ::MessageBoxW(nullptr, wide.c_str(), wtitle.c_str(),
+                          MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
+        }
+    }
+#endif
 }
 
 #if !defined(_WIN32)

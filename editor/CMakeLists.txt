@@ -25,6 +25,7 @@ add_executable(SageEditor WIN32
     src/AssetSlot.cpp
     src/ModelMaterialImport.cpp
     src/ProjectTemplates.cpp
+    src/TemplateStore.cpp
     src/ProjectTemplateCover.cpp
     src/Project.cpp
     src/PluginManager.cpp
@@ -47,6 +48,7 @@ add_executable(SageEditor WIN32
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
     src/panels/SettingsPanel.cpp
+    src/panels/TemplatesPanel.cpp
     src/panels/DialogsPanel.cpp
     src/panels/ProfilerPanel.cpp
     src/FileBrowser.cpp
@@ -101,28 +103,18 @@ add_custom_command(TARGET SageEditor POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/themes $<TARGET_FILE_DIR:SageEditor>/themes
     COMMENT "Копирование тем оформления рядом с бинарником")
 
-# ГОТОВЫЕ ПРОЕКТЫ-ШАБЛОНЫ — рядом с бинарником, в templates/<id>.
+# ШАБЛОНЫ РЯДОМ С БИНАРНИКОМ БОЛЬШЕ НЕ КОПИРУЮТСЯ.
 #
-# Копией, а не второй версией в editor/assets: источник у витрины ОДИН
-# (games/showcase), она собирается, гоняется автопрогоном и правится как
-# обычный проект. Держать её вторую копию внутри редактора значило бы
-# обновлять обе руками — и однажды забыть.
+# Здесь стояла копия games/showcase в templates/showcase — и она ехала в архиве
+# релиза к каждому скачавшему. Готовый проект это СОДЕРЖИМОЕ, а не часть
+# программы: он не нужен большинству, растёт со временем и обновляется отдельно
+# от редактора. Теперь такие шаблоны ставятся в работающем редакторе — из
+# каталога по сети или файлом .sagetemplate с диска (см. src/TemplateStore.h), а
+# папку templates/ редактор заводит сам при первой установке.
 #
-# docs/ (скриншоты для README витрины) не копируем: человеку, который создал
-# из неё проект, они не нужны, а весят они больше всего остального вместе.
-add_custom_command(TARGET SageEditor POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-            $<TARGET_FILE_DIR:SageEditor>/templates/showcase
-    COMMAND ${CMAKE_COMMAND} -E copy
-            ${CMAKE_SOURCE_DIR}/games/showcase/project.sageproj
-            $<TARGET_FILE_DIR:SageEditor>/templates/showcase/project.sageproj
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/games/showcase/scenes
-            $<TARGET_FILE_DIR:SageEditor>/templates/showcase/scenes
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/games/showcase/assets
-            $<TARGET_FILE_DIR:SageEditor>/templates/showcase/assets
-    COMMENT "Копирование шаблона-витрины в templates/ редактора")
+# Витрина при этом никуда не делась: сборка релиза пакует games/showcase в
+# showcase.sagetemplate и кладёт его в тот же релиз отдельным файлом
+# (.github/workflows/windows.yml), откуда редактор её и скачивает.
 
 # Плагины редактора (см. src/PluginAPI.h) — каждый sage_add_editor_plugin()
 # ниже собирается отдельной динамической библиотекой и копируется в plugins/
