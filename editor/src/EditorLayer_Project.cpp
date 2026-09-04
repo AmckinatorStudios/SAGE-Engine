@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iterator>
+#include <cfloat>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -283,6 +285,105 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
 // Модалка, а не тихая загрузка: восстановленная сцена может быть НЕ той, над
 // которой человек работал последней (например, он с тех пор открыл другой
 // проект), и решать это должен он, а не редактор.
+// ============================================================================
+//  ОТЧЁТ О ПРОШЛОМ ПАДЕНИИ
+//
+//  Обработчик падений пишет подробный отчёт (сигнал, стек, версия, открытый
+//  проект, последние строки лога) — и до сих пор об этом знал только тот, кто
+//  догадался поискать рядом с редактором файл sage-crash-*.txt. То есть отчёт
+//  был, а человек, ради которого он писался, его не видел: он видел, что
+//  «редактор закрылся сам».
+//
+//  Показать отчёт В МОМЕНТ падения нельзя: процесс уже разрушен, и рисовать
+//  ImGui в нём — верный способ упасть второй раз, потеряв и отчёт. Поэтому в
+//  момент падения — короткое системное окно (см. CrashHandler.cpp), а весь
+//  текст — здесь, при следующем запуске, когда его есть чем показать.
+// ============================================================================
+void EditorLayer::FindCrashReport() {
+    std::error_code ec;
+    fs::path newest;
+    fs::file_time_type newestTime{};
+    m_crashReportCount = 0;
+    for (const fs::directory_entry& e : fs::directory_iterator(".", ec)) {
+        if (!e.is_regular_file()) continue;
+        const std::string name = sage::PathToUtf8(e.path().filename());
+        if (name.rfind("sage-crash-", 0) != 0 || e.path().extension() != ".txt") continue;
+        ++m_crashReportCount;
+        const fs::file_time_type t = fs::last_write_time(e.path(), ec);
+        if (newest.empty() || t > newestTime) {
+            newest = e.path();
+            newestTime = t;
+        }
+    }
+    if (newest.empty()) return;
+
+    std::ifstream in(newest, std::ios::binary);
+    if (!in.is_open()) return;
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // Отчёт короткий по устройству, но файл на диске мог оказаться каким угодно:
+    // читаем с ограничением, чтобы случайный чужой sage-crash-*.txt на гигабайт
+    // не занял память.
+    if (text.size() > 512 * 1024) text.resize(512 * 1024);
+
+    m_crashReportPath = sage::PathToUtf8(newest);
+    m_crashReportText = std::move(text);
+    m_crashPrompt = true;
+    LOG_WARN("Editor") << "Прошлый запуск завершился аварийно, отчёт: " << m_crashReportPath;
+}
+
+void EditorLayer::DrawCrashReport() {
+    if (!m_crashPrompt) return;
+    ImGui::OpenPopup(T("Previous session crashed" "###crash-report"));
+    const ImVec2 vp = ImGui::GetMainViewport()->WorkSize;
+    ImGui::SetNextWindowSize(ImVec2(std::min(900.0f, vp.x * 0.8f), std::min(620.0f, vp.y * 0.8f)),
+                             ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal(T("Previous session crashed" "###crash-report"), nullptr,
+                                ImGuiWindowFlags_NoSavedSettings)) {
+        return;
+    }
+
+    ImGui::TextWrapped("%s", T("The editor did not close normally last time. Below is the full "
+                               "report written at that moment — it is what a developer needs to "
+                               "find the cause."));
+    ImGui::Spacing();
+    ImGui::TextDisabled("%s", m_crashReportPath.c_str());
+    if (m_crashReportCount > 1)
+        ImGui::TextDisabled(T("Reports next to the editor: %d"), (int)m_crashReportCount);
+    ImGui::Spacing();
+
+    // Текст — в поле ввода только для чтения, а не Text(): так его можно
+    // выделить мышью, прокрутить и скопировать кусок, а не только целиком.
+    const float footer = ImGui::GetFrameHeightWithSpacing() * 1.6f;
+    ImGui::InputTextMultiline("##crashtext", m_crashReportText.data(), m_crashReportText.size() + 1,
+                              ImVec2(-FLT_MIN, -footer), ImGuiInputTextFlags_ReadOnly);
+
+    if (ImGui::Button(T("Copy report"), ImVec2(160, 0))) {
+        ImGui::SetClipboardText(m_crashReportText.c_str());
+        SetStatusMessage(T("Crash report copied to the clipboard"));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Copy path"), ImVec2(140, 0))) {
+        ImGui::SetClipboardText(m_crashReportPath.c_str());
+        SetStatusMessage(T("Path copied to the clipboard"));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Close"), ImVec2(120, 0))) {
+        // Файл ОСТАЁТСЯ. Отчёт — единственный след падения, и стирать его
+        // кнопкой «закрыть» значило бы отнимать у человека возможность его
+        // прислать, когда он до этого дойдёт.
+        m_crashPrompt = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (EditorTheme::ColoredButton(T("Delete report"), EditorTheme::Role::Danger, ImVec2(150, 0))) {
+        std::error_code ec;
+        fs::remove(sage::PathFromUtf8(m_crashReportPath), ec);
+        m_crashPrompt = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 void EditorLayer::DrawRecoveryPrompt() {
     if (!m_recoveryPrompt) return;
     ImGui::OpenPopup(T("Restore scene?"));
@@ -344,11 +445,13 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
 // смотрит, когда что-то «не работает», и она обязана быть там раньше вопроса.
 void EditorLayer::AnnounceTemplateNote(const ProjectTemplate& tpl) {
     m_templateNote.clear();
-    if (tpl.Note[0] == '\0') return;
-    m_templateNote = sage::editor::T(tpl.Note);
-    // Через T(): заметка — строка ИНТЕРФЕЙСА, и в консоли она обязана быть на
-    // том же языке, что и всё остальное.
-    LOG_INFO("Editor") << sage::editor::T(tpl.Note);
+    if (tpl.Note.empty()) return;
+    // Через T(): у встроенного шаблона заметка — ключ перевода, и в консоли она
+    // обязана быть на том же языке, что и весь интерфейс. У УСТАНОВЛЕННОГО
+    // шаблона перевода взяться неоткуда: там это текст из его template.json,
+    // и T() честно вернёт его как есть.
+    m_templateNote = sage::editor::T(tpl.Note.c_str());
+    LOG_INFO("Editor") << m_templateNote;
 }
 
 

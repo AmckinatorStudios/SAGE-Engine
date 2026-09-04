@@ -57,8 +57,6 @@ jobs:
           # первого не работает Build Game, без вторых — шаблон «Витрина».
           test -f build-windows/runtime/SagePlayer.exe \
             || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
-          test -f build-windows/editor/templates/showcase/project.sageproj \
-            || { echo "::error::шаблон-витрина не скопировался в templates/"; exit 1; }
           test -f build-windows/editor/themes/example-amber.json \
             || { echo "::error::темы оформления не скопировались в themes/"; exit 1; }
           file "$EXE"
@@ -106,6 +104,47 @@ jobs:
             done
           fi
 
+      # Шаблон-витрина и каталог — ОТДЕЛЬНЫМИ файлами релиза, а не в архиве.
+      #
+      # Упаковщик собирается нативно (кросс-сборка даёт .exe, которую на
+      # linux-раннере не запустить). Всё тяжёлое при этом выключено: нужен один
+      # маленький инструмент, а не второй полный движок.
+      - name: Шаблон-витрина и каталог
+        run: |
+          cmake -B build-host -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSAGE_BUILD_EDITOR=OFF -DSAGE_BUILD_RUNTIME=OFF \
+            -DSAGE_BUILD_SAMPLES=OFF -DSAGE_BUILD_TESTS=OFF \
+            -DSAGE_PHYSICS_JOLT=OFF -DSAGE_VULKAN=OFF
+          cmake --build build-host -j"$(nproc)" --target sage_template
+
+          ./build-host/tools/sage_template/sage_template pack games/showcase showcase.sagetemplate \
+            --id showcase --name "Витрина" \
+            --summary "Целый рабочий проект: восемь зон на Lua, по которым можно ходить и которые можно править" \
+            --note "Мир этого проекта строят скрипты. Нажмите «Играть», чтобы пройтись по зонам; в остановленном редакторе в сцене только корень мира и игрок." \
+            --version "$(git rev-parse --short HEAD)"
+          ./build-host/tools/sage_template/sage_template info showcase.sagetemplate
+
+          # Каталог — это просто JSON со списком. Ссылка ведёт на этот же релиз,
+          # поэтому скользящий тег в ней и стоит: обновится релиз — обновится и
+          # то, что скачает редактор.
+          BASE="https://github.com/${{ github.repository }}/releases/download/windows-latest"
+          SIZE=$(stat -c%s showcase.sagetemplate)
+          VER="$(git rev-parse --short HEAD)"
+          python3 - "$BASE" "$SIZE" "$VER" > templates.json <<'PYEOF'
+          import json, sys
+          base, size, ver = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          print(json.dumps({"templates": [{
+              "id": "showcase",
+              "name": "Витрина",
+              "summary": "Целый рабочий проект: восемь зон на Lua, по которым можно ходить и которые можно править",
+              "note": "Мир этого проекта строят скрипты. Нажмите «Играть», чтобы пройтись по зонам; в остановленном редакторе в сцене только корень мира и игрок.",
+              "version": ver,
+              "url": base + "/showcase.sagetemplate",
+              "bytes": size,
+          }]}, ensure_ascii=False, indent=2))
+          PYEOF
+          cat templates.json
+
       - name: Сборка архива
         run: |
           PKG=SageEditor-Windows
@@ -124,12 +163,14 @@ jobs:
           cp build-windows/runtime/SagePlayer.exe "$PKG/runtime/"
           cp -r build-windows/runtime/assets "$PKG/runtime/assets"
 
-          # Готовые проекты-шаблоны (templates/<id>): без них «Витрина» в окне
-          # создания проекта честно объявляет себя недоступной — то есть пункт
-          # есть, а нажать его нельзя.
-          if [ -d build-windows/editor/templates ]; then
-            cp -r build-windows/editor/templates "$PKG/templates"
-          fi
+          # ГОТОВЫХ ПРОЕКТОВ В АРХИВЕ БОЛЬШЕ НЕТ.
+          #
+          # Витрина лежала здесь папкой и ехала к каждому скачавшему — нужна она
+          # ему или нет. Готовый проект это СОДЕРЖИМОЕ, а не часть программы:
+          # он растёт со временем, обновляется отдельно и большинству не нужен.
+          # Теперь он лежит в том же релизе отдельным файлом .sagetemplate, а
+          # редактор ставит его по кнопке («Окно > Шаблоны проектов»). Кому не
+          # нужен — не качает.
 
           # Темы оформления (themes/*.json): встроенные темы работают и без
           # этой папки, но вместе с ней уезжает ВОЗМОЖНОСТЬ сделать свою —
@@ -211,11 +252,11 @@ jobs:
           SUBJECT="$(git log -1 --pretty=%s)"
           WHEN="$(git log -1 --date=format:'%d.%m.%Y %H:%M' --pretty=%cd)"
           SHORT="$(git rev-parse --short HEAD)"
-          gh release create "$TAG" SageEditor-Windows.zip \
+          gh release create "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json \
             --title "$TITLE" \
             --notes "$(printf '%s\n\n%s\n\n%s\n%s\n%s' \
               'Скачайте SageEditor-Windows.zip, распакуйте папку целиком и запустите SageEditor.exe. Устанавливать ничего не нужно.' \
-              'В архиве: редактор, плеер (runtime/), шаблоны проектов и плагин-пример.' \
+              'В архиве: редактор, плеер (runtime/), темы оформления и плагин-пример. Готовые проекты-шаблоны ставятся из самого редактора: Окно > Шаблоны проектов.' \
               "Собрано из: $SHORT — $SUBJECT" \
               "Дата коммита: $WHEN" \
               'Если что-то не запускается — рядом с exe появляется sage_editor.log, в нём написана причина.')"

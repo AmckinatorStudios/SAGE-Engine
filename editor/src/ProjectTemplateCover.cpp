@@ -228,7 +228,21 @@ float ProjectTemplateCardHeight(float width) {
 // сколько остальные текстуры редактора, и второй кэш картинок здесь был бы
 // вторым местом, где они текут.
 static const std::shared_ptr<Texture>& TemplateShot(const ProjectTemplate& tpl) {
-    static std::unordered_map<std::string, std::shared_ptr<Texture>> cache;
+    // КЭШ НЕ РАЗРУШАЕТСЯ — намеренно, и это не утечка «на всякий случай».
+    //
+    // Texture владеет объектом OpenGL, а обычная статическая переменная
+    // разрушается ПОСЛЕ выхода из main, когда графического контекста уже нет:
+    // деструктор звал glDeleteTextures в никуда, и редактор падал на выходе с
+    // SIGSEGV. Видно это было ровно там, где карточки шаблонов и рисуются, —
+    // при закрытии стартового окна, то есть у всякого, кто открыл редактор и
+    // закрыл, не создав проекта. Причём молча: обработчик падений к этому
+    // моменту сам разрушен, и отчёт не писался.
+    //
+    // Тот же приём, что у RenderTextureRegistry::Instance() (см.
+    // engine/src/sage/render/RenderTexture.cpp): память живёт до конца
+    // процесса, ОС забирает её сама, а деструктор не зовётся вовсе.
+    static auto* cachePtr = new std::unordered_map<std::string, std::shared_ptr<Texture>>();
+    auto& cache = *cachePtr;
     auto it = cache.find(tpl.Id);
     if (it != cache.end()) return it->second;
     const std::filesystem::path path =

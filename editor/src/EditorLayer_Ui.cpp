@@ -598,6 +598,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
             ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanel::Settings));
+            // Шаблоны — рядом с настройками игры и языком, потому что это
+            // настройка ОКРУЖЕНИЯ, а не текущей сцены: что установлено у меня
+            // на машине и откуда это брать.
+            ImGui::MenuItem(T("Project templates..."), nullptr, &m_showTemplates);
 
             // Язык интерфейса. Здесь, а не в окне Settings: то окно правит
             // настройки ИГРЫ и сохраняется в проект, а язык — настройка
@@ -688,8 +692,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
     }
     if (openDialog) m_dialogs.Open(openDialog);
     m_dialogs.Draw(*this);
+    // Отчёт о падении — ПЕРЕД предложением восстановить сцену: сначала «что
+    // случилось», потом «что с этим делать».
+    DrawCrashReport();
     DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
+    m_templatesPanel.Draw(*this, m_showTemplates);
     m_profiler.Draw(&m_showProfiler);
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();

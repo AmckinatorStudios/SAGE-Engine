@@ -480,6 +480,10 @@ endif()
 
 # Редактор — часть стандартной сборки движка. Проверка EXISTS оставлена как
 # защита на случай частичного checkout, а не как признак опциональности.
+# Упаковщик шаблонов проекта: нужен сборке релиза (кладёт .sagetemplate рядом с
+# архивом) и полезен сам по себе. Собирается всегда — он крошечный.
+add_subdirectory(tools/sage_template)
+
 if (SAGE_BUILD_EDITOR AND EXISTS "${SAGE_ENGINE_ROOT}/editor/CMakeLists.txt")
     add_subdirectory(editor)
 endif()

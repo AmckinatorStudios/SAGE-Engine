@@ -54,6 +54,7 @@ namespace sage { class Application; }
 #include "panels/UIEditorPanel.h"
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
+#include "panels/TemplatesPanel.h"
 #include "panels/DialogsPanel.h"
 
 // ---------------------------------------------------------------------------
@@ -301,11 +302,19 @@ private:
     std::string m_lastAutosave;
     // Найденный при запуске файл восстановления: показать предложение один раз.
     std::string m_recoveryFile;
+    std::string m_crashReportPath;   // отчёт прошлого падения, пусто — не падали
+    std::string m_crashReportText;   // он же целиком, для показа и копирования
+    size_t m_crashReportCount = 0;   // сколько отчётов лежит рядом
+    bool m_crashPrompt = false;
     bool m_recoveryPrompt = false;
 
     // Достаёт материал из файла модели и назначает его меш-рендеру (см. .cpp).
     void AssignModelMaterial(MeshRendererComponent& mr);
     void DrawRecoveryPrompt();
+    // Окно отчёта о ПРОШЛОМ падении: показывается один раз при запуске, если
+    // рядом лежит sage-crash-*.txt (см. FindCrashReport).
+    void FindCrashReport();
+    void DrawCrashReport();
     std::string m_windowTitle;           // кэш заголовка (не дёргать GLFW каждый кадр)
 
     // --- сцена и рендер превью ---
@@ -417,6 +426,8 @@ private:
     UIEditorPanel m_uiEditor;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
+    TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов
+    bool m_showTemplates = false;
     DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)
     bool m_launcherRequested = false; // Window > Project Launcher
     // Прогон без человека (скриншот, самопроверка, автоигра) попросил не
