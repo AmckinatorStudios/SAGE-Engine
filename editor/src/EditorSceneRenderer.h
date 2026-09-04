@@ -71,6 +71,11 @@ public:
     // Иначе связь «эта лампа — эта плитка» пришлось бы возвращать отдельным
     // списком и не потерять его по дороге до цветного прохода.
     void RenderShadow(Scene& scene, LightingEnvironment& env, const Camera& camera);
+    // Подгоняет каскады солнца под заданный вид и перерисовывает глубину.
+    // Видов два — вьюпорт и панель Game, — и карта, подогнанная под чужой, даёт
+    // не «чуть хуже», а чёрную рябь по земле.
+    void FitSunShadows(Scene& scene, const LightingEnvironment& env,
+                       const ShadowMap::CameraView& view);
     // Тени кадра одной строкой: каскады солнца + атлас локальных источников.
     // Собирать ShadowBinding вручную на каждом месте отрисовки — значит однажды
     // забыть про атлас, и лампы перестанут отбрасывать тень ровно в том окне,
@@ -121,6 +126,22 @@ public:
     uint64_t ViewportTexture(int slot) const;
     uint64_t GameTexture() const;
 
+    // Записать последний игровой кадр в PNG. Именно ИГРОВОЙ: он снят
+    // Primary-камерой сцены и уже прошёл пост-обработку и интерфейс — то есть
+    // это ровно то, что увидит игрок, а не вид редакторской камеры с сеткой и
+    // гизмо. Нужен обложкам шаблонов проекта: рисованная картинка обещает то,
+    // чего в проекте может уже не быть, а снимок обещать не умеет.
+    //
+    // false — кадра ещё нет (RenderGame не звали): молча писать пустой файл
+    // значило бы получить чёрную обложку и гадать, откуда она.
+    bool SaveGameFrame(const std::string& path);
+
+    // Есть ли в игровом буфере кадр ЭТОЙ сцены. Без Primary-камеры RenderGame
+    // не рисует ничего, и в буфере остаётся кадр ПРЕДЫДУЩЕЙ сцены — панель Game
+    // прячет его подсказкой, а снимок обложки взял бы чужую картинку и выдал за
+    // свою (так «пустой шаблон» и снялся с демо-объектами).
+    bool HasGameFrame() const { return m_gameFrameValid; }
+
     const sage::ecs::RenderStats& LastStats() const { return m_lastStats; }
     ParticleSystem& Particles() { return *m_particles; } // UpdateEmitters + self-test
 
@@ -167,6 +188,7 @@ private:
     int m_shadowRes = 0;
     int m_shadowCascades = 0;
     std::optional<Framebuffer> m_sceneFbo, m_gameFbo;
+    bool m_gameFrameValid = false;   // в m_gameFbo кадр ТЕКУЩЕЙ сцены
     std::optional<Framebuffer> m_postFbo, m_gamePostFbo; // LDR-выходы PostFX
     // Дополнительные виды (слоты 1..3). Слот 0 — это m_sceneFbo/m_postFbo:
     // одиночный вьюпорт, самый частый случай, не должен платить за раскладку,

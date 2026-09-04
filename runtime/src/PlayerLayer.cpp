@@ -55,6 +55,57 @@ fs::path PlayerLayer::FindMainScene() const {
     return scenes.empty() ? fs::path() : fs::path(scenes.front());
 }
 
+
+// --- Экран отказа -----------------------------------------------------------
+//
+// Плеер, которому нечего запускать, раньше звал app.Close(): окно мигало и
+// исчезало, а причина оставалась строчкой в логе — файле, о котором человек,
+// запустивший игру двойным щелчком, не знает. Со стороны это «игра не
+// запускается», и дальше некуда идти.
+void PlayerLayer::Fail(const std::string& title, std::vector<std::string> lines) {
+    m_fatalTitle = title;
+    m_fatalLines = std::move(lines);
+    // В лог — тоже: он нужен тому, кто разбирается по переписке, и в CI.
+    LOG_ERROR("Player") << "PLAYER: " << title;
+    for (const std::string& l : m_fatalLines)
+        if (!l.empty()) LOG_ERROR("Player") << "PLAYER: " << l;
+}
+
+void PlayerLayer::DrawFatalScreen() {
+    sage::Application& app = sage::Application::Get();
+    Window& window = app.GetWindow();
+    sage::rhi::GraphicsDevice& device = app.Device();
+    device.BindDefaultFramebuffer();
+    device.SetViewport(0, 0, window.Width(), window.Height());
+    device.SetClearColor(0.06f, 0.07f, 0.09f, 1.0f);
+    device.Clear(true, true);
+
+    if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+    const float w = (float)window.Width();
+    const float h = (float)window.Height();
+    m_ui->Begin(window.Width(), window.Height());
+
+    // Полоса-подложка во всю ширину: текст на голом фоне читается хуже, а
+    // «пустое тёмное окно с надписью» слишком похоже на зависшую игру.
+    const float top = h * 0.28f;
+    m_ui->RoundedRect(w * 0.06f, top - 34.0f, w * 0.88f,
+                      52.0f + 26.0f * (float)m_fatalLines.size() + 24.0f,
+                      glm::vec3(0.10f, 0.11f, 0.14f), 0.98f, 10.0f);
+
+    m_ui->Text(w * 0.09f, top, 2.6f, glm::vec3(1.0f, 0.72f, 0.35f), m_fatalTitle);
+    float y = top + 44.0f;
+    for (const std::string& line : m_fatalLines) {
+        if (!line.empty()) m_ui->Text(w * 0.09f, y, 1.5f, glm::vec3(0.88f, 0.90f, 0.94f), line);
+        y += 26.0f;
+    }
+    m_ui->Text(w * 0.09f, y + 10.0f, 1.3f, glm::vec3(0.55f, 0.58f, 0.65f),
+               "Esc — выход. Подробности продублированы в sage_player.log");
+    m_ui->End();
+
+    if (glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) app.Close();
+    TakeAutoScreenshot();
+}
+
 void PlayerLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
 
@@ -110,8 +161,29 @@ void PlayerLayer::OnAttach() {
     }
     fs::current_path(m_projectDir, ec);
     if (ec) {
-        LOG_ERROR("Player") << "PLAYER: project dir not accessible: " << m_projectDir.string();
-        app.Close();
+        Fail("Папка проекта недоступна",
+             {m_projectDir.string(), "",
+              "Проверьте, что путь существует и его можно открыть."});
+        return;
+    }
+
+    // ЗДЕСЬ ВООБЩЕ ПРОЕКТ? Раньше этот вопрос не задавался, и запуск плеера не
+    // из папки игры (например, прямо из build/runtime) доходил до поиска сцен и
+    // жаловался на отсутствие scenes/ — то есть отвечал на второй вопрос, не
+    // задав первого. «Нет сцен» и «это не папка игры» — разные беды с разными
+    // решениями, и путать их значит посылать человека искать не там.
+    const bool packed = sage::assets::vfs::Exists("scenes/main.sage") ||
+                        !sage::assets::vfs::ListFiles("scenes", ".sage").empty();
+    if (!fs::exists(projectFile, ec) && !packed) {
+        Fail("Здесь нет игры",
+             {"SagePlayer — рантайм: он запускает ГОТОВЫЙ проект, а в этой папке его нет.",
+              "Искал: " + (m_projectDir / "project.sageproj").lexically_normal().string(),
+              "",
+              "Что сделать — любое из:",
+              "  • перетащите на плеер папку проекта или сам project.sageproj;",
+              "  • запустите с путём:  SagePlayer <папка проекта>;",
+              "  • соберите игру в редакторе: File > Build Game — она",
+              "    получится папкой, в которой плеер уже лежит рядом с проектом."});
         return;
     }
     // База ассетов — до загрузки сцены: сцена спрашивает у неё актуальные пути
@@ -129,15 +201,20 @@ void PlayerLayer::OnAttach() {
     // 3. Главная сцена.
     fs::path scenePath = FindMainScene();
     if (scenePath.empty()) {
-        LOG_ERROR("Player") << "PLAYER: no .sage scenes in " << (m_projectDir / "scenes").string();
-        app.Close();
+        Fail("В проекте нет ни одной сцены",
+             {"Проект найден, но играть нечего: в scenes/ нет ни одного файла .sage.",
+              "Искал в: " + (m_projectDir / "scenes").lexically_normal().string(),
+              "",
+              "Сохраните сцену в редакторе (File > Save Scene) — плеер берёт",
+              "scenes/main.sage, а если её нет, то первую по алфавиту."});
         return;
     }
     try {
         m_scene = SceneSerializer::Load(scenePath.string());
     } catch (const std::exception& e) {
-        LOG_ERROR("Player") << "PLAYER: scene load failed: " << e.what();
-        app.Close();
+        Fail("Сцена не читается",
+             {scenePath.filename().string(), "", e.what(), "",
+              "Обычно это сцена от более новой версии движка либо повреждённый файл."});
         return;
     }
 
@@ -411,7 +488,7 @@ void PlayerLayer::ApplyGameFlowRequests() {
 }
 
 void PlayerLayer::OnUpdate(float dt) {
-    if (!m_scene) return;
+    if (Failed() || !m_scene) return;
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
 
@@ -548,6 +625,9 @@ ShadowBinding PlayerLayer::FrameShadows(bool sunEnabled) const {
 }
 
 void PlayerLayer::OnRender() {
+    // Отказ рисуется ВМЕСТО кадра: сцены нет, рисовать нечего, а окно обязано
+    // объяснить, почему оно пустое.
+    if (Failed()) { DrawFatalScreen(); return; }
     if (!m_scene) return;
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
@@ -956,9 +1036,19 @@ void PlayerLayer::OnRender() {
 
     DrawPauseMenu(vpW, vpH);
 
+    TakeAutoScreenshot();
+}
+
+// Снимок кадра по SAGE_SCREENSHOT_AT_FRAME. Отдельной функцией, потому что
+// кадр заканчивается в ДВУХ местах: обычный и экран отказа. Пока снимок жил
+// только в обычном, экран отказа нельзя было проверить иначе как открыв его
+// глазами — а это ровно тот кадр, который видит человек, у которого что-то не
+// работает.
+void PlayerLayer::TakeAutoScreenshot() {
     ++m_frameCounter;
-    if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {
-        SaveScreenshot(m_screenshotPath, window.Width(), window.Height());
-        app.Close();
-    }
+    if (m_autoScreenshotFrame < 0 || m_frameCounter != m_autoScreenshotFrame) return;
+    sage::Application& app = sage::Application::Get();
+    Window& window = app.GetWindow();
+    SaveScreenshot(m_screenshotPath, window.Width(), window.Height());
+    app.Close();
 }

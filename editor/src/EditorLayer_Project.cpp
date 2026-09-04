@@ -351,6 +351,75 @@ void EditorLayer::AnnounceTemplateNote(const ProjectTemplate& tpl) {
     LOG_INFO("Editor") << sage::editor::T(tpl.Note);
 }
 
+
+// --- Съёмка обложек шаблонов -------------------------------------------------
+//
+// По кадру на шаблон: создать проект, дать сцене устояться, снять игровой кадр.
+// Машина состояний, а не цикл, потому что снимок берётся ПОСЛЕ RenderGame —
+// внутри кадра, а не между вызовами.
+//
+// У шаблона-копии (витрина) мир собирают скрипты, и в остановленном редакторе
+// сцена почти пуста. Обложка обязана показывать проект таким, каким он будет,
+// поэтому для него включается Play и делается несколько шагов скриптов — иначе
+// снимок честно покажет пустоту и обманет ровно так же, как рисунок.
+void EditorLayer::TickTemplateShots() {
+    if (m_coverShotDir.empty()) return;
+    const std::vector<ProjectTemplate>& all = ProjectTemplates();
+
+    // Ждём, пока снимется текущий: съёмка происходит в конце кадра.
+    if (!m_coverShotPath.empty()) return;
+
+    if (m_coverShotIndex >= 0 && !m_coverShotDone && m_coverShotWait > 0) {
+        // Кадры «на устояться»: первый кадр после загрузки сцены ещё не имеет
+        // ни теней, ни отражений, ни собранного скриптами мира.
+        --m_coverShotWait;
+        if (InPlayMode() && m_playScripts) m_playScripts->UpdateAll(1.0f / 60.0f);
+        if (m_coverShotWait == 0) {
+            m_coverShotPath =
+                (std::filesystem::path(m_coverShotDir) / (all[(size_t)m_coverShotIndex].Id + ".png"))
+                    .string();
+        }
+        return;
+    }
+
+    // Предыдущий снят — переходим к следующему шаблону.
+    const int next = m_coverShotIndex + 1;
+    if (next >= (int)all.size()) {
+        LOG_INFO("Editor") << "Обложки шаблонов сняты: " << all.size();
+        m_coverShotDir.clear();
+        sage::Application::Get().Close();
+        return;
+    }
+    m_coverShotIndex = next;
+    m_coverShotDone = false;
+
+    const ProjectTemplate& tpl = all[(size_t)next];
+    // Один шаблон вместо всех: SAGE_EDITOR_TEMPLATE рядом с папкой снимков.
+    // Нужно и для пересъёмки одной обложки, и для разбора — свежий процесс на
+    // один шаблон исключает влияние предыдущей сцены.
+    if (const char* only = std::getenv("SAGE_EDITOR_TEMPLATE")) {
+        if (tpl.Id != only) { m_coverShotWait = 0; return; }
+    }
+    if (!ProjectTemplateAvailable(tpl)) {
+        LOG_WARN("Editor") << "Обложка пропущена: шаблон " << tpl.Id << " не установлен";
+        m_coverShotWait = 0;
+        return;
+    }
+    if (InPlayMode()) StopPlay();
+    std::error_code ec;
+    const std::string dir = "sage_cover_" + tpl.Id;
+    std::filesystem::remove_all(dir, ec);
+    std::string err;
+    if (!CreateProject(".", dir, tpl.Id, err)) {
+        LOG_ERROR("Editor") << "Обложка: проект по шаблону " << tpl.Id << " не создался: " << err;
+        m_coverShotWait = 0;
+        return;
+    }
+    // Мир, который строят скрипты, обязан быть построен ДО снимка.
+    if (tpl.Kind == ProjectTemplateKind::Copy) StartPlay();
+    m_coverShotWait = 12;
+}
+
 bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
                                const std::string& templateId, std::string& err) {
     // Шаблон разбирается ДО создания папок: получить проект и узнать, что имя

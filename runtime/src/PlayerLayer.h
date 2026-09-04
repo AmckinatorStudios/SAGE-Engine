@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "sage/core/Layer.h"
 #include "sage/core/InputSystem.h"
@@ -71,6 +72,23 @@ private:
     std::string m_launchArgs; // "autopilot=1 seed=42" -> LaunchArg в Lua
 
     std::unique_ptr<Scene> m_scene;
+
+    // --- Экран отказа --------------------------------------------------------
+    //
+    // Плеер, не нашедший проект, ЗАКРЫВАЛСЯ молча: окно мигало и исчезало, а
+    // причина оставалась строчкой в sage_player.log — файле, о котором человек,
+    // запустивший игру двойным щелчком, не знает. Со стороны это «игра не
+    // запускается», и всё.
+    //
+    // Теперь окно остаётся и говорит, ЧТО не так и ЧТО сделать. Строки, а не
+    // код ошибки: адресат — не программист, а тот, кто скачал игру или впервые
+    // запустил плеер из папки сборки.
+    std::string m_fatalTitle;              // «Проект не найден»
+    std::vector<std::string> m_fatalLines; // что искали и что делать
+    bool Failed() const { return !m_fatalTitle.empty(); }
+    void Fail(const std::string& title, std::vector<std::string> lines);
+    void DrawFatalScreen();
+    void TakeAutoScreenshot();
 
     // Собирает рантайм под ЗАГРУЖЕННУЮ сцену: скрипты, ввод, звук, физика,
     // состав кадра. Вынесено из OnAttach ради смены сцены: уровень должен

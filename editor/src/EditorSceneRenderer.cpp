@@ -3,6 +3,8 @@
 #endif
 #include "EditorSceneRenderer.h"
 
+#include "sage/render/Screenshot.h"
+
 #include "sage/ecs/DecalSystem.h"
 
 #include <algorithm>
@@ -139,6 +141,24 @@ ShadowBinding EditorSceneRenderer::FrameShadows() const {
     return b;
 }
 
+// Подгоняет каскады солнца ПОД ЗАДАННЫЙ ВИД и перерисовывает глубину.
+//
+// Отдельной функцией, потому что видов ДВА: вьюпорт редактора и панель Game. У
+// каскадной карты нет «просто теней сцены» — она обязана быть натянута на
+// пирамиду конкретной камеры, и карта, подогнанная под чужую, даёт не «чуть
+// хуже», а мусор: выборки уходят за пределы каскада, и по земле идёт чёрная
+// рябь. Ровно это и было видно в панели Game, пока она пользовалась картой
+// вьюпорта, — при том что панель обещает «как в собранной игре», а собранная
+// игра считает тени под свою камеру.
+void EditorSceneRenderer::FitSunShadows(Scene& scene, const LightingEnvironment& env,
+                                        const ShadowMap::CameraView& view) {
+    if (!m_shadows) return;
+    Window& window = sage::Application::Get().GetWindow();
+    if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, view);
+    else m_shadows->FitSingle(env.Sun.Direction, view);
+    sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(), window.Height());
+}
+
 void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
                                        const Camera& camera) {
     Window& window = sage::Application::Get().GetWindow();
@@ -179,12 +199,7 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
     // FrameShadows), — то есть выключить их в редакторе было нельзя.
     // Тени ЛАМП живут по своей настройке (LocalShadows) и здесь ни при чём:
     // рантайм разделяет их так же.
-    if (cfg.Shadows) {
-        if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, v);
-        else m_shadows->FitSingle(env.Sun.Direction, v);
-        sage::render::RenderShadowDepth(*m_shadows, scene, m_batch, window.Width(),
-                                        window.Height());
-    }
+    if (cfg.Shadows) FitSunShadows(scene, env, v);
 
     // Тени ламп — своим проходом и по своим правилам: у них нет ни каскадов, ни
     // привязки к камере, зато есть раздача мест в атласе.
@@ -627,14 +642,36 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // Нет Primary-камеры — кадр не рисуем (панель Game покажет подсказку).
     float aspect = (float)m_gameW / (float)std::max(m_gameH, 1);
     sage::ecs::CameraFrame frame = sage::ecs::PrimaryCameraFrame(scene, aspect);
-    if (!frame.HasPrimary) { m_gamePostApplied = false; return; }
+    if (!frame.HasPrimary) { m_gamePostApplied = false; m_gameFrameValid = false; return; }
 
     const glm::mat4& view = frame.View;
     const glm::mat4& proj = frame.Proj;
     glm::vec3 camPos = frame.Position;
 
+    // ТЕНИ — ПОД ИГРОВУЮ КАМЕРУ. Карта, оставшаяся от вьюпорта, натянута на
+    // другую пирамиду: выборки уходят за каскад, и по земле идёт чёрная рябь.
+    // Панель Game обещает «как в собранной игре», а та считает тени под свою
+    // камеру — здесь делаем то же самое.
+    if (cfg.Shadows && m_shadows) {
+        ShadowMap::CameraView gv;
+        gv.Position = camPos;
+        // Направление и «верх» — из матрицы вида: у игровой камеры нет объекта
+        // Camera, она задана компонентом, и восстанавливать углы обратно значило
+        // бы завести второй способ считать то же самое.
+        const glm::mat3 rot = glm::mat3(glm::transpose(view));
+        gv.Forward = -glm::vec3(rot[2]);
+        gv.Up = glm::vec3(rot[1]);
+        gv.FovY = 2.0f * std::atan(1.0f / proj[1][1]);
+        gv.Aspect = aspect;
+        gv.Near = 0.1f;
+        gv.ShadowDistance = env.Shadows.Distance > 0.0f ? env.Shadows.Distance
+                                                        : cfg.ShadowDistance;
+        FitSunShadows(scene, const_cast<LightingEnvironment&>(env), gv);
+    }
+
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg));
+    m_gameFrameValid = true;
     m_gameFbo->Bind();
     device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
     device.Clear();
@@ -719,6 +756,19 @@ uint64_t EditorSceneRenderer::ViewportTexture() const {
     return m_postApplied && m_postFbo ? m_postFbo->NativeColorTexture()
                                       : m_sceneFbo->NativeColorTexture();
 }
+bool EditorSceneRenderer::SaveGameFrame(const std::string& path) {
+    if (!m_gameFrameValid) return false;   // чужой кадр за свой не выдаём
+    Framebuffer* target = m_gamePostApplied ? (m_gamePostFbo ? &*m_gamePostFbo : nullptr)
+                                            : (m_gameFbo ? &*m_gameFbo : nullptr);
+    if (!target) return false;
+    // Читаем из ТОГО ЖЕ буфера, который показывает панель Game: снимок обязан
+    // совпасть с тем, что человек видит, иначе обложка врёт по-другому.
+    target->Bind();
+    SaveScreenshot(path, m_gameW, m_gameH);
+    sage::rhi::GraphicsDevice::Get().BindDefaultFramebuffer();
+    return true;
+}
+
 uint64_t EditorSceneRenderer::GameTexture() const {
     return m_gamePostApplied && m_gamePostFbo ? m_gamePostFbo->NativeColorTexture()
                                               : m_gameFbo->NativeColorTexture();
