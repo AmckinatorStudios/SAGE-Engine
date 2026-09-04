@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.18)
 project(SAGEEngine LANGUAGES C CXX)
 
+# Ресурсы Windows (RC) — ради манифеста приложения с activeCodePage=UTF-8,
+# см. cmake/windows/sage.manifest и sage_windows_manifest() в SageHelpers.
+# Отдельным языком, потому что по умолчанию CMake его не включает, а без него
+# .rc-файл в списке исходников просто игнорируется — молча.
+if (WIN32)
+    enable_language(RC)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

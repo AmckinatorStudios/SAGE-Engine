@@ -131,7 +131,8 @@ void EditorLayer::StartPlay() {
     // Параметры запуска игры (LaunchArg в Lua) — до AttachScript, потому что
     // OnStart скриптов читает их сразу. В редакторе источник один: окружение
     // (headless-прогон CI ставит SAGE_GAME_ARGS="autopilot=1").
-    if (const char* args = std::getenv("SAGE_GAME_ARGS")) m_playScripts->SetLaunchArgsFromString(args);
+    if (const std::string args = sage::EnvString("SAGE_GAME_ARGS"); !args.empty())
+        m_playScripts->SetLaunchArgsFromString(args);
 
     // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
     // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные

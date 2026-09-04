@@ -24,7 +24,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/8: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/9: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +45,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/8: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/9: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -67,14 +67,14 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/8: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 3/9: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/8: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+echo "=== Smoke-тест 4/9: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
@@ -110,7 +110,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/8: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 5/9: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -281,7 +281,7 @@ if cmp -s "${POST_OFF}" "${POST_ON}"; then
 fi
 echo "OK: пост-обработка выполняется в собранной игре (кадры с SAGE_POST=0/1 различаются)"
 
-echo "=== Smoke-тест 6/8: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 6/9: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -322,7 +322,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 7/8: обработчик падений (настоящее падение) ==="
+echo "=== Smoke-тест 7/9: обработчик падений (настоящее падение) ==="
 # Единственный честный способ проверить обработчик падений — уронить процесс.
 # Обычным тестом это не сделать: обработчик по замыслу доводит падение до
 # конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
@@ -365,7 +365,7 @@ if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
 fi
 echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
 
-echo "=== Smoke-тест 8/8: отказ запуска слышно ==="
+echo "=== Smoke-тест 8/9: отказ запуска слышно ==="
 # «Просто запускаю — ничего не происходит, даже ошибки нет, а в логе только
 # строка о старте». Так выглядел ЛЮБОЙ отказ запуска: причина уходила в stderr,
 # которого у окна Windows нет, и в лог не попадала вовсе.
@@ -398,5 +398,77 @@ if ! grep -q "GLFW" "${STARTFAIL_DIR}/sage_editor.log"; then
     cat "${STARTFAIL_DIR}/sage_editor.log"; exit 1
 fi
 echo "OK: отказ запуска записан в лог с причиной от GLFW (код ${STATUS})"
+
+echo "=== Smoke-тест 9/9: путь с кириллицей (имя пользователя по-русски) ==="
+# ЭТО ПРОВЕРКА ТОЙ САМОЙ ОШИБКИ, из-за которой редактор не запускался на
+# русской Windows: «filesystem error: Cannot convert character sequence».
+# Причина — путь с кириллицей, пришедший из окружения (APPDATA у пользователя
+# «Владимир»). Ловим её сразу с трёх сторон: настройки редактора, папка
+# проекта и аргумент командной строки плеера — все три содержат кириллицу.
+#
+# На Linux кодировка пути ничего не ломает сама по себе, и падения здесь ждать
+# неоткуда. Проверка всё равно нужна: тот же код собирается для Windows, и
+# сломать его правкой, проверенной только на Linux, — ровно то, как эта ошибка
+# и появилась. Статическую половину стережёт scripts/check_paths.py.
+UNI_ROOT="${SCRATCH_DIR}/Пользователи/Владимир"
+UNI_PROJECT="${UNI_ROOT}/Документы/SAGE Projects/Моя игра"
+mkdir -p "${UNI_ROOT}/.config" "${UNI_PROJECT}"
+UNI_LOG="${SCRATCH_DIR}/unicode_editor.log"
+STATUS=0
+# HOME и XDG_CONFIG_HOME с кириллицей — это и есть аналог APPDATA у
+# «Владимира»: редактор кладёт по ним свои настройки и список проектов.
+( cd "$(dirname "${EDITOR_EXE}")" && \
+  run_headless env HOME="${UNI_ROOT}" XDG_CONFIG_HOME="${UNI_ROOT}/.config" \
+      SAGE_EDITOR_SELFTEST=1 SAGE_EDITOR_LANG=ru \
+      "./$(basename "${EDITOR_EXE}")" ) > "${UNI_LOG}" 2>&1 || STATUS=$?
+if [ ${STATUS} -ne 0 ]; then
+    echo "ОШИБКА: редактор с кириллицей в HOME завершился кодом ${STATUS}"
+    cat "${UNI_LOG}"; exit 1
+fi
+if grep -q "ФАТАЛЬНАЯ ОШИБКА ПРИ ЗАПУСКЕ" "${UNI_LOG}"; then
+    echo "ОШИБКА: кириллица в пути обрушила запуск редактора"
+    grep -n "ФАТАЛЬНАЯ" "${UNI_LOG}"; exit 1
+fi
+if ! grep -q "SELFTEST: PASS" "${UNI_LOG}"; then
+    echo "ОШИБКА: self-test редактора не прошёл при кириллице в HOME"
+    cat "${UNI_LOG}"; exit 1
+fi
+# Настройки действительно легли по русскому пути — значит путь дожил до записи,
+# а не был молча заменён на запасной.
+if [ ! -f "${UNI_ROOT}/.config/sage/editor_prefs.json" ]; then
+    echo "ОШИБКА: настройки не записались в папку с кириллицей"
+    find "${UNI_ROOT}" -type f | head; exit 1
+fi
+
+# Вторая половина: СОБРАННАЯ ИГРА лежит по пути с кириллицей, и путь к её
+# проекту приходит АРГУМЕНТОМ командной строки. На Windows argv отдаётся в
+# ANSI-кодировке, и до NormalizeArgs (см. GameModule.h) первая же строка
+# разбора аргументов убивала плеер: игру из русской папки нельзя было
+# запустить вовсе — ни из редактора кнопкой Play, ни ярлыком.
+UNI_GAME="${UNI_PROJECT}/сборка"
+mkdir -p "${UNI_GAME}"
+cp -r "${GAME_DIR}/." "${UNI_GAME}/"
+UNI_PLAYER_LOG="${SCRATCH_DIR}/unicode_player.log"
+UNI_SHOT="${UNI_PROJECT}/кадр.png"
+STATUS=0
+# Запуск ИЗ ДРУГОЙ ПАПКИ с путём аргументом — так игру и запускают ярлыком.
+( cd "${SCRATCH_DIR}" && \
+  run_headless env SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${UNI_SHOT}" \
+      "${UNI_GAME}/selftest_project" "${UNI_GAME}" ) > "${UNI_PLAYER_LOG}" 2>&1 || STATUS=$?
+if [ ${STATUS} -ne 0 ]; then
+    echo "ОШИБКА: игра по пути с кириллицей завершилась кодом ${STATUS}"
+    cat "${UNI_PLAYER_LOG}"; exit 1
+fi
+if grep -q "ФАТАЛЬНАЯ ОШИБКА ПРИ ЗАПУСКЕ" "${UNI_PLAYER_LOG}"; then
+    echo "ОШИБКА: кириллица в пути обрушила запуск игры"
+    grep -n "ФАТАЛЬНАЯ" "${UNI_PLAYER_LOG}"; exit 1
+fi
+UNI_SHOT_SIZE=$(stat -c%s "${UNI_SHOT}" 2>/dev/null || echo 0)
+if [ "${UNI_SHOT_SIZE}" -lt 1024 ]; then
+    echo "ОШИБКА: игра из папки с кириллицей не отрисовала кадр (${UNI_SHOT_SIZE} байт)"
+    cat "${UNI_PLAYER_LOG}"; exit 1
+fi
+echo "OK: кириллица в пути работает везде — настройки редактора, папка проекта,"
+echo "    аргумент командной строки и запись кадра (${UNI_SHOT_SIZE} байт)"
 
 echo "=== Все smoke-тесты прошли ==="

@@ -8,6 +8,7 @@
 
 #include "sage/assets/import/Importer.h"
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 
 // ---------------------------------------------------------------------------
 // Blender (.blend).
@@ -272,8 +273,12 @@ bool LooksCompressed(const std::vector<uint8_t>& b) {
 std::string FindBlenderExecutable() {
     // Явное указание побеждает поиск: на машине может стоять несколько версий, и
     // выбирать за человека мы не вправе.
-    if (const char* env = std::getenv("SAGE_BLENDER")) {
-        if (*env && fs::exists(env)) return env;
+    // EnvPath, а не getenv: путь к Blender вполне может лежать в папке с
+    // кириллицей, а узкое окружение Windows отдаёт её байтами ANSI — на них
+    // конструктор fs::path бросает исключение (см. Paths.h).
+    if (const fs::path env = sage::EnvPath("SAGE_BLENDER"); !env.empty()) {
+        std::error_code ec;
+        if (fs::exists(env, ec)) return sage::PathToUtf8(env);
     }
 #if defined(_WIN32)
     const char* probe = "where blender >nul 2>&1";

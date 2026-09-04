@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Манифест приложения SAGE. Нужен ради ОДНОЙ строки — activeCodePage.
+
+  Внутри программы путь — это std::string в UTF-8 (так его отдаёт
+  std::filesystem::path::string(), так он лежит в сценах и настройках). Но
+  «узкие» функции Windows — fopen, а значит и std::ifstream(std::string), —
+  трактуют байты имени файла как ANSI-кодировку системы. На русской Windows это
+  CP1251, и путь «C:\Users\Владимир\Documents\SAGE Projects\Игра\scene.sage»,
+  записанный в UTF-8, для них выглядит абракадаброй: файл не открывается, хотя
+  он есть и путь верен.
+
+  activeCodePage=UTF-8 делает ANSI-кодировкой ПРОЦЕССА саму UTF-8. После этого
+  узкие функции понимают наши строки буквально, и открывать файлы по путям с
+  кириллицей можно так же, как по латинским. Работает начиная с Windows 10
+  версии 1903; на более старых система строку игнорирует, и поведение остаётся
+  прежним — то есть хуже не становится нигде.
+
+  Больше здесь ничего нет намеренно. dpiAware, например, поменял бы масштаб
+  окна и размер шрифтов — этим занимается GLFW при инициализации, и вмешиваться
+  в это ради кодировки незачем.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="Sage.Engine.Application" version="1.0.0.0"/>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10/11: без объявления поддержки система не применяет
+           настройки из раздела SMI/2019. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>

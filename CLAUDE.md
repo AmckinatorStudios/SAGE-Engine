@@ -40,6 +40,7 @@ cd build/editor && SAGE_EDITOR_SELFTEST=1 xvfb-run -a ./SageEditor  # самоп
 bash scripts/ci_smoke_test.sh                                     # smoke
 python3 scripts/check_localization.py                             # переводы
 python3 scripts/check_rhi_boundary.py                             # граница RHI
+python3 scripts/check_paths.py                                    # пути из окружения
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
 
@@ -76,6 +77,19 @@ Actions и публичную ссылку не трогает: иначе «п�
 Linux не видна вообще — другой компилятор, другие заголовки, `std::filesystem`
 с иным разделителем, отсутствующие POSIX-функции. Правка, проверенная на одной
 платформе, — это правка, проверенная наполовину. macOS не собираем.
+
+**Пути — не ASCII.** У человека, который скачивает сборку, имя пользователя
+запросто написано кириллицей, и все его проекты лежат в
+`C:\Users\Владимир\Documents\SAGE Projects`. Значит: значение окружения
+превращается в путь только через `sage::EnvPath`/`sage::EnvString`
+(`engine/src/sage/core/Paths.h`), а `std::getenv` для путей запрещён — сторожит
+`scripts/check_paths.py`. Причина не теоретическая: одна строка
+`std::getenv("APPDATA")` не давала редактору запуститься на русской Windows
+вообще, потому что `std::filesystem::path` на байтах ANSI не возвращает ошибку,
+а БРОСАЕТ исключение. Windows-сборка несёт манифест с `activeCodePage=UTF-8`
+(`cmake/windows/sage.manifest`) — без него узкие функции системы (`fopen`, а с
+ним `std::ifstream` от `std::string`) не открывают ни одного файла по такому
+пути.
 
 
 Самопроверка редактора не завершается сама — она пишет в

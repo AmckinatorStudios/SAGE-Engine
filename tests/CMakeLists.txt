@@ -13,6 +13,7 @@ add_executable(sage_tests
     test_scripting.cpp
     test_robustness.cpp
     test_config.cpp
+    test_paths.cpp
     test_ui.cpp
     test_vars_events.cpp
     test_framegraph.cpp

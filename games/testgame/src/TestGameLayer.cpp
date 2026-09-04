@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/core/Application.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Config.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/RenderSystem.h"
@@ -218,7 +219,8 @@ static std::shared_ptr<Material> LoadPbrSetFromDir(const std::string& dir) {
 void SpawnNormalMappedDemo(Scene& scene, glm::vec3 pos) {
     // Реальный PBR-сет с диска (если задан) — иначе процедурная кладка ниже.
     std::shared_ptr<Material> mat;
-    if (const char* d = std::getenv("SAGE_TESTGAME_PBR_DIR")) mat = LoadPbrSetFromDir(d);
+    if (const std::string d = sage::EnvString("SAGE_TESTGAME_PBR_DIR"); !d.empty())
+        mat = LoadPbrSetFromDir(d);
 
     if (!mat) {
     const int N = 128;
@@ -519,7 +521,8 @@ void TestGameLayer::OnAttach() {
     RegisterGameIcons();
 
     // --- env-хуки (паттерн движка) ---
-    if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
+    if (const std::string p = sage::EnvString("SAGE_SCREENSHOT_PATH"); !p.empty())
+        m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
     // Качество графики — из гибкого конфига (файл sage.cfg + env-оверрайды,
     // включая обратно-совместимые SAGE_NO_SHADOWS/SAGE_NO_POST).

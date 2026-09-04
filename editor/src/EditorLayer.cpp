@@ -246,7 +246,8 @@ void EditorLayer::OnAttach() {
             m_droppedFiles.insert(m_droppedFiles.end(), paths.begin(), paths.end());
         });
 
-    if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
+    if (const std::string p = sage::EnvString("SAGE_SCREENSHOT_PATH"); !p.empty())
+        m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) {
         m_autoScreenshotFrame = std::atoi(f);
         // Headless-скриншот обычно снимает сцену, и hub проектов ему только
@@ -282,7 +283,8 @@ void EditorLayer::OnAttach() {
     // переменной SAGE_EDITOR_PLUGINS=1. Без неё plugins/ игнорируется.
     if (std::getenv("SAGE_EDITOR_PLUGINS")) {
         fs::path pluginsDir = fs::current_path() / "plugins";
-        if (const char* dir = std::getenv("SAGE_PLUGINS_DIR")) pluginsDir = dir;
+        if (const fs::path dir = sage::EnvPath("SAGE_PLUGINS_DIR"); !dir.empty())
+            pluginsDir = dir;
         m_plugins.LoadAll(pluginsDir, m_pluginCtx);
     } else {
         LOG_INFO("Editor") << "Плагины редактора отключены (SAGE_EDITOR_PLUGINS не задан)";
@@ -346,7 +348,8 @@ void EditorLayer::OnAttach() {
     // снимать кадр нужно с живым графическим контекстом и настоящей сценой, то
     // есть самим редактором, и делать это на каждой сборке — платить минутой
     // за картинку, которая меняется раз в полгода.
-    if (const char* outDir = std::getenv("SAGE_EDITOR_TEMPLATE_SHOTS")) {
+    if (const std::string outDir = sage::EnvString("SAGE_EDITOR_TEMPLATE_SHOTS");
+        !outDir.empty()) {
         m_headlessProject = true;
         m_coverShotDir = outDir;
         std::error_code shotEc;
@@ -396,7 +399,7 @@ void EditorLayer::OnAttach() {
         m_headlessProject = true;
         m_assets.Select(a);
     }
-    if (const char* f = std::getenv("SAGE_EDITOR_OPEN_CODE")) {
+    if (const std::string f = sage::EnvString("SAGE_EDITOR_OPEN_CODE"); !f.empty()) {
         m_headlessProject = true;
         m_showCode = true;
         m_code.OpenFile(f);
@@ -570,7 +573,7 @@ void EditorLayer::OnAttach() {
     // Выложить модели в сцену тем же путём, каким это делает перетаскивание
     // (AddAssetToScene): пути через ';'. Нужно для проверки на живых ассетах —
     // как модель встаёт, что с её материалом и развёрткой.
-    if (const char* list = std::getenv("SAGE_EDITOR_LOAD_MODELS")) {
+    if (const std::string list = sage::EnvString("SAGE_EDITOR_LOAD_MODELS"); !list.empty()) {
         m_headlessProject = true;
         std::string rest = list;
         float x = -6.0f;
@@ -626,7 +629,7 @@ void EditorLayer::OnDetach() {
     // Список строк, которым не нашлось перевода. Без него новая панель молча
     // выходит по-английски, и узнаётся об этом от пользователя, а не от
     // проверки: SAGE_EDITOR_L10N_MISSING=<файл> выгружает их при выходе.
-    if (const char* path = std::getenv("SAGE_EDITOR_L10N_MISSING")) {
+    if (const std::string path = sage::EnvString("SAGE_EDITOR_L10N_MISSING"); !path.empty()) {
         sage::editor::DumpMissingKeys(path);
     }
 

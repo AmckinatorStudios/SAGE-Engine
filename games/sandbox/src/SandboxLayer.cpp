@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/core/Application.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -65,7 +66,8 @@ void SandboxLayer::OnAttach() {
     m_camera.Pitch = -28.0f;
     m_camera.ProcessMouse(0.0f, 0.0f);
 
-    if (const char* p = std::getenv("SAGE_SCREENSHOT_PATH")) m_screenshotPath = p;
+    if (const std::string p = sage::EnvString("SAGE_SCREENSHOT_PATH"); !p.empty())
+        m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
 
     LOG_INFO("Sandbox") << "SAGE Sandbox запущен (сущностей: " << m_scene.Count() << ")";

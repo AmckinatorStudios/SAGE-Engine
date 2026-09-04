@@ -30,6 +30,13 @@ jobs:
       - name: Localization check (every editor string is translated)
         run: python3 scripts/check_localization.py
 
+      # Пути из окружения: значение переменной становится путём только через
+      # sage::EnvPath/EnvString. Одна строка std::getenv("APPDATA") не давала
+      # редактору запуститься на русской Windows вообще — fs::path на байтах
+      # ANSI бросает исключение. Тоже до сборки: секунда против пяти минут.
+      - name: Paths check (no filesystem path taken from getenv)
+        run: python3 scripts/check_paths.py
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

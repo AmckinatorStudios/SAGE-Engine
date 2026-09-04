@@ -51,10 +51,25 @@ void ReportFatal(const char* what);
 // отчёта, ни строки: процесс исчезал молча. Здесь ставится минимальный
 // обработчик; слой при желании переустановит свой, с аварийным сохранением.
 void InstallEarlyCrashHandler(const char* appName);
+
+// Аргументы командной строки — в UTF-8, ДО того как их кто-то прочтёт.
+//
+// На Windows argv у main приходит в ANSI-кодировке системы. Путь к проекту с
+// кириллицей («D:\Игры\Моя игра») превращается там в байты, которые не
+// являются корректным UTF-8, — а std::filesystem::path именно UTF-8 из узкой
+// строки и ждёт и на чужих байтах БРОСАЕТ (см. Paths.h). То есть плеер,
+// запущенный редактором для проекта в русской папке, умирал на первой же
+// строке разбора аргументов.
+//
+// Здесь argv переписывается из настоящей командной строки процесса
+// (GetCommandLineW), поэтому дальше вся программа видит UTF-8 и ничего не
+// знает про ANSI. На Linux не делает ничего: там argv — просто байты.
+void NormalizeArgs(int& argc, char**& argv);
 } // namespace sage::detail
 
 #define SAGE_MAIN()                                                        \
     int main(int argc, char** argv) {                                      \
+        sage::detail::NormalizeArgs(argc, argv);                            \
         sage::detail::InstallEarlyCrashHandler(argv && argv[0] ? argv[0] : "SAGE"); \
         try {                                                              \
             sage::Application* app = sage::CreateApplication(argc, argv);  \

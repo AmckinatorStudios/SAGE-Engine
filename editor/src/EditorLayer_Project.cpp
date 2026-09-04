@@ -552,7 +552,8 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     // которой появился sage/core/Paths.h).
     const fs::path exeDir = sage::ExecutableDir();
     std::vector<fs::path> candidates;
-    if (const char* p = std::getenv("SAGE_PLAYER_PATH")) candidates.push_back(p);
+    if (const fs::path p = sage::EnvPath("SAGE_PLAYER_PATH"); !p.empty())
+        candidates.push_back(p);
     if (!exeDir.empty()) {
         candidates.push_back(exeDir / playerName);                        // установка: рядом с редактором
         candidates.push_back(exeDir / "runtime" / playerName);            // установка с подпапками
