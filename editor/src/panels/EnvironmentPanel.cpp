@@ -1,4 +1,5 @@
 #include "EnvironmentPanel.h"
+#include "EditorTheme.h"
 
 #include <string>
 #include <vector>
@@ -50,7 +51,7 @@ void EnvironmentPanel::StartBake(EditorHost& host, const sage::gi::GISettings& s
 }
 
 void EnvironmentPanel::DrawGISection(EditorHost& host) {
-    if (!ImGui::CollapsingHeader(T("Global Illumination (baked)" "###Global Illumination (baked)"), ImGuiTreeNodeFlags_DefaultOpen))
+    if (!EditorTheme::SectionHeader(T("Global Illumination (baked)" "###Global Illumination (baked)"), ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
     Scene& scene = host.CurrentScene();
@@ -153,7 +154,7 @@ void EnvironmentPanel::DrawGISection(EditorHost& host) {
 // три поля в панели про это не знают. Панель, которая правит одно, а показывает
 // другое, — худший вид удобства.
 void EnvironmentPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env) {
-    if (!ImGui::CollapsingHeader(T("Sun" "###Sun"), ImGuiTreeNodeFlags_DefaultOpen)) return;
+    if (!EditorTheme::SectionHeader(T("Sun" "###Sun"), ImGuiTreeNodeFlags_DefaultOpen)) return;
 
     // Ищем то же солнце, что возьмёт рендер: направленный свет с наименьшим id
     // (см. sage::ecs::CollectLighting).
@@ -226,7 +227,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     ImGui::PopStyleColor();
     ImGui::Separator();
 
-    if (ImGui::CollapsingHeader(T("Ambient (hemisphere)" "###Ambient (hemisphere)"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Ambient (hemisphere)" "###Ambient (hemisphere)"), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();
         ImGui::ColorEdit3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Strength"), &env.AmbientStrength, 0.01f, 0.0f, 2.0f); host.TrackLastImGuiItem();
@@ -235,7 +236,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
 
     DrawSun(host, scene, env);
 
-    if (ImGui::CollapsingHeader(T("Skybox" "###Skybox"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Skybox" "###Skybox"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ImGui::Checkbox(T("Enable Skybox"), &env.Skybox.Enabled)) host.PushUndoSnapshot();
         ImGui::ColorEdit3(T("Sky Top"), &env.Skybox.TopColor.x); host.TrackLastImGuiItem();
         ImGui::ColorEdit3(T("Sky Horizon"), &env.Skybox.HorizonColor.x); host.TrackLastImGuiItem();
@@ -269,7 +270,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
         ImGui::TextDisabled("%s", T("Procedural gradient (top -> horizon), no textures"));
     }
 
-    if (ImGui::CollapsingHeader(T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
         ImGui::ColorEdit3(T("Fog Color"), &env.Fog.Color.x); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Fog Start"), &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
@@ -288,7 +289,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
 
     DrawGISection(host);
 
-    if (ImGui::CollapsingHeader(T("Scene lights" "###Scene lights"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Scene lights" "###Scene lights"), ImGuiTreeNodeFlags_DefaultOpen)) {
         // Света — сущности сцены (точечные/прожекторы); здесь список для
         // навигации с пометкой типа.
         int count = 0;

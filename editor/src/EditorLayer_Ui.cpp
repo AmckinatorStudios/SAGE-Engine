@@ -603,6 +603,45 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // настройки ИГРЫ и сохраняется в проект, а язык — настройка
             // редактора и живёт в профиле пользователя. Смешать их значило бы
             // получить проект, навязывающий язык всем, кто его откроет.
+            // Оформление — рядом с языком и по той же причине: это настройка
+            // РЕДАКТОРА, она живёт в профиле человека, а не в проекте. Проект,
+            // навязывающий свою тему каждому, кто его открыл, — не то, чего
+            // ждут от проекта.
+            if (ImGui::BeginMenu(T("Appearance"))) {
+                for (const EditorTheme::Theme& theme : EditorTheme::Themes()) {
+                    const bool active = theme.Id == EditorTheme::CurrentId();
+                    // Название темы не переводится — как и название языка: по
+                    // нему тему находят в файле настроек и в themes/*.json.
+                    if (ImGui::MenuItem(theme.Name.c_str(), nullptr, active) && !active) {
+                        EditorTheme::SetTheme(theme.Id);
+                        SetStatusMessage(T("Theme changed"));
+                    }
+                }
+                ImGui::Separator();
+                // Масштаб интерфейса — здесь же: на экране 4K шрифт в 16 точек
+                // читается лупой, и «сделайте покрупнее» до сих пор решалось
+                // только сменой разрешения всей системы.
+                ImGui::TextDisabled("%s", T("Interface scale"));
+                float scale = EditorTheme::UiScale();
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::SliderFloat("##uiscale", &scale, 0.75f, 2.0f, "%.2fx"))
+                    EditorTheme::SetUiScale(scale);
+                if (ImGui::MenuItem(T("Reset scale"), nullptr, false, scale != 1.0f))
+                    EditorTheme::SetUiScale(1.0f);
+                ImGui::Separator();
+                // Выгрузка темы файлом — вот ради чего вся система: взять
+                // текущую за основу, поправить цвета в текстовом редакторе и
+                // положить обратно в themes/. Пересборка не нужна.
+                if (ImGui::MenuItem(T("Export theme to themes/..."))) {
+                    const std::string dir = EditorTheme::ThemesDir();
+                    const std::string path = dir + "/" + EditorTheme::Current().Id + "-copy.json";
+                    if (EditorTheme::ExportTheme(EditorTheme::Current(), path))
+                        SetStatusMessage(std::string(T("Theme saved:")) + " " + path);
+                    else
+                        SetStatusMessage(T("Could not write the theme file"));
+                }
+                ImGui::EndMenu();
+            }
             if (ImGui::BeginMenu(T("Language"))) {
                 for (const sage::editor::LanguageInfo& lang : sage::editor::AvailableLanguages()) {
                     const bool active = lang.Code == sage::editor::CurrentLanguageCode();

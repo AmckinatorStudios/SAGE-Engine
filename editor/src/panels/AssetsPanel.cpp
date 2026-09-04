@@ -1,4 +1,5 @@
 #include "AssetsPanel.h"
+#include "EditorTheme.h"
 
 #include <algorithm>
 #include <cctype>
@@ -891,7 +892,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
     if (ImGui::BeginPopupModal(T("Delete Asset" "###Delete Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text(T("Delete \"%s\"?"), m_deleteTarget.filename().string().c_str());
         ImGui::TextDisabled("%s", T("This cannot be undone."));
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.20f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Danger));
         if (ImGui::Button(T("Delete"), ImVec2(120, 0))) {
             DeleteAsset(m_deleteTarget);
             if (m_selected == m_deleteTarget) m_selected.clear();
@@ -954,7 +955,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // модели, и заметить это можно было лишь случайно.
     const auto& broken = sage::AssetDatabase::Instance().Broken();
     if (!broken.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.40f, 0.40f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Danger));
         const bool open = ImGui::CollapsingHeader(
             (T("Broken references: ") + std::to_string(broken.size()) + "###brokenrefs").c_str());
         ImGui::PopStyleColor();

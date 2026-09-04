@@ -84,4 +84,30 @@ void SetInt(const std::string& key, int value) {
     Flush();
 }
 
+float GetFloat(const std::string& key, float fallback) {
+    const json& r = Root();
+    auto it = r.find(key);
+    if (it == r.end() || !it->is_number()) return fallback;
+    return it->get<float>();
+}
+
+void SetFloat(const std::string& key, float value) {
+    if (Root().contains(key) && GetFloat(key, value + 1.0f) == value) return;
+    Root()[key] = value;
+    Flush();
+}
+
+std::string GetString(const std::string& key, const std::string& fallback) {
+    const json& r = Root();
+    auto it = r.find(key);
+    if (it == r.end() || !it->is_string()) return fallback;
+    return it->get<std::string>();
+}
+
+void SetString(const std::string& key, const std::string& value) {
+    if (GetString(key, value + "\x01") == value) return; // без лишней записи
+    Root()[key] = value;
+    Flush();
+}
+
 } // namespace sage::editor::prefs

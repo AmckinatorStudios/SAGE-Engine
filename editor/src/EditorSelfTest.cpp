@@ -27,6 +27,9 @@
 
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
+#include <nlohmann/json.hpp>
+
+#include "EditorTheme.h"
 #include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Screenshot.h"
@@ -118,7 +121,7 @@ void EditorLayer::RunSelfTest() {
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
-                               << "vars-refs-events + prefab-refs + templates, "
+                               << "vars-refs-events + prefab-refs + templates + themes, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2634,6 +2637,113 @@ bool EditorLayer::SelfTestTools() {
         }
     }
 
+    // --- ОФОРМЛЕНИЕ: тема — данные, и её видно ------------------------------
+    //
+    // Проверяем не «красиво ли», а то, ради чего система вообще заведена:
+    // тем НЕСКОЛЬКО, переключение реально меняет вид, тема из файла работает
+    // наравне со встроенной, а несуществующая тема не оставляет редактор без
+    // оформления. Раньше стиль был одной функцией на сто строк, и ни один из
+    // этих вопросов не имел смысла — ответ был «одна, никак, нет, нечему».
+    {
+        const std::string startId = EditorTheme::CurrentId();
+
+        if (EditorTheme::Themes().size() < 4) {
+            LOG_ERROR("Editor") << "SELFTEST: тем оформления меньше четырёх ("
+                                << EditorTheme::Themes().size() << ")";
+            ok = false;
+        }
+        // Тема из themes/*.json — рядом со встроенными, без пересборки.
+        // Именно это отличает «настраиваемый редактор» от «редактора, у
+        // которого автор предусмотрел четыре варианта».
+        const bool fromFile = std::any_of(
+            EditorTheme::Themes().begin(), EditorTheme::Themes().end(),
+            [](const EditorTheme::Theme& t) { return t.Id == "amber"; });
+        if (!fromFile) {
+            LOG_ERROR("Editor") << "SELFTEST: тема из файла themes/example-amber.json не подхвачена";
+            ok = false;
+        }
+
+        // Переключение обязано МЕНЯТЬ КАРТИНКУ. Сравниваем сам стиль ImGui, а
+        // не поле «текущая тема»: последнее сходится и тогда, когда Apply()
+        // забыли позвать, — а человек в этом случае видит прежний редактор.
+        if (EditorTheme::SetTheme("modern-dark")) {
+            const ImVec4 darkBg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+            if (!EditorTheme::SetTheme("modern-light")) {
+                LOG_ERROR("Editor") << "SELFTEST: светлая тема не применилась";
+                ok = false;
+            } else {
+                const ImVec4 lightBg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+                if (lightBg.x <= darkBg.x) {
+                    LOG_ERROR("Editor") << "SELFTEST: светлая тема не светлее тёмной ("
+                                        << lightBg.x << " vs " << darkBg.x << ")";
+                    ok = false;
+                }
+                // И цвета РОЛЕЙ едут вместе с темой — иначе панели, которые
+                // спрашивают Role::Danger, остались бы в цветах прошлой.
+                if (EditorTheme::Color(EditorTheme::Role::Danger).x <= 0.0f) {
+                    LOG_ERROR("Editor") << "SELFTEST: роль Danger пуста после смены темы";
+                    ok = false;
+                }
+            }
+        } else {
+            LOG_ERROR("Editor") << "SELFTEST: тёмная тема не применилась";
+            ok = false;
+        }
+
+        // Несуществующая тема — отказ, а НЕ «оформления больше нет».
+        const std::string beforeBad = EditorTheme::CurrentId();
+        if (EditorTheme::SetTheme("нет-такой-темы") || EditorTheme::CurrentId() != beforeBad) {
+            LOG_ERROR("Editor") << "SELFTEST: неизвестная тема сменила оформление";
+            ok = false;
+        }
+
+        // Масштаб интерфейса живёт отдельно от темы и переживает её смену:
+        // это свойство экрана, а не оформления.
+        EditorTheme::SetUiScale(1.25f);
+        EditorTheme::SetTheme("modern-dark");
+        if (std::abs(EditorTheme::UiScale() - 1.25f) > 0.001f) {
+            LOG_ERROR("Editor") << "SELFTEST: масштаб интерфейса потерялся при смене темы";
+            ok = false;
+        }
+        // И он ДОХОДИТ до ImGui, а не просто хранится.
+        if (std::abs(ImGui::GetStyle().FontScaleMain - 1.25f) > 0.001f) {
+            LOG_ERROR("Editor") << "SELFTEST: масштаб не дошёл до стиля ImGui";
+            ok = false;
+        }
+        EditorTheme::SetUiScale(1.0f);
+
+        // Выгрузка и чтение обратно: то, что редактор записал, он обязан
+        // прочитать без потерь — иначе «возьми текущую за основу» не работает.
+        const std::string exported = "selftest_theme.json";
+        fs::remove(exported, ec);
+        if (!EditorTheme::ExportTheme(EditorTheme::Current(), exported)) {
+            LOG_ERROR("Editor") << "SELFTEST: тему не выгрузить в файл";
+            ok = false;
+        } else {
+            std::ifstream in(exported);
+            nlohmann::json root;
+            try {
+                in >> root;
+            } catch (const std::exception& e) {
+                LOG_ERROR("Editor") << "SELFTEST: выгруженная тема не читается: " << e.what();
+                ok = false;
+            }
+            if (ok) {
+                const auto colors = root.find("colors");
+                if (colors == root.end() || !colors->is_object() ||
+                    colors->size() != (size_t)EditorTheme::Role::_Count) {
+                    LOG_ERROR("Editor") << "SELFTEST: в выгруженной теме не все роли";
+                    ok = false;
+                } else if (!root.contains("metrics") || !root["metrics"].contains("framePadding")) {
+                    LOG_ERROR("Editor") << "SELFTEST: в выгруженной теме нет метрик";
+                    ok = false;
+                }
+            }
+            fs::remove(exported, ec);
+        }
+
+        EditorTheme::SetTheme(startId); // за собой убираем: прогон идёт дальше
+    }
 
     return ok;
 }

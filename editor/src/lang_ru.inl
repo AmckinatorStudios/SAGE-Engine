@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1081.
+// Язык: Русский. Строк: 1087.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -183,7 +183,7 @@ constexpr TranslationPair kRussianStrings[] = {
     {"Animation",
      "Анимация"},
     {"Appearance",
-     "Вид"},
+     "Оформление"},
     {"Applied on top of the material.",
      "Накладываются поверх материала."},
     {"Apply a preset...",
@@ -464,6 +464,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не удалось сохранить sage.cfg"},
     {"Could not write the game package",
      "Не удалось записать пакет игры"},
+    {"Could not write the theme file",
+     "Файл темы записать не удалось"},
     {"Coverage",
      "Облачность"},
     {"Create",
@@ -678,6 +680,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выход"},
     {"Expand the tools",
      "Развернуть инструменты"},
+    {"Export theme to themes/...",
+     "Выгрузить тему в themes/..."},
     {"Exposure",
      "Экспозиция"},
     {"FOV",
@@ -942,6 +946,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Редактор интерфейса: игровой кадр в его собственном разрешении"},
     {"Interface language changed",
      "Язык интерфейса изменён"},
+    {"Interface scale",
+     "Масштаб интерфейса"},
     {"It becomes a child of the selected element.",
      "Он становится дочерним к выделенному элементу."},
     {"It did not overwrite your scene — this is a separate copy.",
@@ -1508,6 +1514,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Пересканировать проект"},
     {"Reset Layout",
      "Сбросить раскладку"},
+    {"Reset scale",
+     "Обычный масштаб"},
     {"Reset to Defaults",
      "Вернуть значения по умолчанию"},
     {"Reset view",
@@ -1900,6 +1908,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Диск солнца, его направление и цвет — на самом объекте-солнце: выберите его в иерархии."},
     {"The world of this project is built by scripts. Press Play to walk through the zones;\nin the stopped editor the scene holds only the world root and the player.",
      "Мир этого проекта собирают скрипты. Нажмите Play, чтобы пройтись по зонам;\nв остановленном редакторе в сцене лежат только корень мира и игрок."},
+    {"Theme changed",
+     "Оформление изменено"},
+    {"Theme saved:",
+     "Тема записана:"},
     {"There are no interface elements yet. Add one with the Element button above.",
      "Элементов интерфейса пока нет. Добавьте кнопкой «Элемент» выше."},
     {"There are unsaved changes (Ctrl+S)",

@@ -1,4 +1,5 @@
 #include "ConsolePanel.h"
+#include "EditorTheme.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -86,13 +87,13 @@ void ConsolePanel::Draw(bool* open) {
     ImGui::SameLine();
     char warnLabel[48];
     std::snprintf(warnLabel, sizeof(warnLabel), T("Warn (%d)"), m_warnCount);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.30f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
     ImGui::Checkbox(warnLabel, &m_showWarn);
     ImGui::PopStyleColor();
     ImGui::SameLine();
     char errLabel[48];
     std::snprintf(errLabel, sizeof(errLabel), T("Error (%d)"), m_errorCount);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.40f, 0.40f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Danger));
     ImGui::Checkbox(errLabel, &m_showError);
     ImGui::PopStyleColor();
 
@@ -117,9 +118,9 @@ void ConsolePanel::Draw(bool* open) {
             ++shown;
             ImVec4 color(0.85f, 0.85f, 0.85f, 1.0f);
             const char* icon = "info";
-            if (e.Level == LogLevel::Warn) { color = ImVec4(0.95f, 0.80f, 0.30f, 1.0f); icon = "warn"; }
-            if (e.Level >= LogLevel::Error) { color = ImVec4(0.95f, 0.40f, 0.40f, 1.0f); icon = "error"; }
-            if (e.Level <= LogLevel::Debug) { color = ImVec4(0.55f, 0.60f, 0.65f, 1.0f); icon = "debug"; }
+            if (e.Level == LogLevel::Warn) { color = EditorTheme::Color(EditorTheme::Role::Warn); icon = "warn"; }
+            if (e.Level >= LogLevel::Error) { color = EditorTheme::Color(EditorTheme::Role::Danger); icon = "error"; }
+            if (e.Level <= LogLevel::Debug) { color = EditorTheme::Color(EditorTheme::Role::TextDim); icon = "debug"; }
 
             EditorIcons::Inline(icon, glm::vec3(color.x, color.y, color.z));
             ImGui::SameLine();

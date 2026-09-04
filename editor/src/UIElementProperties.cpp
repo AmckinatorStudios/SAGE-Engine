@@ -7,6 +7,7 @@
 // полей значило бы разойтись на первой же новой галке.
 // ---------------------------------------------------------------------------
 #include "UIElementProperties.h"
+#include "EditorTheme.h"
 
 #include <cstdarg>
 #include <cmath>
@@ -71,7 +72,7 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
             if (col) ImGui::SameLine(0.0f, 2.0f);
             ImGui::PushID(index);
             const bool active = (int)anchor == index;
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
+            if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
             const ImVec2 p0 = ImGui::GetCursorScreenPos();
             if (ImGui::Button("##anchor", ImVec2(cell, cell))) {
                 anchor = (UIAnchor)index;

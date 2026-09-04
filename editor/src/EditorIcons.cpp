@@ -1,4 +1,5 @@
 #include "EditorIcons.h"
+#include "EditorTheme.h"
 
 #include <cmath>
 #include <cstdio>
@@ -699,7 +700,9 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
     const float icon_s = std::floor(h * 0.68f);
     ImGui::PushID(label);
     CheckDuplicateId(label);
-    if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
+    // Нажатое состояние — акцент ТЕМЫ. Константа, подобранная под тёмный фон,
+    // в светлой теме оставалась тёмно-синим пятном среди светлых кнопок.
+    if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
 
     // Место под иконку резервируется отступом слева — так подпись не наезжает
     // на рисунок при любом шрифте.
@@ -726,7 +729,9 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     const float h = ImGui::GetFrameHeight();
     ImGui::PushID(icon);
     CheckDuplicateId(icon);
-    if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.216f, 0.322f, 0.520f, 1.0f));
+    // Нажатое состояние — акцент ТЕМЫ. Константа, подобранная под тёмный фон,
+    // в светлой теме оставалась тёмно-синим пятном среди светлых кнопок.
+    if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::Button("##ibtn", ImVec2(h, h));
     const float icon_s = std::floor(h * 0.64f);
