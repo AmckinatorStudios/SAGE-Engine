@@ -29,6 +29,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/core/Application.cpp
+    src/sage/core/FatalReport.cpp
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp

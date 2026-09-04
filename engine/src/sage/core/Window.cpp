@@ -47,9 +47,21 @@ void Window::ForwardFileDrop(GLFWwindow* handle, int count, const char** paths) 
     if (!list.empty()) win->m_fileDropFn(list);
 }
 
+// ПОЧЕМУ GLFW отказал — его собственными словами.
+//
+// Без этого колбэка причина теряется целиком: наружу приходит только «не
+// удалось создать окно», а GLFW в этот момент знает точный текст — «WGL:
+// драйвер не поддерживает OpenGL 3.3», «нет подходящего пиксельного формата»,
+// «не найден OpenGL». Именно этот текст и отвечает на вопрос, почему на одном
+// ПК запускается, а на другом нет; без него разбор упирается в переписку.
+static void GlfwErrorCallback(int code, const char* description) {
+    LOG_ERROR("Window") << "GLFW " << code << ": " << (description ? description : "(без текста)");
+}
+
 Window::Window(int width, int height, const std::string& title, Params params)
     : m_width(width), m_height(height) {
 
+    glfwSetErrorCallback(&GlfwErrorCallback);
     if (!glfwInit()) {
         LOG_ERROR("Window") << "Не удалось инициализировать GLFW";
         throw std::runtime_error("Не удалось инициализировать GLFW");
@@ -90,10 +102,18 @@ Window::Window(int width, int height, const std::string& title, Params params)
 
     m_handle = glfwCreateWindow(createW, createH, title.c_str(), useMonitor, nullptr);
     if (!m_handle) {
+        // Причину GLFW уже написал в лог колбэком выше. Наружу отдаём текст,
+        // по которому человеку понятно, что делать: почти всегда это
+        // «драйвер видеокарты не умеет OpenGL 3.3».
         glfwTerminate();
         LOG_ERROR("Window") << "Не удалось создать окно GLFW";
-        throw std::runtime_error("Не удалось создать окно GLFW");
+        throw std::runtime_error(
+            "Не удалось создать окно с OpenGL 3.3. Обычно это значит, что драйвер видеокарты "
+            "устарел или запуск идёт через удалённый рабочий стол / виртуальную машину без "
+            "3D-ускорения. Точная причина — строкой GLFW в логе.");
     }
+    LOG_INFO("Window") << "Окно создано: " << createW << "x" << createH
+                       << ", контекст OpenGL 3.3 получен";
     m_width = createW;
     m_height = createH;
 
