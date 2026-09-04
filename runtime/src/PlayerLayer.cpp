@@ -21,6 +21,7 @@
 #include "sage/core/SaveGame.h"
 #include "sage/scene/Prefab.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/project/Project.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/DecalSystem.h"
 #include "sage/ecs/LightSystem.h"
@@ -44,16 +45,6 @@ PlayerLayer::PlayerLayer(fs::path projectDir, std::string launchArgs)
     : sage::Layer("Player"), m_projectDir(std::move(projectDir)),
       m_launchArgs(std::move(launchArgs)) {}
 PlayerLayer::~PlayerLayer() = default;
-
-fs::path PlayerLayer::FindMainScene() const {
-    // Через vfs, а не через directory_iterator: в собранной игре проект лежит
-    // ПАКЕТОМ, каталога scenes/ на диске нет, и обход вернул бы пустоту — игра
-    // честно не нашла бы ни одной сцены и не запустилась.
-    if (sage::assets::vfs::Exists("scenes/main.sage")) return fs::path("scenes/main.sage");
-    const std::vector<std::string> scenes =
-        sage::assets::vfs::ListFiles("scenes", ".sage");
-    return scenes.empty() ? fs::path() : fs::path(scenes.front());
-}
 
 
 // --- Экран отказа -----------------------------------------------------------
@@ -149,17 +140,9 @@ void PlayerLayer::OnAttach() {
         sage::assets::vfs::Mount(beside);
     }
 
-    fs::path projectFile = m_projectDir / "project.sageproj";
-    if (fs::exists(projectFile, ec)) {
-        try {
-            std::ifstream file(projectFile);
-            nlohmann::json root;
-            file >> root;
-            m_projectName = root.value("name", m_projectName);
-        } catch (const std::exception& e) {
-            LOG_WARN("Player") << "project.sageproj не парсится (" << e.what() << "), продолжаю";
-        }
-    }
+    // РАБОЧИЙ КАТАЛОГ — В ПАПКУ ИГРЫ, и до открытия проекта: дальше всё
+    // (проект, база ассетов, сцены, скрипты) адресуется относительными путями,
+    // и они обязаны считаться от одного и того же места.
     fs::current_path(m_projectDir, ec);
     if (ec) {
         Fail("Папка проекта недоступна",
@@ -168,46 +151,55 @@ void PlayerLayer::OnAttach() {
         return;
     }
 
-    // ЗДЕСЬ ВООБЩЕ ПРОЕКТ? Раньше этот вопрос не задавался, и запуск плеера не
-    // из папки игры (например, прямо из build/runtime) доходил до поиска сцен и
-    // жаловался на отсутствие scenes/ — то есть отвечал на второй вопрос, не
-    // задав первого. «Нет сцен» и «это не папка игры» — разные беды с разными
-    // решениями, и путать их значит посылать человека искать не там.
-    const bool packed = sage::assets::vfs::Exists("scenes/main.sage") ||
-                        !sage::assets::vfs::ListFiles("scenes", ".sage").empty();
-    if (!fs::exists(projectFile, ec) && !packed) {
-        Fail("Здесь нет игры",
-             {"SagePlayer — рантайм: он запускает ГОТОВЫЙ проект, а в этой папке его нет.",
-              "Искал: " + (m_projectDir / "project.sageproj").lexically_normal().string(),
-              "",
-              "Что сделать — любое из:",
-              "  • перетащите на плеер папку проекта или сам project.sageproj;",
-              "  • запустите с путём:  SagePlayer <папка проекта>;",
-              "  • соберите игру в редакторе: File > Build Game — она",
-              "    получится папкой, в которой плеер уже лежит рядом с проектом."});
-        return;
+    // ПРОЕКТ ОТКРЫВАЕТ ДВИЖОК, а не плеер своим разбором json.
+    //
+    // Раньше здесь лежала вторая реализация того же понятия: свой ifstream,
+    // свой nlohmann::json, своё правило поиска главной сцены. Редактор при этом
+    // пользовался классом Project — и стоило добавить в файл проекта поле,
+    // редактор начинал его писать, а плеер молча не замечал. Теперь и тот и
+    // другой зовут sage::project::Project (см. engine/src/sage/project).
+    std::string projectError;
+    if (!m_project.Open(".", projectError)) {
+        // Файла описания нет. Это либо собранная игра, которая везёт проект
+        // одним пакетом, либо человек запустил плеер не из папки игры. Первое
+        // распознаётся наличием сцен в пакете, второе — их отсутствием, и это
+        // РАЗНЫЕ беды: «нет сцен» и «это не папка игры» лечатся по-разному, и
+        // путать их значит посылать человека искать не там.
+        m_project.AdoptDirectory(".", m_projectName);
+        if (!m_project.HasScenes()) {
+            Fail("Здесь нет игры",
+                 {"SagePlayer — рантайм: он запускает ГОТОВЫЙ проект, а в этой папке его нет.",
+                  "Искал: " + (m_projectDir / "project.sageproj").lexically_normal().string(),
+                  "(" + projectError + ")",
+                  "",
+                  "Что сделать — любое из:",
+                  "  • перетащите на плеер папку проекта или сам project.sageproj;",
+                  "  • запустите с путём:  SagePlayer <папка проекта>;",
+                  "  • соберите игру в редакторе: File > Build Game — она",
+                  "    получится папкой, в которой плеер уже лежит рядом с проектом."});
+            return;
+        }
     }
-    // База ассетов — до загрузки сцены: сцена спрашивает у неё актуальные пути
-    // по GUID'ам, и пустая база означала бы, что все ссылки сломаны.
-    sage::AssetDatabase::Instance().Clear();
-    sage::AssetDatabase::Instance().ScanProject(".");
-
+    // Открытие проекта уже сделало всё, что раньше плеер делал руками: пересканировало
+    // базу ассетов от корня проекта и назначило имя для папки сохранений
+    // (см. Project::Adopt). Имя игры при этом берётся из файла проекта — то же
+    // самое, что видит редактор.
+    m_projectName = m_project.Name();
     glfwSetWindowTitle(app.GetWindow().Handle(), m_projectName.c_str());
 
-    // Имя игры определяет папку сохранений. Ставится ДО загрузки сцены: скрипт
-    // с OnStart вправе сразу прочитать прогресс, и к этому моменту он обязан
-    // знать, откуда читать.
-    sage::save::SetGameName(m_projectName);
-
-    // 3. Главная сцена.
-    fs::path scenePath = FindMainScene();
+    // 3. Главная сцена — тем же правилом, которое теперь знает движок и которое
+    // автор игры может переопределить полем start_scene в project.sageproj.
+    // Ссылкой, а не полным путём: у собранной игры сцена лежит в пакете, где
+    // никакого диска нет.
+    const fs::path scenePath = fs::path(m_project.StartSceneRef());
     if (scenePath.empty()) {
         Fail("В проекте нет ни одной сцены",
              {"Проект найден, но играть нечего: в scenes/ нет ни одного файла .sage.",
               "Искал в: " + (m_projectDir / "scenes").lexically_normal().string(),
               "",
               "Сохраните сцену в редакторе (File > Save Scene) — плеер берёт",
-              "scenes/main.sage, а если её нет, то первую по алфавиту."});
+              "scenes/main.sage, а если её нет, то первую по алфавиту.",
+              "Другую сцену можно назначить полем start_scene в project.sageproj."});
         return;
     }
     try {

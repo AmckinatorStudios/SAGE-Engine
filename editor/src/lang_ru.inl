@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1081.
+// Язык: Русский. Строк: 1085.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1451,7 +1451,7 @@ constexpr TranslationPair kRussianStrings[] = {
     {"Release Time",
      "Время затухания"},
     {"Reload",
-     "Перечитать"},
+     "Перезагрузить"},
     {"Remove",
      "Убрать"},
     {"Remove Animated Model",
@@ -1606,6 +1606,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Правила масштабирования для этого корня интерфейса"},
     {"Scene",
      "Сцена"},
+    {"Scene changed on disk - reloaded",
+     "Сцена изменена на диске — перезагружена"},
+    {"Scene changed outside the editor",
+     "Сцена изменена вне редактора"},
     {"Scene changed since bake — re-bake",
      "Сцена менялась после запекания — стоит перезапечь"},
     {"Scene lights",
@@ -1880,8 +1884,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Префаб не поставился: "},
     {"The previous session seems to have crashed",
      "Похоже, прошлый запуск завершился аварийно"},
+    {"The project has no scenes, so there is nothing to build. Save the scene first (File > Save Scene).",
+     "В проекте нет ни одной сцены — собирать нечего. Сначала сохраните сцену (Файл > Сохранить сцену)."},
     {"The properties of this entity belong to it alone.",
      "Свойства этой сущности — только её."},
+    {"The scene file was changed by another program, and you have unsaved changes. Reloading discards your changes.",
+     "Файл сцены изменён другой программой, а у вас есть несохранённые правки. Перезагрузка их отбросит."},
     {"The server replicates this object to clients",
      "Сервер реплицирует этот объект клиентам"},
     {"The server sends this object to clients; they follow it",

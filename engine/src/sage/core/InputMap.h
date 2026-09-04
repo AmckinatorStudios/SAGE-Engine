@@ -14,8 +14,8 @@
 //
 // Использование:
 //   InputMap map;
-//   map.Register("Jump").Bind(InputBinding::Key(GLFW_KEY_SPACE));
-//   map.Register("Break Block").Bind(InputBinding::Mouse(GLFW_MOUSE_BUTTON_LEFT));
+//   map.Register("Jump").Bind(InputBinding::Key(sage::Key::Space));
+//   map.Register("Break Block").Bind(InputBinding::Mouse(sage::MouseButton::Left));
 //   ...
 //   if (map.Get("Jump").WasPressed()) ...
 //

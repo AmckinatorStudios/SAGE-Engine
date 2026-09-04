@@ -42,6 +42,7 @@ public:
     void BindTexture2D(int unit, sage::rhi::TextureHandle texture) override;
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
     float MaxAnisotropy() override;
+    void EndFrameDiagnostics(unsigned long long frame) override;
 
     // Метки времени GPU (ARB_timer_query, ядро с OpenGL 3.3).
     sage::rhi::QueryHandle CreateTimestampQuery() override;

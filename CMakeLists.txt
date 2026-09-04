@@ -456,6 +456,7 @@ endif()
 #  общие зависимости (imgui/imguizmo/json), а не чужие исполняемые файлы.
 # ============================================================================
 option(SAGE_BUILD_RUNTIME "Собрать рантайм-плеер SagePlayer" ON)
+option(SAGE_BUILD_TOOLS   "Собрать инструменты командной строки (sage)" ON)
 option(SAGE_BUILD_EDITOR  "Собрать редактор SageEditor" ON)
 option(SAGE_BUILD_SAMPLES "Собрать игры-примеры (sandbox, testgame)" ON)
 option(SAGE_BUILD_TESTS   "Собрать модульные тесты движка" ON)
@@ -464,6 +465,13 @@ add_subdirectory(engine)
 
 if (SAGE_BUILD_RUNTIME)
     add_subdirectory(runtime)
+endif()
+
+# Инструменты командной строки. Отдельно от редактора намеренно: проект должно
+# быть можно создать и осмотреть там, где редактора нет и не будет, — на
+# сборочной машине, по ssh, в git-хуке.
+if (SAGE_BUILD_TOOLS)
+    add_subdirectory(tools/sage_cli)
 endif()
 
 if (SAGE_BUILD_SAMPLES)

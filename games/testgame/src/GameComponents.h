@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include <glm/glm.hpp>
+#include "sage/core/Math.h"
 
 // ---------------------------------------------------------------------------
 // Кастомные ECS-компоненты testgame — живут В ИГРЕ, движок про них не знает.

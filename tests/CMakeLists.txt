@@ -14,6 +14,7 @@ add_executable(sage_tests
     test_robustness.cpp
     test_config.cpp
     test_paths.cpp
+    test_project.cpp
     test_ui.cpp
     test_vars_events.cpp
     test_framegraph.cpp
@@ -58,6 +59,20 @@ add_test(NAME sage_tests COMMAND sage_tests)
 # ============================================================================
 add_executable(sage_crash_probe crash_probe.cpp)
 target_link_libraries(sage_crash_probe PRIVATE sage::engine)
+
+# ============================================================================
+#  exit_probe — программа, которая ПРОСТО ЗАВЕРШАЕТСЯ, и это проверка.
+#
+#  Ловит падение на ВЫХОДЕ: глобальный кэш ресурсов разрушается обработчиком
+#  выхода, уже после гибели GL-контекста, и освобождение буферов видеокарты
+#  роняет процесс после последней строки игры. Юнит-тестом не проверить —
+#  нужен настоящий контекст, а падение случается после main. Запускается из
+#  scripts/ci_smoke_test.sh, проверяется ровно код возврата.
+#  Подробности — в комментарии внутри tests/exit_probe.cpp.
+# ============================================================================
+add_executable(sage_exit_probe exit_probe.cpp)
+sage_windows_manifest(sage_exit_probe)
+target_link_libraries(sage_exit_probe PRIVATE sage::engine)
 
 # ============================================================================
 #  sage_render_tests — проверка КАРТИНКИ по эталонным кадрам. Требует GL, поэтому

@@ -41,12 +41,12 @@ inline const std::unordered_map<std::string, int>& KeyTable() {
 // цифры, именованные клавиши из KeyTable() и MOUSE_LEFT/MOUSE_RIGHT/
 // MOUSE_MIDDLE. Возвращает std::nullopt, если имя не распознано.
 inline std::optional<InputBinding> Parse(const std::string& name) {
-    if (name == "MOUSE_LEFT") return InputBinding::Mouse(GLFW_MOUSE_BUTTON_LEFT);
-    if (name == "MOUSE_RIGHT") return InputBinding::Mouse(GLFW_MOUSE_BUTTON_RIGHT);
-    if (name == "MOUSE_MIDDLE") return InputBinding::Mouse(GLFW_MOUSE_BUTTON_MIDDLE);
+    if (name == "MOUSE_LEFT") return InputBinding::Mouse(sage::MouseButton::Left);
+    if (name == "MOUSE_RIGHT") return InputBinding::Mouse(sage::MouseButton::Right);
+    if (name == "MOUSE_MIDDLE") return InputBinding::Mouse(sage::MouseButton::Middle);
 
     auto it = KeyTable().find(name);
-    if (it != KeyTable().end()) return InputBinding::Key(it->second);
+    if (it != KeyTable().end()) return InputBinding::KeyCode(it->second);
     return std::nullopt;
 }
 

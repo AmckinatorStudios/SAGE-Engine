@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "sage/core/Layer.h"
+#include "sage/project/Project.h"
 #include "sage/core/InputSystem.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/render/Shader.h"
@@ -63,10 +64,12 @@ public:
     void OnRender() override;
 
 private:
-    std::filesystem::path FindMainScene() const;
     void UpdateUiInput(float dt);
     void ResetUiEdits();
 
+    // Проект — движковый (sage::project::Project): тот же класс, которым
+    // пользуется редактор. Плеер не разбирает project.sageproj сам.
+    sage::project::Project m_project;
     std::filesystem::path m_projectDir;
     std::string m_projectName = "SAGE Game";
     std::string m_launchArgs; // "autopilot=1 seed=42" -> LaunchArg в Lua

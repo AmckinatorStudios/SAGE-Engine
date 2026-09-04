@@ -9,8 +9,7 @@
 #include <memory>
 #include <vector>
 
-#include <GLFW/glfw3.h>
-#include <glm/glm.hpp>
+#include "sage/core/Math.h"
 
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
@@ -588,11 +587,11 @@ void TestGameLayer::OnAttach() {
     // --- ввод: именованные действия через InputSystem (первый реальный
     // потребитель; подписка на мышь — через Window, см. InputSystem::Attach) ---
     m_input.Attach(window);
-    m_input.Actions().Register("MoveForward").Bind(InputBinding::Key(GLFW_KEY_W));
-    m_input.Actions().Register("MoveBack").Bind(InputBinding::Key(GLFW_KEY_S));
-    m_input.Actions().Register("MoveLeft").Bind(InputBinding::Key(GLFW_KEY_A));
-    m_input.Actions().Register("MoveRight").Bind(InputBinding::Key(GLFW_KEY_D));
-    m_input.Actions().Register("Quit").Bind(InputBinding::Key(GLFW_KEY_ESCAPE));
+    m_input.Actions().Register("MoveForward").Bind(InputBinding::Key(sage::Key::W));
+    m_input.Actions().Register("MoveBack").Bind(InputBinding::Key(sage::Key::S));
+    m_input.Actions().Register("MoveLeft").Bind(InputBinding::Key(sage::Key::A));
+    m_input.Actions().Register("MoveRight").Bind(InputBinding::Key(sage::Key::D));
+    m_input.Actions().Register("Quit").Bind(InputBinding::Key(sage::Key::Escape));
 
     m_camera.Position = m_playerPos + glm::vec3(0.0f, kEyeHeight, 0.0f);
     m_camera.Yaw = -90.0f; // смотрим в -Z, вглубь комнаты
@@ -602,7 +601,10 @@ void TestGameLayer::OnAttach() {
     // Захват курсора для мышиного обзора — не в автопилоте/скриншот-режиме,
     // чтобы headless-прогоны не зависели от курсора.
     if (!m_autopilot && m_autoScreenshotFrame < 0) {
-        glfwSetInputMode(window.Handle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        // Через окно движка, а не glfwSetInputMode: захват курсора — то, что
+        // движок обязан уметь сам, иначе каждая игра включает GLFW ради одной
+        // строки и знает, на чём движок стоит.
+        window.SetCursorCaptured(true);
         m_cursorCaptured = true;
     }
 

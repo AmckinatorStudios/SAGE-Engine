@@ -75,6 +75,39 @@ std::string Timestamp() {
     return buf;
 }
 
+#if defined(_WIN32)
+// Имя модуля и смещение внутри него для адреса кадра.
+//
+// ЗАЧЕМ ЭТО, КОГДА ЕСТЬ SymFromAddr. Потому что имени от него верить нельзя.
+// Без .pdb он резолвит адрес в БЛИЖАЙШИЙ ЭКСПОРТИРУЕМЫЙ символ, а редактор
+// собран с --export-all-symbols — экспортов много, и «ближайший» оказывается
+// любым. В присланном отчёте о падении так и вышло: три верхних кадра
+// назывались CrashHandler::BuildReport +0x2262, следующий — strncpy +0x2c90,
+// то есть стек читался как заведомая чушь и не указывал ни на что.
+//
+// Модуль и смещение — величина, которую не надо угадывать: она не зависит ни
+// от экспортов, ни от ASLR (база вычитается), и по ней ТА ЖЕ сборка
+// разворачивается в строку исходника одной командой addr2line. Поэтому
+// печатается она ПЕРВОЙ и всегда, а имя от SymFromAddr идёт следом и помечено
+// как приблизительное.
+bool ModuleAndOffset(void* addr, char* out, size_t outSize) {
+    HMODULE mod = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)addr, &mod) ||
+        !mod)
+        return false;
+    char path[MAX_PATH] = {};
+    if (!GetModuleFileNameA(mod, path, MAX_PATH)) return false;
+    const char* name = std::strrchr(path, '\\');
+    name = name ? name + 1 : path;
+    const unsigned long long off =
+        (unsigned long long)((const unsigned char*)addr - (const unsigned char*)mod);
+    std::snprintf(out, outSize, "%s+0x%llx", name, off);
+    return true;
+}
+#endif
+
 std::string Backtrace() {
     std::string out;
 #if defined(_WIN32)
@@ -87,16 +120,23 @@ std::string Backtrace() {
     symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
     symbol->MaxNameLen = 255;
     for (USHORT i = 0; i < n; ++i) {
+        char where[MAX_PATH + 32];
+        if (!ModuleAndOffset(frames[i], where, sizeof(where)))
+            std::snprintf(where, sizeof(where), "0x%p", frames[i]);
+
         DWORD64 disp = 0;
-        char line[512];
+        char line[768];
         if (SymFromAddr(proc, (DWORD64)frames[i], &disp, symbol)) {
-            std::snprintf(line, sizeof(line), "  #%02u %s +0x%llx\n", i, symbol->Name,
-                          (unsigned long long)disp);
+            std::snprintf(line, sizeof(line), "  #%02u %s   (~%s +0x%llx)\n", i, where,
+                          symbol->Name, (unsigned long long)disp);
         } else {
-            std::snprintf(line, sizeof(line), "  #%02u 0x%p\n", i, frames[i]);
+            std::snprintf(line, sizeof(line), "  #%02u %s\n", i, where);
         }
         out += line;
     }
+    out += "  (~имя — ближайший экспорт, ему верить нельзя; адрес в строку\n"
+           "   исходника разворачивается ТОЙ ЖЕ сборкой:\n"
+           "   x86_64-w64-mingw32-addr2line -f -C -e SageEditor.exe <смещение>)\n";
 #else
     void* frames[64];
     const int n = ::backtrace(frames, 64);

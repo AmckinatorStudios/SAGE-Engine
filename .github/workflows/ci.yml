@@ -37,6 +37,13 @@ jobs:
       - name: Paths check (no filesystem path taken from getenv)
         run: python3 scripts/check_paths.py
 
+      # Граница «движок -> игра»: игра не включает GLFW, glm, entt и прочие
+      # внутренности движка. Движок обязан выглядеть для игры единой
+      # платформой, а не набором библиотек, которые она связывает сама.
+      # Тоже до сборки: проверка читает исходники и падает за секунду.
+      - name: Engine API boundary (games use sage/... only)
+        run: python3 scripts/check_engine_api.py
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
