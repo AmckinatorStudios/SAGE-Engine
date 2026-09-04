@@ -170,6 +170,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # А ЭТА СБОРКА ЕЩ�ё САМАЯ СВЕЖАЯ? Публикация «только с main» гонку не
+          # закрывает: два слияния подряд дают две работы, и та, что стартовала
+          # раньше, вполне может финишировать позже — тогда она затрёт релиз
+          # СТАРЫМ архивом. Сравниваем свой коммит с текущей вершиной main и
+          # молча уступаем дорогу более новой сборке.
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            HEAD_NOW="$(gh api repos/${{ github.repository }}/commits/main --jq .sha)"
+            if [[ -n "$HEAD_NOW" && "$HEAD_NOW" != "${{ github.sha }}" ]]; then
+              echo "main уже ушёл вперёд ($HEAD_NOW), релиз выложит более свежая сборка"
+              exit 0
+            fi
+          fi
+
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             TAG="${{ github.ref_name }}"
             TITLE="SAGE Editor $TAG"
