@@ -97,6 +97,7 @@ private:
     bool m_running = true;
     float m_deltaTime = 0.0f;
     double m_time = 0.0;   // секунды с запуска (сумма кадровых dt)
+    unsigned long long m_frameIndex = 0;  // номер кадра — для диагностики графики
     float m_fps = 0.0f;
 
     static Application* s_instance;

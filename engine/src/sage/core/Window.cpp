@@ -1,6 +1,8 @@
 #include "Window.h"
 #include "Log.h"
+#include "Paths.h"
 #include <stdexcept>
+#include <string>
 
 static void FramebufferSizeCallback(GLFWwindow* handle, int width, int height) {
     auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
@@ -79,6 +81,18 @@ Window::Window(int width, int height, const std::string& title, Params params)
     // коррекцию (GraphicsDevice::SetSRGBWrite) при рендере сцены напрямую в
     // экран без пост-процесса. Если драйвер не умеет — хинт игнорируется.
     glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
+
+    // Отладочный контекст по SAGE_GPU_DEBUG=1.
+    //
+    // Канал сообщений драйвера (GL_KHR_debug) движок включает всегда, но БЕЗ
+    // отладочного контекста драйвер не обязан ничего в него присылать: часть
+    // реализаций молчит, часть отдаёт только критичное. Просить это у контекста
+    // по умолчанию нельзя — на некоторых драйверах отладочный контекст заметно
+    // медленнее, и платить за это каждым запуском ради строк, которые обычно не
+    // нужны, неправильно. Поэтому: обычный запуск — как раньше, разбор поломки
+    // — с переменной.
+    if (const std::string dbg = sage::EnvString("SAGE_GPU_DEBUG"); !dbg.empty() && dbg != "0")
+        glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
     if (params.Msaa > 0) glfwWindowHint(GLFW_SAMPLES, params.Msaa); // сглаживание экранного буфера
 
     // Полноэкранный/безрамочный режим использует текущий видеорежим монитора

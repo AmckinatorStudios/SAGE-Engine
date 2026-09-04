@@ -939,6 +939,7 @@
   "The parent lays its children out: row, column, grid": "Родитель раскладывает детей: строка, столбец, сетка",
   "The prefab could not be placed: ": "Префаб не поставился: ",
   "The previous session seems to have crashed": "Похоже, прошлый запуск завершился аварийно",
+  "The project has no scenes, so there is nothing to build. Save the scene first (File > Save Scene).": "В проекте нет ни одной сцены — собирать нечего. Сначала сохраните сцену (Файл > Сохранить сцену).",
   "The properties of this entity belong to it alone.": "Свойства этой сущности — только её.",
   "The scene file was changed by another program, and you have unsaved changes. Reloading discards your changes.": "Файл сцены изменён другой программой, а у вас есть несохранённые правки. Перезагрузка их отбросит.",
   "The server replicates this object to clients": "Сервер реплицирует этот объект клиентам",

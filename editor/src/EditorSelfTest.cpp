@@ -755,6 +755,32 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         fs::remove(texB, rmec);
     }
 
+    // --- Сборка игры ОТКАЗЫВАЕТ, когда сохранять было нечего ---
+    //
+    // Отказ здесь заменил собой молчаливую удачу: сборка складывала папку с
+    // exe и пустым пакетом, а узнавал об этом ИГРОК — окном «В проекте нет ни
+    // одной сцены» на своей машине. Проверка прячет scenes/ и требует, чтобы
+    // сборка отказалась; на старом коде она проходила и потому падает.
+    if (ok) {
+        const fs::path scenesDir = m_project.ScenesDir();
+        const fs::path hidden = m_project.Dir() / "scenes-hidden-by-selftest";
+        std::error_code sec;
+        fs::rename(scenesDir, hidden, sec);
+        if (sec) {
+            LOG_ERROR("Editor") << "SELFTEST: не удалось спрятать сцены: " << sec.message();
+            ok = false;
+        } else {
+            std::string emptyErr;
+            if (BuildGame("selftest_dist_empty", emptyErr)) {
+                LOG_ERROR("Editor")
+                    << "SELFTEST: сборка игры без единой сцены обязана отказывать, но прошла";
+                ok = false;
+            }
+            fs::rename(hidden, scenesDir, sec);   // возвращаем на место в любом случае
+            fs::remove_all("selftest_dist_empty", sec);
+        }
+    }
+
     // --- Сборка игры: SagePlayer + project/ упакованы в запускаемую папку ---
     // (запуск упакованной игры проверяет smoke-тест 5/5 отдельным процессом)
     if (ok) {

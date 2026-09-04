@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1084.
+// Язык: Русский. Строк: 1085.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1884,6 +1884,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Префаб не поставился: "},
     {"The previous session seems to have crashed",
      "Похоже, прошлый запуск завершился аварийно"},
+    {"The project has no scenes, so there is nothing to build. Save the scene first (File > Save Scene).",
+     "В проекте нет ни одной сцены — собирать нечего. Сначала сохраните сцену (Файл > Сохранить сцену)."},
     {"The properties of this entity belong to it alone.",
      "Свойства этой сущности — только её."},
     {"The scene file was changed by another program, and you have unsaved changes. Reloading discards your changes.",

@@ -1,5 +1,7 @@
 #include "rhi/opengl/OpenGLDevice.h"
 #include "rhi/opengl/OpenGLResources.h"
+#include "rhi/opengl/GLDebug.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Log.h"
 #include <glad/glad.h>
 #include <algorithm>
@@ -58,6 +60,26 @@ void OpenGLDevice::Init(ProcLoader loader) {
                          << " текстурных юнитов фрагментного шейдера, движку нужно 16 — "
                             "обычный вид может выйти чёрным при исправных отладочных режимах";
     }
+
+    // ПОЛНЫЙ отчёт о карте и канал сообщений драйвера. Строки выше — короткая
+    // сводка на каждый запуск; здесь всё, что нужно для разбора чужой машины.
+    //
+    // Почему отчёт пишется ВСЕГДА, а не по флагу: его нет ровно тогда, когда он
+    // нужен, — человек присылает лог уже после того, как всё сломалось, и
+    // просить «повторите с переменной окружения» значит терять день на круг.
+    // Стоит он один раз при старте и десяток строк в файле.
+    LogGpuReport();
+
+    // Канал сообщений драйвера — тоже всегда. Подробный режим (с
+    // уведомлениями) включается переменной SAGE_GPU_DEBUG=1: уведомлений на
+    // некоторых драйверах сотни за кадр, и в обычном запуске они бы вытеснили
+    // из лога всё остальное.
+    const std::string verbose = sage::EnvString("SAGE_GPU_DEBUG");
+    EnableGlDebugOutput(!verbose.empty() && verbose != "0");
+}
+
+void OpenGLDevice::EndFrameDiagnostics(unsigned long long frame) {
+    SweepGlErrorsOncePerFrame(frame);
 }
 
 std::string OpenGLDevice::ApiVersion() const {
