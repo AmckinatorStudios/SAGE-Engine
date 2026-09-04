@@ -24,7 +24,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/9: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/10: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -45,7 +45,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/9: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/10: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -67,14 +67,14 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
 fi
 echo "OK: SageEditor self-test прошёл"
 
-echo "=== Smoke-тест 3/9: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 3/10: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/9: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+echo "=== Smoke-тест 4/10: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
@@ -110,7 +110,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/9: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 5/10: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -281,7 +281,7 @@ if cmp -s "${POST_OFF}" "${POST_ON}"; then
 fi
 echo "OK: пост-обработка выполняется в собранной игре (кадры с SAGE_POST=0/1 различаются)"
 
-echo "=== Smoke-тест 6/9: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 6/10: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -322,7 +322,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 7/9: обработчик падений (настоящее падение) ==="
+echo "=== Smoke-тест 7/10: обработчик падений (настоящее падение) ==="
 # Единственный честный способ проверить обработчик падений — уронить процесс.
 # Обычным тестом это не сделать: обработчик по замыслу доводит падение до
 # конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
@@ -365,7 +365,7 @@ if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
 fi
 echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
 
-echo "=== Smoke-тест 8/9: отказ запуска слышно ==="
+echo "=== Smoke-тест 8/10: отказ запуска слышно ==="
 # «Просто запускаю — ничего не происходит, даже ошибки нет, а в логе только
 # строка о старте». Так выглядел ЛЮБОЙ отказ запуска: причина уходила в stderr,
 # которого у окна Windows нет, и в лог не попадала вовсе.
@@ -399,7 +399,7 @@ if ! grep -q "GLFW" "${STARTFAIL_DIR}/sage_editor.log"; then
 fi
 echo "OK: отказ запуска записан в лог с причиной от GLFW (код ${STATUS})"
 
-echo "=== Smoke-тест 9/9: путь с кириллицей (имя пользователя по-русски) ==="
+echo "=== Smoke-тест 9/10: путь с кириллицей (имя пользователя по-русски) ==="
 # ЭТО ПРОВЕРКА ТОЙ САМОЙ ОШИБКИ, из-за которой редактор не запускался на
 # русской Windows: «filesystem error: Cannot convert character sequence».
 # Причина — путь с кириллицей, пришедший из окружения (APPDATA у пользователя
@@ -484,5 +484,46 @@ if [ "${UNI_SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: кириллица в пути работает везде — настройки редактора, папка проекта,"
 echo "    аргумент командной строки и запись кадра (${UNI_SHOT_SIZE} байт)"
+
+echo "=== Smoke-тест 10/10: выход из игры без падения (кэш ресурсов) ==="
+# Единственная проверка, которой достаточно кода возврата, — и это не лень.
+#
+# Кэш ресурсов (ResourceManager) — глобальный синглтон, то есть функция-статик.
+# Разрушается он обработчиком выхода из процесса, то есть УЖЕ ПОСЛЕ гибели
+# окна и GL-контекста, и освобождение буферов видеокарты в этот момент роняет
+# процесс — после последней строки игры, со стеком, ведущим в движок.
+#
+# Обход был известен и записан в каждом потребителе (Clear() в своём OnDetach),
+# то есть держался на памяти того, кто пишет новую игру. Первая же игра,
+# написанная по документации, а не по этой памяти, получила падение с кодом
+# 139 при полностью отработавшем прогоне. Теперь кэш закрывает сам
+# Application, пока контекст жив, а sage_exit_probe (игра БЕЗ обходного пути)
+# сторожит, чтобы это не откатили: на старом движке он падает, на новом
+# возвращает ноль.
+# Путь АБСОЛЮТНЫЙ: программа запускается из своего каталога (ей туда пишется
+# лог), и относительный указывал бы уже не туда — ровно так же, как у пробы
+# падения выше.
+if [ ! -x "${BUILD_DIR}/tests/sage_exit_probe" ]; then
+    echo "ОШИБКА: не найден собранный бинарник ${BUILD_DIR}/tests/sage_exit_probe"; exit 1
+fi
+EXIT_PROBE_EXE="$(cd "$(dirname "${BUILD_DIR}/tests/sage_exit_probe")" && pwd)/sage_exit_probe"
+EXIT_PROBE_DIR="${SCRATCH_DIR}/exitprobe"
+mkdir -p "${EXIT_PROBE_DIR}"
+EXIT_STATUS=0
+( cd "${EXIT_PROBE_DIR}" && run_headless "${EXIT_PROBE_EXE}" ) \
+    > "${EXIT_PROBE_DIR}/probe.log" 2>&1 || EXIT_STATUS=$?
+if [ ${EXIT_STATUS} -ne 0 ]; then
+    echo "ОШИБКА: выход из игры завершился кодом ${EXIT_STATUS}"
+    if [ ${EXIT_STATUS} -ge 128 ]; then
+        echo "        (код >= 128 означает сигнал: похоже, GPU-ресурсы освобождаются"
+        echo "         после гибели GL-контекста — см. ~Application и tests/exit_probe.cpp)"
+    fi
+    cat "${EXIT_PROBE_DIR}/probe.log"; exit 1
+fi
+if ! grep -q "EXITPROBE: слой отсоединён" "${EXIT_PROBE_DIR}/sage_exit_probe.log" 2>/dev/null; then
+    echo "ОШИБКА: проба выхода не дошла до отсоединения слоя"
+    cat "${EXIT_PROBE_DIR}/probe.log"; exit 1
+fi
+echo "OK: игра, не зовущая ResourceManager::Clear() сама, выходит с кодом 0"
 
 echo "=== Все smoke-тесты прошли ==="
