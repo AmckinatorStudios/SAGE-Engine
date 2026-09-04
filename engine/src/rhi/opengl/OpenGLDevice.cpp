@@ -27,7 +27,37 @@ void OpenGLDevice::Init(ProcLoader loader) {
     // Бесшовные cubemap — без этого на стыках граней skybox видны швы.
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
+    // ЧТО ЗА ВИДЕОКАРТА И ЧТО ОНА УМЕЕТ — В ЛОГ, СРАЗУ.
+    //
+    // Без этих строк разбор чужой машины начинается с переписки «а какая у вас
+    // карта?». Хуже того, часть отказов рендера — прямое следствие ЛИМИТОВ, и
+    // без них в логе они выглядят загадкой: движку нужно шестнадцать текстурных
+    // юнитов фрагментного шейдера (полная раскладка — в ShadowMap.h), и на
+    // карте, дающей меньше, обычный вид может уйти в чёрное при исправных
+    // отладочных режимах — те столько текстур не трогают.
+    auto limit = [](GLenum what) {
+        GLint v = 0;
+        glGetIntegerv(what, &v);
+        return (int)v;
+    };
+    const GLubyte* vendor = glGetString(GL_VENDOR);
+    const GLubyte* renderer = glGetString(GL_RENDERER);
     LOG_INFO("RHI") << "Графический бэкенд: OpenGL " << glGetString(GL_VERSION);
+    LOG_INFO("RHI") << "Видеокарта: " << (renderer ? (const char*)renderer : "?") << " ("
+                    << (vendor ? (const char*)vendor : "?") << ")";
+    const int texUnits = limit(GL_MAX_TEXTURE_IMAGE_UNITS);
+    LOG_INFO("RHI") << "Лимиты: текстурных юнитов фрагмента " << texUnits << ", всего "
+                    << limit(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS) << ", uniform-компонент "
+                    << limit(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS) << ", размер текстуры "
+                    << limit(GL_MAX_TEXTURE_SIZE);
+    // Шестнадцать — не пожелание, а то, из чего собрана раскладка юнитов.
+    // Сказать об этом надо ГРОМКО и на месте, а не оставлять человека гадать,
+    // почему у него чёрные объекты.
+    if (texUnits > 0 && texUnits < 16) {
+        LOG_ERROR("RHI") << "Видеокарта даёт только " << texUnits
+                         << " текстурных юнитов фрагментного шейдера, движку нужно 16 — "
+                            "обычный вид может выйти чёрным при исправных отладочных режимах";
+    }
 }
 
 std::string OpenGLDevice::ApiVersion() const {

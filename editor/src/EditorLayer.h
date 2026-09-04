@@ -123,6 +123,7 @@ public:
 
     // --- EditorHost: undo/redo ---
     const std::string& TemplateNote() const override { return m_templateNote; }
+    const std::string& RenderWarning() const override { return m_renderer.Warning(); }
     void ClearTemplateNote() override { m_templateNote.clear(); }
     void MergeScriptVars(GameObject object) override;
     // Сообщает в консоль заметку шаблона (см. ProjectTemplate::Note).

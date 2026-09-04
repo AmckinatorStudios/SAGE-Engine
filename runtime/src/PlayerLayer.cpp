@@ -887,7 +887,21 @@ void PlayerLayer::OnRender() {
         // здесь на экране не картинка, а величина: 0.2 шероховатости обязаны
         // остаться 0.2, иначе вид отвечает не на тот вопрос, ради которого его
         // включили. Кадр глубины после ACES и гаммы становился почти белым.
-        const bool usePost = cfg.PostProcessing && !debugging;
+        // Пост-обработка ПРОВЕРЯЕТСЯ на этой видеокарте (см. PostFX::CheckPipeline).
+        // Её отказ выглядит как чёрный экран при живом кадре — с игрой это ещё
+        // хуже, чем с редактором: там хотя бы есть отладочные виды, а здесь
+        // человек видит просто чёрное окно. Лучше кадр без свечения, чем ничего.
+        bool postOk = true;
+        if (cfg.PostProcessing && m_postfx) {
+            const sage::render::PostFX::SelfCheck& check = m_postfx->CheckPipeline();
+            postOk = !check.Ran || check.Ok;
+            if (!postOk && !m_postWarned) {
+                m_postWarned = true;
+                LOG_ERROR("Player") << "Пост-обработка на этой видеокарте не работает ("
+                                    << check.Reason << ") — кадр без эффектов";
+            }
+        }
+        const bool usePost = cfg.PostProcessing && !debugging && postOk;
         if (usePost) {
             if (!m_postfx) m_postfx.emplace();
             // Число сэмплов — по конфигу и той же функцией, что у редактора:

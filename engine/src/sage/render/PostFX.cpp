@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 #include <glm/gtc/matrix_inverse.hpp>
 
@@ -845,6 +846,70 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     // устаревшей матрицей и размазал бы весь экран.
     m_prevViewProj = viewProj;
     m_hasPrevFrame = true;
+}
+
+
+// --- Проверка цепочки на этой видеокарте -------------------------------------
+//
+// Прогоняем известную картинку и смотрим, что вышло. Ровный средний серый —
+// вход, у которого правильный ответ известен без спора: тон-маппинг его
+// подвинет, но чёрным и белым он не станет ни при каких настройках.
+//
+// Проверяется ровно то, что ломается: не «совпал ли пиксель», а «не пропала ли
+// картинка». Сравнивать с эталоном тут нельзя — у каждой видеокарты своя
+// фильтрация и свой порядок операций, и любой такой эталон дал бы ложную
+// тревогу на первой же чужой машине.
+const PostFX::SelfCheck& PostFX::CheckPipeline() {
+    if (m_selfCheck.Ran) return m_selfCheck;
+    m_selfCheck.Ran = true;
+
+    sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
+    constexpr int kSize = 32;
+
+    // Вход: ровный серый, непрозрачный.
+    std::vector<unsigned char> gray((size_t)kSize * kSize * 4, 128);
+    for (size_t i = 3; i < gray.size(); i += 4) gray[i] = 255;
+    sage::rhi::Texture2DDesc desc;
+    desc.Width = desc.Height = kSize;
+    desc.Channels = 4;
+    desc.FilterMode = sage::rhi::Filter::Bilinear;
+    desc.WrapMode = sage::rhi::Wrap::ClampEdge;
+    desc.GenerateMipmaps = false;
+    std::unique_ptr<sage::rhi::Texture2D> input = dev.CreateTexture2D(desc, gray.data());
+    if (!input) {
+        m_selfCheck.Reason = "не удалось создать пробную текстуру";
+        return m_selfCheck;
+    }
+
+    Framebuffer target(kSize, kSize);
+    PostFXSettings s;               // настройки по умолчанию: тон-маппинг и экспозиция
+    s.AOEnabled = false;            // без глубины AO нечего считать
+    s.DofEnabled = false;
+    s.MotionBlurEnabled = false;
+
+    // Матрицы единичные: ни один из оставшихся эффектов их не читает, а
+    // выдумывать камеру ради проверки — заводить второй источник правды.
+    Render(input->Handle(), sage::rhi::TextureHandle{}, kSize, kSize, glm::mat4(1.0f),
+           glm::mat4(1.0f), s, &target, 0, 0, kSize, kSize);
+
+    target.Resolve();
+    target.Bind();
+    std::vector<unsigned char> out((size_t)kSize * kSize * 3, 0);
+    dev.ReadPixelsRGB(0, 0, kSize, kSize, out.data());
+    dev.BindDefaultFramebuffer();
+
+    double sum = 0.0;
+    for (unsigned char c : out) sum += c;
+    const double mean = sum / (double)out.size();
+
+    // Порог низкий намеренно: ловим ПРОПАЖУ картинки, а не отличие в оттенке.
+    // Серый после любого разумного тон-маппинга остаётся заметно светлее нуля.
+    if (mean < 4.0) {
+        m_selfCheck.Reason = "цепочка вернула чёрный кадр на заведомо сером входе";
+        return m_selfCheck;
+    }
+    m_selfCheck.Ok = true;
+    return m_selfCheck;
 }
 
 } // namespace sage::render
