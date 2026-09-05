@@ -17,6 +17,19 @@ namespace EditorIcons {
 
 namespace {
 
+// Метка kThemeColor -> цвет темы. Одно место, через которое проходят все
+// иконки: и рядом с текстом, и в кнопках, и поверх списков.
+glm::vec3 Resolve(const glm::vec3& c) {
+    if (c.x >= 0.0f) return c;
+    const ImVec4 t = EditorTheme::Color(EditorTheme::Role::Text);
+    return glm::vec3(t.x, t.y, t.z);
+}
+
+} // namespace
+
+
+namespace {
+
 ImU32 Col(const glm::vec3& c, float a = 1.0f) {
     return ImGui::GetColorU32(ImVec4(c.r, c.g, c.b, a));
 }
@@ -649,21 +662,31 @@ const char* const kNames[] = {
 
 } // namespace
 
-bool Has(const char* icon) {
-    // Формы рисуются, а не перечисляются, поэтому «есть ли иконка» проверяется
-    // прогоном по невидимому списку команд: ImDrawList с нулевым размером
-    // ничего не рисует, а Shape честно возвращает, знает ли он имя.
-    ImDrawList dl(ImGui::GetDrawListSharedData());
-    dl.PushClipRectFullScreen();
-    dl.PushTextureID(ImGui::GetIO().Fonts->TexID);
-    Pen pen{&dl, ImVec2(0, 0), 0.0f, 0};
-    return Shape(pen, icon);
-}
 
 int Count() { return (int)(sizeof(kNames) / sizeof(kNames[0])); }
 const char* NameAt(int index) {
     return (index >= 0 && index < Count()) ? kNames[index] : nullptr;
 }
+
+bool Has(const char* icon) {
+    // ПРОСТО СРАВНЕНИЕ ИМЁН по тому же списку kNames, из которого работают
+    // Count/NameAt.
+    //
+    // Раньше здесь ради ответа «есть ли такая иконка» СОБИРАЛСЯ временный
+    // ImDrawList и по нему прогонялась отрисовка «в никуда». Две беды сразу.
+    // Первая — цена: список отрисовки выделяет память, а спрашивают об иконке
+    // в цикле по строкам списка, то есть десятки раз за кадр. Вторая — падение:
+    // ImDrawList, созданный вручную, в ImGui 1.92 не готов к PushClipRect, и
+    // первый же такой вызов роняет редактор. Ни то, ни другое не нужно, чтобы
+    // сверить строку со списком строк.
+    if (!icon || !*icon) return false;
+    for (int i = 0; i < Count(); ++i) {
+        const char* name = NameAt(i);
+        if (name && std::strcmp(name, icon) == 0) return true;
+    }
+    return false;
+}
+
 
 // Совпадающие ID — В ЛОГ, а не только под курсор.
 //
@@ -751,7 +774,7 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     const float icon_s = std::floor(h * 0.64f);
     const float off = std::floor((h - icon_s) * 0.5f);
     DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x + off, cursor.y + off), icon_s, icon,
-           Col(tint));
+           Col(Resolve(tint)));
     if (active) ImGui::PopStyleColor(2);
     if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
     ImGui::PopID();
@@ -761,7 +784,7 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
 void Inline(const char* icon, const glm::vec3& color) {
     const float s = std::floor(ImGui::GetTextLineHeight());
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
-    DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x, cursor.y), s, icon, Col(color));
+    DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x, cursor.y), s, icon, Col(Resolve(color)));
     // Место под иконку резервируется Dummy: без него следующий SameLine лёг бы
     // поверх рисунка, потому что ImGui о нарисованном напрямую не знает.
     ImGui::Dummy(ImVec2(s, s));
@@ -770,7 +793,7 @@ void Inline(const char* icon, const glm::vec3& color) {
 void Overlay(float x, float y, float size, const char* icon, const glm::vec3& color) {
     // Ни курсора, ни Dummy: рисунок ложится в список отрисовки окна, а «последний
     // элемент» ImGui остаётся тем, что подали до вызова.
-    DrawAt(ImGui::GetWindowDrawList(), ImVec2(x, y), size, icon, Col(color));
+    DrawAt(ImGui::GetWindowDrawList(), ImVec2(x, y), size, icon, Col(Resolve(color)));
 }
 
 void DrawSheet(bool* open) {

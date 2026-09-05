@@ -790,6 +790,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
 
     // Глобальные хоткеи (когда не печатаем в поле ввода).
     ImGuiIO& io = ImGui::GetIO();
+    // Палитра команд — ДО проверки на ввод текста: Ctrl+K обязан открывать её
+    // и из поля поиска ассетов, иначе «горячая клавиша, которая иногда не
+    // работает» хуже отсутствующей.
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_K)) m_palette.Open(m_paletteQuery);
+    m_palette.Draw(m_commands);
+
     if (!io.WantTextInput) {
         if (ImGui::IsKeyPressed(ImGuiKey_Delete)) DeleteSelected();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) DuplicateSelected();

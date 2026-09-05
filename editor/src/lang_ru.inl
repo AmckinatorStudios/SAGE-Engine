@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1135.
+// Язык: Русский. Строк: 1139.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1248,6 +1248,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не запечено (статичных объектов: %d)"},
     {"Not the scene's sun: a directional light with a lower number in the hierarchy is already the sun, and only one takes part in the frame.",
      "Это не солнце сцены: солнцем уже работает направленный свет с меньшим номером в иерархии, а в кадре участвует только одно."},
+    {"Nothing found",
+     "Ничего не нашлось"},
     {"Nothing happens yet. A link lets this element send an event\nor call a method on another object by itself.",
      "Пока ничего не происходит. Связь позволяет элементу самому\nпослать событие или позвать метод у другого объекта."},
     {"Nothing here yet.",
@@ -1706,6 +1708,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт назначен: "},
     {"Scripts (*.lua)",
      "Скрипты (*.lua)"},
+    {"Search commands...",
+     "Поиск команд..."},
     {"Search...",
      "Поиск…"},
     {"Section",
@@ -1998,6 +2002,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Оформление изменено"},
     {"Theme saved:",
      "Тема записана:"},
+    {"Theme:",
+     "Оформление:"},
     {"There are no interface elements yet. Add one with the Element button above.",
      "Элементов интерфейса пока нет. Добавьте кнопкой «Элемент» выше."},
     {"There are unsaved changes (Ctrl+S)",
@@ -2062,6 +2068,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Треугольников"},
     {"Triangles: %d, bounds %.2f x %.2f x %.2f",
      "Треугольников: %d, габарит %.2f x %.2f x %.2f"},
+    {"Try a different word.",
+     "Попробуйте другое слово."},
     {"Turn on",
      "Включить"},
     {"Turn on layout mode (U)",

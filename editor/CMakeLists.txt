@@ -23,6 +23,8 @@ add_executable(SageEditor WIN32
     src/EditorTheme.cpp
     src/ui/UIStyle.cpp
     src/ui/UI.cpp
+    src/ui/Commands.cpp
+    src/ui/CommandPalette.cpp
     src/EditorIcons.cpp
     src/AssetSlot.cpp
     src/ModelMaterialImport.cpp

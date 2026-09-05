@@ -1135,6 +1135,10 @@
     "GB": "ГБ",
     "Draw Calls": "Вызовов",
     "Triangles": "Треугольников",
-    "Objects": "Объектов"
+    "Objects": "Объектов",
+    "Theme:": "Оформление:",
+    "Search commands...": "Поиск команд...",
+    "Nothing found": "Ничего не нашлось",
+    "Try a different word.": "Попробуйте другое слово."
   }
 }

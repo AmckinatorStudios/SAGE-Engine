@@ -22,6 +22,16 @@
 // ---------------------------------------------------------------------------
 namespace EditorIcons {
 
+// «Цвет — из темы». Значение по умолчанию у аргумента вычисляется в точке
+// объявления, а тема к тому моменту ещё не выбрана, поэтому здесь стоит метка,
+// а настоящий цвет берётся при отрисовке.
+//
+// Заведена не для красоты. Раньше по умолчанию стоял白 — glm::vec3(1.0f), — и
+// на тёмном фоне это выглядело правильно. В светлой теме те же иконки
+// оказались белыми на белом: панель инструментов вьюпорта превращалась в ряд
+// пустых кружков. Цвет, прописанный числом, переживает смену темы — а вид нет.
+inline constexpr glm::vec3 kThemeColor = glm::vec3(-1.0f);
+
 // Кнопка «иконка + подпись». tooltip показывается при наведении (nullptr — не
 // показывать). Возвращает true при нажатии.
 bool Button(const char* icon, const char* label, const char* tooltip = nullptr,
@@ -29,11 +39,11 @@ bool Button(const char* icon, const char* label, const char* tooltip = nullptr,
 
 // Только иконка, размером с кнопку. Для тесных панелей (тулбар).
 bool IconOnlyButton(const char* icon, const char* tooltip, bool active = false,
-                    const glm::vec3& tint = glm::vec3(1.0f));
+                    const glm::vec3& tint = kThemeColor);
 
 // Иконка внутри текстовой строки: занимает место одного символа и выравнена по
 // базовой линии. Для списков (иерархия, консоль, ассеты).
-void Inline(const char* icon, const glm::vec3& color = glm::vec3(0.82f, 0.84f, 0.88f));
+void Inline(const char* icon, const glm::vec3& color = kThemeColor);
 
 // Иконка ПОВЕРХ уже поданного элемента, в абсолютных экранных координатах.
 //
@@ -45,7 +55,7 @@ void Inline(const char* icon, const glm::vec3& color = glm::vec3(0.82f, 0.84f, 0
 // нарисована. Overlay ничего не подаёт: это чистый рисунок в списке отрисовки,
 // и строка остаётся строкой.
 void Overlay(float x, float y, float size, const char* icon,
-             const glm::vec3& color = glm::vec3(0.82f, 0.84f, 0.88f));
+             const glm::vec3& color = kThemeColor);
 
 // Есть ли такая иконка. Неизвестное имя рисуется заглушкой (пустой квадрат с
 // диагональю) — интерфейс не должен рассыпаться из-за опечатки.
