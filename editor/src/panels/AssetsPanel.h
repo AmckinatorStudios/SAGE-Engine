@@ -92,6 +92,14 @@ private:
 
     void DrawBreadcrumb(EditorHost& host);
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
+    // Перетаскивание, выбор, открытие и контекстное меню — общие у сетки и
+    // списка: различаются они только рисованием.
+    void Behaviour(EditorHost& host, const std::filesystem::path& path, bool isDir, bool clicked,
+                   bool doubleClicked);
+    // Строка списка — то же, что тайл, но в один ряд: значок, имя, тип, размер.
+    void DrawRow(EditorHost& host, const std::filesystem::path& path, bool isDir);
+    // Дерево папок слева. Рекурсивно, от папки проекта вниз.
+    void DrawFolderTree(EditorHost& host, const std::filesystem::path& dir, int depth);
     void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели
 
     // Перенос файла в папку броском (вместе с сайдкарами .meta/.sageimport).
@@ -103,6 +111,17 @@ private:
     FileBrowser m_importBrowser;
 
     char m_search[128] = "";
+
+    // СПИСОК ИЛИ СЕТКА. Сетка показывает, ЧТО это (обложка материала, кадр
+    // модели, сама картинка); список показывает, СКОЛЬКО их и как называются.
+    // Обе задачи настоящие и разные: обложки нужны, когда ищешь текстуру
+    // глазами, и мешают, когда в папке полторы сотни скриптов с говорящими
+    // именами. Раньше была только сетка, и вторая задача решалась прокруткой.
+    bool m_listView = false;
+    // Дерево папок слева. Сворачивается: в узкой панели оно съедает половину
+    // ширины, а в широкой — экономит все переходы «вверх, вверх, вниз».
+    bool m_showTree = true;
+    float m_treeWidth = 0.0f;   // 0 — посчитать от токенов при первом кадре
     std::filesystem::path m_selected;      // выделенный тайл
     std::filesystem::path m_renameTarget;  // пусто — модалка Rename не активна
     char m_renameBuf[256] = "";

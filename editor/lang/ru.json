@@ -1139,6 +1139,17 @@
     "Theme:": "Оформление:",
     "Search commands...": "Поиск команд...",
     "Nothing found": "Ничего не нашлось",
-    "Try a different word.": "Попробуйте другое слово."
+    "Try a different word.": "Попробуйте другое слово.",
+    "Try a different name": "Попробуйте другое имя",
+    "Id": "Номер",
+    "Dark theme": "Тёмная тема",
+    "Light theme": "Светлая тема",
+    "Search": "Поиск",
+    "Warnings": "Предупреждения",
+    "Errors": "Ошибки",
+    "Console display": "Показ консоли",
+    "Folder tree": "Дерево папок",
+    "Grid view": "Сеткой",
+    "List view": "Списком"
   }
 }

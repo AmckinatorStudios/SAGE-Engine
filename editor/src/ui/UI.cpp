@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 
 #include "imgui_internal.h"
@@ -114,6 +115,59 @@ bool IconButton(const char* icon, const char* tooltip, bool active, const char* 
     return pressed;
 }
 
+bool FilterChip(const char* label, bool* on, int count, Role role, const char* icon) {
+    const Style& ui = Get();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    char countBuf[16] = {0};
+    if (count >= 0) std::snprintf(countBuf, sizeof(countBuf), "%d", count);
+    const ImVec2 labelSize = ImGui::CalcTextSize(label);
+    const ImVec2 countSize = countBuf[0] ? ImGui::CalcTextSize(countBuf) : ImVec2(0, 0);
+    const float iconW = icon ? ui.IconSize + ui.SpacingXS : 0.0f;
+    const float w = ui.PaddingControl * 2.0f + iconW + labelSize.x +
+                    (countBuf[0] ? ui.SpacingSM + countSize.x : 0.0f);
+    const float h = ui.ControlHeight;
+
+    const ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(label, ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool pressed = ImGui::IsItemClicked();
+    if (pressed) *on = !*on;
+
+    const ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+    const ImVec4 tint = C(role);
+    // Включённая фишка заливается своим цветом слабо, а обводится сильно:
+    // сильная заливка под текстом того же цвета убивает контраст, а обводка
+    // держит форму и на светлой теме, где слабой заливки почти не видно.
+    if (*on) {
+        dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.16f)),
+                          ui.CornerRadius);
+        dl->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.55f)),
+                    ui.CornerRadius, 0, ui.BorderWidth);
+    } else if (hovered) {
+        dl->AddRectFilled(p0, p1, EditorTheme::Color32(Role::Hover), ui.CornerRadius);
+    } else {
+        dl->AddRect(p0, p1, EditorTheme::Color32(Role::Line), ui.CornerRadius, 0, ui.BorderWidth);
+    }
+
+    // Выключенная фишка приглушена, но НЕ до нечитаемости: её всё ещё надо
+    // прочитать, чтобы включить обратно.
+    const ImU32 fg = *on ? ImGui::GetColorU32(tint)
+                         : EditorTheme::Color32Alpha(Role::TextDim, hovered ? 1.0f : 0.75f);
+    float x = p0.x + ui.PaddingControl;
+    if (icon) {
+        EditorIcons::Overlay(x, p0.y + (h - ui.IconSize) * 0.5f, ui.IconSize, icon,
+                             glm::vec3(tint.x, tint.y, tint.z) * (*on ? 1.0f : 0.7f));
+        x += ui.IconSize + ui.SpacingXS;
+    }
+    dl->AddText(ImVec2(x, p0.y + (h - labelSize.y) * 0.5f), fg, label);
+    if (countBuf[0]) {
+        dl->AddText(ImVec2(p1.x - ui.PaddingControl - countSize.x, p0.y + (h - countSize.y) * 0.5f),
+                    *on ? fg : EditorTheme::Color32Alpha(Role::TextFaint, 1.0f), countBuf);
+    }
+    return pressed;
+}
+
 bool SearchField(const char* id, char* buf, size_t bufSize, const char* hint, float width) {
     const Style& ui = Get();
     ImGui::PushID(id);
@@ -203,36 +257,133 @@ void PropertyLabel(const char* label, const char* tooltip) {
     ImGui::TableSetColumnIndex(1);
 }
 
+// Цвета осей — ТЕ ЖЕ, что у осей сетки в трёхмерном виде (sage::render::
+// GridSettings). Совпадение не косметическое: человек тянет за красную стрелку
+// в сцене и должен без раздумий понимать, какое из трёх полей инспектора
+// сейчас меняется. Разойдись эти два красных — и подпись начнёт врать.
+static const ImVec4 kAxisColor[3] = {
+    ImVec4(0.85f, 0.40f, 0.42f, 1.0f), // X — как XAxisColor сетки, чуть светлее
+    ImVec4(0.48f, 0.76f, 0.44f, 1.0f), // Y — вверх
+    ImVec4(0.42f, 0.56f, 0.90f, 1.0f), // Z — как ZAxisColor сетки
+};
+
 bool PropertyVec3(const char* id, float v[3], float speed, const char* format) {
     const Style& ui = Get();
     ImGui::PushID(id);
     const float avail = ImGui::GetContentRegionAvail().x;
-    // Три равных поля с одинаковыми промежутками. Ширина считается один раз и
-    // округляется вниз, чтобы третье поле не вылезало за край панели.
-    const float gap = ui.SpacingXS;
-    const float w = ImFloor((avail - gap * 2.0f) / 3.0f);
+
+    // Буква оси стоит СНАРУЖИ поля, а не внутри него.
+    //
+    // Внутри она была ради ширины: три поля с подписями занимают больше места,
+    // чем три поля. Но плата оказалась выше выигрыша. Число в DragFloat
+    // выравнено по центру, и при длинном значении («-1234.567») оно наезжало
+    // на букву — читалось «X1234.567», а у отрицательных минус сливался с
+    // буквой вовсе. Ещё хуже, что буква не подсвечивалась при наведении и
+    // выглядела частью значения: люди пытались её выделить и стереть.
+    //
+    // Снаружи буква — это подпись поля, чем она и является: своим цветом, вне
+    // рамки ввода, и её ширина считается по самому широкому символу, чтобы три
+    // поля начинались на одной координате.
+    const float letter = ImMax(ImMax(ImGui::CalcTextSize("X").x, ImGui::CalcTextSize("Y").x),
+                               ImGui::CalcTextSize("Z").x);
+    const float cell = letter + ui.SpacingXS; // буква + зазор до рамки
+    const float gap = ui.SpacingSM;           // между группами «буква + поле»
+    // Ширина поля считается один раз и округляется вниз, чтобы третья группа
+    // не вылезала за край панели; остаток отдаётся последнему полю.
+    const float w = ImFloor((avail - gap * 2.0f - cell * 3.0f) / 3.0f);
+
     bool changed = false;
     static const char* kAxis[3] = {"X", "Y", "Z"};
     for (int i = 0; i < 3; ++i) {
         if (i) ImGui::SameLine(0.0f, gap);
         ImGui::PushID(i);
-        ImGui::SetNextItemWidth(i == 2 ? ImMax(w, avail - (w + gap) * 2.0f) : w);
+        ImGui::AlignTextToFramePadding();
+        // Буква по центру своей колонки: у «X», «Y» и «Z» разная ширина, и без
+        // этого поля разъезжались бы на пиксель-другой.
+        const float bias = (letter - ImGui::CalcTextSize(kAxis[i]).x) * 0.5f;
+        if (bias > 0.0f) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + bias);
+        ImGui::TextColored(kAxisColor[i], "%s", kAxis[i]);
+        ImGui::SameLine(0.0f, ui.SpacingXS - bias);
+        const float fw = (i == 2) ? ImMax(w, avail - (w + cell + gap) * 2.0f - cell) : w;
+        ImGui::SetNextItemWidth(fw);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                             ImVec2(ui.PaddingControlY, ui.PaddingControlY));
         changed |= ImGui::DragFloat("##v", &v[i], speed, 0.0f, 0.0f, format);
         ImGui::PopStyleVar();
-        // Буква оси — ВНУТРИ поля слева, приглушённо: отдельной подписью она
-        // съедала бы треть ширины строки, а без неё три одинаковых поля не
-        // отличить друг от друга.
-        const ImVec2 p0 = ImGui::GetItemRectMin();
-        const ImVec2 p1 = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddText(
-            ImVec2(p0.x + ui.SpacingXS, p0.y + (p1.y - p0.y - ImGui::GetTextLineHeight()) * 0.5f),
-            ImGui::GetColorU32(C(Role::TextFaint)), kAxis[i]);
         ImGui::PopID();
     }
     ImGui::PopID();
     return changed;
+}
+
+// --- остальные поля строки свойств ------------------------------------------
+//
+// Все они устроены одинаково: своё имя прячется за "##" (подпись уже стоит в
+// левой колонке), ширина растягивается на всю колонку значения. Отступ внутри
+// поля берётся из токенов, а не из текущего стиля ImGui, чтобы высота строки
+// совпадала с высотой полей PropertyVec3 в соседнем разделе.
+namespace {
+// Общая подготовка: id без подписи и ширина во всю колонку.
+struct FieldScope {
+    char name[64];
+    explicit FieldScope(const char* id) {
+        std::snprintf(name, sizeof(name), "##%s", id);
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                            ImVec2(Get().PaddingControlY, Get().PaddingControlY));
+    }
+    ~FieldScope() { ImGui::PopStyleVar(); }
+};
+} // namespace
+
+bool PropertyCombo(const char* id, int* current, const char* const items[], int count) {
+    FieldScope f(id);
+    return ImGui::Combo(f.name, current, items, count);
+}
+
+bool PropertyFloat(const char* id, float* v, float speed, float min, float max,
+                   const char* format) {
+    FieldScope f(id);
+    return ImGui::DragFloat(f.name, v, speed, min, max, format);
+}
+
+bool PropertySlider(const char* id, float* v, float min, float max, const char* format) {
+    FieldScope f(id);
+    return ImGui::SliderFloat(f.name, v, min, max, format);
+}
+
+bool PropertyInt(const char* id, int* v, int step) {
+    FieldScope f(id);
+    return ImGui::InputInt(f.name, v, step);
+}
+
+bool PropertyCheckbox(const char* id, bool* v) {
+    FieldScope f(id);
+    // Галка не растягивается — она квадратная. Но выравнивание по левому краю
+    // колонки значения обязано совпасть с левым краем соседних полей.
+    return ImGui::Checkbox(f.name, v);
+}
+
+bool PropertyColor(const char* id, float col[3]) {
+    FieldScope f(id);
+    return ImGui::ColorEdit3(f.name, col, ImGuiColorEditFlags_NoInputs |
+                                              ImGuiColorEditFlags_NoLabel);
+}
+
+bool PropertyText(const char* id, char* buf, size_t size, const char* hint) {
+    FieldScope f(id);
+    if (hint) return ImGui::InputTextWithHint(f.name, hint, buf, size);
+    return ImGui::InputText(f.name, buf, size);
+}
+
+void PropertyValue(const char* fmt, ...) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::PushStyleColor(ImGuiCol_Text, C(Role::TextDim));
+    va_list args;
+    va_start(args, fmt);
+    ImGui::TextV(fmt, args);
+    va_end(args);
+    ImGui::PopStyleColor();
 }
 
 void Badge(const char* text, Role role) {
@@ -317,6 +468,51 @@ std::string Truncate(const char* text, float maxWidth) {
     }
     if (out.empty()) return kEllipsis;
     return out + kEllipsis;
+}
+
+
+// --- поиск (см. UI.h: одна свёртка на редактор) -----------------------------
+
+std::string Fold(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) {
+            out.push_back((char)std::tolower(c));
+            ++i;
+        } else if (c == 0xD0 && i + 1 < s.size()) {
+            // А-П это D0 90..9F, Р-Я это D0 A0..AF, Ё это D0 81.
+            const unsigned char d = (unsigned char)s[i + 1];
+            if (d >= 0x90 && d <= 0x9F) {
+                out.push_back((char)0xD0);
+                out.push_back((char)(d + 0x20));
+            } else if (d >= 0xA0 && d <= 0xAF) {
+                out.push_back((char)0xD1);
+                out.push_back((char)(d - 0x20));
+            } else if (d == 0x81) {
+                out.push_back((char)0xD1);
+                out.push_back((char)0x91);
+            } else {
+                out.push_back((char)c);
+                out.push_back((char)d);
+            }
+            i += 2;
+        } else if (c >= 0xC0 && i + 1 < s.size()) {
+            out.push_back((char)c);
+            out.push_back(s[i + 1]);
+            i += 2;
+        } else {
+            out.push_back((char)c);
+            ++i;
+        }
+    }
+    return out;
+}
+
+bool Matches(const std::string& haystack, const std::string& needle) {
+    if (needle.empty()) return true;
+    return Fold(haystack).find(Fold(needle)) != std::string::npos;
 }
 
 } // namespace Sage::UI

@@ -44,6 +44,20 @@ bool Button(const char* label, ButtonStyle style = ButtonStyle::Secondary,
 bool IconButton(const char* icon, const char* tooltip, bool active = false,
                 const char* shortcut = nullptr);
 
+// ФИШКА-ФИЛЬТР: включаемая метка вида «⚠ Предупреждения 3».
+//
+// ЗАЧЕМ ОТДЕЛЬНЫЙ ВИД, а не галочка. Галочка отвечает на вопрос «включено ли
+// это свойство»; фишка отвечает на другой — «что сейчас показано в списке».
+// Разница видна на консоли: пять галок в ряд читаются как настройки панели, и
+// чтобы понять, почему ошибки не видно, приходится их перечитывать по одной. У
+// фишек включённые ЗАЛИТЫ цветом своего уровня, выключенные — прозрачные, и
+// состояние фильтра считывается одним взглядом, не читая подписей.
+//
+// count < 0 — счётчик не показывать (у фильтра, которому нечего считать).
+bool FilterChip(const char* label, bool* on, int count = -1,
+                EditorTheme::Role role = EditorTheme::Role::TextDim,
+                const char* icon = nullptr);
+
 // --- поля -----------------------------------------------------------------
 
 // Поле поиска: иконка внутри слева, подсказка внутри, крестик очистки справа.
@@ -82,6 +96,29 @@ void PropertyLabel(const char* label, const char* tooltip = nullptr);
 bool PropertyVec3(const char* id, float v[3], float speed = 0.01f,
                   const char* format = "%.3f");
 
+// Остальные поля строки свойств. Все они делают ровно одно и то же: занимают
+// ВСЮ колонку значения и не несут своей подписи — подпись уже стоит слева.
+//
+// ЗАЧЕМ ОБЁРТКИ, а не ImGui::Combo("Тип", ...) на месте. У ImGui подпись стоит
+// СПРАВА от поля, и инспектор читался задом наперёд: «Конус ▼ Источник». Убрать
+// её вызывающему нечем, кроме "##" в имени и ручного SetNextItemWidth(-1) перед
+// каждым полем — то есть двух строк, которые надо не забыть тридцать раз
+// подряд. Забывали, и строки разъезжались: у одной значение начиналось от
+// колонки подписей, у соседней — от края панели.
+bool PropertyCombo(const char* id, int* current, const char* const items[], int count);
+bool PropertyFloat(const char* id, float* v, float speed = 0.01f, float min = 0.0f,
+                   float max = 0.0f, const char* format = "%.3f");
+bool PropertySlider(const char* id, float* v, float min, float max,
+                    const char* format = "%.2f");
+bool PropertyInt(const char* id, int* v, int step = 1);
+bool PropertyCheckbox(const char* id, bool* v);
+bool PropertyColor(const char* id, float col[3]);
+// Строка текста. buf/size — как у ImGui::InputText.
+bool PropertyText(const char* id, char* buf, size_t size, const char* hint = nullptr);
+// Значение, которое нельзя править: показывается текстом второго плана, но
+// стоит в той же колонке, что и поля соседних строк.
+void PropertyValue(const char* fmt, ...) IM_FMTARGS(1);
+
 // --- мелочи ---------------------------------------------------------------
 
 // Значок-метка: тип ассета, счётчик, состояние. Компактный, с фоном роли.
@@ -99,5 +136,23 @@ void Tooltip(const char* text, const char* shortcut = nullptr);
 // Обрезать текст под ширину с многоточием. Возвращает то, что влезло; полное
 // значение вызывающий обычно кладёт в Tooltip.
 std::string Truncate(const char* text, float maxWidth);
+
+// --- поиск ----------------------------------------------------------------
+//
+// Свёртка регистра для поиска. Не std::tolower по одному байту: кириллица в
+// UTF-8 занимает два, и побайтная свёртка сложила бы регистр только у латиницы
+// — то есть поиск по-русски работал бы «через раз». И не std::tolower вообще:
+// он зависит от локали процесса, а её редактор не настраивает, и на Windows
+// она будет другой.
+//
+// ОДНА на весь редактор. Своя копия была у палитры команд, вторая появилась
+// было у поиска в иерархии — и это ровно тот случай, когда две копии
+// расходятся молча: находит одна, не находит другая, и виноватым выглядит
+// список, а не поиск.
+std::string Fold(const std::string& s);
+
+// Есть ли needle внутри haystack без учёта регистра. Пустой needle подходит
+// всему: пустая строка поиска означает «показать всё», а не «ничего».
+bool Matches(const std::string& haystack, const std::string& needle);
 
 } // namespace Sage::UI

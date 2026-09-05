@@ -18,6 +18,8 @@
 #include "sage/ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
+#include "EditorTheme.h"
+#include "ui/UI.h"
 
 namespace {
 
@@ -51,12 +53,12 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
 } // namespace
 
 // Рекурсивно рисует узел дерева: сам элемент (выбор/ПКМ/drag-drop) + детей.
-void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
+void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e, bool leaf) {
     entt::registry& reg = scene.Registry();
     int id = reg.get<IdComponent>(e).Id;
     const std::string& name = reg.get<NameComponent>(e).Name;
     const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
-    bool hasChildren = h && !h->Children.empty();
+    bool hasChildren = !leaf && h && !h->Children.empty();
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
     if (host.IsSelected(id)) flags |= ImGuiTreeNodeFlags_Selected; // подсветка всех выбранных
@@ -82,7 +84,22 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         const float s = ImGui::GetTextLineHeight() * 0.86f;
         EditorIcons::Overlay(rowPos.x + indent - s * 1.15f,
                              rowPos.y + (ImGui::GetTextLineHeight() - s) * 0.5f, s,
-                             EntityIcon(reg, e), glm::vec3(0.62f, 0.72f, 0.85f));
+                             EntityIcon(reg, e), EditorIcons::kThemeColor);
+    }
+
+    // Полоса акцента у левого края ВЫБРАННОЙ строки.
+    //
+    // Одной заливки мало: подложка выделения намеренно слабая (18% акцента),
+    // иначе десяток выбранных строк превращает список в жёлтое поле. Но слабую
+    // заливку не видно на светлой теме и не видно боковым зрением — а «что
+    // сейчас выбрано» глаз должен ловить, не читая. Полоса решает это, не
+    // усиливая заливку.
+    if (host.IsSelected(id)) {
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        const float w = std::max(2.0f, 2.0f * EditorTheme::UiScale());
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImVec2(ImGui::GetWindowPos().x, a.y), ImVec2(ImGui::GetWindowPos().x + w, b.y),
+            EditorTheme::Color32(EditorTheme::Role::Accent));
     }
 
     // Клик по строке (не по треугольнику раскрытия) — выбор. Ctrl — добавить/
@@ -189,24 +206,57 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     ImGui::PopID();
 }
 
+// Плоский список совпавших. Узлы рисуются тем же DrawNode, поэтому у найденной
+// строки работает всё то же самое: выбор, ПКМ, перетаскивание, бросок ассета.
+// Разница одна — детей не разворачиваем: они либо совпали сами и стоят в
+// списке отдельной строкой, либо к поиску отношения не имеют.
+void HierarchyPanel::DrawFiltered(EditorHost& host, Scene& scene) {
+    entt::registry& reg = scene.Registry();
+    std::vector<std::pair<int, entt::entity>> hits;
+    auto view = reg.view<IdComponent, NameComponent>();
+    for (auto e : view) {
+        if (Sage::UI::Matches(view.get<NameComponent>(e).Name, m_filter))
+            hits.push_back({view.get<IdComponent>(e).Id, e});
+    }
+    std::sort(hits.begin(), hits.end());
+
+    if (hits.empty()) {
+        Sage::UI::EmptyState(T("Nothing found"), T("Try a different name"));
+        return;
+    }
+    for (auto& [id, e] : hits) DrawNode(host, scene, e, /*leaf=*/true);
+}
+
 void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
     ImGui::Begin(T("Hierarchy" "###Hierarchy"), open);
-    ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
-    ImGui::Separator();
 
-    // Корни (без родителя) в стабильном порядке по id.
-    std::vector<std::pair<int, entt::entity>> roots;
-    auto view = reg.view<IdComponent, NameComponent>();
-    for (auto e : view) {
-        const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
-        bool hasParent = h && h->Parent != entt::null && reg.valid(h->Parent);
-        if (!hasParent) roots.push_back({view.get<IdComponent>(e).Id, e});
+    // ПОИСК ПО ИМЕНИ — первым делом, ещё до списка.
+    //
+    // Дерево из полусотни объектов пролистывается, а из пятисот — уже нет, и
+    // «найти в сцене нужный объект» превращалось в единственную операцию, у
+    // которой в редакторе не было ни одного инструмента: ни поиска, ни
+    // сортировки. Причём чаще всего человек ЗНАЕТ имя — он сам его и задал.
+    Sage::UI::SearchField("##hierarchy_filter", m_filter, sizeof(m_filter), T("Search..."));
+    Sage::UI::TextSecondary(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
+    Sage::UI::Separator();
+
+    if (m_filter[0]) {
+        DrawFiltered(host, scene);
+    } else {
+        // Корни (без родителя) в стабильном порядке по id.
+        std::vector<std::pair<int, entt::entity>> roots;
+        auto view = reg.view<IdComponent, NameComponent>();
+        for (auto e : view) {
+            const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
+            bool hasParent = h && h->Parent != entt::null && reg.valid(h->Parent);
+            if (!hasParent) roots.push_back({view.get<IdComponent>(e).Id, e});
+        }
+        std::sort(roots.begin(), roots.end());
+        for (auto& [id, e] : roots) DrawNode(host, scene, e);
     }
-    std::sort(roots.begin(), roots.end());
-    for (auto& [id, e] : roots) DrawNode(host, scene, e);
 
     // Зона «в корень»: бросок сюда открепляет сущность от родителя, а
     // брошенный ассет добавляется в сцену как новый объект.

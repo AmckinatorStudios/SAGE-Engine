@@ -381,6 +381,20 @@ void Init() {
     LoadExternalThemes();
 
     ScaleRef() = std::clamp(sage::editor::prefs::GetFloat("uiScale", 1.0f), 0.75f, 2.0f);
+    // SAGE_EDITOR_UI_SCALE — масштаб интерфейса для прогона без человека.
+    //
+    // Масштаб — то, что ломает раскладку чаще всего: при 150% подписи растут, а
+    // ширины, посчитанные в точках, нет, и панель, аккуратная на своей машине,
+    // на чужой едет. Проверить это можно было только руками на экране с другим
+    // DPI, то есть практически никогда. Настройка НЕ сохраняется: это ключ на
+    // один запуск, а не выбор человека.
+    if (const std::string s = sage::EnvString("SAGE_EDITOR_UI_SCALE"); !s.empty()) {
+        try {
+            ScaleRef() = std::clamp(std::stof(s), 0.75f, 2.0f);
+        } catch (const std::exception&) {
+            LOG_WARN("Editor") << "SAGE_EDITOR_UI_SCALE: не число — '" << s << "'";
+        }
+    }
     const std::string saved = sage::editor::prefs::GetString("theme", "modern-dark");
     // Сохранённой темы может не быть: файл темы удалили, а выбор остался.
     // Тогда молча берём тему по умолчанию — редактор без оформления не бывает.

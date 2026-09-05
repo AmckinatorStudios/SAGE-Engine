@@ -92,8 +92,14 @@ std::string TruncateToWidth(const std::string& s, float maxWidth) {
 // раньше подпись рисовалась DrawList'ом НИЖЕ InvisibleButton'а (высотой лишь в
 // плашку), выходила за границы item'а, и строки грида налезали друг на друга
 // («неровность»). Теперь весь тайл — единый item, всё внутри его границ.
-constexpr float kTileW = 104.0f;
-constexpr float kTileInset = 8.0f; // внутренний отступ карточки
+// РАЗМЕРЫ ТАЙЛА МАСШТАБИРУЮТСЯ. Constexpr здесь было прямой ошибкой: при
+// масштабе интерфейса 150% подписи, значки и высота строк вырастали, а
+// карточка оставалась ровно 104 точки — превью мельчало относительно всего
+// остального, имя перестало помещаться в свою ширину, а сетка ассетов
+// выглядела вставкой из другой программы. Заметить это можно только на экране
+// с другим DPI, то есть на чужом.
+float TileW() { return std::floor(104.0f * EditorTheme::UiScale()); }
+float TileInset() { return std::floor(8.0f * EditorTheme::UiScale()); } // поле карточки
 // Обложка КВАДРАТНАЯ у всех типов ассетов.
 //
 // Раньше она была 88x54 — вытянутый прямоугольник. Для трёхбуквенного тега это
@@ -102,15 +108,15 @@ constexpr float kTileInset = 8.0f; // внутренний отступ карт
 // оставалось пустым. Квадрат отдаёт превью всю ширину и заодно выравнивает
 // сетку — карточки разных типов перестают отличаться пропорциями.
 //
-// Высота плашки подобрана так, чтобы её ВИДИМАЯ область (kTileW - 2*inset по
-// ширине, kSwatchH - inset по высоте) была квадратом.
-constexpr float kSwatchH = kTileW - kTileInset;
+// Высота плашки подобрана так, чтобы её ВИДИМАЯ область (TileW() - 2*inset по
+// ширине, SwatchH() - inset по высоте) была квадратом.
+float SwatchH() { return TileW() - TileInset(); }
 // Подпись — РОВНО ОДНА строка. Раньше под неё отводилось 34 пикселя «на одну-две
 // строки», но рисовалась всегда одна: каждая карточка несла полторы строки
 // пустоты, и сетка выглядела рыхлой.
-constexpr float kLabelH = 22.0f;
-constexpr float kTileH = kSwatchH + kLabelH + 6.0f; // + внутренний отступ
-constexpr float kTileSpacing = 12.0f;
+float LabelH() { return std::floor(22.0f * EditorTheme::UiScale()); }
+float TileH() { return SwatchH() + LabelH() + std::floor(6.0f * EditorTheme::UiScale()); }
+float TileSpacing() { return std::floor(12.0f * EditorTheme::UiScale()); }
 
 } // namespace
 
@@ -248,103 +254,16 @@ uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
     return id;
 }
 
-void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
-    AssetStyle style = StyleForPath(path, isDir);
-    std::string filename = path.filename().string();
-
-    ImGui::PushID(filename.c_str());
-
-    // Весь тайл — ОДИН item (InvisibleButton на полную высоту карточки): подпись
-    // теперь внутри его границ, строки грида больше не налезают друг на друга.
-    ImVec2 cursor = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##tile", ImVec2(kTileW, kTileH));
-    bool hovered = ImGui::IsItemHovered();
-    bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-    bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
-    bool isSelected = m_selected == path;
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 tileMax(cursor.x + kTileW, cursor.y + kTileH);
-
-    // Подложка карточки — по теме редактора; подсвечивается при наведении/выборе.
-    ImU32 cardBg = 0;
-    if (isSelected)      cardBg = ImGui::GetColorU32(ImGuiCol_Header);
-    else if (hovered)    cardBg = ImGui::GetColorU32(ImGuiCol_HeaderHovered);
-    else                 cardBg = ImGui::GetColorU32(ImVec4(1, 1, 1, 0.035f));
-    dl->AddRectFilled(cursor, tileMax, cardBg, 8.0f);
-    if (isSelected) {
-        dl->AddRect(cursor, tileMax, ImGui::GetColorU32(ImGuiCol_NavHighlight), 8.0f, 0, 1.6f);
-    }
-
-    // Поле обложки — нейтральное у ВСЕХ типов (см. AssetStyle). Тип читается по
-    // значку и метке, а не по цвету всей карточки.
-    constexpr float kInset = kTileInset;
-    ImVec2 sw0(cursor.x + kInset, cursor.y + kInset);
-    ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + kSwatchH - kInset);
-    dl->AddRectFilled(sw0, sw1, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.28f)), 6.0f);
-
-    // Настоящее превью вместо трёхбуквенного тега — там, где его есть из чего
-    // сделать. Тег отвечает на вопрос «какого типа этот файл», а человек в
-    // панели ассетов ищет КОНКРЕТНУЮ картинку или материал среди двух десятков
-    // одинаковых оранжевых прямоугольников с надписью MAT. Имя файла помогает
-    // только если его помнят.
-    const uint64_t thumb = ThumbnailFor(path, isDir);
-    if (thumb) {
-        // Шахматка под картинкой: прозрачные места иначе неотличимы от фона
-        // карточки, и текстура с альфой выглядит просто дырявой.
-        const float checker = 8.0f;
-        dl->PushClipRect(sw0, sw1, true);
-        for (float y = sw0.y; y < sw1.y; y += checker) {
-            for (float x = sw0.x; x < sw1.x; x += checker) {
-                const bool odd = ((int)((x - sw0.x) / checker) + (int)((y - sw0.y) / checker)) % 2;
-                dl->AddRectFilled(ImVec2(x, y), ImVec2(x + checker, y + checker),
-                                  odd ? IM_COL32(70, 70, 76, 255) : IM_COL32(52, 52, 58, 255));
-            }
-        }
-        // Вписываем по меньшей стороне, сохраняя пропорции: растянутое превью
-        // врёт о содержимом.
-        const float availW = sw1.x - sw0.x, availH = sw1.y - sw0.y;
-        const float side = std::min(availW, availH);
-        const ImVec2 c0(sw0.x + (availW - side) * 0.5f, sw0.y + (availH - side) * 0.5f);
-        dl->AddImage((ImTextureID)(std::intptr_t)thumb, c0, ImVec2(c0.x + side, c0.y + side),
-                     ImVec2(0, 1), ImVec2(1, 0));
-        dl->PopClipRect();
-        dl->AddRect(sw0, sw1, IM_COL32(255, 255, 255, 30), 6.0f);
-    } else {
-        // Значок типа по центру поля — тот же набор, что в иерархии, тулбаре и
-        // инспекторе. Три буквы «MAT»/«LUA» приходилось читать, значок узнаётся.
-        const float glyph = std::floor((sw1.y - sw0.y) * 0.52f);
-        const ImVec4 tint = hovered || isSelected
-                                ? style.Color
-                                : ImVec4(style.Color.x * 0.82f, style.Color.y * 0.82f,
-                                         style.Color.z * 0.82f, 1.0f);
-        EditorIcons::Overlay(std::floor(sw0.x + (sw1.x - sw0.x - glyph) * 0.5f),
-                             std::floor(sw0.y + (sw1.y - sw0.y - glyph) * 0.5f), glyph,
-                             style.Icon, glm::vec3(tint.x, tint.y, tint.z));
-    }
-
-    // Метка расширения в углу поля: тип отличим и когда вместо значка стоит
-    // превью (у .png и .sagetex обложка одинаковая — сама картинка).
-    if (!style.Tag.empty()) {
-        const std::string tag = style.Tag;
-        const ImVec2 size = ImGui::CalcTextSize(tag.c_str());
-        const ImVec2 p1(sw1.x - 4.0f, sw1.y - 4.0f);
-        const ImVec2 p0(p1.x - size.x - 8.0f, p1.y - size.y - 2.0f);
-        dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 150), 4.0f);
-        dl->AddText(ImVec2(p0.x + 4.0f, p0.y + 1.0f),
-                    ImGui::ColorConvertFloat4ToU32(style.Color), tag.c_str());
-    }
-
-    // Имя файла по центру области подписи (внутри границ тайла, с усечением).
-    std::string label = TruncateToWidth(filename, kTileW - 8.0f);
-    ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
-    ImVec2 labelPos(std::floor(cursor.x + (kTileW - labelSize.x) * 0.5f), sw1.y + 5.0f);
-    // Имя — главное, что читают в этой панели, поэтому оно нормального цвета
-    // всегда. Приглушённой была ВСЯ сетка, и найти файл глазами по бледным
-    // подписям было тяжелее, чем по цветной мозаике плашек.
-    ImU32 textCol = ImGui::GetColorU32(ImGuiCol_Text, isSelected || hovered ? 1.0f : 0.85f);
-    dl->AddText(labelPos, textCol, label.c_str());
-
+// ПОВЕДЕНИЕ карточки — общее у сетки и у списка.
+//
+// Вынесено потому, что различаются они только рисованием: перетаскивание в
+// слот инспектора, приём броска папкой, выбор, открытие двойным щелчком и
+// контекстное меню у строки списка обязаны быть ТЕ ЖЕ, что у тайла. Пока это
+// было куском внутри DrawTile, второй вид неизбежно получил бы свою копию —
+// и разошёлся бы с первым на первой же правке, причём молча: список выглядел
+// бы рабочим, просто из него нельзя было бы, скажем, перетащить текстуру.
+void AssetsPanel::Behaviour(EditorHost& host, const fs::path& path, bool isDir, bool clicked,
+                            bool doubleClicked) {
     // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.
     // Путь передаётся строкой с завершающим нулём — принимающая сторона получает
     // ровно то, что открыла бы сама.
@@ -409,6 +328,237 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         }
         ImGui::EndPopup();
     }
+}
+
+// СТРОКА СПИСКА: значок, имя, метка типа, размер. Один ряд на файл.
+//
+// Зачем второй вид вообще. Сетка отвечает на вопрос «что это»: обложка
+// материала, кадр модели, сама картинка. Список отвечает на другой — «сколько
+// их и как называются». Обе задачи настоящие: обложки незаменимы, когда ищешь
+// текстуру глазами, и мешают, когда в папке полторы сотни скриптов с
+// говорящими именами — на экран влезает восемь карточек вместо тридцати строк.
+void AssetsPanel::DrawRow(EditorHost& host, const fs::path& path, bool isDir) {
+    const Sage::UI::Style& ui = Sage::UI::Get();
+    const AssetStyle style = StyleForPath(path, isDir);
+    const std::string filename = path.filename().string();
+
+    ImGui::PushID(filename.c_str());
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const float h = ui.RowHeight;
+    ImGui::InvisibleButton("##row", ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    const bool isSelected = m_selected == path;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 rowMax(cursor.x + w, cursor.y + h);
+    if (isSelected)   dl->AddRectFilled(cursor, rowMax, ImGui::GetColorU32(ImGuiCol_Header), ui.CornerRadiusSmall);
+    else if (hovered) dl->AddRectFilled(cursor, rowMax, ImGui::GetColorU32(ImGuiCol_HeaderHovered), ui.CornerRadiusSmall);
+
+    float x = cursor.x + ui.SpacingSM;
+    EditorIcons::Overlay(x, cursor.y + (h - ui.IconSize) * 0.5f, ui.IconSize, style.Icon,
+                         glm::vec3(style.Color.x, style.Color.y, style.Color.z));
+    x += ui.IconSize + ui.SpacingSM;
+
+    // Размер — справа, метка типа — перед ним. Обе колонки фиксированной
+    // ширины, имя занимает всё остальное и обрезается: иначе длинное имя
+    // выталкивало бы за край окна именно то, ради чего список и включают.
+    std::string size;
+    if (!isDir) {
+        std::error_code ec;
+        const auto bytes = (double)fs::file_size(path, ec);
+        if (!ec) {
+            char b[32];
+            if (bytes >= 1024.0 * 1024.0) std::snprintf(b, sizeof(b), "%.1f MB", bytes / (1024.0 * 1024.0));
+            else if (bytes >= 1024.0)     std::snprintf(b, sizeof(b), "%.0f KB", bytes / 1024.0);
+            else                          std::snprintf(b, sizeof(b), "%.0f B", bytes);
+            size = b;
+        }
+    }
+    const float sizeW = size.empty() ? 0.0f : ImGui::CalcTextSize(size.c_str()).x;
+    const float tagW = style.Tag.empty() ? 0.0f : ImGui::CalcTextSize(style.Tag.c_str()).x;
+    const float rightW = sizeW + (tagW > 0.0f ? tagW + ui.SpacingMD : 0.0f) + ui.SpacingMD;
+    const std::string label = TruncateToWidth(filename, std::max(24.0f, rowMax.x - x - rightW));
+    const float textY = cursor.y + (h - ImGui::GetTextLineHeight()) * 0.5f;
+    dl->AddText(ImVec2(x, textY), ImGui::GetColorU32(ImGuiCol_Text, isSelected || hovered ? 1.0f : 0.9f),
+                label.c_str());
+    float rx = rowMax.x - ui.SpacingSM;
+    if (!size.empty()) {
+        rx -= sizeW;
+        dl->AddText(ImVec2(rx, textY), EditorTheme::Color32(EditorTheme::Role::TextFaint), size.c_str());
+        rx -= ui.SpacingMD;
+    }
+    if (!style.Tag.empty()) {
+        rx -= tagW;
+        dl->AddText(ImVec2(rx, textY), ImGui::ColorConvertFloat4ToU32(style.Color), style.Tag.c_str());
+    }
+
+    Behaviour(host, path, isDir, clicked, doubleClicked);
+    if (hovered && label != filename) ImGui::SetTooltip("%s", filename.c_str());
+    ImGui::PopID();
+}
+
+// ДЕРЕВО ПАПОК слева. Показывает ТОЛЬКО папки: файлов в проекте тысячи, и
+// дерево с ними перестаёт быть картой — по нему нельзя понять устройство
+// проекта одним взглядом, ради чего оно и нужно.
+//
+// Зачем оно рядом с хлебными крошками. Крошки говорят, где ты сейчас, и ведут
+// назад по одной ветке. Переход между двумя соседними ветками («assets/models»
+// -> «assets/textures») ими делается через «вверх, вверх, вниз, вниз», и это
+// самое частое перемещение, какое в панели бывает.
+void AssetsPanel::DrawFolderTree(EditorHost& host, const fs::path& dir, int depth) {
+    // Глубже пятого уровня дерево сворачивается само: дальше оно шире панели,
+    // и вложенность читается уже не как структура, а как лесенка отступов.
+    if (depth > 5) return;
+    std::error_code ec;
+    std::vector<fs::path> subdirs;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        if (e.is_directory(ec)) subdirs.push_back(e.path());
+    }
+    std::sort(subdirs.begin(), subdirs.end());
+
+    fs::path& cwd = host.AssetsCwd();
+    for (const fs::path& sub : subdirs) {
+        const std::string name = sub.filename().string();
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+        if (cwd == sub) flags |= ImGuiTreeNodeFlags_Selected;
+        // Лист без стрелки — если внутри нет папок. Стрелка, которая ничего не
+        // раскрывает, обещает содержимое, которого нет.
+        bool hasSub = false;
+        std::error_code sec;
+        for (const auto& e : fs::directory_iterator(sub, sec)) {
+            if (e.is_directory(sec)) { hasSub = true; break; }
+        }
+        if (!hasSub) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+
+        ImGui::PushID(name.c_str());
+        const bool open = ImGui::TreeNodeEx("##dir", flags, "  %s", name.c_str());
+        const ImVec2 rowPos = ImGui::GetItemRectMin();
+        EditorIcons::Overlay(rowPos.x + ImGui::GetTreeNodeToLabelSpacing() -
+                                 ImGui::GetTextLineHeight() * 0.95f,
+                             rowPos.y + ImGui::GetTextLineHeight() * 0.07f,
+                             ImGui::GetTextLineHeight() * 0.86f, "folder",
+                             EditorIcons::kThemeColor);
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) cwd = sub;
+        // Папка дерева принимает бросок так же, как папка в сетке: раскладывать
+        // ассеты по местам удобнее всего именно отсюда — видно всю структуру.
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+                std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+                if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+                MoveIntoFolder(host, dropped, sub);
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if (open && hasSub) {
+            DrawFolderTree(host, sub, depth + 1);
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+}
+
+void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
+    AssetStyle style = StyleForPath(path, isDir);
+    std::string filename = path.filename().string();
+
+    ImGui::PushID(filename.c_str());
+
+    // Весь тайл — ОДИН item (InvisibleButton на полную высоту карточки): подпись
+    // теперь внутри его границ, строки грида больше не налезают друг на друга.
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##tile", ImVec2(TileW(), TileH()));
+    bool hovered = ImGui::IsItemHovered();
+    bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    bool isSelected = m_selected == path;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 tileMax(cursor.x + TileW(), cursor.y + TileH());
+
+    // Подложка карточки — по теме редактора; подсвечивается при наведении/выборе.
+    ImU32 cardBg = 0;
+    if (isSelected)      cardBg = ImGui::GetColorU32(ImGuiCol_Header);
+    else if (hovered)    cardBg = ImGui::GetColorU32(ImGuiCol_HeaderHovered);
+    else                 cardBg = ImGui::GetColorU32(ImVec4(1, 1, 1, 0.035f));
+    dl->AddRectFilled(cursor, tileMax, cardBg, 8.0f);
+    if (isSelected) {
+        dl->AddRect(cursor, tileMax, ImGui::GetColorU32(ImGuiCol_NavHighlight), 8.0f, 0, 1.6f);
+    }
+
+    // Поле обложки — нейтральное у ВСЕХ типов (см. AssetStyle). Тип читается по
+    // значку и метке, а не по цвету всей карточки.
+    const float kInset = TileInset();
+    ImVec2 sw0(cursor.x + kInset, cursor.y + kInset);
+    ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + SwatchH() - kInset);
+    dl->AddRectFilled(sw0, sw1, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.28f)), 6.0f);
+
+    // Настоящее превью вместо трёхбуквенного тега — там, где его есть из чего
+    // сделать. Тег отвечает на вопрос «какого типа этот файл», а человек в
+    // панели ассетов ищет КОНКРЕТНУЮ картинку или материал среди двух десятков
+    // одинаковых оранжевых прямоугольников с надписью MAT. Имя файла помогает
+    // только если его помнят.
+    const uint64_t thumb = ThumbnailFor(path, isDir);
+    if (thumb) {
+        // Шахматка под картинкой: прозрачные места иначе неотличимы от фона
+        // карточки, и текстура с альфой выглядит просто дырявой.
+        const float checker = 8.0f;
+        dl->PushClipRect(sw0, sw1, true);
+        for (float y = sw0.y; y < sw1.y; y += checker) {
+            for (float x = sw0.x; x < sw1.x; x += checker) {
+                const bool odd = ((int)((x - sw0.x) / checker) + (int)((y - sw0.y) / checker)) % 2;
+                dl->AddRectFilled(ImVec2(x, y), ImVec2(x + checker, y + checker),
+                                  odd ? IM_COL32(70, 70, 76, 255) : IM_COL32(52, 52, 58, 255));
+            }
+        }
+        // Вписываем по меньшей стороне, сохраняя пропорции: растянутое превью
+        // врёт о содержимом.
+        const float availW = sw1.x - sw0.x, availH = sw1.y - sw0.y;
+        const float side = std::min(availW, availH);
+        const ImVec2 c0(sw0.x + (availW - side) * 0.5f, sw0.y + (availH - side) * 0.5f);
+        dl->AddImage((ImTextureID)(std::intptr_t)thumb, c0, ImVec2(c0.x + side, c0.y + side),
+                     ImVec2(0, 1), ImVec2(1, 0));
+        dl->PopClipRect();
+        dl->AddRect(sw0, sw1, IM_COL32(255, 255, 255, 30), 6.0f);
+    } else {
+        // Значок типа по центру поля — тот же набор, что в иерархии, тулбаре и
+        // инспекторе. Три буквы «MAT»/«LUA» приходилось читать, значок узнаётся.
+        const float glyph = std::floor((sw1.y - sw0.y) * 0.52f);
+        const ImVec4 tint = hovered || isSelected
+                                ? style.Color
+                                : ImVec4(style.Color.x * 0.82f, style.Color.y * 0.82f,
+                                         style.Color.z * 0.82f, 1.0f);
+        EditorIcons::Overlay(std::floor(sw0.x + (sw1.x - sw0.x - glyph) * 0.5f),
+                             std::floor(sw0.y + (sw1.y - sw0.y - glyph) * 0.5f), glyph,
+                             style.Icon, glm::vec3(tint.x, tint.y, tint.z));
+    }
+
+    // Метка расширения в углу поля: тип отличим и когда вместо значка стоит
+    // превью (у .png и .sagetex обложка одинаковая — сама картинка).
+    if (!style.Tag.empty()) {
+        const std::string tag = style.Tag;
+        const ImVec2 size = ImGui::CalcTextSize(tag.c_str());
+        const ImVec2 p1(sw1.x - 4.0f, sw1.y - 4.0f);
+        const ImVec2 p0(p1.x - size.x - 8.0f, p1.y - size.y - 2.0f);
+        dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 150), 4.0f);
+        dl->AddText(ImVec2(p0.x + 4.0f, p0.y + 1.0f),
+                    ImGui::ColorConvertFloat4ToU32(style.Color), tag.c_str());
+    }
+
+    // Имя файла по центру области подписи (внутри границ тайла, с усечением).
+    std::string label = TruncateToWidth(filename, TileW() - TileInset());
+    ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
+    ImVec2 labelPos(std::floor(cursor.x + (TileW() - labelSize.x) * 0.5f), sw1.y + 5.0f);
+    // Имя — главное, что читают в этой панели, поэтому оно нормального цвета
+    // всегда. Приглушённой была ВСЯ сетка, и найти файл глазами по бледным
+    // подписям было тяжелее, чем по цветной мозаике плашек.
+    ImU32 textCol = ImGui::GetColorU32(ImGuiCol_Text, isSelected || hovered ? 1.0f : 0.85f);
+    dl->AddText(labelPos, textCol, label.c_str());
+
+    Behaviour(host, path, isDir, clicked, doubleClicked);
+
     if (hovered && !filename.empty() && label != filename) ImGui::SetTooltip("%s", filename.c_str());
 
     ImGui::PopID();
@@ -929,7 +1079,11 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // папкой (что я здесь ищу и что приношу), и все виджеты в ряду одной высоты.
     // Выше корня проекта панель не поднимается: снаружи проекта её файлы
     // редактору не принадлежат, а ссылка на них не переживёт сборку игры.
+    const Sage::UI::Style& ui = Sage::UI::Get();
     const fs::path root = project.Dir();
+    if (m_treeWidth <= 0.0f) m_treeWidth = ui.RowHeight * 7.0f;
+    if (Sage::UI::IconButton("layout", T("Folder tree"), m_showTree)) m_showTree = !m_showTree;
+    ImGui::SameLine(0.0f, ui.SpacingXS);
     bool canGoUp = cwd.has_parent_path() && cwd != root;
     ImGui::BeginDisabled(!canGoUp);
     if (EditorIcons::IconOnlyButton("up", T("Up"))) cwd = cwd.parent_path();
@@ -948,9 +1102,18 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // Через Sage::UI: одно поле поиска на весь редактор — с иконкой внутри,
     // тем же отступом и той же высотой, что в консоли и в палитре команд. Три
     // самодельных поля выглядели тремя разными полями.
-    const float searchW = std::max(120.0f, ImGui::GetContentRegionAvail().x - importW -
-                                               ImGui::GetStyle().ItemSpacing.x);
+    const float viewW = ImGui::GetFrameHeight() + ui.SpacingXS;
+    const float searchW = std::max(120.0f, ImGui::GetContentRegionAvail().x - importW - viewW -
+                                               ImGui::GetStyle().ItemSpacing.x * 2.0f);
     Sage::UI::SearchField("assets_search", m_search, sizeof(m_search), T("Search..."), searchW);
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    // Переключатель вида — ОДНОЙ кнопкой, которая показывает, куда переключит,
+    // а не в каком виде мы сейчас. Две кнопки-режима на такую мелочь занимают
+    // вдвое больше места и требуют прочитать, какая из них нажата.
+    if (Sage::UI::IconButton(m_listView ? "layout" : "align",
+                             m_listView ? T("Grid view") : T("List view"))) {
+        m_listView = !m_listView;
+    }
     ImGui::SameLine();
     DrawImportButton(host);
 
@@ -981,6 +1144,31 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     }
     ImGui::Separator();
 
+    // ДЕРЕВО ПАПОК — отдельным столбцом слева, содержимое папки — справа.
+    // Ширина запоминается: панель ассетов растягивают под задачу, и дерево,
+    // возвращающееся к своей доле ширины при каждом открытии, пришлось бы
+    // подгонять заново каждый раз.
+    if (m_showTree) {
+        // Свой фон и полоса справа: без них дерево и сетка сливаются в одно
+        // поле, и вложенные папки читаются как первый столбец карточек.
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Color(EditorTheme::Role::Bg));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, ui.CornerRadius);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ui.SpacingSM, ui.SpacingSM));
+        ImGui::BeginChild("##assets_tree", ImVec2(m_treeWidth, 0), ImGuiChildFlags_ResizeX);
+        // Корень проекта — строкой над деревом: на него надо уметь вернуться
+        // одним щелчком, а стрелки раскрытия у него быть не должно.
+        const bool atRoot = cwd == root;
+        if (ImGui::Selectable(project.Name().empty() ? "/" : project.Name().c_str(), atRoot)) {
+            cwd = root;
+        }
+        DrawFolderTree(host, root, 0);
+        ImGui::EndChild();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
+        m_treeWidth = ImGui::GetItemRectSize().x;
+        ImGui::SameLine(0.0f, ui.SpacingSM);
+    }
+
     ImGui::BeginChild("##assets_scroll");
     std::error_code ec;
     std::vector<fs::directory_entry> dirs, files;
@@ -1000,27 +1188,37 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     std::sort(dirs.begin(), dirs.end(), byName);
     std::sort(files.begin(), files.end(), byName);
 
-    std::string filter = ToLower(m_search);
-    auto matches = [&](const fs::path& p) {
-        if (filter.empty()) return true;
-        return ToLower(p.filename().string()).find(filter) != std::string::npos;
+    // Поиск — той же свёрткой, что у палитры команд, иерархии и консоли.
+    // ToLower здесь складывал регистр побайтно, то есть только у латиницы: у
+    // человека с кириллицей в именах файлов «текстура» не находила «Текстура»,
+    // и панель выглядела так, будто файла в папке нет.
+    auto matches = [this](const fs::path& p) {
+        return Sage::UI::Matches(p.filename().string(), m_search);
     };
 
-    // Единый ритм по вертикали между строками грида — как горизонтальный зазор.
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kTileSpacing, kTileSpacing));
-    float availWidth = ImGui::GetContentRegionAvail().x;
-    int columns = std::max(1, static_cast<int>((availWidth + kTileSpacing) / (kTileW + kTileSpacing)));
-    int col = 0;
     bool any = false;
-    auto placeTile = [&](const fs::path& p, bool isDir) {
-        any = true;
-        if (col > 0) ImGui::SameLine(0, kTileSpacing);
-        DrawTile(host, p, isDir);
-        col = (col + 1) % columns;
-    };
-    for (const auto& d : dirs) if (matches(d.path())) placeTile(d.path(), true);
-    for (const auto& f : files) if (matches(f.path())) placeTile(f.path(), false);
-    ImGui::PopStyleVar();
+    if (m_listView) {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 1.0f));
+        auto placeRow = [&](const fs::path& p, bool isDir) { any = true; DrawRow(host, p, isDir); };
+        for (const auto& d : dirs) if (matches(d.path())) placeRow(d.path(), true);
+        for (const auto& f : files) if (matches(f.path())) placeRow(f.path(), false);
+        ImGui::PopStyleVar();
+    } else {
+        // Единый ритм по вертикали между строками грида — как горизонтальный зазор.
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(TileSpacing(), TileSpacing()));
+        float availWidth = ImGui::GetContentRegionAvail().x;
+        int columns = std::max(1, static_cast<int>((availWidth + TileSpacing()) / (TileW() + TileSpacing())));
+        int col = 0;
+        auto placeTile = [&](const fs::path& p, bool isDir) {
+            any = true;
+            if (col > 0) ImGui::SameLine(0, TileSpacing());
+            DrawTile(host, p, isDir);
+            col = (col + 1) % columns;
+        };
+        for (const auto& d : dirs) if (matches(d.path())) placeTile(d.path(), true);
+        for (const auto& f : files) if (matches(f.path())) placeTile(f.path(), false);
+        ImGui::PopStyleVar();
+    }
 
     // Обложки файлов, которых в этой папке нет, больше не нужны — отпускаем и
     // их буферы. Иначе за сеанс блуждания по проекту накопился бы буфер на

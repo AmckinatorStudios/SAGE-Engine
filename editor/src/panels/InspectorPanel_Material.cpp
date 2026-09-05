@@ -23,6 +23,8 @@
 
 #include "imgui.h"
 
+#include "ui/UI.h"
+
 #include "EditorHost.h"
 #include "sage/core/Log.h"
 #include <algorithm>
@@ -300,7 +302,11 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
     // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
     const char* kinds[] = {T("None"), T("Cube"), T("Sphere"), T("Plane"), T("Cylinder"), T("Cone"), T("Model")};
     int kind = (int)mr.Ref.type;
-    if (ImGui::Combo(T("Source"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
+    Sage::UI::BeginProperties("mesh_src");
+    Sage::UI::PropertyLabel(T("Source"));
+    const bool kindChanged = Sage::UI::PropertyCombo("src", &kind, kinds, IM_ARRAYSIZE(kinds));
+    Sage::UI::EndProperties();
+    if (kindChanged) {
         host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
         const MeshRef::Type chosen = (MeshRef::Type)kind;
         if (chosen != MeshRef::Type::Model) {

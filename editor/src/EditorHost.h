@@ -1,5 +1,6 @@
 #pragma once
 #include "UIToolSettings.h"
+#include "ui/Commands.h"
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <filesystem>
@@ -118,6 +119,18 @@ public:
     virtual sage::EngineConfig& Settings() = 0;
     // Короткое сообщение в статус-баре (обратная связь панелей/плагинов).
     virtual void SetStatusMessage(const std::string& message) = 0;
+
+    // РЕЕСТР КОМАНД — то, через что панель ДЕЛАЕТ, а не сама решает.
+    //
+    // Без него каждая кнопка тулбара требовала бы своего метода в этом
+    // контракте: RequestSave, RequestUndo, CanUndo, RequestBuild… — по два на
+    // действие, и контракт разрастался бы с каждой кнопкой. Хуже того, рядом
+    // с ними жили бы ВТОРЫЕ проверки доступности, которые однажды разойдутся с
+    // теми, что в меню.
+    //
+    // Команда описана один раз (см. ui/Commands.h): что делает и когда
+    // доступна. Панель только рисует её и просит выполнить.
+    virtual Sage::UI::CommandRegistry& Commands() = 0;
 
     // --- undo/redo ---
     // Подмешать в публичные переменные объекта то, что объявил его скрипт
