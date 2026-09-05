@@ -86,7 +86,12 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
     return RayBox(ro, rd, glm::vec3(-0.5f), glm::vec3(0.5f));
 }
 
-constexpr float kStatusBarHeight = 26.0f;
+// Высота статусной строки — ОТ ТОКЕНОВ, а не числом.
+//
+// Числом она была 26 точек при любом масштабе интерфейса: при 150% строка
+// оставалась той же, а текст в ней вырастал — и обрезался снизу примерно на
+// треть. Видно это только на экране с другим DPI, поэтому и держалось долго.
+float StatusBarHeight() { return Sage::UI::Get().StatusBarHeight; }
 
 } // namespace
 
@@ -166,11 +171,89 @@ void EditorLayer::DrawAboutWindow() {
 
 void EditorLayer::DrawStatusBar(float height) {
     // Строка состояния внизу хост-окна: проект | сцена(+dirty) | сущности |
-    // Play-статус | сообщение плагинов | FPS.
+    // Play-статус | сообщение плагинов | справа показатели сцены и версия.
+    //
+    // ЛЕВАЯ ЧАСТЬ СЧИТАЕТСЯ ПОД УЖЕ ИЗВЕСТНУЮ ПРАВУЮ, а не наоборот. Правая
+    // умела ужиматься с самого начала, левая — нет, и на 1280 точках они
+    // сталкивались посреди строки: «1 ошибка, 3 предупреждениПамять 0.30 ГБ».
+    // Наезжали именно те два места, ради которых строка и существует —
+    // счётчик ошибок и расход памяти.
+    //
+    // Что уходит первым, решает польза, а не порядок: имя проекта и сцены
+    // остаются всегда, счётчик ошибок и состояние игры — почти всегда (это
+    // тревога, её нельзя прятать первой), а «объектов в сцене» и сообщение
+    // плагина уступают место, потому что то же самое есть в других местах
+    // экрана.
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 3));
     ImGui::BeginChild("##statusbar", ImVec2(0, height), ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar);
     ImGui::AlignTextToFramePadding();
+
+    const Sage::UI::Style& ui = Sage::UI::Get();
+    const float gap = ui.SpacingLG;
+
+    // --- СПРАВА: показатели сцены и версия движка (считаем ширину заранее) ---
+    //
+    // Пары «подпись — значение», а не слитная строка «meshes 8/8 culled 0
+    // batches 4»: слитную читают только те, кто её писал. Подпись приглушена,
+    // значение обычным цветом — глаз находит число, не читая всю строку.
+    const sage::ecs::RenderStats& rs = m_renderer.LastStats();
+    char fps[32], mem[32], draws[32], tris[32], objs[32];
+    std::snprintf(fps, sizeof(fps), "%.0f", sage::Application::Get().Fps());
+    std::snprintf(mem, sizeof(mem), "%.2f %s",
+                  (double)sage::profile::ResidentBytes() / (1024.0 * 1024.0 * 1024.0), T("GB"));
+    std::snprintf(draws, sizeof(draws), "%d", rs.Batches);
+    // Разряды разделяются пробелом: «89 442» читается с одного взгляда,
+    // «89442» — нет. Пробелом, а не запятой: запятая в русском тексте
+    // означает дробную часть.
+    {
+        char raw[32];
+        std::snprintf(raw, sizeof(raw), "%lld", rs.Triangles);
+        const int len = (int)std::strlen(raw);
+        int out = 0;
+        for (int i = 0; i < len && out < (int)sizeof(tris) - 2; ++i) {
+            if (i > 0 && (len - i) % 3 == 0) tris[out++] = ' ';
+            tris[out++] = raw[i];
+        }
+        tris[out] = '\0';
+    }
+    std::snprintf(objs, sizeof(objs), "%d", rs.Drawn);
+
+    struct Stat { const char* Label; const char* Value; };
+    const Stat stats[] = {
+        {T("FPS"), fps},
+        {T("Mem"), mem},
+        {T("Draw Calls"), draws},
+        {T("Triangles"), tris},
+        {T("Objects"), objs},
+    };
+    const std::string version = std::string("SAGE Engine ") + kSageEngineVersion;
+    float need = ImGui::CalcTextSize(version.c_str()).x + ui.IconSize + gap;
+    int shown = 0;
+    for (int i = (int)IM_ARRAYSIZE(stats) - 1; i >= 0; --i) {
+        const float w = ImGui::CalcTextSize(stats[i].Label).x +
+                        ImGui::CalcTextSize(stats[i].Value).x + ui.SpacingSM + gap;
+        if (need + w > ImGui::GetWindowWidth() * 0.55f) break;
+        need += w;
+        ++shown;
+    }
+    // Предел для левой части: до правой должен остаться зазор, иначе строки
+    // сойдутся вплотную и прочитаются как одна.
+    const float leftLimit = ImGui::GetWindowWidth() - need - gap;
+
+    // --- СЛЕВА -------------------------------------------------------------
+    const float sepW = ImGui::CalcTextSize("|").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+    // Влезает ли ещё кусок такой ширины (вместе с разделителем перед ним).
+    //
+    // Мерится правый край ПОСЛЕДНЕГО нарисованного элемента, а не
+    // GetCursorPosX(): элемент, закрывший строку, оставляет курсор на
+    // следующей строке и её левом краю — то есть GetCursorPosX() отвечает
+    // «места сколько угодно» ровно тогда, когда его нет.
+    auto room = [&](float w) {
+        const float used = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+        return used + sepW + w <= leftLimit;
+    };
+    auto sep = [&]() { ImGui::SameLine(); ImGui::TextDisabled("|"); ImGui::SameLine(); };
 
     // Точка состояния: зелёная в покое, жёлтая в игре. Один символ, но он
     // отвечает на вопрос «редактор жив?» без чтения строки.
@@ -179,34 +262,33 @@ void EditorLayer::DrawStatusBar(float height) {
         const ImVec4 dot = EditorTheme::Color(busy ? EditorTheme::Role::Accent
                                                    : EditorTheme::Role::Ok);
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        const float r = Sage::UI::Get().SpacingXS * 0.75f;
+        const float r = ui.SpacingXS * 0.75f;
         ImGui::GetWindowDrawList()->AddCircleFilled(
             ImVec2(p.x + r, p.y + ImGui::GetTextLineHeight() * 0.5f), r,
             ImGui::GetColorU32(dot));
         ImGui::Dummy(ImVec2(r * 2.0f, ImGui::GetTextLineHeight()));
-        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingSM);
+        ImGui::SameLine(0.0f, ui.SpacingSM);
     }
 
     ImGui::TextDisabled("%s", m_project.Name().c_str());
-    ImGui::SameLine(); ImGui::TextDisabled("|");
-    ImGui::SameLine();
+    sep();
     std::string scene = m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
-    ImGui::Text("%s%s", scene.c_str(), m_sceneDirty ? "*" : "");
-    ImGui::SameLine(); ImGui::TextDisabled("|");
-    ImGui::SameLine(); ImGui::TextDisabled(T("Entities: %zu"), m_scene->Count());
+    // Имя сцены обрезается, а не выталкивает соседей: длинное имя файла — не
+    // повод потерять счётчик ошибок.
+    const std::string sceneShown =
+        Sage::UI::Truncate((scene + (m_sceneDirty ? "*" : "")).c_str(),
+                           std::max(ui.RowHeight * 3.0f, leftLimit * 0.35f));
+    ImGui::TextUnformatted(sceneShown.c_str());
+    if (ImGui::IsItemHovered() && sceneShown != scene) ImGui::SetTooltip("%s", scene.c_str());
 
     // Ошибки и предупреждения — В СТАТУСНОЙ СТРОКЕ, а не только в консоли.
     // Консоль легко держать свёрнутой, и тогда единственное предупреждение о
     // непрочитанном шейдере остаётся незамеченным, а сцена «просто выглядит
     // не так». Клик открывает консоль уже с нужным фильтром.
     if (m_console.ErrorCount() > 0 || m_console.WarnCount() > 0) {
-        ImGui::SameLine(); ImGui::TextDisabled("|");
-        ImGui::SameLine();
         const bool hasErrors = m_console.ErrorCount() > 0;
-        const ImVec4 col = hasErrors ? ImVec4(0.95f, 0.40f, 0.40f, 1.0f)
-                                     : ImVec4(0.95f, 0.80f, 0.30f, 1.0f);
-        EditorIcons::Inline(hasErrors ? "error" : "warn", glm::vec3(col.x, col.y, col.z));
-        ImGui::SameLine();
+        const ImVec4 col = hasErrors ? EditorTheme::Color(EditorTheme::Role::Danger)
+                                     : EditorTheme::Color(EditorTheme::Role::Warn);
         // Склонение по-русски: 1 ошибка, 2 ошибки, 5 ошибок. Мелочь, но
         // «1 ошибок» в статусной строке читается как недоделка интерфейса.
         auto plural = [](int n, const char* one, const char* few, const char* many) {
@@ -216,93 +298,67 @@ void EditorLayer::DrawStatusBar(float height) {
             if (n10 >= 2 && n10 <= 4) return few;
             return many;
         };
-        ImGui::TextColored(col, "%d %s, %d %s", m_console.ErrorCount(),
-                           plural(m_console.ErrorCount(), T("error"), T("errors"), T("errors (many)")),
-                           m_console.WarnCount(),
-                           plural(m_console.WarnCount(), T("warning"), T("warnings"),
-                                  T("warnings (many)")));
-        if (ImGui::IsItemClicked()) ImGui::SetWindowFocus("Console");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Open console"));
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "%d %s, %d %s", m_console.ErrorCount(),
+                      plural(m_console.ErrorCount(), T("error"), T("errors"), T("errors (many)")),
+                      m_console.WarnCount(),
+                      plural(m_console.WarnCount(), T("warning"), T("warnings"),
+                             T("warnings (many)")));
+        const float w = ImGui::CalcTextSize(msg).x + ui.IconSize + ui.SpacingXS;
+        // Когда даже это не влезает, остаётся один значок с числом ошибок:
+        // молча убрать тревогу нельзя, а места под слова может не быть.
+        char shortMsg[32];
+        std::snprintf(shortMsg, sizeof(shortMsg), "%d", m_console.ErrorCount() + m_console.WarnCount());
+        const float shortW = ImGui::CalcTextSize(shortMsg).x + ui.IconSize + ui.SpacingXS;
+        const bool full = room(w);
+        if (full || room(shortW)) {
+            sep();
+            EditorIcons::Inline(hasErrors ? "error" : "warn", glm::vec3(col.x, col.y, col.z));
+            ImGui::SameLine();
+            ImGui::TextColored(col, "%s", full ? msg : shortMsg);
+            if (ImGui::IsItemClicked()) ImGui::SetWindowFocus("Console");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", full ? T("Open console") : msg);
+        }
     }
 
     if (InPlayMode()) {
-        ImGui::SameLine(); ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        bool playing = m_playState == EditorPlayState::Playing;
-        ImGui::TextColored(playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
-                           playing ? "PLAYING" : "PAUSED");
-    }
-    if (!m_pluginStatusMessage.empty()) {
-        ImGui::SameLine(); ImGui::TextDisabled("|");
-        ImGui::SameLine(); ImGui::TextDisabled("%s", m_pluginStatusMessage.c_str());
+        const bool playing = m_playState == EditorPlayState::Playing;
+        const char* label = playing ? "PLAYING" : "PAUSED";  // no-i18n: состояние движка
+        if (room(ImGui::CalcTextSize(label).x)) {
+            sep();
+            ImGui::TextColored(EditorTheme::Color(playing ? EditorTheme::Role::Ok
+                                                          : EditorTheme::Role::Warn),
+                               "%s", label);
+        }
     }
 
-    // --- СПРАВА: показатели сцены и версия движка ---------------------------
-    //
-    // Пары «подпись — значение», а не слитная строка «meshes 8/8 culled 0
-    // batches 4»: слитную читают только те, кто её писал. Подпись приглушена,
-    // значение обычным цветом — глаз находит число, не читая всю строку.
-    //
-    // Собирается СПРАВА НАЛЕВО: ширина считается заранее, и при узком окне
-    // лишние пары просто не рисуются, а не наезжают на левую часть.
+    // Ниже — то, что уступает место первым: число сущностей повторяет счётчик
+    // объектов справа, а сообщение плагина живёт секунды и дублируется логом.
     {
-        const sage::ecs::RenderStats& rs = m_renderer.LastStats();
-        char fps[32], mem[32], draws[32], tris[32], objs[32];
-        std::snprintf(fps, sizeof(fps), "%.0f", sage::Application::Get().Fps());
-        std::snprintf(mem, sizeof(mem), "%.2f %s",
-                      (double)sage::profile::ResidentBytes() / (1024.0 * 1024.0 * 1024.0), T("GB"));
-        std::snprintf(draws, sizeof(draws), "%d", rs.Batches);
-        // Разряды разделяются пробелом: «89 442» читается с одного взгляда,
-        // «89442» — нет. Пробелом, а не запятой: запятая в русском тексте
-        // означает дробную часть.
-        {
-            char raw[32];
-            std::snprintf(raw, sizeof(raw), "%lld", rs.Triangles);
-            const int len = (int)std::strlen(raw);
-            int out = 0;
-            for (int i = 0; i < len && out < (int)sizeof(tris) - 2; ++i) {
-                if (i > 0 && (len - i) % 3 == 0) tris[out++] = ' ';
-                tris[out++] = raw[i];
-            }
-            tris[out] = '\0';
-        }
-        std::snprintf(objs, sizeof(objs), "%d", rs.Drawn);
-
-        struct Stat { const char* Label; const char* Value; };
-        const Stat stats[] = {
-            {T("FPS"), fps},
-            {T("Mem"), mem},
-            {T("Draw Calls"), draws},
-            {T("Triangles"), tris},
-            {T("Objects"), objs},
-        };
-        const std::string version = std::string("SAGE Engine ") + kSageEngineVersion;
-
-        const float gap = Sage::UI::Get().SpacingLG;
-        float need = ImGui::CalcTextSize(version.c_str()).x + Sage::UI::Get().IconSize + gap;
-        int shown = 0;
-        for (int i = (int)IM_ARRAYSIZE(stats) - 1; i >= 0; --i) {
-            const float w = ImGui::CalcTextSize(stats[i].Label).x +
-                            ImGui::CalcTextSize(stats[i].Value).x +
-                            Sage::UI::Get().SpacingSM + gap;
-            if (need + w > ImGui::GetWindowWidth() * 0.55f) break;
-            need += w;
-            ++shown;
-        }
-
-        ImGui::SameLine(ImGui::GetWindowWidth() - need);
-        for (int i = (int)IM_ARRAYSIZE(stats) - shown; i < (int)IM_ARRAYSIZE(stats); ++i) {
-            ImGui::TextDisabled("%s", stats[i].Label);
-            ImGui::SameLine(0.0f, Sage::UI::Get().SpacingSM);
-            ImGui::TextUnformatted(stats[i].Value);
-            ImGui::SameLine(0.0f, gap);
-        }
-        EditorIcons::Inline("cube", glm::vec3(EditorTheme::Color(EditorTheme::Role::Accent).x,
-                                              EditorTheme::Color(EditorTheme::Role::Accent).y,
-                                              EditorTheme::Color(EditorTheme::Role::Accent).z));
-        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
-        ImGui::TextDisabled("%s", version.c_str());
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), T("Entities: %zu"), m_scene->Count());
+        if (room(ImGui::CalcTextSize(buf).x)) { sep(); ImGui::TextDisabled("%s", buf); }
     }
+    if (!m_pluginStatusMessage.empty() &&
+        room(ImGui::CalcTextSize(m_pluginStatusMessage.c_str()).x)) {
+        sep();
+        ImGui::TextDisabled("%s", m_pluginStatusMessage.c_str());
+    }
+
+    // --- СПРАВА: рисуем то, что посчитали выше -----------------------------
+    ImGui::SameLine(ImGui::GetWindowWidth() - need);
+    for (int i = (int)IM_ARRAYSIZE(stats) - shown; i < (int)IM_ARRAYSIZE(stats); ++i) {
+        ImGui::TextDisabled("%s", stats[i].Label);
+        ImGui::SameLine(0.0f, ui.SpacingSM);
+        ImGui::TextUnformatted(stats[i].Value);
+        ImGui::SameLine(0.0f, gap);
+    }
+    {
+        const ImVec4 a = EditorTheme::Color(EditorTheme::Role::Accent);
+        EditorIcons::Inline("cube", glm::vec3(a.x, a.y, a.z));
+    }
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    ImGui::TextDisabled("%s", version.c_str());
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -405,9 +461,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
     }
     // Док-пространство занимает всё между тулбаром и статус-баром.
     const ImVec2 dockMin = ImGui::GetCursorScreenPos();
-    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight), ImGuiDockNodeFlags_None);
+    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -StatusBarHeight()), ImGuiDockNodeFlags_None);
     const ImVec2 dockMax = ImGui::GetItemRectMax();
-    DrawStatusBar(kStatusBarHeight);
+    DrawStatusBar(StatusBarHeight());
 
     // ВАЖНО: OpenPopup нельзя звать изнутри BeginMenu (другой ID-стек — модалка
     // на уровне окна её не найдёт). Меню лишь запоминает, какой диалог открыть;

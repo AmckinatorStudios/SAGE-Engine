@@ -92,8 +92,14 @@ std::string TruncateToWidth(const std::string& s, float maxWidth) {
 // раньше подпись рисовалась DrawList'ом НИЖЕ InvisibleButton'а (высотой лишь в
 // плашку), выходила за границы item'а, и строки грида налезали друг на друга
 // («неровность»). Теперь весь тайл — единый item, всё внутри его границ.
-constexpr float kTileW = 104.0f;
-constexpr float kTileInset = 8.0f; // внутренний отступ карточки
+// РАЗМЕРЫ ТАЙЛА МАСШТАБИРУЮТСЯ. Constexpr здесь было прямой ошибкой: при
+// масштабе интерфейса 150% подписи, значки и высота строк вырастали, а
+// карточка оставалась ровно 104 точки — превью мельчало относительно всего
+// остального, имя перестало помещаться в свою ширину, а сетка ассетов
+// выглядела вставкой из другой программы. Заметить это можно только на экране
+// с другим DPI, то есть на чужом.
+float TileW() { return std::floor(104.0f * EditorTheme::UiScale()); }
+float TileInset() { return std::floor(8.0f * EditorTheme::UiScale()); } // поле карточки
 // Обложка КВАДРАТНАЯ у всех типов ассетов.
 //
 // Раньше она была 88x54 — вытянутый прямоугольник. Для трёхбуквенного тега это
@@ -102,15 +108,15 @@ constexpr float kTileInset = 8.0f; // внутренний отступ карт
 // оставалось пустым. Квадрат отдаёт превью всю ширину и заодно выравнивает
 // сетку — карточки разных типов перестают отличаться пропорциями.
 //
-// Высота плашки подобрана так, чтобы её ВИДИМАЯ область (kTileW - 2*inset по
-// ширине, kSwatchH - inset по высоте) была квадратом.
-constexpr float kSwatchH = kTileW - kTileInset;
+// Высота плашки подобрана так, чтобы её ВИДИМАЯ область (TileW() - 2*inset по
+// ширине, SwatchH() - inset по высоте) была квадратом.
+float SwatchH() { return TileW() - TileInset(); }
 // Подпись — РОВНО ОДНА строка. Раньше под неё отводилось 34 пикселя «на одну-две
 // строки», но рисовалась всегда одна: каждая карточка несла полторы строки
 // пустоты, и сетка выглядела рыхлой.
-constexpr float kLabelH = 22.0f;
-constexpr float kTileH = kSwatchH + kLabelH + 6.0f; // + внутренний отступ
-constexpr float kTileSpacing = 12.0f;
+float LabelH() { return std::floor(22.0f * EditorTheme::UiScale()); }
+float TileH() { return SwatchH() + LabelH() + std::floor(6.0f * EditorTheme::UiScale()); }
+float TileSpacing() { return std::floor(12.0f * EditorTheme::UiScale()); }
 
 } // namespace
 
@@ -463,14 +469,14 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // Весь тайл — ОДИН item (InvisibleButton на полную высоту карточки): подпись
     // теперь внутри его границ, строки грида больше не налезают друг на друга.
     ImVec2 cursor = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##tile", ImVec2(kTileW, kTileH));
+    ImGui::InvisibleButton("##tile", ImVec2(TileW(), TileH()));
     bool hovered = ImGui::IsItemHovered();
     bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
     bool isSelected = m_selected == path;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 tileMax(cursor.x + kTileW, cursor.y + kTileH);
+    ImVec2 tileMax(cursor.x + TileW(), cursor.y + TileH());
 
     // Подложка карточки — по теме редактора; подсвечивается при наведении/выборе.
     ImU32 cardBg = 0;
@@ -484,9 +490,9 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
 
     // Поле обложки — нейтральное у ВСЕХ типов (см. AssetStyle). Тип читается по
     // значку и метке, а не по цвету всей карточки.
-    constexpr float kInset = kTileInset;
+    const float kInset = TileInset();
     ImVec2 sw0(cursor.x + kInset, cursor.y + kInset);
-    ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + kSwatchH - kInset);
+    ImVec2 sw1(tileMax.x - kInset, cursor.y + kInset + SwatchH() - kInset);
     dl->AddRectFilled(sw0, sw1, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.28f)), 6.0f);
 
     // Настоящее превью вместо трёхбуквенного тега — там, где его есть из чего
@@ -542,9 +548,9 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     }
 
     // Имя файла по центру области подписи (внутри границ тайла, с усечением).
-    std::string label = TruncateToWidth(filename, kTileW - 8.0f);
+    std::string label = TruncateToWidth(filename, TileW() - TileInset());
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
-    ImVec2 labelPos(std::floor(cursor.x + (kTileW - labelSize.x) * 0.5f), sw1.y + 5.0f);
+    ImVec2 labelPos(std::floor(cursor.x + (TileW() - labelSize.x) * 0.5f), sw1.y + 5.0f);
     // Имя — главное, что читают в этой панели, поэтому оно нормального цвета
     // всегда. Приглушённой была ВСЯ сетка, и найти файл глазами по бледным
     // подписям было тяжелее, чем по цветной мозаике плашек.
@@ -1199,13 +1205,13 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
         ImGui::PopStyleVar();
     } else {
         // Единый ритм по вертикали между строками грида — как горизонтальный зазор.
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kTileSpacing, kTileSpacing));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(TileSpacing(), TileSpacing()));
         float availWidth = ImGui::GetContentRegionAvail().x;
-        int columns = std::max(1, static_cast<int>((availWidth + kTileSpacing) / (kTileW + kTileSpacing)));
+        int columns = std::max(1, static_cast<int>((availWidth + TileSpacing()) / (TileW() + TileSpacing())));
         int col = 0;
         auto placeTile = [&](const fs::path& p, bool isDir) {
             any = true;
-            if (col > 0) ImGui::SameLine(0, kTileSpacing);
+            if (col > 0) ImGui::SameLine(0, TileSpacing());
             DrawTile(host, p, isDir);
             col = (col + 1) % columns;
         };
