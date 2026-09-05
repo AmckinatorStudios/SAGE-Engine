@@ -1144,6 +1144,9 @@
     "Id": "Номер",
     "Dark theme": "Тёмная тема",
     "Light theme": "Светлая тема",
-    "Search": "Поиск"
+    "Search": "Поиск",
+    "Warnings": "Предупреждения",
+    "Errors": "Ошибки",
+    "Console display": "Показ консоли"
   }
 }

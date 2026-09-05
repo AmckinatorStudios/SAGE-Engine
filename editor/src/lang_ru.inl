@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1144.
+// Язык: Русский. Строк: 1147.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -442,6 +442,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Полуугол конуса"},
     {"Console",
      "Консоль"},
+    {"Console display",
+     "Показ консоли"},
     {"Continue",
      "Продолжить"},
     {"Continuous",
@@ -694,6 +696,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Равный шаг между центрами — для рядов из разных по ширине элементов"},
     {"Error (%d)",
      "Ошибки (%d)"},
+    {"Errors",
+     "Ошибки"},
     {"Even",
      "Поровну"},
     {"Event",
@@ -2160,6 +2164,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ходьба, прыжки, ступеньки"},
     {"Warn (%d)",
      "Предупр. (%d)"},
+    {"Warnings",
+     "Предупреждения"},
     {"Weight",
      "Вес"},
     {"What to show in the toolbar",

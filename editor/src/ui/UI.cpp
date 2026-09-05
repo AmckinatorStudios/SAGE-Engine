@@ -115,6 +115,59 @@ bool IconButton(const char* icon, const char* tooltip, bool active, const char* 
     return pressed;
 }
 
+bool FilterChip(const char* label, bool* on, int count, Role role, const char* icon) {
+    const Style& ui = Get();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    char countBuf[16] = {0};
+    if (count >= 0) std::snprintf(countBuf, sizeof(countBuf), "%d", count);
+    const ImVec2 labelSize = ImGui::CalcTextSize(label);
+    const ImVec2 countSize = countBuf[0] ? ImGui::CalcTextSize(countBuf) : ImVec2(0, 0);
+    const float iconW = icon ? ui.IconSize + ui.SpacingXS : 0.0f;
+    const float w = ui.PaddingControl * 2.0f + iconW + labelSize.x +
+                    (countBuf[0] ? ui.SpacingSM + countSize.x : 0.0f);
+    const float h = ui.ControlHeight;
+
+    const ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(label, ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool pressed = ImGui::IsItemClicked();
+    if (pressed) *on = !*on;
+
+    const ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+    const ImVec4 tint = C(role);
+    // Включённая фишка заливается своим цветом слабо, а обводится сильно:
+    // сильная заливка под текстом того же цвета убивает контраст, а обводка
+    // держит форму и на светлой теме, где слабой заливки почти не видно.
+    if (*on) {
+        dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.16f)),
+                          ui.CornerRadius);
+        dl->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.55f)),
+                    ui.CornerRadius, 0, ui.BorderWidth);
+    } else if (hovered) {
+        dl->AddRectFilled(p0, p1, EditorTheme::Color32(Role::Hover), ui.CornerRadius);
+    } else {
+        dl->AddRect(p0, p1, EditorTheme::Color32(Role::Line), ui.CornerRadius, 0, ui.BorderWidth);
+    }
+
+    // Выключенная фишка приглушена, но НЕ до нечитаемости: её всё ещё надо
+    // прочитать, чтобы включить обратно.
+    const ImU32 fg = *on ? ImGui::GetColorU32(tint)
+                         : EditorTheme::Color32Alpha(Role::TextDim, hovered ? 1.0f : 0.75f);
+    float x = p0.x + ui.PaddingControl;
+    if (icon) {
+        EditorIcons::Overlay(x, p0.y + (h - ui.IconSize) * 0.5f, ui.IconSize, icon,
+                             glm::vec3(tint.x, tint.y, tint.z) * (*on ? 1.0f : 0.7f));
+        x += ui.IconSize + ui.SpacingXS;
+    }
+    dl->AddText(ImVec2(x, p0.y + (h - labelSize.y) * 0.5f), fg, label);
+    if (countBuf[0]) {
+        dl->AddText(ImVec2(p1.x - ui.PaddingControl - countSize.x, p0.y + (h - countSize.y) * 0.5f),
+                    *on ? fg : EditorTheme::Color32Alpha(Role::TextFaint, 1.0f), countBuf);
+    }
+    return pressed;
+}
+
 bool SearchField(const char* id, char* buf, size_t bufSize, const char* hint, float width) {
     const Style& ui = Get();
     ImGui::PushID(id);

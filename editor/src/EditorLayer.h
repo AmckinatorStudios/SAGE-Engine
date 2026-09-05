@@ -439,6 +439,12 @@ private:
     Sage::UI::CommandPalette m_palette;
     std::string m_paletteQuery;   // начальный запрос (SAGE_EDITOR_PALETTE)
     void RegisterCommands();
+
+    // Имя окна ImGui, которое надо вывести вперёд (SAGE_EDITOR_FOCUS). Только
+    // для прогонов без человека: вкладка выводится вперёд первые кадры, чтобы
+    // её было видно на снимке.
+    std::string m_focusWindow;
+    int m_focusFrames = 0;
     DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)
     bool m_launcherRequested = false; // Window > Project Launcher
     // Прогон без человека (скриншот, самопроверка, автоигра) попросил не

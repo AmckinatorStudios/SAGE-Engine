@@ -439,7 +439,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
-            "SAGE_EDITOR_PALETTE",
+            "SAGE_EDITOR_PALETTE",        "SAGE_EDITOR_FOCUS",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -741,6 +741,17 @@ void EditorLayer::OnAttach() {
     }
     // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_GAME")) m_game.RequestFocus();
+    // Вывести вперёд ЛЮБУЮ панель по имени её окна ImGui («Console», «Assets»).
+    //
+    // ЗАЧЕМ. Панели стоят во вкладках, и снизу по умолчанию открыты Ассеты. Всё,
+    // что нарисовано в Консоли, на скриншоте не видно вовсе — то есть проверить
+    // её вид было нечем, и правки в ней принимались «на слово». Отдельный
+    // SAGE_EDITOR_SHOW_GAME для одной панели эту дыру закрывал ровно на одну
+    // панель; имя окна закрывает её для всех.
+    if (const std::string w = sage::EnvString("SAGE_EDITOR_FOCUS"); !w.empty()) {
+        m_headlessProject = true;
+        m_focusWindow = w;
+    }
 
     // Авто-вход в Play при старте (визуальная проверка/CI): вешает spin.lua на
     // Green Cube демо-сцены и нажимает Play — на скриншоте куб будет повёрнут,
@@ -1085,6 +1096,16 @@ void EditorLayer::OnRender() {
     if (m_showConsole) m_console.Draw(&m_showConsole);
     if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
     m_plugins.ImGuiAll();
+
+    // SAGE_EDITOR_FOCUS: вывести вкладку вперёд. Несколько кадров подряд, а не
+    // один: узел доккинга выбирает вкладку при своей сборке, и просьба,
+    // поданная на первом кадре, затирается ею же.
+    if (!m_focusWindow.empty()) {
+        if (m_focusFrames < 4) {
+            ImGui::SetWindowFocus(m_focusWindow.c_str());
+            ++m_focusFrames;
+        }
+    }
 
     // Стартовое окно по просьбе (Window > Стартовое окно): проект уже открыт,
     // но человек хочет открыть другой.

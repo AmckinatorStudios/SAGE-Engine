@@ -46,8 +46,14 @@ bool ConsolePanel::Passes(const Entry& e) const {
     if (m_filter[0]) {
         // Ищем и по категории, и по тексту: искать «Shader» и не найти
         // сообщение категории Shader было бы неожиданностью.
-        if (e.Message.find(m_filter) == std::string::npos &&
-            e.Category.find(m_filter) == std::string::npos) {
+        //
+        // Регистр не учитывается — той же свёрткой, что у палитры команд и
+        // поиска в иерархии (Sage::UI::Matches). Сравнение «как есть» здесь
+        // било по самому частому запросу: сообщения пишутся с заглавной, а
+        // ищут со строчной, и «shader» не находил ни одной строки категории
+        // Shader — то есть поиск выглядел сломанным ровно там, где нужен.
+        if (!Sage::UI::Matches(e.Message, m_filter) &&
+            !Sage::UI::Matches(e.Category, m_filter)) {
             return false;
         }
     }
@@ -55,15 +61,24 @@ bool ConsolePanel::Passes(const Entry& e) const {
 }
 
 void ConsolePanel::Draw(bool* open) {
+    const Sage::UI::Style& ui = Sage::UI::Get();
     ImGui::Begin(T("Console" "###Console"), open);
     if (ImGui::IsWindowFocused()) MarkSeen();
 
-    if (EditorIcons::Button("trash", T("Clear"), T("Clear the console"))) {
+    // Очистка и копирование — ТОЛЬКО значком.
+    //
+    // Подписи у них были длиннее самих кнопок («Копировать» — десять букв ради
+    // одного действия) и съедали треть строки, из-за чего фильтры уровня и
+    // поиск переставали помещаться в один ряд. Значок с подсказкой при
+    // наведении здесь ничего не отнимает: корзина и две страницы — самые
+    // узнаваемые значки, какие есть, и обе кнопки безопасны (очистка стирает
+    // ПОКАЗ, а не лог на диске).
+    if (Sage::UI::IconButton("trash", T("Clear the console"))) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_entries.clear();
     }
-    ImGui::SameLine();
-    if (EditorIcons::Button("copy", T("Copy"), T("Copy the visible lines to the clipboard"))) {
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    if (Sage::UI::IconButton("copy", T("Copy the visible lines to the clipboard"))) {
         std::string all;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -79,34 +94,49 @@ void ConsolePanel::Draw(bool* open) {
 
     // Счётчики совмещены с переключателями уровня намеренно: «вижу, что есть
     // три ошибки» и «хочу видеть только их» — одно и то же движение мышью.
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Checkbox(T("Debug"), &m_showDebug);
-    ImGui::SameLine();
-    ImGui::Checkbox(T("Info"), &m_showInfo);
-    ImGui::SameLine();
-    char warnLabel[48];
-    std::snprintf(warnLabel, sizeof(warnLabel), T("Warn (%d)"), m_warnCount);
-    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
-    ImGui::Checkbox(warnLabel, &m_showWarn);
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
-    char errLabel[48];
-    std::snprintf(errLabel, sizeof(errLabel), T("Error (%d)"), m_errorCount);
-    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Danger));
-    ImGui::Checkbox(errLabel, &m_showError);
-    ImGui::PopStyleColor();
+    //
+    // ФИШКИ, а не галочки. Пять галок подряд читались как настройки панели, и
+    // чтобы понять, почему ошибки не видно, приходилось перечитывать подписи
+    // по одной. У фишки включённое состояние — заливка цветом своего уровня, и
+    // «сейчас показаны только ошибки» видно, не читая (см. ui/UI.h).
+    ImGui::SameLine(0.0f, ui.SpacingMD);
+    Sage::UI::FilterChip(T("Debug"), &m_showDebug, -1, EditorTheme::Role::TextDim, "debug");
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    Sage::UI::FilterChip(T("Info"), &m_showInfo, -1, EditorTheme::Role::Info, "info");
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    Sage::UI::FilterChip(T("Warnings"), &m_showWarn, m_warnCount, EditorTheme::Role::Warn, "warn");
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    Sage::UI::FilterChip(T("Errors"), &m_showError, m_errorCount, EditorTheme::Role::Danger,
+                         "error");
 
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Checkbox(T("Collapse"), &m_collapse);
-    ImGui::SameLine();
-    ImGui::Checkbox(T("Auto-scroll"), &m_autoScroll);
-    ImGui::SameLine();
-    Sage::UI::SearchField("filter", m_filter, sizeof(m_filter), T("Search..."),
-                          Sage::UI::Get().ControlHeight * 9.0f);
+    // Поиск и настройки показа прижаты к ПРАВОМУ краю, фильтры уровня — к
+    // левому. Порядок не случаен: слева то, что меняют часто и глазами
+    // (уровни), справа то, что задают один раз (свернуть повторы,
+    // автопрокрутка) и строка поиска, которая всегда на одном месте.
+    //
+    // Если ширины не хватает — правая часть уезжает на СВОЮ строку целиком, а
+    // не наползает на фишки. Наползала: при узкой панели поле поиска рисовалось
+    // поверх «Ошибки 3», и счётчик ошибок пропадал ровно тогда, когда панель
+    // сузили, чтобы освободить место сцене.
+    const float gearW = ImGui::GetFrameHeight();
+    const float searchW = std::min(ui.ControlHeight * 9.0f,
+                                ImGui::GetContentRegionAvail().x * 0.45f);
+    const float rightW = searchW + ui.SpacingSM + gearW;
+    const float rightX = ImGui::GetWindowContentRegionMax().x - rightW;
+    // Правый край ПОСЛЕДНЕЙ фишки, а не GetCursorPosX(): после элемента,
+    // закрывшего строку, курсор стоит уже на следующей строке и её левом краю,
+    // то есть отвечает «места сколько угодно» ровно в тот момент, когда его
+    // нет. Из-за этого поле поиска и наползало на счётчик ошибок.
+    const float usedX = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+    if (rightX > usedX + ui.SpacingMD) ImGui::SameLine(rightX);
+    Sage::UI::SearchField("filter", m_filter, sizeof(m_filter), T("Search..."), searchW);
+    ImGui::SameLine(0.0f, ui.SpacingSM);
+    if (Sage::UI::IconButton("gear", T("Console display"))) ImGui::OpenPopup("##console_opts");
+    if (ImGui::BeginPopup("##console_opts")) {
+        ImGui::Checkbox(T("Collapse"), &m_collapse);
+        ImGui::Checkbox(T("Auto-scroll"), &m_autoScroll);
+        ImGui::EndPopup();
+    }
     ImGui::Separator();
 
     ImGui::BeginChild("##console_scroll", ImVec2(0, 0), ImGuiChildFlags_None,
