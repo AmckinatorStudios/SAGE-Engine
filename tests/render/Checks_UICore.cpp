@@ -190,6 +190,30 @@ void CheckMasked(UIRenderer& renderer) {
     Check(inside > 0.95, "новый UI: содержимое внутри маски нарисовано");
     Check(beyondRight < 0.02 && beyondBottom < 0.02,
           "новый UI: содержимое за маской действительно обрезано");
+
+    // ФИГУРНАЯ МАСКА. Прямоугольные ножницы её выразить не могут — это и есть
+    // главная причина, по которой маска не «clip rect» (§30).
+    panel.Get<ui::UIMask>()->Form = ui::UIMask::Shape::Ellipse;
+    h.Doc().MarkDirty(ui::UIDirty_All);
+    const Image ellipse = RenderDocument(renderer, h);
+    const double centre = Covered(ellipse, 90, 80, 110, 100);
+    const double corner = Covered(ellipse, 42, 42, 56, 56);
+    std::printf("    masked: эллипс — центр %.2f, угол %.2f\n", centre, corner);
+    Check(centre > 0.95, "новый UI: эллиптическая маска пропускает середину");
+    Check(corner < 0.05, "новый UI: эллиптическая маска срезает углы");
+
+    // Скругление: те же углы, но радиусом.
+    ui::UIMask& mask = *panel.Get<ui::UIMask>();
+    mask.Form = ui::UIMask::Shape::RoundedRect;
+    mask.Radius = ui::UICorners(40.0f);
+    h.Doc().MarkDirty(ui::UIDirty_All);
+    const Image rounded = RenderDocument(renderer, h);
+    const double roundedCentre = Covered(rounded, 80, 80, 120, 120);
+    const double roundedCorner = Covered(rounded, 42, 42, 52, 52);
+    std::printf("    masked: скругление — центр %.2f, угол %.2f\n", roundedCentre,
+                roundedCorner);
+    Check(roundedCentre > 0.95, "новый UI: скруглённая маска пропускает середину");
+    Check(roundedCorner < 0.05, "новый UI: скруглённая маска действительно скругляет");
 }
 
 // --- Сцена «Effects»: тень ложится ПОД узлом, а не поверх ---------------------

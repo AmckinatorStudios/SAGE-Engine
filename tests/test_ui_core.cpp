@@ -1546,3 +1546,32 @@ TEST(UIx_custom_material_reaches_the_backend_untouched) {
     CHECK_TRUE(UILoadDocumentFromString(loaded, json).Ok);
     CHECK_EQ(loaded.FindByName("Noise")->Get<UIMaterial>()->Shader, std::string("my/noise"));
 }
+
+TEST(UIx_shaped_mask_reaches_the_command) {
+    Harness h;
+    UINode& panel = Node(h.Doc(), "Panel");
+    panel.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    UIMask& mask = panel.Ensure<UIMask>();
+    mask.Form = UIMask::Shape::RoundedRect;
+    mask.Radius = UICorners(16.0f);
+    UINode& child = Node(h.Doc(), "Child", panel.Id);
+    child.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    child.Ensure<UIFill>();
+    h.Step();
+    h.rt.Build();
+
+    CHECK_EQ(h.rt.DrawList().Stats().Commands, 1);
+    const UIClipState& clip = h.rt.DrawList().Commands()[0].Clip;
+    // Скругление ножницами не выражается — значит, форма обязана доехать до
+    // бэкенда, а не потеряться по дороге (§30).
+    CHECK_TRUE(clip.Shape != nullptr);
+    CHECK_EQ((int)clip.Shape->Form, (int)UIMaskShape::Kind::RoundedRect);
+    CHECK_NEAR(clip.Shape->Radius.TL, 16.0, 1e-3);
+    // Прямоугольная маска — быстрый путь: только ножницы, никакого шейдера.
+    mask.Form = UIMask::Shape::Rect;
+    h.Doc().MarkDirty(UIDirty_All);
+    h.Step();
+    h.rt.Build();
+    CHECK_TRUE(h.rt.DrawList().Commands()[0].Clip.Shape == nullptr);
+    CHECK_TRUE(h.rt.DrawList().Commands()[0].Clip.HasScissor);
+}

@@ -168,6 +168,34 @@ public:
     void RectShadow(float x, float y, float w, float h, float radius,
                     float size = 10.0f, float alpha = 0.35f);
 
+    // --- ФИГУРНАЯ МАСКА -----------------------------------------------------
+    //
+    // Ножницы умеют ровно одно: резать по осям. Ни круглого аватара, ни списка
+    // со скруглёнными углами, ни мягкого края, ни выреза по альфе картинки ими
+    // не сделать — а это ровно то, ради чего маски и нужны.
+    //
+    // Маска — СОСТОЯНИЕ, а не свойство вершины: она действует на всё, что
+    // нарисовано между вызовами, и уходит в шейдер парой uniform'ов. Поэтому
+    // она ничего не стоит там, где её нет: без маски в шейдер уходит ноль, и
+    // ветка не исполняется.
+    struct Mask {
+        enum class Shape { RoundedRect, Ellipse, Texture, Gradient };
+
+        Shape Form = Shape::RoundedRect;
+        float X = 0.0f, Y = 0.0f, W = 0.0f, H = 0.0f; // в пикселях экрана
+        // Радиусы углов: левый верхний, правый верхний, правый нижний, левый нижний.
+        glm::vec4 Radius{0.0f};
+        float Softness = 0.0f;  // ширина мягкого края в пикселях
+        bool Invert = false;
+        const Texture* Tex = nullptr;   // для Shape::Texture
+        int Channel = 0;                // 0 альфа, 1 R, 2 G, 3 B, 4 яркость
+        float GradientAngle = 0.0f;     // градусы, для Shape::Gradient
+        float GradientStart = 0.0f, GradientEnd = 1.0f;
+    };
+
+    // Задать маску для последующих вызовов; nullptr — снять.
+    void SetMask(const Mask* mask);
+
     // --- Маски (ножницы): всё между Push и Pop обрезается прямоугольником.
     // Вложенные вызовы пересекаются с текущей маской. Пары обязаны сходиться
     // до End() (незакрытые маски закрываются с предупреждением в лог).
@@ -225,6 +253,8 @@ private:
         const Texture* Image = nullptr; // nullptr — шрифт/сплошные квады
         bool Clipped = false;
         glm::vec4 Clip{0.0f}; // x, y, w, h (экранные координаты, верхний левый угол)
+        bool Masked = false;
+        Mask MaskState{};
     };
 
     // bottomColor/bottomAlpha — необязательный цвет НИЖНИХ вершин: так один
@@ -251,6 +281,8 @@ private:
     std::vector<UIVertex> m_vertices; // все квады кадра (прямоугольники, картинки, глифы)
     std::vector<Segment> m_segments;
     std::vector<glm::vec4> m_clipStack; // текущие маски (уже пересечённые)
+    bool m_masked = false;
+    Mask m_mask{};
     size_t m_quadCount = 0;
 
     std::unique_ptr<sage::rhi::Geometry> m_geometry;

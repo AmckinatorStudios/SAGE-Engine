@@ -7,6 +7,7 @@ void UIRenderList::Clear() {
     m_glyphs.clear();
     m_batches.clear();
     m_materials.clear();
+    m_masks.clear();
     m_stats = UIRenderStats{};
 }
 
@@ -18,6 +19,22 @@ UIRenderCommand& UIRenderList::Add() {
 const UIMaterialRef* UIRenderList::AddMaterial(const UIMaterialRef& m) {
     m_materials.push_back(std::make_unique<UIMaterialRef>(m));
     return m_materials.back().get();
+}
+
+const UIMaskShape* UIRenderList::AddMask(const UIMaskShape& m) {
+    // Одинаковая маска у ста строк списка должна быть ОДНИМ объектом — иначе
+    // батч рвётся на каждой строке из-за разных указателей.
+    for (const auto& existing : m_masks) {
+        const UIMaskShape& e = *existing;
+        if (e.Form == m.Form && e.Rect.x == m.Rect.x && e.Rect.y == m.Rect.y &&
+            e.Rect.w == m.Rect.w && e.Rect.h == m.Rect.h && e.Radius == m.Radius &&
+            e.Softness == m.Softness && e.Invert == m.Invert && e.Tex == m.Tex &&
+            e.Channel == m.Channel && e.GradientAngle == m.GradientAngle &&
+            e.GradientStart == m.GradientStart && e.GradientEnd == m.GradientEnd)
+            return existing.get();
+    }
+    m_masks.push_back(std::make_unique<UIMaskShape>(m));
+    return m_masks.back().get();
 }
 
 void UIRenderList::Build() {
@@ -35,6 +52,7 @@ void UIRenderList::Build() {
         if (a.Material != b.Material) return false;
         if (a.Clip.HasScissor != b.Clip.HasScissor) return false;
         if (a.Clip.MaskState != b.Clip.MaskState) return false;
+        if (a.Clip.Shape != b.Clip.Shape) return false;
         if (a.Clip.HasScissor) {
             const UIRect& x = a.Clip.Scissor;
             const UIRect& y = b.Clip.Scissor;

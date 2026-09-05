@@ -37,6 +37,8 @@ public:
     // Материалы живут в списке: команда хранит указатель, и он обязан
     // пережить кадр.
     const UIMaterialRef* AddMaterial(const UIMaterialRef& m);
+    // То же для фигурных масок: список владеет ими, команда ссылается.
+    const UIMaskShape* AddMask(const UIMaskShape& m);
 
     // Собрать батчи. Команды НЕ переставляются: порядок уже задан ключом
     // сортировки на этапе подготовки, а перестановка ради батчинга ломала бы
@@ -56,6 +58,7 @@ private:
     std::vector<UIGlyphDraw> m_glyphs;
     std::vector<UIRenderBatch> m_batches;
     std::vector<std::unique_ptr<UIMaterialRef>> m_materials;
+    std::vector<std::unique_ptr<UIMaskShape>> m_masks;
     UIRenderStats m_stats;
 };
 

@@ -33,8 +33,10 @@ out vec2 vUV;
 out vec2 vLocal;
 out vec2 vHalf;
 out vec2 vParams;
+out vec2 vScreen;
 uniform mat4 uProjection;
 void main() {
+    vScreen = aPos.xy;
     vColor = aColor;
     vUV = aUV;
     vLocal = aLocal;
@@ -50,15 +52,72 @@ in vec2 vUV;
 in vec2 vLocal;
 in vec2 vHalf;
 in vec2 vParams;
+in vec2 vScreen;
 out vec4 FragColor;
 uniform sampler2D uTex;
 uniform int uMode; // 0 — сплошные квады + глифы шрифта; 1 — текстурная картинка
+
+// --- Фигурная маска ---------------------------------------------------------
+// uMaskMode: 0 — маски нет (ветка не исполняется вовсе), 1 — скруглённый
+// прямоугольник, 2 — эллипс, 3 — альфа картинки, 4 — линейное затухание.
+uniform int uMaskMode;
+uniform vec4 uMaskRect;    // x, y, w, h в пикселях экрана интерфейса
+uniform vec4 uMaskRadius;  // TL, TR, BR, BL
+uniform vec2 uMaskParams;  // мягкость края, инверсия (0/1)
+uniform vec4 uMaskGrad;    // угол (радианы), начало, конец, канал
+uniform sampler2D uMaskTex;
 
 // Знаковое расстояние до контура прямоугольника с радиусом скругления r:
 // отрицательное внутри, ноль на контуре.
 float RoundedBoxSDF(vec2 p, vec2 halfSize, float r) {
     vec2 q = abs(p) - halfSize + vec2(r);
     return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// Значение маски в точке экрана: 0 — не видно, 1 — видно, между — мягкий край.
+// Маска именно ЗНАЧЕНИЕ, а не флаг: отсюда мягкие края и растворение бесплатно.
+float MaskValue(vec2 screen) {
+    if (uMaskMode == 0) return 1.0;
+    vec2 halfSize = uMaskRect.zw * 0.5;
+    vec2 centre = uMaskRect.xy + halfSize;
+    vec2 local = screen - centre;
+    float soft = max(uMaskParams.x, 0.0);
+    float v = 1.0;
+
+    if (uMaskMode == 1) {
+        // Радиус берётся у того угла, в чьей четверти лежит точка: четыре
+        // независимых скругления одной формулой.
+        float r = local.x > 0.0 ? (local.y > 0.0 ? uMaskRadius.z : uMaskRadius.y)
+                                : (local.y > 0.0 ? uMaskRadius.w : uMaskRadius.x);
+        r = min(r, min(halfSize.x, halfSize.y));
+        float d = RoundedBoxSDF(local, halfSize, r);
+        float aa = max(max(fwidth(d), 0.0001) * 0.75, soft);
+        v = 1.0 - smoothstep(-aa, aa, d);
+    } else if (uMaskMode == 2) {
+        vec2 n = local / max(halfSize, vec2(0.0001));
+        float d = length(n) - 1.0;
+        float aa = max(max(fwidth(d), 0.0001) * 0.75, soft / max(max(halfSize.x, halfSize.y), 1.0));
+        v = 1.0 - smoothstep(-aa, aa, d);
+    } else if (uMaskMode == 3) {
+        vec2 uv = (screen - uMaskRect.xy) / max(uMaskRect.zw, vec2(0.0001));
+        if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) v = 0.0;
+        else {
+            vec4 t = texture(uMaskTex, uv);
+            int channel = int(uMaskGrad.w + 0.5);
+            v = channel == 1 ? t.r : channel == 2 ? t.g : channel == 3 ? t.b
+              : channel == 4 ? dot(t.rgb, vec3(0.299, 0.587, 0.114)) : t.a;
+        }
+    } else {
+        vec2 dir = vec2(sin(uMaskGrad.x), -cos(uMaskGrad.x));
+        vec2 rel = screen - uMaskRect.xy;
+        float len = abs(dir.x) * uMaskRect.z + abs(dir.y) * uMaskRect.w;
+        float t = len > 0.0 ? clamp(dot(rel, dir) / len +
+                                    ((dir.x < 0.0 || dir.y < 0.0) ? 1.0 : 0.0), 0.0, 1.0)
+                            : 0.0;
+        float a = uMaskGrad.y, b = uMaskGrad.z;
+        v = abs(b - a) < 0.0001 ? (t >= b ? 1.0 : 0.0) : clamp((t - a) / (b - a), 0.0, 1.0);
+    }
+    return uMaskParams.y > 0.5 ? 1.0 - v : v;
 }
 
 void main() {
@@ -84,6 +143,7 @@ void main() {
             col.a *= 1.0 - smoothstep(-aa, aa, d);
         }
     }
+    col.a *= MaskValue(vScreen);
     FragColor = col;
 }
 )";
@@ -160,9 +220,10 @@ void UIRenderer::SetView(glm::vec2 originPx, float scale, int fbWidth, int fbHei
 }
 
 void UIRenderer::Begin(int screenWidth, int screenHeight) {
-    // Каждый кадр начинается с обычного смешивания: режим — свойство ОДНОЙ
-    // отрисовки, а не состояние, которое должно пережить кадр.
+    // Каждый кадр начинается с обычного смешивания и без маски: и то, и другое —
+    // свойство ОДНОЙ отрисовки, а не состояние, которое должно пережить кадр.
     m_blendMode = sage::rhi::GraphicsDevice::BlendMode::Alpha;
+    m_masked = false;
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
     // Каждый кадр начинается с тождественного вида: смотровое преобразование —
@@ -178,13 +239,34 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_quadCount = 0;
 }
 
+void UIRenderer::SetMask(const Mask* mask) {
+    if (!mask) {
+        m_masked = false;
+        return;
+    }
+    m_masked = true;
+    m_mask = *mask;
+}
+
+namespace {
+// Одинаковы ли две фигурные маски. Нужно ровно затем, чтобы одинаковая маска не
+// рвала батч: у списка из ста строк маска одна на всех.
+bool SameMask(const UIRenderer::Mask& a, const UIRenderer::Mask& b) {
+    return a.Form == b.Form && a.X == b.X && a.Y == b.Y && a.W == b.W && a.H == b.H &&
+           a.Radius == b.Radius && a.Softness == b.Softness && a.Invert == b.Invert &&
+           a.Tex == b.Tex && a.Channel == b.Channel && a.GradientAngle == b.GradientAngle &&
+           a.GradientStart == b.GradientStart && a.GradientEnd == b.GradientEnd;
+}
+} // namespace
+
 UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
     bool clipped = !m_clipStack.empty();
     glm::vec4 clip = clipped ? m_clipStack.back() : glm::vec4(0.0f);
     if (!m_segments.empty()) {
         Segment& last = m_segments.back();
         if (last.Image == image && last.Clipped == clipped &&
-            (!clipped || last.Clip == clip)) {
+            (!clipped || last.Clip == clip) && last.Masked == m_masked &&
+            (!m_masked || SameMask(last.MaskState, m_mask))) {
             return last; // состояние не изменилось — продолжаем батч
         }
     }
@@ -193,6 +275,8 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
     seg.Image = image;
     seg.Clipped = clipped;
     seg.Clip = clip;
+    seg.Masked = m_masked;
+    seg.MaskState = m_mask;
     m_segments.push_back(seg);
     return m_segments.back();
 }
@@ -587,6 +671,31 @@ void UIRenderer::End() {
         } else {
             m_shader.SetInt("uMode", 0);
             if (m_font) m_font->Atlas().Bind(0);
+        }
+        // Фигурная маска — состояние сегмента. Там, где её нет, в шейдер уходит
+        // ноль, и ветка не исполняется вовсе: узел без маски не платит за неё.
+        if (!seg.Masked) {
+            m_shader.SetInt("uMaskMode", 0);
+        } else {
+            const Mask& m = seg.MaskState;
+            int mode = 1;
+            switch (m.Form) {
+                case Mask::Shape::Ellipse: mode = 2; break;
+                case Mask::Shape::Texture: mode = m.Tex ? 3 : 0; break;
+                case Mask::Shape::Gradient: mode = 4; break;
+                default: mode = 1; break;
+            }
+            m_shader.SetInt("uMaskMode", mode);
+            m_shader.SetVec4("uMaskRect", glm::vec4(m.X, m.Y, m.W, m.H));
+            m_shader.SetVec4("uMaskRadius", m.Radius);
+            m_shader.SetVec2("uMaskParams", glm::vec2(m.Softness, m.Invert ? 1.0f : 0.0f));
+            m_shader.SetVec4("uMaskGrad",
+                             glm::vec4(m.GradientAngle * 3.14159265358979f / 180.0f,
+                                       m.GradientStart, m.GradientEnd, (float)m.Channel));
+            if (mode == 3 && m.Tex) {
+                m.Tex->Bind(1);
+                m_shader.SetInt("uMaskTex", 1);
+            }
         }
         m_geometry->DrawIndexedRange(seg.FirstQuad * 6, seg.QuadCount * 6);
     }

@@ -6,6 +6,7 @@
 
 #include "sage/render/Texture.h"
 #include "sage/ui/core/UINode.h"
+#include "sage/ui/mask/UIMaskStack.h"
 #include "sage/ui/debug/UIDebug.h"
 #include "sage/ui/effects/UIEffect.h"
 #include "sage/ui/input/UIInteraction.h"
@@ -679,6 +680,41 @@ void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UICont
     // Один узел списка: собрать его команды. Эффекты уровня Behind идут до
     // компонентов, Front — после; порядок компонентов внутри узла задаёт их
     // Order.
+    // Действующая фигурная маска узла: самая ВНУТРЕННЯЯ из тех, что не
+    // выражаются ножницами. Прямоугольные вклады уже сведены в один прямоугольник
+    // ножниц и в шейдер не идут — они дешевле.
+    //
+    // Одна, а не все: несколько наложенных непрямоугольных масок требуют либо
+    // нескольких проходов, либо промежуточной цели. Здесь честно берётся самая
+    // близкая к содержимому — та, которую человек и имел в виду, ставя её.
+    auto shapeFor = [&](const UIResolvedNode& r) -> const UIMaskShape* {
+        const UIMaskState& state = layout.Masks().State(r.MaskState);
+        for (auto it = state.Entries.rbegin(); it != state.Entries.rend(); ++it) {
+            const UIMaskEntry& e = layout.Masks().Entry(*it);
+            UIMaskShape shape;
+            switch (e.Form) {
+                case UIMask::Shape::Ellipse: shape.Form = UIMaskShape::Kind::Ellipse; break;
+                case UIMask::Shape::Texture:
+                    if (!e.Tex) continue; // картинки нет — маскировать нечем
+                    shape.Form = UIMaskShape::Kind::Texture;
+                    break;
+                case UIMask::Shape::Gradient: shape.Form = UIMaskShape::Kind::Gradient; break;
+                default: shape.Form = UIMaskShape::Kind::RoundedRect; break;
+            }
+            shape.Rect = e.Rect;
+            shape.Radius = e.Radius;
+            shape.Softness = e.Softness;
+            shape.Invert = e.Invert;
+            shape.Tex = e.Tex;
+            shape.Channel = (int)e.Source;
+            shape.GradientAngle = e.GradientAngle;
+            shape.GradientStart = e.GradientStart;
+            shape.GradientEnd = e.GradientEnd;
+            return out.AddMask(shape);
+        }
+        return nullptr;
+    };
+
     auto emitNode = [&](const UIResolvedNode& r, UINode& node) {
         UIDrawContext dc;
         dc.Ctx = &ctx;
@@ -694,6 +730,7 @@ void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UICont
         dc.Clip.HasScissor = r.Clipped;
         dc.Clip.Scissor = r.Clip;
         dc.Clip.MaskState = r.MaskState;
+        dc.Clip.Shape = shapeFor(r);
 
         EmitBehindEffects(dc, node);
         for (UIComponent* comp : node.DrawOrder()) {

@@ -58,12 +58,32 @@ struct UIGlyphDraw {
     UIColor Color{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
-// Состояние маски для команды. Ссылка в стек масок плюс готовый прямоугольник
-// ножниц: бэкенд не обязан ходить по дереву.
+// ФИГУРНАЯ МАСКА, уже переведённая в экранные пиксели и готовая к отправке в
+// шейдер. Прямоугольные маски сюда не попадают — они выражаются ножницами и
+// стоят дешевле; здесь только то, что ножницами выразить нельзя.
+struct UIMaskShape {
+    enum class Kind { RoundedRect, Ellipse, Texture, Gradient };
+
+    Kind Form = Kind::RoundedRect;
+    UIRect Rect{};
+    UICorners Radius{0.0f};
+    float Softness = 0.0f;
+    bool Invert = false;
+    const Texture* Tex = nullptr;
+    int Channel = 0; // 0 альфа, 1 R, 2 G, 3 B, 4 яркость
+    float GradientAngle = 0.0f;
+    float GradientStart = 0.0f, GradientEnd = 1.0f;
+};
+
+// Состояние маски для команды: готовый прямоугольник ножниц плюс, если нужна,
+// фигурная маска. Бэкенд не обязан ходить по дереву — всё уже здесь.
 struct UIClipState {
     UIRect Scissor{};
     bool HasScissor = false;
     int MaskState = 0;
+    // Владеет им список команд (см. UIRenderList::AddMask): указатель обязан
+    // пережить кадр, а копия в каждой команде стоила бы дороже самой маски.
+    const UIMaskShape* Shape = nullptr;
 };
 
 // Пользовательский материал (§44, §45). Ядро интерфейса не знает, что внутри

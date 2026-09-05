@@ -160,6 +160,7 @@ void UIClassicBackend::EndOffscreen(const UIRenderCommand& c) {
 }
 
 void UIClassicBackend::End() {
+    m_ui.SetMask(nullptr);
     if (m_clipOpen) {
         m_ui.PopClipRect();
         m_clipOpen = false;
@@ -385,14 +386,43 @@ void UIClassicBackend::Submit(const UIRenderList& list) {
                 continue;
             }
             if (c.Op != UIPassOp::Draw) continue;
-            // Ножницы ставятся ровно на границе состояния — по одному вызову на
-            // батч, а не на команду.
+            // Ножницы и фигурная маска ставятся ровно на границе состояния —
+            // по одному вызову на батч, а не на команду.
             if (i == 0) {
                 if (m_clipOpen) { m_ui.PopClipRect(); m_clipOpen = false; }
                 if (c.Clip.HasScissor && UIRectValid(c.Clip.Scissor)) {
                     m_ui.PushClipRect(c.Clip.Scissor.x, c.Clip.Scissor.y, c.Clip.Scissor.w,
                                       c.Clip.Scissor.h);
                     m_clipOpen = true;
+                }
+                if (!c.Clip.Shape) {
+                    m_ui.SetMask(nullptr);
+                } else {
+                    const UIMaskShape& s = *c.Clip.Shape;
+                    UIRenderer::Mask mask;
+                    switch (s.Form) {
+                        case UIMaskShape::Kind::Ellipse:
+                            mask.Form = UIRenderer::Mask::Shape::Ellipse;
+                            break;
+                        case UIMaskShape::Kind::Texture:
+                            mask.Form = UIRenderer::Mask::Shape::Texture;
+                            break;
+                        case UIMaskShape::Kind::Gradient:
+                            mask.Form = UIRenderer::Mask::Shape::Gradient;
+                            break;
+                        default: mask.Form = UIRenderer::Mask::Shape::RoundedRect; break;
+                    }
+                    mask.X = s.Rect.x; mask.Y = s.Rect.y;
+                    mask.W = s.Rect.w; mask.H = s.Rect.h;
+                    mask.Radius = glm::vec4(s.Radius.TL, s.Radius.TR, s.Radius.BR, s.Radius.BL);
+                    mask.Softness = s.Softness;
+                    mask.Invert = s.Invert;
+                    mask.Tex = s.Tex;
+                    mask.Channel = s.Channel;
+                    mask.GradientAngle = s.GradientAngle;
+                    mask.GradientStart = s.GradientStart;
+                    mask.GradientEnd = s.GradientEnd;
+                    m_ui.SetMask(&mask);
                 }
             }
             switch (c.Kind) {
