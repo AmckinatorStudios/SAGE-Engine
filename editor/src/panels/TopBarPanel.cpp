@@ -1,96 +1,115 @@
 #include "TopBarPanel.h"
-#include "EditorTheme.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "imgui.h"
 
 #include "EditorHost.h"
 #include "EditorIcons.h"
+#include "EditorTheme.h"
+#include "ui/UI.h"
 #include "../Localization.h"
 
+using sage::editor::T;
+using EditorTheme::Role;
+
+// ---------------------------------------------------------------------------
+//  ВЕРХНЯЯ ПАНЕЛЬ — ОДНА СТРОКА.
+//
+//  ЧТО БЫЛО НЕ ТАК. Над каждой группой кнопок стояла мелкая подпись — «Панели»,
+//  «Настройки», «Виды», «Запуск», «Сцена», — и панель из-за них была на самом
+//  деле ДВУХСТРОЧНОЙ: строка подписей плюс строка кнопок. Высоты в 54 точки на
+//  две строки не хватало, поэтому подписи прижимались к самому верху и
+//  срезались краем панели, а кнопки вылезали снизу. Со стороны это читается
+//  ровно так, как и было сказано: «кривое, кнопки за панель выходят».
+//
+//  Подписи при этом ничего не объясняли: что кнопка с солнцем открывает среду,
+//  видно из подсказки при наведении, а не из слова «Настройки» над ней.
+//
+//  ЧТО СТАЛО. Одна строка, всё по вертикали по центру, группы разделены тонкой
+//  чертой. Место, которое занимали подписи, отдано самим кнопкам — панель стала
+//  НИЖЕ и при этом просторнее внутри.
+//
+//  Все размеры — из токенов (ui/UIStyle.h). Раньше здесь стояли 7, 9, 12, 230,
+//  170 и цвет черты числом; из-за них панель и не совпадала ни с чем вокруг.
+// ---------------------------------------------------------------------------
 namespace {
 
-// Ширина, ниже которой панель начинает ужиматься. Числа не «на глаз»: при 1500
-// в панель влезают все подписи, при 1150 — заголовки групп без подписей,
-// дальше остаются одни иконки. Мерить точную ширину содержимого нечем — оно
-// рисуется по ходу дела, — а измерять его вторым, невидимым проходом ради
-// одной перестройки в год дороже, чем два порога.
-constexpr float kWidthForLabels = 1500.0f;
-constexpr float kWidthForTitles = 1150.0f;
+// Пороги ужимания. Сначала пропадают подписи у кнопок, потом имя сцены справа.
+// Мерить точную ширину содержимого нечем — оно рисуется по ходу дела.
+constexpr float kWidthForLabels = 1400.0f;
+constexpr float kWidthForScene = 900.0f;
 
-struct Style {
-    bool Labels = true;  // подписи рядом с иконками
-    bool Titles = true;  // заголовки групп
+struct Row {
+    float Height = 0.0f;   // высота панели
+    float Top = 0.0f;      // Y кнопки, чтобы строка стояла по центру
 };
 
-// Заголовок группы: мелкая приглушённая строка над рядом кнопок. Когда
-// заголовки выключены, вместо неё пустая строка той же высоты — иначе группы
-// разъехались бы по вертикали относительно друг друга.
-void GroupTitle(const Style& style, const char* title, const ImVec4* color = nullptr) {
-    ImGui::PushStyleColor(ImGuiCol_Text,
-                          color ? *color : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextUnformatted(style.Titles ? title : "");
-    ImGui::PopStyleColor();
-}
+// Поставить курсор так, чтобы элемент высотой ControlHeight встал по центру
+// панели. Без этого ряд «плавает»: у кнопки с подписью и у кнопки-иконки
+// разная высота, и они выравниваются по верху.
+void CenterY(const Row& row) { ImGui::SetCursorPosY(row.Top); }
 
 // Кнопка окна: подсвечена, когда окно открыто; щелчок переключает. Одним
 // помощником, потому что кнопок десяток и разъехаться в поведении они не должны.
 void PanelToggle(EditorHost& host, EditorPanel panel, const char* icon, const char* label,
-                 const char* tip, bool withLabel) {
+                 const char* tip, bool withLabel, const Row& row) {
     bool& open = host.PanelVisible(panel);
+    CenterY(row);
     const bool pressed = withLabel ? EditorIcons::Button(icon, label, tip, open)
                                    : EditorIcons::IconOnlyButton(icon, tip, open);
     if (pressed) open = !open;
-    ImGui::SameLine();
+    ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
 }
 
 } // namespace
 
 void TopBarPanel::Draw(EditorHost& host, float height) {
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7, 4));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 2));
+    const Sage::UI::Style& ui = Sage::UI::Get();
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ui.PaddingControl, ui.PaddingControlY));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ui.SpacingXS, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Color(Role::Bg));
     ImGui::BeginChild("##topbar", ImVec2(0, height), ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoScrollbar);
 
     const float windowW = ImGui::GetWindowWidth();
-    Style style;
-    style.Labels = windowW >= kWidthForLabels;
-    style.Titles = windowW >= kWidthForTitles;
+    const bool labels = windowW >= kWidthForLabels;
+    const bool showScene = windowW >= kWidthForScene;
 
-    // Вертикальная черта между группами — от руки в списке отрисовки, а не
-    // текстовым «|»: группа занимает две строки, и символ встал бы по базовой
-    // линии первой из них, то есть посередине заголовка.
+    Row row;
+    row.Height = height;
+    row.Top = std::floor((height - ui.ControlHeight) * 0.5f);
+
     const ImVec2 barMin = ImGui::GetWindowPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Черта между группами — рисунком, а не текстовым «|»: символ встал бы по
+    // базовой линии текста, то есть не по центру панели.
     auto dividerAt = [&](float x) {
         x = std::floor(x);
-        dl->AddLine(ImVec2(x, barMin.y + 5.0f), ImVec2(x, barMin.y + height - 5.0f),
-                    IM_COL32(120, 128, 142, 130));
+        const float inset = ui.SpacingSM;
+        dl->AddLine(ImVec2(x, barMin.y + inset), ImVec2(x, barMin.y + height - inset),
+                    ImGui::GetColorU32(EditorTheme::Color(Role::Line)), ui.BorderWidth);
     };
     // Второй SameLine здесь НЕ РАБОТАЕТ: SameLine(0, spacing) считает позицию от
-    // конца последнего ЭЛЕМЕНТА, а линия рисуется прямо в список отрисовки и
-    // элементом не является. Два вызова подряд давали одну и ту же координату,
-    // и черта оказывалась ровно под первой кнопкой следующей группы. Сдвиг —
-    // руками.
+    // конца последнего ЭЛЕМЕНТА, а линия элементом не является. Сдвиг — руками.
     auto divider = [&]() {
-        ImGui::SameLine(0.0f, 9.0f);
+        ImGui::SameLine(0.0f, ui.SpacingMD);
         const float x = ImGui::GetCursorPosX();
         dividerAt(barMin.x + x);
-        ImGui::SetCursorPosX(x + 9.0f);
+        ImGui::SetCursorPosX(x + ui.SpacingMD);
     };
 
+    ImGui::SetCursorPosX(ui.PaddingPanel);
+
     // --- Панели: из чего собрано рабочее место -------------------------------
-    ImGui::BeginGroup();
-    GroupTitle(style, T("Panels"));
-    PanelToggle(host, EditorPanel::Hierarchy, "layout", T("Hierarchy"), T("Hierarchy"), false);
-    PanelToggle(host, EditorPanel::Inspector, "file", T("Inspector"), T("Inspector"), false);
-    PanelToggle(host, EditorPanel::Assets, "folder", T("Assets"), T("Assets"), false);
-    PanelToggle(host, EditorPanel::Console, "debug", T("Console"), T("Console"), false);
-    PanelToggle(host, EditorPanel::Code, "code", T("Code"), T("Code"), false);
-    PanelToggle(host, EditorPanel::Profiler, "info", T("Profiler"), T("Profiler"), false);
-    ImGui::NewLine();
-    ImGui::EndGroup();
+    PanelToggle(host, EditorPanel::Hierarchy, "layout", T("Hierarchy"), T("Hierarchy"), false, row);
+    PanelToggle(host, EditorPanel::Inspector, "file", T("Inspector"), T("Inspector"), false, row);
+    PanelToggle(host, EditorPanel::Assets, "folder", T("Assets"), T("Assets"), false, row);
+    PanelToggle(host, EditorPanel::Console, "debug", T("Console"), T("Console"), false, row);
+    PanelToggle(host, EditorPanel::Code, "code", T("Code"), T("Code"), false, row);
+    PanelToggle(host, EditorPanel::Profiler, "info", T("Profiler"), T("Profiler"), false, row);
 
     divider();
 
@@ -98,114 +117,108 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     //
     // Они стоят рядом намеренно. Вопрос «где настраивается свет» раньше не имел
     // ответа: часть была в окне Lighting, часть в Game Settings, часть на
-    // объекте. Соседство подписанных кнопок — самая дешёвая форма ответа: среда
-    // сцены здесь, цена кадра там, источники — объекты в иерархии.
-    ImGui::BeginGroup();
-    GroupTitle(style, T("Settings"));
+    // объекте. Соседство кнопок — самая дешёвая форма ответа: среда сцены
+    // здесь, цена кадра там, источники — объекты в иерархии.
     PanelToggle(host, EditorPanel::Environment, "sun", T("Environment"),
-                T("Environment: sky, air, ambient light (saved with the scene)"), style.Labels);
+                T("Environment: sky, air, ambient light (saved with the scene)"), labels, row);
     PanelToggle(host, EditorPanel::Settings, "gear", T("Game Settings"),
                 T("Game Settings: quality and cost of the frame (saved with the project)"),
-                style.Labels);
+                labels, row);
     PanelToggle(host, EditorPanel::UIEditor, "rect", T("Interface"),
-                T("Interface editor: the game frame at its own resolution"), style.Labels);
-    ImGui::NewLine();
-    ImGui::EndGroup();
+                T("Interface editor: the game frame at its own resolution"), labels, row);
 
     divider();
 
     // --- Виды: чем смотреть на сцену ------------------------------------------
-    ImGui::BeginGroup();
-    GroupTitle(style, T("Views"));
-    PanelToggle(host, EditorPanel::Viewport, "cube", T("Viewport"), T("Viewport"), style.Labels);
+    PanelToggle(host, EditorPanel::Viewport, "cube", T("Viewport"), T("Viewport"), labels, row);
     PanelToggle(host, EditorPanel::Game, "camera", T("Game"),
-                T("Game (view from the game camera)"), style.Labels);
-    ImGui::NewLine();
-    ImGui::EndGroup();
+                T("Game (view from the game camera)"), labels, row);
 
     // --- По центру: Play / Pause / Stop --------------------------------------
     //
-    // Центрирование считается ОТ ОКНА и зажимается между левым и правым
-    // блоками: ImGui::SameLine(x) с координатой левее курсора честно ставит
-    // курсор назад, и блок рисуется ПОВЕРХ уже нарисованного — кнопки просто
-    // исчезали с экрана.
+    // Центрирование считается ОТ СВОБОДНОГО МЕСТА и зажимается между левым и
+    // правым блоками: ImGui::SameLine(x) с координатой левее курсора честно
+    // ставит курсор назад, и блок рисуется ПОВЕРХ уже нарисованного — кнопки
+    // просто исчезали бы с экрана.
     const float leftEnd = ImGui::GetItemRectMax().x - barMin.x;
-    // Ширина слота под транспорт — ПОСТОЯННАЯ, хотя в правке в нём одна кнопка,
-    // а в Play-режиме три. Иначе при входе в игру блок раздувался бы и кнопка
-    // Play уезжала из-под курсора ровно в тот момент, когда по ней целятся
-    // второй раз.
-    const float playBlockW = 230.0f;
-    const float rightBlockW = style.Titles ? 230.0f : 170.0f;
-    const float spacing = 12.0f;
-    // Середина СВОБОДНОГО МЕСТА, а не окна: подписи у кнопок сделали левый блок
-    // широким, и «центр окна» оказывался под ним. ImGui::SameLine(x) с
-    // координатой левее курсора честно ставит курсор назад, и транспорт
-    // рисовался бы ПОВЕРХ кнопок — они просто исчезали с экрана.
-    const float rightStart = windowW - rightBlockW;
-    float playX = leftEnd + (rightStart - leftEnd - playBlockW) * 0.5f;
-    const float playMax = rightStart - playBlockW - spacing;
-    if (playX > playMax) playX = playMax;
-    if (playX < leftEnd + spacing) playX = leftEnd + spacing;
-    ImGui::SameLine(playX);
-    dividerAt(barMin.x + playX - 9.0f);
+    // Ширина слота под транспорт ПОСТОЯННА, хотя в правке в нём одна кнопка, а
+    // в игре две. Иначе при входе в игру блок раздувался бы и кнопка уезжала
+    // из-под курсора ровно в тот момент, когда по ней целятся второй раз.
+    const float playBlockW = ui.ControlHeight * 7.0f;
+    const float sceneBlockW = showScene ? ui.ControlHeight * 8.0f : 0.0f;
+    const float gap = ui.SpacingMD;
 
-    // Заголовок этой группы работает ещё и индикатором: в правке он просто
-    // называет группу, а в Play-режиме цветом и словом говорит, что сцена
-    // сейчас ЖИВАЯ. Отдельная надпись рядом с кнопками занимала бы место как
-    // третья кнопка, а сказать ей нечего, пока идёт обычная правка.
+    const float rightStart = windowW - sceneBlockW - ui.PaddingPanel;
+    float playX = leftEnd + (rightStart - leftEnd - playBlockW) * 0.5f;
+    playX = std::min(playX, rightStart - playBlockW - gap);
+    playX = std::max(playX, leftEnd + gap);
+    ImGui::SameLine(playX);
+    dividerAt(barMin.x + playX - gap);
+
     const EditorPlayState state = host.GetPlayState();
-    const ImVec4 playing(0.40f, 0.90f, 0.40f, 1.0f);
-    const ImVec4 paused(0.95f, 0.80f, 0.30f, 1.0f);
-    ImGui::BeginGroup();
-    switch (state) {
-        case EditorPlayState::Playing: GroupTitle(style, T("PLAYING"), &playing); break;
-        case EditorPlayState::Paused:  GroupTitle(style, T("PAUSED"), &paused); break;
-        default:                       GroupTitle(style, T("Run")); break;
-    }
+    CenterY(row);
     if (state == EditorPlayState::Editing) {
-        // Цвет — по смыслу («утвердительное действие»), а не константой:
-        // иначе в светлой теме кнопка осталась бы тёмно-зелёной на белом.
-        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Ok));
+        // ГЛАВНОЕ ДЕЙСТВИЕ ЭКРАНА — единственное, что красится акцентом.
+        // Именно ради него жёлтый и держат в резерве: когда им покрашено ещё
+        // пять кнопок, эта перестаёт быть заметной.
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Accent));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::Color(Role::AccentHover));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Color(Role::AccentActive));
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
         if (EditorIcons::Button("play", T("Play"), T("Run the scene (it is restored on Stop)")))
             host.StartPlay();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor(4);
     } else {
         if (state == EditorPlayState::Playing) {
             if (EditorIcons::Button("pause", T("Pause"), T("Pause"))) host.PausePlay();
         } else {
             if (EditorIcons::Button("play", T("Resume"), T("Resume"))) host.ResumePlay();
         }
-        ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Danger));
+        ImGui::SameLine(0.0f, ui.SpacingXS);
+        CenterY(row);
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Danger));
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
         if (EditorIcons::Button("stop", T("Stop"), T("Stop and restore the scene")))
             host.StopPlay();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor(2);
+
+        // Состояние игры — значком рядом с кнопками, а не подписью над ними:
+        // подпись стоила целой строки высоты, а сказать ей нечего, пока идёт
+        // обычная правка.
+        ImGui::SameLine(0.0f, ui.SpacingSM);
+        CenterY(row);
+        ImGui::AlignTextToFramePadding();
+        const bool playing = state == EditorPlayState::Playing;
+        ImGui::TextColored(EditorTheme::Color(playing ? Role::Ok : Role::Warn), "%s",
+                           playing ? T("PLAYING") : T("PAUSED"));
     }
-    ImGui::NewLine();
-    ImGui::EndGroup();
 
     // --- Справа: что открыто сейчас -------------------------------------------
     //
     // Имя сцены и пометка о несохранённых правках. В статус-баре они тоже есть,
     // но статус-бар внизу, а смотрят при работе — вверх, на кнопку Play.
-    const float rightX = std::max(ImGui::GetItemRectMax().x - barMin.x + spacing,
-                                  windowW - rightBlockW);
-    ImGui::SameLine(rightX);
-    dividerAt(barMin.x + rightX - 9.0f);
-    ImGui::BeginGroup();
-    GroupTitle(style, T("Scene"));
-    ImGui::AlignTextToFramePadding();
-    const bool dirty = host.SceneDirty();
-    if (dirty) {
-        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s *",
-                           host.CurrentSceneName().c_str());
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("There are unsaved changes (Ctrl+S)"));
-    } else {
-        ImGui::TextDisabled("%s", host.CurrentSceneName().c_str());
+    if (showScene) {
+        const float rightX = std::max(ImGui::GetItemRectMax().x - barMin.x + gap, rightStart);
+        ImGui::SameLine(rightX);
+        dividerAt(barMin.x + rightX - gap);
+        CenterY(row);
+        ImGui::AlignTextToFramePadding();
+        EditorIcons::Inline("scene");
+        ImGui::SameLine(0.0f, ui.SpacingXS);
+        // Длинное имя сцены УКОРАЧИВАЕТСЯ, а не выталкивает себя за край панели.
+        const float room = windowW - ImGui::GetCursorPosX() - ui.PaddingPanel;
+        const std::string name = host.CurrentSceneName() + (host.SceneDirty() ? " *" : "");
+        const std::string shown = Sage::UI::Truncate(name.c_str(), room);
+        if (host.SceneDirty()) {
+            ImGui::TextColored(EditorTheme::Color(Role::Warn), "%s", shown.c_str());
+            Sage::UI::Tooltip(T("There are unsaved changes (Ctrl+S)"), "Ctrl+S");
+        } else {
+            ImGui::TextDisabled("%s", shown.c_str());
+            if (shown != name) Sage::UI::Tooltip(name.c_str());
+        }
     }
-    ImGui::EndGroup();
 
     ImGui::EndChild();
+    ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
 }
