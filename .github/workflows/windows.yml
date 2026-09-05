@@ -31,7 +31,14 @@ jobs:
       - name: Установка кросс-компилятора
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64 ninja-build
+          # X11-заголовки нужны НЕ редактору (он собирается кросс-компилятором
+          # под Windows), а нативной настройке CMake для упаковщика шаблонов:
+          # проект тянет GLFW через FetchContent, и его CMakeLists зовёт
+          # find_package(X11) при любой настройке под Linux — даже когда ни
+          # одного окна в сборке нет. Без них шаг «Шаблон-витрина и каталог»
+          # падал на «Could NOT find X11» ещё до первой строки кода.
+          sudo apt-get install -y g++-mingw-w64-x86-64 ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
       # Кросс-компиляция с Linux, а не сборка на windows-раннере: тулчейн
       # линкует рантайм СТАТИЧЕСКИ (cmake/mingw-toolchain.cmake), поэтому .exe
