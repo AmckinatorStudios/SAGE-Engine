@@ -9,6 +9,7 @@
 #include "sage/ui/core/UINode.h"
 #include "sage/ui/visual/UIBorder.h"
 #include "sage/ui/visual/UIFill.h"
+#include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/visual/UIImage.h"
 #include "sage/ui/visual/UIShape.h"
 
@@ -208,6 +209,32 @@ const UIComponentType& UIImage::StaticType() {
             {"UvRect", SAGE_UI_TEXT("UV rect"), UIProperty::Kind::Vec4,
              SAGE_UI_OFFSET(UIImage, UvRect), 0.0f, 1.0f, nullptr, nullptr, 0,
              UIProperty::Widget::Auto, SAGE_UI_TEXT("Advanced")},
+        };
+        return d;
+    }();
+    return t;
+}
+
+const UIComponentType& UIIcon::StaticType() {
+    static UIComponentType t = [] {
+        UIComponentType d;
+        d.Id = "icon";
+        d.Title = SAGE_UI_TEXT("Icon");
+        d.Hint = SAGE_UI_TEXT("Vector icon drawn by the engine, not a file");
+        d.Icon = "star";
+        d.Category = UIComponentCategory::Image;
+        d.Order = 50;
+        d.Create = [] { return std::unique_ptr<UIComponent>(new UIIcon()); };
+        d.Props = {
+            {"Name", SAGE_UI_TEXT("Icon name"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIIcon, Name), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::IconName, nullptr},
+            {"Color", SAGE_UI_TEXT("Color"), UIProperty::Kind::Color,
+             SAGE_UI_OFFSET(UIIcon, Color), 0, 0, nullptr, nullptr, 0, UIProperty::Widget::Auto,
+             nullptr},
+            {"Size", SAGE_UI_TEXT("Size"), UIProperty::Kind::Float, SAGE_UI_OFFSET(UIIcon, Size),
+             0.0f, 256.0f, SAGE_UI_TEXT("Zero fits the shorter side of the node"), nullptr, 0,
+             UIProperty::Widget::Auto, nullptr},
         };
         return d;
     }();

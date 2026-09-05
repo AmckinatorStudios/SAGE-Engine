@@ -51,6 +51,7 @@ namespace sage { class Application; }
 #include "panels/AssetsPanel.h"
 #include "panels/LauncherPanel.h"
 #include "panels/EnvironmentPanel.h"
+#include "panels/UIDocumentPanel.h"
 #include "panels/UIEditorPanel.h"
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
@@ -229,6 +230,7 @@ public:
             case EditorPanel::Game:        return m_showGame;
             case EditorPanel::Viewport:    return m_showViewport;
             case EditorPanel::UIEditor:    return m_showUIEditor;
+            case EditorPanel::UIDocument:  return m_showUIDocument;
             case EditorPanel::Settings:    return m_showSettings;
             default:                       return m_showViewport;
         }
@@ -382,6 +384,7 @@ private:
     // Редактор интерфейса — по умолчанию закрыт: это отдельный инструмент под
     // отдельную задачу, и открывают его, когда садятся верстать.
     bool m_showUIEditor = false;
+    bool m_showUIDocument = false;
     bool m_showViewport = true;
     bool m_showGame = true;
     bool m_showConsole = true;
@@ -426,6 +429,7 @@ private:
     LauncherPanel m_launcher;
     EnvironmentPanel m_environment;
     UIEditorPanel m_uiEditor;
+    UIDocumentPanel m_uiDocument;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов

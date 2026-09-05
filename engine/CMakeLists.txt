@@ -164,6 +164,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/widgets/UIWidgets.cpp
     src/sage/ui/serialization/UISerializer.cpp
     src/sage/ui/serialization/UIPrefab.cpp
+    src/sage/ui/serialization/UIMigration.cpp
     src/sage/ui/animation/UIAnimationValue.cpp
     src/sage/ui/debug/UIDebug.cpp
     src/sage/ui/showcase/UIShowcaseDocument.cpp

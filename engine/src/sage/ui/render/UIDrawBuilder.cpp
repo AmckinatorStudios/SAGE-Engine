@@ -11,6 +11,7 @@
 #include "sage/ui/input/UIInteraction.h"
 #include "sage/ui/visual/UIBorder.h"
 #include "sage/ui/visual/UIFill.h"
+#include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/visual/UIImage.h"
 #include "sage/ui/visual/UIShape.h"
 #include "sage/ui/visual/UIText.h"
@@ -262,6 +263,23 @@ void EmitImage(const UIDrawContext& ctx, const UIComponent& comp) {
     }
 }
 
+void EmitIcon(const UIDrawContext& ctx, const UIComponent& comp) {
+    const UIIcon& icon = static_cast<const UIIcon&>(comp);
+    if (icon.Name.empty() || icon.Color.a <= 0.0f) return;
+    const float side = icon.Size > 0.0f ? icon.Size * ctx.Scale
+                                        : std::min(ctx.Rect.w, ctx.Rect.h);
+    UIMaterialRef material;
+    material.Shader = "icon";
+    material.Name = icon.Name;
+    UIRenderCommand& c = ctx.Begin(UIPrimitive::Custom);
+    // Значок всегда вписан в КВАДРАТ и рисуется целиком внутри него, поэтому
+    // вёрстка не зависит от того, какой именно значок назначили.
+    c.Rect = {ctx.Rect.x + (ctx.Rect.w - side) * 0.5f, ctx.Rect.y + (ctx.Rect.h - side) * 0.5f,
+              side, side};
+    c.Color = Shade(ctx, icon.Color);
+    c.Material = ctx.List->AddMaterial(material);
+}
+
 void EmitText(const UIDrawContext& ctx, const UIComponent& comp) {
     const UIText& t = static_cast<const UIText&>(comp);
     if (t.Color.a <= 0.0f) return;
@@ -498,6 +516,7 @@ void RegisterBuiltinUIEmitters() {
     r.Register("border", &EmitBorder);
     r.Register("shape", &EmitShape);
     r.Register("image", &EmitImage);
+    r.Register("icon", &EmitIcon);
     r.Register("text", &EmitText);
     r.Register("progress", &EmitProgress);
     r.Register("range", &EmitRange);

@@ -70,6 +70,10 @@ struct UIClipState {
 // шейдера, и не должно: его дело — донести до бэкенда имя и параметры.
 struct UIMaterialRef {
     std::string Shader;
+    // Что именно рисуем этим материалом: имя значка, имя эффекта, ключ набора.
+    // Строка живёт в материале, а не в команде: материалов на кадр единицы, а
+    // команд сотни, и строка в каждой стоила бы дороже всего остального.
+    std::string Name;
     const Texture* Textures[4] = {nullptr, nullptr, nullptr, nullptr};
     glm::vec4 Params[4]{};
     UIBlendMode Blend = UIBlendMode::Normal;
@@ -127,6 +131,8 @@ struct UIRenderBatch {
     UIBlendMode Blend = UIBlendMode::Normal;
     UIClipState Clip;
     const UIMaterialRef* Material = nullptr;
+    // В батче есть текст. Информационно (глифы и заливки идут одним
+    // шейдером и состояние не меняют) — нужно профайлеру и отладке.
     bool Text = false;
 };
 

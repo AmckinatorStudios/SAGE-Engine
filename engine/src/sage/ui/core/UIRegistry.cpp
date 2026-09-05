@@ -13,6 +13,7 @@
 #include "sage/ui/style/UIStyle.h"
 #include "sage/ui/visual/UIBorder.h"
 #include "sage/ui/visual/UIFill.h"
+#include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/visual/UIImage.h"
 #include "sage/ui/visual/UIShape.h"
 #include "sage/ui/visual/UIText.h"
@@ -89,6 +90,7 @@ void RegisterBuiltinUIComponents() {
     r.Register(UIBorder::StaticType());
     r.Register(UIShape::StaticType());
     r.Register(UIImage::StaticType());
+    r.Register(UIIcon::StaticType());
     r.Register(UIText::StaticType());
     r.Register(UIMask::StaticType());
     r.Register(UIEffects::StaticType());

@@ -46,7 +46,12 @@ struct UIInputFrame {
 };
 
 // Чем интерфейс «отчитывается» перед игрой: взял ли он ввод себе.
-struct UIInputResult {
+//
+// Имя не UIInputResult намеренно: так называется тот же по смыслу тип СТАРОЙ
+// системы (sage/ui/UIInteraction.h). Пока обе живут рядом, одинаковое имя в
+// одном пространстве имён — ошибка компиляции у всякого, кто включит оба
+// заголовка, то есть у редактора.
+struct UIInputReport {
     bool PointerOverUI = false;
     bool PointerCaptured = false;   // идёт перетаскивание/нажатие в интерфейсе
     bool KeyboardCaptured = false;  // фокус в поле ввода
@@ -62,7 +67,7 @@ class UIInputRouter {
 public:
     // Один шаг. Зовётся РАНЬШЕ игровой логики кадра: по результату игра решает,
     // доставать ли ей тот же щелчок.
-    UIInputResult Update(UIDocument& doc, const UILayoutSolver& layout,
+    UIInputReport Update(UIDocument& doc, const UILayoutSolver& layout,
                          const UIContext& ctx, const UIInputFrame& input,
                          UIEventBus& bus);
 

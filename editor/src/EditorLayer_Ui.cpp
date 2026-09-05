@@ -669,6 +669,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // окружающий свет, а сами источники света — на объектах сцены.
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
             ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
+            ImGui::MenuItem(T("UI Document"), nullptr, &PanelVisible(EditorPanel::UIDocument));
             ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanel::Code));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);

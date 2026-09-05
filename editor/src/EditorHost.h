@@ -55,7 +55,8 @@ enum class EditorPanel {
     Profiler,
     Game,
     Viewport,
-    UIEditor,      // редактор интерфейса (холст игрового кадра + элементы)
+    UIEditor,      // редактор интерфейса сцены (переходный, см. UIEditorPanel.h)
+    UIDocument,    // редактор документа интерфейса (новая система, .uidoc)
     Settings,      // окно настроек движка (качество и цена кадра)
     Count
 };

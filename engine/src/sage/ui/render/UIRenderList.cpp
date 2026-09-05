@@ -40,11 +40,13 @@ void UIRenderList::Build() {
             const UIRect& y = b.Clip.Scissor;
             if (x.x != y.x || x.y != y.y || x.w != y.w || x.h != y.h) return false;
         }
-        const bool textA = a.Kind == UIPrimitive::Glyphs;
-        const bool textB = b.Kind == UIPrimitive::Glyphs;
-        if (textA != textB) return false;
-        // Текстура разная — новый батч. У сплошных фигур её нет, и они
-        // склеиваются с чем угодно, кроме текста.
+        // Текст и сплошные фигуры НЕ разрывают батч. Это не оптимизация «на
+        // всякий случай»: и глифы, и заливки идут через один и тот же шейдер
+        // интерфейса (глиф берёт покрытие из атласа шрифта, заливка не
+        // сэмплирует ничего), то есть состояние GPU у них одинаковое. Разрыв
+        // здесь означал бы отдельный вызов рисования на каждую подпись — а
+        // подпись есть почти у каждого элемента, и именно из них и набегала бы
+        // «сотня draw call на сотню элементов» (§145).
         if (a.Tex != b.Tex) return false;
         return true;
     };
@@ -80,6 +82,7 @@ void UIRenderList::Build() {
         b.Clip = c.Clip;
         b.Material = c.Material;
         b.Text = c.Kind == UIPrimitive::Glyphs;
+        (void)0;
         m_batches.push_back(b);
     }
 

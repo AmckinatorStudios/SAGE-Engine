@@ -29,9 +29,9 @@ void UIRuntime::Update(float dt) {
     m_profile.Layout = m_layout.Stats();
 }
 
-UIInputResult UIRuntime::HandleInput(const UIInputFrame& input) {
+UIInputReport UIRuntime::HandleInput(const UIInputFrame& input) {
     const auto t0 = std::chrono::steady_clock::now();
-    UIInputResult r = m_input.Update(m_doc, m_layout, m_ctx, input, m_bus);
+    UIInputReport r = m_input.Update(m_doc, m_layout, m_ctx, input, m_bus);
     const auto t1 = std::chrono::steady_clock::now();
     m_profile.InputMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
     // Состояния взаимодействия изменились — оформление состояний обязано

@@ -14,7 +14,14 @@
 #include <string>
 
 #include "sage/ui/UIFramework.h"
+#include "sage/scene/Components.h"
+#include "sage/scene/Scene.h"
+#include "sage/ui/components/Interact.h"
+#include "sage/ui/components/Layout.h"
+#include "sage/ui/components/Visual.h"
+#include "sage/ui/serialization/UIMigration.h"
 #include "sage/ui/showcase/UIShowcaseDocument.h"
+#include "sage/ui/visual/UIIcon.h"
 
 using namespace sage::ui;
 
@@ -673,7 +680,7 @@ TEST(UIx_click_reports_command_not_action) {
     in.Buttons[0] = true;
     h.rt.HandleInput(in);
     in.Buttons[0] = false;
-    const UIInputResult r = h.rt.HandleInput(in);
+    const UIInputReport r = h.rt.HandleInput(in);
 
     // Интерфейс сообщает КОМАНДУ, а не выполняет действие: что она значит,
     // решает игра снаружи.
@@ -1341,4 +1348,99 @@ TEST(UIx_simple_things_stay_simple) {
     h.rt.Build();
     CHECK_EQ(h.rt.DrawList().Stats().Commands, 1);
     CHECK_TRUE(h.rt.DrawList().Stats().Glyphs >= 6);
+}
+
+// --- Значок ---------------------------------------------------------------------
+
+TEST(UIx_icon_goes_through_a_material) {
+    Harness h;
+    UINode& n = Node(h.Doc(), "Icon");
+    n.Ensure<UITransform>().Size = {32.0f, 32.0f};
+    UIIcon& icon = n.Ensure<UIIcon>();
+    icon.Name = "heart";
+    h.Step();
+    h.rt.Build();
+
+    CHECK_EQ(h.rt.DrawList().Stats().Commands, 1);
+    const UIRenderCommand& c = h.rt.DrawList().Commands()[0];
+    // Ядро не знает, что такое значок: оно доносит до бэкенда материал с именем.
+    CHECK_EQ((int)c.Kind, (int)UIPrimitive::Custom);
+    CHECK_TRUE(c.Material != nullptr);
+    CHECK_EQ(c.Material->Shader, std::string("icon"));
+    CHECK_EQ(c.Material->Name, std::string("heart"));
+    // Значок вписан в КВАДРАТ — вёрстка не зависит от того, какой назначили.
+    CHECK_NEAR(c.Rect.w, c.Rect.h, 1e-4);
+}
+
+// --- Переезд со старой системы ----------------------------------------------------
+
+TEST(UIx_migration_from_legacy_scene) {
+    Scene scene("legacy");
+    entt::registry& reg = scene.Registry();
+
+    GameObject panel = scene.CreateObject("Panel");
+    {
+        sage::ui::Transform& t = reg.emplace<sage::ui::Transform>(panel.Entity());
+        t.Anchor = UIAnchor::BottomRight;
+        t.Offset = {24.0f, 24.0f};
+        t.Size = {300.0f, 120.0f};
+        t.Layer = 4;
+        sage::ui::Fill& f = reg.emplace<sage::ui::Fill>(panel.Entity());
+        f.Rounding = 12.0f;
+        f.BorderThickness = 2.0f;
+        f.ShadowSize = 10.0f;
+        reg.emplace<sage::ui::Mask>(panel.Entity());
+    }
+
+    GameObject label = scene.CreateObject("Title");
+    {
+        sage::ui::Transform& t = reg.emplace<sage::ui::Transform>(label.Entity());
+        t.Size = {200.0f, 40.0f};
+        sage::ui::Label& l = reg.emplace<sage::ui::Label>(label.Entity());
+        l.Text = "Инвентарь";
+        l.Scale = 2.5f;
+        l.Horizontal = sage::ui::Label::Align::Start;
+        scene.SetParent(label.Entity(), panel.Entity());
+    }
+
+    UIDocument doc;
+    const UIMigrationReport report = UIMigrateSceneUI(scene, doc);
+    CHECK_EQ(report.Nodes, 2);
+
+    UINode* newPanel = doc.FindByName("Panel");
+    CHECK_TRUE(newPanel != nullptr);
+    // Девять якорей стали долями — и дальше правятся как доли.
+    CHECK_NEAR(newPanel->Get<UITransform>()->AnchorMin.x, 1.0, 1e-4);
+    CHECK_NEAR(newPanel->Get<UITransform>()->AnchorMin.y, 1.0, 1e-4);
+    // Рамка стала своим компонентом, тень — эффектом в стеке.
+    CHECK_TRUE(newPanel->Has<UIBorder>());
+    CHECK_TRUE(newPanel->Get<UIEffects>() != nullptr);
+    CHECK_TRUE(newPanel->Get<UIEffects>()->Get<UIDropShadow>() != nullptr);
+    // Флаг обрезки стал полноценной маской со скруглением подложки.
+    CHECK_TRUE(newPanel->Has<UIMask>());
+    CHECK_NEAR(newPanel->Get<UIMask>()->Radius.TL, 12.0, 1e-4);
+
+    UINode* newLabel = doc.FindByName("Title");
+    CHECK_TRUE(newLabel != nullptr);
+    CHECK_EQ(newLabel->Parent, newPanel->Id);
+    CHECK_EQ(newLabel->Get<UIText>()->Text, std::string("Инвентарь"));
+    CHECK_NEAR(newLabel->Get<UIText>()->Size, 20.0, 1e-4); // 2.5 × 8
+    CHECK_TRUE(UIValidate(doc).empty());
+}
+
+TEST(UIx_migration_reports_what_it_could_not_carry) {
+    Scene scene("legacy2");
+    entt::registry& reg = scene.Registry();
+    GameObject button = scene.CreateObject("Play");
+    reg.emplace<sage::ui::Transform>(button.Entity());
+    sage::ui::Interactable& ia = reg.emplace<sage::ui::Interactable>(button.Entity());
+    ia.Action = "menu.play";
+    ia.Events.push_back(sage::events::Binding{});
+
+    UIDocument doc;
+    const UIMigrationReport report = UIMigrateSceneUI(scene, doc);
+    // Связи событий — часть игровой сцены, а не документа. Молча их терять
+    // нельзя: об этом обязано быть сказано (§134).
+    CHECK_TRUE(!report.Warnings.empty());
+    CHECK_EQ(doc.FindByName("Play")->Get<UIInteraction>()->Command, std::string("menu.play"));
 }

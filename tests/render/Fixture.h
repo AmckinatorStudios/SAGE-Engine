@@ -79,6 +79,7 @@ void RunReflectionChecks(FrameRenderer& r);                 // отражени�
 void RunShadowChecks(FrameRenderer& r, Scene& scene);       // тени: мягкость, каскады, лампы
 void RunSceneChecks(FrameRenderer& r);                      // уровни детализации, кэш, небо, RHI
 void RunUIChecks();                                         // интерфейс: части рисуют себя и только себя
+void RunUICoreChecks();                                     // новая система интерфейса: эталонные сцены
 void RunMaterialChecks(FrameRenderer& r);                   // материал: от файла до пикселей
 void RunVolumetricChecks();                                 // объёмный свет: зерно, полосы, кайма
 

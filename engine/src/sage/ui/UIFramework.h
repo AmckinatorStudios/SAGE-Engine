@@ -92,7 +92,7 @@ public:
     // что раскладка нужна и тем, кто не рисует (ввод, редактор, тест).
     void Update(float dt);
     // Раздать ввод. Между Update и Render: события могут поменять документ.
-    UIInputResult HandleInput(const UIInputFrame& input);
+    UIInputReport HandleInput(const UIInputFrame& input);
     // Собрать команды и отдать бэкенду.
     void Render(IUIDrawBackend& backend);
     // Собрать команды без рисования — для тестов и снимков.

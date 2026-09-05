@@ -72,10 +72,10 @@ void UIInputRouter::Emit(UIDocument& doc, UIEventBus& bus, UIEvent& e,
     (void)doc;
 }
 
-UIInputResult UIInputRouter::Update(UIDocument& doc, const UILayoutSolver& layout,
+UIInputReport UIInputRouter::Update(UIDocument& doc, const UILayoutSolver& layout,
                                     const UIContext& ctx, const UIInputFrame& input,
                                     UIEventBus& bus) {
-    UIInputResult result;
+    UIInputReport result;
 
     // Сбросить однокадровые пометки: система ставит, игра читает, следующий шаг
     // гасит. Иначе «нажали» остаётся истиной навсегда.

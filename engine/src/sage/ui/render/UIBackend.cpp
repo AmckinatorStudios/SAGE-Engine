@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "sage/render/Texture.h"
+#include "sage/ui/UIIcons.h"
 #include "sage/ui/UIRenderer.h"
 
 // ---------------------------------------------------------------------------
@@ -250,6 +251,17 @@ void UIClassicBackend::Submit(const UIRenderList& list) {
                 case UIPrimitive::Polygon:
                 case UIPrimitive::Line: DrawPolygon(c); break;
                 case UIPrimitive::Ring: DrawRing(c); break;
+                case UIPrimitive::Custom:
+                    // Единственный материал, который знает ЭТОТ бэкенд, —
+                    // векторный значок движка. Чужой материал он честно
+                    // пропускает: рисовать неизвестное нечем, а притворяться
+                    // хуже, чем не рисовать (§134).
+                    if (c.Material && c.Material->Shader == "icon") {
+                        sage::ui::DrawIcon(m_ui, c.Material->Name, c.Rect.x, c.Rect.y,
+                                           std::min(c.Rect.w, c.Rect.h), Rgb(c.Color),
+                                           c.Color.a);
+                    }
+                    break;
                 default: break;
             }
         }

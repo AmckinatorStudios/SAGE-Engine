@@ -1075,6 +1075,7 @@ void EditorLayer::OnRender() {
     if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
     if (m_showEnvironment) m_environment.Draw(*this, &m_showEnvironment);
     if (m_showUIEditor) m_uiEditor.Draw(*this, &m_showUIEditor);
+    if (m_showUIDocument) m_uiDocument.Draw(*this, &m_showUIDocument);
     if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
     if (m_showGame) m_game.Draw(*this, &m_showGame);
     // Код подаётся ПОСЛЕ Viewport и Game, потому что порядок вкладок в узле
