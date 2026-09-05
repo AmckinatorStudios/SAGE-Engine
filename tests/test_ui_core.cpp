@@ -22,6 +22,7 @@
 #include "sage/ui/serialization/UIMigration.h"
 #include "sage/ui/showcase/UIShowcaseDocument.h"
 #include "sage/ui/visual/UIIcon.h"
+#include "sage/ui/visual/UIMaterial.h"
 
 using namespace sage::ui;
 
@@ -1443,4 +1444,105 @@ TEST(UIx_migration_reports_what_it_could_not_carry) {
     // нельзя: об этом обязано быть сказано (§134).
     CHECK_TRUE(!report.Warnings.empty());
     CHECK_EQ(doc.FindByName("Play")->Get<UIInteraction>()->Command, std::string("menu.play"));
+}
+
+// --- Прокрутка ---------------------------------------------------------------------
+
+TEST(UIx_scroll_offset_moves_content_and_reports_extent) {
+    Harness h;
+    UINode& view = Node(h.Doc(), "Scroll");
+    view.Ensure<UITransform>().Size = {200.0f, 100.0f};
+    view.Ensure<UIMask>();
+    UIScrollView& sv = view.Ensure<UIScrollView>();
+
+    UINode& content = Node(h.Doc(), "Content", view.Id);
+    UITransform& ct = content.Ensure<UITransform>();
+    ct.Size = {200.0f, 400.0f};
+    h.Step();
+
+    CHECK_NEAR(h.RectOf(content.Id).y, 0.0, 1e-3);
+    // Содержимое выше окна на 300 — ровно на столько и можно докрутить (§90).
+    CHECK_NEAR(view.Get<UIScrollView>()->ContentSize.y, 300.0, 1e-3);
+
+    view.Get<UIScrollView>()->Offset.y = 120.0f;
+    h.Doc().MarkDirty(UIDirty_Layout);
+    h.Step();
+    // Содержимое РАСКЛАДЫВАЕТСЯ в сдвинутой области, а не «рисуется со
+    // смещением»: поэтому маска и попадание курсором работают сами собой.
+    CHECK_NEAR(h.RectOf(content.Id).y, -120.0, 1e-3);
+    CHECK_FALSE(UIHitNode(h.Doc(), h.rt.Layout(), h.rt.Context(), content.Id, {50.0f, 250.0f}));
+}
+
+// --- Композиция и промежуточные цели -------------------------------------------------
+
+TEST(UIx_offscreen_wraps_the_whole_subtree) {
+    Harness h;
+    UINode& panel = Node(h.Doc(), "Panel");
+    panel.Ensure<UITransform>().Size = {200.0f, 200.0f};
+    panel.Ensure<UIFill>();
+    UIBlur& blur = panel.Ensure<UIEffects>().Ensure<UIBlur>();
+    blur.Radius = 12.0f;
+    blur.Passes = 2;
+
+    UINode& child = Node(h.Doc(), "Child", panel.Id);
+    child.Ensure<UITransform>().Size = {50.0f, 50.0f};
+    child.Ensure<UIFill>();
+    h.Step();
+    h.rt.Build();
+
+    const std::vector<UIRenderCommand>& cmds = h.rt.DrawList().Commands();
+    CHECK_EQ(cmds.size(), (size_t)4); // begin, панель, ребёнок, end
+    CHECK_EQ((int)cmds.front().Op, (int)UIPassOp::BeginOffscreen);
+    CHECK_EQ((int)cmds.back().Op, (int)UIPassOp::EndOffscreen);
+    // Параметры обработки едут В КОМАНДЕ: бэкенд не имеет доступа к узлам.
+    CHECK_NEAR(cmds.back().Softness, 12.0, 1e-3);
+    CHECK_NEAR(cmds.back().Thickness, 2.0, 1e-3);
+    // Стоимость видна в профайлере (§113).
+    CHECK_EQ(h.rt.DrawList().Stats().RenderTargets, 1);
+    CHECK_TRUE(h.rt.DrawList().Stats().EffectPasses >= 2);
+}
+
+TEST(UIx_offscreen_is_skipped_when_not_allowed) {
+    Harness h;
+    h.rt.Context().AllowOffscreen = false;
+    UINode& panel = Node(h.Doc(), "Panel");
+    panel.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    panel.Ensure<UIFill>();
+    panel.Ensure<UIEffects>().Ensure<UIBlur>();
+    h.Step();
+    h.rt.Build();
+    // Честная деградация: интерфейс рисуется без эффекта, а не в никуда (§134).
+    CHECK_EQ(h.rt.DrawList().Stats().RenderTargets, 0);
+    CHECK_EQ(h.rt.DrawList().Stats().Commands, 1);
+}
+
+// --- Пользовательский материал ---------------------------------------------------------
+
+TEST(UIx_custom_material_reaches_the_backend_untouched) {
+    Harness h;
+    UINode& n = Node(h.Doc(), "Noise");
+    n.Ensure<UITransform>().Size = {64.0f, 64.0f};
+    UIMaterial& m = n.Ensure<UIMaterial>();
+    m.Shader = "my/noise";
+    m.Name = "storm";
+    m.Param0 = {1.0f, 2.0f, 3.0f, 4.0f};
+    m.Blend = UIBlendMode::Add;
+    h.Step();
+    h.rt.Build();
+
+    CHECK_EQ(h.rt.DrawList().Stats().Commands, 1);
+    const UIRenderCommand& c = h.rt.DrawList().Commands()[0];
+    // Ядро интерфейса не знает, что внутри шейдера, и не должно: его дело —
+    // донести имя и параметры (§45).
+    CHECK_TRUE(c.Material != nullptr);
+    CHECK_EQ(c.Material->Shader, std::string("my/noise"));
+    CHECK_EQ(c.Material->Name, std::string("storm"));
+    CHECK_NEAR(c.Material->Params[0].z, 3.0, 1e-4);
+    CHECK_EQ((int)c.Blend, (int)UIBlendMode::Add);
+
+    // И переживает сохранение вместе со всем остальным.
+    const std::string json = UISaveDocumentToString(h.Doc());
+    UIDocument loaded;
+    CHECK_TRUE(UILoadDocumentFromString(loaded, json).Ok);
+    CHECK_EQ(loaded.FindByName("Noise")->Get<UIMaterial>()->Shader, std::string("my/noise"));
 }

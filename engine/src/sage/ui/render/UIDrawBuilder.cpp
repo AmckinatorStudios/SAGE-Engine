@@ -13,6 +13,7 @@
 #include "sage/ui/visual/UIFill.h"
 #include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/visual/UIImage.h"
+#include "sage/ui/visual/UIMaterial.h"
 #include "sage/ui/visual/UIShape.h"
 #include "sage/ui/visual/UIText.h"
 #include "sage/ui/visual/UITextLayout.h"
@@ -280,6 +281,29 @@ void EmitIcon(const UIDrawContext& ctx, const UIComponent& comp) {
     c.Material = ctx.List->AddMaterial(material);
 }
 
+void EmitMaterial(const UIDrawContext& ctx, const UIComponent& comp) {
+    const UIMaterial& m = static_cast<const UIMaterial&>(comp);
+    if (m.Shader.empty()) return;
+    UIMaterialRef ref;
+    ref.Shader = m.Shader;
+    ref.Name = m.Name;
+    ref.Blend = m.Blend;
+    if (ctx.Ctx->Textures) {
+        const std::string* paths[4] = {&m.Texture0, &m.Texture1, &m.Texture2, &m.Texture3};
+        for (int i = 0; i < 4; ++i)
+            if (!paths[i]->empty()) ref.Textures[i] = ctx.Ctx->Textures->Get(*paths[i]);
+    }
+    ref.Params[0] = m.Param0;
+    ref.Params[1] = m.Param1;
+    ref.Params[2] = m.Param2;
+    ref.Params[3] = m.Param3;
+
+    UIRenderCommand& c = ctx.Begin(UIPrimitive::Custom);
+    c.Color = Shade(ctx, m.Color);
+    c.Blend = m.Blend;
+    c.Material = ctx.List->AddMaterial(ref);
+}
+
 void EmitText(const UIDrawContext& ctx, const UIComponent& comp) {
     const UIText& t = static_cast<const UIText&>(comp);
     if (t.Color.a <= 0.0f) return;
@@ -517,6 +541,7 @@ void RegisterBuiltinUIEmitters() {
     r.Register("shape", &EmitShape);
     r.Register("image", &EmitImage);
     r.Register("icon", &EmitIcon);
+    r.Register("material", &EmitMaterial);
     r.Register("text", &EmitText);
     r.Register("progress", &EmitProgress);
     r.Register("range", &EmitRange);
@@ -651,14 +676,13 @@ void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UICont
 
     const UIDrawRegistry& reg = UIDrawRegistry::Instance();
 
-    for (int idx : order) {
-        const UIResolvedNode& r = layout.Nodes()[(size_t)idx];
-        UINode* node = doc.Find(r.Id);
-        if (!node) continue;
-
+    // Один узел списка: собрать его команды. Эффекты уровня Behind идут до
+    // компонентов, Front — после; порядок компонентов внутри узла задаёт их
+    // Order.
+    auto emitNode = [&](const UIResolvedNode& r, UINode& node) {
         UIDrawContext dc;
         dc.Ctx = &ctx;
-        dc.Node = node;
+        dc.Node = &node;
         dc.Resolved = &r;
         dc.List = &out;
         dc.Rect = r.Rect;
@@ -666,32 +690,82 @@ void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UICont
         dc.Opacity = r.Opacity;
         dc.Blend = r.Blend;
         dc.SortKey = r.SortKey;
-        dc.Modulate = CollectModulate(*node);
+        dc.Modulate = CollectModulate(node);
         dc.Clip.HasScissor = r.Clipped;
         dc.Clip.Scissor = r.Clip;
         dc.Clip.MaskState = r.MaskState;
 
-        const UIEffects* fx = node->Get<UIEffects>();
-        const bool offscreen = fx && fx->NeedsOffscreen() && ctx.AllowOffscreen;
-        if (offscreen) {
-            // Явная стоимость (§131): промежуточная цель появляется в списке
-            // команд отдельной операцией и видна в профайлере.
-            UIRenderCommand& begin = dc.Begin(UIPrimitive::Custom);
-            begin.Op = UIPassOp::BeginOffscreen;
-        }
-
-        EmitBehindEffects(dc, *node);
-
-        for (UIComponent* comp : node->DrawOrder()) {
+        EmitBehindEffects(dc, node);
+        for (UIComponent* comp : node.DrawOrder()) {
             if (UIDrawEmitter fn = reg.Find(comp->Type().Id)) fn(dc, *comp);
         }
+        EmitFrontEffects(dc, node);
+    };
 
-        EmitFrontEffects(dc, *node);
+    std::vector<bool> emitted(layout.Nodes().size(), false);
 
-        if (offscreen) {
-            UIRenderCommand& end = dc.Begin(UIPrimitive::Custom);
-            end.Op = UIPassOp::EndOffscreen;
+    for (int idx : order) {
+        if (emitted[(size_t)idx]) continue;
+        const UIResolvedNode& r = layout.Nodes()[(size_t)idx];
+        UINode* node = doc.Find(r.Id);
+        if (!node) { emitted[(size_t)idx] = true; continue; }
+
+        const UIEffects* fx = node->Get<UIEffects>();
+        const bool offscreen = fx && fx->NeedsOffscreen() && ctx.AllowOffscreen;
+        if (!offscreen) {
+            emitted[(size_t)idx] = true;
+            emitNode(r, *node);
+            continue;
         }
+
+        // ЭФФЕКТ ДЕЙСТВУЕТ НА ПОДДЕРЕВО (§36), поэтому поддерево рисуется как
+        // одна группа: сначала целиком в промежуточную цель, потом обработанное
+        // — обратно. Это и есть смысл композиции; рисовать поддерево вразбивку
+        // с соседями и «как-нибудь» применять к нему эффект нельзя.
+        std::vector<int> group;
+        doc.TraverseConst(r.Id, [&](const UINode& n) {
+            const int i = layout.IndexOf(n.Id);
+            if (i >= 0 && !emitted[(size_t)i]) {
+                const UIResolvedNode& sub = layout.Nodes()[(size_t)i];
+                if (sub.Visible && !sub.Culled && sub.Opacity > 0.001f) group.push_back(i);
+            }
+            return true;
+        });
+        std::stable_sort(group.begin(), group.end(), [&](int a, int b) {
+            return layout.Nodes()[(size_t)a].SortKey < layout.Nodes()[(size_t)b].SortKey;
+        });
+
+        // Явная стоимость (§131): промежуточная цель появляется в списке команд
+        // отдельной операцией и видна в профайлере.
+        UIRenderCommand& begin = out.Add();
+        begin.Kind = UIPrimitive::Custom;
+        begin.Op = UIPassOp::BeginOffscreen;
+        begin.SortKey = r.SortKey;
+        begin.Owner = r.Id;
+
+        for (int i : group) {
+            emitted[(size_t)i] = true;
+            UINode* sub = doc.Find(layout.Nodes()[(size_t)i].Id);
+            if (sub) emitNode(layout.Nodes()[(size_t)i], *sub);
+        }
+
+        UIRenderCommand& end = out.Add();
+        end.Kind = UIPrimitive::Custom;
+        end.Op = UIPassOp::EndOffscreen;
+        end.SortKey = r.SortKey;
+        end.Owner = r.Id;
+        end.Rect = r.Rect;
+        // Параметры обработки едут В КОМАНДЕ: бэкенд не имеет доступа к узлам и
+        // не должен его иметь.
+        if (const UIBlur* blur = fx->Get<UIBlur>()) {
+            end.Softness = blur->Radius * r.Scale;
+            end.Thickness = (float)blur->Passes;
+        }
+        // Композиция НЕЙТРАЛЬНА: прозрачность узла и множители эффектов уже
+        // применены к каждой команде внутри цели. Домножить их ещё раз здесь
+        // значило бы применить дважды — панель с прозрачностью 0.5 стала бы
+        // 0.25 ровно от того, что на ней включили размытие.
+        end.Color = UIColor(1.0f);
     }
 
     if (ctx.Debug != UIDebug_None) UIAppendDebugOverlay(doc, layout, ctx, out);

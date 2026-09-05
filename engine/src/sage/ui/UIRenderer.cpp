@@ -160,6 +160,9 @@ void UIRenderer::SetView(glm::vec2 originPx, float scale, int fbWidth, int fbHei
 }
 
 void UIRenderer::Begin(int screenWidth, int screenHeight) {
+    // Каждый кадр начинается с обычного смешивания: режим — свойство ОДНОЙ
+    // отрисовки, а не состояние, которое должно пережить кадр.
+    m_blendMode = sage::rhi::GraphicsDevice::BlendMode::Alpha;
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
     // Каждый кадр начинается с тождественного вида: смотровое преобразование —
@@ -542,6 +545,9 @@ void UIRenderer::End() {
     // становится CW — backface culling движка отсёк бы весь интерфейс.
     device.SetCullMode(sage::rhi::CullMode::Off);
     device.SetBlend(true);
+    // ПОСЛЕ SetBlend: он сам возвращает обычный режим смешивания, и вызов до
+    // него не значил бы ничего.
+    device.SetBlendMode(m_blendMode);
 
     // Вершины лежат в пикселях ЭКРАНА ИНТЕРФЕЙСА; вид переводит их в пиксели
     // КАДРА, ortho — в нормализованные координаты. При тождественном виде это

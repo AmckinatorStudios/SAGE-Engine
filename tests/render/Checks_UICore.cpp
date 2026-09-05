@@ -64,6 +64,10 @@ Image RenderDocument(UIRenderer& renderer, Harness& h, int w = kW, int hh = kH) 
     h.Runtime.SetScreen({(float)w, (float)hh});
     h.Runtime.Update(0.016f);
     ui::UIClassicBackend backend(renderer);
+    // Куда возвращаться после промежуточного прохода. Здесь это буфер теста:
+    // без этого композиция размытия уехала бы в буфер по умолчанию, и снимок
+    // оказался бы пустым — ровно так эта проверка и поймала ошибку.
+    backend.SetRootTarget(&fbo);
     h.Runtime.Render(backend);
 
     Image img = Capture(w, hh);
@@ -277,6 +281,42 @@ void CheckResponsive(UIRenderer& renderer) {
     Check(smallCorner < 0.02 && largeCorner < 0.02, "новый UI: панель не разъехалась по углам");
 }
 
+// --- Размытие: промежуточная цель действительно работает --------------------
+void CheckBlurCompositing(UIRenderer& renderer) {
+    Harness h;
+    // Резкая шахматка: у размытого изображения разница между соседними
+    // клетками падает, у неразмытого — нет. Это измеримое утверждение, не
+    // зависящее ни от драйвера, ни от качества фильтрации.
+    ui::UINode& group = Add(h.Doc(), "Group");
+    group.Ensure<ui::UITransform>().SetStretch(true, true);
+    for (int i = 0; i < 8; ++i) {
+        ui::UINode& cell = Add(h.Doc(), "Cell", group.Id);
+        ui::UITransform& t = cell.Ensure<ui::UITransform>();
+        t.Offset = {60.0f + (float)i * 24.0f, 100.0f};
+        t.Size = {12.0f, 80.0f};
+        cell.Ensure<ui::UIFill>().Color = ui::UIColor(1.0f);
+    }
+
+    const Image sharp = RenderDocument(renderer, h);
+    ui::UIBlur& blur = group.Ensure<ui::UIEffects>().Ensure<ui::UIBlur>();
+    blur.Radius = 24.0f;
+    blur.Passes = 2;
+    h.Doc().MarkDirty(ui::UIDirty_All);
+    const Image blurred = RenderDocument(renderer, h);
+
+    // Промежуток между полосами: у резкой картинки он чёрный, у размытой — нет.
+    const double gapSharp = Luma(sharp, 76, 120, 82, 160);
+    const double gapBlur = Luma(blurred, 76, 120, 82, 160);
+    const double barSharp = Luma(sharp, 62, 120, 70, 160);
+    const double barBlur = Luma(blurred, 62, 120, 70, 160);
+    std::printf("    blur: промежуток %.1f → %.1f, полоса %.1f → %.1f\n", gapSharp, gapBlur,
+                barSharp, barBlur);
+    Check(gapBlur > gapSharp + 8.0, "новый UI: размытие затекло в промежутки между полосами");
+    Check(barBlur < barSharp - 8.0, "новый UI: размытие сняло яркость с самих полос");
+    Check(h.Runtime.DrawList().Stats().RenderTargets >= 1,
+          "новый UI: промежуточная цель действительно создана и видна в профайлере");
+}
+
 // --- Сцена «Large UI»: витрина целиком доезжает до пикселей ------------------
 void CheckShowcaseFrame(UIRenderer& renderer) {
     Harness h;
@@ -314,6 +354,7 @@ void RunUICoreChecks() {
     CheckEffects(renderer);
     CheckTypography(renderer);
     CheckResponsive(renderer);
+    CheckBlurCompositing(renderer);
     CheckShowcaseFrame(renderer);
 }
 

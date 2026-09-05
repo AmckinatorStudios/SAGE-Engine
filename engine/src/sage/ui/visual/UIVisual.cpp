@@ -11,6 +11,7 @@
 #include "sage/ui/visual/UIFill.h"
 #include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/visual/UIImage.h"
+#include "sage/ui/visual/UIMaterial.h"
 #include "sage/ui/visual/UIShape.h"
 
 #include "sage/render/Texture.h"
@@ -235,6 +236,56 @@ const UIComponentType& UIIcon::StaticType() {
             {"Size", SAGE_UI_TEXT("Size"), UIProperty::Kind::Float, SAGE_UI_OFFSET(UIIcon, Size),
              0.0f, 256.0f, SAGE_UI_TEXT("Zero fits the shorter side of the node"), nullptr, 0,
              UIProperty::Widget::Auto, nullptr},
+        };
+        return d;
+    }();
+    return t;
+}
+
+const UIComponentType& UIMaterial::StaticType() {
+    static UIComponentType t = [] {
+        UIComponentType d;
+        d.Id = "material";
+        d.Title = SAGE_UI_TEXT("Material");
+        d.Hint = SAGE_UI_TEXT("Custom shader for this node");
+        d.Icon = "shader";
+        d.Category = UIComponentCategory::Advanced;
+        d.Order = 70;
+        d.Create = [] { return std::unique_ptr<UIComponent>(new UIMaterial()); };
+        d.Props = {
+            {"Shader", SAGE_UI_TEXT("Shader"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIMaterial, Shader), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, nullptr},
+            {"Name", SAGE_UI_TEXT("Variant"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIMaterial, Name), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, nullptr},
+            {"Color", SAGE_UI_TEXT("Color"), UIProperty::Kind::Color,
+             SAGE_UI_OFFSET(UIMaterial, Color), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, nullptr},
+            {"Texture0", SAGE_UI_TEXT("Texture 0"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIMaterial, Texture0), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Texture, SAGE_UI_TEXT("Textures")},
+            {"Texture1", SAGE_UI_TEXT("Texture 1"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIMaterial, Texture1), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Texture, SAGE_UI_TEXT("Textures")},
+            {"Texture2", SAGE_UI_TEXT("Texture 2"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIMaterial, Texture2), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Texture, SAGE_UI_TEXT("Textures")},
+            {"Texture3", SAGE_UI_TEXT("Texture 3"), UIProperty::Kind::String,
+             SAGE_UI_OFFSET(UIMaterial, Texture3), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Texture, SAGE_UI_TEXT("Textures")},
+            {"Param0", SAGE_UI_TEXT("Param 0"), UIProperty::Kind::Vec4,
+             SAGE_UI_OFFSET(UIMaterial, Param0), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, SAGE_UI_TEXT("Parameters")},
+            {"Param1", SAGE_UI_TEXT("Param 1"), UIProperty::Kind::Vec4,
+             SAGE_UI_OFFSET(UIMaterial, Param1), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, SAGE_UI_TEXT("Parameters")},
+            {"Param2", SAGE_UI_TEXT("Param 2"), UIProperty::Kind::Vec4,
+             SAGE_UI_OFFSET(UIMaterial, Param2), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, SAGE_UI_TEXT("Parameters")},
+            {"Param3", SAGE_UI_TEXT("Param 3"), UIProperty::Kind::Vec4,
+             SAGE_UI_OFFSET(UIMaterial, Param3), 0, 0, nullptr, nullptr, 0,
+             UIProperty::Widget::Auto, SAGE_UI_TEXT("Parameters")},
         };
         return d;
     }();

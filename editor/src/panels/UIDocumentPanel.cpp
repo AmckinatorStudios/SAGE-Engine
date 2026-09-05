@@ -602,6 +602,9 @@ void UIDocumentPanel::DrawCanvas(EditorHost& host) {
     device.Clear();
     {
         ui::UIClassicBackend backend(*m_renderer);
+        // Куда возвращаться после промежуточного прохода: без этого остаток
+        // кадра после первого же размытия уехал бы на экран мимо панели.
+        backend.SetRootTarget(m_target.get());
         m_rt.Render(backend);
     }
     device.BindDefaultFramebuffer();

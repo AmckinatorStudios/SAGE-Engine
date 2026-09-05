@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1382.
+// Язык: Русский. Строк: 1395.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -622,6 +622,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Курсор"},
     {"Custom Shader",
      "Свой шейдер"},
+    {"Custom shader for this node",
+     "Свой шейдер для этого узла"},
     {"Cylinder",
      "Цилиндр"},
     {"Damping",
@@ -1628,6 +1630,16 @@ constexpr TranslationPair kRussianStrings[] = {
      "Панели"},
     {"Paragraph spacing",
      "Интервал между абзацами"},
+    {"Param 0",
+     "Параметр 0"},
+    {"Param 1",
+     "Параметр 1"},
+    {"Param 2",
+     "Параметр 2"},
+    {"Param 3",
+     "Параметр 3"},
+    {"Parameters",
+     "Параметры"},
     {"Params: %d (edit in the .sagemat file)",
      "Параметров: %d (правятся в файле .sagemat)"},
     {"Part ",
@@ -2070,6 +2082,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Настройки…"},
     {"Shaded",
      "С освещением"},
+    {"Shader",
+     "Шейдер"},
     {"Shader limit: %d point + %d spot lights per frame",
      "Предел шейдера: %d точечных и %d прожекторов на кадр"},
     {"Shadow",
@@ -2334,6 +2348,14 @@ constexpr TranslationPair kRussianStrings[] = {
      "Надпись на элементе"},
     {"Texture",
      "Текстура"},
+    {"Texture 0",
+     "Текстура 0"},
+    {"Texture 1",
+     "Текстура 1"},
+    {"Texture 2",
+     "Текстура 2"},
+    {"Texture 3",
+     "Текстура 3"},
     {"Texture not loaded (press Load)",
      "Текстура не загружена (нажмите «Загрузить»)"},
     {"Texture offset",
@@ -2348,6 +2370,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Картинка, спрайт или девятина"},
     {"Texture: ",
      "Текстура: "},
+    {"Textures",
+     "Текстуры"},
     {"That folder already exists and is not empty",
      "Такая папка уже есть и не пуста"},
     {"The built game will not find it. Bring it into the project:",
@@ -2566,6 +2590,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Значение (0..1)"},
     {"Variables",
      "Переменные"},
+    {"Variant",
+     "Вариант"},
     {"Vector icon drawn by the engine, not a file",
      "Векторный значок, который движок рисует сам, а не загружает"},
     {"Vector icon of the engine",

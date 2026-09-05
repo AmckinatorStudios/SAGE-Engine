@@ -9,6 +9,7 @@
 #include "sage/ui/layout/UILayout.h"
 #include "sage/ui/layout/UITransform.h"
 #include "sage/ui/mask/UIMask.h"
+#include "sage/ui/widgets/UIWidgets.h"
 
 namespace sage::ui {
 
@@ -530,10 +531,33 @@ void UILayoutSolver::ArrangeNode(UIDocument& doc, UINode& node, const UIRect& pa
 
     m_index[node.Id] = index;
 
-    // Дети.
-    const UIRect childArea{rect.x, rect.y, rect.w, rect.h};
+    // Дети. Прокрутка сдвигает область, в которой они раскладываются, — это и
+    // есть вся прокрутка: содержимое не «перерисовывается со смещением», оно
+    // РАСКЛАДЫВАЕТСЯ в сдвинутой области, поэтому маска, попадание курсором и
+    // отсечение работают сами собой.
+    UIRect childArea{rect.x, rect.y, rect.w, rect.h};
+    UIScrollView* scroll = node.Get<UIScrollView>();
+    if (scroll) {
+        childArea.x -= scroll->Horizontal ? scroll->Offset.x : 0.0f;
+        childArea.y -= scroll->Vertical ? scroll->Offset.y : 0.0f;
+    }
+    const size_t firstChildIndex = m_nodes.size();
     ArrangeChildren(doc, node, childArea, index, childMask, out.Opacity, out.Visible,
                     enabled && node.Enabled, world, depth + 1);
+
+    if (scroll) {
+        // Насколько содержимое БОЛЬШЕ окна — то, до чего можно докрутить.
+        // Считается по фактическим прямоугольникам детей: «сколько там строк»
+        // прокрутка знать не должна и не знает (§90).
+        UIRect content{};
+        for (size_t i = firstChildIndex; i < m_nodes.size(); ++i)
+            content = UIUnionRect(content, m_nodes[i].Rect);
+        const UIRect self = m_nodes[(size_t)index].Rect;
+        const float extraX = std::max(0.0f, UIRight(content) - UIRight(self));
+        const float extraY = std::max(0.0f, UIBottom(content) - UIBottom(self));
+        const float s = m_scale > 0.0001f ? m_scale : 1.0f;
+        scroll->ContentSize = {extraX / s + scroll->Offset.x, extraY / s + scroll->Offset.y};
+    }
 }
 
 void UILayoutSolver::ArrangeChildren(UIDocument& doc, UINode& node, const UIRect& contentRect,

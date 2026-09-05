@@ -2,6 +2,7 @@
 #include "sage/render/Shader.h"
 #include "sage/render/Font.h"
 #include "sage/render/Texture.h"
+#include "sage/rhi/GraphicsDevice.h"
 #include "sage/rhi/Resources.h"
 #include <memory>
 #include <glm/glm.hpp>
@@ -52,6 +53,14 @@ public:
     UIRenderer& operator=(const UIRenderer&) = delete;
 
     void Begin(int screenWidth, int screenHeight);
+
+    // РЕЖИМ СМЕШИВАНИЯ для всего, что нарисовано до ближайшего End().
+    //
+    // Появился не «для полноты»: device.SetBlend(true) каждый раз возвращает
+    // обычный режим, поэтому выставить его снаружи между Begin и End нельзя —
+    // End затрёт. А без него не работают ни аддитивное свечение, ни композиция
+    // промежуточной цели (её содержимое хранит цвет, уже умноженный на альфу).
+    void SetBlendMode(sage::rhi::GraphicsDevice::BlendMode mode) { m_blendMode = mode; }
 
     // СМОТРОВОЕ ПРЕОБРАЗОВАНИЕ: раскладка считается для экрана screenWidth x
     // screenHeight, а В КАДР она кладётся со сдвигом и масштабом.
@@ -253,6 +262,8 @@ private:
     // отображаем scale в пиксельную высоту так же по порядку величины.
     float m_scaleToPixels = 8.0f;
     int m_screenWidth = 0, m_screenHeight = 0;
+    sage::rhi::GraphicsDevice::BlendMode m_blendMode =
+        sage::rhi::GraphicsDevice::BlendMode::Alpha;
     // Смотровое преобразование (см. SetView). По умолчанию — тождественное, и
     // тогда всё считается ровно как раньше.
     glm::vec2 m_viewOrigin{0.0f, 0.0f};

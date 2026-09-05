@@ -4,6 +4,8 @@
 #include <cmath>
 
 #include "sage/render/Texture.h"
+#include "sage/core/Log.h"
+#include "sage/rhi/GraphicsDevice.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIRenderer.h"
 
@@ -34,7 +36,126 @@ glm::vec2 Apply(const UIRenderCommand& c, glm::vec2 p) {
 } // namespace
 
 void UIClassicBackend::Begin(glm::vec2 screenPixels) {
+    m_screen = screenPixels;
+    m_offscreenDepth = 0;
     m_ui.Begin((int)screenPixels.x, (int)screenPixels.y);
+    m_clipOpen = false;
+}
+
+UIClassicBackend::Target& UIClassicBackend::Acquire(size_t slot, int width, int height) {
+    width = std::max(1, width);
+    height = std::max(1, height);
+    if (m_pool.size() <= slot) m_pool.resize(slot + 1);
+    Target& t = m_pool[slot];
+    if (!t.Fbo) {
+        t.Fbo = std::make_unique<Framebuffer>(width, height);
+        t.View = Texture::Wrap(t.Fbo->ColorTexture(), width, height);
+    } else if (t.Fbo->Width() != width || t.Fbo->Height() != height) {
+        t.Fbo->Resize(width, height);
+        // Хендл после пересоздания хранилища другой — обёртку надо обновить,
+        // иначе рисовалась бы текстура, которой больше нет.
+        t.View = Texture::Wrap(t.Fbo->ColorTexture(), width, height);
+    }
+    return t;
+}
+
+void UIClassicBackend::BindRoot() {
+    if (m_root) m_root->Bind();
+    else sage::rhi::GraphicsDevice::Get().BindDefaultFramebuffer();
+}
+
+void UIClassicBackend::BeginOffscreen() {
+    // Всё накопленное уходит в текущую цель — иначе поддерево, которое сейчас
+    // начнётся, смешалось бы с тем, что было до него.
+    m_ui.End();
+    const int w = (int)m_screen.x, h = (int)m_screen.y;
+    Target& t = Acquire((size_t)m_offscreenDepth * 8, w, h);
+    t.Fbo->Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    // Прозрачный фон обязателен: в цель попадает ТОЛЬКО поддерево, всё
+    // остальное должно остаться видимым при композиции.
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    device.Clear();
+    ++m_offscreenDepth;
+    m_ui.Begin(w, h);
+    m_clipOpen = false;
+}
+
+const Texture* UIClassicBackend::BlurChain(size_t firstSlot, const Texture* source, float radius,
+                                           int passes) {
+    if (!source || radius <= 0.5f) return source;
+    // ПРОМЕЖУТОЧНЫЕ ЦЕЛИ ХРАНЯТ ЦВЕТ, УМНОЖЕННЫЙ НА ПРОЗРАЧНОСТЬ. Так его туда
+    // положило обычное альфа-смешивание поверх прозрачного фона. Если рисовать
+    // такую картинку дальше обычным режимом, цвет умножится на альфу ещё раз —
+    // и ещё раз на каждой ступени. На восьми ступенях от полупрозрачных краёв
+    // не остаётся ничего: интерфейс с размытием просто чернеет. Поэтому вся
+    // цепочка идёт в режиме «уже умноженной» альфы.
+    const auto premultiplied = sage::rhi::GraphicsDevice::BlendMode::Premultiplied;
+    // Сколько ступеней уменьшения нужно под запрошенный радиус. Радиус 8 — одна
+    // ступень, 16 — две, и так далее: каждая ступень удваивает область
+    // усреднения.
+    int levels = 1;
+    while (levels < 4 && radius > (float)(8 << (levels - 1))) ++levels;
+    passes = std::max(1, std::min(passes, 3));
+
+    const int w = (int)m_screen.x, h = (int)m_screen.y;
+    const Texture* current = source;
+    for (int pass = 0; pass < passes; ++pass) {
+        // Вниз.
+        for (int i = 1; i <= levels; ++i) {
+            const int lw = std::max(1, w >> i), lh = std::max(1, h >> i);
+            Target& t = Acquire(firstSlot + (size_t)i, lw, lh);
+            t.Fbo->Bind();
+            sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+            device.SetClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+            device.Clear();
+            m_ui.Begin(lw, lh);
+            m_ui.SetBlendMode(premultiplied);
+            m_ui.Image(0.0f, 0.0f, (float)lw, (float)lh, current);
+            m_ui.End();
+            current = t.View.get();
+        }
+        // Вверх.
+        for (int i = levels - 1; i >= 0; --i) {
+            const int lw = std::max(1, w >> i), lh = std::max(1, h >> i);
+            Target& t = Acquire(firstSlot + (size_t)(i == 0 ? 5 : i), lw, lh);
+            t.Fbo->Bind();
+            sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+            device.SetClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+            device.Clear();
+            m_ui.Begin(lw, lh);
+            m_ui.SetBlendMode(premultiplied);
+            m_ui.Image(0.0f, 0.0f, (float)lw, (float)lh, current);
+            m_ui.End();
+            current = t.View.get();
+        }
+    }
+    return current;
+}
+
+void UIClassicBackend::EndOffscreen(const UIRenderCommand& c) {
+    // Поддерево уже нарисовано в цель — доводим его до GPU.
+    m_ui.End();
+    if (m_offscreenDepth > 0) --m_offscreenDepth;
+
+    const size_t slot = (size_t)m_offscreenDepth * 8;
+    Target& subtree = Acquire(slot, (int)m_screen.x, (int)m_screen.y);
+    subtree.Fbo->Resolve();
+    const Texture* result = BlurChain(slot, subtree.View.get(), c.Softness, (int)c.Thickness);
+
+    BindRoot();
+    if (result) {
+        // Композиция: результат кладётся поверх того, что было под ним. Тем же
+        // режимом «уже умноженной» альфы — цель хранит именно такой цвет.
+        m_ui.Begin((int)m_screen.x, (int)m_screen.y);
+        m_ui.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Premultiplied);
+        m_ui.Image(0.0f, 0.0f, m_screen.x, m_screen.y, result,
+                   glm::vec3(c.Color.r, c.Color.g, c.Color.b), c.Color.a);
+        m_ui.End();
+    }
+    // Дальше кадр рисуется как обычно: обычные цвета в промежуточных целях не
+    // бывали и умножены на альфу не были.
+    m_ui.Begin((int)m_screen.x, (int)m_screen.y);
     m_clipOpen = false;
 }
 
@@ -222,16 +343,48 @@ void UIClassicBackend::DrawRing(const UIRenderCommand& c) {
     }
 }
 
+namespace {
+// Режим наложения интерфейса → режим смешивания GPU. Не все семь режимов
+// выражаются функцией смешивания (Multiply, Screen, Overlay нужны либо шейдеру,
+// либо промежуточной цели), поэтому здесь честно поддержаны те, что
+// выражаются; остальные рисуются обычным наложением, а не «примерно похоже».
+sage::rhi::GraphicsDevice::BlendMode ToDeviceBlend(UIBlendMode mode) {
+    switch (mode) {
+        case UIBlendMode::Add:
+        case UIBlendMode::Screen:
+        case UIBlendMode::Lighten: return sage::rhi::GraphicsDevice::BlendMode::Additive;
+        default: return sage::rhi::GraphicsDevice::BlendMode::Alpha;
+    }
+}
+} // namespace
+
 void UIClassicBackend::Submit(const UIRenderList& list) {
+    UIBlendMode currentBlend = UIBlendMode::Normal;
     for (const UIRenderBatch& batch : list.Batches()) {
+        // Смена режима наложения рвёт вызов рисования — как и любая другая
+        // смена состояния GPU. Свечение поверх панели обязано складываться, а
+        // не закрывать её, и это стоит ровно одного лишнего вызова.
+        if (batch.Blend != currentBlend && batch.Count > 0 &&
+            list.Commands()[(size_t)batch.First].Op == UIPassOp::Draw) {
+            if (m_clipOpen) { m_ui.PopClipRect(); m_clipOpen = false; }
+            m_ui.End();
+            m_ui.Begin((int)m_screen.x, (int)m_screen.y);
+            m_ui.SetBlendMode(ToDeviceBlend(batch.Blend));
+            currentBlend = batch.Blend;
+        }
         for (int i = 0; i < batch.Count; ++i) {
             const UIRenderCommand& c = list.Commands()[(size_t)(batch.First + i)];
-            if (c.Op != UIPassOp::Draw) {
-                // Промежуточные цели этот бэкенд не поддерживает: поддерево
-                // рисуется как есть, без размытия. Это честная деградация —
-                // интерфейс остаётся рабочим, просто без одного эффекта (§134).
+            if (c.Op == UIPassOp::BeginOffscreen) {
+                if (m_clipOpen) { m_ui.PopClipRect(); m_clipOpen = false; }
+                BeginOffscreen();
                 continue;
             }
+            if (c.Op == UIPassOp::EndOffscreen) {
+                if (m_clipOpen) { m_ui.PopClipRect(); m_clipOpen = false; }
+                EndOffscreen(c);
+                continue;
+            }
+            if (c.Op != UIPassOp::Draw) continue;
             // Ножницы ставятся ровно на границе состояния — по одному вызову на
             // батч, а не на команду.
             if (i == 0) {
