@@ -414,6 +414,26 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // сам OpenPopup зовётся ниже, после EndMenuBar, на уровне окна-хоста.
     const char* openDialog = nullptr;
     if (ImGui::BeginMenuBar()) {
+        // ЗНАК ПРОДУКТА ПЕРЕД МЕНЮ. Строка меню начиналась прямо со слова
+        // «Файл» — так выглядит окно утилиты, а не редактора движка. Имя и знак
+        // стоят там, где их ищут: в самом левом верхнем углу.
+        {
+            const Sage::UI::Style& ui = Sage::UI::Get();
+            ImGui::Dummy(ImVec2(ui.SpacingSM, 0.0f));
+            ImGui::SameLine(0.0f, 0.0f);
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            EditorIcons::Overlay(p.x, p.y + (ImGui::GetFrameHeight() - ui.IconSize) * 0.5f,
+                                 ui.IconSize, "cube",
+                                 glm::vec3(EditorTheme::Color(EditorTheme::Role::Accent).x,
+                                           EditorTheme::Color(EditorTheme::Role::Accent).y,
+                                           EditorTheme::Color(EditorTheme::Role::Accent).z));
+            ImGui::Dummy(ImVec2(ui.IconSize + ui.SpacingXS, ImGui::GetFrameHeight()));
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("SAGE");  // no-i18n: имя движка
+            ImGui::SameLine(0.0f, ui.SpacingMD);
+        }
+
         if (ImGui::BeginMenu(T("File"))) {
             if (ImGui::MenuItem(T("New Project..."))) openDialog = "New Project";
             if (ImGui::MenuItem(T("Open Project..."))) openDialog = "Open Project";
@@ -742,11 +762,68 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
 
-        // Статус проекта справа в меню-баре.
-        std::string status = std::string(T("Project:")) + " " + m_project.Name();
-        float w = ImGui::CalcTextSize(status.c_str()).x + 16.0f;
-        ImGui::SameLine(ImGui::GetWindowWidth() - w);
-        ImGui::TextDisabled("%s", status.c_str());
+        // --- СПРАВА: поиск команд, тема, проект --------------------------
+        //
+        // Собирается справа налево и всё — по токенам, поэтому блок не наезжает
+        // на пункты меню при любой ширине окна: если места мало, первым уходит
+        // поиск, потом имя проекта.
+        {
+            const Sage::UI::Style& ui = Sage::UI::Get();
+            const std::string project = std::string(T("Project:")) + " " + m_project.Name();
+            const float projectW = ImGui::CalcTextSize(project.c_str()).x + ui.SpacingMD;
+            const float themesW = ui.ControlHeight * 2.0f + ui.SpacingSM;
+            const float searchW = ui.ControlHeight * 9.0f;
+            const float total = ImGui::GetWindowWidth();
+            // Порог: строка меню занимает левую часть, и лезть на неё нельзя.
+            const float menuEnd = ImGui::GetCursorPosX() + ui.SpacingLG;
+
+            float x = total - ui.SpacingMD - projectW;
+            const bool showProject = x > menuEnd;
+            if (showProject) {
+                ImGui::SameLine(x);
+                ImGui::TextDisabled("%s", project.c_str());
+            }
+
+            x -= themesW;
+            if (x > menuEnd) {
+                ImGui::SameLine(x);
+                // Тема — двумя кнопками, а не списком: переключений всего два, и
+                // список ради двух пунктов — лишний щелчок каждый раз.
+                const bool dark = EditorTheme::Current().Dark;
+                if (Sage::UI::IconButton("sun", T("Light theme"), !dark))
+                    EditorTheme::SetTheme("modern-light");
+                ImGui::SameLine(0.0f, ui.SpacingXS);
+                if (Sage::UI::IconButton("drop", T("Dark theme"), dark))
+                    EditorTheme::SetTheme("modern-dark");
+            }
+
+            x -= searchW + ui.SpacingLG;
+            if (x > menuEnd) {
+                ImGui::SameLine(x);
+                // Поле поиска ОТКРЫВАЕТ ПАЛИТРУ, а не ищет само: искать в
+                // редакторе есть где (ассеты, иерархия), и второе поле с другим
+                // поведением здесь путало бы. Щелчок = Ctrl+K.
+                ImGui::SetNextItemWidth(searchW);
+                ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Input));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                      EditorTheme::Color(EditorTheme::Role::Elevated));
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      EditorTheme::Color(EditorTheme::Role::TextFaint));
+                ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+                char label[96];
+                std::snprintf(label, sizeof(label), "      %s  (Ctrl+K)", T("Search"));
+                if (ImGui::Button(label, ImVec2(searchW, ui.ControlHeight))) m_palette.Open();
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor(3);
+                const ImVec2 p0 = ImGui::GetItemRectMin();
+                EditorIcons::Overlay(p0.x + ui.SpacingSM,
+                                     p0.y + (ui.ControlHeight - ui.IconSize) * 0.5f, ui.IconSize,
+                                     "search",
+                                     glm::vec3(EditorTheme::Color(EditorTheme::Role::TextFaint).x,
+                                               EditorTheme::Color(EditorTheme::Role::TextFaint).y,
+                                               EditorTheme::Color(EditorTheme::Role::TextFaint).z));
+            }
+        }
 
         ImGui::EndMenuBar();
     }

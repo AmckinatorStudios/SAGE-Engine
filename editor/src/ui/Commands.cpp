@@ -1,54 +1,12 @@
 #include "ui/Commands.h"
 
+#include "ui/UI.h"
+
 #include <algorithm>
 #include <cctype>
 #include <utility>
 
 namespace Sage::UI {
-
-namespace {
-
-// Сравнение без учёта регистра. Не std::tolower по одному байту: кириллица в
-// UTF-8 занимает два, и побайтная свёртка сложила бы регистр только у
-// латиницы — то есть поиск по-русски работал бы «через раз».
-std::string Fold(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size();) {
-        const unsigned char c = (unsigned char)s[i];
-        if (c < 0x80) {
-            out.push_back((char)std::tolower(c));
-            ++i;
-        } else if (c == 0xD0 && i + 1 < s.size()) {
-            // А-П это D0 90..9F, Р-Я это D0 A0..AF, Ё это D0 81.
-            const unsigned char d = (unsigned char)s[i + 1];
-            if (d >= 0x90 && d <= 0x9F) {
-                out.push_back((char)0xD0);
-                out.push_back((char)(d + 0x20));
-            } else if (d >= 0xA0 && d <= 0xAF) {
-                out.push_back((char)0xD1);
-                out.push_back((char)(d - 0x20));
-            } else if (d == 0x81) {
-                out.push_back((char)0xD1);
-                out.push_back((char)0x91);
-            } else {
-                out.push_back((char)c);
-                out.push_back((char)d);
-            }
-            i += 2;
-        } else if (c >= 0xC0 && i + 1 < s.size()) {
-            out.push_back((char)c);
-            out.push_back(s[i + 1]);
-            i += 2;
-        } else {
-            out.push_back((char)c);
-            ++i;
-        }
-    }
-    return out;
-}
-
-} // namespace
 
 void CommandRegistry::Add(Command cmd) {
     if (cmd.Id.empty()) return;

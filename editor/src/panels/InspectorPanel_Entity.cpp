@@ -135,12 +135,20 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.SelectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
 
+    // Шапка объекта — та же сетка свойств, что и у всех разделов ниже.
+    // Отдельная вёрстка здесь означала бы, что имя и номер начинаются не на
+    // той координате, что позиция и поворот, — а это первое, что видно при
+    // открытии инспектора.
     char buf[128];
     std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-    if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
+    Sage::UI::BeginProperties("entity_head");
+    Sage::UI::PropertyLabel(T("Name"));
+    if (Sage::UI::PropertyText("name", buf, sizeof(buf))) obj.SetName(buf);
     host.TrackLastImGuiItem();
-    ImGui::TextDisabled(T("Id: %d"), obj.Id());
-    ImGui::Separator();
+    Sage::UI::PropertyLabel(T("Id"));
+    Sage::UI::PropertyValue("%d", obj.Id());
+    Sage::UI::EndProperties();
+    Sage::UI::Separator();
 
     if (EditorTheme::SectionHeader(T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
         // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.

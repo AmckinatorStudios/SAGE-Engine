@@ -103,36 +103,39 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
 
     ImGui::SetCursorPosX(ui.PaddingPanel);
 
-    // --- Панели: из чего собрано рабочее место -------------------------------
-    PanelToggle(host, EditorPanel::Hierarchy, "layout", T("Hierarchy"), T("Hierarchy"), false, row);
-    PanelToggle(host, EditorPanel::Inspector, "file", T("Inspector"), T("Inspector"), false, row);
-    PanelToggle(host, EditorPanel::Assets, "folder", T("Assets"), T("Assets"), false, row);
-    PanelToggle(host, EditorPanel::Console, "debug", T("Console"), T("Console"), false, row);
-    PanelToggle(host, EditorPanel::Code, "code", T("Code"), T("Code"), false, row);
-    PanelToggle(host, EditorPanel::Profiler, "info", T("Profiler"), T("Profiler"), false, row);
-
-    divider();
-
-    // --- Настройки: два окна и граница между ними ----------------------------
+    // --- Слева: ДЕЙСТВИЯ, а не переключатели панелей -------------------------
     //
-    // Они стоят рядом намеренно. Вопрос «где настраивается свет» раньше не имел
-    // ответа: часть была в окне Lighting, часть в Game Settings, часть на
-    // объекте. Соседство кнопок — самая дешёвая форма ответа: среда сцены
-    // здесь, цена кадра там, источники — объекты в иерархии.
-    PanelToggle(host, EditorPanel::Environment, "sun", T("Environment"),
-                T("Environment: sky, air, ambient light (saved with the scene)"), labels, row);
-    PanelToggle(host, EditorPanel::Settings, "gear", T("Game Settings"),
-                T("Game Settings: quality and cost of the frame (saved with the project)"),
-                labels, row);
-    PanelToggle(host, EditorPanel::UIEditor, "rect", T("Interface"),
-                T("Interface editor: the game frame at its own resolution"), labels, row);
+    // Здесь стояли одиннадцать переключателей окон. Они не действия: их
+    // нажимают раз в сеанс, чтобы собрать рабочее место, а потом не трогают.
+    // Место у левого края — самое дорогое в панели, и отдано оно тому, что
+    // делают постоянно: создать, открыть, сохранить, собрать, отменить.
+    // Переключатели окон остались в меню «Окно» и в палитре команд (Ctrl+K),
+    // где их и ищут.
+    // Кнопка = КОМАНДА по имени. Ни своего действия, ни своей проверки
+    // доступности у панели нет: и то и другое описано один раз в реестре.
+    Sage::UI::CommandRegistry& cmds = host.Commands();
+    auto action = [&](const char* id, const char* icon) {
+        const Sage::UI::Command* c = cmds.Find(id);
+        if (!c) return;
+        const bool enabled = !c->Enabled || c->Enabled();
+        CenterY(row);
+        if (!enabled) ImGui::BeginDisabled();
+        // Подсказка — из самой команды, вместе с горячей клавишей: третьего
+        // места, где написано, что делает кнопка, быть не должно.
+        const bool hit = EditorIcons::IconOnlyButton(icon, nullptr, false);
+        if (!enabled) ImGui::EndDisabled();
+        Sage::UI::Tooltip(c->Title.c_str(), c->Shortcut.empty() ? nullptr : c->Shortcut.c_str());
+        if (hit && enabled) cmds.Run(id);
+        ImGui::SameLine(0.0f, ui.SpacingXS);
+    };
+    action("scene.new", "file");
+    action("scene.save", "scene");
+    action("window.templates", "folder");
 
     divider();
 
-    // --- Виды: чем смотреть на сцену ------------------------------------------
-    PanelToggle(host, EditorPanel::Viewport, "cube", T("Viewport"), T("Viewport"), labels, row);
-    PanelToggle(host, EditorPanel::Game, "camera", T("Game"),
-                T("Game (view from the game camera)"), labels, row);
+    action("edit.undo", "refresh");
+    action("edit.redo", "up");
 
     // --- По центру: Play / Pause / Stop --------------------------------------
     //
@@ -156,39 +159,42 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     dividerAt(barMin.x + playX - gap);
 
     const EditorPlayState state = host.GetPlayState();
-    CenterY(row);
-    if (state == EditorPlayState::Editing) {
-        // ГЛАВНОЕ ДЕЙСТВИЕ ЭКРАНА — единственное, что красится акцентом.
-        // Именно ради него жёлтый и держат в резерве: когда им покрашено ещё
-        // пять кнопок, эта перестаёт быть заметной.
-        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Accent));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::Color(Role::AccentHover));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Color(Role::AccentActive));
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
-        if (EditorIcons::Button("play", T("Play"), T("Run the scene (it is restored on Stop)")))
-            host.StartPlay();
-        ImGui::PopStyleColor(4);
-    } else {
-        if (state == EditorPlayState::Playing) {
-            if (EditorIcons::Button("pause", T("Pause"), T("Pause"))) host.PausePlay();
-        } else {
-            if (EditorIcons::Button("play", T("Resume"), T("Resume"))) host.ResumePlay();
-        }
-        ImGui::SameLine(0.0f, ui.SpacingXS);
-        CenterY(row);
-        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Danger));
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
-        if (EditorIcons::Button("stop", T("Stop"), T("Stop and restore the scene")))
-            host.StopPlay();
-        ImGui::PopStyleColor(2);
+    const bool editing = state == EditorPlayState::Editing;
+    const bool playing = state == EditorPlayState::Playing;
 
-        // Состояние игры — значком рядом с кнопками, а не подписью над ними:
-        // подпись стоила целой строки высоты, а сказать ей нечего, пока идёт
-        // обычная правка.
+    // ТРИ КНОПКИ ВСЕГДА, а не «одна в правке и две в игре». Меняющийся состав
+    // сдвигал соседей ровно в тот момент, когда по ним целятся второй раз;
+    // недоступная кнопка на своём месте честнее исчезнувшей.
+    CenterY(row);
+    ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Accent));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::Color(Role::AccentHover));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Color(Role::AccentActive));
+    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
+    if (EditorIcons::Button("play", playing ? T("Resume") : T("Play"),
+                            T("Run the scene (it is restored on Stop)"))) {
+        if (editing) host.StartPlay();
+        else if (!playing) host.ResumePlay();
+    }
+    ImGui::PopStyleColor(4);
+
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    if (!playing) ImGui::BeginDisabled();
+    if (EditorIcons::IconOnlyButton("pause", T("Pause"), false)) host.PausePlay();
+    if (!playing) ImGui::EndDisabled();
+
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    if (editing) ImGui::BeginDisabled();
+    if (EditorIcons::IconOnlyButton("stop", T("Stop and restore the scene"), false))
+        host.StopPlay();
+    if (editing) ImGui::EndDisabled();
+
+    // Состояние игры — словом рядом, и только когда есть что сказать.
+    if (!editing) {
         ImGui::SameLine(0.0f, ui.SpacingSM);
         CenterY(row);
         ImGui::AlignTextToFramePadding();
-        const bool playing = state == EditorPlayState::Playing;
         ImGui::TextColored(EditorTheme::Color(playing ? Role::Ok : Role::Warn), "%s",
                            playing ? T("PLAYING") : T("PAUSED"));
     }

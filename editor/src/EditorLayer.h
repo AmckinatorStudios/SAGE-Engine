@@ -123,6 +123,7 @@ public:
     // редактора. Копия здесь и была всей бедой — см. ApplyEngineSettings.
     sage::EngineConfig& Settings() override { return m_settings; }
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
+    Sage::UI::CommandRegistry& Commands() override { return m_commands; }
 
     // --- EditorHost: undo/redo ---
     const std::string& TemplateNote() const override { return m_templateNote; }

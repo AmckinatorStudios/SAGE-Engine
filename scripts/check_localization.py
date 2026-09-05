@@ -62,6 +62,29 @@ def visible_text(raw):
 ESCAPES = re.compile(r'\\[ntr\\"]')
 
 
+# ИМЕНА СОБСТВЕННЫЕ переводить нельзя, и проверка обязана про это знать.
+#
+# «SAGE» на экране остаётся «SAGE» на любом языке — как и версия движка, и
+# расширение файла. Обернуть их в T() значит завести в каталоге строку, перевод
+# которой совпадает с ключом, и надеяться, что её никто не переведёт. Поэтому
+# исключение объявляется ЯВНО, в той же строке кода:
+#
+#     ImGui::TextUnformatted("SAGE");  // no-i18n: имя движка
+#
+# Причина обязательна — без неё пометка превращается в способ отключить
+# проверку, и ею начнут глушить настоящие пропуски.
+NO_I18N = re.compile(r'//\s*no-i18n:\s*\S')
+
+
+def exempt_line(src, pos):
+    """Помечена ли строка исходника, в которой стоит pos, как «не переводить»."""
+    start = src.rfind('\n', 0, pos) + 1
+    end = src.find('\n', pos)
+    if end < 0:
+        end = len(src)
+    return bool(NO_I18N.search(src[start:end]))
+
+
 def worth_translating(raw):
     text = visible_text(raw)
     stripped = FMT.sub('', text)
@@ -117,13 +140,13 @@ def collect():
         rel = os.path.relpath(path, REPO)
         for m in call.finditer(src):
             raw = ''.join(TEXT_IN_LITERAL.findall(m.group(2)))
-            if not worth_translating(raw):
+            if not worth_translating(raw) or exempt_line(src, m.start()):
                 continue
             line = src.count('\n', 0, m.start()) + 1
             unwrapped.append('%s:%d: ImGui::%s("%s")' % (rel, line, m.group(1), raw[:60]))
         for m in hint.finditer(src):
             raw = ''.join(TEXT_IN_LITERAL.findall(m.group(1)))
-            if not worth_translating(raw):
+            if not worth_translating(raw) or exempt_line(src, m.start()):
                 continue
             line = src.count('\n', 0, m.start()) + 1
             unwrapped.append('%s:%d: подсказка InputTextWithHint("%s")' % (rel, line, raw[:60]))

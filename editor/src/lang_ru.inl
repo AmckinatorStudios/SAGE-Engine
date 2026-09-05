@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1139.
+// Язык: Русский. Строк: 1144.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -532,6 +532,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Свой шейдер"},
     {"Cylinder",
      "Цилиндр"},
+    {"Dark theme",
+     "Тёмная тема"},
     {"Darker when pressed",
      "Темнее при нажатии"},
     {"Debug",
@@ -936,6 +938,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Имя значка"},
     {"Icon sheet",
      "Страница иконок"},
+    {"Id",
+     "Номер"},
     {"Id (folder name)",
      "Идентификатор (имя папки)"},
     {"Id: %d",
@@ -1038,6 +1042,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Свет"},
     {"Light Shafts",
      "Лучи света"},
+    {"Light theme",
+     "Светлая тема"},
     {"Lighting",
      "Освещение"},
     {"Lightmapped",
@@ -1708,6 +1714,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт назначен: "},
     {"Scripts (*.lua)",
      "Скрипты (*.lua)"},
+    {"Search",
+     "Поиск"},
     {"Search commands...",
      "Поиск команд..."},
     {"Search...",
@@ -2068,6 +2076,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Треугольников"},
     {"Triangles: %d, bounds %.2f x %.2f x %.2f",
      "Треугольников: %d, габарит %.2f x %.2f x %.2f"},
+    {"Try a different name",
+     "Попробуйте другое имя"},
     {"Try a different word.",
      "Попробуйте другое слово."},
     {"Turn on",

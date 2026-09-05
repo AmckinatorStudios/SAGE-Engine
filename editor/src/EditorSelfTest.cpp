@@ -30,6 +30,7 @@
 #include <nlohmann/json.hpp>
 
 #include "EditorTheme.h"
+#include "ui/UI.h"
 #include "TemplateStore.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Version.h"
@@ -2278,6 +2279,38 @@ bool EditorLayer::SelfTestTools() {
                         ok = false;
                     }
                 }
+            }
+        }
+    }
+
+    // --- Поиск по имени: регистр и кириллица ---
+    //
+    // Поиск есть и в палитре команд, и в иерархии, и в ассетах, и это один и
+    // тот же поиск (Sage::UI::Matches). Проверяется именно он, а не панель:
+    // сломается свёртка регистра — и «куб» перестанет находить «Куб» сразу
+    // везде, причём молча. Латиница здесь ни при чём: у неё регистр
+    // складывается одним байтом и работал всегда. Ломается кириллица, потому
+    // что в UTF-8 она занимает два байта, и половина букв («р»–«я») меняет ещё
+    // и первый.
+    if (ok) {
+        struct Case { const char* hay; const char* needle; bool want; };
+        const Case cases[] = {
+            {"Cube", "cu", true},
+            {"Cube", "CU", true},
+            {"Куб", "куб", true},          // А-П: меняется только второй байт
+            {"Ящик", "ящ", true},          // Р-Я: меняется и первый байт (D0 -> D1)
+            {"ящик", "Я", true},           // и обратно, из нижнего в верхний
+            {"Ёлка", "ёл", true},          // Ё живёт отдельно от А-Я
+            {"Спотлайт", "лайт", true},    // совпадение не с начала
+            {"Cube", "sphere", false},
+            {"Куб", "шар", false},
+            {"что угодно", "", true},      // пустой запрос показывает всё
+        };
+        for (const Case& c : cases) {
+            if (Sage::UI::Matches(c.hay, c.needle) != c.want) {
+                LOG_ERROR("Editor") << "SELFTEST: поиск '" << c.needle << "' в '" << c.hay
+                                    << "' дал " << !c.want << ", ожидалось " << c.want;
+                ok = false;
             }
         }
     }
