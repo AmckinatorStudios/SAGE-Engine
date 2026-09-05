@@ -1,4 +1,5 @@
 #include "ConsolePanel.h"
+#include "ui/UI.h"
 #include "EditorTheme.h"
 
 #include <algorithm>
@@ -104,8 +105,8 @@ void ConsolePanel::Draw(bool* open) {
     ImGui::SameLine();
     ImGui::Checkbox(T("Auto-scroll"), &m_autoScroll);
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(200.0f);
-    ImGui::InputTextWithHint("##filter", T("Search..."), m_filter, sizeof(m_filter));
+    Sage::UI::SearchField("filter", m_filter, sizeof(m_filter), T("Search..."),
+                          Sage::UI::Get().ControlHeight * 9.0f);
     ImGui::Separator();
 
     ImGui::BeginChild("##console_scroll", ImVec2(0, 0), ImGuiChildFlags_None,

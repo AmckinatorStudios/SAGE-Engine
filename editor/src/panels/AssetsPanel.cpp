@@ -1,4 +1,5 @@
 #include "AssetsPanel.h"
+#include "ui/UI.h"
 #include "EditorTheme.h"
 
 #include <algorithm>
@@ -944,9 +945,12 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // первой сборки игры (см. Project::AssetRef).
     const float importW = ImGui::CalcTextSize(T("Import...")).x +
                           ImGui::GetFrameHeight() * 0.68f + ImGui::GetStyle().FramePadding.x * 3.0f;
-    ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - importW -
-                                                 ImGui::GetStyle().ItemSpacing.x));
-    ImGui::InputTextWithHint("##assets_search", T("Search..."), m_search, sizeof(m_search));
+    // Через Sage::UI: одно поле поиска на весь редактор — с иконкой внутри,
+    // тем же отступом и той же высотой, что в консоли и в палитре команд. Три
+    // самодельных поля выглядели тремя разными полями.
+    const float searchW = std::max(120.0f, ImGui::GetContentRegionAvail().x - importW -
+                                               ImGui::GetStyle().ItemSpacing.x);
+    Sage::UI::SearchField("assets_search", m_search, sizeof(m_search), T("Search..."), searchW);
     ImGui::SameLine();
     DrawImportButton(host);
 
