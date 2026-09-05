@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1147.
+// Язык: Русский. Строк: 1150.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -780,6 +780,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Начало тумана"},
     {"Folder",
      "Папка"},
+    {"Folder tree",
+     "Дерево папок"},
     {"Folders",
      "Папки"},
     {"Follow",
@@ -878,6 +880,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сетка и привязки"},
     {"Grid cell",
      "Клетка сетки"},
+    {"Grid view",
+     "Сеткой"},
     {"Grid, bounds, UI layout",
      "Сетка, габариты, режим вёрстки"},
     {"Ground",
@@ -1058,6 +1062,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Строка %d, столбец %d  |  строк: %zu  |  %s  |  %s"},
     {"Linear distance fog (applied in Shaded mode)",
      "Линейный туман по дальности (виден в режиме Shaded)"},
+    {"List view",
+     "Списком"},
     {"Lit by object: %s",
      "Светит объект: %s"},
     {"Load",
