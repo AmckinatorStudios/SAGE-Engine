@@ -1,5 +1,12 @@
 #include "sage/core/Profiler.h"
 
+#if defined(_WIN32)
+#  include <windows.h>
+#  include <psapi.h>
+#elif defined(__linux__)
+#  include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -250,6 +257,32 @@ std::string Summary() {
         std::snprintf(buffer, sizeof(buffer), "кадр: CPU %.2f мс (таймеров GPU нет)", s.CpuMs);
     }
     return buffer;
+}
+
+
+size_t ResidentBytes() {
+#if defined(_WIN32)
+    // K32GetProcessMemoryInfo живёт в kernel32 (с Windows 7), а не в psapi.dll:
+    // psapi пришлось бы добавлять в список разрешённых библиотек поставки, и
+    // ради одного числа в статусной строке это лишнее.
+    PROCESS_MEMORY_COUNTERS pmc{};
+    pmc.cb = sizeof(pmc);
+    if (::K32GetProcessMemoryInfo(::GetCurrentProcess(), &pmc, sizeof(pmc)))
+        return (size_t)pmc.WorkingSetSize;
+    return 0;
+#elif defined(__linux__)
+    // statm: вторая цифра — резидентные СТРАНИЦЫ. Не /proc/self/status: там то
+    // же число, но его пришлось бы искать разбором строк.
+    std::FILE* f = std::fopen("/proc/self/statm", "r");
+    if (!f) return 0;
+    long long total = 0, resident = 0;
+    const int got = std::fscanf(f, "%lld %lld", &total, &resident);
+    std::fclose(f);
+    if (got != 2 || resident <= 0) return 0;
+    return (size_t)resident * (size_t)sysconf(_SC_PAGESIZE);
+#else
+    return 0;
+#endif
 }
 
 } // namespace sage::profile

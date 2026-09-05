@@ -55,6 +55,8 @@ namespace sage { class Application; }
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/TemplatesPanel.h"
+#include "ui/CommandPalette.h"
+#include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
 
 // ---------------------------------------------------------------------------
@@ -428,6 +430,14 @@ private:
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов
     bool m_showTemplates = false;
+
+    // Реестр команд и палитра (Ctrl+K). Реестр наполняется один раз в
+    // OnAttach: команда описывается ОДИН раз, а меню, тулбар, палитра и
+    // обработчик клавиш читают этот же список (см. ui/Commands.h).
+    Sage::UI::CommandRegistry m_commands;
+    Sage::UI::CommandPalette m_palette;
+    std::string m_paletteQuery;   // начальный запрос (SAGE_EDITOR_PALETTE)
+    void RegisterCommands();
     DialogsPanel m_dialogs;        // модалки File-меню (New/Open Project, Save/Open Scene, Build)
     bool m_launcherRequested = false; // Window > Project Launcher
     // Прогон без человека (скриншот, самопроверка, автоигра) попросил не

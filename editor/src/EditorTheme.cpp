@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "EditorPrefs.h"
+#include "ui/UIStyle.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
 
@@ -46,10 +47,11 @@ std::string ToHex(const ImVec4& c) {
 
 // Имя роли в файле темы. Один список на чтение и на запись: два разошлись бы.
 const char* kRoleNames[(int)Role::_Count] = {
-    "bg", "surface", "surfaceAlt", "elevated", "overlay",
+    "bg", "surface", "surfaceAlt", "elevated", "input", "overlay",
     "line", "lineStrong",
     "text", "textDim", "textFaint", "textOnAccent",
-    "accent", "accentHover", "accentActive",
+    "accent", "accentHover", "accentActive", "accentMuted",
+    "hover", "selection",
     "ok", "warn", "danger", "info",
 };
 
@@ -65,27 +67,43 @@ const char* kRoleNames[(int)Role::_Count] = {
 Theme ModernDark() {
     Theme t;
     t.Id = "modern-dark";
-    t.Name = "Modern Dark";
+    t.Name = "SAGE Dark";
     t.Dark = true;
     ImVec4* c = t.Colors;
-    c[(int)Role::Bg] = Hex("#101216");
-    c[(int)Role::Surface] = Hex("#181B21");
-    c[(int)Role::SurfaceAlt] = Hex("#22262E");
-    c[(int)Role::Elevated] = Hex("#2C313B");
-    c[(int)Role::Overlay] = Hex("#1C1F26FA");
-    c[(int)Role::Line] = Hex("#2E3440");
-    c[(int)Role::LineStrong] = Hex("#434B59");
-    c[(int)Role::Text] = Hex("#E7EAF0");
-    c[(int)Role::TextDim] = Hex("#9AA2B1");
-    c[(int)Role::TextFaint] = Hex("#646C7C");
-    c[(int)Role::TextOnAccent] = Hex("#FFFFFF");
-    c[(int)Role::Accent] = Hex("#4C7EF3");
-    c[(int)Role::AccentHover] = Hex("#5E8DFA");
-    c[(int)Role::AccentActive] = Hex("#3A66D6");
-    c[(int)Role::Ok] = Hex("#45C46B");
-    c[(int)Role::Warn] = Hex("#E9B44C");
-    c[(int)Role::Danger] = Hex("#E5595E");
-    c[(int)Role::Info] = Hex("#56B6F0");
+    // Слои — лесенкой, шаг примерно в 4 % яркости: меньше не видно, больше
+    // рябит. Оттенок чуть холодный (синева в тенях), чтобы жёлтый акцент рядом
+    // читался тёплым, а не грязным.
+    c[(int)Role::Bg] = Hex("#0E1013");
+    c[(int)Role::Surface] = Hex("#15181D");
+    c[(int)Role::SurfaceAlt] = Hex("#1B1F26");
+    c[(int)Role::Elevated] = Hex("#232830");
+    c[(int)Role::Input] = Hex("#1E2229");
+    c[(int)Role::Overlay] = Hex("#191D23FA");
+
+    c[(int)Role::Line] = Hex("#272C35");
+    c[(int)Role::LineStrong] = Hex("#3A414D");
+
+    c[(int)Role::Text] = Hex("#E8EAEE");
+    c[(int)Role::TextDim] = Hex("#9BA3B0");
+    c[(int)Role::TextFaint] = Hex("#646C7A");
+    // Текст ПОВЕРХ жёлтого — тёмный, а не белый: белое на жёлтом не читается
+    // (контраст около 1.7:1 при требуемых 4.5).
+    c[(int)Role::TextOnAccent] = Hex("#15181D");
+
+    // SAGE Yellow. Тёплый янтарь, а не лимон: лимонный на тёмном светится и
+    // утомляет, а на светлой теме исчезает.
+    c[(int)Role::Accent] = Hex("#F0B429");
+    c[(int)Role::AccentHover] = Hex("#FFC93C");
+    c[(int)Role::AccentActive] = Hex("#D69A18");
+    c[(int)Role::AccentMuted] = Hex("#F0B42933");   // подложка выделения
+
+    c[(int)Role::Hover] = Hex("#FFFFFF0F");         // наведение — светлее фона
+    c[(int)Role::Selection] = Hex("#F0B4292E");
+
+    c[(int)Role::Ok] = Hex("#4ADE80");
+    c[(int)Role::Warn] = Hex("#FBBF24");
+    c[(int)Role::Danger] = Hex("#F0616B");
+    c[(int)Role::Info] = Hex("#60A5FA");
     return t;
 }
 
@@ -95,50 +113,63 @@ Theme ModernDark() {
 Theme ModernLight() {
     Theme t = ModernDark();
     t.Id = "modern-light";
-    t.Name = "Modern Light";
+    t.Name = "SAGE Light";
     t.Dark = false;
     ImVec4* c = t.Colors;
-    c[(int)Role::Bg] = Hex("#E7EAF0");
-    c[(int)Role::Surface] = Hex("#F6F7FA");
-    c[(int)Role::SurfaceAlt] = Hex("#EAEDF3");
-    c[(int)Role::Elevated] = Hex("#DDE2EB");
+    // НЕ инверсия тёмной. На светлом фоне лесенка слоёв идёт в другую сторону
+    // и шаг мельче: белое рядом с белым различается хуже, чем тёмное рядом с
+    // тёмным, поэтому границы здесь держит ещё и линия.
+    c[(int)Role::Bg] = Hex("#E4E7EC");
+    c[(int)Role::Surface] = Hex("#F7F8FA");
+    c[(int)Role::SurfaceAlt] = Hex("#EEF0F4");
+    c[(int)Role::Elevated] = Hex("#E4E7EC");
+    c[(int)Role::Input] = Hex("#FFFFFF");
     c[(int)Role::Overlay] = Hex("#FFFFFFFA");
-    c[(int)Role::Line] = Hex("#CBD2DE");
-    c[(int)Role::LineStrong] = Hex("#A9B2C1");
-    c[(int)Role::Text] = Hex("#191C22");
-    c[(int)Role::TextDim] = Hex("#555D6B");
-    c[(int)Role::TextFaint] = Hex("#8B94A3");
-    c[(int)Role::TextOnAccent] = Hex("#FFFFFF");
-    c[(int)Role::Accent] = Hex("#2E6BE6");
-    c[(int)Role::AccentHover] = Hex("#3F7CF5");
-    c[(int)Role::AccentActive] = Hex("#1F52C0");
-    c[(int)Role::Ok] = Hex("#12874F");
-    c[(int)Role::Warn] = Hex("#A9720A");
-    c[(int)Role::Danger] = Hex("#C42F36");
-    c[(int)Role::Info] = Hex("#1B7FC0");
+
+    c[(int)Role::Line] = Hex("#D3D8E0");
+    c[(int)Role::LineStrong] = Hex("#A8B0BD");
+
+    c[(int)Role::Text] = Hex("#14171C");
+    c[(int)Role::TextDim] = Hex("#525A66");
+    c[(int)Role::TextFaint] = Hex("#89919E");
+    c[(int)Role::TextOnAccent] = Hex("#14171C");
+
+    // Акцент темнее, чем в тёмной теме: тот же #F0B429 на белом даёт контраст
+    // 1.8:1 — подпись поверх него не прочесть, да и сама кнопка теряется.
+    c[(int)Role::Accent] = Hex("#D99A0B");
+    c[(int)Role::AccentHover] = Hex("#EDAA1A");
+    c[(int)Role::AccentActive] = Hex("#B87F05");
+    c[(int)Role::AccentMuted] = Hex("#D99A0B29");
+
+    c[(int)Role::Hover] = Hex("#0E101314");
+    c[(int)Role::Selection] = Hex("#D99A0B33");
+
+    c[(int)Role::Ok] = Hex("#13895A");
+    c[(int)Role::Warn] = Hex("#A56A00");
+    c[(int)Role::Danger] = Hex("#C43241");
+    c[(int)Role::Info] = Hex("#1D6FD0");
     return t;
 }
 
-// Почти чёрная, с фиолетовым акцентом: для тёмной комнаты и OLED-экрана, где
-// серый фон светится, а чёрный — нет.
+// Почти чёрная: для тёмной комнаты и OLED-экрана, где серый фон светится, а
+// чёрный — нет. Акцент тот же фирменный жёлтый: тема меняет ГЛУБИНУ, а не
+// принадлежность продукту.
 Theme Midnight() {
     Theme t = ModernDark();
     t.Id = "midnight";
-    t.Name = "Midnight";
+    t.Name = "SAGE Midnight";
     ImVec4* c = t.Colors;
     c[(int)Role::Bg] = Hex("#000000");
-    c[(int)Role::Surface] = Hex("#0A0C0F");
-    c[(int)Role::SurfaceAlt] = Hex("#15181E");
-    c[(int)Role::Elevated] = Hex("#1F242C");
-    c[(int)Role::Overlay] = Hex("#0A0C0FFA");
-    c[(int)Role::Line] = Hex("#242A33");
-    c[(int)Role::LineStrong] = Hex("#3B434F");
-    c[(int)Role::Text] = Hex("#F2F4F8");
+    c[(int)Role::Surface] = Hex("#08090B");
+    c[(int)Role::SurfaceAlt] = Hex("#101216");
+    c[(int)Role::Elevated] = Hex("#181B21");
+    c[(int)Role::Input] = Hex("#121418");
+    c[(int)Role::Overlay] = Hex("#08090BFA");
+    c[(int)Role::Line] = Hex("#1C1F25");
+    c[(int)Role::LineStrong] = Hex("#333945");
+    c[(int)Role::Text] = Hex("#F2F4F7");
     c[(int)Role::TextDim] = Hex("#A6AEBC");
     c[(int)Role::TextFaint] = Hex("#69707E");
-    c[(int)Role::Accent] = Hex("#7C6CFF");
-    c[(int)Role::AccentHover] = Hex("#9084FF");
-    c[(int)Role::AccentActive] = Hex("#6353E4");
     return t;
 }
 
@@ -154,6 +185,7 @@ Theme Classic() {
     c[(int)Role::Surface] = Hex("#1D1F23");
     c[(int)Role::SurfaceAlt] = Hex("#25272C");
     c[(int)Role::Elevated] = Hex("#2F3238");
+    c[(int)Role::Input] = Hex("#25272C");
     c[(int)Role::Overlay] = Hex("#1A1B1FFA");
     c[(int)Role::Line] = Hex("#3D4047");
     c[(int)Role::LineStrong] = Hex("#4B4F57");
@@ -164,6 +196,9 @@ Theme Classic() {
     c[(int)Role::Accent] = Hex("#4271C7");
     c[(int)Role::AccentHover] = Hex("#5284DE");
     c[(int)Role::AccentActive] = Hex("#37539E");
+    c[(int)Role::AccentMuted] = Hex("#4271C744");
+    c[(int)Role::Hover] = Hex("#FFFFFF12");
+    c[(int)Role::Selection] = Hex("#4271C74D");
     c[(int)Role::Ok] = Hex("#4FBF74");
     c[(int)Role::Warn] = Hex("#D9A441");
     c[(int)Role::Danger] = Hex("#D9534F");
@@ -378,6 +413,11 @@ void Apply() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImGuiIO& io = ImGui::GetIO();
 
+    // Токены пересчитываются ПЕРЕД раскладкой стиля: ниже почти всё берётся из
+    // них, а не из чисел на месте (см. ui/UIStyle.h).
+    Sage::UI::Rebuild(ScaleRef());
+    const Sage::UI::Style& ui = Sage::UI::Get();
+
     // Полный сброс перед раскладкой темы. Без него смена темы накапливала бы
     // остатки предыдущей: поля, которые новая тема не трогает, оставались бы от
     // старой, и «вернуться на классическую» давало бы не классическую.
@@ -389,7 +429,12 @@ void Apply() {
     style.FontSizeBase = m.FontSize;
     style.FontScaleMain = ScaleRef();
 
-    // --- метрики ----------------------------------------------------------
+    // --- метрики: ТОЛЬКО из токенов --------------------------------------
+    //
+    // Тема задаёт характер (плотнее/просторнее, с рамками или без), а сетка —
+    // порядок. Поэтому радиусы и отступы берутся из темы, но кратны шагу, а
+    // высоты элементов — общие: кнопка в тулбаре и поле в инспекторе обязаны
+    // быть одной высоты, иначе ряд «плывёт».
     style.WindowRounding = m.Radius;
     style.ChildRounding = m.RadiusFrame;
     style.PopupRounding = m.Radius;
@@ -409,31 +454,31 @@ void Apply() {
     style.ItemInnerSpacing = m.ItemInnerSpacing;
     style.CellPadding = m.CellPadding;
     style.IndentSpacing = m.IndentSpacing;
-    style.ScrollbarSize = m.ScrollbarSize;
-    style.GrabMinSize = m.GrabMinSize;
+    style.ScrollbarSize = ui.ScrollbarSize;
+    style.GrabMinSize = ui.SpacingMD;
 
     style.WindowBorderSize = m.BorderWindow;
     style.ChildBorderSize = m.BorderWindow;
     style.FrameBorderSize = m.BorderFrame;
     style.PopupBorderSize = m.BorderPopup;
-    style.TabBarBorderSize = 1.0f;
+    style.TabBarBorderSize = ui.BorderWidth;
+    style.TabBarOverlineSize = m.TabOverline;
+    style.SeparatorSize = ui.BorderWidth;
+    style.SeparatorTextBorderSize = ui.BorderWidth;
+    style.DockingSeparatorSize = ui.BorderWidth * 2.0f;
     // Крестик закрытия — только у той вкладки, на которую навели. Ряд из
     // одинаковых «×» рядом с каждым заголовком — самая узнаваемая примета
     // старого интерфейса, и заодно источник случайно закрытых панелей.
     style.TabCloseButtonMinWidthUnselected = 0.0f;
-    style.TabBarOverlineSize = m.TabOverline;
-    style.SeparatorSize = m.SeparatorSize;
-    style.SeparatorTextBorderSize = m.SeparatorSize;
-    style.DockingSeparatorSize = 2.0f;
 
     style.WindowMenuButtonPosition = ImGuiDir_None; // без стрелки в заголовке
     style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
     style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
     style.SeparatorTextAlign = ImVec2(0.0f, 0.5f);
-    style.SeparatorTextPadding = ImVec2(16.0f, m.FramePadding.y);
+    style.SeparatorTextPadding = ImVec2(ui.SpacingLG, m.FramePadding.y);
     // Линии дерева: иерархия сцены читается по вложенности, а не по отступу.
     style.TreeLinesFlags = ImGuiTreeNodeFlags_DrawLinesToNodes;
-    style.TreeLinesSize = 1.0f;
+    style.TreeLinesSize = ui.BorderWidth;
     style.TreeLinesRounding = m.RadiusSmall;
     style.DisabledAlpha = 0.45f;
 
@@ -442,6 +487,7 @@ void Apply() {
     const ImVec4 surface = t.Colors[(int)Role::Surface];
     const ImVec4 surfaceAlt = t.Colors[(int)Role::SurfaceAlt];
     const ImVec4 elevated = t.Colors[(int)Role::Elevated];
+    const ImVec4 input = t.Colors[(int)Role::Input];
     const ImVec4 overlay = t.Colors[(int)Role::Overlay];
     const ImVec4 line = t.Colors[(int)Role::Line];
     const ImVec4 lineStrong = t.Colors[(int)Role::LineStrong];
@@ -451,6 +497,8 @@ void Apply() {
     const ImVec4 accent = t.Colors[(int)Role::Accent];
     const ImVec4 accentHover = t.Colors[(int)Role::AccentHover];
     const ImVec4 accentActive = t.Colors[(int)Role::AccentActive];
+    const ImVec4 hover = t.Colors[(int)Role::Hover];
+    const ImVec4 selection = t.Colors[(int)Role::Selection];
     const ImVec4 info = t.Colors[(int)Role::Info];
 
     auto tint = [](const ImVec4& c, float a) { return ImVec4(c.x, c.y, c.z, a); };
@@ -464,7 +512,7 @@ void Apply() {
     c[ImGuiCol_Border] = line;
     c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
 
-    c[ImGuiCol_FrameBg] = surfaceAlt;
+    c[ImGuiCol_FrameBg] = input;
     c[ImGuiCol_FrameBgHovered] = elevated;
     c[ImGuiCol_FrameBgActive] = elevated;
 
@@ -484,15 +532,18 @@ void Apply() {
     c[ImGuiCol_SliderGrab] = accent;
     c[ImGuiCol_SliderGrabActive] = accentHover;
 
-    c[ImGuiCol_Button] = surfaceAlt;
+    // Кнопка по умолчанию — НЕЙТРАЛЬНАЯ. Жёлтый остаётся акцентом: если им
+    // покрасить каждую кнопку, акцента не станет вовсе. Главное действие
+    // помечается явно (Sage::UI::Button со стилем Primary).
+    c[ImGuiCol_Button] = input;
     c[ImGuiCol_ButtonHovered] = elevated;
-    c[ImGuiCol_ButtonActive] = accentActive;
+    c[ImGuiCol_ButtonActive] = lineStrong;
 
     // Выбранная строка — акцент ПОЛУПРОЗРАЧНЫЙ. Сплошная заливка на каждой
-    // выделенной строке дерева превращает иерархию в синюю простыню.
-    c[ImGuiCol_Header] = tint(accent, 0.28f);
-    c[ImGuiCol_HeaderHovered] = tint(accent, 0.18f);
-    c[ImGuiCol_HeaderActive] = tint(accent, 0.40f);
+    // выделенной строке дерева превращает иерархию в жёлтую простыню.
+    c[ImGuiCol_Header] = selection;
+    c[ImGuiCol_HeaderHovered] = hover;
+    c[ImGuiCol_HeaderActive] = selection;
 
     c[ImGuiCol_Separator] = line;
     c[ImGuiCol_SeparatorHovered] = tint(accent, 0.70f);
@@ -537,7 +588,8 @@ void Apply() {
     c[ImGuiCol_ModalWindowDimBg] = tint(bg, 0.65f);
     c[ImGuiCol_InputTextCursor] = accent;
 
-    (void)textDim;  // роль для панелей; ImGui своего слота под неё не имеет
+    (void)textDim;      // роль для панелей; своего слота у ImGui под неё нет
+    (void)accentActive; // используется компонентами (Sage::UI), не ImGui
 
     // Мульти-вьюпорт: платформенные окна рисуются без скруглений и без
     // прозрачности, иначе вытащенная панель выглядит как обрезок, а не как окно

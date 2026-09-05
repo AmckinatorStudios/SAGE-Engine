@@ -83,6 +83,87 @@ constexpr float kStatusBarHeight = 26.0f;
 //  Жизненный цикл
 // ============================================================================
 
+
+// ============================================================================
+//  РЕЕСТР КОМАНД
+//
+//  Одно действие — одна запись. До этого «сохранить сцену» жило в трёх местах
+//  сразу (пункт меню, кнопка тулбара, обработчик Ctrl+S), и три копии одного
+//  действия — это три возможности разойтись: у меню появилась проверка, у
+//  горячей клавиши нет. Такие расхождения не ловятся тестом, а находятся
+//  жалобой.
+//
+//  Наполняется один раз при запуске. Читают его палитра команд (Ctrl+K) и
+//  обработчик горячих клавиш.
+// ============================================================================
+void EditorLayer::RegisterCommands() {
+    using Sage::UI::Command;
+    const auto scene = std::string(T("Scene"));
+    const auto object = std::string(T("Object"));
+    const auto window = std::string(T("Window"));
+    const auto view = std::string(T("View"));
+
+    auto hasProject = [this] { return m_project.Loaded(); };
+    auto hasSelection = [this] { return SelectedId() != 0; };
+
+    m_commands.Add({"scene.save", T("Save Scene"), scene, "Ctrl+S", "scene",
+                    [this] { return !m_scenePath.empty(); },
+                    [this] { SaveSceneToFile(m_scenePath); }});
+    m_commands.Add({"scene.new", T("New Scene"), scene, "", "scene", hasProject,
+                    [this] { NewScene(ProjectTemplateKind::Empty); }});
+    m_commands.Add({"edit.undo", T("Undo"), scene, "Ctrl+Z", "refresh",
+                    [this] { return !m_undoStack.empty(); }, [this] { Undo(); }});
+    m_commands.Add({"edit.redo", T("Redo"), scene, "Ctrl+Shift+Z", "refresh",
+                    [this] { return !m_redoStack.empty(); }, [this] { Redo(); }});
+
+    m_commands.Add({"play.start", T("Play"), scene, "", "play",
+                    [this] { return m_playState == EditorPlayState::Editing; },
+                    [this] { StartPlay(); }});
+    m_commands.Add({"play.stop", T("Stop"), scene, "", "stop",
+                    [this] { return InPlayMode(); }, [this] { StopPlay(); }});
+
+    m_commands.Add({"object.duplicate", T("Duplicate"), object, "Ctrl+D", "cube",
+                    hasSelection, [this] { DuplicateSelected(); }});
+    m_commands.Add({"object.delete", T("Delete"), object, "Del", "cube",
+                    hasSelection, [this] { DeleteSelected(); }});
+
+    // Панели — по одной команде на панель: «где включается консоль» перестаёт
+    // быть поиском по меню.
+    struct PanelCmd { const char* Id; const char* Title; EditorPanel Panel; const char* Icon; };
+    static const PanelCmd kPanels[] = {
+        {"panel.hierarchy", "Hierarchy", EditorPanel::Hierarchy, "scene"},
+        {"panel.inspector", "Inspector", EditorPanel::Inspector, "cube"},
+        {"panel.viewport", "Viewport", EditorPanel::Viewport, "camera"},
+        {"panel.game", "Game", EditorPanel::Game, "play"},
+        {"panel.assets", "Assets", EditorPanel::Assets, "folder"},
+        {"panel.console", "Console", EditorPanel::Console, "code"},
+        {"panel.environment", "Environment", EditorPanel::Environment, "sun"},
+        {"panel.code", "Code", EditorPanel::Code, "script"},
+        {"panel.profiler", "Profiler", EditorPanel::Profiler, "grid"},
+    };
+    for (const PanelCmd& p : kPanels) {
+        const EditorPanel panel = p.Panel;
+        m_commands.Add({p.Id, T(p.Title), window, "", p.Icon, {},
+                        [this, panel] { PanelVisible(panel) = !PanelVisible(panel); }});
+    }
+    m_commands.Add({"window.templates", T("Project templates..."), window, "", "folder", {},
+                    [this] { m_showTemplates = true; }});
+    m_commands.Add({"window.settings", T("Game Settings..."), window, "", "project", {},
+                    [this] { m_showSettings = true; }});
+    m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
+                    [this] { ShowAllPanels(); m_rebuildDockLayout = true; }});
+
+    // Оформление — командами тоже: тема меняется без похода в меню, и это тот
+    // случай, когда её меняют часто (свет в комнате не постоянен).
+    for (const EditorTheme::Theme& theme : EditorTheme::Themes()) {
+        const std::string id = theme.Id;
+        m_commands.Add({"theme." + id, std::string(T("Theme:")) + " " + theme.Name, view, "",
+                        "sun", {}, [id] { EditorTheme::SetTheme(id); }});
+    }
+    m_commands.Add({"view.grid", T("Show Grid"), view, "", "grid", {},
+                    [this] { m_showGrid = !m_showGrid; }});
+}
+
 void EditorLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
 
@@ -336,6 +417,9 @@ void EditorLayer::OnAttach() {
         }
     }
 
+    // Команды — после загрузки тем: часть из них перечисляет темы поимённо.
+    RegisterCommands();
+
     if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
     if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
     if (std::getenv("SAGE_EDITOR_OPEN_PROJECT")) RunHeadlessProjectSession();
@@ -355,6 +439,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
+            "SAGE_EDITOR_PALETTE",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -647,6 +732,13 @@ void EditorLayer::OnAttach() {
     // только руками на своей машине, а значит и проверить, как оно выглядит,
     // будет нечем.
     if (std::getenv("SAGE_EDITOR_SHOW_TEMPLATES")) { m_headlessProject = true; m_showTemplates = true; }
+    // Палитра команд — тем же способом: увидеть её иначе можно только руками
+    // на своей машине, а значит и проверить, как она выглядит, будет нечем.
+    if (const std::string q = sage::EnvString("SAGE_EDITOR_PALETTE"); !q.empty()) {
+        m_headlessProject = true;
+        m_palette.Open();
+        m_paletteQuery = (q == "1") ? std::string() : q;
+    }
     // Вывести вперёд панель Game (вид от игровой камеры) — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_GAME")) m_game.RequestFocus();
 

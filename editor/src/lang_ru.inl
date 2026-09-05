@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1129.
+// Язык: Русский. Строк: 1139.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -606,6 +606,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Перетащите ассет сюда"},
     {"Drag an object from Hierarchy. The link holds the object's\nid, so renaming it does not break anything.",
      "Перетащите объект из дерева. Ссылка держится за номер\nобъекта, поэтому переименование её не ломает."},
+    {"Draw Calls",
+     "Вызовов"},
     {"Draws a mesh with a material",
      "Рисует меш с материалом"},
     {"Drives",
@@ -710,6 +712,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Экспозиция"},
     {"FOV",
      "Угол обзора"},
+    {"FPS",
+     "Кадр/с"},
     {"Failed to load: %s",
      "Не загрузилась: %s"},
     {"Failed to open the project: ",
@@ -806,6 +810,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Спереди"},
     {"Fullscreen",
      "Полноэкранный"},
+    {"GB",
+     "ГБ"},
     {"GI Static",
      "Статика для GI"},
     {"GI: bake finished — save the scene to write the lightmaps",
@@ -1110,6 +1116,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Максимум"},
     {"Medium",
      "Средние"},
+    {"Mem",
+     "Память"},
     {"Menu and HUD",
      "Меню и худ"},
     {"Mesh",
@@ -1240,6 +1248,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не запечено (статичных объектов: %d)"},
     {"Not the scene's sun: a directional light with a lower number in the hierarchy is already the sun, and only one takes part in the frame.",
      "Это не солнце сцены: солнцем уже работает направленный свет с меньшим номером в иерархии, а в кадре участвует только одно."},
+    {"Nothing found",
+     "Ничего не нашлось"},
     {"Nothing happens yet. A link lets this element send an event\nor call a method on another object by itself.",
      "Пока ничего не происходит. Связь позволяет элементу самому\nпослать событие или позвать метод у другого объекта."},
     {"Nothing here yet.",
@@ -1264,6 +1274,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Объекта больше нет (номер "},
     {"Object reference",
      "Ссылка на объект"},
+    {"Objects",
+     "Объектов"},
     {"Off",
      "Выключено"},
     {"Offset",
@@ -1696,6 +1708,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт назначен: "},
     {"Scripts (*.lua)",
      "Скрипты (*.lua)"},
+    {"Search commands...",
+     "Поиск команд..."},
     {"Search...",
      "Поиск…"},
     {"Section",
@@ -1988,6 +2002,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Оформление изменено"},
     {"Theme saved:",
      "Тема записана:"},
+    {"Theme:",
+     "Оформление:"},
     {"There are no interface elements yet. Add one with the Element button above.",
      "Элементов интерфейса пока нет. Добавьте кнопкой «Элемент» выше."},
     {"There are unsaved changes (Ctrl+S)",
@@ -2048,8 +2064,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Преобразование"},
     {"Transparency",
      "Прозрачность"},
+    {"Triangles",
+     "Треугольников"},
     {"Triangles: %d, bounds %.2f x %.2f x %.2f",
      "Треугольников: %d, габарит %.2f x %.2f x %.2f"},
+    {"Try a different word.",
+     "Попробуйте другое слово."},
     {"Turn on",
      "Включить"},
     {"Turn on layout mode (U)",
