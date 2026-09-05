@@ -86,18 +86,22 @@ def source_files():
 # Редактор рисует их через T(), но ключа-литерала у него нет — он приходит
 # указателем. Без этого списка перевод новой части молча не появлялся бы, и
 # заметить это можно было бы только глазами, открыв инспектор по-русски.
-ENGINE_TEXT_FILES = [os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UIParts.cpp')]
+# Не список файлов, а ОБХОД всего модуля интерфейса: список неизбежно
+# устаревает ровно тогда, когда появляется новый компонент, — то есть в тот
+# единственный момент, когда проверка и нужна.
+ENGINE_TEXT_ROOT = os.path.join(REPO, 'engine', 'src', 'sage', 'ui')
 ENGINE_TEXT = re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
 
 
 def engine_keys():
     keys = set()
-    for path in ENGINE_TEXT_FILES:
-        if not os.path.exists(path):
-            continue
-        with open(path, encoding='utf-8') as f:
-            for m in ENGINE_TEXT.finditer(f.read()):
-                keys.add(m.group(1))
+    for root, _dirs, files in os.walk(ENGINE_TEXT_ROOT):
+        for name in files:
+            if not name.endswith(('.cpp', '.h')):
+                continue
+            with open(os.path.join(root, name), encoding='utf-8') as f:
+                for m in ENGINE_TEXT.finditer(f.read()):
+                    keys.add(m.group(1))
     return keys
 
 

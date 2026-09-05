@@ -132,6 +132,42 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UILegacy.cpp
     src/sage/ui/UIDemos.cpp
     src/sage/ui/UIShowcase.cpp
+    # --- Новая система интерфейса (см. engine/src/sage/ui/UIFramework.h) ------
+    # Разложена по подсистемам: ядро, раскладка, оформление, маски, эффекты,
+    # рисование, ввод, стили, виджеты, сериализация, анимация, отладка. Порядок
+    # в списке — по подсистемам, а не по алфавиту: так видно устройство.
+    src/sage/ui/core/UITypes.cpp
+    src/sage/ui/core/UIProperty.cpp
+    src/sage/ui/core/UINode.cpp
+    src/sage/ui/core/UIDocument.cpp
+    src/sage/ui/core/UIRegistry.cpp
+    src/sage/ui/layout/UITransform.cpp
+    src/sage/ui/layout/UILayout.cpp
+    src/sage/ui/layout/UILayoutSolver.cpp
+    src/sage/ui/visual/UIGradient.cpp
+    src/sage/ui/visual/UIVisual.cpp
+    src/sage/ui/visual/UIText.cpp
+    src/sage/ui/visual/UITextLayout.cpp
+    src/sage/ui/mask/UIMask.cpp
+    src/sage/ui/mask/UIMaskStack.cpp
+    src/sage/ui/effects/UIEffect.cpp
+    src/sage/ui/render/UIRenderList.cpp
+    src/sage/ui/render/UIDrawBuilder.cpp
+    src/sage/ui/render/UIBackend.cpp
+    src/sage/ui/render/UIEngineResources.cpp
+    src/sage/ui/input/UIInteraction.cpp
+    src/sage/ui/input/UIEvent.cpp
+    src/sage/ui/input/UIHitTest.cpp
+    src/sage/ui/input/UIInput.cpp
+    src/sage/ui/style/UIDesignTokens.cpp
+    src/sage/ui/style/UIStyle.cpp
+    src/sage/ui/widgets/UIWidgets.cpp
+    src/sage/ui/serialization/UISerializer.cpp
+    src/sage/ui/serialization/UIPrefab.cpp
+    src/sage/ui/animation/UIAnimationValue.cpp
+    src/sage/ui/debug/UIDebug.cpp
+    src/sage/ui/showcase/UIShowcaseDocument.cpp
+    src/sage/ui/UIFramework.cpp
 )
 
 add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})
