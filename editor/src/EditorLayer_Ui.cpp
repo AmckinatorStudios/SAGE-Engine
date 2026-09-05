@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -33,6 +34,8 @@
 #include "ImGuizmo.h"
 
 #include "EditorTheme.h"
+#include "ui/UI.h"
+#include "sage/core/Profiler.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "sage/render/DebugView.h"
@@ -169,6 +172,21 @@ void EditorLayer::DrawStatusBar(float height) {
                       ImGuiWindowFlags_NoScrollbar);
     ImGui::AlignTextToFramePadding();
 
+    // Точка состояния: зелёная в покое, жёлтая в игре. Один символ, но он
+    // отвечает на вопрос «редактор жив?» без чтения строки.
+    {
+        const bool busy = InPlayMode();
+        const ImVec4 dot = EditorTheme::Color(busy ? EditorTheme::Role::Accent
+                                                   : EditorTheme::Role::Ok);
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float r = Sage::UI::Get().SpacingXS * 0.75f;
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            ImVec2(p.x + r, p.y + ImGui::GetTextLineHeight() * 0.5f), r,
+            ImGui::GetColorU32(dot));
+        ImGui::Dummy(ImVec2(r * 2.0f, ImGui::GetTextLineHeight()));
+        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingSM);
+    }
+
     ImGui::TextDisabled("%s", m_project.Name().c_str());
     ImGui::SameLine(); ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -219,14 +237,72 @@ void EditorLayer::DrawStatusBar(float height) {
         ImGui::SameLine(); ImGui::TextDisabled("%s", m_pluginStatusMessage.c_str());
     }
 
-    // Статистика рендера (отсечение/батчинг) + FPS — справа.
-    char stat[128];
-    const sage::ecs::RenderStats& rs = m_renderer.LastStats();
-    std::snprintf(stat, sizeof(stat), "meshes %d/%d  culled %d  batches %d  |  %.0f FPS",
-                  rs.Drawn, rs.Total, rs.Culled, rs.Batches, sage::Application::Get().Fps());
-    float w = ImGui::CalcTextSize(stat).x + 16.0f;
-    ImGui::SameLine(ImGui::GetWindowWidth() - w);
-    ImGui::TextDisabled("%s", stat);
+    // --- СПРАВА: показатели сцены и версия движка ---------------------------
+    //
+    // Пары «подпись — значение», а не слитная строка «meshes 8/8 culled 0
+    // batches 4»: слитную читают только те, кто её писал. Подпись приглушена,
+    // значение обычным цветом — глаз находит число, не читая всю строку.
+    //
+    // Собирается СПРАВА НАЛЕВО: ширина считается заранее, и при узком окне
+    // лишние пары просто не рисуются, а не наезжают на левую часть.
+    {
+        const sage::ecs::RenderStats& rs = m_renderer.LastStats();
+        char fps[32], mem[32], draws[32], tris[32], objs[32];
+        std::snprintf(fps, sizeof(fps), "%.0f", sage::Application::Get().Fps());
+        std::snprintf(mem, sizeof(mem), "%.2f %s",
+                      (double)sage::profile::ResidentBytes() / (1024.0 * 1024.0 * 1024.0), T("GB"));
+        std::snprintf(draws, sizeof(draws), "%d", rs.Batches);
+        // Разряды разделяются пробелом: «89 442» читается с одного взгляда,
+        // «89442» — нет. Пробелом, а не запятой: запятая в русском тексте
+        // означает дробную часть.
+        {
+            char raw[32];
+            std::snprintf(raw, sizeof(raw), "%lld", rs.Triangles);
+            const int len = (int)std::strlen(raw);
+            int out = 0;
+            for (int i = 0; i < len && out < (int)sizeof(tris) - 2; ++i) {
+                if (i > 0 && (len - i) % 3 == 0) tris[out++] = ' ';
+                tris[out++] = raw[i];
+            }
+            tris[out] = '\0';
+        }
+        std::snprintf(objs, sizeof(objs), "%d", rs.Drawn);
+
+        struct Stat { const char* Label; const char* Value; };
+        const Stat stats[] = {
+            {T("FPS"), fps},
+            {T("Mem"), mem},
+            {T("Draw Calls"), draws},
+            {T("Triangles"), tris},
+            {T("Objects"), objs},
+        };
+        const std::string version = std::string("SAGE Engine ") + kSageEngineVersion;
+
+        const float gap = Sage::UI::Get().SpacingLG;
+        float need = ImGui::CalcTextSize(version.c_str()).x + Sage::UI::Get().IconSize + gap;
+        int shown = 0;
+        for (int i = (int)IM_ARRAYSIZE(stats) - 1; i >= 0; --i) {
+            const float w = ImGui::CalcTextSize(stats[i].Label).x +
+                            ImGui::CalcTextSize(stats[i].Value).x +
+                            Sage::UI::Get().SpacingSM + gap;
+            if (need + w > ImGui::GetWindowWidth() * 0.55f) break;
+            need += w;
+            ++shown;
+        }
+
+        ImGui::SameLine(ImGui::GetWindowWidth() - need);
+        for (int i = (int)IM_ARRAYSIZE(stats) - shown; i < (int)IM_ARRAYSIZE(stats); ++i) {
+            ImGui::TextDisabled("%s", stats[i].Label);
+            ImGui::SameLine(0.0f, Sage::UI::Get().SpacingSM);
+            ImGui::TextUnformatted(stats[i].Value);
+            ImGui::SameLine(0.0f, gap);
+        }
+        EditorIcons::Inline("cube", glm::vec3(EditorTheme::Color(EditorTheme::Role::Accent).x,
+                                              EditorTheme::Color(EditorTheme::Role::Accent).y,
+                                              EditorTheme::Color(EditorTheme::Role::Accent).z));
+        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
+        ImGui::TextDisabled("%s", version.c_str());
+    }
 
     ImGui::EndChild();
     ImGui::PopStyleVar();

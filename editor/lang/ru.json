@@ -1129,6 +1129,12 @@
     "Path copied to the clipboard": "Путь скопирован в буфер обмена",
     "Previous session crashed": "Прошлый запуск завершился аварийно",
     "Reports next to the editor: %d": "Отчётов рядом с редактором: %d",
-    "The editor did not close normally last time. Below is the full report written at that moment — it is what a developer needs to find the cause.": "В прошлый раз редактор закрылся не сам. Ниже — полный отчёт, записанный в тот момент: именно он нужен разработчику, чтобы найти причину."
+    "The editor did not close normally last time. Below is the full report written at that moment — it is what a developer needs to find the cause.": "В прошлый раз редактор закрылся не сам. Ниже — полный отчёт, записанный в тот момент: именно он нужен разработчику, чтобы найти причину.",
+    "FPS": "Кадр/с",
+    "Mem": "Память",
+    "GB": "ГБ",
+    "Draw Calls": "Вызовов",
+    "Triangles": "Треугольников",
+    "Objects": "Объектов"
   }
 }

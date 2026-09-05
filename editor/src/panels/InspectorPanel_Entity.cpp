@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 #include <cstdarg>
 #include "EditorTheme.h"
+#include "ui/UI.h"
 #include "InspectorPanel.h"
 
 #include <cmath>
@@ -142,10 +143,25 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     ImGui::Separator();
 
     if (EditorTheme::SectionHeader(T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.
+        //
+        // У ImGui подпись стоит СПРАВА от поля, и инспектор читался задом
+        // наперёд: «1.500 0.500 2.200 Позиция». Хуже того, подпись съедала
+        // ширину у самих полей и в узкой панели обрезалась посреди слова, а
+        // строки соседних разделов начинались каждая со своей координаты —
+        // сетки не было вовсе.
+        //
+        // Sage::UI ставит подпись слева в колонке одной ширины, а значения —
+        // на одной координате во ВСЕХ строках и всех разделах (см. ui/UI.h).
         Transform& tr = obj.GetTransform();
-        ImGui::DragFloat3(T("Position"), &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
-        ImGui::DragFloat3(T("Rotation"), &tr.Rotation.x, 0.5f); host.TrackLastImGuiItem();
-        ImGui::DragFloat3(T("Scale"), &tr.Scale.x, 0.05f, 0.01f, 100.0f); host.TrackLastImGuiItem();
+        Sage::UI::BeginProperties("transform");
+        Sage::UI::PropertyLabel(T("Position"));
+        Sage::UI::PropertyVec3("pos", &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
+        Sage::UI::PropertyLabel(T("Rotation"));
+        Sage::UI::PropertyVec3("rot", &tr.Rotation.x, 0.5f, "%.1f"); host.TrackLastImGuiItem();
+        Sage::UI::PropertyLabel(T("Scale"));
+        Sage::UI::PropertyVec3("scl", &tr.Scale.x, 0.05f); host.TrackLastImGuiItem();
+        Sage::UI::EndProperties();
     }
 
     // --- Mesh Renderer: ОДНА секция на весь компонент -------------------------

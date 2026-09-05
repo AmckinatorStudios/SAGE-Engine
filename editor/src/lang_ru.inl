@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1129.
+// Язык: Русский. Строк: 1135.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -606,6 +606,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Перетащите ассет сюда"},
     {"Drag an object from Hierarchy. The link holds the object's\nid, so renaming it does not break anything.",
      "Перетащите объект из дерева. Ссылка держится за номер\nобъекта, поэтому переименование её не ломает."},
+    {"Draw Calls",
+     "Вызовов"},
     {"Draws a mesh with a material",
      "Рисует меш с материалом"},
     {"Drives",
@@ -710,6 +712,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Экспозиция"},
     {"FOV",
      "Угол обзора"},
+    {"FPS",
+     "Кадр/с"},
     {"Failed to load: %s",
      "Не загрузилась: %s"},
     {"Failed to open the project: ",
@@ -806,6 +810,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Спереди"},
     {"Fullscreen",
      "Полноэкранный"},
+    {"GB",
+     "ГБ"},
     {"GI Static",
      "Статика для GI"},
     {"GI: bake finished — save the scene to write the lightmaps",
@@ -1110,6 +1116,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Максимум"},
     {"Medium",
      "Средние"},
+    {"Mem",
+     "Память"},
     {"Menu and HUD",
      "Меню и худ"},
     {"Mesh",
@@ -1264,6 +1272,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Объекта больше нет (номер "},
     {"Object reference",
      "Ссылка на объект"},
+    {"Objects",
+     "Объектов"},
     {"Off",
      "Выключено"},
     {"Offset",
@@ -2048,6 +2058,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Преобразование"},
     {"Transparency",
      "Прозрачность"},
+    {"Triangles",
+     "Треугольников"},
     {"Triangles: %d, bounds %.2f x %.2f x %.2f",
      "Треугольников: %d, габарит %.2f x %.2f x %.2f"},
     {"Turn on",

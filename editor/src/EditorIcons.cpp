@@ -700,9 +700,16 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
     const float icon_s = std::floor(h * 0.68f);
     ImGui::PushID(label);
     CheckDuplicateId(label);
-    // Нажатое состояние — акцент ТЕМЫ. Константа, подобранная под тёмный фон,
-    // в светлой теме оставалась тёмно-синим пятном среди светлых кнопок.
-    if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
+    // Нажатое состояние — акцент ПОДЛОЖКОЙ, а не заливкой.
+    //
+    // Сплошной жёлтый на каждой включённой кнопке превращает тулбар в жёлтую
+    // ленту: акцентом перестаёт быть что бы то ни было, потому что акцентом
+    // становится всё. Подложка в 20 % и жёлтый значок читаются как «включено»
+    // не хуже, а рядом стоящее главное действие (Играть) снова выделяется.
+    if (active) {
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::AccentMuted));
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Accent));
+    }
 
     // Место под иконку резервируется отступом слева — так подпись не наезжает
     // на рисунок при любом шрифте.
@@ -719,7 +726,7 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
     dl->AddText(ImVec2(cursor.x + pad.x * 2.0f + icon_s, cursor.y + (h - textSize.y) * 0.5f), col,
                 label);
 
-    if (active) ImGui::PopStyleColor();
+    if (active) ImGui::PopStyleColor(2);
     if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
     ImGui::PopID();
     return pressed;
@@ -729,16 +736,23 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     const float h = ImGui::GetFrameHeight();
     ImGui::PushID(icon);
     CheckDuplicateId(icon);
-    // Нажатое состояние — акцент ТЕМЫ. Константа, подобранная под тёмный фон,
-    // в светлой теме оставалась тёмно-синим пятном среди светлых кнопок.
-    if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
+    // Нажатое состояние — акцент ПОДЛОЖКОЙ, а не заливкой.
+    //
+    // Сплошной жёлтый на каждой включённой кнопке превращает тулбар в жёлтую
+    // ленту: акцентом перестаёт быть что бы то ни было, потому что акцентом
+    // становится всё. Подложка в 20 % и жёлтый значок читаются как «включено»
+    // не хуже, а рядом стоящее главное действие (Играть) снова выделяется.
+    if (active) {
+        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::AccentMuted));
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Accent));
+    }
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::Button("##ibtn", ImVec2(h, h));
     const float icon_s = std::floor(h * 0.64f);
     const float off = std::floor((h - icon_s) * 0.5f);
     DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x + off, cursor.y + off), icon_s, icon,
            Col(tint));
-    if (active) ImGui::PopStyleColor();
+    if (active) ImGui::PopStyleColor(2);
     if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
     ImGui::PopID();
     return pressed;
