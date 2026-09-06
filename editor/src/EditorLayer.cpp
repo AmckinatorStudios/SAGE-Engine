@@ -174,6 +174,19 @@ void EditorLayer::OnAttach() {
     // взводится — там эти мегабайты ни на что не работают.
     ResourceManager::Instance().SetKeepMeshCpuData(true);
 
+    // --- Ввод игры в Play-режиме -------------------------------------------
+    //
+    // Мост к окну ставится ОДИН раз, здесь, а не на каждый Play: подписка на
+    // события окна снимается только вместе с окном, и второй мост означал бы
+    // два одинаковых события на одно нажатие. Раскладка при этом на каждый Play
+    // своя — её сбрасывает ClearActions (см. StartPlay).
+    m_playInputBridge.Attach(app.GetWindow(), m_playInput);
+    m_playCursor.Attach(m_playInputBridge);
+    // Захватом курсора распоряжается не мост, а условие «панель Game в фокусе»
+    // (см. EditorPlayInput): иначе игра, попросившая обзор от первого лица,
+    // отняла бы у редактора мышь насовсем.
+    m_playInput.SetCursorControl(&m_playCursor);
+
     // --- ImGui: docking + multi-viewport (панели можно вытаскивать в
     // отдельные OS-окна — «плавающие» панели становятся полноценными окнами) ---
     IMGUI_CHECKVERSION();
@@ -837,24 +850,37 @@ void EditorLayer::OnUpdate(float dt) {
 
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
+    // Кадр ввода открывается ВСЕГДА, а не только в Play. Причина не в красоте:
+    // мост шлёт события окна в очередь непрерывно, пока редактор открыт, и
+    // очередь, которую никто не разбирает, растёт без предела — час правки
+    // сцены это десятки тысяч движений мыши в памяти. Заодно это даёт панели
+    // «Управление» живые события: назначить клавишу можно только поймав её.
+    m_playInputBridge.PollGamepads();
+    m_playInput.BeginFrame();
+
     if (m_playState == EditorPlayState::Playing) {
         // Ввод игре — только пока в фокусе панель Game (см. EditorPlayInput).
-        // В остальное время действия гасятся: клавиши уходят редактору.
-        if (m_playRawInput) {
-            GLFWwindow* handle = sage::Application::Get().GetWindow().Handle();
-            m_playRawInput->SetGameFocused(m_game.Focused());
-            m_playRawInput->SyncCapture();
-            if (m_game.Focused()) m_playInput.Update(handle);
-            else m_playInput.UpdateIdle();
+        // В остальное время всё отпускается: клавиши уходят редактору, а игра
+        // не остаётся идти вперёд сама. Простое «не считать действия» тут не
+        // годится — они застыли бы нажатыми.
+        m_playCursor.SetGameFocused(m_game.Focused());
+        m_playCursor.SyncCapture();
+        if (m_game.Focused()) {
+            // Тот же порядок, что в собранной игре: устройства -> интерфейс
+            // сцены -> действия (см. InputSystem::BeginFrame).
+            UpdatePlayUiInput(dt);
+            m_playInput.UpdateActions(dt);
 
             // ESC отпускает захваченный курсор, не выходя из Play: иначе из
             // игры от первого лица в редакторе было бы не выбраться мышью.
-            if (m_playRawInput->MouseCaptured() &&
-                glfwGetKey(handle, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-                m_playRawInput->SetMouseCaptured(false);
+            if (m_playCursor.CursorCaptured() &&
+                m_playInput.State().Keys().Down(sage::input::Key::Escape)) {
+                m_playCursor.SetCursorCaptured(false);
             }
+        } else {
+            m_playInput.ReleaseAll();
+            UpdatePlayUiInput(dt);
         }
-        UpdatePlayUiInput(dt);
     }
     // Время сцены для uTime собственных шейдеров + горячая перезагрузка
     // изменённых .vert/.frag: правка шейдера видна во вьюпорте сразу.

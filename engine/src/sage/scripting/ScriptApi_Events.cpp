@@ -230,16 +230,24 @@ void ScriptEngine::DispatchFrameEvents() {
         const bool wantPressed = m_handlers.count("action.pressed") != 0;
         const bool wantReleased = m_handlers.count("action.released") != 0;
         if (wantPressed || wantReleased) {
-            for (const auto& [name, action] : m_input->All()) {
-                if (wantPressed && action.WasPressed()) {
-                    sol::table t = m_lua.create_table();
-                    t["action"] = name;
-                    DispatchEvent("action.pressed", t);
-                }
-                if (wantReleased && action.WasReleased()) {
-                    sol::table t = m_lua.create_table();
-                    t["action"] = name;
-                    DispatchEvent("action.released", t);
+            // По всем контекстам, а не только по игровому: действие, объявленное
+            // в контексте меню, обязано доходить до скрипта так же, как
+            // игровое (см. sage/input/Context.h).
+            for (sage::input::Context* ctx : m_input->ContextsByPriority()) {
+                if (!ctx->Enabled()) continue;
+                for (const std::string& name : ctx->ActionNames()) {
+                    const sage::input::Action* action = ctx->Find(name);
+                    if (!action) continue;
+                    if (wantPressed && action->WasPressed()) {
+                        sol::table t = m_lua.create_table();
+                        t["action"] = name;
+                        DispatchEvent("action.pressed", t);
+                    }
+                    if (wantReleased && action->WasReleased()) {
+                        sol::table t = m_lua.create_table();
+                        t["action"] = name;
+                        DispatchEvent("action.released", t);
+                    }
                 }
             }
         }

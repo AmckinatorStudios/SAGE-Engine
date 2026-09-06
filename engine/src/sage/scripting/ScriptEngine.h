@@ -1,7 +1,6 @@
 #pragma once
 #include "sage/scene/Scene.h"
-#include "sage/core/InputMap.h"
-#include "sage/core/RawInput.h"
+#include "sage/input/InputSystem.h"
 #include "sage/core/Tween.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ParticleSystem.h"
@@ -25,11 +24,12 @@ namespace sage::net { class NetworkSystem; }
 //   - Vec2/Vec3/Vec4 с арифметикой (+, -, *, длина, нормализация) — для игровой математики
 //   - Spawn/Find/Destroy объектов сцены, SetMeshCube/SetMeshModel — можно
 //     порождать/убирать сущности из Lua и назначать им геометрию
-//   - именованным действиям ввода движка (см. core/InputMap.h) — IsActionDown и т.п.,
+//   - именованным действиям ввода движка (см. sage/input/InputSystem.h) — IsActionDown,
+//     GetAxis, GetVector, BindAction, RebindAction и контексты,
 //     объявляемым ПРЯМО ИЗ LUA (BindAction("Jump", "SPACE")) — раскладка игры
 //     живёт в игре, а не зашита в C++
 //   - «сырому» вводу: GetMouseDelta/SetMouseCaptured — вид от первого лица
-//     пишется скриптом, без единой строки C++ (см. core/RawInput.h)
+//     пишется скриптом, без единой строки C++ (см. sage/input/InputSystem.h)
 //   - МОДУЛЯМ: require("voxel") подтягивает соседний .lua из папок, добавленных
 //     через AddScriptSearchPath — игра размером больше одного файла раскладывается
 //     по модулям, а общий код (воксельное ядро, утилиты) пишется ОДИН раз
@@ -56,7 +56,7 @@ namespace sage::net { class NetworkSystem; }
 // Использование в игре:
 //   ScriptEngine scripts;
 //   scripts.BindScene(scene);           // опционально — даёт Spawn/Find/Destroy
-//   scripts.BindInput(inputMap);        // опционально — даёт IsActionDown и т.п.
+//   scripts.BindInput(input);            // опционально — даёт IsActionDown и т.п.
 //   scripts.BindCamera(camera);         // опционально — даёт GetCamera()
 //   scripts.BindParticles(particles);   // опционально — даёт EmitParticles и т.п.
 //   scripts.BindBillboards(billboards); // опционально — даёт AddBillboard и т.п.
@@ -78,15 +78,15 @@ public:
     // бросают ошибку при вызове из Lua — понятную, не сегфолт.
     void BindScene(Scene& scene);
 
-    // Даёт скриптам доступ к именованным действиям ввода движка:
-    // IsActionDown("Jump"), WasActionPressed("BreakOrHook") и т.п., а также
-    // право ОБЪЯВЛЯТЬ свои действия из Lua — BindAction("Jump", "SPACE").
-    void BindInput(InputMap& input) { m_input = &input; }
-
-    // Даёт скриптам «сырой» ввод: GetMouseDelta/GetScrollDelta/SetMouseCaptured.
-    // Без этого из Lua нельзя написать вид от первого лица — именованные
-    // действия дискретны и обзора не дают (см. core/RawInput.h).
-    void BindRawInput(sage::RawInputSource& raw) { m_rawInput = &raw; }
+    // Даёт скриптам ВЕСЬ ввод движка (см. sage/input/InputSystem.h): и
+    // именованные действия — IsActionDown("Jump"), BindAction("Jump",
+    // "SPACE"), — и оси с векторами, и «сырую» мышь с захватом курсора, без
+    // которой вид от первого лица из Lua написать нельзя.
+    //
+    // Одна привязка вместо прежних двух (действия отдельно, сырая мышь
+    // отдельно): половина ввода, до которой скрипт не дотягивался, — это ровно
+    // тот случай, когда игру целиком на скриптах написать невозможно.
+    void BindInput(sage::input::InputSystem& input) { m_input = &input; }
 
     // Параметр запуска игры: скрипт читает его как LaunchArg("autopilot").
     // Хост наполняет их из командной строки (--autopilot=1) и переменной
@@ -463,8 +463,7 @@ private:
     std::shared_ptr<SolidQueries> m_solidQueries = std::make_shared<SolidQueries>();
 
     Scene* m_scene = nullptr;
-    InputMap* m_input = nullptr;
-    sage::RawInputSource* m_rawInput = nullptr;
+    sage::input::InputSystem* m_input = nullptr;
     Camera* m_camera = nullptr;
     ParticleSystem* m_particles = nullptr;
     BillboardSystem* m_billboards = nullptr;

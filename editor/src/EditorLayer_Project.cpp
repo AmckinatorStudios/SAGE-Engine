@@ -598,6 +598,59 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
     return true;
 }
 
+// ============================================================================
+//  Раскладка управления проекта (<проект>/input.sageinput)
+//
+//  Отдельный файл, а не часть sage.cfg: качество картинки настраивает тот, кто
+//  играет, а раскладку — тот, кто делает игру. Смешать их значило бы позволить
+//  игроку случайно снести управление, поправив яркость.
+// ============================================================================
+
+fs::path EditorLayer::ProjectInputFile() const {
+    return m_project.Loaded() ? (m_project.Dir() / "input.sageinput") : fs::path();
+}
+
+// Переносит раскладку проекта в РАБОТАЮЩИЙ ввод Play-режима.
+//
+// Через строку, а не копированием объекта: InputSystem некопируем намеренно
+// (у него подписки, курсор и шины — то, что принадлежит хозяину, а не
+// раскладке). Сериализация же переносит ровно то, что и должно переноситься, —
+// контексты, действия, привязки и настройки, — и это тот же путь, которым
+// раскладка попадает в собранную игру. Один путь на оба случая: разойдись они,
+// расхождение вылезло бы после сборки.
+void EditorLayer::ApplyProjectInputMapping() {
+    if (m_projectInput.ContextNames().empty()) return;
+    bool hasAnyAction = false;
+    for (sage::input::Context* ctx : m_projectInput.ContextsByPriority())
+        if (!ctx->ActionNames().empty()) hasAnyAction = true;
+    if (!hasAnyAction) return;  // пустая раскладка не должна затирать умолчания скриптов
+
+    m_playInput.LoadMappingFromString(m_projectInput.SaveMappingToString());
+}
+
+bool EditorLayer::SaveProjectInput() {
+    const fs::path file = ProjectInputFile();
+    if (file.empty()) return false;
+    if (!m_projectInput.SaveMapping(file)) return false;
+    m_projectInputDirty = false;
+    LOG_INFO("Editor") << "Раскладка управления сохранена: " << file.string();
+    return true;
+}
+
+bool EditorLayer::ReloadProjectInput() {
+    const fs::path file = ProjectInputFile();
+    // Начинаем с чистого листа: Load ЗАМЕЩАЕТ привязки известных действий, но
+    // не убирает те, которых в файле нет, — без сброса «перечитать» оставляло
+    // бы на экране действия, удалённые из файла руками.
+    m_projectInput.ClearActions();
+    m_projectInputDirty = false;
+    if (file.empty()) return false;
+    // Нет файла — не ошибка: у проекта просто ещё нет своей раскладки.
+    std::error_code ec;
+    if (!fs::exists(file, ec)) return true;
+    return m_projectInput.LoadMapping(file);
+}
+
 bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     if (!m_project.Open(path, err)) return false;
     m_assetsCwd = m_project.Dir();
@@ -609,6 +662,10 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     m_settings.LoadFile((m_project.Dir() / "sage.cfg").string());
     m_settings.ApplyEnvOverrides();   // SAGE_* поверх файла — как у рантайма
     ApplyEngineSettings();
+
+    // Раскладка управления проекта — в окно «Управление»; отсутствие файла не
+    // ошибка (у проекта её просто ещё нет).
+    ReloadProjectInput();
 
     // Автозагрузка первой сцены проекта (по алфавиту) — открытый проект сразу
     // показывает свой контент, а не осиротевшую демо-сцену.

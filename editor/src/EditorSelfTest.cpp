@@ -123,7 +123,7 @@ void EditorLayer::RunSelfTest() {
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
-                               << "vars-refs-events + prefab-refs + templates + themes, "
+                               << "vars-refs-events + prefab-refs + templates + themes + input-mapping, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2921,6 +2921,84 @@ bool EditorLayer::SelfTestTools() {
         }
 
         EditorTheme::SetTheme(startId); // за собой убираем: прогон идёт дальше
+    }
+
+    // --- Раскладка управления проекта (панель «Управление») -----------------
+    //
+    // Проверяется не «панель открывается», а то, ради чего она есть: раскладка
+    // переживает запись на диск и чтение обратно, а Play-режим играется ИМЕННО
+    // ею. Без последнего панель была бы окном, которое красиво выглядит и ни на
+    // что не влияет, — и заметили бы это только после сборки игры.
+    {
+        namespace in = sage::input;
+        // Площадку готовим сами: предыдущие проверки этого блока успевают
+        // прибрать за собой папку проекта, а раскладке нужно, куда писать.
+        std::error_code inputSetupEc;
+        fs::create_directories(m_project.Dir(), inputSetupEc);
+
+        in::InputSystem& mapping = ProjectInput();
+        mapping.ClearActions();
+
+        in::Action& jump = mapping.Register("Jump");
+        jump.Bind("SPACE");
+        jump.Bind("PAD_A");
+        in::Action& move = mapping.Register("Move", in::ActionType::Vector);
+        move.BindVector("W", "S", "A", "D");
+        mapping.CreateContext("Inventory", 50).Add("Equip").Bind("E");
+
+        if (!SaveProjectInput()) {
+            LOG_ERROR("Editor") << "SELFTEST: раскладка управления не сохранилась в проект: "
+                                << ProjectInputFile().string();
+            ok = false;
+        } else {
+            // Перечитываем с нуля: сохранённый файл обязан полностью описывать
+            // раскладку, а не опираться на то, что уже в памяти.
+            if (!ReloadProjectInput()) {
+                LOG_ERROR("Editor") << "SELFTEST: раскладка управления не перечитывается";
+                ok = false;
+            } else if (!mapping.Has("Jump") || !mapping.Has("Move") || !mapping.Has("Equip")) {
+                LOG_ERROR("Editor") << "SELFTEST: после перечитывания раскладки пропали действия";
+                ok = false;
+            } else if (mapping.Find("Jump")->Bindings().size() != 2) {
+                LOG_ERROR("Editor") << "SELFTEST: у действия Jump потерялась привязка";
+                ok = false;
+            } else if (mapping.Find("Move")->Type() != in::ActionType::Vector) {
+                LOG_ERROR("Editor") << "SELFTEST: вид действия Move не пережил сохранение";
+                ok = false;
+            } else if (!mapping.FindContext("Inventory") ||
+                       mapping.FindContext("Inventory")->Priority() != 50) {
+                LOG_ERROR("Editor") << "SELFTEST: контекст Inventory не пережил сохранение";
+                ok = false;
+            }
+        }
+
+        // И главное: раскладка ДОХОДИТ до работающего ввода Play. Проверяем
+        // тем же вызовом, которым это делает StartPlay.
+        if (ok) {
+            m_playInput.ClearActions();
+            ApplyProjectInputMapping();
+            if (!m_playInput.Has("Jump") || !m_playInput.Has("Equip")) {
+                LOG_ERROR("Editor") << "SELFTEST: раскладка проекта не доехала до ввода Play";
+                ok = false;
+            } else {
+                // Ввод отвечает на неё по-настоящему: жмём пробел событием и
+                // ждём, что сработает действие, а не клавиша.
+                m_playInput.Push(in::InputEvent::KeyDown(in::Key::Space));
+                m_playInput.Update(1.0f / 60.0f);
+                if (!m_playInput.WasPressed("Jump")) {
+                    LOG_ERROR("Editor") << "SELFTEST: действие Jump не сработало от назначенной клавиши";
+                    ok = false;
+                }
+                m_playInput.ReleaseAll();
+            }
+            m_playInput.ClearActions();
+        }
+
+        // За собой убираем: раскладка селф-теста не должна остаться в проекте.
+        mapping.ClearActions();
+        std::error_code inputEc;
+        fs::remove(ProjectInputFile(), inputEc);
+        m_projectInputDirty = false;
     }
 
     return ok;

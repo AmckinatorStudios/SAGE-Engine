@@ -112,11 +112,12 @@ void EditorLayer::StartPlay() {
     // поэтому карту действий начинаем с ЧИСТОГО ЛИСТА на каждый Play (иначе
     // раскладка прошлого запуска пережила бы правку скрипта), а привязываем ДО
     // AttachScript — OnStart скриптов зовёт BindAction прямо оттуда.
-    m_playInput = InputSystem();
-    m_playInput.Attach(sage::Application::Get().GetWindow());
-    m_playRawInput = std::make_unique<EditorPlayInput>(m_playInput, sage::Application::Get().GetWindow());
-    m_playScripts->BindInput(m_playInput.Actions());
-    m_playScripts->BindRawInput(*m_playRawInput);
+    m_playInput.ClearActions();
+    m_playScripts->BindInput(m_playInput);
+    // Действия уходят и на шину сцены («input.Jump») — ровно как в собранной
+    // игре: превью обязано вести себя так же, иначе редактор перестаёт
+    // заменять сборку.
+    m_playInput.SetEventBus(&m_scene->Events);
 
     // Звук — как в собранной игре. Устройство может отсутствовать (headless CI):
     // AudioEngine в этом случае работает вхолостую, но вызовы из Lua валидны.
@@ -160,6 +161,14 @@ void EditorLayer::StartPlay() {
             LOG_ERROR("Editor") << "Play: script attach failed: " << ex.what();
         }
     }
+
+    // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.
+    // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а файл проекта
+    // — это «как решил автор игры», и он обязан их замещать, а не дописываться
+    // к ним. Иначе переназначенное в редакторе действие продолжало бы работать
+    // и на старой клавише — то есть панель «Управление» выглядела бы
+    // сломанной. Тот же порядок у собранной игры (см. PlayerLayer).
+    ApplyProjectInputMapping();
 
     // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
     // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).
@@ -220,7 +229,7 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
 
     // Захваченный курсор — режим обзора: экранной точки у мыши нет, и
     // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
-    const bool captured = m_playRawInput && m_playRawInput->MouseCaptured();
+    const bool captured = m_playCursor.CursorCaptured();
     const bool usable = m_game.MouseInside() && !captured;
     const bool down = usable && m_game.MouseDown();
 
@@ -247,7 +256,16 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
         input.Tab = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
     }
 
-    sage::ui::UpdateSceneUI(*m_scene, input, m_renderer.GameWidth(), m_renderer.GameHeight());
+    const sage::ui::UIInputResult result =
+        sage::ui::UpdateSceneUI(*m_scene, input, m_renderer.GameWidth(), m_renderer.GameHeight());
+
+    // Что интерфейс сцены съел, того игра не получит (§29 ТЗ) — так же, как в
+    // собранной игре. Иначе щелчок по кнопке меню в панели Game одновременно
+    // стрелял бы, и превью вело бы себя не как игра.
+    uint8_t eaten = sage::input::DeviceNone;
+    if (result.WantsMouse) eaten |= sage::input::DeviceMouse;
+    if (result.WantsKeyboard) eaten |= sage::input::DeviceKeyboard;
+    if (eaten != sage::input::DeviceNone) m_playInput.BlockDevices(eaten);
 }
 
 void EditorLayer::StopPlay() {
@@ -271,8 +289,16 @@ void EditorLayer::StopPlay() {
     m_playPhysics.reset();
     // Курсор возвращается человеку РАНЬШЕ всего остального: игра могла его
     // захватить, и без этого Stop оставил бы редактор без мыши.
-    if (m_playRawInput) m_playRawInput->ReleaseCapture();
-    m_playRawInput.reset();
+    // Шина событий принадлежит СЦЕНЕ, а сцену сейчас заменит восстановленный
+    // снапшот — указатель на неё обязан уйти раньше. Иначе он переживёт свой
+    // объект, и первое же действие ввода после Stop обратится к освобождённой
+    // памяти. Заметить это по симптому почти невозможно: падает не там, где
+    // ошибка, и не всегда.
+    m_playInput.SetEventBus(nullptr);
+    m_playCursor.ReleaseCapture();
+    // Действия прошлого запуска отпускаются здесь же: иначе клавиша, зажатая в
+    // момент Stop, осталась бы нажатой до следующего Play.
+    m_playInput.ReleaseAll();
     RestoreSceneFromString(m_playSnapshot);
     m_playSnapshot.clear();
     m_playState = EditorPlayState::Editing;

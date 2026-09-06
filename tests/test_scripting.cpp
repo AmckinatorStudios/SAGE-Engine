@@ -362,11 +362,11 @@ TEST(Scripting_launch_args_reach_lua) {
     CHECK_TRUE((bool)se.Lua().script("return LaunchArg('nope') == nil"));
 }
 
-// Раскладка объявляется из игры: BindAction заводит действие в карте ввода
+// Раскладка объявляется из игры: BindAction заводит действие в системе ввода
 // движка, и дальше его читает тот же IsActionDown, что и код на C++.
 TEST(Scripting_bind_action_declares_actions) {
     ScriptEngine se;
-    InputMap input;
+    sage::input::InputSystem input;
     se.BindInput(input);
 
     int bound = se.Lua().script("return BindAction('Jump', 'SPACE')");
@@ -376,10 +376,11 @@ TEST(Scripting_bind_action_declares_actions) {
     // Список клавиш: несколько привязок на одно действие (WASD и стрелки).
     int many = se.Lua().script("return BindAction('Move Forward', {'W', 'UP'})");
     CHECK_EQ(many, 2);
-    CHECK_EQ((int)input.Get("Move Forward").Bindings().size(), 2);
+    CHECK_EQ((int)input.Find("Move Forward")->Bindings().size(), 2);
 
-    // Кнопки мыши — такие же привязки, как клавиши.
+    // Кнопки мыши и геймпада — такие же привязки, как клавиши.
     CHECK_EQ((int)se.Lua().script("return BindAction('Break', 'MOUSE_LEFT')"), 1);
+    CHECK_EQ((int)se.Lua().script("return BindAction('Use', 'PAD_A')"), 1);
 
     // Нераспознанное имя не роняет игру: действие заводится, привязок 0.
     int bad = se.Lua().script("return BindAction('Nonsense', 'NOT_A_KEY')");
@@ -390,26 +391,87 @@ TEST(Scripting_bind_action_declares_actions) {
     CHECK_FALSE((bool)se.Lua().script("return HasAction('Never Declared')"));
 }
 
+// Оси и векторы из Lua: ради них ввод и разделён на виды — «Движение»
+// одинаково приходит и с клавиш, и со стика, а скрипт спрашивает одно и то же.
+TEST(Scripting_can_declare_axis_and_vector_actions) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    CHECK_EQ((int)se.Lua().script("return BindAxis('Throttle', 'W', 'S')"), 2);
+    se.Lua().script("BindVector('Move', 'W', 'S', 'A', 'D')");
+
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::W));
+    input.Update(1.0f / 60.0f);
+
+    CHECK_NEAR((float)se.Lua().script("return GetAxis('Throttle')"), 1.0f, 1e-4);
+    CHECK_NEAR((float)se.Lua().script("return GetVector('Move').y"), 1.0f, 1e-4);
+}
+
+// Переназначение управления из игры: экран настроек живёт в игре, а не в
+// движке, и без этой функции написать его на скриптах нельзя.
+TEST(Scripting_can_rebind_an_action) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+    se.Lua().script("BindAction('Jump', 'SPACE')");
+
+    CHECK_TRUE((bool)se.Lua().script("return RebindAction('Jump', 'Q')"));
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Space));
+    input.Update(1.0f / 60.0f);
+    CHECK_FALSE(input.WasPressed("Jump"));
+
+    input.Push(sage::input::InputEvent::KeyUp(sage::input::Key::Space));
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Q));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE(input.WasPressed("Jump"));
+}
+
+// Контексты из Lua: одна клавиша значит разное в игре и в инвентаре.
+TEST(Scripting_can_switch_input_contexts) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    se.Lua().script("CreateInputContext('Inventory', 50)");
+    se.Lua().script("BindActionIn('Inventory', 'Equip', 'E')");
+    se.Lua().script("SetInputContextEnabled('Inventory', false)");
+    CHECK_FALSE((bool)se.Lua().script("return IsInputContextEnabled('Inventory')"));
+
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::E));
+    input.Update(1.0f / 60.0f);
+    CHECK_FALSE(input.WasPressed("Equip"));
+
+    se.Lua().script("SetInputContextEnabled('Inventory', true)");
+    input.Push(sage::input::InputEvent::KeyUp(sage::input::Key::E));
+    input.Update(1.0f / 60.0f);
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::E));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE(input.WasPressed("Equip"));
+}
+
 // «Сырой» ввод: скрипт получает смещение мыши и управляет захватом курсора —
 // без этого вид от первого лица из Lua написать нельзя.
 TEST(Scripting_raw_input_gives_mouse_and_capture) {
-    struct FakeInput : sage::RawInputSource {
-        glm::vec2 Delta{3.0f, -2.0f};
+    struct FakeCursor : sage::input::CursorControl {
         bool Captured = false;
-        glm::vec2 MouseDelta() const override { return Delta; }
-        glm::vec2 MousePosition() const override { return {100.0f, 50.0f}; }
-        int ScrollDelta() const override { return -1; }
-        void SetMouseCaptured(bool c) override { Captured = c; }
-        bool MouseCaptured() const override { return Captured; }
+        void SetCursorCaptured(bool c) override { Captured = c; }
+        bool CursorCaptured() const override { return Captured; }
     } fake;
 
     ScriptEngine se;
-    se.BindRawInput(fake);
+    sage::input::InputSystem input;
+    input.SetCursorControl(&fake);
+    se.BindInput(input);
+
+    input.Push(sage::input::InputEvent::MouseMove({100.0f, 50.0f}, {3.0f, -2.0f}));
+    input.Push(sage::input::InputEvent::Wheeled(-1.0f));
+    input.Update(1.0f / 60.0f);
 
     CHECK_NEAR((float)se.Lua().script("return GetMouseDelta().x"), 3.0f, 1e-4);
     CHECK_NEAR((float)se.Lua().script("return GetMouseDelta().y"), -2.0f, 1e-4);
     CHECK_NEAR((float)se.Lua().script("return GetMousePosition().x"), 100.0f, 1e-4);
-    CHECK_EQ((int)se.Lua().script("return GetScrollDelta()"), -1);
+    CHECK_NEAR((float)se.Lua().script("return GetScrollDelta()"), -1.0f, 1e-4);
 
     CHECK_FALSE((bool)se.Lua().script("return IsMouseCaptured()"));
     se.Lua().script("SetMouseCaptured(true)");
@@ -417,14 +479,14 @@ TEST(Scripting_raw_input_gives_mouse_and_capture) {
     CHECK_TRUE((bool)se.Lua().script("return IsMouseCaptured()"));
 }
 
-// Без привязок «сырого» ввода GetMouseDelta обязан внятно ругаться, а не
-// молча отдавать нули: молчаливый ноль выглядит как «мышь не двигают».
+// Без привязанного ввода GetMouseDelta обязан внятно ругаться, а не молча
+// отдавать нули: молчаливый ноль выглядит как «мышь не двигают».
 TEST(Scripting_raw_input_without_binding_errors) {
     ScriptEngine se;
     auto result = se.Lua().safe_script("return GetMouseDelta()", sol::script_pass_on_error);
     CHECK_FALSE(result.valid());
     // Скролл — исключение: он опционален, и ноль для него честный ответ.
-    CHECK_EQ((int)se.Lua().script("return GetScrollDelta()"), 0);
+    CHECK_NEAR((float)se.Lua().script("return GetScrollDelta()"), 0.0f, 1e-4);
 }
 
 // --- Пространства имён Lua-API ------------------------------------------------
