@@ -53,7 +53,7 @@ void CenterY(const Row& row) { ImGui::SetCursorPosY(row.Top); }
 
 // Кнопка окна: подсвечена, когда окно открыто; щелчок переключает. Одним
 // помощником, потому что кнопок десяток и разъехаться в поведении они не должны.
-void PanelToggle(EditorHost& host, EditorPanel panel, const char* icon, const char* label,
+void PanelToggle(EditorHost& host, EditorPanelId panel, const char* icon, const char* label,
                  const char* tip, bool withLabel, const Row& row) {
     bool& open = host.PanelVisible(panel);
     CenterY(row);
@@ -104,12 +104,12 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     ImGui::SetCursorPosX(ui.PaddingPanel);
 
     // --- Панели: из чего собрано рабочее место -------------------------------
-    PanelToggle(host, EditorPanel::Hierarchy, "layout", T("Hierarchy"), T("Hierarchy"), false, row);
-    PanelToggle(host, EditorPanel::Inspector, "file", T("Inspector"), T("Inspector"), false, row);
-    PanelToggle(host, EditorPanel::Assets, "folder", T("Assets"), T("Assets"), false, row);
-    PanelToggle(host, EditorPanel::Console, "debug", T("Console"), T("Console"), false, row);
-    PanelToggle(host, EditorPanel::Code, "code", T("Code"), T("Code"), false, row);
-    PanelToggle(host, EditorPanel::Profiler, "info", T("Profiler"), T("Profiler"), false, row);
+    PanelToggle(host, EditorPanelId::Hierarchy, "layout", T("Hierarchy"), T("Hierarchy"), false, row);
+    PanelToggle(host, EditorPanelId::Inspector, "file", T("Inspector"), T("Inspector"), false, row);
+    PanelToggle(host, EditorPanelId::Assets, "folder", T("Assets"), T("Assets"), false, row);
+    PanelToggle(host, EditorPanelId::Console, "debug", T("Console"), T("Console"), false, row);
+    PanelToggle(host, EditorPanelId::Code, "code", T("Code"), T("Code"), false, row);
+    PanelToggle(host, EditorPanelId::Profiler, "info", T("Profiler"), T("Profiler"), false, row);
 
     divider();
 
@@ -119,19 +119,19 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     // ответа: часть была в окне Lighting, часть в Game Settings, часть на
     // объекте. Соседство кнопок — самая дешёвая форма ответа: среда сцены
     // здесь, цена кадра там, источники — объекты в иерархии.
-    PanelToggle(host, EditorPanel::Environment, "sun", T("Environment"),
+    PanelToggle(host, EditorPanelId::Environment, "sun", T("Environment"),
                 T("Environment: sky, air, ambient light (saved with the scene)"), labels, row);
-    PanelToggle(host, EditorPanel::Settings, "gear", T("Game Settings"),
+    PanelToggle(host, EditorPanelId::Settings, "gear", T("Game Settings"),
                 T("Game Settings: quality and cost of the frame (saved with the project)"),
                 labels, row);
-    PanelToggle(host, EditorPanel::UIDocument, "rect", T("Interface"),
+    PanelToggle(host, EditorPanelId::UIDocument, "rect", T("Interface"),
                 T("Interface editor: the game frame at its own resolution"), labels, row);
 
     divider();
 
     // --- Виды: чем смотреть на сцену ------------------------------------------
-    PanelToggle(host, EditorPanel::Viewport, "cube", T("Viewport"), T("Viewport"), labels, row);
-    PanelToggle(host, EditorPanel::Game, "camera", T("Game"),
+    PanelToggle(host, EditorPanelId::Viewport, "cube", T("Viewport"), T("Viewport"), labels, row);
+    PanelToggle(host, EditorPanelId::Game, "camera", T("Game"),
                 T("Game (view from the game camera)"), labels, row);
 
     // --- По центру: Play / Pause / Stop --------------------------------------

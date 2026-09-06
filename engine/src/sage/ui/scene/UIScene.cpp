@@ -47,6 +47,22 @@ UIRuntime& UIDocuments::GetOrLoad(const std::string& path) {
     return *m_docs.back()->Runtime;
 }
 
+UIRuntime& UIDocuments::Adopt(const std::string& path) {
+    for (auto& e : m_docs)
+        if (e->Path == path) return *e->Runtime;
+
+    if (!m_resources) m_resources = std::make_unique<UIEngineResources>();
+    auto entry = std::make_unique<Entry>();
+    entry->Path = path;
+    entry->Runtime = std::make_unique<UIRuntime>();
+    m_resources->Install(entry->Runtime->Context());
+    entry->Runtime->Context().Localize = m_localize;
+    // Loaded остаётся false: документа на диске нет, и врать про это нельзя —
+    // по этому признаку решают, перечитывать ли его.
+    m_docs.push_back(std::move(entry));
+    return *m_docs.back()->Runtime;
+}
+
 UIRuntime* UIDocuments::Find(const std::string& path) {
     for (auto& e : m_docs)
         if (e->Path == path) return e->Runtime.get();

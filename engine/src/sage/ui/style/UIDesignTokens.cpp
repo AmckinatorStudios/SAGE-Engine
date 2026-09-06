@@ -63,4 +63,66 @@ UIDesignTokens UIDesignTokens::Default() {
     return t;
 }
 
+UIDesignTokens UIDesignTokens::Editor() {
+    UIDesignTokens t;
+
+    // ЦВЕТ. Три ступени тёмного вместо одной: фон приложения (то, что видно
+    // между панелями), поверхность панели и приподнятое внутри неё — полосы
+    // вкладок, тулбары, шапки. Без трёх ступеней панели сливаются в одно
+    // пятно, и границы приходится рисовать линиями погуще, то есть шумом.
+    t.SetColor("Color.Background", UIColorFromHex("#0D0E10"));
+    t.SetColor("Color.Surface", UIColorFromHex("#17181B"));
+    t.SetColor("Color.SurfaceRaised", UIColorFromHex("#1F2125"));
+    // Разделитель тонкий и тёмный: его задача — обозначить край, а не быть
+    // заметным. Заметные линии складываются в решётку, и взгляд цепляется за
+    // неё вместо содержимого.
+    t.SetColor("Color.Border", UIColorFromHex("#2A2C31"));
+    t.SetColor("Color.Text", UIColorFromHex("#E6E8EB"));
+    t.SetColor("Color.TextMuted", UIColorFromHex("#8A8E96"));
+    // Золото SAGE. Только для того, что человек выбрал или вот-вот нажмёт:
+    // активная вкладка, выделенная строка, Play, наведение. Жёлтого на экране
+    // должно быть мало — иначе он перестаёт значить «сюда смотри».
+    t.SetColor("Color.Accent", UIColorFromHex("#F0B429"));
+    t.SetColor("Color.AccentText", UIColorFromHex("#141005"));
+    // Подложка выделенной строки: акцент, приглушённый до фона. Заливать
+    // строку самим акцентом нельзя — жёлтая полоса перекрикивает текст на ней.
+    t.SetColor("Color.AccentMuted", UIColorFromHex("#2C2620"));
+    t.SetColor("Color.Positive", UIColorFromHex("#4FB865"));
+    t.SetColor("Color.Warning", UIColorFromHex("#D9A032"));
+    t.SetColor("Color.Danger", UIColorFromHex("#D95757"));
+    t.SetColor("Color.Shadow", UIColor(0.0f, 0.0f, 0.0f, 0.55f));
+
+    // ПЛОТНОСТЬ. Отступы примерно вдвое меньше игровых: на экране редактора
+    // одновременно полторы сотни строк, и каждый лишний пиксель отступа — это
+    // минус строка в списке.
+    t.SetNumber("Spacing.Tiny", 2.0f);
+    t.SetNumber("Spacing.Small", 4.0f);
+    t.SetNumber("Spacing.Medium", 8.0f);
+    t.SetNumber("Spacing.Large", 12.0f);
+    t.SetNumber("Spacing.Huge", 20.0f);
+
+    // Скругления почти прямые. Круглые углы съедают место на стыках и делают
+    // плотную сетку панелей рыхлой.
+    t.SetNumber("Radius.Small", 3.0f);
+    t.SetNumber("Radius.Medium", 4.0f);
+    t.SetNumber("Radius.Large", 6.0f);
+    t.SetNumber("Radius.Pill", 999.0f);
+
+    t.SetNumber("FontSize.Caption", 12.0f);
+    t.SetNumber("FontSize.Body", 13.0f);
+    t.SetNumber("FontSize.Title", 15.0f);
+    t.SetNumber("FontSize.Display", 20.0f);
+
+    // Высота строки списка и высота поля — одно число на весь редактор. Пока
+    // каждый список выбирал её сам, соседние панели стояли «в разлинейку».
+    t.SetNumber("Size.Row", 22.0f);
+    t.SetNumber("Size.Control", 22.0f);
+    t.SetNumber("Size.IconButton", 26.0f);
+    t.SetNumber("Size.Toolbar", 34.0f);
+    t.SetNumber("Size.MenuBar", 28.0f);
+    t.SetNumber("Size.StatusBar", 24.0f);
+    t.SetNumber("Size.Tab", 26.0f);
+    return t;
+}
+
 } // namespace sage::ui

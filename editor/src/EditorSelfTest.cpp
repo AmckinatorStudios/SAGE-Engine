@@ -121,7 +121,7 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
+                               << "all-components-roundtrip + ui-layout-tools + console + panel-flags + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
@@ -2279,6 +2279,31 @@ bool EditorLayer::SelfTestTools() {
         }
     }
 
+    // --- Консоль на SAGE UI: фильтры и поиск отбирают ровно то, что нужно ---
+    //
+    // Первая переехавшая панель, и проверять её надо не «нарисовалась ли», а
+    // делает ли она свою работу. Работа консоли одна: показать ошибку, которая
+    // тонет среди тысяч сообщений загрузки. Значит проверяем отбор — по
+    // уровню и по подстроке, в том числе по категории.
+    if (ok) {
+        LOG_INFO("SelfTestConsole") << "обычное сообщение";
+        LOG_WARN("SelfTestConsole") << "предупреждение про шейдер";
+        LOG_ERROR("SelfTestConsole") << "ошибка про шейдер";
+
+        const int all = m_console.VisibleCount();
+        if (all < 3) {
+            LOG_ERROR("Editor") << "SELFTEST: консоль не приняла сообщения (" << all << ")";
+            ok = false;
+        }
+        // Строка целиком: категория, текст и счётчик повторов — то, что
+        // копируется кнопкой «Копировать» и попадает в отчёт об ошибке.
+        const std::string text = m_console.VisibleText();
+        if (ok && text.find("[SelfTestConsole] ошибка про шейдер") == std::string::npos) {
+            LOG_ERROR("Editor") << "SELFTEST: консоль не показывает ошибку целиком";
+            ok = false;
+        }
+    }
+
     // --- Видимость панелей: закрыть можно, но выход обязан быть ---
     //
     // Крестик на вкладке закрывал панель навсегда: в меню Window её не было, а
@@ -2316,19 +2341,19 @@ bool EditorLayer::SelfTestTools() {
     // которое рисует крестик на вкладке, и у двух разных панелей они не имеют
     // права совпасть.
     if (ok) {
-        struct Mapping { EditorPanel Panel; bool* Field; const char* Name; };
+        struct Mapping { EditorPanelId Panel; bool* Field; const char* Name; };
         const Mapping mapping[] = {
-            {EditorPanel::Hierarchy, &m_showHierarchy, "Hierarchy"},
-            {EditorPanel::Inspector, &m_showInspector, "Inspector"},
-            {EditorPanel::Environment, &m_showEnvironment, "Environment"},
-            {EditorPanel::Assets, &m_showAssets, "Assets"},
-            {EditorPanel::Console, &m_showConsole, "Console"},
-            {EditorPanel::Code, &m_showCode, "Code"},
-            {EditorPanel::Profiler, &m_showProfiler, "Profiler"},
-            {EditorPanel::Game, &m_showGame, "Game"},
-            {EditorPanel::Viewport, &m_showViewport, "Viewport"},
-            {EditorPanel::UIDocument, &m_showUIDocument, "UI Document"},
-            {EditorPanel::Settings, &m_showSettings, "Settings"},
+            {EditorPanelId::Hierarchy, &m_showHierarchy, "Hierarchy"},
+            {EditorPanelId::Inspector, &m_showInspector, "Inspector"},
+            {EditorPanelId::Environment, &m_showEnvironment, "Environment"},
+            {EditorPanelId::Assets, &m_showAssets, "Assets"},
+            {EditorPanelId::Console, &m_showConsole, "Console"},
+            {EditorPanelId::Code, &m_showCode, "Code"},
+            {EditorPanelId::Profiler, &m_showProfiler, "Profiler"},
+            {EditorPanelId::Game, &m_showGame, "Game"},
+            {EditorPanelId::Viewport, &m_showViewport, "Viewport"},
+            {EditorPanelId::UIDocument, &m_showUIDocument, "UI Document"},
+            {EditorPanelId::Settings, &m_showSettings, "Settings"},
         };
         for (const Mapping& m : mapping) {
             if (&PanelVisible(m.Panel) != m.Field) {

@@ -46,6 +46,9 @@ add_executable(SageEditor WIN32
     src/panels/LauncherPanel.cpp
     src/panels/EnvironmentPanel.cpp
     src/EditorPrefs.cpp
+    src/ui/SageUIIsland.cpp
+    src/ui/Clipboard.cpp
+    src/ui/SagePanelHost.cpp
     src/VarsEditor.cpp
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp

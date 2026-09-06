@@ -56,6 +56,7 @@ namespace sage { class Application; }
 #include "panels/SettingsPanel.h"
 #include "panels/TemplatesPanel.h"
 #include "ui/CommandPalette.h"
+#include "ui/SagePanelHost.h"
 #include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
 
@@ -215,19 +216,19 @@ public:
 
     // --- EditorHost: панель Game ---
     void ShowSettingsWindow() override { m_showSettings = true; }
-    bool& PanelVisible(EditorPanel panel) override {
+    bool& PanelVisible(EditorPanelId panel) override {
         switch (panel) {
-            case EditorPanel::Hierarchy:   return m_showHierarchy;
-            case EditorPanel::Inspector:   return m_showInspector;
-            case EditorPanel::Environment: return m_showEnvironment;
-            case EditorPanel::Assets:      return m_showAssets;
-            case EditorPanel::Console:     return m_showConsole;
-            case EditorPanel::Code:        return m_showCode;
-            case EditorPanel::Profiler:    return m_showProfiler;
-            case EditorPanel::Game:        return m_showGame;
-            case EditorPanel::Viewport:    return m_showViewport;
-            case EditorPanel::UIDocument:  return m_showUIDocument;
-            case EditorPanel::Settings:    return m_showSettings;
+            case EditorPanelId::Hierarchy:   return m_showHierarchy;
+            case EditorPanelId::Inspector:   return m_showInspector;
+            case EditorPanelId::Environment: return m_showEnvironment;
+            case EditorPanelId::Assets:      return m_showAssets;
+            case EditorPanelId::Console:     return m_showConsole;
+            case EditorPanelId::Code:        return m_showCode;
+            case EditorPanelId::Profiler:    return m_showProfiler;
+            case EditorPanelId::Game:        return m_showGame;
+            case EditorPanelId::Viewport:    return m_showViewport;
+            case EditorPanelId::UIDocument:  return m_showUIDocument;
+            case EditorPanelId::Settings:    return m_showSettings;
             default:                       return m_showViewport;
         }
     }
@@ -392,6 +393,13 @@ private:
 
     // --- панели (архитектура v3: каждая — независимый класс) ---
     ConsolePanel m_console;
+    // Посредник между оболочкой на ImGui и панелями на SAGE UI. Исчезнет
+    // вместе с последним вызовом ImGui (см. ui/SagePanelHost.h).
+    SagePanelHost m_sagePanels;
+    // Не флаг, а счётчик кадров. Раскладка доков восстанавливается из ini не в
+    // первом кадре, и одноразовый запрос фокуса теряется: вкладка встаёт
+    // вперёд, а через кадр её задвигает восстановленная раскладка.
+    int m_consoleFocusFrames = 0;
     ProfilerPanel m_profiler;
     ConfirmDialog m_confirm;
     CodeEditor m_code;

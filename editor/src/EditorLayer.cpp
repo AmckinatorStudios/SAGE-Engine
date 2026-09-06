@@ -125,20 +125,20 @@ void EditorLayer::RegisterCommands() {
 
     // Панели — по одной команде на панель: «где включается консоль» перестаёт
     // быть поиском по меню.
-    struct PanelCmd { const char* Id; const char* Title; EditorPanel Panel; const char* Icon; };
+    struct PanelCmd { const char* Id; const char* Title; EditorPanelId Panel; const char* Icon; };
     static const PanelCmd kPanels[] = {
-        {"panel.hierarchy", "Hierarchy", EditorPanel::Hierarchy, "scene"},
-        {"panel.inspector", "Inspector", EditorPanel::Inspector, "cube"},
-        {"panel.viewport", "Viewport", EditorPanel::Viewport, "camera"},
-        {"panel.game", "Game", EditorPanel::Game, "play"},
-        {"panel.assets", "Assets", EditorPanel::Assets, "folder"},
-        {"panel.console", "Console", EditorPanel::Console, "code"},
-        {"panel.environment", "Environment", EditorPanel::Environment, "sun"},
-        {"panel.code", "Code", EditorPanel::Code, "script"},
-        {"panel.profiler", "Profiler", EditorPanel::Profiler, "grid"},
+        {"panel.hierarchy", "Hierarchy", EditorPanelId::Hierarchy, "scene"},
+        {"panel.inspector", "Inspector", EditorPanelId::Inspector, "cube"},
+        {"panel.viewport", "Viewport", EditorPanelId::Viewport, "camera"},
+        {"panel.game", "Game", EditorPanelId::Game, "play"},
+        {"panel.assets", "Assets", EditorPanelId::Assets, "folder"},
+        {"panel.console", "Console", EditorPanelId::Console, "code"},
+        {"panel.environment", "Environment", EditorPanelId::Environment, "sun"},
+        {"panel.code", "Code", EditorPanelId::Code, "script"},
+        {"panel.profiler", "Profiler", EditorPanelId::Profiler, "grid"},
     };
     for (const PanelCmd& p : kPanels) {
-        const EditorPanel panel = p.Panel;
+        const EditorPanelId panel = p.Panel;
         m_commands.Add({p.Id, T(p.Title), window, "", p.Icon, {},
                         [this, panel] { PanelVisible(panel) = !PanelVisible(panel); }});
     }
@@ -435,7 +435,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
-            "SAGE_EDITOR_PALETTE",
+            "SAGE_EDITOR_PALETTE",      "SAGE_EDITOR_SHOW_CONSOLE",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -453,6 +453,13 @@ void EditorLayer::OnAttach() {
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_showSettings = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_showProfiler = true; }
+    // Консоль стоит вкладкой рядом с ассетами, и по умолчанию её не видно.
+    // Для скриншот-проверки её надо вывести вперёд — панель за чужой вкладкой
+    // ничем не отличается от невидимой.
+    if (std::getenv("SAGE_EDITOR_SHOW_CONSOLE")) {
+        m_showConsole = true;
+        m_consoleFocusFrames = 30;
+    }
     if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_headlessProject = true; m_showIconSheet = true; }
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
         m_headlessProject = true;
@@ -1012,7 +1019,18 @@ void EditorLayer::OnRender() {
     // Пока он подавался раньше (внутри окна-хоста), вкладка «Код» вставала
     // первой, и раскладка читалась как «Код | Viewport | Game».
     if (m_showCode) m_code.Draw(&m_showCode);
-    if (m_showConsole) m_console.Draw(&m_showConsole);
+    // Первая панель на SAGE UI. Показывается через посредника, пока оболочка
+    // редактора ещё на ImGui; сама панель про ImGui не знает.
+    const float uiDt = app.DeltaTime();
+    m_sagePanels.BeginFrame();
+    if (m_consoleFocusFrames > 0) {
+        --m_consoleFocusFrames;
+        m_sagePanels.RequestFocus(m_console);
+    }
+    if (m_showConsole)
+        m_sagePanels.Draw(m_console, T("Console" "###Console"), &m_showConsole, uiDt);
+    else
+        m_sagePanels.SyncHidden(m_console, uiDt);
     if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
     m_plugins.ImGuiAll();
 

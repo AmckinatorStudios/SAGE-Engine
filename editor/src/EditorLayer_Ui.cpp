@@ -624,21 +624,21 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // и у кнопок верхней панели. Два списка полей рядом однажды
             // разъедутся: кнопка будет открывать одно окно, а галка меню —
             // отмечать другое.
-            ImGui::MenuItem(T("Hierarchy"), nullptr, &PanelVisible(EditorPanel::Hierarchy));
-            ImGui::MenuItem(T("Inspector"), nullptr, &PanelVisible(EditorPanel::Inspector));
-            ImGui::MenuItem(T("Viewport"), nullptr, &PanelVisible(EditorPanel::Viewport));
-            ImGui::MenuItem(T("Game"), nullptr, &PanelVisible(EditorPanel::Game));
-            ImGui::MenuItem(T("Assets"), nullptr, &PanelVisible(EditorPanel::Assets));
-            ImGui::MenuItem(T("Console"), nullptr, &PanelVisible(EditorPanel::Console));
+            ImGui::MenuItem(T("Hierarchy"), nullptr, &PanelVisible(EditorPanelId::Hierarchy));
+            ImGui::MenuItem(T("Inspector"), nullptr, &PanelVisible(EditorPanelId::Inspector));
+            ImGui::MenuItem(T("Viewport"), nullptr, &PanelVisible(EditorPanelId::Viewport));
+            ImGui::MenuItem(T("Game"), nullptr, &PanelVisible(EditorPanelId::Game));
+            ImGui::MenuItem(T("Assets"), nullptr, &PanelVisible(EditorPanelId::Assets));
+            ImGui::MenuItem(T("Console"), nullptr, &PanelVisible(EditorPanelId::Console));
             // «Освещение» стало «Средой»: в окне остались небо, воздух и
             // окружающий свет, а сами источники света — на объектах сцены.
-            ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
-            ImGui::MenuItem(T("UI Document"), nullptr, &PanelVisible(EditorPanel::UIDocument));
-            ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanel::Code));
-            ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
+            ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanelId::Environment));
+            ImGui::MenuItem(T("UI Document"), nullptr, &PanelVisible(EditorPanelId::UIDocument));
+            ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanelId::Code));
+            ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanelId::Profiler));
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
-            ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanel::Settings));
+            ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanelId::Settings));
             // Шаблоны — рядом с настройками игры и языком, потому что это
             // настройка ОКРУЖЕНИЯ, а не текущей сцены: что установлено у меня
             // на машине и откуда это брать.
@@ -739,7 +739,14 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     m_templatesPanel.Draw(*this, m_showTemplates);
-    m_profiler.Draw(&m_showProfiler);
+    // Вторая панель на SAGE UI. Профилирование включается по видимости панели,
+    // а не по факту отрисовки: закрытая панель обязана его ВЫКЛЮЧИТЬ, иначе за
+    // метки времени платят те, кто на них не смотрит.
+    m_profiler.SetShown(m_showProfiler);
+    if (m_showProfiler) {
+        m_sagePanels.Draw(m_profiler, T("Profiler" "###Profiler"), &m_showProfiler,
+                          sage::Application::Get().DeltaTime());
+    }
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
     DrawAboutWindow();

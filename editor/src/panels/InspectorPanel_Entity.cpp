@@ -1053,7 +1053,7 @@ void InspectorPanel::DrawUIDocument(EditorHost& host, GameObject obj) {
     if (ImGui::Button(T("Edit document"))) {
         // Открыть тот самый файл, а не «редактор вообще»: кнопка, открывающая
         // пустой редактор, требует найти документ второй раз руками.
-        host.PanelVisible(EditorPanel::UIDocument) = true;
+        host.PanelVisible(EditorPanelId::UIDocument) = true;
         host.ShowAssetInPanel(c->Path);
     }
     ImGui::SameLine();

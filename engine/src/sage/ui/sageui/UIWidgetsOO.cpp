@@ -197,17 +197,18 @@ void Checkbox::OnAttach() {
     SetStyle("Checkbox");
 
     if (!m_text.empty()) {
-        Label* caption = Ctx().Create<Label>(m_text);
-        Add(caption);
+        // Подпись — ОБЫЧНЫЙ ребёнок раскладки, с отступом слева под квадратик.
+        //
+        // Не «вне раскладки, сдвинутый на 28 пикселей»: у такой галки ширина
+        // содержимого равна нулю, и в ряду они все встают в одну точку друг на
+        // друга. Квадратик при этом рисуется компонентом по прямоугольнику
+        // САМОГО узла и отступа не замечает — то есть остаётся слева.
+        Horizontal(0.0f)->Padding(UIEdges(26.0f, 0.0f, 6.0f, 0.0f));
+        UILayout& l = Layout();
+        l.Cross = UIAlign::Center;
+        l.FitWidth = true;
+        Label* caption = Ctx().CreateIn<Label>(this, m_text);
         caption->SetName("Caption");
-        // Подпись стоит ПОСЛЕ квадратика и не участвует в его размере: квадрат
-        // рисуется по меньшей стороне узла, и растянутая подпись сделала бы его
-        // высотой во всю строку.
-        UITransform& ct = caption->Ensure<UITransform>();
-        ct.IgnoreLayout = true;
-        ct.AnchorMin = ct.AnchorMax = {0.0f, 0.5f};
-        ct.Pivot = {0.0f, 0.5f};
-        ct.Offset = {28.0f, 0.0f};
         caption->SetAlign(UITextAlign::Left, UITextVAlign::Center);
     }
 }
@@ -382,11 +383,23 @@ void ScrollView::OnAttach() {
     m_content->SetName("Content");
     // Лента растянута по ширине и растёт по содержимому вниз: иначе прокручивать
     // нечего — содержимое всегда ровно по окну.
-    UITransform& t = m_content->Ensure<UITransform>();
-    t.WidthMode = UISizeMode::Stretch;
-    t.HeightMode = UISizeMode::Content;
+    //
+    // ЧЕРЕЗ SetStretch, а не через один WidthMode. Растяжение считается ОТ
+    // AnchorMin ДО AnchorMax, и у узла с точечными якорями (по умолчанию они
+    // совпадают) эта ширина равна нулю. Окно прокрутки раскладки не имеет, рект
+    // ленте никто не назначит — и лента молча схлопывается в ноль вместе со
+    // всеми строками. Выглядит это как «список пуст», хотя в нём всё есть.
+    m_content->SetStretch(true, false);
+    m_content->Ensure<UITransform>().HeightMode = UISizeMode::Content;
     m_content->Vertical(4.0f);
-    m_content->Layout().FitHeight = true;
+    UILayout& cl = m_content->Layout();
+    cl.FitHeight = true;
+    // Строки ленты занимают ВСЮ её ширину. Без этого UISizeMode::Stretch у
+    // строки не применяется (поперечное растяжение включается выравниванием
+    // контейнера), строка получает нулевую ширину и не рисуется вовсе — список
+    // выглядит пустым, хотя в нём есть всё.
+    cl.Cross = UIAlign::Stretch;
+    cl.Padding = UIEdges::Uniform(0.0f);
 }
 
 ScrollView* ScrollView::SetHorizontal(bool on) {

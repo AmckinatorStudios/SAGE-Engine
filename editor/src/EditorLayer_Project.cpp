@@ -111,18 +111,21 @@ void AttachDemoDocument(Scene& scene, const Project& project, const std::string&
     // «документ не прочитан» на ровном месте: у нового проекта его и не могло
     // быть. Уже существующий чужой документ по этому пути не трогаем — шаблон
     // не имеет права затирать чужую работу.
-    if (!fs::exists(path)) {
-        sage::ui::UIRuntime built;
-        sage::ui::UIBuildDemo(demo, built.Doc(), built.Theme());
-        if (project.Loaded()) sage::ui::UISaveDocument(built.Doc(), path, &built.Theme());
-    }
-    sage::ui::UIRuntime& rt = sage::ui::UIDocuments::Instance().GetOrLoad(path);
-    if (!sage::ui::UIDocuments::Instance().Loaded(path)) {
-        // Проекта нет (Новая сцена до его создания) — файла на диске тоже, а
-        // показать экран надо: собираем прямо в открытый рантайм.
+    if (fs::exists(path)) {
+        // Документ уже лежит на диске — читаем его и не трогаем: шаблон не
+        // имеет права затирать чужую работу.
+        sage::ui::UIDocuments::Instance().GetOrLoad(path);
+    } else {
+        // Файла нет и быть не могло: экран собирается кодом. Заводим документ
+        // в памяти и кладём на диск, если есть куда. Через Adopt, а не
+        // GetOrLoad: последний честно напишет в лог «документ не прочитан», и
+        // человек, создавший новый проект, увидит в консоли пугающую строку
+        // про файл, которого и не должно было быть.
+        sage::ui::UIRuntime& rt = sage::ui::UIDocuments::Instance().Adopt(path);
         rt.Doc().Clear();
         sage::ui::UIBuildDemo(demo, rt.Doc(), rt.Theme());
         rt.Build();
+        if (project.Loaded()) sage::ui::UISaveDocument(rt.Doc(), path, &rt.Theme());
     }
 
     GameObject obj = scene.CreateObject(objectName);

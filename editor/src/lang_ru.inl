@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1127.
+// Язык: Русский. Строк: 1124.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -360,8 +360,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Очистить"},
     {"Clear bake",
      "Стереть запечённое"},
-    {"Clear the console",
-     "Очистить консоль"},
     {"Click — show in Assets",
      "Клик — показать в Assets"},
     {"Clicks outside the mask do not reach the subtree",
@@ -436,8 +434,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Копировать путь"},
     {"Copy report",
      "Копировать отчёт"},
-    {"Copy the visible lines to the clipboard",
-     "Скопировать видимые строки в буфер обмена"},
     {"Corner radius",
      "Скругление углов"},
     {"Could not copy the project file: ",
@@ -2186,8 +2182,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ноль — без предела"},
     {"Zero means unlimited",
      "Ноль — без ограничения"},
-    {"[%s] %s  (x%d)",
-     "[%s] %s  (x%d)"},
     {"always",
      "всегда"},
     {"and are edited right here.",
