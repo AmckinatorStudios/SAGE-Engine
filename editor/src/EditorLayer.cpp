@@ -850,6 +850,14 @@ void EditorLayer::OnUpdate(float dt) {
 
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
+    // Кадр ввода открывается ВСЕГДА, а не только в Play. Причина не в красоте:
+    // мост шлёт события окна в очередь непрерывно, пока редактор открыт, и
+    // очередь, которую никто не разбирает, растёт без предела — час правки
+    // сцены это десятки тысяч движений мыши в памяти. Заодно это даёт панели
+    // «Управление» живые события: назначить клавишу можно только поймав её.
+    m_playInputBridge.PollGamepads();
+    m_playInput.BeginFrame();
+
     if (m_playState == EditorPlayState::Playing) {
         // Ввод игре — только пока в фокусе панель Game (см. EditorPlayInput).
         // В остальное время всё отпускается: клавиши уходят редактору, а игра
@@ -857,11 +865,9 @@ void EditorLayer::OnUpdate(float dt) {
         // годится — они застыли бы нажатыми.
         m_playCursor.SetGameFocused(m_game.Focused());
         m_playCursor.SyncCapture();
-        m_playInputBridge.PollGamepads();
         if (m_game.Focused()) {
             // Тот же порядок, что в собранной игре: устройства -> интерфейс
             // сцены -> действия (см. InputSystem::BeginFrame).
-            m_playInput.BeginFrame();
             UpdatePlayUiInput(dt);
             m_playInput.UpdateActions(dt);
 

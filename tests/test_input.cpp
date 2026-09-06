@@ -441,6 +441,27 @@ TEST(Input_blocking_a_device_lasts_exactly_one_frame) {
     CHECK_TRUE(in.IsDown("Fire"));
 }
 
+// Хозяин системы перестал открывать кадр (в редакторе закрыли панель Game,
+// окно свернули на час) — очередь не должна съедать память молча. Движения
+// мыши идут сотнями в секунду, и без предела это утечка, которую замечают
+// только по диспетчеру задач.
+TEST(Input_event_queue_does_not_grow_without_bound) {
+    InputSystem in;
+    in.Register("Fire").Bind("MOUSE_LEFT");
+
+    for (size_t i = 0; i < InputSystem::kMaxPendingEvents * 3; ++i)
+        in.Push(InputEvent::MouseMove({(float)i, 0.0f}, {1.0f, 0.0f}));
+
+    // Кадр открылся — разобралось не больше предела, и система жива.
+    in.Update(kFrame);
+    CHECK_TRUE(in.FrameEvents().size() <= InputSystem::kMaxPendingEvents);
+
+    // И самое свежее уцелело: сохраняются последние события, а не первые.
+    in.Push(InputEvent::MouseDown(MouseButton::Left));
+    in.Update(kFrame);
+    CHECK_TRUE(in.WasPressed("Fire"));
+}
+
 // ===========================================================================
 //  ПЕРЕНАЗНАЧЕНИЕ
 // ===========================================================================

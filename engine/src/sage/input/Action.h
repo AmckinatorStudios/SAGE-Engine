@@ -118,7 +118,28 @@ public:
                        const std::string& left, const std::string& right);
 
     const std::vector<Binding>& Bindings() const { return m_bindings; }
+    // Изменяемый список — редактору раскладки: у привязки правят вклад (+1/−1)
+    // и половину вектора, а снять и добавить заново значило бы терять её место
+    // в списке на каждое движение ползунка.
+    std::vector<Binding>& MutableBindings() { return m_bindings; }
     void ClearBindings() { m_bindings.clear(); }
+    // Убрать привязку по номеру. По номеру, а не по значению: в списке законно
+    // лежат две одинаковые по источнику привязки с разным вкладом.
+    bool RemoveBindingAt(int index) {
+        if (index < 0 || index >= (int)m_bindings.size()) return false;
+        m_bindings.erase(m_bindings.begin() + index);
+        return true;
+    }
+
+    // Сменить вид действия. Законная операция при авторстве раскладки: начали
+    // с кнопки, поняли, что нужна ось. Значение при этом сбрасывается — иначе
+    // ставшее векторным действие первый кадр отдавало бы старое число.
+    void SetType(ActionType type) {
+        if (m_type == type) return;
+        m_type = type;
+        m_value = glm::vec2(0.0f);
+        m_smoothed = glm::vec2(0.0f);
+    }
     // Переназначение (§20): все прежние привязки заменяются одной новой.
     // Именно этого ждёт экран настроек — «теперь прыжок на Q», а не «прыжок
     // ещё и на Q».

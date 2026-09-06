@@ -52,6 +52,7 @@ add_executable(SageEditor WIN32
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
     src/panels/SettingsPanel.cpp
+    src/panels/InputPanel.cpp
     src/panels/TemplatesPanel.cpp
     src/panels/DialogsPanel.cpp
     src/panels/ProfilerPanel.cpp

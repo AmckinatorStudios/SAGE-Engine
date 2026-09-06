@@ -60,7 +60,21 @@ InputSystem::~InputSystem() = default;
 
 // --- События снаружи --------------------------------------------------------
 
-void InputSystem::Push(const InputEvent& event) { m_pending.push_back(event); }
+void InputSystem::Push(const InputEvent& event) {
+    if (m_pending.size() >= kMaxPendingEvents) {
+        // Роняем САМОЕ СТАРОЕ, а не новое: если кадр когда-нибудь откроется,
+        // человеку важно то, что он сделал только что, а не движение мыши
+        // получасовой давности.
+        if (!m_overflowReported) {
+            m_overflowReported = true;
+            LOG_ERROR("Input") << "Очередь событий ввода переполнена (" << kMaxPendingEvents
+                               << ") — хозяин системы не открывает кадр (InputSystem::BeginFrame). "
+                               << "Старые события отбрасываются";
+        }
+        m_pending.erase(m_pending.begin());
+    }
+    m_pending.push_back(event);
+}
 
 // --- Контексты --------------------------------------------------------------
 
@@ -266,6 +280,7 @@ void InputSystem::DrainEvents() {
 void InputSystem::BeginFrame() {
     m_devices.BeginFrame();
     DrainEvents();
+    m_overflowReported = false; // кадр открыли — про прошлое переполнение забыли
 }
 
 void InputSystem::UpdateActions(float dt) {

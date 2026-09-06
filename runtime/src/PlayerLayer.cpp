@@ -425,6 +425,21 @@ void PlayerLayer::BuildSceneRuntime() {
         }
     }
 
+    // Раскладка управления проекта — ПОСЛЕ скриптов, и порядок здесь значащий.
+    // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а input.sageinput
+    // — это «как решил автор игры» в редакторе, и он обязан их замещать, а не
+    // дописываться к ним: иначе переназначенное действие продолжало бы работать
+    // и на старой клавише. Ровно тот же порядок в Play-режиме редактора, чтобы
+    // превью игралось тем же управлением, что игра.
+    //
+    // Через VFS, а не std::ifstream: в собранной игре проект лежит внутри
+    // game.sagepak, и обычное чтение файла нашло бы там пустоту — раскладка
+    // молча пропала бы ровно при сборке, то есть там, где это заметят последним.
+    if (std::string mapping; sage::assets::vfs::ReadText("input.sageinput", mapping)) {
+        if (m_input.LoadMappingFromString(mapping))
+            LOG_INFO("Player") << "Раскладка управления проекта применена";
+    }
+
     // Физика: строим мир по сущностям с RigidBodyComponent (бэкенд по умолчанию —
     // Jolt, если собран, иначе встроенный движок). Игра всегда «в Play».
     m_physics = std::make_unique<PhysicsScene>(
@@ -477,6 +492,9 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     m_systems.Clear();
     m_physics.reset();
     m_scripts.reset();   // вместе с ним уходит всё состояние скриптов уровня
+    // Шина событий принадлежит сцене — снимаем ссылку ДО того, как старая
+    // сцена уйдёт из-под ног. BuildSceneRuntime ниже поставит новую.
+    m_input.SetEventBus(nullptr);
     m_scene = std::move(loaded);
     m_scenePath = path;
     m_sceneTime = 0.0f;

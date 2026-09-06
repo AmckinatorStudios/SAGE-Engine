@@ -674,6 +674,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
             ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanel::Settings));
+            // Управление — рядом с настройками игры: это тоже содержимое
+            // проекта, которое уезжает в собранную игру, а не настройка
+            // редактора.
+            ImGui::MenuItem(T("Controls..."), nullptr, &PanelVisible(EditorPanel::Input));
             // Шаблоны — рядом с настройками игры и языком, потому что это
             // настройка ОКРУЖЕНИЯ, а не текущей сцены: что установлено у меня
             // на машине и откуда это брать.
@@ -773,6 +777,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawCrashReport();
     DrawRecoveryPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
+    m_inputPanel.Draw(*this, m_showInput);
     m_templatesPanel.Draw(*this, m_showTemplates);
     m_profiler.Draw(&m_showProfiler);
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);

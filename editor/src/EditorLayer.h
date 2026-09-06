@@ -55,6 +55,7 @@ namespace sage { class Application; }
 #include "panels/UIEditorPanel.h"
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
+#include "panels/InputPanel.h"
 #include "panels/TemplatesPanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
@@ -218,6 +219,21 @@ public:
 
     // --- EditorHost: панель Game ---
     void ShowSettingsWindow() override { m_showSettings = true; }
+
+    // --- EditorHost: раскладка управления ---
+    sage::input::InputSystem& ProjectInput() override { return m_projectInput; }
+    bool SaveProjectInput() override;
+    bool ReloadProjectInput() override;
+    // Где лежит раскладка открытого проекта (пусто, если проект не открыт).
+    std::filesystem::path ProjectInputFile() const;
+    // Переносит раскладку проекта в работающий ввод Play (зовётся из StartPlay
+    // ПОСЛЕ того, как скрипты объявили свои умолчания).
+    void ApplyProjectInputMapping();
+    bool ProjectInputDirty() const override { return m_projectInputDirty; }
+    void SetProjectInputDirty(bool dirty) override { m_projectInputDirty = dirty; }
+    const std::vector<sage::input::InputEvent>& FrameInputEvents() const override {
+        return m_playInput.FrameEvents();
+    }
     bool& PanelVisible(EditorPanel panel) override {
         switch (panel) {
             case EditorPanel::Hierarchy:   return m_showHierarchy;
@@ -231,6 +247,7 @@ public:
             case EditorPanel::Viewport:    return m_showViewport;
             case EditorPanel::UIEditor:    return m_showUIEditor;
             case EditorPanel::Settings:    return m_showSettings;
+            case EditorPanel::Input:       return m_showInput;
             default:                       return m_showViewport;
         }
     }
@@ -356,6 +373,14 @@ private:
     // мост означал бы два комплекта событий на одно нажатие.
     sage::input::GlfwBridge m_playInputBridge;
     EditorPlayInput m_playCursor;   // захват курсора по фокусу панели Game
+
+    // Раскладка управления ПРОЕКТА — документ, а не работающий ввод: кадры
+    // ей никто не считает. Живёт в <проект>/input.sageinput, правится панелью
+    // «Управление» и применяется к m_playInput при старте Play — ровно так же,
+    // как её применяет собранная игра. Иначе превью игралось бы не тем
+    // управлением, что игра, и разницу находили бы уже после сборки.
+    sage::input::InputSystem m_projectInput;
+    bool m_projectInputDirty = false;
     // Звук Play-режима. Без него PlaySound из Lua падал бы в редакторе и
     // работал в собранной игре — превью обязано звучать так же, как игра.
     std::unique_ptr<AudioEngine> m_playAudio;
@@ -433,6 +458,7 @@ private:
     UIEditorPanel m_uiEditor;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
+    InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)
     TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов
     bool m_showTemplates = false;
 
@@ -461,6 +487,7 @@ private:
     // Переносит m_settings в глобальный EngineConfig, если они разошлись.
     void ApplyEngineSettings();
     bool m_showSettings = false;
+    bool m_showInput = false;
     bool m_showAbout = false; // Help > About SAGE (версии подсистем)
 
     // --- плагины редактора (v1, см. PluginAPI.h/PluginManager.h) ---

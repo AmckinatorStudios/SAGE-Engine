@@ -9,6 +9,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/render/Camera.h"
 #include "sage/core/Config.h"
+#include "sage/input/InputSystem.h"
 
 class Project;
 
@@ -57,6 +58,7 @@ enum class EditorPanel {
     Viewport,
     UIEditor,      // редактор интерфейса (холст игрового кадра + элементы)
     Settings,      // окно настроек движка (качество и цена кадра)
+    Input,         // раскладка управления проекта (действия и привязки)
     Count
 };
 
@@ -116,6 +118,34 @@ public:
     // Гибкая конфигурация игры (EngineConfig) — редактируется панелью Settings,
     // сохраняется в <проект>/sage.cfg, Build Game кладёт её в собранную игру.
     virtual sage::EngineConfig& Settings() = 0;
+
+    // --- Раскладка управления проекта -------------------------------------
+    //
+    // ДОКУМЕНТ, а не работающий ввод: здесь объявлены действия игры и их
+    // привязки, но кадры этой системе никто не считает — её содержимое
+    // сохраняется в <проект>/input.sageinput и применяется к настоящему вводу
+    // при запуске игры (в Play-режиме и в собранной игре одинаково).
+    //
+    // Отдельно от EngineConfig намеренно: качество картинки настраивает тот,
+    // кто играет, а раскладку — тот, кто делает игру. Одно живёт в sage.cfg и
+    // правится игроком, другое принадлежит проекту.
+    virtual sage::input::InputSystem& ProjectInput() = 0;
+    // Записать раскладку в <проект>/input.sageinput. false — проект не открыт
+    // или файл не записался.
+    virtual bool SaveProjectInput() = 0;
+    // Перечитать раскладку с диска, потеряв несохранённые правки.
+    virtual bool ReloadProjectInput() = 0;
+    // Есть ли несохранённые правки раскладки — панель показывает это звёздочкой
+    // и не даёт уйти молча.
+    virtual bool ProjectInputDirty() const = 0;
+    virtual void SetProjectInputDirty(bool dirty) = 0;
+
+    // События ввода ТЕКУЩЕГО кадра — панели «Управление», чтобы поймать
+    // клавишу, которую человек назначает. Взять их больше неоткуда: назначение
+    // работает только «нажмите то, что хотите», а не выбором из списка в
+    // сто пунктов.
+    virtual const std::vector<sage::input::InputEvent>& FrameInputEvents() const = 0;
+
     // Короткое сообщение в статус-баре (обратная связь панелей/плагинов).
     virtual void SetStatusMessage(const std::string& message) = 0;
 

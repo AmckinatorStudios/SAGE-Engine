@@ -124,6 +124,34 @@ TEST(Systems_registry_is_valid) {
     }
 }
 
+// Реестр — единственный список подсистем движка: он пишется в лог на старте и
+// показывается в редакторе (Help > About). Пока подсистема в нём не названа,
+// её для пользователя движка не существует — а GI, сеть, публичные переменные,
+// база ассетов и пул потоков в списке отсутствовали, хотя у каждой свой
+// каталог, свои тесты и свой раздел в README.
+//
+// Проверка именно списком имён, а не «размер >= N»: подсистему добавляют раз в
+// полгода, и забыть про строку здесь легко именно потому, что без неё всё
+// собирается и работает.
+TEST(Systems_registry_names_every_subsystem_of_the_engine) {
+    static const char* kExpected[] = {
+        "Core", "Jobs", "RHI", "ECS / Scene", "Serialization", "Resources", "Assets",
+        "Rendering", "Shadows", "Post-processing", "Lighting", "GI", "Materials",
+        "Skybox", "Particles", "Animation", "Physics", "Audio", "Vars", "Scripting",
+        "Network", "UI", "Fonts / Text", "Input", "Events", "Config",
+    };
+    const auto& systems = sage::EngineSystems();
+    for (const char* expected : kExpected) {
+        bool found = false;
+        for (const sage::SystemVersion& s : systems)
+            if (std::string(s.Name) == expected) found = true;
+        if (!found) {
+            ::sagetest::ReportFail(__FILE__, __LINE__,
+                                   std::string("подсистемы нет в реестре: ") + expected);
+        }
+    }
+}
+
 // Ввод переписан целиком (устройства -> действия -> события, контексты,
 // геймпад, ремаппинг), прежний InputMap удалён — это смена контракта, а не
 // дополнение, и она обязана быть видна в списке подсистем. Рядом — события:
