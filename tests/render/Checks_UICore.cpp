@@ -463,12 +463,13 @@ void CheckDemoScreens(UIRenderer& renderer) {
     }
 }
 
-// --- Объектный слой: докинг, окна, меню --------------------------------------
+// --- Оболочка редактора на SAGE UI (ТЗ редактора) ----------------------------
 //
-// Собирается ровно так, как будет собран редактор: область докинга с панелями,
-// плавающее окно, открытое меню. Проверяется, что всё это ДОЕЗЖАЕТ ДО ПИКСЕЛЕЙ —
-// модульные тесты знают только про числа раскладки, и «панель посчиталась, но
-// не нарисовалась» они не увидят.
+// Собирается ровно так, как будет собран редактор: полоса меню, тулбар, док с
+// панелями, дерево сцены, инспектор со свойствами, карточки ассетов, строка
+// состояния. Проверяется, что всё это ДОЕЗЖАЕТ ДО ПИКСЕЛЕЙ — модульные тесты
+// знают только про числа раскладки, и «панель посчиталась, но не появилась»
+// они не увидят.
 void CheckSageUI(UIRenderer& renderer) {
     const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
     namespace sui = ui::sui;
@@ -477,99 +478,192 @@ void CheckSageUI(UIRenderer& renderer) {
     gui.InstallEngineResources();
     gui.SetPixelPerfect();
     gui.SetScreen({1280.0f, 720.0f});
+    // Тема ИНСТРУМЕНТА: плотная и холодная. Игровая тема с её воздухом дала бы
+    // вдвое меньше видимых строк в каждом списке.
+    gui.Theme() = ui::UITheme::Editor();
 
-    // Верхняя панель — как в редакторе.
-    sui::Panel* top = gui.CreateIn<sui::Panel>(gui.Content());
-    top->SetName("TopBar");
-    top->SetAnchor({0.0f, 0.0f}, {1.0f, 0.0f})->SetPivot({0.0f, 0.0f});
-    top->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
-    top->SetHeight(34.0f);
-    top->Horizontal(6.0f)->Padding(ui::UIEdges(8.0f, 5.0f, 8.0f, 5.0f));
-    for (const char* name : {"Файл", "Правка", "Объект", "Окно"})
-        gui.CreateIn<sui::Button>(top, std::string(name), std::string())->SetSize({82.0f, 24.0f});
+    sui::EditorShell* shell = gui.CreateIn<sui::EditorShell>(gui.Content());
 
-    // Док на всё остальное.
-    sui::DockSpace* dock = gui.CreateIn<sui::DockSpace>(gui.Content());
-    dock->SetAnchor({0.0f, 0.0f}, {1.0f, 1.0f})->SetPivot({0.0f, 0.0f});
-    dock->Ensure<ui::UITransform>().Margin = ui::UIEdges(0.0f, 34.0f, 0.0f, 0.0f);
-
-    sui::DockPanel* viewport = dock->Add(
-        gui.Create<sui::DockPanel>(std::string("viewport"), std::string("Сцена")));
-    dock->Add(gui.Create<sui::DockPanel>(std::string("game"), std::string("Игра")),
-              sui::DockSide::Center, "viewport");
-    sui::DockPanel* hierarchy = dock->Add(
-        gui.Create<sui::DockPanel>(std::string("hierarchy"), std::string("Иерархия")),
-        sui::DockSide::Left, "viewport");
-    sui::DockPanel* inspector = dock->Add(
-        gui.Create<sui::DockPanel>(std::string("inspector"), std::string("Инспектор")),
-        sui::DockSide::Right, "viewport");
-    dock->Add(gui.Create<sui::DockPanel>(std::string("console"), std::string("Консоль")),
-              sui::DockSide::Bottom, "viewport");
-    dock->Add(gui.Create<sui::DockPanel>(std::string("assets"), std::string("Ассеты")),
-              sui::DockSide::Center, "console");
-
-    // Содержимое: иерархия — список, инспектор — поля.
-    for (const char* name : {"Main Camera", "Sun", "Ground", "Player", "Lamp"}) {
-        sui::Label* row = gui.CreateIn<sui::Label>(hierarchy->Body(), std::string(name));
-        row->SetAlign(ui::UITextAlign::Left, ui::UITextVAlign::Center);
+    // --- Верх ---
+    shell->Menu()->SetBrand("SAGE Editor");
+    for (const char* name : {"File", "Edit", "Create", "Tools", "Help"}) {
+        sui::Popup* menu = shell->Menu()->AddMenu(name);
+        menu->AddItem("Пункт", nullptr);
     }
-    gui.CreateIn<sui::Label>(inspector->Body(), std::string("Transform"))->SetFontSize(15.0f);
-    gui.CreateIn<sui::TextInput>(inspector->Body(), std::string("0.0"), std::string("x"));
-    gui.CreateIn<sui::Slider>(inspector->Body(), 0.65f, 0.0f, 1.0f)
-        ->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
-    gui.CreateIn<sui::Checkbox>(inspector->Body(), std::string("Отбрасывает тень"), true);
-    gui.CreateIn<sui::ProgressBar>(inspector->Body(), 0.4f)
-        ->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
+    sui::SearchBox* search = gui.CreateIn<sui::SearchBox>(shell->Menu()->Right(),
+                                                          std::string("Search (Ctrl+K)"));
+    search->SetWidth(200.0f);
 
-    // Плавающее окно и открытое меню — поверх дока.
-    sui::Window* win = gui.CreateIn<sui::Window>(gui.Layer(sui::UILayer::Overlay),
-                                                 std::string("Профайлер"));
-    win->SetPosition({860.0f, 430.0f})->SetSize({330.0f, 200.0f});
-    gui.CreateIn<sui::Label>(win->Body(), std::string("кадр 4.2 мс"));
-    gui.CreateIn<sui::ProgressBar>(win->Body(), 0.42f)
-        ->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
+    sui::Toolbar* tb = shell->Tools();
+    tb->AddIcon("save", "Новая сцена");
+    tb->AddIcon("bag", "Открыть");
+    tb->AddIcon("check", "Сохранить");
+    tb->AddSeparator();
+    tb->AddIcon("minus", "Отменить");
+    tb->AddIcon("plus", "Повторить");
+    tb->AddSpacer();
+    sui::Button* play = tb->AddButton("Play");
+    play->SetStyle("ButtonPrimary");
+    play->SetWidth(74.0f);
+    tb->AddIcon("pause", "Пауза");
+    tb->AddIcon("cross", "Стоп");
+    tb->AddSpacer();
+    sui::Dropdown* space = gui.CreateIn<sui::Dropdown>(tb, std::vector<std::string>{"Local", "World"}, 0);
+    space->SetWidth(86.0f);
+    tb->AddIcon("gear", "Настройки гизмо");
 
-    sui::Popup* menu = gui.Create<sui::Popup>();
-    menu->AddItem("Создать объект", nullptr);
-    menu->AddItem("Дублировать", nullptr);
-    menu->AddSeparator();
-    menu->AddItem("Удалить", nullptr);
-    menu->OpenAt({150.0f, 120.0f});
+    // --- Панели ---
+    sui::DockPanel* hierarchy = shell->AddPanel(
+        gui.Create<sui::DockPanel>(std::string("hierarchy"), std::string("Hierarchy")));
+    sui::DockPanel* viewport = shell->AddPanel(
+        gui.Create<sui::DockPanel>(std::string("viewport"), std::string("Viewport")),
+        sui::DockSide::Right, "hierarchy");
+    shell->AddPanel(gui.Create<sui::DockPanel>(std::string("game"), std::string("Game")),
+                    sui::DockSide::Center, "viewport");
+    sui::DockPanel* inspector = shell->AddPanel(
+        gui.Create<sui::DockPanel>(std::string("inspector"), std::string("Inspector")),
+        sui::DockSide::Right, "viewport");
+    sui::DockPanel* assets = shell->AddPanel(
+        gui.Create<sui::DockPanel>(std::string("assets"), std::string("Assets")),
+        sui::DockSide::Bottom, "viewport");
+    shell->AddPanel(gui.Create<sui::DockPanel>(std::string("console"), std::string("Console")),
+                    sui::DockSide::Center, "assets");
+    shell->BuildWindowMenu("Window");
+    // Пропорции референса: узкая иерархия слева, инспектор справа, ассеты
+    // снизу примерно на треть.
+    if (ui::sui::DockNode* root = shell->Dock()->Root()) {
+        root->Ratio = 0.19f;
+        if (root->Children.size() > 1 && root->Children[1]->IsSplit()) {
+            ui::sui::DockNode& right = *root->Children[1];
+            right.Ratio = 0.75f;
+            if (right.Children.size() > 0 && right.Children[0]->IsSplit())
+                right.Children[0]->Ratio = 0.66f;
+        }
+    }
+    shell->Dock()->Invalidate();
+    // Активные вкладки — те, что на референсе: Viewport и Assets. Неактивная
+    // панель стоит на стоянке и прямоугольника не имеет, поэтому проверять её
+    // размеры бессмысленно.
+    shell->Dock()->Focus("viewport");
+    shell->Dock()->Focus("assets");
 
-    // Два кадра: дерево дока пересобирается по модели к следующему кадру, и
-    // меню узнаёт свой размер только после первой раскладки.
-    gui.SetScreen({1280.0f, 720.0f});
-    gui.Update(0.016f);
-    gui.Update(0.016f);
+    // --- Содержимое: дерево сцены ---
+    sui::SearchBox* find = gui.CreateIn<sui::SearchBox>(hierarchy->Body(),
+                                                        std::string("Search entity..."));
+    find->SetStretch(true, false);
+    sui::Tree* tree = gui.CreateIn<sui::Tree>(hierarchy->Body());
+    tree->SetStretch(true, true);
+    std::vector<sui::TreeItem> items;
+    auto item = [&](const char* id, const char* text, int depth, bool kids, bool open,
+                    bool sel, const char* icon) {
+        sui::TreeItem it;
+        it.Id = id;
+        it.Text = text;
+        it.Depth = depth;
+        it.HasChildren = kids;
+        it.Expanded = open;
+        it.Selected = sel;
+        it.Icon = icon;
+        items.push_back(it);
+    };
+    item("scene", "Scene", 0, true, true, false, "bag");
+    item("env", "Environment", 1, true, true, false, "sun");
+    item("dl", "Directional Light", 2, false, false, false, "sun");
+    item("sky", "Sky Light", 2, false, false, false, "moon");
+    item("fog", "Fog", 2, false, false, false, "drop");
+    item("ground", "Ground", 1, true, true, false, "bag");
+    item("plane", "Plane", 2, false, false, false, "rect");
+    item("structures", "Structures", 1, true, true, false, "bag");
+    item("cube", "Cube", 2, false, false, true, "rect");
+    item("cyl", "Cylinder", 2, false, false, false, "rect");
+    item("ramp", "Ramp", 2, false, false, false, "rect");
+    item("camera", "Camera", 1, true, true, false, "bag");
+    item("maincam", "Main Camera", 2, false, false, false, "eye");
+    tree->SetItems(items);
+
+    // --- Содержимое: инспектор ---
+    sui::PropertyGrid* grid = gui.CreateIn<sui::PropertyGrid>(inspector->Body());
+    grid->SetStretch(true, true);
+    sui::UIElement* head = grid->AddSection("Cube", true);
+    sui::UIElement* tagRow = grid->AddRow(head, "Tag");
+    gui.CreateIn<sui::Dropdown>(tagRow, std::vector<std::string>{"Untagged"}, 0)
+        ->SetStretch(true, false);
+    sui::UIElement* layerRow = grid->AddRow(head, "Layer");
+    gui.CreateIn<sui::Dropdown>(layerRow, std::vector<std::string>{"Default"}, 0)
+        ->SetStretch(true, false);
+
+    sui::UIElement* xf = grid->AddSection("Transform", true);
+    const char* kAxis[] = {"X", "Y", "Z"};
+    for (const char* row : {"Position", "Rotation", "Scale"}) {
+        sui::UIElement* slot = grid->AddRow(xf, row);
+        for (const char* axis : kAxis) {
+            sui::NumericField* f = gui.CreateIn<sui::NumericField>(slot, 1.0f);
+            f->SetLabel(axis);
+            f->SetStretch(true, false);
+        }
+    }
+    sui::UIElement* mesh = grid->AddSection("Mesh Renderer", true);
+    sui::UIElement* meshRow = grid->AddRow(mesh, "Mesh");
+    gui.CreateIn<sui::Dropdown>(meshRow, std::vector<std::string>{"Cube"}, 0)
+        ->SetStretch(true, false);
+    sui::UIElement* shadow = grid->AddRow(mesh, "Cast Shadows");
+    gui.CreateIn<sui::Checkbox>(shadow, std::string(), true);
+    sui::UIElement* wide = grid->AddWide(mesh);
+    gui.CreateIn<sui::Button>(wide, std::string("+ Add Component"), std::string())
+        ->SetStretch(true, false);
+
+    // --- Содержимое: ассеты ---
+    sui::AssetView* av = gui.CreateIn<sui::AssetView>(assets->Body());
+    av->SetStretch(true, true);
+    std::vector<sui::AssetItem> cards;
+    const char* kNames[] = {"Cube", "Cylinder", "Ramp", "Platform", "Sphere", "Crate", "Barrel"};
+    for (int i = 0; i < 7; ++i) {
+        sui::AssetItem a;
+        a.Id = kNames[i];
+        a.Name = kNames[i];
+        a.Kind = "Static Mesh";
+        a.Icon = "rect";
+        a.Selected = i == 0;
+        cards.push_back(a);
+    }
+    av->SetItems(cards);
+
+    // --- Низ ---
+    shell->Status()->SetStatus("Ready", ui::UIColorFromHex("#4FB865"));
+    shell->Status()->SetField("FPS", "144");
+    shell->Status()->SetField("Mem", "1.26 GB");
+    shell->Status()->SetField("Draw Calls", "215");
+    shell->Status()->SetField("Triangles", "89 442");
+    shell->Status()->SetField("Objects", "128");
+
+    // Три кадра: дерево дока пересобирается по модели к следующему кадру, а
+    // размеры карточек и меню известны только после первой раскладки.
+    for (int i = 0; i < 3; ++i) gui.Update(0.016f);
 
     Framebuffer fbo(1280, 720);
     fbo.Bind();
     sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
-    dev.SetClearColor(0.055f, 0.06f, 0.075f, 1.0f);
+    dev.SetClearColor(0.05f, 0.055f, 0.063f, 1.0f);
     dev.Clear(true, true);
     gui.Render(renderer, &fbo);
     const Image img = Capture(1280, 720);
     dev.BindDefaultFramebuffer();
 
     const double covered = Covered(img, 0, 0, 1280, 720);
-    std::printf("    SageUI: закрашено %.2f, панелей %zu\n", covered, dock->PanelIds().size());
+    std::printf("    SageUI: закрашено %.2f, панелей %zu\n", covered,
+                shell->Dock()->PanelIds().size());
 
-    Check(covered > 0.9, "SageUI: экран редактора нарисован");
+    Check(covered > 0.9, "SageUI: оболочка редактора нарисована");
     // Каждая область получила НЕНУЛЕВЫЕ пиксели: раскладка дока доехала до
     // экрана, а не осталась числами в модели.
     Check(hierarchy->Bounds().w > 40.0f, "SageUI: область иерархии на экране");
     Check(inspector->Bounds().w > 40.0f, "SageUI: область инспектора на экране");
-    // Активная вкладка области «Сцена/Игра» — вторая: проверяем ЕЁ. Неактивная
-    // панель стоит на стоянке и прямоугольника не имеет — это не ошибка, а
-    // ровно то, ради чего вкладки и нужны.
-    Check(dock->Find("game")->Bounds().w > 40.0f, "SageUI: область сцены на экране");
-    (void)viewport;
-    Check(win->Bounds().w > 40.0f, "SageUI: плавающее окно на экране");
-    Check(menu->Bounds().h > 40.0f, "SageUI: меню раскрылось");
-    // Меню лежит В СЛОЕ Popup, то есть поверх дока и поверх окна.
-    const ui::UIResolvedNode* mr = gui.Runtime().Layout().Get(menu->NodeId());
-    const ui::UIResolvedNode* wr = gui.Runtime().Layout().Get(win->NodeId());
-    Check(mr && wr && mr->SortKey > wr->SortKey, "SageUI: меню поверх окна");
+    Check(viewport->Bounds().w > 40.0f, "SageUI: область сцены на экране");
+    Check(assets->Bounds().h > 40.0f, "SageUI: область ассетов на экране");
+    // Пропорции референса: иерархия узкая, вьюпорт — самая широкая область.
+    Check(hierarchy->Bounds().w < viewport->Bounds().w, "SageUI: вьюпорт шире иерархии");
+    Check(shell->Status()->Bounds().h > 10.0f, "SageUI: строка состояния на экране");
+    Check(shell->Menu()->Bounds().h > 10.0f, "SageUI: полоса меню на экране");
 
     if (shots) SavePng(std::string(shots) + "/sageui_editor.png", img);
 }

@@ -331,4 +331,200 @@ UITheme UITheme::Default() {
     return t;
 }
 
+
+UITheme UITheme::Editor() {
+    // Начинаем с игровой: набор стилей у них общий, различаются числа и цвета.
+    // Переписывать сорок стилей заново значило бы, что новый виджет появляется
+    // в одной теме и отсутствует в другой.
+    UITheme t = UITheme::Default();
+    t.Name = "SAGE Editor";
+    t.Tokens = UIDesignTokens::Editor();
+
+    auto color = [](const char* comp, const char* prop, const char* token) {
+        UIStyleValue v;
+        v.Component = comp;
+        v.Property = prop;
+        v.Text = token;
+        v.IsText = true;
+        return v;
+    };
+    auto number = [](const char* comp, const char* prop, float a, float b = 0.0f, float c = 0.0f,
+                     float d = 0.0f) {
+        UIStyleValue v;
+        v.Component = comp;
+        v.Property = prop;
+        v.Numbers = {a, b, c, d};
+        return v;
+    };
+
+    const float r = 3.0f;   // скругление инструмента: почти прямое
+
+    UIStyle& panel = t.Ensure("Panel");
+    panel.Values = {color("fill", "Color", "@Color.Surface"), number("fill", "Radius", r, r, r, r)};
+
+    UIStyle& label = t.Ensure("Label");
+    label.Values = {color("text", "Color", "@Color.Text"), number("text", "Size", 13.0f)};
+
+    UIStyle& caption = t.Ensure("Caption");
+    caption.Parent = "Label";
+    caption.Values = {color("text", "Color", "@Color.TextMuted"), number("text", "Size", 12.0f)};
+
+    UIStyle& brand = t.Ensure("Brand");
+    brand.Parent = "Label";
+    brand.Values = {color("text", "Color", "@Color.Accent"), number("text", "Size", 13.0f)};
+
+    UIStyle& button = t.Ensure("Button");
+    button.Values = {color("fill", "Color", "@Color.SurfaceRaised"),
+                     number("fill", "Radius", r, r, r, r),
+                     color("border", "Color", "@Color.Border"),
+                     number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+    button.States["hover"] = {color("fill", "Color", "@Color.Border")};
+    button.States["pressed"] = {color("fill", "Color", "@Color.Background")};
+    button.States["focused"] = {color("border", "Color", "@Color.Accent")};
+
+    UIStyle& buttonLabel = t.Ensure("ButtonLabel");
+    buttonLabel.Parent = "Label";
+
+    UIStyle& primary = t.Ensure("ButtonPrimary");
+    primary.Parent = "Button";
+    primary.Values = {color("fill", "Color", "@Color.Accent"),
+                      color("text", "Color", "@Color.AccentText")};
+
+    // Полосы оболочки. Меню темнее панели, тулбар — светлее: так верх окна
+    // читается тремя ступенями, а не одной плитой.
+    UIStyle& menuBar = t.Ensure("MenuBar");
+    menuBar.Values = {color("fill", "Color", "@Color.Background"),
+                      number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& menuTitle = t.Ensure("MenuTitle");
+    menuTitle.Parent = "Button";
+    // Заголовок меню без подложки и рамки: их у него столько же, сколько у
+    // строки текста, и появляются они только под курсором.
+    menuTitle.Values = {color("fill", "Color", "#00000000"),
+                        number("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f),
+                        number("fill", "Radius", r, r, r, r)};
+    menuTitle.States["hover"] = {color("fill", "Color", "@Color.SurfaceRaised")};
+
+    UIStyle& toolbar = t.Ensure("Toolbar");
+    toolbar.Values = {color("fill", "Color", "@Color.SurfaceRaised"),
+                      number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& statusBar = t.Ensure("StatusBar");
+    statusBar.Values = {color("fill", "Color", "@Color.Background"),
+                        number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& separator = t.Ensure("Separator");
+    separator.Values = {color("fill", "Color", "@Color.Border"),
+                        number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& iconButton = t.Ensure("IconButton");
+    iconButton.Values = {color("fill", "Color", "#00000000"),
+                         number("fill", "Radius", r, r, r, r),
+                         number("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f)};
+    iconButton.States["hover"] = {color("fill", "Color", "@Color.Border")};
+    iconButton.States["pressed"] = {color("fill", "Color", "@Color.Background")};
+    // Включённый инструмент — приглушённым золотом, а не самим золотом: ряд
+    // ярко-жёлтых кнопок перестаёт показывать, какая из них включена.
+    iconButton.States["selected"] = {color("fill", "Color", "@Color.AccentMuted")};
+
+    UIStyle& input = t.Ensure("InputField");
+    input.Values = {color("fill", "Color", "@Color.Background"),
+                    number("fill", "Radius", r, r, r, r),
+                    color("border", "Color", "@Color.Border"),
+                    number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+    input.States["hover"] = {color("border", "Color", "@Color.TextMuted")};
+    input.States["focused"] = {color("border", "Color", "@Color.Accent")};
+
+    // Строка списка. Без подложки в обычном состоянии: полторы сотни залитых
+    // прямоугольников — это и есть визуальный шум, от которого уходим.
+    UIStyle& row = t.Ensure("Row");
+    row.Values = {color("fill", "Color", "#00000000"),
+                  number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+    row.States["hover"] = {color("fill", "Color", "@Color.SurfaceRaised")};
+    row.States["selected"] = {color("fill", "Color", "@Color.AccentMuted")};
+
+    UIStyle& sectionHead = t.Ensure("SectionHead");
+    sectionHead.Values = {color("fill", "Color", "@Color.SurfaceRaised"),
+                          number("fill", "Radius", r, r, r, r)};
+    sectionHead.States["hover"] = {color("fill", "Color", "@Color.Border")};
+
+    UIStyle& card = t.Ensure("Card");
+    card.Values = {color("fill", "Color", "@Color.SurfaceRaised"),
+                   number("fill", "Radius", r, r, r, r),
+                   color("border", "Color", "@Color.Border"),
+                   number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+    card.States["hover"] = {color("border", "Color", "@Color.TextMuted")};
+    card.States["selected"] = {color("border", "Color", "@Color.Accent")};
+
+    UIStyle& cover = t.Ensure("Cover");
+    cover.Values = {color("fill", "Color", "@Color.Background"),
+                    number("fill", "Radius", r, r, r, r)};
+
+    // Док и вкладки.
+    UIStyle& dockPanel = t.Ensure("DockPanel");
+    dockPanel.Values = {color("fill", "Color", "@Color.Surface"),
+                        number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& tabStrip = t.Ensure("TabStrip");
+    tabStrip.Values = {color("fill", "Color", "@Color.Background"),
+                       number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& tab = t.Ensure("Tab");
+    tab.Parent = "Button";
+    tab.Values = {color("fill", "Color", "#00000000"),
+                  number("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f),
+                  number("fill", "Radius", r, r, 0.0f, 0.0f),
+                  color("text", "Color", "@Color.TextMuted")};
+    tab.States["hover"] = {color("fill", "Color", "@Color.SurfaceRaised")};
+
+    UIStyle& tabActive = t.Ensure("TabActive");
+    tabActive.Parent = "Tab";
+    // Активная вкладка — цвета содержимого под ней: так видно, что она с ним
+    // «одно», а не лежит поверх.
+    tabActive.Values = {color("fill", "Color", "@Color.Surface"),
+                        color("text", "Color", "@Color.Text")};
+
+    UIStyle& splitter = t.Ensure("Splitter");
+    splitter.Values = {color("fill", "Color", "@Color.Background"),
+                       number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+    splitter.States["hover"] = {color("fill", "Color", "@Color.Accent")};
+
+    UIStyle& window = t.Ensure("Window");
+    window.Parent = "Panel";
+    window.Values = {color("fill", "Color", "@Color.Surface"),
+                     number("fill", "Radius", 5.0f, 5.0f, 5.0f, 5.0f),
+                     color("border", "Color", "@Color.Border"),
+                     number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+
+    UIStyle& windowTitle = t.Ensure("WindowTitle");
+    windowTitle.Values = {color("fill", "Color", "@Color.SurfaceRaised"),
+                          number("fill", "Radius", 5.0f, 5.0f, 0.0f, 0.0f)};
+
+    UIStyle& popup = t.Ensure("Popup");
+    popup.Parent = "Panel";
+    popup.Values = {color("fill", "Color", "@Color.SurfaceRaised"),
+                    number("fill", "Radius", r, r, r, r),
+                    color("border", "Color", "@Color.Border"),
+                    number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+
+    UIStyle& menuItem = t.Ensure("MenuItem");
+    menuItem.Parent = "Button";
+    menuItem.Values = {color("fill", "Color", "#00000000"),
+                       number("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f),
+                       number("fill", "Radius", r, r, r, r)};
+    menuItem.States["hover"] = {color("fill", "Color", "@Color.Border")};
+
+    UIStyle& shell = t.Ensure("Shell");
+    shell.Values = {color("fill", "Color", "@Color.Background"),
+                    number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& tooltip = t.Ensure("Tooltip");
+    tooltip.Parent = "Panel";
+    tooltip.Values = {color("fill", "Color", "@Color.Background"),
+                      number("fill", "Radius", r, r, r, r),
+                      color("border", "Color", "@Color.Border"),
+                      number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+    return t;
+}
+
 } // namespace sage::ui

@@ -164,15 +164,18 @@ public:
     UIContext& Ctx() const { return *m_ctx; }
     UIDocument& Doc() const;
 
+    // Пометить документ грязным. Публично, потому что состав дерева меняет не
+    // только сам элемент: список выставляет подсветку своим строкам, док —
+    // порядок своим областям. Прятать это значило бы заставлять каждого
+    // заводить у себя метод-переходник ровно с этим телом.
+    void Dirty(uint32_t flags);
+
     template <class T> T& Ensure() { return Node()->Ensure<T>(); }
     template <class T> T* Get() const { UINode* n = Node(); return n ? n->Get<T>() : nullptr; }
     template <class T> bool Has() const { return Get<T>() != nullptr; }
 
 protected:
     UITransform& Transform();
-    // Пометить документ грязным: слой обязан это делать за наследников, иначе
-    // «поменял и не видно» становится обычным делом.
-    void Dirty(uint32_t flags);
 
 private:
     friend class UIContext;

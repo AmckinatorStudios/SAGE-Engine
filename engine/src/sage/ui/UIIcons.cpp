@@ -96,6 +96,65 @@ void IconCross(const IconPen& p) {
     p.Line(0.20f, 0.20f, 0.80f, 0.80f, 0.14f);
     p.Line(0.80f, 0.20f, 0.20f, 0.80f, 0.14f);
 }
+// --- Значки интерфейса инструмента ------------------------------------------
+//
+// Не «предметы мира», а разметка: стрелка раскрытия, глаз видимости, лупа
+// поиска, прямоугольник объекта. Они принадлежат ДВИЖКУ, а не редактору,
+// потому что их рисует сам набор виджетов (дерево, выпадающий список, поле
+// поиска), и без них он выглядит незаконченным в любом инструменте.
+void IconChevronDown(const IconPen& p) {
+    p.Line(0.22f, 0.38f, 0.50f, 0.66f, 0.13f);
+    p.Line(0.78f, 0.38f, 0.50f, 0.66f, 0.13f);
+}
+void IconChevronRight(const IconPen& p) {
+    p.Line(0.38f, 0.22f, 0.66f, 0.50f, 0.13f);
+    p.Line(0.38f, 0.78f, 0.66f, 0.50f, 0.13f);
+}
+void IconChevronUp(const IconPen& p) {
+    p.Line(0.22f, 0.62f, 0.50f, 0.34f, 0.13f);
+    p.Line(0.78f, 0.62f, 0.50f, 0.34f, 0.13f);
+}
+void IconChevronLeft(const IconPen& p) {
+    p.Line(0.62f, 0.22f, 0.34f, 0.50f, 0.13f);
+    p.Line(0.62f, 0.78f, 0.34f, 0.50f, 0.13f);
+}
+// Глаз: миндалина из двух дуг заменена парой линий и зрачком — на 14 пикселях
+// дуги неразличимы, а два штриха читаются.
+void IconEye(const IconPen& p) {
+    p.Line(0.08f, 0.50f, 0.50f, 0.24f, 0.10f);
+    p.Line(0.50f, 0.24f, 0.92f, 0.50f, 0.10f);
+    p.Line(0.08f, 0.50f, 0.50f, 0.76f, 0.10f);
+    p.Line(0.50f, 0.76f, 0.92f, 0.50f, 0.10f);
+    p.Dot(0.50f, 0.50f, 0.13f);
+}
+void IconEyeOff(const IconPen& p) {
+    p.Line(0.08f, 0.50f, 0.50f, 0.28f, 0.09f);
+    p.Line(0.50f, 0.28f, 0.92f, 0.50f, 0.09f);
+    p.Line(0.08f, 0.50f, 0.50f, 0.72f, 0.09f);
+    p.Line(0.50f, 0.72f, 0.92f, 0.50f, 0.09f);
+    // Перечёркнуто: «скрыто» должно читаться одним движением взгляда.
+    p.Line(0.16f, 0.84f, 0.84f, 0.16f, 0.12f);
+}
+void IconSearch(const IconPen& p) {
+    p.Ring(0.42f, 0.42f, 0.28f, 0.11f);
+    p.Line(0.62f, 0.62f, 0.88f, 0.88f, 0.13f);
+}
+void IconRect(const IconPen& p) { p.Box(0.14f, 0.20f, 0.72f, 0.60f, 0.08f); }
+void IconDots(const IconPen& p) {
+    p.Dot(0.20f, 0.50f, 0.10f);
+    p.Dot(0.50f, 0.50f, 0.10f);
+    p.Dot(0.80f, 0.50f, 0.10f);
+}
+void IconStop(const IconPen& p) { p.Box(0.24f, 0.24f, 0.52f, 0.52f, 0.06f); }
+void IconTrash(const IconPen& p) {
+    p.Box(0.26f, 0.26f, 0.48f, 0.60f, 0.06f);
+    p.Line(0.16f, 0.22f, 0.84f, 0.22f, 0.11f);
+    p.Line(0.40f, 0.12f, 0.60f, 0.12f, 0.11f);
+}
+void IconCopy(const IconPen& p) {
+    p.Box(0.14f, 0.26f, 0.50f, 0.58f, 0.07f);
+    p.Box(0.36f, 0.14f, 0.50f, 0.58f, 0.07f);
+}
 void IconWarn(const IconPen& p) {
     p.Tri(0.5f, 0.10f, 0.94f, 0.86f, 0.06f, 0.86f);
     IconPen inner = p;
@@ -162,6 +221,13 @@ std::unordered_map<std::string, IconDrawFn>& Table() {
         {"play", IconPlay},   {"pause", IconPause}, {"gear", IconGear},
         {"save", IconSave},   {"exit", IconExit},   {"hammer", IconHammer},
         {"lamp", IconLamp},
+        // Разметка интерфейса.
+        {"chevron-down", IconChevronDown},   {"chevron-right", IconChevronRight},
+        {"chevron-up", IconChevronUp},       {"chevron-left", IconChevronLeft},
+        {"eye", IconEye},                    {"eye-off", IconEyeOff},
+        {"search", IconSearch},              {"rect", IconRect},
+        {"dots", IconDots},                  {"stop", IconStop},
+        {"trash", IconTrash},                {"copy", IconCopy},
     };
     return kTable;
 }
