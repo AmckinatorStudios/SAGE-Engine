@@ -1578,3 +1578,77 @@ TEST(UIx_shaped_mask_reaches_the_command) {
     CHECK_TRUE(h.rt.DrawList().Commands()[0].Clip.Shape == nullptr);
     CHECK_TRUE(h.rt.DrawList().Commands()[0].Clip.HasScissor);
 }
+
+// --- Порядок слоёв ----------------------------------------------------------
+//
+// Две ошибки, найденные окнами и стоившие ровно того, ради чего слои и заведены.
+
+TEST(UIx_negative_layer_and_order_go_below_not_above) {
+    Harness h;
+    UINode& back = Node(h.Doc(), "Back");
+    back.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    back.Layer = -100;   // фон
+    UINode& mid = Node(h.Doc(), "Mid");
+    mid.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    UINode& top = Node(h.Doc(), "Top");
+    top.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    top.Layer = 100;
+    h.Step();
+
+    // Смещение в ключе сортировки раньше обрезалось вместе со знаком, и любое
+    // отрицательное значение всплывало НА САМЫЙ ВЕРХ: фон ложился поверх всего,
+    // затемнение под окном — поверх окна. Молча.
+    const UIResolvedNode* rb = h.rt.Layout().Get(back.Id);
+    const UIResolvedNode* rm = h.rt.Layout().Get(mid.Id);
+    const UIResolvedNode* rt = h.rt.Layout().Get(top.Id);
+    CHECK_TRUE(rb && rm && rt);
+    if (!rb || !rm || !rt) return;
+    CHECK_TRUE(rb->SortKey < rm->SortKey);
+    CHECK_TRUE(rm->SortKey < rt->SortKey);
+
+    // То же для порядка среди соседей.
+    UINode& a = Node(h.Doc(), "A");
+    a.Ensure<UITransform>().Size = {10.0f, 10.0f};
+    a.Order = -1;
+    UINode& b = Node(h.Doc(), "B");
+    b.Ensure<UITransform>().Size = {10.0f, 10.0f};
+    b.Order = 0;
+    h.Doc().MarkDirty(UIDirty_All);
+    h.Step();
+    const UIResolvedNode* ra = h.rt.Layout().Get(a.Id);
+    const UIResolvedNode* rbb = h.rt.Layout().Get(b.Id);
+    CHECK_TRUE(ra && rbb);
+    if (ra && rbb) CHECK_TRUE(ra->SortKey < rbb->SortKey);
+}
+
+TEST(UIx_layer_is_inherited_by_the_subtree) {
+    Harness h;
+    UINode& group = Node(h.Doc(), "Modal");
+    group.Ensure<UITransform>().SetStretch(true, true);
+    group.Layer = 400;
+    UINode& child = Node(h.Doc(), "Window", group.Id);
+    child.Ensure<UITransform>().Size = {100.0f, 100.0f};
+
+    UINode& plain = Node(h.Doc(), "Content");
+    plain.Ensure<UITransform>().Size = {100.0f, 100.0f};
+    h.Step();
+
+    // Группа-слой обязана поднимать ВСЁ поддерево. Иначе «положить окно в слой
+    // Modal» не значит ничего, и слой пришлось бы проставлять каждому узлу
+    // руками — то есть однажды забыть.
+    const UIResolvedNode* rc = h.rt.Layout().Get(child.Id);
+    const UIResolvedNode* rp = h.rt.Layout().Get(plain.Id);
+    CHECK_TRUE(rc && rp);
+    if (!rc || !rp) return;
+    CHECK_EQ(rc->Layer, 400);
+    CHECK_TRUE(rc->SortKey > rp->SortKey);
+
+    // Свой слой у ребёнка — СДВИГ относительно группы, а не выход из неё:
+    // «поднять кнопку над своей панелью» не должно выкидывать её из слоя.
+    child.Layer = 1;
+    h.Doc().MarkDirty(UIDirty_All);
+    h.Step();
+    const UIResolvedNode* rc2 = h.rt.Layout().Get(child.Id);
+    CHECK_TRUE(rc2 != nullptr);
+    if (rc2) CHECK_EQ(rc2->Layer, 401);
+}

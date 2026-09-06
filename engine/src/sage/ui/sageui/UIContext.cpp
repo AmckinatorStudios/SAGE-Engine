@@ -2,7 +2,10 @@
 
 #include "sage/core/Log.h"
 #include "sage/ui/render/UIBackend.h"
+#include "sage/ui/input/UIInteraction.h"
 #include "sage/ui/sageui/UIRegistry.h"
+#include "sage/ui/sageui/UIWindow.h"
+#include "sage/ui/visual/UIFill.h"
 
 namespace sage::ui::sui {
 
@@ -144,6 +147,81 @@ void UIContext::SetReference(glm::vec2 reference, float matchWidthOrHeight) {
 
 float UIContext::Scale() const { return m_scale; }
 
+// --- Всплывающие -------------------------------------------------------------
+
+void UIContext::RegisterOpenPopup(Popup* popup) {
+    for (Popup* p : m_popups)
+        if (p == popup) return;
+    m_popups.push_back(popup);
+}
+
+void UIContext::UnregisterOpenPopup(Popup* popup) {
+    for (size_t i = 0; i < m_popups.size(); ++i) {
+        if (m_popups[i] == popup) {
+            m_popups.erase(m_popups.begin() + (long)i);
+            return;
+        }
+    }
+}
+
+void UIContext::CloseAllPopups() {
+    // По копии: Close() снимает себя из списка, и обход по живому вектору
+    // пропустил бы половину меню.
+    std::vector<Popup*> open = m_popups;
+    for (Popup* p : open) p->Close();
+    m_popups.clear();
+}
+
+// --- Подсказки ---------------------------------------------------------------
+
+void UIContext::UpdateTooltip(float dt) {
+    (void)dt;
+    // Узел под курсором объявляет ключ подсказки — больше ему знать ничего не
+    // нужно. Ни таймера, ни позиции, ни узла подсказки: это работа контекста.
+    UINode* node = m_hovered != kUIInvalidNode ? m_rt.Doc().Find(m_hovered) : nullptr;
+    const UIInteraction* ia = node ? node->Get<UIInteraction>() : nullptr;
+    const bool wants = ia && !ia->TooltipKey.empty() && ia->Runtime.HoverTime >= m_tooltipDelay;
+
+    if (!wants) {
+        if (m_tooltip && m_tooltip->IsVisible()) m_tooltip->SetVisible(false);
+        m_tooltipFor = kUIInvalidNode;
+        return;
+    }
+    if (!m_tooltip) {
+        Panel* box = Create<Panel>();
+        Layer(UILayer::Tooltip)->Add(box);
+        box->SetName("TooltipBox");
+        box->SetStyle("Tooltip");
+        box->SetAnchor({0.0f, 0.0f}, {0.0f, 0.0f})->SetPivot({0.0f, 0.0f});
+        box->Vertical(0.0f)->Padding(UIEdges(8.0f, 5.0f, 8.0f, 5.0f));
+        box->FitContent(true, true);
+        // Подсказка НЕ ловит мышь: иначе она перекрывает то, о чём
+        // рассказывает, и наведение начинает мигать.
+        box->Ensure<UIInteraction>().Hit = UIHitShape::None;
+        m_tooltip = box;
+        m_tooltipText = CreateIn<Label>(box, std::string());
+    }
+    if (m_tooltipFor != m_hovered) {
+        m_tooltipFor = m_hovered;
+        const std::string text = m_rt.Context().Localize ? m_rt.Context().Localize(ia->TooltipKey)
+                                                         : ia->TooltipKey;
+        m_tooltipText->SetText(text);
+    }
+    m_tooltip->SetVisible(true);
+
+    // Рядом с узлом, а не под курсором: подсказка, привязанная к курсору,
+    // дрожит вместе с ним и мешает читать саму себя.
+    UIRect host{};
+    m_rt.Layout().RectOf(m_hovered, host);
+    const UIRect tip = m_tooltip->Bounds();
+    const glm::vec2 screen = m_rt.Context().ScreenPixels;
+    glm::vec2 p{host.x, host.y + host.h + 6.0f};
+    if (p.x + tip.w > screen.x) p.x = std::max(0.0f, screen.x - tip.w);
+    if (p.y + tip.h > screen.y) p.y = std::max(0.0f, host.y - tip.h - 6.0f);
+    const float scale = std::max(0.0001f, m_rt.Layout().CanvasScale());
+    m_tooltip->SetPosition(p / scale);
+}
+
 void UIContext::Update(float dt) {
     // Элементы обновляются ДО раскладки и в порядке дерева: список, дорисовавший
     // строки, обязан попасть в ЭТУ раскладку, а не в следующую — иначе новая
@@ -151,11 +229,41 @@ void UIContext::Update(float dt) {
     for (UINodeId id : m_rt.Doc().Ordered()) {
         if (UIElement* e = Find(id)) e->Update(dt);
     }
+    UpdateTooltip(dt);
     m_rt.Update(dt);
 }
 
 UIInputReport UIContext::HandleInput(const UIInputFrame& input) {
-    return m_rt.HandleInput(input);
+    const UIInputReport r = m_rt.HandleInput(input);
+    m_hovered = r.Hovered;
+
+    // Щелчок МИМО открытого меню закрывает его. Проверяется по попаданию: если
+    // курсор не над ни одним из открытых меню, а кнопку нажали — закрываем.
+    // Ведёт это контекст, а не сами меню: два меню, каждое со своим
+    // обработчиком на весь экран, закрывали бы друг друга по кругу.
+    if (!m_popups.empty() && input.Buttons[0]) {
+        bool inside = false;
+        for (Popup* p : m_popups) {
+            if (!p->IsVisible()) continue;
+            UINodeId walk = r.Hovered;
+            while (walk != kUIInvalidNode) {
+                if (walk == p->NodeId()) { inside = true; break; }
+                const UINode* n = m_rt.Doc().Find(walk);
+                walk = n ? n->Parent : kUIInvalidNode;
+            }
+            if (inside) break;
+        }
+        if (!inside) CloseAllPopups();
+    }
+    // Escape закрывает верхнее меню. Обязателен наравне со щелчком: с
+    // клавиатуры меню иначе не закрыть вовсе.
+    for (int key : input.KeysDown) {
+        if (key == 256 /* GLFW_KEY_ESCAPE */ && !m_popups.empty()) {
+            m_popups.back()->Close();
+            break;
+        }
+    }
+    return r;
 }
 
 void UIContext::Render(UIRenderer& renderer, Framebuffer* root) {

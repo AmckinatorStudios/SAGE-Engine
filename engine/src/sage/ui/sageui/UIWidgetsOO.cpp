@@ -3,6 +3,7 @@
 #include "sage/ui/input/UIInteraction.h"
 #include "sage/ui/sageui/UIContext.h"
 #include "sage/ui/sageui/UIRegistry.h"
+#include "sage/ui/sageui/UIWindow.h"
 #include "sage/ui/style/UIStyle.h"
 #include "sage/ui/visual/UIFill.h"
 #include "sage/ui/visual/UIBorder.h"
@@ -400,6 +401,9 @@ void RegisterBuiltinUIElements() {
     r.Register<ProgressBar>("ProgressBar", "Полоса", "Значения", "rect");
     r.Register<TextInput>("TextInput", "Поле ввода", "Управление", "text");
     r.Register<Image>("Image", "Картинка", "Оформление", "texture");
+    r.Register<Window>("Window", "Окно", "Окна", "rect");
+    r.Register<Dialog>("Dialog", "Диалог", "Окна", "rect");
+    r.Register<Popup>("Popup", "Всплывающее", "Окна", "rect");
 }
 
 } // namespace sage::ui::sui

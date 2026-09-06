@@ -165,6 +165,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/sageui/UIContext.cpp
     src/sage/ui/sageui/UIRegistry.cpp
     src/sage/ui/sageui/UIWidgetsOO.cpp
+    src/sage/ui/sageui/UIWindow.cpp
     src/sage/ui/showcase/UIDemos.cpp
     src/sage/ui/UIFramework.cpp
 )

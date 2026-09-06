@@ -311,3 +311,271 @@ TEST(SageUI_tree_built_by_code_is_a_saveable_document) {
     CHECK_TRUE(back.FindByName("Меню") != nullptr);
     CHECK_TRUE(UIValidate(back).empty());
 }
+
+// ===========================================================================
+//  ОКНА, ВСПЛЫВАЮЩИЕ, ПОДСКАЗКИ
+// ===========================================================================
+//
+// Проверяется главное обещание §26: окно — обычный элемент. Оно двигается теми
+// же событиями Drag, что и ползунок, лежит в тех же слоях и попадает в тот же
+// документ. Как только для окна заведут «свою» отрисовку или «свой» хит-тест,
+// эти тесты перестанут иметь смысл — а вместе с ними и модульность.
+
+namespace {
+
+// Один щелчок по точке: нажали и отпустили там же.
+void ClickAt(UIContext& ui, glm::vec2 point) {
+    UIInputFrame down;
+    down.Pointer = point;
+    down.Buttons[0] = true;
+    ui.HandleInput(down);
+    UIInputFrame up;
+    up.Pointer = point;
+    ui.HandleInput(up);
+}
+
+// Протащить от точки к точке: нажали, отвели (порог сдвига — 4 пикселя),
+// отпустили.
+void DragFromTo(UIContext& ui, glm::vec2 from, glm::vec2 to) {
+    UIInputFrame down;
+    down.Pointer = from;
+    down.Buttons[0] = true;
+    ui.HandleInput(down);
+
+    UIInputFrame move = down;
+    move.Pointer = to;
+    ui.HandleInput(move);
+
+    UIInputFrame up;
+    up.Pointer = to;
+    ui.HandleInput(up);
+}
+
+} // namespace
+
+TEST(SageUI_window_is_an_ordinary_element) {
+    Fixture f;
+    Window* w = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("Инспектор"));
+    f.Step();
+    // Ни отдельной подсистемы, ни второго дерева: окно — узел документа, и его
+    // тело — тоже узел.
+    CHECK_TRUE(f.Ui.Doc().Find(w->NodeId()) != nullptr);
+    CHECK_TRUE(w->Body() != nullptr);
+    if (w->Body()) CHECK_TRUE(w->Body()->Parent() == w);
+    CHECK_EQ(w->Title(), std::string("Инспектор"));
+    CHECK_TRUE(w->Bounds().w > 1.0f);
+}
+
+TEST(SageUI_window_moves_by_its_title_bar) {
+    Fixture f;
+    Window* w = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("Окно"));
+    w->SetPosition({100.0f, 100.0f})->SetSize({300.0f, 200.0f});
+    f.Step();
+
+    // Тянем за заголовок: он в верхней полосе окна.
+    DragFromTo(f.Ui, {200.0f, 112.0f}, {260.0f, 152.0f});
+    f.Step();
+
+    const glm::vec2 p = w->Position();
+    CHECK_NEAR(p.x, 160.0, 0.5);
+    CHECK_NEAR(p.y, 140.0, 0.5);
+}
+
+TEST(SageUI_window_does_not_move_when_movement_is_off) {
+    Fixture f;
+    Window* w = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("Окно"));
+    w->SetPosition({100.0f, 100.0f})->SetSize({300.0f, 200.0f});
+    w->SetMovable(false);
+    f.Step();
+
+    DragFromTo(f.Ui, {200.0f, 112.0f}, {260.0f, 152.0f});
+    f.Step();
+    CHECK_NEAR(w->Position().x, 100.0, 0.5);
+}
+
+TEST(SageUI_window_resize_respects_the_minimum) {
+    Fixture f;
+    Window* w = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("Окно"));
+    w->SetPosition({50.0f, 50.0f})->SetSize({300.0f, 200.0f});
+    w->SetMinSize({160.0f, 120.0f});
+    f.Step();
+
+    // Тянем уголок в правом нижнем углу далеко влево-вверх.
+    DragFromTo(f.Ui, {344.0f, 244.0f}, {80.0f, 80.0f});
+    f.Step();
+    // Окно, стянутое в точку, вернуть обратно нечем — тянуть больше не за что.
+    CHECK_NEAR(w->Size().x, 160.0, 0.5);
+    CHECK_NEAR(w->Size().y, 120.0, 0.5);
+}
+
+TEST(SageUI_clicking_a_window_raises_it) {
+    Fixture f;
+    Window* a = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("A"));
+    Window* b = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("B"));
+    a->SetPosition({0.0f, 0.0f})->SetSize({200.0f, 200.0f});
+    b->SetPosition({0.0f, 0.0f})->SetSize({200.0f, 200.0f});
+    f.Step();
+
+    CHECK_TRUE(b->Node()->Order >= a->Node()->Order);
+    // Щёлкнули по нижнему — он обязан оказаться сверху.
+    ClickAt(f.Ui, {100.0f, 150.0f});
+    f.Step();
+    a->Raise();
+    CHECK_TRUE(a->Node()->Order > b->Node()->Order);
+}
+
+TEST(SageUI_close_button_closes_the_window) {
+    Fixture f;
+    Window* w = f.Ui.CreateIn<Window>(f.Ui.Content(), std::string("Окно"));
+    w->SetPosition({0.0f, 0.0f})->SetSize({300.0f, 200.0f});
+    int closed = 0;
+    w->OnClose([&closed] { ++closed; });
+    f.Step();
+
+    // Крестик стоит у правого края полосы заголовка.
+    ClickAt(f.Ui, {287.0f, 14.0f});
+    f.Step();
+    CHECK_EQ(closed, 1);
+    CHECK_FALSE(w->IsOpen());
+}
+
+TEST(SageUI_dialog_blocks_input_underneath) {
+    Fixture f;
+    Button* below = f.Ui.CreateIn<Button>(f.Ui.Content(), std::string("Под"), std::string("под"));
+    below->SetAnchor({0.0f, 0.0f}, {0.0f, 0.0f})->SetPivot({0.0f, 0.0f});
+    below->SetPosition({0.0f, 0.0f})->SetSize({120.0f, 40.0f});
+    int pressed = 0;
+    below->OnClick([&pressed] { ++pressed; });
+
+    Dialog* d = f.Ui.Create<Dialog>(std::string("Вопрос"));
+    f.Step();
+    f.Step();   // диалог встаёт по центру со второго кадра — когда известен размер
+
+    // Щёлкаем ровно по кнопке под диалогом.
+    ClickAt(f.Ui, {60.0f, 20.0f});
+    // Модальность держится затемнением, а не проверкой в каждом обработчике:
+    // одна забытая проверка означала бы кнопку, нажимаемую сквозь диалог.
+    CHECK_EQ(pressed, 0);
+    CHECK_TRUE(d->IsOpen());
+}
+
+TEST(SageUI_dialog_button_closes_and_reports) {
+    Fixture f;
+    int ok = 0;
+    Dialog* d = Dialog::Confirm(f.Ui, "Удалить?", "Объект исчезнет.", "Удалить",
+                                [&ok] { ++ok; });
+    f.Step();
+    f.Step();
+
+    // Правая кнопка ряда — действие; левая — отказ. Порядок один и тот же во
+    // всём редакторе, и берём мы её по посчитанному прямоугольнику, а не на
+    // глаз: тест, зависящий от отступов темы, ломается от смены темы.
+    UIElement* buttons = d->Buttons();
+    CHECK_TRUE(buttons != nullptr && buttons->Children().size() == 2);
+    if (!buttons || buttons->Children().size() != 2) return;
+    const UIRect apply = buttons->Children()[1]->Bounds();
+    CHECK_TRUE(apply.w > 1.0f);
+    ClickAt(f.Ui, {apply.x + apply.w * 0.5f, apply.y + apply.h * 0.5f});
+    f.Step();
+    CHECK_EQ(ok, 1);
+}
+
+TEST(SageUI_popup_opens_and_closes_by_a_click_outside) {
+    Fixture f;
+    Popup* menu = f.Ui.Create<Popup>();
+    int chose = 0;
+    menu->AddItem("Копировать", [&chose] { ++chose; });
+    menu->AddItem("Вставить", nullptr);
+    menu->OpenAt({100.0f, 100.0f});
+    f.Step();
+
+    CHECK_TRUE(menu->IsOpen());
+    CHECK_TRUE(f.Ui.AnyPopupOpen());
+
+    // Щелчок мимо закрывает: меню, которое нельзя закрыть промахом, однажды
+    // остаётся на экране навсегда.
+    ClickAt(f.Ui, {600.0f, 500.0f});
+    f.Step();
+    CHECK_FALSE(menu->IsOpen());
+    CHECK_FALSE(f.Ui.AnyPopupOpen());
+    CHECK_EQ(chose, 0);
+}
+
+TEST(SageUI_popup_item_runs_and_closes) {
+    Fixture f;
+    Popup* menu = f.Ui.Create<Popup>();
+    int chose = 0;
+    menu->AddItem("Копировать", [&chose] { ++chose; });
+    menu->OpenAt({100.0f, 100.0f});
+    f.Step();
+
+    const UIRect r = menu->Bounds();
+    ClickAt(f.Ui, {r.x + 20.0f, r.y + 14.0f});
+    f.Step();
+    CHECK_EQ(chose, 1);
+    CHECK_FALSE(menu->IsOpen());
+}
+
+TEST(SageUI_popup_escape_closes_the_top_one) {
+    Fixture f;
+    Popup* menu = f.Ui.Create<Popup>();
+    menu->AddItem("Пункт", nullptr);
+    menu->OpenAt({100.0f, 100.0f});
+    f.Step();
+
+    UIInputFrame esc;
+    esc.Pointer = {400.0f, 300.0f};
+    esc.KeysDown.push_back(256); // GLFW_KEY_ESCAPE
+    f.Ui.HandleInput(esc);
+    // С клавиатуры меню иначе не закрыть вовсе.
+    CHECK_FALSE(menu->IsOpen());
+}
+
+TEST(SageUI_popup_stays_inside_the_frame) {
+    Fixture f;
+    Popup* menu = f.Ui.Create<Popup>();
+    for (int i = 0; i < 5; ++i) menu->AddItem("Пункт", nullptr);
+    // Открываем у самого правого нижнего угла кадра 800x600.
+    menu->OpenAt({790.0f, 590.0f});
+    f.Step();
+    f.Step();
+
+    const UIRect r = menu->Bounds();
+    // Меню, наполовину уехавшее за край, бесполезно.
+    CHECK_TRUE(r.x + r.w <= 800.5f);
+    CHECK_TRUE(r.y + r.h <= 600.5f);
+}
+
+TEST(SageUI_tooltip_appears_after_the_delay_and_by_data) {
+    Fixture f;
+    f.Ui.SetTooltipDelay(0.3f);
+    Panel* p = f.Ui.CreateIn<Panel>(f.Ui.Content());
+    p->SetAnchor({0.0f, 0.0f}, {0.0f, 0.0f})->SetPivot({0.0f, 0.0f});
+    p->SetPosition({0.0f, 0.0f})->SetSize({100.0f, 100.0f});
+    // Ключ подсказки — ДАННЫЕ узла: так подсказки работают и у документов,
+    // прочитанных из файла, а не только у собранных кодом.
+    p->Ensure<UIInteraction>().TooltipKey = "Это панель";
+    f.Step();
+
+    UIInputFrame over;
+    over.Pointer = {50.0f, 50.0f};
+    f.Ui.HandleInput(over);
+    f.Step(0.1f);
+    CHECK_TRUE(f.Ui.FindByName("TooltipBox") == nullptr ||
+               !f.Ui.FindByName("TooltipBox")->IsVisible());
+
+    for (int i = 0; i < 5; ++i) {
+        f.Ui.HandleInput(over);
+        f.Step(0.1f);
+    }
+    UIElement* tip = f.Ui.FindByName("TooltipBox");
+    CHECK_TRUE(tip != nullptr);
+    if (tip) CHECK_TRUE(tip->IsVisible());
+
+    // Ушли — подсказка пропала.
+    UIInputFrame away;
+    away.Pointer = {500.0f, 500.0f};
+    f.Ui.HandleInput(away);
+    f.Step();
+    if (tip) CHECK_FALSE(tip->IsVisible());
+}

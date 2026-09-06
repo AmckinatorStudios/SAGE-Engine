@@ -428,7 +428,7 @@ glm::vec2 UILayoutSolver::MeasureContainer(UIDocument& doc, UINode& node, const 
 void UILayoutSolver::ArrangeNode(UIDocument& doc, UINode& node, const UIRect& parentRect,
                                  int parentIndex, int maskState, float opacity, bool visible,
                                  bool enabled, const glm::mat3& parentWorld, int depth,
-                                 uint32_t layerBase) {
+                                 int layerBase) {
     if (!node.Enabled) {
         // Выключенный узел не участвует ни в чём — вместе с поддеревом. Именно
         // «не участвует», а не «невидим»: невидимый может ловить мышь, а
@@ -470,7 +470,18 @@ void UILayoutSolver::ArrangeNode(UIDocument& doc, UINode& node, const UIRect& pa
     out.Blend = node.Blend;
     out.Visible = visible && node.Visible && !node.EditorHidden;
     out.Enabled = enabled;
-    out.Layer = node.Layer;
+    // СЛОЙ СКЛАДЫВАЕТСЯ С РОДИТЕЛЬСКИМ, а не берётся сам по себе.
+    //
+    // Раньше layerBase приезжал в эту функцию и никем не использовался: слой
+    // был свойством ОДНОГО узла. Из-за этого группа-слой не работала вовсе —
+    // положить окно в группу «Модальные» не значило ничего, и каждому узлу
+    // поддерева пришлось бы проставлять слой руками (то есть однажды забыть).
+    //
+    // Сложение, а не «своё перекрывает»: узел с нулём наследует слой группы
+    // (обычный случай), а ненулевой сдвигает себя ОТНОСИТЕЛЬНО неё. Так
+    // «поднять кнопку над своей панелью» не выкидывает её из слоя панели.
+    const int effectiveLayer = layerBase + node.Layer;
+    out.Layer = effectiveLayer;
 
     glm::mat3 world = parentWorld;
     const glm::mat3 local = UILocalMatrix(*t, screen);
@@ -482,10 +493,28 @@ void UILayoutSolver::ArrangeNode(UIDocument& doc, UINode& node, const UIRect& pa
     // Ключ сортировки (§26): слой → порядок → место в дереве. Ровно три ступени
     // и ни одной скрытой. Порядковый счётчик обхода даёт «место в дереве»
     // бесплатно и делает порядок устойчивым.
-    const uint64_t layerKey = (uint64_t)(uint32_t)(node.Layer + 0x40000000);
-    const uint64_t orderKey = (uint64_t)(uint32_t)(node.Order + 0x40000000);
-    out.SortKey = (layerKey << 40) | ((orderKey & 0xFFFFF) << 20) | (m_sortCounter++ & 0xFFFFF);
-    (void)layerBase;
+    //
+    // СМЕЩЕНИЕ ОБЯЗАНО ПОМЕЩАТЬСЯ В СВОЁ ПОЛЕ. Раньше к слою и порядку
+    // прибавлялось 0x40000000, а потом результат обрезался до 24 и 20 бит —
+    // то есть смещение обрезалось вместе со знаком. Из-за этого ЛЮБОЕ
+    // отрицательное значение всплывало на самый верх: фон со слоем -100
+    // ложился поверх всего, а затемнение под окном с порядком -1 — поверх
+    // окна. Ломалось это молча и выглядело как «порядок слоёв не работает».
+    //
+    // Поля: слой — биты 40..63 (24), порядок — 20..39 (20), обход — 0..19 (20).
+    constexpr int kLayerBits = 24, kOrderBits = 20, kTreeBits = 20;
+    constexpr int kLayerBias = 1 << (kLayerBits - 1);
+    constexpr int kOrderBias = 1 << (kOrderBits - 1);
+    const auto pack = [](int value, int bias) -> uint64_t {
+        // Зажимаем, а не переполняем: слой в миллион — это опечатка, и она не
+        // должна утаскивать узел на дно вместо верха.
+        const int lo = -bias + 1, hi = bias - 1;
+        return (uint64_t)(std::min(std::max(value, lo), hi) + bias);
+    };
+    const uint64_t layerKey = pack(effectiveLayer, kLayerBias);
+    const uint64_t orderKey = pack(node.Order, kOrderBias);
+    out.SortKey = (layerKey << (kOrderBits + kTreeBits)) | (orderKey << kTreeBits) |
+                  (uint64_t)(m_sortCounter++ & ((1 << kTreeBits) - 1));
 
     // Маска узла добавляется к состоянию предков и действует на ПОТОМКОВ, а не
     // на сам узел: панель с маской рисует свою подложку целиком, а режет
@@ -543,7 +572,7 @@ void UILayoutSolver::ArrangeNode(UIDocument& doc, UINode& node, const UIRect& pa
     }
     const size_t firstChildIndex = m_nodes.size();
     ArrangeChildren(doc, node, childArea, index, childMask, out.Opacity, out.Visible,
-                    enabled && node.Enabled, world, depth + 1);
+                    enabled && node.Enabled, world, depth + 1, effectiveLayer);
 
     if (scroll) {
         // Насколько содержимое БОЛЬШЕ окна — то, до чего можно докрутить.
@@ -562,7 +591,8 @@ void UILayoutSolver::ArrangeNode(UIDocument& doc, UINode& node, const UIRect& pa
 
 void UILayoutSolver::ArrangeChildren(UIDocument& doc, UINode& node, const UIRect& contentRect,
                                      int selfIndex, int maskState, float opacity, bool visible,
-                                     bool enabled, const glm::mat3& world, int depth) {
+                                     bool enabled, const glm::mat3& world, int depth,
+                                     int layerBase) {
     if (node.Children.empty()) return;
 
     // Порядок среди соседей: слой → порядок → место в дереве.
@@ -581,7 +611,7 @@ void UILayoutSolver::ArrangeChildren(UIDocument& doc, UINode& node, const UIRect
             UINode* child = doc.Find(cid);
             if (!child) continue;
             ArrangeNode(doc, *child, contentRect, selfIndex, maskState, opacity, visible, enabled,
-                        world, depth, 0);
+                        world, depth, layerBase);
         }
         return;
     }
@@ -639,7 +669,7 @@ void UILayoutSolver::ArrangeChildren(UIDocument& doc, UINode& node, const UIRect
             m_pendingRect.Rect = UIRect{s.Pos.x, s.Pos.y, s.Size.x, s.Size.y};
         }
         ArrangeNode(doc, *child, contentRect, selfIndex, maskState, opacity, visible, enabled,
-                    world, depth, 0);
+                    world, depth, layerBase);
         m_pendingRect.Valid = false;
     }
 }

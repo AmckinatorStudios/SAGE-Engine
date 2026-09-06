@@ -120,10 +120,10 @@ private:
     void ArrangeNode(UIDocument& doc, UINode& node, const UIRect& parentRect,
                      int parentIndex, int maskState, float opacity, bool visible,
                      bool enabled, const glm::mat3& parentWorld, int depth,
-                     uint32_t layerBase);
+                     int layerBase);
     void ArrangeChildren(UIDocument& doc, UINode& node, const UIRect& contentRect,
                          int selfIndex, int maskState, float opacity, bool visible,
-                         bool enabled, const glm::mat3& world, int depth);
+                         bool enabled, const glm::mat3& world, int depth, int layerBase);
 
     UIRect ResolveRect(const UITransform& t, const UIRect& parent, glm::vec2 content) const;
 

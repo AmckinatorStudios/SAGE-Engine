@@ -101,6 +101,21 @@ public:
     UIElement* Root() { return m_root; }
     UIElement* Content() { return Layer(UILayer::Content); }
 
+    // --- Всплывающие и подсказки ---------------------------------------------
+    //
+    // Закрытие щелчком мимо и по Escape ведёт КОНТЕКСТ, а не само меню. Иначе
+    // каждое меню заводило бы свой обработчик на весь экран, и два открытых
+    // меню начинали бы спорить, чей щелчок.
+    void RegisterOpenPopup(class Popup* popup);
+    void UnregisterOpenPopup(class Popup* popup);
+    void CloseAllPopups();
+    bool AnyPopupOpen() const { return !m_popups.empty(); }
+
+    // Подсказки — по данным, а не по коду: узел объявляет UIInteraction::
+    // TooltipKey, контекст показывает. Так подсказки работают и у документов,
+    // загруженных из файла, — а не только у собранных кодом.
+    void SetTooltipDelay(float seconds) { m_tooltipDelay = seconds; }
+
     // --- Кадр ---------------------------------------------------------------
     void SetScreen(glm::vec2 pixels);
     glm::vec2 Screen() const;
@@ -136,9 +151,20 @@ private:
     UIRuntime m_rt;
     std::unique_ptr<UIEngineResources> m_resources;
     std::unordered_map<UINodeId, std::unique_ptr<UIElement>> m_elements;
+    void UpdateTooltip(float dt);
+
     UIElement* m_root = nullptr;
     std::unordered_map<int, UIElement*> m_layers;
     float m_scale = 1.0f;
+
+    std::vector<class Popup*> m_popups;
+    // Подсказка одна на контекст: двух подсказок одновременно не бывает, а
+    // создавать узел под каждую наведённую кнопку — мусор в дереве.
+    UIElement* m_tooltip = nullptr;
+    class Label* m_tooltipText = nullptr;
+    UINodeId m_tooltipFor = kUIInvalidNode;
+    float m_tooltipDelay = 0.6f;
+    UINodeId m_hovered = kUIInvalidNode;
 };
 
 } // namespace sage::ui::sui

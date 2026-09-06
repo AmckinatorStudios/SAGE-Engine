@@ -30,3 +30,4 @@
 #include "sage/ui/sageui/UIElement.h"
 #include "sage/ui/sageui/UIRegistry.h"
 #include "sage/ui/sageui/UIWidgetsOO.h"
+#include "sage/ui/sageui/UIWindow.h"
