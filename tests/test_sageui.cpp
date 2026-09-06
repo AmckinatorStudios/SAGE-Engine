@@ -579,3 +579,328 @@ TEST(SageUI_tooltip_appears_after_the_delay_and_by_data) {
     f.Step();
     if (tip) CHECK_FALSE(tip->IsVisible());
 }
+
+// ===========================================================================
+//  ДОКИНГ
+// ===========================================================================
+//
+// Проверяется главное решение §22–27: РАСКЛАДКА — ЭТО ДАННЫЕ. Дерево DockNode
+// живёт отдельно от элементов, сохраняется в файл и восстанавливается; элементы
+// строятся по нему. Как только раскладкой станет само дерево элементов,
+// «сохранить расположение окон» превратится в теневую вторую модель.
+//
+// И второе обещание: панель ПЕРЕЕЗЖАЕТ, а не пересоздаётся. Её содержимое,
+// прокрутка и выделение обязаны пережить и смену вкладки, и отцепление в окно.
+
+namespace {
+
+DockPanel* MakePanel(UIContext& ui, DockSpace* dock, const char* id, const char* title) {
+    DockPanel* p = ui.Create<DockPanel>(std::string(id), std::string(title));
+    return dock->Add(p);
+}
+
+} // namespace
+
+TEST(SageUI_dock_layout_is_data_not_elements) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "hierarchy", "Иерархия");
+    MakePanel(f.Ui, dock, "inspector", "Инспектор");
+    f.Step();
+
+    DockNode* root = dock->Root();
+    CHECK_TRUE(root != nullptr);
+    if (!root) return;
+    // Две панели без указания стороны — одна область с двумя вкладками.
+    CHECK_FALSE(root->IsSplit());
+    CHECK_EQ(root->Panels.size(), (size_t)2);
+    CHECK_TRUE(dock->IsOpen("hierarchy"));
+    CHECK_TRUE(dock->IsOpen("inspector"));
+}
+
+TEST(SageUI_dock_side_splits_the_area) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "viewport", "Сцена");
+    DockPanel* insp = f.Ui.Create<DockPanel>(std::string("inspector"), std::string("Инспектор"));
+    dock->Add(insp, DockSide::Right, "viewport");
+    f.Step();
+
+    DockNode* root = dock->Root();
+    CHECK_TRUE(root && root->IsSplit());
+    if (!root || !root->IsSplit()) return;
+    CHECK_FALSE(root->Vertical);            // слева/справа — деление по горизонтали
+    CHECK_EQ(root->Children.size(), (size_t)2);
+    CHECK_EQ(root->Children[0]->Panels.size(), (size_t)1);
+    CHECK_EQ(root->Children[0]->Panels[0], std::string("viewport"));
+    CHECK_EQ(root->Children[1]->Panels[0], std::string("inspector"));
+}
+
+TEST(SageUI_dock_areas_get_real_pixels) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    dock->SetStretch(true, true);
+    MakePanel(f.Ui, dock, "left", "Слева");
+    DockPanel* right = f.Ui.Create<DockPanel>(std::string("right"), std::string("Справа"));
+    dock->Add(right, DockSide::Right, "left");
+    f.Step();
+    f.Step();   // дерево элементов пересобирается к следующему кадру
+
+    DockPanel* leftPanel = dock->Find("left");
+    CHECK_TRUE(leftPanel != nullptr);
+    if (!leftPanel) return;
+    const UIRect lr = leftPanel->Bounds();
+    const UIRect rr = right->Bounds();
+    // Обе области нарисованы, левая левее правой, вместе занимают кадр.
+    CHECK_TRUE(lr.w > 1.0f && rr.w > 1.0f);
+    CHECK_TRUE(lr.x + lr.w <= rr.x + 1.0f);
+    CHECK_NEAR(lr.w + rr.w, 800.0 - 4.0, 6.0);   // минус полоса-разделитель
+}
+
+TEST(SageUI_dock_tab_switch_keeps_the_panel_alive) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    DockPanel* a = MakePanel(f.Ui, dock, "a", "A");
+    DockPanel* b = MakePanel(f.Ui, dock, "b", "B");
+    // Кладём в панель содержимое: именно оно и обязано пережить переключение.
+    Label* mark = f.Ui.CreateIn<Label>(a->Body(), std::string("метка"));
+    f.Step();
+    f.Step();
+
+    dock->Focus("b");
+    f.Step();
+    f.Step();
+    dock->Focus("a");
+    f.Step();
+    f.Step();
+
+    // Панель ПЕРЕЕЗЖАЕТ, а не пересоздаётся: иначе переключение вкладок
+    // сбрасывало бы прокрутку, выделение и всё, что человек делал.
+    CHECK_TRUE(f.Ui.Doc().Find(mark->NodeId()) != nullptr);
+    CHECK_EQ(mark->Text(), std::string("метка"));
+    CHECK_TRUE(mark->Parent() == a->Body());
+    CHECK_TRUE(b != nullptr);
+}
+
+TEST(SageUI_dock_closing_prunes_the_empty_area) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "main", "Главная");
+    DockPanel* side = f.Ui.Create<DockPanel>(std::string("side"), std::string("Сбоку"));
+    dock->Add(side, DockSide::Right, "main");
+    f.Step();
+    CHECK_TRUE(dock->Root()->IsSplit());
+
+    dock->Close("side");
+    f.Step();
+    // Пустая половина экрана после закрытия панели — это дыра, которую человеку
+    // нечем закрыть. Разделитель с одним живым ребёнком схлопывается.
+    CHECK_FALSE(dock->Root()->IsSplit());
+    CHECK_EQ(dock->Root()->Panels.size(), (size_t)1);
+    CHECK_FALSE(dock->IsOpen("side"));
+    // Панель жива и ждёт: «Окно > Сбоку» обязано её вернуть.
+    CHECK_TRUE(dock->Find("side") != nullptr);
+}
+
+TEST(SageUI_dock_focus_brings_a_closed_panel_back) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "main", "Главная");
+    MakePanel(f.Ui, dock, "console", "Консоль");
+    f.Step();
+    dock->Close("console");
+    CHECK_FALSE(dock->IsOpen("console"));
+
+    dock->Focus("console");
+    f.Step();
+    // Пункт меню обязан ВЕРНУТЬ панель, а не «включить» её невидимо где-то в
+    // закрытой области.
+    CHECK_TRUE(dock->IsOpen("console"));
+}
+
+TEST(SageUI_dock_float_and_dock_back_keep_the_panel) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "main", "Главная");
+    DockPanel* tool = MakePanel(f.Ui, dock, "tool", "Инструмент");
+    Label* mark = f.Ui.CreateIn<Label>(tool->Body(), std::string("состояние"));
+    f.Step();
+    f.Step();
+
+    dock->Float("tool", {40.0f, 40.0f});
+    f.Step();
+    f.Step();
+    CHECK_TRUE(dock->IsFloating("tool"));
+    CHECK_FALSE(dock->IsOpen("main") == false);
+    // §26: пристыкованная панель и плавающее окно — ОДИН объект в разных местах
+    // дерева. Содержимое обязано остаться на месте.
+    CHECK_TRUE(f.Ui.Doc().Find(mark->NodeId()) != nullptr);
+    CHECK_EQ(mark->Text(), std::string("состояние"));
+
+    dock->Dock("tool");
+    f.Step();
+    f.Step();
+    CHECK_FALSE(dock->IsFloating("tool"));
+    CHECK_TRUE(dock->IsOpen("tool"));
+    CHECK_TRUE(f.Ui.Doc().Find(mark->NodeId()) != nullptr);
+}
+
+TEST(SageUI_dock_layout_survives_save_and_load) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "viewport", "Сцена");
+    DockPanel* insp = f.Ui.Create<DockPanel>(std::string("inspector"), std::string("Инспектор"));
+    dock->Add(insp, DockSide::Right, "viewport");
+    DockPanel* console = f.Ui.Create<DockPanel>(std::string("console"), std::string("Консоль"));
+    dock->Add(console, DockSide::Bottom, "viewport");
+    dock->Root()->Ratio = 0.62f;
+    f.Step();
+
+    const std::string saved = dock->SaveLayout();
+    CHECK_TRUE(saved.find("viewport") != std::string::npos);
+
+    // Ломаем раскладку, потом восстанавливаем из файла.
+    dock->ResetLayout();
+    f.Step();
+    CHECK_FALSE(dock->Root()->IsSplit());
+
+    CHECK_TRUE(dock->LoadLayout(saved));
+    f.Step();
+    DockNode* root = dock->Root();
+    CHECK_TRUE(root && root->IsSplit());
+    if (!root || !root->IsSplit()) return;
+    CHECK_NEAR(root->Ratio, 0.62, 1e-3);
+    CHECK_TRUE(dock->IsOpen("viewport"));
+    CHECK_TRUE(dock->IsOpen("inspector"));
+    CHECK_TRUE(dock->IsOpen("console"));
+}
+
+TEST(SageUI_dock_load_keeps_panels_absent_from_the_file) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "old", "Старая");
+    f.Step();
+    const std::string saved = dock->SaveLayout();
+
+    // Панель, появившаяся ПОСЛЕ того, как человек сохранил раскладку.
+    MakePanel(f.Ui, dock, "brand-new", "Новая");
+    CHECK_TRUE(dock->LoadLayout(saved));
+    f.Step();
+    // Иначе новая панель редактора не появлялась бы ни у кого, кто хоть раз
+    // двигал окна, — и выглядело бы это как «её не завезли».
+    CHECK_TRUE(dock->IsOpen("brand-new"));
+    CHECK_TRUE(dock->IsOpen("old"));
+}
+
+TEST(SageUI_dock_broken_layout_falls_back_instead_of_crashing) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "main", "Главная");
+    f.Step();
+
+    CHECK_FALSE(dock->LoadLayout("{это не json"));
+    CHECK_FALSE(dock->LoadLayout("{}"));
+    f.Step();
+    // Битый файл — не повод падать и не повод молчать: редактор открывается со
+    // стандартной раскладкой, а причина уходит в лог.
+    CHECK_TRUE(dock->IsOpen("main"));
+}
+
+TEST(SageUI_dock_splitter_moves_the_ratio_not_the_elements) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "left", "Слева");
+    DockPanel* right = f.Ui.Create<DockPanel>(std::string("right"), std::string("Справа"));
+    dock->Add(right, DockSide::Right, "left");
+    dock->Root()->Ratio = 0.5f;
+    dock->Invalidate();
+    f.Step();
+    f.Step();
+
+    // Тянем полосу от середины кадра вправо.
+    DragFromTo(f.Ui, {400.0f, 300.0f}, {600.0f, 300.0f});
+    f.Step();
+    f.Step();
+
+    // Двигается МОДЕЛЬ. Двигать элементы напрямую значило бы, что сохранённая
+    // раскладка не совпадает с видимой.
+    CHECK_NEAR(dock->Root()->Ratio, 0.75, 0.02);
+    CHECK_TRUE(dock->Find("left")->Bounds().w > 500.0f);
+}
+
+TEST(SageUI_dock_dragging_a_tab_redocks_the_panel) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    DockPanel* left = MakePanel(f.Ui, dock, "left", "Слева");
+    DockPanel* right = f.Ui.Create<DockPanel>(std::string("right"), std::string("Справа"));
+    dock->Add(right, DockSide::Right, "left");
+    DockPanel* extra = MakePanel(f.Ui, dock, "extra", "Ещё");
+    Label* mark = f.Ui.CreateIn<Label>(extra->Body(), std::string("моё"));
+    f.Step();
+    f.Step();
+
+    // «Ещё» лежит вкладкой рядом с «Слева». Тащим его в НИЖНЮЮ пятую часть
+    // правой области.
+    const UIRect rr = right->Bounds();
+    CHECK_TRUE(rr.w > 1.0f);
+    dock->BeginDrag("extra");
+    dock->DragTo({rr.x + rr.w * 0.5f, rr.y + rr.h * 0.9f});
+    // Подсветка обещает именно то место, куда упадёт панель.
+    CHECK_EQ(dock->DropTargetId(), std::string("right"));
+    CHECK_TRUE(dock->DropSide() == DockSide::Bottom);
+    dock->EndDrag({rr.x + rr.w * 0.5f, rr.y + rr.h * 0.9f});
+    f.Step();
+    f.Step();
+
+    // Панель переехала И осталась той же самой.
+    CHECK_TRUE(dock->IsOpen("extra"));
+    CHECK_TRUE(f.Ui.Doc().Find(mark->NodeId()) != nullptr);
+    CHECK_EQ(mark->Text(), std::string("моё"));
+    const UIRect er = extra->Bounds();
+    CHECK_TRUE(er.y > rr.y);              // ниже правой области
+    CHECK_TRUE(left->Bounds().w > 1.0f);  // левая на месте
+}
+
+TEST(SageUI_dock_dropping_outside_makes_a_window) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    dock->SetSize({400.0f, 300.0f})->SetAnchor({0.0f, 0.0f}, {0.0f, 0.0f})->SetPivot({0.0f, 0.0f});
+    MakePanel(f.Ui, dock, "main", "Главная");
+    MakePanel(f.Ui, dock, "tool", "Инструмент");
+    f.Step();
+    f.Step();
+
+    dock->BeginDrag("tool");
+    // Далеко за пределами области дока.
+    dock->DragTo({700.0f, 550.0f});
+    CHECK_TRUE(dock->DropTargetId().empty());
+    dock->EndDrag({700.0f, 550.0f});
+    f.Step();
+    f.Step();
+
+    // Вытащил панель за пределы редактора — получил окно. Привычный жест, и без
+    // него отцепить панель мышью нечем вовсе.
+    CHECK_TRUE(dock->IsFloating("tool"));
+    CHECK_TRUE(dock->IsOpen("main"));
+}
+
+TEST(SageUI_dock_dropping_onto_itself_changes_nothing) {
+    Fixture f;
+    DockSpace* dock = f.Ui.CreateIn<DockSpace>(f.Ui.Content());
+    MakePanel(f.Ui, dock, "a", "A");
+    DockPanel* b = f.Ui.Create<DockPanel>(std::string("b"), std::string("B"));
+    dock->Add(b, DockSide::Right, "a");
+    f.Step();
+    f.Step();
+    const float ratio = dock->Root()->Ratio;
+
+    const UIRect br = b->Bounds();
+    dock->BeginDrag("b");
+    dock->DragTo({br.x + br.w * 0.5f, br.y + br.h * 0.5f});
+    dock->EndDrag({br.x + br.w * 0.5f, br.y + br.h * 0.5f});
+    f.Step();
+
+    // Пересобирать раскладку на каждом промахе — значит мигать экраном.
+    CHECK_TRUE(dock->Root()->IsSplit());
+    CHECK_NEAR(dock->Root()->Ratio, ratio, 1e-4);
+}
