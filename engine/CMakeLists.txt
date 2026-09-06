@@ -151,6 +151,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/input/UIEvent.cpp
     src/sage/ui/input/UIHitTest.cpp
     src/sage/ui/input/UIInput.cpp
+    src/sage/ui/icons/SageIcons.cpp
+    src/sage/ui/icons/SageIcons.generated.cpp
     src/sage/ui/style/UIDesignTokens.cpp
     src/sage/ui/style/UIStyle.cpp
     src/sage/ui/widgets/UIWidgets.cpp

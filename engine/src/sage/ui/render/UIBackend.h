@@ -58,6 +58,7 @@ private:
     void DrawGlyphs(const UIRenderCommand& c, const UIRenderList& list);
     void DrawPolygon(const UIRenderCommand& c);
     void DrawRing(const UIRenderCommand& c);
+    void DrawIconAtlas(const UIRenderCommand& c);
 
     // --- промежуточные цели (§36) ------------------------------------------
     //

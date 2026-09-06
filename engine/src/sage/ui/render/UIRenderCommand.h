@@ -37,6 +37,7 @@ enum class UIPrimitive {
     Polygon,   // произвольный многоугольник
     Ring,      // кольцо/дуга
     Line,
+    Icon,      // значок из атласа покрытия (см. sage/ui/icons/SageIcons.h)
     Custom,    // пользовательский материал (§45)
 };
 
@@ -123,6 +124,10 @@ struct UIRenderCommand {
 
     const Texture* Tex = nullptr;
     glm::vec4 Uv{0.0f, 0.0f, 1.0f, 1.0f};
+    // Для Icon: НОМЕР атласа значков, а не указатель на текстуру. Список команд
+    // не должен держать ресурсы GPU — он обязан собираться и проверяться без
+    // графического контекста вообще; во что превратить номер, знает бэкенд.
+    int IconAtlas = -1;
     UIEdges Slice{0.0f, 0.0f, 0.0f, 0.0f}; // для NineSlice, в пикселях исходника
     glm::vec2 SourceSize{0.0f, 0.0f};
     bool PixelArt = false;

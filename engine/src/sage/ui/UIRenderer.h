@@ -122,6 +122,18 @@ public:
     void ImageSprite(float x, float y, float w, float h, const Texture* texture, Sprite src,
                      glm::vec3 tint = glm::vec3(1.0f), float alpha = 1.0f);
 
+    // Значок из АТЛАСА ПОКРЫТИЯ (см. sage/ui/icons/SageIcons.h).
+    //
+    // Отдельный метод, а не Image, ровно по одной причине: атлас значков хранит
+    // не цвет, а форму — один байт на пиксель. Цвет даёт вызывающий, тем же
+    // умножением, каким красится текст. Из этого следует главное: значок любого
+    // состояния (наведён, нажат, выключен) — это ОДНА текстура и разный tint, а
+    // все значки кадра лежат в одном атласе и рисуются одним батчем.
+    //
+    // uv — уже нормализованный кусок атласа (x0, y0, x1, y1), сверху вниз.
+    void Icon(float x, float y, float w, float h, const sage::rhi::Texture2D* atlas,
+              glm::vec4 uv, glm::vec3 tint = glm::vec3(1.0f), float alpha = 1.0f);
+
     // Девятина («9-slice»): рамка растягивается, углы — нет.
     //
     // Панель набора нарисована как 48x48 с уголками по 8 пикселей. Растянуть её
@@ -251,6 +263,10 @@ private:
     struct Segment {
         size_t FirstQuad = 0, QuadCount = 0;
         const Texture* Image = nullptr; // nullptr — шрифт/сплошные квады
+        // Атлас ПОКРЫТИЯ (один байт на пиксель) вместо шрифтового: значки.
+        // Отдельное поле, а не Image, потому что режим шейдера у них разный:
+        // картинка тонируется целиком, покрытие даёт только альфу.
+        const sage::rhi::Texture2D* Coverage = nullptr;
         bool Clipped = false;
         glm::vec4 Clip{0.0f}; // x, y, w, h (экранные координаты, верхний левый угол)
         bool Masked = false;
@@ -276,7 +292,8 @@ private:
     void EnsureIndexCapacity(size_t quadCount);
     // Сегмент для следующего квада с нужным состоянием (текстура/клип):
     // продолжает текущий, если состояние совпадает, иначе начинает новый.
-    Segment& CurrentSegment(const Texture* image);
+    Segment& CurrentSegment(const Texture* image,
+                            const sage::rhi::Texture2D* coverage = nullptr);
 
     std::vector<UIVertex> m_vertices; // все квады кадра (прямоугольники, картинки, глифы)
     std::vector<Segment> m_segments;

@@ -420,20 +420,23 @@ void RegisterBuiltinUIElements() {
     done = true;
 
     UIElementRegistry& r = UIElementRegistry::Instance();
-    r.Register<UIElement>("Element", "Элемент", "Основные", "rect");
-    r.Register<Group>("Group", "Группа", "Контейнеры", "rect");
-    r.Register<Panel>("Panel", "Панель", "Контейнеры", "rect");
-    r.Register<ScrollView>("ScrollView", "Прокрутка", "Контейнеры", "rect");
-    r.Register<Label>("Label", "Надпись", "Текст", "text");
-    r.Register<Button>("Button", "Кнопка", "Управление", "rect");
-    r.Register<Checkbox>("Checkbox", "Галка", "Управление", "check");
-    r.Register<Slider>("Slider", "Ползунок", "Управление", "rect");
-    r.Register<ProgressBar>("ProgressBar", "Полоса", "Значения", "rect");
-    r.Register<TextInput>("TextInput", "Поле ввода", "Управление", "text");
-    r.Register<Image>("Image", "Картинка", "Оформление", "texture");
-    r.Register<Window>("Window", "Окно", "Окна", "rect");
-    r.Register<Dialog>("Dialog", "Диалог", "Окна", "rect");
-    r.Register<Popup>("Popup", "Всплывающее", "Окна", "rect");
+    // Значок палитры — из набора SAGE, перечислением: палитра редактора
+    // интерфейса должна выглядеть набором, а не разнобоем из того, что нашлось.
+    namespace Icons = icons::Icons;
+    r.Register<UIElement>("Element", "Элемент", "Основные", Icons::Name(Icon::Component));
+    r.Register<Group>("Group", "Группа", "Контейнеры", Icons::Name(Icon::Layers));
+    r.Register<Panel>("Panel", "Панель", "Контейнеры", Icons::Name(Icon::Panel));
+    r.Register<ScrollView>("ScrollView", "Прокрутка", "Контейнеры", Icons::Name(Icon::Rows));
+    r.Register<Label>("Label", "Надпись", "Текст", Icons::Name(Icon::Text));
+    r.Register<Button>("Button", "Кнопка", "Управление", Icons::Name(Icon::Button));
+    r.Register<Checkbox>("Checkbox", "Галка", "Управление", Icons::Name(Icon::Checkbox));
+    r.Register<Slider>("Slider", "Ползунок", "Управление", Icons::Name(Icon::Slider));
+    r.Register<ProgressBar>("ProgressBar", "Полоса", "Значения", Icons::Name(Icon::Timeline));
+    r.Register<TextInput>("TextInput", "Поле ввода", "Управление", Icons::Name(Icon::Input));
+    r.Register<Image>("Image", "Картинка", "Оформление", Icons::Name(Icon::Image));
+    r.Register<Window>("Window", "Окно", "Окна", Icons::Name(Icon::Window));
+    r.Register<Dialog>("Dialog", "Диалог", "Окна", Icons::Name(Icon::Panel));
+    r.Register<Popup>("Popup", "Всплывающее", "Окна", Icons::Name(Icon::Menu));
 }
 
 } // namespace sage::ui::sui

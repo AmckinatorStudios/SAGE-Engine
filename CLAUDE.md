@@ -41,6 +41,7 @@ bash scripts/ci_smoke_test.sh                                     # smoke
 python3 scripts/check_localization.py                             # переводы
 python3 scripts/check_rhi_boundary.py                             # граница RHI
 python3 scripts/check_paths.py                                    # пути из окружения
+python3 scripts/sage_icon_builder.py --check                      # атлас значков
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
 

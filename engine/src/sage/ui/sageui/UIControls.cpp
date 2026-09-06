@@ -75,6 +75,9 @@ void IconButton::OnAttach() {
     m_glyph->Ensure<UIIcon>().Name = m_icon;
 }
 
+IconButton::IconButton(Icon icon, std::string tooltip)
+    : IconButton(std::string(icons::Icons::Name(icon)), std::move(tooltip)) {}
+
 IconButton* IconButton::SetIcon(const std::string& icon) {
     m_icon = icon;
     if (m_glyph) m_glyph->Ensure<UIIcon>().Name = icon;
@@ -224,7 +227,7 @@ void SearchBox::OnAttach() {
     UIElement* glyph = Ctx().CreateIn<UIElement>(this);
     glyph->SetName("Glyph");
     glyph->SetSize({12.0f, 12.0f});
-    glyph->Ensure<UIIcon>().Name = "search";
+    glyph->Ensure<UIIcon>().Name = icons::Icons::Name(Icon::Search);
     glyph->Ensure<UIIcon>().Color = UIColor(0.55f, 0.57f, 0.60f, 1.0f);
 
     m_input = Ctx().CreateIn<TextInput>(this, std::string(), m_placeholder);
@@ -238,7 +241,7 @@ void SearchBox::OnAttach() {
         if (m_onChanged) m_onChanged(text);
     });
 
-    m_clear = Ctx().CreateIn<IconButton>(this, std::string("cross"), std::string("Очистить"));
+    m_clear = Ctx().CreateIn<IconButton>(this, Icon::Close, std::string("Очистить"));
     m_clear->SetSize({16.0f, 16.0f});
     static_cast<IconButton*>(m_clear)->OnPress([this] {
         m_input->SetValue(std::string());
@@ -293,7 +296,7 @@ void Dropdown::OnAttach() {
     UIElement* arrow = Ctx().CreateIn<UIElement>(this);
     arrow->SetName("Arrow");
     arrow->SetSize({10.0f, 10.0f});
-    arrow->Ensure<UIIcon>().Name = "chevron-down";
+    arrow->Ensure<UIIcon>().Name = icons::Icons::Name(Icon::ChevronDown);
 
     m_popup = Ctx().Create<Popup>();
     m_popup->SetName("Dropdown menu");

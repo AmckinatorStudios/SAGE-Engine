@@ -7,6 +7,7 @@
 #include "sage/core/Log.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/ui/UIIcons.h"
+#include "sage/ui/icons/SageIcons.h"
 #include "sage/ui/UIRenderer.h"
 
 // ---------------------------------------------------------------------------
@@ -318,6 +319,16 @@ void UIClassicBackend::DrawPolygon(const UIRenderCommand& c) {
     }
 }
 
+void UIClassicBackend::DrawIconAtlas(const UIRenderCommand& c) {
+    // Номер атласа → текстура. Здесь и только здесь: список команд собирается
+    // без графического контекста, а привязать текстуру может лишь бэкенд.
+    if (c.IconAtlas < 0) return;
+    const sage::rhi::Texture2D* atlas =
+        icons::IconRegistry::Instance().Texture((uint32_t)c.IconAtlas);
+    if (!atlas) return;
+    m_ui.Icon(c.Rect.x, c.Rect.y, c.Rect.w, c.Rect.h, atlas, c.Uv, Rgb(c.Color), c.Color.a);
+}
+
 void UIClassicBackend::DrawRing(const UIRenderCommand& c) {
     const glm::vec2 centre = UICenter(c.Rect);
     const float radius = std::min(c.Rect.w, c.Rect.h) * 0.5f;
@@ -437,6 +448,7 @@ void UIClassicBackend::Submit(const UIRenderList& list) {
                 case UIPrimitive::Polygon:
                 case UIPrimitive::Line: DrawPolygon(c); break;
                 case UIPrimitive::Ring: DrawRing(c); break;
+                case UIPrimitive::Icon: DrawIconAtlas(c); break;
                 case UIPrimitive::Custom:
                     // Единственный материал, который знает ЭТОТ бэкенд, —
                     // векторный значок движка. Чужой материал он честно

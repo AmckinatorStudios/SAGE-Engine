@@ -32,6 +32,8 @@
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/render/UIEngineResources.h"
 #include "sage/ui/sageui/SageUI.h"
+#include "sage/ui/icons/SageIcons.h"
+#include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/showcase/UIDemos.h"
 #include "sage/ui/showcase/UIShowcaseDocument.h"
 
@@ -470,6 +472,98 @@ void CheckDemoScreens(UIRenderer& renderer) {
 // состояния. Проверяется, что всё это ДОЕЗЖАЕТ ДО ПИКСЕЛЕЙ — модульные тесты
 // знают только про числа раскладки, и «панель посчиталась, но не появилась»
 // они не увидят.
+// ---------------------------------------------------------------------------
+// ЗНАЧКИ (ТЗ «SAGE Icon System»).
+//
+// Проверяется то, что нельзя увидеть по списку команд: значок из атласа
+// действительно ПОПАДАЕТ НА ЭКРАН, красится цветом узла и не выходит за
+// отведённый ему квадрат. И проверяется цена: сетка из десятков значков
+// обязана стоить ОДИН батч, потому что все они лежат в одном атласе.
+// ---------------------------------------------------------------------------
+void CheckIcons(UIRenderer& renderer) {
+    const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
+    namespace icons = ui::icons;
+
+    Harness h;
+    ui::UIDocument& doc = h.Doc();
+
+    // Сетка из всего набора: ошибка в одном значке видна на снимке сразу, а
+    // «в среднем нарисовалось» — нет.
+    const int kCell = 26, kIcon = 20, kCols = 24;
+    const int rows = (icons::kIconCount + kCols - 1) / kCols;
+    const int w = kCols * kCell, hh = rows * kCell + 40;
+
+    ui::UINode* sheet = doc.Create("Sheet");
+    sheet->Ensure<ui::UITransform>().SetStretch(true, true);
+
+    for (int i = 0; i < icons::kIconCount; ++i) {
+        ui::UINode* node = doc.Create(icons::generated::kNames[i], sheet->Id);
+        ui::UITransform& t = node->Ensure<ui::UITransform>();
+        t.AnchorMin = t.AnchorMax = {0.0f, 0.0f};
+        t.Pivot = {0.0f, 0.0f};
+        t.Offset = {(float)((i % kCols) * kCell) + 3.0f,
+                    (float)((i / kCols) * kCell) + 3.0f};
+        t.Size = {(float)kIcon, (float)kIcon};
+        ui::UIIcon& icon = node->Ensure<ui::UIIcon>();
+        icon.Name = icons::generated::kNames[i];
+        icon.Size = (float)kIcon;
+        // Цвет из УЗЛА, а не из картинки: в атласе лежит только форма.
+        icon.Color = (i % 2) ? ui::UIColor{1.0f, 0.78f, 0.25f, 1.0f}
+                             : ui::UIColor{0.86f, 0.89f, 0.94f, 1.0f};
+    }
+
+    const Image img = RenderDocument(renderer, h, w, hh);
+    const ui::UIRenderStats& stats = h.Runtime.DrawList().Stats();
+
+    // 1. Каждый значок нарисован. Порог низкий намеренно: значок — это тонкие
+    //    штрихи, а не заливка, и у самых лёгких из них закрашено ~5% квадрата.
+    int drawn = 0, empty = 0;
+    std::string firstEmpty;
+    for (int i = 0; i < icons::kIconCount; ++i) {
+        const int x = (i % kCols) * kCell + 3, y = (i / kCols) * kCell + 3;
+        if (Covered(img, x, y, x + kIcon, y + kIcon) > 0.03) {
+            ++drawn;
+        } else {
+            ++empty;
+            if (firstEmpty.empty()) firstEmpty = icons::generated::kNames[i];
+        }
+    }
+    Check(empty == 0, (std::string("значки: нарисованы все ") +
+                       std::to_string(icons::kIconCount) + " (пустых " +
+                       std::to_string(empty) +
+                       (firstEmpty.empty() ? "" : ", первый — " + firstEmpty) + ")").c_str());
+    Check(drawn == icons::kIconCount, "значки: ни один не потерялся");
+
+    // 2. Значок не вылезает за свою клетку — иначе плотная панель инструментов
+    //    превратилась бы в кашу из наползающих друг на друга штрихов.
+    double spill = 0.0;
+    for (int i = 0; i < icons::kIconCount && spill < 0.02; ++i) {
+        const int x = (i % kCols) * kCell + 3, y = (i / kCols) * kCell + 3;
+        // Полоска справа от клетки: между клетками остаётся 6 px зазора.
+        spill = std::max(spill, Covered(img, x + kIcon + 1, y, x + kIcon + 4, y + kIcon));
+    }
+    Check(spill < 0.02, "значки: рисунок не выходит за свой квадрат");
+
+    // 3. Цвет даёт УЗЕЛ. Жёлтые и белые значки чередуются — значит, в кадре
+    //    обязаны быть и те, и другие из ОДНОЙ текстуры.
+    int warm = 0, cool = 0;
+    for (int p = 0; p < img.Width * img.Height; ++p) {
+        const size_t i = (size_t)p * 3;
+        const int r = img.Pixels[i], g = img.Pixels[i + 1], b = img.Pixels[i + 2];
+        if (r < 40) continue;
+        if (r - b > 60) ++warm;
+        else if (std::abs(r - b) < 24) ++cool;
+    }
+    Check(warm > 200 && cool > 200, "значки: один атлас красится в разные цвета");
+
+    // 4. Цена. Сто с лишним значков — это ОДНА привязка атласа, а не сто.
+    Check(stats.Batches <= 3,
+          (std::string("значки: весь набор — один батч (батчей ") +
+           std::to_string(stats.Batches) + ")").c_str());
+
+    if (shots) SavePng(std::string(shots) + "/ui_icons.png", img);
+}
+
 void CheckSageUI(UIRenderer& renderer) {
     const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
     namespace sui = ui::sui;
@@ -495,22 +589,23 @@ void CheckSageUI(UIRenderer& renderer) {
     search->SetWidth(200.0f);
 
     sui::Toolbar* tb = shell->Tools();
-    tb->AddIcon("save", "Новая сцена");
-    tb->AddIcon("bag", "Открыть");
-    tb->AddIcon("check", "Сохранить");
+    using sui::Icon;
+    tb->AddIcon(Icon::New, "Новая сцена");
+    tb->AddIcon(Icon::Open, "Открыть");
+    tb->AddIcon(Icon::Save, "Сохранить");
     tb->AddSeparator();
-    tb->AddIcon("minus", "Отменить");
-    tb->AddIcon("plus", "Повторить");
+    tb->AddIcon(Icon::Undo, "Отменить");
+    tb->AddIcon(Icon::Redo, "Повторить");
     tb->AddSpacer();
     sui::Button* play = tb->AddButton("Play");
     play->SetStyle("ButtonPrimary");
     play->SetWidth(74.0f);
-    tb->AddIcon("pause", "Пауза");
-    tb->AddIcon("cross", "Стоп");
+    tb->AddIcon(Icon::Pause, "Пауза");
+    tb->AddIcon(Icon::Stop, "Стоп");
     tb->AddSpacer();
     sui::Dropdown* space = gui.CreateIn<sui::Dropdown>(tb, std::vector<std::string>{"Local", "World"}, 0);
     space->SetWidth(86.0f);
-    tb->AddIcon("gear", "Настройки гизмо");
+    tb->AddIcon(Icon::Settings, "Настройки гизмо");
 
     // --- Панели ---
     sui::DockPanel* hierarchy = shell->AddPanel(
@@ -682,6 +777,7 @@ void RunUICoreChecks() {
     CheckBlurCompositing(renderer);
     CheckShowcaseFrame(renderer);
     CheckDemoScreens(renderer);
+    CheckIcons(renderer);
     CheckSageUI(renderer);
 }
 

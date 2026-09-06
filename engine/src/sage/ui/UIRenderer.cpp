@@ -6,6 +6,7 @@
 #include "sage/core/Config.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -259,12 +260,13 @@ bool SameMask(const UIRenderer::Mask& a, const UIRenderer::Mask& b) {
 }
 } // namespace
 
-UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
+UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image,
+                                                const sage::rhi::Texture2D* coverage) {
     bool clipped = !m_clipStack.empty();
     glm::vec4 clip = clipped ? m_clipStack.back() : glm::vec4(0.0f);
     if (!m_segments.empty()) {
         Segment& last = m_segments.back();
-        if (last.Image == image && last.Clipped == clipped &&
+        if (last.Image == image && last.Coverage == coverage && last.Clipped == clipped &&
             (!clipped || last.Clip == clip) && last.Masked == m_masked &&
             (!m_masked || SameMask(last.MaskState, m_mask))) {
             return last; // состояние не изменилось — продолжаем батч
@@ -273,6 +275,7 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
     Segment seg;
     seg.FirstQuad = m_quadCount;
     seg.Image = image;
+    seg.Coverage = coverage;
     seg.Clipped = clipped;
     seg.Clip = clip;
     seg.Masked = m_masked;
@@ -394,6 +397,16 @@ void UIRenderer::ImageSprite(float x, float y, float w, float h, const Texture* 
     CurrentSegment(texture).QuadCount++;
     const SpriteUV uv = ResolveSprite(*texture, src);
     PushImageQuad(x, y, w, h, uv.uv0, uv.uv1, tint, alpha);
+}
+
+void UIRenderer::Icon(float x, float y, float w, float h, const sage::rhi::Texture2D* atlas,
+                      glm::vec4 uv, glm::vec3 tint, float alpha) {
+    if (!atlas || w <= 0.0f || h <= 0.0f || alpha <= 0.0f) return;
+    // Пиксельная сетка: значок нарисован под конкретный размер ячейки, и
+    // полпикселя сдвига размывают тонкий штрих сильнее, чем неверный размер.
+    const float px = std::round(x), py = std::round(y);
+    CurrentSegment(nullptr, atlas).QuadCount++;
+    PushImageQuad(px, py, std::round(w), std::round(h), {uv.x, uv.y}, {uv.z, uv.w}, tint, alpha);
 }
 
 void UIRenderer::ImageNineSlice(float x, float y, float w, float h, const Texture* texture,
@@ -669,8 +682,12 @@ void UIRenderer::End() {
             m_shader.SetInt("uMode", 1);
             seg.Image->Bind(0);
         } else {
+            // Режим покрытия один и тот же и у текста, и у значков — меняется
+            // только атлас. Поэтому переключение стоит одной привязки
+            // текстуры, а не смены шейдера.
             m_shader.SetInt("uMode", 0);
-            if (m_font) m_font->Atlas().Bind(0);
+            if (seg.Coverage) seg.Coverage->Bind(0);
+            else if (m_font) m_font->Atlas().Bind(0);
         }
         // Фигурная маска — состояние сегмента. Там, где её нет, в шейдер уходит
         // ноль, и ветка не исполняется вовсе: узел без маски не платит за неё.

@@ -37,6 +37,13 @@ jobs:
       - name: Paths check (no filesystem path taken from getenv)
         run: python3 scripts/check_paths.py
 
+      # Значки: атлас в репозитории собран из текущего манифеста и текущих SVG.
+      # Проверка нужна ровно потому, что атлас — СГЕНЕРИРОВАННЫЙ файл в истории:
+      # добавили значок в манифест, забыли пересобрать — и в сборке его нет, а
+      # заметно это только на экране. Тоже до сборки: секунды.
+      - name: Icons check (atlas matches the manifest)
+        run: python3 scripts/sage_icon_builder.py --check
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

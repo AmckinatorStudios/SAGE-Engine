@@ -46,10 +46,12 @@ private:
 class IconButton : public UIElement {
 public:
     IconButton(std::string icon, std::string tooltip);
+    IconButton(Icon icon, std::string tooltip);
     const char* TypeName() const override { return "IconButton"; }
     void OnAttach() override;
 
     IconButton* SetIcon(const std::string& icon);
+    IconButton* SetIcon(Icon icon) { return SetIcon(std::string(icons::Icons::Name(icon))); }
     // Нажатое состояние: включённый режим, активный инструмент.
     IconButton* SetActive(bool active);
     bool Active() const { return m_active; }
@@ -69,6 +71,10 @@ public:
 
     IconButton* AddIcon(const std::string& icon, const std::string& tooltip,
                         std::function<void()> onPress = nullptr);
+    IconButton* AddIcon(Icon icon, const std::string& tooltip,
+                        std::function<void()> onPress = nullptr) {
+        return AddIcon(std::string(icons::Icons::Name(icon)), tooltip, std::move(onPress));
+    }
     Button* AddButton(const std::string& text, std::function<void()> onPress = nullptr);
     // Разрыв между группами. Группы — это смысл: «проект», «отмена», «игра».
     void AddSeparator();

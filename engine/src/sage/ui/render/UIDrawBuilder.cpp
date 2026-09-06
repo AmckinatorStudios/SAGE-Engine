@@ -8,6 +8,7 @@
 #include "sage/ui/core/UINode.h"
 #include "sage/ui/mask/UIMaskStack.h"
 #include "sage/ui/debug/UIDebug.h"
+#include "sage/ui/icons/SageIcons.h"
 #include "sage/ui/effects/UIEffect.h"
 #include "sage/ui/input/UIInteraction.h"
 #include "sage/ui/visual/UIBorder.h"
@@ -277,14 +278,31 @@ void EmitIcon(const UIDrawContext& ctx, const UIComponent& comp) {
     if (icon.Name.empty() || icon.Color.a <= 0.0f) return;
     const float side = icon.Size > 0.0f ? icon.Size * ctx.Scale
                                         : std::min(ctx.Rect.w, ctx.Rect.h);
+    // Значок всегда вписан в КВАДРАТ и рисуется целиком внутри него, поэтому
+    // вёрстка не зависит от того, какой именно значок назначили.
+    const UIRect box{ctx.Rect.x + (ctx.Rect.w - side) * 0.5f,
+                     ctx.Rect.y + (ctx.Rect.h - side) * 0.5f, side, side};
+
+    // Сначала — набор SAGE (атлас). Имя ищется ОДИН раз здесь, а не в бэкенде
+    // на каждый кадр: дальше по конвейеру едут номер атласа и четыре числа.
+    const icons::IconHandle h = icons::Icons::Get(icon.Name, side);
+    if (h.Valid()) {
+        UIRenderCommand& c = ctx.Begin(UIPrimitive::Icon);
+        c.Rect = box;
+        c.Color = Shade(ctx, icon.Color);
+        c.Uv = {h.U0, h.V0, h.U1, h.V1};
+        c.IconAtlas = (int)h.Atlas;
+        return;
+    }
+
+    // Чего нет в атласе — рисуется вектором, как и раньше. Это не запасной
+    // путь «на всякий случай»: значок, нарисованный кодом (индикатор, стрелка
+    // под конкретный виджет), в атласе появляться и не должен.
     UIMaterialRef material;
     material.Shader = "icon";
     material.Name = icon.Name;
     UIRenderCommand& c = ctx.Begin(UIPrimitive::Custom);
-    // Значок всегда вписан в КВАДРАТ и рисуется целиком внутри него, поэтому
-    // вёрстка не зависит от того, какой именно значок назначили.
-    c.Rect = {ctx.Rect.x + (ctx.Rect.w - side) * 0.5f, ctx.Rect.y + (ctx.Rect.h - side) * 0.5f,
-              side, side};
+    c.Rect = box;
     c.Color = Shade(ctx, icon.Color);
     c.Material = ctx.List->AddMaterial(material);
 }

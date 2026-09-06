@@ -67,7 +67,7 @@ Tree::RowUI& Tree::EnsureRow(size_t index) {
         row.Text->SetStretch(true, false);
         row.Text->SetEllipsis(true);
 
-        row.Eye = Ctx().CreateIn<IconButton>(row.Box, std::string("eye"), std::string("Видимость"));
+        row.Eye = Ctx().CreateIn<IconButton>(row.Box, Icon::Eye, std::string("Видимость"));
         row.Eye->SetSize({16.0f, 16.0f});
 
         const size_t at = m_rows.size();
@@ -95,7 +95,9 @@ void Tree::Apply(RowUI& row, const TreeItem& item) {
     row.Box->Padding(UIEdges(4.0f + (float)item.Depth * 12.0f, 0.0f, 6.0f, 0.0f));
 
     UIIcon& arrow = row.Arrow->Ensure<UIIcon>();
-    arrow.Name = item.HasChildren ? (item.Expanded ? "chevron-down" : "chevron-right") : "";
+    arrow.Name = item.HasChildren ? icons::Icons::Name(item.Expanded ? Icon::ChevronDown
+                                                              : Icon::ChevronRight)
+                                  : "";
     row.Arrow->SetVisible(item.HasChildren);
 
     UIIcon& icon = row.Icon->Ensure<UIIcon>();
@@ -114,7 +116,7 @@ void Tree::Apply(RowUI& row, const TreeItem& item) {
         if (item.Selected) ia->Runtime.Flags |= UIState_Selected;
         else ia->Runtime.Flags &= ~(uint32_t)UIState_Selected;
     }
-    row.Eye->SetIcon(item.Visible ? "eye" : "eye-off");
+    row.Eye->SetIcon(item.Visible ? Icon::Eye : Icon::EyeOff);
     row.Box->Dirty(UIDirty_Style);
 }
 
@@ -182,7 +184,8 @@ UIElement* PropertyGrid::AddSection(const std::string& title, bool expanded) {
     UIElement* arrow = Ctx().CreateIn<UIElement>(head);
     arrow->SetName("Arrow");
     arrow->SetSize({12.0f, 12.0f});
-    arrow->Ensure<UIIcon>().Name = expanded ? "chevron-down" : "chevron-right";
+    arrow->Ensure<UIIcon>().Name =
+        icons::Icons::Name(expanded ? Icon::ChevronDown : Icon::ChevronRight);
 
     Label* caption = Ctx().CreateIn<Label>(head, title);
     caption->SetStretch(true, false);
@@ -199,7 +202,8 @@ UIElement* PropertyGrid::AddSection(const std::string& title, bool expanded) {
     head->OnClick([arrow, body] {
         const bool open = !body->IsVisible();
         body->SetVisible(open);
-        arrow->Ensure<UIIcon>().Name = open ? "chevron-down" : "chevron-right";
+        arrow->Ensure<UIIcon>().Name =
+            icons::Icons::Name(open ? Icon::ChevronDown : Icon::ChevronRight);
         arrow->Dirty(UIDirty_Visual);
     });
     return body;
