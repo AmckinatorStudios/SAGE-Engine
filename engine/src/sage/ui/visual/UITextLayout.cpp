@@ -86,7 +86,7 @@ struct FontPick {
 // Шрифт для символа с учётом ЗАПАСНОГО (§15, fallback fonts). Без этого один
 // отсутствующий символ превращает строку в ряд прямоугольников, и виноватым
 // выглядит движок, а не шрифт.
-FontPick PickFont(const UIContext& ctx, int primary, int fallback, uint32_t cp) {
+FontPick PickFont(const UIFrameContext& ctx, int primary, int fallback, uint32_t cp) {
     FontPick p;
     p.Font = primary;
     if (!ctx.Fonts) return p;
@@ -108,7 +108,7 @@ struct Measured {
 
 } // namespace
 
-UITextLayoutResult UILayoutText(const UIContext& ctx, const UIText& text, float maxWidth,
+UITextLayoutResult UILayoutText(const UIFrameContext& ctx, const UIText& text, float maxWidth,
                                 float maxHeight) {
     UITextLayoutResult out;
     const std::string src = text.Resolve(ctx);

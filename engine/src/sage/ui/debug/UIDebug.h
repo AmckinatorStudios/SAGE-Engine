@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/layout/UILayoutSolver.h"
 #include "sage/ui/render/UIRenderList.h"
 
@@ -39,7 +39,7 @@ struct UIProfile {
 // области попадания, номера слоёв, границы батчей. Дорисовываются в тот же
 // список команд — то есть тем же конвейером, а не «поверх, как получится».
 void UIAppendDebugOverlay(const UIDocument& doc, const UILayoutSolver& layout,
-                          const UIContext& ctx, UIRenderList& list);
+                          const UIFrameContext& ctx, UIRenderList& list);
 
 // --- Объяснения ---------------------------------------------------------------
 std::string UIExplainPosition(const UIDocument& doc, const UILayoutSolver& layout,

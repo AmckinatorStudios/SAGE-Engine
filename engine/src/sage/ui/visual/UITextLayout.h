@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/visual/UIText.h"
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ struct UITextLayoutResult {
 };
 
 // Посчитать раскладку. maxWidth/maxHeight <= 0 — «не ограничено по этой оси».
-UITextLayoutResult UILayoutText(const UIContext& ctx, const UIText& text,
+UITextLayoutResult UILayoutText(const UIFrameContext& ctx, const UIText& text,
                                 float maxWidth, float maxHeight);
 
 // Индекс байта в строке, ближайший к точке (для каретки поля ввода). Точка — в

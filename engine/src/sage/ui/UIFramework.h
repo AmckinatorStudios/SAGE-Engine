@@ -31,7 +31,7 @@
 // ---------------------------------------------------------------------------
 #include "sage/ui/animation/UIAnimationValue.h"
 #include "sage/ui/core/UIComponent.h"
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/core/UIDocument.h"
 #include "sage/ui/core/UINode.h"
 #include "sage/ui/core/UIRegistry.h"
@@ -79,8 +79,8 @@ public:
 
     UIDocument& Doc() { return m_doc; }
     const UIDocument& Doc() const { return m_doc; }
-    UIContext& Context() { return m_ctx; }
-    const UIContext& Context() const { return m_ctx; }
+    UIFrameContext& Context() { return m_ctx; }
+    const UIFrameContext& Context() const { return m_ctx; }
     UITheme& Theme() { return m_theme; }
     UIEventBus& Events() { return m_bus; }
     UIInputRouter& Input() { return m_input; }
@@ -102,7 +102,7 @@ public:
 
 private:
     UIDocument m_doc;
-    UIContext m_ctx;
+    UIFrameContext m_ctx;
     UITheme m_theme;
     UILayoutSolver m_layout;
     UIRenderList m_list;

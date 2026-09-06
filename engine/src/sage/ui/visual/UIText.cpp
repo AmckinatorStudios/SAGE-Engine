@@ -119,7 +119,7 @@ const UIComponentType& UIText::StaticType() {
     return t;
 }
 
-std::string UIText::Resolve(const UIContext& ctx) const {
+std::string UIText::Resolve(const UIFrameContext& ctx) const {
     // Ключ важнее строки, но строка остаётся запасным вариантом: без словаря
     // (в редакторе, в тесте, на раннем этапе) интерфейс обязан оставаться
     // читаемым, а не показывать «menu.play» (§108, §134).
@@ -132,7 +132,7 @@ std::string UIText::Resolve(const UIContext& ctx) const {
     return Text;
 }
 
-glm::vec2 UIText::Measure(const UIContext& ctx, const UINode& node, glm::vec2 available) const {
+glm::vec2 UIText::Measure(const UIFrameContext& ctx, const UINode& node, glm::vec2 available) const {
     (void)node;
     // Ширина ограничивается ТОЛЬКО если текст переносится: иначе надпись в
     // контейнере по содержимому обрезала бы сама себя.

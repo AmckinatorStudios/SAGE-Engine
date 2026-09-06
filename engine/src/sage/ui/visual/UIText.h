@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "sage/ui/core/UIComponent.h"
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/visual/UIGradient.h"
 
 // ---------------------------------------------------------------------------
@@ -101,11 +101,11 @@ struct UIText : UIComponentOf<UIText> {
 
     std::vector<UITextRun> Runs;
 
-    glm::vec2 Measure(const UIContext& ctx, const UINode& node,
+    glm::vec2 Measure(const UIFrameContext& ctx, const UINode& node,
                       glm::vec2 available) const override;
 
     // Итоговая строка: перевод по ключу, иначе Text.
-    std::string Resolve(const UIContext& ctx) const;
+    std::string Resolve(const UIFrameContext& ctx) const;
 };
 
 const char* const* UITextAlignNames();

@@ -62,7 +62,7 @@ std::string UIProfile::Summary() const {
 }
 
 void UIAppendDebugOverlay(const UIDocument& doc, const UILayoutSolver& layout,
-                          const UIContext& ctx, UIRenderList& list) {
+                          const UIFrameContext& ctx, UIRenderList& list) {
     const uint64_t topKey = ~0ull;
     for (const UIResolvedNode& r : layout.Nodes()) {
         const UINode* node = doc.Find(r.Id);

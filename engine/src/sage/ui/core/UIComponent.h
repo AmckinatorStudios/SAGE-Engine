@@ -30,7 +30,7 @@ class UIComponent;
 class UINode;
 class UIDocument;
 struct UIComponentType;
-struct UIContext;
+struct UIFrameContext;
 
 // Куда компонент попадает в инспекторе (§71: разделы, а не один список из
 // сотен полей).
@@ -85,7 +85,7 @@ public:
     // Вклад компонента в размер по содержимому (§14). available — сколько места
     // дал родитель (0 по оси — «не ограничен»). По умолчанию компонент ничего
     // не требует: подложка, маска и взаимодействие размера не задают.
-    virtual glm::vec2 Measure(const UIContext& ctx, const UINode& node,
+    virtual glm::vec2 Measure(const UIFrameContext& ctx, const UINode& node,
                               glm::vec2 available) const {
         (void)ctx; (void)node; (void)available;
         return glm::vec2(0.0f);

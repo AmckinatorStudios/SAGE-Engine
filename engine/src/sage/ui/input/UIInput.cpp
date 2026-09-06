@@ -73,7 +73,7 @@ void UIInputRouter::Emit(UIDocument& doc, UIEventBus& bus, UIEvent& e,
 }
 
 UIInputReport UIInputRouter::Update(UIDocument& doc, const UILayoutSolver& layout,
-                                    const UIContext& ctx, const UIInputFrame& input,
+                                    const UIFrameContext& ctx, const UIInputFrame& input,
                                     UIEventBus& bus) {
     UIInputReport result;
 

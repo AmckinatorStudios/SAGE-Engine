@@ -79,7 +79,7 @@ enum UIDebugFlags : uint32_t {
     UIDebug_HitAreas  = 1u << 9,
 };
 
-struct UIContext {
+struct UIFrameContext {
     // Размер кадра В ПИКСЕЛЯХ. Логические координаты холста получаются из него
     // и настроек холста (см. UIDocument::ScaleFor).
     glm::vec2 ScreenPixels{1920.0f, 1080.0f};

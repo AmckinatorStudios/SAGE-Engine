@@ -68,7 +68,7 @@ struct UIImage : UIComponentOf<UIImage> {
     // сравнении — это кэш, а не свойство.
     const Texture* Resolved = nullptr;
 
-    glm::vec2 Measure(const UIContext& ctx, const UINode& node,
+    glm::vec2 Measure(const UIFrameContext& ctx, const UINode& node,
                       glm::vec2 available) const override;
 };
 

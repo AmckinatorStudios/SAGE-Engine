@@ -2,7 +2,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/core/UIDocument.h"
 #include "sage/ui/layout/UILayout.h"
 #include "sage/ui/layout/UITransform.h"
@@ -81,7 +81,7 @@ class UILayoutSolver {
 public:
     // Посчитать документ для экрана из контекста. viewport — область в
     // ЛОГИЧЕСКИХ единицах (обычно UIDocument::ViewportFor).
-    void Solve(UIDocument& doc, const UIContext& ctx);
+    void Solve(UIDocument& doc, const UIFrameContext& ctx);
 
     const std::vector<UIResolvedNode>& Nodes() const { return m_nodes; }
     const UIMaskStack& Masks() const { return m_masks; }
@@ -132,7 +132,7 @@ private:
     std::unordered_map<UINodeId, MeasureCache> m_measure;
     UIMaskStack m_masks;
     UILayoutStats m_stats;
-    const UIContext* m_ctx = nullptr;
+    const UIFrameContext* m_ctx = nullptr;
     UIRect m_viewport{};
     float m_scale = 1.0f;
     uint32_t m_sortCounter = 0;

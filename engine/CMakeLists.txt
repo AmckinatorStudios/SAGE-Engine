@@ -161,6 +161,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/debug/UIDebug.cpp
     src/sage/ui/scene/UIScene.cpp
     src/sage/ui/showcase/UIShowcaseDocument.cpp
+    src/sage/ui/sageui/UIElement.cpp
+    src/sage/ui/sageui/UIContext.cpp
+    src/sage/ui/sageui/UIRegistry.cpp
+    src/sage/ui/sageui/UIWidgetsOO.cpp
     src/sage/ui/showcase/UIDemos.cpp
     src/sage/ui/UIFramework.cpp
 )

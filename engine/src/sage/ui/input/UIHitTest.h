@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/layout/UILayoutSolver.h"
 
 // ---------------------------------------------------------------------------
@@ -28,15 +28,15 @@ struct UIHitResult {
 
 // Верхний узел под точкой, принимающий ввод.
 UIHitResult UIHitTest(const UIDocument& doc, const UILayoutSolver& layout,
-                      const UIContext& ctx, glm::vec2 point);
+                      const UIFrameContext& ctx, glm::vec2 point);
 
 // Все узлы под точкой, сверху вниз — нужно распространению событий (§51):
 // путь от корня до цели строится один раз и переиспользуется всеми фазами.
-void UIHitPath(const UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+void UIHitPath(const UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                glm::vec2 point, std::vector<UINodeId>& outPath);
 
 // Попадает ли точка в конкретный узел (с учётом его формы попадания и масок).
-bool UIHitNode(const UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+bool UIHitNode(const UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                UINodeId id, glm::vec2 point);
 
 } // namespace sage::ui

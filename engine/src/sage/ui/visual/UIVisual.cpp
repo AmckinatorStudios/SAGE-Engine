@@ -5,7 +5,7 @@
 // файл, чтение, инспектор редактора и адресация свойств для анимации. Ни один
 // из этих четверых не содержит списка полей: список ровно один, и он здесь.
 // ---------------------------------------------------------------------------
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/core/UINode.h"
 #include "sage/ui/visual/UIBorder.h"
 #include "sage/ui/visual/UIFill.h"
@@ -292,7 +292,7 @@ const UIComponentType& UIMaterial::StaticType() {
     return t;
 }
 
-glm::vec2 UIImage::Measure(const UIContext& ctx, const UINode& node, glm::vec2 available) const {
+glm::vec2 UIImage::Measure(const UIFrameContext& ctx, const UINode& node, glm::vec2 available) const {
     (void)node;
     (void)available;
     // Размер картинки по содержимому — её собственный размер в пикселях

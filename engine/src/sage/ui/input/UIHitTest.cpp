@@ -68,7 +68,7 @@ bool InsidePolygon(const std::vector<glm::vec2>& pts, glm::vec2 p) {
 
 } // namespace
 
-bool UIHitNode(const UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+bool UIHitNode(const UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                UINodeId id, glm::vec2 point) {
     const UIResolvedNode* r = layout.Get(id);
     const UINode* node = doc.Find(id);
@@ -134,7 +134,7 @@ bool UIHitNode(const UIDocument& doc, const UILayoutSolver& layout, const UICont
     (void)ctx;
 }
 
-UIHitResult UIHitTest(const UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+UIHitResult UIHitTest(const UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                       glm::vec2 point) {
     UIHitResult best;
     uint64_t bestKey = 0;
@@ -162,7 +162,7 @@ UIHitResult UIHitTest(const UIDocument& doc, const UILayoutSolver& layout, const
     return best;
 }
 
-void UIHitPath(const UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+void UIHitPath(const UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                glm::vec2 point, std::vector<UINodeId>& outPath) {
     outPath.clear();
     const UIHitResult hit = UIHitTest(doc, layout, ctx, point);

@@ -661,7 +661,7 @@ void EmitFrontEffects(const UIDrawContext& ctx, const UINode& node) {
 
 } // namespace
 
-void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                      UIRenderList& out) {
     const auto t0 = std::chrono::steady_clock::now();
     out.Clear();

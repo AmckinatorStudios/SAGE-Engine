@@ -1,5 +1,5 @@
 #pragma once
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/core/UIDocument.h"
 #include "sage/ui/layout/UILayoutSolver.h"
 #include "sage/ui/render/UIRenderList.h"
@@ -27,7 +27,7 @@ class UINode;
 
 // Что эмиттер получает.
 struct UIDrawContext {
-    const UIContext* Ctx = nullptr;
+    const UIFrameContext* Ctx = nullptr;
     const UINode* Node = nullptr;
     const UIResolvedNode* Resolved = nullptr;
     UIRenderList* List = nullptr;
@@ -68,7 +68,7 @@ private:
 void RegisterBuiltinUIEmitters();
 
 // Собрать команды всего документа.
-void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UIContext& ctx,
+void UIBuildDrawList(UIDocument& doc, const UILayoutSolver& layout, const UIFrameContext& ctx,
                      UIRenderList& out);
 
 } // namespace sage::ui

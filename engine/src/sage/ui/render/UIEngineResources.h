@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 
 class Font;
 class UIRenderer;
@@ -73,7 +73,7 @@ struct UIEngineResources {
     UIEngineFonts Fonts;
     UIEngineTextures Textures;
 
-    void Install(UIContext& ctx) {
+    void Install(UIFrameContext& ctx) {
         ctx.Fonts = &Fonts;
         ctx.Textures = &Textures;
     }

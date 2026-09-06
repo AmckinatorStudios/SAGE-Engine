@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "sage/ui/core/UIContext.h"
+#include "sage/ui/core/UIFrameContext.h"
 #include "sage/ui/input/UIEvent.h"
 #include "sage/ui/layout/UILayoutSolver.h"
 
@@ -47,10 +47,9 @@ struct UIInputFrame {
 
 // Чем интерфейс «отчитывается» перед игрой: взял ли он ввод себе.
 //
-// Имя не UIInputResult намеренно: так называется тот же по смыслу тип СТАРОЙ
-// системы (sage/ui/UIInteraction.h). Пока обе живут рядом, одинаковое имя в
-// одном пространстве имён — ошибка компиляции у всякого, кто включит оба
-// заголовка, то есть у редактора.
+// Отчёт, а не «результат»: игре важно не «что вернула функция», а два факта —
+// забрал ли интерфейс щелчок себе и какие команды за кадр сработали. По первому
+// игра решает, доставать ли ей тот же щелчок; по второму — что делать.
 struct UIInputReport {
     bool PointerOverUI = false;
     bool PointerCaptured = false;   // идёт перетаскивание/нажатие в интерфейсе
@@ -68,7 +67,7 @@ public:
     // Один шаг. Зовётся РАНЬШЕ игровой логики кадра: по результату игра решает,
     // доставать ли ей тот же щелчок.
     UIInputReport Update(UIDocument& doc, const UILayoutSolver& layout,
-                         const UIContext& ctx, const UIInputFrame& input,
+                         const UIFrameContext& ctx, const UIInputFrame& input,
                          UIEventBus& bus);
 
     // --- Фокус (§55) --------------------------------------------------------

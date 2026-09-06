@@ -305,7 +305,7 @@ glm::vec2 UIApplyLayout(const UILayout& layout, const UIRect& container,
 // Решатель
 // ---------------------------------------------------------------------------
 
-void UILayoutSolver::Solve(UIDocument& doc, const UIContext& ctx) {
+void UILayoutSolver::Solve(UIDocument& doc, const UIFrameContext& ctx) {
     const auto t0 = std::chrono::steady_clock::now();
 
     m_ctx = &ctx;

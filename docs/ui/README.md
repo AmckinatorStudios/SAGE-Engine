@@ -5,6 +5,7 @@
 
 | Документ | О чём |
 |---|---|
+| [sageui.md](sageui.md) | Объектный слой: UIContext, UIElement, виджеты |
 | [architecture.md](architecture.md) | Устройство целиком и почему оно такое |
 | [nodes.md](nodes.md) | Узел, компоненты, дерево, документ |
 | [layout.md](layout.md) | Якоря, размеры, контейнеры, адаптивность |
