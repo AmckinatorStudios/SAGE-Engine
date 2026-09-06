@@ -1,6 +1,7 @@
 #include "sage/ui/scene/UIScene.h"
 
 #include <algorithm>
+#include <filesystem>
 
 #include "sage/core/Log.h"
 #include "sage/render/Framebuffer.h"
@@ -15,6 +16,38 @@ UIDocuments& UIDocuments::Instance() {
     // Тот же приём, что у реестра рендер-текстур движка.
     static UIDocuments* instance = new UIDocuments();
     return *instance;
+}
+
+void UIDocuments::SetRoot(const std::string& dir) {
+    if (m_root == dir) return;
+    m_root = dir;
+    // Уже открытые документы перечитываются: смена проекта означает, что тот же
+    // относительный путь ведёт в ДРУГОЙ файл, и оставить старое содержимое —
+    // значит показать человеку интерфейс из закрытого проекта.
+    for (auto& e : m_docs) {
+        if (!e->Loaded) continue;
+        const UILoadReport r = UILoadDocument(e->Runtime->Doc(), ResolvePath(e->Path),
+                                              &e->Runtime->Theme());
+        e->Loaded = r.Ok;
+    }
+}
+
+std::string UIDocuments::ResolvePath(const std::string& path) const {
+    namespace fs = std::filesystem;
+    if (m_root.empty() || path.empty()) return path;
+    std::error_code ec;
+    const fs::path given(path);
+    // Абсолютный путь — как есть: его уже кто-то разрешил, и второй раз
+    // приписывать корень нельзя.
+    if (given.is_absolute()) return path;
+    // Файл рядом с рабочей папкой имеет приоритет: так документы самого
+    // инструмента (витрина, тесты) не уезжают в чужой проект.
+    if (fs::exists(given, ec)) return path;
+    const fs::path inRoot = fs::path(m_root) / given;
+    if (fs::exists(inRoot, ec)) return inRoot.string();
+    // Ни там, ни там. Возвращаем путь В ПРОЕКТЕ: именно туда документ и должны
+    // были положить, и именно этот путь надо назвать в сообщении об ошибке.
+    return inRoot.string();
 }
 
 void UIDocuments::SetLocalizer(std::function<std::string(const std::string&)> fn) {
@@ -34,13 +67,14 @@ UIRuntime& UIDocuments::GetOrLoad(const std::string& path) {
     m_resources->Install(entry->Runtime->Context());
     entry->Runtime->Context().Localize = m_localize;
 
-    const UILoadReport report = UILoadDocument(entry->Runtime->Doc(), path,
+    const std::string file = ResolvePath(path);
+    const UILoadReport report = UILoadDocument(entry->Runtime->Doc(), file,
                                                &entry->Runtime->Theme());
     entry->Loaded = report.Ok;
     if (!report.Ok) {
         // Документа нет или он битый — это НЕ повод падать и не повод молчать:
         // игра продолжает работать, а причина написана в логе (§134).
-        LOG_WARN("UI") << "документ интерфейса не прочитан: " << path << " — "
+        LOG_WARN("UI") << "документ интерфейса не прочитан: " << file << " — "
                        << (report.Error.empty() ? "нет файла" : report.Error);
     }
     m_docs.push_back(std::move(entry));
@@ -78,7 +112,8 @@ bool UIDocuments::Loaded(const std::string& path) const {
 bool UIDocuments::Reload(const std::string& path) {
     for (auto& e : m_docs) {
         if (e->Path != path) continue;
-        const UILoadReport r = UILoadDocument(e->Runtime->Doc(), path, &e->Runtime->Theme());
+        const UILoadReport r =
+            UILoadDocument(e->Runtime->Doc(), ResolvePath(path), &e->Runtime->Theme());
         e->Loaded = r.Ok;
         return r.Ok;
     }

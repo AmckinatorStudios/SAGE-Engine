@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 #include "sage/ui/UIFramework.h"
@@ -1651,4 +1652,62 @@ TEST(UIx_layer_is_inherited_by_the_subtree) {
     const UIResolvedNode* rc2 = h.rt.Layout().Get(child.Id);
     CHECK_TRUE(rc2 != nullptr);
     if (rc2) CHECK_EQ(rc2->Layer, 401);
+}
+
+// --- Пути документов относительно проекта -----------------------------------
+//
+// Сцена ссылается на документ ОТНОСИТЕЛЬНО ПРОЕКТА («assets/ui/hud.uidoc»):
+// абсолютный путь в файле сцены не переживает ни переноса проекта на другую
+// машину, ни сборки игры. Собранной игре этого хватает — SagePlayer делает
+// chdir в проект. Редактору не хватало: его рабочая папка не папка проекта, и
+// тот же самый документ, работавший в игре, в Play не открывался ВООБЩЕ.
+TEST(UI_document_path_is_resolved_against_the_project_root) {
+    namespace fs = std::filesystem;
+    UIInitialize();
+
+    // Проект «где-то не там, где мы сейчас»: ровно так его и видит редактор.
+    std::error_code ec;
+    const fs::path root = fs::temp_directory_path(ec) / "sage_uidoc_root_test";
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "assets" / "ui", ec);
+
+    const std::string ref = "assets/ui/root_test.uidoc";
+    {
+        UIRuntime tmp;
+        UINode& node = *tmp.Doc().Create("Score", kUIInvalidNode);
+        node.Ensure<UIText>().Text = "из проекта";
+        CHECK_TRUE(UISaveDocument(tmp.Doc(), (root / ref).string(), &tmp.Theme()));
+    }
+
+    UIDocuments& docs = UIDocuments::Instance();
+    const std::string prevRoot = docs.Root();
+    docs.Remove(ref);
+
+    // Сначала — БЕЗ корня: ровно то, что делал редактор до этой правки.
+    // Документ не открывается, и по картинке это выглядит как «худ пропал».
+    docs.SetRoot("");
+    docs.GetOrLoad(ref);
+    CHECK_FALSE(docs.Loaded(ref));
+    docs.Remove(ref);
+
+    docs.SetRoot(root.string());
+    UIRuntime& rt = docs.GetOrLoad(ref);
+    CHECK_TRUE(docs.Loaded(ref));
+    const UINode* score = rt.Doc().FindByName("Score");
+    CHECK_TRUE(score != nullptr);
+    if (score && score->Get<UIText>()) CHECK_EQ(score->Get<UIText>()->Text, std::string("из проекта"));
+
+    // Ключ документа — путь ИЗ СЦЕНЫ, а не разрешённый: скрипт, открывший
+    // «assets/ui/hud.uidoc», обязан найти свой же документ по той же строке.
+    CHECK_TRUE(docs.Find(ref) == &rt);
+    CHECK_TRUE(docs.ResolvePath(ref) == (root / ref).string());
+
+    // Абсолютный путь корень НЕ трогает: его уже кто-то разрешил, и второй раз
+    // приписывать корень некуда.
+    const std::string abs = (root / ref).string();
+    CHECK_TRUE(docs.ResolvePath(abs) == abs);
+
+    docs.Remove(ref);
+    docs.SetRoot(prevRoot);
+    fs::remove_all(root, ec);
 }

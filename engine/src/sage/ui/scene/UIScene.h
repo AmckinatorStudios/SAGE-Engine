@@ -90,6 +90,24 @@ public:
     // Перевод строк — общий для всех документов.
     void SetLocalizer(std::function<std::string(const std::string&)> fn);
 
+    // --- Корень проекта -----------------------------------------------------
+    //
+    // Сцена ссылается на документ ОТНОСИТЕЛЬНО ПРОЕКТА («assets/ui/hud.uidoc»)
+    // — иначе сцену нельзя ни перенести, ни собрать в игру. Собранной игре
+    // этого хватает: SagePlayer делает chdir в проект, и относительный путь
+    // открывается сам. РЕДАКТОРУ не хватает: его рабочая папка — не папка
+    // проекта, и тот же путь не открывается ничем.
+    //
+    // Отсюда корень: инструмент говорит, откуда считать относительные пути,
+    // и на этом разница между «работает в игре» и «работает в редакторе»
+    // заканчивается. Ключ документа при этом НЕ меняется — им остаётся путь,
+    // записанный в сцене, иначе скрипт, открывший «assets/ui/hud.uidoc», не
+    // нашёл бы свой же документ.
+    void SetRoot(const std::string& dir);
+    const std::string& Root() const { return m_root; }
+    // Путь, по которому документ реально лежит на диске.
+    std::string ResolvePath(const std::string& path) const;
+
     std::vector<std::string> OpenPaths() const;
 
 private:
@@ -99,6 +117,7 @@ private:
         std::unique_ptr<UIRuntime> Runtime;
         bool Loaded = false;
     };
+    std::string m_root;
     std::vector<std::unique_ptr<Entry>> m_docs;
     std::unique_ptr<UIEngineResources> m_resources;
     std::function<std::string(const std::string&)> m_localize;

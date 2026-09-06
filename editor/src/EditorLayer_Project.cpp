@@ -99,11 +99,15 @@ constexpr float kStatusBarHeight = 26.0f;
 // иначе шаблон «Интерфейс» открывался бы пустым.
 void AttachDemoDocument(Scene& scene, const Project& project, const std::string& demo,
                         const std::string& objectName, int sortOrder) {
-    std::string path = "assets/ui/" + demo + ".uidoc";
+    // В СЦЕНУ идёт путь относительно проекта, а на ДИСК документ пишется по
+    // полному. Абсолютный путь в сцене пережил бы ровно до первого переноса
+    // проекта на другую машину — и до первой сборки игры, где такой папки нет.
+    const std::string path = "assets/ui/" + demo + ".uidoc";
+    std::string file = path;
     if (project.Loaded()) {
         std::error_code ec;
         fs::create_directories(project.AssetsDir() / "ui", ec);
-        path = (project.AssetsDir() / "ui" / (demo + ".uidoc")).string();
+        file = (project.AssetsDir() / "ui" / (demo + ".uidoc")).string();
     }
 
     // Сначала ФАЙЛ, потом чтение. Наоборот — значит попросить реестр открыть
@@ -111,7 +115,7 @@ void AttachDemoDocument(Scene& scene, const Project& project, const std::string&
     // «документ не прочитан» на ровном месте: у нового проекта его и не могло
     // быть. Уже существующий чужой документ по этому пути не трогаем — шаблон
     // не имеет права затирать чужую работу.
-    if (fs::exists(path)) {
+    if (fs::exists(file)) {
         // Документ уже лежит на диске — читаем его и не трогаем: шаблон не
         // имеет права затирать чужую работу.
         sage::ui::UIDocuments::Instance().GetOrLoad(path);
@@ -125,7 +129,7 @@ void AttachDemoDocument(Scene& scene, const Project& project, const std::string&
         rt.Doc().Clear();
         sage::ui::UIBuildDemo(demo, rt.Doc(), rt.Theme());
         rt.Build();
-        if (project.Loaded()) sage::ui::UISaveDocument(rt.Doc(), path, &rt.Theme());
+        if (project.Loaded()) sage::ui::UISaveDocument(rt.Doc(), file, &rt.Theme());
     }
 
     GameObject obj = scene.CreateObject(objectName);
@@ -557,6 +561,7 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
         return false;
     }
     if (!m_project.CreateNew(dir, name, err)) return false;
+    sage::ui::UIDocuments::Instance().SetRoot(m_project.Dir().string());
     const ProjectTemplateKind kind = tpl->Kind;
     m_assetsCwd = m_project.Dir();
     m_recent.Add(m_project.Dir().string());
@@ -613,6 +618,11 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
 bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     if (!m_project.Open(path, err)) return false;
     m_assetsCwd = m_project.Dir();
+    // Откуда считать пути документов интерфейса. Сцена ссылается на них
+    // относительно ПРОЕКТА («assets/ui/hud.uidoc»), а рабочая папка редактора —
+    // не папка проекта; без этого документ, открывавшийся в собранной игре, в
+    // редакторе не открывался вообще.
+    sage::ui::UIDocuments::Instance().SetRoot(m_project.Dir().string());
     m_recent.Add(m_project.Dir().string());
 
     // Настройки проекта (sage.cfg) — в окно Settings; отсутствие файла не ошибка
