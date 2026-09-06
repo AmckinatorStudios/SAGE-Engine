@@ -102,6 +102,9 @@ void PlayerLayer::DrawFatalScreen() {
                "Esc — выход. Подробности продублированы в sage_player.log");
     m_ui->End();
 
+    // Единственное место плеера, где клавиша опрашивается у окна напрямую: до
+    // этого экрана дело доходит, когда проект не загрузился, а значит система
+    // ввода не построена вовсе (см. BuildSceneRuntime) — спрашивать не у кого.
     if (glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS) app.Close();
     TakeAutoScreenshot();
 }
@@ -305,8 +308,10 @@ void PlayerLayer::DrawPauseMenu(int vpW, int vpH) {
 // верхнему углу, а с чёрными полосами — со сдвигом на их ширину.
 glm::vec2 PlayerLayer::CursorInViewport() const {
     Window& window = sage::Application::Get().GetWindow();
-    double mx = 0.0, my = 0.0;
-    glfwGetCursorPos(window.Handle(), &mx, &my);
+    // Курсор берётся из системы ввода — того же снимка кадра, что видят
+    // действия и скрипты. Отдельный опрос окна давал бы интерфейсу другое
+    // положение мыши, чем игре, ровно в те кадры, когда это важнее всего.
+    const glm::vec2 cursor = m_input.MousePosition();
 
     // Window::Width() — размер БУФЕРА (окно слушает FramebufferSizeCallback), а
     // курсор приходит в размерах ОКНА: их отношение и есть множитель HiDPI.
@@ -315,8 +320,8 @@ glm::vec2 PlayerLayer::CursorInViewport() const {
     const float toPixels = winW > 0 ? (float)window.Width() / (float)winW : 1.0f;
     const float toPixelsY = winH > 0 ? (float)window.Height() / (float)winH : 1.0f;
 
-    return {(float)mx * toPixels - (float)m_uiOffsetX,
-            (float)my * toPixelsY - (float)m_uiOffsetY};
+    return {cursor.x * toPixels - (float)m_uiOffsetX,
+            cursor.y * toPixelsY - (float)m_uiOffsetY};
 }
 
 // Выход из игры одним путём для всех кнопок и клавиш.
@@ -372,10 +377,22 @@ void PlayerLayer::BuildSceneRuntime() {
     // Ввод — ДО привязки скриптов: раскладку объявляет сам скрипт в OnStart
     // (BindAction), а OnStart вызывается прямо из AttachScript. Привяжи мы ввод
     // после, первые же BindAction упали бы с «ввод не привязан».
-    m_input.Attach(app.GetWindow());
-    m_rawInput = std::make_unique<WindowRawInput>(m_input, app.GetWindow());
-    m_scripts->BindInput(m_input.Actions());
-    m_scripts->BindRawInput(*m_rawInput);
+    // Мост к окну подключается ОДИН раз за жизнь плеера, а не на каждую сцену:
+    // BuildSceneRuntime зовётся ещё и при смене уровня (sage.scene.Load), а
+    // подписка на события окна снимается только вместе с окном. Второй мост
+    // означал бы два одинаковых события на одно нажатие — то есть удвоенную
+    // дельту мыши и обзор, летящий вдвое быстрее, начиная со второго уровня.
+    if (!m_inputAttached) {
+        m_inputBridge.Attach(app.GetWindow(), m_input);
+        m_inputAttached = true;
+    }
+    // Раскладку объявляют скрипты нового уровня — старая уходит вместе с ним.
+    m_input.ClearActions();
+    m_scripts->BindInput(m_input);
+    // События действий уходят и на шину сцены: «input.Jump» слышат подписчики
+    // на Lua и связи, настроенные в инспекторе, — а не только тот, кто
+    // спрашивает опросом.
+    m_input.SetEventBus(&m_scene->Events);
 
     // Звук игры. Отсутствие звукового устройства (CI, headless) — не повод
     // ронять игру: AudioEngine сам работает вхолостую, а PlaySound из Lua
@@ -495,12 +512,29 @@ void PlayerLayer::OnUpdate(float dt) {
 
     // Ввод опрашиваем ПЕРВЫМ делом в кадре: скрипты ниже читают именно этот
     // снимок (действия + смещение мыши), и он должен быть одним на весь кадр.
-    m_input.Update(window.Handle());
+    // Геймпады опрашиваются отдельно: событий для них оконная система не шлёт
+    // вовсе — джойстик приходится спрашивать самому, раз в кадр.
+    m_inputBridge.PollGamepads();
+
+    // Кадр ввода в два шага (см. InputSystem::BeginFrame): сначала устройства,
+    // потом интерфейс, и только потом действия. Иначе выстрел успевает
+    // получиться из того самого щелчка, которым нажали кнопку меню.
+    m_input.BeginFrame();
 
     // Интерфейс получает ввод РАНЬШЕ скриптов: щелчок по кнопке меню не должен
     // одновременно стрелять, а буква, набранная в поле имени, — двигать
-    // персонажа. Результат (что съел интерфейс) уходит скриптам.
+    // персонажа.
     UpdateUiInput(dt);
+
+    // Что интерфейс съел, того игра не увидит (§29 ТЗ). Раньше UIInputResult
+    // считался и не использовался вовсе: игра стреляла сквозь собственное
+    // меню, и это было видно каждому, кто нажимал кнопку.
+    uint8_t eaten = sage::input::DeviceNone;
+    if (m_uiResult.WantsMouse) eaten |= sage::input::DeviceMouse;
+    if (m_uiResult.WantsKeyboard) eaten |= sage::input::DeviceKeyboard;
+    if (eaten != sage::input::DeviceNone) m_input.BlockDevices(eaten);
+
+    m_input.UpdateActions(dt);
 
     // Логика кадра — планировщиком, а не пятью строками подряд: порядок
     // «скрипты -> физика -> анимация -> частицы -> звук» записан ОДИН раз в
@@ -545,11 +579,11 @@ void PlayerLayer::OnUpdate(float dt) {
     // целиком: перехватывать клавишу и показывать поверх её меню ещё одно —
     // ровно то, из-за чего своё меню было невозможно сделать.
     if (!PauseMenuWanted()) {
-        m_escLatched = glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
+        m_escLatched = m_input.State().Keys().Down(sage::input::Key::Escape);
         m_paused = false;
         return;
     }
-    const bool escDown = glfwGetKey(window.Handle(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
+    const bool escDown = m_input.State().Keys().Down(sage::input::Key::Escape);
     if (escDown && !m_escLatched) {
         m_paused = !m_paused;
         // В паузе курсор нужен для меню; при возврате в игру — обратно в захват,
@@ -561,47 +595,52 @@ void PlayerLayer::OnUpdate(float dt) {
 
 // Собирает состояние ввода для интерфейса и прогоняет его через UI сцены.
 //
-// Символы и клавиши редактирования приходят СОБЫТИЯМИ (колбэки окна), а не
-// опросом: символ зависит от раскладки и композиции, а у Backspace должен
-// работать автоповтор. Мышь, наоборот, опрашивается — её состояние
-// непрерывно.
+// Всё берётся из системы ввода движка (§28 ТЗ): и мышь, и набранный текст, и
+// клавиши редактирования. Своих колбэков окна интерфейс больше не заводит —
+// раньше их было два комплекта (у ввода игры и у интерфейса), и какой из них
+// увидит нажатие первым, зависело от порядка инициализации.
 void PlayerLayer::UpdateUiInput(float dt) {
     if (!m_scene) return;
-    sage::Application& app = sage::Application::Get();
-    Window& window = app.GetWindow();
-
-    if (!m_uiCallbacksBound) {
-        m_uiCallbacksBound = true;
-        window.SetCharCallback(
-            [this](unsigned int cp) { sage::ui::AppendUtf8(m_uiInput.TypedText, cp); });
-        window.AddKeyCallback([this](int key, int action, int) {
-            if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
-            switch (key) {
-                case GLFW_KEY_BACKSPACE: m_uiInput.Backspace = true; break;
-                case GLFW_KEY_DELETE:    m_uiInput.Delete = true; break;
-                case GLFW_KEY_LEFT:      m_uiInput.Left = true; break;
-                case GLFW_KEY_RIGHT:     m_uiInput.Right = true; break;
-                case GLFW_KEY_HOME:      m_uiInput.Home = true; break;
-                case GLFW_KEY_END:       m_uiInput.End = true; break;
-                case GLFW_KEY_ENTER:
-                case GLFW_KEY_KP_ENTER:  m_uiInput.Enter = true; break;
-                case GLFW_KEY_ESCAPE:    m_uiInput.Escape = true; break;
-                case GLFW_KEY_TAB:       m_uiInput.Tab = true; break;
-                default: break;
-            }
-        });
-    }
 
     auto uiView = m_scene->Registry().view<sage::ui::Transform>();
     if (uiView.begin() == uiView.end()) { ResetUiEdits(); return; }
 
-    const bool down = glfwGetMouseButton(window.Handle(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    // Символы — готовыми кодами Unicode: раскладка, Shift и мёртвые клавиши
+    // превращают нажатия в символы по правилам системы, повторять их в движке
+    // нельзя.
+    for (unsigned int codepoint : m_input.TypedText())
+        sage::ui::AppendUtf8(m_uiInput.TypedText, codepoint);
+
+    // Клавиши редактирования — по СОБЫТИЯМ кадра, а не по состоянию: у
+    // Backspace должен работать автоповтор, а «зажато» и «повторилось» — разные
+    // вещи.
+    for (const sage::input::InputEvent& e : m_input.FrameEvents()) {
+        if (e.Type != sage::input::InputEventType::KeyPressed &&
+            e.Type != sage::input::InputEventType::KeyRepeat)
+            continue;
+        switch (e.Keyboard) {
+            case sage::input::Key::Backspace: m_uiInput.Backspace = true; break;
+            case sage::input::Key::Delete:    m_uiInput.Delete = true; break;
+            case sage::input::Key::Left:      m_uiInput.Left = true; break;
+            case sage::input::Key::Right:     m_uiInput.Right = true; break;
+            case sage::input::Key::Home:      m_uiInput.Home = true; break;
+            case sage::input::Key::End:       m_uiInput.End = true; break;
+            case sage::input::Key::Enter:
+            case sage::input::Key::KpEnter:   m_uiInput.Enter = true; break;
+            case sage::input::Key::Escape:    m_uiInput.Escape = true; break;
+            case sage::input::Key::Tab:       m_uiInput.Tab = true; break;
+            default: break;
+        }
+    }
+
+    const sage::input::Mouse& mouse = m_input.State().MouseState();
+    const bool down = mouse.Down(sage::input::MouseButton::Left);
     // Захваченный курсор — это режим обзора: экранной точки у мыши нет, и
     // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
-    const bool captured = window.CursorCaptured();
+    const bool captured = m_input.CursorCaptured();
     m_uiInput.Mouse = captured ? glm::vec2(-1.0f) : CursorInViewport();
-    m_uiInput.MousePressed = down && !m_uiMouseWasDown && !captured;
-    m_uiInput.MouseReleased = !down && m_uiMouseWasDown && !captured;
+    m_uiInput.MousePressed = mouse.Pressed(sage::input::MouseButton::Left) && !captured;
+    m_uiInput.MouseReleased = mouse.Released(sage::input::MouseButton::Left) && !captured;
     m_uiInput.MouseDown = down && !captured;
     m_uiMouseWasDown = down;
     m_uiInput.DeltaTime = dt;

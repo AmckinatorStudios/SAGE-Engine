@@ -8,7 +8,6 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIIcons.h"
-#include "sage/core/KeyNames.h"
 #include <algorithm>
 #include <cctype>
 #include <optional>

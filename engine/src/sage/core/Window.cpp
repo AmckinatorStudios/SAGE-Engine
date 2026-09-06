@@ -34,6 +34,11 @@ void Window::ForwardMouseButton(GLFWwindow* handle, int button, int action, int 
     for (const MouseButtonFn& fn : win->m_mouseButtonFns) fn(button, action, mods);
 }
 
+void Window::ForwardCursorEnter(GLFWwindow* handle, int entered) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    if (win && win->m_cursorEnterFn) win->m_cursorEnterFn(entered != 0);
+}
+
 void Window::ForwardFileDrop(GLFWwindow* handle, int count, const char** paths) {
     auto* win = static_cast<Window*>(glfwGetWindowUserPointer(handle));
     if (!win || !win->m_fileDropFn || count <= 0 || !paths) return;
@@ -127,6 +132,7 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwSetKeyCallback(m_handle, &Window::ForwardKey);
     glfwSetMouseButtonCallback(m_handle, &Window::ForwardMouseButton);
     glfwSetDropCallback(m_handle, &Window::ForwardFileDrop);
+    glfwSetCursorEnterCallback(m_handle, &Window::ForwardCursorEnter);
 
     // Загрузку драйвера (glad) и дефолтное состояние конвейера (depth test,
     // backface culling, бесшовные cubemap) выполняет rhi::GraphicsDevice::Init,

@@ -60,6 +60,12 @@ public:
     // Кнопки мыши — тем же событием и по той же причине, что клавиши: щелчок
     // короче кадра существует, а опрос его не видит (см. AddKeyCallback).
     using MouseButtonFn = std::function<void(int button, int action, int mods)>;
+    // Курсор ВОШЁЛ в окно или ПОКИНУЛ его. Опросить это нельзя — только
+    // событием, а знать надо: пока курсор снаружи, «мышь над кнопкой» ложь, и
+    // подсветка остаётся висеть на той кнопке, над которой курсор вышел за
+    // край окна.
+    using CursorEnterFn = std::function<void(bool entered)>;
+
     // Файлы, брошенные В ОКНО из проводника системы.
     //
     // Это единственный способ узнать о таком перетаскивании: оконная система
@@ -80,6 +86,7 @@ public:
     void AddKeyCallback(KeyFn fn) { m_keyFns.push_back(std::move(fn)); }
     void AddMouseButtonCallback(MouseButtonFn fn) { m_mouseButtonFns.push_back(std::move(fn)); }
     void SetFileDropCallback(FileDropFn fn) { m_fileDropFn = std::move(fn); }
+    void SetCursorEnterCallback(CursorEnterFn fn) { m_cursorEnterFn = std::move(fn); }
 
     // Захват курсора: мышь прячется и «прилипает» к окну, продолжая отдавать
     // смещение — режим обзора от первого лица. Без этого игра от первого лица
@@ -95,6 +102,7 @@ private:
     static void ForwardKey(GLFWwindow* handle, int key, int scancode, int action, int mods);
     static void ForwardMouseButton(GLFWwindow* handle, int button, int action, int mods);
     static void ForwardFileDrop(GLFWwindow* handle, int count, const char** paths);
+    static void ForwardCursorEnter(GLFWwindow* handle, int entered);
 
     GLFWwindow* m_handle = nullptr;
     int m_width;
@@ -105,5 +113,6 @@ private:
     std::vector<KeyFn> m_keyFns;
     std::vector<MouseButtonFn> m_mouseButtonFns;
     FileDropFn m_fileDropFn;
+    CursorEnterFn m_cursorEnterFn;
     bool m_cursorCaptured = false;
 };

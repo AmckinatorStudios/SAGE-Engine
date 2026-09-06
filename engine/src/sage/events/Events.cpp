@@ -11,6 +11,8 @@ namespace {
 // переполнением стека C++ — то есть ошибка в НАСТРОЙКЕ кнопки убивает игру без
 // единого понятного слова в логе.
 constexpr int kMaxDepth = 16;
+// Столько проходов делает разбор очереди — см. DispatchQueued.
+constexpr int kMaxQueuePasses = 8;
 } // namespace
 
 int Bus::On(const std::string& name, Handler handler) {
@@ -51,6 +53,10 @@ void Bus::Clear() {
     // просит сменить уровень), и стирание вектора под ногами у Emit — это
     // висячая ссылка.
     for (Slot& s : m_slots) s.Dead = true;
+    // Неразобранные события выгруженного уровня не должны догнать следующий:
+    // «дверь открылась» из прошлой сцены в новой означает чужую дверь.
+    m_queued.clear();
+    m_deferred.clear();
     if (!m_sweeping && m_depth == 0) m_slots.clear();
 }
 
@@ -87,6 +93,50 @@ void Bus::Emit(const Event& event) {
                       m_slots.end());
         m_sweeping = false;
     }
+}
+
+void Bus::Queue(const std::string& name, const sage::vars::Value& arg, int sender) {
+    Event e;
+    e.Name = name;
+    e.Arg = arg;
+    e.Sender = sender;
+    Queue(e);
+}
+
+void Bus::Defer(const std::string& name, const sage::vars::Value& arg, int sender) {
+    Event e;
+    e.Name = name;
+    e.Arg = arg;
+    e.Sender = sender;
+    Defer(e);
+}
+
+void Bus::DispatchQueued() {
+    // Очередь забирается ЦЕЛИКОМ на каждый проход: обработчик волен положить в
+    // неё новое событие, а дописывание в вектор, по которому идёт цикл, — это
+    // переаллокация под ногами у итератора.
+    //
+    // Проходов несколько, потому что цепочка «событие -> условие -> действие ->
+    // событие» (§17 ТЗ) обязана доиграться в ЭТОМ кадре: разложенная по кадрам,
+    // она превращает открытие двери в лестницу задержек. Но и не бесконечно:
+    // два события, кладущих друг друга в очередь, иначе зациклят кадр насмерть.
+    for (int pass = 0; pass < kMaxQueuePasses && !m_queued.empty(); ++pass) {
+        std::vector<Event> batch;
+        batch.swap(m_queued);
+        for (const Event& e : batch) Emit(e);
+    }
+    if (!m_queued.empty()) {
+        LOG_ERROR("Events") << "Очередь событий не разобралась за " << kMaxQueuePasses
+                            << " проходов — события кладут друг друга по кругу; осталось "
+                            << m_queued.size();
+        m_queued.clear();
+    }
+}
+
+void Bus::DispatchDeferred() {
+    std::vector<Event> batch;
+    batch.swap(m_deferred);
+    for (const Event& e : batch) Emit(e);
 }
 
 int Bus::Count(const std::string& name) const {

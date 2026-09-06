@@ -27,7 +27,8 @@
 #include "sage/core/Config.h"
 #include "sage/ecs/RenderBatch.h"
 
-#include "sage/core/InputSystem.h"
+#include "sage/input/GlfwBridge.h"
+#include "sage/input/InputSystem.h"
 #include "sage/audio/AudioEngine.h"
 
 #include "EditorHost.h"
@@ -349,8 +350,12 @@ private:
     // собранной игре, но отдаются игре только при фокусе панели Game
     // (см. EditorPlayInput). Живут всё время работы редактора — действия
     // объявляют скрипты при старте Play, карта пересоздаётся вместе с ними.
-    InputSystem m_playInput;
-    std::unique_ptr<EditorPlayInput> m_playRawInput;
+    sage::input::InputSystem m_playInput;
+    // Мост к окну — ОДИН на всё время работы редактора, а не новый на каждый
+    // Play: подписка на события окна снимается только вместе с окном, и второй
+    // мост означал бы два комплекта событий на одно нажатие.
+    sage::input::GlfwBridge m_playInputBridge;
+    EditorPlayInput m_playCursor;   // захват курсора по фокусу панели Game
     // Звук Play-режима. Без него PlaySound из Lua падал бы в редакторе и
     // работал в собранной игре — превью обязано звучать так же, как игра.
     std::unique_ptr<AudioEngine> m_playAudio;

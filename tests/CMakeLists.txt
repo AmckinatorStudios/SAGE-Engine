@@ -16,6 +16,8 @@ add_executable(sage_tests
     test_paths.cpp
     test_ui.cpp
     test_vars_events.cpp
+    test_input.cpp
+    test_eventbus.cpp
     test_framegraph.cpp
     test_lod.cpp
     test_resources.cpp

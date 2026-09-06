@@ -6,7 +6,8 @@
 #include <vector>
 
 #include "sage/core/Layer.h"
-#include "sage/core/InputSystem.h"
+#include "sage/input/GlfwBridge.h"
+#include "sage/input/InputSystem.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
@@ -115,8 +116,11 @@ private:
     // Ввод игры. Действия объявляют САМИ СКРИПТЫ (BindAction из Lua) — плеер
     // не знает и не должен знать раскладку конкретной игры; его дело — раз в
     // кадр опросить устройства и отдать результат скриптам.
-    InputSystem m_input;
-    std::unique_ptr<WindowRawInput> m_rawInput; // мышь/захват курсора для Lua
+    sage::input::InputSystem m_input;
+    // Мост к окну: переводит события GLFW в словарь движка и исполняет захват
+    // курсора. Единственное место плеера, знающее про оконный слой.
+    sage::input::GlfwBridge m_inputBridge;
+    bool m_inputAttached = false;   // мост к окну — один на всю жизнь плеера
     std::unique_ptr<AudioEngine> m_audio;       // звук игры (PlaySound/PlayMusic из Lua)
 
     std::optional<Shader> m_shader;       // lit: ambient+sun+point lights+тени
@@ -170,8 +174,9 @@ private:
     // состояния ввода, иначе её нельзя ни прогнать в тесте, ни отдать
     // редактору с его пересчитанными в панель координатами.
     sage::ui::UIInputState m_uiInput;
+    // Что интерфейс съел в этом кадре. Игра обязана это уважать: щелчок по
+    // кнопке меню не должен одновременно стрелять (§29 ТЗ).
     sage::ui::UIInputResult m_uiResult;
-    bool m_uiCallbacksBound = false;
     bool m_uiMouseWasDown = false;
     // Размер области, в которой нарисован интерфейс (letterbox-viewport). Мышь
     // сравнивается именно с ним, иначе клики уезжают на ширину чёрных полос.

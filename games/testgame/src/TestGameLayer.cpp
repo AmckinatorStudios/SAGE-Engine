@@ -585,14 +585,21 @@ void TestGameLayer::OnAttach() {
                          << ", " << m_physics->BodyCount() << " bodies in " << startRoom;
     RebuildSystems();
 
-    // --- ввод: именованные действия через InputSystem (первый реальный
-    // потребитель; подписка на мышь — через Window, см. InputSystem::Attach) ---
-    m_input.Attach(window);
-    m_input.Actions().Register("MoveForward").Bind(InputBinding::Key(GLFW_KEY_W));
-    m_input.Actions().Register("MoveBack").Bind(InputBinding::Key(GLFW_KEY_S));
-    m_input.Actions().Register("MoveLeft").Bind(InputBinding::Key(GLFW_KEY_A));
-    m_input.Actions().Register("MoveRight").Bind(InputBinding::Key(GLFW_KEY_D));
-    m_input.Actions().Register("Quit").Bind(InputBinding::Key(GLFW_KEY_ESCAPE));
+    // --- ввод: именованные действия (см. sage/input/InputSystem.h) ---
+    //
+    // Движение — ОДНО векторное действие, а не четыре булевых: то же самое
+    // «Движение» приходит и с левого стика геймпада, и код ходьбы ниже не
+    // знает, чем играют.
+    m_inputBridge.Attach(window, m_input);
+    sage::input::Action& move = m_input.Register("Move", sage::input::ActionType::Vector);
+    move.BindVector("W", "S", "A", "D");
+    move.Bind(sage::input::Binding::OfPadAxis(sage::input::GamepadAxis::LeftX)
+                  .On(sage::input::Component::X));
+    move.Bind(sage::input::Binding::OfPadAxis(sage::input::GamepadAxis::LeftY)
+                  .On(sage::input::Component::Y));
+    sage::input::Action& quit = m_input.Register("Quit");
+    quit.Bind("ESCAPE");
+    quit.Bind("PAD_START");
 
     m_camera.Position = m_playerPos + glm::vec3(0.0f, kEyeHeight, 0.0f);
     m_camera.Yaw = -90.0f; // смотрим в -Z, вглубь комнаты
@@ -843,9 +850,13 @@ void TestGameLayer::OnUpdate(float dt) {
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
 
-    m_input.Update(window.Handle());
-    if (m_input.Actions().WasPressed("Quit")) app.Close();
-    if (m_cursorCaptured) m_input.ApplyMouseDelta(m_camera);
+    m_inputBridge.PollGamepads();
+    m_input.Update(dt);
+    if (m_input.WasPressed("Quit")) app.Close();
+    if (m_cursorCaptured) {
+        const glm::vec2 look = m_input.MouseDelta();
+        m_camera.ProcessMouse(look.x, look.y);
+    }
 
     m_hurtCooldown = std::max(0.0f, m_hurtCooldown - dt);
 
@@ -855,11 +866,8 @@ void TestGameLayer::OnUpdate(float dt) {
         // Направление движения — из ориентации камеры, спроецированной на XZ.
         glm::vec3 fwd = glm::vec3(m_camera.Front.x, 0.0f, m_camera.Front.z);
         glm::vec3 right = glm::vec3(m_camera.Right.x, 0.0f, m_camera.Right.z);
-        glm::vec3 wish{0.0f};
-        if (m_input.Actions().IsDown("MoveForward")) wish += fwd;
-        if (m_input.Actions().IsDown("MoveBack")) wish -= fwd;
-        if (m_input.Actions().IsDown("MoveRight")) wish += right;
-        if (m_input.Actions().IsDown("MoveLeft")) wish -= right;
+        const glm::vec2 move = m_input.Vector("Move");
+        const glm::vec3 wish = fwd * move.y + right * move.x;
         MovePlayer(wish, dt);
     }
 

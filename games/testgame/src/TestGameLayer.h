@@ -8,7 +8,8 @@
 #include <glm/glm.hpp>
 
 #include "sage/core/Layer.h"
-#include "sage/core/InputSystem.h"
+#include "sage/input/GlfwBridge.h"
+#include "sage/input/InputSystem.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
@@ -114,7 +115,8 @@ private:
     static constexpr float kPlayerSpeed = 5.0f;
 
     // --- ввод/камера ---
-    InputSystem m_input;
+    sage::input::InputSystem m_input;
+    sage::input::GlfwBridge m_inputBridge; // события окна -> словарь движка
     Camera m_camera;
     bool m_cursorCaptured = false;
 

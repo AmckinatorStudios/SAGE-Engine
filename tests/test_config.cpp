@@ -110,15 +110,33 @@ TEST(Paths_user_folders_come_from_xdg_not_from_english_names) {
 }
 #endif
 
-TEST(Systems_registry_all_v1_and_valid) {
+// Версия подсистемы — её контракт, а не украшение: по нему игра понимает, что
+// у неё под ногами. Проверяется, что запись каждой подсистемы осмысленна, а
+// метка совпадает с номером — расхождение между ними видно только здесь.
+TEST(Systems_registry_is_valid) {
     const auto& systems = sage::EngineSystems();
     CHECK_TRUE(systems.size() >= 15); // движок состоит из многих подсистем
     for (const sage::SystemVersion& s : systems) {
-        CHECK_EQ(s.Major, 1);                 // пока все на v1
-        CHECK_EQ(s.Tag(), std::string("v1"));
+        CHECK_TRUE(s.Major >= 1);
+        CHECK_EQ(s.Tag(), std::string("v") + std::to_string(s.Major));
         CHECK_TRUE(s.Name != nullptr && s.Name[0] != '\0');
         CHECK_TRUE(s.Summary != nullptr && s.Summary[0] != '\0');
     }
+}
+
+// Ввод переписан целиком (устройства -> действия -> события, контексты,
+// геймпад, ремаппинг), прежний InputMap удалён — это смена контракта, а не
+// дополнение, и она обязана быть видна в списке подсистем. Рядом — события:
+// подсистема, которой в списке не было вовсе.
+TEST(Systems_registry_records_the_input_rewrite) {
+    bool inputIsV2 = false;
+    bool hasEvents = false;
+    for (const sage::SystemVersion& s : sage::EngineSystems()) {
+        if (std::string(s.Name) == "Input" && s.Major == 2) inputIsV2 = true;
+        if (std::string(s.Name) == "Events") hasEvents = true;
+    }
+    CHECK_TRUE(inputIsV2);
+    CHECK_TRUE(hasEvents);
 }
 
 TEST(Config_preset_low_disables_heavy_passes) {

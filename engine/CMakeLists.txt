@@ -28,6 +28,15 @@ set(SAGE_ENGINE_SOURCES
     src/sage/vars/ScriptVars.cpp
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
+    src/sage/events/TypedBus.cpp
+    src/sage/events/Rules.cpp
+    src/sage/input/Keys.cpp
+    src/sage/input/Binding.cpp
+    src/sage/input/Devices.cpp
+    src/sage/input/Action.cpp
+    src/sage/input/Context.cpp
+    src/sage/input/InputSystem.cpp
+    src/sage/input/GlfwBridge.cpp
     src/sage/core/Application.cpp
     src/sage/core/FatalReport.cpp
     src/sage/core/Config.cpp
