@@ -336,6 +336,16 @@ public:
     // однажды забыл про паузу.
     float FrameTimeScale() const { return m_paused ? 0.0f : m_timeScale; }
 
+    // КОМАНДЫ ИНТЕРФЕЙСА ЗА КАДР. Их приносит тот, кто раздавал интерфейсу ввод
+    // (плеер, редактор), а скрипт спрашивает sage.ui.Pressed("menu.play").
+    //
+    // Через движок, а не напрямую из интерфейса в скрипт, ровно по границе
+    // §103: интерфейс сообщает, что его нажали, и не знает, кто это слушает.
+    void SetUICommands(std::vector<std::string> commands) {
+        m_uiCommands = std::move(commands);
+    }
+    const std::vector<std::string>& UICommands() const { return m_uiCommands; }
+
 private:
     template <typename Fn>
     void Bind(const char* module, const char* name, const char* legacy, Fn&& fn) {
@@ -355,14 +365,7 @@ private:
     void RegisterEngineApi();
     void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
     void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
-    void RegisterUIApi();         // элемент интерфейса + sage.ui.*
-    // Аксессоры интерфейса на GameObject (HasUI/GetUI/AddUI/RemoveUI).
-    //
-    // Отдельным вызовом, а не строкой в RegisterGameObject, потому что элемент
-    // интерфейса — это НАБОР компонентов, и общий BindComponentAccessors<T> тут
-    // не подходит: отдавать скрипту один компонент из набора значило бы врать
-    // ему о том, что такое элемент. Тело живёт рядом с прокси (ScriptApi_UI.cpp).
-    void BindUIAccessors(sol::usertype<GameObject>& t);
+    void RegisterUIApi();         // документы интерфейса + sage.ui.*
     void RegisterTweenApi();      // Ease + sage.tween.*
     void RegisterAnimationApi();  // sage.anim.* и sage.ik.*
     void RegisterGameObject();    // GameObject + аксессоры компонентов + иерархия
@@ -480,6 +483,7 @@ private:
     sage::TweenManager m_tweens;
 
     // Параметры запуска (LaunchArg из Lua). Таблица Lua завести нельзя до
+    std::vector<std::string> m_uiCommands; // команды интерфейса текущего кадра
     // RegisterEngineApi, поэтому храним на стороне C++ и отдаём по запросу.
     std::unordered_map<std::string, std::string> m_launchArgs;
 

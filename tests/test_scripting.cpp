@@ -13,7 +13,8 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/core/Log.h"
-#include "sage/ui/UI.h"
+#include "sage/ui/UIFramework.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/assets/Pack.h"
 #include "sage/vars/VarsComponent.h"
 #include "sage/events/Events.h"
@@ -470,12 +471,19 @@ TEST(Scripting_legacy_names_are_the_same_function_object) {
 // Старые имена не помечены устаревшими и удалять их не планируется: все
 // существующие игры написаны на них. Тест закрепляет это обещание — иначе
 // «наведение порядка» однажды тихо сломает работающие скрипты.
+//
+// ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — SetUIValue(объект, значение). Оно ставило значение
+// шкале-СУЩНОСТИ, а интерфейс перестал быть сущностями вовсе: экран стал
+// документом, и «тот объект» больше не существует, чтобы к нему обращаться.
+// Замена — doc:Set("Health.progress.Value", v) у документа, открытого через
+// OpenUIDocument; переписывается это одной строкой, а сохранить имя, которое
+// молча ничего не делает, было бы хуже, чем убрать его.
 TEST(Scripting_every_legacy_global_still_answers) {
     ScriptEngine se;
     const char* legacy[] = {"SpawnObject", "FindObject", "DestroyObject", "SetMeshCube",
                             "SetMaterial", "IsActionDown", "GetCamera",   "EmitParticles",
                             "PlaySound",   "Schedule",     "SendMessage", "LaunchArg",
-                            "Cross",       "GetLighting",  "SetVelocity", "SetUIValue",
+                            "Cross",       "GetLighting",  "SetVelocity", "OpenUIDocument",
                             "TweenColor",  "PlayAnimation", "AddIKGoal",  "MoveCharacter"};
     for (const char* name : legacy) {
         const bool ok = se.Lua().script(std::string("return type(") + name + ") == 'function'");
@@ -704,90 +712,80 @@ TEST(Scripting_time_scale_and_pause_fold_into_one_multiplier) {
     CHECK_NEAR(se.TimeScale(), 0.0f, 1e-6);
 }
 
-// --- Интерфейс из скрипта: раскладка, холст, группа ---------------------------
+// --- Интерфейс из скрипта: документ, узлы, свойства ---------------------------
 //
-// Компоненты Layout/Canvas/Group существовали с самого появления новой системы
-// интерфейса, но были доступны ТОЛЬКО из редактора. Игре, которая собирает свои
-// экраны скриптом, это означало: сетку инвентаря раскладывать формулой в
-// самом скрипте, порядок «меню поверх худа» — угадывать по порядку создания
-// сущностей, а спрятать панель целиком — обходить всех её детей.
-TEST(Scripting_ui_layout_canvas_and_group_are_reachable) {
-    ScriptEngine se;
-    Scene scene("S");
-    se.BindScene(scene);
-    GameObject panel = scene.CreateObject("Panel");
-    se.Lua()["panel"] = panel;
+// Игра, собирающая свои экраны скриптом, обращается к ДОКУМЕНТУ, а не к
+// сущностям сцены: экран — самостоятельный ресурс, и открыт он один на путь.
+// Без этого «поменять счёт в худе» означало бы найти нужную сущность в сцене и
+// надеяться, что её не переименовали.
+TEST(Scripting_ui_document_nodes_and_properties_are_reachable) {
+    sage::ui::UIInitialize();
+    const std::string path = "test://scripting_ui.uidoc";
+    sage::ui::UIDocuments::Instance().Remove(path);
 
+    // Документ заводится заранее — так же, как его прочитали бы с диска.
+    {
+        sage::ui::UIRuntime& rt = sage::ui::UIDocuments::Instance().GetOrLoad(path);
+        sage::ui::UIDocument& d = rt.Doc();
+        sage::ui::UINode& root = *d.Create("Root", sage::ui::kUIInvalidNode);
+        root.Ensure<sage::ui::UITransform>().SetStretch(true, true);
+        sage::ui::UINode& label = *d.Create("Score", root.Id);
+        label.Ensure<sage::ui::UIText>().Text = "0";
+        sage::ui::UINode& bar = *d.Create("Health", root.Id);
+        bar.Ensure<sage::ui::UIProgress>().Value = 1.0f;
+    }
+
+    ScriptEngine se;
+    se.Lua()["docPath"] = path;
     se.Lua().script(R"(
-        local e = panel:AddUI()
-        e.Type = UIKind.Panel
-        e.Stretch = UIStretch.Both
-        e.Margin = Vec4(4, 8, 12, 16)
-        e.Pivot = Vec2(0.5, 0.5)
-        e.Alpha = 0.25
-        e.IconSize = 18.0
-        sage.ui.SetLayout(panel, {dir = "grid", columns = 5, spacing = 6,
-                                  padding = 3.0, stretch = false, fit = true})
-        sage.ui.SetCanvas(panel, {order = 7, scale = true, reference = Vec2(1280, 720),
-                                  match = 0.25})
+        local doc = sage.ui.Open(docPath)
+        doc:SetText("Score", "42")
+        doc:Set("Health.progress.Value", 0.25)
+        doc:Show("Health", false)
+        local node = doc:Find("Score")
+        node.Opacity = 0.5
+        doc:Create("Root", "Extra")
     )");
 
-    const entt::entity e = panel.Entity();
-    const auto& xf = scene.Registry().get<sage::ui::Transform>(e);
-    CHECK_TRUE(xf.Mode == sage::ui::Transform::Stretch::Both);
-    CHECK_NEAR(xf.Margin.z, 12.0f, 1e-4f);
-    CHECK_NEAR(xf.Pivot.x, 0.5f, 1e-4f);
+    sage::ui::UIDocument& d = sage::ui::UIDocuments::Instance().GetOrLoad(path).Doc();
+    const sage::ui::UINode* score = d.FindByName("Score");
+    CHECK_TRUE(score != nullptr);
+    if (score) {
+        CHECK_TRUE(score->Get<sage::ui::UIText>() != nullptr);
+        if (const sage::ui::UIText* t = score->Get<sage::ui::UIText>())
+            CHECK_EQ(t->Text, std::string("42"));
+        CHECK_NEAR(score->Opacity, 0.5f, 1e-4f);
+    }
+    const sage::ui::UINode* health = d.FindByName("Health");
+    CHECK_TRUE(health != nullptr);
+    if (health) {
+        // Значение задано АДРЕСОМ свойства: скрипт не обязан знать, каким
+        // компонентом полоса сделана, — он называет путь, как в инспекторе.
+        if (const sage::ui::UIProgress* p = health->Get<sage::ui::UIProgress>())
+            CHECK_NEAR(p->Value, 0.25f, 1e-4f);
+        CHECK_FALSE(health->Visible);
+    }
+    // Узел, созданный из скрипта, — обычный узел документа.
+    CHECK_TRUE(d.FindByName("Extra") != nullptr);
 
-    const auto& group = scene.Registry().get<sage::ui::Group>(e);
-    CHECK_NEAR(group.Alpha, 0.25f, 1e-4f);
-    // Прозрачность группы НЕ должна попутно запрещать ввод: панель, показанная
-    // наполовину, обязана оставаться нажимаемой.
-    CHECK_TRUE(group.Interactable);
-
-    CHECK_NEAR(scene.Registry().get<sage::ui::Icon>(e).Size, 18.0f, 1e-4f);
-
-    const auto& layout = scene.Registry().get<sage::ui::Layout>(e);
-    CHECK_TRUE(layout.Direction == sage::ui::Layout::Flow::Grid);
-    CHECK_EQ(layout.Columns, 5);
-    CHECK_NEAR(layout.Spacing, 6.0f, 1e-4f);
-    CHECK_NEAR(layout.Padding.w, 3.0f, 1e-4f);
-    CHECK_FALSE(layout.StretchCross);
-    CHECK_TRUE(layout.FitContent);
-
-    const auto& canvas = scene.Registry().get<sage::ui::Canvas>(e);
-    CHECK_EQ(canvas.SortOrder, 7);
-    CHECK_TRUE(canvas.Mode == sage::ui::Canvas::Scale::ScaleWithSize);
-    CHECK_NEAR(canvas.Reference.x, 1280.0f, 1e-4f);
-    CHECK_NEAR(canvas.MatchWidthOrHeight, 0.25f, 1e-4f);
-
-    // Снять раскладку так же просто, как поставить: иначе «сделать из сетки
-    // обычную панель» означало бы пересоздать её.
-    se.Lua().script("sage.ui.ClearLayout(panel)");
-    CHECK_FALSE(scene.Registry().all_of<sage::ui::Layout>(e));
+    sage::ui::UIDocuments::Instance().Remove(path);
 }
 
-// Что под курсором — по ИМЕНИ ДЕЙСТВИЯ, как и что нажато. Без этого подсказка
-// «из чего делается предмет» требует опрашивать поле Hovered у каждой ячейки
-// инвентаря каждый кадр.
-TEST(Scripting_ui_hovered_action_answers_by_name) {
+// Команды интерфейса за кадр: интерфейс их СООБЩАЕТ, а что они значат — решает
+// игра. Без этого каждая кнопка требовала бы своего опросчика в скрипте.
+TEST(Scripting_ui_commands_of_the_frame_are_visible) {
     ScriptEngine se;
-    Scene scene("S");
-    se.BindScene(scene);
-    GameObject slot = scene.CreateObject("Slot");
-    se.Lua()["slot"] = slot;
-    se.Lua().script(R"(
-        local e = slot:AddUI()
-        e.Type = UIKind.Panel
-        e.Interactive = true
-        e.Action = "craft:plank"
-    )");
+    CHECK_FALSE(se.Lua().script("return sage.ui.Pressed(\"menu.play\")").get<bool>());
 
-    std::string hovered = se.Lua().script("return sage.ui.HoveredAction()");
-    CHECK_TRUE(hovered.empty());
+    se.SetUICommands({"menu.play", "menu.quit"});
+    CHECK_TRUE(se.Lua().script("return sage.ui.Pressed(\"menu.play\")").get<bool>());
+    CHECK_FALSE(se.Lua().script("return sage.ui.Pressed(\"menu.load\")").get<bool>());
+    CHECK_EQ(se.Lua().script("return #sage.ui.Commands()").get<int>(), 2);
 
-    scene.Registry().get<sage::ui::Interactable>(slot.Entity()).Runtime.Hovered = true;
-    hovered = se.Lua().script("return sage.ui.HoveredAction()");
-    CHECK_TRUE(hovered == "craft:plank");
+    // Кадр кончился — команды кончились вместе с ним: иначе одно нажатие
+    // срабатывало бы каждый кадр до конца игры.
+    se.SetUICommands({});
+    CHECK_FALSE(se.Lua().script("return sage.ui.Pressed(\"menu.play\")").get<bool>());
 }
 
 // Встроенное меню паузы плеера выключается игрой, у которой меню своё. Пока

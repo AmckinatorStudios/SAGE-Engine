@@ -19,6 +19,7 @@
 #include "sage/render/Reflection.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Light.h"
 #include "sage/core/Config.h"
@@ -60,6 +61,12 @@ public:
     // сравнивается курсор, переведённый панелью Game в его координаты.
     int GameWidth() const { return m_gameW; }
     int GameHeight() const { return m_gameH; }
+
+    // Рантайм интерфейса сцены. Один на редактор, а не по одному на панель:
+    // фокус, захват курсора и состояние виджетов — это одно состояние, и
+    // раздать ввод одним объектом, а нарисовать другим значит рисовать не то,
+    // что нажималось.
+    sage::ui::UISceneRuntime& SceneUI() { return m_sceneUi; }
 
     // Общий depth-проход солнца (одна карта теней на кадр для обоих окон).
     // camera — камера ВЬЮПОРТА: карта теней строится вокруг неё, а не вокруг
@@ -211,9 +218,10 @@ private:
     int m_extraH[kMaxViews] = {0, 0, 0, 0};
     std::optional<Framebuffer> m_outlineMask;            // силуэт выделенного объекта (аутлайн)
     std::unique_ptr<sage::rhi::Geometry> m_outlineTri;   // полноэкранный треугольник для краевого прохода
-    // UI сцены (компоненты sage::ui) — оверлей в панели Game (WYSIWYG: как в
-    // собранной игре). Лениво: создаётся при первом кадре с UI-сущностями.
+    // Интерфейс сцены (документы .uidoc) — оверлей в панели Game (WYSIWYG: как
+    // в собранной игре). Лениво: создаётся при первом кадре с документом.
     std::unique_ptr<UIRenderer> m_ui;
+    sage::ui::UISceneRuntime m_sceneUi;
     std::optional<sage::render::PostFX> m_postfx, m_gamePostfx;
     std::optional<sage::render::Volumetrics> m_volumetrics;
     std::optional<sage::render::LensFlare> m_lensFlare;

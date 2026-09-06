@@ -15,11 +15,9 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIPart.h"
-#include "sage/ui/UIPresets.h"
+#include "sage/ui/UIFramework.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/scene/Prefab.h"
-#include "sage/ui/UISceneSystem.h"
 #include "sage/vars/ScriptVars.h"
 #include "sage/vars/VarsComponent.h"
 
@@ -316,34 +314,67 @@ TEST(Events_a_payload_carries_the_sender_and_the_argument) {
 // ===========================================================================
 //  КНОПКА ДЕЛАЕТ ЧТО-ТО САМА
 // ===========================================================================
+//
+// Узел интерфейса умеет ровно одно: сообщить строку-команду. Что она значит —
+// записано в СЦЕНЕ, на ссылке этого объекта на документ (UIDocumentComponent::
+// Commands). Так игровой логики в ядре интерфейса нет вовсе, а кнопка при этом
+// по-прежнему делает своё дело сама — без уровневого скрипта, который каждый
+// кадр спрашивал бы «не нажали ли».
 
 namespace {
-// Кнопка на весь экран: попасть по ней мышью можно, не считая координат.
-GameObject MakeButton(Scene& scene, const char* name) {
-    GameObject e = scene.CreateObject(name);
-    sage::ui::Transform t;
-    t.Anchor = UIAnchor::TopLeft;
+
+// Экран с одной кнопкой на весь кадр: попасть по ней мышью можно, не считая
+// координат. Документ живёт под своим путём, как прочитанный с диска.
+GameObject MakeButtonScreen(Scene& scene, const char* name, const std::string& command,
+                            const std::string& path) {
+    sage::ui::UIInitialize();
+    sage::ui::UIDocuments::Instance().Remove(path);
+    sage::ui::UIRuntime& rt = sage::ui::UIDocuments::Instance().GetOrLoad(path);
+    sage::ui::UIDocument& d = rt.Doc();
+    d.Clear();
+    // Холст в ПИКСЕЛЯХ: тест говорит про координаты щелчка буквально, и
+    // масштабирование под опорное разрешение сдвинуло бы кнопку под курсором,
+    // проверяя заодно совсем другое.
+    d.Canvas().Scale = sage::ui::UICanvasSettings::ScaleMode::Pixels;
+    sage::ui::UINode& root = *d.Create("Root", sage::ui::kUIInvalidNode);
+    root.Ensure<sage::ui::UITransform>().SetStretch(true, true);
+
+    sage::ui::UINode& btn = *d.Create(name, root.Id);
+    sage::ui::UITransform& t = btn.Ensure<sage::ui::UITransform>();
+    t.AnchorMin = t.AnchorMax = {0.0f, 0.0f};
+    t.Pivot = {0.0f, 0.0f};
     t.Offset = {0.0f, 0.0f};
     t.Size = {200.0f, 100.0f};
-    scene.Registry().emplace<sage::ui::Transform>(e.Entity(), t);
-    scene.Registry().emplace<sage::ui::Fill>(e.Entity());
-    scene.Registry().emplace<sage::ui::Interactable>(e.Entity());
+    btn.Ensure<sage::ui::UIFill>();
+    btn.Ensure<sage::ui::UIInteraction>().Command = command;
+
+    GameObject e = scene.CreateObject(name);
+    sage::ui::UIDocumentComponent c;
+    c.Path = path;
+    scene.Registry().emplace<sage::ui::UIDocumentComponent>(e.Entity(), c);
     return e;
 }
 
 // Один щелчок по точке: нажали и отпустили там же.
 void ClickAt(Scene& scene, glm::vec2 point) {
-    sage::ui::UIInputState down;
-    down.Mouse = point;
-    down.MouseDown = true;
-    down.MousePressed = true;
-    sage::ui::UpdateSceneUI(scene, down, 800, 600);
+    sage::ui::UISceneRuntime runtime;
+    const glm::vec2 frame(800.0f, 600.0f);
+    runtime.Update(scene, frame, 0.0f);
 
-    sage::ui::UIInputState up;
-    up.Mouse = point;
-    up.MouseReleased = true;
-    sage::ui::UpdateSceneUI(scene, up, 800, 600);
+    sage::ui::UIInputFrame down;
+    down.Pointer = point;
+    down.Buttons[0] = true;
+    runtime.HandleInput(scene, down, frame);
+
+    sage::ui::UIInputFrame up;
+    up.Pointer = point;
+    runtime.HandleInput(scene, up, frame);
 }
+
+sage::events::Bindings& CommandsOf(Scene& scene, GameObject obj) {
+    return scene.Registry().get<sage::ui::UIDocumentComponent>(obj.Entity()).Commands;
+}
+
 } // namespace
 
 // ТО, РАДИ ЧЕГО ВСЁ ЭТО. Кнопка шлёт событие САМА — без уровневого скрипта,
@@ -351,12 +382,12 @@ void ClickAt(Scene& scene, glm::vec2 point) {
 // длинном кадре и требовал скрипта-спутника у любой кнопки.
 TEST(Events_a_button_emits_on_its_own_without_any_script) {
     Scene scene("ui");
-    GameObject button = MakeButton(scene, "Play");
+    GameObject button = MakeButtonScreen(scene, "Play", "game.play", "test://ev_play.uidoc");
     sage::events::Binding b;
-    b.Trigger = "click";
+    b.Trigger = "game.play";   // триггер связи — имя КОМАНДЫ документа
     b.Event = "game.start";
     b.Arg = Value(std::string("level1"));
-    scene.Registry().get<sage::ui::Interactable>(button.Entity()).Events.push_back(b);
+    CommandsOf(scene, button).push_back(b);
 
     int heard = 0;
     std::string level;
@@ -370,18 +401,18 @@ TEST(Events_a_button_emits_on_its_own_without_any_script) {
     ClickAt(scene, {50.0f, 50.0f});
     CHECK_EQ(heard, 1);
     CHECK_EQ(level, std::string("level1"));
-    // Отправитель — сама кнопка: без него обработчик не знает, КАКУЮ нажали, и
-    // каждой кнопке пришлось бы придумывать своё имя события.
+    // Отправитель — объект с документом: без него обработчик не знает, КАКОЙ
+    // экран нажали, и каждому пришлось бы придумывать своё имя события.
     CHECK_EQ(sender, button.Id());
 }
 
 TEST(Events_a_button_does_not_emit_when_the_click_misses_it) {
     Scene scene("ui");
-    GameObject button = MakeButton(scene, "Play");
+    GameObject button = MakeButtonScreen(scene, "Play", "game.play", "test://ev_miss.uidoc");
     sage::events::Binding b;
-    b.Trigger = "click";
+    b.Trigger = "game.play";
     b.Event = "game.start";
-    scene.Registry().get<sage::ui::Interactable>(button.Entity()).Events.push_back(b);
+    CommandsOf(scene, button).push_back(b);
 
     int heard = 0;
     scene.Events.On("game.start", [&](const sage::events::Event&) { ++heard; });
@@ -389,64 +420,45 @@ TEST(Events_a_button_does_not_emit_when_the_click_misses_it) {
     CHECK_EQ(heard, 0);
 }
 
-// Триггеры различаются: связь на наведение не должна срабатывать от щелчка, и
-// наоборот. Иначе «звук при наведении» звучал бы и при нажатии.
-TEST(Events_triggers_are_told_apart) {
+// Команды различаются: связь на «выход» не должна срабатывать от «играть».
+// Иначе одна кнопка на экране означала бы все сразу.
+TEST(Events_commands_are_told_apart) {
     Scene scene("ui");
-    GameObject button = MakeButton(scene, "Play");
-    sage::ui::Interactable& act = scene.Registry().get<sage::ui::Interactable>(button.Entity());
-    sage::events::Binding hover;
-    hover.Trigger = "hoverIn";
-    hover.Event = "ui.hover";
-    sage::events::Binding click;
-    click.Trigger = "click";
-    click.Event = "ui.click";
-    act.Events.push_back(hover);
-    act.Events.push_back(click);
+    GameObject screen = MakeButtonScreen(scene, "Play", "menu.play", "test://ev_two.uidoc");
+    // Вторая кнопка в том же документе — ниже первой, со своей командой.
+    {
+        sage::ui::UIDocument& d = sage::ui::UIDocuments::Instance().GetOrLoad(
+            "test://ev_two.uidoc").Doc();
+        sage::ui::UINode* root = d.FindByName("Root");
+        sage::ui::UINode& quit = *d.Create("Quit", root->Id);
+        sage::ui::UITransform& t = quit.Ensure<sage::ui::UITransform>();
+        t.AnchorMin = t.AnchorMax = {0.0f, 0.0f};
+        t.Pivot = {0.0f, 0.0f};
+        t.Offset = {0.0f, 200.0f};
+        t.Size = {200.0f, 100.0f};
+        quit.Ensure<sage::ui::UIFill>();
+        quit.Ensure<sage::ui::UIInteraction>().Command = "menu.quit";
+    }
+    sage::events::Binding play;
+    play.Trigger = "menu.play";
+    play.Event = "ui.play";
+    sage::events::Binding quit;
+    quit.Trigger = "menu.quit";
+    quit.Event = "ui.quit";
+    CommandsOf(scene, screen).push_back(play);
+    CommandsOf(scene, screen).push_back(quit);
 
-    int hovers = 0, clicks = 0;
-    scene.Events.On("ui.hover", [&](const sage::events::Event&) { ++hovers; });
-    scene.Events.On("ui.click", [&](const sage::events::Event&) { ++clicks; });
-
-    // Курсор наехал: только наведение.
-    sage::ui::UIInputState move;
-    move.Mouse = {50.0f, 50.0f};
-    sage::ui::UpdateSceneUI(scene, move, 800, 600);
-    CHECK_EQ(hovers, 1);
-    CHECK_EQ(clicks, 0);
-
-    // Стоит на месте — второй раз наведение не шлётся: подсветка и звук нужны
-    // на переходе, а не каждый кадр.
-    sage::ui::UpdateSceneUI(scene, move, 800, 600);
-    CHECK_EQ(hovers, 1);
+    int plays = 0, quits = 0;
+    scene.Events.On("ui.play", [&](const sage::events::Event&) { ++plays; });
+    scene.Events.On("ui.quit", [&](const sage::events::Event&) { ++quits; });
 
     ClickAt(scene, {50.0f, 50.0f});
-    CHECK_EQ(clicks, 1);
-}
+    CHECK_EQ(plays, 1);
+    CHECK_EQ(quits, 0);
 
-// Ползунок и галка шлют «change»: слушателю всё равно, чем подвинули значение.
-TEST(Events_a_checkbox_reports_a_change) {
-    Scene scene("ui");
-    GameObject box = scene.CreateObject("Sound");
-    CHECK_TRUE(sage::ui::ApplyPreset(scene, box.Entity(), "Checkbox"));
-    sage::ui::Transform& t = scene.Registry().get<sage::ui::Transform>(box.Entity());
-    t.Anchor = UIAnchor::TopLeft;
-    t.Offset = {0.0f, 0.0f};
-    t.Size = {200.0f, 100.0f};
-
-    sage::events::Binding b;
-    b.Trigger = "change";
-    b.Event = "settings.sound";
-    scene.Registry().get<sage::ui::Interactable>(box.Entity()).Events.push_back(b);
-
-    bool on = false;
-    int heard = 0;
-    scene.Events.On("settings.sound", [&](const sage::events::Event& e) {
-        ++heard;
-        on = e.Arg.AsBool();
-    });
-    ClickAt(scene, {20.0f, 50.0f});
-    CHECK_EQ(heard, 1);
+    ClickAt(scene, {50.0f, 250.0f});
+    CHECK_EQ(plays, 1);
+    CHECK_EQ(quits, 1);
 }
 
 // Связи — ДАННЫЕ: их настраивают в инспекторе, и они обязаны пережить запись
@@ -454,16 +466,16 @@ TEST(Events_a_checkbox_reports_a_change) {
 // до перезапуска редактора.
 TEST(Events_bindings_survive_save_and_load) {
     Scene scene("ui");
-    GameObject button = MakeButton(scene, "Open");
+    GameObject button = MakeButtonScreen(scene, "Open", "door.click", "test://ev_save.uidoc");
     GameObject door = scene.CreateObject("Door");
 
     sage::events::Binding b;
-    b.Trigger = "click";
+    b.Trigger = "door.click";
     b.Event = "door.open";
     b.Target = EntityRef{door.Id()};
     b.Method = "Open";
     b.Arg = Value(2.5f);
-    scene.Registry().get<sage::ui::Interactable>(button.Entity()).Events.push_back(b);
+    CommandsOf(scene, button).push_back(b);
 
     std::unique_ptr<Scene> back =
         SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
@@ -471,27 +483,27 @@ TEST(Events_bindings_survive_save_and_load) {
     if (!back) return;
     GameObject loaded = back->FindByName("Open");
     CHECK_TRUE(loaded.Valid());
-    const sage::ui::Interactable& act =
-        back->Registry().get<sage::ui::Interactable>(loaded.Entity());
-    CHECK_EQ(act.Events.size(), (size_t)1);
-    if (act.Events.empty()) return;
-    CHECK_EQ(act.Events[0].Trigger, std::string("click"));
-    CHECK_EQ(act.Events[0].Event, std::string("door.open"));
-    CHECK_EQ(act.Events[0].Target.Id, door.Id());
-    CHECK_EQ(act.Events[0].Method, std::string("Open"));
-    CHECK_NEAR(act.Events[0].Arg.AsFloat(), 2.5f, 1e-4f);
+    const sage::ui::UIDocumentComponent& c =
+        back->Registry().get<sage::ui::UIDocumentComponent>(loaded.Entity());
+    CHECK_EQ(c.Commands.size(), (size_t)1);
+    if (c.Commands.empty()) return;
+    CHECK_EQ(c.Commands[0].Trigger, std::string("door.click"));
+    CHECK_EQ(c.Commands[0].Event, std::string("door.open"));
+    CHECK_EQ(c.Commands[0].Target.Id, door.Id());
+    CHECK_EQ(c.Commands[0].Method, std::string("Open"));
+    CHECK_NEAR(c.Commands[0].Arg.AsFloat(), 2.5f, 1e-4f);
 }
 
 // Выключенная связь не срабатывает: «временно отключить» должно быть галкой, а
 // не удалением с последующим набором заново.
 TEST(Events_a_disabled_binding_stays_silent) {
     Scene scene("ui");
-    GameObject button = MakeButton(scene, "Play");
+    GameObject button = MakeButtonScreen(scene, "Play", "game.play", "test://ev_off.uidoc");
     sage::events::Binding b;
-    b.Trigger = "click";
+    b.Trigger = "game.play";
     b.Event = "game.start";
     b.Enabled = false;
-    scene.Registry().get<sage::ui::Interactable>(button.Entity()).Events.push_back(b);
+    CommandsOf(scene, button).push_back(b);
 
     int heard = 0;
     scene.Events.On("game.start", [&](const sage::events::Event&) { ++heard; });
@@ -517,11 +529,16 @@ TEST(Prefab_a_link_inside_the_prefab_points_at_the_copy_not_the_original) {
     scene.Registry().emplace<VarsComponent>(button.Entity()).Values.Set(
         "opens", Value(EntityRef{door.Id()}));
     sage::events::Binding b;
-    b.Trigger = "click";
+    b.Trigger = "door.click";
     b.Event = "door.open";
     b.Target = EntityRef{door.Id()};
     b.Method = "Open";
-    scene.Registry().emplace<sage::ui::Interactable>(button.Entity()).Events.push_back(b);
+    {
+        sage::ui::UIDocumentComponent c;
+        c.Path = "assets/ui/door.uidoc";
+        c.Commands.push_back(b);
+        scene.Registry().emplace<sage::ui::UIDocumentComponent>(button.Entity(), c);
+    }
 
     // Копия поддерева — тем же путём, каким работают и «Дублировать», и префаб.
     GameObject copyRoot = sage::scene::CopySubtree(scene, door.Entity(), scene, entt::null);
@@ -536,10 +553,11 @@ TEST(Prefab_a_link_inside_the_prefab_points_at_the_copy_not_the_original) {
     const entt::entity copyButton = h->Children[0];
 
     const VarsComponent& cv = scene.Registry().get<VarsComponent>(copyButton);
-    const sage::ui::Interactable& ca = scene.Registry().get<sage::ui::Interactable>(copyButton);
+    const sage::ui::UIDocumentComponent& ca =
+        scene.Registry().get<sage::ui::UIDocumentComponent>(copyButton);
     CHECK_EQ(cv.Values.Get("opens").AsEntity().Id, copyRoot.Id());
-    CHECK_EQ(ca.Events.size(), (size_t)1);
-    if (!ca.Events.empty()) CHECK_EQ(ca.Events[0].Target.Id, copyRoot.Id());
+    CHECK_EQ(ca.Commands.size(), (size_t)1);
+    if (!ca.Commands.empty()) CHECK_EQ(ca.Commands[0].Target.Id, copyRoot.Id());
 
     // А оригинал не тронут: копирование не должно править то, с чего копируют.
     const VarsComponent& ov = scene.Registry().get<VarsComponent>(button.Entity());
@@ -559,44 +577,6 @@ TEST(Prefab_a_link_outside_the_subtree_is_kept_as_is) {
     GameObject copy = sage::scene::CopySubtree(scene, lamp.Entity(), scene, entt::null);
     const VarsComponent& cv = scene.Registry().get<VarsComponent>(copy.Entity());
     CHECK_EQ(cv.Values.Get("watch").AsEntity().Id, player.Id());
-}
-
-// Своя часть игры, зарегистрированная в реестре, обязана ехать в префаб и в
-// дубликат. Раньше список копируемых частей был написан руками — то есть часть,
-// которой в нём нет, переживала сохранение сцены, но пропадала при дублировании.
-namespace {
-struct PrefabMark {
-    float Power = 1.0f;
-    std::string Tag;
-};
-const std::vector<sage::ui::PartField>& PrefabMarkFields() {
-    static const std::vector<sage::ui::PartField> f = {
-        {"power", "Power", sage::ui::PartField::Kind::Float, offsetof(PrefabMark, Power), 0.0f, 10.0f},
-        {"tag", "Tag", sage::ui::PartField::Kind::String, offsetof(PrefabMark, Tag)},
-    };
-    return f;
-}
-} // namespace
-
-TEST(Prefab_a_game_part_survives_copying) {
-    sage::ui::RegisterPart(
-        sage::ui::MakePart<PrefabMark>("prefabMark", "Prefab Mark", 95, &PrefabMarkFields()));
-
-    Scene scene("world");
-    GameObject src = scene.CreateObject("Marked");
-    scene.Registry().emplace<sage::ui::Transform>(src.Entity());
-    PrefabMark mark;
-    mark.Power = 4.5f;
-    mark.Tag = "особая";
-    scene.Registry().emplace<PrefabMark>(src.Entity(), mark);
-
-    GameObject copy = sage::scene::CopySubtree(scene, src.Entity(), scene, entt::null);
-    const PrefabMark* copied = scene.Registry().try_get<PrefabMark>(copy.Entity());
-    CHECK_TRUE(copied != nullptr);
-    if (copied) {
-        CHECK_NEAR(copied->Power, 4.5f, 1e-4f);
-        CHECK_EQ(copied->Tag, std::string("особая"));
-    }
 }
 
 // Ссылка НАРУЖУ заготовки при сохранении обрывается. Это не потеря данных, а

@@ -112,7 +112,15 @@ public:
     // добавляющий свет, и закрывающая его геометрия: объёмные лучи плюс
     // облака поверх неба композитятся одной формулой, без второго прохода.
     // Additive — только сложение (искры, лучи без перекрытия).
-    enum class BlendMode { Alpha, Premultiplied, Additive };
+    // Как складывается нарисованное с тем, что под ним.
+    //
+    // Additive и AdditiveAlpha — РАЗНЫЕ, и различие не косметическое. Additive
+    // (ONE, ONE) складывает цвет целиком и годится источникам, у которых цвет
+    // уже помножен на прозрачность (частицы, блики). Интерфейс так не рисует:
+    // у него цвет и альфа раздельные, и с ONE, ONE прозрачность просто
+    // ИГНОРИРУЕТСЯ — восемь слоёв свечения с альфой 0.09 давали сплошное белое
+    // пятно во весь экран вместо мягкого ореола.
+    enum class BlendMode { Alpha, Premultiplied, Additive, AdditiveAlpha };
     virtual void SetBlendMode(BlendMode mode) { (void)mode; }
     virtual void SetDepthTest(bool enabled) = 0;
     virtual void SetDepthWrite(bool enabled) = 0;

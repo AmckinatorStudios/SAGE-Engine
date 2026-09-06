@@ -6,8 +6,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIPart.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/vars/Refs.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
@@ -77,16 +76,10 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<AnimatedModelComponent>(src, dst);
     CopyIfPresent<IKComponent>(src, dst);
     CopyIfPresent<ReflectionProbeComponent>(src, dst);
-    // Интерфейс — ПО РЕЕСТРУ ЧАСТЕЙ, а не списком руками.
-    //
-    // Список здесь был, и он молча устаревал: часть, зарегистрированную игрой
-    // (sage::ui::RegisterPart), он не знал по определению — такая часть
-    // переживала сохранение сцены и пропадала при дублировании объекта.
-    // Объяснить это можно было только чтением исходников движка.
-    CopyIfPresent<sage::ui::Transform>(src, dst);   // прямоугольник — не часть, а сам элемент
-    for (const sage::ui::PartType& part : sage::ui::Parts()) {
-        if (part.Copy) part.Copy(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
-    }
+    // Интерфейс — ОДНА ССЫЛКА на документ. Сам интерфейс копировать незачем:
+    // он живёт в .uidoc, и два объекта, ссылающихся на один документ, — это
+    // один интерфейс, показанный дважды.
+    CopyIfPresent<sage::ui::UIDocumentComponent>(src, dst);
     CopyIfPresent<GIStaticComponent>(src, dst);
     CopyIfPresent<CharacterControllerComponent>(src, dst);
     CopyIfPresent<ShaderParamsComponent>(src, dst);

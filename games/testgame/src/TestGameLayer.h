@@ -20,7 +20,8 @@
 #include "sage/scene/SceneManager.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/ui/UIRenderer.h"
-#include "sage/ui/Widgets.h"
+#include "sage/ui/UIFramework.h"
+#include "sage/ui/scene/UIScene.h"
 #include "GameComponents.h"
 
 class ScriptEngine;
@@ -38,7 +39,7 @@ class AudioEngine;
 //   • Кастомные ECS-компоненты (Health/Pickup/Patrol/StaticCollider/Portal) —
 //     GameComponents.h, движок не правился.
 //   • Десятки Lua-скриптов одновременно (монетки/маяки) — стресс ScriptEngine.
-//   • HUD движковым UIRenderer/Widgets (health bar + счёт + подсказки).
+//   • HUD документом интерфейса (health bar + счёт + подсказки).
 //   • Аудио: эмбиент-луп + 2D-эффекты подбора/урона/портала (AudioEngine,
 //     в headless CI тихо деградирует — IsAvailable()=false, Play* — no-op).
 //   • Модель .obj двумя путями: ECS-энтити через ResourceManager::GetModel и
@@ -76,6 +77,7 @@ private:
     void AttachSceneScripts(const std::string& sceneName);
     void VerifySerializationRoundTrip(); // TESTGAME: лог-маркер PASS/FAIL
     void SetupHud();
+    void UpdateHud();
 
     // --- игровой цикл ---
     GameObject ActivePlayer(); // сущность "Player" активной сцены
@@ -133,10 +135,19 @@ private:
 
     // --- HUD ---
     std::optional<UIRenderer> m_ui;
-    UIProgressBar m_hudHealth;
-    UILabel m_hudScore;
-    UILabel m_hudRoom;
-    UILabel m_hudHint;
+    // Худ игры — обычный документ интерфейса, собранный кодом. Не «виджеты
+    // рядом с рендером»: тот же путь, что у экрана из редактора, значит и
+    // ломается он вместе с ним, а не отдельно.
+    sage::ui::UIRuntime m_hud;
+    // Узлы, значения которых обновляются каждый кадр. Идентификаторы, а не
+    // указатели: узел может быть перестроен, а идентификатор переживает это.
+    sage::ui::UINodeId m_hudHealthBar = sage::ui::kUIInvalidNode;
+    sage::ui::UINodeId m_hudScoreText = sage::ui::kUIInvalidNode;
+    sage::ui::UINodeId m_hudRoomText = sage::ui::kUIInvalidNode;
+    // Интерфейс сцены (витрина активной комнаты) — тот же рантайм, что у
+    // редактора и плеера.
+    sage::ui::UISceneRuntime m_sceneUi;
+    std::unique_ptr<sage::ui::UIEngineResources> m_uiResources;
 
     // --- аудио ---
     std::unique_ptr<AudioEngine> m_audio;

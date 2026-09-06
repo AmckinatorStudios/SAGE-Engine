@@ -353,7 +353,10 @@ sage::rhi::GraphicsDevice::BlendMode ToDeviceBlend(UIBlendMode mode) {
     switch (mode) {
         case UIBlendMode::Add:
         case UIBlendMode::Screen:
-        case UIBlendMode::Lighten: return sage::rhi::GraphicsDevice::BlendMode::Additive;
+        // ИМЕННО AdditiveAlpha: цвет интерфейса не помножен на прозрачность, и
+        // обычное сложение (ONE, ONE) её бы просто выбросило — полупрозрачное
+        // свечение легло бы непрозрачным белым пятном.
+        case UIBlendMode::Lighten: return sage::rhi::GraphicsDevice::BlendMode::AdditiveAlpha;
         default: return sage::rhi::GraphicsDevice::BlendMode::Alpha;
     }
 }

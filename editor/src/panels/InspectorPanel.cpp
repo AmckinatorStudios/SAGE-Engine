@@ -27,9 +27,7 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
 #include "sage/ui/UIIcons.h"
-#include "sage/ui/UIPresets.h"
 #include "../Localization.h"
 
 namespace fs = std::filesystem;

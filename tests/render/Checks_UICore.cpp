@@ -22,13 +22,16 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <string>
 
 #include "sage/render/Framebuffer.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/ui/UIFramework.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/render/UIEngineResources.h"
+#include "sage/ui/showcase/UIDemos.h"
 #include "sage/ui/showcase/UIShowcaseDocument.h"
 
 namespace sage::rendertest {
@@ -367,6 +370,98 @@ void CheckShowcaseFrame(UIRenderer& renderer) {
     Check(stats.Batches * 3 < stats.Commands, "витрина: команды собраны в батчи, а не по одной");
 }
 
+// --- Готовые экраны ---------------------------------------------------------
+//
+// Витрина отвечает на вопрос «что система умеет». Демо-экраны отвечают на
+// второй: «как из этого собирают экран», и проверяются они здесь ровно затем,
+// что это единственные экраны, которые видит человек при первом запуске — из
+// шаблона проекта и из меню создания. Экран, который собрался, но не нарисовался
+// (потерянный шрифт, маска не той формы, эффект в чужой буфер), выглядит как
+// «редактор сломан», и никакой модульный тест этого не поймает.
+//
+// Снимки экранов пишутся в PNG, когда задан SAGE_UI_DEMO_SHOTS=<папка>: их
+// смотрят глазами. Эталонами они НЕ являются намеренно — шрифт и сглаживание у
+// каждой машины свои, и сравнение картинок давало бы ложные падения; утверждения
+// ниже проверяют числа со смыслом.
+void CheckDemoScreens(UIRenderer& renderer) {
+    const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
+
+    // Проверяется не «сколько кадра закрашено» — этим экраны отличаются
+    // законно: худ обязан оставлять игру видимой, а меню занимает весь кадр.
+    // Проверяется УЗЕЛ, без которого экрана нет: его прямоугольник посчитан,
+    // лежит внутри кадра и в нём действительно что-то нарисовано.
+    struct Case {
+        const char* Name;
+        const char* Title;
+        const char* Anchor;  // узел, без которого экрана нет
+        double MinCovered;   // сколько его прямоугольника обязано быть закрашено
+    };
+    const Case kCases[] = {
+        {"menu", "главное меню", "Продолжить", 0.80},
+        {"hud", "худ", "Health", 0.35},
+        {"settings", "настройки", "Window", 0.90},
+        {"inventory", "инвентарь", "Grid", 0.35},
+        {"dialogue", "диалог", "Box", 0.90},
+    };
+
+    for (const Case& c : kCases) {
+        Harness h;
+        ui::UITheme theme;
+        Check(ui::UIBuildDemo(c.Name, h.Doc(), theme),
+              (std::string("демо-экран собран: ") + c.Title).c_str());
+        h.Runtime.Theme() = theme;
+        // Экраны собраны под опорное разрешение 1920x1080 и обязаны считаться
+        // под кадр любой стороны — здесь 1280x720.
+        h.Doc().Canvas().Scale = ui::UICanvasSettings::ScaleMode::ScaleWithSize;
+
+        const Image img = RenderDocument(renderer, h, 1280, 720);
+        const ui::UIRenderStats& stats = h.Runtime.DrawList().Stats();
+
+        const ui::UINode* anchor = h.Doc().FindByName(c.Anchor);
+        const ui::UIResolvedNode* rn = anchor ? h.Runtime.Layout().Get(anchor->Id) : nullptr;
+        Check(rn != nullptr, (std::string("узел экрана посчитан: ") + c.Title).c_str());
+
+        double covered = 0.0;
+        bool inside = false;
+        if (rn) {
+            const ui::UIRect& r = rn->Rect;
+            covered = Covered(img, (int)r.x, (int)r.y, (int)(r.x + r.w), (int)(r.y + r.h));
+            inside = r.w > 1.0f && r.h > 1.0f && r.x >= 0.0f && r.y >= 0.0f &&
+                     r.x + r.w <= 1280.0f && r.y + r.h <= 720.0f;
+        }
+        std::printf("    демо %-10s %s: %.0fx%.0f, закрашено %.2f; команд %d, батчей %d, "
+                    "узлов %d\n",
+                    c.Name, c.Anchor, rn ? rn->Rect.w : 0.0f, rn ? rn->Rect.h : 0.0f, covered,
+                    stats.Commands, stats.Batches, h.Runtime.Profile().Layout.Visible);
+
+        // Внутри кадра — потому что экран, собранный под 1920x1080, обязан
+        // помещаться и в 1280x720: масштаб холста именно за это и отвечает.
+        Check(inside, (std::string("узел экрана внутри кадра: ") + c.Title).c_str());
+        Check(covered > c.MinCovered,
+              (std::string("демо-экран нарисован: ") + c.Title).c_str());
+        // Экран из одного прямоугольника — это не экран: если раскладка
+        // схлопнулась, закрашенность может остаться высокой (фон-то есть), а
+        // содержимого не будет вовсе.
+        Check(stats.Commands > 8,
+              (std::string("на экране есть содержимое: ") + c.Title).c_str());
+        Check(stats.Batches <= stats.Commands,
+              (std::string("батчи не расплодились: ") + c.Title).c_str());
+        Check(ui::UIValidate(h.Doc()).empty(),
+              (std::string("документ демо-экрана без замечаний: ") + c.Title).c_str());
+
+        if (shots) SavePng(std::string(shots) + "/ui_demo_" + c.Name + ".png", img);
+        if (const char* dump = std::getenv("SAGE_UI_DEMO_DUMP")) {
+            if (std::string(dump) == c.Name)
+                for (const ui::UIResolvedNode& rn : h.Runtime.Layout().Nodes()) {
+                    const ui::UINode* nn = h.Doc().Find(rn.Id);
+                    std::printf("      %-12s rect=%.0f,%.0f %.0fx%.0f vis=%d\n",
+                                nn ? nn->Name.c_str() : "?", rn.Rect.x, rn.Rect.y, rn.Rect.w,
+                                rn.Rect.h, (int)rn.Visible);
+                }
+        }
+    }
+}
+
 } // namespace
 
 void RunUICoreChecks() {
@@ -380,6 +475,7 @@ void RunUICoreChecks() {
     CheckResponsive(renderer);
     CheckBlurCompositing(renderer);
     CheckShowcaseFrame(renderer);
+    CheckDemoScreens(renderer);
 }
 
 } // namespace sage::rendertest

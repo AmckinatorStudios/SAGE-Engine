@@ -11,15 +11,13 @@
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/ui/UILegacy.h"
-#include "sage/ui/UIPart.h"
 
 using json = nlohmann::json;
 
 // Текущая версия формата сцены. Растёт при ЛОМАЮЩЕМ изменении: добавление
 // необязательного поля версию не двигает, потому что старые файлы читаются без
 // него как раньше.
-constexpr int kSceneVersion = 6;
+constexpr int kSceneVersion = 7;
 
 static json Vec3ToJson(const glm::vec3& v) {
     return json{ {"x", v.x}, {"y", v.y}, {"z", v.z} };
@@ -637,91 +635,18 @@ static IKComponent ParseIK(const json& ij) {
 // на компоненты. Пишется всё уже компонентами (см. ниже), поэтому здесь только
 // чтение: однажды открытая и сохранённая сцена сюда больше не возвращается.
 
-static sage::ui::LegacyElement::Kind UIKindFromString(const std::string& s) {
-    if (s == "label") return sage::ui::LegacyElement::Kind::Label;
-    if (s == "image") return sage::ui::LegacyElement::Kind::Image;
-    if (s == "bar")   return sage::ui::LegacyElement::Kind::Bar;
-    if (s == "icon")  return sage::ui::LegacyElement::Kind::Icon;
-    if (s == "input") return sage::ui::LegacyElement::Kind::Input;
-    if (s == "checkbox") return sage::ui::LegacyElement::Kind::Checkbox;
-    if (s == "slider") return sage::ui::LegacyElement::Kind::Slider;
-    return sage::ui::LegacyElement::Kind::Panel;
-}
-
-static sage::ui::LegacyElement ParseUIElement(const json& uj) {
-    sage::ui::LegacyElement u;
-    u.Type = UIKindFromString(uj.value("kind", "panel"));
-    int anchor = uj.value("anchor", 0);
-    if (anchor >= 0 && anchor <= 8) u.Anchor = (UIAnchor)anchor;
-    if (uj.contains("offset")) {
-        u.Offset.x = uj["offset"].value("x", u.Offset.x);
-        u.Offset.y = uj["offset"].value("y", u.Offset.y);
-    }
-    if (uj.contains("size")) {
-        u.Size.x = uj["size"].value("x", u.Size.x);
-        u.Size.y = uj["size"].value("y", u.Size.y);
-    }
-    u.Layer = uj.value("layer", u.Layer);
-    u.Visible = uj.value("visible", u.Visible);
-    u.ClipChildren = uj.value("clipChildren", u.ClipChildren);
-    if (uj.contains("color")) u.Color = Vec4FromJson(uj["color"], u.Color);
-    u.Rounding = uj.value("rounding", u.Rounding);
-    u.BorderThickness = uj.value("borderThickness", u.BorderThickness);
-    if (uj.contains("borderColor")) u.BorderColor = Vec4FromJson(uj["borderColor"], u.BorderColor);
-    u.Text = uj.value("text", u.Text);
-    u.TextScale = uj.value("textScale", u.TextScale);
-    if (uj.contains("textColor")) u.TextColor = Vec4FromJson(uj["textColor"], u.TextColor);
-    u.TextCentered = uj.value("textCentered", u.TextCentered);
-    u.TexturePath = uj.value("texture", u.TexturePath);
-    u.Value = uj.value("value", u.Value);
-    if (uj.contains("barFillColor")) u.BarFillColor = Vec4FromJson(uj["barFillColor"], u.BarFillColor);
-    u.Icon = uj.value("icon", u.Icon);
-    if (uj.contains("iconColor")) u.IconColor = Vec4FromJson(uj["iconColor"], u.IconColor);
-    if (uj.contains("gradientColor")) u.GradientColor = Vec4FromJson(uj["gradientColor"], u.GradientColor);
-    u.ShadowSize = uj.value("shadowSize", u.ShadowSize);
-    if (uj.contains("sprite")) u.Sprite = Vec4FromJson(uj["sprite"], u.Sprite);
-    if (uj.contains("sliceBorder")) u.SliceBorder = Vec4FromJson(uj["sliceBorder"], u.SliceBorder);
-    u.PixelScale = uj.value("pixelScale", u.PixelScale);
-    u.PixelArt = uj.value("pixelArt", u.PixelArt);
-    if (uj.contains("spriteHover")) u.SpriteHover = Vec4FromJson(uj["spriteHover"], u.SpriteHover);
-    if (uj.contains("spritePressed"))
-        u.SpritePressed = Vec4FromJson(uj["spritePressed"], u.SpritePressed);
-    u.Interactive = uj.value("interactive", u.Interactive);
-    u.Enabled = uj.value("enabled", u.Enabled);
-    u.Placeholder = uj.value("placeholder", u.Placeholder);
-    u.MaxLength = uj.value("maxLength", u.MaxLength);
-    u.Password = uj.value("password", u.Password);
-    u.MinValue = uj.value("minValue", u.MinValue);
-    u.MaxValue = uj.value("maxValue", u.MaxValue);
-    u.WrapText = uj.value("wrapText", u.WrapText);
-    u.PadX = uj.value("padX", u.PadX);
-    u.AutoWidth = uj.value("autoWidth", u.AutoWidth);
-    // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).
-    if (!u.TexturePath.empty()) {
-        // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
-        // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний
-        // спрайт.
-        u.Tex = u.PixelArt
-                    ? ResourceManager::Instance().GetTexture(u.TexturePath, TextureFilter::Nearest,
-                                                             /*mipmaps=*/false)
-                    : ResourceManager::Instance().GetTexture(u.TexturePath);
-    }
-    return u;
-}
-
-// --- Интерфейс: КОМПОНЕНТЫ ---------------------------------------------------
+// --- Интерфейс: ССЫЛКА НА ДОКУМЕНТ -------------------------------------------
 //
-// Элемент интерфейса — это набор компонентов (см. sage/ui/UI.h), и в файле он
-// выглядит так же: под "ui" лежат только те части, которые у элемента ЕСТЬ.
-// Кнопка — это transform + fill + label + interactable, надпись — transform +
-// label. Раньше писался один плоский блок на сорок полей, и у каждой надписи в
-// файле честно хранились скругление, девятина, предел длины поля ввода и
-// границы ползунка — поля, ничего для неё не значащие.
+// Раньше здесь лежал САМ интерфейс: у каждого объекта сцены блок "ui" на сорок
+// полей, позже — набор частей. Интерфейса в сцене больше нет: он живёт
+// отдельным документом (.uidoc), а в сцене остаётся ССЫЛКА на него.
 //
-// СТАРЫЙ ФОРМАТ ЧИТАЕТСЯ. Признак — ключ "kind": он был видом элемента и в
-// новой записи не встречается. Такой блок разбирается прежним разбором и
-// раскладывается по компонентам (ui::Decompose), поэтому сцены, сделанные до
-// перехода, открываются без единой правки руками.
+// Старые сцены этот загрузчик как интерфейс уже не читает — и не должен: делать
+// вид, что старая модель плавно переходит в новую, значит получить третью. Для
+// них есть отдельный инструмент переезда, работающий с ФАЙЛОМ сцены
+// (sage/ui/serialization/UIMigration.h). Он намеренно не зависит от системы, из
+// которой переезжают, — иначе умер бы вместе с ней ровно тогда, когда нужен.
+
 
 static json Vec2ToJson(const glm::vec2& v) { return json{{"x", v.x}, {"y", v.y}}; }
 
@@ -729,18 +654,6 @@ static glm::vec2 Vec2FromJson(const json& j, const glm::vec2& fallback) {
     if (!j.is_object()) return fallback;
     return {j.value("x", fallback.x), j.value("y", fallback.y)};
 }
-
-// --- Части элемента — ПО РЕЕСТРУ (sage/ui/UIPart.h) -------------------------
-//
-// Здесь было двести строк «поле за полем» на запись и столько же на чтение, и
-// два этих списка обязаны были совпадать. Рано или поздно они расходятся:
-// свойство сохраняется, но не читается, и молча сбрасывается при следующей
-// загрузке — самая незаметная из поломок формата.
-//
-// Теперь оба идут по одной таблице полей, объявленной рядом с самой частью.
-// Своя часть игры сериализуется без единой правки здесь: она есть в реестре —
-// значит, она есть в файле.
-
 
 // --- Значения, переменные и связи (sage/vars, sage/events) -------------------
 //
@@ -861,146 +774,27 @@ static void BindingsFromJson(const json& in, sage::events::Bindings& out) {
 }
 
 // Одно поле части -> json.
-static void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
-    using K = sage::ui::PartField::Kind;
-    switch (f.Type) {
-        case K::Bool: out[f.Key] = sage::ui::FieldAs<bool>(data, f); break;
-        case K::Int: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
-        case K::Float: out[f.Key] = sage::ui::FieldAs<float>(data, f); break;
-        case K::String: out[f.Key] = sage::ui::FieldAs<std::string>(data, f); break;
-        case K::Color:
-        case K::Vec4: out[f.Key] = Vec4ToJson(sage::ui::FieldAs<glm::vec4>(data, f)); break;
-        case K::Vec2: out[f.Key] = Vec2ToJson(sage::ui::FieldAs<glm::vec2>(data, f)); break;
-        // Перечисление пишется ЧИСЛОМ: имена значений живут в таблице полей и
-        // нужны человеку, а файл должен пережить их переименование.
-        case K::Enum: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
-        case K::Bindings:
-            out[f.Key] = BindingsToJson(sage::ui::FieldAs<sage::events::Bindings>(data, f));
-            break;
-    }
-}
-
-static void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
-    if (!in.contains(f.Key)) return; // нет ключа — остаётся значение по умолчанию
-    using K = sage::ui::PartField::Kind;
-    const json& v = in[f.Key];
-    switch (f.Type) {
-        case K::Bool:
-            if (v.is_boolean()) sage::ui::FieldAs<bool>(data, f) = v.get<bool>();
-            break;
-        case K::Int:
-            if (v.is_number()) sage::ui::FieldAs<int>(data, f) = v.get<int>();
-            break;
-        case K::Float:
-            if (v.is_number()) sage::ui::FieldAs<float>(data, f) = v.get<float>();
-            break;
-        case K::String:
-            if (v.is_string()) sage::ui::FieldAs<std::string>(data, f) = v.get<std::string>();
-            break;
-        case K::Color:
-        case K::Vec4:
-            sage::ui::FieldAs<glm::vec4>(data, f) =
-                Vec4FromJson(v, sage::ui::FieldAs<glm::vec4>(data, f));
-            break;
-        case K::Vec2:
-            sage::ui::FieldAs<glm::vec2>(data, f) =
-                Vec2FromJson(v, sage::ui::FieldAs<glm::vec2>(data, f));
-            break;
-        case K::Enum:
-            // Значение из файла зажимается по списку имён: чужой номер (файл от
-            // будущей версии) не должен превращаться в мусорное перечисление.
-            if (v.is_number()) {
-                const int n = v.get<int>();
-                if (f.EnumCount <= 0 || (n >= 0 && n < f.EnumCount))
-                    sage::ui::FieldAs<int>(data, f) = n;
-            }
-            break;
-        case K::Bindings:
-            BindingsFromJson(v, sage::ui::FieldAs<sage::events::Bindings>(data, f));
-            break;
-    }
-}
-
-static void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
-    const sage::ui::Transform* t = reg.try_get<sage::ui::Transform>(e);
-    if (!t) return;
+// Ссылка сцены на документ интерфейса.
+static void SaveUIDocument(json& j, const sage::ui::UIDocumentComponent& c) {
     json& uj = j["ui"];
-
-    // Прямоугольник — не «часть», а сам элемент: без него элемента нет, и в
-    // реестре частей ему делать нечего.
-    json& tj = uj["transform"];
-    tj["anchor"] = (int)t->Anchor;
-    tj["stretch"] = (int)t->Mode;
-    tj["offset"] = Vec2ToJson(t->Offset);
-    tj["size"] = Vec2ToJson(t->Size);
-    tj["margin"] = Vec4ToJson(t->Margin);
-    tj["pivot"] = Vec2ToJson(t->Pivot);
-    tj["layer"] = t->Layer;
-    tj["visible"] = t->Visible;
-    // LayoutSize не пишется: это след последнего кадра, а не настройка.
-
-    for (const sage::ui::PartType& p : sage::ui::Parts()) {
-        if (!p.Fields || !p.Has || !p.Has(reg, e)) continue;  // без полей писать нечего
-        const void* data = p.Get(reg, e);
-        if (!data) continue;
-        json& pj = uj[p.Id];
-        for (const sage::ui::PartField& f : *p.Fields) SaveField(pj, data, f);
-    }
+    uj["document"] = c.Path;
+    uj["sortOrder"] = c.SortOrder;
+    uj["interactive"] = c.Interactive;
+    uj["visible"] = c.Visible;
+    // Связи «команда -> событие» пишутся, только если они есть: пустой массив в
+    // каждом объекте с интерфейсом — шум в файле, который потом читают глазами.
+    if (!c.Commands.empty()) uj["commands"] = BindingsToJson(c.Commands);
 }
 
-// Загружает текстуру картинки элемента (рантайм-поле, в файл не пишется).
-static void ResolveUIImage(sage::ui::Image& im) {
-    if (im.Path.empty()) return;
-    // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
-    // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
-    im.Tex = im.PixelArt ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
-                                                                 /*mipmaps=*/false)
-                         : ResourceManager::Instance().GetTexture(im.Path);
+static void LoadUIDocument(const json& uj, sage::ui::UIDocumentComponent& c) {
+    c.Path = uj.value("document", std::string());
+    c.SortOrder = uj.value("sortOrder", 0);
+    c.Interactive = uj.value("interactive", true);
+    c.Visible = uj.value("visible", true);
+    c.Commands.clear();
+    if (uj.contains("commands")) BindingsFromJson(uj["commands"], c.Commands);
 }
 
-static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
-    // Старая запись (плоский элемент с "kind") — разбираем прежним разбором и
-    // раскладываем по компонентам. Отдельная ветка, а не «дочитать
-    // недостающее»: это два разных формата, и делать вид, что один плавно
-    // переходит в другой, значит получить третий.
-    if (uj.contains("kind")) {
-        sage::ui::Decompose(ParseUIElement(uj), reg, e);
-        if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
-        return;
-    }
-
-    sage::ui::Transform t;
-    if (uj.contains("transform")) {
-        const json& tj = uj["transform"];
-        const int anchor = tj.value("anchor", (int)t.Anchor);
-        if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
-        const int stretch = tj.value("stretch", (int)t.Mode);
-        if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Transform::Stretch)stretch;
-        t.Offset = Vec2FromJson(tj.value("offset", json::object()), t.Offset);
-        t.Size = Vec2FromJson(tj.value("size", json::object()), t.Size);
-        if (tj.contains("margin")) t.Margin = Vec4FromJson(tj["margin"], t.Margin);
-        t.Pivot = Vec2FromJson(tj.value("pivot", json::object()), t.Pivot);
-        t.Layer = tj.value("layer", t.Layer);
-        t.Visible = tj.value("visible", t.Visible);
-    }
-    reg.emplace_or_replace<sage::ui::Transform>(e, t);
-
-    // Части — по реестру. Ключ, которого реестр не знает (часть из другой
-    // сборки игры), ПРОПУСКАЕТСЯ молча и остаётся в файле нетронутым: терять
-    // чужие данные при открытии сцены нельзя.
-    for (const sage::ui::PartType& p : sage::ui::Parts()) {
-        if (!p.Fields || !p.Id || !uj.contains(p.Id)) continue;
-        p.Add(reg, e);
-        void* data = p.GetMutable(reg, e);
-        if (!data) continue;
-        const json& pj = uj[p.Id];
-        for (const sage::ui::PartField& f : *p.Fields) LoadField(pj, data, f);
-    }
-
-    // Картинке нужен рантайм-указатель на текстуру: путь в файле есть, а
-    // загрузить его — дело загрузчика сцены.
-    if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
-}
 
 static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
     json& pj = j["particles"];
@@ -1215,7 +1009,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
         if (const VarsComponent* vc = reg.try_get<VarsComponent>(e))
             if (!vc->Values.Empty()) j["vars"] = VarsToJson(vc->Values);
-        SaveUIComponents(j, reg, e);
+        if (const sage::ui::UIDocumentComponent* uc =
+                reg.try_get<sage::ui::UIDocumentComponent>(e))
+            SaveUIDocument(j, *uc);
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -1370,150 +1166,43 @@ void MigrateV4toV5(json& root) {
     root["lighting"]["sun"]["intensity"] = 0.0f;
 }
 
-// v5 -> v6. Части перестали двигать и перекрашивать друг друга.
+// v5 -> v6: НИЧЕГО НЕ ДЕЛАЕТ.
 //
-// ПОЧЕМУ ПОМЕНЯЛОСЬ. Часть рисует себя в прямоугольнике СВОЕГО элемента и
-// ничего не знает о соседях. Раньше было наоборот, и правила жили только в
-// исходниках отрисовки: значок сдвигал подпись вправо на свою ширину, галка —
-// на сторону квадратика, ползунок красился подложкой соседа, а «акцент» брал у
-// шкалы, которую для этого надо было повесить рядом; при этом подложка,
-// оказавшись рядом с диапазоном, переставала закрашивать элемент целиком. Ни
-// одно из этих правил нельзя было увидеть в инспекторе или отменить.
+// Этот шаг разбирал внутреннее устройство старого элемента интерфейса: значок,
+// сдвигавший подпись, галку, красившую соседа, ползунок, забиравший цвета у
+// подложки. Интерфейса в сцене больше нет — разбирать нечего, и следующий шаг
+// (v6 -> v7) блок "ui" всё равно убирает.
 //
-// ЧТО ДЕЛАЕТ МИГРАЦИЯ — три перевода, каждый сохраняет прежний ВИД:
-//   1. Диапазон забирает себе цвета, которые брал у подложки и шкалы, а сами
-//      подложка и шкала с такого элемента убираются: раньше их всё равно не
-//      рисовали (подложка шла в дорожку, шкала не рисовалась вовсе), а теперь
-//      нарисовали бы поверх.
-//   2. Значок, стоявший рядом с чем-то ещё, переезжает в свой дочерний объект
-//      того же размера и на то же место — раньше он в этом случае жался
-//      квадратиком к левому краю, а один в элементе занимал его целиком.
-//   3. Подпись, которую двигали значок или галка, переезжает в дочерний объект,
-//      растянутый на родителя, с левым полем ровно в прежний сдвиг.
-//
-// Чего миграция НЕ трогает: элементы без значка и галки (там текст и раньше
-// рисовался по всему прямоугольнику) и поля ввода — их текст рисует САМО ПОЛЕ
-// (он бывает скрыт точками и обрезан кареткой), и вынос его к ребёнку показал
-// бы рядом вторую, неживую копию.
-void MigrateV5toV6(json& root) {
-    int maxId = 0;
-    for (const json& obj : root["objects"]) maxId = std::max(maxId, obj.value("id", 0));
+// Шаг оставлен пустым, а не выкинут: номера версий — это цепочка, и выдёргивать
+// из неё звено значит сломать чтение всех сцен, записанных после него.
+void MigrateV5toV6(json& root) { (void)root; }
 
-    // Дети собираются отдельно: дописывать в массив, по которому идёт цикл, —
-    // это ссылки, протухшие при первом же расширении вектора.
-    std::vector<json> born;
-
+// v6 -> v7: интерфейс уехал из сцены в документ.
+//
+// Старый блок "ui" описывал САМ интерфейс — сорок полей на объект. Теперь в
+// сцене остаётся только ССЫЛКА на документ (.uidoc), а старый блок здесь
+// убирается: молча тащить его дальше значило бы держать в файле данные, которых
+// никто не читает, и однажды перепутать их со ссылкой.
+//
+// Сам интерфейс при этом НЕ ТЕРЯЕТСЯ: он переносится в документ отдельным
+// инструментом, который читает исходный файл сцены
+// (sage/ui/serialization/UIMigration.h). Поэтому здесь — предупреждение с
+// именем объекта, а не тихое удаление.
+void MigrateV6toV7(json& root) {
+    int dropped = 0;
     for (json& obj : root["objects"]) {
         if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
-        json& uj = obj["ui"];
-        const int ownerId = obj.value("id", 0);
-        if (ownerId <= 0) continue; // без id ребёнка не к чему привязать
-
-        const bool hasLabel = uj.contains("label") && uj["label"].is_object();
-        const bool hasInput = uj.contains("textInput");
-        const bool hasImage = uj.contains("image") && uj["image"].is_object();
-        const bool hasBar = uj.contains("bar") && uj["bar"].is_object();
-        const bool hasRange = uj.contains("range") && uj["range"].is_object();
-        const bool hasIcon = uj.contains("icon") && uj["icon"].is_object() &&
-                             !uj["icon"].value("name", std::string()).empty();
-
-        const json tj = uj.value("transform", json::object());
-        const glm::vec2 size = Vec2FromJson(tj.value("size", json::object()), {200.0f, 56.0f});
-        const float w = size.x > 0.0f ? size.x : 200.0f;
-        const float h = size.y > 0.0f ? size.y : 56.0f;
-        const int layer = tj.value("layer", 0);
-
-        // Заготовка дочернего элемента: те же поля, что пишет SaveUIComponents,
-        // — иначе загрузчик подставит СВОИ умолчания вместо наших.
-        auto makeChild = [&](const char* name) {
-            json child;
-            child["id"] = ++maxId;
-            // Имя латиницей: это ДАННЫЕ сцены, а не строка интерфейса (см.
-            // «Sun» в миграции v4->v5) — от смены языка редактора имя объекта
-            // меняться не должно.
-            child["name"] = name;
-            child["parent"] = ownerId;
-            child["mesh"]["type"] = "none";
-            json& cu = child["ui"];
-            cu["transform"]["anchor"] = (int)UIAnchor::TopLeft;
-            cu["transform"]["stretch"] = (int)sage::ui::Transform::Stretch::None;
-            cu["transform"]["offset"] = Vec2ToJson({0.0f, 0.0f});
-            cu["transform"]["size"] = Vec2ToJson(size);
-            cu["transform"]["margin"] = Vec4ToJson(glm::vec4(0.0f));
-            cu["transform"]["pivot"] = Vec2ToJson({0.0f, 0.0f});
-            // Слой берётся у родителя: часть обязана лечь поверх того же, поверх
-            // чего лежала, а не всплыть на нулевой слой холста.
-            cu["transform"]["layer"] = layer;
-            cu["transform"]["visible"] = true;
-            return child;
-        };
-
-        // --- 1. Диапазон забирает чужие цвета себе --------------------------
-        if (hasRange) {
-            json& rj = uj["range"];
-            if (uj.contains("fill") && uj["fill"].is_object()) {
-                const json& fj = uj["fill"];
-                if (fj.contains("color")) rj["trackColor"] = fj["color"];
-                if (fj.contains("rounding")) rj["rounding"] = fj["rounding"];
-                if (fj.contains("borderColor")) rj["borderColor"] = fj["borderColor"];
-                if (fj.contains("borderThickness"))
-                    rj["borderThickness"] = fj["borderThickness"];
-                uj.erase("fill");
-            }
-            if (hasBar) {
-                if (uj["bar"].contains("fillColor")) rj["accentColor"] = uj["bar"]["fillColor"];
-                uj.erase("bar");
-            }
-        }
-
-        // Сдвиг подписи считается ТЕМИ ЖЕ формулами, что были в старой
-        // отрисовке, — иначе «выглядит как раньше» станет «примерно как раньше».
-        const float iconPad = std::min(4.0f, h * 0.18f);
-        const float declaredIcon = hasIcon ? uj["icon"].value("size", 0.0f) : 0.0f;
-        const float iconSide =
-            declaredIcon > 0.0f ? declaredIcon : std::max(h - iconPad * 2.0f, 4.0f);
-
-        // --- 2. Значок рядом с чем-то ещё — в свой объект --------------------
-        if (hasIcon && (hasLabel || hasImage || hasBar || hasRange)) {
-            json child = makeChild("Icon");
-            child["ui"]["transform"]["offset"] = Vec2ToJson({iconPad, iconPad});
-            child["ui"]["transform"]["size"] = Vec2ToJson({iconSide, iconSide});
-            child["ui"]["icon"] = uj["icon"];
-            uj.erase("icon");
-            born.push_back(std::move(child));
-        }
-
-        // --- 3. Сдвинутая подпись — в свой объект ----------------------------
-        if (hasLabel && !hasInput) {
-            const float padX = uj["label"].value("padX", 8.0f);
-            float left = padX;
-            bool shifted = false;
-            if (hasIcon) {
-                left = iconPad * 2.0f + iconSide;
-                shifted = true;
-            }
-            if (hasRange && uj["range"].value("toggle", false)) {
-                left = std::max(left, std::min(w, h) + padX);
-                shifted = true;
-            }
-            if (shifted) {
-                json child = makeChild("Text");
-                json& ctj = child["ui"]["transform"];
-                // Растянут на родителя: иначе подпись зависела бы от размера,
-                // записанного однажды, и разъезжалась бы при растяжении самого
-                // элемента.
-                ctj["stretch"] = (int)sage::ui::Transform::Stretch::Both;
-                // Левое поле — прежний сдвиг МИНУС боковой отступ надписи: его
-                // надпись добавит сама, и без вычитания он посчитался бы дважды.
-                ctj["margin"] = Vec4ToJson({std::max(left - padX, 0.0f), 0.0f, 0.0f, 0.0f});
-                child["ui"]["label"] = uj["label"];
-                uj.erase("label");
-                born.push_back(std::move(child));
-            }
-        }
+        const json& uj = obj["ui"];
+        // Ссылку на документ не трогаем: это уже новый формат.
+        if (uj.contains("document")) continue;
+        obj.erase("ui");
+        ++dropped;
     }
-
-    for (json& child : born) root["objects"].push_back(std::move(child));
+    if (dropped > 0) {
+        LOG_WARN("Scene") << "интерфейс старого образца убран из сцены (" << dropped
+                          << " объектов). Перенесите его в документ: "
+                             "UIMigrateSceneFile(<исходный .sage>, doc)";
+    }
 }
 
 using MigrationFn = void (*)(json&);
@@ -1525,6 +1214,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV3toV4,
     &MigrateV4toV5,
     &MigrateV5toV6,
+    &MigrateV6toV7,
 };
 
 } // namespace
@@ -1648,8 +1338,12 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             if (!vc.Values.Empty())
                 obj.Registry()->emplace_or_replace<VarsComponent>(obj.Entity(), std::move(vc));
         }
-        if (j.contains("ui"))
-            LoadUIComponents(j["ui"], *obj.Registry(), obj.Entity());
+        if (j.contains("ui") && j["ui"].contains("document")) {
+            sage::ui::UIDocumentComponent uc;
+            LoadUIDocument(j["ui"], uc);
+            obj.Registry()->emplace_or_replace<sage::ui::UIDocumentComponent>(obj.Entity(),
+                                                                             std::move(uc));
+        }
 
         // Пересоздаём GPU-ресурс на основе описания
         if (mr.Ref.type == MeshRef::Type::Model) {

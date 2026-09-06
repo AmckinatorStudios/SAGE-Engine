@@ -52,7 +52,6 @@ namespace sage { class Application; }
 #include "panels/LauncherPanel.h"
 #include "panels/EnvironmentPanel.h"
 #include "panels/UIDocumentPanel.h"
-#include "panels/UIEditorPanel.h"
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/TemplatesPanel.h"
@@ -179,8 +178,6 @@ public:
     float& SnapScale() override { return m_snapScale; }
     float SnapStepForCurrentOp() override;
     bool& ShowBounds() override { return m_showBounds; }
-    UIToolSettings& UITools() override { return m_uiTools; }
-    GameObject CreateUIEntity(const std::string& preset) override;
     bool& ColliderEditMode() override { return m_colliderEdit; }
 
     // --- EditorHost: инструменты над выделением ---
@@ -229,7 +226,6 @@ public:
             case EditorPanel::Profiler:    return m_showProfiler;
             case EditorPanel::Game:        return m_showGame;
             case EditorPanel::Viewport:    return m_showViewport;
-            case EditorPanel::UIEditor:    return m_showUIEditor;
             case EditorPanel::UIDocument:  return m_showUIDocument;
             case EditorPanel::Settings:    return m_showSettings;
             default:                       return m_showViewport;
@@ -339,7 +335,6 @@ private:
     float m_snapRotate = 15.0f;
     float m_snapScale = 0.1f;
     bool m_showBounds = false;
-    UIToolSettings m_uiTools;   // сетка и привязки вёрстки (см. UIToolSettings.h)
     bool m_colliderEdit = false; // гизмо тянет коллайдер, а не объект
 
     // --- Play-режим ---
@@ -383,7 +378,6 @@ private:
     bool m_showEnvironment = true;
     // Редактор интерфейса — по умолчанию закрыт: это отдельный инструмент под
     // отдельную задачу, и открывают его, когда садятся верстать.
-    bool m_showUIEditor = false;
     bool m_showUIDocument = false;
     bool m_showViewport = true;
     bool m_showGame = true;
@@ -428,7 +422,6 @@ private:
     static std::function<void(const std::vector<std::string>&)> s_dropSink;
     LauncherPanel m_launcher;
     EnvironmentPanel m_environment;
-    UIEditorPanel m_uiEditor;
     UIDocumentPanel m_uiDocument;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())

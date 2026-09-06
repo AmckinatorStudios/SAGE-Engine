@@ -11,15 +11,15 @@
 #include "TestFramework.h"
 
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 #include "sage/ui/UIFramework.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
-#include "sage/ui/components/Interact.h"
-#include "sage/ui/components/Layout.h"
-#include "sage/ui/components/Visual.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/ui/serialization/UIMigration.h"
+#include "sage/ui/showcase/UIDemos.h"
 #include "sage/ui/showcase/UIShowcaseDocument.h"
 #include "sage/ui/visual/UIIcon.h"
 #include "sage/ui/visual/UIMaterial.h"
@@ -1376,40 +1376,31 @@ TEST(UIx_icon_goes_through_a_material) {
 // --- Переезд со старой системы ----------------------------------------------------
 
 TEST(UIx_migration_from_legacy_scene) {
-    Scene scene("legacy");
-    entt::registry& reg = scene.Registry();
-
-    GameObject panel = scene.CreateObject("Panel");
-    {
-        sage::ui::Transform& t = reg.emplace<sage::ui::Transform>(panel.Entity());
-        t.Anchor = UIAnchor::BottomRight;
-        t.Offset = {24.0f, 24.0f};
-        t.Size = {300.0f, 120.0f};
-        t.Layer = 4;
-        sage::ui::Fill& f = reg.emplace<sage::ui::Fill>(panel.Entity());
-        f.Rounding = 12.0f;
-        f.BorderThickness = 2.0f;
-        f.ShadowSize = 10.0f;
-        reg.emplace<sage::ui::Mask>(panel.Entity());
-    }
-
-    GameObject label = scene.CreateObject("Title");
-    {
-        sage::ui::Transform& t = reg.emplace<sage::ui::Transform>(label.Entity());
-        t.Size = {200.0f, 40.0f};
-        sage::ui::Label& l = reg.emplace<sage::ui::Label>(label.Entity());
-        l.Text = "Инвентарь";
-        l.Scale = 2.5f;
-        l.Horizontal = sage::ui::Label::Align::Start;
-        scene.SetParent(label.Entity(), panel.Entity());
-    }
+    // Из ФАЙЛА, а не из живых компонентов: старой системы в движке больше нет,
+    // а сцены с блоками "ui" у людей на диске остались — инструмент переезда
+    // обязан пережить систему, из которой переезжают.
+    const std::string legacy = R"({
+      "name": "legacy", "sage_scene_version": 6,
+      "objects": [
+        {"id": 1, "name": "Panel",
+         "ui": {"transform": {"anchor": 8, "offset": {"x": 24, "y": 24},
+                              "size": {"x": 300, "y": 120}, "layer": 4},
+                "fill": {"rounding": 12.0, "borderThickness": 2.0, "shadowSize": 10.0},
+                "mask": {"form": 1}}},
+        {"id": 2, "name": "Title", "parent": 1,
+         "ui": {"transform": {"size": {"x": 200, "y": 40}},
+                "label": {"text": "Инвентарь", "scale": 2.5, "horizontal": 0}}}
+      ]
+    })";
 
     UIDocument doc;
-    const UIMigrationReport report = UIMigrateSceneUI(scene, doc);
+    const UIMigrationReport report = UIMigrateSceneText(legacy, doc);
+    CHECK_TRUE(report.Ok);
     CHECK_EQ(report.Nodes, 2);
 
     UINode* newPanel = doc.FindByName("Panel");
     CHECK_TRUE(newPanel != nullptr);
+    if (!newPanel) return;
     // Девять якорей стали долями — и дальше правятся как доли.
     CHECK_NEAR(newPanel->Get<UITransform>()->AnchorMin.x, 1.0, 1e-4);
     CHECK_NEAR(newPanel->Get<UITransform>()->AnchorMin.y, 1.0, 1e-4);
@@ -1423,6 +1414,9 @@ TEST(UIx_migration_from_legacy_scene) {
 
     UINode* newLabel = doc.FindByName("Title");
     CHECK_TRUE(newLabel != nullptr);
+    if (!newLabel) return;
+    // Иерархия восстановлена по номерам объектов: подпись была ребёнком панели
+    // и обязана им остаться, иначе она уедет в угол экрана.
     CHECK_EQ(newLabel->Parent, newPanel->Id);
     CHECK_EQ(newLabel->Get<UIText>()->Text, std::string("Инвентарь"));
     CHECK_NEAR(newLabel->Get<UIText>()->Size, 20.0, 1e-4); // 2.5 × 8
@@ -1430,23 +1424,32 @@ TEST(UIx_migration_from_legacy_scene) {
 }
 
 TEST(UIx_migration_reports_what_it_could_not_carry) {
-    Scene scene("legacy2");
-    entt::registry& reg = scene.Registry();
-    GameObject button = scene.CreateObject("Play");
-    reg.emplace<sage::ui::Transform>(button.Entity());
-    sage::ui::Interactable& ia = reg.emplace<sage::ui::Interactable>(button.Entity());
-    ia.Action = "menu.play";
-    ia.Events.push_back(sage::events::Binding{});
+    // Связи событий на самом элементе перенести некуда: их место теперь в
+    // сцене, на ссылке объекта (UIDocumentComponent::Commands). Молчать об
+    // этом нельзя — иначе кнопка приедет молчаливой, и виноватым окажется
+    // переезд, а не отсутствующая связь.
+    const std::string legacy = R"({
+      "name": "legacy2", "sage_scene_version": 6,
+      "objects": [
+        {"id": 1, "name": "Play",
+         "ui": {"transform": {"size": {"x": 100, "y": 40}},
+                "interactable": {"action": "menu.play",
+                                 "events": [{"trigger": "click", "event": "game.start"}]}}}
+      ]
+    })";
 
     UIDocument doc;
-    const UIMigrationReport report = UIMigrateSceneUI(scene, doc);
-    // Связи событий — часть игровой сцены, а не документа. Молча их терять
-    // нельзя: об этом обязано быть сказано (§134).
+    const UIMigrationReport report = UIMigrateSceneText(legacy, doc);
+    CHECK_TRUE(report.Ok);
+    CHECK_EQ(report.Nodes, 1);
+    // Команда переехала: она и в новой системе — строка, которую узел сообщает.
+    UINode* n = doc.FindByName("Play");
+    CHECK_TRUE(n != nullptr);
+    if (n && n->Get<UIInteraction>())
+        CHECK_EQ(n->Get<UIInteraction>()->Command, std::string("menu.play"));
+    // А про связь сказано вслух.
     CHECK_TRUE(!report.Warnings.empty());
-    CHECK_EQ(doc.FindByName("Play")->Get<UIInteraction>()->Command, std::string("menu.play"));
 }
-
-// --- Прокрутка ---------------------------------------------------------------------
 
 TEST(UIx_scroll_offset_moves_content_and_reports_extent) {
     Harness h;

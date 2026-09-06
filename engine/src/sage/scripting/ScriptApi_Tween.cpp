@@ -1,6 +1,7 @@
 #include "ScriptEngine.h"
 
-#include "sage/ui/UI.h"
+#include "sage/ui/UIFramework.h"
+#include "sage/ui/scene/UIScene.h"
 
 #include "sage/core/Log.h"
 
@@ -56,18 +57,25 @@ void ScriptEngine::RegisterTweenApi() {
         return m_tweens.To<glm::vec3>(obj.ColorRef(), to, dur, easeOr(ease, sage::Easing::Linear),
             [obj](const glm::vec3& v) mutable { if (obj.Valid()) obj.ColorRef() = v; });
     });
-    // Полоса/значение UI (0..1) — например плавная убыль здоровья.
-    Bind("tween", "UIValue", "TweenUIValue", [this, easeOr](GameObject obj, float to, float dur,
-                                                      sol::optional<sage::Easing> ease) -> uint64_t {
-        if (!obj.Valid()) return 0;
-        auto* ui = obj.Registry()->try_get<sage::ui::Bar>(obj.Entity());
-        if (!ui) return 0;
-        return m_tweens.To<float>(ui->Value, to, dur, easeOr(ease, sage::Easing::QuadOut),
-            [obj](const float& v) mutable {
-                if (!obj.Valid()) return;
-                if (auto* u = obj.Registry()->try_get<sage::ui::Bar>(obj.Entity())) u->Value = v;
-            });
-    });
+    // Значение интерфейса (полоса, ползунок) — по АДРЕСУ СВОЙСТВА в документе:
+    //
+    //   sage.tween.UIValue("assets/ui/hud.uidoc", "Health/Fill.progress.Value", 0.3, 0.4)
+    //
+    // Не по объекту сцены: интерфейс живёт в документе, и объект — не он.
+    Bind("tween", "UIValue", "TweenUIValue",
+         [this, easeOr](const std::string& document, const std::string& property, float to,
+                        float dur, sol::optional<sage::Easing> ease) -> uint64_t {
+             sage::ui::UIRuntime* rt = sage::ui::UIDocuments::Instance().Find(document);
+             if (!rt) return 0;
+             auto binding = std::make_shared<sage::ui::UIPropertyBinding>();
+             if (!binding->Bind(rt->Doc(), property)) return 0;
+             float from = 0.0f;
+             binding->Get(from);
+             // Значение живёт в документе, а не в анимации: держать его копию
+             // здесь значило бы потерять чужую правку посреди анимации.
+             return m_tweens.To<float>(from, to, dur, easeOr(ease, sage::Easing::QuadOut),
+                                       [binding](const float& v) { binding->Set(v); });
+         });
     Bind("tween", "Cancel", "TweenCancel", [this](uint64_t id) { m_tweens.Cancel(id); });
     Bind("tween", "CancelAll", "TweenCancelAll", [this]() { m_tweens.CancelAll(); });
     Bind("tween", "Active", "ActiveTweens", [this]() { return m_tweens.ActiveCount(); });

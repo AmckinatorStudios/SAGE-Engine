@@ -56,10 +56,7 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIDemos.h"
-#include "sage/ui/UIPresets.h"
-#include "sage/ui/UISceneSystem.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
@@ -309,7 +306,7 @@ void EditorLayer::DrawStatusBar(float height) {
 }
 
 bool EditorLayer::AnyPanelVisible() const {
-    return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUIEditor ||
+    return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUIDocument ||
            m_showViewport || m_showGame ||
            m_showConsole || m_showAssets || m_showCode || m_showProfiler;
 }
@@ -508,59 +505,27 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 SetSelectedId(d.Id());
             }
 
-            // Готовые элементы интерфейса, а не «добавь компонент и настрой».
+            // ИНТЕРФЕЙС В СЦЕНЕ — ЭТО ССЫЛКА НА ДОКУМЕНТ.
             //
-            // Голый прямоугольник — это ещё не элемент: чтобы получить из него
-            // кнопку, надо добавить подложку, надпись и реакцию на мышь. Меню
-            // отдаёт то, что человек и хотел получить, сразу собранным; дальше
-            // правится всё, вплоть до состава частей.
-            if (ImGui::BeginMenu(T("Create UI"))) {
-                struct Preset { const char* Name; const char* Label; };
-                static const Preset kPresets[] = {
-                    {"Panel", T("Panel")},   {"Button", T("Button")}, {"Label", T("Label")},
-                    {"Image", T("Image")}, {"Bar", T("Bar")},    {"Checkbox", T("Checkbox")},
-                    {"Slider", T("Slider")}, {"Input", T("Input")},
-                };
-                for (const Preset& p : kPresets) {
-                    if (ImGui::MenuItem(p.Label)) {
-                        PushUndoSnapshot();
-                        SetSelectedId(CreateUIEntity(p.Name).Id());
-                        // И сразу открывается редактор интерфейса: элемент,
-                        // которого не видно после создания, выглядит как
-                        // «кнопка не сработала».
-                        m_showUIEditor = true;
-                        m_uiEditor.RequestFocus();
-                    }
-                }
-
-                // Готовые ЭКРАНЫ, а не отдельные элементы.
-                //
-                // Заготовка отвечает на вопрос «что такое кнопка»; оставшийся —
-                // «как из кнопок собирают меню» — до сих пор оставался без
-                // ответа, и каждый отвечал на него сам. Демо ставится в сцену и
-                // разбирается в инспекторе: холст, раскладка, группа и имена
-                // действий видны на работающем экране (см. sage/ui/UIDemos.h).
-                ImGui::Separator();
-                if (ImGui::BeginMenu(T("Demo screens"))) {
-                    struct Demo { const char* Key; const char* Label; };
-                    static const Demo kDemos[] = {
-                        {"menu", T("Main menu")},
-                        {"hud", T("HUD")},
-                        {"settings", T("Settings")},
-                    };
-                    for (const Demo& d : kDemos) {
-                        if (ImGui::MenuItem(d.Label)) {
-                            PushUndoSnapshot();
-                            const int id = sage::ui::BuildDemo(*m_scene, d.Key);
-                            if (id >= 0) SetSelectedId(id);
-                            m_showUIEditor = true;
-                            m_uiEditor.RequestFocus();
-                            m_sceneDirty = true;
-                        }
-                    }
-                    ImGui::EndMenu();
-                }
-                ImGui::EndMenu();
+            // Раньше здесь создавались элементы интерфейса — объекты сцены
+            // рядом с камерой и светом. Их больше нет: интерфейс живёт
+            // отдельным документом (.uidoc) и правится своим редактором, а в
+            // сцене остаётся один объект со ссылкой. Из-за этого один и тот же
+            // худ переиспользуется на всех уровнях, а не копируется в каждый.
+            if (ImGui::MenuItem(T("Create UI"))) {
+                PushUndoSnapshot();
+                GameObject obj = m_scene->CreateObject("UI");
+                m_scene->Registry().emplace<sage::ui::UIDocumentComponent>(obj.Entity());
+                SetSelectedId(obj.Id());
+                // И сразу открывается редактор документа: объект, после
+                // создания которого ничего не видно, выглядит как «кнопка не
+                // сработала».
+                m_showUIDocument = true;
+                m_uiDocument.RequestFocus();
+                m_sceneDirty = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Scene object that points at a .uidoc document"));
             }
             if (ImGui::MenuItem(T("Create Camera"))) {
                 PushUndoSnapshot();
@@ -668,7 +633,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // «Освещение» стало «Средой»: в окне остались небо, воздух и
             // окружающий свет, а сами источники света — на объектах сцены.
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
-            ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
             ImGui::MenuItem(T("UI Document"), nullptr, &PanelVisible(EditorPanel::UIDocument));
             ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanel::Code));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));

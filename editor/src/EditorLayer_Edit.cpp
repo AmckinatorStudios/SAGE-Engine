@@ -58,10 +58,6 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIDemos.h"
-#include "sage/ui/UIPresets.h"
-#include "sage/ui/UISceneSystem.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
@@ -188,47 +184,6 @@ void EditorLayer::Redo() {
 //  Сущности
 // ============================================================================
 
-
-// Готовый элемент интерфейса по имени пресета. Значения подобраны так, чтобы
-// созданный элемент был СРАЗУ ВИДЕН и сразу делал то, что обещает названием:
-// кнопка ловит мышь, полоса заполнена наполовину, поле ввода имеет подсказку.
-// Ноль в размере или прозрачный цвет по умолчанию означали бы, что человек
-// создал элемент и не увидел ничего.
-GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
-    GameObject obj = m_scene->CreateObject(preset);
-    entt::registry& reg = m_scene->Registry();
-
-    // Новый элемент становится ДОЧЕРНИМ к выделенному элементу интерфейса.
-    //
-    // Интерфейс собирается из вложенных прямоугольников: панель, а в ней
-    // надпись, кнопка и полоса. Раньше каждый созданный элемент вставал в
-    // корень, то есть отсчитывался от края ЭКРАНА, и собрать панель означало
-    // создать элементы, а потом перетащить каждый в иерархии на панель, помня,
-    // что до этого они лежали не там. Самый частый шаг верстки требовал
-    // отдельного ручного действия — и именно это ощущается как «неудобно
-    // прикреплять».
-    if (m_selectedId >= 0) {
-        GameObject sel = m_scene->Get(m_selectedId);
-        if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity())) {
-            m_scene->SetParent(obj.Entity(), sel.Entity());
-        }
-    }
-
-    // Что именно значит «кнопка» или «полоса», знает ДВИЖОК (sage/ui/UIPresets.h).
-    // Раньше это знание жило только здесь, и получить кнопку можно было лишь
-    // мышью в редакторе: скрипт, собирающий интерфейс на лету, повторял те же
-    // семь присваиваний у себя.
-    // Через СЦЕНУ: у заготовок есть дети (надпись на кнопке — отдельный
-    // объект), а создать объект и назначить родителя умеет только сцена.
-    sage::ui::ApplyPreset(*m_scene, obj.Entity(), preset);
-    // Новый элемент появляется в центре родителя: у края экрана его легко не
-    // заметить и решить, что «ничего не создалось».
-    sage::ui::Transform& xf = reg.get<sage::ui::Transform>(obj.Entity());
-    xf.Anchor = UIAnchor::Center;
-    xf.Offset = glm::vec2(0.0f, 0.0f);
-
-    return obj;
-}
 
 GameObject EditorLayer::CreateCubeEntity(const std::string& name) {
     return CreatePrimitiveEntity(name, MeshRef::Type::Cube);

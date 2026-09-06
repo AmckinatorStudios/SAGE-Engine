@@ -14,7 +14,7 @@
 #include "sage/render/Material.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
-#include "sage/ui/UI.h"
+#include "sage/ui/scene/UIScene.h"
 
 namespace fs = std::filesystem;
 
@@ -262,45 +262,16 @@ TEST(Scene_json_encodes_primitive_mesh_ref) {
 // ===========================================================================
 //  Прозрачность и оформление интерфейса переживают сохранение
 // ===========================================================================
-TEST(Serialization_opacity_and_ui_style_round_trip) {
+TEST(Serialization_opacity_round_trip) {
     Scene scene("Style");
     GameObject glass = scene.CreateObject("Glass");
     // Тип меша оставляем None: тесты идут без GL-контекста, а любой примитив
     // при загрузке попросил бы у ResourceManager настоящий GPU-меш.
     glass.Renderer().Opacity = 0.35f;
 
-    GameObject hud = scene.CreateObject("Bar");
-    entt::registry& reg = scene.Registry();
-    reg.emplace<sage::ui::Transform>(hud.Entity(), sage::ui::Transform{});
-    sage::ui::Fill fill;
-    fill.Gradient = {0.1f, 0.1f, 0.2f, 0.8f};
-    fill.ShadowSize = 12.0f;
-    reg.emplace<sage::ui::Fill>(hud.Entity(), fill);
-    sage::ui::Icon icon;
-    icon.Name = "heart";
-    icon.Color = {0.9f, 0.2f, 0.2f, 1.0f};
-    reg.emplace<sage::ui::Icon>(hud.Entity(), icon);
-    reg.emplace<sage::ui::Bar>(hud.Entity(), sage::ui::Bar{});
-
     std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
     GameObject g2 = back->FindByName("Glass");
     CHECK_NEAR(g2.Renderer().Opacity, 0.35f, 1e-4);
-
-    entt::registry& r2 = back->Registry();
-    const entt::entity e2 = back->FindByName("Bar").Entity();
-    const auto* icon2 = r2.try_get<sage::ui::Icon>(e2);
-    const auto* fill2 = r2.try_get<sage::ui::Fill>(e2);
-    CHECK_TRUE(icon2 != nullptr);
-    CHECK_TRUE(fill2 != nullptr);
-    if (icon2) {
-        CHECK_EQ(icon2->Name, std::string("heart"));
-        CHECK_NEAR(icon2->Color.r, 0.9f, 1e-4);
-    }
-    if (fill2) {
-        CHECK_NEAR(fill2->Gradient.a, 0.8f, 1e-4);
-        CHECK_NEAR(fill2->ShadowSize, 12.0f, 1e-4);
-    }
-    CHECK_TRUE(r2.all_of<sage::ui::Bar>(e2));
 }
 
 // Материал: своя программа и пользовательские юниформы — тоже данные проекта.
@@ -693,143 +664,77 @@ TEST(MeshRenderer_scene_without_slots_still_loads) {
     CHECK_EQ(lm.MaterialPath, std::string("materials/wood.sagemat"));
 }
 
-// --- v5 -> v6: части перестали двигать и перекрашивать друг друга ------------
+// --- v6 -> v7: интерфейс перестал быть сущностями сцены ----------------------
 //
-// Без миграции каждая уже сделанная галка и каждая строка «значок + подпись»
-// съехали бы при первом открытии: текст лёг бы на квадратик и на значок, а
-// подложка закрасила бы галку целиком. Проверяем все три перевода по
-// отдельности — одна формула может быть верной, а вторая нет.
-TEST(Scene_migration_v5_to_v6_moves_a_shifted_label_into_a_child) {
+// Старые сцены несут в объектах блок "ui" — набор частей прежней системы
+// (прямоугольник, заливка, надпись, шкала). Этой системы больше нет: экран стал
+// самостоятельным ресурсом (.uidoc), а сцена хранит на него ссылку.
+//
+// Молча оставить чужой блок в файле нельзя: он не читается ничем, и объект,
+// который «был кнопкой», выглядел бы как обычный пустой объект без единой
+// строчки в логе. Миграция блок УБИРАЕТ, а сам экран переносится отдельным
+// инструментом (UIMigrateSceneFile) — из того же файла, но в документ.
+TEST(Scene_migration_v6_to_v7_drops_the_old_interface_blocks) {
     const std::string old = R"({
-      "name": "Old", "sage_scene_version": 5,
+      "name": "Old", "sage_scene_version": 6,
       "objects": [
         {"id": 1, "name": "Check",
          "ui": {"transform": {"size": {"x": 200, "y": 40}, "layer": 3},
                 "fill": {"color": {"x":0.1,"y":0.1,"z":0.1,"w":1.0}, "rounding": 6.0},
-                "range": {"toggle": true},
-                "label": {"text": "Звук", "padX": 8.0}}},
-        {"id": 2, "name": "Button",
-         "ui": {"transform": {"size": {"x": 200, "y": 40}},
-                "fill": {},
-                "label": {"text": "OK", "padX": 8.0}}}
+                "label": {"text": "Звук"}}},
+        {"id": 2, "name": "Player", "transform": {"position": {"x": 1, "y": 2, "z": 3}}}
       ]
     })";
     const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
     CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
-    CHECK_EQ(j["objects"].size(), (size_t)3);   // родился ровно один объект-надпись
-
-    // У галки надписи больше нет — она стала ребёнком.
-    CHECK_FALSE(j["objects"][0]["ui"].contains("label"));
-    // Подложка ушла в цвет квадратика: раньше она и рисовалась только там, а
-    // теперь закрасила бы весь элемент вместе с местом под подпись.
-    CHECK_FALSE(j["objects"][0]["ui"].contains("fill"));
-    CHECK_NEAR(j["objects"][0]["ui"]["range"]["trackColor"]["x"].get<float>(), 0.1f, 1e-4f);
-    CHECK_NEAR(j["objects"][0]["ui"]["range"]["rounding"].get<float>(), 6.0f, 1e-4f);
-    // У обычной кнопки текст рисовался по всему элементу и раньше: не трогаем.
-    CHECK_TRUE(j["objects"][1]["ui"].contains("label"));
-    CHECK_TRUE(j["objects"][1]["ui"].contains("fill"));
-
-    const nlohmann::json& child = j["objects"][2];
-    CHECK_EQ(child["parent"].get<int>(), 1);
-    CHECK_EQ(child["ui"]["label"]["text"].get<std::string>(), std::string("Звук"));
-    // Растянут на родителя: иначе подпись зависела бы от размера, записанного
-    // однажды, и разъезжалась бы при растяжении самой галки.
-    CHECK_EQ(child["ui"]["transform"]["stretch"].get<int>(),
-             (int)sage::ui::Transform::Stretch::Both);
-    // Левое поле = прежний сдвиг (сторона квадратика 40 + отступ 8) минус
-    // боковой отступ надписи, который надпись добавит сама.
-    CHECK_NEAR(child["ui"]["transform"]["margin"]["x"].get<float>(), 40.0f, 1e-4f);
-    CHECK_NEAR(child["ui"]["transform"]["margin"]["y"].get<float>(), 0.0f, 1e-4f);
-    // Слой берётся у родителя: надпись обязана лечь поверх того же, поверх чего
-    // лежала галка, а не всплыть на нулевой слой холста.
-    CHECK_EQ(child["ui"]["transform"]["layer"].get<int>(), 3);
+    // Объекты на месте: интерфейс был не единственным, что на них висело, и
+    // выбрасывать объект целиком значило бы потерять и всё остальное.
+    CHECK_EQ(j["objects"].size(), (size_t)2);
+    CHECK_FALSE(j["objects"][0].contains("ui"));
+    CHECK_NEAR(j["objects"][1]["transform"]["position"]["x"].get<float>(), 1.0f, 1e-4f);
 }
 
-// Значок рядом с подписью: он и сам съезжает в свой объект (раньше жался
-// квадратиком к левому краю, теперь занимал бы элемент целиком), и подпись
-// сдвигает — по формуле, отличной от галкиной.
-TEST(Scene_migration_v5_to_v6_keeps_the_icon_shift) {
-    const std::string old = R"({
-      "name": "Old", "sage_scene_version": 5,
-      "objects": [
-        {"id": 7, "name": "Health",
-         "ui": {"transform": {"size": {"x": 240, "y": 32}},
-                "icon": {"name": "sun", "size": 20.0},
-                "label": {"text": "100", "padX": 6.0}}}
-      ]
-    })";
-    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
-    CHECK_EQ(j["objects"].size(), (size_t)3);   // значок и надпись — два ребёнка
-    CHECK_FALSE(j["objects"][0]["ui"].contains("label"));
-    CHECK_FALSE(j["objects"][0]["ui"].contains("icon"));
+// Ссылка на документ: путь, порядок, флаги и связи «команда -> событие» — это
+// данные проекта, и терять их при записи нельзя.
+TEST(Scene_ui_document_reference_survives_a_round_trip) {
+    Scene scene("UI");
+    GameObject screen = scene.CreateObject("Menu");
+    GameObject door = scene.CreateObject("Door");
 
-    // pad = min(4, 32*0.18) = 4; значок стоял в (pad, pad) стороной 20.
-    const nlohmann::json& iconChild = j["objects"][1];
-    CHECK_EQ(iconChild["parent"].get<int>(), 7);
-    CHECK_TRUE(iconChild["ui"].contains("icon"));
-    CHECK_NEAR(iconChild["ui"]["transform"]["offset"]["x"].get<float>(), 4.0f, 1e-4f);
-    CHECK_NEAR(iconChild["ui"]["transform"]["size"]["x"].get<float>(), 20.0f, 1e-4f);
+    sage::ui::UIDocumentComponent c;
+    c.Path = "assets/ui/menu.uidoc";
+    c.SortOrder = 7;
+    c.Interactive = false;
+    c.Visible = true;
+    sage::events::Binding b;
+    b.Trigger = "menu.play";
+    b.Event = "game.start";
+    b.Target = sage::vars::EntityRef{door.Id()};
+    b.Method = "Open";
+    b.Arg = sage::vars::Value(std::string("тихо"));
+    c.Commands.push_back(b);
+    scene.Registry().emplace<sage::ui::UIDocumentComponent>(screen.Entity(), c);
 
-    const nlohmann::json& textChild = j["objects"][2];
-    CHECK_EQ(textChild["parent"].get<int>(), 7);
-    // сдвиг = pad*2 + 20 = 28; минус боковой отступ надписи 6.
-    CHECK_NEAR(textChild["ui"]["transform"]["margin"]["x"].get<float>(), 22.0f, 1e-4f);
-    // id детей свободны: совпадение порвало бы связи иерархии.
-    CHECK_TRUE(iconChild["id"].get<int>() > 7);
-    CHECK_TRUE(textChild["id"].get<int>() > iconChild["id"].get<int>());
-}
-
-// Значок ОДИН в элементе занимал его целиком и раньше — трогать нечего. Иначе
-// миграция плодила бы лишний объект на каждую иконку в проекте.
-TEST(Scene_migration_v5_to_v6_leaves_a_lone_icon_in_place) {
-    const std::string old = R"({
-      "name": "Old", "sage_scene_version": 5,
-      "objects": [
-        {"id": 3, "name": "Gear",
-         "ui": {"transform": {"size": {"x": 32, "y": 32}}, "icon": {"name": "gear"}}}
-      ]
-    })";
-    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
-    CHECK_EQ(j["objects"].size(), (size_t)1);
-    CHECK_TRUE(j["objects"][0]["ui"].contains("icon"));
-}
-
-// Ползунок со шкалой рядом: шкала не рисовалась вовсе, а её цвет был цветом
-// ручки. После миграции цвет живёт у ползунка, а шкалы на элементе нет — иначе
-// поверх дорожки легла бы вторая полоса.
-TEST(Scene_migration_v5_to_v6_folds_a_bar_colour_into_the_slider) {
-    const std::string old = R"({
-      "name": "Old", "sage_scene_version": 5,
-      "objects": [
-        {"id": 4, "name": "Volume",
-         "ui": {"transform": {"size": {"x": 240, "y": 30}},
-                "fill": {"color": {"x":0.2,"y":0.2,"z":0.2,"w":1.0}},
-                "bar": {"fillColor": {"x":0.9,"y":0.4,"z":0.1,"w":1.0}},
-                "range": {"toggle": false, "value": 0.5}}}
-      ]
-    })";
-    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
-    const nlohmann::json& ui = j["objects"][0]["ui"];
-    CHECK_FALSE(ui.contains("bar"));
-    CHECK_FALSE(ui.contains("fill"));
-    CHECK_NEAR(ui["range"]["accentColor"]["x"].get<float>(), 0.9f, 1e-4f);
-    CHECK_NEAR(ui["range"]["trackColor"]["x"].get<float>(), 0.2f, 1e-4f);
-}
-
-// Поле ввода рисует свой текст САМО (его прячут точками, обрезают кареткой).
-// Вынести его к ребёнку значит показать рядом с полем вторую, неживую копию.
-TEST(Scene_migration_v5_to_v6_leaves_a_text_input_alone) {
-    const std::string old = R"({
-      "name": "Old", "sage_scene_version": 5,
-      "objects": [
-        {"id": 1, "name": "Field",
-         "ui": {"transform": {"size": {"x": 200, "y": 40}},
-                "icon": {"name": "sun"},
-                "textInput": {},
-                "label": {"text": "abc"}}}
-      ]
-    })";
-    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
-    CHECK_TRUE(j["objects"][0]["ui"].contains("label"));   // текст остался у поля
-    CHECK_EQ(j["objects"].size(), (size_t)2);              // но значок всё же съехал
+    std::unique_ptr<Scene> back =
+        SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(back != nullptr);
+    GameObject loaded = back->FindByName("Menu");
+    CHECK_TRUE(loaded.Valid());
+    const auto* got = back->Registry().try_get<sage::ui::UIDocumentComponent>(loaded.Entity());
+    CHECK_TRUE(got != nullptr);
+    if (!got) return;
+    CHECK_EQ(got->Path, std::string("assets/ui/menu.uidoc"));
+    CHECK_EQ(got->SortOrder, 7);
+    CHECK_FALSE(got->Interactive);
+    CHECK_TRUE(got->Visible);
+    CHECK_EQ(got->Commands.size(), (size_t)1);
+    if (got->Commands.empty()) return;
+    // Триггер связи — имя КОМАНДЫ документа: ровно здесь интерфейс встречается
+    // с игрой, и потерянная строка означает кнопку, которая молча ничего не
+    // делает.
+    CHECK_EQ(got->Commands[0].Trigger, std::string("menu.play"));
+    CHECK_EQ(got->Commands[0].Event, std::string("game.start"));
+    CHECK_EQ(got->Commands[0].Method, std::string("Open"));
+    CHECK_EQ(got->Commands[0].Arg.AsString(), std::string("тихо"));
+    CHECK_EQ(got->Commands[0].Target.Id, back->FindByName("Door").Id());
 }

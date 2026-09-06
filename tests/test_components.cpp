@@ -24,11 +24,11 @@
 #include "sage/render/ParticleComponents.h"
 #include "sage/render/ReflectionComponents.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptComponent.h"
-#include "sage/ui/UI.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/physics/PhysicsComponents.h"
 
 namespace fs = std::filesystem;
@@ -86,8 +86,8 @@ TEST(Components_survive_a_scene_round_trip) {
     probe.Registry()->emplace<ReflectionProbeComponent>(probe.Entity()).Resolution = 64;
 
     GameObject ui = scene.CreateObject("UI");
-    ui.Registry()->emplace<sage::ui::Transform>(ui.Entity());
-    ui.Registry()->emplace<sage::ui::Label>(ui.Entity()).Text = "кнопка";
+    ui.Registry()->emplace<sage::ui::UIDocumentComponent>(ui.Entity()).Path =
+        "assets/ui/menu.uidoc";
 
     std::unique_ptr<Scene> loaded = RoundTrip(scene, "core");
     CHECK_TRUE(loaded != nullptr);
@@ -133,11 +133,13 @@ TEST(Components_survive_a_scene_round_trip) {
         CHECK_EQ(pr.Registry()->get<ReflectionProbeComponent>(pr.Entity()).Resolution, 64);
     }
 
-    // Интерфейс хранится НАБОРОМ компонентов: надпись кнопки живёт в Label, а
-    // не в общем поле «текст» у всего подряд.
-    GameObject u = Find<sage::ui::Label>(*loaded);
+    // Интерфейс в сцене — ССЫЛКА на документ: сам экран лежит отдельным
+    // ресурсом, а сцена знает только, какой из них здесь показывается.
+    GameObject u = Find<sage::ui::UIDocumentComponent>(*loaded);
     CHECK_TRUE(u.Valid());
-    if (u.Valid()) CHECK_TRUE(u.Registry()->get<sage::ui::Label>(u.Entity()).Text == "кнопка");
+    if (u.Valid())
+        CHECK_TRUE(u.Registry()->get<sage::ui::UIDocumentComponent>(u.Entity()).Path ==
+                   "assets/ui/menu.uidoc");
 }
 
 // --- Компоненты, которых сериализация НЕ ЗНАЕТ -------------------------------

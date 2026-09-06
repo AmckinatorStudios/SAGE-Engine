@@ -22,7 +22,7 @@
 #include "sage/render/LensFlare.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/ui/UIRenderer.h"
-#include "sage/ui/UIInteraction.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/ecs/RenderBatch.h"
 #include "sage/net/NetworkSystem.h"
 #include "sage/scene/Scene.h"
@@ -169,8 +169,10 @@ private:
     // ЗДЕСЬ, а не в системе UI: та обязана оставаться чистой функцией от
     // состояния ввода, иначе её нельзя ни прогнать в тесте, ни отдать
     // редактору с его пересчитанными в панель координатами.
-    sage::ui::UIInputState m_uiInput;
-    sage::ui::UIInputResult m_uiResult;
+    // Рантайм интерфейса сцены: документы, на которые ссылаются её объекты.
+    sage::ui::UISceneRuntime m_uiScene;
+    sage::ui::UIInputFrame m_uiInput;
+    sage::ui::UIInputReport m_uiResult;
     bool m_uiCallbacksBound = false;
     bool m_uiMouseWasDown = false;
     // Размер области, в которой нарисован интерфейс (letterbox-viewport). Мышь

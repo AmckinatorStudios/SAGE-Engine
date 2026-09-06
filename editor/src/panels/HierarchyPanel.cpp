@@ -15,7 +15,7 @@
 #include "EditorIcons.h"
 #include "Project.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
 
@@ -37,7 +37,7 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
     if (reg.all_of<ReflectionProbeComponent>(e)) return "probe";
     if (reg.all_of<ParticleEmitterComponent>(e)) return "particles";
     if (reg.all_of<AnimatedModelComponent>(e)) return "anim";
-    if (reg.all_of<sage::ui::Transform>(e)) return "file";
+    if (reg.all_of<sage::ui::UIDocumentComponent>(e)) return "rect";
     if (reg.all_of<RigidBodyComponent>(e) || reg.all_of<ColliderComponent>(e)) return "physics";
     if (reg.all_of<ScriptComponent>(e)) return "script";
     if (const MeshRendererComponent* mr = reg.try_get<MeshRendererComponent>(e)) {

@@ -40,14 +40,12 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel.cpp
     src/panels/InspectorPanel_Material.cpp
     src/panels/InspectorPanel_Entity.cpp
-    src/panels/InspectorPanel_Ui.cpp
     src/panels/ViewportPanel.cpp
     src/panels/GamePanel.cpp
     src/panels/AssetsPanel.cpp
     src/panels/LauncherPanel.cpp
     src/panels/EnvironmentPanel.cpp
     src/EditorPrefs.cpp
-    src/UIElementProperties.cpp
     src/VarsEditor.cpp
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
@@ -58,9 +56,6 @@ add_executable(SageEditor WIN32
     src/FileBrowser.cpp
     src/ConfirmDialog.cpp
     src/CodeEditor.cpp
-    src/UICanvas.cpp
-    src/UILayoutOps.cpp
-    src/panels/UIEditorPanel.cpp
     src/panels/UIDocumentPanel.cpp
     src/AssetPreview.cpp
 )

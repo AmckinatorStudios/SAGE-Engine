@@ -122,16 +122,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Lighting.cpp
     src/sage/scripting/ScriptApi_Events.cpp
     src/sage/scripting/ScriptApi_Physics.cpp
-    src/sage/ui/UIParts.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UIIcons.cpp
-    src/sage/ui/UISceneSystem.cpp
-    src/sage/ui/UIPresets.cpp
-    src/sage/ui/UI.cpp
-    src/sage/ui/UILayoutTools.cpp
-    src/sage/ui/UILegacy.cpp
-    src/sage/ui/UIDemos.cpp
-    src/sage/ui/UIShowcase.cpp
     # --- Новая система интерфейса (см. engine/src/sage/ui/UIFramework.h) ------
     # Разложена по подсистемам: ядро, раскладка, оформление, маски, эффекты,
     # рисование, ввод, стили, виджеты, сериализация, анимация, отладка. Порядок
@@ -167,7 +159,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/serialization/UIMigration.cpp
     src/sage/ui/animation/UIAnimationValue.cpp
     src/sage/ui/debug/UIDebug.cpp
+    src/sage/ui/scene/UIScene.cpp
     src/sage/ui/showcase/UIShowcaseDocument.cpp
+    src/sage/ui/showcase/UIDemos.cpp
     src/sage/ui/UIFramework.cpp
 )
 

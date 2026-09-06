@@ -4,12 +4,12 @@
 
 #include <cstdint>
 
+#include "sage/ui/visual/UITextLayout.h"
 #include "imgui.h"
 
 #include "EditorHost.h"
 #include "sage/core/Config.h"
 #include "../Localization.h"
-#include "sage/ui/UIInteraction.h"
 
 void GamePanel::Draw(EditorHost& host, bool* open) {
     if (m_focusFrames > 0) {
@@ -88,7 +88,7 @@ void GamePanel::Draw(EditorHost& host, bool* open) {
     if (m_focused) {
         const ImGuiIO& io = ImGui::GetIO();
         for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
-            sage::ui::AppendUtf8(m_typed, (unsigned int)io.InputQueueCharacters[i]);
+            sage::ui::UIUtf8Append(m_typed, (uint32_t)io.InputQueueCharacters[i]);
         }
     }
 

@@ -65,11 +65,18 @@ void EmitFill(const UIDrawContext& ctx, const UIComponent& comp) {
         return;
     }
     if (f.Color.a <= 0.0f && !f.Gradient.Active()) return; // §130: невидимое ничего не стоит
+    const bool gradient = f.Type == UIFill::Kind::Gradient && f.Gradient.Active();
     UIRenderCommand& c = ctx.Begin(UIPrimitive::Rect);
-    c.Color = Shade(ctx, f.Color);
+    // У ГРАДИЕНТА СВОИ ЦВЕТА. Цвет заливки — это цвет СПЛОШНОЙ заливки, и когда
+    // выбран градиент, он не участвует: рисующий домножает остановки на цвет
+    // команды, а цвет заливки по умолчанию почти чёрный (0.09) — то есть любой
+    // градиент, которому не выставили Color вручную, гас в чёрный прямоугольник.
+    // Сюда уходит белый, а состояние и прозрачность узла (Shade) применяются
+    // по-прежнему: подсветка кнопки с градиентом обязана работать.
+    c.Color = Shade(ctx, gradient ? UIColor(1.0f, 1.0f, 1.0f, 1.0f) : f.Color);
     c.Radius = ScaledCorners(f.Radius, ctx.Scale);
     c.Softness = f.Softness * ctx.Scale;
-    if (f.Type == UIFill::Kind::Gradient && f.Gradient.Active()) c.Gradient = f.Gradient;
+    if (gradient) c.Gradient = f.Gradient;
 }
 
 void EmitBorder(const UIDrawContext& ctx, const UIComponent& comp) {

@@ -8,7 +8,7 @@
 #include "sage/render/TextureGen.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/scene/Prefab.h"
-#include "sage/ui/UISceneSystem.h"
+#include "sage/ui/scene/UIScene.h"
 
 // ---------------------------------------------------------------------------
 // Сцена и объекты: GameObject, sage.scene.*, sage.render.* (меши и материалы)
@@ -62,7 +62,10 @@ void ScriptEngine::RegisterGameObject() {
     sage::scripting::detail::BindComponentAccessors<ParticleEmitterComponent>(goType, "HasEmitter", "GetEmitter", "AddEmitter", "RemoveEmitter");
     sage::scripting::detail::BindComponentAccessors<MeshRendererComponent>(goType, "HasRenderer", "GetRenderer", "AddRenderer", "RemoveRenderer");
     sage::scripting::detail::BindComponentAccessors<ScriptComponent>(goType, "HasScript", "GetScript", "AddScript", "RemoveScript");
-    BindUIAccessors(goType);
+    // Интерфейс на объекте — это ССЫЛКА на документ, а не набор компонентов:
+    // сам интерфейс живёт в .uidoc и правится sage.ui.*.
+    sage::scripting::detail::BindComponentAccessors<sage::ui::UIDocumentComponent>(
+        goType, "HasUI", "GetUI", "AddUI", "RemoveUI");
     sage::scripting::detail::BindComponentAccessors<DecalComponent>(goType, "HasDecal", "GetDecal", "AddDecal", "RemoveDecal");
 
     // --- Иерархия прямо на объекте: e:SetParent(p) / e:Parent() / e:Children() /
@@ -154,18 +157,6 @@ void ScriptEngine::RegisterSceneApi() {
         if (!obj.Valid()) return sol::nullopt;
         return obj;
     });
-
-    // Верхний видимый UI-элемент под экранной точкой (учитывает слои/маски):
-    // GameObject или nil. Экранный размер передаётся явно — скрипт берёт его
-    // из своего контекста (окно игры / панель Game).
-    Bind("ui", "ElementAt", "GetUIElementAt", [this](float x, float y, int screenW, int screenH) -> sol::optional<GameObject> {
-            if (!m_scene) return sol::nullopt;
-            int id = sage::ui::HitTest(*m_scene, x, y, screenW, screenH);
-            if (id < 0) return sol::nullopt;
-            GameObject obj = m_scene->Get(id);
-            if (!obj.Valid()) return sol::nullopt;
-            return obj;
-        });
 
     // Принимает СУЩНОСТЬ ИЛИ ЕЁ НОМЕР, как и SendMessage.
     //

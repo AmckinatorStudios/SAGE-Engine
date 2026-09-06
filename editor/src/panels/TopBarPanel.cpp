@@ -124,7 +124,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     PanelToggle(host, EditorPanel::Settings, "gear", T("Game Settings"),
                 T("Game Settings: quality and cost of the frame (saved with the project)"),
                 labels, row);
-    PanelToggle(host, EditorPanel::UIEditor, "rect", T("Interface"),
+    PanelToggle(host, EditorPanel::UIDocument, "rect", T("Interface"),
                 T("Interface editor: the game frame at its own resolution"), labels, row);
 
     divider();

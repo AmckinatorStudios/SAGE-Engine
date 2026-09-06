@@ -28,9 +28,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UILegacy.h"
-#include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UIFramework.h"
 
 namespace sage::bench {
 namespace {
@@ -239,34 +237,41 @@ void RegisterScriptCases() {
 
 void RegisterUiCases() {
     // Раскладка интерфейса: якоря, растяжения, сетки, обход иерархии. Зовётся
-    // каждый кадр, а экран инвентаря — это полторы сотни элементов.
+    // каждый кадр, а экран инвентаря — это полторы сотни узлов.
     {
-        auto scene = std::make_shared<Scene>("bench-ui");
-        auto put = [&](GameObject obj, glm::vec2 pos, glm::vec2 size, bool interactive) {
-            sage::ui::LegacyElement e;
-            e.Type = sage::ui::LegacyElement::Kind::Panel;
-            e.Anchor = UIAnchor::TopLeft;
-            e.Offset = pos;
-            e.Size = size;
-            e.Interactive = interactive;
-            sage::ui::Decompose(e, scene->Registry(), obj.Entity());
-        };
-        GameObject root = scene->CreateObject("Canvas");
-        put(root, {0.0f, 0.0f}, {1920.0f, 1080.0f}, false);
-        // Ячейки ИНТЕРАКТИВНЫЕ: раскладка ищет, кто под курсором, и на пассивных
-        // элементах этот поиск не делается вовсе — замер мерил бы половину
-        // работы, которую делает настоящий экран инвентаря.
+        using namespace sage::ui;
+        UIInitialize();
+        auto rt = std::make_shared<UIRuntime>();
+        UIDocument& doc = rt->Doc();
+        doc.SetName("bench");
+        UINode& root = *doc.Create("Canvas", kUIInvalidNode);
+        root.Ensure<UITransform>().SetStretch(true, true);
+        // Ячейки ИНТЕРАКТИВНЫЕ: ввод ищет, кто под курсором, и на пассивных
+        // узлах этот поиск не делается вовсе — замер мерил бы половину работы,
+        // которую делает настоящий экран инвентаря.
         for (int i = 0; i < 240; ++i) {
-            GameObject slot = scene->CreateObject("slot");
-            put(slot, {(float)((i % 16) * 56), (float)((i / 16) * 56)}, {52.0f, 52.0f}, true);
-            scene->SetParent(slot.Entity(), root.Entity());
+            UINode& slot = *doc.Create("slot", root.Id);
+            UITransform& t = slot.Ensure<UITransform>();
+            t.AnchorMin = t.AnchorMax = {0.0f, 0.0f};
+            t.Pivot = {0.0f, 0.0f};
+            t.Offset = {(float)((i % 16) * 56), (float)((i / 16) * 56)};
+            t.Size = {52.0f, 52.0f};
+            slot.Ensure<UIFill>().Radius = UICorners(4.0f);
+            slot.Ensure<UIInteraction>();
         }
-        sage::ui::UIInputState input;
-        Register("ui: раскладка 240 элементов x 200 кадров", "элемент", 240 * 200,
-                 [scene, input] {
-                     for (int i = 0; i < 200; ++i)
-                         sage::ui::UpdateSceneUI(*scene, input, 1920, 1080);
-                 });
+        rt->SetScreen({1920.0f, 1080.0f});
+
+        Register("ui: раскладка 240 узлов x 200 кадров", "узел", 240 * 200, [rt] {
+            UIInputFrame input;
+            input.Pointer = {640.0f, 360.0f};
+            for (int i = 0; i < 200; ++i) {
+                // Каждый кадр заново: замер должен мерить работу, а не удачно
+                // сработавший кеш «ничего не поменялось».
+                rt->Doc().MarkDirty(UIDirty_Layout);
+                rt->Update(1.0f / 60.0f);
+                rt->HandleInput(input);
+            }
+        });
     }
 }
 

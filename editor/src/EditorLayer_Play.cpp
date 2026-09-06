@@ -54,10 +54,6 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIDemos.h"
-#include "sage/ui/UIPresets.h"
-#include "sage/ui/UISceneSystem.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
@@ -215,8 +211,8 @@ void EditorLayer::StartPlay() {
 // панель — единственный, кто знает, где нарисована её картинка.
 void EditorLayer::UpdatePlayUiInput(float dt) {
     if (!m_scene) return;
-    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
-    if (uiView.begin() == uiView.end()) return;
+    auto& sceneUi = m_renderer.SceneUI();
+    if (!sceneUi.Any(*m_scene)) { m_playUiMouseWasDown = false; return; }
 
     // Захваченный курсор — режим обзора: экранной точки у мыши нет, и
     // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
@@ -224,30 +220,57 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
     const bool usable = m_game.MouseInside() && !captured;
     const bool down = usable && m_game.MouseDown();
 
-    sage::ui::UIInputState input;
-    input.Mouse = usable ? glm::vec2(m_game.MouseX(), m_game.MouseY()) : glm::vec2(-1.0f);
-    input.MouseDown = down;
-    input.MousePressed = down && !m_playUiMouseWasDown;
-    input.MouseReleased = !down && m_playUiMouseWasDown;
-    input.TypedText = m_game.TypedText();
-    input.DeltaTime = dt;
+    sage::ui::UIInputFrame input;
+    input.Pointer = usable ? glm::vec2(m_game.MouseX(), m_game.MouseY()) : glm::vec2(-1.0f);
+    input.PointerInside = usable;
+    input.Buttons[0] = down;
+    input.TextInput = m_game.TypedText();
     m_playUiMouseWasDown = down;
 
-    // Клавиши редактирования — из ImGui: он уже слушает окно, и второй
-    // обработчик на те же клавиши спорил бы с ним за автоповтор.
+    // Клавиши — из ImGui: он уже слушает окно, и второй обработчик на те же
+    // клавиши спорил бы с ним за автоповтор. Интерфейс ждёт коды GLFW, а они у
+    // ImGui свои — переводим только те, что нужны полю ввода и навигации.
     if (m_game.Focused()) {
-        input.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
-        input.Delete = ImGui::IsKeyPressed(ImGuiKey_Delete, true);
-        input.Left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true);
-        input.Right = ImGui::IsKeyPressed(ImGuiKey_RightArrow, true);
-        input.Home = ImGui::IsKeyPressed(ImGuiKey_Home, true);
-        input.End = ImGui::IsKeyPressed(ImGuiKey_End, true);
-        input.Enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
-        input.Escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-        input.Tab = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
+        struct KeyPair { ImGuiKey Im; int Glfw; bool Repeat; };
+        static const KeyPair kKeys[] = {
+            {ImGuiKey_Backspace, GLFW_KEY_BACKSPACE, true},
+            {ImGuiKey_Delete, GLFW_KEY_DELETE, true},
+            {ImGuiKey_LeftArrow, GLFW_KEY_LEFT, true},
+            {ImGuiKey_RightArrow, GLFW_KEY_RIGHT, true},
+            {ImGuiKey_UpArrow, GLFW_KEY_UP, true},
+            {ImGuiKey_DownArrow, GLFW_KEY_DOWN, true},
+            {ImGuiKey_Home, GLFW_KEY_HOME, true},
+            {ImGuiKey_End, GLFW_KEY_END, true},
+            {ImGuiKey_Enter, GLFW_KEY_ENTER, false},
+            {ImGuiKey_Escape, GLFW_KEY_ESCAPE, false},
+            {ImGuiKey_Tab, GLFW_KEY_TAB, false},
+        };
+        for (const KeyPair& k : kKeys)
+            if (ImGui::IsKeyPressed(k.Im, k.Repeat)) input.KeysDown.push_back(k.Glfw);
+
+        input.Shift = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+        input.Ctrl = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+        input.Alt = ImGui::IsKeyDown(ImGuiKey_LeftAlt) || ImGui::IsKeyDown(ImGuiKey_RightAlt);
+
+        // Навигация — поверх клавиш: интерфейс не должен знать, со стрелки она
+        // пришла или со стика.
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) input.NavX = -1;
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) input.NavX = 1;
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) input.NavY = -1;
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) input.NavY = 1;
+        input.NavSubmit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+        input.NavCancel = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        if (ImGui::IsKeyPressed(ImGuiKey_Tab, false))
+            (input.Shift ? input.NavPrev : input.NavNext) = true;
     }
 
-    sage::ui::UpdateSceneUI(*m_scene, input, m_renderer.GameWidth(), m_renderer.GameHeight());
+    const glm::vec2 screen((float)m_renderer.GameWidth(), (float)m_renderer.GameHeight());
+    sceneUi.Update(*m_scene, screen, dt);
+    const sage::ui::UIInputReport report = sceneUi.HandleInput(*m_scene, input, screen);
+
+    // Команды интерфейса — скриптам: это единственный способ, которым нажатая
+    // кнопка доходит до игровой логики (§102).
+    if (m_playScripts) m_playScripts->SetUICommands(report.Commands);
 }
 
 void EditorLayer::StopPlay() {

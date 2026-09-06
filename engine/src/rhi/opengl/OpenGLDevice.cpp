@@ -97,6 +97,7 @@ void OpenGLDevice::SetBlendMode(BlendMode mode) {
     switch (mode) {
         case BlendMode::Premultiplied: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
         case BlendMode::Additive:      glBlendFunc(GL_ONE, GL_ONE); break;
+        case BlendMode::AdditiveAlpha: glBlendFunc(GL_SRC_ALPHA, GL_ONE); break;
         default:                       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); break;
     }
 }

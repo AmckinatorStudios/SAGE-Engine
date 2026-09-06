@@ -23,8 +23,6 @@
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
 #include "sage/ecs/CameraView.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UISceneSystem.h"
 
 void EditorSceneRenderer::Init() {
     m_outlineShader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
@@ -752,17 +750,16 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_gamePostApplied = true;
     }
 
-    // UI сцены (компоненты интерфейса) — поверх ИТОГОВОЙ картинки (после поста),
-    // ровно как его увидит игрок в собранной игре (WYSIWYG панели Game).
-    auto uiView = scene.Registry().view<sage::ui::Transform>();
-    if (uiView.begin() != uiView.end()) {
+    // Интерфейс сцены (документы .uidoc) — поверх ИТОГОВОЙ картинки (после
+    // поста), ровно как его увидит игрок в собранной игре (WYSIWYG панели Game).
+    if (m_sceneUi.Any(scene)) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         Framebuffer& target = m_gamePostApplied ? *m_gamePostFbo : *m_gameFbo;
         target.Bind();
         device.SetViewport(0, 0, m_gameW, m_gameH);
-        m_ui->Begin(m_gameW, m_gameH);
-        sage::ui::DrawSceneUI(scene, *m_ui, m_gameW, m_gameH);
-        m_ui->End();
+        // Цель передаётся рантайму: эффекты рисуются во временные буферы и
+        // должны вернуться ИМЕННО сюда, а не в буфер по умолчанию.
+        m_sceneUi.Render(scene, *m_ui, glm::vec2((float)m_gameW, (float)m_gameH), &target);
     }
     device.BindDefaultFramebuffer();
 }

@@ -42,9 +42,8 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
 #include "sage/ui/UIIcons.h"
-#include "sage/ui/UIPresets.h"
+#include "sage/ui/scene/UIScene.h"
 #include "../Localization.h"
 
 namespace fs = std::filesystem;
@@ -129,6 +128,18 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
             env.Skybox.Celestials = true;
         }
     }
+}
+
+// Серое пояснение с переносом строк. Не подсказка по наведению: то, что
+// объясняет ПОЛЕ, должно читаться раньше, чем человек догадается навести на
+// него курсор.
+void InspectorPanel::HintWrapped(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrappedV(fmt, args);
+    ImGui::PopStyleColor();
+    va_end(args);
 }
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
@@ -782,9 +793,10 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    if (reg.all_of<sage::ui::Transform>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        DrawUIElement(host, obj);
+    if (reg.all_of<sage::ui::UIDocumentComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader(T("UI Document" "###UI Document"),
+                                   ImGuiTreeNodeFlags_DefaultOpen)) {
+        DrawUIDocument(host, obj);
     }
 
     // --- Единое «Add Component»: добавляет любой ОТСУТСТВУЮЩИЙ компонент ---
@@ -887,11 +899,12 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Net Replicated", "Logic", "network",
          "The server replicates this object to clients", HasComp<NetReplicatedComponent>,
          AddComp<NetReplicatedComponent>},
-        // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего
-        // элемент состоит дальше, выбирается в самом инспекторе (или заготовкой).
-        {"UI Element", "Interface", "rect",
-         "Panel, label, image or bar on screen", HasComp<sage::ui::Transform>,
-         AddComp<sage::ui::Transform>},
+        // Интерфейс добавляется ССЫЛКОЙ на документ: сам экран собирается в
+        // редакторе документа, а объект сцены отвечает лишь за то, где и когда
+        // он показывается.
+        {"UI Document", "Interface", "rect",
+         "Shows a .uidoc interface document on screen", HasComp<sage::ui::UIDocumentComponent>,
+         AddComp<sage::ui::UIDocumentComponent>},
     };
     return kEntries;
 }
@@ -997,4 +1010,90 @@ void InspectorPanel::DrawPrefabPreview(EditorHost& host) {
 
     ImGui::Spacing();
     if (ImGui::Button(T("Place in scene"), ImVec2(-1, 0))) host.InstantiatePrefab(path);
+}
+
+// ---------------------------------------------------------------------------
+//  Ссылка на документ интерфейса
+// ---------------------------------------------------------------------------
+//
+// САМОГО ИНТЕРФЕЙСА ЗДЕСЬ НЕТ, И ЭТО НАМЕРЕННО. Раньше инспектор сцены был
+// вторым редактором интерфейса: элемент был сущностью, и его якорь, заливка,
+// надпись и рамка правились здесь, рядом с физикой и светом. Из этого следовало
+// всё плохое сразу — экран нельзя было переиспользовать, правка не доезжала до
+// второго уровня, а «где редактируется меню» имело два разных ответа.
+//
+// Теперь экран — документ (.uidoc), и правит его редактор документа. Инспектор
+// сцены отвечает на другой вопрос, и только на него: КАКОЙ экран показывается
+// на этом объекте, в каком порядке — и что делают его кнопки.
+void InspectorPanel::DrawUIDocument(EditorHost& host, GameObject obj) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    auto* c = reg.try_get<sage::ui::UIDocumentComponent>(obj.Entity());
+    if (!c) return;
+
+    // Путь к документу. Принимает и перетаскивание из панели Assets: искать
+    // файл по памяти, когда он виден в дереве, — лишняя работа.
+    char buf[512];
+    std::snprintf(buf, sizeof(buf), "%s", c->Path.c_str());
+    if (ImGui::InputText(T("Document"), buf, sizeof(buf))) {
+        host.PushUndoSnapshot();
+        c->Path = buf;
+    }
+    host.TrackLastImGuiItem();
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(assetslot::kPayload)) {
+            const std::filesystem::path dropped((const char*)p->Data);
+            if (dropped.extension() == ".uidoc") {
+                host.PushUndoSnapshot();
+                c->Path = host.CurrentProject().AssetRef(dropped);
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    if (ImGui::Button(T("Edit document"))) {
+        // Открыть тот самый файл, а не «редактор вообще»: кнопка, открывающая
+        // пустой редактор, требует найти документ второй раз руками.
+        host.PanelVisible(EditorPanel::UIDocument) = true;
+        host.ShowAssetInPanel(c->Path);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Reload"))) sage::ui::UIDocuments::Instance().Reload(c->Path);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Re-read the document from disk"));
+
+    if (ImGui::DragInt(T("Sort Order"), &c->SortOrder, 0.1f)) host.PushUndoSnapshot();
+    host.TrackLastImGuiItem();
+    HintWrapped(T("Documents of one scene are drawn in this order: the pause menu must "
+                  "lie over the HUD regardless of which object was created first."));
+    if (ImGui::Checkbox(T("Visible"), &c->Visible)) host.PushUndoSnapshot();
+    host.TrackLastImGuiItem();
+    if (ImGui::Checkbox(T("Interactive"), &c->Interactive)) host.PushUndoSnapshot();
+    host.TrackLastImGuiItem();
+    HintWrapped(T("Off: the document is visible but does not take the mouse — a HUD over "
+                  "the game must not eat shots."));
+
+    // --- Что значат команды документа ---------------------------------------
+    //
+    // Узел интерфейса умеет ровно одно: сообщить строку ("menu.play"). Что она
+    // означает — записано здесь: имя команды в роли триггера, дальше обычная
+    // связь событий движка.
+    ImGui::Spacing();
+    ImGui::TextUnformatted(T("Commands"));
+    HintWrapped(T("A button reports a command; here you say what it does. The interface "
+                  "itself knows nothing about the game."));
+    std::vector<std::string> triggers;
+    if (sage::ui::UIRuntime* rt = sage::ui::UIDocuments::Instance().Find(c->Path)) {
+        // Подсказываем команды, которые в документе ЕСТЬ: вписывать их по
+        // памяти — значит однажды опечататься и молча получить кнопку, которая
+        // ничего не делает.
+        for (sage::ui::UINodeId id : rt->Doc().Ordered()) {
+            const sage::ui::UINode* n = rt->Doc().Find(id);
+            const sage::ui::UIInteraction* ia = n ? n->Get<sage::ui::UIInteraction>() : nullptr;
+            if (!ia || ia->Command.empty()) continue;
+            if (std::find(triggers.begin(), triggers.end(), ia->Command) == triggers.end())
+                triggers.push_back(ia->Command);
+        }
+    }
+    if (varsui::DrawBindings(host, "uidoc", c->Commands, triggers, nullptr))
+        host.PushUndoSnapshot();
 }

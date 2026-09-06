@@ -1,7 +1,7 @@
 #include "sage/vars/Refs.h"
 
 #include "sage/events/Events.h"
-#include "sage/ui/UIPart.h"
+#include "sage/ui/scene/UIScene.h"
 #include "sage/vars/VarsComponent.h"
 
 namespace sage::vars {
@@ -20,18 +20,11 @@ void VisitEntityRefs(entt::registry& reg, entt::entity e,
         }
     }
 
-    // 2. Адресаты связей событий — ПО РЕЕСТРУ ЧАСТЕЙ, а не по списку известных
-    // компонентов: связи может носить не только Interactable, и своя часть игры
-    // со списком связей обязана попасть сюда сама.
-    for (const sage::ui::PartType& part : sage::ui::Parts()) {
-        if (!part.Fields || !part.Has || !part.GetMutable || !part.Has(reg, e)) continue;
-        void* data = part.GetMutable(reg, e);
-        if (!data) continue;
-        for (const sage::ui::PartField& f : *part.Fields) {
-            if (f.Type != sage::ui::PartField::Kind::Bindings) continue;
-            for (sage::events::Binding& b : sage::ui::FieldAs<sage::events::Bindings>(data, f))
-                visit(b.Target);
-        }
+    // 2. Связи «команда интерфейса -> событие»: у них есть адресат, и он
+    //    такая же ссылка на объект. Без этого копия заготовки открывала бы
+    //    дверь ОРИГИНАЛА — молча и убедительно.
+    if (sage::ui::UIDocumentComponent* uc = reg.try_get<sage::ui::UIDocumentComponent>(e)) {
+        for (sage::events::Binding& b : uc->Commands) visit(b.Target);
     }
 }
 

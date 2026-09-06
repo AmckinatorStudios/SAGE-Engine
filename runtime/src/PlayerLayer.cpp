@@ -35,8 +35,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/ecs/CameraView.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UISceneSystem.h"
+#include "sage/ui/scene/UIScene.h"
 
 namespace fs = std::filesystem;
 
@@ -572,51 +571,52 @@ void PlayerLayer::UpdateUiInput(float dt) {
 
     if (!m_uiCallbacksBound) {
         m_uiCallbacksBound = true;
-        window.SetCharCallback(
-            [this](unsigned int cp) { sage::ui::AppendUtf8(m_uiInput.TypedText, cp); });
-        window.AddKeyCallback([this](int key, int action, int) {
+        window.SetCharCallback([this](unsigned int cp) {
+            sage::ui::UIUtf8Append(m_uiInput.TextInput, cp);
+        });
+        window.AddKeyCallback([this](int key, int action, int mods) {
             if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
-            switch (key) {
-                case GLFW_KEY_BACKSPACE: m_uiInput.Backspace = true; break;
-                case GLFW_KEY_DELETE:    m_uiInput.Delete = true; break;
-                case GLFW_KEY_LEFT:      m_uiInput.Left = true; break;
-                case GLFW_KEY_RIGHT:     m_uiInput.Right = true; break;
-                case GLFW_KEY_HOME:      m_uiInput.Home = true; break;
-                case GLFW_KEY_END:       m_uiInput.End = true; break;
-                case GLFW_KEY_ENTER:
-                case GLFW_KEY_KP_ENTER:  m_uiInput.Enter = true; break;
-                case GLFW_KEY_ESCAPE:    m_uiInput.Escape = true; break;
-                case GLFW_KEY_TAB:       m_uiInput.Tab = true; break;
-                default: break;
+            // Коды клавиш уходят в интерфейс как есть: он сам решает, что для
+            // него значит Backspace, а что — Tab. Разбирать их здесь значило бы
+            // держать вторую копию этого решения.
+            m_uiInput.KeysDown.push_back(key);
+            m_uiInput.Shift = (mods & GLFW_MOD_SHIFT) != 0;
+            m_uiInput.Ctrl = (mods & GLFW_MOD_CONTROL) != 0;
+            m_uiInput.Alt = (mods & GLFW_MOD_ALT) != 0;
+            if (key == GLFW_KEY_TAB) {
+                (m_uiInput.Shift ? m_uiInput.NavPrev : m_uiInput.NavNext) = true;
             }
         });
     }
 
-    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
-    if (uiView.begin() == uiView.end()) { ResetUiEdits(); return; }
+    if (!m_uiScene.Any(*m_scene)) { ResetUiEdits(); return; }
 
     const bool down = glfwGetMouseButton(window.Handle(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     // Захваченный курсор — это режим обзора: экранной точки у мыши нет, и
     // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
     const bool captured = window.CursorCaptured();
-    m_uiInput.Mouse = captured ? glm::vec2(-1.0f) : CursorInViewport();
-    m_uiInput.MousePressed = down && !m_uiMouseWasDown && !captured;
-    m_uiInput.MouseReleased = !down && m_uiMouseWasDown && !captured;
-    m_uiInput.MouseDown = down && !captured;
+    m_uiInput.Pointer = captured ? glm::vec2(-1.0f) : CursorInViewport();
+    m_uiInput.PointerInside = !captured;
+    m_uiInput.Buttons[0] = down && !captured;
     m_uiMouseWasDown = down;
-    m_uiInput.DeltaTime = dt;
 
-    m_uiResult = sage::ui::UpdateSceneUI(*m_scene, m_uiInput, m_uiWidth, m_uiHeight);
+    const glm::vec2 screen((float)m_uiWidth, (float)m_uiHeight);
+    m_uiScene.Update(*m_scene, screen, dt);
+    m_uiResult = m_uiScene.HandleInput(*m_scene, m_uiInput, screen);
+    // Команды интерфейса — игре: что они значат, решает она (§102, §103).
+    if (m_scripts) m_scripts->SetUICommands(m_uiResult.Commands);
     ResetUiEdits();
 }
 
 // Однокадровые события съедены — гасим, иначе следующий кадр повторит ввод.
 void PlayerLayer::ResetUiEdits() {
-    m_uiInput.TypedText.clear();
-    m_uiInput.Backspace = m_uiInput.Delete = false;
-    m_uiInput.Left = m_uiInput.Right = false;
-    m_uiInput.Home = m_uiInput.End = false;
-    m_uiInput.Enter = m_uiInput.Escape = m_uiInput.Tab = false;
+    m_uiInput.TextInput.clear();
+    m_uiInput.KeysDown.clear();
+    m_uiInput.KeysUp.clear();
+    m_uiInput.NavNext = m_uiInput.NavPrev = false;
+    m_uiInput.NavSubmit = m_uiInput.NavCancel = false;
+    m_uiInput.NavX = m_uiInput.NavY = 0;
+    m_uiInput.Scroll = glm::vec2(0.0f);
 }
 
 ShadowBinding PlayerLayer::FrameShadows(bool sunEnabled) const {
@@ -1037,16 +1037,13 @@ void PlayerLayer::OnRender() {
     // UI сцены (компоненты интерфейса из .sage): худ/меню, собранные в редакторе.
     // Рисуется в letterbox-viewport с его размерами — якоря совпадают с панелью
     // Game редактора (WYSIWYG).
-    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
-    if (uiView.begin() != uiView.end()) {
+    if (m_uiScene.Any(*m_scene)) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         m_uiWidth = vpW;  // тот же прямоугольник, с которым сравнивается мышь
         m_uiHeight = vpH;
         m_uiOffsetX = vpX;
         m_uiOffsetY = vpY;
-        m_ui->Begin(vpW, vpH);
-        sage::ui::DrawSceneUI(*m_scene, *m_ui, vpW, vpH);
-        m_ui->End();
+        m_uiScene.Render(*m_scene, *m_ui, glm::vec2((float)vpW, (float)vpH));
     }
 
     DrawPauseMenu(vpW, vpH);

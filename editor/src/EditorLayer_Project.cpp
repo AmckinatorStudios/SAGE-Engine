@@ -56,11 +56,10 @@
 #include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIDemos.h"
-#include "sage/ui/UIPresets.h"
-#include "sage/ui/UISceneSystem.h"
 #include "sage/scene/Prefab.h"
+#include "sage/ui/scene/UIScene.h"
+#include "sage/ui/showcase/UIDemos.h"
+#include "sage/ui/serialization/UISerializer.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
 
@@ -87,6 +86,51 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
 }
 
 constexpr float kStatusBarHeight = 26.0f;
+
+// Положить в сцену готовый демо-экран интерфейса.
+//
+// Экран — это ДОКУМЕНТ (.uidoc), а сцена хранит на него ссылку: тот же файл
+// кладётся в assets проекта и дальше правится обычным редактором документов.
+// Раньше шаблон собирал худ из сущностей сцены, и «поправить демо» означало
+// ковырять девять объектов в иерархии рядом с камерой и светом.
+//
+// Документ ещё и заводится в реестре открытых сразу: без проекта (Новая сцена
+// до создания проекта) файла на диске нет, а показать экран надо всё равно —
+// иначе шаблон «Интерфейс» открывался бы пустым.
+void AttachDemoDocument(Scene& scene, const Project& project, const std::string& demo,
+                        const std::string& objectName, int sortOrder) {
+    std::string path = "assets/ui/" + demo + ".uidoc";
+    if (project.Loaded()) {
+        std::error_code ec;
+        fs::create_directories(project.AssetsDir() / "ui", ec);
+        path = (project.AssetsDir() / "ui" / (demo + ".uidoc")).string();
+    }
+
+    // Сначала ФАЙЛ, потом чтение. Наоборот — значит попросить реестр открыть
+    // заведомо отсутствующий документ и получить в лог честное, но пугающее
+    // «документ не прочитан» на ровном месте: у нового проекта его и не могло
+    // быть. Уже существующий чужой документ по этому пути не трогаем — шаблон
+    // не имеет права затирать чужую работу.
+    if (!fs::exists(path)) {
+        sage::ui::UIRuntime built;
+        sage::ui::UIBuildDemo(demo, built.Doc(), built.Theme());
+        if (project.Loaded()) sage::ui::UISaveDocument(built.Doc(), path, &built.Theme());
+    }
+    sage::ui::UIRuntime& rt = sage::ui::UIDocuments::Instance().GetOrLoad(path);
+    if (!sage::ui::UIDocuments::Instance().Loaded(path)) {
+        // Проекта нет (Новая сцена до его создания) — файла на диске тоже, а
+        // показать экран надо: собираем прямо в открытый рантайм.
+        rt.Doc().Clear();
+        sage::ui::UIBuildDemo(demo, rt.Doc(), rt.Theme());
+        rt.Build();
+    }
+
+    GameObject obj = scene.CreateObject(objectName);
+    sage::ui::UIDocumentComponent comp;
+    comp.Path = path;
+    comp.SortOrder = sortOrder;
+    scene.Registry().emplace<sage::ui::UIDocumentComponent>(obj.Entity(), comp);
+}
 
 } // namespace
 
@@ -181,45 +225,9 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         spotLc.OuterConeDeg = 30.0f;
         m_scene->Registry().emplace<LightComponent>(spot.Entity(), spotLc);
 
-        // Демо-худ: панель со скруглением и рамкой + полоса здоровья ребёнком.
-        // Показывает систему интерфейса сразу в панели Game и служит стартовой
-        // точкой для своего интерфейса (правится в Inspector).
-        //
-        // Собирается ИЗ ЧАСТЕЙ — так же, как это делает человек в инспекторе:
-        // панель это прямоугольник + подложка + надпись, полоса — прямоугольник
-        // + подложка + шкала.
-        entt::registry& reg = m_scene->Registry();
-        GameObject hud = m_scene->CreateObject("HUD Panel");
-        sage::ui::Transform hudXf;
-        hudXf.Anchor = UIAnchor::TopLeft;
-        hudXf.Offset = {16.0f, 16.0f};
-        hudXf.Size = {230.0f, 64.0f};
-        reg.emplace<sage::ui::Transform>(hud.Entity(), hudXf);
-        sage::ui::Fill hudFill;
-        hudFill.Rounding = 12.0f;
-        hudFill.BorderThickness = 2.0f;
-        reg.emplace<sage::ui::Fill>(hud.Entity(), hudFill);
-        sage::ui::Label hudLabel;
-        hudLabel.Text = "SAGE UI";
-        hudLabel.Horizontal = sage::ui::Label::Align::Start;
-        reg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
-
-        GameObject hp = m_scene->CreateObject("HP Bar");
-        sage::ui::Transform hpXf;
-        hpXf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
-        hpXf.Offset = {12.0f, 8.0f};
-        hpXf.Size = {206.0f, 18.0f};
-        reg.emplace<sage::ui::Transform>(hp.Entity(), hpXf);
-        sage::ui::Fill hpFill;
-        hpFill.Rounding = 8.0f;
-        hpFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
-        reg.emplace<sage::ui::Fill>(hp.Entity(), hpFill);
-        sage::ui::Bar hpBar;
-        hpBar.Value = 0.72f;
-        hpBar.FillColor = {0.85f, 0.30f, 0.30f, 1.0f};
-        hpBar.Smoothing = 3.0f;
-        reg.emplace<sage::ui::Bar>(hp.Entity(), hpBar);
-        m_scene->SetParent(hp.Entity(), hud.Entity());
+        // Демо-худ — документом, а не сущностями: показывает систему интерфейса
+        // сразу в панели Game и служит стартовой точкой для своего экрана.
+        AttachDemoDocument(*m_scene, m_project, "hud", "HUD", 0);
 
     } else if (content == ProjectTemplateKind::UIStarter) {
         // Стартер интерфейса: сцены как таковой нет, зато есть камера, свет и
@@ -245,10 +253,11 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         sunLc.Color = {1.0f, 0.95f, 0.85f};
         m_scene->Registry().emplace<LightComponent>(sun.Entity(), sunLc);
 
-        // Те же самые демо-экраны, что и в меню «Create UI»: одна реализация,
-        // а не «похожий интерфейс, собранный отдельно для шаблона».
-        sage::ui::BuildDemo(*m_scene, "hud");
-        sage::ui::BuildDemo(*m_scene, "menu");
+        // Те же самые демо-экраны, что собираются кодом в showcase/UIDemos:
+        // одна реализация, а не «похожий интерфейс, собранный отдельно для
+        // шаблона». Меню кладётся ПОВЕРХ худа (SortOrder больше).
+        AttachDemoDocument(*m_scene, m_project, "hud", "HUD", 0);
+        AttachDemoDocument(*m_scene, m_project, "menu", "Main Menu", 10);
     }
 
     if (content == ProjectTemplateKind::Demo) {

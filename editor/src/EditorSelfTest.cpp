@@ -43,12 +43,8 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
-#include "sage/ui/UI.h"
-#include "sage/ui/UIPresets.h"
-#include "sage/ui/UISceneSystem.h"
 #include "sage/events/Events.h"
 #include "sage/vars/VarsComponent.h"
-#include "UILayoutOps.h"
 #include "EditorPrefs.h"
 #include "Localization.h"
 #include "sage/scene/SceneSerializer.h"
@@ -59,6 +55,9 @@
 #include "sage/render/PostFX.h"
 #include "sage/assets/import/Convert.h"
 #include "AssetPreview.h"
+#include "sage/ui/scene/UIScene.h"
+#include "sage/ui/showcase/UIDemos.h"
+#include "sage/ui/serialization/UISerializer.h"
 
 namespace fs = std::filesystem;
 
@@ -154,7 +153,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         const TemplateCheck checks[] = {
             {"empty", true, nullptr},
             {"demo", false, "Green Cube"},
-            {"ui", false, "MenuButtons"},
+            {"ui", false, "Main Menu"},
         };
         for (const TemplateCheck& c : checks) {
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
@@ -179,7 +178,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                                         << " сущностей";
                     ok = false;
                 }
-                const auto uiView = m_scene->Registry().view<sage::ui::Transform>();
+                const auto uiView = m_scene->Registry().view<sage::ui::UIDocumentComponent>();
                 if (uiView.begin() != uiView.end()) {
                     LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс элементы интерфейса";
                     ok = false;
@@ -2198,9 +2197,15 @@ bool EditorLayer::SelfTestTools() {
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/selftest_script.lua"});
-        // Со СЦЕНОЙ, а не с реестром: у кнопки есть ребёнок-надпись, и создать
-        // объект умеет только сцена (см. UIPresets.h).
-        sage::ui::ApplyPreset(*m_scene, e, "Button");
+        // Интерфейс сцены — ССЫЛКА на документ: сцена хранит путь, а не дерево
+        // элементов. Проверять надо именно то, что пережило сохранение, — путь.
+        {
+            sage::ui::UIDocumentComponent uiDoc;
+            uiDoc.Path = "assets/ui/selftest.uidoc";
+            uiDoc.SortOrder = 3;
+            uiDoc.Interactive = false;
+            reg.emplace_or_replace<sage::ui::UIDocumentComponent>(e, uiDoc);
+        }
         {
             ParticleEmitterComponent em;
             em.Config = ParticlePresets::Registry()[0].Make();
@@ -2242,7 +2247,7 @@ bool EditorLayer::SelfTestTools() {
                     {"IK", r2.all_of<IKComponent>(e2)},
                     {"ReflectionProbe", r2.all_of<ReflectionProbeComponent>(e2)},
                     {"Script", r2.all_of<ScriptComponent>(e2)},
-                    {"UIElement", r2.all_of<sage::ui::Transform>(e2)},
+                    {"UIDocument", r2.all_of<sage::ui::UIDocumentComponent>(e2)},
                     {"ParticleEmitter", r2.all_of<ParticleEmitterComponent>(e2)},
                 };
                 for (const Check& c : checks) {
@@ -2252,24 +2257,16 @@ bool EditorLayer::SelfTestTools() {
                         ok = false;
                     }
                 }
-                // Значения, а не только наличие: заготовка кнопки обязана
-                // остаться кнопкой, а не панелью с чужими полями.
+                // Значения, а не только наличие: пустая ссылка на документ —
+                // это «компонент есть, интерфейса нет», и такой проверке грош
+                // цена.
                 if (ok) {
-                    // Кнопка — это набор частей ПЛЮС объект-надпись внутри:
-                    // подложка, не ловящая мышь, кнопкой не является, а надпись
-                    // у кнопки больше не встроена — она отдельный ребёнок, и
-                    // потеряться при сохранении может именно он.
-                    bool button = r2.all_of<sage::ui::Interactable>(e2) &&
-                                  r2.all_of<sage::ui::Fill>(e2);
-                    bool caption = false;
-                    if (const auto* h = r2.try_get<HierarchyComponent>(e2)) {
-                        for (entt::entity child : h->Children) {
-                            const sage::ui::Label* l = r2.try_get<sage::ui::Label>(child);
-                            if (l && !l->Text.empty()) caption = true;
-                        }
-                    }
-                    if (!button || !caption) {
-                        LOG_ERROR("Editor") << "SELFTEST: элемент интерфейса приехал не кнопкой";
+                    const sage::ui::UIDocumentComponent* uc =
+                        r2.try_get<sage::ui::UIDocumentComponent>(e2);
+                    if (!uc || uc->Path != "assets/ui/selftest.uidoc" || uc->SortOrder != 3 ||
+                        uc->Interactive) {
+                        LOG_ERROR("Editor") << "SELFTEST: ссылка на документ интерфейса "
+                                               "приехала не такой, какой уехала";
                         ok = false;
                     }
                     const ScriptComponent* sc = r2.try_get<ScriptComponent>(e2);
@@ -2330,7 +2327,7 @@ bool EditorLayer::SelfTestTools() {
             {EditorPanel::Profiler, &m_showProfiler, "Profiler"},
             {EditorPanel::Game, &m_showGame, "Game"},
             {EditorPanel::Viewport, &m_showViewport, "Viewport"},
-            {EditorPanel::UIEditor, &m_showUIEditor, "UI Editor"},
+            {EditorPanel::UIDocument, &m_showUIDocument, "UI Document"},
             {EditorPanel::Settings, &m_showSettings, "Settings"},
         };
         for (const Mapping& m : mapping) {
@@ -2374,139 +2371,124 @@ bool EditorLayer::SelfTestTools() {
         }
     }
 
-    // --- Инструменты вёрстки: выравнивание, распределение, якорь -----------
+    // --- Интерфейс: документ -> файл -> сцена -> раскладка -> щелчок --------
     //
-    // Проверяется ПУТЬ ЦЕЛИКОМ, а не только математика (она проверена
-    // юнит-тестами в tests/test_ui.cpp): выделение -> операция -> запись в
-    // компоненты -> прямоугольник, который увидит игра. Между «формула верна» и
-    // «кнопка в панели работает» лежит ровно то, что здесь и ломается: якорь,
-    // масштаб холста и обратный перевод пикселей в опорные единицы.
-    //
-    // Кликать по самим кнопкам панели в CI нечем, но кнопка не делает ничего,
-    // кроме вызова uiops::*, — и вызывается он здесь тем же способом.
+    // Проверяется ПУТЬ ЦЕЛИКОМ, а не только математика (её проверяют юнит-тесты
+    // в tests/test_ui_core.cpp): экран собран -> сохранён как .uidoc -> сцена
+    // сослалась на него -> рантайм посчитал раскладку -> щелчок по кнопке дошёл
+    // до команды. Между «формула верна» и «кнопка в игре работает» лежит ровно
+    // то, что здесь и ломается: путь к файлу, порядок документов и перевод
+    // экранных пикселей в опорные единицы холста.
     if (ok) {
         NewScene(ProjectTemplateKind::Empty);
-        entt::registry& reg = m_scene->Registry();
+        namespace ui = sage::ui;
 
-        // Экран-родитель на весь кадр и три элемента разной ширины в нём.
-        GameObject screen = m_scene->CreateObject("UIRoot");
-        sage::ui::Transform rootXf;
-        rootXf.Anchor = UIAnchor::TopLeft;
-        rootXf.Offset = {0.0f, 0.0f};
-        rootXf.Mode = sage::ui::Transform::Stretch::Both;
-        reg.emplace<sage::ui::Transform>(screen.Entity(), rootXf);
+        const fs::path docPath = m_project.AssetsDir() / "selftest_menu.uidoc";
+        {
+            ui::UIRuntime tmp;
+            ui::UIBuildDemo("menu", tmp.Doc(), tmp.Theme());
+            if (!ui::UISaveDocument(tmp.Doc(), docPath.string(), &tmp.Theme())) {
+                LOG_ERROR("Editor") << "SELFTEST: документ интерфейса не сохранился";
+                ok = false;
+            }
+        }
 
-        auto makeBox = [&](const char* name, glm::vec2 pos, glm::vec2 size) {
-            GameObject o = m_scene->CreateObject(name);
-            sage::ui::Transform xf;
-            xf.Anchor = UIAnchor::TopLeft;
-            xf.Offset = pos;
-            xf.Size = size;
-            reg.emplace<sage::ui::Transform>(o.Entity(), xf);
-            reg.emplace<sage::ui::Fill>(o.Entity());
-            m_scene->SetParent(o.Entity(), screen.Entity());
-            return o;
-        };
-        GameObject a = makeBox("BoxA", {10.0f, 10.0f}, {40.0f, 20.0f});
-        GameObject b = makeBox("BoxB", {200.0f, 60.0f}, {80.0f, 20.0f});
-        GameObject c = makeBox("BoxC", {500.0f, 120.0f}, {40.0f, 20.0f});
+        // Свежее чтение С ДИСКА, а не тот же объект в памяти: «сохранилось» и
+        // «прочиталось обратно» — разные утверждения, и второе ломается чаще.
+        ui::UIDocuments::Instance().Remove(docPath.string());
+        GameObject screen = m_scene->CreateObject("UI Screen");
+        {
+            ui::UIDocumentComponent c;
+            c.Path = docPath.string();
+            m_scene->Registry().emplace<ui::UIDocumentComponent>(screen.Entity(), c);
+        }
 
-        // Кадр вёрстки задаётся явно: в headless панель вьюпорта его ещё не
-        // сообщала, а от него зависят прямоугольники (см. UIToolSettings).
-        m_uiTools.FrameSize = {1280.0f, 720.0f};
-
-        auto offsetOf = [&](GameObject o) {
-            return reg.get<sage::ui::Transform>(o.Entity()).Offset;
-        };
-
-        // Выравнивание по левому краю первичного (последнего кликнутого).
-        // Первичный — тот, кого выделили последним, то есть BoxC.
-        SetSelectedId(a.Id());
-        ToggleSelection(b.Id());
-        ToggleSelection(c.Id());
-        uiops::Align(*this, sage::ui::AlignEdge::Left);
-        if (std::abs(offsetOf(a).x - 500.0f) > 0.01f ||
-            std::abs(offsetOf(b).x - 500.0f) > 0.01f ||
-            std::abs(offsetOf(c).x - 500.0f) > 0.01f) {
-            LOG_ERROR("Editor") << "SELFTEST: выравнивание по левому краю не сработало ("
-                                << offsetOf(a).x << ", " << offsetOf(b).x << ", "
-                                << offsetOf(c).x << ")";
+        ui::UISceneRuntime runtime;
+        const glm::vec2 frame(1280.0f, 720.0f);
+        if (ok && !runtime.Any(*m_scene)) {
+            LOG_ERROR("Editor") << "SELFTEST: сцена не увидела своего документа интерфейса";
             ok = false;
         }
-        // Выравнивание по горизонтали не имеет права двигать по вертикали.
-        if (ok && std::abs(offsetOf(a).y - 10.0f) > 0.01f) {
-            LOG_ERROR("Editor") << "SELFTEST: выравнивание сдвинуло элемент по чужой оси";
+        if (ok) runtime.Update(*m_scene, frame, 0.0f);
+
+        ui::UIRuntime* rt = ui::UIDocuments::Instance().Find(docPath.string());
+        if (ok && (!rt || !ui::UIDocuments::Instance().Loaded(docPath.string()))) {
+            LOG_ERROR("Editor") << "SELFTEST: документ интерфейса не прочитался с диска";
             ok = false;
         }
 
-        // Распределение по вертикали: крайние стоят, средний встаёт посередине.
+        // Кнопка «Играть» — та, что несёт команду menu.play.
+        ui::UINodeId play = ui::kUIInvalidNode;
         if (ok) {
-            uiops::Distribute(*this, /*horizontal=*/false, /*byCenters=*/false);
-            const float ya = offsetOf(a).y, yb = offsetOf(b).y, yc = offsetOf(c).y;
-            // Занято 60 из (140 - 10) + 20 = 130 по высоте: зазоры по 35.
-            if (std::abs(ya - 10.0f) > 0.01f || std::abs(yc - 120.0f) > 0.01f ||
-                std::abs(yb - 65.0f) > 0.01f) {
-                LOG_ERROR("Editor") << "SELFTEST: распределение по вертикали дало " << ya << ", "
-                                    << yb << ", " << yc;
+            for (ui::UINodeId id : rt->Doc().Ordered()) {
+                const ui::UINode* n = rt->Doc().Find(id);
+                const ui::UIInteraction* act = n ? n->Get<ui::UIInteraction>() : nullptr;
+                if (act && act->Command == "menu.continue") { play = id; break; }
+            }
+            if (play == ui::kUIInvalidNode) {
+                LOG_ERROR("Editor") << "SELFTEST: в загруженном меню нет кнопки с командой";
                 ok = false;
             }
         }
 
-        // Смена якоря обязана ОСТАВИТЬ элемент на месте.
+        // Прямоугольник кнопки — в ЭКРАННЫХ пикселях: холст меню собран под
+        // 1920x1080, кадр здесь 1280x720, и если масштаб холста потерялся,
+        // кнопка окажется за краем — ровно так это и ломалось.
+        ui::UIRect rect{};
         if (ok) {
-            SetSelectedId(b.Id());
-            const std::vector<sage::ui::ElementRect> before2 =
-                sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
-            sage::ui::UIRect was{};
-            for (const auto& e : before2)
-                if (e.Entity == b.Entity()) was = e.Rect;
-            uiops::SetAnchorKeepingPlace(*this, UIAnchor::BottomRight);
-            const std::vector<sage::ui::ElementRect> after2 =
-                sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
-            sage::ui::UIRect now{};
-            for (const auto& e : after2)
-                if (e.Entity == b.Entity()) now = e.Rect;
-            if (reg.get<sage::ui::Transform>(b.Entity()).Anchor != UIAnchor::BottomRight ||
-                std::abs(was.x - now.x) > 0.01f || std::abs(was.y - now.y) > 0.01f) {
-                LOG_ERROR("Editor") << "SELFTEST: смена якоря сдвинула элемент ("
-                                    << was.x << "," << was.y << " -> " << now.x << "," << now.y
-                                    << ")";
+            const ui::UIResolvedNode* r = rt->Layout().Get(play);
+            if (!r) {
+                LOG_ERROR("Editor") << "SELFTEST: у кнопки меню нет посчитанного прямоугольника";
+                ok = false;
+            } else {
+                rect = r->Rect;
+                if (rect.w < 1.0f || rect.h < 1.0f || rect.x < 0.0f || rect.y < 0.0f ||
+                    rect.x + rect.w > frame.x || rect.y + rect.h > frame.y) {
+                    LOG_ERROR("Editor") << "SELFTEST: кнопка меню уехала за кадр (" << rect.x
+                                        << "," << rect.y << " " << rect.w << "x" << rect.h << ")";
+                    ok = false;
+                }
+            }
+        }
+
+        // ЩЕЛЧОК по её середине: нажали — отпустили — команда пришла.
+        if (ok) {
+            const glm::vec2 point(rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f);
+            ui::UIInputFrame down;
+            down.Pointer = point;
+            down.Buttons[0] = true;
+            runtime.HandleInput(*m_scene, down, frame);
+
+            ui::UIInputFrame up;
+            up.Pointer = point;
+            const ui::UIInputReport report = runtime.HandleInput(*m_scene, up, frame);
+
+            const bool heard = std::find(report.Commands.begin(), report.Commands.end(),
+                                         std::string("menu.continue")) != report.Commands.end();
+            if (!heard) {
+                LOG_ERROR("Editor") << "SELFTEST: щелчок по кнопке меню не дал команды";
+                ok = false;
+            }
+            if (ok && !report.PointerOverUI) {
+                LOG_ERROR("Editor") << "SELFTEST: интерфейс не признал курсор своим";
                 ok = false;
             }
         }
 
-        // «Растянуть на родителя с полем» — размер и место считаются от
-        // родителя, а не от экрана: элемент внутри панели обязан остаться внутри.
+        // Непринимающий ввод документ мышь не ловит: иначе прозрачный худ
+        // поверх игры съедал бы каждый выстрел.
         if (ok) {
-            SetSelectedId(c.Id());
-            uiops::StretchToParent(*this, 16.0f);
-            const sage::ui::Transform& t = reg.get<sage::ui::Transform>(c.Entity());
-            if (std::abs(t.Size.x - (1280.0f - 32.0f)) > 0.01f ||
-                std::abs(t.Size.y - (720.0f - 32.0f)) > 0.01f) {
-                LOG_ERROR("Editor") << "SELFTEST: растяжение на родителя дало " << t.Size.x << "x"
-                                    << t.Size.y;
+            m_scene->Registry().get<ui::UIDocumentComponent>(screen.Entity()).Interactive = false;
+            ui::UIInputFrame hover;
+            hover.Pointer = {rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f};
+            if (runtime.HandleInput(*m_scene, hover, frame).PointerOverUI) {
+                LOG_ERROR("Editor") << "SELFTEST: непринимающий ввод документ забрал курсор";
                 ok = false;
             }
         }
-        // «Вернуть на экран»: элемент, уехавший за границу, придвигается внутрь.
-        // Проверяется именно то, ради чего кнопка и появилась, — что элемент
-        // становится ВИДИМЫМ, а не просто меняет числа.
-        if (ok) {
-            SetSelectedId(a.Id());
-            sage::ui::Transform& ta = reg.get<sage::ui::Transform>(a.Entity());
-            ta.Offset = {5000.0f, -300.0f};   // далеко за краем
-            uiops::BringIntoView(*this);
-            const std::vector<sage::ui::ElementRect> back =
-                sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
-            sage::ui::UIRect r{};
-            for (const auto& e : back)
-                if (e.Entity == a.Entity()) r = e.Rect;
-            if (r.x < 0.0f || r.y < 0.0f || r.x + r.w > 1280.0f || r.y + r.h > 720.0f) {
-                LOG_ERROR("Editor") << "SELFTEST: «вернуть на экран» оставило элемент снаружи ("
-                                    << r.x << "," << r.y << " " << r.w << "x" << r.h << ")";
-                ok = false;
-            }
-        }
+
+        ui::UIDocuments::Instance().Remove(docPath.string());
+        fs::remove(docPath, ec);
         SetSelectedId(-1);
     }
 
@@ -2552,24 +2534,44 @@ bool EditorLayer::SelfTestTools() {
             vc->Values.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
         }
 
-        // Кнопка со связью: щёлкнули — послала событие и позвала метод двери.
+        // Интерфейс со связью: щёлкнули по кнопке документа — послалось событие
+        // и позвался метод двери. Кнопка при этом не знает про дверь ничего:
+        // она сообщает команду, а что команда означает — записано в СЦЕНЕ.
+        const fs::path btnDoc = m_project.AssetsDir() / "selftest_button.uidoc";
         GameObject button = m_scene->CreateObject("SelfTestButton");
         {
-            sage::ui::Transform t;
-            t.Anchor = UIAnchor::TopLeft;
-            t.Offset = {0.0f, 0.0f};
-            t.Size = {200.0f, 100.0f};
-            m_scene->Registry().emplace_or_replace<sage::ui::Transform>(button.Entity(), t);
-            m_scene->Registry().emplace_or_replace<sage::ui::Fill>(button.Entity());
-            sage::ui::Interactable& act =
-                m_scene->Registry().emplace_or_replace<sage::ui::Interactable>(button.Entity());
+            sage::ui::UIRuntime tmp;
+            sage::ui::UIInitialize();
+            sage::ui::UIDocument& d = tmp.Doc();
+            d.SetName("SelfTestButton");
+            sage::ui::UINode& rootNode = *d.Create("Root", sage::ui::kUIInvalidNode);
+            rootNode.Ensure<sage::ui::UITransform>().SetStretch(true, true);
+            const sage::ui::UINodeId btn =
+                sage::ui::UIMakeButton(d, rootNode.Id, "Открыть", "selftest.click");
+            if (sage::ui::UINode* n = d.Find(btn)) {
+                sage::ui::UITransform& t = n->Ensure<sage::ui::UITransform>();
+                t.AnchorMin = t.AnchorMax = {0.0f, 0.0f};
+                t.Pivot = {0.0f, 0.0f};
+                t.Offset = {0.0f, 0.0f};
+                t.Size = {200.0f, 100.0f};
+                t.WidthMode = t.HeightMode = sage::ui::UISizeMode::Fixed;
+            }
+            if (!sage::ui::UISaveDocument(d, btnDoc.string(), &tmp.Theme())) {
+                LOG_ERROR("Editor") << "SELFTEST: документ с кнопкой не сохранился";
+                ok = false;
+            }
+
+            sage::ui::UIDocumentComponent c;
+            c.Path = btnDoc.string();
             sage::events::Binding b;
-            b.Trigger = "click";
+            b.Trigger = "selftest.click"; // триггер связи — имя команды документа
             b.Event = "selftest.open";
             b.Target = sage::vars::EntityRef{door.Id()};
             b.Method = "Open";
             b.Arg = sage::vars::Value(std::string("тихо"));
-            act.Events.push_back(b);
+            c.Commands.push_back(b);
+            m_scene->Registry().emplace_or_replace<sage::ui::UIDocumentComponent>(button.Entity(),
+                                                                                 c);
         }
 
         // Сохранение и загрузка: связи и переменные — данные, и терять их при
@@ -2611,15 +2613,18 @@ bool EditorLayer::SelfTestTools() {
                 arg = e.Arg.AsString();
                 sender = e.Sender;
             });
-            sage::ui::UIInputState down;
-            down.Mouse = {50.0f, 50.0f};
-            down.MouseDown = true;
-            down.MousePressed = true;
-            sage::ui::UpdateSceneUI(*m_scene, down, 1280, 720);
-            sage::ui::UIInputState up;
-            up.Mouse = down.Mouse;
-            up.MouseReleased = true;
-            sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
+            sage::ui::UISceneRuntime uiRuntime;
+            const glm::vec2 uiFrame(1280.0f, 720.0f);
+            uiRuntime.Update(*m_scene, uiFrame, 0.0f);
+            sage::ui::UIInputFrame down;
+            down.Pointer = {50.0f, 50.0f};
+            down.Buttons[0] = true;
+            uiRuntime.HandleInput(*m_scene, down, uiFrame);
+            sage::ui::UIInputFrame up;
+            up.Pointer = down.Pointer;
+            uiRuntime.HandleInput(*m_scene, up, uiFrame);
+            sage::ui::UIDocuments::Instance().Remove(btnDoc.string());
+            fs::remove(btnDoc, ec);
 
             if (heard != 1 || arg != "тихо") {
                 LOG_ERROR("Editor") << "SELFTEST: кнопка не послала своё событие (получено "
@@ -2651,17 +2656,19 @@ bool EditorLayer::SelfTestTools() {
         vars.Set("opens", sage::vars::Value(sage::vars::EntityRef{door.Id()}));
         vars.Set("watch", sage::vars::Value(sage::vars::EntityRef{outsider.Id()}));
         sage::events::Binding b;
-        b.Trigger = "click";
+        b.Trigger = "prefab.click";
         b.Event = "prefab.open";
         b.Target = sage::vars::EntityRef{door.Id()};
         b.Method = "Open";
-        // Прямоугольник обязателен: без него сущность не элемент интерфейса, и
-        // сериализатор её части не пишет (см. SaveUIComponents). Кнопка без
-        // прямоугольника — не кнопка, и проверять на такой нечего.
-        m_scene->Registry().emplace_or_replace<sage::ui::Transform>(knob.Entity());
-        m_scene->Registry()
-            .emplace_or_replace<sage::ui::Interactable>(knob.Entity())
-            .Events.push_back(b);
+        // Связь живёт на ссылке НА ДОКУМЕНТ: путь нужен, иначе сериализатор
+        // компонент не пишет — а связь без документа проверять не на чем.
+        {
+            sage::ui::UIDocumentComponent c;
+            c.Path = "assets/ui/selftest_prefab.uidoc";
+            c.Commands.push_back(b);
+            m_scene->Registry().emplace_or_replace<sage::ui::UIDocumentComponent>(knob.Entity(),
+                                                                                 c);
+        }
 
         const fs::path pf = m_project.AssetsDir() / "selftest_door.sageprefab";
         std::string perr;
@@ -2687,13 +2694,13 @@ bool EditorLayer::SelfTestTools() {
                     const entt::entity copyKnob = h->Children[0];
                     const VarsComponent* cv =
                         m_scene->Registry().try_get<VarsComponent>(copyKnob);
-                    const sage::ui::Interactable* ca =
-                        m_scene->Registry().try_get<sage::ui::Interactable>(copyKnob);
+                    const sage::ui::UIDocumentComponent* ca =
+                        m_scene->Registry().try_get<sage::ui::UIDocumentComponent>(copyKnob);
                     if (!cv || cv->Values.Get("opens").AsEntity().Id != copy.Id()) {
                         LOG_ERROR("Editor") << "SELFTEST: ссылка внутри копии ведёт не в копию";
                         ok = false;
                     }
-                    if (!ca || ca->Events.empty() || ca->Events[0].Target.Id != copy.Id()) {
+                    if (!ca || ca->Commands.empty() || ca->Commands[0].Target.Id != copy.Id()) {
                         LOG_ERROR("Editor") << "SELFTEST: адресат связи в копии не переписан";
                         ok = false;
                     }
@@ -2995,19 +3002,22 @@ function OnMessage(entity, name, data)
 end
 )LUA");
     // HUD: копит счёт по "scored", пишет текст и заполняет полосу из Lua.
+    // Через ДОКУМЕНТ, а не через сущности: интерфейс — самостоятельный ресурс,
+    // и скрипт обращается к нему по имени узла, как к любому другому ассету.
     writeScript("hud.lua", R"LUA(
 local score = 0
+local function doc()
+    return sage.ui.Open("assets/ui/e2e_hud.uidoc")
+end
 function OnStart(entity)
-    local ui = entity:GetUI()
-    if ui ~= nil then ui.Text = "Score: 0 / 5" end
+    doc():SetText("Score", "Score: 0 / 5")
 end
 function OnMessage(entity, name, data)
     if name ~= "scored" then return end
     score = score + 1
-    local ui = entity:GetUI()
-    if ui ~= nil then ui.Text = "Score: " .. score .. " / 5" end
-    local bar = FindObject("Score Bar")
-    if bar ~= nil then bar:GetUI().Value = score / 5.0 end
+    local d = doc()
+    d:SetText("Score", "Score: " .. score .. " / 5")
+    d:Set("Bar.progress.Value", score / 5.0)
     if score >= 5 then log("E2E: ALL COINS COLLECTED") end
 end
 )LUA");
@@ -3040,37 +3050,70 @@ end
     cam.GetTransform().Rotation = {-12.0f, 0.0f, 0.0f};
     m_scene->Registry().emplace<CameraComponent>(cam.Entity());
 
-    entt::registry& uiReg = m_scene->Registry();
-    GameObject hud = m_scene->CreateObject("HUD");
-    sage::ui::Transform hudXf;
-    hudXf.Offset = {16.0f, 16.0f};
-    hudXf.Size = {240.0f, 64.0f};
-    uiReg.emplace<sage::ui::Transform>(hud.Entity(), hudXf);
-    sage::ui::Fill hudFill;
-    hudFill.Rounding = 12.0f;
-    hudFill.BorderThickness = 2.0f;
-    uiReg.emplace<sage::ui::Fill>(hud.Entity(), hudFill);
-    sage::ui::Label hudLabel;
-    hudLabel.Text = "Score: 0 / 5";
-    hudLabel.Horizontal = sage::ui::Label::Align::Start;
-    uiReg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
-    uiReg.emplace<ScriptComponent>(hud.Entity(), ScriptComponent{"assets/scripts/hud.lua"});
+    // Худ — ДОКУМЕНТ на диске плюс ссылка на него в сцене. Ровно тот путь,
+    // которым интерфейс попадает в игру: собран (здесь — кодом, в жизни — в
+    // редакторе документа), сохранён, а сцена знает только путь.
+    const fs::path hudDoc = m_project.AssetsDir() / "ui" / "e2e_hud.uidoc";
+    {
+        namespace ui = sage::ui;
+        ui::UIInitialize();
+        ui::UIRuntime tmp;
+        ui::UIDocument& d = tmp.Doc();
+        d.SetName("E2E HUD");
+        ui::UINode& root = *d.Create("Root", ui::kUIInvalidNode);
+        root.Ensure<ui::UITransform>().SetStretch(true, true);
 
-    GameObject bar = m_scene->CreateObject("Score Bar");
-    sage::ui::Transform barXf;
-    barXf.Anchor = UIAnchor::BottomLeft;
-    barXf.Offset = {12.0f, 8.0f};
-    barXf.Size = {216.0f, 16.0f};
-    uiReg.emplace<sage::ui::Transform>(bar.Entity(), barXf);
-    sage::ui::Fill barFill;
-    barFill.Rounding = 7.0f;
-    barFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
-    uiReg.emplace<sage::ui::Fill>(bar.Entity(), barFill);
-    sage::ui::Bar barBar;
-    barBar.Value = 0.0f;
-    barBar.FillColor = {0.95f, 0.80f, 0.20f, 1.0f};
-    uiReg.emplace<sage::ui::Bar>(bar.Entity(), barBar);
-    m_scene->SetParent(bar.Entity(), hud.Entity());
+        ui::UINode& panel = *d.Create("Panel", root.Id);
+        ui::UITransform& pt = panel.Ensure<ui::UITransform>();
+        pt.AnchorMin = pt.AnchorMax = {0.0f, 0.0f};
+        pt.Pivot = {0.0f, 0.0f};
+        pt.Offset = {16.0f, 16.0f};
+        pt.Size = {240.0f, 64.0f};
+        ui::UIFill& pf = panel.Ensure<ui::UIFill>();
+        pf.Radius = ui::UICorners(12.0f);
+        panel.Ensure<ui::UIBorder>().Thickness = ui::UIEdges::Uniform(2.0f);
+
+        ui::UINode& score = *d.Create("Score", panel.Id);
+        ui::UITransform& st = score.Ensure<ui::UITransform>();
+        st.SetStretch(true, false);
+        st.Size.y = 28.0f;
+        st.Offset = {8.0f, 6.0f};
+        ui::UIText& stx = score.Ensure<ui::UIText>();
+        stx.Text = "Score: 0 / 5";
+        stx.Size = 20.0f;
+
+        ui::UINode& barBox = *d.Create("Bar Track", panel.Id);
+        ui::UITransform& bt = barBox.Ensure<ui::UITransform>();
+        bt.AnchorMin = bt.AnchorMax = {0.0f, 1.0f};
+        bt.Pivot = {0.0f, 1.0f};
+        bt.Offset = {12.0f, -8.0f};
+        bt.Size = {216.0f, 16.0f};
+        ui::UIFill& btf = barBox.Ensure<ui::UIFill>();
+        btf.Color = ui::UIColor(0.0f, 0.0f, 0.0f, 0.55f);
+        btf.Radius = ui::UICorners(7.0f);
+
+        ui::UINode& bar = *d.Create("Bar", barBox.Id);
+        bar.Ensure<ui::UITransform>().SetStretch(true, true);
+        ui::UIProgress& bp = bar.Ensure<ui::UIProgress>();
+        bp.Value = 0.0f;
+        bp.FillColor = ui::UIColor(0.95f, 0.80f, 0.20f, 1.0f);
+
+        std::error_code hudEc;
+        fs::create_directories(hudDoc.parent_path(), hudEc);
+        if (!ui::UISaveDocument(d, hudDoc.string(), &tmp.Theme())) {
+            LOG_ERROR("Editor") << "E2E: HUD document not saved";
+            ok = false;
+        }
+    }
+
+    GameObject hud = m_scene->CreateObject("HUD");
+    {
+        sage::ui::UIDocumentComponent c;
+        c.Path = m_project.AssetRef(hudDoc);
+        m_scene->Registry().emplace<sage::ui::UIDocumentComponent>(hud.Entity(), c);
+    }
+    m_scene->Registry().emplace<ScriptComponent>(hud.Entity(),
+                                                 ScriptComponent{"assets/scripts/hud.lua"});
 
     // --- 4. Сохранить и ПЕРЕЧИТАТЬ с диска: играем то, что реально в файле ---
     fs::path scenePath = m_project.ScenesDir() / "main.sage";
@@ -3086,11 +3129,16 @@ end
         bool coinsGone = true;
         for (int i = 1; i <= 5; ++i)
             if (m_scene->FindByName("Coin" + std::to_string(i)).Valid()) coinsGone = false;
-        const sage::ui::Label* hudNow =
-            m_scene->Registry().try_get<sage::ui::Label>(m_scene->FindByName("HUD").Entity());
+        // Читаем ТО ЖЕ, что видит игрок: узлы документа, открытого скриптом.
+        sage::ui::UIRuntime* hudRt =
+            sage::ui::UIDocuments::Instance().Find("assets/ui/e2e_hud.uidoc");
+        const sage::ui::UINode* scoreNode = hudRt ? hudRt->Doc().FindByName("Score") : nullptr;
+        const sage::ui::UIText* hudNow =
+            scoreNode ? scoreNode->Get<sage::ui::UIText>() : nullptr;
         bool scoreOk = hudNow && hudNow->Text == "Score: 5 / 5";
-        const sage::ui::Bar* barNow =
-            m_scene->Registry().try_get<sage::ui::Bar>(m_scene->FindByName("Score Bar").Entity());
+        const sage::ui::UINode* barNode = hudRt ? hudRt->Doc().FindByName("Bar") : nullptr;
+        const sage::ui::UIProgress* barNow =
+            barNode ? barNode->Get<sage::ui::UIProgress>() : nullptr;
         bool barOk = barNow && std::abs(barNow->Value - 1.0f) < 0.001f;
         if (!coinsGone || !scoreOk || !barOk) {
             LOG_ERROR("Editor") << "E2E: play logic failed (coinsGone=" << coinsGone

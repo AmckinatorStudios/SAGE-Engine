@@ -25,8 +25,9 @@
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ScenePasses.h"
 #include "sage/physics/Ragdoll.h"
-#include "sage/ui/UIShowcase.h"
-#include "sage/ui/UISceneSystem.h"
+#include "sage/ui/showcase/UIShowcaseDocument.h"
+#include "sage/ui/widgets/UIWidgets.h"
+#include "sage/ui/render/UIBackend.h"
 #include "sage/render/Screenshot.h"
 #include "sage/render/Texture.h"
 #include "sage/scene/Components.h"
@@ -109,6 +110,27 @@ void TestGameLayer::SpawnPhysicsProps(Scene& scene, glm::vec3 origin) {
         scene.Registry().emplace<ColliderComponent>(dumbbell.Entity(), col);
     }
 }
+
+namespace {
+
+// Витрина интерфейса — ССЫЛКОЙ из сцены, как любой другой экран игры.
+//
+// Документ собирается кодом (витрина обязана существовать в любой сборке и не
+// зависеть от того, лежит ли рядом ассет), но сцена всё равно хранит только
+// путь: иначе у игры был бы свой, второй способ показать интерфейс — и ровно
+// он однажды разошёлся бы с тем, что видно в редакторе.
+void AttachShowcaseDocument(Scene& scene) {
+    const std::string path = "testgame://showcase.uidoc";
+    sage::ui::UIRuntime& rt = sage::ui::UIDocuments::Instance().GetOrLoad(path);
+    if (rt.Doc().NodeCount() == 0) sage::ui::UIBuildShowcase(rt.Doc(), rt.Theme());
+
+    GameObject obj = scene.CreateObject("UI Showcase");
+    sage::ui::UIDocumentComponent comp;
+    comp.Path = path;
+    scene.Registry().emplace<sage::ui::UIDocumentComponent>(obj.Entity(), comp);
+}
+
+} // namespace
 
 namespace {
 
@@ -346,9 +368,10 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     SpawnPlayer(scene, {0.0f, 0.85f, 9.0f});
     m_roomSpawns["room1"] = {0.0f, 0.85f, 9.0f};
 
-    // Боевой сложный интерфейс (инвентарь + дерево навыков) поверх комнаты —
-    // реальная проверка UI-тулкита на плотном экране, не на паре панелей.
-    sage::ui::BuildShowcase(scene);
+    // Боевой сложный интерфейс (витрина) поверх комнаты — реальная проверка
+    // тулкита на плотном экране, не на паре панелей. Ссылкой на документ: в
+    // сцене лежит путь, а сам экран собирается кодом при первом обращении.
+    AttachShowcaseDocument(scene);
 
     // Стресс-тест масштабирования: SAGE_TESTGAME_STRESS=N рассыпает N*N мелких
     // кубов сеткой — большинство вне поля зрения, отсекается фрустумом, а
@@ -475,36 +498,124 @@ void TestGameLayer::VerifySerializationRoundTrip() {
 void TestGameLayer::SetupHud() {
     m_ui.emplace();
 
-    m_hudHealth.Anchor = UIAnchor::BottomLeft;
-    m_hudHealth.Offset = {18, 18};
-    m_hudHealth.Size = {220, 22};
-    m_hudHealth.Label = "HP";
-    m_hudHealth.FillColor = {0.8f, 0.25f, 0.25f};
-    m_hudHealth.ValueSource = [this]() {
+    // Ресурсы движка (шрифты, текстуры) — в контекст интерфейса. Их создаёт
+    // ТОТ, КТО РИСУЕТ: ядро интерфейса не знает про ResourceManager.
+    m_uiResources = std::make_unique<sage::ui::UIEngineResources>();
+    m_uiResources->Install(m_hud.Context());
+
+    using namespace sage::ui;
+    UIInitialize();
+
+    UIDocument& doc = m_hud.Doc();
+    doc.Clear();
+    doc.SetName("TestGameHUD");
+    UICanvasSettings& canvas = doc.Canvas();
+    canvas.Scale = UICanvasSettings::ScaleMode::ScaleWithSize;
+    canvas.Reference = {1600.0f, 900.0f};
+    canvas.MatchWidthOrHeight = 1.0f; // худ привязан к высоте: полосы не должны толстеть
+
+    UINode& root = *doc.Create("HUD", kUIInvalidNode);
+    root.Ensure<UITransform>().SetStretch(true, true);
+
+    // --- полоса здоровья слева внизу ---
+    UINode& hpBox = *doc.Create("HP", root.Id);
+    UITransform& hpXf = hpBox.Ensure<UITransform>();
+    hpXf.AnchorMin = hpXf.AnchorMax = {0.0f, 1.0f};
+    hpXf.Pivot = {0.0f, 1.0f};
+    hpXf.Offset = {18.0f, -40.0f};
+    hpXf.Size = {220.0f, 22.0f};
+    UIFill& hpBg = hpBox.Ensure<UIFill>();
+    hpBg.Color = UIColor(0.0f, 0.0f, 0.0f, 0.55f);
+    hpBg.Radius = UICorners(6.0f);
+
+    m_hudHealthBar = UIMakeProgress(doc, hpBox.Id);
+    if (UINode* bar = doc.Find(m_hudHealthBar)) {
+        bar->Ensure<UITransform>().SetStretch(true, true);
+        bar->Ensure<UIProgress>().FillColor = UIColor(0.80f, 0.25f, 0.25f, 1.0f);
+    }
+    UINode& hpLabel = *doc.Create("HP Label", hpBox.Id);
+    hpLabel.Ensure<UITransform>().SetStretch(true, true);
+    UIText& hpText = hpLabel.Ensure<UIText>();
+    hpText.Text = "HP";
+    hpText.Size = 14.0f;
+    hpText.Align = UITextAlign::Center;
+    hpText.VAlign = UITextVAlign::Center;
+
+    // --- счёт справа вверху ---
+    UINode& score = *doc.Create("Score", root.Id);
+    UITransform& scoreXf = score.Ensure<UITransform>();
+    scoreXf.AnchorMin = scoreXf.AnchorMax = {1.0f, 0.0f};
+    scoreXf.Pivot = {1.0f, 0.0f};
+    scoreXf.Offset = {-18.0f, 14.0f};
+    scoreXf.WidthMode = scoreXf.HeightMode = UISizeMode::Content;
+    UIText& scoreText = score.Ensure<UIText>();
+    scoreText.Text = "SCORE 0";
+    scoreText.Size = 30.0f;
+    scoreText.Align = UITextAlign::Right;
+    m_hudScoreText = score.Id;
+
+    // --- имя комнаты по центру сверху ---
+    UINode& room = *doc.Create("Room", root.Id);
+    UITransform& roomXf = room.Ensure<UITransform>();
+    roomXf.AnchorMin = roomXf.AnchorMax = {0.5f, 0.0f};
+    roomXf.Pivot = {0.5f, 0.0f};
+    roomXf.Offset = {0.0f, 14.0f};
+    roomXf.WidthMode = roomXf.HeightMode = UISizeMode::Content;
+    UIText& roomText = room.Ensure<UIText>();
+    roomText.Text = " ";
+    roomText.Size = 28.0f;
+    roomText.Color = UIColor(0.85f, 0.90f, 1.0f, 1.0f);
+    roomText.Align = UITextAlign::Center;
+    m_hudRoomText = room.Id;
+
+    // --- подсказка внизу по центру ---
+    UINode& hint = *doc.Create("Hint", root.Id);
+    UITransform& hintXf = hint.Ensure<UITransform>();
+    hintXf.AnchorMin = hintXf.AnchorMax = {0.5f, 1.0f};
+    hintXf.Pivot = {0.5f, 1.0f};
+    hintXf.Offset = {0.0f, -16.0f};
+    hintXf.WidthMode = hintXf.HeightMode = UISizeMode::Content;
+    UIText& hintText = hint.Ensure<UIText>();
+    // Кириллица — прямая проверка TrueType-шрифта (раньше был ASCII-only
+    // stb_easy_font, русский текст не рисовался вообще).
+    hintText.Text = "WASD — движение, мышь — обзор, синий маяк — портал, ESC — выход";
+    hintText.Size = 20.0f;
+    hintText.Color = UIColor(0.80f, 0.80f, 0.80f, 1.0f);
+    hintText.Align = UITextAlign::Center;
+}
+
+// Значения худа за кадр. Отдельно от сборки: дерево строится один раз, а
+// меняются в нём три числа — перестраивать документ ради счёта значило бы
+// каждый кадр терять и фокус, и анимацию полосы.
+void TestGameLayer::UpdateHud() {
+    using namespace sage::ui;
+    UIDocument& doc = m_hud.Doc();
+
+    if (UINode* n = doc.Find(m_hudHealthBar)) {
+        float value = 0.0f;
         GameObject player = ActivePlayer();
-        if (!player.Valid()) return 0.0f;
-        auto& hp = player.Registry()->get<HealthComponent>(player.Entity());
-        return hp.Current / hp.Max;
-    };
-
-    m_hudScore.Anchor = UIAnchor::TopRight;
-    m_hudScore.Offset = {18, 14};
-    m_hudScore.Scale = 2.2f;
-    m_hudScore.TextSource = [this]() { return "SCORE " + std::to_string(m_score); };
-
-    m_hudRoom.Anchor = UIAnchor::TopCenter;
-    m_hudRoom.Offset = {0, 14};
-    m_hudRoom.Scale = 2.0f;
-    m_hudRoom.Color = {0.85f, 0.9f, 1.0f};
-    m_hudRoom.TextSource = [this]() { return m_activeName; };
-
-    m_hudHint.Anchor = UIAnchor::BottomCenter;
-    m_hudHint.Offset = {0, 16};
-    m_hudHint.Scale = 1.5f;
-    m_hudHint.Color = {0.8f, 0.8f, 0.8f};
-    // Кириллица — прямая проверка TrueType-шрифта UIRenderer (раньше был
-    // ASCII-only stb_easy_font, русский текст не рисовался вообще).
-    m_hudHint.Text = "WASD — движение, мышь — обзор, синий маяк — портал, ESC — выход";
+        if (player.Valid()) {
+            auto& hp = player.Registry()->get<HealthComponent>(player.Entity());
+            value = hp.Max > 0.0f ? hp.Current / hp.Max : 0.0f;
+        }
+        if (UIProgress* p = n->Get<UIProgress>()) {
+            if (p->Value != value) { p->Value = value; doc.MarkDirty(n->Id, UIDirty_Visual); }
+        }
+    }
+    if (UINode* n = doc.Find(m_hudScoreText)) {
+        const std::string text = "SCORE " + std::to_string(m_score);
+        if (UIText* t = n->Get<UIText>()) {
+            if (t->Text != text) { t->Text = text; doc.MarkDirty(n->Id, UIDirty_Layout); }
+        }
+    }
+    if (UINode* n = doc.Find(m_hudRoomText)) {
+        if (UIText* t = n->Get<UIText>()) {
+            if (t->Text != m_activeName) {
+                t->Text = m_activeName;
+                doc.MarkDirty(n->Id, UIDirty_Layout);
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -1008,19 +1119,23 @@ void TestGameLayer::OnRender() {
         device.SetSRGBWrite(false); // HUD ниже — его цвета уже в sRGB
     }
 
-    // --- 4. HUD поверх всего (движковый UIRenderer, не ImGui) — во весь экран,
+    // --- 4. HUD поверх всего (система интерфейса, не ImGui) — во весь экран,
     //        поверх возможных чёрных полос letterbox ---
     device.SetViewport(0, 0, window.Width(), window.Height());
-    m_ui->Begin(window.Width(), window.Height());
-    // UI сцены (инвентарь + дерево навыков активной комнаты)
-    // — тот же путь, что в собранной игре/редакторе; под кастомным HUD игры.
-    if (m_scenes.Active())
-        sage::ui::DrawSceneUI(*m_scenes.Active(), *m_ui, window.Width(), window.Height());
-    m_hudHealth.Draw(*m_ui);
-    m_hudScore.Draw(*m_ui);
-    m_hudRoom.Draw(*m_ui);
-    m_hudHint.Draw(*m_ui);
-    m_ui->End();
+
+    // Интерфейс сцены (витрина активной комнаты) — тот же путь, что в
+    // редакторе и плеере; под собственным худом игры.
+    const glm::vec2 screen((float)window.Width(), (float)window.Height());
+    if (m_scenes.Active() && m_sceneUi.Any(*m_scenes.Active())) {
+        m_sceneUi.Update(*m_scenes.Active(), screen, 0.0f);
+        m_sceneUi.Render(*m_scenes.Active(), *m_ui, screen);
+    }
+
+    UpdateHud();
+    m_hud.SetScreen(screen);
+    m_hud.Update(0.0f);
+    sage::ui::UIClassicBackend hudBackend(*m_ui);
+    m_hud.Render(hudBackend);
 
     ++m_frameCounter;
     if (m_autoScreenshotFrame >= 0 && m_frameCounter == m_autoScreenshotFrame) {
