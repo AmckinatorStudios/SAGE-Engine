@@ -31,8 +31,23 @@ void SagePanelHost::Draw(EditorPanel& panel, const char* windowTitle, bool* open
     const bool visible = ImGui::Begin(windowTitle, open);
     ImGui::PopStyleVar();
     if (visible) {
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
         island.DrawInWindow(dt);
         if (island.KeyboardCaptured()) m_keyboard = true;
+
+        // Ассет из проводника ассетов. Целью объявляется КАРТИНКА острова (её и
+        // видит человек как панель), а точка переводится в её координаты: панель
+        // обязана отличить «на этот объект» от «в пустое место», и по-другому
+        // ей это не узнать.
+        if (panel.AcceptsAssets() && ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+                std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+                if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+                const ImVec2 mouse = ImGui::GetMousePos();
+                panel.OnAssetDropped(dropped, {mouse.x - origin.x, mouse.y - origin.y});
+            }
+            ImGui::EndDragDropTarget();
+        }
     }
     ImGui::End();
 }

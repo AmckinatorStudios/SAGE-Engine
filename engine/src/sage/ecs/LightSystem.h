@@ -9,6 +9,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
+#include "sage/ecs/RenderSystem.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/Transform.h"
 
@@ -66,6 +67,7 @@ inline entt::entity FindSunEntity(Scene& scene) {
     auto view = scene.Registry().view<LightComponent, Transform>();
     for (auto e : view) {
         if (view.get<LightComponent>(e).Kind != LightComponent::Type::Directional) continue;
+        if (IsHidden(scene.Registry(), e)) continue;
         const IdComponent* id = scene.Registry().try_get<IdComponent>(e);
         const int candidate = id ? id->Id : 0;
         if (sun != entt::null && candidate >= sunId) continue;
@@ -96,6 +98,9 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
     bool sunTaken = false;
     auto view = scene.Registry().view<LightComponent, Transform>();
     for (auto e : view) {
+        // Спрятанный объект не светит: иначе «спрятать лампу» гасило бы её
+        // модель и оставляло пятно света на полу.
+        if (IsHidden(scene.Registry(), e)) continue;
         const LightComponent& lc = view.get<LightComponent>(e);
         // Мировые позиция/направление (учёт иерархии родителей).
         glm::mat4 world = scene.WorldMatrix(e);

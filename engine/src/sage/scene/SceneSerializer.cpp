@@ -950,6 +950,10 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
                 if (const IdComponent* pid = reg.try_get<IdComponent>(h->Parent))
                     j["parent"] = pid->Id;
         }
+        // Скрытие пишется, только когда оно есть: у подавляющего большинства
+        // объектов его нет, и «"hidden": false» в каждом узле — шум в файле,
+        // который люди читают и сравнивают в системе контроля версий.
+        if (reg.all_of<HiddenComponent>(e)) j["hidden"] = true;
         j["position"] = Vec3ToJson(tr.Position);
         j["rotation"] = Vec3ToJson(tr.Rotation);
         j["scale"]    = Vec3ToJson(tr.Scale);
@@ -1249,6 +1253,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     for (const auto& j : root.value("objects", json::array())) {
         int id = j.value("id", fallbackId++);
         GameObject obj = scene->CreateObjectWithId(j.value("name", "Object"), id);
+        if (j.value("hidden", false))
+            obj.Registry()->emplace_or_replace<HiddenComponent>(obj.Entity());
         // ФАКТИЧЕСКИЙ id: при дубликате в файле Scene выдаёт ближайший свободный
         // (см. CreateObjectWithId) — maxId и связи иерархии считаем по нему.
         id = obj.Id();

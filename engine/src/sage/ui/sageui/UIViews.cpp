@@ -5,6 +5,7 @@
 #include "sage/ui/input/UIInteraction.h"
 #include "sage/ui/sageui/UIContext.h"
 #include "sage/ui/style/UIStyle.h"
+#include "sage/ui/visual/UIBorder.h"
 #include "sage/ui/visual/UIFill.h"
 #include "sage/ui/visual/UIIcon.h"
 
@@ -31,6 +32,14 @@ void Tree::OnAttach() {
     // Строки вплотную: это список, а не форма. Зазор между строками дерева
     // сцены съедает по строке на каждые десять.
     m_scroll->Content()->Layout().Gap = {0.0f, 0.0f};
+
+    // Правый щелчок мимо строк — меню пустого места. Ловится САМИМ деревом, а
+    // не отдельной «зоной внизу»: пустое место списка — это и промежуток между
+    // последней строкой и низом панели, и вся панель у пустой сцены.
+    Ensure<UIInteraction>().Hit = UIHitShape::Rect;
+    OnClickEvent([this](UIEvent& e) {
+        if (e.Button == 1 && m_onContextEmpty) m_onContextEmpty(e.Pointer);
+    });
 }
 
 UIElement* Tree::Content() const { return m_scroll ? m_scroll->Content() : nullptr; }
@@ -46,6 +55,10 @@ Tree::RowUI& Tree::EnsureRow(size_t index) {
         row.Box->Horizontal(4.0f)->Padding(UIEdges(4.0f, 0.0f, 6.0f, 0.0f));
         row.Box->Layout().Cross = UIAlign::Center;
         row.Box->Ensure<UIFill>();
+        // Рамка заведена сразу, хотя обычно невидима: она нужна подсказке «сюда
+        // бросят», а добавлять компонент во время перетаскивания значит менять
+        // документ в самый неподходящий момент.
+        row.Box->Ensure<UIBorder>().Thickness = UIEdges{0.0f, 0.0f, 0.0f, 0.0f};
         row.Box->SetStyle("Row");
         UIInteraction& ia = row.Box->Ensure<UIInteraction>();
         ia.Hit = UIHitShape::Rect;
@@ -72,7 +85,16 @@ Tree::RowUI& Tree::EnsureRow(size_t index) {
 
         const size_t at = m_rows.size();
         row.Box->OnClickEvent([this, at](UIEvent& e) {
-            if (at >= m_rows.size() || !m_onSelect) return;
+            if (at >= m_rows.size()) return;
+            // Правая кнопка — контекстное меню, и НЕ выделение: набор из пяти
+            // объектов, по которому нажали правой, обязан остаться набором.
+            // Кого именно считать целью, решает вызывающий: он знает, входит ли
+            // строка в текущее выделение.
+            if (e.Button == 1) {
+                if (m_onContext) m_onContext(m_rows[at].Id, e.Pointer);
+                return;
+            }
+            if (!m_onSelect) return;
             if (e.Clicks >= 2 && m_onActivate) { m_onActivate(m_rows[at].Id); return; }
             m_onSelect(m_rows[at].Id, e.Ctrl || e.Shift);
         });
@@ -81,6 +103,31 @@ Tree::RowUI& Tree::EnsureRow(size_t index) {
         });
         row.Eye->OnPress([this, at] {
             if (at < m_rows.size() && m_onVisibility) m_onVisibility(m_rows[at].Id);
+        });
+
+        // Перетаскивание строки. Начало — на самой строке, цель — под курсором:
+        // ядро во время перетаскивания держит указатель ЗАХВАЧЕННЫМ на
+        // источнике (иначе перетаскивание терялось бы, стоило курсору сойти со
+        // строки), поэтому «на кого бросили» дерево считает само, по своим же
+        // прямоугольникам.
+        row.Box->On(UIEventType::DragStart, [this, at](UIEvent&) {
+            if (at < m_rows.size()) m_dragging = m_rows[at].Id;
+        });
+        row.Box->On(UIEventType::Drag, [this](UIEvent& e) {
+            if (m_dragging.empty()) return;
+            const std::string under = RowAt(e.Pointer);
+            // На себя не бросают: объект не может стать собственным родителем,
+            // и подсвечивать это как возможный исход — врать.
+            HighlightDrop(under == m_dragging ? std::string() : under);
+        });
+        row.Box->On(UIEventType::DragEnd, [this](UIEvent& e) {
+            if (m_dragging.empty()) return;
+            const std::string dragged = m_dragging;
+            const std::string under = RowAt(e.Pointer);
+            m_dragging.clear();
+            HighlightDrop(std::string());
+            if (under == dragged) return;
+            if (m_onDrop) m_onDrop(dragged, under);
         });
         m_rows.push_back(row);
     }
@@ -143,6 +190,49 @@ Tree* Tree::OnVisibility(std::function<void(const std::string&)> fn) {
 Tree* Tree::OnActivate(std::function<void(const std::string&)> fn) {
     m_onActivate = std::move(fn);
     return this;
+}
+Tree* Tree::OnContext(std::function<void(const std::string&, glm::vec2)> fn) {
+    m_onContext = std::move(fn);
+    return this;
+}
+Tree* Tree::OnContextEmpty(std::function<void(glm::vec2)> fn) {
+    m_onContextEmpty = std::move(fn);
+    return this;
+}
+Tree* Tree::OnDrop(std::function<void(const std::string&, const std::string&)> fn) {
+    m_onDrop = std::move(fn);
+    return this;
+}
+
+std::string Tree::RowAt(glm::vec2 point) const {
+    for (size_t i = 0; i < m_rows.size() && i < m_items.size(); ++i) {
+        if (!m_rows[i].Box->IsVisible()) continue;
+        const UIRect r = m_rows[i].Box->Bounds();
+        if (point.x >= r.x && point.x <= r.x + r.w && point.y >= r.y && point.y <= r.y + r.h)
+            return m_rows[i].Id;
+    }
+    return std::string();
+}
+
+UIRect Tree::RowBounds(const std::string& id) const {
+    for (size_t i = 0; i < m_rows.size() && i < m_items.size(); ++i)
+        if (m_rows[i].Id == id && m_rows[i].Box->IsVisible()) return m_rows[i].Box->Bounds();
+    return UIRect{};
+}
+
+void Tree::HighlightDrop(const std::string& id) {
+    if (m_dropTarget == id) return;
+    m_dropTarget = id;
+    // Цель подсвечивается СОСТОЯНИЕМ, а не своим цветом: подсказка «сюда» и
+    // подсветка под курсором обязаны выглядеть частями одной темы.
+    for (RowUI& row : m_rows) {
+        UIInteraction* ia = row.Box->Get<UIInteraction>();
+        if (!ia) continue;
+        const bool on = !id.empty() && row.Id == id;
+        if (on) ia->Runtime.Flags |= UIState_Checked;
+        else ia->Runtime.Flags &= ~(uint32_t)UIState_Checked;
+        row.Box->Dirty(UIDirty_Style);
+    }
 }
 
 // ============================================================================

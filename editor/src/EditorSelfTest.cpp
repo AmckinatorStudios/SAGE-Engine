@@ -37,6 +37,7 @@
 #include "sage/render/Screenshot.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
+#include "ui/SageUIIsland.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/render/Frustum.h"
 #include "sage/render/ParticlePresets.h"
@@ -121,7 +122,7 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools + console + panel-flags + editor-prefs + material-assign + "
+                               << "all-components-roundtrip + ui-layout-tools + console + hierarchy + panel-flags + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
@@ -2301,6 +2302,79 @@ bool EditorLayer::SelfTestTools() {
         if (ok && text.find("[SelfTestConsole] ошибка про шейдер") == std::string::npos) {
             LOG_ERROR("Editor") << "SELFTEST: консоль не показывает ошибку целиком";
             ok = false;
+        }
+    }
+
+    // --- Иерархия на SAGE UI: список, поиск и скрытие ---
+    //
+    // Проверяется не «нарисовалась ли панель», а её работа. У иерархии работа
+    // тройная: показать дерево сцены целиком, СУЗИТЬ его поиском до нужного
+    // объекта и убрать объект из кадра, не удаляя его. Каждое из трёх ломается
+    // молча — список выглядит правдоподобным в любом случае.
+    if (ok) {
+        // Панель собирается на первом показе, а самопроверка идёт до первого
+        // кадра: собираем её здесь тем же способом, каким это сделал бы хозяин.
+        m_hierarchy.SetHost(this);
+        SageUIIsland island;
+        m_hierarchy.EnsureBuilt(island.Ui(), island.Ui().Content());
+        m_hierarchy.Sync(0.016f);
+
+        const int rows = m_hierarchy.VisibleCount();
+        const std::size_t entities = m_scene->Count();
+        if (rows <= 0 || (std::size_t)rows != entities) {
+            LOG_ERROR("Editor") << "SELFTEST: иерархия показывает " << rows << " строк при "
+                                << entities << " объектах сцены";
+            ok = false;
+        }
+
+        // Поиск. Берём имя РЕАЛЬНОГО объекта сцены, а не выдуманное: иначе
+        // проверка сломается вместе с шаблоном проекта, а не вместе с поиском.
+        std::string wanted;
+        auto names = m_scene->Registry().view<NameComponent>();
+        for (auto e : names) {
+            const std::string& n = names.get<NameComponent>(e).Name;
+            if (n.size() >= 4) { wanted = n; break; }
+        }
+        if (ok && !wanted.empty()) {
+            m_hierarchy.SetFilter(wanted);
+            m_hierarchy.Sync(0.016f);
+            const std::string shown = m_hierarchy.VisibleText();
+            if (shown.find(wanted) == std::string::npos) {
+                LOG_ERROR("Editor") << "SELFTEST: поиск в иерархии потерял '" << wanted << "'";
+                ok = false;
+            }
+            if (ok && m_hierarchy.VisibleCount() >= rows) {
+                LOG_ERROR("Editor") << "SELFTEST: поиск в иерархии ничего не сузил";
+                ok = false;
+            }
+            m_hierarchy.SetFilter("");
+            m_hierarchy.Sync(0.016f);
+        }
+
+        // Скрытие: объект остаётся в сцене и в списке, но уходит из кадра.
+        // Проверяем именно это — «пропал из иерархии» было бы удалением.
+        if (ok) {
+            entt::entity target = entt::null;
+            auto meshes = m_scene->Registry().view<MeshRendererComponent>();
+            for (auto e : meshes) { target = e; break; }
+            if (target != entt::null) {
+                m_scene->Registry().emplace_or_replace<HiddenComponent>(target);
+                int drawn = 0;
+                sage::ecs::ForEachRenderableEntity(
+                    *m_scene, [&](entt::entity e, Transform&, MeshRendererComponent&) {
+                        if (e == target) ++drawn;
+                    });
+                if (drawn != 0) {
+                    LOG_ERROR("Editor") << "SELFTEST: спрятанный объект всё равно рисуется";
+                    ok = false;
+                }
+                m_hierarchy.Sync(0.016f);
+                if (ok && (std::size_t)m_hierarchy.VisibleCount() != entities) {
+                    LOG_ERROR("Editor") << "SELFTEST: спрятанный объект исчез из иерархии";
+                    ok = false;
+                }
+                m_scene->Registry().remove<HiddenComponent>(target);
+            }
         }
     }
 

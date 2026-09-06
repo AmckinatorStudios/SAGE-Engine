@@ -442,6 +442,10 @@ UITheme UITheme::Editor() {
                   number("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
     row.States["hover"] = {color("fill", "Color", "@Color.SurfaceRaised")};
     row.States["selected"] = {color("fill", "Color", "@Color.AccentMuted")};
+    // «Сюда бросят» — рамкой акцентом, а не заливкой: заливка спорила бы с
+    // выделением, и было бы не разобрать, что выбрано, а что цель броска.
+    row.States["checked"] = {color("border", "Color", "@Color.Accent"),
+                             number("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
 
     UIStyle& sectionHead = t.Ensure("SectionHead");
     sectionHead.Values = {color("fill", "Color", "@Color.SurfaceRaised"),

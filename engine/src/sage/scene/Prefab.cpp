@@ -83,6 +83,11 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<GIStaticComponent>(src, dst);
     CopyIfPresent<CharacterControllerComponent>(src, dst);
     CopyIfPresent<ShaderParamsComponent>(src, dst);
+    // Скрытие — свойство объекта, а не «состояние редактора»: копия спрятанного
+    // объекта обязана быть спрятанной, иначе дубликат внезапно появляется в
+    // кадре. Метка без полей копируется НАЛИЧИЕМ: копировать у неё нечего.
+    if (src.Registry()->all_of<HiddenComponent>(src.Entity()))
+        dst.Registry()->emplace_or_replace<HiddenComponent>(dst.Entity());
 
     // Дальше — сброс того, что принадлежит ЭКЗЕМПЛЯРУ, а не шаблону. Скопируй
     // мы это как есть, две сущности делили бы один дескриптор тела, и удаление

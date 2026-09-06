@@ -28,6 +28,8 @@
 
 #include "sage/ecs/CameraLightComponents.h"
 #include "sage/ecs/LightSystem.h"
+#include "sage/ecs/RenderSystem.h"
+#include "sage/render/Mesh.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
@@ -295,4 +297,94 @@ TEST(Lighting_set_sun_falls_back_to_scene_settings) {
     const LightingEnvironment env = sage::ecs::CollectLighting(scene);
     CHECK_NEAR(env.Sun.Intensity, 0.75f, 1e-4);
     CHECK_NEAR(glm::normalize(env.Sun.Direction).z, -0.7071f, 1e-3);
+}
+
+// --- Скрытие сущности --------------------------------------------------------
+
+namespace {
+// Меш-заглушка. ForEachRenderable спрашивает у сущности ровно одно: НАЗНАЧЕН ли
+// меш, — а настоящий Mesh при создании загружает себя в GPU, и в тесте без
+// графического контекста это падение. Указатель никто не разыменовывает,
+// владения нет: удалитель ничего не делает.
+std::shared_ptr<Mesh> FakeMesh() {
+    return std::shared_ptr<Mesh>(reinterpret_cast<Mesh*>(1), [](Mesh*) {});
+}
+} // namespace
+//
+// «Спрятать объект» — действие, которое ломается тихо: список выглядит
+// одинаково и когда объект исчез из кадра, и когда он там остался. Проверяются
+// ровно те три вещи, ради которых метка и заведена.
+TEST(Hidden_entity_is_not_drawn) {
+    Scene scene;
+    GameObject box = scene.CreateObject("Box");
+    box.Registry()->emplace<MeshRendererComponent>(box.Entity()).MeshPtr = FakeMesh();
+
+    int drawn = 0;
+    sage::ecs::ForEachRenderable(scene, [&](Transform&, MeshRendererComponent&) { ++drawn; });
+    CHECK_EQ(drawn, 1);
+
+    box.Registry()->emplace<HiddenComponent>(box.Entity());
+    drawn = 0;
+    sage::ecs::ForEachRenderable(scene, [&](Transform&, MeshRendererComponent&) { ++drawn; });
+    CHECK_EQ(drawn, 0);
+
+    // Сущность НЕ удалена: скрытие — про кадр, а не про сцену. Иначе «спрятать»
+    // означало бы «потерять», и человек лишился бы объекта вместе со всеми его
+    // настройками.
+    CHECK_TRUE(scene.FindByName("Box").Valid());
+}
+
+TEST(Hidden_parent_hides_the_whole_subtree) {
+    Scene scene;
+    GameObject group = scene.CreateObject("Group");
+    GameObject child = scene.CreateObject("Child");
+    child.Registry()->emplace<MeshRendererComponent>(child.Entity()).MeshPtr = FakeMesh();
+    scene.SetParent(child.Entity(), group.Entity());
+
+    // Спрятана ГРУППА, а меш только у ребёнка: спрятать группу и увидеть её
+    // детей на экране — это сломанное действие, а не особенность.
+    group.Registry()->emplace<HiddenComponent>(group.Entity());
+    int drawn = 0;
+    sage::ecs::ForEachRenderable(scene, [&](Transform&, MeshRendererComponent&) { ++drawn; });
+    CHECK_EQ(drawn, 0);
+
+    // Своей метки у ребёнка нет — значит, показав группу обратно, его видно
+    // снова, и «показать» не приходится делать по одному.
+    group.Registry()->remove<HiddenComponent>(group.Entity());
+    drawn = 0;
+    sage::ecs::ForEachRenderable(scene, [&](Transform&, MeshRendererComponent&) { ++drawn; });
+    CHECK_EQ(drawn, 1);
+}
+
+TEST(Hidden_light_stops_lighting_the_scene) {
+    Scene scene;
+    GameObject lamp = scene.CreateObject("Lamp");
+    LightComponent& lc = lamp.Registry()->emplace<LightComponent>(lamp.Entity());
+    lc.Kind = LightComponent::Type::Point;
+    lc.Intensity = 5.0f;
+    lamp.Registry()->emplace_or_replace<Transform>(lamp.Entity()).Position = {0.0f, 2.0f, 0.0f};
+
+    CHECK_EQ((int)sage::ecs::CollectLighting(scene).PointLights.size(), 1);
+
+    // Спрятанная лампа не светит: иначе «спрятать лампу» гасило бы её модель и
+    // оставляло пятно света на полу — то есть выглядело бы как ошибка рендера.
+    lamp.Registry()->emplace<HiddenComponent>(lamp.Entity());
+    CHECK_EQ((int)sage::ecs::CollectLighting(scene).PointLights.size(), 0);
+}
+
+TEST(Hidden_survives_saving_and_loading_the_scene) {
+    Scene scene;
+    GameObject box = scene.CreateObject("Box");
+    box.Registry()->emplace<MeshRendererComponent>(box.Entity());
+    box.Registry()->emplace<HiddenComponent>(box.Entity());
+
+    const std::string text = SceneSerializer::SaveToString(scene);
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+    CHECK_TRUE(loaded != nullptr);
+    if (!loaded) return;
+    GameObject back = loaded->FindByName("Box");
+    CHECK_TRUE(back.Valid());
+    // Скрытие — свойство ОБЪЕКТА, а не состояние редактора: закрыв и открыв
+    // сцену, человек обязан увидеть её такой, какой оставил.
+    if (back.Valid()) CHECK_TRUE(back.Registry()->all_of<HiddenComponent>(back.Entity()));
 }

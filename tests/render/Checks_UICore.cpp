@@ -564,6 +564,97 @@ void CheckIcons(UIRenderer& renderer) {
     if (shots) SavePng(std::string(shots) + "/ui_icons.png", img);
 }
 
+// ---------------------------------------------------------------------------
+// ДЕРЕВО СЦЕНЫ (§6 ТЗ редактора).
+//
+// У списка объектов три состояния строки, и каждое обязано быть видно БЕЗ
+// подписи: выбранная, скрытая и та, на которую сейчас бросят. Проверяются
+// именно они — «список нарисовался» не значит ничего: он рисуется одинаково и
+// когда выделение потерялось, и когда подсветка цели не пришла.
+// ---------------------------------------------------------------------------
+void CheckHierarchyTree(UIRenderer& renderer) {
+    const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
+    namespace sui = ui::sui;
+
+    sui::UIContext gui;
+    gui.InstallEngineResources();
+    gui.SetPixelPerfect();
+    gui.SetScreen({260.0f, 200.0f});
+    gui.Theme() = ui::UITheme::Editor();
+
+    sui::Panel* panel = gui.CreateIn<sui::Panel>(gui.Content());
+    panel->SetStretch(true, true);
+    sui::Tree* tree = gui.CreateIn<sui::Tree>(panel);
+    tree->SetStretch(true, true);
+
+    auto add = [](std::vector<sui::TreeItem>& v, const char* id, const char* text, int depth,
+                  bool sel, bool visible) {
+        sui::TreeItem it;
+        it.Id = id;
+        it.Text = text;
+        it.Depth = depth;
+        it.Icon = ui::icons::Icons::Name(sui::Icon::Cube);
+        it.Selected = sel;
+        it.Visible = visible;
+        v.push_back(it);
+    };
+    std::vector<sui::TreeItem> items;
+    add(items, "a", "Ground", 0, false, true);
+    add(items, "b", "Red Cube", 0, true, true);      // выбранная
+    add(items, "c", "Green Cube", 0, false, false);  // скрытая
+    add(items, "d", "Blue Cube", 0, false, true);
+    tree->SetItems(items);
+
+    Framebuffer fbo(260, 200);
+    auto shot = [&]() {
+        fbo.Bind();
+        sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
+        dev.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        dev.Clear(true, true);
+        gui.Update(0.016f);
+        gui.Render(renderer, &fbo);
+        Image out = Capture(260, 200);
+        dev.BindDefaultFramebuffer();
+        return out;
+    };
+    Image img = shot();
+
+    // Выбранная строка ЗАЛИТА, соседняя — нет. Сравниваем их между собой, а не
+    // с числом: цвет подсветки задаёт тема, и прибивать его в проверке значит
+    // ломать её при первой же смене оформления.
+    const ui::UIRect selected = tree->RowBounds("b");
+    const ui::UIRect plain = tree->RowBounds("a");
+    Check(selected.h > 1.0f && plain.h > 1.0f, "дерево: строки посчитаны");
+    const double selLuma = Luma(img, (int)selected.x + 100, (int)selected.y + 4,
+                                (int)selected.x + 150, (int)(selected.y + selected.h) - 4);
+    const double plainLuma = Luma(img, (int)plain.x + 100, (int)plain.y + 4,
+                                  (int)plain.x + 150, (int)(plain.y + plain.h) - 4);
+    Check(selLuma > plainLuma + 3.0, "дерево: выбранная строка подсвечена");
+
+    // Скрытая строка приглушена: почему объекта нет в кадре, видно из списка.
+    const ui::UIRect hidden = tree->RowBounds("c");
+    const double hiddenText = Luma(img, (int)hidden.x + 20, (int)hidden.y,
+                                   (int)hidden.x + 90, (int)(hidden.y + hidden.h));
+    const double plainText = Luma(img, (int)plain.x + 20, (int)plain.y,
+                                  (int)plain.x + 90, (int)(plain.y + plain.h));
+    Check(hiddenText < plainText, "дерево: скрытая строка приглушена");
+
+    if (shots) SavePng(std::string(shots) + "/ui_tree.png", img);
+
+    // Цель перетаскивания: рамка акцентом на строке под курсором. Без неё
+    // «бросить объект в группу» делается вслепую — до отпускания кнопки не
+    // видно, куда именно попадёшь.
+    tree->ShowDropTarget("d");
+    Image dragImg = shot();
+    const ui::UIRect target = tree->RowBounds("d");
+    const double before = Luma(img, (int)target.x + 2, (int)target.y,
+                               (int)(target.x + target.w) - 2, (int)target.y + 2);
+    const double after = Luma(dragImg, (int)target.x + 2, (int)target.y,
+                              (int)(target.x + target.w) - 2, (int)target.y + 2);
+    Check(after > before + 4.0, "дерево: цель броска обведена");
+    if (shots) SavePng(std::string(shots) + "/ui_tree_drop.png", dragImg);
+}
+
 void CheckSageUI(UIRenderer& renderer) {
     const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
     namespace sui = ui::sui;
@@ -661,19 +752,20 @@ void CheckSageUI(UIRenderer& renderer) {
         it.Icon = icon;
         items.push_back(it);
     };
-    item("scene", "Scene", 0, true, true, false, "bag");
-    item("env", "Environment", 1, true, true, false, "sun");
-    item("dl", "Directional Light", 2, false, false, false, "sun");
-    item("sky", "Sky Light", 2, false, false, false, "moon");
-    item("fog", "Fog", 2, false, false, false, "drop");
-    item("ground", "Ground", 1, true, true, false, "bag");
-    item("plane", "Plane", 2, false, false, false, "rect");
-    item("structures", "Structures", 1, true, true, false, "bag");
-    item("cube", "Cube", 2, false, false, true, "rect");
-    item("cyl", "Cylinder", 2, false, false, false, "rect");
-    item("ramp", "Ramp", 2, false, false, false, "rect");
-    item("camera", "Camera", 1, true, true, false, "bag");
-    item("maincam", "Main Camera", 2, false, false, false, "eye");
+    auto ico = [](sui::Icon i) { return ui::icons::Icons::Name(i); };
+    item("scene", "Scene", 0, true, true, false, ico(sui::Icon::Layers));
+    item("env", "Environment", 1, true, true, false, ico(sui::Icon::Sun));
+    item("dl", "Directional Light", 2, false, false, false, ico(sui::Icon::Sun));
+    item("sky", "Sky Light", 2, false, false, false, ico(sui::Icon::Light));
+    item("fog", "Fog", 2, false, false, false, ico(sui::Icon::Droplet));
+    item("ground", "Ground", 1, true, true, false, ico(sui::Icon::Layers));
+    item("plane", "Plane", 2, false, false, false, ico(sui::Icon::Mesh));
+    item("structures", "Structures", 1, true, true, false, ico(sui::Icon::Layers));
+    item("cube", "Cube", 2, false, false, true, ico(sui::Icon::Cube));
+    item("cyl", "Cylinder", 2, false, false, false, ico(sui::Icon::Cube));
+    item("ramp", "Ramp", 2, false, false, false, ico(sui::Icon::Cube));
+    item("camera", "Camera", 1, true, true, false, ico(sui::Icon::Layers));
+    item("maincam", "Main Camera", 2, false, false, false, ico(sui::Icon::Camera));
     tree->SetItems(items);
 
     // --- Содержимое: инспектор ---
@@ -778,6 +870,7 @@ void RunUICoreChecks() {
     CheckShowcaseFrame(renderer);
     CheckDemoScreens(renderer);
     CheckIcons(renderer);
+    CheckHierarchyTree(renderer);
     CheckSageUI(renderer);
 }
 

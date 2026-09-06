@@ -2,6 +2,7 @@
 
 #include "sage/render/ParticleSystem.h"
 #include "sage/scene/Scene.h"
+#include "sage/ecs/RenderSystem.h"
 #include "sage/scene/Components.h"
 
 namespace sage::fx {
@@ -11,6 +12,9 @@ void UpdateEmitters(Scene& scene, ParticleSystem& sys, float dt) {
     for (auto e : view) {
         ParticleEmitterComponent& em = view.get<ParticleEmitterComponent>(e);
         if (!em.Active) continue;
+        // Спрятанный эмиттер не сыплет: иначе дым остался бы висеть над
+        // спрятанным костром.
+        if (sage::ecs::IsHidden(scene.Registry(), e)) continue;
         glm::vec3 pos = glm::vec3(scene.WorldMatrix(e)[3]); // мировая позиция (иерархия)
 
         if (em.Continuous) {

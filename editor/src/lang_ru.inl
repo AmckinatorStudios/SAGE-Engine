@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1124.
+// Язык: Русский. Строк: 1120.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -108,8 +108,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Добавить связь"},
     {"Add stop",
      "Добавить остановку"},
-    {"Add the prefab as a child",
-     "Добавить префаб дочерним объектом"},
     {"Add variable",
      "Добавить переменную"},
     {"Add via Entity > Create Light; type/params in Inspector",
@@ -200,14 +198,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ассеты"},
     {"Assets -> Import...",
      "Assets -> Импорт…"},
-    {"Assign the material to this object",
-     "Назначить материал этому объекту"},
     {"Atlas",
      "Атлас"},
     {"Atlas size",
      "Размер атласа"},
-    {"Attach the script to this object",
-     "Прикрепить скрипт к этому объекту"},
     {"Auto size",
      "Автоподбор кегля"},
     {"Auto-scroll",
@@ -1554,8 +1548,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Режим отрисовки"},
     {"Repeat",
      "Повторять"},
-    {"Replace this object's mesh",
-     "Заменить меш этого объекта"},
     {"Reported to the game; the UI never interprets it",
      "Сообщается игре; интерфейс её не толкует"},
     {"Reports a click; the game decides what it means",
@@ -1664,8 +1656,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Источники света сцены"},
     {"Scene object that points at a .uidoc document",
      "Объект сцены со ссылкой на документ .uidoc"},
-    {"Scene: %s  |  Entities: %zu",
-     "Сцена: %s  |  объектов: %zu"},
     {"Scenes (*.sage)",
      "Сцены (*.sage)"},
     {"Script",
@@ -1678,6 +1668,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Принимает прокрутку"},
     {"Scroll view",
      "Прокрутка"},
+    {"Search entity...",
+     "Поиск объекта..."},
     {"Search...",
      "Поиск…"},
     {"Section",

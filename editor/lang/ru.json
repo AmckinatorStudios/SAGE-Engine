@@ -50,7 +50,6 @@
     "Add effect": "Добавить эффект",
     "Add link": "Добавить связь",
     "Add stop": "Добавить остановку",
-    "Add the prefab as a child": "Добавить префаб дочерним объектом",
     "Add variable": "Добавить переменную",
     "Add via Entity > Create Light; type/params in Inspector": "Добавляется через Entity > Create Light; тип и параметры — в инспекторе",
     "Added to the material emissive. Above 1 gives a bloom halo.": "Прибавляется к свечению материала. Больше 1 — ореол (bloom).",
@@ -96,10 +95,8 @@
     "Asset": "Ассет",
     "Assets": "Ассеты",
     "Assets -> Import...": "Assets -> Импорт…",
-    "Assign the material to this object": "Назначить материал этому объекту",
     "Atlas": "Атлас",
     "Atlas size": "Размер атласа",
-    "Attach the script to this object": "Прикрепить скрипт к этому объекту",
     "Auto size": "Автоподбор кегля",
     "Auto-scroll": "Автопрокрутка",
     "Average": "Усреднять",
@@ -768,7 +765,6 @@
     "Render Scale < 1 is faster; > 1 supersamples (sharper).": "Render Scale < 1 — быстрее; > 1 — суперсэмплинг (чётче).",
     "Render mode": "Режим отрисовки",
     "Repeat": "Повторять",
-    "Replace this object's mesh": "Заменить меш этого объекта",
     "Reported to the game; the UI never interprets it": "Сообщается игре; интерфейс её не толкует",
     "Reports a click; the game decides what it means": "Сообщает о нажатии; что оно значит, решает игра",
     "Reports next to the editor: %d": "Отчётов рядом с редактором: %d",
@@ -822,7 +818,6 @@
     "Scene": "Сцена",
     "Scene changed since bake — re-bake": "Сцена менялась после запекания — стоит перезапечь",
     "Scene lights": "Источники света сцены",
-    "Scene: %s  |  Entities: %zu": "Сцена: %s  |  объектов: %zu",
     "Scenes (*.sage)": "Сцены (*.sage)",
     "Script": "Скрипт",
     "Script assigned: ": "Скрипт назначен: ",
@@ -1124,6 +1119,7 @@
     "Scene object that points at a .uidoc document": "Объект сцены со ссылкой на документ .uidoc",
     "Documents of one scene are drawn in this order: the pause menu must lie over the HUD regardless of which object was created first.": "Документы одной сцены рисуются в этом порядке: меню паузы обязано лечь поверх худа независимо от того, кого создали раньше.",
     "Off: the document is visible but does not take the mouse — a HUD over the game must not eat shots.": "Выключено — документ виден, но мышь не ловит: худ поверх игры не должен съедать выстрелы.",
-    "A button reports a command; here you say what it does. The interface itself knows nothing about the game.": "Кнопка сообщает команду; здесь записано, что она делает. Сам интерфейс про игру не знает ничего."
+    "A button reports a command; here you say what it does. The interface itself knows nothing about the game.": "Кнопка сообщает команду; здесь записано, что она делает. Сам интерфейс про игру не знает ничего.",
+    "Search entity...": "Поиск объекта..."
   }
 }

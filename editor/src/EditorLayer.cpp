@@ -211,6 +211,9 @@ void EditorLayer::OnAttach() {
 
     // --- Console первой: сток лога ловит все сообщения запуска ---
     m_console.Attach();
+    // Панель иерархии обращается к сцене и выделению через хозяина — он ставится
+    // ДО первой сборки дерева: собирать список объектов, не зная сцены, нечем.
+    m_hierarchy.SetHost(this);
 
     // --- Готовность к падению ---
     //
@@ -436,6 +439,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
             "SAGE_EDITOR_PALETTE",      "SAGE_EDITOR_SHOW_CONSOLE",
+            "SAGE_EDITOR_HIERARCHY_FIND", "SAGE_EDITOR_HIDE_ENTITY",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -526,6 +530,23 @@ void EditorLayer::OnAttach() {
         GameObject obj = m_scene->FindByName(name);
         if (obj.Valid()) SetSelectedId(obj.Id());
         else LOG_WARN("Editor") << "SAGE_EDITOR_SELECT_ENTITY: нет сущности с именем " << name;
+    }
+    // Поиск и скрытие в иерархии — БЕЗ ЧЕЛОВЕКА.
+    //
+    // Обе вещи видны только в списке и только в движении: набрал строку —
+    // список сузился; щёлкнул по глазу — объект ушёл из кадра, но остался в
+    // сцене. Кликать в CI некому, а «список выглядит правдоподобно» он
+    // выглядит и когда сломан.
+    if (const std::string f = sage::EnvString("SAGE_EDITOR_HIERARCHY_FIND"); !f.empty()) {
+        m_headlessProject = true;
+        m_showHierarchy = true;
+        m_hierarchy.SetFilter(f);
+    }
+    if (const char* name = std::getenv("SAGE_EDITOR_HIDE_ENTITY")) {
+        m_headlessProject = true;
+        GameObject obj = m_scene->FindByName(name);
+        if (obj.Valid()) m_scene->Registry().emplace_or_replace<HiddenComponent>(obj.Entity());
+        else LOG_WARN("Editor") << "SAGE_EDITOR_HIDE_ENTITY: нет сущности с именем " << name;
     }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
         m_headlessProject = true;
@@ -1008,7 +1029,7 @@ void EditorLayer::OnRender() {
     DrawDockspaceAndMenu(); // включая модалки (m_dialogs) и окно настроек (m_settingsPanel)
     // Панель подаётся в кадр только когда она открыта: закрытая вкладка иначе
     // возвращалась бы сама собой на следующем кадре, и крестик не работал бы.
-    if (m_showHierarchy) m_hierarchy.Draw(*this, &m_showHierarchy);
+
     if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
     if (m_showEnvironment) m_environment.Draw(*this, &m_showEnvironment);
     if (m_showUIDocument) m_uiDocument.Draw(*this, &m_showUIDocument);
@@ -1031,6 +1052,11 @@ void EditorLayer::OnRender() {
         m_sagePanels.Draw(m_console, T("Console" "###Console"), &m_showConsole, uiDt);
     else
         m_sagePanels.SyncHidden(m_console, uiDt);
+    if (m_showHierarchy)
+        m_sagePanels.Draw(m_hierarchy, T("Hierarchy" "###Hierarchy"), &m_showHierarchy, uiDt,
+                          ImVec2(300.0f, 520.0f));
+    else
+        m_sagePanels.SyncHidden(m_hierarchy, uiDt);
     if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
     m_plugins.ImGuiAll();
 
