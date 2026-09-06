@@ -237,6 +237,97 @@ UITheme UITheme::Default() {
                     colorValue("border", "Color", "@Color.Border"),
                     numberValue("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
     field.States["focused"] = {colorValue("border", "Color", "@Color.Accent")};
+
+    // --- Оформление объектного слоя: окна, вкладки, меню ---------------------
+    //
+    // Стили здесь, а не в коде виджетов, ровно по §18: чтобы перекрасить все
+    // окна редактора, должно хватать одного места. Виджет, красящий себя сам, —
+    // это тема, которую нельзя сменить.
+    UIStyle& window = t.Ensure("Window");
+    window.Parent = "Panel";
+    window.Values = {colorValue("fill", "Color", "@Color.Surface"),
+                     numberValue("fill", "Radius", 8.0f, 8.0f, 8.0f, 8.0f),
+                     colorValue("border", "Color", "@Color.Border"),
+                     numberValue("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+
+    UIStyle& windowTitle = t.Ensure("WindowTitle");
+    windowTitle.Values = {colorValue("fill", "Color", "@Color.SurfaceRaised"),
+                          numberValue("fill", "Radius", 8.0f, 8.0f, 0.0f, 0.0f)};
+
+    UIStyle& windowClose = t.Ensure("WindowClose");
+    windowClose.Parent = "Button";
+    windowClose.Values = {colorValue("fill", "Color", "@Color.SurfaceRaised"),
+                          numberValue("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f),
+                          numberValue("fill", "Radius", 5.0f, 5.0f, 5.0f, 5.0f)};
+
+    UIStyle& buttonLabel = t.Ensure("ButtonLabel");
+    buttonLabel.Parent = "Label";
+
+    UIStyle& popup = t.Ensure("Popup");
+    popup.Parent = "Panel";
+    popup.Values = {colorValue("fill", "Color", "@Color.SurfaceRaised"),
+                    numberValue("fill", "Radius", 8.0f, 8.0f, 8.0f, 8.0f),
+                    colorValue("border", "Color", "@Color.Border"),
+                    numberValue("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+
+    UIStyle& menuItem = t.Ensure("MenuItem");
+    menuItem.Parent = "Button";
+    // Пункт меню без подложки и рамки: их у него столько же, сколько у строки
+    // текста, — и появляются они только под курсором.
+    menuItem.Values = {colorValue("fill", "Color", "#00000000"),
+                       numberValue("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f),
+                       numberValue("fill", "Radius", 5.0f, 5.0f, 5.0f, 5.0f)};
+    menuItem.States["hover"] = {colorValue("fill", "Color", "@Color.Border")};
+
+    UIStyle& tooltip = t.Ensure("Tooltip");
+    tooltip.Parent = "Panel";
+    tooltip.Values = {colorValue("fill", "Color", "@Color.Background"),
+                      numberValue("fill", "Radius", 6.0f, 6.0f, 6.0f, 6.0f),
+                      colorValue("border", "Color", "@Color.Border"),
+                      numberValue("border", "Thickness", 1.0f, 1.0f, 1.0f, 1.0f)};
+
+    UIStyle& tabStrip = t.Ensure("TabStrip");
+    tabStrip.Values = {colorValue("fill", "Color", "@Color.Background"),
+                       numberValue("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& tab = t.Ensure("Tab");
+    tab.Parent = "Button";
+    tab.Values = {colorValue("fill", "Color", "@Color.Background"),
+                  numberValue("border", "Thickness", 0.0f, 0.0f, 0.0f, 0.0f),
+                  numberValue("fill", "Radius", 6.0f, 6.0f, 0.0f, 0.0f),
+                  colorValue("text", "Color", "@Color.TextMuted")};
+    tab.States["hover"] = {colorValue("fill", "Color", "@Color.Surface")};
+
+    UIStyle& tabActive = t.Ensure("TabActive");
+    tabActive.Parent = "Tab";
+    // Активная вкладка светлее полосы и того же цвета, что содержимое под ней:
+    // так видно, что она с ним «одно», а не лежит поверх.
+    tabActive.Values = {colorValue("fill", "Color", "@Color.Surface"),
+                        colorValue("text", "Color", "@Color.Text")};
+
+    UIStyle& dockPanel = t.Ensure("DockPanel");
+    dockPanel.Values = {colorValue("fill", "Color", "@Color.Surface"),
+                        numberValue("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+
+    UIStyle& splitter = t.Ensure("Splitter");
+    splitter.Values = {colorValue("fill", "Color", "@Color.Background"),
+                       numberValue("fill", "Radius", 0.0f, 0.0f, 0.0f, 0.0f)};
+    splitter.States["hover"] = {colorValue("fill", "Color", "@Color.Accent")};
+
+    UIStyle& dropHint = t.Ensure("DropHint");
+    dropHint.Values = {numberValue("fill", "Radius", 4.0f, 4.0f, 4.0f, 4.0f)};
+
+    UIStyle& checkbox = t.Ensure("Checkbox");
+    checkbox.Values = {colorValue("range", "TrackColor", "@Color.Background"),
+                       colorValue("range", "AccentColor", "@Color.Accent")};
+
+    UIStyle& slider = t.Ensure("Slider");
+    slider.Values = {colorValue("range", "TrackColor", "@Color.Background"),
+                     colorValue("range", "AccentColor", "@Color.Accent")};
+
+    UIStyle& progress = t.Ensure("Progress");
+    progress.Values = {colorValue("progress", "TrackColor", "@Color.Background"),
+                       colorValue("progress", "FillColor", "@Color.Accent")};
     return t;
 }
 

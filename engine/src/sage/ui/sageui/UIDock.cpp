@@ -24,6 +24,10 @@ DockPanel::DockPanel(std::string id, std::string title)
 void DockPanel::OnAttach() {
     SetName(m_title.empty() ? m_id : m_title);
     SetStretch(true, true);
+    // Своя подложка: без неё видно фон области дока, и вкладка не читается как
+    // «принадлежащая» тому, что под ней.
+    Ensure<UIFill>();
+    SetStyle("DockPanel");
     Vertical(0.0f)->Padding(UIEdges::Uniform(0.0f));
     // Панель обрезает своё содержимое: длинный список не должен рисоваться
     // поверх соседней области дока.
@@ -396,7 +400,7 @@ UIElement* DockSpace::BuildTabs(DockNode& node, UIElement* parent) {
         Button* tab = Ctx().CreateIn<Button>(strip, title, std::string());
         tab->SetName("Tab");
         tab->SetHeight(22.0f);
-        tab->Ensure<UITransform>().WidthMode = UISizeMode::Content;
+        tab->FitToText(12.0f);
         // Активная вкладка отличается СТИЛЕМ, а не набором полей: перекрасить
         // все вкладки редактора должно быть правкой в одном месте.
         tab->SetStyle((int)i == node.Active ? "TabActive" : "Tab");

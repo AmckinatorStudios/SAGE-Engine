@@ -152,6 +152,21 @@ Button* Button::SetText(const std::string& text) {
     return this;
 }
 
+Button* Button::FitToText(float padX) {
+    Horizontal(0.0f)->Padding(UIEdges(padX, 0.0f, padX, 0.0f));
+    UILayout& l = Layout();
+    l.Cross = UIAlign::Stretch;
+    l.FitWidth = true;
+    Ensure<UITransform>().WidthMode = UISizeMode::Content;
+    if (m_caption) {
+        UITransform& ct = m_caption->Ensure<UITransform>();
+        ct.WidthMode = UISizeMode::Content;   // растянутая подпись меряется в ноль
+        ct.HeightMode = UISizeMode::Stretch;
+    }
+    Dirty(UIDirty_Layout);
+    return this;
+}
+
 Button* Button::SetCommand(const std::string& command) {
     m_command = command;
     Ensure<UIInteraction>().Command = command;
@@ -165,16 +180,11 @@ Checkbox::Checkbox(std::string text, bool checked)
 
 void Checkbox::OnAttach() {
     SetName(m_text.empty() ? "Checkbox" : m_text);
-    const UINodeId id = UIMakeCheckbox(Doc(), Parent() ? Parent()->NodeId() : kUIInvalidNode,
-                                       m_text);
-    // Заготовка ядра собрала узел со всеми частями; переносим их себе, чтобы
-    // элемент оставался ОДНИМ узлом. Иначе у элемента был бы «свой» узел и
-    // «настоящий» рядом, и любая правка попадала бы не туда.
-    Doc().Destroy(id);
-
     UITransform& t = Ensure<UITransform>();
     t.Size = {180.0f, 24.0f};
-    Ensure<UIFill>();
+    // БЕЗ подложки. Галка — это квадратик с отметкой (его рисует UIRangeValue)
+    // плюс подпись рядом; заливка на всю строку превратила бы её в кнопку во
+    // всю ширину — ровно так это и выглядело.
     UIRangeValue& r = Ensure<UIRangeValue>();
     r.Toggle = true;
     r.Min = 0.0f;
@@ -190,7 +200,14 @@ void Checkbox::OnAttach() {
         Label* caption = Ctx().Create<Label>(m_text);
         Add(caption);
         caption->SetName("Caption");
-        caption->SetPosition({28.0f, 0.0f});
+        // Подпись стоит ПОСЛЕ квадратика и не участвует в его размере: квадрат
+        // рисуется по меньшей стороне узла, и растянутая подпись сделала бы его
+        // высотой во всю строку.
+        UITransform& ct = caption->Ensure<UITransform>();
+        ct.IgnoreLayout = true;
+        ct.AnchorMin = ct.AnchorMax = {0.0f, 0.5f};
+        ct.Pivot = {0.0f, 0.5f};
+        ct.Offset = {28.0f, 0.0f};
         caption->SetAlign(UITextAlign::Left, UITextVAlign::Center);
     }
 }
@@ -294,7 +311,7 @@ void TextInput::OnAttach() {
     UIInteraction& ia = Ensure<UIInteraction>();
     ia.Focusable = true;
     ia.Cursor = "text";
-    SetStyle("Input");
+    SetStyle("InputField");
 }
 
 const std::string& TextInput::Value() const {

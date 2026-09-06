@@ -31,6 +31,7 @@
 #include "sage/ui/UIFramework.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/render/UIEngineResources.h"
+#include "sage/ui/sageui/SageUI.h"
 #include "sage/ui/showcase/UIDemos.h"
 #include "sage/ui/showcase/UIShowcaseDocument.h"
 
@@ -462,6 +463,117 @@ void CheckDemoScreens(UIRenderer& renderer) {
     }
 }
 
+// --- Объектный слой: докинг, окна, меню --------------------------------------
+//
+// Собирается ровно так, как будет собран редактор: область докинга с панелями,
+// плавающее окно, открытое меню. Проверяется, что всё это ДОЕЗЖАЕТ ДО ПИКСЕЛЕЙ —
+// модульные тесты знают только про числа раскладки, и «панель посчиталась, но
+// не нарисовалась» они не увидят.
+void CheckSageUI(UIRenderer& renderer) {
+    const char* shots = std::getenv("SAGE_UI_DEMO_SHOTS");
+    namespace sui = ui::sui;
+
+    sui::UIContext gui;
+    gui.InstallEngineResources();
+    gui.SetPixelPerfect();
+    gui.SetScreen({1280.0f, 720.0f});
+
+    // Верхняя панель — как в редакторе.
+    sui::Panel* top = gui.CreateIn<sui::Panel>(gui.Content());
+    top->SetName("TopBar");
+    top->SetAnchor({0.0f, 0.0f}, {1.0f, 0.0f})->SetPivot({0.0f, 0.0f});
+    top->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
+    top->SetHeight(34.0f);
+    top->Horizontal(6.0f)->Padding(ui::UIEdges(8.0f, 5.0f, 8.0f, 5.0f));
+    for (const char* name : {"Файл", "Правка", "Объект", "Окно"})
+        gui.CreateIn<sui::Button>(top, std::string(name), std::string())->SetSize({82.0f, 24.0f});
+
+    // Док на всё остальное.
+    sui::DockSpace* dock = gui.CreateIn<sui::DockSpace>(gui.Content());
+    dock->SetAnchor({0.0f, 0.0f}, {1.0f, 1.0f})->SetPivot({0.0f, 0.0f});
+    dock->Ensure<ui::UITransform>().Margin = ui::UIEdges(0.0f, 34.0f, 0.0f, 0.0f);
+
+    sui::DockPanel* viewport = dock->Add(
+        gui.Create<sui::DockPanel>(std::string("viewport"), std::string("Сцена")));
+    dock->Add(gui.Create<sui::DockPanel>(std::string("game"), std::string("Игра")),
+              sui::DockSide::Center, "viewport");
+    sui::DockPanel* hierarchy = dock->Add(
+        gui.Create<sui::DockPanel>(std::string("hierarchy"), std::string("Иерархия")),
+        sui::DockSide::Left, "viewport");
+    sui::DockPanel* inspector = dock->Add(
+        gui.Create<sui::DockPanel>(std::string("inspector"), std::string("Инспектор")),
+        sui::DockSide::Right, "viewport");
+    dock->Add(gui.Create<sui::DockPanel>(std::string("console"), std::string("Консоль")),
+              sui::DockSide::Bottom, "viewport");
+    dock->Add(gui.Create<sui::DockPanel>(std::string("assets"), std::string("Ассеты")),
+              sui::DockSide::Center, "console");
+
+    // Содержимое: иерархия — список, инспектор — поля.
+    for (const char* name : {"Main Camera", "Sun", "Ground", "Player", "Lamp"}) {
+        sui::Label* row = gui.CreateIn<sui::Label>(hierarchy->Body(), std::string(name));
+        row->SetAlign(ui::UITextAlign::Left, ui::UITextVAlign::Center);
+    }
+    gui.CreateIn<sui::Label>(inspector->Body(), std::string("Transform"))->SetFontSize(15.0f);
+    gui.CreateIn<sui::TextInput>(inspector->Body(), std::string("0.0"), std::string("x"));
+    gui.CreateIn<sui::Slider>(inspector->Body(), 0.65f, 0.0f, 1.0f)
+        ->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
+    gui.CreateIn<sui::Checkbox>(inspector->Body(), std::string("Отбрасывает тень"), true);
+    gui.CreateIn<sui::ProgressBar>(inspector->Body(), 0.4f)
+        ->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
+
+    // Плавающее окно и открытое меню — поверх дока.
+    sui::Window* win = gui.CreateIn<sui::Window>(gui.Layer(sui::UILayer::Overlay),
+                                                 std::string("Профайлер"));
+    win->SetPosition({860.0f, 430.0f})->SetSize({330.0f, 200.0f});
+    gui.CreateIn<sui::Label>(win->Body(), std::string("кадр 4.2 мс"));
+    gui.CreateIn<sui::ProgressBar>(win->Body(), 0.42f)
+        ->Ensure<ui::UITransform>().WidthMode = ui::UISizeMode::Stretch;
+
+    sui::Popup* menu = gui.Create<sui::Popup>();
+    menu->AddItem("Создать объект", nullptr);
+    menu->AddItem("Дублировать", nullptr);
+    menu->AddSeparator();
+    menu->AddItem("Удалить", nullptr);
+    menu->OpenAt({150.0f, 120.0f});
+
+    // Два кадра: дерево дока пересобирается по модели к следующему кадру, и
+    // меню узнаёт свой размер только после первой раскладки.
+    gui.SetScreen({1280.0f, 720.0f});
+    gui.Update(0.016f);
+    gui.Update(0.016f);
+
+    Framebuffer fbo(1280, 720);
+    fbo.Bind();
+    sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
+    dev.SetClearColor(0.055f, 0.06f, 0.075f, 1.0f);
+    dev.Clear(true, true);
+    gui.Render(renderer, &fbo);
+    const Image img = Capture(1280, 720);
+    dev.BindDefaultFramebuffer();
+
+    const double covered = Covered(img, 0, 0, 1280, 720);
+    std::printf("    SageUI: закрашено %.2f, панелей %zu\n", covered, dock->PanelIds().size());
+
+    Check(covered > 0.9, "SageUI: экран редактора нарисован");
+    // Каждая область получила НЕНУЛЕВЫЕ пиксели: раскладка дока доехала до
+    // экрана, а не осталась числами в модели.
+    Check(hierarchy->Bounds().w > 40.0f, "SageUI: область иерархии на экране");
+    Check(inspector->Bounds().w > 40.0f, "SageUI: область инспектора на экране");
+    // Активная вкладка области «Сцена/Игра» — вторая: проверяем ЕЁ. Неактивная
+    // панель стоит на стоянке и прямоугольника не имеет — это не ошибка, а
+    // ровно то, ради чего вкладки и нужны.
+    Check(dock->Find("game")->Bounds().w > 40.0f, "SageUI: область сцены на экране");
+    (void)viewport;
+    Check(win->Bounds().w > 40.0f, "SageUI: плавающее окно на экране");
+    Check(menu->Bounds().h > 40.0f, "SageUI: меню раскрылось");
+    // Меню лежит В СЛОЕ Popup, то есть поверх дока и поверх окна.
+    const ui::UIResolvedNode* mr = gui.Runtime().Layout().Get(menu->NodeId());
+    const ui::UIResolvedNode* wr = gui.Runtime().Layout().Get(win->NodeId());
+    Check(mr && wr && mr->SortKey > wr->SortKey, "SageUI: меню поверх окна");
+
+    if (shots) SavePng(std::string(shots) + "/sageui_editor.png", img);
+}
+
 } // namespace
 
 void RunUICoreChecks() {
@@ -476,6 +588,7 @@ void RunUICoreChecks() {
     CheckBlurCompositing(renderer);
     CheckShowcaseFrame(renderer);
     CheckDemoScreens(renderer);
+    CheckSageUI(renderer);
 }
 
 } // namespace sage::rendertest
