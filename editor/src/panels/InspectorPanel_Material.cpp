@@ -72,7 +72,7 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
         // Материал держит СВОИ указатели на текстуры: без пересборки картинка в
         // слоте новая, а объект в сцене остаётся со старой.
         if (std::shared_ptr<Material> mat =
-                ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string())) {
+                ResourceManager::Instance().GetMaterial(host.InspectedAssetPath().string())) {
             ResourceManager::Instance().ResolveMaterialTextures(*mat);
         }
     }
@@ -98,7 +98,7 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
 }
 
 void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
-    std::string pathStr = host.SelectedAssetPath().string();
+    std::string pathStr = host.InspectedAssetPath().string();
     std::shared_ptr<Material> material = ResourceManager::Instance().GetMaterial(pathStr);
 
     // Файл мог не прочитаться (удалён, битый JSON) — тогда весь редактор ниже
@@ -240,7 +240,7 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 // нормализация в сайдкар .sageimport. Reimport перечитывает меш и обновляет все
 // сущности сцены, использующие эту модель.
 void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
-    std::string path = host.SelectedAssetPath().string();
+    std::string path = host.InspectedAssetPath().string();
     ModelLoader::ImportSettings s = ModelLoader::LoadImportSettings(path);
     ImGui::DragFloat(T("Import Scale"), &s.Scale, 0.01f, 0.001f, 1000.0f);
     ImGui::Checkbox(T("Recenter (AABB -> origin)"), &s.Recenter);
@@ -258,7 +258,7 @@ void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
                 MeshRendererComponent& mr = view.get<MeshRendererComponent>(e);
                 if (mr.Ref.type == MeshRef::Type::Model && mr.Ref.path == path) mr.MeshPtr = mesh;
             }
-            host.SetStatusMessage("Reimported: " + host.SelectedAssetPath().filename().string());
+            host.SetStatusMessage("Reimported: " + host.InspectedAssetPath().filename().string());
         }
     }
     ImGui::TextDisabled("%s", T("Baked into the mesh on load — affects editor and built game"));
@@ -417,7 +417,7 @@ void InspectorPanel::CreateMaterialForObject(EditorHost& host, MeshRendererCompo
     // Имя — по объекту: «Red Cube» -> Red Cube.sagemat. Так в панели ассетов
     // видно, чей это материал, без открытия файла.
     std::string name = "Material";
-    if (GameObject sel = host.SelectedObject(); sel.Valid()) name = sel.Name();
+    if (GameObject sel = host.InspectedObject(); sel.Valid()) name = sel.Name();
     for (char& c : name) {
         if (std::string("/\\:*?\"<>|").find(c) != std::string::npos) c = '_';
     }

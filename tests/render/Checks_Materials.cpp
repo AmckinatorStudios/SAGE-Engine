@@ -397,6 +397,78 @@ void TestAlbedoMapAndTiling(FrameRenderer& r) {
 
 } // namespace
 
+// --- Карта, назначенная ПОСЛЕ загрузки материала ---------------------------
+//
+// Из отчёта человека: он назначает текстуру в слот материала и получает под
+// слотом красное «Не удалось загрузить» — при том, что обложка ЭТОЙ ЖЕ
+// текстуры в том же слоте прекрасно видна. Противоречие объясняется просто:
+// обложка грузится по ПУТИ, а материал рисуется по УКАЗАТЕЛЮ, и указатель
+// собирался ровно один раз — при первой загрузке материала. Дальше путь мог
+// меняться сколько угодно: перетаскиванием, кнопкой «Обзор…», очисткой слота,
+// скриптом, импортом материалов модели, — а указатель оставался прежним.
+//
+// Правило «поменял путь — перерезолвь» тут и не сработало: путь через
+// перетаскивание его помнил, путь через «Обзор…» — нет.
+void TestTextureAssignedAfterLoadReachesTheMaterial() {
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "sage_mat_latetex";
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+
+    // Две ЗАМЕТНО разные картинки: по цвету видно, какая из них доехала.
+    Image red, blue;
+    red.Width = red.Height = 4;
+    blue.Width = blue.Height = 4;
+    red.Pixels.assign(4 * 4 * 3, 0);
+    blue.Pixels.assign(4 * 4 * 3, 0);
+    for (int i = 0; i < 4 * 4; ++i) {
+        red.Pixels[(size_t)i * 3 + 0] = 220; red.Pixels[(size_t)i * 3 + 1] = 20;
+        red.Pixels[(size_t)i * 3 + 2] = 20;
+        blue.Pixels[(size_t)i * 3 + 0] = 20; blue.Pixels[(size_t)i * 3 + 1] = 20;
+        blue.Pixels[(size_t)i * 3 + 2] = 220;
+    }
+    const fs::path redFile = dir / "red.png";
+    const fs::path blueFile = dir / "blue.png";
+    if (!SavePng(redFile.string(), red) || !SavePng(blueFile.string(), blue)) {
+        std::printf("       не удалось записать картинки — проверка пропущена\n");
+        CountFail();
+        return;
+    }
+
+    // Материал на диске БЕЗ карт — как только что созданный «New Material».
+    const fs::path matFile = dir / "late.sagemat";
+    { std::ofstream f(matFile); f << R"({"albedo":[1,1,1],"metallic":0,"roughness":0.8})"; }
+
+    ResourceManager& rm = ResourceManager::Instance();
+    std::shared_ptr<Material> mat = rm.GetMaterial(matFile.string());
+    Check(mat != nullptr, "материал прочитался");
+    if (!mat) { fs::remove_all(dir, ec); return; }
+    Check(mat->AlbedoTex == nullptr, "карт у нового материала нет");
+
+    // Ровно то, что делает кнопка «Обзор…»: путь записан в поле материала, и
+    // больше ничего.
+    mat->TexturePath = redFile.string();
+    std::shared_ptr<Material> again = rm.GetMaterial(matFile.string());
+    Check(again == mat, "материал тот же самый");
+    Check(again->AlbedoTex != nullptr, "назначенная карта доехала до материала");
+
+    // И смена карты на другую — тоже: устаревшим считается любой разошедшийся
+    // путь, а не только «был пустым».
+    const std::shared_ptr<Texture> first = again->AlbedoTex;
+    again->TexturePath = blueFile.string();
+    std::shared_ptr<Material> third = rm.GetMaterial(matFile.string());
+    Check(third->AlbedoTex != nullptr && third->AlbedoTex != first,
+          "смена карты доезжает тоже");
+
+    // Очистка слота — обратная сторона того же: пустой путь обязан снять карту,
+    // иначе «Очистить» ничего не делает.
+    third->TexturePath.clear();
+    Check(rm.GetMaterial(matFile.string())->AlbedoTex == nullptr, "очистка слота снимает карту");
+
+    rm.Clear();
+    fs::remove_all(dir, ec);
+}
+
 void RunMaterialChecks(FrameRenderer& r) {
     TestMaterialPaintsAndUpdatesLive(r);
     TestEditingByAnotherSpellingReachesTheObject(r);
@@ -405,6 +477,7 @@ void RunMaterialChecks(FrameRenderer& r) {
     TestSaveReloadKeepsTheLook(r);
     TestEmissiveShows(r);
     TestAlbedoMapAndTiling(r);
+    TestTextureAssignedAfterLoadReachesTheMaterial();
 }
 
 } // namespace sage::rendertest

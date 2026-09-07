@@ -6,6 +6,7 @@
 
 #include "sage/render/ModelMaterial.h"
 
+#include "sage/assets/AssetDatabase.h"
 #include "sage/assets/import/Importer.h"
 
 #include <algorithm>
@@ -414,8 +415,18 @@ void ExtractFbx(const std::string& modelPath, ExtractedMaterialSet& set) {
     }
 }
 
-ExtractedMaterialSet ExtractMaterials(const std::string& modelPath, const std::string& textureDir) {
+ExtractedMaterialSet ExtractMaterials(const std::string& ref, const std::string& textureDir) {
     ExtractedMaterialSet out;
+
+    // ССЫЛКА ПРОЕКТА -> ПУТЬ, КОТОРЫЙ ОТКРОЕТСЯ. Сущность и обложка держат путь
+    // относительно проекта («low_poly_environment/scene.gltf»), а открывается
+    // он относительно каталога, ИЗ КОТОРОГО ЗАПУЩЕН редактор, — то есть из
+    // папки с exe. У человека это Downloads\SageEditor-Windows, а проект лежит
+    // в Documents\SAGE Projects\MyGame, и разбор материалов честно сообщал
+    // «файл модели не найден» о файле, который прекрасно виден в Assets:
+    // геометрию грузил ResourceManager (он через LocatePath ходит с самого
+    // начала), а материалы — этот разбор, мимо неё.
+    const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(ref);
 
     std::error_code ec;
     if (!fs::exists(modelPath, ec)) {

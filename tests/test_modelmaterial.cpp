@@ -10,6 +10,7 @@
 #include "TestFramework.h"
 
 #include "sage/render/ModelMaterial.h"
+#include "sage/assets/AssetDatabase.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -265,3 +266,45 @@ void WritePixelPng(const fs::path& p, unsigned char r, unsigned char g, unsigned
     f.write((const char*)png.data(), (std::streamsize)png.size());
 }
 } // namespace
+
+// ---------------------------------------------------------------------------
+// МОДЕЛЬ, ЛЕЖАЩАЯ В ПРОЕКТЕ, А НЕ В ТЕКУЩЕМ КАТАЛОГЕ ПРОЦЕССА
+//
+// Из отчёта человека, дословно из его лога:
+//
+//   [Editor] Внесена папка: C:\...\SAGE Projects\MyGame\low_poly_environment
+//   [Model] low_poly_environment/scene.gltf: файл модели не найден:
+//           low_poly_environment/scene.gltf
+//
+// Папка с моделью лежала в проекте, геометрия рисовалась (обложка в Assets
+// показывала модель), а материалы «не находились» — потому что путь к модели
+// здесь брался КАК ЕСТЬ и открывался относительно каталога, из которого
+// запущен редактор (C:\...\Downloads\SageEditor-Windows). Всё остальное в
+// движке давно ходит через AssetDatabase::LocatePath — и только разбор
+// материалов ходил мимо.
+//
+// Проверка воспроизводит ровно это: проект в одном месте, текущий каталог — в
+// другом, ссылка на модель относительная.
+TEST(model_material_resolves_a_project_relative_path) {
+    const fs::path project = TempDir("sage_test_modelmat_project");
+    const fs::path inner = project / "low_poly_environment";
+    std::error_code ec;
+    fs::create_directories(inner, ec);
+    WriteText(inner / "scene.gltf", kGltfTemplate);
+    WriteGeomBin(inner / "geom.bin");
+    WritePixelPng(inner / "base.png", 200, 100, 50);
+    WritePixelPng(inner / "orm.png", 10, 120, 240);
+
+    sage::AssetDatabase::Instance().ScanProject(project.string());
+
+    // Ровно та строка, которую держит MeshRendererComponent::Ref.path.
+    const ModelLoader::ExtractedMaterial m =
+        ModelLoader::ExtractMaterial("low_poly_environment/scene.gltf");
+    CHECK_TRUE(m.Found);
+    CHECK_EQ(m.Name, std::string("Ржавое железо"));
+    // И карты найдены рядом с моделью, а не «где-то относительно процесса».
+    CHECK_TRUE(m.AlbedoMap.find("base.png") != std::string::npos);
+    // Путь не просто похож на правильный — по нему ОТКРЫВАЕТСЯ файл. Ссылка,
+    // которую нельзя открыть, и есть «Не удалось загрузить» в слоте материала.
+    CHECK_TRUE(FirstPixel(m.AlbedoMap) >= 0);
+}
