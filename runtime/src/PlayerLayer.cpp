@@ -1,6 +1,7 @@
 #include "PlayerLayer.h"
 
 #include "sage/audio/AudioSystem.h"
+#include "sage/render/SkyDraw.h"
 #include "sage/render/DebugView.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Paths.h"
@@ -809,13 +810,8 @@ void PlayerLayer::OnRender() {
         if (m_sky) {
             // Настоящее небо сцены (набор граней), если оно задано, — иначе
             // отражение показывало бы градиент вместо того, что видно в кадре.
-            std::shared_ptr<Skybox> skyAsset;
-            const Skybox* cubemap = nullptr;
-            if (env.Skybox.HasCubemap()) {
-                skyAsset = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir);
-                cubemap = skyAsset.get();
-            }
-            m_reflections.UpdateSky(*m_sky, env, cubemap);
+            std::shared_ptr<Skybox> skyAsset = sage::render::SceneSkyCubemap(env);
+            m_reflections.UpdateSky(*m_sky, env, skyAsset.get());
         }
 
         // Зонды сцены: не больше одного за кадр (шесть проходов геометрии).
@@ -826,8 +822,7 @@ void PlayerLayer::OnRender() {
                     device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                     device.Clear(true, true);
                     if (m_sky && env.Skybox.Enabled)
-                        m_sky->Draw(v, p, env.Skybox.TopColor, env.Skybox.HorizonColor,
-                                    CelestialsFromEnvironment(env));
+                        sage::render::DrawSceneSky(*m_sky, env, v, p);
                     sage::render::SceneColorInput c;
                     c.View = v;
                     c.Proj = p;
@@ -915,8 +910,7 @@ void PlayerLayer::OnRender() {
                                  const glm::vec3 mirrorEye =
                                      glm::vec3(glm::inverse(mv)[3]);
                                  if (m_sky && env.Skybox.Enabled)
-                                     m_sky->Draw(mv, mp, env.Skybox.TopColor, env.Skybox.HorizonColor,
-                                                 CelestialsFromEnvironment(env));
+                                     sage::render::DrawSceneSky(*m_sky, env, mv, mp);
                                  sage::render::SceneColorInput rc;
                                  rc.View = mv;
                                  rc.Proj = mp;
@@ -1004,8 +998,7 @@ void PlayerLayer::OnRender() {
         }
 
         if (env.Skybox.Enabled) {
-            m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
-                        CelestialsFromEnvironment(env));
+            sage::render::DrawSceneSky(*m_sky, env, view, proj);
         }
 
         // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.

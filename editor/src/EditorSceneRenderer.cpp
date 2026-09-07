@@ -17,6 +17,7 @@
 #include "sage/core/Config.h"
 #include "sage/render/DebugView.h"
 #include "sage/render/ScenePasses.h"
+#include "sage/render/SkyDraw.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ResourceManager.h"
@@ -55,17 +56,11 @@ sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::Engin
 // окно игры легко разъезжаются по фону.
 void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat4& view,
                                   const glm::mat4& proj) {
-    if (!env.Skybox.Enabled) return;
-    if (env.Skybox.HasCubemap()) {
-        if (std::shared_ptr<Skybox> sky = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir)) {
-            sky->Draw(view, proj, env.Skybox.Intensity, env.Skybox.RotationDeg);
-            return;
-        }
-        // Каталог задан, но не читается — падать на этом нельзя, поэтому
-        // молча остаёмся на градиенте (причина уже в логе от ResourceManager).
-    }
-    m_sky->Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor,
-                CelestialsFromEnvironment(env));
+    // Выбор режима неба, запасной путь и цвета по времени суток — общие для
+    // всего движка (sage/render/SkyDraw.h). Своя копия здесь означала бы, что
+    // вьюпорт, панель Game и собранная игра показывают разное небо, стоит
+    // появиться новому режиму.
+    sage::render::DrawSceneSky(*m_sky, env, view, proj);
 }
 
 void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnvironment& env) {
@@ -78,12 +73,8 @@ void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnviron
 
     // Небо: если у сцены задан набор граней, отражается ОН, а не процедурный
     // градиент — иначе вода отражала бы совсем другое небо, чем видно в кадре.
-    const Skybox* cubemap = nullptr;
-    std::shared_ptr<Skybox> skyAsset;
-    if (env.Skybox.HasCubemap()) {
-        skyAsset = ResourceManager::Instance().GetSkybox(env.Skybox.CubemapDir);
-        cubemap = skyAsset.get();
-    }
+    std::shared_ptr<Skybox> skyAsset = sage::render::SceneSkyCubemap(env);
+    const Skybox* cubemap = skyAsset.get();
     if (m_sky) m_reflections.UpdateSky(*m_sky, env, cubemap);
 
     // Зонды: не больше одного за кадр. Съёмка — это шесть проходов сцены, и

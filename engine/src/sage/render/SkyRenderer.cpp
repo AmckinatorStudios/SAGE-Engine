@@ -51,6 +51,7 @@ uniform float uMoon;
 uniform vec3 uMoonColor;
 uniform float uMoonSize;
 uniform float uStars;
+uniform float uDay;   // 1 день, 0 ночь — по нему гаснут звёзды и бледнеет луна
 void main() {
     float y = normalize(vDir).y;
     float t = clamp(y, 0.0, 1.0);            // 0 у горизонта и ниже, 1 в зените
@@ -85,7 +86,11 @@ void main() {
         // Ореол вокруг диска: без него солнце выглядит наклейкой на небе.
         float sunGlow = pow(max(0.0, sunCos), 220.0) * 0.6
                       + pow(max(0.0, sunCos), 12.0) * 0.10;
-        col += uSunColor * (sunDisk * 6.0 + sunGlow);
+        // Диск и ореол гаснут вместе с солнцем: ушедшее за горизонт светило
+        // не имеет права продолжать светить в кадре той же яркостью. Полностью
+        // ноль не берём — у самого горизонта диск ещё виден, и это закат.
+        float sunVisible = smoothstep(-0.12, 0.06, uSunDir.y);
+        col += uSunColor * (sunDisk * 6.0 + sunGlow) * sunVisible;
 
         if (uMoon > 0.5) {
             float moonCos = dot(dir, -uSunDir);
@@ -95,7 +100,12 @@ void main() {
             vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), -uSunDir) + vec3(1e-5));
             float phase = smoothstep(-0.25, 0.35, dot(dir - (-uSunDir), east) / max(uMoonSize, 1e-4));
             float moonGlow = pow(max(0.0, moonCos), 400.0) * 0.25;
-            col += uMoonColor * (moonDisk * mix(0.15, 1.6, phase) + moonGlow) * uStars;
+            // ЯРКОСТЬ ЛУНЫ — ПО ВРЕМЕНИ СУТОК, А НЕ ПО ЗВЁЗДАМ. Здесь стоял
+            // множитель uStars: выключил звёзды — пропала и луна, хотя это
+            // разные вещи и настройка у них разная. Днём луна видна бледным
+            // диском (так и в жизни), ночью светит в полную силу.
+            float moonVisible = mix(1.0, 0.25, uDay);
+            col += uMoonColor * (moonDisk * mix(0.15, 1.6, phase) + moonGlow) * moonVisible;
         }
 
         // Звёзды — только там, где темно, и только ночью. Шум по направлению
@@ -118,10 +128,19 @@ void main() {
 SkyCelestials CelestialsFromEnvironment(const LightingEnvironment& env) {
     SkyCelestials c;
     c.Enabled = env.Skybox.Celestials;
-    // У направленного света хранится, КУДА он светит; нарисовать солнце надо
-    // там, ОТКУДА — то есть в противоположной стороне.
-    const glm::vec3 d = env.Sun.Direction;
-    c.SunDir = glm::length(d) > 1e-6f ? -glm::normalize(d) : glm::vec3(0.0f, 1.0f, 0.0f);
+    // Направление НА СОЛНЦЕ берётся из разрешённого состояния кадра, а не из
+    // env.Sun: ночью в слоте солнца лежит ЛУНА (см. SkyModel.h), и диск солнца
+    // уехал бы вслед за ней — то есть всходил бы на западе.
+    if (env.SkyResolved && glm::length(env.SkySunDirection) > 1e-6f) {
+        c.SunDir = glm::normalize(env.SkySunDirection);
+    } else {
+        // Состояние кадра не посчитано (окружение собрано кодом, без ApplySky).
+        // Тогда — как раньше: у направленного света хранится, КУДА он светит, а
+        // нарисовать надо там, ОТКУДА.
+        const glm::vec3 d = env.Sun.Direction;
+        c.SunDir = glm::length(d) > 1e-6f ? -glm::normalize(d) : glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+    c.DayFactor = env.DayFactor;
     c.SunColor = env.Skybox.SunColor;
     c.SunSize = env.Skybox.SunSize;
     c.Moon = env.Skybox.Moon;
@@ -158,10 +177,13 @@ void SkyRenderer::Draw(const glm::mat4& view, const glm::mat4& proj,
     m_shader->SetFloat("uMoon", sky.Moon ? 1.0f : 0.0f);
     m_shader->SetVec3("uMoonColor", sky.MoonColor);
     m_shader->SetFloat("uMoonSize", sky.MoonSize);
-    // Звёзды и луна проступают по мере ухода солнца под горизонт. Считается
-    // здесь, а не в игре: это свойство неба, а не игровой логики.
-    const float night = glm::clamp(-sunDir.y * 4.0f + 0.25f, 0.0f, 1.0f);
-    m_shader->SetFloat("uStars", night * sky.StarIntensity);
+    // Звёзды проступают по мере ухода солнца. Множитель приходит СНАРУЖИ, из
+    // общей модели времени суток (sage/render/SkyModel.h): раньше небо считало
+    // «сколько сейчас ночи» само, отдельной формулой, и его представление о
+    // времени расходилось с тем, по которому темнело освещение сцены. Одно
+    // время суток на кадр — одно место, где оно считается.
+    m_shader->SetFloat("uDay", sky.DayFactor);
+    m_shader->SetFloat("uStars", (1.0f - sky.DayFactor) * sky.StarIntensity);
 
     // Небо — фон: без теста и записи глубины, без отсечения. Рисуется первым,
     // сцена ложится поверх по своей глубине.

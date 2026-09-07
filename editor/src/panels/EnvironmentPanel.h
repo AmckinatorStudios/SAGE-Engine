@@ -5,6 +5,8 @@
 #include <string>
 #include <thread>
 
+#include "../FileBrowser.h"
+
 #include "sage/gi/GI.h"
 
 class EditorHost;
@@ -43,8 +45,21 @@ public:
 
 private:
     void DrawGISection(EditorHost& host);
-    void DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env);
+    // Небо: режим (процедурное / кубическая карта / шесть граней) и его
+    // настройки. Солнце и луна показываются только у процедурного — у
+    // текстурного неба они запечены в самих гранях, и ползунок «размер солнца»
+    // там означал бы, что настройка есть, а действия у неё нет.
+    void DrawSkySection(EditorHost& host, LightingEnvironment& env);
+    // Окружающий свет: от неба или свои значения.
+    void DrawAmbientSection(EditorHost& host, LightingEnvironment& env);
+    // Строка про объект-солнце внутри настроек процедурного неба: время суток
+    // задаётся его поворотом, и добраться до него надо отсюда одним нажатием.
+    void DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env);
     void StartBake(EditorHost& host, const sage::gi::GISettings& settings);
+
+    FileBrowser m_browser;
+    // Что именно выбирают в открытом диалоге: -1 — каталог неба, 0..5 — грань.
+    int m_skyPick = -2;
 
     std::thread m_bakeThread;
     std::atomic<bool> m_bakeRunning{false};

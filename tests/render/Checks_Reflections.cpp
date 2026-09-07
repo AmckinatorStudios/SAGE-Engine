@@ -242,6 +242,59 @@ void TestReflections(FrameRenderer& r) {
 // симметричной сцене этого не видно вовсе. Поэтому сцена намеренно
 // НЕсимметрична — ярко-красная стена стоит ровно с одной стороны, и тест
 // требует, чтобы она отразилась именно с той стороны шара.
+// --- Отражение обязано жить по тому же времени суток, что и кадр ------------
+//
+// Куб окружения снимался АВТОРСКИМИ цветами неба, и ключ его кэша состоял из
+// них же. Оба следствия одинаково плохи: ночью вода отражала полуденное небо —
+// то есть светилась ярче всего вокруг, — и пересъёмку это не вызывало НИ РАЗУ
+// за весь заход солнца, потому что авторские поля при этом не меняются.
+//
+// Проверка снимает два кадра ОДНОЙ системой отражений: сначала днём, потом,
+// опустив солнце, ночью. Если ключ кэша слеп ко времени суток, второй кадр
+// придёт с первым кубом — и шар останется дневным.
+void TestReflectionFollowsTimeOfDay(FrameRenderer& r) {
+    std::printf("=== Отражения: время суток ===\n");
+    SkyRenderer sky;
+    auto mirror = MakeReflectionScene(0.05f, 1.0f);
+    // Зеркальный металл берёт цвет почти целиком из карты окружения, поэтому
+    // на нём видно именно её, а не общее потемнение сцены.
+    sage::render::ReflectionSystem reflect;
+
+    const glm::vec3 up = glm::normalize(glm::vec3(-0.35f, -1.0f, -0.4f));   // солнце в небе
+    mirror->Lighting.Sun.Direction = up;
+    const Image day = RenderReflected(r, *mirror, &reflect, sky, kW, kH);
+    mirror->Lighting.Sun.Direction = -up;                                   // солнце село
+    const Image night = RenderReflected(r, *mirror, &reflect, sky, kW, kH);
+
+    // Область шара берётся по ДНЕВНОМУ кадру: ночью он темнеет, и порог
+    // «ярче фона» отрезал бы как раз то, что мы собрались мерить.
+    long long n = 0;
+    double dayLuma = 0.0, nightLuma = 0.0, dayWarm = 0.0, nightWarm = 0.0;
+    for (int y = 0; y < day.Height; ++y)
+        for (int x = 0; x < day.Width; ++x) {
+            int dr, dg, db;
+            if (!BallPixel(day, x, y, dr, dg, db)) continue;
+            const size_t i = ((size_t)y * day.Width + x) * 3;
+            const int nr = night.Pixels[i], ng = night.Pixels[i + 1], nb = night.Pixels[i + 2];
+            dayLuma += 0.2126 * dr + 0.7152 * dg + 0.0722 * db;
+            nightLuma += 0.2126 * nr + 0.7152 * ng + 0.0722 * nb;
+            dayWarm += dr - db;
+            nightWarm += nr - nb;
+            ++n;
+        }
+    Check(n > 200, "шар найден в кадре");
+    if (n == 0) return;
+    dayLuma /= (double)n; nightLuma /= (double)n;
+    dayWarm /= (double)n; nightWarm /= (double)n;
+    std::printf("       на шаре: день яркость %.1f тепло %.1f, ночь яркость %.1f тепло %.1f\n",
+                dayLuma, dayWarm, nightLuma, nightWarm);
+
+    Check(nightLuma < dayLuma * 0.5, "ночью отражение темнеет вместе с небом");
+    // Оранжевый горизонт — самая заметная примета дневного неба на шаре. Ночью
+    // его быть не должно: это и есть «кэш переснялся».
+    Check(nightWarm < dayWarm - 15.0, "ночью на шаре нет дневного горизонта");
+}
+
 void TestReflectionProbe(FrameRenderer& r) {
     std::printf("=== Отражения: зонд снимает сцену ===\n");
 
@@ -709,6 +762,7 @@ void TestPlanarReflectionMath() {
 void RunReflectionChecks(FrameRenderer& r) {
     TestLensFlare(r);
     TestReflections(r);
+    TestReflectionFollowsTimeOfDay(r);
     TestReflectionProbe(r);
     TestReflectionSeams();
     TestPlanarReflectionMath();
