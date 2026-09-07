@@ -38,4 +38,5 @@
 #include "sage/render/ReflectionComponents.h"  // зонды отражений
 #include "sage/ui/UI.h"                        // элементы интерфейса сцены (компоненты)
 #include "sage/render/ParticleComponents.h"    // эмиттеры частиц
+#include "sage/audio/AudioComponents.h"       // источник звука на объекте
 #include "sage/net/NetComponents.h"         // участие в сетевой репликации

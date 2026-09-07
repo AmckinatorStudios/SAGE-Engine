@@ -164,7 +164,13 @@ private:
     }
 
     void EndBatch() {
-        sage::rhi::GraphicsDevice::Get().SetDepthWrite(true);
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetDepthWrite(true);
+        // Смешивание поднял BeginBatch — снимает его тот же проход. Оставленное
+        // включённым, оно утекает в пост-обработку, а та пишет в буферы,
+        // живущие между кадрами: кадр начинает подмешиваться к предыдущему и
+        // темнеть (см. тот же разбор в ParticleSystem::Draw).
+        device.SetBlend(false);
     }
 
     void SetupQuad() {

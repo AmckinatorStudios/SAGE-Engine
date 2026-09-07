@@ -256,6 +256,24 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
         // Ключ кэша остаётся путём к файлу — по нему же идут перезагрузка и
         // стриминг, и подмешивать в него настройки нельзя.
         if (it->second.Tex && (it->second.Filter != filter || it->second.Mipmaps != mipmaps)) {
+            // Перекидывать картинку туда-обратно нельзя: см. FilterFlips.
+            // После двух смен настройки остаётся та, что уже на видеокарте, а
+            // причина — в лог, ОДИН раз и с именем файла: иначе «редактор
+            // просел на ровном месте» ищется по всему рендеру, хотя ответ в
+            // одной строке.
+            constexpr int kMaxFilterFlips = 2;
+            if (it->second.FilterFlips >= kMaxFilterFlips) {
+                if (!it->second.FilterWarned) {
+                    it->second.FilterWarned = true;
+                    LOG_WARN("Resources")
+                        << "Текстура " << path
+                        << " запрашивается с разной фильтрацией из разных мест — оставлена та, "
+                           "что уже на видеокарте. Пересоздавать её каждый кадр дороже, чем "
+                           "разница в фильтрации.";
+                }
+                return it->second.Tex;
+            }
+            ++it->second.FilterFlips;
             try {
                 *it->second.Tex = Texture(Locate(path), filter, mipmaps);
                 m_textureBytes -= it->second.Bytes;
@@ -481,13 +499,30 @@ std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& pat
     return it->second;
 }
 
+// Карты материала — АНИЗОТРОПНЫЕ, а не трилинейные.
+//
+// Поддержка анизотропии в движке была с самого начала: и режим фильтрации, и
+// запрос лимита у драйвера, и применение в бэкенде. Не было одного — её никто
+// не просил: каждая карта грузилась трилинейной, потому что таково значение
+// параметра по умолчанию. То есть код работал вхолостую, а пол под острым
+// углом мылился на любой видеокарте — включая те, где резкость досталась бы
+// даром.
+//
+// Почему именно карты материала, а не все текстуры подряд: анизотропия имеет
+// смысл там, где поверхность видна ПОД УГЛОМ и сжата сильнее по одной оси, —
+// это пол, стены, дорога. Картинки интерфейса всегда фронтальны, и платить за
+// них нечем и незачем; пиксель-арт и вовсе грузится Nearest без мипмапов.
+//
+// Карта без расширения получает трилинейную фильтрацию сама (см.
+// EffectiveFilter в Texture.cpp) — запрос не отказывает, а опускается.
 void ResourceManager::ResolveMaterialTextures(Material& m) {
-    m.AlbedoTex = GetTexture(m.TexturePath);
-    m.NormalTex = GetTexture(m.NormalMapPath);
-    m.MetallicTex = GetTexture(m.MetallicMapPath);
-    m.RoughnessTex = GetTexture(m.RoughnessMapPath);
-    m.AOTex = GetTexture(m.AOMapPath);
-    m.EmissiveTex = GetTexture(m.EmissiveMap);
+    constexpr TextureFilter kSurface = TextureFilter::Anisotropic;
+    m.AlbedoTex = GetTexture(m.TexturePath, kSurface);
+    m.NormalTex = GetTexture(m.NormalMapPath, kSurface);
+    m.MetallicTex = GetTexture(m.MetallicMapPath, kSurface);
+    m.RoughnessTex = GetTexture(m.RoughnessMapPath, kSurface);
+    m.AOTex = GetTexture(m.AOMapPath, kSurface);
+    m.EmissiveTex = GetTexture(m.EmissiveMap, kSurface);
 }
 
 void ResourceManager::DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,

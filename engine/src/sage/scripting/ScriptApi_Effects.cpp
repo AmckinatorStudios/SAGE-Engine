@@ -1,4 +1,5 @@
 #include "ScriptEngine.h"
+#include "sage/audio/AudioComponents.h"
 
 #include "sage/core/Log.h"
 #include "sage/render/ParticlePresets.h"
@@ -125,6 +126,56 @@ void ScriptEngine::RegisterAudioApi() {
     Bind("audio", "SetMasterVolume", "SetMasterVolume", [this](float volume) {
         if (!m_audio) throw std::runtime_error("SetMasterVolume: аудио не привязано (ScriptEngine::BindAudio не вызван)");
         m_audio->SetMasterVolume(volume);
+    });
+
+    // --- Звук ОБЪЕКТА (компонент Audio) ------------------------------------
+    //
+    // Отличие от PlaySound3D не в удобстве: там скрипт обязан знать и путь к
+    // файлу, и координаты, и повторить их в каждом месте, откуда звук
+    // запускается. Здесь всё это уже стоит в сцене мышью, а скрипт говорит
+    // только КОГДА: `Audio.Play(door)`. Звук при этом едет за объектом сам —
+    // ровно поэтому у скрипта нет способа «забыть обновить позицию».
+    //
+    // Команда ставится компоненту, а к устройству идёт система кадра: у
+    // скрипта нет доступа к звуковому устройству, и заводить его ради одной
+    // кнопки значило бы дать каждому скрипту право глушить чужие звуки.
+    Bind("audio", "Play", "Play", [](GameObject obj) {
+        if (!obj.Valid()) throw std::runtime_error("Audio.Play: объект недействителен");
+        AudioSourceComponent* au = obj.Registry()->try_get<AudioSourceComponent>(obj.Entity());
+        if (!au) throw std::runtime_error("Audio.Play: у объекта нет компонента Audio");
+        au->Play();
+    });
+    Bind("audio", "Stop", "Stop", [](GameObject obj) {
+        if (!obj.Valid()) throw std::runtime_error("Audio.Stop: объект недействителен");
+        AudioSourceComponent* au = obj.Registry()->try_get<AudioSourceComponent>(obj.Entity());
+        if (!au) throw std::runtime_error("Audio.Stop: у объекта нет компонента Audio");
+        au->Stop();
+    });
+    Bind("audio", "IsPlaying", "IsPlaying", [](GameObject obj) {
+        if (!obj.Valid()) return false;
+        const AudioSourceComponent* au =
+            obj.Registry()->try_get<AudioSourceComponent>(obj.Entity());
+        return au && au->Playing;
+    });
+    // Громкость и высота — на живом звуке: система переносит их на звучащий
+    // экземпляр в том же кадре, поэтому «затихающий вдали мотор» пишется одной
+    // строкой в OnUpdate, а не перезапуском звука.
+    Bind("audio", "SetVolume", "SetVolume", [](GameObject obj, float volume) {
+        if (!obj.Valid()) return;
+        if (AudioSourceComponent* au = obj.Registry()->try_get<AudioSourceComponent>(obj.Entity()))
+            au->Volume = volume < 0.0f ? 0.0f : (volume > 1.0f ? 1.0f : volume);
+    });
+    Bind("audio", "SetPitch", "SetPitch", [](GameObject obj, float pitch) {
+        if (!obj.Valid()) return;
+        if (AudioSourceComponent* au = obj.Registry()->try_get<AudioSourceComponent>(obj.Entity()))
+            au->Pitch = pitch < 0.05f ? 0.05f : pitch;
+    });
+    // Сменить звук на лету: у двери «открыть» и «закрыть» — один источник и
+    // два файла, и заводить ради этого два компонента незачем.
+    Bind("audio", "SetClip", "SetClip", [](GameObject obj, const std::string& clip) {
+        if (!obj.Valid()) return;
+        if (AudioSourceComponent* au = obj.Registry()->try_get<AudioSourceComponent>(obj.Entity()))
+            au->Clip = clip;
     });
 }
 

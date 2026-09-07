@@ -43,6 +43,7 @@ add_executable(sage_tests
     test_lighting.cpp
     test_scripting_lifecycle.cpp
     test_fbx.cpp
+    test_audio.cpp
     test_bench.cpp
 )
 

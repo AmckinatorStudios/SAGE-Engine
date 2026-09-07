@@ -77,6 +77,7 @@ public:
     void Clear(bool color = true, bool depth = true) override;
     void BindDefaultFramebuffer() override;
     void SetBlend(bool enabled) override { m_state.Blend = enabled; }
+    bool BlendEnabled() const override { return m_state.Blend; }
     void SetDepthTest(bool enabled) override { m_state.DepthTest = enabled; }
     void SetDepthWrite(bool enabled) override { m_state.DepthWrite = enabled; }
     void SetDepthFunc(DepthFunc func) override { m_state.Depth = func; }

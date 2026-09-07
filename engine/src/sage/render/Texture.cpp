@@ -15,6 +15,24 @@ float Texture::MaxSupportedAnisotropy() {
     return GraphicsDevice::Get().MaxAnisotropy();
 }
 
+namespace {
+// Какую фильтрацию МОЖНО получить на этой машине.
+//
+// Анизотропия — расширение: на карте без него запрос молча превращается в
+// трилинейную, и лучше решить это ОДИН раз здесь, чем в каждом бэкенде и в
+// каждом месте, которое потом спросит «а какая фильтрация вышла». Заодно
+// пропадает ложь в ответе Filter(): он говорит про то, что есть, а не про то,
+// что просили.
+//
+// Анизотропия без мипмапов бессмысленна (ей нечего выбирать), поэтому такой
+// запрос тоже опускается.
+TextureFilter EffectiveFilter(TextureFilter want, bool mipmaps) {
+    if (want != TextureFilter::Anisotropic) return want;
+    if (!mipmaps) return TextureFilter::Trilinear;
+    return Texture::MaxSupportedAnisotropy() > 1.0f ? want : TextureFilter::Trilinear;
+}
+} // namespace
+
 Texture::Texture(const std::string& path, TextureFilter filter, bool generateMipmaps) {
     // Свой формат — своя ветка, и она ПЕРВАЯ: .sagetex это не картинка, stb его
     // не откроет, а сообщение «unknown image type» ничего бы не объяснило.
@@ -35,7 +53,9 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
     desc.Width = m_width;
     desc.Height = m_height;
     desc.Channels = m_channels;
+    filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
+    m_filter = filter;
     desc.GenerateMipmaps = generateMipmaps;
     m_hasMipmaps = generateMipmaps;
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, data);
@@ -78,9 +98,11 @@ bool Texture::LoadFromNative(const std::string& path, TextureFilter filter) {
     desc.Width = w;
     desc.Height = h;
     desc.Channels = 4;
-    desc.FilterMode = filter;
     desc.GenerateMipmaps = tex.Levels.size() > 1;
     m_hasMipmaps = desc.GenerateMipmaps;
+    filter = EffectiveFilter(filter, desc.GenerateMipmaps);
+    desc.FilterMode = filter;
+    m_filter = filter;
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, rgba.data());
     LOG_INFO("Texture") << "Текстура загружена: " << path << " (" << w << "x" << h
                         << ", свой формат, уровней " << tex.Levels.size() << ")";
@@ -120,7 +142,9 @@ Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, Texture
     desc.Width = width;
     desc.Height = height;
     desc.Channels = 4;
+    filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
+    m_filter = filter;
     desc.GenerateMipmaps = generateMipmaps;
     m_hasMipmaps = generateMipmaps;
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
@@ -137,7 +161,9 @@ void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int heig
     desc.Width = width;
     desc.Height = height;
     desc.Channels = 4;
+    filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
+    m_filter = filter;
     desc.GenerateMipmaps = generateMipmaps;
     // Пересоздание: старый rhi::Texture2D освобождается (unique_ptr), новый
     // занимает его место — GL-хендл заменяется на главном потоке.

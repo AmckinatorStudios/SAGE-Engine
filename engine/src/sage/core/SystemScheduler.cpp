@@ -1,5 +1,7 @@
 #include "sage/core/SystemScheduler.h"
 
+#include "sage/audio/AudioSystem.h"
+
 #include <algorithm>
 #include <chrono>
 #include <exception>
@@ -166,7 +168,17 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
     // надо окончательные — иначе панорама отстаёт от картинки на кадр.
     if (systems.Audio) {
         AudioEngine* audio = systems.Audio;
-        scheduler.Add(Stage::Effects, "audio", [audio](Scene&, float) { audio->Update(); }, 10);
+        scheduler.Add(Stage::Effects, "audio", [audio](Scene& scene, float) {
+            // Источники сцены (AudioSourceComponent) — здесь же, а не отдельной
+            // системой, и по той же причине: они читают мировые позиции, и
+            // читать их надо после того, как всё в кадре доехало на свои места.
+            // Отдельная система означала бы ещё одно место, которое обязан
+            // зарегистрировать КАЖДЫЙ потребитель движка, — а забывший её
+            // получил бы сцену, где звук просто не играет, без единого
+            // сообщения о причине.
+            sage::audio::Update(scene, *audio);
+            audio->Update();
+        }, 10);
     }
 }
 

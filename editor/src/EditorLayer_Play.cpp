@@ -13,6 +13,8 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+
+#include "sage/audio/AudioSystem.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -201,6 +203,14 @@ void EditorLayer::StartPlay() {
         // повторной регистрацией только заменилась бы сама на себя.
         core.Animation = false;
         sage::RegisterCoreSystems(m_systems, core);
+        // Звуковые источники сцены оживают вместе с игрой: у кого стоит «играть
+        // сразу» — зазвучал. Не в самой системе кадра, потому что «начать» это
+        // событие, а система кадра — про каждый кадр: иначе источник
+        // перезапускался бы шестьдесят раз в секунду.
+        if (m_playAudio) {
+            const int started = sage::audio::StartScene(*m_scene, *m_playAudio);
+            if (started > 0) LOG_INFO("Editor") << "Play: звуковых источников запущено: " << started;
+        }
     }
 
     m_playState = EditorPlayState::Playing;
@@ -285,6 +295,11 @@ void EditorLayer::StopPlay() {
     m_systems.Remove("scripts");
     m_systems.Remove("physics");
     m_systems.Remove("audio");
+    // Звук объекта не имеет права пережить остановку игры: сцена вернётся из
+    // снапшота, а шум водопада продолжал бы идти из точки, где водопада уже
+    // нет. Глушим ДО замены сцены — после неё компонентов с дескрипторами уже
+    // не существует, и остановить их будет нечем.
+    if (m_playAudio && m_scene) sage::audio::StopScene(*m_scene, *m_playAudio);
     m_playScripts.reset();
     m_playPhysics.reset();
     // Курсор возвращается человеку РАНЬШЕ всего остального: игра могла его

@@ -782,6 +782,74 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Звук объекта ------------------------------------------------------
+    //
+    // Слот тот же, что у меша и скрипта: файл выбирается мышью или бросается
+    // из дерева проекта. Печатать путь к .wav наизусть — ровно тот барьер,
+    // из-за которого звук в сценах не появлялся.
+    if (reg.all_of<AudioSourceComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader(T("Audio" "###Audio"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(obj.Entity())) {
+            const assetslot::Result r =
+                assetslot::Draw(host, "audioclip", assetslot::Kind::Audio, au->Clip, &m_preview,
+                                T("No sound attached"));
+            if (r.Changed) {
+                host.PushUndoSnapshot();
+                au->Clip = r.Path;
+            }
+            if (r.BrowseRequested) {
+                FileBrowser::Config c;
+                c.Title = T("Choose a sound");
+                c.Filters = assetslot::Extensions(assetslot::Kind::Audio);
+                c.FilterLabel = T("Sounds (*.wav, *.mp3, *.ogg)");
+                c.StartDir = host.CurrentProject().AssetsDir();
+                m_browser.Open(c);
+                m_browseTarget = nullptr;
+                m_browseAudioEntity = obj.Id();
+                m_browseIsShader = false;
+                m_browseIsMesh = false;
+                m_browseIsMaterial = false;
+            }
+
+            ImGui::DragFloat(T("Volume"), &au->Volume, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Pitch"), &au->Pitch, 0.01f, 0.25f, 4.0f); host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Loop"), &au->Loop); host.TrackLastImGuiItem();
+            ImGui::SameLine();
+            ImGui::Checkbox(T("Auto Play"), &au->AutoPlay); host.TrackLastImGuiItem();
+            ImGui::Checkbox(T("Spatial (3D)"), &au->Spatial); host.TrackLastImGuiItem();
+            if (au->Spatial) {
+                ImGui::DragFloat(T("Min Distance"), &au->MinDistance, 0.1f, 0.1f, 1000.0f);
+                host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Max Distance"), &au->MaxDistance, 0.5f, 0.2f, 5000.0f);
+                host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Rolloff"), &au->Rolloff, 0.05f, 0.0f, 10.0f);
+                host.TrackLastImGuiItem();
+            }
+            const char* kCategories[] = {T("Effects"), T("Music"), T("Ambience")};
+            int cat = (int)au->Category;
+            if (ImGui::Combo(T("Mix Group"), &cat, kCategories, 3)) {
+                host.PushUndoSnapshot();
+                au->Category = (AudioCategory)cat;
+            }
+
+            // Послушать ПРЯМО В РЕДАКТОРЕ, не запуская игру. Иначе подбор
+            // громкости и расстояний превращается в цикл «Play — послушал —
+            // Stop — поправил», по десятку секунд на каждую правку.
+            if (au->Clip.empty()) {
+                ImGui::TextDisabled("%s", T("Attach a sound file to preview it"));
+            } else if (au->Playing) {
+                if (EditorIcons::Button("stop", T("Stop"))) au->Stop();
+            } else {
+                if (EditorIcons::Button("play", T("Preview"))) au->Play();
+            }
+            if (ImGui::Button(T("Remove Audio"))) {
+                host.PushUndoSnapshot();
+                au->Stop();
+                reg.remove<AudioSourceComponent>(obj.Entity());
+            }
+        }
+    }
+
     if (reg.all_of<sage::ui::Transform>(obj.Entity()) &&
         EditorTheme::SectionHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawUIElement(host, obj);
@@ -881,6 +949,16 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // первом же Play в консоль летело «Скрипт не найден». Пустой слот
         // честно говорит «скрипт не прикреплён» и ждёт, когда в него бросят
         // файл.
+        // ЗВУК — ТАКОЕ ЖЕ СВОЙСТВО ПРЕДМЕТА, КАК ЕГО МЕШ.
+        //
+        // Звуковая подсистема в движке была полной с самого начала, а
+        // дотянуться до неё можно было ровно из скрипта. То есть чтобы у двери
+        // появился скрип, дверь обязана была обзавестись программистом, — и
+        // поэтому звука в сценах не было вовсе.
+        {"Audio", "Audio", "audio",
+         "Sound of this object: ambience, hum, one-shot", HasComp<AudioSourceComponent>,
+         AddComp<AudioSourceComponent>},
+
         {"Script", "Logic", "script",
          "Lua: OnStart and OnUpdate on this object", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},

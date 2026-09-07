@@ -4,6 +4,8 @@
 #include <vector>
 #include <glm/glm.hpp>
 
+#include "sage/rhi/ResourceLedger.h"
+
 // ---------------------------------------------------------------------------
 // RHI-ресурсы — бэкенд-независимые абстракции GPU-объектов. Весь код движка и
 // игр создаёт их через фабрики GraphicsDevice (CreateShaderProgram/
@@ -80,8 +82,28 @@ struct VertexLayout {
     std::vector<VertexAttribute> InstanceAttributes;
 };
 
+// --- Учёт живых GPU-объектов -------------------------------------------------
+//
+// Считает себя САМ БАЗОВЫЙ КЛАСС, а не бэкенд. Иначе учёт держался бы на том,
+// что автор каждой новой реализации про него вспомнил, — а вспоминают ровно до
+// первого раза, когда некогда. Так же он достаётся Null-бэкенду и любому
+// будущему: наследовать интерфейс, не унаследовав счётчик, нельзя.
+//
+// Цена — один атомарный инкремент на создание объекта, то есть ничто по
+// сравнению с самим созданием текстуры или программы.
+template <ResourceKind Kind>
+class CountedResource {
+protected:
+    CountedResource() { ResourceLedger::Acquired(Kind); }
+    CountedResource(const CountedResource&) { ResourceLedger::Acquired(Kind); }
+    CountedResource(CountedResource&&) noexcept { ResourceLedger::Acquired(Kind); }
+    CountedResource& operator=(const CountedResource&) = default;
+    CountedResource& operator=(CountedResource&&) noexcept = default;
+    ~CountedResource() { ResourceLedger::Released(Kind); }
+};
+
 // --- Шейдерная программа (vertex + fragment) ---
-class ShaderProgram {
+class ShaderProgram : public CountedResource<ResourceKind::Shader> {
 public:
     virtual ~ShaderProgram() = default;
     virtual void Use() const = 0;
@@ -100,7 +122,7 @@ public:
 };
 
 // --- Геометрия: вершинный/индексный/инстансный буферы + отрисовка ---
-class Geometry {
+class Geometry : public CountedResource<ResourceKind::Geometry> {
 public:
     virtual ~Geometry() = default;
 
@@ -152,7 +174,7 @@ struct Texture2DDesc {
     bool FloatPixels = false;
 };
 
-class Texture2D {
+class Texture2D : public CountedResource<ResourceKind::Texture> {
 public:
     virtual ~Texture2D() = default;
     virtual void Bind(int unit) const = 0;
@@ -182,7 +204,7 @@ struct Texture3DDesc {
     int Channels = 4;
 };
 
-class Texture3D {
+class Texture3D : public CountedResource<ResourceKind::Texture> {
 public:
     virtual ~Texture3D() = default;
     virtual void Bind(int unit) const = 0;
@@ -196,7 +218,7 @@ struct CubeFacePixels {
     const unsigned char* Pixels = nullptr;
 };
 
-class TextureCube {
+class TextureCube : public CountedResource<ResourceKind::Texture> {
 public:
     virtual ~TextureCube() = default;
     virtual void Bind(int unit) const = 0;
@@ -214,7 +236,7 @@ public:
 //
 // Глубина общая на все грани (renderbuffer): грани рисуются по очереди, и
 // хранить шесть буферов глубины ради этого незачем.
-class CubeRenderTarget {
+class CubeRenderTarget : public CountedResource<ResourceKind::RenderTarget> {
 public:
     virtual ~CubeRenderTarget() = default;
     // Делает активными грань face (0..5: +X,-X,+Y,-Y,+Z,-Z) и мип mip,
@@ -266,7 +288,7 @@ struct RenderTargetDesc {
     int Samples = 1;
 };
 
-class RenderTarget {
+class RenderTarget : public CountedResource<ResourceKind::RenderTarget> {
 public:
     virtual ~RenderTarget() = default;
     // Переносит многосэмпловое содержимое в обычные текстуры, которые отдают

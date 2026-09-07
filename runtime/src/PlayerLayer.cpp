@@ -1,4 +1,6 @@
 #include "PlayerLayer.h"
+
+#include "sage/audio/AudioSystem.h"
 #include "sage/render/DebugView.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Paths.h"
@@ -460,6 +462,13 @@ void PlayerLayer::BuildSceneRuntime() {
     core.Audio = m_audio.get();
     sage::RegisterCoreSystems(m_systems, core);
 
+    // Звуковые источники сцены — на старт. Игра всегда «в Play», поэтому
+    // отдельного события «начали» у неё нет: началом служит построение
+    // рантайма сцены, и оно же случается при переходе на следующий уровень.
+    if (m_audio) {
+        const int started = sage::audio::StartScene(*m_scene, *m_audio);
+        if (started > 0) LOG_INFO("Player") << "Звуковых источников запущено: " << started;
+    }
 }
 
 bool PlayerLayer::SwitchScene(const std::string& sceneName) {
@@ -495,6 +504,10 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     // Шина событий принадлежит сцене — снимаем ссылку ДО того, как старая
     // сцена уйдёт из-под ног. BuildSceneRuntime ниже поставит новую.
     m_input.SetEventBus(nullptr);
+    // Звук старой сцены глушим, пока она ещё жива: её компоненты держат
+    // дескрипторы, и после std::move остановить их будет некому — водопад
+    // предыдущего уровня продолжал бы шуметь на следующем.
+    if (m_audio && m_scene) sage::audio::StopScene(*m_scene, *m_audio);
     m_scene = std::move(loaded);
     m_scenePath = path;
     m_sceneTime = 0.0f;

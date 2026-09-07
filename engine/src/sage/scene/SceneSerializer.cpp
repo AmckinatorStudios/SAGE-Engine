@@ -1,4 +1,5 @@
 #include "SceneSerializer.h"
+#include "sage/audio/AudioComponents.h"
 #include "sage/assets/Pack.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/LodGroup.h"
@@ -1002,6 +1003,40 @@ static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e
     if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
 }
 
+// Звуковой источник объекта (см. sage/audio/AudioComponents.h). Рантайм-поля
+// (дескриптор, «звучит», команда) в файл НЕ идут: это состояние партии, а не
+// свойство сцены, и сохранённое «сейчас звучит» означало бы, что сцена
+// открывается с уже играющим звуком, которого никто не запускал.
+static void SaveAudio(json& j, const AudioSourceComponent& a) {
+    json& aj = j["audio"];
+    aj["clip"] = a.Clip;
+    aj["volume"] = a.Volume;
+    aj["pitch"] = a.Pitch;
+    aj["loop"] = a.Loop;
+    aj["autoPlay"] = a.AutoPlay;
+    aj["spatial"] = a.Spatial;
+    aj["minDistance"] = a.MinDistance;
+    aj["maxDistance"] = a.MaxDistance;
+    aj["rolloff"] = a.Rolloff;
+    aj["category"] = (int)a.Category;
+}
+
+static AudioSourceComponent ParseAudio(const json& aj) {
+    AudioSourceComponent a;
+    a.Clip = aj.value("clip", std::string());
+    a.Volume = aj.value("volume", 1.0f);
+    a.Pitch = aj.value("pitch", 1.0f);
+    a.Loop = aj.value("loop", false);
+    a.AutoPlay = aj.value("autoPlay", true);
+    a.Spatial = aj.value("spatial", true);
+    a.MinDistance = aj.value("minDistance", 1.0f);
+    a.MaxDistance = aj.value("maxDistance", 40.0f);
+    a.Rolloff = aj.value("rolloff", 1.0f);
+    const int cat = aj.value("category", 0);
+    a.Category = (cat >= 0 && cat <= 2) ? (AudioCategory)cat : AudioCategory::Sfx;
+    return a;
+}
+
 static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
     json& pj = j["particles"];
     pj["preset"] = pe.Preset;
@@ -1213,6 +1248,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const ShaderParamsComponent* sp = reg.try_get<ShaderParamsComponent>(e))
             SaveShaderParams(j, *sp);
         if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
+        if (const AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(e)) SaveAudio(j, *au);
         if (const VarsComponent* vc = reg.try_get<VarsComponent>(e))
             if (!vc->Values.Empty()) j["vars"] = VarsToJson(vc->Values);
         SaveUIComponents(j, reg, e);
@@ -1642,6 +1678,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
                                                            ParseShaderParams(j["shaderParams"]));
         if (j.contains("particles"))
             obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
+        if (j.contains("audio"))
+            obj.Registry()->emplace<AudioSourceComponent>(obj.Entity(), ParseAudio(j["audio"]));
         if (j.contains("vars")) {
             VarsComponent vc;
             VarsFromJson(j["vars"], vc.Values);

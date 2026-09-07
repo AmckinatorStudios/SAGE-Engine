@@ -101,7 +101,7 @@ void NullDevice::SetViewport(int, int, int, int) { ++g_counters.StateChanges; }
 void NullDevice::SetClearColor(float, float, float, float) { ++g_counters.StateChanges; }
 void NullDevice::Clear(bool, bool) { ++g_counters.StateChanges; }
 void NullDevice::BindDefaultFramebuffer() { ++g_counters.StateChanges; }
-void NullDevice::SetBlend(bool) { ++g_counters.StateChanges; }
+void NullDevice::SetBlend(bool enabled) { m_blend = enabled; ++g_counters.StateChanges; }
 void NullDevice::SetDepthTest(bool) { ++g_counters.StateChanges; }
 void NullDevice::SetDepthWrite(bool) { ++g_counters.StateChanges; }
 void NullDevice::SetDepthFunc(DepthFunc) { ++g_counters.StateChanges; }

@@ -273,8 +273,20 @@ void ApplyFilter2D(Filter filter, bool mipmaps) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
 
     if (filter == Filter::Anisotropic && mipmaps) {
-        float level = std::min(4.0f, QueryMaxAnisotropy()); // 4x — баланс качество/цена
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, level);
+        // ТОЛЬКО ЕСЛИ ВИДЕОКАРТА ЭТО УМЕЕТ.
+        //
+        // Анизотропная фильтрация — расширение, а не часть OpenGL 3.3. На карте
+        // без него glTexParameterf с этим именем — ошибка GL_INVALID_ENUM: она
+        // ничего не ломает, но копится в очереди ошибок драйвера и всплывает
+        // потом в чужом месте, где её ищут как настоящую. Запрос лимита
+        // (QueryMaxAnisotropy) на такой карте возвращает 1 — это и есть ответ
+        // «расширения нет», и тогда остаётся обычная трилинейная фильтрация,
+        // то есть корректный откат вместо отказа.
+        const float maxLevel = QueryMaxAnisotropy();
+        if (maxLevel > 1.0f) {
+            const float level = std::min(4.0f, maxLevel); // 4x — баланс качество/цена
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, level);
+        }
     }
 }
 } // namespace
