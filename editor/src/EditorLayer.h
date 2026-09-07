@@ -295,6 +295,7 @@ private:
     bool SelfTestSystems();
     bool SelfTestSelection();
     bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
+    bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
     // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +
     // Play + Build Game (собранный бинарник затем гоняет smoke-тест).
     void RunE2EGameTest();

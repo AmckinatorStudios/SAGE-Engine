@@ -72,6 +72,12 @@ public:
     }
     size_t GpuBytes() const { return EstimateBytes(m_width, m_height, m_hasMipmaps); }
 
+    // С какой фильтрацией картинка реально создана. Не «какую просили»: запрос
+    // Anisotropic на карте без расширения честно опускается до трилинейной, и
+    // отвечать здесь «анизотропная» значило бы врать тому, кто спрашивает.
+    TextureFilter Filter() const { return m_filter; }
+    bool HasMipmaps() const { return m_hasMipmaps; }
+
     // Максимальный уровень анизотропии, который поддерживает текущая
     // видеокарта/драйвер (обычно 4, 8 или 16).
     static float MaxSupportedAnisotropy();
@@ -94,4 +100,5 @@ private:
     std::unique_ptr<sage::rhi::Texture2D> m_texture;
     int m_width = 0, m_height = 0, m_channels = 0;
     bool m_hasMipmaps = true;
+    TextureFilter m_filter = TextureFilter::Trilinear;
 };

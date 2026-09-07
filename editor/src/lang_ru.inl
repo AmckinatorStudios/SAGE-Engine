@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1277.
+// Язык: Русский. Строк: 1280.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -36,6 +36,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "%s -> %s (%.1fx меньше)"},
     {"%zu selected — editing the primary one",
      "Выбрано %zu — правим первичный"},
+    {"(grew: %s)",
+     "(прибавилось: %s)"},
     {"(no event)",
      "(событие не задано)"},
     {"(no light entities)",
@@ -906,6 +908,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "GI: нет статичных сущностей — добавь компонент GI Static"},
     {"GI: the scene changed during the bake — the result was dropped",
      "GI: сцена изменилась во время бейка — результат отброшен"},
+    {"GPU objects: %s",
+     "GPU-объекты: %s"},
     {"GPU, ms",
      "GPU, мс"},
     {"Game",
@@ -970,6 +974,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Группа"},
     {"Grows",
      "Растёт"},
+    {"Growth on an unchanged scene means a leak: objects are\ncreated every frame and never released. Loading assets or\nopening a scene legitimately adds objects — the number must\nstop growing once the scene stands still.",
+     "Рост на неизменной сцене — это утечка: объекты создаются каждый\nкадр и не освобождаются. Загрузка ассетов и открытие сцены\nдобавляют объекты законно — но как только сцена перестала\nменяться, число обязано перестать расти."},
     {"HUD",
      "Худ"},
     {"HUD under the pause menu",

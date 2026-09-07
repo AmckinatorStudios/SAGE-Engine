@@ -50,6 +50,7 @@ public:
     void BindDefaultFramebuffer() override;
 
     void SetBlend(bool enabled) override;
+    bool BlendEnabled() const override { return m_blend; }
     void SetDepthTest(bool enabled) override;
     void SetDepthWrite(bool enabled) override;
     void SetDepthFunc(DepthFunc func) override;
@@ -76,6 +77,12 @@ public:
     // разных мест, и таскать ссылку на устройство ради счётчика незачем.
     static NullCounters& Counters();
     static void ResetCounters();
+
+private:
+    // Устройство без графического API обязано ОТВЕЧАТЬ про состояние так же,
+    // как настоящее: на нём гоняется набор соответствия (rhi/Conformance), и
+    // «всегда false» означало бы, что контракт проверен на подделке.
+    bool m_blend = false;
 };
 
 } // namespace sage::rhi

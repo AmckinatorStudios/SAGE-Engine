@@ -39,7 +39,9 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/render/Frustum.h"
+#include "sage/render/ParticleECS.h"
 #include "sage/render/ParticlePresets.h"
+#include "sage/rhi/ResourceLedger.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
@@ -113,6 +115,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestSystems() && ok;
         ok = SelfTestSelection() && ok;
         ok = SelfTestTools() && ok;
+        ok = SelfTestRenderStability() && ok;
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
@@ -123,7 +126,8 @@ void EditorLayer::RunSelfTest() {
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
-                               << "vars-refs-events + prefab-refs + templates + themes + input-mapping, "
+                               << "vars-refs-events + prefab-refs + templates + themes + input-mapping + "
+                               << "render-stability, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -1980,6 +1984,120 @@ bool EditorLayer::SelfTestSelection() {
     return ok;
 }
 
+
+// --- устойчивость кадра вьюпорта -------------------------------------------
+//
+// САМАЯ ДОРОГАЯ ИЗ ВСЕХ ПОЛОМОК РЕНДЕРА — та, которой нет в первом кадре.
+// «Создаёшь пустой проект, картинка нормальная, а потом она без причины
+// портится»: каждый отдельный кадр правильный, а кадры складываются друг с
+// другом, и через десяток-другой картинка уже не та. Ни одна проверка,
+// снимающая ОДИН кадр, этого не видит по построению — включая эталонные кадры
+// движка.
+//
+// Здесь кадр вьюпорта снимается несколько раз ПОЛНЫМ путём редактора (тени,
+// отражения, сцена, частицы, гизмо, пост-обработка, кайма выделения) и
+// сравнивается сам с собой. Сцена при этом неподвижна, время не идёт —
+// значит, любое расхождение означает, что рендер что-то КОПИТ между кадрами.
+//
+// В сцене намеренно есть эмиттер частиц: именно проходы, поднимающие
+// смешивание (частицы, билборды, интерфейс), однажды забыли снять его за
+// собой — и цепочка пост-обработки, чьи буферы живут между кадрами, начала
+// подмешивать кадр к предыдущему вместо замены. Без частиц в сцене этот путь
+// не выполняется вовсе, и проверка прошла бы мимо той самой поломки.
+bool EditorLayer::SelfTestRenderStability() {
+    bool ok = true;
+
+    // Эмиттер на отдельной сущности — минимальная сцена, поднимающая все
+    // проходы кадра.
+    GameObject fx = m_scene->CreateObject("SelftestParticles");
+    fx.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+    ParticleEmitterComponent& emitter =
+        m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity());
+    emitter.Continuous = true;
+    emitter.Config.EmissionRate = 60.0f;
+    emitter.Config.LifetimeMin = 30.0f; // частицы не должны умереть посреди прогона
+    emitter.Config.LifetimeMax = 30.0f;
+    emitter.Active = true;
+
+    m_renderer.SetViewportSize(0, 320, 240);
+    m_renderer.SetGameSize(320, 240);
+
+    // Частицы рождаем ОДИН раз и дальше время не двигаем: движущиеся частицы
+    // меняли бы кадр законно, и проверка потеряла бы смысл.
+    sage::fx::UpdateEmitters(*m_scene, m_renderer.Particles(), 0.25f);
+
+    const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    std::vector<unsigned char> first;
+    int w = 0, h = 0;
+    int worstDiff = 0;
+    double worstMean = 0.0;
+    sage::rhi::ResourceCounts baseline;
+    bool haveBaseline = false;
+    std::string growth;
+
+    // Восемь кадров: первый прогревает (снимается карта окружения, создаются
+    // ленивые шейдеры), со второго кадр обязан быть один и тот же.
+    constexpr int kFrames = 8;
+    for (int i = 0; i < kFrames; ++i) {
+        LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+        m_renderer.PrepareReflections(*m_scene, env);
+        m_renderer.RenderShadow(*m_scene, env, m_camera);
+        glm::mat4 view(1.0f), proj(1.0f);
+        m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode,
+                                  m_showGrid, cfg, view, proj, 0);
+        m_renderer.RenderGame(*m_scene, env, cfg);
+
+        std::vector<unsigned char> frame;
+        int fw = 0, fh = 0;
+        if (!m_renderer.ReadViewportPixels(frame, fw, fh) || frame.empty()) {
+            LOG_ERROR("Editor") << "SELFTEST: не удалось прочитать кадр вьюпорта";
+            ok = false;
+            break;
+        }
+        if (i == 1) {
+            first = frame;
+            w = fw;
+            h = fh;
+            baseline = sage::rhi::ResourceLedger::Snapshot();
+            haveBaseline = true;
+        } else if (i > 1) {
+            if (fw != w || fh != h || frame.size() != first.size()) {
+                LOG_ERROR("Editor") << "SELFTEST: размер кадра вьюпорта изменился сам собой";
+                ok = false;
+                break;
+            }
+            long long sum = 0;
+            for (size_t k = 0; k < frame.size(); ++k) {
+                const int d = std::abs((int)frame[k] - (int)first[k]);
+                sum += d;
+                if (d > worstDiff) worstDiff = d;
+            }
+            worstMean = std::max(worstMean, (double)sum / (double)frame.size());
+        }
+    }
+
+    if (ok && haveBaseline) {
+        growth = sage::rhi::ResourceLedger::Snapshot().DiffFrom(baseline);
+    }
+
+    // Допуск в один уровень из 255 — это последний бит арифметики шейдера, а не
+    // «похоже». Накопление даёт десятки уровней и проценты средней разницы.
+    if (ok && worstDiff > 1) {
+        LOG_ERROR("Editor") << "SELFTEST: кадр вьюпорта уплывает от повторов: худший канал "
+                            << worstDiff << ", среднее " << worstMean
+                            << " — рендер копит изменения между кадрами";
+        ok = false;
+    }
+    if (ok && !growth.empty()) {
+        LOG_ERROR("Editor") << "SELFTEST: за " << kFrames
+                            << " кадров прибавилось GPU-объектов: " << growth
+                            << " — рендер течёт покадрово";
+        ok = false;
+    }
+
+    m_scene->RemoveObject(fx.Id());
+    return ok;
+}
 
 // --- инструменты, перетаскивание, панели и вёрстка интерфейса --------------
 //

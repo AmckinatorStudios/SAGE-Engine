@@ -54,6 +54,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/net/NetworkSystem.cpp
     src/sage/net/UdpSocket.cpp
     src/rhi/Conformance.cpp
+    src/rhi/ResourceLedger.cpp
     src/rhi/null/NullDevice.cpp
     src/sage/assets/AssetCache.cpp
     src/sage/assets/AssetDatabase.cpp

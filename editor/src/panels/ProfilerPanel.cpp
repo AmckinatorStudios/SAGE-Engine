@@ -1,10 +1,12 @@
 #include "panels/ProfilerPanel.h"
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "imgui.h"
 #include "sage/core/Profiler.h"
+#include "sage/rhi/ResourceLedger.h"
 #include "../Localization.h"
 
 namespace {
@@ -54,6 +56,12 @@ void ProfilerPanel::Draw(bool* open) {
     if (wantEnabled != m_wasEnabled) {
         sage::profile::SetEnabled(wantEnabled);
         m_wasEnabled = wantEnabled;
+        // Точку отсчёта для GPU-объектов берём в момент ОТКРЫТИЯ панели: смысл
+        // имеет прирост с этого момента, а не абсолютное число.
+        if (wantEnabled) {
+            m_gpuBaseline = sage::rhi::ResourceLedger::Snapshot();
+            m_hasGpuBaseline = true;
+        }
     }
     if (!wantEnabled) return;
 
@@ -71,6 +79,31 @@ void ProfilerPanel::Draw(bool* open) {
     } else {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", T("| no GPU timers"));
+    }
+
+    // GPU-объекты: сколько живо и сколько прибавилось с момента открытия.
+    // Строка короткая намеренно — она нужна не всегда, но когда нужна, её
+    // спрашивают первой: «сколько у вас там в профилировщике по объектам?»
+    // отвечается за секунду, а «редактор со временем портит картинку»
+    // расследуется неделю.
+    {
+        const sage::rhi::ResourceCounts now = sage::rhi::ResourceLedger::Snapshot();
+        ImGui::Text(T("GPU objects: %s"), now.ToString().c_str());
+        if (m_hasGpuBaseline) {
+            const std::string growth = now.DiffFrom(m_gpuBaseline);
+            if (!growth.empty()) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.25f, 1.0f), T("(grew: %s)"),
+                                   growth.c_str());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s",
+                                      T("Growth on an unchanged scene means a leak: objects are\n"
+                                        "created every frame and never released. Loading assets or\n"
+                                        "opening a scene legitimately adds objects — the number must\n"
+                                        "stop growing once the scene stands still."));
+                }
+            }
+        }
     }
 
     ImGui::Checkbox(T("Average"), &m_averaged);

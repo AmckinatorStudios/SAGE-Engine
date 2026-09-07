@@ -799,6 +799,24 @@ bool EditorSceneRenderer::SaveGameFrame(const std::string& path) {
     return true;
 }
 
+bool EditorSceneRenderer::ReadViewportPixels(std::vector<unsigned char>& out, int& outW,
+                                             int& outH) {
+    // Тот же выбор буфера, что и у ViewportTexture: показываем и читаем одно и
+    // то же, иначе проверка сравнивала бы не то, что видно.
+    Framebuffer* target = m_postApplied && m_postFbo ? &*m_postFbo
+                                                     : (m_sceneFbo ? &*m_sceneFbo : nullptr);
+    if (!target) return false;
+    outW = target->Width();
+    outH = target->Height();
+    if (outW <= 0 || outH <= 0) return false;
+    out.assign((size_t)outW * (size_t)outH * 3u, 0);
+    target->Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.ReadPixelsRGB(0, 0, outW, outH, out.data());
+    device.BindDefaultFramebuffer();
+    return true;
+}
+
 uint64_t EditorSceneRenderer::GameTexture() const {
     return m_gamePostApplied && m_gamePostFbo ? m_gamePostFbo->NativeColorTexture()
                                               : m_gameFbo->NativeColorTexture();

@@ -1,6 +1,7 @@
 #include "rhi/opengl/OpenGLDevice.h"
 #include "rhi/opengl/OpenGLResources.h"
 #include "sage/core/Log.h"
+#include "sage/rhi/ResourceLedger.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <stdexcept>
@@ -92,6 +93,12 @@ void OpenGLDevice::SetBlend(bool enabled) {
         glDisable(GL_BLEND);
     }
 }
+
+// Спрашиваем сам GL, а не хранимую копию: копия рассинхронизировалась бы с
+// действительностью в тот же момент, когда состояние поменяет кто-то мимо RHI
+// (бэкенд ImGui в редакторе делает ровно это), — и проверка «проход вернул
+// состояние» стала бы проверять нашу переменную, а не видеокарту.
+bool OpenGLDevice::BlendEnabled() const { return glIsEnabled(GL_BLEND) == GL_TRUE; }
 
 void OpenGLDevice::SetBlendMode(BlendMode mode) {
     switch (mode) {
@@ -213,6 +220,10 @@ void OpenGLDevice::SetColorWrite(bool enabled) {
 sage::rhi::QueryHandle OpenGLDevice::CreateOcclusionQuery() {
     GLuint query = 0;
     glGenQueries(1, &query);
+    // Запросы считаются наравне с текстурами и буферами (см. ResourceLedger.h):
+    // это ресурс драйвера, и утекать он умеет ровно так же — по запросу на
+    // сущность кадра, то есть незаметно и быстро.
+    if (query) ResourceLedger::Acquired(ResourceKind::Query);
     return {query};
 }
 
@@ -220,6 +231,7 @@ void OpenGLDevice::DestroyOcclusionQuery(sage::rhi::QueryHandle query) {
     if (query.Valid()) {
         GLuint q = (GLuint)query.Value;
         glDeleteQueries(1, &q);
+        ResourceLedger::Released(ResourceKind::Query);
     }
 }
 
@@ -251,6 +263,7 @@ bool OpenGLDevice::OcclusionVisible(sage::rhi::QueryHandle query) {
 sage::rhi::QueryHandle OpenGLDevice::CreateTimestampQuery() {
     GLuint query = 0;
     glGenQueries(1, &query);
+    if (query) ResourceLedger::Acquired(ResourceKind::Query);
     return {query};
 }
 
@@ -258,6 +271,7 @@ void OpenGLDevice::DestroyTimestampQuery(sage::rhi::QueryHandle query) {
     if (query.Valid()) {
         GLuint q = (GLuint)query.Value;
         glDeleteQueries(1, &q);
+        ResourceLedger::Released(ResourceKind::Query);
     }
 }
 
