@@ -94,6 +94,11 @@ struct ExtractedMaterialSet {
     bool Found() const { return !Materials.empty(); }
 };
 
+// Путь к модели — ЛИБО настоящий путь на диске, ЛИБО ссылка проекта
+// («low_poly_environment/scene.gltf», как её держит MeshRendererComponent::Ref).
+// Второе разрешается через AssetDatabase::LocatePath, как и везде в движке:
+// редактор запускается из своей папки, а проект лежит в другой, и путь «как
+// дали» открывался бы относительно exe.
 ExtractedMaterialSet ExtractMaterials(const std::string& modelPath,
                                       const std::string& textureDir = {});
 

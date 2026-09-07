@@ -353,6 +353,24 @@ void EditorLayer::DeleteSelected() {
     });
 }
 
+// Замок запоминает ТО, ЧТО ПОКАЗАНО СЕЙЧАС, в момент запирания — и держит,
+// пока его не откроют. Хранится идентификатор, а не GameObject: за время под
+// замком сцену могли перезагрузить (откат, открытие другой), и объект по
+// указателю оказался бы чужим.
+void EditorLayer::SetInspectorLocked(bool locked) {
+    m_inspectorLocked = locked;
+    if (!locked) return;
+    m_lockedEntityId = m_selectedId;
+    m_lockedAssetPath = m_assets.Selected();
+}
+
+GameObject EditorLayer::InspectedObject() {
+    if (!m_inspectorLocked) return SelectedObject();
+    // Запертый объект мог исчезнуть — сцену перезагрузили или его удалили.
+    // Тогда панель честно пуста, а не показывает чужие поля по старому номеру.
+    return m_scene ? m_scene->Get(m_lockedEntityId) : GameObject{};
+}
+
 void EditorLayer::SetSelectedId(int id) {
     m_selectedId = id;
     m_selection.clear();

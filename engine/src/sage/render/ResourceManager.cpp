@@ -428,7 +428,16 @@ void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<T
 std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) {
     const std::string key = CacheKey(path);
     auto it = m_materials.find(key);
-    if (it != m_materials.end()) return it->second;
+    if (it != m_materials.end()) {
+        // ПУТИ МОГЛИ ПОМЕНЯТЬСЯ ПОСЛЕ ЗАГРУЗКИ — и меняет их не одно место (см.
+        // Material::ResolvedFrom). Раньше кэш отдавал материал как есть, с
+        // указателями от прежних путей: назначенная кнопкой «Обзор…» текстура
+        // не появлялась НИКОГДА, потому что перерезолвить её было некому.
+        // Сравнение шести строк дешевле любой попытки помнить это правило
+        // руками — и, в отличие от правила, не забывается.
+        RefreshMaterialTextures(*it->second);
+        return it->second;
+    }
     auto material = std::make_shared<Material>();
     try {
         *material = Material::LoadFromFile(Locate(path));
@@ -546,6 +555,25 @@ void ResourceManager::ResolveMaterialTextures(Material& m) {
     m.RoughnessTex = GetTexture(m.RoughnessMapPath, kSurface);
     m.AOTex = GetTexture(m.AOMapPath, kSurface);
     m.EmissiveTex = GetTexture(m.EmissiveMap, kSurface);
+    m.TexturesFrom = PathsOf(m);
+}
+
+// Слепок путей к картам — по нему видно, что указатели устарели.
+Material::ResolvedFrom ResourceManager::PathsOf(const Material& m) {
+    Material::ResolvedFrom f;
+    f.Albedo = m.TexturePath;
+    f.Normal = m.NormalMapPath;
+    f.Metallic = m.MetallicMapPath;
+    f.Roughness = m.RoughnessMapPath;
+    f.AO = m.AOMapPath;
+    f.Emissive = m.EmissiveMap;
+    return f;
+}
+
+bool ResourceManager::RefreshMaterialTextures(Material& m) {
+    if (m.TexturesFrom == PathsOf(m)) return false;
+    ResolveMaterialTextures(m);
+    return true;
 }
 
 void ResourceManager::DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,

@@ -120,7 +120,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + build + "
+                               << "materials + camera + light + primitives + environment + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
@@ -2029,6 +2029,52 @@ bool EditorLayer::SelfTestSelection() {
         m_scene->GI.reset();
         m_scene->RemoveObject(giFloor.Id());
         m_scene->RemoveObject(giCube.Id());
+    }
+
+    // --- Замок панели свойств -------------------------------------------------
+    //
+    // Смысл замка ровно один: пока он заперт, панель показывает ТО ЖЕ САМОЕ,
+    // сколько бы человек ни щёлкал по другим объектам и файлам. Без этого
+    // перетащить текстуру из Assets в слот материала нельзя вовсе — нажатие,
+    // которым начинают перетаскивание, уводит панель на эту же текстуру.
+    if (ok) {
+        // Номера берём СРАЗУ: GameObject после удаления объекта спрашивать
+        // нельзя — Id() у него бросает, и проверка падала бы вместо проверки.
+        const int idA = m_scene->CreateObject("LockA").Id();
+        const int idB = m_scene->CreateObject("LockB").Id();
+        SetSelectedId(idA);
+        SetInspectorLocked(true);
+
+        SetSelectedId(idB);   // «случайный клик», ради которого всё и затевалось
+        if (!InspectedObject().Valid() || InspectedObject().Id() != idA) {
+            LOG_ERROR("Editor") << "SELFTEST: inspector lock did not hold the object";
+            ok = false;
+        }
+        // Выбор при этом работает как работал: замок держит ПАНЕЛЬ, а не мышь.
+        if (ok && (!SelectedObject().Valid() || SelectedObject().Id() != idB)) {
+            LOG_ERROR("Editor") << "SELFTEST: inspector lock froze the selection itself";
+            ok = false;
+        }
+        SetInspectorLocked(false);
+        if (ok && (!InspectedObject().Valid() || InspectedObject().Id() != idB)) {
+            LOG_ERROR("Editor") << "SELFTEST: inspector did not follow the selection after unlock";
+            ok = false;
+        }
+        // Запертый объект удалили — панель обязана честно опустеть, а не
+        // показывать чужие поля по освободившемуся номеру.
+        if (ok) {
+            SetSelectedId(idA);
+            SetInspectorLocked(true);
+            m_scene->RemoveObject(idA);
+            if (InspectedObject().Valid()) {
+                LOG_ERROR("Editor") << "SELFTEST: inspector lock kept a deleted object";
+                ok = false;
+            }
+            SetInspectorLocked(false);
+        }
+        SetSelectedId(-1);
+        if (m_scene->Get(idA).Valid()) m_scene->RemoveObject(idA);
+        m_scene->RemoveObject(idB);
     }
 
     return ok;

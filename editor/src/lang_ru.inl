@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1344.
+// Язык: Русский. Строк: 1347.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1224,6 +1224,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Локальное"},
     {"Location",
      "Папка"},
+    {"Lock: the panel will keep showing this while you pick something else (for drag and drop)",
+     "Запереть: панель продолжит показывать это, пока вы выбираете другое (для перетаскивания)"},
+    {"Locked",
+     "Заперто"},
     {"Logic",
      "Логика"},
     {"Loop",
@@ -2460,6 +2464,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Единиц в секунду; 0 — сразу к значению"},
     {"Unlit",
      "Без освещения"},
+    {"Unlock: the panel will follow the selection again",
+     "Отпереть: панель снова будет следовать за выбором"},
     {"Unparent",
      "Отвязать от родителя"},
     {"Up",

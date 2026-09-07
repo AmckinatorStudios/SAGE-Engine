@@ -132,7 +132,7 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
 }
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
-    GameObject obj = host.SelectedObject();
+    GameObject obj = host.InspectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
 
     char buf[128];
@@ -1084,7 +1084,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
 // Префаб в инспекторе: та же вращаемая обложка, что у материала. Крупнее, чем в
 // панели Assets, потому что здесь на неё и смотрят — выбирают, тот ли это ящик.
 void InspectorPanel::DrawPrefabPreview(EditorHost& host) {
-    const std::string path = host.SelectedAssetPath().string();
+    const std::string path = host.InspectedAssetPath().string();
     const float side = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
     const uint64_t tex = m_preview.RenderPrefab(path, (int)side);
     if (!tex) {

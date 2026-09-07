@@ -264,6 +264,14 @@ public:
     const std::filesystem::path& SelectedAssetPath() const override { return m_assets.Selected(); }
     void ShowAssetInPanel(const std::filesystem::path& path) override;
 
+    // --- EditorHost: замок панели свойств (см. EditorHost.h) ---
+    bool InspectorLocked() const override { return m_inspectorLocked; }
+    void SetInspectorLocked(bool locked) override;
+    GameObject InspectedObject() override;
+    const std::filesystem::path& InspectedAssetPath() const override {
+        return m_inspectorLocked ? m_lockedAssetPath : m_assets.Selected();
+    }
+
 private:
     // --- undo/redo (вызываются меню и хоткеями) ---
     void Undo();
@@ -395,6 +403,11 @@ private:
 
     // --- выбор/вьюпорты (размеры окон живут в m_renderer) ---
     int m_selectedId = -1;              // «первичная» (последняя кликнутая)
+
+    // Замок панели свойств: что она показывает, пока заперта (см. EditorHost.h).
+    bool m_inspectorLocked = false;
+    int m_lockedEntityId = -1;
+    std::filesystem::path m_lockedAssetPath;
     std::vector<int> m_selection;       // весь набор выбранных (включает первичную)
     glm::mat4 m_view{1.0f}, m_proj{1.0f}; // последние view/proj кадра (гизмо/пикинг)
 

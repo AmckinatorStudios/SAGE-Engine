@@ -76,14 +76,14 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
                 // Путь спросили ради СОЗДАНИЯ: файла ещё нет, его надо записать.
                 m_browseIsMaterial = false;
                 m_browseCreateMaterial = false;
-                if (GameObject sel = host.SelectedObject(); sel.Valid()) {
+                if (GameObject sel = host.InspectedObject(); sel.Valid()) {
                     WriteMaterialFromOverrides(host, sel.Renderer(), m_browser.Result().string());
                 }
             } else if (m_browseIsMaterial) {
                 m_browseIsMaterial = false;
                 // Материал грузим сразу: без указателя объект остался бы с путём
                 // и без вида — «выбрал материал, ничего не произошло».
-                if (GameObject sel = host.SelectedObject(); sel.Valid()) {
+                if (GameObject sel = host.InspectedObject(); sel.Valid()) {
                     MeshRendererComponent& mr = sel.Renderer();
                     if (!mr.MaterialPath.empty())
                         mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
@@ -99,7 +99,7 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
             }
             if (m_browseIsShader) {
                 if (std::shared_ptr<Material> m =
-                        ResourceManager::Instance().GetMaterial(host.SelectedAssetPath().string())) {
+                        ResourceManager::Instance().GetMaterial(host.InspectedAssetPath().string())) {
                     m->ShaderPtr.reset();
                 }
             }
@@ -107,6 +107,27 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
     }
 
     ImGui::Begin(T("Inspector" "###Inspector"), open);
+
+    // --- ЗАМОК --------------------------------------------------------------
+    //
+    // Пока он заперт, панель показывает то же, что и в момент запирания, — и
+    // это единственный способ перетащить сюда текстуру из Assets: чтобы начать
+    // перетаскивание, по файлу надо нажать, а нажатие меняет выбранный ассет и
+    // уводит панель на него же. Слота, в который тащили, к моменту отпускания
+    // кнопки просто не остаётся.
+    const bool locked = host.InspectorLocked();
+    if (EditorIcons::IconOnlyButton("lock",
+                                    locked ? T("Unlock: the panel will follow the selection again")
+                                           : T("Lock: the panel will keep showing this while you "
+                                               "pick something else (for drag and drop)"),
+                                    locked)) {
+        host.SetInspectorLocked(!locked);
+    }
+    if (locked) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", T("Locked"));
+    }
+    ImGui::Separator();
 
     // ------------------------------------------------------------------------
     // Две ПРИНЦИПИАЛЬНО разные вещи — в две вкладки, а не в одну простыню.
@@ -124,16 +145,20 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
     // ассет. Иначе за разделение пришлось бы платить лишним кликом на каждое
     // переключение, и оно бы только мешало.
     // ------------------------------------------------------------------------
-    const AssetKind assetKind = ClassifyAsset(host.SelectedAssetPath());
-    const bool hasEntity = host.SelectedObject().Valid();
+    const AssetKind assetKind = ClassifyAsset(host.InspectedAssetPath());
+    const bool hasEntity = host.InspectedObject().Valid();
     const bool hasAsset = assetKind != AssetKind::None;
 
     // Что выбрали последним. Сравниваем с прошлым кадром: событий выбора панель
     // не получает, а сравнение состояния даёт ровно тот же ответ.
-    const int entityId = hasEntity ? host.SelectedObject().Id() : -1;
-    const std::string assetPath = host.SelectedAssetPath().string();
-    if (entityId != m_lastEntityId && hasEntity) { m_focus = Focus::Object; m_forceFocus = true; }
-    if (assetPath != m_lastAssetPath && hasAsset) { m_focus = Focus::Asset; m_forceFocus = true; }
+    const int entityId = hasEntity ? host.InspectedObject().Id() : -1;
+    const std::string assetPath = host.InspectedAssetPath().string();
+    // Под замком вкладка тоже не переключается: иначе замок держал бы предмет
+    // правки, но панель всё равно уезжала бы с «Ассета» на «Объект».
+    if (!locked) {
+        if (entityId != m_lastEntityId && hasEntity) { m_focus = Focus::Object; m_forceFocus = true; }
+        if (assetPath != m_lastAssetPath && hasAsset) { m_focus = Focus::Asset; m_forceFocus = true; }
+    }
     m_lastEntityId = entityId;
     m_lastAssetPath = assetPath;
 
@@ -214,7 +239,7 @@ InspectorPanel::AssetKind InspectorPanel::ClassifyAsset(const std::filesystem::p
 }
 
 void InspectorPanel::DrawObjectSection(EditorHost& host) {
-    GameObject obj = host.SelectedObject();
+    GameObject obj = host.InspectedObject();
     DrawSectionHeader("cube", T("scene object"), obj.Name(),
                       T("The properties of this entity belong to it alone."));
 
@@ -229,7 +254,7 @@ void InspectorPanel::DrawObjectSection(EditorHost& host) {
 }
 
 void InspectorPanel::DrawAssetSection(EditorHost& host, AssetKind kind) {
-    const std::filesystem::path& path = host.SelectedAssetPath();
+    const std::filesystem::path& path = host.InspectedAssetPath();
     const std::string name = path.filename().string();
 
     switch (kind) {

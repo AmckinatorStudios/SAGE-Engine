@@ -177,6 +177,31 @@ struct Material {
     std::shared_ptr<Texture> MetallicTex;
     std::shared_ptr<Texture> RoughnessTex;
     std::shared_ptr<Texture> AOTex;
+
+    // ИЗ КАКИХ ПУТЕЙ собраны указатели выше (runtime, не сериализуется).
+    //
+    // Пути к картам правятся ПОСЛЕ загрузки материала и не одним местом:
+    // перетаскиванием в слот, кнопкой «Обзор…», очисткой слота, скриптом,
+    // импортом материалов модели. Указатели при этом остаются от прошлых путей,
+    // и материал показывает старую картинку — а если раньше карты не было
+    // вовсе, то «Не удалось загрузить» под слотом, в котором обложка этой
+    // текстуры прекрасно видна (обложка грузится по пути, а не по указателю).
+    // Ровно на это и жаловались.
+    //
+    // Правило «поменял путь — не забудь перерезолвить» уже не сработало: один
+    // из путей правки его помнил, другой нет. Поэтому здесь лежит слепок путей,
+    // по которым указатели собраны, и ResourceManager::GetMaterial сам
+    // пересобирает их, когда слепок разошёлся с полями.
+    struct ResolvedFrom {
+        std::string Albedo, Normal, Metallic, Roughness, AO, Emissive;
+        bool operator==(const ResolvedFrom& o) const {
+            return Albedo == o.Albedo && Normal == o.Normal && Metallic == o.Metallic &&
+                   Roughness == o.Roughness && AO == o.AO && Emissive == o.Emissive;
+        }
+        bool operator!=(const ResolvedFrom& o) const { return !(*this == o); }
+    };
+    ResolvedFrom TexturesFrom;
+
     // Рисуется текстурным PBR-путём, если задана хотя бы одна карта.
     bool HasMaps() const {
         return AlbedoTex || NormalTex || MetallicTex || RoughnessTex || AOTex || EmissiveTex;
