@@ -631,6 +631,77 @@ void TestDecals(FrameRenderer& r) {
     Check(after > before + 500, "наклейка видна в кадре");
 }
 
+// Шаг сетки, зависящий от зума (§9 ТЗ редактора).
+//
+// Проверяется ровно то, ради чего это заведено, и чего нельзя увидеть по одному
+// кадру: сетка обязана оставаться ЧИТАЕМОЙ на любом удалении. С постоянным
+// шагом отъезд превращает её в мутную заливку — клетки сходятся ближе пикселя,
+// — а такая «сетка» хуже, чем никакой: по ней ничего не измеришь, а кадр она
+// портит. Адаптивная обязана держать плотность линий в разумной полосе и на
+// метре, и на километре.
+void TestAdaptiveGrid(FrameRenderer& r) {
+    const int w = 320, h = 240;
+
+    // Сетка рисуется ОДНА, без сцены: проверяется она сама, и посторонняя
+    // геометрия только мешала бы считать линии.
+    auto coverage = [&](float height, bool adaptive) {
+        Framebuffer fbo(w, h);
+        fbo.Bind();
+        sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
+        dev.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        dev.Clear(true, true);
+
+        // Камера смотрит на начало координат сверху под 45°: чем выше, тем
+        // «дальше отъехали», и другого смысла у зума здесь нет.
+        const glm::vec3 eye(height, height, height);
+        const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+        const glm::mat4 proj =
+            glm::perspective(glm::radians(50.0f), (float)w / (float)h, 0.05f, height * 40.0f);
+
+        sage::render::GridSettings g;
+        g.Mode = sage::render::GridSettings::Extent::Infinite;
+        g.CellSize = 1.0f;
+        g.MajorEvery = 10;
+        g.ShowAxes = false;   // оси считались бы линиями на любом масштабе
+        g.Adaptive = adaptive;
+        // Затухание отключено: оно гасит дальние линии само, и без него видно
+        // именно работу ШАГА, а не работу тумана.
+        g.FadeDistance = height * 1000.0f;
+        r.Grid.Draw(view, proj, eye, g);
+
+        const Image img = Capture(w, h);
+        dev.BindDefaultFramebuffer();
+        long long lit = 0;
+        for (size_t i = 0; i + 2 < img.Pixels.size(); i += 3)
+            if (std::max({img.Pixels[i], img.Pixels[i + 1], img.Pixels[i + 2]}) > 40) ++lit;
+        return (double)lit / (double)(w * h);
+    };
+
+    const double nearAdaptive = coverage(6.0f, true);
+    const double farFixed = coverage(400.0f, false);
+    const double farAdaptive = coverage(400.0f, true);
+    std::printf("       сетка: вблизи %.3f; вдали постоянная %.3f, адаптивная %.3f\n",
+                nearAdaptive, farFixed, farAdaptive);
+
+    // Вблизи сетка видна в обоих режимах — это база, без которой остальное
+    // ничего не значит.
+    Check(nearAdaptive > 0.02, "сетка: вблизи линии видны");
+
+    // Главное. Отъехав, постоянная сетка сливается: линий столько, что они
+    // покрывают заметную долю кадра сплошняком. Адаптивная обязана быть
+    // ЗАМЕТНО реже — она перешла на более крупный шаг.
+    Check(farAdaptive < farFixed * 0.75,
+          "сетка: на отъезде адаптивная реже постоянной, а не сливается в заливку");
+    // И при этом не исчезла: «реже» не значит «пусто».
+    Check(farAdaptive > 0.01, "сетка: на отъезде адаптивная всё ещё видна");
+
+    // Плотность держится в одной полосе на обоих масштабах: это и есть
+    // «читаема на любом удалении», а не «видна хоть как-то».
+    const double ratio = farAdaptive > 0.0 ? nearAdaptive / farAdaptive : 0.0;
+    std::printf("       сетка: отношение плотности вблизи/вдали %.2f\n", ratio);
+    Check(ratio > 0.25 && ratio < 4.0, "сетка: плотность линий держится при смене масштаба");
+}
+
 void TestGrid(FrameRenderer& r, Scene& scene) {
     const glm::mat4 proj = PerspectiveProj();
 
@@ -772,6 +843,7 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestTransparentFaceOrder(r, scene);
     TestEmissive(r, scene);
     TestGrid(r, scene);
+    TestAdaptiveGrid(r);
     TestDecals(r);
     TestObjectMotionBlur(r);
     TestMsaa(r);

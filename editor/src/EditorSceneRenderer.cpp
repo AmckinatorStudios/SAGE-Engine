@@ -563,8 +563,25 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     GameObject selectedObj = scene.Get(selectedId);
 
+    // Опорная сетка — до гизмо и после геометрии: она полупрозрачна и обязана
+    // смешиваться с тем, что за ней, а глубину пишет свою, чтобы объекты её
+    // перекрывали.
+    if (showGrid) {
+        sage::render::GridSettings g;
+        g.Mode = sage::render::GridSettings::Extent::Infinite;
+        g.CellSize = 1.0f;
+        g.MajorEvery = 10;
+        // Шаг подбирается под зум: с постоянным сетка превращается в мутную
+        // заливку, стоит отъехать на сотню метров, — а по такой ничего не
+        // выровняешь.
+        g.Adaptive = true;
+        g.MinorColor = {0.30f, 0.32f, 0.36f};
+        g.MajorColor = {0.42f, 0.45f, 0.50f};
+        g.Opacity = 0.9f;
+        m_grid.Draw(outView, outProj, eye, g);
+    }
+
     // Гизмо-графика (DebugDraw) — в тот же буфер, с тестом глубины (объекты заслоняют сетку).
-    if (showGrid) m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
     DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
     if (selectedObj.Valid()) {
         glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());

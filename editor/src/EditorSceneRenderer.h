@@ -13,6 +13,7 @@
 #include "sage/render/LensFlare.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/render/DebugDraw.h"
+#include "sage/render/GridRenderer.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/SkyRenderer.h"
@@ -227,6 +228,14 @@ private:
     std::optional<sage::render::LensFlare> m_lensFlare;
     bool m_postApplied = false, m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
+    // Опорная сетка вьюпорта — ШЕЙДЕРНАЯ, а не набор отладочных линий.
+    //
+    // Линейная сетка задаёт вопрос, на который нет хорошего ответа: сколько
+    // линий рисовать? Прежняя рисовала квадрат 12x12 метров вокруг начала
+    // координат — отъехал, и сетка кончается посреди кадра; отошёл в сторону,
+    // и её нет вовсе. Шейдерная считает линию аналитически, тянется до
+    // горизонта и сама выбирает шаг под зум (см. render/GridRenderer.h).
+    sage::render::GridRenderer m_grid;
     std::optional<SkyRenderer> m_sky;
     // Отражения вьюпорта. Свои, а не общие с рантаймом: карта окружения
     // снимается из точки и принадлежит виду.

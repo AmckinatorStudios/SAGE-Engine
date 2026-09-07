@@ -44,6 +44,10 @@ uniform int uRadiusMode;    // 1 — обрезать по радиусу
 uniform float uRadius;
 uniform float uFadeDistance;
 
+uniform int uAdaptive;        // 1 — шаг подбирается по зуму
+uniform float uMinCellPixels; // клетка не мельче стольких пикселей
+uniform float uMinCell;       // и не мельче стольких единиц мира
+
 // Покрытие линии для сетки с шагом cell. Ключевой приём: делим расстояние до
 // ближайшей линии на ПРОИЗВОДНУЮ координаты (fwidth). Тогда толщина линии
 // получается в пикселях экрана, а не в единицах мира: у горизонта, где клетка
@@ -79,10 +83,42 @@ void main() {
     vec3 world = ro + rd * t;
     vec2 plane = world.xz;
 
+    // ШАГ, ПОДОБРАННЫЙ ПОД ЗУМ.
+    //
+    // Сколько единиц мира приходится на пиксель — это и есть «насколько мы
+    // отъехали» в единственной форме, которая здесь что-то значит. Из неё
+    // выводится уровень: во сколько раз (в степенях MajorEvery) шаг обязан
+    // быть крупнее авторского, чтобы клетка осталась не мельче MinCellPixels.
+    //
+    // Уровень ДРОБНЫЙ, и это главное. Целый уровень означал бы, что при
+    // движении колеса сетка меняется скачком — мигает вся разом. Здесь
+    // рисуются два соседних уровня, и дробная часть перекладывает вес с одного
+    // на другой: на границе уровней уходящий уже погас, а пришедший в полную
+    // силу, и никакого мига нет.
+    float cellA = uCellSize;             // мелкая клетка текущего уровня
+    float cellB = uCellSize * uMajorEvery;
+    float blend = 0.0;
+    if (uAdaptive == 1) {
+        float pixelWorld = max(fwidth(plane.x), fwidth(plane.y));
+        float wanted = pixelWorld * uMinCellPixels;
+        // Ниже авторского шага не опускаемся, если MinCell этого не разрешил.
+        float floorCell = max(uMinCell > 0.0 ? uMinCell : uCellSize, 1e-5);
+        float level = log(max(wanted, 1e-6) / floorCell) / log(uMajorEvery);
+        level = max(level, 0.0);
+        float step = floor(level);
+        blend = level - step;
+        cellA = floorCell * pow(uMajorEvery, step);
+        cellB = cellA * uMajorEvery;
+    }
+
     // Две частоты: мелкая клетка и крупная. Мелкая гаснет с расстоянием
     // раньше — так сетка не превращается в сплошную заливку у горизонта.
-    float minor = GridCoverage(plane, uCellSize);
-    float major = GridCoverage(plane, uCellSize * uMajorEvery);
+    float minor = uAdaptive == 1
+        ? mix(GridCoverage(plane, cellA), GridCoverage(plane, cellB), blend)
+        : GridCoverage(plane, cellA);
+    float major = uAdaptive == 1
+        ? mix(GridCoverage(plane, cellB), GridCoverage(plane, cellB * uMajorEvery), blend)
+        : GridCoverage(plane, cellB);
 
     // Затухание по расстоянию от камеры вдоль плоскости.
     float distance = length(world - uCameraPos);
@@ -165,6 +201,9 @@ void GridRenderer::Draw(const glm::mat4& view, const glm::mat4& proj, const glm:
     shader.SetVec3("uCameraPos", cameraPos);
     shader.SetFloat("uHeight", s.Height);
     shader.SetFloat("uCellSize", s.CellSize);
+    shader.SetInt("uAdaptive", s.Adaptive ? 1 : 0);
+    shader.SetFloat("uMinCellPixels", std::max(s.MinCellPixels, 1.0f));
+    shader.SetFloat("uMinCell", std::max(s.MinCell, 0.0f));
     shader.SetFloat("uMajorEvery", (float)std::max(s.MajorEvery, 2));
     shader.SetVec3("uMinorColor", s.MinorColor);
     shader.SetVec3("uMajorColor", s.MajorColor);
