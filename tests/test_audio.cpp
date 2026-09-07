@@ -27,6 +27,7 @@
 #include "sage/audio/AudioComponents.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/audio/AudioSystem.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
@@ -263,6 +264,49 @@ TEST(Audio_source_really_plays_and_stops) {
     sage::audio::StopScene(*scene, engine);
     CHECK_TRUE(!au.Playing);
     std::filesystem::remove_all(dir, ec);
+}
+
+// --- Звук по ссылке ПРОЕКТА, а не по пути от каталога процесса --------------
+//
+// Клип у компонента хранится относительно проекта («assets/audio/creak.wav»), а
+// звуковая подсистема открывала файл относительно каталога, из которого запущен
+// процесс. В собранной игре это одно и то же место, и разницы не видно; в
+// редакторе, запущенном из своей папки, не звучало НИЧЕГО — и не звучало молча,
+// потому что ошибки как таковой не происходило.
+//
+// Проверяется разбором, а не проигрыванием: разбор работает и на машине без
+// звуковой карты, а дорога к файлу у них с проигрыванием одна.
+TEST(Audio_resolves_a_project_relative_path) {
+    std::error_code ec;
+    const std::filesystem::path project =
+        std::filesystem::temp_directory_path(ec) / "sage_audio_project";
+    std::filesystem::remove_all(project, ec);
+    const std::filesystem::path inner = project / "sounds";
+    std::filesystem::create_directories(inner, ec);
+    CHECK_TRUE(WriteTestWav(inner / "beep.wav"));
+
+    sage::AssetDatabase::Instance().ScanProject(project.string());
+
+    std::vector<float> samples;
+    int rate = 0;
+    // Ровно та строка, которую держит AudioSourceComponent::Clip.
+    CHECK_TRUE(AudioEngine::DecodeToMono("sounds/beep.wav", samples, rate));
+    CHECK_TRUE(rate > 0);
+    CHECK_TRUE(!samples.empty());
+
+    // Настоящий путь при этом продолжает работать: ссылка проекта — дополнение,
+    // а не замена (инструменты и тесты ходят абсолютными путями).
+    std::vector<float> direct;
+    int directRate = 0;
+    CHECK_TRUE(AudioEngine::DecodeToMono((inner / "beep.wav").string(), direct, directRate));
+    CHECK_EQ(directRate, rate);
+
+    // Несуществующий файл остаётся несуществующим — резолвер не выдумывает.
+    std::vector<float> missing;
+    int missingRate = 0;
+    CHECK_TRUE(!AudioEngine::DecodeToMono("sounds/nope.wav", missing, missingRate));
+
+    std::filesystem::remove_all(project, ec);
 }
 
 } // namespace

@@ -12,6 +12,7 @@
 #include "sage/input/InputSystem.h"
 
 class Project;
+class AudioEngine;
 
 // Состояние Play-режима редактора (см. EditorLayer): вынесено из класса,
 // чтобы панели зависели от контракта EditorHost, а не от EditorLayer.
@@ -340,6 +341,13 @@ public:
 
     // --- выбор в Assets (нужен Inspector'у для назначения материала) ---
     virtual const std::filesystem::path& SelectedAssetPath() const = 0;
+
+    // Звуковое устройство редактора. Одно на весь редактор и живёт всегда, а
+    // не только в Play: им работает и кнопка «Послушать» у компонента, и
+    // проигрыватель звуковых файлов. Может быть «немым» (нет звуковой карты) —
+    // тогда вызовы безопасно ничего не делают, см. AudioEngine::IsAvailable.
+    // nullptr не возвращает.
+    virtual AudioEngine* Audio() = 0;
 
     // --- ЗАМОК ПАНЕЛИ СВОЙСТВ -----------------------------------------------
     //

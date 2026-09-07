@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
 
 // Только ОБЪЯВЛЕНИЯ miniaudio — реализация (MINIAUDIO_IMPLEMENTATION) собрана
@@ -53,11 +54,25 @@ struct AudioEngine::Impl {
         return GroupsInited[idx] ? &Groups[idx] : nullptr;
     }
 
-    void WarnOnce(const std::string& path, ma_result result) {
-        if (WarnedPaths.insert(path).second) {
-            LOG_WARN("Audio") << "Не удалось загрузить звук '" << path
-                              << "' (код " << (int)result << ") — пропускаю";
+    // ПОЧЕМУ НЕ ЗАИГРАЛО — одной строкой и с указанием, что именно проверять.
+    //
+    // Раньше здесь был код miniaudio и слово «пропускаю». По коду 2 («файл не
+    // найден») человек не может отличить опечатку в пути от того, что путь
+    // относительный, а редактор запущен из другой папки, — а это два разных
+    // действия. Поэтому в строке стоит и то, что просили, и то, во что это
+    // превратилось, и человеческая причина.
+    void WarnOnce(const std::string& ref, const std::string& resolved, ma_result result) {
+        if (!WarnedPaths.insert(ref).second) return;
+        const char* why = "";
+        switch (result) {
+            case MA_DOES_NOT_EXIST: why = "файла нет по этому пути"; break;
+            case MA_ACCESS_DENIED:  why = "нет доступа к файлу"; break;
+            case MA_INVALID_FILE:   why = "формат не разобран (нужны wav, mp3, flac или ogg)"; break;
+            case MA_OUT_OF_MEMORY:  why = "не хватило памяти"; break;
+            default:                why = "звуковая подсистема отказала"; break;
         }
+        LOG_ERROR("Audio") << "Звук не запущен: '" << ref << "' -> '" << resolved << "' — " << why
+                           << " (miniaudio " << (int)result << ")";
     }
 
     // Создаёт и запускает ma_sound из файла. streaming=true для музыки
@@ -67,14 +82,27 @@ struct AudioEngine::Impl {
         ma_uint32 flags = streaming ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
         if (!spatial) flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
 
+        // ССЫЛКА ПРОЕКТА -> ПУТЬ, КОТОРЫЙ ОТКРОЕТСЯ. Клип у компонента хранится
+        // относительно проекта («assets/audio/creak.wav»), а miniaudio открывает
+        // файл относительно каталога процесса — то есть папки с exe. Играя из
+        // игры, собранной рядом с проектом, разницы не видно; в редакторе,
+        // запущенном из Downloads, не звучало НИЧЕГО. Ровно так же ходят за
+        // своими файлами модели, текстуры и материалы.
+        const std::string resolved = sage::AssetDatabase::Instance().LocatePath(path);
+
         auto* sound = new ma_sound{};
-        ma_result r = ma_sound_init_from_file(&Engine, path.c_str(), flags,
+        ma_result r = ma_sound_init_from_file(&Engine, resolved.c_str(), flags,
                                               GroupFor(cat), nullptr, sound);
         if (r != MA_SUCCESS) {
             delete sound;
-            WarnOnce(path, r);
+            WarnOnce(path, resolved, r);
             return nullptr;
         }
+        LOG_DEBUG("Audio") << "Звук запущен: '" << path << "'"
+                           << (resolved == path ? std::string() : " -> '" + resolved + "'")
+                           << ", громкость " << volume << (looping ? ", зациклен" : "")
+                           << (spatial ? ", позиционный" : ", непозиционный")
+                           << (streaming ? ", потоком" : "");
 
         ma_sound_set_volume(sound, kClamp01(volume));
         ma_sound_set_looping(sound, looping ? MA_TRUE : MA_FALSE);
@@ -223,6 +251,37 @@ bool AudioEngine::IsSoundPlaying(SoundHandle handle) const {
     return it != m_impl->Managed.end() && ma_sound_is_playing(it->second) == MA_TRUE;
 }
 
+// --- Где мы внутри звука ----------------------------------------------------
+//
+// Нужно проигрывателю: полоса с бегунком без длительности и позиции — просто
+// кнопка «играть». Спрашивается у miniaudio, а не считается по времени кадра:
+// звук идёт своим потоком со своей частотой, и счётчик кадров с ним разъедется
+// тем сильнее, чем дольше играет.
+float AudioEngine::SoundPosition(SoundHandle handle) const {
+    auto it = m_impl->Managed.find(handle);
+    if (it == m_impl->Managed.end()) return 0.0f;
+    float seconds = 0.0f;
+    if (ma_sound_get_cursor_in_seconds(it->second, &seconds) != MA_SUCCESS) return 0.0f;
+    return seconds;
+}
+
+float AudioEngine::SoundLength(SoundHandle handle) const {
+    auto it = m_impl->Managed.find(handle);
+    if (it == m_impl->Managed.end()) return 0.0f;
+    float seconds = 0.0f;
+    if (ma_sound_get_length_in_seconds(it->second, &seconds) != MA_SUCCESS) return 0.0f;
+    return seconds;
+}
+
+void AudioEngine::SeekSound(SoundHandle handle, float seconds) {
+    auto it = m_impl->Managed.find(handle);
+    if (it == m_impl->Managed.end()) return;
+    const ma_uint32 rate = ma_engine_get_sample_rate(&m_impl->Engine);
+    if (rate == 0) return;
+    if (seconds < 0.0f) seconds = 0.0f;
+    ma_sound_seek_to_pcm_frame(it->second, (ma_uint64)(seconds * (float)rate));
+}
+
 void AudioEngine::SetListener(const glm::vec3& position, const glm::vec3& forward, const glm::vec3& up) {
     if (!m_impl->Available) return;
     ma_engine_listener_set_position(&m_impl->Engine, 0, position.x, position.y, position.z);
@@ -299,15 +358,21 @@ bool AudioEngine::DecodeToMono(const std::string& path, std::vector<float>& outS
                                int& outSampleRate) {
     // Просим float32: волне нужна амплитуда, а не исходная разрядность, и
     // конвертацию miniaudio делает сам — надёжнее, чем разбирать форматы руками.
+    // Ссылка проекта разрешается так же, как при проигрывании: инструмент,
+    // который РИСУЕТ волну по файлу, и движок, который его ИГРАЕТ, обязаны
+    // понимать одну и ту же строку. Иначе звук слышно, а волны для него нет —
+    // и выглядит это как «формат не поддержан».
+    const std::string resolved = sage::AssetDatabase::Instance().LocatePath(path);
     ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
     ma_decoder decoder;
-    if (ma_decoder_init_file(path.c_str(), &config, &decoder) != MA_SUCCESS) {
-        LOG_WARN("Audio") << "Не удалось открыть для разбора: " << path;
+    if (ma_decoder_init_file(resolved.c_str(), &config, &decoder) != MA_SUCCESS) {
+        LOG_WARN("Audio") << "Не удалось открыть для разбора: '" << path << "' -> '" << resolved
+                          << "'";
         return false;
     }
     const bool ok = DecodeAllToMono(decoder, outSamples, outSampleRate);
     ma_decoder_uninit(&decoder);
-    if (!ok) LOG_WARN("Audio") << "Файл открылся, но сэмплов не дал: " << path;
+    if (!ok) LOG_WARN("Audio") << "Файл открылся, но сэмплов не дал: " << resolved;
     return ok;
 }
 

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1347.
+// Язык: Русский. Строк: 1352.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -30,6 +30,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "%.1f КиБ"},
     {"%.1f MiB",
      "%.1f МиБ"},
+    {"%.2f of %.2f s",
+     "%.2f из %.2f с"},
     {"%llu B",
      "%llu Б"},
     {"%s -> %s (%.1fx smaller)",
@@ -1200,6 +1202,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Слева направо"},
     {"Legacy",
      "Устаревшее"},
+    {"Length unknown — the file did not decode.",
+     "Длительность неизвестна — файл не разобран."},
     {"Light",
      "Свет"},
     {"Light Shafts",
@@ -1216,6 +1220,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Линейный туман по дальности (виден в режиме Shaded)"},
     {"List",
      "Списком"},
+    {"Listen to it right here — no need to put it on an object first.",
+     "Слушается прямо здесь — ставить его на объект ради проверки не нужно."},
     {"Lit by object: %s",
      "Светит объект: %s"},
     {"Load",
@@ -1430,6 +1436,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт не прикреплён"},
     {"No sound attached",
      "Звук не прикреплён"},
+    {"No sound device — nothing will be heard here.",
+     "Звукового устройства нет — здесь ничего не будет слышно."},
     {"No such file: ",
      "Файла нет: "},
     {"No templates installed",
@@ -2282,6 +2290,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Файл удалён или повреждён — подробности в консоли."},
     {"The file is missing. Put it back or reassign the asset —\nonly the .meta sidecar could have caught a rename made outside the editor.",
      "Файла нет. Верните его на место или переназначьте ассет —\nпереименование мимо редактора мог поймать только сайдкар .meta."},
+    {"The file itself is fine; the reason is in the log.",
+     "С самим файлом при этом всё в порядке, причина — в логе."},
     {"The filter matched nothing",
      "Ничего не найдено по фильтру"},
     {"The folder already contains ",

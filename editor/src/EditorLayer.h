@@ -264,6 +264,10 @@ public:
     const std::filesystem::path& SelectedAssetPath() const override { return m_assets.Selected(); }
     void ShowAssetInPanel(const std::filesystem::path& path) override;
 
+    // Устройство заводится на старте редактора вместе с остальными системами
+    // режима правки (см. EditorLayer::OnAttach) и живёт до конца.
+    AudioEngine* Audio() override { return m_playAudio.get(); }
+
     // --- EditorHost: замок панели свойств (см. EditorHost.h) ---
     bool InspectorLocked() const override { return m_inspectorLocked; }
     void SetInspectorLocked(bool locked) override;
