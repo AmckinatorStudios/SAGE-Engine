@@ -35,6 +35,8 @@
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkinnedModel.h"
+#include "sage/render/SkyDraw.h"
+#include "sage/render/SkyModel.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -630,6 +632,100 @@ void TestSkyRayDirection() {
     Check(worst <= 8.0, "луч неба совпадает с лучом камеры");
 }
 
+// --- Небо: ночь обязана быть ночью -------------------------------------------
+//
+// Жалоба звучала так: «солнце садится, а освещение не меняется — только звёзды
+// и луна появляются». В коде это выглядело буквально: небо рисовалось цветами
+// ИЗ НАСТРОЕК (Skybox.TopColor/HorizonColor), а они постоянные, поэтому кадр
+// оставался полуденным при любом положении солнца.
+//
+// Проверка идёт через ВЕСЬ путь — настройки, модель времени суток, общий вызов
+// отрисовки неба, шейдер, пиксели, — а не через одну арифметику: числовые
+// проверки лежат в sage_tests (tests/test_sky.cpp), а здесь важно, что до
+// кадра эти числа действительно доходят. На прежнем коде обе картинки
+// совпадали бы попиксельно.
+void TestSkyNightIsDark() {
+    SkyRenderer sky;
+    constexpr int w = 256, h = 192;
+    const float fov = glm::radians(60.0f);
+    const glm::mat4 proj = glm::perspective(fov, (float)w / (float)h, 0.1f, 500.0f);
+    // Камера смотрит по горизонту вдоль -Z. Солнце — впереди: днём высоко
+    // (выше верхнего края кадра), ночью глубоко под горизонтом (ниже нижнего).
+    // Тогда в кадре нет ни диска солнца, ни диска луны, и всё, что ярче фона, —
+    // звёзды. Без этого «яркая точка» означала бы что угодно.
+    const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, -1.0f),
+                                       glm::vec3(0.0f, 1.0f, 0.0f));
+
+    auto envWithSunAt = [](float elevationDeg) {
+        LightingEnvironment env;
+        env.Skybox.Enabled = true;
+        env.Skybox.Kind = SkyboxSettings::Source::Procedural;
+        env.Skybox.DayNight = true;
+        env.Skybox.Celestials = true;
+        env.Skybox.StarIntensity = 1.0f;
+        const float rad = glm::radians(elevationDeg);
+        // У направленного света хранится, КУДА он светит: солнце над горизонтом
+        // светит вниз, значит направление на него — противоположное.
+        env.Sun.Direction = -glm::normalize(glm::vec3(0.0f, std::sin(rad), -std::cos(rad)));
+        env.Sun.Intensity = 1.0f;
+        sage::render::ApplySky(env);
+        return env;
+    };
+
+    auto shoot = [&](const LightingEnvironment& env) {
+        Framebuffer fbo(w, h);
+        fbo.Bind();
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        sage::render::DrawSceneSky(sky, env, view, proj);
+        Image img = Capture(w, h);
+        device.BindDefaultFramebuffer();
+        return img;
+    };
+
+    auto luma = [](const Image& img, size_t px) {
+        const unsigned char* p = &img.Pixels[px * 3];
+        return (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255.0;
+    };
+    auto mean = [&](const Image& img) {
+        double sum = 0.0;
+        const size_t n = (size_t)img.Width * img.Height;
+        for (size_t i = 0; i < n; ++i) sum += luma(img, i);
+        return sum / (double)n;
+    };
+    // «Звёзды» — точки заметно ярче собственного фона кадра. Порог берётся от
+    // среднего именно этого кадра, а не абсолютный: иначе проверка развалилась
+    // бы от любой правки ночных цветов.
+    auto sparkles = [&](const Image& img, double avg) {
+        int count = 0;
+        const size_t n = (size_t)img.Width * img.Height;
+        for (size_t i = 0; i < n; ++i)
+            if (luma(img, i) > avg + 0.12) ++count;
+        return count;
+    };
+
+    const LightingEnvironment day = envWithSunAt(60.0f);
+    const LightingEnvironment night = envWithSunAt(-35.0f);
+    const Image dayImg = shoot(day);
+    const Image nightImg = shoot(night);
+
+    const double dayAvg = mean(dayImg);
+    const double nightAvg = mean(nightImg);
+    const int dayStars = sparkles(dayImg, dayAvg);
+    const int nightStars = sparkles(nightImg, nightAvg);
+    std::printf("       небо: день %.3f, ночь %.3f (%.0f%% от дня), звёзд днём %d, ночью %d\n",
+                dayAvg, nightAvg, dayAvg > 1e-6 ? nightAvg / dayAvg * 100.0 : 0.0, dayStars,
+                nightStars);
+
+    Check(nightAvg < dayAvg * 0.35, "ночное небо темнее дневного");
+    // Ночь тёмная, но не чёрная: в чёрном кадре не видно силуэтов, и это уже
+    // не ночь, а выключенный рендер.
+    Check(nightAvg > 0.004, "ночное небо не чёрное");
+    Check(nightStars > 20, "ночью на небе есть звёзды");
+    Check(dayStars == 0, "днём звёзд не видно");
+}
+
 // --- Соответствие RHI на НАСТОЯЩЕМ бэкенде ------------------------------------
 //
 // Тот же контракт, что sage_tests гоняет по Null, — но здесь есть контекст, и
@@ -662,6 +758,7 @@ void RunSceneChecks(FrameRenderer& r) {
     TestOcclusionDoesNotEatShadows();
     TestAssetCache();
     TestSkyRayDirection();
+    TestSkyNightIsDark();
     TestRhiConformance();
 }
 

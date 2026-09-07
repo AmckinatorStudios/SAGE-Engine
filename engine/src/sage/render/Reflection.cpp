@@ -2,6 +2,7 @@
 #include "sage/core/Profiler.h"
 
 #include <algorithm>
+#include <string>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -84,7 +85,10 @@ void EnvironmentMap::CaptureSky(SkyRenderer& sky, const LightingEnvironment& env
         dev.Clear(true, true);
         const glm::mat4 view = FaceView(face, glm::vec3(0.0f));
         if (cubemap) cubemap->Draw(view, proj, env.Skybox.Intensity, env.Skybox.RotationDeg);
-        else sky.Draw(view, proj, env.Skybox.TopColor, env.Skybox.HorizonColor);
+        // ЦВЕТА РАЗРЕШЁННЫЕ, а не авторские: в них учтено время суток (см.
+        // sage/render/SkyModel.h). С полями настроек вода ночью отражала бы
+        // полуденное небо — то есть светилась бы ярче, чем всё вокруг.
+        else sky.Draw(view, proj, env.SkyTop(), env.SkyHorizon());
     }
     m_cube->GenerateMips();
 }
@@ -172,17 +176,27 @@ void ReflectionSystem::UpdateSky(SkyRenderer& sky, const LightingEnvironment& en
     // Пересъёмка только на изменение неба. Сравнение по ЗНАЧЕНИЯМ, а не по
     // флагу «поменялось»: небо правит и редактор, и скрипт, и загрузка сцены,
     // и уговориться, что все они дёргают флаг, не выйдет.
-    const std::string& dir = cubemap ? env.Skybox.CubemapDir : std::string();
-    if (m_captured && m_skyTop == env.Skybox.TopColor &&
-        m_skyHorizon == env.Skybox.HorizonColor && m_skyCubemap == dir &&
+    // Ключ описывает ИСТОЧНИК неба целиком, а не только путь к каталогу: в
+    // режиме «по кусочкам» каталога нет вовсе, а оставшаяся от прежнего режима
+    // строка одинакова для любых шести файлов — по ней смена набора выглядела
+    // бы как «ничего не изменилось», и вода отражала бы прежнее небо.
+    std::string dir;
+    if (cubemap) {
+        dir = std::to_string((int)env.Skybox.Kind) + "|" + env.Skybox.CubemapDir;
+        for (int i = 0; i < 6; ++i) dir += "|" + env.Skybox.FacePaths[i];
+    }
+    // Сравниваются РАЗРЕШЁННЫЕ цвета: по авторским куб не пересняли бы ни разу
+    // за весь заход солнца — они не меняются, меняется время суток.
+    if (m_captured && m_skyTop == env.SkyTop() &&
+        m_skyHorizon == env.SkyHorizon() && m_skyCubemap == dir &&
         m_skyIntensity == env.Skybox.Intensity && m_skyRotation == env.Skybox.RotationDeg) {
         return;
     }
     EnvironmentMap& e = Ensure();
     if (!e.Valid()) return;
     e.CaptureSky(sky, env, cubemap);
-    m_skyTop = env.Skybox.TopColor;
-    m_skyHorizon = env.Skybox.HorizonColor;
+    m_skyTop = env.SkyTop();
+    m_skyHorizon = env.SkyHorizon();
     m_skyCubemap = dir;
     m_skyIntensity = env.Skybox.Intensity;
     m_skyRotation = env.Skybox.RotationDeg;

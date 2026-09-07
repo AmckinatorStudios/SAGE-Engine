@@ -12,6 +12,10 @@
 #include "sage/physics/PhysicsTypes.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
+#include "sage/render/SkyModel.h"
+#include "../Project.h"
+#include <cstdio>
+#include <cmath>
 #include "../Localization.h"
 
 EnvironmentPanel::~EnvironmentPanel() {
@@ -153,27 +157,23 @@ void EnvironmentPanel::DrawGISection(EditorHost& host) {
 // бывает: сущность можно повернуть гизмо, привязать к родителю и анимировать, а
 // три поля в панели про это не знают. Панель, которая правит одно, а показывает
 // другое, — худший вид удобства.
-void EnvironmentPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironment& env) {
-    if (!EditorTheme::SectionHeader(T("Sun" "###Sun"), ImGuiTreeNodeFlags_DefaultOpen)) return;
-
-    // Ищем то же солнце, что возьмёт рендер: направленный свет с наименьшим id
-    // (см. sage::ecs::CollectLighting).
-    entt::registry& reg = scene.Registry();
-    int sunId = 0;
-    entt::entity sunEntity = entt::null;
-    for (auto e : reg.view<LightComponent>()) {
-        const LightComponent& lc = reg.get<LightComponent>(e);
-        if (lc.Kind != LightComponent::Type::Directional) continue;
-        const IdComponent* id = reg.try_get<IdComponent>(e);
-        const int candidate = id ? id->Id : 0;
-        if (sunEntity != entt::null && candidate >= sunId) continue;
-        sunEntity = e;
-        sunId = candidate;
-    }
+// Солнце — ОБЪЕКТ СЦЕНЫ, и время суток задаётся его поворотом.
+//
+// Здесь не настройки солнца, а дорога к нему: полей солнца в этом окне нет и
+// быть не должно (их правит инспектор объекта). Но процедурное небо целиком
+// зависит от того, где солнце стоит, и человек, пришедший «сделать ночь»,
+// должен из этого места попасть к нужной ручке за одно нажатие, а не искать
+// объект в иерархии по названию.
+void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env) {
+    (void)env;
+    // СОЛНЦЕ ИЩЕТ ДВИЖОК, а не панель: правило «солнце — направленный свет с
+    // наименьшим Id» одно на весь редактор и рантайм, и вторая его копия здесь
+    // однажды разошлась бы с первой — панель показывала бы один объект, а
+    // светил бы другой.
+    const entt::entity sunEntity = sage::ecs::FindSunEntity(scene);
 
     if (sunEntity == entt::null) {
-        ImGui::TextWrapped("%s", T("No directional light in the scene — no sun. Direction, colour and intensity "
-          "live on the object itself."));
+        ImGui::TextWrapped("%s", T("No directional light — no sun and no time of day."));
         if (ImGui::Button(T("Create a sun"))) {
             host.PushUndoSnapshot();
             GameObject sun = scene.CreateObject("Sun");
@@ -184,20 +184,192 @@ void EnvironmentPanel::DrawSun(EditorHost& host, Scene& scene, LightingEnvironme
             lc.Kind = LightComponent::Type::Directional;
             lc.Color = {1.0f, 0.95f, 0.85f};
             lc.Intensity = 1.0f;
-            reg.emplace<LightComponent>(sun.Entity(), lc);
+            scene.Registry().emplace<LightComponent>(sun.Entity(), lc);
             host.SetSelectedId(sun.Id());
         }
         return;
     }
 
-    const LightComponent& lc = reg.get<LightComponent>(sunEntity);
-    const NameComponent* name = reg.try_get<NameComponent>(sunEntity);
-    ImGui::Text(T("Lit by object: %s"), name ? name->Name.c_str() : "?");
+    // ЧТО СЕЙЧАС НА НЕБЕ — словами и числом. Без этого «почему у меня темно»
+    // проверяется только методом тыка: высота солнца не написана нигде, а по
+    // трём числам поворота её в уме не считают.
+    //
+    // Состояние берётся ЧЕРЕЗ СБОР ОСВЕЩЕНИЯ КАДРА, а не из scene.Lighting.Sun:
+    // там лежит поле окружения, которое кадр не трогает, — светит объект-солнце,
+    // и его поворот в это поле не попадает. Панель, читающая его напрямую,
+    // показывала бы час, не имеющий отношения к картинке.
+    const LightingEnvironment frame = sage::ecs::CollectLighting(scene);
+    const sage::render::SkyState state = sage::render::EvaluateSky(frame);
+    const float elevationDeg = glm::degrees(std::asin(glm::clamp(state.SunDirection.y, -1.0f, 1.0f)));
+    const char* phase = state.DayFactor > 0.85f  ? T("day")
+                        : state.DayFactor > 0.15f ? T("twilight")
+                                                  : T("night");
+    ImGui::Text(T("Now: %s (sun %.0f° above the horizon)"), phase, elevationDeg);
+    const NameComponent* name = scene.Registry().try_get<NameComponent>(sunEntity);
+    const IdComponent* id = scene.Registry().try_get<IdComponent>(sunEntity);
+    ImGui::TextDisabled(T("Time of day = rotation of the object \"%s\""),
+                        name ? name->Name.c_str() : "?");
     ImGui::SameLine();
-    if (ImGui::Button(T("Select"))) host.SetSelectedId(sunId);
-    ImGui::Text(T("Intensity %.2f, direction (%.2f, %.2f, %.2f)"), lc.Intensity,
-                env.Sun.Direction.x, env.Sun.Direction.y, env.Sun.Direction.z);
-    ImGui::TextDisabled("%s", T("Edited in the object inspector; direction is its rotation"));
+    if (ImGui::Button(T("Select"))) host.SetSelectedId(id ? id->Id : 0);
+}
+
+// --- НЕБО ------------------------------------------------------------------
+void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env) {
+    if (!EditorTheme::SectionHeader(T("Sky" "###Sky"), ImGuiTreeNodeFlags_DefaultOpen)) return;
+    SkyboxSettings& sky = env.Skybox;
+
+    if (ImGui::Checkbox(T("Enable Sky"), &sky.Enabled)) host.PushUndoSnapshot();
+    if (!sky.Enabled) {
+        ImGui::TextDisabled("%s", T("Background is a flat colour; ambient uses its own values"));
+        return;
+    }
+
+    // РЕЖИМ — первым делом: от него зависит, какие настройки вообще имеют смысл.
+    const char* kModes[] = {T("Procedural"), T("Cubemap folder"), T("Six separate files")};
+    int mode = (int)sky.Kind;
+    if (ImGui::Combo(T("Source"), &mode, kModes, 3)) {
+        host.PushUndoSnapshot();
+        sky.Kind = (SkyboxSettings::Source)mode;
+        // Пути НЕ стираются при переключении: вернуться к своему набору неба
+        // надо уметь без повторного выбора папки.
+    }
+
+    if (sky.Kind == SkyboxSettings::Source::Procedural) {
+        DrawSunLink(host, host.CurrentScene(), env);
+        ImGui::Separator();
+
+        if (ImGui::Checkbox(T("Day and night"), &sky.DayNight)) host.PushUndoSnapshot();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Sky colours AND the scene's light follow the sun's height:\n"
+                                      "below the horizon it really gets dark, and the moon takes over.\n"
+                                      "Turn off for a scene lit at a fixed staged angle."));
+        }
+
+        ImGui::TextDisabled("%s", T("Daytime"));
+        ImGui::ColorEdit3(T("Zenith"), &sky.TopColor.x); host.TrackLastImGuiItem();
+        ImGui::ColorEdit3(T("Horizon"), &sky.HorizonColor.x); host.TrackLastImGuiItem();
+        if (sky.DayNight) {
+            ImGui::TextDisabled("%s", T("Night"));
+            ImGui::ColorEdit3(T("Zenith (night)"), &sky.NightTopColor.x); host.TrackLastImGuiItem();
+            ImGui::ColorEdit3(T("Horizon (night)"), &sky.NightHorizonColor.x);
+            host.TrackLastImGuiItem();
+            ImGui::ColorEdit3(T("Sunset glow"), &sky.DuskColor.x); host.TrackLastImGuiItem();
+            ImGui::ColorEdit3(T("Moonlight"), &sky.MoonlightColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Moonlight strength"), &sky.MoonlightIntensity, 0.005f, 0.0f, 1.0f,
+                             "%.3f");
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("At night the moon becomes the scene's light: it casts\n"
+                                          "the shadows and sets how dark the night is."));
+            }
+        }
+
+        ImGui::Separator();
+        if (ImGui::Checkbox(T("Sun and moon in the sky"), &sky.Celestials)) host.PushUndoSnapshot();
+        if (sky.Celestials) {
+            // Цвет и направление диска солнца — у объекта-солнца; здесь только
+            // то, что принадлежит НЕБУ: размер диска, луна, звёзды.
+            ImGui::ColorEdit3(T("Sun disc colour"), &sky.SunColor.x); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Sun size"), &sky.SunSize, 0.002f, 0.005f, 0.4f, "%.3f");
+            host.TrackLastImGuiItem();
+            if (ImGui::Checkbox(T("Moon"), &sky.Moon)) host.PushUndoSnapshot();
+            if (sky.Moon) {
+                ImGui::ColorEdit3(T("Moon colour"), &sky.MoonColor.x); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Moon size"), &sky.MoonSize, 0.002f, 0.005f, 0.4f, "%.3f");
+                host.TrackLastImGuiItem();
+            }
+            ImGui::DragFloat(T("Stars"), &sky.StarIntensity, 0.02f, 0.0f, 3.0f, "%.2f");
+            host.TrackLastImGuiItem();
+        }
+        return;
+    }
+
+    // --- Текстурное небо ---------------------------------------------------
+    if (sky.Kind == SkyboxSettings::Source::Cubemap) {
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "%s", sky.CubemapDir.c_str());
+        if (ImGui::InputText(T("Folder"), buf, sizeof(buf))) sky.CubemapDir = buf;
+        host.TrackLastImGuiItem();
+        ImGui::SameLine();
+        if (ImGui::Button(T("Browse..."))) {
+            FileBrowser::Config c;
+            c.Title = T("Choose a sky folder");
+            c.Mode = FileBrowser::PickMode::PickFolder;
+            c.StartDir = host.CurrentProject().AssetsDir();
+            m_browser.Open(c);
+            m_skyPick = -1;
+        }
+        ImGui::TextDisabled("%s", T("Six faces named px, nx, py, ny, pz, nz"));
+    } else {
+        // Шесть отдельных файлов: имена чужого набора трогать не нужно.
+        // НЕ static: язык интерфейса переключается на ходу, а статический
+        // массив запомнил бы подписи того языка, при котором панель открыли
+        // впервые.
+        const char* kFaceLabels[6] = {T("Right (+X)"), T("Left (-X)"), T("Up (+Y)"),
+                                      T("Down (-Y)"),  T("Front (+Z)"), T("Back (-Z)")};
+        for (int i = 0; i < 6; ++i) {
+            ImGui::PushID(i);
+            char buf[512];
+            std::snprintf(buf, sizeof(buf), "%s", sky.FacePaths[i].c_str());
+            if (ImGui::InputText(kFaceLabels[i], buf, sizeof(buf))) sky.FacePaths[i] = buf;
+            host.TrackLastImGuiItem();
+            ImGui::SameLine();
+            if (ImGui::Button(T("..."))) {
+                FileBrowser::Config c;
+                c.Title = kFaceLabels[i];
+                c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};
+                c.FilterLabel = T("Images");
+                c.StartDir = host.CurrentProject().AssetsDir();
+                m_browser.Open(c);
+                m_skyPick = i;
+            }
+            ImGui::PopID();
+        }
+        if (!sky.HasFaces())
+            ImGui::TextDisabled("%s", T("Fill all six — the sky needs every face"));
+    }
+
+    ImGui::DragFloat(T("Brightness"), &sky.Intensity, 0.01f, 0.0f, 4.0f); host.TrackLastImGuiItem();
+    ImGui::DragFloat(T("Rotation"), &sky.RotationDeg, 0.5f, -360.0f, 360.0f, "%.0f°");
+    host.TrackLastImGuiItem();
+    ImGui::TextDisabled("%s", T("Time of day is baked into the images — the day/night model does "
+                                "not touch a textured sky."));
+}
+
+// --- ОКРУЖАЮЩИЙ СВЕТ -------------------------------------------------------
+void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment& env) {
+    if (!EditorTheme::SectionHeader(T("Ambient light" "###Ambient light"),
+                                    ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    const char* kModes[] = {T("From the sky"), T("Custom values")};
+    int mode = (int)env.AmbientMode;
+    if (ImGui::Combo(T("Source##ambient"), &mode, kModes, 2)) {
+        host.PushUndoSnapshot();
+        env.AmbientMode = (LightingEnvironment::AmbientSource)mode;
+    }
+
+    if (env.AmbientMode == LightingEnvironment::AmbientSource::FromSky && env.Skybox.Enabled) {
+        // Показываем РЕЗУЛЬТАТ, а не поля: значения считаются из неба и времени
+        // суток, и правка полей ниже на них не влияет. Серые нередактируемые
+        // образцы честнее, чем активные ползунки, которые ничего не делают.
+        glm::vec3 skyC, groundC;
+        env.ResolveAmbient(skyC, groundC);
+        ImGui::ColorEdit3(T("Sky (computed)"), &skyC.x, ImGuiColorEditFlags_NoInputs |
+                                                            ImGuiColorEditFlags_NoPicker);
+        ImGui::ColorEdit3(T("Ground (computed)"), &groundC.x, ImGuiColorEditFlags_NoInputs |
+                                                                  ImGuiColorEditFlags_NoPicker);
+        ImGui::TextDisabled("%s", T("Taken from the sky, so it darkens with it"));
+    } else {
+        if (env.AmbientMode == LightingEnvironment::AmbientSource::FromSky) {
+            ImGui::TextDisabled("%s", T("The sky is off — own values are used"));
+        }
+        ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();
+        ImGui::ColorEdit3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
+    }
+    ImGui::DragFloat(T("Strength"), &env.AmbientStrength, 0.01f, 0.0f, 2.0f);
+    host.TrackLastImGuiItem();
+    ImGui::TextDisabled("%s", T("Sky tints upward faces, Ground — downward"));
 }
 
 void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
@@ -205,6 +377,21 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     LightingEnvironment& env = scene.Lighting;
 
     ImGui::Begin(T("Environment" "###Lighting"), open);
+
+    // Ответ диалога приходит ЧЕРЕЗ КАДР, поэтому цель выбора хранится числом, а
+    // не указателем на поле: за этот кадр сцену могли перезагрузить (откат,
+    // открытие другой), и указатель повис бы.
+    if (m_browser.Draw()) {
+        const std::string picked = host.CurrentProject().AssetRef(m_browser.Result());
+        if (m_skyPick == -1) {
+            host.PushUndoSnapshot();
+            env.Skybox.CubemapDir = picked;
+        } else if (m_skyPick >= 0 && m_skyPick < 6) {
+            host.PushUndoSnapshot();
+            env.Skybox.FacePaths[m_skyPick] = picked;
+        }
+        m_skyPick = -2;
+    }
 
     // ГДЕ ЧТО НАСТРАИВАЕТСЯ — первым же абзацем.
     //
@@ -227,48 +414,8 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     ImGui::PopStyleColor();
     ImGui::Separator();
 
-    if (EditorTheme::SectionHeader(T("Ambient (hemisphere)" "###Ambient (hemisphere)"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();
-        ImGui::ColorEdit3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Strength"), &env.AmbientStrength, 0.01f, 0.0f, 2.0f); host.TrackLastImGuiItem();
-        ImGui::TextDisabled("%s", T("Sky tints upward faces, Ground — downward"));
-    }
-
-    DrawSun(host, scene, env);
-
-    if (EditorTheme::SectionHeader(T("Skybox" "###Skybox"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::Checkbox(T("Enable Skybox"), &env.Skybox.Enabled)) host.PushUndoSnapshot();
-        ImGui::ColorEdit3(T("Sky Top"), &env.Skybox.TopColor.x); host.TrackLastImGuiItem();
-        ImGui::ColorEdit3(T("Sky Horizon"), &env.Skybox.HorizonColor.x); host.TrackLastImGuiItem();
-
-        // Светила. Направление НЕ дублируется: солнце на небе рисуется по тому
-        // же DirectionalLight, который освещает сцену, — иначе тени и солнце
-        // рано или поздно разъедутся.
-        ImGui::Separator();
-        if (ImGui::Checkbox(T("Sun and moon in the sky"), &env.Skybox.Celestials))
-            host.PushUndoSnapshot();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("Sun disc along the sun direction, moon opposite it,\n"
-              "stars appear as the sun goes below the horizon."));
-        }
-        if (env.Skybox.Celestials) {
-            // Диска солнца здесь НЕТ намеренно: он принадлежит объекту-солнцу и
-            // правится в его инспекторе вместе с направлением, цветом и
-            // интенсивностью. Две ручки одного светила в разных окнах — это
-            // ровно та путаница, из-за которой окно и переделано.
-            ImGui::TextDisabled("%s", T("The sun's disc, direction and colour are on the sun "
-                                        "object — select it in the hierarchy."));
-            ImGui::Checkbox(T("Moon"), &env.Skybox.Moon);
-            if (env.Skybox.Moon) {
-                ImGui::ColorEdit3(T("Moon colour"), &env.Skybox.MoonColor.x); host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Moon size"), &env.Skybox.MoonSize, 0.002f, 0.005f, 0.4f, "%.3f");
-                host.TrackLastImGuiItem();
-            }
-            ImGui::DragFloat(T("Stars"), &env.Skybox.StarIntensity, 0.02f, 0.0f, 3.0f, "%.2f");
-            host.TrackLastImGuiItem();
-        }
-        ImGui::TextDisabled("%s", T("Procedural gradient (top -> horizon), no textures"));
-    }
+    DrawSkySection(host, env);
+    DrawAmbientSection(host, env);
 
     if (EditorTheme::SectionHeader(T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
@@ -288,25 +435,6 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     }
 
     DrawGISection(host);
-
-    if (EditorTheme::SectionHeader(T("Scene lights" "###Scene lights"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        // Света — сущности сцены (точечные/прожекторы); здесь список для
-        // навигации с пометкой типа.
-        int count = 0;
-        auto view = scene.Registry().view<LightComponent, IdComponent, NameComponent>();
-        for (auto e : view) {
-            ++count;
-            int id = view.get<IdComponent>(e).Id;
-            const LightComponent& lc = view.get<LightComponent>(e);
-            const char* tag = lc.Kind == LightComponent::Type::Spot ? "[spot] " : "[point] ";
-            std::string label = tag + view.get<NameComponent>(e).Name + "##light" + std::to_string(id);
-            if (ImGui::Selectable(label.c_str(), host.SelectedId() == id)) host.SetSelectedId(id);
-        }
-        if (count == 0) ImGui::TextDisabled("%s", T("(no light entities)"));
-        ImGui::TextDisabled("%s", T("Add via Entity > Create Light; type/params in Inspector"));
-        ImGui::TextDisabled(T("Shader limit: %d point + %d spot lights per frame"),
-                            LightingEnvironment::MaxPointLights, LightingEnvironment::MaxSpotLights);
-    }
 
     ImGui::End();
 }

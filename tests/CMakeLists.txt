@@ -45,6 +45,7 @@ add_executable(sage_tests
     test_fbx.cpp
     test_audio.cpp
     test_components_mesh_animation.cpp
+    test_sky.cpp
     test_bench.cpp
 )
 

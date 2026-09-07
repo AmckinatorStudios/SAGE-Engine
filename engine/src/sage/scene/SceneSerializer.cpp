@@ -96,6 +96,7 @@ static std::string LoadAssetRef(const json& j, const char* key) {
 
 static json LightingToJson(const LightingEnvironment& lighting) {
     json j;
+    j["ambientMode"] = (int)lighting.AmbientMode;
     j["ambientSky"] = Vec3ToJson(lighting.SkyColor);
     j["ambientGround"] = Vec3ToJson(lighting.GroundColor);
     j["ambientStrength"] = lighting.AmbientStrength;
@@ -141,9 +142,24 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["fog"]["end"] = lighting.Fog.End;
 
     j["skybox"]["enabled"] = lighting.Skybox.Enabled;
+    // РЕЖИМ НЕБА — явным полем. Раньше он выводился из того, пуст ли путь к
+    // каталогу, и «процедурное небо + сохранённый путь к набору» описать было
+    // нечем: путь приходилось стирать, то есть терять.
+    j["skybox"]["mode"] = (int)lighting.Skybox.Kind;
     j["skybox"]["top"] = Vec3ToJson(lighting.Skybox.TopColor);
     j["skybox"]["horizon"] = Vec3ToJson(lighting.Skybox.HorizonColor);
+    j["skybox"]["dayNight"] = lighting.Skybox.DayNight;
+    j["skybox"]["nightTop"] = Vec3ToJson(lighting.Skybox.NightTopColor);
+    j["skybox"]["nightHorizon"] = Vec3ToJson(lighting.Skybox.NightHorizonColor);
+    j["skybox"]["dusk"] = Vec3ToJson(lighting.Skybox.DuskColor);
+    j["skybox"]["moonlightColor"] = Vec3ToJson(lighting.Skybox.MoonlightColor);
+    j["skybox"]["moonlightIntensity"] = lighting.Skybox.MoonlightIntensity;
     j["skybox"]["cubemapDir"] = lighting.Skybox.CubemapDir;
+    {
+        json faces = json::array();
+        for (int i = 0; i < 6; ++i) faces.push_back(lighting.Skybox.FacePaths[i]);
+        j["skybox"]["faces"] = faces;
+    }
     j["skybox"]["intensity"] = lighting.Skybox.Intensity;
     j["skybox"]["rotation"] = lighting.Skybox.RotationDeg;
     j["skybox"]["celestials"] = lighting.Skybox.Celestials;
@@ -177,6 +193,11 @@ static LightingEnvironment LightingFromJson(const json& root) {
         lighting.SetFlatAmbient(Vec3FromJson(j["ambientColor"]), lighting.AmbientStrength);
     }
     lighting.AmbientStrength = j.value("ambientStrength", lighting.AmbientStrength);
+    {
+        const int mode = j.value("ambientMode", (int)lighting.AmbientMode);
+        lighting.AmbientMode = (mode == 1) ? LightingEnvironment::AmbientSource::Custom
+                                           : LightingEnvironment::AmbientSource::FromSky;
+    }
 
     if (j.contains("sun")) {
         const json& sj = j["sun"];
@@ -223,6 +244,32 @@ static LightingEnvironment LightingFromJson(const json& root) {
         if (sj.contains("top")) lighting.Skybox.TopColor = Vec3FromJson(sj["top"]);
         if (sj.contains("horizon")) lighting.Skybox.HorizonColor = Vec3FromJson(sj["horizon"]);
         lighting.Skybox.CubemapDir = sj.value("cubemapDir", lighting.Skybox.CubemapDir);
+        if (sj.contains("faces") && sj["faces"].is_array()) {
+            const json& fa = sj["faces"];
+            for (int i = 0; i < 6 && i < (int)fa.size(); ++i)
+                lighting.Skybox.FacePaths[i] = fa[(size_t)i].get<std::string>();
+        }
+        lighting.Skybox.DayNight = sj.value("dayNight", lighting.Skybox.DayNight);
+        if (sj.contains("nightTop")) lighting.Skybox.NightTopColor = Vec3FromJson(sj["nightTop"]);
+        if (sj.contains("nightHorizon"))
+            lighting.Skybox.NightHorizonColor = Vec3FromJson(sj["nightHorizon"]);
+        if (sj.contains("dusk")) lighting.Skybox.DuskColor = Vec3FromJson(sj["dusk"]);
+        if (sj.contains("moonlightColor"))
+            lighting.Skybox.MoonlightColor = Vec3FromJson(sj["moonlightColor"]);
+        lighting.Skybox.MoonlightIntensity =
+            sj.value("moonlightIntensity", lighting.Skybox.MoonlightIntensity);
+        // РЕЖИМ. Явный — из файла; иначе выводим из того, что есть, ровно по
+        // старому правилу: был путь к каталогу — значит небо было текстурным.
+        // Так сцены, сохранённые до появления режимов, открываются с тем же
+        // небом, что и раньше, а не с внезапным градиентом.
+        if (sj.contains("mode")) {
+            const int mode = sj.value("mode", 0);
+            lighting.Skybox.Kind = (mode == 1)   ? SkyboxSettings::Source::Cubemap
+                                   : (mode == 2) ? SkyboxSettings::Source::Faces
+                                                 : SkyboxSettings::Source::Procedural;
+        } else if (!lighting.Skybox.CubemapDir.empty()) {
+            lighting.Skybox.Kind = SkyboxSettings::Source::Cubemap;
+        }
         lighting.Skybox.Intensity = sj.value("intensity", lighting.Skybox.Intensity);
         lighting.Skybox.RotationDeg = sj.value("rotation", lighting.Skybox.RotationDeg);
         lighting.Skybox.Celestials = sj.value("celestials", lighting.Skybox.Celestials);

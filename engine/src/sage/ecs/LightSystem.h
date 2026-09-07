@@ -10,6 +10,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Light.h"
+#include "sage/render/SkyModel.h"
 #include "sage/scene/Transform.h"
 
 // LightSystem — сбор итогового освещения кадра. «Система» в терминах ECS:
@@ -134,6 +135,15 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
             env.PointLights.push_back(p);
         }
     }
+    // ВРЕМЯ СУТОК — последним шагом сбора, и это не деталь порядка.
+    //
+    // Модель дня и ночи (sage/render/SkyModel.h) превращает высоту солнца в
+    // цвета неба и в ГЛАВНОЕ СВЕТИЛО кадра: днём это солнце, ночью луна. Она
+    // обязана видеть уже собранное солнце сцены — то есть работать после цикла
+    // выше, — и обязана отработать ДО всего, что читает свет: шейдинга, теней,
+    // отражений, окружающего света. Единственное место, где оба условия
+    // выполняются, — здесь.
+    sage::render::ApplySky(env);
     return env;
 }
 

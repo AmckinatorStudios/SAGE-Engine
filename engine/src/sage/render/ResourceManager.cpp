@@ -1,3 +1,4 @@
+#include <array>
 #include <filesystem>
 #include "ResourceManager.h"
 #include "sage/assets/AssetDatabase.h"
@@ -382,6 +383,28 @@ std::shared_ptr<Skybox> ResourceManager::GetSkybox(const std::string& directory)
     if (it != m_skyboxes.end()) return it->second; // в т.ч. закэшированный nullptr
 
     std::shared_ptr<Skybox> sky = Skybox::LoadFromDirectory(Locate(directory));
+    m_skyboxes[key] = sky;
+    return sky;
+}
+
+std::shared_ptr<Skybox> ResourceManager::GetSkyboxFaces(const std::string faces[6]) {
+    std::array<std::string, 6> resolved;
+    std::string key;
+    for (int i = 0; i < 6; ++i) {
+        if (faces[i].empty()) return nullptr;   // набор неполон — небо не собрать
+        resolved[(size_t)i] = Locate(faces[i]);
+        key += CacheKey(faces[i]);
+        key += '|';
+    }
+    auto it = m_skyboxes.find(key);
+    if (it != m_skyboxes.end()) return it->second; // в т.ч. закэшированный nullptr
+
+    std::shared_ptr<Skybox> sky;
+    try {
+        sky = std::make_shared<Skybox>(resolved);
+    } catch (const std::exception& e) {
+        LOG_ERROR("Resources") << "Небо из отдельных граней не собралось: " << e.what();
+    }
     m_skyboxes[key] = sky;
     return sky;
 }
