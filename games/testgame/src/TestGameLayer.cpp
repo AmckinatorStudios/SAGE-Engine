@@ -371,7 +371,7 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     // (пустой Path). Демонстрирует скелетную анимацию в живой игре.
     GameObject rig = scene.CreateObject("Animated Totem");
     rig.GetTransform().Position = {3.5f, 0.0f, 4.0f};
-    scene.Registry().emplace<AnimatedModelComponent>(rig.Entity());
+    scene.Registry().emplace<AnimationComponent>(rig.Entity());
 
     // Факел — эмиттер частиц (огонь) на колонне: демонстрирует систему частиц.
     GameObject torch = scene.CreateObject("Torch Fire");

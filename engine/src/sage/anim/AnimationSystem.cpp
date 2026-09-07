@@ -1,4 +1,6 @@
 #include "sage/anim/AnimationSystem.h"
+
+#include "sage/ecs/RenderComponents.h"
 #include "sage/core/Profiler.h"
 
 #include <algorithm>
@@ -22,20 +24,46 @@ namespace sage::anim {
 // процедурный демо-щупалец при пустом Path), привязывает Animator к скелету и
 // запускает клип. Ошибка загрузки помечает компонент готовым без модели —
 // сущность просто не рисуется (и не пытается грузиться каждый кадр).
-static void EnsureReady(AnimatedModelComponent& am) {
+// Откуда взять скелет: модель, на которую показывает Mesh этой же сущности.
+//
+// Путь ЗДЕСЬ НЕ ХРАНИТСЯ, и это главное отличие от прежнего «Animated Model».
+// Модель — принадлежность Mesh, а анимация лишь надевается на её скелет;
+// поэтому смена модели в инспекторе автоматически меняет и то, что
+// анимируется, а держать два поля с одним и тем же путём (и следить, чтобы они
+// не разъехались) больше не нужно.
+static std::string SkinnedPathOf(Scene& scene, entt::entity e) {
+    const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(e);
+    if (!mr) return {};
+    if (mr->Ref.type != MeshRef::Type::Model) return {};
+    return mr->Ref.path;
+}
+
+// Ленивая инициализация: грузит скелетную модель по пути из Mesh (или строит
+// процедурный демо-щупалец, если модели нет вовсе), привязывает Animator к
+// скелету и запускает клип. Ошибка загрузки помечает компонент готовым без
+// модели — сущность просто не анимируется и не пытается грузиться каждый кадр.
+static void EnsureReady(AnimationComponent& am, const std::string& path) {
+    // Модель в Mesh сменили — переинициализируемся. Иначе клипы продолжали бы
+    // играть по костям прежнего скелета, которых у новой модели нет.
+    if (am.Ready && am.ResolvedFrom != path) {
+        am.Ready = false;
+        am.Model = nullptr;
+        am.MorphWeights.clear();
+    }
     if (am.Ready) return;
     am.Ready = true;
+    am.ResolvedFrom = path;
     try {
-        if (am.Path.empty()) {
+        if (path.empty()) {
             am.Model = sage::render::SkinnedModel::CreateDemoTentacle(am.DemoSegments);
         } else {
             // Через кэш: дюжина одинаковых NPC — это одна модель, а не дюжина.
-            am.Model = ResourceManager::Instance().GetSkinnedModel(am.Path);
+            am.Model = ResourceManager::Instance().GetSkinnedModel(path);
             if (!am.Model) throw std::runtime_error("модель не загрузилась");
         }
     } catch (const std::exception& e) {
-        LOG_ERROR("Anim") << "Не удалось подготовить анимированную модель '"
-                          << (am.Path.empty() ? "<demo>" : am.Path) << "': " << e.what();
+        LOG_ERROR("Anim") << "Не удалось подготовить анимацию по модели '"
+                          << (path.empty() ? "<demo>" : path) << "': " << e.what();
         am.Model = nullptr;
         return;
     }
@@ -66,7 +94,7 @@ static void EnsureReady(AnimatedModelComponent& am) {
 // поставил скрипт), но пишет в те же индексы костей — поэтому «повернуть
 // голову скриптом» и «смотреть на цель по IK» на одну кость не уживаются, и
 // это честно: две команды на одну кость и должны спорить.
-void SolveIKGoals(Scene& scene, entt::entity e, AnimatedModelComponent& am, IKComponent& ik,
+void SolveIKGoals(Scene& scene, entt::entity e, AnimationComponent& am, IKComponent& ik,
                   float dt) {
     if (!am.Model) return;
     const sage::anim::Skeleton& sk = am.Model->GetSkeleton();
@@ -217,10 +245,10 @@ void SolveIKGoals(Scene& scene, entt::entity e, AnimatedModelComponent& am, IKCo
 }
 
 void UpdateAnimators(Scene& scene, float dt) {
-    auto view = scene.Registry().view<AnimatedModelComponent>();
+    auto view = scene.Registry().view<AnimationComponent>();
     for (auto e : view) {
-        AnimatedModelComponent& am = view.get<AnimatedModelComponent>(e);
-        EnsureReady(am);
+        AnimationComponent& am = view.get<AnimationComponent>(e);
+        EnsureReady(am, SkinnedPathOf(scene, e));
         if (!am.Model) continue;
         am.Anim.SetSpeed(am.Speed);
         // Смена Clip в компоненте (редактор/скрипт) -> плавный кросс-фейд к нему
@@ -263,9 +291,9 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections) {
     SAGE_PROFILE("Скиннинг");
-    auto v = scene.Registry().view<AnimatedModelComponent, Transform>();
+    auto v = scene.Registry().view<AnimationComponent, Transform>();
     for (auto e : v) {
-        AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
+        AnimationComponent& am = v.get<AnimationComponent>(e);
         if (!am.Model) continue;
         am.Model->Draw(scene.WorldMatrix(e), view, proj, viewPos, env, am.Anim.BoneMatrices(),
                        shadows, reflections, &am.MorphWeights);
@@ -273,9 +301,9 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
 }
 
 void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix) {
-    auto v = scene.Registry().view<AnimatedModelComponent, Transform>();
+    auto v = scene.Registry().view<AnimationComponent, Transform>();
     for (auto e : v) {
-        AnimatedModelComponent& am = v.get<AnimatedModelComponent>(e);
+        AnimationComponent& am = v.get<AnimationComponent>(e);
         if (!am.Model) continue;
         am.Model->DrawDepth(scene.WorldMatrix(e), lightMatrix, am.Anim.BoneMatrices(),
                             &am.MorphWeights);

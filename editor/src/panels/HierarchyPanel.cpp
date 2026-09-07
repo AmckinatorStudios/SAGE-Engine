@@ -36,7 +36,7 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
     }
     if (reg.all_of<ReflectionProbeComponent>(e)) return "probe";
     if (reg.all_of<ParticleEmitterComponent>(e)) return "particles";
-    if (reg.all_of<AnimatedModelComponent>(e)) return "anim";
+    if (reg.all_of<AnimationComponent>(e)) return "anim";
     if (reg.all_of<sage::ui::Transform>(e)) return "file";
     if (reg.all_of<RigidBodyComponent>(e) || reg.all_of<ColliderComponent>(e)) return "physics";
     if (reg.all_of<ScriptComponent>(e)) return "script";

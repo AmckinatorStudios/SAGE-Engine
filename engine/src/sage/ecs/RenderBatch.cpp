@@ -1,4 +1,6 @@
 #include "sage/ecs/RenderBatch.h"
+
+#include "sage/anim/AnimationComponents.h"
 #include "sage/core/Profiler.h"
 
 #include <algorithm>
@@ -291,6 +293,18 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     // 1) ПОСЛЕДОВАТЕЛЬНЫЙ сбор: итерация реестра (не потокобезопасна на
     //    структурные правки) в плоский список — только указатели/матрицы/цвет.
     ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
+        // СКЕЛЕТНЫЕ МОДЕЛИ РИСУЕТ НЕ ЭТОТ ПРОХОД.
+        //
+        // С тех пор как модель принадлежит Mesh, а не отдельному компоненту
+        // «Animated Model», у анимированного персонажа есть и то и другое: Mesh
+        // с путём к .glb и Animation, которая надевает на него скелет. Файл при
+        // этом читается ДВАЖДЫ — статическим загрузчиком (в MeshPtr) и
+        // скелетным, — и без этой проверки персонаж рисовался бы дважды: раз в
+        // позе покоя статикой и раз анимированным поверх. Видно это как
+        // «модель двоится» и как проваленный вдвое счёт треугольников.
+        if (const AnimationComponent* anim = scene.Registry().try_get<AnimationComponent>(e)) {
+            if (anim->Model) return;   // рисует sage::anim::DrawAnimatedModels
+        }
         const glm::mat4* cached = m_worldCache.Find(e);
         glm::mat4 model = cached ? *cached : scene.WorldMatrix(e);
         Mesh* mesh = mr.MeshPtr.get();

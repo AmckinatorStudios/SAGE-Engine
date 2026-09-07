@@ -20,7 +20,7 @@ using json = nlohmann::json;
 // Текущая версия формата сцены. Растёт при ЛОМАЮЩЕМ изменении: добавление
 // необязательного поля версию не двигает, потому что старые файлы читаются без
 // него как раньше.
-constexpr int kSceneVersion = 6;
+constexpr int kSceneVersion = 7;
 
 static json Vec3ToJson(const glm::vec3& v) {
     return json{ {"x", v.x}, {"y", v.y}, {"z", v.z} };
@@ -552,21 +552,23 @@ static ShaderParamsComponent ParseShaderParams(const json& sj) {
     return sp;
 }
 
-static void SaveAnimatedModel(json& j, const AnimatedModelComponent& am) {
-    // Только описательные поля — модель/палитра восстанавливаются загрузкой.
-    SaveAssetRef(j["animatedModel"], "path", am.Path);
-    j["animatedModel"]["demoSegments"] = am.DemoSegments;
-    j["animatedModel"]["clip"] = am.Clip;
-    j["animatedModel"]["speed"] = am.Speed;
-    j["animatedModel"]["loop"] = am.Loop;
-    j["animatedModel"]["playing"] = am.Playing;
-    j["animatedModel"]["blendTime"] = am.BlendTime;
-    j["animatedModel"]["rootMotion"] = am.RootMotion;
+static void SaveAnimation(json& j, const AnimationComponent& am) {
+    // Только описательные поля — модель, поза и палитра костей восстанавливаются
+    // загрузкой. Пути к модели здесь БОЛЬШЕ НЕТ: она принадлежит Mesh, и второе
+    // её имя в файле означало бы два источника правды, которые однажды
+    // разъедутся (см. AnimationComponent).
+    json& oj = j["animation"];
+    oj["demoSegments"] = am.DemoSegments;
+    oj["clip"] = am.Clip;
+    oj["speed"] = am.Speed;
+    oj["loop"] = am.Loop;
+    oj["playing"] = am.Playing;
+    oj["blendTime"] = am.BlendTime;
+    oj["rootMotion"] = am.RootMotion;
 }
 
-static AnimatedModelComponent ParseAnimatedModel(const json& aj) {
-    AnimatedModelComponent am;
-    am.Path = LoadAssetRef(aj, "path");
+static AnimationComponent ParseAnimation(const json& aj) {
+    AnimationComponent am;
     am.DemoSegments = aj.value("demoSegments", 6);
     am.Clip = aj.value("clip", 0);
     am.Speed = aj.value("speed", 1.0f);
@@ -1237,7 +1239,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
         if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
-        if (const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(e)) SaveAnimatedModel(j, *am);
+        if (const AnimationComponent* am = reg.try_get<AnimationComponent>(e)) SaveAnimation(j, *am);
         if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
         if (const ReflectionProbeComponent* rp = reg.try_get<ReflectionProbeComponent>(e))
             SaveReflectionProbe(j, *rp);
@@ -1555,12 +1557,49 @@ void MigrateV5toV6(json& root) {
 using MigrationFn = void (*)(json&);
 
 // Цепочка миграций: индекс i переводит версию (i+1) в (i+2).
+// --- v6 -> v7: «Animated Model» распадается на Mesh + Animation --------------
+//
+// В шестой версии анимированный персонаж описывался блоком animatedModel, где
+// лежали И путь к модели, И проигрывание. В седьмой модель принадлежит mesh —
+// как у любого другого объекта, — а animation отвечает только за клип. Это не
+// переименование: до правки в сцене существовало ДВА разных вида объекта, и у
+// «анимированной модели» не было ни материалов, ни слотов подмешей, ни
+// настроек отрисовки.
+//
+// Миграция здесь, а не в разборе компонентов, ровно поэтому: разбор обязан
+// знать один формат — текущий. Иначе каждая новая версия добавляет ветку в
+// разбор, и через три версии никто уже не скажет, какой формат считается
+// настоящим.
+void MigrateV6toV7(json& root) {
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("animatedModel") || !obj["animatedModel"].is_object()) continue;
+        json am = obj["animatedModel"];
+        obj.erase("animatedModel");
+
+        // Путь — в mesh. Если объект уже описывает свою модель, старый путь НЕ
+        // источник правды: у него не было причин быть верным, а у mesh есть.
+        const std::string path = am.value("path", std::string());
+        if (!path.empty()) {
+            const bool meshHasModel = obj.contains("mesh") && obj["mesh"].is_object() &&
+                                      obj["mesh"].value("type", std::string("none")) == "model" &&
+                                      !obj["mesh"].value("path", std::string()).empty();
+            if (!meshHasModel) {
+                obj["mesh"]["type"] = "model";
+                obj["mesh"]["path"] = path;
+            }
+        }
+        am.erase("path");
+        obj["animation"] = am;
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
     &MigrateV3toV4,
     &MigrateV4toV5,
     &MigrateV5toV6,
+    &MigrateV6toV7,
 };
 
 } // namespace
@@ -1661,8 +1700,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<ColliderComponent>(obj.Entity(), ParseCollider(j["collider"]));
         if (j.contains("joint"))
             obj.Registry()->emplace<JointComponent>(obj.Entity(), ParseJoint(j["joint"]));
-        if (j.contains("animatedModel"))
-            obj.Registry()->emplace<AnimatedModelComponent>(obj.Entity(), ParseAnimatedModel(j["animatedModel"]));
+        if (j.contains("animation"))
+            obj.Registry()->emplace<AnimationComponent>(obj.Entity(), ParseAnimation(j["animation"]));
         if (j.contains("ik"))
             obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
         if (j.contains("character"))
@@ -1691,7 +1730,16 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
         // Пересоздаём GPU-ресурс на основе описания
         if (mr.Ref.type == MeshRef::Type::Model) {
-            mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+            // У АНИМИРОВАННОГО объекта статический меш не грузим вовсе.
+            //
+            // Один и тот же файл читают два загрузчика: статический (в MeshPtr)
+            // и скелетный (для Animation). Рисует объект только второй — значит,
+            // первый копировал бы в видеопамять вершины и индексы, которыми
+            // никто ни разу не воспользуется. На сцене с десятком разных
+            // персонажей это десяток лишних копий геометрии, и заметить их
+            // нечем: картинка правильная, просто памяти вдвое больше.
+            const bool animated = obj.Registry()->all_of<AnimationComponent>(obj.Entity());
+            mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path);
         } else {
             // Примитивы (Cube/Sphere/Plane/Cylinder/Cone) — из кэша; None -> nullptr.
             mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);

@@ -175,9 +175,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Теперь порядок повторяет саму структуру компонента (см.
     // ecs/RenderComponents.h): ЧТО рисуем -> ЧЕМ красим -> чем ЭТОТ экземпляр
     // отличается от других таких же.
-    if (EditorTheme::SectionHeader(T("Mesh Renderer" "###Mesh Renderer"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
-        DrawMeshSlot(host, mr);
+        DrawMeshSlot(host, mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
         DrawInstanceOverrides(host, mr, obj.Id());
     }
@@ -554,18 +554,31 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    // --- Скелетно-анимированная модель (.glb/.gltf или процедурное демо) ---
-    if (reg.all_of<AnimatedModelComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animated Model" "###Animated Model"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity())) {
-            char pathBuf[512];
-            std::snprintf(pathBuf, sizeof(pathBuf), "%s", am->Path.c_str());
-            if (ImGui::InputText(T("Model (.glb)"), pathBuf, sizeof(pathBuf))) am->Path = pathBuf;
-            host.TrackLastImGuiItem();
-            ImGui::TextDisabled("%s", T("Empty path = procedural demo (\"tentacle\")"));
-            if (am->Path.empty()) {
+    // --- Анимация: клип поверх скелета из Mesh -----------------------------
+    //
+    // Модели здесь больше нет: она задаётся в Mesh, как у любого другого
+    // объекта. Секция отвечает только на вопрос «как это движется», и первое,
+    // что она обязана сказать, — ЕСТЬ ЛИ ЧТО анимировать: компонент,
+    // добавленный к кубу, обязан объяснить, почему ничего не происходит.
+    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity())) {
+            const MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity());
+            const bool hasModelRef = mesh && mesh->Ref.type == MeshRef::Type::Model &&
+                                     !mesh->Ref.path.empty();
+            if (hasModelRef) {
+                ImGui::TextDisabled("%s", T("Skeleton comes from the Mesh model"));
+            } else {
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), "%s",
+                                   T("No model in Mesh — showing the built-in demo skeleton"));
                 if (ImGui::SliderInt(T("Demo Segments"), &am->DemoSegments, 2, 16)) {
                     am->Ready = false; am->Model = nullptr; // пересобрать демо
                 }
+            }
+            // Модель есть, а скелета в ней нет — это тот самый случай, который
+            // ТЗ требует объяснять словами, а не молчанием.
+            if (hasModelRef && am->Ready && !am->Model) {
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                                   T("This model has no skeleton — nothing to animate"));
             }
             if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
 
@@ -602,9 +615,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ImGui::TextDisabled(T("t = %.2f s"), am->Anim.Time());
             }
             ImGui::Checkbox(T("Root Motion"), &am->RootMotion);
-            if (ImGui::Button(T("Remove Animated Model"))) {
+            if (ImGui::Button(T("Remove Animation"))) {
                 host.PushUndoSnapshot();
-                reg.remove<AnimatedModelComponent>(obj.Entity());
+                reg.remove<AnimationComponent>(obj.Entity());
+                // Статический меш анимированному объекту не грузится (см.
+                // загрузчик сцены): рисует его скелетный проход. Сняли
+                // анимацию — рисовать станет некому, и объект пропал бы из
+                // кадра до перезагрузки сцены. Догружаем здесь же.
+                if (MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity())) {
+                    if (mesh->Ref.type == MeshRef::Type::Model && !mesh->Ref.path.empty() &&
+                        !mesh->MeshPtr) {
+                        mesh->MeshPtr = ResourceManager::Instance().GetModel(mesh->Ref.path);
+                    }
+                }
             }
         }
     }
@@ -654,9 +677,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen)) {
         if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
             ImGui::Checkbox(T("IK Enabled"), &ik->Enabled);
-            const AnimatedModelComponent* am = reg.try_get<AnimatedModelComponent>(obj.Entity());
+            const AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity());
             if (!am) ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
-                                        "%s", T("No Animated Model - goals do nothing"));
+                                        "%s", T("No Animation component - goals do nothing"));
 
             int remove = -1;
             for (int gi = 0; gi < (int)ik->Goals.size(); ++gi) {
@@ -906,8 +929,14 @@ void AddComp(entt::registry& reg, entt::entity e) {
 
 const std::vector<ComponentEntry>& ComponentRegistry() {
     static const std::vector<ComponentEntry> kEntries = {
-        {"Mesh Renderer", "Render", "cube",
-         "Draws a mesh with a material", HasComp<MeshRendererComponent>, AddComp<MeshRendererComponent>},
+        // ПРОСТО «Mesh»: это то, КАК ОБЪЕКТ ВЫГЛЯДИТ — модель, её материалы и
+        // настройки отрисовки. Слово «Renderer» в названии описывало не предмет
+        // сцены, а внутреннее устройство движка, и делило объекты на «модель» и
+        // «модель с рендерером» там, где деления нет. Скелетная модель — тот же
+        // Mesh: анимацию к ней добавляет отдельный компонент Animation.
+        {"Mesh", "Render", "cube",
+         "Model, materials and how it is drawn", HasComp<MeshRendererComponent>,
+         AddComp<MeshRendererComponent>},
         {"Decal", "Render", "texture",
          "Projects a texture onto surfaces underneath", HasComp<DecalComponent>, AddComp<DecalComponent>},
         {"GI Static", "Render", "sun",
@@ -938,8 +967,13 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          "Walking, jumping, stairs", HasComp<CharacterControllerComponent>,
          AddComp<CharacterControllerComponent>},
 
-        {"Animated Model", "Animation", "anim",
-         "Skeletal animation clips", HasComp<AnimatedModelComponent>, AddComp<AnimatedModelComponent>},
+        // АНИМАЦИЯ, А НЕ «АНИМИРОВАННАЯ МОДЕЛЬ». Второе делило объекты сцены
+        // на два сорта — «модель» и «анимированная модель», — хотя анимация
+        // это характеристика предмета, а не отдельный вид предмета. Скелет
+        // берётся из модели, заданной в Mesh.
+        {"Animation", "Animation", "anim",
+         "Plays clips on the skeleton of the Mesh model", HasComp<AnimationComponent>,
+         AddComp<AnimationComponent>},
         {"IK", "Animation", "ik",
          "Bones reach for a target", HasComp<IKComponent>, AddComp<IKComponent>},
 

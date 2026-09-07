@@ -74,7 +74,7 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<ColliderComponent>(src, dst);
     CopyIfPresent<JointComponent>(src, dst);
     CopyIfPresent<ParticleEmitterComponent>(src, dst);
-    CopyIfPresent<AnimatedModelComponent>(src, dst);
+    CopyIfPresent<AnimationComponent>(src, dst);
     CopyIfPresent<IKComponent>(src, dst);
     CopyIfPresent<ReflectionProbeComponent>(src, dst);
     // Интерфейс — ПО РЕЕСТРУ ЧАСТЕЙ, а не списком руками.
@@ -102,10 +102,15 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     }
     if (auto* jc = dst.Registry()->try_get<JointComponent>(dst.Entity()))
         jc->RuntimeJoint = sage::physics::kInvalidJoint;
-    if (auto* am = dst.Registry()->try_get<AnimatedModelComponent>(dst.Entity())) {
+    if (auto* am = dst.Registry()->try_get<AnimationComponent>(dst.Entity())) {
         am->Model.reset();
         am->Anim = sage::anim::Animator{};
         am->Ready = false;
+        // И ПУТЬ, из которого собран скелет: он тоже рантайм. Оставленный, он
+        // совпал бы с путём в Mesh копии, и система решила бы, что скелет уже
+        // готов, — а Model при этом пуста, то есть копия осталась бы без
+        // анимации до первой смены модели.
+        am->ResolvedFrom.clear();
     }
     // Индексы костей и залипшая опора — состояние экземпляра: у копии модель
     // загрузится заново, и цели должны разрешиться по именам с нуля.

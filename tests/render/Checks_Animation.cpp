@@ -60,14 +60,14 @@ void TestMorphTargets(FrameRenderer& r) {
 
     GameObject character = scene->CreateObject("Character");
     character.GetTransform().Position = {0.0f, 0.0f, 0.0f};
-    AnimatedModelComponent anim;
+    AnimationComponent anim;
     anim.Playing = false; // поза не должна зависеть от времени: тест детерминированный
-    scene->Registry().emplace<AnimatedModelComponent>(character.Entity(), std::move(anim));
+    scene->Registry().emplace<AnimationComponent>(character.Entity(), std::move(anim));
 
     // Модель грузится лениво — один тик системы поднимает её и привязывает риг.
     sage::anim::UpdateAnimators(*scene, 0.0f);
 
-    AnimatedModelComponent& am = scene->Registry().get<AnimatedModelComponent>(character.Entity());
+    AnimationComponent& am = scene->Registry().get<AnimationComponent>(character.Entity());
     if (!am.Model) {
         std::printf("[FAIL] демо-модель не загрузилась — блендшейпы проверить нечем\n");
         CountFail();
@@ -149,12 +149,12 @@ void TestInverseKinematicsECS() {
     // модели, тест бы это поймал — при повороте на 90° промах стал бы метровым.
     rig.GetTransform().Position = {3.0f, 1.0f, -2.0f};
     rig.GetTransform().Rotation = {0.0f, 90.0f, 0.0f};
-    AnimatedModelComponent anim;
+    AnimationComponent anim;
     anim.Playing = false;   // поза не должна зависеть от времени
-    scene->Registry().emplace<AnimatedModelComponent>(rig.Entity(), std::move(anim));
+    scene->Registry().emplace<AnimationComponent>(rig.Entity(), std::move(anim));
     sage::anim::UpdateAnimators(*scene, 0.0f);
 
-    AnimatedModelComponent& am = scene->Registry().get<AnimatedModelComponent>(rig.Entity());
+    AnimationComponent& am = scene->Registry().get<AnimationComponent>(rig.Entity());
     if (!am.Model || am.Model->GetSkeleton().Count() < 3) {
         std::printf("[FAIL] демо-модель не поднялась — IK проверять не на чем\n");
         CountFail();
@@ -213,10 +213,71 @@ void TestInverseKinematicsECS() {
     Check(glm::length(endWorld() - target) < 0.02f, "включённая обратно цель снова держит");
 }
 
+
+// --- Скелет берётся из Mesh, и объект не рисуется дважды --------------------
+//
+// Это проверка ТОЙ САМОЙ связи, ради которой «Animated Model» перестал быть
+// отдельным компонентом: модель задаётся в Mesh, а Animation надевает на неё
+// скелет. Проверять её структурой в памяти мало — там всё сходится по
+// построению; здесь модель действительно грузится с диска, а потом считается,
+// сколько раз объект попал в кадр.
+//
+// Двойная отрисовка — не теоретическая опасность: файл читают ДВА загрузчика,
+// статический и скелетный, и до явной проверки в проходе статики персонаж
+// рисовался бы дважды — раз в позе покоя и раз анимированным поверх.
+void TestAnimationUsesMeshModel(FrameRenderer& r) {
+    const char* model =
+#ifdef SAGE_TEST_MODEL
+        SAGE_TEST_MODEL;
+#else
+        "assets/test_model.glb";
+#endif
+
+    auto scene = std::make_unique<Scene>("MeshAnimation");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.35f));
+    scene->Lighting.Sun.Intensity = 1.2f;
+    scene->Lighting.Skybox.Enabled = false;
+
+    GameObject hero = scene->CreateObject("Hero");
+    MeshRendererComponent& mr = scene->Registry().emplace<MeshRendererComponent>(hero.Entity());
+    mr.Ref.type = MeshRef::Type::Model;
+    mr.Ref.path = model;
+    AnimationComponent anim;
+    anim.Playing = false;
+    scene->Registry().emplace<AnimationComponent>(hero.Entity(), std::move(anim));
+
+    sage::anim::UpdateAnimators(*scene, 0.0f);
+    AnimationComponent& am = scene->Registry().get<AnimationComponent>(hero.Entity());
+    Check(am.Model != nullptr, "Animation взяла модель из Mesh");
+    if (!am.Model) return;
+    Check(am.Model->GetSkeleton().Count() > 1, "скелет модели из Mesh разобран");
+    Check(!am.Model->Clips().empty(), "клипы модели из Mesh доехали до аниматора");
+
+    // Проход статики обязан ПРОПУСТИТЬ этот объект: его рисует скелетный путь.
+    Framebuffer fbo(kW, kH);
+    fbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+    device.Clear(true, true);
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    const sage::ecs::RenderStats stats =
+        r.Batch.RenderColor(*scene, TestView(), PerspectiveProj(), kEye, env, ShadowBinding(), 0);
+    device.BindDefaultFramebuffer();
+    Check(stats.Total == 0, "статический проход не рисует анимированный объект второй раз");
+
+    // Смена модели в Mesh обязана переехать в скелет: иначе клипы играли бы по
+    // костям, которых у новой модели нет.
+    mr.Ref.path.clear();
+    mr.Ref.type = MeshRef::Type::None;
+    sage::anim::UpdateAnimators(*scene, 0.0f);
+    Check(am.ResolvedFrom.empty(), "смена модели в Mesh переинициализирует скелет");
+}
+
 } // namespace
 
 void RunAnimationChecks(FrameRenderer& r) {
     TestMorphTargets(r);
+    TestAnimationUsesMeshModel(r);
     TestInverseKinematicsECS();
 }
 

@@ -1349,10 +1349,10 @@ bool EditorLayer::SelfTestSystems() {
     // --- Анимация: демо-скелет проигрывается, палитра костей меняется во времени ---
     if (ok) {
         GameObject rig = m_scene->CreateObject("SelftestRig");
-        m_scene->Registry().emplace<AnimatedModelComponent>(rig.Entity());
+        m_scene->Registry().emplace<AnimationComponent>(rig.Entity());
 
         sage::anim::UpdateAnimators(*m_scene, 0.0f); // инициализация (загрузка демо + rig)
-        AnimatedModelComponent& am = m_scene->Registry().get<AnimatedModelComponent>(rig.Entity());
+        AnimationComponent& am = m_scene->Registry().get<AnimationComponent>(rig.Entity());
         if (!am.Model || am.Anim.BoneCount() < 2) {
             LOG_ERROR("Editor") << "SELFTEST: animation failed - rig not built";
             ok = false;
@@ -2512,7 +2512,7 @@ bool EditorLayer::SelfTestTools() {
         reg.emplace_or_replace<ColliderComponent>(e);
         reg.emplace_or_replace<JointComponent>(e);
         reg.emplace_or_replace<CharacterControllerComponent>(e);
-        reg.emplace_or_replace<AnimatedModelComponent>(e);
+        reg.emplace_or_replace<AnimationComponent>(e);
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/selftest_script.lua"});
@@ -2556,7 +2556,7 @@ bool EditorLayer::SelfTestTools() {
                     {"Collider", r2.all_of<ColliderComponent>(e2)},
                     {"Joint", r2.all_of<JointComponent>(e2)},
                     {"CharacterController", r2.all_of<CharacterControllerComponent>(e2)},
-                    {"AnimatedModel", r2.all_of<AnimatedModelComponent>(e2)},
+                    {"Animation", r2.all_of<AnimationComponent>(e2)},
                     {"IK", r2.all_of<IKComponent>(e2)},
                     {"ReflectionProbe", r2.all_of<ReflectionProbeComponent>(e2)},
                     {"Script", r2.all_of<ScriptComponent>(e2)},

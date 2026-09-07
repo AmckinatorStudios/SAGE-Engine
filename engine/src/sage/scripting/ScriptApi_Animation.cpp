@@ -1,5 +1,7 @@
 #include "ScriptEngine.h"
 
+#include "sage/ecs/RenderComponents.h"
+
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/SkinnedModel.h"
@@ -18,13 +20,21 @@
 // ---------------------------------------------------------------------------
 
 void ScriptEngine::RegisterAnimationApi() {
-    // Анимированная модель на сущности: .glb/.gltf со скелетом. Без этого
-    // скрипт не мог поставить в сцену персонажа вовсе — компонент добавлялся
-    // только в редакторе, а игра, которая расставляет NPC сама, обычна.
+    // Поставить в сцену анимированного персонажа одной строкой: модель уходит
+    // в Mesh (там ей и место), проигрывание — в Animation. Скрипт при этом
+    // по-прежнему пишет ОДИН вызов: игра, расставляющая NPC сама, не должна
+    // знать, из скольких компонентов состоит персонаж.
+    //
+    // Имя AddAnimatedModel сохранено намеренно: по нему написаны все
+    // существующие скрипты, и переименование ради стройности сломало бы их
+    // ради ничего.
     Bind("anim", "Add", "AddAnimatedModel", [](GameObject& obj, const std::string& path) {
         if (!obj.Valid()) return;
-        auto& am = obj.Registry()->get_or_emplace<AnimatedModelComponent>(obj.Entity());
-        am.Path = path;
+        MeshRendererComponent& mr =
+            obj.Registry()->get_or_emplace<MeshRendererComponent>(obj.Entity());
+        mr.Ref.type = MeshRef::Type::Model;
+        mr.Ref.path = path;
+        auto& am = obj.Registry()->get_or_emplace<AnimationComponent>(obj.Entity());
         am.Ready = false; // загрузку и rig сделает UpdateAnimators на первом кадре
     });
 
@@ -37,7 +47,7 @@ void ScriptEngine::RegisterAnimationApi() {
     Bind("anim", "JointNames", "JointNames", [this](GameObject obj) -> sol::table {
         sol::table t = m_lua.create_table();
         if (!obj.Valid()) return t;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return t;
         const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
         for (int i = 0; i < sk.Count(); ++i) t[i + 1] = sk.Joints[(size_t)i].Name;
@@ -45,7 +55,7 @@ void ScriptEngine::RegisterAnimationApi() {
     });
     Bind("anim", "JointIndex", "JointIndex", [](GameObject obj, const std::string& name) -> int {
         if (!obj.Valid()) return -1;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return -1;
         const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
         for (int i = 0; i < sk.Count(); ++i)
@@ -65,7 +75,7 @@ void ScriptEngine::RegisterAnimationApi() {
     Bind("anim", "SetJointRotation", "SetJointRotation", [](GameObject obj, int joint, float rx, float ry,
                                               float rz) {
         if (!obj.Valid()) return;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return;
         const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
         if (joint < 0 || joint >= sk.Count()) return;
@@ -78,23 +88,23 @@ void ScriptEngine::RegisterAnimationApi() {
     });
     Bind("anim", "ClearJointPoses", "ClearJointPoses", [](GameObject obj) {
         if (!obj.Valid()) return;
-        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+        if (auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity()))
             am->PoseOverrides.clear();
     });
     // Сколько клипов в модели — по нему игра решает, играть готовую анимацию
     // или двигать кости самой.
     Bind("anim", "Count", "AnimationCount", [](GameObject obj) -> int {
         if (!obj.Valid()) return 0;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         return (am && am->Model) ? (int)am->Model->Clips().size() : 0;
     });
 
-    // Проиграть клип анимации на сущности с AnimatedModelComponent, плавно
+    // Проиграть клип анимации на сущности с AnimationComponent, плавно
     // перейдя за blend секунд (кросс-фейд; система анимации подхватит смену Clip).
     // false, если у сущности нет анимированной модели.
     Bind("anim", "Play", "PlayAnimation", [](GameObject obj, int clip, sol::optional<float> blend) -> bool {
         if (!obj.Valid()) return false;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am) return false;
         am->Clip = clip;
         if (blend) am->BlendTime = *blend;
@@ -188,7 +198,7 @@ void ScriptEngine::RegisterAnimationApi() {
     // (например, чтобы поставить эффект или проверить опору).
     Bind("anim", "BonePosition", "BonePosition", [this](GameObject obj, const std::string& bone) -> glm::vec3 {
         if (!obj.Valid()) return glm::vec3(0.0f);
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return glm::vec3(0.0f);
         const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
         const std::vector<glm::mat4>& g = am->Anim.GlobalMatrices();
@@ -211,7 +221,7 @@ void ScriptEngine::RegisterAnimationApi() {
     Bind("anim", "BoneAxis", "BoneAxis", [this](GameObject obj, const std::string& bone,
                                           const glm::vec3& axis) -> glm::vec3 {
         if (!obj.Valid()) return glm::vec3(0.0f);
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return glm::vec3(0.0f);
         const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
         const std::vector<glm::mat4>& g = am->Anim.GlobalMatrices();
@@ -230,7 +240,7 @@ void ScriptEngine::RegisterAnimationApi() {
     // Возвращает, сколько клипов перенеслось (0 — скелеты не сошлись именами).
     Bind("anim", "Borrow", "BorrowAnimations", [](GameObject obj, const std::string& path) -> int {
         if (!obj.Valid()) return 0;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return 0; // модель ещё не загрузилась
         std::shared_ptr<sage::render::SkinnedModel> src =
             ResourceManager::Instance().GetSkinnedModel(path);
@@ -252,7 +262,7 @@ void ScriptEngine::RegisterAnimationApi() {
     Bind("anim", "Names", "AnimationNames", [this](GameObject obj) -> sol::table {
         sol::table t = m_lua.create_table();
         if (!obj.Valid()) return t;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return t;
         const auto& clips = am->Model->Clips();
         for (size_t i = 0; i < clips.size(); ++i) t[i + 1] = clips[i].Name;
@@ -260,7 +270,7 @@ void ScriptEngine::RegisterAnimationApi() {
     });
     Bind("anim", "Index", "AnimationIndex", [](GameObject obj, const std::string& name) -> int {
         if (!obj.Valid()) return -1;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return -1;
         const auto& clips = am->Model->Clips();
         for (size_t i = 0; i < clips.size(); ++i)
@@ -270,7 +280,7 @@ void ScriptEngine::RegisterAnimationApi() {
     Bind("anim", "PlayNamed", "PlayAnimationNamed", [](GameObject obj, const std::string& name,
                                                 sol::optional<float> blend) -> bool {
         if (!obj.Valid()) return false;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return false;
         const auto& clips = am->Model->Clips();
         for (size_t i = 0; i < clips.size(); ++i) {
@@ -284,7 +294,7 @@ void ScriptEngine::RegisterAnimationApi() {
     });
     Bind("anim", "Duration", "AnimationDuration", [](GameObject obj, int clip) -> float {
         if (!obj.Valid()) return 0.0f;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return 0.0f;
         const auto& clips = am->Model->Clips();
         if (clip < 0 || clip >= (int)clips.size()) return 0.0f;
@@ -295,22 +305,22 @@ void ScriptEngine::RegisterAnimationApi() {
     // покадровый рендер, превью, синхронизация двух персонажей.
     Bind("anim", "Time", "AnimationTime", [](GameObject obj) -> float {
         if (!obj.Valid()) return 0.0f;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         return am ? am->Anim.Time() : 0.0f;
     });
     Bind("anim", "Seek", "SeekAnimation", [](GameObject obj, float time) {
         if (!obj.Valid()) return;
-        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+        if (auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity()))
             am->Anim.Seek(time);
     });
     Bind("anim", "SetSpeed", "SetAnimationSpeed", [](GameObject obj, float speed) {
         if (!obj.Valid()) return;
-        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+        if (auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity()))
             am->Speed = speed;
     });
     Bind("anim", "SetPlaying", "SetAnimationPlaying", [](GameObject obj, bool playing) {
         if (!obj.Valid()) return;
-        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+        if (auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity()))
             am->Playing = playing;
     });
     // Корневое движение: перемещение из клипа применяется к сущности, а не к
@@ -318,19 +328,19 @@ void ScriptEngine::RegisterAnimationApi() {
     // нужна своя скорость передвижения, а катсцене — ровно та, что в клипе.
     Bind("anim", "SetRootMotion", "SetRootMotion", [](GameObject obj, bool on) {
         if (!obj.Valid()) return;
-        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+        if (auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity()))
             am->RootMotion = on;
     });
     Bind("anim", "SetLoop", "SetAnimationLoop", [](GameObject obj, bool loop) {
         if (!obj.Valid()) return;
-        if (auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity()))
+        if (auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity()))
             am->Loop = loop;
     });
     // Идёт ли сейчас кросс-фейд и с каким весом — по нему видно, что переход
     // действительно СМЕШИВАЕТ позы, а не переключает клип рывком.
     Bind("anim", "Fade", "AnimationFade", [](GameObject obj) -> float {
         if (!obj.Valid()) return 0.0f;
-        auto* am = obj.Registry()->try_get<AnimatedModelComponent>(obj.Entity());
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Anim.Fading()) return 0.0f;
         return am->Anim.FadeWeight();
     });

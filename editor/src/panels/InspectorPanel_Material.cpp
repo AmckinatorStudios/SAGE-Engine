@@ -294,7 +294,7 @@ void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererCompo
 }
 
 // --- Mesh Renderer, часть 1: ЧТО рисуем --------------------------------------
-void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
+void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, bool animated) {
     ImGui::SeparatorText(T("Mesh"));
 
     // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
@@ -352,12 +352,15 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
 
         if (m_pendingMeshLoad) {
             m_pendingMeshLoad = false;
-            mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+            // Анимированному объекту статическая копия модели не нужна: его
+            // рисует скелетный проход, а вторая копия геометрии просто заняла
+            // бы видеопамять. Материал модели при этом всё равно подбираем.
+            mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path);
             // GetModel сам логирует причину и отдаёт nullptr — сообщаем об
             // этом ЗДЕСЬ, в панели: строчку в консоли легко не заметить, а
             // «модель не появилась» без объяснения выглядит как поломка
             // редактора.
-            if (!mr.MeshPtr) {
+            if (!mr.MeshPtr && !animated) {
                 host.SetStatusMessage(T("The model failed to load: ") + mr.Ref.path +
                                       T(" — details in Console"));
             } else {
@@ -366,7 +369,11 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr) {
                 AutoAssignModelMaterial(host, mr);
             }
         }
-        if (!mr.Ref.path.empty() && !mr.MeshPtr) {
+        if (animated && !mr.Ref.path.empty()) {
+            // Не тревога, а объяснение: у анимированного объекта геометрию
+            // держит скелетная модель, и пустой статический меш здесь — норма.
+            ImGui::TextDisabled("%s", T("Drawn as a skinned model (see Animation)"));
+        } else if (!mr.Ref.path.empty() && !mr.MeshPtr) {
             ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("Mesh not loaded"));
             ImGui::SameLine();
             if (EditorIcons::Button("refresh", T("Load"))) m_pendingMeshLoad = true;

@@ -620,13 +620,16 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 m_scene->Registry().emplace<ColliderComponent>(box.Entity());
                 SetSelectedId(box.Id());
             }
-            // Скелетно-анимированная модель: без пути — процедурный демо-щупалец
-            // с клипом «Wave» (сразу проигрывается в вьюпорте).
-            if (ImGui::MenuItem(T("Create Animated Model"))) {
+            // Анимированный объект: Mesh (пока пустой — модель выберут в
+            // инспекторе) плюс Animation. Без модели анимация показывает
+            // встроенный демо-скелет с клипом «Wave», и во вьюпорте сразу
+            // видно, что скиннинг работает.
+            if (ImGui::MenuItem(T("Create Animated Object"))) {
                 PushUndoSnapshot();
-                GameObject anim = m_scene->CreateObject("Animated Model");
+                GameObject anim = m_scene->CreateObject("Animated Object");
                 anim.GetTransform().Position = {0.0f, 0.0f, 0.0f};
-                m_scene->Registry().emplace<AnimatedModelComponent>(anim.Entity());
+                m_scene->Registry().emplace<MeshRendererComponent>(anim.Entity());
+                m_scene->Registry().emplace<AnimationComponent>(anim.Entity());
                 SetSelectedId(anim.Id());
             }
             // Эмиттер частиц: по умолчанию пресет «Fire» в точке над началом.

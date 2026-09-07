@@ -87,7 +87,10 @@ private:
     // Раньше первое и третье лежали вперемешку под заголовком «Mesh Renderer»,
     // а второе — отдельным заголовком «Material», как будто это другой
     // компонент; см. комментарий на месте вызова.
-    void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr);
+    // animated — модель этого объекта рисует скелетный проход. Тогда пустой
+    // MeshPtr это НОРМА, а не «модель не загрузилась»: статическую копию
+    // такому объекту не грузят намеренно (см. загрузчик сцены).
+    void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, bool animated);
     void DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr);
     // Слоты материалов по ЧАСТЯМ модели (см. sage::render::Submesh). Рисуются
     // только у моделей, которые разметку несут: у куба и одноматериального

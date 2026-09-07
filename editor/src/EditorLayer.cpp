@@ -580,7 +580,7 @@ void EditorLayer::OnAttach() {
         reg.emplace_or_replace<ColliderComponent>(e);
         reg.emplace_or_replace<JointComponent>(e);
         reg.emplace_or_replace<CharacterControllerComponent>(e);
-        reg.emplace_or_replace<AnimatedModelComponent>(e);
+        reg.emplace_or_replace<AnimationComponent>(e);
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
