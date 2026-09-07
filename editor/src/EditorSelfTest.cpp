@@ -39,6 +39,7 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/render/Frustum.h"
+#include "sage/audio/AudioSystem.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ParticlePresets.h"
 #include "sage/rhi/ResourceLedger.h"
@@ -126,7 +127,7 @@ void EditorLayer::RunSelfTest() {
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
-                               << "vars-refs-events + prefab-refs + templates + themes + input-mapping + "
+                               << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
                                << "render-stability, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
@@ -1494,6 +1495,55 @@ bool EditorLayer::SelfTestSystems() {
         if (copy.Valid()) m_scene->RemoveObject(copy.Id());
         m_scene->RemoveObject(src.Id());
         SetSelectedId(-1);
+    }
+
+    // --- Звук объекта: компонент, файл сцены, запуск вместе с игрой ---------
+    //
+    // Проверяется не «слышно ли» (на машине сборки звука может не быть вовсе),
+    // а то, ради чего компонент заводился: звук ставится в сцену как свойство
+    // предмета, переживает сохранение и оживает вместе с Play.
+    if (ok) {
+        GameObject obj = m_scene->CreateObject("SelftestSound");
+        AudioSourceComponent& au =
+            m_scene->Registry().emplace<AudioSourceComponent>(obj.Entity());
+        au.Clip = "assets/audio/selftest.wav";
+        au.Volume = 0.42f;
+        au.Loop = true;
+        au.Spatial = true;
+        au.MaxDistance = 33.0f;
+        au.Category = AudioCategory::Ambient;
+
+        const std::string snapshot = SceneSerializer::SaveToString(*m_scene);
+        std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(snapshot);
+        const AudioSourceComponent* loaded = nullptr;
+        if (back) {
+            GameObject same = back->FindByName("SelftestSound");
+            if (same.Valid()) loaded = back->Registry().try_get<AudioSourceComponent>(same.Entity());
+        }
+        if (!loaded || loaded->Clip != au.Clip || std::abs(loaded->Volume - 0.42f) > 1e-4f ||
+            !loaded->Loop || std::abs(loaded->MaxDistance - 33.0f) > 1e-4f ||
+            loaded->Category != AudioCategory::Ambient) {
+            LOG_ERROR("Editor") << "SELFTEST: звук объекта не пережил запись и чтение сцены";
+            ok = false;
+        }
+
+        // Команда, поставленная скриптом или кнопкой «Послушать», обязана
+        // сниматься ровно одним кадром системы — иначе звук перезапускался бы
+        // каждый кадр, пока команда висит.
+        au.Play();
+        if (m_playAudio) {
+            sage::audio::Update(*m_scene, *m_playAudio);
+            if (au.Request != AudioRequest::None) {
+                LOG_ERROR("Editor") << "SELFTEST: команда звуку не снялась за кадр";
+                ok = false;
+            }
+            sage::audio::StopScene(*m_scene, *m_playAudio);
+            if (au.Playing || au.Handle != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: остановка сцены не заглушила звук";
+                ok = false;
+            }
+        }
+        m_scene->RemoveObject(obj.Id());
     }
 
     return ok;

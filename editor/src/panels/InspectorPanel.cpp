@@ -55,6 +55,16 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
                 host.CurrentScene().Registry().emplace_or_replace<ScriptComponent>(
                     target.Entity(), ScriptComponent{picked});
             }
+        } else if (m_browseAudioEntity >= 0) {
+            // Звук адресован сущности — ровно как скрипт выше.
+            GameObject target = host.CurrentScene().Get(m_browseAudioEntity);
+            m_browseAudioEntity = -1;
+            if (target.Valid()) {
+                host.PushUndoSnapshot();
+                entt::registry& reg = host.CurrentScene().Registry();
+                AudioSourceComponent& au = reg.get_or_emplace<AudioSourceComponent>(target.Entity());
+                au.Clip = picked;
+            }
         } else if (m_browseTarget) {
             *m_browseTarget = picked;
             m_browseTarget = nullptr;

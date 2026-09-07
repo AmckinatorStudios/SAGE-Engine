@@ -143,6 +143,25 @@ void AudioEngine::PlaySound3D(const std::string& path, const glm::vec3& position
     }
 }
 
+AudioEngine::SoundHandle AudioEngine::Play(const std::string& path, const SoundParams& p) {
+    if (!m_impl->Available) return InvalidHandle;
+    ma_sound* s = m_impl->StartSound(path, p.Cat, p.Volume, p.Spatial, p.Position, p.Loop,
+                                     /*streaming=*/false);
+    if (!s) return InvalidHandle;
+    // Параметры, которых у StartSound нет: он делит их с прежними вызовами, а
+    // те задают расстояния константами движка. Ставим поверх — так старое
+    // поведение остаётся ровно прежним, а новое получает свои значения.
+    ma_sound_set_pitch(s, p.Pitch > 0.01f ? p.Pitch : 0.01f);
+    if (p.Spatial) {
+        ma_sound_set_min_distance(s, std::max(p.MinDistance, 0.01f));
+        ma_sound_set_max_distance(s, std::max(p.MaxDistance, p.MinDistance + 0.01f));
+        ma_sound_set_rolloff(s, std::max(p.Rolloff, 0.0f));
+    }
+    SoundHandle h = m_impl->NextHandle++;
+    m_impl->Managed[h] = s;
+    return h;
+}
+
 AudioEngine::SoundHandle AudioEngine::PlayLoop(const std::string& path, float volume,
                                                Category category, bool spatial,
                                                const glm::vec3& position) {
@@ -188,6 +207,15 @@ void AudioEngine::SetSoundVolume(SoundHandle handle, float volume) {
 void AudioEngine::SetSoundPosition(SoundHandle handle, const glm::vec3& position) {
     auto it = m_impl->Managed.find(handle);
     if (it != m_impl->Managed.end()) ma_sound_set_position(it->second, position.x, position.y, position.z);
+}
+
+void AudioEngine::SetSoundPitch(SoundHandle handle, float pitch) {
+    auto it = m_impl->Managed.find(handle);
+    if (it != m_impl->Managed.end()) ma_sound_set_pitch(it->second, pitch > 0.01f ? pitch : 0.01f);
+}
+
+bool AudioEngine::IsSoundAlive(SoundHandle handle) const {
+    return m_impl->Managed.find(handle) != m_impl->Managed.end();
 }
 
 bool AudioEngine::IsSoundPlaying(SoundHandle handle) const {
