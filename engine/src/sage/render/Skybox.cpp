@@ -1,6 +1,9 @@
 #include "Skybox.h"
 #include <stb_image.h>
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <vector>
 #include <stdexcept>
 #include "sage/core/Log.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -29,14 +32,24 @@ static const float kSkyboxVertices[] = {
      1.0f, -1.0f, -1.0f,   -1.0f, -1.0f,  1.0f,    1.0f, -1.0f,  1.0f
 };
 
-Skybox::Skybox(const std::array<std::string, 6>& faces) {
+void Skybox::BuildGeometry() {
     GraphicsDevice& device = GraphicsDevice::Get();
-
     VertexLayout layout;
     layout.Stride = 3 * sizeof(float);
     layout.Attributes = {{0, 3, AttribType::Float, 0}};
     m_geometry = device.CreateGeometry(layout);
     m_geometry->SetVertexData(kSkyboxVertices, sizeof(kSkyboxVertices), /*dynamic=*/false);
+}
+
+Skybox::Skybox(const CubeFacePixels faces[6]) {
+    BuildGeometry();
+    m_cubemap = GraphicsDevice::Get().CreateTextureCube(faces);
+    if (!m_cubemap) throw std::runtime_error("Не удалось создать кубическую текстуру неба");
+}
+
+Skybox::Skybox(const std::array<std::string, 6>& faces) {
+    GraphicsDevice& device = GraphicsDevice::Get();
+    BuildGeometry();
 
     stbi_set_flip_vertically_on_load(false); // у cubemap другая конвенция — грани НЕ переворачиваем
 
@@ -65,6 +78,182 @@ Skybox::Skybox(const std::array<std::string, 6>& faces) {
     stbi_set_flip_vertically_on_load(true); // возвращаем конвенцию обратно для обычных Texture
 
     LOG_INFO("Skybox") << "Skybox загружен (6 граней)";
+}
+
+
+// ---------------------------------------------------------------------------
+//  Небо из ОДНОГО изображения
+// ---------------------------------------------------------------------------
+
+Skybox::Layout Skybox::DetectLayout(int width, int height) {
+    if (width <= 0 || height <= 0) return Layout::Auto;
+    const double aspect = (double)width / (double)height;
+    // Допуск, а не точное равенство: у наборов встречается лишний пиксель по
+    // краю, и «4:3 с точностью до пикселя» отбраковало бы годную картинку.
+    auto near = [aspect](double want) { return std::abs(aspect - want) < 0.02 * want; };
+    if (near(4.0 / 3.0)) return Layout::HorizontalCross;
+    if (near(3.0 / 4.0)) return Layout::VerticalCross;
+    if (near(6.0)) return Layout::Row;
+    if (near(1.0 / 6.0)) return Layout::Column;
+    if (near(2.0)) return Layout::Equirectangular;
+    return Layout::Auto;   // не распознано
+}
+
+const char* Skybox::LayoutName(Layout layout) {
+    switch (layout) {
+        case Layout::HorizontalCross: return "крест 4:3";
+        case Layout::VerticalCross:   return "крест 3:4";
+        case Layout::Row:             return "полоса 6:1";
+        case Layout::Column:          return "столбец 1:6";
+        case Layout::Equirectangular: return "панорама 2:1";
+        default:                      return "не распознана";
+    }
+}
+
+namespace {
+
+// Клетка креста/полосы для каждой грани, в порядке +X, -X, +Y, -Y, +Z, -Z.
+// Числа — столбец и строка в сетке; -1 у поворота означает «как есть».
+struct Cell { int Col, Row, Rotate180; };
+
+const Cell* CellsFor(Skybox::Layout layout) {
+    // Горизонтальный крест 4x3:
+    //        [+Y]
+    //   [-X] [+Z] [+X] [-Z]
+    //        [-Y]
+    static const Cell kHoriz[6] = {{2,1,0}, {0,1,0}, {1,0,0}, {1,2,0}, {1,1,0}, {3,1,0}};
+    // Вертикальный крест 3x4 — тот же крест, но -Z уехал вниз и лежит вверх
+    // ногами: так его и печатают, чтобы крест сворачивался в куб без разрывов.
+    static const Cell kVert[6]  = {{2,1,0}, {0,1,0}, {1,0,0}, {1,2,0}, {1,1,0}, {1,3,1}};
+    static const Cell kRow[6]   = {{0,0,0}, {1,0,0}, {2,0,0}, {3,0,0}, {4,0,0}, {5,0,0}};
+    static const Cell kCol[6]   = {{0,0,0}, {0,1,0}, {0,2,0}, {0,3,0}, {0,4,0}, {0,5,0}};
+    switch (layout) {
+        case Skybox::Layout::HorizontalCross: return kHoriz;
+        case Skybox::Layout::VerticalCross:   return kVert;
+        case Skybox::Layout::Row:             return kRow;
+        case Skybox::Layout::Column:          return kCol;
+        default:                              return nullptr;
+    }
+}
+
+// Сколько клеток по горизонтали и вертикали у раскладки.
+void GridOf(Skybox::Layout layout, int& cols, int& rows) {
+    switch (layout) {
+        case Skybox::Layout::HorizontalCross: cols = 4; rows = 3; break;
+        case Skybox::Layout::VerticalCross:   cols = 3; rows = 4; break;
+        case Skybox::Layout::Row:             cols = 6; rows = 1; break;
+        case Skybox::Layout::Column:          cols = 1; rows = 6; break;
+        default:                              cols = 0; rows = 0; break;
+    }
+}
+
+// Направление луча для точки (u,v) в пределах грани. u,v идут от 0 до 1,
+// начало — левый верхний угол грани, как и в памяти картинки.
+glm::vec3 FaceDirection(int face, float u, float v) {
+    const float a = 2.0f * u - 1.0f;
+    const float b = 1.0f - 2.0f * v;
+    switch (face) {
+        case 0: return glm::normalize(glm::vec3( 1.0f,  b, -a)); // +X
+        case 1: return glm::normalize(glm::vec3(-1.0f,  b,  a)); // -X
+        case 2: return glm::normalize(glm::vec3( a,  1.0f, -b)); // +Y
+        case 3: return glm::normalize(glm::vec3( a, -1.0f,  b)); // -Y
+        case 4: return glm::normalize(glm::vec3( a,  b,  1.0f)); // +Z
+        default:return glm::normalize(glm::vec3(-a,  b, -1.0f)); // -Z
+    }
+}
+
+} // namespace
+
+std::unique_ptr<Skybox> Skybox::LoadFromImage(const std::string& file, Layout layout) {
+    stbi_set_flip_vertically_on_load(false);   // у cubemap своя конвенция
+    int w = 0, h = 0, comp = 0;
+    unsigned char* src = stbi_load(file.c_str(), &w, &h, &comp, 0);
+    stbi_set_flip_vertically_on_load(true);
+    if (!src) {
+        LOG_ERROR("Skybox") << "Небо не прочиталось: " << file << " ("
+                            << (stbi_failure_reason() ? stbi_failure_reason() : "?") << ")";
+        return nullptr;
+    }
+
+    const Layout chosen = layout == Layout::Auto ? DetectLayout(w, h) : layout;
+    if (chosen == Layout::Auto) {
+        LOG_ERROR("Skybox") << "Не понимаю раскладку неба " << file << " (" << w << "x" << h
+                            << "): ожидались крест 4:3 или 3:4, полоса 6:1, столбец 1:6 "
+                               "или панорама 2:1";
+        stbi_image_free(src);
+        return nullptr;
+    }
+
+    std::vector<std::vector<unsigned char>> faces(6);
+    int faceSize = 0;
+
+    if (chosen == Layout::Equirectangular) {
+        // Панорама — не сетка, а проекция: у каждого пикселя грани спрашиваем
+        // направление и берём из панорамы точку с теми же широтой и долготой.
+        // Размер грани — четверть ширины: столько же деталей на 90°, сколько в
+        // исходнике.
+        faceSize = std::max(16, w / 4);
+        for (int f = 0; f < 6; ++f) {
+            faces[f].assign((size_t)faceSize * faceSize * comp, 0);
+            for (int y = 0; y < faceSize; ++y) {
+                for (int x = 0; x < faceSize; ++x) {
+                    const glm::vec3 d = FaceDirection(f, (x + 0.5f) / faceSize,
+                                                      (y + 0.5f) / faceSize);
+                    const float lon = std::atan2(d.x, -d.z);          // -pi..pi
+                    const float lat = std::asin(glm::clamp(d.y, -1.0f, 1.0f));
+                    int sx = (int)((lon / (2.0f * 3.14159265f) + 0.5f) * (float)w);
+                    int sy = (int)((0.5f - lat / 3.14159265f) * (float)h);
+                    sx = glm::clamp(sx, 0, w - 1);
+                    sy = glm::clamp(sy, 0, h - 1);
+                    const unsigned char* s = src + ((size_t)sy * w + sx) * comp;
+                    unsigned char* d8 = faces[f].data() + ((size_t)y * faceSize + x) * comp;
+                    for (int c = 0; c < comp; ++c) d8[c] = s[c];
+                }
+            }
+        }
+    } else {
+        int cols = 0, rows = 0;
+        GridOf(chosen, cols, rows);
+        const Cell* cells = CellsFor(chosen);
+        if (!cells || cols == 0) { stbi_image_free(src); return nullptr; }
+        faceSize = w / cols;
+        if (faceSize <= 0 || h / rows != faceSize) {
+            LOG_ERROR("Skybox") << "Клетки неба не квадратные: " << file << " (" << w << "x" << h
+                                << ", раскладка " << LayoutName(chosen) << ")";
+            stbi_image_free(src);
+            return nullptr;
+        }
+        for (int f = 0; f < 6; ++f) {
+            faces[f].assign((size_t)faceSize * faceSize * comp, 0);
+            const int x0 = cells[f].Col * faceSize;
+            const int y0 = cells[f].Row * faceSize;
+            for (int y = 0; y < faceSize; ++y) {
+                for (int x = 0; x < faceSize; ++x) {
+                    // Поворот на 180° — это чтение той же клетки с конца по обеим
+                    // осям; отдельного прохода он не требует.
+                    const int sx = cells[f].Rotate180 ? (faceSize - 1 - x) : x;
+                    const int sy = cells[f].Rotate180 ? (faceSize - 1 - y) : y;
+                    const unsigned char* s = src + ((size_t)(y0 + sy) * w + (x0 + sx)) * comp;
+                    unsigned char* d8 = faces[f].data() + ((size_t)y * faceSize + x) * comp;
+                    for (int c = 0; c < comp; ++c) d8[c] = s[c];
+                }
+            }
+        }
+    }
+    stbi_image_free(src);
+
+    CubeFacePixels cubeFaces[6];
+    for (int f = 0; f < 6; ++f) cubeFaces[f] = {faceSize, faceSize, comp, faces[f].data()};
+
+    try {
+        auto sky = std::unique_ptr<Skybox>(new Skybox(cubeFaces));
+        LOG_INFO("Skybox") << "Небо из одного файла: " << file << " (" << w << "x" << h
+                           << ", " << LayoutName(chosen) << ", грань " << faceSize << "px)";
+        return sky;
+    } catch (const std::exception& e) {
+        LOG_ERROR("Skybox") << "Небо не собралось из " << file << ": " << e.what();
+        return nullptr;
+    }
 }
 
 const std::array<const char*, 6>& Skybox::FaceNames() {

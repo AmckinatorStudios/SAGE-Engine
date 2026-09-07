@@ -12,7 +12,9 @@
 #include "sage/physics/PhysicsTypes.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
+#include "sage/render/SkyDraw.h"
 #include "sage/render/SkyModel.h"
+#include "sage/render/Skybox.h"
 #include "../Project.h"
 #include <cstdio>
 #include <cmath>
@@ -225,11 +227,20 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
     }
 
     // РЕЖИМ — первым делом: от него зависит, какие настройки вообще имеют смысл.
-    const char* kModes[] = {T("Procedural"), T("Cubemap folder"), T("Six separate files")};
-    int mode = (int)sky.Kind;
-    if (ImGui::Combo(T("Source"), &mode, kModes, 3)) {
+    const char* kModes[] = {T("Procedural"), T("One image (cross or panorama)"),
+                            T("Cubemap folder"), T("Six separate files")};
+    // Порядок в списке — по частоте, а не по значению перечисления: одной
+    // картинкой небо приходит чаще всего, и стоять она должна первой из
+    // текстурных. Поэтому индекс списка и Source связаны таблицей, а не равны.
+    static const SkyboxSettings::Source kOrder[4] = {
+        SkyboxSettings::Source::Procedural, SkyboxSettings::Source::Image,
+        SkyboxSettings::Source::Cubemap, SkyboxSettings::Source::Faces};
+    int mode = 0;
+    for (int i = 0; i < 4; ++i)
+        if (kOrder[i] == sky.Kind) mode = i;
+    if (ImGui::Combo(T("Source"), &mode, kModes, 4)) {
         host.PushUndoSnapshot();
-        sky.Kind = (SkyboxSettings::Source)mode;
+        sky.Kind = kOrder[mode];
         // Пути НЕ стираются при переключении: вернуться к своему набору неба
         // надо уметь без повторного выбора папки.
     }
@@ -285,7 +296,44 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
     }
 
     // --- Текстурное небо ---------------------------------------------------
-    if (sky.Kind == SkyboxSettings::Source::Cubemap) {
+    if (sky.Kind == SkyboxSettings::Source::Image) {
+        // ОДИН ФАЙЛ — обычный случай для скачанного набора: в папке лежат
+        // двадцать готовых небес, каждое отдельной картинкой, и выбрать надо
+        // именно картинку, а не каталог.
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "%s", sky.ImagePath.c_str());
+        if (ImGui::InputText(T("Image"), buf, sizeof(buf))) sky.ImagePath = buf;
+        host.TrackLastImGuiItem();
+        ImGui::SameLine();
+        if (ImGui::Button(T("Browse..."))) {
+            FileBrowser::Config c;
+            c.Title = T("Choose a sky image");
+            c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
+            c.FilterLabel = T("Images");
+            c.StartDir = host.CurrentProject().AssetsDir();
+            m_browser.Open(c);
+            m_skyPick = -3;
+        }
+
+        const char* kLayouts[] = {T("Detect automatically"), T("Cross 4:3"), T("Cross 3:4"),
+                                  T("Row 6:1"), T("Column 1:6"), T("Panorama 2:1")};
+        if (ImGui::Combo(T("Layout"), &sky.ImageLayout, kLayouts, 6)) host.PushUndoSnapshot();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Usually the aspect ratio is enough to tell. Set it by hand\n"
+                                      "if the sky came out scrambled: 4:3 is not always a cross."));
+        }
+        // ЧТО ИМЕННО РАСПОЗНАНО — словами и сразу, а не «попробуй и посмотри».
+        if (!sky.ImagePath.empty()) {
+            if (std::shared_ptr<Skybox> loaded = sage::render::SceneSkyCubemap(env)) {
+                ImGui::TextDisabled("%s", T("The sky is assembled and in the frame"));
+            } else {
+                ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
+                                   T("The sky did not assemble — the reason is in the console"));
+            }
+        }
+        ImGui::TextDisabled("%s", T("One picture with all six faces: a cross, a strip or a "
+                                    "panorama."));
+    } else if (sky.Kind == SkyboxSettings::Source::Cubemap) {
         char buf[512];
         std::snprintf(buf, sizeof(buf), "%s", sky.CubemapDir.c_str());
         if (ImGui::InputText(T("Folder"), buf, sizeof(buf))) sky.CubemapDir = buf;
@@ -386,6 +434,9 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
         if (m_skyPick == -1) {
             host.PushUndoSnapshot();
             env.Skybox.CubemapDir = picked;
+        } else if (m_skyPick == -3) {
+            host.PushUndoSnapshot();
+            env.Skybox.ImagePath = picked;
         } else if (m_skyPick >= 0 && m_skyPick < 6) {
             host.PushUndoSnapshot();
             env.Skybox.FacePaths[m_skyPick] = picked;

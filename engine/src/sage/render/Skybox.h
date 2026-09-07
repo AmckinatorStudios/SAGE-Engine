@@ -33,6 +33,34 @@ public:
     // хватает граней; причина уходит в лог.
     static std::unique_ptr<Skybox> LoadFromDirectory(const std::string& directory);
 
+    // --- НЕБО ИЗ ОДНОГО ФАЙЛА -----------------------------------------------
+    //
+    // ЗАЧЕМ. Требовать папку с шестью файлами по нашим именам — значит требовать
+    // того, чего в скачанных наборах чаще всего НЕТ. Наборы приходят одним
+    // изображением на небо: крест 4:3, крест 3:4, полоса 6:1 или столбец 1:6, а
+    // панорамы — 2:1. Человек видит в папке два десятка готовых небес и не может
+    // выбрать ни одного, потому что редактор просит каталог с px/nx/py/ny/pz/nz.
+    // Раскладывать чужой файл по нашим именам руками — работа, которой можно не
+    // быть.
+    enum class Layout {
+        Auto = 0,          // по соотношению сторон (обычный случай)
+        HorizontalCross,   // 4x3: сверху +Y, ряд -X +Z +X -Z, снизу -Y
+        VerticalCross,     // 3x4: тот же крест, но -Z внизу и повёрнут на 180°
+        Row,               // 6x1: +X -X +Y -Y +Z -Z слева направо
+        Column,            // 1x6: те же грани сверху вниз
+        Equirectangular,   // 2:1 панорама — пересчитывается в грани
+    };
+
+    // Небо из одного изображения. nullptr — файл не читается или раскладка не
+    // распознана; причина уходит в лог.
+    static std::unique_ptr<Skybox> LoadFromImage(const std::string& file,
+                                                 Layout layout = Layout::Auto);
+
+    // Раскладка, выбранная для картинки такого размера (Auto -> конкретная).
+    // Отдельно, чтобы редактор мог написать, ЧТО он распознал, не загружая небо.
+    static Layout DetectLayout(int width, int height);
+    static const char* LayoutName(Layout layout);
+
     // Имена граней в порядке +X, -X, +Y, -Y, +Z, -Z (без расширения).
     static const std::array<const char*, 6>& FaceNames();
 
@@ -56,7 +84,15 @@ public:
               float intensity = 1.0f, float rotationDeg = 0.0f) const;
 
 private:
+    // Небо из УЖЕ РАЗОБРАННЫХ пикселей шести граней. Приватный: снаружи небо
+    // берут из файлов (шесть штук или одна картинка), а этот путь — общее дно
+    // для обоих, чтобы создание cubemap жило в одном месте.
+    explicit Skybox(const sage::rhi::CubeFacePixels faces[6]);
+
     void DrawInternal(const glm::mat4& view, const glm::mat4& projection) const;
+
+    // Куб-геометрия неба. Одинакова для всех способов загрузки.
+    void BuildGeometry();
 
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
     std::unique_ptr<sage::rhi::TextureCube> m_cubemap;

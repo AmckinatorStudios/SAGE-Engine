@@ -197,6 +197,10 @@ public:
     // это одна кубическая текстура.
     std::shared_ptr<Skybox> GetSkyboxFaces(const std::string faces[6]);
 
+    // Небо из ОДНОГО файла (крест, полоса, столбец, панорама). layout — 0
+    // «определить по соотношению сторон», дальше по порядку Skybox::Layout.
+    std::shared_ptr<Skybox> GetSkyboxImage(const std::string& file, int layout);
+
     // Перечитать материал с диска В ТОТ ЖЕ разделяемый экземпляр (все
     // держатели видят обновление). Если не кэширован — просто загрузит.
     std::shared_ptr<Material> ReloadMaterial(const std::string& path);

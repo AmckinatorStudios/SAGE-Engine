@@ -409,6 +409,21 @@ std::shared_ptr<Skybox> ResourceManager::GetSkyboxFaces(const std::string faces[
     return sky;
 }
 
+std::shared_ptr<Skybox> ResourceManager::GetSkyboxImage(const std::string& file, int layout) {
+    if (file.empty()) return nullptr;
+    // Раскладка входит в ключ: одну и ту же картинку можно прочитать и крестом,
+    // и панорамой, и это разные небеса.
+    const std::string key = "img:" + std::to_string(layout) + "|" + CacheKey(file);
+    auto it = m_skyboxes.find(key);
+    if (it != m_skyboxes.end()) return it->second;   // в т.ч. закэшированный nullptr
+
+    // LoadFromImage не бросает — отдаёт nullptr и пишет причину сама.
+    std::shared_ptr<Skybox> sky =
+        Skybox::LoadFromImage(Locate(file), (Skybox::Layout)layout);
+    m_skyboxes[key] = sky;
+    return sky;
+}
+
 void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture) {
     if (name.empty() || !texture) return;
     auto it = m_textures.find(name);

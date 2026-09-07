@@ -110,6 +110,7 @@ struct SkyboxSettings {
         Procedural = 0, // градиент со светилами, без единого файла
         Cubemap,        // каталог с шестью гранями px/nx/py/ny/pz/nz
         Faces,          // шесть отдельных файлов, выбранных поштучно
+        Image,          // ОДИН файл: крест, полоса или панорама
     };
     Source Kind = Source::Procedural;
 
@@ -158,6 +159,15 @@ struct SkyboxSettings {
     // набор пришёл россыпью с чужими именами: раскладывать чужие файлы по
     // нашему соглашению об именах — работа, которой можно не быть.
     std::string FacePaths[6];
+    // ОДНА картинка со всем небом сразу (Source::Image). Скачанные наборы почти
+    // всегда так и устроены: крест 4:3 или 3:4, полоса 6:1, столбец 1:6 либо
+    // панорама 2:1. Требовать под каждое такое небо каталог с шестью файлами по
+    // нашим именам — значит требовать ручной нарезки чужого файла.
+    std::string ImagePath;
+    // Раскладка: 0 — определить по соотношению сторон (обычный случай), дальше
+    // по порядку Skybox::Layout. Ручной выбор нужен потому, что 4:3 бывает и
+    // крестом, и просто широкой картинкой, и ошибиться молча тут нельзя.
+    int ImageLayout = 0;
     float Intensity = 1.0f;    // яркость неба (экспозиция окружения)
     float RotationDeg = 0.0f;  // поворот вокруг вертикали
 
@@ -174,6 +184,7 @@ struct SkyboxSettings {
     bool HasCubemap() const {
         if (Kind == Source::Cubemap) return !CubemapDir.empty();
         if (Kind == Source::Faces) return HasFaces();
+        if (Kind == Source::Image) return !ImagePath.empty();
         return false;
     }
 };
