@@ -46,6 +46,7 @@ namespace sage { class Application; }
 #include "CodeEditor.h"
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
+#include "panels/InspectorPanelSage.h"
 #include "panels/ViewportPanel.h"
 #include "panels/GamePanel.h"
 #include "panels/AssetsPanel.h"
@@ -415,6 +416,13 @@ private:
     bool m_showIconSheet = false; // страница со всеми иконками (Window > Icon sheet)
     HierarchyPanel m_hierarchy;
     InspectorPanel m_inspector;
+    // Инспектор на SAGE UI — секции и строки порождаются ОПИСАНИЕМ компонентов
+    // (sage::scene::SceneReflect), а не кодом панели. Пока показывается по
+    // просьбе (SAGE_EDITOR_INSPECTOR_SAGE): у прежнего инспектора есть ещё
+    // вкладка ассетов и правка переменных, и заменять его до их переноса значит
+    // отнять у человека работающее.
+    InspectorPanelSage m_inspectorSage;
+    bool m_useSageInspector = false;
     ViewportPanel m_viewport;
     GamePanel m_game;
     // Левая кнопка на прошлом кадре: из «удерживается» и «удерживалась»

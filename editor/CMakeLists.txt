@@ -37,6 +37,7 @@ add_executable(SageEditor WIN32
     src/Localization.cpp
     src/panels/ConsolePanel.cpp
     src/panels/HierarchyPanel.cpp
+    src/panels/InspectorPanelSage.cpp
     src/panels/InspectorPanel.cpp
     src/panels/InspectorPanel_Material.cpp
     src/panels/InspectorPanel_Entity.cpp
@@ -48,6 +49,7 @@ add_executable(SageEditor WIN32
     src/EditorPrefs.cpp
     src/ui/SageUIIsland.cpp
     src/ui/Clipboard.cpp
+    src/ui/PropertyRows.cpp
     src/ui/SagePanelHost.cpp
     src/VarsEditor.cpp
     src/panels/TopBarPanel.cpp

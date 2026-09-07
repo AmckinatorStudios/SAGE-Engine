@@ -89,19 +89,29 @@ def source_files():
 # Не список файлов, а ОБХОД всего модуля интерфейса: список неизбежно
 # устаревает ровно тогда, когда появляется новый компонент, — то есть в тот
 # единственный момент, когда проверка и нужна.
-ENGINE_TEXT_ROOT = os.path.join(REPO, 'engine', 'src', 'sage', 'ui')
-ENGINE_TEXT = re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
+# То же и для КОМПОНЕНТОВ СЦЕНЫ: их поля описаны таблицей свойств
+# (sage/scene/SceneReflect.h), а инспектор рисует подписи через T(prop.Label) —
+# литерала у него опять нет. Без этого перевод нового поля молча не появлялся
+# бы, а старые переводы выглядели бы «лишними» и однажды были бы удалены как
+# мусор — то есть инспектор стал бы английским по частям.
+ENGINE_TEXT_ROOTS = [
+    (os.path.join(REPO, 'engine', 'src', 'sage', 'ui'),
+     re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')),
+    (os.path.join(REPO, 'engine', 'src', 'sage', 'scene'),
+     re.compile(r'SAGE_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')),
+]
 
 
 def engine_keys():
     keys = set()
-    for root, _dirs, files in os.walk(ENGINE_TEXT_ROOT):
-        for name in files:
-            if not name.endswith(('.cpp', '.h')):
-                continue
-            with open(os.path.join(root, name), encoding='utf-8') as f:
-                for m in ENGINE_TEXT.finditer(f.read()):
-                    keys.add(m.group(1))
+    for root_dir, pattern in ENGINE_TEXT_ROOTS:
+        for root, _dirs, files in os.walk(root_dir):
+            for name in files:
+                if not name.endswith(('.cpp', '.h')):
+                    continue
+                with open(os.path.join(root, name), encoding='utf-8') as f:
+                    for m in pattern.finditer(f.read()):
+                        keys.add(m.group(1))
     return keys
 
 

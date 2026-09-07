@@ -214,6 +214,7 @@ void EditorLayer::OnAttach() {
     // Панель иерархии обращается к сцене и выделению через хозяина — он ставится
     // ДО первой сборки дерева: собирать список объектов, не зная сцены, нечем.
     m_hierarchy.SetHost(this);
+    m_inspectorSage.SetHost(this);
 
     // --- Готовность к падению ---
     //
@@ -440,6 +441,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
             "SAGE_EDITOR_PALETTE",      "SAGE_EDITOR_SHOW_CONSOLE",
             "SAGE_EDITOR_HIERARCHY_FIND", "SAGE_EDITOR_HIDE_ENTITY",
+            "SAGE_EDITOR_INSPECTOR_SAGE",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -525,6 +527,15 @@ void EditorLayer::OnAttach() {
         m_uiDocument.RequestFocus();
     }
     if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_headlessProject = true; m_colliderEdit = true; }
+    // Инспектор на SAGE UI — по просьбе. Пока это второй инспектор, а не
+    // замена: у прежнего есть вкладка ассетов и правка переменных, и до их
+    // переноса замена отняла бы у человека работающее. Хук нужен, чтобы новый
+    // всё же ПРОВЕРЯЛСЯ — кадром, а не обещанием.
+    if (std::getenv("SAGE_EDITOR_INSPECTOR_SAGE")) {
+        m_headlessProject = true;
+        m_useSageInspector = true;
+        m_showInspector = true;
+    }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_headlessProject = true;
         GameObject obj = m_scene->FindByName(name);
@@ -1030,7 +1041,17 @@ void EditorLayer::OnRender() {
     // Панель подаётся в кадр только когда она открыта: закрытая вкладка иначе
     // возвращалась бы сама собой на следующем кадре, и крестик не работал бы.
 
-    if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
+    // Кадр панелей на SAGE UI начинается ДО первой из них: BeginFrame сбрасывает
+    // «клавиатура занята», и вызов после первой панели стирал бы её же ответ.
+    const float uiDt = app.DeltaTime();
+    m_sagePanels.BeginFrame();
+    if (m_showInspector) {
+        if (m_useSageInspector)
+            m_sagePanels.Draw(m_inspectorSage, T("Inspector" "###Inspector"), &m_showInspector,
+                              uiDt, ImVec2(320.0f, 560.0f));
+        else
+            m_inspector.Draw(*this, &m_showInspector);
+    }
     if (m_showEnvironment) m_environment.Draw(*this, &m_showEnvironment);
     if (m_showUIDocument) m_uiDocument.Draw(*this, &m_showUIDocument);
     if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
@@ -1042,8 +1063,6 @@ void EditorLayer::OnRender() {
     if (m_showCode) m_code.Draw(&m_showCode);
     // Первая панель на SAGE UI. Показывается через посредника, пока оболочка
     // редактора ещё на ImGui; сама панель про ImGui не знает.
-    const float uiDt = app.DeltaTime();
-    m_sagePanels.BeginFrame();
     if (m_consoleFocusFrames > 0) {
         --m_consoleFocusFrames;
         m_sagePanels.RequestFocus(m_console);

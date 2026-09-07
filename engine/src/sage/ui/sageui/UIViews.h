@@ -121,12 +121,24 @@ public:
     void OnAttach() override;
 
     // Секция. Возвращает контейнер, в который кладут строки.
-    UIElement* AddSection(const std::string& title, bool expanded = true);
+    //
+    // depth — вложенность: 0 — компонент, 1 — подгруппа внутри него («Тени»,
+    // «Конус»). Отступом, а не другим цветом: подгруппа обязана читаться как
+    // ЧАСТЬ компонента, а не как ещё один компонент рядом.
+    UIElement* AddSection(const std::string& title, bool expanded = true, int depth = 0);
     // Строка: подпись слева, редактор справа. Редактор создаёт вызывающий —
     // таблица не знает и не должна знать, чем правят значение.
     UIElement* AddRow(UIElement* section, const std::string& label);
     // Строка на всю ширину, без подписи: кнопка, разделитель, предупреждение.
     UIElement* AddWide(UIElement* section);
+    // Шапка секции по её телу. Нужна тому, кто вешает на секцию действие —
+    // кнопку «убрать компонент», меню, значок. Отдельным методом, а не третьим
+    // возвращаемым значением AddSection: шапка нужна не всем.
+    UIElement* SectionHead(UIElement* section) const;
+    // Убрать всё содержимое. Инспектор пересобирается при смене выбранного
+    // объекта целиком: строка держит указатель на компонент, и переиспользовать
+    // её для другой сущности значит править чужие поля.
+    void Clear();
 
     PropertyGrid* SetLabelWidth(float width);
     float LabelWidth() const { return m_labelWidth; }

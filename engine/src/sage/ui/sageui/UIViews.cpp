@@ -250,12 +250,13 @@ void PropertyGrid::OnAttach() {
 
 UIElement* PropertyGrid::Content() const { return m_scroll ? m_scroll->Content() : nullptr; }
 
-UIElement* PropertyGrid::AddSection(const std::string& title, bool expanded) {
+UIElement* PropertyGrid::AddSection(const std::string& title, bool expanded, int depth) {
     UIElement* box = Ctx().CreateIn<UIElement>(m_scroll->Content());
     box->SetName(title);
     box->SetStretch(true, false);
     box->Ensure<UITransform>().HeightMode = UISizeMode::Content;
-    box->Vertical(0.0f)->Padding(UIEdges::Uniform(0.0f));
+    const float indent = depth > 0 ? 10.0f * (float)depth : 0.0f;
+    box->Vertical(0.0f)->Padding(UIEdges(indent, 0.0f, 0.0f, 0.0f));
     box->Layout().FitHeight = true;
     box->Layout().Cross = UIAlign::Stretch;
 
@@ -279,6 +280,9 @@ UIElement* PropertyGrid::AddSection(const std::string& title, bool expanded) {
 
     Label* caption = Ctx().CreateIn<Label>(head, title);
     caption->SetStretch(true, false);
+    // Подгруппа — подписью потише: заголовок компонента и заголовок его
+    // подгруппы одного веса читались бы как два компонента.
+    if (depth > 0) caption->SetStyle("Caption");
 
     UIElement* body = Ctx().CreateIn<UIElement>(box);
     body->SetName("Body");
@@ -299,6 +303,22 @@ UIElement* PropertyGrid::AddSection(const std::string& title, bool expanded) {
     return body;
 }
 
+UIElement* PropertyGrid::SectionHead(UIElement* section) const {
+    // Тело секции лежит рядом с шапкой в одной коробке — поднимаемся к ней и
+    // берём первого ребёнка. Знание об этом устройстве живёт ровно здесь.
+    UIElement* box = section ? section->Parent() : nullptr;
+    if (!box) return nullptr;
+    const std::vector<UIElement*> kids = box->Children();
+    return kids.empty() ? nullptr : kids.front();
+}
+
+void PropertyGrid::Clear() {
+    if (!m_scroll) return;
+    // Копия списка: удаление меняет список детей на месте.
+    const std::vector<UIElement*> kids = m_scroll->Content()->Children();
+    for (UIElement* child : kids) child->RemoveFromParent();
+}
+
 UIElement* PropertyGrid::AddRow(UIElement* section, const std::string& label) {
     if (!section) return nullptr;
     UIElement* row = Ctx().CreateIn<UIElement>(section);
@@ -311,8 +331,10 @@ UIElement* PropertyGrid::AddRow(UIElement* section, const std::string& label) {
     Label* caption = Ctx().CreateIn<Label>(row, label);
     caption->SetName("Label");
     // Ширина колонки подписей одна на всю таблицу: пока каждая строка выбирала
-    // её сама, поля стояли лесенкой.
-    caption->SetWidth(m_labelWidth);
+    // её сама, поля стояли лесенкой. Высота — В СТРОКУ: у надписи свой размер
+    // по умолчанию, и он выше строки — выравнивание по центру резало подпись
+    // сверху и снизу, и обрубленные буквы выглядели как ошибка шрифта.
+    caption->SetSize({m_labelWidth, Metric(*this, "Size.Row", 22.0f)});
     caption->SetEllipsis(true);
     caption->SetStyle("Caption");
 

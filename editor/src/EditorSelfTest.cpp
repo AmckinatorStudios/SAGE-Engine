@@ -37,6 +37,7 @@
 #include "sage/render/Screenshot.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
+#include "sage/scene/SceneReflect.h"
 #include "ui/SageUIIsland.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/render/Frustum.h"
@@ -122,7 +123,7 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools + console + hierarchy + panel-flags + editor-prefs + material-assign + "
+                               << "all-components-roundtrip + ui-layout-tools + console + hierarchy + inspector + panel-flags + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
@@ -2376,6 +2377,64 @@ bool EditorLayer::SelfTestTools() {
                 m_scene->Registry().remove<HiddenComponent>(target);
             }
         }
+    }
+
+    // --- Инспектор на SAGE UI: секции порождаются ОПИСАНИЕМ компонентов ---
+    //
+    // Проверяется не «панель нарисовалась», а связь описания с экраном: у
+    // объекта со светом обязана появиться секция света, у объекта без света —
+    // исчезнуть. Пока это проверяется глазами, таблица свойств может
+    // разъехаться с компонентом молча: инспектор выглядит правдоподобным в
+    // любом случае.
+    if (ok) {
+        m_inspectorSage.SetHost(this);
+        SageUIIsland island;
+        m_inspectorSage.EnsureBuilt(island.Ui(), island.Ui().Content());
+
+        GameObject probe = m_scene->CreateObject("SelfTestInspector");
+        SetSelectedId(probe.Id());
+        m_inspectorSage.Sync(0.016f);
+        const std::string base = m_inspectorSage.SectionNames();
+        if (base.find("Transform") == std::string::npos) {
+            LOG_ERROR("Editor") << "SELFTEST: инспектор не показал Transform (" << base << ")";
+            ok = false;
+        }
+        if (ok && base.find("Light") != std::string::npos) {
+            LOG_ERROR("Editor") << "SELFTEST: инспектор показал свет у объекта без света";
+            ok = false;
+        }
+
+        if (ok) {
+            m_scene->Registry().emplace<LightComponent>(probe.Entity());
+            m_inspectorSage.Sync(0.016f);
+            const std::string withLight = m_inspectorSage.SectionNames();
+            if (withLight.find("Light") == std::string::npos) {
+                LOG_ERROR("Editor") << "SELFTEST: инспектор не заметил добавленный свет ("
+                                    << withLight << ")";
+                ok = false;
+            }
+        }
+
+        // Правка ЧЕРЕЗ ОПИСАНИЕ доходит до компонента. Без этой проверки
+        // неверное смещение в таблице молча правило бы соседнее поле.
+        if (ok) {
+            const sage::scene::ComponentType* light =
+                sage::scene::ComponentRegistry::Instance().Find("Light");
+            const sage::scene::Property* intensity = light ? light->FindProp("intensity") : nullptr;
+            if (light && intensity) {
+                void* data = light->Data(m_scene->Registry(), probe.Entity());
+                sage::scene::PropertySetFloat(data, *intensity, 0, 3.5f);
+                const float got = m_scene->Registry().get<LightComponent>(probe.Entity()).Intensity;
+                if (std::abs(got - 3.5f) > 1e-4f) {
+                    LOG_ERROR("Editor") << "SELFTEST: правка через описание не дошла до света ("
+                                        << got << ")";
+                    ok = false;
+                }
+            }
+        }
+        m_scene->RemoveObject(probe.Id());
+        SetSelectedId(0);   // ничего не выбрано: инспектор обязан опустеть
+        m_inspectorSage.Sync(0.016f);
     }
 
     // --- Видимость панелей: закрыть можно, но выход обязан быть ---

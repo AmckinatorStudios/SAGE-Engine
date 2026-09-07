@@ -1120,6 +1120,25 @@
     "Documents of one scene are drawn in this order: the pause menu must lie over the HUD regardless of which object was created first.": "Документы одной сцены рисуются в этом порядке: меню паузы обязано лечь поверх худа независимо от того, кого создали раньше.",
     "Off: the document is visible but does not take the mouse — a HUD over the game must not eat shots.": "Выключено — документ виден, но мышь не ловит: худ поверх игры не должен съедать выстрелы.",
     "A button reports a command; here you say what it does. The interface itself knows nothing about the game.": "Кнопка сообщает команду; здесь записано, что она делает. Сам интерфейс про игру не знает ничего.",
-    "Search entity...": "Поиск объекта..."
+    "Search entity...": "Поиск объекта...",
+    "Id": "Id",
+    "Remove the component": "Убрать компонент",
+    "Select an object": "Выберите объект",
+    "Anchor": "Точка крепления",
+    "Cast Shadows": "Отбрасывать тень",
+    "Clip": "Клип",
+    "Field of View": "Угол обзора",
+    "In Reflections": "В отражениях",
+    "Instance": "Экземпляр",
+    "Limits": "Пределы",
+    "Near Clip": "Ближняя граница",
+    "Ortho Height": "Высота кадра (орто)",
+    "Projection": "Проекция",
+    "Realtime": "В реальном времени",
+    "Replicated": "Реплицируется",
+    "Sensor": "Сенсор",
+    "Target Id": "Id партнёра",
+    "Visibility": "Видимость",
+    "Zero means the decal did not land on anything": "Ноль — наклейка ни на что не легла"
   }
 }
