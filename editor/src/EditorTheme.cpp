@@ -1,4 +1,5 @@
 #include "EditorTheme.h"
+#include "EditorIcons.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -402,9 +403,12 @@ void LoadFont() {
         if (!probe) continue;
         std::fclose(probe);
         io.Fonts->AddFontFromFileTTF(path, 16.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic());
+        EditorIcons::LoadFont();
         return;
     }
-    // Ничего не нашлось — остаёмся на встроенном ProggyClean (ASCII).
+    // Ничего не нашлось — остаёмся на встроенном ProggyClean (ASCII). Иконки при
+    // этом обязаны быть: они свои, встроенные, и от системных шрифтов не зависят.
+    EditorIcons::LoadFont();
 }
 
 void Apply() {

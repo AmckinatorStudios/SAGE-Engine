@@ -235,7 +235,152 @@ InspectorPanel::AssetKind InspectorPanel::ClassifyAsset(const std::filesystem::p
     if (ext == ".sagemat") return AssetKind::Material;
     if (ext == ".sageprefab") return AssetKind::Prefab;
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return AssetKind::Model;
+    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac")
+        return AssetKind::Audio;
     return AssetKind::Other;
+}
+
+
+// ============================================================================
+//  Проигрыватель звукового файла
+// ============================================================================
+//
+// Отвечает на вопрос «что это за звук» там же, где его задают, — в Assets.
+// Раньше ответ стоил постановки объекта в сцену с компонентом Audio, то есть
+// мусора в сцене ради проверки, тот ли это выстрел.
+
+void InspectorPanel::StopAudioPreview(EditorHost& host) {
+    if (!m_audioHandle) return;
+    if (AudioEngine* audio = host.Audio()) audio->StopSound(m_audioHandle);
+    m_audioHandle = 0;
+}
+
+void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
+    AudioEngine* audio = host.Audio();
+    const std::string path = host.InspectedAssetPath().string();
+
+    // СМЕНИЛСЯ ФАЙЛ — снимаем прежний звук и пересчитываем волну. Без первого
+    // выбор второго файла играл бы поверх первого, без второго на новом файле
+    // осталась бы чужая картинка.
+    if (path != m_audioPath) {
+        StopAudioPreview(host);
+        m_audioPath = path;
+        m_audioWave.clear();
+        m_audioSeconds = 0.0f;
+
+        std::vector<float> samples;
+        int rate = 0;
+        // Путь отдаём КАК ЕСТЬ: ссылку проекта движок разрешает сам — и при
+        // разборе, и при проигрывании, одной и той же дорогой.
+        if (AudioEngine::DecodeToMono(path, samples, rate) && rate > 0 && !samples.empty()) {
+            m_audioSeconds = (float)samples.size() / (float)rate;
+            // Огибающая столбцами: в одном пикселе тысячи сэмплов, и рисовать
+            // их поштучно нельзя. Берём минимум и максимум на столбец — так
+            // видно и тихие места, и щелчки, а среднее их бы съело.
+            constexpr int kColumns = 512;
+            m_audioWave.reserve(kColumns);
+            const size_t per = std::max<size_t>(1, samples.size() / kColumns);
+            for (size_t i = 0; i < samples.size(); i += per) {
+                float lo = samples[i], hi = samples[i];
+                const size_t end = std::min(samples.size(), i + per);
+                for (size_t k = i; k < end; ++k) {
+                    lo = std::min(lo, samples[k]);
+                    hi = std::max(hi, samples[k]);
+                }
+                m_audioWave.emplace_back(lo, hi);
+            }
+        } else {
+            LOG_WARN("Audio") << "Волна не построена для '" << path
+                              << "' — причина строкой выше";
+        }
+    }
+
+    if (!audio || !audio->IsAvailable()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.7f, 0.4f, 1.0f), "%s",
+                           T("No sound device — nothing will be heard here."));
+        ImGui::TextDisabled("%s", T("The file itself is fine; the reason is in the log."));
+        return;
+    }
+
+    const bool alive = m_audioHandle && audio->IsSoundAlive(m_audioHandle);
+    const bool playing = alive && audio->IsSoundPlaying(m_audioHandle);
+    // Доигравший звук отпускаем сам: дескриптор живёт, пока владелец его не
+    // снял, и без этого второй «Играть» ничего бы не запустил.
+    if (alive && !playing && !m_audioLoop) StopAudioPreview(host);
+
+    if (playing) {
+        if (EditorIcons::Button("stop", T("Stop"))) StopAudioPreview(host);
+    } else {
+        if (EditorIcons::Button("play", T("Play"))) {
+            StopAudioPreview(host);
+            AudioEngine::SoundParams p;
+            p.Volume = m_audioVolume;
+            p.Loop = m_audioLoop;
+            p.Spatial = false;   // слушаем ФАЙЛ, а не источник в сцене
+            p.Cat = AudioEngine::Category::Sfx;
+            m_audioHandle = audio->Play(path, p);
+            if (!m_audioHandle) {
+                LOG_ERROR("Audio") << "Проигрыватель: звук не запустился — '" << path
+                                   << "' (причина строкой выше)";
+            }
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Checkbox(T("Loop##audioplayer"), &m_audioLoop) && alive) {
+        // Смена зацикленности на лету: перезапускать звук ради галочки — значит
+        // терять место, до которого дослушали.
+        StopAudioPreview(host);
+    }
+    ImGui::SetNextItemWidth(140.0f);
+    if (ImGui::SliderFloat(T("Volume##audioplayer"), &m_audioVolume, 0.0f, 1.0f) && alive) {
+        audio->SetSoundVolume(m_audioHandle, m_audioVolume);
+    }
+
+    // --- Полоса времени -----------------------------------------------------
+    const float length = alive && audio->SoundLength(m_audioHandle) > 0.0f
+                             ? audio->SoundLength(m_audioHandle)
+                             : m_audioSeconds;
+    float position = alive ? audio->SoundPosition(m_audioHandle) : 0.0f;
+    if (length > 0.0f) {
+        ImGui::SetNextItemWidth(-1.0f);
+        // Бегунок ведёт себя как бегунок: тянут — перематываем. Без этого
+        // послушать конец длинного файла можно было бы только дослушав его.
+        if (ImGui::SliderFloat("##audiopos", &position, 0.0f, length, "%.2f s") && alive) {
+            audio->SeekSound(m_audioHandle, position);
+        }
+        ImGui::TextDisabled(T("%.2f of %.2f s"), position, length);
+    } else {
+        ImGui::TextDisabled("%s", T("Length unknown — the file did not decode."));
+    }
+
+    // --- Волна --------------------------------------------------------------
+    if (!m_audioWave.empty()) {
+        const float height = 64.0f;
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        const float width = std::max(64.0f, ImGui::GetContentRegionAvail().x);
+        ImGui::Dummy(ImVec2(width, height));
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 p1(p0.x + width, p0.y + height);
+        dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(0, 0, 0, 0.28f)), 4.0f);
+        const float mid = p0.y + height * 0.5f;
+        const ImU32 col = ImGui::GetColorU32(ImVec4(0.45f, 0.68f, 0.95f, 0.95f));
+        dl->PushClipRect(p0, p1, true);
+        for (int x = 0; x < (int)width; ++x) {
+            const size_t i = (size_t)((float)x / width * (float)m_audioWave.size());
+            if (i >= m_audioWave.size()) break;
+            const float lo = m_audioWave[i].first, hi = m_audioWave[i].second;
+            dl->AddLine(ImVec2(p0.x + (float)x, mid - hi * height * 0.5f),
+                        ImVec2(p0.x + (float)x, mid - lo * height * 0.5f), col);
+        }
+        // Где мы сейчас — вертикальная черта. Она и делает волну полезной:
+        // видно, к какому месту записи относится то, что слышно.
+        if (length > 0.0f) {
+            const float x = p0.x + width * std::clamp(position / length, 0.0f, 1.0f);
+            dl->AddLine(ImVec2(x, p0.y), ImVec2(x, p1.y),
+                        ImGui::GetColorU32(ImVec4(1.0f, 0.85f, 0.35f, 1.0f)), 1.5f);
+        }
+        dl->PopClipRect();
+    }
 }
 
 void InspectorPanel::DrawObjectSection(EditorHost& host) {
@@ -272,6 +417,11 @@ void InspectorPanel::DrawAssetSection(EditorHost& host, AssetKind kind) {
             DrawSectionHeader("model", T("model"), name,
                               T("Import settings are baked into the mesh on load."));
             DrawModelImportEditor(host);
+            break;
+        case AssetKind::Audio:
+            DrawSectionHeader("play", T("sound"), name,
+                              T("Listen to it right here — no need to put it on an object first."));
+            DrawAudioPlayer(host);
             break;
         default: {
             // Для остальных типов редактора нет — но пустая вкладка выглядит как

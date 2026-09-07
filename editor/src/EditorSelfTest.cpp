@@ -12,6 +12,7 @@
 // вызываются оттуда же, откуда вызывались.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "EditorIcons.h"
 
 #include "sage/ecs/DecalSystem.h"
 
@@ -120,7 +121,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
@@ -2029,6 +2030,64 @@ bool EditorLayer::SelfTestSelection() {
         m_scene->GI.reset();
         m_scene->RemoveObject(giFloor.Id());
         m_scene->RemoveObject(giCube.Id());
+    }
+
+    // --- Иконки: шрифт собрался и у каждого имени есть свой глиф ---------------
+    //
+    // Отказ здесь беззвучный: не собрался шрифт — на всех кнопках пустые
+    // квадратики с диагональю, и редактор при этом работает. Человек видит это
+    // глазами, а никакой тест — нет, поэтому спрашиваем прямо.
+    if (ok) {
+        if (!EditorIcons::FontReady()) {
+            LOG_ERROR("Editor") << "SELFTEST: icon font did not build";
+            ok = false;
+        }
+        // И каждое имя из набора обязано иметь глиф: имя без глифа рисуется той
+        // же заглушкой, то есть опечатка в имени иконки выглядит как «иконки
+        // сломались», а не как опечатка.
+        for (int i = 0; ok && i < EditorIcons::Count(); ++i) {
+            const char* name = EditorIcons::NameAt(i);
+            if (!name || !EditorIcons::HasGlyph(name)) {
+                LOG_ERROR("Editor") << "SELFTEST: no glyph for icon '" << (name ? name : "?") << "'";
+                ok = false;
+            }
+        }
+    }
+
+    // --- Звук живёт в режиме ПРАВКИ, а не только в игре ------------------------
+    //
+    // Кнопка «Послушать» у компонента и проигрыватель звукового файла ставят
+    // команду и ждут, что её кто-то выполнит. Выполняет стадия «audio», и она
+    // заводилась вместе с Play, а по Stop снималась. То есть до первого запуска
+    // игры превью звука не работало вовсе, а после первой остановки переставало
+    // работать навсегда — молча, без единой строки в логе, потому что никакой
+    // ошибки при этом не происходило.
+    if (ok) {
+        auto hasAudioStage = [this]() {
+            for (const std::string& name : m_systems.Order())
+                if (name == "audio") return true;
+            return false;
+        };
+        if (!hasAudioStage()) {
+            LOG_ERROR("Editor") << "SELFTEST: audio stage missing in edit mode";
+            ok = false;
+        }
+        if (ok && !m_playAudio) {
+            LOG_ERROR("Editor") << "SELFTEST: no audio device outside Play";
+            ok = false;
+        }
+        if (ok) {
+            StartPlay();
+            if (!hasAudioStage()) {
+                LOG_ERROR("Editor") << "SELFTEST: audio stage missing during Play";
+                ok = false;
+            }
+            StopPlay();
+            if (ok && !hasAudioStage()) {
+                LOG_ERROR("Editor") << "SELFTEST: audio stage lost after Stop";
+                ok = false;
+            }
+        }
     }
 
     // --- Замок панели свойств -------------------------------------------------

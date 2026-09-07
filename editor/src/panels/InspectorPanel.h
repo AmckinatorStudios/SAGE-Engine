@@ -2,8 +2,11 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "AssetPreview.h"
+#include "sage/audio/AudioEngine.h"
 #include "FileBrowser.h"
 
 
@@ -32,7 +35,7 @@ public:
 
 private:
     // Что за файл выбран в Assets — по нему выбирается редактор.
-    enum class AssetKind { None, Material, Prefab, Model, Other };
+    enum class AssetKind { None, Material, Prefab, Model, Audio, Other };
     // Какая вкладка открыта. Следует за последним выбором человека, иначе
     // разделение стоило бы лишнего клика на каждое переключение.
     enum class Focus { Object, Asset };
@@ -50,6 +53,30 @@ private:
     std::string m_lastAssetPath;
 
     void DrawMaterialEditor(EditorHost& host);
+    // --- ПРОИГРЫВАТЕЛЬ ЗВУКОВОГО ФАЙЛА --------------------------------------
+    //
+    // Выбрал .wav в Assets — слышишь его. До этого послушать файл можно было
+    // ровно одним способом: повесить его на объект компонентом Audio и нажать
+    // «Послушать» там, то есть насорить в сцене ради проверки, тот ли это
+    // выстрел. Проигрыватель отвечает на вопрос «что это за файл» на месте.
+    //
+    // Волна рисуется движковым декодером (AudioEngine::DecodeToMono) — тем же,
+    // что и проигрывает: иначе нашёлся бы формат, который слышно, но не видно.
+    void DrawAudioPlayer(EditorHost& host);
+    void StopAudioPreview(EditorHost& host);
+
+    // Что сейчас в проигрывателе. Путь — чтобы заметить смену файла и снять
+    // прежний звук: иначе выбор второго файла играл бы поверх первого.
+    std::string m_audioPath;
+    AudioEngine::SoundHandle m_audioHandle = 0;
+    bool m_audioLoop = false;
+    float m_audioVolume = 1.0f;
+    // Огибающая для рисования: пары «минимум-максимум» по столбцам. Считается
+    // один раз на файл — декодирование минуты звука это миллионы сэмплов, и
+    // делать это каждый кадр значило бы уронить редактор на первом же выборе.
+    std::vector<std::pair<float, float>> m_audioWave;
+    float m_audioSeconds = 0.0f;
+
     // Префаб: вращаемая 3D-обложка + постановка в сцену (см. AssetPreview::RenderPrefab).
     void DrawPrefabPreview(EditorHost& host);
 
