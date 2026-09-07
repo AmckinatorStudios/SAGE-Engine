@@ -15,10 +15,11 @@
 // Все иконки вписаны в КВАДРАТ со стороной, равной высоте строки, поэтому
 // вёрстка не зависит от того, какую именно нарисовали.
 //
-// Имена: play, pause, stop, move, rotate, scale, grid, cube, sphere, light,
-// camera, script, particles, anim, ik, probe, folder, file, scene, material,
-// model, warn, error, info, debug, trash, copy, save, open, plus, eye, lock,
-// wire, sun, universal, align, drop, rect, gear, magnet.
+// Имена: play, pause, stop, move, rotate, scale, grid, list, cube, sphere,
+// light, camera, script, particles, anim, ik, probe, folder, file, scene,
+// material, model, warn, error, info, debug, trash, copy, save, open, import,
+// plus, pencil, clock, eye, lock, wire, sun, universal, align, drop, rect,
+// gear, magnet.
 // ---------------------------------------------------------------------------
 namespace EditorIcons {
 

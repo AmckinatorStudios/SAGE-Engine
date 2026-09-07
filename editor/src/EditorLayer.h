@@ -38,7 +38,7 @@ namespace sage { class Application; }
 #include "EditorPlayInput.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
-#include "RecentProjects.h"
+#include "ProjectLauncher/ProjectDatabase.h"
 #include "PluginAPI.h"
 #include "PluginManager.h"
 #include "panels/ConsolePanel.h"
@@ -50,7 +50,7 @@ namespace sage { class Application; }
 #include "panels/ViewportPanel.h"
 #include "panels/GamePanel.h"
 #include "panels/AssetsPanel.h"
-#include "panels/LauncherPanel.h"
+#include "ProjectLauncher/ProjectLauncher.h"
 #include "panels/EnvironmentPanel.h"
 #include "panels/UIEditorPanel.h"
 #include "panels/TopBarPanel.h"
@@ -308,7 +308,9 @@ private:
 
     // --- проект ---
     Project m_project;
-    RecentProjects m_recent;
+    // База проектов стартового окна: что человек открывал, создавал или
+    // принёс сам. Пришла на смену списку недавних (см. ProjectDatabase.h).
+    Sage::Launcher::ProjectDatabase m_projects;
     std::filesystem::path m_scenePath;   // куда сохранена/откуда открыта текущая сцена
     std::filesystem::path m_assetsCwd;   // текущая папка панели Assets
     // Состав и порядок кадра (см. sage/core/SystemScheduler.h).
@@ -422,6 +424,9 @@ private:
     // imgui.h в этот заголовок не входит, и тянуть его сюда ради двух точек —
     // значит навязать его всем, кто включает EditorLayer.h.
     void DrawEmptyDockHint(float minX, float minY, float maxX, float maxY);
+    // Показать окна, которые ImGui вынес в отдельные окна системы. Зовётся в
+    // КАЖДОМ кадре после ImGui::Render() — см. EditorLayer.cpp.
+    void PresentExtraViewports();
 
     // --- панели (архитектура v3: каждая — независимый класс) ---
     ConsolePanel m_console;
@@ -453,7 +458,7 @@ private:
     // Приёмник для колбэка GLFW: он статический по природе (C-функция), а
     // редактор в процессе один.
     static std::function<void(const std::vector<std::string>&)> s_dropSink;
-    LauncherPanel m_launcher;
+    Sage::Launcher::ProjectLauncher m_launcher;
     EnvironmentPanel m_environment;
     UIEditorPanel m_uiEditor;
     TopBarPanel m_topBar;

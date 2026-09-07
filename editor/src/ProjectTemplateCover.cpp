@@ -1,5 +1,7 @@
 #include "ProjectTemplateCover.h"
 
+#include "EditorTheme.h"
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -290,7 +292,11 @@ bool ProjectTemplateCard(const ProjectTemplate& tpl, bool selected, float width)
     // Выбранная карточка — рамкой и подложкой акцентного цвета, а не только
     // цветом текста: цветом текста «выбрано» не читается на трёх карточках
     // подряд, а именно это и был единственный признак у радиокнопок.
-    const ImVec4 accent(0.35f, 0.55f, 0.90f, 1.0f);
+    // Акцент — ИЗ ТЕМЫ, а не числом. Здесь стоял синий (0.35, 0.55, 0.90),
+    // подобранный до появления дизайн-системы: выбранная карточка шаблона
+    // светилась синим на экране, где всё остальное выделяется жёлтым SAGE, и
+    // смена темы её не касалась (см. EditorTheme.h, «почему роли»).
+    const ImVec4 accent = EditorTheme::Color(EditorTheme::Role::Accent);
     if (selected) dl->AddRectFilled(a, b, Col(accent.x, accent.y, accent.z, 0.22f), 5.0f);
     else if (hovered) dl->AddRectFilled(a, b, ImGui::GetColorU32(ImGuiCol_FrameBgHovered), 5.0f);
     dl->AddRect(a, b, selected ? Col(accent.x, accent.y, accent.z, 1.0f)

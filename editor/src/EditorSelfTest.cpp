@@ -440,15 +440,165 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         }
     }
 
-    // --- Недавние проекты: наш проект должен был попасть в начало списка ---
+    // --- База проектов стартового окна ------------------------------------
+    //
+    // Проверяется то, ради чего она и заведена: проект попадает в список сам,
+    // список читается с диска, поиск и отбор работают по памяти, отсутствующая
+    // папка ПОМЕЧАЕТСЯ, а не вычёркивается, «убрать из списка» и «удалить с
+    // диска» — разные действия. Каждый из этих пунктов раньше проверялся
+    // только глазами: список недавних умел ровно «добавить строку».
     if (ok) {
-        RecentProjects reload;
-        reload.Load();
-        bool found = !reload.List().empty() &&
-                     reload.List().front() == m_project.Dir().string();
-        if (!found) {
-            LOG_ERROR("Editor") << "SELFTEST: recent projects did not record the new project";
+        using namespace Sage::Launcher;
+        const std::string mine = m_project.Dir().string();
+
+        ProjectDatabase db;
+        db.Load();
+        if (db.IndexOf(mine) < 0) {
+            LOG_ERROR("Editor") << "SELFTEST: проект не попал в базу стартового окна";
             ok = false;
+        }
+        // Порядок «недавние сверху»: только что созданный проект — первый.
+        if (ok) {
+            const std::vector<int> shown = db.Query(ProjectFilter::All, "", ProjectSort::Recent);
+            if (shown.empty() || db.All()[(size_t)shown.front()].Path != db.All()[(size_t)db.IndexOf(mine)].Path) {
+                LOG_ERROR("Editor") << "SELFTEST: недавний проект не первый в списке";
+                ok = false;
+            }
+        }
+        // Поиск идёт по имени и пути — и ничего не находит по бессмыслице.
+        if (ok) {
+            const std::string name = db.All()[(size_t)db.IndexOf(mine)].Name;
+            if (db.Query(ProjectFilter::All, name, ProjectSort::Recent).empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: поиск не нашёл проект по имени";
+                ok = false;
+            }
+            if (!db.Query(ProjectFilter::All, "щщщнетакого", ProjectSort::Recent).empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: поиск нашёл несуществующее";
+                ok = false;
+            }
+        }
+        // Тип проекта живёт в дескрипторе и меняет вкладку отбора.
+        if (ok) {
+            std::string metaErr;
+            if (!ProjectDatabase::WriteMetadata(m_project.Dir(), ProjectKind::Scene,
+                                                "проверка", metaErr)) {
+                LOG_ERROR("Editor") << "SELFTEST: тип проекта не записался: " << metaErr;
+                ok = false;
+            } else {
+                db.Refresh(mine);
+                const ProjectEntry* e = db.Find(mine);
+                if (!e || e->Kind != ProjectKind::Scene || e->Description != "проверка") {
+                    LOG_ERROR("Editor") << "SELFTEST: тип/описание проекта не перечитались";
+                    ok = false;
+                } else if (!db.Query(ProjectFilter::Games, e->Name, ProjectSort::Name).empty() ||
+                           db.Query(ProjectFilter::Scenes, e->Name, ProjectSort::Name).empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: отбор по типу не увидел смену типа";
+                    ok = false;
+                }
+                // Вернуть тип обратно: дальше этим проектом пользуются другие шаги.
+                ProjectDatabase::WriteMetadata(m_project.Dir(), ProjectKind::Game, "", metaErr);
+                db.Refresh(mine);
+            }
+        }
+        // Импорт: не проект — понятный отказ; тот же проект второй раз — не
+        // дубликат в списке.
+        if (ok) {
+            const fs::path notProject = fs::path("selftest_not_a_project");
+            fs::create_directories(notProject, ec);
+            std::string importErr;
+            if (db.Import(notProject, importErr) || importErr.empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: импорт принял папку без project.sageproj";
+                ok = false;
+            }
+            fs::remove_all(notProject, ec);
+
+            const size_t before = db.All().size();
+            std::string dupErr;
+            if (!db.Import(m_project.Dir(), dupErr) || db.All().size() != before) {
+                LOG_ERROR("Editor") << "SELFTEST: повторный импорт задвоил проект в списке";
+                ok = false;
+            }
+        }
+        // Дубликат -> удаление с диска: копия появляется рядом и исчезает
+        // насовсем, а оригинал остаётся.
+        if (ok) {
+            std::string dupErr, copyPath;
+            if (!db.Duplicate(mine, "selftest_project_copy", dupErr, &copyPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: дубликат проекта не создался: " << dupErr;
+                ok = false;
+            } else if (!fs::exists(fs::path(copyPath) / "project.sageproj", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: у дубликата нет дескриптора";
+                ok = false;
+            } else {
+                std::string delErr;
+                if (!db.DeleteFromDisk(copyPath, delErr)) {
+                    LOG_ERROR("Editor") << "SELFTEST: дубликат не удалился: " << delErr;
+                    ok = false;
+                } else if (fs::exists(copyPath, ec) || db.IndexOf(copyPath) >= 0) {
+                    LOG_ERROR("Editor") << "SELFTEST: удалённый проект остался";
+                    ok = false;
+                }
+                // Оригинал НЕ пострадал — иначе «удалить копию» означало бы
+                // потерю работы.
+                if (ok && !fs::exists(fs::path(mine) / "project.sageproj", ec)) {
+                    LOG_ERROR("Editor") << "SELFTEST: удаление копии задело оригинал";
+                    ok = false;
+                }
+            }
+        }
+        // Пропавшая папка ПОМЕЧАЕТСЯ, а не вычёркивается: внешний диск
+        // отключают чаще, чем удаляют проекты.
+        if (ok) {
+            const fs::path ghost = fs::absolute("selftest_ghost_project", ec);
+            fs::create_directories(ghost, ec);
+            std::ofstream(ghost / "project.sageproj") << "{\"name\":\"ghost\"}";
+            std::string ghostErr;
+            if (!db.Import(ghost, ghostErr)) {
+                LOG_ERROR("Editor") << "SELFTEST: импорт проекта-призрака отказал: " << ghostErr;
+                ok = false;
+            } else {
+                fs::remove_all(ghost, ec);
+                ProjectDatabase reload;
+                reload.Load();
+                const ProjectEntry* e = reload.Find(ghost.string());
+                if (!e || !e->Missing) {
+                    LOG_ERROR("Editor") << "SELFTEST: пропавший проект не помечен";
+                    ok = false;
+                }
+                reload.Forget(ghost.string());
+                ProjectDatabase after;
+                after.Load();
+                if (after.Find(ghost.string())) {
+                    LOG_ERROR("Editor") << "SELFTEST: запись не убралась из списка";
+                    ok = false;
+                }
+            }
+        }
+        // Перетаскивание: папка проекта добавляется, чужая — с объяснением.
+        if (ok) {
+            Sage::Launcher::ProjectLauncher launcher;
+            ProjectDatabase drop;
+            drop.Load();
+            const int added = launcher.AcceptDroppedFiles({mine}, drop);
+            if (added != 0 && drop.IndexOf(mine) < 0) {
+                LOG_ERROR("Editor") << "SELFTEST: брошенный проект не попал в список";
+                ok = false;
+            }
+            const int junk = launcher.AcceptDroppedFiles({std::string("нет-такой-папки")}, drop);
+            if (junk != 0 || launcher.LastError().empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: брошенная чужая папка принята молча";
+                ok = false;
+            }
+        }
+        // Кэш обложек: путь считается из пути картинки и не меняется от
+        // запуска к запуску — иначе кэш не кэш.
+        if (ok) {
+            const std::string src = "/tmp/пример/preview.png";
+            if (ProjectThumbnail::CachePathFor(src) != ProjectThumbnail::CachePathFor(src) ||
+                ProjectThumbnail::CachePathFor(src) == ProjectThumbnail::CachePathFor(src + "2")) {
+                LOG_ERROR("Editor") << "SELFTEST: путь кэша обложек не постоянен";
+                ok = false;
+            }
         }
     }
 
