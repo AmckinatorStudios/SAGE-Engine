@@ -94,6 +94,15 @@ void EditorLayer::HandleDroppedFiles() {
     std::vector<std::string> dropped;
     dropped.swap(m_droppedFiles);
 
+    // ПОКА НА ЭКРАНЕ СТАРТОВОЕ ОКНО, брошенный файл принадлежит ему: там
+    // перетаскивание означает «добавь этот проект в список», а не «внеси файл
+    // в ассеты». Без этой ветки папка, брошенная на стартовое окно, молча
+    // копировалась бы в ассеты того проекта, который откроют следующим.
+    if (!m_project.Loaded() || m_launcherRequested) {
+        m_launcher.AcceptDroppedFiles(dropped, m_projects);
+        return;
+    }
+
     int imported = 0;
     std::string lastError;
     for (const std::string& raw : dropped) {

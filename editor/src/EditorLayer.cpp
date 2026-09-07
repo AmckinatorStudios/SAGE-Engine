@@ -325,7 +325,7 @@ void EditorLayer::OnAttach() {
     // Дефолтные пути диалогов теперь инициализирует DialogsPanel (в конструкторе).
     m_assetsCwd = fs::current_path();
 
-    m_recent.Load();
+    m_projects.Load();
 
     // Настройки движка ДО первого кадра: файл рядом с редактором, поверх него —
     // переменные окружения (как это делает рантайм в своём main). Без этого
@@ -804,6 +804,7 @@ void EditorLayer::OnDetach() {
     // списать падение уже не на что.
     m_inspector.Shutdown();
     m_assets.Shutdown();
+    m_launcher.Shutdown();   // обложки проектов — тоже текстуры
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
     if (m_imguiReady) {
         ImGui_ImplOpenGL3_Shutdown();
@@ -1080,10 +1081,14 @@ void EditorLayer::OnRender() {
     // это условие: до открытия проекта показывать нечего, потому что и работать
     // не с чем.
     if (!m_project.Loaded()) {
-        m_launcher.Draw(*this, m_recent);
+        m_launcher.Draw(*this, m_projects);
         m_dialogs.Draw(*this);   // диалог обзора папок открывается отсюда же
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        // Окна системы — и здесь тоже (см. PresentExtraViewports): диалог
+        // создания проекта в стартовом окне становится отдельным окном, если
+        // не влезает в главное.
+        PresentExtraViewports();
         // СНИМОК ДЕЛАЕТСЯ И ЗДЕСЬ. Ранний выход пропускал счётчик кадров вместе
         // со скриншотом, и стартовое окно оказывалось единственной частью
         // редактора, которую нельзя проверить иначе как открыв её глазами на
@@ -1116,13 +1121,32 @@ void EditorLayer::OnRender() {
     // но человек хочет открыть другой.
     if (m_launcherRequested) {
         const std::string was = m_project.Dir().string();
-        m_launcher.Draw(*this, m_recent);
+        // Draw() отвечает «показывать ли дальше»: у окна поверх открытого
+        // проекта есть выход назад, и закрыть его надо по этому ответу.
+        if (!m_launcher.Draw(*this, m_projects)) m_launcherRequested = false;
         if (m_project.Dir().string() != was) m_launcherRequested = false;
     }
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
+    PresentExtraViewports();
+
+    TakeAutoScreenshot(app);
+}
+
+// ---------------------------------------------------------------------------
+// Окна, живущие ОТДЕЛЬНЫМИ окнами системы (multi-viewport): панели, вытащенные
+// из дока, и всплывающие окна, не поместившиеся в главное.
+//
+// ВЫЗЫВАТЬ КАЖДЫЙ КАДР, В КОТОРОМ БЫЛ ImGui::Render(). Пропущенный вызов — не
+// «окно не показалось»: ImGui заводит для такого окна вьюпорт и ждёт, что
+// платформа создаст ему настоящее окно, а следующий кадр бэкенда спрашивает у
+// несозданного окна фокус и падает в glfwGetWindowAttrib. Ровно так редактор
+// и падал, стоило открыть в стартовом окне диалог, который не влезает в
+// главное окно: ветка стартового окна рисовала кадр и выходила раньше этого
+// блока.
+void EditorLayer::PresentExtraViewports() {
     // Multi-viewport: панели, вытащенные за пределы главного окна, живут в
     // собственных OS-окнах — их нужно обновить и отрисовать отдельно.
     ImGuiIO& io = ImGui::GetIO();
@@ -1156,8 +1180,6 @@ void EditorLayer::OnRender() {
         ImGui::RenderPlatformWindowsDefault();
         glfwMakeContextCurrent(backup);
     }
-
-    TakeAutoScreenshot(app);
 }
 
 void EditorLayer::TakeAutoScreenshot(sage::Application& app) {

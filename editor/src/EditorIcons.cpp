@@ -483,6 +483,42 @@ bool Shape(const Pen& p, const char* n) {
         p.Line(0.625f, 0.625f, 0.8125f, 0.8125f, 0.09f);
         return true;
     }
+    // Часы — «недавние». Стрелки строго на 10:20 (не на 12:00): на маленьком
+    // размере совпавшие стрелки читаются как одна палка, и циферблат перестаёт
+    // быть циферблатом.
+    if (is("clock")) {
+        p.Circle(0.5f, 0.5f, 0.375f, 0.075f);
+        p.Line(0.5f, 0.5f, 0.5f, 0.3125f, 0.075f);
+        p.Line(0.5f, 0.5f, 0.6875f, 0.5625f, 0.065f);
+        return true;
+    }
+    // Список — три строки с маркерами. Пара к «grid»: они стоят рядом
+    // переключателем вида, и различаться обязаны формой, а не подписью.
+    if (is("list")) {
+        for (int i = 0; i < 3; ++i) {
+            const float y = 0.25f + 0.25f * (float)i;
+            p.Disc(0.1875f, y, 0.0625f);
+            p.Line(0.375f, y, 0.8125f, y, 0.075f);
+        }
+        return true;
+    }
+    // Импорт — стрелка В коробку. Направление и отличает её от «сохранить»:
+    // там стрелка идёт из коробки.
+    if (is("import")) {
+        p.Line(0.5f, 0.125f, 0.5f, 0.5f, 0.075f);
+        p.ArrowDown(0.5f, 0.625f, 0.1875f, 0.1875f);
+        p.Poly({0.1875f, 0.5625f, 0.1875f, 0.8125f, 0.8125f, 0.8125f, 0.8125f, 0.5625f}, false,
+               0.075f);
+        return true;
+    }
+    // Карандаш — переименовать. Кончик отдельным треугольником: без него на
+    // 16 пикселях получается просто наклонная палка.
+    if (is("pencil")) {
+        p.Poly({0.3125f, 0.75f, 0.6875f, 0.1875f}, false, 0.14f);
+        p.Tri(0.1875f, 0.8125f, 0.375f, 0.8125f, 0.25f, 0.625f);
+        p.Line(0.5625f, 0.3125f, 0.75f, 0.4375f, 0.075f);
+        return true;
+    }
     if (is("code")) {
         p.Line(0.375f, 0.3125f, 0.1875f, 0.5f, 0.075f);
         p.Line(0.1875f, 0.5f, 0.375f, 0.6875f, 0.075f);
@@ -654,7 +690,8 @@ const char* const kNames[] = {
     "physics",
     "folder", "file", "scene", "material", "project", "prefab", "texture", "shader", "audio",
     "model",
-    "up", "refresh", "folder-plus", "search", "code", "question", "layout", "gear",
+    "up", "refresh", "folder-plus", "search", "clock", "list", "import", "pencil",
+    "code", "question", "layout", "gear",
     "magnet",
     "warn", "error", "info", "debug",
     "trash", "copy", "save", "open", "plus", "eye", "lock",

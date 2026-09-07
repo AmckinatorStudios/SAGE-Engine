@@ -33,7 +33,10 @@ add_executable(SageEditor WIN32
     src/ProjectTemplateCover.cpp
     src/Project.cpp
     src/PluginManager.cpp
-    src/RecentProjects.cpp
+    src/ProjectLauncher/ProjectLauncher.cpp
+    src/ProjectLauncher/ProjectDatabase.cpp
+    src/ProjectLauncher/ProjectCard.cpp
+    src/ProjectLauncher/ProjectThumbnail.cpp
     src/Localization.cpp
     src/panels/ConsolePanel.cpp
     src/panels/HierarchyPanel.cpp
@@ -44,7 +47,6 @@ add_executable(SageEditor WIN32
     src/panels/ViewportPanel.cpp
     src/panels/GamePanel.cpp
     src/panels/AssetsPanel.cpp
-    src/panels/LauncherPanel.cpp
     src/panels/EnvironmentPanel.cpp
     src/EditorPrefs.cpp
     src/UIElementProperties.cpp

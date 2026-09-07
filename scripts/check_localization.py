@@ -36,7 +36,11 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_DIRS = [os.path.join(REPO, 'editor', 'src'), os.path.join(REPO, 'editor', 'src', 'panels')]
+# Корень исходников редактора. Обходится ЦЕЛИКОМ, а не перечислением папок:
+# перечисление держалось ровно до появления новой папки (ProjectLauncher/), и
+# её строки молча выпадали из проверки — то есть новый экран выходил бы
+# по-английски, а проверка отчитывалась «все переведены».
+SRC_ROOT = os.path.join(REPO, 'editor', 'src')
 CATALOG = os.path.join(REPO, 'editor', 'lang', 'ru.json')
 # Тот самый файл, который редактор реально компилирует в себя (см. gen_lang.py).
 GENERATED = os.path.join(REPO, 'editor', 'src', 'lang_ru.inl')
@@ -75,10 +79,11 @@ def worth_translating(raw):
 
 
 def source_files():
-    for d in SRC_DIRS:
-        for name in sorted(os.listdir(d)):
+    for root, dirs, names in os.walk(SRC_ROOT):
+        dirs.sort()
+        for name in sorted(names):
             if name.endswith('.cpp') and not name.startswith('Localization'):
-                yield os.path.join(d, name)
+                yield os.path.join(root, name)
 
 
 # Строки, которые ДВИЖОК отдаёт редактору на показ: названия частей элемента
