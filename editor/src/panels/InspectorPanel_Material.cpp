@@ -282,14 +282,26 @@ void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
 // вручную, тоже не трогается.
 void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr) {
     const ModelMaterialImportResult r = ImportModelMaterials(host.CurrentProject(), mr);
-    if (r.Assigned == 0) {
-        if (!r.FirstWarning.empty()) host.SetStatusMessage(T("Model material: ") + r.FirstWarning);
+    // ОТВЕТ ЕСТЬ ВСЕГДА. Раньше при нуле назначенных и пустом предупреждении
+    // функция молча возвращалась: нажал «Загрузить» — не произошло ничего, и
+    // понять, разобрал ли движок файл, было неоткуда.
+    if (r.Assigned > 0) {
+        host.SetStatusMessage(T("Model materials assigned: ") + std::to_string(r.Assigned) +
+                              (r.Created > 0
+                                   ? T(", files created: ") + std::to_string(r.Created)
+                                   : std::string()) +
+                              (r.AnyMaps ? T(" (with maps)") : ""));
+        LOG_INFO("Editor") << "Материалов модели назначено: " << r.Assigned
+                           << ", файлов создано: " << r.Created;
         return;
     }
-    if (r.Created > 0) {
-        host.SetStatusMessage(T("Model materials imported: ") + std::to_string(r.Created) +
-                              (r.AnyMaps ? T(" (with maps)") : ""));
-        LOG_INFO("Editor") << "Материалов модели импортировано: " << r.Created;
+    if (!r.FirstWarning.empty()) {
+        host.SetStatusMessage(T("Model material: ") + r.FirstWarning);
+    } else if (r.Parts > 0 && r.FileMaterials == 0) {
+        host.SetStatusMessage(T("The model carries no materials — it stays white"));
+    } else if (r.Parts > 0) {
+        // Слоты уже заполнены руками — импортировать нечего, и это не отказ.
+        host.SetStatusMessage(T("All parts already have their own materials"));
     }
 }
 
@@ -550,6 +562,34 @@ void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponen
     ImGui::SeparatorText(T("Model parts"));
     ImGui::TextDisabled("%s", T("Each part of the model has its own material. Empty means "
                                 "the object material above."));
+
+    // --- «ИМПОРТИРОВАТЬ МАТЕРИАЛЫ МОДЕЛИ» -----------------------------------
+    //
+    // Импорт запускался ровно в одном месте — когда модель НАЗНАЧАЮТ. Модель,
+    // уже стоящая в сцене, переимпортировать было нечем: сцена, сохранённая
+    // тогда, когда импорт не работал, открывалась с пустыми слотами навсегда, и
+    // единственным способом это исправить было переназначить меш заново.
+    //
+    // Кнопка показывается всегда, а не только «когда пусто»: набор материалов у
+    // модели меняют и снаружи (перекрасили в Blender, дописали карту), и
+    // «перечитать» — законное желание, а не аварийная мера.
+    int filled = 0;
+    for (const MaterialSlot& slot : mr.Slots)
+        if (!slot.Path.empty()) ++filled;
+
+    if (EditorIcons::Button("import", T("Import model materials"),
+                            T("Reads the materials from the model file, creates the missing\n"
+                              ".sagemat next to it and fills the empty slots.\n"
+                              "Slots you filled yourself are not touched."))) {
+        AutoAssignModelMaterial(host, mr);
+    }
+    if (filled == 0 && !subs.empty()) {
+        // Пустые слоты — это не обязательно поломка (модель может и не нести
+        // материалов), поэтому не «ошибка», а объяснение с готовым действием.
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.95f, 0.78f, 0.45f, 1.0f), "%s",
+                           T("all parts are unpainted"));
+    }
 
     // Слоты держим ровно по числу частей: меш могли переимпортировать, и число
     // частей меняется вместе с ним. Лишние обрезаем, недостающие добавляем —

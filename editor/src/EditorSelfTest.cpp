@@ -35,7 +35,9 @@
 #include "sage/assets/Pack.h"
 #include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/render/Screenshot.h"
+#include <stb_image_write.h>   // реализация развёрнута в render/Screenshot.cpp
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/physics/Ragdoll.h"
@@ -2351,6 +2353,142 @@ bool EditorLayer::SelfTestTools() {
         // Возвращаем «не спрашивать» на остаток прогона: дальше кликать
         // по-прежнему некому.
         m_confirm.SetSuppressed("delete-entity", true);
+        SetSelectedId(-1);
+        m_selection.clear();
+    }
+
+    // Настоящая картинка 4x4: слот материала обязан не просто получить путь, а
+    // ЗАГРУЗИТЬ по нему карту, иначе проверка пройдёт на битой ссылке.
+    auto WriteSelfTestPng = [](const fs::path& file, unsigned char r, unsigned char g,
+                               unsigned char b) {
+        unsigned char px[4 * 4 * 3];
+        for (int i = 0; i < 4 * 4; ++i) { px[i * 3] = r; px[i * 3 + 1] = g; px[i * 3 + 2] = b; }
+        stbi_write_png(file.string().c_str(), 4, 4, 3, px, 4 * 3);
+    };
+
+    // --- МНОГОМАТЕРИАЛЬНАЯ МОДЕЛЬ ИЗ СКАЧАННОГО НАБОРА -------------------------
+    //
+    // Ровно то, на что жаловались: набор с сайта кладут в проект, тащат модель в
+    // сцену — и каждая часть приезжает с ПУСТЫМ слотом материала, то есть белой.
+    // Проверяется весь путь тем же методом, который зовёт перетаскивание
+    // (AddAssetToScene), а не по кускам: разбор материалов работал и раньше,
+    // ломалось соединение между ним и слотами.
+    if (ok) {
+        const fs::path pack = m_project.AssetsDir() / "selftest_pack";
+        fs::create_directories(pack / "textures", ec);
+
+        // Две части с РАЗНЫМИ материалами и разными картами — как в наборе, где
+        // у каждой постройки своя текстура. Одного материала мало: слот мог бы
+        // заполниться «первым попавшимся» и проверка этого не заметила бы.
+        WriteSelfTestPng(pack / "textures" / "soil.png", 200, 120, 60);
+        WriteSelfTestPng(pack / "textures" / "water.png", 40, 90, 200);
+        {
+            std::ofstream f(pack / "geom.bin", std::ios::binary);
+            const float verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+            const unsigned short idx[3] = {0, 1, 2};
+            f.write((const char*)verts, sizeof(verts));
+            f.write((const char*)idx, sizeof(idx));
+        }
+        {
+            std::ofstream f(pack / "scene.gltf");
+            f << R"({
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0, 1]}],
+  "nodes": [
+    {"name": "Soil_Soil_texture_0", "mesh": 0},
+    {"name": "Water_Water_texture_0", "mesh": 1}
+  ],
+  "meshes": [
+    {"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "material": 0}]},
+    {"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "material": 1}]}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "min": [0,0,0], "max": [1,1,0]},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+  ],
+  "buffers": [{"byteLength": 42, "uri": "geom.bin"}],
+  "images": [{"uri": "textures/soil.png"}, {"uri": "textures/water.png"}],
+  "textures": [{"source": 0}, {"source": 1}],
+  "materials": [
+    {"name": "Soil_texture", "pbrMetallicRoughness": {
+        "baseColorFactor": [1, 1, 1, 1], "baseColorTexture": {"index": 0}}},
+    {"name": "Water_texture", "pbrMetallicRoughness": {
+        "baseColorFactor": [1, 1, 1, 1], "baseColorTexture": {"index": 1}}}
+  ]
+})";
+        }
+        sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+
+        // Тот самый жест: бросить модель в сцену.
+        const size_t before = m_scene->Count();
+        if (!AddAssetToScene(pack / "scene.gltf") || m_scene->Count() != before + 1) {
+            LOG_ERROR("Editor") << "SELFTEST: модель из набора не встала в сцену";
+            ok = false;
+        } else {
+            GameObject placed = m_scene->Get(m_selectedId);
+            MeshRendererComponent& pmr = placed.Renderer();
+            if (!pmr.MeshPtr || pmr.MeshPtr->Submeshes().size() != 2) {
+                LOG_ERROR("Editor") << "SELFTEST: у модели набора нет разметки на две части";
+                ok = false;
+            } else if (pmr.Slots.size() != 2) {
+                LOG_ERROR("Editor") << "SELFTEST: слотов материалов нет (частей "
+                                    << pmr.MeshPtr->Submeshes().size() << ")";
+                ok = false;
+            } else {
+                for (size_t i = 0; i < pmr.Slots.size(); ++i) {
+                    if (pmr.Slots[i].Path.empty() || !pmr.Slots[i].Ptr) {
+                        LOG_ERROR("Editor") << "SELFTEST: слот " << i
+                                            << " пуст — материал модели не назначен";
+                        ok = false;
+                        break;
+                    }
+                    // И это НЕ болванка: у материала из набора есть карта.
+                    if (pmr.Slots[i].Ptr->TexturePath.empty() || !pmr.Slots[i].Ptr->AlbedoTex) {
+                        LOG_ERROR("Editor") << "SELFTEST: у материала слота " << i
+                                            << " нет карты albedo";
+                        ok = false;
+                        break;
+                    }
+                }
+                // Разные части — разные материалы: один на всё это ровно та
+                // болячка, ради которой заводились слоты.
+                if (ok && pmr.Slots[0].Path == pmr.Slots[1].Path) {
+                    LOG_ERROR("Editor") << "SELFTEST: обе части покрашены одним материалом";
+                    ok = false;
+                }
+            }
+            m_scene->RemoveObject(placed.Id());
+        }
+
+        // ВТОРОЙ ЖЕСТ: бросить ту же модель НА УЖЕ СТОЯЩИЙ объект. Он подменяет
+        // меш, а слоты при этом сбрасываются вместе со старой моделью — и
+        // единственный из четырёх путей оставался без импорта материалов, то
+        // есть объект оставался белым, сколько его ни перетаскивай.
+        if (ok) {
+            GameObject host = m_scene->CreateObject("SelfTestDropTarget");
+            const int hostId = host.Id();
+            if (!ApplyAssetToEntity(hostId, pack / "scene.gltf")) {
+                LOG_ERROR("Editor") << "SELFTEST: модель не легла на существующий объект";
+                ok = false;
+            } else {
+                MeshRendererComponent& hmr = m_scene->Get(hostId).Renderer();
+                const bool filled = hmr.Slots.size() == 2 && !hmr.Slots[0].Path.empty() &&
+                                    !hmr.Slots[1].Path.empty();
+                if (!filled) {
+                    LOG_ERROR("Editor")
+                        << "SELFTEST: брошенная на объект модель осталась без материалов (слотов "
+                        << hmr.Slots.size() << ")";
+                    ok = false;
+                }
+            }
+            m_scene->RemoveObject(hostId);
+        }
         SetSelectedId(-1);
         m_selection.clear();
     }

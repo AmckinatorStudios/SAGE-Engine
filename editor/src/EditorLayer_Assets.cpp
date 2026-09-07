@@ -227,6 +227,12 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         PushUndoSnapshot();
         MeshRendererComponent& mr = obj.Renderer();
         SetEntityMesh(mr, MeshRef::Type::Model, ref, std::move(mesh));
+        // МАТЕРИАЛ — ТОЖЕ ЗДЕСЬ. Этот путь (бросить модель НА существующий
+        // объект) единственный из четырёх остался без импорта материалов, хотя
+        // комментарий ниже утверждал, что закрыты все. Меш подменялся, слоты
+        // при этом сбрасывались вместе со старой моделью — и объект оставался
+        // белым, сколько бы раз его ни перетаскивали.
+        AssignModelMaterial(mr);
         SetStatusMessage(T("Mesh replaced: ") + asset.filename().string());
         return true;
     }
@@ -245,7 +251,17 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
 // же ассет выглядел по-разному в зависимости от того, каким жестом его принесли,
 // и «текстуры не работают» было честным выводом из увиденного.
 void EditorLayer::AssignModelMaterial(MeshRendererComponent& mr) {
-    ImportModelMaterials(m_project, mr);
+    const ModelMaterialImportResult r = ImportModelMaterials(m_project, mr);
+    // РЕЗУЛЬТАТ НЕ ВЫБРАСЫВАЕМ. Раньше он именно выбрасывался, и модель,
+    // приехавшая белой, не оставляла после себя ни строки состояния, ни записи
+    // в логе — «не работает» приходилось проверять глазами по кадру.
+    if (r.Assigned > 0) {
+        SetStatusMessage(T("Model materials assigned: ") + std::to_string(r.Assigned));
+    } else if (r.Parts > 0 && r.FileMaterials == 0) {
+        SetStatusMessage(T("The model carries no materials — it stays white"));
+    } else if (r.Parts > 0) {
+        SetStatusMessage(T("Model materials NOT assigned — details in Console"));
+    }
 }
 
 bool EditorLayer::AddAssetToScene(const fs::path& asset) {

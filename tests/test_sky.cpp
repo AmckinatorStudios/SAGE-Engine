@@ -23,6 +23,7 @@
 #include "sage/ecs/CameraLightComponents.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/SkyModel.h"
+#include "sage/render/Skybox.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scene/Scene.h"
@@ -287,6 +288,36 @@ TEST(Sky_hand_built_environment_keeps_its_own_colours) {
     // После расчёта кадра — уже разрешённые цвета.
     sage::render::ApplySky(studio);
     CHECK_TRUE(studio.SkyResolved);
+}
+
+// --- Небо из ОДНОГО файла ---------------------------------------------------
+//
+// Жалоба была прямая: «почему мы должны папку загружать, а не конкретную
+// текстуру, странно». И это справедливо: скачанный набор — это два десятка
+// готовых небес, каждое ОДНОЙ картинкой (крест 4:3, полоса, панорама), а
+// редактор просил каталог с шестью файлами по нашим именам px/nx/py/ny/pz/nz.
+// Ни одно небо из набора выбрать было нельзя, не нарезав его руками.
+//
+// Раскладка определяется по соотношению сторон — это и проверяется: числа, а не
+// картинка, потому что ошибка здесь означает грани, разложенные не по тем
+// сторонам куба, и увидеть её можно только глазами на готовой сцене.
+TEST(Sky_single_image_layout_is_detected_by_aspect) {
+    using L = Skybox::Layout;
+    // Ровно то, что лежит у человека: 2048x1536 при гранях 512.
+    CHECK_TRUE(Skybox::DetectLayout(2048, 1536) == L::HorizontalCross);
+    CHECK_TRUE(Skybox::DetectLayout(1536, 2048) == L::VerticalCross);
+    CHECK_TRUE(Skybox::DetectLayout(3072, 512) == L::Row);
+    CHECK_TRUE(Skybox::DetectLayout(512, 3072) == L::Column);
+    CHECK_TRUE(Skybox::DetectLayout(4096, 2048) == L::Equirectangular);
+    // Квадрат — ни то, ни другое: молча принять его значило бы нарезать небо
+    // наугад и показать мешанину вместо ошибки.
+    CHECK_TRUE(Skybox::DetectLayout(1024, 1024) == L::Auto);
+    CHECK_TRUE(Skybox::DetectLayout(0, 0) == L::Auto);
+
+    // Допуск на лишний пиксель по краю: наборы этим грешат, а отбраковывать
+    // годную картинку из-за одного пикселя — значит возвращать человека к
+    // ручной нарезке.
+    CHECK_TRUE(Skybox::DetectLayout(2049, 1536) == L::HorizontalCross);
 }
 
 } // namespace

@@ -94,9 +94,19 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
 
     const ModelLoader::ExtractedMaterialSet set = ModelLoader::ExtractMaterials(modelPath);
     if (!set.Warnings.empty()) result.FirstWarning = set.Warnings.front();
+    result.FileMaterials = (int)set.Materials.size();
+    result.Parts = (int)submeshes.size();
     // Нет материалов в файле — и не надо: белая болванка это честный результат
-    // «в модели материалов нет», а не поломка.
-    if (!set.Found()) return result;
+    // «в модели материалов нет», а не поломка. Но сказать об этом надо: молчание
+    // здесь неотличимо от «импорт не сработал», а это разные вещи.
+    if (!set.Found()) {
+        LOG_WARN("Материалы") << "В модели нет материалов: " << mr.Ref.path
+                              << " (частей " << submeshes.size() << ")"
+                              << (result.FirstWarning.empty()
+                                      ? std::string()
+                                      : " — " + result.FirstWarning);
+        return result;
+    }
 
     // Файлы материалов создаются ЛЕНИВО и по требованию разметки: материал, на
     // который не ссылается ни одна часть модели, в проект не попадает — иначе
@@ -139,14 +149,36 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     // из разметки. Части без материала в файле остаются с пустым слотом — их
     // красит материал объекта (см. MaterialForSubmesh).
     mr.Slots.resize(submeshes.size());
+    int kept = 0, noMaterial = 0, notWritten = 0;
     for (size_t i = 0; i < submeshes.size(); ++i) {
-        if (!mr.Slots[i].Path.empty()) continue;   // выбор человека главнее импорта
+        if (!mr.Slots[i].Path.empty()) { ++kept; continue; }  // выбор человека главнее импорта
+        // Часть без материала в файле — законно (её красит материал объекта), а
+        // вот часть С материалом, для которой не вышло имя файла, — отказ, и
+        // молчать о нём нельзя: снаружи оба случая выглядят одинаково пустым
+        // слотом.
+        if (submeshes[i].Material < 0) { ++noMaterial; continue; }
         const std::string ref = fileFor(submeshes[i].Material);
-        if (ref.empty()) continue;
+        if (ref.empty()) { ++notWritten; continue; }
         mr.Slots[i].Path = ref;
         mr.Slots[i].Ptr = ResourceManager::Instance().GetMaterial(ref);
         ++result.Assigned;
     }
+
+    // ИТОГ — ОДНОЙ СТРОКОЙ И ВСЕГДА. Раньше импорт молчал целиком: и когда
+    // разложил тридцать семь материалов, и когда не разложил ни одного. Поэтому
+    // на вопрос «почему модель белая» ответа в логе не было вовсе — там про неё
+    // не было ни строчки.
+    LOG_INFO("Материалы") << "Модель " << mr.Ref.path << ": частей " << submeshes.size()
+                          << ", материалов в файле " << set.Materials.size()
+                          << ", назначено " << result.Assigned
+                          << (kept ? ", своих оставлено " + std::to_string(kept) : "")
+                          << (noMaterial ? ", без материала в файле " + std::to_string(noMaterial)
+                                         : "")
+                          << (notWritten ? ", НЕ ЗАПИСАНО " + std::to_string(notWritten) : "")
+                          << (result.Created ? ", создано файлов " + std::to_string(result.Created)
+                                             : "");
+    if (notWritten > 0 && !result.FirstWarning.empty())
+        LOG_ERROR("Материалы") << "Причина: " << result.FirstWarning;
     return result;
 }
 

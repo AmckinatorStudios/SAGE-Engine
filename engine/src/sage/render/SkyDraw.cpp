@@ -17,6 +17,10 @@ std::shared_ptr<Skybox> SceneSkyCubemap(const LightingEnvironment& env) {
         case SkyboxSettings::Source::Faces:
             return sky.HasFaces() ? ResourceManager::Instance().GetSkyboxFaces(sky.FacePaths)
                                   : nullptr;
+        case SkyboxSettings::Source::Image:
+            return sky.ImagePath.empty()
+                       ? nullptr
+                       : ResourceManager::Instance().GetSkyboxImage(sky.ImagePath, sky.ImageLayout);
         default:
             return nullptr;   // процедурное — картинки нет и не должно быть
     }

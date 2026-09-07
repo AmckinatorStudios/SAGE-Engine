@@ -38,6 +38,7 @@
 #include "sage/render/SkyDraw.h"
 #include "sage/render/SkyModel.h"
 #include "sage/render/SkyRenderer.h"
+#include "sage/render/Skybox.h"
 #include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
@@ -726,6 +727,95 @@ void TestSkyNightIsDark() {
     Check(dayStars == 0, "днём звёзд не видно");
 }
 
+// --- Небо из одного файла: грани ложатся на свои стороны куба -----------------
+//
+// Раскладку по соотношению сторон проверяет sage_tests; здесь проверяется то,
+// что числами не проверить, — КУДА легла каждая грань. Ошибка в таблице клеток
+// не мешает небу собраться: оно соберётся и будет показывать право слева, а
+// увидеть это можно только посмотрев в шесть сторон.
+//
+// Крест рисуется шестью РАЗНЫМИ цветами, потом камера поворачивается в каждую
+// сторону и сверяется цвет в центре кадра.
+void TestSkyFromSingleImage() {
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "sage_sky_cross";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+
+    // Горизонтальный крест 4x3, грань 8 пикселей.
+    constexpr int kFace = 8, kCols = 4, kRows = 3;
+    Image cross;
+    cross.Width = kFace * kCols;
+    cross.Height = kFace * kRows;
+    cross.Pixels.assign((size_t)cross.Width * cross.Height * 3, 0);
+    // Цвет на грань: +X, -X, +Y, -Y, +Z, -Z.
+    const unsigned char kColors[6][3] = {{220, 40, 40},  {40, 220, 40},  {40, 40, 220},
+                                         {220, 220, 40}, {220, 40, 220}, {40, 220, 220}};
+    // Клетки того же креста, что и в Skybox::LoadFromImage.
+    const int kCell[6][2] = {{2, 1}, {0, 1}, {1, 0}, {1, 2}, {1, 1}, {3, 1}};
+    for (int f = 0; f < 6; ++f) {
+        for (int y = 0; y < kFace; ++y) {
+            for (int x = 0; x < kFace; ++x) {
+                const int px = kCell[f][0] * kFace + x;
+                const int py = kCell[f][1] * kFace + y;
+                const size_t i = ((size_t)py * cross.Width + px) * 3;
+                cross.Pixels[i] = kColors[f][0];
+                cross.Pixels[i + 1] = kColors[f][1];
+                cross.Pixels[i + 2] = kColors[f][2];
+            }
+        }
+    }
+    const std::filesystem::path file = dir / "sky_cross.png";
+    if (!SavePng(file.string(), cross)) {
+        std::printf("       крест не записан — проверка пропущена\n");
+        CountFail();
+        return;
+    }
+
+    std::unique_ptr<Skybox> sky = Skybox::LoadFromImage(file.string());
+    Check(sky != nullptr, "небо собралось из одной картинки");
+    if (!sky) { std::filesystem::remove_all(dir, ec); return; }
+
+    constexpr int w = 64, h = 64;
+    const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 1.0f, 0.1f, 100.0f);
+    // Куда смотрим для каждой грани — в том же порядке.
+    const glm::vec3 kLook[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    const char* kNames[6] = {"+X", "-X", "+Y", "-Y", "+Z", "-Z"};
+
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    int wrong = 0;
+    for (int f = 0; f < 6; ++f) {
+        Framebuffer fbo(w, h);
+        fbo.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        // Для взгляда вдоль вертикали «верх» обязан быть другим, иначе lookAt
+        // вырождается и матрица приходит из нулей.
+        const glm::vec3 up = std::abs(kLook[f].y) > 0.5f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+        const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), kLook[f], up);
+        sky->Draw(view, proj, 1.0f, 0.0f);
+        const Image img = Capture(w, h);
+        device.BindDefaultFramebuffer();
+
+        const size_t c = ((size_t)(h / 2) * w + w / 2) * 3;
+        const int r = img.Pixels[c], g = img.Pixels[c + 1], b = img.Pixels[c + 2];
+        // Допуск широкий: небо рисуется своим шейдером с фильтрацией, важен
+        // сам цвет грани, а не точные значения.
+        const bool ok = std::abs(r - (int)kColors[f][0]) < 60 &&
+                        std::abs(g - (int)kColors[f][1]) < 60 &&
+                        std::abs(b - (int)kColors[f][2]) < 60;
+        if (!ok) {
+            ++wrong;
+            std::printf("       грань %s: ждали (%d,%d,%d), получили (%d,%d,%d)\n", kNames[f],
+                        kColors[f][0], kColors[f][1], kColors[f][2], r, g, b);
+        }
+    }
+    std::printf("       крест 4:3 разложен по граням: верных %d из 6\n", 6 - wrong);
+    Check(wrong == 0, "каждая грань креста легла на свою сторону куба");
+
+    std::filesystem::remove_all(dir, ec);
+}
+
 // --- Соответствие RHI на НАСТОЯЩЕМ бэкенде ------------------------------------
 //
 // Тот же контракт, что sage_tests гоняет по Null, — но здесь есть контекст, и
@@ -759,6 +849,7 @@ void RunSceneChecks(FrameRenderer& r) {
     TestAssetCache();
     TestSkyRayDirection();
     TestSkyNightIsDark();
+    TestSkyFromSingleImage();
     TestRhiConformance();
 }
 

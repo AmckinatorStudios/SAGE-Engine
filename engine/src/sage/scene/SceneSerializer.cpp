@@ -155,6 +155,8 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["skybox"]["moonlightColor"] = Vec3ToJson(lighting.Skybox.MoonlightColor);
     j["skybox"]["moonlightIntensity"] = lighting.Skybox.MoonlightIntensity;
     j["skybox"]["cubemapDir"] = lighting.Skybox.CubemapDir;
+    j["skybox"]["image"] = lighting.Skybox.ImagePath;
+    j["skybox"]["imageLayout"] = lighting.Skybox.ImageLayout;
     {
         json faces = json::array();
         for (int i = 0; i < 6; ++i) faces.push_back(lighting.Skybox.FacePaths[i]);
@@ -244,6 +246,8 @@ static LightingEnvironment LightingFromJson(const json& root) {
         if (sj.contains("top")) lighting.Skybox.TopColor = Vec3FromJson(sj["top"]);
         if (sj.contains("horizon")) lighting.Skybox.HorizonColor = Vec3FromJson(sj["horizon"]);
         lighting.Skybox.CubemapDir = sj.value("cubemapDir", lighting.Skybox.CubemapDir);
+        lighting.Skybox.ImagePath = sj.value("image", lighting.Skybox.ImagePath);
+        lighting.Skybox.ImageLayout = sj.value("imageLayout", lighting.Skybox.ImageLayout);
         if (sj.contains("faces") && sj["faces"].is_array()) {
             const json& fa = sj["faces"];
             for (int i = 0; i < 6 && i < (int)fa.size(); ++i)
@@ -266,6 +270,7 @@ static LightingEnvironment LightingFromJson(const json& root) {
             const int mode = sj.value("mode", 0);
             lighting.Skybox.Kind = (mode == 1)   ? SkyboxSettings::Source::Cubemap
                                    : (mode == 2) ? SkyboxSettings::Source::Faces
+                                   : (mode == 3) ? SkyboxSettings::Source::Image
                                                  : SkyboxSettings::Source::Procedural;
         } else if (!lighting.Skybox.CubemapDir.empty()) {
             lighting.Skybox.Kind = SkyboxSettings::Source::Cubemap;
