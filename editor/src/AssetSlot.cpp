@@ -31,10 +31,9 @@ std::string Lower(std::string s) {
     return s;
 }
 
-// Обложка для слота. Держится в кэше: снять её — это полный проход сцены со
-// светом, а слот рисуется каждый кадр. Не больше ОДНОЙ съёмки за кадр на весь
-// редактор — иначе инспектор с мешем, материалом и пятью текстурами уронил бы
-// частоту кадров .
+// Запись кэша обложек. Кэш общий на весь редактор (слоты, панель ассетов,
+// файловый диалог): снять обложку — это полный проход сцены со светом, а
+// рисуются они каждый кадр.
 struct Cached {
     uint64_t Id = 0;
     long long Stamp = 0; // время правки файла: правка материала обязана обновить обложку
@@ -46,7 +45,9 @@ std::unordered_map<std::string, Cached>& Cache() {
     return cache;
 }
 
-uint64_t Thumbnail(AssetPreview* preview, const fs::path& path, int size) {
+} // namespace
+
+uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     if (path.empty()) return 0;
     const std::string key = path.string();
     const std::string ext = Lower(path.extension().string());
@@ -107,8 +108,6 @@ uint64_t Thumbnail(AssetPreview* preview, const fs::path& path, int size) {
     }
     return id;
 }
-
-} // namespace
 
 Kind KindOf(const fs::path& path) {
     // Папка узнаётся не по расширению, а по диску: у каталога расширения нет,
@@ -192,7 +191,7 @@ std::vector<std::string> Extensions(Kind kind) {
 void BeginDrag(const fs::path& path, AssetPreview* preview) {
     const std::string p = path.string();
     ImGui::SetDragDropPayload(kPayload, p.c_str(), p.size() + 1);
-    const uint64_t thumb = Thumbnail(preview, path, 64);
+    const uint64_t thumb = Cover(preview, path, 64);
     if (thumb) {
         ImGui::Image((ImTextureID)(std::intptr_t)thumb, ImVec2(48, 48), ImVec2(0, 1), ImVec2(1, 0));
         ImGui::SameLine();
@@ -295,7 +294,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     const ImVec2 t1(t0.x + thumb, t0.y + thumb);
     dl->AddRectFilled(t0, t1, ImGui::GetColorU32(ImVec4(0, 0, 0, 0.28f)), 5.0f);
 
-    const uint64_t tex = Thumbnail(preview, assetPath, (int)thumb);
+    const uint64_t tex = Cover(preview, assetPath, (int)thumb);
     // Шахматка под картинкой: без неё прозрачные места сливаются с фоном слота,
     // и текстура с альфой выглядит просто дырявой.
     if (tex && KindOf(assetPath) == Kind::Texture) {

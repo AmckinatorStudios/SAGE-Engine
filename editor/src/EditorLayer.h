@@ -45,7 +45,6 @@ namespace sage { class Application; }
 #include "panels/ConsolePanel.h"
 #include "panels/ProfilerPanel.h"
 #include "ConfirmDialog.h"
-#include "CodeEditor.h"
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/ViewportPanel.h"
@@ -206,10 +205,7 @@ public:
         }
     }
     uint64_t ViewTexture(int slot) const override { return m_renderer.ViewportTexture(slot); }
-    void OpenCodeFile(const std::filesystem::path& path) override {
-        m_showCode = true;
-        m_code.OpenFile(path);
-    }
+    bool OpenFileInSystemEditor(const std::filesystem::path& path) override;
     void PickAtViewport(float u, float v, bool additive = false) override;
     bool DropAssetAtViewport(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                              const std::filesystem::path& asset) override;
@@ -242,7 +238,6 @@ public:
             case EditorPanel::Environment: return m_showEnvironment;
             case EditorPanel::Assets:      return m_showAssets;
             case EditorPanel::Console:     return m_showConsole;
-            case EditorPanel::Code:        return m_showCode;
             case EditorPanel::Profiler:    return m_showProfiler;
             case EditorPanel::Game:        return m_showGame;
             case EditorPanel::Viewport:    return m_showViewport;
@@ -453,11 +448,6 @@ private:
     ConsolePanel m_console;
     ProfilerPanel m_profiler;
     ConfirmDialog m_confirm;
-    CodeEditor m_code;
-    // Вкладка «Код» открыта с самого начала: она докнута третьей рядом с
-    // Viewport и Game, и её отсутствие означало бы, что вкладки в раскладке то
-    // две, то три. Пустой редактор показывает подсказку, как открыть файл.
-    bool m_showCode = true;
     // Запросы мультивьюпорта: панель раскладывает, рендер исполняет в начале
     // следующего кадра.
     ViewRequest m_viewRequests[kMaxViews];

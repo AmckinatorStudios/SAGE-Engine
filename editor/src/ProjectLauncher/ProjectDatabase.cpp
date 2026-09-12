@@ -579,21 +579,21 @@ std::string HumanStamp(long long unixTime) {
     return FormatStamp(unixTime);
 }
 
-bool RevealInFileManager(const fs::path& dir) {
+bool OpenWithSystem(const fs::path& target) {
     std::error_code ec;
-    if (!fs::exists(dir, ec)) return false;
+    if (!fs::exists(target, ec)) return false;
 #ifdef _WIN32
     // ShellExecuteW, а не system(): узкий system() на Windows идёт через ANSI,
     // и папка «C:\Users\Владимир\...» до проводника просто не доезжает — ровно
     // та же беда, из-за которой в редакторе запрещён std::getenv для путей.
-    const std::wstring wide = dir.wstring();
+    const std::wstring wide = target.wstring();
     const HINSTANCE rc = ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     return (INT_PTR)rc > 32;
 #else
     // Одинарные кавычки внутри пути ломают команду — заменяем их безопасной
     // склейкой '\''.
     std::string quoted = "'";
-    for (char c : sage::PathToUtf8(dir)) {
+    for (char c : sage::PathToUtf8(target)) {
         if (c == '\'') quoted += "'\\''";
         else quoted += c;
     }
@@ -602,5 +602,11 @@ bool RevealInFileManager(const fs::path& dir) {
     return std::system(cmd.c_str()) == 0;
 #endif
 }
+
+// Папка и файл открываются ОДНИМ И ТЕМ ЖЕ вызовом системы: и «показать папку», и
+// «открыть скрипт» — это просьба «открой это тем, чем открываешь обычно». Две
+// функции ради одной строки различия разошлись бы при первой же правке под
+// Windows.
+bool RevealInFileManager(const fs::path& dir) { return OpenWithSystem(dir); }
 
 } // namespace Sage::Launcher

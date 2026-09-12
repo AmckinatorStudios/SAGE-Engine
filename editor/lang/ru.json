@@ -240,7 +240,6 @@
     "Cloud Steps": "Шагов сквозь облака",
     "Cloud Top": "Верх облаков",
     "Clouds": "Облака",
-    "Code": "Код",
     "Collapse": "Свернуть повторы",
     "Collapse the tools": "Свернуть инструменты",
     "Collider": "Коллайдер",
@@ -780,7 +779,6 @@
     "Open Scene": "Открыть сцену",
     "Open Scene...": "Открыть сцену…",
     "Open console": "Открыть консоль",
-    "Open in editor": "Открыть в редакторе",
     "Open project": "Открыть проект",
     "Open scene": "Открыть сцену",
     "Open the copy": "Открыть копию",
@@ -1390,6 +1388,10 @@
     "Shaders": "Шейдеры",
     "Sky picture": "Картинка неба",
     "folder": "папка",
-    "shader": "шейдер"
+    "shader": "шейдер",
+    "Grid: covers": "Сеткой: обложки",
+    "Rows: name and size": "Строками: имя и размер",
+    "Open in the system editor": "Открыть в системном редакторе",
+    "The system has no program for this file: ": "Система не знает, чем открыть этот файл: "
   }
 }

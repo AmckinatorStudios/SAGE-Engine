@@ -139,7 +139,6 @@ void EditorLayer::RegisterCommands() {
         {"panel.assets", "Assets", EditorPanel::Assets, "folder"},
         {"panel.console", "Console", EditorPanel::Console, "code"},
         {"panel.environment", "Environment", EditorPanel::Environment, "sun"},
-        {"panel.code", "Code", EditorPanel::Code, "script"},
         {"panel.profiler", "Profiler", EditorPanel::Profiler, "grid"},
     };
     for (const PanelCmd& p : kPanels) {
@@ -463,7 +462,7 @@ void EditorLayer::OnAttach() {
             "SAGE_SCREENSHOT_AT_FRAME", "SAGE_EDITOR_SHOW_SETTINGS", "SAGE_EDITOR_SHOW_PROFILER",
             "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
             "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_COLLIDER_MODE", "SAGE_EDITOR_SELECT_ENTITY",
-            "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_OPEN_CODE",     "SAGE_EDITOR_SHOW_ABOUT",
+            "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
             "SAGE_EDITOR_PALETTE",
@@ -557,11 +556,6 @@ void EditorLayer::OnAttach() {
         m_headlessProject = true;
         m_assets.Select(a);
     }
-    if (const std::string f = sage::EnvString("SAGE_EDITOR_OPEN_CODE"); !f.empty()) {
-        m_headlessProject = true;
-        m_showCode = true;
-        m_code.OpenFile(f);
-    }
     // Закрыть все панели — состояние, в которое человек попадал крестиками и из
     // которого раньше не было выхода. Проверять его иначе нечем: кликать по
     // крестикам в CI некому, а именно на этом кадре должна быть видна подсказка
@@ -570,7 +564,7 @@ void EditorLayer::OnAttach() {
         m_headlessProject = true;
         m_showHierarchy = m_showInspector = m_showEnvironment = m_showUIEditor = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
-        m_showCode = m_showProfiler = false;
+        m_showProfiler = false;
     }
     // Сущность СО ВСЕМИ компонентами сразу — для жёсткой проверки инспектора.
     //
@@ -1122,11 +1116,6 @@ void EditorLayer::OnRender() {
     if (m_showUIEditor) m_uiEditor.Draw(*this, &m_showUIEditor);
     if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
     if (m_showGame) m_game.Draw(*this, &m_showGame);
-    // Код подаётся ПОСЛЕ Viewport и Game, потому что порядок вкладок в узле
-    // доккинга — это порядок подачи окон в кадре, а не порядок DockBuilder'а.
-    // Пока он подавался раньше (внутри окна-хоста), вкладка «Код» вставала
-    // первой, и раскладка читалась как «Код | Viewport | Game».
-    if (m_showCode) m_code.Draw(&m_showCode);
     if (m_showConsole) m_console.Draw(&m_showConsole);
     if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
     m_plugins.ImGuiAll();

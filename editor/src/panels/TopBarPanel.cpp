@@ -108,7 +108,6 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     PanelToggle(host, EditorPanel::Inspector, "file", T("Inspector"), T("Inspector"), false, row);
     PanelToggle(host, EditorPanel::Assets, "folder", T("Assets"), T("Assets"), false, row);
     PanelToggle(host, EditorPanel::Console, "debug", T("Console"), T("Console"), false, row);
-    PanelToggle(host, EditorPanel::Code, "code", T("Code"), T("Code"), false, row);
     PanelToggle(host, EditorPanel::Profiler, "info", T("Profiler"), T("Profiler"), false, row);
 
     divider();

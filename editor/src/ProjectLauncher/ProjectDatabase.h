@@ -172,6 +172,11 @@ std::string FormatStamp(long long unixTime);
 // человек сверяет её с памятью, а не с календарём.
 std::string HumanStamp(long long unixTime);
 
+// Открыть файл или папку ТЕМ, ЧЕМ ИХ ОТКРЫВАЕТ СИСТЕМА: папку — проводником,
+// .lua — назначенным текстовым редактором. false — система отказала (нет файла
+// или нет программы для него).
+bool OpenWithSystem(const std::filesystem::path& target);
+
 // Открыть папку в файловом менеджере системы. false — система отказала.
 bool RevealInFileManager(const std::filesystem::path& dir);
 

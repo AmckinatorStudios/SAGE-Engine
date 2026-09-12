@@ -378,14 +378,19 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         else if (path.extension() == ".sage") host.LoadSceneFromFile(path);
         else if (path.extension() == ".sageprefab") host.InstantiatePrefab(path); // инстанс в сцену
         else {
-            // Код открывается во встроенном редакторе: скрипты и шейдеры правят
-            // постоянно, и уводить человека во внешний редактор на каждую
-            // строчку значит терять горячую перезагрузку, ради которой она и
-            // сделана.
+            // Текст открывается ТЕМ, ЧЕМ ЕГО ОТКРЫВАЕТ СИСТЕМА. Своего редактора
+            // кода у SAGE больше нет: он всегда проигрывал бы тому, что у
+            // человека уже стоит, а горячая перезагрузка от этого не страдает —
+            // движок следит за файлом, а не за тем, кто его сохранил.
             const std::string ext = path.extension().string();
             if (ext == ".lua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
                 ext == ".txt" || ext == ".md" || ext == ".json") {
-                host.OpenCodeFile(path);
+                // Отказ системы виден: молчащий двойной клик неотличим от
+                // сломанного редактора.
+                if (!host.OpenFileInSystemEditor(path)) {
+                    host.SetStatusMessage(T("The system has no program for this file: ") +
+                                          path.filename().string());
+                }
             }
         }
     }

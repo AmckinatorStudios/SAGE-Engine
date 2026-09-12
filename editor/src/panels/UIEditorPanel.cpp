@@ -552,6 +552,9 @@ void UIEditorPanel::DrawSide(EditorHost& host, float width) {
 
 // ============================================================================
 void UIEditorPanel::Draw(EditorHost& host, bool* open) {
+    // Обложки в файловом диалоге рисуются ТЕМ ЖЕ превью, что и слоты этой
+    // панели: второй набор буферов в видеопамяти ради модального окна не нужен.
+    m_browser.SetPreview(&m_preview);
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;

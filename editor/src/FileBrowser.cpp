@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <cstring>
 
+#include "AssetSlot.h"
 #include "EditorIcons.h"
+#include "EditorPrefs.h"
 #include "sage/core/Paths.h"
 #include "imgui.h"
 #include "Localization.h"
@@ -47,9 +49,69 @@ const char* IconFor(const fs::path& p, bool isDir) {
     return "file";
 }
 
+// Размер плитки в сетке. 96 — тот же размер обложки, что в панели ассетов: одна
+// и та же картинка не должна выглядеть в двух местах по-разному, да и кэш
+// обложек у них общий (assetslot::Cover), так что совпадение размеров — это ещё
+// и одна съёмка вместо двух.
+constexpr float kTileW = 104.0f;
+constexpr float kCoverH = 80.0f;
+constexpr float kTileH = kCoverH + 26.0f;
+constexpr float kTileGap = 8.0f;
+
+// Обрезает имя многоточием справа, чтобы уместиться в ширину плитки.
+std::string TruncateToWidth(const std::string& s, float maxWidth) {
+    if (ImGui::CalcTextSize(s.c_str()).x <= maxWidth) return s;
+    const float dots = ImGui::CalcTextSize("...").x;
+    std::string out;
+    for (size_t n = 1; n <= s.size(); ++n) {
+        const std::string candidate = s.substr(0, n);
+        if (ImGui::CalcTextSize(candidate.c_str()).x + dots > maxWidth) break;
+        out = candidate;
+    }
+    if (out.empty()) out = s.substr(0, 1);
+    return out + "...";
+}
+
+// Шахматка под картинкой с прозрачностью: без неё дырки в альфе неотличимы от
+// фона, и текстура выглядит просто рваной.
+void DrawChecker(ImDrawList* dl, const ImVec2& a, const ImVec2& b) {
+    const float step = 8.0f;
+    dl->PushClipRect(a, b, true);
+    for (float y = a.y; y < b.y; y += step) {
+        for (float x = a.x; x < b.x; x += step) {
+            const bool odd = ((int)((x - a.x) / step) + (int)((y - a.y) / step)) % 2;
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + step, y + step),
+                              odd ? IM_COL32(68, 68, 74, 255) : IM_COL32(50, 50, 56, 255));
+        }
+    }
+    dl->PopClipRect();
+}
+
 } // namespace
 
+// Один ответ на щелчок для обоих видов. Раньше такого разбора не было вовсе —
+// вид был один; с появлением второго «двойной клик открывает папку» обязано
+// остаться ОДНОЙ строкой кода, иначе сетка и список разойдутся в поведении при
+// первой же правке.
+FileBrowser::Hit FileBrowser::DrawEntryCommon(int index, const Entry& entry, bool doubleClicked) {
+    m_selected = index;
+    if (!entry.IsDir) std::snprintf(m_name, sizeof(m_name), "%s", entry.Name.c_str());
+    if (!doubleClicked) return Hit::Selected;
+    if (entry.IsDir) return Hit::EnterDir;
+    if (m_cfg.Mode == PickMode::PickFolder) return Hit::Selected;
+    m_result = m_dir / entry.Name;
+    return Hit::Confirm;
+}
+
 void FileBrowser::Open(const Config& config) {
+    // Выбранный вид читается ОДИН раз за сеанс: файл настроек лежит на диске, а
+    // диалог за сеанс открывают десятки раз. Именно здесь, а не в Draw(): вид
+    // обязан быть известен до первого кадра окна, иначе диалог мигал бы строками
+    // и только потом становился сеткой.
+    if (!m_viewLoaded) {
+        m_grid = sage::editor::prefs::GetBool("filebrowser.grid", false);
+        m_viewLoaded = true;
+    }
     m_cfg = config;
     m_error.clear();
     m_selected = -1;
@@ -211,6 +273,132 @@ void FileBrowser::DrawBreadcrumbs() {
     }
 }
 
+// --- СТРОКИ -----------------------------------------------------------------
+//
+// Вид для «я знаю, как называется файл»: одна строка на файл, видно имя целиком
+// и размер. Обложка маленькая, вместо прежнего голого значка типа: даже 18
+// пикселей отвечают на вопрос «это та картинка или соседняя», на который значок
+// «texture» не отвечает никогда.
+bool FileBrowser::DrawList() {
+    bool confirmed = false;
+    const std::string needle = LowerOf(m_search);
+    const float icon = ImGui::GetTextLineHeight() + 4.0f;
+    for (int i = 0; i < (int)m_entries.size(); ++i) {
+        const Entry& e = m_entries[i];
+        if (!needle.empty() && LowerOf(e.Name).find(needle) == std::string::npos) continue;
+
+        ImGui::PushID(i);
+        const fs::path full = m_dir / e.Name;
+        const uint64_t cover = e.IsDir ? 0 : assetslot::Cover(m_preview, full, (int)kCoverH);
+        if (cover) {
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            const ImVec2 p1(p0.x + icon, p0.y + icon);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            DrawChecker(dl, p0, p1);
+            dl->AddImageRounded((ImTextureID)(std::intptr_t)cover, p0, p1, ImVec2(0, 1),
+                                ImVec2(1, 0), IM_COL32_WHITE, 3.0f);
+            ImGui::Dummy(ImVec2(icon, icon));
+        } else {
+            EditorIcons::Inline(IconFor(e.Name, e.IsDir));
+        }
+        ImGui::SameLine();
+        if (ImGui::Selectable(e.Name.c_str(), i == m_selected,
+                              ImGuiSelectableFlags_AllowDoubleClick)) {
+            const Hit hit = DrawEntryCommon(i, e, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+            if (hit == Hit::EnterDir) {
+                GoTo(full);
+                ImGui::PopID();
+                break;   // список пересобран — итерация по нему больше не валидна
+            }
+            if (hit == Hit::Confirm) confirmed = true;
+        }
+        if (!e.IsDir) {
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70.0f);
+            ImGui::TextDisabled("%s", HumanSize(e.Size).c_str());
+        }
+        ImGui::PopID();
+    }
+    return confirmed;
+}
+
+// --- СЕТКА ------------------------------------------------------------------
+//
+// Вид для «мне нужна вон та картинка». Имена у скачанных наборов не значат
+// ничего (sky_04.png, T_Rock_02_D.png), и строка с таким именем и размером —
+// это загадка, которую человек решал открыванием файлов по одному. Обложка
+// отвечает на неё сразу.
+bool FileBrowser::DrawGrid() {
+    bool confirmed = false;
+    const std::string needle = LowerOf(m_search);
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const int columns = std::max(1, (int)((avail + kTileGap) / (kTileW + kTileGap)));
+    int col = 0;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    for (int i = 0; i < (int)m_entries.size(); ++i) {
+        const Entry& e = m_entries[i];
+        if (!needle.empty() && LowerOf(e.Name).find(needle) == std::string::npos) continue;
+
+        if (col > 0) ImGui::SameLine(0.0f, kTileGap);
+        ImGui::PushID(i);
+        const fs::path full = m_dir / e.Name;
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        const ImVec2 p1(p0.x + kTileW, p0.y + kTileH);
+
+        // Вся плитка — ОДИН элемент: подпись внутри его границ, и строки сетки
+        // не налезают друг на друга, а попасть по плитке можно мимо картинки.
+        ImGui::InvisibleButton("##tile", ImVec2(kTileW, kTileH));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+        const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+        if (hovered) ImGui::SetTooltip("%s", e.Name.c_str());
+
+        ImU32 bg = ImGui::GetColorU32(ImVec4(1, 1, 1, 0.035f));
+        if (i == m_selected) bg = ImGui::GetColorU32(ImGuiCol_Header);
+        else if (hovered)    bg = ImGui::GetColorU32(ImGuiCol_HeaderHovered);
+        dl->AddRectFilled(p0, p1, bg, 6.0f);
+
+        const ImVec2 c0(p0.x + 4.0f, p0.y + 4.0f);
+        const ImVec2 c1(p1.x - 4.0f, p0.y + kCoverH);
+        dl->AddRectFilled(c0, c1, ImGui::GetColorU32(ImVec4(0, 0, 0, 0.28f)), 5.0f);
+
+        const uint64_t cover = e.IsDir ? 0 : assetslot::Cover(m_preview, full, (int)kCoverH);
+        if (cover) {
+            DrawChecker(dl, c0, c1);
+            dl->AddImageRounded((ImTextureID)(std::intptr_t)cover, c0, c1, ImVec2(0, 1),
+                                ImVec2(1, 0), IM_COL32_WHITE, 5.0f);
+        } else {
+            // Обложки нет (папка, звук, текст, ещё не снятая модель) — значок
+            // типа во всю площадку. Пустая площадка читалась бы как «файл битый».
+            const float glyph = 34.0f;
+            EditorIcons::Overlay(c0.x + (c1.x - c0.x - glyph) * 0.5f,
+                                 c0.y + (c1.y - c0.y - glyph) * 0.5f, glyph,
+                                 e.IsDir ? "folder" : IconFor(e.Name, e.IsDir),
+                                 glm::vec3(0.72f, 0.74f, 0.78f));
+        }
+
+        // Имя обрезается многоточием: под плиткой одна строка, и длинное имя
+        // иначе уехало бы на соседнюю плитку.
+        const std::string label = TruncateToWidth(e.Name, kTileW - 10.0f);
+        const ImVec2 size = ImGui::CalcTextSize(label.c_str());
+        dl->AddText(ImVec2(p0.x + (kTileW - size.x) * 0.5f, p0.y + kCoverH + 4.0f),
+                    ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+
+        if (clicked || doubleClicked) {
+            const Hit hit = DrawEntryCommon(i, e, doubleClicked);
+            if (hit == Hit::EnterDir) {
+                GoTo(full);
+                ImGui::PopID();
+                break;   // список пересобран
+            }
+            if (hit == Hit::Confirm) confirmed = true;
+        }
+        ImGui::PopID();
+        col = (col + 1) % columns;
+    }
+    return confirmed;
+}
+
 bool FileBrowser::Draw() {
     if (!m_open) return false;
     if (m_needsOpen) {
@@ -237,6 +425,14 @@ bool FileBrowser::Draw() {
         ImGui::Checkbox(T("Hidden"), &m_showHidden);
         if (ImGui::IsItemDeactivatedAfterEdit()) Refresh();
         ImGui::SameLine();
+        // Вид — ОДНА кнопка-переключатель, а не две радиокнопки: состояний два,
+        // и значок на ней показывает тот вид, в который она переключит.
+        if (EditorIcons::Button(m_grid ? "list" : "grid",
+                                m_grid ? T("Rows: name and size") : T("Grid: covers"))) {
+            m_grid = !m_grid;
+            sage::editor::prefs::SetBool("filebrowser.grid", m_grid);
+        }
+        ImGui::SameLine();
         ImGui::SetNextItemWidth(180);
         ImGui::InputTextWithHint("##search", T("Search..."), m_search, sizeof(m_search));
 
@@ -261,38 +457,9 @@ bool FileBrowser::Draw() {
         DrawPlaces();
         ImGui::SameLine();
 
-        // --- Список ---
+        // --- Список или сетка ---
         ImGui::BeginChild("##list", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2.2f), true);
-        const std::string needle = LowerOf(m_search);
-        for (int i = 0; i < (int)m_entries.size(); ++i) {
-            const Entry& e = m_entries[i];
-            if (!needle.empty() && LowerOf(e.Name).find(needle) == std::string::npos) continue;
-
-            ImGui::PushID(i);
-            EditorIcons::Inline(IconFor(e.Name, e.IsDir));
-            ImGui::SameLine();
-            const bool selected = (i == m_selected);
-            if (ImGui::Selectable(e.Name.c_str(), selected,
-                                  ImGuiSelectableFlags_AllowDoubleClick)) {
-                m_selected = i;
-                if (!e.IsDir) std::snprintf(m_name, sizeof(m_name), "%s", e.Name.c_str());
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    if (e.IsDir) {
-                        GoTo(m_dir / e.Name);
-                        ImGui::PopID();
-                        break;   // список пересобран — итерация по нему больше не валидна
-                    } else if (m_cfg.Mode != PickMode::PickFolder) {
-                        m_result = m_dir / e.Name;
-                        confirmed = true;
-                    }
-                }
-            }
-            if (!e.IsDir) {
-                ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70.0f);
-                ImGui::TextDisabled("%s", HumanSize(e.Size).c_str());
-            }
-            ImGui::PopID();
-        }
+        confirmed = m_grid ? DrawGrid() : DrawList();
         if (m_entries.empty()) ImGui::TextDisabled("%s", T("Empty"));
         ImGui::EndChild();
 

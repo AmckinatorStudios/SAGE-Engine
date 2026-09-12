@@ -126,10 +126,10 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + model-pack + anim-clips + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + model-pack + anim-clips + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
-                               << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
+                               << "models + prefab-api + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
@@ -2153,6 +2153,62 @@ bool EditorLayer::SelfTestSelection() {
         fs::remove_all(root, ec);
     }
 
+    // --- Файловый диалог: обложки и выбор вида ---------------------------------
+    //
+    // Диалог показывал строку с именем и размером — и всё. Имена в скачанных
+    // наборах не значат ничего («sky_04.png», «T_Rock_02_D.png»), поэтому выбор
+    // картинки сводился к открыванию файлов по одному. Проверяется то, из чего
+    // обложка берётся: картинка обязана дать обложку БЕЗ превью-рендера (она
+    // сама себе обложка), а папка и текст — не дать ничего, иначе диалог рисовал
+    // бы мусор на месте картинки.
+    if (ok) {
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path(ec) / "sage_selftest_dialog";
+        fs::remove_all(root, ec);
+        fs::create_directories(root / "sub", ec);
+        const fs::path png = root / "cover.png";
+        {
+            unsigned char px[4 * 4 * 3];
+            for (int i = 0; i < 4 * 4; ++i) { px[i * 3] = 200; px[i * 3 + 1] = 40; px[i * 3 + 2] = 40; }
+            stbi_write_png(png.string().c_str(), 4, 4, 3, px, 4 * 3);
+        }
+        { std::ofstream(root / "notes.txt") << "текст"; }
+
+        if (assetslot::Cover(nullptr, png, 64) == 0) {
+            LOG_ERROR("Editor") << "SELFTEST: picture got no cover in the file dialog";
+            ok = false;
+        }
+        if (ok && assetslot::Cover(nullptr, root / "sub", 64) != 0) {
+            LOG_ERROR("Editor") << "SELFTEST: a folder got a cover";
+            ok = false;
+        }
+        if (ok && assetslot::Cover(nullptr, root / "notes.txt", 64) != 0) {
+            LOG_ERROR("Editor") << "SELFTEST: a text file got a cover";
+            ok = false;
+        }
+
+        // Вид (сетка/строки) — привычка человека, и он обязан пережить закрытие
+        // диалога. Хранится в настройках редактора, читается при открытии.
+        if (ok) {
+            const bool had = sage::editor::prefs::GetBool("filebrowser.grid", false);
+            FileBrowser::Config cfg;
+            cfg.StartDir = root;
+
+            sage::editor::prefs::SetBool("filebrowser.grid", true);
+            FileBrowser asGrid;
+            asGrid.Open(cfg);
+            sage::editor::prefs::SetBool("filebrowser.grid", false);
+            FileBrowser asRows;
+            asRows.Open(cfg);
+            if (!asGrid.GridView() || asRows.GridView()) {
+                LOG_ERROR("Editor") << "SELFTEST: file dialog does not remember the chosen view";
+                ok = false;
+            }
+            sage::editor::prefs::SetBool("filebrowser.grid", had);
+        }
+        fs::remove_all(root, ec);
+    }
+
     // --- Звук живёт в режиме ПРАВКИ, а не только в игре ------------------------
     //
     // Кнопка «Послушать» у компонента и проигрыватель звукового файла ставят
@@ -2417,14 +2473,6 @@ bool EditorLayer::SelfTestTools() {
             m_scene->RemoveObject(copyId);
         }
         m_scene->RemoveObject(modelObj.Id());
-
-        // 3. Редактор кода: открыть скрипт, увидеть строки, определить язык.
-        const fs::path luaPath = m_project.AssetsDir() / "selftest_code.lua";
-        { std::ofstream f(luaPath); f << "local x = 1\n-- комментарий\nfunction F() end\n"; }
-        if (!m_code.OpenFile(luaPath)) {
-            LOG_ERROR("Editor") << "SELFTEST: редактор кода не открыл .lua";
-            ok = false;
-        }
 
         // 4. Подтверждение опасного действия: пока вопрос включён, объект
         //    остаётся; с выключенным вопросом действие проходит сразу. Именно
@@ -3078,12 +3126,11 @@ bool EditorLayer::SelfTestTools() {
         const bool visibleBefore = AnyPanelVisible();
         m_showHierarchy = m_showInspector = m_showEnvironment = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
-        m_showCode = m_showProfiler = false;
+        m_showProfiler = false;
         const bool visibleAfterClose = AnyPanelVisible();
         ShowAllPanels();
         const bool restored = m_showHierarchy && m_showInspector && m_showEnvironment &&
-                              m_showViewport && m_showGame && m_showConsole && m_showAssets &&
-                              m_showCode;
+                              m_showViewport && m_showGame && m_showConsole && m_showAssets;
         if (!visibleBefore || visibleAfterClose || !restored) {
             LOG_ERROR("Editor") << "SELFTEST: закрытые панели не возвращаются "
                                 << "(до " << visibleBefore << ", после закрытия " << visibleAfterClose
@@ -3109,7 +3156,6 @@ bool EditorLayer::SelfTestTools() {
             {EditorPanel::Environment, &m_showEnvironment, "Environment"},
             {EditorPanel::Assets, &m_showAssets, "Assets"},
             {EditorPanel::Console, &m_showConsole, "Console"},
-            {EditorPanel::Code, &m_showCode, "Code"},
             {EditorPanel::Profiler, &m_showProfiler, "Profiler"},
             {EditorPanel::Game, &m_showGame, "Game"},
             {EditorPanel::Viewport, &m_showViewport, "Viewport"},
