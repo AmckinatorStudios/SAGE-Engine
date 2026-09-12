@@ -1399,6 +1399,12 @@
     "Only what is actually installed is listed": "Показано только то, что действительно установлено",
     "Search again": "Найти заново",
     "Code editors: ": "Редакторов кода: ",
-    "Scripts reloaded: ": "Скриптов перечитано: "
+    "Scripts reloaded: ": "Скриптов перечитано: ",
+    "Reading...": "Читается…",
+    "The file is gone": "Файла больше нет",
+    "The file could not be read as an image": "Файл не читается как картинка",
+    "This is actually %s — the format is not supported": "На самом деле это %s — такой формат не поддерживается",
+    "The cover did not fit into video memory": "Обложка не поместилась в видеопамять",
+    "%d x %d, %s": "%d x %d, %s"
   }
 }

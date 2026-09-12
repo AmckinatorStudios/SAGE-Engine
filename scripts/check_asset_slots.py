@@ -74,7 +74,14 @@ def main() -> int:
             for fn in sorted(files):
                 if not fn.endswith((".cpp", ".h", ".hpp")):
                     continue
-                full = os.path.join(dirpath, fn)
+                # normpath обязателен: ROOTS написаны через «/», а исключения
+                # собраны через os.path.join, и на Windows получалось
+                # «editor/src\FileBrowser.cpp» против «editor\src\FileBrowser.cpp»
+                # — то есть названное исключение там молча не срабатывало, и
+                # проверка ругалась на файловый диалог, который сама же и
+                # освобождает. На Linux разделитель один, поэтому CI этого не
+                # видел.
+                full = os.path.normpath(os.path.join(dirpath, fn))
                 if exempt_file(full):
                     continue
                 lines = open(full, encoding="utf-8", errors="replace").read().splitlines()

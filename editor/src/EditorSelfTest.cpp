@@ -15,6 +15,7 @@
 #include "EditorIcons.h"
 #include "CodeEditorApp.h"
 #include "AssetSlot.h"
+#include "Thumbnails.h"
 #include "panels/AssetsPanel.h"
 
 #include "sage/ecs/DecalSystem.h"
@@ -2207,6 +2208,78 @@ bool EditorLayer::SelfTestSelection() {
             }
             sage::editor::prefs::SetBool("filebrowser.grid", had);
         }
+        fs::remove_all(root, ec);
+    }
+
+    // --- Обложки картинок: фоном, уменьшенными, с сохранением пропорций --------
+    //
+    // Три беды разом, и все три человек видел глазами (см. Thumbnails.h):
+    // папка с фотографиями подвешивала диалог на секунды, обложка выходила
+    // рябой, а панорама 4:1 показывалась квадратом. Проверяется поэтому не
+    // «есть обложка», а именно то, чего не было:
+    //
+    //   1) первый запрос НЕ ЖДЁТ файл — возвращает «читается» и уходит;
+    //   2) вместе с обложкой приезжают размеры ИСХОДНОЙ картинки, иначе вписать
+    //      её в площадку с сохранением пропорций нечем;
+    //   3) файл не той породы (.png, внутри которого WEBP — так их отдают
+    //      сетевые редакторы) даёт ВНЯТНЫЙ отказ с названием формата, а не
+    //      «unknown image type», по которому вывод один: редактор сломался.
+    if (ok) {
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path(ec) / "sage_selftest_thumbs";
+        fs::remove_all(root, ec);
+        fs::create_directories(root, ec);
+
+        // Картинка НЕ КВАДРАТНАЯ намеренно: на квадрате ошибка с пропорциями не
+        // видна вообще, и проверка бы её пропустила.
+        const fs::path wide = root / "wide.png";
+        {
+            std::vector<unsigned char> px((size_t)64 * 16 * 3, 0);
+            for (size_t i = 0; i < px.size(); i += 3) { px[i] = 30; px[i + 1] = 160; px[i + 2] = 220; }
+            stbi_write_png(wide.string().c_str(), 64, 16, 3, px.data(), 64 * 3);
+        }
+        // .png снаружи, WEBP внутри — ровно тот файл, на котором редактор
+        // ругался непонятным.
+        const fs::path fake = root / "fake.png";
+        {
+            std::ofstream f(fake, std::ios::binary);
+            const char riff[] = {'R', 'I', 'F', 'F', 0x20, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' '};
+            f.write(riff, sizeof(riff));
+        }
+
+        const thumbs::Thumb first = thumbs::Get(wide);
+        if (first.Id != 0 || !first.Loading) {
+            LOG_ERROR("Editor") << "SELFTEST: the first cover request did not go to the background";
+            ok = false;
+        }
+
+        thumbs::Thumb ready;
+        for (int i = 0; i < 500 && ready.Id == 0 && !ready.Failed; ++i) {
+            thumbs::Pump();
+            ready = thumbs::Get(wide);
+            if (ready.Id == 0) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (ok && (ready.Id == 0 || ready.W != 64 || ready.H != 16)) {
+            LOG_ERROR("Editor") << "SELFTEST: the cover did not arrive with the source size ("
+                                << ready.W << "x" << ready.H << ")";
+            ok = false;
+        }
+
+        if (ok) {
+            thumbs::Thumb bad = thumbs::Get(fake);
+            for (int i = 0; i < 500 && !bad.Failed; ++i) {
+                thumbs::Pump();
+                bad = thumbs::Get(fake);
+                if (!bad.Failed) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            if (!bad.Failed || bad.Error.find("WEBP") == std::string::npos) {
+                LOG_ERROR("Editor") << "SELFTEST: a WEBP under a .png name got no clear refusal ("
+                                    << bad.Error << ")";
+                ok = false;
+            }
+        }
+
+        thumbs::Clear();
         fs::remove_all(root, ec);
     }
 

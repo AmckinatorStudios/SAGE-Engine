@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1399.
+// Язык: Русский. Строк: 1405.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -34,6 +34,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "%.2f из %.2f с"},
     {"%d bones of the clip are missing from this skeleton",
      "Костей клипа нет в этом скелете: %d"},
+    {"%d x %d, %s",
+     "%d x %d, %s"},
     {"%llu B",
      "%llu Б"},
     {"%s -> %s (%.1fx smaller)",
@@ -1826,6 +1828,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Только чтение"},
     {"Read only",
      "Только чтение"},
+    {"Reading...",
+     "Читается…"},
     {"Reads the materials from the model file, creates the missing\n.sagemat next to it and fills the empty slots.\nSlots you filled yourself are not touched.",
      "Читает материалы из файла модели, создаёт рядом недостающие\n.sagemat и заполняет пустые слоты.\nСлоты, заполненные вами, не трогает."},
     {"Ready-made projects are content, not part of the editor: they are installed separately and can be removed. Built-in templates (empty, demo, menu) are built by code and are always available.",
@@ -2352,12 +2356,18 @@ constexpr TranslationPair kRussianStrings[] = {
      "В собранной игре не найдётся. Внесите его в проект:"},
     {"The cone shines along the object's forward (-Z of its rotation). Its shadow is a separate map in the atlas: there are few, and they go to the brightest sources.",
      "Конус светит вдоль «вперёд» объекта (-Z поворота). Тень — отдельная карта в атласе: их немного, и достаются они самым ярким источникам."},
+    {"The cover did not fit into video memory",
+     "Обложка не поместилась в видеопамять"},
     {"The editor did not close normally last time. Below is the full report written at that moment — it is what a developer needs to find the cause.",
      "В прошлый раз редактор закрылся не сам. Ниже — полный отчёт, записанный в тот момент: именно он нужен разработчику, чтобы найти причину."},
     {"The element stays where it is — only Offset is recomputed.",
      "Элемент остаётся на месте — пересчитывается только Offset."},
     {"The engine's own format: loads without parsing and weighs less.\nThe source file stays where it is.",
      "Свой формат движка: грузится без разбора и весит меньше.\nИсходный файл остаётся на месте."},
+    {"The file could not be read as an image",
+     "Файл не читается как картинка"},
+    {"The file is gone",
+     "Файла больше нет"},
     {"The file is gone or damaged — details in the console.",
      "Файл удалён или повреждён — подробности в консоли."},
     {"The file is missing. Put it back or reassign the asset —\nonly the .meta sidecar could have caught a rename made outside the editor.",
@@ -2466,6 +2476,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Этот файл на объект не назначается"},
     {"This folder is empty.",
      "Папка пуста."},
+    {"This is actually %s — the format is not supported",
+     "На самом деле это %s — такой формат не поддерживается"},
     {"This is not a SAGE project folder: ",
      "Это не папка проекта SAGE: "},
     {"This is not a SAGE project: no project.sageproj in ",
