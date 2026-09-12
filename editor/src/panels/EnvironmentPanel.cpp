@@ -419,10 +419,27 @@ void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment&
         ImGui::ColorEdit3(T("Ground (computed)"), &groundC.x, ImGuiColorEditFlags_NoInputs |
                                                                   ImGuiColorEditFlags_NoPicker);
         ImGui::TextDisabled("%s", T("Taken from the sky, so it darkens with it"));
+    } else if (env.AmbientMode == LightingEnvironment::AmbientSource::FromSky) {
+        // НЕБА НЕТ — И СВЕТА ОТ НЕГО НЕТ, и поля тут ни при чём: они
+        // принадлежат другому режиму. Показывать их рабочими значило бы
+        // обещать свет, которого не будет, — а именно так и выглядела прошлая
+        // подстановка «выключено небо — берём ваши значения»: человек выключал
+        // небо, удалял все источники света, и сцена оставалась освещена
+        // непонятно чем.
+        ImGui::TextDisabled("%s", T("The sky is off — there is no ambient light"));
+        ImGui::TextDisabled("%s", T("Switch to Custom values for light without a sky"));
+        ImGui::BeginDisabled(true);
+        glm::vec3 none(0.0f);
+        ImGui::ColorEdit3(T("Sky"), &none.x, ImGuiColorEditFlags_NoInputs |
+                                                 ImGuiColorEditFlags_NoPicker);
+        ImGui::ColorEdit3(T("Ground"), &none.x, ImGuiColorEditFlags_NoInputs |
+                                                    ImGuiColorEditFlags_NoPicker);
+        float zero = 0.0f;
+        ImGui::DragFloat(T("Strength"), &zero, 0.01f, 0.0f, 2.0f);
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("%s", T("Sky tints upward faces, Ground — downward"));
+        return;
     } else {
-        if (env.AmbientMode == LightingEnvironment::AmbientSource::FromSky) {
-            ImGui::TextDisabled("%s", T("The sky is off — own values are used"));
-        }
         ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();
         ImGui::ColorEdit3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
     }

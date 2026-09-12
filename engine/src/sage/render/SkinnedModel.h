@@ -128,12 +128,18 @@ public:
     // bind-поза (единичные кости).
     // morphWeights — веса блендшейпов в порядке MorphNames(); пусто или
     // nullptr — форма как в файле.
+    // shadingMode — номер отладочного вида (см. render/DebugView.h), 0 —
+    // обычная отрисовка. Тот же номер и тот же код разбора, что у статических
+    // мешей: персонаж обязан участвовать в разборе кадра наравне со всем
+    // остальным, иначе в режиме «Нормали» посреди цветной картинки стоит
+    // обычный освещённый герой.
     void Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
               const glm::vec3& viewPos, const LightingEnvironment& env,
               const std::vector<glm::mat4>& bones,
               const ShadowBinding& shadows,
               const sage::render::ReflectionBinding* reflections = nullptr,
-              const std::vector<float>* morphWeights = nullptr) const;
+              const std::vector<float>* morphWeights = nullptr,
+              int shadingMode = 0) const;
 
     // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей
     // позе — чтобы анимированная модель ОТБРАСЫВАЛА тень. Вызывается внутри

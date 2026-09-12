@@ -75,6 +75,10 @@ FloorScene MakeFloor(const std::string& texture) {
     f.Data->Lighting.SkyColor = {0.25f, 0.28f, 0.34f};
     f.Data->Lighting.GroundColor = {0.10f, 0.10f, 0.10f};
     f.Data->Lighting.AmbientStrength = 0.35f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    f.Data->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     f.Data->Lighting.Skybox.Enabled = false;
 
     GameObject floor = f.Data->CreateObject("Floor");

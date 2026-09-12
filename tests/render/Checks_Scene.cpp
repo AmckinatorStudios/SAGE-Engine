@@ -58,6 +58,10 @@ std::unique_ptr<Scene> BuildLodScene(std::shared_ptr<Mesh>& sphere, bool withLod
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -0.9f, 0.3f));
     scene->Lighting.Sun.Intensity = 2.2f;
     scene->Lighting.AmbientStrength = 0.25f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     // Сферу строим САМИ, с копией геометрии: уровни выводятся из неё, а
@@ -154,6 +158,10 @@ std::unique_ptr<Scene> BuildOccludedScene() {
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -0.9f, -0.2f));
     scene->Lighting.Sun.Intensity = 2.0f;
     scene->Lighting.AmbientStrength = 0.3f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     auto primitive = [](GameObject obj, MeshRef::Type type, glm::vec3 color) {
@@ -267,6 +275,10 @@ std::unique_ptr<Scene> BuildTwoViewScene() {
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -0.9f, -0.2f));
     scene->Lighting.Sun.Intensity = 2.0f;
     scene->Lighting.AmbientStrength = 0.3f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     auto primitive = [](GameObject obj, glm::vec3 color) {

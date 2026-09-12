@@ -27,10 +27,14 @@ void UpdateAnimators(Scene& scene, float dt);
 // прохода сцены — тест глубины включён). Освещение ПОЛНОЕ и совпадает со
 // статическими мешами: передаются позиция камеры, окружение и карты теней
 // солнца (каскады — см. ShadowMap.h), как в статическом lit-проходе.
+// shadingMode — номер отладочного вида кадра (render/DebugView.h), 0 — обычная
+// отрисовка. Передаётся насквозь в SkinnedModel::Draw: разбор кадра по
+// слагаемым обязан касаться и персонажей.
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const ShadowBinding& shadows,
-                        const sage::render::ReflectionBinding* reflections = nullptr);
+                        const sage::render::ReflectionBinding* reflections = nullptr,
+                        int shadingMode = 0);
 
 // Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
 // внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.

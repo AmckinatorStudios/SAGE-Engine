@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1408.
+// Язык: Русский. Строк: 1410.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2304,6 +2304,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поддерживаются:"},
     {"Surface Offset",
      "Отступ от поверхности"},
+    {"Switch to Custom values for light without a sky",
+     "Нужен свет без неба — переключите на «Свои значения»"},
     {"Taken from the contexts below only when this context actually used the device that frame.",
      "Забирается у нижних контекстов только в тот кадр, когда этот контекст действительно воспользовался устройством."},
     {"Taken from the sky, so it darkens with it",
@@ -2440,6 +2442,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Небо собрано и стоит в кадре"},
     {"The sky is off — own values are used",
      "Небо выключено — используются свои значения"},
+    {"The sky is off — there is no ambient light",
+     "Небо выключено — окружающего света нет"},
     {"The sky or its celestials are off — see Environment.",
      "Небо или его светила выключены — см. окно «Среда»."},
     {"The subtree is clipped by this element's rectangle",

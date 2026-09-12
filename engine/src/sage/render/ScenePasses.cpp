@@ -77,8 +77,10 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
         batch.RenderOcclusionProbes(input.Proj * input.View, input.ViewPos);
     }
 
+    // Режим отладочного вида — тот же, что у статики: персонаж обязан
+    // участвовать в разборе кадра наравне со всем остальным.
     sage::anim::DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
-                                   input.Shadows, &input.Reflection);
+                                   input.Shadows, &input.Reflection, input.ShadingMode);
     return stats;
 }
 
@@ -118,6 +120,11 @@ int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,
             studio.SkyColor = glm::vec3(0.72f, 0.78f, 0.88f);
             studio.GroundColor = glm::vec3(0.34f, 0.32f, 0.30f);
             studio.Fog.Enabled = false;
+            // Свет студии задан ЗДЕСЬ и небу не подчиняется — значит режим
+            // «Свои значения» (см. LightingEnvironment::AmbientMode). Без
+            // этого выключенное ниже небо забрало бы с собой и ambient, и
+            // съёмка в текстуру приезжала бы чёрной.
+            studio.AmbientMode = LightingEnvironment::AmbientSource::Custom;
             studio.Skybox.Enabled = false;
             studio.Shadows.Distance = 0.0f;
         }

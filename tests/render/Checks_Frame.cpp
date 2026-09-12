@@ -20,6 +20,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "sage/render/SkyDraw.h"
+
 #include "sage/anim/AnimationSystem.h"
 #include "sage/assets/AssetCache.h"
 #include "sage/ecs/DecalSystem.h"
@@ -84,6 +86,59 @@ void TestShadowsOffIsNotBlack(FrameRenderer& r, Scene& scene) {
         CountFail();
         std::printf("[FAIL] %-28s среднее %.1f — сцена ЧЁРНАЯ при выключенных тенях\n",
                     "shadows_off_not_black", mean);
+    }
+}
+
+// НЕБО ВЫКЛЮЧЕНО, ИСТОЧНИКОВ НЕТ — КАДР ЧЁРНЫЙ.
+//
+// Ровно та жалоба, с которой это чинилось: «отключил небо, удалил всё
+// освещение, а свет всё равно есть». Причина была в молчаливой подстановке:
+// режим «от неба» при выключенном небе брал поля SkyColor/GroundColor — а они
+// по умолчанию голубые и ненулевые, то есть сцену освещало нечто, чего нет ни
+// в списке объектов, ни на небе.
+//
+// Проверяется СВОЙСТВО, а не эталон: при таком свете кадр обязан быть чёрным
+// целиком, и любой ненулевой пиксель — это и есть «свет взялся ниоткуда».
+void TestNoSkyNoLightIsBlack(FrameRenderer& r) {
+    Scene dark("NoSkyNoLight");
+    dark.Lighting.Sun.Intensity = 0.0f;             // солнца нет
+    dark.Lighting.Skybox.Enabled = false;           // неба нет
+    dark.Lighting.AmbientMode = LightingEnvironment::AmbientSource::FromSky;
+    // Поля чужого режима намеренно ЯРКИЕ: если они всё же попадут в кадр,
+    // проверка это увидит.
+    dark.Lighting.SkyColor = glm::vec3(1.0f);
+    dark.Lighting.GroundColor = glm::vec3(1.0f);
+    dark.Lighting.AmbientStrength = 1.0f;
+
+    GameObject cube = dark.CreateObject("Cube");
+    cube.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    cube.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    cube.Renderer().Color = glm::vec3(1.0f);
+    cube.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+    cube.GetTransform().Scale = glm::vec3(2.0f);
+
+    Framebuffer sceneFbo(kW, kH);
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    // Заливка — тем же правилом, что у редактора и игры: нет неба — чернота.
+    const glm::vec3 clear = sage::render::SceneClearColor(dark.Lighting);
+    device.SetClearColor(clear.r, clear.g, clear.b, 1.0f);
+    device.Clear(true, true);
+    const LightingEnvironment env = sage::ecs::CollectLighting(dark);
+    r.Batch.RenderColor(dark, TestView(), PerspectiveProj(), kEye, env, ShadowBinding(), 0);
+    const Image frame = Capture(kW, kH);
+    device.BindDefaultFramebuffer();
+
+    int brightest = 0;
+    for (unsigned char px : frame.Pixels) brightest = std::max(brightest, (int)px);
+    if (brightest <= 1) {
+        CountPass();
+        std::printf("[ ok ] %-28s ярчайший пиксель %d — свету взяться неоткуда\n",
+                    "no_sky_no_light_black", brightest);
+    } else {
+        CountFail();
+        std::printf("[FAIL] %-28s ярчайший пиксель %d — сцена освещена без единого источника\n",
+                    "no_sky_no_light_black", brightest);
     }
 }
 
@@ -163,6 +218,10 @@ void TestMsaa(FrameRenderer& r) {
     // геометрией, а не про то, что на этой геометрии нарисовано. Первая версия
     // теста этого не учитывала и требовала от MSAA невозможного.
     auto scene = std::make_unique<Scene>("MsaaTest");
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
     scene->Lighting.AmbientStrength = 1.0f;
 
@@ -276,6 +335,10 @@ void TestObjectMotionBlur(FrameRenderer& r) {
     scene->Lighting.SkyColor = {0.40f, 0.48f, 0.64f};
     scene->Lighting.GroundColor = {0.20f, 0.17f, 0.15f};
     scene->Lighting.AmbientStrength = 0.35f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     GameObject ground = scene->CreateObject("Ground");
@@ -476,6 +539,10 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
 
     auto renderWith = [&](const sage::render::MeshData& md) {
         Scene local;
+        // Свет — СВОИМИ значениями: неба в сцене нет, а «от неба» без неба это
+        // темнота (см. LightingEnvironment::ResolveAmbient). На чёрном кадре
+        // проверять прозрачность нечем.
+        local.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
         GameObject cube = local.CreateObject("Glass");
         MeshRendererComponent& mr = cube.Renderer();
         mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
@@ -501,6 +568,7 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
     // обязана дать ДРУГОЙ кадр. Иначе тест выше прошёл бы и на непрозрачном
     // кубе, где порядок не важен по определению и доказывать нечего.
     Scene opaqueScene;
+    opaqueScene.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     GameObject solid = opaqueScene.CreateObject("Solid");
     MeshRendererComponent& smr = solid.Renderer();
     smr.Ref = MeshRef{MeshRef::Type::Cube, ""};
@@ -763,6 +831,7 @@ void TestPostSelfCheck(FrameRenderer& r) {
 void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestScenePerspective(r, scene);
     TestShadowsOffIsNotBlack(r, scene);
+    TestNoSkyNoLightIsBlack(r);
     TestShadedWithPostIsNotBlack(r, scene);
     TestPostSelfCheck(r);
     TestSceneOrthographic(r, scene);

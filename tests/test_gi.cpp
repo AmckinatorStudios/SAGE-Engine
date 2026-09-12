@@ -262,6 +262,10 @@ TEST(gi_bake_occlusion_darkens) {
     auto bakeAvgFloor = [](bool roofed) {
         Scene scene("cmp");
         scene.Lighting.Sun.Intensity = 0.0f; // только небо — чистая проверка окклюзии
+        // Небо в сцене не включено, а свет задан здесь — значит «свои
+        // значения»: «от неба» без неба это темнота (см. ResolveAmbient), и
+        // окклюзию пришлось бы сравнивать между двумя чёрными кадрами.
+        scene.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
         scene.Lighting.SkyColor = {1.0f, 1.0f, 1.0f};
         scene.Lighting.GroundColor = {0.0f, 0.0f, 0.0f};
         scene.Lighting.AmbientStrength = 1.0f;

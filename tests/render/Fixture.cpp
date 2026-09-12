@@ -77,6 +77,10 @@ std::unique_ptr<Scene> MakeScene() {
     scene->Lighting.SkyColor = {0.40f, 0.48f, 0.64f};
     scene->Lighting.GroundColor = {0.20f, 0.17f, 0.15f};
     scene->Lighting.AmbientStrength = 0.35f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false; // небо здесь не проверяем — только геометрию и свет
 
     // Ref задаёт, ЧТО рисовать, а MeshPtr — чем: GPU-меш ставится
