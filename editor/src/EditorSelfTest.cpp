@@ -124,7 +124,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + model-pack + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + model-pack + anim-clips + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
