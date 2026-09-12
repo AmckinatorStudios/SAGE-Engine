@@ -58,6 +58,34 @@ namespace fs = std::filesystem;
 // Раньше этот слот был написан отдельно от слотов меша и материала и вёл себя
 // иначе: путь правился полем ввода по Enter, бросок файла не того типа молча
 // ничего не делал, а «где лежит эта текстура» узнавалось поиском по проекту.
+void InspectorPanel::DrawShaderSlot(EditorHost& host, const char* label, std::string& path,
+                                    const std::shared_ptr<Material>& material) {
+    ImGui::PushID(label);
+    ImGui::TextUnformatted(label);
+    const assetslot::Result r =
+        assetslot::Draw(host, label, assetslot::Kind::Shader, path, &m_preview);
+    if (r.Changed) {
+        host.PushUndoSnapshot();
+        path = r.Path;
+        // Программа собрана из ПРЕЖНЕЙ пары файлов: без сброса материал в сцене
+        // продолжал бы рисоваться старым шейдером, а слот показывал бы новый.
+        if (material) material->ShaderPtr.reset();
+    }
+    if (r.BrowseRequested) {
+        FileBrowser::Config c;
+        c.Title = std::string(T("Shader: ")) + label;
+        c.Filters = assetslot::Extensions(assetslot::Kind::Shader);
+        c.FilterLabel = T("Shaders");
+        c.StartDir = host.CurrentProject().AssetsDir();
+        m_browser.Open(c);
+        m_browseTarget = &path;
+        m_browseIsShader = true;
+        m_browseIsMesh = false;
+        m_browseIsMaterial = false;
+    }
+    ImGui::PopID();
+}
+
 void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::string& path,
                                      const std::shared_ptr<Texture>& tex, const char* tooltip) {
     ImGui::PushID(label);
@@ -189,18 +217,11 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
     // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.
     ImGui::SeparatorText(T("Custom Shader"));
-    char vsBuf[512];
-    std::snprintf(vsBuf, sizeof(vsBuf), "%s", material->VertexShaderPath.c_str());
-    if (ImGui::InputText(T("Vertex"), vsBuf, sizeof(vsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->VertexShaderPath = vsBuf;
-        material->ShaderPtr.reset();
-    }
-    char fsBuf[512];
-    std::snprintf(fsBuf, sizeof(fsBuf), "%s", material->FragmentShaderPath.c_str());
-    if (ImGui::InputText(T("Fragment"), fsBuf, sizeof(fsBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        material->FragmentShaderPath = fsBuf;
-        material->ShaderPtr.reset();
-    }
+    // Шейдер — такой же ассет проекта, как текстура, и выбирается так же:
+    // слотом с перетаскиванием (см. AssetSlot.h). Поле ввода здесь требовало
+    // помнить путь и нажать Enter, иначе набранное молча пропадало.
+    DrawShaderSlot(host, T("Vertex"), material->VertexShaderPath, material);
+    DrawShaderSlot(host, T("Fragment"), material->FragmentShaderPath, material);
     if (material->HasCustomShader() && !material->Params.empty()) {
         ImGui::TextDisabled(T("Params: %d (edit in the .sagemat file)"), (int)material->Params.size());
     }

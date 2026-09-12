@@ -14,8 +14,11 @@
 # из какой папки запущен редактор.
 #
 # Запуск (нужны fonttools и распакованный @tabler/icons-webfont):
-#   python3 scripts/gen_icon_font.py <путь к tabler-icons-outline.ttf> \
-#                                    <путь к tabler-icons-outline.css>
+#   python3 scripts/gen_icon_font.py <распакованный .../dist/fonts> <.../dist>
+#
+# Берутся ОБА начертания: контурное (основное) и залитое — оно нужно там, где
+# смысл передаётся парой «контур/заливка», например пустая папка против папки с
+# содержимым.
 # ---------------------------------------------------------------------------
 import json, os, re, subprocess, sys, tempfile
 
@@ -35,6 +38,10 @@ ICONS = {
     "script": "file-code", "particles": "sparkles", "anim": "walk", "ik": "body-scan",
     "probe": "circle-dot", "network": "network", "physics": "atom",
     "folder": "folder", "file": "file", "scene": "stack-2", "material": "palette",
+    # Папка с содержимым — ЗАЛИТАЯ. Пара «контур/заливка» читается мгновенно и
+    # не требует подписи, в отличие от «folder» против «folder-open»: открытая
+    # папка означает «в неё вошли», а не «в ней что-то есть».
+    "folder-full": ("filled", "folder"),
     "project": "briefcase", "prefab": "box-multiple", "texture": "photo", "shader": "brush",
     "audio": "volume", "model": "cube-3d-sphere",
     "up": "arrow-up", "refresh": "refresh", "folder-plus": "folder-plus", "search": "search",
@@ -51,23 +58,53 @@ def main():
     if len(sys.argv) != 3:
         print(__doc__)
         return 2
-    ttf, css_path = sys.argv[1], sys.argv[2]
-    css = open(css_path, encoding='utf-8').read()
-    table = dict(re.findall(r'\.ti-([a-z0-9-]+):before\s*\{\s*content:\s*"\\([0-9a-f]+)";', css))
+    # Аргументы — КАТАЛОГИ распакованного @tabler/icons-webfont: dist/fonts и dist.
+    fonts_dir, css_dir = sys.argv[1], sys.argv[2]
 
-    missing = sorted(n for n in ICONS.values() if n not in table)
+    def table_of(style):
+        name = 'tabler-icons-%s.css' % style
+        css = open(os.path.join(css_dir, name), encoding='utf-8').read()
+        return dict(re.findall(r'\.ti-([a-z0-9-]+):before\s*\{\s*content:\s*"\\([0-9a-f]+)";',
+                               css))
+
+    tables = {'outline': table_of('outline'), 'filled': table_of('filled')}
+
+    # Имя иконки редактора -> (начертание, кодовая точка).
+    points, missing = {}, []
+    for name, want in ICONS.items():
+        style, tabler = want if isinstance(want, tuple) else ('outline', want)
+        code = tables[style].get(tabler)
+        if code is None:
+            missing.append('%s (%s/%s)' % (name, style, tabler))
+            continue
+        points[name] = (style, int(code, 16))
     if missing:
         print('нет в шрифте:', ', '.join(missing))
         return 1
 
-    points = {name: int(table[tabler], 16) for name, tabler in ICONS.items()}
+    # ДВА НАЧЕРТАНИЯ — ДВА ШРИФТА, и подмножества из них сливаются в один.
+    # Кодовые точки у контурного и залитого наборов разные, поэтому слияние
+    # безопасно: глифы не накладываются друг на друга.
     with tempfile.TemporaryDirectory() as tmp:
-        uni = os.path.join(tmp, 'unicodes.txt')
-        open(uni, 'w').write(','.join('U+%04X' % c for c in sorted(set(points.values()))))
-        out = os.path.join(tmp, 'subset.ttf')
-        subprocess.run(['pyftsubset', ttf, '--unicodes-file=' + uni, '--output-file=' + out,
-                        '--no-hinting', '--desubroutinize', '--drop-tables+=DSIG'], check=True)
-        data = open(out, 'rb').read()
+        parts = []
+        for style in ('outline', 'filled'):
+            codes = sorted({c for st, c in points.values() if st == style})
+            if not codes:
+                continue
+            uni = os.path.join(tmp, style + '.txt')
+            open(uni, 'w').write(','.join('U+%04X' % c for c in codes))
+            out = os.path.join(tmp, style + '.ttf')
+            subprocess.run(['pyftsubset', os.path.join(fonts_dir, 'tabler-icons-%s.ttf' % style),
+                            '--unicodes-file=' + uni, '--output-file=' + out,
+                            '--no-hinting', '--desubroutinize', '--drop-tables+=DSIG'], check=True)
+            parts.append(out)
+        if len(parts) == 1:
+            data = open(parts[0], 'rb').read()
+        else:
+            from fontTools.merge import Merger
+            merged = os.path.join(tmp, 'merged.ttf')
+            Merger().merge(parts).save(merged)
+            data = open(merged, 'rb').read()
 
     lines = []
     lines.append('// СГЕНЕРИРОВАНО scripts/gen_icon_font.py — РУКАМИ НЕ ПРАВИТЬ.')
@@ -88,7 +125,7 @@ def main():
     lines.append('struct Glyph { const char* Name; unsigned int Code; };')
     lines.append('inline const Glyph kGlyphs[] = {')
     for name in sorted(points):
-        lines.append('    {"%s", 0x%04x},' % (name, points[name]))
+        lines.append('    {"%s", 0x%04x},' % (name, points[name][1]))
     lines.append('};')
     lines.append('inline constexpr int kGlyphCount = %d;' % len(points))
     lines.append('')

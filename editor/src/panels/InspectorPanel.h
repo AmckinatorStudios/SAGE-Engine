@@ -13,6 +13,7 @@
 class EditorHost;
 class GameObject;
 class Texture;
+class Material;
 struct MeshRendererComponent;
 enum class UIAnchor;
 
@@ -88,6 +89,12 @@ private:
     // картинку: назначено ли что-то и то ли это, что хотели, видно сразу.
     void DrawTextureSlot(EditorHost& host, const char* label, std::string& path,
                          const std::shared_ptr<Texture>& tex, const char* tooltip);
+
+    // Свой шейдер материала — тем же слотом и по той же причине. Пара .vert/
+    // .frag выбиралась двумя полями ввода с применением по Enter: набранное без
+    // Enter молча пропадало, а промах в пути был виден только в консоли.
+    void DrawShaderSlot(EditorHost& host, const char* label, std::string& path,
+                        const std::shared_ptr<Material>& material);
 
     AssetPreview m_preview;
     FileBrowser m_browser;

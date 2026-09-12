@@ -111,6 +111,12 @@ uint64_t Thumbnail(AssetPreview* preview, const fs::path& path, int size) {
 } // namespace
 
 Kind KindOf(const fs::path& path) {
+    // Папка узнаётся не по расширению, а по диску: у каталога расширения нет,
+    // и «assets/sky» ничем не отличается от файла без расширения. Спрашивать
+    // приходится файловую систему — зато один раз и в одном месте.
+    std::error_code ec;
+    if (!path.empty() && fs::is_directory(path, ec)) return Kind::Folder;
+
     const std::string ext = Lower(path.extension().string());
     if (ext == ".sagemat") return Kind::Material;
     if (ext == ".sageprefab") return Kind::Prefab;
@@ -121,6 +127,7 @@ Kind KindOf(const fs::path& path) {
         return Kind::Texture;
     if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return Kind::Audio;
     if (ext == ".sageanim") return Kind::Animation;
+    if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return Kind::Shader;
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
     // умеет .obj/.gltf/.glb/.fbx/.blend/.bbmodel и пополняется плагинами.
     if (ext == ".sagemesh" || ModelLoader::IsSupportedModel(path.string())) return Kind::Model;
@@ -142,6 +149,8 @@ const char* KindName(Kind kind) {
         case Kind::Scene:    return T("scene");
         case Kind::Audio:    return T("sound");
         case Kind::Animation: return T("animation clip");
+        case Kind::Shader:   return T("shader");
+        case Kind::Folder:   return T("folder");
         default:             return T("file");
     }
 }
@@ -156,6 +165,8 @@ const char* KindIcon(Kind kind) {
         case Kind::Scene:    return "scene";
         case Kind::Audio:    return "audio";
         case Kind::Animation: return "anim";
+        case Kind::Shader:   return "shader";
+        case Kind::Folder:   return "folder";
         default:             return "file";
     }
 }
@@ -170,6 +181,10 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::Scene:    return {".sage"};
         case Kind::Audio:    return {".wav", ".ogg", ".mp3"};
         case Kind::Animation: return {".sageanim"};
+        case Kind::Shader:   return {".vert", ".frag", ".glsl"};
+        // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-
+        // живаются…» в отказе остаётся пустой — перечислять там нечего.
+        case Kind::Folder:   return {};
         default:             return {};
     }
 }
@@ -258,7 +273,15 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     }
 
     // --- Обложка ------------------------------------------------------------
-    const fs::path assetPath = path;
+    //
+    // Ссылка хранится ОТНОСИТЕЛЬНОЙ (см. Project::AssetRef), а текущая папка
+    // процесса — не обязательно корень проекта. Поэтому всё, что смотрит на
+    // диск (тип, обложка, «файла нет»), работает с РАЗРЕШЁННЫМ путём: иначе
+    // слот папки не узнал бы в своей ссылке каталог и подписывал бы её «файл».
+    std::error_code resolveEc;
+    fs::path assetPath = path;
+    if (!path.empty() && !fs::exists(assetPath, resolveEc))
+        assetPath = host.CurrentProject().Dir() / path;
     ImGui::SetCursorScreenPos(ImVec2(p0.x + 4.0f, p0.y + 4.0f));
     ImGui::InvisibleButton("##thumb", ImVec2(thumb, thumb));
     const bool thumbHovered = ImGui::IsItemHovered();
@@ -329,8 +352,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
         // текущая папка процесса — не обязательно корень проекта, поэтому
         // ищем в обоих местах.
         std::error_code ec;
-        const bool missing = !fs::exists(assetPath, ec) &&
-                             !fs::exists(host.CurrentProject().Dir() / assetPath, ec);
+        const bool missing = !fs::exists(assetPath, ec);
         if (missing) {
             ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", T("File not found"));
         } else {
