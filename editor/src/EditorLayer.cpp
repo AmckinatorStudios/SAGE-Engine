@@ -472,7 +472,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
-            "SAGE_EDITOR_PALETTE",
+            "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -758,6 +758,11 @@ void EditorLayer::OnAttach() {
             }
             x += 3.0f;
         }
+        // Камера подводится к последней поставленной модели. Без этого хук не
+        // отвечал на вопрос, ради которого заведён («что с её материалом и
+        // развёрткой»): модель вставала в ряд далеко от камеры и занимала в
+        // кадре десяток пикселей, по которым не видно ни шва текстуры, ни позы.
+        if (m_selectedId >= 0) FocusSelected();
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_headlessProject = true; m_showAbout = true; }

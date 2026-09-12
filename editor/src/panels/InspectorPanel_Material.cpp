@@ -327,7 +327,9 @@ void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererCompo
 }
 
 // --- Mesh Renderer, часть 1: ЧТО рисуем --------------------------------------
-void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, bool animated) {
+void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
+                                  MeshRendererComponent& mr, bool animated) {
+    entt::registry& reg = host.CurrentScene().Registry();
     ImGui::SeparatorText(T("Mesh"));
 
     // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
@@ -338,7 +340,7 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, b
         const MeshRef::Type chosen = (MeshRef::Type)kind;
         if (chosen != MeshRef::Type::Model) {
             // Примитив вместо модели: путь и слоты её частей уходят вместе с ней.
-            SetEntityMesh(host.CurrentProject(), mr, chosen, {},
+            SetEntityMesh(host.CurrentProject(), reg, entity, chosen, {},
                           ResourceManager::Instance().GetPrimitive(chosen));
         } else {
             mr.Ref.type = chosen;   // Model — путь задаётся ниже и грузится кнопкой
@@ -358,7 +360,12 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, b
             host.PushUndoSnapshot();
             // Сам меш подгружается ниже (m_pendingMeshLoad) — здесь важно, что
             // вместе со сменой модели сбрасываются слоты её частей.
-            SetEntityMesh(host.CurrentProject(), mr, MeshRef::Type::Model, r.Path, nullptr);
+            // Скелет и клипы приезжают уже отсюда: у персонажа, назначенного
+            // ЭТИМ слотом, статического меша не будет никогда (его рисует
+            // скелетный проход), и ждать загрузки меша значило бы не настроить
+            // его вовсе.
+            SetEntityMesh(host.CurrentProject(), reg, entity, MeshRef::Type::Model, r.Path,
+                          nullptr);
             if (!r.Cleared) m_pendingMeshLoad = true;
         }
         if (r.BrowseRequested) {

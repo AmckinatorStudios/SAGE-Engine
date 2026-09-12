@@ -305,9 +305,22 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
     const glm::mat4 world = parent * NodeLocalMatrix(node);
 
     if (node.mesh >= 0 && node.mesh < (int)gltf.meshes.size()) {
+        // У СКИНОВОГО МЕША ТРАНСФОРМ УЗЛА НЕ ПРИМЕНЯЕТСЯ — так требует glTF, и
+        // это не формальность. Геометрия скина живёт в пространстве скелета, и
+        // двигают её ТОЛЬКО кости; узел при этом сплошь и рядом несёт свой
+        // масштаб от экспортёра (у персонажа из набора — 0.84).
+        //
+        // Пока масштаб применялся, статическая копия модели выходила на 16%
+        // мельче того, что рисует скелетный проход: контур выделения, габариты
+        // и попадание мышью жили в одном размере, а персонаж на экране — в
+        // другом. Выглядит это как «модель грузится криво»: щёлкаешь по краю —
+        // не попадаешь, рамка выделения не по фигуре.
+        //
+        // Детей это не касается: их трансформ считается как обычно.
+        const bool skinned = node.skin >= 0 && node.skin < (int)gltf.skins.size();
         const tinygltf::Mesh& mesh = gltf.meshes[(size_t)node.mesh];
         for (size_t p = 0; p < mesh.primitives.size(); ++p) {
-            CollectPrimitive(gltf, mesh.primitives[p], world,
+            CollectPrimitive(gltf, mesh.primitives[p], skinned ? glm::mat4(1.0f) : world,
                              PrimitiveName(gltf, node, node.mesh, p, mesh.primitives.size()), out);
         }
     }

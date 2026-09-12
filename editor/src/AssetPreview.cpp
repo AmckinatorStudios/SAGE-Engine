@@ -76,7 +76,29 @@ void AssetPreview::Init() {
     m_ready = m_sphere != nullptr;
 }
 
+// Кэш материалов моделей — НЕ функциональная статика.
+//
+// Материал держит текстуры, текстура — имя объекта OpenGL, а её деструктор
+// зовёт glDeleteTextures. Статика внутри функции умирает в самом конце, на
+// выходе из программы: контекста к этому моменту уже нет, и удаление уходит в
+// адрес, которого не существует. Редактор именно так и падал — молча, БЕЗ
+// отчёта о падении, потому что валился уже после main, при разборе глобальных
+// объектов. Снаружи это выглядело так: закрыл редактор с моделью в сцене —
+// «программа завершилась некорректно».
+//
+// Кэш живёт здесь, а чистит его Shutdown (см. ниже) — то есть пока контекст
+// ещё жив и удалять текстуры есть чем.
+namespace {
+std::unordered_map<std::string, std::vector<std::shared_ptr<Material>>>& ModelMaterialCache() {
+    static std::unordered_map<std::string, std::vector<std::shared_ptr<Material>>> cache;
+    return cache;
+}
+} // namespace
+
 void AssetPreview::Shutdown() {
+    // Первым делом — материалы моделей: в них текстуры, и отпустить их надо
+    // при живом контексте (см. ModelMaterialCache).
+    ModelMaterialCache().clear();
     m_fbo.reset();
     m_targets.clear();
     m_sphere.reset();
@@ -117,7 +139,8 @@ uint64_t AssetPreview::RenderMesh(const std::shared_ptr<Mesh>& mesh, int size,
 
 const std::vector<std::shared_ptr<Material>>& AssetPreview::MaterialsForModel(
     const std::string& path) {
-    static std::unordered_map<std::string, std::vector<std::shared_ptr<Material>>> cache;
+    std::unordered_map<std::string, std::vector<std::shared_ptr<Material>>>& cache =
+        ModelMaterialCache();
     auto it = cache.find(path);
     if (it != cache.end()) return it->second;
 
