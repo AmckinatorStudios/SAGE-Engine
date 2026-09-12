@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1390.
+// Язык: Русский. Строк: 1392.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -486,8 +486,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Верх облаков"},
     {"Clouds",
      "Облака"},
-    {"Code",
-     "Код"},
     {"Collapse",
      "Свернуть повторы"},
     {"Collapse the tools",
@@ -1040,6 +1038,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Клетка сетки"},
     {"Grid, bounds, UI layout",
      "Сетка, габариты, режим вёрстки"},
+    {"Grid: covers",
+     "Сеткой: обложки"},
     {"Ground",
      "Земля"},
     {"Ground (computed)",
@@ -1568,8 +1568,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Открыть сцену…"},
     {"Open console",
      "Открыть консоль"},
-    {"Open in editor",
-     "Открыть в редакторе"},
+    {"Open in the system editor",
+     "Открыть в системном редакторе"},
     {"Open project",
      "Открыть проект"},
     {"Open scene",
@@ -1978,6 +1978,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Строка"},
     {"Row 6:1",
      "Полоса 6:1"},
+    {"Rows: name and size",
+     "Строками: имя и размер"},
     {"Run",
      "Запуск"},
     {"Run the scene (it is restored on Stop)",
@@ -2418,6 +2420,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поддерево обрезается этим прямоугольником (списки, миникарты)"},
     {"The sun's disc, direction and colour are on the sun object — select it in the hierarchy.",
      "Диск солнца, его направление и цвет — на самом объекте-солнце: выберите его в иерархии."},
+    {"The system has no program for this file: ",
+     "Система не знает, чем открыть этот файл: "},
     {"The world of this project is built by scripts. Press Play to walk through the zones;\nin the stopped editor the scene holds only the world root and the player.",
      "Мир этого проекта собирают скрипты. Нажмите Play, чтобы пройтись по зонам;\nв остановленном редакторе в сцене лежат только корень мира и игрок."},
     {"Theme",

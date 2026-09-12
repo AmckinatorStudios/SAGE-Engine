@@ -336,8 +336,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 m_browseIsMesh = false;
                 m_browseIsMaterial = false;
             }
-            if (!sc->Path.empty() && EditorIcons::Button("code", T("Open in editor"))) {
-                host.OpenCodeFile(sc->Path);
+            if (!sc->Path.empty() && EditorIcons::Button("code", T("Open in the system editor"))) {
+                // Скрипт открывается тем, чем его открывает система: своего
+                // редактора кода у SAGE нет (см. EditorHost::OpenFileInSystemEditor).
+                if (!host.OpenFileInSystemEditor(sc->Path)) {
+                    host.SetStatusMessage(T("The system has no program for this file: ") + sc->Path);
+                }
             }
             ImGui::TextDisabled("%s", T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"));
             if (ImGui::Button(T("Remove Script"))) {

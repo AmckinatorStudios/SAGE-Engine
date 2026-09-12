@@ -13,6 +13,7 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "ProjectLauncher/ProjectDatabase.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -94,6 +95,15 @@ constexpr float kStatusBarHeight = 26.0f;
 // ============================================================================
 //  Сцена / проект
 // ============================================================================
+
+bool EditorLayer::OpenFileInSystemEditor(const fs::path& path) {
+    // Через ту же функцию, которой лаунчер показывает папку проекта: «открой
+    // это тем, чем открываешь обычно» — одна просьба к системе на оба случая.
+    // Свой редактор кода из SAGE убран (см. EditorHost::OpenFileInSystemEditor).
+    const bool ok = Sage::Launcher::OpenWithSystem(path);
+    if (!ok) LOG_WARN("Editor") << "Система не открыла файл: " << path.string();
+    return ok;
+}
 
 void EditorLayer::NewScene(ProjectTemplateKind content) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами

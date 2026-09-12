@@ -118,11 +118,6 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     // вперёд при входе в Play (GamePanel::RequestFocus).
     ImGui::DockBuilderDockWindow("Viewport", center);
     ImGui::DockBuilderDockWindow("Game", center);
-    // Код — третьей вкладкой рядом с Viewport и Game, а не отдельным плавающим
-    // окном. Правка скрипта и проверка результата — это одно занятие, и
-    // «редактор кода поверх сцены» заставлял таскать окно с места на место
-    // ровно так же, как раньше заставлял alt-tab во внешний редактор.
-    ImGui::DockBuilderDockWindow("Code", center);
     // Редактор интерфейса — вкладкой в центр, к вьюпорту и игре: это
     // такой же основной рабочий вид, только для другого предмета работы.
     ImGui::DockBuilderDockWindow("UIEditor", center);
@@ -311,7 +306,7 @@ void EditorLayer::DrawStatusBar(float height) {
 bool EditorLayer::AnyPanelVisible() const {
     return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUIEditor ||
            m_showViewport || m_showGame ||
-           m_showConsole || m_showAssets || m_showCode || m_showProfiler;
+           m_showConsole || m_showAssets || m_showProfiler;
 }
 
 void EditorLayer::ShowAllPanels() {
@@ -320,7 +315,6 @@ void EditorLayer::ShowAllPanels() {
     // не часть постоянной раскладки, и открывать её вместе со всем остальным
     // значит отдать ей место у человека, который сейчас собирает сцену.
     m_showViewport = m_showGame = m_showConsole = m_showAssets = true;
-    m_showCode = true;
     // Профайлер сюда НЕ входит: он служебный и по умолчанию закрыт, а «вернуть
     // панели» не должно означать «открыть то, чего человек не открывал».
 }
@@ -672,7 +666,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // окружающий свет, а сами источники света — на объектах сцены.
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
             ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
-            ImGui::MenuItem(T("Code"), nullptr, &PanelVisible(EditorPanel::Code));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
