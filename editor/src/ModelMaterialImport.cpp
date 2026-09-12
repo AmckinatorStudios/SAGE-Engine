@@ -7,7 +7,9 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
 #include "sage/render/Material.h"
+#include "sage/anim/ClipFile.h"
 #include "sage/render/ModelMaterial.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/scene/Components.h"
 
@@ -227,5 +229,70 @@ ModelMaterialImportResult SetEntityMesh(const Project& project, MeshRendererComp
     // импортировать нечего, а модель без загруженного меша не даёт разметки —
     // её материалы подберутся вместе с загрузкой.
     if (type != MeshRef::Type::Model || !mr.MeshPtr) return {};
+
+    // КЛИПЫ — ТОЖЕ ЗДЕСЬ И ПО ТОЙ ЖЕ ПРИЧИНЕ. Модель с анимацией, положенная в
+    // сцену, обязана принести свои клипы файлами, а не оставить человека жать
+    // отдельную кнопку. У модели без скелета клипов нет — вызов ничего не
+    // делает и ничего не стоит.
+    ImportModelClips(project, path);
+
     return ImportModelMaterials(project, mr);
+}
+
+// ============================================================================
+//  Клипы анимации в отдельные файлы
+// ============================================================================
+
+ClipImportResult ImportModelClips(const Project& project, const std::string& modelRef) {
+    ClipImportResult result;
+    if (modelRef.empty()) return result;
+
+    const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(modelRef);
+    std::error_code ec;
+    if (!fs::exists(modelPath, ec)) {
+        result.FirstWarning = "файл модели не найден: " + modelPath;
+        LOG_WARN("Анимация") << result.FirstWarning;
+        return result;
+    }
+
+    // Скелетная модель — через кэш: она же нужна и сцене, грузить второй раз
+    // незачем.
+    std::shared_ptr<sage::render::SkinnedModel> model =
+        ResourceManager::Instance().GetSkinnedModel(modelRef);
+    if (!model) {
+        // Не ошибка импорта: у модели может не быть скелета вовсе (декорация).
+        // Причину GetSkinnedModel уже написал в лог.
+        LOG_INFO("Анимация") << "В модели нет скелета: " << modelRef;
+        return result;
+    }
+
+    const std::vector<sage::anim::AnimationClip>& clips = model->Clips();
+    result.Found = (int)clips.size();
+    if (clips.empty()) {
+        LOG_INFO("Анимация") << "В модели нет клипов: " << modelRef;
+        return result;
+    }
+
+    const fs::path dir = fs::path(modelPath).parent_path();
+    const std::string stem = fs::path(modelPath).stem().string();
+    result.Refs.reserve(clips.size());
+
+    for (const sage::anim::AnimationClip& clip : clips) {
+        const fs::path file = dir / sage::anim::ClipFileName(stem, clip.Name);
+        result.Refs.push_back(project.AssetRef(file));
+        if (fs::exists(file, ec)) continue;     // правку руками не стираем
+        try {
+            sage::anim::SaveClip(sage::anim::ToAsset(clip, model->GetSkeleton()), file.string());
+            sage::AssetDatabase::Instance().Register(file.string(), "animation");
+            ++result.Created;
+        } catch (const std::exception& e) {
+            if (result.FirstWarning.empty()) result.FirstWarning = e.what();
+            LOG_ERROR("Анимация") << "Клип не записан (" << clip.Name << "): " << e.what();
+        }
+    }
+
+    LOG_INFO("Анимация") << "Клипы модели " << modelRef << ": в файле " << result.Found
+                         << ", записано " << result.Created
+                         << (result.Created == 0 && result.Found > 0 ? " (уже лежали рядом)" : "");
+    return result;
 }

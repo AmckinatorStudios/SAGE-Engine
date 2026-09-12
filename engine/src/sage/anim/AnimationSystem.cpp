@@ -7,6 +7,8 @@
 #include <exception>
 
 #include "sage/core/Log.h"
+#include "sage/anim/ClipFile.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/anim/IK.h"
 #include "sage/render/SkinnedModel.h"
@@ -38,10 +40,17 @@ static std::string SkinnedPathOf(Scene& scene, entt::entity e) {
     return mr->Ref.path;
 }
 
-// Ленивая инициализация: грузит скелетную модель по пути из Mesh (или строит
-// процедурный демо-щупалец, если модели нет вовсе), привязывает Animator к
-// скелету и запускает клип. Ошибка загрузки помечает компонент готовым без
-// модели — сущность просто не анимируется и не пытается грузиться каждый кадр.
+// Ленивая инициализация: грузит скелетную модель по пути из Mesh, привязывает
+// Animator к скелету и запускает клип. Ошибка загрузки помечает компонент
+// готовым без модели — сущность просто не анимируется и не пытается грузиться
+// каждый кадр.
+//
+// МОДЕЛИ НЕТ — НЕТ И АНИМАЦИИ. Раньше на этом месте строилось встроенное
+// демо-щупальце: компонент, добавленный к объекту без модели, показывал
+// шевелящийся отросток. Задумано это было как материал для примеров, а на деле
+// отвечало на вопрос «почему у меня не работает анимация» самым сбивающим с
+// толку способом из возможных — показывая чужую работающую анимацию вместо
+// объяснения. Теперь компонент молчит, а объясняет редактор: словами и по делу.
 static void EnsureReady(AnimationComponent& am, const std::string& path) {
     // Модель в Mesh сменили — переинициализируемся. Иначе клипы продолжали бы
     // играть по костям прежнего скелета, которых у новой модели нет.
@@ -49,21 +58,23 @@ static void EnsureReady(AnimationComponent& am, const std::string& path) {
         am.Ready = false;
         am.Model = nullptr;
         am.MorphWeights.clear();
+        am.OwnClips.clear();
+        am.ClipResolvedFrom.clear();
     }
     if (am.Ready) return;
     am.Ready = true;
     am.ResolvedFrom = path;
+    if (path.empty()) {
+        am.Model = nullptr;   // анимировать нечего — и это не ошибка, а состояние
+        return;
+    }
     try {
-        if (path.empty()) {
-            am.Model = sage::render::SkinnedModel::CreateDemoTentacle(am.DemoSegments);
-        } else {
-            // Через кэш: дюжина одинаковых NPC — это одна модель, а не дюжина.
-            am.Model = ResourceManager::Instance().GetSkinnedModel(path);
-            if (!am.Model) throw std::runtime_error("модель не загрузилась");
-        }
+        // Через кэш: дюжина одинаковых NPC — это одна модель, а не дюжина.
+        am.Model = ResourceManager::Instance().GetSkinnedModel(path);
+        if (!am.Model) throw std::runtime_error("модель не загрузилась");
     } catch (const std::exception& e) {
-        LOG_ERROR("Anim") << "Не удалось подготовить анимацию по модели '"
-                          << (path.empty() ? "<demo>" : path) << "': " << e.what();
+        LOG_ERROR("Anim") << "Не удалось подготовить анимацию по модели '" << path
+                          << "': " << e.what();
         am.Model = nullptr;
         return;
     }
@@ -79,6 +90,63 @@ static void EnsureReady(AnimationComponent& am, const std::string& path) {
     if (am.Model->Clips().empty()) return;      // нет клипов — остаётся bind-поза
     int clip = (am.Clip >= 0 && am.Clip < am.Model->Clips().size()) ? am.Clip : 0;
     am.Anim.Play(clip, am.Loop);
+    if (!am.Playing) am.Anim.Stop();
+}
+
+// Клип из ФАЙЛА (.sageanim) — то, чем компонент пользуется, когда клип вынут из
+// модели в отдельный ассет. Кости в файле адресованы именами, здесь они
+// ищутся в скелете ЭТОЙ модели: один и тот же клип играет на разных персонажах,
+// и номера костей у каждого свои.
+//
+// Делается после EnsureReady и только при смене пути: разбор файла с тысячами
+// ключей — не работа для каждого кадра.
+static void EnsureClipFile(AnimationComponent& am) {
+    if (!am.Model) return;
+    if (am.ClipPath.empty()) {
+        // Вернулись к клипам модели — снимаем свой и переподключаем аниматор.
+        if (!am.ClipResolvedFrom.empty()) {
+            am.ClipResolvedFrom.clear();
+            am.OwnClips.clear();
+            am.MissingBones = 0;
+            am.Anim.SetRig(&am.Model->GetSkeleton(), &am.Model->Clips());
+            if (!am.Model->Clips().empty()) {
+                const int clip =
+                    (am.Clip >= 0 && am.Clip < (int)am.Model->Clips().size()) ? am.Clip : 0;
+                am.Anim.Play(clip, am.Loop);
+                if (!am.Playing) am.Anim.Stop();
+            }
+        }
+        return;
+    }
+    if (am.ClipResolvedFrom == am.ClipPath) return;
+    am.ClipResolvedFrom = am.ClipPath;
+    am.OwnClips.clear();
+    am.MissingBones = 0;
+    try {
+        const sage::anim::ClipAsset asset =
+            sage::anim::LoadClip(sage::AssetDatabase::Instance().LocatePath(am.ClipPath));
+        int missing = 0;
+        sage::anim::AnimationClip bound = sage::anim::Bind(asset, am.Model->GetSkeleton(), &missing);
+        am.MissingBones = missing;
+        if (missing > 0) {
+            // Не отказ: клип от другого персонажа обычно частично подходит. Но
+            // «двигается половина скелета» человек сам не объяснит.
+            LOG_WARN("Anim") << "Клип '" << am.ClipPath << "': " << missing
+                             << " костей не нашлось в скелете модели " << am.ResolvedFrom;
+        }
+        am.OwnClips.push_back(std::move(bound));
+    } catch (const std::exception& e) {
+        LOG_ERROR("Anim") << "Клип не прочитан '" << am.ClipPath << "': " << e.what();
+        am.OwnClips.clear();
+    }
+    if (am.OwnClips.empty()) {
+        // Файл не прочитался — оставляем модельные клипы, чтобы объект не замер
+        // совсем; причина уже в логе, а редактор покажет её у слота.
+        am.Anim.SetRig(&am.Model->GetSkeleton(), &am.Model->Clips());
+        return;
+    }
+    am.Anim.SetRig(&am.Model->GetSkeleton(), &am.OwnClips);
+    am.Anim.Play(0, am.Loop);
     if (!am.Playing) am.Anim.Stop();
 }
 
@@ -249,6 +317,7 @@ void UpdateAnimators(Scene& scene, float dt) {
     for (auto e : view) {
         AnimationComponent& am = view.get<AnimationComponent>(e);
         EnsureReady(am, SkinnedPathOf(scene, e));
+        EnsureClipFile(am);
         if (!am.Model) continue;
         am.Anim.SetSpeed(am.Speed);
         // Смена Clip в компоненте (редактор/скрипт) -> плавный кросс-фейд к нему

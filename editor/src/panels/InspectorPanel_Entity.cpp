@@ -568,11 +568,13 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (hasModelRef) {
                 ImGui::TextDisabled("%s", T("Skeleton comes from the Mesh model"));
             } else {
-                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), "%s",
-                                   T("No model in Mesh — showing the built-in demo skeleton"));
-                if (ImGui::SliderInt(T("Demo Segments"), &am->DemoSegments, 2, 16)) {
-                    am->Ready = false; am->Model = nullptr; // пересобрать демо
-                }
+                // РАНЬШЕ ЗДЕСЬ ЗАВОДИЛОСЬ ДЕМО-ЩУПАЛЬЦЕ. Компонент, добавленный
+                // к объекту без модели, показывал шевелящийся отросток — то есть
+                // на вопрос «почему не работает моя анимация» отвечал чужой
+                // работающей анимацией. Теперь ответ словами и по делу.
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                                   T("No model in Mesh — there is nothing to animate"));
+                ImGui::TextDisabled("%s", T("Put a model with a skeleton into Mesh (.glb/.gltf/.fbx)."));
             }
             // Модель есть, а скелета в ней нет — это тот самый случай, который
             // ТЗ требует объяснять словами, а не молчанием.
@@ -582,9 +584,63 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             }
             if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
 
+            // --- КЛИП ФАЙЛОМ ---------------------------------------------
+            //
+            // Слот ассета, а не номер в списке: номер зависит от порядка клипов
+            // в модели и молча меняется при переэкспорте (см. AnimationComponent).
+            // Пустой слот — играем клип из самой модели, как раньше.
+            ImGui::TextUnformatted(T("Clip file"));
+            const assetslot::Result clipSlot =
+                assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath,
+                                &m_preview, T("Playing a clip from the model itself"));
+            if (clipSlot.Changed) {
+                host.PushUndoSnapshot();
+                am->ClipPath = clipSlot.Path;
+            }
+            if (clipSlot.BrowseRequested) {
+                FileBrowser::Config c;
+                c.Title = T("Choose an animation clip");
+                c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
+                c.FilterLabel = T("Animation");
+                c.StartDir = host.CurrentProject().AssetsDir();
+                m_browser.Open(c);
+                m_browseTarget = &am->ClipPath;
+                m_browseIsShader = false;
+                m_browseIsMesh = false;
+                m_browseIsMaterial = false;
+            }
+            if (!am->ClipPath.empty() && am->MissingBones > 0) {
+                // Клип от другого персонажа подходит частично — и молчать об
+                // этом нельзя: «двигается половина скелета» иначе не объяснить.
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
+                                   T("%d bones of the clip are missing from this skeleton"),
+                                   am->MissingBones);
+            }
+
+            // Вынуть клипы модели в файлы — то же действие, что импорт
+            // материалов, и в том же месте, где о них вспоминают.
+            if (hasModelRef && EditorIcons::Button("import", T("Extract clips to files"),
+                                                   T("Writes every clip of the model next to it\n"
+                                                     "as .sageanim. Existing files are kept."))) {
+                const ClipImportResult r = ImportModelClips(host.CurrentProject(), mesh->Ref.path);
+                if (r.Found == 0) {
+                    host.SetStatusMessage(T("The model has no animation clips"));
+                } else {
+                    host.SetStatusMessage(T("Clips: ") + std::to_string(r.Found) +
+                                          T(", files written: ") + std::to_string(r.Created));
+                    // Первый клип сразу назначаем: иначе человек нажал кнопку,
+                    // файлы появились, а объект не двинулся — и непонятно, что
+                    // ещё от него хотят.
+                    if (am->ClipPath.empty() && !r.Refs.empty()) {
+                        host.PushUndoSnapshot();
+                        am->ClipPath = r.Refs.front();
+                    }
+                }
+            }
+
             // Список клипов — из проигрывателя (модель уже загружена системой).
             int clipCount = am->Anim.ClipCount();
-            if (clipCount > 0) {
+            if (clipCount > 0 && am->ClipPath.empty()) {
                 if (am->Clip >= clipCount) am->Clip = 0;
                 std::string preview = am->Anim.ClipName(am->Clip);
                 if (ImGui::BeginCombo("Clip", preview.c_str())) {
@@ -604,7 +660,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 if (am->Anim.Fading())
                     ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), T("cross-fading %.0f%%"),
                                        am->Anim.FadeWeight() * 100.0f);
-            } else {
+            } else if (clipCount == 0) {
                 ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
             }
             ImGui::DragFloat(T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f); host.TrackLastImGuiItem();
@@ -974,8 +1030,18 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Animation", "Animation", "anim",
          "Plays clips on the skeleton of the Mesh model", HasComp<AnimationComponent>,
          AddComp<AnimationComponent>},
-        {"IK", "Animation", "ik",
-         "Bones reach for a target", HasComp<IKComponent>, AddComp<IKComponent>},
+        // IK В СПИСКЕ НЕТ — НАМЕРЕННО.
+        //
+        // Обратная кинематика нужна в считаных случаях (стопа на склоне, взгляд
+        // за целью, лекарство от скольжения ног) и требует знания имён костей.
+        // В списке «Добавить компонент» она стояла наравне с мешем и звуком, то
+        // есть предлагалась каждому — и добавлялась по ошибке, после чего ничем
+        // себя не проявляла: без настроенных целей IK не делает НИЧЕГО.
+        // Компонент, который нечем отличить от сломанного, из списка убран.
+        //
+        // Сам механизм на месте: секция IK в инспекторе рисуется у сущности,
+        // которая его уже имеет, работает Lua-API, IK переживает сохранение и
+        // префабы. Добавляется он скриптом — тем, кто знает, зачем.
 
         // Скрипт добавляется ПУСТЫМ. Раньше сюда подставлялся путь
         // «assets/scripts/spin.lua» — демонстрационный скрипт движка, которого

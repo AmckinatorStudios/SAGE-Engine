@@ -70,6 +70,11 @@ add_executable(SageEditor WIN32
 # imguizmo — 3D-гизмо во вьюпорте; nlohmann_json — файлы проектов (.sageproj).
 target_link_libraries(SageEditor PRIVATE sage::engine imgui imguizmo nlohmann_json::nlohmann_json)
 target_include_directories(SageEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# Скелетная модель для САМОПРОВЕРКИ: извлечение клипов анимации проверяется на
+# настоящем .glb со скелетом и клипами, а не на синтетике. Путь абсолютный —
+# самопроверку запускают из build/editor.
+target_compile_definitions(SageEditor PRIVATE
+    SAGE_TEST_MODEL="${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/test_model.glb")
 
 # ImGui хранит своё состояние (GImGui) в статической глобальной переменной.
 # Плагины (.so) НЕ линкуют libimgui.a сами (см. sage_add_editor_plugin) —
