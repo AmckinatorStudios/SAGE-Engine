@@ -93,6 +93,23 @@ private:
     enum class Hit { None, Selected, EnterDir, Confirm };
     Hit DrawEntryCommon(int index, const Entry& entry, bool doubleClicked);
 
+    // Чем кончилась попытка показать обложку. Ответ нужен именно такой, а не
+    // «нарисовали или нет»: «ещё читается» и «не открылась» — разные вещи для
+    // человека, и рисовать их одинаково значит врать. Пустая площадка читается
+    // как «файл битый», крутилка — как «подожди», а значок с восклицательным
+    // знаком честно говорит «эта картинка не открылась» и объясняет почему.
+    enum class Cover { None, Loading, Drawn, Failed };
+    // Координаты — числами, а не ImVec2: заголовок не тянет за собой imgui.h
+    // ради двух float, и панели, которым нужен только FileBrowser, не начинают
+    // зависеть от версии ImGui.
+    Cover DrawCover(const std::filesystem::path& full, bool isDir, float x0, float y0, float x1,
+                    float y1, float rounding);
+
+    // Крупное превью под курсором: сама картинка во много раз больше плитки,
+    // размеры, вес и тип. Плитка отвечает на «который из них», превью — на «то
+    // ли это, что мне нужно», и второй вопрос по плитке 80x80 не решается.
+    void DrawHoverPreview(const std::filesystem::path& full, const Entry& entry);
+
     Config m_cfg;
     bool m_open = false;
     bool m_needsOpen = false;   // отложенный OpenPopup: звать его можно только в кадре

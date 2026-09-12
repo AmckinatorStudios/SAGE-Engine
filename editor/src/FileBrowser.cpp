@@ -7,6 +7,7 @@
 #include "AssetSlot.h"
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
+#include "Thumbnails.h"
 #include "sage/core/Paths.h"
 #include "imgui.h"
 #include "Localization.h"
@@ -87,6 +88,37 @@ void DrawChecker(ImDrawList* dl, const ImVec2& a, const ImVec2& b) {
     dl->PopClipRect();
 }
 
+// Прямоугольник, в который картинка w:h вписана внутрь площадки a..b по центру.
+//
+// ЗАЧЕМ. Раньше обложка растягивалась на всю площадку, и это не мелкая
+// небрежность: панорама 4096x1024 показывалась КВАДРАТОМ, тайл-лист 1:4 —
+// квадратом, скриншот 16:9 — квадратом. Обложку смотрят затем, чтобы узнать
+// свой файл, а растянутая картинка перестаёт быть похожей на себя — то есть
+// делает ровно обратное тому, ради чего нарисована.
+struct FitRect {
+    ImVec2 A, B;
+};
+FitRect Fit(const ImVec2& a, const ImVec2& b, int w, int h) {
+    const float boxW = b.x - a.x;
+    const float boxH = b.y - a.y;
+    if (w <= 0 || h <= 0 || boxW <= 0.0f || boxH <= 0.0f) return {a, b};
+    const float k = std::min(boxW / (float)w, boxH / (float)h);
+    const float iw = std::max(1.0f, (float)w * k);
+    const float ih = std::max(1.0f, (float)h * k);
+    const ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    return {ImVec2(c.x - iw * 0.5f, c.y - ih * 0.5f), ImVec2(c.x + iw * 0.5f, c.y + ih * 0.5f)};
+}
+
+// Крутилка на месте ещё не прочитанной обложки. Пустая площадка означала бы
+// «здесь ничего нет», а её тут просто ещё нет — разница важная: в первом случае
+// человек идёт искать другой файл, во втором ждёт полсекунды.
+void DrawSpinner(ImDrawList* dl, const ImVec2& center, float radius, ImU32 color) {
+    const float t = (float)ImGui::GetTime() * 3.2f;
+    dl->PathClear();
+    dl->PathArcTo(center, radius, t, t + 4.2f, 20);
+    dl->PathStroke(color, 0, 2.0f);
+}
+
 } // namespace
 
 // Один ответ на щелчок для обоих видов. Раньше такого разбора не было вовсе —
@@ -101,6 +133,117 @@ FileBrowser::Hit FileBrowser::DrawEntryCommon(int index, const Entry& entry, boo
     if (m_cfg.Mode == PickMode::PickFolder) return Hit::Selected;
     m_result = m_dir / entry.Name;
     return Hit::Confirm;
+}
+
+// Обложка файла в заданной площадке. Одна на оба вида: строка рисует её 18
+// пикселями, плитка — восемьюдесятью, и разойтись в том, что считается
+// обложкой, они не могут.
+FileBrowser::Cover FileBrowser::DrawCover(const fs::path& full, bool isDir, float x0, float y0,
+                                          float x1, float y1, float rounding) {
+    if (isDir) return Cover::None;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 a(x0, y0), b(x1, y1);
+
+    // Картинки идут через свой кэш обложек: уменьшенными, с мипмапами и в
+    // фоновом потоке. Почему не через ResourceManager — в Thumbnails.h.
+    if (thumbs::IsImage(full)) {
+        const thumbs::Thumb t = thumbs::Get(full, thumbs::Size::Tile);
+        if (t.Id) {
+            const FitRect r = Fit(a, b, t.W, t.H);
+            DrawChecker(dl, r.A, r.B);
+            const float rr = std::min(rounding, std::min(r.B.x - r.A.x, r.B.y - r.A.y) * 0.5f);
+            dl->AddImageRounded((ImTextureID)(std::intptr_t)t.Id, r.A, r.B, ImVec2(0, 1),
+                                ImVec2(1, 0), IM_COL32_WHITE, rr);
+            return Cover::Drawn;
+        }
+        if (t.Failed) return Cover::Failed;
+        DrawSpinner(dl, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f),
+                    std::min(b.x - a.x, b.y - a.y) * 0.22f,
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled));
+        return Cover::Loading;
+    }
+
+    // Модель, материал, префаб — их обложку надо РИСОВАТЬ, и делает это общий
+    // кэш редактора: не больше одной съёмки за кадр, результат помнится.
+    const uint64_t cover = assetslot::Cover(m_preview, full, (int)kCoverH);
+    if (!cover) return Cover::None;
+    dl->AddImageRounded((ImTextureID)(std::intptr_t)cover, a, b, ImVec2(0, 1), ImVec2(1, 0),
+                        IM_COL32_WHITE, rounding);
+    return Cover::Drawn;
+}
+
+// Превью под курсором.
+//
+// ЗАЧЕМ. Плитка 80x80 отвечает на вопрос «который из этих файлов», и на этом её
+// возможности кончаются. «Та ли это картинка», «что на ней написано», «какого
+// она размера», «почему она весит сорок мегабайт» — по плитке не видно ничего,
+// и до сих пор ответ добывался открыванием файла. Превью показывает ту же
+// картинку в шесть-семь раз крупнее и подписывает то, что по ней не прочитать:
+// размеры в пикселях, вес, тип.
+void FileBrowser::DrawHoverPreview(const fs::path& full, const Entry& entry) {
+    if (!ImGui::BeginTooltip()) return;
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    // Больше половины окна превью быть не должно: оно всплывает под курсором и,
+    // разросшись, закрывает собой тот самый список, по которому человек ведёт
+    // мышь.
+    const float maxW = std::min(560.0f, vp->Size.x * 0.42f);
+    const float maxH = std::min(560.0f, vp->Size.y * 0.55f);
+
+    bool drew = false;
+    if (!entry.IsDir && thumbs::IsImage(full)) {
+        // Крупную обложку просим отдельно, а мелкую показываем, ПОКА крупная
+        // читается: пустота под курсором выглядит как «редактор задумался», а
+        // растянутая мелкая — как «сейчас станет резче», и это правда.
+        thumbs::Thumb t = thumbs::Get(full, thumbs::Size::Large);
+        if (!t.Id) {
+            const thumbs::Thumb small = thumbs::Get(full, thumbs::Size::Tile);
+            if (small.Id) t = small;
+        }
+        if (t.Id && t.W > 0 && t.H > 0) {
+            // Маленькую картинку НЕ РАСТЯГИВАЕМ до размеров превью: спрайт 32x32,
+            // раздутый до полуэкрана, показывает не спрайт, а свои пиксели.
+            // Увеличиваем не больше чем вчетверо.
+            const float k = std::min({maxW / (float)t.W, maxH / (float)t.H, 4.0f});
+            const ImVec2 size(std::max(16.0f, (float)t.W * k), std::max(16.0f, (float)t.H * k));
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            DrawChecker(ImGui::GetWindowDrawList(), p, ImVec2(p.x + size.x, p.y + size.y));
+            ImGui::Image((ImTextureID)(std::intptr_t)t.Id, size, ImVec2(0, 1), ImVec2(1, 0));
+            drew = true;
+        } else if (t.Failed) {
+            ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.4f, 1.0f), "%s", t.Error.c_str());
+            drew = true;
+        } else {
+            ImGui::TextDisabled("%s", T("Reading..."));
+            drew = true;
+        }
+    } else if (!entry.IsDir) {
+        const uint64_t cover = assetslot::Cover(m_preview, full, 192);
+        if (cover) {
+            const float side = std::min(maxW, maxH) * 0.6f;
+            ImGui::Image((ImTextureID)(std::intptr_t)cover, ImVec2(side, side), ImVec2(0, 1),
+                         ImVec2(1, 0));
+            drew = true;
+        }
+    }
+
+    if (drew) ImGui::Spacing();
+    ImGui::PushTextWrapPos(maxW);
+    ImGui::TextUnformatted(entry.Name.c_str());
+    ImGui::PopTextWrapPos();
+
+    if (entry.IsDir) {
+        ImGui::TextDisabled("%s", T("Folder"));
+    } else {
+        const thumbs::Thumb t = thumbs::IsImage(full) ? thumbs::Get(full, thumbs::Size::Tile)
+                                                      : thumbs::Thumb{};
+        if (t.W > 0 && t.H > 0) {
+            ImGui::TextDisabled(T("%d x %d, %s"), t.W, t.H, HumanSize(entry.Size).c_str());
+        } else {
+            ImGui::TextDisabled("%s", HumanSize(entry.Size).c_str());
+        }
+    }
+    ImGui::EndTooltip();
 }
 
 void FileBrowser::Open(const Config& config) {
@@ -289,17 +432,13 @@ bool FileBrowser::DrawList() {
 
         ImGui::PushID(i);
         const fs::path full = m_dir / e.Name;
-        const uint64_t cover = e.IsDir ? 0 : assetslot::Cover(m_preview, full, (int)kCoverH);
-        if (cover) {
-            const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            const ImVec2 p1(p0.x + icon, p0.y + icon);
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            DrawChecker(dl, p0, p1);
-            dl->AddImageRounded((ImTextureID)(std::intptr_t)cover, p0, p1, ImVec2(0, 1),
-                                ImVec2(1, 0), IM_COL32_WHITE, 3.0f);
-            ImGui::Dummy(ImVec2(icon, icon));
+        const ImVec2 ip0 = ImGui::GetCursorScreenPos();
+        const Cover cover =
+            DrawCover(full, e.IsDir, ip0.x, ip0.y, ip0.x + icon, ip0.y + icon, 3.0f);
+        if (cover == Cover::None || cover == Cover::Failed) {
+            EditorIcons::Inline(cover == Cover::Failed ? "warn" : IconFor(e.Name, e.IsDir));
         } else {
-            EditorIcons::Inline(IconFor(e.Name, e.IsDir));
+            ImGui::Dummy(ImVec2(icon, icon));
         }
         ImGui::SameLine();
         if (ImGui::Selectable(e.Name.c_str(), i == m_selected,
@@ -312,6 +451,10 @@ bool FileBrowser::DrawList() {
             }
             if (hit == Hit::Confirm) confirmed = true;
         }
+        // Превью и в строках тоже: вид выбирают по привычке, а не по тому, нужно
+        // ли сейчас разглядеть картинку, и лишать строки превью значит заставлять
+        // человека переключать вид ради одного взгляда.
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) DrawHoverPreview(full, e);
         if (!e.IsDir) {
             ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70.0f);
             ImGui::TextDisabled("%s", HumanSize(e.Size).c_str());
@@ -351,7 +494,6 @@ bool FileBrowser::DrawGrid() {
         const bool hovered = ImGui::IsItemHovered();
         const bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
         const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
-        if (hovered) ImGui::SetTooltip("%s", e.Name.c_str());
 
         ImU32 bg = ImGui::GetColorU32(ImVec4(1, 1, 1, 0.035f));
         if (i == m_selected) bg = ImGui::GetColorU32(ImGuiCol_Header);
@@ -362,19 +504,19 @@ bool FileBrowser::DrawGrid() {
         const ImVec2 c1(p1.x - 4.0f, p0.y + kCoverH);
         dl->AddRectFilled(c0, c1, ImGui::GetColorU32(ImVec4(0, 0, 0, 0.28f)), 5.0f);
 
-        const uint64_t cover = e.IsDir ? 0 : assetslot::Cover(m_preview, full, (int)kCoverH);
-        if (cover) {
-            DrawChecker(dl, c0, c1);
-            dl->AddImageRounded((ImTextureID)(std::intptr_t)cover, c0, c1, ImVec2(0, 1),
-                                ImVec2(1, 0), IM_COL32_WHITE, 5.0f);
-        } else {
+        const Cover cover = DrawCover(full, e.IsDir, c0.x, c0.y, c1.x, c1.y, 5.0f);
+        if (cover == Cover::None || cover == Cover::Failed) {
             // Обложки нет (папка, звук, текст, ещё не снятая модель) — значок
             // типа во всю площадку. Пустая площадка читалась бы как «файл битый».
+            // А вот если картинка ИМЕННО ЧТО не открылась — значок «внимание»:
+            // это разные вещи, и одинаковым значком они были бы неразличимы.
             const float glyph = 34.0f;
+            const bool failed = cover == Cover::Failed;
             EditorIcons::Overlay(c0.x + (c1.x - c0.x - glyph) * 0.5f,
                                  c0.y + (c1.y - c0.y - glyph) * 0.5f, glyph,
-                                 e.IsDir ? "folder" : IconFor(e.Name, e.IsDir),
-                                 glm::vec3(0.72f, 0.74f, 0.78f));
+                                 failed ? "warn" : (e.IsDir ? "folder" : IconFor(e.Name, e.IsDir)),
+                                 failed ? glm::vec3(0.95f, 0.62f, 0.38f)
+                                        : glm::vec3(0.72f, 0.74f, 0.78f));
         }
 
         // Имя обрезается многоточием: под плиткой одна строка, и длинное имя
@@ -383,6 +525,10 @@ bool FileBrowser::DrawGrid() {
         const ImVec2 size = ImGui::CalcTextSize(label.c_str());
         dl->AddText(ImVec2(p0.x + (kTileW - size.x) * 0.5f, p0.y + kCoverH + 4.0f),
                     ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+
+        // Превью — ПОСЛЕ плитки: оно уходит в своё окно, и открывать его раньше,
+        // чем дорисована сама плитка, значит перемешивать два списка отрисовки.
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) DrawHoverPreview(full, e);
 
         if (clicked || doubleClicked) {
             const Hit hit = DrawEntryCommon(i, e, doubleClicked);
