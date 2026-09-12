@@ -59,5 +59,17 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
 // Тот же самый ref (переимпорт модели после правки .sageimport) слоты
 // СОХРАНЯЕТ: модель та же, части те же, и стирать назначенные материалы не за
 // что.
-void SetEntityMesh(MeshRendererComponent& mr, MeshRef::Type type, const std::string& path,
-                   std::shared_ptr<Mesh> mesh);
+//
+// МАТЕРИАЛЫ НАЗНАЧАЮТСЯ ЗДЕСЬ ЖЕ, а не у каждого, кто ставит меш. Это уже
+// дважды расходилось: сперва импорт звали три пути из четырёх, потом четыре из
+// пяти, и каждый раз модель приезжала белой ровно у того жеста, про который
+// забыли. Правило «поставил меш — не забудь импортировать материалы» не
+// удержалось ни разу, поэтому его больше нет: импорт делает сама функция,
+// ставящая меш, и забыть его нельзя.
+//
+// Импорт идёт, только когда меш УЖЕ загружен (по нему берётся разметка частей).
+// Инспектор ставит модель с mesh == nullptr и грузит её следующим шагом — там
+// импорт случится вместе с загрузкой.
+ModelMaterialImportResult SetEntityMesh(const Project& project, MeshRendererComponent& mr,
+                                        MeshRef::Type type, const std::string& path,
+                                        std::shared_ptr<Mesh> mesh);

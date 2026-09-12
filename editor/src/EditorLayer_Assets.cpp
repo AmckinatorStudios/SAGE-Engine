@@ -226,13 +226,8 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         }
         PushUndoSnapshot();
         MeshRendererComponent& mr = obj.Renderer();
-        SetEntityMesh(mr, MeshRef::Type::Model, ref, std::move(mesh));
-        // МАТЕРИАЛ — ТОЖЕ ЗДЕСЬ. Этот путь (бросить модель НА существующий
-        // объект) единственный из четырёх остался без импорта материалов, хотя
-        // комментарий ниже утверждал, что закрыты все. Меш подменялся, слоты
-        // при этом сбрасывались вместе со старой моделью — и объект оставался
-        // белым, сколько бы раз его ни перетаскивали.
-        AssignModelMaterial(mr);
+        ReportModelMaterials(SetEntityMesh(m_project, mr, MeshRef::Type::Model, ref,
+                                           std::move(mesh)));
         SetStatusMessage(T("Mesh replaced: ") + asset.filename().string());
         return true;
     }
@@ -250,8 +245,7 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
 // не назначали вовсе, и модель с текстурами вставала белой болванкой. Один и тот
 // же ассет выглядел по-разному в зависимости от того, каким жестом его принесли,
 // и «текстуры не работают» было честным выводом из увиденного.
-void EditorLayer::AssignModelMaterial(MeshRendererComponent& mr) {
-    const ModelMaterialImportResult r = ImportModelMaterials(m_project, mr);
+void EditorLayer::ReportModelMaterials(const ModelMaterialImportResult& r) {
     // РЕЗУЛЬТАТ НЕ ВЫБРАСЫВАЕМ. Раньше он именно выбрасывался, и модель,
     // приехавшая белой, не оставляла после себя ни строки состояния, ни записи
     // в логе — «не работает» приходилось проверять глазами по кадру.
@@ -286,8 +280,8 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         PushUndoSnapshot();
         GameObject obj = m_scene->CreateObject(asset.stem().string());
         MeshRendererComponent& mr = obj.Renderer();
-        SetEntityMesh(mr, MeshRef::Type::Model, ref, std::move(mesh));
-        AssignModelMaterial(mr);
+        ReportModelMaterials(SetEntityMesh(m_project, mr, MeshRef::Type::Model, ref,
+                                           std::move(mesh)));
         newId = obj.Id();
     } else {
         return false;
@@ -374,7 +368,8 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     } else {
         GameObject obj = m_scene->CreateObject(asset.stem().string());
         MeshRendererComponent& mr = obj.Renderer();
-        SetEntityMesh(mr, MeshRef::Type::Model, ref, ResourceManager::Instance().GetModel(ref));
+        ReportModelMaterials(SetEntityMesh(m_project, mr, MeshRef::Type::Model, ref,
+                                           ResourceManager::Instance().GetModel(ref)));
         if (!mr.MeshPtr) {
             m_scene->RemoveObject(obj.Id());
             SetStatusMessage(T("The model failed to load: ") + asset.filename().string() +

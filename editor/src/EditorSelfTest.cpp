@@ -2382,6 +2382,10 @@ bool EditorLayer::SelfTestTools() {
         // заполниться «первым попавшимся» и проверка этого не заметила бы.
         WriteSelfTestPng(pack / "textures" / "soil.png", 200, 120, 60);
         WriteSelfTestPng(pack / "textures" / "water.png", 40, 90, 200);
+        // Карта нормалей и упакованная ORM: без них проверка сказала бы только
+        // про albedo, а жалоба была ровно в том, что остальные карты не едут.
+        WriteSelfTestPng(pack / "textures" / "soil_n.png", 128, 128, 255);
+        WriteSelfTestPng(pack / "textures" / "soil_orm.png", 40, 160, 220);
         {
             std::ofstream f(pack / "geom.bin", std::ios::binary);
             const float verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
@@ -2413,11 +2417,16 @@ bool EditorLayer::SelfTestTools() {
     {"buffer": 0, "byteOffset": 36, "byteLength": 6}
   ],
   "buffers": [{"byteLength": 42, "uri": "geom.bin"}],
-  "images": [{"uri": "textures/soil.png"}, {"uri": "textures/water.png"}],
-  "textures": [{"source": 0}, {"source": 1}],
+  "images": [{"uri": "textures/soil.png"}, {"uri": "textures/water.png"},
+             {"uri": "textures/soil_n.png"}, {"uri": "textures/soil_orm.png"}],
+  "textures": [{"source": 0}, {"source": 1}, {"source": 2}, {"source": 3}],
   "materials": [
-    {"name": "Soil_texture", "pbrMetallicRoughness": {
-        "baseColorFactor": [1, 1, 1, 1], "baseColorTexture": {"index": 0}}},
+    {"name": "Soil_texture",
+     "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1],
+                              "baseColorTexture": {"index": 0},
+                              "metallicRoughnessTexture": {"index": 3}},
+     "normalTexture": {"index": 2},
+     "occlusionTexture": {"index": 3}},
     {"name": "Water_texture", "pbrMetallicRoughness": {
         "baseColorFactor": [1, 1, 1, 1], "baseColorTexture": {"index": 1}}}
   ]
@@ -2456,6 +2465,30 @@ bool EditorLayer::SelfTestTools() {
                         break;
                     }
                 }
+                // НЕ ТОЛЬКО ALBEDO. У первой части в файле заданы карта
+                // нормалей и упакованная ORM — значит в материале обязаны
+                // оказаться и нормали, и металличность, и шероховатость, и
+                // затенение. Жалоба звучала именно так: «загружается только
+                // albedo, остальные не работают».
+                if (ok) {
+                    const Material& first = *pmr.Slots[0].Ptr;
+                    struct Map { const char* Name; const std::string& Path;
+                                 const std::shared_ptr<Texture>& Tex; };
+                    const Map maps[] = {{"normal", first.NormalMapPath, first.NormalTex},
+                                        {"metallic", first.MetallicMapPath, first.MetallicTex},
+                                        {"roughness", first.RoughnessMapPath, first.RoughnessTex},
+                                        {"AO", first.AOMapPath, first.AOTex}};
+                    for (const Map& m : maps) {
+                        if (m.Path.empty() || !m.Tex) {
+                            LOG_ERROR("Editor") << "SELFTEST: карта " << m.Name
+                                                << " не приехала из модели (путь "
+                                                << (m.Path.empty() ? "пуст" : "есть")
+                                                << ", текстура "
+                                                << (m.Tex ? "есть" : "нет") << ")";
+                            ok = false;
+                        }
+                    }
+                }
                 // Разные части — разные материалы: один на всё это ровно та
                 // болячка, ради которой заводились слоты.
                 if (ok && pmr.Slots[0].Path == pmr.Slots[1].Path) {
@@ -2488,6 +2521,33 @@ bool EditorLayer::SelfTestTools() {
                 }
             }
             m_scene->RemoveObject(hostId);
+        }
+
+        // ТРЕТИЙ ЖЕСТ: бросок ВО ВЬЮПОРТ. Он ставит модель в точку под курсором
+        // и был ПЯТЫМ путём, который импорт материалов не звал: сначала забыли
+        // три из четырёх, потом один из пяти. Поэтому импорт переехал внутрь
+        // SetEntityMesh — забыть его больше нельзя, — а проверка держит все
+        // жесты разом.
+        if (ok) {
+            const size_t was = m_scene->Count();
+            const glm::mat4 dropView = m_camera.GetViewMatrix();
+            const glm::mat4 dropProj =
+                glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
+            if (!DropAssetAtViewport(dropView, dropProj, 0.5f, 0.5f, pack / "scene.gltf") ||
+                m_scene->Count() != was + 1) {
+                LOG_ERROR("Editor") << "SELFTEST: модель не встала во вьюпорт";
+                ok = false;
+            } else {
+                MeshRendererComponent& vmr = m_scene->Get(m_selectedId).Renderer();
+                if (vmr.Slots.size() != 2 || vmr.Slots[0].Path.empty() ||
+                    vmr.Slots[1].Path.empty()) {
+                    LOG_ERROR("Editor")
+                        << "SELFTEST: брошенная во вьюпорт модель осталась без материалов (слотов "
+                        << vmr.Slots.size() << ")";
+                    ok = false;
+                }
+                m_scene->RemoveObject(m_selectedId);
+            }
         }
         SetSelectedId(-1);
         m_selection.clear();
