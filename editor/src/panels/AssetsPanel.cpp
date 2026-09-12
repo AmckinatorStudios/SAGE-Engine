@@ -50,7 +50,7 @@ std::string ToLower(std::string s) {
 }
 
 AssetStyle StyleForPath(const fs::path& path, bool isDir) {
-    if (isDir) return { ImVec4(0.85f, 0.68f, 0.32f, 1.0f), "", "folder" };
+    if (isDir) return { ImVec4(0.85f, 0.68f, 0.32f, 1.0f), "", AssetsPanel::FolderIcon(path) };
     std::string ext = ToLower(path.extension().string());
     if (ext == ".sage") return { ImVec4(0.45f, 0.62f, 0.95f, 1.0f), "scene", "scene" };
     if (ext == ".sageprefab") return { ImVec4(0.55f, 0.70f, 1.00f, 1.0f), "prefab", "prefab" };
@@ -348,7 +348,10 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.
     // Путь передаётся строкой с завершающим нулём — принимающая сторона получает
     // ровно то, что открыла бы сама.
-    if (!isDir && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+    // Папка перетаскивается тоже: в слот типа «папка» (небо-кубмап) её иначе
+    // было бы нечем назначить, кроме как набрать путь руками, — а это ровно то,
+    // от чего слоты и избавляют (см. AssetSlot.h).
+    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
         // Полезная нагрузка и карточка под курсором — общие для всего
         // редактора (см. AssetSlot.h): и панель, и слоты компонентов начинают
         // перетаскивание одинаково, поэтому и принимающая сторона у них одна.
@@ -535,6 +538,19 @@ void RegisterInDatabase(const fs::path& file) {
 // ассета — по нему ссылки в сценах остаются целыми) и .sageimport (настройки
 // импорта модели): оставить их на старом месте значило бы, что переехавшая
 // модель потеряла и свой GUID, и свой масштаб.
+const char* AssetsPanel::FolderIcon(const fs::path& dir) {
+    std::error_code ec;
+    fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
+    if (ec) return "folder"; // нечитаемая папка — пусть выглядит пустой, а не полной
+    // Сайдкары .meta не в счёт: это служебная запись движка на каждый файл, и
+    // без своего файла она не остаётся. Сам файл здесь же и папку заполняет.
+    for (const fs::directory_entry& e : it) {
+        if (!e.is_directory(ec) && e.path().extension() == ".meta") continue;
+        return "folder-full";
+    }
+    return "folder";
+}
+
 void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const fs::path& folder) {
     std::error_code ec;
     if (!fs::exists(source, ec) || fs::is_directory(source, ec)) return;

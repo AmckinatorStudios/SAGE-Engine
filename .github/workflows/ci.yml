@@ -37,6 +37,12 @@ jobs:
       - name: Paths check (no filesystem path taken from getenv)
         run: python3 scripts/check_paths.py
 
+      # Ассеты выбираются слотом, а не набираются путём в поле ввода. Поле с
+      # путём не показывает выбранное, не проверяет тип, молчит о пропавшем
+      # файле и не принимает перетаскивание — см. editor/src/AssetSlot.h.
+      - name: Asset slot check (no asset path typed into a text field)
+        run: python3 scripts/check_asset_slots.py
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

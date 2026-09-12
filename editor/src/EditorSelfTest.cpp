@@ -13,6 +13,8 @@
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
 #include "EditorIcons.h"
+#include "AssetSlot.h"
+#include "panels/AssetsPanel.h"
 
 #include "sage/ecs/DecalSystem.h"
 
@@ -124,7 +126,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + model-pack + anim-clips + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + model-pack + anim-clips + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
@@ -2068,6 +2070,87 @@ bool EditorLayer::SelfTestSelection() {
                 ok = false;
             }
         }
+    }
+
+    // --- Папка: ПУСТАЯ и НЕПУСТАЯ выглядят по-разному -------------------------
+    //
+    // Значок один на все каталоги означал, что «где мои модели» решается только
+    // заходом внутрь. Отказ здесь беззвучный ровно так же, как у иконок: панель
+    // продолжает работать, просто перестаёт что-либо сообщать.
+    if (ok) {
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path(ec) / "sage_selftest_folder_state";
+        fs::remove_all(root, ec);
+        const fs::path empty = root / "empty";
+        const fs::path full = root / "full";
+        const fs::path onlyMeta = root / "only_meta";
+        fs::create_directories(empty, ec);
+        fs::create_directories(full, ec);
+        fs::create_directories(onlyMeta, ec);
+        { std::ofstream(full / "thing.sagemat") << "{}"; }
+        // Сайдкар .meta без своего файла — служебная запись, а не содержимое:
+        // папка с одним только .meta для человека пустая.
+        { std::ofstream(onlyMeta / "thing.sagemat.meta") << "{}"; }
+
+        auto icon = [](const fs::path& p) { return std::string(AssetsPanel::FolderIcon(p)); };
+        if (icon(empty) != "folder") {
+            LOG_ERROR("Editor") << "SELFTEST: empty folder got icon '" << icon(empty) << "'";
+            ok = false;
+        }
+        if (ok && icon(full) != "folder-full") {
+            LOG_ERROR("Editor") << "SELFTEST: folder with a file got icon '" << icon(full) << "'";
+            ok = false;
+        }
+        if (ok && icon(onlyMeta) != "folder") {
+            LOG_ERROR("Editor") << "SELFTEST: folder with only .meta got icon '"
+                                << icon(onlyMeta) << "'";
+            ok = false;
+        }
+        // И оба значка обязаны быть в шрифте: имя без глифа рисуется заглушкой,
+        // и разница между пустой и полной папкой пропадает снова.
+        if (ok && (!EditorIcons::HasGlyph("folder") || !EditorIcons::HasGlyph("folder-full"))) {
+            LOG_ERROR("Editor") << "SELFTEST: folder icons have no glyphs";
+            ok = false;
+        }
+        fs::remove_all(root, ec);
+    }
+
+    // --- Слот ассета берёт ПАПКУ, а не только файл ----------------------------
+    //
+    // Папка кубической карты неба — единственный ассет-каталог в редакторе, и
+    // до появления типа Folder её путь набирали руками. Слот, который не узнаёт
+    // в каталоге каталог, отказал бы от броска молча — ровно так же, как раньше
+    // молчало поле ввода.
+    if (ok) {
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path(ec) / "sage_selftest_folder_slot";
+        fs::remove_all(root, ec);
+        fs::create_directories(root, ec);
+        { std::ofstream(root / "px.png") << "x"; }
+
+        if (assetslot::KindOf(root) != assetslot::Kind::Folder) {
+            LOG_ERROR("Editor") << "SELFTEST: a directory is not recognised as a folder asset";
+            ok = false;
+        }
+        if (ok && !assetslot::Accepts(assetslot::Kind::Folder, root)) {
+            LOG_ERROR("Editor") << "SELFTEST: folder slot refuses a directory";
+            ok = false;
+        }
+        // И наоборот: в слот папки нельзя бросить файл, а в слот текстуры —
+        // папку. Слот, берущий всё подряд, не лучше поля ввода.
+        if (ok && assetslot::Accepts(assetslot::Kind::Folder, root / "px.png")) {
+            LOG_ERROR("Editor") << "SELFTEST: folder slot accepts a file";
+            ok = false;
+        }
+        if (ok && assetslot::Accepts(assetslot::Kind::Texture, root)) {
+            LOG_ERROR("Editor") << "SELFTEST: texture slot accepts a directory";
+            ok = false;
+        }
+        if (ok && assetslot::KindOf("shaders/water.frag") != assetslot::Kind::Shader) {
+            LOG_ERROR("Editor") << "SELFTEST: .frag is not recognised as a shader asset";
+            ok = false;
+        }
+        fs::remove_all(root, ec);
     }
 
     // --- Звук живёт в режиме ПРАВКИ, а не только в игре ------------------------

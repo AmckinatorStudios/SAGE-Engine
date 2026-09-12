@@ -367,11 +367,26 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
 
     SpawnPhysicsProps(scene, {-6.5f, 0.0f, 6.0f}); // башенка падающих ящиков
 
-    // Скелетно-анимированная модель: процедурный «щупалец» с клипом Wave
-    // (пустой Path). Демонстрирует скелетную анимацию в живой игре.
+    // Скелетно-анимированная модель — НАСТОЯЩАЯ, из файла, и клип к ней тоже
+    // файлом (.sageanim рядом с моделью).
+    //
+    // Раньше здесь стоял процедурный «щупалец»: компонент Animation с пустым
+    // путём строил его сам. Такая заглушка проверяла ровно то, чего в игре не
+    // бывает, — скелет, которого нет ни в одном файле, и клип, которого нет ни
+    // в одном ассете. Настоящий путь — модель в Mesh, клип в ClipPath — не
+    // проверялся ничем, при том что именно он и работает у человека.
     GameObject rig = scene.CreateObject("Animated Totem");
     rig.GetTransform().Position = {3.5f, 0.0f, 4.0f};
-    scene.Registry().emplace<AnimationComponent>(rig.Entity());
+    MeshRendererComponent& rigMr = rig.Renderer();
+    rigMr.Ref = MeshRef{MeshRef::Type::Model, "assets/models/totem.glb"};
+    rigMr.MeshPtr = ResourceManager::Instance().GetModel(rigMr.Ref.path);
+    {
+        AnimationComponent am;
+        // Клип адресован ФАЙЛОМ, а не номером внутри модели: номер молча меняется
+        // при переэкспорте, имя файла — нет (см. sage/anim/ClipFile.h).
+        am.ClipPath = "assets/models/totem.Clip_0.sageanim";
+        scene.Registry().emplace<AnimationComponent>(rig.Entity(), am);
+    }
 
     // Факел — эмиттер частиц (огонь) на колонне: демонстрирует систему частиц.
     GameObject torch = scene.CreateObject("Torch Fire");

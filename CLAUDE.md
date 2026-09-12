@@ -57,6 +57,7 @@ bash scripts/ci_smoke_test.sh                                     # smoke
 python3 scripts/check_localization.py                             # переводы
 python3 scripts/check_rhi_boundary.py                             # граница RHI
 python3 scripts/check_paths.py                                    # пути из окружения
+python3 scripts/check_asset_slots.py                              # ассеты — слотами
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
 
@@ -122,5 +123,13 @@ Linux не видна вообще — другой компилятор, дру
   `scripts/check_localization.py`.
 - **Вызовы `gl*` — только в `engine/src/rhi/`.** Проверяет
   `scripts/check_rhi_boundary.py`.
+- **Ассет выбирается СЛОТОМ, а не набирается путём.** Любая ссылка на файл
+  проекта — текстура, материал, модель, скрипт, шейдер, звук, клип, папка —
+  рисуется через `assetslot::Draw` (`editor/src/AssetSlot.h`). Поле ввода с
+  путём требует ЗНАТЬ путь наизусть, не показывает выбранное, не проверяет тип,
+  молчит о пропавшем файле и не принимает перетаскивание. Исключение ОДНО по
+  смыслу: путь НАРУЖУ проекта (папка проекта в лаунчере, создание и открытие
+  проекта, папка сборки) — там проекта ещё нет и перетаскивать неоткуда.
+  Проверяет `scripts/check_asset_slots.py`.
 - **Новый файл в редакторе** дописывается в `editor/CMakeLists.txt`.
 - Правка поведения — вместе с проверкой, которая на старом коде падает.

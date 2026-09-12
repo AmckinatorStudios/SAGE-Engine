@@ -15,6 +15,7 @@
 #include "sage/render/SkyDraw.h"
 #include "sage/render/SkyModel.h"
 #include "sage/render/Skybox.h"
+#include "../AssetSlot.h"
 #include "../Project.h"
 #include <cstdio>
 #include <cmath>
@@ -300,12 +301,16 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         // ОДИН ФАЙЛ — обычный случай для скачанного набора: в папке лежат
         // двадцать готовых небес, каждое отдельной картинкой, и выбрать надо
         // именно картинку, а не каталог.
-        char buf[512];
-        std::snprintf(buf, sizeof(buf), "%s", sky.ImagePath.c_str());
-        if (ImGui::InputText(T("Image"), buf, sizeof(buf))) sky.ImagePath = buf;
-        host.TrackLastImGuiItem();
-        ImGui::SameLine();
-        if (ImGui::Button(T("Browse..."))) {
+        // СЛОТ, а не поле ввода с путём: картинку неба перетаскивают из панели
+        // ассетов, как и всё остальное в редакторе (см. AssetSlot.h).
+        ImGui::TextUnformatted(T("Image"));
+        assetslot::Result r = assetslot::Draw(host, "sky_image", assetslot::Kind::Texture,
+                                              sky.ImagePath, nullptr, T("Sky picture"));
+        if (r.Changed) {
+            host.PushUndoSnapshot();
+            sky.ImagePath = r.Path;
+        }
+        if (r.BrowseRequested) {
             FileBrowser::Config c;
             c.Title = T("Choose a sky image");
             c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
@@ -334,12 +339,16 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         ImGui::TextDisabled("%s", T("One picture with all six faces: a cross, a strip or a "
                                     "panorama."));
     } else if (sky.Kind == SkyboxSettings::Source::Cubemap) {
-        char buf[512];
-        std::snprintf(buf, sizeof(buf), "%s", sky.CubemapDir.c_str());
-        if (ImGui::InputText(T("Folder"), buf, sizeof(buf))) sky.CubemapDir = buf;
-        host.TrackLastImGuiItem();
-        ImGui::SameLine();
-        if (ImGui::Button(T("Browse..."))) {
+        // Слот типа «папка»: каталог перетаскивается из панели ассетов ровно
+        // так же, как файл, и слот показывает, что именно выбрано.
+        ImGui::TextUnformatted(T("Folder"));
+        assetslot::Result r = assetslot::Draw(host, "sky_dir", assetslot::Kind::Folder,
+                                              sky.CubemapDir, nullptr, T("Folder with six faces"));
+        if (r.Changed) {
+            host.PushUndoSnapshot();
+            sky.CubemapDir = r.Path;
+        }
+        if (r.BrowseRequested) {
             FileBrowser::Config c;
             c.Title = T("Choose a sky folder");
             c.Mode = FileBrowser::PickMode::PickFolder;
@@ -357,12 +366,14 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
                                       T("Down (-Y)"),  T("Front (+Z)"), T("Back (-Z)")};
         for (int i = 0; i < 6; ++i) {
             ImGui::PushID(i);
-            char buf[512];
-            std::snprintf(buf, sizeof(buf), "%s", sky.FacePaths[i].c_str());
-            if (ImGui::InputText(kFaceLabels[i], buf, sizeof(buf))) sky.FacePaths[i] = buf;
-            host.TrackLastImGuiItem();
-            ImGui::SameLine();
-            if (ImGui::Button(T("..."))) {
+            ImGui::TextUnformatted(kFaceLabels[i]);
+            assetslot::Result r = assetslot::Draw(host, "face", assetslot::Kind::Texture,
+                                                  sky.FacePaths[i], nullptr, kFaceLabels[i]);
+            if (r.Changed) {
+                host.PushUndoSnapshot();
+                sky.FacePaths[i] = r.Path;
+            }
+            if (r.BrowseRequested) {
                 FileBrowser::Config c;
                 c.Title = kFaceLabels[i];
                 c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};

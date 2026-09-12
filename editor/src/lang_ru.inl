@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1384.
+// Язык: Русский. Строк: 1390.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -926,6 +926,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Начало тумана"},
     {"Folder",
      "Папка"},
+    {"Folder with six faces",
+     "Папка с шестью гранями"},
     {"Folders",
      "Папки"},
     {"Follow",
@@ -2080,6 +2082,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "С освещением"},
     {"Shader limit: %d point + %d spot lights per frame",
      "Предел шейдера: %d точечных и %d прожекторов на кадр"},
+    {"Shader: ",
+     "Шейдер: "},
+    {"Shaders",
+     "Шейдеры"},
     {"Shadow",
      "Тень"},
     {"Shadow Resolution",
@@ -2142,6 +2148,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Небо в зените"},
     {"Sky colours AND the scene's light follow the sun's height:\nbelow the horizon it really gets dark, and the moon takes over.\nTurn off for a scene lit at a fixed staged angle.",
      "Цвета неба И свет сцены следуют за высотой солнца:\nушло за горизонт — по-настоящему стемнело, светит луна.\nВыключите для сцены со светом под сценическим углом."},
+    {"Sky picture",
+     "Картинка неба"},
     {"Sky tints upward faces, Ground — downward",
      "Sky красит грани, смотрящие вверх, Ground — вниз"},
     {"Skybox",
@@ -2712,6 +2720,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "ошибок"},
     {"file",
      "файл"},
+    {"folder",
+     "папка"},
     {"for example: game.start",
      "например: game.start"},
     {"material",
@@ -2744,6 +2754,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "объект сцены"},
     {"script",
      "скрипт"},
+    {"shader",
+     "шейдер"},
     {"sound",
      "звук"},
     {"t = %.2f s",
