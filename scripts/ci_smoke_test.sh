@@ -65,7 +65,16 @@ if ! grep -q "SELFTEST: PASS" "${EDITOR_LOG}"; then
     echo "ОШИБКА: self-test редактора не прошёл (нет 'SELFTEST: PASS' в логе)"
     cat "${EDITOR_LOG}"; exit 1
 fi
-echo "OK: SageEditor self-test прошёл"
+# Многооконность: редактор интерфейса обязан жить ОТДЕЛЬНЫМ окном системы.
+# Проверка живёт в кадре (см. EditorLayer::CheckMultiWindowFrame): состояние и
+# флаг вьюпорта проверяет сам self-test, а вот окно заводит платформа — и этот
+# шаг ломается молча, окна на экране просто нет.
+if ! grep -q "MULTIWINDOW: OK" "${EDITOR_LOG}"; then
+    echo "ОШИБКА: редактор интерфейса не открылся отдельным окном системы"
+    grep "MULTIWINDOW" "${EDITOR_LOG}" || true
+    cat "${EDITOR_LOG}"; exit 1
+fi
+echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса)"
 
 echo "=== Smoke-тест 3/10: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then

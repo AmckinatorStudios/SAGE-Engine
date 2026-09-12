@@ -64,6 +64,7 @@
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
+#include "PanelWindows.h"
 
 namespace fs = std::filesystem;
 
@@ -104,24 +105,33 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGuiID left  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.23f, nullptr, &center);
     ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28f, nullptr, &center);
 
-    ImGui::DockBuilderDockWindow("Hierarchy", left);
-    // Панель вёрстки — вкладкой к иерархии слева, а не плавающим окном. Плавать
-    // ей нельзя: она открывается сама вместе с режимом вёрстки и накрывала бы
-    // собой ровно тот вьюпорт, ради которого её и открыли.
-    ImGui::DockBuilderDockWindow("Lighting", right);
-    ImGui::DockBuilderDockWindow("Inspector", right);
-    ImGui::DockBuilderDockWindow("Console", bottom);
-    ImGui::DockBuilderDockWindow("Assets", bottom);
+    // Сброс раскладки возвращает и состав ОКОН, а не только расстановку
+    // вкладок: окно, уехавшее на монитор, которого больше нет, иначе не
+    // вернуть ничем (см. PanelWindows.h).
+    panelwindows::ResetToDefaults();
+    // Панель, живущая своим окном системы, в док не заводится: DockBuilder
+    // втянул бы её обратно вкладкой, отменив то, о чём человека не спрашивали.
+    auto dock = [](const char* id, ImGuiID node) {
+        if (!panelwindows::Detached(id)) ImGui::DockBuilderDockWindow(id, node);
+    };
+
+    dock("Hierarchy", left);
+    dock("Lighting", right);
+    dock("Inspector", right);
+    dock("Console", bottom);
+    dock("Assets", bottom);
     // Viewport докается ПЕРВЫМ в центральный узел — так он и есть таб по
     // умолчанию (первый добавленный к узлу становится выбранным). Раньше первым
     // шёл Game, из-за чего редактор открывался на «игровом окне» без пикинга/
     // гизмо/аутлайна — выглядело как «выделение не работает». Game выходит
     // вперёд при входе в Play (GamePanel::RequestFocus).
-    ImGui::DockBuilderDockWindow("Viewport", center);
-    ImGui::DockBuilderDockWindow("Game", center);
-    // Редактор интерфейса — вкладкой в центр, к вьюпорту и игре: это
-    // такой же основной рабочий вид, только для другого предмета работы.
-    ImGui::DockBuilderDockWindow("UIEditor", center);
+    dock("Viewport", center);
+    dock("Game", center);
+    // Редактор интерфейса сюда больше не докается: он открывается ОТДЕЛЬНЫМ
+    // окном (см. PanelWindows.cpp, kDefaults). Вкладкой в центре он отбирал
+    // место у вьюпорта, а его собственному холсту — тому самому кадру игры, по
+    // которому и верстают, — оставалась треть экрана.
+    dock("UIEditor", center);
     ImGui::DockBuilderFinish(dockspaceId);
 
     ImGui::SetWindowFocus("Viewport");
@@ -392,6 +402,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_topBar.Draw(*this, TopBarPanel::kHeight);
 
     ImGuiID dockspaceId = ImGui::GetID("SageDockSpace");
+    // Куда возвращать панель, у которой сняли галочку «в отдельном окне».
+    panelwindows::SetHomeDock(dockspaceId);
     // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)
     // или пользователь попросил сброс (Window > Reset Layout).
     if (m_rebuildDockLayout || ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
@@ -669,6 +681,46 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
+            ImGui::Separator();
+
+            // --- Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ -----------------------------
+            //
+            // Меню, а не только перетаскивание мышью: вытащить панель в своё
+            // окно раньше можно было единственным жестом — дотащить её за
+            // вкладку за край главного окна, — а вернуть обратно нечем, кроме
+            // сброса всей раскладки. И главное, вытащенное окно слипалось с
+            // главным обратно, стоило его туда надвинуть (см. PanelWindows.h).
+            if (ImGui::BeginMenu(T("Separate window"))) {
+                ImGui::TextDisabled("%s", T("Panel becomes a window of the system"));
+                ImGui::Separator();
+                struct DetachRow { const char* Id; const char* Label; EditorPanel Panel; };
+                static const DetachRow kRows[] = {
+                    {"UIEditor",  "Interface",   EditorPanel::UIEditor},
+                    {"Viewport",  "Viewport",    EditorPanel::Viewport},
+                    {"Game",      "Game",        EditorPanel::Game},
+                    {"Hierarchy", "Hierarchy",   EditorPanel::Hierarchy},
+                    {"Inspector", "Inspector",   EditorPanel::Inspector},
+                    {"Lighting",  "Environment", EditorPanel::Environment},
+                    {"Assets",    "Assets",      EditorPanel::Assets},
+                    {"Console",   "Console",     EditorPanel::Console},
+                };
+                for (const DetachRow& row : kRows) {
+                    const bool detached = panelwindows::Detached(row.Id);
+                    if (ImGui::MenuItem(T(row.Label), nullptr, detached)) {
+                        panelwindows::SetDetached(row.Id, !detached);
+                        // Отдельное окно ЗАКРЫТОЙ панели — это окно, которого
+                        // не видно: галочка стоит, а на экране ничего не
+                        // изменилось. Поэтому отрыв открывает панель заодно.
+                        if (!detached) PanelVisible(row.Panel) = true;
+                    }
+                }
+                ImGui::Separator();
+                // Путь назад для случая «окно уехало на второй монитор, а
+                // монитора больше нет»: оттуда его не достать ни мышью, ни
+                // галочкой — окна не видно, чтобы за него взяться.
+                if (ImGui::MenuItem(T("Bring all windows back"))) panelwindows::AttachAll();
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
             ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanel::Settings));
             // Управление — рядом с настройками игры: это тоже содержимое

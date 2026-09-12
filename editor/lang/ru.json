@@ -167,6 +167,7 @@
     "Brighter on hover": "Ярче под курсором",
     "Brightness": "Яркость",
     "Bring a file into the project": "Внести файл в проект",
+    "Bring all windows back": "Собрать все окна в главное",
     "Bring back on screen": "Вернуть на экран",
     "Bring forward": "Выше соседей",
     "Broken references: ": "Битых ссылок: ",
@@ -797,6 +798,7 @@
     "Padding l,t,r,b": "Отступы л,в,п,н",
     "Painted with the object material.": "Красится материалом объекта.",
     "Panel": "Панель",
+    "Panel becomes a window of the system": "Панель становится окном системы",
     "Panel, label, image or bar on screen": "Панель, надпись, картинка или полоса на экране",
     "Panels": "Панели",
     "Panorama 2:1": "Панорама 2:1",
@@ -1029,6 +1031,7 @@
     "Select an interface element.": "Выделите элемент интерфейса.",
     "Select an object in the viewport or Hierarchy, or a file in Assets.": "Выберите объект во вьюпорте или в Hierarchy, либо файл в Assets.",
     "Send backward": "Ниже соседей",
+    "Separate window": "В отдельном окне",
     "Sensitivity": "Чувствительность",
     "Settings": "Настройки",
     "Settings saved: sage.cfg": "Настройки сохранены: sage.cfg",
@@ -1399,6 +1402,12 @@
     "Only what is actually installed is listed": "Показано только то, что действительно установлено",
     "Search again": "Найти заново",
     "Code editors: ": "Редакторов кода: ",
-    "Scripts reloaded: ": "Скриптов перечитано: "
+    "Scripts reloaded: ": "Скриптов перечитано: ",
+    "Reading...": "Читается…",
+    "The file is gone": "Файла больше нет",
+    "The file could not be read as an image": "Файл не читается как картинка",
+    "This is actually %s — the format is not supported": "На самом деле это %s — такой формат не поддерживается",
+    "The cover did not fit into video memory": "Обложка не поместилась в видеопамять",
+    "%d x %d, %s": "%d x %d, %s"
   }
 }

@@ -90,6 +90,32 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
 
 constexpr float kStatusBarHeight = 26.0f;
 
+// Копирование каталога В УЖЕ СУЩЕСТВУЮЩИЙ каталог, файл за файлом.
+//
+// ЗАЧЕМ, если есть fs::copy с recursive|overwrite_existing. Затем, что НА
+// WINDOWS ОН ЭТОГО НЕ ДЕЛАЕТ: когда каталог-приёмник уже есть, реализация
+// отдаёт EEXIST («File exists») и не копирует НИЧЕГО. На Linux тот же вызов
+// молча сливает содержимое, поэтому беда не видна ни в CI, ни на машине
+// разработчика — ровно тот случай, про который CLAUDE.md говорит «правка,
+// проверенная на одной платформе, проверена наполовину».
+//
+// Стоило это создания проекта из готового шаблона: CreateNew уже завёл
+// assets/ и scenes/, дальше шаблон копировался поверх — и на Windows человек
+// получал отказ «Failed to copy template … File exists» и пустой проект.
+void CopyInto(const fs::path& src, const fs::path& dst, std::error_code& ec) {
+    if (!fs::is_directory(src, ec)) {
+        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        return;
+    }
+    fs::create_directories(dst, ec);
+    if (ec) return;
+    for (const fs::directory_entry& e : fs::directory_iterator(src, ec)) {
+        if (ec) return;
+        CopyInto(e.path(), dst / e.path().filename(), ec);
+        if (ec) return;
+    }
+}
+
 } // namespace
 
 
@@ -573,8 +599,7 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
         for (const fs::directory_entry& e : fs::directory_iterator(src, ec)) {
             // Файл проекта пропускаем — он уже создан с нужным именем.
             if (e.path().filename() == "project.sageproj") continue;
-            fs::copy(e.path(), m_project.Dir() / e.path().filename(),
-                     fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+            CopyInto(e.path(), m_project.Dir() / e.path().filename(), ec);
             if (ec) {
                 err = "Failed to copy template '" + tpl->Id + "': " + ec.message();
                 return false;

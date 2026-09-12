@@ -15,6 +15,9 @@
 #include "EditorIcons.h"
 #include "CodeEditorApp.h"
 #include "AssetSlot.h"
+#include "Thumbnails.h"
+#include "PanelWindows.h"
+#include "imgui_internal.h" // NextWindowData: проверка флага вьюпорта у отдельных окон
 #include "panels/AssetsPanel.h"
 
 #include "sage/ecs/DecalSystem.h"
@@ -133,11 +136,52 @@ void EditorLayer::RunSelfTest() {
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
                                << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
-                               << "all-components-roundtrip + ui-layout-tools + panel-flags + editor-prefs + material-assign + "
+                               << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
                                << "render-stability, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
+}
+
+// ---------------------------------------------------------------------------
+// МНОГООКОННОСТЬ В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST=1).
+//
+// Состояние и флаг вьюпорта проверяет RunSelfTest, но кадра там нет, а окно
+// системы заводит ПЛАТФОРМА: ImGui решает завести панели свой вьюпорт, бэкенд
+// создаёт под него окно GLFW, и только тогда окно существует. Ломается этот
+// последний шаг молча — галочка стоит, состояние верное, а окна на экране нет;
+// увидеть такое можно было только запустив редактор глазами.
+//
+// Поэтому проверяется ровно конец пути: у редактора интерфейса СВОЙ вьюпорт со
+// СВОИМ окном платформы, а панель, оставшаяся в доке, живёт во вьюпорте
+// главного окна — иначе «отдельное окно» означало бы, что в него уехали все.
+// ---------------------------------------------------------------------------
+void EditorLayer::CheckMultiWindowFrame() {
+    if (m_multiWindowChecked) return;
+    if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
+    // Не в первых кадрах: окно платформы появляется не в том же кадре, в
+    // котором ImGui решил завести вьюпорт.
+    if (m_frameCounter < 6) return;
+    m_multiWindowChecked = true;
+
+    const ImGuiID mainId = ImGui::GetMainViewport()->ID;
+    const ImGuiWindow* ui = ImGui::FindWindowByName("UIEditor");
+    const ImGuiWindow* docked = ImGui::FindWindowByName("Hierarchy");
+
+    if (ui == nullptr || ui->Viewport == nullptr) {
+        LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — окна редактора интерфейса нет в кадре";
+        return;
+    }
+    const bool own = ui->Viewport->ID != mainId;
+    const bool real = ui->Viewport->PlatformHandle != nullptr;
+    const bool dockedStayed = docked == nullptr || docked->Viewport == nullptr ||
+                              docked->Viewport->ID == mainId;
+    if (own && real && dockedStayed) {
+        LOG_INFO("Editor") << "MULTIWINDOW: OK — редактор интерфейса живёт своим окном системы";
+        return;
+    }
+    LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — свой вьюпорт " << own << ", окно платформы "
+                        << real << ", панель дока осталась в главном " << dockedStayed;
 }
 
 // --- проект, шаблоны, ассеты и материалы -----------------------------------
@@ -2210,6 +2254,78 @@ bool EditorLayer::SelfTestSelection() {
         fs::remove_all(root, ec);
     }
 
+    // --- Обложки картинок: фоном, уменьшенными, с сохранением пропорций --------
+    //
+    // Три беды разом, и все три человек видел глазами (см. Thumbnails.h):
+    // папка с фотографиями подвешивала диалог на секунды, обложка выходила
+    // рябой, а панорама 4:1 показывалась квадратом. Проверяется поэтому не
+    // «есть обложка», а именно то, чего не было:
+    //
+    //   1) первый запрос НЕ ЖДЁТ файл — возвращает «читается» и уходит;
+    //   2) вместе с обложкой приезжают размеры ИСХОДНОЙ картинки, иначе вписать
+    //      её в площадку с сохранением пропорций нечем;
+    //   3) файл не той породы (.png, внутри которого WEBP — так их отдают
+    //      сетевые редакторы) даёт ВНЯТНЫЙ отказ с названием формата, а не
+    //      «unknown image type», по которому вывод один: редактор сломался.
+    if (ok) {
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path(ec) / "sage_selftest_thumbs";
+        fs::remove_all(root, ec);
+        fs::create_directories(root, ec);
+
+        // Картинка НЕ КВАДРАТНАЯ намеренно: на квадрате ошибка с пропорциями не
+        // видна вообще, и проверка бы её пропустила.
+        const fs::path wide = root / "wide.png";
+        {
+            std::vector<unsigned char> px((size_t)64 * 16 * 3, 0);
+            for (size_t i = 0; i < px.size(); i += 3) { px[i] = 30; px[i + 1] = 160; px[i + 2] = 220; }
+            stbi_write_png(wide.string().c_str(), 64, 16, 3, px.data(), 64 * 3);
+        }
+        // .png снаружи, WEBP внутри — ровно тот файл, на котором редактор
+        // ругался непонятным.
+        const fs::path fake = root / "fake.png";
+        {
+            std::ofstream f(fake, std::ios::binary);
+            const char riff[] = {'R', 'I', 'F', 'F', 0x20, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' '};
+            f.write(riff, sizeof(riff));
+        }
+
+        const thumbs::Thumb first = thumbs::Get(wide);
+        if (first.Id != 0 || !first.Loading) {
+            LOG_ERROR("Editor") << "SELFTEST: the first cover request did not go to the background";
+            ok = false;
+        }
+
+        thumbs::Thumb ready;
+        for (int i = 0; i < 500 && ready.Id == 0 && !ready.Failed; ++i) {
+            thumbs::Pump();
+            ready = thumbs::Get(wide);
+            if (ready.Id == 0) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (ok && (ready.Id == 0 || ready.W != 64 || ready.H != 16)) {
+            LOG_ERROR("Editor") << "SELFTEST: the cover did not arrive with the source size ("
+                                << ready.W << "x" << ready.H << ")";
+            ok = false;
+        }
+
+        if (ok) {
+            thumbs::Thumb bad = thumbs::Get(fake);
+            for (int i = 0; i < 500 && !bad.Failed; ++i) {
+                thumbs::Pump();
+                bad = thumbs::Get(fake);
+                if (!bad.Failed) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            if (!bad.Failed || bad.Error.find("WEBP") == std::string::npos) {
+                LOG_ERROR("Editor") << "SELFTEST: a WEBP under a .png name got no clear refusal ("
+                                    << bad.Error << ")";
+                ok = false;
+            }
+        }
+
+        thumbs::Clear();
+        fs::remove_all(root, ec);
+    }
+
     // --- Чем открывать код: список и подстановка строки ------------------------
     //
     // Список редакторов обязан содержать ТОЛЬКО установленное: пункт «Visual
@@ -3261,6 +3377,85 @@ bool EditorLayer::SelfTestTools() {
                                         << mapping[j].Name << " делят один флаг";
                     ok = false;
                 }
+    }
+
+    // --- Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ (multi-window) ---------------------
+    //
+    // Проверяется не «панель можно вытащить мышью» — это ImGui умел и раньше, —
+    // а ровно то, чего не было и из-за чего вытащенная панель не становилась
+    // окном (см. PanelWindows.h):
+    //
+    //   1) ФЛАГ ВЬЮПОРТА. Пока окну не поставлен ImGuiViewportFlags_NoAutoMerge,
+    //      ImGui СЛИВАЕТ его с главным, стоит на главное наехать: для системы
+    //      такого окна нет — ни отдельной кнопки на панели задач, ни переноса
+    //      на второй монитор. Проверяется прямо: после Before у следующего окна
+    //      обязан стоять этот флаг — и обязан НЕ стоять у панели, живущей в
+    //      доке, иначе в отдельное окно уедут все подряд.
+    //   2) РЕДАКТОР ИНТЕРФЕЙСА отделён изначально (в нём дерево, холст,
+    //      свойства и инструменты разом — во вкладке центрального дока холсту
+    //      остаётся треть экрана, а верстают именно по холсту).
+    //   3) ПАМЯТЬ МЕЖДУ ЗАПУСКАМИ: состояние живёт в настройках редактора, иначе
+    //      расстановку окон пришлось бы собирать заново каждый запуск.
+    //   4) ПУТЬ НАЗАД: «собрать все окна в главное» возвращает ВСЕ, включая
+    //      уехавшее на монитор, которого больше нет, — его иначе не достать.
+    if (ok) {
+        namespace prefs = sage::editor::prefs;
+        // Настройки общие с живым редактором, поэтому состояние возвращается
+        // как было: прогон не имеет права переставить человеку окна.
+        const bool hadUi = panelwindows::Detached("UIEditor");
+        const bool hadViewport = panelwindows::Detached("Viewport");
+
+        panelwindows::ResetToDefaults();
+        if (!panelwindows::Detached("UIEditor") || panelwindows::Detached("Viewport")) {
+            LOG_ERROR("Editor") << "SELFTEST: по умолчанию редактор интерфейса обязан быть "
+                                << "отдельным окном, а вьюпорт — нет (интерфейс "
+                                << panelwindows::Detached("UIEditor") << ", вьюпорт "
+                                << panelwindows::Detached("Viewport") << ")";
+            ok = false;
+        }
+        // Флаг вьюпорта — то самое, без чего окно слипается с главным.
+        if (ok) {
+            ImGuiContext* ctx = ImGui::GetCurrentContext();
+            panelwindows::Before("UIEditor");
+            const bool detachedHasFlag =
+                (ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasWindowClass) != 0 &&
+                (ctx->NextWindowData.WindowClass.ViewportFlagsOverrideSet &
+                 ImGuiViewportFlags_NoAutoMerge) != 0;
+            ctx->NextWindowData.ClearFlags();
+            panelwindows::Before("Viewport");
+            const bool dockedHasFlag =
+                (ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasWindowClass) != 0 &&
+                (ctx->NextWindowData.WindowClass.ViewportFlagsOverrideSet &
+                 ImGuiViewportFlags_NoAutoMerge) != 0;
+            // Заготовку следующего окна за собой убираем: иначе первый же
+            // настоящий Begin в кадре получил бы чужой класс и чужой док.
+            ctx->NextWindowData.ClearFlags();
+            if (!detachedHasFlag || dockedHasFlag) {
+                LOG_ERROR("Editor") << "SELFTEST: NoAutoMerge выставлен неверно (отдельное окно "
+                                    << detachedHasFlag << ", панель в доке " << dockedHasFlag << ")";
+                ok = false;
+            }
+        }
+
+        // Память между запусками и путь назад.
+        if (ok) {
+            panelwindows::SetDetached("Hierarchy", true);
+            const bool saved = prefs::GetBool("window.detached.Hierarchy", false);
+            panelwindows::AttachAll();
+            const bool allBack = !panelwindows::Detached("Hierarchy") &&
+                                 !panelwindows::Detached("UIEditor");
+            const bool cleared = !prefs::GetBool("window.detached.Hierarchy", true);
+            if (!saved || !allBack || !cleared) {
+                LOG_ERROR("Editor") << "SELFTEST: состояние отдельных окон не сохраняется "
+                                    << "(записалось " << saved << ", собрались " << allBack
+                                    << ", стёрлось " << cleared << ")";
+                ok = false;
+            }
+        }
+
+        panelwindows::SetDetached("Hierarchy", false);
+        panelwindows::SetDetached("UIEditor", hadUi);
+        panelwindows::SetDetached("Viewport", hadViewport);
     }
 
     // --- Настройки редактора переживают запись и чтение ---------------------
