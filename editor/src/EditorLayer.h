@@ -304,6 +304,10 @@ private:
     bool SelfTestSelection();
     bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
+    // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
+    // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
+    void CheckMultiWindowFrame();
+    bool m_multiWindowChecked = false; // проверка одноразовая: кадров много
     // SAGE_EDITOR_E2E=1: полная игра через редактор — проект + Lua-логика +
     // Play + Build Game (собранный бинарник затем гоняет smoke-тест).
     void RunE2EGameTest();

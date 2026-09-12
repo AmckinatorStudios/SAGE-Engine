@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1405.
+// Язык: Русский. Строк: 1408.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -344,6 +344,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Яркость"},
     {"Bring a file into the project",
      "Внести файл в проект"},
+    {"Bring all windows back",
+     "Собрать все окна в главное"},
     {"Bring back on screen",
      "Вернуть на экран"},
     {"Bring forward",
@@ -1618,6 +1620,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Красится материалом объекта."},
     {"Panel",
      "Панель"},
+    {"Panel becomes a window of the system",
+     "Панель становится окном системы"},
     {"Panel, label, image or bar on screen",
      "Панель, надпись, картинка или полоса на экране"},
     {"Panels",
@@ -2092,6 +2096,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ниже соседей"},
     {"Sensitivity",
      "Чувствительность"},
+    {"Separate window",
+     "В отдельном окне"},
     {"Settings",
      "Настройки"},
     {"Settings saved: sage.cfg",

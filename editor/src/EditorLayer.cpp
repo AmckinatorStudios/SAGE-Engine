@@ -54,6 +54,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "AssetExt.h"
 #include "Localization.h"
+#include "PanelWindows.h"
 
 namespace fs = std::filesystem;
 
@@ -218,6 +219,11 @@ void EditorLayer::OnAttach() {
         LOG_ERROR("ImGui") << "кадр интерфейса собран неверно — окно '"
                            << (w ? w->Name : "<нет>") << "': " << msg;
     };
+
+    // Кто из панелей живёт своим окном системы — помнится между запусками
+    // (см. PanelWindows.h). Читается ДО первого кадра: в кадре это уже поздно,
+    // панель успеет нарисоваться в доке и уехать оттуда рывком.
+    panelwindows::Load();
 
     EditorTheme::LoadFont();
     // Init, а не Apply: он собирает список тем (встроенные + themes/*.json) и
@@ -485,6 +491,11 @@ void EditorLayer::OnAttach() {
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_showSettings = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_showProfiler = true; }
     if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_headlessProject = true; m_showIconSheet = true; }
+    // Редактор интерфейса открывается в прогоне самопроверки нарочно: он живёт
+    // ОТДЕЛЬНЫМ окном системы (см. PanelWindows.h), а закрытая панель окна не
+    // заводит — проверять в кадре было бы нечего. На снимок главного окна это
+    // не влияет: окно у него своё.
+    if (std::getenv("SAGE_EDITOR_SELFTEST")) m_showUIEditor = true;
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
         m_headlessProject = true;
         m_pendingDialog = dlg;   // откроется в кадре, на уровне окна-хоста
@@ -1125,14 +1136,26 @@ void EditorLayer::OnRender() {
     DrawDockspaceAndMenu(); // включая модалки (m_dialogs) и окно настроек (m_settingsPanel)
     // Панель подаётся в кадр только когда она открыта: закрытая вкладка иначе
     // возвращалась бы сама собой на следующем кадре, и крестик не работал бы.
-    if (m_showHierarchy) m_hierarchy.Draw(*this, &m_showHierarchy);
-    if (m_showInspector) m_inspector.Draw(*this, &m_showInspector);
-    if (m_showEnvironment) m_environment.Draw(*this, &m_showEnvironment);
-    if (m_showUIEditor) m_uiEditor.Draw(*this, &m_showUIEditor);
-    if (m_showViewport) m_viewport.Draw(*this, &m_showViewport);
-    if (m_showGame) m_game.Draw(*this, &m_showGame);
-    if (m_showConsole) m_console.Draw(&m_showConsole);
-    if (m_showAssets) m_assets.Draw(*this, &m_showAssets);
+    //
+    // Вокруг каждой панели — panelwindows (см. PanelWindows.h): она решает,
+    // живёт панель вкладкой в главном окне или ОТДЕЛЬНЫМ окном системы, и
+    // сверяет своё состояние с тем, что человек сделал мышью. Обёртка общая и
+    // одна на все панели намеренно: панель, которую забыли обернуть, молча
+    // теряет право на своё окно, и объяснить это человеку будет нечем.
+    auto panel = [](const char* id, bool shown, auto&& draw) {
+        if (!shown) return;
+        panelwindows::Before(id);
+        draw();
+        panelwindows::After(id);
+    };
+    panel("Hierarchy", m_showHierarchy, [&] { m_hierarchy.Draw(*this, &m_showHierarchy); });
+    panel("Inspector", m_showInspector, [&] { m_inspector.Draw(*this, &m_showInspector); });
+    panel("Lighting", m_showEnvironment, [&] { m_environment.Draw(*this, &m_showEnvironment); });
+    panel("UIEditor", m_showUIEditor, [&] { m_uiEditor.Draw(*this, &m_showUIEditor); });
+    panel("Viewport", m_showViewport, [&] { m_viewport.Draw(*this, &m_showViewport); });
+    panel("Game", m_showGame, [&] { m_game.Draw(*this, &m_showGame); });
+    panel("Console", m_showConsole, [&] { m_console.Draw(&m_showConsole); });
+    panel("Assets", m_showAssets, [&] { m_assets.Draw(*this, &m_showAssets); });
     m_plugins.ImGuiAll();
 
     // Стартовое окно по просьбе (Window > Стартовое окно): проект уже открыт,
@@ -1149,6 +1172,10 @@ void EditorLayer::OnRender() {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     PresentExtraViewports();
+
+    // Многооконность проверяется здесь, а не в RunSelfTest: там нет кадра, а
+    // окно системы заводит платформа — после UpdatePlatformWindows.
+    CheckMultiWindowFrame();
 
     TakeAutoScreenshot(app);
 }
