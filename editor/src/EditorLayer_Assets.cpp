@@ -225,9 +225,9 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
             return true;
         }
         PushUndoSnapshot();
-        MeshRendererComponent& mr = obj.Renderer();
-        ReportModelMaterials(SetEntityMesh(m_project, mr, MeshRef::Type::Model, ref,
-                                           std::move(mesh)));
+        obj.Renderer();   // компонент обязан быть до настройки модели
+        ReportModelMaterials(SetEntityMesh(m_project, m_scene->Registry(), obj.Entity(),
+                                           MeshRef::Type::Model, ref, std::move(mesh)));
         SetStatusMessage(T("Mesh replaced: ") + asset.filename().string());
         return true;
     }
@@ -279,9 +279,9 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         }
         PushUndoSnapshot();
         GameObject obj = m_scene->CreateObject(asset.stem().string());
-        MeshRendererComponent& mr = obj.Renderer();
-        ReportModelMaterials(SetEntityMesh(m_project, mr, MeshRef::Type::Model, ref,
-                                           std::move(mesh)));
+        obj.Renderer();
+        ReportModelMaterials(SetEntityMesh(m_project, m_scene->Registry(), obj.Entity(),
+                                           MeshRef::Type::Model, ref, std::move(mesh)));
         newId = obj.Id();
     } else {
         return false;
@@ -367,9 +367,13 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         }
     } else {
         GameObject obj = m_scene->CreateObject(asset.stem().string());
-        MeshRendererComponent& mr = obj.Renderer();
-        ReportModelMaterials(SetEntityMesh(m_project, mr, MeshRef::Type::Model, ref,
+        ReportModelMaterials(SetEntityMesh(m_project, m_scene->Registry(), obj.Entity(),
+                                           MeshRef::Type::Model, ref,
                                            ResourceManager::Instance().GetModel(ref)));
+        // Ссылка берётся ПОСЛЕ вызова: он мог завести сущности компоненты
+        // (Animation у модели со скелетом), а всякая вставка в ECS вправе
+        // переселить хранилище — и ссылка, взятая раньше, стала бы чужой.
+        MeshRendererComponent& mr = obj.Renderer();
         if (!mr.MeshPtr) {
             m_scene->RemoveObject(obj.Id());
             SetStatusMessage(T("The model failed to load: ") + asset.filename().string() +

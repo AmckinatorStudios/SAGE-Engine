@@ -3,6 +3,8 @@
 #endif
 #include "EditorSceneRenderer.h"
 
+#include "sage/anim/AnimationComponents.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/render/Screenshot.h"
 
 #include "sage/ecs/DecalSystem.h"
@@ -323,9 +325,29 @@ void EditorSceneRenderer::RenderOutlineMask(Scene& scene, const std::vector<int>
 
     device.SetDepthTest(false); // полный силуэт независимо от перекрытий
     // Все выбранные сущности с мешем — в одну маску (кайма охватит их все).
+    const glm::mat4 viewProj = proj * view;
     for (int id : selection) {
         GameObject obj = scene.Get(id);
         if (!obj.Valid()) continue;
+
+        // ПЕРСОНАЖ ОБВОДИТСЯ ПО ТОЙ ПОЗЕ, В КОТОРОЙ ОН НАРИСОВАН.
+        //
+        // У сущности со скелетом на экране скелетная модель в позе клипа, а
+        // статическая копия в Mesh — это поза привязки (растопыренная
+        // Т-поза). Пока кайма шла по ней, выделенный персонаж стоял внутри
+        // чужого контура: выделено правильно, а выглядит как поломка.
+        if (const AnimationComponent* am =
+                scene.Registry().try_get<AnimationComponent>(obj.Entity())) {
+            if (am->Model) {
+                am->Model->DrawSilhouette(scene.WorldMatrix(obj.Entity()), viewProj,
+                                          am->Anim.BoneMatrices(), &am->MorphWeights);
+                // Шейдер силуэта сменил текущую программу — возвращаем свою,
+                // иначе следующий статический меш нарисуется его шейдером.
+                m_outlineShader->Use();
+                continue;
+            }
+        }
+
         const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(obj.Entity());
         if (!mr || !mr->MeshPtr) continue;
         m_outlineShader->SetMat4("uModel", scene.WorldMatrix(obj.Entity()));

@@ -232,6 +232,21 @@ Shader& SkinDepthShader() {
     return *shader;
 }
 
+// Силуэт: та же вершинная часть (скиннинг + морфы), но с записью цвета.
+// Вершинный шейдер общий с depth-проходом намеренно: силуэт обязан совпадать
+// с геометрией пиксель в пиксель, а две копии одной формулы расходятся.
+const char* kSkinSilhouetteFrag = R"(#version 330 core
+out vec4 FragColor;
+uniform vec3 uColor;
+void main() { FragColor = vec4(uColor, 1.0); }
+)";
+
+Shader& SkinSilhouetteShader() {
+    static Shader* shader = new Shader(
+        Shader::FromSource(SkinDepthVertSource(), kSkinSilhouetteFrag, "SkinnedModelSilhouette"));
+    return *shader;
+}
+
 } // namespace
 
 namespace {
@@ -387,6 +402,31 @@ void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatri
     for (const auto& sub : m_subMeshes) {
         // Тень обязана повторять ту же форму, что и сам меш, иначе лицо и его
         // тень «разъедутся» при любом выражении.
+        UploadMorphs(shader, sub, morphWeights);
+        sub.Mesh->Draw();
+    }
+}
+
+void SkinnedModel::DrawSilhouette(const glm::mat4& model, const glm::mat4& viewProj,
+                                  const std::vector<glm::mat4>& bones,
+                                  const std::vector<float>* morphWeights) const {
+    Shader& shader = SkinSilhouetteShader();
+    shader.Use();
+    // uLightSpace — имя из общего с depth-проходом вершинного шейдера; здесь в
+    // него едет обычная матрица вида-проекции камеры.
+    shader.SetMat4("uLightSpace", viewProj);
+    shader.SetMat4("uModel", model);
+    shader.SetVec3("uColor", glm::vec3(1.0f));
+
+    int boneCount = std::min((int)bones.size(), kMaxBones);
+    if (boneCount > 0) {
+        shader.SetInt("uSkinned", 1);
+        shader.SetMat4Array("uBones", bones.data(), boneCount);
+    } else {
+        shader.SetInt("uSkinned", 0);
+    }
+
+    for (const auto& sub : m_subMeshes) {
         UploadMorphs(shader, sub, morphWeights);
         sub.Mesh->Draw();
     }

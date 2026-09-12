@@ -177,7 +177,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // отличается от других таких же.
     if (EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
-        DrawMeshSlot(host, mr, reg.all_of<AnimationComponent>(obj.Entity()));
+        DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
         DrawInstanceOverrides(host, mr, obj.Id());
     }

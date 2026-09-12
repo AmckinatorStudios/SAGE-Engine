@@ -214,9 +214,78 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     return result;
 }
 
-ModelMaterialImportResult SetEntityMesh(const Project& project, MeshRendererComponent& mr,
-                                        MeshRef::Type type, const std::string& path,
-                                        std::shared_ptr<Mesh> mesh) {
+namespace {
+
+// Клип по умолчанию — ПОЗА ПОКОЯ.
+//
+// Персонажа ставят в сцену стоящим, а не в прыжке и не в момент смерти: из
+// восемнадцати клипов «Jumpscare» и «Shutdown» правильным первым впечатлением
+// не будет ни один. Ищем по имени — «idle» пишут почти все, в любом регистре и
+// с любым префиксом экспортёра («SpringBonnie_LegacyFit--Idle»). Не нашли —
+// берём первый: он всё равно лучше неподвижной позы привязки, по которой не
+// видно даже, что скелет вообще работает.
+int PreferredClipIndex(const std::vector<sage::anim::AnimationClip>& clips) {
+    for (size_t i = 0; i < clips.size(); ++i) {
+        std::string lower;
+        lower.reserve(clips[i].Name.size());
+        for (unsigned char c : clips[i].Name) lower.push_back((char)std::tolower(c));
+        if (lower.find("idle") != std::string::npos) return (int)i;
+    }
+    return clips.empty() ? -1 : 0;
+}
+
+} // namespace
+
+ModelMaterialImportResult& SetupModelAnimation(const Project& project, entt::registry& registry,
+                                               entt::entity entity, const std::string& modelRef,
+                                               ModelMaterialImportResult& result) {
+    if (modelRef.empty() || !registry.valid(entity)) return result;
+
+    // Скелет берём через кэш: ту же модель сейчас же попросит и сцена.
+    std::shared_ptr<sage::render::SkinnedModel> model =
+        ResourceManager::Instance().GetSkinnedModel(modelRef);
+    if (!model || model->GetSkeleton().Count() == 0) {
+        // Декорация без костей — это НЕ ошибка и не повод навешивать Animation:
+        // компонент, которому нечего анимировать, только мешал бы в инспекторе.
+        return result;
+    }
+
+    result.Skeleton = true;
+    result.Bones = model->GetSkeleton().Count();
+
+    // Клипы — файлами рядом с моделью (как и материалы). Делается здесь, а не
+    // в SetEntityMesh: ссылки на записанные файлы нужны тут же, чтобы назначить
+    // клип сущности, а не оставить его на диске.
+    const ClipImportResult clips = ImportModelClips(project, modelRef);
+    result.Clips = clips.Found;
+
+    const bool had = registry.all_of<AnimationComponent>(entity);
+    AnimationComponent& am = registry.get_or_emplace<AnimationComponent>(entity);
+    result.AnimationAdded = !had;
+
+    // Выбор человека не перебиваем: назначенный клип — это его работа.
+    if (am.ClipPath.empty() && !clips.Refs.empty()) {
+        const int index = PreferredClipIndex(model->Clips());
+        if (index >= 0 && index < (int)clips.Refs.size()) am.ClipPath = clips.Refs[index];
+    }
+    result.Clip = am.ClipPath;
+
+    LOG_INFO("Анимация") << "Модель со скелетом " << modelRef << ": костей " << result.Bones
+                         << ", клипов " << result.Clips
+                         << (result.AnimationAdded ? ", добавлен компонент Animation"
+                                                   : ", компонент Animation уже был")
+                         << (result.Clip.empty() ? std::string(" (клипов в файле нет — скелет "
+                                                               "готов к позам из скрипта)")
+                                                 : ", клип " + result.Clip);
+    return result;
+}
+
+namespace {
+
+ModelMaterialImportResult SetEntityMeshImpl(const Project& project, entt::registry& registry,
+                                            entt::entity entity, MeshRendererComponent& mr,
+                                            MeshRef::Type type, const std::string& path,
+                                            std::shared_ptr<Mesh> mesh) {
     const bool sameModel = mr.Ref.type == type && mr.Ref.path == path;
     mr.Ref.type = type;
     mr.Ref.path = path;
@@ -225,18 +294,37 @@ ModelMaterialImportResult SetEntityMesh(const Project& project, MeshRendererComp
     // старые слоты покрасили бы их наугад.
     if (!sameModel) mr.Slots.clear();
 
-    // И сразу материалы (см. заголовок о том, почему именно здесь). Примитиву
-    // импортировать нечего, а модель без загруженного меша не даёт разметки —
-    // её материалы подберутся вместе с загрузкой.
-    if (type != MeshRef::Type::Model || !mr.MeshPtr) return {};
+    if (type != MeshRef::Type::Model || path.empty()) return {};
 
-    // КЛИПЫ — ТОЖЕ ЗДЕСЬ И ПО ТОЙ ЖЕ ПРИЧИНЕ. Модель с анимацией, положенная в
-    // сцену, обязана принести свои клипы файлами, а не оставить человека жать
-    // отдельную кнопку. У модели без скелета клипов нет — вызов ничего не
-    // делает и ничего не стоит.
-    ImportModelClips(project, path);
+    ModelMaterialImportResult result;
+    // СКЕЛЕТ И КЛИПЫ — ДО проверки на загруженный меш, а не после. Инспектор
+    // ставит модель с mesh == nullptr (грузит следующим шагом), и у персонажа,
+    // назначенного слотом инспектора, статического меша не будет НИКОГДА: его
+    // рисует скелетный проход. Стой эта настройка ниже, ровно у этого пути
+    // персонаж так и оставался бы статуей.
+    SetupModelAnimation(project, registry, entity, path, result);
 
-    return ImportModelMaterials(project, mr);
+    // Материалы — только когда меш УЖЕ загружен: по нему берётся разметка
+    // частей. Модель без меша получит их вместе с загрузкой.
+    if (!mr.MeshPtr) return result;
+
+    const ModelMaterialImportResult materials = ImportModelMaterials(project, mr);
+    result.Created = materials.Created;
+    result.Assigned = materials.Assigned;
+    result.AnyMaps = materials.AnyMaps;
+    result.FirstWarning = materials.FirstWarning;
+    result.FileMaterials = materials.FileMaterials;
+    result.Parts = materials.Parts;
+    return result;
+}
+
+} // namespace
+
+ModelMaterialImportResult SetEntityMesh(const Project& project, entt::registry& registry,
+                                        entt::entity entity, MeshRef::Type type,
+                                        const std::string& path, std::shared_ptr<Mesh> mesh) {
+    MeshRendererComponent& mr = registry.get_or_emplace<MeshRendererComponent>(entity);
+    return SetEntityMeshImpl(project, registry, entity, mr, type, path, std::move(mesh));
 }
 
 // ============================================================================

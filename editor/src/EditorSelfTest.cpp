@@ -68,12 +68,158 @@
 
 #include "sage/scene/Prefab.h"
 #include "sage/render/ModelLoader.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/PostFX.h"
 #include "sage/assets/import/Convert.h"
 #include "AssetPreview.h"
 
 namespace fs = std::filesystem;
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// МОДЕЛЬ СО СКЕЛЕТОМ — эталон для самопроверки.
+//
+// Готового такого файла в репозитории нет и быть не должно: скелетные наборы
+// весят десятки мегабайт, а проверять надо не чужую модель, а НАШ путь от
+// файла до готового к игре персонажа. Поэтому файл пишется здесь — маленький,
+// но настоящий: скин из двух костей, треугольник с весами, обратные матрицы
+// привязки и ДВА клипа.
+//
+// Две особенности сделаны нарочно:
+//   • клип «Idle» лежит ВТОРЫМ. Выбор клипа по умолчанию обязан искать позу
+//     покоя по имени, а не брать первый попавшийся: персонаж, поставленный в
+//     сцену, не должен встречать человека прыжком или смертью.
+//   • развёрток ДВЕ (TEXCOORD_0 и TEXCOORD_1) с РАЗНЫМИ координатами — ровно
+//     как в наборах, экспортированных из Blender/Sketchfab. Движок обязан
+//     брать нулевую: перепутанная развёртка выглядит как «текстура наехала не
+//     туда», и заметить это на одной развёртке нечем.
+// ---------------------------------------------------------------------------
+void WriteFloats(std::ofstream& out, const std::vector<float>& v) {
+    out.write(reinterpret_cast<const char*>(v.data()), (std::streamsize)(v.size() * sizeof(float)));
+}
+
+// skinned == false — та же модель БЕЗ скина: декорация. Нужна затем, что
+// «не навешивать Animation на камень» — отдельное требование, и проверить его
+// можно только на модели, которая скелета не несёт.
+bool WriteRigFixture(const fs::path& dir, const std::string& name, bool skinned,
+                     std::string& err) {
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+
+    {
+        std::ofstream bin(dir / (name + ".bin"), std::ios::binary);
+        if (!bin) { err = "не открыть rig.bin"; return false; }
+        // POSITION (3 вершины)
+        WriteFloats(bin, {0.0f, 0.0f, 0.0f,  1.0f, 0.0f, 0.0f,  0.0f, 1.0f, 0.0f});
+        // NORMAL
+        WriteFloats(bin, {0.0f, 0.0f, 1.0f,  0.0f, 0.0f, 1.0f,  0.0f, 0.0f, 1.0f});
+        // TEXCOORD_0 — рабочая развёртка
+        WriteFloats(bin, {0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f});
+        // TEXCOORD_1 — ВТОРАЯ, намеренно другая: если движок возьмёт её,
+        // проверка это увидит.
+        WriteFloats(bin, {0.25f, 0.75f,  0.5f, 0.75f,  0.25f, 0.5f});
+        // JOINTS_0 (ubyte x4 на вершину)
+        const unsigned char joints[12] = {0,1,0,0,  0,1,0,0,  0,1,0,0};
+        bin.write(reinterpret_cast<const char*>(joints), sizeof(joints));
+        // WEIGHTS_0
+        WriteFloats(bin, {0.5f,0.5f,0.0f,0.0f,  0.5f,0.5f,0.0f,0.0f,  0.5f,0.5f,0.0f,0.0f});
+        // INDICES + выравнивание до четырёх байт
+        const unsigned short idx[3] = {0, 1, 2};
+        bin.write(reinterpret_cast<const char*>(idx), sizeof(idx));
+        const unsigned short pad = 0;
+        bin.write(reinterpret_cast<const char*>(&pad), sizeof(pad));
+        // inverseBindMatrices: единичная для первой кости, сдвиг на -1 по Y для второй
+        WriteFloats(bin, {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1});
+        WriteFloats(bin, {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,-1,0,1});
+        // Время клипа и два поворота (кватернионы)
+        WriteFloats(bin, {0.0f, 1.0f});
+        WriteFloats(bin, {0,0,0,1,  0.0f, 0.0f, 0.3827f, 0.9239f});
+    }
+
+    const std::string skinAttrs =
+        skinned ? std::string(",\n                     \"JOINTS_0\": 4, \"WEIGHTS_0\": 5")
+                : std::string();
+    const std::string skins =
+        skinned ? std::string("  \"skins\": [{\"inverseBindMatrices\": 7, \"joints\": [1, 2], "
+                              "\"skeleton\": 1}],\n")
+                : std::string();
+    const std::string meshNode =
+        skinned
+            ? std::string("{\"name\": \"RigMeshNode\", \"mesh\": 0, \"skin\": 0, "
+                          "\"scale\": [2, 2, 2]}")
+            : std::string("{\"name\": \"RigMeshNode\", \"mesh\": 0, \"scale\": [2, 2, 2]}");
+
+    static const char* kRigGltf = R"({
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0]}],
+  "nodes": [
+    {"name": "Rig", "children": [1, 3]},
+    {"name": "Bone0", "children": [2]},
+    {"name": "Bone1", "translation": [0, 1, 0]},
+    @MESHNODE@
+  ],
+@SKINS@
+  "meshes": [{"name": "RigMesh", "primitives": [{
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2, "TEXCOORD_1": 3@SKINATTRS@},
+      "indices": 6, "material": 0}]}],
+  "materials": [{"name": "RigMat", "pbrMetallicRoughness": {
+      "baseColorFactor": [0.8, 0.6, 0.2, 1], "metallicFactor": 0, "roughnessFactor": 0.7}}],
+  "animations": [
+    {"name": "Jumpscare",
+     "channels": [{"sampler": 0, "target": {"node": 2, "path": "rotation"}}],
+     "samplers": [{"input": 8, "output": 9, "interpolation": "LINEAR"}]},
+    {"name": "Rig|Idle",
+     "channels": [{"sampler": 0, "target": {"node": 2, "path": "rotation"}}],
+     "samplers": [{"input": 8, "output": 9, "interpolation": "LINEAR"}]}
+  ],
+  "buffers": [{"uri": "@BIN@", "byteLength": 356}],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0,   "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36,  "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72,  "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96,  "byteLength": 24},
+    {"buffer": 0, "byteOffset": 120, "byteLength": 12},
+    {"buffer": 0, "byteOffset": 132, "byteLength": 48},
+    {"buffer": 0, "byteOffset": 180, "byteLength": 6},
+    {"buffer": 0, "byteOffset": 188, "byteLength": 128},
+    {"buffer": 0, "byteOffset": 316, "byteLength": 8},
+    {"buffer": 0, "byteOffset": 324, "byteLength": 32}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "min": [0, 0, 0], "max": [1, 1, 0]},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 4, "componentType": 5121, "count": 3, "type": "VEC4"},
+    {"bufferView": 5, "componentType": 5126, "count": 3, "type": "VEC4"},
+    {"bufferView": 6, "componentType": 5123, "count": 3, "type": "SCALAR"},
+    {"bufferView": 7, "componentType": 5126, "count": 2, "type": "MAT4"},
+    {"bufferView": 8, "componentType": 5126, "count": 2, "type": "SCALAR",
+     "min": [0], "max": [1]},
+    {"bufferView": 9, "componentType": 5126, "count": 2, "type": "VEC4"}
+  ]
+})";
+    std::string text = kRigGltf;
+    auto put = [&text](const std::string& mark, const std::string& value) {
+        const size_t at = text.find(mark);
+        if (at != std::string::npos) text.replace(at, mark.size(), value);
+    };
+    put("@MESHNODE@", meshNode);
+    put("@SKINS@", skins);
+    put("@SKINATTRS@", skinAttrs);
+    put("@BIN@", name + ".bin");
+
+    std::ofstream gltf(dir / (name + ".gltf"));
+    if (!gltf) { err = "не открыть " + name + ".gltf"; return false; }
+    gltf << text;
+    return true;
+}
+
+} // namespace
 
 // ============================================================================
 //  Self-test (SAGE_EDITOR_SELFTEST=1, headless CI)
@@ -130,7 +276,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2252,6 +2398,165 @@ bool EditorLayer::SelfTestSelection() {
             sage::editor::prefs::SetBool("filebrowser.grid", had);
         }
         fs::remove_all(root, ec);
+    }
+
+    // --- ОБЛОЖКИ МОДЕЛИ НЕ ПЕРЕЖИВАЮТ ГРАФИЧЕСКИЙ КОНТЕКСТ ------------------
+    //
+    // Кэш материалов модели держит ТЕКСТУРЫ, а деструктор текстуры зовёт
+    // glDeleteTextures. Пока кэш был статикой внутри функции, он умирал в самом
+    // конце — уже после main, когда контекста нет: редактор падал молча, без
+    // отчёта о падении, стоило закрыть его с моделью в сцене. Со стороны это и
+    // есть «странно работает»: поработал, закрыл — «программа завершилась
+    // некорректно».
+    //
+    // Проверка держится на двух вещах разом: здесь кэш ЗАПОЛНЯЕТСЯ (без этого
+    // падать нечему), а ловит падение код возврата процесса — его сверяет
+    // scripts/ci_smoke_test.sh. Внутри программы поймать это нельзя: падение
+    // случается позже любой проверки.
+    if (ok) {
+        const std::vector<std::shared_ptr<Material>>& preview =
+            AssetPreview::MaterialsForModel(SAGE_TEST_MODEL);
+        if (preview.empty()) {
+            LOG_ERROR("Editor") << "SELFTEST: материалы модели для обложки не прочитались: "
+                                << SAGE_TEST_MODEL;
+            ok = false;
+        }
+    }
+
+    // --- МОДЕЛЬ СО СКЕЛЕТОМ СТАНОВИТСЯ ГОТОВЫМ ПЕРСОНАЖЕМ --------------------
+    //
+    // Что было: файл со скином честно разбирался (кости, клипы), клипы даже
+    // выкладывались файлами .sageanim рядом с моделью — а сущность получала
+    // ОДИН Mesh. Ни компонента Animation, ни назначенного клипа, ни поднятого
+    // скелета: в кадре стояла статуя в позе привязки, и человек справедливо
+    // говорил «модель грузится без костей, анимации нет». Настроить это руками
+    // можно было, только зная три неочевидные вещи разом (см.
+    // ModelMaterialImport.h).
+    //
+    // Проверяется ВЕСЬ путь тем же жестом, каким модель приносят: бросок в
+    // сцену -> компонент Animation -> клип файлом -> живой скелет с привязанным
+    // клипом. И отдельно — что декорации это не касается: модель без костей
+    // компонента получать не должна, иначе он висел бы на каждом камне.
+    if (ok) {
+        std::error_code ec;
+        const fs::path rigDir = m_project.AssetsDir() / "selftest_rig";
+        fs::remove_all(rigDir, ec);
+        std::string rigErr;
+        if (!WriteRigFixture(rigDir, "rig", true, rigErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: не записать эталон скелетной модели: " << rigErr;
+            ok = false;
+        } else {
+            sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+            const size_t before = m_scene->Count();
+            if (!AddAssetToScene(rigDir / "rig.gltf") || m_scene->Count() != before + 1) {
+                LOG_ERROR("Editor") << "SELFTEST: скелетная модель не встала в сцену";
+                ok = false;
+            } else {
+                entt::registry& reg = m_scene->Registry();
+                const entt::entity e = m_scene->Get(m_selectedId).Entity();
+                const AnimationComponent* am = reg.try_get<AnimationComponent>(e);
+                if (!am) {
+                    LOG_ERROR("Editor") << "SELFTEST: у модели со скелетом нет компонента Animation";
+                    ok = false;
+                } else if (am->ClipPath.empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: клип не назначен (в модели их два)";
+                    ok = false;
+                } else if (am->ClipPath.find("Idle") == std::string::npos) {
+                    // «Jumpscare» в файле ПЕРВЫЙ — значит, взять первый попавшийся
+                    // мало: персонаж встречал бы человека прыжком.
+                    LOG_ERROR("Editor") << "SELFTEST: клипом по умолчанию взят не Idle, а "
+                                        << am->ClipPath;
+                    ok = false;
+                } else if (!fs::exists(sage::AssetDatabase::Instance().LocatePath(am->ClipPath), ec)) {
+                    LOG_ERROR("Editor") << "SELFTEST: файла клипа нет на диске: " << am->ClipPath;
+                    ok = false;
+                }
+
+                // Скелет обязан ПОДНЯТЬСЯ, а клип — лечь на него. Назначенный
+                // файл сам по себе ничего не значит: клип от другого персонажа
+                // тоже назначается, и играет при этом половина костей.
+                if (ok) {
+                    sage::anim::UpdateAnimators(*m_scene, 0.016f);
+                    const AnimationComponent& live = reg.get<AnimationComponent>(e);
+                    if (!live.Model || live.Model->GetSkeleton().Count() != 2) {
+                        LOG_ERROR("Editor") << "SELFTEST: скелет не поднялся (костей "
+                                            << (live.Model ? live.Model->GetSkeleton().Count() : -1)
+                                            << ", ожидалось 2)";
+                        ok = false;
+                    } else if (live.OwnClips.empty() || live.MissingBones != 0) {
+                        LOG_ERROR("Editor") << "SELFTEST: клип не лёг на скелет (клипов "
+                                            << live.OwnClips.size() << ", костей мимо "
+                                            << live.MissingBones << ")";
+                        ok = false;
+                    }
+                }
+
+                // РАЗВЁРТКА. В эталоне их две, и вторая намеренно другая:
+                // движок обязан взять TEXCOORD_0. Перепутанная развёртка — это
+                // «текстура наехала не туда», и на одной развёртке поймать это
+                // нечем.
+                if (ok) {
+                    const std::shared_ptr<sage::render::SkinnedModel> rig =
+                        ResourceManager::Instance().GetSkinnedModel(
+                            m_project.AssetRef(rigDir / "rig.gltf"));
+                    const std::shared_ptr<Mesh> asStatic =
+                        ResourceManager::Instance().GetModel(m_project.AssetRef(rigDir / "rig.gltf"));
+                    const std::vector<Vertex>* verts = asStatic ? asStatic->CpuVertices() : nullptr;
+                    if (!rig || !verts || verts->size() != 3) {
+                        LOG_ERROR("Editor") << "SELFTEST: эталон скелетной модели не читается "
+                                            << "статическим загрузчиком";
+                        ok = false;
+                    } else {
+                        // Вершина 1 в TEXCOORD_0 = (1,0), в TEXCOORD_1 = (0.5,0.75).
+                        const glm::vec2 uv = (*verts)[1].TexCoords;
+                        if (std::abs(uv.x - 1.0f) > 1e-3f || std::abs(uv.y) > 1e-3f) {
+                            LOG_ERROR("Editor") << "SELFTEST: взята не та развёртка: uv=("
+                                                << uv.x << ", " << uv.y << "), ожидалось (1, 0)";
+                            ok = false;
+                        }
+                        // ТРАНСФОРМ УЗЛА У СКИНА НЕ ПРИМЕНЯЕТСЯ (см.
+                        // GltfImporter.cpp). В эталоне у узла меша масштаб 2, и
+                        // вершина 1 обязана остаться на x = 1: иначе
+                        // статическая копия (контур выделения, габариты,
+                        // попадание мышью) вдвое разойдётся с тем, что рисует
+                        // скелетный проход.
+                        const float x = (*verts)[1].Position.x;
+                        if (std::abs(x - 1.0f) > 1e-3f) {
+                            LOG_ERROR("Editor") << "SELFTEST: у скина применён трансформ узла: "
+                                                << "x=" << x << ", ожидалось 1";
+                            ok = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Декорация без костей компонента анимации НЕ получает: иначе Animation
+        // висел бы на каждом камне, а инспектор персонажа перестал бы
+        // отличаться от инспектора забора.
+        if (ok && WriteRigFixture(rigDir, "plain", false, rigErr)) {
+            const fs::path plain = rigDir / "plain.gltf";
+            sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+            if (AddAssetToScene(plain)) {
+                const entt::entity e = m_scene->Get(m_selectedId).Entity();
+                if (m_scene->Registry().all_of<AnimationComponent>(e)) {
+                    LOG_ERROR("Editor") << "SELFTEST: модели БЕЗ костей навесили Animation";
+                    ok = false;
+                }
+                // А вот у обычного узла трансформ применяться ОБЯЗАН: правило
+                // выше касается только скина, и «не применять никогда» сломало
+                // бы любую сцену, собранную из узлов с поворотами и сдвигами.
+                const std::shared_ptr<Mesh> mesh =
+                    ResourceManager::Instance().GetModel(m_project.AssetRef(plain));
+                const std::vector<Vertex>* pv = mesh ? mesh->CpuVertices() : nullptr;
+                if (pv && pv->size() == 3 && std::abs((*pv)[1].Position.x - 2.0f) > 1e-3f) {
+                    LOG_ERROR("Editor") << "SELFTEST: у обычного узла потерян трансформ: x="
+                                        << (*pv)[1].Position.x << ", ожидалось 2";
+                    ok = false;
+                }
+            }
+        }
+        fs::remove_all(rigDir, ec);
     }
 
     // --- Обложки картинок: фоном, уменьшенными, с сохранением пропорций --------

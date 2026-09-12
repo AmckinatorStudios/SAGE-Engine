@@ -124,7 +124,11 @@ private:
     // animated — модель этого объекта рисует скелетный проход. Тогда пустой
     // MeshPtr это НОРМА, а не «модель не загрузилась»: статическую копию
     // такому объекту не грузят намеренно (см. загрузчик сцены).
-    void DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, bool animated);
+    // Сущность целиком, а не только её MeshRenderer: модель со скелетом
+    // приносит с собой компонент Animation (см. ModelMaterialImport.h), и
+    // поставить её, имея на руках один MeshRenderer, нельзя.
+    void DrawMeshSlot(EditorHost& host, entt::entity entity, MeshRendererComponent& mr,
+                      bool animated);
     void DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr);
     // Слоты материалов по ЧАСТЯМ модели (см. sage::render::Submesh). Рисуются
     // только у моделей, которые разметку несут: у куба и одноматериального
