@@ -317,7 +317,8 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, b
         const MeshRef::Type chosen = (MeshRef::Type)kind;
         if (chosen != MeshRef::Type::Model) {
             // Примитив вместо модели: путь и слоты её частей уходят вместе с ней.
-            SetEntityMesh(mr, chosen, {}, ResourceManager::Instance().GetPrimitive(chosen));
+            SetEntityMesh(host.CurrentProject(), mr, chosen, {},
+                          ResourceManager::Instance().GetPrimitive(chosen));
         } else {
             mr.Ref.type = chosen;   // Model — путь задаётся ниже и грузится кнопкой
         }
@@ -336,7 +337,7 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, MeshRendererComponent& mr, b
             host.PushUndoSnapshot();
             // Сам меш подгружается ниже (m_pendingMeshLoad) — здесь важно, что
             // вместе со сменой модели сбрасываются слоты её частей.
-            SetEntityMesh(mr, MeshRef::Type::Model, r.Path, nullptr);
+            SetEntityMesh(host.CurrentProject(), mr, MeshRef::Type::Model, r.Path, nullptr);
             if (!r.Cleared) m_pendingMeshLoad = true;
         }
         if (r.BrowseRequested) {

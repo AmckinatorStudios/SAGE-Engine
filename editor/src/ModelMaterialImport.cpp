@@ -168,6 +168,36 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     // разложил тридцать семь материалов, и когда не разложил ни одного. Поэтому
     // на вопрос «почему модель белая» ответа в логе не было вовсе — там про неё
     // не было ни строчки.
+    // КАКИЕ КАРТЫ ПРИЕХАЛИ — поимённо. «Загружается только albedo» — это первое,
+    // что замечают, и до сих пор проверить это можно было лишь глазами по
+    // слотам: набор, в котором лежат одни diffuse-текстуры, и движок, потерявший
+    // остальные карты, выглядят совершенно одинаково.
+    int withAlbedo = 0, withNormal = 0, withMetallic = 0, withRoughness = 0, withAO = 0,
+        withEmissive = 0;
+    for (const ModelLoader::ExtractedMaterial& m : set.Materials) {
+        if (!m.AlbedoMap.empty()) ++withAlbedo;
+        if (!m.NormalMap.empty()) ++withNormal;
+        if (!m.MetallicMap.empty()) ++withMetallic;
+        if (!m.RoughnessMap.empty()) ++withRoughness;
+        if (!m.AOMap.empty()) ++withAO;
+        if (!m.EmissiveMap.empty()) ++withEmissive;
+    }
+    std::string maps;
+    auto note = [&maps](const char* name, int n) {
+        if (n == 0) return;
+        if (!maps.empty()) maps += ", ";
+        maps += name;
+        maps += " " + std::to_string(n);
+    };
+    note("albedo", withAlbedo);
+    note("normal", withNormal);
+    note("metallic", withMetallic);
+    note("roughness", withRoughness);
+    note("AO", withAO);
+    note("emissive", withEmissive);
+    LOG_INFO("Материалы") << "Карты модели " << mr.Ref.path << ": "
+                          << (maps.empty() ? std::string("НИ ОДНОЙ — в файле только цвета") : maps);
+
     LOG_INFO("Материалы") << "Модель " << mr.Ref.path << ": частей " << submeshes.size()
                           << ", материалов в файле " << set.Materials.size()
                           << ", назначено " << result.Assigned
@@ -182,8 +212,9 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     return result;
 }
 
-void SetEntityMesh(MeshRendererComponent& mr, MeshRef::Type type, const std::string& path,
-                   std::shared_ptr<Mesh> mesh) {
+ModelMaterialImportResult SetEntityMesh(const Project& project, MeshRendererComponent& mr,
+                                        MeshRef::Type type, const std::string& path,
+                                        std::shared_ptr<Mesh> mesh) {
     const bool sameModel = mr.Ref.type == type && mr.Ref.path == path;
     mr.Ref.type = type;
     mr.Ref.path = path;
@@ -191,4 +222,10 @@ void SetEntityMesh(MeshRendererComponent& mr, MeshRef::Type type, const std::str
     // Слоты — это материалы частей ЭТОЙ модели. Другая модель — другие части, и
     // старые слоты покрасили бы их наугад.
     if (!sameModel) mr.Slots.clear();
+
+    // И сразу материалы (см. заголовок о том, почему именно здесь). Примитиву
+    // импортировать нечего, а модель без загруженного меша не даёт разметки —
+    // её материалы подберутся вместе с загрузкой.
+    if (type != MeshRef::Type::Model || !mr.MeshPtr) return {};
+    return ImportModelMaterials(project, mr);
 }

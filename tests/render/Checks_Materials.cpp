@@ -469,6 +469,160 @@ void TestTextureAssignedAfterLoadReachesTheMaterial() {
     fs::remove_all(dir, ec);
 }
 
+
+// --- КАЖДАЯ КАРТА МАТЕРИАЛА ДОХОДИТ ДО КАДРА ---------------------------------
+//
+// Жалоба: «в материалах загружается только albedo, остальные не работают».
+// Проверить это одним взглядом нельзя: карта, которая не доехала, не оставляет
+// ни ошибки, ни пустого слота — кадр просто выглядит так, будто её и не
+// назначали. Поэтому здесь каждая карта проверяется ОТДЕЛЬНО и по своему
+// признаку: назначили — кадр обязан измениться именно так, как эта карта
+// работает.
+//
+// Проверок пять, а не одна общая, чтобы по упавшей было видно, КАКАЯ карта
+// потерялась: «материал сломался» — это не диагноз.
+void TestEveryMapReachesTheFrame(FrameRenderer& r) {
+    std::printf("=== Материал: карты, а не только albedo ===\n");
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "sage_mat_maps";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+
+    // Однотонная картинка заданного цвета: карты движка читаются из R-канала
+    // (metallic/roughness/AO), а albedo и emissive — целиком.
+    auto solid = [&](const char* name, int rr, int gg, int bb) {
+        Image img;
+        img.Width = img.Height = 8;
+        img.Pixels.assign((size_t)img.Width * img.Height * 3, 0);
+        for (int i = 0; i < img.Width * img.Height; ++i) {
+            img.Pixels[(size_t)i * 3 + 0] = (unsigned char)rr;
+            img.Pixels[(size_t)i * 3 + 1] = (unsigned char)gg;
+            img.Pixels[(size_t)i * 3 + 2] = (unsigned char)bb;
+        }
+        const std::filesystem::path p = dir / name;
+        return SavePng(p.string(), img) ? p.string() : std::string();
+    };
+
+    const std::string white = solid("white.png", 255, 255, 255);
+    const std::string black = solid("black.png", 8, 8, 8);
+    const std::string green = solid("green.png", 20, 220, 20);
+    if (white.empty() || black.empty() || green.empty()) {
+        std::printf("       картинки не записаны — проверка пропущена\n");
+        CountFail();
+        return;
+    }
+
+    GameObject ball;
+    std::unique_ptr<Scene> scene = MakeMaterialScene(ball);
+    auto material = std::make_shared<Material>();
+    material->Albedo = {1.0f, 1.0f, 1.0f};
+    material->Metallic = 1.0f;   // фактор на максимум: карта его УМНОЖАЕТ
+    material->Roughness = 1.0f;
+    ball.Renderer().MaterialPtr = material;
+
+    ResourceManager& rm = ResourceManager::Instance();
+    auto shoot = [&]() {
+        rm.ResolveMaterialTextures(*material);
+        return BallColor(Shot(r, *scene));
+    };
+    auto luma = [](const glm::vec3& c) { return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b; };
+
+    // --- 1. Albedo: цвет шара становится цветом карты ------------------------
+    const glm::vec3 plain = shoot();
+    material->TexturePath = green;
+    const glm::vec3 withAlbedo = shoot();
+    Check(withAlbedo.g > withAlbedo.r + 0.05f && withAlbedo.g > plain.g - 1.0f,
+          "albedo-карта красит шар");
+    material->TexturePath.clear();
+
+    // --- 2. Metallic: металл при том же свете темнее диэлектрика -------------
+    //
+    // У металла нет диффузного отражения — он виден только бликом и отражением
+    // окружения. Карта с чёрным R гасит металличность до нуля, то есть
+    // возвращает диэлектрик; белая оставляет металл.
+    material->MetallicMapPath = black;
+    const float dielectric = luma(shoot());
+    material->MetallicMapPath = white;
+    const float metal = luma(shoot());
+    std::printf("       metallic: карта чёрная %.3f, белая %.3f\n", dielectric, metal);
+    Check(std::abs(dielectric - metal) > 0.02f, "metallic-карта доходит до шейдера");
+    material->MetallicMapPath.clear();
+
+    // --- 3. Roughness: гладкое даёт узкий яркий блик, шероховатое — размытый --
+    //
+    // Мерится ПО САМОМУ ЯРКОМУ пикселю шара, а не по среднему пятну: шероховатость
+    // двигает блик, а блик — это десяток пикселей, который в среднем по пятну
+    // тонет. Среднее здесь давало разницу в три тысячных и объявляло рабочую
+    // карту сломанной.
+    //
+    // И на МЕТАЛЛЕ: у диэлектрика зеркальная составляющая мала, у металла она
+    // единственная, и шероховатость на нём видна во всю силу.
+    auto brightest = [&]() {
+        const Image img = Shot(r, *scene);
+        float best = 0.0f;
+        for (int y = (int)(img.Height * 0.30f); y < (int)(img.Height * 0.62f); ++y)
+            for (int x = (int)(img.Width * 0.36f); x < (int)(img.Width * 0.64f); ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                const float l = (0.2126f * img.Pixels[i] + 0.7152f * img.Pixels[i + 1] +
+                                 0.0722f * img.Pixels[i + 2]) / 255.0f;
+                best = std::max(best, l);
+            }
+        return best;
+    };
+    material->Metallic = 1.0f;
+    material->RoughnessMapPath = black;
+    rm.ResolveMaterialTextures(*material);
+    const float smooth = brightest();
+    material->RoughnessMapPath = white;
+    rm.ResolveMaterialTextures(*material);
+    const float rough = brightest();
+    std::printf("       roughness: карта чёрная %.3f, белая %.3f (по яркому пикселю)\n", smooth,
+                rough);
+    Check(std::abs(smooth - rough) > 0.02f, "roughness-карта доходит до шейдера");
+    material->RoughnessMapPath.clear();
+    material->Metallic = 0.0f;
+
+    // --- 4. AO: затенение умножает непрямой свет ------------------------------
+    material->AOMapPath = white;
+    const float lit = luma(shoot());
+    material->AOMapPath = black;
+    const float occluded = luma(shoot());
+    std::printf("       AO: карта белая %.3f, чёрная %.3f\n", lit, occluded);
+    Check(occluded < lit - 0.002f, "AO-карта затемняет непрямой свет");
+    material->AOMapPath.clear();
+
+    // --- 5. Emissive: свечение добавляется поверх освещения -------------------
+    const float unlit = luma(shoot());
+    material->Emissive = {1.0f, 1.0f, 1.0f};
+    material->EmissiveMap = green;
+    const glm::vec3 glow = shoot();
+    std::printf("       emissive: без карты %.3f, с картой %.3f\n", unlit, luma(glow));
+    Check(luma(glow) > unlit + 0.02f && glow.g > glow.r + 0.05f,
+          "emissive-карта светится своим цветом");
+    material->EmissiveMap.clear();
+    material->Emissive = {0.0f, 0.0f, 0.0f};
+
+    // --- 6. Normal: карта разворачивает нормали и меняет затенение ------------
+    //
+    // Ровная карта (128,128,255) — это «нормаль как есть», и кадр с ней обязан
+    // совпасть с кадром без карты. Наклонная — обязан отличаться. Так проверка
+    // отличает РАБОТАЮЩУЮ карту от карты, которая просто игнорируется: второе
+    // тоже даёт «кадр не изменился».
+    const glm::vec3 noNormal = shoot();
+    material->NormalMapPath = solid("flat_n.png", 128, 128, 255);
+    const glm::vec3 flatNormal = shoot();
+    material->NormalMapPath = solid("tilt_n.png", 235, 128, 140);
+    const glm::vec3 tiltNormal = shoot();
+    std::printf("       normal: без карты %.3f, ровная %.3f, наклонная %.3f\n", luma(noNormal),
+                luma(flatNormal), luma(tiltNormal));
+    Check(std::abs(luma(flatNormal) - luma(noNormal)) < 0.05f, "ровная normal-карта ничего не меняет");
+    Check(std::abs(luma(tiltNormal) - luma(flatNormal)) > 0.01f,
+          "наклонная normal-карта меняет затенение");
+
+    rm.Clear();
+    std::filesystem::remove_all(dir, ec);
+}
+
 void RunMaterialChecks(FrameRenderer& r) {
     TestMaterialPaintsAndUpdatesLive(r);
     TestEditingByAnotherSpellingReachesTheObject(r);
@@ -478,6 +632,7 @@ void RunMaterialChecks(FrameRenderer& r) {
     TestEmissiveShows(r);
     TestAlbedoMapAndTiling(r);
     TestTextureAssignedAfterLoadReachesTheMaterial();
+    TestEveryMapReachesTheFrame(r);
 }
 
 } // namespace sage::rendertest

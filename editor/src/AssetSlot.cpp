@@ -201,7 +201,13 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     // абсолютными координатами поверх, и без резерва следующий виджет лёг бы на
     // слот. Кнопки подаются позже фона и поэтому получают наведение первыми.
     ImGui::Dummy(ImVec2(width, height));
-    const ImGuiID slotId = ImGui::GetItemID();
+    // ИДЕНТИФИКАТОР БЕРЁТСЯ У СТЕКА, А НЕ У Dummy. Dummy добавляет элемент с
+    // НУЛЕВЫМ id, поэтому GetItemID() отдавал ноль у КАЖДОГО слота, а
+    // BeginDragDropTargetCustom нулевой id запрещает прямо (IM_ASSERT(id != 0)):
+    // в отладочной сборке это падение, в обычной — общая цель приёма на все
+    // слоты сразу, и стоит им перекрыться, как бросок уезжает не в тот слот.
+    // GetID даёт свой id каждому слоту: в стеке уже лежит его имя.
+    const ImGuiID slotId = ImGui::GetID("##slotdrop");
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(1, 1, 1, 0.045f)), 6.0f);

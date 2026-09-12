@@ -8,6 +8,7 @@
 #include <functional>
 #include <set>
 
+#include "ModelMaterialImport.h"
 #include "sage/core/Layer.h"
 #include "sage/core/Log.h"
 #include "sage/render/Shader.h"
@@ -344,7 +345,9 @@ private:
     bool m_recoveryPrompt = false;
 
     // Достаёт материал из файла модели и назначает его меш-рендеру (см. .cpp).
-    void AssignModelMaterial(MeshRendererComponent& mr);
+    // Сообщает человеку, чем кончился импорт материалов модели (строка
+    // состояния + лог). Сам импорт делает SetEntityMesh — см. ModelMaterialImport.h.
+    void ReportModelMaterials(const ModelMaterialImportResult& r);
     void DrawRecoveryPrompt();
     // Окно отчёта о ПРОШЛОМ падении: показывается один раз при запуске, если
     // рядом лежит sage-crash-*.txt (см. FindCrashReport).
