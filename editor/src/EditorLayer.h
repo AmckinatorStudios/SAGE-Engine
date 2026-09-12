@@ -205,7 +205,7 @@ public:
         }
     }
     uint64_t ViewTexture(int slot) const override { return m_renderer.ViewportTexture(slot); }
-    bool OpenFileInSystemEditor(const std::filesystem::path& path) override;
+    bool OpenFileInSystemEditor(const std::filesystem::path& path, int line = 0) override;
     void PickAtViewport(float u, float v, bool additive = false) override;
     bool DropAssetAtViewport(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                              const std::filesystem::path& asset) override;

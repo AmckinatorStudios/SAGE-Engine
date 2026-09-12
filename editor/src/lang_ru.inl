@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1392.
+// Язык: Русский. Строк: 1399.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -218,6 +218,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Применить заготовку…"},
     {"Argument",
      "Аргумент"},
+    {"As the system opens it",
+     "Как откроет система"},
     {"Aspect Ratio",
      "Соотношение сторон"},
     {"Asset",
@@ -486,6 +488,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Верх облаков"},
     {"Clouds",
      "Облака"},
+    {"Code editor",
+     "Редактор кода"},
+    {"Code editors: ",
+     "Редакторов кода: "},
     {"Collapse",
      "Свернуть повторы"},
     {"Collapse the tools",
@@ -1440,6 +1446,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Нет компонента Animation — цели ни на что не влияют"},
     {"No animation clips (bind pose)",
      "Клипов анимации нет (поза привязки)"},
+    {"No code editors found on this machine",
+     "На этой машине редакторов кода не найдено"},
     {"No controls yet — the action can never fire. Add one.",
      "Кнопок нет — действие не сработает никогда. Добавьте хотя бы одну."},
     {"No cover: the prefab has no visible geometry",
@@ -1552,6 +1560,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Здесь перечислены только элементы интерфейса.\nОстальная сцена — в иерархии."},
     {"Only the folders and an empty scene",
      "Только структура папок и пустая сцена"},
+    {"Only what is actually installed is listed",
+     "Показано только то, что действительно установлено"},
     {"Opacity",
      "Непрозрачность"},
     {"Open",
@@ -2054,6 +2064,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт назначен: "},
     {"Scripts (*.lua)",
      "Скрипты (*.lua)"},
+    {"Scripts reloaded: ",
+     "Скриптов перечитано: "},
+    {"Search again",
+     "Найти заново"},
     {"Search commands...",
      "Поиск команд..."},
     {"Search projects...   Ctrl+K",

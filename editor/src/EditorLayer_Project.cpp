@@ -13,6 +13,7 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "CodeEditorApp.h"
 #include "ProjectLauncher/ProjectDatabase.h"
 #include "sage/assets/Pack.h"
 
@@ -96,10 +97,14 @@ constexpr float kStatusBarHeight = 26.0f;
 //  Сцена / проект
 // ============================================================================
 
-bool EditorLayer::OpenFileInSystemEditor(const fs::path& path) {
-    // Через ту же функцию, которой лаунчер показывает папку проекта: «открой
-    // это тем, чем открываешь обычно» — одна просьба к системе на оба случая.
-    // Свой редактор кода из SAGE убран (см. EditorHost::OpenFileInSystemEditor).
+bool EditorLayer::OpenFileInSystemEditor(const fs::path& path, int line) {
+    // Сначала ВЫБРАННЫЙ редактор (VS Code, CLion, Sublime…): он один умеет
+    // встать на нужную строку, и он один точно установлен — в списке только то,
+    // что нашлось на этой машине (см. CodeEditorApp.h).
+    if (sage::editor::codeapp::Open(path, line)) return true;
+
+    // Запасной путь — системная ассоциация. Той же функцией, которой лаунчер
+    // показывает папку проекта: «открой это тем, чем открываешь обычно».
     const bool ok = Sage::Launcher::OpenWithSystem(path);
     if (!ok) LOG_WARN("Editor") << "Система не открыла файл: " << path.string();
     return ok;

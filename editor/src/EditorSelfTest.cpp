@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
 #include "EditorIcons.h"
+#include "CodeEditorApp.h"
 #include "AssetSlot.h"
 #include "panels/AssetsPanel.h"
 
@@ -126,7 +127,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + model-pack + anim-clips + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2207,6 +2208,89 @@ bool EditorLayer::SelfTestSelection() {
             sage::editor::prefs::SetBool("filebrowser.grid", had);
         }
         fs::remove_all(root, ec);
+    }
+
+    // --- Чем открывать код: список и подстановка строки ------------------------
+    //
+    // Список редакторов обязан содержать ТОЛЬКО установленное: пункт «Visual
+    // Studio Code» у человека без VS Code — обещание, которое не выполнится, и
+    // выглядит это как «кнопка не работает». А подстановка {file}/{line} —
+    // единственное, ради чего вообще нужен выбор IDE вместо системной
+    // ассоциации: ошибка приходит как «hero.lua:42», и искать строку глазами
+    // после открытия файла — та самая работа, которую должен делать редактор.
+    if (ok) {
+        namespace codeapp = sage::editor::codeapp;
+        const fs::path file = "/tmp/sage selftest/hero.lua";   // с пробелом — как у человека
+
+        // {file} обязан приехать В КАВЫЧКАХ: путь с пробелом («SAGE Projects»)
+        // иначе разъезжается по аргументам, и редактор открывает «SAGE».
+        const std::string withLine = codeapp::ExpandArgs("-g {file}:{line}", file, 42);
+        if (withLine.find("42") == std::string::npos ||
+            withLine.find("hero.lua") == std::string::npos ||
+            withLine.find(' ') == std::string::npos) {
+            LOG_ERROR("Editor") << "SELFTEST: code editor arguments expand wrong: " << withLine;
+            ok = false;
+        }
+        // Без строки шаблон её и не упоминает — подставлять нечего и некуда.
+        if (ok && codeapp::ExpandArgs("{file}", file, 0).find("42") != std::string::npos) {
+            LOG_ERROR("Editor") << "SELFTEST: a line number leaked into a line-less pattern";
+            ok = false;
+        }
+        // В списке — только то, что нашлось: у каждого пункта есть команда, и
+        // пустого имени быть не может (по нему человек его узнаёт в меню).
+        for (const codeapp::App& app : codeapp::Available()) {
+            if (app.Id.empty() || app.Name.empty() || app.Command.empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: a code editor entry is incomplete";
+                ok = false;
+                break;
+            }
+        }
+        // Выбор живёт в настройках РЕДАКТОРА и переживает закрытие меню.
+        if (ok) {
+            const std::string had = codeapp::CurrentId();
+            codeapp::SetCurrent("vscode");
+            const bool kept = codeapp::CurrentId() == "vscode";
+            codeapp::SetCurrent("");
+            const bool cleared = codeapp::CurrentId().empty();
+            codeapp::SetCurrent(had);
+            if (!kept || !cleared) {
+                LOG_ERROR("Editor") << "SELFTEST: the chosen code editor is not remembered";
+                ok = false;
+            }
+        }
+    }
+
+    // --- Правка скрипта видна БЕЗ перезапуска игры -----------------------------
+    //
+    // Скрипты правят во внешнем редакторе, и правка не значила ничего, пока игру
+    // не перезапустят: цикл «поправил число — посмотрел» стоил прохождения
+    // уровня заново. Здесь проверяется связка целиком — со стороны редактора, а
+    // не только двигателя скриптов: правка файла в проекте обязана доехать.
+    if (ok) {
+        ScriptEngine se;
+        se.BindScene(*m_scene);
+        GameObject probe = m_scene->CreateObject("SelfTestHotReload");
+        const fs::path script = m_project.AssetsDir() / "selftest_hotreload.lua";
+        { std::ofstream f(script); f << "function OnStart(e) _G.SELFTEST_HOT = 1 end\n"; }
+
+        se.AttachScript(probe, script.string());
+        if (se.Lua()["SELFTEST_HOT"].get<int>() != 1) {
+            LOG_ERROR("Editor") << "SELFTEST: script did not run on attach";
+            ok = false;
+        }
+        if (ok) {
+            { std::ofstream f(script); f << "function OnStart(e) _G.SELFTEST_HOT = 2 end\n"; }
+            // Штамп сдвигается ЯВНО: у времени правки есть зернистость, и
+            // полагаться на «прошло достаточно» в проверке нельзя.
+            const auto when = fs::last_write_time(script, ec);
+            fs::last_write_time(script, when + std::chrono::seconds(5), ec);
+            if (se.ReloadChangedScripts() != 1 || se.Lua()["SELFTEST_HOT"].get<int>() != 2) {
+                LOG_ERROR("Editor") << "SELFTEST: an edited script was not picked up";
+                ok = false;
+            }
+        }
+        m_scene->RemoveObject(probe.Id());
+        fs::remove(script, ec);
     }
 
     // --- Звук живёт в режиме ПРАВКИ, а не только в игре ------------------------
