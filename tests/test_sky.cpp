@@ -22,6 +22,7 @@
 
 #include "sage/ecs/CameraLightComponents.h"
 #include "sage/ecs/LightSystem.h"
+#include "sage/render/SkyDraw.h"
 #include "sage/render/SkyModel.h"
 #include "sage/render/Skybox.h"
 #include "sage/scene/Light.h"
@@ -180,6 +181,54 @@ TEST(Ambient_from_sky_follows_the_sky) {
     env.ResolveAmbient(sky, ground);
     // Небо голубое, а «свои значения» красные — берётся именно небо.
     CHECK_TRUE(sky.b > sky.r);
+}
+
+// --- 7b. НЕБА НЕТ — И СВЕТА ОТ НЕГО НЕТ --------------------------------------
+//
+// Ровно то, из-за чего сцена оставалась освещённой неизвестно чем: человек
+// выключал небо, удалял ВСЕ источники света — и всё равно всё видел. Причина
+// была в молчаливой подстановке: «от неба» при выключенном небе брало поля
+// SkyColor/GroundColor, а они по умолчанию голубые и ненулевые.
+TEST(Ambient_from_sky_is_black_without_a_sky) {
+    LightingEnvironment env = EnvWithSunAt(45.0f);
+    env.AmbientMode = LightingEnvironment::AmbientSource::FromSky;
+    env.SkyColor = glm::vec3(0.9f, 0.9f, 0.9f);   // эти поля — чужого режима
+    env.GroundColor = glm::vec3(0.9f, 0.9f, 0.9f);
+    sage::render::ApplySky(env);
+    env.Skybox.Enabled = false;
+
+    glm::vec3 sky, ground;
+    env.ResolveAmbient(sky, ground);
+    CHECK_NEAR(sky.r, 0.0f, 1e-6f);
+    CHECK_NEAR(sky.g, 0.0f, 1e-6f);
+    CHECK_NEAR(sky.b, 0.0f, 1e-6f);
+    CHECK_NEAR(ground.r, 0.0f, 1e-6f);
+    CHECK_NEAR(ground.b, 0.0f, 1e-6f);
+
+    // А художественный свет без неба никуда не делся: он живёт в «своих
+    // значениях», и выключенное небо его не трогает.
+    env.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    env.ResolveAmbient(sky, ground);
+    CHECK_NEAR(sky.r, 0.9f, 1e-5f);
+    CHECK_NEAR(ground.b, 0.9f, 1e-5f);
+}
+
+// Заливка кадра — тем же правилом: выключенное небо выглядит как ЕГО
+// ОТСУТСТВИЕ, то есть чернота. Раньше здесь стоял SkyColor, и «небо выключено»
+// оставалось голубым — то есть небо не исчезало, а становилось плоским.
+TEST(Frame_clears_to_black_without_a_sky) {
+    LightingEnvironment env;
+    env.SkyColor = glm::vec3(0.5f, 0.6f, 0.9f);
+
+    env.Skybox.Enabled = false;
+    const glm::vec3 off = sage::render::SceneClearColor(env);
+    CHECK_NEAR(off.r, 0.0f, 1e-6f);
+    CHECK_NEAR(off.g, 0.0f, 1e-6f);
+    CHECK_NEAR(off.b, 0.0f, 1e-6f);
+
+    env.Skybox.Enabled = true;
+    const glm::vec3 on = sage::render::SceneClearColor(env);
+    CHECK_TRUE(on.b > 0.5f);
 }
 
 // --- 8. Режим неба переживает запись и чтение --------------------------------

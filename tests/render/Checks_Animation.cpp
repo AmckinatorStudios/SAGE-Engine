@@ -85,6 +85,10 @@ void TestMorphTargets(FrameRenderer& r) {
     scene->Lighting.SkyColor = {0.40f, 0.48f, 0.64f};
     scene->Lighting.GroundColor = {0.20f, 0.17f, 0.15f};
     scene->Lighting.AmbientStrength = 0.40f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     GameObject character = scene->CreateObject("Character");
@@ -266,6 +270,10 @@ void TestAnimationUsesMeshModel(FrameRenderer& r) {
     auto scene = std::make_unique<Scene>("MeshAnimation");
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.35f));
     scene->Lighting.Sun.Intensity = 1.2f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     GameObject hero = scene->CreateObject("Hero");
@@ -301,6 +309,94 @@ void TestAnimationUsesMeshModel(FrameRenderer& r) {
     mr.Ref.type = MeshRef::Type::None;
     sage::anim::UpdateAnimators(*scene, 0.0f);
     Check(am.ResolvedFrom.empty(), "смена модели в Mesh переинициализирует скелет");
+}
+
+// --- ПЕРСОНАЖ УЧАСТВУЕТ В ОТЛАДОЧНЫХ ВИДАХ КАДРА -----------------------------
+//
+// Разбор кадра по слагаемым (нормали, шероховатость, металличность…) существует
+// затем, чтобы отвечать на вопрос «почему выглядит не так». Скелетный проход
+// про эти виды не знал вовсе: в шейдере руками разбирались два номера из
+// одиннадцати, а сам номер туда даже не передавался — uShadingMode оставался
+// нулём при любом выборе в редакторе. На экране это выглядело так: включаешь
+// «Нормали», всё вокруг становится цветным, и посреди этого стоит обычный
+// освещённый персонаж — то есть главное, что в кадре есть, из разбора выпадало.
+//
+// Проверяется СВОЙСТВО: кадр в режиме «Нормали» обязан отличаться от обычного
+// именно на персонаже, и цвета в нём — это нормали (сине-зелёная гамма
+// N*0.5+0.5), а не albedo модели.
+void TestSkinnedDebugView(FrameRenderer& r) {
+    const char* model =
+#ifdef SAGE_TEST_MODEL
+        SAGE_TEST_MODEL;
+#else
+        "assets/test_model.glb";
+#endif
+
+    auto scene = std::make_unique<Scene>("SkinnedDebugView");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.35f));
+    scene->Lighting.Sun.Intensity = 1.4f;
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.Skybox.Enabled = false;
+
+    GameObject hero = scene->CreateObject("Hero");
+    MeshRendererComponent& mr = scene->Registry().emplace<MeshRendererComponent>(hero.Entity());
+    mr.Ref.type = MeshRef::Type::Model;
+    mr.Ref.path = model;
+    AnimationComponent anim;
+    anim.Playing = false;
+    scene->Registry().emplace<AnimationComponent>(hero.Entity(), std::move(anim));
+    sage::anim::UpdateAnimators(*scene, 0.0f);
+    if (!scene->Registry().get<AnimationComponent>(hero.Entity()).Model) {
+        Check(false, "скелетная модель для отладочного вида загрузилась");
+        return;
+    }
+
+    auto frameWithMode = [&](int shadingMode) {
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        Framebuffer fbo(kW, kH);
+        fbo.Bind();
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        sage::anim::DrawAnimatedModels(*scene, TestView(), PerspectiveProj(), kEye, env,
+                                       ShadowBinding(), nullptr, shadingMode);
+        Image img = Capture(kW, kH);
+        device.BindDefaultFramebuffer();
+        return img;
+    };
+
+    const Image shaded = frameWithMode(0);
+    const Image normals = frameWithMode(2);   // DebugView::Normals
+
+    long long diff = 0;
+    size_t lit = 0;
+    for (size_t i = 0; i < shaded.Pixels.size() && i < normals.Pixels.size(); ++i) {
+        diff += std::abs((int)shaded.Pixels[i] - (int)normals.Pixels[i]);
+        if (shaded.Pixels[i] > 8) ++lit;
+    }
+    const double mean = (double)diff / (double)std::max<size_t>(shaded.Pixels.size(), 1);
+    std::printf("       персонаж: непустых байт %zu, отличие Нормали-vs-Shaded %.2f\n", lit, mean);
+    Check(lit > 500, "персонаж вообще нарисован скелетным проходом");
+    Check(mean > 2.0, "режим «Нормали» меняет и персонажа, а не только сцену вокруг");
+
+    // И это ИМЕННО отладочный вид, а не «случайно другая картинка»: показанная
+    // величина от освещения не зависит. Гасим солнце — обычный кадр обязан
+    // измениться, кадр нормалей обязан остаться прежним ДО БАЙТА. Проверка не
+    // знает ни про цвет модели, ни про то, куда она смотрит: она спрашивает
+    // свойство отладочного вида.
+    scene->Lighting.Sun.Intensity = 0.0f;
+    const Image shadedDark = frameWithMode(0);
+    const Image normalsDark = frameWithMode(2);
+
+    long long shadedDiff = 0, normalsDiff = 0;
+    for (size_t i = 0; i < shaded.Pixels.size(); ++i) {
+        shadedDiff += std::abs((int)shaded.Pixels[i] - (int)shadedDark.Pixels[i]);
+        normalsDiff += std::abs((int)normals.Pixels[i] - (int)normalsDark.Pixels[i]);
+    }
+    std::printf("       погасили солнце: обычный кадр изменился на %lld, нормали на %lld\n",
+                shadedDiff, normalsDiff);
+    Check(shadedDiff > 0, "обычный кадр персонажа зависит от света (иначе проверять нечего)");
+    Check(normalsDiff == 0, "в режиме «Нормали» персонаж показан нормалями, а не освещением");
 }
 
 // --- Клип, вынутый в файл, играет ровно так же ------------------------------
@@ -390,6 +486,7 @@ void TestClipFileMatchesModelClip() {
 void RunAnimationChecks(FrameRenderer& r) {
     TestMorphTargets(r);
     TestAnimationUsesMeshModel(r);
+    TestSkinnedDebugView(r);
     TestInverseKinematicsECS();
     TestClipFileMatchesModelClip();
 }

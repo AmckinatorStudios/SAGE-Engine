@@ -26,6 +26,11 @@ std::shared_ptr<Skybox> SceneSkyCubemap(const LightingEnvironment& env) {
     }
 }
 
+glm::vec3 SceneClearColor(const LightingEnvironment& env) {
+    if (!env.Skybox.Enabled) return glm::vec3(0.0f);
+    return env.SkyColor * 0.9f;
+}
+
 void DrawSceneSky(SkyRenderer& fallback, const LightingEnvironment& env, const glm::mat4& view,
                   const glm::mat4& proj) {
     if (!env.Skybox.Enabled) return;

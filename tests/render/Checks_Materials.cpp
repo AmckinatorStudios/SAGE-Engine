@@ -65,6 +65,10 @@ std::unique_ptr<Scene> MakeMaterialScene(GameObject& outBall) {
     scene->Lighting.SkyColor = {0.10f, 0.11f, 0.13f};
     scene->Lighting.GroundColor = {0.05f, 0.05f, 0.05f};
     scene->Lighting.AmbientStrength = 0.25f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     GameObject ground = scene->CreateObject("Ground");

@@ -305,6 +305,10 @@ void TestReflectionProbe(FrameRenderer& r) {
     // (у металла нет диффузной составляющей).
     scene->Lighting.Sun.Intensity = 0.0f;
     scene->Lighting.AmbientStrength = 1.6f;
+    // Свет задан ЗДЕСЬ и небу не подчиняется — «свои значения»: иначе
+    // выключенное небо забрало бы ambient с собой (см. ResolveAmbient), и
+    // стены, по которым тест и смотрит, были бы чёрными.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.SkyColor = {1.0f, 1.0f, 1.0f};
     scene->Lighting.GroundColor = {1.0f, 1.0f, 1.0f};
     scene->Lighting.Skybox.TopColor = {0.0f, 0.0f, 0.0f};
@@ -595,6 +599,8 @@ void TestPlanarReflectionRender(FrameRenderer& r) {
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -1.0f, -0.4f));
     scene->Lighting.Sun.Intensity = 1.2f;
     scene->Lighting.AmbientStrength = 0.5f;
+    // Небо в этой сцене не рисуется, а свет задан явно — «свои значения».
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.SkyColor = {0.5f, 0.55f, 0.7f};
     scene->Lighting.GroundColor = {0.2f, 0.2f, 0.2f};
 

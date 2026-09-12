@@ -543,7 +543,11 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     Framebuffer& postFbo = primary ? *m_postFbo : *m_extraPostFbo[slot];
 
     sceneFbo.Bind();
-    device.SetClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+    // Тем же правилом, что и панель Game: небо выключено — за сценой чернота.
+    // Свой серый фон вьюпорта означал бы, что «нет неба» выглядит в редакторе
+    // одним, а в игре другим.
+    const glm::vec3 viewportClear = sage::render::SceneClearColor(env);
+    device.SetClearColor(viewportClear.r, viewportClear.g, viewportClear.b, 1.0f);
     device.Clear();
 
     // Ортогональные виды приходят готовыми матрицами: у них нет свободной
@@ -716,7 +720,10 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg));
     m_gameFrameValid = true;
     m_gameFbo->Bind();
-    device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
+    // Заливка — общим правилом (SkyDraw.h): выключенное небо чёрное, а не
+    // голубое.
+    const glm::vec3 clear = sage::render::SceneClearColor(env);
+    device.SetClearColor(clear.r, clear.g, clear.b, 1.0f);
     device.Clear();
 
     DrawSky(env, view, proj);

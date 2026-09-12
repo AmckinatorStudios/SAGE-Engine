@@ -55,6 +55,10 @@ std::unique_ptr<Scene> BuildShaftScene() {
     scene->Lighting.Sun.Intensity = 6.0f;
     scene->Lighting.Sun.Color = glm::vec3(1.0f, 0.96f, 0.88f);
     scene->Lighting.AmbientStrength = 0.18f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     auto cube = [&](const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec3 color) {

@@ -161,8 +161,25 @@ uniform float uRoughness;
 void main() {
     vec3 albedo = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
     vec3 N = normalize(Normal);
-    if (uShadingMode == 2) { FragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
-    if (uShadingMode == 1) { FragColor = vec4(albedo, 1.0); return; }
+
+    // ОТЛАДОЧНЫЕ ВИДЫ — ТЕМ ЖЕ КОДОМ, ЧТО У СТАТИКИ (DebugShade из PbrShader.h).
+    //
+    // Здесь стояли две строки «руками»: нормали и unlit, остальные девять видов
+    // скин просто не знал. Толку от разбора кадра по слагаемым в этом случае
+    // нет: персонаж — обычно главное, что в кадре есть, и во всех режимах,
+    // кроме двух, он оставался нарисован как ни в чём не бывало. Смотришь на
+    // «Шероховатость» — вокруг серая шкала, а посреди неё освещённый кролик.
+    //
+    // Тень солнца в отладочный вид передаётся посчитанной (CalcSunShadow) — она
+    // же и есть режим «Тень».
+    if (uShadingMode != 0) {
+        vec4 dbg;
+        if (DebugShade(uShadingMode, N, FragPos, albedo, uMetallic, uRoughness, 1.0,
+                       vec3(0.0), CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
+            FragColor = vec4(dbg.rgb, 1.0);
+            return;
+        }
+    }
     FragColor = vec4(ShadePBR(N, FragPos, albedo, uMetallic, uRoughness), 1.0);
 }
 )";
@@ -312,13 +329,14 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
                         const std::vector<glm::mat4>& bones,
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections,
-                        const std::vector<float>* morphWeights) const {
+                        const std::vector<float>* morphWeights, int shadingMode) const {
     Shader& shader = SkinShader();
     shader.Use();
     shader.SetMat4("uModel", model);
     shader.SetMat4("uView", view);
     shader.SetMat4("uProjection", proj);
     shader.SetVec3("uViewPos", viewPos);
+    shader.SetInt("uShadingMode", shadingMode);
 
     // Полное освещение сцены (ambient из скайбокса, солнце, точечные, прожекторы,
     // туман) — теми же uniform'ами, что и статический lit-проход.

@@ -67,6 +67,10 @@ std::unique_ptr<Scene> MakeLampScene(LightComponent::Type kind, bool withBlocker
     scene->Lighting.SkyColor = {0.05f, 0.05f, 0.06f};
     scene->Lighting.GroundColor = {0.04f, 0.04f, 0.05f};
     scene->Lighting.AmbientStrength = 0.15f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     auto primitive = [](GameObject obj, MeshRef::Type type, glm::vec3 color) {
@@ -194,6 +198,10 @@ std::unique_ptr<Scene> BuildLongScene() {
     scene->Lighting.SkyColor = {0.40f, 0.48f, 0.64f};
     scene->Lighting.GroundColor = {0.20f, 0.17f, 0.15f};
     scene->Lighting.AmbientStrength = 0.15f;
+    // Ambient здесь задан ЯВНО и небу не подчиняется — значит «свои значения»
+    // (см. LightingEnvironment::AmbientMode). Выключенное небо иначе забирает
+    // с собой и окружающий свет, и проверять было бы нечего: чёрный кадр.
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.Skybox.Enabled = false;
 
     auto primitive = [](GameObject obj, MeshRef::Type type, glm::vec3 color) {

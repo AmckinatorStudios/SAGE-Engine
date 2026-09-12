@@ -714,7 +714,21 @@ void PlayerLayer::OnRender() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
     // Флаги качества из конфига переопределяют настройки сцены.
-    if (!cfg.Skybox) env.Skybox.Enabled = false;
+    //
+    // НО СВЕТ ПРИ ЭТОМ ОСТАЁТСЯ. Настройка качества выключает ОТРИСОВКУ неба, а
+    // не солнце над миром: «поставил пресет полегче — мир погас» было бы не
+    // оптимизацией, а поломкой. Поэтому посчитанный от неба ambient
+    // замораживается своими значениями, и дальше сцена освещена ровно так же,
+    // как при включённом небе. (Автор, выключивший небо В СЦЕНЕ, получает
+    // темноту намеренно — см. LightingEnvironment::ResolveAmbient.)
+    if (!cfg.Skybox && env.Skybox.Enabled) {
+        glm::vec3 ambientSky, ambientGround;
+        env.ResolveAmbient(ambientSky, ambientGround);
+        env.SkyColor = ambientSky;
+        env.GroundColor = ambientGround;
+        env.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+        env.Skybox.Enabled = false;
+    }
     if (!cfg.Fog) env.Fog.Enabled = false;
 
     // --- Соотношение сторон: letterbox-viewport по центру окна (или весь экран) ---
@@ -981,7 +995,8 @@ void PlayerLayer::OnRender() {
             device.Clear();
         }
         if (!usePost) device.SetViewport(vpX, vpY, vpW, vpH);
-        device.SetClearColor(env.SkyColor.r * 0.9f, env.SkyColor.g * 0.9f, env.SkyColor.b * 0.9f, 1.0f);
+        const glm::vec3 clear = sage::render::SceneClearColor(env);
+        device.SetClearColor(clear.r, clear.g, clear.b, 1.0f);
         device.Clear();
 
         // Аппаратная гамма-коррекция нужна ТОЛЬКО когда сцена идёт прямо в
