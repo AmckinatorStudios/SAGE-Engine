@@ -610,7 +610,9 @@ static void SaveAnimation(json& j, const AnimationComponent& am) {
     // её имя в файле означало бы два источника правды, которые однажды
     // разъедутся (см. AnimationComponent).
     json& oj = j["animation"];
-    oj["demoSegments"] = am.DemoSegments;
+    // Клип — ПУТЬ к файлу; номер остался запасным путём для сцен, сделанных до
+    // появления файлов клипов, и для моделей, клипы которых ещё не вынуты.
+    oj["clipPath"] = am.ClipPath;
     oj["clip"] = am.Clip;
     oj["speed"] = am.Speed;
     oj["loop"] = am.Loop;
@@ -621,7 +623,7 @@ static void SaveAnimation(json& j, const AnimationComponent& am) {
 
 static AnimationComponent ParseAnimation(const json& aj) {
     AnimationComponent am;
-    am.DemoSegments = aj.value("demoSegments", 6);
+    am.ClipPath = aj.value("clipPath", std::string());
     am.Clip = aj.value("clip", 0);
     am.Speed = aj.value("speed", 1.0f);
     am.Loop = aj.value("loop", true);

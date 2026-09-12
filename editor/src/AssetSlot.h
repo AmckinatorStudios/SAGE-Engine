@@ -32,7 +32,7 @@ namespace assetslot {
 
 // Тип ассета, который слот готов принять. Any — принимает всё (панель Assets и
 // вьюпорт решают по расширению, что значит «бросили сюда»).
-enum class Kind { Any, Model, Material, Texture, Script, Prefab, Scene, Audio };
+enum class Kind { Any, Model, Material, Texture, Script, Prefab, Scene, Audio, Animation };
 
 // Тип файла по расширению. Единственное место, где расширения превращаются в
 // смысл: раньше эти списки были переписаны в семи местах и уже разошлись —

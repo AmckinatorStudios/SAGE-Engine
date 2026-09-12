@@ -73,3 +73,24 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
 ModelMaterialImportResult SetEntityMesh(const Project& project, MeshRendererComponent& mr,
                                         MeshRef::Type type, const std::string& path,
                                         std::shared_ptr<Mesh> mesh);
+
+// --- КЛИПЫ АНИМАЦИИ В ОТДЕЛЬНЫЕ ФАЙЛЫ ---------------------------------------
+//
+// Вынимает из модели ВСЕ клипы в .sageanim рядом с ней — ровно так же, как
+// материалы вынимаются в .sagemat, и по той же причине. Клип, живущий только
+// внутри .glb, нельзя ни посмотреть в панели ассетов, ни назначить другому
+// персонажу, ни сослаться на него из сцены иначе как номером — а номер молча
+// меняется при переэкспорте модели.
+//
+// Существующий файл НЕ перезаписывается: клип после импорта могли поправить, и
+// повторный импорт модели не повод стирать эту работу.
+struct ClipImportResult {
+    int Found = 0;      // сколько клипов в модели
+    int Created = 0;    // сколько файлов записано на этот раз
+    std::vector<std::string> Refs;   // ссылки проекта на файлы клипов, по порядку
+    std::string FirstWarning;
+};
+
+// modelRef — ссылка проекта на модель (.glb/.gltf/.fbx). Скелетная модель
+// грузится через кэш; у модели без скелета клипов нет, и это не ошибка.
+ClipImportResult ImportModelClips(const Project& project, const std::string& modelRef);

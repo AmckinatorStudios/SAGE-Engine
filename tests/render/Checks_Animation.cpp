@@ -7,6 +7,8 @@
 // ---------------------------------------------------------------------------
 #include "Fixture.h"
 
+#include "sage/anim/ClipFile.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -48,6 +50,33 @@ namespace {
 // Морф-цели меняют саму ФОРМУ меша, а не его положение, поэтому единственная
 // честная проверка — картинка. Демо-модель движка несёт две процедурные цели
 // («Fatten» — раздуть, «Bend» — отклонить в сторону), и веса им ставятся ровно тем
+
+// Демо-щупальце ЯВНО. Компонент Animation больше не строит его сам, когда в
+// Mesh нет модели: подсовывать человеку чужую работающую анимацию вместо
+// ответа «анимировать нечего» — худший способ объяснить, почему у него ничего
+// не движется (см. AnimationSystem.cpp). Но как ОСНАСТКА щупальце осталось
+// незаменимым: скиннинг, блендшейпы и обратная кинематика обязаны быть
+// проверяемы без единого ассета на диске, иначе проверка зависит от файла,
+// который кто-нибудь однажды заменит.
+//
+// Поэтому тесты собирают его руками и кладут в компонент готовым.
+void GiveDemoSkeleton(AnimationComponent& am, int segments = 6) {
+    am.Model = sage::render::SkinnedModel::CreateDemoTentacle(segments);
+    am.Ready = true;              // системе переинициализировать нечего
+    am.ResolvedFrom.clear();
+    if (!am.Model) return;
+    am.Anim.SetRig(&am.Model->GetSkeleton(), &am.Model->Clips());
+    am.Anim.SetSpeed(am.Speed);
+    if (am.MorphWeights.empty() && am.Model->MorphCount() > 0) {
+        am.MorphWeights = am.Model->DefaultMorphWeights();
+        am.MorphWeights.resize((size_t)am.Model->MorphCount(), 0.0f);
+    }
+    if (!am.Model->Clips().empty()) {
+        am.Anim.Play(0, am.Loop);
+        if (!am.Playing) am.Anim.Stop();
+    }
+}
+
 // же способом, что и настоящему лицу.
 void TestMorphTargets(FrameRenderer& r) {
     auto scene = std::make_unique<Scene>("MorphTest");
@@ -64,10 +93,10 @@ void TestMorphTargets(FrameRenderer& r) {
     anim.Playing = false; // поза не должна зависеть от времени: тест детерминированный
     scene->Registry().emplace<AnimationComponent>(character.Entity(), std::move(anim));
 
-    // Модель грузится лениво — один тик системы поднимает её и привязывает риг.
-    sage::anim::UpdateAnimators(*scene, 0.0f);
-
     AnimationComponent& am = scene->Registry().get<AnimationComponent>(character.Entity());
+    GiveDemoSkeleton(am);
+    // Тик системы: поза, блендшейпы и переопределения раскладываются ею.
+    sage::anim::UpdateAnimators(*scene, 0.0f);
     if (!am.Model) {
         std::printf("[FAIL] демо-модель не загрузилась — блендшейпы проверить нечем\n");
         CountFail();
@@ -152,9 +181,10 @@ void TestInverseKinematicsECS() {
     AnimationComponent anim;
     anim.Playing = false;   // поза не должна зависеть от времени
     scene->Registry().emplace<AnimationComponent>(rig.Entity(), std::move(anim));
-    sage::anim::UpdateAnimators(*scene, 0.0f);
 
     AnimationComponent& am = scene->Registry().get<AnimationComponent>(rig.Entity());
+    GiveDemoSkeleton(am);
+    sage::anim::UpdateAnimators(*scene, 0.0f);
     if (!am.Model || am.Model->GetSkeleton().Count() < 3) {
         std::printf("[FAIL] демо-модель не поднялась — IK проверять не на чем\n");
         CountFail();
@@ -273,12 +303,95 @@ void TestAnimationUsesMeshModel(FrameRenderer& r) {
     Check(am.ResolvedFrom.empty(), "смена модели в Mesh переинициализирует скелет");
 }
 
+// --- Клип, вынутый в файл, играет ровно так же ------------------------------
+//
+// Ради этого формат и заводился, и проверять его надо ИМЕННО так: не «файл
+// записался и прочитался» (это следствие), а «поза совпала». Клип проходит весь
+// путь — из модели в .sageanim, оттуда обратно в компонент, привязка костей по
+// именам, — и палитра матриц обязана совпасть с той, что даёт клип из самой
+// модели в тот же момент времени. Любая потеря по дороге (кватернион без w,
+// ступенчатая интерполяция, перепутанная кость) видна здесь числом, а в кадре
+// выглядела бы «персонаж как-то не так дёргается».
+void TestClipFileMatchesModelClip() {
+    const char* model =
+#ifdef SAGE_TEST_MODEL
+        SAGE_TEST_MODEL;
+#else
+        "assets/test_model.glb";
+#endif
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "sage_clipfile";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+
+    auto scene = std::make_unique<Scene>("ClipFile");
+    GameObject hero = scene->CreateObject("Hero");
+    MeshRendererComponent& mr = scene->Registry().emplace<MeshRendererComponent>(hero.Entity());
+    mr.Ref.type = MeshRef::Type::Model;
+    mr.Ref.path = model;
+    scene->Registry().emplace<AnimationComponent>(hero.Entity());
+
+    sage::anim::UpdateAnimators(*scene, 0.0f);
+    AnimationComponent& am = scene->Registry().get<AnimationComponent>(hero.Entity());
+    Check(am.Model != nullptr, "модель для клипа загрузилась");
+    if (!am.Model || am.Model->Clips().empty()) {
+        std::printf("       у тестовой модели нет клипов — проверка пропущена\n");
+        CountFail();
+        std::filesystem::remove_all(dir, ec);
+        return;
+    }
+
+    // Проигрываем клип МОДЕЛИ и запоминаем позу в середине.
+    constexpr float kAt = 0.37f;
+    sage::anim::UpdateAnimators(*scene, kAt);
+    const std::vector<glm::mat4> fromModel = am.Anim.BoneMatrices();
+    Check(!fromModel.empty(), "клип модели дал палитру костей");
+
+    // Тот же клип — в файл и обратно.
+    const std::filesystem::path file =
+        dir / sage::anim::ClipFileName("hero", am.Model->Clips()[0].Name);
+    sage::anim::SaveClip(sage::anim::ToAsset(am.Model->Clips()[0], am.Model->GetSkeleton()),
+                         file.string());
+    Check(std::filesystem::exists(file, ec), "файл клипа записан");
+
+    auto scene2 = std::make_unique<Scene>("ClipFile2");
+    GameObject hero2 = scene2->CreateObject("Hero");
+    MeshRendererComponent& mr2 = scene2->Registry().emplace<MeshRendererComponent>(hero2.Entity());
+    mr2.Ref.type = MeshRef::Type::Model;
+    mr2.Ref.path = model;
+    AnimationComponent fromFile;
+    fromFile.ClipPath = file.string();
+    scene2->Registry().emplace<AnimationComponent>(hero2.Entity(), std::move(fromFile));
+
+    sage::anim::UpdateAnimators(*scene2, 0.0f);
+    AnimationComponent& am2 = scene2->Registry().get<AnimationComponent>(hero2.Entity());
+    Check(am2.MissingBones == 0, "все кости клипа нашлись в скелете своей же модели");
+    Check(am2.Anim.ClipCount() == 1, "аниматор играет клип из файла");
+    sage::anim::UpdateAnimators(*scene2, kAt);
+    const std::vector<glm::mat4> fromDisk = am2.Anim.BoneMatrices();
+
+    Check(fromDisk.size() == fromModel.size(), "палитра костей того же размера");
+    float worst = 0.0f;
+    if (fromDisk.size() == fromModel.size()) {
+        for (size_t b = 0; b < fromDisk.size(); ++b)
+            for (int c = 0; c < 4; ++c)
+                for (int r2 = 0; r2 < 4; ++r2)
+                    worst = std::max(worst, std::abs(fromDisk[b][c][r2] - fromModel[b][c][r2]));
+    }
+    std::printf("       клип из файла против клипа модели: худшее расхождение %.6f\n", worst);
+    // Допуск — на запись чисел в текст и обратно, а не на «примерно похоже».
+    Check(worst < 1e-3f, "поза из файла совпадает с позой из модели");
+
+    std::filesystem::remove_all(dir, ec);
+}
+
 } // namespace
 
 void RunAnimationChecks(FrameRenderer& r) {
     TestMorphTargets(r);
     TestAnimationUsesMeshModel(r);
     TestInverseKinematicsECS();
+    TestClipFileMatchesModelClip();
 }
 
 } // namespace sage::rendertest

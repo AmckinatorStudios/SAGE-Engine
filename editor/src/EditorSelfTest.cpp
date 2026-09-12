@@ -35,6 +35,7 @@
 #include "sage/assets/Pack.h"
 #include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/anim/ClipFile.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/Screenshot.h"
 #include <stb_image_write.h>   // реализация развёрнута в render/Screenshot.cpp
@@ -123,7 +124,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + model-pack + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + model-pack + anim-clips + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + code-editor + confirm + pick + tools + formats + ortho + "
@@ -1349,12 +1350,24 @@ bool EditorLayer::SelfTestSystems() {
         }
     }
 
-    // --- Анимация: демо-скелет проигрывается, палитра костей меняется во времени ---
+    // --- Анимация: клип проигрывается, палитра костей меняется во времени ------
+    //
+    // НА НАСТОЯЩЕЙ МОДЕЛИ, а не на демо-щупальце. Раньше компонент без модели в
+    // Mesh строил встроенное щупальце, и проверка шла по нему — то есть по
+    // пути, которым человек не ходит. Щупальца больше нет (оно сбивало с толку:
+    // на вопрос «почему не работает моя анимация» показывалась чужая
+    // работающая), и проверка пошла тем же путём, что и человек: модель в Mesh,
+    // скелет из неё, клип из неё.
+#ifdef SAGE_TEST_MODEL
     if (ok) {
         GameObject rig = m_scene->CreateObject("SelftestRig");
+        MeshRendererComponent& rigMesh =
+            m_scene->Registry().emplace<MeshRendererComponent>(rig.Entity());
+        rigMesh.Ref.type = MeshRef::Type::Model;
+        rigMesh.Ref.path = SAGE_TEST_MODEL;
         m_scene->Registry().emplace<AnimationComponent>(rig.Entity());
 
-        sage::anim::UpdateAnimators(*m_scene, 0.0f); // инициализация (загрузка демо + rig)
+        sage::anim::UpdateAnimators(*m_scene, 0.0f); // инициализация (загрузка + rig)
         AnimationComponent& am = m_scene->Registry().get<AnimationComponent>(rig.Entity());
         if (!am.Model || am.Anim.BoneCount() < 2) {
             LOG_ERROR("Editor") << "SELFTEST: animation failed - rig not built";
@@ -1393,6 +1406,7 @@ bool EditorLayer::SelfTestSystems() {
         }
         m_scene->RemoveObject(rig.Id());
     }
+#endif
 
     // --- Конфиг: сохранение и загрузка настроек сохраняют значения (round-trip) ---
     if (ok) {
@@ -2552,6 +2566,71 @@ bool EditorLayer::SelfTestTools() {
         SetSelectedId(-1);
         m_selection.clear();
     }
+
+    // --- КЛИПЫ АНИМАЦИИ ВЫНИМАЮТСЯ В ФАЙЛЫ ------------------------------------
+    //
+    // Жалоба была такая: «компонент анимация вообще не работает, там просто
+    // тестовая тентакля». Щупальце убрано, а клипы модели теперь вынимаются в
+    // .sageanim рядом с ней — и проверяется это на НАСТОЯЩЕЙ модели со скелетом,
+    // а не на синтетике: разбор скина и клипов и есть то, что здесь может
+    // сломаться.
+#ifdef SAGE_TEST_MODEL
+    if (ok) {
+        const fs::path animDir = m_project.AssetsDir() / "selftest_anim";
+        fs::create_directories(animDir, ec);
+        const fs::path modelCopy = animDir / "hero.glb";
+        fs::copy_file(SAGE_TEST_MODEL, modelCopy, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            LOG_ERROR("Editor") << "SELFTEST: тестовая модель не скопировалась: " << ec.message();
+            ok = false;
+        } else {
+            sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+            const ClipImportResult r = ImportModelClips(m_project, m_project.AssetRef(modelCopy));
+            if (r.Found <= 0) {
+                LOG_ERROR("Editor") << "SELFTEST: клипы модели не найдены";
+                ok = false;
+            } else if (r.Created != r.Found) {
+                LOG_ERROR("Editor") << "SELFTEST: записано файлов клипов " << r.Created << " из "
+                                    << r.Found;
+                ok = false;
+            } else {
+                // Файлы обязаны лежать на диске и читаться обратно: «импорт
+                // сказал, что записал» — это не то же самое, что «файл есть».
+                for (const std::string& ref : r.Refs) {
+                    const std::string full = sage::AssetDatabase::Instance().LocatePath(ref);
+                    if (!fs::exists(full, ec)) {
+                        LOG_ERROR("Editor") << "SELFTEST: файла клипа нет: " << full;
+                        ok = false;
+                        break;
+                    }
+                    try {
+                        const sage::anim::ClipAsset clip = sage::anim::LoadClip(full);
+                        if (clip.Channels.empty()) {
+                            LOG_ERROR("Editor") << "SELFTEST: клип без каналов: " << full;
+                            ok = false;
+                            break;
+                        }
+                    } catch (const std::exception& e) {
+                        LOG_ERROR("Editor") << "SELFTEST: клип не читается: " << e.what();
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            // Повторный импорт НЕ перезаписывает: правку клипа руками терять
+            // нельзя, а «переимпортировал модель» — обычное действие.
+            if (ok) {
+                const ClipImportResult again =
+                    ImportModelClips(m_project, m_project.AssetRef(modelCopy));
+                if (again.Created != 0) {
+                    LOG_ERROR("Editor") << "SELFTEST: повторный импорт перезаписал клипы ("
+                                        << again.Created << ")";
+                    ok = false;
+                }
+            }
+        }
+    }
+#endif
 
     // --- Свои ассеты: внесение файла со стороны и переносимость ссылок --------
     //

@@ -11,6 +11,7 @@
 set(SAGE_ENGINE_SOURCES
     src/sage/anim/AnimationSystem.cpp
     src/sage/anim/Animator.cpp
+    src/sage/anim/ClipFile.cpp
     src/sage/anim/IK.cpp
     src/sage/anim/Retarget.cpp
     src/sage/anim/Skeleton.cpp
