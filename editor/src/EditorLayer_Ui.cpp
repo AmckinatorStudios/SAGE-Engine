@@ -33,6 +33,7 @@
 #include "imgui_impl_opengl3.h"
 #include "ImGuizmo.h"
 
+#include "CodeEditorApp.h"
 #include "EditorTheme.h"
 #include "ui/UI.h"
 #include "sage/core/Profiler.h"
@@ -719,6 +720,39 @@ void EditorLayer::DrawDockspaceAndMenu() {
                         SetStatusMessage(std::string(T("Theme saved:")) + " " + path);
                     else
                         SetStatusMessage(T("Could not write the theme file"));
+                }
+                ImGui::EndMenu();
+            }
+            // Чем открывать код. Здесь же, где язык и оформление, и по той же
+            // причине: это настройка РЕДАКТОРА, она живёт в профиле человека.
+            // Проект, навязывающий соавтору свою IDE, — не то, чего ждут от
+            // проекта.
+            if (ImGui::BeginMenu(T("Code editor"))) {
+                namespace codeapp = sage::editor::codeapp;
+                const std::string current = codeapp::CurrentId();
+                // Системная ассоциация — всегда первая и всегда доступна: это
+                // единственный вариант, который не может «не установиться».
+                if (ImGui::MenuItem(T("As the system opens it"), nullptr, current.empty()))
+                    codeapp::SetCurrent("");
+                const std::vector<codeapp::App>& apps = codeapp::Available();
+                if (!apps.empty()) ImGui::Separator();
+                for (const codeapp::App& app : apps) {
+                    // Имя программы НЕ переводится — как название темы и языка:
+                    // по нему её узнают в меню «Пуск» и в своей же панели задач.
+                    if (ImGui::MenuItem(app.Name.c_str(), nullptr, app.Id == current))
+                        codeapp::SetCurrent(app.Id);
+                }
+                ImGui::Separator();
+                if (apps.empty()) {
+                    // Пустой список — не поломка, и сказать об этом надо прямо:
+                    // иначе меню из одного пункта читается как «выбор сломан».
+                    ImGui::TextDisabled("%s", T("No code editors found on this machine"));
+                }
+                ImGui::TextDisabled("%s", T("Only what is actually installed is listed"));
+                if (ImGui::MenuItem(T("Search again"))) {
+                    codeapp::Rescan();
+                    SetStatusMessage(T("Code editors: ") +
+                                     std::to_string(codeapp::Available().size()));
                 }
                 ImGui::EndMenu();
             }

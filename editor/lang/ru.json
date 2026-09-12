@@ -1392,6 +1392,13 @@
     "Grid: covers": "Сеткой: обложки",
     "Rows: name and size": "Строками: имя и размер",
     "Open in the system editor": "Открыть в системном редакторе",
-    "The system has no program for this file: ": "Система не знает, чем открыть этот файл: "
+    "The system has no program for this file: ": "Система не знает, чем открыть этот файл: ",
+    "Code editor": "Редактор кода",
+    "As the system opens it": "Как откроет система",
+    "No code editors found on this machine": "На этой машине редакторов кода не найдено",
+    "Only what is actually installed is listed": "Показано только то, что действительно установлено",
+    "Search again": "Найти заново",
+    "Code editors: ": "Редакторов кода: ",
+    "Scripts reloaded: ": "Скриптов перечитано: "
   }
 }

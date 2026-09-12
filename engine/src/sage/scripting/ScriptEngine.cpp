@@ -1,4 +1,5 @@
 #include "ScriptEngine.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
@@ -9,6 +10,8 @@
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIIcons.h"
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <cctype>
 #include <optional>
 
@@ -135,6 +138,21 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterNetApi();
 }
 
+namespace {
+
+// Время последней правки файла скрипта. 0 — файла на диске нет: так бывает в
+// собранной игре (скрипты лежат в .sagepak) и у скрипта, который только что
+// удалили. И то и другое — не повод перезагружать.
+long long ScriptFileStamp(const std::string& ref) {
+    std::error_code ec;
+    const std::filesystem::path disk = sage::AssetDatabase::Instance().LocatePath(ref);
+    const auto when = std::filesystem::last_write_time(disk, ec);
+    if (ec) return 0;
+    return (long long)when.time_since_epoch().count();
+}
+
+} // namespace
+
 void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath) {
     sol::environment env(m_lua, sol::create, m_lua.globals());
 
@@ -196,6 +214,7 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
         existing.Object = object;
         existing.UpdateErrors = 0;
         existing.UpdateDisabled = false;
+        existing.Stamp = ScriptFileStamp(scriptPath);
         return;
     }
 
@@ -203,6 +222,7 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
                             std::move(messageFn), std::move(entityRef), scriptPath });
     m_instances.back().FixedUpdateFn = m_instances.back().Env["OnFixedUpdate"];
     m_instances.back().LateUpdateFn = m_instances.back().Env["OnLateUpdate"];
+    m_instances.back().Stamp = ScriptFileStamp(scriptPath);
 }
 
 void ScriptEngine::RunScript(const std::string& scriptPath) {
@@ -237,6 +257,85 @@ void ScriptEngine::RunScript(const std::string& scriptPath) {
                             sol::protected_function{}, sol::object{}, scriptPath });
     m_instances.back().FixedUpdateFn = m_instances.back().Env["OnFixedUpdate"];
     m_instances.back().LateUpdateFn = m_instances.back().Env["OnLateUpdate"];
+    m_instances.back().Stamp = ScriptFileStamp(scriptPath);
+}
+
+int ScriptEngine::ReloadChangedScripts() {
+    // В собранной игре скрипты живут в .sagepak: файлов на диске нет, править
+    // их некому, и обходить список каждый кадр незачем.
+    if (sage::assets::vfs::Mounted()) return 0;
+
+    // Сначала СПИСОК того, что перечитывать, и только потом сама перезагрузка.
+    // OnStart перезагруженного скрипта может спавнить объекты и привязывать к
+    // ним скрипты, то есть дописывать m_instances, — а это реаллокация, после
+    // которой ссылка на элемент указывает в никуда.
+    std::vector<size_t> stale;
+    for (size_t i = 0; i < m_instances.size(); ++i) {
+        ScriptInstance& inst = m_instances[i];
+        const long long now = ScriptFileStamp(inst.Path);
+        if (now == 0 || now == inst.Stamp) continue;
+        // Штамп запоминается СРАЗУ, до попытки: скрипт с опечаткой иначе
+        // пересобирался бы каждый кадр и писал бы одну и ту же ошибку
+        // шестьдесят раз в секунду, пока её не исправят.
+        inst.Stamp = now;
+        stale.push_back(i);
+    }
+    if (stale.empty()) return 0;
+
+    int reloaded = 0;
+    for (size_t index : stale) {
+        if (index >= m_instances.size()) continue;   // сущность успела умереть
+        const std::string path = m_instances[index].Path;
+        const bool hasObject = m_instances[index].HasObject;
+        const GameObject object = m_instances[index].Object;
+
+        std::string source;
+        if (!sage::assets::vfs::ReadText(path, source)) {
+            LOG_WARN("ScriptEngine") << "Скрипт пропал при перезагрузке: " << path;
+            continue;
+        }
+
+        // Собираем в НОВОЕ окружение и подменяем только при успехе — ровно тот
+        // же порядок, что у шейдеров: недописанная строка не имеет права
+        // выключить то, что уже работало.
+        sol::environment env(m_lua, sol::create, m_lua.globals());
+        auto result = m_lua.script(source, env, sol::script_pass_on_error, "@" + path);
+        if (!result.valid()) {
+            sol::error err = result;
+            LOG_ERROR("ScriptEngine") << "Правка скрипта не собралась, оставляю прежний ("
+                                      << path << "): " << err.what();
+            continue;
+        }
+
+        if (index >= m_instances.size()) continue;
+        ScriptInstance& inst = m_instances[index];
+        inst.Env = std::move(env);
+        inst.UpdateFn = inst.Env["OnUpdate"];
+        inst.MessageFn = inst.Env["OnMessage"];
+        inst.FixedUpdateFn = inst.Env["OnFixedUpdate"];
+        inst.LateUpdateFn = inst.Env["OnLateUpdate"];
+        // Счётчик падений сбрасывается: старый код мог быть погашен за ошибки,
+        // а новый — и правился ради того, чтобы их не было.
+        inst.UpdateErrors = 0;
+        inst.UpdateDisabled = false;
+
+        // OnStart — ПОСЛЕДНИМ и по КОПИЯМ: он может дописать m_instances, и
+        // ссылка inst после него недействительна.
+        sol::protected_function startFn = inst.Env["OnStart"];
+        sol::object entityRef = inst.EntityRef;
+        ++reloaded;
+        LOG_INFO("ScriptEngine") << "Скрипт перечитан: " << path
+                                 << " (состояние скрипта сброшено, OnStart выполнен заново)";
+        if (!startFn.valid()) continue;
+        auto startResult = hasObject ? startFn(entityRef) : startFn();
+        if (!startResult.valid()) {
+            sol::error err = startResult;
+            LOG_ERROR("ScriptEngine") << "Ошибка в OnStart после перезагрузки (" << path
+                                      << "): " << err.what();
+        }
+        (void)object;
+    }
+    return reloaded;
 }
 
 void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::object data) {

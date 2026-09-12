@@ -18,7 +18,9 @@
 #include "sage/vars/VarsComponent.h"
 #include "sage/events/Events.h"
 
+#include <chrono>
 #include <filesystem>
+#include <system_error>
 
 namespace {
 // Пишет временный .lua во временную папку, отдаёт путь. Тела скриптов короткие,
@@ -557,7 +559,9 @@ TEST(Scripting_every_legacy_global_still_answers) {
 #include "sage/core/SaveGame.h"
 
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
+#include <system_error>
 
 TEST(Prefab_round_trips_through_a_file_and_keeps_the_subtree) {
     Scene source("src");
@@ -1090,4 +1094,99 @@ TEST(Scripting_an_addressed_event_calls_the_method_of_the_target_object) {
     CHECK_EQ(opened, 2);
 
     std::remove(path.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// ГОРЯЧАЯ ПЕРЕЗАГРУЗКА СКРИПТОВ
+//
+// Скрипты правят во внешнем редакторе (своего в SAGE нет), и до этой правки
+// изменение файла не значило НИЧЕГО, пока игру не перезапустят: цикл «поправил
+// число — посмотрел» стоил прохождения уровня заново.
+//
+// Время правки файла у файловых систем имеет зернистость (на ext4 — наносекунды,
+// но на некоторых FAT/сетевых — до двух секунд), поэтому тесты не полагаются на
+// «прошло достаточно времени»: штамп сдвигается ЯВНО через last_write_time.
+// ---------------------------------------------------------------------------
+namespace {
+void TouchLater(const std::string& path) {
+    std::error_code ec;
+    const auto now = std::filesystem::last_write_time(path, ec);
+    std::filesystem::last_write_time(path, now + std::chrono::seconds(5), ec);
+}
+} // namespace
+
+TEST(Scripting_edited_file_is_picked_up_without_restart) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject hero = scene.CreateObject("Hero");
+
+    const std::string path = WriteTempScript("hotreload", "function OnStart(e) _G.MARK = 1 end\n");
+    se.AttachScript(hero, path);
+    CHECK_EQ(se.Lua()["MARK"].get<int>(), 1);
+
+    // Ничего не менялось — перезагружать нечего. Иначе скрипт пересобирался бы
+    // каждый кадр, и состояние сбрасывалось бы у всех подряд без причины.
+    CHECK_EQ(se.ReloadChangedScripts(), 0);
+    CHECK_EQ(se.Lua()["MARK"].get<int>(), 1);
+
+    { std::ofstream f(path); f << "function OnStart(e) _G.MARK = 2 end\n"; }
+    TouchLater(path);
+    CHECK_EQ(se.ReloadChangedScripts(), 1);
+    // Новый код выполнен, и выполнен ЗАНОВО: OnStart — часть перезагрузки, без
+    // него скрипт остался бы со старым состоянием и новым кодом вперемешку.
+    CHECK_EQ(se.Lua()["MARK"].get<int>(), 2);
+
+    // И повторный вызов уже ничего не делает: штамп запомнен.
+    CHECK_EQ(se.ReloadChangedScripts(), 0);
+    std::filesystem::remove(path);
+}
+
+TEST(Scripting_broken_edit_keeps_the_working_script) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject hero = scene.CreateObject("Hero");
+
+    const std::string path = WriteTempScript(
+        "hotreload_broken", "function OnUpdate(e, dt) _G.TICKS = (_G.TICKS or 0) + 1 end\n");
+    se.AttachScript(hero, path);
+    se.UpdateAll(0.016f);
+    CHECK_EQ(se.Lua()["TICKS"].get<int>(), 1);
+
+    // Недописанная строка — обычное состояние файла в середине правки, и
+    // выключать из-за неё то, что уже работает, нельзя: иначе каждое сохранение
+    // на полуслове роняло бы игру.
+    { std::ofstream f(path); f << "function OnUpdate(e, dt) this is not lua\n"; }
+    TouchLater(path);
+    CHECK_EQ(se.ReloadChangedScripts(), 0);   // не перечитан
+    se.UpdateAll(0.016f);
+    CHECK_EQ(se.Lua()["TICKS"].get<int>(), 2); // прежний продолжает работать
+
+    // Опечатку исправили — подхватывается без перезапуска.
+    { std::ofstream f(path); f << "function OnUpdate(e, dt) _G.TICKS = (_G.TICKS or 0) + 10 end\n"; }
+    TouchLater(path);
+    CHECK_EQ(se.ReloadChangedScripts(), 1);
+    se.UpdateAll(0.016f);
+    CHECK_EQ(se.Lua()["TICKS"].get<int>(), 12);
+    std::filesystem::remove(path);
+}
+
+TEST(Scripting_level_script_reloads_too) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    // Уровневый скрипт (RunScript) — не привязан ни к одной сущности, и OnStart
+    // у него без аргумента. Перезагрузка обязана работать и для него: правила
+    // уровня правят не реже, чем поведение объекта.
+    const std::string path = WriteTempScript("hotreload_level", "function OnStart() _G.RULE = 1 end\n");
+    se.RunScript(path);
+    CHECK_EQ(se.Lua()["RULE"].get<int>(), 1);
+
+    { std::ofstream f(path); f << "function OnStart() _G.RULE = 7 end\n"; }
+    TouchLater(path);
+    CHECK_EQ(se.ReloadChangedScripts(), 1);
+    CHECK_EQ(se.Lua()["RULE"].get<int>(), 7);
+    std::filesystem::remove(path);
 }
