@@ -1267,11 +1267,13 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (mrp) {
             const MeshRendererComponent& mr = *mrp;
             j["color"]    = Vec3ToJson(mr.Color);
-            j["opacity"]  = mr.Opacity;
             j["castShadows"] = mr.CastShadows;
             j["inReflections"] = mr.InReflections;
-            j["emissive"] = Vec3ToJson(mr.Emissive);
-            j["emissiveStrength"] = mr.EmissiveStrength;
+            // СВЕЧЕНИЯ И ПРОЗРАЧНОСТИ У ЭКЗЕМПЛЯРА БОЛЬШЕ НЕТ: и то и другое —
+            // свойство материала (см. MeshRendererComponent). Ключи opacity,
+            // emissive и emissiveStrength не пишутся и не читаются: сцена,
+            // сохранённая старым редактором, открывается, но эти значения
+            // теряет — хранить их было бы обещанием, что они на что-то влияют.
             j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
             SaveAssetRef(j["mesh"], "path", mr.Ref.path);
             SaveAssetRef(j, "material", mr.MaterialPath);
@@ -1727,11 +1729,12 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("rotation")) tr.Rotation = Vec3FromJson(j["rotation"]);
         if (j.contains("scale"))    tr.Scale    = Vec3FromJson(j["scale"]);
         if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
-        mr.Opacity = j.value("opacity", mr.Opacity);
         mr.CastShadows = j.value("castShadows", mr.CastShadows);
         mr.InReflections = j.value("inReflections", mr.InReflections);
-        if (j.contains("emissive")) mr.Emissive = Vec3FromJson(j["emissive"]);
-        mr.EmissiveStrength = j.value("emissiveStrength", mr.EmissiveStrength);
+        // opacity / emissive / emissiveStrength из старых сцен НЕ читаются:
+        // полей под них больше нет. Прозрачность и свечение задаёт материал, и
+        // объект, которому они были нужны, получает свой материал — иначе вид
+        // снова задавался бы в двух местах.
 
         if (j.contains("mesh")) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));

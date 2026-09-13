@@ -15,6 +15,7 @@
 #include "EditorLayer.h"
 #include "CodeEditorApp.h"
 #include "ProjectLauncher/ProjectDatabase.h"
+#include "SceneCover.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -136,6 +137,43 @@ bool EditorLayer::OpenFileInSystemEditor(const fs::path& path, int line) {
     return ok;
 }
 
+// Материал шаблона: файл в assets/materials/<имя>.sagemat + ссылка на него.
+// Почему файлом, а не полем Color — см. объявление в EditorLayer.h.
+std::string EditorLayer::TemplateMaterial(const std::string& name, const glm::vec3& albedo,
+                                          float metallic, float roughness) {
+    if (!m_project.Loaded()) return {};
+    std::error_code ec;
+    const fs::path dir = m_project.AssetsDir() / "materials";
+    fs::create_directories(dir, ec);
+    if (ec) return {};
+
+    Material mat;
+    mat.Albedo = albedo;
+    mat.Metallic = metallic;
+    mat.Roughness = roughness;
+    const fs::path path = dir / (name + ".sagemat");
+    mat.SaveToFile(sage::PathToUtf8(path));
+    if (!fs::exists(path, ec)) return {};
+
+    // Ссылка ОТНОСИТЕЛЬНАЯ (assets/materials/...): абсолютный путь пережил бы
+    // ровно до первого переноса проекта на другую машину.
+    return m_project.AssetRef(path);
+}
+
+void EditorLayer::PaintWithMaterial(GameObject object, const std::string& name,
+                                    const glm::vec3& albedo, float metallic, float roughness) {
+    MeshRendererComponent& mr = object.Renderer();
+    const std::string ref = TemplateMaterial(name, albedo, metallic, roughness);
+    if (ref.empty()) {
+        // Проекта нет — файл писать некуда, и цвет остаётся у объекта. Это не
+        // «второй способ красить»: ровно для такого случая Color и оставлен —
+        // объект БЕЗ материала (см. ecs/RenderComponents.h).
+        mr.Color = albedo;
+        return;
+    }
+    AssignMaterial(mr, ref, ResourceManager::Instance().GetMaterial(ref));
+}
+
 void EditorLayer::NewScene(ProjectTemplateKind content) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
     m_undoStack.clear();
@@ -149,19 +187,33 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // Скайбокс включён по умолчанию — сцена сразу с атмосферным фоном.
         m_scene->Lighting.Skybox.Enabled = true;
 
-        struct Def { const char* name; glm::vec3 pos; glm::vec3 color; glm::vec3 scale; };
+        // ЦВЕТ ПРИХОДИТ ИЗ МАТЕРИАЛА, а не из поля объекта.
+        //
+        // Шаблон — это ещё и образец того, как устроен проект: по нему учатся,
+        // открыв инспектор первого же куба. Пока кубы красились полем Color,
+        // образец врал: цвет был, материала не было, и откуда взялся цвет,
+        // ответить было нечем. Теперь у каждой формы свой .sagemat в
+        // assets/materials — тот самый файл, который человек и правит дальше.
+        //
+        // Шероховатость у металла (Tower) ниже: витрина обязана показывать не
+        // только разные цвета, но и разные ПОВЕРХНОСТИ — иначе непонятно,
+        // зачем материалу что-то кроме цвета.
+        struct Def {
+            const char* name; glm::vec3 pos; glm::vec3 color; glm::vec3 scale;
+            float metallic; float roughness;
+        };
         Def defs[] = {
-            {"Ground",     {0.0f, -0.75f, 0.0f}, {0.30f, 0.32f, 0.36f}, {6.0f, 0.3f, 6.0f}},
-            {"Red Cube",   {-1.6f, 0.3f, 0.0f},  {0.85f, 0.30f, 0.30f}, {1.0f, 1.0f, 1.0f}},
-            {"Green Cube", {0.0f, 0.3f, 0.0f},   {0.35f, 0.75f, 0.40f}, {1.0f, 1.0f, 1.0f}},
-            {"Blue Cube",  {1.6f, 0.3f, 0.0f},   {0.35f, 0.55f, 0.90f}, {1.0f, 1.0f, 1.0f}},
-            {"Tower",      {0.0f, 1.6f, -1.8f},  {0.90f, 0.80f, 0.35f}, {0.6f, 2.4f, 0.6f}},
+            {"Ground",     {0.0f, -0.75f, 0.0f}, {0.30f, 0.32f, 0.36f}, {6.0f, 0.3f, 6.0f}, 0.0f, 0.85f},
+            {"Red Cube",   {-1.6f, 0.3f, 0.0f},  {0.85f, 0.30f, 0.30f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0.55f},
+            {"Green Cube", {0.0f, 0.3f, 0.0f},   {0.35f, 0.75f, 0.40f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0.55f},
+            {"Blue Cube",  {1.6f, 0.3f, 0.0f},   {0.35f, 0.55f, 0.90f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0.55f},
+            {"Tower",      {0.0f, 1.6f, -1.8f},  {0.90f, 0.80f, 0.35f}, {0.6f, 2.4f, 0.6f}, 1.0f, 0.25f},
         };
         for (const Def& d : defs) {
             GameObject obj = CreateCubeEntity(d.name);
             obj.GetTransform().Position = d.pos;
             obj.GetTransform().Scale = d.scale;
-            obj.Renderer().Color = d.color;
+            PaintWithMaterial(obj, d.name, d.color, d.metallic, d.roughness);
         }
 
         // Криволинейные примитивы — витрина форм И проверка аутлайна выделения:
@@ -176,7 +228,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         for (const Prim& p : prims) {
             GameObject obj = CreatePrimitiveEntity(p.name, p.type);
             obj.GetTransform().Position = p.pos;
-            obj.Renderer().Color = p.color;
+            PaintWithMaterial(obj, p.name, p.color, 0.0f, 0.45f);
         }
 
         // Игровая камера сцены — панель Game сразу показывает картинку. НАРОЧНО
@@ -271,7 +323,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
 
         GameObject ground = CreatePrimitiveEntity("Ground", MeshRef::Type::Plane);
         ground.GetTransform().Scale = {12.0f, 1.0f, 12.0f};
-        ground.Renderer().Color = {0.30f, 0.32f, 0.36f};
+        PaintWithMaterial(ground, "Ground", {0.30f, 0.32f, 0.36f}, 0.0f, 0.85f);
 
         GameObject camObj = m_scene->CreateObject("Main Camera");
         camObj.GetTransform().Position = {0.0f, 1.6f, 6.0f};
@@ -537,11 +589,52 @@ bool EditorLayer::SaveSceneToFile(const fs::path& path) {
         m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene saved: " << path.string();
         UpdateWindowTitle();
+        // Обложка снимается ПОСЛЕ сохранения и не в этой функции: кадр
+        // существует только в конце кадра (см. TakeSceneShot). Здесь — заказ.
+        RequestSceneShot();
         return true;
     } catch (const std::exception& e) {
         LOG_ERROR("Editor") << "Scene save failed: " << e.what();
         return false;
     }
+}
+
+// --- Обложка сцены ----------------------------------------------------------
+//
+// Заказ обложки: путь считается СЕЙЧАС (пока известны и проект, и сцена), а
+// снимок берётся в конце кадра — раньше игрового кадра просто нет.
+void EditorLayer::RequestSceneShot() {
+    m_sceneShotPath.clear();
+    if (!m_project.Loaded() || m_scenePath.empty()) return;
+    const fs::path cover = scenecover::For(m_project.Dir(), m_scenePath);
+    if (cover.empty()) return;
+    std::error_code ec;
+    fs::create_directories(cover.parent_path(), ec);
+    if (ec) return;
+    m_sceneShotPath = sage::PathToUtf8(cover);
+}
+
+// Снимок сцены в заказанный файл. Зовётся из конца кадра.
+//
+// ИГРОВОЙ КАДР ПРЕДПОЧТИТЕЛЬНЕЕ вида редактора: в нём нет ни сетки, ни гизмо,
+// ни каймы выделения — то есть он показывает СЦЕНУ, а не рабочее место. Если
+// игровой камеры в сцене нет, снимаем вьюпорт: обложка с сеткой всё равно
+// отвечает на вопрос «какая это сцена» лучше, чем её отсутствие.
+void EditorLayer::TakeSceneShot() {
+    if (m_sceneShotPath.empty()) return;
+    const std::string path = m_sceneShotPath;
+    m_sceneShotPath.clear();
+
+    if (!m_renderer.SaveGameFrame(path) && !m_renderer.SaveViewportFrame(path)) {
+        LOG_WARN("Editor") << "Обложка сцены не снялась: кадра нет";
+        return;
+    }
+    // Та же картинка — обложкой ПРОЕКТА в стартовом окне (см. SceneCover.h).
+    std::error_code ec;
+    const fs::path shot = scenecover::ProjectShot(m_project.Dir());
+    fs::create_directories(shot.parent_path(), ec);
+    fs::copy_file(path, shot, fs::copy_options::overwrite_existing, ec);
+    if (ec) LOG_WARN("Editor") << "Обложка проекта не обновилась: " << ec.message();
 }
 
 // Заметка шаблона — В КОНСОЛЬ, а не только в диалог.
@@ -700,6 +793,24 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
     }
 
     NewScene(kind);
+
+    // ШАБЛОН ОБЯЗАН ОСТАВИТЬ ФАЙЛ СЦЕНЫ, а не только картинку в окне.
+    //
+    // Ровно эта жалоба и привела сюда: «выберу базовый шаблон — сцену
+    // показывает, а самого файла сцены НЕТ». Так и было: встроенный шаблон
+    // строил сцену в памяти, m_scenePath оставался пустым, и дальше всё
+    // ломалось по цепочке — в scenes/ пусто, в панели ассетов сцену не
+    // открыть, Ctrl+S спрашивает, куда сохранять, собранная игра не находит
+    // с чего начать. Проект без сцены на диске — это не проект.
+    //
+    // Имя main.sage не случайное: с него начинает плеер (см.
+    // runtime/src/PlayerLayer.cpp) и его же ищут шаблоны-копии.
+    const fs::path scenePath = m_project.ScenesDir() / "main.sage";
+    if (!SaveSceneToFile(scenePath)) {
+        err = "Failed to write the first scene: " + sage::PathToUtf8(scenePath);
+        return false;
+    }
+
     AnnounceTemplateNote(*tpl);
     UpdateWindowTitle();
     return true;
@@ -888,25 +999,35 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     // ходит, а место они занимают.
     {
         sage::assets::PackWriter pack;
-        // project.sageproj в пакет НЕ кладётся, а копируется рядом с exe. Это
-        // манифест игры: по нему плеер узнаёт её имя, и на него указывают,
-        // когда запускают игру из другой папки или перетаскивают файл на
-        // плеер. Спрятав его в пакет, мы отняли бы этот способ запуска — что и
-        // случилось, и поймал это smoke-тест «игра запускается из ЛЮБОЙ папки».
+        // МАНИФЕСТ ЛЕЖИТ В ПАКЕТЕ, а не россыпью рядом с exe.
         //
-        // Копия одна, а не две: файла нет в пакете, поэтому правила «пакет
-        // против россыпи» он не нарушает.
-        const size_t packed =
-            pack.AddDirectory(m_project.Dir(), {".meta", ".sageimport", "project.sageproj"});
+        // project.sageproj — это манифест игры: по нему плеер узнаёт её имя.
+        // Раньше он копировался ОТДЕЛЬНЫМ файлом рядом с exe, и получалось,
+        // что игра, целиком упакованная в один game.sagepak, всё равно везёт
+        // рядом кусок редакторского проекта — тот самый, который у автора уже
+        // есть. Теперь он внутри пакета, и плеер читает его оттуда (см.
+        // runtime/src/PlayerLayer.cpp).
+        //
+        // Файлы .meta и .sageimport в пакет не кладутся: это служебные данные
+        // редактора (GUID'ы ассетов, параметры импорта), в игре по ним никто не
+        // ходит, а место они занимают.
+        const size_t packed = pack.AddDirectory(m_project.Dir(), {".meta", ".sageimport"});
         if (!pack.Save(gameDir / "game.sagepak")) {
             err = T("Could not write the game package");
             return false;
         }
-        fs::copy_file(m_project.Dir() / "project.sageproj", gameDir / "project.sageproj",
-                      fs::copy_options::overwrite_existing, ec);
-        if (ec) {
-            err = T("Could not copy the project file: ") + ec.message();
-            return false;
+
+        // ОТДЕЛЬНАЯ КОПИЯ — только если её попросили параметром сборки (см.
+        // EngineConfig::BuildProjectFile; в настройках редактора его нет и не
+        // должно быть). Нужна она ровно для одного: запускать игру, перетащив
+        // project.sageproj на плеер.
+        if (m_settings.BuildProjectFile) {
+            fs::copy_file(m_project.Dir() / "project.sageproj", gameDir / "project.sageproj",
+                          fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                err = T("Could not copy the project file: ") + ec.message();
+                return false;
+            }
         }
         LOG_INFO("Editor") << "Пакет игры: " << packed << " файлов";
     }

@@ -12,6 +12,7 @@
 // вызываются оттуда же, откуда вызывались.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "SceneCover.h"
 #include "EditorIcons.h"
 #include "CodeEditorApp.h"
 #include "AssetSlot.h"
@@ -387,14 +388,17 @@ bool EditorLayer::SelfTestProjectAndAssets() {
     // интерфейсный — принести готовые экраны. Пока выбор был булевым флагом,
     // проверять было нечего: вариантов было два, и один из них никто не звал.
     if (ok) {
-        struct TemplateCheck { const char* Id; bool Empty; const char* Expect; };
+        // Painted — объект, у которого проверяется МАТЕРИАЛ. Отдельным полем, а
+        // не «тем же, что Expect»: у интерфейсного шаблона Expect — экран меню,
+        // и материала у него нет по определению, а покрашенный пол есть.
+        struct TemplateCheck { const char* Id; bool Empty; const char* Expect; const char* Painted; };
         // ВСЕ шаблоны, строящие сцену кодом, а не два из трёх. «Демо» не
         // проверялся вообще — при том, что он предлагается по умолчанию и
         // именно его видит человек, открывший редактор впервые.
         const TemplateCheck checks[] = {
-            {"empty", true, nullptr},
-            {"demo", false, "Green Cube"},
-            {"ui", false, "MenuButtons"},
+            {"empty", true, nullptr, nullptr},
+            {"demo", false, "Green Cube", "Green Cube"},
+            {"ui", false, "MenuButtons", "Ground"},
         };
         for (const TemplateCheck& c : checks) {
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
@@ -433,6 +437,45 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не принёс " << c.Expect;
                 ok = false;
             }
+
+            // ФАЙЛ СЦЕНЫ НА ДИСКЕ — у КАЖДОГО шаблона, пустого в том числе.
+            // Ровно та поломка, с которой пришли: сцену показывает, а файла
+            // нет. Дальше по цепочке ломается всё: в scenes/ пусто, Ctrl+S
+            // спрашивает куда, собранная игра не находит, с чего начать.
+            const fs::path made = fs::path(std::string("selftest_tpl_") + c.Id) / "scenes" /
+                                  "main.sage";
+            if (!fs::exists(made, ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не создал файл сцены "
+                                    << made.string();
+                ok = false;
+            } else if (m_scenePath.filename() != "main.sage") {
+                // И редактор обязан СЧИТАТЬ её открытой: иначе первое же
+                // Ctrl+S спросит путь, будто сцена ничья.
+                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id
+                                    << " оставил редактор без пути сцены";
+                ok = false;
+            }
+
+            // ЦВЕТ — ИЗ МАТЕРИАЛА, А НЕ ИЗ ПОЛЯ ОБЪЕКТА. Вторая половина той
+            // же жалобы: «формы разного цвета, а материалов у них нет».
+            if (c.Painted) {
+                GameObject shown = m_scene->FindByName(c.Painted);
+                if (!shown.Valid() || !shown.HasRenderer()) {
+                    LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не принёс "
+                                        << c.Painted;
+                    ok = false;
+                } else if (shown.Renderer().MaterialPath.empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: у объекта " << c.Painted << " шаблона "
+                                        << c.Id << " нет материала";
+                    ok = false;
+                } else if (!fs::exists(fs::path(std::string("selftest_tpl_") + c.Id) /
+                                           shown.Renderer().MaterialPath, ec)) {
+                    LOG_ERROR("Editor") << "SELFTEST: материал " << shown.Renderer().MaterialPath
+                                        << " шаблона " << c.Id << " не записан на диск";
+                    ok = false;
+                }
+            }
+
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
             if (!ok) break;
         }
@@ -1323,15 +1366,44 @@ bool EditorLayer::SelfTestSceneAndPlay() {
             // Проверяем и то, что папки нет: положить рядом и пакет, и россыпь
             // значило бы, что какой из них прочтут — дело случая.
             if (!fs::exists(exe, ec) || !fs::exists(gameDir / "game.sagepak", ec) ||
-                // Манифест игры лежит РЯДОМ с exe, а не в пакете: на него
-                // указывают при запуске из другой папки.
-                !fs::exists(gameDir / "project.sageproj", ec) ||
                 fs::exists(gameDir / "project", ec) ||
                 !fs::exists(gameDir / "assets" / "shaders" / "lit.frag", ec)) {
                 LOG_ERROR("Editor") << "SELFTEST: built game layout incomplete in " << gameDir.string();
                 ok = false;
             }
+            // МАНИФЕСТА РЯДОМ С EXE НЕТ — он в пакете (см.
+            // EngineConfig::BuildProjectFile). Отдельная копия была лишним
+            // файлом: игра уже везёт всё содержимое проекта одним пакетом.
+            if (fs::exists(gameDir / "project.sageproj", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: рядом с игрой лежит project.sageproj, "
+                                       "хотя сборка по умолчанию его не кладёт";
+                ok = false;
+            }
         }
+    }
+
+    // --- Тот же параметр, включённый: копия манифеста появляется ------------
+    //
+    // Выключатель без проверки — это обещание. Ради него он и заведён: игру
+    // запускают, перетаскивая project.sageproj на плеер, и если включённый
+    // параметр ничего не меняет, способ запуска молча пропадает.
+    if (ok) {
+        const bool saved = m_settings.BuildProjectFile;
+        m_settings.BuildProjectFile = true;
+        std::string buildErr;
+        if (!BuildGame("selftest_dist_manifest", buildErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: сборка с манифестом не прошла: " << buildErr;
+            ok = false;
+        } else {
+            const fs::path dir = fs::path("selftest_dist_manifest") / m_project.Name();
+            if (!fs::exists(dir / "project.sageproj", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: BuildProjectFile=true не положил манифест рядом";
+                ok = false;
+            }
+            std::error_code rmec;
+            fs::remove_all("selftest_dist_manifest", rmec);  // артефакт, не данные
+        }
+        m_settings.BuildProjectFile = saved;
     }
 
     // --- Play: скрипт вращает сущность, Stop откатывает сцену к снапшоту ---
@@ -3822,6 +3894,44 @@ bool EditorLayer::SelfTestRenderStability() {
             m_scene->RemoveObject(cube.Id());
         }
         m_scene->RemoveObject(cam.Id());
+    }
+
+    // --- ОБЛОЖКА СЦЕНЫ: сохранили — появился снимок ------------------------
+    //
+    // Проверяется весь путь: сохранение заказывает обложку, конец кадра её
+    // снимает, файл ложится в .sage/covers и повторяется обложкой проекта для
+    // стартового окна. Ломается это молча — сцена сохранена, всё работает,
+    // просто в списке проектов по-прежнему рисунок из имени, — и заметить
+    // это можно только открыв стартовое окно и вспомнив, как было.
+    if (ok && m_project.Loaded()) {
+        const fs::path scenePath = m_project.ScenesDir() / "selftest_cover.sage";
+        if (!SaveSceneToFile(scenePath)) {
+            LOG_ERROR("Editor") << "SELFTEST: сцена под обложку не сохранилась";
+            ok = false;
+        } else {
+            // Кадр — тот же, что рисует редактор: обложка снимается из
+            // готового буфера, а до первого прохода буфера нет.
+            LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+            glm::mat4 v(1.0f), p(1.0f);
+            m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection,
+                                      m_renderMode, m_showGrid, cfg, v, p, 0);
+            m_renderer.RenderGame(*m_scene, env, cfg);
+            TakeSceneShot();
+
+            std::error_code cec;
+            const fs::path cover = scenecover::For(m_project.Dir(), scenePath);
+            const fs::path shot = scenecover::ProjectShot(m_project.Dir());
+            if (!fs::exists(cover, cec) || fs::file_size(cover, cec) < 1024) {
+                LOG_ERROR("Editor") << "SELFTEST: обложка сцены не снялась: " << cover.string();
+                ok = false;
+            }
+            if (!fs::exists(shot, cec)) {
+                LOG_ERROR("Editor") << "SELFTEST: обложка проекта для стартового окна не появилась";
+                ok = false;
+            }
+            std::error_code rmec;
+            fs::remove(scenePath, rmec);
+        }
     }
 
     m_scene->RemoveObject(fx.Id());

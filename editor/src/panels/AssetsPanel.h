@@ -98,7 +98,7 @@ private:
     // Превью карточек. Материалы, префабы и модели рендерятся по одному за кадр
     // и запоминаются (см. ThumbnailFor): один такой рендер — полный проход
     // сцены со светом.
-    uint64_t ThumbnailFor(const std::filesystem::path& path, bool isDir);
+    uint64_t ThumbnailFor(EditorHost& host, const std::filesystem::path& path, bool isDir);
     AssetPreview m_preview;
     struct Thumb {
         uint64_t Id = 0;      // 0 — превью не получилось (негативный кэш)

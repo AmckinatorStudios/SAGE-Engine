@@ -62,17 +62,16 @@ public:
         if (!Valid()) throw std::runtime_error("GameObject: обращение к уничтоженной/невалидной сущности");
         return m_reg->get_or_emplace<MeshRendererComponent>(m_entity);
     }
-    // Цвет и свечение из скрипта: компонент ЗАВОДИТСЯ по обращению. Пустой
-    // объект без MeshRenderer — обычное дело (узел иерархии, точка привязки), а
+    // Цвет из скрипта: компонент ЗАВОДИТСЯ по обращению. Пустой объект без
+    // MeshRenderer — обычное дело (узел иерархии, точка привязки), а
     // «obj.Color = ...» на нём означает «пусть будет видимым», а не ошибку.
+    //
+    // СВЕЧЕНИЯ И ПРОЗРАЧНОСТИ У ОБЪЕКТА БОЛЬШЕ НЕТ: и то и другое — свойство
+    // ПОВЕРХНОСТИ, то есть материала (см. MeshRendererComponent). Второй их
+    // копии на экземпляре не бывает: две лампы с одним материалом обязаны
+    // светиться одинаково, а «затухание одного объекта» делается своим
+    // материалом, а не поправкой поверх общего.
     glm::vec3& ColorRef() { return m_reg->get_or_emplace<MeshRendererComponent>(m_entity).Color; }
-    // Свечение — рядом с цветом и по той же причине: и то и другое живёт в
-    // рендерере, но со стороны скрипта это свойство САМОГО объекта («фонарь
-    // светится»), и заставлять писать obj:GetRenderer().Emissive там, где
-    // соседняя строка — obj.Color, значило бы разложить одно и то же понятие
-    // на два разных способа обращения.
-    glm::vec3& EmissiveRef() { return m_reg->get_or_emplace<MeshRendererComponent>(m_entity).Emissive; }
-    float& EmissiveStrengthRef() { return m_reg->get_or_emplace<MeshRendererComponent>(m_entity).EmissiveStrength; }
 
 private:
     template <typename T>

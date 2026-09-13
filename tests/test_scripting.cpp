@@ -59,33 +59,35 @@ TEST(Scripting_component_add_get_has_remove) {
     CHECK_TRUE(getNil);
 }
 
-// Свечение объекта пишется из скрипта так же, как цвет. Тест ловит ровно ту
-// ошибку, из-за которой светящиеся фонари не работали: `obj.Emissive = ...`
-// падал с "cannot set (new_index) into this object", потому что свойство было
-// только у компонента-рендерера, а у GameObject его не было — притом что
-// СОСЕДНЯЯ строка `obj.Color = ...` работала.
-TEST(Scripting_emissive_is_settable_on_the_object_like_color) {
+// Свечение объекта задаётся из скрипта МАТЕРИАЛОМ — своего свечения у объекта
+// больше нет. Тест закрепляет ровно этот путь: собрать материал скриптом,
+// выставить ему свечение и назначить объекту. Пока свечение дублировалось в
+// компоненте, `obj.Emissive = ...` падал с "cannot set (new_index) into this
+// object", и обходной путь искали наощупь; теперь путь один, и он проверен.
+TEST(Scripting_emissive_comes_from_the_material) {
     ScriptEngine se;
     Scene scene("S");
     se.BindScene(scene);
     GameObject o = scene.CreateObject("Lantern");
     se.Lua()["e"] = o;
 
-    se.Lua().script("e.Color = Vec3.new(0.2, 0.3, 0.4)\n"
-                    "e.Emissive = Vec3.new(1.0, 0.72, 0.34)\n"
-                    "e.EmissiveStrength = 2.6");
+    se.Lua().script("local m = sage.render.NewMaterial('test/lantern')\n"
+                    "m.Albedo = Vec3.new(0.2, 0.3, 0.4)\n"
+                    "m.Emissive = Vec3.new(1.0, 0.72, 0.34)\n"
+                    "m.EmissiveStrength = 2.6\n"
+                    "sage.render.SetMaterial(e, 'test/lantern')");
 
     const MeshRendererComponent& mr = scene.Registry().get<MeshRendererComponent>(o.Entity());
-    CHECK_NEAR(mr.Emissive.x, 1.0f, 1e-4);
-    CHECK_NEAR(mr.Emissive.y, 0.72f, 1e-4);
-    CHECK_NEAR(mr.Emissive.z, 0.34f, 1e-4);
-    CHECK_NEAR(mr.EmissiveStrength, 2.6f, 1e-4);
+    CHECK_TRUE(mr.MaterialPtr != nullptr);
+    CHECK_NEAR(mr.MaterialPtr->Emissive.x, 1.0f, 1e-4);
+    CHECK_NEAR(mr.MaterialPtr->Emissive.y, 0.72f, 1e-4);
+    CHECK_NEAR(mr.MaterialPtr->Emissive.z, 0.34f, 1e-4);
+    CHECK_NEAR(mr.MaterialPtr->EmissiveStrength, 2.6f, 1e-4);
 
-    // И читается обратно, и правится покомпонентно — как Color.
-    se.Lua().script("e.Emissive.y = 0.5");
-    CHECK_NEAR(mr.Emissive.y, 0.5f, 1e-4);
-    float strength = se.Lua().script("return e.EmissiveStrength");
-    CHECK_NEAR(strength, 2.6f, 1e-4);
+    // Материал объекта читается обратно и правится на ходу — то есть менять
+    // яркость лампы во время игры можно, не собирая материал заново.
+    se.Lua().script("sage.render.MaterialOf(e).EmissiveStrength = 4.0");
+    CHECK_NEAR(mr.MaterialPtr->EmissiveStrength, 4.0f, 1e-4);
 
     // Итоговое свечение больше единицы — иначе bloom не сработает и «светящийся»
     // объект окажется просто светлым.

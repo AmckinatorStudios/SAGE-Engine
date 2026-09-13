@@ -273,6 +273,9 @@ bool EngineConfig::LoadFile(const std::string& path) {
     WorkerThreads       = sys.value("workerThreads", WorkerThreads);
     MultithreadedRender = sys.value("multithreadedRender", MultithreadedRender);
 
+    auto build = j.value("build", json::object());
+    BuildProjectFile = build.value("projectFile", BuildProjectFile);
+
     LOG_INFO("Config") << "Загружены настройки: " << path;
     return true;
 }
@@ -334,6 +337,11 @@ std::string EngineConfig::ToJsonString() const {
     };
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
+    };
+    // Сборка игры — своей секцией, а не в system: это не про то, как движок
+    // работает, а про то, что получится в папке сборки (см. Config.h).
+    j["build"] = {
+        {"projectFile", BuildProjectFile},
     };
     return j.dump(2);
 }
@@ -427,6 +435,11 @@ void EngineConfig::ApplyEnvOverrides() {
         PlanarReflections = EnvBool(v, PlanarReflections);
     if (const char* v = std::getenv("SAGE_FOG")) Fog = EnvBool(v, Fog);
     if (const char* v = std::getenv("SAGE_SKYBOX")) Skybox = EnvBool(v, Skybox);
+
+    // Сборка игры. Из окружения — потому что собирают её и из скриптов: CI
+    // проверяет ОБА расклада файлов, не заводя ради этого двух sage.cfg.
+    if (const char* v = std::getenv("SAGE_BUILD_PROJECT_FILE"))
+        BuildProjectFile = EnvBool(v, BuildProjectFile);
 }
 
 EngineConfig& EngineConfig::Get() {

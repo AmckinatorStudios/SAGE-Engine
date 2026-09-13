@@ -156,22 +156,30 @@ void PlayerLayer::OnAttach() {
     }
 
     fs::path projectFile = m_projectDir / "project.sageproj";
-    if (fs::exists(projectFile, ec)) {
-        try {
-            std::ifstream file(projectFile);
-            nlohmann::json root;
-            file >> root;
-            m_projectName = root.value("name", m_projectName);
-        } catch (const std::exception& e) {
-            LOG_WARN("Player") << "project.sageproj не парсится (" << e.what() << "), продолжаю";
-        }
-    }
     fs::current_path(m_projectDir, ec);
     if (ec) {
         Fail("Папка проекта недоступна",
              {m_projectDir.string(), "",
               "Проверьте, что путь существует и его можно открыть."});
         return;
+    }
+
+    // ИМЯ ИГРЫ — ИЗ МАНИФЕСТА, ГДЕ БЫ ОН НИ ЛЕЖАЛ.
+    //
+    // Собранная игра везёт project.sageproj ВНУТРИ game.sagepak: отдельная его
+    // копия рядом с exe — лишний файл, и по умолчанию редактор её больше не
+    // кладёт (см. EngineConfig::BuildProjectFile). Поэтому читаем через vfs:
+    // он сначала смотрит в смонтированный пакет, потом на диск — то есть один
+    // и тот же код работает и для собранной игры, и для запуска из папки
+    // проекта во время разработки. Пока это был честный std::ifstream, игра
+    // без отдельного файла показывалась в заголовке окна как «SAGE Player».
+    std::string manifest;
+    if (sage::assets::vfs::ReadText("project.sageproj", manifest)) {
+        try {
+            m_projectName = nlohmann::json::parse(manifest).value("name", m_projectName);
+        } catch (const std::exception& e) {
+            LOG_WARN("Player") << "project.sageproj не парсится (" << e.what() << "), продолжаю";
+        }
     }
 
     // ЗДЕСЬ ВООБЩЕ ПРОЕКТ? Раньше этот вопрос не задавался, и запуск плеера не

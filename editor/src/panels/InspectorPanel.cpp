@@ -84,7 +84,7 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
                 // могло уйти на пустой объект — у него меша нет вовсе.
                 if (GameObject sel = host.InspectedObject();
                     sel.Valid() && sel.Registry()->all_of<MeshRendererComponent>(sel.Entity())) {
-                    WriteMaterialFromOverrides(host, sel.Renderer(), m_browser.Result().string());
+                    WriteMaterialForObject(host, sel.Renderer(), m_browser.Result().string());
                 }
             } else if (m_browseIsMaterial) {
                 m_browseIsMaterial = false;

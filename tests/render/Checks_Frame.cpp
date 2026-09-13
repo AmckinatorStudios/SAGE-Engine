@@ -630,8 +630,12 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
         MeshRendererComponent& mr = cube.Renderer();
         mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
         mr.MeshPtr = std::make_shared<Mesh>(md.Vertices, md.Indices);
-        mr.Color = glm::vec3(0.8f, 0.25f, 0.25f);
-        mr.Opacity = 0.45f;   // полупрозрачный: именно здесь порядок и решает
+        // Полупрозрачность — материалом: своей непрозрачности у экземпляра
+        // больше нет, она вся живёт в .sagemat.
+        auto glass = std::make_shared<Material>();
+        glass->Albedo = glm::vec3(0.8f, 0.25f, 0.25f);
+        glass->Opacity = 0.45f;   // именно здесь порядок граней и решает
+        mr.MaterialPtr = glass;
         cube.GetTransform().Position = glm::vec3(0.0f, 0.0f, 0.0f);
         cube.GetTransform().Scale = glm::vec3(2.0f);
         return RenderFrame(r, local, PerspectiveProj(), BaseSettings(), kW, kH);
@@ -656,8 +660,10 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
     MeshRendererComponent& smr = solid.Renderer();
     smr.Ref = MeshRef{MeshRef::Type::Cube, ""};
     smr.MeshPtr = std::make_shared<Mesh>(data.Vertices, data.Indices);
-    smr.Color = glm::vec3(0.8f, 0.25f, 0.25f);
-    smr.Opacity = 1.0f;
+    auto solidMat = std::make_shared<Material>();
+    solidMat->Albedo = glm::vec3(0.8f, 0.25f, 0.25f);
+    solidMat->Opacity = 1.0f;
+    smr.MaterialPtr = solidMat;
     solid.GetTransform().Scale = glm::vec3(2.0f);
     const Image opaque = RenderFrame(r, opaqueScene, PerspectiveProj(), BaseSettings(), kW, kH);
     long long diff = 0;

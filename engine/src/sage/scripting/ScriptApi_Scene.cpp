@@ -40,16 +40,11 @@ void ScriptEngine::RegisterGameObject() {
         "Color", sol::property(
             [](GameObject& o) -> glm::vec3& { return o.ColorRef(); },
             [](GameObject& o, const glm::vec3& c) { o.ColorRef() = c; }),
-        // Свечение — ровно как Color: ссылкой (можно писать по компонентам) и
-        // целым значением. Живёт оно в рендерере, но для скрипта это свойство
-        // объекта: строка `lamp.Emissive = Vec3(...)` рядом с `lamp.Color =
-        // Vec3(...)` не должна вдруг требовать другого способа обращения.
-        "Emissive", sol::property(
-            [](GameObject& o) -> glm::vec3& { return o.EmissiveRef(); },
-            [](GameObject& o, const glm::vec3& c) { o.EmissiveRef() = c; }),
-        "EmissiveStrength", sol::property(
-            [](GameObject& o) { return o.EmissiveStrengthRef(); },
-            [](GameObject& o, float v) { o.EmissiveStrengthRef() = v; }),
+        // СВЕЧЕНИЯ У ОБЪЕКТА НЕТ — оно у материала (sage.render.NewMaterial +
+        // m.Emissive / m.EmissiveStrength, см. mat.lua витрины). Светится
+        // поверхность, а не отдельный экземпляр: две лампы с одним материалом
+        // обязаны светиться одинаково, а разное свечение — это разные
+        // материалы, а не поправка поверх общего.
         "Valid", [](GameObject& o) { return o.Valid(); }
     );
 
@@ -284,18 +279,16 @@ void ScriptEngine::RegisterMeshApi() {
         mr.Ref = MeshRef{MeshRef::Type::Capsule, ""};
         mr.MeshPtr = ResourceManager::Instance().GetCapsule();
     });
-    // Прозрачность объекта одним вызовом: не заставлять скрипт доставать
-    // компонент ради одного числа, которое меняется чаще всего остального
-    // (затухание подобранного предмета, вода, призрачная подсветка постройки).
-    Bind("render", "SetOpacity", "SetOpacity", [](GameObject& obj, float opacity) {
-        obj.EnsureRenderer().Opacity = opacity;
-    });
-    Bind("render", "GetOpacity", "GetOpacity", [](GameObject& obj) {
-        // У пустого объекта прозрачности нет вовсе. Единица — «непрозрачен»:
-        // ошибкой скрипта отсутствие меша не является, спрашивать про него
-        // могут и у узла иерархии.
-        return obj.HasRenderer() ? obj.Renderer().Opacity : 1.0f;
-    });
+    // ПРОЗРАЧНОСТЬ — У МАТЕРИАЛА, и SetOpacity/GetOpacity здесь больше нет.
+    //
+    // Они правили поправку экземпляра поверх материала: у объекта была своя
+    // непрозрачность, у материала своя, и итог приходилось держать в уме.
+    // Скрипту, которому нужно затухание, нужен свой материал:
+    //   local m = sage.render.NewMaterial("fade_" .. id)
+    //   m.Opacity = 0.4
+    //   sage.render.SetMaterial(obj, "fade_" .. id)
+    // Это дороже одной строки ровно настолько, насколько честнее: прозрачность
+    // объекта перестаёт быть невидимым множителем поверх общей поверхности.
 
     // Юниформы собственного шейдера ДЛЯ ОДНОЙ сущности: материал общий, а
     // «подсвети именно эту доску» — задача штучная. Тип выводится из значения:

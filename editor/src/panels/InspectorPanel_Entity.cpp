@@ -271,8 +271,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // материала верхний ползунок цвета переставал что-либо делать — молча.
     //
     // Теперь порядок повторяет саму структуру компонента (см.
-    // ecs/RenderComponents.h): ЧТО рисуем -> ЧЕМ красим -> чем ЭТОТ экземпляр
-    // отличается от других таких же.
+    // ecs/RenderComponents.h): ЧТО рисуем -> ЧЕМ красим. Третьей группы,
+    // «поправок экземпляра» поверх материала, больше нет: вид объекта задаёт
+    // материал, и спрашивать, какое из двух полей сейчас решает, не нужно.
     // СЕКЦИЯ ЕСТЬ, ТОЛЬКО ЕСЛИ ЕСТЬ КОМПОНЕНТ. Пустой объект его не несёт, и
     // рисовать ему «Меш» значило бы показывать цвет, тени и слот материала у
     // того, кто ничем не рисуется; добавляется компонент кнопкой «Добавить
@@ -282,7 +283,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
-        DrawInstanceOverrides(host, mr, obj.Id());
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---

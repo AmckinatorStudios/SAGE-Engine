@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1551.
+// Язык: Русский. Строк: 1544.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -166,8 +166,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Добавляется через Entity > Create Light; тип и параметры — в инспекторе"},
     {"Added to the list: %d",
      "Добавлено в список: %d"},
-    {"Added to the material emissive. Above 1 gives a bloom halo.",
-     "Прибавляется к свечению материала. Больше 1 — ореол (bloom)."},
     {"Added to the scene: ",
      "Добавлено в сцену: "},
     {"Adds the usual set of actions. Existing ones are left alone.",
@@ -238,8 +236,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Клип анимации"},
     {"Appearance",
      "Оформление"},
-    {"Applied on top of the material.",
-     "Накладываются поверх материала."},
     {"Apply a preset...",
      "Применить заготовку…"},
     {"Argument",
@@ -1286,8 +1282,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Установить из папки проекта..."},
     {"Installed",
      "Установленные"},
-    {"Instance overrides",
-     "Поправки экземпляра"},
     {"Intensity",
      "Яркость"},
     {"Intensity %.2f, direction (%.2f, %.2f, %.2f)",
@@ -1536,10 +1530,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Перенесено в "},
     {"Moving failed: ",
      "Перенос не удался: "},
-    {"Multiplies the material albedo. White means as in the material.",
-     "Множится на albedo материала. Белый — как в материале."},
-    {"Multiplies the material opacity.",
-     "Множится на непрозрачность материала."},
     {"Music",
      "Музыка"},
     {"My Game",
@@ -1758,8 +1748,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка вывода"},
     {"Over the selection",
      "Над выделением"},
-    {"Override the material",
-     "Переопределить материал"},
     {"PAUSED",
      "ПАУЗА"},
     {"PBR",
@@ -2648,8 +2636,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка остаётся там же — меняется только имя."},
     {"The game looks through this object",
      "Игра смотрит через этот объект"},
-    {"The look comes from the material. Turn the switch on only to make THIS object differ from others sharing the same material.",
-     "Вид берётся из материала. Включайте переключатель, только чтобы ЭТОТ объект отличался от других с тем же материалом."},
     {"The look of an object is defined by its material.",
      "Вид объекта задаёт материал."},
     {"The look of the scene's world: sky, air, ambient light. Saved with the scene. Light SOURCES are objects — see the hierarchy. Quality and cost are in Game Settings.",

@@ -266,7 +266,11 @@ TEST(Serialization_opacity_and_ui_style_round_trip) {
     GameObject glass = scene.CreateObject("Glass");
     // Тип меша оставляем None: тесты идут без GL-контекста, а любой примитив
     // при загрузке попросил бы у ResourceManager настоящий GPU-меш.
-    glass.Renderer().Opacity = 0.35f;
+    //
+    // Прозрачность теперь живёт В МАТЕРИАЛЕ, а не поправкой на экземпляре, и в
+    // сцену уезжает ПУТЬ материала. Проверяем именно его: он и есть всё, что
+    // сцена знает о прозрачности объекта.
+    glass.Renderer().MaterialPath = "assets/glass.sagemat";
 
     GameObject hud = scene.CreateObject("Bar");
     entt::registry& reg = scene.Registry();
@@ -283,7 +287,7 @@ TEST(Serialization_opacity_and_ui_style_round_trip) {
 
     std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
     GameObject g2 = back->FindByName("Glass");
-    CHECK_NEAR(g2.Renderer().Opacity, 0.35f, 1e-4);
+    CHECK_EQ(g2.Renderer().MaterialPath, std::string("assets/glass.sagemat"));
 
     entt::registry& r2 = back->Registry();
     const entt::entity e2 = back->FindByName("Bar").Entity();
@@ -670,9 +674,13 @@ TEST(Scene_migration_v3_to_v4_neutralises_a_dead_instance_colour) {
     CHECK_NEAR(plain[1].get<float>(), 0.05f, 1e-5f);
 }
 
-// А это уже само правило: поправка МОДУЛИРУЕТ материал, одинаково у всех трёх
-// величин. Раньше правил было три разных, и цвет из них молчал громче всех.
-TEST(MeshRenderer_instance_overrides_modulate_the_material) {
+// ВИД ЗАДАЁТ МАТЕРИАЛ, И ТОЛЬКО ОН.
+//
+// Поправок экземпляра поверх материала больше нет: были тон, свечение, сила
+// свечения и непрозрачность, и вид объекта складывался из двух источников —
+// чем он покрашен на самом деле, приходилось считать в уме. Осталось одно
+// исключение, и оно не поправка: цвет объекта, У КОТОРОГО МАТЕРИАЛА НЕТ.
+TEST(MeshRenderer_look_comes_from_the_material) {
     MeshRendererComponent mr;
     auto mat = std::make_shared<Material>();
     mat->Albedo = {0.5f, 0.5f, 0.5f};
@@ -681,24 +689,24 @@ TEST(MeshRenderer_instance_overrides_modulate_the_material) {
     mat->EmissiveStrength = 1.0f;
     mr.MaterialPtr = mat;
 
-    // Нейтральные поправки = «как в материале»: включение группы само по себе
-    // ничего не меняет.
     CHECK_NEAR(EffectiveColor(mr).r, 0.5f, 1e-5f);
     CHECK_NEAR(EffectiveOpacity(mr), 0.8f, 1e-5f);
     CHECK_NEAR(EffectiveEmissive(mr).r, 0.1f, 1e-5f);
 
+    // Назначение материала возвращает цвет объекта в белый — иначе красный
+    // материал на зелёном кубе давал бы бурое пятно.
     mr.Color = {1.0f, 0.5f, 0.0f};
-    mr.Opacity = 0.5f;
-    mr.Emissive = {0.2f, 0.0f, 0.0f};
-    CHECK_NEAR(EffectiveColor(mr).r, 0.5f, 1e-5f);    // 0.5 * 1.0
-    CHECK_NEAR(EffectiveColor(mr).g, 0.25f, 1e-5f);   // 0.5 * 0.5
-    CHECK_NEAR(EffectiveOpacity(mr), 0.4f, 1e-5f);    // 0.8 * 0.5
-    CHECK_NEAR(EffectiveEmissive(mr).r, 0.3f, 1e-5f); // 0.1 + 0.2
-
-    // Без материала поправка задаёт вид целиком — как и раньше.
-    mr.MaterialPtr = nullptr;
+    AssignMaterial(mr, "assets/m.sagemat", mat);
+    CHECK_NEAR(mr.Color.g, 1.0f, 1e-5f);
     CHECK_NEAR(EffectiveColor(mr).g, 0.5f, 1e-5f);
-    CHECK_NEAR(EffectiveOpacity(mr), 0.5f, 1e-5f);
+
+    // Без материала цвет объекта задаёт вид целиком, а прозрачности и свечения
+    // у него нет вовсе: непрозрачен и не светится.
+    mr.MaterialPtr = nullptr;
+    mr.Color = {1.0f, 0.5f, 0.0f};
+    CHECK_NEAR(EffectiveColor(mr).g, 0.5f, 1e-5f);
+    CHECK_NEAR(EffectiveOpacity(mr), 1.0f, 1e-5f);
+    CHECK_NEAR(EffectiveEmissive(mr).r, 0.0f, 1e-5f);
 }
 
 // --- Материалы частей модели -------------------------------------------------

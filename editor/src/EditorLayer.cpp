@@ -1143,6 +1143,10 @@ void EditorLayer::OnRender() {
         m_coverShotDone = true;
     }
 
+    // Обложка СЦЕНЫ — здесь же и по той же причине: игровой кадр существует
+    // ровно после RenderGame (см. EditorLayer::TakeSceneShot).
+    TakeSceneShot();
+
     app.Device().SetViewport(0, 0, app.GetWindow().Width(), app.GetWindow().Height());
     app.Device().SetClearColor(0.05f, 0.05f, 0.06f, 1.0f);
     app.Device().Clear();

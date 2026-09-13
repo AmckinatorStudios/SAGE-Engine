@@ -19,6 +19,8 @@
 #include "EditorHost.h"
 #include "../AssetSlot.h"
 #include "../EditorIcons.h"
+#include "../SceneCover.h"
+#include "../Thumbnails.h"
 
 #include "sage/assets/import/Convert.h"
 #include "sage/render/ResourceManager.h"
@@ -258,13 +260,26 @@ void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
 // проход сцены со светом, и делать двадцать таких на открытие папки значит
 // уронить редактор . Остальные карточки получат своё превью в
 // следующих кадрах — за десяток кадров это незаметно глазу.
-uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
+uint64_t AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& path, bool isDir) {
     if (isDir) return 0;
     const std::string key = path.string();
 
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return (char)std::tolower(c); });
+
+    // СЦЕНА — СВОЕЙ ОБЛОЖКОЙ (см. SceneCover.h). Файл .sage показывался значком,
+    // одинаковым у всех сцен проекта, и выбрать нужную из трёх можно было
+    // только открыв каждую. Обложка снимается при сохранении сцены, поэтому
+    // здесь её только показывают: рисовать сцену в панели значило бы грузить
+    // её целиком ради картинки размером с ноготь.
+    if (ext == ".sage") {
+        const fs::path cover = scenecover::For(host.CurrentProject().Dir(), path);
+        if (cover.empty()) return 0;
+        // Через общий кэш обложек-картинок: он асинхронный и с мипмапами, то
+        // есть снимок 1920x1080 не разбирается в кадре и не рябит в плитке.
+        return thumbs::Get(cover, thumbs::Size::Tile).Id;
+    }
 
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
         ext == ".hdr" || ext == ".sagetex") {
@@ -467,7 +482,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // панели ассетов ищет КОНКРЕТНУЮ картинку или материал среди двух десятков
     // одинаковых оранжевых прямоугольников с надписью MAT. Имя файла помогает
     // только если его помнят.
-    const uint64_t thumb = ThumbnailFor(path, isDir);
+    const uint64_t thumb = ThumbnailFor(host, path, isDir);
     if (thumb) {
         // Шахматка под картинкой: прозрачные места иначе неотличимы от фона
         // карточки, и текстура с альфой выглядит просто дырявой.
