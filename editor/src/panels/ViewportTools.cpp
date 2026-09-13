@@ -52,15 +52,36 @@ namespace {
 // латиницу с кириллицей, и «▾» в нём попросту нет — на экране получился бы
 // пустой квадрат. Хвост из пробелов в подписи — это место под него.
 bool DropdownButton(const char* icon, const char* label, const char* tooltip) {
-    const std::string padded = std::string(label) + "    ";
-    const bool pressed = EditorIcons::Button(icon, padded.c_str(), tooltip);
-    const ImVec2 a = ImGui::GetItemRectMin();
-    const ImVec2 b = ImGui::GetItemRectMax();
-    const float cx = b.x - 11.0f;
-    const float cy = (a.y + b.y) * 0.5f;
-    ImGui::GetWindowDrawList()->AddTriangleFilled(
-        ImVec2(cx - 4.0f, cy - 2.0f), ImVec2(cx + 4.0f, cy - 2.0f), ImVec2(cx, cy + 3.0f),
-        ImGui::GetColorU32(ImGuiCol_Text));
+    // ВСЁ СЧИТАЕТСЯ, А НЕ ПОДГОНЯЕТСЯ. Здесь к подписи дописывались четыре
+    // пробела «под стрелку», а стрелка рисовалась в одиннадцати пикселях от
+    // правого края: два независимых числа, которые совпадали только при одном
+    // шрифте и одном языке. Теперь ширина кнопки складывается из её частей, а
+    // каждая часть ставится от посчитанной точки.
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float h = ImGui::GetFrameHeight();
+    const float icon_s = std::floor(h * 0.68f);
+    const float caret = std::floor(ImGui::GetFontSize() * 0.45f);   // ширина стрелки
+    const float gap = EditorIcons::TextGap();
+    const float content = EditorIcons::LabeledWidth(icon_s, label) + gap + caret;
+
+    ImGui::PushID(label);
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::Button("##dropdown", ImVec2(content + style.FramePadding.x * 2.0f, h));
+    if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
+    ImGui::PopID();
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+    const float used = EditorIcons::DrawLabeled(
+        dl, ImVec2(at.x + style.FramePadding.x, at.y + std::floor((h - icon_s) * 0.5f)), icon_s,
+        icon, col, label, col);
+
+    // Треугольник — ВНИЗ, от той же точки, что и подпись, плюс общий зазор.
+    const float cx = at.x + style.FramePadding.x + used + gap + caret * 0.5f;
+    const float cy = at.y + h * 0.5f;
+    const float r = caret * 0.5f;
+    dl->AddTriangleFilled(ImVec2(cx - r, cy - r * 0.6f), ImVec2(cx + r, cy - r * 0.6f),
+                          ImVec2(cx, cy + r * 0.7f), col);
     return pressed;
 }
 

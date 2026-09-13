@@ -331,7 +331,8 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
 
     fs::path& cwd = host.AssetsCwd();
     const bool current = fs::weakly_canonical(cwd, ec) == fs::weakly_canonical(dir, ec);
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
+                               ImGuiTreeNodeFlags_DrawLinesNone;
     if (subdirs.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     if (current) flags |= ImGuiTreeNodeFlags_Selected;
     // Корень раскрыт сразу: свёрнутое дерево из одной строки не отвечает ни на
@@ -341,17 +342,20 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
     ImGui::PushID(dir.string().c_str());
     const ImVec2 rowPos = ImGui::GetCursorScreenPos();
     const float indent = ImGui::GetTreeNodeToLabelSpacing();
-    const bool open = ImGui::TreeNodeEx("##folder", flags, "  %s",
-                                        dir.filename().string().c_str());
+    m_treeRows.push_back({rowPos.y, rowPos.x + indent, depth});
+    const bool open = ImGui::TreeNodeEx("##folder", flags, "%s", "");
     // Значок папки — её цветом (тем же, что в сетке): метка обязана означать
-    // одно и то же в обоих местах.
+    // одно и то же в обоих местах. Значок и подпись — одной парой с общим
+    // зазором (EditorIcons::DrawLabeled), а не двумя пробелами в формате.
     {
-        const float size = ImGui::GetTextLineHeight() * 0.86f;
         glm::vec3 tint(0.85f, 0.68f, 0.32f);
         sage::editor::foldercolors::Get(dir, tint);
-        EditorIcons::Overlay(rowPos.x + indent - size * 1.15f,
-                             rowPos.y + (ImGui::GetTextLineHeight() - size) * 0.5f, size,
-                             subdirs.empty() ? "folder" : "folder-full", tint);
+        const ImVec4 c(tint.x, tint.y, tint.z, 1.0f);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
+                                 ImGui::GetTextLineHeight(),
+                                 subdirs.empty() ? "folder" : "folder-full", ImGui::GetColorU32(c),
+                                 dir.filename().string().c_str(),
+                                 ImGui::GetColorU32(ImGuiCol_Text));
     }
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) cwd = dir;
     // Бросок файла на папку дерева — перенос в неё: то же, что и в сетке.
@@ -365,6 +369,29 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
     }
     if (open && !subdirs.empty()) {
         for (const fs::path& sub : subdirs) DrawFolderNode(host, sub, depth + 1);
+        // Линии связи — свои, по той же причине, что и в иерархии: встроенная в
+        // ImGui горизонталь обрывается далеко от значка папки.
+        {
+            const float line = ImGui::GetTextLineHeight();
+            const float spineX = std::floor(rowPos.x + indent * 0.5f);
+            const ImU32 col = ImGui::GetColorU32(ImGuiCol_TreeLines);
+            const float thickness = std::max(1.0f, ImGui::GetStyle().TreeLinesSize);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            float lastMid = 0.0f;
+            for (const TreeRow& r : m_treeRows) {
+                if (r.Depth != depth + 1) continue;
+                const float mid = std::floor(r.Y + line * 0.5f);
+                lastMid = mid;
+                dl->AddLine(ImVec2(spineX, mid),
+                            ImVec2(r.IconX - EditorIcons::TextGap() * 0.5f, mid), col, thickness);
+            }
+            if (lastMid > 0.0f)
+                dl->AddLine(ImVec2(spineX, std::floor(rowPos.y + line)), ImVec2(spineX, lastMid),
+                            col, thickness);
+            m_treeRows.erase(std::remove_if(m_treeRows.begin(), m_treeRows.end(),
+                                            [depth](const TreeRow& r) { return r.Depth > depth; }),
+                             m_treeRows.end());
+        }
         ImGui::TreePop();
     }
     ImGui::PopID();
@@ -372,6 +399,7 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
 
 void AssetsPanel::DrawFolderTree(EditorHost& host) {
     ImGui::BeginChild("##assets_tree", ImVec2(m_treeWidth, 0), ImGuiChildFlags_Borders);
+    m_treeRows.clear();
     // Корень дерева — assets/, а не папка проекта: см. AssetsRoot().
     DrawFolderNode(host, AssetsRoot(host), 0);
     ImGui::EndChild();
@@ -619,10 +647,20 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                     // список из восьми слов цвета не показывает.
                     const ImVec2 at = ImGui::GetCursorScreenPos();
                     const float box = ImGui::GetTextLineHeight();
-                    const bool picked = ImGui::MenuItem((std::string("   ") + tint.Label).c_str());
+                    // Место под образец — пробелами ровно по его ширине с общим
+                    // зазором, а не «три пробела на глаз»: ширина пробела
+                    // зависит от шрифта, и на другом масштабе подпись налезала
+                    // на квадратик.
+                    const float gap = EditorIcons::TextGap();
+                    const float spaceW = ImGui::CalcTextSize(" ").x;
+                    const int count = spaceW > 0.0f ? (int)std::ceil((box + gap) / spaceW) : 2;
+                    const bool picked =
+                        ImGui::MenuItem((std::string((size_t)count, ' ') + tint.Label).c_str());
+                    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+                    const float x = at.x + count * spaceW - gap - box;
+                    const float y = std::floor(r0.y + ((r1.y - r0.y) - box) * 0.5f);
                     ImGui::GetWindowDrawList()->AddRectFilled(
-                        ImVec2(at.x + 2.0f, at.y + 2.0f),
-                        ImVec2(at.x + box - 2.0f, at.y + box - 2.0f),
+                        ImVec2(x + 2.0f, y + 2.0f), ImVec2(x + box - 2.0f, y + box - 2.0f),
                         ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
                         3.0f);
                     if (picked) foldercolors::Set(path, tint.Color);

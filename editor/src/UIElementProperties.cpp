@@ -187,7 +187,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                         ImGui::PushID(name.c_str());
                         const bool sel = v == name;
                         EditorIcons::Inline("info");
-                        ImGui::SameLine();
+                        ImGui::SameLine(0.0f, 0.0f);
                         if (ImGui::Selectable(name.c_str(), sel)) {
                             host.PushUndoSnapshot();
                             v = name;

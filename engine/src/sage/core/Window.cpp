@@ -159,6 +159,10 @@ bool Window::ShouldClose() const {
     return glfwWindowShouldClose(m_handle);
 }
 
+void Window::CancelClose() {
+    glfwSetWindowShouldClose(m_handle, GLFW_FALSE);
+}
+
 void Window::SwapBuffers() {
     glfwSwapBuffers(m_handle);
 }

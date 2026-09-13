@@ -273,6 +273,34 @@ void CheckDuplicateId(const char* what) {
     seen[id] = g.FrameCount;
 }
 
+float TextGap() {
+    // От высоты строки, а не константой в пикселях: масштаб интерфейса меняет
+    // шрифт, и зазор обязан меняться вместе с ним.
+    return std::floor(ImGui::GetFontSize() * 0.42f);
+}
+
+float LabeledWidth(float line, const char* text) {
+    const float icon_s = std::floor(line);
+    const float textW = (text && *text) ? ImGui::CalcTextSize(text).x : 0.0f;
+    return icon_s + ((text && *text) ? TextGap() + textW : 0.0f);
+}
+
+float DrawLabeled(ImDrawList* dl, ImVec2 pos, float line, const char* icon, ImU32 iconColor,
+                  const char* text, ImU32 textColor) {
+    const float icon_s = std::floor(line);
+    pos = ImVec2(std::floor(pos.x), std::floor(pos.y));
+    DrawAt(dl, pos, icon_s, icon, iconColor);
+    if (!text || !*text) return icon_s;
+    const float gap = TextGap();
+    const ImVec2 ts = ImGui::CalcTextSize(text);
+    // Подпись — по СЕРЕДИНЕ той же высоты, что и значок. Выравнивание по
+    // верхнему краю даёт ту самую «кривизну»: у значка поле сверху и снизу, у
+    // текста — только сверху, и пара выглядит съехавшей вниз.
+    dl->AddText(ImVec2(pos.x + icon_s + gap, std::floor(pos.y + (icon_s - ts.y) * 0.5f)),
+                textColor, text);
+    return icon_s + gap + ts.x;
+}
+
 bool Button(const char* icon, const char* label, const char* tooltip, bool active) {
     const float h = ImGui::GetFrameHeight();
     const float icon_s = std::floor(h * 0.68f);
@@ -289,20 +317,19 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
         ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Accent));
     }
 
-    // Место под иконку резервируется отступом слева — так подпись не наезжает
-    // на рисунок при любом шрифте.
-    const ImVec2 textSize = ImGui::CalcTextSize(label);
+    // Значок и подпись — ОДНИМ блоком (DrawLabeled), а не двумя отдельными
+    // рисунками: зазор между ними и вертикальное выравнивание обязаны быть
+    // такими же, как во всех остальных местах редактора.
     const ImVec2 pad = ImGui::GetStyle().FramePadding;
-    const ImVec2 size(textSize.x + icon_s + pad.x * 3.0f, h);
+    const float content = LabeledWidth(icon_s, label);
+    const ImVec2 size(content + pad.x * 2.0f, h);
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::Button("##btn", size);
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
-    DrawAt(dl, ImVec2(cursor.x + pad.x, cursor.y + std::floor((h - icon_s) * 0.5f)), icon_s, icon,
-           col);
-    dl->AddText(ImVec2(cursor.x + pad.x * 2.0f + icon_s, cursor.y + (h - textSize.y) * 0.5f), col,
-                label);
+    DrawLabeled(dl, ImVec2(cursor.x + pad.x, cursor.y + std::floor((h - icon_s) * 0.5f)), icon_s,
+                icon, col, label, col);
 
     if (active) ImGui::PopStyleColor(2);
     if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
@@ -341,17 +368,38 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     return pressed;
 }
 
+// Сколько пробелов освободит в подписи место шириной width. Пробел — единица
+// сдвига, доступная внутри ОДНОГО элемента ImGui, а пункт меню обязан остаться
+// одним элементом: разбей его на «значок + текст», и сломаются и клик по
+// строке, и подсветка под курсором, и переход стрелками.
+static int SpacesFor(float width) {
+    const float spaceW = ImGui::CalcTextSize(" ").x;
+    if (spaceW <= 0.0f) return 1;
+    return (int)std::ceil(width / spaceW);
+}
+
 bool MenuItem(const char* icon, const char* label, const char* shortcut, bool enabled) {
     const ImVec2 at = ImGui::GetCursorScreenPos();
     const float size = ImGui::GetTextLineHeight();
-    // Отступ пробелами, а не SameLine: пункт обязан остаться ОДНИМ элементом,
-    // иначе ломается и клик, и подсветка строки под курсором.
-    const std::string padded = std::string("     ") + label;
+    const float gap = TextGap();
+    // Пробелов — РОВНО столько, сколько нужно под значок с зазором, а не пять
+    // «на глаз». Пять пробелов — это разная ширина при разном шрифте и масштабе
+    // интерфейса: в одном меню подпись прилипала к рисунку, в другом уезжала.
+    const int count = SpacesFor(size + gap);
+    const std::string padded = std::string((size_t)count, ' ') + label;
     const bool clicked = ImGui::MenuItem(padded.c_str(), shortcut, false, enabled);
+
+    // Значок ПРИЖАТ К ПОДПИСИ с тем же зазором: остаток от округления пробелов
+    // уходит слева, где он никому не мешает, а не между рисунком и словом, где
+    // он и читается как кривизна.
+    const float textStart = count * ImGui::CalcTextSize(" ").x;
+    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
     // Погашенный пункт и значок имеет погашенный: живой значок у мёртвой строки
     // читается как «работает, просто не нажимается».
     const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    DrawAt(ImGui::GetWindowDrawList(), ImVec2(at.x + 2.0f, at.y), size, icon, color);
+    DrawAt(ImGui::GetWindowDrawList(),
+           ImVec2(at.x + textStart - gap - size, std::floor(r0.y + ((r1.y - r0.y) - size) * 0.5f)),
+           size, icon, color);
     return clicked;
 }
 
@@ -361,7 +409,12 @@ void Inline(const char* icon, const glm::vec3& color) {
     DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x, cursor.y), s, icon, Col(Resolve(color)));
     // Место под иконку резервируется Dummy: без него следующий SameLine лёг бы
     // поверх рисунка, потому что ImGui о нарисованном напрямую не знает.
-    ImGui::Dummy(ImVec2(s, s));
+    //
+    // И вместе с ЗАЗОРОМ до подписи: раньше каждый вызывающий добавлял его сам
+    // (кто 4 пикселя, кто 6, кто ничего), и в одном списке значок прилипал к
+    // тексту, а в соседнем стоял с просветом. Поэтому после Inline идёт
+    // SameLine(0, 0) — зазор уже учтён.
+    ImGui::Dummy(ImVec2(s + TextGap(), s));
 }
 
 void Overlay(float x, float y, float size, const char* icon, const glm::vec3& color) {

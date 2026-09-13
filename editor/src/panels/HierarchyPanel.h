@@ -26,6 +26,17 @@ public:
     static const char* IconFor(entt::registry& reg, entt::entity e);
 
 private:
+    // Линии связи дерева рисуются сами (см. DrawTreeLines): у встроенных в
+    // ImGui горизонталь обрывается далеко от значка.
+    struct Row {
+        float Y = 0.0f;      // верх строки
+        float IconX = 0.0f;  // где начинается значок
+        int Depth = 0;
+    };
+    std::vector<Row> m_rows;
+    int m_depth = 0;
+    void DrawTreeLines(const ImVec2& parentPos, float indent, int childDepth);
+
     void DrawNode(EditorHost& host, Scene& scene, entt::entity e);
 
     sage::editor::rectselect::State m_rect;

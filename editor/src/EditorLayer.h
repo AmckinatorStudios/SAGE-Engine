@@ -310,6 +310,13 @@ private:
 
 public:
     void RequestDialog(const char* id) override { m_pendingDialog = id; }
+    void SaveCurrentScene() override {
+        if (m_scenePath.empty()) RequestDialog("Save Scene As");
+        else SaveSceneToFile(m_scenePath);
+    }
+    void NewSceneWithPrompt() override {
+        AskUnsaved([this] { NewScene(ProjectTemplateKind::Empty); });
+    }
 
 private:
     void UpdateWindowTitle();
@@ -363,6 +370,18 @@ private:
     size_t m_crashReportCount = 0;   // сколько отчётов лежит рядом
     bool m_crashPrompt = false;
     bool m_recoveryPrompt = false;
+
+    // --- ВОПРОС О НЕСОХРАНЁННОЙ СЦЕНЕ ---------------------------------------
+    //
+    // Закрыть редактор с несохранённой сценой можно было молча: крестик окна —
+    // и работа исчезла. Undo здесь не спасает, он живёт в той же программе,
+    // которую закрывают. Тот же вопрос нужен и там, где сцена ЗАМЕНЯЕТСЯ:
+    // новая сцена, открытие другой сцены или проекта.
+    bool m_unsavedPrompt = false;
+    bool m_closeAfterPrompt = false;          // спросили из-за закрытия окна
+    std::function<void()> m_afterUnsaved;     // что сделать, когда ответят
+    void AskUnsaved(std::function<void()> action);
+    void DrawUnsavedPrompt();
 
     // Достаёт материал из файла модели и назначает его меш-рендеру (см. .cpp).
     // Сообщает человеку, чем кончился импорт материалов модели (строка

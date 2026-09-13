@@ -236,8 +236,10 @@ void InspectorPanel::DrawSectionHeader(const char* icon, const char* kind, const
     ImGui::Spacing();
     const float s = ImGui::GetTextLineHeight();
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    EditorIcons::Overlay(p.x, p.y + s * 0.15f, s, icon, glm::vec3(0.62f, 0.72f, 0.85f));
-    ImGui::Dummy(ImVec2(s * 1.35f, s));
+    // Значок и имя — с тем же зазором, что и везде (см. EditorIcons::TextGap):
+    // «полторы высоты строки» было своим числом в этом одном месте.
+    EditorIcons::Overlay(p.x, p.y, s, icon, glm::vec3(0.62f, 0.72f, 0.85f));
+    ImGui::Dummy(ImVec2(s + EditorIcons::TextGap(), s));
     ImGui::SameLine(0.0f, 0.0f);
     ImGui::TextUnformatted(name.c_str());
     ImGui::SameLine();

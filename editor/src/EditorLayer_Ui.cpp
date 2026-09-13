@@ -213,7 +213,7 @@ void EditorLayer::DrawStatusBar(float height) {
         const ImVec4 col = hasErrors ? ImVec4(0.95f, 0.40f, 0.40f, 1.0f)
                                      : ImVec4(0.95f, 0.80f, 0.30f, 1.0f);
         EditorIcons::Inline(hasErrors ? "error" : "warn", glm::vec3(col.x, col.y, col.z));
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, 0.0f);
         // Склонение по-русски: 1 ошибка, 2 ошибки, 5 ошибок. Мелочь, но
         // «1 ошибок» в статусной строке читается как недоделка интерфейса.
         auto plural = [](int n, const char* one, const char* few, const char* many) {
@@ -307,7 +307,7 @@ void EditorLayer::DrawStatusBar(float height) {
         EditorIcons::Inline("cube", glm::vec3(EditorTheme::Color(EditorTheme::Role::Accent).x,
                                               EditorTheme::Color(EditorTheme::Role::Accent).y,
                                               EditorTheme::Color(EditorTheme::Role::Accent).z));
-        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
+        ImGui::SameLine(0.0f, 0.0f);
         ImGui::TextDisabled("%s", version.c_str());
     }
 
@@ -448,17 +448,18 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 ImGui::EndMenu();
             }
 
-            if (ImGui::MenuItem(T("Save Scene"), "Ctrl+S")) {
-                if (!m_scenePath.empty()) SaveSceneToFile(m_scenePath);
-                else openDialog = "Save Scene As";
-            }
+            if (ImGui::MenuItem(T("Save Scene"), "Ctrl+S")) SaveCurrentScene();
             if (ImGui::MenuItem(T("Save Scene As..."))) openDialog = "Save Scene As";
             ImGui::Separator();
             if (ImGui::MenuItem(T("Build Game..."))) {
                 openDialog = "Build Game";
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(T("Exit"))) sage::Application::Get().Close();
+            if (ImGui::MenuItem(T("Exit"))) {
+                m_closeAfterPrompt = true;
+                AskUnsaved(nullptr);
+                if (!m_unsavedPrompt) sage::Application::Get().Close();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(T("Edit"))) {
@@ -692,6 +693,17 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // случилось», потом «что с этим делать».
     DrawCrashReport();
     DrawRecoveryPrompt();
+    // ЗАКРЫТИЕ ОКНА — ЧЕРЕЗ ТОТ ЖЕ ВОПРОС. Крестик и Alt+F4 ставят флаг GLFW, и
+    // без перехвата редактор закрылся бы молча вместе с несохранённой сценой.
+    {
+        Window& win = sage::Application::Get().GetWindow();
+        if (win.ShouldClose() && m_sceneDirty && !m_unsavedPrompt) {
+            win.CancelClose();
+            m_closeAfterPrompt = true;
+            AskUnsaved(nullptr);   // «продолжить» здесь и значит «закрыться»
+        }
+    }
+    DrawUnsavedPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     m_inputPanel.Draw(*this, m_showInput);
     m_templatesPanel.Draw(*this, m_showTemplates);
@@ -720,7 +732,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
     if (!io.WantTextInput) {
         if (ImGui::IsKeyPressed(ImGuiKey_Delete)) DeleteSelected();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) DuplicateSelected();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S) && !m_scenePath.empty()) SaveSceneToFile(m_scenePath);
+        // Ctrl+S работает ВСЕГДА, а не только у сцены с именем: у новой сцены
+        // имени нет, и «горячая клавиша молча ничего не делает» — это ровно то,
+        // как выглядит потерянная работа.
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) SaveCurrentScene();
         if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) Undo();
         if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) ||
             (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z))) Redo();
