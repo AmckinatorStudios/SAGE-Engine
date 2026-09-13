@@ -636,6 +636,20 @@ void EditorLayer::SetSelectedId(int id) {
     if (id != -1) m_selection.push_back(id);
 }
 
+void EditorLayer::SetSelection(const std::vector<int>& ids, bool additive) {
+    if (!additive) m_selection.clear();
+    for (int id : ids) {
+        if (id == -1) continue;
+        if (std::find(m_selection.begin(), m_selection.end(), id) == m_selection.end())
+            m_selection.push_back(id);
+    }
+    // ПЕРВИЧНАЯ — последняя добавленная: под неё встаёт инспектор и пивот
+    // гизмо. Пустой набор означает «ничего не выбрано», а не «первичная
+    // осталась прежней»: иначе инспектор показывал бы поля объекта, который на
+    // экране уже не подсвечен.
+    m_selectedId = m_selection.empty() ? -1 : m_selection.back();
+}
+
 bool EditorLayer::IsSelected(int id) const {
     return std::find(m_selection.begin(), m_selection.end(), id) != m_selection.end();
 }

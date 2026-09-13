@@ -87,9 +87,19 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                              EntityIcon(reg, e), glm::vec3(0.62f, 0.72f, 0.85f));
     }
 
+    // Рамка выделения: строка засчитывается, если её прямоугольник задет.
+    // Проверка здесь, сразу после TreeNodeEx, — единственное место, где
+    // прямоугольник ИМЕННО ЭТОЙ строки ещё «последний элемент» ImGui.
+    if (m_rectActive && sage::editor::rectselect::Hits(m_rect, ImGui::GetItemRectMin(),
+                                                      ImGui::GetItemRectMax())) {
+        m_rectHits.push_back(id);
+    }
+
     // Клик по строке (не по треугольнику раскрытия) — выбор. Ctrl — добавить/
     // убрать из набора (множественный выбор), обычный клик — одиночный.
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+    // Пока ведут рамку, клики не разбираем: жест уже начат, и «выбрать один»
+    // посреди него означало бы мигание выбора.
+    if (!m_rectActive && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         if (ImGui::GetIO().KeyCtrl) host.ToggleSelection(id);
         else host.SetSelectedId(id);
     }
@@ -199,6 +209,10 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
     ImGui::Separator();
 
+    namespace rectselect = sage::editor::rectselect;
+    m_rectActive = rectselect::Begin(m_rect);
+    m_rectHits.clear();
+
     // Корни (без родителя) в стабильном порядке по id.
     std::vector<std::pair<int, entt::entity>> roots;
     auto view = reg.view<IdComponent, NameComponent>();
@@ -242,5 +256,14 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
         if (const char* pick = sage::editor::objectcatalog::DrawMenu()) host.CreateCatalogObject(pick);
         ImGui::EndPopup();
     }
+
+    // Рамка выделения. Начинается в пустом месте списка — над строкой начинать
+    // нельзя: там живут перетаскивание сущности и смена родителя.
+    if (m_rectActive && m_rect.Finished && rectselect::Meaningful(m_rect)) {
+        host.SetSelection(m_rectHits, m_rect.Additive);
+    }
+    rectselect::End(m_rect, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+                                !ImGui::IsAnyItemHovered() && !ImGui::IsPopupOpen("##hierarchy_ctx"));
+    rectselect::Draw(m_rect);
     ImGui::End();
 }

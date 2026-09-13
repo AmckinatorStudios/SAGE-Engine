@@ -1002,10 +1002,22 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Mesh", "Render", "cube",
          "Model, materials and how it is drawn", HasComp<MeshRendererComponent>,
          AddComp<MeshRendererComponent>},
-        {"Decal", "Render", "texture",
-         "Projects a texture onto surfaces underneath", HasComp<DecalComponent>, AddComp<DecalComponent>},
-        {"GI Static", "Render", "sun",
-         "Marks the object as static for the light bake", HasComp<GIStaticComponent>, AddComp<GIStaticComponent>},
+        // НАКЛЕЙКИ И «GI STATIC» В СПИСКЕ НЕТ — НАМЕРЕННО, и не потому, что их
+        // убрали из движка: оба на месте и работают.
+        //
+        // Наклейка — это ПРЕДМЕТ сцены, а не свойство существующего: её ставят
+        // на стену, целясь в место, а не «добавляют кубу». Отдельным
+        // компонентом она к тому же приезжала сломанной: DecalComponent на
+        // объекте с мешем даёт наклейку, спроецированную саму на себя. Ставится
+        // она каталогом: Объект > Эффекты > Наклейка, — там она сразу встаёт
+        // перед камерой и смотрит туда же, куда человек.
+        //
+        // «GI Static» — не решение про ОДИН объект: помечать статикой по
+        // одному пятьдесят стен никто не станет, а пометив три, человек
+        // получит запечённый свет, который хуже незапечённого. Для этого есть
+        // кнопка «Пометить статичную геометрию» в панели Environment, рядом с
+        // самой выпечкой, — она размечает всю сцену разом и по понятному
+        // правилу.
         {"Particle Emitter", "Render", "particles",
          "Fire, smoke, sparks", HasComp<ParticleEmitterComponent>,
          [](entt::registry& reg, entt::entity e) {
@@ -1085,6 +1097,16 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
 
 } // namespace
 
+std::vector<std::pair<std::string, std::vector<std::string>>>
+InspectorPanel::AddComponentMenuContents() {
+    std::vector<std::pair<std::string, std::vector<std::string>>> out;
+    for (const ComponentEntry& c : ComponentRegistry()) {
+        if (out.empty() || out.back().first != c.Category) out.push_back({c.Category, {}});
+        out.back().second.push_back(c.Name);
+    }
+    return out;
+}
+
 void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
     entt::registry& reg = host.CurrentScene().Registry();
     entt::entity e = obj.Entity();
@@ -1117,15 +1139,52 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         return hay.find(filter) != std::string::npos;
     };
 
+    // СПИСОК СВОРАЧИВАЕТСЯ ПО КАТЕГОРИЯМ.
+    //
+    // Категории были подписями, а не узлами: список рос с каждым новым
+    // компонентом и целиком в окно уже не помещался — приходилось листать,
+    // чтобы увидеть, что вообще бывает. Свёрнутые категории показывают ВЕСЬ
+    // состав редактора одним экраном из восьми строк, а раскрывается та одна,
+    // которая нужна. Состояние раскрытия ImGui держит сам, по имени узла, —
+    // открытая категория остаётся открытой и в следующий раз.
+    //
+    // ПРИ ПОИСКЕ КАТЕГОРИИ РАСКРЫВАЮТСЯ ПРИНУДИТЕЛЬНО: найденное, спрятанное
+    // под свёрнутым заголовком, читается как «ничего не нашлось».
+    const bool searching = !filter.empty();
+
+    // Сколько подходящих в категории — числом рядом с названием: свёрнутая
+    // категория иначе не отвечает на вопрос «а есть ли там что-нибудь».
+    auto countIn = [&](const char* category) {
+        int n = 0;
+        for (const ComponentEntry& c : ComponentRegistry())
+            if (std::strcmp(c.Category, category) == 0 && !c.Has(reg, e) && matches(c)) ++n;
+        return n;
+    };
+
     const char* lastCategory = nullptr;
+    bool categoryOpen = false;
+    // ПОДХОДЯЩИЕ, а не НАРИСОВАННЫЕ. Считать нарисованные значило бы писать
+    // «все компоненты уже добавлены» всякий раз, когда категории свёрнуты, —
+    // то есть по умолчанию.
     int shown = 0;
+    auto closeCategory = [&]() {
+        if (categoryOpen) ImGui::TreePop();
+        categoryOpen = false;
+    };
     for (const ComponentEntry& c : ComponentRegistry()) {
         if (c.Has(reg, e) || !matches(c)) continue;
+        ++shown;
         if (!lastCategory || std::strcmp(lastCategory, c.Category) != 0) {
-            if (lastCategory) ImGui::Spacing();
-            ImGui::TextDisabled("%s", T(c.Category));
+            closeCategory();
             lastCategory = c.Category;
+            char label[128];
+            std::snprintf(label, sizeof(label), "%s (%d)###cat_%s", T(c.Category), countIn(c.Category),
+                          c.Category);
+            if (searching) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+            categoryOpen = ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth |
+                                                        ImGuiTreeNodeFlags_FramePadding);
         }
+        if (!categoryOpen) continue;
         ImGui::PushID(c.Name);
         const ImVec2 rowPos = ImGui::GetCursorScreenPos();
         const float iconSize = ImGui::GetTextLineHeight();
@@ -1147,8 +1206,8 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::PopID();
-        ++shown;
     }
+    closeCategory();
     if (shown == 0) {
         ImGui::TextDisabled("%s", filter.empty() ? T("All components already added")
                                                  : T("Nothing matches the search."));

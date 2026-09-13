@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include "imgui.h"
+#include "../RectSelect.h"
 
 
 class EditorHost;
@@ -44,6 +45,9 @@ public:
     };
 
 private:
+    // Рамка выделения ЛКМ по пустому месту (см. editor/src/RectSelect.h).
+    sage::editor::rectselect::State m_rect;
+
     // Бросок ассета во вьюпорт: приём сидит на item'е картинки, а постановка
     // происходит ниже по кадру, где уже посчитаны матрицы активного вида.
     struct PendingDrop {
