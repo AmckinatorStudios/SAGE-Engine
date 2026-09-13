@@ -15,7 +15,9 @@
 #include "sage/gi/GIUpload.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -54,6 +56,8 @@ SkinnedMesh::SkinnedMesh(const std::vector<SkinnedVertex>& vertices,
         {2, 2, AttribType::Float, (int)offsetof(SkinnedVertex, TexCoords)},
         {3, 4, AttribType::Float, (int)offsetof(SkinnedVertex, Joints)},
         {4, 4, AttribType::Float, (int)offsetof(SkinnedVertex, Weights)},
+        {5, 4, AttribType::Float, (int)offsetof(SkinnedVertex, Tangent)},
+        {6, 2, AttribType::Float, (int)offsetof(SkinnedVertex, TexCoords2)},
     };
     m_geometry = GraphicsDevice::Get().CreateGeometry(layout);
     m_geometry->SetVertexData(vertices.data(), vertices.size() * sizeof(SkinnedVertex), false);
@@ -63,12 +67,15 @@ SkinnedMesh::SkinnedMesh(const std::vector<SkinnedVertex>& vertices,
 void SkinnedMesh::Draw() const { m_geometry->DrawIndexed(m_indexCount); }
 
 // ============================================================================
-//  Встроенный скиннинг-шейдер. Фрагментная стадия использует ОБЩИЙ PBR-блок
-//  kPbrSharedGlsl (Cook-Torrance, metallic-roughness) — тот же, что у статических
-//  инстансных/текстурных мешей, поэтому анимированные и статичные объекты
-//  освещаются ФИЗИЧЕСКИ ОДИНАКОВО (единый источник модели освещения). Отличие
-//  только в вершинной стадии: скиннинг палитрой костей. Uniform'ы освещения
-//  названы как в UploadLighting/UploadShadowUniforms и заливаются без изменений.
+//  Скиннинг-шейдер. СВОЯ здесь только вершинная стадия — скиннинг палитрой
+//  костей; фрагментная берётся целиком у статического текстурного прохода
+//  (sage::render::TexturedPbrFragSource из PbrShader.h). Не «такая же», а
+//  БУКВАЛЬНО ТА ЖЕ функция: две редакции одного шейдера расходятся на первой
+//  правке, и ровно так скин остался без карт материала, пока у него был свой
+//  сокращённый фрагмент.
+//
+//  Uniform'ы освещения названы как в UploadLighting/UploadShadowUniforms и
+//  заливаются без изменений; юниты текстур совпадают с раскладкой RenderBatch.
 // ============================================================================
 namespace {
 
@@ -105,10 +112,17 @@ layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aUV;
 layout (location = 3) in vec4 aJoints;
 layout (location = 4) in vec4 aWeights;
+layout (location = 5) in vec4 aTangent;
+layout (location = 6) in vec2 aUV2;
 
+// ВЫХОД ТОТ ЖЕ, ЧТО У СТАТИЧЕСКОГО ТЕКСТУРНОГО МЕША (см. kTexVert в
+// ecs/RenderBatch.cpp) — иначе общий фрагментный шейдер сюда не подошёл бы, а
+// именно он и делает освещение скина и статики одинаковым.
 out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoords;
+out mat3 TBN;
+out vec2 vUV2;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -136,60 +150,38 @@ void main() {
              + aWeights.w * uBones[int(aJoints.w)];
     }
     vec4 skinnedPos = skin * vec4(morphedPos, 1.0);
-    vec3 skinnedNormal = mat3(skin) * morphedNrm;
+    // Нормаль и касательную поворачивает та же матрица скиннинга: кость гнёт
+    // поверхность целиком, и рельеф обязан гнуться вместе с ней.
+    mat3 skin3 = mat3(skin);
+    vec3 skinnedNormal = skin3 * morphedNrm;
+    vec3 skinnedTangent = skin3 * aTangent.xyz;
 
+    // ЕДИНСТВЕННОЕ ОТЛИЧИЕ ОТ ОБЫЧНОГО МЕША — строчки выше. Дальше всё ровно
+    // то же самое: модельная матрица, мировая позиция, нормальная матрица.
     vec4 worldPos = uModel * skinnedPos;
     FragPos = worldPos.xyz;
     // Обратно-транспонированная нормальная матрица — верные нормали при
     // неравномерном/отрицательном масштабе модели.
-    Normal = transpose(inverse(mat3(uModel))) * skinnedNormal;
+    mat3 nm = transpose(inverse(mat3(uModel)));
+    vec3 N = normalize(nm * skinnedNormal);
+    vec3 T = normalize(nm * skinnedTangent);
+    T = normalize(T - N * dot(N, T));      // Gram-Schmidt, как у статики
+    vec3 B = cross(N, T) * aTangent.w;     // знак развёртки
+    TBN = mat3(T, B, N);
+    Normal = N;
     TexCoords = aUV;
+    vUV2 = aUV2;
     gl_Position = uProjection * uView * worldPos;
 }
 )";
 
-// Фрагментный шейдер: тот же общий PBR-блок (kPbrSharedGlsl), что у статических
-// мешей — albedo из tint (× опциональная текстура), metallic/roughness из
-// материала. Так скин и статика физически неразличимы по освещению.
-std::string SkinFragSource() {
-    return std::string(R"(#version 330 core
-in vec3 FragPos;
-in vec3 Normal;
-in vec2 TexCoords;
-out vec4 FragColor;
-
-uniform vec3 uObjectColor;
-uniform sampler2D uTexture;
-uniform bool uUseTexture;
-uniform float uMetallic;
-uniform float uRoughness;
-)") + sage::render::kPbrSharedGlsl + R"(
-void main() {
-    vec3 albedo = uUseTexture ? texture(uTexture, TexCoords).rgb * uObjectColor : uObjectColor;
-    vec3 N = normalize(Normal);
-
-    // ОТЛАДОЧНЫЕ ВИДЫ — ТЕМ ЖЕ КОДОМ, ЧТО У СТАТИКИ (DebugShade из PbrShader.h).
-    //
-    // Здесь стояли две строки «руками»: нормали и unlit, остальные девять видов
-    // скин просто не знал. Толку от разбора кадра по слагаемым в этом случае
-    // нет: персонаж — обычно главное, что в кадре есть, и во всех режимах,
-    // кроме двух, он оставался нарисован как ни в чём не бывало. Смотришь на
-    // «Шероховатость» — вокруг серая шкала, а посреди неё освещённый кролик.
-    //
-    // Тень солнца в отладочный вид передаётся посчитанной (CalcSunShadow) — она
-    // же и есть режим «Тень».
-    if (uShadingMode != 0) {
-        vec4 dbg;
-        if (DebugShade(uShadingMode, N, FragPos, albedo, uMetallic, uRoughness, 1.0,
-                       vec3(0.0), CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
-            FragColor = vec4(dbg.rgb, 1.0);
-            return;
-        }
-    }
-    FragColor = vec4(ShadePBR(N, FragPos, albedo, uMetallic, uRoughness), 1.0);
-}
-)";
-}
+// Фрагментная стадия — ОБЩАЯ со статическим текстурным мешем
+// (sage::render::TexturedPbrFragSource, см. PbrShader.h). Здесь нет ни строчки
+// своего освещения, и это главное: пока у скина был свой сокращённый фрагмент,
+// персонаж не знал ни карты металличности (а значит, металличность бралась
+// множителем на всю поверхность и гасила рассеянный свет), ни карты нормалей,
+// ни затенения, ни свечения, ни прозрачности.
+std::string SkinFragSource() { return sage::render::TexturedPbrFragSource(); }
 
 // Готовый исходник вершинной стадии: версия + блок морфинга + тело. Склейка
 // здесь, а не в двух местах, гарантирует, что цветной и depth-проход морфят
@@ -354,6 +346,9 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     // полусферическим ambient.
     sage::gi::SetGISamplerUnits(shader);
     shader.SetInt("uGIVolumeEnabled", 0);
+    // Лайтмапы у скина нет по смыслу: она печётся на неподвижную геометрию, а
+    // персонаж двигается. Флаг выставляем ЯВНО — общий фрагмент его читает.
+    shader.SetInt("uLightmapEnabled", 0);
 
     // Тени от солнца: каскады на свои юниты + матрицы — как у статики.
     BindAndUploadShadows(shader, shadows);
@@ -369,20 +364,86 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
         shader.SetInt("uSkinned", 0);
     }
 
-    for (const auto& sub : m_subMeshes) {
+    // Юниты — ТЕ ЖЕ, что у текстурного прохода статики (см. RenderBatch):
+    // albedo=0, тень=1, нормали=2, металл=3, шероховатость=4, AO=5, свечение=12.
+    // Совпадение не косметическое: фрагментный шейдер у них общий, и разойдись
+    // раскладка — один и тот же код читал бы чужие текстуры.
+    shader.SetInt("uAlbedoMap", 0);
+    shader.SetInt("uNormalMap", 2);
+    shader.SetInt("uMetallicMap", 3);
+    shader.SetInt("uRoughnessMap", 4);
+    shader.SetInt("uAOMap", 5);
+    shader.SetInt("uEmissiveMap", kEmissiveUnit);
+    shader.SetVec2("uUVScale", glm::vec2(1.0f));  // повтор развёртки задаёт файл модели
+
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+
+    // Один подмеш: материал на юниты, состояние отсечения — и рисуем.
+    auto drawSub = [&](const SkinnedSubMesh& sub) {
+        const SkinnedMaterial& m = sub.Material;
         UploadMorphs(shader, sub, morphWeights);
-        shader.SetVec3("uObjectColor", sub.Tint);
-        shader.SetFloat("uMetallic", sub.Metallic);
-        shader.SetFloat("uRoughness", sub.Roughness);
-        if (sub.Diffuse) {
-            shader.SetInt("uUseTexture", 1);
-            shader.SetInt("uTexture", 0);
-            sub.Diffuse->Bind(0);
-        } else {
-            shader.SetInt("uUseTexture", 0);
-        }
+
+        // Двусторонний материал рисуется без отсечения задних граней. У
+        // персонажей это почти всегда так: ремни, провода, ткань и «плоские»
+        // детали смоделированы одной поверхностью, и с отсечением половина из
+        // них пропадает — модель выглядит дырявой.
+        device.SetCullMode(m.DoubleSided ? sage::rhi::CullMode::Off
+                                         : sage::rhi::CullMode::Back);
+
+        shader.SetVec3("uAlbedoFactor", m.Tint);
+        shader.SetFloat("uMetallic", m.Metallic);
+        shader.SetFloat("uRoughness", m.Roughness);
+        shader.SetFloat("uOpacity", m.Opacity);
+        shader.SetFloat("uAlphaCutoff", m.Mode == SkinnedMaterial::Alpha::Mask ? m.AlphaCutoff
+                                                                               : 0.0f);
+        shader.SetVec3("uEmissive", m.Emissive);
+        shader.SetInt("uHasAlbedo", m.Albedo ? 1 : 0);
+        shader.SetInt("uHasNormal", m.Normal ? 1 : 0);
+        shader.SetInt("uHasMetallic", m.MetallicMap ? 1 : 0);
+        shader.SetInt("uHasRoughness", m.RoughnessMap ? 1 : 0);
+        shader.SetInt("uHasAO", m.AOMap ? 1 : 0);
+        shader.SetVec4("uMetallicMask", m.MetallicMask);
+        shader.SetVec4("uRoughnessMask", m.RoughnessMask);
+        shader.SetVec4("uAOMask", m.AOMask);
+        shader.SetInt("uHasEmissive", m.EmissiveMap ? 1 : 0);
+        if (m.Albedo) m.Albedo->Bind(0);
+        if (m.Normal) m.Normal->Bind(2);
+        if (m.MetallicMap) m.MetallicMap->Bind(3);
+        if (m.RoughnessMap) m.RoughnessMap->Bind(4);
+        if (m.AOMap) m.AOMap->Bind(5);
+        if (m.EmissiveMap) m.EmissiveMap->Bind(kEmissiveUnit);
         sub.Mesh->Draw();
+    };
+
+    // ДВА ПРОХОДА: сначала непрозрачное, потом полупрозрачное.
+    //
+    // Смешивание не коммутативно: стекло очков, нарисованное раньше глаз за
+    // ним, просто закрасит их собой. Тот же порядок, что у статики (см.
+    // RenderBatch): непрозрачное пишет глубину, полупрозрачное её только
+    // читает — иначе прозрачная деталь загородила бы всё, что за ней.
+    for (const auto& sub : m_subMeshes) {
+        if (sub.Material.Transparent()) continue;
+        drawSub(sub);
     }
+
+    bool blending = false;
+    for (const auto& sub : m_subMeshes) {
+        if (!sub.Material.Transparent()) continue;
+        if (!blending) {
+            device.SetBlend(true);
+            device.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Alpha);
+            device.SetDepthWrite(false);
+            blending = true;
+        }
+        drawSub(sub);
+    }
+    if (blending) {
+        device.SetBlend(false);
+        device.SetDepthWrite(true);
+    }
+    // Состояние отсечения возвращаем общему проходу: следующий, кто рисует,
+    // вправе считать, что его никто не менял (то же правило, что в RenderBatch).
+    device.SetCullMode(sage::rhi::CullMode::Back);
 }
 
 
@@ -526,7 +587,9 @@ std::unique_ptr<SkinnedModel> SkinnedModel::CreateDemoTentacle(int segments) {
 
     SkinnedSubMesh sub;
     sub.Mesh = std::make_shared<SkinnedMesh>(verts, idx);
-    sub.Tint = {0.35f, 0.75f, 0.55f};
+    // Демо-щупальцу — обычный материал: свой цвет и матовая поверхность.
+    sub.Material.Tint = {0.35f, 0.75f, 0.55f};
+    sub.Material.Roughness = 0.6f;
 
     // --- Две морф-цели, как у настоящей модели ---
     // Блендшейпы нужно на чём-то показывать и чем-то проверять, а лицевой модели
@@ -636,15 +699,18 @@ namespace {
 
 bool GltfSkinImageLoader(tinygltf::Image* image, const int, std::string* err, std::string*,
                          int, int, const unsigned char* bytes, int size, void*) {
-    // Переворот выключаем ЯВНО. Флаг у stb глобальный, и его выставляет в true
-    // загрузчик обычных текстур (там v=0 внизу — соглашение GL). У glTF
-    // соглашение обратное: v=0 — ВЕРХНЯЯ строка картинки. Унаследовав чужой
-    // флаг, модель получает текстуру вверх ногами — и это не «картинка
-    // зеркальная», а совсем другие тексели: у палитровых моделей все цвета
-    // лежат в одном углу, и после переворота UV попадают в пустоту. Персонаж
-    // становится чёрным, причём ТОЛЬКО если до него успели загрузить любую
-    // другую текстуру — то есть плавающе, в зависимости от порядка загрузки.
-    stbi_set_flip_vertically_on_load(false);
+    // Переворот выключаем ЯВНО и ПОТОЧНО. У glTF соглашение обратное обычным
+    // текстурам: v=0 — ВЕРХНЯЯ строка картинки. Унаследовав чужое значение,
+    // модель получает текстуру вверх ногами — и это не «картинка зеркальная»,
+    // а совсем другие тексели: у палитровых моделей все цвета лежат в одном
+    // углу, и после переворота UV попадают в пустоту, персонаж становится
+    // чёрным.
+    //
+    // Именно поточный флаг (_thread), а не глобальный: фоновый загрузчик
+    // текстур ставит себе true, и с глобальным флагом он перебивал бы наш
+    // false ПОСРЕДИ разбора модели — «через раз», в зависимости от того, что
+    // грузилось рядом (см. ResourceManager::DecodeImageFile).
+    stbi_set_flip_vertically_on_load_thread(false);
     int w, h, comp;
     unsigned char* data = stbi_load_from_memory(bytes, size, &w, &h, &comp, 4);
     if (!data) { if (err) *err += "Не удалось декодировать изображение glTF\n"; return false; }
@@ -692,6 +758,82 @@ std::vector<unsigned int> ReadUInts(const tinygltf::Model& m, int accessorIdx, i
     return out;
 }
 
+// Разложение матрицы узла в перенос/поворот/масштаб.
+//
+// Нужно потому, что glTF разрешает задать узел ЛИБО тремя полями, ЛИБО
+// матрицей, а скелет движка хранит именно TRS: каналы анимации правят перенос,
+// поворот и масштаб по отдельности, и хранить вместо них матрицу значило бы
+// раскладывать её обратно на каждом кадре. Кость, заданная матрицей, до этого
+// молча получала единичный TRS — скелет складывался в точку.
+void DecomposeTRS(const glm::mat4& m, glm::vec3& t, glm::quat& r, glm::vec3& s) {
+    t = glm::vec3(m[3]);
+    glm::vec3 c0(m[0]), c1(m[1]), c2(m[2]);
+    s = glm::vec3(glm::length(c0), glm::length(c1), glm::length(c2));
+    // Зеркальный масштаб (определитель < 0) поворотом не выражается: отдаём
+    // знак одной оси, как это делает всякое разложение, — иначе кватернион
+    // вышел бы «вывернутым» и кость смотрела бы в другую сторону.
+    if (glm::determinant(glm::mat3(m)) < 0.0f) s.x = -s.x;
+    const float ex = 1e-8f;
+    c0 /= (std::fabs(s.x) > ex ? s.x : 1.0f);
+    c1 /= (std::fabs(s.y) > ex ? s.y : 1.0f);
+    c2 /= (std::fabs(s.z) > ex ? s.z : 1.0f);
+    r = glm::normalize(glm::quat_cast(glm::mat3(c0, c1, c2)));
+}
+
+// Нормали по треугольникам — для частей, в которых их нет в файле.
+void RebuildNormals(std::vector<SkinnedVertex>& verts, const std::vector<unsigned int>& indices) {
+    for (SkinnedVertex& v : verts) v.Normal = glm::vec3(0.0f);
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const unsigned a = indices[i], b = indices[i + 1], c = indices[i + 2];
+        if (a >= verts.size() || b >= verts.size() || c >= verts.size()) continue;
+        const glm::vec3 n = glm::cross(verts[b].Position - verts[a].Position,
+                                       verts[c].Position - verts[a].Position);
+        verts[a].Normal += n; verts[b].Normal += n; verts[c].Normal += n;
+    }
+    for (SkinnedVertex& v : verts) {
+        v.Normal = glm::dot(v.Normal, v.Normal) > 1e-12f ? glm::normalize(v.Normal)
+                                                   : glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+}
+
+// Касательные по развёртке — для карты нормалей, когда TANGENT в файле нет.
+// Классическое накопление по треугольникам с ортогонализацией Грама-Шмидта:
+// та же формула, что у статических мешей (см. render/Mesh.cpp), иначе одна и
+// та же модель освещалась бы по-разному скином и статикой.
+void RebuildTangents(std::vector<SkinnedVertex>& verts, const std::vector<unsigned int>& indices) {
+    std::vector<glm::vec3> tan(verts.size(), glm::vec3(0.0f));
+    std::vector<glm::vec3> bit(verts.size(), glm::vec3(0.0f));
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const unsigned ia = indices[i], ib = indices[i + 1], ic = indices[i + 2];
+        if (ia >= verts.size() || ib >= verts.size() || ic >= verts.size()) continue;
+        const glm::vec3 e1 = verts[ib].Position - verts[ia].Position;
+        const glm::vec3 e2 = verts[ic].Position - verts[ia].Position;
+        const glm::vec2 d1 = verts[ib].TexCoords - verts[ia].TexCoords;
+        const glm::vec2 d2 = verts[ic].TexCoords - verts[ia].TexCoords;
+        const float det = d1.x * d2.y - d2.x * d1.y;
+        if (std::fabs(det) < 1e-12f) continue;   // вырожденная развёртка
+        const float f = 1.0f / det;
+        const glm::vec3 t = f * (d2.y * e1 - d1.y * e2);
+        const glm::vec3 b = f * (d1.x * e2 - d2.x * e1);
+        tan[ia] += t; tan[ib] += t; tan[ic] += t;
+        bit[ia] += b; bit[ib] += b; bit[ic] += b;
+    }
+    for (size_t i = 0; i < verts.size(); ++i) {
+        const glm::vec3 n = verts[i].Normal;
+        glm::vec3 t = tan[i] - n * glm::dot(n, tan[i]);
+        if (glm::dot(t, t) < 1e-12f) {
+            // Треугольников с годной развёрткой не нашлось — берём любую ось,
+            // перпендикулярную нормали: карта нормалей всё равно ляжет криво,
+            // но кадр не получит NaN.
+            t = std::fabs(n.x) < 0.9f ? glm::cross(n, glm::vec3(1, 0, 0))
+                                      : glm::cross(n, glm::vec3(0, 1, 0));
+        }
+        t = glm::normalize(t);
+        const float w = glm::dot(glm::cross(n, t), bit[i]) < 0.0f ? -1.0f : 1.0f;
+        verts[i].Tangent = glm::vec4(t, w);
+    }
+}
+
 glm::mat4 NodeLocal(const tinygltf::Node& n) {
     if (n.matrix.size() == 16) {
         glm::mat4 m;
@@ -709,6 +851,15 @@ glm::mat4 NodeLocal(const tinygltf::Node& n) {
 
 // Разбор исходного glTF в ModelData. Ничего не создаёт на видеокарте —
 // поэтому работает и без контекста OpenGL, и результат можно записать в кэш.
+//
+// ЧТО ЗДЕСЬ ГЛАВНОЕ. Разбор собирает модель ЦЕЛИКОМ, а не только её скиновую
+// часть. Раньше отбор шёл по одному признаку — есть ли у примитива JOINTS_0, —
+// и всё остальное молча выбрасывалось. Для персонажей это не мелочь: жёсткие
+// детали (зубы, глазницы, провода, панели эндоскелета, болты) риггят НЕ весами,
+// а привязкой узла к кости — это дешевле и точнее. У проверочной модели
+// Springtrap скиновых примитивов 18 из 179: в кадр попадала голова и пара
+// кусков костюма, а остальные девять десятых модели не рисовались вовсе.
+// Выглядело это как «модель бледная и разваливается».
 static ModelData ParseGltf(const std::string& path) {
     bool binary = path.size() > 4 && path.substr(path.size() - 4) == ".glb";
 
@@ -734,6 +885,35 @@ static ModelData ParseGltf(const std::string& path) {
     std::unordered_map<int, int> nodeToJoint;
     for (int i = 0; i < jointCount; ++i) nodeToJoint[skin.joints[i]] = i;
 
+    // --- Иерархия узлов: родители и мировые матрицы ---------------------------
+    //
+    // Нужна целиком, а не только по костям: жёсткая деталь может висеть на
+    // кости через несколько промежуточных узлов со своими поворотами, и её
+    // место в модели задаёт вся цепочка.
+    const int nodeCount = (int)g.nodes.size();
+    std::vector<int> parent((size_t)nodeCount, -1);
+    for (int ni = 0; ni < nodeCount; ++ni) {
+        for (int child : g.nodes[(size_t)ni].children) {
+            if (child >= 0 && child < nodeCount) parent[(size_t)child] = ni;
+        }
+    }
+    // Мировая матрица узла — произведение локальных от корня. Считается лениво
+    // и запоминается: у модели бывают сотни узлов, и подниматься по цепочке для
+    // каждого значило бы квадратичную работу на ровном месте.
+    std::vector<glm::mat4> world((size_t)nodeCount, glm::mat4(1.0f));
+    std::vector<char> worldReady((size_t)nodeCount, 0);
+    std::function<glm::mat4(int)> worldOf = [&](int node) -> glm::mat4 {
+        if (node < 0 || node >= nodeCount) return glm::mat4(1.0f);
+        if (worldReady[(size_t)node]) return world[(size_t)node];
+        // Отметку ставим ДО рекурсии: битый файл с циклом в дереве узлов иначе
+        // ушёл бы в бесконечный спуск и повесил загрузку.
+        worldReady[(size_t)node] = 1;
+        world[(size_t)node] = NodeLocal(g.nodes[(size_t)node]);
+        const int p = parent[(size_t)node];
+        if (p >= 0) world[(size_t)node] = worldOf(p) * world[(size_t)node];
+        return world[(size_t)node];
+    };
+
     // Обратные bind-матрицы (по одной на кость).
     std::vector<glm::mat4> invBind(jointCount, glm::mat4(1.0f));
     if (skin.inverseBindMatrices >= 0) {
@@ -750,14 +930,21 @@ static ModelData ParseGltf(const std::string& path) {
         Joint& j = sk.Joints[i];
         j.Name = n.name;
         j.InverseBind = invBind[i];
-        j.Translation = n.translation.size() == 3 ? glm::vec3(n.translation[0], n.translation[1], n.translation[2]) : glm::vec3(0.0f);
-        j.Rotation = n.rotation.size() == 4 ? glm::quat((float)n.rotation[3], (float)n.rotation[0], (float)n.rotation[1], (float)n.rotation[2]) : glm::quat(1, 0, 0, 0);
-        j.Scale = n.scale.size() == 3 ? glm::vec3(n.scale[0], n.scale[1], n.scale[2]) : glm::vec3(1.0f);
+        if (n.matrix.size() == 16) {
+            // Узел задан МАТРИЦЕЙ, а не TRS. Так пишут многие экспортёры, и
+            // раньше такая кость получала единичный TRS — то есть скелет
+            // складывался в точку, а модель сминалась в комок.
+            DecomposeTRS(NodeLocal(n), j.Translation, j.Rotation, j.Scale);
+        } else {
+            j.Translation = n.translation.size() == 3 ? glm::vec3(n.translation[0], n.translation[1], n.translation[2]) : glm::vec3(0.0f);
+            j.Rotation = n.rotation.size() == 4 ? glm::quat((float)n.rotation[3], (float)n.rotation[0], (float)n.rotation[1], (float)n.rotation[2]) : glm::quat(1, 0, 0, 0);
+            j.Scale = n.scale.size() == 3 ? glm::vec3(n.scale[0], n.scale[1], n.scale[2]) : glm::vec3(1.0f);
+        }
         j.Parent = -1;
     }
     // Родитель: у кого этот узел в children.
-    for (int ni = 0; ni < (int)g.nodes.size(); ++ni) {
-        for (int child : g.nodes[ni].children) {
+    for (int ni = 0; ni < nodeCount; ++ni) {
+        for (int child : g.nodes[(size_t)ni].children) {
             auto itC = nodeToJoint.find(child);
             auto itP = nodeToJoint.find(ni);
             if (itC != nodeToJoint.end() && itP != nodeToJoint.end())
@@ -765,26 +952,108 @@ static ModelData ParseGltf(const std::string& path) {
         }
     }
 
-    // Меши со скином: собираем все примитивы, у которых есть JOINTS_0/WEIGHTS_0.
-    // Изображение забирается РАСПАКОВАННЫМ и запоминается по индексу glTF: одна
-    // картинка, использованная десятью материалами, не должна лежать в данных
+    // Трансформ НАД скелетом (см. Skeleton::Root): мировая матрица родителя
+    // корневой кости. Берём у первой кости без родителя — у скина он общий.
+    for (int i = 0; i < jointCount; ++i) {
+        if (sk.Joints[i].Parent >= 0) continue;
+        sk.Root = worldOf(parent[(size_t)skin.joints[i]]);
+        break;
+    }
+
+    // Матрица кости В ПОЗЕ ПРИВЯЗКИ — ровно то, что окажется в палитре, пока
+    // клип не начал двигать кости (см. Animator: Root * цепочка * InverseBind).
+    //
+    // ЗАЧЕМ ОНА НУЖНА. К этой матрице приводятся жёсткие детали: чтобы деталь
+    // встала на своё место, её вершины надо задать так, чтобы палитра вернула
+    // их обратно. Считать это «по формуле» нельзя — экспортёры расходятся в
+    // том, ОТНОСИТЕЛЬНО ЧЕГО заданы обратные bind-матрицы: спецификация велит
+    // от корня сцены, Sketchfab и часть выгрузок Blender пишут от корня
+    // скелета. Разница — ровно поворот над скелетом, и угадавший неверно
+    // получает половину модели, развёрнутую на 180°. Поэтому не угадываем, а
+    // берём то, что реально получится в кадре.
+    std::vector<glm::mat4> bindBone((size_t)jointCount, glm::mat4(1.0f));
+    {
+        std::vector<glm::mat4> bindGlobal((size_t)jointCount, glm::mat4(1.0f));
+        for (int i = 0; i < jointCount; ++i) {
+            glm::mat4 g = sk.Joints[i].LocalMatrix();
+            for (int p = sk.Joints[i].Parent; p >= 0; p = sk.Joints[p].Parent)
+                g = sk.Joints[p].LocalMatrix() * g;
+            bindGlobal[(size_t)i] = sk.Root * g;
+            bindBone[(size_t)i] = bindGlobal[(size_t)i] * sk.Joints[i].InverseBind;
+        }
+    }
+
+    // --- Изображения и их каналы ---------------------------------------------
+    //
+    // Картинка забирается РАСПАКОВАННОЙ и запоминается по индексу glTF: одна
+    // текстура, использованная десятью материалами, не должна лежать в данных
     // десять раз — ни в памяти, ни в кэше.
     std::unordered_map<int, int> imageSlots;
     auto takeImage = [&](int texIndex) -> int {
         if (texIndex < 0 || texIndex >= (int)g.textures.size()) return -1;
-        int img = g.textures[texIndex].source;
+        int img = g.textures[(size_t)texIndex].source;
         auto it = imageSlots.find(img);
         if (it != imageSlots.end()) return it->second;
-        if (img < 0 || img >= (int)g.images.size() || g.images[img].image.empty()) return -1;
+        if (img < 0 || img >= (int)g.images.size() || g.images[(size_t)img].image.empty()) return -1;
         ModelImage out;
-        out.Width = g.images[img].width;
-        out.Height = g.images[img].height;
-        out.Pixels = g.images[img].image;
+        out.Width = g.images[(size_t)img].width;
+        out.Height = g.images[(size_t)img].height;
+        out.Pixels = g.images[(size_t)img].image;
         data.Images.push_back(std::move(out));
         const int slot = (int)data.Images.size() - 1;
         imageSlots[img] = slot;
         return slot;
     };
+
+    // --- Материалы ------------------------------------------------------------
+    // Разбираются ОДИН раз на материал, а не на каждый примитив: у проверочной
+    // модели 179 примитивов на 17 материалов, и раскладывать одну и ту же
+    // упакованную карту по каналам 179 раз значило бы 170 лишних проходов по
+    // мегапиксельным картинкам.
+    std::vector<ModelSubMeshMaterial> materials((size_t)g.materials.size());
+    for (size_t mi = 0; mi < g.materials.size(); ++mi) {
+        const tinygltf::Material& m = g.materials[mi];
+        ModelSubMeshMaterial& out = materials[mi];
+        out.Name = m.name;
+        const tinygltf::PbrMetallicRoughness& pbr = m.pbrMetallicRoughness;
+        if (pbr.baseColorFactor.size() >= 4) {
+            out.Tint = glm::vec3((float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1],
+                                 (float)pbr.baseColorFactor[2]);
+            out.Opacity = (float)pbr.baseColorFactor[3];
+        }
+        out.Metallic = (float)pbr.metallicFactor;    // glTF по умолчанию 1.0
+        out.Roughness = (float)pbr.roughnessFactor;  // glTF по умолчанию 1.0
+        out.Albedo = takeImage(pbr.baseColorTexture.index);
+        out.Normal = takeImage(m.normalTexture.index);
+        // Металличность в B, шероховатость в G, затенение в R — так пакует
+        // glTF, и это ОДНА текстура. Берём её один раз и говорим шейдеру, из
+        // какого канала читать: три копии одной карты 4K не нужны ни памяти,
+        // ни кэшу (см. uMetallicMask в PbrShader.h).
+        out.MetallicMap = takeImage(pbr.metallicRoughnessTexture.index);
+        out.MetallicChannel = 2;
+        out.RoughnessMap = takeImage(pbr.metallicRoughnessTexture.index);
+        out.RoughnessChannel = 1;
+        out.AOMap = takeImage(m.occlusionTexture.index);
+        out.AOChannel = 0;
+        if (m.emissiveFactor.size() >= 3) {
+            out.Emissive = glm::vec3((float)m.emissiveFactor[0], (float)m.emissiveFactor[1],
+                                     (float)m.emissiveFactor[2]);
+        }
+        out.EmissiveMap = takeImage(m.emissiveTexture.index);
+        // KHR_materials_emissive_strength: яркость свечения выше единицы. Без
+        // неё светящиеся детали (глаза) выходят просто светлыми — bloom их не
+        // подхватывает, потому что подхватывать нечего.
+        auto ext = m.extensions.find("KHR_materials_emissive_strength");
+        if (ext != m.extensions.end() && ext->second.Has("emissiveStrength")) {
+            const tinygltf::Value& v = ext->second.Get("emissiveStrength");
+            const float strength = v.IsNumber() ? (float)v.GetNumberAsDouble() : 1.0f;
+            out.Emissive *= strength;
+        }
+        if (m.alphaMode == "MASK") out.AlphaMode = 1;
+        else if (m.alphaMode == "BLEND") out.AlphaMode = 2;
+        out.AlphaCutoff = (float)m.alphaCutoff;
+        out.DoubleSided = m.doubleSided;
+    }
 
     // Ширина текстуры дельт. 1024 — заведомо в пределах любого GL 3.3
     // (минимум по спецификации 1024) и достаточно широка, чтобы у обычного
@@ -813,43 +1082,112 @@ static ModelData ParseGltf(const std::string& path) {
         return names;
     };
 
-    for (const auto& mesh : g.meshes) {
+    // --- Сбор примитивов ------------------------------------------------------
+    //
+    // Идём по УЗЛАМ, а не по мешам: у жёсткой детали место в модели задаёт узел,
+    // а один и тот же меш может стоять в нескольких узлах (провода, болты).
+    // Обход по мешам нарисовал бы такую деталь один раз и не в том месте.
+    int skinnedParts = 0, rigidParts = 0, skippedParts = 0;
+    for (int ni = 0; ni < nodeCount; ++ni) {
+        const tinygltf::Node& node = g.nodes[(size_t)ni];
+        if (node.mesh < 0 || node.mesh >= (int)g.meshes.size()) continue;
+        const tinygltf::Mesh& mesh = g.meshes[(size_t)node.mesh];
+
+        // Узел со скином — вершины уже в системе координат скелета (так велит
+        // спецификация: их место задают кости, а не трансформ узла).
+        const bool skinned = node.skin >= 0;
+
+        // Жёсткая деталь: ищем ближайшую кость ВВЕРХ по дереву. Она и будет
+        // единственной костью этой детали с весом 1 — тот же скиннинг, просто
+        // вырожденный, поэтому дальше по конвейеру разницы нет вообще.
+        int rigidJoint = -1;
+        if (!skinned) {
+            for (int p = ni; p >= 0; p = parent[(size_t)p]) {
+                auto it = nodeToJoint.find(p);
+                if (it != nodeToJoint.end()) { rigidJoint = it->second; break; }
+            }
+        }
+        // Вершины жёсткой детали задаём так, чтобы палитра кости вернула их
+        // ровно туда, где деталь стоит в файле: v' = bindBone(кость)⁻¹ · W · v.
+        // В позе привязки палитра даст обратно W·v, а при движении кости
+        // деталь поедет вместе с ней — чего и ждут от привязки к кости.
+        const glm::mat4 rigidXf =
+            skinned ? glm::mat4(1.0f)
+                    : glm::inverse(rigidJoint >= 0 ? bindBone[(size_t)rigidJoint] : sk.Root) *
+                          worldOf(ni);
+        const glm::mat3 rigidNrm = glm::mat3(glm::transpose(glm::inverse(rigidXf)));
+
         for (const auto& prim : mesh.primitives) {
-            if (prim.mode != TINYGLTF_MODE_TRIANGLES) continue;
+            if (prim.mode != TINYGLTF_MODE_TRIANGLES) { ++skippedParts; continue; }
             auto posIt = prim.attributes.find("POSITION");
+            if (posIt == prim.attributes.end()) { ++skippedParts; continue; }
             auto jIt = prim.attributes.find("JOINTS_0");
             auto wIt = prim.attributes.find("WEIGHTS_0");
-            if (posIt == prim.attributes.end() || jIt == prim.attributes.end() || wIt == prim.attributes.end())
-                continue; // не скиновый примитив
+            const bool hasSkin = skinned && jIt != prim.attributes.end() && wIt != prim.attributes.end();
 
             std::vector<float> pos = ReadFloats(g, posIt->second, 3);
+            if (pos.size() < 3) { ++skippedParts; continue; }
             auto nIt = prim.attributes.find("NORMAL");
             std::vector<float> nrm = nIt != prim.attributes.end() ? ReadFloats(g, nIt->second, 3) : std::vector<float>();
             auto uvIt = prim.attributes.find("TEXCOORD_0");
             std::vector<float> uv = uvIt != prim.attributes.end() ? ReadFloats(g, uvIt->second, 2) : std::vector<float>();
-            std::vector<unsigned int> joints = ReadUInts(g, jIt->second, 4);
-            std::vector<float> weights = ReadFloats(g, wIt->second, 4);
+            auto uv2It = prim.attributes.find("TEXCOORD_1");
+            std::vector<float> uv2 = uv2It != prim.attributes.end() ? ReadFloats(g, uv2It->second, 2) : std::vector<float>();
+            auto tanIt = prim.attributes.find("TANGENT");
+            std::vector<float> tan = tanIt != prim.attributes.end() ? ReadFloats(g, tanIt->second, 4) : std::vector<float>();
+            std::vector<unsigned int> joints = hasSkin ? ReadUInts(g, jIt->second, 4) : std::vector<unsigned int>();
+            std::vector<float> weights = hasSkin ? ReadFloats(g, wIt->second, 4) : std::vector<float>();
 
-            size_t vc = pos.size() / 3;
+            const size_t vc = pos.size() / 3;
+            if (hasSkin && (joints.size() < vc * 4 || weights.size() < vc * 4)) { ++skippedParts; continue; }
+
             std::vector<SkinnedVertex> verts(vc);
             for (size_t i = 0; i < vc; ++i) {
-                verts[i].Position = {pos[i*3], pos[i*3+1], pos[i*3+2]};
-                verts[i].Normal = !nrm.empty() ? glm::vec3(nrm[i*3], nrm[i*3+1], nrm[i*3+2]) : glm::vec3(0, 1, 0);
-                verts[i].TexCoords = !uv.empty() ? glm::vec2(uv[i*2], uv[i*2+1]) : glm::vec2(0.0f);
-                verts[i].Joints = {(float)joints[i*4], (float)joints[i*4+1], (float)joints[i*4+2], (float)joints[i*4+3]};
-                glm::vec4 w(weights[i*4], weights[i*4+1], weights[i*4+2], weights[i*4+3]);
-                float sum = w.x + w.y + w.z + w.w;
-                verts[i].Weights = sum > 0.0001f ? w / sum : glm::vec4(1, 0, 0, 0);
+                SkinnedVertex& v = verts[i];
+                v.Position = {pos[i*3], pos[i*3+1], pos[i*3+2]};
+                v.Normal = nrm.size() >= (i + 1) * 3 ? glm::vec3(nrm[i*3], nrm[i*3+1], nrm[i*3+2]) : glm::vec3(0, 1, 0);
+                v.TexCoords = uv.size() >= (i + 1) * 2 ? glm::vec2(uv[i*2], uv[i*2+1]) : glm::vec2(0.0f);
+                v.TexCoords2 = uv2.size() >= (i + 1) * 2 ? glm::vec2(uv2[i*2], uv2[i*2+1]) : v.TexCoords;
+                if (tan.size() >= (i + 1) * 4)
+                    v.Tangent = glm::vec4(tan[i*4], tan[i*4+1], tan[i*4+2], tan[i*4+3]);
+                if (hasSkin) {
+                    v.Joints = {(float)joints[i*4], (float)joints[i*4+1], (float)joints[i*4+2], (float)joints[i*4+3]};
+                    glm::vec4 w(weights[i*4], weights[i*4+1], weights[i*4+2], weights[i*4+3]);
+                    const float sum = w.x + w.y + w.z + w.w;
+                    v.Weights = sum > 0.0001f ? w / sum : glm::vec4(1, 0, 0, 0);
+                } else {
+                    // Жёсткая деталь: одна кость с весом 1, вершины заранее
+                    // переведены в систему координат скелета.
+                    v.Position = glm::vec3(rigidXf * glm::vec4(v.Position, 1.0f));
+                    v.Normal = rigidNrm * v.Normal;
+                    v.Tangent = glm::vec4(rigidNrm * glm::vec3(v.Tangent), v.Tangent.w);
+                    v.Joints = glm::vec4((float)std::max(rigidJoint, 0), 0.0f, 0.0f, 0.0f);
+                    // Кости не нашлось (деталь вне скелета) — вес 0: шейдер
+                    // возьмёт единичную матрицу, и деталь останется на месте.
+                    v.Weights = rigidJoint >= 0 ? glm::vec4(1, 0, 0, 0) : glm::vec4(0.0f);
+                }
             }
 
             std::vector<unsigned int> indices;
             if (prim.indices >= 0) indices = ReadUInts(g, prim.indices, 1);
             else { indices.resize(vc); for (size_t i = 0; i < vc; ++i) indices[i] = (unsigned)i; }
+            if (indices.size() < 3) { ++skippedParts; continue; }
 
             ModelSubMeshData sub;
             sub.Vertices = std::move(verts);
             sub.Indices = std::move(indices);
-            sub.Tint = glm::vec3(1.0f);
+            if (prim.material >= 0 && prim.material < (int)materials.size())
+                sub.Material = materials[(size_t)prim.material];
+
+            // Нормали, которых в файле нет, считаем по треугольникам: без них
+            // деталь освещается как плоскость с нормалью «вверх» — то есть не
+            // освещается вовсе.
+            if (nrm.size() < vc * 3) RebuildNormals(sub.Vertices, sub.Indices);
+            // Касательные нужны ТОЛЬКО карте нормалей: считать их всегда — это
+            // лишний проход по каждой модели ради данных, которыми никто не
+            // воспользуется.
+            if (sub.Material.Normal >= 0 && tan.size() < vc * 4)
+                RebuildTangents(sub.Vertices, sub.Indices);
 
             // --- Морф-цели примитива ---
             if (!prim.targets.empty()) {
@@ -901,14 +1239,8 @@ static ModelData ParseGltf(const std::string& path) {
                     }
                 }
             }
-            if (prim.material >= 0 && prim.material < (int)g.materials.size()) {
-                const auto& pbr = g.materials[prim.material].pbrMetallicRoughness;
-                if (pbr.baseColorFactor.size() == 4)
-                    sub.Tint = glm::vec3(pbr.baseColorFactor[0], pbr.baseColorFactor[1], pbr.baseColorFactor[2]);
-                if (pbr.baseColorTexture.index >= 0) sub.Image = takeImage(pbr.baseColorTexture.index);
-                sub.Metallic = (float)pbr.metallicFactor;   // glTF по умолчанию 1.0
-                sub.Roughness = (float)pbr.roughnessFactor; // glTF по умолчанию 1.0
-            }
+
+            if (hasSkin) ++skinnedParts; else ++rigidParts;
             data.SubMeshes.push_back(std::move(sub));
         }
     }
@@ -945,7 +1277,12 @@ static ModelData ParseGltf(const std::string& path) {
     }
 
     if (data.SubMeshes.empty())
-        throw std::runtime_error("SkinnedModel: в файле нет скиновых мешей: " + path);
+        throw std::runtime_error("SkinnedModel: в файле нет мешей: " + path);
+
+    LOG_INFO("Anim") << "SkinnedModel: частей со скином " << skinnedParts << ", жёстких "
+                     << rigidParts << (skippedParts ? ", пропущено " + std::to_string(skippedParts)
+                                                    : std::string())
+                     << ", материалов " << materials.size() << ", картинок " << data.Images.size();
     return data;
 }
 
@@ -975,10 +1312,39 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     for (ModelSubMeshData& src : data.SubMeshes) {
         SkinnedSubMesh sub;
         sub.Mesh = std::make_shared<SkinnedMesh>(src.Vertices, src.Indices);
-        sub.Tint = src.Tint;
-        sub.Metallic = src.Metallic;
-        sub.Roughness = src.Roughness;
-        if (src.Image >= 0 && src.Image < (int)textures.size()) sub.Diffuse = textures[(size_t)src.Image];
+
+        // Материал переносится ЦЕЛИКОМ, карта за картой. Пока сюда доезжала
+        // одна текстура из шести, у скина не могло быть ни рельефа, ни
+        // затенения, ни свечения — и это было не решение, а потеря данных.
+        const ModelSubMeshMaterial& m = src.Material;
+        auto pick = [&](int index) -> std::shared_ptr<Texture> {
+            return index >= 0 && index < (int)textures.size() ? textures[(size_t)index] : nullptr;
+        };
+        sub.Material.Name = m.Name;
+        sub.Material.Albedo = pick(m.Albedo);
+        sub.Material.Normal = pick(m.Normal);
+        sub.Material.MetallicMap = pick(m.MetallicMap);
+        sub.Material.RoughnessMap = pick(m.RoughnessMap);
+        sub.Material.AOMap = pick(m.AOMap);
+        sub.Material.EmissiveMap = pick(m.EmissiveMap);
+        auto mask = [](int channel) {
+            glm::vec4 v(0.0f);
+            v[channel >= 0 && channel < 4 ? channel : 0] = 1.0f;
+            return v;
+        };
+        sub.Material.MetallicMask = mask(m.MetallicChannel);
+        sub.Material.RoughnessMask = mask(m.RoughnessChannel);
+        sub.Material.AOMask = mask(m.AOChannel);
+        sub.Material.Tint = m.Tint;
+        sub.Material.Opacity = m.Opacity;
+        sub.Material.Metallic = m.Metallic;
+        sub.Material.Roughness = m.Roughness;
+        sub.Material.Emissive = m.Emissive;
+        sub.Material.Mode = m.AlphaMode == 2   ? SkinnedMaterial::Alpha::Blend
+                            : m.AlphaMode == 1 ? SkinnedMaterial::Alpha::Mask
+                                               : SkinnedMaterial::Alpha::Opaque;
+        sub.Material.AlphaCutoff = m.AlphaCutoff;
+        sub.Material.DoubleSided = m.DoubleSided;
 
         if (src.MorphCount > 0) {
             // Nearest и без мипов: выборка идёт texelFetch по точному индексу

@@ -20,7 +20,15 @@ constexpr unsigned int kMagic = 0x434D4753u;
 // разбора, и после исправления загрузчика старая запись продолжает отдавать
 // сломанные данные — молча, потому что файл-исходник не изменился. Ровно так
 // пережила правку перевёрнутая палитра glTF (см. GltfSkinImageLoader).
-constexpr unsigned int kVersion = 2;
+// Версия формата. Поднимается КАЖДЫЙ раз, когда меняется набор полей: кэш
+// лежит у человека на диске с прошлой сборки, и прочитать им новую структуру
+// означало бы разобрать чужие байты как свои — то есть мусорные материалы и
+// падение на ровном месте.
+//
+//   2 -> 3: у подмеша полный материал (карты нормалей/металла/шероховатости/
+//           AO/свечения, прозрачность, двусторонность), у вершины — касательная
+//           и вторая развёртка.
+constexpr unsigned int kVersion = 3;
 
 struct State {
     std::string Directory = ".sage-cache";
@@ -190,6 +198,7 @@ bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out)
     // --- Скелет ---
     unsigned long long jointCount = 0;
     if (!r.Pod(jointCount) || jointCount > 100000ull) return false;
+    r.Pod(out.Skeleton.Root);
     out.Skeleton.Joints.resize((size_t)jointCount);
     for (auto& j : out.Skeleton.Joints) {
         r.Text(j.Name);
@@ -236,10 +245,24 @@ bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out)
     for (auto& sub : out.SubMeshes) {
         r.Array(sub.Vertices);
         r.Array(sub.Indices);
-        r.Pod(sub.Image);
-        r.Pod(sub.Tint);
-        r.Pod(sub.Metallic);
-        r.Pod(sub.Roughness);
+        r.Text(sub.Material.Name);
+        r.Pod(sub.Material.Albedo);
+        r.Pod(sub.Material.Normal);
+        r.Pod(sub.Material.MetallicMap);
+        r.Pod(sub.Material.RoughnessMap);
+        r.Pod(sub.Material.AOMap);
+        r.Pod(sub.Material.EmissiveMap);
+        r.Pod(sub.Material.MetallicChannel);
+        r.Pod(sub.Material.RoughnessChannel);
+        r.Pod(sub.Material.AOChannel);
+        r.Pod(sub.Material.Tint);
+        r.Pod(sub.Material.Opacity);
+        r.Pod(sub.Material.Metallic);
+        r.Pod(sub.Material.Roughness);
+        r.Pod(sub.Material.Emissive);
+        r.Pod(sub.Material.AlphaMode);
+        r.Pod(sub.Material.AlphaCutoff);
+        r.Pod(sub.Material.DoubleSided);
         r.Pod(sub.MorphCount);
         r.Pod(sub.MorphWidth);
         r.Pod(sub.MorphRows);
@@ -289,6 +312,7 @@ bool WriteModelCache(const std::string& sourcePath, const sage::render::ModelDat
     w.Pod(source);
 
     w.Pod((unsigned long long)data.Skeleton.Joints.size());
+    w.Pod(data.Skeleton.Root);
     for (const auto& j : data.Skeleton.Joints) {
         w.Text(j.Name);
         w.Pod(j.Parent);
@@ -323,10 +347,24 @@ bool WriteModelCache(const std::string& sourcePath, const sage::render::ModelDat
     for (const auto& sub : data.SubMeshes) {
         w.Array(sub.Vertices);
         w.Array(sub.Indices);
-        w.Pod(sub.Image);
-        w.Pod(sub.Tint);
-        w.Pod(sub.Metallic);
-        w.Pod(sub.Roughness);
+        w.Text(sub.Material.Name);
+        w.Pod(sub.Material.Albedo);
+        w.Pod(sub.Material.Normal);
+        w.Pod(sub.Material.MetallicMap);
+        w.Pod(sub.Material.RoughnessMap);
+        w.Pod(sub.Material.AOMap);
+        w.Pod(sub.Material.EmissiveMap);
+        w.Pod(sub.Material.MetallicChannel);
+        w.Pod(sub.Material.RoughnessChannel);
+        w.Pod(sub.Material.AOChannel);
+        w.Pod(sub.Material.Tint);
+        w.Pod(sub.Material.Opacity);
+        w.Pod(sub.Material.Metallic);
+        w.Pod(sub.Material.Roughness);
+        w.Pod(sub.Material.Emissive);
+        w.Pod(sub.Material.AlphaMode);
+        w.Pod(sub.Material.AlphaCutoff);
+        w.Pod(sub.Material.DoubleSided);
         w.Pod(sub.MorphCount);
         w.Pod(sub.MorphWidth);
         w.Pod(sub.MorphRows);

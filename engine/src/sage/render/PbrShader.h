@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Общий GLSL-блок физически-корректного освещения (PBR, metallic-roughness,
@@ -763,5 +764,113 @@ vec3 ShadePBR(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough) {
     return ShadePBRao(N, fragPos, albedo, metallic, rough, 1.0);
 }
 )GLSL";
+
+
+// ФРАГМЕНТНАЯ СТАДИЯ ТЕКСТУРНОГО PBR — ОДНА НА ВЕСЬ ДВИЖОК.
+//
+// Её собирают ДВА пути: статический текстурный меш (ecs/RenderBatch) и
+// скелетная модель (render/SkinnedModel). И это не «удобно», а обязательно:
+// пока у скина был свой урезанный фрагмент, анимированный персонаж и такой же
+// статический меш с тем же материалом освещались по-разному — у скина не было
+// ни карт металличности и шероховатости, ни нормалей, ни затенения, ни
+// свечения, ни прозрачности. Разница между скином и статикой обязана быть
+// ровно одна: КАК получается позиция и нормаль вершины. Всё, что дальше, —
+// один и тот же код.
+//
+// Вход (его обязан дать вершинный шейдер): FragPos, Normal, TexCoords, TBN,
+// vUV2. Выход — цвет с альфой материала.
+inline std::string TexturedPbrFragSource() {
+    return std::string(R"(#version 330 core
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoords;
+in mat3 TBN;
+in vec2 vUV2;
+out vec4 FragColor;
+
+// Лайтмапа GI текущей сущности (uLightmapEnabled — сущность запечена).
+uniform bool uLightmapEnabled;
+uniform sampler2D uLightmap;
+
+uniform vec3 uAlbedoFactor;
+// Повтор текстуры по развёртке (см. MaterialRender::UVScale*). Умножается
+// ЗДЕСЬ, а не в вершинном шейдере: TBN и вторая развёртка (лайтмапа) повтора
+// не знают и знать не должны — лайтмапа уникальна на объект по построению.
+uniform vec2 uUVScale;
+uniform float uMetallic;
+uniform float uRoughness;
+uniform sampler2D uAlbedoMap;
+uniform bool uHasAlbedo;
+uniform sampler2D uNormalMap;
+uniform bool uHasNormal;
+uniform sampler2D uMetallicMap;
+uniform bool uHasMetallic;
+uniform sampler2D uRoughnessMap;
+uniform bool uHasRoughness;
+uniform sampler2D uAOMap;
+uniform bool uHasAO;
+// ИЗ КАКОГО КАНАЛА карты брать значение. Маска, а не индекс: скалярное
+// произведение работает в любом GLSL и не требует динамической индексации
+// вектора.
+//
+// Зачем это вообще. glTF пакует в ОДНУ текстуру три величины: R — затенение,
+// G — шероховатость, B — металличность. Разложить её на три отдельные картинки
+// при загрузке значило бы держать в памяти и в кэше три копии карты 4K вместо
+// одной — сотню мегабайт на модель на ровном месте. Читаем из одной, просто
+// разными каналами. У материалов движка (.sagemat) карта у каждого своя, и
+// маска у них R — то есть прежнее поведение.
+uniform vec4 uMetallicMask;
+uniform vec4 uRoughnessMask;
+uniform vec4 uAOMask;
+uniform float uOpacity;
+// Порог отсечения по альфе (glTF alphaMode=MASK). Ноль — режима нет и альфа
+// текстуры не смотрится вовсе: у обычного материала в ней бывает что угодно,
+// и внезапно начать по ней отсекать значило бы продырявить готовые сцены.
+uniform float uAlphaCutoff;
+uniform vec3 uEmissive;
+uniform sampler2D uEmissiveMap;
+uniform bool uHasEmissive;
+)") + kPbrSharedGlsl + R"(
+void main() {
+    vec2 uv = TexCoords * uUVScale;
+    vec4 base = vec4(uAlbedoFactor, 1.0);
+    if (uHasAlbedo) base *= texture(uAlbedoMap, uv);
+    // Отсечение по альфе — ДО всей остальной работы: отброшенный пиксель не
+    // должен стоить ни выборок карт, ни освещения.
+    if (uAlphaCutoff > 0.0 && base.a < uAlphaCutoff) discard;
+    vec3 albedo = base.rgb;
+
+    vec3 N = normalize(Normal);
+    if (uHasNormal) {
+        vec3 n = texture(uNormalMap, uv).rgb * 2.0 - 1.0;
+        N = normalize(TBN * n);
+    }
+    // metallic/roughness/ao — из своих карт (канал задаёт маска) × фактор,
+    // иначе только фактор.
+    float metallic = uMetallic;
+    if (uHasMetallic) metallic *= dot(texture(uMetallicMap, uv), uMetallicMask);
+    float rough = uRoughness;
+    if (uHasRoughness) rough *= dot(texture(uRoughnessMap, uv), uRoughnessMask);
+    float ao = uHasAO ? dot(texture(uAOMap, uv), uAOMask) : 1.0;
+
+    if (uShadingMode != 0) {
+        vec4 dbg;
+        vec3 dbgEmissive = uEmissive;
+        if (uHasEmissive) dbgEmissive *= texture(uEmissiveMap, uv).rgb;
+        if (DebugShade(uShadingMode, N, FragPos, albedo, metallic, rough, ao, dbgEmissive,
+                       CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
+            FragColor = vec4(dbg.rgb, uOpacity);
+            return;
+        }
+    }
+    vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
+                                     : DefaultIndirect(FragPos, N);
+    vec3 emissive = uEmissive;
+    if (uHasEmissive) emissive *= texture(uEmissiveMap, uv).rgb;
+    FragColor = vec4(emissive + ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect),
+                     uOpacity);
+}
+)";
+}
 
 } // namespace sage::render

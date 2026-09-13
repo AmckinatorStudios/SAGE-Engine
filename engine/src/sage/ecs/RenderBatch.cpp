@@ -155,77 +155,11 @@ void main() {
 }
 )";
 
-std::string TexFragSource() {
-    return std::string(R"(#version 330 core
-in vec3 FragPos;
-in vec3 Normal;
-in vec2 TexCoords;
-in mat3 TBN;
-in vec2 vUV2;
-out vec4 FragColor;
-
-// Лайтмапа GI текущей сущности (uLightmapEnabled — сущность запечена).
-uniform bool uLightmapEnabled;
-uniform sampler2D uLightmap;
-
-uniform vec3 uAlbedoFactor;
-// Повтор текстуры по развёртке (см. MaterialRender::UVScale*). Умножается
-// ЗДЕСЬ, а не в вершинном шейдере: TBN и вторая развёртка (лайтмапа) повтора
-// не знают и знать не должны — лайтмапа уникальна на объект по построению.
-uniform vec2 uUVScale;
-uniform float uMetallic;
-uniform float uRoughness;
-uniform sampler2D uAlbedoMap;
-uniform bool uHasAlbedo;
-uniform sampler2D uNormalMap;
-uniform bool uHasNormal;
-uniform sampler2D uMetallicMap;
-uniform bool uHasMetallic;
-uniform sampler2D uRoughnessMap;
-uniform bool uHasRoughness;
-uniform sampler2D uAOMap;
-uniform bool uHasAO;
-uniform float uOpacity;
-uniform vec3 uEmissive;
-uniform sampler2D uEmissiveMap;
-uniform bool uHasEmissive;
-)") + kPbrSharedGlsl + R"(
-void main() {
-    vec2 uv = TexCoords * uUVScale;
-    vec3 albedo = uAlbedoFactor;
-    if (uHasAlbedo) albedo *= texture(uAlbedoMap, uv).rgb;
-
-    vec3 N = normalize(Normal);
-    if (uHasNormal) {
-        vec3 n = texture(uNormalMap, uv).rgb * 2.0 - 1.0;
-        N = normalize(TBN * n);
-    }
-    // metallic/roughness/ao — из карт (R-канал) × фактор, иначе только фактор.
-    float metallic = uMetallic;
-    if (uHasMetallic) metallic *= texture(uMetallicMap, uv).r;
-    float rough = uRoughness;
-    if (uHasRoughness) rough *= texture(uRoughnessMap, uv).r;
-    float ao = uHasAO ? texture(uAOMap, uv).r : 1.0;
-
-    if (uShadingMode != 0) {
-        vec4 dbg;
-        vec3 dbgEmissive = uEmissive;
-        if (uHasEmissive) dbgEmissive *= texture(uEmissiveMap, uv).rgb;
-        if (DebugShade(uShadingMode, N, FragPos, albedo, metallic, rough, ao, dbgEmissive,
-                       CalcSunShadow(FragPos, N, normalize(-uSunDir)), dbg)) {
-            FragColor = vec4(dbg.rgb, uOpacity);
-            return;
-        }
-    }
-    vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
-                                     : DefaultIndirect(FragPos, N);
-    vec3 emissive = uEmissive;
-    if (uHasEmissive) emissive *= texture(uEmissiveMap, uv).rgb;
-    FragColor = vec4(emissive + ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect),
-                     uOpacity);
-}
-)";
-}
+// Фрагментная стадия текстурного PBR живёт в PbrShader.h: тот же самый код
+// собирает себе скелетная модель (см. render/SkinnedModel.cpp). Держать её
+// здесь значило бы иметь две редакции одного шейдера, которые расходятся при
+// первой же правке — ровно так скин и остался без половины карт материала.
+std::string TexFragSource() { return sage::render::TexturedPbrFragSource(); }
 
 // --- Depth-шейдеры для карты теней (инстансный и uModel — для текстурных) ---
 const char* kDepthInstVert = R"(#version 330 core
@@ -612,6 +546,13 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         tex.SetInt("uMetallicMap", 3);
         tex.SetInt("uRoughnessMap", 4);
         tex.SetInt("uAOMap", 5);
+        // У материала движка каждая карта своя, и значение лежит в R (см.
+        // ModelLoader::ExtractMaterials, который так их и раскладывает).
+        // Маски всё равно выставляем ЯВНО: неустановленный uniform — это ноль,
+        // то есть «канала нет», и карта молча перестала бы влиять.
+        tex.SetVec4("uMetallicMask", glm::vec4(1, 0, 0, 0));
+        tex.SetVec4("uRoughnessMask", glm::vec4(1, 0, 0, 0));
+        tex.SetVec4("uAOMask", glm::vec4(1, 0, 0, 0));
         for (const TexturedItem& it : m_textured) {
             bindLightmap(tex, it.LmPage);
             setCull(it.Mat ? (int)it.Mat->Render.Cull : (int)CullFaces::Back);
@@ -738,6 +679,9 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 Shader& t = *texShader;
                 t.SetInt("uAlbedoMap", 0); t.SetInt("uNormalMap", 2);
                 t.SetInt("uMetallicMap", 3); t.SetInt("uRoughnessMap", 4); t.SetInt("uAOMap", 5);
+                t.SetVec4("uMetallicMask", glm::vec4(1, 0, 0, 0));
+                t.SetVec4("uRoughnessMask", glm::vec4(1, 0, 0, 0));
+                t.SetVec4("uAOMask", glm::vec4(1, 0, 0, 0));
                 bindLightmap(t, head.LmPage);
                 t.SetMat4("uModel", head.Inst.Model);
                 // Тон и свечение — из инстанса (свёрнутые), как на всех

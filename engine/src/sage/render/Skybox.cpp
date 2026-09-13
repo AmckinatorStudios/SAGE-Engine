@@ -51,7 +51,7 @@ Skybox::Skybox(const std::array<std::string, 6>& faces) {
     GraphicsDevice& device = GraphicsDevice::Get();
     BuildGeometry();
 
-    stbi_set_flip_vertically_on_load(false); // у cubemap другая конвенция — грани НЕ переворачиваем
+    stbi_set_flip_vertically_on_load_thread(false); // у cubemap другая конвенция — грани НЕ переворачиваем
 
     // Сначала декодируем все 6 граней (падение на любой — без утечки уже
     // декодированных), затем одним вызовом создаём cubemap у бэкенда.
@@ -70,12 +70,12 @@ Skybox::Skybox(const std::array<std::string, 6>& faces) {
         m_cubemap = device.CreateTextureCube(cubeFaces);
     } catch (...) {
         for (unsigned char* p : pixels) if (p) stbi_image_free(p);
-        stbi_set_flip_vertically_on_load(true);
+        stbi_set_flip_vertically_on_load_thread(true);
         throw;
     }
     for (unsigned char* p : pixels) stbi_image_free(p);
 
-    stbi_set_flip_vertically_on_load(true); // возвращаем конвенцию обратно для обычных Texture
+    stbi_set_flip_vertically_on_load_thread(true); // возвращаем конвенцию обратно для обычных Texture
 
     LOG_INFO("Skybox") << "Skybox загружен (6 граней)";
 }
@@ -165,10 +165,10 @@ glm::vec3 FaceDirection(int face, float u, float v) {
 } // namespace
 
 std::unique_ptr<Skybox> Skybox::LoadFromImage(const std::string& file, Layout layout) {
-    stbi_set_flip_vertically_on_load(false);   // у cubemap своя конвенция
+    stbi_set_flip_vertically_on_load_thread(false);   // у cubemap своя конвенция
     int w = 0, h = 0, comp = 0;
     unsigned char* src = stbi_load(file.c_str(), &w, &h, &comp, 0);
-    stbi_set_flip_vertically_on_load(true);
+    stbi_set_flip_vertically_on_load_thread(true);
     if (!src) {
         LOG_ERROR("Skybox") << "Небо не прочиталось: " << file << " ("
                             << (stbi_failure_reason() ? stbi_failure_reason() : "?") << ")";
