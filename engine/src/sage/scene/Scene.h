@@ -142,6 +142,19 @@ public:
         return CreateEmptyObjectWithId(name, m_nextId++);
     }
 
+    // ПАПКА СПИСКА (см. FolderComponent): пустой объект с меткой. Transform у
+    // неё есть — его ждут скрипты, физика и интерфейс у ЛЮБОЙ сущности, — но в
+    // мировую матрицу потомков он не входит (см. WorldMatrix ниже).
+    GameObject CreateFolder(const std::string& name) {
+        GameObject obj = CreateEmptyObject(name);
+        m_registry.emplace<FolderComponent>(obj.Entity());
+        return obj;
+    }
+
+    bool IsFolder(entt::entity e) const {
+        return e != entt::null && m_registry.valid(e) && m_registry.all_of<FolderComponent>(e);
+    }
+
     GameObject CreateEmptyObjectWithId(const std::string& name, int id) {
         while (m_idToEntity.find(id) != m_idToEntity.end()) id = m_nextId++;
         entt::entity e = m_registry.create();
@@ -197,7 +210,12 @@ public:
     glm::mat4 WorldMatrix(entt::entity e) const {
         if (e == entt::null || !m_registry.valid(e)) return glm::mat4(1.0f);
         const Transform* tr = m_registry.try_get<Transform>(e);
-        glm::mat4 local = tr ? tr->GetMatrix() : glm::mat4(1.0f);
+        // ПАПКА НЕ ДВИГАЕТ СОДЕРЖИМОЕ. Она заведена ради порядка в списке, и
+        // если бы её Transform входил в матрицу, «сложить фонари в папку»
+        // означало бы сдвинуть их все — то самое, из-за чего группировать
+        // родителем и было нельзя (см. FolderComponent).
+        glm::mat4 local = (tr && !m_registry.all_of<FolderComponent>(e)) ? tr->GetMatrix()
+                                                                        : glm::mat4(1.0f);
         const auto* h = m_registry.try_get<HierarchyComponent>(e);
         if (h && h->Parent != entt::null && m_registry.valid(h->Parent))
             return WorldMatrix(h->Parent) * local;

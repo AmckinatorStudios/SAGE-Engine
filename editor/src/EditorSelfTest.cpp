@@ -19,6 +19,8 @@
 #include "PanelWindows.h"
 #include "imgui_internal.h" // NextWindowData: проверка флага вьюпорта у отдельных окон
 #include "panels/AssetsPanel.h"
+#include "FolderColors.h"
+#include "panels/HierarchyPanel.h"
 
 #include "sage/ecs/DecalSystem.h"
 
@@ -301,7 +303,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2572,6 +2574,144 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: материалы модели для обложки не прочитались: "
                                 << SAGE_TEST_MODEL;
             ok = false;
+        }
+    }
+
+    // --- ЗНАЧКИ СПИСКА И ПАПКИ СЦЕНЫ ---------------------------------------
+    //
+    // ЗНАЧОК — ПРО ТИП ПРЕДМЕТА, А НЕ ПРО ЕГО ФОРМУ. Куб, сфера, цилиндр и
+    // конус в списке — одно и то же: геометрия. Разные значки у них означали
+    // бы, что глаз обязан различать кубик и шарик размером с букву, ничего за
+    // это не получая. Свет — единственное исключение: солнце, точечный и
+    // прожектор ведут себя по-разному, и перепутать их дорого.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        entt::registry& reg = m_scene->Registry();
+        auto iconOf = [&](GameObject& o) { return std::string(HierarchyPanel::IconFor(reg, o.Entity())); };
+
+        // Все формы — ОДИН значок.
+        const MeshRef::Type kShapes[] = {MeshRef::Type::Cube, MeshRef::Type::Sphere,
+                                         MeshRef::Type::Plane, MeshRef::Type::Cylinder,
+                                         MeshRef::Type::Cone};
+        for (MeshRef::Type type : kShapes) {
+            GameObject shape = CreatePrimitiveEntity("IconShape", type);
+            if (iconOf(shape) != "cube") {
+                LOG_ERROR("Editor") << "SELFTEST: у формы значок '" << iconOf(shape)
+                                    << "' вместо общего 'cube'";
+                ok = false;
+                break;
+            }
+        }
+
+        // Три типа света — ТРИ РАЗНЫХ значка.
+        if (ok) {
+            std::string sun, point, spot;
+            for (const char* id : {"light.sun", "light.point", "light.spot"}) {
+                GameObject light = m_scene->Get(CreateCatalogObject(id));
+                if (!light.Valid()) { ok = false; break; }
+                const std::string icon = iconOf(light);
+                if (std::string(id) == "light.sun") sun = icon;
+                else if (std::string(id) == "light.point") point = icon;
+                else spot = icon;
+            }
+            if (ok && (sun == point || point == spot || sun == spot)) {
+                LOG_ERROR("Editor") << "SELFTEST: типы света неразличимы по значку: солнце '" << sun
+                                    << "', точечный '" << point << "', прожектор '" << spot << "'";
+                ok = false;
+            }
+            // И камера — своим значком, а не общим.
+            if (ok) {
+                GameObject cam = m_scene->Get(CreateCatalogObject("camera.game"));
+                if (!cam.Valid() || iconOf(cam) != "camera") {
+                    LOG_ERROR("Editor") << "SELFTEST: у камеры не её значок";
+                    ok = false;
+                }
+            }
+        }
+
+        // Значка-заглушки (пустой квадрат с диагональю) быть не должно ни у
+        // одного типа: опечатка в имени выглядит как поломка всего набора.
+        if (ok) {
+            for (auto e : reg.view<IdComponent>()) {
+                const char* icon = HierarchyPanel::IconFor(reg, e);
+                if (!EditorIcons::HasGlyph(icon)) {
+                    LOG_ERROR("Editor") << "SELFTEST: значка нет в наборе — '" << icon << "'";
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        // ПАПКА СПИСКА: свой значок, свой цвет и НИКАКОГО влияния на сцену.
+        if (ok) {
+            GameObject folder = m_scene->CreateFolder("Декорации");
+            GameObject lamp = CreatePrimitiveEntity("FolderLamp", MeshRef::Type::Cube);
+            lamp.GetTransform().Position = glm::vec3(4.0f, 1.0f, 0.0f);
+            m_scene->SetParent(lamp.Entity(), folder.Entity());
+            if (iconOf(folder) != "folder-full") {
+                LOG_ERROR("Editor") << "SELFTEST: у непустой папки значок '" << iconOf(folder) << "'";
+                ok = false;
+            }
+            // Двигаем папку — лампа обязана остаться на месте.
+            if (ok) {
+                folder.GetTransform().Position = glm::vec3(100.0f, 0.0f, 0.0f);
+                const glm::mat4 world = m_scene->WorldMatrix(lamp.Entity());
+                if (std::abs(world[3][0] - 4.0f) > 0.001f) {
+                    LOG_ERROR("Editor") << "SELFTEST: папка сдвинула содержимое (x " << world[3][0]
+                                        << " вместо 4)";
+                    ok = false;
+                }
+            }
+            // Цвет метки — из компонента, а не общий цвет значков.
+            if (ok) {
+                reg.get<FolderComponent>(folder.Entity()).Color = glm::vec3(0.9f, 0.35f, 0.35f);
+                const std::string text = SceneSerializer::SaveToString(*m_scene);
+                if (text.find("\"folder\"") == std::string::npos) {
+                    LOG_ERROR("Editor") << "SELFTEST: папка не сохраняется в сцене";
+                    ok = false;
+                }
+            }
+        }
+    }
+
+    // --- ЦВЕТНЫЕ МЕТКИ ПАПОК ПРОЕКТА ---------------------------------------
+    //
+    // Метка обязана пережить перезапуск редактора и переезд проекта: цвет,
+    // живущий один сеанс, человек назначит второй раз и перестанет верить.
+    if (ok) {
+        namespace foldercolors = sage::editor::foldercolors;
+        std::error_code ec;
+        const fs::path dir = m_project.AssetsDir() / "selftest_colored";
+        fs::create_directories(dir, ec);
+        foldercolors::SetProject(m_project.Dir());
+        foldercolors::Set(dir, glm::vec3(0.45f, 0.80f, 0.45f));
+
+        glm::vec3 got(0.0f);
+        if (!foldercolors::Get(dir, got) || std::abs(got.g - 0.80f) > 0.001f) {
+            LOG_ERROR("Editor") << "SELFTEST: цвет папки не назначился";
+            ok = false;
+        }
+        // Перечитываем с диска, как при следующем запуске.
+        if (ok) {
+            foldercolors::SetProject(fs::path{});
+            foldercolors::SetProject(m_project.Dir());
+            glm::vec3 reloaded(0.0f);
+            if (!foldercolors::Get(dir, reloaded) || std::abs(reloaded.g - 0.80f) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: цвет папки не пережил перезапуск";
+                ok = false;
+            }
+        }
+        // Переименование везёт метку с собой.
+        if (ok) {
+            const fs::path moved = m_project.AssetsDir() / "selftest_renamed";
+            fs::rename(dir, moved, ec);
+            foldercolors::Rename(dir, moved);
+            glm::vec3 after(0.0f);
+            if (!foldercolors::Get(moved, after) || std::abs(after.g - 0.80f) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: метка не поехала за переименованной папкой";
+                ok = false;
+            }
+            fs::remove_all(moved, ec);
         }
     }
 

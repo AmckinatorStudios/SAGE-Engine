@@ -895,3 +895,63 @@ TEST(Scene_empty_object_gets_a_renderer_on_demand) {
     node.EnsureRenderer();
     CHECK_NEAR(node.Renderer().Color.r, 1.0f, 1e-5);
 }
+
+// --- ПАПКА СПИСКА НЕ ВЛИЯЕТ НА СЦЕНУ ---------------------------------------
+//
+// Сгруппировать объекты в списке можно было только сделав один из них
+// родителем других — а это не группировка: родитель тащит потомков за собой при
+// каждом сдвиге и повороте, и «пусть просто лежат рядом» оборачивалось
+// сломанной сценой. Папка заведена ровно для того, чтобы этого НЕ происходило,
+// и проверяется здесь именно это свойство.
+TEST(Scene_folder_does_not_move_its_contents) {
+    Scene scene("Folders");
+    GameObject folder = scene.CreateFolder("Декорации");
+    GameObject lamp = scene.CreateObject("Lamp");
+    lamp.GetTransform().Position = glm::vec3(5.0f, 1.0f, -2.0f);
+    scene.SetParent(lamp.Entity(), folder.Entity());
+
+    // Двигаем и вертим саму папку — содержимое обязано остаться на месте.
+    folder.GetTransform().Position = glm::vec3(100.0f, 50.0f, 7.0f);
+    folder.GetTransform().Rotation = glm::vec3(0.0f, 90.0f, 0.0f);
+    folder.GetTransform().Scale = glm::vec3(3.0f);
+
+    const glm::mat4 world = scene.WorldMatrix(lamp.Entity());
+    CHECK_NEAR(world[3][0], 5.0f, 1e-4);
+    CHECK_NEAR(world[3][1], 1.0f, 1e-4);
+    CHECK_NEAR(world[3][2], -2.0f, 1e-4);
+    // И масштаб не протёк: 3.0 у папки не должен раздуть лампу.
+    CHECK_NEAR(world[0][0], 1.0f, 1e-4);
+
+    // Обычный родитель по-прежнему ДВИГАЕТ: правка не должна была отменить
+    // иерархию вообще.
+    GameObject parent = scene.CreateObject("Parent");
+    parent.GetTransform().Position = glm::vec3(10.0f, 0.0f, 0.0f);
+    GameObject child = scene.CreateObject("Child");
+    child.GetTransform().Position = glm::vec3(1.0f, 0.0f, 0.0f);
+    scene.SetParent(child.Entity(), parent.Entity());
+    CHECK_NEAR(scene.WorldMatrix(child.Entity())[3][0], 11.0f, 1e-4);
+}
+
+// Папка обязана пережить сохранение: иначе после перезагрузки сцены
+// «Декорации» становятся обычным пустым объектом и СНОВА начинают таскать за
+// собой содержимое — то есть поломка приезжает отложенной.
+TEST(Scene_folder_survives_save_and_copy) {
+    Scene scene("FolderSave");
+    GameObject folder = scene.CreateFolder("Props");
+    scene.Registry().get<FolderComponent>(folder.Entity()).Color = glm::vec3(0.9f, 0.35f, 0.35f);
+    GameObject inside = scene.CreateObject("Crate");
+    scene.SetParent(inside.Entity(), folder.Entity());
+
+    const std::string text = SceneSerializer::SaveToString(scene);
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+    CHECK_TRUE(loaded != nullptr);
+    GameObject back = FindByName(*loaded, "Props");
+    CHECK_TRUE(back.Valid());
+    CHECK_TRUE(loaded->Registry().all_of<FolderComponent>(back.Entity()));
+    CHECK_NEAR(loaded->Registry().get<FolderComponent>(back.Entity()).Color.r, 0.9f, 1e-4);
+
+    // Копия папки — тоже папка (Ctrl+D, префабы).
+    GameObject copy = sage::scene::CopySubtree(scene, folder.Entity(), scene, entt::null);
+    CHECK_TRUE(copy.Valid());
+    CHECK_TRUE(scene.Registry().all_of<FolderComponent>(copy.Entity()));
+}
