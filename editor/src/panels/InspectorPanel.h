@@ -57,8 +57,8 @@ private:
 
     // Что за файл выбран в Assets — по нему выбирается редактор.
     enum class AssetKind { None, Material, Prefab, Model, Audio, Other };
-    // Какая вкладка открыта. Следует за последним выбором человека, иначе
-    // разделение стоило бы лишнего клика на каждое переключение.
+    // ЧТО ПАНЕЛЬ ПОКАЗЫВАЕТ СЕЙЧАС: объект сцены или файл из Assets. Не
+    // вкладка — предмет правки: он всегда ОДИН и следует за последним выбором.
     enum class Focus { Object, Asset };
 
     static AssetKind ClassifyAsset(const std::filesystem::path& path);
@@ -68,8 +68,8 @@ private:
     void DrawAssetSection(EditorHost& host, AssetKind kind);
 
     Focus m_focus = Focus::Object;
-    // Одноразовый: переключить вкладку СЕЙЧАС. Постоянный SetSelected залипает.
-    bool m_forceFocus = false;
+    // Выбор прошлого кадра: событий выбора панель не получает, и «что выбрали
+    // последним» вычисляется сравнением состояния.
     int m_lastEntityId = -1;
     std::string m_lastAssetPath;
 

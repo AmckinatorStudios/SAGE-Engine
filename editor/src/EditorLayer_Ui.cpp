@@ -693,16 +693,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // случилось», потом «что с этим делать».
     DrawCrashReport();
     DrawRecoveryPrompt();
-    // ЗАКРЫТИЕ ОКНА — ЧЕРЕЗ ТОТ ЖЕ ВОПРОС. Крестик и Alt+F4 ставят флаг GLFW, и
-    // без перехвата редактор закрылся бы молча вместе с несохранённой сценой.
-    {
-        Window& win = sage::Application::Get().GetWindow();
-        if (win.ShouldClose() && m_sceneDirty && !m_unsavedPrompt) {
-            win.CancelClose();
-            m_closeAfterPrompt = true;
-            AskUnsaved(nullptr);   // «продолжить» здесь и значит «закрыться»
-        }
-    }
+    // Вопрос о несохранённой сцене. Сюда он попадает и от пункта «Выход», и от
+    // крестика окна — тот приходит через EditorLayer::OnCloseRequest (см.
+    // Layer.h): проверять флаг GLFW прямо здесь бесполезно, цикл выходит
+    // раньше, чем этот код выполнится.
     DrawUnsavedPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     m_inputPanel.Draw(*this, m_showInput);

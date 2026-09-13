@@ -172,11 +172,11 @@ const char* const kNames[] = {
     "shader", "audio",
     "model",
     "up", "refresh", "folder-plus", "search", "clock", "list", "import", "pencil",
-    "undo", "redo", "capsule", "cone",
+    "undo", "redo", "cone",
     "code", "question", "layout", "gear",
     "magnet",
     "warn", "error", "info", "debug",
-    "trash", "copy", "save", "open", "plus", "eye", "lock", "unlock",
+    "trash", "copy", "save", "open", "plus", "eye", "eye-off", "lock", "unlock",
 };
 
 } // namespace

@@ -151,20 +151,19 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
     }
 
     // ------------------------------------------------------------------------
-    // Две ПРИНЦИПИАЛЬНО разные вещи — в две вкладки, а не в одну простыню.
+    // ОДИН ПРЕДМЕТ ПРАВКИ ЗА РАЗ — ТОТ, ЧТО ВЫБРАН ПОСЛЕДНИМ.
     //
-    // Раньше панель просто складывала одно под другое: сверху редактор
-    // материала, выбранного в Assets, снизу свойства выбранной сущности, между
-    // ними голая черта. Это два независимых предмета правки — файл на диске и
-    // объект в сцене, — и у них даже разная область действия: материал общий
-    // для всех, кто им покрашен, а Transform принадлежит одной сущности.
-    // Соседство без границы читалось как один список свойств одного объекта, и
-    // человек не понимал, что именно он сейчас меняет.
+    // Здесь были две вкладки, «Объект» и «Ассет»: панель показывала сущность
+    // сцены и файл из Assets как два разных предмета правки. Мысль верная —
+    // это и правда разные вещи, — а вот вкладки её не выражали: они
+    // показывали, что выбрано ДВА предмета сразу, при том что правят всегда
+    // один, и переключались сами, стоило щёлкнуть по чему угодно. Строка
+    // вкладок при этом стояла всегда и отнимала место у полей.
     //
-    // Вкладка САМА переключается на то, что человек выбрал последним: щёлкнул
-    // по объекту в сцене — открыт объект, щёлкнул по файлу в Assets — открыт
-    // ассет. Иначе за разделение пришлось бы платить лишним кликом на каждое
-    // переключение, и оно бы только мешало.
+    // Теперь панель показывает ФОКУС: щёлкнули по объекту — объект, щёлкнули
+    // по файлу в Assets — файл. Вернуться ко второму — это щелчок по нему же,
+    // то есть ровно тот жест, которым его и выбирают. Чем именно правят
+    // сейчас, видно по заголовку раздела (см. DrawSectionHeader).
     // ------------------------------------------------------------------------
     const AssetKind assetKind = ClassifyAsset(host.InspectedAssetPath());
     const bool hasEntity = host.InspectedObject().Valid();
@@ -174,11 +173,11 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
     // не получает, а сравнение состояния даёт ровно тот же ответ.
     const int entityId = hasEntity ? host.InspectedObject().Id() : -1;
     const std::string assetPath = host.InspectedAssetPath().string();
-    // Под замком вкладка тоже не переключается: иначе замок держал бы предмет
-    // правки, но панель всё равно уезжала бы с «Ассета» на «Объект».
+    // Под замком фокус не переключается: замок для того и нужен, чтобы панель
+    // держала свой предмет, пока в Assets выбирают файл под перетаскивание.
     if (!locked) {
-        if (entityId != m_lastEntityId && hasEntity) { m_focus = Focus::Object; m_forceFocus = true; }
-        if (assetPath != m_lastAssetPath && hasAsset) { m_focus = Focus::Asset; m_forceFocus = true; }
+        if (entityId != m_lastEntityId && hasEntity) m_focus = Focus::Object;
+        if (assetPath != m_lastAssetPath && hasAsset) m_focus = Focus::Asset;
     }
     m_lastEntityId = entityId;
     m_lastAssetPath = assetPath;
@@ -193,37 +192,14 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
         return;
     }
 
-    // Одна сущность выбрана — вкладки не нужны: они бы только съедали строку.
-    if (hasEntity && !hasAsset) {
-        DrawObjectSection(host);
-    } else if (!hasEntity && hasAsset) {
-        DrawAssetSection(host, assetKind);
-    } else if (ImGui::BeginTabBar("##inspector_tabs", ImGuiTabBarFlags_None)) {
-        // SetSelected ставится РОВНО НА ОДИН КАДР — тот, в котором сменился
-        // выбор. Передавать его каждый кадр, пока m_focus равен вкладке, нельзя:
-        // человек щёлкает по «Ассету», ImGui его открывает, а на следующем кадре
-        // флаг у «Объекта» всё ещё выставлен и утаскивает выбор обратно. Вкладка
-        // выглядела намертво залипшей — ровно так эта панель и сломалась.
-        const bool force = m_forceFocus;
-        m_forceFocus = false;
-        const ImGuiTabItemFlags objFlags = (force && m_focus == Focus::Object)
-                                               ? ImGuiTabItemFlags_SetSelected
-                                               : ImGuiTabItemFlags_None;
-        if (ImGui::BeginTabItem(T("Object" "###Object"), nullptr, objFlags)) {
-            m_focus = Focus::Object;
-            DrawObjectSection(host);
-            ImGui::EndTabItem();
-        }
-        const ImGuiTabItemFlags assetFlags = (force && m_focus == Focus::Asset)
-                                                 ? ImGuiTabItemFlags_SetSelected
-                                                 : ImGuiTabItemFlags_None;
-        if (ImGui::BeginTabItem(T("Asset" "###Asset"), nullptr, assetFlags)) {
-            m_focus = Focus::Asset;
-            DrawAssetSection(host, assetKind);
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
-    }
+    // Фокус мог остаться на том, чего уже нет (объект удалили, файл сняли с
+    // выбора) — тогда показываем то, что есть: пустая панель при живом выборе
+    // читается как поломка.
+    if (m_focus == Focus::Asset && !hasAsset) m_focus = Focus::Object;
+    if (m_focus == Focus::Object && !hasEntity) m_focus = Focus::Asset;
+
+    if (m_focus == Focus::Asset) DrawAssetSection(host, assetKind);
+    else DrawObjectSection(host);
 
     ImGui::End();
 }

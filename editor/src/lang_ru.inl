@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1544.
+// Язык: Русский. Строк: 1542.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2404,8 +2404,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Радиус привязки"},
     {"Snap step for the current mode.\nWhen building from blocks, set it to the block size.",
      "Шаг привязки для текущего режима.\nДля постройки из блоков ставьте его равным размеру блока."},
-    {"Snap steps",
-     "Шаги привязки"},
     {"Snap to edges and centers",
      "Привязка к краям и центрам"},
     {"Snap to edges and centers of neighbours",
@@ -2416,8 +2414,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Привязка к шагу"},
     {"Snap to the grid",
      "Привязка к сетке"},
-    {"Snap to the step",
-     "Привязка к шагу"},
     {"Snapping and its step",
      "Привязка и её шаг"},
     {"Sort order",
