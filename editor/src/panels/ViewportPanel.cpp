@@ -449,13 +449,99 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     ImGuizmo::SetRect(imgPos.x, imgPos.y, avail.x, avail.y);
 
     GameObject selected = host.SelectedObject();
-    // В режиме «только выбор» манипулятора нет: ни ручек на экране, ни
-    // перехвата кликов. Правка коллайдера — исключение: это отдельный
-    // переключатель, и он тянет форму, а не объект.
-    // У управляемой камеры гизмо не показывается: её положение задаёт полёт
-    // вида, и ручки, тянущие то же самое, спорили бы с ним каждый кадр.
-    if (selected.Valid() && selected.Id() != m_pilotId &&
-        (host.GizmoOp() != EditorHost::kGizmoSelectOnly || host.ColliderEditMode())) {
+    // --- ГИЗМО КОЛЛАЙДЕРА — ОТДЕЛЬНЫМ БЛОКОМ, а не веткой внутри гизмо объекта.
+    //
+    // Оно тянет ФОРМУ СТОЛКНОВЕНИЯ, а не объект, и потому работает в любом
+    // режиме инструментов, включая «только выбор». Раньше эта ветка сидела
+    // внутри гизмо объекта и заканчивалась выходом из всей панели — вместе с
+    // правкой коллайдера пропадали строка инструментов, значки невидимых
+    // объектов, гизмо осей и выбор мышью, и выйти из режима было нечем, кроме
+    // клавиши C.
+    // Размеры формы столкновения правились только числами в инспекторе: человек
+    // тянул поле HalfExtents, смотрел на зелёный каркас во вьюпорте, возвращался
+    // к полю. Здесь тот же масштаб, но тянет он ФОРМУ, а не объект — путать их
+    // нельзя: масштаб объекта растягивает и картинку, и коллайдер вместе с ней.
+    bool colliderGizmo = false;
+    if (selected.Valid() && host.ColliderEditMode()) {
+        Scene& scene = host.CurrentScene();
+        const glm::mat4 model = scene.WorldMatrix(selected.Entity());
+        ColliderComponent* col =
+            scene.Registry().try_get<ColliderComponent>(selected.Entity());
+        if (col) {
+            const glm::vec3 wpos = glm::vec3(model[3]);
+            const glm::vec3 sc(glm::length(glm::vec3(model[0])),
+                               glm::length(glm::vec3(model[1])),
+                               glm::length(glm::vec3(model[2])));
+            const float uniform = glm::max(sc.x, glm::max(sc.y, sc.z));
+            // Поворот без масштаба: масштаб уже сидит в размерах формы, и
+            // умножать на него второй раз — раздувать каркас квадратично.
+            glm::mat4 rot = model;
+            for (int k = 0; k < 3; ++k) {
+                const float len = sc[k] > 1e-6f ? sc[k] : 1.0f;
+                rot[k] /= len;
+            }
+            rot[3] = glm::vec4(wpos, 1.0f);
+
+            glm::vec3 size(1.0f);
+            switch (col->Shape) {
+                case sage::physics::ShapeType::Box:
+                    size = col->HalfExtents * sc * 2.0f;
+                    break;
+                case sage::physics::ShapeType::Sphere:
+                    size = glm::vec3(col->Radius * uniform * 2.0f);
+                    break;
+                case sage::physics::ShapeType::Capsule:
+                    size = glm::vec3(col->Radius * uniform * 2.0f,
+                                     (col->HalfHeight * sc.y + col->Radius * uniform) * 2.0f,
+                                     col->Radius * uniform * 2.0f);
+                    break;
+            }
+            size = glm::max(size, glm::vec3(1e-3f));
+            glm::mat4 shape = rot * glm::scale(glm::mat4(1.0f), size);
+
+            if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !host.InPlayMode()) {
+                host.CapturePendingSnapshot();
+            }
+            const float step = host.SnapStepForCurrentOp();
+            const float colliderSnap[3] = {step, step, step};
+            const bool changed = ImGuizmo::Manipulate(
+                glm::value_ptr(activeView), glm::value_ptr(activeProj), ImGuizmo::SCALE,
+                ImGuizmo::LOCAL, glm::value_ptr(shape), nullptr,
+                host.GizmoSnap() ? colliderSnap : nullptr);
+            if (changed && !host.InPlayMode()) {
+                const glm::vec3 out(glm::length(glm::vec3(shape[0])),
+                                    glm::length(glm::vec3(shape[1])),
+                                    glm::length(glm::vec3(shape[2])));
+                // Обратно в ЛОКАЛЬНЫЕ размеры: делим на масштаб объекта,
+                // иначе коллайдер у растянутого родителя рос бы вдвое.
+                const glm::vec3 safe = glm::max(sc, glm::vec3(1e-4f));
+                const float safeU = glm::max(uniform, 1e-4f);
+                switch (col->Shape) {
+                    case sage::physics::ShapeType::Box:
+                        col->HalfExtents = glm::max(out / safe * 0.5f, glm::vec3(1e-3f));
+                        break;
+                    case sage::physics::ShapeType::Sphere:
+                        col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
+                        break;
+                    case sage::physics::ShapeType::Capsule: {
+                        col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
+                        const float half = out.y * 0.5f - col->Radius * safeU;
+                        col->HalfHeight = glm::max(half / safe.y, 0.0f);
+                        break;
+                    }
+                }
+            }
+            if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.CommitPendingSnapshot();
+            m_gizmoWasUsing = ImGuizmo::IsUsing();
+            // Гизмо объекта в этом кадре уже не нужно: тянут форму, а не объект.
+            colliderGizmo = true;
+        }
+    }
+    // Гизмо объекта. В режиме «только выбор» его нет вовсе: ни ручек на экране,
+    // ни перехвата кликов. У управляемой камеры — тоже: её положение задаёт
+    // полёт вида, и ручки, тянущие то же самое, спорили бы с ним каждый кадр.
+    if (selected.Valid() && !colliderGizmo && selected.Id() != m_pilotId &&
+        host.GizmoOp() != EditorHost::kGizmoSelectOnly) {
         Transform& tr = selected.GetTransform();
         // Гизмо работает в МИРОВОМ пространстве (учёт родителей): манипулируем
         // мировой матрицей, результат переводим обратно в локальную через
@@ -464,88 +550,6 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         entt::entity parent = scene.ParentOf(selected.Entity());
         glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
         glm::mat4 model = scene.WorldMatrix(selected.Entity());
-
-        // --- Гизмо КОЛЛАЙДЕРА ------------------------------------------
-        //
-        // Размеры формы столкновения правились только числами в инспекторе:
-        // человек тянул поле HalfExtents, смотрел на зелёный каркас во
-        // вьюпорте, возвращался к полю. Здесь тот же масштаб, но тянет он
-        // ФОРМУ, а не объект — путать их нельзя: масштаб объекта растягивает и
-        // картинку, и коллайдер вместе с ней.
-        if (host.ColliderEditMode()) {
-            ColliderComponent* col =
-                scene.Registry().try_get<ColliderComponent>(selected.Entity());
-            if (col) {
-                const glm::vec3 wpos = glm::vec3(model[3]);
-                const glm::vec3 sc(glm::length(glm::vec3(model[0])),
-                                   glm::length(glm::vec3(model[1])),
-                                   glm::length(glm::vec3(model[2])));
-                const float uniform = glm::max(sc.x, glm::max(sc.y, sc.z));
-                // Поворот без масштаба: масштаб уже сидит в размерах формы, и
-                // умножать на него второй раз — раздувать каркас квадратично.
-                glm::mat4 rot = model;
-                for (int k = 0; k < 3; ++k) {
-                    const float len = sc[k] > 1e-6f ? sc[k] : 1.0f;
-                    rot[k] /= len;
-                }
-                rot[3] = glm::vec4(wpos, 1.0f);
-
-                glm::vec3 size(1.0f);
-                switch (col->Shape) {
-                    case sage::physics::ShapeType::Box:
-                        size = col->HalfExtents * sc * 2.0f;
-                        break;
-                    case sage::physics::ShapeType::Sphere:
-                        size = glm::vec3(col->Radius * uniform * 2.0f);
-                        break;
-                    case sage::physics::ShapeType::Capsule:
-                        size = glm::vec3(col->Radius * uniform * 2.0f,
-                                         (col->HalfHeight * sc.y + col->Radius * uniform) * 2.0f,
-                                         col->Radius * uniform * 2.0f);
-                        break;
-                }
-                size = glm::max(size, glm::vec3(1e-3f));
-                glm::mat4 shape = rot * glm::scale(glm::mat4(1.0f), size);
-
-                if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !host.InPlayMode()) {
-                    host.CapturePendingSnapshot();
-                }
-                const float step = host.SnapStepForCurrentOp();
-                const float colliderSnap[3] = {step, step, step};
-                const bool changed = ImGuizmo::Manipulate(
-                    glm::value_ptr(activeView), glm::value_ptr(activeProj), ImGuizmo::SCALE,
-                    ImGuizmo::LOCAL, glm::value_ptr(shape), nullptr,
-                    host.GizmoSnap() ? colliderSnap : nullptr);
-                if (changed && !host.InPlayMode()) {
-                    const glm::vec3 out(glm::length(glm::vec3(shape[0])),
-                                        glm::length(glm::vec3(shape[1])),
-                                        glm::length(glm::vec3(shape[2])));
-                    // Обратно в ЛОКАЛЬНЫЕ размеры: делим на масштаб объекта,
-                    // иначе коллайдер у растянутого родителя рос бы вдвое.
-                    const glm::vec3 safe = glm::max(sc, glm::vec3(1e-4f));
-                    const float safeU = glm::max(uniform, 1e-4f);
-                    switch (col->Shape) {
-                        case sage::physics::ShapeType::Box:
-                            col->HalfExtents = glm::max(out / safe * 0.5f, glm::vec3(1e-3f));
-                            break;
-                        case sage::physics::ShapeType::Sphere:
-                            col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
-                            break;
-                        case sage::physics::ShapeType::Capsule: {
-                            col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
-                            const float half = out.y * 0.5f - col->Radius * safeU;
-                            col->HalfHeight = glm::max(half / safe.y, 0.0f);
-                            break;
-                        }
-                    }
-                }
-                if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.CommitPendingSnapshot();
-                m_gizmoWasUsing = ImGuizmo::IsUsing();
-                ImGui::End(); // Viewport
-                ImGui::PopStyleVar();
-                return;
-            }
-        }
 
         const bool rectTool = (ImGuizmo::OPERATION)host.GizmoOp() == ImGuizmo::BOUNDS;
 

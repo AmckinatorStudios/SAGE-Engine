@@ -271,7 +271,22 @@ jobs:
             TITLE="SAGE Editor — последняя сборка для Windows"
             # Скользящий релиз: старый удаляем, чтобы ссылка всегда вела на
             # свежую версию, а список релизов не зарастал.
+            #
+            # УДАЛЕНИЕ НА СТОРОНЕ GITHUB НЕ МГНОВЕННО. Сразу за delete создание
+            # успевало упасть на «a release with the same tag name already
+            # exists» — и это не теория: так пропала сборка 13.09, релиз остался
+            # позавчерашним, а работа отчиталась красным уже ПОСЛЕ успешной
+            # сборки. Ждём, пока релиз действительно исчезнет, и только потом
+            # создаём.
             gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              gh release view "$TAG" >/dev/null 2>&1 || break
+              echo "жду, пока старый релиз $TAG исчезнет..."
+              sleep 3
+            done
+            # Тег мог пережить релиз (--cleanup-tag молчит об отказе) — тогда
+            # create спотыкается уже о него.
+            git push --delete origin "$TAG" 2>/dev/null || true
           fi
           # ЧТО ИМЕННО в архиве — в описании релиза. Без этого «свежая сборка»
           # проверяется только на слово: у скачавшего нет способа отличить
@@ -280,11 +295,30 @@ jobs:
           SUBJECT="$(git log -1 --pretty=%s)"
           WHEN="$(git log -1 --date=format:'%d.%m.%Y %H:%M' --pretty=%cd)"
           SHORT="$(git rev-parse --short HEAD)"
-          gh release create "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json \
-            --title "$TITLE" \
-            --notes "$(printf '%s\n\n%s\n\n%s\n%s\n%s' \
-              'Скачайте SageEditor-Windows.zip, распакуйте папку целиком и запустите SageEditor.exe. Устанавливать ничего не нужно.' \
-              'В архиве: редактор, плеер (runtime/), темы оформления и плагин-пример. Готовые проекты-шаблоны ставятся из самого редактора: Окно > Шаблоны проектов.' \
-              "Собрано из: $SHORT — $SUBJECT" \
-              "Дата коммита: $WHEN" \
-              'Если что-то не запускается — рядом с exe появляется sage_editor.log, в нём написана причина.')"
+          NOTES="$(printf '%s\n\n%s\n\n%s\n%s\n%s' \
+            'Скачайте SageEditor-Windows.zip, распакуйте папку целиком и запустите SageEditor.exe. Устанавливать ничего не нужно.' \
+            'В архиве: редактор, плеер (runtime/), темы оформления и плагин-пример. Готовые проекты-шаблоны ставятся из самого редактора: Окно > Шаблоны проектов.' \
+            "Собрано из: $SHORT — $SUBJECT" \
+            "Дата коммита: $WHEN" \
+            'Если что-то не запускается — рядом с exe появляется sage_editor.log, в нём написана причина.')"
+
+          # СОЗДАНИЕ — С ПОВТОРАМИ, и последняя попытка обновляет уже
+          # существующий релиз вместо создания. Молча оставить человека со
+          # старой сборкой хуже, чем не собрать вовсе: скачивают релиз, а не
+          # репозиторий, и всё, что в него не попало, для него не существует.
+          published=""
+          for attempt in 1 2 3; do
+            if gh release create "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json \
+                 --title "$TITLE" --notes "$NOTES"; then
+              published=1
+              break
+            fi
+            echo "попытка $attempt не удалась, повтор через 5 с"
+            sleep 5
+          done
+          if [[ -z "$published" ]]; then
+            echo "создать релиз не вышло — обновляю существующий"
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
+            gh release upload "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json \
+              --clobber
+          fi
