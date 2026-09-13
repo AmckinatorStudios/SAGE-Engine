@@ -1522,6 +1522,17 @@
     "Rotate": "Поворот",
     "Project and scene": "Проект и сцена",
     "Project: ": "Проект: ",
-    "Cylinder with rounded ends: the working shape of a character": "Цилиндр со скруглёнными торцами: рабочая форма персонажа"
+    "Cylinder with rounded ends: the working shape of a character": "Цилиндр со скруглёнными торцами: рабочая форма персонажа",
+    "%s  (x%d)": "%s  (x%d)",
+    "Log": "Сообщения",
+    "Warning": "Предупреждения",
+    "Error": "Ошибки",
+    "Show messages of every level": "Показывать сообщения всех уровней",
+    "Collapse repeats": "Сворачивать повторы",
+    "Scroll to the newest line": "Прокручивать к новым строкам",
+    "Search in console...": "Поиск в консоли…",
+    "Prefab": "Заготовка",
+    "Shader": "Шейдер",
+    "Animation clip": "Клип анимации"
   }
 }

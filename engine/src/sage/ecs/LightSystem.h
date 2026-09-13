@@ -66,6 +66,7 @@ inline entt::entity FindSunEntity(Scene& scene) {
     int sunId = 0;
     auto view = scene.Registry().view<LightComponent, Transform>();
     for (auto e : view) {
+        if (scene.IsHidden(e)) continue; // выключенный источник не светит
         if (view.get<LightComponent>(e).Kind != LightComponent::Type::Directional) continue;
         const IdComponent* id = scene.Registry().try_get<IdComponent>(e);
         const int candidate = id ? id->Id : 0;
@@ -97,6 +98,7 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
     bool sunTaken = false;
     auto view = scene.Registry().view<LightComponent, Transform>();
     for (auto e : view) {
+        if (scene.IsHidden(e)) continue; // выключенный источник не светит
         const LightComponent& lc = view.get<LightComponent>(e);
         // Мировые позиция/направление (учёт иерархии родителей).
         glm::mat4 world = scene.WorldMatrix(e);

@@ -47,9 +47,38 @@ struct AssetStyle {
     const char* Icon;
 };
 
+std::string ToUpper(std::string s) {
+    for (char& c : s) c = (char)std::toupper((unsigned char)c);
+    return s;
+}
+
 std::string ToLower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
+}
+
+// ЧТО ЭТО ЗА ФАЙЛ — одним словом, одинаково для всех расширений одного предмета.
+// Расширение отвечает на вопрос «чем открыть», а человек в дереве проекта ищет
+// предмет: модель, текстуру, звук. Для .obj, .gltf, .glb, .fbx и .sagemesh ответ
+// один и тот же.
+std::string KindLabel(const fs::path& path, bool isDir) {
+    if (isDir) return T("Folder");
+    const std::string ext = ToLower(path.extension().string());
+    if (ext == ".sage") return T("Scene");
+    if (ext == ".sageprefab") return T("Prefab");
+    if (ext == ".sagemat") return T("Material");
+    if (ext == ".lua") return T("Script");
+    if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
+        ext == ".bbmodel" || ext == ".sagemesh")
+        return T("Model");
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
+        ext == ".hdr" || ext == ".sagetex")
+        return T("Texture");
+    if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return T("Sound");
+    if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return T("Shader");
+    if (ext == ".sageanim") return T("Animation clip");
+    if (ext.empty()) return T("File");
+    return ToUpper(ext.substr(1));
 }
 
 AssetStyle StyleForPath(const fs::path& path, bool isDir) {
@@ -112,7 +141,11 @@ constexpr float kSwatchH = kTileW - kTileInset;
 // строки», но рисовалась всегда одна: каждая карточка несла полторы строки
 // пустоты, и сетка выглядела рыхлой.
 constexpr float kLabelH = 22.0f;
-constexpr float kTileH = kSwatchH + kLabelH + 6.0f; // + внутренний отступ
+// Под подписью ДВЕ строки: имя и тип. Тип — это второй вопрос к файлу («что это
+// вообще такое»), и раньше на него отвечали только трёхбуквенная метка в углу
+// обложки и значок. Для .obj, .gltf и .sagemesh метка разная, а предмет один —
+// модель; словом это сказано один раз и одинаково.
+constexpr float kTileH = kSwatchH + kLabelH * 2.0f + 8.0f;
 constexpr float kTileSpacing = 12.0f;
 
 } // namespace
@@ -251,6 +284,76 @@ uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
     return id;
 }
 
+void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int depth) {
+    std::error_code ec;
+    std::vector<fs::path> subdirs;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (entry.is_directory(ec)) subdirs.push_back(entry.path());
+    }
+    std::sort(subdirs.begin(), subdirs.end());
+
+    fs::path& cwd = host.AssetsCwd();
+    const bool current = fs::weakly_canonical(cwd, ec) == fs::weakly_canonical(dir, ec);
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (subdirs.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    if (current) flags |= ImGuiTreeNodeFlags_Selected;
+    // Корень раскрыт сразу: свёрнутое дерево из одной строки не отвечает ни на
+    // один вопрос и требует лишнего щелчка каждый раз.
+    if (depth == 0) ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+
+    ImGui::PushID(dir.string().c_str());
+    const ImVec2 rowPos = ImGui::GetCursorScreenPos();
+    const float indent = ImGui::GetTreeNodeToLabelSpacing();
+    const bool open = ImGui::TreeNodeEx("##folder", flags, "  %s",
+                                        dir.filename().string().c_str());
+    // Значок папки — её цветом (тем же, что в сетке): метка обязана означать
+    // одно и то же в обоих местах.
+    {
+        const float size = ImGui::GetTextLineHeight() * 0.86f;
+        glm::vec3 tint(0.85f, 0.68f, 0.32f);
+        sage::editor::foldercolors::Get(dir, tint);
+        EditorIcons::Overlay(rowPos.x + indent - size * 1.15f,
+                             rowPos.y + (ImGui::GetTextLineHeight() - size) * 0.5f, size,
+                             subdirs.empty() ? "folder" : "folder-full", tint);
+    }
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) cwd = dir;
+    // Бросок файла на папку дерева — перенос в неё: то же, что и в сетке.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            MoveIntoFolder(host, dropped, dir);
+        }
+        ImGui::EndDragDropTarget();
+    }
+    if (open && !subdirs.empty()) {
+        for (const fs::path& sub : subdirs) DrawFolderNode(host, sub, depth + 1);
+        ImGui::TreePop();
+    }
+    ImGui::PopID();
+}
+
+void AssetsPanel::DrawFolderTree(EditorHost& host) {
+    ImGui::BeginChild("##assets_tree", ImVec2(m_treeWidth, 0), ImGuiChildFlags_Borders);
+    DrawFolderNode(host, host.CurrentProject().Dir(), 0);
+    ImGui::EndChild();
+
+    // Разделитель: ширину дерева правят перетаскиванием. Не настройка в меню —
+    // её меняют на глаз, пока смотрят на имена, которые не помещаются.
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::InvisibleButton("##assets_split", ImVec2(6.0f, ImGui::GetContentRegionAvail().y));
+    if (ImGui::IsItemActive()) m_treeWidth += ImGui::GetIO().MouseDelta.x;
+    m_treeWidth = std::clamp(m_treeWidth, 120.0f, 420.0f);
+    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            ImVec2((a.x + b.x) * 0.5f - 1.0f, a.y), ImVec2((a.x + b.x) * 0.5f + 1.0f, b.y),
+            ImGui::GetColorU32(ImGuiCol_NavHighlight));
+    }
+    ImGui::SameLine(0.0f, 0.0f);
+}
+
 void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     AssetStyle style = StyleForPath(path, isDir);
     // Метка папки перекрывает общий жёлтый: две сотни одинаковых значков —
@@ -354,6 +457,38 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // подписям было тяжелее, чем по цветной мозаике плашек.
     ImU32 textCol = ImGui::GetColorU32(ImGuiCol_Text, isSelected || hovered ? 1.0f : 0.85f);
     dl->AddText(labelPos, textCol, label.c_str());
+
+    // Вторая строка — ЧТО ЭТО. Одним словом и одинаково для всех расширений
+    // одного предмета: .obj, .gltf и .sagemesh — «модель».
+    {
+        const std::string kind = KindLabel(path, isDir);
+        const std::string kindShown = TruncateToWidth(kind, kTileW - 24.0f);
+        const ImVec2 kindSize = ImGui::CalcTextSize(kindShown.c_str());
+        dl->AddText(ImVec2(std::floor(cursor.x + (kTileW - kindSize.x) * 0.5f),
+                           labelPos.y + kLabelH),
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled), kindShown.c_str());
+    }
+
+    // «Ещё» — та же правая кнопка, но нажимаемая мышью без правой кнопки: на
+    // ноутбуке и планшете правого клика может не быть вовсе, а действия над
+    // файлом (переименовать, удалить, цвет папки) больше нигде не живут.
+    {
+        const float dots = ImGui::GetTextLineHeight();
+        const ImVec2 at(tileMax.x - dots - 4.0f, tileMax.y - dots - 3.0f);
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const bool overDots = mouse.x >= at.x && mouse.x <= at.x + dots && mouse.y >= at.y &&
+                              mouse.y <= at.y + dots && hovered;
+        if (hovered || isSelected) {
+            EditorIcons::Overlay(at.x, at.y, dots, "list",
+                                 overDots ? glm::vec3(0.95f, 0.78f, 0.30f)
+                                          : glm::vec3(0.55f, 0.57f, 0.62f));
+        }
+        if (overDots && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            m_selected = path;
+            if (std::find(m_multi.begin(), m_multi.end(), path) == m_multi.end()) m_multi = {path};
+            ImGui::OpenPopup("##tile_ctx");
+        }
+    }
 
     // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.
     // Путь передаётся строкой с завершающим нулём — принимающая сторона получает
@@ -1145,6 +1280,8 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // Какой проект обслуживаем (метки папок лежат в нём). Дёшево: перечитывает
     // файл только при СМЕНЕ проекта.
     sage::editor::foldercolors::SetProject(host.CurrentProject().Dir());
+
+    DrawFolderTree(host);
 
     ImGui::BeginChild("##assets_scroll");
     namespace rectselect = sage::editor::rectselect;
