@@ -1121,6 +1121,15 @@ void EditorLayer::OnRender() {
     } // отдаёт view/proj для гизмо/пикинга
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 
+    // Превью ВЫБРАННОЙ камеры — последним и только по запросу вьюпорта: это
+    // ещё один полный проход сцены, и платить за него, когда карточки на
+    // экране нет, не за что.
+    if (m_cameraPreviewId >= 0) {
+        GameObject cam = m_scene->Get(m_cameraPreviewId);
+        if (cam.Valid()) m_renderer.RenderCameraPreview(*m_scene, env, cfg, cam.Entity());
+        m_cameraPreviewId = -1;
+    }
+
     // Снимок обложки шаблона делается ЗДЕСЬ и только здесь: игровой кадр
     // существует ровно после RenderGame, а до неё это прошлогодняя картинка.
     if (!m_coverShotPath.empty()) {

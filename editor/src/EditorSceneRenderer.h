@@ -126,6 +126,23 @@ public:
     // GameApplied() остаётся false). Всегда Shaded + пост-обработка.
     void RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg);
 
+    // --- ПРЕВЬЮ ВЫБРАННОЙ КАМЕРЫ -------------------------------------------
+    //
+    // Отдельный маленький кадр от камеры-сущности, которую сейчас выбрали. Не
+    // панель Game: та показывает Primary-камеру, то есть ту, с которой игра
+    // начнётся, а выбранная камера — это чаще всего ВТОРАЯ, третья, камера
+    // катсцены или вид от лица героя. Навести её, не видя, что в неё попадает,
+    // нельзя: положение камеры целиком определяется её кадром, а в сцене она
+    // выглядит проволочной пирамидкой, по которой кадр не прочитать.
+    //
+    // Без гизмо, без сетки и без каймы выделения — это кадр, а не рабочее
+    // место: всё перечисленное в нём было бы враньём о том, что увидит игрок.
+    void SetCameraPreviewSize(int w, int h);
+    void RenderCameraPreview(Scene& scene, const LightingEnvironment& env,
+                             const sage::EngineConfig& cfg, entt::entity camera);
+    // Текстура превью (0 — кадра нет: камера не выбрана или её больше нет).
+    uint64_t CameraPreviewTexture() const;
+
     // Текстуры для ImGui-панелей: после PostFX — LDR-выход, иначе HDR-цвет FBO.
     uint64_t ViewportTexture() const;
     // Текстура конкретного вида раскладки.
@@ -189,6 +206,10 @@ private:
     // Номер вида для панели Game: сразу за слотами вьюпорта, чтобы ни с одним
     // из них не совпасть.
     static constexpr int kGameViewId = kMaxViews;
+    // И свой номер у превью камеры — по той же причине: отсечение и батчи ведут
+    // состояние ПО ВИДУ, и общий номер с панелью Game означал бы, что два кадра
+    // из разных точек затирают друг другу список видимого.
+    static constexpr int kPreviewViewId = kMaxViews + 1;
     // Аутлайн выделения — робастный пост-проход: силуэт объекта в масочный
     // буфер, затем краевая дилатация ПОСТОЯННОЙ ширины в пикселях поверх кадра.
     // Работает для любых мешей (модели/плоскости/невыпуклые), в отличие от
@@ -244,4 +265,9 @@ private:
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
     int m_gameW = 1280, m_gameH = 720;
+    // Превью выбранной камеры: свой буфер и свой размер (см. RenderCameraPreview).
+    std::optional<Framebuffer> m_previewFbo, m_previewPostFbo;
+    int m_previewW = 320, m_previewH = 180;
+    bool m_previewValid = false;     // в буфере кадр ЭТОГО кадра, а не прошлогодний
+    bool m_previewPostApplied = false;
 };

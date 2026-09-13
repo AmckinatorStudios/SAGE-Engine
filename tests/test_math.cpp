@@ -216,3 +216,78 @@ TEST(Math_transform_matrix_moves_points_the_same_way) {
         CHECK_NEAR(got.z, want.z, 1e-4);
     }
 }
+
+// --- Transform::SetFromMatrix: разложение обратно в поля --------------------
+//
+// Матрица приходит оттуда, где положение задают НЕ поля: гизмо тянет мировую
+// матрицу, управление камерой от её лица ставит объект по базису вида. Важно
+// не то, какие именно углы получатся (у одного поворота их несколько), а то,
+// что GetMatrix соберёт из них ту же матрицу обратно: иначе объект прыгает при
+// первом же касании.
+
+TEST(Transform_set_from_matrix_round_trips) {
+    const glm::vec3 angles[] = {
+        {0.0f, 0.0f, 0.0f},     {12.0f, 34.0f, 56.0f},  {-80.0f, 170.0f, 25.0f},
+        {45.0f, -45.0f, 90.0f}, {5.0f, -175.0f, -30.0f}, {-60.0f, 89.0f, 120.0f},
+    };
+    for (const glm::vec3& a : angles) {
+        Transform src;
+        src.Position = glm::vec3(1.5f, -2.0f, 7.25f);
+        src.Rotation = a;
+        src.Scale = glm::vec3(2.0f, 0.5f, 1.25f);
+
+        Transform back;
+        back.SetFromMatrix(src.GetMatrix());
+
+        const glm::mat4 m0 = src.GetMatrix();
+        const glm::mat4 m1 = back.GetMatrix();
+        for (int c = 0; c < 4; ++c)
+            for (int r = 0; r < 4; ++r) CHECK_NEAR(m1[c][r], m0[c][r], 1e-3);
+    }
+}
+
+TEST(Transform_set_from_matrix_keeps_camera_forward) {
+    // Базис вида редактора, как его ставит управление камерой: столбцы —
+    // «вправо», «вверх» и МИНУС «вперёд» (камера смотрит вдоль своего -Z).
+    const glm::vec3 fwd = glm::normalize(glm::vec3(0.4f, -0.3f, -0.86f));
+    const glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0, 1, 0)));
+    const glm::vec3 up = glm::normalize(glm::cross(right, fwd));
+
+    glm::mat4 world(1.0f);
+    world[0] = glm::vec4(right, 0.0f);
+    world[1] = glm::vec4(up, 0.0f);
+    world[2] = glm::vec4(-fwd, 0.0f);
+    world[3] = glm::vec4(3.0f, 4.0f, 5.0f, 1.0f);
+
+    Transform tr;
+    tr.SetFromMatrix(world);
+
+    // Камера, поставленная так, смотрит ТУДА ЖЕ, куда смотрел вид.
+    const glm::vec3 got =
+        glm::normalize(glm::vec3(tr.GetMatrix() * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+    CHECK_NEAR(got.x, fwd.x, 1e-3);
+    CHECK_NEAR(got.y, fwd.y, 1e-3);
+    CHECK_NEAR(got.z, fwd.z, 1e-3);
+    CHECK_NEAR(tr.Position.x, 3.0f, 1e-4);
+    CHECK_NEAR(tr.Position.y, 4.0f, 1e-4);
+    CHECK_NEAR(tr.Position.z, 5.0f, 1e-4);
+}
+
+TEST(Transform_set_from_matrix_survives_straight_down) {
+    // Взгляд строго вниз — вырожденный случай (gimbal lock): пара углов
+    // перестаёт различаться, и наивное разложение даёт NaN или произвольный
+    // разворот вокруг вертикали. Камеру, смотрящую в пол, ставят постоянно.
+    glm::mat4 world(1.0f);
+    world[0] = glm::vec4(1, 0, 0, 0);
+    world[1] = glm::vec4(0, 0, -1, 0);   // «вверх» камеры смотрит в -Z
+    world[2] = glm::vec4(0, 1, 0, 0);    // -Z камеры смотрит в -Y, то есть вниз
+    world[3] = glm::vec4(0, 10, 0, 1);
+
+    Transform tr;
+    tr.SetFromMatrix(world);
+    const glm::vec3 got =
+        glm::normalize(glm::vec3(tr.GetMatrix() * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+    CHECK_NEAR(got.x, 0.0f, 1e-3);
+    CHECK_NEAR(got.y, -1.0f, 1e-3);
+    CHECK_NEAR(got.z, 0.0f, 1e-3);
+}

@@ -1,4 +1,5 @@
 #pragma once
+#include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
 class Scene;
@@ -24,5 +25,11 @@ struct CameraFrame {
 // HasPrimary=false, если камеры нет — вызывающий решает, что показать (редактор
 // рисует подсказку, рантайм — запасной вид с явным предупреждением в лог).
 CameraFrame PrimaryCameraFrame(Scene& scene, float aspect);
+
+// Кадр от ЗАДАННОЙ камеры-сущности. Тот же расчёт, что у Primary: превью
+// выбранной камеры в редакторе обязано показывать ровно то, что покажет игра,
+// а два разных расчёта «куда смотрит камера» разошлись бы на первом же повороте
+// родителя. HasPrimary=false, если у сущности нет CameraComponent.
+CameraFrame CameraFrameFor(Scene& scene, entt::entity camera, float aspect);
 
 } // namespace sage::ecs

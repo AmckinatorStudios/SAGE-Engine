@@ -44,6 +44,10 @@ ICONS = {
     "world": "world",
     # Многоточие — «здесь есть ещё»: общепринятый знак спрятанного меню.
     "dots": "dots",
+    # «Взять управление» — джойстик. Ни камера (она уже стоит в заголовке
+    # карточки), ни стрелки перемещения (это гизмо) здесь не годятся: кнопка
+    # означает не «камера» и не «двигать», а «рулить этим отсюда».
+    "pilot": "device-gamepad",
     "grid": "grid-dots", "wire": "vector-triangle",
     "cube": "cube", "sphere": "sphere", "light": "bulb", "sun": "sun", "camera": "camera",
     "script": "file-code", "particles": "sparkles", "anim": "walk", "ik": "body-scan",

@@ -210,6 +210,12 @@ public:
         }
     }
     uint64_t ViewTexture(int slot) const override { return m_renderer.ViewportTexture(slot); }
+
+    void RequestCameraPreview(int entityId, int w, int h) override {
+        m_cameraPreviewId = entityId;
+        if (entityId >= 0) m_renderer.SetCameraPreviewSize(w, h);
+    }
+    uint64_t CameraPreviewTexture() const override { return m_renderer.CameraPreviewTexture(); }
     bool OpenFileInSystemEditor(const std::filesystem::path& path, int line = 0) override;
     void PickAtViewport(float u, float v, bool additive = false) override;
     bool DropAssetAtViewport(const glm::mat4& view, const glm::mat4& proj, float u, float v,
@@ -481,6 +487,10 @@ private:
     // Запросы мультивьюпорта: панель раскладывает, рендер исполняет в начале
     // следующего кадра.
     ViewRequest m_viewRequests[kMaxViews];
+    // Чью камеру показывать карточкой превью в этом кадре (-1 — ничью).
+    // Сбрасывается сразу после отрисовки: запрос живёт один кадр (см.
+    // EditorHost::RequestCameraPreview).
+    int m_cameraPreviewId = -1;
     int m_viewCount = 1;
     bool m_showProfiler = false;
     bool m_showIconSheet = false; // страница со всеми иконками (Window > Icon sheet)

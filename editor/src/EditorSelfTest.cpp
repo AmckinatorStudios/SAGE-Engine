@@ -312,7 +312,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability, "
+                               << "render-stability + camera-preview, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -3788,6 +3788,40 @@ bool EditorLayer::SelfTestRenderStability() {
                             << " кадров прибавилось GPU-объектов: " << growth
                             << " — рендер течёт покадрово";
         ok = false;
+    }
+
+    // --- ПРЕВЬЮ ВЫБРАННОЙ КАМЕРЫ: кадр правда рисуется ---------------------
+    //
+    // Проверяется весь путь целиком — расчёт кадра камеры, проход сцены, отдача
+    // текстуры, — потому что ломается он молча: карточка в углу остаётся чёрной
+    // или показывает прошлую камеру, а ни сборка, ни остальные тесты этого не
+    // замечают.
+    if (ok) {
+        GameObject cam = m_scene->CreateObject("SelftestPreviewCam");
+        cam.GetTransform().Position = {0.0f, 2.0f, 6.0f};
+        m_scene->Registry().emplace<CameraComponent>(cam.Entity());
+
+        LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+        m_renderer.SetCameraPreviewSize(160, 90);
+        m_renderer.RenderCameraPreview(*m_scene, env, cfg, cam.Entity());
+        if (m_renderer.CameraPreviewTexture() == 0) {
+            LOG_ERROR("Editor") << "SELFTEST: превью выбранной камеры не дало кадра";
+            ok = false;
+        }
+
+        // У сущности БЕЗ камеры превью обязано исчезнуть, а не остаться от
+        // прошлого показа: старый кадр в карточке — это ложь о том, куда
+        // смотрит выбранный объект.
+        if (ok) {
+            GameObject cube = m_scene->CreateObject("SelftestPreviewCube");
+            m_renderer.RenderCameraPreview(*m_scene, env, cfg, cube.Entity());
+            if (m_renderer.CameraPreviewTexture() != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: превью осталось от прошлой камеры";
+                ok = false;
+            }
+            m_scene->RemoveObject(cube.Id());
+        }
+        m_scene->RemoveObject(cam.Id());
     }
 
     m_scene->RemoveObject(fx.Id());

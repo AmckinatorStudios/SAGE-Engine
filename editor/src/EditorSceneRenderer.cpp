@@ -734,6 +734,70 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     device.BindDefaultFramebuffer();
 }
 
+void EditorSceneRenderer::SetCameraPreviewSize(int w, int h) {
+    // Нижняя граница — чтобы буфер не стал вырожденным, верхняя — чтобы превью
+    // не превратилось во второй полноразмерный вьюпорт: это карточка в углу, и
+    // каждый её пиксель стоит прохода сцены.
+    m_previewW = std::clamp(w, 64, 960);
+    m_previewH = std::clamp(h, 36, 540);
+}
+
+uint64_t EditorSceneRenderer::CameraPreviewTexture() const {
+    if (!m_previewValid) return 0;
+    if (m_previewPostApplied && m_previewPostFbo) return m_previewPostFbo->NativeColorTexture();
+    return m_previewFbo ? m_previewFbo->NativeColorTexture() : 0;
+}
+
+// Кадр ВЫБРАННОЙ камеры — тем же хелпером, что и панель Game и собранная игра
+// (sage::ecs::CameraFrameFor). Второй способ посчитать «куда смотрит камера»
+// разошёлся бы с игрой на первом же повёрнутом родителе, а превью для того и
+// нужно, чтобы ему верили.
+void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnvironment& env,
+                                              const sage::EngineConfig& cfg,
+                                              entt::entity camera) {
+    m_previewValid = false;
+    m_previewPostApplied = false;
+    if (m_previewW < 8 || m_previewH < 8) return;
+
+    const float aspect = (float)m_previewW / (float)std::max(m_previewH, 1);
+    sage::ecs::CameraFrame frame = sage::ecs::CameraFrameFor(scene, camera, aspect);
+    if (!frame.HasPrimary) return;   // не камера (или сущности уже нет)
+
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+    EnsureFramebuffer(m_previewFbo, m_previewW, m_previewH, sage::render::SceneSamples(cfg));
+    m_previewFbo->Bind();
+    const glm::vec3 clear = sage::render::SceneClearColor(env);
+    device.SetClearColor(clear.r, clear.g, clear.b, 1.0f);
+    device.Clear();
+
+    // ТЕНИ БЕРУТСЯ ТЕ ЖЕ, что построил вьюпорт этим кадром, и заново под эту
+    // камеру не подгоняются. Подгонка — общая для кадра (солнце одно на сцену),
+    // и превью размером с почтовую марку забрало бы карту у вьюпорта, где
+    // работают: тени поехали бы в главном окне ради теней в углу. Ошибка
+    // выборки в превью стоит куда меньше.
+    DrawSky(env, frame.View, frame.Proj);
+    DrawLit(scene, env, frame.View, frame.Proj, frame.Position, /*shadingMode=*/0,
+            /*wireframe=*/false, /*viewId=*/kPreviewViewId);
+    m_particles->DrawFromView(frame.View, frame.Proj);
+    m_previewFbo->Resolve();
+
+    // Пост-обработка — как в игре: превью обещает игровой кадр, а не «сцену без
+    // эффектов». Объёмного света и блика здесь нет намеренно: два лишних
+    // полноэкранных прохода ради картинки в углу.
+    if (cfg.PostProcessing && PostWorks()) {
+        EnsureFramebuffer(m_previewPostFbo, m_previewW, m_previewH);
+        m_previewPostFbo->Resize(m_previewW, m_previewH);
+        m_postfx->Render(m_previewFbo->ColorTexture(), m_previewFbo->DepthTexture(),
+                         m_previewFbo->Width(), m_previewFbo->Height(), frame.Proj, frame.View,
+                         FxFromConfig(cfg), /*output=*/&*m_previewPostFbo, 0, 0, m_previewW,
+                         m_previewH);
+        m_previewPostApplied = true;
+    }
+
+    device.BindDefaultFramebuffer();
+    m_previewValid = true;
+}
+
 void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg) {
     // Кадр от Primary-камеры сцены — ЧЕРЕЗ ТОТ ЖЕ ХЕЛПЕР, что и собранная игра
     // (sage::ecs::PrimaryCameraFrame): превью Game-панели = реальный вид в игре.

@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 
 #include <glm/glm.hpp>
@@ -59,5 +60,48 @@ struct Transform {
         m[3][2] = Position.z;
         m[3][3] = 1.0f;
         return m;
+    }
+
+    // Обратное GetMatrix: матрица -> Position/Rotation/Scale.
+    //
+    // ЗАЧЕМ ЭТО В ДВИЖКЕ, А НЕ В РЕДАКТОРЕ. Разложить матрицу обратно нужно
+    // всюду, где положение приходит НЕ из полей: гизмо тянет мировую матрицу,
+    // управление камерой от её лица ставит объект по базису вида, физика
+    // возвращает тело после симуляции. Порядок углов обязан совпадать с
+    // GetMatrix (T*Rx*Ry*Rz*S) — разложение «вообще» (например, декомпозиция
+    // ImGuizmo, у неё другой порядок) даёт ДРУГИЕ углы, и объект прыгает при
+    // первом же касании. Один раз здесь, рядом со сборкой матрицы, — и спорить
+    // двум реализациям не о чем.
+    void SetFromMatrix(const glm::mat4& m) {
+        Position = glm::vec3(m[3]);
+
+        glm::vec3 scale(glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])),
+                        glm::length(glm::vec3(m[2])));
+        scale = glm::max(scale, glm::vec3(1e-6f));   // защита от вырожденного масштаба
+        Scale = scale;
+
+        glm::mat4 rot(1.0f);
+        rot[0] = glm::vec4(glm::vec3(m[0]) / scale.x, 0.0f);
+        rot[1] = glm::vec4(glm::vec3(m[1]) / scale.y, 0.0f);
+        rot[2] = glm::vec4(glm::vec3(m[2]) / scale.z, 0.0f);
+
+        // Углы Эйлера XYZ из матрицы поворота — ровно то разложение, из которого
+        // GetMatrix соберёт ту же матрицу обратно.
+        constexpr float kRad2Deg = 57.29577951308232087680f;
+        const float sy = std::min(std::max(rot[2][0], -1.0f), 1.0f);
+        const float cy = std::sqrt(std::max(0.0f, 1.0f - sy * sy));
+        float rx, ry, rz;
+        ry = std::asin(sy);
+        if (cy > 1e-6f) {
+            rx = std::atan2(-rot[2][1], rot[2][2]);
+            rz = std::atan2(-rot[1][0], rot[0][0]);
+        } else {
+            // Взгляд строго вдоль оси: поворот вокруг X и Z становится одним и
+            // тем же движением (gimbal lock). Отдаём весь поворот X, иначе
+            // atan2 от нулей вернул бы произвольные углы.
+            rx = std::atan2(rot[1][2], rot[1][1]);
+            rz = 0.0f;
+        }
+        Rotation = glm::vec3(rx, ry, rz) * kRad2Deg;
     }
 };

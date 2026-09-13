@@ -80,6 +80,11 @@ Window::Window(int width, int height, const std::string& title, Params params)
 #endif
     glfwWindowHint(GLFW_RESIZABLE, params.Resizable ? GLFW_TRUE : GLFW_FALSE);
     if (params.Hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    // Развернуть — ПОДСКАЗКОЙ ДО СОЗДАНИЯ, а не glfwMaximizeWindow после.
+    // Разворот после создания даёт видимый прыжок: окно успевает появиться в
+    // заказанном размере, отрисовать первый кадр и только потом растянуться.
+    if (params.Maximized && params.Mode == sage::WindowMode::Windowed && !params.Hidden)
+        glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     // sRGB-способный экранный буфер: позволяет включать аппаратную гамма-
     // коррекцию (GraphicsDevice::SetSRGBWrite) при рендере сцены напрямую в
     // экран без пост-процесса. Если драйвер не умеет — хинт игнорируется.
@@ -117,10 +122,16 @@ Window::Window(int width, int height, const std::string& title, Params params)
             "устарел или запуск идёт через удалённый рабочий стол / виртуальную машину без "
             "3D-ускорения. Точная причина — строкой GLFW в логе.");
     }
-    LOG_INFO("Window") << "Окно создано: " << createW << "x" << createH
-                       << ", контекст OpenGL 3.3 получен";
+    // Размер берём У ОКНА, а не из заказанного: развёрнутое окно получает
+    // размер рабочей области монитора, и запомненные 1600x900 разъехались бы с
+    // настоящим кадром — вьюпорт считал бы по ним лучи пикинга. По этой же
+    // причине в лог идёт ФАКТИЧЕСКИЙ размер: заказанный отвечает не на тот
+    // вопрос, когда разбираешься, почему картинка не того размера.
+    glfwGetFramebufferSize(m_handle, &createW, &createH);
     m_width = createW;
     m_height = createH;
+    LOG_INFO("Window") << "Окно создано: " << createW << "x" << createH
+                       << ", контекст OpenGL 3.3 получен";
 
     glfwMakeContextCurrent(m_handle);
     glfwSwapInterval(params.VSync ? 1 : 0); // вертикальная синхронизация
