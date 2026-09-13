@@ -208,9 +208,13 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     // читает его тем же взглядом, каким смотрит на «Play».
     ImGui::SameLine(0.0f, ui.SpacingMD);
     CenterY(row);
+    // Подпись и значок — ТЕ ЖЕ, что в строке инструментов вьюпорта
+    // (ViewportTools.cpp): состояние одно, и называться в двух местах разными
+    // словами («Мировое» здесь и «Глобально» там) оно не имеет права — это
+    // читается как две разные настройки.
     const bool local = host.GizmoSpace() == EditorGizmoSpace::Local;
-    if (EditorIcons::Button("universal", local ? T("Local") : T("World"),
-                            T("Gizmo axes: along the object (Local) or along the world (World)"))) {
+    if (EditorIcons::Button(local ? "cube" : "world", local ? T("Local") : T("Global"),
+                            T("Which axes the gizmo works in"))) {
         host.GizmoSpace() = local ? EditorGizmoSpace::World : EditorGizmoSpace::Local;
     }
     ImGui::SameLine(0.0f, ui.SpacingXS);

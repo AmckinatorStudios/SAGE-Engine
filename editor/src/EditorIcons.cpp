@@ -161,7 +161,9 @@ void DrawAt(ImDrawList* dl, ImVec2 pos, float size, const char* icon, ImU32 colo
 // как формы выше.
 const char* const kNames[] = {
     "play", "pause", "stop", "step",
+    "select",
     "move", "rotate", "scale", "universal", "rect", "align", "drop",
+    "world", "dots",
     "grid", "wire",
     "cube", "sphere", "light", "sun", "camera", "script", "particles", "anim", "ik", "probe",
     "network",
@@ -170,7 +172,7 @@ const char* const kNames[] = {
     "shader", "audio",
     "model",
     "up", "refresh", "folder-plus", "search", "clock", "list", "import", "pencil",
-    "undo", "redo", "capsule",
+    "undo", "redo", "capsule", "cone",
     "code", "question", "layout", "gear",
     "magnet",
     "warn", "error", "info", "debug",
@@ -366,6 +368,12 @@ void Overlay(float x, float y, float size, const char* icon, const glm::vec3& co
     // Ни курсора, ни Dummy: рисунок ложится в список отрисовки окна, а «последний
     // элемент» ImGui остаётся тем, что подали до вызова.
     DrawAt(ImGui::GetWindowDrawList(), ImVec2(x, y), size, icon, Col(Resolve(color)));
+}
+
+void Overlay(ImDrawList* dl, float x, float y, float size, const char* icon,
+             const glm::vec3& color) {
+    if (!dl) return;
+    DrawAt(dl, ImVec2(x, y), size, icon, Col(Resolve(color)));
 }
 
 void DrawSheet(bool* open) {

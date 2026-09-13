@@ -218,7 +218,6 @@ private:
     // одиночный вьюпорт, самый частый случай, не должен платить за раскладку,
     // которой не пользуются.
     std::optional<Framebuffer> m_extraFbo[kMaxViews], m_extraPostFbo[kMaxViews];
-    bool m_extraPostApplied[kMaxViews] = {false, false, false, false};
     int m_extraW[kMaxViews] = {0, 0, 0, 0};
     int m_extraH[kMaxViews] = {0, 0, 0, 0};
     std::optional<Framebuffer> m_outlineMask;            // силуэт выделенного объекта (аутлайн)
@@ -229,7 +228,7 @@ private:
     std::optional<sage::render::PostFX> m_postfx, m_gamePostfx;
     std::optional<sage::render::Volumetrics> m_volumetrics;
     std::optional<sage::render::LensFlare> m_lensFlare;
-    bool m_postApplied = false, m_gamePostApplied = false;
+    bool m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
     std::optional<SkyRenderer> m_sky;
     // Отражения вьюпорта. Свои, а не общие с рантаймом: карта окружения

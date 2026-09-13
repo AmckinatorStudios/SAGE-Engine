@@ -45,7 +45,12 @@ struct State {
 // pivot — точка, вокруг которой крутить (обычно центр внимания вьюпорта).
 // Возвращает true, если мышь занята гизмо: тогда вьюпорт не должен ни выбирать
 // объекты, ни начинать рамку выделения.
-bool Draw(State& state, Camera& camera, const ImVec2& viewMin, const ImVec2& viewMax,
-          const glm::vec3& pivot, float dt);
+//
+// dl — список отрисовки ТОГО ОКНА, в котором лежит картинка сцены. Не «список
+// текущего окна»: картинка вьюпорта живёт в дочернем окне ImGui, а дочерние
+// окна выводятся ПОСЛЕ родительского. Гизмо, поданное в список родителя,
+// рисовалось под кадром сцены — то есть не было видно вовсе.
+bool Draw(ImDrawList* dl, State& state, Camera& camera, const ImVec2& viewMin,
+          const ImVec2& viewMax, const glm::vec3& pivot, float dt);
 
 } // namespace sage::editor::viewgizmo

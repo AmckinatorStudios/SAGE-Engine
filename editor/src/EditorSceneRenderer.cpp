@@ -299,6 +299,18 @@ Shader& OutlineEdgeShader() {
     static Shader* s = new Shader(Shader::FromSource(kOutlineEdgeVert, kOutlineEdgeFrag, "OutlineEdge"));
     return *s;
 }
+
+// Возврат готового кадра в буфер сцены — один полноэкранный треугольник.
+const char* kCopyFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uSrc;
+void main() { FragColor = vec4(texture(uSrc, vUV).rgb, 1.0); }
+)";
+Shader& CopyShader() {
+    static Shader* s = new Shader(Shader::FromSource(kOutlineEdgeVert, kCopyFrag, "EditorCopy"));
+    return *s;
+}
 } // namespace
 
 // Рисует силуэт выбранного меша сплошным белым в масочный буфер (без теста
@@ -582,45 +594,16 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     GameObject selectedObj = scene.Get(selectedId);
 
-    // Гизмо-графика (DebugDraw) — в тот же буфер, с тестом глубины (объекты заслоняют сетку).
-    if (showGrid) m_debugDraw->InfiniteGrid(eye, {0.26f, 0.27f, 0.31f});
-    DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
-    if (selectedObj.Valid()) {
-        glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());
-        m_debugDraw->Axes(world, 1.4f);
-        if (const LightComponent* light = scene.Registry().try_get<LightComponent>(selectedObj.Entity())) {
-            glm::vec3 wpos = glm::vec3(world[3]);
-            glm::vec3 lightColor = glm::vec3(light->Color) * 0.9f;
-            if (light->Kind == LightComponent::Type::Spot) {
-                glm::vec3 dir = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
-                m_debugDraw->WireCone(wpos, dir, light->Range, light->OuterConeDeg, lightColor);
-            } else {
-                m_debugDraw->WireSphere(wpos, light->Range, lightColor);
-            }
-        }
+    // СЕТКА — ЧАСТЬ КАДРА, А НЕ ИНСТРУМЕНТ, и потому рисуется здесь, вместе со
+    // сценой. Она уходит к горизонту, где её линии сходятся в рябь, и сгладить
+    // эту рябь может только экранное сглаживание пост-обработки. Гизмо (оси,
+    // каркасы, маркеры) — наоборот, инструмент поверх картинки, и они рисуются
+    // ПОСЛЕ поста (см. ниже): тон-маппинг съедал их цвет, а глубина резкости
+    // расфокусировала у дальнего объекта.
+    if (showGrid) {
+        m_debugDraw->InfiniteGrid(eye, {0.26f, 0.27f, 0.31f});
+        m_debugDraw->Flush(outView, outProj);
     }
-    // Габариты выделенного — ровно та коробка, по которой считается попадание
-    // мышью (sage::render::RayMesh). Показывать её незачем всегда, но когда
-    // «клик выбрал не то» непонятен, увидеть её — самый короткий ответ.
-    if (m_showBounds) {
-        for (int id : selection) {
-            GameObject o = scene.Get(id);
-            if (!o.Valid()) continue;
-            const MeshRendererComponent* mr =
-                scene.Registry().try_get<MeshRendererComponent>(o.Entity());
-            if (!mr || !mr->MeshPtr) continue;
-            const glm::vec3 bmin = mr->MeshPtr->BoundsMin();
-            const glm::vec3 bmax = mr->MeshPtr->BoundsMax();
-            // Коробка рисуется в ЛОКАЛЬНЫХ осях объекта (мировая матрица целиком,
-            // включая поворот) — именно в них её и проверяет пикинг.
-            const glm::mat4 box = scene.WorldMatrix(o.Entity()) *
-                                  glm::translate(glm::mat4(1.0f), (bmin + bmax) * 0.5f) *
-                                  glm::scale(glm::mat4(1.0f), bmax - bmin);
-            m_debugDraw->WireBox(box, glm::vec3(1.0f, 0.65f, 0.2f));
-        }
-    }
-
-    m_debugDraw->Flush(outView, outProj);
 
     // Объём — после геометрии и до пост-обработки: свечение лучей должно
     // попасть в bloom. В плоском холсте вёрстки его нет — там нет и сцены.
@@ -665,20 +648,88 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                          /*output=*/&postFbo, 0, 0, w, h);
         postApplied = true;
     }
-    if (primary) m_postApplied = postApplied;
-    else m_extraPostApplied[slot] = postApplied;
-
-    // Кайма выделения — поверх ИТОГОВОГО кадра (после поста, постоянная ширина
-    // в пикселях, крайне читаемая независимо от размера объекта и дистанции).
-    if (!selection.empty()) {
-        CompositeOutline(postApplied ? postFbo : sceneFbo);
-        // Без пост-обработки итоговый кадр — это САМ буфер сцены, а он при MSAA
-        // многосэмпловый: кайма легла в него уже ПОСЛЕ Resolve, то есть мимо той
-        // текстуры, которую показывает панель. Выделение просто не появлялось —
-        // в любом отладочном виде и в любом ортогональном окне, где поста нет.
-        // Сводим ещё раз: проход дописал в буфер, значит и свести надо заново.
-        if (!postApplied) sceneFbo.Resolve();
+    // ГОТОВЫЙ КАДР ВОЗВРАЩАЕТСЯ В БУФЕР СЦЕНЫ — и дальше всё рисуется в него.
+    //
+    // Так гизмо оказываются ЗА пост-обработкой, а не под ней. Пока они шли
+    // вместе со сценой, их проглатывал тон-маппинг: чистый красный превращался
+    // в бурый, свечение размывало линии, а глубина резкости просто расфокусиро-
+    // вывала оси у дальнего объекта. Гизмо — это не часть картинки мира, это
+    // инструмент поверх неё, и «настройки красоты» не имеют права на него
+    // влиять.
+    //
+    // Копией, а не отрисовкой гизмо в буфер поста: у буфера поста нет глубины
+    // сцены, и линии в нём ничем не заслонялись бы — сетка светила бы сквозь
+    // стены. В буфере сцены глубина цела (копия идёт с выключенным тестом
+    // глубины и потому её не трогает).
+    if (postApplied) {
+        sceneFbo.Bind();
+        device.SetViewport(0, 0, w, h);
+        device.SetDepthTest(false);
+        device.SetBlend(false);
+        Shader& copy = CopyShader();
+        copy.Use();
+        copy.SetInt("uSrc", 0);
+        device.BindTexture2D(0, postFbo.ColorTexture());
+        m_outlineTri->DrawArrays(3);
+    } else {
+        sceneFbo.Bind();
+        device.SetViewport(0, 0, w, h);
     }
+    // Тест глубины включаем ЯВНО и всегда: выше прошли проходы, которые его
+    // выключают (копия кадра, маска силуэта, пост-обработка), а гизмо без него
+    // светили бы сквозь стены. Полагаться на то, что каждый проход прибрал за
+    // собой, здесь нельзя — это ровно тот случай, когда «обычно прибирает»
+    // означает «однажды не прибрал, и сетка поехала поверх сцены».
+    device.SetDepthTest(true);
+
+    // --- ГИЗМО-ГРАФИКА: сетка, оси, каркасы (DebugDraw) --------------------
+    //
+    // С тестом глубины по буферу сцены: объекты заслоняют гизмо, как и должны.
+    DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
+    if (selectedObj.Valid()) {
+        glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());
+        m_debugDraw->Axes(world, 1.4f);
+        if (const LightComponent* light = scene.Registry().try_get<LightComponent>(selectedObj.Entity())) {
+            glm::vec3 wpos = glm::vec3(world[3]);
+            glm::vec3 lightColor = glm::vec3(light->Color) * 0.9f;
+            if (light->Kind == LightComponent::Type::Spot) {
+                glm::vec3 dir = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
+                m_debugDraw->WireCone(wpos, dir, light->Range, light->OuterConeDeg, lightColor);
+            } else {
+                m_debugDraw->WireSphere(wpos, light->Range, lightColor);
+            }
+        }
+    }
+    // Габариты выделенного — ровно та коробка, по которой считается попадание
+    // мышью (sage::render::RayMesh). Показывать её незачем всегда, но когда
+    // «клик выбрал не то» непонятен, увидеть её — самый короткий ответ.
+    if (m_showBounds) {
+        for (int id : selection) {
+            GameObject o = scene.Get(id);
+            if (!o.Valid()) continue;
+            const MeshRendererComponent* mr =
+                scene.Registry().try_get<MeshRendererComponent>(o.Entity());
+            if (!mr || !mr->MeshPtr) continue;
+            const glm::vec3 bmin = mr->MeshPtr->BoundsMin();
+            const glm::vec3 bmax = mr->MeshPtr->BoundsMax();
+            // Коробка рисуется в ЛОКАЛЬНЫХ осях объекта (мировая матрица целиком,
+            // включая поворот) — именно в них её и проверяет пикинг.
+            const glm::mat4 box = scene.WorldMatrix(o.Entity()) *
+                                  glm::translate(glm::mat4(1.0f), (bmin + bmax) * 0.5f) *
+                                  glm::scale(glm::mat4(1.0f), bmax - bmin);
+            m_debugDraw->WireBox(box, glm::vec3(1.0f, 0.65f, 0.2f));
+        }
+    }
+    m_debugDraw->Flush(outView, outProj);
+
+    // Кайма выделения — поверх ИТОГОВОГО кадра (постоянная ширина в пикселях,
+    // читаемая независимо от размера объекта и дистанции).
+    if (!selection.empty()) CompositeOutline(sceneFbo);
+
+    // Буфер сцены при MSAA многосэмпловый, а наружу отдаётся разрешённая копия:
+    // всё, что дописано после первого Resolve (кадр поста, гизмо, кайма), без
+    // повторного сведения просто не попало бы в показываемую текстуру.
+    sceneFbo.Resolve();
 
     device.BindDefaultFramebuffer();
 }
@@ -794,17 +845,19 @@ void EditorSceneRenderer::SetViewportSize(int slot, int w, int h) {
     m_extraH[slot] = h;
 }
 
+// ПОКАЗЫВАЕТСЯ БУФЕР СЦЕНЫ — ВСЕГДА.
+//
+// Кадр после пост-обработки возвращается в него копией (см. RenderViewport), и
+// только в нём поверх лежат гизмо и кайма выделения. Выбор «пост или сцена»,
+// который был здесь раньше, теперь означал бы картинку без инструментов.
 uint64_t EditorSceneRenderer::ViewportTexture(int slot) const {
     if (slot <= 0) return ViewportTexture();
     if (slot >= kMaxViews || !m_extraFbo[slot]) return 0;
-    return m_extraPostApplied[slot] && m_extraPostFbo[slot]
-               ? m_extraPostFbo[slot]->NativeColorTexture()
-               : m_extraFbo[slot]->NativeColorTexture();
+    return m_extraFbo[slot]->NativeColorTexture();
 }
 
 uint64_t EditorSceneRenderer::ViewportTexture() const {
-    return m_postApplied && m_postFbo ? m_postFbo->NativeColorTexture()
-                                      : m_sceneFbo->NativeColorTexture();
+    return m_sceneFbo->NativeColorTexture();
 }
 bool EditorSceneRenderer::SaveGameFrame(const std::string& path) {
     if (!m_gameFrameValid) return false;   // чужой кадр за свой не выдаём
@@ -821,10 +874,9 @@ bool EditorSceneRenderer::SaveGameFrame(const std::string& path) {
 
 bool EditorSceneRenderer::ReadViewportPixels(std::vector<unsigned char>& out, int& outW,
                                              int& outH) {
-    // Тот же выбор буфера, что и у ViewportTexture: показываем и читаем одно и
-    // то же, иначе проверка сравнивала бы не то, что видно.
-    Framebuffer* target = m_postApplied && m_postFbo ? &*m_postFbo
-                                                     : (m_sceneFbo ? &*m_sceneFbo : nullptr);
+    // Тот же буфер, что и у ViewportTexture: показываем и читаем одно и то же,
+    // иначе проверка сравнивала бы не то, что видно.
+    Framebuffer* target = m_sceneFbo ? &*m_sceneFbo : nullptr;
     if (!target) return false;
     outW = target->Width();
     outH = target->Height();

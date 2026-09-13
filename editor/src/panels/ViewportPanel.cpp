@@ -407,6 +407,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
 
     // --- Хоткеи гизмо (не во время полёта камеры и не в полях ввода) ---
     if (hovered && !m_cameraDriving && !io.WantTextInput) {
+        // Q — «просто выбирать»: гизмо убрано с глаз и не ловит клики.
+        if (ImGui::IsKeyPressed(ImGuiKey_Q)) host.GizmoOp() = EditorHost::kGizmoSelectOnly;
         if (ImGui::IsKeyPressed(ImGuiKey_W)) host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
         if (ImGui::IsKeyPressed(ImGuiKey_E)) host.GizmoOp() = (int)ImGuizmo::ROTATE;
         if (ImGui::IsKeyPressed(ImGuiKey_R)) host.GizmoOp() = (int)ImGuizmo::SCALE;
@@ -450,7 +452,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     ImGuizmo::SetRect(imgPos.x, imgPos.y, avail.x, avail.y);
 
     GameObject selected = host.SelectedObject();
-    if (selected.Valid()) {
+    // В режиме «только выбор» манипулятора нет: ни ручек на экране, ни
+    // перехвата кликов. Правка коллайдера — исключение: это отдельный
+    // переключатель, и он тянет форму, а не объект.
+    if (selected.Valid() &&
+        (host.GizmoOp() != EditorHost::kGizmoSelectOnly || host.ColliderEditMode())) {
         Transform& tr = selected.GetTransform();
         // Гизмо работает в МИРОВОМ пространстве (учёт родителей): манипулируем
         // мировой матрицей, результат переводим обратно в локальную через
@@ -719,10 +725,14 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // вопрос «что это». Вторая: тот же набор значков уже есть у иерархии и у
     // инспектора, и рисовать его вторым способом значило бы завести вторую
     // истину о том, как выглядит свет.
-    if (!host.InPlayMode()) {
+    if (!host.InPlayMode() && slotDrawList[m_activeSlot]) {
         entt::registry& reg = host.CurrentScene().Registry();
         const glm::mat4 vp = activeProj * activeView;
-        ImDrawList* dl = ImGui::GetWindowDrawList();
+        // Список отрисовки — ТОГО ОКНА, где лежит картинка (см. slotDrawList).
+        // В списке окна Viewport значки оказывались ПОД кадром сцены: дочерние
+        // окна ImGui выводятся после родительского, и картинка накрывала их
+        // целиком. Рисовались они при этом честно — просто их не было видно.
+        ImDrawList* dl = slotDrawList[m_activeSlot];
         const float iconSize = 20.0f;
 
         auto drawMarker = [&](entt::entity e, const char* icon, const glm::vec3& color) {
@@ -745,11 +755,14 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             const int id = reg.get<IdComponent>(e).Id;
             const bool selected = host.IsSelected(id);
             const ImVec2 mid(at.x + iconSize * 0.5f, at.y + iconSize * 0.5f);
+            // Число сегментов — автоматическое (0): шестнадцать превращали
+            // подложку в заметный многоугольник, а значок на ней выглядел
+            // приклеенным к гайке.
             dl->AddCircleFilled(mid, iconSize * 0.62f,
                                 selected ? ImGui::GetColorU32(ImGuiCol_NavHighlight)
                                          : IM_COL32(18, 20, 26, 170),
-                                16);
-            EditorIcons::Overlay(at.x, at.y, iconSize, icon, color);
+                                0);
+            EditorIcons::Overlay(dl, at.x, at.y, iconSize, icon, color);
         };
 
         const glm::vec3 kTint(0.86f, 0.90f, 0.98f);
@@ -789,7 +802,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             dist = std::max(glm::length(target - cam.Position), 0.5f);
         }
         const glm::vec3 pivot = cam.Position + cam.Front * dist;
-        gizmoBusy = sage::editor::viewgizmo::Draw(m_viewGizmo, cam, imgPos,
+        gizmoBusy = sage::editor::viewgizmo::Draw(slotDrawList[m_activeSlot], m_viewGizmo, cam,
+                                                  imgPos,
                                                   ImVec2(imgPos.x + avail.x, imgPos.y + avail.y),
                                                   pivot, io.DeltaTime);
     }

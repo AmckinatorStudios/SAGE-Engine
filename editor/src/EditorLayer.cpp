@@ -56,6 +56,8 @@
 #include "Localization.h"
 #include "PanelWindows.h"
 
+
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -1138,6 +1140,7 @@ void EditorLayer::OnRender() {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
+    EditorTheme::ApplyGizmoColors();
 
     // ПОКА ПРОЕКТА НЕТ, РЕДАКТОРА НЕТ — только стартовое окно.
     //

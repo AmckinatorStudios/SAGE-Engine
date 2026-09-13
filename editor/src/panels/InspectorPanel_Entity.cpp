@@ -146,7 +146,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
     if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
     host.TrackLastImGuiItem();
-    ImGui::TextDisabled(T("Id: %d"), obj.Id());
     ImGui::Separator();
 
     // --- ПАПКА СПИСКА: имя, цвет и всё -------------------------------------
@@ -298,16 +297,15 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         changed |= ImGui::DragFloat(T("Surface Offset"), &dc.Offset, 0.001f, 0.0f, 0.5f, "%.3f");
         host.TrackLastImGuiItem();
 
-        // Треугольники — главный ответ на «почему наклейки не видно». Ноль
-        // значит, что под коробкой не оказалось подходящей геометрии, а не что
-        // сломался рендер, и лечится это перемещением, а не настройками.
+        // ГОВОРИМ ТОЛЬКО О БЕДЕ. Число спроецированных треугольников — счётчик
+        // для того, кто пишет рендер; человеку, который ставит наклейку, от
+        // него ничего не нужно, пока наклейка видна. А вот ноль — это ответ на
+        // «почему её нет», и он остаётся.
         //
         // Подсказки — с переносом по ширине панели. Без него текст просто
         // обрезается на границе: панель у людей узкая, и «размер задаёт Scal»
         // читается как поломка редактора, а не как совет.
-        if (dc.Triangles > 0) {
-            ImGui::TextDisabled(T("Projected triangles: %d"), dc.Triangles);
-        } else {
+        if (dc.Triangles <= 0) {
             ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
             ImGui::TextWrapped("%s", T("Landed on nothing: there is no geometry under the box, or it faces away from "
               "the decal."));
@@ -530,12 +528,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("How hard the character pushes dynamic bodies"));
             }
-
-            // Состояние из физики — только для чтения: правка «стоит на земле»
-            // из интерфейса не имеет смысла, его вычисляет симуляция.
-            ImGui::Separator();
-            ImGui::TextDisabled(T("Grounded: %s"), ch->Grounded ? T("yes") : T("no"));
-
         }
     }
 
@@ -692,9 +684,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::Checkbox(T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
             ImGui::SameLine();
             ImGui::Checkbox(T("Playing"), &am->Playing);
-            if (clipCount > 0) {
-                ImGui::TextDisabled(T("t = %.2f s"), am->Anim.Time());
-            }
             ImGui::Checkbox(T("Root Motion"), &am->RootMotion);
         }
     }
@@ -730,8 +719,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
 
             if (ImGui::Button(T("Bake Probe"))) p->Dirty = true;
-            ImGui::SameLine();
-            ImGui::TextDisabled(p->Dirty ? "queued" : (p->Runtime ? "captured" : "empty"));
         }
     }
 

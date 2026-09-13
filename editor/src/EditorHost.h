@@ -234,6 +234,14 @@ public:
     virtual void StopPlay() = 0;
 
     // --- общее состояние инструментов (делят тулбар и вьюпорт) ---
+    //
+    // РЕЖИМ «ТОЛЬКО ВЫБОР» — ноль. У ImGuizmo нет операции с таким значением
+    // (TRANSLATE=7, ROTATE=120, SCALE=896 — все ненулевые), и это ровно то,
+    // что нужно: манипулятора нет вообще. Без такого режима ручки гизмо
+    // постоянно висят на выбранном объекте и перехватывают клики — выбрать
+    // соседний предмет, стоящий за стрелкой, было нечем.
+    static constexpr int kGizmoSelectOnly = 0;
+
     virtual int& GizmoOp() = 0;              // значение ImGuizmo::OPERATION
     virtual bool& GizmoSnap() = 0;
     virtual EditorGizmoSpace& GizmoSpace() = 0;

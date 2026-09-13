@@ -56,8 +56,8 @@ void DebugDraw::Grid(glm::vec3 center, float halfExtent, float step, glm::vec3 c
     for (int i = -lines; i <= lines; ++i) {
         float offset = i * step;
         // Линии, проходящие через центр, — это оси мира: X красным, Z синим.
-        glm::vec3 cx = (i == 0) ? glm::vec3(0.75f, 0.35f, 0.35f) : color;
-        glm::vec3 cz = (i == 0) ? glm::vec3(0.35f, 0.45f, 0.80f) : color;
+        glm::vec3 cx = (i == 0) ? glm::vec3(0.85f, 0.28f, 0.28f) : color;
+        glm::vec3 cz = (i == 0) ? glm::vec3(0.28f, 0.42f, 0.88f) : color;
         Line(center + glm::vec3(-halfExtent, 0, offset), center + glm::vec3(halfExtent, 0, offset), cx);
         Line(center + glm::vec3(offset, 0, -halfExtent), center + glm::vec3(offset, 0, halfExtent), cz);
     }
@@ -256,9 +256,14 @@ void DebugDraw::Axes(const glm::mat4& transform, float size) {
         float len = glm::length(v);
         return len > 0.0001f ? v / len : glm::vec3(0.0f);
     };
-    Line(origin, origin + axis(0) * size, {0.9f, 0.2f, 0.2f});
-    Line(origin, origin + axis(1) * size, {0.2f, 0.85f, 0.25f});
-    Line(origin, origin + axis(2) * size, {0.25f, 0.4f, 0.95f});
+    // ЦВЕТА ЧИСТЫЕ. Ось — это ответ на вопрос «куда поедет», и читается он
+    // только цветом: приглушённый красный рядом с приглушённым зелёным на
+    // пёстрой сцене сливается в «две тёмные палочки». Те же три цвета носят
+    // гизмо осей в углу вьюпорта и манипулятор — «красное это X» запоминают
+    // один раз и дальше полагаются на это всюду.
+    Line(origin, origin + axis(0) * size, {1.0f, 0.22f, 0.22f});
+    Line(origin, origin + axis(1) * size, {0.25f, 0.95f, 0.25f});
+    Line(origin, origin + axis(2) * size, {0.22f, 0.46f, 1.0f});
 }
 
 void DebugDraw::Flush(const glm::mat4& view, const glm::mat4& proj) {
