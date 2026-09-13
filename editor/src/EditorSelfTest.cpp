@@ -38,6 +38,7 @@
 #include "sage/core/Paths.h"
 #include <nlohmann/json.hpp>
 
+#include "ImGuizmo.h"
 #include "EditorTheme.h"
 #include "TemplateStore.h"
 #include "sage/assets/Pack.h"
@@ -307,7 +308,7 @@ void EditorLayer::RunSelfTest() {
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
-                               << "import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
+                               << "viewport-tools + import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
@@ -3649,6 +3650,58 @@ bool EditorLayer::SelfTestTools() {
     std::error_code ec;
     std::string err;
     (void)ec; (void)err;
+
+    // --- СТРОКА ИНСТРУМЕНТОВ ВЬЮПОРТА: значки и цвета гизмо ----------------
+    //
+    // Проверяется ровно то, что человек видит глазами и что тихо ломается:
+    // отсутствующий значок рисуется ЗАГЛУШКОЙ (пустой квадрат), а цвета гизмо
+    // молча возвращаются к ImGuizmo'вским по умолчанию — вдвое темнее нужного.
+    // Ни то, ни другое не роняет сборку и не валит ни один другой тест.
+    {
+        // Значки строки — поимённо. Имена «про смысл», и опечатка в любом из
+        // них превращает кнопку в пустой квадратик.
+        static const char* const kToolIcons[] = {"select", "move",  "rotate", "scale",
+                                                 "world",  "cube",  "magnet", "grid",
+                                                 "sun",    "dots"};
+        for (const char* icon : kToolIcons) {
+            if (!EditorIcons::Has(icon) || !EditorIcons::HasGlyph(icon)) {
+                LOG_ERROR("Editor") << "SELFTEST: значка строки инструментов нет в наборе — '"
+                                    << icon << "'";
+                ok = false;
+            }
+        }
+
+        // «Только выбор» обязан НЕ совпадать ни с одной операцией ImGuizmo:
+        // совпади он с любой — и в режиме выбора на объекте висело бы гизмо,
+        // перехватывающее клики.
+        const int select = EditorHost::kGizmoSelectOnly;
+        if (select == (int)ImGuizmo::TRANSLATE || select == (int)ImGuizmo::ROTATE ||
+            select == (int)ImGuizmo::SCALE || select == (int)ImGuizmo::UNIVERSAL ||
+            select == (int)ImGuizmo::BOUNDS) {
+            LOG_ERROR("Editor") << "SELFTEST: режим «только выбор» совпал с операцией гизмо";
+            ok = false;
+        }
+
+        // Цвета осей манипулятора — ЧИСТЫЕ: у каждой свой канал почти в
+        // максимуме, а два других заметно ниже. Приглушённая тройка по
+        // умолчанию (0.666 на канал) этой проверки не проходит.
+        EditorTheme::ApplyGizmoColors();
+        const ImGuizmo::Style& gs = ImGuizmo::GetStyle();
+        const int axes[3] = {ImGuizmo::DIRECTION_X, ImGuizmo::DIRECTION_Y, ImGuizmo::DIRECTION_Z};
+        const char* names[3] = {"X", "Y", "Z"};
+        for (int a = 0; a < 3; ++a) {
+            const ImVec4& c = gs.Colors[axes[a]];
+            const float ch[3] = {c.x, c.y, c.z};
+            const float own = ch[a];
+            const float other = std::max(ch[(a + 1) % 3], ch[(a + 2) % 3]);
+            if (own < 0.85f || other > 0.55f) {
+                LOG_ERROR("Editor") << "SELFTEST: ось " << names[a]
+                                    << " гизмо не чистого цвета: свой канал " << own
+                                    << ", чужой " << other;
+                ok = false;
+            }
+        }
+    }
 
     // --- Новые инструменты редактора: загрузка моделей, префабы, редактор кода,
     //     подтверждения. Проверяем ИМЕННО то, что человек делает мышью, но без

@@ -1,4 +1,6 @@
 #include "EditorTheme.h"
+
+#include "ImGuizmo.h"
 #include "Localization.h"
 #include "EditorIcons.h"
 
@@ -410,6 +412,40 @@ void LoadFont() {
     // Ничего не нашлось — остаёмся на встроенном ProggyClean (ASCII). Иконки при
     // этом обязаны быть: они свои, встроенные, и от системных шрифтов не зависят.
     EditorIcons::LoadFont();
+}
+
+// ЦВЕТА МАНИПУЛЯТОРА — ЧИСТЫЕ И ОДНИ И ТЕ ЖЕ ВЕЗДЕ.
+//
+// По умолчанию ImGuizmo красит оси в половинную яркость (0.666 от чистого), и
+// на кадре сцены это выглядит бурым, болотным и тёмно-синим: три почти
+// одинаковых тёмных штриха, в которых красную ось от синей отличаешь не сразу,
+// а на тёмном полу — вообще никак. Гизмо существует ради мгновенного ответа
+// «какая это ось», и вся его работа держится на цвете.
+//
+// Те же три цвета, что у гизмо осей в углу (ViewGizmo.cpp) и у осей объекта в
+// сцене (DebugDraw::Axes): «красное — X» человек запоминает один раз.
+void ApplyGizmoColors() {
+    ImGuizmo::Style& st = ImGuizmo::GetStyle();
+    st.Colors[ImGuizmo::DIRECTION_X] = ImVec4(1.00f, 0.22f, 0.22f, 1.00f);
+    st.Colors[ImGuizmo::DIRECTION_Y] = ImVec4(0.25f, 0.90f, 0.25f, 1.00f);
+    st.Colors[ImGuizmo::DIRECTION_Z] = ImVec4(0.22f, 0.46f, 1.00f, 1.00f);
+    // Плоскости — те же цвета полупрозрачными: это те же оси, взятые парой.
+    st.Colors[ImGuizmo::PLANE_X] = ImVec4(1.00f, 0.22f, 0.22f, 0.42f);
+    st.Colors[ImGuizmo::PLANE_Y] = ImVec4(0.25f, 0.90f, 0.25f, 0.42f);
+    st.Colors[ImGuizmo::PLANE_Z] = ImVec4(0.22f, 0.46f, 1.00f, 0.42f);
+    // Подсветка захваченной ручки — янтарная, как кайма выделения: одно
+    // «сейчас работают с этим» на весь редактор.
+    st.Colors[ImGuizmo::SELECTION] = ImVec4(1.00f, 0.62f, 0.12f, 0.85f);
+    st.Colors[ImGuizmo::ROTATION_USING_BORDER] = ImVec4(1.00f, 0.62f, 0.12f, 1.00f);
+    st.Colors[ImGuizmo::ROTATION_USING_FILL] = ImVec4(1.00f, 0.62f, 0.12f, 0.35f);
+    // Линии потолще: тройка тонких штрихов по яркой сцене теряется, а попасть
+    // по ним мышью надо с первого раза.
+    st.TranslationLineThickness = 4.0f;
+    st.TranslationLineArrowSize = 8.0f;
+    st.RotationLineThickness = 3.0f;
+    st.RotationOuterLineThickness = 3.0f;
+    st.ScaleLineThickness = 4.0f;
+    st.ScaleLineCircleSize = 7.0f;
 }
 
 void Apply() {

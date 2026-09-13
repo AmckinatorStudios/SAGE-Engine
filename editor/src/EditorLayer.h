@@ -369,7 +369,13 @@ private:
     // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---
     int m_gizmoOp = 0;                                          // ImGuizmo::OPERATION (TRANSLATE)
     bool m_snap = false;
-    EditorGizmoSpace m_gizmoSpace = EditorGizmoSpace::Local;
+    // Оси по умолчанию — МИРОВЫЕ. В осях объекта стрелка «вправо» у повёрнутого
+    // предмета ведёт вбок и вглубь одновременно, и человек, который об этом не
+    // знает (а по умолчанию не знает никто), видит просто «гизмо тянет не
+    // туда». Мир одинаков для всех объектов сцены, поэтому он и стоит первым;
+    // локальные оси включаются осознанно — подписанным переключателем в строке
+    // инструментов.
+    EditorGizmoSpace m_gizmoSpace = EditorGizmoSpace::World;
     bool m_showGrid = true;
     EditorRenderMode m_renderMode = EditorRenderMode::Shaded;
     // Шаг привязки. Перенос — 1.0: движок строит примитивы размером в единицу,

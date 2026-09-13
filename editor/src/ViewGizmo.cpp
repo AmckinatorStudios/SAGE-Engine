@@ -29,8 +29,11 @@ struct Axis {
 // Разойтись им нельзя: человек читает «красное — это X» один раз и дальше
 // полагается на это во всём редакторе.
 ImU32 AxisColor(int axis, bool positive) {
-    const ImU32 kBase[3] = {IM_COL32(226, 86, 86, 255), IM_COL32(122, 200, 96, 255),
-                            IM_COL32(86, 140, 235, 255)};
+    // ЧИСТЫЕ, А НЕ ПРИГЛУШЁННЫЕ. Пастельные оттенки на пёстром кадре читаются
+    // как «что-то серое»: на светлом полу бледно-красный неотличим от бледно-
+    // зелёного за полсекунды, а гизмо для того и нужно, чтобы отвечать мгновенно.
+    const ImU32 kBase[3] = {IM_COL32(255, 56, 56, 255), IM_COL32(64, 230, 64, 255),
+                            IM_COL32(56, 118, 255, 255)};
     if (positive) return kBase[axis];
     // Отрицательный конец — тот же цвет, но приглушённый: это та же ось, а не
     // другая сущность, и красить её в серый значило бы потерять связь.
@@ -60,10 +63,10 @@ float ShortestDelta(float from, float to) {
 
 } // namespace
 
-bool Draw(State& state, Camera& camera, const ImVec2& viewMin, const ImVec2& viewMax,
-          const glm::vec3& pivot, float dt) {
+bool Draw(ImDrawList* dl, State& state, Camera& camera, const ImVec2& viewMin,
+          const ImVec2& viewMax, const glm::vec3& pivot, float dt) {
+    if (!dl) return false;
     const ImVec2 center(viewMax.x - kRadius - kInset, viewMin.y + kRadius + kInset);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
 
     // --- Плавный переход к выбранной оси -----------------------------------
     if (state.Animating) {

@@ -1,6 +1,8 @@
 #pragma once
 #include <glm/glm.hpp>
 
+struct ImDrawList;
+
 // ---------------------------------------------------------------------------
 // Иконки редактора — подмножество Tabler Icons.
 //
@@ -85,6 +87,16 @@ void Inline(const char* icon, const glm::vec3& color = kThemeColor);
 // нарисована. Overlay ничего не подаёт: это чистый рисунок в списке отрисовки,
 // и строка остаётся строкой.
 void Overlay(float x, float y, float size, const char* icon,
+             const glm::vec3& color = kThemeColor);
+
+// То же, но В ЗАДАННЫЙ список отрисовки.
+//
+// Нужна там, где рисуют ПОВЕРХ КАРТИНКИ СЦЕНЫ. Картинка вьюпорта лежит в
+// дочернем окне ImGui, а дочерние окна выводятся ПОСЛЕ родительского: значок,
+// поданный в список окна Viewport, честно рисуется — и целиком закрывается
+// кадром сцены. Список нужного окна запоминается, пока оно открыто, и
+// передаётся сюда.
+void Overlay(ImDrawList* dl, float x, float y, float size, const char* icon,
              const glm::vec3& color = kThemeColor);
 
 // Есть ли такая иконка. Неизвестное имя рисуется заглушкой (пустой квадрат с

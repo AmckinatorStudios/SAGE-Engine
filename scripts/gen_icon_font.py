@@ -31,8 +31,19 @@ OUT = os.path.join(REPO, 'editor', 'src', 'EditorIconFont.inl')
 ICONS = {
     "play": "player-play", "pause": "player-pause", "stop": "player-stop",
     "step": "player-track-next",
-    "move": "arrows-move", "rotate": "rotate-3d", "scale": "resize",
+    # Выбор — КУРСОР. Инструмент «просто выделять» ничего не делает с объектом,
+    # и рисунок обязан говорить ровно это: стрелка мыши, а не ещё один
+    # манипулятор.
+    "select": "pointer",
+    # Поворот — КРУГОВАЯ СТРЕЛКА, а не кубик с дугой: на шестнадцати пикселях
+    # кубик превращается в пятно, и в ряду рядом с «перенести» и «масштаб» он
+    # читается как ещё один объект, а не как действие над ним.
+    "move": "arrows-move", "rotate": "rotate-clockwise", "scale": "resize",
     "universal": "vector", "rect": "crop", "align": "layout-align-left", "drop": "droplet",
+    # Пространство осей: мир — глобус, объект — куб. Пара читается без подписи.
+    "world": "world",
+    # Многоточие — «здесь есть ещё»: общепринятый знак спрятанного меню.
+    "dots": "dots",
     "grid": "grid-dots", "wire": "vector-triangle",
     "cube": "cube", "sphere": "sphere", "light": "bulb", "sun": "sun", "camera": "camera",
     "script": "file-code", "particles": "sparkles", "anim": "walk", "ik": "body-scan",

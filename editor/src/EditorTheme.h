@@ -199,4 +199,10 @@ bool ExportTheme(const Theme& theme, const std::string& path);
 // Где редактор ищет дополнительные темы (themes/ рядом с бинарником).
 std::string ThemesDir();
 
+// Цвета манипулятора (ImGuizmo) — чистые X/Y/Z и янтарный захват. Зовётся
+// каждый кадр сразу за ImGuizmo::BeginFrame(): стиль ImGuizmo живёт в его
+// собственном контексте, темы редактора о нём не знают, а один раз при старте
+// ставить нельзя — самопроверка запускается до первого кадра.
+void ApplyGizmoColors();
+
 } // namespace EditorTheme

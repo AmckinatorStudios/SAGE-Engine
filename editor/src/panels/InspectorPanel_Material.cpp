@@ -438,11 +438,6 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
         }
     }
 
-    if (mr.MeshPtr) {
-        const glm::vec3 size = mr.MeshPtr->BoundsMax() - mr.MeshPtr->BoundsMin();
-        HintWrapped(T("Triangles: %d, bounds %.2f x %.2f x %.2f"),
-                            (int)(mr.MeshPtr->IndexCount() / 3), size.x, size.y, size.z);
-    }
 }
 
 // Создать материал для объекта, у которого его ещё нет.
