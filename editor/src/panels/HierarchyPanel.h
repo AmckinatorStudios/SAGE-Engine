@@ -19,6 +19,12 @@ class HierarchyPanel {
 public:
     void Draw(EditorHost& host, bool* open);
 
+    // Какой значок у сущности в списке. Публично — потому что это ДОГОВОР с
+    // человеком, а не подробность рисования: значок отвечает на вопрос «что это
+    // за предмет», и правило «все формы — один значок, а типы света разные»
+    // проверяется, а не держится на памяти того, кто последним правил список.
+    static const char* IconFor(entt::registry& reg, entt::entity e);
+
 private:
     void DrawNode(EditorHost& host, Scene& scene, entt::entity e);
 

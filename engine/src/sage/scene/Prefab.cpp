@@ -71,6 +71,9 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     } else {
         dst.Registry()->remove<MeshRendererComponent>(dst.Entity());
     }
+    // Копия папки — тоже папка: иначе дубликат группы (Ctrl+D) превращался бы
+    // в обычный пустой объект и начинал двигать содержимое.
+    CopyIfPresent<FolderComponent>(src, dst);
     CopyIfPresent<ScriptComponent>(src, dst);
     // Публичные переменные едут с объектом: префаб без своих настроек — это
     // объект, который после постановки в сцену надо настраивать заново.

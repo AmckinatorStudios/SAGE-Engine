@@ -20,6 +20,7 @@
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
 #include "../ObjectCatalog.h"
+#include "../FolderColors.h"
 
 namespace {
 
@@ -27,30 +28,68 @@ namespace {
 // компонента к самому общему: у камеры со скриптом важнее, что это камера, а
 // меш есть почти у всего и потому проверяется последним.
 //
-// По иконке иерархия читается одним взглядом: в списке из полусотни «Object»
-// глазу не за что зацепиться, а «свет / камера / зонд / модель» видно сразу.
+// ЗНАЧОК — ПРО ТИП ПРЕДМЕТА, А НЕ ПРО ЕГО ФОРМУ. Куб, сфера, цилиндр и конус
+// получают ОДИН значок: в списке важно «это геометрия», а какая именно — видно
+// в имени и во вьюпорте. Разные значки у форм означали бы, что глаз обязан
+// различать кубик и шарик размером с букву, ничего за это не получая.
+//
+// СВЕТ — ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ, и не ради красоты: типы света ведут себя
+// по-разному, и перепутать их дорого. Солнце одно на сцену и задаёт всё её
+// настроение; точечный светит во все стороны; прожектор — конусом, и «свет не
+// работает» у него обычно значит «смотрит не туда». Три значка отвечают на это
+// без открывания инспектора.
 const char* EntityIcon(entt::registry& reg, entt::entity e) {
+    // Папка — прежде всего остального: она не предмет сцены, а ящик для них.
+    if (reg.all_of<FolderComponent>(e)) {
+        const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
+        return (h && !h->Children.empty()) ? "folder-full" : "folder";
+    }
     if (reg.all_of<CameraComponent>(e)) return "camera";
-    // Солнце — не лампа. Направленный свет один на сцену и задаёт всё её
-    // настроение, поэтому в списке он обязан отличаться с первого взгляда.
     if (const LightComponent* lc = reg.try_get<LightComponent>(e)) {
-        return lc->Kind == LightComponent::Type::Directional ? "sun" : "light";
+        switch (lc->Kind) {
+            case LightComponent::Type::Directional: return "sun";
+            // Прожектор — конус, и своего глифа-конуса в наборе нет. Капля
+            // (drop) — ближайшее по форме: сужается книзу, то есть читается как
+            // направленный пучок, а не как лампочка, светящая во все стороны.
+            case LightComponent::Type::Spot: return "drop";
+            default: return "light";
+        }
     }
     if (reg.all_of<ReflectionProbeComponent>(e)) return "probe";
     if (reg.all_of<ParticleEmitterComponent>(e)) return "particles";
     if (reg.all_of<AnimationComponent>(e)) return "anim";
-    if (reg.all_of<sage::ui::Transform>(e)) return "file";
-    if (reg.all_of<RigidBodyComponent>(e) || reg.all_of<ColliderComponent>(e)) return "physics";
+    if (reg.all_of<AudioSourceComponent>(e)) return "audio";
+    if (reg.all_of<sage::ui::Transform>(e)) return "rect";
+    if (reg.all_of<DecalComponent>(e)) return "texture";
+    if (reg.all_of<RigidBodyComponent>(e) || reg.all_of<ColliderComponent>(e) ||
+        reg.all_of<CharacterControllerComponent>(e))
+        return "physics";
     if (reg.all_of<ScriptComponent>(e)) return "script";
     if (const MeshRendererComponent* mr = reg.try_get<MeshRendererComponent>(e)) {
+        // Модель из файла — отдельно от встроенных форм: это ассет проекта, и
+        // на него ссылаются, его переименовывают, он может не загрузиться.
         if (mr->Ref.type == MeshRef::Type::Model) return "model";
-        if (mr->Ref.type == MeshRef::Type::Sphere) return "sphere";
-        if (mr->Ref.type != MeshRef::Type::None) return "cube";
+        if (mr->Ref.type != MeshRef::Type::None) return "cube"; // все формы — один значок
     }
     return "file";
 }
 
+// Цвет значка. У папки — её собственный (см. FolderComponent), у остальных —
+// общий цвет значков редактора.
+glm::vec3 EntityIconColor(entt::registry& reg, entt::entity e) {
+    if (const FolderComponent* fc = reg.try_get<FolderComponent>(e)) return fc->Color;
+    return glm::vec3(0.62f, 0.72f, 0.85f);
+}
+
+// Палитра меток — ОБЩАЯ с папками проекта (editor/src/FolderColors.h). Две
+// палитры означали бы, что «зелёная папка» в дереве проекта и в списке сцены
+// оказались разного зелёного, и цвет перестал бы быть общим языком.
+
 } // namespace
+
+const char* HierarchyPanel::IconFor(entt::registry& reg, entt::entity e) {
+    return EntityIcon(reg, e);
+}
 
 // Рекурсивно рисует узел дерева: сам элемент (выбор/ПКМ/drag-drop) + детей.
 void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
@@ -84,7 +123,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         const float s = ImGui::GetTextLineHeight() * 0.86f;
         EditorIcons::Overlay(rowPos.x + indent - s * 1.15f,
                              rowPos.y + (ImGui::GetTextLineHeight() - s) * 0.5f, s,
-                             EntityIcon(reg, e), glm::vec3(0.62f, 0.72f, 0.85f));
+                             EntityIcon(reg, e), EntityIconColor(reg, e));
     }
 
     // Рамка выделения: строка засчитывается, если её прямоугольник задет.
@@ -165,6 +204,34 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
             scene.SetParent(child.Entity(), e);
             host.SetSelectedId(child.Id());
         }
+        if (ImGui::MenuItem(T("Create Folder Inside"))) {
+            host.PushUndoSnapshot();
+            GameObject folder = scene.CreateFolder(T("Folder"));
+            scene.SetParent(folder.Entity(), e);
+            host.SetSelectedId(folder.Id());
+        }
+        // ЦВЕТ — только у папки: у предмета сцены цвет уже занят материалом, и
+        // вторая, ничего не значащая раскраска рядом путала бы.
+        if (FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
+            if (ImGui::BeginMenu(T("Folder Colour"))) {
+                for (const sage::editor::foldercolors::Tint& tint : sage::editor::foldercolors::Palette()) {
+                    // Образец цвета рядом с названием: выбирают глазами, а
+                    // список из восьми слов цвет не показывает.
+                    const ImVec2 at = ImGui::GetCursorScreenPos();
+                    const float box = ImGui::GetTextLineHeight();
+                    const bool picked = ImGui::MenuItem((std::string("   ") + tint.Label).c_str());
+                    ImGui::GetWindowDrawList()->AddRectFilled(
+                        ImVec2(at.x + 2.0f, at.y + 2.0f), ImVec2(at.x + box - 2.0f, at.y + box - 2.0f),
+                        ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
+                        3.0f);
+                    if (picked) {
+                        host.PushUndoSnapshot();
+                        fc->Color = tint.Color;
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        }
         if (ImGui::MenuItem(T("Duplicate"))) host.DuplicateSelected();
         // Сохранить выбранную сущность (с детьми) как переиспользуемый префаб в
         // assets/ проекта. Имя файла — по имени сущности.
@@ -206,6 +273,35 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     entt::registry& reg = scene.Registry();
 
     ImGui::Begin(T("Hierarchy" "###Hierarchy"), open, panelwindows::WindowFlags("Hierarchy"));
+    // --- ДВЕ КНОПКИ НАД СПИСКОМ ---------------------------------------------
+    //
+    // Создать объект можно было двумя способами, и оба надо было ЗНАТЬ: меню
+    // «Объект» наверху окна и правая кнопка по пустому месту списка. Ни то ни
+    // другое не видно человеку, который смотрит на пустую сцену и ищет, с чего
+    // начать. Кнопка прямо над списком отвечает на этот вопрос, не требуя
+    // догадки; «Папка» рядом — потому что второе, что делают со списком после
+    // наполнения, это наводят в нём порядок.
+    if (EditorIcons::Button("plus", T("Object"), T("Add an object to the scene"))) {
+        ImGui::OpenPopup("##hierarchy_add");
+    }
+    if (ImGui::BeginPopup("##hierarchy_add")) {
+        if (const char* pick = sage::editor::objectcatalog::DrawMenu()) host.CreateCatalogObject(pick);
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (EditorIcons::Button("folder-plus", T("Folder"),
+                            T("A folder for sorting the list. It changes nothing in the game."))) {
+        host.PushUndoSnapshot();
+        // Папка создаётся ВНУТРИ выбранной папки, если выбрана именно папка:
+        // раскладывая сцену, вложенные группы делают сразу, и лезть потом
+        // перетаскивать только что созданную папку внутрь — лишний шаг.
+        GameObject folder = scene.CreateFolder(T("Folder"));
+        GameObject selected = scene.Get(host.SelectedId());
+        if (selected.Valid() && scene.IsFolder(selected.Entity()))
+            scene.SetParent(folder.Entity(), selected.Entity());
+        host.SetSelectedId(folder.Id());
+    }
+    ImGui::SameLine();
     ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
     ImGui::Separator();
 

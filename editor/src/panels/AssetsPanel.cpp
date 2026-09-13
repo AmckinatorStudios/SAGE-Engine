@@ -1,5 +1,6 @@
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
+#include "../FolderColors.h"
 #include "ui/UI.h"
 #include "EditorTheme.h"
 
@@ -252,6 +253,13 @@ uint64_t AssetsPanel::ThumbnailFor(const fs::path& path, bool isDir) {
 
 void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     AssetStyle style = StyleForPath(path, isDir);
+    // Метка папки перекрывает общий жёлтый: две сотни одинаковых значков —
+    // ровно то, из-за чего папку и приходится искать чтением имён.
+    if (isDir) {
+        glm::vec3 tint;
+        if (sage::editor::foldercolors::Get(path, tint))
+            style.Color = ImVec4(tint.r, tint.g, tint.b, 1.0f);
+    }
     std::string filename = path.filename().string();
 
     ImGui::PushID(filename.c_str());
@@ -430,6 +438,27 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         }
         // Переименование — всегда про ОДИН файл: у двадцати файлов общего имени
         // нет, и придумывать правило вроде «имя + номер» здесь не за чем.
+        if (isDir) {
+            namespace foldercolors = sage::editor::foldercolors;
+            if (ImGui::BeginMenu(T("Folder Colour"))) {
+                for (const foldercolors::Tint& tint : foldercolors::Palette()) {
+                    // Образец рядом с названием: цвет выбирают глазами, а
+                    // список из восьми слов цвета не показывает.
+                    const ImVec2 at = ImGui::GetCursorScreenPos();
+                    const float box = ImGui::GetTextLineHeight();
+                    const bool picked = ImGui::MenuItem((std::string("   ") + tint.Label).c_str());
+                    ImGui::GetWindowDrawList()->AddRectFilled(
+                        ImVec2(at.x + 2.0f, at.y + 2.0f),
+                        ImVec2(at.x + box - 2.0f, at.y + box - 2.0f),
+                        ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
+                        3.0f);
+                    if (picked) foldercolors::Set(path, tint.Color);
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem(T("No colour"))) foldercolors::Clear(path);
+                ImGui::EndMenu();
+            }
+        }
         if (ImGui::MenuItem(T("Rename"))) { m_renameTarget = path; m_error.clear(); }
         if (ImGui::MenuItem(T("Delete"))) { m_deleteTargets = m_multi; }
 
@@ -614,6 +643,8 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
 
     if (m_selected == source) m_selected = target;
     for (fs::path& p : m_multi) if (p == source) p = target;
+    // Метка едет с папкой: иначе раскладка рассыпалась бы от первого переезда.
+    sage::editor::foldercolors::Rename(source, target);
     // Пересканировать проект: база ассетов помнит пути, и после переезда её
     // ответ на «где этот файл» обязан измениться.
     sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
@@ -986,6 +1017,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             if (!RenameAsset(m_renameTarget, m_renameBuf, target, m_error)) {
                 LOG_ERROR("Editor") << "Asset rename failed: " << m_error;
             } else {
+                sage::editor::foldercolors::Rename(m_renameTarget, target);
                 if (m_selected == m_renameTarget) m_selected = target;
                 for (fs::path& p : m_multi) if (p == m_renameTarget) p = target;
                 sage::AssetDatabase::Instance().ScanProject(
@@ -1109,6 +1141,10 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
         }
     }
     ImGui::Separator();
+
+    // Какой проект обслуживаем (метки папок лежат в нём). Дёшево: перечитывает
+    // файл только при СМЕНЕ проекта.
+    sage::editor::foldercolors::SetProject(host.CurrentProject().Dir());
 
     ImGui::BeginChild("##assets_scroll");
     namespace rectselect = sage::editor::rectselect;

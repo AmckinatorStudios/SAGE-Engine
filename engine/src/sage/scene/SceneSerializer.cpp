@@ -1291,6 +1291,12 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
                 j["materialSlots"] = std::move(slots);
             }
         } // if (mrp)
+        // Папка списка: сама метка и её цвет. Без этого «Декорации» после
+        // перезагрузки сцены становились обычным пустым объектом — и снова
+        // начинали таскать за собой содержимое.
+        if (const FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
+            j["folder"]["color"] = Vec3ToJson(fc->Color);
+        }
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             SaveAssetRef(j, "script", sc->Path);
         }
@@ -1734,6 +1740,11 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<DecalComponent>(obj.Entity(), dc);
         }
 
+        if (j.contains("folder")) {
+            FolderComponent fc;
+            if (j["folder"].contains("color")) fc.Color = Vec3FromJson(j["folder"]["color"]);
+            obj.Registry()->emplace<FolderComponent>(obj.Entity(), fc);
+        }
         if (j.contains("script")) {
             obj.Registry()->emplace<ScriptComponent>(obj.Entity(),
                                                      ScriptComponent{LoadAssetRef(j, "script")});

@@ -142,6 +142,29 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     ImGui::TextDisabled(T("Id: %d"), obj.Id());
     ImGui::Separator();
 
+    // --- ПАПКА СПИСКА: имя, цвет и всё -------------------------------------
+    //
+    // У папки нет ни положения, ни вида, ни компонентов — она заведена ради
+    // порядка в списке и на игру не влияет (см. FolderComponent). Показывать ей
+    // Transform, «Меш» и «Добавить компонент» значило бы предлагать настроить
+    // то, чего у неё нет и не будет, — и каждый, кто это попробует, решит, что
+    // настройка не работает.
+    if (FolderComponent* folder = reg.try_get<FolderComponent>(obj.Entity())) {
+        ImGui::TextDisabled("%s", T("A folder for sorting the list. It changes nothing in the game:"));
+        ImGui::TextDisabled("%s", T("it does not move its contents and is not drawn."));
+        ImGui::Spacing();
+        if (ImGui::ColorEdit3(T("Colour"), &folder->Color.x, ImGuiColorEditFlags_NoInputs))
+            host.PushUndoSnapshot();
+        host.TrackLastImGuiItem();
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", T("mark in the list"));
+        int inside = 0;
+        if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(obj.Entity()))
+            inside = (int)h->Children.size();
+        ImGui::TextDisabled(T("Objects inside: %d"), inside);
+        return;
+    }
+
     // Флаги «убрать компонент»: кнопка живёт в ЗАГОЛОВКЕ секции, а снятие
     // происходит в конце разбора — иначе компонент исчезал бы из-под кода,
     // который прямо сейчас рисует его поля.

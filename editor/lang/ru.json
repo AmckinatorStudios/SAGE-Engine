@@ -1486,6 +1486,23 @@
     "Copy an outside file, folder or .zip into the current project folder.\nA model moves together with its .mtl/.bin files and textures;\nan archive is unpacked into a folder of its own.": "Скопировать чужой файл, папку или .zip в текущую папку проекта.\nМодель переезжает вместе со своими .mtl/.bin и текстурами,\nа архив распаковывается в отдельную папку.",
     "The archive could not be unpacked: ": "Архив не распаковался: ",
     " file(s) inside)": " файл(ов) внутри)",
-    "; not brought in: ": "; не внесено: "
+    "; not brought in: ": "; не внесено: ",
+    "Add an object to the scene": "Добавить объект в сцену",
+    "A folder for sorting the list. It changes nothing in the game.": "Папка для порядка в списке. В игре она ничего не меняет.",
+    "A folder for sorting the list. It changes nothing in the game:": "Папка для порядка в списке. В игре она ничего не меняет:",
+    "it does not move its contents and is not drawn.": "содержимое не двигает и не рисуется.",
+    "Create Folder Inside": "Создать папку внутри",
+    "Folder Colour": "Цвет папки",
+    "No colour": "Без цвета",
+    "mark in the list": "метка в списке",
+    "Objects inside: %d": "Объектов внутри: %d",
+    "Grey": "Серый",
+    "Red": "Красный",
+    "Orange": "Оранжевый",
+    "Yellow": "Жёлтый",
+    "Green": "Зелёный",
+    "Cyan": "Бирюзовый",
+    "Blue": "Синий",
+    "Purple": "Фиолетовый"
   }
 }
