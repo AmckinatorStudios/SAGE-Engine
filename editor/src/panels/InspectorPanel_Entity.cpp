@@ -142,6 +142,25 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     ImGui::TextDisabled(T("Id: %d"), obj.Id());
     ImGui::Separator();
 
+    // Флаги «убрать компонент»: кнопка живёт в ЗАГОЛОВКЕ секции, а снятие
+    // происходит в конце разбора — иначе компонент исчезал бы из-под кода,
+    // который прямо сейчас рисует его поля.
+    bool rmCamera = false;
+    bool rmLight = false;
+    bool rmDecal = false;
+    bool rmGiStatic = false;
+    bool rmNet = false;
+    bool rmScript = false;
+    bool rmBody = false;
+    bool rmCollider = false;
+    bool rmCharacter = false;
+    bool rmJoint = false;
+    bool rmAnimation = false;
+    bool rmProbe = false;
+    bool rmIk = false;
+    bool rmEmitter = false;
+    bool rmAudio = false;
+
     if (EditorTheme::SectionHeader(T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
         // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.
         //
@@ -188,23 +207,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
-    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rmCamera)) {
         if (CameraComponent* cam = reg.try_get<CameraComponent>(obj.Entity())) {
             ImGui::DragFloat(T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Far"), &cam->FarClip, 1.0f, 1.0f, 5000.0f); host.TrackLastImGuiItem();
             if (ImGui::Checkbox(T("Primary"), &cam->Primary)) host.PushUndoSnapshot();
             ImGui::TextDisabled("%s", T("Game panel renders from the first Primary camera"));
-            if (ImGui::Button(T("Remove Camera"))) {
-                host.PushUndoSnapshot();
-                reg.remove<CameraComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
 
-    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rmLight)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
             const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)")};
             int kind = (int)light->Kind;
@@ -241,16 +256,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                               "of geometry (one per cube face), so it is best left only to "
                               "the lamps that have something to occlude."));
             }
-            if (ImGui::Button(T("Remove Light"))) {
-                host.PushUndoSnapshot();
-                reg.remove<LightComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader(T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rmDecal)) {
         DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
         bool changed = false;
         changed |= ImGui::DragFloat(T("Angle Limit"), &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
@@ -277,12 +288,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         ImGui::TextWrapped("%s", T("Projection goes along -Z; Scale sets the size"));
         ImGui::PopStyleColor();
         if (ImGui::Button(T("Rebuild##decal"))) changed = true;
-        ImGui::SameLine();
-        if (ImGui::Button(T("Remove##decal"))) {
-            host.PushUndoSnapshot();
-            reg.remove<DecalComponent>(obj.Entity());
-            changed = false;
-        }
         // Правка параметров обязана быть видна сразу: наклейка пересобирается
         // по флагу, и без него ползунок угла не менял бы вообще ничего.
         if (changed && reg.all_of<DecalComponent>(obj.Entity()))
@@ -290,29 +295,21 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
-    if (reg.all_of<GIStaticComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("GI Static" "###GI Static"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<GIStaticComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("GI Static" "###GI Static"), ImGuiTreeNodeFlags_DefaultOpen, &rmGiStatic)) {
         GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
         ImGui::Checkbox(T("Lightmapped"), &gs.Lightmapped); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Texel Scale"), &gs.TexelScale, 0.05f, 0.1f, 8.0f); host.TrackLastImGuiItem();
         ImGui::TextDisabled("%s", T("Static occluder for baked GI; lightmapped = has own lightmap"));
         ImGui::TextDisabled("%s", T("Re-bake lighting after changes (Lighting panel)"));
-        if (ImGui::Button(T("Remove##gistatic"))) {
-            host.PushUndoSnapshot();
-            reg.remove<GIStaticComponent>(obj.Entity());
-        }
     }
 
     if (reg.all_of<NetReplicatedComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Net Replicated" "###Net Replicated"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader(T("Net Replicated" "###Net Replicated"), ImGuiTreeNodeFlags_DefaultOpen, &rmNet)) {
         ImGui::TextDisabled("%s", T("The server sends this object to clients; they follow it"));
         ImGui::TextDisabled("%s", T("Position, rotation, scale, color and primitive are replicated"));
-        if (ImGui::Button(T("Remove##netreplicated"))) {
-            host.PushUndoSnapshot();
-            reg.remove<NetReplicatedComponent>(obj.Entity());
-        }
     }
 
-    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript)) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
             // обложка, приём перетаскивания с проверкой типа, «показать в
@@ -349,10 +346,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 }
             }
             ImGui::TextDisabled("%s", T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"));
-            if (ImGui::Button(T("Remove Script"))) {
-                host.PushUndoSnapshot();
-                reg.remove<ScriptComponent>(obj.Entity());
-            }
         }
     }
 
@@ -383,7 +376,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
-    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen, &rmBody)) {
         if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::BodyType.
             const char* types[] = {T("Static"), T("Dynamic"), T("Kinematic")};
@@ -396,15 +389,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
             ImGui::TextDisabled("%s", T("Dynamic falls under gravity; Static/Kinematic don't"));
-            if (ImGui::Button(T("Remove Rigid Body"))) {
-                host.PushUndoSnapshot();
-                reg.remove<RigidBodyComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
-    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen, &rmCollider)) {
         if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::ShapeType.
             const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule")};
@@ -472,10 +461,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 col->Parts.push_back(ColliderComponent::Part{});
             }
 
-            if (ImGui::Button(T("Remove Collider"))) {
-                host.PushUndoSnapshot();
-                reg.remove<ColliderComponent>(obj.Entity());
-            }
         }
     }
 
@@ -486,7 +471,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // скриптом или правкой .sage руками. Компонент, который нельзя увидеть в
     // редакторе, для человека, работающего в редакторе, не существует.
     if (reg.all_of<CharacterControllerComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader(T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen, &rmCharacter)) {
         if (CharacterControllerComponent* ch =
                 reg.try_get<CharacterControllerComponent>(obj.Entity())) {
             ImGui::DragFloat(T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
@@ -512,15 +497,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::Separator();
             ImGui::TextDisabled(T("Grounded: %s"), ch->Grounded ? T("yes") : T("no"));
 
-            if (ImGui::Button(T("Remove Character Controller"))) {
-                host.PushUndoSnapshot();
-                reg.remove<CharacterControllerComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Соединение (constraint/joint) с другим телом или миром ---
-    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen, &rmJoint)) {
         if (JointComponent* jc = reg.try_get<JointComponent>(obj.Entity())) {
             const char* types[] = {T("Fixed"), T("Point"), T("Hinge"), T("Slider"),
                                    T("Distance"), T("Cone")};
@@ -556,10 +537,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.TrackLastImGuiItem();
             }
             ImGui::TextDisabled("%s", T("Needs a Rigid Body; only the Jolt backend simulates joints"));
-            if (ImGui::Button(T("Remove Joint"))) {
-                host.PushUndoSnapshot();
-                reg.remove<JointComponent>(obj.Entity());
-            }
         }
     }
 
@@ -569,7 +546,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // объекта. Секция отвечает только на вопрос «как это движется», и первое,
     // что она обязана сказать, — ЕСТЬ ЛИ ЧТО анимировать: компонент,
     // добавленный к кубу, обязан объяснить, почему ничего не происходит.
-    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rmAnimation)) {
         if (AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity())) {
             const MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity());
             const bool hasModelRef = mesh && mesh->Ref.type == MeshRef::Type::Model &&
@@ -680,26 +657,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ImGui::TextDisabled(T("t = %.2f s"), am->Anim.Time());
             }
             ImGui::Checkbox(T("Root Motion"), &am->RootMotion);
-            if (ImGui::Button(T("Remove Animation"))) {
-                host.PushUndoSnapshot();
-                reg.remove<AnimationComponent>(obj.Entity());
-                // Статический меш анимированному объекту не грузится (см.
-                // загрузчик сцены): рисует его скелетный проход. Сняли
-                // анимацию — рисовать станет некому, и объект пропал бы из
-                // кадра до перезагрузки сцены. Догружаем здесь же.
-                if (MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity())) {
-                    if (mesh->Ref.type == MeshRef::Type::Model && !mesh->Ref.path.empty() &&
-                        !mesh->MeshPtr) {
-                        mesh->MeshPtr = ResourceManager::Instance().GetModel(mesh->Ref.path);
-                    }
-                }
-            }
         }
     }
 
     // --- Зонд отражений -----------------------------------------------------
     if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe)) {
         if (ReflectionProbeComponent* p = reg.try_get<ReflectionProbeComponent>(obj.Entity())) {
             ImGui::TextDisabled("%s", T("Captures the scene around this point into a cubemap"));
             // Любая правка охвата или разрешения означает «снять заново»: карта
@@ -728,10 +691,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::Button(T("Bake Probe"))) p->Dirty = true;
             ImGui::SameLine();
             ImGui::TextDisabled(p->Dirty ? "queued" : (p->Runtime ? "captured" : "empty"));
-            if (ImGui::Button(T("Remove Reflection Probe"))) {
-                host.PushUndoSnapshot();
-                reg.remove<ReflectionProbeComponent>(obj.Entity());
-            }
         }
     }
 
@@ -739,7 +698,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Кость задаётся ИМЕНЕМ, а не индексом: модель может смениться (или ещё не
     // загрузиться), а имя переживает и то, и другое. Список имён показываем
     // только когда скелет уже есть.
-    if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen, &rmIk)) {
         if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
             ImGui::Checkbox(T("IK Enabled"), &ik->Enabled);
             const AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity());
@@ -818,16 +777,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ik->Goals.erase(ik->Goals.begin() + remove);
             }
             if (ImGui::Button(T("Add Goal"))) ik->Goals.emplace_back();
-            ImGui::SameLine();
-            if (ImGui::Button(T("Remove IK"))) {
-                host.PushUndoSnapshot();
-                reg.remove<IKComponent>(obj.Entity());
-            }
         }
     }
 
     // --- Эмиттер частиц (огонь/дым/искры/…): пресеты + тонкая настройка ---
-    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen, &rmEmitter)) {
         if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
             ParticleEmitterConfig& cfg = em->Config;
             // Пресеты: применяют готовый конфиг, дальше его можно править.
@@ -863,10 +817,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat3(T("Dir Min"), &cfg.DirectionMin.x, 0.02f); host.TrackLastImGuiItem();
             ImGui::DragFloat3(T("Dir Max"), &cfg.DirectionMax.x, 0.02f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Spin"), &cfg.AngularVelocityMax, 0.05f, 0.0f, 20.0f); host.TrackLastImGuiItem();
-            if (ImGui::Button(T("Remove Emitter"))) {
-                host.PushUndoSnapshot();
-                reg.remove<ParticleEmitterComponent>(obj.Entity());
-            }
         }
     }
 
@@ -876,7 +826,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // из дерева проекта. Печатать путь к .wav наизусть — ровно тот барьер,
     // из-за которого звук в сценах не появлялся.
     if (reg.all_of<AudioSourceComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Audio" "###Audio"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader(T("Audio" "###Audio"), ImGuiTreeNodeFlags_DefaultOpen, &rmAudio)) {
         if (AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(obj.Entity())) {
             const assetslot::Result r =
                 assetslot::Draw(host, "audioclip", assetslot::Kind::Audio, au->Clip, &m_preview,
@@ -930,17 +880,107 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             } else {
                 if (EditorIcons::Button("play", T("Preview"))) au->Play();
             }
-            if (ImGui::Button(T("Remove Audio"))) {
-                host.PushUndoSnapshot();
-                au->Stop();
-                reg.remove<AudioSourceComponent>(obj.Entity());
-            }
         }
     }
 
     if (reg.all_of<sage::ui::Transform>(obj.Entity()) &&
         EditorTheme::SectionHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawUIElement(host, obj);
+    }
+
+    // --- Снятие компонентов: ОДНО место, в конце ----------------------------
+    //
+    // Не там, где нажали: кнопка стоит в заголовке, а под ней рисуются поля
+    // того же компонента. Сняв его сразу, мы выдернули бы из-под них данные —
+    // на том же кадре. Здесь же собраны и «хвосты» снятия: у анимации это
+    // возврат статического меша, у звука — глушение источника.
+    if (rmCamera) {
+        host.PushUndoSnapshot();
+        reg.remove<CameraComponent>(obj.Entity());
+    }
+
+    if (rmLight) {
+        host.PushUndoSnapshot();
+        reg.remove<LightComponent>(obj.Entity());
+    }
+
+    if (rmDecal) {
+        host.PushUndoSnapshot();
+        reg.remove<DecalComponent>(obj.Entity());
+    }
+
+    if (rmGiStatic) {
+        host.PushUndoSnapshot();
+        reg.remove<GIStaticComponent>(obj.Entity());
+    }
+
+    if (rmNet) {
+        host.PushUndoSnapshot();
+        reg.remove<NetReplicatedComponent>(obj.Entity());
+    }
+
+    if (rmScript) {
+        host.PushUndoSnapshot();
+        reg.remove<ScriptComponent>(obj.Entity());
+    }
+
+    if (rmBody) {
+        host.PushUndoSnapshot();
+        reg.remove<RigidBodyComponent>(obj.Entity());
+    }
+
+    if (rmCollider) {
+        host.PushUndoSnapshot();
+        reg.remove<ColliderComponent>(obj.Entity());
+    }
+
+    if (rmCharacter) {
+        host.PushUndoSnapshot();
+        reg.remove<CharacterControllerComponent>(obj.Entity());
+    }
+
+    if (rmJoint) {
+        host.PushUndoSnapshot();
+        reg.remove<JointComponent>(obj.Entity());
+    }
+
+    if (rmAnimation) {
+        host.PushUndoSnapshot();
+        reg.remove<AnimationComponent>(obj.Entity());
+        // Статический меш анимированному объекту не грузится (см. загрузчик
+        // сцены): рисует его скелетный проход. Сняли анимацию — рисовать
+        // станет некому, и объект пропал бы из кадра до перезагрузки сцены.
+        // Догружаем здесь же.
+        if (MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity())) {
+            if (mesh->Ref.type == MeshRef::Type::Model && !mesh->Ref.path.empty() &&
+                !mesh->MeshPtr) {
+                mesh->MeshPtr = ResourceManager::Instance().GetModel(mesh->Ref.path);
+            }
+        }
+    }
+
+    if (rmProbe) {
+        host.PushUndoSnapshot();
+        reg.remove<ReflectionProbeComponent>(obj.Entity());
+    }
+
+    if (rmIk) {
+        host.PushUndoSnapshot();
+        reg.remove<IKComponent>(obj.Entity());
+    }
+
+    if (rmEmitter) {
+        host.PushUndoSnapshot();
+        reg.remove<ParticleEmitterComponent>(obj.Entity());
+    }
+
+    if (rmAudio) {
+        host.PushUndoSnapshot();
+        // Глушим ДО снятия компонента: дескриптор звука живёт в нём, и после
+        // remove остановить источник было бы нечем — водопад продолжал бы
+        // шуметь из точки, где его уже нет.
+        if (AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(obj.Entity())) au->Stop();
+        reg.remove<AudioSourceComponent>(obj.Entity());
     }
 
     // --- Единое «Add Component»: добавляет любой ОТСУТСТВУЮЩИЙ компонент ---

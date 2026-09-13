@@ -1,4 +1,5 @@
 #include "EditorTheme.h"
+#include "Localization.h"
 #include "EditorIcons.h"
 
 #include <algorithm>
@@ -604,12 +605,40 @@ void Apply() {
     }
 }
 
-bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags) {
+bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked) {
+    // AllowOverlap — чтобы кнопка в правом углу принимала нажатие, а не
+    // проваливалась в заголовок: CollapsingHeader занимает всю ширину строки, и
+    // без этого флага он перехватывал бы клик по всему, что на нём нарисовано.
+    if (removeClicked) {
+        *removeClicked = false;
+        flags |= ImGuiTreeNodeFlags_AllowOverlap;
+    }
     ImGui::PushStyleColor(ImGuiCol_Header, Color(Role::SurfaceAlt));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, Color(Role::Elevated));
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, Color(Role::Elevated));
     const bool open = ImGui::CollapsingHeader(label, flags);
     ImGui::PopStyleColor(3);
+
+    if (removeClicked) {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float side = ImGui::GetFrameHeight();
+        // Кнопка рисуется и у СВЁРНУТОЙ секции: убрать компонент, не раскрывая
+        // его, — обычное дело, и заставлять раскрывать ради этого незачем.
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - side - style.FramePadding.x);
+        ImGui::PushID(label);
+        const ImVec4 danger = Color(Role::Danger);
+        // Сама иконка красная всегда, подложка — только под курсором: десяток
+        // залитых красным квадратов сверху вниз превратил бы инспектор в
+        // предупреждение, хотя ничего плохого не происходит.
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                              ImVec4(danger.x * 0.85f, danger.y * 0.85f, danger.z * 0.85f, danger.w));
+        *removeClicked = EditorIcons::IconOnlyButton("trash", T("Remove this component"), false,
+                                                     glm::vec3(danger.x, danger.y, danger.z));
+        ImGui::PopStyleColor(3);
+        ImGui::PopID();
+    }
     return open;
 }
 

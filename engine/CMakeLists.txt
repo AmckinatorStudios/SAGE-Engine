@@ -61,6 +61,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/AssetCache.cpp
     src/sage/assets/AssetDatabase.cpp
     src/sage/assets/Pack.cpp
+    src/sage/assets/Zip.cpp
     src/sage/render/DebugDraw.cpp
     src/sage/render/DecalProjection.cpp
     src/sage/render/DebugOverlay.cpp

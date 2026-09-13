@@ -42,6 +42,12 @@ struct AudioEngine::Impl {
     SoundHandle NextHandle = 1;
     SoundHandle MusicHandle = InvalidHandle;
 
+    // Что мы остановили паузой — чтобы продолжить ровно это (см. SetAllPaused).
+    std::vector<SoundHandle> PausedByUs;
+    // Одноразовые звуки дескрипторов не имеют — для них хватает одного флага:
+    // на паузе они все остановлены, и продолжать надо все недоигравшие.
+    bool OneShotsPaused = false;
+
     // Одноразовые звуки: живут до конца проигрывания, реапятся в Update().
     std::vector<ma_sound*> OneShots;
 
@@ -287,6 +293,47 @@ void AudioEngine::SetListener(const glm::vec3& position, const glm::vec3& forwar
     ma_engine_listener_set_position(&m_impl->Engine, 0, position.x, position.y, position.z);
     ma_engine_listener_set_direction(&m_impl->Engine, 0, forward.x, forward.y, forward.z);
     ma_engine_listener_set_world_up(&m_impl->Engine, 0, up.x, up.y, up.z);
+}
+
+int AudioEngine::SetAllPaused(bool paused) {
+    if (!m_impl->Available) return 0;
+    int touched = 0;
+    if (paused) {
+        m_impl->PausedByUs.clear();
+        for (auto& [id, sound] : m_impl->Managed) {
+            if (ma_sound_is_playing(sound) != MA_TRUE) continue;
+            // ma_sound_stop, а не uninit: курсор остаётся на месте, и старт
+            // продолжает с него же.
+            ma_sound_stop(sound);
+            m_impl->PausedByUs.push_back(id);
+            ++touched;
+        }
+        for (ma_sound* sound : m_impl->OneShots) {
+            if (ma_sound_is_playing(sound) != MA_TRUE) continue;
+            ma_sound_stop(sound);
+            ++touched;
+        }
+        m_impl->OneShotsPaused = true;
+    } else {
+        for (SoundHandle id : m_impl->PausedByUs) {
+            auto it = m_impl->Managed.find(id);
+            // Звук мог исчезнуть за время паузы (сцену остановили, объект
+            // удалили) — это не ошибка, просто продолжать нечего.
+            if (it == m_impl->Managed.end()) continue;
+            ma_sound_start(it->second);
+            ++touched;
+        }
+        m_impl->PausedByUs.clear();
+        if (m_impl->OneShotsPaused) {
+            for (ma_sound* sound : m_impl->OneShots) {
+                if (ma_sound_at_end(sound) == MA_TRUE) continue;
+                ma_sound_start(sound);
+                ++touched;
+            }
+            m_impl->OneShotsPaused = false;
+        }
+    }
+    return touched;
 }
 
 void AudioEngine::SetMasterVolume(float volume) {
