@@ -240,12 +240,12 @@ void NetworkSystem::ApplySnapshot(Scene& scene, const uint8_t* data, size_t byte
         if (!obj.Valid()) {
             // Призрак: сущности нет у клиента — создаём с СЕРВЕРНЫМ id.
             obj = scene.CreateObjectWithId("net_" + std::to_string(st.Id), st.Id);
-            obj.Renderer().Ref = MeshRef{MeshTypeFromWire(st.MeshType), ""};
+            obj.EnsureRenderer().Ref = MeshRef{MeshTypeFromWire(st.MeshType), ""};
             // GPU-меш — только при живом рендере (headless-тесты без GL).
             // Он подтянется отрисовкой через ResourceManager у тех, кто рисует.
             m_ghosts.insert(st.Id);
         }
-        obj.Renderer().Color = st.Color;
+        obj.EnsureRenderer().Color = st.Color;
 
         // Копим состояния с их временем прихода. Старше момента показа на
         // полсекунды — уже мусор: столько не бывает ни задержки, ни просадки,

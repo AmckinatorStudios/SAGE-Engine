@@ -19,6 +19,7 @@
 #include "sage/ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
+#include "../ObjectCatalog.h"
 
 namespace {
 
@@ -231,16 +232,14 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     }
 
     // Контекстное меню пустого места — создание корневых сущностей.
+    //
+    // ТОТ ЖЕ КАТАЛОГ, ЧТО И В МЕНЮ «ОБЪЕКТ». Здесь было два пункта («пустой» и
+    // «куб») против полутора десятков в верхнем меню, и человек, нашедший
+    // нужное там, здесь его не находил — при том что правой кнопкой по списку
+    // объекты и создают.
     if (ImGui::BeginPopupContextWindow("##hierarchy_ctx",
                                        ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        if (ImGui::MenuItem(T("Create Empty"))) {
-            host.PushUndoSnapshot();
-            host.SetSelectedId(scene.CreateObject("Empty").Id());
-        }
-        if (ImGui::MenuItem(T("Create Cube"))) {
-            host.PushUndoSnapshot();
-            host.SetSelectedId(host.CreateCubeEntity("Cube").Id());
-        }
+        if (const char* pick = sage::editor::objectcatalog::DrawMenu()) host.CreateCatalogObject(pick);
         ImGui::EndPopup();
     }
     ImGui::End();

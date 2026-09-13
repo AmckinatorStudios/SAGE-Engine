@@ -1238,7 +1238,10 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
     });
     for (entt::entity e : entities) {
         const Transform& tr = reg.get<Transform>(e);
-        const MeshRendererComponent& mr = reg.get<MeshRendererComponent>(e);
+        // Указатель, а не ссылка: MeshRenderer есть НЕ У ВСЕХ. Пустой объект
+        // (узел иерархии, точка привязки, держатель скрипта) его не несёт, и
+        // reg.get<> на такой сущности читал бы чужую память.
+        const MeshRendererComponent* mrp = reg.try_get<MeshRendererComponent>(e);
         json j;
         j["id"] = reg.get<IdComponent>(e).Id;
         j["name"] = reg.get<NameComponent>(e).Name;
@@ -1251,32 +1254,43 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["position"] = Vec3ToJson(tr.Position);
         j["rotation"] = Vec3ToJson(tr.Rotation);
         j["scale"]    = Vec3ToJson(tr.Scale);
-        j["color"]    = Vec3ToJson(mr.Color);
-        j["opacity"]  = mr.Opacity;
-        j["castShadows"] = mr.CastShadows;
-        j["inReflections"] = mr.InReflections;
-        j["emissive"] = Vec3ToJson(mr.Emissive);
-        j["emissiveStrength"] = mr.EmissiveStrength;
-        j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
-        SaveAssetRef(j["mesh"], "path", mr.Ref.path);
-        SaveAssetRef(j, "material", mr.MaterialPath);
-        // Материалы подмешей — массивом, по слоту на элемент разметки меша.
-        // Пишется, только если слоты есть: у одноматериального объекта пустой
-        // массив в каждом узле сцены был бы шумом в файле, который люди читают
-        // и сравнивают в системе контроля версий.
+        // ПРИЗНАК ОТСУТСТВИЯ, А НЕ МОЛЧАНИЕ. Старые сцены ключа "noMesh" не
+        // имеют, и загрузчик по-прежнему даёт их объектам MeshRenderer — иначе
+        // каждая сохранённая до этой правки сцена открылась бы невидимой.
+        // Отсутствие компонента поэтому пишется явно.
         //
-        // Пустой слот сохраняется как пустой объект, а не пропускается: слоты
-        // адресуются НОМЕРОМ подмеша, и сжать дырки значило бы сдвинуть все
-        // последующие материалы на одну часть модели.
-        if (!mr.Slots.empty()) {
-            json slots = json::array();
-            for (const MaterialSlot& slot : mr.Slots) {
-                json sj = json::object();
-                SaveAssetRef(sj, "path", slot.Path);
-                slots.push_back(std::move(sj));
+        // Пропускаются ТОЛЬКО поля меша: у пустого объекта могут быть скрипт,
+        // свет, физика, звук и дети, и они сохраняются наравне со всеми.
+        if (!mrp) j["noMesh"] = true;
+        if (mrp) {
+            const MeshRendererComponent& mr = *mrp;
+            j["color"]    = Vec3ToJson(mr.Color);
+            j["opacity"]  = mr.Opacity;
+            j["castShadows"] = mr.CastShadows;
+            j["inReflections"] = mr.InReflections;
+            j["emissive"] = Vec3ToJson(mr.Emissive);
+            j["emissiveStrength"] = mr.EmissiveStrength;
+            j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
+            SaveAssetRef(j["mesh"], "path", mr.Ref.path);
+            SaveAssetRef(j, "material", mr.MaterialPath);
+            // Материалы подмешей — массивом, по слоту на элемент разметки меша.
+            // Пишется, только если слоты есть: у одноматериального объекта пустой
+            // массив в каждом узле сцены был бы шумом в файле, который люди читают
+            // и сравнивают в системе контроля версий.
+            //
+            // Пустой слот сохраняется как пустой объект, а не пропускается: слоты
+            // адресуются НОМЕРОМ подмеша, и сжать дырки значило бы сдвинуть все
+            // последующие материалы на одну часть модели.
+            if (!mr.Slots.empty()) {
+                json slots = json::array();
+                for (const MaterialSlot& slot : mr.Slots) {
+                    json sj = json::object();
+                    SaveAssetRef(sj, "path", slot.Path);
+                    slots.push_back(std::move(sj));
+                }
+                j["materialSlots"] = std::move(slots);
             }
-            j["materialSlots"] = std::move(slots);
-        }
+        } // if (mrp)
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             SaveAssetRef(j, "script", sc->Path);
         }
@@ -1799,6 +1813,12 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             // Примитивы (Cube/Sphere/Plane/Cylinder/Cone) — из кэша; None -> nullptr.
             mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);
         }
+
+        // Пустой объект: компонент снимается ПОСЛЕДНИМ, уже после разбора всего
+        // остального. Сущность создаётся общим CreateObjectWithId (он даёт
+        // MeshRenderer всем), а строк выше, читающих mr, полтора десятка —
+        // проще снять лишнее в конце, чем проводить указатель через весь разбор.
+        if (j.value("noMesh", false)) obj.Registry()->remove<MeshRendererComponent>(obj.Entity());
     }
     // Восстанавливаем иерархию, когда ВСЕ сущности уже созданы (родитель мог
     // идти в файле позже ребёнка).

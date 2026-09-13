@@ -175,7 +175,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Теперь порядок повторяет саму структуру компонента (см.
     // ecs/RenderComponents.h): ЧТО рисуем -> ЧЕМ красим -> чем ЭТОТ экземпляр
     // отличается от других таких же.
-    if (EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    // СЕКЦИЯ ЕСТЬ, ТОЛЬКО ЕСЛИ ЕСТЬ КОМПОНЕНТ. Пустой объект его не несёт, и
+    // рисовать ему «Меш» значило бы показывать цвет, тени и слот материала у
+    // того, кто ничем не рисуется; добавляется компонент кнопкой «Добавить
+    // компонент», как и все остальные.
+    if (reg.all_of<MeshRendererComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen)) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);

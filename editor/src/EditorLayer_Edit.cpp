@@ -242,6 +242,265 @@ GameObject EditorLayer::CreatePrimitiveEntity(const std::string& name, MeshRef::
     return obj;
 }
 
+// --- Создание по каталогу ---------------------------------------------------
+//
+// ОДНО МЕСТО НА ВСЕ МЕНЮ. Пункты «создать» жили в двух списках сразу — в меню
+// «Объект» и под правой кнопкой в иерархии, — и списки эти расходились: под
+// правой кнопкой были только «пустой» и «куб». Теперь оба меню рисуют общий
+// каталог (editor/src/ObjectCatalog.h) и зовут сюда с его ключом.
+//
+// ШАБЛОН, А НЕ ГОЛЫЙ КОМПОНЕНТ. Каждый пункт даёт предмет, с которым уже можно
+// работать: у падающего ящика есть масса и коллайдер, у прожектора — поворот
+// вниз, у персонажа — капсула нужного роста. Пункт, после которого надо
+// открыть инспектор и что-то донастроить, чтобы вообще увидеть результат,
+// читается как несработавшая кнопка.
+int EditorLayer::CreateCatalogObject(const std::string& id) {
+    entt::registry& reg = m_scene->Registry();
+
+    // Готовый объект: снимок для отмены уже сделан, осталось выделить и
+    // отметить сцену изменённой.
+    auto done = [&](GameObject obj) {
+        SetSelectedId(obj.Id());
+        m_sceneDirty = true;
+        return obj.Id();
+    };
+
+    if (id == "empty") {
+        PushUndoSnapshot();
+        return done(m_scene->CreateEmptyObject("Empty"));
+    }
+
+    // --- Формы ---
+    struct ShapeEntry { const char* Id; const char* Name; MeshRef::Type Type; };
+    static const ShapeEntry kShapes[] = {
+        {"shape.cube",     "Cube",     MeshRef::Type::Cube},
+        {"shape.sphere",   "Sphere",   MeshRef::Type::Sphere},
+        {"shape.plane",    "Plane",    MeshRef::Type::Plane},
+        {"shape.cylinder", "Cylinder", MeshRef::Type::Cylinder},
+        {"shape.cone",     "Cone",     MeshRef::Type::Cone},
+    };
+    for (const ShapeEntry& sh : kShapes) {
+        if (id != sh.Id) continue;
+        PushUndoSnapshot();
+        return done(CreatePrimitiveEntity(sh.Name, sh.Type));
+    }
+
+    // --- Свет ---
+    // Прожектор смотрит ВНИЗ, солнце — наискось: свет, созданный «в никуда»,
+    // выглядит как свет, который не работает.
+    struct LightEntry {
+        const char* Id; const char* Name; LightComponent::Type Kind;
+        glm::vec3 Position; glm::vec3 Rotation; glm::vec3 Color; float Intensity;
+    };
+    static const LightEntry kLights[] = {
+        {"light.point", "Light", LightComponent::Type::Point,
+         {0.0f, 2.5f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, 1.0f},
+        {"light.spot", "Spotlight", LightComponent::Type::Spot,
+         {0.0f, 5.0f, 0.0f}, {-90.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, 4.0f},
+        {"light.sun", "Sun", LightComponent::Type::Directional,
+         {0.0f, 10.0f, 0.0f}, {-55.0f, -25.0f, 0.0f}, {1.0f, 0.95f, 0.85f}, 1.0f},
+    };
+    for (const LightEntry& l : kLights) {
+        if (id != l.Id) continue;
+        PushUndoSnapshot();
+        // Свет не рисуется мешем — объект пустой: секция «Меш» у лампы
+        // предлагала бы ей модель, цвет и тени, которых у света нет.
+        GameObject obj = m_scene->CreateEmptyObject(l.Name);
+        obj.GetTransform().Position = l.Position;
+        obj.GetTransform().Rotation = l.Rotation;
+        LightComponent lc;
+        lc.Kind = l.Kind;
+        lc.Color = l.Color;
+        lc.Intensity = l.Intensity;
+        reg.emplace<LightComponent>(obj.Entity(), lc);
+        return done(obj);
+    }
+
+    // --- Камера ---
+    if (id == "camera.game") {
+        PushUndoSnapshot();
+        GameObject obj = m_scene->CreateEmptyObject("Camera");
+        // Камера встаёт ТУДА, ОТКУДА СЕЙЧАС СМОТРЯТ. Созданная в начале
+        // координат, она чаще всего оказывалась внутри пола, и панель Game
+        // показывала темноту — «камера не работает».
+        obj.GetTransform().Position = m_camera.Position;
+        const glm::vec3 f = m_camera.Front;
+        obj.GetTransform().Rotation =
+            glm::vec3(glm::degrees(std::asin(glm::clamp(-f.y, -1.0f, 1.0f))),
+                      glm::degrees(std::atan2(-f.x, -f.z)), 0.0f);
+        reg.emplace<CameraComponent>(obj.Entity());
+        return done(obj);
+    }
+
+    // --- Физика ---
+    if (id == "physics.box") {
+        PushUndoSnapshot();
+        GameObject obj = CreatePrimitiveEntity("Crate", MeshRef::Type::Cube);
+        obj.GetTransform().Position = {0.0f, 4.0f, 0.0f};
+        RigidBodyComponent rb;
+        rb.Type = sage::physics::BodyType::Dynamic;
+        reg.emplace<RigidBodyComponent>(obj.Entity(), rb);
+        reg.emplace<ColliderComponent>(obj.Entity());
+        return done(obj);
+    }
+    if (id == "physics.platform") {
+        PushUndoSnapshot();
+        GameObject obj = CreatePrimitiveEntity("Platform", MeshRef::Type::Cube);
+        // Плита, а не куб: половинные размеры коллайдера умножаются на масштаб
+        // (см. PhysicsComponents.h), поэтому форма совпадает с видимой без
+        // отдельной настройки.
+        obj.GetTransform().Scale = {6.0f, 0.5f, 6.0f};
+        obj.GetTransform().Position = {0.0f, -0.25f, 0.0f};
+        RigidBodyComponent rb;
+        rb.Type = sage::physics::BodyType::Static;
+        reg.emplace<RigidBodyComponent>(obj.Entity(), rb);
+        reg.emplace<ColliderComponent>(obj.Entity());
+        return done(obj);
+    }
+    if (id == "physics.trigger") {
+        PushUndoSnapshot();
+        // Зона НЕВИДИМА — меша у неё нет вовсе. Гизмо коллайдера редактор
+        // рисует и без него, а модель у триггера означала бы, что игрок видит
+        // границу, которую видеть не должен.
+        GameObject obj = m_scene->CreateEmptyObject("Trigger");
+        obj.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+        RigidBodyComponent rb;
+        rb.Type = sage::physics::BodyType::Static;
+        rb.Sensor = true; // пропускает сквозь себя, но сообщает о входе и выходе
+        reg.emplace<RigidBodyComponent>(obj.Entity(), rb);
+        ColliderComponent col;
+        col.HalfExtents = {1.0f, 1.0f, 1.0f};
+        reg.emplace<ColliderComponent>(obj.Entity(), col);
+        return done(obj);
+    }
+    if (id == "physics.character") {
+        PushUndoSnapshot();
+        GameObject obj = CreatePrimitiveEntity("Character", MeshRef::Type::Cylinder);
+        // Цилиндр движка — единичный (радиус 0.5, высота 1), поэтому масштаб
+        // повторяет рост контроллера: 0.7 в ширину и 1.8 в высоту.
+        obj.GetTransform().Scale = {0.7f, 1.8f, 0.7f};
+        obj.GetTransform().Position = {0.0f, 0.9f, 0.0f};
+        reg.emplace<CharacterControllerComponent>(obj.Entity());
+        return done(obj);
+    }
+
+    // --- Эффекты ---
+    if (id == "fx.decal") {
+        PushUndoSnapshot();
+        // Наклейка ставится в СЕРЕДИНУ вида и смотрит туда же, куда камера:
+        // поставленная в начало координат, она чаще всего оказалась бы внутри
+        // пола или далеко за спиной, и первое, что пришлось бы делать, —
+        // искать её.
+        GameObject d = m_scene->CreateObject("Decal");
+        d.Renderer().Ref = MeshRef{MeshRef::Type::None, ""};
+        d.GetTransform().Position = m_camera.Position + m_camera.Front * 4.0f;
+        // Ось Z наклейки — навстречу камере: проекция идёт вдоль -Z, то есть
+        // от зрителя вглубь сцены, как и смотрит человек.
+        const glm::vec3 f = -m_camera.Front;
+        d.GetTransform().Rotation =
+            glm::vec3(glm::degrees(std::asin(glm::clamp(f.y, -1.0f, 1.0f))),
+                      glm::degrees(std::atan2(f.x, f.z)), 0.0f);
+        d.GetTransform().Scale = glm::vec3(1.0f);
+        reg.emplace<DecalComponent>(d.Entity());
+        return done(d);
+    }
+    if (id == "fx.probe") {
+        PushUndoSnapshot();
+        GameObject obj = m_scene->CreateEmptyObject("Reflection Probe");
+        obj.GetTransform().Position = {0.0f, 2.0f, 0.0f};
+        reg.emplace<ReflectionProbeComponent>(obj.Entity());
+        return done(obj);
+    }
+
+    // Частицы: ключ каталога -> название пресета движка. Связь по ИМЕНИ, а не
+    // по номеру в реестре: номера сдвинутся от любой вставки нового пресета, и
+    // «Огонь» в меню молча стал бы дымом.
+    struct FxEntry { const char* Id; const char* Preset; const char* Name; };
+    static const FxEntry kFx[] = {
+        {"fx.particles.fire",   "Fire",         "Fire"},
+        {"fx.particles.smoke",  "Smoke",        "Smoke"},
+        {"fx.particles.sparks", "Sparks",       "Sparks"},
+        {"fx.particles.splash", "Water Splash", "Water Splash"},
+        {"fx.particles.embers", "Embers",       "Embers"},
+        {"fx.particles.debris", "Block Break",  "Debris"},
+    };
+    for (const FxEntry& fx : kFx) {
+        if (id != fx.Id) continue;
+        const auto& registry = ParticlePresets::Registry();
+        int index = 0;
+        for (int i = 0; i < (int)registry.size(); ++i) {
+            if (std::string(registry[(size_t)i].Name) == fx.Preset) { index = i; break; }
+        }
+        PushUndoSnapshot();
+        GameObject obj = m_scene->CreateEmptyObject(fx.Name);
+        obj.GetTransform().Position = {0.0f, 0.5f, 0.0f};
+        ParticleEmitterComponent em;
+        em.Config = registry[(size_t)index].Make();
+        em.Preset = index;
+        reg.emplace<ParticleEmitterComponent>(obj.Entity(), em);
+        return done(obj);
+    }
+
+    // --- Звук и логика ---
+    if (id == "audio.source") {
+        PushUndoSnapshot();
+        GameObject obj = m_scene->CreateEmptyObject("Sound");
+        reg.emplace<AudioSourceComponent>(obj.Entity());
+        return done(obj);
+    }
+    if (id == "logic.script") {
+        PushUndoSnapshot();
+        // Скрипт прикрепляется ПУСТЫМ слотом: подставленный путь к
+        // демонстрационному скрипту движка в чужом проекте не существует, и
+        // объект приезжал бы уже сломанным.
+        GameObject obj = m_scene->CreateEmptyObject("Script Object");
+        reg.emplace<ScriptComponent>(obj.Entity());
+        return done(obj);
+    }
+
+    // --- Анимация ---
+    if (id == "anim.model") {
+        PushUndoSnapshot();
+        // Меш пустой — модель выберут в инспекторе. Без модели анимация
+        // показывает встроенный демо-скелет с клипом «Wave», и во вьюпорте
+        // сразу видно, что скиннинг работает.
+        GameObject obj = m_scene->CreateObject("Animated Model");
+        reg.emplace<AnimationComponent>(obj.Entity());
+        return done(obj);
+    }
+
+    // --- Интерфейс ---
+    // Готовые ЭКРАНЫ и готовые ЭЛЕМЕНТЫ. Голый прямоугольник — это ещё не
+    // кнопка: чтобы получить её, надо добавить подложку, надпись и реакцию на
+    // мышь. Меню отдаёт то, что человек и хотел, сразу собранным.
+    if (id.rfind("ui.screen.", 0) == 0) {
+        const std::string demo = id.substr(std::string("ui.screen.").size());
+        PushUndoSnapshot();
+        const int newId = sage::ui::BuildDemo(*m_scene, demo);
+        if (newId < 0) return -1;
+        SetSelectedId(newId);
+        m_sceneDirty = true;
+        // И сразу открывается редактор интерфейса: элемент, которого не видно
+        // после создания, выглядит как «кнопка не сработала».
+        m_showUIEditor = true;
+        m_uiEditor.RequestFocus();
+        return newId;
+    }
+    if (id.rfind("ui.", 0) == 0) {
+        const std::string preset = id.substr(std::string("ui.").size());
+        PushUndoSnapshot();
+        GameObject obj = CreateUIEntity(preset);
+        m_showUIEditor = true;
+        m_uiEditor.RequestFocus();
+        return done(obj);
+    }
+
+    // Неизвестный ключ — это опечатка в каталоге, а не действие пользователя.
+    // Молчать нельзя: пункт меню внешне сработал бы и не сделал ничего.
+    LOG_WARN("Editor") << "Каталог объектов: неизвестный ключ — " << id;
+    return -1;
+}
+
 namespace {
 // Копирует компонент T с сущности src на copy, если он есть. Дубликат должен
 // нести ВСЕ движковые компоненты — раньше копировались только Script/Camera, и

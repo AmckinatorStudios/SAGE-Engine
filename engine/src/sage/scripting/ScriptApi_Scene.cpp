@@ -237,7 +237,7 @@ void ScriptEngine::RegisterMeshApi() {
     // Удобный хелпер: даёт заспавненному объекту видимый куб-меш, чтобы его
     // сразу было видно на сцене без ручной возни с MeshRef/ResourceManager
     Bind("render", "SetMeshCube", "SetMeshCube", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Cube, ""};
         mr.MeshPtr = ResourceManager::Instance().GetCube();
     });
@@ -246,7 +246,7 @@ void ScriptEngine::RegisterMeshApi() {
     // одна и та же модель, запрошенная из нескольких скриптов, не
     // перечитывается с диска). Бросает ошибку, если файл не найден/битый.
     Bind("render", "SetMeshModel", "SetMeshModel", [](GameObject& obj, const std::string& path) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Model, path};
         mr.MeshPtr = ResourceManager::Instance().GetModel(path);
         // GetModel при ошибке возвращает nullptr (чтобы загрузка СЦЕНЫ с битой
@@ -258,22 +258,22 @@ void ScriptEngine::RegisterMeshApi() {
     // цилиндра/конуса. SetMeshNone убирает геометрию (пустышка/маркер/держатель
     // компонентов).
     Bind("render", "SetMeshSphere", "SetMeshSphere", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Sphere, ""};
         mr.MeshPtr = ResourceManager::Instance().GetSphere();
     });
     Bind("render", "SetMeshPlane", "SetMeshPlane", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Plane, ""};
         mr.MeshPtr = ResourceManager::Instance().GetPlane();
     });
     Bind("render", "SetMeshCylinder", "SetMeshCylinder", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Cylinder, ""};
         mr.MeshPtr = ResourceManager::Instance().GetCylinder();
     });
     Bind("render", "SetMeshCone", "SetMeshCone", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Cone, ""};
         mr.MeshPtr = ResourceManager::Instance().GetCone();
     });
@@ -281,10 +281,13 @@ void ScriptEngine::RegisterMeshApi() {
     // компонент ради одного числа, которое меняется чаще всего остального
     // (затухание подобранного предмета, вода, призрачная подсветка постройки).
     Bind("render", "SetOpacity", "SetOpacity", [](GameObject& obj, float opacity) {
-        obj.Renderer().Opacity = opacity;
+        obj.EnsureRenderer().Opacity = opacity;
     });
     Bind("render", "GetOpacity", "GetOpacity", [](GameObject& obj) {
-        return obj.Renderer().Opacity;
+        // У пустого объекта прозрачности нет вовсе. Единица — «непрозрачен»:
+        // ошибкой скрипта отсутствие меша не является, спрашивать про него
+        // могут и у узла иерархии.
+        return obj.HasRenderer() ? obj.Renderer().Opacity : 1.0f;
     });
 
     // Юниформы собственного шейдера ДЛЯ ОДНОЙ сущности: материал общий, а
@@ -418,7 +421,9 @@ void ScriptEngine::RegisterMeshApi() {
     // своим цветом). Нужен, чтобы не хранить имена материалов в скрипте
     // параллельно с движком.
     Bind("render", "MaterialOf", "MaterialOf",
-         [](GameObject& obj) -> std::shared_ptr<Material> { return obj.Renderer().MaterialPtr; });
+         [](GameObject& obj) -> std::shared_ptr<Material> {
+             return obj.HasRenderer() ? obj.Renderer().MaterialPtr : nullptr;
+         });
 
     // Подтянуть текстуры материала по проставленным путям. Отдельным вызовом,
     // а не на каждое присваивание пути: у материала до шести карт, и грузить
@@ -434,7 +439,7 @@ void ScriptEngine::RegisterMeshApi() {
         // Через AssignMaterial — как и редактор: назначение материала
         // возвращает поправки экземпляра в нейтраль, иначе назначенный из
         // скрипта материал показывался бы умноженным на прежний тон объекта.
-        AssignMaterial(obj.Renderer(), path,
+        AssignMaterial(obj.EnsureRenderer(), path,
                        path.empty() ? nullptr : ResourceManager::Instance().GetMaterial(path));
     });
 
@@ -446,7 +451,7 @@ void ScriptEngine::RegisterMeshApi() {
     // выключатель (см. MaterialForSubmesh).
     Bind("render", "SetSubmeshMaterial", "SetSubmeshMaterial",
          [](GameObject& obj, int part, const std::string& path) {
-             MeshRendererComponent& mr = obj.Renderer();
+             MeshRendererComponent& mr = obj.EnsureRenderer();
              const size_t count = mr.MeshPtr ? mr.MeshPtr->SubmeshCount() : 0;
              if (part < 1 || (size_t)part > count) {
                  throw std::runtime_error("SetSubmeshMaterial: у модели " +
@@ -462,7 +467,7 @@ void ScriptEngine::RegisterMeshApi() {
     // Сколько частей у модели: без этого числа предыдущий вызов пришлось бы
     // звать наугад и ловить ошибку.
     Bind("render", "SubmeshCount", "SubmeshCount", [](GameObject& obj) -> int {
-        const MeshRendererComponent& mr = obj.Renderer();
+        const MeshRendererComponent& mr = obj.EnsureRenderer();
         return mr.MeshPtr ? (int)mr.MeshPtr->SubmeshCount() : 0;
     });
 
@@ -482,7 +487,7 @@ void ScriptEngine::RegisterMeshApi() {
     });
 
     Bind("render", "SetMeshNone", "SetMeshNone", [](GameObject& obj) {
-        MeshRendererComponent& mr = obj.Renderer();
+        MeshRendererComponent& mr = obj.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::None, ""};
         mr.MeshPtr.reset();
     });
