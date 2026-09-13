@@ -111,11 +111,10 @@ void EditorLayer::RegisterCommands() {
     auto hasProject = [this] { return m_project.Loaded(); };
     auto hasSelection = [this] { return SelectedId() != 0; };
 
-    m_commands.Add({"scene.save", T("Save Scene"), scene, "Ctrl+S", "scene",
-                    [this] { return !m_scenePath.empty(); },
-                    [this] { SaveSceneToFile(m_scenePath); }});
+    m_commands.Add({"scene.save", T("Save Scene"), scene, "Ctrl+S", "scene", hasProject,
+                    [this] { SaveCurrentScene(); }});
     m_commands.Add({"scene.new", T("New Scene"), scene, "", "scene", hasProject,
-                    [this] { NewScene(ProjectTemplateKind::Empty); }});
+                    [this] { NewSceneWithPrompt(); }});
     m_commands.Add({"edit.undo", T("Undo"), scene, "Ctrl+Z", "refresh",
                     [this] { return !m_undoStack.empty(); }, [this] { Undo(); }});
     m_commands.Add({"edit.redo", T("Redo"), scene, "Ctrl+Shift+Z", "refresh",

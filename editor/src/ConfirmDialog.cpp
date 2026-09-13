@@ -43,7 +43,7 @@ void ConfirmDialog::Draw() {
     const std::string id = m_title + "###confirm";
     if (ImGui::BeginPopupModal(id.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         EditorIcons::Inline("warn");
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, 0.0f);
         ImGui::TextWrapped("%s", m_message.c_str());
         ImGui::Spacing();
         ImGui::Checkbox(T("Do not ask about this action again"), &m_dontAskAgain);

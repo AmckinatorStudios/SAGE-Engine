@@ -106,7 +106,7 @@ void CommandPalette::Draw(CommandRegistry& registry) {
                     EditorIcons::Overlay(x, p0.y + (rowH - ui.IconSize) * 0.5f, ui.IconSize,
                                          cmd.Icon.c_str(),
                                          glm::vec3(textCol.x, textCol.y, textCol.z));
-                    x += ui.IconSize + ui.SpacingSM;
+                    x += ui.IconSize + EditorIcons::TextGap();
                 }
                 const float textY = p0.y + (rowH - ImGui::GetTextLineHeight()) * 0.5f;
                 dl->AddText(ImVec2(x, textY), ImGui::GetColorU32(textCol), cmd.Title.c_str());

@@ -308,7 +308,7 @@ void EditorLayer::RunSelfTest() {
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
-                               << "assets-root + scale-lock + viewport-tools + import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
+                               << "scene-save + assets-root + scale-lock + viewport-tools + import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
@@ -3839,6 +3839,62 @@ bool EditorLayer::SelfTestTools() {
     std::error_code ec;
     std::string err;
     (void)ec; (void)err;
+
+    // --- СОХРАНЕНИЕ СЦЕНЫ РАБОТАЕТ КНОПКОЙ И ХОТКЕЕМ -----------------------
+    //
+    // Кнопка «Сохранить» и Ctrl+S ПРОСИЛИ ДИАЛОГ «Save Scene», а диалога с
+    // таким именем нет: ImGui::OpenPopup для окна, которое никто не начинает,
+    // молчит. Нажатие не делало ничего — ни файла, ни ошибки, ни строки в
+    // логе, — и сцена терялась при первом же закрытии редактора. Проверяем то,
+    // что зовут обе кнопки: у сцены с путём файл обязан обновиться на диске.
+    {
+        const fs::path scenePath = m_project.ScenesDir() / "selftest_save.sage";
+        m_scenePath = scenePath;
+        GameObject mark = m_scene->CreateObject("SelftestSaveMark");
+        mark.GetTransform().Position = {3.0f, 4.0f, 5.0f};
+        m_sceneDirty = true;
+
+        std::error_code sec;
+        fs::remove(scenePath, sec);
+        SaveCurrentScene();
+        if (!fs::exists(scenePath, sec)) {
+            LOG_ERROR("Editor") << "SELFTEST: «Сохранить сцену» не записала файл "
+                                << scenePath.string();
+            ok = false;
+        } else if (m_sceneDirty) {
+            LOG_ERROR("Editor") << "SELFTEST: после записи сцена всё ещё считается изменённой";
+            ok = false;
+        }
+
+        // Несохранённая сцена обязана СПРОСИТЬ, а не молча уступить место новой:
+        // иначе работа исчезает по одному нажатию.
+        m_sceneDirty = true;
+        bool ran = false;
+        AskUnsaved([&ran] { ran = true; });
+        if (ran || !m_unsavedPrompt) {
+            LOG_ERROR("Editor") << "SELFTEST: несохранённую сцену заменили без вопроса";
+            ok = false;
+        }
+        m_unsavedPrompt = false;
+        m_afterUnsaved = nullptr;
+
+        // А сохранённая — не спрашивает: вопрос, который задают всегда,
+        // перестают читать.
+        m_sceneDirty = false;
+        ran = false;
+        AskUnsaved([&ran] { ran = true; });
+        if (!ran || m_unsavedPrompt) {
+            LOG_ERROR("Editor") << "SELFTEST: сохранённая сцена спросила о потере правок";
+            ok = false;
+        }
+        m_unsavedPrompt = false;
+        m_afterUnsaved = nullptr;
+
+        m_scene->RemoveObject(mark.Id());
+        fs::remove(scenePath, sec);
+        m_scenePath.clear();
+        m_sceneDirty = false;
+    }
 
     // --- ПАНЕЛЬ АССЕТОВ НЕ ВЫХОДИТ ИЗ assets/ ------------------------------
     //

@@ -462,6 +462,72 @@ void EditorLayer::DrawRecoveryPrompt() {
     }
 }
 
+// Спросить про несохранённую сцену и, если ответят, сделать action.
+//
+// Сохранено — спрашивать не о чем, действие идёт сразу: вопрос, который задают
+// всегда, перестают читать.
+void EditorLayer::AskUnsaved(std::function<void()> action) {
+    if (!m_sceneDirty) {
+        if (action) action();
+        return;
+    }
+    m_afterUnsaved = std::move(action);
+    m_unsavedPrompt = true;
+}
+
+// ТРИ ОТВЕТА, А НЕ ДВА. «Сохранить» и «Отмена» — это ловушка для того, кто
+// действительно хочет выбросить черновик: он вынужден сохранять мусор поверх
+// хорошего файла. Поэтому «Сохранить», «Не сохранять» и «Отмена» — ровно тот
+// набор, который человек видел во всех программах, где что-то редактируют.
+void EditorLayer::DrawUnsavedPrompt() {
+    if (!m_unsavedPrompt) return;
+    ImGui::OpenPopup(T("Scene not saved" "###Unsaved"));
+    if (ImGui::BeginPopupModal(T("Scene not saved" "###Unsaved"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        const std::string name = m_scenePath.empty() ? CurrentSceneName()
+                                                     : m_scenePath.filename().string();
+        ImGui::Text(T("Scene \"%s\" has unsaved changes."), name.c_str());
+        ImGui::TextDisabled("%s", T("They will be lost if you continue."));
+        ImGui::Spacing();
+
+        auto finish = [&](bool proceed) {
+            m_unsavedPrompt = false;
+            const bool closing = m_closeAfterPrompt;
+            m_closeAfterPrompt = false;
+            auto action = std::move(m_afterUnsaved);
+            m_afterUnsaved = nullptr;
+            ImGui::CloseCurrentPopup();
+            if (!proceed) return;
+            if (action) action();
+            if (closing) sage::Application::Get().Close();
+        };
+
+        if (ImGui::Button(T("Save"), ImVec2(150, 0))) {
+            if (m_scenePath.empty()) {
+                // Имени у сцены ещё нет — спрашиваем его, а отложенное действие
+                // отменяем: продолжать, не дождавшись записи, значит потерять
+                // ровно то, что человек попросил сохранить.
+                m_unsavedPrompt = false;
+                m_closeAfterPrompt = false;
+                m_afterUnsaved = nullptr;
+                RequestDialog("Save Scene As");
+                ImGui::CloseCurrentPopup();
+            } else if (SaveSceneToFile(m_scenePath)) {
+                finish(true);
+            } else {
+                // Запись не удалась — причина в консоли, а выход отменяем:
+                // закрыться после неудачной записи значит потерять сцену.
+                finish(false);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(T("Don't save"), ImVec2(150, 0))) finish(true);
+        ImGui::SameLine();
+        if (ImGui::Button(T("Cancel"), ImVec2(110, 0))) finish(false);
+        ImGui::EndPopup();
+    }
+}
+
 bool EditorLayer::SaveSceneToFile(const fs::path& path) {
     try {
         std::error_code ec;

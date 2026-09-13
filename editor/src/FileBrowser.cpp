@@ -441,9 +441,11 @@ bool FileBrowser::DrawList() {
         if (cover == Cover::None || cover == Cover::Failed) {
             EditorIcons::Inline(cover == Cover::Failed ? "warn" : IconFor(e.Name, e.IsDir));
         } else {
-            ImGui::Dummy(ImVec2(icon, icon));
+            // Обложка занимает место сама, но зазор до имени обязан быть тем
+            // же, что и у значка (EditorIcons::Inline его уже включает).
+            ImGui::Dummy(ImVec2(icon + EditorIcons::TextGap(), icon));
         }
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, 0.0f);
         if (ImGui::Selectable(e.Name.c_str(), i == m_selected,
                               ImGuiSelectableFlags_AllowDoubleClick)) {
             const Hit hit = DrawEntryCommon(i, e, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));

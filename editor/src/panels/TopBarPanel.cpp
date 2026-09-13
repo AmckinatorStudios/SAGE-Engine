@@ -105,7 +105,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     // минуту, и место у левого края (куда рука идёт первой) досталось не тому.
     // Сами окна никуда не делись: они все перечислены в меню «Окно».
     CenterY(row);
-    if (EditorIcons::IconOnlyButton("file", T("New scene"))) host.RequestDialog("New Scene");
+    if (EditorIcons::IconOnlyButton("file", T("New scene"))) host.NewSceneWithPrompt();
     ImGui::SameLine(0.0f, ui.SpacingXS);
     CenterY(row);
     if (EditorIcons::IconOnlyButton("open", T("Open scene..."))) host.RequestDialog("Open Scene");
@@ -114,7 +114,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     if (EditorIcons::IconOnlyButton("project", T("Open project..."))) host.RequestDialog("Open Project");
     ImGui::SameLine(0.0f, ui.SpacingXS);
     CenterY(row);
-    if (EditorIcons::IconOnlyButton("save", T("Save scene (Ctrl+S)"))) host.RequestDialog("Save Scene");
+    if (EditorIcons::IconOnlyButton("save", T("Save scene (Ctrl+S)"))) host.SaveCurrentScene();
 
     divider();
 

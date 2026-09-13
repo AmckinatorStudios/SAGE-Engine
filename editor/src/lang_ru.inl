@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1547.
+// Язык: Русский. Строк: 1551.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -794,6 +794,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Больше не спрашивать об этом действии"},
     {"Do not clip",
      "Не обрезать"},
+    {"Don't save",
+     "Не сохранять"},
     {"Double-click a .lua, .vert, .frag or .glsl file in Assets to open it here.",
      "Двойной клик по .lua, .vert, .frag или .glsl в панели Assets открывает файл здесь."},
     {"Down",
@@ -2246,10 +2248,14 @@ constexpr TranslationPair kRussianStrings[] = {
      "Правила масштабирования для этого корня интерфейса"},
     {"Scene",
      "Сцена"},
+    {"Scene \"%s\" has unsaved changes.",
+     "В сцене «%s» есть несохранённые правки."},
     {"Scene changed since bake — re-bake",
      "Сцена менялась после запекания — стоит перезапечь"},
     {"Scene lights",
      "Источники света сцены"},
+    {"Scene not saved",
+     "Сцена не сохранена"},
     {"Scene: %s  |  Entities: %zu",
      "Сцена: %s  |  объектов: %zu"},
     {"Scenes",
@@ -2726,6 +2732,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Под выделенным нет поверхности"},
     {"There is no undo for this. To just hide the project from the list, use «Remove from Launcher».",
      "Отменить это будет нечем. Чтобы просто убрать проект из списка, есть «Убрать из списка»."},
+    {"They will be lost if you continue.",
+     "Если продолжить, они пропадут."},
     {"This cannot be undone.",
      "Это действие необратимо."},
     {"This file cannot be applied to an object",

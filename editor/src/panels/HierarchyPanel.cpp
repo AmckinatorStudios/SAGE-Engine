@@ -94,6 +94,44 @@ const char* HierarchyPanel::IconFor(entt::registry& reg, entt::entity e) {
     return EntityIcon(reg, e);
 }
 
+// ЛИНИИ ДЕРЕВА — СВОИ, а не встроенные в ImGui.
+//
+// ImGui ведёт горизонтальную чёрточку до СТРЕЛКИ раскрытия ребёнка, а значок и
+// подпись у нас начинаются дальше — за отступом до подписи. Между чёрточкой и
+// значком оставался провал в полтора десятка пикселей: линия будто обрывается
+// на полпути, и дерево выглядит недорисованным. Здесь линия идёт до самого
+// значка, а вертикаль — от родителя до СЕРЕДИНЫ последнего ребёнка, а не до
+// конца всего поддерева: иначе она свисает под последней строкой в пустоту.
+//
+// Строки детей собираются в m_rows по ходу отрисовки — по ним и строится
+// вертикаль: другого способа узнать, где кончился последний ребёнок, нет.
+void HierarchyPanel::DrawTreeLines(const ImVec2& parentPos, float indent, int childDepth) {
+    if (m_rows.empty()) return;
+    const float line = ImGui::GetTextLineHeight();
+    const float spineX = std::floor(parentPos.x + indent * 0.5f);
+    const ImU32 col = ImGui::GetColorU32(ImGuiCol_TreeLines);
+    const float thickness = std::max(1.0f, ImGui::GetStyle().TreeLinesSize);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    float lastMid = 0.0f;
+    for (const Row& r : m_rows) {
+        if (r.Depth != childDepth) continue;           // только прямые дети
+        const float mid = std::floor(r.Y + line * 0.5f);
+        lastMid = mid;
+        dl->AddLine(ImVec2(spineX, mid), ImVec2(r.IconX - EditorIcons::TextGap() * 0.5f, mid), col,
+                    thickness);
+    }
+    if (lastMid > 0.0f) {
+        dl->AddLine(ImVec2(spineX, std::floor(parentPos.y + line)), ImVec2(spineX, lastMid), col,
+                    thickness);
+    }
+    // Строки этого уровня уже использованы — дальше их не надо ни родителю, ни
+    // соседям: иначе вертикаль тянулась бы через чужие ветки.
+    m_rows.erase(std::remove_if(m_rows.begin(), m_rows.end(),
+                                [childDepth](const Row& r) { return r.Depth >= childDepth; }),
+                 m_rows.end());
+}
+
 // Рекурсивно рисует узел дерева: сам элемент (выбор/ПКМ/drag-drop) + детей.
 void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     entt::registry& reg = scene.Registry();
@@ -102,7 +140,8 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
     bool hasChildren = h && !h->Children.empty();
 
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
+                               ImGuiTreeNodeFlags_DrawLinesNone;
     if (host.IsSelected(id)) flags |= ImGuiTreeNodeFlags_Selected; // подсветка всех выбранных
     if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
@@ -113,7 +152,14 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // обычным способом нельзя — клик перестал бы попадать в строку.
     const ImVec2 rowPos = ImGui::GetCursorScreenPos();
     const float indent = ImGui::GetTreeNodeToLabelSpacing();
-    bool open = ImGui::TreeNodeEx((void*)(intptr_t)id, flags, "  %s", name.c_str());
+    // УЗЕЛ БЕЗ ПОДПИСИ, подпись — рисунком вместе со значком.
+    //
+    // Подпись стояла в самом узле, а перед ней — два пробела, чтобы освободить
+    // место под значок. Ширина пробела зависит от шрифта и его масштаба, и
+    // «место под значок» то не хватало (значок наезжал на букву), то оказывалось
+    // вдвое больше нужного. Значок и подпись — одна пара, и ставит их одна
+    // функция с одним зазором на весь редактор (EditorIcons::DrawLabeled).
+    bool open = ImGui::TreeNodeEx((void*)(intptr_t)id, flags, "%s", "");
 
     // Иконка — Overlay, а НЕ Inline. Inline резервирует место под рисунок через
     // Dummy, то есть подаёт свой элемент, и «последним элементом» для ImGui
@@ -123,11 +169,14 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // букву вместо строки дерева. Из-за этого в иерархии НЕ ВЫБИРАЛИСЬ объекты:
     // клик проверялся у иконки, попасть в которую можно было лишь случайно, а
     // заодно молча не работали перетаскивание и контекстное меню.
+    m_rows.push_back({rowPos.y, rowPos.x + indent, m_depth});
     {
-        const float s = ImGui::GetTextLineHeight() * 0.86f;
-        EditorIcons::Overlay(rowPos.x + indent - s * 1.15f,
-                             rowPos.y + (ImGui::GetTextLineHeight() - s) * 0.5f, s,
-                             EntityIcon(reg, e), EntityIconColor(reg, e));
+        const float line = ImGui::GetTextLineHeight();
+        const glm::vec3 tint = EntityIconColor(reg, e);
+        const ImVec4 c(tint.x, tint.y, tint.z, 1.0f);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
+                                 line, EntityIcon(reg, e), ImGui::GetColorU32(c), name.c_str(),
+                                 ImGui::GetColorU32(ImGuiCol_Text));
     }
 
     // --- ВЫКЛЮЧАТЕЛЬ СПРАВА В СТРОКЕ ---------------------------------------
@@ -268,9 +317,20 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                     // список из восьми слов цвет не показывает.
                     const ImVec2 at = ImGui::GetCursorScreenPos();
                     const float box = ImGui::GetTextLineHeight();
-                    const bool picked = ImGui::MenuItem((std::string("   ") + tint.Label).c_str());
+                    // Место под образец — пробелами ровно по его ширине с общим
+                    // зазором, а не «три пробела на глаз»: ширина пробела
+                    // зависит от шрифта, и на другом масштабе подпись налезала
+                    // на квадратик.
+                    const float gap = EditorIcons::TextGap();
+                    const float spaceW = ImGui::CalcTextSize(" ").x;
+                    const int count = spaceW > 0.0f ? (int)std::ceil((box + gap) / spaceW) : 2;
+                    const bool picked =
+                        ImGui::MenuItem((std::string((size_t)count, ' ') + tint.Label).c_str());
+                    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+                    const float x = at.x + count * spaceW - gap - box;
+                    const float y = std::floor(r0.y + ((r1.y - r0.y) - box) * 0.5f);
                     ImGui::GetWindowDrawList()->AddRectFilled(
-                        ImVec2(at.x + 2.0f, at.y + 2.0f), ImVec2(at.x + box - 2.0f, at.y + box - 2.0f),
+                        ImVec2(x + 2.0f, y + 2.0f), ImVec2(x + box - 2.0f, y + box - 2.0f),
                         ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
                         3.0f);
                     if (picked) {
@@ -310,8 +370,12 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         std::sort(kids.begin(), kids.end(), [&](entt::entity a, entt::entity b) {
             return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
         });
+        const int myDepth = m_depth;
+        ++m_depth;
         for (auto k : kids)
             if (reg.valid(k)) DrawNode(host, scene, k);
+        --m_depth;
+        DrawTreeLines(rowPos, indent, myDepth + 1);
         ImGui::TreePop();
     }
     ImGui::PopID();
@@ -379,13 +443,14 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     const bool sceneOpen = ImGui::TreeNodeEx(
         "##scene_root",
         ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
-            ImGuiTreeNodeFlags_OpenOnDoubleClick,
-        "  %s", scene.Name().c_str());
+            ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_DrawLinesNone,
+        "%s", "");
     {
-        const float size = ImGui::GetTextLineHeight() * 0.9f;
-        EditorIcons::Overlay(rootPos.x + ImGui::GetTreeNodeToLabelSpacing() - size * 1.15f,
-                             rootPos.y + (ImGui::GetTextLineHeight() - size) * 0.5f, size, "scene",
-                             glm::vec3(0.72f, 0.78f, 0.90f));
+        const ImVec4 tint(0.72f, 0.78f, 0.90f, 1.0f);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(),
+                                 ImVec2(rootPos.x + ImGui::GetTreeNodeToLabelSpacing(), rootPos.y),
+                                 ImGui::GetTextLineHeight(), "scene", ImGui::GetColorU32(tint),
+                                 scene.Name().c_str(), ImGui::GetColorU32(ImGuiCol_Text));
     }
     // Бросок НА СЦЕНУ = «в корень»: то же, что и бросок в пустое место ниже, но
     // по видимой цели. Ассет, брошенный сюда, добавляется в сцену.
@@ -406,7 +471,10 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The scene itself: everything lives here"));
 
     if (sceneOpen) {
+        m_rows.clear();
+        m_depth = 0;
         for (auto& [id, e] : roots) DrawNode(host, scene, e);
+        DrawTreeLines(rootPos, ImGui::GetTreeNodeToLabelSpacing(), 0);
         ImGui::TreePop();
     }
 

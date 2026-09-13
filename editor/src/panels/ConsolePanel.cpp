@@ -169,7 +169,7 @@ void ConsolePanel::Draw(bool* open) {
             ImGui::TextDisabled("%s", e.Stamp.c_str());
             ImGui::SameLine(0.0f, 10.0f);
             EditorIcons::Inline(icon, glm::vec3(color.x, color.y, color.z));
-            ImGui::SameLine(0.0f, 6.0f);
+            ImGui::SameLine(0.0f, 0.0f);
             if (m_collapse && e.Repeats > 1) {
                 ImGui::TextColored(color, T("%s  (x%d)"), e.Message.c_str(), e.Repeats);
             } else {

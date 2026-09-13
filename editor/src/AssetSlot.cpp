@@ -197,7 +197,7 @@ void BeginDrag(const fs::path& path, AssetPreview* preview) {
         ImGui::SameLine();
     } else {
         EditorIcons::Inline(KindIcon(KindOf(path)));
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, 0.0f);
     }
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(path.filename().string().c_str());

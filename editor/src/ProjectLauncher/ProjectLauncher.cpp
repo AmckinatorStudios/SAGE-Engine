@@ -63,11 +63,9 @@ bool NavItem(const char* icon, const char* label, bool active) {
     }
 
     const ImVec4 col = EditorTheme::Color(active ? Role::Text : Role::TextDim);
-    EditorIcons::Overlay(p0.x + ui.SpacingMD, p0.y + (h - ui.IconSize) * 0.5f, ui.IconSize, icon,
-                         glm::vec3(col.x, col.y, col.z));
-    dl->AddText(ImVec2(p0.x + ui.SpacingMD + ui.IconSize + ui.SpacingSM,
-                       p0.y + (h - ImGui::GetTextLineHeight()) * 0.5f),
-                ImGui::GetColorU32(col), label);
+    EditorIcons::DrawLabeled(dl, ImVec2(p0.x + ui.SpacingMD, p0.y + (h - ui.IconSize) * 0.5f),
+                             ui.IconSize, icon, ImGui::GetColorU32(col), label,
+                             ImGui::GetColorU32(col));
     return pressed;
 }
 
@@ -102,7 +100,8 @@ void DetailRow(const char* icon, const char* label, const std::string& value, fl
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     EditorIcons::Overlay(p0.x, p0.y + (ImGui::GetTextLineHeight() - ui.IconSize) * 0.5f,
                          ui.IconSize, icon, glm::vec3(dim.x, dim.y, dim.z));
-    const float labelX = ImGui::GetCursorPosX() + ui.IconSize + ui.SpacingSM;
+    // Тот же зазор, что у всех пар «значок + подпись» в редакторе.
+    const float labelX = ImGui::GetCursorPosX() + ui.IconSize + EditorIcons::TextGap();
     ImGui::SetCursorPosX(labelX);
     ImGui::PushStyleColor(ImGuiCol_Text, dim);
     ImGui::TextUnformatted(label);
@@ -422,7 +421,7 @@ void ProjectLauncher::DrawTopBar(bool canClose, bool& closeRequested) {
     // «SAGE» — ЛОГОТИП, а не подпись интерфейса: он не переводится и рисуется
     // списком отрисовки, чтобы не попадать в каталог переводов пустой строкой,
     // равной самой себе.
-    const float markX = ui.PaddingPanel + ui.IconSizeLarge + ui.SpacingSM;
+    const float markX = ui.PaddingPanel + ui.IconSizeLarge + EditorIcons::TextGap();
     const ImVec2 wordPos(p0.x + markX, markPos.y + (ImGui::GetFrameHeight() -
                                                     ImGui::GetTextLineHeight()) * 0.5f);
     ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), ui.FontTitle, wordPos,
@@ -493,9 +492,9 @@ void ProjectLauncher::DrawSidebar() {
     const ImVec4 dim = EditorTheme::Color(Role::TextDim);
     const ImVec2 pos = ImGui::GetCursorScreenPos();
     EditorIcons::Overlay(pos.x, pos.y, ui.IconSize, "cube", glm::vec3(dim.x, dim.y, dim.z));
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ui.IconSize + ui.SpacingSM);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ui.IconSize + EditorIcons::TextGap());
     Sage::UI::TextSecondary("SAGE Engine");
-    ImGui::Indent(ui.IconSize + ui.SpacingSM);
+    ImGui::Indent(ui.IconSize + EditorIcons::TextGap());
     ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextFaint));
     ImGui::Text("v%s", kSageEngineVersion);
     ImGui::PopStyleColor();
@@ -756,7 +755,7 @@ void ProjectLauncher::DrawDetails(EditorHost& host, ProjectDatabase& db) {
     const ImVec2 iconPos = ImGui::GetCursorScreenPos();
     EditorIcons::Overlay(iconPos.x, iconPos.y + (ImGui::GetTextLineHeight() - ui.IconSize) * 0.5f,
                          ui.IconSize, "cube", glm::vec3(dim.x, dim.y, dim.z));
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ui.IconSize + ui.SpacingSM);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ui.IconSize + EditorIcons::TextGap());
     PushFontSize(ui.FontTitle);
     ImGui::TextWrapped("%s", entry->Name.c_str());
     ImGui::PopFont();
@@ -787,21 +786,30 @@ void ProjectLauncher::DrawDetails(EditorHost& host, ProjectDatabase& db) {
     // рядом с ней намеренно тише: если акцентных кнопок две, акцента нет.
     ImGui::Dummy(ImVec2(0.0f, ui.SpacingLG));
     ImGui::BeginDisabled(entry->Missing);
-    // Подпись с отступом слева под значок: он рисуется поверх кнопки ровно на
-    // месте этих пробелов, поэтому текст и значок стоят как одно целое при
-    // любой длине перевода.
-    const std::string openLabel = std::string("     ") + T("Open Project");
-    if (Sage::UI::Button(openLabel.c_str(), Sage::UI::ButtonStyle::Primary,
+    // ПОДПИСЬ РИСУЕТСЯ ВМЕСТЕ СО ЗНАЧКОМ, а кнопка подаётся пустой.
+    //
+    // Здесь стояли пять пробелов перед словом и значок, положенный поверх них
+    // «примерно в это место» с поправкой в полпробела. Ширина пробела зависит от
+    // шрифта и перевода, поправка не зависела ни от чего — и пара то налезала
+    // сама на себя, то расползалась. Теперь ширину пары считает та же функция,
+    // что её рисует, и центрируется она целиком.
+    const char* openLabel = T("Open Project");
+    if (Sage::UI::Button("##open_project", Sage::UI::ButtonStyle::Primary,
                          ImVec2(width, ImGui::GetFrameHeight() * 1.6f))) {
         OpenProject(host, db, entry->Path);
     }
     const ImVec2 btnMin = ImGui::GetItemRectMin();
     const ImVec2 btnMax = ImGui::GetItemRectMax();
     const ImVec4 onAccent = EditorTheme::Color(Role::TextOnAccent);
-    EditorIcons::Overlay(btnMin.x + width * 0.5f -
-                             ImGui::CalcTextSize(openLabel.c_str()).x * 0.5f + ui.SpacingXS,
-                         (btnMin.y + btnMax.y) * 0.5f - ui.IconSize * 0.5f, ui.IconSize, "play",
-                         glm::vec3(onAccent.x, onAccent.y, onAccent.z));
+    {
+        const float line = ImGui::GetTextLineHeight();
+        const float blockW = EditorIcons::LabeledWidth(line, openLabel);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(),
+                                 ImVec2((btnMin.x + btnMax.x) * 0.5f - blockW * 0.5f,
+                                        (btnMin.y + btnMax.y) * 0.5f - line * 0.5f),
+                                 line, "play", ImGui::GetColorU32(onAccent), openLabel,
+                                 ImGui::GetColorU32(onAccent));
+    }
     ImGui::Dummy(ImVec2(0.0f, ui.SpacingSM));
     if (Sage::UI::Button(T("Open Folder"), Sage::UI::ButtonStyle::Secondary,
                          ImVec2(width, 0.0f))) {
@@ -829,16 +837,24 @@ void ProjectLauncher::DrawDetails(EditorHost& host, ProjectDatabase& db) {
         // Подпись прижата ВЛЕВО, под значком: по центру она читалась бы как
         // отдельная кнопка, а не как строка списка действий.
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
-        const std::string label = std::string("     ") + T(q.Label);
-        const bool pressed = Sage::UI::Button(label.c_str(), Sage::UI::ButtonStyle::Ghost,
+        // Кнопка ПУСТАЯ, а «значок + подпись» рисуются парой у левого края.
+        //
+        // Раньше подпись начиналась с пяти пробелов, а значок клали поверх них.
+        // Кнопка во всю ширину центрирует свой текст, поэтому расстояние от
+        // значка до буквы зависело от ДЛИНЫ СЛОВА: у «Удалить» одно, у
+        // «Дублировать» другое, и колонка не читалась как колонка.
+        const bool pressed = Sage::UI::Button("##quick", Sage::UI::ButtonStyle::Ghost,
                                               ImVec2(width, 0.0f));
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
         const ImVec2 rowMin = ImGui::GetItemRectMin();
         const ImVec4 col = EditorTheme::Color(q.Danger ? Role::Danger : Role::TextDim);
-        EditorIcons::Overlay(rowMin.x + ui.SpacingMD,
-                             rowMin.y + (ImGui::GetFrameHeight() - ui.IconSize) * 0.5f, ui.IconSize,
-                             q.Icon, glm::vec3(col.x, col.y, col.z));
+        const ImVec4 textCol = EditorTheme::Color(q.Danger ? Role::Danger : Role::Text);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(),
+                                 ImVec2(rowMin.x + ui.SpacingMD,
+                                        rowMin.y + (ImGui::GetFrameHeight() - ui.IconSize) * 0.5f),
+                                 ui.IconSize, q.Icon, ImGui::GetColorU32(col), T(q.Label),
+                                 ImGui::GetColorU32(textCol));
         ImGui::EndDisabled();
         ImGui::PopID();
         if (pressed) RunAction(host, db, q.Action, entry->Path);
