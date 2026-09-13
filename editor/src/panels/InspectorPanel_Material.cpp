@@ -149,24 +149,42 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         const uint64_t tex = m_preview.RenderMaterial(material, (int)side);
         if (tex) {
             const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            // КАРТИНКА + НЕВИДИМАЯ КНОПКА ПОВЕРХ, а не «реакция по наведению».
+            //
+            // Пока вращение слушало IsMouseHovered, оно обрывалось на границе
+            // картинки: увёл курсор на пиксель в сторону — и шар замер посреди
+            // жеста, хотя кнопка ещё зажата. Настоящая кнопка захватывает мышь
+            // до отпускания, и крутить можно размашисто, как во вьюпорте.
+            ImGui::SetCursorScreenPos(p0);
             ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(side, side), ImVec2(0, 1),
                          ImVec2(1, 0));
-            // Вращение мышью: блик и шероховатость читаются только в движении —
-            // на неподвижной картинке гладкое и почти гладкое неотличимы.
-            if (ImGui::IsItemHovered()) {
-                ImGuiIO& io = ImGui::GetIO();
-                if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                    m_preview.Orbit(io.MouseDelta.x * 0.5f, -io.MouseDelta.y * 0.5f);
-                }
-                if (io.MouseWheel != 0.0f) m_preview.Zoom(io.MouseWheel);
-                ImGui::SetTooltip("%s", T("LMB orbits, wheel zooms"));
+            ImGui::SetCursorScreenPos(p0);
+            ImGui::InvisibleButton("##preview_drag", ImVec2(side, side));
+            const bool hot = ImGui::IsItemHovered();
+            if (ImGui::IsItemActive()) {
+                const ImVec2 d = ImGui::GetIO().MouseDelta;
+                m_preview.Orbit(d.x * 0.5f, -d.y * 0.5f);
             }
-            (void)p0;
+            // КОЛЕСО ОТДАЁТСЯ ПРЕВЬЮ, пока курсор над ним.
+            //
+            // Инспектор — прокручиваемая панель, и колесо по умолчанию
+            // достаётся ЕЙ: прокрутка выигрывала у приближения через раз, и
+            // выглядело это как «колесо иногда не работает». Владение ключом
+            // решает спор в пользу того, на что смотрят.
+            if (hot) {
+                ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+                const float wheel = ImGui::GetIO().MouseWheel;
+                if (wheel != 0.0f) m_preview.Zoom(wheel);
+                ImGui::SetTooltip("%s", T("Drag to turn, wheel to zoom"));
+            }
         }
         ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::TextDisabled("%s", T("Preview"));
-        if (ImGui::SmallButton(T("Reset view"))) m_preview.ResetView();
+        // Кнопка-значок вместо подписи: «Сбросить вид» занимало полстроки рядом
+        // с картинкой, а нажимают её редко и понимают по значку сразу.
+        if (EditorIcons::IconOnlyButton("refresh", T("Reset the preview view")))
+            m_preview.ResetView();
         ImGui::EndGroup();
         ImGui::Spacing();
     }
@@ -208,6 +226,23 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
                     T("Ambient occlusion, channel R. Empty means AO = 1."));
 
+    // ПОВТОР ТЕКСТУРЫ («тайлинг») — ЗДЕСЬ, среди карт, а не в поведении рендера.
+    // Настраивают его, глядя на текстуру: пол в сто метров с одной растянутой
+    // плиткой — это вопрос к карте, а не к тому, как рисуются грани. Какие
+    // свойства сюда попадают, решает таблица (MaterialRenderFields), а не этот
+    // файл: формат .sagemat от переезда подписи не меняется.
+    {
+        float tiling[2] = {material->Render.UVScaleX, material->Render.UVScaleY};
+        if (ImGui::DragFloat2(T("Tiling"), tiling, 0.05f, 0.01f, 64.0f, "%.2f")) {
+            material->Render.UVScaleX = std::clamp(tiling[0], 0.01f, 64.0f);
+            material->Render.UVScaleY = std::clamp(tiling[1], 0.01f, 64.0f);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("How many times the texture repeats across the UV: X and Y.\n"
+              "Without it a picture on a large object is stretched over its whole length."));
+        }
+    }
+
     ImGui::TextDisabled("%s", T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));
     ImGui::TextDisabled("%s", T("Map value multiplies the factor above; Enter applies the path."));
 
@@ -233,7 +268,18 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // от формата файла чаще всего: её забывали.
     ImGui::SeparatorText(T("Render"));
     for (const MaterialRenderField& f : MaterialRenderFields()) {
-        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
+        // Своё место в инспекторе есть не у всех: повтор текстуры показан выше,
+        // среди карт (см. MaterialRenderField::Group).
+        if (f.In != MaterialRenderField::Group::Render) continue;
+        if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum && f.SetEnum) {
+            // Подписи берутся ИЗ ТАБЛИЦЫ как есть — она же единственный источник
+            // правды о свойствах рендера, и вторым списком названий здесь мы
+            // завели бы ровно то расхождение, от которого таблица и заведена.
+            int value = f.GetEnum(material->Render);
+            const int count = std::min(f.EnumCount, 8);
+            if (ImGui::Combo(f.Label, &value, f.EnumLabels, count))
+                f.SetEnum(material->Render, value);
+        } else if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
             ImGui::Checkbox(f.Label, &(material->Render.*f.AsBool));
         } else if (f.AsFloat) {
             ImGui::SliderFloat(f.Label, &(material->Render.*f.AsFloat), f.Min, f.Max);
@@ -241,8 +287,6 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
     }
 
-    ImGui::SeparatorText(T("Legacy"));
-    ImGui::DragFloat(T("Shininess"), &material->Shininess, 0.5f, 1.0f, 256.0f);
     ImGui::TextDisabled("%s", T("Edits apply live to every entity using this material."));
 
     if (ImGui::Button(T("Save Material"))) {

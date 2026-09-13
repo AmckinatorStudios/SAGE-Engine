@@ -1303,19 +1303,30 @@ void InspectorPanel::DrawPrefabPreview(EditorHost& host) {
         ImGui::TextDisabled("%s", T("No cover: the prefab has no visible geometry"));
         ImGui::TextDisabled("%s", T("(or the file cannot be read — details in Console)."));
     } else {
+        // Управление — ровно такое же, как у превью материала (см.
+        // InspectorPanel_Material.cpp): невидимая кнопка поверх картинки держит
+        // жест до отпускания, а колесо принадлежит тому, на что смотрят, а не
+        // прокрутке панели.
+        const ImVec2 at = ImGui::GetCursorScreenPos();
         ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(side, side), ImVec2(0, 1),
                      ImVec2(1, 0));
+        ImGui::SetCursorScreenPos(at);
+        ImGui::InvisibleButton("##prefab_preview_drag", ImVec2(side, side));
+        if (ImGui::IsItemActive()) {
+            const ImVec2 d = ImGui::GetIO().MouseDelta;
+            m_preview.Orbit(d.x * 0.5f, -d.y * 0.5f);
+        }
         if (ImGui::IsItemHovered()) {
-            ImGuiIO& io = ImGui::GetIO();
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
-                m_preview.Orbit(io.MouseDelta.x * 0.5f, -io.MouseDelta.y * 0.5f);
-            if (io.MouseWheel != 0.0f) m_preview.Zoom(io.MouseWheel);
-            ImGui::SetTooltip("%s", T("LMB orbits, wheel zooms"));
+            ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+            const float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel != 0.0f) m_preview.Zoom(wheel);
+            ImGui::SetTooltip("%s", T("Drag to turn, wheel to zoom"));
         }
         ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::TextDisabled("%s", T("Preview"));
-        if (ImGui::SmallButton(T("Reset view"))) m_preview.ResetView();
+        if (EditorIcons::IconOnlyButton("refresh", T("Reset the preview view")))
+            m_preview.ResetView();
         ImGui::EndGroup();
     }
 

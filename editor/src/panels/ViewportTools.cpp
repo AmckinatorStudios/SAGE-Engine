@@ -167,16 +167,22 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
 void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
     ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 10.0f));
 
-    // Полупрозрачная подложка: виджет лежит НА сцене, и непрозрачная плашка
-    // отрезала бы кусок кадра насовсем.
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.11f, 0.13f, 0.88f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 4));
+    // БЕЗ ПЛАШКИ: только кнопки.
+    //
+    // Подложка с рамкой рисовала поверх сцены серый прямоугольник — вторую
+    // панель внутри панели, со своей границей и своим фоном. У каждой кнопки и
+    // так есть собственная подложка (она и показывает, что это кнопка), а
+    // общая поверх них ничего не добавляла, кроме отрезанного куска кадра в
+    // самом рабочем углу. Само окно остаётся: им ловится мышь (кнопки — это
+    // элементы ImGui, им нужен хозяин) и по нему считается «курсор на
+    // инструментах».
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
     ImGui::BeginChild("##viewtools", ImVec2(0, 0),
-                      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY |
-                          ImGuiChildFlags_Borders,
+                      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
                           ImGuiWindowFlags_NoNavFocus);
 

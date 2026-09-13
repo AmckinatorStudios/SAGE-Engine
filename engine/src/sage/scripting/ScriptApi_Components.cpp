@@ -1,5 +1,7 @@
 #include "ScriptEngine.h"
 
+#include <algorithm>
+
 #include "sage/core/Log.h"
 
 // ---------------------------------------------------------------------------
@@ -129,7 +131,15 @@ void ScriptEngine::RegisterComponentTypes() {
     // настраивает поля здесь и назначает нужным объектам. Правка видна всем
     // сразу — тем же способом, каким её видит редактор.
     m_lua.new_usertype<MaterialRender>("MaterialRender",
-        "DoubleSided", &MaterialRender::DoubleSided,
+        // Отсечение граней числом: 0 — задние (обычный случай), 1 — передние,
+        // 2 — не отсекать (двусторонний). Именами значений скрипт не пользуется
+        // — sol не умеет отдавать enum class без отдельной таблицы, а заводить
+        // её ради одного поля дороже, чем написать 2 в скрипте.
+        "Cull", sol::property(
+            [](const MaterialRender& r) { return (int)r.Cull; },
+            [](MaterialRender& r, int v) {
+                r.Cull = (CullFaces)std::clamp(v, 0, 2);
+            }),
         "PlanarReflectivity", &MaterialRender::PlanarReflectivity,
         // Повтор текстуры по развёртке: без него картинка на большом объекте
         // растягивается, и пол приходится собирать из тысяч плиток-объектов.

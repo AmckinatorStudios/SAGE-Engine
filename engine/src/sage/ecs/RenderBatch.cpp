@@ -466,7 +466,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             } else {
                 // Плоский цвет — быстрый инстансный путь. Metallic/roughness из
                 // материала (если назначен), иначе дефолты MeshInstance.
-                Group& g = m_groups[MeshSlotKey{c.Mesh_, si}];
+                const int cull = mat ? (int)mat->Render.Cull : (int)CullFaces::Back;
+                Group& g = m_groups[MeshSlotKey{c.Mesh_, si, cull}];
                 g.Instances.push_back(inst);
                 g.LmPage = c.LmPage; // у запечённой статики меш уникален — страница одна
             }
@@ -504,6 +505,17 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                                                        : sage::render::ReflectionBinding{});
     };
 
+    // Отсечение граней по материалу. Состояние конвейера, поэтому ставится
+    // ПЕРЕД вызовом отрисовки и снимается в конец прохода: оставленное
+    // включённым, оно утекло бы в следующий проход и в следующий кадр.
+    auto setCull = [&device](int cull) {
+        switch ((CullFaces)cull) {
+            case CullFaces::Front: device.SetCullMode(sage::rhi::CullMode::Front); break;
+            case CullFaces::None:  device.SetCullMode(sage::rhi::CullMode::Off); break;
+            default:               device.SetCullMode(sage::rhi::CullMode::Back); break;
+        }
+    };
+
     // Привязка лайтмапы группы/сущности (или выключение для незапечённых).
     auto bindLightmap = [&](Shader& sh, int lmPage) {
         if (gi && lmPage >= 0 && lmPage < (int)gi->Pages.size()) {
@@ -522,6 +534,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // полупрозрачные — внутри него, с блендингом и в своём порядке.
     auto drawCustom = [&](Shader& sh, Mesh& mesh, unsigned int submesh, CustomGroup& g) {
         setupCommon(sh);
+        if (!g.Transparent) setCull(g.Mat ? (int)g.Mat->Render.Cull : (int)CullFaces::Back);
         sh.SetFloat("uTime", m_time);
         bindLightmap(sh, g.LmPage);
         if (g.Mat) {
@@ -583,6 +596,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     for (auto& kv : m_groups) {
         if (kv.second.Instances.empty()) continue;
         bindLightmap(lit, kv.second.LmPage);
+        setCull(kv.first.Cull);
         kv.first.Mesh_->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
         kv.first.Mesh_->DrawSubmeshInstances(kv.first.Submesh, kv.second.Instances.size());
         ++m_stats.Batches;
@@ -600,6 +614,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         tex.SetInt("uAOMap", 5);
         for (const TexturedItem& it : m_textured) {
             bindLightmap(tex, it.LmPage);
+            setCull(it.Mat ? (int)it.Mat->Render.Cull : (int)CullFaces::Back);
             tex.SetMat4("uModel", it.Model);
             // Свёрнутое значение, а не it.Mat->Albedo: тон экземпляра обязан
             // работать и на текстурном пути (см. TexturedItem в заголовке).
@@ -646,6 +661,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     for (const auto& kv : m_custom)
         if (kv.second.Transparent && !kv.second.Instances.empty()) anyCustomTransparent = true;
 
+    // Отсечение вернулось к обычному: его ставили по материалу, и оставленное
+    // чужое значение перевернуло бы следующий проход кадра наизнанку.
+    device.SetCullMode(sage::rhi::CullMode::Back);
+
     // 4. Полупрозрачный проход — ПОСЛЕ всей непрозрачной геометрии.
     //
     // Два правила, без которых прозрачность не работает:
@@ -681,14 +700,15 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // Замкнутым телам (вода) материал ставит DoubleSided = false: у них
         // задней стенки не видно, и второй проход был бы лишней работой.
         auto passCount = [](const Material* mat) {
-            return (!mat || mat->Render.DoubleSided) ? 2 : 1;
+            return (!mat || mat->Render.Cull == CullFaces::None) ? 2 : 1;
         };
-        auto setCullForPass = [&device](const Material* mat, int pass) {
-            if (mat && !mat->Render.DoubleSided) {
-                device.SetCullMode(sage::rhi::CullMode::Back);
+        auto setCullForPass = [&](const Material* mat, int pass) {
+            if (mat && mat->Render.Cull != CullFaces::None) {
+                setCull((int)mat->Render.Cull);
                 return;
             }
-            // Проход 0 — задние грани (отсекаем передние), проход 1 — передние.
+            // Двусторонний: проход 0 — задние грани (отсекаем передние),
+            // проход 1 — передние.
             device.SetCullMode(pass == 0 ? sage::rhi::CullMode::Front
                                          : sage::rhi::CullMode::Back);
         };
