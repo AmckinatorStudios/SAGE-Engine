@@ -151,6 +151,20 @@ public:
         return obj;
     }
 
+    // Выключен ли объект — С УЧЁТОМ РОДИТЕЛЕЙ. Проверка идёт вверх по цепочке:
+    // выключенная папка обязана погасить всё, что в ней лежит. Глубина иерархии
+    // сцены — единицы уровней, так что это дешевле любого кэша, который пришлось
+    // бы поддерживать в согласии при каждом переносе ветки.
+    bool IsHidden(entt::entity e) const {
+        for (int guard = 0; guard < 64 && e != entt::null && m_registry.valid(e); ++guard) {
+            if (m_registry.all_of<HiddenComponent>(e)) return true;
+            const auto* h = m_registry.try_get<HierarchyComponent>(e);
+            if (!h) return false;
+            e = h->Parent;
+        }
+        return false;
+    }
+
     bool IsFolder(entt::entity e) const {
         return e != entt::null && m_registry.valid(e) && m_registry.all_of<FolderComponent>(e);
     }

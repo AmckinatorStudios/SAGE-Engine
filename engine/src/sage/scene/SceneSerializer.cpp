@@ -1296,6 +1296,10 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         // Папка списка: сама метка и её цвет. Без этого «Декорации» после
         // перезагрузки сцены становились обычным пустым объектом — и снова
         // начинали таскать за собой содержимое.
+        // Выключенное остаётся выключенным и после перезагрузки, и в собранной
+        // игре: иначе «выключил и забыл» означало бы сюрприз ровно в тот
+        // момент, когда игру собрали и раздали.
+        if (reg.all_of<HiddenComponent>(e)) j["hidden"] = true;
         if (const FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
             j["folder"]["color"] = Vec3ToJson(fc->Color);
         }
@@ -1742,6 +1746,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<DecalComponent>(obj.Entity(), dc);
         }
 
+        if (j.value("hidden", false)) obj.Registry()->emplace<HiddenComponent>(obj.Entity());
         if (j.contains("folder")) {
             FolderComponent fc;
             if (j["folder"].contains("color")) fc.Color = Vec3FromJson(j["folder"]["color"]);

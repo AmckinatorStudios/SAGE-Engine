@@ -17,6 +17,7 @@ inline void ForEachRenderable(Scene& scene, Fn&& fn) {
     for (auto entity : view) {
         MeshRendererComponent& mr = view.template get<MeshRendererComponent>(entity);
         if (!mr.MeshPtr) continue; // сущность без назначенного меша не рисуется
+        if (scene.IsHidden(entity)) continue; // выключен — вместе со всей веткой
         fn(view.template get<Transform>(entity), mr);
     }
 }
@@ -30,6 +31,7 @@ inline void ForEachRenderableEntity(Scene& scene, Fn&& fn) {
     for (auto entity : view) {
         MeshRendererComponent& mr = view.template get<MeshRendererComponent>(entity);
         if (!mr.MeshPtr) continue;
+        if (scene.IsHidden(entity)) continue;
         fn(entity, view.template get<Transform>(entity), mr);
     }
 }

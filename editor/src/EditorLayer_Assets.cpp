@@ -540,6 +540,9 @@ void EditorLayer::SelectInViewportRect(const glm::mat4& view, const glm::mat4& p
     for (auto e : meshes) {
         Mesh* mesh = meshes.get<MeshRendererComponent>(e).MeshPtr.get();
         if (!mesh) continue;
+        // Выключенного в кадре НЕТ — выбирать его рамкой значит выбирать
+        // вслепую: человек обводит то, что видит.
+        if (m_scene->IsHidden(e)) continue;
         const glm::mat4 world = m_scene->WorldMatrix(e);
         const glm::vec3 lo = mesh->BoundsMin();
         const glm::vec3 hi = mesh->BoundsMax();
@@ -559,6 +562,7 @@ void EditorLayer::SelectInViewportRect(const glm::mat4& view, const glm::mat4& p
     // экране они нарисованы, и не попасть в рамку, которая их обводит, было бы
     // странно.
     auto marker = [&](entt::entity e, int id) {
+        if (m_scene->IsHidden(e)) return;
         const glm::vec3 pos(m_scene->WorldMatrix(e)[3]);
         glm::vec2 mn, mx;
         if (screenBox({pos}, mn, mx) && overlaps(mn, mx)) picked.push_back(id);
@@ -590,6 +594,7 @@ void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& pro
     for (auto e : meshes) {
         Mesh* mesh = meshes.get<MeshRendererComponent>(e).MeshPtr.get();
         if (!mesh) continue;
+        if (m_scene->IsHidden(e)) continue; // в кадре его нет — и под курсором тоже
         // МИРОВАЯ матрица (учёт иерархии родителей): раньше бралась локальная —
         // дочерние сущности выделялись по неверной позиции.
         glm::mat4 inv = glm::inverse(m_scene->WorldMatrix(e));
@@ -614,6 +619,7 @@ void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& pro
     // Невидимые сущности (камера/свет) кликабельны по маленькому боксу вокруг
     // их позиции — иначе их гизмо не выбрать (меша нет).
     auto pickMarker = [&](entt::entity e, int id, const glm::vec3& pos) {
+        if (m_scene->IsHidden(e)) return;
         glm::mat4 boxInv = glm::inverse(glm::translate(glm::mat4(1.0f), pos) *
                                         glm::scale(glm::mat4(1.0f), glm::vec3(0.6f)));
         glm::vec3 lro = glm::vec3(boxInv * glm::vec4(ro, 1.0f));

@@ -304,7 +304,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + capsule + step + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + capsule + step + hidden + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2575,6 +2575,70 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: материалы модели для обложки не прочитались: "
                                 << SAGE_TEST_MODEL;
             ok = false;
+        }
+    }
+
+    // --- ВЫКЛЮЧЕННЫЙ ОБЪЕКТ НЕ ПОПАДАЕТ В КАДР ------------------------------
+    //
+    // Флаг в сцене — половина дела; вторая половина в том, что его СЛУШАЮТ все,
+    // кто собирает кадр. Проверяется именно это: выключенный объект не приходит
+    // в обход рисуемых, выключенный свет не приходит в сбор источников, и обоих
+    // не выбрать рамкой — в кадре их нет.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        entt::registry& reg = m_scene->Registry();
+        GameObject box = CreatePrimitiveEntity("HiddenBox", MeshRef::Type::Cube);
+        GameObject lamp = m_scene->Get(CreateCatalogObject("light.point"));
+
+        auto renderableCount = [&]() {
+            int n = 0;
+            sage::ecs::ForEachRenderable(*m_scene, [&](Transform&, MeshRendererComponent&) { ++n; });
+            return n;
+        };
+        const int before = renderableCount();
+        if (before < 1) {
+            LOG_ERROR("Editor") << "SELFTEST: в кадре нет ни одного рисуемого — проверять нечего";
+            ok = false;
+        }
+
+        if (ok) {
+            reg.emplace<HiddenComponent>(box.Entity());
+            if (renderableCount() != before - 1) {
+                LOG_ERROR("Editor") << "SELFTEST: выключенный объект остался в обходе рисуемых";
+                ok = false;
+            }
+        }
+        // И рамкой его не выбрать: выбирать то, чего в кадре нет, — значит
+        // выбирать вслепую.
+        if (ok) {
+            const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 8.0f), glm::vec3(0.0f),
+                                               glm::vec3(0, 1, 0));
+            const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
+            SetSelectedId(-1);
+            SelectInViewportRect(view, proj, 0.0f, 0.0f, 1.0f, 1.0f, false);
+            if (IsSelected(box.Id())) {
+                LOG_ERROR("Editor") << "SELFTEST: рамка выбрала выключенный объект";
+                ok = false;
+            }
+        }
+        // Выключенный СВЕТ не светит.
+        if (ok && lamp.Valid()) {
+            const size_t lit = sage::ecs::CollectLighting(*m_scene).PointLights.size();
+            reg.emplace<HiddenComponent>(lamp.Entity());
+            const size_t unlit = sage::ecs::CollectLighting(*m_scene).PointLights.size();
+            if (lit == 0 || unlit != lit - 1) {
+                LOG_ERROR("Editor") << "SELFTEST: выключенный источник остался в сборе света ("
+                                    << lit << " -> " << unlit << ")";
+                ok = false;
+            }
+        }
+        // Включаем обратно — объект возвращается в кадр.
+        if (ok) {
+            reg.remove<HiddenComponent>(box.Entity());
+            if (renderableCount() != before) {
+                LOG_ERROR("Editor") << "SELFTEST: включённый обратно объект не вернулся в кадр";
+                ok = false;
+            }
         }
     }
 

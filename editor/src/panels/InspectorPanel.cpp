@@ -123,19 +123,32 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
     // перетаскивание, по файлу надо нажать, а нажатие меняет выбранный ассет и
     // уводит панель на него же. Слота, в который тащили, к моменту отпускания
     // кнопки просто не остаётся.
+    // ЗАМОК СТОИТ У ПРАВОГО КРАЯ ЗАГОЛОВКА, а не отдельной строкой.
+    //
+    // Под него была отдана целая строка панели — кнопка, подпись «Заперто» и
+    // черта под ними, — при том что нажимают его редко и по конкретному поводу
+    // (перетащить файл из Assets в слот). Постоянная строка ради редкого
+    // действия съедала место у того, ради чего панель и открыта: у полей.
+    // Теперь он в одном ряду с именем предмета правки и занимает ровно свою
+    // ширину; запертое состояние видно по подсветке самой кнопки.
     const bool locked = host.InspectorLocked();
-    if (EditorIcons::IconOnlyButton("lock",
-                                    locked ? T("Unlock: the panel will follow the selection again")
-                                           : T("Lock: the panel will keep showing this while you "
-                                               "pick something else (for drag and drop)"),
-                                    locked)) {
-        host.SetInspectorLocked(!locked);
+    {
+        const float side = ImGui::GetFrameHeight();
+        const float startX = ImGui::GetCursorPosX();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - side);
+        if (EditorIcons::IconOnlyButton(
+                "lock",
+                locked ? T("Unlock: the panel will follow the selection again")
+                       : T("Lock: the panel will keep showing this while you pick something else "
+                           "(for drag and drop)"),
+                locked)) {
+            host.SetInspectorLocked(!locked);
+        }
+        // Курсор возвращается В НАЧАЛО ТОЙ ЖЕ строки: следующее содержимое —
+        // вкладки или имя объекта — встаёт рядом с замком, а не под ним. Ради
+        // этого всё и затевалось: строка перестаёт принадлежать одной кнопке.
+        ImGui::SameLine(startX);
     }
-    if (locked) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", T("Locked"));
-    }
-    ImGui::Separator();
 
     // ------------------------------------------------------------------------
     // Две ПРИНЦИПИАЛЬНО разные вещи — в две вкладки, а не в одну простыню.

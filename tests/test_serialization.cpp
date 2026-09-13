@@ -955,3 +955,52 @@ TEST(Scene_folder_survives_save_and_copy) {
     CHECK_TRUE(copy.Valid());
     CHECK_TRUE(scene.Registry().all_of<FolderComponent>(copy.Entity()));
 }
+
+// --- ВЫКЛЮЧЕННЫЙ ОБЪЕКТ ----------------------------------------------------
+//
+// Сцена собирается слоями, и на каждом шаге мешает всё остальное. Способ был
+// один — удалить и сделать заново. Выключатель убирает объект из кадра, ничего
+// не теряя; выключается ВСЁ поддерево, иначе «выключил Декорации» гасило бы
+// одну пустую папку.
+TEST(Scene_hidden_hides_the_whole_branch) {
+    Scene scene("Hidden");
+    GameObject folder = scene.CreateFolder("Props");
+    GameObject crate = scene.CreateObject("Crate");
+    GameObject nail = scene.CreateObject("Nail");
+    scene.SetParent(crate.Entity(), folder.Entity());
+    scene.SetParent(nail.Entity(), crate.Entity());
+
+    CHECK_TRUE(!scene.IsHidden(crate.Entity()));
+    scene.Registry().emplace<HiddenComponent>(folder.Entity());
+    // Сам объект, его ребёнок и внук — все погашены.
+    CHECK_TRUE(scene.IsHidden(folder.Entity()));
+    CHECK_TRUE(scene.IsHidden(crate.Entity()));
+    CHECK_TRUE(scene.IsHidden(nail.Entity()));
+
+    // Соседняя ветка не задета: гасится именно поддерево, а не сцена.
+    GameObject other = scene.CreateObject("Lamp");
+    CHECK_TRUE(!scene.IsHidden(other.Entity()));
+}
+
+// Выключенное остаётся выключенным и после перезагрузки, и в собранной игре:
+// иначе «выключил и забыл» означало бы сюрприз ровно в тот момент, когда игру
+// собрали и раздали.
+TEST(Scene_hidden_survives_save_and_copy) {
+    Scene scene("HiddenSave");
+    GameObject box = scene.CreateObject("Box");
+    scene.Registry().emplace<HiddenComponent>(box.Entity());
+
+    const std::string text = SceneSerializer::SaveToString(scene);
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+    CHECK_TRUE(loaded != nullptr);
+    GameObject back = FindByName(*loaded, "Box");
+    CHECK_TRUE(back.Valid());
+    CHECK_TRUE(loaded->IsHidden(back.Entity()));
+
+    // Копия выключенного — тоже выключена, а копия включённого — включена.
+    GameObject copy = sage::scene::CopySubtree(scene, box.Entity(), scene, entt::null);
+    CHECK_TRUE(scene.IsHidden(copy.Entity()));
+    GameObject visible = scene.CreateObject("Visible");
+    GameObject copy2 = sage::scene::CopySubtree(scene, visible.Entity(), scene, entt::null);
+    CHECK_TRUE(!scene.IsHidden(copy2.Entity()));
+}
