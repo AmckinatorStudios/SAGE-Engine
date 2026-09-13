@@ -1,3 +1,4 @@
+#include "../PanelWindows.h"
 #include "HierarchyPanel.h"
 
 #include <algorithm>
@@ -193,7 +194,7 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
-    ImGui::Begin(T("Hierarchy" "###Hierarchy"), open);
+    ImGui::Begin(T("Hierarchy" "###Hierarchy"), open, panelwindows::WindowFlags("Hierarchy"));
     ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
     ImGui::Separator();
 

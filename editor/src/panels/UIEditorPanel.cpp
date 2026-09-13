@@ -1,3 +1,4 @@
+#include "../PanelWindows.h"
 #include "UIEditorPanel.h"
 
 #include <algorithm>
@@ -570,7 +571,7 @@ void UIEditorPanel::Draw(EditorHost& host, bool* open) {
     }
 
     ImGui::SetNextWindowSize(ImVec2(1100, 640), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("Interface" "###UIEditor"), open)) {
+    if (!ImGui::Begin(T("Interface" "###UIEditor"), open, panelwindows::WindowFlags("UIEditor"))) {
         ImGui::End();
         return;
     }

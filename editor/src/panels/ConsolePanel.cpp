@@ -1,3 +1,4 @@
+#include "../PanelWindows.h"
 #include "ConsolePanel.h"
 #include "ui/UI.h"
 #include "EditorTheme.h"
@@ -55,7 +56,7 @@ bool ConsolePanel::Passes(const Entry& e) const {
 }
 
 void ConsolePanel::Draw(bool* open) {
-    ImGui::Begin(T("Console" "###Console"), open);
+    ImGui::Begin(T("Console" "###Console"), open, panelwindows::WindowFlags("Console"));
     if (ImGui::IsWindowFocused()) MarkSeen();
 
     if (EditorIcons::Button("trash", T("Clear"), T("Clear the console"))) {

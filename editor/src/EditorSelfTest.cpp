@@ -276,7 +276,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -320,14 +320,24 @@ void EditorLayer::CheckMultiWindowFrame() {
     }
     const bool own = ui->Viewport->ID != mainId;
     const bool real = ui->Viewport->PlatformHandle != nullptr;
+    // РАМКА СИСТЕМЫ — часть требования, а не украшение: без неё у окна нет
+    // кнопок «свернуть» и «развернуть», оно не разворачивается двойным щелчком
+    // по заголовку и не прилипает к краю экрана. То есть выглядит как окно и
+    // стоит отдельно, а ведёт себя не как окно.
+    const bool decorated = (ui->Viewport->Flags & ImGuiViewportFlags_NoDecoration) == 0;
+    // И заголовок у него ОДИН: свой ImGui в таком окне гасится, иначе их два
+    // подряд (см. panelwindows::WindowFlags).
+    const bool singleTitle = (ui->Flags & ImGuiWindowFlags_NoTitleBar) != 0;
     const bool dockedStayed = docked == nullptr || docked->Viewport == nullptr ||
                               docked->Viewport->ID == mainId;
-    if (own && real && dockedStayed) {
-        LOG_INFO("Editor") << "MULTIWINDOW: OK — редактор интерфейса живёт своим окном системы";
+    if (own && real && decorated && singleTitle && dockedStayed) {
+        LOG_INFO("Editor") << "MULTIWINDOW: OK — редактор интерфейса живёт своим окном системы "
+                           << "(рамка системы, один заголовок)";
         return;
     }
     LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — свой вьюпорт " << own << ", окно платформы "
-                        << real << ", панель дока осталась в главном " << dockedStayed;
+                        << real << ", рамка системы " << decorated << ", один заголовок "
+                        << singleTitle << ", панель дока осталась в главном " << dockedStayed;
 }
 
 // --- проект, шаблоны, ассеты и материалы -----------------------------------
@@ -2398,6 +2408,123 @@ bool EditorLayer::SelfTestSelection() {
             sage::editor::prefs::SetBool("filebrowser.grid", had);
         }
         fs::remove_all(root, ec);
+    }
+
+    // --- СКАЧАННЫЙ НАБОР ТЕКСТУР СТАНОВИТСЯ МАТЕРИАЛОМ ЦЕЛИКОМ --------------
+    //
+    // Текстуры скачивают наборами: рядом лежат albedo, normal, roughness,
+    // metallic, ao, height. Раньше картинку нельзя было даже бросить на объект
+    // («этот файл нельзя назначить объекту»), и единственным путём было создать
+    // материал руками и разложить пять карт по слотам, зная, какой файл в какой
+    // слот. Понятно, до какого слота доходили: до albedo. Отсюда и вывод,
+    // который и звучал, — «работает только albedo, остальные карты
+    // игнорируются».
+    //
+    // Проверяется тем же жестом, каким набор и приносят: бросок ОДНОГО файла на
+    // объект. И проверяется не «материал появился», а что в нём: все карты
+    // набора, нормаль в формате OpenGL (а не DirectX, лежащая рядом), и ничего
+    // лишнего — карту высот движок не применяет и в слот класть не должен.
+    if (ok) {
+        std::error_code ec;
+        const fs::path dir = m_project.AssetsDir() / "selftest_set";
+        fs::remove_all(dir, ec);
+        fs::create_directories(dir, ec);
+
+        auto png = [&](const char* name, unsigned char r, unsigned char g, unsigned char b) {
+            const fs::path file = dir / name;
+            std::vector<unsigned char> px(4 * 4 * 3);
+            for (size_t i = 0; i < px.size(); i += 3) { px[i] = r; px[i + 1] = g; px[i + 2] = b; }
+            stbi_write_png(file.string().c_str(), 4, 4, 3, px.data(), 4 * 3);
+            return file;
+        };
+        const fs::path albedo = png("wall_albedo.png", 200, 120, 90);
+        png("wall_normal-ogl.png", 128, 128, 255);
+        png("wall_normal-dx.png", 128, 128, 255);
+        png("wall_roughness.png", 180, 180, 180);
+        png("wall_metallic.png", 10, 10, 10);
+        png("wall_ao.png", 240, 240, 240);
+        png("wall_height.png", 60, 60, 60);   // движок её не применяет
+        sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+
+        NewScene(ProjectTemplateKind::Empty);
+        GameObject wall = m_scene->CreateObject("Wall");
+        wall.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        wall.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+
+        if (!ApplyAssetToEntity(wall.Id(), albedo)) {
+            LOG_ERROR("Editor") << "SELFTEST: текстуру нельзя бросить на объект";
+            ok = false;
+        } else {
+            const MeshRendererComponent& mr = wall.Renderer();
+            const std::shared_ptr<Material> mat = mr.MaterialPtr;
+            if (mr.MaterialPath.empty() || !mat) {
+                LOG_ERROR("Editor") << "SELFTEST: материал из набора не назначен объекту";
+                ok = false;
+            } else if (mat->TexturePath.empty() || mat->NormalMapPath.empty() ||
+                       mat->RoughnessMapPath.empty() || mat->MetallicMapPath.empty() ||
+                       mat->AOMapPath.empty()) {
+                LOG_ERROR("Editor") << "SELFTEST: в материале из набора не все карты: albedo '"
+                                    << mat->TexturePath << "', нормаль '" << mat->NormalMapPath
+                                    << "', шероховатость '" << mat->RoughnessMapPath
+                                    << "', металличность '" << mat->MetallicMapPath
+                                    << "', затенение '" << mat->AOMapPath << "'";
+                ok = false;
+            } else if (mat->NormalMapPath.find("dx") != std::string::npos) {
+                // Рядом лежат обе нормали; DX-вариант даёт рельеф наизнанку.
+                LOG_ERROR("Editor") << "SELFTEST: взята DirectX-нормаль вместо OpenGL: "
+                                    << mat->NormalMapPath;
+                ok = false;
+            } else if (mat->EmissiveMap.find("height") != std::string::npos) {
+                LOG_ERROR("Editor") << "SELFTEST: карта высот попала в слот, хотя не применяется";
+                ok = false;
+            } else if (!mat->NormalTex || !mat->RoughnessTex || !mat->AOTex) {
+                // Пути мало: без загруженных текстур карты не доедут до кадра.
+                LOG_ERROR("Editor") << "SELFTEST: карты набора не загрузились в материал";
+                ok = false;
+            }
+
+            // Файл материала лежит РЯДОМ С КАРТАМИ и назван общим корнем набора:
+            // искать его потом человек будет именно там.
+            if (ok && !fs::exists(dir / "wall.sagemat", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: .sagemat не записан рядом с набором";
+                ok = false;
+            }
+
+            // ТОТ ЖЕ ЖЕСТ ВО ВЬЮПОРТЕ: текстуру роняют на поверхность, которую
+            // хотят покрасить. Раньше бросок во вьюпорт текстуру просто не
+            // замечал — как и бросок в список.
+            if (ok) {
+                GameObject painted = m_scene->CreateObject("WallDrop");
+                painted.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+                painted.Renderer().MeshPtr =
+                    ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+                painted.GetTransform().Position = glm::vec3(0.0f, 0.0f, 0.0f);
+                const glm::mat4 dropView =
+                    glm::lookAt(glm::vec3(0.0f, 0.0f, 4.0f), glm::vec3(0.0f), glm::vec3(0, 1, 0));
+                const glm::mat4 dropProj =
+                    glm::perspective(glm::radians(60.0f), 1.0f, 0.1f, 100.0f);
+                if (!DropAssetAtViewport(dropView, dropProj, 0.5f, 0.5f, albedo) ||
+                    painted.Renderer().MaterialPath.empty()) {
+                    LOG_ERROR("Editor") << "SELFTEST: бросок текстуры во вьюпорт не покрасил объект";
+                    ok = false;
+                }
+            }
+
+            // Набор собирается по ЛЮБОМУ своему файлу, а не только по albedo:
+            // человек с равным правом бросит на объект карту нормалей.
+            if (ok) {
+                GameObject other = m_scene->CreateObject("Wall2");
+                other.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+                other.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+                if (!ApplyAssetToEntity(other.Id(), dir / "wall_normal-ogl.png") ||
+                    other.Renderer().MaterialPath != mr.MaterialPath) {
+                    LOG_ERROR("Editor") << "SELFTEST: бросок карты нормалей дал другой материал: '"
+                                        << other.Renderer().MaterialPath << "'";
+                    ok = false;
+                }
+            }
+        }
+        fs::remove_all(dir, ec);
     }
 
     // --- ОБЛОЖКИ МОДЕЛИ НЕ ПЕРЕЖИВАЮТ ГРАФИЧЕСКИЙ КОНТЕКСТ ------------------

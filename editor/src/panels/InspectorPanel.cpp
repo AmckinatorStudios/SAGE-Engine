@@ -1,4 +1,5 @@
 #include <cstdarg>
+#include "../PanelWindows.h"
 #include "InspectorPanel.h"
 
 #include <cmath>
@@ -109,7 +110,7 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
         }
     }
 
-    ImGui::Begin(T("Inspector" "###Inspector"), open);
+    ImGui::Begin(T("Inspector" "###Inspector"), open, panelwindows::WindowFlags("Inspector"));
 
     // --- ЗАМОК --------------------------------------------------------------
     //

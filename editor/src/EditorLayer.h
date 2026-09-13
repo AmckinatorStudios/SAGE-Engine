@@ -211,6 +211,9 @@ public:
                              const std::filesystem::path& asset) override;
     bool ApplyAssetToEntity(int entityId, const std::filesystem::path& asset) override;
     bool AddAssetToScene(const std::filesystem::path& asset) override;
+    // Материал из НАБОРА карт, лежащих рядом с картинкой (см. TextureSet.h):
+    // скачанный набор становится материалом целиком, а не одной albedo.
+    std::string MaterialFromTextureSet(const std::filesystem::path& texture, std::string& status);
     void PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                             bool additive) override;
 

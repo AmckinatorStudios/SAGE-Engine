@@ -1,3 +1,4 @@
+#include "../PanelWindows.h"
 #include "EnvironmentPanel.h"
 #include "EditorTheme.h"
 
@@ -470,7 +471,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     LightingEnvironment& env = scene.Lighting;
 
-    ImGui::Begin(T("Environment" "###Lighting"), open);
+    ImGui::Begin(T("Environment" "###Lighting"), open, panelwindows::WindowFlags("Lighting"));
 
     // Ответ диалога приходит ЧЕРЕЗ КАДР, поэтому цель выбора хранится числом, а
     // не указателем на поле: за этот кадр сцену могли перезагрузить (откат,
