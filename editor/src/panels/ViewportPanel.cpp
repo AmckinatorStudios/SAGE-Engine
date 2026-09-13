@@ -759,7 +759,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             // Тот же разбор типов, что и в иерархии: значок света обязан
             // означать одно и то же везде.
             const char* icon = lc.Kind == LightComponent::Type::Directional ? "sun"
-                               : lc.Kind == LightComponent::Type::Spot      ? "drop"
+                               : lc.Kind == LightComponent::Type::Spot      ? "cone"
                                                                            : "light";
             // Цвет лампы — её собственный: в кадре с тёплыми и холодными
             // источниками это половина ответа на вопрос «который из них».

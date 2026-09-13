@@ -63,6 +63,54 @@ void DebugDraw::Grid(glm::vec3 center, float halfExtent, float step, glm::vec3 c
     }
 }
 
+void DebugDraw::InfiniteGrid(const glm::vec3& cameraPos, glm::vec3 color) {
+    // Шаг — по высоте над плоскостью сетки, десятками. Клетка на экране обязана
+    // оставаться примерно одного размера: иначе на высоте она сливается в
+    // заливку, а у земли исчезает.
+    const float height = std::max(std::abs(cameraPos.y), 1.0f);
+    float step = 1.0f;
+    while (height / step > 40.0f) step *= 10.0f;
+    while (height / step < 4.0f && step > 0.01f) step *= 0.1f;
+
+    const float fine = step * 26.0f;    // докуда рисуем мелкую клетку
+    const float far = step * 220.0f;    // докуда крупную (каждая десятая)
+    const float coarse = step * 10.0f;
+
+    // Центр переезжает ПО КЛЕТКАМ крупной сетки: сдвиг на дробную часть означал
+    // бы, что линии ползут под камерой, а они обязаны стоять на месте мира.
+    const float cx = std::floor(cameraPos.x / coarse) * coarse;
+    const float cz = std::floor(cameraPos.z / coarse) * coarse;
+
+    // Оси мира — цветом: X красным, Z синим. Они и есть ответ на вопрос «где
+    // начало координат», когда всё остальное одинаково серое.
+    const glm::vec3 axisX(0.75f, 0.35f, 0.35f);
+    const glm::vec3 axisZ(0.35f, 0.45f, 0.80f);
+    // Крупная линия заметнее мелкой: без разницы в тоне сетка превращается в
+    // ровную штриховку, по которой не отсчитать расстояние.
+    const glm::vec3 coarseColor = color * 1.35f;
+
+    const int fineCount = (int)(fine / step);
+    const int farCount = (int)(far / coarse);
+
+    // Крупная клетка — до самого края.
+    for (int i = -farCount; i <= farCount; ++i) {
+        const float x = cx + i * coarse;
+        const float z = cz + i * coarse;
+        Line({x, 0.0f, cz - far}, {x, 0.0f, cz + far},
+             std::abs(x) < 0.001f ? axisZ : coarseColor);
+        Line({cx - far, 0.0f, z}, {cx + far, 0.0f, z},
+             std::abs(z) < 0.001f ? axisX : coarseColor);
+    }
+    // Мелкая — только вблизи, и пропуская те, что уже нарисованы крупными.
+    for (int i = -fineCount; i <= fineCount; ++i) {
+        if (i % 10 == 0) continue;
+        const float x = cx + i * step;
+        const float z = cz + i * step;
+        Line({x, 0.0f, cz - fine}, {x, 0.0f, cz + fine}, color);
+        Line({cx - fine, 0.0f, z}, {cx + fine, 0.0f, z}, color);
+    }
+}
+
 void DebugDraw::WireBox(const glm::mat4& transform, glm::vec3 color) {
     // 8 углов единичного куба -0.5..+0.5 в мировых координатах.
     glm::vec3 c[8];

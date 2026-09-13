@@ -23,6 +23,7 @@ Group Catalog() {
              {"shape.plane",    T("Plane"),    T("Flat square: ground, water surface")},
              {"shape.cylinder", T("Cylinder"), T("Column, barrel, pipe")},
              {"shape.cone",     T("Cone"),     T("Spike, roof, direction marker")},
+             {"shape.capsule",  T("Capsule"),  T("Cylinder with rounded ends: the working shape of a character")},
          },
          {}},
 

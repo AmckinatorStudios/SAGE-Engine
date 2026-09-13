@@ -583,7 +583,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     GameObject selectedObj = scene.Get(selectedId);
 
     // Гизмо-графика (DebugDraw) — в тот же буфер, с тестом глубины (объекты заслоняют сетку).
-    if (showGrid) m_debugDraw->Grid({0.0f, 0.0f, 0.0f}, 12.0f, 1.0f, {0.32f, 0.33f, 0.38f});
+    if (showGrid) m_debugDraw->InfiniteGrid(eye, {0.26f, 0.27f, 0.31f});
     DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
     if (selectedObj.Valid()) {
         glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());

@@ -1,4 +1,6 @@
 #include "EditorIcons.h"
+
+#include <string>
 #include "EditorIconFont.inl"
 #include "EditorTheme.h"
 
@@ -168,6 +170,7 @@ const char* const kNames[] = {
     "shader", "audio",
     "model",
     "up", "refresh", "folder-plus", "search", "clock", "list", "import", "pencil",
+    "undo", "redo", "capsule",
     "code", "question", "layout", "gear",
     "magnet",
     "warn", "error", "info", "debug",
@@ -305,7 +308,8 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
     return pressed;
 }
 
-bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const glm::vec3& tint) {
+bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const glm::vec3& tint,
+                    const glm::vec3* hoverTint) {
     const float h = ImGui::GetFrameHeight();
     ImGui::PushID(icon);
     CheckDuplicateId(icon);
@@ -321,14 +325,32 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     }
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::Button("##ibtn", ImVec2(h, h));
+    // Наведение опрашивается СРАЗУ после кнопки: значок рисуется поверх неё, и
+    // выбрать его цвет надо до того, как он ляжет на залитую подложку.
+    const bool hovered = ImGui::IsItemHovered();
+    const glm::vec3 use = (hovered && hoverTint) ? *hoverTint : tint;
     const float icon_s = std::floor(h * 0.64f);
     const float off = std::floor((h - icon_s) * 0.5f);
     DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x + off, cursor.y + off), icon_s, icon,
-           Col(Resolve(tint)));
+           Col(Resolve(use)));
     if (active) ImGui::PopStyleColor(2);
     if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
     ImGui::PopID();
     return pressed;
+}
+
+bool MenuItem(const char* icon, const char* label, const char* shortcut, bool enabled) {
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float size = ImGui::GetTextLineHeight();
+    // Отступ пробелами, а не SameLine: пункт обязан остаться ОДНИМ элементом,
+    // иначе ломается и клик, и подсветка строки под курсором.
+    const std::string padded = std::string("     ") + label;
+    const bool clicked = ImGui::MenuItem(padded.c_str(), shortcut, false, enabled);
+    // Погашенный пункт и значок имеет погашенный: живой значок у мёртвой строки
+    // читается как «работает, просто не нажимается».
+    const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    DrawAt(ImGui::GetWindowDrawList(), ImVec2(at.x + 2.0f, at.y), size, icon, color);
+    return clicked;
 }
 
 void Inline(const char* icon, const glm::vec3& color) {

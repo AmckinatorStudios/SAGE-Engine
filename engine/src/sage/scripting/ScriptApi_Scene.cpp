@@ -277,6 +277,13 @@ void ScriptEngine::RegisterMeshApi() {
         mr.Ref = MeshRef{MeshRef::Type::Cone, ""};
         mr.MeshPtr = ResourceManager::Instance().GetCone();
     });
+    // Капсула — рабочая форма персонажа: ею же его считает физика, и спавнить
+    // болванку игрока скриптом надо именно ею, а не цилиндром.
+    Bind("render", "SetMeshCapsule", "SetMeshCapsule", [](GameObject& obj) {
+        MeshRendererComponent& mr = obj.EnsureRenderer();
+        mr.Ref = MeshRef{MeshRef::Type::Capsule, ""};
+        mr.MeshPtr = ResourceManager::Instance().GetCapsule();
+    });
     // Прозрачность объекта одним вызовом: не заставлять скрипт доставать
     // компонент ради одного числа, которое меняется чаще всего остального
     // (затухание подобранного предмета, вода, призрачная подсветка постройки).

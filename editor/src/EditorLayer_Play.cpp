@@ -295,6 +295,17 @@ void EditorLayer::PausePlay() {
     if (m_playAudio) m_playAudio->SetAllPaused(true);
 }
 
+void EditorLayer::StepPlay() {
+    // Только из паузы: «шаг» у работающей игры смысла не имеет — она и так
+    // идёт, — а из режима правки шагать нечему.
+    if (m_playState != EditorPlayState::Paused) return;
+    // Считаем ОДИН кадр фиксированной длительности, а не реальный dt: шаг
+    // делают, чтобы разглядеть происходящее, и его величина обязана быть
+    // одинаковой, а не зависеть от того, сколько миллисекунд прошло между
+    // нажатиями. 1/60 — тот же шаг, которым идёт игра на обычном мониторе.
+    m_pendingStep = 1.0f / 60.0f;
+}
+
 void EditorLayer::ResumePlay() {
     if (m_playState != EditorPlayState::Paused) return;
     m_playState = EditorPlayState::Playing;

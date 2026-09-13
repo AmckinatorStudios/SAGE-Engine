@@ -807,11 +807,9 @@ void ResourceManager::Clear() {
         if (m_async->Worker.joinable()) m_async->Worker.join();
         m_async.reset();
     }
-    m_cube.reset();
-    m_sphere.reset();
-    m_plane.reset();
-    m_cylinder.reset();
-    m_cone.reset();
+    // ВСЕ формы разом: забыть одну нельзя, а забытая освобождала бы свой буфер
+    // видеокарты после смерти GL-контекста — то есть падением при выходе.
+    for (std::shared_ptr<Mesh>& primitive : m_primitives) primitive.reset();
     m_models.clear();
     m_skinned.clear(); // GPU-ресурс: чистится, пока GL-контекст ещё жив
     // Материал держит свою программу через ShaderPtr, а копии shared_ptr на сам

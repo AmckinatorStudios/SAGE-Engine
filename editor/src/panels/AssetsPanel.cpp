@@ -455,12 +455,12 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                     if (picked) foldercolors::Set(path, tint.Color);
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem(T("No colour"))) foldercolors::Clear(path);
+                if (EditorIcons::MenuItem("folder", T("No colour"))) foldercolors::Clear(path);
                 ImGui::EndMenu();
             }
         }
-        if (ImGui::MenuItem(T("Rename"))) { m_renameTarget = path; m_error.clear(); }
-        if (ImGui::MenuItem(T("Delete"))) { m_deleteTargets = m_multi; }
+        if (EditorIcons::MenuItem("pencil", T("Rename"))) { m_renameTarget = path; m_error.clear(); }
+        if (EditorIcons::MenuItem("trash", T("Delete"))) { m_deleteTargets = m_multi; }
 
         // Конвертация в свой формат — там же, где всё остальное про файл.
         // Отдельной кнопки в меню нет намеренно: конвертируют КОНКРЕТНЫЙ файл,
@@ -1218,12 +1218,12 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
             std::snprintf(m_createName, sizeof(m_createName), "%s", defaultName);
             m_error.clear();
         };
-        if (ImGui::MenuItem(T("New Folder"))) startCreate(CreateKind::Folder, "NewFolder");
-        if (ImGui::MenuItem(T("New Script (.lua)"))) startCreate(CreateKind::Script, "new_script");
-        if (ImGui::MenuItem(T("New Text File (.txt)"))) startCreate(CreateKind::TextFile, "notes");
-        if (ImGui::MenuItem(T("New Material (.sagemat)"))) startCreate(CreateKind::Material, "NewMaterial");
+        if (EditorIcons::MenuItem("folder-plus", T("New Folder"))) startCreate(CreateKind::Folder, "NewFolder");
+        if (EditorIcons::MenuItem("script", T("New Script (.lua)"))) startCreate(CreateKind::Script, "new_script");
+        if (EditorIcons::MenuItem("file", T("New Text File (.txt)"))) startCreate(CreateKind::TextFile, "notes");
+        if (EditorIcons::MenuItem("material", T("New Material (.sagemat)"))) startCreate(CreateKind::Material, "NewMaterial");
         ImGui::Separator();
-        if (ImGui::MenuItem(T("Convert the whole folder to engine formats"))) ConvertFolderHere(host);
+        if (EditorIcons::MenuItem("refresh", T("Convert the whole folder to engine formats"))) ConvertFolderHere(host);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", T("Models and images in this folder (including nested) -> .sagemesh/.sagetex.\n"
               "Already converted files are skipped, sources stay in place."));

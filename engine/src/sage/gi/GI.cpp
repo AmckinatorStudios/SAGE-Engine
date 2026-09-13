@@ -41,6 +41,7 @@ sage::render::MeshData ResolveMeshData(const MeshRef& ref) {
         case MeshRef::Type::Plane:    return sage::render::BuildPlane();
         case MeshRef::Type::Cylinder: return sage::render::BuildCylinder();
         case MeshRef::Type::Cone:     return sage::render::BuildCone();
+        case MeshRef::Type::Capsule:  return sage::render::BuildCapsule();
         case MeshRef::Type::Model: {
             const std::string& p = ref.path;
             if (p.size() >= 4 && p.compare(p.size() - 4, 4, ".obj") == 0) {

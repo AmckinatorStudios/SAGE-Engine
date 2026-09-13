@@ -157,6 +157,7 @@ public:
     static Mesh CreatePlane(int subdivisions = 1, bool keepCpuData = false);              // 1x1 в плоскости XZ, нормаль +Y
     static Mesh CreateCylinder(int sectors = 32, bool keepCpuData = false);               // r=0.5, высота 1 (Y), с крышками
     static Mesh CreateCone(int sectors = 32, bool keepCpuData = false);                   // r=0.5 у основания, высота 1 (Y)
+    static Mesh CreateCapsule(int rings = 12, int sectors = 24, bool keepCpuData = false); // r=0.5, общая высота 1 (Y)
 
 private:
     // Покрывает ли подмеш весь индексный буфер (тогда отрисовка идёт без

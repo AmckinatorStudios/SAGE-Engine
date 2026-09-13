@@ -30,7 +30,10 @@
 struct MeshRef {
     // Примитивы генерируются процедурно (Mesh::Create*), Model грузится из файла
     // по path. None — сущность без меша (камера/свет/пустышка), не рисуется.
-    enum class Type { None, Cube, Sphere, Plane, Cylinder, Cone, Model };
+    // Capsule ДОПИСАНА В КОНЕЦ, перед Model: тип пишется в сцену числом
+    // (см. SceneSerializer), и вставка в середину сдвинула бы всё, что за ней,
+    // — каждая сохранённая сцена открылась бы с другими формами.
+    enum class Type { None, Cube, Sphere, Plane, Cylinder, Cone, Capsule, Model };
     Type type = Type::None;
     std::string path; // используется только при Type::Model
 

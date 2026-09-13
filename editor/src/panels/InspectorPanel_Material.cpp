@@ -333,7 +333,8 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
     ImGui::SeparatorText(T("Mesh"));
 
     // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
-    const char* kinds[] = {T("None"), T("Cube"), T("Sphere"), T("Plane"), T("Cylinder"), T("Cone"), T("Model")};
+    const char* kinds[] = {T("None"),     T("Cube"), T("Sphere"),  T("Plane"),
+                           T("Cylinder"), T("Cone"), T("Capsule"), T("Model")};
     int kind = (int)mr.Ref.type;
     if (ImGui::Combo(T("Source"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
         host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo

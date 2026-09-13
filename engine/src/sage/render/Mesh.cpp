@@ -216,3 +216,4 @@ Mesh Mesh::CreateSphere(int rings, int sectors, bool keepCpu) { auto d = sage::r
 Mesh Mesh::CreatePlane(int subdivisions, bool keepCpu) { auto d = sage::render::BuildPlane(subdivisions); return Mesh(d.Vertices, d.Indices, keepCpu); }
 Mesh Mesh::CreateCylinder(int sectors, bool keepCpu) { auto d = sage::render::BuildCylinder(sectors);   return Mesh(d.Vertices, d.Indices, keepCpu); }
 Mesh Mesh::CreateCone(int sectors, bool keepCpu) { auto d = sage::render::BuildCone(sectors);       return Mesh(d.Vertices, d.Indices, keepCpu); }
+Mesh Mesh::CreateCapsule(int rings, int sectors, bool keepCpu) { auto d = sage::render::BuildCapsule(rings, sectors); return Mesh(d.Vertices, d.Indices, keepCpu); }
