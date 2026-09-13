@@ -6,6 +6,10 @@
 #include "SkinnedModel.h"
 
 #include "sage/assets/AssetCache.h"
+#include <filesystem>
+#include <cctype>
+
+#include "sage/assets/import/FbxSkin.h"
 #include "sage/render/ModelData.h"
 #include "sage/anim/Retarget.h"
 #include "sage/gi/GIUpload.h"
@@ -33,6 +37,8 @@ using namespace sage::rhi;
 using namespace sage::anim;
 
 namespace sage::render {
+
+namespace fs = std::filesystem;
 
 // ============================================================================
 //  SkinnedMesh (GPU-геометрия)
@@ -1009,10 +1015,25 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
         return BuildFromData(data);
     }
 
-    data = ParseGltf(path);
-    LOG_INFO("Anim") << "SkinnedModel разобран: " << path << " (костей "
-                     << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
-                     << ", клипов " << data.Clips.size() << ")";
+    // ФОРМАТ ВЫБИРАЕТ ПУТЬ РАЗБОРА. glTF читает tinygltf, FBX — свой разбор
+    // (assets/import/FbxSkin.h): у FBX скин, кости и клипы лежат совсем иначе,
+    // и делать вид, что это один и тот же файл, нельзя. Пока пути не было,
+    // персонаж из FBX (а это всё, что отдают Blender, Maya, Mixamo и
+    // ассет-сторы по умолчанию) получал «не загрузить glTF … parse error»:
+    // сообщение о ЧУЖОМ формате, из которого следовал вывод «моя модель
+    // движку не подходит».
+    std::string ext = fs::path(path).extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext == ".fbx") {
+        std::string err;
+        if (!sage::assets::ImportFbxSkinned(path, data, err))
+            throw std::runtime_error("SkinnedModel: " + err);
+    } else {
+        data = ParseGltf(path);
+        LOG_INFO("Anim") << "SkinnedModel разобран: " << path << " (костей "
+                         << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
+                         << ", клипов " << data.Clips.size() << ")";
+    }
     sage::assets::WriteModelCache(path, data);
     return BuildFromData(data);
 }

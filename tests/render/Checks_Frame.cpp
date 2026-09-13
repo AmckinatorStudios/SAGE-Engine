@@ -142,6 +142,89 @@ void TestNoSkyNoLightIsBlack(FrameRenderer& r) {
     }
 }
 
+// НЕБО ОДНИМ ЦВЕТОМ — ЭТО РОВНО ОДИН ЦВЕТ.
+//
+// Режим заведён для сцен, где небо — фон, а не предмет разговора (схема
+// уровня, студийная подложка, стилизованная игра). Проверяется свойство, ради
+// которого он и нужен: в кадре НЕТ градиента — цвет вверху кадра совпадает с
+// цветом внизу, а «чужие» поля (цвет горизонта, закат, звёзды) на него не
+// влияют. Процедурное небо здесь же служит противовесом: у него разница
+// между верхом и низом обязана быть.
+void TestSolidSky(FrameRenderer&) {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    SkyRenderer sky;
+
+    auto render = [&](const LightingEnvironment& env) {
+        Framebuffer fbo(kW, kH);
+        fbo.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        // Камера смотрит ГОРИЗОНТАЛЬНО: только так в кадр попадают и верх
+        // неба, и горизонт, а значит есть чему отличаться.
+        const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 1.0f, 0.0f),
+                                           glm::vec3(0.0f, 1.0f, -1.0f),
+                                           glm::vec3(0.0f, 1.0f, 0.0f));
+        sage::render::DrawSceneSky(sky, env, view, PerspectiveProj());
+        Image img = Capture(kW, kH);
+        device.BindDefaultFramebuffer();
+        return img;
+    };
+    // Средний цвет полосы кадра: сверху — зенит, снизу — горизонт.
+    auto band = [](const Image& img, int fromRow, int toRow) {
+        glm::vec3 sum(0.0f);
+        int count = 0;
+        for (int y = fromRow; y < toRow; ++y) {
+            for (int x = 0; x < kW; ++x) {
+                const size_t i = ((size_t)y * kW + (size_t)x) * 3;
+                if (i + 2 >= img.Pixels.size()) continue;
+                sum += glm::vec3(img.Pixels[i], img.Pixels[i + 1], img.Pixels[i + 2]);
+                ++count;
+            }
+        }
+        return count > 0 ? sum / (float)count : sum;
+    };
+
+    LightingEnvironment env;
+    env.Skybox.Enabled = true;
+    env.Skybox.Kind = SkyboxSettings::Source::Procedural;
+    env.Skybox.TopColor = glm::vec3(0.10f, 0.20f, 0.70f);
+    env.Skybox.HorizonColor = glm::vec3(0.90f, 0.80f, 0.40f);
+    env.Skybox.DayNight = false;
+
+    const Image gradient = render(env);
+    const glm::vec3 gTop = band(gradient, 0, kH / 5);
+    const glm::vec3 gBottom = band(gradient, kH * 4 / 5, kH);
+    const float gradientSpread = glm::length(gTop - gBottom);
+
+    env.Skybox.Kind = SkyboxSettings::Source::Solid;
+    const Image solid = render(env);
+    const glm::vec3 sTop = band(solid, 0, kH / 5);
+    const glm::vec3 sBottom = band(solid, kH * 4 / 5, kH);
+    const float solidSpread = glm::length(sTop - sBottom);
+
+    std::printf("       разброс по кадру: градиент %.1f, одним цветом %.1f\n", gradientSpread,
+                solidSpread);
+    if (gradientSpread > 20.0f && solidSpread < 2.0f) {
+        CountPass();
+        std::printf("[ ok ] %-28s заливка ровная, градиент — нет\n", "sky_solid_colour");
+    } else {
+        CountFail();
+        std::printf("[FAIL] %-28s заливка не ровная (%.1f) либо градиент пропал (%.1f)\n",
+                    "sky_solid_colour", solidSpread, gradientSpread);
+    }
+
+    // И цвет — ТОТ САМЫЙ, что задан: синий канал заметно сильнее красного.
+    if (sTop.b > sTop.r * 1.5f) {
+        CountPass();
+        std::printf("[ ok ] %-28s цвет неба — заданный (r %.0f, b %.0f)\n", "sky_solid_value",
+                    sTop.r, sTop.b);
+    } else {
+        CountFail();
+        std::printf("[FAIL] %-28s цвет неба не тот (r %.0f, b %.0f)\n", "sky_solid_value", sTop.r,
+                    sTop.b);
+    }
+}
+
 void TestSceneOrthographic(FrameRenderer& r, Scene& scene) {
     // Ортокамера — новая возможность движка, и «работает» для неё значит
     // «даёт правильную картинку», а не «компилируется».
@@ -832,6 +915,7 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestScenePerspective(r, scene);
     TestShadowsOffIsNotBlack(r, scene);
     TestNoSkyNoLightIsBlack(r);
+    TestSolidSky(r);
     TestShadedWithPostIsNotBlack(r, scene);
     TestPostSelfCheck(r);
     TestSceneOrthographic(r, scene);

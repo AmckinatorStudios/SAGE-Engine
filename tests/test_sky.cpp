@@ -24,6 +24,7 @@
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/SkyDraw.h"
 #include "sage/render/SkyModel.h"
+#include "sage/render/SkyRenderer.h"
 #include "sage/render/Skybox.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/SceneSerializer.h"
@@ -229,6 +230,72 @@ TEST(Frame_clears_to_black_without_a_sky) {
     env.Skybox.Enabled = true;
     const glm::vec3 on = sage::render::SceneClearColor(env);
     CHECK_TRUE(on.b > 0.5f);
+}
+
+// --- 7c. НЕБО ОДНИМ ЦВЕТОМ ---------------------------------------------------
+//
+// Режим для сцен, где небо — фон, а не предмет разговора: схема уровня,
+// студийная подложка, стилизованная игра. Проверяется именно то, чем он
+// отличается от процедурного: один цвет вместо градиента, никакого времени
+// суток — и при этом ЕСТЬ окружающий свет (в отличие от выключенного неба,
+// которое означает темноту).
+TEST(Sky_solid_colour_is_flat_and_has_no_time_of_day) {
+    LightingEnvironment env = EnvWithSunAt(45.0f);
+    env.Skybox.Enabled = true;
+    env.Skybox.Kind = SkyboxSettings::Source::Solid;
+    env.Skybox.TopColor = glm::vec3(0.2f, 0.6f, 0.3f);
+    env.Skybox.HorizonColor = glm::vec3(1.0f, 0.0f, 0.0f); // цвет ЧУЖОГО режима
+    env.Skybox.DayNight = true;
+    sage::render::ApplySky(env);
+
+    // Верх и горизонт совпадают — это и есть «одним цветом».
+    CHECK_NEAR(env.SkyTop().g, 0.6f, 1e-4f);
+    CHECK_NEAR(env.SkyHorizon().g, 0.6f, 1e-4f);
+    CHECK_NEAR(env.SkyHorizon().r, 0.2f, 1e-4f);
+
+    // Солнце под горизонтом ничего не меняет: у заливки нет ни ночи, ни заката.
+    LightingEnvironment night = env;
+    night.Sun.Direction = glm::normalize(glm::vec3(0.0f, 1.0f, 0.0f)); // светит вверх = село
+    sage::render::ApplySky(night);
+    CHECK_NEAR(night.SkyTop().g, 0.6f, 1e-4f);
+    CHECK_NEAR(night.DayFactor, 1.0f, 1e-4f);
+
+    // Окружающий свет «от неба» берёт этот же цвет — ради этого режим и нужен
+    // там, где выключенное небо не годится.
+    env.AmbientMode = LightingEnvironment::AmbientSource::FromSky;
+    glm::vec3 sky, ground;
+    env.ResolveAmbient(sky, ground);
+    CHECK_TRUE(sky.g > sky.r);
+    CHECK_TRUE(sky.g > 0.1f);
+}
+
+// Светил на заливке быть не может: солнце и звёзды сразу превращают её обратно
+// в небо, ради отсутствия которого режим и выбирают.
+TEST(Sky_solid_colour_draws_no_sun_or_stars) {
+    LightingEnvironment env = EnvWithSunAt(30.0f);
+    env.Skybox.Enabled = true;
+    env.Skybox.Celestials = true;
+    env.Skybox.Kind = SkyboxSettings::Source::Procedural;
+    CHECK_TRUE(CelestialsFromEnvironment(env).Enabled);
+
+    env.Skybox.Kind = SkyboxSettings::Source::Solid;
+    CHECK_FALSE(CelestialsFromEnvironment(env).Enabled);
+}
+
+// Режим переживает запись и чтение сцены: номер лежит в .sage, и добавление
+// нового значения не имеет права переназначить небо в старых файлах.
+TEST(Sky_solid_colour_survives_save_and_load) {
+    auto scene = std::make_unique<Scene>("SolidSky");
+    scene->Lighting.Skybox.Enabled = true;
+    scene->Lighting.Skybox.Kind = SkyboxSettings::Source::Solid;
+    scene->Lighting.Skybox.TopColor = glm::vec3(0.1f, 0.2f, 0.3f);
+
+    std::unique_ptr<Scene> back =
+        SceneSerializer::LoadFromString(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(back != nullptr);
+    if (!back) return;
+    CHECK_TRUE(back->Lighting.Skybox.Kind == SkyboxSettings::Source::Solid);
+    CHECK_NEAR(back->Lighting.Skybox.TopColor.b, 0.3f, 1e-4f);
 }
 
 // --- 8. Режим неба переживает запись и чтение --------------------------------

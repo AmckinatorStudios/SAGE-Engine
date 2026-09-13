@@ -127,7 +127,10 @@ void main() {
 
 SkyCelestials CelestialsFromEnvironment(const LightingEnvironment& env) {
     SkyCelestials c;
-    c.Enabled = env.Skybox.Celestials;
+    // Одноцветное небо — это ЗАЛИВКА, и светил на ней быть не может: солнце,
+    // луна и звёзды сразу превращают её обратно в небо, ради отсутствия
+    // которого режим и выбирают.
+    c.Enabled = env.Skybox.Celestials && env.Skybox.Kind != SkyboxSettings::Source::Solid;
     // Направление НА СОЛНЦЕ берётся из разрешённого состояния кадра, а не из
     // env.Sun: ночью в слоте солнца лежит ЛУНА (см. SkyModel.h), и диск солнца
     // уехал бы вслед за ней — то есть всходил бы на западе.

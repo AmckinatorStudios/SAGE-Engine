@@ -228,22 +228,40 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
     }
 
     // РЕЖИМ — первым делом: от него зависит, какие настройки вообще имеют смысл.
-    const char* kModes[] = {T("Procedural"), T("One image (cross or panorama)"),
+    const char* kModes[] = {T("Procedural"), T("One colour"), T("One image (cross or panorama)"),
                             T("Cubemap folder"), T("Six separate files")};
     // Порядок в списке — по частоте, а не по значению перечисления: одной
     // картинкой небо приходит чаще всего, и стоять она должна первой из
     // текстурных. Поэтому индекс списка и Source связаны таблицей, а не равны.
-    static const SkyboxSettings::Source kOrder[4] = {
-        SkyboxSettings::Source::Procedural, SkyboxSettings::Source::Image,
-        SkyboxSettings::Source::Cubemap, SkyboxSettings::Source::Faces};
+    static const SkyboxSettings::Source kOrder[5] = {
+        SkyboxSettings::Source::Procedural, SkyboxSettings::Source::Solid,
+        SkyboxSettings::Source::Image, SkyboxSettings::Source::Cubemap,
+        SkyboxSettings::Source::Faces};
+    constexpr int kModeCount = (int)(sizeof(kOrder) / sizeof(kOrder[0]));
     int mode = 0;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < kModeCount; ++i)
         if (kOrder[i] == sky.Kind) mode = i;
-    if (ImGui::Combo(T("Source"), &mode, kModes, 4)) {
+    if (ImGui::Combo(T("Source"), &mode, kModes, kModeCount)) {
         host.PushUndoSnapshot();
         sky.Kind = kOrder[mode];
         // Пути НЕ стираются при переключении: вернуться к своему набору неба
         // надо уметь без повторного выбора папки.
+    }
+
+    // --- Небо одним цветом --------------------------------------------------
+    //
+    // Настроек ровно одна, и это не упрощение ради красоты: всё остальное
+    // (сутки, закат, светила, звёзды) по смыслу режима не существует, и
+    // показывать их значило бы обещать то, чего не будет.
+    if (sky.Kind == SkyboxSettings::Source::Solid) {
+        ImGui::ColorEdit3(T("Sky colour"), &sky.TopColor.x);
+        host.TrackLastImGuiItem();
+        ImGui::TextDisabled("%s", T("Flat fill: no gradient, no sun, no time of day"));
+        // Окружающий свет при этом ЕСТЬ: режим «от неба» возьмёт этот самый
+        // цвет, и предметы будут им подсвечены — в отличие от выключенного
+        // неба, которое означает темноту.
+        ImGui::TextDisabled("%s", T("Ambient light from the sky takes this colour"));
+        return;
     }
 
     if (sky.Kind == SkyboxSettings::Source::Procedural) {

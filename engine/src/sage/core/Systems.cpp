@@ -29,7 +29,7 @@ const std::vector<SystemVersion>& EngineSystems() {
         {"Materials",      1, "metallic-roughness, normal/AO-карты (.sagemat)"},
         {"Skybox",         1, "процедурный градиентный скайбокс + туман"},
         {"Particles",      1, "инстансные billboard-частицы (залпы и струи)"},
-        {"Animation",      1, "скелетная анимация (glTF-скины, палитра костей)"},
+        {"Animation",      1, "скелетная анимация (скины glTF и FBX, палитра костей)"},
         {"Physics",        1, "PhysicsWorld: встроенный движок / Jolt / Null"},
         {"Audio",          1, "miniaudio: 2D/3D звук, музыка, группы громкости"},
         {"Vars",           1, "публичные переменные объектов и ссылки, пережившие переименование"},
