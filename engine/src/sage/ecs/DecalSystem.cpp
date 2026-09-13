@@ -16,6 +16,7 @@ MeshData ReceiverGeometry(const MeshRendererComponent& mr) {
         case MeshRef::Type::Plane:    return sage::render::BuildPlane();
         case MeshRef::Type::Cylinder: return sage::render::BuildCylinder();
         case MeshRef::Type::Cone:     return sage::render::BuildCone();
+        case MeshRef::Type::Capsule:  return sage::render::BuildCapsule();
         case MeshRef::Type::Model: {
             // Только если копию геометрии просили сохранить при загрузке.
             // Иначе наклейку класть не на что: вершины остались на видеокарте,

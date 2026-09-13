@@ -965,6 +965,10 @@ void EditorLayer::OnUpdate(float dt) {
     if (m_playState != EditorPlayState::Paused) {
         const float scale = m_playScripts ? m_playScripts->FrameTimeScale() : 1.0f;
         m_systems.Run(*m_scene, dt * scale);
+    } else if (m_pendingStep > 0.0f) {
+        // Заказанный шаг: ровно один кадр игры и снова стоп.
+        m_systems.Run(*m_scene, m_pendingStep);
+        m_pendingStep = 0.0f;
     }
     m_plugins.UpdateAll(dt);
 

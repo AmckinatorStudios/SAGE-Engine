@@ -44,7 +44,17 @@ ICONS = {
     "folder-full": ("filled", "folder"),
     "project": "briefcase", "prefab": "box-multiple", "texture": "photo", "shader": "brush",
     "audio": "volume", "model": "cube-3d-sphere",
-    "up": "arrow-up", "refresh": "refresh", "folder-plus": "folder-plus", "search": "search",
+    "up": "arrow-up", "refresh": "refresh",
+    # Отмена и повтор — гнутые стрелки, как во всех редакторах. Прямые
+    # («влево»/«вправо») читаются как переход по списку, а не как отмена.
+    "undo": "arrow-back-up", "redo": "arrow-forward-up",
+    # Конус — ПРОЖЕКТОР. Раньше его роль играла капля: она сужается книзу и
+    # потому хоть как-то читалась, но конус — это буквально форма его светового
+    # пучка, и объяснять её не нужно.
+    "cone": "cone-2",
+    # Капсула — рабочая форма персонажа (см. BuildCapsule): в списке форм у неё
+    # обязан быть свой значок, а не общий кубик.
+    "capsule": "capsule", "folder-plus": "folder-plus", "search": "search",
     "clock": "clock", "list": "list", "import": "file-import", "pencil": "pencil",
     "code": "code", "question": "help", "layout": "layout", "gear": "settings",
     "magnet": "magnet",

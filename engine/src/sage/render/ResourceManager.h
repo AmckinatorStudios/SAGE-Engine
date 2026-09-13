@@ -61,39 +61,49 @@ public:
     bool KeepMeshCpuData() const { return m_keepMeshCpu; }
 
     // --- Примитивы (лениво создаются, живут до Clear) ---
-    std::shared_ptr<Mesh> GetCube() {
-        if (!m_cube) m_cube = std::make_shared<Mesh>(Mesh::CreateCube(m_keepMeshCpu));
-        return m_cube;
-    }
-    std::shared_ptr<Mesh> GetSphere() {
-        if (!m_sphere) m_sphere = std::make_shared<Mesh>(Mesh::CreateSphere(24, 32, m_keepMeshCpu));
-        return m_sphere;
-    }
-    std::shared_ptr<Mesh> GetPlane() {
-        if (!m_plane) m_plane = std::make_shared<Mesh>(Mesh::CreatePlane(1, m_keepMeshCpu));
-        return m_plane;
-    }
-    std::shared_ptr<Mesh> GetCylinder() {
-        if (!m_cylinder) m_cylinder = std::make_shared<Mesh>(Mesh::CreateCylinder(32, m_keepMeshCpu));
-        return m_cylinder;
-    }
-    std::shared_ptr<Mesh> GetCone() {
-        if (!m_cone) m_cone = std::make_shared<Mesh>(Mesh::CreateCone(32, m_keepMeshCpu));
-        return m_cone;
+    //
+    // МАССИВОМ, А НЕ ПОЛЕМ НА КАЖДУЮ ФОРМУ. Полей было пять, и каждая новая
+    // форма требовала правки в трёх местах сразу: поле, ветка в GetPrimitive и
+    // строка в Clear(). Забытая строка в Clear() — не мелочь: меш остаётся жив
+    // до конца программы и освобождает свой буфер видеокарты ПОСЛЕ того, как
+    // умер GL-контекст, то есть редактор падает при выходе. Падает при этом не
+    // там, где ошиблись, и не всегда — ровно тот вид поломки, который ищут
+    // сутками. Ровно так и случилось с капсулой.
+    //
+    // С массивом забыть нечего: Clear() сбрасывает весь массив одной строкой, а
+    // новая форма — это одна ветка в Build ниже.
+    std::shared_ptr<Mesh> GetPrimitive(MeshRef::Type type) {
+        const size_t index = (size_t)type;
+        if (index >= kPrimitiveСount) return nullptr;
+        std::shared_ptr<Mesh>& slot = m_primitives[index];
+        if (!slot) {
+            switch (type) {
+                case MeshRef::Type::Cube:
+                    slot = std::make_shared<Mesh>(Mesh::CreateCube(m_keepMeshCpu)); break;
+                case MeshRef::Type::Sphere:
+                    slot = std::make_shared<Mesh>(Mesh::CreateSphere(24, 32, m_keepMeshCpu)); break;
+                case MeshRef::Type::Plane:
+                    slot = std::make_shared<Mesh>(Mesh::CreatePlane(1, m_keepMeshCpu)); break;
+                case MeshRef::Type::Cylinder:
+                    slot = std::make_shared<Mesh>(Mesh::CreateCylinder(32, m_keepMeshCpu)); break;
+                case MeshRef::Type::Cone:
+                    slot = std::make_shared<Mesh>(Mesh::CreateCone(32, m_keepMeshCpu)); break;
+                case MeshRef::Type::Capsule:
+                    slot = std::make_shared<Mesh>(Mesh::CreateCapsule(12, 24, m_keepMeshCpu)); break;
+                // None не рисуется, Model грузится через GetModel.
+                default: return nullptr;
+            }
+        }
+        return slot;
     }
 
-    // Готовый GPU-меш по описанию примитива — единая точка для сцен/сериализатора
-    // (nullptr для None/Model: None не рисуется, Model грузится через GetModel).
-    std::shared_ptr<Mesh> GetPrimitive(MeshRef::Type type) {
-        switch (type) {
-            case MeshRef::Type::Cube:     return GetCube();
-            case MeshRef::Type::Sphere:   return GetSphere();
-            case MeshRef::Type::Plane:    return GetPlane();
-            case MeshRef::Type::Cylinder: return GetCylinder();
-            case MeshRef::Type::Cone:     return GetCone();
-            default:                      return nullptr;
-        }
-    }
+    // Короткие имена — их зовут десятки мест; все ведут в GetPrimitive.
+    std::shared_ptr<Mesh> GetCube()     { return GetPrimitive(MeshRef::Type::Cube); }
+    std::shared_ptr<Mesh> GetSphere()   { return GetPrimitive(MeshRef::Type::Sphere); }
+    std::shared_ptr<Mesh> GetPlane()    { return GetPrimitive(MeshRef::Type::Plane); }
+    std::shared_ptr<Mesh> GetCylinder() { return GetPrimitive(MeshRef::Type::Cylinder); }
+    std::shared_ptr<Mesh> GetCone()     { return GetPrimitive(MeshRef::Type::Cone); }
+    std::shared_ptr<Mesh> GetCapsule()  { return GetPrimitive(MeshRef::Type::Capsule); }
 
     // Модель по пути. nullptr при ошибке (файл удалён/бит) — вызывающий просто
     // не рисует сущность, а сцена с одной битой моделью грузится ЦЕЛИКОМ.
@@ -311,7 +321,10 @@ private:
     void DowngradeTexture(const std::string& path); // понизить разрешение вдвое
     uint64_t NextTick() { return ++m_tick; }
 
-    std::shared_ptr<Mesh> m_cube, m_sphere, m_plane, m_cylinder, m_cone;
+    // Кэш форм по MeshRef::Type. Размер — по последнему значению перечисления,
+    // чтобы новая форма не требовала править ещё и число.
+    static constexpr size_t kPrimitiveСount = (size_t)MeshRef::Type::Model + 1;
+    std::shared_ptr<Mesh> m_primitives[kPrimitiveСount];
     bool m_keepMeshCpu = false;   // см. SetKeepMeshCpuData
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;

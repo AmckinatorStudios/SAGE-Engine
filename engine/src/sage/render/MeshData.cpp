@@ -1,5 +1,6 @@
 #include "sage/render/MeshData.h"
 
+#include <algorithm>
 #include <cmath>
 #include <glm/gtc/constants.hpp>
 
@@ -63,6 +64,54 @@ MeshData BuildSphere(int rings, int sectors) {
             unsigned int a = r * stride + s;
             unsigned int b = a + stride;
             d.Indices.insert(d.Indices.end(), { a, b, a + 1, a + 1, b, b + 1 });
+        }
+    }
+    return d;
+}
+
+MeshData BuildCapsule(int rings, int sectors) {
+    if (rings < 2) rings = 2;
+    if (sectors < 3) sectors = 3;
+    const float pi = glm::pi<float>();
+    const float radius = 0.5f;
+    // Общая высота — 1. Цилиндрическая часть это то, что осталось от единицы
+    // после двух полусфер радиуса 0.5; при радиусе 0.5 она вырождается в ноль,
+    // и капсула становится сферой — это правильный предельный случай, а не
+    // ошибка: тоньше радиуса капсула не бывает.
+    const float half = std::max(0.5f - radius, 0.0f);
+
+    MeshData d;
+    // Кольца идут сверху вниз одной лентой: верхняя полусфера, шов, нижняя.
+    // Шов проходится ДВАЖДЫ (один раз с центром +half, один с -half) — так
+    // получается прямая боковая стенка, а не бочка.
+    const int total = rings * 2 + 1;
+    for (int r = 0; r <= total; ++r) {
+        // Полярный угол идёт 0..pi, но центр кольца переезжает на середине.
+        const int upper = r <= rings ? r : rings;          // 0..rings
+        const int lower = r <= rings ? 0 : r - rings - 1;  // 0..rings-1
+        const float phi = (r <= rings) ? (float)upper / rings * (pi * 0.5f)
+                                       : (pi * 0.5f) + (float)(lower + 1) / rings * (pi * 0.5f);
+        const float cy = (r <= rings) ? half : -half;
+        const float ny = std::cos(phi);
+        const float ringR = std::sin(phi);
+        const float v = (float)r / total;
+        for (int s = 0; s <= sectors; ++s) {
+            const float u = (float)s / sectors;
+            const float theta = u * 2.0f * pi;
+            const glm::vec3 n(ringR * std::cos(theta), ny, ringR * std::sin(theta));
+            // Нормаль — от ЦЕНТРА СВОЕЙ полусферы, поэтому у боковой стенки она
+            // строго горизонтальна, а на шапках расходится веером.
+            d.Vertices.push_back({glm::vec3(n.x * radius, cy + n.y * radius, n.z * radius), n,
+                                  {u, 1.0f - v}});
+        }
+    }
+
+    const int stride = sectors + 1;
+    for (int r = 0; r < total; ++r) {
+        for (int s = 0; s < sectors; ++s) {
+            const unsigned int a = (unsigned int)(r * stride + s);
+            const unsigned int b = a + (unsigned int)stride;
+            d.Indices.insert(d.Indices.end(), {a, b, a + 1, a + 1, b, b + 1});
         }
     }
     return d;

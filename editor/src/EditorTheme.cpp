@@ -651,8 +651,14 @@ bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClic
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                               ImVec4(danger.x * 0.85f, danger.y * 0.85f, danger.z * 0.85f, danger.w));
+        // Под курсором подложка заливается красным — значок обязан стать
+        // светлым, иначе он сливается с ней и кнопка выглядит пустым красным
+        // квадратом ровно тогда, когда на неё навели.
+        const ImVec4 onAccent = Color(Role::TextOnAccent);
+        const glm::vec3 hoverTint(onAccent.x, onAccent.y, onAccent.z);
         *removeClicked = EditorIcons::IconOnlyButton("trash", T("Remove this component"), false,
-                                                     glm::vec3(danger.x, danger.y, danger.z));
+                                                     glm::vec3(danger.x, danger.y, danger.z),
+                                                     &hoverTint);
         ImGui::PopStyleColor(3);
         ImGui::PopID();
     }

@@ -303,7 +303,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + capsule + step + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2574,6 +2574,97 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: материалы модели для обложки не прочитались: "
                                 << SAGE_TEST_MODEL;
             ok = false;
+        }
+    }
+
+    // --- КАПСУЛА И ШАГ ПО КАДРАМ --------------------------------------------
+    //
+    // Капсула — рабочая форма персонажа: ею его считает физика (ShapeType::
+    // Capsule), а НАРИСОВАТЬ её было нечем, и персонаж собирался из цилиндра —
+    // видимое тело не совпадало с тем, чем он сталкивается.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        GameObject cap = CreatePrimitiveEntity("CapsuleShape", MeshRef::Type::Capsule);
+        const MeshRendererComponent& mr = cap.Renderer();
+        if (!mr.MeshPtr || mr.MeshPtr->TriangleCount() <= 0) {
+            LOG_ERROR("Editor") << "SELFTEST: капсула не построилась";
+            ok = false;
+        }
+        // Габарит: радиус 0.5 и общая высота 1 — как у остальных примитивов,
+        // иначе «капсула ростом 1.8» не получалась бы масштабом 1.8.
+        if (ok) {
+            const glm::vec3 lo = mr.MeshPtr->BoundsMin(), hi = mr.MeshPtr->BoundsMax();
+            if (std::abs((hi.y - lo.y) - 1.0f) > 0.01f || std::abs((hi.x - lo.x) - 1.0f) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: габарит капсулы " << (hi.x - lo.x) << " x "
+                                    << (hi.y - lo.y) << " вместо 1 x 1";
+                ok = false;
+            }
+        }
+        // Форма переживает сохранение: тип пишется именем, и опечатка в нём
+        // превратила бы капсулу в «ничего» при следующем открытии сцены.
+        if (ok) {
+            const std::string text = SceneSerializer::SaveToString(*m_scene);
+            std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+            GameObject back = loaded ? loaded->FindByName("CapsuleShape") : GameObject{};
+            if (!back.Valid() || back.Renderer().Ref.type != MeshRef::Type::Capsule) {
+                LOG_ERROR("Editor") << "SELFTEST: капсула не пережила сохранение сцены";
+                ok = false;
+            }
+        }
+        // И персонаж из каталога собирается ИМЕННО капсулой.
+        if (ok) {
+            GameObject ch = m_scene->Get(CreateCatalogObject("physics.character"));
+            if (!ch.Valid() || ch.Renderer().Ref.type != MeshRef::Type::Capsule) {
+                LOG_ERROR("Editor") << "SELFTEST: персонаж собран не капсулой";
+                ok = false;
+            }
+        }
+    }
+
+    // ШАГ ПО КАДРАМ. На паузе мир стоит — это единственное состояние, в котором
+    // его можно разглядеть; но вопросы к нему про движение. Шаг двигает мир
+    // ровно на один кадр и снова останавливает.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        GameObject box = CreatePrimitiveEntity("StepBox", MeshRef::Type::Cube);
+        box.GetTransform().Position = glm::vec3(0.0f, 20.0f, 0.0f);
+        m_scene->Registry().emplace_or_replace<RigidBodyComponent>(box.Entity());
+        const int boxId = box.Id();
+
+        StartPlay();
+        PausePlay();
+        const float yPaused = m_scene->Get(boxId).GetTransform().Position.y;
+
+        StepPlay();
+        OnUpdate(0.05f);
+        const float yStepped = m_scene->Get(boxId).GetTransform().Position.y;
+        if (yStepped >= yPaused - 1e-5f) {
+            LOG_ERROR("Editor") << "SELFTEST: шаг не сдвинул кадр (y " << yPaused << " -> "
+                                << yStepped << ")";
+            ok = false;
+        }
+        // И ровно ОДИН кадр: следующие OnUpdate без нажатия шага обязаны
+        // оставить мир на месте, иначе это не шаг, а снятие с паузы.
+        if (ok) {
+            for (int i = 0; i < 10; ++i) OnUpdate(0.05f);
+            const float yAfter = m_scene->Get(boxId).GetTransform().Position.y;
+            if (std::abs(yAfter - yStepped) > 1e-5f) {
+                LOG_ERROR("Editor") << "SELFTEST: после шага кадр продолжает идти сам";
+                ok = false;
+            }
+        }
+        // Вне паузы шаг не делает ничего: у работающей игры он смысла не имеет.
+        if (ok) {
+            StopPlay();
+            const float yBefore = m_scene->Get(boxId).GetTransform().Position.y;
+            StepPlay();
+            OnUpdate(0.05f);
+            if (std::abs(m_scene->Get(boxId).GetTransform().Position.y - yBefore) > 1e-5f) {
+                LOG_ERROR("Editor") << "SELFTEST: шаг сработал вне паузы";
+                ok = false;
+            }
+        } else {
+            StopPlay();
         }
     }
 

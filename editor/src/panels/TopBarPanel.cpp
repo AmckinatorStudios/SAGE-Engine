@@ -6,6 +6,7 @@
 #include "imgui.h"
 
 #include "EditorHost.h"
+#include "Project.h"
 #include "EditorIcons.h"
 #include "EditorTheme.h"
 #include "ui/UI.h"
@@ -103,118 +104,180 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
 
     ImGui::SetCursorPosX(ui.PaddingPanel);
 
-    // --- Панели: из чего собрано рабочее место -------------------------------
-    PanelToggle(host, EditorPanel::Hierarchy, "layout", T("Hierarchy"), T("Hierarchy"), false, row);
-    PanelToggle(host, EditorPanel::Inspector, "file", T("Inspector"), T("Inspector"), false, row);
-    PanelToggle(host, EditorPanel::Assets, "folder", T("Assets"), T("Assets"), false, row);
-    PanelToggle(host, EditorPanel::Console, "debug", T("Console"), T("Console"), false, row);
-    PanelToggle(host, EditorPanel::Profiler, "info", T("Profiler"), T("Profiler"), false, row);
-
-    divider();
-
-    // --- Настройки: два окна и граница между ними ----------------------------
+    // --- СЛЕВА: ФАЙЛ -------------------------------------------------------
     //
-    // Они стоят рядом намеренно. Вопрос «где настраивается свет» раньше не имел
-    // ответа: часть была в окне Lighting, часть в Game Settings, часть на
-    // объекте. Соседство кнопок — самая дешёвая форма ответа: среда сцены
-    // здесь, цена кадра там, источники — объекты в иерархии.
-    PanelToggle(host, EditorPanel::Environment, "sun", T("Environment"),
-                T("Environment: sky, air, ambient light (saved with the scene)"), labels, row);
-    PanelToggle(host, EditorPanel::Settings, "gear", T("Game Settings"),
-                T("Game Settings: quality and cost of the frame (saved with the project)"),
-                labels, row);
-    PanelToggle(host, EditorPanel::UIEditor, "rect", T("Interface"),
-                T("Interface editor: the game frame at its own resolution"), labels, row);
+    // Четыре действия, которыми начинают и заканчивают работу: новая сцена,
+    // открыть сцену, открыть проект, сохранить. Раньше верхнюю панель занимали
+    // переключатели окон — но окна открывают раз в день, а сохраняют раз в
+    // минуту, и место у левого края (куда рука идёт первой) досталось не тому.
+    // Сами окна никуда не делись: они все перечислены в меню «Окно».
+    CenterY(row);
+    if (EditorIcons::IconOnlyButton("file", T("New scene"))) host.RequestDialog("New Scene");
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    if (EditorIcons::IconOnlyButton("open", T("Open scene..."))) host.RequestDialog("Open Scene");
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    if (EditorIcons::IconOnlyButton("project", T("Open project..."))) host.RequestDialog("Open Project");
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    if (EditorIcons::IconOnlyButton("save", T("Save scene (Ctrl+S)"))) host.RequestDialog("Save Scene");
 
     divider();
 
-    // --- Виды: чем смотреть на сцену ------------------------------------------
-    PanelToggle(host, EditorPanel::Viewport, "cube", T("Viewport"), T("Viewport"), labels, row);
-    PanelToggle(host, EditorPanel::Game, "camera", T("Game"),
-                T("Game (view from the game camera)"), labels, row);
+    // --- ОТМЕНА И ПОВТОР ---------------------------------------------------
+    //
+    // Гаснут, когда отменять нечего: серая кнопка честно говорит «здесь пусто»,
+    // а живая, которая ничего не делает, читается как поломка.
+    const bool canUndo = host.CanUndo() && !host.InPlayMode();
+    const bool canRedo = host.CanRedo() && !host.InPlayMode();
+    CenterY(row);
+    ImGui::BeginDisabled(!canUndo);
+    if (EditorIcons::IconOnlyButton("undo", T("Undo (Ctrl+Z)"))) host.Undo();
+    ImGui::EndDisabled();
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    ImGui::BeginDisabled(!canRedo);
+    if (EditorIcons::IconOnlyButton("redo", T("Redo (Ctrl+Y)"))) host.Redo();
+    ImGui::EndDisabled();
 
-    // --- По центру: Play / Pause / Stop --------------------------------------
+    // --- ПО ЦЕНТРУ: ЗАПУСК --------------------------------------------------
     //
     // Центрирование считается ОТ СВОБОДНОГО МЕСТА и зажимается между левым и
     // правым блоками: ImGui::SameLine(x) с координатой левее курсора честно
     // ставит курсор назад, и блок рисуется ПОВЕРХ уже нарисованного — кнопки
     // просто исчезали бы с экрана.
     const float leftEnd = ImGui::GetItemRectMax().x - barMin.x;
-    // Ширина слота под транспорт ПОСТОЯННА, хотя в правке в нём одна кнопка, а
-    // в игре две. Иначе при входе в игру блок раздувался бы и кнопка уезжала
+    // Ширина слота под запуск ПОСТОЯННА, хотя в правке в нём одна кнопка, а в
+    // игре четыре. Иначе при входе в игру блок раздувался бы и кнопка уезжала
     // из-под курсора ровно в тот момент, когда по ней целятся второй раз.
-    const float playBlockW = ui.ControlHeight * 7.0f;
-    const float sceneBlockW = showScene ? ui.ControlHeight * 8.0f : 0.0f;
+    const float playBlockW = ui.ControlHeight * 8.0f;
+    const float rightBlockW = showScene ? ui.ControlHeight * 9.0f : ui.ControlHeight * 3.0f;
     const float gap = ui.SpacingMD;
 
-    const float rightStart = windowW - sceneBlockW - ui.PaddingPanel;
+    const float rightStart = windowW - rightBlockW - ui.PaddingPanel;
     float playX = leftEnd + (rightStart - leftEnd - playBlockW) * 0.5f;
     playX = std::min(playX, rightStart - playBlockW - gap);
     playX = std::max(playX, leftEnd + gap);
     ImGui::SameLine(playX);
-    dividerAt(barMin.x + playX - gap);
 
     const EditorPlayState state = host.GetPlayState();
+    const bool playing = state == EditorPlayState::Playing;
+    const bool paused = state == EditorPlayState::Paused;
     CenterY(row);
-    if (state == EditorPlayState::Editing) {
-        // ГЛАВНОЕ ДЕЙСТВИЕ ЭКРАНА — единственное, что красится акцентом.
-        // Именно ради него жёлтый и держат в резерве: когда им покрашено ещё
-        // пять кнопок, эта перестаёт быть заметной.
-        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Accent));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::Color(Role::AccentHover));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Color(Role::AccentActive));
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
-        if (EditorIcons::Button("play", T("Play"), T("Run the scene (it is restored on Stop)")))
-            host.StartPlay();
-        ImGui::PopStyleColor(4);
-    } else {
-        if (state == EditorPlayState::Playing) {
-            if (EditorIcons::Button("pause", T("Pause"), T("Pause"))) host.PausePlay();
-        } else {
-            if (EditorIcons::Button("play", T("Resume"), T("Resume"))) host.ResumePlay();
-        }
-        ImGui::SameLine(0.0f, ui.SpacingXS);
-        CenterY(row);
-        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Danger));
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
-        if (EditorIcons::Button("stop", T("Stop"), T("Stop and restore the scene")))
-            host.StopPlay();
-        ImGui::PopStyleColor(2);
+    // ГЛАВНОЕ ДЕЙСТВИЕ ЭКРАНА — единственное, что красится акцентом. Именно
+    // ради него жёлтый и держат в резерве: когда им покрашено ещё пять кнопок,
+    // эта перестаёт быть заметной. Подпись у него есть, у остальных нет: «Play»
+    // ищут глазами, а паузу и стоп — уже рядом с ним.
+    ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(Role::Accent));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::Color(Role::AccentHover));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Color(Role::AccentActive));
+    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::TextOnAccent));
+    if (paused) {
+        if (EditorIcons::Button("play", T("Resume"), T("Resume"))) host.ResumePlay();
+    } else if (EditorIcons::Button("play", T("Play"), T("Run the scene (it is restored on Stop)"),
+                                   playing)) {
+        if (!playing) host.StartPlay();
+    }
+    ImGui::PopStyleColor(4);
 
-        // Состояние игры — значком рядом с кнопками, а не подписью над ними:
-        // подпись стоила целой строки высоты, а сказать ей нечего, пока идёт
-        // обычная правка.
-        ImGui::SameLine(0.0f, ui.SpacingSM);
-        CenterY(row);
-        ImGui::AlignTextToFramePadding();
-        const bool playing = state == EditorPlayState::Playing;
-        ImGui::TextColored(EditorTheme::Color(playing ? Role::Ok : Role::Warn), "%s",
-                           playing ? T("PLAYING") : T("PAUSED"));
+    // Пауза, шаг и стоп — только когда есть что останавливать. В правке их
+    // место остаётся пустым, а не занято серыми кнопками: пустое место не
+    // предлагает нажать на себя.
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    ImGui::BeginDisabled(!playing);
+    if (EditorIcons::IconOnlyButton("pause", T("Pause"))) host.PausePlay();
+    ImGui::EndDisabled();
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    // ШАГ — только на паузе: у работающей игры он смысла не имеет.
+    ImGui::BeginDisabled(!paused);
+    if (EditorIcons::IconOnlyButton("step", T("One frame forward (only while paused)")))
+        host.StepPlay();
+    ImGui::EndDisabled();
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    ImGui::BeginDisabled(!host.InPlayMode());
+    if (EditorIcons::IconOnlyButton("stop", T("Stop and restore the scene"))) host.StopPlay();
+    ImGui::EndDisabled();
+
+    // --- ПРОСТРАНСТВО ГИЗМО И ПРИВЯЗКА ---------------------------------------
+    //
+    // Здесь, а не только во вьюпорте: это свойство ЖЕСТА, а не окна, и человек
+    // читает его тем же взглядом, каким смотрит на «Play».
+    ImGui::SameLine(0.0f, ui.SpacingMD);
+    CenterY(row);
+    const bool local = host.GizmoSpace() == EditorGizmoSpace::Local;
+    if (EditorIcons::Button("universal", local ? T("Local") : T("World"),
+                            T("Gizmo axes: along the object (Local) or along the world (World)"))) {
+        host.GizmoSpace() = local ? EditorGizmoSpace::World : EditorGizmoSpace::Local;
+    }
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    CenterY(row);
+    if (EditorIcons::IconOnlyButton("magnet", T("Snap to the step"), host.GizmoSnap()))
+        host.GizmoSnap() = !host.GizmoSnap();
+    ImGui::SameLine(0.0f, 0.0f);
+    CenterY(row);
+    // Стрелка рядом с магнитом: сам магнит включает привязку, стрелка открывает
+    // её шаги. Два действия у одной кнопки не разделить — а шаг правят реже,
+    // чем включают привязку, и прятать его за вторым щелчком правильно.
+    if (ImGui::SmallButton("v" "###snapsteps")) ImGui::OpenPopup("##snapsteps");
+    Sage::UI::Tooltip(T("Snap steps"));
+    if (ImGui::BeginPopup("##snapsteps")) {
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::DragFloat(T("Move"), &host.SnapMove(), 0.01f, 0.001f, 100.0f, "%.3f");
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::DragFloat(T("Rotate"), &host.SnapRotate(), 0.5f, 0.1f, 180.0f, "%.1f°");
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::DragFloat(T("Scale"), &host.SnapScale(), 0.01f, 0.001f, 10.0f, "%.3f");
+        ImGui::EndPopup();
     }
 
-    // --- Справа: что открыто сейчас -------------------------------------------
+    // --- СПРАВА: ПРОЕКТ И НАСТРОЙКИ ------------------------------------------
     //
-    // Имя сцены и пометка о несохранённых правках. В статус-баре они тоже есть,
-    // но статус-бар внизу, а смотрят при работе — вверх, на кнопку Play.
+    // Имя открытого проекта и сцены. В статус-баре они тоже есть, но статус-бар
+    // внизу, а смотрят при работе — вверх, на кнопку «Play».
+    const float rightX = std::max(ImGui::GetItemRectMax().x - barMin.x + gap, rightStart);
+    ImGui::SameLine(rightX);
+    dividerAt(barMin.x + rightX - gap);
+    CenterY(row);
     if (showScene) {
-        const float rightX = std::max(ImGui::GetItemRectMax().x - barMin.x + gap, rightStart);
-        ImGui::SameLine(rightX);
-        dividerAt(barMin.x + rightX - gap);
-        CenterY(row);
-        ImGui::AlignTextToFramePadding();
-        EditorIcons::Inline("scene");
-        ImGui::SameLine(0.0f, ui.SpacingXS);
-        // Длинное имя сцены УКОРАЧИВАЕТСЯ, а не выталкивает себя за край панели.
-        const float room = windowW - ImGui::GetCursorPosX() - ui.PaddingPanel;
-        const std::string name = host.CurrentSceneName() + (host.SceneDirty() ? " *" : "");
-        const std::string shown = Sage::UI::Truncate(name.c_str(), room);
-        if (host.SceneDirty()) {
-            ImGui::TextColored(EditorTheme::Color(Role::Warn), "%s", shown.c_str());
-            Sage::UI::Tooltip(T("There are unsaved changes (Ctrl+S)"), "Ctrl+S");
-        } else {
-            ImGui::TextDisabled("%s", shown.c_str());
-            if (shown != name) Sage::UI::Tooltip(name.c_str());
+        const std::string label =
+            std::string(T("Project: ")) + host.CurrentProject().Name() + "  v";
+        const float room = windowW - ImGui::GetCursorPosX() - ui.ControlHeight - ui.PaddingPanel * 2.0f;
+        if (ImGui::Button(Sage::UI::Truncate(label.c_str(), room).c_str())) {
+            ImGui::OpenPopup("##projectmenu");
         }
+        Sage::UI::Tooltip(T("Project and scene"));
+        if (ImGui::BeginPopup("##projectmenu")) {
+            ImGui::TextDisabled("%s", host.CurrentProject().Dir().string().c_str());
+            ImGui::Separator();
+            // Имя сцены и пометка о несохранённых правках — здесь же: вопрос
+            // «что у меня открыто» один, и ответ на него должен быть в одном
+            // месте.
+            const std::string scene = host.CurrentSceneName() + (host.SceneDirty() ? " *" : "");
+            if (host.SceneDirty()) {
+                ImGui::TextColored(EditorTheme::Color(Role::Warn), "%s", scene.c_str());
+            } else {
+                ImGui::TextUnformatted(scene.c_str());
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(T("Save Scene"), "Ctrl+S")) host.RequestDialog("Save Scene");
+            if (ImGui::MenuItem(T("Save Scene As..."))) host.RequestDialog("Save Scene As");
+            if (ImGui::MenuItem(T("Open Scene..."))) host.RequestDialog("Open Scene");
+            ImGui::Separator();
+            if (ImGui::MenuItem(T("New Project..."))) host.RequestDialog("New Project");
+            if (ImGui::MenuItem(T("Open Project..."))) host.RequestDialog("Open Project");
+            if (ImGui::MenuItem(T("Build Game..."))) host.RequestDialog("Build Game");
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine(0.0f, ui.SpacingXS);
+        CenterY(row);
+    }
+    if (EditorIcons::IconOnlyButton("gear", T("Game Settings"),
+                                    host.PanelVisible(EditorPanel::Settings))) {
+        host.PanelVisible(EditorPanel::Settings) = !host.PanelVisible(EditorPanel::Settings);
     }
 
     ImGui::EndChild();

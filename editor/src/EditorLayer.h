@@ -148,6 +148,8 @@ public:
     // кадр заканчивается в ДВУХ местах: со стартовым окном и с редактором.
     void TakeAutoScreenshot(sage::Application& app);
     void PushUndoSnapshot() override;
+    bool CanUndo() const override { return !m_undoStack.empty(); }
+    bool CanRedo() const override { return !m_redoStack.empty(); }
     void CapturePendingSnapshot() override;
     void CommitPendingSnapshot() override;
     void TrackLastImGuiItem() override;
@@ -165,6 +167,7 @@ public:
     bool InPlayMode() const override { return m_playState != EditorPlayState::Editing; }
     void StartPlay() override;
     void PausePlay() override;
+    void StepPlay() override;
     void ResumePlay() override;
     void StopPlay() override;
     // Ввод интерфейсу ИГРЫ в Play-режиме: курсор панели Game, переведённый в
@@ -281,8 +284,8 @@ public:
 
 private:
     // --- undo/redo (вызываются меню и хоткеями) ---
-    void Undo();
-    void Redo();
+    void Undo() override;
+    void Redo() override;
 
     // --- построение кадра UI ---
     void DrawDockspaceAndMenu();
@@ -298,6 +301,11 @@ private:
     // Диалог, который надо открыть в ближайшем кадре (SAGE_EDITOR_OPEN_DIALOG).
     // Открывать сразу нельзя: OpenPopup обязан звучать на уровне окна-хоста.
     const char* m_pendingDialog = nullptr;
+
+public:
+    void RequestDialog(const char* id) override { m_pendingDialog = id; }
+
+private:
     void UpdateWindowTitle();
     void RunSelfTest();
     // Блоки самопроверки по областям. Возвращают свой итог и выполняются ВСЕ,
@@ -422,6 +430,11 @@ private:
     int m_lockedEntityId = -1;
     std::filesystem::path m_lockedAssetPath;
     std::vector<int> m_selection;       // весь набор выбранных (включает первичную)
+    // Длительность ЗАКАЗАННОГО шага на паузе (0 — шага нет). Заказ, а не прямой
+    // прогон: кнопку нажимают посреди рисования интерфейса, а кадр игры обязан
+    // считаться там же, где считается всегда, — иначе системы пошли бы дважды
+    // за один кадр редактора.
+    float m_pendingStep = 0.0f;
     glm::mat4 m_view{1.0f}, m_proj{1.0f}; // последние view/proj кадра (гизмо/пикинг)
 
     // --- docking ---

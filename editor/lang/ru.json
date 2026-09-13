@@ -1507,6 +1507,21 @@
     "Click — look along this axis; drag — orbit the view": "Щелчок — смотреть вдоль этой оси; перетаскивание — вращать вид",
     "Mark in the list. A folder is for sorting only: it does not move its contents and is not drawn.": "Метка в списке. Папка нужна только для порядка: содержимое она не двигает и не рисуется.",
     "Bakes indirect light to lightmaps (static) and a probe volume (dynamic); direct light stays realtime": "Запекает непрямой свет в лайтмапы (статика) и в объём проб (динамика); прямой свет остаётся реального времени",
-    "Flat fill: no gradient, no sun, no time of day. Ambient light from the sky takes this colour": "Ровная заливка: без градиента, светил и времени суток. Окружающий свет «от неба» возьмёт этот цвет"
+    "Flat fill: no gradient, no sun, no time of day. Ambient light from the sky takes this colour": "Ровная заливка: без градиента, светил и времени суток. Окружающий свет «от неба» возьмёт этот цвет",
+    "New scene": "Новая сцена",
+    "Open scene...": "Открыть сцену…",
+    "Open project...": "Открыть проект…",
+    "Save scene (Ctrl+S)": "Сохранить сцену (Ctrl+S)",
+    "Undo (Ctrl+Z)": "Отменить (Ctrl+Z)",
+    "Redo (Ctrl+Y)": "Повторить (Ctrl+Y)",
+    "One frame forward (only while paused)": "Один кадр вперёд (только на паузе)",
+    "Gizmo axes: along the object (Local) or along the world (World)": "Оси гизмо: вдоль объекта (Локально) или вдоль мира (Мир)",
+    "Snap to the step": "Привязка к шагу",
+    "Snap steps": "Шаги привязки",
+    "Move": "Перенос",
+    "Rotate": "Поворот",
+    "Project and scene": "Проект и сцена",
+    "Project: ": "Проект: ",
+    "Cylinder with rounded ends: the working shape of a character": "Цилиндр со скруглёнными торцами: рабочая форма персонажа"
   }
 }

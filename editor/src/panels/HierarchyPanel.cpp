@@ -48,10 +48,9 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
     if (const LightComponent* lc = reg.try_get<LightComponent>(e)) {
         switch (lc->Kind) {
             case LightComponent::Type::Directional: return "sun";
-            // Прожектор — конус, и своего глифа-конуса в наборе нет. Капля
-            // (drop) — ближайшее по форме: сужается книзу, то есть читается как
-            // направленный пучок, а не как лампочка, светящая во все стороны.
-            case LightComponent::Type::Spot: return "drop";
+            // Прожектор — КОНУС: это буквально форма его светового пучка,
+            // и объяснять её не нужно.
+            case LightComponent::Type::Spot: return "cone";
             default: return "light";
         }
     }
@@ -69,7 +68,11 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
         // Модель из файла — отдельно от встроенных форм: это ассет проекта, и
         // на него ссылаются, его переименовывают, он может не загрузиться.
         if (mr->Ref.type == MeshRef::Type::Model) return "model";
-        if (mr->Ref.type != MeshRef::Type::None) return "cube"; // все формы — один значок
+        // Капсула — исключение из «все формы один значок» по той же причине, по
+        // которой она вообще заведена: это форма ПЕРСОНАЖА, а не декорации, и
+        // в списке из полусотни строк игрока и врагов ищут отдельно от ящиков.
+        if (mr->Ref.type == MeshRef::Type::Capsule) return "capsule";
+        if (mr->Ref.type != MeshRef::Type::None) return "cube"; // остальные формы — один значок
     }
     return "file";
 }
@@ -198,13 +201,13 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
         // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
         if (!host.IsSelected(id)) host.SetSelectedId(id);
-        if (ImGui::MenuItem(T("Create Child"))) {
+        if (EditorIcons::MenuItem("plus", T("Create Child"))) {
             host.PushUndoSnapshot();
             GameObject child = scene.CreateObject("Child");
             scene.SetParent(child.Entity(), e);
             host.SetSelectedId(child.Id());
         }
-        if (ImGui::MenuItem(T("Create Folder Inside"))) {
+        if (EditorIcons::MenuItem("folder-plus", T("Create Folder Inside"))) {
             host.PushUndoSnapshot();
             GameObject folder = scene.CreateFolder(T("Folder"));
             scene.SetParent(folder.Entity(), e);
@@ -232,10 +235,10 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 ImGui::EndMenu();
             }
         }
-        if (ImGui::MenuItem(T("Duplicate"))) host.DuplicateSelected();
+        if (EditorIcons::MenuItem("copy", T("Duplicate"), "Ctrl+D")) host.DuplicateSelected();
         // Сохранить выбранную сущность (с детьми) как переиспользуемый префаб в
         // assets/ проекта. Имя файла — по имени сущности.
-        if (ImGui::MenuItem(T("Save as Prefab"))) {
+        if (EditorIcons::MenuItem("prefab", T("Save as Prefab"))) {
             std::error_code ec;
             std::filesystem::path dir = host.CurrentProject().Dir() / "assets";
             std::filesystem::create_directories(dir, ec);
@@ -246,12 +249,12 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 host.SetStatusMessage("Prefab save failed: " + perr);
         }
         bool hasParent = h && h->Parent != entt::null;
-        if (ImGui::MenuItem(T("Unparent"), nullptr, false, hasParent)) {
+        if (EditorIcons::MenuItem("up", T("Unparent"), nullptr, hasParent)) {
             host.PushUndoSnapshot();
             scene.SetParent(e, entt::null);
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(T("Delete"))) host.DeleteSelected();
+        if (EditorIcons::MenuItem("trash", T("Delete"), "Del")) host.DeleteSelected();
         ImGui::EndPopup();
     }
 

@@ -46,6 +46,7 @@ static std::string MeshTypeToString(MeshRef::Type t) {
         case MeshRef::Type::Plane:    return "plane";
         case MeshRef::Type::Cylinder: return "cylinder";
         case MeshRef::Type::Cone:     return "cone";
+        case MeshRef::Type::Capsule:  return "capsule";
         case MeshRef::Type::Model:    return "model";
         default: return "none";
     }
@@ -57,6 +58,7 @@ static MeshRef::Type MeshTypeFromString(const std::string& s) {
     if (s == "plane")    return MeshRef::Type::Plane;
     if (s == "cylinder") return MeshRef::Type::Cylinder;
     if (s == "cone")     return MeshRef::Type::Cone;
+    if (s == "capsule")  return MeshRef::Type::Capsule;
     if (s == "model")    return MeshRef::Type::Model;
     return MeshRef::Type::None;
 }

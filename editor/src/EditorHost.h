@@ -120,6 +120,13 @@ public:
     virtual bool BuildGame(const std::filesystem::path& outputDir, std::string& err) = 0;
     virtual std::filesystem::path& AssetsCwd() = 0; // текущая папка панели Assets
 
+    // Попросить открыть диалог по его имени ("Open Scene", "Save Scene As",
+    // "New Project", "Open Project", "Build Game"). Строкой, а не методом на
+    // каждый: диалоги живут в одной панели (DialogsPanel), их список правят
+    // чаще, чем интерфейс хоста, и заводить виртуальный метод под каждый значит
+    // трогать всех, кто видит EditorHost, ради одной кнопки.
+    virtual void RequestDialog(const char* id) = 0;
+
     // Гибкая конфигурация игры (EngineConfig) — редактируется панелью Settings,
     // сохраняется в <проект>/sage.cfg, Build Game кладёт её в собранную игру.
     virtual sage::EngineConfig& Settings() = 0;
@@ -180,6 +187,13 @@ public:
     virtual void MergeScriptVars(GameObject object) = 0;
 
     virtual void PushUndoSnapshot() = 0;
+    // Отмена и повтор — с верхней панели и по горячим клавишам. Есть ли что
+    // отменять, спрашивают отдельно: кнопка, которая живая и ничего не делает,
+    // читается как поломка, а погашенная честно говорит «здесь пусто».
+    virtual void Undo() = 0;
+    virtual void Redo() = 0;
+    virtual bool CanUndo() const = 0;
+    virtual bool CanRedo() const = 0;
     // Трекинг «размазанных» правок (перетаскивание DragFloat, набор текста):
     // Capture — запомнить состояние «до» (на активации виджета/наведении
     // гизмо), Commit — положить запомненное в undo-стек (на факте изменения).
@@ -206,6 +220,16 @@ public:
     virtual bool InPlayMode() const = 0;
     virtual void StartPlay() = 0;
     virtual void PausePlay() = 0;
+    // ШАГ НА ОДИН КАДР — только на паузе.
+    //
+    // ЗАЧЕМ. На паузе игра стоит, и это единственное состояние, в котором её
+    // можно РАЗГЛЯДЕТЬ. Но вопросы к ней обычно про движение: почему тело
+    // проваливается сквозь пол, на каком кадре срабатывает триггер, куда
+    // улетает снаряд. Ответить на них, наблюдая работающую игру, нельзя —
+    // всё происходит за доли секунды; а полный запуск заново ставит тот же
+    // вопрос с начала. Шаг двигает мир ровно на один кадр и снова
+    // останавливает: то же, что «промотать по кадрам» у видео.
+    virtual void StepPlay() = 0;
     virtual void ResumePlay() = 0;
     virtual void StopPlay() = 0;
 

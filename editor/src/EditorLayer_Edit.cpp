@@ -278,6 +278,7 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         {"shape.plane",    "Plane",    MeshRef::Type::Plane},
         {"shape.cylinder", "Cylinder", MeshRef::Type::Cylinder},
         {"shape.cone",     "Cone",     MeshRef::Type::Cone},
+        {"shape.capsule",  "Capsule",  MeshRef::Type::Capsule},
     };
     for (const ShapeEntry& sh : kShapes) {
         if (id != sh.Id) continue;
@@ -375,9 +376,12 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
     }
     if (id == "physics.character") {
         PushUndoSnapshot();
-        GameObject obj = CreatePrimitiveEntity("Character", MeshRef::Type::Cylinder);
-        // Цилиндр движка — единичный (радиус 0.5, высота 1), поэтому масштаб
-        // повторяет рост контроллера: 0.7 в ширину и 1.8 в высоту.
+        // КАПСУЛОЙ, а не цилиндром: капсулой персонажа считает и физика (см.
+        // ShapeType::Capsule), и видимое тело обязано совпадать с тем, чем он
+        // сталкивается, — иначе высоту настраивают в двух местах, сверяя на глаз.
+        GameObject obj = CreatePrimitiveEntity("Character", MeshRef::Type::Capsule);
+        // Капсула движка — единичная (радиус 0.5, общая высота 1), поэтому
+        // масштаб повторяет рост контроллера: 0.7 в ширину и 1.8 в высоту.
         obj.GetTransform().Scale = {0.7f, 1.8f, 0.7f};
         obj.GetTransform().Position = {0.0f, 0.9f, 0.0f};
         reg.emplace<CharacterControllerComponent>(obj.Entity());
