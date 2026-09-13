@@ -155,13 +155,8 @@ private:
     // ассета показывать было бы нечего.
     void DrawSubmeshMaterials(EditorHost& host, MeshRendererComponent& mr);
     void CreateMaterialForObject(EditorHost& host, MeshRendererComponent& mr);
-    void WriteMaterialFromOverrides(EditorHost& host, MeshRendererComponent& mr,
-                                    const std::string& path);
-    void DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr, int entityId);
-    // У какой сущности человек РАСКРЫЛ поправки экземпляра вручную. Состояние
-    // интерфейса, а не сцены: сохранять его в файл значило бы записывать туда,
-    // какие секции были открыты, — это не свойство объекта.
-    int m_overridesOpenFor = -1;
+    void WriteMaterialForObject(EditorHost& host, MeshRendererComponent& mr,
+                                const std::string& path);
     // Материал модели — вместе с моделью: .sagemat рядом с файлом модели, если
     // его ещё нет, и назначение его сущности.
     void AutoAssignModelMaterial(EditorHost& host, MeshRendererComponent& mr);

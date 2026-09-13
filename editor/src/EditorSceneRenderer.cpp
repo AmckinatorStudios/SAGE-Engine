@@ -966,6 +966,18 @@ bool EditorSceneRenderer::SaveGameFrame(const std::string& path) {
     return true;
 }
 
+// Снимок ВЬЮПОРТА в файл — запасной путь для обложки сцены, у которой нет
+// игровой камеры. Тот же буфер, что показывает панель: обложка обязана
+// совпасть с тем, что человек видел, когда сохранял.
+bool EditorSceneRenderer::SaveViewportFrame(const std::string& path) {
+    Framebuffer* target = m_sceneFbo ? &*m_sceneFbo : nullptr;
+    if (!target || target->Width() <= 0 || target->Height() <= 0) return false;
+    target->Bind();
+    SaveScreenshot(path, target->Width(), target->Height());
+    sage::rhi::GraphicsDevice::Get().BindDefaultFramebuffer();
+    return true;
+}
+
 bool EditorSceneRenderer::ReadViewportPixels(std::vector<unsigned char>& out, int& outW,
                                              int& outH) {
     // Тот же буфер, что и у ViewportTexture: показываем и читаем одно и то же,

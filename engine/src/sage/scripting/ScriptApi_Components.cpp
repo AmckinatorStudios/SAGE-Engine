@@ -94,16 +94,14 @@ void ScriptEngine::RegisterComponentTypes() {
         "BurstInterval", &ParticleEmitterComponent::BurstInterval
     );
     m_lua.new_usertype<MeshRendererComponent>("MeshRendererComponent",
+        // Цвет объекта БЕЗ материала. Свечения и прозрачности здесь больше нет:
+        // и то и другое — свойство поверхности, то есть материала (см.
+        // RenderComponents.h), и второй их копии на экземпляре не бывает.
         "Color", &MeshRendererComponent::Color,
-        "Opacity", &MeshRendererComponent::Opacity,
         // Куда объект НЕ попадает: рука на камере не должна ни бросать тень на
         // палубу, ни отражаться в воде (см. RenderComponents.h).
         "CastShadows", &MeshRendererComponent::CastShadows,
         "InReflections", &MeshRendererComponent::InReflections,
-        // Свечение объекта: цвет и сила. Сила больше 1 даёт ореол (bloom) —
-        // ровно это отличает светящуюся лампу от просто жёлтого куба.
-        "Emissive", &MeshRendererComponent::Emissive,
-        "EmissiveStrength", &MeshRendererComponent::EmissiveStrength,
         "MaterialPath", &MeshRendererComponent::MaterialPath
     );
     m_lua.new_usertype<DecalComponent>("DecalComponent",

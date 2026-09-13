@@ -89,6 +89,18 @@ size_t PackWriter::AddDirectory(const fs::path& root, const std::vector<std::str
         const std::string rel = Normalize(fs::relative(entry.path(), root, ec).generic_string());
         if (rel.empty()) continue;
 
+        // СЛУЖЕБНЫЕ ПАПКИ В ИГРУ НЕ ЕДУТ. Всё, что лежит в каталоге, чьё имя
+        // начинается с точки, — не содержимое проекта, а чей-то кэш: .sage
+        // (обложки сцен редактора), .git, .vs, .idea. Раньше такие папки
+        // паковались целиком: репозиторий проекта уезжал в собранную игру, и
+        // игра весила как история разработки.
+        bool hidden = false;
+        for (size_t pos = 0, next; (next = rel.find('/', pos)) != std::string::npos;
+             pos = next + 1) {
+            if (rel[pos] == '.') { hidden = true; break; }
+        }
+        if (hidden) continue;
+
         bool skip = false;
         for (const std::string& suffix : skipSuffixes) {
             if (rel.size() >= suffix.size() &&

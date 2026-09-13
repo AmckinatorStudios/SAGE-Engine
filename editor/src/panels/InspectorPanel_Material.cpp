@@ -531,28 +531,23 @@ void InspectorPanel::CreateMaterialForObject(EditorHost& host, MeshRendererCompo
     for (int i = 2; fs::exists(path, ec) && i < 1000; ++i) {
         path = dir / (name + " " + std::to_string(i) + ".sagemat");
     }
-    WriteMaterialFromOverrides(host, mr, path.string());
+    WriteMaterialForObject(host, mr, path.string());
 }
 
-// Записывает материал по указанному пути, забирая себе поправки объекта.
-void InspectorPanel::WriteMaterialFromOverrides(EditorHost& host, MeshRendererComponent& mr,
+// Записывает материал по указанному пути, забирая себе цвет объекта.
+//
+// Цвет — единственное, что у объекта было своего, и потерять его при создании
+// материала нельзя: человек покрасил куб красным и нажал «Создать материал»,
+// материал обязан быть красным, а не белым по умолчанию.
+void InspectorPanel::WriteMaterialForObject(EditorHost& host, MeshRendererComponent& mr,
                                                 const std::string& path) {
     Material material;
     material.Albedo = mr.Color;
-    material.Emissive = mr.Emissive;
-    material.EmissiveStrength = mr.EmissiveStrength;
-    material.Opacity = mr.Opacity;
     material.SaveToFile(path);
 
     host.PushUndoSnapshot();
-    mr.MaterialPath = host.CurrentProject().AssetRef(path);
-    mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);
-    // Поправки — в нейтраль: их вид теперь несёт материал, и оставить их
-    // значило бы покрасить объект дважды.
-    mr.Color = glm::vec3(1.0f);
-    mr.Emissive = glm::vec3(0.0f);
-    mr.EmissiveStrength = 1.0f;
-    mr.Opacity = 1.0f;
+    AssignMaterial(mr, host.CurrentProject().AssetRef(path),
+                   ResourceManager::Instance().GetMaterial(host.CurrentProject().AssetRef(path)));
     host.SetStatusMessage(std::string(T("Material created: ")) +
                           std::filesystem::path(path).filename().string());
 }
@@ -700,91 +695,4 @@ void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponen
         }
         ImGui::PopID();
     }
-}
-
-void InspectorPanel::DrawInstanceOverrides(EditorHost& host, MeshRendererComponent& mr,
-                                           int entityId) {
-    const bool neutral = mr.Color == glm::vec3(1.0f) && mr.Emissive == glm::vec3(0.0f) &&
-                         mr.Opacity >= 0.999f;
-
-    // Ширина полей считается по САМОЙ ДЛИННОЙ подписи группы — и по подписям
-    // ТЕКУЩЕГО ЯЗЫКА. У ImGui подпись стоит справа от поля, и на узкой панели
-    // инспектора она обрезалась: пока интерфейс был русским, длиннее всех была
-    // «Непрозрачность», а в английском — «Emissive Strength».
-    auto pushWidth = []() {
-        float labelWidth = 0.0f;
-        for (const char* label : {T("Tint"), T("Emissive"), T("Emissive Strength"), T("Opacity")}) {
-            labelWidth = std::max(labelWidth, ImGui::CalcTextSize(label).x);
-        }
-        ImGui::PushItemWidth(-(labelWidth + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f));
-    };
-
-    auto fields = [&]() {
-        ImGui::ColorEdit3(T("Tint"), &mr.Color.x);
-        host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("Multiplies the material albedo. White means as in the material."));
-
-        ImGui::ColorEdit3(T("Emissive"), &mr.Emissive.x);
-        host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Emissive Strength"), &mr.EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
-        host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("Added to the material emissive. Above 1 gives a bloom halo."));
-
-        // Непрозрачность < 1 уводит объект в полупрозрачный проход (сортировка
-        // от дальних, блендинг, без записи глубины) — см. ecs/RenderBatch.
-        ImGui::SliderFloat(T("Opacity"), &mr.Opacity, 0.0f, 1.0f);
-        host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Multiplies the material opacity."));
-    };
-
-    auto reset = [&]() {
-        host.PushUndoSnapshot();
-        mr.Color = glm::vec3(1.0f);
-        mr.Emissive = glm::vec3(0.0f);
-        mr.EmissiveStrength = 1.0f;
-        mr.Opacity = 1.0f;
-    };
-
-    // Материала нет — переопределять НЕЧЕГО, и показывать здесь цвет со
-    // свечением нельзя: ровно это и делало вид объекта задаваемым в двух
-    // местах. Что делать вместо, сказано в слоте материала выше — там же
-    // кнопка «Создать материал».
-    if (!mr.MaterialPtr) return;
-
-    // --- Материал есть: поправки — по требованию ---------------------------
-    ImGui::SeparatorText(T("Instance overrides"));
-
-    // Выключатель НЕ хранится в сцене: он выведен из самих значений. Ненейтральные
-    // поправки — значит, они включены; человек, открывший их вручную, держится
-    // отдельным полем панели (состояние интерфейса, а не данные объекта).
-    bool open = !neutral || m_overridesOpenFor == entityId;
-    if (ImGui::Checkbox(T("Override the material"), &open)) {
-        if (open) {
-            m_overridesOpenFor = entityId;
-        } else {
-            m_overridesOpenFor = -1;
-            // Выключить — значит вернуть вид материалу. Оставлять поправки
-            // «выключенными, но действующими» значило бы завести третье
-            // состояние, которого никто не ждёт.
-            if (!neutral) reset();
-        }
-    }
-
-    if (!open) {
-        // Вместо четырёх полей — то, что реально красит объект.
-        const glm::vec3 albedo = mr.MaterialPtr->Albedo;
-        ImGui::ColorButton("##effective_albedo", ImVec4(albedo.r, albedo.g, albedo.b, 1.0f),
-                           ImGuiColorEditFlags_NoTooltip, ImVec2(18, 18));
-        ImGui::SameLine();
-        HintWrapped("%s", T("The look comes from the material. Turn the switch on only to make "
-                            "THIS object differ from others sharing the same material."));
-        return;
-    }
-
-    pushWidth();
-    fields();
-    ImGui::PopItemWidth();
-    HintWrapped("%s", T("Applied on top of the material."));
 }
