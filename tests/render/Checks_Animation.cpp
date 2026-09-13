@@ -483,10 +483,215 @@ void TestClipFileMatchesModelClip() {
 
 } // namespace
 
+// --- СКЕЛЕТНАЯ МОДЕЛЬ ОСВЕЩАЕТСЯ КАК ОБЫЧНАЯ -------------------------------
+//
+// Отказ, ради которого эти проверки написаны, звучал так: «персонаж не
+// реагирует на рассеянный свет (кроме глаз), на источники реагирует еле-еле,
+// выглядит бледным, и половина модели не рисуется». Все четыре беды — про одно
+// и то же: у скина был СВОЙ, урезанный путь. Свой фрагментный шейдер без карт
+// металличности, шероховатости, нормалей, затенения и свечения; свой отбор
+// частей, выбрасывавший всё, что подвешено к костям без весов.
+//
+// Проверочная оснастка engine/assets/test_rig.glb собрана генератором
+// tools/make_test_rig.py ровно под это (что в ней и почему — в его шапке).
+namespace {
+
+const char* TestRigPath() {
+#ifdef SAGE_TEST_RIG
+    return SAGE_TEST_RIG;
+#else
+    return "assets/test_rig.glb";
+#endif
+}
+
+// Сцена с оснасткой: модель по центру, ambient задан явно, солнце — по запросу.
+std::unique_ptr<Scene> MakeRigScene(float ambient, float sun) {
+    auto scene = std::make_unique<Scene>("Rig");
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.SkyColor = {0.55f, 0.62f, 0.72f};
+    scene->Lighting.GroundColor = {0.22f, 0.20f, 0.18f};
+    scene->Lighting.AmbientStrength = ambient;
+    scene->Lighting.Skybox.Enabled = false;
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -0.8f, -0.5f));
+    scene->Lighting.Sun.Intensity = sun;
+
+    GameObject hero = scene->CreateObject("Rig");
+    MeshRendererComponent& mr = scene->Registry().emplace<MeshRendererComponent>(hero.Entity());
+    mr.Ref.type = MeshRef::Type::Model;
+    mr.Ref.path = TestRigPath();
+    AnimationComponent anim;
+    anim.Playing = false;   // поза не должна зависеть от времени
+    scene->Registry().emplace<AnimationComponent>(hero.Entity(), std::move(anim));
+    sage::anim::UpdateAnimators(*scene, 0.0f);
+    return scene;
+}
+
+// Средняя яркость кадра — грубая, зато честная мера «света на модели».
+double MeanLuma(const Image& im) {
+    if (im.Pixels.empty()) return 0.0;
+    long long sum = 0;
+    for (unsigned char v : im.Pixels) sum += v;
+    return (double)sum / (double)im.Pixels.size();
+}
+
+// Кадр ПУСТОЙ сцены с теми же настройками — «фон». Нужен, чтобы мерить свет
+// НА МОДЕЛИ, а не по всему кадру: модель занимает малую его часть, и среднее
+// по кадру размывается фоном до неразличимости (рост втрое на модели выглядит
+// как плюс пятнадцать процентов по кадру).
+Image RigBackdrop(FrameRenderer& r) {
+    Scene empty("RigBackdrop");
+    empty.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    empty.Lighting.Skybox.Enabled = false;
+    empty.Lighting.Sun.Intensity = 0.0f;
+    return RenderFrame(r, empty, PerspectiveProj(), BaseSettings(), kW, kH);
+}
+
+// Пиксель считается «моделью», если он отличается от фона: фон один и тот же
+// во всех кадрах набора (цвет очистки + одна и та же пост-обработка).
+bool IsModelPixel(const Image& im, const Image& backdrop, size_t i) {
+    if (i + 2 >= backdrop.Pixels.size()) return false;
+    int diff = 0;
+    for (int c = 0; c < 3; ++c)
+        diff += std::abs((int)im.Pixels[i + c] - (int)backdrop.Pixels[i + c]);
+    return diff > 12;
+}
+
+// Средняя яркость ПО МОДЕЛИ и её площадь в пикселях.
+double MeanLumaOnModel(const Image& im, const Image& backdrop, int* outPixels = nullptr) {
+    long long sum = 0;
+    int count = 0;
+    for (size_t i = 0; i + 2 < im.Pixels.size(); i += 3) {
+        if (!IsModelPixel(im, backdrop, i)) continue;
+        sum += (im.Pixels[i] + im.Pixels[i + 1] + im.Pixels[i + 2]) / 3;
+        ++count;
+    }
+    if (outPixels) *outPixels = count;
+    return count ? (double)sum / (double)count : 0.0;
+}
+
+// Сколько пикселей заметно ярче фона — мера «сколько модели видно».
+int LitPixels(const Image& im, const Image& backdrop) {
+    int count = 0;
+    MeanLumaOnModel(im, backdrop, &count);
+    return count;
+}
+
+} // namespace
+
+// 1. ЖЁСТКИЕ ДЕТАЛИ НА КОСТЯХ РИСУЮТСЯ И ДВИГАЮТСЯ ВМЕСТЕ С КОСТЬЮ.
+void TestRigidPartsOnBones(FrameRenderer& r) {
+    auto scene = MakeRigScene(0.5f, 1.5f);
+    AnimationComponent& am = scene->Registry().view<AnimationComponent>().get<AnimationComponent>(
+        scene->Registry().view<AnimationComponent>().front());
+    if (!am.Model) {
+        std::printf("[FAIL] проверочная оснастка не загрузилась (%s)\n", TestRigPath());
+        CountFail();
+        return;
+    }
+
+    // Три части: скиновое тело, жёсткий кубик на кости, пластинка с альфой.
+    // Отбор «только с JOINTS_0» оставил бы одну.
+    Check(am.Model->SubMeshCount() == 3, "в модель попали и скиновые части, и жёсткие");
+    Check(am.Model->GetSkeleton().Count() == 2, "кости оснастки разобраны");
+
+    const glm::mat4 proj = PerspectiveProj();
+    const Image bind = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+
+    // Поза клипа: вторая кость поворачивается, и жёсткая деталь на ней обязана
+    // уехать вместе с костью. Если бы она рисовалась сама по себе (в позе
+    // привязки), кадр не изменился бы вовсе.
+    am.Anim.Play(0, false);
+    am.Anim.Update(0.9f);
+    const Image posed = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+
+    long long diff = 0;
+    for (size_t i = 0; i < bind.Pixels.size() && i < posed.Pixels.size(); ++i)
+        diff += std::abs((int)bind.Pixels[i] - (int)posed.Pixels[i]);
+    const double mean = (double)diff / (double)std::max<size_t>(bind.Pixels.size(), 1);
+    std::printf("       поза сдвинула кадр на %.2f\n", mean);
+    Check(mean > 0.5, "жёсткая деталь следует за костью, а не стоит в позе привязки");
+
+    Report("rig_bind_pose", CompareWithReference("rig_bind_pose", bind));
+}
+
+// 2. РАССЕЯННЫЙ СВЕТ ДЕЙСТВУЕТ НА СКИН — то самое «не реагирует на ambient».
+//
+// И действует он по ФИЗИКЕ, а не «немножко»: у материала оснастки множитель
+// металличности единица, а карта говорит «металла нет». Путь, который карту не
+// читает, сделает модель сплошным металлом — а металл рассеянный свет почти не
+// принимает, и разницы между ambient 0.1 и 1.0 на нём почти не будет.
+void TestSkinnedAmbient(FrameRenderer& r) {
+    const glm::mat4 proj = PerspectiveProj();
+    auto dim = MakeRigScene(0.08f, 0.0f);
+    const Image low = RenderFrame(r, *dim, proj, BaseSettings(), kW, kH);
+    auto bright = MakeRigScene(1.0f, 0.0f);
+    const Image high = RenderFrame(r, *bright, proj, BaseSettings(), kW, kH);
+
+    const Image backdrop = RigBackdrop(r);
+    int loPixels = 0, hiPixels = 0;
+    const double lo = MeanLumaOnModel(low, backdrop, &loPixels);
+    const double hi = MeanLumaOnModel(high, backdrop, &hiPixels);
+    std::printf("       ambient на модели: тускло %.2f -> ярко %.2f (x%.2f), пикселей %d/%d\n",
+                lo, hi, hi / std::max(lo, 0.01), loPixels, hiPixels);
+    Check(hi > lo * 2.0, "скелетная модель реагирует на рассеянный свет");
+
+    // И реагирует не отдельными частями (глазами), а целиком: на свету площадь
+    // видимой модели обязана быть той же самой или больше.
+    Check(hiPixels >= loPixels, "на свету видно всю модель, а не отдельные части");
+}
+
+// 3. ИСТОЧНИК СВЕТА ДЕЙСТВУЕТ НА СКИН так же, как на обычный меш.
+void TestSkinnedPointLight(FrameRenderer& r) {
+    const glm::mat4 proj = PerspectiveProj();
+    auto dark = MakeRigScene(0.05f, 0.0f);
+    const Image without = RenderFrame(r, *dark, proj, BaseSettings(), kW, kH);
+
+    auto lit = MakeRigScene(0.05f, 0.0f);
+    GameObject lamp = lit->CreateObject("Lamp");
+    lamp.GetTransform().Position = {2.0f, 2.5f, 3.0f};
+    LightComponent lc;
+    lc.Kind = LightComponent::Type::Point;
+    lc.Color = {1.0f, 0.9f, 0.8f};
+    lc.Intensity = 30.0f;
+    lc.Range = 20.0f;
+    lit->Registry().emplace<LightComponent>(lamp.Entity(), lc);
+    const Image withLamp = RenderFrame(r, *lit, proj, BaseSettings(), kW, kH);
+
+    const Image backdrop = RigBackdrop(r);
+    const double off = MeanLumaOnModel(without, backdrop);
+    const double on = MeanLumaOnModel(withLamp, backdrop);
+    std::printf("       точечный свет на модели: без %.2f -> с ним %.2f\n", off, on);
+    Check(on > off * 1.5, "скелетная модель освещается точечным источником");
+}
+
+// 4. МАТЕРИАЛ ДОЕЗЖАЕТ ЦЕЛИКОМ: карты, свечение, отсечение по альфе.
+void TestSkinnedMaterialMaps(FrameRenderer& r) {
+    auto scene = MakeRigScene(0.35f, 1.2f);
+    auto view = scene->Registry().view<AnimationComponent>();
+    AnimationComponent& am = view.get<AnimationComponent>(view.front());
+    if (!am.Model) { CountFail(); return; }
+
+    // Свечение: без единого источника света модель обязана остаться видимой —
+    // светится жёсткая деталь (emissiveFactor в её материале).
+    auto black = MakeRigScene(0.0f, 0.0f);
+    const Image glow = RenderFrame(r, *black, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image backdrop = RigBackdrop(r);
+    Check(LitPixels(glow, backdrop) > 50, "свечение материала доезжает до кадра");
+
+    // Эталон общего вида: он и ловит всё остальное разом — карту
+    // шероховатости, затенение, дырки в пластинке с alphaMode=MASK.
+    const Image frame = RenderFrame(r, *scene, PerspectiveProj(), BaseSettings(), kW, kH);
+    Report("rig_materials", CompareWithReference("rig_materials", frame));
+}
+
 void RunAnimationChecks(FrameRenderer& r) {
     TestMorphTargets(r);
     TestAnimationUsesMeshModel(r);
     TestSkinnedDebugView(r);
+    TestRigidPartsOnBones(r);
+    TestSkinnedAmbient(r);
+    TestSkinnedPointLight(r);
+    TestSkinnedMaterialMaps(r);
     TestInverseKinematicsECS();
     TestClipFileMatchesModelClip();
 }

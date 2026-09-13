@@ -41,7 +41,7 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
         throw std::runtime_error("Не удалось загрузить .sagetex: " + path);
     }
 
-    stbi_set_flip_vertically_on_load(true); // GPU ждёт (0,0) внизу-слева, у большинства картинок — вверху-слева
+    stbi_set_flip_vertically_on_load_thread(true); // GPU ждёт (0,0) внизу-слева, у большинства картинок — вверху-слева
 
     unsigned char* data = stbi_load(path.c_str(), &m_width, &m_height, &m_channels, 0);
     if (!data) {

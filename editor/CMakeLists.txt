@@ -81,7 +81,11 @@ target_include_directories(SageEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # настоящем .glb со скелетом и клипами, а не на синтетике. Путь абсолютный —
 # самопроверку запускают из build/editor.
 target_compile_definitions(SageEditor PRIVATE
-    SAGE_TEST_MODEL="${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/test_model.glb")
+    SAGE_TEST_MODEL="${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/test_model.glb"
+    # Оснастка «как у настоящих персонажей»: жёсткие детали на костях,
+    # упакованная карта металличности и шероховатости, свечение, отсечение по
+    # альфе (tools/make_test_rig.py).
+    SAGE_TEST_RIG="${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/test_rig.glb")
 
 # ImGui хранит своё состояние (GImGui) в статической глобальной переменной.
 # Плагины (.so) НЕ линкуют libimgui.a сами (см. sage_add_editor_plugin) —

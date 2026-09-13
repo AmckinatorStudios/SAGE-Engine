@@ -34,13 +34,46 @@ struct ModelImage {
     std::vector<unsigned char> Pixels; // Width * Height * 4
 };
 
+// Материал подмеша в ПАМЯТИ: факторы как есть, карты — индексами в
+// ModelData::Images (-1 — карты нет). Индексами, а не копиями пикселей: одна
+// картинка обслуживает по десятку материалов, и хранить её десять раз значило
+// бы раздуть и память, и кэш ровно во столько же раз.
+//
+// Набор ТОТ ЖЕ, что у статического материала (sage/render/Material.h). Пока
+// здесь лежала одна текстура и два числа, всё остальное, что несёт файл
+// модели, — карта металличности, шероховатости, нормалей, свечение,
+// прозрачность, двусторонность — молча выбрасывалось при загрузке.
+struct ModelSubMeshMaterial {
+    std::string Name;
+    int Albedo = -1;
+    int Normal = -1;
+    int MetallicMap = -1;
+    int RoughnessMap = -1;
+    int AOMap = -1;
+    int EmissiveMap = -1;
+    // Из какого канала карты брать значение (0 R, 1 G, 2 B, 3 A). glTF пакует
+    // затенение, шероховатость и металличность в R, G и B ОДНОЙ текстуры —
+    // хранить три её копии с переложенными каналами значило бы утроить и
+    // память, и кэш (см. uMetallicMask в PbrShader.h).
+    int MetallicChannel = 0;
+    int RoughnessChannel = 0;
+    int AOChannel = 0;
+
+    glm::vec3 Tint{1.0f};
+    float Opacity = 1.0f;
+    float Metallic = 0.0f;
+    float Roughness = 0.6f;
+    glm::vec3 Emissive{0.0f};
+
+    int AlphaMode = 0;       // 0 Opaque, 1 Mask, 2 Blend (см. SkinnedMaterial::Alpha)
+    float AlphaCutoff = 0.5f;
+    bool DoubleSided = false;
+};
+
 struct ModelSubMeshData {
     std::vector<SkinnedVertex> Vertices;
     std::vector<unsigned int> Indices;
-    int Image = -1;              // индекс в ModelData::Images, -1 — без текстуры
-    glm::vec3 Tint{1.0f};
-    float Metallic = 0.0f;
-    float Roughness = 0.6f;
+    ModelSubMeshMaterial Material;
 
     // Морф-цели: дельты позиций и нормалей, разложенные по строкам текстуры.
     // Раскладка (ширина, строк на цель) считается при разборе и сохраняется —

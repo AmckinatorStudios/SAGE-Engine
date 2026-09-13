@@ -237,7 +237,11 @@ void Animator::ComputePoseBlended(float weight) {
                    glm::scale(glm::mat4(1.0f), s[i]);
     }
 
-    // 4. Глобальные матрицы: поднимаемся по цепочке родителей (любой порядок костей).
+    // 4. Глобальные матрицы: поднимаемся по цепочке родителей (любой порядок
+    // костей), а сверху — трансформ НАД скелетом (Skeleton::Root). Без него
+    // кость считалась бы в своей системе координат, а обратная bind-матрица —
+    // в системе корня сцены, и вся модель выходила бы повёрнутой (см.
+    // комментарий у Skeleton::Root).
     for (int i = 0; i < n; ++i) {
         glm::mat4 global = local[i];
         int p = joints[i].Parent;
@@ -245,7 +249,7 @@ void Animator::ComputePoseBlended(float weight) {
             global = local[p] * global;
             p = joints[p].Parent;
         }
-        m_globals[i] = global;
+        m_globals[i] = m_skeleton->Root * global;
     }
 
     // 5. Палитра костей: global * inverseBind.

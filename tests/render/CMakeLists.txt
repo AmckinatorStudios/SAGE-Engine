@@ -35,7 +35,10 @@ target_compile_definitions(sage_render_tests PRIVATE
     SAGE_RENDER_REFERENCES="${CMAKE_CURRENT_SOURCE_DIR}/references"
     # Тестовая модель: сгенерирована tools/make_test_model.py и закоммичена.
     # Путь абсолютный, потому что тест запускают из разных каталогов.
-    SAGE_TEST_MODEL="${SAGE_ENGINE_ROOT}/engine/assets/test_model.glb")
+    SAGE_TEST_MODEL="${SAGE_ENGINE_ROOT}/engine/assets/test_model.glb"
+    # Проверочная оснастка: жёсткие детали на костях, упакованная карта
+    # metallic-roughness, свечение, отсечение по альфе (tools/make_test_rig.py).
+    SAGE_TEST_RIG="${SAGE_ENGINE_ROOT}/engine/assets/test_rig.glb")
 
 add_test(NAME sage_render_tests
          COMMAND sage_render_tests --references ${CMAKE_CURRENT_SOURCE_DIR}/references)

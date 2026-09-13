@@ -116,7 +116,7 @@ ConvertResult ConvertTextureToNative(const std::string& sourcePath, const std::s
     // Без переворота: .sagetex хранит строки сверху вниз, как и исходник, а за
     // ориентацию отвечает загрузчик текстуры — иначе флип пришлось бы помнить
     // в двух местах.
-    stbi_set_flip_vertically_on_load(false);
+    stbi_set_flip_vertically_on_load_thread(false);
     unsigned char* pixels = stbi_load(sourcePath.c_str(), &w, &h, &channels, 4);
     if (!pixels) {
         r.Error = std::string("картинка не читается: ") +

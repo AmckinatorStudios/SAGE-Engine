@@ -635,7 +635,7 @@ void RebuildAfterLoad(Scene& scene, const std::string& scenePath) {
     // Страницы — из .hdr рядом с файлом сцены. ВАЖНО: глобальный флип stb
     // (включается загрузкой обычных текстур, см. Texture.cpp) здесь недопустим —
     // строки страницы соответствуют лайтмап-UV напрямую, без переворота.
-    stbi_set_flip_vertically_on_load(false);
+    stbi_set_flip_vertically_on_load_thread(false);
     st.Pages.clear();
     st.Pages.resize(pageCount);
     for (int i = 0; i < pageCount; ++i) {
@@ -658,7 +658,7 @@ void RebuildAfterLoad(Scene& scene, const std::string& scenePath) {
         p.Coverage.assign(p.Texels.size(), 1);
         stbi_image_free(data);
     }
-    stbi_set_flip_vertically_on_load(true); // вернуть конвенцию обычных текстур
+    stbi_set_flip_vertically_on_load_thread(true); // вернуть конвенцию обычных текстур
     LOG_INFO("GI") << "GI восстановлено: " << st.Entities.size() << " сущностей, "
                    << pageCount << " страниц(ы) лайтмап";
 }

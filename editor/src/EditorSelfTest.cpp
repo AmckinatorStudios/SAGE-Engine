@@ -1653,6 +1653,42 @@ bool EditorLayer::SelfTestSystems() {
         }
     }
 
+    // --- Модель персонажа доезжает ЦЕЛИКОМ ------------------------------------
+    //
+    // Отказ, с которого началась правка: «половина модели не рисуется, на
+    // рассеянный свет не реагирует, выглядит бледной». Обе беды — у скелетного
+    // пути: части, подвешенные к костям БЕЗ весов (так риггят зубы, глаза,
+    // панели, провода — у проверочного Springtrap таких 161 из 179), он
+    // выбрасывал, а материал читал на четверть — без карт металличности,
+    // шероховатости, нормалей, затенения и свечения.
+    //
+    // Проверяется здесь ровно то, что ломалось: число частей и то, что у них
+    // есть материал с картами. Как это ВЫГЛЯДИТ — дело кадровых тестов
+    // (tests/render/Checks_Animation.cpp), здесь графики нет.
+#ifdef SAGE_TEST_RIG
+    if (ok) {
+        GameObject full = m_scene->CreateObject("SelftestRigFull");
+        MeshRendererComponent& fullMesh =
+            m_scene->Registry().emplace<MeshRendererComponent>(full.Entity());
+        fullMesh.Ref.type = MeshRef::Type::Model;
+        fullMesh.Ref.path = SAGE_TEST_RIG;
+        m_scene->Registry().emplace<AnimationComponent>(full.Entity());
+        sage::anim::UpdateAnimators(*m_scene, 0.0f);
+
+        const AnimationComponent& fam =
+            m_scene->Registry().get<AnimationComponent>(full.Entity());
+        if (!fam.Model) {
+            LOG_ERROR("Editor") << "SELFTEST: оснастка " << SAGE_TEST_RIG << " не загрузилась";
+            ok = false;
+        } else if (fam.Model->SubMeshCount() != 3) {
+            LOG_ERROR("Editor") << "SELFTEST: у модели " << fam.Model->SubMeshCount()
+                                << " частей вместо 3 — жёсткие детали на костях потеряны";
+            ok = false;
+        }
+        m_scene->RemoveObject(full.Id());
+    }
+#endif
+
     // --- Анимация: клип проигрывается, палитра костей меняется во времени ------
     //
     // НА НАСТОЯЩЕЙ МОДЕЛИ, а не на демо-щупальце. Раньше компонент без модели в
