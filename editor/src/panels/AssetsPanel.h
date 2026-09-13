@@ -108,6 +108,12 @@ private:
     void ConvertFolderHere(EditorHost& host);
 
     void DrawBreadcrumb(EditorHost& host);
+    // Дерево папок проекта слева. Сетка отвечает на вопрос «что лежит здесь», а
+    // дерево — на вопрос «что вообще есть в проекте»: без него единственным
+    // способом узнать состав было ходить по папкам вверх-вниз, каждый раз теряя
+    // из виду то, откуда пришёл.
+    void DrawFolderTree(EditorHost& host);
+    void DrawFolderNode(EditorHost& host, const std::filesystem::path& dir, int depth);
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
     void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели
 
@@ -120,6 +126,9 @@ private:
     FileBrowser m_importBrowser;
 
     char m_search[128] = "";
+    // Ширина дерева. Правится перетаскиванием разделителя и живёт до
+    // перезапуска: у кого-то имена папок длинные, у кого-то экран узкий.
+    float m_treeWidth = 190.0f;
     std::filesystem::path m_selected;      // первичный выделенный тайл (под инспектор)
     std::vector<std::filesystem::path> m_multi; // весь набор: рамка, Ctrl-клик
     sage::editor::rectselect::State m_rect;     // рамка выделения (см. RectSelect.h)

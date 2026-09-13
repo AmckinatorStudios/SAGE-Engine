@@ -73,6 +73,13 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     }
     // Копия папки — тоже папка: иначе дубликат группы (Ctrl+D) превращался бы
     // в обычный пустой объект и начинал двигать содержимое.
+    // Метка-пустышка: у неё нет полей, и try_get<> для такого типа возвращает
+    // void — общий CopyIfPresent на ней не собирается. Копируем фактом наличия.
+    if (src.Registry()->all_of<HiddenComponent>(src.Entity())) {
+        dst.Registry()->emplace_or_replace<HiddenComponent>(dst.Entity());
+    } else {
+        dst.Registry()->remove<HiddenComponent>(dst.Entity());
+    }
     CopyIfPresent<FolderComponent>(src, dst);
     CopyIfPresent<ScriptComponent>(src, dst);
     // Публичные переменные едут с объектом: префаб без своих настроек — это

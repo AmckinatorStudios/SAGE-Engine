@@ -107,6 +107,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
     ImGui::PushID(id);
+    bool eyeClicked = false;
     // Иконка рисуется ПОВЕРХ строки узла, а не отдельным элементом: узел ImGui
     // занимает всю ширину (SpanAvailWidth), и вставить перед ним что-либо
     // обычным способом нельзя — клик перестал бы попадать в строку.
@@ -129,6 +130,51 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                              EntityIcon(reg, e), EntityIconColor(reg, e));
     }
 
+    // --- ВЫКЛЮЧАТЕЛЬ СПРАВА В СТРОКЕ ---------------------------------------
+    //
+    // Сцена собирается слоями, и на каждом шаге мешает всё остальное: сквозь
+    // листву не видно геометрии, сквозь полсотни ламп не разобрать, что даёт
+    // именно эта. Способ был один — удалить и сделать заново.
+    //
+    // Глаз стоит у ПРАВОГО КРАЯ, а не перед именем: перед именем он оттеснил бы
+    // значок типа, по которому строку и находят, и щёлкать по нему пришлось бы,
+    // целясь между стрелкой раскрытия и текстом. Справа он всегда на одном
+    // месте, независимо от глубины вложения.
+    {
+        const bool hidden = reg.all_of<HiddenComponent>(e);
+        // Выключенный РОДИТЕЛЬ гасит и эту строку — показываем это приглушённым
+        // глазом: иначе объект не виден в кадре, а в списке выглядит включённым.
+        const bool hiddenByParent = !hidden && scene.IsHidden(e);
+        const float eyeSize = ImGui::GetTextLineHeight();
+        const float right = ImGui::GetWindowContentRegionMax().x - eyeSize - 2.0f;
+        const ImVec2 eyeAt(ImGui::GetWindowPos().x + right - ImGui::GetScrollX(),
+                           rowPos.y + (ImGui::GetTextLineHeight() - eyeSize) * 0.5f);
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const bool overEye = mouse.x >= eyeAt.x && mouse.x <= eyeAt.x + eyeSize &&
+                             mouse.y >= eyeAt.y && mouse.y <= eyeAt.y + eyeSize &&
+                             ImGui::IsItemHovered();
+        // Видимый объект — тусклый глаз, и только под курсором или у выключенного
+        // он наливается цветом: полсотни ярких глаз подряд спорят с именами, по
+        // которым список и читают.
+        const glm::vec3 eyeColor = hidden ? glm::vec3(0.55f, 0.56f, 0.60f)
+                                   : overEye ? glm::vec3(0.95f, 0.78f, 0.30f)
+                                             : glm::vec3(0.42f, 0.44f, 0.50f);
+        EditorIcons::Overlay(eyeAt.x, eyeAt.y, eyeSize, hidden ? "lock" : "eye", eyeColor);
+        if (overEye && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            host.PushUndoSnapshot();
+            if (hidden) reg.remove<HiddenComponent>(e);
+            else reg.emplace<HiddenComponent>(e);
+            eyeClicked = true;
+        }
+        if (hiddenByParent) {
+            // Приглушаем ВСЮ строку: так видно, что объект погашен не сам по
+            // себе, а вместе с веткой, и щёлкать по его глазу бесполезно.
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                rowPos, ImVec2(eyeAt.x, rowPos.y + ImGui::GetTextLineHeight()),
+                ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.35f)));
+        }
+    }
+
     // Рамка выделения: строка засчитывается, если её прямоугольник задет.
     // Проверка здесь, сразу после TreeNodeEx, — единственное место, где
     // прямоугольник ИМЕННО ЭТОЙ строки ещё «последний элемент» ImGui.
@@ -141,7 +187,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // убрать из набора (множественный выбор), обычный клик — одиночный.
     // Пока ведут рамку, клики не разбираем: жест уже начат, и «выбрать один»
     // посреди него означало бы мигание выбора.
-    if (!m_rectActive && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+    if (!m_rectActive && !eyeClicked && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         if (ImGui::GetIO().KeyCtrl) host.ToggleSelection(id);
         else host.SetSelectedId(id);
     }
@@ -304,8 +350,16 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
             scene.SetParent(folder.Entity(), selected.Entity());
         host.SetSelectedId(folder.Id());
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled(T("Scene: %s  |  Entities: %zu"), scene.Name().c_str(), scene.Count());
+    ImGui::SameLine(0.0f, 8.0f);
+    // ИМЯ СЦЕНЫ, А НЕ ОТЧЁТ О НЕЙ. Здесь стояло «Сцена: MainScene | Объектов:
+    // 47». Число объектов не нужно ни для одного решения — его не сравнивают,
+    // по нему ничего не ищут, — а место оно занимало в каждой строке заголовка,
+    // и слово «Сцена:» перед именем повторяло то, что и так написано на вкладке
+    // панели. Осталось само имя.
+    ImGui::AlignTextToFramePadding();
+    EditorIcons::Inline("scene");
+    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::TextUnformatted(scene.Name().c_str());
     ImGui::Separator();
 
     namespace rectselect = sage::editor::rectselect;

@@ -726,6 +726,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const float iconSize = 20.0f;
 
         auto drawMarker = [&](entt::entity e, const char* icon, const glm::vec3& color) {
+            // Выключенный объект не рисуется — и значка у него быть не должно:
+            // иначе в кадре остаётся метка того, чего в кадре нет.
+            if (host.CurrentScene().IsHidden(e)) return;
             // У объекта с мешем значок не нужен: он и так виден, а значок поверх
             // него только загораживал бы картинку.
             if (const MeshRendererComponent* mr = reg.try_get<MeshRendererComponent>(e)) {
