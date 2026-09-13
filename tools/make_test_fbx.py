@@ -202,6 +202,150 @@ def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0),
         f.write(header + body)
 
 
+def prop_long_array(values):
+    payload = struct.pack('<%dq' % len(values), *values)
+    return b'l' + struct.pack('<III', len(values), 0, len(payload)) + payload
+
+
+def prop_float_array(values):
+    payload = struct.pack('<%df' % len(values), *values)
+    return b'f' + struct.pack('<III', len(values), 0, len(payload)) + payload
+
+
+def p70_vec(name, kind, values):
+    """Свойство-вектор с ЯВНЫМ типом: у PreRotation он свой, и подставлять
+    везде «Lcl Translation», как делает p70v, нельзя."""
+    props = prop_string(name) + prop_string(kind) + prop_string('') + prop_string('A')
+    for v in values:
+        props += prop_double(float(v))
+    return node('P', props)
+
+
+# Время FBX: 46186158000 единиц в секунде (делится на все частоты кадров).
+KTIME = 46186158000
+
+
+def build_skinned(path, unit=100.0):
+    """Модель СО СКИНОМ: полоса из четырёх вершин на двух костях + клип.
+
+    Геометрия нарочно простейшая, а веса — заведомо разные: нижние вершины
+    держит только первая кость, верхние — только вторая. Поэтому поворот второй
+    кости обязан двигать ровно верхние вершины, и проверке есть что измерить.
+    """
+    verts = [
+        -1.0, 0.0, 0.0,   # 0 — низ слева
+         1.0, 0.0, 0.0,   # 1 — низ справа
+         1.0, 2.0, 0.0,   # 2 — верх справа
+        -1.0, 2.0, 0.0,   # 3 — верх слева
+    ]
+    indices = [0, 1, 2, ~3]
+    normals = [0.0, 0.0, 1.0] * 4
+    uvs = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
+
+    geometry = node(
+        'Geometry', prop_long(100) + prop_string('Strip\x00\x01Geometry') + prop_string('Mesh'),
+        [
+            node('Vertices', prop_double_array(verts)),
+            node('PolygonVertexIndex', prop_int_array(indices)),
+            node('LayerElementNormal', prop_int(0), [
+                node('MappingInformationType', prop_string('ByPolygonVertex')),
+                node('ReferenceInformationType', prop_string('Direct')),
+                node('Normals', prop_double_array(normals)),
+            ]),
+            node('LayerElementUV', prop_int(0), [
+                node('MappingInformationType', prop_string('ByPolygonVertex')),
+                node('ReferenceInformationType', prop_string('Direct')),
+                node('UV', prop_double_array(uvs)),
+            ]),
+        ])
+
+    mesh_model = node('Model', prop_long(200) + prop_string('SkinMesh\x00\x01Model') + prop_string('Mesh'),
+                      [node('Properties70', b'', [])])
+
+    # Кости: корень в начале координат, вторая — на высоте 1 (в единицах файла).
+    # У второй ЕСТЬ PreRotation: именно его теряют наивные импортёры, и модель
+    # выходит вывернутой, хотя «все числа прочитаны».
+    root_bone = node('Model', prop_long(300) + prop_string('Root\x00\x01Model') + prop_string('LimbNode'),
+                     [node('Properties70', b'', [p70v('Lcl Translation', (0.0, 0.0, 0.0))])])
+    child_bone = node('Model', prop_long(301) + prop_string('Upper\x00\x01Model') + prop_string('LimbNode'),
+                      [node('Properties70', b'', [
+                          p70v('Lcl Translation', (0.0, 1.0, 0.0)),
+                          p70_vec('PreRotation', 'Vector3D', (0.0, 0.0, 0.0)),
+                      ])])
+
+    def matrix_prop(m):
+        return prop_double_array(m)
+
+    ident = [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, 0.0, 0.0, 1.0]
+    # TransformLink второй кости — её мировая матрица привязки (сдвиг на 1 по Y).
+    link_child = [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, 1.0, 0.0, 1.0]
+
+    skin = node('Deformer', prop_long(400) + prop_string('Skin\x00\x01Deformer') + prop_string('Skin'))
+    cluster_root = node(
+        'Deformer', prop_long(401) + prop_string('ClusterRoot\x00\x01SubDeformer') + prop_string('Cluster'),
+        [
+            node('Indexes', prop_int_array([0, 1])),
+            node('Weights', prop_double_array([1.0, 1.0])),
+            node('Transform', matrix_prop(ident)),
+            node('TransformLink', matrix_prop(ident)),
+        ])
+    cluster_child = node(
+        'Deformer', prop_long(402) + prop_string('ClusterUpper\x00\x01SubDeformer') + prop_string('Cluster'),
+        [
+            node('Indexes', prop_int_array([2, 3])),
+            node('Weights', prop_double_array([1.0, 1.0])),
+            node('Transform', matrix_prop(ident)),
+            node('TransformLink', matrix_prop(link_child)),
+        ])
+
+    # Клип: вторая кость поворачивается вокруг Z с 0 до 90 градусов за секунду.
+    stack = node('AnimationStack', prop_long(500) + prop_string('Wave\x00\x01AnimStack') + prop_string(''))
+    layer = node('AnimationLayer', prop_long(501) + prop_string('Base\x00\x01AnimLayer') + prop_string(''))
+    curve_node = node('AnimationCurveNode', prop_long(502) + prop_string('R\x00\x01AnimCurveNode') + prop_string(''),
+                      [node('Properties70', b'', [])])
+    curve_z = node('AnimationCurve', prop_long(503) + prop_string('\x00\x01AnimCurve') + prop_string(''), [
+        node('KeyTime', prop_long_array([0, KTIME])),
+        node('KeyValueFloat', prop_float_array([0.0, 90.0])),
+    ])
+
+    settings = node('GlobalSettings', b'', [
+        node('Properties70', b'', [
+            p70('UpAxis', 'int', 1),
+            p70('UnitScaleFactor', 'double', float(unit)),
+        ]),
+    ])
+
+    objects = node('Objects', b'', [geometry, mesh_model, root_bone, child_bone,
+                                    skin, cluster_root, cluster_child,
+                                    stack, layer, curve_node, curve_z])
+
+    connections = node('Connections', b'', [
+        node('C', prop_string('OO') + prop_long(100) + prop_long(200)),   # Geometry -> Model
+        node('C', prop_string('OO') + prop_long(301) + prop_long(300)),   # Upper -> Root
+        node('C', prop_string('OO') + prop_long(400) + prop_long(100)),   # Skin -> Geometry
+        node('C', prop_string('OO') + prop_long(401) + prop_long(400)),   # Cluster -> Skin
+        node('C', prop_string('OO') + prop_long(402) + prop_long(400)),
+        node('C', prop_string('OO') + prop_long(300) + prop_long(401)),   # Root -> ClusterRoot
+        node('C', prop_string('OO') + prop_long(301) + prop_long(402)),   # Upper -> ClusterUpper
+        node('C', prop_string('OO') + prop_long(501) + prop_long(500)),   # Layer -> Stack
+        node('C', prop_string('OO') + prop_long(502) + prop_long(501)),   # CurveNode -> Layer
+        node('C', prop_string('OP') + prop_long(502) + prop_long(301) + prop_string('Lcl Rotation')),
+        node('C', prop_string('OP') + prop_long(503) + prop_long(502) + prop_string('d|Z')),
+    ])
+
+    header = b'Kaydara FBX Binary  \x00\x1a\x00' + struct.pack('<I', VERSION)
+    body = b''
+    cursor = len(header)
+    for top in (settings, objects, connections):
+        blob = top(cursor)
+        body += blob
+        cursor += len(blob)
+    body += b'\0' * 13
+
+    with open(path, 'wb') as f:
+        f.write(header + body)
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('out')
@@ -211,6 +355,10 @@ if __name__ == '__main__':
     ap.add_argument('--offset', nargs=3, type=float, default=[0.0, 0.0, 0.0],
                     help='Lcl Translation узла Model')
     ap.add_argument('--node-scale', type=float, default=1.0, help='Lcl Scaling узла Model')
+    ap.add_argument('--skin', action='store_true', help='модель со скином, костями и клипом')
     args = ap.parse_args()
-    build(args.out, args.zup, args.unit, args.ascii, tuple(args.offset), args.node_scale)
+    if args.skin:
+        build_skinned(args.out, args.unit)
+    else:
+        build(args.out, args.zup, args.unit, args.ascii, tuple(args.offset), args.node_scale)
     print('записан', args.out)

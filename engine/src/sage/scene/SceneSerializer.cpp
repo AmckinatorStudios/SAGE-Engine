@@ -271,6 +271,7 @@ static LightingEnvironment LightingFromJson(const json& root) {
             lighting.Skybox.Kind = (mode == 1)   ? SkyboxSettings::Source::Cubemap
                                    : (mode == 2) ? SkyboxSettings::Source::Faces
                                    : (mode == 3) ? SkyboxSettings::Source::Image
+                                   : (mode == 4) ? SkyboxSettings::Source::Solid
                                                  : SkyboxSettings::Source::Procedural;
         } else if (!lighting.Skybox.CubemapDir.empty()) {
             lighting.Skybox.Kind = SkyboxSettings::Source::Cubemap;

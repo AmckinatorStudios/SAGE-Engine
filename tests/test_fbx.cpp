@@ -14,7 +14,14 @@
 #include <filesystem>
 #include <string>
 
+#include <cmath>
+#include <memory>
+
+#include "sage/anim/Animator.h"
 #include "sage/assets/import/Importer.h"
+#include "sage/assets/import/FbxSkin.h"
+#include "sage/render/ModelData.h"
+#include "sage/render/SkinnedModel.h"
 #include "sage/render/ModelLoader.h"
 
 namespace fs = std::filesystem;
@@ -218,4 +225,88 @@ TEST(Fbx_node_transform_places_and_scales_the_mesh) {
     // UnitScaleFactor 100).
     CHECK_NEAR((mn.x + mx.x) * 0.5f, 5.0f, 1e-3f);
     CHECK_NEAR((mn.y + mx.y) * 0.5f, 0.0f, 1e-3f);
+}
+
+// --- СКИН: кости, веса и клип ----------------------------------------------
+//
+// FBX — то, во что экспортируют по умолчанию Blender, Maya, Mixamo и любой
+// ассет-стор, и персонажи оттуда приходят СО СКИНОМ. Пока скин не читался,
+// движок отвечал «не загрузить glTF … parse error» — сообщением о чужом
+// формате, из которого следовал вывод «моя модель движку не подходит».
+//
+// Эталон устроен так, чтобы измерять, а не «проверять факт загрузки»: полоса
+// из четырёх вершин на двух костях, нижние держит первая кость, верхние —
+// вторая. Значит, поворот второй кости обязан двигать РОВНО верхние вершины.
+TEST(Fbx_with_skin_loads_bones_weights_and_clips) {
+    // --unit 1 — файл в САНТИМЕТРАХ, как их и отдают экспортёры: заодно
+    // проверяется, что кости и вершины приводятся к метрам одинаково.
+    const std::string path = MakeFbx("sage_test_skin.fbx", "--skin --unit 1");
+    if (path.empty()) return; // нет python3 — проверять нечем
+
+    // Проверяется РАЗБОР, а не загрузка на видеокарту: контекста в модульных
+    // тестах нет, а спрашиваем мы про данные — кости, веса, клипы.
+    sage::render::ModelData data;
+    std::string err;
+    const bool ok = sage::assets::ImportFbxSkinned(path, data, err);
+    std::remove(path.c_str());
+    if (!ok) std::printf("       %s\n", err.c_str());
+    CHECK_TRUE(ok);
+    if (!ok) return;
+
+    // Скелет: две кости, вторая — ребёнок первой, имена из файла.
+    CHECK_EQ(data.Skeleton.Count(), 2);
+    if (data.Skeleton.Count() != 2) return;
+    CHECK_EQ(data.Skeleton.Joints[0].Name, std::string("Root"));
+    CHECK_EQ(data.Skeleton.Joints[1].Name, std::string("Upper"));
+    CHECK_EQ(data.Skeleton.Joints[1].Parent, 0);
+    // Единицы: файл в сантиметрах, кость на высоте 1 единицы -> 0.01 метра.
+    CHECK_NEAR(data.Skeleton.Joints[1].Translation.y, 0.01f, 1e-4f);
+
+    // ВЕСА ДОЕХАЛИ ДО ВЕРШИН, и именно те: нижние вершины держит первая кость,
+    // верхние — вторая. Проверка на «веса вообще есть» пропустила бы самую
+    // частую поломку — перепутанные местами кости.
+    CHECK_EQ((int)data.SubMeshes.size(), 1);
+    if (data.SubMeshes.empty()) return;
+    const std::vector<sage::render::SkinnedVertex>& verts = data.SubMeshes[0].Vertices;
+    CHECK_TRUE(verts.size() >= 6);   // четырёхугольник -> два треугольника
+    int lowOnRoot = 0, highOnUpper = 0;
+    for (const sage::render::SkinnedVertex& v : verts) {
+        const int joint = (int)v.Joints[0];
+        const bool low = v.Position.y < 0.005f;
+        if (low && joint == 0 && v.Weights[0] > 0.99f) ++lowOnRoot;
+        if (!low && joint == 1 && v.Weights[0] > 0.99f) ++highOnUpper;
+    }
+    std::printf("       вершин: низ на Root %d, верх на Upper %d\n", lowOnRoot, highOnUpper);
+    CHECK_TRUE(lowOnRoot >= 2);
+    CHECK_TRUE(highOnUpper >= 2);
+
+    // Клип назван по стеку анимации, а не номером: номер молча меняется при
+    // переэкспорте (см. anim/AnimationComponents.h).
+    CHECK_EQ((int)data.Clips.size(), 1);
+    if (data.Clips.empty()) return;
+    CHECK_EQ(data.Clips[0].Name, std::string("Wave"));
+    CHECK_NEAR(data.Clips[0].Duration, 1.0f, 1e-3f);
+
+    // И ГЛАВНОЕ: клип РЕАЛЬНО ДВИГАЕТ СКЕЛЕТ. Гоним его до конца (поворот
+    // второй кости на 90° вокруг Z) и смотрим палитру: первая кость обязана
+    // остаться на месте, вторая — повернуться. Без матриц привязки и каналов
+    // эта проверка не проходит ни при каких обстоятельствах.
+    sage::anim::Animator animator;
+    animator.SetRig(&data.Skeleton, &data.Clips);
+    animator.Play(0, false);
+    animator.Update(1.0f);
+    const std::vector<glm::mat4>& palette = animator.BoneMatrices();
+    CHECK_TRUE(palette.size() >= 2);
+    if (palette.size() < 2) return;
+
+    // Точка на сантиметр выше начала верхней кости: поворот на 90° вокруг Z
+    // кладёт её набок — x уходит от нуля, y падает.
+    const glm::vec3 tip = glm::vec3(palette[1] * glm::vec4(0.0f, 0.02f, 0.0f, 1.0f));
+    std::printf("       верх после поворота: (%.4f, %.4f, %.4f)\n", tip.x, tip.y, tip.z);
+    CHECK_TRUE(std::abs(tip.x) > 0.005f);
+    CHECK_TRUE(tip.y < 0.019f);
+
+    const glm::vec3 base = glm::vec3(palette[0] * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    CHECK_NEAR(base.x, 0.0f, 1e-4f);
+    CHECK_NEAR(base.y, 0.0f, 1e-4f);
 }

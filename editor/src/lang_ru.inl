@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1410.
+// Язык: Русский. Строк: 1414.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -202,6 +202,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Затенение складок (SSAO)"},
     {"Ambient light",
      "Окружающий свет"},
+    {"Ambient light from the sky takes this colour",
+     "Окружающий свет «от неба» возьмёт этот цвет"},
     {"Ambient occlusion, channel R. Empty means AO = 1.",
      "Ambient occlusion, канал R. Пусто — AO = 1."},
     {"Anchor",
@@ -924,6 +926,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "По содержимому"},
     {"Fixed",
      "Жёсткий"},
+    {"Flat fill: no gradient, no sun, no time of day",
+     "Ровная заливка: ни градиента, ни солнца, ни времени суток"},
     {"Fog",
      "Туман"},
     {"Fog Color",
@@ -1550,6 +1554,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "При отпускании"},
     {"On short tap",
      "При коротком нажатии"},
+    {"One colour",
+     "Одним цветом"},
     {"One element — aligned to its parent",
      "Один элемент — равняется по родителю"},
     {"One image (cross or panorama)",
@@ -2172,6 +2178,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Небо у горизонта"},
     {"Sky Top",
      "Небо в зените"},
+    {"Sky colour",
+     "Цвет неба"},
     {"Sky colours AND the scene's light follow the sun's height:\nbelow the horizon it really gets dark, and the moon takes over.\nTurn off for a scene lit at a fixed staged angle.",
      "Цвета неба И свет сцены следуют за высотой солнца:\nушло за горизонт — по-настоящему стемнело, светит луна.\nВыключите для сцены со светом под сценическим углом."},
     {"Sky picture",
