@@ -1476,6 +1476,7 @@
     "Screens": "Экраны",
     "Ready screen: title and a column of buttons": "Готовый экран: заголовок и столбец кнопок",
     "Health, ammo and a crosshair over the game": "Здоровье, патроны и прицел поверх игры",
-    "Sound, quality and controls on one screen": "Звук, качество и управление на одном экране"
+    "Sound, quality and controls on one screen": "Звук, качество и управление на одном экране",
+    "Delete selected files: %zu?": "Удалить выбранные файлы: %zu?"
   }
 }

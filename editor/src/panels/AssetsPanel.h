@@ -7,6 +7,7 @@
 
 #include "AssetPreview.h"
 #include "FileBrowser.h"
+#include "../RectSelect.h"
 
 class EditorHost;
 class Project;
@@ -26,9 +27,13 @@ public:
     void Shutdown() { m_preview.Shutdown(); }
 
     const std::filesystem::path& Selected() const { return m_selected; }
+    // ВЕСЬ набор выбранных файлов (включая первичный). Отдельно от Selected():
+    // инспектор показывает один файл — тот, на который смотрят, — а удаление и
+    // подсветка работают по набору, который обвели рамкой.
+    const std::vector<std::filesystem::path>& SelectionSet() const { return m_multi; }
     // Выбрать ассет программно — нужно headless-прогонам и переходу «показать
     // в Assets» из других панелей.
-    void Select(const std::filesystem::path& p) { m_selected = p; }
+    void Select(const std::filesystem::path& p) { m_selected = p; m_multi = {p}; }
 
     // Создаёт ассет kind с именем name в папке dir (расширение дописывается).
     // false + err при ошибке. Публично: используется и модалкой, и self-test'ом.
@@ -115,10 +120,14 @@ private:
     FileBrowser m_importBrowser;
 
     char m_search[128] = "";
-    std::filesystem::path m_selected;      // выделенный тайл
+    std::filesystem::path m_selected;      // первичный выделенный тайл (под инспектор)
+    std::vector<std::filesystem::path> m_multi; // весь набор: рамка, Ctrl-клик
+    sage::editor::rectselect::State m_rect;     // рамка выделения (см. RectSelect.h)
+    std::vector<std::filesystem::path> m_rectHits; // кого рамка задела в этом кадре
+    bool m_rectActive = false;
     std::filesystem::path m_renameTarget;  // пусто — модалка Rename не активна
     char m_renameBuf[256] = "";
-    std::filesystem::path m_deleteTarget;  // ждёт подтверждения в модалке Delete
+    std::vector<std::filesystem::path> m_deleteTargets; // ждут подтверждения в модалке Delete
     CreateKind m_createKind = CreateKind::None;
     char m_createName[128] = "";
     std::string m_error; // ошибка текущей модалки

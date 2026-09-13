@@ -103,6 +103,7 @@ public:
     const std::vector<int>& Selection() const override { return m_selection; }
     bool IsSelected(int id) const override;
     void ToggleSelection(int id) override;
+    void SetSelection(const std::vector<int>& ids, bool additive = false) override;
 
     // --- EditorHost: префабы ---
     bool SaveSelectedAsPrefab(const std::filesystem::path& path, std::string& err) override;
@@ -217,6 +218,8 @@ public:
     std::string MaterialFromTextureSet(const std::filesystem::path& texture, std::string& status);
     void PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                             bool additive) override;
+    void SelectInViewportRect(const glm::mat4& view, const glm::mat4& proj, float u0, float v0,
+                              float u1, float v1, bool additive) override;
 
     // --- EditorHost: панель Game ---
     void ShowSettingsWindow() override { m_showSettings = true; }

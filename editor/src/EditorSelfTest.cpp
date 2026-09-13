@@ -65,6 +65,8 @@
 #include "EditorPrefs.h"
 #include "Localization.h"
 #include "ObjectCatalog.h"
+#include "panels/InspectorPanel.h"
+#include "RectSelect.h"
 #include "sage/scene/SceneSerializer.h"
 
 #include "sage/scene/Prefab.h"
@@ -277,7 +279,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2547,6 +2549,139 @@ bool EditorLayer::SelfTestSelection() {
         if (preview.empty()) {
             LOG_ERROR("Editor") << "SELFTEST: материалы модели для обложки не прочитались: "
                                 << SAGE_TEST_MODEL;
+            ok = false;
+        }
+    }
+
+    // --- РАМКА ВЫДЕЛЕНИЯ И СПИСОК КОМПОНЕНТОВ -------------------------------
+    //
+    // Что было: выделить двадцать объектов можно было только Ctrl-кликом по
+    // каждому, а список «Добавить компонент» рос плоской простынёй, которая
+    // перестала помещаться в окно. Проверяются обе правки.
+    //
+    // Рамка: три куба в ряд, камера смотрит на них сбоку. Прямоугольник,
+    // накрывающий два левых, обязан выбрать ровно их — ни больше (третий
+    // рядом), ни меньше. Считается всё теми же матрицами, что у вьюпорта:
+    // проверка спрашивает «что выберет эта рамка на экране», а не подглядывает
+    // в реализацию.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        GameObject a = CreatePrimitiveEntity("RectA", MeshRef::Type::Cube);
+        GameObject b = CreatePrimitiveEntity("RectB", MeshRef::Type::Cube);
+        GameObject c = CreatePrimitiveEntity("RectC", MeshRef::Type::Cube);
+        a.GetTransform().Position = glm::vec3(-3.0f, 0.0f, 0.0f);
+        b.GetTransform().Position = glm::vec3(0.0f, 0.0f, 0.0f);
+        c.GetTransform().Position = glm::vec3(3.0f, 0.0f, 0.0f);
+
+        const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 12.0f), glm::vec3(0.0f),
+                                           glm::vec3(0, 1, 0));
+        const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
+        auto project = [&](const glm::vec3& world, float& u, float& v) {
+            const glm::vec4 clip = proj * view * glm::vec4(world, 1.0f);
+            u = (clip.x / clip.w) * 0.5f + 0.5f;
+            v = 0.5f - (clip.y / clip.w) * 0.5f;
+        };
+        // Рамка от левого края до промежутка между вторым и третьим кубом.
+        float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
+        project(glm::vec3(-5.0f, 2.0f, 0.0f), u0, v0);
+        project(glm::vec3(1.5f, -2.0f, 0.0f), u1, v1);
+
+        SetSelectedId(-1);
+        SelectInViewportRect(view, proj, u0, v0, u1, v1, /*additive=*/false);
+        auto selected = [&](GameObject& o) { return IsSelected(o.Id()); };
+        if (m_selection.size() != 2 || !selected(a) || !selected(b) || selected(c)) {
+            LOG_ERROR("Editor") << "SELFTEST: рамка выделила " << m_selection.size()
+                                << " объектов вместо двух левых";
+            ok = false;
+        }
+
+        // Ctrl/Shift — ДОБАВИТЬ к набору, а не заменить его: иначе обвести две
+        // группы подряд было бы нельзя.
+        if (ok) {
+            project(glm::vec3(1.5f, 2.0f, 0.0f), u0, v0);
+            project(glm::vec3(5.0f, -2.0f, 0.0f), u1, v1);
+            SelectInViewportRect(view, proj, u0, v0, u1, v1, /*additive=*/true);
+            if (m_selection.size() != 3) {
+                LOG_ERROR("Editor") << "SELFTEST: рамка с Ctrl заменила набор, а не дополнила: "
+                                    << m_selection.size();
+                ok = false;
+            }
+        }
+
+        // Рамка ЗА спиной камеры не выбирает ничего. Точка с отрицательной
+        // глубиной проецируется зеркально, и без проверки предметы позади
+        // попадали бы в рамку перед лицом.
+        if (ok) {
+            GameObject behind = CreatePrimitiveEntity("RectBehind", MeshRef::Type::Cube);
+            behind.GetTransform().Position = glm::vec3(0.0f, 0.0f, 40.0f);
+            SetSelectedId(-1);
+            SelectInViewportRect(view, proj, 0.0f, 0.0f, 1.0f, 1.0f, false);
+            if (IsSelected(behind.Id())) {
+                LOG_ERROR("Editor") << "SELFTEST: рамка выбрала объект за спиной камеры";
+                ok = false;
+            }
+            m_scene->RemoveObject(behind.Id());
+        }
+    }
+
+    // Геометрия самой рамки: направление ведения не должно ничего менять, а
+    // дрожание руки — не должно считаться рамкой (иначе каждый обычный клик
+    // снимал бы выделение).
+    if (ok) {
+        namespace rectselect = sage::editor::rectselect;
+        rectselect::State rs;
+        rs.Start = ImVec2(100.0f, 100.0f);
+        rs.Current = ImVec2(40.0f, 30.0f); // ведут ВВЕРХ-ВЛЕВО
+        if (!rectselect::Hits(rs, ImVec2(50.0f, 50.0f), ImVec2(60.0f, 60.0f)) ||
+            rectselect::Hits(rs, ImVec2(200.0f, 200.0f), ImVec2(210.0f, 210.0f))) {
+            LOG_ERROR("Editor") << "SELFTEST: рамка, ведённая назад, считает попадания неверно";
+            ok = false;
+        }
+        // Касание КРАЕМ засчитывается: обводя список по диагонали, крайние
+        // строки задевают уголком, и терять их нельзя.
+        if (ok && !rectselect::Hits(rs, ImVec2(95.0f, 95.0f), ImVec2(300.0f, 300.0f))) {
+            LOG_ERROR("Editor") << "SELFTEST: рамка не засчитывает касание краем";
+            ok = false;
+        }
+        if (ok) {
+            rectselect::State click;
+            click.Start = ImVec2(10.0f, 10.0f);
+            click.Current = ImVec2(11.0f, 12.0f); // дрогнула рука
+            if (rectselect::Meaningful(click) || !rectselect::Meaningful(rs)) {
+                LOG_ERROR("Editor") << "SELFTEST: клик и рамка не различаются по порогу";
+                ok = false;
+            }
+        }
+    }
+
+    // Список «Добавить компонент»: сворачивается по категориям, и это опирается
+    // на то, что записи одной категории идут ПОДРЯД — иначе категория открылась
+    // бы вторым заголовком. Заодно проверяется, что наклейки и «GI Static» в
+    // списке больше нет: у обеих есть своё место (каталог объектов и панель
+    // Environment), а в списке компонентов они предлагались каждому.
+    if (ok) {
+        const auto menu = InspectorPanel::AddComponentMenuContents();
+        if (menu.size() < 6) {
+            LOG_ERROR("Editor") << "SELFTEST: меню компонентов не разложено по категориям: "
+                                << menu.size();
+            ok = false;
+        }
+        std::set<std::string> seenCategories;
+        std::set<std::string> names;
+        for (const auto& [category, items] : menu) {
+            if (!seenCategories.insert(category).second) {
+                LOG_ERROR("Editor") << "SELFTEST: категория компонентов разорвана: " << category;
+                ok = false;
+            }
+            for (const std::string& n : items) names.insert(n);
+        }
+        if (ok && (names.count("Decal") || names.count("GI Static"))) {
+            LOG_ERROR("Editor") << "SELFTEST: наклейка или GI Static остались в списке компонентов";
+            ok = false;
+        }
+        // И то, ради чего список вообще нужен, на месте.
+        if (ok && (!names.count("Mesh") || !names.count("Light") || !names.count("Script"))) {
+            LOG_ERROR("Editor") << "SELFTEST: из списка компонентов пропало основное";
             ok = false;
         }
     }

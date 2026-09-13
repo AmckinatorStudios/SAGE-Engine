@@ -92,6 +92,11 @@ public:
     virtual const std::vector<int>& Selection() const = 0; // весь набор выбранных id
     virtual bool IsSelected(int id) const = 0;
     virtual void ToggleSelection(int id) = 0;             // Ctrl-клик: добавить/убрать из набора
+    // Заменить набор целиком. Нужен рамке выделения: она приносит СРАЗУ
+    // двадцать номеров, и класть их по одному через ToggleSelection значило бы
+    // двадцать раз переназначить первичную сущность и двадцать раз перерисовать
+    // инспектор. additive — добавить к тому, что уже выбрано (Ctrl/Shift).
+    virtual void SetSelection(const std::vector<int>& ids, bool additive = false) = 0;
 
     // --- префабы (переиспользуемые сущности-поддеревья) ---
     // Сохраняет сущность (с детьми) в .sageprefab; false + err при ошибке.
@@ -350,6 +355,14 @@ public:
     // объектом в начале координат. Точки под курсором в списке нет, поэтому
     // место то же, что у создания через меню Entity.
     virtual bool AddAssetToScene(const std::filesystem::path& asset) = 0;
+
+    // Выделить всё, что попало в ПРЯМОУГОЛЬНИК вьюпорта (рамка выделения).
+    // Координаты — доли от размера вьюпорта, как у PickAtViewport; порядок
+    // углов любой. Считается ЭКРАННАЯ коробка объекта: обводя рамкой, человек
+    // смотрит на картинку, а не на то, где проходит луч.
+    virtual void SelectInViewportRect(const glm::mat4& view, const glm::mat4& proj,
+                                      float u0, float v0, float u1, float v1,
+                                      bool additive) = 0;
 
     virtual void PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                                     bool additive) = 0;

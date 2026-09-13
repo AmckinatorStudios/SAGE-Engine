@@ -262,7 +262,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     bool hovered = ImGui::IsItemHovered();
     bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
-    bool isSelected = m_selected == path;
+    bool isSelected = std::find(m_multi.begin(), m_multi.end(), path) != m_multi.end();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 tileMax(cursor.x + kTileW, cursor.y + kTileH);
@@ -373,7 +373,29 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         ImGui::EndDragDropTarget();
     }
 
-    if (clicked) m_selected = path;
+    // Рамка выделения: карточка засчитывается, если её прямоугольник задет.
+    if (m_rectActive && sage::editor::rectselect::Hits(m_rect, cursor, tileMax)) {
+        m_rectHits.push_back(path);
+    }
+
+    if (clicked && !m_rectActive) {
+        // Ctrl/Shift — добавить или убрать из набора; обычный клик — один файл.
+        // Без этого набор, собранный рамкой, разрушался бы первым же кликом по
+        // соседнему файлу, и «обвести, потом добавить ещё один» не работало.
+        if (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) {
+            auto it = std::find(m_multi.begin(), m_multi.end(), path);
+            if (it != m_multi.end()) {
+                m_multi.erase(it);
+                m_selected = m_multi.empty() ? fs::path{} : m_multi.back();
+            } else {
+                m_multi.push_back(path);
+                m_selected = path;
+            }
+        } else {
+            m_selected = path;
+            m_multi = {path};
+        }
+    }
     if (doubleClicked) {
         if (isDir) host.AssetsCwd() = path;
         else if (path.extension() == ".sage") host.LoadSceneFromFile(path);
@@ -396,9 +418,19 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         }
     }
     if (ImGui::BeginPopupContextItem("##tile_ctx")) {
-        m_selected = path;
+        // ПКМ по файлу ВНЕ набора выбирает его одного: меню всегда про то, на
+        // что нажали. ПКМ по файлу ИЗ набора набор сохраняет — иначе обвести
+        // рамкой двадцать файлов и удалить их разом было бы нельзя.
+        if (std::find(m_multi.begin(), m_multi.end(), path) == m_multi.end()) {
+            m_selected = path;
+            m_multi = {path};
+        } else {
+            m_selected = path;
+        }
+        // Переименование — всегда про ОДИН файл: у двадцати файлов общего имени
+        // нет, и придумывать правило вроде «имя + номер» здесь не за чем.
         if (ImGui::MenuItem(T("Rename"))) { m_renameTarget = path; m_error.clear(); }
-        if (ImGui::MenuItem(T("Delete"))) { m_deleteTarget = path; }
+        if (ImGui::MenuItem(T("Delete"))) { m_deleteTargets = m_multi; }
 
         // Конвертация в свой формат — там же, где всё остальное про файл.
         // Отдельной кнопки в меню нет намеренно: конвертируют КОНКРЕТНЫЙ файл,
@@ -580,6 +612,7 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
     }
 
     if (m_selected == source) m_selected = target;
+    for (fs::path& p : m_multi) if (p == source) p = target;
     // Пересканировать проект: база ассетов помнит пути, и после переезда её
     // ответ на «где этот файл» обязан измениться.
     sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
@@ -750,6 +783,7 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
         return;
     }
     m_selected = r.Created;
+    m_multi = {r.Created};
 
     std::string message = T("Brought in: ") + r.Created.filename().string();
     if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + T(" companion file(s))");
@@ -859,6 +893,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             fs::path created;
             if (CreateAsset(m_createKind, m_createName, host.AssetsCwd(), created, m_error)) {
                 m_selected = created;
+                m_multi = {created};
                 m_createKind = CreateKind::None;
                 m_error.clear();
                 ImGui::CloseCurrentPopup();
@@ -892,6 +927,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
                 LOG_ERROR("Editor") << "Asset rename failed: " << m_error;
             } else {
                 if (m_selected == m_renameTarget) m_selected = target;
+                for (fs::path& p : m_multi) if (p == m_renameTarget) p = target;
                 sage::AssetDatabase::Instance().ScanProject(
                     host.CurrentProject().Dir().string());
                 m_renameTarget.clear();
@@ -908,24 +944,35 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::EndPopup();
     }
 
-    if (!m_deleteTarget.empty() && !ImGui::IsPopupOpen("Delete Asset")) {
+    if (!m_deleteTargets.empty() && !ImGui::IsPopupOpen("Delete Asset")) {
         ImGui::OpenPopup("Delete Asset");
     }
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal(T("Delete Asset" "###Delete Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text(T("Delete \"%s\"?"), m_deleteTarget.filename().string().c_str());
+        // Один файл называется по имени, набор — числом. «Удалить 17 файлов?»
+        // отвечает на тот же вопрос, что и имя: понимаю ли я, что сейчас
+        // исчезнет.
+        if (m_deleteTargets.size() == 1) {
+            ImGui::Text(T("Delete \"%s\"?"), m_deleteTargets.front().filename().string().c_str());
+        } else {
+            ImGui::Text(T("Delete selected files: %zu?"), m_deleteTargets.size());
+        }
         ImGui::TextDisabled("%s", T("This cannot be undone."));
         ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Danger));
         if (ImGui::Button(T("Delete"), ImVec2(120, 0))) {
-            DeleteAsset(m_deleteTarget);
-            if (m_selected == m_deleteTarget) m_selected.clear();
-            m_deleteTarget.clear();
+            for (const fs::path& victim : m_deleteTargets) {
+                DeleteAsset(victim);
+                if (m_selected == victim) m_selected.clear();
+                auto it = std::find(m_multi.begin(), m_multi.end(), victim);
+                if (it != m_multi.end()) m_multi.erase(it);
+            }
+            m_deleteTargets.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::PopStyleColor();
         ImGui::SameLine();
         if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) {
-            m_deleteTarget.clear();
+            m_deleteTargets.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -1004,6 +1051,9 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     ImGui::Separator();
 
     ImGui::BeginChild("##assets_scroll");
+    namespace rectselect = sage::editor::rectselect;
+    m_rectActive = rectselect::Begin(m_rect);
+    m_rectHits.clear();
     std::error_code ec;
     std::vector<fs::directory_entry> dirs, files;
     for (const auto& entry : fs::directory_iterator(cwd, ec)) {
@@ -1084,6 +1134,21 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
         }
         ImGui::EndPopup();
     }
+
+    // Рамка выделения. Начинается только в пустом месте сетки: над карточкой
+    // живёт перетаскивание файла, и рамка отняла бы его.
+    if (m_rectActive && m_rect.Finished && rectselect::Meaningful(m_rect)) {
+        if (!m_rect.Additive) m_multi.clear();
+        for (const fs::path& hit : m_rectHits) {
+            if (std::find(m_multi.begin(), m_multi.end(), hit) == m_multi.end())
+                m_multi.push_back(hit);
+        }
+        m_selected = m_multi.empty() ? fs::path{} : m_multi.back();
+    }
+    rectselect::End(m_rect, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+                                !ImGui::IsAnyItemHovered() &&
+                                !ImGui::IsPopupOpen("##assets_create_ctx"));
+    rectselect::Draw(m_rect);
     ImGui::EndChild();
 
     DrawModals(host);

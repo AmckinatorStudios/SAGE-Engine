@@ -502,6 +502,75 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     return true;
 }
 
+// --- Рамка выделения во вьюпорте -------------------------------------------
+//
+// ПО ЭКРАННОЙ КОРОБКЕ, А НЕ ПО ЛУЧУ. Обводя рамкой, человек смотрит на
+// картинку: «всё, что я обвёл». Проверять лучом каждый пиксель рамки — это
+// сотни тысяч трассировок на один жест, и результат всё равно был бы другим:
+// объект, видимый краем за чужой спиной, в рамку попадает, а в лучи — нет.
+// Поэтому каждый объект проецируется в экран целиком (восемь углов его
+// коробки) и сравнивается своим прямоугольником с прямоугольником рамки.
+void EditorLayer::SelectInViewportRect(const glm::mat4& view, const glm::mat4& proj, float u0,
+                                       float v0, float u1, float v1, bool additive) {
+    const glm::vec2 rectMin(std::min(u0, u1), std::min(v0, v1));
+    const glm::vec2 rectMax(std::max(u0, u1), std::max(v0, v1));
+    const glm::mat4 vp = proj * view;
+
+    // Экранный прямоугольник набора точек. Возвращает false, если объект
+    // целиком ЗА камерой: точка с w <= 0 проецируется зеркально, и без этой
+    // проверки предметы за спиной попадали бы в рамку перед лицом.
+    auto screenBox = [&](const std::vector<glm::vec3>& pts, glm::vec2& mn, glm::vec2& mx) {
+        bool any = false;
+        for (const glm::vec3& p : pts) {
+            const glm::vec4 clip = vp * glm::vec4(p, 1.0f);
+            if (clip.w <= 1e-6f) continue;
+            const glm::vec2 uv((clip.x / clip.w) * 0.5f + 0.5f, 0.5f - (clip.y / clip.w) * 0.5f);
+            if (!any) { mn = mx = uv; any = true; continue; }
+            mn = glm::min(mn, uv);
+            mx = glm::max(mx, uv);
+        }
+        return any;
+    };
+    auto overlaps = [&](const glm::vec2& mn, const glm::vec2& mx) {
+        return !(mx.x < rectMin.x || mn.x > rectMax.x || mx.y < rectMin.y || mn.y > rectMax.y);
+    };
+
+    std::vector<int> picked;
+    auto meshes = m_scene->Registry().view<IdComponent, MeshRendererComponent>();
+    for (auto e : meshes) {
+        Mesh* mesh = meshes.get<MeshRendererComponent>(e).MeshPtr.get();
+        if (!mesh) continue;
+        const glm::mat4 world = m_scene->WorldMatrix(e);
+        const glm::vec3 lo = mesh->BoundsMin();
+        const glm::vec3 hi = mesh->BoundsMax();
+        std::vector<glm::vec3> corners;
+        corners.reserve(8);
+        for (int i = 0; i < 8; ++i) {
+            const glm::vec3 local((i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y,
+                                  (i & 4) ? hi.z : lo.z);
+            corners.push_back(glm::vec3(world * glm::vec4(local, 1.0f)));
+        }
+        glm::vec2 mn, mx;
+        if (screenBox(corners, mn, mx) && overlaps(mn, mx))
+            picked.push_back(meshes.get<IdComponent>(e).Id);
+    }
+
+    // Свет и камера — теми же маркерами, что и по клику: меша у них нет, но на
+    // экране они нарисованы, и не попасть в рамку, которая их обводит, было бы
+    // странно.
+    auto marker = [&](entt::entity e, int id) {
+        const glm::vec3 pos(m_scene->WorldMatrix(e)[3]);
+        glm::vec2 mn, mx;
+        if (screenBox({pos}, mn, mx) && overlaps(mn, mx)) picked.push_back(id);
+    };
+    auto camMarkers = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
+    for (auto e : camMarkers) marker(e, camMarkers.get<IdComponent>(e).Id);
+    auto lightMarkers = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
+    for (auto e : lightMarkers) marker(e, lightMarkers.get<IdComponent>(e).Id);
+
+    SetSelection(picked, additive);
+}
+
 void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
                                      bool additive) {
     // Луч из камеры через пиксель вьюпорта: unprojection ближней/дальней точек NDC.

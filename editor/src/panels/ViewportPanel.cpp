@@ -711,17 +711,39 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // «увидел» бы стрелки перемещения, которых у рамки не нарисовано. Клик
     // рядом с невидимой осью не выбирал бы объект под курсором — тем более
     // странно, что видимой причины для этого на экране нет.
-    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        !ImGuizmo::IsOver() && !ImGuizmo::IsUsing()) {
-        ImVec2 mp = ImGui::GetMousePos();
-        float u = (mp.x - imgPos.x) / avail.x;
-        float v = (mp.y - imgPos.y) / avail.y;
-        if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) {
-            // Теми же матрицами, что и гизмо: иначе в ортогональном виде или в
-            // неглавном слоте луч строился бы по камере другого окна и выбирал
-            // бы объекты «не там, куда щёлкнули».
-            host.PickAtViewportWith(activeView, activeProj, u, v, io.KeyCtrl);
+    // ОДИН ЖЕСТ, ДВА ИСХОДА: нажали и отпустили не сдвинувшись — выбор по
+    // лучу, как раньше; провели рамку — выбор всем, что она обвела. Развести
+    // их можно только по отпусканию кнопки: в момент нажатия ещё неизвестно,
+    // клик это или начало рамки. Поэтому выбор и переехал с нажатия на
+    // отпускание — на глаз разницы нет, а рамка иначе сперва выбирала бы один
+    // объект под курсором и тут же заменяла его набором.
+    {
+        namespace rectselect = sage::editor::rectselect;
+        const bool rectActive = rectselect::Begin(m_rect);
+        auto toUv = [&](const ImVec2& p) {
+            return ImVec2((p.x - imgPos.x) / avail.x, (p.y - imgPos.y) / avail.y);
+        };
+        if (rectActive && m_rect.Finished) {
+            const ImVec2 a = toUv(m_rect.Start);
+            const ImVec2 b = toUv(m_rect.Current);
+            if (rectselect::Meaningful(m_rect)) {
+                host.SelectInViewportRect(activeView, activeProj, a.x, a.y, b.x, b.y,
+                                          m_rect.Additive);
+            } else if (b.x >= 0.0f && b.x <= 1.0f && b.y >= 0.0f && b.y <= 1.0f) {
+                // Теми же матрицами, что и гизмо: иначе в ортогональном виде
+                // или в неглавном слоте луч строился бы по камере другого окна
+                // и выбирал бы объекты «не там, куда щёлкнули».
+                host.PickAtViewportWith(activeView, activeProj, b.x, b.y, io.KeyCtrl);
+            }
         }
+        // Рамку начинаем только там, где раньше начинался выбор: над картинкой,
+        // мимо гизмо и не во время манипуляции им.
+        const ImVec2 mp = ImGui::GetMousePos();
+        const ImVec2 uv = toUv(mp);
+        const bool insideImage = uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
+        rectselect::End(m_rect, hovered && insideImage && !ImGuizmo::IsOver() &&
+                                    !ImGuizmo::IsUsing() && !m_cameraDriving);
+        rectselect::Draw(m_rect);
     }
 
     // Маска осей глобальна для ImGuizmo — снимаем её здесь, когда все опросы

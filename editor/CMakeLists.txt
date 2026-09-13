@@ -51,6 +51,7 @@ add_executable(SageEditor WIN32
     src/EditorPrefs.cpp
     src/PanelWindows.cpp
     src/ObjectCatalog.cpp
+    src/RectSelect.cpp
     src/TextureSet.cpp
     src/UIElementProperties.cpp
     src/VarsEditor.cpp
