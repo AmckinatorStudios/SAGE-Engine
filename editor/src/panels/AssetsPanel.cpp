@@ -150,15 +150,52 @@ constexpr float kTileSpacing = 12.0f;
 
 } // namespace
 
-void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
+// КОРЕНЬ ПАНЕЛИ — assets/ ПРОЕКТА, и выше него панель не поднимается.
+//
+// Всё, с чем панель умеет работать, живёт в assets/: только оттуда ассет
+// попадает в сцену ссылкой, которая переживёт сборку игры, и только там его
+// найдут импорт, превью и слоты. Выше лежат служебные файлы проекта
+// (project.sageproj, sage.cfg, папка scenes/) — трогать их отсюда нечем, а
+// показывать значит предлагать работу, которой панель не делает: человек
+// заходил в папку проекта, видел «пусто» и решал, что ассеты потерялись.
+//
+// Возврат пути наружу тоже закрыт этим: путь за пределами assets/ в сцене не
+// работает (Project::AssetRef), и запрещать его в слотах, продолжая водить туда
+// панелью, — это два правила об одном и том же, из которых верно только одно.
+fs::path AssetsPanel::AssetsRoot(EditorHost& host) {
     Project& project = host.CurrentProject();
-    fs::path& cwd = host.AssetsCwd();
-    const fs::path root = project.Dir().parent_path();
+    return project.Loaded() ? project.AssetsDir() : host.AssetsCwd();
+}
 
-    // Собираем цепочку сегментов от текущей папки вверх до корня.
+// Загоняет текущую папку обратно в корень, если она оказалась снаружи. Так
+// бывает после открытия другого проекта и после удаления папки, в которой
+// стояли: молча остаться «нигде» хуже, чем вернуться в корень.
+void AssetsPanel::ClampCwd(EditorHost& host) {
+    const fs::path root = AssetsRoot(host);
+    fs::path& cwd = host.AssetsCwd();
+    std::error_code ec;
+    if (!fs::exists(cwd, ec)) { cwd = root; return; }
+    const fs::path c = fs::weakly_canonical(cwd, ec);
+    const fs::path r = fs::weakly_canonical(root, ec);
+    for (fs::path p = c; ; p = p.parent_path()) {
+        if (p == r) return;                  // внутри корня — всё в порядке
+        if (!p.has_parent_path() || p.parent_path() == p) break;
+    }
+    cwd = root;
+}
+
+void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
+    fs::path& cwd = host.AssetsCwd();
+    // Цепочка обрывается на КОРНЕ ПАНЕЛИ: показывать дорогу туда, куда всё
+    // равно не пустят, — значит обещать несуществующий ход.
+    const fs::path root = AssetsRoot(host);
+
     std::vector<fs::path> chain;
-    for (fs::path p = cwd; p != root && p.has_parent_path(); p = p.parent_path()) {
+    std::error_code cec;
+    const fs::path rootCanon = fs::weakly_canonical(root, cec);
+    for (fs::path p = cwd; p.has_parent_path(); p = p.parent_path()) {
         chain.push_back(p);
+        if (fs::weakly_canonical(p, cec) == rootCanon) break;
         if (p.parent_path() == p) break; // достигли корня файловой системы
     }
     std::reverse(chain.begin(), chain.end());
@@ -335,7 +372,8 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
 
 void AssetsPanel::DrawFolderTree(EditorHost& host) {
     ImGui::BeginChild("##assets_tree", ImVec2(m_treeWidth, 0), ImGuiChildFlags_Borders);
-    DrawFolderNode(host, host.CurrentProject().Dir(), 0);
+    // Корень дерева — assets/, а не папка проекта: см. AssetsRoot().
+    DrawFolderNode(host, AssetsRoot(host), 0);
     ImGui::EndChild();
 
     // Разделитель: ширину дерева правят перетаскиванием. Не настройка в меню —
@@ -1212,6 +1250,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // Бюджет превью на кадр: см. ThumbnailFor.
     m_thumbRenderedThisFrame = false;
     Project& project = host.CurrentProject();
+    ClampCwd(host);
     fs::path& cwd = host.AssetsCwd();
 
     ImGui::Begin(T("Assets" "###Assets"), open, panelwindows::WindowFlags("Assets"));
@@ -1227,8 +1266,10 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // папкой (что я здесь ищу и что приношу), и все виджеты в ряду одной высоты.
     // Выше корня проекта панель не поднимается: снаружи проекта её файлы
     // редактору не принадлежат, а ссылка на них не переживёт сборку игры.
-    const fs::path root = project.Dir();
-    bool canGoUp = cwd.has_parent_path() && cwd != root;
+    const fs::path root = AssetsRoot(host);
+    std::error_code upec;
+    const bool atRoot = fs::weakly_canonical(cwd, upec) == fs::weakly_canonical(root, upec);
+    const bool canGoUp = cwd.has_parent_path() && !atRoot;
     ImGui::BeginDisabled(!canGoUp);
     if (EditorIcons::IconOnlyButton("up", T("Up"))) cwd = cwd.parent_path();
     ImGui::EndDisabled();

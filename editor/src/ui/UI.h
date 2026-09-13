@@ -79,8 +79,12 @@ void EndProperties();
 // Подпись + переход в колонку значения. tooltip — пояснение при наведении.
 void PropertyLabel(const char* label, const char* tooltip = nullptr);
 // Три поля X/Y/Z в одну строку, ровно по ширине колонки значения.
+//
+// reserveRight — сколько пикселей оставить справа под чужой элемент в той же
+// строке (замок связи осей у масштаба). Без него поля занимают всю колонку и
+// кнопка, поданная следом, уезжает за край панели.
 bool PropertyVec3(const char* id, float v[3], float speed = 0.01f,
-                  const char* format = "%.3f");
+                  const char* format = "%.3f", float reserveRight = 0.0f);
 
 // --- мелочи ---------------------------------------------------------------
 

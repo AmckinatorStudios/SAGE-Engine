@@ -45,6 +45,16 @@ public:
     static std::vector<std::pair<std::string, std::vector<std::string>>> AddComponentMenuContents();
 
 private:
+public:
+    // Связанные оси масштаба: что получится, если из before потянули одну ось
+    // и получили after. Открыто ради проверки без интерфейса.
+    static glm::vec3 LinkScaleAxes(const glm::vec3& before, const glm::vec3& after);
+
+private:
+    // Замок связи осей масштаба (см. Transform в InspectorPanel_Entity.cpp).
+    bool m_uniformScale = true;
+    bool m_uniformScaleLoaded = false;
+
     // Что за файл выбран в Assets — по нему выбирается редактор.
     enum class AssetKind { None, Material, Prefab, Model, Audio, Other };
     // Какая вкладка открыта. Следует за последним выбором человека, иначе

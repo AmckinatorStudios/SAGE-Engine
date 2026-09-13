@@ -587,7 +587,8 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
     }
     if (!m_project.CreateNew(dir, name, err)) return false;
     const ProjectTemplateKind kind = tpl->Kind;
-    m_assetsCwd = m_project.Dir();
+    // ПАНЕЛЬ АССЕТОВ ЖИВЁТ В assets/ И ТОЛЬКО В НЕЙ (см. AssetsPanel.cpp).
+    m_assetsCwd = m_project.AssetsDir();
     m_projects.Touch(m_project.Dir().string());
 
     if (kind == ProjectTemplateKind::Copy) {
@@ -693,7 +694,8 @@ bool EditorLayer::ReloadProjectInput() {
 
 bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     if (!m_project.Open(path, err)) return false;
-    m_assetsCwd = m_project.Dir();
+    // ПАНЕЛЬ АССЕТОВ ЖИВЁТ В assets/ И ТОЛЬКО В НЕЙ (см. AssetsPanel.cpp).
+    m_assetsCwd = m_project.AssetsDir();
     m_projects.Touch(m_project.Dir().string());
 
     // Настройки проекта (sage.cfg) — в окно Settings; отсутствие файла не ошибка

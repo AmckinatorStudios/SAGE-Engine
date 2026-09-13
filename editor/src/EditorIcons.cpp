@@ -176,7 +176,7 @@ const char* const kNames[] = {
     "code", "question", "layout", "gear",
     "magnet",
     "warn", "error", "info", "debug",
-    "trash", "copy", "save", "open", "plus", "eye", "lock",
+    "trash", "copy", "save", "open", "plus", "eye", "lock", "unlock",
 };
 
 } // namespace

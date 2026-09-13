@@ -203,10 +203,11 @@ void PropertyLabel(const char* label, const char* tooltip) {
     ImGui::TableSetColumnIndex(1);
 }
 
-bool PropertyVec3(const char* id, float v[3], float speed, const char* format) {
+bool PropertyVec3(const char* id, float v[3], float speed, const char* format,
+                  float reserveRight) {
     const Style& ui = Get();
     ImGui::PushID(id);
-    const float avail = ImGui::GetContentRegionAvail().x;
+    const float avail = ImMax(ImGui::GetContentRegionAvail().x - reserveRight, 60.0f);
     // Три равных поля с одинаковыми промежутками. Ширина считается один раз и
     // округляется вниз, чтобы третье поле не вылезало за край панели.
     const float gap = ui.SpacingXS;
