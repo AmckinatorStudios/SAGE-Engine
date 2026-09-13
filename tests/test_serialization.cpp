@@ -126,7 +126,6 @@ TEST(Material_save_load_roundtrip) {
     out.MetallicMapPath = "textures/brick_metallic.png";
     out.RoughnessMapPath = "textures/brick_roughness.png";
     out.AOMapPath = "textures/brick_ao.png";
-    out.Shininess = 64.0f;
 
     std::string path = TempPath("mat.sagemat");
     out.SaveToFile(path);
@@ -143,7 +142,6 @@ TEST(Material_save_load_roundtrip) {
     CHECK_EQ(in.MetallicMapPath, std::string("textures/brick_metallic.png"));
     CHECK_EQ(in.RoughnessMapPath, std::string("textures/brick_roughness.png"));
     CHECK_EQ(in.AOMapPath, std::string("textures/brick_ao.png"));
-    CHECK_NEAR(in.Shininess, 64.0f, 1e-5);
 
     fs::remove(path);
 }
@@ -533,6 +531,11 @@ TEST(Material_render_properties_survive_a_round_trip_by_table) {
     for (const MaterialRenderField& f : fields) {
         if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
             out.Render.*f.AsBool = !(defaults.Render.*f.AsBool);
+        } else if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum && f.SetEnum) {
+            // Берём значение, заведомо отличное от текущего: первое, если
+            // сейчас не первое, и второе, если первое.
+            const int def = f.GetEnum(defaults.Render);
+            f.SetEnum(out.Render, def == 0 ? 1 : 0);
         } else if (f.AsFloat) {
             const float def = defaults.Render.*f.AsFloat;
             out.Render.*f.AsFloat = (def == f.Max) ? f.Min : f.Max;
@@ -548,12 +551,22 @@ TEST(Material_render_properties_survive_a_round_trip_by_table) {
     for (const MaterialRenderField& f : fields) {
         if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
             CHECK_TRUE(in.Render.*f.AsBool == out.Render.*f.AsBool);
+        } else if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum) {
+            CHECK_EQ(f.GetEnum(in.Render), f.GetEnum(out.Render));
         } else if (f.AsFloat) {
             CHECK_NEAR(in.Render.*f.AsFloat, out.Render.*f.AsFloat, 1e-5);
         }
-        // Каждое свойство обязано иметь ключ, подпись и одно (ровно одно) поле.
+        // Каждое свойство обязано иметь ключ, подпись и ровно один способ
+        // добраться до значения.
         CHECK_TRUE(f.Key != nullptr && f.Label != nullptr);
-        CHECK_TRUE((f.AsBool != nullptr) != (f.AsFloat != nullptr));
+        const int ways = (f.AsBool != nullptr) + (f.AsFloat != nullptr) +
+                         (f.GetEnum != nullptr && f.SetEnum != nullptr);
+        CHECK_EQ(ways, 1);
+        // У списка обязаны быть и ключи, и подписи — ровно по числу значений.
+        if (f.Type == MaterialRenderField::Kind::Enum) {
+            CHECK_TRUE(f.EnumKeys != nullptr && f.EnumLabels != nullptr);
+            CHECK_TRUE(f.EnumCount >= 2);
+        }
     }
 }
 
@@ -574,8 +587,51 @@ TEST(Material_reads_files_written_before_the_split) {
 
     CHECK_NEAR(m.Albedo.r, 0.5f, 1e-5);
     CHECK_NEAR(m.Metallic, 0.75f, 1e-5);
-    CHECK_FALSE(m.Render.DoubleSided);
+    // Флажок «двусторонний» превратился в список отсечения: false — отсекаем
+    // задние грани, как и рисовал такой материал раньше.
+    CHECK_TRUE(m.Render.Cull == CullFaces::Back);
     CHECK_NEAR(m.Render.PlanarReflectivity, 0.9f, 1e-5);
+}
+
+// Тот же старый файл, но с doubleSided = true: материал БЫЛ двусторонним и
+// обязан таким остаться. Молча сменить отсечение — значит переделать чужую
+// сцену без спроса: у стекла и листвы пропала бы половина поверхности.
+TEST(Material_double_sided_flag_becomes_no_culling) {
+    const std::string path =
+        (fs::temp_directory_path() / "sage_material_twosided.sagemat").string();
+    {
+        std::ofstream f(path);
+        f << R"({"albedo":[1,1,1],"doubleSided":true})";
+    }
+    const Material m = Material::LoadFromFile(path);
+    fs::remove(path);
+    CHECK_TRUE(m.Render.Cull == CullFaces::None);
+}
+
+// Новый ключ пишется СЛОВОМ и читается обратно; неизвестное слово не ломает
+// материал, а оставляет значение по умолчанию.
+TEST(Material_cull_is_written_as_a_word) {
+    Material out;
+    out.Render.Cull = CullFaces::Front;
+    const std::string path = (fs::temp_directory_path() / "sage_material_cull.sagemat").string();
+    out.SaveToFile(path);
+
+    std::ifstream in(path);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK_TRUE(text.find("\"front\"") != std::string::npos);
+
+    const Material back = Material::LoadFromFile(path);
+    CHECK_TRUE(back.Render.Cull == CullFaces::Front);
+    fs::remove(path);
+
+    const std::string bad = (fs::temp_directory_path() / "sage_material_cull_bad.sagemat").string();
+    {
+        std::ofstream f(bad);
+        f << R"({"cull":"сбоку"})";
+    }
+    const Material m = Material::LoadFromFile(bad);
+    fs::remove(bad);
+    CHECK_TRUE(m.Render.Cull == CullFaces::Back);
 }
 
 // --- v3 -> v4: цвет экземпляра стал множителем albedo, а не заменой ----------

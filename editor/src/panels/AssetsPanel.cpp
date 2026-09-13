@@ -1074,7 +1074,9 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
                 "{\n"
                 "    \"albedo\": [1.0, 1.0, 1.0],\n"
                 "    \"emissive\": [0.0, 0.0, 0.0],\n"
-                "    \"shininess\": 32.0,\n"
+                "    \"metallic\": 0.0,\n"
+                "    \"roughness\": 0.5,\n"
+                "    \"cull\": \"back\",\n"
                 "    \"texture\": \"\"\n"
                 "}\n";
         }

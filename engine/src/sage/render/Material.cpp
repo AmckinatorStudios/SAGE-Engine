@@ -1,4 +1,6 @@
 #include "sage/render/Material.h"
+
+#include <algorithm>
 #include "sage/assets/Pack.h"
 
 #include <fstream>
@@ -18,25 +20,39 @@ static glm::vec3 Vec3FromJson(const json& j, glm::vec3 fallback) {
 // Единственный источник правды о свойствах рендера. Читатель, писатель и
 // инспектор ходят СЮДА, а не держат по своему списку: три списка, которые
 // обязаны совпадать, — это три места, где они однажды разойдутся.
+namespace {
+// Значения списка отсечения: как пишутся в файл и как называются в инспекторе.
+// Порядок обязан совпадать с CullFaces.
+const char* const kCullKeys[] = {"back", "front", "none"};
+const char* const kCullLabels[] = {"Задние", "Передние", "Не отсекать"};
+} // namespace
+
 const std::vector<MaterialRenderField>& MaterialRenderFields() {
     static const std::vector<MaterialRenderField> fields = {
-        {"doubleSided", "Двусторонний", MaterialRenderField::Kind::Bool,
-         &MaterialRender::DoubleSided, nullptr, 0.0f, 1.0f,
-         "Не отсекать задние грани. Стакану и листве — да; замкнутому телу\n"
-         "(плитка воды, ящик стекла) — нет: иначе два слоя смешивания на один\n"
-         "объект, вода темнеет вдвое, а на швах появляется сетка."},
+        {"cull", "Отсечение граней", MaterialRenderField::Kind::Enum,
+         MaterialRenderField::Group::Render, nullptr, nullptr, 0.0f, 0.0f,
+         "Какие грани НЕ рисуются.\n"
+         "«Задние» — обычный случай: внутренностей замкнутого тела не видно,\n"
+         "и платить за них нечем.\n"
+         "«Передние» — для модели, вывернутой наизнанку экспортом, и для\n"
+         "комнаты, в которую смотрят изнутри коробки.\n"
+         "«Не отсекать» — двусторонний материал: стекло, листва, трава.",
+         [](const MaterialRender& r) { return (int)r.Cull; },
+         [](MaterialRender& r, int v) { r.Cull = (CullFaces)v; },
+         kCullKeys, kCullLabels, 3},
         {"planarReflectivity", "Плоское отражение", MaterialRenderField::Kind::Float,
-         nullptr, &MaterialRender::PlanarReflectivity, 0.0f, 1.0f,
+         MaterialRenderField::Group::Render, nullptr, &MaterialRender::PlanarReflectivity,
+         0.0f, 1.0f,
          "Насколько поверхность пользуется плоским отражением сцены.\n"
          "0 — не пользуется, 1 — зеркало. Не выводится из шероховатости:\n"
          "гладкий шар тоже гладкий, но плоскости он не принадлежит."},
         {"uvScaleX", "Повтор по X", MaterialRenderField::Kind::Float,
-         nullptr, &MaterialRender::UVScaleX, 0.01f, 64.0f,
+         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleX, 0.01f, 64.0f,
          "Сколько раз текстура укладывается по ширине развёртки.\n"
          "Развёртка примитивов — 0..1 на грань, поэтому без повтора\n"
          "картинка на большом объекте растягивается на всю его длину."},
         {"uvScaleY", "Повтор по Y", MaterialRenderField::Kind::Float,
-         nullptr, &MaterialRender::UVScaleY, 0.01f, 64.0f,
+         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleY, 0.01f, 64.0f,
          "То же по высоте. Отдельно от X: у стены 4 x 2.5 метра равный\n"
          "повтор по осям растянул бы кладку."},
     };
@@ -59,7 +75,6 @@ Material Material::LoadFromFile(const std::string& path) {
     Material m;
     m.Albedo = Vec3FromJson(root.value("albedo", json()), m.Albedo);
     m.Emissive = Vec3FromJson(root.value("emissive", json()), m.Emissive);
-    m.Shininess = root.value("shininess", m.Shininess);
     m.Metallic = root.value("metallic", m.Metallic);
     m.Roughness = root.value("roughness", m.Roughness);
     m.Opacity = root.value("opacity", m.Opacity);
@@ -71,9 +86,23 @@ Material Material::LoadFromFile(const std::string& path) {
         if (!root.contains(f.Key)) continue;
         if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
             m.Render.*f.AsBool = root[f.Key].get<bool>();
+        } else if (f.Type == MaterialRenderField::Kind::Enum && f.SetEnum) {
+            // Список пишется СЛОВОМ, а не числом: файл материала читают и
+            // правят руками, и «cull: front» понятно без таблицы, а «cull: 1»
+            // — нет. Неизвестное слово оставляет значение по умолчанию.
+            const std::string key = root[f.Key].is_string() ? root[f.Key].get<std::string>() : "";
+            for (int i = 0; i < f.EnumCount; ++i) {
+                if (key == f.EnumKeys[i]) { f.SetEnum(m.Render, i); break; }
+            }
         } else if (f.AsFloat) {
             m.Render.*f.AsFloat = root[f.Key].get<float>();
         }
+    }
+    // СТАРЫЙ ФЛАЖОК «двусторонний» — в новый список. Материалы, сделанные до
+    // появления списка, обязаны выглядеть ровно так же, как выглядели: молча
+    // сменить им отсечение значит переделать чужую сцену без спроса.
+    if (!root.contains("cull") && root.contains("doubleSided")) {
+        m.Render.Cull = root["doubleSided"].get<bool>() ? CullFaces::None : CullFaces::Back;
     }
     m.VertexShaderPath = root.value("vertexShader", m.VertexShaderPath);
     m.FragmentShaderPath = root.value("fragmentShader", m.FragmentShaderPath);
@@ -107,13 +136,15 @@ void Material::SaveToFile(const std::string& path) const {
     json root;
     root["albedo"] = Vec3ToJson(Albedo);
     root["emissive"] = Vec3ToJson(Emissive);
-    root["shininess"] = Shininess;
     root["metallic"] = Metallic;
     root["roughness"] = Roughness;
     root["opacity"] = Opacity;
     for (const MaterialRenderField& f : MaterialRenderFields()) {
         if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) root[f.Key] = Render.*f.AsBool;
-        else if (f.AsFloat) root[f.Key] = Render.*f.AsFloat;
+        else if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum) {
+            const int v = std::clamp(f.GetEnum(Render), 0, f.EnumCount - 1);
+            root[f.Key] = f.EnumKeys[v];
+        } else if (f.AsFloat) root[f.Key] = Render.*f.AsFloat;
     }
     root["vertexShader"] = VertexShaderPath;
     root["fragmentShader"] = FragmentShaderPath;

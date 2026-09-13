@@ -13,6 +13,7 @@
 #include "sage/render/LensFlare.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/render/DebugDraw.h"
+#include "sage/render/GridRenderer.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/SkyRenderer.h"
@@ -251,6 +252,8 @@ private:
     std::optional<sage::render::LensFlare> m_lensFlare;
     bool m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
+    // Сетка пола — ШЕЙДЕРОМ, а не набором линий (sage::render::GridRenderer).
+    std::optional<sage::render::GridRenderer> m_grid;
     std::optional<SkyRenderer> m_sky;
     // Отражения вьюпорта. Свои, а не общие с рантаймом: карта окружения
     // снимается из точки и принадлежит виду.

@@ -242,16 +242,23 @@ private:
     // инстансинга — пара, а не один меш: две части одной модели с разными
     // материалами обязаны попасть в разные пачки, иначе вторая покрасилась бы
     // первой.
+    // Ключ пачки плоского пути. ОТСЕЧЕНИЕ ГРАНЕЙ — часть ключа, потому что это
+    // состояние конвейера, а не данные инстанса: в одном вызове отрисовки оно
+    // одно на всех. Объекты с одним мешем, но разным отсечением (обычная стена
+    // и двусторонняя занавеска) обязаны разъехаться по разным пачкам — иначе
+    // одно из двух значений молча проиграет другому.
     struct MeshSlotKey {
         Mesh* Mesh_ = nullptr;
         unsigned int Submesh = 0;
+        int Cull = 0;   // sage::render::CullFaces
         bool operator==(const MeshSlotKey& o) const {
-            return Mesh_ == o.Mesh_ && Submesh == o.Submesh;
+            return Mesh_ == o.Mesh_ && Submesh == o.Submesh && Cull == o.Cull;
         }
     };
     struct MeshSlotKeyHash {
         size_t operator()(const MeshSlotKey& k) const {
-            return std::hash<const void*>()(k.Mesh_) ^ (std::hash<unsigned int>()(k.Submesh) << 1);
+            return std::hash<const void*>()(k.Mesh_) ^ (std::hash<unsigned int>()(k.Submesh) << 1) ^
+                   (std::hash<int>()(k.Cull) << 2);
         }
     };
 
