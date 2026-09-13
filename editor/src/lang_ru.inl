@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1544.
+// Язык: Русский. Строк: 1547.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1014,6 +1014,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ровная заливка: без градиента, светил и времени суток. Окружающий свет «от неба» возьмёт этот цвет"},
     {"Flat square: ground, water surface",
      "Плоский квадрат: земля, гладь воды"},
+    {"Fly this camera like the editor view: right mouse button + WASD",
+     "Летать этой камерой как видом редактора: правая кнопка мыши + WASD"},
     {"Fog",
      "Туман"},
     {"Fog Color",
@@ -2512,6 +2514,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Стоп"},
     {"Stop and restore the scene",
      "Остановить и вернуть сцену как была"},
+    {"Stop controlling (Esc): the editor view goes back where it was",
+     "Выйти из управления (Esc): вид редактора вернётся на место"},
     {"Strength",
      "Сила"},
     {"Stretch",
@@ -2902,6 +2906,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вес"},
     {"What a new project starts from",
      "С чего начинается новый проект"},
+    {"What this camera sees. Drag the card to any corner",
+     "Что видит эта камера. Карточку можно перетащить в любой угол"},
     {"What this project is about (optional)",
      "О чём этот проект (необязательно)"},
     {"What to show in the toolbar",

@@ -343,6 +343,15 @@ public:
     virtual void SetViewRequests(const ViewRequest* requests, int count) = 0;
     virtual uint64_t ViewTexture(int slot) const = 0;
 
+    // --- ПРЕВЬЮ ВЫБРАННОЙ КАМЕРЫ --------------------------------------------
+    //
+    // Запрос ОДНОРАЗОВЫЙ, на один кадр: пока вьюпорт показывает карточку, он
+    // просит кадр каждый кадр, а закрытая панель (или снятое выделение)
+    // перестаёт просить — и лишний проход сцены исчезает сам, без отдельного
+    // «выключить превью». entityId < 0 — не рисовать.
+    virtual void RequestCameraPreview(int entityId, int w, int h) = 0;
+    virtual uint64_t CameraPreviewTexture() const = 0;
+
     // Открыть файл ТЕМ, ЧЕМ ЕГО ОТКРЫВАЕТ СИСТЕМА (.lua, .vert, .frag, .json).
     //
     // Встроенного редактора кода в SAGE больше нет. Он был отдельным текстовым

@@ -136,6 +136,51 @@ TEST(Camera_frame_uses_world_transform_of_parented_camera) {
     CHECK_TRUE(vp.z < 0.0f);
 }
 
+TEST(Camera_frame_for_picks_the_asked_camera_not_the_primary) {
+    // Превью в редакторе показывает ВЫБРАННУЮ камеру, а она почти никогда не
+    // Primary: Primary — та, с которой начнётся игра, а наводят обычно вторую,
+    // третью, камеру катсцены. Разойдись эти два пути — и карточка показывала
+    // бы кадр не той камеры, которую человек держит выбранной.
+    Scene scene("C");
+    GameObject first = scene.CreateObject("Primary");
+    first.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+    scene.Registry().emplace<CameraComponent>(first.Entity()).Primary = true;
+
+    GameObject second = scene.CreateObject("Cutscene");
+    second.GetTransform().Position = {-7.0f, 3.0f, 0.0f};
+    scene.Registry().emplace<CameraComponent>(second.Entity());
+
+    sage::ecs::CameraFrame f = sage::ecs::CameraFrameFor(scene, second.Entity(), 16.0f / 9.0f);
+    CHECK_TRUE(f.HasPrimary);
+    CHECK_NEAR(f.Position.x, -7.0f, 1e-3);
+    CHECK_NEAR(f.Position.y, 3.0f, 1e-3);
+
+    // Не камера — кадра нет, а не «кадр от нуля»: показывать в карточке пустоту
+    // честнее, чем вид из начала координат, которого в сцене никто не ставил.
+    GameObject cube = scene.CreateObject("Cube");
+    CHECK_FALSE(sage::ecs::CameraFrameFor(scene, cube.Entity(), 1.0f).HasPrimary);
+    CHECK_FALSE(sage::ecs::CameraFrameFor(scene, entt::null, 1.0f).HasPrimary);
+}
+
+TEST(Camera_frame_for_child_camera_uses_world_transform) {
+    // Та же проверка, что у Primary, но через новый путь: камера, подвешенная к
+    // родителю, обязана считаться по МИРОВОЙ матрице — иначе превью показывает
+    // вид из локальных координат, то есть из места, где камеры нет.
+    Scene scene("C");
+    GameObject rig = scene.CreateObject("Rig");
+    rig.GetTransform().Position = {10.0f, 0.0f, 0.0f};
+    GameObject cam = scene.CreateObject("Cam");
+    cam.GetTransform().Position = {0.0f, 2.0f, 5.0f};
+    scene.Registry().emplace<CameraComponent>(cam.Entity());
+    scene.SetParent(cam.Entity(), rig.Entity());
+
+    sage::ecs::CameraFrame f = sage::ecs::CameraFrameFor(scene, cam.Entity(), 16.0f / 9.0f);
+    CHECK_TRUE(f.HasPrimary);
+    CHECK_NEAR(f.Position.x, 10.0f, 1e-3);
+    CHECK_NEAR(f.Position.y, 2.0f, 1e-3);
+    CHECK_NEAR(f.Position.z, 5.0f, 1e-3);
+}
+
 TEST(Hierarchy_compute_world_matrices_matches_recursive) {
     // Мемоизированный проход ComputeWorldMatrices (оптимизация рендера) обязан
     // давать в точности те же матрицы, что рекурсивный WorldMatrix per-entity.

@@ -23,6 +23,9 @@ struct AppConfig {
     float MaxDeltaTime = 0.05f; // ограничитель dt после паузы/лага (см. Run)
 
     WindowMode Mode = WindowMode::Windowed;
+    // Развернуть окно на весь экран при запуске. Для игры — нет (окно игры
+    // открывается тем размером, который задал автор), для редактора — да.
+    bool Maximized = false;
     bool Resizable = true;
     bool VSync = true;
     int FrameCap = 0; // 0 — без ограничения

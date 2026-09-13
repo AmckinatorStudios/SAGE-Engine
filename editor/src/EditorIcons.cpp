@@ -163,7 +163,7 @@ const char* const kNames[] = {
     "play", "pause", "stop", "step",
     "select",
     "move", "rotate", "scale", "universal", "rect", "align", "drop",
-    "world", "dots",
+    "world", "dots", "pilot",
     "grid", "wire",
     "cube", "sphere", "light", "sun", "camera", "script", "particles", "anim", "ik", "probe",
     "network",
