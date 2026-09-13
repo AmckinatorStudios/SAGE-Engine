@@ -410,6 +410,10 @@ private:
     bool m_unsavedPrompt = false;
     bool m_closeAfterPrompt = false;          // спросили из-за закрытия окна
     std::function<void()> m_afterUnsaved;     // что сделать, когда ответят
+    // Окно попросили закрыть (крестик, Alt+F4). Несохранённая сцена — повод
+    // задержать закрытие и спросить; ответ «не сохранять»/«сохранено» закроет
+    // приложение сам (см. DrawUnsavedPrompt).
+    bool OnCloseRequest() override;
     void AskUnsaved(std::function<void()> action);
     void DrawUnsavedPrompt();
 

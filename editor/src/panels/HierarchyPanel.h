@@ -31,6 +31,8 @@ private:
     struct Row {
         float Y = 0.0f;      // верх строки
         float IconX = 0.0f;  // где начинается значок
+        float ArrowX = 0.0f; // левый край стрелки раскрытия (если она есть)
+        bool Arrow = false;  // у строки есть стрелка — линия обязана в неё не влезать
         int Depth = 0;
     };
     std::vector<Row> m_rows;

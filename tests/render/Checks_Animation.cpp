@@ -569,6 +569,17 @@ double MeanLumaOnModel(const Image& im, const Image& backdrop, int* outPixels = 
     return count ? (double)sum / (double)count : 0.0;
 }
 
+// Самый тёмный пиксель МОДЕЛИ. Мера «нет ли на ней неосвещённых мест»: при
+// одном только рассеянном свете чёрных пятен на модели быть не может.
+int DarkestOnModel(const Image& im, const Image& backdrop) {
+    int darkest = 255;
+    for (size_t i = 0; i + 2 < im.Pixels.size(); i += 3) {
+        if (!IsModelPixel(im, backdrop, i)) continue;
+        darkest = std::min(darkest, (im.Pixels[i] + im.Pixels[i + 1] + im.Pixels[i + 2]) / 3);
+    }
+    return darkest;
+}
+
 // Сколько пикселей заметно ярче фона — мера «сколько модели видно».
 int LitPixels(const Image& im, const Image& backdrop) {
     int count = 0;
@@ -638,6 +649,19 @@ void TestSkinnedAmbient(FrameRenderer& r) {
     // И реагирует не отдельными частями (глазами), а целиком: на свету площадь
     // видимой модели обязана быть той же самой или больше.
     Check(hiPixels >= loPixels, "на свету видно всю модель, а не отдельные части");
+
+    // ДВУСТОРОННЯЯ ПОВЕРХНОСТЬ ОСВЕЩЕНА С ОБЕИХ СТОРОН.
+    //
+    // У двустороннего материала (а у моделей со сканов и выгрузок он почти
+    // всегда такой) в кадр попадает изнанка, и нормаль у неё — от лицевой
+    // стороны, то есть направлена ОТ зрителя и от света. Такая грань выходила
+    // ЧЁРНОЙ посреди полностью освещённой сцены. В оснастке изнанкой к камере
+    // повёрнута пластинка, поэтому проверка простая: при одном только
+    // рассеянном свете на модели не должно остаться чёрных мест.
+    SavePng("/tmp/claude-0/-home-user-SAGE-Engine/e10db34d-310e-5d13-84af-3c314f296de3/scratchpad/amb_high.png", high);
+    const int darkest = DarkestOnModel(high, backdrop);
+    std::printf("       самое тёмное место модели при ambient 1.0: %d\n", darkest);
+    Check(darkest > 20, "у двусторонней поверхности освещена и изнанка");
 }
 
 // 3. ИСТОЧНИК СВЕТА ДЕЙСТВУЕТ НА СКИН так же, как на обычный меш.

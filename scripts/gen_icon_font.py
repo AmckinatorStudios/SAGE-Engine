@@ -39,7 +39,13 @@ ICONS = {
     # кубик превращается в пятно, и в ряду рядом с «перенести» и «масштаб» он
     # читается как ещё один объект, а не как действие над ним.
     "move": "arrows-move", "rotate": "rotate-clockwise", "scale": "resize",
-    "universal": "vector", "rect": "crop", "align": "layout-align-left", "drop": "droplet",
+    # Универсальный манипулятор — «всё сразу»: перенос, поворот и масштаб одной
+    # рамкой. Рисунок обязан говорить про ВСЁ ПРОСТРАНСТВО, а не про одну из
+    # операций, поэтому глобус-орбиты, а не вектор.
+    "universal": "universe",
+    # Прямоугольник интерфейса — вектор с узлами: это рамка с точками, за
+    # которые её тянут. «Кадрирование» (crop) означало обрезку картинки.
+    "rect": "vector", "align": "layout-align-left", "drop": "droplet",
     # Пространство осей: мир — глобус, объект — куб. Пара читается без подписи.
     "world": "world",
     # Многоточие — «здесь есть ещё»: общепринятый знак спрятанного меню.
@@ -48,7 +54,9 @@ ICONS = {
     # карточки), ни стрелки перемещения (это гизмо) здесь не годятся: кнопка
     # означает не «камера» и не «двигать», а «рулить этим отсюда».
     "pilot": "device-gamepad",
-    "grid": "grid-dots", "wire": "vector-triangle",
+    # Сетка — КЛЕТКА, а не точки: точечная сетка читается как «привязка», а
+    # кнопка включает именно клетчатую сетку пола.
+    "grid": "grid-3x3", "wire": "vector-triangle",
     "cube": "cube", "sphere": "sphere", "light": "bulb", "sun": "sun", "camera": "camera",
     "script": "file-code", "particles": "sparkles", "anim": "walk", "ik": "body-scan",
     "probe": "circle-dot", "network": "network", "physics": "atom",
@@ -67,15 +75,15 @@ ICONS = {
     # потому хоть как-то читалась, но конус — это буквально форма его светового
     # пучка, и объяснять её не нужно.
     "cone": "cone-2",
-    # Капсула — рабочая форма персонажа (см. BuildCapsule): в списке форм у неё
-    # обязан быть свой значок, а не общий кубик.
-    "capsule": "capsule", "folder-plus": "folder-plus", "search": "search",
+    "folder-plus": "folder-plus", "search": "search",
     "clock": "clock", "list": "list", "import": "file-import", "pencil": "pencil",
     "code": "code", "question": "help", "layout": "layout", "gear": "settings",
     "magnet": "magnet",
     "warn": "alert-triangle", "error": "circle-x", "info": "info-circle", "debug": "bug",
     "trash": "trash", "copy": "copy", "save": "device-floppy", "open": "folder-open",
-    "plus": "plus", "eye": "eye", "lock": "lock",
+    # Перечёркнутый глаз — «не видно». Пара к «eye» у переключателя видимости:
+    # замок там означал бы «нельзя трогать», а это другое свойство.
+    "plus": "plus", "eye": "eye", "eye-off": "eye-off", "lock": "lock",
     # Открытый замок — пара к закрытому: связь осей включают и выключают одной
     # кнопкой, и состояние читается по рисунку, а не по цвету.
     "unlock": "lock-open",

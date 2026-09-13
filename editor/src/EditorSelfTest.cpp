@@ -2449,6 +2449,21 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: folder icons have no glyphs";
             ok = false;
         }
+        // А заодно — ВСЕ значки редактора разом. Список имён и шрифт живут в
+        // разных местах (EditorIcons.cpp и generated .inl из
+        // scripts/gen_icon_font.py), и расходятся они молча: имя, которому не
+        // сделали глиф, рисуется пустотой, и кнопка выглядит сломанной. Правка
+        // списка без прогона генератора — ровно тот случай, который эта
+        // проверка и ловит.
+        for (int i = 0; ok && i < EditorIcons::Count(); ++i) {
+            const char* name = EditorIcons::NameAt(i);
+            if (name && !EditorIcons::HasGlyph(name)) {
+                LOG_ERROR("Editor") << "SELFTEST: у значка '" << name
+                                    << "' нет глифа — перегенерируйте шрифт "
+                                       "(scripts/gen_icon_font.py)";
+                ok = false;
+            }
+        }
         fs::remove_all(root, ec);
     }
 
@@ -2763,14 +2778,39 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: капсула не построилась";
             ok = false;
         }
-        // Габарит: радиус 0.5 и общая высота 1 — как у остальных примитивов,
-        // иначе «капсула ростом 1.8» не получалась бы масштабом 1.8.
+        // ГАБАРИТ: высота 1 (как у всех примитивов — «капсула ростом 1.8»
+        // получается масштабом 1.8), ширина 0.5 — то есть ВДВОЕ МЕНЬШЕ высоты.
+        //
+        // Проверка именно на это, а не «1 x 1»: при радиусе в половину высоты
+        // цилиндрической части не остаётся вовсе, и капсула вырождается в
+        // СФЕРУ — ровно так она и была построена, один в один с шаром. Форма,
+        // неотличимая от другой формы, не нужна ни в списке, ни в движке.
         if (ok) {
             const glm::vec3 lo = mr.MeshPtr->BoundsMin(), hi = mr.MeshPtr->BoundsMax();
-            if (std::abs((hi.y - lo.y) - 1.0f) > 0.01f || std::abs((hi.x - lo.x) - 1.0f) > 0.01f) {
-                LOG_ERROR("Editor") << "SELFTEST: габарит капсулы " << (hi.x - lo.x) << " x "
-                                    << (hi.y - lo.y) << " вместо 1 x 1";
+            const float w = hi.x - lo.x, h = hi.y - lo.y;
+            if (std::abs(h - 1.0f) > 0.01f || std::abs(w - 0.5f) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: габарит капсулы " << w << " x " << h
+                                    << " вместо 0.5 x 1";
                 ok = false;
+            }
+            // И цилиндрическая часть ЕСТЬ: у сферы вершины лежат на одном
+            // расстоянии от центра, у капсулы — нет. Проверка формы, а не
+            // чисел: габарит у вытянутой сферы был бы такой же.
+            if (ok) {
+                const std::vector<Vertex>* verts = mr.MeshPtr->CpuVertices();
+                float rMin = 1e9f, rMax = 0.0f;
+                if (verts) {
+                    for (const Vertex& v : *verts) {
+                        const float r = glm::length(v.Position);
+                        rMin = std::min(rMin, r);
+                        rMax = std::max(rMax, r);
+                    }
+                }
+                if (!verts || rMax - rMin < 0.05f) {
+                    LOG_ERROR("Editor") << "SELFTEST: капсула построена сферой (разброс радиуса "
+                                        << (rMax - rMin) << ")";
+                    ok = false;
+                }
             }
         }
         // Форма переживает сохранение: тип пишется именем, и опечатка в нём
@@ -4031,6 +4071,39 @@ bool EditorLayer::SelfTestTools() {
         AskUnsaved([&ran] { ran = true; });
         if (!ran || m_unsavedPrompt) {
             LOG_ERROR("Editor") << "SELFTEST: сохранённая сцена спросила о потере правок";
+            ok = false;
+        }
+        m_unsavedPrompt = false;
+        m_afterUnsaved = nullptr;
+
+        // ЗАКРЫТИЕ ОКНА ИДЁТ ЧЕРЕЗ ТОТ ЖЕ ВОПРОС, и проверять это обязательно.
+        //
+        // Перехват уже был написан — и не работал НИ РАЗУ: он стоял внутри
+        // отрисовки кадра, а флаг закрытия GLFW ставит в PollEvents, в конце
+        // кадра. Условие главного цикла проверяется раньше, чем слой получит
+        // управление, поэтому редактор закрывался молча вместе с
+        // несохранённой сценой, а код перехвата выглядел совершенно рабочим.
+        // Теперь закрытие спрашивают хуком (Layer::OnCloseRequest), и проверка
+        // зовёт ровно его — то же самое, что зовёт главный цикл.
+        m_sceneDirty = true;
+        m_closeAfterPrompt = false;
+        if (OnCloseRequest()) {
+            LOG_ERROR("Editor") << "SELFTEST: закрытие с несохранённой сценой не задержано";
+            ok = false;
+        }
+        if (!m_unsavedPrompt || !m_closeAfterPrompt) {
+            LOG_ERROR("Editor") << "SELFTEST: закрытие не подняло вопрос о несохранённой сцене";
+            ok = false;
+        }
+        m_unsavedPrompt = false;
+        m_closeAfterPrompt = false;
+        m_afterUnsaved = nullptr;
+
+        // Сохранённая сцена закрытию не мешает: иначе выйти из редактора было
+        // бы нельзя вовсе.
+        m_sceneDirty = false;
+        if (!OnCloseRequest() || m_unsavedPrompt) {
+            LOG_ERROR("Editor") << "SELFTEST: сохранённая сцена держит закрытие";
             ok = false;
         }
         m_unsavedPrompt = false;

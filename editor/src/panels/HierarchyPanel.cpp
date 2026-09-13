@@ -68,11 +68,11 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
         // Модель из файла — отдельно от встроенных форм: это ассет проекта, и
         // на него ссылаются, его переименовывают, он может не загрузиться.
         if (mr->Ref.type == MeshRef::Type::Model) return "model";
-        // Капсула — исключение из «все формы один значок» по той же причине, по
-        // которой она вообще заведена: это форма ПЕРСОНАЖА, а не декорации, и
-        // в списке из полусотни строк игрока и врагов ищут отдельно от ящиков.
-        if (mr->Ref.type == MeshRef::Type::Capsule) return "capsule";
-        if (mr->Ref.type != MeshRef::Type::None) return "cube"; // остальные формы — один значок
+        // ВСЕ ВСТРОЕННЫЕ ФОРМЫ — ОДИН ЗНАЧОК. Своего значка у капсулы здесь
+        // было исключение, и оно не оправдалось: в списке из полусотни строк
+        // человек читает ИМЕНА, а значок отвечает на вопрос «объект какого
+        // рода» — форма у него одна и та же, куб это или капсула.
+        if (mr->Ref.type != MeshRef::Type::None) return "cube";
     }
     return "file";
 }
@@ -118,8 +118,14 @@ void HierarchyPanel::DrawTreeLines(const ImVec2& parentPos, float indent, int ch
         if (r.Depth != childDepth) continue;           // только прямые дети
         const float mid = std::floor(r.Y + line * 0.5f);
         lastMid = mid;
-        dl->AddLine(ImVec2(spineX, mid), ImVec2(r.IconX - EditorIcons::TextGap() * 0.5f, mid), col,
-                    thickness);
+        // ЛИНИЯ НЕ ЛЕЗЕТ В СТРЕЛКУ. У строки с детьми в начале стоит стрелка
+        // раскрытия, и горизонталь, доведённая до значка, шла ПРЯМО СКВОЗЬ неё
+        // — стрелка выглядела перечёркнутой. У листа стрелки нет, и там линию
+        // правильно вести до самого значка: иначе она обрывается в пустоте.
+        const float end = r.Arrow ? r.ArrowX - 2.0f
+                                  : r.IconX - EditorIcons::TextGap() * 0.5f;
+        if (end <= spineX + 1.0f) continue;   // вести нечего: стрелка вплотную к вертикали
+        dl->AddLine(ImVec2(spineX, mid), ImVec2(end, mid), col, thickness);
     }
     if (lastMid > 0.0f) {
         dl->AddLine(ImVec2(spineX, std::floor(parentPos.y + line)), ImVec2(spineX, lastMid), col,
@@ -169,7 +175,11 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // букву вместо строки дерева. Из-за этого в иерархии НЕ ВЫБИРАЛИСЬ объекты:
     // клик проверялся у иконки, попасть в которую можно было лишь случайно, а
     // заодно молча не работали перетаскивание и контекстное меню.
-    m_rows.push_back({rowPos.y, rowPos.x + indent, m_depth});
+    // Стрелка раскрытия ImGui рисует в начале строки, отступив FramePadding.x
+    // (см. TreeNodeBehavior). Линия дерева обязана знать, где она: горизонталь,
+    // доведённая до значка, проходила ПО стрелке насквозь.
+    m_rows.push_back({rowPos.y, rowPos.x + indent,
+                      rowPos.x + ImGui::GetStyle().FramePadding.x, hasChildren, m_depth});
     {
         const float line = ImGui::GetTextLineHeight();
         const glm::vec3 tint = EntityIconColor(reg, e);
@@ -208,7 +218,11 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         const glm::vec3 eyeColor = hidden ? glm::vec3(0.55f, 0.56f, 0.60f)
                                    : overEye ? glm::vec3(0.95f, 0.78f, 0.30f)
                                              : glm::vec3(0.42f, 0.44f, 0.50f);
-        EditorIcons::Overlay(eyeAt.x, eyeAt.y, eyeSize, hidden ? "lock" : "eye", eyeColor);
+        // ВЫКЛЮЧЕННЫЙ — ПЕРЕЧЁРКНУТЫЙ ГЛАЗ, а не замок. Замок означает «нельзя
+        // трогать», и это другое свойство: объект может быть заперт и при этом
+        // виден. Кнопка же переключает ровно видимость, и её выключенное
+        // состояние обязано называться «не видно».
+        EditorIcons::Overlay(eyeAt.x, eyeAt.y, eyeSize, hidden ? "eye-off" : "eye", eyeColor);
         if (overEye && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             host.PushUndoSnapshot();
             if (hidden) reg.remove<HiddenComponent>(e);
