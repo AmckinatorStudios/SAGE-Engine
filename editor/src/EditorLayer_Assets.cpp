@@ -629,12 +629,29 @@ void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& pro
         bestExact = true;
         bestId = id;
     };
-    auto camMarkers = m_scene->Registry().view<CameraComponent, Transform, IdComponent>();
-    for (auto e : camMarkers)
-        pickMarker(e, camMarkers.get<IdComponent>(e).Id, glm::vec3(m_scene->WorldMatrix(e)[3]));
-    auto lightMarkers = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
-    for (auto e : lightMarkers)
-        pickMarker(e, lightMarkers.get<IdComponent>(e).Id, glm::vec3(m_scene->WorldMatrix(e)[3]));
+    // ВСЕ, У КОГО ЕСТЬ ЗНАЧОК В КАДРЕ. Камера и свет были кликабельны и раньше,
+    // а эмиттер частиц, зонд отражений и источник звука — нет: в кадре они
+    // нарисованы значком, но щелчок по нему проваливался сквозь. Выбрать их
+    // можно было только в иерархии, то есть значок обманывал.
+    auto pickMarkerView = [&](auto view) {
+        for (auto e : view) {
+            // У объекта с мешем значка нет (см. ViewportPanel) — и лишней
+            // коробки вокруг него быть не должно: она перехватывала бы выбор у
+            // самой модели.
+            if (const MeshRendererComponent* mr =
+                    m_scene->Registry().try_get<MeshRendererComponent>(e)) {
+                if (mr->Ref.type != MeshRef::Type::None && mr->MeshPtr) continue;
+            }
+            pickMarker(e, view.template get<IdComponent>(e).Id,
+                       glm::vec3(m_scene->WorldMatrix(e)[3]));
+        }
+    };
+    entt::registry& reg = m_scene->Registry();
+    pickMarkerView(reg.view<CameraComponent, Transform, IdComponent>());
+    pickMarkerView(reg.view<LightComponent, Transform, IdComponent>());
+    pickMarkerView(reg.view<ParticleEmitterComponent, Transform, IdComponent>());
+    pickMarkerView(reg.view<ReflectionProbeComponent, Transform, IdComponent>());
+    pickMarkerView(reg.view<AudioSourceComponent, Transform, IdComponent>());
 
     // Ctrl-клик (additive): добавить/убрать попадание из набора (клик по пустоте
     // ничего не меняет). Обычный клик: одиночный выбор (мимо всех — снять).

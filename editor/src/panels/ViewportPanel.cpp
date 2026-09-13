@@ -20,6 +20,7 @@
 #include "sage/core/Application.h"
 #include "sage/scene/Components.h"
 #include "../Localization.h"
+#include "EditorIcons.h"
 
 namespace {
 
@@ -704,6 +705,95 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         m_pendingDrop = {};
     }
 
+    // --- ЗНАЧКИ НЕВИДИМЫХ ОБЪЕКТОВ -------------------------------------------
+    //
+    // Камера, свет, эмиттер частиц, зонд отражений и источник звука ничего не
+    // рисуют. В кадре их попросту НЕТ: сцена с десятком ламп выглядит пустой,
+    // выбрать лампу мышью нельзя (не во что попасть), а понять, откуда идёт
+    // свет, можно только по списку в иерархии. Значок в точке объекта решает и
+    // то и другое: предмет видно и в него можно ткнуть.
+    //
+    // РИСУЕТСЯ ДВУМЕРНО, поверх кадра, а не билбордом в сцене. Причины две.
+    // Первая: значок обязан оставаться ЧИТАЕМЫМ — билборд в перспективе на
+    // дальней лампе превращается в пару пикселей, то есть перестаёт отвечать на
+    // вопрос «что это». Вторая: тот же набор значков уже есть у иерархии и у
+    // инспектора, и рисовать его вторым способом значило бы завести вторую
+    // истину о том, как выглядит свет.
+    if (!host.InPlayMode()) {
+        entt::registry& reg = host.CurrentScene().Registry();
+        const glm::mat4 vp = activeProj * activeView;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float iconSize = 20.0f;
+
+        auto drawMarker = [&](entt::entity e, const char* icon, const glm::vec3& color) {
+            // У объекта с мешем значок не нужен: он и так виден, а значок поверх
+            // него только загораживал бы картинку.
+            if (const MeshRendererComponent* mr = reg.try_get<MeshRendererComponent>(e)) {
+                if (mr->Ref.type != MeshRef::Type::None && mr->MeshPtr) return;
+            }
+            const glm::vec3 world(host.CurrentScene().WorldMatrix(e)[3]);
+            const glm::vec4 clip = vp * glm::vec4(world, 1.0f);
+            if (clip.w <= 1e-6f) return;   // за спиной камеры — проекция зеркальна
+            const float u = (clip.x / clip.w) * 0.5f + 0.5f;
+            const float v = 0.5f - (clip.y / clip.w) * 0.5f;
+            if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) return;
+            const ImVec2 at(imgPos.x + u * avail.x - iconSize * 0.5f,
+                            imgPos.y + v * avail.y - iconSize * 0.5f);
+
+            // Подложка — чтобы значок читался и на светлом небе, и на тёмном
+            // полу; у выбранного она акцентная, как подсветка в иерархии.
+            const int id = reg.get<IdComponent>(e).Id;
+            const bool selected = host.IsSelected(id);
+            const ImVec2 mid(at.x + iconSize * 0.5f, at.y + iconSize * 0.5f);
+            dl->AddCircleFilled(mid, iconSize * 0.62f,
+                                selected ? ImGui::GetColorU32(ImGuiCol_NavHighlight)
+                                         : IM_COL32(18, 20, 26, 170),
+                                16);
+            EditorIcons::Overlay(at.x, at.y, iconSize, icon, color);
+        };
+
+        const glm::vec3 kTint(0.86f, 0.90f, 0.98f);
+        for (auto e : reg.view<CameraComponent>()) drawMarker(e, "camera", kTint);
+        for (auto e : reg.view<LightComponent>()) {
+            const LightComponent& lc = reg.get<LightComponent>(e);
+            // Тот же разбор типов, что и в иерархии: значок света обязан
+            // означать одно и то же везде.
+            const char* icon = lc.Kind == LightComponent::Type::Directional ? "sun"
+                               : lc.Kind == LightComponent::Type::Spot      ? "drop"
+                                                                           : "light";
+            // Цвет лампы — её собственный: в кадре с тёплыми и холодными
+            // источниками это половина ответа на вопрос «который из них».
+            drawMarker(e, icon, glm::normalize(glm::max(lc.Color, glm::vec3(0.15f))));
+        }
+        for (auto e : reg.view<ParticleEmitterComponent>()) drawMarker(e, "particles", kTint);
+        for (auto e : reg.view<ReflectionProbeComponent>()) drawMarker(e, "probe", kTint);
+        for (auto e : reg.view<AudioSourceComponent>()) drawMarker(e, "audio", kTint);
+    }
+
+    // --- Гизмо осей в углу ---------------------------------------------------
+    //
+    // ДО разбора выбора: щелчок по шарику не должен заодно выбирать объект,
+    // который под ним оказался, а рамка — начинаться из-под гизмо. Рисуется
+    // только в перспективе: у ортогонального вида направление задано самим
+    // видом, и крутить его гизмо значило бы превратить «вид сверху» в
+    // произвольный — то есть сломать то, ради чего он и нужен.
+    bool gizmoBusy = false;
+    if (perspective && !host.InPlayMode()) {
+        // Вокруг чего крутить: вокруг ТОГО, НА ЧТО СМОТРЯТ, а не вокруг самой
+        // камеры. Поворот вокруг камеры («оглядеться») увёл бы предмет из
+        // кадра — а от гизмо осей ждут ровно обратного.
+        Camera& cam = host.EditorCamera();
+        float dist = 10.0f;
+        if (GameObject sel = host.SelectedObject(); sel.Valid()) {
+            const glm::vec3 target(host.CurrentScene().WorldMatrix(sel.Entity())[3]);
+            dist = std::max(glm::length(target - cam.Position), 0.5f);
+        }
+        const glm::vec3 pivot = cam.Position + cam.Front * dist;
+        gizmoBusy = sage::editor::viewgizmo::Draw(m_viewGizmo, cam, imgPos,
+                                                  ImVec2(imgPos.x + avail.x, imgPos.y + avail.y),
+                                                  pivot, io.DeltaTime);
+    }
+
     // --- Пикинг ЛКМ (не по гизмо и не во время манипуляции) ---
     //
     // Маска осей снимается ПОСЛЕ этой проверки, а не сразу за Manipulate:
@@ -729,7 +819,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             if (rectselect::Meaningful(m_rect)) {
                 host.SelectInViewportRect(activeView, activeProj, a.x, a.y, b.x, b.y,
                                           m_rect.Additive);
-            } else if (b.x >= 0.0f && b.x <= 1.0f && b.y >= 0.0f && b.y <= 1.0f) {
+            } else if (!gizmoBusy && b.x >= 0.0f && b.x <= 1.0f && b.y >= 0.0f && b.y <= 1.0f) {
                 // Теми же матрицами, что и гизмо: иначе в ортогональном виде
                 // или в неглавном слоте луч строился бы по камере другого окна
                 // и выбирал бы объекты «не там, куда щёлкнули».
@@ -742,7 +832,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const ImVec2 uv = toUv(mp);
         const bool insideImage = uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
         rectselect::End(m_rect, hovered && insideImage && !ImGuizmo::IsOver() &&
-                                    !ImGuizmo::IsUsing() && !m_cameraDriving);
+                                    !ImGuizmo::IsUsing() && !m_cameraDriving && !gizmoBusy);
         rectselect::Draw(m_rect);
     }
 

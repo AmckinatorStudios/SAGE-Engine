@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1503.
+// Язык: Русский. Строк: 1507.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -302,6 +302,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Запечено: сущностей %d, страниц %d, проб %dx%dx%d"},
     {"Bakes indirect light to lightmaps (static) and a probe",
      "Запекает непрямой свет в лайтмапы (для статики) и в объём проб"},
+    {"Bakes indirect light to lightmaps (static) and a probe volume (dynamic); direct light stays realtime",
+     "Запекает непрямой свет в лайтмапы (статика) и в объём проб (динамика); прямой свет остаётся реального времени"},
     {"Ball: projectiles, markers",
      "Шар: снаряды, метки"},
     {"Bar",
@@ -512,6 +514,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Очистить консоль"},
     {"Click to reassign",
      "Щёлкните, чтобы переназначить"},
+    {"Click — look along this axis; drag — orbit the view",
+     "Щелчок — смотреть вдоль этой оси; перетаскивание — вращать вид"},
     {"Click — show in Assets",
      "Клик — показать в Assets"},
     {"Clip Children",
@@ -996,6 +1000,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Языки пламени с тягой вверх"},
     {"Flat fill: no gradient, no sun, no time of day",
      "Ровная заливка: ни градиента, ни солнца, ни времени суток"},
+    {"Flat fill: no gradient, no sun, no time of day. Ambient light from the sky takes this colour",
+     "Ровная заливка: без градиента, светил и времени суток. Окружающий свет «от неба» возьмёт этот цвет"},
     {"Flat square: ground, water surface",
      "Плоский квадрат: земля, гладь воды"},
     {"Fog",
@@ -1386,6 +1392,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Значение карты множится на коэффициент выше; Enter применяет путь."},
     {"Margin l,t,r,b",
      "Поля л,в,п,н"},
+    {"Mark in the list. A folder is for sorting only: it does not move its contents and is not drawn.",
+     "Метка в списке. Папка нужна только для порядка: содержимое она не двигает и не рисуется."},
     {"Mark static geometry",
      "Пометить статичную геометрию"},
     {"Marks the object as static for the light bake",

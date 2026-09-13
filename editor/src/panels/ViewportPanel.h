@@ -8,6 +8,7 @@
 
 #include "imgui.h"
 #include "../RectSelect.h"
+#include "../ViewGizmo.h"
 
 
 class EditorHost;
@@ -47,6 +48,8 @@ public:
 private:
     // Рамка выделения ЛКМ по пустому месту (см. editor/src/RectSelect.h).
     sage::editor::rectselect::State m_rect;
+    // Гизмо осей в углу вида (см. editor/src/ViewGizmo.h).
+    sage::editor::viewgizmo::State m_viewGizmo;
 
     // Бросок ассета во вьюпорт: приём сидит на item'е картинки, а постановка
     // происходит ниже по кадру, где уже посчитаны матрицы активного вида.

@@ -131,6 +131,13 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
     }
 }
 
+namespace {
+// Две строки пояснения одной подсказкой. Разбивать их на две всплывашки нечем —
+// подсказка у элемента одна, а разносить смысл по разным полям значит заставить
+// искать вторую половину.
+std::string Hint2(const char* a, const char* b) { return std::string(a) + "\n" + b; }
+} // namespace
+
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.InspectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
@@ -150,14 +157,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // то, чего у неё нет и не будет, — и каждый, кто это попробует, решит, что
     // настройка не работает.
     if (FolderComponent* folder = reg.try_get<FolderComponent>(obj.Entity())) {
-        ImGui::TextDisabled("%s", T("A folder for sorting the list. It changes nothing in the game:"));
-        ImGui::TextDisabled("%s", T("it does not move its contents and is not drawn."));
-        ImGui::Spacing();
         if (ImGui::ColorEdit3(T("Colour"), &folder->Color.x, ImGuiColorEditFlags_NoInputs))
             host.PushUndoSnapshot();
+        EditorTheme::Hint(T("Mark in the list. A folder is for sorting only: it does not move its "
+                            "contents and is not drawn."));
         host.TrackLastImGuiItem();
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", T("mark in the list"));
         int inside = 0;
         if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(obj.Entity()))
             inside = (int)h->Children.size();
@@ -168,6 +172,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Флаги «убрать компонент»: кнопка живёт в ЗАГОЛОВКЕ секции, а снятие
     // происходит в конце разбора — иначе компонент исчезал бы из-под кода,
     // который прямо сейчас рисует его поля.
+    bool rmMesh = false;
     bool rmCamera = false;
     bool rmLight = false;
     bool rmDecal = false;
@@ -222,7 +227,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // того, кто ничем не рисуется; добавляется компонент кнопкой «Добавить
     // компонент», как и все остальные.
     if (reg.all_of<MeshRendererComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen, &rmMesh)) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
@@ -236,7 +241,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Far"), &cam->FarClip, 1.0f, 1.0f, 5000.0f); host.TrackLastImGuiItem();
             if (ImGui::Checkbox(T("Primary"), &cam->Primary)) host.PushUndoSnapshot();
-            ImGui::TextDisabled("%s", T("Game panel renders from the first Primary camera"));
+            EditorTheme::Hint(T("Game panel renders from the first Primary camera"));
         }
     }
 
@@ -284,7 +289,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rmDecal)) {
+        EditorTheme::SectionHeader(T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rmDecal,
+                                       T("Projection goes along -Z; Scale sets the size"))) {
         DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
         bool changed = false;
         changed |= ImGui::DragFloat(T("Angle Limit"), &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
@@ -308,7 +314,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::PopStyleColor();
         }
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-        ImGui::TextWrapped("%s", T("Projection goes along -Z; Scale sets the size"));
+
         ImGui::PopStyleColor();
         if (ImGui::Button(T("Rebuild##decal"))) changed = true;
         // Правка параметров обязана быть видна сразу: наклейка пересобирается
@@ -318,21 +324,29 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
-    if (reg.all_of<GIStaticComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("GI Static" "###GI Static"), ImGuiTreeNodeFlags_DefaultOpen, &rmGiStatic)) {
+    if (reg.all_of<GIStaticComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("GI Static" "###GI Static"), ImGuiTreeNodeFlags_DefaultOpen, &rmGiStatic,
+                                       Hint2(T("Static occluder for baked GI; lightmapped = has own lightmap"),
+                                       T("Re-bake lighting after changes (Lighting panel)")).c_str())) {
         GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
         ImGui::Checkbox(T("Lightmapped"), &gs.Lightmapped); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Texel Scale"), &gs.TexelScale, 0.05f, 0.1f, 8.0f); host.TrackLastImGuiItem();
-        ImGui::TextDisabled("%s", T("Static occluder for baked GI; lightmapped = has own lightmap"));
-        ImGui::TextDisabled("%s", T("Re-bake lighting after changes (Lighting panel)"));
     }
 
-    if (reg.all_of<NetReplicatedComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Net Replicated" "###Net Replicated"), ImGuiTreeNodeFlags_DefaultOpen, &rmNet)) {
-        ImGui::TextDisabled("%s", T("The server sends this object to clients; they follow it"));
-        ImGui::TextDisabled("%s", T("Position, rotation, scale, color and primitive are replicated"));
+    // У этого компонента НЕТ ПОЛЕЙ: он флаг, и вся его настройка — есть он или
+    // нет. Раскрывающаяся секция с пустым телом выглядела бы сломанной, поэтому
+    // он и не секция: строка состояния плюс кнопка «убрать» рядом.
+    if (reg.all_of<NetReplicatedComponent>(obj.Entity())) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(T("Net Replicated"));
+        EditorTheme::Hint(Hint2(T("The server sends this object to clients; they follow it"),
+                                T("Position, rotation, scale, color and primitive are replicated"))
+                              .c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Remove##netreplicated"))) rmNet = true;
     }
 
-    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript)) {
+    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript,
+                                       T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"))) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
             // обложка, приём перетаскивания с проверкой типа, «показать в
@@ -368,7 +382,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                     host.SetStatusMessage(T("The system has no program for this file: ") + sc->Path);
                 }
             }
-            ImGui::TextDisabled("%s", T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"));
+
         }
     }
 
@@ -399,7 +413,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
-    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen, &rmBody)) {
+    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen, &rmBody,
+                                       T("Dynamic falls under gravity; Static/Kinematic don't"))) {
         if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::BodyType.
             const char* types[] = {T("Static"), T("Dynamic"), T("Kinematic")};
@@ -411,12 +426,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat(T("Mass"), &rb->Mass, 0.05f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::TextDisabled("%s", T("Dynamic falls under gravity; Static/Kinematic don't"));
+
         }
     }
 
     // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
-    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen, &rmCollider)) {
+    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen, &rmCollider,
+                                       Hint2(T("Sizes are scaled by the entity's Transform scale"),
+                                       T("Parts override the single shape above")).c_str())) {
         if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::ShapeType.
             const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule")};
@@ -437,13 +454,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ImGui::DragFloat(T("Half Height"), &col->HalfHeight, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             }
-            ImGui::TextDisabled("%s", T("Sizes are scaled by the entity's Transform scale"));
+
 
             // --- Составная (compound) форма: список дочерних примитивов ---
             ImGui::Separator();
             ImGui::Text(T("Compound parts: %d"), (int)col->Parts.size());
-            if (!col->Parts.empty())
-                ImGui::TextDisabled("%s", T("Parts override the single shape above"));
+
             const char* shapeNames[] = {T("Box"), T("Sphere"), T("Capsule")};
             int removePart = -1;
             for (int pi = 0; pi < (int)col->Parts.size(); ++pi) {
@@ -524,7 +540,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Соединение (constraint/joint) с другим телом или миром ---
-    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen, &rmJoint)) {
+    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen, &rmJoint,
+                                       T("Needs a Rigid Body; only the Jolt backend simulates joints"))) {
         if (JointComponent* jc = reg.try_get<JointComponent>(obj.Entity())) {
             const char* types[] = {T("Fixed"), T("Point"), T("Hinge"), T("Slider"),
                                    T("Distance"), T("Cone")};
@@ -559,7 +576,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 ImGui::DragFloat(T("Cone Half Angle"), &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
                 host.TrackLastImGuiItem();
             }
-            ImGui::TextDisabled("%s", T("Needs a Rigid Body; only the Jolt backend simulates joints"));
+
         }
     }
 
@@ -569,14 +586,13 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // объекта. Секция отвечает только на вопрос «как это движется», и первое,
     // что она обязана сказать, — ЕСТЬ ЛИ ЧТО анимировать: компонент,
     // добавленный к кубу, обязан объяснить, почему ничего не происходит.
-    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rmAnimation)) {
+    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rmAnimation,
+                                       T("Skeleton comes from the Mesh model"))) {
         if (AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity())) {
             const MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity());
             const bool hasModelRef = mesh && mesh->Ref.type == MeshRef::Type::Model &&
                                      !mesh->Ref.path.empty();
-            if (hasModelRef) {
-                ImGui::TextDisabled("%s", T("Skeleton comes from the Mesh model"));
-            } else {
+            if (!hasModelRef) {
                 // РАНЬШЕ ЗДЕСЬ ЗАВОДИЛОСЬ ДЕМО-ЩУПАЛЬЦЕ. Компонент, добавленный
                 // к объекту без модели, показывал шевелящийся отросток — то есть
                 // на вопрос «почему не работает моя анимация» отвечал чужой
@@ -685,9 +701,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Зонд отражений -----------------------------------------------------
     if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe)) {
+        EditorTheme::SectionHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe,
+                                       Hint2(T("Captures the scene around this point into a cubemap"),
+                                       T("Realtime = 6 scene passes per frame - use sparingly")).c_str())) {
         if (ReflectionProbeComponent* p = reg.try_get<ReflectionProbeComponent>(obj.Entity())) {
-            ImGui::TextDisabled("%s", T("Captures the scene around this point into a cubemap"));
+
             // Любая правка охвата или разрешения означает «снять заново»: карта
             // снята под прежние числа, и оставить её значило бы показывать
             // отражение, которого в сцене уже нет.
@@ -702,14 +720,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::DragFloat3(T("Box Half Extents"), &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
                 p->Dirty = true;
             host.TrackLastImGuiItem();
-            ImGui::TextDisabled("%s", T("Camera inside this box uses this probe"));
+
             if (ImGui::Checkbox(T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
             ImGui::SliderFloat(T("Intensity"), &p->Intensity, 0.0f, 3.0f);
             host.TrackLastImGuiItem();
             if (ImGui::DragFloat(T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
             host.TrackLastImGuiItem();
             ImGui::Checkbox(T("Realtime (re-capture every frame)"), &p->Realtime);
-            ImGui::TextDisabled("%s", T("Realtime = 6 scene passes per frame - use sparingly"));
+
 
             if (ImGui::Button(T("Bake Probe"))) p->Dirty = true;
             ImGui::SameLine();
@@ -917,6 +935,16 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // того же компонента. Сняв его сразу, мы выдернули бы из-под них данные —
     // на том же кадре. Здесь же собраны и «хвосты» снятия: у анимации это
     // возврат статического меша, у звука — глушение источника.
+    // МЕШ СНИМАЕТСЯ, КАК ЛЮБОЙ ДРУГОЙ КОМПОНЕНТ. Он был единственным без кнопки
+    // «убрать»: добавить его через «Добавить компонент» было можно, а снять —
+    // нельзя, и объект, которому меш достался по ошибке (например, брошенной
+    // моделью), оставался с ним навсегда. Никакой особости у него нет: это
+    // такое же свойство предмета, как свет или звук, и невидимый объект —
+    // законное состояние (узел, точка привязки, держатель скрипта).
+    if (rmMesh) {
+        host.PushUndoSnapshot();
+        reg.remove<MeshRendererComponent>(obj.Entity());
+    }
     if (rmCamera) {
         host.PushUndoSnapshot();
         reg.remove<CameraComponent>(obj.Entity());
