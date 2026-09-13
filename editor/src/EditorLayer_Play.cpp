@@ -278,6 +278,29 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
     if (eaten != sage::input::DeviceNone) m_playInput.BlockDevices(eaten);
 }
 
+// ПАУЗА — ЭТО ОСТАНОВЛЕННЫЙ КАДР, А НЕ ЗНАЧОК.
+//
+// Раньше обе эти функции только меняли поле состояния, и на этом всё
+// заканчивалось: планировщик систем звался в OnUpdate каждый кадр независимо от
+// состояния, а звук шёл из своего устройства. То есть в «паузе» продолжали идти
+// скрипты, физика, анимация, частицы и звук — кнопка меняла свой вид и больше
+// ничего. Сам кадр останавливает OnUpdate (см. EditorLayer.cpp), здесь —
+// вторая половина: звук.
+void EditorLayer::PausePlay() {
+    if (m_playState != EditorPlayState::Playing) return;
+    m_playState = EditorPlayState::Paused;
+    // Остановленный кадр, из которого продолжает литься шум водопада, паузой не
+    // выглядит. Позиция воспроизведения сохраняется — продолжаем с того же
+    // места, а не с начала.
+    if (m_playAudio) m_playAudio->SetAllPaused(true);
+}
+
+void EditorLayer::ResumePlay() {
+    if (m_playState != EditorPlayState::Paused) return;
+    m_playState = EditorPlayState::Playing;
+    if (m_playAudio) m_playAudio->SetAllPaused(false);
+}
+
 void EditorLayer::StopPlay() {
     if (!InPlayMode()) return;
 

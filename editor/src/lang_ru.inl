@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1477.
+// Язык: Русский. Строк: 1486.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -24,6 +24,8 @@ constexpr TranslationPair kRussianStrings[] = {
      " спутник(ов))"},
     {" entities.",
      " сущностей."},
+    {" file(s) inside)",
+     " файл(ов) внутри)"},
     {" maps",
      " карт"},
     {" — details in Console",
@@ -90,6 +92,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "9-срез (л,в,п,н)"},
     {"9-slice l,t,r,b",
      "Девять частей: слева, сверху, справа, снизу"},
+    {"; not brought in: ",
+     "; не внесено: "},
     {"; not found: ",
      "; не найдено: "},
     {"A UI root: reference resolution and order between roots",
@@ -100,6 +104,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Файл на диске — изменится у ВСЕХ объектов с этим материалом."},
     {"A file with this name already exists",
      "Файл с таким именем уже есть"},
+    {"A file, a folder or a .zip — nothing chosen means this folder",
+     "Файл, папка или .zip — если ничего не выбрано, берётся эта папка"},
     {"A file, a piece of a sprite sheet, 9-slice, pixel art",
      "Файл, кусок атласа, 9-срез, пиксель-арт"},
     {"A modular 3D engine: ECS, RHI, PBR, physics, scripting, UI.",
@@ -366,6 +372,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вернуть на экран"},
     {"Bring forward",
      "Выше соседей"},
+    {"Bring in",
+     "Внести"},
+    {"Bring into the project",
+     "Внести в проект"},
     {"Broken references: ",
      "Битых ссылок: "},
     {"Brought in: ",
@@ -580,6 +590,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Копировать"},
     {"Copy an outside file into the current project folder.\nA model moves together with its .mtl/.bin files and textures.",
      "Скопировать файл со стороны в текущую папку проекта.\nМодель переезжает вместе со своими .mtl/.bin и текстурами."},
+    {"Copy an outside file, folder or .zip into the current project folder.\nA model moves together with its .mtl/.bin files and textures;\nan archive is unpacked into a folder of its own.",
+     "Скопировать чужой файл, папку или .zip в текущую папку проекта.\nМодель переезжает вместе со своими .mtl/.bin и текстурами,\nа архив распаковывается в отдельную папку."},
     {"Copy path",
      "Копировать путь"},
     {"Copy report",
@@ -1554,6 +1566,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Звук не прикреплён"},
     {"No sound device — nothing will be heard here.",
      "Звукового устройства нет — здесь ничего не будет слышно."},
+    {"No such file or folder: ",
+     "Нет такого файла или папки: "},
     {"No such file: ",
      "Файла нет: "},
     {"No templates installed",
@@ -2000,6 +2014,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Убрать связь"},
     {"Remove the variable",
      "Убрать переменную"},
+    {"Remove this component",
+     "Убрать этот компонент"},
     {"Removed from the list. The project itself is still on disk.",
      "Убрано из списка. Сам проект остался на диске."},
     {"Rename",
@@ -2488,6 +2504,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Такая папка уже есть: "},
     {"The Game panel and the built game look through it",
      "Через неё смотрят панель Game и собранная игра"},
+    {"The archive could not be unpacked: ",
+     "Архив не распаковался: "},
     {"The built game will not find it. Bring it into the project:",
      "В собранной игре не найдётся. Внесите его в проект:"},
     {"The cone shines along the object's forward (-Z of its rotation). Its shadow is a separate map in the atlas: there are few, and they go to the brightest sources.",

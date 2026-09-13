@@ -127,7 +127,10 @@ void DrawSpinner(ImDrawList* dl, const ImVec2& center, float radius, ImU32 color
 // первой же правке.
 FileBrowser::Hit FileBrowser::DrawEntryCommon(int index, const Entry& entry, bool doubleClicked) {
     m_selected = index;
-    if (!entry.IsDir) std::snprintf(m_name, sizeof(m_name), "%s", entry.Name.c_str());
+    // В режиме «файл или папка» имя папки тоже попадает в поле: щелчок по ней
+    // означает «вот это и внести», а двойной по-прежнему заходит внутрь.
+    if (!entry.IsDir || m_cfg.Mode == PickMode::OpenAny)
+        std::snprintf(m_name, sizeof(m_name), "%s", entry.Name.c_str());
     if (!doubleClicked) return Hit::Selected;
     if (entry.IsDir) return Hit::EnterDir;
     if (m_cfg.Mode == PickMode::PickFolder) return Hit::Selected;
@@ -618,14 +621,23 @@ bool FileBrowser::Draw() {
         } else {
             ImGui::TextDisabled(T("Will select: %s"), m_dir.string().c_str());
         }
+        if (m_cfg.Mode == PickMode::OpenAny) {
+            ImGui::TextDisabled("%s", T("A file, a folder or a .zip — nothing chosen means this folder"));
+        }
 
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
 
         const char* okLabel = m_cfg.Mode == PickMode::SaveFile     ? T("Save")
                               : m_cfg.Mode == PickMode::PickFolder ? T("Choose folder")
+                              : m_cfg.Mode == PickMode::OpenAny    ? T("Bring in")
                                                                : T("Open");
         if (ImGui::Button(okLabel, ImVec2(140, 0))) {
             if (m_cfg.Mode == PickMode::PickFolder) {
+                m_result = m_dir;
+                confirmed = true;
+            } else if (m_cfg.Mode == PickMode::OpenAny && !m_name[0]) {
+                // Ничего не выбрано — значит «внести эту папку целиком»: в неё
+                // человек и зашёл, разглядывая содержимое.
                 m_result = m_dir;
                 confirmed = true;
             } else if (m_name[0]) {
@@ -638,7 +650,9 @@ bool FileBrowser::Draw() {
                     candidate += m_cfg.Filters.front();
                 }
                 std::error_code ec;
-                if (m_cfg.Mode == PickMode::OpenFile && !fs::exists(candidate, ec)) {
+                if (m_cfg.Mode == PickMode::OpenAny && !fs::exists(candidate, ec)) {
+                    m_error = T("No such file or folder: ") + candidate.string();
+                } else if (m_cfg.Mode == PickMode::OpenFile && !fs::exists(candidate, ec)) {
                     m_error = T("No such file: ") + candidate.string();
                 } else {
                     m_result = candidate;

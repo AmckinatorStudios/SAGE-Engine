@@ -164,8 +164,8 @@ public:
     EditorPlayState GetPlayState() const override { return m_playState; }
     bool InPlayMode() const override { return m_playState != EditorPlayState::Editing; }
     void StartPlay() override;
-    void PausePlay() override { if (m_playState == EditorPlayState::Playing) m_playState = EditorPlayState::Paused; }
-    void ResumePlay() override { if (m_playState == EditorPlayState::Paused) m_playState = EditorPlayState::Playing; }
+    void PausePlay() override;
+    void ResumePlay() override;
     void StopPlay() override;
     // Ввод интерфейсу ИГРЫ в Play-режиме: курсор панели Game, переведённый в
     // координаты игрового кадра, плюс набранный текст (см. определение).

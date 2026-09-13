@@ -22,6 +22,7 @@
 #include "sage/assets/import/Convert.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/assets/Zip.h"
 #include "Project.h"
 #include "sage/core/Log.h"
 #include "../Localization.h"
@@ -668,13 +669,64 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
     ImportReport report;
     std::error_code ec;
 
-    if (!fs::exists(source, ec) || fs::is_directory(source, ec)) {
+    if (!fs::exists(source, ec)) {
         report.Error = T("File not found: ") + source.string();
         return report;
     }
     fs::create_directories(destDir, ec);
     if (ec) {
         report.Error = T("The folder is not accessible: ") + ec.message();
+        return report;
+    }
+
+    // --- ПАПКА ЦЕЛИКОМ -------------------------------------------------------
+    //
+    // Скачанный ассет — это чаще всего папка: модель, набор карт, лицензия,
+    // превью. Вносить её по файлу значит десяток раз открыть диалог и один раз
+    // ошибиться, а разбор спутников (.mtl, .bin, текстуры) тут и не нужен —
+    // внутри и так уже всё, что нужно модели.
+    if (fs::is_directory(source, ec)) {
+        const fs::path target = destDir / source.filename();
+        fs::copy(source, target,
+                 fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
+        if (ec) {
+            report.Error = T("Could not copy: ") + source.filename().string();
+            return report;
+        }
+        for (const auto& entry : fs::recursive_directory_iterator(target, ec)) {
+            if (entry.is_directory(ec)) continue;
+            RegisterInDatabase(entry.path());
+            report.Extra.push_back(entry.path());
+        }
+        report.Ok = true;
+        report.Created = target;
+        return report;
+    }
+
+    // --- АРХИВ ---------------------------------------------------------------
+    //
+    // Определяется ПО СОДЕРЖИМОМУ, а не по расширению: тот же zip приезжает и
+    // как .zip, и без расширения вовсе. Распаковывается в свою папку, а не
+    // вперемешку с тем, что уже лежит рядом: в архиве часто десятки файлов, и
+    // высыпать их в открытую папку проекта значит превратить её в свалку,
+    // которую потом разбирать руками.
+    if (sage::assets::IsZip(source)) {
+        const fs::path target = destDir / source.stem();
+        std::string zipErr;
+        std::vector<std::string> skipped;
+        const int written = sage::assets::ExtractZip(source, target, zipErr, &skipped);
+        if (written < 0) {
+            report.Error = T("The archive could not be unpacked: ") + zipErr;
+            return report;
+        }
+        for (const auto& entry : fs::recursive_directory_iterator(target, ec)) {
+            if (entry.is_directory(ec)) continue;
+            RegisterInDatabase(entry.path());
+            report.Extra.push_back(entry.path());
+        }
+        report.Missing = skipped;
+        report.Ok = true;
+        report.Created = target;
         return report;
     }
 
@@ -762,7 +814,13 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
 
     if (EditorIcons::Button("open", T("Import..."))) {
         FileBrowser::Config c;
-        c.Title = T("Bring a file into the project");
+        c.Title = T("Bring into the project");
+        // ФАЙЛ, ПАПКА ИЛИ АРХИВ — одной кнопкой. Скачивают по-разному: модель
+        // одним файлом, набор текстур папкой, ассет с маркетплейса архивом.
+        // Кнопка, которая берёт только файл, на двух из трёх случаев отвечает
+        // «выберите файл» — и человек идёт распаковывать и перетаскивать руками
+        // ровно то, что программа сделала бы за секунду.
+        c.Mode = FileBrowser::PickMode::OpenAny;
         // Пусто — показывать всё: в проект вносят и модели, и картинки, и звук,
         // и чужие скрипты, а перечислять их фильтром значит однажды забыть
         // формат, который движок уже понимает.
@@ -770,8 +828,9 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
         m_importBrowser.Open(c);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Copy an outside file into the current project folder.\n"
-                                  "A model moves together with its .mtl/.bin files and textures."));
+        ImGui::SetTooltip("%s", T("Copy an outside file, folder or .zip into the current project folder.\n"
+                                  "A model moves together with its .mtl/.bin files and textures;\n"
+                                  "an archive is unpacked into a folder of its own."));
     }
 
     if (!m_importBrowser.Draw()) return;
@@ -786,15 +845,16 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
     m_multi = {r.Created};
 
     std::string message = T("Brought in: ") + r.Created.filename().string();
-    if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + T(" companion file(s))");
+    if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + T(" file(s) inside)");
     if (!r.Missing.empty()) {
-        // Недостающие спутники — это будущее «модель без текстуры», и узнать о
-        // них надо здесь. Список уходит в консоль целиком: в статусной строке
-        // ему не поместиться, а первое имя уже подсказывает, что искать.
-        message += T("; not found: ") + r.Missing.front();
+        // Недостающие спутники (и пропущенные записи архива) — это будущее
+        // «модель без текстуры», и узнать о них надо здесь. Список уходит в
+        // консоль целиком: в статусной строке ему не поместиться, а первое имя
+        // уже подсказывает, что искать.
+        message += T("; not brought in: ") + r.Missing.front();
         if (r.Missing.size() > 1) message += T(" and ") + std::to_string(r.Missing.size() - 1);
         for (const std::string& m : r.Missing)
-            LOG_WARN("Editor") << "Импорт: спутник не найден — " << m;
+            LOG_WARN("Editor") << "Импорт: не внесено — " << m;
     }
     host.SetStatusMessage(message);
     LOG_INFO("Editor") << "Импорт: " << r.Created.string();

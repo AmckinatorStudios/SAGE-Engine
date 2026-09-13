@@ -231,6 +231,28 @@ bool WriteRigFixture(const fs::path& dir, const std::string& name, bool skinned,
 // Headless-проверка ядра редактора без UI-кликов (модалки недоступны в CI):
 // проект -> сцена -> undo/redo -> ассеты -> материалы -> камера -> Play.
 // Результат — строкой SELFTEST: PASS/FAIL в лог.
+namespace {
+// Маленький настоящий .zip, встроенный байтами: самопроверка не должна зависеть
+// от того, есть ли на машине архиватор.
+void WriteSelfTestZip(const std::filesystem::path& path) {
+    static const unsigned char kZip[] = {
+        0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00, 0x5c, 0x16,
+        0x2d, 0x5d, 0x25, 0x2f, 0x84, 0xe3, 0x0c, 0x00, 0x00, 0x00, 0x0a, 0x00,
+        0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x72, 0x65, 0x61, 0x64, 0x6d, 0x65,
+        0x2e, 0x74, 0x78, 0x74, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0x28, 0x4e,
+        0x4c, 0x4f, 0x05, 0x00, 0x50, 0x4b, 0x01, 0x02, 0x14, 0x03, 0x14, 0x00,
+        0x00, 0x00, 0x08, 0x00, 0x5c, 0x16, 0x2d, 0x5d, 0x25, 0x2f, 0x84, 0xe3,
+        0x0c, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x72, 0x65, 0x61, 0x64, 0x6d, 0x65, 0x2e, 0x74, 0x78, 0x74,
+        0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x38, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    std::ofstream out(path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(kZip), (std::streamsize)sizeof(kZip));
+}
+} // namespace
+
 void EditorLayer::RunSelfTest() {
     size_t before = m_scene->Count();
     std::string err;
@@ -279,7 +301,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2551,6 +2573,98 @@ bool EditorLayer::SelfTestSelection() {
                                 << SAGE_TEST_MODEL;
             ok = false;
         }
+    }
+
+    // --- ПАУЗА ОСТАНАВЛИВАЕТ КАДР, А НЕ ТОЛЬКО ЗНАЧОК -----------------------
+    //
+    // Что было: «Пауза» меняла поле состояния, и на этом всё кончалось.
+    // Планировщик систем звался в OnUpdate каждый кадр независимо от состояния,
+    // и в паузе продолжали идти скрипты, физика, анимация и частицы — кнопка
+    // меняла свой вид и больше ничего.
+    //
+    // Проверяется ИМЕННО ЧЕРЕЗ OnUpdate, а не через m_systems.Run: остановка
+    // живёт в кадре редактора, и прогон планировщика напрямую (как в проверке
+    // физики выше) прошёл бы мимо неё — то есть не заметил бы поломки.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        GameObject box = CreatePrimitiveEntity("PauseBox", MeshRef::Type::Cube);
+        box.GetTransform().Position = glm::vec3(0.0f, 20.0f, 0.0f);
+        m_scene->Registry().emplace_or_replace<RigidBodyComponent>(box.Entity());
+        const int boxId = box.Id();
+
+        StartPlay();
+        for (int i = 0; i < 5; ++i) OnUpdate(0.05f);
+        const float yPlaying = m_scene->Get(boxId).GetTransform().Position.y;
+        if (yPlaying >= 20.0f - 0.001f) {
+            LOG_ERROR("Editor") << "SELFTEST: в Play тело не падает — проверять паузу нечем";
+            ok = false;
+        }
+
+        if (ok) {
+            PausePlay();
+            const float yPaused = m_scene->Get(boxId).GetTransform().Position.y;
+            for (int i = 0; i < 20; ++i) OnUpdate(0.05f);
+            const float yAfterPause = m_scene->Get(boxId).GetTransform().Position.y;
+            if (std::abs(yAfterPause - yPaused) > 0.0001f) {
+                LOG_ERROR("Editor") << "SELFTEST: на паузе кадр продолжает идти (y " << yPaused
+                                    << " -> " << yAfterPause << ")";
+                ok = false;
+            }
+        }
+
+        // И продолжение обязано ПРОДОЛЖИТЬ: пауза, после которой ничего не
+        // оживает, — это остановка, а не пауза.
+        if (ok) {
+            const float yBeforeResume = m_scene->Get(boxId).GetTransform().Position.y;
+            ResumePlay();
+            for (int i = 0; i < 5; ++i) OnUpdate(0.05f);
+            const float yResumed = m_scene->Get(boxId).GetTransform().Position.y;
+            if (yResumed >= yBeforeResume - 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: после продолжения кадр не пошёл (y "
+                                    << yBeforeResume << " -> " << yResumed << ")";
+                ok = false;
+            }
+        }
+        StopPlay();
+    }
+
+    // --- ВНЕСТИ В ПРОЕКТ: ФАЙЛ, ПАПКА ИЛИ АРХИВ -----------------------------
+    //
+    // Кнопка «Внести» умела ровно один файл. Скачивают же по-разному: модель
+    // одним файлом, набор текстур папкой, ассет с маркетплейса архивом, — и на
+    // двух случаях из трёх кнопка отвечала «выберите файл».
+    if (ok) {
+        std::error_code ec;
+        const fs::path outside = fs::temp_directory_path() / "sage_selftest_import";
+        fs::remove_all(outside, ec);
+        fs::create_directories(outside / "rock" / "tex", ec);
+        {
+            std::ofstream(outside / "rock" / "rock.txt") << "mesh";
+            std::ofstream(outside / "rock" / "tex" / "albedo.txt") << "map";
+        }
+        const fs::path dest = m_project.AssetsDir() / "selftest_import";
+        fs::remove_all(dest, ec);
+        fs::create_directories(dest, ec);
+
+        // ПАПКА целиком, вместе с вложенной.
+        const AssetsPanel::ImportReport folderReport = AssetsPanel::ImportAsset(outside / "rock", dest);
+        if (!folderReport.Ok || !fs::exists(dest / "rock" / "rock.txt") ||
+            !fs::exists(dest / "rock" / "tex" / "albedo.txt")) {
+            LOG_ERROR("Editor") << "SELFTEST: папка не внеслась в проект целиком";
+            ok = false;
+        }
+
+        // АРХИВ — в свою папку, а не вперемешку с тем, что уже лежит рядом.
+        if (ok) {
+            const fs::path zipPath = outside / "pack.zip";
+            WriteSelfTestZip(zipPath);
+            const AssetsPanel::ImportReport zipReport = AssetsPanel::ImportAsset(zipPath, dest);
+            if (!zipReport.Ok || !fs::exists(dest / "pack" / "readme.txt")) {
+                LOG_ERROR("Editor") << "SELFTEST: архив не распаковался в проект";
+                ok = false;
+            }
+        }
+        fs::remove_all(outside, ec);
     }
 
     // --- РАМКА ВЫДЕЛЕНИЯ И СПИСОК КОМПОНЕНТОВ -------------------------------
