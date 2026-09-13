@@ -113,6 +113,17 @@ void ResetToDefaults() {
 
 void SetHomeDock(ImGuiID dockspace) { g_homeDock = dockspace; }
 
+ImGuiWindowFlags WindowFlags(const char* id) {
+    // Спрашиваем НЕ состояние-намерение, а то, где окно на самом деле: в кадре
+    // переезда намерение уже новое, а окна системы ещё нет, и заголовок исчез
+    // бы раньше, чем появилась рамка.
+    const ImGuiWindow* w = ImGui::FindWindowByName(id);
+    if (!w || w->Viewport == nullptr) return 0;
+    if (w->Viewport->ID == ImGui::GetMainViewport()->ID) return 0;
+    if ((w->Viewport->Flags & ImGuiViewportFlags_NoDecoration) != 0) return 0;
+    return ImGuiWindowFlags_NoTitleBar;
+}
+
 void Before(const char* id) {
     State& s = Get(id);
 

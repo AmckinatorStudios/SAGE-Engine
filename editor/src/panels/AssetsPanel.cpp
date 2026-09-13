@@ -1,3 +1,4 @@
+#include "../PanelWindows.h"
 #include "AssetsPanel.h"
 #include "ui/UI.h"
 #include "EditorTheme.h"
@@ -937,7 +938,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     Project& project = host.CurrentProject();
     fs::path& cwd = host.AssetsCwd();
 
-    ImGui::Begin(T("Assets" "###Assets"), open);
+    ImGui::Begin(T("Assets" "###Assets"), open, panelwindows::WindowFlags("Assets"));
 
     // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
     //

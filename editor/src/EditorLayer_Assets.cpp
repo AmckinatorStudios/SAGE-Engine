@@ -35,6 +35,8 @@
 #include "EditorTheme.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
+#include "AssetSlot.h"
+#include "TextureSet.h"
 #include "sage/render/DebugView.h"
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
@@ -231,11 +233,92 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         SetStatusMessage(T("Mesh replaced: ") + asset.filename().string());
         return true;
     }
+    // КАРТИНКА — ЭТО НАБОР КАРТ, А НЕ ОДНА ТЕКСТУРА.
+    //
+    // Текстуры скачивают наборами: рядом лежат albedo, normal, roughness,
+    // metallic, ao. Раньше бросок картинки на объект отвечал «этот файл нельзя
+    // назначить объекту», и единственным путём было создать материал руками и
+    // разложить пять карт по слотам, зная, какой файл в какой слот. Понятно, до
+    // какого слота доходили: до albedo. Отсюда и вывод, который и звучал, —
+    // «работает только albedo, остальные карты игнорируются».
+    if (assetslot::Accepts(assetslot::Kind::Texture, asset)) {
+        PushUndoSnapshot();
+        std::string status;
+        const std::string matRef = MaterialFromTextureSet(asset, status);
+        if (matRef.empty()) {
+            SetStatusMessage(status);
+            return true;
+        }
+        AssignMaterial(obj.Renderer(), matRef, ResourceManager::Instance().GetMaterial(matRef));
+        SetStatusMessage(status);
+        return true;
+    }
+
     // Префаб на сущность НЕ применяется: он сам себе поддерево, и «применить» его
     // к чужой сущности значило бы её заменить. Ставится он в сцену — броском во
     // вьюпорт или в список.
     SetStatusMessage(T("This file cannot be assigned to an object"));
     return false;
+}
+
+// Материал из набора карт, лежащих рядом с этой картинкой. Возвращает ссылку
+// проекта на .sagemat (пусто — не получилось), status — строка для человека.
+std::string EditorLayer::MaterialFromTextureSet(const fs::path& texture, std::string& status) {
+    const sage::editor::TextureSet set = sage::editor::FindTextureSet(texture);
+
+    Material material;
+    material.TexturePath = m_project.AssetRef(set.Albedo);
+    material.NormalMapPath = m_project.AssetRef(set.Normal);
+    material.MetallicMapPath = m_project.AssetRef(set.Metallic);
+    material.RoughnessMapPath = m_project.AssetRef(set.Roughness);
+    material.AOMapPath = m_project.AssetRef(set.AO);
+    material.EmissiveMap = m_project.AssetRef(set.Emissive);
+    // Карта задана — значит вид определяет она, а множитель её лишь домножает.
+    // Фактор 0 при наличии карты обнулил бы её целиком, и «металл приехал без
+    // металличности» выглядело бы как потеря текстуры (та же логика, что при
+    // импорте материалов модели).
+    if (!material.MetallicMapPath.empty()) material.Metallic = 1.0f;
+    if (!material.RoughnessMapPath.empty()) material.Roughness = 1.0f;
+    if (!material.EmissiveMap.empty()) material.Emissive = glm::vec3(1.0f);
+
+    // Файл материала — РЯДОМ С КАРТАМИ и по общему корню имени: набор
+    // «brick-wall_*» даёт «brick-wall.sagemat», и найти его потом можно там же,
+    // где лежат сами карты.
+    fs::path file = texture.parent_path() / (set.Base + ".sagemat");
+    std::error_code ec;
+    if (fs::exists(file, ec)) {
+        // Уже есть — не перезаписываем: в нём могли поправить цвет, зеркальность
+        // или подставить свою карту, и бросок текстуры не повод стирать эту
+        // работу.
+        const std::string ref = m_project.AssetRef(file);
+        status = T("Material from the set: ") + file.filename().string() + T(" (already existed)");
+        return ref;
+    }
+    try {
+        material.SaveToFile(file.string());
+    } catch (const std::exception& e) {
+        LOG_ERROR("Материалы") << "Материал из набора не записан: " << e.what();
+        status = T("Material from the set NOT written — details in Console");
+        return {};
+    }
+    sage::AssetDatabase::Instance().Register(file.string(), "material");
+
+    LOG_INFO("Материалы") << "Материал из набора " << set.Base << ": карт " << set.Found()
+                          << (set.Normal.empty() ? "" : ", нормаль")
+                          << (set.Metallic.empty() ? "" : ", металличность")
+                          << (set.Roughness.empty() ? "" : ", шероховатость")
+                          << (set.AO.empty() ? "" : ", затенение")
+                          << (set.Emissive.empty() ? "" : ", свечение");
+    if (set.NormalIsDirectX) {
+        LOG_WARN("Материалы") << "Карта нормалей в формате DirectX (зелёный канал перевёрнут) — "
+                              << "движок ждёт OpenGL; рельеф может читаться наизнанку";
+    }
+    for (const std::string& skipped : set.Unused) {
+        LOG_INFO("Материалы") << "Карта из набора не применяется движком: " << skipped;
+    }
+
+    status = T("Material from the set: ") + std::to_string(set.Found()) + T(" maps");
+    return m_project.AssetRef(file);
 }
 
 // Материал модели — сразу при её появлении в сцене.
@@ -303,7 +386,11 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     const bool isModel = ModelLoader::IsSupportedModel(ext);
     const bool isPrefab = ext == ".sageprefab";
     const bool isMaterial = ext == ".sagemat";
-    if (!isModel && !isPrefab && !isMaterial) return false;
+    // Текстура — тот же жест, что и материал: её роняют НА ПОВЕРХНОСТЬ, которую
+    // хотят покрасить. Разница только в том, что материала ещё нет — он
+    // собирается из набора карт, лежащих рядом (см. MaterialFromTextureSet).
+    const bool isTexture = assetslot::Accepts(assetslot::Kind::Texture, asset);
+    if (!isModel && !isPrefab && !isMaterial && !isTexture) return false;
 
     // Луч через точку, где отпустили кнопку. Та же математика, что у выбора
     // мышью (см. PickAtViewportWith), и это важно: место, куда встанет объект,
@@ -333,7 +420,7 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         }
     }
 
-    if (isMaterial) {
+    if (isMaterial || isTexture) {
         // Материал ложится на то, НА ЧТО его уронили. В пустоту ронять его
         // бессмысленно — там нечего красить, и создавать ради этого объект было
         // бы сюрпризом.
@@ -342,12 +429,21 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
             return true;
         }
         PushUndoSnapshot();
+        std::string status = T("Material assigned: ") + asset.filename().string();
+        std::string useRef = ref;
+        if (isTexture) {
+            useRef = MaterialFromTextureSet(asset, status);
+            if (useRef.empty()) {
+                SetStatusMessage(status);
+                return true;
+            }
+        }
         MeshRendererComponent& mr = m_scene->Registry().get<MeshRendererComponent>(bestEntity);
-        AssignMaterial(mr, ref, ResourceManager::Instance().GetMaterial(ref));
+        AssignMaterial(mr, useRef, ResourceManager::Instance().GetMaterial(useRef));
         const int id = m_scene->Registry().get<IdComponent>(bestEntity).Id;
         SetSelectedId(id);
         m_selection = {id};
-        SetStatusMessage(T("Material assigned: ") + asset.filename().string());
+        SetStatusMessage(status);
         return true;
     }
 

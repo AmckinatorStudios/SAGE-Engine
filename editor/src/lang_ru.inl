@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1414.
+// Язык: Русский. Строк: 1418.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -14,6 +14,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "\nВместе с потомками это "},
     {"  (off)",
      "  (выключена)"},
+    {" (already existed)",
+     " (уже был)"},
     {" (with maps)",
      " (с картами)"},
     {" and ",
@@ -22,6 +24,8 @@ constexpr TranslationPair kRussianStrings[] = {
      " спутник(ов))"},
     {" entities.",
      " сущностей."},
+    {" maps",
+     " карт"},
     {" — details in Console",
      " — подробности в Console"},
     {"%.1f GiB",
@@ -1318,6 +1322,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Материал не читается"},
     {"Material created: ",
      "Материал создан: "},
+    {"Material from the set NOT written — details in Console",
+     "Материал из набора НЕ записан — подробности в консоли"},
+    {"Material from the set: ",
+     "Материал из набора: "},
     {"Materials (*.sagemat)",
      "Материалы (*.sagemat)"},
     {"Materials (.sagemat) and models (.obj/.gltf/.glb)",
