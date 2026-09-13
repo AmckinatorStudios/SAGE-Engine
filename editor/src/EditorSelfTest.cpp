@@ -308,7 +308,7 @@ void EditorLayer::RunSelfTest() {
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
-                               << "viewport-tools + import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
+                               << "assets-root + scale-lock + viewport-tools + import + asset-refs + model-material + prefab-cover + drag-drop + settings-live + "
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
@@ -3839,6 +3839,71 @@ bool EditorLayer::SelfTestTools() {
     std::error_code ec;
     std::string err;
     (void)ec; (void)err;
+
+    // --- ПАНЕЛЬ АССЕТОВ НЕ ВЫХОДИТ ИЗ assets/ ------------------------------
+    //
+    // Выход наружу ломается тихо: панель показывает папку проекта, в ней «пусто»
+    // (ассетов там и не было), и человек решает, что ассеты потерялись. А путь,
+    // взятый снаружи, в сцене не работает — он не переживёт сборку игры.
+    {
+        const fs::path assets = m_project.AssetsDir();
+        const fs::path sub = assets / "selftest_cwd";
+        fs::create_directories(sub, ec);
+
+        m_assetsCwd = m_project.Dir();              // выше корня — вернуть в корень
+        AssetsPanel::ClampCwd(*this);
+        if (fs::weakly_canonical(m_assetsCwd, ec) != fs::weakly_canonical(assets, ec)) {
+            LOG_ERROR("Editor") << "SELFTEST: панель ассетов вышла выше assets/: "
+                                << m_assetsCwd.string();
+            ok = false;
+        }
+
+        m_assetsCwd = sub;                          // внутри корня — не трогать
+        AssetsPanel::ClampCwd(*this);
+        if (fs::weakly_canonical(m_assetsCwd, ec) != fs::weakly_canonical(sub, ec)) {
+            LOG_ERROR("Editor") << "SELFTEST: панель ассетов не удержалась во вложенной папке";
+            ok = false;
+        }
+
+        m_assetsCwd = assets / "нет-такой-папки";   // исчезнувшая папка — в корень
+        AssetsPanel::ClampCwd(*this);
+        if (fs::weakly_canonical(m_assetsCwd, ec) != fs::weakly_canonical(assets, ec)) {
+            LOG_ERROR("Editor") << "SELFTEST: после пропавшей папки панель осталась «нигде»";
+            ok = false;
+        }
+        fs::remove_all(sub, ec);
+    }
+
+    // --- ЗАМОК СВЯЗИ ОСЕЙ МАСШТАБА -----------------------------------------
+    //
+    // Пропорции обязаны сохраняться ТОЧНО: «почти» здесь означает предмет,
+    // который на глаз квадратный, а в сцене слегка приплюснут.
+    {
+        const glm::vec3 out =
+            InspectorPanel::LinkScaleAxes(glm::vec3(2.0f, 1.0f, 4.0f), glm::vec3(3.0f, 1.0f, 4.0f));
+        // Потянули X с 2 до 3 — это в полтора раза: Y и Z обязаны стать 1.5 и 6.
+        if (std::abs(out.x - 3.0f) > 1e-4f || std::abs(out.y - 1.5f) > 1e-4f ||
+            std::abs(out.z - 6.0f) > 1e-4f) {
+            LOG_ERROR("Editor") << "SELFTEST: связанные оси масштаба не держат пропорцию: "
+                                << out.x << ", " << out.y << ", " << out.z;
+            ok = false;
+        }
+        // Ось была нулевой — отношения нет, и всем осям ставится одно значение:
+        // иначе предмет остался бы плоским при любом вводе.
+        const glm::vec3 zero =
+            InspectorPanel::LinkScaleAxes(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 2.0f, 0.0f));
+        if (std::abs(zero.x - 2.0f) > 1e-4f || std::abs(zero.z - 2.0f) > 1e-4f) {
+            LOG_ERROR("Editor") << "SELFTEST: из нулевого масштаба оси не восстановились";
+            ok = false;
+        }
+        // Ничего не меняли — ничего и не должно поменяться.
+        const glm::vec3 same =
+            InspectorPanel::LinkScaleAxes(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(1.0f, 2.0f, 3.0f));
+        if (std::abs(same.y - 2.0f) > 1e-4f || std::abs(same.z - 3.0f) > 1e-4f) {
+            LOG_ERROR("Editor") << "SELFTEST: связь осей сработала без правки";
+            ok = false;
+        }
+    }
 
     // --- СТРОКА ИНСТРУМЕНТОВ ВЬЮПОРТА: значки и цвета гизмо ----------------
     //

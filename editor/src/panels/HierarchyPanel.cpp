@@ -350,16 +350,6 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
             scene.SetParent(folder.Entity(), selected.Entity());
         host.SetSelectedId(folder.Id());
     }
-    ImGui::SameLine(0.0f, 8.0f);
-    // ИМЯ СЦЕНЫ, А НЕ ОТЧЁТ О НЕЙ. Здесь стояло «Сцена: MainScene | Объектов:
-    // 47». Число объектов не нужно ни для одного решения — его не сравнивают,
-    // по нему ничего не ищут, — а место оно занимало в каждой строке заголовка,
-    // и слово «Сцена:» перед именем повторяло то, что и так написано на вкладке
-    // панели. Осталось само имя.
-    ImGui::AlignTextToFramePadding();
-    EditorIcons::Inline("scene");
-    ImGui::SameLine(0.0f, 4.0f);
-    ImGui::TextUnformatted(scene.Name().c_str());
     ImGui::Separator();
 
     namespace rectselect = sage::editor::rectselect;
@@ -375,7 +365,50 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
         if (!hasParent) roots.push_back({view.get<IdComponent>(e).Id, e});
     }
     std::sort(roots.begin(), roots.end());
-    for (auto& [id, e] : roots) DrawNode(host, scene, e);
+
+    // --- САМА СЦЕНА — КОРЕНЬ СПИСКА, а не подпись над ним --------------------
+    //
+    // Имя сцены стояло строкой в заголовке панели, рядом с кнопками, и не
+    // отвечало на вопрос, который задают списку: ГДЕ Я. Дерево начиналось сразу
+    // с объектов, будто они висят в воздухе, а «в корень» было местом, которого
+    // на экране нет, — пустотой под последней строкой. Сцена как узел ставит всё
+    // на место: у дерева появляется вершина, у «корня» — строка, на которую
+    // можно бросить объект, а у имени сцены — осмысленное место.
+    ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+    const ImVec2 rootPos = ImGui::GetCursorScreenPos();
+    const bool sceneOpen = ImGui::TreeNodeEx(
+        "##scene_root",
+        ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow |
+            ImGuiTreeNodeFlags_OpenOnDoubleClick,
+        "  %s", scene.Name().c_str());
+    {
+        const float size = ImGui::GetTextLineHeight() * 0.9f;
+        EditorIcons::Overlay(rootPos.x + ImGui::GetTreeNodeToLabelSpacing() - size * 1.15f,
+                             rootPos.y + (ImGui::GetTextLineHeight() - size) * 0.5f, size, "scene",
+                             glm::vec3(0.72f, 0.78f, 0.90f));
+    }
+    // Бросок НА СЦЕНУ = «в корень»: то же, что и бросок в пустое место ниже, но
+    // по видимой цели. Ассет, брошенный сюда, добавляется в сцену.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY")) {
+            int childId = *(const int*)p->Data;
+            host.PushUndoSnapshot();
+            scene.SetParentById(childId, -1);
+        }
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
+            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
+            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
+            if (!host.AddAssetToScene(dropped))
+                host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
+        }
+        ImGui::EndDragDropTarget();
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The scene itself: everything lives here"));
+
+    if (sceneOpen) {
+        for (auto& [id, e] : roots) DrawNode(host, scene, e);
+        ImGui::TreePop();
+    }
 
     // Зона «в корень»: бросок сюда открепляет сущность от родителя, а
     // брошенный ассет добавляется в сцену как новый объект.

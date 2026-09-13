@@ -37,11 +37,6 @@ using EditorTheme::Role;
 // ---------------------------------------------------------------------------
 namespace {
 
-// Пороги ужимания. Сначала пропадают подписи у кнопок, потом имя сцены справа.
-// Мерить точную ширину содержимого нечем — оно рисуется по ходу дела.
-constexpr float kWidthForLabels = 1400.0f;
-constexpr float kWidthForScene = 900.0f;
-
 struct Row {
     float Height = 0.0f;   // высота панели
     float Top = 0.0f;      // Y кнопки, чтобы строка стояла по центру
@@ -76,8 +71,6 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
                       ImGuiWindowFlags_NoScrollbar);
 
     const float windowW = ImGui::GetWindowWidth();
-    const bool labels = windowW >= kWidthForLabels;
-    const bool showScene = windowW >= kWidthForScene;
 
     Row row;
     row.Height = height;
@@ -152,7 +145,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     // игре четыре. Иначе при входе в игру блок раздувался бы и кнопка уезжала
     // из-под курсора ровно в тот момент, когда по ней целятся второй раз.
     const float playBlockW = ui.ControlHeight * 8.0f;
-    const float rightBlockW = showScene ? ui.ControlHeight * 9.0f : ui.ControlHeight * 3.0f;
+    const float rightBlockW = ui.ControlHeight * 3.0f;
     const float gap = ui.SpacingMD;
 
     const float rightStart = windowW - rightBlockW - ui.PaddingPanel;
@@ -202,22 +195,17 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     if (EditorIcons::IconOnlyButton("stop", T("Stop and restore the scene"))) host.StopPlay();
     ImGui::EndDisabled();
 
-    // --- ПРОСТРАНСТВО ГИЗМО И ПРИВЯЗКА ---------------------------------------
+    // --- ПРИВЯЗКА -----------------------------------------------------------
     //
     // Здесь, а не только во вьюпорте: это свойство ЖЕСТА, а не окна, и человек
     // читает его тем же взглядом, каким смотрит на «Play».
+    //
+    // А ВОТ ПРОСТРАНСТВА ОСЕЙ ЗДЕСЬ БОЛЬШЕ НЕТ. Тот же переключатель стоит в
+    // строке инструментов вьюпорта — у самого объекта, которого он касается, —
+    // и две кнопки для одного состояния читаются как две РАЗНЫЕ настройки:
+    // человек щёлкает одну, видит, что вторая изменилась сама, и перестаёт
+    // доверять обеим.
     ImGui::SameLine(0.0f, ui.SpacingMD);
-    CenterY(row);
-    // Подпись и значок — ТЕ ЖЕ, что в строке инструментов вьюпорта
-    // (ViewportTools.cpp): состояние одно, и называться в двух местах разными
-    // словами («Мировое» здесь и «Глобально» там) оно не имеет права — это
-    // читается как две разные настройки.
-    const bool local = host.GizmoSpace() == EditorGizmoSpace::Local;
-    if (EditorIcons::Button(local ? "cube" : "world", local ? T("Local") : T("Global"),
-                            T("Which axes the gizmo works in"))) {
-        host.GizmoSpace() = local ? EditorGizmoSpace::World : EditorGizmoSpace::Local;
-    }
-    ImGui::SameLine(0.0f, ui.SpacingXS);
     CenterY(row);
     if (EditorIcons::IconOnlyButton("magnet", T("Snap to the step"), host.GizmoSnap()))
         host.GizmoSnap() = !host.GizmoSnap();
@@ -238,47 +226,18 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
         ImGui::EndPopup();
     }
 
-    // --- СПРАВА: ПРОЕКТ И НАСТРОЙКИ ------------------------------------------
+    // --- СПРАВА: НАСТРОЙКИ ИГРЫ ---------------------------------------------
     //
-    // Имя открытого проекта и сцены. В статус-баре они тоже есть, но статус-бар
-    // внизу, а смотрят при работе — вверх, на кнопку «Play».
+    // КНОПКИ «ПРОЕКТ: ИМЯ» ЗДЕСЬ БОЛЬШЕ НЕТ. Она открывала меню, в котором не
+    // было ничего своего: «открыть проект» стоит слева отдельной кнопкой,
+    // сцену сохраняют кнопкой рядом с ней (и Ctrl+S), а всё остальное из того
+    // меню есть в меню «Файл». Имя открытого проекта и сцены и так написаны —
+    // в заголовке окна и в статус-баре, — а кнопка отнимала правую четверть
+    // полосы ради строки, которую не нажимают.
     const float rightX = std::max(ImGui::GetItemRectMax().x - barMin.x + gap, rightStart);
     ImGui::SameLine(rightX);
     dividerAt(barMin.x + rightX - gap);
     CenterY(row);
-    if (showScene) {
-        const std::string label =
-            std::string(T("Project: ")) + host.CurrentProject().Name() + "  v";
-        const float room = windowW - ImGui::GetCursorPosX() - ui.ControlHeight - ui.PaddingPanel * 2.0f;
-        if (ImGui::Button(Sage::UI::Truncate(label.c_str(), room).c_str())) {
-            ImGui::OpenPopup("##projectmenu");
-        }
-        Sage::UI::Tooltip(T("Project and scene"));
-        if (ImGui::BeginPopup("##projectmenu")) {
-            ImGui::TextDisabled("%s", host.CurrentProject().Dir().string().c_str());
-            ImGui::Separator();
-            // Имя сцены и пометка о несохранённых правках — здесь же: вопрос
-            // «что у меня открыто» один, и ответ на него должен быть в одном
-            // месте.
-            const std::string scene = host.CurrentSceneName() + (host.SceneDirty() ? " *" : "");
-            if (host.SceneDirty()) {
-                ImGui::TextColored(EditorTheme::Color(Role::Warn), "%s", scene.c_str());
-            } else {
-                ImGui::TextUnformatted(scene.c_str());
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem(T("Save Scene"), "Ctrl+S")) host.RequestDialog("Save Scene");
-            if (ImGui::MenuItem(T("Save Scene As..."))) host.RequestDialog("Save Scene As");
-            if (ImGui::MenuItem(T("Open Scene..."))) host.RequestDialog("Open Scene");
-            ImGui::Separator();
-            if (ImGui::MenuItem(T("New Project..."))) host.RequestDialog("New Project");
-            if (ImGui::MenuItem(T("Open Project..."))) host.RequestDialog("Open Project");
-            if (ImGui::MenuItem(T("Build Game..."))) host.RequestDialog("Build Game");
-            ImGui::EndPopup();
-        }
-        ImGui::SameLine(0.0f, ui.SpacingXS);
-        CenterY(row);
-    }
     if (EditorIcons::IconOnlyButton("gear", T("Game Settings"),
                                     host.PanelVisible(EditorPanel::Settings))) {
         host.PanelVisible(EditorPanel::Settings) = !host.PanelVisible(EditorPanel::Settings);

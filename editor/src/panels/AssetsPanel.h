@@ -19,6 +19,13 @@ class Project;
 // материалов) и операцию CreateAsset (переиспользуется self-test'ом).
 class AssetsPanel {
 public:
+    // Корень панели — assets/ проекта: выше неё панель не поднимается (почему
+    // именно так — в AssetsPanel.cpp у самой функции). Открыты ради
+    // самопроверки: выход наружу ломается тихо, и увидеть его без проверки
+    // можно только глазами.
+    static std::filesystem::path AssetsRoot(EditorHost& host);
+    static void ClampCwd(EditorHost& host);
+
     enum class CreateKind { None, Folder, Script, TextFile, Material };
 
     void Draw(EditorHost& host, bool* open);

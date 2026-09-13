@@ -32,6 +32,7 @@
 
 #include "AssetSlot.h"
 #include "EditorIcons.h"
+#include "../EditorPrefs.h"
 #include "ModelMaterialImport.h"
 #include "Project.h"
 #include "sage/render/ResourceManager.h"
@@ -138,6 +139,28 @@ namespace {
 std::string Hint2(const char* a, const char* b) { return std::string(a) + "\n" + b; }
 } // namespace
 
+// Связанные оси масштаба: ось, которую потянули, тянет за собой две другие.
+//
+// ЧЕРЕЗ ОТНОШЕНИЕ, А НЕ ЧЕРЕЗ РАЗНИЦУ. Масштаб — множитель: «прибавить 0.5»
+// растянуло бы тонкую ось вдвое, а толстую на четверть, и предмет, который
+// хотели увеличить, менял бы форму. Отношение сохраняет пропорции ровно.
+//
+// Отдельной функцией, а не десятком строк внутри отрисовки: это единственное
+// место с арифметикой во всём разделе, и проверить её надо без интерфейса
+// (шаг самопроверки scale-lock).
+glm::vec3 InspectorPanel::LinkScaleAxes(const glm::vec3& before, const glm::vec3& after) {
+    for (int i = 0; i < 3; ++i) {
+        if (after[i] == before[i]) continue;
+        // Ось была нулевой — отношения нет; тогда всем ставится одно значение.
+        if (std::abs(before[i]) <= 1e-4f) return glm::vec3(after[i]);
+        const float k = after[i] / before[i];
+        glm::vec3 out = before * k;
+        out[i] = after[i];   // потянутую ось оставляем ровно такой, какой ввели
+        return out;
+    }
+    return after;
+}
+
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.InspectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
@@ -205,8 +228,37 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         Sage::UI::PropertyVec3("pos", &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
         Sage::UI::PropertyLabel(T("Rotation"));
         Sage::UI::PropertyVec3("rot", &tr.Rotation.x, 0.5f, "%.1f"); host.TrackLastImGuiItem();
+        // --- МАСШТАБ СО СВЯЗЬЮ ОСЕЙ ------------------------------------
+        //
+        // Замок справа от полей связывает X, Y и Z: тянешь одну ось — растут
+        // все три в тех же пропорциях. Без него равномерно увеличить предмет
+        // означало три одинаковых движения мышью, и после первого же промаха
+        // ящик становился слегка приплюснутым — а заметно это только с другой
+        // стороны сцены. Неравномерный масштаб тоже нужен (стена, доска), но
+        // он — исключение, и включается тем же щелчком.
+        //
+        // Состояние замка запоминается между запусками: это привычка человека,
+        // а не свойство сцены.
+        if (!m_uniformScaleLoaded) {
+            m_uniformScaleLoaded = true;
+            m_uniformScale = sage::editor::prefs::GetBool("inspector.uniform_scale", true);
+        }
         Sage::UI::PropertyLabel(T("Scale"));
-        Sage::UI::PropertyVec3("scl", &tr.Scale.x, 0.05f); host.TrackLastImGuiItem();
+        const float lockW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
+        const glm::vec3 before = tr.Scale;
+        const bool scaleChanged =
+            Sage::UI::PropertyVec3("scl", &tr.Scale.x, 0.05f, "%.3f", lockW);
+        host.TrackLastImGuiItem();
+        if (scaleChanged && m_uniformScale) tr.Scale = LinkScaleAxes(before, tr.Scale);
+        ImGui::SameLine();
+        if (EditorIcons::IconOnlyButton(
+                m_uniformScale ? "lock" : "unlock",
+                m_uniformScale ? T("Axes are linked: dragging one scales all three")
+                               : T("Axes are independent: each one scales on its own"),
+                m_uniformScale)) {
+            m_uniformScale = !m_uniformScale;
+            sage::editor::prefs::SetBool("inspector.uniform_scale", m_uniformScale);
+        }
         Sage::UI::EndProperties();
     }
 

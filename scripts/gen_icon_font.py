@@ -76,6 +76,9 @@ ICONS = {
     "warn": "alert-triangle", "error": "circle-x", "info": "info-circle", "debug": "bug",
     "trash": "trash", "copy": "copy", "save": "device-floppy", "open": "folder-open",
     "plus": "plus", "eye": "eye", "lock": "lock",
+    # Открытый замок — пара к закрытому: связь осей включают и выключают одной
+    # кнопкой, и состояние читается по рисунку, а не по цвету.
+    "unlock": "lock-open",
 }
 
 
