@@ -35,15 +35,6 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // объекты сцены. Пока это лежало вперемешку, на вопрос «где настраивается
     // освещение» честного ответа не было.
     //
-    // TextWrapped, а не TextDisabled: пояснения длиннее строки, и без переноса
-    // они обрезались бы по краю окна — то есть пропадал бы ровно тот текст,
-    // ради которого их писали.
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped("%s", T("Quality and cost of the frame — saved into the project as "
-                               "sage.cfg. The look of the scene (sky, fog, ambient) is in "
-                               "Environment; light sources are objects in the hierarchy."));
-    ImGui::PopStyleColor();
-    ImGui::Separator();
 
     // Пресеты качества: один клик выставляет display/graphics/post разом
     // (EngineConfig::ApplyPreset); дальше поля можно подстроить вручную.
@@ -68,7 +59,8 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     }
     ImGui::Separator();
 
-    if (EditorTheme::SectionHeader(T("Window" "###Window settings"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Window" "###Window settings"), ImGuiTreeNodeFlags_DefaultOpen,
+                                   nullptr, T("Window settings apply when the game starts."))) {
         ImGui::InputInt(T("Width"), &c.Width);
         ImGui::InputInt(T("Height"), &c.Height);
         const char* modes[] = {T("Windowed"), T("Borderless"), T("Fullscreen")};
@@ -83,26 +75,18 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
         if (ImGui::Combo(T("MSAA"), &msaaIdx, msaa, IM_ARRAYSIZE(msaa)))
             c.Msaa = kMsaaVals[msaaIdx];
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped("%s", T("Window settings apply when the game starts."));
-        ImGui::PopStyleColor();
     }
 
-    if (EditorTheme::SectionHeader(T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen,
+                                       nullptr, T("Render Scale < 1 is faster; > 1 supersamples (sharper)."))) {
         const char* aspects[] = {T("Free"), "16:9", "16:10", "4:3", "21:9"};
         int a = (int)c.Aspect;
         if (ImGui::Combo(T("Aspect Ratio"), &a, aspects, IM_ARRAYSIZE(aspects))) c.Aspect = (sage::AspectMode)a;
         ImGui::SliderFloat(T("Render Scale"), &c.RenderScale, 0.25f, 2.0f, "%.2fx");
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped("%s", T("Render Scale < 1 is faster; > 1 supersamples (sharper)."));
-        ImGui::PopStyleColor();
     }
 
-    if (EditorTheme::SectionHeader(T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped("%s", T("Whether a pass runs at all and at what resolution. Which "
-                                   "light casts those shadows is a property of the light object."));
-        ImGui::PopStyleColor();
+    if (EditorTheme::SectionHeader(T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen,
+                                       nullptr, T("Whether a pass runs at all and at what resolution. Which light casts those shadows is a property of the light object."))) {
         ImGui::Checkbox(T("Shadows"), &c.Shadows);
         static const int kShadowVals[] = {512, 1024, 2048, 4096};
         const char* shadowRes[] = {"512", "1024", "2048", "4096"};
@@ -146,7 +130,9 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // лучи. Пока раздела не было, единственным способом попробовать объём в
     // редакторе была переменная окружения при запуске: то есть перезапуск на
     // каждое значение.
-    if (EditorTheme::SectionHeader(T("Volumetric Light" "###Volumetrics"))) {
+    if (EditorTheme::SectionHeader(T("Volumetric Light" "###Volumetrics"),
+                                   ImGuiTreeNodeFlags_DefaultOpen, nullptr,
+                                   T("Steps decide banding, accumulation decides grain, scale decides sharpness. Turn accumulation off and the same number of steps becomes visibly noisy."))) {
         ImGui::Checkbox(T("Volumetrics"), &c.Volumetrics);
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
@@ -186,11 +172,6 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::BeginDisabled(!c.VolumetricTemporal);
         ImGui::SliderFloat(T("Temporal Blend"), &c.VolumetricTemporalBlend, 0.5f, 0.98f);
         ImGui::EndDisabled();
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextWrapped("%s", T("Steps decide banding, accumulation decides grain, scale decides "
-                                   "sharpness. Turn accumulation off and the same number of steps "
-                                   "becomes visibly noisy."));
-        ImGui::PopStyleColor();
 
         ImGui::Checkbox(T("Debug: sun visibility"), &c.VolumetricDebug);
         ImGui::EndDisabled();

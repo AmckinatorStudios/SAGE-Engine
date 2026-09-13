@@ -605,7 +605,20 @@ void Apply() {
     }
 }
 
-bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked) {
+void Hint(const char* text) {
+    if (!text || !*text) return;
+    if (!ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) return;
+    ImGui::BeginTooltip();
+    // Перенос по ширине: пояснения бывают в две-три строки, а подсказка во всю
+    // ширину экрана нечитаема.
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
+bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
+                   const char* hint) {
     // AllowOverlap — чтобы кнопка в правом углу принимала нажатие, а не
     // проваливалась в заголовок: CollapsingHeader занимает всю ширину строки, и
     // без этого флага он перехватывал бы клик по всему, что на нём нарисовано.
@@ -618,6 +631,10 @@ bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClic
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, Color(Role::Elevated));
     const bool open = ImGui::CollapsingHeader(label, flags);
     ImGui::PopStyleColor(3);
+    // Подсказка вешается на ЗАГОЛОВОК — до кнопки «убрать»: после неё
+    // «последним элементом» для ImGui станет кнопка, и пояснение к секции
+    // всплывало бы над корзиной.
+    Hint(hint);
 
     if (removeClicked) {
         const ImGuiStyle& style = ImGui::GetStyle();

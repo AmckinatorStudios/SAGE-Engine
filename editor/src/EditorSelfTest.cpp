@@ -303,7 +303,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2574,6 +2574,91 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: материалы модели для обложки не прочитались: "
                                 << SAGE_TEST_MODEL;
             ok = false;
+        }
+    }
+
+    // --- МЕШ СНИМАЕТСЯ, КАК ЛЮБОЙ КОМПОНЕНТ ---------------------------------
+    //
+    // Меш был единственным компонентом без кнопки «убрать»: добавить его через
+    // «Добавить компонент» было можно, а снять — нельзя, и объект, которому он
+    // достался по ошибке (брошенной моделью, например), оставался с ним
+    // навсегда. Никакой особости у меша нет, и невидимый объект — законное
+    // состояние.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        GameObject box = CreatePrimitiveEntity("MeshRemovable", MeshRef::Type::Cube);
+        entt::registry& reg = m_scene->Registry();
+        const int boxId = box.Id();
+
+        reg.remove<MeshRendererComponent>(box.Entity());
+        if (reg.all_of<MeshRendererComponent>(box.Entity())) {
+            LOG_ERROR("Editor") << "SELFTEST: меш не снимается с объекта";
+            ok = false;
+        }
+        // Объект без меша обязан пережить сохранение и остаться без меша: иначе
+        // «сняли меш» откатывалось бы при первой же перезагрузке сцены.
+        if (ok) {
+            const std::string text = SceneSerializer::SaveToString(*m_scene);
+            std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+            GameObject back = loaded ? loaded->Get(boxId) : GameObject{};
+            if (!back.Valid() || loaded->Registry().all_of<MeshRendererComponent>(back.Entity())) {
+                LOG_ERROR("Editor") << "SELFTEST: снятый меш вернулся после перезагрузки сцены";
+                ok = false;
+            }
+        }
+        // И добавляется обратно — тем же списком компонентов.
+        if (ok) {
+            reg.emplace<MeshRendererComponent>(box.Entity());
+            if (!reg.all_of<MeshRendererComponent>(box.Entity())) {
+                LOG_ERROR("Editor") << "SELFTEST: меш не добавляется обратно";
+                ok = false;
+            }
+        }
+        // Меш есть в списке «Добавить компонент» — иначе снять его было бы
+        // можно, а вернуть нечем.
+        if (ok) {
+            bool offered = false;
+            for (const auto& [category, items] : InspectorPanel::AddComponentMenuContents())
+                for (const std::string& n : items)
+                    if (n == "Mesh") offered = true;
+            if (!offered) {
+                LOG_ERROR("Editor") << "SELFTEST: меша нет в списке «Добавить компонент»";
+                ok = false;
+            }
+        }
+    }
+
+    // --- НЕВИДИМЫЕ ОБЪЕКТЫ ВЫБИРАЮТСЯ ЩЕЛЧКОМ ПО СВОЕМУ ЗНАЧКУ --------------
+    //
+    // Камера, свет, эмиттер, зонд и источник звука ничего не рисуют. Значок в
+    // их точке показывает, что они там есть, — но щелчок по нему проваливался
+    // сквозь у всех, кроме камеры и света: значок обманывал.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        struct Probe { const char* Catalog; const char* What; };
+        const Probe kProbes[] = {
+            {"fx.particles.fire", "эмиттер частиц"},
+            {"fx.probe", "зонд отражений"},
+            {"audio.source", "источник звука"},
+            {"camera.game", "камера"},
+        };
+        const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 8.0f), glm::vec3(0.0f),
+                                           glm::vec3(0, 1, 0));
+        const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
+        for (const Probe& p : kProbes) {
+            const int id = CreateCatalogObject(p.Catalog);
+            GameObject obj = m_scene->Get(id);
+            if (!obj.Valid()) { ok = false; break; }
+            // Ставим в начало координат и целимся ровно в него.
+            obj.GetTransform().Position = glm::vec3(0.0f);
+            SetSelectedId(-1);
+            PickAtViewportWith(view, proj, 0.5f, 0.5f, /*additive=*/false);
+            if (m_selectedId != id) {
+                LOG_ERROR("Editor") << "SELFTEST: щелчок по значку не выбирает: " << p.What;
+                ok = false;
+                break;
+            }
+            m_scene->RemoveObject(id);
         }
     }
 

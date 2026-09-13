@@ -1503,6 +1503,10 @@
     "Green": "Зелёный",
     "Cyan": "Бирюзовый",
     "Blue": "Синий",
-    "Purple": "Фиолетовый"
+    "Purple": "Фиолетовый",
+    "Click — look along this axis; drag — orbit the view": "Щелчок — смотреть вдоль этой оси; перетаскивание — вращать вид",
+    "Mark in the list. A folder is for sorting only: it does not move its contents and is not drawn.": "Метка в списке. Папка нужна только для порядка: содержимое она не двигает и не рисуется.",
+    "Bakes indirect light to lightmaps (static) and a probe volume (dynamic); direct light stays realtime": "Запекает непрямой свет в лайтмапы (статика) и в объём проб (динамика); прямой свет остаётся реального времени",
+    "Flat fill: no gradient, no sun, no time of day. Ambient light from the sky takes this colour": "Ровная заливка: без градиента, светил и времени суток. Окружающий свет «от неба» возьмёт этот цвет"
   }
 }

@@ -59,7 +59,9 @@ void EnvironmentPanel::StartBake(EditorHost& host, const sage::gi::GISettings& s
 }
 
 void EnvironmentPanel::DrawGISection(EditorHost& host) {
-    if (!EditorTheme::SectionHeader(T("Global Illumination (baked)" "###Global Illumination (baked)"), ImGuiTreeNodeFlags_DefaultOpen))
+    if (!EditorTheme::SectionHeader(T("Global Illumination (baked)" "###Global Illumination (baked)"),
+                                    ImGuiTreeNodeFlags_DefaultOpen, nullptr,
+                                    T("Bakes indirect light to lightmaps (static) and a probe volume (dynamic); direct light stays realtime")))
         return;
 
     Scene& scene = host.CurrentScene();
@@ -148,8 +150,6 @@ void EnvironmentPanel::DrawGISection(EditorHost& host) {
             scene.GI->Settings = s;
         }
     }
-    ImGui::TextDisabled("%s", T("Bakes indirect light to lightmaps (static) and a probe"));
-    ImGui::TextDisabled("%s", T("volume (dynamic); direct light stays realtime"));
 }
 
 // Солнце сцены. Раньше здесь стояли три поля прямо в настройках освещения —
@@ -219,12 +219,12 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
 
 // --- НЕБО ------------------------------------------------------------------
 void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env) {
-    if (!EditorTheme::SectionHeader(T("Sky" "###Sky"), ImGuiTreeNodeFlags_DefaultOpen)) return;
+    if (!EditorTheme::SectionHeader(T("Sky" "###Sky"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
+                                    T("Time of day is baked into the images — the day/night model does not touch a textured sky."))) return;
     SkyboxSettings& sky = env.Skybox;
 
     if (ImGui::Checkbox(T("Enable Sky"), &sky.Enabled)) host.PushUndoSnapshot();
     if (!sky.Enabled) {
-        ImGui::TextDisabled("%s", T("Background is a flat colour; ambient uses its own values"));
         return;
     }
 
@@ -256,12 +256,12 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
     // показывать их значило бы обещать то, чего не будет.
     if (sky.Kind == SkyboxSettings::Source::Solid) {
         ImGui::ColorEdit3(T("Sky colour"), &sky.TopColor.x);
+        EditorTheme::Hint(T("Flat fill: no gradient, no sun, no time of day. "
+                            "Ambient light from the sky takes this colour"));
         host.TrackLastImGuiItem();
-        ImGui::TextDisabled("%s", T("Flat fill: no gradient, no sun, no time of day"));
         // Окружающий свет при этом ЕСТЬ: режим «от неба» возьмёт этот самый
         // цвет, и предметы будут им подсвечены — в отличие от выключенного
         // неба, которое означает темноту.
-        ImGui::TextDisabled("%s", T("Ambient light from the sky takes this colour"));
         return;
     }
 
@@ -355,8 +355,6 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
                                    T("The sky did not assemble — the reason is in the console"));
             }
         }
-        ImGui::TextDisabled("%s", T("One picture with all six faces: a cross, a strip or a "
-                                    "panorama."));
     } else if (sky.Kind == SkyboxSettings::Source::Cubemap) {
         // Слот типа «папка»: каталог перетаскивается из панели ассетов ровно
         // так же, как файл, и слот показывает, что именно выбрано.
@@ -375,7 +373,6 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
             m_browser.Open(c);
             m_skyPick = -1;
         }
-        ImGui::TextDisabled("%s", T("Six faces named px, nx, py, ny, pz, nz"));
     } else {
         // Шесть отдельных файлов: имена чужого набора трогать не нужно.
         // НЕ static: язык интерфейса переключается на ходу, а статический
@@ -410,8 +407,6 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
     ImGui::DragFloat(T("Brightness"), &sky.Intensity, 0.01f, 0.0f, 4.0f); host.TrackLastImGuiItem();
     ImGui::DragFloat(T("Rotation"), &sky.RotationDeg, 0.5f, -360.0f, 360.0f, "%.0f°");
     host.TrackLastImGuiItem();
-    ImGui::TextDisabled("%s", T("Time of day is baked into the images — the day/night model does "
-                                "not touch a textured sky."));
 }
 
 // --- ОКРУЖАЮЩИЙ СВЕТ -------------------------------------------------------
@@ -435,9 +430,9 @@ void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment&
         env.ResolveAmbient(skyC, groundC);
         ImGui::ColorEdit3(T("Sky (computed)"), &skyC.x, ImGuiColorEditFlags_NoInputs |
                                                             ImGuiColorEditFlags_NoPicker);
+        EditorTheme::Hint(T("Taken from the sky, so it darkens with it"));
         ImGui::ColorEdit3(T("Ground (computed)"), &groundC.x, ImGuiColorEditFlags_NoInputs |
                                                                   ImGuiColorEditFlags_NoPicker);
-        ImGui::TextDisabled("%s", T("Taken from the sky, so it darkens with it"));
     } else if (env.AmbientMode == LightingEnvironment::AmbientSource::FromSky) {
         // НЕБА НЕТ — И СВЕТА ОТ НЕГО НЕТ, и поля тут ни при чём: они
         // принадлежат другому режиму. Показывать их рабочими значило бы
@@ -456,15 +451,15 @@ void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment&
         float zero = 0.0f;
         ImGui::DragFloat(T("Strength"), &zero, 0.01f, 0.0f, 2.0f);
         ImGui::EndDisabled();
-        ImGui::TextDisabled("%s", T("Sky tints upward faces, Ground — downward"));
         return;
     } else {
-        ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x); host.TrackLastImGuiItem();
+        ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x);
+        EditorTheme::Hint(T("Sky tints upward faces, Ground — downward"));
+        host.TrackLastImGuiItem();
         ImGui::ColorEdit3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
     }
     ImGui::DragFloat(T("Strength"), &env.AmbientStrength, 0.01f, 0.0f, 2.0f);
     host.TrackLastImGuiItem();
-    ImGui::TextDisabled("%s", T("Sky tints upward faces, Ground — downward"));
 }
 
 void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
@@ -515,13 +510,13 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     DrawSkySection(host, env);
     DrawAmbientSection(host, env);
 
-    if (EditorTheme::SectionHeader(T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader(T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
+                                   T("Linear distance fog (applied in Shaded mode)"))) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
         ImGui::ColorEdit3(T("Fog Color"), &env.Fog.Color.x); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Fog Start"), &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Fog End"), &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
         if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;
-        ImGui::TextDisabled("%s", T("Linear distance fog (applied in Shaded mode)"));
 
         // Объёмный свет живёт в настройках ДВИЖКА, а ищут его здесь — рядом с
         // туманом, потому что для человека это одно и то же явление: воздух,

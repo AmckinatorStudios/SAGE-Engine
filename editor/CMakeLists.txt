@@ -53,6 +53,7 @@ add_executable(SageEditor WIN32
     src/ObjectCatalog.cpp
     src/RectSelect.cpp
     src/FolderColors.cpp
+    src/ViewGizmo.cpp
     src/TextureSet.cpp
     src/UIElementProperties.cpp
     src/VarsEditor.cpp
