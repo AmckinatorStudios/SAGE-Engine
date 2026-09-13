@@ -63,7 +63,14 @@ std::vector<entt::entity> RootsOf(Scene& scene) {
 
 void CopyAllComponents(GameObject& src, GameObject& dst) {
     dst.GetTransform() = src.GetTransform();
-    dst.Renderer() = src.Renderer();
+    // МЕШ КОПИРУЕТСЯ, ЕСЛИ ОН ЕСТЬ. Копия пустого объекта обязана остаться
+    // пустой: иначе дублирование узла иерархии возвращало бы ему MeshRenderer,
+    // и «пустой» объект переставал быть пустым от одного Ctrl+D.
+    if (const MeshRendererComponent* smr = src.Registry()->try_get<MeshRendererComponent>(src.Entity())) {
+        dst.Registry()->emplace_or_replace<MeshRendererComponent>(dst.Entity(), *smr);
+    } else {
+        dst.Registry()->remove<MeshRendererComponent>(dst.Entity());
+    }
     CopyIfPresent<ScriptComponent>(src, dst);
     // Публичные переменные едут с объектом: префаб без своих настроек — это
     // объект, который после постановки в сцену надо настраивать заново.

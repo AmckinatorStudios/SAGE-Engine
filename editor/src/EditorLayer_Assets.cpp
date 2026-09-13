@@ -209,7 +209,11 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         // AssignMaterial, а не три присваивания: он же возвращает в нейтраль
         // поправки экземпляра. Красный материал на зелёном кубе иначе даёт
         // бурое пятно — цвет объекта множится на albedo материала.
-        AssignMaterial(obj.Renderer(), ref, ResourceManager::Instance().GetMaterial(ref));
+        // get_or_emplace, а не Renderer(): бросить материал можно и на ПУСТОЙ
+        // объект — у него меша нет. Бросок означает «пусть выглядит так», и
+        // отказывать на этом месте было бы странно; компонент заводится сам.
+        AssignMaterial(m_scene->Registry().get_or_emplace<MeshRendererComponent>(obj.Entity()),
+                       ref, ResourceManager::Instance().GetMaterial(ref));
         SetStatusMessage(T("Material assigned: ") + asset.filename().string());
         return true;
     }
@@ -227,7 +231,9 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
             return true;
         }
         PushUndoSnapshot();
-        obj.Renderer();   // компонент обязан быть до настройки модели
+        // Компонент обязан быть до настройки модели — и у пустого объекта его
+        // нет, поэтому заводим, а не читаем.
+        m_scene->Registry().get_or_emplace<MeshRendererComponent>(obj.Entity());
         ReportModelMaterials(SetEntityMesh(m_project, m_scene->Registry(), obj.Entity(),
                                            MeshRef::Type::Model, ref, std::move(mesh)));
         SetStatusMessage(T("Mesh replaced: ") + asset.filename().string());
@@ -249,7 +255,8 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
             SetStatusMessage(status);
             return true;
         }
-        AssignMaterial(obj.Renderer(), matRef, ResourceManager::Instance().GetMaterial(matRef));
+        AssignMaterial(m_scene->Registry().get_or_emplace<MeshRendererComponent>(obj.Entity()),
+                       matRef, ResourceManager::Instance().GetMaterial(matRef));
         SetStatusMessage(status);
         return true;
     }
@@ -362,7 +369,6 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         }
         PushUndoSnapshot();
         GameObject obj = m_scene->CreateObject(asset.stem().string());
-        obj.Renderer();
         ReportModelMaterials(SetEntityMesh(m_project, m_scene->Registry(), obj.Entity(),
                                            MeshRef::Type::Model, ref, std::move(mesh)));
         newId = obj.Id();

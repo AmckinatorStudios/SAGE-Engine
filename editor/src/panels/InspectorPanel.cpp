@@ -80,14 +80,18 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
                 // Путь спросили ради СОЗДАНИЯ: файла ещё нет, его надо записать.
                 m_browseIsMaterial = false;
                 m_browseCreateMaterial = false;
-                if (GameObject sel = host.InspectedObject(); sel.Valid()) {
+                // Проверка на компонент: пока диалог был открыт, выделение
+                // могло уйти на пустой объект — у него меша нет вовсе.
+                if (GameObject sel = host.InspectedObject();
+                    sel.Valid() && sel.Registry()->all_of<MeshRendererComponent>(sel.Entity())) {
                     WriteMaterialFromOverrides(host, sel.Renderer(), m_browser.Result().string());
                 }
             } else if (m_browseIsMaterial) {
                 m_browseIsMaterial = false;
                 // Материал грузим сразу: без указателя объект остался бы с путём
                 // и без вида — «выбрал материал, ничего не произошло».
-                if (GameObject sel = host.InspectedObject(); sel.Valid()) {
+                if (GameObject sel = host.InspectedObject();
+                    sel.Valid() && sel.Registry()->all_of<MeshRendererComponent>(sel.Entity())) {
                     MeshRendererComponent& mr = sel.Renderer();
                     if (!mr.MaterialPath.empty())
                         mr.MaterialPtr = ResourceManager::Instance().GetMaterial(mr.MaterialPath);

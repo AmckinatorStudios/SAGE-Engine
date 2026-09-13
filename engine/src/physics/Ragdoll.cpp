@@ -58,7 +58,7 @@ int BuildRagdoll(Scene& scene, const glm::vec3& origin, float scale) {
                                      (b.HalfHeight + b.Radius) * s,
                                      2.0f * b.Radius * s};
 
-        MeshRendererComponent& mr = bone.Renderer();
+        MeshRendererComponent& mr = bone.EnsureRenderer();
         mr.Ref = MeshRef{MeshRef::Type::Cylinder, ""};
         mr.MeshPtr = cylinder;
         mr.Color = {0.75f, 0.65f, 0.55f};

@@ -13,6 +13,7 @@
 #include "sage/core/Config.h"
 #include "sage/render/Material.h"
 #include "sage/scene/Scene.h"
+#include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/ui/UI.h"
 
@@ -832,4 +833,65 @@ TEST(Scene_migration_v5_to_v6_leaves_a_text_input_alone) {
     const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
     CHECK_TRUE(j["objects"][0]["ui"].contains("label"));   // текст остался у поля
     CHECK_EQ(j["objects"].size(), (size_t)2);              // но значок всё же съехал
+}
+
+// --- Пустой объект ДЕЙСТВИТЕЛЬНО пуст -------------------------------------
+//
+// «Создать пустой объект» давал сущность с MeshRendererComponent — то есть уже
+// не пустую: в инспекторе висела секция «Меш» с цветом, тенями и слотом
+// материала. Проверяется не только момент создания, но и две точки, где
+// компонент возвращался незаметно: сохранение сцены (загрузчик даёт меш всем
+// подряд) и копирование поддерева (Ctrl+D, префабы).
+TEST(Scene_empty_object_has_no_mesh_renderer) {
+    Scene scene("Empty");
+    GameObject empty = scene.CreateEmptyObject("Node");
+    CHECK_TRUE(!scene.Registry().all_of<MeshRendererComponent>(empty.Entity()));
+    // Имя и положение у него всё же есть — иначе это не объект сцены.
+    CHECK_EQ(empty.Name(), std::string("Node"));
+
+    // Обычный объект по-прежнему с мешем: правка не должна была задеть всех.
+    GameObject solid = scene.CreateObject("Box");
+    CHECK_TRUE(scene.Registry().all_of<MeshRendererComponent>(solid.Entity()));
+
+    // Сохранение и загрузка.
+    const std::string path = TempPath("empty_object.sage");
+    SceneSerializer::Save(scene, path);
+    auto loaded = SceneSerializer::Load(path);
+    CHECK_TRUE(loaded != nullptr);
+    GameObject back = FindByName(*loaded, "Node");
+    CHECK_TRUE(back.Valid());
+    CHECK_TRUE(!loaded->Registry().all_of<MeshRendererComponent>(back.Entity()));
+    GameObject backSolid = FindByName(*loaded, "Box");
+    CHECK_TRUE(backSolid.Valid());
+    CHECK_TRUE(loaded->Registry().all_of<MeshRendererComponent>(backSolid.Entity()));
+    std::remove(path.c_str());
+}
+
+// Копия пустого объекта обязана остаться пустой: иначе Ctrl+D возвращал бы
+// MeshRenderer, и «пустой» объект переставал быть пустым от одного нажатия.
+TEST(Scene_copy_of_empty_object_stays_empty) {
+    Scene scene("Copy");
+    GameObject empty = scene.CreateEmptyObject("Node");
+    GameObject child = scene.CreateEmptyObject("Child");
+    scene.SetParent(child.Entity(), empty.Entity());
+
+    GameObject copy = sage::scene::CopySubtree(scene, empty.Entity(), scene, entt::null);
+    CHECK_TRUE(copy.Valid());
+    CHECK_TRUE(!scene.Registry().all_of<MeshRendererComponent>(copy.Entity()));
+}
+
+// Скрипт («сделай этот объект кубом») и сеть задают ВИД объекта, и пустой
+// объект для них — обычное дело: узел иерархии, которому по ходу игры решили
+// дать меш. Поэтому задающий путь компонент заводит, а спрашивающий отвечает
+// значением по умолчанию, а не ошибкой.
+TEST(Scene_empty_object_gets_a_renderer_on_demand) {
+    Scene scene("OnDemand");
+    GameObject node = scene.CreateEmptyObject("Node");
+    CHECK_TRUE(!node.HasRenderer());
+    node.EnsureRenderer().Color = glm::vec3(1.0f, 0.0f, 0.0f);
+    CHECK_TRUE(node.HasRenderer());
+    CHECK_NEAR(node.Renderer().Color.r, 1.0f, 1e-5);
+    // Повторный вызов не сбрасывает уже заведённый компонент.
+    node.EnsureRenderer();
+    CHECK_NEAR(node.Renderer().Color.r, 1.0f, 1e-5);
 }

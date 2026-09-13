@@ -154,6 +154,7 @@ public:
     // --- EditorHost: сущности ---
     GameObject CreateCubeEntity(const std::string& name) override;
     GameObject CreatePrimitiveEntity(const std::string& name, MeshRef::Type type);
+    int CreateCatalogObject(const std::string& id) override;
     GameObject DuplicateEntity(GameObject src); // копия одной сущности (для Duplicate/prefab)
     void DuplicateSelected() override;
     void DeleteSelected() override;

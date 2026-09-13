@@ -64,6 +64,7 @@
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
+#include "ObjectCatalog.h"
 #include "PanelWindows.h"
 
 namespace fs = std::filesystem;
@@ -476,180 +477,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (ImGui::MenuItem(T("Stop"), nullptr, false, InPlayMode())) StopPlay();
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu(T("Entity"))) {
-            if (ImGui::MenuItem(T("Create Empty"))) {
-                PushUndoSnapshot();
-                SetSelectedId(m_scene->CreateObject("Empty").Id());
-            }
-            if (ImGui::BeginMenu(T("Create Primitive"))) {
-                struct { const char* name; MeshRef::Type type; } prims[] = {
-                    {"Cube", MeshRef::Type::Cube}, {"Sphere", MeshRef::Type::Sphere},
-                    {"Plane", MeshRef::Type::Plane}, {"Cylinder", MeshRef::Type::Cylinder},
-                    {"Cone", MeshRef::Type::Cone},
-                };
-                for (const auto& p : prims) {
-                    if (ImGui::MenuItem(p.name)) {
-                        PushUndoSnapshot();
-                        SetSelectedId(CreatePrimitiveEntity(p.name, p.type).Id());
-                    }
-                }
-                ImGui::EndMenu();
-            }
-            // Наклейка ставится в СЕРЕДИНУ вида и смотрит туда же, куда
-            // камера: поставленная в начало координат, она чаще всего оказалась
-            // бы внутри пола или далеко за спиной, и первое, что пришлось бы
-            // делать, — искать её.
-            if (ImGui::MenuItem(T("Create Decal"))) {
-                PushUndoSnapshot();
-                GameObject d = m_scene->CreateObject("Decal");
-                d.Renderer().Ref = MeshRef{MeshRef::Type::None, ""};
-                d.GetTransform().Position = m_camera.Position + m_camera.Front * 4.0f;
-                // Ось Z наклейки — навстречу камере: проекция идёт вдоль -Z, то
-                // есть от зрителя вглубь сцены, как и смотрит человек.
-                const glm::vec3 f = -m_camera.Front;
-                d.GetTransform().Rotation =
-                    glm::vec3(glm::degrees(std::asin(glm::clamp(f.y, -1.0f, 1.0f))),
-                              glm::degrees(std::atan2(f.x, f.z)), 0.0f);
-                d.GetTransform().Scale = glm::vec3(1.0f);
-                m_scene->Registry().emplace<DecalComponent>(d.Entity());
-                SetSelectedId(d.Id());
-            }
-
-            // Готовые элементы интерфейса, а не «добавь компонент и настрой».
-            //
-            // Голый прямоугольник — это ещё не элемент: чтобы получить из него
-            // кнопку, надо добавить подложку, надпись и реакцию на мышь. Меню
-            // отдаёт то, что человек и хотел получить, сразу собранным; дальше
-            // правится всё, вплоть до состава частей.
-            if (ImGui::BeginMenu(T("Create UI"))) {
-                struct Preset { const char* Name; const char* Label; };
-                static const Preset kPresets[] = {
-                    {"Panel", T("Panel")},   {"Button", T("Button")}, {"Label", T("Label")},
-                    {"Image", T("Image")}, {"Bar", T("Bar")},    {"Checkbox", T("Checkbox")},
-                    {"Slider", T("Slider")}, {"Input", T("Input")},
-                };
-                for (const Preset& p : kPresets) {
-                    if (ImGui::MenuItem(p.Label)) {
-                        PushUndoSnapshot();
-                        SetSelectedId(CreateUIEntity(p.Name).Id());
-                        // И сразу открывается редактор интерфейса: элемент,
-                        // которого не видно после создания, выглядит как
-                        // «кнопка не сработала».
-                        m_showUIEditor = true;
-                        m_uiEditor.RequestFocus();
-                    }
-                }
-
-                // Готовые ЭКРАНЫ, а не отдельные элементы.
-                //
-                // Заготовка отвечает на вопрос «что такое кнопка»; оставшийся —
-                // «как из кнопок собирают меню» — до сих пор оставался без
-                // ответа, и каждый отвечал на него сам. Демо ставится в сцену и
-                // разбирается в инспекторе: холст, раскладка, группа и имена
-                // действий видны на работающем экране (см. sage/ui/UIDemos.h).
-                ImGui::Separator();
-                if (ImGui::BeginMenu(T("Demo screens"))) {
-                    struct Demo { const char* Key; const char* Label; };
-                    static const Demo kDemos[] = {
-                        {"menu", T("Main menu")},
-                        {"hud", T("HUD")},
-                        {"settings", T("Settings")},
-                    };
-                    for (const Demo& d : kDemos) {
-                        if (ImGui::MenuItem(d.Label)) {
-                            PushUndoSnapshot();
-                            const int id = sage::ui::BuildDemo(*m_scene, d.Key);
-                            if (id >= 0) SetSelectedId(id);
-                            m_showUIEditor = true;
-                            m_uiEditor.RequestFocus();
-                            m_sceneDirty = true;
-                        }
-                    }
-                    ImGui::EndMenu();
-                }
-                ImGui::EndMenu();
-            }
-            if (ImGui::MenuItem(T("Create Camera"))) {
-                PushUndoSnapshot();
-                GameObject camObj = m_scene->CreateObject("Camera");
-                m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
-                SetSelectedId(camObj.Id());
-            }
-            // Свет — подменю по типам. Одного пункта «Create Light» было мало:
-            // он всегда создавал точечный, а прожектор и солнце приходилось
-            // делать через инспектор, догадавшись, что тип там переключается.
-            if (ImGui::BeginMenu(T("Create Light"))) {
-                struct LightPreset {
-                    const char* item;
-                    const char* name;
-                    LightComponent::Type kind;
-                    glm::vec3 position;
-                    glm::vec3 rotation;
-                };
-                const LightPreset presets[] = {
-                    {T("Point"), "Light", LightComponent::Type::Point,
-                     {0.0f, 2.5f, 0.0f}, {0.0f, 0.0f, 0.0f}},
-                    // Прожектор смотрит вниз: поворот -90° по X направляет
-                    // «вперёд» (-Z) в -Y. Созданный «в никуда», он выглядел бы
-                    // как свет, который не работает.
-                    {T("Spot"), "Spotlight", LightComponent::Type::Spot,
-                     {0.0f, 5.0f, 0.0f}, {-90.0f, 0.0f, 0.0f}},
-                    {T("Directional (sun)"), "Sun", LightComponent::Type::Directional,
-                     {0.0f, 10.0f, 0.0f}, {-55.0f, -25.0f, 0.0f}},
-                };
-                for (const LightPreset& p : presets) {
-                    if (!ImGui::MenuItem(p.item)) continue;
-                    PushUndoSnapshot();
-                    GameObject lightObj = m_scene->CreateObject(p.name);
-                    lightObj.GetTransform().Position = p.position;
-                    lightObj.GetTransform().Rotation = p.rotation;
-                    LightComponent lc;
-                    lc.Kind = p.kind;
-                    if (p.kind == LightComponent::Type::Directional) {
-                        lc.Color = {1.0f, 0.95f, 0.85f};
-                        lc.Intensity = 1.0f;
-                    } else if (p.kind == LightComponent::Type::Spot) {
-                        lc.Intensity = 4.0f;
-                    }
-                    m_scene->Registry().emplace<LightComponent>(lightObj.Entity(), lc);
-                    SetSelectedId(lightObj.Id());
-                }
-                ImGui::EndMenu();
-            }
-            ImGui::Separator();
-            // Физический куб: меш + динамическое тело + бокс-коллайдер — падает
-            // под гравитацией сразу в Play (быстрый способ проверить физику).
-            if (ImGui::MenuItem(T("Create Physics Cube"))) {
-                PushUndoSnapshot();
-                GameObject box = CreatePrimitiveEntity("Physics Cube", MeshRef::Type::Cube);
-                box.GetTransform().Position = {0.0f, 4.0f, 0.0f};
-                m_scene->Registry().emplace<RigidBodyComponent>(box.Entity());
-                m_scene->Registry().emplace<ColliderComponent>(box.Entity());
-                SetSelectedId(box.Id());
-            }
-            // Анимированный объект: Mesh (пока пустой — модель выберут в
-            // инспекторе) плюс Animation. Без модели анимация показывает
-            // встроенный демо-скелет с клипом «Wave», и во вьюпорте сразу
-            // видно, что скиннинг работает.
-            if (ImGui::MenuItem(T("Create Animated Object"))) {
-                PushUndoSnapshot();
-                GameObject anim = m_scene->CreateObject("Animated Object");
-                anim.GetTransform().Position = {0.0f, 0.0f, 0.0f};
-                m_scene->Registry().emplace<MeshRendererComponent>(anim.Entity());
-                m_scene->Registry().emplace<AnimationComponent>(anim.Entity());
-                SetSelectedId(anim.Id());
-            }
-            // Эмиттер частиц: по умолчанию пресет «Fire» в точке над началом.
-            if (ImGui::MenuItem(T("Create Particle Emitter"))) {
-                PushUndoSnapshot();
-                GameObject fx = m_scene->CreateObject("Particle Emitter");
-                fx.GetTransform().Position = {0.0f, 0.5f, 0.0f};
-                ParticleEmitterComponent em;
-                em.Config = ParticlePresets::Registry()[0].Make(); // Fire
-                em.Preset = 0;
-                m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity(), em);
-                SetSelectedId(fx.Id());
-            }
+        // ОБЪЕКТ — ОДИН КАТАЛОГ НА ВЕСЬ РЕДАКТОР.
+        //
+        // Здесь был свой список пунктов, а под правой кнопкой в иерархии —
+        // свой, вдвое короче. Теперь оба рисуют общий каталог
+        // (editor/src/ObjectCatalog.h), и разойтись им нечем.
+        if (ImGui::BeginMenu(T("Object"))) {
+            if (const char* pick = sage::editor::objectcatalog::DrawMenu()) CreateCatalogObject(pick);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(T("Window"))) {

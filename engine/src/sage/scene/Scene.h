@@ -49,20 +49,44 @@ public:
 
     MeshRendererComponent& Renderer() { return Comp<MeshRendererComponent>(); }
     const MeshRendererComponent& Renderer() const { return Comp<MeshRendererComponent>(); }
-    glm::vec3& ColorRef() { return Comp<MeshRendererComponent>().Color; }
+
+    // Есть ли чем рисоваться. Нужен всем, кто ЧИТАЕТ вид объекта: пустой
+    // объект (узел иерархии, точка привязки, держатель скрипта) компонента не
+    // несёт, и Renderer() на нём бросает исключение.
+    bool HasRenderer() const { return Valid() && m_reg->all_of<MeshRendererComponent>(m_entity); }
+
+    // Компонент вида — ЗАВЕСТИ, если его нет. Для тех, кто вид ЗАДАЁТ:
+    // «сделай этот объект кубом» из скрипта или из сети означает «пусть он
+    // будет видимым», а не «ошибка, у него нет меша».
+    MeshRendererComponent& EnsureRenderer() {
+        if (!Valid()) throw std::runtime_error("GameObject: обращение к уничтоженной/невалидной сущности");
+        return m_reg->get_or_emplace<MeshRendererComponent>(m_entity);
+    }
+    // Цвет и свечение из скрипта: компонент ЗАВОДИТСЯ по обращению. Пустой
+    // объект без MeshRenderer — обычное дело (узел иерархии, точка привязки), а
+    // «obj.Color = ...» на нём означает «пусть будет видимым», а не ошибку.
+    glm::vec3& ColorRef() { return m_reg->get_or_emplace<MeshRendererComponent>(m_entity).Color; }
     // Свечение — рядом с цветом и по той же причине: и то и другое живёт в
     // рендерере, но со стороны скрипта это свойство САМОГО объекта («фонарь
     // светится»), и заставлять писать obj:GetRenderer().Emissive там, где
     // соседняя строка — obj.Color, значило бы разложить одно и то же понятие
     // на два разных способа обращения.
-    glm::vec3& EmissiveRef() { return Comp<MeshRendererComponent>().Emissive; }
-    float& EmissiveStrengthRef() { return Comp<MeshRendererComponent>().EmissiveStrength; }
+    glm::vec3& EmissiveRef() { return m_reg->get_or_emplace<MeshRendererComponent>(m_entity).Emissive; }
+    float& EmissiveStrengthRef() { return m_reg->get_or_emplace<MeshRendererComponent>(m_entity).EmissiveStrength; }
 
 private:
     template <typename T>
     T& Comp() const {
         if (!Valid()) throw std::runtime_error("GameObject: обращение к уничтоженной/невалидной сущности");
-        return m_reg->get<T>(m_entity);
+        // ПРОВЕРКА, А НЕ get<>(). С тех пор как пустой объект стал ДЕЙСТВИТЕЛЬНО
+        // пустым (без MeshRenderer), обращение к отсутствующему компоненту
+        // перестало быть невозможным случаем: его даёт любая забытая проверка в
+        // панели. entt на это отвечает неопределённым поведением — чтением по
+        // чужому адресу, — то есть падением где угодно, только не здесь.
+        // Исключение с внятным текстом падает в том месте, где ошиблись.
+        T* c = m_reg->try_get<T>(m_entity);
+        if (!c) throw std::runtime_error("GameObject: у сущности нет запрошенного компонента");
+        return *c;
     }
 
     entt::registry* m_reg = nullptr;
@@ -101,12 +125,29 @@ public:
     // (утечка в registry, RemoveObject её больше не найдёт). Вместо этого
     // выдаём ближайший свободный id; фактический id — в возвращённом объекте.
     GameObject CreateObjectWithId(const std::string& name, int id) {
+        GameObject obj = CreateEmptyObjectWithId(name, id);
+        m_registry.emplace<MeshRendererComponent>(obj.Entity());
+        return obj;
+    }
+
+    // ДЕЙСТВИТЕЛЬНО пустой объект: только Id, Name и Transform.
+    //
+    // ЗАЧЕМ ОТДЕЛЬНО. «Создать пустой объект» в редакторе давал объект с
+    // MeshRenderer — то есть уже не пустой: в инспекторе висела секция «Меш» с
+    // цветом, тенями и слотом материала, а в списке компонентов «Меш» стоял
+    // добавленным. Пустой объект берут ровно для обратного — как узел иерархии,
+    // точку привязки, держатель скрипта, — и первым делом этот компонент
+    // приходилось снимать вручную, догадавшись, что он лишний.
+    GameObject CreateEmptyObject(const std::string& name) {
+        return CreateEmptyObjectWithId(name, m_nextId++);
+    }
+
+    GameObject CreateEmptyObjectWithId(const std::string& name, int id) {
         while (m_idToEntity.find(id) != m_idToEntity.end()) id = m_nextId++;
         entt::entity e = m_registry.create();
         m_registry.emplace<IdComponent>(e, IdComponent{id});
         m_registry.emplace<NameComponent>(e, NameComponent{name});
         m_registry.emplace<Transform>(e);
-        m_registry.emplace<MeshRendererComponent>(e);
         m_idToEntity[id] = e;
         return GameObject(&m_registry, e);
     }

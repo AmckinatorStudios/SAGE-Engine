@@ -64,6 +64,7 @@
 #include "UILayoutOps.h"
 #include "EditorPrefs.h"
 #include "Localization.h"
+#include "ObjectCatalog.h"
 #include "sage/scene/SceneSerializer.h"
 
 #include "sage/scene/Prefab.h"
@@ -276,7 +277,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -2550,6 +2551,128 @@ bool EditorLayer::SelfTestSelection() {
         }
     }
 
+    // --- КАТАЛОГ ОБЪЕКТОВ: КАЖДЫЙ ПУНКТ ДАЁТ ГОТОВЫЙ ПРЕДМЕТ ----------------
+    //
+    // Что было: два РАЗНЫХ списка «создать» — в меню «Объект» полтора десятка
+    // пунктов плоским перечнем, а под правой кнопкой в иерархии всего два
+    // («пустой» и «куб»). Часть пунктов при этом выглядела отладочными
+    // кнопками автора («Physics Cube»), а «пустой объект» приходил с
+    // MeshRenderer, то есть пустым не был.
+    //
+    // Проверяется ровно это: список ОДИН и РАЗЛОЖЕН по категориям, каждый его
+    // ключ действительно создаёт объект, пустой объект пуст, а шаблоны
+    // приезжают настроенными — у ящика есть тело и коллайдер, у прожектора
+    // поворот вниз, у дыма конфиг именно дыма.
+    if (ok) {
+        NewScene(ProjectTemplateKind::Empty);
+        namespace catalog = sage::editor::objectcatalog;
+        const catalog::Group root = catalog::Catalog();
+
+        // РАЗЛОЖЕН, А НЕ ПЛОСКИЙ. Ради этого всё и делалось: одним списком из
+        // сорока пунктов пользоваться нельзя.
+        bool hasSubGroups = false;
+        for (const catalog::Group& g : root.Groups)
+            if (!g.Groups.empty()) hasSubGroups = true;
+        if (root.Groups.size() < 6 || !hasSubGroups) {
+            LOG_ERROR("Editor") << "SELFTEST: каталог объектов не разложен по категориям: категорий "
+                                << root.Groups.size() << ", под-списки " << (hasSubGroups ? "есть" : "нет");
+            ok = false;
+        }
+
+        // Все ключи каталога — плоским списком, включая вложенные.
+        std::vector<std::string> ids;
+        std::function<void(const catalog::Group&)> collect = [&](const catalog::Group& g) {
+            for (const catalog::Item& it : g.Items) ids.push_back(it.Id);
+            for (const catalog::Group& sub : g.Groups) collect(sub);
+        };
+        collect(root);
+        if (ids.size() < 25) {
+            LOG_ERROR("Editor") << "SELFTEST: в каталоге объектов всего пунктов: " << ids.size();
+            ok = false;
+        }
+
+        // КАЖДЫЙ пункт обязан что-то создать. Пункт, который внешне сработал и
+        // не сделал ничего, — худший вид поломки: о нём не сообщают.
+        for (const std::string& id : ids) {
+            const int newId = CreateCatalogObject(id);
+            if (newId < 0 || !m_scene->Get(newId).Valid()) {
+                LOG_ERROR("Editor") << "SELFTEST: пункт каталога ничего не создал: " << id;
+                ok = false;
+                break;
+            }
+        }
+
+        // Пустой — ДЕЙСТВИТЕЛЬНО пустой.
+        if (ok) {
+            const int emptyId = CreateCatalogObject("empty");
+            GameObject empty = m_scene->Get(emptyId);
+            if (!empty.Valid() || m_scene->Registry().all_of<MeshRendererComponent>(empty.Entity())) {
+                LOG_ERROR("Editor") << "SELFTEST: пустой объект приехал с компонентом Меш";
+                ok = false;
+            }
+        }
+
+        // Шаблон, а не заготовка под ручную настройку: тело + коллайдер.
+        if (ok) {
+            GameObject crate = m_scene->Get(CreateCatalogObject("physics.box"));
+            if (!crate.Valid() ||
+                !m_scene->Registry().all_of<RigidBodyComponent>(crate.Entity()) ||
+                !m_scene->Registry().all_of<ColliderComponent>(crate.Entity()) ||
+                m_scene->Registry().get<RigidBodyComponent>(crate.Entity()).Type !=
+                    sage::physics::BodyType::Dynamic) {
+                LOG_ERROR("Editor") << "SELFTEST: падающий ящик приехал без тела или коллайдера";
+                ok = false;
+            }
+        }
+
+        // Зона-триггер: пропускает сквозь себя и НЕ рисуется.
+        if (ok) {
+            GameObject trig = m_scene->Get(CreateCatalogObject("physics.trigger"));
+            if (!trig.Valid() ||
+                !m_scene->Registry().all_of<ColliderComponent>(trig.Entity()) ||
+                !m_scene->Registry().get<RigidBodyComponent>(trig.Entity()).Sensor ||
+                m_scene->Registry().all_of<MeshRendererComponent>(trig.Entity())) {
+                LOG_ERROR("Editor") << "SELFTEST: зона-триггер не сквозная или видимая";
+                ok = false;
+            }
+        }
+
+        // Прожектор смотрит ВНИЗ: свет «в никуда» выглядит неработающим.
+        if (ok) {
+            GameObject spot = m_scene->Get(CreateCatalogObject("light.spot"));
+            if (!spot.Valid() ||
+                !m_scene->Registry().all_of<LightComponent>(spot.Entity()) ||
+                m_scene->Registry().get<LightComponent>(spot.Entity()).Kind !=
+                    LightComponent::Type::Spot ||
+                spot.GetTransform().Rotation.x > -45.0f) {
+                LOG_ERROR("Editor") << "SELFTEST: прожектор создан без типа или не смотрит вниз";
+                ok = false;
+            }
+        }
+
+        // Частицы: пункт «Дым» обязан дать именно дым. Связь ключа с пресетом
+        // идёт по имени, и ошибка здесь — это молча подменённый эффект.
+        if (ok) {
+            GameObject smoke = m_scene->Get(CreateCatalogObject("fx.particles.smoke"));
+            const auto& presets = ParticlePresets::Registry();
+            int smokeIndex = -1;
+            for (int i = 0; i < (int)presets.size(); ++i)
+                if (std::string(presets[(size_t)i].Name) == "Smoke") smokeIndex = i;
+            if (!smoke.Valid() ||
+                !m_scene->Registry().all_of<ParticleEmitterComponent>(smoke.Entity()) ||
+                m_scene->Registry().get<ParticleEmitterComponent>(smoke.Entity()).Preset != smokeIndex) {
+                LOG_ERROR("Editor") << "SELFTEST: пункт «Дым» дал не дым";
+                ok = false;
+            }
+        }
+
+        // Опечатка в ключе не должна выглядеть как удачное создание.
+        if (ok && CreateCatalogObject("shape.nonexistent") >= 0) {
+            LOG_ERROR("Editor") << "SELFTEST: неизвестный ключ каталога создал объект";
+            ok = false;
+        }
+    }
+
     // --- МОДЕЛЬ СО СКЕЛЕТОМ СТАНОВИТСЯ ГОТОВЫМ ПЕРСОНАЖЕМ --------------------
     //
     // Что было: файл со скином честно разбирался (кости, клипы), клипы даже
@@ -3759,6 +3882,12 @@ bool EditorLayer::SelfTestTools() {
         m_showHierarchy = m_showInspector = m_showEnvironment = false;
         m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
         m_showProfiler = false;
+        // Панель вёрстки — тоже панель, и AnyPanelVisible её считает. В списке
+        // её не было, потому что до сих пор ни один шаг самопроверки её не
+        // открывал; шаг «каталог объектов» открывает (создание элемента
+        // интерфейса ведёт в редактор интерфейса), и «закрыли всё» переставало
+        // быть правдой.
+        m_showUIEditor = false;
         const bool visibleAfterClose = AnyPanelVisible();
         ShowAllPanels();
         const bool restored = m_showHierarchy && m_showInspector && m_showEnvironment &&

@@ -185,6 +185,14 @@ public:
 
     // --- сущности ---
     virtual GameObject CreateCubeEntity(const std::string& name) = 0;
+    // Создаёт объект по ключу КАТАЛОГА (editor/src/ObjectCatalog.h): "empty",
+    // "shape.cube", "light.spot", "fx.particles.fire", "ui.screen.hud", …
+    // Возвращает id созданного объекта или -1, если ключ неизвестен.
+    //
+    // Ключом, а не набором методов на каждый пункт: список объектов правят
+    // часто, и каждый новый пункт иначе означал бы новый виртуальный метод в
+    // интерфейсе, который видят все панели. Снимок для отмены делает сам.
+    virtual int CreateCatalogObject(const std::string& id) = 0;
     virtual void DuplicateSelected() = 0;
     virtual void DeleteSelected() = 0;
 
