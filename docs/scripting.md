@@ -384,6 +384,11 @@ API не ограничен `Transform`/`Color` — скрипт общаетс�
 - **Физика времени выполнения** (после `BindPhysics`, привязан в Play-режиме
   редактора и в рантайме игры): `SetVelocity(entity, v)` / `GetVelocity(entity)`
   для тела с `RigidBodyComponent` и `SetGravity(v)` для всего мира.
+- **Экран <-> мир**: `camera.ScreenToRay(x, y)` — таблица `{origin, dir}` для
+  `physics.Raycast(ray.origin, ray.dir, ...)` (клик мышью по объекту сцены, а
+  не только прицел из центра экрана); `camera.WorldToScreen(pos)` — точка
+  экрана или `nil`, если она за спиной камеры (полоска здоровья над головой,
+  маркер цели). Координаты — те же, что у `ui.Cursor()`/`ui.ScreenSize()`.
 
 Пример «компоненты общаются» — дверь открывается по сообщению от кнопки:
 ```lua
