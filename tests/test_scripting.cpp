@@ -494,6 +494,178 @@ TEST(Scripting_raw_input_without_binding_errors) {
     CHECK_NEAR((float)se.Lua().script("return GetScrollDelta()"), 0.0f, 1e-4);
 }
 
+// ============================================================================
+//  Источник напрямую (SourceDown/Pressed/Released/Value, AnyPressedSource,
+//  FindConflict, AddBinding, ContextNames, ReleaseAll, TypedText, геймпад,
+//  Configure)
+//
+//  Именованных действий (BindAction/IsActionDown) хватает игровой логике, но
+//  не экрану настроек: без прямого доступа к физическому источнику на Lua
+//  нельзя написать ни ловлю «нажмите новую клавишу», ни проверку конфликта, ни
+//  поле ввода имени игрока.
+// ============================================================================
+
+TEST(Scripting_source_down_pressed_released_by_name) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    CHECK_FALSE((bool)se.Lua().script("return input.SourceDown('W')"));
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::W));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE((bool)se.Lua().script("return input.SourceDown('W')"));
+    CHECK_TRUE((bool)se.Lua().script("return input.SourcePressed('W')"));
+    CHECK_FALSE((bool)se.Lua().script("return input.SourceReleased('W')"));
+
+    input.Push(sage::input::InputEvent::KeyUp(sage::input::Key::W));
+    input.Update(1.0f / 60.0f);
+    CHECK_FALSE((bool)se.Lua().script("return input.SourceDown('W')"));
+    CHECK_TRUE((bool)se.Lua().script("return input.SourceReleased('W')"));
+
+    // Мышь и геймпад — та же строка, тот же путь.
+    input.Push(sage::input::InputEvent::MouseDown(sage::input::MouseButton::Left));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE((bool)se.Lua().script("return input.SourceDown('MOUSE_LEFT')"));
+
+    // Геймпад отвечает, только когда подключён — как и в настоящей игре.
+    input.Push(sage::input::InputEvent::PadConnected(0, true));
+    input.Push(sage::input::InputEvent::PadDown(sage::input::GamepadButton::A, 0));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE((bool)se.Lua().script("return input.SourceDown('PAD_A')"));
+
+    // Нераспознанное имя — честное false, а не ошибка.
+    CHECK_FALSE((bool)se.Lua().script("return input.SourceDown('NOT_A_KEY')"));
+}
+
+TEST(Scripting_source_value_works_for_any_kind) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    // Кнопка как значение — 1.0/0.0, удобно, когда вид источника заранее не
+    // известен (настраиваемая клавиша).
+    CHECK_NEAR((float)se.Lua().script("return input.SourceValue('SPACE')"), 0.0f, 1e-4);
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Space));
+    input.Update(1.0f / 60.0f);
+    CHECK_NEAR((float)se.Lua().script("return input.SourceValue('SPACE')"), 1.0f, 1e-4);
+
+    // Колесо мыши.
+    input.Push(sage::input::InputEvent::Wheeled(-2.0f));
+    input.Update(1.0f / 60.0f);
+    CHECK_NEAR((float)se.Lua().script("return input.SourceValue('WHEEL_DOWN')"), -2.0f, 1e-4);
+
+    // Ось геймпада — тоже только у подключённого.
+    input.Push(sage::input::InputEvent::PadConnected(0, true));
+    input.Push(sage::input::InputEvent::PadAxisMoved(sage::input::GamepadAxis::LeftX, 0.6f, 0));
+    input.Update(1.0f / 60.0f);
+    CHECK_NEAR((float)se.Lua().script("return input.SourceValue('PAD_LEFT_X')"), 0.6f, 1e-4);
+}
+
+TEST(Scripting_any_pressed_source_catches_the_frame_press) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    CHECK_TRUE((bool)se.Lua().script("return input.AnyPressedSource() == nil"));
+
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Q));
+    input.Update(1.0f / 60.0f);
+    std::string caught = se.Lua().script("return input.AnyPressedSource()");
+    CHECK_EQ(caught, std::string("Q"));
+
+    // Голый модификатор (Shift без второй клавиши) источником не считается —
+    // сочетание ещё не дожали.
+    sage::input::InputEvent shift = sage::input::InputEvent::KeyDown(sage::input::Key::LeftShift);
+    input.Push(shift);
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE((bool)se.Lua().script("return input.AnyPressedSource() == nil"));
+}
+
+TEST(Scripting_find_conflict_and_add_binding) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    se.Lua().script("BindAction('Jump', 'SPACE')");
+    CHECK_TRUE((bool)se.Lua().script("return input.FindConflict('SPACE') == 'Jump'"));
+    CHECK_TRUE((bool)se.Lua().script("return input.FindConflict('Q') == nil"));
+
+    // AddBinding ДОБАВЛЯЕТ, не заменяя: пробел остаётся рабочим.
+    CHECK_TRUE((bool)se.Lua().script("return input.AddBinding('Jump', 'PAD_A')"));
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Space));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE(input.WasPressed("Jump"));
+}
+
+TEST(Scripting_context_names_and_release_all) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    se.Lua().script("CreateInputContext('Inventory', 50)");
+    sol::table names = se.Lua().script("return input.ContextNames()");
+    bool foundDefault = false, foundInventory = false;
+    for (auto& kv : names) {
+        const std::string n = kv.second.as<std::string>();
+        if (n == "Gameplay") foundDefault = true;
+        if (n == "Inventory") foundInventory = true;
+    }
+    CHECK_TRUE(foundDefault);
+    CHECK_TRUE(foundInventory);
+
+    se.Lua().script("BindAction('Jump', 'SPACE')");
+    input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Space));
+    input.Update(1.0f / 60.0f);
+    CHECK_TRUE(input.IsDown("Jump"));
+
+    // ReleaseAll гасит зажатое немедленно — как потеря фокуса окна.
+    se.Lua().script("input.ReleaseAll()");
+    CHECK_FALSE(input.IsDown("Jump"));
+}
+
+TEST(Scripting_typed_text_reads_this_frames_unicode) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    input.Push(sage::input::InputEvent::Text((unsigned int)'H'));
+    input.Push(sage::input::InputEvent::Text((unsigned int)'i'));
+    input.Update(1.0f / 60.0f);
+    CHECK_EQ((std::string)se.Lua().script("return input.TypedText()"), std::string("Hi"));
+}
+
+TEST(Scripting_gamepad_connected_and_name) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+
+    CHECK_FALSE((bool)se.Lua().script("return input.GamepadConnected()"));
+    input.Push(sage::input::InputEvent::PadConnected(0, true));
+    input.Update(1.0f / 60.0f);
+    input.MutableState().PadMutable(0).SetName("Test Pad");
+
+    CHECK_TRUE((bool)se.Lua().script("return input.GamepadConnected()"));      // «хоть один»
+    CHECK_TRUE((bool)se.Lua().script("return input.GamepadConnected(0)"));
+    CHECK_FALSE((bool)se.Lua().script("return input.GamepadConnected(1)"));
+    CHECK_EQ((std::string)se.Lua().script("return input.GamepadName(0)"), std::string("Test Pad"));
+}
+
+TEST(Scripting_configure_tunes_dead_zone_and_sensitivity) {
+    ScriptEngine se;
+    sage::input::InputSystem input;
+    se.BindInput(input);
+    se.Lua().script("BindAxis('Look', 'RIGHT', 'LEFT')");
+
+    CHECK_TRUE((bool)se.Lua().script(
+        "return input.Configure('Look', {deadZone = 0.4, sensitivity = 2.0, smoothing = 0.0})"));
+    const sage::input::ActionSettings& s = input.Find("Look")->Settings();
+    CHECK_NEAR(s.DeadZone, 0.4f, 1e-4);
+    CHECK_NEAR(s.Sensitivity, 2.0f, 1e-4);
+
+    // Действия, которого нет, — честный false, а не ошибка.
+    CHECK_FALSE((bool)se.Lua().script("return input.Configure('Never Declared', {deadZone = 0.1})"));
+}
+
 // --- Пространства имён Lua-API ------------------------------------------------
 //
 // API был ПЛОСКОЙ КУЧЕЙ: 126 глобальных имён, где SetIKFootLock,
