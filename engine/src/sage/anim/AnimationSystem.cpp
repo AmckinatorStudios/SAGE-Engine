@@ -54,7 +54,10 @@ static std::string SkinnedPathOf(Scene& scene, entt::entity e) {
 static void EnsureReady(AnimationComponent& am, const std::string& path) {
     // Модель в Mesh сменили — переинициализируемся. Иначе клипы продолжали бы
     // играть по костям прежнего скелета, которых у новой модели нет.
-    if (am.Ready && am.ResolvedFrom != path) {
+    // Тот же разбор заново требуется и после ПЕРЕЧИТЫВАНИЯ файла модели: путь
+    // не менялся, а модель за ним — уже другая (см. AnimationComponent::ResourceGen).
+    const uint64_t gen = ResourceManager::Instance().AssetsGeneration();
+    if (am.Ready && (am.ResolvedFrom != path || am.ResourceGen != gen)) {
         am.Ready = false;
         am.Model = nullptr;
         am.MorphWeights.clear();
@@ -64,6 +67,7 @@ static void EnsureReady(AnimationComponent& am, const std::string& path) {
     if (am.Ready) return;
     am.Ready = true;
     am.ResolvedFrom = path;
+    am.ResourceGen = gen;
     if (path.empty()) {
         am.Model = nullptr;   // анимировать нечего — и это не ошибка, а состояние
         return;

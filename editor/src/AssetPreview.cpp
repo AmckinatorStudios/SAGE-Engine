@@ -141,6 +141,17 @@ const std::vector<std::shared_ptr<Material>>& AssetPreview::MaterialsForModel(
     const std::string& path) {
     std::unordered_map<std::string, std::vector<std::shared_ptr<Material>>>& cache =
         ModelMaterialCache();
+    // ПЕРЕЧИТАЛИ МОДЕЛЬ — РАЗБОР УСТАРЕЛ. Материалы вынуты из файла один раз и
+    // лежат здесь по пути; переэкспортировав модель из Blender с другими
+    // картами, человек видел бы в превью прежние. Сверяться с поколением
+    // ресурсов дешевле, чем держать здесь свои времена правки (см.
+    // ResourceManager::AssetsGeneration).
+    static uint64_t cachedGen = 0;
+    const uint64_t gen = ResourceManager::Instance().AssetsGeneration();
+    if (gen != cachedGen) {
+        cachedGen = gen;
+        cache.clear();
+    }
     auto it = cache.find(path);
     if (it != cache.end()) return it->second;
 

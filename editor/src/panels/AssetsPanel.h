@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -101,6 +103,21 @@ public:
     static ImportReport ImportAsset(const std::filesystem::path& source,
                                     const std::filesystem::path& destDir);
 
+    // ТО ЖЕ, НО ДВУМЯ ПОЛОВИНАМИ — потому что внесение идёт В ФОНОВОМ ПОТОКЕ.
+    //
+    // Копирование — работа файловой системы, и её можно (и нужно) вести не в
+    // кадре: папка ассетов с маркетплейса — это сотни файлов и сотни мегабайт,
+    // а всё это время редактор стоял бы без единого кадра, то есть выглядел бы
+    // повисшим. База ассетов при этом остаётся ЗА ГЛАВНЫМ ПОТОКОМ: её читает
+    // каждый кадр панель, и писать в неё из фона значит гонку.
+    //
+    // tell — куда сообщать ход дела: доля (отрицательная — неизвестна) и имя
+    // текущего файла. Зовётся из рабочего потока.
+    static ImportReport CopyIntoProject(
+        const std::filesystem::path& source, const std::filesystem::path& destDir,
+        const std::function<void(float, const std::string&)>& tell = {});
+    static void RegisterImported(const ImportReport& report);
+
 private:
     // Превью карточек. Материалы, префабы и модели рендерятся по одному за кадр
     // и запоминаются (см. ThumbnailFor): один такой рендер — полный проход
@@ -120,6 +137,10 @@ private:
     // Конвертация в свои форматы движка (sage/assets/import/Convert.h).
     void ConvertOne(EditorHost& host, const std::filesystem::path& path);
     void ConvertFolderHere(EditorHost& host);
+
+    // Фоновое внесение файлов в проект: поток, его результат и карточка.
+    std::future<ImportReport> m_import;
+    uint64_t m_importTask = 0;
 
     // Очередь пакетной конвертации: что осталось перевести и что уже вышло.
     // Файлы разбираются по нескольку за кадр (см. Tick) — кадр при этом живой,
@@ -155,6 +176,7 @@ private:
 
     // Внесение чужих файлов в проект: диалог + отчёт в статусную строку.
     void DrawImportButton(EditorHost& host);
+    void FinishImport(EditorHost& host);
     FileBrowser m_importBrowser;
 
     char m_search[128] = "";

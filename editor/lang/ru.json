@@ -1554,6 +1554,8 @@
     "Thumbnails ready": "Обложки готовы",
     "Working...": "Идёт работа...",
     "Baking is temporarily unavailable in the editor": "Выпечка освещения в редакторе временно недоступна",
-    "Marked as static geometry for baked lighting": "Помечен как статичная геометрия для запечённого света"
+    "Marked as static geometry for baked lighting": "Помечен как статичная геометрия для запечённого света",
+    "Bringing into the project: ": "Внесение в проект: ",
+    "Files changed on disk — reloaded: ": "Файлы изменились на диске — перечитано: "
   }
 }

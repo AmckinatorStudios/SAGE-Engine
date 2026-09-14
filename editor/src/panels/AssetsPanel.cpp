@@ -1,6 +1,9 @@
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
 #include "../Progress.h"
+
+#include <chrono>
+#include <future>
 #include "../FolderColors.h"
 #include "ui/UI.h"
 #include "EditorTheme.h"
@@ -770,6 +773,7 @@ void AssetsPanel::ConvertFolderHere(EditorHost& host) {
 }
 
 void AssetsPanel::Tick(EditorHost& host) {
+    FinishImport(host);
     if (m_convertQueue.empty()) return;
     namespace progress = sage::editor::progress;
 
@@ -977,9 +981,16 @@ void AssetsPanel::DeleteAsset(const fs::path& path) {
     }
 }
 
-AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const fs::path& destDir) {
+// Копирование БЕЗ базы ассетов (см. AssetsPanel.h): всё, что здесь делается, —
+// работа файловой системы, и её ведёт фоновый поток.
+AssetsPanel::ImportReport AssetsPanel::CopyIntoProject(
+    const fs::path& source, const fs::path& destDir,
+    const std::function<void(float, const std::string&)>& tell) {
     ImportReport report;
     std::error_code ec;
+    auto say = [&](float fraction, const std::string& what) {
+        if (tell) tell(fraction, what);
+    };
 
     if (!fs::exists(source, ec)) {
         report.Error = T("File not found: ") + source.string();
@@ -999,16 +1010,33 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
     // внутри и так уже всё, что нужно модели.
     if (fs::is_directory(source, ec)) {
         const fs::path target = destDir / source.filename();
-        fs::copy(source, target,
-                 fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
-        if (ec) {
-            report.Error = T("Could not copy: ") + source.filename().string();
-            return report;
-        }
-        for (const auto& entry : fs::recursive_directory_iterator(target, ec)) {
+        // ПО ФАЙЛУ, А НЕ ОДНИМ fs::copy: рекурсивное копирование не умеет
+        // рассказывать, где оно сейчас, а папка ассетов — это сотни файлов, и
+        // «идёт копирование, 214 из 680, wood_normal.png» это и есть разница
+        // между ожиданием и зависанием.
+        std::vector<fs::path> files;
+        for (const auto& entry : fs::recursive_directory_iterator(source, ec)) {
             if (entry.is_directory(ec)) continue;
-            RegisterInDatabase(entry.path());
-            report.Extra.push_back(entry.path());
+            files.push_back(entry.path());
+        }
+        fs::create_directories(target, ec);
+        size_t done = 0;
+        for (const fs::path& from : files) {
+            const fs::path rel = fs::relative(from, source, ec);
+            const fs::path to = target / rel;
+            std::error_code cec;
+            fs::create_directories(to.parent_path(), cec);
+            // Существующий файл не трогаем — тем же правилом, что и ниже:
+            // повторное внесение не должно затирать правку.
+            if (!fs::exists(to, cec)) fs::copy_file(from, to, cec);
+            if (cec) {
+                report.Missing.push_back(rel.generic_string());
+            } else {
+                report.Extra.push_back(to);
+            }
+            ++done;
+            say(files.empty() ? -1.0f : (float)done / (float)files.size(),
+                rel.filename().string());
         }
         report.Ok = true;
         report.Created = target;
@@ -1026,6 +1054,9 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
         const fs::path target = destDir / source.stem();
         std::string zipErr;
         std::vector<std::string> skipped;
+        // Доля неизвестна: распаковка идёт одним вызовом и о ходе дела не
+        // сообщает. Полоса при этом бежит, а не стоит на нуле (см. Progress.h).
+        say(-1.0f, source.filename().string());
         const int written = sage::assets::ExtractZip(source, target, zipErr, &skipped);
         if (written < 0) {
             report.Error = T("The archive could not be unpacked: ") + zipErr;
@@ -1033,7 +1064,6 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
         }
         for (const auto& entry : fs::recursive_directory_iterator(target, ec)) {
             if (entry.is_directory(ec)) continue;
-            RegisterInDatabase(entry.path());
             report.Extra.push_back(entry.path());
         }
         report.Missing = skipped;
@@ -1098,8 +1128,9 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
         return report;
     }
     report.Created = mainDst;
-    RegisterInDatabase(mainDst);
+    say(companions.empty() ? 1.0f : 0.0f, source.filename().string());
 
+    size_t doneCompanions = 0;
     for (const std::string& rel : companions) {
         // Путь спутника относительный — сохраняем его форму, иначе .gltf,
         // ссылающийся на «textures/wood.png», после импорта не нашёл бы файл.
@@ -1111,13 +1142,30 @@ AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source, const
         const fs::path to = destDir / rel;
         if (copyOne(from, to)) {
             report.Extra.push_back(to);
-            RegisterInDatabase(to);
         } else {
             report.Missing.push_back(rel);
         }
+        ++doneCompanions;
+        say((float)doneCompanions / (float)companions.size(), fs::path(rel).filename().string());
     }
 
     report.Ok = true;
+    return report;
+}
+
+// Регистрация внесённого в базе ассетов — ТОЛЬКО главный поток (см. заголовок).
+void AssetsPanel::RegisterImported(const ImportReport& report) {
+    if (!report.Ok) return;
+    if (!report.Created.empty() && !fs::is_directory(report.Created)) RegisterInDatabase(report.Created);
+    for (const fs::path& file : report.Extra) RegisterInDatabase(file);
+}
+
+// Прежний однокадровый путь: копирование плюс регистрация. Им пользуются те,
+// у кого кадра нет вовсе, — self-test и сценарии без интерфейса.
+AssetsPanel::ImportReport AssetsPanel::ImportAsset(const fs::path& source,
+                                                   const fs::path& destDir) {
+    ImportReport report = CopyIntoProject(source, destDir);
+    RegisterImported(report);
     return report;
 }
 
@@ -1146,13 +1194,46 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
     }
 
     if (!m_importBrowser.Draw()) return;
+    if (m_import.valid()) return;   // одно внесение за раз: два потока в одну папку — гонка
 
-    const ImportReport r = ImportAsset(m_importBrowser.Result(), host.AssetsCwd());
+    // ВНЕСЕНИЕ ИДЁТ ФОНОМ, А НА ЭКРАНЕ — ПОЛОСА.
+    //
+    // Папка ассетов с маркетплейса это сотни файлов и сотни мегабайт: копируя
+    // их внутри кадра, редактор замирал на минуты — ни кадра, ни курсора, ни
+    // ответа на вопрос «оно вообще работает?». Полоса ВАЖНАЯ (модальная):
+    // папка проекта в это время меняется под ногами, и щёлкать по ней нельзя
+    // (см. Progress.h).
+    namespace progress = sage::editor::progress;
+    const fs::path source = m_importBrowser.Result();
+    m_importTask = progress::Begin(progress::Kind::Blocking,
+                                   std::string(T("Bringing into the project: ")) +
+                                       source.filename().string());
+    const uint64_t task = m_importTask;
+    const fs::path dest = host.AssetsCwd();
+    m_import = std::async(std::launch::async, [source, dest, task]() {
+        return CopyIntoProject(source, dest, [task](float fraction, const std::string& what) {
+            sage::editor::progress::Update(task, fraction, what);
+        });
+    });
+}
+
+// Принять то, что скопировал фоновый поток: зарегистрировать в базе ассетов и
+// сказать человеку, чем кончилось. Только главный поток — см. AssetsPanel.h.
+void AssetsPanel::FinishImport(EditorHost& host) {
+    namespace progress = sage::editor::progress;
+    if (!m_import.valid()) return;
+    if (m_import.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    const ImportReport r = m_import.get();
+    m_import = {};
+
     if (!r.Ok) {
+        progress::End(m_importTask, T("Import failed: ") + r.Error);
+        m_importTask = 0;
         host.SetStatusMessage(T("Import failed: ") + r.Error);
         LOG_ERROR("Editor") << "Импорт не удался: " << r.Error;
         return;
     }
+    RegisterImported(r);
     m_selected = r.Created;
     m_multi = {r.Created};
 
@@ -1168,6 +1249,8 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
         for (const std::string& m : r.Missing)
             LOG_WARN("Editor") << "Импорт: не внесено — " << m;
     }
+    progress::End(m_importTask, message);
+    m_importTask = 0;
     host.SetStatusMessage(message);
     LOG_INFO("Editor") << "Импорт: " << r.Created.string();
 }

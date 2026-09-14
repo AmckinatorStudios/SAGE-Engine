@@ -203,6 +203,7 @@ std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
         LOG_ERROR("Resources") << "Скиннинг-модель не загрузилась (" << path << "): " << e.what();
     }
     m_skinned[key] = model; // в т.ч. nullptr — негативный кэш
+    m_skinnedStamps[key] = FileStamp(Locate(path));
     return model;
 }
 
@@ -226,6 +227,18 @@ int ResourceManager::ReloadChangedAssets() {
     std::vector<std::string> staleMaterials;
     for (const auto& [path, stamp] : m_materialStamps) {
         if (FileStamp(Locate(path)) != stamp) staleMaterials.push_back(path);
+    }
+    std::vector<std::string> staleSkinned;
+    for (const auto& [path, stamp] : m_skinnedStamps) {
+        if (FileStamp(Locate(path)) != stamp) staleSkinned.push_back(path);
+    }
+    std::vector<std::string> staleTextures;
+    for (const auto& [path, rec] : m_textures) {
+        // Процедурную (Generated) перечитывать неоткуда, а грузящуюся (Pending)
+        // рано: её пиксели ещё едут из фонового потока, и подмена сейчас
+        // означала бы гонку с ними.
+        if (rec.Generated || rec.Pending || !rec.Tex) continue;
+        if (FileStamp(Locate(path)) != rec.Stamp) staleTextures.push_back(path);
     }
 
     for (const std::string& path : staleModels) {
@@ -257,6 +270,47 @@ int ResourceManager::ReloadChangedAssets() {
         ++reloaded;
         LOG_INFO("Resources") << "Материал перечитан: " << path;
     }
+
+    // СКЕЛЕТНАЯ МОДЕЛЬ — ЗАМЕНОЙ ЗАПИСИ, А НЕ ПОДМЕНОЙ СОДЕРЖИМОГО.
+    //
+    // На обычный меш смотрят только как на геометрию, и подмена на месте
+    // безопасна. У скелетной модели наружу торчат УКАЗАТЕЛИ ВНУТРЬ: аниматор
+    // держит адреса скелета и списка клипов (см. AnimationSystem), и подменить
+    // содержимое под ним значит оставить его с индексами костей, которых в
+    // новом скелете может не быть. Поэтому запись в кэше заменяется целиком, а
+    // тот, кто держит старую модель через shared_ptr, доживает с ней до того,
+    // как заметит смену поколения (AssetsGeneration) и переспросит.
+    for (const std::string& path : staleSkinned) {
+        m_skinned.erase(path);
+        m_skinnedStamps.erase(path);
+        GetSkinnedModel(path);
+        ++reloaded;
+        LOG_INFO("Resources") << "Скелетная модель перечитана: " << path;
+    }
+
+    // ТЕКСТУРА — НА МЕСТЕ: на неё ссылаются материалы и интерфейс, и заменить
+    // запись в кэше значило бы оставить их со старой картинкой.
+    for (const std::string& path : staleTextures) {
+        TextureRecord& rec = m_textures[path];
+        try {
+            *rec.Tex = Texture(Locate(path), rec.Filter, rec.Mipmaps);
+            m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
+            rec.Bytes = rec.Tex->GpuBytes();
+            m_textureBytes += rec.Bytes;
+            rec.Stamp = FileStamp(Locate(path));
+            ++reloaded;
+            LOG_INFO("Resources") << "Текстура перечитана: " << path;
+        } catch (const std::exception& e) {
+            // Не получилось — оставляем прежнюю картинку и ЗАПОМИНАЕМ штамп:
+            // иначе битый файл перечитывался бы каждый кадр, заваливая лог.
+            rec.Stamp = FileStamp(Locate(path));
+            LOG_ERROR("Resources") << "Текстура не перечиталась (" << path << "): " << e.what();
+        }
+    }
+
+    // Поколение растёт ОДИН раз на пачку: кэши, которые по нему сбрасываются,
+    // должны сброситься от факта перезагрузки, а не по числу файлов.
+    if (reloaded > 0) ++m_assetsGeneration;
     return reloaded;
 }
 
@@ -316,6 +370,7 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
         rec.Bytes = 0;
     }
     rec.Tick = NextTick();
+    rec.Stamp = FileStamp(Locate(path));
     std::shared_ptr<Texture> result = rec.Tex; // держим ссылку -> не вытеснится ниже
     m_textureBytes += rec.Bytes;
     m_textures[key] = std::move(rec);
@@ -346,6 +401,7 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     rec.Bytes = rec.Tex->GpuBytes();
     rec.Tick = NextTick();
     rec.Pending = true;
+    rec.Stamp = FileStamp(Locate(path));
     std::shared_ptr<Texture> result = rec.Tex;
     m_textureBytes += rec.Bytes;
     m_textures[key] = std::move(rec);
