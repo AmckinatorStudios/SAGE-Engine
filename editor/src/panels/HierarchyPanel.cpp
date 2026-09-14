@@ -527,8 +527,16 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
 
     // Рамка выделения. Начинается в пустом месте списка — над строкой начинать
     // нельзя: там живут перетаскивание сущности и смена родителя.
-    if (m_rectActive && m_rect.Finished && rectselect::Meaningful(m_rect)) {
-        host.SetSelection(m_rectHits, m_rect.Additive);
+    if (m_rectActive && m_rect.Finished) {
+        if (rectselect::Meaningful(m_rect)) {
+            host.SetSelection(m_rectHits, m_rect.Additive);
+        } else if (!m_rect.Additive) {
+            // ЩЕЛЧОК ПО ПУСТОМУ МЕСТУ СПИСКА СНИМАЕТ ВЫДЕЛЕНИЕ — так же, как во
+            // вьюпорте. Раньше такой щелчок не делал ничего: рамка выходила
+            // «незначащей», и выбор оставался висеть. Снять его можно было
+            // только выбрав другой объект, то есть никак.
+            host.SetSelectedId(-1);
+        }
     }
     rectselect::End(m_rect, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
                                 !ImGui::IsAnyItemHovered() && !ImGui::IsPopupOpen("##hierarchy_ctx"));

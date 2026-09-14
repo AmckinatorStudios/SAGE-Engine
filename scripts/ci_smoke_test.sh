@@ -74,7 +74,16 @@ if ! grep -q "MULTIWINDOW: OK" "${EDITOR_LOG}"; then
     grep "MULTIWINDOW" "${EDITOR_LOG}" || true
     cat "${EDITOR_LOG}"; exit 1
 fi
-echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса)"
+# Мышь в живом кадре: щелчок по пустому месту снимает выделение (вьюпорт и
+# список объектов), щелчок по гизмо навигации поворачивает камеру. Проверяется
+# НАСТОЯЩИМИ событиями мыши (см. EditorLayer::TickInputProbe): ворота на пути
+# щелчка ломаются молча — код пикинга при этом выглядит рабочим.
+if ! grep -q "VIEWPORT_INPUT: OK" "${EDITOR_LOG}"; then
+    echo "ОШИБКА: щелчок мышью по вьюпорту или списку объектов не работает"
+    grep "VIEWPORT_INPUT" "${EDITOR_LOG}" || true
+    cat "${EDITOR_LOG}"; exit 1
+fi
+echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса и мышь во вьюпорте)"
 
 echo "=== Smoke-тест 3/10: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then

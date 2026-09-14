@@ -1466,13 +1466,20 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
 
     // Рамка выделения. Начинается только в пустом месте сетки: над карточкой
     // живёт перетаскивание файла, и рамка отняла бы его.
-    if (m_rectActive && m_rect.Finished && rectselect::Meaningful(m_rect)) {
-        if (!m_rect.Additive) m_multi.clear();
-        for (const fs::path& hit : m_rectHits) {
-            if (std::find(m_multi.begin(), m_multi.end(), hit) == m_multi.end())
-                m_multi.push_back(hit);
+    if (m_rectActive && m_rect.Finished) {
+        if (rectselect::Meaningful(m_rect)) {
+            if (!m_rect.Additive) m_multi.clear();
+            for (const fs::path& hit : m_rectHits) {
+                if (std::find(m_multi.begin(), m_multi.end(), hit) == m_multi.end())
+                    m_multi.push_back(hit);
+            }
+            m_selected = m_multi.empty() ? fs::path{} : m_multi.back();
+        } else if (!m_rect.Additive) {
+            // Щелчок по пустому месту сетки снимает выбор файла — тем же
+            // жестом, что и в списке объектов и во вьюпорте.
+            m_multi.clear();
+            m_selected.clear();
         }
-        m_selected = m_multi.empty() ? fs::path{} : m_multi.back();
     }
     rectselect::End(m_rect, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
                                 !ImGui::IsAnyItemHovered() &&

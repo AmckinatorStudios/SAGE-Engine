@@ -61,12 +61,28 @@ float ShortestDelta(float from, float to) {
     return d;
 }
 
+// Центр гизмо в экранных координатах — одна формула на отрисовку и на
+// AxisBall, иначе проверка целилась бы не туда, куда рисует гизмо.
+ImVec2 GizmoCenter(const ImVec2& viewMin, const ImVec2& viewMax) {
+    return ImVec2(viewMax.x - kRadius - kInset, viewMin.y + kRadius + kInset);
+}
+
 } // namespace
+
+ImVec2 AxisBall(const Camera& camera, const ImVec2& viewMin, const ImVec2& viewMax, int axis,
+                bool positive) {
+    const ImVec2 center = GizmoCenter(viewMin, viewMax);
+    glm::vec3 dir(0.0f);
+    dir[std::clamp(axis, 0, 2)] = positive ? 1.0f : -1.0f;
+    const float x = glm::dot(dir, camera.Right);
+    const float y = glm::dot(dir, camera.Up);
+    return ImVec2(center.x + x * kRadius, center.y - y * kRadius);
+}
 
 bool Draw(ImDrawList* dl, State& state, Camera& camera, const ImVec2& viewMin,
           const ImVec2& viewMax, const glm::vec3& pivot, float dt) {
     if (!dl) return false;
-    const ImVec2 center(viewMax.x - kRadius - kInset, viewMin.y + kRadius + kInset);
+    const ImVec2 center = GizmoCenter(viewMin, viewMax);
 
     // --- Плавный переход к выбранной оси -----------------------------------
     if (state.Animating) {
@@ -123,8 +139,13 @@ bool Draw(ImDrawList* dl, State& state, Camera& camera, const ImVec2& viewMin,
                              mouse.x >= viewMin.x && mouse.x <= viewMax.x &&
                              mouse.y >= viewMin.y && mouse.y <= viewMax.y;
 
+    // Шарик под курсором считается И ВО ВРЕМЯ ПЕРЕТАСКИВАНИЯ. Раньше здесь
+    // стояло «и только если не тащим» — а решение «это был щелчок по оси»
+    // принимается в кадре ОТПУСКАНИЯ, когда перетаскивание ещё числится
+    // активным. То есть hovered в этот момент был гарантированно -1, и щелчок
+    // по гизмо навигации не делал ровно ничего.
     int hovered = -1;
-    if (overGizmo && viewHovered && !state.Dragging) {
+    if (overGizmo && viewHovered) {
         float best = kBall * kBall * 2.25f;
         for (int i = 0; i < n; ++i) {
             const float ddx = mouse.x - dots[i].At.x, ddy = mouse.y - dots[i].At.y;

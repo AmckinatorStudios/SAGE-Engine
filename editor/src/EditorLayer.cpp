@@ -471,7 +471,12 @@ void EditorLayer::OnAttach() {
     // Команды — после загрузки тем: часть из них перечисляет темы поимённо.
     RegisterCommands();
 
-    if (std::getenv("SAGE_EDITOR_SELFTEST")) RunSelfTest();
+    if (std::getenv("SAGE_EDITOR_SELFTEST")) {
+        RunSelfTest();
+        // Мышь проверяется уже в кадрах, после самопроверки: до главного цикла
+        // кадра нет, а щёлкать надо по нарисованному вьюпорту.
+        m_probeStep = 0;
+    }
     if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
     if (std::getenv("SAGE_EDITOR_OPEN_PROJECT")) RunHeadlessProjectSession();
 
@@ -1153,6 +1158,10 @@ void EditorLayer::OnRender() {
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
+    // Проверка мыши В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST) кладёт свои события
+    // ПОСЛЕ бэкенда и ДО NewFrame: бэкенд в своём NewFrame тоже трогает
+    // положение курсора, и синтетические события обязаны прийти последними.
+    TickInputProbe();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
     EditorTheme::ApplyGizmoColors();
@@ -1283,7 +1292,12 @@ void EditorLayer::PresentExtraViewports() {
 
 void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     ++m_frameCounter;
-    if (m_autoScreenshotFrame < 0 || m_frameCounter != m_autoScreenshotFrame) return;
+    if (m_autoScreenshotFrame < 0 || m_frameCounter < m_autoScreenshotFrame) return;
+    // ПРОВЕРКА МЫШИ ДОЛЖНА УСПЕТЬ. Она идёт кадрами (см. TickInputProbe), а
+    // smoke-тест просит снимок на десятом кадре и на нём же закрывает редактор —
+    // то есть выход случался раньше первого щелчка, и проверка не давала
+    // вердикта вообще. Поэтому снимок и выход ждут её конца, а не номера кадра.
+    if (m_probeStep >= 0) return;
     Window& win = app.GetWindow();
     SaveScreenshot(m_screenshotPath, win.Width(), win.Height());
     app.Close();
