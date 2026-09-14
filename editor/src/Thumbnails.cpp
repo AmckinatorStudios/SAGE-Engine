@@ -1,4 +1,6 @@
 #include "Thumbnails.h"
+#include "Progress.h"
+#include "Localization.h"
 
 #include <algorithm>
 #include <atomic>
@@ -378,9 +380,49 @@ Thumb Get(const fs::path& path, Size size) {
     return out;
 }
 
+// СКОЛЬКО ОБЛОЖЕК ЕЩЁ ГОТОВИТСЯ. Считается и то, что лежит в стеке задач, и
+// то, что уже декодировано, но не залито в видеопамять: для человека это одно
+// и то же ожидание.
+int Pending() {
+    State& s = S();
+    if (!s.Started) return 0;
+    size_t jobs = 0, ready = 0;
+    { std::lock_guard<std::mutex> lk(s.JobMx); jobs = s.Jobs.size(); }
+    { std::lock_guard<std::mutex> lk(s.DoneMx); ready = s.Ready.size(); }
+    return (int)(jobs + ready);
+}
+
+// Карточка «готовятся обложки» в углу. Пачка в несколько файлов проскакивает
+// за пару кадров, и карточка на них только мигала бы; папка в четыреста
+// текстур занимает десятки секунд — вот про неё и надо сказать.
+void UpdateCard() {
+    namespace progress = sage::editor::progress;
+    static progress::Id task = 0;
+    static int total = 0;
+    const int left = Pending();
+    constexpr int kShowFrom = 12;
+
+    if (task == 0) {
+        if (left < kShowFrom) return;
+        total = left;
+        task = progress::Begin(progress::Kind::Background, T("Preparing asset thumbnails"));
+    }
+    total = std::max(total, left);
+    if (left <= 0) {
+        progress::End(task, T("Thumbnails ready"));
+        task = 0;
+        total = 0;
+        return;
+    }
+    char note[96];
+    std::snprintf(note, sizeof(note), T("%d of %d"), total - left, total);
+    progress::Update(task, total > 0 ? (float)(total - left) / (float)total : -1.0f, note);
+}
+
 int Pump() {
     State& s = S();
     if (!s.Started) return 0;
+    UpdateCard();
 
     // Забираем ровно столько, сколько успеем залить за кадр; остальное дождётся
     // следующего — оно уже декодировано и никуда не денется.

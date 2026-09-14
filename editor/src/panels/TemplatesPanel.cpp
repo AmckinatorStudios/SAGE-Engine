@@ -1,4 +1,8 @@
 #include "TemplatesPanel.h"
+#include "../Progress.h"
+
+#include <chrono>
+#include <future>
 
 #include <cfloat>
 #include <cstring>
@@ -45,6 +49,43 @@ void TemplatesPanel::Say(EditorHost& host, const std::string& message, bool bad)
     host.SetStatusMessage(message);
     if (bad) LOG_ERROR("Editor") << message;
     else LOG_INFO("Editor") << message;
+}
+
+// Загрузка началась: поток качает и распаковывает, карточка в углу говорит об
+// этом, кнопки на время загрузки неактивны.
+void TemplatesPanel::StartDownload(const tpl::Manifest& item) {
+    if (m_download.valid()) return;
+    namespace progress = sage::editor::progress;
+    m_downloadName = item.Name;
+    m_downloadTask = progress::Begin(progress::Kind::Background,
+                                     std::string(T("Downloading template:")) + " " + item.Name,
+                                     T("Connecting..."));
+    // Доля неизвестна: curl отдаёт файл целиком, промежуточного счёта у нас
+    // нет — и полоса честно бежит, вместо того чтобы врать про проценты.
+    progress::Update(m_downloadTask, -1.0f, T("Downloading and unpacking"));
+    m_download = std::async(std::launch::async, [item]() -> std::string {
+        std::string err;
+        if (tpl::Download(item, err)) return {};
+        return err.empty() ? std::string("?") : err;
+    });
+}
+
+void TemplatesPanel::Tick(EditorHost& host) {
+    namespace progress = sage::editor::progress;
+    if (!m_download.valid()) return;
+    if (m_download.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    const std::string err = m_download.get();
+    m_download = {};
+    progress::End(m_downloadTask, err.empty() ? T("Installed") : T("Failed"));
+    m_downloadTask = 0;
+    if (err.empty()) {
+        // Список читается с диска ЗДЕСЬ, на главном потоке: фоновая часть
+        // кончилась вместе с распаковкой, и «наполовину поставлено» не бывает.
+        Refresh();
+        Say(host, std::string(T("Template installed:")) + " " + m_downloadName, false);
+    } else {
+        Say(host, err, true);
+    }
 }
 
 void TemplatesPanel::Draw(EditorHost& host, bool& open) {
@@ -242,27 +283,17 @@ void TemplatesPanel::DrawCatalog(EditorHost& host) {
             ImGui::TextWrapped("%s", m.Summary.c_str());
             ImGui::PopStyleColor();
         }
+        // Пока качается один шаблон, второй начать нельзя: обе загрузки
+        // распаковываются в templates/ и передрались бы за одну папку.
+        ImGui::BeginDisabled(m_download.valid());
         if (m.Installed) {
             ImGui::TextDisabled("%s", T("Already installed"));
             ImGui::SameLine();
-            if (ImGui::Button(T("Reinstall"))) {
-                std::string err;
-                if (tpl::Download(m, err)) {
-                    Refresh();
-                    Say(host, std::string(T("Template installed:")) + " " + m.Name, false);
-                } else {
-                    Say(host, err, true);
-                }
-            }
+            if (ImGui::Button(T("Reinstall"))) StartDownload(m);
         } else if (ImGui::Button(T("Download and install"))) {
-            std::string err;
-            if (tpl::Download(m, err)) {
-                Refresh();
-                Say(host, std::string(T("Template installed:")) + " " + m.Name, false);
-            } else {
-                Say(host, err, true);
-            }
+            StartDownload(m);
         }
+        ImGui::EndDisabled();
         ImGui::PopID();
     }
 }

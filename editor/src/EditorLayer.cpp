@@ -55,6 +55,7 @@
 #include "AssetExt.h"
 #include "Localization.h"
 #include "PanelWindows.h"
+#include "Progress.h"
 
 
 
@@ -470,6 +471,23 @@ void EditorLayer::OnAttach() {
 
     // Команды — после загрузки тем: часть из них перечисляет темы поимённо.
     RegisterCommands();
+
+    // ПОКАЗАТЬ ПОЛОСЫ ДОЛГОЙ РАБОТЫ БЕЗ САМОЙ РАБОТЫ. Карточка в углу и
+    // модальное окно появляются только во время бейка, скачивания или перевода
+    // папки — то есть посмотреть на них глазами в прогоне было нечем, а
+    // проверять оформление по коду нельзя. С этой переменной обе полосы стоят
+    // в кадре сразу и попадают на авто-снимок.
+    if (std::getenv("SAGE_EDITOR_PROGRESS_DEMO")) {
+        namespace progress = sage::editor::progress;
+        const progress::Id bake = progress::Begin(progress::Kind::Background,
+                                                  T("Baking GI"), "16 / 64");
+        progress::Update(bake, 0.25f, "16 / 64");
+        progress::Begin(progress::Kind::Background, T("Preparing asset thumbnails"),
+                        T("Downloading and unpacking"));
+        const progress::Id conv = progress::Begin(progress::Kind::Blocking,
+                                                  T("Converting the folder"), "tower.fbx (37/120)");
+        progress::Update(conv, 0.31f, "tower.fbx (37/120)");
+    }
 
     if (std::getenv("SAGE_EDITOR_SELFTEST")) {
         RunSelfTest();
@@ -1180,6 +1198,9 @@ void EditorLayer::OnRender() {
     if (!m_project.Loaded()) {
         m_launcher.Draw(*this, m_projects);
         m_dialogs.Draw(*this);   // диалог обзора папок открывается отсюда же
+        // Долгая работа видна И В СТАРТОВОМ ОКНЕ: шаблон качают именно отсюда,
+        // и без полосы окно просто замирает.
+        sage::editor::progress::Draw();
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         // Окна системы — и здесь тоже (см. PresentExtraViewports): диалог
@@ -1220,6 +1241,11 @@ void EditorLayer::OnRender() {
     panel("Console", m_showConsole, [&] { m_console.Draw(&m_showConsole); });
     panel("Assets", m_showAssets, [&] { m_assets.Draw(*this, &m_showAssets); });
     m_plugins.ImGuiAll();
+
+    // Полосы долгой работы — ПОВЕРХ панелей и до стартового окна: карточка в
+    // углу и модальное окно обязаны лежать выше всего, что рисует редактор
+    // (см. Progress.h).
+    sage::editor::progress::Draw();
 
     // Стартовое окно по просьбе (Window > Стартовое окно): проект уже открыт,
     // но человек хочет открыть другой.

@@ -18,6 +18,7 @@
 #include "AssetSlot.h"
 #include "Thumbnails.h"
 #include "PanelWindows.h"
+#include "Progress.h"
 #include "imgui_internal.h" // NextWindowData: проверка флага вьюпорта у отдельных окон
 #include "panels/AssetsPanel.h"
 #include "FolderColors.h"
@@ -433,6 +434,16 @@ void EditorLayer::TickInputProbe() {
             // проверка многооконности отработает, закрываем панель и выводим
             // вкладку вперёд.
             if (!m_multiWindowChecked) { m_probeWait = 1; return; }
+            // МОДАЛЬНОЕ ОКНО СЪЕДАЕТ ВСЕ ЩЕЛЧКИ, и проверка мыши под ним
+            // осмысленна не больше, чем нажатие на выключенный экран. Такое
+            // окно в headless-прогоне — само по себе отказ (например, после
+            // падения остался файл восстановления сцены), и назвать его надо
+            // прямо, а не тремя одинаковыми «щелчок ничего не сделал».
+            if (const ImGuiWindow* modal = ImGui::GetTopMostPopupModal()) {
+                fail((std::string("щелчку мешает модальное окно: ") + modal->Name).c_str());
+                m_probeStep = -1;
+                return;
+            }
             m_showUIEditor = false;
             m_viewport.RequestFocus();
             m_probeWait = 3;
@@ -495,11 +506,57 @@ void EditorLayer::TickInputProbe() {
                 fail("щелчок по пустому месту списка объектов не снял выделение");
             }
             break;
+        case 12: {
+            // ПОЛОСЫ ДОЛГОЙ РАБОТЫ (см. Progress.h). Заводим обе задачи
+            // понарошку: важную (модальное окно) и фоновую (карточка в углу).
+            namespace progress = sage::editor::progress;
+            progress::Clear();
+            progress::Begin(progress::Kind::Background, "ПРОВЕРКА: фон", "1 из 2");
+            progress::Begin(progress::Kind::Blocking, "ПРОВЕРКА: важное");
+            m_probeWait = 2;   // окно появляется не в том же кадре
+            break;
+        }
+        case 13: {
+            // Спрашиваем ОКНА, а не ImGui::IsPopupOpen: проверка живёт МЕЖДУ
+            // кадрами (см. начало функции), а IsPopupOpen считает идентификатор
+            // от текущего окна — которого в этот момент нет, и обращение уходит
+            // по нулевому указателю. WasActive отвечает ровно на нужный вопрос:
+            // нарисовалось ли окно в прошлом кадре.
+            namespace progress = sage::editor::progress;
+            auto drawn = [](const char* name) {
+                const ImGuiWindow* w = ImGui::FindWindowByName(name);
+                return w != nullptr && w->WasActive;
+            };
+            if (!progress::Blocked()) { fail("важная работа не считается блокирующей"); break; }
+            if (!drawn("##progress_modal")) {
+                fail("важная загрузка не показала модального окна");
+                break;
+            }
+            if (!drawn("##progress_card_0")) {
+                fail("фоновая загрузка не показала карточки в углу");
+            }
+            break;
+        }
+        case 14: {
+            namespace progress = sage::editor::progress;
+            progress::Clear();
+            m_probeWait = 2;
+            break;
+        }
+        case 15: {
+            // Работа кончилась — окна не осталось. Модалка, которую некому
+            // закрыть, запирает редактор наглухо.
+            const ImGuiWindow* modal = ImGui::FindWindowByName("##progress_modal");
+            if (modal != nullptr && modal->WasActive) {
+                fail("модальное окно осталось после конца работы");
+            }
+            break;
+        }
         default:
             if (!m_probeFailed) LOG_INFO("Editor") << "VIEWPORT_INPUT: OK — щелчок по пустому "
                                                       "снимает выбор и во вьюпорте, и в списке "
                                                       "объектов, гизмо навигации поворачивает "
-                                                      "камеру";
+                                                      "камеру, полосы долгой работы видны";
             m_probeStep = -1;
             return;
     }

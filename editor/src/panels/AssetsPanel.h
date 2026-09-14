@@ -30,6 +30,13 @@ public:
 
     void Draw(EditorHost& host, bool* open);
 
+    // ДОЛГАЯ РАБОТА ПАНЕЛИ — ПО КАДРАМ, а не одним куском. Зовётся каждый кадр
+    // из EditorLayer, независимо от того, открыта ли панель: перевод папки в
+    // свои форматы занимает минуты, и сделать его одним вызовом значит
+    // повесить редактор наглухо — без кадра, без полосы и без ответа на
+    // вопрос, сколько осталось (см. Progress.h).
+    void Tick(EditorHost& host);
+
     // Освободить GPU-ресурсы превью, пока контекст жив (см. AssetPreview).
     void Shutdown() { m_preview.Shutdown(); }
 
@@ -113,6 +120,15 @@ private:
     // Конвертация в свои форматы движка (sage/assets/import/Convert.h).
     void ConvertOne(EditorHost& host, const std::filesystem::path& path);
     void ConvertFolderHere(EditorHost& host);
+
+    // Очередь пакетной конвертации: что осталось перевести и что уже вышло.
+    // Файлы разбираются по нескольку за кадр (см. Tick) — кадр при этом живой,
+    // а модальное окно показывает, где счёт.
+    std::vector<std::filesystem::path> m_convertQueue;
+    size_t m_convertAt = 0;
+    size_t m_convertOk = 0, m_convertFailed = 0;
+    size_t m_convertSrcBytes = 0, m_convertOutBytes = 0;
+    uint64_t m_convertTask = 0;
 
     void DrawBreadcrumb(EditorHost& host);
     // Дерево папок проекта слева. Сетка отвечает на вопрос «что лежит здесь», а

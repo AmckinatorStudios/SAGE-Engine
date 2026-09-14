@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -25,9 +27,15 @@ class EditorHost;
 //     ставятся: «поделиться заготовкой» и «поставить чужую» — одно действие с
 //     разных сторон.
 //
-// Скачивание СИНХРОННОЕ, и это осознанно. Асинхронная загрузка потребовала бы
-// потока, отмены и состояния «наполовину поставлено» — ради файла, который
-// качается секунду. Пока идёт загрузка, окно показывает, чем занято.
+// СКАЧИВАНИЕ — ФОНОМ. Было синхронным, и это держалось на предположении «файл
+// качается секунду»: на деле шаблон весит мегабайты, а канал бывает узким, и
+// на всё это время редактор замирал целиком — ни кадра, ни курсора, ни ответа
+// на вопрос «оно вообще качает?». Теперь загрузка идёт в отдельном потоке, а
+// про ход дела рассказывает карточка в углу (см. Progress.h). Состояние
+// «наполовину поставлено» при этом не появляется: распаковка — часть той же
+// фоновой работы, а список шаблонов перечитывается на главном потоке, когда
+// она кончилась. Пока идёт загрузка, кнопки скачивания неактивны: две
+// одновременные установки одного шаблона — это гонка за одну и ту же папку.
 // ---------------------------------------------------------------------------
 class TemplatesPanel {
 public:
@@ -36,11 +44,17 @@ public:
     // Обновить списки с диска. Зовётся при открытии окна и после установки.
     void Refresh();
 
+    // Довести до конца фоновую загрузку. Зовётся КАЖДЫЙ КАДР, а не из Draw:
+    // окно шаблонов закрывают, не дожидаясь конца загрузки, и результат некому
+    // было бы принять — шаблон качался бы в никуда.
+    void Tick(EditorHost& host);
+
 private:
     void DrawInstalled(EditorHost& host);
     void DrawCatalog(EditorHost& host);
     void DrawSources(EditorHost& host);
     void Say(EditorHost& host, const std::string& message, bool bad);
+    void StartDownload(const sage::editor::templates::Manifest& item);
 
     std::vector<sage::editor::templates::Manifest> m_installed;
     std::vector<sage::editor::templates::Manifest> m_catalog;
@@ -52,6 +66,11 @@ private:
     FileBrowser m_browser;
     enum class Pending { None, InstallFile, InstallFolder, SaveAs };
     Pending m_pending = Pending::None;
+
+    // Фоновая загрузка: поток, его результат и номер карточки прогресса.
+    std::future<std::string> m_download;   // пустая строка — успех, иначе причина
+    std::string m_downloadName;            // что именно качаем (для сообщения)
+    uint64_t m_downloadTask = 0;
 
     char m_catalogUrl[512] = {0};
     char m_saveId[64] = {0};

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1542.
+// Язык: Русский. Строк: 1552.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -40,6 +40,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "%.2f из %.2f с"},
     {"%d bones of the clip are missing from this skeleton",
      "Костей клипа нет в этом скелете: %d"},
+    {"%d of %d",
+     "%d из %d"},
     {"%d x %d, %s",
      "%d x %d, %s"},
     {"%llu B",
@@ -308,6 +310,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Запекает непрямой свет в лайтмапы (для статики) и в объём проб"},
     {"Bakes indirect light to lightmaps (static) and a probe volume (dynamic); direct light stays realtime",
      "Запекает непрямой свет в лайтмапы (статика) и в объём проб (динамика); прямой свет остаётся реального времени"},
+    {"Baking GI",
+     "Расчёт освещения (GI)"},
     {"Ball: projectiles, markers",
      "Шар: снаряды, метки"},
     {"Bar",
@@ -572,6 +576,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Полуугол конуса"},
     {"Cone of light: flashlight, street lamp",
      "Конус света: фонарь, уличная лампа"},
+    {"Connecting...",
+     "Соединение..."},
     {"Console",
      "Консоль"},
     {"Contexts",
@@ -604,6 +610,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Конвертировать в .sagetex"},
     {"Converted %zu, skipped %zu; %.1f -> %.1f KB",
      "Сконвертировано %zu, пропущено %zu; %.1f -> %.1f КБ"},
+    {"Converting the folder",
+     "Перевод папки в форматы движка"},
     {"Copy",
      "Копировать"},
     {"Copy an outside file into the current project folder.\nA model moves together with its .mtl/.bin files and textures.",
@@ -802,6 +810,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скачать"},
     {"Download and install",
      "Скачать и установить"},
+    {"Downloading and unpacking",
+     "Скачивание и распаковка"},
+    {"Downloading template:",
+     "Скачивается шаблон:"},
     {"Drag an asset here",
      "Перетащите ассет сюда"},
     {"Drag an object from Hierarchy. The link holds the object's\nid, so renaming it does not break anything.",
@@ -940,6 +952,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Угол обзора"},
     {"FPS",
      "Кадр/с"},
+    {"Failed",
+     "Не получилось"},
     {"Failed to copy the project: ",
      "Не удалось скопировать проект: "},
     {"Failed to delete the project: ",
@@ -1868,6 +1882,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Заготовка"},
     {"Prefab saved: ",
      "Префаб сохранён: "},
+    {"Preparing asset thumbnails",
+     "Готовятся обложки ассетов"},
     {"Preset",
      "Заготовка"},
     {"Preset:",
@@ -2742,6 +2758,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Этот шаблон не установлен рядом с редактором:"},
     {"Three numbers",
      "Три числа"},
+    {"Thumbnails ready",
+     "Обложки готовы"},
     {"Tidies up a screen that was built before snapping was on.",
      "Приводит в порядок экран, собранный до включения привязок."},
     {"Ties this body to another one",
@@ -2958,6 +2976,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Каркас"},
     {"Without it diagonal movement is 1.41 times faster than straight — the oldest bug in games.",
      "Без неё движение по диагонали быстрее прямого в 1.41 раза — старейшая ошибка в играх."},
+    {"Working...",
+     "Идёт работа..."},
     {"World",
      "Мировое"},
     {"Wrap",

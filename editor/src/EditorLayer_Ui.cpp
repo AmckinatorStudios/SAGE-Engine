@@ -700,6 +700,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawUnsavedPrompt();
     m_settingsPanel.Draw(*this, m_showSettings);
     m_inputPanel.Draw(*this, m_showInput);
+    m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
+    m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
     m_profiler.Draw(&m_showProfiler);
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
