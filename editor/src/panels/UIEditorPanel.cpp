@@ -19,6 +19,7 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
+#include "../ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 
@@ -209,6 +210,9 @@ void UIEditorPanel::DrawCreateMenu(EditorHost& host) {
     if (EditorIcons::Button("plus", T("Element"), T("Add an interface element"))) {
         ImGui::OpenPopup("##ui_create");
     }
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope).
+    Sage::UI::MenuScope createMenu;
     if (ImGui::BeginPopup("##ui_create")) {
         ImGui::TextDisabled("%s", T("New element"));
         ImGui::Separator();

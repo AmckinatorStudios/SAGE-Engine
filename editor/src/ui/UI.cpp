@@ -320,4 +320,33 @@ std::string Truncate(const char* text, float maxWidth) {
     return out + kEllipsis;
 }
 
+// --- всплывающие окна и меню ----------------------------------------------
+
+MenuScope::MenuScope() {
+    // Значения берутся У ТЕМЫ, а не у текущего стиля: текущий и есть то, что
+    // могло быть обнулено вокруг (см. комментарий в UI.h).
+    const EditorTheme::Metrics& m = EditorTheme::Current().Metric;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, m.WindowPadding);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, m.FramePadding);
+    // Пункты меню — ряд строк, и по вертикали им нужно чуть больше воздуха, чем
+    // элементам в плотной панели: ряд из пятнадцати строк без просветов
+    // читается как сплошное полотно, в котором глазу не за что зацепиться.
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                        ImVec2(m.ItemSpacing.x, m.ItemSpacing.y));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, m.ItemInnerSpacing);
+}
+
+MenuScope::~MenuScope() { ImGui::PopStyleVar(4); }
+
+void MenuSection(const char* label, bool first) {
+    const Style& ui = Get();
+    if (!first) {
+        ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
+        ImGui::Separator();
+    }
+    ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
+    TextSecondary("%s", label);
+    ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
+}
+
 } // namespace Sage::UI

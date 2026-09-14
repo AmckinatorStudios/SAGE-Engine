@@ -1256,6 +1256,9 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         m_addComponentFilter[0] = '\0';
         m_addComponentFocus = true;
     }
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope).
+    Sage::UI::MenuScope addComponentMenu;
     if (!ImGui::BeginPopup("##add_component")) return;
 
     ImGui::SetNextItemWidth(280.0f);

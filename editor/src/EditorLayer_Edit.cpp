@@ -383,10 +383,19 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         // ShapeType::Capsule), и видимое тело обязано совпадать с тем, чем он
         // сталкивается, — иначе высоту настраивают в двух местах, сверяя на глаз.
         GameObject obj = CreatePrimitiveEntity("Character", MeshRef::Type::Capsule);
-        // Капсула движка — единичная (радиус 0.5, общая высота 1), поэтому
-        // масштаб повторяет рост контроллера: 0.7 в ширину и 1.8 в высоту.
-        obj.GetTransform().Scale = {0.7f, 1.8f, 0.7f};
-        obj.GetTransform().Position = {0.0f, 0.9f, 0.0f};
+        // МАСШТАБ СЧИТАЕТСЯ ОТ РАЗМЕРА КАПСУЛЫ, а не переписан на глаз.
+        //
+        // Капсула движка — диаметр 1, высота 2 (те же числа, что у коллайдера;
+        // см. BuildCapsule). Контроллер по умолчанию — радиус 0.35 и высота
+        // 1.8, то есть 0.7 в ширину. Отсюда масштаб: 0.7 по ширине и 0.9 по
+        // высоте.
+        //
+        // Стояло {0.7, 1.8, 0.7} при капсуле шириной 0.5 — персонаж рисовался
+        // 0.35 в ширину, ВДВОЕ ТОНЬШЕ своей физической капсулы. Именно то
+        // расхождение, ради устранения которого капсулу и заводили.
+        const CharacterControllerComponent shape;
+        obj.GetTransform().Scale = {shape.Radius * 2.0f, shape.Height * 0.5f, shape.Radius * 2.0f};
+        obj.GetTransform().Position = {0.0f, shape.Height * 0.5f, 0.0f};
         reg.emplace<CharacterControllerComponent>(obj.Entity());
         return done(obj);
     }

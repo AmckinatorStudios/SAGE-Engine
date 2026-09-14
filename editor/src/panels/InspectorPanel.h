@@ -66,8 +66,12 @@ private:
     enum class Focus { Object, Asset };
 
     static AssetKind ClassifyAsset(const std::filesystem::path& path);
-    static void DrawSectionHeader(const char* icon, const char* kind, const std::string& name,
-                                  const std::string& subtitle);
+    // Заголовок раздела: значок, имя, вид предмета правки — и замок панели в
+    // той же строке (см. .cpp: почему именно здесь, а не перед заголовком).
+    void DrawSectionHeader(EditorHost& host, const char* icon, const char* kind,
+                           const std::string& name, const std::string& subtitle);
+    // Замок панели, прижатый к правому краю ТЕКУЩЕЙ строки.
+    void DrawLockButton(EditorHost& host);
     void DrawObjectSection(EditorHost& host);
     void DrawAssetSection(EditorHost& host, AssetKind kind);
 

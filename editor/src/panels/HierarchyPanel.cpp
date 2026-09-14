@@ -17,6 +17,7 @@
 #include "Project.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
+#include "../ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
 #include "../ObjectCatalog.h"
@@ -306,6 +307,9 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     }
 
     // Контекстное меню сущности.
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope).
+    Sage::UI::MenuScope rowMenu;
     if (ImGui::BeginPopupContextItem()) {
         // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
         // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
@@ -411,6 +415,9 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     if (EditorIcons::Button("plus", T("Object"), T("Add an object to the scene"))) {
         ImGui::OpenPopup("##hierarchy_add");
     }
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope).
+    Sage::UI::MenuScope addMenu;
     if (ImGui::BeginPopup("##hierarchy_add")) {
         if (const char* pick = sage::editor::objectcatalog::DrawMenu()) host.CreateCatalogObject(pick);
         ImGui::EndPopup();

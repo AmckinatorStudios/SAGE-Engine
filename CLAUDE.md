@@ -59,6 +59,7 @@ python3 scripts/check_rhi_boundary.py                             # границ
 python3 scripts/check_paths.py                                    # пути из окружения
 python3 scripts/check_asset_slots.py                              # ассеты — слотами
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
+python3 scripts/check_menu_style.py                               # отступы меню
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
@@ -141,6 +142,12 @@ Linux не видна вообще — другой компилятор, дру
   обязано нести «###»: перевод меняет строку, а с ней и идентификатор окна.
   Проверяет `scripts/check_popup_ids.py`, в рантайме подстраховывает
   `EditorLayer::CloseGhostPopups`.
+- **Всплывающее меню объявляет свои отступы** — `Sage::UI::MenuScope` перед
+  `BeginPopup`. ImGui берёт отступы окна В МОМЕНТ открытия, то есть те, что
+  протолкнуты вокруг: панель с обнулённым `WindowPadding` отдаёт свой ноль
+  любому меню, открытому изнутри неё, и пункты прижимаются к самой рамке.
+  Модальных окон правило не касается — у них свои поля по смыслу. Проверяет
+  `scripts/check_menu_style.py`.
 - **Новая функция скриптам — одним вызовом `Bind(...)`** в
   `engine/src/sage/scripting/`. Из этих вызовов собирается подсказка для
   редакторов кода (`editor/assets/api/sage.lua`), поэтому после правки —

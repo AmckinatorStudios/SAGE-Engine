@@ -9,6 +9,7 @@
 #include "../EditorHost.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
+#include "../ui/UI.h"
 
 using sage::input::Action;
 using sage::input::ActionType;
@@ -344,6 +345,9 @@ void InputPanel::DrawAction(EditorHost& host, Context& context, Action& action,
     if (action.Type() != ActionType::Digital) {
         ImGui::SameLine();
         if (ImGui::Button(T("+ Axis..."))) ImGui::OpenPopup("##axisMenu");
+        // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+        // момент открытия (см. Sage::UI::MenuScope).
+        Sage::UI::MenuScope axisMenu;
         if (ImGui::BeginPopup("##axisMenu")) {
             struct AxisItem { const char* Label; Binding (*Make)(); };
             static const AxisItem kAxes[] = {
@@ -405,6 +409,9 @@ void InputPanel::Draw(EditorHost& host, bool& open) {
 
     ImGui::SameLine();
     if (ImGui::Button(T("Standard layout..."))) ImGui::OpenPopup("##presetMenu");
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope).
+    Sage::UI::MenuScope presetMenu;
     if (ImGui::BeginPopup("##presetMenu")) {
         Hint(T("Adds the usual set of actions. Existing ones are left alone."));
         ImGui::Separator();

@@ -132,23 +132,6 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
     // Теперь он в одном ряду с именем предмета правки и занимает ровно свою
     // ширину; запертое состояние видно по подсветке самой кнопки.
     const bool locked = host.InspectorLocked();
-    {
-        const float side = ImGui::GetFrameHeight();
-        const float startX = ImGui::GetCursorPosX();
-        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - side);
-        if (EditorIcons::IconOnlyButton(
-                "lock",
-                locked ? T("Unlock: the panel will follow the selection again")
-                       : T("Lock: the panel will keep showing this while you pick something else "
-                           "(for drag and drop)"),
-                locked)) {
-            host.SetInspectorLocked(!locked);
-        }
-        // Курсор возвращается В НАЧАЛО ТОЙ ЖЕ строки: следующее содержимое —
-        // вкладки или имя объекта — встаёт рядом с замком, а не под ним. Ради
-        // этого всё и затевалось: строка перестаёт принадлежать одной кнопке.
-        ImGui::SameLine(startX);
-    }
 
     // ------------------------------------------------------------------------
     // ОДИН ПРЕДМЕТ ПРАВКИ ЗА РАЗ — ТОТ, ЧТО ВЫБРАН ПОСЛЕДНИМ.
@@ -184,6 +167,7 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
 
     if (!hasEntity && !hasAsset) {
         ImGui::TextDisabled("%s", T("Nothing selected"));
+        DrawLockButton(host);   // и здесь: запереть панель можно и с пустым выбором
         ImGui::Spacing();
         // TextWrapped, а не две строки текста: панель узкая и её ширину меняют,
         // а обрезанная посередине подсказка бесполезнее отсутствующей.
@@ -207,9 +191,37 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
 // Заголовок раздела: что именно правится. Без него вкладка «Ассет» с полями
 // Albedo/Metallic ничем не отличается от материала, назначенного объекту, —
 // а это разные вещи: здесь правится ФАЙЛ, общий для всех, кто им покрашен.
-void InspectorPanel::DrawSectionHeader(const char* icon, const char* kind, const std::string& name,
-                                       const std::string& subtitle) {
-    ImGui::Spacing();
+// Замок — В СТРОКЕ С ИМЕНЕМ, а не отдельной строкой над ним.
+//
+// Раньше под него отдавалась целая строка панели, при том что нажимают его
+// редко и по конкретному поводу (перетащить файл из Assets в слот). Постоянная
+// строка ради редкого действия съедала место у того, ради чего панель и
+// открыта, — у полей.
+//
+// Попытка посадить его в строку заголовка уже была: кнопка рисовалась ПЕРЕД
+// заголовком, а потом ImGui::SameLine возвращал курсор в начало той же строки.
+// Не работало, и причина поучительная: заголовок начинался с ImGui::Spacing(),
+// а Spacing — это ЭЛЕМЕНТ, и он переводит строку. Замок оставался на своей
+// строке один, как будто SameLine не звали вовсе.
+//
+// Поэтому теперь замок рисует САМ заголовок, последним в своей строке: между
+// «нарисовать имя» и «нарисовать замок» больше нечему вклиниться.
+void InspectorPanel::DrawLockButton(EditorHost& host) {
+    const bool locked = host.InspectorLocked();
+    const float side = ImGui::GetFrameHeight();
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - side);
+    if (EditorIcons::IconOnlyButton(
+            "lock",
+            locked ? T("Unlock: the panel will follow the selection again")
+                   : T("Lock: the panel will keep showing this while you pick something else "
+                       "(for drag and drop)"),
+            locked)) {
+        host.SetInspectorLocked(!locked);
+    }
+}
+
+void InspectorPanel::DrawSectionHeader(EditorHost& host, const char* icon, const char* kind,
+                                       const std::string& name, const std::string& subtitle) {
     const float s = ImGui::GetTextLineHeight();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     // Значок и имя — с тем же зазором, что и везде (см. EditorIcons::TextGap):
@@ -220,6 +232,7 @@ void InspectorPanel::DrawSectionHeader(const char* icon, const char* kind, const
     ImGui::TextUnformatted(name.c_str());
     ImGui::SameLine();
     ImGui::TextDisabled("(%s)", kind);
+    DrawLockButton(host);
     if (!subtitle.empty()) {
         ImGui::TextDisabled("%s", subtitle.c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", subtitle.c_str());
@@ -384,7 +397,7 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
 
 void InspectorPanel::DrawObjectSection(EditorHost& host) {
     GameObject obj = host.InspectedObject();
-    DrawSectionHeader("cube", T("scene object"), obj.Name(),
+    DrawSectionHeader(host, "cube", T("scene object"), obj.Name(),
                       T("The properties of this entity belong to it alone."));
 
     // Мультивыделение: правим первичную, но подсказываем размер набора
@@ -403,29 +416,29 @@ void InspectorPanel::DrawAssetSection(EditorHost& host, AssetKind kind) {
 
     switch (kind) {
         case AssetKind::Material:
-            DrawSectionHeader("material", T("material"), name,
+            DrawSectionHeader(host, "material", T("material"), name,
                               T("A file on disk — the change affects EVERY object using this material."));
             DrawMaterialEditor(host);
             break;
         case AssetKind::Prefab:
-            DrawSectionHeader("cube", T("prefab"), name,
+            DrawSectionHeader(host, "cube", T("prefab"), name,
                               T("A subtree template: double-clicking in Assets places a copy into the scene."));
             DrawPrefabPreview(host);
             break;
         case AssetKind::Model:
-            DrawSectionHeader("model", T("model"), name,
+            DrawSectionHeader(host, "model", T("model"), name,
                               T("Import settings are baked into the mesh on load."));
             DrawModelImportEditor(host);
             break;
         case AssetKind::Audio:
-            DrawSectionHeader("play", T("sound"), name,
+            DrawSectionHeader(host, "play", T("sound"), name,
                               T("Listen to it right here — no need to put it on an object first."));
             DrawAudioPlayer(host);
             break;
         default: {
             // Для остальных типов редактора нет — но пустая вкладка выглядит как
             // поломка, поэтому показываем то, что известно о файле.
-            DrawSectionHeader("file", T("file"), name, path.string());
+            DrawSectionHeader(host, "file", T("file"), name, path.string());
             std::error_code ec;
             const auto size = std::filesystem::file_size(path, ec);
             if (!ec) ImGui::TextDisabled(T("Size: %llu bytes"), (unsigned long long)size);

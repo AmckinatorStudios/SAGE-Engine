@@ -51,6 +51,13 @@ jobs:
       - name: Popup id check (OpenPopup and BeginPopup* agree on the name)
         run: python3 scripts/check_popup_ids.py
 
+      # Меню объявляют свои отступы: ImGui берёт их в момент BeginPopup, то есть
+      # те, что протолкнуты вокруг. Панель с обнулённым WindowPadding отдавала
+      # свой ноль любому меню, открытому изнутри неё, — пункты прижимались к
+      # самой рамке окна.
+      - name: Menu style check (a popup declares its own padding)
+        run: python3 scripts/check_menu_style.py
+
       # Подсказка по скриптовому API для редакторов кода собирается из вызовов
       # Bind(...) движка. Устареет — начнёт врать: предлагать то, чего нет, и
       # молчать о том, что появилось. Врущая подсказка хуже отсутствующей.

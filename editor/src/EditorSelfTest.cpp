@@ -3065,19 +3065,23 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: капсула не построилась";
             ok = false;
         }
-        // ГАБАРИТ: высота 1 (как у всех примитивов — «капсула ростом 1.8»
-        // получается масштабом 1.8), ширина 0.5 — то есть ВДВОЕ МЕНЬШЕ высоты.
+        // ГАБАРИТ СВЕРЯЕТСЯ С КОЛЛАЙДЕРОМ, А НЕ С ЧИСЛОМ В ЭТОМ ТЕСТЕ.
         //
-        // Проверка именно на это, а не «1 x 1»: при радиусе в половину высоты
-        // цилиндрической части не остаётся вовсе, и капсула вырождается в
-        // СФЕРУ — ровно так она и была построена, один в один с шаром. Форма,
-        // неотличимая от другой формы, не нужна ни в списке, ни в движке.
+        // Смысл капсулы ровно один: видимое тело обязано совпадать с тем, чем
+        // персонаж сталкивается. Поэтому проверка спрашивает не «0.5 x 1», а
+        // «то же, что у ColliderComponent по умолчанию»: разъехавшись, эти два
+        // размера снова заставят настраивать рост в двух местах на глаз — и
+        // именно так и было (меш 0.25 x 1 против коллайдера 0.5 x 2).
         if (ok) {
+            const ColliderComponent shape;   // значения по умолчанию: капсула
+            const float wantW = shape.Radius * 2.0f;
+            const float wantH = (shape.HalfHeight + shape.Radius) * 2.0f;
             const glm::vec3 lo = mr.MeshPtr->BoundsMin(), hi = mr.MeshPtr->BoundsMax();
             const float w = hi.x - lo.x, h = hi.y - lo.y;
-            if (std::abs(h - 1.0f) > 0.01f || std::abs(w - 0.5f) > 0.01f) {
+            if (std::abs(h - wantH) > 0.01f || std::abs(w - wantW) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: габарит капсулы " << w << " x " << h
-                                    << " вместо 0.5 x 1";
+                                    << " вместо " << wantW << " x " << wantH
+                                    << " (размер коллайдера по умолчанию)";
                 ok = false;
             }
             // И цилиндрическая часть ЕСТЬ: у сферы вершины лежат на одном
@@ -3111,12 +3115,28 @@ bool EditorLayer::SelfTestSelection() {
                 ok = false;
             }
         }
-        // И персонаж из каталога собирается ИМЕННО капсулой.
+        // И персонаж из каталога собирается ИМЕННО капсулой — ТОГО ЖЕ размера,
+        // что и его контроллер. Проверка на «это капсула» пропускала главное:
+        // персонаж рисовался вдвое тоньше своей физической капсулы, потому что
+        // масштаб считали от капсулы шириной 0.5, а контроллер — от 0.7.
         if (ok) {
             GameObject ch = m_scene->Get(CreateCatalogObject("physics.character"));
             if (!ch.Valid() || ch.Renderer().Ref.type != MeshRef::Type::Capsule) {
                 LOG_ERROR("Editor") << "SELFTEST: персонаж собран не капсулой";
                 ok = false;
+            } else if (const std::shared_ptr<Mesh>& m = ch.Renderer().MeshPtr; m) {
+                const CharacterControllerComponent want;
+                const glm::vec3 sc = ch.GetTransform().Scale;
+                const glm::vec3 lo = m->BoundsMin(), hi = m->BoundsMax();
+                const float drawnW = (hi.x - lo.x) * sc.x;
+                const float drawnH = (hi.y - lo.y) * sc.y;
+                if (std::abs(drawnW - want.Radius * 2.0f) > 0.01f ||
+                    std::abs(drawnH - want.Height) > 0.01f) {
+                    LOG_ERROR("Editor") << "SELFTEST: персонаж нарисован " << drawnW << " x "
+                                        << drawnH << ", а сталкивается " << want.Radius * 2.0f
+                                        << " x " << want.Height;
+                    ok = false;
+                }
             }
         }
     }
