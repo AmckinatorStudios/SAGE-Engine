@@ -1,5 +1,4 @@
 #include "../PanelWindows.h"
-#include "../Progress.h"
 #include "EnvironmentPanel.h"
 #include "EditorTheme.h"
 
@@ -10,7 +9,6 @@
 
 #include "EditorHost.h"
 #include "sage/core/Log.h"
-#include "sage/gi/GI.h"
 #include "sage/physics/PhysicsTypes.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
@@ -23,160 +21,6 @@
 #include <cmath>
 #include "../Localization.h"
 
-EnvironmentPanel::~EnvironmentPanel() {
-    // Дожидаемся фонового бейка: его вход самодостаточен, но поток обязан
-    // завершиться до разрушения атомиков/мьютекса панели.
-    if (m_bakeThread.joinable()) m_bakeThread.join();
-}
-
-void EnvironmentPanel::StartBake(EditorHost& host, const sage::gi::GISettings& settings) {
-    if (m_bakeRunning) return;
-    if (m_bakeThread.joinable()) m_bakeThread.join();
-
-    // Вход собирается ЗДЕСЬ, на главном потоке — фоновой части сцена не нужна.
-    sage::gi::BakeInput input = sage::gi::CollectBakeInput(host.CurrentScene(), settings);
-    if (input.Items.empty()) {
-        host.SetStatusMessage(T("GI: no static entities — add the GI Static component"));
-        return;
-    }
-
-    m_bakeRunning = true;
-    m_bakeProgress = 0.0f;
-    {
-        std::lock_guard<std::mutex> lock(m_bakeMutex);
-        m_bakeResult.reset();
-        m_bakePhase = T("Start");
-    }
-    // КАРТОЧКА В УГЛУ, А НЕ ТОЛЬКО ПОЛОСА В ЭТОЙ ПАНЕЛИ. Бейк идёт минутами, а
-    // панель Lighting на это время закрывают — и работа, которая продолжается,
-    // исчезала с глаз совсем (см. Progress.h).
-    namespace progress = sage::editor::progress;
-    const progress::Id task = progress::Begin(progress::Kind::Background, T("Baking GI"),
-                                              T("Start"));
-    m_bakeThread = std::thread([this, task, input = std::move(input)]() {
-        auto result = sage::gi::Bake(input, [this, task](float f, const char* phase) {
-            m_bakeProgress = f;
-            sage::editor::progress::Update(task, f, phase ? phase : "");
-            std::lock_guard<std::mutex> lock(m_bakeMutex);
-            m_bakePhase = phase;
-        });
-        sage::editor::progress::End(task);
-        std::lock_guard<std::mutex> lock(m_bakeMutex);
-        m_bakeResult = std::move(result);
-        m_bakeRunning = false;
-    });
-}
-
-void EnvironmentPanel::DrawGISection(EditorHost& host) {
-    if (!EditorTheme::SectionHeader(T("Global Illumination (baked)" "###Global Illumination (baked)"),
-                                    ImGuiTreeNodeFlags_DefaultOpen, nullptr,
-                                    T("Bakes indirect light to lightmaps (static) and a probe volume (dynamic); direct light stays realtime")))
-        return;
-
-    Scene& scene = host.CurrentScene();
-
-    // Завершившийся фоновый бейк — применяем к сцене (на главном потоке).
-    if (!m_bakeRunning) {
-        std::shared_ptr<sage::gi::GIState> done;
-        {
-            std::lock_guard<std::mutex> lock(m_bakeMutex);
-            done = std::move(m_bakeResult);
-        }
-        if (done) {
-            // Сцена могла измениться/смениться, пока пёкся свет: применяем
-            // только на геометрически ту же сцену, иначе UV не соответствуют.
-            uint64_t now = sage::gi::ComputeGeometryHash(scene, done->Settings);
-            if (now == done->GeometryHash) {
-                scene.GI = std::move(done);
-                host.SetStatusMessage(T("GI: bake finished — save the scene to write the lightmaps"));
-            } else {
-                host.SetStatusMessage(T("GI: the scene changed during the bake — the result was dropped"));
-                LOG_WARN("GI") << "Сцена изменилась во время бейка — повтори запекание";
-            }
-        }
-    }
-
-    // Настройки живут в состоянии GI сцены (persist со сценой). Нет — дефолт.
-    if (!scene.GI) scene.GI = std::make_shared<sage::gi::GIState>();
-    sage::gi::GISettings& s = scene.GI->Settings;
-
-    ImGui::DragInt(T("Texels / unit"), &s.TexelsPerUnit, 0.2f, 1, 64);
-    const char* atlasSizes[] = {"512", "1024", "2048"};
-    int atlasIdx = s.AtlasSize >= 2048 ? 2 : (s.AtlasSize >= 1024 ? 1 : 0);
-    if (ImGui::Combo(T("Atlas size"), &atlasIdx, atlasSizes, 3))
-        s.AtlasSize = atlasIdx == 2 ? 2048 : (atlasIdx == 1 ? 1024 : 512);
-    ImGui::DragInt(T("Samples / texel"), &s.SampleCount, 1.0f, 8, 1024);
-    ImGui::DragInt(T("Bounces"), &s.Bounces, 0.1f, 1, 8);
-    ImGui::DragFloat(T("Probe cell size"), &s.ProbeCellSize, 0.1f, 0.5f, 10.0f);
-
-    int staticCount = 0;
-    {
-        auto view = scene.Registry().view<GIStaticComponent>();
-        staticCount = (int)view.size();
-    }
-    if (scene.GI->Baked)
-        ImGui::Text(T("Baked: %d entities, %d page(s), probes %dx%dx%d"),
-                    (int)scene.GI->Entities.size(), (int)scene.GI->Pages.size(),
-                    scene.GI->Probes.Dims.x, scene.GI->Probes.Dims.y, scene.GI->Probes.Dims.z);
-    else
-        ImGui::TextDisabled(T("Not baked (%d static entities)"), staticCount);
-
-    // Устарел ли бейк относительно текущей сцены.
-    if (scene.GI->Baked &&
-        sage::gi::ComputeGeometryHash(scene, s) != scene.GI->GeometryHash) {
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", T("Scene changed since bake — re-bake"));
-    }
-
-    if (m_bakeRunning) {
-        std::string phase;
-        {
-            std::lock_guard<std::mutex> lock(m_bakeMutex);
-            phase = m_bakePhase;
-        }
-        ImGui::ProgressBar(m_bakeProgress, ImVec2(-1, 0), phase.c_str());
-    } else {
-        if (ImGui::Button(T("Bake GI"), ImVec2(-1, 0))) StartBake(host, s);
-        if (ImGui::Button(T("Mark static geometry"))) {
-            // Все сущности с мешем и без динамического тела — статичные для GI.
-            host.PushUndoSnapshot();
-            int added = 0;
-            auto view = scene.Registry().view<MeshRendererComponent>();
-            for (auto e : view) {
-                const auto& mr = view.get<MeshRendererComponent>(e);
-                if (mr.Ref.type == MeshRef::Type::None) continue;
-                if (scene.Registry().all_of<GIStaticComponent>(e)) continue;
-                const auto* rb = scene.Registry().try_get<RigidBodyComponent>(e);
-                if (rb && rb->Type != sage::physics::BodyType::Static) continue;
-                scene.Registry().emplace<GIStaticComponent>(e);
-                ++added;
-            }
-            host.SetStatusMessage(T("GI: entities marked static: ") + std::to_string(added));
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(T("Clear bake")) && scene.GI->Baked) {
-            host.PushUndoSnapshot();
-            scene.GI = std::make_shared<sage::gi::GIState>();
-            scene.GI->Settings = s;
-        }
-    }
-}
-
-// Солнце сцены. Раньше здесь стояли три поля прямо в настройках освещения —
-// направление, цвет, яркость. Теперь солнце это ОБЪЕКТ (сущность с
-// LightComponent{Directional}), и панель не редактирует его копию, а показывает,
-// какой именно объект светит, и уводит к нему.
-//
-// Почему не оставить дубль полей здесь «для удобства». Потому что дубля не
-// бывает: сущность можно повернуть гизмо, привязать к родителю и анимировать, а
-// три поля в панели про это не знают. Панель, которая правит одно, а показывает
-// другое, — худший вид удобства.
-// Солнце — ОБЪЕКТ СЦЕНЫ, и время суток задаётся его поворотом.
-//
-// Здесь не настройки солнца, а дорога к нему: полей солнца в этом окне нет и
-// быть не должно (их правит инспектор объекта). Но процедурное небо целиком
-// зависит от того, где солнце стоит, и человек, пришедший «сделать ночь»,
-// должен из этого места попасть к нужной ручке за одно нажатие, а не искать
-// объект в иерархии по названию.
 void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env) {
     (void)env;
     // СОЛНЦЕ ИЩЕТ ДВИЖОК, а не панель: правило «солнце — направленный свет с
@@ -189,7 +33,7 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
         ImGui::TextWrapped("%s", T("No directional light — no sun and no time of day."));
         if (ImGui::Button(T("Create a sun"))) {
             host.PushUndoSnapshot();
-            GameObject sun = scene.CreateObject("Sun");
+            GameObject sun = scene.CreateEmptyObject("Sun");
             sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
             sun.GetTransform().Rotation =
                 sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
@@ -526,17 +370,8 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
         ImGui::DragFloat(T("Fog Start"), &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Fog End"), &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
         if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;
-
-        // Объёмный свет живёт в настройках ДВИЖКА, а ищут его здесь — рядом с
-        // туманом, потому что для человека это одно и то же явление: воздух,
-        // который видно. Ссылка дешевле, чем вторая копия десятка ползунков в
-        // другом окне.
-        ImGui::TextDisabled("%s", T("Volumetric light and clouds are a frame cost, not a scene "
-                                    "property — they live in the engine settings."));
-        if (ImGui::Button(T("Volumetric Light..."))) host.ShowSettingsWindow();
     }
 
-    DrawGISection(host);
-
+    // ВЫПЕЧКА GI ПОКА УБРАНА ИЗ РЕДАКТОРА (см. EnvironmentPanel.h).
     ImGui::End();
 }

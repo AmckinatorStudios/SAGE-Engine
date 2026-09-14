@@ -12,7 +12,10 @@ namespace {
 
 // Сущность-элемент: имя, родитель, обязательный прямоугольник.
 GameObject Element(Scene& scene, const std::string& name, GameObject parent, const Transform& xf) {
-    GameObject e = scene.CreateObject(name);
+    // ПУСТОЙ объект, а не CreateObject: элемент интерфейса рисуется системой
+    // UI, а не мешем, и компонент «Меш» у надписи — это секция с моделью,
+    // цветом и тенями, которой нечем распорядиться.
+    GameObject e = scene.CreateEmptyObject(name);
     scene.Registry().emplace<Transform>(e.Entity(), xf);
     if (parent.Valid()) scene.SetParent(e.Entity(), parent.Entity());
     return e;
@@ -50,7 +53,7 @@ Label Text(const std::string& text, float scale, glm::vec4 color,
 // отступов), у кнопок есть ИМЯ ДЕЙСТВИЯ, а группа гасит весь экран одним
 // числом.
 int BuildMenu(Scene& scene) {
-    GameObject root = scene.CreateObject("DemoMenu");
+    GameObject root = scene.CreateEmptyObject("DemoMenu");
 
     Transform screenXf;
     screenXf.Anchor = UIAnchor::TopLeft;
@@ -116,7 +119,7 @@ int BuildMenu(Scene& scene) {
 
 // --- Худ --------------------------------------------------------------------
 int BuildHud(Scene& scene) {
-    GameObject root = scene.CreateObject("DemoHud");
+    GameObject root = scene.CreateEmptyObject("DemoHud");
 
     Transform screenXf;
     screenXf.Anchor = UIAnchor::TopLeft;
@@ -206,7 +209,7 @@ int BuildHud(Scene& scene) {
 
 // --- Настройки --------------------------------------------------------------
 int BuildSettings(Scene& scene) {
-    GameObject root = scene.CreateObject("DemoSettings");
+    GameObject root = scene.CreateEmptyObject("DemoSettings");
 
     Transform panelXf;
     panelXf.Anchor = UIAnchor::Center;

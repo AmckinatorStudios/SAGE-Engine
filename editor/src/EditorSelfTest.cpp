@@ -635,6 +635,27 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 ok = false;
             }
 
+            // У СВЕТА, КАМЕРЫ И ЭЛЕМЕНТА ИНТЕРФЕЙСА НЕТ КОМПОНЕНТА «МЕШ».
+            //
+            // Scene::CreateObject вешает MeshRenderer всем подряд, и шаблоны
+            // звали именно его: лампа приезжала с секцией «Меш» — моделью,
+            // цветом и тенями, которых у света нет. Шаблон — образец того, как
+            // устроен проект, и лишний компонент в нём учит неправильному.
+            {
+                entt::registry& reg = m_scene->Registry();
+                auto complain = [&](entt::entity e, const char* what) {
+                    if (!reg.all_of<MeshRendererComponent>(e)) return;
+                    const auto* nm = reg.try_get<NameComponent>(e);
+                    LOG_ERROR("Editor") << "SELFTEST: у объекта " << (nm ? nm->Name : "?")
+                                        << " шаблона " << c.Id << " висит компонент «Меш», хотя это "
+                                        << what;
+                    ok = false;
+                };
+                for (auto e : reg.view<LightComponent>()) complain(e, "свет");
+                for (auto e : reg.view<CameraComponent>()) complain(e, "камера");
+                for (auto e : reg.view<sage::ui::Transform>()) complain(e, "элемент интерфейса");
+            }
+
             // ФАЙЛ СЦЕНЫ НА ДИСКЕ — у КАЖДОГО шаблона, пустого в том числе.
             // Ровно та поломка, с которой пришли: сцену показывает, а файла
             // нет. Дальше по цепочке ломается всё: в scenes/ пусто, Ctrl+S

@@ -1552,6 +1552,8 @@
     "Failed": "Не получилось",
     "Preparing asset thumbnails": "Готовятся обложки ассетов",
     "Thumbnails ready": "Обложки готовы",
-    "Working...": "Идёт работа..."
+    "Working...": "Идёт работа...",
+    "Baking is temporarily unavailable in the editor": "Выпечка освещения в редакторе временно недоступна",
+    "Marked as static geometry for baked lighting": "Помечен как статичная геометрия для запечённого света"
   }
 }

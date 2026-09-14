@@ -34,7 +34,7 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
 
 void BuildChildren(Scene& scene, entt::entity parent, const Preset& p) {
     for (const Preset& child : p.Children) {
-        GameObject obj = scene.CreateObject(child.Name.empty() ? "Element" : child.Name);
+        GameObject obj = scene.CreateEmptyObject(child.Name.empty() ? "Element" : child.Name);
         scene.SetParent(obj.Entity(), parent);
         ApplyNode(scene.Registry(), obj.Entity(), child);
         BuildChildren(scene, obj.Entity(), child); // заготовка может быть глубже

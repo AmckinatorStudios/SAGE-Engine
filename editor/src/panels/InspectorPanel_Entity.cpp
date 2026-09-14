@@ -374,12 +374,21 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
-    if (reg.all_of<GIStaticComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("GI Static" "###GI Static"), ImGuiTreeNodeFlags_DefaultOpen, &rmGiStatic,
-                                       Hint2(T("Static occluder for baked GI; lightmapped = has own lightmap"),
-                                       T("Re-bake lighting after changes (Lighting panel)")).c_str())) {
-        GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
-        ImGui::Checkbox(T("Lightmapped"), &gs.Lightmapped); host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Texel Scale"), &gs.TexelScale, 0.05f, 0.1f, 8.0f); host.TrackLastImGuiItem();
+    // GI STATIC — ТОЛЬКО СТРОКА И КНОПКА «УБРАТЬ».
+    //
+    // Выпечка GI из редактора временно убрана (см. EnvironmentPanel.h), а
+    // значит «Lightmapped» и «Texel Scale» настраивать нечего: их читал бейк,
+    // которого больше нельзя запустить. Настройка, ни на что не влияющая, врёт
+    // сильнее, чем её отсутствие. Сам компонент остаётся видимым и снимаемым:
+    // в сценах, размеченных раньше, он есть, и человек должен понимать, что
+    // это такое и как от него избавиться.
+    if (reg.all_of<GIStaticComponent>(obj.Entity())) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(T("GI Static"));
+        EditorTheme::Hint(Hint2(T("Marked as static geometry for baked lighting"),
+                                T("Baking is temporarily unavailable in the editor")).c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Remove##gistatic"))) rmGiStatic = true;
     }
 
     // У этого компонента НЕТ ПОЛЕЙ: он флаг, и вся его настройка — есть он или

@@ -195,7 +195,10 @@ void EditorLayer::Redo() {
 // Ноль в размере или прозрачный цвет по умолчанию означали бы, что человек
 // создал элемент и не увидел ничего.
 GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
-    GameObject obj = m_scene->CreateObject(preset);
+    // ПУСТОЙ объект: элемент интерфейса рисует система UI, а не меш. С
+    // CreateObject у каждой кнопки и надписи висел компонент «Меш» с моделью,
+    // цветом и тенями — настройками, которых у прямоугольника на экране нет.
+    GameObject obj = m_scene->CreateEmptyObject(preset);
     entt::registry& reg = m_scene->Registry();
 
     // Новый элемент становится ДОЧЕРНИМ к выделенному элементу интерфейса.

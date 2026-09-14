@@ -27,7 +27,7 @@ struct UI {
 
 // Создаёт UI-сущность и (опционально) родителя; возвращает её.
 GameObject MakeUI(Scene& scene, const std::string& name, const UI& ui, GameObject parent) {
-    GameObject e = scene.CreateObject(name);
+    GameObject e = scene.CreateEmptyObject(name);
     entt::registry& reg = scene.Registry();
     reg.emplace<Transform>(e.Entity(), ui.Xf);
     if (ui.HasFill) reg.emplace<Fill>(e.Entity(), ui.FillStyle);
@@ -63,7 +63,7 @@ int BuildShowcase(Scene& scene) {
     // Корень — ПРОСТАЯ сущность без частей интерфейса: только группировка (и
     // удаление всего интерфейса разом). Дети с UI считаются экранными корнями
     // (родитель без UI => якорь к экрану), сам корень не рисуется и не кликается.
-    GameObject root = scene.CreateObject("UIShowcase");
+    GameObject root = scene.CreateEmptyObject("UIShowcase");
 
     // ======================= ИНВЕНТАРЬ (справа) =======================
     UI invUi = Panel(UIAnchor::TopRight, {24, 24}, {372, 470}, {0.08f, 0.09f, 0.13f, 0.92f}, 12.0f);

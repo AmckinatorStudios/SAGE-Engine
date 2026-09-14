@@ -140,15 +140,6 @@
         "y": 1,
         "z": 1
       },
-      "color": {
-        "x": 1,
-        "y": 1,
-        "z": 1
-      },
-      "mesh": {
-        "type": "none",
-        "path": ""
-      },
       "camera": {
         "projection": "perspective",
         "fov": 72.0,
