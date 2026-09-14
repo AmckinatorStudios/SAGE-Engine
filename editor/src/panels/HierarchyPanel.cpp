@@ -245,14 +245,30 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                                                       ImGui::GetItemRectMax())) {
         m_rectHits.push_back(id);
     }
+    m_visibleRows.push_back(id);   // порядок строк на экране — для Shift-диапазона
+    {
+        // Центр строки в экранных координатах: самопроверка щёлкает по списку
+        // ПО-НАСТОЯЩЕМУ (см. EditorLayer::TickInputProbe), а чтобы щёлкнуть,
+        // надо знать куда.
+        const ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+        m_rowCenters.push_back(ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f));
+    }
 
     // Клик по строке (не по треугольнику раскрытия) — выбор. Ctrl — добавить/
     // убрать из набора (множественный выбор), обычный клик — одиночный.
     // Пока ведут рамку, клики не разбираем: жест уже начат, и «выбрать один»
     // посреди него означало бы мигание выбора.
     if (!m_rectActive && !eyeClicked && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-        if (ImGui::GetIO().KeyCtrl) host.ToggleSelection(id);
-        else host.SetSelectedId(id);
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.KeyShift && m_anchorId != -1) {
+            m_shiftClickId = id;   // диапазон считается в конце кадра (см. HierarchyPanel.h)
+        } else if (io.KeyCtrl) {
+            host.ToggleSelection(id);
+            m_anchorId = id;
+        } else {
+            host.SetSelectedId(id);
+            m_anchorId = id;
+        }
     }
 
     // Перетаскиваем эту сущность как источник.
@@ -433,6 +449,8 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     namespace rectselect = sage::editor::rectselect;
     m_rectActive = rectselect::Begin(m_rect);
     m_rectHits.clear();
+    m_visibleRows.clear();
+    m_rowCenters.clear();
 
     // Корни (без родителя) в стабильном порядке по id.
     std::vector<std::pair<int, entt::entity>> roots;
@@ -527,6 +545,30 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
 
     // Рамка выделения. Начинается в пустом месте списка — над строкой начинать
     // нельзя: там живут перетаскивание сущности и смена родителя.
+    // ДИАПАЗОН ОТ ЯКОРЯ ДО ЩЕЛЧКА — здесь, когда все строки кадра нарисованы.
+    // Ctrl+Shift добавляет диапазон к набору, просто Shift — заменяет им набор.
+    // Якорь не двигается: с него продолжают тянуть выбор дальше.
+    if (m_shiftClickId != -1) {
+        const auto from = std::find(m_visibleRows.begin(), m_visibleRows.end(), m_anchorId);
+        const auto to = std::find(m_visibleRows.begin(), m_visibleRows.end(), m_shiftClickId);
+        if (from != m_visibleRows.end() && to != m_visibleRows.end()) {
+            auto a = from, b = to;
+            if (a > b) std::swap(a, b);
+            std::vector<int> range(a, b + 1);
+            // Первичным (тем, что показывает инспектор) становится ТОТ, ПО ЧЕМУ
+            // ЩЁЛКНУЛИ, а не последний по порядку: человек смотрит на него.
+            range.erase(std::remove(range.begin(), range.end(), m_shiftClickId), range.end());
+            range.push_back(m_shiftClickId);
+            host.SetSelection(range, ImGui::GetIO().KeyCtrl);
+        } else {
+            // Якорь свернули вместе с веткой — диапазона нет, но щелчок не
+            // должен пропадать: выбираем то, по чему щёлкнули.
+            host.SetSelectedId(m_shiftClickId);
+            m_anchorId = m_shiftClickId;
+        }
+        m_shiftClickId = -1;
+    }
+
     if (m_rectActive && m_rect.Finished) {
         if (rectselect::Meaningful(m_rect)) {
             host.SetSelection(m_rectHits, m_rect.Additive);

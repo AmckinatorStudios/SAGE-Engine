@@ -608,10 +608,30 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     }
 
     if (clicked && !m_rectActive) {
-        // Ctrl/Shift — добавить или убрать из набора; обычный клик — один файл.
-        // Без этого набор, собранный рамкой, разрушался бы первым же кликом по
-        // соседнему файлу, и «обвести, потом добавить ещё один» не работало.
-        if (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) {
+        // ТРИ РАЗНЫХ ЩЕЛЧКА, а не два.
+        //
+        //   • Shift — ДИАПАЗОН от якоря до этого файла. Так выделяют в любом
+        //     проводнике, и без него выбрать сорок файлов подряд можно было
+        //     только Ctrl-кликом по каждому или рамкой — а рамка в длинном
+        //     списке требует прокрутки с зажатой кнопкой.
+        //   • Ctrl — добавить или убрать ОДИН файл: набор, собранный рамкой,
+        //     иначе разрушался бы первым же щелчком по соседнему.
+        //   • Обычный — один файл и новый якорь.
+        const ImGuiIO& io = ImGui::GetIO();
+        const auto anchorAt = std::find(m_visibleOrder.begin(), m_visibleOrder.end(), m_anchor);
+        const auto hereAt = std::find(m_visibleOrder.begin(), m_visibleOrder.end(), path);
+        if (io.KeyShift && anchorAt != m_visibleOrder.end() && hereAt != m_visibleOrder.end()) {
+            auto from = anchorAt, to = hereAt;
+            if (from > to) std::swap(from, to);
+            // Ctrl+Shift — ДОБАВИТЬ диапазон к набору; просто Shift — заменить
+            // им набор. Якорь не двигается: с него продолжают тянуть выбор.
+            if (!io.KeyCtrl) m_multi.clear();
+            for (auto it = from; it <= to; ++it) {
+                if (std::find(m_multi.begin(), m_multi.end(), *it) == m_multi.end())
+                    m_multi.push_back(*it);
+            }
+            m_selected = path;
+        } else if (io.KeyCtrl) {
             auto it = std::find(m_multi.begin(), m_multi.end(), path);
             if (it != m_multi.end()) {
                 m_multi.erase(it);
@@ -620,9 +640,11 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                 m_multi.push_back(path);
                 m_selected = path;
             }
+            m_anchor = path;
         } else {
             m_selected = path;
             m_multi = {path};
+            m_anchor = path;
         }
     }
     if (doubleClicked) {
@@ -1402,8 +1424,13 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::EndPopup();
     }
 
-    if (!m_deleteTargets.empty() && !ImGui::IsPopupOpen("Delete Asset")) {
+    // ВОПРОС ЗАДАЁТСЯ ОДИН РАЗ. Раньше окно открывалось каждый кадр, пока
+    // цели не пусты, — то есть закрыть его Escape'ом было нельзя: следующий же
+    // кадр открывал его заново. Окно, от которого нельзя отказаться, читается
+    // как зависший редактор.
+    if (!m_deleteTargets.empty() && !m_deleteAsked) {
         ImGui::OpenPopup("Delete Asset");
+        m_deleteAsked = true;
     }
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal(T("Delete Asset" "###Delete Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1429,12 +1456,21 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         }
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) {
+        // ESCAPE — ТА ЖЕ «ОТМЕНА». Само ImGui модальное окно по Escape не
+        // закрывает (это сделано нарочно: модалка требует ответа), но вопрос
+        // «удалить?» отменяют именно так, и без этого выход из него был только
+        // один — попасть мышью в кнопку.
+        if (ImGui::Button(T("Cancel"), ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             m_deleteTargets.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
+    } else if (m_deleteAsked && !ImGui::IsPopupOpen("Delete Asset")) {
+        // Окно закрыли, ничего не выбрав (Escape или щелчок мимо) — значит
+        // передумали, и цели удаления больше не ждут ответа.
+        m_deleteTargets.clear();
     }
+    if (m_deleteTargets.empty()) m_deleteAsked = false;
 }
 
 void AssetsPanel::Draw(EditorHost& host, bool* open) {
@@ -1444,6 +1480,12 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     ClampCwd(host);
     fs::path& cwd = host.AssetsCwd();
 
+    // Просьба вывести вкладку вперёд: панель делит место с консолью, и пока
+    // впереди консоль, панели ассетов в кадре нет вовсе (см. RequestFocus).
+    if (m_focusFrames > 0) {
+        ImGui::SetNextWindowFocus();
+        --m_focusFrames;
+    }
     ImGui::Begin(T("Assets" "###Assets"), open, panelwindows::WindowFlags("Assets"));
 
     // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
@@ -1551,10 +1593,22 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     int columns = std::max(1, static_cast<int>((availWidth + kTileSpacing) / (kTileW + kTileSpacing)));
     int col = 0;
     bool any = false;
+    // Порядок карточек НА ЭКРАНЕ собирается ДО отрисовки: по нему считается
+    // диапазон Shift-выбора, а щелчок разбирается внутри DrawTile — то есть
+    // раньше, чем нарисуются карточки ниже (см. m_visibleOrder).
+    m_visibleOrder.clear();
+    for (const auto& d : dirs) if (matches(d.path())) m_visibleOrder.push_back(d.path());
+    for (const auto& f : files) if (matches(f.path())) m_visibleOrder.push_back(f.path());
+
+    m_tileCenters.clear();
     auto placeTile = [&](const fs::path& p, bool isDir) {
         any = true;
         if (col > 0) ImGui::SameLine(0, kTileSpacing);
         DrawTile(host, p, isDir);
+        // Где карточка на экране: самопроверка щёлкает по ней по-настоящему
+        // (см. EditorLayer::TickInputProbe).
+        const ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+        m_tileCenters.push_back(ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f));
         col = (col + 1) % columns;
     };
     for (const auto& d : dirs) if (matches(d.path())) placeTile(d.path(), true);
@@ -1600,6 +1654,19 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
               "Already converted files are skipped, sources stay in place."));
         }
         ImGui::EndPopup();
+    }
+
+    // DELETE — КЛАВИШЕЙ, А НЕ ТОЛЬКО ЧЕРЕЗ МЕНЮ. Выделил сорок файлов рамкой,
+    // потянулся к Delete — и ничего: удалить можно было только правой кнопкой
+    // по одной из карточек, то есть жестом, который ещё надо вспомнить.
+    // Условия жёсткие намеренно: клавиша срабатывает, только когда работают
+    // ИМЕННО С ЭТОЙ панелью и ничего не печатают, — иначе Delete в поле поиска
+    // или в переименовании сносил бы файлы вместо буквы.
+    if (!m_multi.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
+        !ImGui::GetIO().WantTextInput && m_renameTarget.empty() &&
+        m_createKind == CreateKind::None && m_deleteTargets.empty() &&
+        !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+        m_deleteTargets = m_multi;   // дальше — обычная модалка подтверждения
     }
 
     // Рамка выделения. Начинается только в пустом месте сетки: над карточкой

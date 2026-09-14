@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "imgui.h"
+
 #include "AssetPreview.h"
 #include "FileBrowser.h"
 #include "../RectSelect.h"
@@ -38,6 +40,17 @@ public:
     // повесить редактор наглухо — без кадра, без полосы и без ответа на
     // вопрос, сколько осталось (см. Progress.h).
     void Tick(EditorHost& host);
+
+    // Просит вывести вкладку Assets вперёд. Нужно самопроверке: панель делит
+    // док с консолью, и щёлкать по карточке, пока впереди консоль, не по чему.
+    void RequestFocus() { m_focusFrames = 3; }
+
+    // Сколько карточек нарисовано в этом кадре, где их середина и ждёт ли
+    // ответа вопрос об удалении. Нужно самопроверке: она выбирает файл
+    // настоящим щелчком и жмёт настоящий Delete.
+    int TileCount() const { return (int)m_tileCenters.size(); }
+    ImVec2 TileCenter(int i) const { return m_tileCenters[(size_t)i]; }
+    bool DeletePending() const { return !m_deleteTargets.empty(); }
 
     // Освободить GPU-ресурсы превью, пока контекст жив (см. AssetPreview).
     void Shutdown() { m_preview.Shutdown(); }
@@ -185,6 +198,15 @@ private:
     float m_treeWidth = 190.0f;
     std::filesystem::path m_selected;      // первичный выделенный тайл (под инспектор)
     std::vector<std::filesystem::path> m_multi; // весь набор: рамка, Ctrl-клик
+    // ЯКОРЬ ДИАПАЗОНА и порядок карточек НА ЭКРАНЕ — для выбора с Shift «от и
+    // до». Диапазон считается по тому порядку, который человек ВИДИТ (папки,
+    // потом файлы, с учётом поиска), а не по порядку файлов на диске: выделяя
+    // от одного до другого, смотрят на сетку.
+    std::filesystem::path m_anchor;
+    std::vector<std::filesystem::path> m_visibleOrder;
+    std::vector<ImVec2> m_tileCenters;   // где карточки на экране (для самопроверки)
+    bool m_deleteAsked = false;          // вопрос об удалении уже показывали
+    int m_focusFrames = 0;               // >0 — просим вывести вкладку вперёд
     sage::editor::rectselect::State m_rect;     // рамка выделения (см. RectSelect.h)
     std::vector<std::filesystem::path> m_rectHits; // кого рамка задела в этом кадре
     bool m_rectActive = false;

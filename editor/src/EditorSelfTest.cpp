@@ -552,11 +552,95 @@ void EditorLayer::TickInputProbe() {
             }
             break;
         }
+        case 16: {
+            // ВЫБОР ДИАПАЗОНА С SHIFT в списке объектов. Щёлкаем по первой
+            // строке обычным щелчком — она станет якорем.
+            if (m_hierarchy.RowCount() < 4) { fail("в списке объектов меньше четырёх строк"); break; }
+            press(m_hierarchy.RowCenter(0));
+            break;
+        }
+        case 17: release(); break;
+        case 18: {
+            if (m_selection.size() != 1) { fail("щелчок по строке списка выбрал не один объект"); break; }
+            // И с зажатым Shift — по четвёртой: выбранными обязаны стать все
+            // четыре, а не две (так вело себя прежнее «Shift = то же, что Ctrl»).
+            io.AddKeyEvent(ImGuiMod_Shift, true);
+            press(m_hierarchy.RowCenter(3));
+            break;
+        }
+        case 19:
+            release();
+            io.AddKeyEvent(ImGuiMod_Shift, false);
+            m_probeWait = 2;   // диапазон применяется в конце кадра отрисовки списка
+            break;
+        case 20:
+            if (m_selection.size() != 4) {
+                fail("Shift-щелчок не выбрал диапазон строк");
+            }
+            break;
+        case 21: {
+            // Панель ассетов делит место с консолью — выводим её вперёд и ждём
+            // кадр, иначе щёлкать не по чему. Заодно кладём в папку проекта
+            // файл, на котором проверяем удаление: своих файлов в свежем
+            // проекте нет, а проверка не должна зависеть от того, что там
+            // накопилось от других шагов.
+            // Папку заводим заново: шаги выше создают и УДАЛЯЮТ проекты
+            // шаблонов, и текущий проект вполне может указывать на снесённую
+            // папку — карточек в ней не будет ни одной по причине, к
+            // проверяемому отношения не имеющей.
+            m_assetsCwd = m_project.AssetsDir();
+            std::error_code mk;
+            fs::create_directories(m_assetsCwd, mk);
+            std::ofstream(m_assetsCwd / "selftest_delete_me.txt") << "delete me\n";
+            m_assets.RequestFocus();
+            m_probeWait = 3;
+            break;
+        }
+        case 22: {
+            // DELETE В ПАНЕЛИ АССЕТОВ: щёлкаем по первой карточке.
+            if (m_assets.TileCount() < 1) { fail("в панели ассетов нет ни одной карточки"); break; }
+            press(m_assets.TileCenter(0));
+            break;
+        }
+        case 23: release(); break;
+        case 24: {
+            if (m_assets.SelectionSet().empty()) { fail("щелчок по карточке не выбрал файл"); break; }
+            io.AddKeyEvent(ImGuiKey_Delete, true);
+            break;
+        }
+        case 25:
+            io.AddKeyEvent(ImGuiKey_Delete, false);
+            m_probeWait = 2;
+            break;
+        case 26:
+            // Вопрос об удалении задан — файл при этом ещё на месте: удаляет
+            // ответ, а не клавиша.
+            if (!m_assets.DeletePending()) {
+                fail("Delete в панели ассетов не спросил об удалении");
+            }
+            // Уходим из вопроса так же, как человек: Escape.
+            io.AddKeyEvent(ImGuiKey_Escape, true);
+            break;
+        case 27:
+            io.AddKeyEvent(ImGuiKey_Escape, false);
+            m_probeWait = 3;
+            break;
+        case 28: {
+            // И вопрос не возвращается сам собой: цели удаления сброшены.
+            if (m_assets.DeletePending()) {
+                fail("вопрос об удалении не закрылся по Escape");
+            }
+            std::error_code rc;
+            fs::remove(m_assetsCwd / "selftest_delete_me.txt", rc);
+            break;
+        }
         default:
             if (!m_probeFailed) LOG_INFO("Editor") << "VIEWPORT_INPUT: OK — щелчок по пустому "
                                                       "снимает выбор и во вьюпорте, и в списке "
                                                       "объектов, гизмо навигации поворачивает "
-                                                      "камеру, полосы долгой работы видны";
+                                                      "камеру, полосы долгой работы видны, Shift "
+                                                      "выбирает диапазон, Delete спрашивает об "
+                                                      "удалении";
             m_probeStep = -1;
             return;
     }
