@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1552.
+// Язык: Русский. Строк: 1554.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -312,6 +312,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Запекает непрямой свет в лайтмапы (статика) и в объём проб (динамика); прямой свет остаётся реального времени"},
     {"Baking GI",
      "Расчёт освещения (GI)"},
+    {"Baking is temporarily unavailable in the editor",
+     "Выпечка освещения в редакторе временно недоступна"},
     {"Ball: projectiles, markers",
      "Шар: снаряды, метки"},
     {"Bar",
@@ -1430,6 +1432,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Метка в списке. Папка нужна только для порядка: содержимое она не двигает и не рисуется."},
     {"Mark static geometry",
      "Пометить статичную геометрию"},
+    {"Marked as static geometry for baked lighting",
+     "Помечен как статичная геометрия для запечённого света"},
     {"Marks the object as static for the light bake",
      "Помечает объект статикой для запекания света"},
     {"Mask",

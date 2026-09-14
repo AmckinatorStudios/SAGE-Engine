@@ -231,12 +231,22 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
             PaintWithMaterial(obj, p.name, p.color, 0.0f, 0.45f);
         }
 
+        // СВЕТ, КАМЕРА И ЭЛЕМЕНТЫ ИНТЕРФЕЙСА СОЗДАЮТСЯ ПУСТЫМИ ОБЪЕКТАМИ.
+        //
+        // Scene::CreateObject вешает MeshRenderer (см. Scene.h) — и лампа в
+        // шаблоне приезжала с компонентом «Меш»: в инспекторе секция с моделью,
+        // цветом и тенями, которых у света нет вовсе. Шаблон — это ещё и
+        // образец того, как устроен проект: по нему учатся, открыв инспектор
+        // первого же объекта, и лишний компонент учит неправильному. Объект,
+        // который ничего не рисует мешем, обязан заводиться через
+        // CreateEmptyObject — ровно так же, как это делает каталог объектов.
+        //
         // Игровая камера сцены — панель Game сразу показывает картинку. НАРОЧНО
         // поставлена НЕ как редакторская орбитальная камера ({6.5,5,6.5}, взгляд
         // сверху): низкий, почти фронтальный «кинематографичный» ракурс с уровня
         // сцены — так сразу видно, что панель Game показывает СВОЮ, игровую
         // камеру, а не вид вьюпорта. Сущность без меша (не рисуется в мире).
-        GameObject camObj = m_scene->CreateObject("Main Camera");
+        GameObject camObj = m_scene->CreateEmptyObject("Main Camera");
         camObj.GetTransform().Position = {0.0f, 1.5f, 6.5f};
         camObj.GetTransform().Rotation = {-6.0f, 0.0f, 0.0f}; // чуть вниз, вдоль -Z
         m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
@@ -244,7 +254,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // Солнце — такая же сущность, как всё остальное. Раньше его роль играли
         // три поля в настройках сцены; теперь его видно в иерархии, можно
         // повернуть гизмо и увидеть, как поехали тени.
-        GameObject sun = m_scene->CreateObject("Sun");
+        GameObject sun = m_scene->CreateEmptyObject("Sun");
         sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
         sun.GetTransform().Rotation =
             sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
@@ -255,14 +265,14 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         m_scene->Registry().emplace<LightComponent>(sun.Entity(), sunLc);
 
         // Тёплая лампа — демонстрация точечного света-сущности (LightComponent).
-        GameObject lamp = m_scene->CreateObject("Lamp");
+        GameObject lamp = m_scene->CreateEmptyObject("Lamp");
         lamp.GetTransform().Position = {2.4f, 1.6f, 1.8f};
         m_scene->Registry().emplace<LightComponent>(lamp.Entity());
 
         // Прожектор сверху — демонстрация конусного света (Spot): смотрит вниз
         // (поворот -90° по X направляет «вперёд» -Z в -Y), кладёт круг света
         // на кубы и пол.
-        GameObject spot = m_scene->CreateObject("Spotlight");
+        GameObject spot = m_scene->CreateEmptyObject("Spotlight");
         spot.GetTransform().Position = {0.0f, 5.0f, 0.0f};
         spot.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f};
         LightComponent spotLc;
@@ -282,7 +292,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // панель это прямоугольник + подложка + надпись, полоса — прямоугольник
         // + подложка + шкала.
         entt::registry& reg = m_scene->Registry();
-        GameObject hud = m_scene->CreateObject("HUD Panel");
+        GameObject hud = m_scene->CreateEmptyObject("HUD Panel");
         sage::ui::Transform hudXf;
         hudXf.Anchor = UIAnchor::TopLeft;
         hudXf.Offset = {16.0f, 16.0f};
@@ -297,7 +307,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         hudLabel.Horizontal = sage::ui::Label::Align::Start;
         reg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
 
-        GameObject hp = m_scene->CreateObject("HP Bar");
+        GameObject hp = m_scene->CreateEmptyObject("HP Bar");
         sage::ui::Transform hpXf;
         hpXf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
         hpXf.Offset = {12.0f, 8.0f};
@@ -325,12 +335,12 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         ground.GetTransform().Scale = {12.0f, 1.0f, 12.0f};
         PaintWithMaterial(ground, "Ground", {0.30f, 0.32f, 0.36f}, 0.0f, 0.85f);
 
-        GameObject camObj = m_scene->CreateObject("Main Camera");
+        GameObject camObj = m_scene->CreateEmptyObject("Main Camera");
         camObj.GetTransform().Position = {0.0f, 1.6f, 6.0f};
         camObj.GetTransform().Rotation = {-8.0f, 0.0f, 0.0f};
         m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
 
-        GameObject sun = m_scene->CreateObject("Sun");
+        GameObject sun = m_scene->CreateEmptyObject("Sun");
         sun.GetTransform().Rotation =
             sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
         LightComponent sunLc;

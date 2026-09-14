@@ -1481,7 +1481,10 @@ void MigrateV4toV5(json& root) {
     entity["position"] = Vec3ToJson(glm::vec3(0.0f, 10.0f, 0.0f));
     entity["rotation"] = Vec3ToJson(sage::ecs::EulerFromForward(direction));
     entity["scale"] = Vec3ToJson(glm::vec3(1.0f));
-    entity["mesh"]["type"] = "none";
+    // БЕЗ КОМПОНЕНТА МЕША ВОВСЕ, а не с мешем «none»: у света нет ни модели, ни
+    // цвета, ни теней-от-себя, и секция «Меш» в инспекторе лампы обещает
+    // настройки, которыми нечем распорядиться (см. "noMesh" при загрузке).
+    entity["noMesh"] = true;
     entity["light"]["type"] = "directional";
     entity["light"]["color"] = Vec3ToJson(color);
     entity["light"]["intensity"] = intensity;
@@ -1554,7 +1557,8 @@ void MigrateV5toV6(json& root) {
             // меняться не должно.
             child["name"] = name;
             child["parent"] = ownerId;
-            child["mesh"]["type"] = "none";
+            // Элемент интерфейса рисует система UI, а не меш (см. "Sun" выше).
+            child["noMesh"] = true;
             json& cu = child["ui"];
             cu["transform"]["anchor"] = (int)UIAnchor::TopLeft;
             cu["transform"]["stretch"] = (int)sage::ui::Transform::Stretch::None;
