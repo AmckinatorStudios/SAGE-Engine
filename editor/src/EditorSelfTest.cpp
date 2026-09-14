@@ -6195,6 +6195,44 @@ bool EditorLayer::SelfTestTools() {
             m_playInput.ClearActions();
         }
 
+        // И то же самое ВИДНО СКРИПТУ через его Lua-API, а не только самому
+        // InputSystem на C++ — это разные вещи. Раскладка вполне может
+        // доехать до InputSystem и остаться невидимой Lua, если BindInput
+        // забыли позвать или порядок регистрации в StartPlay разъехался;
+        // проверка выше такую поломку не поймала бы вовсе. Действие "Equip"
+        // взято НАРОЧНО — оно живёт в СВОЁМ контексте ("Inventory"), а не в
+        // контексте по умолчанию, поэтому заодно проверяется, что связь
+        // работает не только для действий по умолчанию.
+        if (ok) {
+            std::error_code scriptEc;
+            fs::create_directories(m_project.Dir() / "assets" / "scripts", scriptEc);
+            {
+                std::ofstream f(m_project.Dir() / "assets" / "scripts" / "selftest_input_ctx.lua");
+                f << "function OnUpdate(entity, dt)\n"
+                  << "    if IsActionDown('Equip') then entity.Transform.Position.x = 5.0 end\n"
+                  << "end\n";
+            }
+            GameObject probe = m_scene->CreateObject("SelftestInputCtxProbe");
+            m_scene->Registry().emplace<ScriptComponent>(
+                probe.Entity(), ScriptComponent{"assets/scripts/selftest_input_ctx.lua"});
+
+            StartPlay();
+            m_playInput.Push(in::InputEvent::KeyDown(in::Key::E));
+            m_playInput.Update(1.0f / 60.0f);
+            for (int i = 0; i < 3; ++i) m_systems.Run(*m_scene, 1.0f / 60.0f);
+            GameObject after = m_scene->FindByName("SelftestInputCtxProbe");
+            const bool sawAction = after.Valid() && after.GetTransform().Position.x > 4.0f;
+            StopPlay(); // сцена откатится к снапшоту — читать результат нужно ДО этого
+
+            if (!sawAction) {
+                LOG_ERROR("Editor") << "SELFTEST: контекст и действие, заведённые в раскладке "
+                                       "проекта ('Inventory' / 'Equip'), не видны скрипту через "
+                                       "IsActionDown в Play";
+                ok = false;
+            }
+            m_playInput.ClearActions();
+        }
+
         // За собой убираем: раскладка селф-теста не должна остаться в проекте.
         mapping.ClearActions();
         std::error_code inputEc;
