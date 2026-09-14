@@ -380,6 +380,9 @@ private:
     // Искатель модулей для require: читает .lua через vfs (пакет или диск).
     void RegisterModuleLoader();
     void RegisterEngineApi();
+    // Короткие имена модулей в глобальных: game.Quit() == sage.game.Quit().
+    // Псевдоним, а не копия; занятое имя не трогается. Подробности — в .cpp.
+    void RegisterShortNames();
     void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
     void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
     void RegisterUIApi();         // элемент интерфейса + sage.ui.*

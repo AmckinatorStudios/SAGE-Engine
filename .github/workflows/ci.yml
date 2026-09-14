@@ -51,6 +51,12 @@ jobs:
       - name: Popup id check (OpenPopup and BeginPopup* agree on the name)
         run: python3 scripts/check_popup_ids.py
 
+      # Подсказка по скриптовому API для редакторов кода собирается из вызовов
+      # Bind(...) движка. Устареет — начнёт врать: предлагать то, чего нет, и
+      # молчать о том, что появилось. Врущая подсказка хуже отсутствующей.
+      - name: Script API hints are up to date
+        run: python3 scripts/gen_script_api.py --check
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

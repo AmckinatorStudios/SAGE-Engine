@@ -59,6 +59,7 @@ python3 scripts/check_rhi_boundary.py                             # границ
 python3 scripts/check_paths.py                                    # пути из окружения
 python3 scripts/check_asset_slots.py                              # ассеты — слотами
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
+python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
 
@@ -140,5 +141,10 @@ Linux не видна вообще — другой компилятор, дру
   обязано нести «###»: перевод меняет строку, а с ней и идентификатор окна.
   Проверяет `scripts/check_popup_ids.py`, в рантайме подстраховывает
   `EditorLayer::CloseGhostPopups`.
+- **Новая функция скриптам — одним вызовом `Bind(...)`** в
+  `engine/src/sage/scripting/`. Из этих вызовов собирается подсказка для
+  редакторов кода (`editor/assets/api/sage.lua`), поэтому после правки —
+  `python3 scripts/gen_script_api.py`. Сторожит `--check`: подсказка, отставшая
+  от движка, начинает врать, а врущей верят.
 - **Новый файл в редакторе** дописывается в `editor/CMakeLists.txt`.
 - Правка поведения — вместе с проверкой, которая на старом коде падает.

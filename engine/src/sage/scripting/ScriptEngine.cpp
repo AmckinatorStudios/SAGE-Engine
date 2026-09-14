@@ -98,9 +98,6 @@ void ScriptEngine::AddScriptSearchPath(const std::string& dir) {
 
 // Таблица модуля sage.<name>, создаваемая по требованию. get_or_create, а не
 // присваивание: модули заполняются из разных Register*-методов, и второй из них
-
-// Таблица модуля sage.<name>, создаваемая по требованию. get_or_create, а не
-// присваивание: модули заполняются из разных Register*-методов, и второй из них
 // не должен затирать то, что положил первый.
 sol::table ScriptEngine::Module(const char* name) {
     sol::table root = m_lua["sage"].get_or_create<sol::table>();
@@ -136,6 +133,61 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterVarsApi();
     RegisterRenderTextureApi();
     RegisterNetApi();
+    // Короткие имена — ПОСЛЕДНИМИ: они раздают псевдонимы уже собранным модулям.
+    RegisterShortNames();
+}
+
+// ============================================================================
+//  КОРОТКОЕ ИМЯ МОДУЛЯ: game.Quit() вместо sage.game.Quit()
+//
+//  ЗАЧЕМ. «sage.» перед каждым вызовом — это четыре лишних знака в строке,
+//  которую пишут десятки раз на файл, и ноль сведений: в скрипте ДЛЯ ЭТОГО
+//  движка другого «game» взяться неоткуда. Приставка нужна была для другого —
+//  чтобы разложить по областям бывшую плоскую кучу из 126 глобальных имён (см.
+//  docs/scripting.md). Область при коротком имени никуда не девается:
+//  game.Quit() читается так же однозначно, как sage.game.Quit(), — потому что
+//  область по-прежнему названа.
+//
+//  ЭТО ПСЕВДОНИМ, А НЕ КОПИЯ. В глобальные кладётся ТА ЖЕ таблица, поэтому
+//  game.Quit == sage.game.Quit буквально, и дописанная в модуль функция
+//  появляется под обоими именами сразу. Копия разъехалась бы на первой правке.
+//
+//  ЗАНЯТОЕ ИМЯ НЕ ТРОГАЕМ — и это главное правило здесь. Скрипт игры имеет
+//  полное право объявить свою `scene` или `save`; молча подменить её движком
+//  значит сломать работающую игру ради удобства письма. Занято — остаётся
+//  только длинное имя, и это честный размен.
+//
+//  МОДУЛЬ `math` — ОСОБЫЙ СЛУЧАЙ и единственное исключение. Глобальный `math` в
+//  Lua занят стандартной библиотекой, и подменить его целиком значит отобрать у
+//  игры math.floor, math.random и всё остальное. Поэтому функции движка
+//  ДОПИСЫВАЮТСЯ в стандартную таблицу: math.Lerp и math.floor живут рядом.
+//  Имена не сталкиваются по написанию — движок называет свои с большой буквы,
+//  стандартная библиотека свои с маленькой, — но проверка всё равно стоит:
+//  правило «занятое не трогаем» не должно зависеть от соглашения об именах.
+// ============================================================================
+void ScriptEngine::RegisterShortNames() {
+    sol::table root = m_lua["sage"].get_or_create<sol::table>();
+    for (const auto& pair : root) {
+        const sol::object key = pair.first;
+        const sol::object value = pair.second;
+        if (key.get_type() != sol::type::string || value.get_type() != sol::type::table) continue;
+        const std::string name = key.as<std::string>();
+
+        sol::object existing = m_lua[name];
+        if (name == "math") {
+            // Дописываем в стандартную таблицу, а не заменяем её.
+            sol::table std_math = m_lua["math"];
+            for (const auto& fn : value.as<sol::table>()) {
+                if (fn.first.get_type() != sol::type::string) continue;
+                const std::string fnName = fn.first.as<std::string>();
+                if (std_math[fnName].valid()) continue;   // занято — не трогаем
+                std_math[fnName] = fn.second;
+            }
+            continue;
+        }
+        if (existing.valid()) continue;   // имя занято — остаётся длинное
+        m_lua[name] = value;
+    }
 }
 
 namespace {
@@ -164,6 +216,28 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     if (!sage::assets::vfs::ReadText(scriptPath, source)) {
         throw std::runtime_error("Скрипт не найден: " + scriptPath);
     }
+
+    // `self` — СВОЯ сущность, видна во всём файле скрипта.
+    //
+    // До сих пор её приносил только аргумент хука: OnUpdate(entity, dt). Для
+    // самого хука это удобно, а для всего остального — нет. Функция, вынесенная
+    // из OnUpdate (а её выносят сразу же, как только тело перерастает десять
+    // строк), своей сущности не видела вовсе: её приходилось протаскивать
+    // аргументом через каждый вызов или запоминать в OnStart в свою переменную.
+    // Оба способа — обход того, что движок и так знает.
+    //
+    // Ставится ДО выполнения файла: код верхнего уровня (а это и есть «настроил
+    // и забыл») тоже вправе спросить, к кому его привязали.
+    //
+    // Аргумент хуков НИКУДА НЕ ДЕВАЕТСЯ: на нём написаны все существующие
+    // скрипты, и это тот же самый объект — self == entity внутри хука.
+    //
+    // В ОКРУЖЕНИИ скрипта, а не в глобальных: у каждого скрипта свой env (см.
+    // sol::environment выше), и глобальный `self` означал бы, что два скрипта в
+    // одной сцене видят одну и ту же чужую сущность — ту, что привязали позже.
+    sol::object entityRef = sol::make_object(m_lua, object);
+    env["self"] = entityRef;
+
     auto result = m_lua.script(source, env, sol::script_pass_on_error, "@" + scriptPath);
     if (!result.valid()) {
         sol::error err = result;
@@ -179,10 +253,8 @@ void ScriptEngine::AttachScript(GameObject object, const std::string& scriptPath
     // может принимать сообщения от других скриптов (SendMessage/Broadcast).
     sol::protected_function messageFn = env["OnMessage"];
 
-    // Userdata сущности создаём один раз — все дальнейшие вызовы хуков
+    // Userdata сущности создан выше, один раз — все дальнейшие вызовы хуков
     // передают его же (см. комментарий у ScriptInstance::EntityRef).
-    sol::object entityRef = sol::make_object(m_lua, object);
-
     sol::protected_function startFn = env["OnStart"];
     if (startFn.valid()) {
         auto startResult = startFn(entityRef);

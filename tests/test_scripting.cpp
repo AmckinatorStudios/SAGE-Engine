@@ -1192,3 +1192,210 @@ TEST(Scripting_level_script_reloads_too) {
     CHECK_EQ(se.Lua()["RULE"].get<int>(), 7);
     std::filesystem::remove(path);
 }
+
+// ============================================================================
+//  КОРОТКИЕ ИМЕНА МОДУЛЕЙ: game.Quit() вместо sage.game.Quit()
+//
+//  «sage.» перед каждым вызовом — четыре знака, которые пишут десятки раз на
+//  файл, и ноль сведений. Область при этом остаётся названной, а значит и
+//  порядок, ради которого приставку заводили, не теряется.
+//
+//  Проверяется ИМЕННО ТОЖДЕСТВО, а не «обе функции работают»: псевдоним обязан
+//  ссылаться на ТУ ЖЕ таблицу. Копия разъехалась бы с оригиналом на первой
+//  правке движка, и об этом никто бы не узнал — обе вызывались бы без ошибок.
+// ============================================================================
+TEST(Scripting_short_module_name_is_the_same_table) {
+    ScriptEngine se;
+
+    const bool same = se.Lua().script("return game == sage.game").get<bool>();
+    CHECK_TRUE(same);
+
+    // И это верно для КАЖДОГО модуля, а не для того, о котором вспомнили.
+    // Список берётся из самой таблицы sage: модуль, добавленный завтра,
+    // попадает в проверку сам.
+    const std::string report = se.Lua().script(R"(
+        local missing = {}
+        for name, value in pairs(sage) do
+            if type(value) == "table" then
+                if name == "math" then
+                    -- math особый: дописываемся в стандартную таблицу.
+                    for fn, impl in pairs(value) do
+                        if math[fn] ~= impl then missing[#missing+1] = "math." .. fn end
+                    end
+                elseif _G[name] ~= value then
+                    missing[#missing+1] = name
+                end
+            end
+        end
+        return table.concat(missing, ", ")
+    )").get<std::string>();
+    if (!report.empty()) std::printf("       без короткого имени: %s\n", report.c_str());
+    CHECK_TRUE(report.empty());
+}
+
+TEST(Scripting_short_names_do_not_break_the_lua_standard_library) {
+    ScriptEngine se;
+
+    // math.floor обязан остаться на месте: модуль движка ДОПИСЫВАЕТСЯ в
+    // стандартную таблицу, а не подменяет её. Подмена отобрала бы у игры
+    // math.floor/random/pi — то есть сломала бы любой уже написанный скрипт.
+    const float floored = se.Lua().script("return math.floor(3.7)").get<float>();
+    CHECK_NEAR(floored, 3.0f, 1e-4);
+    const bool pi = se.Lua().script("return math.pi > 3.14 and math.pi < 3.15").get<bool>();
+    CHECK_TRUE(pi);
+    // И при этом рядом лежит математика движка.
+    const float lerp = se.Lua().script("return math.Lerp(0.0, 10.0, 0.25)").get<float>();
+    CHECK_NEAR(lerp, 2.5f, 1e-4);
+}
+
+TEST(Scripting_short_names_never_replace_a_lua_standard_global) {
+    ScriptEngine se;
+    // ПРАВИЛО: занятое имя не трогаем. Проверяется на том, что занято ВСЕГДА —
+    // на стандартной библиотеке Lua. Модуль, названный завтра `table` или
+    // `string`, отобрал бы у каждой игры её таблицы молча: скрипт падал бы на
+    // table.insert, и искать причину человек шёл бы в свой код.
+    const std::string stolen = se.Lua().script(R"(
+        local taken = {"table", "string", "os", "io", "coroutine", "debug", "utf8", "package"}
+        local bad = {}
+        for _, name in ipairs(taken) do
+            if sage[name] ~= nil and _G[name] == sage[name] then bad[#bad+1] = name end
+        end
+        -- math особый: он не подменён, а ДОПИСАН — стандартные функции на месте.
+        if type(math.floor) ~= "function" then bad[#bad+1] = "math" end
+        return table.concat(bad, ", ")
+    )").get<std::string>();
+    if (!stolen.empty()) std::printf("       отобрано у Lua: %s\n", stolen.c_str());
+    CHECK_TRUE(stolen.empty());
+}
+
+// ============================================================================
+//  ПОДСКАЗКА ПО API НЕ ВРЁТ
+//
+//  editor/assets/api/sage.lua — то, что редактор кода человека показывает как
+//  список доступных функций. Собирается он из вызовов Bind(...) разбором
+//  исходников (scripts/gen_script_api.py), а разбор текста всегда может
+//  ошибиться: пропустить вызов, склеить не тот аргумент, выдумать модуль.
+//
+//  Поэтому проверяется не «файл собрался», а ДВЕ вещи, которые только и делают
+//  подсказку полезной: она читается как Lua (иначе редактор молча её не
+//  подхватит, и человек решит, что подсказок в движке нет) и КАЖДАЯ обещанная
+//  функция в движке действительно есть. Подсказка, предлагающая
+//  несуществующее, хуже отсутствующей: отсутствующую человек компенсирует
+//  документацией, а этой он верит и идёт искать ошибку в своём коде.
+// ============================================================================
+TEST(Scripting_api_hints_parse_and_match_the_engine) {
+    namespace fs = std::filesystem;
+    const fs::path stub =
+        fs::path(__FILE__).parent_path().parent_path() / "editor" / "assets" / "api" / "sage.lua";
+    std::error_code ec;
+    CHECK_TRUE(fs::exists(stub, ec));
+    if (!fs::exists(stub, ec)) return;
+
+    ScriptEngine se;
+    // ЧИТАЕТСЯ ЛИ. Именно load, а не script: выполнять описание незачем, оно
+    // затёрло бы живые таблицы своими заглушками.
+    sol::load_result chunk = se.Lua().load_file(stub.string());
+    CHECK_TRUE(chunk.valid());
+    if (!chunk.valid()) {
+        sol::error err = chunk;
+        std::printf("       подсказка не читается как Lua: %s\n", err.what());
+        return;
+    }
+
+    // СОВПАДАЕТ ЛИ. Каждая строка «function sage.<модуль>.<Имя>(» обязана
+    // отвечать живой функции.
+    std::ifstream in(stub);
+    std::string line, missing;
+    int promised = 0;
+    while (std::getline(in, line)) {
+        const std::string head = "function sage.";
+        if (line.rfind(head, 0) != 0) continue;
+        const size_t open = line.find('(');
+        if (open == std::string::npos) continue;
+        const std::string full = line.substr(head.size() - 5, open - (head.size() - 5));
+        const size_t dot = full.find('.', 5);
+        if (dot == std::string::npos) continue;
+        const std::string module = full.substr(5, dot - 5);
+        const std::string name = full.substr(dot + 1);
+        ++promised;
+        const sol::object fn = se.Lua()["sage"][module][name];
+        if (fn.get_type() != sol::type::function) {
+            if (missing.size() < 200) missing += (missing.empty() ? "" : ", ") + full;
+        }
+    }
+    std::printf("       подсказка обещает функций: %d\n", promised);
+    CHECK_TRUE(promised > 100);   // файл не должен молча выродиться в пустой
+    if (!missing.empty()) std::printf("       в движке нет: %s\n", missing.c_str());
+    CHECK_TRUE(missing.empty());
+}
+
+
+// ============================================================================
+//  `self` — СВОЯ СУЩНОСТЬ, ВИДНА ВО ВСЁМ ФАЙЛЕ
+//
+//  Раньше сущность приносил только аргумент хука. Функция, вынесенная из
+//  OnUpdate — а её выносят сразу, как только тело перерастает десяток строк, —
+//  своей сущности не видела: её тащили аргументом через каждый вызов или
+//  запоминали в OnStart в свою переменную. И то и другое — обход того, что
+//  движок и так знает.
+//
+//  Проверяется ТОЖДЕСТВО с аргументом хука и РАЗДЕЛЬНОСТЬ между скриптами:
+//  общий `self` на двоих был бы хуже его отсутствия — скрипт молча правил бы
+//  чужой объект.
+// ============================================================================
+TEST(Scripting_self_is_the_own_entity_everywhere_in_the_file) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject obj = scene.CreateObject("Hero");
+
+    // Итоги скрипт кладёт в ОБЩУЮ таблицу: присваивание имени уходит в
+    // окружение скрипта (у каждого своё), а поле общей таблицы видно снаружи.
+    se.Lua()["Out"] = se.Lua().create_table();
+
+    const std::string path = WriteTempScript("self_hook", R"(
+        -- Код верхнего уровня тоже видит self: «настроил и забыл» — обычный
+        -- способ писать скрипт, и сущность нужна ему так же.
+        Out.topLevelName = self.Name
+
+        local function move()        -- вынесенная функция: аргумента у неё нет
+            self.Transform.Position.y = 5.0
+        end
+
+        function OnStart(entity)
+            Out.sameObject = (self == entity)
+            move()
+        end
+    )");
+    se.AttachScript(obj, path);
+    std::remove(path.c_str());
+
+    CHECK_EQ(se.Lua()["Out"]["topLevelName"].get<std::string>(), std::string("Hero"));
+    CHECK_TRUE(se.Lua()["Out"]["sameObject"].get<bool>());
+    CHECK_NEAR(obj.GetTransform().Position.y, 5.0f, 1e-4);
+}
+
+TEST(Scripting_self_is_not_shared_between_scripts) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject a = scene.CreateObject("A");
+    GameObject b = scene.CreateObject("B");
+
+    // Один и тот же файл на двух сущностях: у каждой обязан быть СВОЙ self.
+    // Общий сделал бы `self` ловушкой — второй скрипт молча правил бы первый.
+    const std::string path = WriteTempScript("self_each", R"(
+        function OnStart(entity)
+            self.Transform.Position.x = 1.0
+        end
+    )");
+    se.AttachScript(a, path);
+    se.AttachScript(b, path);
+    std::remove(path.c_str());
+
+    CHECK_NEAR(a.GetTransform().Position.x, 1.0f, 1e-4);
+    CHECK_NEAR(b.GetTransform().Position.x, 1.0f, 1e-4);
+    // И ни одна из них не подвинулась дважды/за другую.
+    CHECK_NEAR(a.GetTransform().Position.y, 0.0f, 1e-4);
+    CHECK_NEAR(b.GetTransform().Position.y, 0.0f, 1e-4);
+}
