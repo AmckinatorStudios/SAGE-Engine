@@ -1,4 +1,5 @@
 #pragma once
+#include "imgui.h"
 
 #include <vector>
 
@@ -46,4 +47,23 @@ private:
     // прямоугольник строки известен только сразу после её отрисовки.
     std::vector<int> m_rectHits;
     bool m_rectActive = false;
+
+    // ВЫБОР ДИАПАЗОНА С SHIFT: якорь и порядок строк НА ЭКРАНЕ.
+    //
+    // Порядок — тот, который человек видит: дерево, обойдённое сверху вниз, со
+    // свёрнутыми ветками (их детей на экране нет, и в диапазон они не входят).
+    // Собирается по ходу рисования, поэтому сам щелчок только ЗАПОМИНАЕТСЯ:
+    // строки ниже к этому моменту ещё не нарисованы, и диапазон до них не
+    // посчитать. Разбирается он в конце кадра, когда список полон.
+    std::vector<int> m_visibleRows;
+    std::vector<ImVec2> m_rowCenters;   // где эти строки на экране (для самопроверки)
+    int m_anchorId = -1;
+    int m_shiftClickId = -1;
+
+public:
+    // Сколько строк нарисовано в этом кадре и где их середина. Нужно
+    // самопроверке: она выбирает диапазон настоящими щелчками с Shift.
+    int RowCount() const { return (int)m_rowCenters.size(); }
+    ImVec2 RowCenter(int i) const { return m_rowCenters[(size_t)i]; }
+    int RowId(int i) const { return m_visibleRows[(size_t)i]; }
 };
