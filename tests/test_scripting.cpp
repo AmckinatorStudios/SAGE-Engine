@@ -17,6 +17,7 @@
 #include "sage/assets/Pack.h"
 #include "sage/vars/VarsComponent.h"
 #include "sage/events/Events.h"
+#include "sage/render/Camera.h"
 
 #include <chrono>
 #include <filesystem>
@@ -1398,4 +1399,95 @@ TEST(Scripting_self_is_not_shared_between_scripts) {
     // И ни одна из них не подвинулась дважды/за другую.
     CHECK_NEAR(a.GetTransform().Position.y, 0.0f, 1e-4);
     CHECK_NEAR(b.GetTransform().Position.y, 0.0f, 1e-4);
+}
+
+// ============================================================================
+//  camera.ScreenToRay / camera.WorldToScreen
+//
+//  До этого щёлкнуть мышью по объекту сцены (не по центру экрана прицелом, а
+//  ИМЕННО там, куда указывает курсор) было нечем: у камеры был только базис
+//  (Position/Front/Right/Up/Fov), а перевести точку экрана в луч — отдельная
+//  геометрия, которую иначе пришлось бы писать в каждой игре заново. Проверяем
+//  оба направления и их согласованность друг с другом.
+// ============================================================================
+
+TEST(Scripting_camera_screen_to_ray_needs_binding) {
+    ScriptEngine se; // камера не привязана (BindCamera не вызван)
+    auto r = se.Lua().safe_script("return camera.ScreenToRay(0, 0)", sol::script_pass_on_error);
+    CHECK_FALSE(r.valid());
+}
+
+TEST(Scripting_camera_screen_to_ray_center_points_forward) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    scene.UiFrame.Size = glm::vec2(800.0f, 600.0f);
+    Camera cam;   // умолчания: Position (0,0,3), Front (0,0,-1), Fov 60
+    se.BindCamera(cam);
+
+    // Центр экрана — луч точно вдоль Front, каким бы ни было поле зрения.
+    se.Lua().script("Ray = camera.ScreenToRay(400, 300)");
+    const glm::vec3 origin = se.Lua()["Ray"]["origin"];
+    const glm::vec3 dir = se.Lua()["Ray"]["dir"];
+    CHECK_NEAR(origin.x, cam.Position.x, 1e-4);
+    CHECK_NEAR(origin.y, cam.Position.y, 1e-4);
+    CHECK_NEAR(origin.z, cam.Position.z, 1e-4);
+    CHECK_NEAR(dir.x, cam.Front.x, 1e-3);
+    CHECK_NEAR(dir.y, cam.Front.y, 1e-3);
+    CHECK_NEAR(dir.z, cam.Front.z, 1e-3);
+}
+
+TEST(Scripting_camera_world_to_screen_point_ahead_is_screen_center) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    scene.UiFrame.Size = glm::vec2(800.0f, 600.0f);
+    Camera cam;
+    se.BindCamera(cam);
+
+    // Точка ровно впереди камеры (вдоль Front) обязана лечь в центр кадра.
+    const glm::vec3 ahead = cam.Position + cam.Front * 10.0f;
+    se.Lua()["P"] = ahead;
+    se.Lua().script("S = camera.WorldToScreen(P)");
+    sol::object result = se.Lua()["S"];
+    CHECK_TRUE(result.get_type() != sol::type::lua_nil);
+    const glm::vec2 screen = result.as<glm::vec2>();
+    CHECK_NEAR(screen.x, 400.0f, 0.5f);
+    CHECK_NEAR(screen.y, 300.0f, 0.5f);
+}
+
+TEST(Scripting_camera_world_to_screen_behind_camera_is_nil) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    scene.UiFrame.Size = glm::vec2(800.0f, 600.0f);
+    Camera cam;
+    se.BindCamera(cam);
+
+    // Точка ЗА спиной камеры — честный nil, а не координата, случайно попавшая
+    // на экран: спроецировать её без вранья нельзя (тангенс угла уходит в
+    // отрицательную полуплоскость и «отражается» на противоположный край).
+    const glm::vec3 behind = cam.Position - cam.Front * 10.0f;
+    se.Lua()["P"] = behind;
+    const bool isNil = se.Lua().script("return camera.WorldToScreen(P) == nil");
+    CHECK_TRUE(isNil);
+}
+
+TEST(Scripting_camera_screen_to_ray_and_world_to_screen_are_consistent) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    scene.UiFrame.Size = glm::vec2(800.0f, 600.0f);
+    Camera cam;
+    se.BindCamera(cam);
+
+    // Точка МИМО центра: спроецировать в экран и тут же пустить луч из той же
+    // точки экрана обязано указать почти точно обратно на неё же.
+    const glm::vec3 world = cam.Position + cam.Front * 8.0f + cam.Right * 2.0f + cam.Up * 1.0f;
+    se.Lua()["P"] = world;
+    se.Lua().script("S = camera.WorldToScreen(P)");
+    se.Lua().script("Ray = camera.ScreenToRay(S.x, S.y)");
+    const glm::vec3 dir = se.Lua()["Ray"]["dir"];
+    const glm::vec3 expected = glm::normalize(world - cam.Position);
+    CHECK_NEAR(glm::dot(dir, expected), 1.0f, 1e-3);
 }

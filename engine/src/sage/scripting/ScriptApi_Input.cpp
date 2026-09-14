@@ -217,5 +217,58 @@ void ScriptEngine::RegisterCameraApi() {
         if (!m_camera) throw std::runtime_error("GetCamera: камера не привязана (ScriptEngine::BindCamera не вызван)");
         return *m_camera;
     });
+
+    // --- Экран <-> мир. Между щелчком мыши и лучом в мир не было ничего, кроме
+    // ручной геометрии в самом скрипте: без этого «щёлкнуть по объекту» умел
+    // только прицел от первого лица (луч из camera.Position/camera.Front, то
+    // есть всегда из ЦЕНТРА экрана) — курсор мыши в этот луч превратить было
+    // нечем. Расчёт — БЕЗ полных матриц вида/проекции: у камеры уже есть базис
+    // (Front/Right/Up) и угол обзора, а привязывать glm::mat4 к Lua ради одной
+    // этой пары функций незачем. Аспект и координаты берутся из sage.ui.Cursor/
+    // ScreenSize (Scene::UiFrame) — ТОЙ ЖЕ системы координат, что у letterbox-
+    // кадра игры, а не окна: иначе луч уезжал бы мимо на нестандартном размере
+    // окна или с чёрными полосами по краям.
+    //
+    // Таблица {origin, dir}, а не два возврата: тот же приём, что у
+    // physics.Raycast ({object, point, normal, distance}) — подсказка API
+    // читает возврат по сигнатуре лямбды и честно напишет «table», а два
+    // отдельных Vec3 она показала бы как один (соврав про второй).
+    Bind("camera", "ScreenToRay", nullptr,
+         [this](float screenX, float screenY) -> sol::table {
+        if (!m_camera) throw std::runtime_error("ScreenToRay: камера не привязана (BindCamera не вызван)");
+        const glm::vec2 size = m_scene ? m_scene->UiFrame.Size : glm::vec2(0.0f);
+        glm::vec3 dir = m_camera->Front;
+        if (size.x > 0.0f && size.y > 0.0f) {
+            const float aspect = size.x / size.y;
+            const float tanHalfFov = std::tan(glm::radians(m_camera->Fov) * 0.5f);
+            const float ndcX = (2.0f * screenX / size.x - 1.0f) * aspect * tanHalfFov;
+            const float ndcY = (1.0f - 2.0f * screenY / size.y) * tanHalfFov;
+            dir = glm::normalize(m_camera->Front + m_camera->Right * ndcX + m_camera->Up * ndcY);
+        }
+        sol::table t = m_lua.create_table();
+        t["origin"] = m_camera->Position;
+        t["dir"] = dir;
+        return t;
+    });
+
+    // Обратная операция: точка мира -> точка экрана, или nil — точка позади
+    // камеры (или ближе NearClip), проецировать её честно нельзя. Нужна всему,
+    // что рисует интерфейс НАД объектом мира: полоска здоровья, маркер цели,
+    // всплывающее число урона.
+    Bind("camera", "WorldToScreen", nullptr,
+         [this](const glm::vec3& worldPos) -> sol::object {
+        if (!m_camera) throw std::runtime_error("WorldToScreen: камера не привязана (BindCamera не вызван)");
+        const glm::vec2 size = m_scene ? m_scene->UiFrame.Size : glm::vec2(0.0f);
+        if (size.x <= 0.0f || size.y <= 0.0f) return sol::nil;
+        const glm::vec3 toPoint = worldPos - m_camera->Position;
+        const float depth = glm::dot(toPoint, m_camera->Front);
+        if (depth <= m_camera->NearClip) return sol::nil;
+        const float aspect = size.x / size.y;
+        const float tanHalfFov = std::tan(glm::radians(m_camera->Fov) * 0.5f);
+        const float ndcX = glm::dot(toPoint, m_camera->Right) / (depth * aspect * tanHalfFov);
+        const float ndcY = glm::dot(toPoint, m_camera->Up) / (depth * tanHalfFov);
+        return sol::make_object(m_lua, glm::vec2((ndcX + 1.0f) * 0.5f * size.x,
+                                                 (1.0f - ndcY) * 0.5f * size.y));
+    });
 }
 
