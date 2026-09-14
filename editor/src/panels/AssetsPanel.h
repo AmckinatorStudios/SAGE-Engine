@@ -118,6 +118,10 @@ public:
         const std::function<void(float, const std::string&)>& tell = {});
     static void RegisterImported(const ImportReport& report);
 
+    // Смена проекта: отпустить обложки прошлого. Ключ обложки — путь ассета,
+    // а он в каждом проекте свой и ведёт к другому файлу.
+    void ForgetProject() { m_preview.ForgetProject(); }
+
 private:
     // Превью карточек. Материалы, префабы и модели рендерятся по одному за кадр
     // и запоминаются (см. ThumbnailFor): один такой рендер — полный проход

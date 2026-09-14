@@ -16,6 +16,7 @@
 #include "CodeEditorApp.h"
 #include "ProjectLauncher/ProjectDatabase.h"
 #include "SceneCover.h"
+#include "Thumbnails.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -794,6 +795,7 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
         return false;
     }
     if (!m_project.CreateNew(dir, name, err)) return false;
+    ForgetPreviousProject();
     const ProjectTemplateKind kind = tpl->Kind;
     // ПАНЕЛЬ АССЕТОВ ЖИВЁТ В assets/ И ТОЛЬКО В НЕЙ (см. AssetsPanel.cpp).
     m_assetsCwd = m_project.AssetsDir();
@@ -918,8 +920,59 @@ bool EditorLayer::ReloadProjectInput() {
     return m_projectInput.LoadMapping(file);
 }
 
+// ============================================================================
+//  СМЕНА ПРОЕКТА: ПРОШЛЫЙ ОБЯЗАН ИСЧЕЗНУТЬ ЦЕЛИКОМ
+//
+//  «Создал частицу в одном проекте, перешёл в другой — и на секунду видно те
+//  объекты и ту работу». Это не мерцание отрисовки, а честно оставшееся
+//  состояние: смена проекта меняла ПУТЬ, но не трогала ничего из того, что уже
+//  загружено и живёт.
+//
+//  Держалось прошлое в четырёх местах, и каждое по своей причине:
+//
+//    • КЭШ РЕСУРСОВ хранит модели, текстуры, материалы и шейдеры ПО ССЫЛКЕ
+//      ПРОЕКТА («assets/hero.fbx»). Ссылка в каждом проекте своя и указывает на
+//      РАЗНЫЙ файл — значит новый проект получал чужую модель просто потому,
+//      что имя совпало. Хуже того, выглядит это правдоподобно: модель есть,
+//      материал есть, только не те.
+//    • ЧАСТИЦЫ живут секундами и системе, которая их родила, ничем не обязаны:
+//      залп, пущенный в старом проекте, догорал уже в новом. Стримы — ещё
+//      дольше: непрерывный эмиттер продолжал сыпать от объекта, которого в
+//      новой сцене нет вовсе.
+//    • ОБЛОЖКИ (thumbs и буферы AssetPreview) ключуются путём ассета — та же
+//      беда, что у кэша ресурсов, только видна прямо в панели.
+//    • СЦЕНА прошлого проекта оставалась на экране до тех пор, пока не
+//      загрузится сцена нового. А если сцен в новом проекте нет вовсе — не
+//      уходила совсем: человек видел чужие объекты в пустом проекте.
+//
+//  Зовётся ПОСЛЕ успешного открытия/создания: провал открытия не повод стирать
+//  то, над чем человек работает. Проект, который не открылся, — это не смена
+//  проекта.
+// ============================================================================
+void EditorLayer::ForgetPreviousProject() {
+    // Сцена — первой и СРАЗУ, а не «когда загрузится новая». Новый проект может
+    // оказаться без сцен вовсе, и тогда «когда загрузится» не наступает.
+    // NewScene, а не присваивание: он же сбрасывает историю правок, выделение,
+    // путь сцены и признак изменённости — всё это тоже прошлое.
+    NewScene(ProjectTemplateKind::Empty);
+
+    ResourceManager::Instance().ForgetProjectAssets();
+    m_renderer.Particles().Clear();
+    thumbs::Clear();
+    sage::scene::ClearPrefabCache();
+    m_assets.ForgetProject();
+    m_inspector.ForgetProject();
+    m_uiEditor.ForgetProject();
+    // Ссылки на сущности прошлой сцены: их номера в новой сцене принадлежат
+    // другим объектам, и «выделен объект 7» после смены проекта значит
+    // выделенным чужой.
+    SetSelectedId(-1);
+    m_selection.clear();
+}
+
 bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     if (!m_project.Open(path, err)) return false;
+    ForgetPreviousProject();
     // ПАНЕЛЬ АССЕТОВ ЖИВЁТ В assets/ И ТОЛЬКО В НЕЙ (см. AssetsPanel.cpp).
     m_assetsCwd = m_project.AssetsDir();
     m_projects.Touch(m_project.Dir().string());

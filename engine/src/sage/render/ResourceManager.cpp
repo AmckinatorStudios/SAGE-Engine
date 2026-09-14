@@ -2,6 +2,7 @@
 #include <filesystem>
 #include "ResourceManager.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/assets/Quarantine.h"
 #include "sage/render/SkinnedModel.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
@@ -181,10 +182,21 @@ std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     auto it = m_models.find(key);
     if (it != m_models.end()) return it->second;
     std::shared_ptr<Mesh> mesh;
-    try {
-        mesh = ModelLoader::LoadMesh(Locate(path), m_keepMeshCpu);
-    } catch (const std::exception& e) {
-        LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
+    // КАРАНТИН: на этом файле прошлый запуск умер (см. assets/Quarantine.h).
+    // Загружать его снова значит повторить падение — и запереть редактор в
+    // кольце «открыл проект — упал».
+    if (sage::assets::quarantine::Blocked(path)) {
+        LOG_ERROR("Resources") << "Модель «" << path
+                               << "» в карантине: на ней оборвался прошлый запуск. "
+                               << "Перезапишите файл — карантин снимется сам.";
+    } else {
+        sage::assets::quarantine::Begin(path);
+        try {
+            mesh = ModelLoader::LoadMesh(Locate(path), m_keepMeshCpu);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Resources") << "Модель не загрузилась (" << path << "): " << e.what();
+        }
+        sage::assets::quarantine::End();
     }
     m_models[key] = mesh; // в т.ч. nullptr — негативный кэш (не перечитывать битый файл)
     m_modelStamps[key] = FileStamp(Locate(path));
@@ -197,10 +209,19 @@ std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
     auto it = m_skinned.find(key);
     if (it != m_skinned.end()) return it->second;
     std::shared_ptr<sage::render::SkinnedModel> model;
-    try {
-        model = sage::render::SkinnedModel::Load(Locate(path));
-    } catch (const std::exception& e) {
-        LOG_ERROR("Resources") << "Скиннинг-модель не загрузилась (" << path << "): " << e.what();
+    if (sage::assets::quarantine::Blocked(path)) {
+        LOG_ERROR("Resources") << "Скелетная модель «" << path
+                               << "» в карантине: на ней оборвался прошлый запуск. "
+                               << "Перезапишите файл — карантин снимется сам.";
+    } else {
+        sage::assets::quarantine::Begin(path);
+        try {
+            model = sage::render::SkinnedModel::Load(Locate(path));
+        } catch (const std::exception& e) {
+            LOG_ERROR("Resources") << "Скиннинг-модель не загрузилась (" << path << "): "
+                                   << e.what();
+        }
+        sage::assets::quarantine::End();
     }
     m_skinned[key] = model; // в т.ч. nullptr — негативный кэш
     m_skinnedStamps[key] = FileStamp(Locate(path));
@@ -898,6 +919,33 @@ void ResourceManager::Clear() {
     m_textures.clear();
     m_textureBytes = 0;
     // m_evictions/m_tick намеренно НЕ сбрасываем — это счётчики за жизнь процесса.
+}
+
+void ResourceManager::ForgetProjectAssets() {
+    // Только ЗАПИСИ КЭША. Ни один живой объект здесь не разрушается насильно:
+    // уходящая сцена ещё держит свои shared_ptr, и отобрать у неё материал
+    // посреди кадра значило бы поменять падение «чужая модель» на падение
+    // «материала нет».
+    m_models.clear();
+    m_modelStamps.clear();
+    m_skinned.clear();
+    m_skinnedStamps.clear();
+    m_materials.clear();
+    m_materialStamps.clear();
+    m_textures.clear();
+    m_textureBytes = 0;
+    m_skyboxes.clear();
+    // Шейдеры — тоже проектные: игра вправе положить свои .vert/.frag рядом со
+    // сценой (см. docs/custom_shaders.md), и программа, собранная из файлов
+    // прошлого проекта, в новом означает чужую картинку.
+    m_shaders.clear();
+    // Примитивы (куб, сфера, плоскость) НЕ трогаем: они посчитаны движком, к
+    // проекту отношения не имеют, а пересоздавать их — лишняя работа на ровном
+    // месте.
+    //
+    // Поколение ассетов двигаем: по нему те, кто держит РАЗОБРАННЫЕ данные, а не
+    // shared_ptr, понимают, что их копия устарела.
+    ++m_assetsGeneration;
 }
 
 ResourceManager::~ResourceManager() {

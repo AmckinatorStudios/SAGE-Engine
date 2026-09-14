@@ -203,6 +203,11 @@ Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
     return it->second;
 }
 
+// Смена проекта: все именованные буферы — прочь (см. заголовок).
+void AssetPreview::ForgetProject() {
+    m_targets.clear();
+}
+
 uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
                               const std::vector<std::shared_ptr<Material>>& materials, int size,
                               float fitRadius, const std::string& key) {

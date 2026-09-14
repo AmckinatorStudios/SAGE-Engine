@@ -1556,6 +1556,7 @@
     "Baking is temporarily unavailable in the editor": "Выпечка освещения в редакторе временно недоступна",
     "Marked as static geometry for baked lighting": "Помечен как статичная геометрия для запечённого света",
     "Bringing into the project: ": "Внесение в проект: ",
-    "Files changed on disk — reloaded: ": "Файлы изменились на диске — перечитано: "
+    "Files changed on disk — reloaded: ": "Файлы изменились на диске — перечитано: ",
+    "Last session died on a file — it is quarantined: ": "Прошлый запуск оборвался на файле — он в карантине: "
   }
 }

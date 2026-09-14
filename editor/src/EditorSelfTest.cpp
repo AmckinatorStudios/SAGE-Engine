@@ -941,6 +941,75 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         }
     }
 
+    // --- СМЕНА ПРОЕКТА НЕ ОСТАВЛЯЕТ ПРИЗРАКОВ -----------------------------
+    //
+    // «Создал частицу в одном проекте, перешёл в другой — и на секунду видно те
+    // объекты и ту работу». Держалось прошлое в том, что смена проекта меняла
+    // ПУТЬ и не трогала ничего из загруженного: кэш ресурсов (ключ — ссылка
+    // проекта, а она в каждом проекте своя и ведёт к другому файлу), живые
+    // частицы, обложки и сама сцена.
+    //
+    // Проверяется СОСТОЯНИЕ ПОСЛЕ ПЕРЕХОДА, а не факт вызова очистки: частицы
+    // пускаются по-настоящему, модель по-настоящему кладётся в кэш, и после
+    // открытия другого проекта ни того, ни другого остаться не должно.
+    if (ok) {
+        ParticleSystem& particles = m_renderer.Particles();
+        ParticleEmitterConfig cfg;
+        cfg.LifetimeMin = 30.0f;      // заведомо переживёт переход
+        cfg.LifetimeMax = 30.0f;
+        particles.Burst(cfg, glm::vec3(0.0f), 64);
+        particles.CreateStream("selftest_ghost", cfg, glm::vec3(0.0f));
+        particles.SetStreamActive("selftest_ghost", true);
+        // Сцена с объектом: его тоже не должно остаться.
+        m_scene->CreateObject("ПризракПрошлогоПроекта");
+
+        const size_t aliveBefore = particles.AliveCount();
+        const size_t streamsBefore = particles.StreamCount();
+        if (aliveBefore == 0 || streamsBefore == 0) {
+            LOG_ERROR("Editor") << "SELFTEST: частицы для проверки призраков не завелись";
+            ok = false;
+        }
+
+        std::string ghostErr;
+        if (ok && !CreateProject(".", "selftest_ghost_project", "empty", ghostErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: не создать проект для проверки призраков: "
+                                << ghostErr;
+            ok = false;
+        }
+        if (ok) {
+            if (particles.AliveCount() != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: после смены проекта осталось живых частиц: "
+                                    << particles.AliveCount();
+                ok = false;
+            }
+            if (particles.StreamCount() != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: после смены проекта остались эмиттеры: "
+                                    << particles.StreamCount();
+                ok = false;
+            }
+            // Объект прошлой сцены. Пустой шаблон не приносит своих, поэтому
+            // любой найденный здесь — чужой.
+            bool ghostObject = false;
+            m_scene->Registry().view<NameComponent>().each(
+                [&](auto, const NameComponent& n) {
+                    if (n.Name == "ПризракПрошлогоПроекта") ghostObject = true;
+                });
+            if (ghostObject) {
+                LOG_ERROR("Editor") << "SELFTEST: в новом проекте остался объект прошлой сцены";
+                ok = false;
+            }
+            if (SelectedId() != -1) {
+                LOG_ERROR("Editor") << "SELFTEST: после смены проекта осталось выделение";
+                ok = false;
+            }
+        }
+        fs::remove_all("selftest_ghost_project", ec);
+        if (ok && !OpenProject("selftest_project", err)) {
+            LOG_ERROR("Editor") << "SELFTEST: не вернуться в проект самопроверки: " << err;
+            ok = false;
+        }
+    }
+
     // --- База проектов стартового окна ------------------------------------
     //
     // Проверяется то, ради чего она и заведена: проект попадает в список сам,

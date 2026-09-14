@@ -5,6 +5,7 @@
 #include "TestFramework.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -199,4 +200,86 @@ TEST(CrashReport_ring_buffer_keeps_only_the_tail) {
 
     CHECK_TRUE(report.find("сообщение 199") != std::string::npos);   // хвост на месте
     CHECK_TRUE(report.find("сообщение 0 ") == std::string::npos);    // голова вытеснена
+}
+
+// ============================================================================
+//  КАРАНТИН: ОДИН БИТЫЙ ФАЙЛ НЕ ЗАПИРАЕТ РЕДАКТОР
+//
+//  «Если с одним проектом что-то не пойдёт, я целый редактор открыть НЕ СМОГУ».
+//  Кольцо замыкалось так: открыл проект — редактор сам грузит его сцену — в
+//  сцене ссылка на битую модель — падение — запустил снова — открыл тот же
+//  проект — то же падение. Выйти из кольца человеку нечем.
+//
+//  Проверяется ровно поведение предохранителя, а не его наличие: метка,
+//  пережившая запуск, сажает файл в карантин; карантин отказывает по имени; и
+//  снимается он САМ, как только файл на диске изменился — иначе предохранитель
+//  стал бы приговором.
+// ============================================================================
+#include "sage/assets/Quarantine.h"
+
+TEST(Quarantine_marks_the_file_a_crash_died_on) {
+    namespace q = sage::assets::quarantine;
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_quarantine";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+
+    q::SetDirectory(dir.string());
+    // Мирный запуск: метки нет — сажать некого.
+    CHECK_TRUE(q::TakeUnfinished().empty());
+
+    // Начали разбирать файл и НЕ закончили — так выглядит падение.
+    q::Begin("assets/hero.fbx");
+    CHECK_TRUE(fs::exists(dir / "sage-loading.txt", ec));
+
+    // Следующий запуск читает метку.
+    q::SetDirectory(dir.string());
+    CHECK_EQ(q::TakeUnfinished(), std::string("assets/hero.fbx"));
+    CHECK_TRUE(q::Blocked("assets/hero.fbx"));
+    CHECK_FALSE(q::Blocked("assets/other.fbx"));
+    // И метка убрана: второй запуск подряд не должен сажать тот же файл дважды.
+    CHECK_FALSE(fs::exists(dir / "sage-loading.txt", ec));
+
+    // Карантин переживает перезапуск: список лежит файлом рядом с редактором.
+    q::SetDirectory(dir.string());
+    CHECK_TRUE(q::Blocked("assets/hero.fbx"));
+
+    q::Clear();
+    CHECK_FALSE(q::Blocked("assets/hero.fbx"));
+    q::SetDirectory("");
+    fs::remove_all(dir, ec);
+}
+
+TEST(Quarantine_ends_cleanly_and_survives_nested_loads) {
+    namespace q = sage::assets::quarantine;
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_quarantine_ok";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    q::SetDirectory(dir.string());
+
+    // Разбор модели тянет её текстуры: метка обязана называть ВНЕШНЮЮ работу,
+    // ту, которую затеял человек. Пометив текстуру, после падения мы посадили бы
+    // в карантин её, а виновата была бы модель.
+    q::Begin("assets/hero.fbx");
+    q::Begin("assets/hero_albedo.png");
+    q::End();
+    // Внутренняя работа кончилась — метка ЕЩЁ стоит: модель разбирается дальше.
+    CHECK_TRUE(fs::exists(dir / "sage-loading.txt", ec));
+    std::ifstream mark(dir / "sage-loading.txt");
+    std::string line;
+    std::getline(mark, line);
+    mark.close();
+    CHECK_EQ(line, std::string("assets/hero.fbx"));
+
+    q::End();
+    // Всё кончилось мирно — метки нет, и следующий запуск никого не посадит.
+    CHECK_FALSE(fs::exists(dir / "sage-loading.txt", ec));
+    q::SetDirectory(dir.string());
+    CHECK_TRUE(q::TakeUnfinished().empty());
+
+    q::SetDirectory("");
+    fs::remove_all(dir, ec);
 }

@@ -28,6 +28,8 @@
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "Thumbnails.h"
+
+#include "sage/assets/Quarantine.h"
 #include "sage/render/DebugView.h"
 #include "sage/core/Application.h"
 #include "sage/core/Paths.h"
@@ -299,6 +301,23 @@ void EditorLayer::OnAttach() {
             }
         };
         sage::CrashHandler::Install(cfg);
+    }
+
+    // КАРАНТИН — ДО ПЕРВОЙ ЗАГРУЗКИ ЧЕГО-ЛИБО и до открытия проекта.
+    //
+    // «Если с одним проектом что-то не пойдёт, я целый редактор открыть НЕ
+    // СМОГУ» — и это не преувеличение: открыл проект, редактор сам грузит его
+    // сцену, в сцене ссылка на битую модель, падение; запустил снова, открыл тот
+    // же проект (он в списке первым) — то же падение. Выйти из кольца нечем:
+    // редактор не доживает до состояния, в котором можно что-то нажать.
+    //
+    // Метка, пережившая запуск, называет файл, на котором процесс умер. Такой
+    // файл в карантине: редактор открывается, проект открывается, сцена
+    // открывается — не появляется одна модель, и про неё сказано прямым текстом
+    // (см. assets/Quarantine.h).
+    sage::assets::quarantine::SetDirectory(".");
+    if (const std::string broken = sage::assets::quarantine::TakeUnfinished(); !broken.empty()) {
+        SetStatusMessage(T("Last session died on a file — it is quarantined: ") + broken);
     }
 
     // Отчёт о прошлом падении — ищем сразу после установки обработчика: если

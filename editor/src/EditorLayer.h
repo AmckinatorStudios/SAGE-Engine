@@ -311,6 +311,9 @@ private:
     // Новая сцена по ШАБЛОНУ (см. ProjectTemplates.h). Empty — пустая; она же
     // используется пунктом «Новая сцена» и самопроверкой.
     void NewScene(ProjectTemplateKind content);
+    // Смена проекта: прошлый исчезает целиком — сцена, кэш ресурсов, частицы,
+    // обложки, префабы, выделение. Подробности — в EditorLayer_Project.cpp.
+    void ForgetPreviousProject();
 
     // Материал шаблона — ФАЙЛОМ в assets/materials, а не полем Color.
     //

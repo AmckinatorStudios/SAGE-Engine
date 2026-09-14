@@ -44,6 +44,10 @@ public:
     // выглядит как две одинаковые строки в списке из полутора десятков.
     static std::vector<std::pair<std::string, std::vector<std::string>>> AddComponentMenuContents();
 
+    // Смена проекта: отпустить обложки прошлого. Ключ обложки — путь ассета,
+    // а он в каждом проекте свой и ведёт к другому файлу.
+    void ForgetProject() { m_preview.ForgetProject(); }
+
 private:
 public:
     // Связанные оси масштаба: что получится, если из before потянули одну ось
