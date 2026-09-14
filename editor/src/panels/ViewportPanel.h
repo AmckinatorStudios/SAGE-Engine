@@ -101,6 +101,17 @@ private:
     static glm::mat4 OrthoViewMatrix(ViewKind kind, const glm::vec3& center);
     static const char* ViewKindName(ViewKind kind);
 
+public:
+    // Экранный прямоугольник АКТИВНОГО вида, снятый в этом кадре. Нужен
+    // самопроверке: она щёлкает мышью по вьюпорту по-настоящему (см.
+    // EditorLayer::TickInputProbe), а чтобы щёлкнуть, надо знать куда.
+    ImVec2 ViewMin() const { return m_lastViewMin; }
+    ImVec2 ViewMax() const { return m_lastViewMax; }
+
+private:
+    ImVec2 m_lastViewMin{0.0f, 0.0f};
+    ImVec2 m_lastViewMax{0.0f, 0.0f};
+
     Layout m_layout = Layout::Single;
     ViewKind m_kinds[4] = {ViewKind::Perspective, ViewKind::Top, ViewKind::Front, ViewKind::Side};
     OrthoView m_ortho[4];

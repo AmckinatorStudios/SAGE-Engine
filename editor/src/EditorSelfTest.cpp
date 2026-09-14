@@ -76,6 +76,7 @@
 #include "sage/scene/Prefab.h"
 #include "sage/render/ModelLoader.h"
 #include "sage/render/SkinnedModel.h"
+#include "ViewGizmo.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/PostFX.h"
 #include "sage/assets/import/Convert.h"
@@ -367,6 +368,145 @@ void EditorLayer::CheckMultiWindowFrame() {
     LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — свой вьюпорт " << own << ", окно платформы "
                         << real << ", рамка системы " << decorated << ", один заголовок "
                         << singleTitle << ", панель дока осталась в главном " << dockedStayed;
+}
+
+// ============================================================================
+//  МЫШЬ В ЖИВОМ КАДРЕ: щелчок по вьюпорту проверяется НАСТОЯЩИМ щелчком
+// ============================================================================
+//
+// Зачем так, а не вызовом внутренних функций. Два отказа подряд — «щёлкаю по
+// гизмо осей, ничего не происходит» и «щёлкаю по пустому месту, выделение не
+// снимается» — оба в коде, который по отдельности выглядит правильным.
+// Ломается не он, а ВОРОТА на пути щелчка: захват мыши слотом, ImGuizmo::IsOver,
+// гизмо осей, рамка выделения. Проверка, которая зовёт PickAtViewportWith
+// напрямую, проходит и при полностью мёртвом вьюпорте: она проверяет не то
+// место.
+//
+// Поэтому события мыши кладутся в очередь ImGui теми же вызовами, что и у
+// бэкенда GLFW, и дальше кадр идёт своим ходом. Ставить их надо ПОСЛЕ
+// ImGui_ImplGlfw_NewFrame и ДО ImGui::NewFrame: бэкенд в своём NewFrame тоже
+// трогает положение курсора, и наши события обязаны прийти последними.
+void EditorLayer::TickInputProbe() {
+    if (m_probeStep < 0) return;
+    // СТОРОЖ. Пока проверка не кончилась, редактор не закрывается (см.
+    // TakeAutoScreenshot) — значит она обязана кончаться при любом исходе, в том
+    // числе если вьюпорта в кадре так и не появилось. Иначе headless-прогон
+    // висел бы до таймаута CI без единой строки о причине.
+    if (++m_probeFrames > 900) {
+        LOG_ERROR("Editor") << "VIEWPORT_INPUT: FAIL — вьюпорт так и не отозвался на мышь "
+                            << "(шаг " << m_probeStep << ")";
+        m_probeStep = -1;
+        return;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+    // КУРСОР ДЕРЖИМ КАЖДЫЙ КАДР. Бэкенд GLFW в своём NewFrame кладёт в очередь
+    // НАСТОЯЩЕЕ положение курсора (в headless — середина окна), и стоит нам
+    // пропустить кадр, как «нажатие» и «отпускание» происходят в разных точках:
+    // редактор видит не щелчок, а протяжку через полэкрана.
+    if (m_probeStep > 0) io.AddMousePosEvent(m_probePos.x, m_probePos.y);
+    if (m_probeWait > 0) { --m_probeWait; return; }
+
+    const ImVec2 mn = m_viewport.ViewMin();
+    const ImVec2 mx = m_viewport.ViewMax();
+    if (mx.x - mn.x < 64.0f || mx.y - mn.y < 64.0f) return;  // вьюпорт ещё не нарисован
+
+    auto fail = [&](const char* what) {
+        LOG_ERROR("Editor") << "VIEWPORT_INPUT: FAIL — " << what;
+        m_probeFailed = true;
+    };
+    // Щелчок = положение + нажатие; отпускание — отдельным кадром: редактор
+    // различает клик и рамку выделения именно по кадрам.
+    auto press = [&](const ImVec2& at) {
+        m_probePos = at;
+        io.AddMousePosEvent(at.x, at.y);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    };
+    auto release = [&]() { io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); };
+
+    switch (m_probeStep) {
+        case 0: {
+            // ВЬЮПОРТ — ВПЕРЁД И БЕЗ ЧУЖОГО ОКНА СВЕРХУ. Панель редактора
+            // интерфейса на время самопроверки открыта и живёт ОТДЕЛЬНЫМ окном
+            // системы (см. CheckMultiWindowFrame), а в координатах экрана оно
+            // накрывает вид: щелчок доставался ему, а не сцене. Дожидаемся, пока
+            // проверка многооконности отработает, закрываем панель и выводим
+            // вкладку вперёд.
+            if (!m_multiWindowChecked) { m_probeWait = 1; return; }
+            m_showUIEditor = false;
+            m_viewport.RequestFocus();
+            m_probeWait = 3;
+            break;
+        }
+        case 1: {
+            // Целимся в ПУСТОЕ место: левый верхний угол вида — там небо.
+            // Виджет инструментов прижат к самому верху, поэтому берём ниже.
+            GameObject any = m_scene->FindByName("Red Cube");
+            if (!any.Valid()) { fail("в сцене нет объекта, на котором проверять"); break; }
+            SetSelectedId(any.Id());
+            press(ImVec2(mn.x + (mx.x - mn.x) * 0.06f, mn.y + (mx.y - mn.y) * 0.35f));
+            break;
+        }
+        case 2: release(); break;
+        case 3:
+            // ЩЕЛЧОК ПО ПУСТОМУ МЕСТУ СНИМАЕТ ВЫДЕЛЕНИЕ. Иначе снять его можно
+            // только выбрав что-то другое — то есть никак.
+            if (!m_selection.empty() || m_selectedId != -1) {
+                fail("щелчок по пустому месту не снял выделение");
+            }
+            break;
+        case 4:
+            // СНАЧАЛА ПОДВЕСТИ КУРСОР, ПОТОМ НАЖАТЬ — отдельными кадрами.
+            // Гизмо навигации крутит вид по СМЕЩЕНИЮ курсора, и если прыжок к
+            // шарику случится в кадре нажатия, камера поедет от протяжки. Такая
+            // проверка зелена и при полностью мёртвом щелчке.
+            m_probePos = sage::editor::viewgizmo::AxisBall(m_camera, mn, mx, 0, true);
+            io.AddMousePosEvent(m_probePos.x, m_probePos.y);
+            break;
+        case 5:
+            // Щелчок по шарику оси X гизмо навигации: камера обязана поехать.
+            m_probeYaw = m_camera.Yaw;
+            press(m_probePos);
+            break;
+        case 6: release(); break;
+        case 7:
+            m_probeWait = 6;   // переход плавный (четверть секунды) — даём кадры
+            break;
+        case 8:
+            if (std::abs(m_camera.Yaw - m_probeYaw) < 0.01f) {
+                fail("щелчок по гизмо навигации не повернул камеру");
+            }
+            break;
+        case 9: {
+            // ТО ЖЕ САМОЕ В СПИСКЕ ОБЪЕКТОВ. Выделение снимают там, где на него
+            // смотрят, а список — второе такое место после вьюпорта.
+            GameObject any = m_scene->FindByName("Red Cube");
+            if (!any.Valid()) { fail("в сцене нет объекта, на котором проверять"); break; }
+            SetSelectedId(any.Id());
+            const ImGuiWindow* list = ImGui::FindWindowByName("Hierarchy");
+            if (!list || list->Size.y < 64.0f) { fail("списка объектов нет в кадре"); break; }
+            // Ниже строк: у стартовой сцены их единицы, и низ списка пуст.
+            press(ImVec2(list->Pos.x + list->Size.x * 0.5f, list->Pos.y + list->Size.y - 12.0f));
+            break;
+        }
+        case 10: release(); break;
+        case 11:
+            if (!m_selection.empty() || m_selectedId != -1) {
+                fail("щелчок по пустому месту списка объектов не снял выделение");
+            }
+            break;
+        default:
+            if (!m_probeFailed) LOG_INFO("Editor") << "VIEWPORT_INPUT: OK — щелчок по пустому "
+                                                      "снимает выбор и во вьюпорте, и в списке "
+                                                      "объектов, гизмо навигации поворачивает "
+                                                      "камеру";
+            m_probeStep = -1;
+            return;
+    }
+    ++m_probeStep;
+    // Кадр «на усвоение»: события ImGui разбирает в NewFrame, а редактор
+    // отвечает на них уже при отрисовке панели.
+    if (m_probeWait == 0) m_probeWait = 1;
 }
 
 // --- проект, шаблоны, ассеты и материалы -----------------------------------

@@ -343,6 +343,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     const bool hovered = slotOwnsMouse[m_activeSlot] && !toolsBlock;
     const ImVec2 imgPos = slotPos[m_activeSlot];
     const ImVec2 avail = cell;
+    m_lastViewMin = imgPos;
+    m_lastViewMax = ImVec2(imgPos.x + avail.x, imgPos.y + avail.y);
     // Размер буфера главного слота обновляется ВСЕГДА, а не только в перспективе:
     // иначе при смене вида на ортогональный кадр остаётся прежнего размера и
     // растягивается по панели.
