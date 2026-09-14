@@ -1,4 +1,5 @@
 #include "../PanelWindows.h"
+#include "../Progress.h"
 #include "EnvironmentPanel.h"
 #include "EditorTheme.h"
 
@@ -46,12 +47,20 @@ void EnvironmentPanel::StartBake(EditorHost& host, const sage::gi::GISettings& s
         m_bakeResult.reset();
         m_bakePhase = T("Start");
     }
-    m_bakeThread = std::thread([this, input = std::move(input)]() {
-        auto result = sage::gi::Bake(input, [this](float f, const char* phase) {
+    // КАРТОЧКА В УГЛУ, А НЕ ТОЛЬКО ПОЛОСА В ЭТОЙ ПАНЕЛИ. Бейк идёт минутами, а
+    // панель Lighting на это время закрывают — и работа, которая продолжается,
+    // исчезала с глаз совсем (см. Progress.h).
+    namespace progress = sage::editor::progress;
+    const progress::Id task = progress::Begin(progress::Kind::Background, T("Baking GI"),
+                                              T("Start"));
+    m_bakeThread = std::thread([this, task, input = std::move(input)]() {
+        auto result = sage::gi::Bake(input, [this, task](float f, const char* phase) {
             m_bakeProgress = f;
+            sage::editor::progress::Update(task, f, phase ? phase : "");
             std::lock_guard<std::mutex> lock(m_bakeMutex);
             m_bakePhase = phase;
         });
+        sage::editor::progress::End(task);
         std::lock_guard<std::mutex> lock(m_bakeMutex);
         m_bakeResult = std::move(result);
         m_bakeRunning = false;

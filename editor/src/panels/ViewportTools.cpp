@@ -130,14 +130,9 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     if (!ImGui::BeginPopup("##more_menu")) return;
 
     ImGui::TextDisabled("%s", T("Rarer gizmos"));
-    if (ImGui::MenuItem(T("All at once (T): move + rotate + scale"), nullptr,
-                        host.GizmoOp() == (int)ImGuizmo::UNIVERSAL))
-        host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
-    // Рамка (Y): тянет ОДНУ грань, оставляя противоположную на месте — в
-    // отличие от масштаба, который тянет от центра сразу в обе стороны.
-    if (ImGui::MenuItem(T("Rect (Y): drag the faces of the bounding box"), nullptr,
-                        host.GizmoOp() == (int)ImGuizmo::BOUNDS))
-        host.GizmoOp() = (int)ImGuizmo::BOUNDS;
+    // Универсальное (T) и рамка (Y) живут В СТРОКЕ инструментов, а не здесь:
+    // дублировать их пунктом меню значит спорить с самим собой о том, где
+    // переключают инструмент.
     // Коллайдер (C): гизмо тянет ФОРМУ СТОЛКНОВЕНИЯ, а не объект.
     if (ImGui::MenuItem(T("Collider (C): drag the collision shape"), nullptr,
                         host.ColliderEditMode()))
@@ -228,6 +223,19 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
     if (EditorIcons::IconOnlyButton("scale", T("Scale (R)"),
                                     host.GizmoOp() == (int)ImGuizmo::SCALE))
         host.GizmoOp() = (int)ImGuizmo::SCALE;
+    // УНИВЕРСАЛЬНОЕ И РАМКА — В СТРОКЕ, А НЕ В «…». Инструмент, выбираемый
+    // мышью, обязан быть виден: спрятанный в меню, он существует только для
+    // того, кто помнит про клавиши T и Y. Оба заменяют собой три кнопки сразу
+    // (универсальное) и делают то, чего не умеет масштаб (рамка тянет ОДНУ
+    // грань, оставляя противоположную на месте), — это не «редкое».
+    ImGui::SameLine();
+    if (EditorIcons::IconOnlyButton("universal", T("All at once (T): move + rotate + scale"),
+                                    host.GizmoOp() == (int)ImGuizmo::UNIVERSAL))
+        host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
+    ImGui::SameLine();
+    if (EditorIcons::IconOnlyButton("rect", T("Rect (Y): drag the faces of the bounding box"),
+                                    host.GizmoOp() == (int)ImGuizmo::BOUNDS))
+        host.GizmoOp() = (int)ImGuizmo::BOUNDS;
 
     // --- 2. В каких осях ----------------------------------------------------
     gap();

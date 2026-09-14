@@ -1,5 +1,6 @@
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
+#include "../Progress.h"
 #include "../FolderColors.h"
 #include "ui/UI.h"
 #include "EditorTheme.h"
@@ -731,30 +732,84 @@ void AssetsPanel::ConvertOne(EditorHost& host, const fs::path& path) {
 
 // Вся текущая папка. Отчёт — одной строкой со сводкой: перечислять полсотни
 // файлов в статусной строке бессмысленно, а подробности уже в консоли.
+// ПАПКА ПЕРЕВОДИТСЯ ПО КАДРАМ, А НЕ ОДНИМ ВЫЗОВОМ.
+//
+// Раньше здесь стоял sage::assets::ConvertFolder: он перемалывал всю папку
+// внутри одного кадра. Сотня моделей — это минуты, в которые редактор не
+// рисовал ничего: ни полосы, ни имени файла, ни даже курсора. Со стороны это
+// неотличимо от зависания, и первое, что делает человек, — снимает задачу,
+// теряя вместе с ней уже сделанную работу.
+//
+// Поэтому здесь только СПИСОК: что переводить. Сами файлы разбирает Tick — по
+// нескольку за кадр, под модальным окном прогресса (см. Progress.h). Модальным
+// именно потому, что папка проекта в это время меняется под ногами.
 void AssetsPanel::ConvertFolderHere(EditorHost& host) {
+    if (!m_convertQueue.empty()) return;   // одна пакетная работа за раз
+
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root = host.AssetsCwd();
+    m_convertQueue.clear();
+    for (const fs::directory_entry& entry : fs::recursive_directory_iterator(root, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file(ec)) continue;
+        const std::string path = entry.path().string();
+        if (!sage::assets::IsConvertibleModel(path) && !sage::assets::IsConvertibleTexture(path))
+            continue;
+        m_convertQueue.push_back(entry.path());
+    }
+    if (m_convertQueue.empty()) {
+        host.SetStatusMessage(T("Nothing to convert: no models or images in the folder"));
+        return;
+    }
+    m_convertAt = 0;
+    m_convertOk = m_convertFailed = 0;
+    m_convertSrcBytes = m_convertOutBytes = 0;
+    namespace progress = sage::editor::progress;
+    m_convertTask = progress::Begin(progress::Kind::Blocking, T("Converting the folder"));
+}
+
+void AssetsPanel::Tick(EditorHost& host) {
+    if (m_convertQueue.empty()) return;
+    namespace progress = sage::editor::progress;
+
+    // Сколько файлов за кадр. Один — и папка из тысячи мелких текстур
+    // переводилась бы минуту на ровном месте; много — и кадр снова встаёт.
+    // Четыре держат и то, и другое: кадр остаётся живым, полоса едет.
+    constexpr size_t kPerFrame = 4;
     sage::assets::ConvertOptions opts;
     opts.Overwrite = false;   // пакетная операция не должна затирать правки руками
-    const std::vector<sage::assets::ConvertResult> results =
-        sage::assets::ConvertFolder(host.AssetsCwd().string(), opts);
 
-    size_t ok = 0, failed = 0, srcBytes = 0, outBytes = 0;
-    for (const sage::assets::ConvertResult& r : results) {
+    for (size_t done = 0; done < kPerFrame && m_convertAt < m_convertQueue.size(); ++done) {
+        const std::filesystem::path& file = m_convertQueue[m_convertAt++];
+        const sage::assets::ConvertResult r =
+            sage::assets::ConvertAnyToNative(file.string(), {}, opts);
         if (r.Ok) {
-            ++ok;
-            srcBytes += r.SourceBytes;
-            outBytes += r.OutputBytes;
+            ++m_convertOk;
+            m_convertSrcBytes += r.SourceBytes;
+            m_convertOutBytes += r.OutputBytes;
         } else {
-            ++failed;
+            ++m_convertFailed;
             LOG_WARN("Convert") << r.SourcePath << ": " << r.Error;
         }
     }
-    char buf[256];
-    if (ok == 0 && failed == 0) {
-        std::snprintf(buf, sizeof(buf), "%s", T("Nothing to convert: no models or images in the folder"));
-    } else {
-        std::snprintf(buf, sizeof(buf), T("Converted %zu, skipped %zu; %.1f -> %.1f KB"),
-                      ok, failed, srcBytes / 1024.0, outBytes / 1024.0);
+
+    const size_t total = m_convertQueue.size();
+    char note[256];
+    if (m_convertAt < total) {
+        std::snprintf(note, sizeof(note), "%s (%zu/%zu)",
+                      m_convertQueue[m_convertAt].filename().string().c_str(), m_convertAt, total);
+        progress::Update(m_convertTask, (float)m_convertAt / (float)total, note);
+        return;
     }
+
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), T("Converted %zu, skipped %zu; %.1f -> %.1f KB"), m_convertOk,
+                  m_convertFailed, m_convertSrcBytes / 1024.0, m_convertOutBytes / 1024.0);
+    progress::End(m_convertTask, buf);
+    m_convertTask = 0;
+    m_convertQueue.clear();
+    m_convertAt = 0;
     host.SetStatusMessage(buf);
 }
 

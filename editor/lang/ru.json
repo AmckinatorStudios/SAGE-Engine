@@ -1542,6 +1542,16 @@
     "| lines: %d | %s": "| строк: %d | %s",
     "| no GPU timers": "| таймеров GPU нет",
     "— axes of the object itself": "— оси самого объекта",
-    "— axes of the scene": "— оси сцены"
+    "— axes of the scene": "— оси сцены",
+    "%d of %d": "%d из %d",
+    "Baking GI": "Расчёт освещения (GI)",
+    "Connecting...": "Соединение...",
+    "Converting the folder": "Перевод папки в форматы движка",
+    "Downloading and unpacking": "Скачивание и распаковка",
+    "Downloading template:": "Скачивается шаблон:",
+    "Failed": "Не получилось",
+    "Preparing asset thumbnails": "Готовятся обложки ассетов",
+    "Thumbnails ready": "Обложки готовы",
+    "Working...": "Идёт работа..."
   }
 }
