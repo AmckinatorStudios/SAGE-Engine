@@ -589,9 +589,10 @@ bool FileBrowser::Draw() {
         ImGui::InputTextWithHint("##search", T("Search..."), m_search, sizeof(m_search));
 
         // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-        // момент открытия (см. Sage::UI::MenuScope).
-        Sage::UI::MenuScope newFolderMenu;
-        if (ImGui::BeginPopup("##newfolder")) {
+        // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
+        // держится в границах if — иначе деструктор снялся бы после
+        // EndChild() списка ниже, и ImGui решил бы, что стиль не сняли вовсе.
+        if (Sage::UI::MenuScope newFolderMenu; ImGui::BeginPopup("##newfolder")) {
             ImGui::InputText(T("Name"), m_newFolder, sizeof(m_newFolder));
             if (ImGui::Button(T("Create")) && m_newFolder[0]) {
                 std::error_code ec;

@@ -671,9 +671,10 @@ void ProjectLauncher::DrawBrowser(EditorHost& host, ProjectDatabase& db) {
     }
     ProjectAction action = ProjectAction::None;
     // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope).
-    Sage::UI::MenuScope projectMenu;
-    if (ImGui::BeginPopup("##projectmenu")) {
+    // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
+    // держится в границах if — иначе деструктор снялся бы после EndChild()
+    // ниже, и ImGui решил бы, что стиль не сняли вовсе.
+    if (Sage::UI::MenuScope projectMenu; ImGui::BeginPopup("##projectmenu")) {
         if (const ProjectEntry* entry = db.Find(m_menuTarget)) action = DrawProjectMenuItems(*entry);
         else ImGui::CloseCurrentPopup();
         ImGui::EndPopup();

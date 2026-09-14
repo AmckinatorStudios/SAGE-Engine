@@ -669,9 +669,10 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         }
     }
     // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope).
-    Sage::UI::MenuScope tileMenu;
-    if (ImGui::BeginPopupContextItem("##tile_ctx")) {
+    // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
+    // держится в границах if — иначе деструктор снялся бы позже, после
+    // End() окна, и ImGui решил бы, что стиль не сняли вовсе.
+    if (Sage::UI::MenuScope tileMenu; ImGui::BeginPopupContextItem("##tile_ctx")) {
         // ПКМ по файлу ВНЕ набора выбирает его одного: меню всегда про то, на
         // что нажали. ПКМ по файлу ИЗ набора набор сохраняет — иначе обвести
         // рамкой двадцать файлов и удалить их разом было бы нельзя.
@@ -1640,9 +1641,10 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
 
     // Создание ассетов — ПКМ по пустому месту (не по тайлу: у тайлов своё меню).
     // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope).
-    Sage::UI::MenuScope createCtxMenu;
-    if (ImGui::BeginPopupContextWindow("##assets_create_ctx",
+    // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
+    // держится в границах if — иначе деструктор снялся бы после EndChild()/
+    // End() этого окна, и ImGui решил бы, что стиль не сняли вовсе.
+    if (Sage::UI::MenuScope createCtxMenu; ImGui::BeginPopupContextWindow("##assets_create_ctx",
                                        ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
         auto startCreate = [this](CreateKind kind, const char* defaultName) {
             m_createKind = kind;

@@ -1141,13 +1141,26 @@ bool EditorLayer::SelfTestProjectAndAssets() {
             } else {
                 db.Refresh(mine);
                 const ProjectEntry* e = db.Find(mine);
+                const int mineIdx = db.IndexOf(mine);
                 if (!e || e->Kind != ProjectKind::Scene || e->Description != "проверка") {
                     LOG_ERROR("Editor") << "SELFTEST: тип/описание проекта не перечитались";
                     ok = false;
-                } else if (!db.Query(ProjectFilter::Games, e->Name, ProjectSort::Name).empty() ||
-                           db.Query(ProjectFilter::Scenes, e->Name, ProjectSort::Name).empty()) {
-                    LOG_ERROR("Editor") << "SELFTEST: отбор по типу не увидел смену типа";
-                    ok = false;
+                } else {
+                    // Ищем ИМЕННО СВОЮ запись по индексу, а не по «пусто ли
+                    // вообще» — база стартового окна общая на машину, и в ней
+                    // могут лежать другие проекты с тем же именем (например,
+                    // от прошлых прогонов самопроверки из другой папки сборки).
+                    // Проверка по пустоте результата ловила ИХ тип, а не тип
+                    // своего проекта, и падала не из-за отбора, а из-за чужих
+                    // записей в общей базе.
+                    const std::vector<int> games = db.Query(ProjectFilter::Games, e->Name, ProjectSort::Name);
+                    const std::vector<int> scenes = db.Query(ProjectFilter::Scenes, e->Name, ProjectSort::Name);
+                    const bool inGames = std::find(games.begin(), games.end(), mineIdx) != games.end();
+                    const bool inScenes = std::find(scenes.begin(), scenes.end(), mineIdx) != scenes.end();
+                    if (inGames || !inScenes) {
+                        LOG_ERROR("Editor") << "SELFTEST: отбор по типу не увидел смену типа";
+                        ok = false;
+                    }
                 }
                 // Вернуть тип обратно: дальше этим проектом пользуются другие шаги.
                 ProjectDatabase::WriteMetadata(m_project.Dir(), ProjectKind::Game, "", metaErr);
