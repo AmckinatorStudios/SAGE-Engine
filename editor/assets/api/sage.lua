@@ -477,6 +477,12 @@ sage.input = {}
 ---@type sage.input
 input = nil
 
+---@param action string
+---@param source string
+---@return boolean
+function sage.input.AddBinding(action, source) end
+---@return any
+function sage.input.AnyPressedSource() end
 ---@param name string
 ---@return number
 function sage.input.Axis(name) end
@@ -500,9 +506,24 @@ function sage.input.BindIn(context, action, keys) end
 ---@param left string
 ---@param right string
 function sage.input.BindVector(action, up, down, left, right) end
+---@param action string
+---@param settings table
+---@return boolean
+function sage.input.Configure(action, settings) end
+---@return table
+function sage.input.ContextNames() end
 ---@param name string
 ---@param priority number
 function sage.input.CreateContext(name, priority) end
+---@param source string
+---@return any
+function sage.input.FindConflict(source) end
+---@param index number
+---@return boolean
+function sage.input.GamepadConnected(index) end
+---@param index number
+---@return string
+function sage.input.GamepadName(index) end
 ---@param name string
 ---@return boolean
 function sage.input.Has(name) end
@@ -525,6 +546,7 @@ function sage.input.MousePosition() end
 ---@param source string
 ---@return boolean
 function sage.input.Rebind(action, source) end
+function sage.input.ReleaseAll() end
 ---@param file string
 ---@return boolean
 function sage.input.SaveMapping(file) end
@@ -539,9 +561,23 @@ function sage.input.SetMouseCaptured(captured) end
 ---@param mode string
 ---@return boolean
 function sage.input.SetTrigger(action, mode) end
+---@param source string
+---@return boolean
+function sage.input.SourceDown(source) end
+---@param source string
+---@return boolean
+function sage.input.SourcePressed(source) end
+---@param source string
+---@return boolean
+function sage.input.SourceReleased(source) end
+---@param source string
+---@return number
+function sage.input.SourceValue(source) end
 ---@param name string
 ---@return boolean
 function sage.input.Triggered(name) end
+---@return string
+function sage.input.TypedText() end
 ---@param name string
 ---@return Vec2
 function sage.input.Vector(name) end

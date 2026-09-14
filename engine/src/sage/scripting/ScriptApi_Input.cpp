@@ -2,6 +2,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
+#include "sage/ui/UIInteraction.h" // AppendUtf8 — тот же перевод codepoint -> UTF-8, что у полей ввода
 
 // ---------------------------------------------------------------------------
 // Ввод и камера: sage.input.*, sage.camera.*
@@ -14,6 +15,72 @@
 // по-прежнему записан в одном месте (RegisterEngineApi) и не зависит от того,
 // в каком файле лежит тело.
 // ---------------------------------------------------------------------------
+
+namespace {
+
+// Именованные действия (BindAction/IsActionDown) хватает игровой логике, но не
+// экрану настроек: спросить «что нажали?» без уже объявленного действия было
+// нечем, а без этого в Lua нельзя написать ни ловлю клавиши по нажатию
+// («назначьте кнопку»), ни быстрый прототип без раскладки заранее. Источник —
+// та же строка, что везде ("W", "MOUSE_LEFT", "PAD_A"), разобранная тем же
+// Binding::Parse, что понимает файл раскладки.
+enum class ButtonQuery { Down, Pressed, Released };
+
+bool QueryBindingButton(sage::input::InputSystem& input, const sage::input::Binding& b,
+                        ButtonQuery q) {
+    using namespace sage::input;
+    const Devices& d = input.State();
+    auto pick = [&](bool down, bool pressed, bool released) {
+        switch (q) {
+            case ButtonQuery::Down: return down;
+            case ButtonQuery::Pressed: return pressed;
+            case ButtonQuery::Released: return released;
+        }
+        return false;
+    };
+    switch (b.Kind) {
+        case SourceKind::Key: {
+            const Keyboard& k = d.Keys();
+            return pick(k.Down(b.AsKey()), k.Pressed(b.AsKey()), k.Released(b.AsKey()));
+        }
+        case SourceKind::MouseButton: {
+            const Mouse& m = d.MouseState();
+            return pick(m.Down(b.AsMouseButton()), m.Pressed(b.AsMouseButton()), m.Released(b.AsMouseButton()));
+        }
+        case SourceKind::GamepadButton: {
+            const int idx = b.Gamepad >= 0 ? b.Gamepad : d.FirstConnected();
+            if (idx < 0) return false; // геймпад не подключён — честное «нет»
+            const Gamepad& g = d.Pad(idx);
+            return pick(g.Down(b.AsPadButton()), g.Pressed(b.AsPadButton()), g.Released(b.AsPadButton()));
+        }
+        default:
+            return false; // колесо и оси — не кнопки, у них нет «нажато»; см. SourceValue
+    }
+}
+
+// Аналоговое значение источника — работает для ЛЮБОГО вида, в отличие от
+// QueryBindingButton: кнопка честно отвечает 1.0/0.0 (удобно, когда скрипт не
+// знает заранее, к чему привязана настраиваемая клавиша).
+float QueryBindingValue(sage::input::InputSystem& input, const sage::input::Binding& b) {
+    using namespace sage::input;
+    const Devices& d = input.State();
+    switch (b.Kind) {
+        case SourceKind::MouseWheel:
+            return input.Wheel();
+        case SourceKind::MouseAxis: {
+            const glm::vec2 delta = d.MouseState().Delta();
+            return b.Code == 0 ? delta.x : delta.y;
+        }
+        case SourceKind::GamepadAxis: {
+            const int idx = b.Gamepad >= 0 ? b.Gamepad : d.FirstConnected();
+            return idx < 0 ? 0.0f : d.Pad(idx).Axis(b.AsPadAxis());
+        }
+        default:
+            return QueryBindingButton(input, b, ButtonQuery::Down) ? 1.0f : 0.0f;
+    }
+}
+
+} // namespace
 
 void ScriptEngine::RegisterInputApi() {
     using sage::input::ActionType;
@@ -186,6 +253,164 @@ void ScriptEngine::RegisterInputApi() {
     });
     Bind("input", "IsMouseCaptured", "IsMouseCaptured", [this]() -> bool {
         return m_input && m_input->CursorCaptured();
+    });
+
+    // --- Источник напрямую, БЕЗ объявленного действия. Игровой логике хватает
+    // именованных действий выше, но не экрану настроек: спросить «нажат ли
+    // ИМЕННО этот физический источник» без уже заведённого Action было нечем —
+    // ни ловлю клавиши для «назначьте новую кнопку», ни быстрый прототип без
+    // раскладки заранее на них было не написать. Строка источника — та же, что
+    // в BindAction/файле раскладки ("W", "MOUSE_LEFT", "PAD_A", "CTRL+S").
+    // Нераспознанное имя — честные false/0, а не ошибка: раскладку строит сам
+    // скрипт, и опечатка в строке не должна его ронять. ---
+    Bind("input", "SourceDown", nullptr, [this](const std::string& source) -> bool {
+        if (!m_input) throw std::runtime_error("SourceDown: ввод не привязан (BindInput не вызван)");
+        auto b = sage::input::Binding::Parse(source);
+        return b && QueryBindingButton(*m_input, *b, ButtonQuery::Down);
+    });
+    Bind("input", "SourcePressed", nullptr, [this](const std::string& source) -> bool {
+        if (!m_input) throw std::runtime_error("SourcePressed: ввод не привязан (BindInput не вызван)");
+        auto b = sage::input::Binding::Parse(source);
+        return b && QueryBindingButton(*m_input, *b, ButtonQuery::Pressed);
+    });
+    Bind("input", "SourceReleased", nullptr, [this](const std::string& source) -> bool {
+        if (!m_input) throw std::runtime_error("SourceReleased: ввод не привязан (BindInput не вызван)");
+        auto b = sage::input::Binding::Parse(source);
+        return b && QueryBindingButton(*m_input, *b, ButtonQuery::Released);
+    });
+    // Аналоговое значение — колесо, ось стика/курка/мыши, а для кнопки честные
+    // 1.0/0.0 (удобно, когда скрипт не знает заранее, что за источник ему
+    // назначили: не нужно спрашивать вид отдельно).
+    Bind("input", "SourceValue", nullptr, [this](const std::string& source) -> float {
+        if (!m_input) throw std::runtime_error("SourceValue: ввод не привязан (BindInput не вызван)");
+        auto b = sage::input::Binding::Parse(source);
+        return b ? QueryBindingValue(*m_input, *b) : 0.0f;
+    });
+
+    // Что нажали В ЭТОМ КАДРЕ — целиком строкой источника, готовой для
+    // BindAction/Rebind. Без неё экран «нажмите новую клавишу» на Lua не
+    // написать: SourceDown требует уже знать, ЧТО спрашивать, а тут вопрос
+    // ровно обратный. Сами модификаторы (Shift/Ctrl/Alt/Super) источником не
+    // считаются — нажатие голого Shift почти всегда значит, что сочетание ещё
+    // не дожали, — тот же приём, что у собственной ловли редактора
+    // (InputPanel::BindingFromEvent). Отмену по Escape (если она нужна) решает
+    // сам вызывающий скрипт: это политика экрана, а не источника.
+    Bind("input", "AnyPressedSource", nullptr, [this]() -> sol::object {
+        if (!m_input) throw std::runtime_error("AnyPressedSource: ввод не привязан (BindInput не вызван)");
+        using namespace sage::input;
+        for (const InputEvent& e : m_input->FrameEvents()) {
+            if (e.Consumed) continue;
+            switch (e.Type) {
+                case InputEventType::KeyPressed:
+                    switch (e.Keyboard) {
+                        case Key::LeftShift: case Key::RightShift:
+                        case Key::LeftControl: case Key::RightControl:
+                        case Key::LeftAlt: case Key::RightAlt:
+                        case Key::LeftSuper: case Key::RightSuper:
+                            continue;
+                        default: break;
+                    }
+                    return sol::make_object(m_lua, Binding::OfKey(e.Keyboard, e.Modifiers).ToString());
+                case InputEventType::MouseButtonPressed:
+                    return sol::make_object(m_lua, Binding::OfMouse(e.Button, e.Modifiers).ToString());
+                case InputEventType::MouseWheel:
+                    return sol::make_object(m_lua,
+                        (e.Wheel > 0.0f ? Binding::WheelUp() : Binding::WheelDown()).ToString());
+                case InputEventType::GamepadButtonPressed:
+                    return sol::make_object(m_lua,
+                        Binding::OfPadButton(e.PadButton, (int8_t)e.Gamepad).ToString());
+                default: break;
+            }
+        }
+        return sol::nil;
+    });
+
+    // Кто уже занял этот источник — экран настроек обязан спросить ДО
+    // назначения: молча отобрать клавишу у другого действия значит сломать его
+    // управление, не сказав об этом.
+    Bind("input", "FindConflict", nullptr, [this](const std::string& source) -> sol::object {
+        if (!m_input) throw std::runtime_error("FindConflict: ввод не привязан (BindInput не вызван)");
+        auto b = sage::input::Binding::Parse(source);
+        if (!b) return sol::nil;
+        sage::input::Action* a = m_input->FindByBinding(*b);
+        return a ? sol::make_object(m_lua, a->Name()) : sol::nil;
+    });
+    // Добавить привязку, НЕ снимая прежние — в отличие от Rebind (полная
+    // замена). «Прыжок» на пробеле и вдобавок на кнопке A геймпада — это
+    // AddBinding, а не Rebind, который стёр бы пробел.
+    Bind("input", "AddBinding", nullptr, [this](const std::string& action, const std::string& source) -> bool {
+        if (!m_input) throw std::runtime_error("AddBinding: ввод не привязан (BindInput не вызван)");
+        return m_input->AddBinding(action, source);
+    });
+
+    // Имена всех заведённых контекстов — экрану настроек, который перечисляет
+    // «Игра/Инвентарь/Диалог», а не только тот, с которым сейчас работают.
+    Bind("input", "ContextNames", nullptr, [this]() -> sol::table {
+        sol::table out = m_lua.create_table();
+        if (!m_input) return out;
+        int i = 1;
+        for (const std::string& name : m_input->ContextNames()) out[i++] = name;
+        return out;
+    });
+
+    // Отпустить весь ввод немедленно — как при потере фокуса окна. Открыли
+    // меню паузы с зажатым «вперёд» — без этого игрок вернётся в игру, которая
+    // всё это время шла вперёд сама (см. InputSystem::ReleaseAll).
+    Bind("input", "ReleaseAll", nullptr, [this]() {
+        if (m_input) m_input->ReleaseAll();
+    });
+
+    // Набранный за кадр ТЕКСТ — готовые символы Unicode (раскладка, Shift,
+    // мёртвые клавиши и композиция уже учтены системой), а не коды клавиш.
+    // Нужен полю ввода, написанному на Lua поверх своего интерфейса: имя
+    // игрока, чат, консоль команд — без этого текст с кириллицей или составных
+    // символов на Lua не набрать вовсе (SourceDown/AnyPressedSource дают только
+    // физическую клавишу, не итоговый символ раскладки).
+    Bind("input", "TypedText", nullptr, [this]() -> std::string {
+        if (!m_input) throw std::runtime_error("TypedText: ввод не привязан (BindInput не вызван)");
+        std::string out;
+        for (unsigned int cp : m_input->TypedText()) sage::ui::AppendUtf8(out, cp);
+        return out;
+    });
+
+    // Геймпад: подключён ли (без индекса — «хоть один», ровно то поведение,
+    // которое хочет одиночная игра), и его имя — для подсказки «нажмите A» на
+    // экране, где показывать её стоит, только если джойстик и правда воткнут.
+    Bind("input", "GamepadConnected", nullptr, [this](sol::optional<int> index) -> bool {
+        if (!m_input) return false;
+        const int idx = index.value_or(-1);
+        if (idx < 0) return m_input->State().AnyGamepadConnected();
+        return m_input->State().Pad(idx).Connected();
+    });
+    Bind("input", "GamepadName", nullptr, [this](sol::optional<int> index) -> std::string {
+        if (!m_input) return std::string();
+        const int idx = index.value_or(m_input->State().FirstConnected());
+        if (idx < 0) return std::string();
+        return m_input->State().Pad(idx).Name();
+    });
+
+    // Тонкая настройка действия — то же самое, что уже умеет ActionSettings в
+    // C++ (мёртвая зона, сглаживание, чувствительность, нормировка диагонали,
+    // точные модификаторы, тайминги удержания/короткого нажатия), одной
+    // таблицей: поля, которых нет в таблице, остаются как были. Экран
+    // «Чувствительность стика», «Мёртвая зона» без неё писался бы только
+    // правкой движка.
+    Bind("input", "Configure", nullptr, [this](const std::string& action, sol::table settings) -> bool {
+        if (!m_input) throw std::runtime_error("Configure: ввод не привязан (BindInput не вызван)");
+        sage::input::Action* a = m_input->Find(action);
+        if (!a) return false;
+        sage::input::ActionSettings& s = a->Settings();
+        if (sol::optional<float> v = settings["deadZone"]) s.DeadZone = *v;
+        if (sol::optional<std::string> v = settings["deadZoneMode"])
+            s.Zone = (*v == "axial") ? sage::input::DeadZoneMode::Axial : sage::input::DeadZoneMode::Radial;
+        if (sol::optional<float> v = settings["smoothing"]) s.Smoothing = *v;
+        if (sol::optional<float> v = settings["sensitivity"]) s.Sensitivity = *v;
+        if (sol::optional<bool> v = settings["normalize"]) s.Normalize = *v;
+        if (sol::optional<bool> v = settings["exactModifiers"]) s.ExactModifiers = *v;
+        if (sol::optional<float> v = settings["holdTime"]) s.HoldTime = *v;
+        if (sol::optional<float> v = settings["tapTime"]) s.TapTime = *v;
+        if (sol::optional<float> v = settings["pressThreshold"]) s.PressThreshold = *v;
+        return true;
     });
 }
 
