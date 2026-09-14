@@ -45,6 +45,7 @@ public:
     LogCapture() {
         Log::SetSink([this](LogLevel level, const std::string&, const std::string& message) {
             if (level == LogLevel::Error) m_errors.push_back(message);
+            if (level == LogLevel::Warn) m_warnings.push_back(message);
             m_all.push_back(message);
         });
     }
@@ -58,16 +59,24 @@ public:
         }
         return n;
     }
+    int WarningsContaining(const std::string& needle) const {
+        int n = 0;
+        for (const std::string& w : m_warnings) {
+            if (w.find(needle) != std::string::npos) ++n;
+        }
+        return n;
+    }
     bool AnyContains(const std::string& needle) const {
         for (const std::string& e : m_all) {
             if (e.find(needle) != std::string::npos) return true;
         }
         return false;
     }
-    void Clear() { m_errors.clear(); m_all.clear(); }
+    void Clear() { m_errors.clear(); m_warnings.clear(); m_all.clear(); }
 
 private:
     std::vector<std::string> m_errors;
+    std::vector<std::string> m_warnings;
     std::vector<std::string> m_all;
 };
 
@@ -666,6 +675,55 @@ TEST(ScriptLife_api_without_its_binding_errors_cleanly) {
     auto input = se.Lua().safe_script("return IsActionDown('Jump')", sol::script_pass_on_error);
     CHECK_TRUE(input.valid());
     CHECK_FALSE(input.get<bool>());
+}
+
+// --- log()/logWarn()/logError()/print() — уровни и вывод, доступные БЕЗ
+// какой-либо привязки (BindScene и т.п. не нужны: это чистый инструмент
+// отладки, работающий даже до того, как сцена вообще есть) --------------------
+//
+// logError() — НЕ то же самое, что встроенный Lua error(): тот прерывает
+// выполнение исключением, а logError() лишь красит строку по-другому и
+// позволяет скрипту продолжить. Спутать одно с другим значит либо потерять
+// сообщение об ошибке (ждут исключение — получают тихую запись в лог), либо
+// неожиданно оборвать скрипт там, где ожидали просто отметку в консоли.
+
+TEST(ScriptLife_log_levels_reach_the_right_severity) {
+    ScriptEngine se; // ничего не привязано — log/logWarn/logError не требуют привязок
+    LogCapture cap;
+
+    se.Lua().script("log('обычное сообщение')");
+    se.Lua().script("logWarn('осторожно')");
+    se.Lua().script("logError('что-то сломалось')");
+
+    CHECK_TRUE(cap.AnyContains("обычное сообщение"));
+    CHECK_EQ(cap.WarningsContaining("осторожно"), 1);
+    CHECK_EQ(cap.ErrorsContaining("что-то сломалось"), 1);
+    // Предупреждение не должно засчитаться ошибкой, и наоборот.
+    CHECK_EQ(cap.ErrorsContaining("осторожно"), 0);
+    CHECK_EQ(cap.WarningsContaining("что-то сломалось"), 0);
+}
+
+TEST(ScriptLife_log_error_does_not_stop_the_script) {
+    ScriptEngine se;
+    LogCapture cap;
+    sol::table probe = MakeProbe(se);
+
+    // logError() пишет и ПРОДОЛЖАЕТ — в отличие от встроенного error().
+    auto r = se.Lua().safe_script(
+        "logError('первая половина')\nprobe.reached = true", sol::script_pass_on_error);
+    CHECK_TRUE(r.valid());
+    CHECK_TRUE(probe["reached"].get<bool>());
+    CHECK_EQ(cap.ErrorsContaining("первая половина"), 1);
+}
+
+TEST(ScriptLife_print_accepts_multiple_arguments_like_real_lua_print) {
+    ScriptEngine se;
+    LogCapture cap;
+
+    // Несколько аргументов через таб, tostring на каждый — как в обычной Lua,
+    // а не как у log() (один-единственный строковый аргумент).
+    se.Lua().script("print('a', 1, true)");
+    CHECK_TRUE(cap.AnyContains("a\t1\ttrue"));
 }
 
 // --- Обращение к УНИЧТОЖЕННОЙ сущности из скрипта ----------------------------
