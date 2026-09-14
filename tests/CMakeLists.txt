@@ -52,7 +52,9 @@ add_executable(sage_tests
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json)
+# tinygltf — ради проверки разреженных аксессоров: она сверяет то, что отдаёт
+# общий читатель (assets/import/GltfAccessor.h), а он работает с tinygltf::Model.
+target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json tinygltf)
 
 add_test(NAME sage_tests COMMAND sage_tests)
 

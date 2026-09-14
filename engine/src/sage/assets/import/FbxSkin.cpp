@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -352,13 +353,137 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
                   joint.Scale);
     }
 
-    // --- Геометрия со скином -------------------------------------------------
+    // --- Материалы -----------------------------------------------------------
+    //
+    // Этого блока здесь НЕ БЫЛО ВОВСЕ: скелетная модель из FBX приезжала без
+    // единого материала — белой. Причём цвета в файле есть всегда: экспортёр
+    // пишет их в Properties70 материала (DiffuseColor и остальное), и
+    // статический путь (FbxImporter.cpp) их читал. Расхождение и давало
+    // «модель грузится без текстур»: одна и та же модель была цветной в панели
+    // ассетов и белой в сцене.
+    //
+    // Картинки, если они в файле названы, ищутся ФАЙЛАМИ РЯДОМ С МОДЕЛЬЮ: пути
+    // в FBX почти всегда чужие и windows-овые («C:\\Users\\…\\suit.png»), и
+    // единственное, на что можно опереться, — имя файла.
+    const fs::path modelDir = fs::path(path).parent_path();
+    std::unordered_map<std::string, int> imageSlots;   // имя файла -> индекс в out.Images
+    auto takeImageFile = [&](const std::string& raw) -> int {
+        if (raw.empty()) return -1;
+        std::string slashed = raw;
+        for (char& c : slashed) if (c == '\\') c = '/';
+        const std::string name = fs::path(slashed).filename().string();
+        if (name.empty()) return -1;
+        auto known = imageSlots.find(name);
+        if (known != imageSlots.end()) return known->second;
+
+        std::error_code ec;
+        fs::path file = modelDir / name;
+        if (!fs::exists(file, ec)) {
+            file = modelDir / "textures" / name;
+            if (!fs::exists(file, ec)) { imageSlots[name] = -1; return -1; }
+        }
+        // Переворот выключаем ЯВНО и ПОТОЧНО — по той же причине, что и у glTF
+        // (см. GltfSkinImageLoader): фоновый загрузчик текстур ставит себе
+        // true, и с глобальным флагом модель получала бы текстуру вверх ногами
+        // через раз.
+        stbi_set_flip_vertically_on_load_thread(false);
+        int w = 0, h = 0, comp = 0;
+        unsigned char* pixels = stbi_load(file.string().c_str(), &w, &h, &comp, 4);
+        if (!pixels) { imageSlots[name] = -1; return -1; }
+        sage::render::ModelImage image;
+        image.Width = w;
+        image.Height = h;
+        image.Pixels.assign(pixels, pixels + (size_t)w * h * 4);
+        stbi_image_free(pixels);
+        out.Images.push_back(std::move(image));
+        const int slot = (int)out.Images.size() - 1;
+        imageSlots[name] = slot;
+        return slot;
+    };
+
+    // Texture --OP("DiffuseColor")--> Material: имя свойства говорит, какая это
+    // карта. Без него нормаль неотличима от альбедо.
+    std::unordered_map<int64_t, std::string> textureFile;
+    for (const Node& n : objects->Children) {
+        if (n.Name != "Texture" || n.Props.empty()) continue;
+        std::string file = Text(n.Find("RelativeFilename"));
+        if (file.empty()) file = Text(n.Find("FileName"));
+        if (!file.empty()) textureFile[Uid(n)] = file;
+    }
+    std::unordered_map<int64_t, std::unordered_map<std::string, int64_t>> materialSlots;
+    for (const auto& [texture, link] : conns.PropertyOf) {
+        if (textureFile.count(texture)) materialSlots[link.Parent][link.Property] = texture;
+    }
+
+    std::unordered_map<int64_t, sage::render::ModelSubMeshMaterial> materialOf;
+    for (const Node& n : objects->Children) {
+        if (n.Name != "Material" || n.Props.empty()) continue;
+        sage::render::ModelSubMeshMaterial m;
+        m.Name = ObjectName(n);
+        m.Tint = Property70Vec(&n, "DiffuseColor", glm::vec3(1.0f));
+        m.Emissive = Property70Vec(&n, "EmissiveColor", glm::vec3(0.0f)) *
+                     (float)Property70(&n, "EmissiveFactor", 1.0);
+        m.Opacity = (float)Property70(&n, "Opacity", 1.0);
+        // Блеск Phong -> шероховатость PBR. Точного перевода нет ни у кого;
+        // важно лишь, чтобы полированное не приезжало матовым (та же формула,
+        // что на статическом пути).
+        const float shininess = (float)Property70(&n, "Shininess", -1.0);
+        if (shininess > 0.0f)
+            m.Roughness = std::clamp(1.0f - std::sqrt(shininess / 100.0f), 0.04f, 1.0f);
+
+        const auto slots = materialSlots.find(Uid(n));
+        auto slotImage = [&](std::initializer_list<const char*> names) -> int {
+            if (slots == materialSlots.end()) return -1;
+            for (const char* wanted : names) {
+                auto it = slots->second.find(wanted);
+                if (it == slots->second.end()) continue;
+                auto file = textureFile.find(it->second);
+                if (file == textureFile.end()) continue;
+                const int slot = takeImageFile(file->second);
+                if (slot >= 0) return slot;
+            }
+            return -1;
+        };
+        m.Albedo = slotImage({"DiffuseColor", "Maya|baseColor", "BaseColor"});
+        m.Normal = slotImage({"NormalMap", "Bump", "Maya|normalCamera"});
+        m.MetallicMap = slotImage({"Maya|metalness", "MetalnessMap", "ReflectionFactor"});
+        m.RoughnessMap = slotImage({"Maya|specularRoughness", "ShininessExponent"});
+        m.AOMap = slotImage({"AmbientColor", "Maya|ambientOcclusion"});
+        m.EmissiveMap = slotImage({"EmissiveColor"});
+        materialOf[Uid(n)] = std::move(m);
+    }
+
+    // Материал геометрии — через её Model: Material --OO--> Model --OO--> …
+    auto materialOfGeometry = [&](int64_t geometry) {
+        sage::render::ModelSubMeshMaterial m;
+        const int64_t model = parentOfKind(geometry, "Model");
+        if (model == 0) return m;
+        auto range = conns.ChildrenOf.equal_range(model);
+        for (auto it = range.first; it != range.second; ++it) {
+            auto known = materialOf.find(it->second);
+            if (known != materialOf.end()) return known->second;
+        }
+        return m;
+    };
+
+    // --- Геометрия -----------------------------------------------------------
+    //
+    // ВСЯ, а не только со скином. Раньше здесь стоял отбор «нет скина —
+    // пропускаем», и это выбрасывало почти всю модель: жёсткие детали
+    // (панели эндоскелета, зубы, глазницы, пряжки, инструмент) риггят НЕ
+    // весами, а привязкой узла к кости — это дешевле и точнее. У проверочной
+    // модели (Spring Bonnie из Blender) со скином 6 геометрий из 98: в сцену
+    // попадали шесть кусков, остальные девяносто два не рисовались вовсе.
+    // Выглядело это как «модель загрузилась развалинами».
+    //
+    // Жёсткая деталь — это тот же скиннинг, просто вырожденный: одна кость с
+    // весом 1. Дальше по конвейеру разницы нет вообще.
     std::vector<std::string> warnings;
-    int submeshes = 0;
+    int submeshes = 0, rigidParts = 0;
     for (const Node& n : objects->Children) {
         if (n.Name != "Geometry") continue;
         auto skin = skinOfGeometry.find(Uid(n));
-        if (skin == skinOfGeometry.end()) continue;   // меш без скина — не наш случай
+        if (skin == skinOfGeometry.end()) continue;   // жёсткие детали — вторым проходом
 
         // Трансформ узла, которому принадлежит геометрия: вершины хранятся уже
         // в мировом пространстве файла (так же, как у статического пути).
@@ -441,6 +566,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             sub.Indices.push_back((unsigned int)sub.Vertices.size());
             sub.Vertices.push_back(v);
         }
+        sub.Material = materialOfGeometry(Uid(n));
         out.SubMeshes.push_back(std::move(sub));
         ++submeshes;
         (void)modelUid;
@@ -450,6 +576,94 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         err = "в файле FBX есть скин, но нет геометрии с весами";
         return false;
     }
+
+    // --- Матрица кости В ПОЗЕ ПРИВЯЗКИ ---------------------------------------
+    //
+    // Ровно то, что окажется в палитре, пока клип не двигает кости (см.
+    // Animator: цепочка * InverseBind). Считается ЗДЕСЬ, а не раньше, потому
+    // что InverseBind заполняют кластеры скина — то есть проход выше.
+    //
+    // К этой матрице приводятся жёсткие детали: чтобы деталь встала на своё
+    // место, её вершины надо задать так, чтобы палитра вернула их обратно.
+    // Считать это «по формуле» нельзя — экспортёры расходятся в том,
+    // относительно чего заданы обратные матрицы привязки. Поэтому не гадаем, а
+    // берём то, что реально получится в кадре.
+    std::vector<glm::mat4> bindBone(out.Skeleton.Joints.size(), glm::mat4(1.0f));
+    for (size_t i = 0; i < out.Skeleton.Joints.size(); ++i) {
+        glm::mat4 g = out.Skeleton.Joints[i].LocalMatrix();
+        for (int p = out.Skeleton.Joints[i].Parent; p >= 0;
+             p = out.Skeleton.Joints[(size_t)p].Parent)
+            g = out.Skeleton.Joints[(size_t)p].LocalMatrix() * g;
+        bindBone[i] = g * out.Skeleton.Joints[i].InverseBind;
+    }
+
+    // --- Жёсткие детали ------------------------------------------------------
+    //
+    // Второй проход — по геометрии БЕЗ скина. Раньше её просто не было в
+    // результате, и это выбрасывало почти всю модель: панели эндоскелета, зубы,
+    // глазницы, пряжки, инструмент риггят НЕ весами, а привязкой узла к кости
+    // (дешевле и точнее). У проверочной модели (Spring Bonnie из Blender) со
+    // скином 6 геометрий из 98 — в сцену попадали шесть кусков, остальные
+    // девяносто два не рисовались вовсе. Выглядит это как «модель загрузилась
+    // развалинами», и на движок это списывают заслуженно.
+    for (const Node& n : objects->Children) {
+        if (n.Name != "Geometry" || skinOfGeometry.count(Uid(n))) continue;
+
+        const int64_t modelUid = parentOfKind(Uid(n), "Model");
+        glm::mat4 nodeWorld(1.0f);
+        for (int64_t cur = modelUid, guard = 0; cur != 0 && guard < 64; ++guard) {
+            auto obj = byUid.find(cur);
+            if (obj == byUid.end() || obj->second->Name != "Model") break;
+            nodeWorld = ReadTransform(*obj->second).Matrix() * nodeWorld;
+            cur = parentOfKind(cur, "Model");
+        }
+
+        // Кость детали — БЛИЖАЙШАЯ ВВЕРХ по цепочке моделей. Она и станет
+        // единственной костью этой детали с весом 1: тот же скиннинг, просто
+        // вырожденный, и дальше по конвейеру разницы нет.
+        int rigidJoint = -1;
+        for (int64_t cur = modelUid, guard = 0; cur != 0 && guard < 128; ++guard) {
+            auto known = jointOf.find(cur);
+            if (known != jointOf.end()) { rigidJoint = known->second; break; }
+            cur = parentOfKind(cur, "Model");
+        }
+        // Кость за палитрой шейдера (uBones[kMaxBones]) — это чтение чужой
+        // памяти на видеокарте. Деталь лучше оставить на месте, чем отправить
+        // в палитру наугад.
+        if (rigidJoint >= sage::anim::kMaxBones) rigidJoint = -1;
+
+        const std::vector<fbx::MeshCorner> corners =
+            fbx::BuildCorners(n, units, nodeWorld, warnings);
+        if (corners.empty()) continue;
+
+        // Вершины уже в пространстве движка; переводим их так, чтобы палитра
+        // кости вернула их ровно туда, где деталь стоит в файле.
+        const glm::mat4 toBone =
+            rigidJoint >= 0 ? glm::inverse(bindBone[(size_t)rigidJoint]) : glm::mat4(1.0f);
+        const glm::mat3 toBoneNrm = glm::mat3(glm::transpose(glm::inverse(toBone)));
+
+        sage::render::ModelSubMeshData sub;
+        sub.Vertices.reserve(corners.size());
+        sub.Indices.reserve(corners.size());
+        for (const fbx::MeshCorner& corner : corners) {
+            sage::render::SkinnedVertex v;
+            v.Position = glm::vec3(toBone * glm::vec4(corner.Position, 1.0f));
+            v.Normal = glm::normalize(toBoneNrm * corner.Normal);
+            v.TexCoords = corner.TexCoords;
+            v.Joints = glm::vec4((float)std::max(rigidJoint, 0), 0.0f, 0.0f, 0.0f);
+            // Кости не нашлось (деталь вне скелета) — вес 0: шейдер возьмёт
+            // единичную матрицу, и деталь останется там, где стоит в файле.
+            v.Weights = rigidJoint >= 0 ? glm::vec4(1.0f, 0.0f, 0.0f, 0.0f) : glm::vec4(0.0f);
+            sub.Indices.push_back((unsigned int)sub.Vertices.size());
+            sub.Vertices.push_back(v);
+        }
+        sub.Material = materialOfGeometry(Uid(n));
+        out.SubMeshes.push_back(std::move(sub));
+        ++rigidParts;
+    }
+
+    LOG_INFO("Anim") << "FBX: частей со скином " << submeshes << ", жёстких " << rigidParts
+                     << ", материалов " << materialOf.size() << ", картинок " << out.Images.size();
 
     // --- Клипы ---------------------------------------------------------------
     //
@@ -594,7 +808,8 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
 
     for (const std::string& w : warnings) LOG_WARN("Anim") << "FBX: " << w;
     LOG_INFO("Anim") << "FBX со скином разобран: " << path << " (костей "
-                     << out.Skeleton.Count() << ", submesh " << submeshes << ", клипов "
+                     << out.Skeleton.Count() << ", submesh " << out.SubMeshes.size()
+                     << ", клипов "
                      << out.Clips.size() << ")";
     return true;
 }

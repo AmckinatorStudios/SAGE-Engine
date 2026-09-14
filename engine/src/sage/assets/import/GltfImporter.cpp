@@ -4,6 +4,7 @@
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
+#include "sage/assets/import/GltfAccessor.h"
 #include "sage/assets/import/Importer.h"
 
 #include <cstdint>
@@ -95,88 +96,23 @@ glm::mat4 NodeLocalMatrix(const tinygltf::Node& node) {
     return t * r * s;
 }
 
-// --- Чтение аксессоров С ПРОВЕРКОЙ ГРАНИЦ -----------------------------------
+// --- Чтение аксессоров -------------------------------------------------------
 //
-// Проверки здесь не перестраховка. Индексы аксессоров, смещения и шаги в glTF —
-// это числа из файла, и файл может быть битым или собранным нарочно. Чтение по
-// ним без проверки — это чтение за границей буфера в процессе редактора,
-// который люди запускают на моделях, скачанных из интернета.
-struct AccessorView {
-    const unsigned char* Base = nullptr;
-    size_t Count = 0;
-    size_t Stride = 0;
-    int ComponentType = 0;
-    bool Valid = false;
-};
-
-AccessorView OpenAccessor(const tinygltf::Model& gltf, int accessorIndex, size_t elementBytes) {
-    AccessorView v;
-    if (accessorIndex < 0 || accessorIndex >= (int)gltf.accessors.size()) return v;
-    const tinygltf::Accessor& acc = gltf.accessors[(size_t)accessorIndex];
-    if (acc.bufferView < 0 || acc.bufferView >= (int)gltf.bufferViews.size()) return v;
-    const tinygltf::BufferView& view = gltf.bufferViews[(size_t)acc.bufferView];
-    if (view.buffer < 0 || view.buffer >= (int)gltf.buffers.size()) return v;
-    const std::vector<unsigned char>& data = gltf.buffers[(size_t)view.buffer].data;
-
-    const size_t stride = acc.ByteStride(view) > 0 ? (size_t)acc.ByteStride(view) : elementBytes;
-    const size_t offset = view.byteOffset + acc.byteOffset;
-    if (offset > data.size() || acc.count == 0) return v;
-    // Последний элемент обязан целиком помещаться в буфер.
-    const size_t span = stride * (acc.count - 1) + elementBytes;
-    if (span > data.size() - offset) return v;
-
-    v.Base = data.data() + offset;
-    v.Count = acc.count;
-    v.Stride = stride;
-    v.ComponentType = acc.componentType;
-    v.Valid = true;
-    return v;
-}
-
-// FLOAT-аксессор (позиции, нормали, UV, касательные) в плоский массив.
-bool ReadFloats(const tinygltf::Model& gltf, int accessorIndex, int components,
-                std::vector<float>& out) {
-    const AccessorView v = OpenAccessor(gltf, accessorIndex, sizeof(float) * (size_t)components);
-    if (!v.Valid || v.ComponentType != TINYGLTF_COMPONENT_TYPE_FLOAT) return false;
-    out.resize(v.Count * (size_t)components);
-    for (size_t i = 0; i < v.Count; ++i) {
-        float tmp[4];
-        std::memcpy(tmp, v.Base + i * v.Stride, sizeof(float) * (size_t)components);
-        for (int c = 0; c < components; ++c) out[i * (size_t)components + (size_t)c] = tmp[c];
-    }
-    return true;
-}
+// Общий читатель (assets/import/GltfAccessor.h): проверки границ, разреженные
+// аксессоры и нормализованные целые — одни и те же здесь и у скелетного разбора
+// (render/SkinnedModel.cpp). Раньше проверки были только тут, и одна и та же
+// модель открывалась в панели ассетов, но роняла редактор, когда её клали в
+// сцену.
+using sage::assets::gltf::ReadFloats;
 
 bool ReadIndices(const tinygltf::Model& gltf, int accessorIndex, size_t vertexCount,
                  std::vector<unsigned int>& out) {
-    size_t elem = 0;
-    if (accessorIndex >= 0 && accessorIndex < (int)gltf.accessors.size()) {
-        switch (gltf.accessors[(size_t)accessorIndex].componentType) {
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  elem = 1; break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: elem = 2; break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:   elem = 4; break;
-            default: return false;
-        }
-    }
-    const AccessorView v = OpenAccessor(gltf, accessorIndex, elem);
-    if (!v.Valid) return false;
-    out.resize(v.Count);
-    for (size_t i = 0; i < v.Count; ++i) {
-        const unsigned char* p = v.Base + i * v.Stride;
-        unsigned int idx = 0;
-        switch (v.ComponentType) {
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: idx = *p; break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-                uint16_t s = 0; std::memcpy(&s, p, sizeof(s)); idx = s; break;
-            }
-            default: {
-                uint32_t s = 0; std::memcpy(&s, p, sizeof(s)); idx = s; break;
-            }
-        }
-        // Индекс за пределами вершин примитива — битый файл. Схлопываем в 0:
-        // треугольник выродится, но чтения за границей не будет.
-        out[i] = idx < vertexCount ? idx : 0u;
-    }
+    out = sage::assets::gltf::ReadUInts(gltf, accessorIndex, 1);
+    if (out.empty()) return false;
+    // Индекс за пределами вершин примитива — битый файл. Схлопываем в 0:
+    // треугольник выродится, но чтения за границей не будет.
+    for (unsigned int& idx : out)
+        if (idx >= (unsigned)vertexCount) idx = 0u;
     return true;
 }
 
@@ -249,21 +185,21 @@ void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& pr
     auto posIt = prim.attributes.find("POSITION");
     if (posIt == prim.attributes.end()) return;
 
-    std::vector<float> positions;
-    if (!ReadFloats(gltf, posIt->second, 3, positions) || positions.empty()) {
+    std::vector<float> positions = ReadFloats(gltf, posIt->second, 3);
+    if (positions.size() < 3) {
         out.Warnings.push_back("часть «" + name + "» пропущена: позиции вершин не читаются");
         return;
     }
     const size_t count = positions.size() / 3;
 
-    std::vector<float> normals, uvs;
     auto normIt = prim.attributes.find("NORMAL");
-    const bool hasNormals =
-        normIt != prim.attributes.end() && ReadFloats(gltf, normIt->second, 3, normals) &&
-        normals.size() >= count * 3;
+    const std::vector<float> normals =
+        normIt != prim.attributes.end() ? ReadFloats(gltf, normIt->second, 3) : std::vector<float>();
+    const bool hasNormals = normals.size() >= count * 3;
     auto uvIt = prim.attributes.find("TEXCOORD_0");
-    const bool hasUV = uvIt != prim.attributes.end() && ReadFloats(gltf, uvIt->second, 2, uvs) &&
-                       uvs.size() >= count * 2;
+    const std::vector<float> uvs =
+        uvIt != prim.attributes.end() ? ReadFloats(gltf, uvIt->second, 2) : std::vector<float>();
+    const bool hasUV = uvs.size() >= count * 2;
 
     ImportedNode node;
     node.Name = std::move(name);

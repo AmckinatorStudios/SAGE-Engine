@@ -225,7 +225,7 @@ def p70_vec(name, kind, values):
 KTIME = 46186158000
 
 
-def build_skinned(path, unit=100.0):
+def build_skinned(path, unit=100.0, rigid=False):
     """Модель СО СКИНОМ: полоса из четырёх вершин на двух костях + клип.
 
     Геометрия нарочно простейшая, а веса — заведомо разные: нижние вершины
@@ -315,9 +315,60 @@ def build_skinned(path, unit=100.0):
         ]),
     ])
 
+    # --- Жёсткая деталь на кости (--rigid) --------------------------------
+    #
+    # Деталь БЕЗ весов, подвешенная узлом к кости Upper, плюс материал с
+    # цветом. Так риггят всё, что не гнётся: панели, зубы, глазницы, пряжки,
+    # инструмент. Импортёр скина такие детали ВЫБРАСЫВАЛ, а материалы не читал
+    # вовсе — и настоящая модель приезжала кучей белых обломков.
+    extra_objects = []
+    extra_connections = []
+    if rigid:
+        panel_verts = [
+            2.0, 0.0, 0.0,
+            3.0, 0.0, 0.0,
+            3.0, 1.0, 0.0,
+            2.0, 1.0, 0.0,
+        ]
+        panel_geometry = node(
+            'Geometry',
+            prop_long(110) + prop_string('Panel\x00\x01Geometry') + prop_string('Mesh'),
+            [
+                node('Vertices', prop_double_array(panel_verts)),
+                node('PolygonVertexIndex', prop_int_array([0, 1, 2, ~3])),
+                node('LayerElementNormal', prop_int(0), [
+                    node('MappingInformationType', prop_string('ByPolygonVertex')),
+                    node('ReferenceInformationType', prop_string('Direct')),
+                    node('Normals', prop_double_array([0.0, 0.0, 1.0] * 4)),
+                ]),
+                node('LayerElementUV', prop_int(0), [
+                    node('MappingInformationType', prop_string('ByPolygonVertex')),
+                    node('ReferenceInformationType', prop_string('Direct')),
+                    node('UV', prop_double_array([0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0])),
+                ]),
+            ])
+        panel_model = node(
+            'Model', prop_long(210) + prop_string('Panel\x00\x01Model') + prop_string('Mesh'),
+            [node('Properties70', b'', [p70v('Lcl Translation', (0.0, 0.0, 0.0))])])
+        # Цвет материала — тот же приём, что у настоящих экспортёров: узловой
+        # материал Blender в FBX доезжает хотя бы DiffuseColor.
+        material = node(
+            'Material', prop_long(600) + prop_string('Suit\x00\x01Material') + prop_string(''),
+            [node('Properties70', b'', [
+                p70v('DiffuseColor', (0.36, 0.21, 0.03)),
+                p70('Shininess', 'Number', 25.0),
+            ])])
+        extra_objects = [panel_geometry, panel_model, material]
+        extra_connections = [
+            node('C', prop_string('OO') + prop_long(110) + prop_long(210)),  # Geometry -> Model
+            node('C', prop_string('OO') + prop_long(210) + prop_long(301)),  # Panel -> кость Upper
+            node('C', prop_string('OO') + prop_long(600) + prop_long(210)),  # Material -> Panel
+            node('C', prop_string('OO') + prop_long(600) + prop_long(200)),  # Material -> SkinMesh
+        ]
+
     objects = node('Objects', b'', [geometry, mesh_model, root_bone, child_bone,
                                     skin, cluster_root, cluster_child,
-                                    stack, layer, curve_node, curve_z])
+                                    stack, layer, curve_node, curve_z] + extra_objects)
 
     connections = node('Connections', b'', [
         node('C', prop_string('OO') + prop_long(100) + prop_long(200)),   # Geometry -> Model
@@ -331,7 +382,7 @@ def build_skinned(path, unit=100.0):
         node('C', prop_string('OO') + prop_long(502) + prop_long(501)),   # CurveNode -> Layer
         node('C', prop_string('OP') + prop_long(502) + prop_long(301) + prop_string('Lcl Rotation')),
         node('C', prop_string('OP') + prop_long(503) + prop_long(502) + prop_string('d|Z')),
-    ])
+    ] + extra_connections)
 
     header = b'Kaydara FBX Binary  \x00\x1a\x00' + struct.pack('<I', VERSION)
     body = b''
@@ -356,9 +407,11 @@ if __name__ == '__main__':
                     help='Lcl Translation узла Model')
     ap.add_argument('--node-scale', type=float, default=1.0, help='Lcl Scaling узла Model')
     ap.add_argument('--skin', action='store_true', help='модель со скином, костями и клипом')
+    ap.add_argument('--rigid', action='store_true',
+                    help='вместе с --skin: добавить жёсткую деталь на кости и материал с цветом')
     args = ap.parse_args()
     if args.skin:
-        build_skinned(args.out, args.unit)
+        build_skinned(args.out, args.unit, args.rigid)
     else:
         build(args.out, args.zup, args.unit, args.ascii, tuple(args.offset), args.node_scale)
     print('записан', args.out)

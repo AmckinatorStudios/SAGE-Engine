@@ -25,6 +25,7 @@ add_executable(sage_render_tests
 
 target_include_directories(sage_render_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..   # общая оснастка тестов (GltfSparseModel.h)
     ${SAGE_ENGINE_ROOT}/external/stb
 )
 target_link_libraries(sage_render_tests PRIVATE sage::engine glfw)
