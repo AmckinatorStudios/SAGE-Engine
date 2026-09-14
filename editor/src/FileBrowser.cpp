@@ -8,6 +8,7 @@
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
 #include "Thumbnails.h"
+#include "ui/UI.h"
 #include "sage/core/Paths.h"
 #include "imgui.h"
 #include "Localization.h"
@@ -587,7 +588,11 @@ bool FileBrowser::Draw() {
         ImGui::SetNextItemWidth(180);
         ImGui::InputTextWithHint("##search", T("Search..."), m_search, sizeof(m_search));
 
-        if (ImGui::BeginPopup("##newfolder")) {
+        // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+        // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
+        // держится в границах if — иначе деструктор снялся бы после
+        // EndChild() списка ниже, и ImGui решил бы, что стиль не сняли вовсе.
+        if (Sage::UI::MenuScope newFolderMenu; ImGui::BeginPopup("##newfolder")) {
             ImGui::InputText(T("Name"), m_newFolder, sizeof(m_newFolder));
             if (ImGui::Button(T("Create")) && m_newFolder[0]) {
                 std::error_code ec;

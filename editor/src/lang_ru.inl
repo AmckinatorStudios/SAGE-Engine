@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1556.
+// Язык: Русский. Строк: 1557.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1356,6 +1356,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Изменён"},
     {"Last modified: ",
      "Изменён: "},
+    {"Last session died on a file — it is quarantined: ",
+     "Прошлый запуск оборвался на файле — он в карантине: "},
     {"Launcher data",
      "Данные стартового окна"},
     {"Layer",

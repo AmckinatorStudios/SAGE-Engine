@@ -1025,6 +1025,75 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         }
     }
 
+    // --- СМЕНА ПРОЕКТА НЕ ОСТАВЛЯЕТ ПРИЗРАКОВ -----------------------------
+    //
+    // «Создал частицу в одном проекте, перешёл в другой — и на секунду видно те
+    // объекты и ту работу». Держалось прошлое в том, что смена проекта меняла
+    // ПУТЬ и не трогала ничего из загруженного: кэш ресурсов (ключ — ссылка
+    // проекта, а она в каждом проекте своя и ведёт к другому файлу), живые
+    // частицы, обложки и сама сцена.
+    //
+    // Проверяется СОСТОЯНИЕ ПОСЛЕ ПЕРЕХОДА, а не факт вызова очистки: частицы
+    // пускаются по-настоящему, модель по-настоящему кладётся в кэш, и после
+    // открытия другого проекта ни того, ни другого остаться не должно.
+    if (ok) {
+        ParticleSystem& particles = m_renderer.Particles();
+        ParticleEmitterConfig cfg;
+        cfg.LifetimeMin = 30.0f;      // заведомо переживёт переход
+        cfg.LifetimeMax = 30.0f;
+        particles.Burst(cfg, glm::vec3(0.0f), 64);
+        particles.CreateStream("selftest_ghost", cfg, glm::vec3(0.0f));
+        particles.SetStreamActive("selftest_ghost", true);
+        // Сцена с объектом: его тоже не должно остаться.
+        m_scene->CreateObject("ПризракПрошлогоПроекта");
+
+        const size_t aliveBefore = particles.AliveCount();
+        const size_t streamsBefore = particles.StreamCount();
+        if (aliveBefore == 0 || streamsBefore == 0) {
+            LOG_ERROR("Editor") << "SELFTEST: частицы для проверки призраков не завелись";
+            ok = false;
+        }
+
+        std::string ghostErr;
+        if (ok && !CreateProject(".", "selftest_ghost_project", "empty", ghostErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: не создать проект для проверки призраков: "
+                                << ghostErr;
+            ok = false;
+        }
+        if (ok) {
+            if (particles.AliveCount() != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: после смены проекта осталось живых частиц: "
+                                    << particles.AliveCount();
+                ok = false;
+            }
+            if (particles.StreamCount() != 0) {
+                LOG_ERROR("Editor") << "SELFTEST: после смены проекта остались эмиттеры: "
+                                    << particles.StreamCount();
+                ok = false;
+            }
+            // Объект прошлой сцены. Пустой шаблон не приносит своих, поэтому
+            // любой найденный здесь — чужой.
+            bool ghostObject = false;
+            m_scene->Registry().view<NameComponent>().each(
+                [&](auto, const NameComponent& n) {
+                    if (n.Name == "ПризракПрошлогоПроекта") ghostObject = true;
+                });
+            if (ghostObject) {
+                LOG_ERROR("Editor") << "SELFTEST: в новом проекте остался объект прошлой сцены";
+                ok = false;
+            }
+            if (SelectedId() != -1) {
+                LOG_ERROR("Editor") << "SELFTEST: после смены проекта осталось выделение";
+                ok = false;
+            }
+        }
+        fs::remove_all("selftest_ghost_project", ec);
+        if (ok && !OpenProject("selftest_project", err)) {
+            LOG_ERROR("Editor") << "SELFTEST: не вернуться в проект самопроверки: " << err;
+            ok = false;
+        }
+    }
+
     // --- База проектов стартового окна ------------------------------------
     //
     // Проверяется то, ради чего она и заведена: проект попадает в список сам,
@@ -1072,13 +1141,26 @@ bool EditorLayer::SelfTestProjectAndAssets() {
             } else {
                 db.Refresh(mine);
                 const ProjectEntry* e = db.Find(mine);
+                const int mineIdx = db.IndexOf(mine);
                 if (!e || e->Kind != ProjectKind::Scene || e->Description != "проверка") {
                     LOG_ERROR("Editor") << "SELFTEST: тип/описание проекта не перечитались";
                     ok = false;
-                } else if (!db.Query(ProjectFilter::Games, e->Name, ProjectSort::Name).empty() ||
-                           db.Query(ProjectFilter::Scenes, e->Name, ProjectSort::Name).empty()) {
-                    LOG_ERROR("Editor") << "SELFTEST: отбор по типу не увидел смену типа";
-                    ok = false;
+                } else {
+                    // Ищем ИМЕННО СВОЮ запись по индексу, а не по «пусто ли
+                    // вообще» — база стартового окна общая на машину, и в ней
+                    // могут лежать другие проекты с тем же именем (например,
+                    // от прошлых прогонов самопроверки из другой папки сборки).
+                    // Проверка по пустоте результата ловила ИХ тип, а не тип
+                    // своего проекта, и падала не из-за отбора, а из-за чужих
+                    // записей в общей базе.
+                    const std::vector<int> games = db.Query(ProjectFilter::Games, e->Name, ProjectSort::Name);
+                    const std::vector<int> scenes = db.Query(ProjectFilter::Scenes, e->Name, ProjectSort::Name);
+                    const bool inGames = std::find(games.begin(), games.end(), mineIdx) != games.end();
+                    const bool inScenes = std::find(scenes.begin(), scenes.end(), mineIdx) != scenes.end();
+                    if (inGames || !inScenes) {
+                        LOG_ERROR("Editor") << "SELFTEST: отбор по типу не увидел смену типа";
+                        ok = false;
+                    }
                 }
                 // Вернуть тип обратно: дальше этим проектом пользуются другие шаги.
                 ProjectDatabase::WriteMetadata(m_project.Dir(), ProjectKind::Game, "", metaErr);
@@ -3080,19 +3162,23 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: капсула не построилась";
             ok = false;
         }
-        // ГАБАРИТ: высота 1 (как у всех примитивов — «капсула ростом 1.8»
-        // получается масштабом 1.8), ширина 0.5 — то есть ВДВОЕ МЕНЬШЕ высоты.
+        // ГАБАРИТ СВЕРЯЕТСЯ С КОЛЛАЙДЕРОМ, А НЕ С ЧИСЛОМ В ЭТОМ ТЕСТЕ.
         //
-        // Проверка именно на это, а не «1 x 1»: при радиусе в половину высоты
-        // цилиндрической части не остаётся вовсе, и капсула вырождается в
-        // СФЕРУ — ровно так она и была построена, один в один с шаром. Форма,
-        // неотличимая от другой формы, не нужна ни в списке, ни в движке.
+        // Смысл капсулы ровно один: видимое тело обязано совпадать с тем, чем
+        // персонаж сталкивается. Поэтому проверка спрашивает не «0.5 x 1», а
+        // «то же, что у ColliderComponent по умолчанию»: разъехавшись, эти два
+        // размера снова заставят настраивать рост в двух местах на глаз — и
+        // именно так и было (меш 0.25 x 1 против коллайдера 0.5 x 2).
         if (ok) {
+            const ColliderComponent shape;   // значения по умолчанию: капсула
+            const float wantW = shape.Radius * 2.0f;
+            const float wantH = (shape.HalfHeight + shape.Radius) * 2.0f;
             const glm::vec3 lo = mr.MeshPtr->BoundsMin(), hi = mr.MeshPtr->BoundsMax();
             const float w = hi.x - lo.x, h = hi.y - lo.y;
-            if (std::abs(h - 1.0f) > 0.01f || std::abs(w - 0.5f) > 0.01f) {
+            if (std::abs(h - wantH) > 0.01f || std::abs(w - wantW) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: габарит капсулы " << w << " x " << h
-                                    << " вместо 0.5 x 1";
+                                    << " вместо " << wantW << " x " << wantH
+                                    << " (размер коллайдера по умолчанию)";
                 ok = false;
             }
             // И цилиндрическая часть ЕСТЬ: у сферы вершины лежат на одном
@@ -3126,12 +3212,28 @@ bool EditorLayer::SelfTestSelection() {
                 ok = false;
             }
         }
-        // И персонаж из каталога собирается ИМЕННО капсулой.
+        // И персонаж из каталога собирается ИМЕННО капсулой — ТОГО ЖЕ размера,
+        // что и его контроллер. Проверка на «это капсула» пропускала главное:
+        // персонаж рисовался вдвое тоньше своей физической капсулы, потому что
+        // масштаб считали от капсулы шириной 0.5, а контроллер — от 0.7.
         if (ok) {
             GameObject ch = m_scene->Get(CreateCatalogObject("physics.character"));
             if (!ch.Valid() || ch.Renderer().Ref.type != MeshRef::Type::Capsule) {
                 LOG_ERROR("Editor") << "SELFTEST: персонаж собран не капсулой";
                 ok = false;
+            } else if (const std::shared_ptr<Mesh>& m = ch.Renderer().MeshPtr; m) {
+                const CharacterControllerComponent want;
+                const glm::vec3 sc = ch.GetTransform().Scale;
+                const glm::vec3 lo = m->BoundsMin(), hi = m->BoundsMax();
+                const float drawnW = (hi.x - lo.x) * sc.x;
+                const float drawnH = (hi.y - lo.y) * sc.y;
+                if (std::abs(drawnW - want.Radius * 2.0f) > 0.01f ||
+                    std::abs(drawnH - want.Height) > 0.01f) {
+                    LOG_ERROR("Editor") << "SELFTEST: персонаж нарисован " << drawnW << " x "
+                                        << drawnH << ", а сталкивается " << want.Radius * 2.0f
+                                        << " x " << want.Height;
+                    ok = false;
+                }
             }
         }
     }

@@ -43,6 +43,27 @@ jobs:
       - name: Asset slot check (no asset path typed into a text field)
         run: python3 scripts/check_asset_slots.py
 
+      # Имена всплывающих окон ImGui: OpenPopup и BeginPopup* обязаны совпадать.
+      # Разойдутся — окно открыто, но его никто не рисует, а тот, кто его
+      # открыл, просит каждый кадр и этим закрывает всё, что открыл человек:
+      # ни одно меню и ни один диалог больше не открываются. Снаружи — «редактор
+      # завис, кнопки не нажимаются» при живой картинке и пустом логе.
+      - name: Popup id check (OpenPopup and BeginPopup* agree on the name)
+        run: python3 scripts/check_popup_ids.py
+
+      # Меню объявляют свои отступы: ImGui берёт их в момент BeginPopup, то есть
+      # те, что протолкнуты вокруг. Панель с обнулённым WindowPadding отдавала
+      # свой ноль любому меню, открытому изнутри неё, — пункты прижимались к
+      # самой рамке окна.
+      - name: Menu style check (a popup declares its own padding)
+        run: python3 scripts/check_menu_style.py
+
+      # Подсказка по скриптовому API для редакторов кода собирается из вызовов
+      # Bind(...) движка. Устареет — начнёт врать: предлагать то, чего нет, и
+      # молчать о том, что появилось. Врущая подсказка хуже отсутствующей.
+      - name: Script API hints are up to date
+        run: python3 scripts/gen_script_api.py --check
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 

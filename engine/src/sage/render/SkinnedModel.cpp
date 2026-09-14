@@ -3,6 +3,8 @@
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
+#include "sage/assets/import/GltfAccessor.h"
+
 #include "SkinnedModel.h"
 
 #include "sage/assets/AssetCache.h"
@@ -721,42 +723,13 @@ bool GltfSkinImageLoader(tinygltf::Image* image, const int, std::string* err, st
     return true;
 }
 
-const unsigned char* AccessorBase(const tinygltf::Model& m, const tinygltf::Accessor& acc, size_t& stride) {
-    const auto& view = m.bufferViews[acc.bufferView];
-    const auto& buf = m.buffers[view.buffer];
-    stride = acc.ByteStride(view);
-    return buf.data.data() + view.byteOffset + acc.byteOffset;
-}
-
-std::vector<float> ReadFloats(const tinygltf::Model& m, int accessorIdx, int comps) {
-    const auto& acc = m.accessors[accessorIdx];
-    size_t stride; const unsigned char* base = AccessorBase(m, acc, stride);
-    std::vector<float> out(acc.count * comps);
-    for (size_t i = 0; i < acc.count; ++i) {
-        const float* v = reinterpret_cast<const float*>(base + i * stride);
-        for (int c = 0; c < comps; ++c) out[i * comps + c] = v[c];
-    }
-    return out;
-}
-
-// Индексы (для JOINTS_0 — ubyte/ushort, для indices — +uint).
-std::vector<unsigned int> ReadUInts(const tinygltf::Model& m, int accessorIdx, int comps) {
-    const auto& acc = m.accessors[accessorIdx];
-    size_t stride; const unsigned char* base = AccessorBase(m, acc, stride);
-    std::vector<unsigned int> out(acc.count * comps);
-    for (size_t i = 0; i < acc.count; ++i) {
-        const unsigned char* p = base + i * stride;
-        for (int c = 0; c < comps; ++c) {
-            switch (acc.componentType) {
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  out[i*comps+c] = ((const uint8_t*)p)[c]; break;
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: out[i*comps+c] = ((const uint16_t*)p)[c]; break;
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:   out[i*comps+c] = ((const uint32_t*)p)[c]; break;
-                default: out[i*comps+c] = 0; break;
-            }
-        }
-    }
-    return out;
-}
+// Аксессоры читает ОБЩИЙ читатель (assets/import/GltfAccessor.h) — тот же, что
+// у статического импорта. Здесь раньше лежала своя пара функций БЕЗ единой
+// проверки: `m.bufferViews[acc.bufferView]` при bufferView = -1 (а это законный
+// разреженный аксессор, которым Blender пишет каждый ключ формы) означало
+// обращение за начало вектора и падение редактора на ровном месте.
+using sage::assets::gltf::ReadFloats;
+using sage::assets::gltf::ReadUInts;
 
 // Разложение матрицы узла в перенос/поворот/масштаб.
 //
@@ -882,8 +855,15 @@ static ModelData ParseGltf(const std::string& path) {
     }
 
     // node index -> индекс в нашем скелете (0..jointCount-1)
+    // Кость, ссылающаяся на несуществующий узел, — битый файл. Такую кость
+    // молча заменяем единичной, а не читаем g.nodes за границей.
+    auto jointNode = [&](int j) {
+        const int node = (j >= 0 && j < (int)skin.joints.size()) ? skin.joints[(size_t)j] : -1;
+        return (node >= 0 && node < (int)g.nodes.size()) ? node : -1;
+    };
     std::unordered_map<int, int> nodeToJoint;
-    for (int i = 0; i < jointCount; ++i) nodeToJoint[skin.joints[i]] = i;
+    for (int i = 0; i < jointCount; ++i)
+        if (jointNode(i) >= 0) nodeToJoint[jointNode(i)] = i;
 
     // --- Иерархия узлов: родители и мировые матрицы ---------------------------
     //
@@ -925,8 +905,10 @@ static ModelData ParseGltf(const std::string& path) {
     // Скелет: TRS из узлов + родитель из иерархии узлов.
     Skeleton& sk = data.Skeleton;
     sk.Joints.resize(jointCount);
+    const tinygltf::Node kEmptyNode;
     for (int i = 0; i < jointCount; ++i) {
-        const tinygltf::Node& n = g.nodes[skin.joints[i]];
+        const int ni = jointNode(i);
+        const tinygltf::Node& n = ni >= 0 ? g.nodes[(size_t)ni] : kEmptyNode;
         Joint& j = sk.Joints[i];
         j.Name = n.name;
         j.InverseBind = invBind[i];
@@ -956,7 +938,9 @@ static ModelData ParseGltf(const std::string& path) {
     // корневой кости. Берём у первой кости без родителя — у скина он общий.
     for (int i = 0; i < jointCount; ++i) {
         if (sk.Joints[i].Parent >= 0) continue;
-        sk.Root = worldOf(parent[(size_t)skin.joints[i]]);
+        const int ni = jointNode(i);
+        if (ni < 0) continue;
+        sk.Root = worldOf(parent[(size_t)ni]);
         break;
     }
 
@@ -1106,6 +1090,10 @@ static ModelData ParseGltf(const std::string& path) {
                 auto it = nodeToJoint.find(p);
                 if (it != nodeToJoint.end()) { rigidJoint = it->second; break; }
             }
+            // Кость за палитрой шейдера (uBones[kMaxBones]) — это чтение чужой
+            // памяти на видеокарте. У модели с сотнями костей такое бывает, и
+            // деталь лучше оставить на месте, чем отправить в палитру наугад.
+            if (rigidJoint >= kMaxBones) rigidJoint = -1;
         }
         // Вершины жёсткой детали задаём так, чтобы палитра кости вернула их
         // ровно туда, где деталь стоит в файле: v' = bindBone(кость)⁻¹ · W · v.
@@ -1151,7 +1139,16 @@ static ModelData ParseGltf(const std::string& path) {
                 if (tan.size() >= (i + 1) * 4)
                     v.Tangent = glm::vec4(tan[i*4], tan[i*4+1], tan[i*4+2], tan[i*4+3]);
                 if (hasSkin) {
-                    v.Joints = {(float)joints[i*4], (float)joints[i*4+1], (float)joints[i*4+2], (float)joints[i*4+3]};
+                    // Номер кости из файла упирается в РАЗМЕР ПАЛИТРЫ шейдера
+                    // (uBones[kMaxBones]): выход за неё — чтение чужой памяти
+                    // уже на видеокарте, где ни исключения, ни лога не будет,
+                    // а будет чёрный экран или вылет драйвера. Кость за
+                    // границей скелета — тоже битый файл; обе заменяем нулевой.
+                    auto joint = [&](unsigned raw) {
+                        return (float)(raw < (unsigned)std::min(jointCount, kMaxBones) ? raw : 0u);
+                    };
+                    v.Joints = {joint(joints[i*4]), joint(joints[i*4+1]), joint(joints[i*4+2]),
+                                joint(joints[i*4+3])};
                     glm::vec4 w(weights[i*4], weights[i*4+1], weights[i*4+2], weights[i*4+3]);
                     const float sum = w.x + w.y + w.z + w.w;
                     v.Weights = sum > 0.0001f ? w / sum : glm::vec4(1, 0, 0, 0);
@@ -1169,8 +1166,17 @@ static ModelData ParseGltf(const std::string& path) {
             }
 
             std::vector<unsigned int> indices;
-            if (prim.indices >= 0) indices = ReadUInts(g, prim.indices, 1);
-            else { indices.resize(vc); for (size_t i = 0; i < vc; ++i) indices[i] = (unsigned)i; }
+            if (prim.indices >= 0) {
+                indices = ReadUInts(g, prim.indices, 1);
+                // Индекс за пределами вершин ЭТОЙ части — битый файл. Схлопываем
+                // в 0 (треугольник выродится) вместо того, чтобы отдать его
+                // видеокарте: там он читает вершинный буфер за границей.
+                for (unsigned int& idx : indices)
+                    if (idx >= (unsigned)vc) idx = 0u;
+            } else {
+                indices.resize(vc);
+                for (size_t i = 0; i < vc; ++i) indices[i] = (unsigned)i;
+            }
             if (indices.size() < 3) { ++skippedParts; continue; }
 
             ModelSubMeshData sub;
@@ -1252,7 +1258,10 @@ static ModelData ParseGltf(const std::string& path) {
         for (const auto& ch : anim.channels) {
             auto jIt = nodeToJoint.find(ch.target_node);
             if (jIt == nodeToJoint.end()) continue; // канал не на кости скина
-            const tinygltf::AnimationSampler& samp = anim.samplers[ch.sampler];
+            // Номер сэмплера — число из файла: за границей списка это битый
+            // файл, а не повод читать чужую память.
+            if (ch.sampler < 0 || ch.sampler >= (int)anim.samplers.size()) continue;
+            const tinygltf::AnimationSampler& samp = anim.samplers[(size_t)ch.sampler];
             AnimChannel out;
             out.Joint = jIt->second;
             if (ch.target_path == "translation") out.Target = AnimPath::Translation;
@@ -1264,7 +1273,13 @@ static ModelData ParseGltf(const std::string& path) {
             std::vector<float> times = ReadFloats(g, samp.input, 1);
             int comps = (out.Target == AnimPath::Rotation) ? 4 : 3;
             std::vector<float> vals = ReadFloats(g, samp.output, comps);
-            size_t keyCount = times.size();
+            // Ключей столько, на сколько хватает ОБОИХ массивов. Верить длине
+            // времён на слово нельзя: у CUBICSPLINE значений втрое больше, у
+            // битого файла — меньше, и цикл по временам читал бы за концом
+            // значений.
+            size_t keyCount = std::min(times.size(), vals.size() / (size_t)comps);
+            if (keyCount == 0) continue;
+            times.resize(keyCount);
             out.Times = times;
             out.Values.resize(keyCount, glm::vec4(0.0f));
             for (size_t k = 0; k < keyCount; ++k) {

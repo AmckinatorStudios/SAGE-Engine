@@ -50,6 +50,10 @@ public:
     // Вывести окно вперёд (после создания элемента из меню Create).
     void RequestFocus() { m_focusFrames = 3; }
 
+    // Смена проекта: отпустить обложки прошлого. Ключ обложки — путь ассета,
+    // а он в каждом проекте свой и ведёт к другому файлу.
+    void ForgetProject() { m_preview.ForgetProject(); }
+
 private:
     void DrawTopBar(EditorHost& host);
     void DrawTree(EditorHost& host, float width);

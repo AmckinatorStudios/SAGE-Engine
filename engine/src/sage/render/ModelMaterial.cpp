@@ -454,6 +454,38 @@ ExtractedMaterialSet ExtractMaterials(const std::string& ref, const std::string&
         out.Materials.clear();
     }
 
+    // --- Экспорт, не донёсший материалы ---------------------------------
+    //
+    // Отдельная и ЧАСТАЯ беда, которую нельзя оставлять молчаливой. Материалы
+    // в файле есть — с именами, по одному на часть, — но у всех до единого ни
+    // карты, ни цвета: белое с настройками по умолчанию. Так выглядит экспорт
+    // из Blender, у которого материал собран узлами (шум, градиент, смешение
+    // шейдеров): экспортёр glTF переносит только то, что сводится к
+    // Principled BSDF, остальное молча выбрасывает, и модель приезжает белой.
+    //
+    // Без этой строки человек видит белую модель и делает единственный
+    // возможный вывод — «движок не грузит текстуры». Сказать надо ровно то,
+    // что произошло, и куда смотреть: перевыложить материалы из Blender
+    // (запечь узлы в текстуры) или взять экспорт в FBX, куда цвета попадают
+    // и из узловых материалов.
+    if (!out.Materials.empty()) {
+        bool anyMap = false, anyColour = false;
+        for (const ExtractedMaterial& m : out.Materials) {
+            if (m.HasAnyMap()) anyMap = true;
+            const glm::vec3 d = glm::abs(m.Albedo - glm::vec3(1.0f));
+            if (d.x > 0.01f || d.y > 0.01f || d.z > 0.01f) anyColour = true;
+            if (m.Emissive != glm::vec3(0.0f)) anyColour = true;
+        }
+        if (!anyMap && !anyColour) {
+            out.Warnings.push_back(
+                "материалов в файле " + std::to_string(out.Materials.size()) +
+                ", но ни у одного нет ни текстуры, ни цвета — экспорт их не донёс. "
+                "Так выходит, когда материал в Blender собран узлами: в glTF попадает "
+                "только Principled BSDF. Запеките узлы в текстуры при экспорте или "
+                "возьмите этот же меш в .fbx — туда цвета материалов попадают");
+        }
+    }
+
     for (const std::string& w : out.Warnings) LOG_WARN("Model") << modelPath << ": " << w;
     for (const ExtractedMaterial& m : out.Materials)
         for (const std::string& w : m.Warnings)

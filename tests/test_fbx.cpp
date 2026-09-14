@@ -310,3 +310,96 @@ TEST(Fbx_with_skin_loads_bones_weights_and_clips) {
     CHECK_NEAR(base.x, 0.0f, 1e-4f);
     CHECK_NEAR(base.y, 0.0f, 1e-4f);
 }
+
+// ============================================================================
+//  Жёсткие детали на костях и материалы скиновой модели
+//
+//  Обе беды видны на одной жалобе: «модель грузится без текстур и выглядит не
+//  как в Blender». Причин было две, и обе — в скиновом пути FBX.
+//
+//  1. Отбор геометрии шёл по одному признаку — есть ли у неё скин, — и всё
+//     остальное молча выбрасывалось. Но деталь, которая не гнётся (панель,
+//     зуб, глазница, пряжка, инструмент), риггят НЕ весами, а привязкой узла к
+//     кости: это дешевле и точнее. У разбираемой модели (Spring Bonnie из
+//     Blender) со скином 6 геометрий из 98 — в сцену попадали шесть кусков.
+//  2. Материалы не читались ВООБЩЕ. Цвета в FBX есть всегда (Properties70
+//     материала), статический путь их брал — и одна и та же модель была
+//     цветной в панели ассетов и белой в сцене.
+// ============================================================================
+TEST(Fbx_skin_keeps_rigid_parts_on_bones_and_their_materials) {
+    const std::string path = MakeFbx("sage_test_rigid.fbx", "--skin --rigid --unit 1");
+    if (path.empty()) return; // нет python3 — проверять нечем
+
+    sage::render::ModelData data;
+    std::string err;
+    const bool ok = sage::assets::ImportFbxSkinned(path, data, err);
+    if (!ok) std::printf("       %s\n", err.c_str());
+    CHECK_TRUE(ok);
+    if (!ok) { std::remove(path.c_str()); return; }
+
+    // ДВЕ части, а не одна: скиновая полоса И жёсткая панель.
+    CHECK_EQ((int)data.SubMeshes.size(), 2);
+
+    // Цвет материала доехал до ОБЕИХ частей.
+    int coloured = 0;
+    for (const sage::render::ModelSubMeshData& sub : data.SubMeshes) {
+        if (std::fabs(sub.Material.Tint.x - 0.36f) < 0.01f &&
+            std::fabs(sub.Material.Tint.y - 0.21f) < 0.01f &&
+            std::fabs(sub.Material.Tint.z - 0.03f) < 0.01f) {
+            ++coloured;
+        }
+    }
+    std::printf("       частей с цветом материала: %d из %d\n", coloured,
+                (int)data.SubMeshes.size());
+    CHECK_EQ(coloured, (int)data.SubMeshes.size());
+
+    // И ГЛАВНОЕ: жёсткая деталь стоит ТАМ ЖЕ, где её ставит статический разбор
+    // того же файла. Проверка на «часть появилась» пропустила бы самую частую
+    // поломку такого переноса — деталь есть, но улетела в начало координат или
+    // развёрнута костью наизнанку.
+    //
+    // Вершины жёсткой части лежат в системе координат КОСТИ: чтобы получить
+    // место в модели, их надо прогнать через матрицу кости в позе привязки —
+    // ровно то, что сделает палитра в кадре.
+    sage::assets::ImportedScene flat;
+    std::string ferr;
+    const bool fok = sage::assets::ImporterRegistry::Instance().Import(path, flat, ferr);
+    std::remove(path.c_str());
+    CHECK_TRUE(fok);
+    if (!fok) return;
+
+    // Панель в статическом разборе — часть с вершинами правее полосы (x >= 2
+    // единицы файла, то есть 0.02 м).
+    float staticRight = -1e9f, staticTop = -1e9f;
+    for (const sage::assets::ImportedNode& n : flat.Nodes) {
+        for (const Vertex& v : n.Mesh.Vertices) {
+            staticRight = std::max(staticRight, v.Position.x);
+            staticTop = std::max(staticTop, v.Position.y);
+        }
+    }
+
+    // Та же крайняя точка, посчитанная через кости.
+    std::vector<glm::mat4> bind(data.Skeleton.Joints.size(), glm::mat4(1.0f));
+    for (size_t i = 0; i < data.Skeleton.Joints.size(); ++i) {
+        glm::mat4 g = data.Skeleton.Joints[i].LocalMatrix();
+        for (int p = data.Skeleton.Joints[i].Parent; p >= 0;
+             p = data.Skeleton.Joints[(size_t)p].Parent)
+            g = data.Skeleton.Joints[(size_t)p].LocalMatrix() * g;
+        bind[i] = g * data.Skeleton.Joints[i].InverseBind;
+    }
+    float skinnedRight = -1e9f;
+    for (const sage::render::ModelSubMeshData& sub : data.SubMeshes) {
+        for (const sage::render::SkinnedVertex& v : sub.Vertices) {
+            const int joint = (int)v.Joints[0];
+            const glm::mat4 m = (v.Weights[0] > 0.5f && joint >= 0 && joint < (int)bind.size())
+                                    ? bind[(size_t)joint] : glm::mat4(1.0f);
+            skinnedRight = std::max(skinnedRight, (m * glm::vec4(v.Position, 1.0f)).x);
+        }
+    }
+    std::printf("       правый край: статикой %.4f, через кости %.4f\n", (double)staticRight,
+                (double)skinnedRight);
+    CHECK_NEAR(skinnedRight, staticRight, 1e-3f);
+    // И деталь не схлопнулась в точку: панель шире полосы.
+    CHECK_TRUE(staticRight > 0.02f - 1e-4f);
+    (void)staticTop;
+}

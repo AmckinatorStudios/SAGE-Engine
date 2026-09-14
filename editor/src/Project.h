@@ -60,6 +60,11 @@ public:
     void Adopt();
 
 private:
+    // Кладёт рядом с проектом описание скриптового API для редактора кода
+    // (.sage/api/sage.lua) и .luarc.json, который на него показывает.
+    // Зовётся из Adopt: подсказка обязана быть свежей, а не той, что была при
+    // создании проекта. Подробности — в .cpp.
+    void InstallScriptApiHints() const;
 
     bool m_loaded = false;
     std::string m_name;

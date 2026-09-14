@@ -7,6 +7,8 @@
 // ---------------------------------------------------------------------------
 #include "Fixture.h"
 
+#include "GltfSparseModel.h"
+
 #include "sage/anim/ClipFile.h"
 
 #include <algorithm>
@@ -708,7 +710,37 @@ void TestSkinnedMaterialMaps(FrameRenderer& r) {
     Report("rig_materials", CompareWithReference("rig_materials", frame));
 }
 
+// Разреженный морф-аксессор: модель со скином и ключом формы, у которого нет
+// bufferView. Проверка идёт ЗДЕСЬ, а не в модульных тестах, потому что падал
+// именно этот путь — SkinnedModel::Load, тот самый, которым модель попадает в
+// сцену. В редакторе это выглядело так: модель видно в панели ассетов (её
+// открывает СТАТИЧЕСКИЙ разбор, у которого проверки границ были), а перетащил в
+// сцену — редактор закрылся без единой строки в логе.
+void TestSparseMorphLoads() {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_rt_sparse";
+    const std::string path = sage_test::WriteSparseGltf(dir, "sparse");
+    Check(!path.empty(), "разреженная модель записана");
+    if (path.empty()) return;
+
+    std::unique_ptr<sage::render::SkinnedModel> model;
+    try {
+        model = sage::render::SkinnedModel::Load(path);
+    } catch (const std::exception& e) {
+        std::printf("       SkinnedModel::Load: %s\n", e.what());
+    }
+    Check(model != nullptr, "модель с разреженным ключом формы загрузилась");
+    if (model) {
+        Check(model->GetSkeleton().Count() == 2, "кости на месте");
+        // Ключ формы должен ДОЕХАТЬ, а не потеряться вместе с падением.
+        Check(model->MorphNames().size() == 1, "ключ формы прочитан");
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 void RunAnimationChecks(FrameRenderer& r) {
+    TestSparseMorphLoads();
     TestMorphTargets(r);
     TestAnimationUsesMeshModel(r);
     TestSkinnedDebugView(r);

@@ -311,6 +311,9 @@ private:
     // Новая сцена по ШАБЛОНУ (см. ProjectTemplates.h). Empty — пустая; она же
     // используется пунктом «Новая сцена» и самопроверкой.
     void NewScene(ProjectTemplateKind content);
+    // Смена проекта: прошлый исчезает целиком — сцена, кэш ресурсов, частицы,
+    // обложки, префабы, выделение. Подробности — в EditorLayer_Project.cpp.
+    void ForgetPreviousProject();
 
     // Материал шаблона — ФАЙЛОМ в assets/materials, а не полем Color.
     //
@@ -365,6 +368,9 @@ private:
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
     void CheckMultiWindowFrame();
+    // Закрыть всплывающее окно, которое открыли, но никто не рисует: такое
+    // окно обездвиживает редактор целиком (см. EditorLayer.cpp).
+    void CloseGhostPopups();
     bool m_multiWindowChecked = false; // проверка одноразовая: кадров много
 
     // --- Мышь В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST=1) -------------------------

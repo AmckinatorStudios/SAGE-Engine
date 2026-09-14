@@ -9,6 +9,7 @@
 #include "../EditorHost.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
+#include "../ui/UI.h"
 
 using sage::input::Action;
 using sage::input::ActionType;
@@ -344,7 +345,9 @@ void InputPanel::DrawAction(EditorHost& host, Context& context, Action& action,
     if (action.Type() != ActionType::Digital) {
         ImGui::SameLine();
         if (ImGui::Button(T("+ Axis..."))) ImGui::OpenPopup("##axisMenu");
-        if (ImGui::BeginPopup("##axisMenu")) {
+        // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+        // момент открытия (см. Sage::UI::MenuScope).
+        if (Sage::UI::MenuScope axisMenu; ImGui::BeginPopup("##axisMenu")) {
             struct AxisItem { const char* Label; Binding (*Make)(); };
             static const AxisItem kAxes[] = {
                 {"MOUSE_X", [] { return Binding::MouseAxisX(); }},
@@ -405,7 +408,11 @@ void InputPanel::Draw(EditorHost& host, bool& open) {
 
     ImGui::SameLine();
     if (ImGui::Button(T("Standard layout..."))) ImGui::OpenPopup("##presetMenu");
-    if (ImGui::BeginPopup("##presetMenu")) {
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
+    // держится в границах if — иначе деструктор снялся бы после EndChild()
+    // ниже, и ImGui решил бы, что стиль не сняли вовсе.
+    if (Sage::UI::MenuScope presetMenu; ImGui::BeginPopup("##presetMenu")) {
         Hint(T("Adds the usual set of actions. Existing ones are left alone."));
         ImGui::Separator();
         if (ImGui::MenuItem(T("First-person / third-person game"))) {

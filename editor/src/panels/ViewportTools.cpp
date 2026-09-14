@@ -9,6 +9,7 @@
 #include "EditorHost.h"
 #include "EditorIcons.h"
 #include "../Localization.h"
+#include "../ui/UI.h"
 #include "sage/render/DebugView.h"
 
 // ---------------------------------------------------------------------------
@@ -94,8 +95,11 @@ bool DropdownButton(const char* icon, const char* label, const char* tooltip) {
 // туда, куда повёрнут он сам. Человек, который тянет повёрнутый предмет и не
 // знает, в каком он режиме, видит просто «гизмо едет не туда».
 void ViewportPanel::DrawSpaceMenu(EditorHost& host) {
+    // Отступы темы — ДО BeginPopup: меню рисуется изнутри строки инструментов,
+    // у которой WindowPadding обнулён (см. Sage::UI::MenuScope).
+    Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("##space_menu")) return;
-    ImGui::TextDisabled("%s", T("Gizmo axes"));
+    Sage::UI::MenuSection(T("Gizmo axes"), true);
     const bool world = host.GizmoSpace() == EditorGizmoSpace::World;
     if (ImGui::MenuItem(T("Global"), nullptr, world)) host.GizmoSpace() = EditorGizmoSpace::World;
     ImGui::SameLine();
@@ -103,15 +107,18 @@ void ViewportPanel::DrawSpaceMenu(EditorHost& host) {
     if (ImGui::MenuItem(T("Local"), nullptr, !world)) host.GizmoSpace() = EditorGizmoSpace::Local;
     ImGui::SameLine();
     ImGui::TextDisabled("%s", T("— axes of the object itself"));
+    ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
     ImGui::Separator();
-    ImGui::TextDisabled("%s", T("Scale always works in the object's own axes"));
+    ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
+    Sage::UI::TextSecondary("%s", T("Scale always works in the object's own axes"));
     ImGui::EndPopup();
 }
 
 // --- Чем показывать сцену ---------------------------------------------------
 void ViewportPanel::DrawShadingMenu(EditorHost& host) {
+    Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("##shading_menu")) return;
-    ImGui::TextDisabled("%s", T("How to show the scene"));
+    Sage::UI::MenuSection(T("How to show the scene"), true);
     for (int i = 0; i < (int)EditorRenderMode::Count; ++i) {
         // Имена отладочных видов берутся из самого движка (DebugViewName), а не
         // переписываются здесь: разойдясь однажды, список начнёт врать о том,
@@ -127,9 +134,10 @@ void ViewportPanel::DrawShadingMenu(EditorHost& host) {
 
 // --- Редкое: «…» ------------------------------------------------------------
 void ViewportPanel::DrawMoreMenu(EditorHost& host) {
+    Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("##more_menu")) return;
 
-    ImGui::TextDisabled("%s", T("Rarer gizmos"));
+    Sage::UI::MenuSection(T("Rarer gizmos"), true);
     // Универсальное (T) и рамка (Y) живут В СТРОКЕ инструментов, а не здесь:
     // дублировать их пунктом меню значит спорить с самим собой о том, где
     // переключают инструмент.
@@ -138,8 +146,7 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
                         host.ColliderEditMode()))
         host.ColliderEditMode() = !host.ColliderEditMode();
 
-    ImGui::Separator();
-    ImGui::TextDisabled("%s", T("Over the selection"));
+    Sage::UI::MenuSection(T("Over the selection"));
     // Отключены, когда выделения нет: серый пункт честнее пункта, который молча
     // ничего не делает.
     ImGui::BeginDisabled(host.Selection().empty());
@@ -159,15 +166,13 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     if (ImGui::MenuItem(T("Bounds of the selection"), nullptr, host.ShowBounds()))
         host.ShowBounds() = !host.ShowBounds();
 
-    ImGui::Separator();
-    ImGui::TextDisabled("%s", T("Views"));
+    Sage::UI::MenuSection(T("Views"));
     const char* layouts[] = {T("Single view"), T("Two columns"), T("Four views")};
     for (int i = 0; i < 3; ++i)
         if (ImGui::MenuItem(layouts[i], nullptr, (int)m_layout == i)) m_layout = (Layout)i;
-    ImGui::TextDisabled("%s", T("Each view is a full scene pass"));
+    Sage::UI::TextSecondary("%s", T("Each view is a full scene pass"));
 
-    ImGui::Separator();
-    ImGui::TextDisabled("%s", T("Projection of the active view"));
+    Sage::UI::MenuSection(T("Projection of the active view"));
     const char* kinds[] = {T("Perspective"), T("Top"), T("Front"), T("Side")};
     for (int i = 0; i < 4; ++i)
         if (ImGui::MenuItem(kinds[i], nullptr, (int)m_kinds[m_activeSlot] == i))

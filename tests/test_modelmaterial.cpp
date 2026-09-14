@@ -308,3 +308,53 @@ TEST(model_material_resolves_a_project_relative_path) {
     // которую нельзя открыть, и есть «Не удалось загрузить» в слоте материала.
     CHECK_TRUE(FirstPixel(m.AlbedoMap) >= 0);
 }
+
+// Экспорт, не донёсший материалы: имена есть, а вида нет ни у одного.
+//
+// Это и стоит за жалобой «модель грузится без текстур». В файле четырнадцать
+// материалов с правильными именами — и все белые, без единой карты: так
+// экспортёр glTF выгружает узловые материалы Blender, из которых он понимает
+// только Principled BSDF. Молчать об этом нельзя: белая модель без объяснения
+// читается как «движок не грузит текстуры», и человек ищет поломку не там.
+TEST(model_material_export_without_maps_and_colours_is_reported) {
+    const fs::path dir = TempDir("sage_test_modelmat_blank");
+    WriteGeomBin(dir / "geom.bin");
+    // Тот же шаблон, но материал — пустышка: только имя и doubleSided, ровно
+    // как в разбираемом файле.
+    std::string gltf = kGltfTemplate;
+    const size_t at = gltf.find("\"images\"");
+    gltf = gltf.substr(0, at) +
+           "\"materials\": [{\"name\": \"Suit1\", \"doubleSided\": true}]\n}";
+    WriteText(dir / "blank.gltf", gltf);
+
+    const ModelLoader::ExtractedMaterialSet set =
+        ModelLoader::ExtractMaterials((dir / "blank.gltf").string());
+    CHECK_EQ((int)set.Materials.size(), 1);
+    CHECK_TRUE(set.Found());
+    CHECK_FALSE(set.Warnings.empty());
+    if (!set.Warnings.empty()) {
+        // Предупреждение обязано называть ПРИЧИНУ и что делать, а не просто
+        // отмечать факт: «нет текстур» само по себе бесполезно.
+        CHECK_TRUE(set.Warnings.front().find("экспорт их не донёс") != std::string::npos);
+        CHECK_TRUE(set.Warnings.front().find("fbx") != std::string::npos);
+    }
+}
+
+// Обратная сторона: материал с цветом (без единой карты) — законный результат,
+// и ругаться на него нельзя. Иначе предупреждение обесценится: его перестанут
+// читать ровно там, где оно важно.
+TEST(model_material_coloured_material_without_maps_is_not_reported) {
+    const fs::path dir = TempDir("sage_test_modelmat_colour");
+    WriteGeomBin(dir / "geom.bin");
+    std::string gltf = kGltfTemplate;
+    const size_t at = gltf.find("\"images\"");
+    gltf = gltf.substr(0, at) +
+           "\"materials\": [{\"name\": \"Suit1\", \"pbrMetallicRoughness\": "
+           "{\"baseColorFactor\": [0.36, 0.21, 0.03, 1]}}]\n}";
+    WriteText(dir / "colour.gltf", gltf);
+
+    const ModelLoader::ExtractedMaterialSet set =
+        ModelLoader::ExtractMaterials((dir / "colour.gltf").string());
+    CHECK_EQ((int)set.Materials.size(), 1);
+    CHECK_TRUE(set.Warnings.empty());
+}

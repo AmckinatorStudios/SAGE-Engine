@@ -319,3 +319,89 @@ TEST(imported_scene_flatten_bakes_transforms) {
     CHECK_TRUE(minX < 0.0f);
     CHECK_EQ((int)scene.TotalTriangles(), (int)(idxPerCube * 2 / 3));
 }
+
+// ============================================================================
+//  Разреженные аксессоры glTF
+//
+//  На них редактор ПАДАЛ. По спецификации поле bufferView у аксессора
+//  необязательно: без него аксессор считается нулевым, а значения лежат в блоке
+//  sparse парами «номер вершины — значение». Blender пишет так каждый ключ
+//  формы, tinygltf разворачивать их не умеет и оставляет bufferView = -1, а
+//  разбор скелетной модели читал bufferViews[-1] — то есть за начало вектора.
+//  Не «модель приехала кривой», а падение процесса: у проверочной модели
+//  (Spring Bonnie из Blender) таких аксессоров 29 из 535.
+// ============================================================================
+#include "GltfSparseModel.h"
+#include "sage/assets/import/GltfAccessor.h"
+
+#define TINYGLTF_NO_STB_IMAGE
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#include <tiny_gltf.h>
+
+#include <filesystem>
+
+TEST(gltf_sparse_accessor_is_expanded_not_read_out_of_bounds) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_sparse_gltf";
+    const std::string path = sage_test::WriteSparseGltf(dir, "sparse");
+    CHECK_TRUE(!path.empty());
+    if (path.empty()) return;
+
+    tinygltf::TinyGLTF loader;
+    // Картинок в файле нет, но без загрузчика tinygltf ругается на сам разбор.
+    loader.SetImageLoader([](tinygltf::Image*, const int, std::string*, std::string*, int, int,
+                             const unsigned char*, int, void*) { return true; },
+                          nullptr);
+    tinygltf::Model g;
+    std::string err, warn;
+    CHECK_TRUE(loader.LoadASCIIFromFile(&g, &err, &warn, path));
+    CHECK_EQ((int)g.accessors.size(), 6);
+    // Именно то состояние, на котором ломался разбор: bufferView отсутствует.
+    CHECK_EQ(g.accessors[5].bufferView, -1);
+    CHECK_TRUE(g.accessors[5].sparse.isSparse);
+
+    // Три вершины по три числа — ровно столько, сколько объявлено в count, а не
+    // пусто и не «сколько нашлось в sparse».
+    const std::vector<float> delta = sage::assets::gltf::ReadFloats(g, 5, 3);
+    CHECK_EQ((int)delta.size(), 9);
+    if (delta.size() == 9) {
+        // Нетронутые вершины — нули (так велит спецификация), сдвинута третья.
+        for (int i = 0; i < 6; ++i) CHECK_TRUE(delta[(size_t)i] == 0.0f);
+        CHECK_TRUE(delta[6] == 0.0f);
+        CHECK_TRUE(delta[7] == 0.0f);
+        CHECK_TRUE(std::fabs(delta[8] - 0.5f) < 1e-6f);
+    }
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST(gltf_accessor_reader_refuses_broken_indices_instead_of_reading_memory) {
+    tinygltf::Model g; // пустая модель: ни аксессоров, ни буферов
+    CHECK_TRUE(sage::assets::gltf::ReadFloats(g, 0, 3).empty());
+    CHECK_TRUE(sage::assets::gltf::ReadFloats(g, -1, 3).empty());
+    CHECK_TRUE(sage::assets::gltf::ReadUInts(g, 7, 1).empty());
+    CHECK_EQ((int)sage::assets::gltf::AccessorCount(g, 0), 0);
+}
+
+TEST(gltf_with_sparse_morph_target_still_imports_its_geometry) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_sparse_gltf_import";
+    const std::string path = sage_test::WriteSparseGltf(dir, "sparse");
+    CHECK_TRUE(!path.empty());
+    if (path.empty()) return;
+
+    ImportedScene scene;
+    std::string err;
+    const bool ok = ImporterRegistry::Instance().Import(path, scene, err);
+    CHECK_TRUE(ok);
+    if (!ok) std::printf("       ошибка импорта: %s\n", err.c_str());
+    CHECK_EQ((int)scene.Nodes.size(), 1);
+    if (!scene.Nodes.empty()) {
+        CHECK_EQ((int)scene.Nodes[0].Mesh.Vertices.size(), 3);
+        CHECK_EQ((int)scene.Nodes[0].Mesh.Indices.size(), 3);
+    }
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}

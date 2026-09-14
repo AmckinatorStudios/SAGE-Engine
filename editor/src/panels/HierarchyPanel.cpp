@@ -17,6 +17,7 @@
 #include "Project.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
+#include "../ui/UI.h"
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
 #include "../ObjectCatalog.h"
@@ -322,7 +323,10 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     }
 
     // Контекстное меню сущности.
-    if (ImGui::BeginPopupContextItem()) {
+    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+    // момент открытия (см. Sage::UI::MenuScope). Блок держит время жизни
+    // MenuScope в границах самого меню, а не всей отрисовки узла.
+    if (Sage::UI::MenuScope rowMenu; ImGui::BeginPopupContextItem()) {
         // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
         // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
         if (!host.IsSelected(id)) host.SetSelectedId(id);
@@ -427,9 +431,17 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     if (EditorIcons::Button("plus", T("Object"), T("Add an object to the scene"))) {
         ImGui::OpenPopup("##hierarchy_add");
     }
-    if (ImGui::BeginPopup("##hierarchy_add")) {
-        if (const char* pick = sage::editor::objectcatalog::DrawMenu()) host.CreateCatalogObject(pick);
-        ImGui::EndPopup();
+    {
+        // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
+        // момент открытия (см. Sage::UI::MenuScope). Блок держит время жизни
+        // MenuScope в границах именно этого меню — иначе деструктор снимет
+        // стиль только в конце Draw(), после End() текущего окна, и ImGui
+        // решит, что стиль не сняли вовсе.
+        Sage::UI::MenuScope addMenu;
+        if (ImGui::BeginPopup("##hierarchy_add")) {
+            if (const char* pick = sage::editor::objectcatalog::DrawMenu()) host.CreateCatalogObject(pick);
+            ImGui::EndPopup();
+        }
     }
     ImGui::SameLine();
     if (EditorIcons::Button("folder-plus", T("Folder"),

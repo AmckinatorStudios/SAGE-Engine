@@ -5,6 +5,7 @@
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/SaveGame.h"
+#include "sage/core/Paths.h"
 #include "sage/scene/Prefab.h"
 
 namespace fs = std::filesystem;
@@ -64,6 +65,63 @@ void Project::Adopt() {
     // одно место, а игра читала из другого.
     sage::save::SetGameName(m_name);
     sage::scene::ClearPrefabCache();   // префабы прошлого проекта тут ни при чём
+
+    InstallScriptApiHints();
+}
+
+// ============================================================================
+//  ПОДСКАЗКА ПО API — РЯДОМ С ПРОЕКТОМ, А НЕ В ИНСТРУКЦИИ
+//
+//  Скрипты пишут не в SAGE: своего редактора кода у движка нет намеренно (см.
+//  editor/src/CodeEditorApp.h), .lua открывается в VS Code, Neovim, JetBrains.
+//  И до сих пор там не было НИ ОДНОЙ подсказки: движок даёт под три сотни
+//  функций в двух с половиной десятках модулей, а редактор не знает ни имени,
+//  ни аргументов. Узнать, как называется функция и что она берёт, можно было
+//  только чтением исходников движка на C++ — то есть никак.
+//
+//  Кладём два файла:
+//    .sage/api/sage.lua — описание API на языке аннотаций LuaLS/EmmyLua. Это
+//      не «файл для VS Code»: за подсказками к Lua почти в каждом редакторе
+//      стоит один и тот же lua-language-server (VS Code, Neovim, Zed, Helix)
+//      либо совместимый с ним EmmyLua (JetBrains). Один файл — все редакторы.
+//    .luarc.json — строка, которая говорит серверу, где лежит описание.
+//
+//  ОБНОВЛЯЕТСЯ КАЖДОЕ ОТКРЫТИЕ, а не только при создании: движок дорастает
+//  новыми функциями, и подсказка, застрявшая на версии, в которой проект
+//  завели, начинает ВРАТЬ — предлагает то, чего уже нет, и молчит о том, что
+//  появилось. Врущая подсказка хуже отсутствующей: отсутствующую человек
+//  компенсирует документацией, а врущей он верит.
+//
+//  .luarc.json — ТОЛЬКО ЕСЛИ ЕГО НЕТ. Это файл настроек ЧЕЛОВЕКА: он мог
+//  дописать туда свои библиотеки, версию Lua, правила проверок. Переписывать
+//  его каждым открытием проекта значит стирать чужую работу молча.
+// ============================================================================
+void Project::InstallScriptApiHints() const {
+    std::error_code ec;
+    const fs::path source = sage::PathFromUtf8(sage::EngineAssetPath("assets/api/sage.lua"));
+    if (!fs::exists(source, ec)) return;   // сборка без подсказки — не повод шуметь
+
+    const fs::path apiDir = m_dir / ".sage" / "api";
+    fs::create_directories(apiDir, ec);
+    if (ec) return;
+    fs::copy_file(source, apiDir / "sage.lua", fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        LOG_WARN("Editor") << "Подсказка по API не обновилась: " << ec.message();
+        return;
+    }
+
+    const fs::path luarc = m_dir / ".luarc.json";
+    if (fs::exists(luarc, ec)) return;
+    std::ofstream f(luarc);
+    if (!f.is_open()) return;
+    f << R"({
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.4",
+  "workspace.library": [".sage/api"],
+  "diagnostics.globals": ["OnStart", "OnUpdate", "OnMessage"]
+}
+)";
+    LOG_INFO("Editor") << "Подсказка по скриптовому API готова: .sage/api/sage.lua";
 }
 
 std::string Project::AssetRef(const fs::path& path) const {
