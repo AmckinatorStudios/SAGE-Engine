@@ -436,12 +436,13 @@ void EditorLayer::FindCrashReport() {
 
 void EditorLayer::DrawCrashReport() {
     if (!m_crashPrompt) return;
-    ImGui::OpenPopup(T("Previous session crashed" "###crash-report"));
+    // Одно имя на оба вызова и просьба ОДИН раз — см. DrawRecoveryPrompt.
+    const char* const kId = T("Previous session crashed" "###crash-report");
+    if (!ImGui::IsPopupOpen(kId)) ImGui::OpenPopup(kId);
     const ImVec2 vp = ImGui::GetMainViewport()->WorkSize;
     ImGui::SetNextWindowSize(ImVec2(std::min(900.0f, vp.x * 0.8f), std::min(620.0f, vp.y * 0.8f)),
                              ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal(T("Previous session crashed" "###crash-report"), nullptr,
-                                ImGuiWindowFlags_NoSavedSettings)) {
+    if (!ImGui::BeginPopupModal(kId, nullptr, ImGuiWindowFlags_NoSavedSettings)) {
         return;
     }
 
@@ -489,9 +490,31 @@ void EditorLayer::DrawCrashReport() {
 
 void EditorLayer::DrawRecoveryPrompt() {
     if (!m_recoveryPrompt) return;
-    ImGui::OpenPopup(T("Restore scene?"));
-    if (ImGui::BeginPopupModal(T("Restore scene?" "###Restore scene?"), nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize)) {
+    // ИМЯ ОКНА — ЦЕЛИКОМ И ОДНО И ТО ЖЕ В ОБОИХ ВЫЗОВАХ, вместе с «###».
+    //
+    // Здесь стоял OpenPopup(T("Restore scene?")) — БЕЗ «###». По-английски это
+    // работало случайно: ImGui считает имя окна хэшем, сбрасывая его на «###»,
+    // и у строки без «###» хэш совпадал с хвостом «###Restore scene?». А в
+    // переводе OpenPopup получал «Восстановить сцену?» — другой хэш, то есть
+    // ОТКРЫВАЛОСЬ ОДНО ОКНО, А РИСОВАЛОСЬ ДРУГОЕ.
+    //
+    // И это не «диалог не показался». Открытое окно, которое никто не рисует,
+    // навсегда остаётся в стеке всплывающих окон ImGui, а раз модалка не
+    // нарисована, m_recoveryPrompt не сбросить — значит OpenPopup зовётся
+    // КАЖДЫЙ КАДР. Каждый такой вызов закрывает всё, что человек открыл выше
+    // (ImGui::OpenPopupEx -> ClosePopupToLevel), и меню «Файл» захлопывается в
+    // том же кадре, в котором открылось. Снаружи это выглядит как «редактор
+    // завис, кнопки не нажимаются»: картинка живая, вьюпорт крутится, а ни
+    // одно меню и ни один диалог не открываются — и ни строчки в логе.
+    //
+    // Ловится это ДВУМЯ сторожами, потому что случай возвращается: одно и то же
+    // имя в обоих вызовах проверяет scripts/check_popup_ids.py, а «открыто
+    // окно, которое никто не рисует» — проверка кадра (CheckGhostPopups).
+    const char* const kId = T("Restore scene?" "###Restore scene?");
+    // Просим ОДИН раз, а не каждый кадр: повторный OpenPopup — это удар по
+    // чужим открытым окнам, и платить им за то, что наше уже открыто, не за что.
+    if (!ImGui::IsPopupOpen(kId)) ImGui::OpenPopup(kId);
+    if (ImGui::BeginPopupModal(kId, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted(T("The previous session seems to have crashed"));
         ImGui::Spacing();
         ImGui::Text(T("Found file: %s"), m_recoveryFile.c_str());
@@ -558,9 +581,10 @@ void EditorLayer::AskUnsaved(std::function<void()> action) {
 // набор, который человек видел во всех программах, где что-то редактируют.
 void EditorLayer::DrawUnsavedPrompt() {
     if (!m_unsavedPrompt) return;
-    ImGui::OpenPopup(T("Scene not saved" "###Unsaved"));
-    if (ImGui::BeginPopupModal(T("Scene not saved" "###Unsaved"), nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize)) {
+    // Одно имя на оба вызова и просьба ОДИН раз — см. DrawRecoveryPrompt.
+    const char* const kId = T("Scene not saved" "###Unsaved");
+    if (!ImGui::IsPopupOpen(kId)) ImGui::OpenPopup(kId);
+    if (ImGui::BeginPopupModal(kId, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         const std::string name = m_scenePath.empty() ? CurrentSceneName()
                                                      : m_scenePath.filename().string();
         ImGui::Text(T("Scene \"%s\" has unsaved changes."), name.c_str());
