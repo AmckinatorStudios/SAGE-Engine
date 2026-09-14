@@ -3960,6 +3960,78 @@ bool EditorLayer::SelfTestSelection() {
         fs::remove(script, ec);
     }
 
+    // --- ПРАВКА ФАЙЛА СНАРУЖИ ДОЕЗЖАЕТ ДО РЕДАКТОРА ----------------------------
+    //
+    // «Переэкспортировал модель из Blender — в редакторе ничего не изменилось».
+    // Кэш ресурсов держит загруженное по пути и на файл не смотрит; модель и
+    // материал перечитывались, а ТЕКСТУРА и СКЕЛЕТНАЯ модель — нет, то есть
+    // ровно то, что правят чаще всего, и оставалось прежним до перезапуска.
+    // Проверяется настоящей правкой файла: пишем другой файл на то же место и
+    // сдвигаем время правки явно (у него зернистость, «прошло достаточно» в
+    // проверке не годится).
+    if (ok) {
+        ResourceManager& rm = ResourceManager::Instance();
+
+        // ТЕКСТУРА: 2x2 -> 4x4. Размер виден без чтения пикселей с видеокарты.
+        const fs::path tex = m_project.AssetsDir() / "selftest_reload.png";
+        auto writePng = [&](int side) {
+            std::vector<unsigned char> rgba((size_t)side * side * 4, 200);
+            stbi_write_png(tex.string().c_str(), side, side, 4, rgba.data(), side * 4);
+        };
+        writePng(2);
+        const std::string texRef = m_project.AssetRef(tex);
+        std::shared_ptr<Texture> loaded = rm.GetTexture(texRef);
+        if (!loaded || loaded->Width() != 2) {
+            LOG_ERROR("Editor") << "SELFTEST: тестовая текстура не загрузилась";
+            ok = false;
+        } else {
+            writePng(4);
+            const auto when = fs::last_write_time(tex, ec);
+            fs::last_write_time(tex, when + std::chrono::seconds(5), ec);
+            const uint64_t genBefore = rm.AssetsGeneration();
+            rm.ReloadChangedAssets();
+            // ТОТ ЖЕ shared_ptr: на текстуру ссылаются материалы и интерфейс, и
+            // подмена записи в кэше оставила бы их со старой картинкой.
+            if (loaded->Width() != 4) {
+                LOG_ERROR("Editor") << "SELFTEST: перерисованная текстура не перечиталась ("
+                                    << loaded->Width() << "px)";
+                ok = false;
+            }
+            if (rm.AssetsGeneration() == genBefore) {
+                LOG_ERROR("Editor") << "SELFTEST: поколение ресурсов не сменилось";
+                ok = false;
+            }
+        }
+        fs::remove(tex, ec);
+
+        // СКЕЛЕТНАЯ МОДЕЛЬ: тот же файл переписывается собой же со сдвинутым
+        // временем правки — кэш обязан перечитать его заново.
+        const fs::path rigSrc = fs::path("assets") / "test_rig.glb";
+        if (ok && fs::exists(rigSrc, ec)) {
+            const fs::path rig = m_project.AssetsDir() / "selftest_reload.glb";
+            fs::copy_file(rigSrc, rig, fs::copy_options::overwrite_existing, ec);
+            const std::string rigRef = m_project.AssetRef(rig);
+            std::shared_ptr<sage::render::SkinnedModel> before = rm.GetSkinnedModel(rigRef);
+            if (!before) {
+                LOG_ERROR("Editor") << "SELFTEST: тестовая скелетная модель не загрузилась";
+                ok = false;
+            } else {
+                const auto when = fs::last_write_time(rig, ec);
+                fs::last_write_time(rig, when + std::chrono::seconds(5), ec);
+                rm.ReloadChangedAssets();
+                std::shared_ptr<sage::render::SkinnedModel> after = rm.GetSkinnedModel(rigRef);
+                // ДРУГОЙ объект: у скелетной модели наружу торчат указатели
+                // внутрь (аниматор держит адреса скелета и клипов), и подменять
+                // её содержимое под ними нельзя — запись заменяется целиком.
+                if (!after || after == before) {
+                    LOG_ERROR("Editor") << "SELFTEST: скелетная модель не перечиталась";
+                    ok = false;
+                }
+            }
+            fs::remove(rig, ec);
+        }
+    }
+
     // --- Звук живёт в режиме ПРАВКИ, а не только в игре ------------------------
     //
     // Кнопка «Послушать» у компонента и проигрыватель звукового файла ставят

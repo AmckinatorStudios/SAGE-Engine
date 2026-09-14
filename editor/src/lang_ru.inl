@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1554.
+// Язык: Русский. Строк: 1556.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -396,6 +396,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Внести"},
     {"Bring into the project",
      "Внести в проект"},
+    {"Bringing into the project: ",
+     "Внесение в проект: "},
     {"Broken references: ",
      "Битых ссылок: "},
     {"Brought in: ",
@@ -990,6 +992,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ссылка на файл"},
     {"Files brought into the project: ",
      "Внесено в проект файлов: "},
+    {"Files changed on disk — reloaded: ",
+     "Файлы изменились на диске — перечитано: "},
     {"Fill",
      "Заливка"},
     {"Fill / Tint",
