@@ -34,19 +34,37 @@ public:
     void Draw(EditorHost& host, bool& open);
 
 private:
-    // Что рисуем для одного действия (тело раскрытого узла).
-    void DrawAction(EditorHost& host, sage::input::Context& context,
-                    sage::input::Action& action, const std::string& contextName);
-    // Строка одной привязки: источник, кнопка «переназначить», удаление.
-    // Возвращает true, если привязку попросили удалить.
-    bool DrawBinding(EditorHost& host, sage::input::Action& action, int index,
-                     const std::string& contextName);
+    // Три колонки окна — контексты, список действий выбранного контекста,
+    // подробности ВЫБРАННОГО действия. Разделение намеренное: раньше все
+    // действия были раскрывающимися узлами в одном списке, и стоило раскрыть
+    // два — настройки одного действия наезжали на настройки соседнего, а сам
+    // список действий (то, ПО ЧЕМУ ориентируются) уезжал за край окна.
+    // Список — только выбор, подробности — только выбранное; смешивать их
+    // назад нельзя, это и была причина путаницы.
+    void DrawContextsColumn(EditorHost& host, sage::input::InputSystem& input);
+    void DrawActionsColumn(EditorHost& host, sage::input::Context& context);
+    // Всё об ОДНОМ выбранном действии: вид, поведение, список управления.
+    // Возвращает true, если действие попросили удалить (сама Draw() решает,
+    // что делать с выбором после этого).
+    bool DrawActionDetail(EditorHost& host, sage::input::Action& action, const std::string& contextName);
+    // Раздел «Управление»: таблица привязок + кнопки добавления.
+    void DrawBindingsSection(EditorHost& host, sage::input::Action& action,
+                             const std::string& contextName);
+    // Раздел «Поведение»: то, что зависит от вида действия (кнопка/ось/вектор).
+    void DrawBehaviorSection(EditorHost& host, sage::input::Action& action);
+    // Строка одной привязки — ряд таблицы: источник, устройство, вклад/ось,
+    // конфликт, удаление. Возвращает true, если привязку попросили удалить.
+    bool DrawBindingRow(EditorHost& host, sage::input::Action& action, int index,
+                        const std::string& contextName);
     // Модалка ловли. Возвращает true в тот кадр, когда источник пойман.
     bool DrawCaptureModal(EditorHost& host, sage::input::Binding& caught);
     // Кто ещё занял этот источник (пусто, если никто). Отдельной функцией,
     // потому что вопрос задаётся и при показе привязки, и при назначении новой.
     std::string ConflictWith(sage::input::InputSystem& input, const sage::input::Binding& binding,
                              const sage::input::Action* self) const;
+    // Есть ли конфликт хоть у одной привязки действия — для метки в списке:
+    // видно СРАЗУ, не раскрывая действие, у кого клавиши спорят.
+    bool HasAnyConflict(sage::input::InputSystem& input, const sage::input::Action& action) const;
 
     // Куда положить пойманный источник: имя контекста + имя действия + номер
     // привязки (−1 — добавить новую). Строками, а не указателями: пока открыта
@@ -57,8 +75,14 @@ private:
     int m_captureBinding = -1;
     bool m_captureOpen = false;
 
-    // Выбранный контекст (по имени — по той же причине).
+    // Выбранные контекст и действие (по имени — по той же причине, что выше).
     std::string m_selectedContext;
+    std::string m_selectedAction;
+
+    // Поиск по имени действия в средней колонке — список легко растёт за
+    // пределы экрана (движение, обзор, десяток боевых команд, инвентарь), а
+    // пролистывать его глазами дольше, чем набрать три буквы.
+    char m_actionFilter[64] = {0};
 
     char m_newContextName[64] = {0};
     char m_newActionName[64] = {0};

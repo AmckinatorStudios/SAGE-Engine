@@ -1557,6 +1557,39 @@
     "Marked as static geometry for baked lighting": "Помечен как статичная геометрия для запечённого света",
     "Bringing into the project: ": "Внесение в проект: ",
     "Files changed on disk — reloaded: ": "Файлы изменились на диске — перечитано: ",
-    "Last session died on a file — it is quarantined: ": "Прошлый запуск оборвался на файле — он в карантине: "
+    "Last session died on a file — it is quarantined: ": "Прошлый запуск оборвался на файле — он в карантине: ",
+    "A new action in this context": "Новое действие в этом контексте",
+    "A new input context": "Новый контекст ввода",
+    "A stick, trigger or the mouse as an axis": "Стик, курок или мышь как ось",
+    "Actions of the game and what fires them — the game code asks for the action, never the key.":
+        "Действия игры и то, чем они вызываются — игровой код спрашивает про действие, а не про клавишу.",
+    "Add one below.": "Добавьте его ниже.",
+    "Axis...": "Ось…",
+    "Behavior": "Поведение",
+    "Conflict": "Конфликт",
+    "Context": "Контекст",
+    "Control": "Управление",
+    "Dead zone shape": "Форма мёртвой зоны",
+    "Delete this action": "Удалить это действие",
+    "Device": "Устройство",
+    "Higher priority takes a device away from contexts below it.":
+        "Более высокий приоритет забирает устройство у контекстов ниже.",
+    "No action selected": "Действие не выбрано",
+    "No actions yet": "Действий пока нет",
+    "No context selected": "Контекст не выбран",
+    "No controls yet": "Управления пока нет",
+    "Normalize diagonal": "Нормировать диагональ",
+    "Pick one from the list, or create a new one on the left.":
+        "Выберите из списка или создайте новое слева.",
+    "Pick one on the left, or create a new one.": "Выберите слева или создайте новый.",
+    "Press a key, mouse button or gamepad button": "Нажмите клавишу, кнопку мыши или геймпада",
+    "Remove this control": "Убрать эту привязку",
+    "Search actions...": "Поиск действий...",
+    "Takes": "Забирает",
+    "The action can never fire. Add one below.": "Действие никогда не сработает. Добавьте управление ниже.",
+    "Try another search.": "Попробуйте другой запрос.",
+    "Tuning": "Настройка",
+    "Vector": "Вектор",
+    "conflict": "конфликт"
   }
 }
