@@ -123,6 +123,37 @@ void ScriptEngine::RegisterSceneApi() {
     Bind("core", "log", "log", [](const std::string& message) {
         LOG_INFO("Lua") << message;
     });
+    // Предупреждение и ошибка — ОТДЕЛЬНО от log(): в консоли редактора они
+    // красятся иначе (жёлтый/красный) и не теряются в потоке обычных строк.
+    // logError НЕ останавливает скрипт — это НЕ то же самое, что встроенный
+    // Lua error() (тот бросает исключение и прерывает текущий вызов целиком).
+    // Для «сообщить и продолжить» нужен именно этот путь, а не try/pcall
+    // вокруг всего тела: настоящую ошибку, обрывающую выполнение, по-прежнему
+    // даёт встроенный error("...").
+    Bind("core", "logWarn", "logWarn", [](const std::string& message) {
+        LOG_WARN("Lua") << message;
+    });
+    Bind("core", "logError", "logError", [](const std::string& message) {
+        LOG_ERROR("Lua") << message;
+    });
+
+    // print — рука тянется к нему по привычке из любого другого языка.
+    // НАСТОЯЩИЙ Lua print пишет в stdout, а у игры нет окна консоли ни в
+    // редакторе, ни в собранной сборке — вывод улетал бы в никуда молча, и
+    // человек решил бы, что скрипт не выполнился вовсе (см. print, который
+    // "не печатает" — самый частый первый вопрос новичка в любом движке).
+    // Тот же путь, что у log(): консоль редактора и файл лога игры, но с
+    // поведением НАСТОЯЩЕГО print — несколько аргументов через таб, tostring
+    // на каждый (числа, bool, таблицы адресом — как в обычной Lua).
+    m_lua.set_function("print", [this](sol::variadic_args args) {
+        std::string line;
+        sol::function tostring = m_lua["tostring"];
+        for (auto v : args) {
+            if (!line.empty()) line += "\t";
+            line += tostring(v).get<std::string>();
+        }
+        LOG_INFO("Lua") << line;
+    });
 
     // --- Сцена: спавн/поиск/удаление объектов из Lua (доступно после BindScene) ---
     Bind("scene", "Spawn", "SpawnObject", [this](const std::string& name) -> GameObject {

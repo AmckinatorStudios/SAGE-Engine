@@ -117,6 +117,14 @@ self = nil
 ---@param message any
 function log(message) end
 
+---То же самое, что log(), но настоящим Lua print: любое число аргументов,
+---через таб, tostring на каждый. Стандартный print пишет в stdout, которого
+---у игры нет (ни в редакторе, ни в сборке) — вывод улетал бы в никуда молча,
+---поэтому здесь print ПЕРЕОПРЕДЕЛЁН на тот же путь, что у log()/logWarn()/
+---logError() (консоль редактора + файл лога игры).
+---@param ... any
+function print(...) end
+
 ---Ждать внутри StartCoroutine. Вне корутины смысла не имеет.
 ---@param seconds number
 function wait(seconds) end
@@ -320,6 +328,10 @@ core = nil
 
 ---@param message string
 function sage.core.log(message) end
+---@param message string
+function sage.core.logError(message) end
+---@param message string
+function sage.core.logWarn(message) end
 
 ---@class sage.events
 sage.events = {}
@@ -1405,6 +1417,10 @@ WasActionReleased = sage.input.WasReleased
 WasActionTriggered = sage.input.Triggered
 ---@type fun(...): any
 log = sage.core.log
+---@type fun(...): any
+logError = sage.core.logError
+---@type fun(...): any
+logWarn = sage.core.logWarn
 
 -- --- Хуки скрипта ---------------------------------------------------------
 -- Объявляются в файле скрипта; движок зовёт их сам. Ни один не обязателен.
