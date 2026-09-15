@@ -208,48 +208,56 @@ bool PropertyVec3(const char* id, float v[3], float speed, const char* format,
     const Style& ui = Get();
     ImGui::PushID(id);
     const float avail = ImMax(ImGui::GetContentRegionAvail().x - reserveRight, 60.0f);
-    // Три равных поля с одинаковыми промежутками. Ширина считается один раз и
-    // округляется вниз, чтобы третье поле не вылезало за край панели.
     const float gap = ui.SpacingXS;
-    const float w = ImFloor((avail - gap * 2.0f) / 3.0f);
-    bool changed = false;
     static const char* kAxis[3] = {"X", "Y", "Z"};
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                        ImVec2(ui.PaddingControlY, ui.PaddingControlY));
+    const float frameH = ImGui::GetFrameHeight();
+    // Буква оси — ОТДЕЛЬНЫЙ ярлык ПЕРЕД полем, а не наложение поверх него.
+    // Раньше буква рисовалась поверх той же прямоугольной области, что и
+    // само число, а ImGui центрирует число по ВСЕЙ ширине поля — «-1.600»
+    // шире, чем «0.0», и рано или поздно наезжает на букву: жаловались
+    // именно на это («вплотную»). У ярлыка и у поля значения теперь СВОИ,
+    // непересекающиеся прямоугольники — наехать друг на друга им нечем.
+    const float labelW = ImGui::CalcTextSize("X").x + ui.SpacingSM * 2.0f;
+    const float labelGap = ui.SpacingXS * 0.75f;
+    const float groupW = ImFloor((avail - gap * 2.0f) / 3.0f);
+
+    bool changed = false;
     for (int i = 0; i < 3; ++i) {
         if (i) ImGui::SameLine(0.0f, gap);
         ImGui::PushID(i);
-        ImGui::SetNextItemWidth(i == 2 ? ImMax(w, avail - (w + gap) * 2.0f) : w);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-                            ImVec2(ui.PaddingControlY, ui.PaddingControlY));
-        changed |= ImGui::DragFloat("##v", &v[i], speed, 0.0f, 0.0f, format);
-        ImGui::PopStyleVar();
-        // Буква оси — ВНУТРИ поля слева, плашкой цвета этой оси: отдельной
-        // подписью она съедала бы треть ширины строки, а без неё три
-        // одинаковых поля было не отличить друг от друга. Цвет — тот же,
-        // что у манипулятора сцены и гизмо в углу вьюпорта
-        // (EditorTheme::AxisColor): «красное — X» читается здесь тем же
-        // взглядом, что и во вьюпорте, вместо одинаковой серой буквы для
-        // всех трёх осей.
-        //
-        // ПЛАШКА, А НЕ ГОЛАЯ ЦВЕТНАЯ БУКВА: чистый красный/зелёный/синий
-        // текст прямо на фоне поля ввода либо резал бы глаз (светлая тема),
-        // либо терялся в контрасте (тёмная); тонированная подложка держит
-        // читаемость в обеих и выглядит меткой, а не случайным цветом текста.
+
+        // Плашка — ПОЧТИ СПЛОШНОЙ цвет оси и БЕЛАЯ буква, а не приглушённая
+        // тонировка: полупрозрачная подложка прошлой версии («плохо видно»)
+        // сливалась и с тёмной, и со светлой темой. Сплошной цвет читается
+        // в обеих без исключений — ровно как сам манипулятор сцены, который
+        // тоже красят чистым, а не приглушённым (см. EditorTheme::AxisColor).
         const ImVec4 axis = EditorTheme::AxisColor(i);
-        const ImU32 axisFg = ImGui::GetColorU32(axis);
-        const ImU32 axisBg = ImGui::GetColorU32(ImVec4(axis.x, axis.y, axis.z, 0.20f));
-        const ImVec2 p0 = ImGui::GetItemRectMin();
-        const ImVec2 p1 = ImGui::GetItemRectMax();
-        const float textH = ImGui::GetTextLineHeight();
-        const float letterW = ImGui::CalcTextSize(kAxis[i]).x;
-        const ImVec2 chipMin(p0.x + 2.0f, p0.y + 2.0f);
-        const ImVec2 chipMax(chipMin.x + letterW + ui.SpacingXS * 1.6f, p1.y - 2.0f);
+        const ImU32 axisBg = ImGui::GetColorU32(ImVec4(axis.x, axis.y, axis.z, 0.92f));
+        const ImU32 axisFg = IM_COL32(255, 255, 255, 255);
+        const ImVec2 labelP0 = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(ImVec2(labelW, frameH));
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(chipMin, chipMax, axisBg, ui.CornerRadiusSmall);
-        dl->AddText(
-            ImVec2(chipMin.x + ui.SpacingXS * 0.8f, p0.y + (p1.y - p0.y - textH) * 0.5f),
-            axisFg, kAxis[i]);
+        dl->AddRectFilled(labelP0, ImVec2(labelP0.x + labelW, labelP0.y + frameH),
+                          axisBg, ui.CornerRadiusSmall);
+        const ImVec2 letterSize = ImGui::CalcTextSize(kAxis[i]);
+        dl->AddText(ImVec2(labelP0.x + (labelW - letterSize.x) * 0.5f,
+                           labelP0.y + (frameH - letterSize.y) * 0.5f),
+                    axisFg, kAxis[i]);
+        ImGui::SameLine(0.0f, labelGap);
+
+        // Та же поправка на остаток от округления, что была у ширины поля
+        // целиком: без неё третья группа (ярлык+поле) на паре пикселей не
+        // дотягивалась бы до правого края панели.
+        const float thisGroupW = (i == 2) ? ImMax(groupW, avail - (groupW + gap) * 2.0f) : groupW;
+        const float fieldW = ImMax(thisGroupW - labelW - labelGap, 24.0f);
+        ImGui::SetNextItemWidth(fieldW);
+        changed |= ImGui::DragFloat("##v", &v[i], speed, 0.0f, 0.0f, format);
         ImGui::PopID();
     }
+    ImGui::PopStyleVar();
     ImGui::PopID();
     return changed;
 }
