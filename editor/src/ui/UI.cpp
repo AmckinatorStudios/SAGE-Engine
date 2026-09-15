@@ -220,8 +220,13 @@ bool PropertyVec3(const char* id, float v[3], float speed, const char* format,
     // шире, чем «0.0», и рано или поздно наезжает на букву: жаловались
     // именно на это («вплотную»). У ярлыка и у поля значения теперь СВОИ,
     // непересекающиеся прямоугольники — наехать друг на друга им нечем.
-    const float labelW = ImGui::CalcTextSize("X").x + ui.SpacingSM * 2.0f;
-    const float labelGap = ui.SpacingXS * 0.75f;
+    // Плашка — ВПРИТЫК к букве (по бокам чуть-чуть, не треть поля): раньше
+    // отступ считался от SpacingSM (8 — зазор между СОСЕДНИМИ полями строки),
+    // а тут не зазор, а рамка вокруг одной буквы, и она забирала себе больше
+    // трети каждого поля — с тем и жаловались, что поля стали узкими и
+    // мелкими. Цифрам достаётся весь освободившийся остаток.
+    const float labelW = ImGui::CalcTextSize("X").x + ui.SpacingXS * 1.5f;
+    const float labelGap = ui.SpacingXS * 0.5f;
     const float groupW = ImFloor((avail - gap * 2.0f) / 3.0f);
 
     bool changed = false;
