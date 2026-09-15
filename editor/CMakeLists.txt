@@ -21,6 +21,7 @@ add_executable(SageEditor WIN32
     src/EditorSelfTest.cpp
     src/EditorSceneRenderer.cpp
     src/EditorTheme.cpp
+    src/PostChainUi.cpp
     src/ui/UIStyle.cpp
     src/ui/UI.cpp
     src/ui/Commands.cpp

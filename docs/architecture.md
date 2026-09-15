@@ -432,7 +432,11 @@ cfg.ApplyEnvOverrides(); EngineConfig::Set(cfg);`, после чего окно 
   внутреннего разрешения `renderScale` (0.25..2.0 — быстрее/чётче).
 - **Графика**: `shadows` (+`shadowResolution` 512..4096), `postProcessing`,
   `fog`, `skybox` — любой тяжёлый проход отключается одним флагом.
-- **Пост-эффекты**: `exposure`/`gamma`/`saturation`/`contrast`/`vignette`.
+- **Пост-эффекты**: `chain` — ТРАКТ проекта (состав и порядок звеньев, см.
+  [rendering.md](rendering.md)); поля `exposure`/`gamma`/`saturation`/`contrast`/
+  `vignette`/`bloom`/`ao`/… остались умолчанием для проекта, который тракт не
+  трогал. Правятся они (точнее, сам тракт) в редакторе, **Window → Game
+  Settings**; у камеры может быть свой тракт — компонентом `Post-Processing`.
 
 **Файл** (`sage.cfg` рядом с игрой). Пример:
 

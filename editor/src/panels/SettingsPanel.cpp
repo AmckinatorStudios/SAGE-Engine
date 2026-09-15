@@ -4,6 +4,9 @@
 #include <cfloat>
 #include "EditorHost.h"
 #include "Project.h"
+#include "PostChainUi.h"
+#include "sage/render/PostChainComponent.h"
+#include "sage/render/PostChainIO.h"
 
 #include <imgui.h>
 #include "../Localization.h"
@@ -99,27 +102,26 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::Checkbox(T("Skybox"), &c.Skybox);
     }
 
+    // --- Тракт пост-обработки ПРОЕКТА ---------------------------------------
+    //
+    // Раньше здесь стоял десяток полей: экспозиция, гамма, насыщенность,
+    // контраст, виньетка, свечение, затенение. Поля описывали ЧТО включать, но
+    // не описывали ПОРЯДОК, и менять этот порядок было нельзя — он жил в коде
+    // движка. Теперь здесь ТРАКТ: тот же редактор, что у камеры, — состав и
+    // порядок эффектов видны и правятся.
+    //
+    // Плоские поля в конфиге при этом никуда не делись и остаются УМОЛЧАНИЕМ для
+    // проекта, который тракт не трогал: так работают все проекты, настроенные до
+    // появления трактов (см. ProjectPostChain).
     if (EditorTheme::SectionHeader(T("Post-Process" "###Post-Process"))) {
         ImGui::BeginDisabled(!c.PostProcessing);
-        ImGui::SliderFloat(T("Exposure"), &c.Exposure, 0.1f, 4.0f);
-        ImGui::SliderFloat(T("Gamma"), &c.Gamma, 1.0f, 3.0f);
-        ImGui::SliderFloat(T("Saturation"), &c.Saturation, 0.0f, 2.0f);
-        ImGui::SliderFloat(T("Contrast"), &c.Contrast, 0.5f, 2.0f);
-        ImGui::SliderFloat(T("Vignette"), &c.Vignette, 0.0f, 1.0f);
-
-        ImGui::SeparatorText(T("Bloom"));
-        ImGui::Checkbox(T("Bloom"), &c.Bloom);
-        ImGui::BeginDisabled(!c.Bloom);
-        ImGui::SliderFloat(T("Bloom Threshold"), &c.BloomThreshold, 0.0f, 3.0f);
-        ImGui::SliderFloat(T("Bloom Intensity"), &c.BloomIntensity, 0.0f, 2.0f);
-        ImGui::EndDisabled();
-
-        ImGui::SeparatorText(T("Ambient Occlusion (SSAO)"));
-        ImGui::Checkbox(T("Ambient Occlusion"), &c.AmbientOcclusion);
-        ImGui::BeginDisabled(!c.AmbientOcclusion);
-        ImGui::SliderFloat(T("AO Strength"), &c.AOStrength, 0.0f, 4.0f);
-        ImGui::SliderFloat(T("AO Radius"), &c.AORadius, 0.05f, 2.0f);
-        ImGui::EndDisabled();
+        // Читаем тракт проекта и пишем обратно ТОЛЬКО если его изменили: до
+        // первой правки в конфиге тракта нет вовсе, и это правильное состояние —
+        // «собрать из полей», а не «пустой тракт».
+        sage::render::PostChain chain = sage::render::ProjectPostChain(c);
+        if (sage::editor::DrawPostChainEditor(nullptr, chain, "settings"))
+            c.PostChain = sage::render::PostChainToJson(chain).dump();
+        EditorTheme::Hint(T("a camera with its own chain uses it instead of this one"));
         ImGui::EndDisabled();
     }
 
