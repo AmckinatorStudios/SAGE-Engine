@@ -4,6 +4,7 @@
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/LodGroup.h"
 #include "sage/gi/GI.h"
+#include "sage/render/PostChainIO.h"
 #include "sage/render/ResourceManager.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -353,92 +354,18 @@ static LightComponent::Type LightTypeFromString(const std::string& text) {
 
 // --- Тракт пост-обработки на камере -------------------------------------------
 //
-// Значения параметров пишутся ПО ИМЕНИ, а не позиционно.
-//
-// Это не украшение. Список параметров звена принадлежит ДВИЖКУ и в следующей
-// версии может подрасти или переставиться: добавили настройку — добавили
-// параметр. Позиционная запись в таком случае сдвинула бы значения всех
-// последующих параметров, и старая сцена молча открылась бы с чужими
-// настройками. Именная переживает и добавление, и перестановку; чего в файле
-// нет — берётся из умолчаний вида, а чего в виде нет — пропускается.
-static const sage::render::PostParamDesc* PostParamByName(const sage::render::PostEffect& e,
-                                                          const char* name) {
-    const sage::render::PostEffectKind* kind =
-        sage::render::PostEffectCatalog::Instance().Find(e.Kind);
-    if (!kind) return nullptr;
-    for (const sage::render::PostParamDesc& d : kind->Params)
-        if (d.Name == name) return &d;
-    return nullptr;
-}
-
+// Сам формат тракта живёт в движке (sage/render/PostChainIO.h) и ОДИН на всех,
+// кто его хранит: сцену и конфиг проекта. Здесь только место компонента в файле
+// сцены — так же, как у камеры, света и прочих компонентов.
 static void SavePostChain(json& j, const sage::render::PostChainComponent& component) {
+    j["postChain"] = sage::render::PostChainToJson(component.Chain);
     j["postChain"]["useProjectDefault"] = component.UseProjectDefault;
-    json effects = json::array();
-    for (const sage::render::PostEffect& e : component.Chain.Effects) {
-        const sage::render::PostEffectKind* kind =
-            sage::render::PostEffectCatalog::Instance().Find(e.Kind);
-        if (!kind) continue; // звено неизвестного вида сохранять нечем
-        json params = json::object();
-        for (size_t i = 0; i < kind->Params.size() && i < e.Values.size(); ++i) {
-            const sage::render::PostParamDesc& d = kind->Params[i];
-            const sage::render::PostValue& v = e.Values[i];
-            switch (d.Type) {
-            case sage::render::PostParamType::Heading:
-                break; // у подписи-разделителя значения нет
-            case sage::render::PostParamType::Bool:
-                params[d.Name] = v.B;
-                break;
-            case sage::render::PostParamType::Vec2:
-                params[d.Name] = {v.V[0], v.V[1]};
-                break;
-            case sage::render::PostParamType::Color:
-                params[d.Name] = {v.V[0], v.V[1], v.V[2], v.V[3]};
-                break;
-            default:
-                params[d.Name] = v.V[0];
-                break;
-            }
-        }
-        effects.push_back(
-            {{"kind", e.Kind}, {"enabled", e.Enabled}, {"params", std::move(params)}});
-    }
-    j["postChain"]["effects"] = std::move(effects);
 }
 
 static sage::render::PostChainComponent ParsePostChain(const json& cj) {
-    using namespace sage::render;
-    PostChainComponent component;
+    sage::render::PostChainComponent component;
     component.UseProjectDefault = cj.value("useProjectDefault", false);
-    if (!cj.contains("effects") || !cj["effects"].is_array()) return component;
-
-    for (const json& ej : cj["effects"]) {
-        PostEffect e = MakePostEffect(ej.value("kind", std::string()));
-        e.Enabled = ej.value("enabled", true);
-        const json& params = ej.contains("params") ? ej["params"] : json::object();
-        if (params.is_object()) {
-            for (auto it = params.begin(); it != params.end(); ++it) {
-                PostValue* v = e.Find(it.key().c_str());
-                const PostParamDesc* desc = PostParamByName(e, it.key().c_str());
-                if (!v || !desc) continue; // параметр исчез из вида — это не ошибка файла
-                const json& value = it.value();
-                // БИТЫЙ ФАЙЛ НЕ ДОЛЖЕН БРОСАТЬ: значения приходят из текста,
-                // который правят руками, и строка там, где ждали число, — обычное
-                // дело. Непонятное значение просто не применяется, а параметр
-                // остаётся на умолчании вида.
-                if (desc->Type == PostParamType::Bool) {
-                    v->B = value.is_boolean() ? value.get<bool>()
-                                              : (value.is_number() && value.get<float>() != 0.0f);
-                    v->V[0] = v->B ? 1.0f : 0.0f;
-                } else if (value.is_number()) {
-                    v->V[0] = value.get<float>();
-                } else if (value.is_array()) {
-                    for (size_t i = 0; i < value.size() && i < 4; ++i)
-                        if (value[i].is_number()) v->V[i] = value[i].get<float>();
-                }
-            }
-        }
-        component.Chain.Effects.push_back(std::move(e));
-    }
+    component.Chain = sage::render::PostChainFromJson(cj);
     return component;
 }
 

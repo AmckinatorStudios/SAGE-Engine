@@ -225,6 +225,10 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Bloom            = pp.value("bloom", Bloom);
     BloomThreshold   = pp.value("bloomThreshold", BloomThreshold);
     BloomIntensity   = pp.value("bloomIntensity", BloomIntensity);
+    // Авторский тракт проекта. Хранится текстом и разбирается тем, кто его
+    // исполняет; здесь важно только не потерять его при перезаписи файла — иначе
+    // «сохранить настройки» в редакторе стирало бы тракт проекта.
+    if (pp.contains("chain") && pp["chain"].is_array()) PostChain = pp["chain"].dump();
     Volumetrics        = pp.value("volumetrics", Volumetrics);
     VolumetricShafts   = pp.value("volumetricShafts", VolumetricShafts);
     VolumetricClouds   = pp.value("volumetricClouds", VolumetricClouds);
@@ -335,6 +339,18 @@ std::string EngineConfig::ToJsonString() const {
         {"fxaa", Fxaa},
         {"fxaaContrastThreshold", FxaaContrastThreshold},
     };
+    // АВТОРСКИЙ ТРАКТ ПРОЕКТА — отдельным присваиванием, а не строкой в списке
+    // выше: он хранится ТЕКСТОМ (см. Config.h) и разбирается в JSON здесь, на
+    // выходе. Пустой тракт в файл НЕ пишется: его отсутствие и означает «собрать
+    // тракт из полей выше», то есть ровно то состояние, в котором проект был до
+    // появления трактов.
+    if (!PostChain.empty()) {
+        try {
+            j["postProcess"]["chain"] = json::parse(PostChain);
+        } catch (const std::exception&) {
+            // Битый текст тракта — не повод не сохранить остальные настройки.
+        }
+    }
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
     };

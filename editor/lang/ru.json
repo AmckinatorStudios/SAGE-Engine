@@ -1611,6 +1611,7 @@
     "Focus Distance": "Дистанция фокуса",
     "Max Radius": "Предел радиуса",
     "Chromatic Aberration": "Хроматическая аберрация",
-    "Contrast Threshold": "Порог контраста"
+    "Contrast Threshold": "Порог контраста",
+    "a camera with its own chain uses it instead of this one": "камера со своим трактом использует его, а не этот"
   }
 }
