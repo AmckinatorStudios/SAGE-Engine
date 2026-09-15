@@ -544,18 +544,12 @@ void TestGameLayer::OnAttach() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_shadowsEnabled = cfg.Shadows;
     m_postEnabled = cfg.PostProcessing;
-    // PostFX (SSAO + Bloom + виньетка) — параметры из EngineConfig.
-    m_postfxSettings.Exposure = cfg.Exposure;
-    m_postfxSettings.Gamma = cfg.Gamma;
-    m_postfxSettings.Saturation = cfg.Saturation;
-    m_postfxSettings.Contrast = cfg.Contrast;
-    m_postfxSettings.Vignette = cfg.Vignette;
-    m_postfxSettings.BloomEnabled = cfg.Bloom;
-    m_postfxSettings.BloomThreshold = cfg.BloomThreshold;
-    m_postfxSettings.BloomIntensity = cfg.BloomIntensity;
-    m_postfxSettings.AOEnabled = cfg.AmbientOcclusion;
-    m_postfxSettings.AOStrength = cfg.AOStrength;
-    m_postfxSettings.AORadius = cfg.AORadius;
+    // Тракт пост-обработки — из конфига проекта, тем же способом, что в
+    // редакторе и в плеере. Раньше игра собирала настройки ПОЛЯМИ, и это
+    // означало, что всё, о чём она не написала, оставалось на умолчаниях
+    // структуры: сглаживание включалось само, а глубина резкости и смаз
+    // движения не включались никогда, даже если проект их просил.
+    m_postfxChain = sage::render::PostChain::FromConfig(cfg);
     m_autopilot = (std::getenv("SAGE_TESTGAME_AUTOPILOT") != nullptr);
 
     // --- аудио (первым: скрипты сцен биндят его при привязке) ---
@@ -1025,7 +1019,7 @@ void TestGameLayer::OnRender() {
         // виньетка. Пишет в экран, letterbox-viewport (vpX..).
         m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                          m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
-                         m_postfxSettings,
+                         m_postfxChain,
                          /*output=*/nullptr, vpX, vpY, vpW, vpH);
     } else {
         device.SetSRGBWrite(false); // HUD ниже — его цвета уже в sRGB

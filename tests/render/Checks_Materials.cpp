@@ -111,7 +111,7 @@ float BallHighlight(const Image& img) {
 }
 
 Image Shot(FrameRenderer& r, Scene& scene) {
-    return RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH);
+    return RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH);
 }
 
 // --- 1. Материал красит объект, и правка видна СРАЗУ -----------------------

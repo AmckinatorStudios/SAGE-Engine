@@ -48,6 +48,8 @@ SAGE-Engine/
       scene/    Scene (ECS), Components, Transform, Light, SceneSerializer
       render/   Shader, Camera, Mesh (+примитивы), Model, SkinnedModel, Font,
                 Material, Skybox, SkyRenderer (небо), ShadowMap, PostProcess,
+                PostEffect/PostChain/PostChainComponent (тракт пост-обработки
+                как композиция звеньев, см. rendering.md), PostFX (исполнитель),
                 DebugDraw (гизмо/линии в мире), ...
       anim/     Skeleton, Animator, SkinnedModel — скелетная анимация
       ui/       UIRenderer (текст TrueType), Widgets — immediate-mode UI

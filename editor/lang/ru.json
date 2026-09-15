@@ -1590,6 +1590,27 @@
     "Try another search.": "Попробуйте другой запрос.",
     "Tuning": "Настройка",
     "Vector": "Вектор",
-    "conflict": "конфликт"
+    "conflict": "конфликт",
+    "Use the project chain": "Взять тракт проекта",
+    "this camera is processed by the project chain from sage.cfg": "эта камера обрабатывается трактом проекта из sage.cfg",
+    "The chain will not run:": "Тракт не сработает:",
+    "Empty chain: the frame is only tone-mapped": "Пустой тракт: кадр только тон-маппится",
+    "Move up": "Выше",
+    "Move down": "Ниже",
+    "Add effect": "Добавить эффект",
+    "Choose an effect": "Выберите эффект",
+    "Unknown effect": "Неизвестный эффект",
+    "What is done to this camera's frame before it is shown": "Что делается с кадром этой камеры перед показом",
+    "Color": "Цвет",
+    "Depth of Field": "Глубина резкости",
+    "Motion Blur": "Смаз движения",
+    "Tone Map & Grade": "Тон-маппинг и цвет",
+    "FXAA": "FXAA",
+    "Amount": "Сила",
+    "Aperture": "Диафрагма",
+    "Focus Distance": "Дистанция фокуса",
+    "Max Radius": "Предел радиуса",
+    "Chromatic Aberration": "Хроматическая аберрация",
+    "Contrast Threshold": "Порог контраста"
   }
 }

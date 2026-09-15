@@ -49,6 +49,7 @@ add_executable(sage_tests
     test_components_mesh_animation.cpp
     test_sky.cpp
     test_bench.cpp
+    test_posteffect.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

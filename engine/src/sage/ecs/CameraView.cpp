@@ -27,13 +27,16 @@ CameraFrame CameraFrameFor(Scene& scene, entt::entity camera, float aspect) {
     return frame;
 }
 
-CameraFrame PrimaryCameraFrame(Scene& scene, float aspect) {
-    entt::entity camEntity = entt::null;
+entt::entity PrimaryCameraEntity(Scene& scene) {
     auto view = scene.Registry().view<CameraComponent, Transform>();
     for (auto e : view) {
-        if (view.get<CameraComponent>(e).Primary) { camEntity = e; break; }
+        if (view.get<CameraComponent>(e).Primary) return e;
     }
-    return CameraFrameFor(scene, camEntity, aspect);
+    return entt::null;
+}
+
+CameraFrame PrimaryCameraFrame(Scene& scene, float aspect) {
+    return CameraFrameFor(scene, PrimaryCameraEntity(scene), aspect);
 }
 
 } // namespace sage::ecs

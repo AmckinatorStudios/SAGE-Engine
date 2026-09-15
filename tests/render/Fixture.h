@@ -52,8 +52,25 @@ glm::mat4 TestView();
 constexpr int kW = 320;
 constexpr int kH = 240;
 
-sage::render::PostFXSettings BaseSettings();
+// Тракт эталонных кадров.
+//
+// Значения зафиксированы ЗДЕСЬ, а не взяты из EngineConfig: иначе правка
+// дефолтов конфига «ломала» бы эталоны, ничего не сломав в рендере. Поэтому это
+// не PostChain::FromConfig, а собранный руками список звеньев — но ровно в том
+// порядке и с теми значениями, что были в прежней цепочке.
+//
+// FXAA в него НЕ входит: эталонные кадры снимаются без сглаживания, а оно
+// включается отдельной проверкой.
+sage::render::PostChain BaseChain();
+
 glm::mat4 PerspectiveProj();
+
+// Помощники проверок. Звено — это данные, поэтому «включить эффект» в тесте
+// означает «добавить звено», а не «выставить поле в структуре из двадцати полей».
+sage::render::PostEffect& AddEffect(sage::render::PostChain& chain, const char* kindId);
+void RemoveEffect(sage::render::PostChain& chain, const char* kindId);
+void SetParam(sage::render::PostChain& chain, const char* kindId, const char* param, float value);
+bool HasEffect(const sage::render::PostChain& chain, const char* kindId);
 
 // Владелец GPU-объектов прохода. Именно ВЛАДЕЛЕЦ, а не набор статиков внутри
 // функции: статик разрушился бы после выхода из main, когда графического
@@ -65,10 +82,24 @@ struct FrameRenderer {
     sage::render::GridRenderer Grid;
 };
 
+// chain == nullptr — БЕЗ пост-обработки: в выход уходит сам буфер сцены.
+//
+// Так проверяется «пост-обработка выключена» всерьёз. До этого проверка
+// выставляла поле Enabled в настройках, а поле НИКЕМ не читалось — то есть
+// эталон «без пост-обработки» снимался С ней, и проверка сторожила копию
+// обычного кадра.
 Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
-                  const sage::render::PostFXSettings& fx, int width, int height,
+                  const sage::render::PostChain* chain, int width, int height,
                   const sage::render::GridSettings* grid = nullptr,
                   float shadowRadius = 12.0f);
+
+// Обычный случай: тракт есть.
+inline Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
+                         const sage::render::PostChain& chain, int width, int height,
+                         const sage::render::GridSettings* grid = nullptr,
+                         float shadowRadius = 12.0f) {
+    return RenderFrame(r, scene, proj, &chain, width, height, grid, shadowRadius);
+}
 
 // --- Наборы проверок --------------------------------------------------------
 // Объявлены здесь, а вызываются из main: порядок прогона задаётся в одном

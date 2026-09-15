@@ -36,6 +36,7 @@
 #include "sage/physics/PhysicsComponents.h"    // тело, коллайдер, соединение, персонаж
 #include "sage/anim/AnimationComponents.h"     // скелетная анимация и IK
 #include "sage/render/ReflectionComponents.h"  // зонды отражений
+#include "sage/render/PostChainComponent.h"    // тракт пост-обработки на камере
 #include "sage/ui/UI.h"                        // элементы интерфейса сцены (компоненты)
 #include "sage/render/ParticleComponents.h"    // эмиттеры частиц
 #include "sage/audio/AudioComponents.h"       // источник звука на объекте

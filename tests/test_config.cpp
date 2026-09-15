@@ -357,16 +357,26 @@ TEST(Config_fxaa_and_msaa_do_not_stack) {
     sage::EngineConfig cfg;
     cfg.Fxaa = true;
 
+    // Спрашиваем у ТРАКТА, а не у плоской структуры настроек: FXAA — это звено,
+    // и «включён ли он» теперь означает «есть ли оно в тракте». Проверять поле
+    // бессмысленно — поля больше нет, а звено либо стоит, либо нет.
+    auto hasFxaa = [](const sage::EngineConfig& c) {
+        const sage::render::PostChain chain = sage::render::PostChain::FromConfig(c);
+        for (const sage::render::PostEffect& e : chain.Effects)
+            if (e.Kind == "fxaa") return true;
+        return false;
+    };
+
     cfg.Msaa = 0;
-    CHECK_TRUE(sage::render::FxFromConfig(cfg).FxaaEnabled);
+    CHECK_TRUE(hasFxaa(cfg));
 
     cfg.Msaa = 4;
-    CHECK_FALSE(sage::render::FxFromConfig(cfg).FxaaEnabled);
+    CHECK_FALSE(hasFxaa(cfg));
 
     // Выключенный руками FXAA не должен включаться сам от отсутствия MSAA.
     cfg.Fxaa = false;
     cfg.Msaa = 0;
-    CHECK_FALSE(sage::render::FxFromConfig(cfg).FxaaEnabled);
+    CHECK_FALSE(hasFxaa(cfg));
 }
 
 // Пресет Ultra обещает MSAA — и обещание должно доходить до буфера сцены.

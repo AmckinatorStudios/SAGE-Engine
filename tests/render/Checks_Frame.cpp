@@ -48,7 +48,7 @@ namespace {
 void TestScenePerspective(FrameRenderer& r, Scene& scene) {
     Report("scene_perspective", CompareWithReference(
                                     "scene_perspective",
-                                    RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH)));
+                                    RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH)));
 }
 
 // Выключенные тени НЕ ДОЛЖНЫ означать чёрную сцену.
@@ -235,13 +235,13 @@ void TestSceneOrthographic(FrameRenderer& r, Scene& scene) {
     cam.FarClip = 100.0f;
     const glm::mat4 proj = cam.ProjectionMatrix((float)kW / (float)kH);
 
-    const Image ortho = RenderFrame(r, scene, proj, BaseSettings(), kW, kH);
+    const Image ortho = RenderFrame(r, scene, proj, BaseChain(), kW, kH);
     Report("scene_orthographic", CompareWithReference("scene_orthographic", ortho));
 
     // Отдельная проверка смысла: орто-кадр обязан ОТЛИЧАТЬСЯ от перспективного.
     // Без неё тест прошёл бы и в случае, если ProjectionMatrix молча вернула
     // перспективу, — эталон просто записался бы дважды одинаковым.
-    const Image persp = RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image persp = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH);
     long long sum = 0;
     for (size_t i = 0; i < ortho.Pixels.size(); ++i) {
         sum += std::abs((int)ortho.Pixels[i] - (int)persp.Pixels[i]);
@@ -252,12 +252,13 @@ void TestSceneOrthographic(FrameRenderer& r, Scene& scene) {
 }
 
 void TestNoPostFX(FrameRenderer& r, Scene& scene) {
-    // Выключённая пост-обработка — отдельный путь кода (Enabled=false), и он
-    // тоже должен давать стабильную картинку.
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.Enabled = false;
+    // Пост-обработка ВЫКЛЮЧЕНА — отдельный путь кода, и он тоже должен давать
+    // стабильную картинку. Проверяется отсутствием ТРАКТА (nullptr), а не полем
+    // в настройках: поля Enabled не читал никто, и эталон этого кадра был снят
+    // С пост-обработкой — то есть проверка сторожила копию обычного кадра.
     Report("scene_no_postfx",
-           CompareWithReference("scene_no_postfx", RenderFrame(r, scene, PerspectiveProj(), fx, kW, kH)));
+           CompareWithReference("scene_no_postfx",
+                                RenderFrame(r, scene, PerspectiveProj(), nullptr, kW, kH)));
 }
 
 // --- Качество размытия: гладкость и сохранность фокуса -----------------------
@@ -358,14 +359,14 @@ DofQuality MeasureDofQuality(const Image& dof, const Image& sharp) {
 }
 
 void TestDepthOfField(FrameRenderer& r, Scene& scene) {
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.DofEnabled = true;
-    fx.FocusDistance = 6.0f; // примерно на сфере
-    fx.Aperture = 1.8f;
+    sage::render::PostChain fx = BaseChain();
+    AddEffect(fx, "dof");
+    SetParam(fx, "dof", "focus", 6.0f); // примерно на сфере
+    SetParam(fx, "dof", "aperture", 1.8f);
     const Image dof = RenderFrame(r, scene, PerspectiveProj(), fx, kW, kH);
     Report("scene_dof", CompareWithReference("scene_dof", dof));
 
-    const Image sharp = RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image sharp = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH);
     long long sum = 0;
     for (size_t i = 0; i < dof.Pixels.size(); ++i) {
         sum += std::abs((int)dof.Pixels[i] - (int)sharp.Pixels[i]);
@@ -390,7 +391,7 @@ void TestDepthOfField(FrameRenderer& r, Scene& scene) {
     // есть ровно в том случае, который человек получает, потянув ползунок
     // радиуса вверх. Замер прежнего прохода здесь: 99.9% 11.3, худший 20.1;
     // новый даёт 4.8 и 9.4. Пороги стоят между ними, с запасом в обе стороны.
-    fx.DofMaxRadius = 28.0f;
+    SetParam(fx, "dof", "maxRadius", 28.0f);
     const Image wide = RenderFrame(r, scene, PerspectiveProj(), fx, kW, kH);
     const DofQuality qw = MeasureDofQuality(wide, sharp);
     std::printf("       радиус 28: размытых %zu, разрыв карты резкости 99.9%% %.1f худший %.1f\n",
@@ -441,11 +442,13 @@ void TestMsaa(FrameRenderer& r) {
     const glm::mat4 proj = PerspectiveProj();
     const glm::mat4 view = TestView();
 
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.FxaaEnabled = false; // иначе измеряли бы сумму двух разных механизмов
-    fx.BloomEnabled = false;
-    fx.AOEnabled = false;
-    fx.Vignette = 0.0f;
+    sage::render::PostChain fx = BaseChain();
+    // Свечение размыло бы кромку, затенение добавило бы к измеряемому перепаду
+    // своё, а виньетка — перепад яркости к краям. Сглаживание в эталонном тракте
+    // и так выключено (см. BaseChain).
+    RemoveEffect(fx, "bloom");
+    RemoveEffect(fx, "ao");
+    SetParam(fx, "tonemap", "vignette", 0.0f);
 
     auto render = [&](int samples) {
         Framebuffer sceneFbo(kW, kH, samples);
@@ -563,11 +566,13 @@ void TestObjectMotionBlur(FrameRenderer& r) {
     const glm::mat4 view = TestView();
     const glm::mat4 viewProj = proj * view;
 
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.MotionBlurEnabled = true;
-    fx.MotionBlurAmount = 1.0f;
-    fx.BloomEnabled = false; // bloom размазал бы кромку и смазал границу измерения
-    fx.AOEnabled = false;
+    sage::render::PostChain fx = BaseChain();
+    AddEffect(fx, "motionblur");
+    SetParam(fx, "motionblur", "amount", 1.0f);
+    // Свечение размазало бы кромку и смазало границу измерения, а затенение
+    // добавило бы к ней свой перепад.
+    RemoveEffect(fx, "bloom");
+    RemoveEffect(fx, "ao");
 
     // Буфер скоростей размером с кадр. ColorHDRWithDepth: глубина нужна, чтобы
     // скорость писала ближайшая поверхность, а не последняя нарисованная.
@@ -620,8 +625,8 @@ void TestObjectMotionBlur(FrameRenderer& r) {
     // Опорный кадр без смаза, снятый в ТОЙ ЖЕ точке, куда объект сейчас
     // переедет: с ним и сравниваем, иначе разница была бы просто от смещения.
     mover.GetTransform().Position.x = -0.3f;
-    sage::render::PostFXSettings sharpFx = fx;
-    sharpFx.MotionBlurEnabled = false;
+    sage::render::PostChain sharpFx = fx;
+    RemoveEffect(sharpFx, "motionblur");
     Image sharp;
     {
         Framebuffer sceneFbo(kW, kH), output(kW, kH);
@@ -680,12 +685,12 @@ void TestObjectMotionBlur(FrameRenderer& r) {
 }
 
 void TestFxaa(FrameRenderer& r, Scene& scene) {
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.FxaaEnabled = true;
+    sage::render::PostChain fx = BaseChain();
+    AddEffect(fx, "fxaa");
     const Image aa = RenderFrame(r, scene, PerspectiveProj(), fx, kW, kH);
     Report("scene_fxaa", CompareWithReference("scene_fxaa", aa));
 
-    const Image raw = RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image raw = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH);
 
     // Сглаживание обязано (а) что-то изменить и (б) изменить именно КРОМКИ, а
     // не всё подряд: если тронуто больше половины кадра — это уже замыливание.
@@ -760,7 +765,7 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
         mr.MaterialPtr = glass;
         cube.GetTransform().Position = glm::vec3(0.0f, 0.0f, 0.0f);
         cube.GetTransform().Scale = glm::vec3(2.0f);
-        return RenderFrame(r, local, PerspectiveProj(), BaseSettings(), kW, kH);
+        return RenderFrame(r, local, PerspectiveProj(), BaseChain(), kW, kH);
     };
 
     const Image a = renderWith(data);
@@ -787,7 +792,7 @@ void TestTransparentFaceOrder(FrameRenderer& r, Scene& scene) {
     solidMat->Opacity = 1.0f;
     smr.MaterialPtr = solidMat;
     solid.GetTransform().Scale = glm::vec3(2.0f);
-    const Image opaque = RenderFrame(r, opaqueScene, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image opaque = RenderFrame(r, opaqueScene, PerspectiveProj(), BaseChain(), kW, kH);
     long long diff = 0;
     for (size_t i = 0; i < a.Pixels.size() && i < opaque.Pixels.size(); ++i)
         diff += std::abs((int)a.Pixels[i] - (int)opaque.Pixels[i]);
@@ -818,7 +823,7 @@ void TestEmissive(FrameRenderer& r, Scene& scene) {
         mat->EmissiveStrength = strength;
         mr.MaterialPtr = mat;
         cube.GetTransform().Scale = glm::vec3(1.2f);
-        return RenderFrame(r, local, PerspectiveProj(), BaseSettings(), kW, kH);
+        return RenderFrame(r, local, PerspectiveProj(), BaseChain(), kW, kH);
     };
 
     const Image dark = build(0.0f);
@@ -884,8 +889,8 @@ void TestDecals(FrameRenderer& r) {
                 sage::ecs::BuildDecals(local, sage::ecs::MakeDecalMesh);
             Check(st.Triangles > 0, "наклейка построила геометрию по сцене");
         }
-        sage::render::PostFXSettings fx = BaseSettings();
-        fx.BloomEnabled = false;  // ореол размыл бы границу, которую меряем
+        sage::render::PostChain fx = BaseChain();
+        RemoveEffect(fx, "bloom");  // ореол размыл бы границу, которую меряем
         return RenderFrame(r, local, PerspectiveProj(), fx, kW, kH);
     };
 
@@ -923,9 +928,9 @@ void TestGrid(FrameRenderer& r, Scene& scene) {
     radius.Mode = sage::render::GridSettings::Extent::Radius;
     radius.Radius = 5.0f; // заметно меньше пола (14 м), чтобы край окружности попал в кадр
 
-    const Image plain = RenderFrame(r, scene, proj, BaseSettings(), kW, kH);
-    const Image withInfinite = RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &infinite);
-    const Image withRadius = RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &radius);
+    const Image plain = RenderFrame(r, scene, proj, BaseChain(), kW, kH);
+    const Image withInfinite = RenderFrame(r, scene, proj, BaseChain(), kW, kH, &infinite);
+    const Image withRadius = RenderFrame(r, scene, proj, BaseChain(), kW, kH, &radius);
 
     Report("grid_infinite", CompareWithReference("grid_infinite", withInfinite));
     Report("grid_radius", CompareWithReference("grid_radius", withRadius));
@@ -956,7 +961,7 @@ void TestGrid(FrameRenderer& r, Scene& scene) {
     // ложь, и снять сетку с кадра было бы нечем.
     sage::render::GridSettings off = infinite;
     off.Enabled = false;
-    Check(meanDiff(RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &off), plain) < 0.001,
+    Check(meanDiff(RenderFrame(r, scene, proj, BaseChain(), kW, kH, &off), plain) < 0.001,
           "выключенная сетка не рисуется");
 
     // Прозрачность обязана влиять монотонно: половинная сетка ближе к пустому
@@ -964,7 +969,7 @@ void TestGrid(FrameRenderer& r, Scene& scene) {
     sage::render::GridSettings faint = infinite;
     faint.Opacity = 0.35f;
     const double faintVsPlain =
-        meanDiff(RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &faint), plain);
+        meanDiff(RenderFrame(r, scene, proj, BaseChain(), kW, kH, &faint), plain);
     std::printf("       полупрозрачная сетка против пустого кадра: %.2f\n", faintVsPlain);
     Check(faintVsPlain > 0.05 && faintVsPlain < infiniteVsPlain,
           "прозрачность сетки ослабляет её, но не убирает");
@@ -972,7 +977,7 @@ void TestGrid(FrameRenderer& r, Scene& scene) {
     // Шаг клетки обязан менять картинку: без этого настройка была бы мёртвой.
     sage::render::GridSettings coarse = infinite;
     coarse.CellSize = 4.0f;
-    Check(meanDiff(RenderFrame(r, scene, proj, BaseSettings(), kW, kH, &coarse), withInfinite) > 0.5,
+    Check(meanDiff(RenderFrame(r, scene, proj, BaseChain(), kW, kH, &coarse), withInfinite) > 0.5,
           "шаг клетки меняет сетку");
 }
 
@@ -1000,7 +1005,7 @@ void TestShadedWithPostIsNotBlack(FrameRenderer& r, Scene& scene) {
     r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(), 0);
     sceneFbo.Resolve();
 
-    sage::render::PostFXSettings fx = BaseSettings();
+    sage::render::PostChain fx = BaseChain();
     r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), kW, kH, proj, view, fx, &outFbo,
                 0, 0, kW, kH);
     outFbo.Resolve();

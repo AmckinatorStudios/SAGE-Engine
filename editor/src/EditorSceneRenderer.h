@@ -228,7 +228,6 @@ private:
     void EnsureShadowMap();
     void CompositeOutline(Framebuffer& target);
     void DrawEntityGizmos(Scene& scene, const std::vector<int>& selection, float gameAspect);
-    static sage::render::PostFXSettings FxFromConfig(const sage::EngineConfig& cfg);
 
     std::optional<Shader> m_outlineShader;   // lit-шейдер как flat-цвет каймы выделения
     std::optional<ShadowMap> m_shadows;

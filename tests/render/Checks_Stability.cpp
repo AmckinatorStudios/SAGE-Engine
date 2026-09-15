@@ -110,7 +110,7 @@ double MeanLuma(const Image& img) {
 // прошёл бы мимо фазы, в которой ошибка видна.
 void TestNoFrameDrift(FrameRenderer& r, Scene& scene) {
     const glm::mat4 proj = PerspectiveProj();
-    const sage::render::PostFXSettings fx = BaseSettings();
+    const sage::render::PostChain fx = BaseChain();
 
     const Image first = RenderFrame(r, scene, proj, fx, kW, kH);
     Image worstFrame;
@@ -151,7 +151,7 @@ void TestNoFrameDrift(FrameRenderer& r, Scene& scene) {
 // видит как «через полчаса всё замирает».
 void TestNoResourceGrowth(FrameRenderer& r, Scene& scene) {
     const glm::mat4 proj = PerspectiveProj();
-    const sage::render::PostFXSettings fx = BaseSettings();
+    const sage::render::PostChain fx = BaseChain();
 
     // Прогрев: первые кадры создают ленивые шейдеры и буферы — это не утечка.
     for (int i = 0; i < 5; ++i) RenderFrame(r, scene, proj, fx, kW, kH);
@@ -184,7 +184,7 @@ void TestNoResourceGrowth(FrameRenderer& r, Scene& scene) {
 // уничтожаются целиком, между циклами кадр рисуется по-настоящему.
 void TestPlayStopCyclesDoNotLeak() {
     const glm::mat4 proj = PerspectiveProj();
-    const sage::render::PostFXSettings fx = BaseSettings();
+    const sage::render::PostChain fx = BaseChain();
 
     // Один прогрев вне замера: ленивые статические шейдеры создаются один раз
     // на процесс и в цикле уже не появятся.
@@ -228,7 +228,7 @@ void TestPlayStopCyclesDoNotLeak() {
 // снятым на чистом проходе.
 void TestSceneSwapKeepsNoState() {
     const glm::mat4 proj = PerspectiveProj();
-    const sage::render::PostFXSettings fx = BaseSettings();
+    const sage::render::PostChain fx = BaseChain();
 
     // Эталон: чистый проход, ничего до него не рисовал.
     Image clean;
@@ -306,7 +306,7 @@ void TestResolutions(FrameRenderer& r, Scene& scene) {
         cam.Fov = 50.0f;
         cam.NearClip = 0.1f;
         cam.FarClip = 100.0f;
-        const Image img = RenderFrame(r, scene, cam.ProjectionMatrix(aspect), BaseSettings(),
+        const Image img = RenderFrame(r, scene, cam.ProjectionMatrix(aspect), BaseChain(),
                                       c.W, c.H);
         if (img.Width != c.W || img.Height != c.H || img.Pixels.empty()) {
             ok = false;
@@ -387,7 +387,7 @@ void TestResizeChurn(FrameRenderer& r, Scene& scene) {
     cam.NearClip = 0.1f;
     cam.FarClip = 100.0f;
     const glm::mat4 proj = cam.ProjectionMatrix(aspect);
-    const sage::render::PostFXSettings fx = BaseSettings();
+    const sage::render::PostChain fx = BaseChain();
 
     const Image fresh = RenderFrame(r, scene, proj, fx, w, h);
 
@@ -472,9 +472,9 @@ void TestMsaaMatchesSingleSample(Scene& scene) {
         // Читаем через разрешённую текстуру: именно её видит пост-обработка.
         Framebuffer copy(w, h);
         sage::render::PostFX post;
-        sage::render::PostFXSettings fx = BaseSettings();
-        fx.BloomEnabled = false;
-        fx.AOEnabled = false;
+        sage::render::PostChain fx = BaseChain();
+        RemoveEffect(fx, "bloom");
+        RemoveEffect(fx, "ao");
         post.Render(fbo.ColorTexture(), fbo.DepthTexture(), w, h, proj, view, fx, &copy, 0, 0, w,
                     h);
         copy.Bind();
@@ -586,7 +586,7 @@ void TestPassesRestoreBlendState(FrameRenderer& r, Scene& scene) {
 void TestPostFxIgnoresInheritedState(FrameRenderer& r, Scene& scene) {
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
     const glm::mat4 proj = PerspectiveProj();
-    const sage::render::PostFXSettings fx = BaseSettings();
+    const sage::render::PostChain fx = BaseChain();
 
     device.SetBlend(false);
     const Image clean = RenderFrame(r, scene, proj, fx, kW, kH);
