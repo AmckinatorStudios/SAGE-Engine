@@ -18,6 +18,7 @@
 #include "sage/vars/VarsComponent.h"
 #include "sage/events/Events.h"
 #include "sage/render/Camera.h"
+#include "sage/assets/AssetDatabase.h"
 
 #include <chrono>
 #include <filesystem>
@@ -93,6 +94,115 @@ TEST(Scripting_emissive_comes_from_the_material) {
     // Итоговое свечение больше единицы — иначе bloom не сработает и «светящийся»
     // объект окажется просто светлым.
     CHECK_TRUE(EffectiveEmissive(mr).x > 1.0f);
+}
+
+// Полная поддержка материалов из скрипта: собственный шейдер, юниформы
+// (запись/чтение/удаление) и сохранение/перезагрузка с диска — то, чего не
+// было ни у Material-usertype (только поля поверхности), ни у sage.render
+// (SetMaterialParam был "в одну сторону": писал, но не читал). Один тест на
+// всю цепочку, потому что это ОДНА возможность: "материал, собранный
+// скриптом, — полноценный ассет проекта", а не набор независимых полей.
+TEST(Scripting_materials_full_support) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_script_material_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "assets" / "shaders");
+    fs::create_directories(dir / "assets" / "materials");
+    // Настоящие .vert/.frag не нужны: GetShader на несобирающемся шейдере не
+    // бросает, а логирует и кэширует nullptr (см. ResourceManager::GetShader)
+    // — для проверки, что ПУТИ дошли до материала, этого достаточно.
+    std::ofstream(dir / "assets/shaders/water.vert") << "// stub";
+    std::ofstream(dir / "assets/shaders/water.frag") << "// stub";
+
+    sage::AssetDatabase& db = sage::AssetDatabase::Instance();
+    db.Clear();
+    db.ScanProject(dir.string());
+
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    // NewMaterial отдаёт материал БЕЗ осмысленного пути в общем кэше (см.
+    // комментарий у Bind("render","NewMaterial",...)) — поэтому всё, что
+    // проверяется по этому 'm', проверяется через сам 'm', а не повторным
+    // поиском по имени "test/water" со стороны C++: два разных способа
+    // получить материал (по сырому имени и по канонизированному пути) не
+    // обязаны указывать на один и тот же кэшированный экземпляр.
+    se.Lua().script(
+        "m = sage.render.NewMaterial('test/water')\n"
+        "m.Albedo = Vec3.new(0.1, 0.4, 0.6)\n"
+        "sage.render.SetMaterialShader(m, 'assets/shaders/water.vert', 'assets/shaders/water.frag')\n"
+        "m:SetParam('waveHeight', 0.35)\n"
+        "m:SetParam('flowDir', Vec2.new(1.0, 0.0))\n");
+
+    // Пути дошли до материала, и HasCustomShader их видит.
+    bool hasCustom = se.Lua().script(
+        "return m:HasCustomShader() and m.VertexShaderPath == 'assets/shaders/water.vert' "
+        "and m.FragmentShaderPath == 'assets/shaders/water.frag'");
+    CHECK_TRUE(hasCustom);
+
+    // Юниформа читается обратно ТЕМ ЖЕ типом, каким была задана.
+    bool paramOk = se.Lua().script(
+        "local h = m:GetParam('waveHeight')\n"
+        "local d = m:GetParam('flowDir')\n"
+        "return math.abs(h - 0.35) < 1e-4 and math.abs(d.x - 1.0) < 1e-4 "
+        "and m:HasParam('waveHeight') and not m:HasParam('nope')");
+    CHECK_TRUE(paramOk);
+
+    // ClearParam снимает ОДНУ юниформу — вторая остаётся на месте.
+    bool clearedOk = se.Lua().script(
+        "m:ClearParam('waveHeight')\n"
+        "return not m:HasParam('waveHeight') and m:HasParam('flowDir')");
+    CHECK_TRUE(clearedOk);
+
+    // Сохранение НОВОГО материала (файла ещё не было) — путь разрешается
+    // относительно проекта, не рабочей директории процесса теста.
+    se.Lua().script("sage.render.SaveMaterial(m, 'assets/materials/water.sagemat')");
+    const fs::path saved = dir / "assets/materials/water.sagemat";
+    CHECK_TRUE(fs::exists(saved));
+
+    // Независимая загрузка ТОГО ЖЕ файла (sage.render.GetMaterial по пути —
+    // отдельный, канонизированный ключ кэша) обязана увидеть ровно то, что
+    // SaveMaterial записал: цвет, оба пути шейдера и уцелевшую юниформу.
+    bool roundTripOk = se.Lua().script(
+        "local r = sage.render.GetMaterial('assets/materials/water.sagemat')\n"
+        "return math.abs(r.Albedo.x - 0.1) < 1e-4 and math.abs(r.Albedo.y - 0.4) < 1e-4 "
+        "and r.VertexShaderPath == 'assets/shaders/water.vert' "
+        "and r.FragmentShaderPath == 'assets/shaders/water.frag' "
+        "and math.abs(r:GetParam('flowDir').x - 1.0) < 1e-4 "
+        "and not r:HasParam('waveHeight')");
+    CHECK_TRUE(roundTripOk);
+
+    // Правим ЗАГРУЖЕННЫЙ экземпляр в памяти мимо файла, затем откатываем —
+    // ReloadMaterial обязан вернуть то, что реально лежит на диске, причём
+    // ТОТ ЖЕ общий экземпляр (см. ResourceManager::ReloadMaterial — правит
+    // объект на месте, а не подменяет указатель), а не собственную копию.
+    bool reloadOk = se.Lua().script(
+        "local r = sage.render.GetMaterial('assets/materials/water.sagemat')\n"
+        "r.Albedo = Vec3.new(0.9, 0.9, 0.9)\n"
+        "local reloaded = sage.render.ReloadMaterial('assets/materials/water.sagemat')\n"
+        "return math.abs(reloaded.Albedo.x - 0.1) < 1e-4 and math.abs(r.Albedo.x - 0.1) < 1e-4");
+    CHECK_TRUE(reloadOk);
+
+    // ClearMaterialShader возвращает материал к штатному PBR — на ЭТОМ же
+    // независимо загруженном экземпляре, чтобы не задевать 'm' раньше времени.
+    bool clearShaderOk = se.Lua().script(
+        "local r = sage.render.GetMaterial('assets/materials/water.sagemat')\n"
+        "sage.render.ClearMaterialShader(r)\n"
+        "return not r:HasCustomShader() and r.VertexShaderPath == '' and r.FragmentShaderPath == ''");
+    CHECK_TRUE(clearShaderOk);
+
+    // sage.render.GetMaterialParam читает то же, что положил
+    // sage.render.SetMaterialParam, — по пути, без ссылки на объект материала.
+    bool pathParamOk = se.Lua().script(
+        "sage.render.SetMaterialParam('assets/materials/water.sagemat', 'tint', 0.75)\n"
+        "return math.abs(sage.render.GetMaterialParam('assets/materials/water.sagemat', 'tint') - 0.75) < 1e-4 "
+        "and sage.render.GetMaterialParam('assets/materials/water.sagemat', 'nope') == nil");
+    CHECK_TRUE(pathParamOk);
+
+    db.Clear();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }
 
 TEST(Scripting_enum_values_bound) {

@@ -1,6 +1,8 @@
 #include "ScriptEngine.h"
 #include "ScriptApiCommon.h"
 
+#include <filesystem>
+
 #include "sage/core/Config.h"
 #include "sage/core/Log.h"
 #include "sage/render/DebugView.h"
@@ -516,6 +518,75 @@ void ScriptEngine::RegisterMeshApi() {
         else if (value.is<glm::vec4>())   mat->Params[name] = ShaderParam::Make(value.as<glm::vec4>());
         else throw std::runtime_error("SetMaterialParam: значение должно быть числом или Vec2/3/4");
     });
+
+    // Юниформа материала ОБРАТНО — читает то, что положил SetMaterialParam
+    // (или .sagemat). nil, если её нет: скрипт различает «не задана» и «0».
+    Bind("render", "GetMaterialParam", "GetMaterialParam",
+         [this](const std::string& path, const std::string& name) -> sol::object {
+             std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(path);
+             if (!mat) return sol::lua_nil;
+             auto it = mat->Params.find(name);
+             if (it == mat->Params.end()) return sol::lua_nil;
+             switch (it->second.Kind) {
+                 case ShaderParam::Type::Float: return sol::make_object(m_lua, it->second.Value.x);
+                 case ShaderParam::Type::Vec2:  return sol::make_object(m_lua, glm::vec2(it->second.Value));
+                 case ShaderParam::Type::Vec3:  return sol::make_object(m_lua, glm::vec3(it->second.Value));
+                 case ShaderParam::Type::Vec4:  return sol::make_object(m_lua, it->second.Value);
+             }
+             return sol::lua_nil;
+         });
+
+    // Собственный шейдер материала, назначаемый ЦЕЛИКОМ ИЗ СКРИПТА, а не
+    // только из .sagemat (см. docs/custom_shaders.md). Пишет оба пути и тут
+    // же собирает программу — материал, у которого пути заданы, а ShaderPtr
+    // ещё нет, RenderBatch рисует обычным PBR-шейдером молча (см.
+    // RenderBatch.cpp), и это выглядело бы как «шейдер не применился».
+    // Пустой путь ХОТЯ БЫ У ОДНОЙ половины возвращает материал к штатному PBR.
+    Bind("render", "SetMaterialShader", "SetMaterialShader",
+         [](const std::shared_ptr<Material>& mat, const std::string& vertexPath,
+            const std::string& fragmentPath) {
+             if (!mat) throw std::runtime_error("SetMaterialShader: материал не задан");
+             mat->VertexShaderPath = vertexPath;
+             mat->FragmentShaderPath = fragmentPath;
+             mat->ShaderPtr = mat->HasCustomShader()
+                 ? ResourceManager::Instance().GetShader(vertexPath, fragmentPath)
+                 : nullptr;
+         });
+    // Снять собственный шейдер — материал возвращается к штатному PBR движка.
+    Bind("render", "ClearMaterialShader", "ClearMaterialShader",
+         [](const std::shared_ptr<Material>& mat) {
+             if (!mat) return;
+             mat->VertexShaderPath.clear();
+             mat->FragmentShaderPath.clear();
+             mat->ShaderPtr.reset();
+         });
+
+    // Материал, собранный (или правленный) скриптом, — НА ДИСК, .sagemat.
+    // Нужен именно скрипту редактора/инструментов: игра, собранная для
+    // игрока, свой проект не пишет. Путь — тот же, что и у остальных
+    // материальных функций (относительно проекта, см. sage.render.GetMaterial).
+    //
+    // РАЗРЕШАЕТСЯ НЕ ЧЕРЕЗ LocatePath: тот ищет существующий файл, а тут
+    // типичный случай — файла ЕЩЁ НЕТ (материал только что собран скриптом),
+    // и LocatePath на несуществующий путь отдал бы его как есть, то есть
+    // относительно текущей рабочей директории процесса, а не проекта.
+    Bind("render", "SaveMaterial", "SaveMaterial",
+         [](const std::shared_ptr<Material>& mat, const std::string& path) {
+             if (!mat) throw std::runtime_error("SaveMaterial: материал не задан");
+             if (path.empty()) throw std::runtime_error("SaveMaterial: путь не может быть пустым");
+             const std::filesystem::path p(path);
+             const std::string& projectDir = sage::AssetDatabase::Instance().ProjectDir();
+             const std::string full = (p.is_absolute() || projectDir.empty())
+                 ? path : (projectDir + "/" + path);
+             mat->SaveToFile(full);
+         });
+
+    // Откатить материал к тому, что лежит на диске, — отменяет правки скрипта
+    // и редактора в общем экземпляре (как кнопка «Отменить» в инспекторе).
+    Bind("render", "ReloadMaterial", "ReloadMaterial",
+         [](const std::string& path) -> std::shared_ptr<Material> {
+             return ResourceManager::Instance().ReloadMaterial(path);
+         });
 
     Bind("render", "SetMeshNone", "SetMeshNone", [](GameObject& obj) {
         MeshRendererComponent& mr = obj.EnsureRenderer();

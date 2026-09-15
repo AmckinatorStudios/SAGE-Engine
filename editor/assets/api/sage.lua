@@ -755,6 +755,8 @@ sage.render = {}
 ---@type sage.render
 render = nil
 
+---@param mat any
+function sage.render.ClearMaterialShader(mat) end
 ---@param entity Entity
 function sage.render.ClearShaderParams(entity) end
 function sage.render.DebugViews() end
@@ -763,14 +765,24 @@ function sage.render.GetDebugView() end
 ---@param path string
 ---@return any
 function sage.render.GetMaterial(path) end
+---@param path string
+---@param name string
+---@return any
+function sage.render.GetMaterialParam(path, name) end
 ---@param entity Entity
 ---@return any
 function sage.render.MaterialOf(entity) end
 ---@param name string
 ---@return any
 function sage.render.NewMaterial(name) end
+---@param path string
+---@return any
+function sage.render.ReloadMaterial(path) end
 ---@param mat any
 function sage.render.ResolveMaterialTextures(mat) end
+---@param mat any
+---@param path string
+function sage.render.SaveMaterial(mat, path) end
 ---@param name string
 ---@return boolean
 function sage.render.SetDebugView(name) end
@@ -781,6 +793,10 @@ function sage.render.SetMaterial(entity, path) end
 ---@param name string
 ---@param value any
 function sage.render.SetMaterialParam(path, name, value) end
+---@param mat any
+---@param vertexPath string
+---@param fragmentPath string
+function sage.render.SetMaterialShader(mat, vertexPath, fragmentPath) end
 ---@param entity Entity
 function sage.render.SetMeshCapsule(entity) end
 ---@param entity Entity
@@ -1118,6 +1134,8 @@ Clamp = sage.math.Clamp
 ---@type fun(...): any
 ClearJointPoses = sage.anim.ClearJointPoses
 ---@type fun(...): any
+ClearMaterialShader = sage.render.ClearMaterialShader
+---@type fun(...): any
 ClearShaderParams = sage.render.ClearShaderParams
 ---@type fun(...): any
 ClearUIImage = sage.ui.ClearImage
@@ -1161,6 +1179,8 @@ GetDebugView = sage.render.GetDebugView
 GetLighting = sage.light.Get
 ---@type fun(...): any
 GetMaterial = sage.render.GetMaterial
+---@type fun(...): any
+GetMaterialParam = sage.render.GetMaterialParam
 ---@type fun(...): any
 GetMouseDelta = sage.input.MouseDelta
 ---@type fun(...): any
@@ -1250,6 +1270,8 @@ RebindAction = sage.input.Rebind
 ---@type fun(...): any
 RefreshRenderTexture = sage.rt.Refresh
 ---@type fun(...): any
+ReloadMaterial = sage.render.ReloadMaterial
+---@type fun(...): any
 RemoveBillboard = sage.fx.RemoveBillboard
 ---@type fun(...): any
 RemoveParticleStream = sage.fx.RemoveStream
@@ -1265,6 +1287,8 @@ SaveDirectory = sage.save.Directory
 SaveGame = sage.save.Write
 ---@type fun(...): any
 SaveInputMapping = sage.input.SaveMapping
+---@type fun(...): any
+SaveMaterial = sage.render.SaveMaterial
 ---@type fun(...): any
 SavePrefab = sage.scene.SavePrefab
 ---@type fun(...): any
@@ -1329,6 +1353,8 @@ SetMasterVolume = sage.audio.SetMasterVolume
 SetMaterial = sage.render.SetMaterial
 ---@type fun(...): any
 SetMaterialParam = sage.render.SetMaterialParam
+---@type fun(...): any
+SetMaterialShader = sage.render.SetMaterialShader
 ---@type fun(...): any
 SetMeshCapsule = sage.render.SetMeshCapsule
 ---@type fun(...): any
