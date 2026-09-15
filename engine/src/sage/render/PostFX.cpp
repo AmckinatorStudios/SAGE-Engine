@@ -254,30 +254,45 @@ void main() {
 }
 )";
 
-// --- Глубина резкости: gather-размытие по кругу нерезкости из глубины ---
+// --- Глубина резкости: три прохода вместо одного ----------------------------
 //
-// Классическая проблема экранного DoF — «протекание» резкого переднего плана на
-// размытый фон. Решается правилом сбора: сэмпл участвует в размытии пикселя,
-// только если ОН САМ достаточно размыт, чтобы дотянуться сюда своим кругом
-// нерезкости (или если он дальше от камеры, чем текущий пиксель). Поэтому
-// каждый сэмпл проверяется по собственной глубине, а не берётся вслепую.
-const char* kDofFrag = R"(#version 330 core
+// ЧТО БЫЛО НЕ ТАК. Один проход брал 24 выборки по спирали на ПОЛНОМ разрешении,
+// с радиусом до uMaxRadius пикселей. При радиусе 12 это шаг около 2.4 пикселя:
+// диск покрыт выборками РЕЖЕ, чем в нём пикселей. Отсюда обе жалобы разом —
+// «пикселизация» (узор выборки виден как сетка, и он ОДИНАКОВ во всех пикселях,
+// поэтому складывается в регулярную структуру) и «артефакты» (источник не был
+// предварительно отфильтрован, и выборка попадала на отдельную деталь, а не на
+// её среднее, — резкая картинка под размытием заворачивалась).
+//
+// Три прохода делают то же, что делают настоящие движки: размывают на
+// ПОЛОВИННОМ разрешении — радиус в его пикселях вдвое меньше, а выборок столько
+// же, то есть шаг вдвое плотнее, — и предварительно фильтруют источник, чтобы
+// высокие частоты не заворачивались.
+//
+//   1. prep:    половинное разрешение: цвет 2x2 + круг нерезкости в альфе
+//   2. blur:    половинное разрешение: сбор по диску, вес по CoC САМОГО сэмпла
+//   3. compose: полное разрешение: плавное смешивание резкого и размытого
+//
+// Разрешение ПОЛОВИННОЕ, а не четвертное: при четвертном радиус в пикселях
+// рабочего буфера падает примерно до трёх, и на силуэтах становится видна
+// блочность подъёма из низкого разрешения — та же болезнь, от которой уходим.
+const char* kDofPrepFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
 
-uniform sampler2D uScene;
-uniform sampler2D uDepth;
+uniform sampler2D uScene;   // цвет сцены, полное разрешение
+uniform sampler2D uDepth;   // глубина сцены, полное разрешение
 uniform mat4 uInvProj;
-uniform vec2 uTexel;
-uniform float uFocus;      // расстояние до плоскости фокуса, единицы мира
-uniform float uAperture;   // f-число
-uniform float uMaxRadius;  // потолок радиуса, пиксели
+uniform vec2 uFullTexel;    // 1/размер кадра
+uniform float uFocus;       // расстояние до плоскости фокуса, единицы мира
+uniform float uAperture;    // f-число
+uniform float uMaxRadius;   // потолок радиуса, пиксели ПОЛНОГО разрешения
 
 // Расстояние от камеры вдоль взгляда (положительное).
 float LinearDepth(vec2 uv) {
     float d = texture(uDepth, uv).r;
     vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    return -(c.z / max(abs(c.w), 1e-6)) * sign(c.w);
+    return -c.z / c.w;
 }
 
 // Радиус круга нерезкости в пикселях.
@@ -294,32 +309,118 @@ float Coc(float depth) {
 }
 
 void main() {
-    float depth = LinearDepth(vUV);
-    float coc = Coc(depth);
+    // Префильтр 2x2 по углам своего текселя: размытие на половинном разрешении
+    // читает соседей крупными шагами, и без префильтра мелкая текстура и кромки
+    // «звенят» — это и читалось как пикселизация размытой части кадра.
+    vec2 o = uFullTexel * 0.5;
+    vec3 c = texture(uScene, vUV + vec2(-o.x, -o.y)).rgb
+           + texture(uScene, vUV + vec2( o.x, -o.y)).rgb
+           + texture(uScene, vUV + vec2(-o.x,  o.y)).rgb
+           + texture(uScene, vUV + vec2( o.x,  o.y)).rgb;
+    // CoC пишем в альфу и СРАЗУ в пикселях половинного разрешения: дальше его
+    // читает проход, который в этом разрешении и работает.
+    FragColor = vec4(c * 0.25, Coc(LinearDepth(vUV)) * 0.5);
+}
+)";
 
-    vec3 sum = texture(uScene, vUV).rgb;
+// Сбор по диску на половинном разрешении.
+//
+// Число выборок берётся от радиуса, а не фиксировано: качество размытия держит
+// ПЛОТНОСТЬ выборок (шаг не больше текселя), а не их количество само по себе.
+// При радиусе R шаг равен R/sqrt(N), то есть N ~ R^2 — отсюда квадрат в формуле.
+// Верхняя граница нужна потому, что uMaxDiameter приходит из настроек, то есть
+// от человека, и без неё один ползунок превращал бы кадр в слайд-шоу.
+const char* kDofBlurFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform sampler2D uPrep;   // цвет + CoC (альфа), половинное разрешение
+uniform vec2 uTexel;       // 1/(w/2), 1/(h/2)
+
+void main() {
+    vec4 center = texture(uPrep, vUV);
+    // Половина пикселя половинного разрешения — размывать нечего. Это не тот
+    // жёсткий порог, что стоял раньше: решение «резко или размыто» принимает
+    // проход 3, и принимает его ПЛАВНО, поэтому видимой границы здесь не будет.
+    if (center.a <= 0.5) {
+        FragColor = vec4(center.rgb, 1.0);
+        return;
+    }
+
+    float coc = center.a;
+    int n = clamp(int(coc * coc * 1.5), 12, 64);
+
+    vec3 sum = center.rgb;
     float weight = 1.0;
-
-    if (coc > 0.75) { // меньше пикселя — размывать нечего
-        const int N = 24;
-        for (int i = 0; i < N; ++i) {
-            // Спираль по золотому углу: равномерное покрытие диска без таблиц.
-            float fi = (float(i) + 0.5) / float(N);
-            float ang = float(i) * 2.39996323;
-            float r = sqrt(fi) * coc;
-            vec2 suv = vUV + vec2(cos(ang), sin(ang)) * r * uTexel;
-
-            float sd = LinearDepth(suv);
-            float sc = Coc(sd);
-            // Дальний сэмпл виден всегда; ближний — только если его собственный
-            // круг нерезкости дотягивается до нас (иначе резкий передний план
-            // размазался бы по фону).
-            float w = (sd >= depth) ? 1.0 : smoothstep(0.0, 1.0, sc / max(r, 1e-3));
-            sum += texture(uScene, suv).rgb * w;
-            weight += w;
-        }
+    const float kGolden = 2.39996323;
+    for (int i = 0; i < 64; ++i) {
+        if (i >= n) break;
+        // Спираль по золотому углу: равномерное покрытие диска без таблиц.
+        float fi = (float(i) + 0.5) / float(n);
+        float ang = float(i) * kGolden;
+        float r = sqrt(fi) * coc;
+        // Выборку прижимаем к кадру: за его границей текстура повторяет крайний
+        // ряд пикселей, и размытие втягивало в кадр растянутые полосы.
+        vec2 suv = clamp(vUV + vec2(cos(ang), sin(ang)) * r * uTexel,
+                         uTexel * 0.5, vec2(1.0) - uTexel * 0.5);
+        vec4 s = texture(uPrep, suv);
+        // Сэмпл участвует ровно настолько, насколько его СОБСТВЕННЫЙ круг
+        // нерезкости дотягивается сюда. Так резкий передний план не размазывается
+        // по фону (его CoC мал), а размытый фон попадает в размытие целиком.
+        //
+        // Раньше здесь стояло сравнение ГЛУБИН и бинарный выбор веса (1.0 или
+        // smoothstep): на силуэте это давало ступеньку — ту самую резкую границу,
+        // которая читается как ореол вокруг предмета.
+        float w = clamp(s.a / max(r, 0.5), 0.0, 1.0);
+        sum += s.rgb * w;
+        weight += w;
     }
     FragColor = vec4(sum / weight, 1.0);
+}
+)";
+
+// Смешивание резкой картинки полного разрешения с размытой половинного.
+//
+// Отдельный проход, а не слияние с первым: смешивать надо РЕЗКУЮ картинку, а
+// префильтр прохода 1 её уже усреднил. Здесь же считается и CoC — на полном
+// разрешении, по которому и решается, где пары пикселей резкости нет вовсе.
+const char* kDofCompositeFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+
+uniform sampler2D uScene;    // резкая картинка, полное разрешение
+uniform sampler2D uBlurred;  // размытая, половинное разрешение (читается билинейно)
+uniform sampler2D uDepth;
+uniform mat4 uInvProj;
+uniform float uFocus;
+uniform float uAperture;
+uniform float uMaxRadius;
+
+float LinearDepth(vec2 uv) {
+    float d = texture(uDepth, uv).r;
+    vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    return -c.z / c.w;
+}
+
+float Coc(float depth) {
+    float diopters = abs(1.0 / max(uFocus, 1e-3) - 1.0 / max(depth, 1e-3));
+    return clamp(diopters * (15.0 / max(uAperture, 0.7)), 0.0, 1.0) * uMaxRadius;
+}
+
+void main() {
+    vec3 sharp = texture(uScene, vUV).rgb;
+    float coc = Coc(LinearDepth(vUV));
+
+    // Переход РАСТЯНУТ на пару пикселей вместо порога «coc > 0.75». Порог делил
+    // кадр на резкую и размытую половины с разрывом производной: вокруг
+    // плоскости фокуса была видна ступенька-контур, а не мягкий переход.
+    //
+    // В фокусе резкость при этом не теряется: при coc < 0.5 подмешивается РОВНО
+    // исходный пиксель, а до coc = 1.0 размытый буфер вообще равен резкому
+    // (проход 2 на таком радиусе не работает). Поэтому «мыльности» в плоскости
+    // фокуса эта правка не добавляет.
+    float t = smoothstep(0.5, 2.5, coc);
+    FragColor = vec4(mix(sharp, texture(uBlurred, vUV).rgb, t), 1.0);
 }
 )";
 
@@ -599,7 +700,9 @@ void main() {
 
 Shader& SsaoShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsaoFrag, "PostFX.SSAO")); return *s; }
 Shader& AoBlurShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAoBlurFrag, "PostFX.AOBlur")); return *s; }
-Shader& DofShader()       { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofFrag, "PostFX.DoF")); return *s; }
+Shader& DofPrepShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofPrepFrag, "PostFX.DoFPrep")); return *s; }
+Shader& DofBlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofBlurFrag, "PostFX.DoFBlur")); return *s; }
+Shader& DofCompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofCompositeFrag, "PostFX.DoFComposite")); return *s; }
 Shader& MotionShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kMotionFrag, "PostFX.MotionBlur")); return *s; }
 Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBrightFrag, "PostFX.Bright")); return *s; }
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
@@ -630,13 +733,15 @@ void PostFX::EnsureTargets(int w, int h) {
     // Смена размера обесценивает вспомогательные буферы и историю кадра:
     // репроецировать старую матрицу на другой кадр нельзя.
     m_dof.reset();
+    m_dofPrep.reset();
+    m_dofBlur.reset();
     m_motion.reset();
     m_ldr.reset();
     m_hasPrevFrame = false;
 }
 
-RenderTarget* PostFX::EnsureAux(std::unique_ptr<RenderTarget>& slot) {
-    if (!slot) slot = MakeColor(m_w, m_h);
+RenderTarget* PostFX::EnsureAux(std::unique_ptr<RenderTarget>& slot, int w, int h) {
+    if (!slot) slot = MakeColor(w > 0 ? w : m_w, h > 0 ? h : m_h);
     return slot.get();
 }
 
@@ -721,25 +826,62 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
         drawTri();
     }
 
-    // --- 2. Глубина резкости: размытие по кругу нерезкости из глубины ---
+    // --- 2. Глубина резкости: три прохода (префильтр -> сбор -> смешивание) ---
     // colorTex — «текущая картинка» цепочки: каждый следующий проход читает
     // результат предыдущего, а не исходный кадр.
+    //
+    // Проход-смешивание читает РЕЗКУЮ картинку (colorTex), а пишет в отдельную
+    // цель, поэтому чтение и запись в один буфер не пересекаются.
     sage::rhi::TextureHandle colorTex = sceneColor;
     if (doDof) {
         SAGE_PROFILE("Глубина резкости");
-        RenderTarget* dof = EnsureAux(m_dof);
-        dof->Bind();
-        Shader& sh = DofShader();
-        sh.Use();
-        sh.SetInt("uScene", 0);
-        sh.SetInt("uDepth", 1);
+        const int hw = std::max(1, w / 2), hh = std::max(1, h / 2);
+        RenderTarget* prep = EnsureAux(m_dofPrep, hw, hh);
+        RenderTarget* blurred = EnsureAux(m_dofBlur, hw, hh);
+        const float focus = glm::max(s.FocusDistance, 0.01f);
+        const float aperture = glm::max(s.Aperture, 0.7f);
+        const float maxRadius = glm::max(s.DofMaxRadius, 0.0f);
+        const glm::mat4 invProj = glm::inverse(proj);
+
+        // 2.1 Префильтр источника + круг нерезкости в альфу.
+        prep->Bind();
+        Shader& dprep = DofPrepShader();
+        dprep.Use();
+        dprep.SetInt("uScene", 0);
+        dprep.SetInt("uDepth", 1);
         device.BindTexture2D(0, colorTex);
         device.BindTexture2D(1, sceneDepth);
-        sh.SetMat4("uInvProj", glm::inverse(proj));
-        sh.SetVec2("uTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
-        sh.SetFloat("uFocus", glm::max(s.FocusDistance, 0.01f));
-        sh.SetFloat("uAperture", glm::max(s.Aperture, 0.7f));
-        sh.SetFloat("uMaxRadius", glm::max(s.DofMaxRadius, 0.0f));
+        dprep.SetMat4("uInvProj", invProj);
+        dprep.SetVec2("uFullTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
+        dprep.SetFloat("uFocus", focus);
+        dprep.SetFloat("uAperture", aperture);
+        dprep.SetFloat("uMaxRadius", maxRadius);
+        drawTri();
+
+        // 2.2 Сбор по диску на половинном разрешении.
+        blurred->Bind();
+        Shader& dblur = DofBlurShader();
+        dblur.Use();
+        dblur.SetInt("uPrep", 0);
+        device.BindTexture2D(0, prep->ColorTextureHandle());
+        dblur.SetVec2("uTexel", glm::vec2(1.0f / (float)hw, 1.0f / (float)hh));
+        drawTri();
+
+        // 2.3 Плавное смешивание резкого с размытым на полном разрешении.
+        RenderTarget* dof = EnsureAux(m_dof, w, h);
+        dof->Bind();
+        Shader& dcomp = DofCompositeShader();
+        dcomp.Use();
+        dcomp.SetInt("uScene", 0);
+        dcomp.SetInt("uBlurred", 1);
+        dcomp.SetInt("uDepth", 2);
+        device.BindTexture2D(0, colorTex);
+        device.BindTexture2D(1, blurred->ColorTextureHandle());
+        device.BindTexture2D(2, sceneDepth);
+        dcomp.SetMat4("uInvProj", invProj);
+        dcomp.SetFloat("uFocus", focus);
+        dcomp.SetFloat("uAperture", aperture);
+        dcomp.SetFloat("uMaxRadius", maxRadius);
         drawTri();
         colorTex = dof->ColorTextureHandle();
     }
