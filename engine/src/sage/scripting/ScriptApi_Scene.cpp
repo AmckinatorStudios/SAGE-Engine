@@ -183,6 +183,17 @@ void ScriptEngine::RegisterSceneApi() {
         return obj;
     });
 
+    // По номеру, а не по имени — держат его, не имя, если ссылка должна
+    // пережить переименование объекта (SendMessage/Call/DestroyObject уже
+    // принимают номер напрямую; сцене до сих пор нечем было превратить его
+    // обратно в GameObject, минуя FindObject-по-имени).
+    Bind("scene", "FindById", "FindObjectById", [this](int id) -> sol::optional<GameObject> {
+        if (!m_scene) throw std::runtime_error("FindObjectById: сцена не привязана (ScriptEngine::BindScene не вызван)");
+        GameObject obj = m_scene->Get(id);
+        if (!obj.Valid()) return sol::nullopt;
+        return obj;
+    });
+
     // Верхний видимый UI-элемент под экранной точкой (учитывает слои/маски):
     // GameObject или nil. Экранный размер передаётся явно — скрипт берёт его
     // из своего контекста (окно игры / панель Game).

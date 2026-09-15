@@ -284,6 +284,110 @@ TEST(Scripting_math_helpers) {
     CHECK_NEAR(deg, 180.0f, 1e-2);
 }
 
+// Расширенная математика: Vec2 в пару к Vec3, геометрия на Vec3 (Reflect/
+// Angle/MoveTowards/ClampLength), Quat (полностью — от оси-угла до Slerp),
+// Lerp/SmoothStep на всех векторах, случайные точки/направления, пересечения
+// луча с плоскостью и сферой без физического мира. Один тест на всю область,
+// потому что запрос был на "полную математику" ЦЕЛИКОМ, а не на функцию.
+TEST(Scripting_math_full_support) {
+    ScriptEngine se;
+
+    // Vec2 — теперь тот же набор геометрии, что у Vec3.
+    bool vec2Ok = se.Lua().script(
+        "local a = Vec2.new(3, 4)\n"
+        "local b = Vec2.new(1, 0)\n"
+        "return math.abs(a:Length() - 5.0) < 1e-4 "
+        "and math.abs(a:Normalized():Length() - 1.0) < 1e-4 "
+        "and math.abs(a:Distance(Vec2.new(0,0)) - 5.0) < 1e-4 "
+        "and math.abs(a:Dot(b) - 3.0) < 1e-4 "
+        "and (-a).x == -3.0 "
+        "and (a / 2.0).x == 1.5");
+    CHECK_TRUE(vec2Ok);
+
+    // Vec3: Reflect (луч по нормали), Angle (в градусах), MoveTowards
+    // (снап на конечном шаге, а не перелёт), ClampLength (направление цело).
+    bool vec3Ok = se.Lua().script(
+        "local r = Vec3.new(1,-1,0):Reflect(Vec3.new(0,1,0))\n"
+        "local ang = Vec3.new(1,0,0):Angle(Vec3.new(0,1,0))\n"
+        "local mv = Vec3.new(0,0,0):MoveTowards(Vec3.new(10,0,0), 3)\n"
+        "local mv2 = Vec3.new(0,0,0):MoveTowards(Vec3.new(1,0,0), 10)\n"
+        "local cl = Vec3.new(10,0,0):ClampLength(2)\n"
+        "return math.abs(r.y - 1.0) < 1e-4 and math.abs(ang - 90.0) < 1e-2 "
+        "and math.abs(mv.x - 3.0) < 1e-4 and math.abs(mv2.x - 1.0) < 1e-4 "
+        "and math.abs(cl:Length() - 2.0) < 1e-4");
+    CHECK_TRUE(vec3Ok);
+
+    // Lerp теперь и на Vec2, и на Vec4 (раньше — только число и Vec3).
+    bool lerpOk = se.Lua().script(
+        "local v2 = Lerp(Vec2.new(0,0), Vec2.new(10,10), 0.5)\n"
+        "local v4 = Lerp(Vec4.new(0,0,0,0), Vec4.new(1,1,1,1), 0.25)\n"
+        "return math.abs(v2.x - 5.0) < 1e-4 and math.abs(v4.w - 0.25) < 1e-4");
+    CHECK_TRUE(lerpOk);
+
+    float smooth = se.Lua().script("return SmoothStep(0.0, 10.0, 5.0)");
+    CHECK_NEAR(smooth, 0.5f, 1e-4);
+
+    // Slerp векторов — по дуге между НАПРАВЛЕНИЯМИ, не покомпонентно: длина
+    // единичная всю дорогу, а не проседает к середине, как у Lerp.
+    bool slerpOk = se.Lua().script(
+        "local s = Slerp(Vec3.new(1,0,0), Vec3.new(0,1,0), 0.5)\n"
+        "return math.abs(s:Length() - 1.0) < 1e-3 and s.x > 0 and s.y > 0");
+    CHECK_TRUE(slerpOk);
+
+    // Quat: ось-угол, применение к вектору, обратный отменяет поворот,
+    // q * q:Inverse() — единичный кватернион.
+    bool quatOk = se.Lua().script(
+        "local q = Quat.FromAxisAngle(Vec3.new(0,1,0), 90.0)\n"
+        "local v = q * Vec3.new(1,0,0)\n"
+        "local back = q:Inverse() * v\n"
+        "local id = q * q:Inverse()\n"
+        "return math.abs(v.x) < 1e-3 and math.abs(v.z + 1.0) < 1e-3 "
+        "and math.abs(back.x - 1.0) < 1e-3 and math.abs(id.w - 1.0) < 1e-3");
+    CHECK_TRUE(quatOk);
+
+    // FromEuler/Euler ОБЯЗАНЫ совпадать с Transform.Rotation — общая формула
+    // (sage::EulerXYZDegreesFromRotationMatrix), иначе поворот, посчитанный
+    // кватернионом, при записи в Transform.Rotation дал бы другой результат.
+    bool eulerBridgeOk = se.Lua().script(
+        "local e = Vec3.new(15, 35, -20)\n"
+        "local back = Quat.FromEuler(e):Euler()\n"
+        "return math.abs(back.x - e.x) < 0.05 and math.abs(back.y - e.y) < 0.05 "
+        "and math.abs(back.z - e.z) < 0.05");
+    CHECK_TRUE(eulerBridgeOk);
+
+    // Slerp кватернионов: на полпути между 0 и 90° вокруг Y — ровно 45°.
+    bool quatSlerpOk = se.Lua().script(
+        "local a = Quat.Identity()\n"
+        "local b = Quat.FromAxisAngle(Vec3.new(0,1,0), 90.0)\n"
+        "local mid = a:Slerp(b, 0.5)\n"
+        "return math.abs(mid:Euler().y - 45.0) < 0.5");
+    CHECK_TRUE(quatSlerpOk);
+
+    // Случайность — проверяем ГРАНИЦЫ и инварианты (длина <= 1, длина == 1
+    // на поверхности), не конкретное значение: оно намеренно не детерминировано.
+    bool randomOk = se.Lua().script(
+        "for i = 1, 50 do\n"
+        "    local r = RandomRange(-2.0, 2.0)\n"
+        "    if r < -2.0 or r > 2.0 then return false end\n"
+        "    if RandomInsideUnitSphere():Length() > 1.0001 then return false end\n"
+        "    if math.abs(RandomOnUnitSphere():Length() - 1.0) > 1e-3 then return false end\n"
+        "    if RandomInsideUnitCircle():Length() > 1.0001 then return false end\n"
+        "end\n"
+        "return true");
+    CHECK_TRUE(randomOk);
+
+    // Геометрия без физического мира: луч в плоскость и в сферу, попадание и
+    // явный промах (nil).
+    bool geomOk = se.Lua().script(
+        "local hit = IntersectRayPlane(Vec3.new(0,5,0), Vec3.new(0,-1,0), Vec3.new(0,0,0), Vec3.new(0,1,0))\n"
+        "local miss = IntersectRayPlane(Vec3.new(0,5,0), Vec3.new(0,1,0), Vec3.new(0,0,0), Vec3.new(0,1,0))\n"
+        "local sph = IntersectRaySphere(Vec3.new(-5,0,0), Vec3.new(1,0,0), Vec3.new(0,0,0), 1.0)\n"
+        "local sphMiss = IntersectRaySphere(Vec3.new(-5,10,0), Vec3.new(1,0,0), Vec3.new(0,0,0), 1.0)\n"
+        "return hit ~= nil and math.abs(hit.y) < 1e-3 and miss == nil "
+        "and sph ~= nil and math.abs(sph.x + 1.0) < 1e-3 and sphMiss == nil");
+    CHECK_TRUE(geomOk);
+}
+
 TEST(Scripting_lighting_access) {
     ScriptEngine se;
     Scene scene("S");
@@ -356,6 +460,85 @@ TEST(Scripting_message_payload_delivered) {
     CHECK_NEAR(sum, 42.0, 1e-6);
 
     std::remove(path.c_str());
+}
+
+// sage.msg.Call — связь СО СВОИМ ОТВЕТОМ: в отличие от SendMessage/Broadcast
+// (оповещение без возврата), Call зовёт именованную функцию скрипта цели
+// напрямую и отдаёт то, что она вернула. Проверяем: значение доходит,
+// аргументы доходят, несколько возвращаемых значений доходят все сразу,
+// отсутствующая функция и мёртвая/несуществующая цель — законный nil (а не
+// ошибка), и ошибка ВНУТРИ вызванной функции не роняет и не блокирует
+// звонящего (просто nil в логе).
+TEST(Scripting_call_between_scripts) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    std::string path = WriteTempScript("callee",
+        "function GetHealth(entity) return 42 end\n"
+        "function Add(entity, a, b) return a + b end\n"
+        "function GetPosition(entity) return 1, 2, 3 end\n"
+        "function Kaboom(entity) error('boom') end\n");
+
+    GameObject enemy = scene.CreateObject("Enemy");
+    se.AttachScript(enemy, path);
+    se.Lua()["enemy"] = enemy;
+
+    double hp = se.Lua().script("return sage.msg.Call(enemy, 'GetHealth')");
+    CHECK_NEAR(hp, 42.0, 1e-6);
+
+    double sum = se.Lua().script("return sage.msg.Call(enemy, 'Add', 3, 4)");
+    CHECK_NEAR(sum, 7.0, 1e-6);
+
+    // Несколько возвращаемых значений доходят ВСЕ, а не только первое.
+    bool multiOk = se.Lua().script(
+        "local x, y, z = sage.msg.Call(enemy, 'GetPosition')\n"
+        "return x == 1 and y == 2 and z == 3");
+    CHECK_TRUE(multiOk);
+
+    // Функции нет у цели — nil, не ошибка: это не обязательный хук.
+    bool missingOk = se.Lua().script("return sage.msg.Call(enemy, 'NoSuchFunction') == nil");
+    CHECK_TRUE(missingOk);
+
+    // Ошибка внутри вызванной функции — nil звонящему, а не Lua-исключение,
+    // которое оборвало бы его собственный скрипт.
+    bool crashOk = se.Lua().script(
+        "local ok, err = pcall(function() return sage.msg.Call(enemy, 'Kaboom') end)\n"
+        "return ok and err == nil"); // pcall не падает — Call сама ловит ошибку внутри
+    CHECK_TRUE(crashOk);
+
+    // Мёртвая цель — тоже nil.
+    scene.RemoveObject(enemy.Id());
+    bool deadOk = se.Lua().script("return sage.msg.Call(enemy, 'GetHealth') == nil");
+    CHECK_TRUE(deadOk);
+
+    // Несуществующий номер — тоже nil, не ошибка.
+    bool noneOk = se.Lua().script("return sage.msg.Call(999999, 'GetHealth') == nil");
+    CHECK_TRUE(noneOk);
+
+    std::remove(path.c_str());
+}
+
+// scene.FindById — вторая половина того, что уже умели SendMessage/Call/
+// DestroyObject (принимать номер сущности вместо самой сущности): найти
+// объект ПО НОМЕРУ, когда он единственное, что осталось (например, номер
+// сохранился с прошлого кадра, а FindObject по имени не годится — имя могло
+// смениться, а вот номер живёт, пока жива сама сущность).
+TEST(Scripting_find_object_by_id) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+
+    GameObject o = scene.CreateObject("Target");
+    se.Lua()["targetId"] = o.Id();
+
+    bool foundOk = se.Lua().script(
+        "local found = sage.scene.FindById(targetId)\n"
+        "return found ~= nil and found.Name == 'Target'");
+    CHECK_TRUE(foundOk);
+
+    bool missingOk = se.Lua().script("return sage.scene.FindById(999999) == nil");
+    CHECK_TRUE(missingOk);
 }
 
 // --- Твины из Lua: TweenMove ведёт позицию к цели, тикая в UpdateAll ---

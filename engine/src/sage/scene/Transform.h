@@ -5,6 +5,34 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+namespace sage {
+// Углы Эйлера XYZ (Rx*Ry*Rz, градусы) из ЧИСТОЙ матрицы поворота — столбцы
+// единичные, масштаб уже снят. Общая точка для Transform::SetFromMatrix (там
+// матрица приходит со масштабом, и его снимают перед вызовом) и для
+// scripting Quat:Euler() (кватернион — уже чистый поворот, снимать нечего).
+// Одна формула на оба случая: порядок осей завязан на GetMatrix ниже, и
+// вторая независимая реализация рано или поздно разошлась бы с ней на
+// gimbal lock или знаке угла.
+inline glm::vec3 EulerXYZDegreesFromRotationMatrix(const glm::mat4& rot) {
+    constexpr float kRad2Deg = 57.29577951308232087680f;
+    const float sy = std::min(std::max(rot[2][0], -1.0f), 1.0f);
+    const float cy = std::sqrt(std::max(0.0f, 1.0f - sy * sy));
+    float rx, ry, rz;
+    ry = std::asin(sy);
+    if (cy > 1e-6f) {
+        rx = std::atan2(-rot[2][1], rot[2][2]);
+        rz = std::atan2(-rot[1][0], rot[0][0]);
+    } else {
+        // Взгляд строго вдоль оси: поворот вокруг X и Z становится одним и тем
+        // же движением (gimbal lock). Отдаём весь поворот X, иначе atan2 от
+        // нулей вернул бы произвольные углы.
+        rx = std::atan2(rot[1][2], rot[1][1]);
+        rz = 0.0f;
+    }
+    return glm::vec3(rx, ry, rz) * kRad2Deg;
+}
+} // namespace sage
+
 struct Transform {
     glm::vec3 Position{0.0f};
     glm::vec3 Rotation{0.0f}; // в градусах, углы Эйлера
@@ -86,22 +114,7 @@ struct Transform {
         rot[2] = glm::vec4(glm::vec3(m[2]) / scale.z, 0.0f);
 
         // Углы Эйлера XYZ из матрицы поворота — ровно то разложение, из которого
-        // GetMatrix соберёт ту же матрицу обратно.
-        constexpr float kRad2Deg = 57.29577951308232087680f;
-        const float sy = std::min(std::max(rot[2][0], -1.0f), 1.0f);
-        const float cy = std::sqrt(std::max(0.0f, 1.0f - sy * sy));
-        float rx, ry, rz;
-        ry = std::asin(sy);
-        if (cy > 1e-6f) {
-            rx = std::atan2(-rot[2][1], rot[2][2]);
-            rz = std::atan2(-rot[1][0], rot[0][0]);
-        } else {
-            // Взгляд строго вдоль оси: поворот вокруг X и Z становится одним и
-            // тем же движением (gimbal lock). Отдаём весь поворот X, иначе
-            // atan2 от нулей вернул бы произвольные углы.
-            rx = std::atan2(rot[1][2], rot[1][1]);
-            rz = 0.0f;
-        }
-        Rotation = glm::vec3(rx, ry, rz) * kRad2Deg;
+        // GetMatrix соберёт ту же матрицу обратно (см. EulerXYZDegreesFromRotationMatrix).
+        Rotation = sage::EulerXYZDegreesFromRotationMatrix(rot);
     }
 };
