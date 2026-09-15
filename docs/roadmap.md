@@ -105,8 +105,8 @@
   нормализацию, `Reimport` пишет сайдкар `.sageimport` и перечитывает меш во
   все сущности; настройки пекутся в вершины при загрузке — действуют и в
   собранной игре). Пока НЕТ: универсального добавления произвольных компонентов
-  (Inspector понимает Transform/MeshRenderer/Material/Camera/Light/Script/
-  RigidBody/Collider/Joint/Particle/UI/AnimatedModel).
+  (Inspector понимает Transform/MeshRenderer/Material/Camera/Light/Post-Processing/
+  Script/RigidBody/Collider/Joint/Particle/UI/AnimatedModel).
 - **`SceneSerializer` не сохраняет кастомные компоненты игр** — в `.sage`
   попадают только встроенные (Name/Id/Transform/MeshRenderer/Material-путь/
 Script/Camera + свет + RigidBody/Collider).
