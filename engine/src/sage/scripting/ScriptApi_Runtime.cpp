@@ -267,6 +267,88 @@ void ScriptEngine::RegisterMessagingApi() {
     Bind("msg", "Broadcast", "Broadcast", [this](const std::string& name, sol::object data) {
         DispatchMessage(-1, name, data);
     });
+
+    // --- Call: связь СО СВОИМ ОТВЕТОМ, а не только оповещение. -------------
+    //
+    // SendMessage/Broadcast — «крикнул и пошёл дальше»: OnMessage ничего не
+    // возвращает, и спросить «сколько у него здоровья прямо сейчас» ими
+    // нельзя — только объявить своё намерение и ждать ответного сообщения.
+    // Call зовёт ИМЕНОВАННУЮ функцию скрипта цели НАПРЯМУЮ и отдаёт то, что
+    // она вернула: настоящий запрос-ответ между двумя объектами.
+    //
+    //   -- скрипт врага:
+    //   function GetHealth(entity) return health end
+    //
+    //   -- скрипт игрока:
+    //   local hp = sage.msg.Call(enemy, 'GetHealth')
+    //
+    // БЕЗОПАСНО ПО ТЕМ ЖЕ ПРАВИЛАМ, ЧТО SendMessage, И ЖЁСТЧЕ:
+    //  - мёртвая или несуществующая цель — nil, не ошибка (враг мог умереть
+    //    между кадром и вызовом);
+    //  - у цели нет такой функции — тоже nil, не ошибка: функция не хук со
+    //    строгим контрактом (как OnUpdate), а объявленный автором скрипта
+    //    публичный API, и его отсутствие законно;
+    //  - ошибка ВНУТРИ функции цели не роняет и не подвешивает звонящего —
+    //    она ловится (protected_function, тот же путь, что у OnMessage),
+    //    попадает в лог с именем сущности, и Call возвращает nil. Баг в
+    //    одном скрипте не должен обрушить того, кто до него дозвонился.
+    //  - общий с SendMessage счётчик глубины (m_messageDepth) страхует от
+    //    цикла A зовёт B зовёт A зовёт B: рассылка/цепочка вызовов обрывается
+    //    с логом, а не переполняет C++-стек.
+    Bind("msg", "Call", "CallScript",
+         [this](sol::object target, const std::string& name,
+                sol::variadic_args args) -> sol::variadic_results {
+             sol::variadic_results none;
+             int targetId = -1;
+             if (target.is<GameObject>()) {
+                 GameObject o = target.as<GameObject>();
+                 if (!o.Valid()) return none; // мёртвая цель — не ошибка, см. SendMessage
+                 targetId = o.Id();
+             } else if (target.is<int>()) {
+                 targetId = target.as<int>();
+             } else {
+                 throw std::runtime_error("Call: цель — сущность или её номер");
+             }
+
+             constexpr int kMaxCallDepth = 16; // тот же порядок, что у DispatchMessage
+             if (m_messageDepth >= kMaxCallDepth) {
+                 LOG_ERROR("ScriptEngine") << "Call: превышена глубина вложенных вызовов ("
+                                           << kMaxCallDepth << ") на функции '" << name
+                                           << "' — вероятен цикл Call-обработчиков, вызов оборван";
+                 return none;
+             }
+
+             // Снимок нужной функции, а не ссылка на m_instances: сама функция
+             // может спавнить/уничтожать объекты и реаллоцировать вектор — тот
+             // же приём, что и в DispatchMessage.
+             sol::protected_function fn;
+             sol::object entityRef;
+             std::string targetName;
+             for (auto& inst : m_instances) {
+                 if (!inst.HasObject || !inst.Object.Valid() || inst.Object.Id() != targetId) continue;
+                 sol::object f = inst.Env[name];
+                 if (f.is<sol::protected_function>()) {
+                     fn = f.as<sol::protected_function>();
+                     entityRef = inst.EntityRef;
+                     targetName = inst.Object.Name();
+                 }
+                 break; // сущность нашлась (со скриптом или без функции) — второй не будет
+             }
+             if (!fn.valid()) return none; // нет цели, нет скрипта или нет такой функции — законный nil
+
+             ++m_messageDepth;
+             sol::protected_function_result result = fn(entityRef, sol::as_args(args));
+             --m_messageDepth;
+             if (!result.valid()) {
+                 sol::error err = result;
+                 LOG_ERROR("ScriptEngine") << "Ошибка в " << name << " (Call, " << targetName
+                                           << "): " << err.what();
+                 return none;
+             }
+             sol::variadic_results out;
+             for (auto it = result.begin(); it != result.end(); ++it) out.push_back(*it);
+             return out;
+         });
 }
 
 void ScriptEngine::SetLaunchArg(const std::string& key, const std::string& value) {

@@ -634,8 +634,38 @@ function sage.math.Clamp(x, lo, hi) end
 function sage.math.Cross(a, b) end
 ---@param rad number
 function sage.math.Degrees(rad) end
+---@param origin Vec3
+---@param dir Vec3
+---@param planePoint Vec3
+---@param planeNormal Vec3
+---@return Vec3
+function sage.math.IntersectRayPlane(origin, dir, planePoint, planeNormal) end
+---@param origin Vec3
+---@param dir Vec3
+---@param center Vec3
+---@param radius number
+---@return Vec3
+function sage.math.IntersectRaySphere(origin, dir, center, radius) end
 ---@param deg number
 function sage.math.Radians(deg) end
+---@return Vec2
+function sage.math.RandomInsideUnitCircle() end
+---@return Vec3
+function sage.math.RandomInsideUnitSphere() end
+---@return Vec3
+function sage.math.RandomOnUnitSphere() end
+---@param lo number
+---@param hi number
+function sage.math.RandomRange(lo, hi) end
+---@param a Vec3
+---@param b Vec3
+---@param t number
+---@return Vec3
+function sage.math.Slerp(a, b, t) end
+---@param edge0 number
+---@param edge1 number
+---@param x number
+function sage.math.SmoothStep(edge0, edge1, x) end
 
 ---@class sage.msg
 sage.msg = {}
@@ -649,6 +679,11 @@ msg = nil
 ---@param name string
 ---@param data any
 function sage.msg.Broadcast(name, data) end
+---@param target any
+---@param name string
+---@param args any
+---@return any
+function sage.msg.Call(target, name, args) end
 ---@param target any
 ---@param name string
 ---@param data any
@@ -886,6 +921,9 @@ function sage.scene.Destroy(target) end
 ---@param name string
 ---@return Entity
 function sage.scene.Find(name) end
+---@param id number
+---@return Entity
+function sage.scene.FindById(id) end
 ---@param name string
 function sage.scene.Load(name) end
 ---@param id number
@@ -1124,6 +1162,8 @@ BorrowAnimations = sage.anim.Borrow
 ---@type fun(...): any
 Broadcast = sage.msg.Broadcast
 ---@type fun(...): any
+CallScript = sage.msg.Call
+---@type fun(...): any
 CancelTimer = sage.time.Cancel
 ---@type fun(...): any
 CharacterFits = sage.physics.CharacterFits
@@ -1168,6 +1208,8 @@ EventCount = sage.events.Count
 ---@type fun(...): any
 FindObject = sage.scene.Find
 ---@type fun(...): any
+FindObjectById = sage.scene.FindById
+---@type fun(...): any
 GenerateTexture = sage.texture.Generate
 ---@type fun(...): any
 GetAxis = sage.input.Axis
@@ -1209,6 +1251,10 @@ IKLocked = sage.ik.Locked
 IconNames = sage.ui.IconNames
 ---@type fun(...): any
 ImageSize = sage.ui.ImageSize
+---@type fun(...): any
+IntersectRayPlane = sage.math.IntersectRayPlane
+---@type fun(...): any
+IntersectRaySphere = sage.math.IntersectRaySphere
 ---@type fun(...): any
 IsActionDown = sage.input.IsDown
 ---@type fun(...): any
@@ -1263,6 +1309,14 @@ PlaySound = sage.audio.PlaySound
 PlaySound3D = sage.audio.PlaySound3D
 ---@type fun(...): any
 Radians = sage.math.Radians
+---@type fun(...): any
+RandomInsideUnitCircle = sage.math.RandomInsideUnitCircle
+---@type fun(...): any
+RandomInsideUnitSphere = sage.math.RandomInsideUnitSphere
+---@type fun(...): any
+RandomOnUnitSphere = sage.math.RandomOnUnitSphere
+---@type fun(...): any
+RandomRange = sage.math.RandomRange
 ---@type fun(...): any
 Raycast = sage.physics.Raycast
 ---@type fun(...): any
@@ -1423,6 +1477,10 @@ SetVolume = sage.audio.SetVolume
 SetVolumetrics = sage.volumetric.Set
 ---@type fun(...): any
 SetWaterReflection = sage.reflect.SetWater
+---@type fun(...): any
+Slerp = sage.math.Slerp
+---@type fun(...): any
+SmoothStep = sage.math.SmoothStep
 ---@type fun(...): any
 SpawnObject = sage.scene.Spawn
 ---@type fun(...): any
