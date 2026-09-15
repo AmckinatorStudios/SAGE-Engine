@@ -1,5 +1,6 @@
 #include "sage/render/PostFX.h"
 
+#include "sage/core/Log.h"
 #include "sage/core/Profiler.h"
 
 #include <algorithm>
@@ -14,34 +15,6 @@
 using namespace sage::rhi;
 
 namespace sage::render {
-
-PostFXSettings FxFromConfig(const sage::EngineConfig& cfg) {
-    PostFXSettings fx;
-    fx.Exposure = cfg.Exposure; fx.Gamma = cfg.Gamma;
-    fx.Saturation = cfg.Saturation; fx.Contrast = cfg.Contrast;
-    fx.Vignette = cfg.Vignette;
-    fx.BloomEnabled = cfg.Bloom; fx.BloomThreshold = cfg.BloomThreshold;
-    fx.BloomIntensity = cfg.BloomIntensity;
-    fx.AOEnabled = cfg.AmbientOcclusion; fx.AOStrength = cfg.AOStrength;
-    fx.AORadius = cfg.AORadius;
-    fx.DofEnabled = cfg.DepthOfField; fx.FocusDistance = cfg.FocusDistance;
-    fx.Aperture = cfg.Aperture; fx.DofMaxRadius = cfg.DofMaxRadius;
-    fx.MotionBlurEnabled = cfg.MotionBlur; fx.MotionBlurAmount = cfg.MotionBlurAmount;
-    fx.MotionBlurSamples = cfg.MotionBlurSamples;
-    fx.ChromaticAberration = cfg.ChromaticAberration;
-    fx.FxaaContrastThreshold = cfg.FxaaContrastThreshold;
-
-    // FXAA и MSAA НЕ СКЛАДЫВАЮТСЯ.
-    //
-    // Это и есть «сглаживание не работает, а картинка мыльная»: они лечат одно
-    // и то же разными способами, и второй проход поверх первого уже нечего
-    // сглаживать — зато он честно размывает всё, что похоже на кромку, включая
-    // текстуры и мелкие детали. MSAA решает задачу в источнике (растеризатор
-    // считает покрытие пикселя геометрией), FXAA — по готовым пикселям, гадая
-    // по яркости; когда работает первый, второй только портит.
-    fx.FxaaEnabled = cfg.Fxaa && SceneSamples(cfg) <= 1;
-    return fx;
-}
 
 int SceneSamples(const sage::EngineConfig& cfg) {
     // Ступени растеризатора: всё, что между ними, округляем ВНИЗ — обещать
@@ -194,6 +167,8 @@ out vec4 FragColor;
 uniform sampler2D uAO;
 uniform vec2 uTexel;
 uniform vec2 uDirection;   // (1,0) — горизонтальный проход, (0,1) — вертикальный
+uniform float uStrength;       // во что возводится затенение (см. звено «Ambient Occlusion»)
+uniform int uApplyStrength;    // 1 — применять; 0 — не трогать (горизонтальный проход)
 
 void main() {
     // Затенение в R, линейная глубина в ALPHA (см. проход SSAO выше). Читать
@@ -219,7 +194,19 @@ void main() {
             weight += w;
         }
     }
-    FragColor = vec4(vec3(sum / weight), centerDepth);
+    // СИЛА ЗАТЕНЕНИЯ ПРИМЕНЯЕТСЯ ЗДЕСЬ, а не тем, кто эту карту читает.
+    //
+    // Раньше её возводил в степень общий composite — то есть настройка одного
+    // эффекта лежала в звене другого. Теперь у каждого звена свои параметры:
+    // убрали из тракта «Ambient Occlusion» — уехали и радиус, и сила, и
+    // возводить в степень стало нечего и некому.
+    //
+    // Порядок при этом НЕ изменился: в степени возводится уже размытое
+    // затенение ровно так же, как это делал composite. pow(blur(x)) и
+    // blur(pow(x)) — разные картинки, и первая здесь сохранена намеренно.
+    float ao = clamp(sum / weight, 0.0, 1.0);
+    if (uApplyStrength == 1) ao = pow(ao, uStrength);
+    FragColor = vec4(vec3(ao), centerDepth);
 }
 )";
 
@@ -243,6 +230,8 @@ in vec2 vUV;
 out vec4 FragColor;
 uniform sampler2D uTex;
 uniform vec2 uDir;
+uniform float uScale;       // во сколько раз умножить результат (сила свечения)
+uniform int uApplyScale;    // 1 — умножать; 0 — не трогать
 void main() {
     float w[5] = float[](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);
     vec3 c = texture(uTex, vUV).rgb * w[0];
@@ -250,6 +239,10 @@ void main() {
         c += texture(uTex, vUV + uDir * float(i)).rgb * w[i];
         c += texture(uTex, vUV - uDir * float(i)).rgb * w[i];
     }
+    // Сила свечения применяется на ПОСЛЕДНЕМ проходе размытия, чтобы она
+    // принадлежала звену «Bloom», а не тому, кто это свечение подмешивает (см.
+    // пояснение у силы затенения в kAoBlurFrag).
+    if (uApplyScale == 1) c *= uScale;
     FragColor = vec4(c, 1.0);
 }
 )";
@@ -641,8 +634,6 @@ uniform float uGamma;
 uniform float uSaturation;
 uniform float uContrast;
 uniform float uVignette;
-uniform float uBloomIntensity;
-uniform float uAOStrength;
 uniform float uChromatic;
 
 vec3 ACES(vec3 x) {
@@ -663,12 +654,16 @@ vec3 SampleScene(vec2 uv) {
 
 void main() {
     vec3 hdr = SampleScene(vUV);
+    // Затенение и свечение приходят ГОТОВЫМИ картами: и степень затенения, и
+    // сила свечения применены тем звеном, которому эти настройки принадлежат
+    // (см. kAoBlurFrag и kBlurFrag). Здесь они только применяются — и только
+    // если в тракте есть их производитель. Нет производителя — нет и карты, а
+    // значит нет и следа эффекта: ничего не «осталось выключенным».
     if (uUseAO) {
         float ao = clamp(texture(uAO, vUV).r, 0.0, 1.0);
-        ao = pow(ao, uAOStrength); // усиление затемнения
         hdr *= ao;
     }
-    if (uUseBloom) hdr += texture(uBloom, vUV).rgb * uBloomIntensity;
+    if (uUseBloom) hdr += texture(uBloom, vUV).rgb;
 
     vec3 color = ACES(hdr * uExposure);
 
@@ -698,6 +693,19 @@ void main() {
 }
 )";
 
+// Финальная копия результата тракта в цель вывода (FBO вьюпорта или экран).
+//
+// Отдельный проход, а не «последнее звено пишет прямо в выход»: звено обязано
+// знать только то, что написано в его описании, — а куда смотрит камера, знает
+// вызывающий. Так одно и то же звено годится и для превью в редакторе, и для
+// собранной игры, и для второго вьюпорта с другим размером.
+const char* kCopyFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+void main() { FragColor = vec4(texture(uScene, vUV).rgb, 1.0); }
+)";
+
 Shader& SsaoShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsaoFrag, "PostFX.SSAO")); return *s; }
 Shader& AoBlurShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAoBlurFrag, "PostFX.AOBlur")); return *s; }
 Shader& DofPrepShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofPrepFrag, "PostFX.DoFPrep")); return *s; }
@@ -708,6 +716,7 @@ Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFs
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
 Shader& CompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kCompositeFrag, "PostFX.Composite")); return *s; }
 Shader& FxaaShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kFxaaFrag, "PostFX.FXAA")); return *s; }
+Shader& CopyShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kCopyFrag, "PostFX.Copy")); return *s; }
 
 std::unique_ptr<RenderTarget> MakeColor(int w, int h) {
     RenderTargetDesc d;
@@ -717,37 +726,542 @@ std::unique_ptr<RenderTarget> MakeColor(int w, int h) {
 
 } // namespace
 
+// ============================================================================
+//  Помощники звеньев (объявлены в PostEffect.h)
+// ============================================================================
+
+namespace {
+
+GraphicsDevice& Dev(PostContext& ctx) { return *ctx.Device; }
+
+// Полный экран: треугольник без вершинного буфера, рисуется тремя вершинами по
+// gl_VertexID (см. kFsVert). Один и тот же для всех звеньев.
+void DrawFullscreen(PostContext& ctx) { ctx.Scratch->Fullscreen->DrawArrays(3); }
+
+// Сообщение, которое печатается ОДИН раз за процесс.
+//
+// Тракт исполняется КАЖДЫЙ кадр, и причина отказа у него одна и та же: без
+// этой памяти лог получал бы шестьдесят одинаковых строк в секунду — ровно та
+// беда, ради которой в движке уже заведено «печатать один раз» для ошибок
+// скриптов. Здесь это тем важнее, что причина — свойство ТРАКТА, а не кадра.
+void OnceLog(const std::string& message) {
+    static std::vector<std::string> said;
+    if (std::find(said.begin(), said.end(), message) != said.end()) return;
+    said.push_back(message);
+    LOG_WARN("PostFX") << message;
+}
+
+// Лениво создаёт буфер звена: полноразмерный HDR-таргет стоит заметной VRAM, а
+// глубина резкости включается не в каждом проекте.
+RenderTarget* Keep(std::unique_ptr<RenderTarget>& slot, int w, int h) {
+    if (!slot) slot = MakeColor(std::max(1, w), std::max(1, h));
+    return slot.get();
+}
+
+PostParamDesc Param(const char* name, const char* label, float def, float min, float max,
+                    const char* hint) {
+    PostParamDesc p;
+    p.Name = name;
+    p.Label = label;
+    p.Type = PostParamType::Float;
+    p.Min = min;
+    p.Max = max;
+    p.Default[0] = def;
+    p.Hint = hint ? hint : "";
+    return p;
+}
+
+// Подпись-разделитель внутри списка параметров звена. Значения у неё нет:
+// это способ сгруппировать настройки, не заводя вложенных структур.
+PostParamDesc Heading(const char* label) {
+    PostParamDesc p;
+    p.Label = label;
+    p.Type = PostParamType::Heading;
+    return p;
+}
+
+// --- Звено «Ambient Occlusion» ----------------------------------------------
+// Публикует карту postaux::kAO. И радиус, и сила принадлежат ЗВЕНУ: убрали
+// звено — уехали оба, и возводить в степень стало некому (см. kAoBlurFrag).
+void RunAmbientOcclusion(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("SSAO");
+    GraphicsDevice& device = Dev(ctx);
+    PostScratch& sc = *ctx.Scratch;
+    const glm::vec2 texel(1.0f / (float)ctx.Width, 1.0f / (float)ctx.Height);
+
+    sc.Ao->Bind();
+    Shader& ao = SsaoShader();
+    ao.Use();
+    ao.SetInt("uDepth", 0);
+    device.BindTexture2D(0, ctx.SceneDepth);
+    ao.SetMat4("uProj", ctx.Proj);
+    ao.SetMat4("uInvProj", glm::inverse(ctx.Proj));
+    ao.SetFloat("uRadius", e.Float("radius", 0.5f));
+    ao.SetVec2("uTexel", texel);
+    DrawFullscreen(ctx);
+
+    // Размытие РАЗДЕЛЁННОЕ: горизонталь в AoBlur, вертикаль обратно в Ao. Два
+    // прохода по 9 выборок вместо одного по 16 — и дешевле, и шире окно
+    // (сглаживает шум выборки, который квадрат 4x4 оставлял).
+    Shader& aob = AoBlurShader();
+    aob.Use();
+    aob.SetInt("uAO", 0);
+    aob.SetVec2("uTexel", texel);
+    aob.SetFloat("uStrength", glm::max(e.Float("strength", 1.0f), 0.01f));
+
+    sc.AoBlur->Bind();
+    aob.SetVec2("uDirection", glm::vec2(1.0f, 0.0f));
+    aob.SetInt("uApplyStrength", 0);
+    device.BindTexture2D(0, sc.Ao->ColorTextureHandle());
+    DrawFullscreen(ctx);
+
+    sc.Ao->Bind();
+    aob.SetVec2("uDirection", glm::vec2(0.0f, 1.0f));
+    aob.SetInt("uApplyStrength", 1);
+    device.BindTexture2D(0, sc.AoBlur->ColorTextureHandle());
+    DrawFullscreen(ctx);
+
+    // Готовая карта лежит в Ao: вертикальный проход пишет обратно в него.
+    PostPublishAux(ctx, postaux::kAO, sc.Ao->ColorTextureHandle());
+}
+
+// --- Звено «Depth of Field» --------------------------------------------------
+void RunDepthOfField(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Глубина резкости");
+    GraphicsDevice& device = Dev(ctx);
+    PostScratch& sc = *ctx.Scratch;
+    const int hw = std::max(1, ctx.Width / 2), hh = std::max(1, ctx.Height / 2);
+    RenderTarget* prep = Keep(sc.DofPrep, hw, hh);
+    RenderTarget* blurred = Keep(sc.DofBlur, hw, hh);
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+
+    const float focus = glm::max(e.Float("focus", 10.0f), 0.01f);
+    const float aperture = glm::max(e.Float("aperture", 2.8f), 0.7f);
+    const float maxRadius = glm::max(e.Float("maxRadius", 12.0f), 0.0f);
+    const glm::mat4 invProj = glm::inverse(ctx.Proj);
+
+    // Префильтр источника + круг нерезкости в альфу.
+    prep->Bind();
+    Shader& dprep = DofPrepShader();
+    dprep.Use();
+    dprep.SetInt("uScene", 0);
+    dprep.SetInt("uDepth", 1);
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, ctx.SceneDepth);
+    dprep.SetMat4("uInvProj", invProj);
+    dprep.SetVec2("uFullTexel", glm::vec2(1.0f / (float)ctx.Width, 1.0f / (float)ctx.Height));
+    dprep.SetFloat("uFocus", focus);
+    dprep.SetFloat("uAperture", aperture);
+    dprep.SetFloat("uMaxRadius", maxRadius);
+    DrawFullscreen(ctx);
+
+    // Сбор по диску на половинном разрешении.
+    blurred->Bind();
+    Shader& dblur = DofBlurShader();
+    dblur.Use();
+    dblur.SetInt("uPrep", 0);
+    device.BindTexture2D(0, prep->ColorTextureHandle());
+    dblur.SetVec2("uTexel", glm::vec2(1.0f / (float)hw, 1.0f / (float)hh));
+    DrawFullscreen(ctx);
+
+    // Плавное смешивание резкого с размытым на полном разрешении.
+    out->Bind();
+    Shader& dcomp = DofCompositeShader();
+    dcomp.Use();
+    dcomp.SetInt("uScene", 0);
+    dcomp.SetInt("uBlurred", 1);
+    dcomp.SetInt("uDepth", 2);
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, blurred->ColorTextureHandle());
+    device.BindTexture2D(2, ctx.SceneDepth);
+    dcomp.SetMat4("uInvProj", invProj);
+    dcomp.SetFloat("uFocus", focus);
+    dcomp.SetFloat("uAperture", aperture);
+    dcomp.SetFloat("uMaxRadius", maxRadius);
+    DrawFullscreen(ctx);
+
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
+}
+
+// --- Звено «Motion Blur» -----------------------------------------------------
+void RunMotionBlur(PostContext& ctx, const PostEffect& e) {
+    const bool useVelocity = ctx.Velocity.Valid();
+    // С буфером скоростей история прошлого кадра НЕ нужна: её хранит проход
+    // геометрии, у каждой сущности свою. Запасной путь без буфера сравнивает
+    // матрицу этого кадра с матрицей прошлого и потому без истории невозможен.
+    const bool useHistory = ctx.Scratch->HasPrevFrame;
+    if (!useVelocity && !useHistory) {
+        OnceLog("звено «Motion Blur» пропущено: нет ни буфера скоростей, ни прошлого кадра");
+        return;
+    }
+    const float amount = e.Float("amount", 0.5f);
+    if (amount <= 0.001f) return;
+
+    SAGE_PROFILE("Смаз движения");
+    GraphicsDevice& device = Dev(ctx);
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& sh = MotionShader();
+    sh.Use();
+    sh.SetInt("uScene", 0);
+    sh.SetInt("uDepth", 1);
+    sh.SetInt("uVelocity", 2);
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, ctx.SceneDepth);
+    // Сэмплер обязан быть привязан всегда, даже когда путь не выбран:
+    // непривязанный юнит на части драйверов читается как чёрная текстура,
+    // а на части — как мусор из чужого прохода.
+    device.BindTexture2D(2, useVelocity ? ctx.Velocity : ctx.SceneDepth);
+    sh.SetInt("uUseVelocity", useVelocity ? 1 : 0);
+    sh.SetMat4("uInvViewProj", glm::inverse(ctx.Proj * ctx.View));
+    sh.SetMat4("uPrevViewProj", ctx.Scratch->PrevViewProj);
+    sh.SetFloat("uAmount", amount);
+    sh.SetInt("uSamples", glm::clamp(e.Int("samples", 12), 2, 32));
+    DrawFullscreen(ctx);
+
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
+}
+
+// --- Звено «Bloom» -----------------------------------------------------------
+// Публикует карту postaux::kBloom. Порог И сила принадлежат звену: сила
+// умножается на последнем проходе размытия, а не тем, кто это свечение
+// подмешивает (см. kBlurFrag).
+void RunBloom(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Bloom");
+    GraphicsDevice& device = Dev(ctx);
+    PostScratch& sc = *ctx.Scratch;
+    const int hw = sc.Bright->Width(), hh = sc.Bright->Height();
+
+    sc.Bright->Bind();
+    Shader& br = BrightShader();
+    br.Use();
+    br.SetInt("uScene", 0);
+    device.BindTexture2D(0, ctx.Color);
+    br.SetFloat("uThreshold", e.Float("threshold", 1.0f));
+    DrawFullscreen(ctx);
+
+    Shader& blur = BlurShader();
+    blur.Use();
+    blur.SetInt("uTex", 0);
+    const glm::vec2 texel(1.0f / (float)hw, 1.0f / (float)hh);
+    const float intensity = e.Float("intensity", 0.55f);
+    sage::rhi::TextureHandle src = sc.Bright->ColorTextureHandle();
+    RenderTarget* dstA = sc.BloomA.get();
+    RenderTarget* dstB = sc.BloomB.get();
+    for (int i = 0; i < 2; ++i) {
+        const bool last = (i == 1);
+        dstA->Bind(); // горизонтальный
+        device.BindTexture2D(0, src);
+        blur.SetVec2("uDir", glm::vec2(texel.x, 0.0f));
+        blur.SetInt("uApplyScale", 0);
+        DrawFullscreen(ctx);
+        dstB->Bind(); // вертикальный
+        device.BindTexture2D(0, dstA->ColorTextureHandle());
+        blur.SetVec2("uDir", glm::vec2(0.0f, texel.y));
+        blur.SetFloat("uScale", intensity);
+        blur.SetInt("uApplyScale", last ? 1 : 0);
+        DrawFullscreen(ctx);
+        src = dstB->ColorTextureHandle();
+    }
+    PostPublishAux(ctx, postaux::kBloom, src);
+}
+
+// --- Звено «Tone Map & Grade» ------------------------------------------------
+// ЕДИНСТВЕННОЕ звено каталога, переводящее кадр из HDR в LDR (см. Tonemaps).
+// Затенение и свечение оно не считает, а ПРИМЕНЯЕТ — и только если их карты
+// кто-то опубликовал до него. Нет производителя — нет карты, нет и следа.
+void RunTonemap(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Тон-маппинг");
+    GraphicsDevice& device = Dev(ctx);
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+
+    const sage::rhi::TextureHandle bloom = PostAuxTexture(ctx, postaux::kBloom);
+    const sage::rhi::TextureHandle ao = PostAuxTexture(ctx, postaux::kAO);
+
+    Shader& comp = CompositeShader();
+    comp.Use();
+    comp.SetInt("uScene", 0);
+    comp.SetInt("uBloom", 1);
+    comp.SetInt("uAO", 2);
+    comp.SetInt("uUseBloom", bloom.Valid() ? 1 : 0);
+    comp.SetInt("uUseAO", ao.Valid() ? 1 : 0);
+    comp.SetFloat("uExposure", glm::max(e.Float("exposure", 1.05f), 0.001f));
+    comp.SetFloat("uGamma", glm::max(e.Float("gamma", 2.2f), 0.01f));
+    comp.SetFloat("uSaturation", e.Float("saturation", 1.16f));
+    comp.SetFloat("uContrast", e.Float("contrast", 1.06f));
+    comp.SetFloat("uVignette", glm::max(e.Float("vignette", 0.35f), 0.0f));
+    comp.SetFloat("uChromatic", glm::max(e.Float("chromatic", 0.0f), 0.0f));
+    device.BindTexture2D(0, ctx.Color);
+    // Сэмплеры привязаны ВСЕГДА, даже когда карты в тракте нет: непривязанный
+    // юнит на части драйверов читается как чёрная текстура, а на части — как
+    // мусор из чужого прохода.
+    device.BindTexture2D(1, bloom.Valid() ? bloom : ctx.Color);
+    device.BindTexture2D(2, ao.Valid() ? ao : ctx.Color);
+    DrawFullscreen(ctx);
+
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/true);
+}
+
+// --- Звено «FXAA» ------------------------------------------------------------
+void RunFxaa(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("FXAA");
+    GraphicsDevice& device = Dev(ctx);
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& fxaa = FxaaShader();
+    fxaa.Use();
+    fxaa.SetInt("uTex", 0);
+    fxaa.SetVec2("uTexel",
+                 glm::vec2(1.0f / (float)ctx.Width, 1.0f / (float)ctx.Height));
+    fxaa.SetFloat("uContrastThreshold", glm::max(e.Float("threshold", 0.0625f), 0.0f));
+    device.BindTexture2D(0, ctx.Color);
+    DrawFullscreen(ctx);
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/true);
+}
+
+} // namespace
+
+RenderTarget* PostAcquireTarget(PostContext& ctx, int divisor) {
+    PostScratch& sc = *ctx.Scratch;
+    if (divisor < 1) divisor = 1;
+    for (PostScratch::Pooled& entry : sc.Pool) {
+        if (entry.Divisor != divisor) continue;
+        // Цель, которую звено ЧИТАЕТ, брать нельзя: запись в неё затёрла бы вход.
+        // Тракт линеен, поэтому этого одного правила достаточно — цель, бывшая
+        // входом предыдущего звена, к этому моменту уже свободна.
+        if (entry.Target->ColorTextureHandle() == ctx.Color) continue;
+        return entry.Target.get();
+    }
+    // Свободных нет — заводим ещё одну. Так длина тракта не упирается в
+    // заранее угаданное число буферов.
+    PostScratch::Pooled fresh;
+    fresh.Divisor = divisor;
+    fresh.Target = MakeColor(std::max(1, sc.Width / divisor), std::max(1, sc.Height / divisor));
+    sc.Pool.push_back(std::move(fresh));
+    return sc.Pool.back().Target.get();
+}
+
+void PostDrawFullscreen(PostContext& ctx) { ctx.Scratch->Fullscreen->DrawArrays(3); }
+
+void PostPublishAux(PostContext& ctx, const char* name, sage::rhi::TextureHandle texture) {
+    if (!name) return;
+    for (std::pair<std::string, sage::rhi::TextureHandle>& entry : ctx.Aux) {
+        if (entry.first == name) {
+            entry.second = texture;
+            return;
+        }
+    }
+    ctx.Aux.emplace_back(name, texture);
+}
+
+sage::rhi::TextureHandle PostAuxTexture(const PostContext& ctx, const char* name) {
+    if (!name) return {};
+    for (const std::pair<std::string, sage::rhi::TextureHandle>& entry : ctx.Aux)
+        if (entry.first == name) return entry.second;
+    return {};
+}
+
+void PostSetColor(PostContext& ctx, sage::rhi::TextureHandle texture, bool ldr) {
+    ctx.Color = texture;
+    ctx.ColorIsLdr = ldr;
+}
+
+// ============================================================================
+//  Встроенные виды эффектов
+// ============================================================================
+
+void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
+    {
+        PostEffectKind k;
+        k.Id = "ao";
+        k.Label = "Ambient Occlusion";
+        k.Hint = "Затемняет щели и места контакта предметов; считается по глубине кадра";
+        k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.ProducesAux = postaux::kAO;
+        k.Params = {Param("radius", "Radius", 0.5f, 0.05f, 2.0f, "Радиус выборки в метрах"),
+                    Param("strength", "Strength", 1.0f, 0.0f, 4.0f, "Во сколько раз усилить затемнение")};
+        k.Run = RunAmbientOcclusion;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "dof";
+        k.Label = "Depth of Field";
+        k.Hint = "Размывает то, что дальше или ближе плоскости фокуса";
+        k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Params = {
+            Param("focus", "Focus Distance", 10.0f, 0.05f, 200.0f, "Расстояние до плоскости фокуса"),
+            Param("aperture", "Aperture", 2.8f, 0.7f, 16.0f, "f-число: меньше — сильнее размытие"),
+            Param("maxRadius", "Max Radius", 12.0f, 0.0f, 64.0f, "Потолок радиуса в пикселях")};
+        k.Run = RunDepthOfField;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "motionblur";
+        k.Label = "Motion Blur";
+        k.Hint = "Смаз движения камеры (и объектов, если у кадра есть буфер скоростей)";
+        k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Params = {Param("amount", "Amount", 0.5f, 0.0f, 1.0f, "Доля вектора смещения за кадр"),
+                    Param("samples", "Samples", 12.0f, 2.0f, 32.0f, "Выборок вдоль вектора")};
+        k.Run = RunMotionBlur;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "bloom";
+        k.Label = "Bloom";
+        k.Hint = "Свечение ярких участков; считается до тон-маппинга";
+        k.Needs = PostNeeds::HdrColor;
+        k.ProducesAux = postaux::kBloom;
+        k.Params = {Param("threshold", "Bloom Threshold", 1.0f, 0.0f, 8.0f,
+                          "Яркость, выше которой пиксель светится"),
+                    Param("intensity", "Bloom Intensity", 0.55f, 0.0f, 4.0f,
+                          "Сила добавляемого свечения")};
+        k.Run = RunBloom;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "tonemap";
+        k.Label = "Tone Map & Grade";
+        k.Hint = "Переводит кадр в готовый к показу вид: экспозиция, кривая, гамма, цвет";
+        k.Needs = PostNeeds::HdrColor;
+        k.Tonemaps = true;
+        k.Params = {
+            Param("exposure", "Exposure", 1.05f, 0.1f, 4.0f, "Экспозиция до тон-маппинга"),
+            Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f, "Гамма вывода"),
+            Heading("Color"),
+            Param("saturation", "Saturation", 1.16f, 0.0f, 2.0f, "Насыщенность"),
+            Param("contrast", "Contrast", 1.06f, 0.5f, 2.0f, "Контраст вокруг середины"),
+            Param("vignette", "Vignette", 0.35f, 0.0f, 1.0f, "Затемнение к краям кадра"),
+            Param("chromatic", "Chromatic Aberration", 0.0f, 0.0f, 1.0f,
+                  "Расхождение каналов к краям кадра")};
+        k.Run = RunTonemap;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "fxaa";
+        k.Label = "FXAA";
+        k.Hint = "Сглаживает кромки по готовой картинке; работает только после тон-маппинга";
+        k.Needs = PostNeeds::LdrColor;
+        k.Params = {Param("threshold", "Contrast Threshold", 0.0625f, 0.0f, 0.5f,
+                          "Ниже этого перепада пиксель не считается кромкой")};
+        k.Run = RunFxaa;
+        catalog.Register(std::move(k));
+    }
+}
+
+// Тракт проекта по умолчанию. Здесь, а не в PostEffect.cpp, потому что
+// ФОРМА умолчания неотделима от того, какие виды зарегистрировал движок: имена
+// звеньев и их параметры заданы прямо выше.
+PostChain PostChain::FromConfig(const sage::EngineConfig& cfg) {
+    PostChain chain;
+    auto add = [&chain](const char* id) -> PostEffect& {
+        chain.Effects.push_back(MakePostEffect(id));
+        return chain.Effects.back();
+    };
+    auto set = [](PostEffect& effect, const char* name, float value) {
+        if (PostValue* p = effect.Find(name)) p->V[0] = value;
+    };
+
+    if (cfg.AmbientOcclusion) {
+        PostEffect& e = add("ao");
+        set(e, "radius", cfg.AORadius);
+        set(e, "strength", cfg.AOStrength);
+    }
+    if (cfg.DepthOfField) {
+        PostEffect& e = add("dof");
+        set(e, "focus", cfg.FocusDistance);
+        set(e, "aperture", cfg.Aperture);
+        set(e, "maxRadius", cfg.DofMaxRadius);
+    }
+    if (cfg.MotionBlur) {
+        PostEffect& e = add("motionblur");
+        set(e, "amount", cfg.MotionBlurAmount);
+        set(e, "samples", (float)cfg.MotionBlurSamples);
+    }
+    if (cfg.Bloom) {
+        PostEffect& e = add("bloom");
+        set(e, "threshold", cfg.BloomThreshold);
+        set(e, "intensity", cfg.BloomIntensity);
+    }
+    {
+        // Тон-маппинг в тракте по умолчанию есть ВСЕГДА: без него на экран ушёл
+        // бы HDR-цвет, то есть «пост-обработка выключена» выглядело бы как
+        // сломанная картинка, а не как отсутствие эффектов.
+        PostEffect& e = add("tonemap");
+        set(e, "exposure", cfg.Exposure);
+        set(e, "gamma", cfg.Gamma);
+        set(e, "saturation", cfg.Saturation);
+        set(e, "contrast", cfg.Contrast);
+        set(e, "vignette", cfg.Vignette);
+        set(e, "chromatic", cfg.ChromaticAberration);
+    }
+    // FXAA и MSAA НЕ СКЛАДЫВАЮТСЯ: они лечат одно и то же разными способами, и
+    // второй проход поверх первого уже нечего сглаживать — зато он размывает
+    // всё, что похоже на кромку. Тот же запрет, что и раньше, но теперь он
+    // выражен отсутствием звена в тракте, а не полем в настройках.
+    if (cfg.Fxaa && SceneSamples(cfg) <= 1) {
+        PostEffect& e = add("fxaa");
+        set(e, "threshold", cfg.FxaaContrastThreshold);
+    }
+    return chain;
+}
+
 PostFX::PostFX() {
-    m_fsTri = GraphicsDevice::Get().CreateGeometry(VertexLayout{});
+    m_scratch.Fullscreen = GraphicsDevice::Get().CreateGeometry(VertexLayout{});
 }
 
 void PostFX::EnsureTargets(int w, int h) {
-    if (w == m_w && h == m_h && m_ao) return;
-    m_w = w; m_h = h;
-    int hw = std::max(1, w / 2), hh = std::max(1, h / 2); // bloom — половинное разрешение
-    m_ao = MakeColor(w, h);
-    m_aoBlur = MakeColor(w, h);
-    m_bright = MakeColor(hw, hh);
-    m_bloomA = MakeColor(hw, hh);
-    m_bloomB = MakeColor(hw, hh);
-    // Смена размера обесценивает вспомогательные буферы и историю кадра:
-    // репроецировать старую матрицу на другой кадр нельзя.
-    m_dof.reset();
-    m_dofPrep.reset();
-    m_dofBlur.reset();
-    m_motion.reset();
-    m_ldr.reset();
-    m_hasPrevFrame = false;
+    if (w == m_scratch.Width && h == m_scratch.Height && m_scratch.Ao) return;
+    m_scratch.Width = w;
+    m_scratch.Height = h;
+    const int hw = std::max(1, w / 2), hh = std::max(1, h / 2); // свечение — половинное
+    m_scratch.Ao = MakeColor(w, h);
+    m_scratch.AoBlur = MakeColor(w, h);
+    m_scratch.Bright = MakeColor(hw, hh);
+    m_scratch.BloomA = MakeColor(hw, hh);
+    m_scratch.BloomB = MakeColor(hw, hh);
+    // Смена размера обесценивает рабочие буферы, пул целей и историю кадра:
+    // репроецировать старую матрицу на другой кадр нельзя, а цель другого
+    // размера не подходит ни одному звену.
+    m_scratch.DofPrep.reset();
+    m_scratch.DofBlur.reset();
+    m_scratch.Pool.clear();
+    m_scratch.HasPrevFrame = false;
 }
 
 RenderTarget* PostFX::EnsureAux(std::unique_ptr<RenderTarget>& slot, int w, int h) {
-    if (!slot) slot = MakeColor(w > 0 ? w : m_w, h > 0 ? h : m_h);
-    return slot.get();
+    return Keep(slot, w > 0 ? w : m_scratch.Width, h > 0 ? h : m_scratch.Height);
+}
+
+void PostFX::BlitToOutput(sage::rhi::TextureHandle source, Framebuffer* output, int outX, int outY,
+                          int outW, int outH) {
+    GraphicsDevice& device = GraphicsDevice::Get();
+    // Состояние, от которого зависит проход, проход и выставляет: копия
+    // вызывается и из тракта, и сама по себе — например хостом, у которого
+    // пост-обработка выключена конфигом, или тестом «с обработкой и без».
+    device.SetDepthTest(false);
+    device.SetBlend(false);
+    if (output) {
+        output->Bind();
+    } else {
+        device.BindDefaultFramebuffer();
+        device.SetViewport(outX, outY, outW, outH);
+    }
+    Shader& copy = CopyShader();
+    copy.Use();
+    copy.SetInt("uScene", 0);
+    device.BindTexture2D(0, source);
+    m_scratch.Fullscreen->DrawArrays(3);
 }
 
 void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandle sceneDepth,
                     int w, int h, const glm::mat4& proj, const glm::mat4& view,
-                    const PostFXSettings& s, Framebuffer* output, int outX, int outY, int outW,
+                    const PostChain& chain, Framebuffer* output, int outX, int outY, int outW,
                     int outH, sage::rhi::TextureHandle velocityTexture) {
     SAGE_PROFILE("Пост-обработка");
     GraphicsDevice& device = GraphicsDevice::Get();
@@ -775,240 +1289,78 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     // проход, проход и выставляет — ровно как строкой выше с глубиной.
     device.SetBlend(false);
 
-    auto drawTri = [&]() { m_fsTri->DrawArrays(3); };
+    // ТРАКТ ДОПОЛНЯЕТСЯ И ПРОВЕРЯЕТСЯ ДО ОТРИСОВКИ.
+    //
+    // Порядок звеньев — данные, и он может быть неверным: свечение после
+    // тон-маппинга, сглаживание до него, два тон-маппинга. Заметить это «по
+    // картинке» нельзя: картинка будет просто неверной, без единого сообщения.
+    // Поэтому тракт сперва дополняется до рабочего (нет тон-маппинга — он
+    // вставляется, см. PostChain::Completed), затем компилируется и только потом
+    // исполняется.
+    PostChain run = chain.Completed();
+    const PostChainReport report = run.Compile();
+    if (!report.Ok) {
+        // Неверный тракт НЕ оставляет чёрный экран: кадр показывается с одним
+        // тон-маппингом, а причина уходит в лог. Отказ показать картинку
+        // из-за опечатки в настройке — самый дорогой исход: человек увидит
+        // чёрное и решит, что сломан рендер, а не тракт.
+        OnceLog("тракт пост-обработки неверен: " + report.Error +
+                " — кадр показан без эффектов");
+        run.Effects.clear();
+        run.Effects.push_back(MakePostEffect("tonemap"));
+    }
 
-    // Все три эффекта, читающие глубину, без depth-текстуры невозможны.
-    const bool haveDepth = sceneDepth.Valid();
-    const bool doAO = s.AOEnabled && haveDepth;
-    const bool doDof = s.DofEnabled && haveDepth;
-    // С буфером скоростей история прошлого кадра ЗДЕСЬ не нужна — её хранит
-    // проход геометрии, у каждой сущности свою. Поэтому m_hasPrevFrame требуется
-    // только запасному пути.
-    const bool useVelocity = velocityTexture.Valid();
-    const bool doMotion = s.MotionBlurEnabled && (useVelocity || (haveDepth && m_hasPrevFrame)) &&
-                          s.MotionBlurAmount > 0.001f;
-    const bool doBloom = s.BloomEnabled;
+    // Контекст кадра — ВСЁ, что звено вправе знать. Ни очереди эффектов, ни
+    // числа проходов, ни внутренностей исполнителя здесь нет: звено должно
+    // уметь работать, ничего не зная о том, кто стоит до и после него.
+    PostContext ctx;
+    ctx.Device = &device;
+    ctx.Width = w;
+    ctx.Height = h;
+    ctx.Proj = proj;
+    ctx.View = view;
+    ctx.SceneColor = sceneColor;
+    ctx.SceneDepth = sceneDepth;
+    ctx.Velocity = velocityTexture;
+    ctx.Color = sceneColor;
+    ctx.ColorIsLdr = false;
+    ctx.Scratch = &m_scratch;
 
     const glm::mat4 viewProj = proj * view;
 
-    // --- 1. SSAO из глубины сцены -> m_ao, затем размытие -> m_aoBlur ---
-    if (doAO) {
-        SAGE_PROFILE("SSAO");
-        glm::mat4 invProj = glm::inverse(proj);
-        m_ao->Bind();
-        Shader& ao = SsaoShader();
-        ao.Use();
-        ao.SetInt("uDepth", 0);
-        device.BindTexture2D(0, sceneDepth);
-        ao.SetMat4("uProj", proj);
-        ao.SetMat4("uInvProj", invProj);
-        ao.SetFloat("uRadius", s.AORadius);
-        const glm::vec2 texel(1.0f / (float)w, 1.0f / (float)h);
-        ao.SetVec2("uTexel", texel);
-        drawTri();
+    for (const PostEffect& effect : run.Effects) {
+        if (!effect.Enabled) continue;
+        const PostEffectKind* kind = PostEffectCatalog::Instance().Find(effect.Kind);
+        if (!kind || !kind->Run) continue;
 
-        // Размытие РАЗДЕЛЁННОЕ: горизонталь в m_aoBlur, вертикаль обратно в
-        // m_ao. Два прохода по 9 выборок вместо одного по 16 — и дешевле, и
-        // шире окно (сглаживает шум выборки, который квадрат 4x4 оставлял).
-        Shader& aob = AoBlurShader();
-        aob.Use();
-        aob.SetInt("uAO", 0);
-        aob.SetVec2("uTexel", texel);
-
-        m_aoBlur->Bind();
-        aob.SetVec2("uDirection", glm::vec2(1.0f, 0.0f));
-        device.BindTexture2D(0, m_ao->ColorTextureHandle());
-        drawTri();
-
-        m_ao->Bind();
-        aob.SetVec2("uDirection", glm::vec2(0.0f, 1.0f));
-        device.BindTexture2D(0, m_aoBlur->ColorTextureHandle());
-        drawTri();
-    }
-
-    // --- 2. Глубина резкости: три прохода (префильтр -> сбор -> смешивание) ---
-    // colorTex — «текущая картинка» цепочки: каждый следующий проход читает
-    // результат предыдущего, а не исходный кадр.
-    //
-    // Проход-смешивание читает РЕЗКУЮ картинку (colorTex), а пишет в отдельную
-    // цель, поэтому чтение и запись в один буфер не пересекаются.
-    sage::rhi::TextureHandle colorTex = sceneColor;
-    if (doDof) {
-        SAGE_PROFILE("Глубина резкости");
-        const int hw = std::max(1, w / 2), hh = std::max(1, h / 2);
-        RenderTarget* prep = EnsureAux(m_dofPrep, hw, hh);
-        RenderTarget* blurred = EnsureAux(m_dofBlur, hw, hh);
-        const float focus = glm::max(s.FocusDistance, 0.01f);
-        const float aperture = glm::max(s.Aperture, 0.7f);
-        const float maxRadius = glm::max(s.DofMaxRadius, 0.0f);
-        const glm::mat4 invProj = glm::inverse(proj);
-
-        // 2.1 Префильтр источника + круг нерезкости в альфу.
-        prep->Bind();
-        Shader& dprep = DofPrepShader();
-        dprep.Use();
-        dprep.SetInt("uScene", 0);
-        dprep.SetInt("uDepth", 1);
-        device.BindTexture2D(0, colorTex);
-        device.BindTexture2D(1, sceneDepth);
-        dprep.SetMat4("uInvProj", invProj);
-        dprep.SetVec2("uFullTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
-        dprep.SetFloat("uFocus", focus);
-        dprep.SetFloat("uAperture", aperture);
-        dprep.SetFloat("uMaxRadius", maxRadius);
-        drawTri();
-
-        // 2.2 Сбор по диску на половинном разрешении.
-        blurred->Bind();
-        Shader& dblur = DofBlurShader();
-        dblur.Use();
-        dblur.SetInt("uPrep", 0);
-        device.BindTexture2D(0, prep->ColorTextureHandle());
-        dblur.SetVec2("uTexel", glm::vec2(1.0f / (float)hw, 1.0f / (float)hh));
-        drawTri();
-
-        // 2.3 Плавное смешивание резкого с размытым на полном разрешении.
-        RenderTarget* dof = EnsureAux(m_dof, w, h);
-        dof->Bind();
-        Shader& dcomp = DofCompositeShader();
-        dcomp.Use();
-        dcomp.SetInt("uScene", 0);
-        dcomp.SetInt("uBlurred", 1);
-        dcomp.SetInt("uDepth", 2);
-        device.BindTexture2D(0, colorTex);
-        device.BindTexture2D(1, blurred->ColorTextureHandle());
-        device.BindTexture2D(2, sceneDepth);
-        dcomp.SetMat4("uInvProj", invProj);
-        dcomp.SetFloat("uFocus", focus);
-        dcomp.SetFloat("uAperture", aperture);
-        dcomp.SetFloat("uMaxRadius", maxRadius);
-        drawTri();
-        colorTex = dof->ColorTextureHandle();
-    }
-
-    // --- 3. Motion blur: смаз вдоль вектора репроекции прошлым кадром ---
-    if (doMotion) {
-        SAGE_PROFILE("Смаз движения");
-        RenderTarget* motion = EnsureAux(m_motion);
-        motion->Bind();
-        Shader& sh = MotionShader();
-        sh.Use();
-        sh.SetInt("uScene", 0);
-        sh.SetInt("uDepth", 1);
-        sh.SetInt("uVelocity", 2);
-        device.BindTexture2D(0, colorTex);
-        device.BindTexture2D(1, sceneDepth);
-        // Сэмплер обязан быть привязан всегда, даже когда путь не выбран:
-        // непривязанный юнит на части драйверов читается как чёрная текстура,
-        // а на части — как мусор из чужого прохода.
-        device.BindTexture2D(2, useVelocity ? velocityTexture : sceneDepth);
-        sh.SetInt("uUseVelocity", useVelocity ? 1 : 0);
-        sh.SetMat4("uInvViewProj", glm::inverse(viewProj));
-        sh.SetMat4("uPrevViewProj", m_prevViewProj);
-        sh.SetFloat("uAmount", s.MotionBlurAmount);
-        sh.SetInt("uSamples", glm::clamp(s.MotionBlurSamples, 2, 32));
-        drawTri();
-        colorTex = motion->ColorTextureHandle();
-    }
-
-    // --- 4. Bloom: bright-pass -> размытие (2 итерации, ping-pong) ---
-    // Считается по УЖЕ размытой картинке (см. комментарий к порядку цепочки в
-    // PostFX.h): свечение размытого источника не должно быть резким.
-    if (doBloom) {
-        SAGE_PROFILE("Bloom");
-        int hw = m_bright->Width(), hh = m_bright->Height();
-        m_bright->Bind();
-        Shader& br = BrightShader();
-        br.Use();
-        br.SetInt("uScene", 0);
-        device.BindTexture2D(0, colorTex);
-        br.SetFloat("uThreshold", s.BloomThreshold);
-        drawTri();
-
-        Shader& blur = BlurShader();
-        blur.Use();
-        blur.SetInt("uTex", 0);
-        glm::vec2 texel(1.0f / (float)hw, 1.0f / (float)hh);
-        sage::rhi::TextureHandle src = m_bright->ColorTextureHandle();
-        RenderTarget* dstA = m_bloomA.get();
-        RenderTarget* dstB = m_bloomB.get();
-        for (int i = 0; i < 2; ++i) {
-            dstA->Bind(); // горизонтальный
-            device.BindTexture2D(0, src);
-            blur.SetVec2("uDir", glm::vec2(texel.x, 0.0f));
-            drawTri();
-            dstB->Bind(); // вертикальный
-            device.BindTexture2D(0, dstA->ColorTextureHandle());
-            blur.SetVec2("uDir", glm::vec2(0.0f, texel.y));
-            drawTri();
-            src = dstB->ColorTextureHandle();
+        // Чего не хватает КАДРУ, а не тракту: глубины может не быть вовсе, если
+        // сцену нарисовали без буфера глубины. Это не ошибка автора тракта, и
+        // звено пропускается — но с причиной, а не молча.
+        if (Has(kind->Needs, PostNeeds::Depth) && !ctx.SceneDepth.Valid()) {
+            OnceLog("звено «" + kind->Label + "» пропущено: у кадра нет текстуры глубины");
+            continue;
         }
+        // Эти два случая компилятор уже отверг; здесь они лишь страховка от
+        // расхождения между проверкой и исполнением.
+        if (Has(kind->Needs, PostNeeds::HdrColor) && ctx.ColorIsLdr) continue;
+        if (Has(kind->Needs, PostNeeds::LdrColor) && !ctx.ColorIsLdr) continue;
+
+        kind->Run(ctx, effect);
     }
 
-    // --- 5. Composite -> output (FBO вьюпорта) или экран ---
-    // FXAA работает по ГОТОВОЙ картинке, поэтому при включённом сглаживании
-    // composite пишет не в выход, а в промежуточный буфер: шейдеру нужен вход,
-    // а читать тот же буфер, в который пишешь, нельзя.
-    const bool doFxaa = s.FxaaEnabled;
-    RenderTarget* ldr = doFxaa ? EnsureAux(m_ldr) : nullptr;
-    {
-    SAGE_PROFILE("Тон-маппинг");
-    if (ldr) {
-        ldr->Bind();
-    } else if (output) {
-        output->Bind();
-    } else {
-        device.BindDefaultFramebuffer();
-        device.SetViewport(outX, outY, outW, outH);
-    }
-    Shader& comp = CompositeShader();
-    comp.Use();
-    comp.SetInt("uScene", 0);
-    comp.SetInt("uBloom", 1);
-    comp.SetInt("uAO", 2);
-    comp.SetInt("uUseBloom", doBloom ? 1 : 0);
-    comp.SetInt("uUseAO", doAO ? 1 : 0);
-    comp.SetFloat("uExposure", s.Exposure);
-    comp.SetFloat("uGamma", s.Gamma);
-    comp.SetFloat("uSaturation", s.Saturation);
-    comp.SetFloat("uContrast", s.Contrast);
-    comp.SetFloat("uVignette", s.Vignette);
-    comp.SetFloat("uBloomIntensity", s.BloomIntensity);
-    comp.SetFloat("uAOStrength", glm::max(s.AOStrength, 0.01f));
-    comp.SetFloat("uChromatic", glm::max(s.ChromaticAberration, 0.0f));
-    device.BindTexture2D(0, colorTex);
-    if (doBloom) device.BindTexture2D(1, m_bloomB->ColorTextureHandle());
-    // ГОТОВОЕ размытое AO лежит в m_ao: вертикальный проход пишет обратно в
-    // него (m_aoBlur — промежуточный буфер горизонтали, см. шаг 1).
-    if (doAO) device.BindTexture2D(2, m_ao->ColorTextureHandle());
-    drawTri();
-    }
-
-    // --- 6. FXAA -> выход ---
-    if (ldr) {
-        SAGE_PROFILE("FXAA");
-        if (output) {
-            output->Bind();
-        } else {
-            device.BindDefaultFramebuffer();
-            device.SetViewport(outX, outY, outW, outH);
-        }
-        Shader& fxaa = FxaaShader();
-        fxaa.Use();
-        fxaa.SetInt("uTex", 0);
-        fxaa.SetVec2("uTexel", glm::vec2(1.0f / (float)m_w, 1.0f / (float)m_h));
-        fxaa.SetFloat("uContrastThreshold", glm::max(s.FxaaContrastThreshold, 0.0f));
-        device.BindTexture2D(0, ldr->ColorTextureHandle());
-        drawTri();
-    }
+    // ФИНАЛЬНАЯ КОПИЯ. Звено пишет в СВОЮ цель, а не в выход: оно не обязано
+    // знать, куда смотрит камера. Копия стоит один проход и одно чтение
+    // текстуры, зато одно и то же звено годится и для превью в редакторе, и для
+    // экрана игры, и для второго вьюпорта другого размера.
+    BlitToOutput(ctx.Color, output, outX, outY, outW, outH);
 
     device.SetDepthTest(true);
 
-    // История для смаза следующего кадра. Пишется ВСЕГДА, даже когда motion blur
+    // История для смаза следующего кадра. Пишется ВСЕГДА, даже когда смаз
     // выключен: иначе после его включения первый кадр сравнивался бы с давно
     // устаревшей матрицей и размазал бы весь экран.
-    m_prevViewProj = viewProj;
-    m_hasPrevFrame = true;
+    m_scratch.PrevViewProj = viewProj;
+    m_scratch.HasPrevFrame = true;
 }
 
 
@@ -1045,15 +1397,12 @@ const PostFX::SelfCheck& PostFX::CheckPipeline() {
     }
 
     Framebuffer target(kSize, kSize);
-    PostFXSettings s;               // настройки по умолчанию: тон-маппинг и экспозиция
-    s.AOEnabled = false;            // без глубины AO нечего считать
-    s.DofEnabled = false;
-    s.MotionBlurEnabled = false;
-
-    // Матрицы единичные: ни один из оставшихся эффектов их не читает, а
-    // выдумывать камеру ради проверки — заводить второй источник правды.
+    // Тракт для проверки — ПУСТОЙ: он означает «только тон-маппинг», а все
+    // эффекты, читающие глубину, в этой пробе и не нужны (глубины тут нет).
+    // Дополнение до рабочего делает сам исполнитель (PostChain::Completed).
+    const PostChain chain;
     Render(input->Handle(), sage::rhi::TextureHandle{}, kSize, kSize, glm::mat4(1.0f),
-           glm::mat4(1.0f), s, &target, 0, 0, kSize, kSize);
+           glm::mat4(1.0f), chain, &target, 0, 0, kSize, kSize);
 
     target.Resolve();
     target.Bind();

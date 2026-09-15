@@ -21,6 +21,7 @@
 #include "sage/render/ScenePasses.h"
 #include "sage/render/SkyDraw.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/PostChainComponent.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -45,13 +46,14 @@ void EditorSceneRenderer::Init() {
     m_outlineTri = sage::rhi::GraphicsDevice::Get().CreateGeometry(sage::rhi::VertexLayout{});
 }
 
-// Перевод конфига в настройки эффектов живёт в движке (sage/render/PostFX.h):
+// Перевод конфига в тракт эффектов живёт в движке (sage/render/PostEffect.h):
 // его читают и превью редактора, и собранная игра, и разойтись они не должны
 // — «в редакторе одна картинка, в игре другая» началось ровно с того, что этот
 // код был здесь и рантайму был недоступен.
-sage::render::PostFXSettings EditorSceneRenderer::FxFromConfig(const sage::EngineConfig& cfg) {
-    return sage::render::FxFromConfig(cfg);
-}
+//
+// Чей тракт брать, решает sage::render::ResolvePostChain: у камеры может быть
+// СВОЙ тракт (компонент PostChainComponent), и тогда вид через неё обязан
+// считаться по нему — и в превью, и в игре одинаково.
 
 // Небо кадра: кубическая текстура, если у сцены задан её каталог, иначе
 // процедурный градиент. Одна точка на оба окна редактора — иначе вьюпорт и
@@ -673,8 +675,13 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     if (cfg.PostProcessing && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
         PostWorks()) {
         postFbo.Resize(w, h);
+        // Вид вьюпорта смотрит РЕДАКТОРСКОЙ камерой, а не камерой сцены, поэтому
+        // тракта у него своего быть не может — берём тракт проекта. Тракт
+        // камеры сцены показывается там, где через неё действительно смотрят:
+        // в панели Game и в превью выбранной камеры.
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
-                         sceneFbo.Height(), outProj, outView, FxFromConfig(cfg),
+                         sceneFbo.Height(), outProj, outView,
+                         sage::render::PostChain::FromConfig(cfg),
                          /*output=*/&postFbo, 0, 0, w, h);
         postApplied = true;
     }
@@ -819,7 +826,8 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
         m_previewPostFbo->Resize(m_previewW, m_previewH);
         m_postfx->Render(m_previewFbo->ColorTexture(), m_previewFbo->DepthTexture(),
                          m_previewFbo->Width(), m_previewFbo->Height(), frame.Proj, frame.View,
-                         FxFromConfig(cfg), /*output=*/&*m_previewPostFbo, 0, 0, m_previewW,
+                         sage::render::ResolvePostChain(scene, camera, cfg),
+                         /*output=*/&*m_previewPostFbo, 0, 0, m_previewW,
                          m_previewH);
         m_previewPostApplied = true;
     }
@@ -912,7 +920,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
                              m_gameFbo->Width(), m_gameFbo->Height(), proj, view,
-                             FxFromConfig(cfg),
+                             sage::render::ResolvePostChain(
+                                 scene, sage::ecs::PrimaryCameraEntity(scene), cfg),
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
         m_gamePostApplied = true;
     }

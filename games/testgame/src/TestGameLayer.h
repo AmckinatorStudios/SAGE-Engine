@@ -125,8 +125,8 @@ private:
     std::optional<Shader> m_shadowShader;
     std::optional<ShadowMap> m_shadows;
     std::optional<Framebuffer> m_sceneFbo;
-    std::optional<sage::render::PostFX> m_postfx;      // SSAO + Bloom + composite
-    sage::render::PostFXSettings m_postfxSettings;     // экспозиция/AO/bloom/виньетка
+    std::optional<sage::render::PostFX> m_postfx;      // исполнитель тракта
+    sage::render::PostChain m_postfxChain;             // что именно он делает
     bool m_shadowsEnabled = true;
     bool m_postEnabled = true;
     std::unique_ptr<Model> m_monument; // прямой Model::Load путь (комната 2)

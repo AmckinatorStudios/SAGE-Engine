@@ -133,7 +133,7 @@ glm::mat4 TestView() { return glm::lookAt(kEye, kTarget, glm::vec3(0, 1, 0)); }
 // него напрямую зависит размер текселя, а значит и то, ВИДНО ли работу
 // фильтра. На тесной коробке фильтровать почти нечего.
 Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
-                  const sage::render::PostFXSettings& fx, int width, int height,
+                  const sage::render::PostChain* chain, int width, int height,
                   const sage::render::GridSettings* grid, float shadowRadius) {
     Framebuffer sceneFbo(width, height);
     Framebuffer output(width, height);
@@ -147,8 +147,18 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
     r.Batch.RenderDepth(scene, r.Shadow.LightMatrix());
     r.Shadow.EndRender(width, height);
 
-    sceneFbo.Bind();
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+
+    // БЕЗ тракта сцена рисуется ПРЯМО в выход и с аппаратной гаммой — ровно так,
+    // как идёт собранная игра (PlayerLayer: SetSRGBWrite(!usePost)).
+    //
+    // Это не деталь. Нарисовать без пост-обработки в HDR-буфер, а потом
+    // скопировать его в выход означало бы показать сырой линейный цвет: кадр
+    // вышел бы засвеченным, и эталон «без пост-обработки» сторожил бы путь,
+    // которым движок НЕ ходит.
+    Framebuffer& sceneTarget = chain ? sceneFbo : output;
+    sceneTarget.Bind();
+    device.SetSRGBWrite(chain == nullptr);
     device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
     device.Clear(true, true);
     r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
@@ -157,35 +167,71 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
     sage::anim::DrawAnimatedModels(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true));
 
     if (grid) r.Grid.Draw(view, proj, kEye, *grid);
+    device.SetSRGBWrite(false);
 
-    // Смаз движения опирается на историю кадров, а тест должен быть
-    // детерминированным при любом порядке запуска — сбрасываем её явно.
-    r.Fx.ResetHistory();
-    r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), width, height, proj, view, fx,
-                  &output, 0, 0, width, height);
+    if (chain) {
+        // Смаз движения опирается на историю кадров, а тест должен быть
+        // детерминированным при любом порядке запуска — сбрасываем её явно.
+        r.Fx.ResetHistory();
+        r.Fx.Render(sceneTarget.ColorTexture(), sceneTarget.DepthTexture(), width, height, proj,
+                    view, *chain, &output, 0, 0, width, height);
+    }
 
     output.Bind();
     return Capture(width, height);
 }
 
-sage::render::PostFXSettings BaseSettings() {
-    sage::render::PostFXSettings fx;
-    // Значения фиксированы в тесте, а не взяты из конфига: иначе правка
-    // дефолтов конфига «ломала» бы эталоны, ничего не сломав в рендере.
-    fx.Enabled = true;
-    fx.Exposure = 1.05f;
-    fx.Gamma = 2.2f;
-    fx.Saturation = 1.16f;
-    fx.Contrast = 1.06f;
-    fx.BloomEnabled = true;
-    fx.BloomThreshold = 1.0f;
-    fx.BloomIntensity = 0.55f;
-    fx.AOEnabled = true;
-    fx.AORadius = 0.5f;
-    fx.AOStrength = 1.0f;
-    fx.Vignette = 0.35f;
-    fx.FxaaEnabled = false; // включается отдельным тестом
-    return fx;
+sage::render::PostChain BaseChain() {
+    using namespace sage::render;
+    PostChain chain;
+    // Порядок и значения — те же, что были у прежней зашитой цепочки:
+    // затенение -> свечение -> тон-маппинг. Глубины резкости и смаза здесь нет
+    // (их включают отдельные проверки), FXAA — тоже.
+    {
+        PostEffect& ao = AddEffect(chain, "ao");
+        (void)ao;
+        SetParam(chain, "ao", "radius", 0.5f);
+        SetParam(chain, "ao", "strength", 1.0f);
+    }
+    {
+        AddEffect(chain, "bloom");
+        SetParam(chain, "bloom", "threshold", 1.0f);
+        SetParam(chain, "bloom", "intensity", 0.55f);
+    }
+    {
+        AddEffect(chain, "tonemap");
+        SetParam(chain, "tonemap", "exposure", 1.05f);
+        SetParam(chain, "tonemap", "gamma", 2.2f);
+        SetParam(chain, "tonemap", "saturation", 1.16f);
+        SetParam(chain, "tonemap", "contrast", 1.06f);
+        SetParam(chain, "tonemap", "vignette", 0.35f);
+        SetParam(chain, "tonemap", "chromatic", 0.0f);
+    }
+    return chain;
+}
+
+sage::render::PostEffect& AddEffect(sage::render::PostChain& chain, const char* kindId) {
+    // Место в тракте выбирает движок по тому, что звено читает: тест не должен
+    // знать про порядок HDR/LDR — иначе он проверял бы своё же знание.
+    return sage::render::AddPostEffect(chain, kindId);
+}
+
+void RemoveEffect(sage::render::PostChain& chain, const char* kindId) {
+    sage::render::RemovePostEffect(chain, kindId);
+}
+
+void SetParam(sage::render::PostChain& chain, const char* kindId, const char* param, float value) {
+    for (sage::render::PostEffect& e : chain.Effects) {
+        if (e.Kind != kindId) continue;
+        if (sage::render::PostValue* p = e.Find(param)) p->V[0] = value;
+        return;
+    }
+}
+
+bool HasEffect(const sage::render::PostChain& chain, const char* kindId) {
+    for (const sage::render::PostEffect& e : chain.Effects)
+        if (e.Kind == kindId) return true;
+    return false;
 }
 
 glm::mat4 PerspectiveProj() {

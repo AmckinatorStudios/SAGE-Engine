@@ -117,17 +117,17 @@ void TestMorphTargets(FrameRenderer& r) {
     const glm::mat4 proj = PerspectiveProj();
 
     // Нулевые веса — исходная форма.
-    const Image neutral = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image neutral = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
     Report("morph_neutral", CompareWithReference("morph_neutral", neutral));
 
     // Полный вес первой цели.
     am.MorphWeights = {1.0f, 0.0f};
-    const Image fat = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image fat = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
     Report("morph_fatten", CompareWithReference("morph_fatten", fat));
 
     // Вторая цель — независимо от первой.
     am.MorphWeights = {0.0f, 1.0f};
-    const Image bend = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image bend = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
     Report("morph_bend", CompareWithReference("morph_bend", bend));
 
     auto meanDiff = [](const Image& a, const Image& b) {
@@ -150,7 +150,7 @@ void TestMorphTargets(FrameRenderer& r) {
 
     // Половинный вес обязан дать промежуточную форму, а не переключение.
     am.MorphWeights = {0.5f, 0.0f};
-    const Image half = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image half = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
     const double halfVsNeutral = meanDiff(half, neutral);
     std::printf("       половинный вес: до исходной %.2f, до полной %.2f\n", halfVsNeutral,
                 meanDiff(half, fat));
@@ -159,7 +159,7 @@ void TestMorphTargets(FrameRenderer& r) {
 
     // Возврат к нулю обязан вернуть исходную форму в точности.
     am.MorphWeights = {0.0f, 0.0f};
-    const Image back = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image back = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
     Check(meanDiff(back, neutral) < 0.01, "нулевые веса возвращают исходную форму");
 }
 
@@ -545,7 +545,7 @@ Image RigBackdrop(FrameRenderer& r) {
     empty.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     empty.Lighting.Skybox.Enabled = false;
     empty.Lighting.Sun.Intensity = 0.0f;
-    return RenderFrame(r, empty, PerspectiveProj(), BaseSettings(), kW, kH);
+    return RenderFrame(r, empty, PerspectiveProj(), BaseChain(), kW, kH);
 }
 
 // Пиксель считается «моделью», если он отличается от фона: фон один и тот же
@@ -608,14 +608,14 @@ void TestRigidPartsOnBones(FrameRenderer& r) {
     Check(am.Model->GetSkeleton().Count() == 2, "кости оснастки разобраны");
 
     const glm::mat4 proj = PerspectiveProj();
-    const Image bind = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image bind = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
 
     // Поза клипа: вторая кость поворачивается, и жёсткая деталь на ней обязана
     // уехать вместе с костью. Если бы она рисовалась сама по себе (в позе
     // привязки), кадр не изменился бы вовсе.
     am.Anim.Play(0, false);
     am.Anim.Update(0.9f);
-    const Image posed = RenderFrame(r, *scene, proj, BaseSettings(), kW, kH);
+    const Image posed = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
 
     long long diff = 0;
     for (size_t i = 0; i < bind.Pixels.size() && i < posed.Pixels.size(); ++i)
@@ -636,9 +636,9 @@ void TestRigidPartsOnBones(FrameRenderer& r) {
 void TestSkinnedAmbient(FrameRenderer& r) {
     const glm::mat4 proj = PerspectiveProj();
     auto dim = MakeRigScene(0.08f, 0.0f);
-    const Image low = RenderFrame(r, *dim, proj, BaseSettings(), kW, kH);
+    const Image low = RenderFrame(r, *dim, proj, BaseChain(), kW, kH);
     auto bright = MakeRigScene(1.0f, 0.0f);
-    const Image high = RenderFrame(r, *bright, proj, BaseSettings(), kW, kH);
+    const Image high = RenderFrame(r, *bright, proj, BaseChain(), kW, kH);
 
     const Image backdrop = RigBackdrop(r);
     int loPixels = 0, hiPixels = 0;
@@ -670,7 +670,7 @@ void TestSkinnedAmbient(FrameRenderer& r) {
 void TestSkinnedPointLight(FrameRenderer& r) {
     const glm::mat4 proj = PerspectiveProj();
     auto dark = MakeRigScene(0.05f, 0.0f);
-    const Image without = RenderFrame(r, *dark, proj, BaseSettings(), kW, kH);
+    const Image without = RenderFrame(r, *dark, proj, BaseChain(), kW, kH);
 
     auto lit = MakeRigScene(0.05f, 0.0f);
     GameObject lamp = lit->CreateObject("Lamp");
@@ -681,7 +681,7 @@ void TestSkinnedPointLight(FrameRenderer& r) {
     lc.Intensity = 30.0f;
     lc.Range = 20.0f;
     lit->Registry().emplace<LightComponent>(lamp.Entity(), lc);
-    const Image withLamp = RenderFrame(r, *lit, proj, BaseSettings(), kW, kH);
+    const Image withLamp = RenderFrame(r, *lit, proj, BaseChain(), kW, kH);
 
     const Image backdrop = RigBackdrop(r);
     const double off = MeanLumaOnModel(without, backdrop);
@@ -700,13 +700,13 @@ void TestSkinnedMaterialMaps(FrameRenderer& r) {
     // Свечение: без единого источника света модель обязана остаться видимой —
     // светится жёсткая деталь (emissiveFactor в её материале).
     auto black = MakeRigScene(0.0f, 0.0f);
-    const Image glow = RenderFrame(r, *black, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image glow = RenderFrame(r, *black, PerspectiveProj(), BaseChain(), kW, kH);
     const Image backdrop = RigBackdrop(r);
     Check(LitPixels(glow, backdrop) > 50, "свечение материала доезжает до кадра");
 
     // Эталон общего вида: он и ловит всё остальное разом — карту
     // шероховатости, затенение, дырки в пластинке с alphaMode=MASK.
-    const Image frame = RenderFrame(r, *scene, PerspectiveProj(), BaseSettings(), kW, kH);
+    const Image frame = RenderFrame(r, *scene, PerspectiveProj(), BaseChain(), kW, kH);
     Report("rig_materials", CompareWithReference("rig_materials", frame));
 }
 

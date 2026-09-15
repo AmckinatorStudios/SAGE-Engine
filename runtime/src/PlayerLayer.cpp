@@ -1088,7 +1088,8 @@ void PlayerLayer::OnRender() {
             device.Clear();
             m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                              m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
-                             sage::render::FxFromConfig(cfg),
+                             sage::render::ResolvePostChain(
+                                 *m_scene, sage::ecs::PrimaryCameraEntity(*m_scene), cfg),
                              /*output=*/nullptr, vpX, vpY, vpW, vpH);
         }
         };

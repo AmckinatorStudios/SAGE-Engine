@@ -150,7 +150,7 @@ void TestShadowSoftness(FrameRenderer& r, Scene& scene) {
     // провалилась: она проходила и до правки. Сорок метров дают тексель в
     // четыре сантиметра, то есть ровно тот случай, ради которого фильтр и
     // делался.
-    const Image frame = RenderFrame(r, scene, PerspectiveProj(), BaseSettings(), kW, kH,
+    const Image frame = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH,
                                     nullptr, /*shadowRadius=*/40.0f);
 
     int hard = 0, soft = 0;

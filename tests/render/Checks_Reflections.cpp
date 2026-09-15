@@ -170,9 +170,9 @@ Image RenderReflected(FrameRenderer& r, Scene& scene, sage::render::ReflectionSy
     r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0, &binding);
 
     r.Fx.ResetHistory();
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.BloomEnabled = false;   // свечение размывает переходы, которые мы меряем
-    fx.Vignette = 0.0f;        // и виньетка съедает края шара
+    sage::render::PostChain fx = BaseChain();
+    RemoveEffect(fx, "bloom");                      // свечение размывает переходы, которые мы меряем
+    SetParam(fx, "tonemap", "vignette", 0.0f);      // и виньетка съедает края шара
     r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, fx, &output, 0,
                 0, w, h);
     output.Bind();
@@ -380,9 +380,9 @@ void TestReflectionProbe(FrameRenderer& r) {
     r.Batch.RenderColor(*scene, view, proj, glm::vec3(0.0f, 0.8f, 7.0f), env, ShadowBinding(), 0,
                         &binding);
     r.Fx.ResetHistory();
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.BloomEnabled = false;
-    fx.Vignette = 0.0f;
+    sage::render::PostChain fx = BaseChain();
+    RemoveEffect(fx, "bloom");
+    SetParam(fx, "tonemap", "vignette", 0.0f);
     r.Fx.Render(fbo.ColorTexture(), fbo.DepthTexture(), kW, kH, proj, view, fx, &out, 0, 0, kW, kH);
     out.Bind();
     const Image img = Capture(kW, kH);
@@ -492,9 +492,9 @@ Image RenderFlareFrame(FrameRenderer& r, bool flareOn, bool blocker, bool behind
                      env, s);
     }
 
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.Vignette = 0.0f;      // виньетка съедает призраки у края и мешает считать
-    fx.BloomEnabled = false; // свечение размазало бы разницу, которую мы меряем
+    sage::render::PostChain fx = BaseChain();
+    SetParam(fx, "tonemap", "vignette", 0.0f); // виньетка съедает призраки у края и мешает считать
+    RemoveEffect(fx, "bloom");                 // свечение размазало бы разницу, которую мы меряем
     r.Fx.ResetHistory();
     r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, fx, &output, 0,
                 0, w, h);
@@ -671,9 +671,9 @@ void TestPlanarReflectionRender(FrameRenderer& r) {
     binding.ScreenTexel = glm::vec2(1.0f / kW, 1.0f / kH);
     r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0, &binding);
     r.Fx.ResetHistory();
-    sage::render::PostFXSettings fx = BaseSettings();
-    fx.BloomEnabled = false;
-    fx.Vignette = 0.0f;
+    sage::render::PostChain fx = BaseChain();
+    RemoveEffect(fx, "bloom");
+    SetParam(fx, "tonemap", "vignette", 0.0f);
     r.Fx.Render(fbo.ColorTexture(), fbo.DepthTexture(), kW, kH, proj, view, fx, &out, 0, 0, kW, kH);
     out.Bind();
     const Image img = Capture(kW, kH);
