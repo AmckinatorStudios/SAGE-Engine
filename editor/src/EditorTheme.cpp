@@ -424,15 +424,24 @@ void LoadFont() {
 //
 // Те же три цвета, что у гизмо осей в углу (ViewGizmo.cpp) и у осей объекта в
 // сцене (DebugDraw::Axes): «красное — X» человек запоминает один раз.
+ImVec4 AxisColor(int axis) {
+    static const ImVec4 kAxisColors[3] = {
+        ImVec4(1.00f, 0.22f, 0.22f, 1.00f),  // X — красный
+        ImVec4(0.25f, 0.90f, 0.25f, 1.00f),  // Y — зелёный
+        ImVec4(0.22f, 0.46f, 1.00f, 1.00f),  // Z — синий
+    };
+    return kAxisColors[axis >= 0 && axis < 3 ? axis : 0];
+}
+
 void ApplyGizmoColors() {
     ImGuizmo::Style& st = ImGuizmo::GetStyle();
-    st.Colors[ImGuizmo::DIRECTION_X] = ImVec4(1.00f, 0.22f, 0.22f, 1.00f);
-    st.Colors[ImGuizmo::DIRECTION_Y] = ImVec4(0.25f, 0.90f, 0.25f, 1.00f);
-    st.Colors[ImGuizmo::DIRECTION_Z] = ImVec4(0.22f, 0.46f, 1.00f, 1.00f);
+    st.Colors[ImGuizmo::DIRECTION_X] = AxisColor(0);
+    st.Colors[ImGuizmo::DIRECTION_Y] = AxisColor(1);
+    st.Colors[ImGuizmo::DIRECTION_Z] = AxisColor(2);
     // Плоскости — те же цвета полупрозрачными: это те же оси, взятые парой.
-    st.Colors[ImGuizmo::PLANE_X] = ImVec4(1.00f, 0.22f, 0.22f, 0.42f);
-    st.Colors[ImGuizmo::PLANE_Y] = ImVec4(0.25f, 0.90f, 0.25f, 0.42f);
-    st.Colors[ImGuizmo::PLANE_Z] = ImVec4(0.22f, 0.46f, 1.00f, 0.42f);
+    st.Colors[ImGuizmo::PLANE_X] = ImVec4(AxisColor(0).x, AxisColor(0).y, AxisColor(0).z, 0.42f);
+    st.Colors[ImGuizmo::PLANE_Y] = ImVec4(AxisColor(1).x, AxisColor(1).y, AxisColor(1).z, 0.42f);
+    st.Colors[ImGuizmo::PLANE_Z] = ImVec4(AxisColor(2).x, AxisColor(2).y, AxisColor(2).z, 0.42f);
     // Подсветка захваченной ручки — янтарная, как кайма выделения: одно
     // «сейчас работают с этим» на весь редактор.
     st.Colors[ImGuizmo::SELECTION] = ImVec4(1.00f, 0.62f, 0.12f, 0.85f);

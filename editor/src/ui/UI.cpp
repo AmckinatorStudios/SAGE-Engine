@@ -222,14 +222,32 @@ bool PropertyVec3(const char* id, float v[3], float speed, const char* format,
                             ImVec2(ui.PaddingControlY, ui.PaddingControlY));
         changed |= ImGui::DragFloat("##v", &v[i], speed, 0.0f, 0.0f, format);
         ImGui::PopStyleVar();
-        // Буква оси — ВНУТРИ поля слева, приглушённо: отдельной подписью она
-        // съедала бы треть ширины строки, а без неё три одинаковых поля не
-        // отличить друг от друга.
+        // Буква оси — ВНУТРИ поля слева, плашкой цвета этой оси: отдельной
+        // подписью она съедала бы треть ширины строки, а без неё три
+        // одинаковых поля было не отличить друг от друга. Цвет — тот же,
+        // что у манипулятора сцены и гизмо в углу вьюпорта
+        // (EditorTheme::AxisColor): «красное — X» читается здесь тем же
+        // взглядом, что и во вьюпорте, вместо одинаковой серой буквы для
+        // всех трёх осей.
+        //
+        // ПЛАШКА, А НЕ ГОЛАЯ ЦВЕТНАЯ БУКВА: чистый красный/зелёный/синий
+        // текст прямо на фоне поля ввода либо резал бы глаз (светлая тема),
+        // либо терялся в контрасте (тёмная); тонированная подложка держит
+        // читаемость в обеих и выглядит меткой, а не случайным цветом текста.
+        const ImVec4 axis = EditorTheme::AxisColor(i);
+        const ImU32 axisFg = ImGui::GetColorU32(axis);
+        const ImU32 axisBg = ImGui::GetColorU32(ImVec4(axis.x, axis.y, axis.z, 0.20f));
         const ImVec2 p0 = ImGui::GetItemRectMin();
         const ImVec2 p1 = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddText(
-            ImVec2(p0.x + ui.SpacingXS, p0.y + (p1.y - p0.y - ImGui::GetTextLineHeight()) * 0.5f),
-            ImGui::GetColorU32(C(Role::TextFaint)), kAxis[i]);
+        const float textH = ImGui::GetTextLineHeight();
+        const float letterW = ImGui::CalcTextSize(kAxis[i]).x;
+        const ImVec2 chipMin(p0.x + 2.0f, p0.y + 2.0f);
+        const ImVec2 chipMax(chipMin.x + letterW + ui.SpacingXS * 1.6f, p1.y - 2.0f);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(chipMin, chipMax, axisBg, ui.CornerRadiusSmall);
+        dl->AddText(
+            ImVec2(chipMin.x + ui.SpacingXS * 0.8f, p0.y + (p1.y - p0.y - textH) * 0.5f),
+            axisFg, kAxis[i]);
         ImGui::PopID();
     }
     ImGui::PopID();
