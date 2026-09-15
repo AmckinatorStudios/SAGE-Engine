@@ -173,10 +173,12 @@ private:
     SelfCheck m_selfCheck;
 
     void EnsureTargets(int w, int h);
-    // Лениво создаёт полноразмерный вспомогательный буфер. DoF и motion blur
+    // Лениво создаёт вспомогательный буфер. Размер по умолчанию — полный кадр;
+    // глубина резкости просит ПОЛОВИННЫЙ (см. kDofBlurFrag). DoF и motion blur
     // включают редко, а полноэкранный HDR-таргет стоит заметной VRAM — держать
     // их всегда только ради выключенной галочки незачем.
-    sage::rhi::RenderTarget* EnsureAux(std::unique_ptr<sage::rhi::RenderTarget>& slot);
+    sage::rhi::RenderTarget* EnsureAux(std::unique_ptr<sage::rhi::RenderTarget>& slot,
+                                       int w = 0, int h = 0);
 
     std::unique_ptr<sage::rhi::Geometry> m_fsTri; // полноэкранный треугольник (без атрибутов)
 
@@ -185,6 +187,10 @@ private:
     std::unique_ptr<sage::rhi::RenderTarget> m_bright, m_bloomA, m_bloomB;
     // Полноразмерные, создаются по факту включения эффекта (см. EnsureAux).
     std::unique_ptr<sage::rhi::RenderTarget> m_dof, m_motion;
+    // Половинного разрешения: префильтр с CoC и сам сбор по диску. Размывать на
+    // полном разрешении выборками по числу пикселей радиуса — это и была
+    // «пикселизация» прежнего DoF (см. kDofPrepFrag).
+    std::unique_ptr<sage::rhi::RenderTarget> m_dofPrep, m_dofBlur;
     // Готовая LDR-картинка перед FXAA: сглаживание — отдельный проход после
     // composite, ему нужен вход, а не запись «в себя».
     std::unique_ptr<sage::rhi::RenderTarget> m_ldr;
