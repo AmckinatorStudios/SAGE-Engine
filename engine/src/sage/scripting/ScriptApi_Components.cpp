@@ -162,7 +162,39 @@ void ScriptEngine::RegisterComponentTypes() {
         "MetallicMapPath", &Material::MetallicMapPath,
         "RoughnessMapPath", &Material::RoughnessMapPath,
         "AOMapPath", &Material::AOMapPath,
-        "EmissiveMap", &Material::EmissiveMap
+        "EmissiveMap", &Material::EmissiveMap,
+        // Собственный шейдер — ТОЛЬКО НА ЧТЕНИЕ: путь сам по себе шейдер не
+        // собирает (см. Material.h), а запись поля в обход компиляции оставила
+        // бы материал с путём, указывающим на несобранную программу. Менять
+        // шейдер — sage.render.SetMaterialShader/ClearMaterialShader, они и
+        // пишут пути, и собирают программу тем же вызовом.
+        "VertexShaderPath", sol::readonly(&Material::VertexShaderPath),
+        "FragmentShaderPath", sol::readonly(&Material::FragmentShaderPath),
+        "HasCustomShader", &Material::HasCustomShader,
+        // Пользовательские юниформы (см. Material::Params). Методом на самом
+        // материале, а не отдельной функцией по пути: NewMaterial отдаёт
+        // материал без осмысленного пути в кэше, и городить его ради чтения
+        // одной юниформы незачем — материал и так уже в руках у скрипта.
+        "SetParam", [](Material& m, const std::string& name, sol::object value) {
+            if (value.is<float>())          m.Params[name] = ShaderParam::Make(value.as<float>());
+            else if (value.is<glm::vec2>()) m.Params[name] = ShaderParam::Make(value.as<glm::vec2>());
+            else if (value.is<glm::vec3>()) m.Params[name] = ShaderParam::Make(value.as<glm::vec3>());
+            else if (value.is<glm::vec4>()) m.Params[name] = ShaderParam::Make(value.as<glm::vec4>());
+            else throw std::runtime_error("Material:SetParam: значение должно быть числом или Vec2/3/4");
+        },
+        "GetParam", [this](const Material& m, const std::string& name) -> sol::object {
+            auto it = m.Params.find(name);
+            if (it == m.Params.end()) return sol::lua_nil;
+            switch (it->second.Kind) {
+                case ShaderParam::Type::Float: return sol::make_object(m_lua, it->second.Value.x);
+                case ShaderParam::Type::Vec2:  return sol::make_object(m_lua, glm::vec2(it->second.Value));
+                case ShaderParam::Type::Vec3:  return sol::make_object(m_lua, glm::vec3(it->second.Value));
+                case ShaderParam::Type::Vec4:  return sol::make_object(m_lua, it->second.Value);
+            }
+            return sol::lua_nil;
+        },
+        "HasParam", [](const Material& m, const std::string& name) { return m.Params.count(name) > 0; },
+        "ClearParam", [](Material& m, const std::string& name) { m.Params.erase(name); }
     );
 }
 
