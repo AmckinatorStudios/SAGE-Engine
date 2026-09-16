@@ -9,11 +9,13 @@
 // ---------------------------------------------------------------------------
 #include "TestFramework.h"
 
+#include <filesystem>
 #include <string>
 
 #include <nlohmann/json.hpp>
 
 #include "sage/render/PostChainComponent.h"
+#include "sage/render/PostChainIO.h"
 #include "sage/render/PostEffect.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
@@ -317,4 +319,66 @@ TEST(PostChain_resolves_from_the_camera_then_the_project) {
 
     // Камеры нет вовсе — тоже проект, а не пустота.
     CHECK_TRUE(EffectOf(ResolvePostChain(scene, entt::null, cfg), "ao") != nullptr);
+}
+
+// --- Тракт ПРОЕКТА: `sage.cfg` и умолчание из полей --------------------------
+
+TEST(PostChain_project_chain_comes_from_config_or_from_fields) {
+    sage::EngineConfig cfg;
+    cfg.Bloom = false;
+    cfg.AmbientOcclusion = true;
+
+    // Конфиг тракт не трогал — он собирается из полей. Так выглядят все проекты,
+    // настроенные до появления трактов.
+    const PostChain fromFields = ProjectPostChain(cfg);
+    CHECK_TRUE(EffectOf(fromFields, "ao") != nullptr);
+    CHECK_TRUE(EffectOf(fromFields, "bloom") == nullptr);
+
+    // Авторский тракт ПЕРЕКРЫВАЕТ поля: иначе правка в редакторе ничего бы не
+    // значила, а человек не понял бы, почему его тракт не работает.
+    PostChain authored = ChainOf({"bloom", "tonemap"});
+    cfg.PostChain = PostChainToJson(authored).dump();
+    const PostChain loaded = ProjectPostChain(cfg);
+    CHECK_TRUE(EffectOf(loaded, "bloom") != nullptr);
+    CHECK_TRUE(EffectOf(loaded, "ao") == nullptr);
+
+    // Битый текст тракта не оставляет проект БЕЗ обработки вовсе: собираем из
+    // полей. Файл правят руками, и опечатка там — обычное дело.
+    cfg.PostChain = "{ это не json";
+    const PostChain broken = ProjectPostChain(cfg);
+    CHECK_TRUE(EffectOf(broken, "tonemap") != nullptr);
+    CHECK_TRUE(EffectOf(broken, "ao") != nullptr);
+}
+
+TEST(PostChain_survives_a_config_round_trip) {
+    // «Сохранить настройки» в редакторе перезаписывает sage.cfg ЦЕЛИКОМ. Если бы
+    // тракт при этом терялся, правка настроек молча стирала бы всю
+    // пост-обработку проекта — и заметить это можно было бы только по картинке.
+    sage::EngineConfig cfg;
+    cfg.PostChain = PostChainToJson(ChainOf({"bloom", "tonemap"})).dump();
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "sage_postchain_test.cfg").string();
+    CHECK_TRUE(cfg.SaveFile(path));
+
+    sage::EngineConfig loaded;
+    CHECK_TRUE(loaded.LoadFile(path));
+    const PostChain back = ProjectPostChain(loaded);
+    CHECK_TRUE(EffectOf(back, "bloom") != nullptr);
+    CHECK_TRUE(EffectOf(back, "tonemap") != nullptr);
+    CHECK_TRUE(back.Compile().Ok);
+    std::filesystem::remove(path);
+
+    // А конфиг БЕЗ тракта остаётся конфигом без тракта: сохранять в него
+    // собранный из полей тракт значило бы «автоматически закрепить» умолчания, и
+    // после первой же правки полей в другой версии проект вёл бы себя по-старому.
+    sage::EngineConfig plain;
+    plain.Bloom = true;
+    const std::string plainPath =
+        (std::filesystem::temp_directory_path() / "sage_postchain_test2.cfg").string();
+    CHECK_TRUE(plain.SaveFile(plainPath));
+    sage::EngineConfig plainBack;
+    CHECK_TRUE(plainBack.LoadFile(plainPath));
+    CHECK_TRUE(plainBack.PostChain.empty());
+    std::filesystem::remove(plainPath);
 }
