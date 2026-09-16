@@ -172,7 +172,7 @@ Env-хуки: общие `SAGE_SCREENSHOT_*`, плюс `SAGE_NO_SHADOWS`, `SAGE_
 `SAGE_TESTGAME_START_ROOM=room2` (старт в конкретной комнате для отладки) и
 `SAGE_TESTGAME_AUTOPILOT=1` — бот сам собирает монеты и проходит портал; CI
 гоняет его каждым коммитом и проверяет лог-маркеры `TESTGAME:` + отсутствие
-ERROR-строк (см. `scripts/ci_smoke_test.sh`, тест 4/4).
+ERROR-строк (см. `scripts/ci_smoke_test.sh`, тест 4/11).
 
 Уже вскрытые этой игрой и починенные баги движка:
 1. `Window` и `InputSystem` оба монопольно занимали GLFW user pointer окна —
