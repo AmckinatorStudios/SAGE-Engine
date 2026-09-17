@@ -131,6 +131,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scene/SceneMigrations.cpp
+    src/sage/scene/SceneValueJson.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/scripting/ScriptApi_Math.cpp
     src/sage/scripting/ScriptApi_Net.cpp
@@ -148,6 +149,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIParts.cpp
     src/sage/ui/NineSlice.cpp
+    src/sage/ui/UISerialize.cpp
+    src/sage/ui/Interface.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp
