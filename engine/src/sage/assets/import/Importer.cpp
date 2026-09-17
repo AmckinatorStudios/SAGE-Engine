@@ -1,4 +1,5 @@
 #include "sage/assets/import/Importer.h"
+#include "sage/core/EngineContext.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -87,8 +88,7 @@ sage::render::MeshData ImportedScene::Flatten() const {
 }
 
 ImporterRegistry& ImporterRegistry::Instance() {
-    static ImporterRegistry inst;
-    return inst;
+    return sage::EngineContext::Current().Importers();
 }
 
 ImporterRegistry::ImporterRegistry() { RegisterBuiltinImporters(*this); }

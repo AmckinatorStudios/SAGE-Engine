@@ -1,4 +1,5 @@
 #include "sage/core/JobSystem.h"
+#include "sage/core/EngineContext.h"
 #include "sage/core/Log.h"
 
 #include <algorithm>
@@ -46,10 +47,9 @@ struct JobSystem::Impl {
     }
 };
 
-JobSystem& JobSystem::Get() {
-    static JobSystem instance;
-    return instance;
-}
+JobSystem& JobSystem::Get() { return EngineContext::Current().Jobs(); }
+
+JobSystem::JobSystem() = default;
 
 JobSystem::~JobSystem() { Shutdown(); }
 

@@ -40,6 +40,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/input/InputSystem.cpp
     src/sage/input/GlfwBridge.cpp
     src/sage/core/Application.cpp
+    src/sage/core/EngineContext.cpp
     src/sage/core/FatalReport.cpp
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp

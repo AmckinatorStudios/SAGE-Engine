@@ -26,6 +26,7 @@
 //  Запуск:  ./sage_bench            все замеры
 //           ./sage_bench culling     только те, в чьём имени есть «culling»
 // ---------------------------------------------------------------------------
+#include "sage/core/EngineContext.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -115,6 +116,9 @@ void PrintRow(const char* name, const char* median, const char* best, const char
 
 int main(int argc, char** argv) {
     using namespace sage::bench;
+
+    // Замеры трогают кэш ресурсов и пул задач — им нужен живой контекст движка.
+    sage::ScopedEngineContext engineContext;
 
     const char* filter = argc > 1 ? argv[1] : nullptr;
     int runs = 7;

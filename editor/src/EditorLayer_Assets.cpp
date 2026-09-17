@@ -377,7 +377,6 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
     }
 
     SetSelectedId(newId);
-    m_selection = {newId};
     m_sceneDirty = true;
     UpdateWindowTitle();
     SetStatusMessage(T("Added to the scene: ") + asset.filename().string());
@@ -448,7 +447,6 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         AssignMaterial(mr, useRef, ResourceManager::Instance().GetMaterial(useRef));
         const int id = m_scene->Registry().get<IdComponent>(bestEntity).Id;
         SetSelectedId(id);
-        m_selection = {id};
         SetStatusMessage(status);
         return true;
     }
@@ -495,7 +493,6 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     }
 
     SetSelectedId(newId);
-    m_selection = {newId};
     m_sceneDirty = true;
     UpdateWindowTitle();
     SetStatusMessage(T("Placed in the scene: ") + asset.filename().string());

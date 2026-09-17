@@ -1,4 +1,5 @@
 #include "sage/core/Config.h"
+#include "sage/core/EngineContext.h"
 
 #include <cctype>
 #include <algorithm>
@@ -458,10 +459,7 @@ void EngineConfig::ApplyEnvOverrides() {
         BuildProjectFile = EnvBool(v, BuildProjectFile);
 }
 
-EngineConfig& EngineConfig::Get() {
-    static EngineConfig g;
-    return g;
-}
+EngineConfig& EngineConfig::Get() { return EngineContext::Current().Config(); }
 
 void EngineConfig::Set(const EngineConfig& cfg) {
     Get() = cfg;

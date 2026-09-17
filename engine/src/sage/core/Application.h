@@ -5,6 +5,7 @@
 #include "sage/core/Window.h"
 #include "sage/core/Layer.h"
 #include "sage/core/Config.h"
+#include "sage/core/EngineContext.h"
 #include "sage/rhi/GraphicsDevice.h"
 
 namespace sage {
@@ -77,10 +78,24 @@ public:
     float DeltaTime() const { return m_deltaTime; }
     float Fps() const { return m_fps; }
 
+    // Подсистемы движка (кэш ресурсов, база ассетов, пул задач, настройки...).
+    // Слою, которому нужна подсистема, её ПЕРЕДАЮТ отсюда — это единственный
+    // способ увидеть зависимость в подписи, а не найти её чтением тела.
+    EngineContext& Context() { return *m_context; }
+
+    // Мост для мест, куда ссылка на приложение ещё не протащена. Новому коду
+    // приложение передают явно.
     static Application& Get() { return *s_instance; }
 
 private:
     AppConfig m_config;
+    // Контекст обычно поднимает точка входа (SAGE_MAIN) — ДО CreateApplication,
+    // потому что игра настраивает EngineConfig ещё до создания окна. Если его
+    // нет (кто-то собрал Application вручную), приложение заводит свой, и тогда
+    // владеет им через m_ownedContext: он объявлен первым и потому разрушается
+    // последним, уже после окна и устройства.
+    std::unique_ptr<EngineContext> m_ownedContext;
+    EngineContext* m_context = nullptr;
     std::unique_ptr<Window> m_window;
     std::unique_ptr<rhi::GraphicsDevice> m_device;
     std::vector<std::unique_ptr<Layer>> m_layers;

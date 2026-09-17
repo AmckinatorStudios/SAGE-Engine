@@ -1,4 +1,5 @@
 #include "sage/render/PostEffect.h"
+#include "sage/core/EngineContext.h"
 
 #include <algorithm>
 
@@ -8,20 +9,10 @@ namespace sage::render {
 //  Каталог видов
 // ============================================================================
 
+PostEffectCatalog::PostEffectCatalog() { RegisterBuiltinPostEffects(*this); }
+
 PostEffectCatalog& PostEffectCatalog::Instance() {
-    static PostEffectCatalog catalog;
-    // Встроенные виды регистрируются ЗДЕСЬ, при первом обращении, а не «где-то
-    // при старте приложения». Причина простая: каталог — единственный источник
-    // ответа на вопрос «какой эффект существует», и если бы его наполнение
-    // зависело от того, вспомнил ли хост вызвать регистрацию, забывчивость
-    // выглядела бы как «звено неизвестно» — то есть как ошибка автора тракта,
-    // а не как незакрытая инициализация движка.
-    static bool builtins = false;
-    if (!builtins) {
-        builtins = true;
-        RegisterBuiltinPostEffects(catalog);
-    }
-    return catalog;
+    return sage::EngineContext::Current().PostEffects();
 }
 
 void PostEffectCatalog::Register(PostEffectKind kind) {

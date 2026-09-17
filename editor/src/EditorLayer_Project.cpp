@@ -177,8 +177,7 @@ void EditorLayer::PaintWithMaterial(GameObject object, const std::string& name,
 
 void EditorLayer::NewScene(ProjectTemplateKind content) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
-    m_undoStack.clear();
-    m_redoStack.clear();
+    m_history.Clear();
     m_scene = std::make_unique<Scene>("Untitled");
     SetSelectedId(-1);
     m_scenePath.clear();
@@ -370,9 +369,8 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
     if (InPlayMode()) StopPlay(); // см. NewScene
     try {
         m_scene = SceneSerializer::Load(path.string());
-        m_undoStack.clear();
-        m_redoStack.clear();
-        SetSelectedId(-1);
+        m_history.Clear();
+            SetSelectedId(-1);
         m_scenePath = path;
         m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene loaded: " << path.string();
@@ -966,8 +964,7 @@ void EditorLayer::ForgetPreviousProject() {
     // Ссылки на сущности прошлой сцены: их номера в новой сцене принадлежат
     // другим объектам, и «выделен объект 7» после смены проекта значит
     // выделенным чужой.
-    SetSelectedId(-1);
-    m_selection.clear();
+    m_selection.Clear();
 }
 
 bool EditorLayer::OpenProject(const std::string& path, std::string& err) {

@@ -124,32 +124,18 @@ void EditorLayer::MergeScriptVars(GameObject object) {
     reg.get_or_emplace<VarsComponent>(object.Entity()).Values.MergeDeclaration(declaration);
 }
 
+// Стопки снимков и их правила живут в EditorHistory — здесь остаётся только
+// то, чего история про редактор знать не должна: что Play-режим её отключает
+// и что после удавшейся записи сцена считается изменённой (звёздочка в
+// заголовке окна).
 void EditorLayer::PushUndoSnapshot() {
-    if (InPlayMode()) return; // правки в Play эфемерны — Stop их и так откатит
-    constexpr size_t kMaxUndoEntries = 100;
-    if (m_undoStack.size() >= kMaxUndoEntries) {
-        m_undoStack.erase(m_undoStack.begin());
-    }
-    m_undoStack.push_back(SceneSerializer::SaveToString(*m_scene));
-    m_redoStack.clear(); // новая мутация обрывает redo-ветку
-    m_sceneDirty = true;
-    UpdateWindowTitle();
-}
-
-void EditorLayer::CapturePendingSnapshot() {
-    if (InPlayMode()) return;
-    m_pendingEditSnapshot = SceneSerializer::SaveToString(*m_scene);
+    m_history.SetEnabled(!InPlayMode()); // правки в Play эфемерны — Stop их откатит
+    if (m_history.Push()) MarkSceneDirty();
 }
 
 void EditorLayer::CommitPendingSnapshot() {
-    if (InPlayMode() || m_pendingEditSnapshot.empty()) return;
-    constexpr size_t kMaxUndoEntries = 100;
-    if (m_undoStack.size() >= kMaxUndoEntries) m_undoStack.erase(m_undoStack.begin());
-    m_undoStack.push_back(m_pendingEditSnapshot);
-    m_pendingEditSnapshot.clear();
-    m_redoStack.clear();
-    m_sceneDirty = true;
-    UpdateWindowTitle();
+    m_history.SetEnabled(!InPlayMode());
+    if (m_history.CommitPending()) MarkSceneDirty();
 }
 
 // Одна запись undo на всё перетаскивание DragFloat/набор текста: состояние
@@ -160,28 +146,19 @@ void EditorLayer::TrackLastImGuiItem() {
     if (ImGui::IsItemDeactivatedAfterEdit()) CommitPendingSnapshot();
 }
 
+void EditorLayer::MarkSceneDirty() {
+    m_sceneDirty = true;
+    UpdateWindowTitle();
+}
+
 void EditorLayer::Undo() {
-    if (InPlayMode() || m_undoStack.empty()) return;
-    m_redoStack.push_back(SceneSerializer::SaveToString(*m_scene));
-    if (RestoreSceneFromString(m_undoStack.back())) {
-        m_undoStack.pop_back();
-        m_sceneDirty = true;
-        UpdateWindowTitle();
-    } else {
-        m_redoStack.pop_back(); // откат не удался — не ломаем историю
-    }
+    m_history.SetEnabled(!InPlayMode());
+    if (m_history.Undo()) MarkSceneDirty();
 }
 
 void EditorLayer::Redo() {
-    if (InPlayMode() || m_redoStack.empty()) return;
-    m_undoStack.push_back(SceneSerializer::SaveToString(*m_scene));
-    if (RestoreSceneFromString(m_redoStack.back())) {
-        m_redoStack.pop_back();
-        m_sceneDirty = true;
-        UpdateWindowTitle();
-    } else {
-        m_undoStack.pop_back();
-    }
+    m_history.SetEnabled(!InPlayMode());
+    if (m_history.Redo()) MarkSceneDirty();
 }
 
 // ============================================================================
@@ -210,8 +187,8 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     // что до этого они лежали не там. Самый частый шаг верстки требовал
     // отдельного ручного действия — и именно это ощущается как «неудобно
     // прикреплять».
-    if (m_selectedId >= 0) {
-        GameObject sel = m_scene->Get(m_selectedId);
+    if (m_selection.Primary() >= 0) {
+        GameObject sel = m_scene->Get(m_selection.Primary());
         if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity())) {
             m_scene->SetParent(obj.Entity(), sel.Entity());
         }
@@ -556,10 +533,10 @@ GameObject EditorLayer::DuplicateEntity(GameObject src) {
 }
 
 void EditorLayer::DuplicateSelected() {
-    if (m_selection.empty()) return;
+    if (m_selection.Empty()) return;
     PushUndoSnapshot();
     std::vector<int> copies;
-    for (int id : m_selection) {
+    for (int id : m_selection.All()) {
         GameObject src = m_scene->Get(id);
         if (!src.Valid()) continue;
         entt::entity parent = m_scene->ParentOf(src.Entity()); // копия остаётся у того же родителя
@@ -567,8 +544,8 @@ void EditorLayer::DuplicateSelected() {
         if (parent != entt::null) m_scene->SetParent(copy.Entity(), parent);
         copies.push_back(copy.Id());
     }
-    m_selection = copies;
-    m_selectedId = copies.empty() ? -1 : copies.back();
+    m_selection.Set(copies);
+    m_selection.Set(copies);
 }
 
 namespace {
@@ -589,7 +566,7 @@ int CountDescendants(Scene& scene, entt::entity e) {
 void EditorLayer::DeleteSelected() {
     int count = 0;
     std::string firstName;
-    for (int id : m_selection) {
+    for (int id : m_selection.All()) {
         GameObject o = m_scene->Get(id);
         if (!o.Valid()) continue;
         if (count == 0) firstName = o.Name();
@@ -601,7 +578,7 @@ void EditorLayer::DeleteSelected() {
     // родителя уносит детей, и человек, выделивший одну строку в иерархии,
     // сплошь и рядом не помнит, сколько под ней.
     int withChildren = 0;
-    for (int id : m_selection) {
+    for (int id : m_selection.All()) {
         GameObject o = m_scene->Get(id);
         if (!o.Valid()) continue;
         withChildren += 1 + CountDescendants(*m_scene, o.Entity());
@@ -621,10 +598,9 @@ void EditorLayer::DeleteSelected() {
 
     m_confirm.Ask("delete-entity", T("Deleting an object"), message, [this]() {
         PushUndoSnapshot();
-        for (int id : m_selection)
+        for (int id : m_selection.All())
             if (m_scene->Get(id).Valid()) m_scene->RemoveObject(id); // удаляет и поддерево
-        SetSelectedId(-1);
-        m_selection.clear();
+        m_selection.Clear();
     });
 }
 
@@ -632,54 +608,18 @@ void EditorLayer::DeleteSelected() {
 // пока его не откроют. Хранится идентификатор, а не GameObject: за время под
 // замком сцену могли перезагрузить (откат, открытие другой), и объект по
 // указателю оказался бы чужим.
+// Правила выделения и замка живут в EditorSelection — здесь остаётся только
+// связь со сценой и панелью ассетов, про которые выделение не знает.
 void EditorLayer::SetInspectorLocked(bool locked) {
-    m_inspectorLocked = locked;
-    if (!locked) return;
-    m_lockedEntityId = m_selectedId;
-    m_lockedAssetPath = m_assets.Selected();
+    if (locked) m_selection.Lock(m_selection.Primary(), m_assets.Selected());
+    else m_selection.Unlock();
 }
 
 GameObject EditorLayer::InspectedObject() {
-    if (!m_inspectorLocked) return SelectedObject();
+    if (!m_selection.Locked()) return SelectedObject();
     // Запертый объект мог исчезнуть — сцену перезагрузили или его удалили.
     // Тогда панель честно пуста, а не показывает чужие поля по старому номеру.
-    return m_scene ? m_scene->Get(m_lockedEntityId) : GameObject{};
-}
-
-void EditorLayer::SetSelectedId(int id) {
-    m_selectedId = id;
-    m_selection.clear();
-    if (id != -1) m_selection.push_back(id);
-}
-
-void EditorLayer::SetSelection(const std::vector<int>& ids, bool additive) {
-    if (!additive) m_selection.clear();
-    for (int id : ids) {
-        if (id == -1) continue;
-        if (std::find(m_selection.begin(), m_selection.end(), id) == m_selection.end())
-            m_selection.push_back(id);
-    }
-    // ПЕРВИЧНАЯ — последняя добавленная: под неё встаёт инспектор и пивот
-    // гизмо. Пустой набор означает «ничего не выбрано», а не «первичная
-    // осталась прежней»: иначе инспектор показывал бы поля объекта, который на
-    // экране уже не подсвечен.
-    m_selectedId = m_selection.empty() ? -1 : m_selection.back();
-}
-
-bool EditorLayer::IsSelected(int id) const {
-    return std::find(m_selection.begin(), m_selection.end(), id) != m_selection.end();
-}
-
-void EditorLayer::ToggleSelection(int id) {
-    if (id == -1) return;
-    auto it = std::find(m_selection.begin(), m_selection.end(), id);
-    if (it != m_selection.end()) {
-        m_selection.erase(it);
-        m_selectedId = m_selection.empty() ? -1 : m_selection.back();
-    } else {
-        m_selection.push_back(id);
-        m_selectedId = id; // добавленная становится первичной
-    }
+    return m_scene ? m_scene->Get(m_selection.LockedEntityId()) : GameObject{};
 }
 
 // ============================================================================
@@ -687,7 +627,7 @@ void EditorLayer::ToggleSelection(int id) {
 //  та же JSON-сериализация, что у сцен: префаб = мини-сцена с одним корнем.
 // ============================================================================
 bool EditorLayer::SaveSelectedAsPrefab(const fs::path& path, std::string& err) {
-    GameObject root = m_scene->Get(m_selectedId);
+    GameObject root = m_scene->Get(m_selection.Primary());
     if (!root.Valid()) { err = T("nothing selected"); return false; }
     if (!sage::scene::SavePrefab(*m_scene, root.Entity(), path.string(), err)) return false;
     SetStatusMessage(T("Prefab saved: ") + path.filename().string());
@@ -704,14 +644,6 @@ int EditorLayer::InstantiatePrefab(const fs::path& path) {
 // ============================================================================
 //  Инструменты над выделением
 // ============================================================================
-
-float EditorLayer::SnapStepForCurrentOp() {
-    switch ((ImGuizmo::OPERATION)m_gizmoOp) {
-        case ImGuizmo::ROTATE: return m_snapRotate;
-        case ImGuizmo::SCALE:  return m_snapScale;
-        default:               return m_snapMove;
-    }
-}
 
 namespace {
 
@@ -740,7 +672,7 @@ bool EntityWorldBounds(Scene& scene, entt::entity e, glm::vec3& lo, glm::vec3& h
 
 bool EditorLayer::SelectionBounds(glm::vec3& outMin, glm::vec3& outMax) {
     bool any = false;
-    for (int id : m_selection) {
+    for (int id : m_selection.All()) {
         GameObject o = m_scene->Get(id);
         if (!o.Valid()) continue;
         glm::vec3 lo, hi;
@@ -777,11 +709,11 @@ void EditorLayer::FocusSelected() {
 }
 
 void EditorLayer::DropSelectedToSurface() {
-    if (m_selection.empty()) return;
+    if (m_selection.Empty()) return;
     PushUndoSnapshot();
 
     int moved = 0;
-    for (int id : m_selection) {
+    for (int id : m_selection.All()) {
         GameObject o = m_scene->Get(id);
         if (!o.Valid()) continue;
         glm::vec3 lo, hi;
@@ -834,7 +766,7 @@ void EditorLayer::DropSelectedToSurface() {
 }
 
 void EditorLayer::AlignSelection(int axis) {
-    if (m_selection.size() < 2 || axis < 0 || axis > 2) return;
+    if (m_selection.All().size() < 2 || axis < 0 || axis > 2) return;
     GameObject primary = SelectedObject();
     if (!primary.Valid()) return;
     PushUndoSnapshot();
@@ -842,7 +774,7 @@ void EditorLayer::AlignSelection(int axis) {
     // Эталон — первичная сущность (та, вокруг которой стоит гизмо): выравнивать
     // «по среднему» бессмысленно, человек всегда равняет ПО ЧЕМУ-ТО.
     const float target = m_scene->WorldMatrix(primary.Entity())[3][axis];
-    for (int id : m_selection) {
+    for (int id : m_selection.All()) {
         if (id == primary.Id()) continue;
         GameObject o = m_scene->Get(id);
         if (!o.Valid()) continue;

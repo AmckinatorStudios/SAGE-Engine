@@ -32,6 +32,14 @@ namespace sage {
 // ---------------------------------------------------------------------------
 class JobSystem {
 public:
+    JobSystem(); // out-of-line: Impl — неполный тип pimpl (см. .cpp)
+    ~JobSystem();
+
+    JobSystem(const JobSystem&) = delete;
+    JobSystem& operator=(const JobSystem&) = delete;
+
+    // Пулом владеет sage::EngineContext, он же его останавливает до сноса
+    // остальных подсистем. Get() — мост в пул текущего контекста.
     static JobSystem& Get();
 
     // workerThreads: 0 — авто (аппаратные потоки − 1, т.к. главный тоже считает);
@@ -64,11 +72,6 @@ public:
     void Dispatch(const std::vector<std::function<void()>>& tasks);
 
 private:
-    JobSystem() = default;
-    ~JobSystem();
-    JobSystem(const JobSystem&) = delete;
-    JobSystem& operator=(const JobSystem&) = delete;
-
     struct Impl;
     std::unique_ptr<Impl> m_impl; // пул спрятан в .cpp (не тащим <thread> в заголовки)
     bool m_enabled = true;
