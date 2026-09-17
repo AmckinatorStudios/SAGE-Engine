@@ -894,8 +894,15 @@ function sage.save.Directory() end
 ---@param slot string
 function sage.save.Exists(slot) end
 ---@param slot string
+function sage.save.HasBackup(slot) end
+---@param slot string
+---@return any
+function sage.save.Info(slot) end
+---@param slot string
 ---@return any
 function sage.save.Read(slot) end
+---@param slot string
+function sage.save.RestoreBackup(slot) end
 ---@return table
 function sage.save.Slots() end
 ---@param slot string
@@ -903,9 +910,9 @@ function sage.save.Slots() end
 function sage.save.Version(slot) end
 ---@param slot string
 ---@param data table
----@param version number
+---@param options any
 ---@return boolean
-function sage.save.Write(slot, data, version) end
+function sage.save.Write(slot, data, options) end
 
 ---@class sage.scene
 sage.scene = {}
@@ -1254,6 +1261,8 @@ HasIcon = sage.ui.HasIcon
 ---@type fun(...): any
 HasSave = sage.save.Exists
 ---@type fun(...): any
+HasSaveBackup = sage.save.HasBackup
+---@type fun(...): any
 IKLocked = sage.ik.Locked
 ---@type fun(...): any
 IconNames = sage.ui.IconNames
@@ -1346,9 +1355,13 @@ Repeat = sage.time.Repeat
 ---@type fun(...): any
 ResolveMaterialTextures = sage.render.ResolveMaterialTextures
 ---@type fun(...): any
+RestoreSaveBackup = sage.save.RestoreBackup
+---@type fun(...): any
 SaveDirectory = sage.save.Directory
 ---@type fun(...): any
 SaveGame = sage.save.Write
+---@type fun(...): any
+SaveInfo = sage.save.Info
 ---@type fun(...): any
 SaveInputMapping = sage.input.SaveMapping
 ---@type fun(...): any

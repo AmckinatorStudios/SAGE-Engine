@@ -52,6 +52,7 @@ add_executable(sage_tests
     test_posteffect.cpp
     test_editorstate.cpp
     test_nineslice.cpp
+    test_savegame.cpp
     ../editor/src/EditorSelection.cpp
     ../editor/src/EditorHistory.cpp
 )
