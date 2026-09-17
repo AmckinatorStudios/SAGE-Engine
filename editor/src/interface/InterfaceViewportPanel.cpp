@@ -84,13 +84,17 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     // домножать в уме.
     ImGui::SetNextItemWidth(110.0f);
     float zoomPercent = m_zoom * 100.0f;
-    if (ImGui::DragFloat("##zoom", &zoomPercent, 1.0f, 10.0f, 400.0f, "%.0f%%"))
+    if (ImGui::DragFloat("##zoom", &zoomPercent, 1.0f, 10.0f, 400.0f, "%.0f%%")) {
         m_zoom = std::clamp(zoomPercent / 100.0f, 0.10f, 4.0f);
+        m_autoFit = false;   // попросили масштаб числом — вписывать больше нечего
+    }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Canvas zoom (wheel over the canvas)"));
     ImGui::SameLine();
-    if (ImGui::SmallButton(T("1:1"))) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); }
+    if (ImGui::SmallButton(T("1:1"))) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); m_autoFit = false; }
     ImGui::SameLine();
-    if (ImGui::SmallButton(T("Fit"))) { m_fitOnce = true; m_pan = ImVec2(0, 0); }
+    // Кнопка нажата — режим ВКЛЮЧЁН: она и показывает, вписан ли кадр сейчас.
+    if (EditorIcons::IconOnlyButton("fit", T("Fit the frame into the panel"), m_autoFit))
+        RequestFit();
 
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -203,9 +207,9 @@ void InterfaceViewportPanel::DrawCanvas(EditorHost& host) {
     // Вписывание: кадр целиком, с полем по краям — за границей экрана тоже
     // надо что-то видеть, иначе уехавший элемент не поймать мышью.
     const float fit = std::min(avail.x / (float)gw, avail.y / (float)gh) * 0.92f;
-    if (m_fitOnce) {
+    if (m_autoFit) {
         m_zoom = std::clamp(fit, 0.10f, 4.0f);
-        m_fitOnce = false;
+        m_pan = ImVec2(0.0f, 0.0f);
     }
 
     const ImVec2 imgSize((float)gw * m_zoom, (float)gh * m_zoom);
@@ -265,16 +269,23 @@ void InterfaceViewportPanel::DrawCanvas(EditorHost& host) {
             m_pan.x = m.x - f.x * next - origin.x - (avail.x - size2.x) * 0.5f;
             m_pan.y = m.y - f.y * next - origin.y - (avail.y - size2.y) * 0.5f;
             m_zoom = next;
+            m_autoFit = false;
         }
         if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
             m_pan.x += io.MouseDelta.x;
             m_pan.y += io.MouseDelta.y;
+            m_autoFit = false;   // кадр сдвинули руками — держать его вписанным нечестно
         }
         // Home — вернуть один к одному; Shift+F — вписать ВСЁ, включая
         // уехавшее за экран. Это и есть ответ на «элемент пропал»: одна
         // клавиша показывает его вместе с экраном.
-        if (ImGui::IsKeyPressed(ImGuiKey_Home)) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); }
+        if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
+            m_zoom = 1.0f;
+            m_pan = ImVec2(0, 0);
+            m_autoFit = false;
+        }
         if (ImGui::IsKeyPressed(ImGuiKey_F) && ImGui::GetIO().KeyShift) {
+            m_autoFit = false;   // «показать всё» — это свой масштаб, не вписывание кадра
             const sage::ui::UIRect all = m_canvas.ContentBounds(gw, gh);
             const float k = std::min(avail.x / std::max(all.w, 1.0f),
                                      avail.y / std::max(all.h, 1.0f)) * 0.92f;

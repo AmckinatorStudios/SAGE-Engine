@@ -105,6 +105,10 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
     m_selection.Clear();
     // Своя раскладка у каждого пространства строится при первом показе: узла с
     // таким именем ImGui ещё не знает, и BuildXxxDockLayout сработает сам.
+    // Общие панели (ассеты, консоль) вернуть туда, где они стояли в ЭТОМ
+    // пространстве: окно у них одно на оба, и построенная раскладка соседа
+    // уносит их с собой (см. m_sharedDock).
+    m_redockShared = true;
     if (workspace == EditorWorkspace::Interface) {
         m_uiViewport.RequestFit();
         m_uiViewport.RequestFocus();
@@ -112,6 +116,11 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
         m_viewport.RequestFocus();
     }
 }
+
+// Панели, живущие в ОБОИХ пространствах. Окно у такой панели одно, а док-узлов
+// два — отсюда и вся возня с запоминанием места (см. m_sharedDock).
+static const char* const kSharedPanels[] = {"Assets", "Console"};
+static constexpr int kSharedPanelCount = (int)(sizeof(kSharedPanels) / sizeof(kSharedPanels[0]));
 
 void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     // У вёрстки другой главный: ХОЛСТ, а не вьюпорт сцены. Всё остальное
@@ -140,7 +149,11 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     dock("InterfacePreview", center);
     ImGui::DockBuilderFinish(dockspaceId);
 
-    ImGui::SetWindowFocus("InterfaceViewport");
+    // ПО ИДЕНТИФИКАТОРУ, а не по имени: имя панели переводится («Canvas» /
+    // «Холст»), и SetWindowFocus по строке в русском редакторе не находил
+    // ничего — молча.
+    if (ImGuiWindow* canvas = ImGui::FindWindowByID(ImHashStr("InterfaceViewport")))
+        ImGui::FocusWindow(canvas);
 }
 
 void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
@@ -440,6 +453,19 @@ void EditorLayer::DrawDockspaceAndMenu() {
     const bool interfaceSpace = m_workspace == EditorWorkspace::Interface;
     ImGuiID dockspaceId =
         ImGui::GetID(interfaceSpace ? "SageInterfaceDock" : "SageDockSpace");
+    // ВТОРОЕ ДОК-ПРОСТРАНСТВО ДЕРЖИМ ЖИВЫМ, хоть и не показываем.
+    //
+    // Не подать его ImGui значит сказать «этого дока больше нет»: узлы, в
+    // которых не осталось ни одного окна, убираются, а окна из неподанного
+    // дока выпадают наружу. Именно так панель ассетов и оказывалась висящей
+    // посреди экрана: раскладка вёрстки забирала её себе, нижний узел
+    // раскладки сцены пустел и исчезал, а вернуться ей было уже некуда.
+    // KeepAliveOnly — это ровно «узлы живы, окна свои не отпускают».
+    const ImGuiID otherDockspaceId =
+        ImGui::GetID(interfaceSpace ? "SageDockSpace" : "SageInterfaceDock");
+    if (ImGui::DockBuilderGetNode(otherDockspaceId) != nullptr)
+        ImGui::DockSpace(otherDockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_KeepAliveOnly);
+
     // Куда возвращать панель, у которой сняли галочку «в отдельном окне».
     panelwindows::SetHomeDock(dockspaceId);
     // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)
@@ -448,6 +474,30 @@ void EditorLayer::DrawDockspaceAndMenu() {
         m_rebuildDockLayout = false;
         if (interfaceSpace) BuildInterfaceDockLayout(dockspaceId);
         else BuildDefaultDockLayout(dockspaceId);
+    }
+
+    // ОБЩИЕ ПАНЕЛИ — НА СВОЁ МЕСТО В ЭТОМ ПРОСТРАНСТВЕ. Делается ДО того, как
+    // панели поданы: после Begin просьба о доке опоздает на кадр, и панель
+    // успеет мигнуть отдельным окном.
+    {
+        const int space = interfaceSpace ? 1 : 0;
+        if (m_redockShared) {
+            m_redockShared = false;
+            for (int i = 0; i < kSharedPanelCount; ++i) {
+                const ImGuiID node = (ImGuiID)m_sharedDock[space][i];
+                // Узла может уже не быть: раскладку сбрасывали, окно закрывали,
+                // ini пришёл от другой версии. Тогда пусть стоит как стоит —
+                // затолкать панель в несуществующий узел значит потерять её.
+                if (node != 0 && ImGui::DockBuilderGetNode(node) != nullptr)
+                    ImGui::DockBuilderDockWindow(kSharedPanels[i], node);
+            }
+        }
+        // Где они стоят сейчас: человек мог переложить их сам, и возвращать
+        // панель туда, куда её когда-то поставил редактор, — значит спорить.
+        for (int i = 0; i < kSharedPanelCount; ++i) {
+            ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr(kSharedPanels[i]));
+            if (w && w->DockId != 0) m_sharedDock[space][i] = (unsigned int)w->DockId;
+        }
     }
     // Док-пространство занимает всё между тулбаром и статус-баром.
     const ImVec2 dockMin = ImGui::GetCursorScreenPos();

@@ -392,6 +392,62 @@ void EditorLayer::CheckMultiWindowFrame() {
                         << singleTitle << ", панель дока осталась в главном " << dockedStayed;
 }
 
+// ---------------------------------------------------------------------------
+// ОБЩИЕ ПАНЕЛИ ПЕРЕЖИВАЮТ ПЕРЕХОД МЕЖДУ ПРОСТРАНСТВАМИ.
+//
+// Ассеты и консоль стоят и в сцене, и в вёрстке, но окно у такой панели ОДНО, а
+// док-пространства разные. Раскладка вёрстки, построившись, забирала ассеты
+// себе — и вернувшись в сцену, человек находил панель висящей отдельным окном
+// посреди экрана. Ни состояние, ни лог об этом не говорили ничего: панель
+// открыта, галочка стоит, просто стоит она не там.
+//
+// Проверяется живым переходом туда и обратно: раскладка дока устаканивается за
+// несколько кадров, и вызовом функций этого не воспроизвести.
+void EditorLayer::CheckWorkspaceDockFrame() {
+    if (m_workspaceDockChecked) return;
+    if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
+    if (!m_multiWindowChecked) return;   // та проверка сама двигает панели
+    if (m_wsDockWait > 0) { --m_wsDockWait; return; }
+
+    auto dockOf = [](const char* id) -> unsigned int {
+        const ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr(id));
+        return w ? (unsigned int)w->DockId : 0u;
+    };
+    auto done = [this](bool ok, const char* why) {
+        m_workspaceDockChecked = true;
+        if (ok) LOG_INFO("Editor") << "WORKSPACE_DOCK: OK — общие панели остаются в доке "
+                                   << "после перехода «сцена — интерфейс» и обратно";
+        else LOG_ERROR("Editor") << "WORKSPACE_DOCK: FAIL — " << why;
+    };
+
+    switch (m_wsDockStep) {
+        case 0:
+            m_wsDockHome = dockOf("Assets");
+            if (m_wsDockHome == 0) { done(false, "панель ассетов и до перехода не в доке"); return; }
+            SetWorkspace(EditorWorkspace::Interface);
+            m_wsDockStep = 1;
+            m_wsDockWait = 8;   // раскладка вёрстки строится и устаканивается
+            return;
+        case 1:
+            if (dockOf("Assets") == 0) { done(false, "в вёрстке панель ассетов оказалась вне дока"); return; }
+            SetWorkspace(EditorWorkspace::Scene);
+            m_wsDockStep = 2;
+            m_wsDockWait = 8;
+            return;
+        default: {
+            const unsigned int back = dockOf("Assets");
+            if (back == 0) {
+                done(false, "вернувшись в сцену, панель ассетов отцепилась от дока");
+            } else if (back != m_wsDockHome) {
+                done(false, "вернувшись в сцену, панель ассетов встала в чужой узел дока");
+            } else {
+                done(true, nullptr);
+            }
+            return;
+        }
+    }
+}
+
 // ============================================================================
 //  МЫШЬ В ЖИВОМ КАДРЕ: щелчок по вьюпорту проверяется НАСТОЯЩИМ щелчком
 // ============================================================================
@@ -504,6 +560,9 @@ void EditorLayer::TickInputProbe() {
             // раскладка устоялась: возврат панели в док занимает несколько
             // кадров (panelwindows::Settle).
             if (!m_multiWindowChecked) { m_probeWait = 1; return; }
+            // И проверки общих панелей: она нарочно переключает пространство
+            // туда-обратно, а щелчки по вьюпорту сцены в вёрстке бессмысленны.
+            if (!m_workspaceDockChecked) { m_probeWait = 1; return; }
             // МОДАЛЬНОЕ ОКНО СЪЕДАЕТ ВСЕ ЩЕЛЧКИ, и проверка мыши под ним
             // осмысленна не больше, чем нажатие на выключенный экран. Такое
             // окно в headless-прогоне — само по себе отказ (например, после
