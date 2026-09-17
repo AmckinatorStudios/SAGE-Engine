@@ -119,9 +119,9 @@ void EditorLayer::RegisterCommands() {
     m_commands.Add({"scene.new", T("New Scene"), scene, "", "scene", hasProject,
                     [this] { NewSceneWithPrompt(); }});
     m_commands.Add({"edit.undo", T("Undo"), scene, "Ctrl+Z", "refresh",
-                    [this] { return !m_undoStack.empty(); }, [this] { Undo(); }});
+                    [this] { return m_history.CanUndo(); }, [this] { Undo(); }});
     m_commands.Add({"edit.redo", T("Redo"), scene, "Ctrl+Shift+Z", "refresh",
-                    [this] { return !m_redoStack.empty(); }, [this] { Redo(); }});
+                    [this] { return m_history.CanRedo(); }, [this] { Redo(); }});
 
     m_commands.Add({"play.start", T("Play"), scene, "", "play",
                     [this] { return m_playState == EditorPlayState::Editing; },
@@ -167,8 +167,16 @@ void EditorLayer::RegisterCommands() {
                         "sun", {}, [id] { EditorTheme::SetTheme(id); }});
     }
     m_commands.Add({"view.grid", T("Show Grid"), view, "", "grid", {},
-                    [this] { m_showGrid = !m_showGrid; }});
+                    [this] { m_tools.ShowGrid = !m_tools.ShowGrid; }});
 }
+
+// История отката знакомится со сценой ЗДЕСЬ: она умеет снять снимок и
+// применить снимок, а как именно это делается — знание сериализатора, не
+// истории (см. EditorHistory.h).
+EditorLayer::EditorLayer()
+    : sage::Layer("Editor"),
+      m_history([this] { return SceneSerializer::SaveToString(*m_scene); },
+                [this](const std::string& snapshot) { return RestoreSceneFromString(snapshot); }) {}
 
 void EditorLayer::OnAttach() {
     sage::Application& app = sage::Application::Get();
@@ -368,7 +376,7 @@ void EditorLayer::OnAttach() {
         sage::RegisterCoreSystems(m_systems, preview);
     }
 
-    m_gizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
+    m_tools.GizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
 
     NewScene(ProjectTemplateKind::Demo);
 
@@ -425,9 +433,9 @@ void EditorLayer::OnAttach() {
         const std::string mode = m;
         sage::render::DebugView dv = sage::render::DebugView::None;
         if (mode == "wireframe") {
-            m_renderMode = EditorRenderMode::Wireframe;
+            m_tools.RenderMode = EditorRenderMode::Wireframe;
         } else if (sage::render::ParseDebugView(mode.c_str(), dv)) {
-            m_renderMode = dv == sage::render::DebugView::None
+            m_tools.RenderMode = dv == sage::render::DebugView::None
                                ? EditorRenderMode::Shaded
                                : (EditorRenderMode)((int)dv + 1);
         } else {
@@ -616,8 +624,8 @@ void EditorLayer::OnAttach() {
         m_uiEditor.RequestFocus();
     }
     if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
-        m_uiTools.Backdrop = (float)std::atof(b);
-    if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_headlessProject = true; m_colliderEdit = true; }
+        m_tools.UI.Backdrop = (float)std::atof(b);
+    if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_headlessProject = true; m_tools.ColliderEdit = true; }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_headlessProject = true;
         GameObject obj = m_scene->FindByName(name);
@@ -811,7 +819,7 @@ void EditorLayer::OnAttach() {
                 continue;
             }
             // Раскладываем в ряд: иначе всё оказывается в начале координат.
-            GameObject obj = m_scene->Get(m_selectedId);
+            GameObject obj = m_scene->Get(m_selection.Primary());
             if (obj.Valid()) {
                 obj.GetTransform().Position = glm::vec3(x, 0.0f, 0.0f);
                 LOG_INFO("Editor") << "загружено: " << one;
@@ -822,7 +830,7 @@ void EditorLayer::OnAttach() {
         // отвечал на вопрос, ради которого заведён («что с её материалом и
         // развёрткой»): модель вставала в ряд далеко от камеры и занимала в
         // кадре десяток пикселей, по которым не видно ни шва текстуры, ни позы.
-        if (m_selectedId >= 0) FocusSelected();
+        if (m_selection.Primary() >= 0) FocusSelected();
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_headlessProject = true; m_showAbout = true; }
@@ -1063,7 +1071,7 @@ void EditorLayer::PluginContextImpl::Log(const char* message) {
 }
 
 const char* EditorLayer::PluginContextImpl::SelectedEntityName() const {
-    GameObject obj = m_owner.m_scene->Get(m_owner.m_selectedId);
+    GameObject obj = m_owner.m_scene->Get(m_owner.m_selection.Primary());
     m_selectedNameBuf = obj.Valid() ? obj.Name() : "";
     return m_selectedNameBuf.c_str();
 }
@@ -1123,7 +1131,7 @@ void EditorLayer::OnRender() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
-    m_renderer.SetShowBounds(m_showBounds);
+    m_renderer.SetShowBounds(m_tools.ShowBounds);
     // Игровой интерфейс во ВЬЮПОРТЕ больше не рисуется: холст вёрстки — это
     // окно «Интерфейс», где показан игровой кадр в разрешении игры. Вьюпорт
     // остался вьюпортом, а не наполовину холстом.
@@ -1144,7 +1152,8 @@ void EditorLayer::OnRender() {
             primaryOv.EyePos = r0.EyePos;
         }
     }
-    m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode, m_showGrid,
+    m_renderer.RenderViewport(*m_scene, m_camera, env, m_selection.Primary(), m_selection.All(),
+                              m_tools.RenderMode, m_tools.ShowGrid,
                               cfg, m_view, m_proj, 0, primaryOv);
 
     // Дополнительные виды раскладки (сверху/спереди/сбоку). Каждый — полный
@@ -1165,8 +1174,8 @@ void EditorLayer::OnRender() {
         ov.Proj = r.Proj;
         ov.EyePos = r.EyePos;
         glm::mat4 v, p;
-        m_renderer.RenderViewport(*m_scene, m_camera, env, m_selectedId, m_selection, m_renderMode,
-                                  m_showGrid, cfg, v, p, i, ov);
+        m_renderer.RenderViewport(*m_scene, m_camera, env, m_selection.Primary(), m_selection.All(),
+                                  m_tools.RenderMode, m_tools.ShowGrid, cfg, v, p, i, ov);
     } // отдаёт view/proj для гизмо/пикинга
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 

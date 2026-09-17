@@ -463,10 +463,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(T("Edit"))) {
-            if (ImGui::MenuItem(T("Undo"), "Ctrl+Z", false, !m_undoStack.empty() && !InPlayMode())) Undo();
-            if (ImGui::MenuItem(T("Redo"), "Ctrl+Y", false, !m_redoStack.empty() && !InPlayMode())) Redo();
+            if (ImGui::MenuItem(T("Undo"), "Ctrl+Z", false, m_history.CanUndo() && !InPlayMode())) Undo();
+            if (ImGui::MenuItem(T("Redo"), "Ctrl+Y", false, m_history.CanRedo() && !InPlayMode())) Redo();
             ImGui::Separator();
-            bool hasSel = m_scene->Get(m_selectedId).Valid();
+            bool hasSel = m_scene->Get(m_selection.Primary()).Valid();
             if (ImGui::MenuItem(T("Duplicate"), "Ctrl+D", false, hasSel)) DuplicateSelected();
             if (ImGui::MenuItem(T("Delete"), "Del", false, hasSel)) DeleteSelected();
             ImGui::EndMenu();
@@ -494,7 +494,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 ShowAllPanels();
                 m_rebuildDockLayout = true;
             }
-            ImGui::MenuItem(T("Show Grid"), nullptr, &m_showGrid);
+            ImGui::MenuItem(T("Show Grid"), nullptr, &m_tools.ShowGrid);
             ImGui::Separator();
             // Каждая панель — переключатель. Это единственный путь назад после
             // крестика на вкладке, поэтому здесь перечислены ВСЕ панели, а не

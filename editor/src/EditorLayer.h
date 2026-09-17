@@ -33,6 +33,9 @@
 #include "sage/audio/AudioEngine.h"
 
 #include "EditorHost.h"
+#include "EditorHistory.h"
+#include "EditorSelection.h"
+#include "EditorTools.h"
 #include "ProjectTemplates.h"
 
 namespace sage { class Application; }
@@ -85,7 +88,10 @@ namespace sage { class Application; }
 // ---------------------------------------------------------------------------
 class EditorLayer : public sage::Layer, public EditorHost {
 public:
-    EditorLayer() : sage::Layer("Editor") {}
+    // Определён в .cpp: история заводится с двумя функциями, а знание о том,
+    // как снимается и применяется снимок сцены, принадлежит сериализатору —
+    // тащить его заголовок сюда ради одной строки не за что.
+    EditorLayer();
 
     void OnAttach() override;
     // Файлы, брошенные в окно из проводника: проект/сцена открываются,
@@ -97,13 +103,18 @@ public:
 
     // --- EditorHost: сцена и выбор ---
     Scene& CurrentScene() override { return *m_scene; }
-    int SelectedId() const override { return m_selectedId; }
-    void SetSelectedId(int id) override; // одиночный выбор (сбрасывает набор)
-    GameObject SelectedObject() override { return m_scene->Get(m_selectedId); }
-    const std::vector<int>& Selection() const override { return m_selection; }
-    bool IsSelected(int id) const override;
-    void ToggleSelection(int id) override;
-    void SetSelection(const std::vector<int>& ids, bool additive = false) override;
+    // Выделение, история и инструменты — отдельные объекты (см. их заголовки).
+    // Слой их только держит и пересказывает панелям через EditorHost: правила
+    // выделения и отката живут там, где их можно прочитать и проверить.
+    int SelectedId() const override { return m_selection.Primary(); }
+    void SetSelectedId(int id) override { m_selection.SetPrimary(id); }
+    GameObject SelectedObject() override { return m_scene->Get(m_selection.Primary()); }
+    const std::vector<int>& Selection() const override { return m_selection.All(); }
+    bool IsSelected(int id) const override { return m_selection.Contains(id); }
+    void ToggleSelection(int id) override { m_selection.Toggle(id); }
+    void SetSelection(const std::vector<int>& ids, bool additive = false) override {
+        m_selection.Set(ids, additive);
+    }
 
     // --- EditorHost: префабы ---
     bool SaveSelectedAsPrefab(const std::filesystem::path& path, std::string& err) override;
@@ -156,9 +167,11 @@ public:
     // кадр заканчивается в ДВУХ местах: со стартовым окном и с редактором.
     void TakeAutoScreenshot(sage::Application& app);
     void PushUndoSnapshot() override;
-    bool CanUndo() const override { return !m_undoStack.empty(); }
-    bool CanRedo() const override { return !m_redoStack.empty(); }
-    void CapturePendingSnapshot() override;
+    // Сцена изменена: звёздочка в заголовке окна и маркер несохранённого.
+    void MarkSceneDirty();
+    bool CanUndo() const override { return m_history.CanUndo(); }
+    bool CanRedo() const override { return m_history.CanRedo(); }
+    void CapturePendingSnapshot() override { m_history.CapturePending(); }
     void CommitPendingSnapshot() override;
     void TrackLastImGuiItem() override;
 
@@ -183,19 +196,19 @@ public:
     void UpdatePlayUiInput(float dt);
 
     // --- EditorHost: общее состояние инструментов (тулбар + вьюпорт) ---
-    int& GizmoOp() override { return m_gizmoOp; }
-    bool& GizmoSnap() override { return m_snap; }
-    EditorGizmoSpace& GizmoSpace() override { return m_gizmoSpace; }
-    bool& ShowGrid() override { return m_showGrid; }
-    EditorRenderMode& RenderMode() override { return m_renderMode; }
-    float& SnapMove() override { return m_snapMove; }
-    float& SnapRotate() override { return m_snapRotate; }
-    float& SnapScale() override { return m_snapScale; }
-    float SnapStepForCurrentOp() override;
-    bool& ShowBounds() override { return m_showBounds; }
-    UIToolSettings& UITools() override { return m_uiTools; }
+    int& GizmoOp() override { return m_tools.GizmoOp; }
+    bool& GizmoSnap() override { return m_tools.Snap; }
+    EditorGizmoSpace& GizmoSpace() override { return m_tools.GizmoSpace; }
+    bool& ShowGrid() override { return m_tools.ShowGrid; }
+    EditorRenderMode& RenderMode() override { return m_tools.RenderMode; }
+    float& SnapMove() override { return m_tools.SnapMove; }
+    float& SnapRotate() override { return m_tools.SnapRotate; }
+    float& SnapScale() override { return m_tools.SnapScale; }
+    float SnapStepForCurrentOp() override { return m_tools.SnapStepForCurrentOp(); }
+    bool& ShowBounds() override { return m_tools.ShowBounds; }
+    UIToolSettings& UITools() override { return m_tools.UI; }
     GameObject CreateUIEntity(const std::string& preset) override;
-    bool& ColliderEditMode() override { return m_colliderEdit; }
+    bool& ColliderEditMode() override { return m_tools.ColliderEdit; }
 
     // --- EditorHost: инструменты над выделением ---
     void FocusSelected() override;
@@ -289,11 +302,11 @@ public:
     AudioEngine* Audio() override { return m_playAudio.get(); }
 
     // --- EditorHost: замок панели свойств (см. EditorHost.h) ---
-    bool InspectorLocked() const override { return m_inspectorLocked; }
+    bool InspectorLocked() const override { return m_selection.Locked(); }
     void SetInspectorLocked(bool locked) override;
     GameObject InspectedObject() override;
     const std::filesystem::path& InspectedAssetPath() const override {
-        return m_inspectorLocked ? m_lockedAssetPath : m_assets.Selected();
+        return m_selection.Locked() ? m_selection.LockedAssetPath() : m_assets.Selected();
     }
 
 private:
@@ -459,26 +472,7 @@ private:
     EditorSceneRenderer m_renderer;        // весь превью-рендер (теней/Viewport/Game/PostFX/гизмо)
 
     // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---
-    int m_gizmoOp = 0;                                          // ImGuizmo::OPERATION (TRANSLATE)
-    bool m_snap = false;
-    // Оси по умолчанию — МИРОВЫЕ. В осях объекта стрелка «вправо» у повёрнутого
-    // предмета ведёт вбок и вглубь одновременно, и человек, который об этом не
-    // знает (а по умолчанию не знает никто), видит просто «гизмо тянет не
-    // туда». Мир одинаков для всех объектов сцены, поэтому он и стоит первым;
-    // локальные оси включаются осознанно — подписанным переключателем в строке
-    // инструментов.
-    EditorGizmoSpace m_gizmoSpace = EditorGizmoSpace::World;
-    bool m_showGrid = true;
-    EditorRenderMode m_renderMode = EditorRenderMode::Shaded;
-    // Шаг привязки. Перенос — 1.0: движок строит примитивы размером в единицу,
-    // и для постройки из блоков это единственный шаг, при котором блоки встают
-    // вплотную без щелей и нахлёстов.
-    float m_snapMove = 1.0f;
-    float m_snapRotate = 15.0f;
-    float m_snapScale = 0.1f;
-    bool m_showBounds = false;
-    UIToolSettings m_uiTools;   // сетка и привязки вёрстки (см. UIToolSettings.h)
-    bool m_colliderEdit = false; // гизмо тянет коллайдер, а не объект
+    EditorTools m_tools;
 
     // --- Play-режим ---
     EditorPlayState m_playState = EditorPlayState::Editing;
@@ -507,19 +501,15 @@ private:
     // работал в собранной игре — превью обязано звучать так же, как игра.
     std::unique_ptr<AudioEngine> m_playAudio;
 
-    // --- Undo/Redo ---
-    std::vector<std::string> m_undoStack; // JSON-снапшоты «состояние до мутации»
-    std::vector<std::string> m_redoStack;
-    std::string m_pendingEditSnapshot;    // состояние на момент Capture (виджет/гизмо)
+    // --- Undo/Redo (см. EditorHistory.h) ---
+    //
+    // Историю со сценой знакомит слой: она умеет снять снимок и применить
+    // снимок, а КАК это делается — знание сериализатора и сцены, не истории.
+    EditorHistory m_history;
 
-    // --- выбор/вьюпорты (размеры окон живут в m_renderer) ---
-    int m_selectedId = -1;              // «первичная» (последняя кликнутая)
-
-    // Замок панели свойств: что она показывает, пока заперта (см. EditorHost.h).
-    bool m_inspectorLocked = false;
-    int m_lockedEntityId = -1;
-    std::filesystem::path m_lockedAssetPath;
-    std::vector<int> m_selection;       // весь набор выбранных (включает первичную)
+    // --- выбор и замок инспектора (см. EditorSelection.h); размеры окон
+    //     живут в m_renderer ---
+    EditorSelection m_selection;
     // Длительность ЗАКАЗАННОГО шага на паузе (0 — шага нет). Заказ, а не прямой
     // прогон: кнопку нажимают посреди рисования интерфейса, а кадр игры обязан
     // считаться там же, где считается всегда, — иначе системы пошли бы дважды
