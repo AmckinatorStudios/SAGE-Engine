@@ -59,7 +59,7 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
     if (reg.all_of<ParticleEmitterComponent>(e)) return "particles";
     if (reg.all_of<AnimationComponent>(e)) return "anim";
     if (reg.all_of<AudioSourceComponent>(e)) return "audio";
-    if (reg.all_of<sage::ui::Transform>(e)) return "rect";
+    if (reg.all_of<sage::ui::Element>(e)) return "rect";
     if (reg.all_of<DecalComponent>(e)) return "texture";
     if (reg.all_of<RigidBodyComponent>(e) || reg.all_of<ColliderComponent>(e) ||
         reg.all_of<CharacterControllerComponent>(e))

@@ -29,7 +29,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/ui/UI.h"
-#include "sage/ui/UILegacy.h"
+#include "sage/scene/SceneLegacyUI.h"
 #include "sage/ui/UISceneSystem.h"
 
 namespace sage::bench {
@@ -243,13 +243,13 @@ void RegisterUiCases() {
     {
         auto scene = std::make_shared<Scene>("bench-ui");
         auto put = [&](GameObject obj, glm::vec2 pos, glm::vec2 size, bool interactive) {
-            sage::ui::LegacyElement e;
-            e.Type = sage::ui::LegacyElement::Kind::Panel;
+            sage::scene::LegacyElement e;
+            e.Type = sage::scene::LegacyElement::Kind::Panel;
             e.Anchor = UIAnchor::TopLeft;
             e.Offset = pos;
             e.Size = size;
             e.Interactive = interactive;
-            sage::ui::Decompose(e, scene->Registry(), obj.Entity());
+            sage::scene::Decompose(e, scene->Registry(), obj.Entity());
         };
         GameObject root = scene->CreateObject("Canvas");
         put(root, {0.0f, 0.0f}, {1920.0f, 1080.0f}, false);

@@ -11,7 +11,7 @@
 #include "sage/scene/SceneJson.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ui/UIAnchor.h"
-#include "sage/ui/UILegacy.h"
+#include "sage/scene/SceneLegacyUI.h"
 
 using json = nlohmann::json;
 
@@ -231,7 +231,7 @@ void MigrateV5toV6(json& root) {
             child["noMesh"] = true;
             json& cu = child["ui"];
             cu["transform"]["anchor"] = (int)UIAnchor::TopLeft;
-            cu["transform"]["stretch"] = (int)sage::ui::Transform::Stretch::None;
+            cu["transform"]["stretch"] = (int)sage::ui::Element::Stretch::None;
             cu["transform"]["offset"] = Vec2ToJson({0.0f, 0.0f});
             cu["transform"]["size"] = Vec2ToJson(size);
             cu["transform"]["margin"] = Vec4ToJson(glm::vec4(0.0f));
@@ -297,7 +297,7 @@ void MigrateV5toV6(json& root) {
                 // Растянут на родителя: иначе подпись зависела бы от размера,
                 // записанного однажды, и разъезжалась бы при растяжении самого
                 // элемента.
-                ctj["stretch"] = (int)sage::ui::Transform::Stretch::Both;
+                ctj["stretch"] = (int)sage::ui::Element::Stretch::Both;
                 // Левое поле — прежний сдвиг МИНУС боковой отступ надписи: его
                 // надпись добавит сама, и без вычитания он посчитался бы дважды.
                 ctj["margin"] = Vec4ToJson({std::max(left - padX, 0.0f), 0.0f, 0.0f, 0.0f});

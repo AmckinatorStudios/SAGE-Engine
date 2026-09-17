@@ -928,7 +928,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
 
     // UI сцены (компоненты интерфейса) — поверх ИТОГОВОЙ картинки (после поста),
     // ровно как его увидит игрок в собранной игре (WYSIWYG панели Game).
-    auto uiView = scene.Registry().view<sage::ui::Transform>();
+    auto uiView = scene.Registry().view<sage::ui::Element>();
     if (uiView.begin() != uiView.end()) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         Framebuffer& target = m_gamePostApplied ? *m_gamePostFbo : *m_gameFbo;

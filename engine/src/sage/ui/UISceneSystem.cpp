@@ -2,7 +2,7 @@
 #include "sage/ui/UIPart.h"
 
 #include "sage/ui/UI.h"
-#include "sage/ui/UILegacy.h"
+#include "sage/scene/SceneLegacyUI.h"
 #include "sage/core/Profiler.h"
 #include "UIRenderer.h"
 #include "UIIcons.h"
@@ -15,7 +15,7 @@
 namespace sage::ui {
 
 bool IsElement(const entt::registry& reg, entt::entity e) {
-    return reg.valid(e) && reg.all_of<Transform>(e);
+    return reg.valid(e) && reg.all_of<Element>(e);
 }
 
 namespace {
@@ -48,9 +48,9 @@ std::vector<entt::entity> SortedUIChildren(Scene& scene, entt::entity parent) {
             if (IsElement(reg, c)) kids.push_back(c);
     }
     std::stable_sort(kids.begin(), kids.end(), [&reg](entt::entity a, entt::entity b) {
-        const Transform& ta = reg.get<Transform>(a);
-        const Transform& tb = reg.get<Transform>(b);
-        if (ta.Layer != tb.Layer) return ta.Layer < tb.Layer;
+        const Element& ta = reg.get<Element>(a);
+        const Element& tb = reg.get<Element>(b);
+        if (ta.Order != tb.Order) return ta.Order < tb.Order;
         return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
     });
     return kids;
@@ -66,7 +66,7 @@ std::vector<entt::entity> SortedUIChildren(Scene& scene, entt::entity parent) {
 std::vector<entt::entity> SortedUIRoots(Scene& scene) {
     std::vector<entt::entity> roots;
     entt::registry& reg = scene.Registry();
-    for (auto e : reg.view<Transform>()) {
+    for (auto e : reg.view<Element>()) {
         entt::entity parent = scene.ParentOf(e);
         if (parent == entt::null || !IsElement(reg, parent)) roots.push_back(e);
     }
@@ -77,9 +77,9 @@ std::vector<entt::entity> SortedUIRoots(Scene& scene) {
     std::stable_sort(roots.begin(), roots.end(), [&](entt::entity a, entt::entity b) {
         const int ca = canvasOrder(a), cb = canvasOrder(b);
         if (ca != cb) return ca < cb;
-        const Transform& ta = reg.get<Transform>(a);
-        const Transform& tb = reg.get<Transform>(b);
-        if (ta.Layer != tb.Layer) return ta.Layer < tb.Layer;
+        const Element& ta = reg.get<Element>(a);
+        const Element& tb = reg.get<Element>(b);
+        if (ta.Order != tb.Order) return ta.Order < tb.Order;
         return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
     });
     return roots;
@@ -133,6 +133,13 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
                  float alpha, UIRenderer& ui) {
     const Interactable* act = reg.try_get<Interactable>(e);
 
+    // ПОВОРОТ — на весь элемент разом, включая текст и значки: рисовальщиков у
+    // него семь, и заставить каждого знать про поворот значит получить семь
+    // мест, где про него забудут.
+    const Element* box = reg.try_get<Element>(e);
+    const bool rotated = box && std::fabs(box->Rotation) > 0.0001f;
+    if (rotated) ui.PushRotation({r.x + r.w * 0.5f, r.y + r.h * 0.5f}, box->Rotation);
+
     PartDrawContext c;
     c.Reg = &reg;
     c.Entity = e;
@@ -157,6 +164,8 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
         c.Data = p.Get(reg, e);
         p.DrawOver(c);
     }
+
+    if (rotated) ui.PopRotation();
 }
 
 // --- Один решатель на три задачи ------------------------------------------
@@ -179,9 +188,15 @@ struct Solved {
     // задано рядом с прямоугольником, но не выводится из него: кегль шрифта,
     // скругление, толщина рамки.
     float Scale = 1.0f;
-    // Виден ли элемент сам по себе. Рантайму это не нужно (невидимые в список
-    // не попадают вовсе), а редактору нужно: выключенный элемент надо ПОКАЗАТЬ
-    // рамкой, иначе его нельзя найти и включить обратно.
+    // Виден ли элемент сам по себе.
+    //
+    // Невидимые ОСТАЮТСЯ в списке, и это не недосмотр: спрятанный элемент
+    // держит своё место в раскладке родителя, иначе «спрятать кнопку на время»
+    // означало бы, что все соседи в списке разъехались и вернулись обратно
+    // рывком. Не рисуют и не ловят мышь их те, кто читает этот список.
+    //
+    // Редактору флаг нужен отдельно: выключенный элемент надо ПОКАЗАТЬ рамкой,
+    // иначе его нельзя найти и включить обратно.
     bool Visible = true;
 };
 
@@ -192,13 +207,18 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                   bool clipped, const UIRect& clip, float alpha, bool interactive,
                   const UIRect* forced, bool includeHidden, std::vector<Solved>& out) {
     entt::registry& reg = scene.Registry();
-    const Transform& t = reg.get<Transform>(ent);
-    // Невидимый прячет и всё поддерево — но только в игре. Редактор просит
-    // includeHidden и получает выключенные элементы тоже: иначе выключить
+    const Element& t = reg.get<Element>(ent);
+    // НЕАКТИВНЫЙ выпадает из всего вместе с поддеревом: ни отрисовки, ни ввода,
+    // ни участия в раскладке родителя. НЕВИДИМЫЙ — только не рисуется: место он
+    // держит, и соседи в списке не съезжают, пока он спрятан. Пока флаг был
+    // один, «спрятать панель на время анимации, не сломав раскладку соседей»
+    // выразить было нечем.
+    //
+    // Редактор просит includeHidden и получает и то, и другое: иначе выключить
     // элемент значило бы потерять его насовсем.
-    if (!t.Visible && !includeHidden) return;
+    if (!t.Active && !includeHidden) return;
 
-    // ГЕОМЕТРИЯ БЕРЁТСЯ ИЗ Transform, а не из плоского описания.
+    // ГЕОМЕТРИЯ БЕРЁТСЯ ИЗ Element, а не из плоского описания.
     //
     // Плоское описание — это то, чем элемент РИСУЕТСЯ, и растяжения, полей и
     // точки привязки в нём нет: у прежнего компонента их не было вовсе.
@@ -212,7 +232,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     if (forced) size = {forced->w, forced->h};
     // Фактический размер запоминается в САМОМ элементе: его читают попадание
     // курсором и следующий кадр, когда шрифта под рукой может не оказаться.
-    reg.get<Transform>(ent).LayoutSize = size;
+    reg.get<Element>(ent).Resolved = size;
 
     // Групповые свойства накапливаются вниз по дереву: спрятать панель — это
     // одно число на ней, а не проход скриптом по каждому её ребёнку.
@@ -225,9 +245,21 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
 
     const size_t self = out.size();
     out.push_back(Solved{ent, r, clip, clipped, myAlpha, myInteractive});
-    out.back().Visible = t.Visible;
+    out.back().Visible = t.Shown();
 
     std::vector<entt::entity> kids = SortedUIChildren(scene, ent);
+    // ВЫКЛЮЧЕННЫЙ РЕБЁНОК НЕ ЗАНИМАЕТ МЕСТА В РАСКЛАДКЕ. Отсеивать его надо
+    // ЗДЕСЬ, до ApplyLayout: рекурсия ниже и так не пойдёт в выключенного, но
+    // место под него уже было бы выделено, и в списке осталась бы дыра — то
+    // есть «выключить» выглядело бы как «спрятать», и разницы между флагами не
+    // стало бы. Спрятанный (Visible=false) место держит и потому остаётся.
+    if (!includeHidden) {
+        kids.erase(std::remove_if(kids.begin(), kids.end(),
+                                  [&reg](entt::entity k) {
+                                      return !reg.get<Element>(k).Active;
+                                  }),
+                   kids.end());
+    }
     if (kids.empty()) return;
 
     // Маска: окно обрезки пересекается с родительским — вложенные маски режут
@@ -245,11 +277,11 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
 
     // Раскладка: контейнер сам расставляет детей. Их якоря при этом не
     // работают — в том и смысл, что позиции считает родитель.
-    if (const Layout* layout = reg.try_get<Layout>(ent)) {
+    if (const Stack* layout = reg.try_get<Stack>(ent)) {
         std::vector<LayoutSlot> slots(kids.size());
         auto measure = [&] {
             for (size_t i = 0; i < kids.size(); ++i) {
-                const Transform& kt = reg.get<Transform>(kids[i]);
+                const Element& kt = reg.get<Element>(kids[i]);
                 slots[i].Size = ResolveSize(kt, r);
                 if (ui) slots[i].Size = MeasuredWidth(reg, kids[i], slots[i].Size, *ui);
             }
@@ -272,14 +304,14 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
             const glm::vec2 padded{content.x + layout->Padding.x + layout->Padding.z,
                                    content.y + layout->Padding.y + layout->Padding.w};
             const glm::vec2 fitted =
-                layout->Direction == Layout::Flow::Horizontal
+                layout->Direction == Stack::Flow::Horizontal
                     ? glm::vec2{padded.x, r.h}
-                    : (layout->Direction == Layout::Flow::Vertical ? glm::vec2{r.w, padded.y}
+                    : (layout->Direction == Stack::Flow::Vertical ? glm::vec2{r.w, padded.y}
                                                                    : padded);
             if (fitted != glm::vec2{r.w, r.h}) {
                 r = forced ? UIRect{r.x, r.y, fitted.x, fitted.y}
                            : Resolve(t, parentRect, fitted);
-                reg.get<Transform>(ent).LayoutSize = fitted;
+                reg.get<Element>(ent).Resolved = fitted;
                 out[self].Rect = r;
                 measure();
                 ApplyLayout(*layout, r, slots);
@@ -346,7 +378,7 @@ std::vector<ElementRect> SolveSceneRects(Scene& scene, int screenW, int screenH,
                                          bool includeHidden) {
     entt::registry& reg = scene.Registry();
     // Без UIRenderer: авто-ширину надписи меряет шрифт, а его здесь нет.
-    // Прошлый кадр её уже посчитал и положил в Transform::LayoutSize, поэтому
+    // Прошлый кадр её уже посчитал и положил в Element::LayoutSize, поэтому
     // рамка редактора отстаёт от изменившегося текста ровно на один кадр —
     // цена за то, что редактор не тащит за собой отрисовку.
     const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH, includeHidden);
@@ -366,7 +398,7 @@ std::vector<ElementRect> SolveSceneRects(Scene& scene, int screenW, int screenH,
         if (parent != entt::null && reg.valid(parent)) {
             for (const Solved& p : items)
                 if (p.Entity == parent) { e.Parent = p.Rect; break; }
-            e.InLayout = reg.all_of<Layout>(parent);
+            e.InLayout = reg.all_of<Stack>(parent);
         }
         out.push_back(e);
     }
@@ -387,6 +419,8 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
     const entt::registry& reg = scene.Registry();
 
     for (const Solved& it : items) {
+        // Спрятанный элемент место в раскладке держит, а на экране его нет.
+        if (!it.Visible) continue;
         if (it.Clipped) {
             if (it.Clip.w <= 0.0f || it.Clip.h <= 0.0f) continue; // полностью обрезан
             ui.PushClipRect(it.Clip.x, it.Clip.y, it.Clip.w, it.Clip.h);
@@ -404,6 +438,11 @@ int HitTest(Scene& scene, float x, float y, int screenW, int screenH) {
     const entt::registry& reg = scene.Registry();
     int bestId = -1;
     for (const Solved& it : items) {
+        // Невидимый не ловит точку. Прозрачная зона нажатия делается заливкой с
+        // нулевой альфой, а не спрятанным элементом: спрятанный, который всё
+        // равно кликается, — это ловушка, которую не видно ни на экране, ни в
+        // дереве.
+        if (!it.Visible) continue;
         if (it.Clipped && !PointIn(it.Clip, {x, y})) continue;
         if (PointIn(it.Rect, {x, y})) bestId = reg.get<IdComponent>(it.Entity).Id;
     }
@@ -414,7 +453,11 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     UIInputResult result;
     result.Size = glm::vec2((float)screenW, (float)screenH);
     entt::registry& reg = scene.Registry();
-    const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH);
+    std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH);
+    // Спрятанный не ловит ввод по той же причине, что и не ловит точку.
+    items.erase(std::remove_if(items.begin(), items.end(),
+                               [](const Solved& s) { return !s.Visible; }),
+                items.end());
 
     // Состояние взаимодействия живёт в Interactable::Runtime, и его НЕТ у
     // элементов, которые мышь не ловят. Это не мелочь: раньше поля Hovered,

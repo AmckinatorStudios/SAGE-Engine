@@ -13,7 +13,7 @@
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/ui/UILegacy.h"
+#include "sage/scene/SceneLegacyUI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/scene/SceneJson.h"
 #include "sage/scene/SceneMigrations.h"
@@ -703,19 +703,19 @@ static IKComponent ParseIK(const json& ij) {
 // на компоненты. Пишется всё уже компонентами (см. ниже), поэтому здесь только
 // чтение: однажды открытая и сохранённая сцена сюда больше не возвращается.
 
-static sage::ui::LegacyElement::Kind UIKindFromString(const std::string& s) {
-    if (s == "label") return sage::ui::LegacyElement::Kind::Label;
-    if (s == "image") return sage::ui::LegacyElement::Kind::Image;
-    if (s == "bar")   return sage::ui::LegacyElement::Kind::Bar;
-    if (s == "icon")  return sage::ui::LegacyElement::Kind::Icon;
-    if (s == "input") return sage::ui::LegacyElement::Kind::Input;
-    if (s == "checkbox") return sage::ui::LegacyElement::Kind::Checkbox;
-    if (s == "slider") return sage::ui::LegacyElement::Kind::Slider;
-    return sage::ui::LegacyElement::Kind::Panel;
+static sage::scene::LegacyElement::Kind UIKindFromString(const std::string& s) {
+    if (s == "label") return sage::scene::LegacyElement::Kind::Label;
+    if (s == "image") return sage::scene::LegacyElement::Kind::Image;
+    if (s == "bar")   return sage::scene::LegacyElement::Kind::Bar;
+    if (s == "icon")  return sage::scene::LegacyElement::Kind::Icon;
+    if (s == "input") return sage::scene::LegacyElement::Kind::Input;
+    if (s == "checkbox") return sage::scene::LegacyElement::Kind::Checkbox;
+    if (s == "slider") return sage::scene::LegacyElement::Kind::Slider;
+    return sage::scene::LegacyElement::Kind::Panel;
 }
 
-static sage::ui::LegacyElement ParseUIElement(const json& uj) {
-    sage::ui::LegacyElement u;
+static sage::scene::LegacyElement ParseUIElement(const json& uj) {
+    sage::scene::LegacyElement u;
     u.Type = UIKindFromString(uj.value("kind", "panel"));
     int anchor = uj.value("anchor", 0);
     if (anchor >= 0 && anchor <= 8) u.Anchor = (UIAnchor)anchor;
@@ -786,7 +786,7 @@ static sage::ui::LegacyElement ParseUIElement(const json& uj) {
 //
 // СТАРЫЙ ФОРМАТ ЧИТАЕТСЯ. Признак — ключ "kind": он был видом элемента и в
 // новой записи не встречается. Такой блок разбирается прежним разбором и
-// раскладывается по компонентам (ui::Decompose), поэтому сцены, сделанные до
+// раскладывается по компонентам (sage::scene::Decompose), поэтому сцены, сделанные до
 // перехода, открываются без единой правки руками.
 
 // --- Части элемента — ПО РЕЕСТРУ (sage/ui/UIPart.h) -------------------------
@@ -981,22 +981,25 @@ static void LoadField(const json& in, void* data, const sage::ui::PartField& f) 
 }
 
 static void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
-    const sage::ui::Transform* t = reg.try_get<sage::ui::Transform>(e);
+    const sage::ui::Element* t = reg.try_get<sage::ui::Element>(e);
     if (!t) return;
     json& uj = j["ui"];
 
-    // Прямоугольник — не «часть», а сам элемент: без него элемента нет, и в
-    // реестре частей ему делать нечего.
-    json& tj = uj["transform"];
+    // Раскладка — не компонент, а сам элемент: без неё элемента нет, и в
+    // реестре компонентов ей делать нечего.
+    json& tj = uj["element"];
     tj["anchor"] = (int)t->Anchor;
     tj["stretch"] = (int)t->Mode;
-    tj["offset"] = Vec2ToJson(t->Offset);
+    tj["position"] = Vec2ToJson(t->Position);
     tj["size"] = Vec2ToJson(t->Size);
     tj["margin"] = Vec4ToJson(t->Margin);
     tj["pivot"] = Vec2ToJson(t->Pivot);
-    tj["layer"] = t->Layer;
+    tj["rotation"] = t->Rotation;
+    tj["order"] = t->Order;
     tj["visible"] = t->Visible;
-    // LayoutSize не пишется: это след последнего кадра, а не настройка.
+    tj["active"] = t->Active;
+    tj["locked"] = t->Locked;
+    // Resolved не пишется: это след последнего кадра, а не настройка.
 
     for (const sage::ui::PartType& p : sage::ui::Parts()) {
         if (!p.Fields || !p.Has || !p.Has(reg, e)) continue;  // без полей писать нечего
@@ -1023,26 +1026,38 @@ static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e
     // недостающее»: это два разных формата, и делать вид, что один плавно
     // переходит в другой, значит получить третий.
     if (uj.contains("kind")) {
-        sage::ui::Decompose(ParseUIElement(uj), reg, e);
+        sage::scene::Decompose(ParseUIElement(uj), reg, e);
         if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
         return;
     }
 
-    sage::ui::Transform t;
-    if (uj.contains("transform")) {
-        const json& tj = uj["transform"];
+    sage::ui::Element t;
+    // Ключ "element", а прежде был "transform": раскладка стала частью самого
+    // элемента, и старое имя врало бы про устройство. Прежний ключ читается —
+    // сцены, сделанные до переименования, обязаны открываться.
+    const json* tjp = uj.contains("element")   ? &uj["element"]
+                      : uj.contains("transform") ? &uj["transform"]
+                                                 : nullptr;
+    if (tjp) {
+        const json& tj = *tjp;
         const int anchor = tj.value("anchor", (int)t.Anchor);
         if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
         const int stretch = tj.value("stretch", (int)t.Mode);
-        if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Transform::Stretch)stretch;
-        t.Offset = Vec2FromJson(tj.value("offset", json::object()), t.Offset);
+        if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Element::Stretch)stretch;
+        // "offset" -> "position", "layer" -> "order": те же значения под именами,
+        // которыми их зовут люди.
+        t.Position = Vec2FromJson(tj.value("position", tj.value("offset", json::object())),
+                                  t.Position);
         t.Size = Vec2FromJson(tj.value("size", json::object()), t.Size);
         if (tj.contains("margin")) t.Margin = Vec4FromJson(tj["margin"], t.Margin);
         t.Pivot = Vec2FromJson(tj.value("pivot", json::object()), t.Pivot);
-        t.Layer = tj.value("layer", t.Layer);
+        t.Rotation = tj.value("rotation", t.Rotation);
+        t.Order = tj.value("order", tj.value("layer", t.Order));
         t.Visible = tj.value("visible", t.Visible);
+        t.Active = tj.value("active", t.Active);
+        t.Locked = tj.value("locked", t.Locked);
     }
-    reg.emplace_or_replace<sage::ui::Transform>(e, t);
+    reg.emplace_or_replace<sage::ui::Element>(e, t);
 
     // Части — по реестру. Ключ, которого реестр не знает (часть из другой
     // сборки игры), ПРОПУСКАЕТСЯ молча и остаётся в файле нетронутым: терять

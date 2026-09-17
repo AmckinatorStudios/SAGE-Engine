@@ -80,7 +80,7 @@ void UICanvas::DrawGrid(ImDrawList* dl, ImVec2 imgPos, ImVec2 imgSize,
 void UICanvas::Apply(Scene& scene, const Item& item, glm::vec2 topLeft, glm::vec2 size,
                      bool sizeChanged) {
     entt::registry& reg = scene.Registry();
-    sage::ui::Transform* u = reg.try_get<sage::ui::Transform>(item.Entity);
+    sage::ui::Element* u = reg.try_get<sage::ui::Element>(item.Entity);
     if (!u) return;
     // Мышь работает в ПИКСЕЛЯХ ЭКРАНА, а Offset и Size хранятся в ОПОРНЫХ
     // единицах холста. Обратный ход — деление на масштаб холста; без него
@@ -92,7 +92,7 @@ void UICanvas::Apply(Scene& scene, const Item& item, glm::vec2 topLeft, glm::vec
     const UIRect parent{item.Parent.x / k, item.Parent.y / k, item.Parent.w / k,
                         item.Parent.h / k};
     if (sizeChanged) u->Size = sz;
-    u->Offset = sage::ui::OffsetForTopLeft(u->Anchor, tl, sz, parent);
+    u->Position = sage::ui::OffsetForTopLeft(u->Anchor, tl, sz, parent);
 }
 
 void UICanvas::MoveSelection(EditorHost& host, Scene& scene, glm::vec2 delta) {
@@ -225,7 +225,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
 
         // Точка якоря и линия до неё: без этого непонятно, ОТ ЧЕГО считается
         // положение, и элемент «уезжает» при смене разрешения неожиданно.
-        const sage::ui::Transform& u = reg.get<sage::ui::Transform>(it.Entity);
+        const sage::ui::Element& u = reg.get<sage::ui::Element>(it.Entity);
         const UIRect& pr = it.Parent;
         float ax = pr.x, ay = pr.y;
         switch (u.Anchor) {
@@ -404,7 +404,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     }
     GameObject obj = scene.Get(m_dragId);
     if (!obj.Valid()) { m_drag = Drag::None; return; }
-    sage::ui::Transform* u = reg.try_get<sage::ui::Transform>(obj.Entity());
+    sage::ui::Element* u = reg.try_get<sage::ui::Element>(obj.Entity());
     if (!u) { m_drag = Drag::None; return; }
 
     // Одна запись undo на всё перетаскивание, и берётся она в первый кадр

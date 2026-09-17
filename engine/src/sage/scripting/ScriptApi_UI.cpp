@@ -10,7 +10,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
-#include "sage/ui/UILegacy.h"
+#include "sage/scene/SceneLegacyUI.h"
 
 #include <algorithm>
 #include <cmath>
@@ -166,17 +166,17 @@ sol::object UIOf(GameObject& obj, sol::this_state ts) {
 // Разбор таблицы, а не десяток отдельных функций: раскладка задаётся ОДНИМ
 // решением («это сетка по пять в ряд с зазором шесть»), и разносить его по
 // пяти вызовам значило бы дать возможность настроить половину.
-sage::ui::Layout::Flow FlowFromName(const std::string& name) {
-    if (name == "row" || name == "horizontal") return sage::ui::Layout::Flow::Horizontal;
-    if (name == "grid") return sage::ui::Layout::Flow::Grid;
-    return sage::ui::Layout::Flow::Vertical;
+sage::ui::Stack::Flow FlowFromName(const std::string& name) {
+    if (name == "row" || name == "horizontal") return sage::ui::Stack::Flow::Horizontal;
+    if (name == "grid") return sage::ui::Stack::Flow::Grid;
+    return sage::ui::Stack::Flow::Vertical;
 }
 
-sage::ui::Layout::Align AlignFromName(const std::string& name) {
-    if (name == "center") return sage::ui::Layout::Align::Center;
-    if (name == "end") return sage::ui::Layout::Align::End;
-    if (name == "between" || name == "space-between") return sage::ui::Layout::Align::SpaceBetween;
-    return sage::ui::Layout::Align::Start;
+sage::ui::Stack::Align AlignFromName(const std::string& name) {
+    if (name == "center") return sage::ui::Stack::Align::Center;
+    if (name == "end") return sage::ui::Stack::Align::End;
+    if (name == "between" || name == "space-between") return sage::ui::Stack::Align::SpaceBetween;
+    return sage::ui::Stack::Align::Start;
 }
 
 // Поля контейнера: число («со всех сторон одинаково») или Vec4 (л, в, п, н).
@@ -217,32 +217,36 @@ void ScriptEngine::RegisterUIApi() {
     // Растяжение: панель во всю ширину экрана — это ОДНО поле, а не пересчёт
     // размера скриптом на каждое изменение окна. Затемнение под меню паузы
     // иначе приходится каждый кадр подгонять под разрешение вручную.
-    m_lua.new_enum<sage::ui::Transform::Stretch>("UIStretch", {
-        {"None", sage::ui::Transform::Stretch::None},
-        {"Horizontal", sage::ui::Transform::Stretch::Horizontal},
-        {"Vertical", sage::ui::Transform::Stretch::Vertical},
-        {"Both", sage::ui::Transform::Stretch::Both},
+    m_lua.new_enum<sage::ui::Element::Stretch>("UIStretch", {
+        {"None", sage::ui::Element::Stretch::None},
+        {"Horizontal", sage::ui::Element::Stretch::Horizontal},
+        {"Vertical", sage::ui::Element::Stretch::Vertical},
+        {"Both", sage::ui::Element::Stretch::Both},
     });
 
     m_lua.new_usertype<UIRef>("UIElement",
         // Где стоит.
-        "Anchor", UI_FIELD(sage::ui::Transform, Anchor),
-        "Offset", UI_FIELD(sage::ui::Transform, Offset),
-        "Size", UI_FIELD(sage::ui::Transform, Size),
-        "Layer", UI_FIELD(sage::ui::Transform, Layer),
-        "Visible", UI_FIELD(sage::ui::Transform, Visible),
+        "Anchor", UI_FIELD(sage::ui::Element, Anchor),
+        "Position", UI_FIELD(sage::ui::Element, Position),
+        "Size", UI_FIELD(sage::ui::Element, Size),
+        "Rotation", UI_FIELD(sage::ui::Element, Rotation),
+        "Order", UI_FIELD(sage::ui::Element, Order),
+        "Visible", UI_FIELD(sage::ui::Element, Visible),
+        "Active", UI_FIELD(sage::ui::Element, Active),
         // Растяжение и поля: «на весь экран с отступом 24» задаётся здесь, а не
         // пересчитывается скриптом при каждом изменении размера окна.
-        "Stretch", UI_FIELD(sage::ui::Transform, Mode),
-        "Margin", UI_FIELD(sage::ui::Transform, Margin),
-        "Pivot", UI_FIELD(sage::ui::Transform, Pivot),
+        "Stretch", UI_FIELD(sage::ui::Element, Mode),
+        "Margin", UI_FIELD(sage::ui::Element, Margin),
+        "Pivot", UI_FIELD(sage::ui::Element, Pivot),
         // Групповые свойства поддерева: спрятать плавно — одно число на корне
         // панели вместо прохода по всем её детям с правкой альфы у каждого.
         "Alpha", UI_FIELD(sage::ui::Group, Alpha),
         "BlockRaycasts", UI_FIELD(sage::ui::Group, BlockRaycasts),
-        "LayoutSize", sol::readonly_property([](UIRef& r) {
-            const sage::ui::Transform* t = r.Peek<sage::ui::Transform>();
-            return t ? t->LayoutSize : glm::vec2(0.0f);
+        // Фактический размер после раскладки: только для чтения — его считает
+        // раскладка, а не задаёт скрипт.
+        "ResolvedSize", sol::readonly_property([](UIRef& r) {
+            const sage::ui::Element* t = r.Peek<sage::ui::Element>();
+            return t ? t->Resolved : glm::vec2(0.0f);
         }),
         // Подложка.
         "Color", sol::property([](UIRef& r) {
@@ -357,8 +361,8 @@ void ScriptEngine::RegisterUIApi() {
     //                             padding = 10, justify = "center", fit = true})
     Bind("ui", "SetLayout", "SetUILayout", [](GameObject& obj, sol::table opts) {
         if (!obj.Valid()) throw std::runtime_error("ui.SetLayout: сущность недействительна");
-        obj.Registry()->get_or_emplace<sage::ui::Transform>(obj.Entity());
-        sage::ui::Layout& layout = obj.Registry()->get_or_emplace<sage::ui::Layout>(obj.Entity());
+        obj.Registry()->get_or_emplace<sage::ui::Element>(obj.Entity());
+        sage::ui::Stack& layout = obj.Registry()->get_or_emplace<sage::ui::Stack>(obj.Entity());
         layout.Direction = FlowFromName(opts.get_or<std::string>("dir", "column"));
         layout.Justify = AlignFromName(opts.get_or<std::string>("justify", "start"));
         layout.Spacing = opts.get_or("spacing", layout.Spacing);
@@ -368,7 +372,7 @@ void ScriptEngine::RegisterUIApi() {
         layout.FitContent = opts.get_or("fit", layout.FitContent);
     });
     Bind("ui", "ClearLayout", "ClearUILayout", [](GameObject& obj) {
-        if (obj.Valid()) obj.Registry()->remove<sage::ui::Layout>(obj.Entity());
+        if (obj.Valid()) obj.Registry()->remove<sage::ui::Stack>(obj.Entity());
     });
 
     // Холст: масштаб интерфейса и порядок МЕЖДУ корнями.
@@ -381,7 +385,7 @@ void ScriptEngine::RegisterUIApi() {
     //   sage.ui.SetCanvas(menuRoot, {order = 100, scale = true})
     Bind("ui", "SetCanvas", "SetUICanvas", [](GameObject& obj, sol::table opts) {
         if (!obj.Valid()) throw std::runtime_error("ui.SetCanvas: сущность недействительна");
-        obj.Registry()->get_or_emplace<sage::ui::Transform>(obj.Entity());
+        obj.Registry()->get_or_emplace<sage::ui::Element>(obj.Entity());
         sage::ui::Canvas& canvas = obj.Registry()->get_or_emplace<sage::ui::Canvas>(obj.Entity());
         canvas.SortOrder = opts.get_or("order", canvas.SortOrder);
         if (opts["scale"].valid()) {
@@ -611,14 +615,14 @@ void ScriptEngine::BindUIAccessors(sol::usertype<GameObject>& t) {
     t["GetUI"] = &UIOf;
     t["AddUI"] = [](GameObject& o) -> UIRef {
         if (!o.Valid()) throw std::runtime_error("AddUI: невалидная сущность");
-        o.Registry()->get_or_emplace<sage::ui::Transform>(o.Entity());
+        o.Registry()->get_or_emplace<sage::ui::Element>(o.Entity());
         return UIRef{o.Registry(), o.Entity()};
     };
     t["RemoveUI"] = [](GameObject& o) {
         if (!o.Valid()) return;
         namespace ui = sage::ui;
-        o.Registry()->remove<ui::Transform, ui::Fill, ui::Label, ui::Image, ui::Bar, ui::Icon,
-                             ui::Interactable, ui::TextInput, ui::Range, ui::Mask, ui::Layout,
+        o.Registry()->remove<ui::Element, ui::Fill, ui::Label, ui::Image, ui::Bar, ui::Icon,
+                             ui::Interactable, ui::TextInput, ui::Range, ui::Mask, ui::Stack,
                              ui::Canvas, ui::Group>(o.Entity());
     };
 }

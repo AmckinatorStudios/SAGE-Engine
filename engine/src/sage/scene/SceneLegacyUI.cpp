@@ -1,17 +1,21 @@
-#include "sage/ui/UILegacy.h"
+#include "sage/scene/SceneLegacyUI.h"
 
-namespace sage::ui {
+namespace sage::scene {
+
+// Компоненты, в которые раскладывается старый плоский элемент.
+using namespace sage::ui;
+
 
 void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
     using Kind = LegacyElement::Kind;
 
-    Transform t;
+    Element t;
     t.Anchor = flat.Anchor;
-    t.Offset = flat.Offset;
+    t.Position = flat.Offset;
     t.Size = flat.Size;
-    t.Layer = flat.Layer;
+    t.Order = flat.Layer;
     t.Visible = flat.Visible;
-    reg.emplace_or_replace<Transform>(e, t);
+    reg.emplace_or_replace<Element>(e, t);
 
     // Подложка есть у всех, кроме чистой надписи, чистой картинки и элементов
     // ДИАПАЗОНА: у первых фон не рисовался и в старой системе, а у ползунка с
@@ -99,4 +103,4 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
     if (flat.ClipChildren) reg.emplace_or_replace<Mask>(e, Mask{});
 }
 
-} // namespace sage::ui
+} // namespace sage::scene

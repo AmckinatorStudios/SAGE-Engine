@@ -298,7 +298,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     const entt::entity e = obj.Entity();
     namespace ui = sage::ui;
 
-    ui::Transform* xf = reg.try_get<ui::Transform>(e);
+    ui::Element* xf = reg.try_get<ui::Element>(e);
     if (!xf) return;
 
     // --- Заготовка ----------------------------------------------------------
@@ -351,29 +351,29 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     // --- Положение ----------------------------------------------------------
     ImGui::SeparatorText(T("Layout"));
     if (DrawAnchorPicker(xf->Anchor)) host.PushUndoSnapshot();
-    ImGui::DragFloat2(T("Offset"), &xf->Offset.x, 1.0f); host.TrackLastImGuiItem();
+    ImGui::DragFloat2(T("Position"), &xf->Position.x, 1.0f); host.TrackLastImGuiItem();
 
     const char* stretchNames[] = {T("None"), T("Horizontal"), T("Vertical"), T("Both")};
     int stretch = (int)xf->Mode;
     if (ImGui::Combo(T("Stretch"), &stretch, stretchNames, IM_ARRAYSIZE(stretchNames))) {
         host.PushUndoSnapshot();
-        xf->Mode = (ui::Transform::Stretch)stretch;
+        xf->Mode = (ui::Element::Stretch)stretch;
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", T("Follows the parent size instead of a fixed one"));
     }
     const bool autoWidth = reg.all_of<ui::Label>(e) && reg.get<ui::Label>(e).AutoWidth;
-    ImGui::BeginDisabled(autoWidth || xf->Mode == ui::Transform::Stretch::Both);
+    ImGui::BeginDisabled(autoWidth || xf->Mode == ui::Element::Stretch::Both);
     ImGui::DragFloat2(T("Size"), &xf->Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
     ImGui::EndDisabled();
-    if (xf->Mode != ui::Transform::Stretch::None) {
+    if (xf->Mode != ui::Element::Stretch::None) {
         ImGui::DragFloat4(T("Margin l,t,r,b"), &xf->Margin.x, 1.0f); host.TrackLastImGuiItem();
     }
     ImGui::DragFloat2(T("Pivot"), &xf->Pivot.x, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", T("Which point of the element lands on the anchor"));
     }
-    ImGui::DragInt(T("Layer"), &xf->Layer, 1); host.TrackLastImGuiItem();
+    ImGui::DragInt(T("Order"), &xf->Order, 1); host.TrackLastImGuiItem();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
     ImGui::Checkbox(T("Visible"), &xf->Visible);
 
@@ -406,7 +406,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         // часть, добавленная игрой, тоже должна уходить вместе с элементом.
         for (const ui::PartType& p : ui::Parts())
             if (p.Has(reg, e)) p.Remove(reg, e);
-        reg.remove<ui::Transform>(e);
+        reg.remove<ui::Element>(e);
     }
 }
 

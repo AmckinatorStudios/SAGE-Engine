@@ -698,11 +698,11 @@ void EditorLayer::OnAttach() {
             vc->Values.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
 
         GameObject button = m_scene->CreateObject("Кнопка «Открыть»");
-        sage::ui::Transform t;
+        sage::ui::Element t;
         t.Anchor = UIAnchor::Center;
-        t.Offset = {0.0f, 0.0f};
+        t.Position = {0.0f, 0.0f};
         t.Size = {220.0f, 56.0f};
-        reg.emplace_or_replace<sage::ui::Transform>(button.Entity(), t);
+        reg.emplace_or_replace<sage::ui::Element>(button.Entity(), t);
         reg.emplace_or_replace<sage::ui::Fill>(button.Entity());
         sage::ui::Interactable& act =
             reg.emplace_or_replace<sage::ui::Interactable>(button.Entity());

@@ -94,16 +94,16 @@ double Covered(const Image& img, int x0, int y0, int x1, int y1) {
 // пересчёта координат.
 GameObject Screen(Scene& scene, const char* name, glm::vec2 size) {
     GameObject e = scene.CreateObject(name);
-    scene.Registry().emplace<sage::ui::Transform>(e.Entity(), sage::ui::Transform{});
+    scene.Registry().emplace<sage::ui::Element>(e.Entity(), sage::ui::Element{});
     PlaceTopLeft(scene, e, size);
     return e;
 }
 
 void PlaceTopLeft(Scene& scene, GameObject e, glm::vec2 size) {
-    sage::ui::Transform& t = scene.Registry().get<sage::ui::Transform>(e.Entity());
+    sage::ui::Element& t = scene.Registry().get<sage::ui::Element>(e.Entity());
     t.Anchor = UIAnchor::TopLeft;
-    t.Mode = sage::ui::Transform::Stretch::None;
-    t.Offset = {0.0f, 0.0f};
+    t.Mode = sage::ui::Element::Stretch::None;
+    t.Position = {0.0f, 0.0f};
     t.Size = size;
 }
 
@@ -145,11 +145,11 @@ void CheckIconAndTextDoNotOverlap(UIRenderer& ui) {
     GameObject row = Screen(scene, "Row", {(float)kUiW, 40.0f});
 
     GameObject iconObj = scene.CreateObject("Icon");
-    sage::ui::Transform it;
+    sage::ui::Element it;
     it.Anchor = UIAnchor::CenterLeft;
-    it.Offset = {4.0f, 0.0f};
+    it.Position = {4.0f, 0.0f};
     it.Size = {32.0f, 32.0f};
-    scene.Registry().emplace<sage::ui::Transform>(iconObj.Entity(), it);
+    scene.Registry().emplace<sage::ui::Element>(iconObj.Entity(), it);
     sage::ui::Icon icon;
     icon.Name = "heart";
     icon.Color = {1.0f, 0.3f, 0.3f, 1.0f};
@@ -157,11 +157,11 @@ void CheckIconAndTextDoNotOverlap(UIRenderer& ui) {
     scene.SetParent(iconObj.Entity(), row.Entity());
 
     GameObject textObj = scene.CreateObject("Text");
-    sage::ui::Transform tt;
+    sage::ui::Element tt;
     tt.Anchor = UIAnchor::TopLeft;
-    tt.Mode = sage::ui::Transform::Stretch::Both;
+    tt.Mode = sage::ui::Element::Stretch::Both;
     tt.Margin = {44.0f, 0.0f, 0.0f, 0.0f};
-    scene.Registry().emplace<sage::ui::Transform>(textObj.Entity(), tt);
+    scene.Registry().emplace<sage::ui::Element>(textObj.Entity(), tt);
     sage::ui::Label label;
     label.Text = "100 / 100";
     label.Scale = 1.6f;

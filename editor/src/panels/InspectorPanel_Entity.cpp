@@ -1009,7 +1009,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    if (reg.all_of<sage::ui::Transform>(obj.Entity()) &&
+    if (reg.all_of<sage::ui::Element>(obj.Entity()) &&
         EditorTheme::SectionHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawUIElement(host, obj);
     }
@@ -1281,8 +1281,8 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего
         // элемент состоит дальше, выбирается в самом инспекторе (или заготовкой).
         {"UI Element", "Interface", "rect",
-         "Panel, label, image or bar on screen", HasComp<sage::ui::Transform>,
-         AddComp<sage::ui::Transform>},
+         "Panel, label, image or bar on screen", HasComp<sage::ui::Element>,
+         AddComp<sage::ui::Element>},
     };
     return kEntries;
 }

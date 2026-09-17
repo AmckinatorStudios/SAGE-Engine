@@ -8,7 +8,7 @@
 namespace sage::ui {
 
 // Заготовка -> набор компонентов на сущности. Здесь и видно, чем новая модель
-// отличается от старой: «кнопка» — это не значение перечисления, а Transform +
+// отличается от старой: «кнопка» — это не значение перечисления, а Element +
 // Fill + Label + Interactable, и собирается она перечислением того, из чего
 // состоит, без единой ветки «если вид такой-то».
 namespace {
@@ -20,7 +20,7 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
         if (present) reg.emplace_or_replace<T>(e, value);
         else reg.remove<T>(e);
     };
-    reg.emplace_or_replace<Transform>(e, p.Xf);
+    reg.emplace_or_replace<Element>(e, p.Box);
     part(p.HasFill, p.FillStyle);
     part(p.HasLabel, p.LabelStyle);
     part(p.HasImage, p.ImageStyle);
@@ -28,7 +28,7 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
     part(p.HasInteractable, p.Interact);
     part(p.HasInput, p.Input);
     part(p.HasRange, p.RangeValue);
-    part(p.HasLayout, p.LayoutRule);
+    part(p.HasStack, p.StackRule);
     part(p.HasMask, p.MaskRule);
 }
 
@@ -65,7 +65,7 @@ bool ApplyPreset(Scene& scene, entt::entity e, const std::string& preset) {
     if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e)) {
         for (entt::entity c : h->Children) {
             const IdComponent* id = reg.try_get<IdComponent>(c);
-            if (id && reg.all_of<Transform>(c)) stale.push_back(id->Id);
+            if (id && reg.all_of<Element>(c)) stale.push_back(id->Id);
         }
     }
     for (int id : stale) scene.RemoveObject(id);

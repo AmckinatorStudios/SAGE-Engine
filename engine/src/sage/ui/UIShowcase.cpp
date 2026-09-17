@@ -15,7 +15,7 @@ namespace {
 // Локальная запись, а не общий тип: витрина набита элементами всех видов, и
 // расписывать каждый из полусотни набором компонентов значило бы утроить файл.
 struct UI {
-    Transform Xf;
+    Element Box;
     bool HasFill = true;
     Fill FillStyle;
     bool HasLabel = false;
@@ -29,7 +29,7 @@ struct UI {
 GameObject MakeUI(Scene& scene, const std::string& name, const UI& ui, GameObject parent) {
     GameObject e = scene.CreateEmptyObject(name);
     entt::registry& reg = scene.Registry();
-    reg.emplace<Transform>(e.Entity(), ui.Xf);
+    reg.emplace<Element>(e.Entity(), ui.Box);
     if (ui.HasFill) reg.emplace<Fill>(e.Entity(), ui.FillStyle);
     if (ui.HasLabel) reg.emplace<Label>(e.Entity(), ui.LabelStyle);
     if (ui.HasBar) reg.emplace<Bar>(e.Entity(), ui.BarStyle);
@@ -40,14 +40,14 @@ GameObject MakeUI(Scene& scene, const std::string& name, const UI& ui, GameObjec
 
 UI Panel(UIAnchor a, glm::vec2 off, glm::vec2 size, glm::vec4 color, float rounding = 8.0f) {
     UI u;
-    u.Xf.Anchor = a; u.Xf.Offset = off; u.Xf.Size = size;
+    u.Box.Anchor = a; u.Box.Position = off; u.Box.Size = size;
     u.FillStyle.Color = color; u.FillStyle.Rounding = rounding;
     return u;
 }
 
 UI TextLine(UIAnchor a, glm::vec2 off, const std::string& text, float scale, glm::vec4 col) {
     UI u;
-    u.Xf.Anchor = a; u.Xf.Offset = off; u.Xf.Size = {180.0f, 24.0f};
+    u.Box.Anchor = a; u.Box.Position = off; u.Box.Size = {180.0f, 24.0f};
     u.HasFill = false;   // у надписи фона нет
     u.HasLabel = true;
     u.LabelStyle.Text = text;
@@ -106,7 +106,7 @@ int BuildShowcase(Scene& scene) {
                 // Счётчик в углу.
                 UI cnt = TextLine(UIAnchor::BottomRight, {4, 2},
                                "x" + std::to_string((slotIndex * 3) % 9 + 1), 1.4f, {1, 1, 1, 1});
-                cnt.Xf.Size = {28, 16};
+                cnt.Box.Size = {28, 16};
                 MakeUI(scene, "Count" + std::to_string(slotIndex), cnt, slot);
             }
         }
@@ -155,12 +155,12 @@ int BuildShowcase(Scene& scene) {
         // Вертикальный сегмент от родителя вниз до уровня ребёнка.
         float vTop = pcy, vBot = ccy, vh = vBot - vTop;
         UI vSeg = Panel(UIAnchor::TopLeft, {pcx - 2.0f, vTop}, {4.0f, vh > 0 ? vh : 1.0f}, wire, 2.0f);
-        vSeg.Xf.Layer = -1;
+        vSeg.Box.Order = -1;
         MakeUI(scene, std::string("WireV") + std::to_string(i), vSeg, skills);
         // Горизонтальный сегмент на уровне ребёнка от родителя-X к ребёнку-X.
         float hL = pcx < ccx ? pcx : ccx, hR = pcx < ccx ? ccx : pcx, hw = hR - hL;
         UI hSeg = Panel(UIAnchor::TopLeft, {hL - 2.0f, ccy - 2.0f}, {hw + 4.0f, 4.0f}, wire, 2.0f);
-        hSeg.Xf.Layer = -1;
+        hSeg.Box.Order = -1;
         MakeUI(scene, std::string("WireH") + std::to_string(i), hSeg, skills);
     }
 
@@ -170,7 +170,7 @@ int BuildShowcase(Scene& scene) {
         glm::vec4 fill = n.Unlocked ? glm::vec4(0.20f, 0.45f, 0.70f, 1.0f)
                                     : glm::vec4(0.14f, 0.16f, 0.20f, 1.0f);
         UI node = Panel(UIAnchor::TopLeft, {n.X, n.Y}, {kNodeSize, kNodeSize}, fill, kHalf);
-        node.Xf.Layer = 1;
+        node.Box.Order = 1;
         node.FillStyle.BorderThickness = 2.0f;
         node.FillStyle.BorderColor = n.Unlocked ? glm::vec4(0.6f, 0.9f, 1.0f, 1.0f)
                                                 : glm::vec4(0.35f, 0.38f, 0.44f, 1.0f);

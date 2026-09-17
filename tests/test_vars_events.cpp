@@ -321,11 +321,11 @@ namespace {
 // Кнопка на весь экран: попасть по ней мышью можно, не считая координат.
 GameObject MakeButton(Scene& scene, const char* name) {
     GameObject e = scene.CreateObject(name);
-    sage::ui::Transform t;
+    sage::ui::Element t;
     t.Anchor = UIAnchor::TopLeft;
-    t.Offset = {0.0f, 0.0f};
+    t.Position = {0.0f, 0.0f};
     t.Size = {200.0f, 100.0f};
-    scene.Registry().emplace<sage::ui::Transform>(e.Entity(), t);
+    scene.Registry().emplace<sage::ui::Element>(e.Entity(), t);
     scene.Registry().emplace<sage::ui::Fill>(e.Entity());
     scene.Registry().emplace<sage::ui::Interactable>(e.Entity());
     return e;
@@ -429,9 +429,9 @@ TEST(Events_a_checkbox_reports_a_change) {
     Scene scene("ui");
     GameObject box = scene.CreateObject("Sound");
     CHECK_TRUE(sage::ui::ApplyPreset(scene, box.Entity(), "Checkbox"));
-    sage::ui::Transform& t = scene.Registry().get<sage::ui::Transform>(box.Entity());
+    sage::ui::Element& t = scene.Registry().get<sage::ui::Element>(box.Entity());
     t.Anchor = UIAnchor::TopLeft;
-    t.Offset = {0.0f, 0.0f};
+    t.Position = {0.0f, 0.0f};
     t.Size = {200.0f, 100.0f};
 
     sage::events::Binding b;
@@ -584,7 +584,7 @@ TEST(Prefab_a_game_part_survives_copying) {
 
     Scene scene("world");
     GameObject src = scene.CreateObject("Marked");
-    scene.Registry().emplace<sage::ui::Transform>(src.Entity());
+    scene.Registry().emplace<sage::ui::Element>(src.Entity());
     PrefabMark mark;
     mark.Power = 4.5f;
     mark.Tag = "особая";

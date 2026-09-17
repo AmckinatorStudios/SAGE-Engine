@@ -705,7 +705,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                                         << " сущностей";
                     ok = false;
                 }
-                const auto uiView = m_scene->Registry().view<sage::ui::Transform>();
+                const auto uiView = m_scene->Registry().view<sage::ui::Element>();
                 if (uiView.begin() != uiView.end()) {
                     LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс элементы интерфейса";
                     ok = false;
@@ -738,7 +738,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 };
                 for (auto e : reg.view<LightComponent>()) complain(e, "свет");
                 for (auto e : reg.view<CameraComponent>()) complain(e, "камера");
-                for (auto e : reg.view<sage::ui::Transform>()) complain(e, "элемент интерфейса");
+                for (auto e : reg.view<sage::ui::Element>()) complain(e, "элемент интерфейса");
             }
 
             // ФАЙЛ СЦЕНЫ НА ДИСКЕ — у КАЖДОГО шаблона, пустого в том числе.
@@ -5515,7 +5515,7 @@ bool EditorLayer::SelfTestTools() {
                     {"IK", r2.all_of<IKComponent>(e2)},
                     {"ReflectionProbe", r2.all_of<ReflectionProbeComponent>(e2)},
                     {"Script", r2.all_of<ScriptComponent>(e2)},
-                    {"UIElement", r2.all_of<sage::ui::Transform>(e2)},
+                    {"UIElement", r2.all_of<sage::ui::Element>(e2)},
                     {"ParticleEmitter", r2.all_of<ParticleEmitterComponent>(e2)},
                 };
                 for (const Check& c : checks) {
@@ -5746,19 +5746,19 @@ bool EditorLayer::SelfTestTools() {
 
         // Экран-родитель на весь кадр и три элемента разной ширины в нём.
         GameObject screen = m_scene->CreateObject("UIRoot");
-        sage::ui::Transform rootXf;
+        sage::ui::Element rootXf;
         rootXf.Anchor = UIAnchor::TopLeft;
-        rootXf.Offset = {0.0f, 0.0f};
-        rootXf.Mode = sage::ui::Transform::Stretch::Both;
-        reg.emplace<sage::ui::Transform>(screen.Entity(), rootXf);
+        rootXf.Position = {0.0f, 0.0f};
+        rootXf.Mode = sage::ui::Element::Stretch::Both;
+        reg.emplace<sage::ui::Element>(screen.Entity(), rootXf);
 
         auto makeBox = [&](const char* name, glm::vec2 pos, glm::vec2 size) {
             GameObject o = m_scene->CreateObject(name);
-            sage::ui::Transform xf;
+            sage::ui::Element xf;
             xf.Anchor = UIAnchor::TopLeft;
-            xf.Offset = pos;
+            xf.Position = pos;
             xf.Size = size;
-            reg.emplace<sage::ui::Transform>(o.Entity(), xf);
+            reg.emplace<sage::ui::Element>(o.Entity(), xf);
             reg.emplace<sage::ui::Fill>(o.Entity());
             m_scene->SetParent(o.Entity(), screen.Entity());
             return o;
@@ -5772,7 +5772,7 @@ bool EditorLayer::SelfTestTools() {
         m_tools.UI.FrameSize = {1280.0f, 720.0f};
 
         auto offsetOf = [&](GameObject o) {
-            return reg.get<sage::ui::Transform>(o.Entity()).Offset;
+            return reg.get<sage::ui::Element>(o.Entity()).Position;
         };
 
         // Выравнивание по левому краю первичного (последнего кликнутого).
@@ -5822,7 +5822,7 @@ bool EditorLayer::SelfTestTools() {
             sage::ui::UIRect now{};
             for (const auto& e : after2)
                 if (e.Entity == b.Entity()) now = e.Rect;
-            if (reg.get<sage::ui::Transform>(b.Entity()).Anchor != UIAnchor::BottomRight ||
+            if (reg.get<sage::ui::Element>(b.Entity()).Anchor != UIAnchor::BottomRight ||
                 std::abs(was.x - now.x) > 0.01f || std::abs(was.y - now.y) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: смена якоря сдвинула элемент ("
                                     << was.x << "," << was.y << " -> " << now.x << "," << now.y
@@ -5836,7 +5836,7 @@ bool EditorLayer::SelfTestTools() {
         if (ok) {
             m_selection.SetPrimary(c.Id());
             uiops::StretchToParent(*this, 16.0f);
-            const sage::ui::Transform& t = reg.get<sage::ui::Transform>(c.Entity());
+            const sage::ui::Element& t = reg.get<sage::ui::Element>(c.Entity());
             if (std::abs(t.Size.x - (1280.0f - 32.0f)) > 0.01f ||
                 std::abs(t.Size.y - (720.0f - 32.0f)) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: растяжение на родителя дало " << t.Size.x << "x"
@@ -5849,8 +5849,8 @@ bool EditorLayer::SelfTestTools() {
         // становится ВИДИМЫМ, а не просто меняет числа.
         if (ok) {
             m_selection.SetPrimary(a.Id());
-            sage::ui::Transform& ta = reg.get<sage::ui::Transform>(a.Entity());
-            ta.Offset = {5000.0f, -300.0f};   // далеко за краем
+            sage::ui::Element& ta = reg.get<sage::ui::Element>(a.Entity());
+            ta.Position = {5000.0f, -300.0f};   // далеко за краем
             uiops::BringIntoView(*this);
             const std::vector<sage::ui::ElementRect> back =
                 sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
@@ -5911,11 +5911,11 @@ bool EditorLayer::SelfTestTools() {
         // Кнопка со связью: щёлкнули — послала событие и позвала метод двери.
         GameObject button = m_scene->CreateObject("SelfTestButton");
         {
-            sage::ui::Transform t;
+            sage::ui::Element t;
             t.Anchor = UIAnchor::TopLeft;
-            t.Offset = {0.0f, 0.0f};
+            t.Position = {0.0f, 0.0f};
             t.Size = {200.0f, 100.0f};
-            m_scene->Registry().emplace_or_replace<sage::ui::Transform>(button.Entity(), t);
+            m_scene->Registry().emplace_or_replace<sage::ui::Element>(button.Entity(), t);
             m_scene->Registry().emplace_or_replace<sage::ui::Fill>(button.Entity());
             sage::ui::Interactable& act =
                 m_scene->Registry().emplace_or_replace<sage::ui::Interactable>(button.Entity());
@@ -6014,7 +6014,7 @@ bool EditorLayer::SelfTestTools() {
         // Прямоугольник обязателен: без него сущность не элемент интерфейса, и
         // сериализатор её части не пишет (см. SaveUIComponents). Кнопка без
         // прямоугольника — не кнопка, и проверять на такой нечего.
-        m_scene->Registry().emplace_or_replace<sage::ui::Transform>(knob.Entity());
+        m_scene->Registry().emplace_or_replace<sage::ui::Element>(knob.Entity());
         m_scene->Registry()
             .emplace_or_replace<sage::ui::Interactable>(knob.Entity())
             .Events.push_back(b);
@@ -6514,10 +6514,10 @@ end
 
     entt::registry& uiReg = m_scene->Registry();
     GameObject hud = m_scene->CreateObject("HUD");
-    sage::ui::Transform hudXf;
-    hudXf.Offset = {16.0f, 16.0f};
+    sage::ui::Element hudXf;
+    hudXf.Position = {16.0f, 16.0f};
     hudXf.Size = {240.0f, 64.0f};
-    uiReg.emplace<sage::ui::Transform>(hud.Entity(), hudXf);
+    uiReg.emplace<sage::ui::Element>(hud.Entity(), hudXf);
     sage::ui::Fill hudFill;
     hudFill.Rounding = 12.0f;
     hudFill.BorderThickness = 2.0f;
@@ -6529,11 +6529,11 @@ end
     uiReg.emplace<ScriptComponent>(hud.Entity(), ScriptComponent{"assets/scripts/hud.lua"});
 
     GameObject bar = m_scene->CreateObject("Score Bar");
-    sage::ui::Transform barXf;
+    sage::ui::Element barXf;
     barXf.Anchor = UIAnchor::BottomLeft;
-    barXf.Offset = {12.0f, 8.0f};
+    barXf.Position = {12.0f, 8.0f};
     barXf.Size = {216.0f, 16.0f};
-    uiReg.emplace<sage::ui::Transform>(bar.Entity(), barXf);
+    uiReg.emplace<sage::ui::Element>(bar.Entity(), barXf);
     sage::ui::Fill barFill;
     barFill.Rounding = 7.0f;
     barFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
