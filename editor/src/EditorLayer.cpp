@@ -124,7 +124,7 @@ void EditorLayer::RegisterCommands() {
                     [this] { return m_history.CanRedo(); }, [this] { Redo(); }});
 
     m_commands.Add({"play.start", T("Play"), scene, "", "play",
-                    [this] { return m_playState == EditorPlayState::Editing; },
+                    [this] { return !m_play.Active(); },
                     [this] { StartPlay(); }});
     m_commands.Add({"play.stop", T("Stop"), scene, "", "stop",
                     [this] { return InPlayMode(); }, [this] { StopPlay(); }});
@@ -194,12 +194,10 @@ void EditorLayer::OnAttach() {
     // события окна снимается только вместе с окном, и второй мост означал бы
     // два одинаковых события на одно нажатие. Раскладка при этом на каждый Play
     // своя — её сбрасывает ClearActions (см. StartPlay).
-    m_playInputBridge.Attach(app.GetWindow(), m_playInput);
-    m_playCursor.Attach(m_playInputBridge);
     // Захватом курсора распоряжается не мост, а условие «панель Game в фокусе»
     // (см. EditorPlayInput): иначе игра, попросившая обзор от первого лица,
-    // отняла бы у редактора мышь насовсем.
-    m_playInput.SetCursorControl(&m_playCursor);
+    // отняла бы у редактора мышь насовсем. Всё это связывает сессия.
+    m_play.Attach(m_playInputBridge, app.GetWindow());
 
     // --- ImGui: docking + multi-viewport (панели можно вытаскивать в
     // отдельные OS-окна — «плавающие» панели становятся полноценными окнами) ---
@@ -290,7 +288,7 @@ void EditorLayer::OnAttach() {
                    (m_scenePath.empty() ? "<no file>" : m_scenePath.string()) +
                    (m_sceneDirty ? "  (NOT SAVED)\n" : "\n");
             ctx += std::string("Mode:   ") +
-                   (m_playState == EditorPlayState::Editing ? "Editing" : "Play") + "\n";
+                   (!m_play.Active() ? "Editing" : "Play") + "\n";
             if (m_scene) ctx += std::string("Entities: ") + std::to_string(m_scene->Count()) + "\n";
             return ctx;
         };
@@ -369,10 +367,9 @@ void EditorLayer::OnAttach() {
     // глушить превью на входе в игру и получать два микшера на одну звуковую
     // карту.
     {
-        if (!m_playAudio) m_playAudio = std::make_unique<AudioEngine>();
         sage::CoreSystems preview;
         preview.Particles = &m_renderer.Particles();
-        preview.Audio = m_playAudio.get();
+        preview.Audio = &m_play.Audio(); // заводит устройство, если его ещё нет
         sage::RegisterCoreSystems(m_systems, preview);
     }
 
@@ -777,7 +774,7 @@ void EditorLayer::OnAttach() {
         // тот же, что и от мыши.
         if (mode && std::string(mode) == "play") {
             StartPlay();
-            if (m_playScripts) m_playScripts->UpdateAll(0.016f);
+            if (m_play.Scripts()) m_play.Scripts()->UpdateAll(0.016f);
             sage::ui::UIInputState down;
             down.Mouse = {640.0f, 360.0f};   // центр экрана — там стоит кнопка
             down.MouseDown = true;
@@ -787,7 +784,7 @@ void EditorLayer::OnAttach() {
             up.Mouse = down.Mouse;
             up.MouseReleased = true;
             sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
-            if (m_playScripts) m_playScripts->UpdateAll(0.016f);
+            if (m_play.Scripts()) m_play.Scripts()->UpdateAll(0.016f);
         }
 
         // Выбор: дверь по умолчанию, но SAGE_EDITOR_SELECT_ENTITY сильнее — он
@@ -925,7 +922,7 @@ void EditorLayer::OnUpdate(float dt) {
     // Только в режиме правки: во время Play сцена живёт по игровым правилам, и
     // сохранять её состояние значило бы записывать середину игры вместо уровня.
     if (m_autosaveInterval > 0.0f && m_sceneDirty && m_scene &&
-        m_playState == EditorPlayState::Editing) {
+        !m_play.Active()) {
         m_autosaveTimer += dt;
         if (m_autosaveTimer >= m_autosaveInterval) {
             m_autosaveTimer = 0.0f;
@@ -950,29 +947,29 @@ void EditorLayer::OnUpdate(float dt) {
     // сцены это десятки тысяч движений мыши в памяти. Заодно это даёт панели
     // «Управление» живые события: назначить клавишу можно только поймав её.
     m_playInputBridge.PollGamepads();
-    m_playInput.BeginFrame();
+    m_play.Input().BeginFrame();
 
-    if (m_playState == EditorPlayState::Playing) {
+    if (m_play.Playing()) {
         // Ввод игре — только пока в фокусе панель Game (см. EditorPlayInput).
         // В остальное время всё отпускается: клавиши уходят редактору, а игра
         // не остаётся идти вперёд сама. Простое «не считать действия» тут не
         // годится — они застыли бы нажатыми.
-        m_playCursor.SetGameFocused(m_game.Focused());
-        m_playCursor.SyncCapture();
+        m_play.Cursor().SetGameFocused(m_game.Focused());
+        m_play.Cursor().SyncCapture();
         if (m_game.Focused()) {
             // Тот же порядок, что в собранной игре: устройства -> интерфейс
             // сцены -> действия (см. InputSystem::BeginFrame).
             UpdatePlayUiInput(dt);
-            m_playInput.UpdateActions(dt);
+            m_play.Input().UpdateActions(dt);
 
             // ESC отпускает захваченный курсор, не выходя из Play: иначе из
             // игры от первого лица в редакторе было бы не выбраться мышью.
-            if (m_playCursor.CursorCaptured() &&
-                m_playInput.State().Keys().Down(sage::input::Key::Escape)) {
-                m_playCursor.SetCursorCaptured(false);
+            if (m_play.Cursor().CursorCaptured() &&
+                m_play.Input().State().Keys().Down(sage::input::Key::Escape)) {
+                m_play.Cursor().SetCursorCaptured(false);
             }
         } else {
-            m_playInput.ReleaseAll();
+            m_play.Input().ReleaseAll();
             UpdatePlayUiInput(dt);
         }
     }
@@ -999,8 +996,8 @@ void EditorLayer::OnUpdate(float dt) {
     // «поправил число — посмотрел» стоил прохождения уровня заново. Зовётся и в
     // правке, и в Play: в правке привязанных скриптов просто нет, и обход
     // пустого списка ничего не стоит.
-    if (m_playScripts) {
-        const int n = m_playScripts->ReloadChangedScripts();
+    if (m_play.Scripts()) {
+        const int n = m_play.Scripts()->ReloadChangedScripts();
         if (n > 0) SetStatusMessage(T("Scripts reloaded: ") + std::to_string(n));
     }
 
@@ -1021,20 +1018,19 @@ void EditorLayer::OnUpdate(float dt) {
     // dt = 0 тут не годится: OnUpdate скриптов при нулевом шаге всё равно
     // выполняется, и логика, не считающая время («каждый кадр прибавить
     // единицу»), продолжала бы идти. Пауза — это НЕ считать кадр вовсе.
-    if (m_playState != EditorPlayState::Paused) {
-        const float scale = m_playScripts ? m_playScripts->FrameTimeScale() : 1.0f;
+    if (!m_play.Paused()) {
+        const float scale = m_play.Scripts() ? m_play.Scripts()->FrameTimeScale() : 1.0f;
         m_systems.Run(*m_scene, dt * scale);
-    } else if (m_pendingStep > 0.0f) {
+    } else if (const float step = m_play.TakePendingStep(); step > 0.0f) {
         // Заказанный шаг: ровно один кадр игры и снова стоп.
-        m_systems.Run(*m_scene, m_pendingStep);
-        m_pendingStep = 0.0f;
+        m_systems.Run(*m_scene, step);
     }
     m_plugins.UpdateAll(dt);
 
     // Чего игра попросила за кадр. Здесь — после того, как все скрипты
     // отработали и ни один не находится на стеке.
-    if (m_playScripts) {
-        if (m_playScripts->TakeQuitRequest()) {
+    if (m_play.Scripts()) {
+        if (m_play.Scripts()->TakeQuitRequest()) {
             // В редакторе «выйти из игры» — это остановить Play, а не закрыть
             // редактор: у человека несохранённая сцена, и закрывать её по
             // просьбе скрипта нельзя.
@@ -1043,8 +1039,8 @@ void EditorLayer::OnUpdate(float dt) {
             return;
         }
         std::string sceneName;
-        const bool restart = m_playScripts->TakeRestartRequest();
-        if (m_playScripts->TakeSceneRequest(sceneName) || restart) {
+        const bool restart = m_play.Scripts()->TakeRestartRequest();
+        if (m_play.Scripts()->TakeSceneRequest(sceneName) || restart) {
             // Смена сцены В РЕДАКТОРЕ пока не поддержана: Play работает с той
             // сценой, что открыта, и подменить её под человеком, не спросив,
             // значило бы потерять его несохранённую правку. Говорим прямо,

@@ -95,269 +95,64 @@ constexpr float kStatusBarHeight = 26.0f;
 //  Play-режим
 // ============================================================================
 
+// Слой добавляет к сессии ровно то, чего она про редактор знать не должна:
+// заметку шаблона, фокус панелей и способ восстановить сцену.
+PlayContext EditorLayer::MakePlayContext() {
+    PlayContext ctx;
+    ctx.ScenePtr = &m_scenePtr;
+    ctx.Systems = &m_systems;
+    ctx.Particles = &m_renderer.Particles();
+    ctx.ProjectDir = m_project.Dir();
+    ctx.RestoreScene = [this](const std::string& s) { return RestoreSceneFromString(s); };
+    ctx.ApplyProjectInputMapping = [this] { ApplyProjectInputMapping(); };
+    return ctx;
+}
+
 void EditorLayer::StartPlay() {
     // Заметка шаблона отвечала на вопрос «почему в сцене пусто»; Play на него
     // и отвечает делом — держать её дальше значит мешать смотреть.
     m_templateNote.clear();
-    if (InPlayMode()) return;
-
-    // Снапшот сцены — Stop вернёт всё ровно как было до Play.
-    m_playSnapshot = SceneSerializer::SaveToString(*m_scene);
-
-    m_playScripts = std::make_unique<ScriptEngine>();
-    m_playScripts->BindScene(*m_scene);
-    // Паритет с рантаймом: частицы доступны скриптам уже в OnStart
-    // (EmitParticles/CreateParticleStream рисуются в предпросмотре сцены).
-    m_playScripts->BindParticles(m_renderer.Particles());
-
-    // Ввод — как в собранной игре: действия объявляют сами скрипты (BindAction),
-    // поэтому карту действий начинаем с ЧИСТОГО ЛИСТА на каждый Play (иначе
-    // раскладка прошлого запуска пережила бы правку скрипта), а привязываем ДО
-    // AttachScript — OnStart скриптов зовёт BindAction прямо оттуда.
-    m_playInput.ClearActions();
-    m_playScripts->BindInput(m_playInput);
-    // Действия уходят и на шину сцены («input.Jump») — ровно как в собранной
-    // игре: превью обязано вести себя так же, иначе редактор перестаёт
-    // заменять сборку.
-    m_playInput.SetEventBus(&m_scene->Events);
-
-    // Звук — как в собранной игре. Устройство может отсутствовать (headless CI):
-    // AudioEngine в этом случае работает вхолостую, но вызовы из Lua валидны.
-    if (!m_playAudio) m_playAudio = std::make_unique<AudioEngine>();
-    m_playScripts->BindAudio(*m_playAudio);
-
-    // Модули Lua (require "voxel") ищутся в скриптовой папке ОТКРЫТОГО ПРОЕКТА —
-    // тот же контракт, что в собранной игре, где CWD и есть корень проекта.
-    m_playScripts->AddScriptSearchPath((m_project.Dir() / "assets" / "scripts").string());
-    m_playScripts->AddScriptSearchPath("assets/scripts"); // скрипты рядом с редактором
-
-    // Параметры запуска игры (LaunchArg в Lua) — до AttachScript, потому что
-    // OnStart скриптов читает их сразу. В редакторе источник один: окружение
-    // (headless-прогон CI ставит SAGE_GAME_ARGS="autopilot=1").
-    if (const std::string args = sage::EnvString("SAGE_GAME_ARGS"); !args.empty())
-        m_playScripts->SetLaunchArgsFromString(args);
-
-    // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
-    // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные
-    // продолжают работать.
-    int attached = 0;
-    auto view = m_scene->Registry().view<ScriptComponent, IdComponent>();
-    for (auto e : view) {
-        const std::string& path = view.get<ScriptComponent>(e).Path;
-        if (path.empty()) continue;
-        // Пути скриптов в сцене — ОТНОСИТЕЛЬНО ПРОЕКТА ("assets/scripts/x.lua"):
-        // так их резолвит собранная игра (SagePlayer делает chdir в проект). CWD
-        // редактора — не папка проекта, поэтому здесь резолвим сами: как есть
-        // (скрипты редактора, абсолютные пути), иначе — от корня проекта. Без
-        // этого скрипты проекта работали бы в собранной игре, но НЕ в Play.
-        std::string resolved = path;
-        std::error_code scriptEc;
-        if (!fs::exists(resolved, scriptEc)) {
-            fs::path inProject = m_project.Dir() / path;
-            if (fs::exists(inProject, scriptEc)) resolved = inProject.string();
-        }
-        try {
-            m_playScripts->AttachScript(GameObject(&m_scene->Registry(), e), resolved);
-            ++attached;
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Editor") << "Play: script attach failed: " << ex.what();
-        }
-    }
-
-    // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.
-    // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а файл проекта
-    // — это «как решил автор игры», и он обязан их замещать, а не дописываться
-    // к ним. Иначе переназначенное в редакторе действие продолжало бы работать
-    // и на старой клавише — то есть панель «Управление» выглядела бы
-    // сломанной. Тот же порядок у собранной игры (см. PlayerLayer).
-    ApplyProjectInputMapping();
-
-    // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
-    // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).
-    m_playPhysics = std::make_unique<PhysicsScene>(
-        sage::physics::PhysicsWorld::DefaultBackend(), *m_scene);
-
-    // Скрипты получают доступ к физике времени выполнения (SetVelocity/GetVelocity/
-    // SetGravity) — привязываем ПОСЛЕ построения мира, чтобы RuntimeBody сущностей
-    // уже существовали к первому OnUpdate.
-    m_playScripts->BindPhysics(*m_playPhysics);
-
-    // Состав кадра на время Play — ТОТ ЖЕ, что у собранной игры (см.
-    // PlayerLayer): скрипты, физика, анимация, частицы, звук в порядке,
-    // заданном один раз в RegisterCoreSystems.
-    //
-    // Без этой регистрации Play выглядел запущенным и не был им: AttachScript
-    // выше зовёт OnStart (и в консоли честно появляется «spin.lua attached
-    // to: …»), но UpdateAll не звал НИКТО — планировщик о скриптах не знал.
-    // То есть скрипт «привязывался и ничего не делал», а физика не считала ни
-    // одного шага. StopPlay при этом снимал системы "scripts"/"physics",
-    // которых никогда не добавляли, — по коду выхода из Play было видно
-    // намерение, но входа в него не было.
-    {
-        sage::CoreSystems core;
-        core.Scripts = m_playScripts.get();
-        core.Physics = m_playPhysics.get();
-        core.Particles = &m_renderer.Particles();
-        core.Audio = m_playAudio.get();
-        // Анимация уже зарегистрирована набором режима правки (превью) и
-        // повторной регистрацией только заменилась бы сама на себя.
-        core.Animation = false;
-        sage::RegisterCoreSystems(m_systems, core);
-        // Звуковые источники сцены оживают вместе с игрой: у кого стоит «играть
-        // сразу» — зазвучал. Не в самой системе кадра, потому что «начать» это
-        // событие, а система кадра — про каждый кадр: иначе источник
-        // перезапускался бы шестьдесят раз в секунду.
-        if (m_playAudio) {
-            const int started = sage::audio::StartScene(*m_scene, *m_playAudio);
-            if (started > 0) LOG_INFO("Editor") << "Play: звуковых источников запущено: " << started;
-        }
-    }
-
-    m_playState = EditorPlayState::Playing;
+    m_scenePtr = m_scene.get();
+    PlayContext ctx = MakePlayContext();
+    if (m_play.Start(ctx) < 0) return;
     m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
-    LOG_INFO("Editor") << "Play started (" << attached << " script(s), "
-                       << m_playPhysics->BodyCount() << " physics body(ies) on "
-                       << m_playPhysics->BackendName() << ")";
-}
-
-// Ввод ИНТЕРФЕЙСУ ИГРЫ в Play-режиме редактора.
-//
-// Раньше этого не было вовсе, и это была не мелочь, а разница между «игра
-// работает» и «игра работает только собранной»: панель Game РИСОВАЛА интерфейс
-// сцены (DrawSceneUI), но UpdateSceneUI звал только плеер. Кнопка меню в
-// редакторе не нажималась, слот инвентаря не подсвечивался, поле ввода не
-// принимало текст — молча, без единой строки в логе. Проверить меню можно было
-// только собрав игру, то есть ровно в том месте, где редактор обязан заменять
-// сборку.
-//
-// Координаты курсора приходят уже переведёнными в кадр игры (см. GamePanel):
-// панель — единственный, кто знает, где нарисована её картинка.
-void EditorLayer::UpdatePlayUiInput(float dt) {
-    if (!m_scene) return;
-    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
-    if (uiView.begin() == uiView.end()) return;
-
-    // Захваченный курсор — режим обзора: экранной точки у мыши нет, и
-    // подсвечивать ею элементы нельзя (подсветилось бы то, что под центром).
-    const bool captured = m_playCursor.CursorCaptured();
-    const bool usable = m_game.MouseInside() && !captured;
-    const bool down = usable && m_game.MouseDown();
-
-    sage::ui::UIInputState input;
-    input.Mouse = usable ? glm::vec2(m_game.MouseX(), m_game.MouseY()) : glm::vec2(-1.0f);
-    input.MouseDown = down;
-    input.MousePressed = down && !m_playUiMouseWasDown;
-    input.MouseReleased = !down && m_playUiMouseWasDown;
-    input.TypedText = m_game.TypedText();
-    input.DeltaTime = dt;
-    m_playUiMouseWasDown = down;
-
-    // Клавиши редактирования — из ImGui: он уже слушает окно, и второй
-    // обработчик на те же клавиши спорил бы с ним за автоповтор.
-    if (m_game.Focused()) {
-        input.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
-        input.Delete = ImGui::IsKeyPressed(ImGuiKey_Delete, true);
-        input.Left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true);
-        input.Right = ImGui::IsKeyPressed(ImGuiKey_RightArrow, true);
-        input.Home = ImGui::IsKeyPressed(ImGuiKey_Home, true);
-        input.End = ImGui::IsKeyPressed(ImGuiKey_End, true);
-        input.Enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
-        input.Escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-        input.Tab = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
-    }
-
-    const sage::ui::UIInputResult result =
-        sage::ui::UpdateSceneUI(*m_scene, input, m_renderer.GameWidth(), m_renderer.GameHeight());
-
-    // Что интерфейс сцены съел, того игра не получит (§29 ТЗ) — так же, как в
-    // собранной игре. Иначе щелчок по кнопке меню в панели Game одновременно
-    // стрелял бы, и превью вело бы себя не как игра.
-    uint8_t eaten = sage::input::DeviceNone;
-    if (result.WantsMouse) eaten |= sage::input::DeviceMouse;
-    if (result.WantsKeyboard) eaten |= sage::input::DeviceKeyboard;
-    if (eaten != sage::input::DeviceNone) m_playInput.BlockDevices(eaten);
-}
-
-// ПАУЗА — ЭТО ОСТАНОВЛЕННЫЙ КАДР, А НЕ ЗНАЧОК.
-//
-// Раньше обе эти функции только меняли поле состояния, и на этом всё
-// заканчивалось: планировщик систем звался в OnUpdate каждый кадр независимо от
-// состояния, а звук шёл из своего устройства. То есть в «паузе» продолжали идти
-// скрипты, физика, анимация, частицы и звук — кнопка меняла свой вид и больше
-// ничего. Сам кадр останавливает OnUpdate (см. EditorLayer.cpp), здесь —
-// вторая половина: звук.
-void EditorLayer::PausePlay() {
-    if (m_playState != EditorPlayState::Playing) return;
-    m_playState = EditorPlayState::Paused;
-    // Остановленный кадр, из которого продолжает литься шум водопада, паузой не
-    // выглядит. Позиция воспроизведения сохраняется — продолжаем с того же
-    // места, а не с начала.
-    if (m_playAudio) m_playAudio->SetAllPaused(true);
-}
-
-void EditorLayer::StepPlay() {
-    // Только из паузы: «шаг» у работающей игры смысла не имеет — она и так
-    // идёт, — а из режима правки шагать нечему.
-    if (m_playState != EditorPlayState::Paused) return;
-    // Считаем ОДИН кадр фиксированной длительности, а не реальный dt: шаг
-    // делают, чтобы разглядеть происходящее, и его величина обязана быть
-    // одинаковой, а не зависеть от того, сколько миллисекунд прошло между
-    // нажатиями. 1/60 — тот же шаг, которым идёт игра на обычном мониторе.
-    m_pendingStep = 1.0f / 60.0f;
-}
-
-void EditorLayer::ResumePlay() {
-    if (m_playState != EditorPlayState::Paused) return;
-    m_playState = EditorPlayState::Playing;
-    if (m_playAudio) m_playAudio->SetAllPaused(false);
 }
 
 void EditorLayer::StopPlay() {
-    if (!InPlayMode()) return;
-
-    // Порядок важен: ScriptEngine держит указатель на текущую сцену — гасим
-    // его ДО того, как заменить сцену восстановленным снапшотом.
-    // Снимаем ДО разрушения объектов: система держит на них указатель, и
-    // оставленная в кадре она обратилась бы к освобождённой памяти.
-    // Ровно то, что добавил StartPlay. "particles" и "animation" остаются: это
-    // превью режима правки, а не игровые системы.
-    // Stop — это для игры «выход»: скрипты обязаны узнать о нём раньше, чем
-    // исчезнут. Без этого проверить сохранение при выходе можно было только в
-    // собранной игре: в Play-режиме прогресс за последние секунды пропадал, и
-    // выглядело это как «сохранение не работает в редакторе».
-    if (m_playScripts) m_playScripts->DispatchQuit();
-    m_systems.Remove("scripts");
-    m_systems.Remove("physics");
-    // "audio" НЕ снимаем: устройство и стадия звука принадлежат режиму правки
-    // так же, как частицы и анимация, — ими работает кнопка «Послушать» в
-    // инспекторе и проигрыватель звуковых файлов. Пока стадию снимали здесь,
-    // превью звука работало ровно до первого запуска игры и после него молчало
-    // навсегда, а причина не попадала ни в один лог.
-    
-    // Звук объекта не имеет права пережить остановку игры: сцена вернётся из
-    // снапшота, а шум водопада продолжал бы идти из точки, где водопада уже
-    // нет. Глушим ДО замены сцены — после неё компонентов с дескрипторами уже
-    // не существует, и остановить их будет нечем.
-    if (m_playAudio && m_scene) sage::audio::StopScene(*m_scene, *m_playAudio);
-    m_playScripts.reset();
-    m_playPhysics.reset();
-    // Курсор возвращается человеку РАНЬШЕ всего остального: игра могла его
-    // захватить, и без этого Stop оставил бы редактор без мыши.
-    // Шина событий принадлежит СЦЕНЕ, а сцену сейчас заменит восстановленный
-    // снапшот — указатель на неё обязан уйти раньше. Иначе он переживёт свой
-    // объект, и первое же действие ввода после Stop обратится к освобождённой
-    // памяти. Заметить это по симптому почти невозможно: падает не там, где
-    // ошибка, и не всегда.
-    m_playInput.SetEventBus(nullptr);
-    m_playCursor.ReleaseCapture();
-    // Действия прошлого запуска отпускаются здесь же: иначе клавиша, зажатая в
-    // момент Stop, осталась бы нажатой до следующего Play.
-    m_playInput.ReleaseAll();
-    RestoreSceneFromString(m_playSnapshot);
-    m_playSnapshot.clear();
-    m_playState = EditorPlayState::Editing;
+    if (!m_play.Active()) return;
+    m_scenePtr = m_scene.get();
+    PlayContext ctx = MakePlayContext();
+    m_play.Stop(ctx);
     m_viewport.RequestFocus(); // вернулись к редактированию — Viewport вперёд
-    LOG_INFO("Editor") << "Play stopped, scene restored";
+}
+
+// Мышь и текст панели Game — интерфейсу сцены. Клавиши редактирования берутся
+// из ImGui: он уже слушает окно, и второй обработчик на те же клавиши спорил бы
+// с ним за автоповтор.
+void EditorLayer::UpdatePlayUiInput(float dt) {
+    if (!m_scene) return;
+    PlayUiInput in;
+    in.MouseInside = m_game.MouseInside();
+    in.MouseDown = m_game.MouseDown();
+    in.Focused = m_game.Focused();
+    in.MouseX = m_game.MouseX();
+    in.MouseY = m_game.MouseY();
+    in.TypedText = m_game.TypedText();
+    in.GameWidth = m_renderer.GameWidth();
+    in.GameHeight = m_renderer.GameHeight();
+    in.DeltaTime = dt;
+    if (in.Focused) {
+        in.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+        in.Delete = ImGui::IsKeyPressed(ImGuiKey_Delete, true);
+        in.Left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true);
+        in.Right = ImGui::IsKeyPressed(ImGuiKey_RightArrow, true);
+        in.Home = ImGui::IsKeyPressed(ImGuiKey_Home, true);
+        in.End = ImGui::IsKeyPressed(ImGuiKey_End, true);
+        in.Enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+        in.Escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        in.Tab = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
+    }
+    m_play.UpdateUiInput(*m_scene, in);
 }
 
 // ============================================================================

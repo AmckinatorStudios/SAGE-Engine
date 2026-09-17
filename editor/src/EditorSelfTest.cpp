@@ -1802,7 +1802,7 @@ bool EditorLayer::SelfTestSceneAndPlay() {
             float rotBefore = green.GetTransform().Rotation.y;
 
             StartPlay();
-            // Тики ЧЕРЕЗ ПЛАНИРОВЩИК, а не вызовом m_playScripts->UpdateAll:
+            // Тики ЧЕРЕЗ ПЛАНИРОВЩИК, а не вызовом m_play.Scripts()->UpdateAll:
             // self-test выполняется до главного цикла, но проверять он обязан
             // тот же путь, которым идёт настоящий кадр (см. OnUpdate). Прямой
             // вызов проверял только сам ScriptEngine — и потому пропустил
@@ -1981,7 +1981,7 @@ bool EditorLayer::SelfTestSystems() {
             float yBefore = green.GetTransform().Position.y;
 
             StartPlay();
-            if (!m_playPhysics || m_playPhysics->BodyCount() < 1) {
+            if (!m_play.Physics() || m_play.Physics()->BodyCount() < 1) {
                 LOG_ERROR("Editor") << "SELFTEST: physics failed - no bodies created";
                 ok = false;
             }
@@ -2021,13 +2021,13 @@ bool EditorLayer::SelfTestSystems() {
             float yBefore = root.GetTransform().Position.y;
             StartPlay();
             // Суставы строятся и на Jolt, и на встроенном движке.
-            bool jointsOk = !m_playPhysics->SupportsJoints() || m_playPhysics->JointCount() >= 6;
-            for (int i = 0; i < 40; ++i) m_playPhysics->Step(*m_scene, 1.0f / 60.0f);
+            bool jointsOk = !m_play.Physics()->SupportsJoints() || m_play.Physics()->JointCount() >= 6;
+            for (int i = 0; i < 40; ++i) m_play.Physics()->Step(*m_scene, 1.0f / 60.0f);
             float yAfter = m_scene->Get(rootId).GetTransform().Position.y;
             StopPlay();
             if (!jointsOk) {
                 LOG_ERROR("Editor") << "SELFTEST: ragdoll joints not built on Jolt ("
-                                    << m_playPhysics->JointCount() << ")";
+                                    << m_play.Physics()->JointCount() << ")";
                 ok = false;
             } else if (yAfter >= yBefore - 0.05f) {
                 LOG_ERROR("Editor") << "SELFTEST: ragdoll did not fall (" << yBefore
@@ -2271,13 +2271,13 @@ bool EditorLayer::SelfTestSystems() {
         // сниматься ровно одним кадром системы — иначе звук перезапускался бы
         // каждый кадр, пока команда висит.
         au.Play();
-        if (m_playAudio) {
-            sage::audio::Update(*m_scene, *m_playAudio);
+        if (m_play.AudioIfCreated()) {
+            sage::audio::Update(*m_scene, *m_play.AudioIfCreated());
             if (au.Request != AudioRequest::None) {
                 LOG_ERROR("Editor") << "SELFTEST: команда звуку не снялась за кадр";
                 ok = false;
             }
-            sage::audio::StopScene(*m_scene, *m_playAudio);
+            sage::audio::StopScene(*m_scene, *m_play.AudioIfCreated());
             if (au.Playing || au.Handle != 0) {
                 LOG_ERROR("Editor") << "SELFTEST: остановка сцены не заглушила звук";
                 ok = false;
@@ -4236,7 +4236,7 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: audio stage missing in edit mode";
             ok = false;
         }
-        if (ok && !m_playAudio) {
+        if (ok && !m_play.AudioIfCreated()) {
             LOG_ERROR("Editor") << "SELFTEST: no audio device outside Play";
             ok = false;
         }
@@ -6171,23 +6171,23 @@ bool EditorLayer::SelfTestTools() {
         // И главное: раскладка ДОХОДИТ до работающего ввода Play. Проверяем
         // тем же вызовом, которым это делает StartPlay.
         if (ok) {
-            m_playInput.ClearActions();
+            m_play.Input().ClearActions();
             ApplyProjectInputMapping();
-            if (!m_playInput.Has("Jump") || !m_playInput.Has("Equip")) {
+            if (!m_play.Input().Has("Jump") || !m_play.Input().Has("Equip")) {
                 LOG_ERROR("Editor") << "SELFTEST: раскладка проекта не доехала до ввода Play";
                 ok = false;
             } else {
                 // Ввод отвечает на неё по-настоящему: жмём пробел событием и
                 // ждём, что сработает действие, а не клавиша.
-                m_playInput.Push(in::InputEvent::KeyDown(in::Key::Space));
-                m_playInput.Update(1.0f / 60.0f);
-                if (!m_playInput.WasPressed("Jump")) {
+                m_play.Input().Push(in::InputEvent::KeyDown(in::Key::Space));
+                m_play.Input().Update(1.0f / 60.0f);
+                if (!m_play.Input().WasPressed("Jump")) {
                     LOG_ERROR("Editor") << "SELFTEST: действие Jump не сработало от назначенной клавиши";
                     ok = false;
                 }
-                m_playInput.ReleaseAll();
+                m_play.Input().ReleaseAll();
             }
-            m_playInput.ClearActions();
+            m_play.Input().ClearActions();
         }
 
         // И то же самое ВИДНО СКРИПТУ через его Lua-API, а не только самому
@@ -6212,8 +6212,8 @@ bool EditorLayer::SelfTestTools() {
                 probe.Entity(), ScriptComponent{"assets/scripts/selftest_input_ctx.lua"});
 
             StartPlay();
-            m_playInput.Push(in::InputEvent::KeyDown(in::Key::E));
-            m_playInput.Update(1.0f / 60.0f);
+            m_play.Input().Push(in::InputEvent::KeyDown(in::Key::E));
+            m_play.Input().Update(1.0f / 60.0f);
             for (int i = 0; i < 3; ++i) m_systems.Run(*m_scene, 1.0f / 60.0f);
             GameObject after = m_scene->FindByName("SelftestInputCtxProbe");
             const bool sawAction = after.Valid() && after.GetTransform().Position.x > 4.0f;
@@ -6225,7 +6225,7 @@ bool EditorLayer::SelfTestTools() {
                                        "IsActionDown в Play";
                 ok = false;
             }
-            m_playInput.ClearActions();
+            m_play.Input().ClearActions();
         }
 
         // За собой убираем: раскладка селф-теста не должна остаться в проекте.
@@ -6394,7 +6394,7 @@ end
     // --- 5. Play: логика Lua реально играет (бот собирает все монеты) ---
     if (ok) {
         StartPlay();
-        for (int i = 0; i < 240 && ok; ++i) m_playScripts->UpdateAll(0.05f); // ~12 c игры
+        for (int i = 0; i < 240 && ok; ++i) m_play.Scripts()->UpdateAll(0.05f); // ~12 c игры
         bool coinsGone = true;
         for (int i = 1; i <= 5; ++i)
             if (m_scene->FindByName("Coin" + std::to_string(i)).Valid()) coinsGone = false;
@@ -6513,8 +6513,8 @@ void EditorLayer::RunHeadlessProjectSession() {
         StartPlay();
         size_t stepCount = (size_t)(playSeconds / step);
         for (size_t i = 0; i < stepCount; ++i) {
-            m_playScripts->UpdateAll(step);
-            if (m_playPhysics) m_playPhysics->Step(*m_scene, step);
+            m_play.Scripts()->UpdateAll(step);
+            if (m_play.Physics()) m_play.Physics()->Step(*m_scene, step);
         }
         LOG_INFO("Editor") << "SESSION: played " << playSeconds << "s in " << stepCount
                            << " steps (" << m_scene->Count() << " entities at the end)";

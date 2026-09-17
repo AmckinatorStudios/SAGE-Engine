@@ -235,7 +235,7 @@ void EditorLayer::DrawStatusBar(float height) {
     if (InPlayMode()) {
         ImGui::SameLine(); ImGui::TextDisabled("|");
         ImGui::SameLine();
-        bool playing = m_playState == EditorPlayState::Playing;
+        bool playing = m_play.Playing();
         ImGui::TextColored(playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
                            playing ? "PLAYING" : "PAUSED");
     }
@@ -472,9 +472,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(T("Play"))) {
-            if (ImGui::MenuItem(T("Play"), nullptr, false, m_playState == EditorPlayState::Editing)) StartPlay();
-            if (ImGui::MenuItem(T("Pause"), nullptr, false, m_playState == EditorPlayState::Playing)) PausePlay();
-            if (ImGui::MenuItem(T("Resume"), nullptr, false, m_playState == EditorPlayState::Paused)) ResumePlay();
+            if (ImGui::MenuItem(T("Play"), nullptr, false, !m_play.Active())) StartPlay();
+            if (ImGui::MenuItem(T("Pause"), nullptr, false, m_play.Playing())) PausePlay();
+            if (ImGui::MenuItem(T("Resume"), nullptr, false, m_play.Paused())) ResumePlay();
             if (ImGui::MenuItem(T("Stop"), nullptr, false, InPlayMode())) StopPlay();
             ImGui::EndMenu();
         }
