@@ -50,6 +50,7 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/Screenshot.h"
 #include <stb_image_write.h>   // реализация развёрнута в render/Screenshot.cpp
+#include "sage/ui/NineSlice.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/physics/Ragdoll.h"
@@ -315,7 +316,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview, "
+                               << "render-stability + camera-preview + nine-slice, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4501,6 +4502,115 @@ bool EditorLayer::SelfTestTools() {
     std::error_code ec;
     std::string err;
     (void)ec; (void)err;
+
+    // --- ДЕВЯТИНА: ОТ КАРТИНКИ ДО ЭЛЕМЕНТА --------------------------------
+    //
+    // Геометрию нарезки проверяет модульный тест (tests/test_nineslice.cpp), а
+    // здесь — ВОРОТА редактора: догадка читает настоящий файл с диска, .sage9
+    // ложится рядом с ним и читается обратно, нарезка доезжает до компонента
+    // выбранного элемента. Каждый из этих шагов по отдельности работает и на
+    // сломанном пути — ломается именно стык, и увидеть это можно было только
+    // руками.
+    {
+        // Рамка 16x16 с каймой в 4 пикселя — ровно то, из чего состоят наборы
+        // интерфейса. Пишется PNG, а не подсовывается в память: догадка обязана
+        // пройти через настоящий разбор файла.
+        const fs::path imagePath = m_project.AssetsDir() / "selftest_frame.png";
+        constexpr int N = 16, B = 4;
+        std::vector<unsigned char> px((size_t)N * N * 4, 0);
+        for (int y = 0; y < N; ++y) {
+            for (int x = 0; x < N; ++x) {
+                const bool edge = x < B || y < B || x >= N - B || y >= N - B;
+                unsigned char* q = px.data() + ((size_t)y * N + x) * 4;
+                q[0] = edge ? 200 : 40; q[1] = edge ? 180 : 40; q[2] = edge ? 60 : 40; q[3] = 255;
+            }
+        }
+        std::error_code iec;
+        fs::create_directories(imagePath.parent_path(), iec);
+        stbi_write_png(imagePath.string().c_str(), N, N, 4, px.data(), N * 4);
+
+        sage::ui::NineSlice guess;
+        if (!sage::ui::GuessBorderFromFile(imagePath.string(), guess)) {
+            LOG_ERROR("Editor") << "SELFTEST: девятина не подобралась по настоящему файлу";
+            ok = false;
+        } else if (guess.Left != (float)B || guess.Top != (float)B ||
+                   guess.Right != (float)B || guess.Bottom != (float)B) {
+            LOG_ERROR("Editor") << "SELFTEST: девятина подобрала " << guess.Left << ","
+                                << guess.Top << "," << guess.Right << "," << guess.Bottom
+                                << " вместо " << B;
+            ok = false;
+        }
+
+        // Описание ложится РЯДОМ с картинкой и читается обратно тем же путём,
+        // каким его ищет окно при выборе файла.
+        guess.EdgeFill = sage::ui::SliceFill::Tile;
+        guess.DrawCenter = false;
+        const std::string sidecar = sage::ui::NineSlice::SidecarPath(imagePath.string());
+        std::string serr;
+        if (!guess.SaveFile(sidecar, serr)) {
+            LOG_ERROR("Editor") << "SELFTEST: .sage9 не записался: " << serr;
+            ok = false;
+        }
+        sage::ui::NineSlice back;
+        if (!sage::ui::NineSlice::LoadFile(sidecar, back, serr)) {
+            LOG_ERROR("Editor") << "SELFTEST: .sage9 не прочитался: " << serr;
+            ok = false;
+        } else if (back.Left != guess.Left || back.EdgeFill != sage::ui::SliceFill::Tile ||
+                   back.DrawCenter) {
+            LOG_ERROR("Editor") << "SELFTEST: .sage9 вернулся не тем, чем был записан";
+            ok = false;
+        }
+
+        // И доезжает до компонента: именно это делает кнопка «Применить к
+        // выбранному», и именно это попадает в сцену и в собранную игру.
+        // Имя заготовки — ровно то, что знает движок. Проверяем заодно, что
+        // НЕИЗВЕСТНОЕ имя не роняет редактор: именно этим оно и кончалось —
+        // заготовка не применялась, Transform не появлялся, а его брали
+        // через get<>, то есть падение без единого сообщения.
+        if (CreateUIEntity("нет такой заготовки").Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: неизвестная заготовка создала элемент";
+            ok = false;
+        }
+        GameObject el = CreateUIEntity("Panel");
+        if (!el.Valid()) {
+            LOG_ERROR("Editor") << "SELFTEST: элемент интерфейса для девятины не создался";
+            ok = false;
+        } else {
+            sage::ui::Image& img = m_scene->Registry().get_or_emplace<sage::ui::Image>(el.Entity());
+            img.Path = imagePath.string();
+            img.SetSlice(back);
+            const sage::ui::NineSlice roundTrip = img.Slice();
+            if (roundTrip.Left != back.Left || roundTrip.EdgeFill != back.EdgeFill ||
+                roundTrip.DrawCenter != back.DrawCenter) {
+                LOG_ERROR("Editor") << "SELFTEST: девятина не доехала до компонента Image";
+                ok = false;
+            }
+            // Нарезка обязана пережить сохранение сцены: поля объявлены в
+            // таблице части, и запись с чтением идут по ней — но ровно эту связь
+            // и рвут, забыв ключ.
+            const std::string snapshot = SceneSerializer::SaveToString(*m_scene);
+            std::unique_ptr<Scene> restored = SceneSerializer::LoadFromString(snapshot);
+            bool found = false;
+            if (restored) {
+                auto view = restored->Registry().view<sage::ui::Image>();
+                for (auto e : view) {
+                    const sage::ui::Image& r = view.get<sage::ui::Image>(e);
+                    if (r.Path != imagePath.string()) continue;
+                    found = true;
+                    if (r.SliceBorder.x != back.Left || r.SliceEdgeFill != back.EdgeFill ||
+                        r.SliceDrawCenter != back.DrawCenter) {
+                        LOG_ERROR("Editor") << "SELFTEST: девятина потерялась в сцене";
+                        ok = false;
+                    }
+                }
+            }
+            if (!found) {
+                LOG_ERROR("Editor") << "SELFTEST: элемент с девятиной не нашёлся в сцене";
+                ok = false;
+            }
+            m_scene->RemoveObject(el.Id());
+        }
+    }
 
     // --- СОХРАНЕНИЕ СЦЕНЫ РАБОТАЕТ КНОПКОЙ И ХОТКЕЕМ -----------------------
     //

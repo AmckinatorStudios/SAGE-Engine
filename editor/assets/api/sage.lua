@@ -1059,6 +1059,8 @@ function sage.ui.HoveredAction() end
 function sage.ui.IconNames() end
 ---@param path string
 function sage.ui.ImageSize(path) end
+---@param entity Entity
+function sage.ui.LoadSlice(entity) end
 ---@return boolean
 function sage.ui.MouseDown() end
 ---@param entity Entity
@@ -1087,6 +1089,12 @@ function sage.ui.SetLayout(entity, opts) end
 ---@param b number
 ---@param scale number
 function sage.ui.SetSlice(entity, l, t, r, b, scale) end
+---@param entity Entity
+---@param draw boolean
+function sage.ui.SetSliceDrawsCenter(entity, draw) end
+---@param entity Entity
+---@param tiled boolean
+function sage.ui.SetSliceTiled(entity, tiled) end
 ---@param entity Entity
 ---@param x number
 ---@param y number
@@ -1282,6 +1290,8 @@ LoadInputMapping = sage.input.LoadMapping
 ---@type fun(...): any
 LoadScene = sage.scene.Load
 ---@type fun(...): any
+LoadUISlice = sage.ui.LoadSlice
+---@type fun(...): any
 MaterialOf = sage.render.MaterialOf
 ---@type fun(...): any
 MoveCharacter = sage.physics.MoveCharacter
@@ -1465,6 +1475,10 @@ SetUILayout = sage.ui.SetLayout
 SetUIPreset = sage.ui.Preset
 ---@type fun(...): any
 SetUISlice = sage.ui.SetSlice
+---@type fun(...): any
+SetUISliceDrawsCenter = sage.ui.SetSliceDrawsCenter
+---@type fun(...): any
+SetUISliceTiled = sage.ui.SetSliceTiled
 ---@type fun(...): any
 SetUISprite = sage.ui.SetSprite
 ---@type fun(...): any

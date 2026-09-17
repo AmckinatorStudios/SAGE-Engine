@@ -515,6 +515,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
             ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
+            // Редактор девятины. Инструмент, а не панель раскладки: его
+            // открывают под задачу «подобрать нарезку картинке» и закрывают,
+            // поэтому он не участвует в раскладке по умолчанию.
+            ImGui::MenuItem(T("9-slice editor"), nullptr, &m_showNineSlice);
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
 
@@ -703,6 +707,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
     m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
+    m_nineSlice.Draw(*this, m_showNineSlice);
     m_profiler.Draw(&m_showProfiler);
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();

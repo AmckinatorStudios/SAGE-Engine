@@ -3,6 +3,7 @@
 #include "sage/render/Font.h"
 #include "sage/render/Texture.h"
 #include "sage/rhi/Resources.h"
+#include "sage/ui/NineSlice.h"
 #include <memory>
 #include <glm/glm.hpp>
 #include <string>
@@ -128,6 +129,17 @@ public:
     void ImageNineSlice(float x, float y, float w, float h, const Texture* texture, Sprite src,
                         glm::vec4 border, float scale, glm::vec3 tint = glm::vec3(1.0f),
                         float alpha = 1.0f);
+
+    // Тот же рисунок, но нарезкой целиком: с повторением кусков вместо
+    // растягивания и, если надо, без середины (см. sage/ui/NineSlice.h).
+    //
+    // РАСКЛАДКУ СЧИТАЕТ НЕ ЭТА ФУНКЦИЯ. Девять кусков — чистая геометрия, и
+    // живёт она в sage::ui::Solve, где её проверяет модульный тест. Здесь
+    // остаётся только выдать посчитанное в буфер: пока счёт был внутри
+    // отрисовки, единственным способом заметить ошибку был взгляд на экран.
+    void ImageSliced(float x, float y, float w, float h, const Texture* texture, Sprite src,
+                     const sage::ui::NineSlice& slice, float scale,
+                     glm::vec3 tint = glm::vec3(1.0f), float alpha = 1.0f);
 
     // --- Формы (v3) --------------------------------------------------------
     // Круг и кольцо — частный случай скруглённого прямоугольника с радиусом в

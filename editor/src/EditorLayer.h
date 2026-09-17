@@ -60,6 +60,7 @@ namespace sage { class Application; }
 #include "panels/SettingsPanel.h"
 #include "panels/InputPanel.h"
 #include "panels/TemplatesPanel.h"
+#include "panels/NineSlicePanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
@@ -137,6 +138,10 @@ public:
     // редактора. Копия здесь и была всей бедой — см. ApplyEngineSettings.
     sage::EngineConfig& Settings() override { return m_settings; }
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
+    void OpenNineSliceEditor(const std::string& imagePath) override {
+        m_showNineSlice = true;
+        m_nineSlice.OpenFor(imagePath);
+    }
 
     // --- EditorHost: undo/redo ---
     const std::string& TemplateNote() const override { return m_templateNote; }
@@ -577,6 +582,10 @@ private:
     InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)
     TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов
     bool m_showTemplates = false;
+    // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
+    // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
+    NineSlicePanel m_nineSlice;
+    bool m_showNineSlice = false;
 
     // Реестр команд и палитра (Ctrl+K). Реестр наполняется один раз в
     // OnAttach: команда описывается ОДИН раз, а меню, тулбар, палитра и

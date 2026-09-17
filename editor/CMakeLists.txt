@@ -77,6 +77,7 @@ add_executable(SageEditor WIN32
     src/UICanvas.cpp
     src/UILayoutOps.cpp
     src/panels/UIEditorPanel.cpp
+    src/panels/NineSlicePanel.cpp
     src/AssetPreview.cpp
 )
 

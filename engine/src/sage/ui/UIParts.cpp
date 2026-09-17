@@ -120,6 +120,10 @@ void DrawFillBorder(const PartDrawContext& c) {
 
 // --- Картинка ---------------------------------------------------------------
 
+// Имена значений SliceFill для таблицы полей: enum пишется числом, но человек
+// видит слово — и в инспекторе, и в подсказке.
+const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Repeat")};
+
 const std::vector<PartField>& ImageFields() {
     static const std::vector<PartField> f = {
         {"path", SAGE_UI_TEXT("File"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
@@ -130,7 +134,20 @@ const std::vector<PartField>& ImageFields() {
         {"sliceBorder", SAGE_UI_TEXT("9-slice (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Image, SliceBorder),
          0.0f, 512.0f,
          "Fixed corners in source pixels. Without it a 48x48 panel cannot be\n"
-         "stretched to 300x120 — the corners smear along with the middle."},
+         "stretched to 300x120 — the corners smear along with the middle.\n"
+         "Window > 9-slice editor drags these over the picture itself.",
+         nullptr, 0, PartField::Widget::NineSliceBorder},
+        {"sliceCenterFill", SAGE_UI_TEXT("9-slice centre"), PartField::Kind::Enum,
+         offsetof(Image, SliceCenterFill), 0.0f, 1.0f,
+         "Stretch or repeat the middle piece.", kSliceFillNames, 2},
+        {"sliceEdgeFill", SAGE_UI_TEXT("9-slice edges"), PartField::Kind::Enum,
+         offsetof(Image, SliceEdgeFill), 0.0f, 1.0f,
+         "Repeat is the only right answer for pixel art and patterns: an\n"
+         "ornament of 16 pixels stretched to 300 turns to mush.",
+         kSliceFillNames, 2},
+        {"sliceDrawCenter", SAGE_UI_TEXT("9-slice draws the middle"), PartField::Kind::Bool,
+         offsetof(Image, SliceDrawCenter), 0.0f, 1.0f,
+         "An outline frame has no middle — what is under the element shows through."},
         {"pixelScale", SAGE_UI_TEXT("Pixel scale"), PartField::Kind::Float, offsetof(Image, PixelScale), 0.0f,
          16.0f, "0 picks it automatically."},
         {"pixelArt", SAGE_UI_TEXT("Pixel art"), PartField::Kind::Bool, offsetof(Image, PixelArt), 0.0f, 1.0f,
@@ -168,9 +185,8 @@ void DrawImagePart(const PartDrawContext& c) {
     }
 
     const UIRenderer::Sprite src = StateSprite(c, img);
-    const bool sliced = img.SliceBorder.x > 0.0f || img.SliceBorder.y > 0.0f ||
-                        img.SliceBorder.z > 0.0f || img.SliceBorder.w > 0.0f;
-    if (sliced) {
+    const NineSlice slice = img.Slice();
+    if (!slice.Empty()) {
         // Масштаб пикселя: 0 — «подобрать сам». Для пиксель-арта округляется
         // ВНИЗ до целого: дробный масштаб растягивает одни пиксели исходника на
         // два экранных, а соседние на один, и ровная рамка идёт волнами.
@@ -180,8 +196,7 @@ void DrawImagePart(const PartDrawContext& c) {
             pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
             if (img.PixelArt) pixels = std::max(1.0f, std::floor(pixels));
         }
-        ui.ImageNineSlice(r.x, r.y, r.w, r.h, img.Tex.get(), src, img.SliceBorder, pixels, rgb,
-                          alpha);
+        ui.ImageSliced(r.x, r.y, r.w, r.h, img.Tex.get(), src, slice, pixels, rgb, alpha);
         return;
     }
 

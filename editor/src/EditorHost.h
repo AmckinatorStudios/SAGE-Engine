@@ -176,6 +176,10 @@ public:
     // Короткое сообщение в статус-баре (обратная связь панелей/плагинов).
     virtual void SetStatusMessage(const std::string& message) = 0;
 
+    // Открыть редактор девятины на этой картинке (кнопка у поля с пометкой
+    // PartField::Widget::NineSliceBorder). Пустой путь просто открывает окно.
+    virtual void OpenNineSliceEditor(const std::string& imagePath) = 0;
+
     // --- undo/redo ---
     // Подмешать в публичные переменные объекта то, что объявил его скрипт
     // (см. sage/vars/ScriptVars.h). Зовётся инспектором ПЕРЕД показом секции:

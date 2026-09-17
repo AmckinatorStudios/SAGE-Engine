@@ -223,6 +223,21 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             break;
 
         case K::Vec4:
+            if (f.Editor == W::NineSliceBorder) {
+                // Числа здесь остаются — иногда нарезка известна точно и её
+                // просто вписывают. Но подбирают её ГЛАЗАМИ, по картинке, и
+                // кнопка рядом ведёт туда, где это видно.
+                ImGui::DragFloat4(label, &ui::FieldAs<glm::vec4>(data, f).x, 1.0f, f.Min, f.Max);
+                host.TrackLastImGuiItem();
+                if (ImGui::SmallButton(T("Edit on the picture…"))) {
+                    // Путь берётся у самой части: девятина описывает ту
+                    // картинку, рядом с которой лежит, и спрашивать его у
+                    // человека второй раз незачем.
+                    const ui::Image* img = reg.try_get<ui::Image>(e);
+                    host.OpenNineSliceEditor(img ? img->Path : std::string());
+                }
+                break;
+            }
             ImGui::DragFloat4(label, &ui::FieldAs<glm::vec4>(data, f).x, 1.0f, f.Min, f.Max);
             host.TrackLastImGuiItem();
             break;
