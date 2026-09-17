@@ -235,7 +235,7 @@ void EditorLayer::DrawStatusBar(float height) {
     if (InPlayMode()) {
         ImGui::SameLine(); ImGui::TextDisabled("|");
         ImGui::SameLine();
-        bool playing = m_playState == EditorPlayState::Playing;
+        bool playing = m_play.Playing();
         ImGui::TextColored(playing ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) : ImVec4(0.9f, 0.8f, 0.3f, 1.0f),
                            playing ? "PLAYING" : "PAUSED");
     }
@@ -472,9 +472,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(T("Play"))) {
-            if (ImGui::MenuItem(T("Play"), nullptr, false, m_playState == EditorPlayState::Editing)) StartPlay();
-            if (ImGui::MenuItem(T("Pause"), nullptr, false, m_playState == EditorPlayState::Playing)) PausePlay();
-            if (ImGui::MenuItem(T("Resume"), nullptr, false, m_playState == EditorPlayState::Paused)) ResumePlay();
+            if (ImGui::MenuItem(T("Play"), nullptr, false, !m_play.Active())) StartPlay();
+            if (ImGui::MenuItem(T("Pause"), nullptr, false, m_play.Playing())) PausePlay();
+            if (ImGui::MenuItem(T("Resume"), nullptr, false, m_play.Paused())) ResumePlay();
             if (ImGui::MenuItem(T("Stop"), nullptr, false, InPlayMode())) StopPlay();
             ImGui::EndMenu();
         }
@@ -515,6 +515,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
             ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
+            // Редактор девятины. Инструмент, а не панель раскладки: его
+            // открывают под задачу «подобрать нарезку картинке» и закрывают,
+            // поэтому он не участвует в раскладке по умолчанию.
+            ImGui::MenuItem(T("9-slice editor"), nullptr, &m_showNineSlice);
             ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
             ImGui::Separator();
 
@@ -703,6 +707,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
     m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
+    m_nineSlice.Draw(*this, m_showNineSlice);
     m_profiler.Draw(&m_showProfiler);
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();

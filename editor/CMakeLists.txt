@@ -15,6 +15,7 @@ add_executable(SageEditor WIN32
     src/EditorLayer.cpp
     src/EditorLayer_Project.cpp
     src/EditorLayer_Play.cpp
+    src/EditorPlaySession.cpp
     src/EditorLayer_Edit.cpp
     src/EditorSelection.cpp
     src/EditorHistory.cpp
@@ -76,6 +77,7 @@ add_executable(SageEditor WIN32
     src/UICanvas.cpp
     src/UILayoutOps.cpp
     src/panels/UIEditorPanel.cpp
+    src/panels/NineSlicePanel.cpp
     src/AssetPreview.cpp
 )
 

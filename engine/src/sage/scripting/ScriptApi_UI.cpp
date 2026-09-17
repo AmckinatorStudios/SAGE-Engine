@@ -439,6 +439,42 @@ void ScriptEngine::RegisterUIApi() {
         im.PixelScale = scale.value_or(0.0f);
     });
 
+    // Нарезка ИЗ ФАЙЛА, лежащего рядом с картинкой (см. sage/ui/NineSlice.h).
+    // Ради этого описание и вынесено в файл: одна рамка на десяти элементах
+    // описана один раз, и скрипту не приходится повторять её четыре числа —
+    // вместе с режимами заполнения и полой серединой, которых у SetUISlice нет.
+    // false — файла рядом нет или он не разобрался (картинка при этом рисуется
+    // целиком, а не пропадает).
+    Bind("ui", "LoadSlice", "LoadUISlice", [](GameObject& obj) {
+        if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return false;
+        sage::ui::Image* im = obj.Registry()->try_get<sage::ui::Image>(obj.Entity());
+        if (!im || im->Path.empty()) return false;
+        sage::ui::NineSlice slice;
+        std::string err;
+        if (!sage::ui::NineSlice::LoadFile(sage::ui::NineSlice::SidecarPath(im->Path), slice, err))
+            return false;
+        im->SetSlice(slice);
+        return true;
+    });
+
+    // Повторять тянущиеся куски вместо растягивания. Для пиксель-арта и узоров
+    // это единственный правильный ответ: орнамент из 16 пикселей, растянутый на
+    // 300, превращается в мыло.
+    Bind("ui", "SetSliceTiled", "SetUISliceTiled", [](GameObject& obj, bool tiled) {
+        if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
+        sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
+        const auto fill = tiled ? sage::ui::SliceFill::Tile : sage::ui::SliceFill::Stretch;
+        im.SliceCenterFill = fill;
+        im.SliceEdgeFill = fill;
+    });
+
+    // Рисовать ли середину. У рамки-обводки её нет: сквозь неё видно то, что
+    // под элементом.
+    Bind("ui", "SetSliceDrawsCenter", "SetUISliceDrawsCenter", [](GameObject& obj, bool draw) {
+        if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
+        obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity()).SliceDrawCenter = draw;
+    });
+
     // Значение ползунка/галки в ЕДИНИЦАХ ИГРЫ — 0..100 громкости, -180..180
     // угла. Диапазон теперь хранит их прямо (sage::ui::Range), и эти две
     // функции стали тем, чем и должны были быть: коротким доступом к значению,

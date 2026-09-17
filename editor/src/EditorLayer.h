@@ -39,7 +39,7 @@
 #include "ProjectTemplates.h"
 
 namespace sage { class Application; }
-#include "EditorPlayInput.h"
+#include "EditorPlaySession.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
 #include "ProjectLauncher/ProjectDatabase.h"
@@ -60,6 +60,7 @@ namespace sage { class Application; }
 #include "panels/SettingsPanel.h"
 #include "panels/InputPanel.h"
 #include "panels/TemplatesPanel.h"
+#include "panels/NineSlicePanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
@@ -137,6 +138,10 @@ public:
     // редактора. Копия здесь и была всей бедой — см. ApplyEngineSettings.
     sage::EngineConfig& Settings() override { return m_settings; }
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
+    void OpenNineSliceEditor(const std::string& imagePath) override {
+        m_showNineSlice = true;
+        m_nineSlice.OpenFor(imagePath);
+    }
 
     // --- EditorHost: undo/redo ---
     const std::string& TemplateNote() const override { return m_templateNote; }
@@ -184,16 +189,21 @@ public:
     void DeleteSelected() override;
 
     // --- EditorHost: Play ---
-    EditorPlayState GetPlayState() const override { return m_playState; }
-    bool InPlayMode() const override { return m_playState != EditorPlayState::Editing; }
+    // Play-режим — у EditorPlaySession; слой пересказывает его панелям и
+    // добавляет то, чего сессия про редактор знать не должна: фокус окон и
+    // заметку шаблона.
+    EditorPlayState GetPlayState() const override { return m_play.State(); }
+    bool InPlayMode() const override { return m_play.Active(); }
     void StartPlay() override;
-    void PausePlay() override;
-    void StepPlay() override;
-    void ResumePlay() override;
+    void PausePlay() override { m_play.Pause(); }
+    void StepPlay() override { m_play.RequestStep(); }
+    void ResumePlay() override { m_play.Resume(); }
     void StopPlay() override;
     // Ввод интерфейсу ИГРЫ в Play-режиме: курсор панели Game, переведённый в
     // координаты игрового кадра, плюс набранный текст (см. определение).
     void UpdatePlayUiInput(float dt);
+    // Что сессия получает от редактора на Start/Stop (см. EditorPlaySession.h).
+    PlayContext MakePlayContext();
 
     // --- EditorHost: общее состояние инструментов (тулбар + вьюпорт) ---
     int& GizmoOp() override { return m_tools.GizmoOp; }
@@ -266,7 +276,7 @@ public:
     bool ProjectInputDirty() const override { return m_projectInputDirty; }
     void SetProjectInputDirty(bool dirty) override { m_projectInputDirty = dirty; }
     const std::vector<sage::input::InputEvent>& FrameInputEvents() const override {
-        return m_playInput.FrameEvents();
+        return m_play.Input().FrameEvents();
     }
     bool& PanelVisible(EditorPanel panel) override {
         switch (panel) {
@@ -299,7 +309,7 @@ public:
 
     // Устройство заводится на старте редактора вместе с остальными системами
     // режима правки (см. EditorLayer::OnAttach) и живёт до конца.
-    AudioEngine* Audio() override { return m_playAudio.get(); }
+    AudioEngine* Audio() override { return &m_play.Audio(); }
 
     // --- EditorHost: замок панели свойств (см. EditorHost.h) ---
     bool InspectorLocked() const override { return m_selection.Locked(); }
@@ -474,21 +484,20 @@ private:
     // --- общее состояние инструментов (тулбар + вьюпорт делят через host) ---
     EditorTools m_tools;
 
-    // --- Play-режим ---
-    EditorPlayState m_playState = EditorPlayState::Editing;
-    std::string m_playSnapshot;                    // сцена на момент Play — восстанавливается по Stop
-    std::unique_ptr<ScriptEngine> m_playScripts;   // живёт только в Play-режиме
-    std::unique_ptr<PhysicsScene> m_playPhysics;   // симуляция физики только в Play-режиме
-    // Ввод игры в Play: те же именованные действия и та же мышь, что в
-    // собранной игре, но отдаются игре только при фокусе панели Game
-    // (см. EditorPlayInput). Живут всё время работы редактора — действия
-    // объявляют скрипты при старте Play, карта пересоздаётся вместе с ними.
-    sage::input::InputSystem m_playInput;
+    // --- Play-режим (см. EditorPlaySession.h) ---
+    //
+    // Игра, запущенная внутри редактора: снимок сцены, скрипты, физика, звук,
+    // ввод, захват курсора, пауза и шаг. Полтора десятка полей и порядок их
+    // гашения в Stop — там, а не здесь: это единственное место редактора, где
+    // сцена живёт не как документ, и смешивать его с редактированием опасно.
+    EditorPlaySession m_play;
+    // Сцену на время Stop заменяет сессия, поэтому ей отдаётся указатель НА
+    // указатель. Отдельное поле, а не &m_scene: unique_ptr — не Scene*.
+    Scene* m_scenePtr = nullptr;
     // Мост к окну — ОДИН на всё время работы редактора, а не новый на каждый
     // Play: подписка на события окна снимается только вместе с окном, и второй
     // мост означал бы два комплекта событий на одно нажатие.
     sage::input::GlfwBridge m_playInputBridge;
-    EditorPlayInput m_playCursor;   // захват курсора по фокусу панели Game
 
     // Раскладка управления ПРОЕКТА — документ, а не работающий ввод: кадры
     // ей никто не считает. Живёт в <проект>/input.sageinput, правится панелью
@@ -497,10 +506,6 @@ private:
     // управлением, что игра, и разницу находили бы уже после сборки.
     sage::input::InputSystem m_projectInput;
     bool m_projectInputDirty = false;
-    // Звук Play-режима. Без него PlaySound из Lua падал бы в редакторе и
-    // работал в собранной игре — превью обязано звучать так же, как игра.
-    std::unique_ptr<AudioEngine> m_playAudio;
-
     // --- Undo/Redo (см. EditorHistory.h) ---
     //
     // Историю со сценой знакомит слой: она умеет снять снимок и применить
@@ -510,11 +515,6 @@ private:
     // --- выбор и замок инспектора (см. EditorSelection.h); размеры окон
     //     живут в m_renderer ---
     EditorSelection m_selection;
-    // Длительность ЗАКАЗАННОГО шага на паузе (0 — шага нет). Заказ, а не прямой
-    // прогон: кнопку нажимают посреди рисования интерфейса, а кадр игры обязан
-    // считаться там же, где считается всегда, — иначе системы пошли бы дважды
-    // за один кадр редактора.
-    float m_pendingStep = 0.0f;
     glm::mat4 m_view{1.0f}, m_proj{1.0f}; // последние view/proj кадра (гизмо/пикинг)
 
     // --- docking ---
@@ -566,9 +566,6 @@ private:
     InspectorPanel m_inspector;
     ViewportPanel m_viewport;
     GamePanel m_game;
-    // Левая кнопка на прошлом кадре: из «удерживается» и «удерживалась»
-    // получаются «нажата» и «отпущена», а без них щелчка не существует.
-    bool m_playUiMouseWasDown = false;
     AssetsPanel m_assets;
     // Накопитель брошенных путей: колбэк окна складывает сюда, кадр разбирает.
     std::vector<std::string> m_droppedFiles;
@@ -585,6 +582,10 @@ private:
     InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)
     TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов
     bool m_showTemplates = false;
+    // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
+    // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
+    NineSlicePanel m_nineSlice;
+    bool m_showNineSlice = false;
 
     // Реестр команд и палитра (Ctrl+K). Реестр наполняется один раз в
     // OnAttach: команда описывается ОДИН раз, а меню, тулбар, палитра и

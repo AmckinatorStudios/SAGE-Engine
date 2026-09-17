@@ -347,6 +347,29 @@ void UIRenderer::ImageNineSlice(float x, float y, float w, float h, const Textur
     }
 }
 
+void UIRenderer::ImageSliced(float x, float y, float w, float h, const Texture* texture,
+                             Sprite src, const sage::ui::NineSlice& slice, float scale,
+                             glm::vec3 tint, float alpha) {
+    if (!texture || texture->Width() <= 0 || texture->Height() <= 0) return;
+    if (src.Whole()) src = Sprite{0.0f, 0.0f, (float)texture->Width(), (float)texture->Height()};
+
+    sage::ui::SliceRequest req;
+    req.SrcX = src.X; req.SrcY = src.Y; req.SrcW = src.W; req.SrcH = src.H;
+    req.DstX = x; req.DstY = y; req.DstW = w; req.DstH = h;
+    req.Scale = scale > 0.0f ? scale : 1.0f;
+
+    const std::vector<sage::ui::SliceQuad> quads = sage::ui::Solve(slice, req);
+    if (quads.empty()) return;
+
+    const float tw = (float)texture->Width(), th = (float)texture->Height();
+    CurrentSegment(texture).QuadCount += (int)quads.size();
+    for (const sage::ui::SliceQuad& q : quads) {
+        PushImageQuad(q.DstX, q.DstY, q.DstW, q.DstH,
+                      {q.SrcX / tw, SheetV(q.SrcY, th)},
+                      {(q.SrcX + q.SrcW) / tw, SheetV(q.SrcY + q.SrcH, th)}, tint, alpha);
+    }
+}
+
 void UIRenderer::PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]) {
     for (int i = 0; i < 4; ++i) {
         unsigned char r = static_cast<unsigned char>(glm::clamp(c[i].r, 0.0f, 1.0f) * 255.0f);

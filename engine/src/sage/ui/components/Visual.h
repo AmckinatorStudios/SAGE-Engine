@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/render/Texture.h"
+#include "sage/ui/NineSlice.h"
 
 // ---------------------------------------------------------------------------
 // Из чего элемент интерфейса СДЕЛАН: подложка, надпись, картинка, полоса,
@@ -65,6 +66,16 @@ struct Image {
     // Девятина: неподвижные углы в пикселях исходника (л, в, п, н). Без неё
     // панель 48x48 нельзя растянуть на 300x120 — углы размажутся с серединой.
     glm::vec4 SliceBorder{0.0f, 0.0f, 0.0f, 0.0f};
+    // Как заполняются тянущиеся куски (см. sage/ui/NineSlice.h). Повтор вместо
+    // растяжения — единственный правильный ответ для пиксель-арта и узоров:
+    // орнамент из 16 пикселей, растянутый на 300, превращается в мыло.
+    SliceFill SliceCenterFill = SliceFill::Stretch;
+    SliceFill SliceEdgeFill = SliceFill::Stretch;
+    // Рисовать ли середину. У рамки-обводки середины нет: сквозь неё видно то,
+    // что под элементом. Отдельный флаг, а не «нулевая середина»: её размер
+    // считается из полей, и обнулить его, не сломав края, нельзя.
+    bool SliceDrawCenter = true;
+
     float PixelScale = 0.0f; // во сколько раз пиксель исходника крупнее экранного (0 — растянуть)
     bool PixelArt = false;   // ближайший сосед и никаких мипмапов
 
@@ -75,6 +86,25 @@ struct Image {
     glm::vec4 SpritePressed{0.0f, 0.0f, 0.0f, 0.0f};
 
     std::shared_ptr<Texture> Tex; // рантайм, не сериализуется
+
+    // Описание нарезки одним объектом — им пользуется и отрисовка, и редактор
+    // девятины, и запись в .sage9. Поля остаются плоскими, потому что по ним
+    // работает общая таблица частей (см. UIPart.h): сериализация и инспектор
+    // идут по offsetof, и вложенная структура выпала бы из обеих.
+    NineSlice Slice() const {
+        NineSlice s;
+        s.SetBorder(SliceBorder);
+        s.CenterFill = SliceCenterFill;
+        s.EdgeFill = SliceEdgeFill;
+        s.DrawCenter = SliceDrawCenter;
+        return s;
+    }
+    void SetSlice(const NineSlice& s) {
+        SliceBorder = s.Border();
+        SliceCenterFill = s.CenterFill;
+        SliceEdgeFill = s.EdgeFill;
+        SliceDrawCenter = s.DrawCenter;
+    }
 };
 
 // Полоса: шкала здоровья, прогресс, загрузка.
