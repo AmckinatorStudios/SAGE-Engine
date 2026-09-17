@@ -41,10 +41,17 @@ namespace sage::render { class SkinnedModel; }
 // ---------------------------------------------------------------------------
 class ResourceManager {
 public:
-    static ResourceManager& Instance() {
-        static ResourceManager instance;
-        return instance;
-    }
+    // Владеет кэшем sage::EngineContext — он же разрушает его, пока живо
+    // графическое устройство. Создавать свой экземпляр можно и нужно в тестах.
+    ResourceManager(); // out-of-line: m_async — неполный тип pimpl (см. .cpp)
+
+    ResourceManager(const ResourceManager&) = delete;
+    ResourceManager& operator=(const ResourceManager&) = delete;
+
+    // ПЕРЕХОДНЫЙ МОСТ, а не рекомендуемый доступ: кэш нужно ПЕРЕДАВАТЬ тому,
+    // кто им пользуется. Оставлен ради мест, куда ссылка ещё не протащена;
+    // ведёт в кэш текущего EngineContext, своего состояния не имеет.
+    static ResourceManager& Instance();
 
     // --- Копия геометрии на стороне процессора --------------------------------
     //
@@ -346,8 +353,6 @@ public:
                                                size_t currentBytes, size_t budget);
 
 private:
-    ResourceManager(); // out-of-line: m_async — неполный тип pimpl (см. .cpp)
-
     void StartWorker();          // лениво поднимает фоновый поток декодирования
     void EvictToBudget();        // вытеснить LRU-неиспользуемые до бюджета
     void DowngradeTexture(const std::string& path); // понизить разрешение вдвое

@@ -181,6 +181,15 @@ struct PostEffectKind {
 
 class PostEffectCatalog {
 public:
+    // Встроенные виды регистрируются в конструкторе: каталог — единственный
+    // источник ответа «какой эффект существует», и пустой каталог выглядел бы
+    // как ошибка автора тракта, а не как незакрытая инициализация движка.
+    PostEffectCatalog();
+
+    PostEffectCatalog(const PostEffectCatalog&) = delete;
+    PostEffectCatalog& operator=(const PostEffectCatalog&) = delete;
+
+    // Мост в каталог текущего EngineContext. Новому коду каталог передают.
     static PostEffectCatalog& Instance();
 
     // Регистрирует вид. Повторная регистрация того же Id заменяет описание —

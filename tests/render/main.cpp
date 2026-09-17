@@ -24,6 +24,7 @@
 
 #include "Fixture.h"
 
+#include "sage/core/EngineContext.h"
 #include "sage/core/Log.h"
 #include "sage/core/Window.h"
 #include "sage/render/ResourceManager.h"
@@ -32,6 +33,10 @@
 using namespace sage::rendertest;
 
 int main(int argc, char** argv) {
+    // Подсистемы движка — на весь прогон: кадровые проверки грузят текстуры и
+    // модели через кэш ресурсов, а закрывается он здесь, пока GL-контекст жив.
+    sage::ScopedEngineContext engineContext;
+
     std::string referenceDir = "references";
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--update") == 0) SetUpdateMode(true);

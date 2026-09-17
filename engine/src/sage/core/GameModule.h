@@ -72,6 +72,10 @@ void NormalizeArgs(int& argc, char**& argv);
         sage::detail::NormalizeArgs(argc, argv);                            \
         sage::detail::InstallEarlyCrashHandler(argv && argv[0] ? argv[0] : "SAGE"); \
         try {                                                              \
+            /* Подсистемы движка живут ровно столько, сколько main: игра    \
+               настраивает EngineConfig ДО создания окна, а закрываются они \
+               после того, как Application снёс окно и устройство. */       \
+            sage::ScopedEngineContext engineContext;                       \
             sage::Application* app = sage::CreateApplication(argc, argv);  \
             app->Run();                                                    \
             delete app;                                                    \

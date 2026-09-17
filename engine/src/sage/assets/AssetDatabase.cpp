@@ -1,4 +1,5 @@
 #include "sage/assets/AssetDatabase.h"
+#include "sage/core/EngineContext.h"
 #include "sage/assets/Pack.h"
 
 #include <algorithm>
@@ -138,10 +139,7 @@ bool AssetDatabase::WriteMeta(const std::string& assetPath, const AssetGuid& gui
 //  База
 // ---------------------------------------------------------------------------
 
-AssetDatabase& AssetDatabase::Instance() {
-    static AssetDatabase db;
-    return db;
-}
+AssetDatabase& AssetDatabase::Instance() { return EngineContext::Current().Assets(); }
 
 void AssetDatabase::Clear() {
     m_projectDir.clear();

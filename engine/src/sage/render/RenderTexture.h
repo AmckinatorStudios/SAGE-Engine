@@ -56,6 +56,14 @@ private:
 // должно.
 class RenderTextureRegistry {
 public:
+    RenderTextureRegistry() = default;
+
+    RenderTextureRegistry(const RenderTextureRegistry&) = delete;
+    RenderTextureRegistry& operator=(const RenderTextureRegistry&) = delete;
+
+    // Мост в набор текущего EngineContext. Владеет набором контекст: он же
+    // чистит его, пока графическое устройство ещё живо (раньше набор
+    // сознательно утекал через `new`, чтобы не разрушиться после устройства).
     static RenderTextureRegistry& Instance();
 
     RenderTexture& GetOrCreate(const std::string& name, int width, int height);

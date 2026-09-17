@@ -1,6 +1,7 @@
 #include <array>
 #include <filesystem>
 #include "ResourceManager.h"
+#include "sage/core/EngineContext.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Quarantine.h"
 #include "sage/render/SkinnedModel.h"
@@ -113,6 +114,10 @@ std::string CacheKey(const std::string& path) {
 
 // --- GL-независимое декодирование (используется и воркером, и юнит-тестом) ---
 ResourceManager::ResourceManager() = default;
+
+ResourceManager& ResourceManager::Instance() {
+    return sage::EngineContext::Current().Resources();
+}
 
 bool ResourceManager::DecodeImageFile(const std::string& path, std::vector<unsigned char>& outRGBA,
                                       int& outW, int& outH) {

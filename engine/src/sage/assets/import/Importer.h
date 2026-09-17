@@ -98,6 +98,12 @@ struct ImporterInfo {
 
 class ImporterRegistry {
 public:
+    ImporterRegistry();
+
+    ImporterRegistry(const ImporterRegistry&) = delete;
+    ImporterRegistry& operator=(const ImporterRegistry&) = delete;
+
+    // Мост в реестр текущего EngineContext. Новому коду реестр передают.
     static ImporterRegistry& Instance();
 
     // Регистрирует импортёр. Повторная регистрация того же расширения ЗАМЕНЯЕТ
@@ -114,7 +120,6 @@ public:
     std::vector<std::string> Extensions() const;
 
 private:
-    ImporterRegistry();
     std::vector<ImporterInfo> m_importers;
 };
 

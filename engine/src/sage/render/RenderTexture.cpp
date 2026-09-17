@@ -1,4 +1,5 @@
 #include "sage/render/RenderTexture.h"
+#include "sage/core/EngineContext.h"
 
 #include <algorithm>
 
@@ -34,8 +35,7 @@ void RenderTexture::Resize(int width, int height) {
 }
 
 RenderTextureRegistry& RenderTextureRegistry::Instance() {
-    static RenderTextureRegistry* r = new RenderTextureRegistry();
-    return *r;
+    return sage::EngineContext::Current().RenderTextures();
 }
 
 RenderTexture& RenderTextureRegistry::GetOrCreate(const std::string& name, int width, int height) {
