@@ -363,20 +363,39 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
     const float indent = ImGui::GetTreeNodeToLabelSpacing();
     m_treeRows.push_back({rowPos.y, rowPos.x + indent, depth});
     const bool open = ImGui::TreeNodeEx("##folder", flags, "%s", "");
-    // Значок папки — её цветом (тем же, что в сетке): метка обязана означать
-    // одно и то же в обоих местах. Значок и подпись — одной парой с общим
-    // зазором (EditorIcons::DrawLabeled), а не двумя пробелами в формате.
+    // Значок и цвет — ТЕ ЖЕ, что в сетке, и из того же источника.
+    //
+    // Здесь стояло `subdirs.empty() ? "folder" : "folder-full"` — то есть
+    // заполненность считалась по ОДНИМ ПОДПАПКАМ. Папка с полусотней текстур и
+    // без единой подпапки выглядела в дереве пустой, а в сетке — полной: два
+    // места отвечали на один вопрос по-разному, и верным было второе.
+    // FolderIcon (см. ниже) знает про содержимое целиком и про служебные
+    // сайдкары .meta, которые содержимым не считаются.
+    //
+    // Значок и подпись — одной парой с общим зазором (EditorIcons::DrawLabeled),
+    // а не двумя пробелами в формате.
     {
         glm::vec3 tint(0.85f, 0.68f, 0.32f);
         sage::editor::foldercolors::Get(dir, tint);
         const ImVec4 c(tint.x, tint.y, tint.z, 1.0f);
         EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
-                                 ImGui::GetTextLineHeight(),
-                                 subdirs.empty() ? "folder" : "folder-full", ImGui::GetColorU32(c),
+                                 ImGui::GetTextLineHeight(), FolderIcon(dir), ImGui::GetColorU32(c),
                                  dir.filename().string().c_str(),
                                  ImGui::GetColorU32(ImGuiCol_Text));
     }
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) cwd = dir;
+
+    // ЦВЕТНАЯ МЕТКА СТАВИТСЯ И ОТСЮДА. Меню было только у карточки в сетке:
+    // метку видно в обоих местах, а назначить её можно было ровно в одном —
+    // причём не в том, где папки и ищут. Подменю общее (см. FolderColors.h),
+    // поэтому палитра в дереве и в сетке не разъедется.
+    if (Sage::UI::MenuScope folderMenu; ImGui::BeginPopupContextItem("##folder_menu")) {
+        ImGui::TextDisabled("%s", dir.filename().string().c_str());
+        ImGui::Separator();
+        sage::editor::foldercolors::DrawPaletteMenu(dir);
+        if (EditorIcons::MenuItem("folder", T("Show in Assets"))) cwd = dir;
+        ImGui::EndPopup();
+    }
     // Бросок файла на папку дерева — перенос в неё: то же, что и в сетке.
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
@@ -684,37 +703,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         }
         // Переименование — всегда про ОДИН файл: у двадцати файлов общего имени
         // нет, и придумывать правило вроде «имя + номер» здесь не за чем.
-        if (isDir) {
-            namespace foldercolors = sage::editor::foldercolors;
-            if (ImGui::BeginMenu(T("Folder Colour"))) {
-                for (const foldercolors::Tint& tint : foldercolors::Palette()) {
-                    // Образец рядом с названием: цвет выбирают глазами, а
-                    // список из восьми слов цвета не показывает.
-                    const ImVec2 at = ImGui::GetCursorScreenPos();
-                    const float box = ImGui::GetTextLineHeight();
-                    // Место под образец — пробелами ровно по его ширине с общим
-                    // зазором, а не «три пробела на глаз»: ширина пробела
-                    // зависит от шрифта, и на другом масштабе подпись налезала
-                    // на квадратик.
-                    const float gap = EditorIcons::TextGap();
-                    const float spaceW = ImGui::CalcTextSize(" ").x;
-                    const int count = spaceW > 0.0f ? (int)std::ceil((box + gap) / spaceW) : 2;
-                    const bool picked =
-                        ImGui::MenuItem((std::string((size_t)count, ' ') + tint.Label).c_str());
-                    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
-                    const float x = at.x + count * spaceW - gap - box;
-                    const float y = std::floor(r0.y + ((r1.y - r0.y) - box) * 0.5f);
-                    ImGui::GetWindowDrawList()->AddRectFilled(
-                        ImVec2(x + 2.0f, y + 2.0f), ImVec2(x + box - 2.0f, y + box - 2.0f),
-                        ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
-                        3.0f);
-                    if (picked) foldercolors::Set(path, tint.Color);
-                }
-                ImGui::Separator();
-                if (EditorIcons::MenuItem("folder", T("No colour"))) foldercolors::Clear(path);
-                ImGui::EndMenu();
-            }
-        }
+        if (isDir) sage::editor::foldercolors::DrawPaletteMenu(path);
         if (EditorIcons::MenuItem("pencil", T("Rename"))) { m_renameTarget = path; m_error.clear(); }
         if (EditorIcons::MenuItem("trash", T("Delete"))) { m_deleteTargets = m_multi; }
 

@@ -316,7 +316,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + nine-slice, "
+                               << "render-stability + camera-preview + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2828,6 +2828,56 @@ bool EditorLayer::SelfTestSelection() {
                                 << icon(onlyMeta) << "'";
             ok = false;
         }
+        // ПАПКА С ФАЙЛАМИ, НО БЕЗ ПОДПАПОК — отдельно, потому что именно на ней
+        // дерево и расходилось с сеткой: заполненность там считалась по одним
+        // подпапкам, и папка с полусотней текстур выглядела в дереве пустой.
+        // Проверяем то, что рисуют ОБА места, — один и тот же FolderIcon.
+        {
+            const fs::path filesOnly = root / "files_only";
+            fs::create_directories(filesOnly, ec);
+            { std::ofstream(filesOnly / "a.png") << "x"; }
+            { std::ofstream(filesOnly / "b.png") << "x"; }
+            if (ok && icon(filesOnly) != "folder-full") {
+                LOG_ERROR("Editor") << "SELFTEST: папка с файлами без подпапок считается пустой";
+                ok = false;
+            }
+        }
+
+        // ЦВЕТНАЯ МЕТКА — и в сетке, и в дереве, из одного источника. Пока
+        // назначать её можно было только из сетки, в дереве она оставалась
+        // умолчанием; теперь оба места спрашивают foldercolors::Get, и проверка
+        // сторожит именно это — что метка НАЗНАЧАЕТСЯ и ЧИТАЕТСЯ.
+        if (ok) {
+            namespace foldercolors = sage::editor::foldercolors;
+            foldercolors::SetProject(root);
+            const glm::vec3 want(0.40f, 0.60f, 0.95f);
+            foldercolors::Set(full, want);
+            glm::vec3 got(0.0f);
+            if (!foldercolors::Get(full, got) || std::fabs(got.b - want.b) > 0.001f) {
+                LOG_ERROR("Editor") << "SELFTEST: цветная метка папки не назначилась";
+                ok = false;
+            }
+            // Метка переживает перезагрузку проекта: она лежит в файле проекта,
+            // а не в памяти сеанса. Цвет, живущий один запуск, — это цвет,
+            // который человек поставит второй раз и перестанет верить.
+            foldercolors::SetProject(fs::path{});
+            foldercolors::SetProject(root);
+            glm::vec3 reloaded(0.0f);
+            if (ok && (!foldercolors::Get(full, reloaded) ||
+                       std::fabs(reloaded.b - want.b) > 0.001f)) {
+                LOG_ERROR("Editor") << "SELFTEST: цветная метка папки не пережила перечитывание";
+                ok = false;
+            }
+            // Снятая метка не остаётся в файле.
+            foldercolors::Clear(full);
+            glm::vec3 cleared(0.0f);
+            if (ok && foldercolors::Get(full, cleared)) {
+                LOG_ERROR("Editor") << "SELFTEST: снятая метка папки осталась";
+                ok = false;
+            }
+            foldercolors::SetProject(m_project.Dir());  // возвращаем проект прогона
+        }
+
         // И оба значка обязаны быть в шрифте: имя без глифа рисуется заглушкой,
         // и разница между пустой и полной папкой пропадает снова.
         if (ok && (!EditorIcons::HasGlyph("folder") || !EditorIcons::HasGlyph("folder-full"))) {

@@ -1,5 +1,10 @@
 #include "FolderColors.h"
+#include "EditorIcons.h"
 #include "Localization.h"
+
+#include <cmath>
+
+#include "imgui.h"
 
 #include <map>
 #include <fstream>
@@ -118,6 +123,38 @@ void Rename(const fs::path& from, const fs::path& to) {
     g_colors.erase(it);
     g_colors[newKey] = color;
     Save();
+}
+
+void DrawPaletteMenu(const fs::path& folder) {
+    if (!ImGui::BeginMenu(T("Folder Colour"))) return;
+    for (const Tint& tint : Palette()) {
+            // Образец рядом с названием: цвет выбирают глазами, а
+            // список из восьми слов цвета не показывает.
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const float box = ImGui::GetTextLineHeight();
+            // Место под образец — пробелами ровно по его ширине с общим
+            // зазором, а не «три пробела на глаз»: ширина пробела
+            // зависит от шрифта, и на другом масштабе подпись налезала
+            // на квадратик.
+            const float gap = EditorIcons::TextGap();
+            const float spaceW = ImGui::CalcTextSize(" ").x;
+            const int count = spaceW > 0.0f ? (int)std::ceil((box + gap) / spaceW) : 2;
+            const bool picked =
+                ImGui::MenuItem((std::string((size_t)count, ' ') + tint.Label).c_str());
+            const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+            const float x = at.x + count * spaceW - gap - box;
+            const float y = std::floor(r0.y + ((r1.y - r0.y) - box) * 0.5f);
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                ImVec2(x + 2.0f, y + 2.0f), ImVec2(x + box - 2.0f, y + box - 2.0f),
+                ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
+                3.0f);
+            if (picked) Set(folder, tint.Color);
+        }
+        ImGui::Separator();
+        if (EditorIcons::MenuItem("folder", T("No colour"))) Clear(folder);
+    ImGui::Separator();
+    if (EditorIcons::MenuItem("folder", T("No colour"))) Clear(folder);
+    ImGui::EndMenu();
 }
 
 } // namespace sage::editor::foldercolors

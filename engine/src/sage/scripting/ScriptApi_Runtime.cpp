@@ -112,6 +112,27 @@ sol::object JsonToLua(const nlohmann::json& j, sol::state_view lua) {
     return sol::nil;
 }
 
+// Строчка слота для Lua. Одна на Slots() и Info(): меню и карточка показывают
+// одно и то же, и разойтись этим двум местам значило бы, что список говорит
+// одно, а карточка — другое.
+sol::table SlotInfoToLua(const sage::save::SlotInfo& s, sol::state_view lua) {
+    sol::table row = lua.create_table();
+    row["name"] = s.Name;
+    row["savedAt"] = s.SavedAtUnix;
+    row["version"] = s.Version;
+    row["bytes"] = (long long)s.Bytes;
+    row["compressed"] = s.Compressed;
+    row["broken"] = s.Broken;
+    // Метка — таблицей, а не строкой: игра клала её таблицей и ждёт обратно то
+    // же самое.
+    try {
+        row["meta"] = JsonToLua(nlohmann::json::parse(s.Meta), lua);
+    } catch (const std::exception&) {
+        row["meta"] = lua.create_table();
+    }
+    return row;
+}
+
 } // namespace
 
 // --- Сохранения игры: ПРОГРЕСС ИГРОКА ----------------------------------------
@@ -122,11 +143,32 @@ sol::object JsonToLua(const nlohmann::json& j, sol::state_view lua) {
 // сохранения лежат в пользовательском каталоге и пишутся через переименование,
 // — в sage/core/SaveGame.h.
 void ScriptEngine::RegisterSaveApi() {
+    // Третий аргумент — ВЕРСИЯ ЧИСЛОМ или ТАБЛИЦА настроек. Две формы, потому
+    // что девяти играм из десяти хватает версии, а десятой нужны метка слота и
+    // отказ от сжатия — и заводить ради неё второе имя функции значило бы
+    // развести два пути записи, которые однажды разойдутся.
+    //
+    //   sage.save.Write("main", data, 3)
+    //   sage.save.Write("main", data, { version = 3, compress = false,
+    //                                   meta = { chapter = "Пещера", playtime = 7200 } })
     Bind("save", "Write", "SaveGame",
-         [](const std::string& slot, sol::table data, sol::optional<int> version) -> bool {
+         [](const std::string& slot, sol::table data, sol::object options) -> bool {
              std::vector<const void*> open;
-             return sage::save::Write(slot, TableToJson(data, 0, open).dump(),
-                                      version.value_or(1));
+             sage::save::WriteOptions o;
+             if (options.is<int>()) {
+                 o.Version = options.as<int>();
+             } else if (options.is<sol::table>()) {
+                 sol::table t = options.as<sol::table>();
+                 o.Version = t.get_or("version", 1);
+                 o.Compress = t.get_or("compress", true);
+                 o.KeepBackup = t.get_or("backup", true);
+                 sol::object meta = t["meta"];
+                 if (meta.is<sol::table>()) {
+                     std::vector<const void*> metaOpen;
+                     o.MetaJson = TableToJson(meta.as<sol::table>(), 0, metaOpen).dump();
+                 }
+             }
+             return sage::save::Write(slot, TableToJson(data, 0, open).dump(), o);
          });
 
     // Возвращает таблицу или nil. Именно nil, а не пустая таблица: «сохранения
@@ -155,6 +197,22 @@ void ScriptEngine::RegisterSaveApi() {
 
     Bind("save", "Exists", "HasSave",
          [](const std::string& slot) { return sage::save::Exists(slot); });
+
+    // Заголовок слота БЕЗ чтения прогресса: имя, время, версия, размер и метка.
+    // Ради карточки в меню «Продолжить» грузить мегабайты инвентаря незачем.
+    Bind("save", "Info", "SaveInfo", [this](const std::string& slot) -> sol::object {
+        sage::save::SlotInfo info;
+        if (!sage::save::ReadInfo(slot, info)) return sol::nil;
+        return SlotInfoToLua(info, m_lua);
+    });
+
+    // Откат на копию, которую оставила прошлая запись. Нужен ровно в том
+    // случае, ради которого копия и заводится: игра сохранилась в состояние, из
+    // которого не выбраться.
+    Bind("save", "HasBackup", "HasSaveBackup",
+         [](const std::string& slot) { return sage::save::HasBackup(slot); });
+    Bind("save", "RestoreBackup", "RestoreSaveBackup",
+         [](const std::string& slot) { return sage::save::RestoreBackup(slot); });
     Bind("save", "Delete", "DeleteSave",
          [](const std::string& slot) { return sage::save::Delete(slot); });
     Bind("save", "Directory", "SaveDirectory", []() { return sage::save::Directory(); });
@@ -165,12 +223,7 @@ void ScriptEngine::RegisterSaveApi() {
         sol::table out = m_lua.create_table();
         int i = 1;
         for (const sage::save::SlotInfo& s : sage::save::Slots()) {
-            sol::table row = m_lua.create_table();
-            row["name"] = s.Name;
-            row["savedAt"] = s.SavedAtUnix;
-            row["version"] = s.Version;
-            row["bytes"] = (long long)s.Bytes;
-            out[i++] = row;
+            out[i++] = SlotInfoToLua(s, m_lua);
         }
         return out;
     });
