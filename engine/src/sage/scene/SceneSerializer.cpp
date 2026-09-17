@@ -15,10 +15,20 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/scene/SceneLegacyUI.h"
 #include "sage/ui/UIPart.h"
+#include "sage/ui/UISerialize.h"
 #include "sage/scene/SceneJson.h"
+#include "sage/scene/SceneValueJson.h"
 #include "sage/scene/SceneMigrations.h"
 
 using json = nlohmann::json;
+
+// Переменные и связи в JSON — общий словарь (см. SceneValueJson.h).
+using sage::scene::BindingsFromJson;
+using sage::scene::BindingsToJson;
+using sage::scene::ValueFromJson;
+using sage::scene::ValueToJson;
+using sage::scene::VarsFromJson;
+using sage::scene::VarsToJson;
 
 // Векторы в JSON и обратно — общий словарь формата (см. SceneJson.h).
 using sage::scene::Vec2FromJson;
@@ -807,279 +817,6 @@ static sage::scene::LegacyElement ParseUIElement(const json& uj) {
 // события и связь кнопки — это одно и то же значение под именем. Раньше каждая
 // такая вещь заводила бы свою пару «запись/чтение», и рано или поздно они
 // расходятся: поле сохраняется, но не читается, и молча сбрасывается.
-static json ValueToJson(const sage::vars::Value& v) {
-    using K = sage::vars::Kind;
-    json j;
-    // ВИД ПИШЕТСЯ ИМЕНЕМ, а не номером: номер сломался бы от вставки нового
-    // вида в середину перечисления, и старые сцены прочитались бы наизнанку.
-    j["kind"] = sage::vars::KindId(v.Type());
-    switch (v.Type()) {
-        case K::Bool: j["value"] = v.AsBool(); break;
-        case K::Int: j["value"] = v.AsInt(); break;
-        case K::Float: j["value"] = v.AsFloat(); break;
-        case K::String: j["value"] = v.AsString(); break;
-        case K::Vec2: j["value"] = Vec2ToJson(v.AsVec2()); break;
-        case K::Vec3: j["value"] = Vec3ToJson(v.AsVec3()); break;
-        case K::Color: j["value"] = Vec4ToJson(v.AsVec4()); break;
-        case K::Entity: j["value"] = v.AsEntity().Id; break;
-        case K::Asset: j["value"] = v.AsAsset().Path; break;
-    }
-    return j;
-}
-
-static sage::vars::Value ValueFromJson(const json& j) {
-    using K = sage::vars::Kind;
-    K kind = K::Bool;
-    if (!j.is_object() || !j.contains("kind") || !j["kind"].is_string() ||
-        !sage::vars::ParseKind(j["kind"].get<std::string>(), kind)) {
-        return sage::vars::Value();
-    }
-    const json v = j.value("value", json());
-    switch (kind) {
-        case K::Bool: return sage::vars::Value(v.is_boolean() ? v.get<bool>() : false);
-        case K::Int: return sage::vars::Value(v.is_number() ? v.get<int>() : 0);
-        case K::Float: return sage::vars::Value(v.is_number() ? v.get<float>() : 0.0f);
-        case K::String:
-            return sage::vars::Value(v.is_string() ? v.get<std::string>() : std::string());
-        case K::Vec2: return sage::vars::Value(Vec2FromJson(v, glm::vec2(0.0f)));
-        case K::Vec3: return sage::vars::Value(v.is_object() ? Vec3FromJson(v) : glm::vec3(0.0f));
-        case K::Color: return sage::vars::Value(Vec4FromJson(v, glm::vec4(1.0f)));
-        case K::Entity:
-            return sage::vars::Value(sage::vars::EntityRef{v.is_number() ? v.get<int>() : 0});
-        case K::Asset:
-            return sage::vars::Value(
-                sage::vars::AssetRef{v.is_string() ? v.get<std::string>() : std::string()});
-    }
-    return sage::vars::Value();
-}
-
-static json VarsToJson(const sage::vars::Table& table) {
-    // МАССИВ, а не объект: порядок переменных — это порядок в инспекторе, и
-    // объект JSON его не обещает.
-    json out = json::array();
-    for (const sage::vars::Var& var : table.All()) {
-        json j = ValueToJson(var.Data);
-        j["name"] = var.Name;
-        // Описание пишется, только если оно есть: у переменной, заведённой
-        // руками, его нет, и пустые ключи в файле — это шум.
-        if (!var.Label.empty()) j["label"] = var.Label;
-        if (!var.Tooltip.empty()) j["tooltip"] = var.Tooltip;
-        if (var.Min != var.Max) { j["min"] = var.Min; j["max"] = var.Max; }
-        if (var.Declared) j["declared"] = true;
-        out.push_back(std::move(j));
-    }
-    return out;
-}
-
-static void VarsFromJson(const json& in, sage::vars::Table& table) {
-    table.Clear();
-    if (!in.is_array()) return;
-    for (const json& j : in) {
-        if (!j.is_object() || !j.contains("name") || !j["name"].is_string()) continue;
-        sage::vars::Var var;
-        var.Name = j["name"].get<std::string>();
-        var.Data = ValueFromJson(j);
-        var.Label = j.value("label", std::string());
-        var.Tooltip = j.value("tooltip", std::string());
-        var.Min = j.value("min", 0.0f);
-        var.Max = j.value("max", 0.0f);
-        var.Declared = j.value("declared", false);
-        table.Put(var);
-    }
-}
-
-static json BindingsToJson(const sage::events::Bindings& bindings) {
-    json out = json::array();
-    for (const sage::events::Binding& b : bindings) {
-        json j;
-        j["trigger"] = b.Trigger;
-        if (!b.Event.empty()) j["event"] = b.Event;
-        if (b.Target.Valid()) j["target"] = b.Target.Id;
-        if (!b.Method.empty()) j["method"] = b.Method;
-        j["arg"] = ValueToJson(b.Arg);
-        if (!b.Enabled) j["enabled"] = false;
-        out.push_back(std::move(j));
-    }
-    return out;
-}
-
-static void BindingsFromJson(const json& in, sage::events::Bindings& out) {
-    out.clear();
-    if (!in.is_array()) return;
-    for (const json& j : in) {
-        if (!j.is_object()) continue;
-        sage::events::Binding b;
-        b.Trigger = j.value("trigger", std::string());
-        b.Event = j.value("event", std::string());
-        b.Target.Id = j.value("target", 0);
-        b.Method = j.value("method", std::string());
-        if (j.contains("arg")) b.Arg = ValueFromJson(j["arg"]);
-        b.Enabled = j.value("enabled", true);
-        out.push_back(std::move(b));
-    }
-}
-
-// Одно поле части -> json.
-static void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
-    using K = sage::ui::PartField::Kind;
-    switch (f.Type) {
-        case K::Bool: out[f.Key] = sage::ui::FieldAs<bool>(data, f); break;
-        case K::Int: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
-        case K::Float: out[f.Key] = sage::ui::FieldAs<float>(data, f); break;
-        case K::String: out[f.Key] = sage::ui::FieldAs<std::string>(data, f); break;
-        case K::Color:
-        case K::Vec4: out[f.Key] = Vec4ToJson(sage::ui::FieldAs<glm::vec4>(data, f)); break;
-        case K::Vec2: out[f.Key] = Vec2ToJson(sage::ui::FieldAs<glm::vec2>(data, f)); break;
-        // Перечисление пишется ЧИСЛОМ: имена значений живут в таблице полей и
-        // нужны человеку, а файл должен пережить их переименование.
-        case K::Enum: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
-        case K::Bindings:
-            out[f.Key] = BindingsToJson(sage::ui::FieldAs<sage::events::Bindings>(data, f));
-            break;
-    }
-}
-
-static void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
-    if (!in.contains(f.Key)) return; // нет ключа — остаётся значение по умолчанию
-    using K = sage::ui::PartField::Kind;
-    const json& v = in[f.Key];
-    switch (f.Type) {
-        case K::Bool:
-            if (v.is_boolean()) sage::ui::FieldAs<bool>(data, f) = v.get<bool>();
-            break;
-        case K::Int:
-            if (v.is_number()) sage::ui::FieldAs<int>(data, f) = v.get<int>();
-            break;
-        case K::Float:
-            if (v.is_number()) sage::ui::FieldAs<float>(data, f) = v.get<float>();
-            break;
-        case K::String:
-            if (v.is_string()) sage::ui::FieldAs<std::string>(data, f) = v.get<std::string>();
-            break;
-        case K::Color:
-        case K::Vec4:
-            sage::ui::FieldAs<glm::vec4>(data, f) =
-                Vec4FromJson(v, sage::ui::FieldAs<glm::vec4>(data, f));
-            break;
-        case K::Vec2:
-            sage::ui::FieldAs<glm::vec2>(data, f) =
-                Vec2FromJson(v, sage::ui::FieldAs<glm::vec2>(data, f));
-            break;
-        case K::Enum:
-            // Значение из файла зажимается по списку имён: чужой номер (файл от
-            // будущей версии) не должен превращаться в мусорное перечисление.
-            if (v.is_number()) {
-                const int n = v.get<int>();
-                if (f.EnumCount <= 0 || (n >= 0 && n < f.EnumCount))
-                    sage::ui::FieldAs<int>(data, f) = n;
-            }
-            break;
-        case K::Bindings:
-            BindingsFromJson(v, sage::ui::FieldAs<sage::events::Bindings>(data, f));
-            break;
-    }
-}
-
-static void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
-    const sage::ui::Element* t = reg.try_get<sage::ui::Element>(e);
-    if (!t) return;
-    json& uj = j["ui"];
-
-    // Раскладка — не компонент, а сам элемент: без неё элемента нет, и в
-    // реестре компонентов ей делать нечего.
-    json& tj = uj["element"];
-    tj["anchor"] = (int)t->Anchor;
-    tj["stretch"] = (int)t->Mode;
-    tj["position"] = Vec2ToJson(t->Position);
-    tj["size"] = Vec2ToJson(t->Size);
-    tj["margin"] = Vec4ToJson(t->Margin);
-    tj["pivot"] = Vec2ToJson(t->Pivot);
-    tj["rotation"] = t->Rotation;
-    tj["order"] = t->Order;
-    tj["visible"] = t->Visible;
-    tj["active"] = t->Active;
-    tj["locked"] = t->Locked;
-    // Resolved не пишется: это след последнего кадра, а не настройка.
-
-    for (const sage::ui::PartType& p : sage::ui::Parts()) {
-        if (!p.Fields || !p.Has || !p.Has(reg, e)) continue;  // без полей писать нечего
-        const void* data = p.Get(reg, e);
-        if (!data) continue;
-        json& pj = uj[p.Id];
-        for (const sage::ui::PartField& f : *p.Fields) SaveField(pj, data, f);
-    }
-}
-
-// Загружает текстуру картинки элемента (рантайм-поле, в файл не пишется).
-static void ResolveUIImage(sage::ui::Image& im) {
-    if (im.Path.empty()) return;
-    // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
-    // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
-    im.Tex = im.PixelArt ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
-                                                                 /*mipmaps=*/false)
-                         : ResourceManager::Instance().GetTexture(im.Path);
-}
-
-static void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
-    // Старая запись (плоский элемент с "kind") — разбираем прежним разбором и
-    // раскладываем по компонентам. Отдельная ветка, а не «дочитать
-    // недостающее»: это два разных формата, и делать вид, что один плавно
-    // переходит в другой, значит получить третий.
-    if (uj.contains("kind")) {
-        sage::scene::Decompose(ParseUIElement(uj), reg, e);
-        if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
-        return;
-    }
-
-    sage::ui::Element t;
-    // Ключ "element", а прежде был "transform": раскладка стала частью самого
-    // элемента, и старое имя врало бы про устройство. Прежний ключ читается —
-    // сцены, сделанные до переименования, обязаны открываться.
-    const json* tjp = uj.contains("element")   ? &uj["element"]
-                      : uj.contains("transform") ? &uj["transform"]
-                                                 : nullptr;
-    if (tjp) {
-        const json& tj = *tjp;
-        const int anchor = tj.value("anchor", (int)t.Anchor);
-        if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
-        const int stretch = tj.value("stretch", (int)t.Mode);
-        if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Element::Stretch)stretch;
-        // "offset" -> "position", "layer" -> "order": те же значения под именами,
-        // которыми их зовут люди.
-        t.Position = Vec2FromJson(tj.value("position", tj.value("offset", json::object())),
-                                  t.Position);
-        t.Size = Vec2FromJson(tj.value("size", json::object()), t.Size);
-        if (tj.contains("margin")) t.Margin = Vec4FromJson(tj["margin"], t.Margin);
-        t.Pivot = Vec2FromJson(tj.value("pivot", json::object()), t.Pivot);
-        t.Rotation = tj.value("rotation", t.Rotation);
-        t.Order = tj.value("order", tj.value("layer", t.Order));
-        t.Visible = tj.value("visible", t.Visible);
-        t.Active = tj.value("active", t.Active);
-        t.Locked = tj.value("locked", t.Locked);
-    }
-    reg.emplace_or_replace<sage::ui::Element>(e, t);
-
-    // Части — по реестру. Ключ, которого реестр не знает (часть из другой
-    // сборки игры), ПРОПУСКАЕТСЯ молча и остаётся в файле нетронутым: терять
-    // чужие данные при открытии сцены нельзя.
-    for (const sage::ui::PartType& p : sage::ui::Parts()) {
-        if (!p.Fields || !p.Id || !uj.contains(p.Id)) continue;
-        p.Add(reg, e);
-        void* data = p.GetMutable(reg, e);
-        if (!data) continue;
-        const json& pj = uj[p.Id];
-        for (const sage::ui::PartField& f : *p.Fields) LoadField(pj, data, f);
-    }
-
-    // Картинке нужен рантайм-указатель на текстуру: путь в файле есть, а
-    // загрузить его — дело загрузчика сцены.
-    if (sage::ui::Image* im = reg.try_get<sage::ui::Image>(e)) ResolveUIImage(*im);
-}
-
-// Звуковой источник объекта (см. sage/audio/AudioComponents.h). Рантайм-поля
-// (дескриптор, «звучит», команда) в файл НЕ идут: это состояние партии, а не
-// свойство сцены, и сохранённое «сейчас звучит» означало бы, что сцена
-// открывается с уже играющим звуком, которого никто не запускал.
 static void SaveAudio(json& j, const AudioSourceComponent& a) {
     json& aj = j["audio"];
     aj["clip"] = a.Clip;
@@ -1353,7 +1090,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(e)) SaveAudio(j, *au);
         if (const VarsComponent* vc = reg.try_get<VarsComponent>(e))
             if (!vc->Values.Empty()) j["vars"] = VarsToJson(vc->Values);
-        SaveUIComponents(j, reg, e);
+        // Элемент и его компоненты — общей записью (см. sage/ui/UISerialize.h):
+        // тот же формат, каким интерфейс ложится в отдельный ресурс .sageui.
+        if (json ui; sage::ui::SaveElement(ui, reg, e)) j["ui"] = std::move(ui);
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -1474,8 +1213,21 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             if (!vc.Values.Empty())
                 obj.Registry()->emplace_or_replace<VarsComponent>(obj.Entity(), std::move(vc));
         }
-        if (j.contains("ui"))
-            LoadUIComponents(j["ui"], *obj.Registry(), obj.Entity());
+        if (j.contains("ui")) {
+            const json& uj = j["ui"];
+            // Старая запись (плоский элемент с "kind") — история формата СЦЕН,
+            // и разбирается она здесь, а не в общем читателе элемента: это два
+            // разных формата, и делать вид, что один плавно переходит в другой,
+            // значит получить третий.
+            if (uj.contains("kind")) {
+                sage::scene::Decompose(ParseUIElement(uj), *obj.Registry(), obj.Entity());
+                if (sage::ui::Image* im =
+                        obj.Registry()->try_get<sage::ui::Image>(obj.Entity()))
+                    sage::ui::ResolveImageTexture(*im);
+            } else {
+                sage::ui::LoadElement(uj, *obj.Registry(), obj.Entity());
+            }
+        }
 
         // Пересоздаём GPU-ресурс на основе описания
         if (mr.Ref.type == MeshRef::Type::Model) {

@@ -1,3 +1,4 @@
+#include <utility>
 #include "sage/ui/UI.h"
 
 #include <algorithm>
@@ -183,6 +184,15 @@ std::vector<Preset> BuildPresets() {
     };
 
     {
+        // ПУСТОЙ — тоже заготовка, и самая нужная. Элемент без единого
+        // компонента ничего не рисует, но им собирают всё остальное: якорь под
+        // группу, контейнер под раскладку, узел, который скрипт наполнит сам.
+        // Без него «создать просто элемент» приходилось делать, создав панель и
+        // сняв с неё заливку.
+        Preset& p = add("Empty");
+        p.Box.Size = {120.0f, 60.0f};
+    }
+    {
         Preset& p = add("Panel");
         p.Box.Size = {260.0f, 140.0f};
         p.HasFill = true;
@@ -200,7 +210,7 @@ std::vector<Preset> BuildPresets() {
         p.Children.push_back(TextChild("Текст", "Button"));
     }
     {
-        Preset& p = add("Label");
+        Preset& p = add("Text");
         p.Box.Size = {220.0f, 40.0f};
         p.HasLabel = true;
         p.LabelStyle.Text = "Text";
@@ -250,7 +260,7 @@ std::vector<Preset> BuildPresets() {
         // прямоугольник во всю высоту, а дорожка тонкая и по центру.
     }
     {
-        Preset& p = add("Input");
+        Preset& p = add("Input Field");
         p.Box.Size = {260.0f, 40.0f};
         p.HasFill = true;
         p.HasLabel = true;
@@ -319,6 +329,18 @@ const std::vector<std::string>& PresetNames() {
 const Preset* FindPreset(const std::string& name) {
     for (const Preset& p : Presets()) {
         if (p.Name == name) return &p;
+    }
+    // Прежние имена. Заготовки зовут по имени из меню, из скрипта и из
+    // самопроверки, и переименование «Label -> Text» не имеет права молча
+    // превратить рабочий вызов в «заготовка неизвестна».
+    static const std::pair<const char*, const char*> kRenamed[] = {
+        {"Label", "Text"},
+        {"Input", "Input Field"},
+    };
+    for (const auto& [was, now] : kRenamed) {
+        if (name != was) continue;
+        for (const Preset& p : Presets())
+            if (p.Name == now) return &p;
     }
     return nullptr;
 }
