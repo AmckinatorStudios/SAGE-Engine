@@ -179,7 +179,10 @@ const char* const kNames[] = {
     "trash", "copy", "paste", "save", "open", "plus", "eye", "eye-off", "lock", "unlock",
     "align-left", "align-center-x", "align-right",
     "align-top", "align-center-y", "align-bottom",
-    "color",
+    "color", "fit",
+    "anchor-tl", "anchor-tc", "anchor-tr",
+    "anchor-cl", "anchor-cc", "anchor-cr",
+    "anchor-bl", "anchor-bc", "anchor-br",
 };
 
 } // namespace

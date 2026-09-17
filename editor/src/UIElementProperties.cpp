@@ -63,6 +63,13 @@ void HintWrapped(const char* fmt, ...) {
 // из них соответствует нужному углу; сетка показывает это буквально — кнопка
 // стоит там же, где встанет элемент.
 bool DrawAnchorPicker(UIAnchor& anchor) {
+    // Порядок — тот же, что у UIAnchor (строка * 3 + столбец), и это не
+    // случайность: сетка кнопок и есть перечисление, разложенное по экрану.
+    static const char* const kAnchorIcons[9] = {
+        "anchor-tl", "anchor-tc", "anchor-tr",
+        "anchor-cl", "anchor-cc", "anchor-cr",
+        "anchor-bl", "anchor-bc", "anchor-br",
+    };
     bool changed = false;
     const float cell = ImGui::GetFrameHeight();
     ImGui::BeginGroup();
@@ -79,12 +86,12 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
                 changed = true;
             }
             if (active) ImGui::PopStyleColor();
-            // Точка внутри кнопки — в том углу, который эта кнопка и означает.
-            const float px = p0.x + cell * (0.25f + 0.25f * (float)col);
-            const float py = p0.y + cell * (0.25f + 0.25f * (float)row);
-            ImGui::GetWindowDrawList()->AddCircleFilled(
-                ImVec2(px, py), 2.5f,
-                ImGui::GetColorU32(active ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+            // Рисунок внутри кнопки — ИКОНКА НАБОРА: прямоугольник и плашка,
+            // прижатая к тому краю, который эта кнопка означает. Точка в углу,
+            // стоявшая здесь раньше, называла МЕСТО, но не говорила главного —
+            // что элемент к этому месту прижмётся, а не просто окажется рядом.
+            EditorIcons::Overlay(p0.x, p0.y, cell, kAnchorIcons[index],
+                                 EditorIcons::kThemeColor);
             ImGui::PopID();
         }
     }

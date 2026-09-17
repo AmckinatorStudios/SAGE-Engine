@@ -519,7 +519,8 @@ void EditorLayer::OnAttach() {
         static const char* const kHeadless[] = {
             "SAGE_SCREENSHOT_AT_FRAME", "SAGE_EDITOR_SHOW_SETTINGS", "SAGE_EDITOR_SHOW_PROFILER",
             "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
-            "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_COLLIDER_MODE", "SAGE_EDITOR_SELECT_ENTITY",
+            "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_UI_PREVIEW",    "SAGE_EDITOR_COLLIDER_MODE",
+            "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
@@ -607,6 +608,14 @@ void EditorLayer::OnAttach() {
     }
     if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
         m_tools.UI.Backdrop = (float)std::atof(b);
+    // Предпросмотр вкладкой лежит ЗА холстом, и снять его headless иначе
+    // нечем: щёлкнуть по вкладке в прогоне некому, а проверять тут надо
+    // именно картинку — «кадр не по центру» в состоянии не видно.
+    if (std::getenv("SAGE_EDITOR_UI_PREVIEW")) {
+        m_headlessProject = true;
+        SetWorkspace(EditorWorkspace::Interface);
+        m_uiPreview.RequestFocus();
+    }
     if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_headlessProject = true; m_tools.ColliderEdit = true; }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_headlessProject = true;
@@ -1301,6 +1310,7 @@ void EditorLayer::OnRender() {
     // Многооконность проверяется здесь, а не в RunSelfTest: там нет кадра, а
     // окно системы заводит платформа — после UpdatePlatformWindows.
     CheckMultiWindowFrame();
+    CheckWorkspaceDockFrame();
 
     TakeAutoScreenshot(app);
 }
