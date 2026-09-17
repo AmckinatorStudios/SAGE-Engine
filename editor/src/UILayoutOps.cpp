@@ -35,12 +35,12 @@ struct Target {
 std::vector<Target> Collect(EditorHost& host) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
-    const glm::vec2 frame = host.UITools().FrameSize;
+    const glm::vec2 frame = host.Tools().UI.FrameSize;
     const std::vector<sage::ui::ElementRect> solved =
         sage::ui::SolveSceneRects(scene, (int)frame.x, (int)frame.y, /*includeHidden=*/true);
 
     std::vector<Target> out;
-    for (int id : host.Selection()) {
+    for (int id : host.Selection().All()) {
         GameObject obj = scene.Get(id);
         if (!obj.Valid()) continue;
         if (!reg.all_of<sage::ui::Transform>(obj.Entity())) continue;
@@ -81,7 +81,7 @@ void Align(EditorHost& host, sage::ui::AlignEdge edge) {
     // панели»). Несколько — по первичному, то есть по последнему кликнутому:
     // это единственный элемент, про который человек точно знает, что он
     // остался на месте.
-    GameObject primaryObj = scene.Get(host.SelectedId());
+    GameObject primaryObj = scene.Get(host.Selection().Primary());
     const entt::entity primary = primaryObj.Valid() ? primaryObj.Entity() : entt::null;
 
     UIRect target = targets.front().Parent;
@@ -152,7 +152,7 @@ void SetAnchorKeepingPlace(EditorHost& host, UIAnchor anchor) {
 void BringIntoView(EditorHost& host) {
     std::vector<Target> targets = Collect(host);
     if (targets.empty()) return;
-    const glm::vec2 frame = host.UITools().FrameSize;
+    const glm::vec2 frame = host.Tools().UI.FrameSize;
     Scene& scene = host.CurrentScene();
 
     host.PushUndoSnapshot();
@@ -169,7 +169,7 @@ void BringIntoView(EditorHost& host) {
 void SnapSelectionToGrid(EditorHost& host) {
     std::vector<Target> targets = Collect(host);
     if (targets.empty()) return;
-    const float step = host.UITools().Snap.GridStep;
+    const float step = host.Tools().UI.Snap.GridStep;
     if (step <= 0.0f) return;
     Scene& scene = host.CurrentScene();
 

@@ -1,5 +1,5 @@
 #pragma once
-#include "EditorHost.h"
+#include "EditorTypes.h"
 #include "UIToolSettings.h"
 
 // ---------------------------------------------------------------------------

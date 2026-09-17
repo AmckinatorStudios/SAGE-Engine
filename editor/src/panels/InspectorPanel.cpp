@@ -402,9 +402,9 @@ void InspectorPanel::DrawObjectSection(EditorHost& host) {
 
     // Мультивыделение: правим первичную, но подсказываем размер набора
     // (гизмо двигает все; Delete/Duplicate — по всем выбранным).
-    if (host.Selection().size() > 1) {
+    if (host.Selection().All().size() > 1) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), T("%zu selected — editing the primary one"),
-                           host.Selection().size());
+                           host.Selection().All().size());
         ImGui::Separator();
     }
     DrawEntityProperties(host);

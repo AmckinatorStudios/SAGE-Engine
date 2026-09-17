@@ -112,7 +112,7 @@ void EditorLayer::RegisterCommands() {
     const auto view = std::string(T("View"));
 
     auto hasProject = [this] { return m_project.Loaded(); };
-    auto hasSelection = [this] { return SelectedId() != 0; };
+    auto hasSelection = [this] { return m_selection.Primary() != 0; };
 
     m_commands.Add({"scene.save", T("Save Scene"), scene, "Ctrl+S", "scene", hasProject,
                     [this] { SaveCurrentScene(); }});
@@ -155,9 +155,9 @@ void EditorLayer::RegisterCommands() {
     m_commands.Add({"window.templates", T("Project templates..."), window, "", "folder", {},
                     [this] { m_showTemplates = true; }});
     m_commands.Add({"window.settings", T("Game Settings..."), window, "", "project", {},
-                    [this] { m_showSettings = true; }});
+                    [this] { m_panels[EditorPanel::Settings] = true; }});
     m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
-                    [this] { ShowAllPanels(); m_rebuildDockLayout = true; }});
+                    [this] { m_panels.Restore(); m_rebuildDockLayout = true; }});
 
     // Оформление — командами тоже: тема меняется без похода в меню, и это тот
     // случай, когда её меняют часто (свет в комнате не постоянен).
@@ -329,23 +329,9 @@ void EditorLayer::OnAttach() {
     // Отчёт о прошлом падении — ищем сразу после установки обработчика: если
     // прошлый запуск умер, человек должен узнать об этом первым делом, а не
     // после того, как заново соберёт сцену.
-    FindCrashReport();
-
-    // --- Восстановление после прошлого падения ---
-    // Файл на диске — единственный след прошлого запуска: спрашивать некого,
-    // процесс тот уже мёртв. Предложение показывается ОДИН раз; отказ удаляет
-    // файл, иначе редактор спрашивал бы про него до конца времён.
-    {
-        std::error_code ec;
-        for (const char* candidate : {"sage-recovered.sage", "sage-autosave.sage"}) {
-            if (fs::exists(candidate, ec)) {
-                m_recoveryFile = candidate;
-                m_recoveryPrompt = true;
-                LOG_WARN("Editor") << "Найден файл восстановления: " << candidate;
-                break;
-            }
-        }
-    }
+    // Отчёт о падении и файл восстановления — один поиск: и то, и другое след
+    // прошлого запуска, и спрашивать о них некого, тот процесс уже мёртв.
+    m_recovery.ScanOnStartup();
 
     // --- Превью-рендер: тени/Viewport/Game/PostFX/гизмо — в EditorSceneRenderer ---
     m_renderer.Init();
@@ -553,14 +539,14 @@ void EditorLayer::OnAttach() {
     }
 
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
-    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_showSettings = true; }
-    if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_showProfiler = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_panels[EditorPanel::Settings] = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
     if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_headlessProject = true; m_showIconSheet = true; }
     // Редактор интерфейса открывается в прогоне самопроверки нарочно: он живёт
     // ОТДЕЛЬНЫМ окном системы (см. PanelWindows.h), а закрытая панель окна не
     // заводит — проверять в кадре было бы нечего. На снимок главного окна это
     // не влияет: окно у него своё.
-    if (std::getenv("SAGE_EDITOR_SELFTEST")) m_showUIEditor = true;
+    if (std::getenv("SAGE_EDITOR_SELFTEST")) m_panels[EditorPanel::UIEditor] = true;
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
         m_headlessProject = true;
         m_pendingDialog = dlg;   // откроется в кадре, на уровне окна-хоста
@@ -617,7 +603,7 @@ void EditorLayer::OnAttach() {
     // Открыть редактор интерфейса при старте — для скриншот-проверок.
     if (std::getenv("SAGE_EDITOR_UI_EDITOR")) {
         m_headlessProject = true;
-        m_showUIEditor = true;
+        m_panels[EditorPanel::UIEditor] = true;
         m_uiEditor.RequestFocus();
     }
     if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
@@ -626,7 +612,7 @@ void EditorLayer::OnAttach() {
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_headlessProject = true;
         GameObject obj = m_scene->FindByName(name);
-        if (obj.Valid()) SetSelectedId(obj.Id());
+        if (obj.Valid()) m_selection.SetPrimary(obj.Id());
         else LOG_WARN("Editor") << "SAGE_EDITOR_SELECT_ENTITY: нет сущности с именем " << name;
     }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
@@ -639,9 +625,9 @@ void EditorLayer::OnAttach() {
     // «Все панели закрыты» с кнопкой возврата.
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
         m_headlessProject = true;
-        m_showHierarchy = m_showInspector = m_showEnvironment = m_showUIEditor = false;
-        m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
-        m_showProfiler = false;
+        m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = m_panels[EditorPanel::UIEditor] = false;
+        m_panels[EditorPanel::Viewport] = m_panels[EditorPanel::Game] = m_panels[EditorPanel::Console] = m_panels[EditorPanel::Assets] = false;
+        m_panels[EditorPanel::Profiler] = false;
     }
     // Сущность СО ВСЕМИ компонентами сразу — для жёсткой проверки инспектора.
     //
@@ -673,7 +659,7 @@ void EditorLayer::OnAttach() {
         ParticleEmitterComponent em;
         em.Config = ParticlePresets::Registry()[0].Make();
         reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
-        SetSelectedId(all.Id());
+        m_selection.SetPrimary(all.Id());
         LOG_INFO("Editor") << "SAGE_EDITOR_ALL_COMPONENTS: сущность со всеми компонентами создана";
     }
     // Показать в инспекторе ПУБЛИЧНЫЕ ПЕРЕМЕННЫЕ и СВЯЗИ СОБЫТИЙ на живом
@@ -795,7 +781,7 @@ void EditorLayer::OnAttach() {
         if (const char* pick = std::getenv("SAGE_EDITOR_SELECT_ENTITY"))
             wanted = m_scene->FindByName(pick);
         if (!wanted.Valid()) wanted = m_scene->FindByName("Дверь");
-        if (wanted.Valid()) SetSelectedId(wanted.Id());
+        if (wanted.Valid()) m_selection.SetPrimary(wanted.Id());
         LOG_INFO("Editor") << "SAGE_EDITOR_VARS_DEMO: дверь, ключ и кнопка со связями созданы";
     }
 
@@ -854,7 +840,7 @@ void EditorLayer::OnAttach() {
         if (green.Valid()) {
             m_scene->Registry().emplace_or_replace<ScriptComponent>(
                 green.Entity(), ScriptComponent{"assets/scripts/spin.lua"});
-            SetSelectedId(green.Id());
+            m_selection.SetPrimary(green.Id());
         }
         StartPlay();
     }
@@ -921,23 +907,16 @@ void EditorLayer::OnUpdate(float dt) {
     //
     // Только в режиме правки: во время Play сцена живёт по игровым правилам, и
     // сохранять её состояние значило бы записывать середину игры вместо уровня.
-    if (m_autosaveInterval > 0.0f && m_sceneDirty && m_scene &&
-        !m_play.Active()) {
-        m_autosaveTimer += dt;
-        if (m_autosaveTimer >= m_autosaveInterval) {
-            m_autosaveTimer = 0.0f;
-            try {
-                SceneSerializer::Save(*m_scene, "sage-autosave.sage");
-                m_lastAutosave = "sage-autosave.sage";
-                LOG_DEBUG("Editor") << "Автосохранение: sage-autosave.sage";
-            } catch (const std::exception& e) {
-                // Не сумели — не беда для кадра, но сказать надо: молчащее
-                // автосохранение хуже отсутствующего, на него рассчитывают.
-                LOG_WARN("Editor") << "Автосохранение не удалось: " << e.what();
-                m_autosaveInterval = 0.0f;   // не долбить диск каждую минуту
-            }
-        }
-    }
+    m_recovery.Tick(dt, m_sceneDirty && m_scene != nullptr, m_play.Active(),
+                    [this](const std::string& path) {
+                        try {
+                            SceneSerializer::Save(*m_scene, path);
+                            return true;
+                        } catch (const std::exception& e) {
+                            LOG_WARN("Editor") << "Автосохранение не удалось: " << e.what();
+                            return false;
+                        }
+                    });
 
     // Логика правки — событийная, живёт в панелях. Единственный
     // "симуляционный" тик — Play: скрипты сущностей, пока не пауза.
@@ -1264,14 +1243,14 @@ void EditorLayer::OnRender() {
         draw();
         panelwindows::After(id);
     };
-    panel("Hierarchy", m_showHierarchy, [&] { m_hierarchy.Draw(*this, &m_showHierarchy); });
-    panel("Inspector", m_showInspector, [&] { m_inspector.Draw(*this, &m_showInspector); });
-    panel("Lighting", m_showEnvironment, [&] { m_environment.Draw(*this, &m_showEnvironment); });
-    panel("UIEditor", m_showUIEditor, [&] { m_uiEditor.Draw(*this, &m_showUIEditor); });
-    panel("Viewport", m_showViewport, [&] { m_viewport.Draw(*this, &m_showViewport); });
-    panel("Game", m_showGame, [&] { m_game.Draw(*this, &m_showGame); });
-    panel("Console", m_showConsole, [&] { m_console.Draw(&m_showConsole); });
-    panel("Assets", m_showAssets, [&] { m_assets.Draw(*this, &m_showAssets); });
+    panel("Hierarchy", m_panels[EditorPanel::Hierarchy], [&] { m_hierarchy.Draw(*this, &m_panels[EditorPanel::Hierarchy]); });
+    panel("Inspector", m_panels[EditorPanel::Inspector], [&] { m_inspector.Draw(*this, &m_panels[EditorPanel::Inspector]); });
+    panel("Lighting", m_panels[EditorPanel::Environment], [&] { m_environment.Draw(*this, &m_panels[EditorPanel::Environment]); });
+    panel("UIEditor", m_panels[EditorPanel::UIEditor], [&] { m_uiEditor.Draw(*this, &m_panels[EditorPanel::UIEditor]); });
+    panel("Viewport", m_panels[EditorPanel::Viewport], [&] { m_viewport.Draw(*this, &m_panels[EditorPanel::Viewport]); });
+    panel("Game", m_panels[EditorPanel::Game], [&] { m_game.Draw(*this, &m_panels[EditorPanel::Game]); });
+    panel("Console", m_panels[EditorPanel::Console], [&] { m_console.Draw(&m_panels[EditorPanel::Console]); });
+    panel("Assets", m_panels[EditorPanel::Assets], [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets]); });
     m_plugins.ImGuiAll();
 
     // Полосы долгой работы — ПОВЕРХ панелей и до стартового окна: карточка в

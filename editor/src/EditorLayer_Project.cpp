@@ -179,7 +179,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
     m_history.Clear();
     m_scene = std::make_unique<Scene>("Untitled");
-    SetSelectedId(-1);
+    m_selection.SetPrimary(-1);
     m_scenePath.clear();
     m_sceneDirty = false;
 
@@ -360,7 +360,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // силуэте (кайма строится из силуэта меша — точна для любой формы).
         GameObject sel = m_scene->FindByName("Cone");
         if (!sel.Valid()) sel = m_scene->FindByName("Green Cube");
-        if (sel.Valid()) SetSelectedId(sel.Id());
+        if (sel.Valid()) m_selection.SetPrimary(sel.Id());
     }
     UpdateWindowTitle();
 }
@@ -370,7 +370,7 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
     try {
         m_scene = SceneSerializer::Load(path.string());
         m_history.Clear();
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
         m_scenePath = path;
         m_sceneDirty = false;
         LOG_INFO("Editor") << "Scene loaded: " << path.string();
@@ -401,40 +401,8 @@ bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
 //  момент падения — короткое системное окно (см. CrashHandler.cpp), а весь
 //  текст — здесь, при следующем запуске, когда его есть чем показать.
 // ============================================================================
-void EditorLayer::FindCrashReport() {
-    std::error_code ec;
-    fs::path newest;
-    fs::file_time_type newestTime{};
-    m_crashReportCount = 0;
-    for (const fs::directory_entry& e : fs::directory_iterator(".", ec)) {
-        if (!e.is_regular_file()) continue;
-        const std::string name = sage::PathToUtf8(e.path().filename());
-        if (name.rfind("sage-crash-", 0) != 0 || e.path().extension() != ".txt") continue;
-        ++m_crashReportCount;
-        const fs::file_time_type t = fs::last_write_time(e.path(), ec);
-        if (newest.empty() || t > newestTime) {
-            newest = e.path();
-            newestTime = t;
-        }
-    }
-    if (newest.empty()) return;
-
-    std::ifstream in(newest, std::ios::binary);
-    if (!in.is_open()) return;
-    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    // Отчёт короткий по устройству, но файл на диске мог оказаться каким угодно:
-    // читаем с ограничением, чтобы случайный чужой sage-crash-*.txt на гигабайт
-    // не занял память.
-    if (text.size() > 512 * 1024) text.resize(512 * 1024);
-
-    m_crashReportPath = sage::PathToUtf8(newest);
-    m_crashReportText = std::move(text);
-    m_crashPrompt = true;
-    LOG_WARN("Editor") << "Прошлый запуск завершился аварийно, отчёт: " << m_crashReportPath;
-}
-
 void EditorLayer::DrawCrashReport() {
-    if (!m_crashPrompt) return;
+    if (!m_recovery.HasCrashReport()) return;
     // Одно имя на оба вызова и просьба ОДИН раз — см. DrawRecoveryPrompt.
     const char* const kId = T("Previous session crashed" "###crash-report");
     if (!ImGui::IsPopupOpen(kId)) ImGui::OpenPopup(kId);
@@ -449,24 +417,25 @@ void EditorLayer::DrawCrashReport() {
                                "report written at that moment — it is what a developer needs to "
                                "find the cause."));
     ImGui::Spacing();
-    ImGui::TextDisabled("%s", m_crashReportPath.c_str());
-    if (m_crashReportCount > 1)
-        ImGui::TextDisabled(T("Reports next to the editor: %d"), (int)m_crashReportCount);
+    ImGui::TextDisabled("%s", m_recovery.CrashReportPath().c_str());
+    if (m_recovery.CrashReportCount() > 1)
+        ImGui::TextDisabled(T("Reports next to the editor: %d"), (int)m_recovery.CrashReportCount());
     ImGui::Spacing();
 
     // Текст — в поле ввода только для чтения, а не Text(): так его можно
     // выделить мышью, прокрутить и скопировать кусок, а не только целиком.
     const float footer = ImGui::GetFrameHeightWithSpacing() * 1.6f;
-    ImGui::InputTextMultiline("##crashtext", m_crashReportText.data(), m_crashReportText.size() + 1,
+    ImGui::InputTextMultiline("##crashtext", m_recovery.CrashReportText().data(),
+                              m_recovery.CrashReportText().size() + 1,
                               ImVec2(-FLT_MIN, -footer), ImGuiInputTextFlags_ReadOnly);
 
     if (ImGui::Button(T("Copy report"), ImVec2(160, 0))) {
-        ImGui::SetClipboardText(m_crashReportText.c_str());
+        ImGui::SetClipboardText(m_recovery.CrashReportText().c_str());
         SetStatusMessage(T("Crash report copied to the clipboard"));
     }
     ImGui::SameLine();
     if (ImGui::Button(T("Copy path"), ImVec2(140, 0))) {
-        ImGui::SetClipboardText(m_crashReportPath.c_str());
+        ImGui::SetClipboardText(m_recovery.CrashReportPath().c_str());
         SetStatusMessage(T("Path copied to the clipboard"));
     }
     ImGui::SameLine();
@@ -474,21 +443,20 @@ void EditorLayer::DrawCrashReport() {
         // Файл ОСТАЁТСЯ. Отчёт — единственный след падения, и стирать его
         // кнопкой «закрыть» значило бы отнимать у человека возможность его
         // прислать, когда он до этого дойдёт.
-        m_crashPrompt = false;
+        m_recovery.DismissCrashReport();
         ImGui::CloseCurrentPopup();
     }
     ImGui::SameLine();
     if (EditorTheme::ColoredButton(T("Delete report"), EditorTheme::Role::Danger, ImVec2(150, 0))) {
         std::error_code ec;
-        fs::remove(sage::PathFromUtf8(m_crashReportPath), ec);
-        m_crashPrompt = false;
+        m_recovery.DeleteCrashReport();
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
 }
 
 void EditorLayer::DrawRecoveryPrompt() {
-    if (!m_recoveryPrompt) return;
+    if (!m_recovery.HasRecoveryFile()) return;
     // ИМЯ ОКНА — ЦЕЛИКОМ И ОДНО И ТО ЖЕ В ОБОИХ ВЫЗОВАХ, вместе с «###».
     //
     // Здесь стоял OpenPopup(T("Restore scene?")) — БЕЗ «###». По-английски это
@@ -499,7 +467,7 @@ void EditorLayer::DrawRecoveryPrompt() {
     //
     // И это не «диалог не показался». Открытое окно, которое никто не рисует,
     // навсегда остаётся в стеке всплывающих окон ImGui, а раз модалка не
-    // нарисована, m_recoveryPrompt не сбросить — значит OpenPopup зовётся
+    // нарисована, предложение не сбросить — значит OpenPopup зовётся
     // КАЖДЫЙ КАДР. Каждый такой вызов закрывает всё, что человек открыл выше
     // (ImGui::OpenPopupEx -> ClosePopupToLevel), и меню «Файл» захлопывается в
     // том же кадре, в котором открылось. Снаружи это выглядит как «редактор
@@ -516,30 +484,28 @@ void EditorLayer::DrawRecoveryPrompt() {
     if (ImGui::BeginPopupModal(kId, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted(T("The previous session seems to have crashed"));
         ImGui::Spacing();
-        ImGui::Text(T("Found file: %s"), m_recoveryFile.c_str());
+        ImGui::Text(T("Found file: %s"), m_recovery.RecoveryFile().c_str());
         ImGui::TextDisabled("%s", T("It did not overwrite your scene — this is a separate copy."));
         ImGui::Spacing();
         if (ImGui::Button(T("Open the copy"), ImVec2(150, 0))) {
-            if (LoadSceneFromFile(m_recoveryFile)) {
+            if (LoadSceneFromFile(m_recovery.RecoveryFile())) {
                 // Путь сцены НЕ ставим: иначе первое же Ctrl+S записало бы
                 // восстановленное поверх файла восстановления, а не сцены.
                 m_scenePath.clear();
                 m_sceneDirty = true;
                 UpdateWindowTitle();
             }
-            m_recoveryPrompt = false;
+            m_recovery.DismissRecovery();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button(T("Keep the file"), ImVec2(150, 0))) {
-            m_recoveryPrompt = false;
+            m_recovery.DismissRecovery();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button(T("Delete"), ImVec2(110, 0))) {
-            std::error_code ec;
-            fs::remove(m_recoveryFile, ec);
-            m_recoveryPrompt = false;
+            m_recovery.DeleteRecoveryFile();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

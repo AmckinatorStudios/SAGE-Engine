@@ -315,22 +315,6 @@ void EditorLayer::DrawStatusBar(float height) {
     ImGui::PopStyleVar();
 }
 
-bool EditorLayer::AnyPanelVisible() const {
-    return m_showHierarchy || m_showInspector || m_showEnvironment || m_showUIEditor ||
-           m_showViewport || m_showGame ||
-           m_showConsole || m_showAssets || m_showProfiler;
-}
-
-void EditorLayer::ShowAllPanels() {
-    m_showHierarchy = m_showInspector = m_showEnvironment = true;
-    // Панель вёрстки в «показать все» НЕ входит: она инструмент под задачу, а
-    // не часть постоянной раскладки, и открывать её вместе со всем остальным
-    // значит отдать ей место у человека, который сейчас собирает сцену.
-    m_showViewport = m_showGame = m_showConsole = m_showAssets = true;
-    // Профайлер сюда НЕ входит: он служебный и по умолчанию закрыт, а «вернуть
-    // панели» не должно означать «открыть то, чего человек не открывал».
-}
-
 void EditorLayer::DrawEmptyDockHint(float minX, float minY, float maxX, float maxY) {
     const char* title = T("All panels are closed");
     const char* body = T("Windows menu returns any panel, or restore the default layout.");
@@ -370,7 +354,7 @@ void EditorLayer::DrawEmptyDockHint(float minX, float minY, float maxX, float ma
     ImGui::Spacing();
     centered(buttonWidth);
     if (ImGui::Button(action, ImVec2(buttonWidth, buttonHeight))) {
-        ShowAllPanels();
+        m_panels.Restore();
         m_rebuildDockLayout = true; // панель могла быть закрыта вместе со своим узлом
     }
     ImGui::End();
@@ -491,7 +475,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
             if (ImGui::MenuItem(T("Reset Layout"))) {
-                ShowAllPanels();
+                m_panels.Restore();
                 m_rebuildDockLayout = true;
             }
             ImGui::MenuItem(T("Show Grid"), nullptr, &m_tools.ShowGrid);
@@ -702,13 +686,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // Layer.h): проверять флаг GLFW прямо здесь бесполезно, цикл выходит
     // раньше, чем этот код выполнится.
     DrawUnsavedPrompt();
-    m_settingsPanel.Draw(*this, m_showSettings);
-    m_inputPanel.Draw(*this, m_showInput);
+    m_settingsPanel.Draw(*this, m_panels[EditorPanel::Settings]);
+    m_inputPanel.Draw(*this, m_panels[EditorPanel::Input]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
     m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
     m_nineSlice.Draw(*this, m_showNineSlice);
-    m_profiler.Draw(&m_showProfiler);
+    m_profiler.Draw(&m_panels[EditorPanel::Profiler]);
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
     DrawAboutWindow();
@@ -720,7 +704,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // результат его же крестиков, а не поломка. Подсказка рисуется ПОСЛЕ
     // окна-хоста и отдельным окном: внутри хоста её накрывает фон пустого
     // док-узла, который ImGui кладёт в фоновый канал списка отрисовки.
-    if (!AnyPanelVisible()) DrawEmptyDockHint(dockMin.x, dockMin.y, dockMax.x, dockMax.y);
+    if (!m_panels.AnyVisible()) DrawEmptyDockHint(dockMin.x, dockMin.y, dockMax.x, dockMax.y);
 
     // Глобальные хоткеи (когда не печатаем в поле ввода).
     ImGuiIO& io = ImGui::GetIO();

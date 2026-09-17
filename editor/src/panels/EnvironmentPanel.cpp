@@ -42,7 +42,7 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
             lc.Color = {1.0f, 0.95f, 0.85f};
             lc.Intensity = 1.0f;
             scene.Registry().emplace<LightComponent>(sun.Entity(), lc);
-            host.SetSelectedId(sun.Id());
+            host.Selection().SetPrimary(sun.Id());
         }
         return;
     }
@@ -67,7 +67,7 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
     ImGui::TextDisabled(T("Time of day = rotation of the object \"%s\""),
                         name ? name->Name.c_str() : "?");
     ImGui::SameLine();
-    if (ImGui::Button(T("Select"))) host.SetSelectedId(id ? id->Id : 0);
+    if (ImGui::Button(T("Select"))) host.Selection().SetPrimary(id ? id->Id : 0);
 }
 
 // --- НЕБО ------------------------------------------------------------------

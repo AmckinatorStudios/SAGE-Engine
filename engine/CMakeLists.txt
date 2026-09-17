@@ -130,6 +130,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/builtin/Collide.cpp
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneSerializer.cpp
+    src/sage/scene/SceneMigrations.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/scripting/ScriptApi_Math.cpp
     src/sage/scripting/ScriptApi_Net.cpp
