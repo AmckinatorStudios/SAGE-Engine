@@ -31,7 +31,14 @@ struct Default {
 // в окне размером с ладонь нельзя: ошибки раскладки видны только в натуральную
 // величину.
 const Default kDefaults[] = {
-    {"UIEditor",   true,  1280.0f, 820.0f},
+    // Панелей, отстыкованных ПО УМОЛЧАНИЮ, больше нет: вёрстка стала отдельным
+    // рабочим пространством со своими панелями внутри главного окна, и
+    // выталкивать её наружу незачем. Возможность никуда не делась — её включают
+    // галочкой в меню «Окно», и проверка самотестом это делает явно.
+    {"InterfaceViewport",  false, 1280.0f, 820.0f},
+    {"InterfaceHierarchy", false,  380.0f, 720.0f},
+    {"InterfaceInspector", false,  460.0f, 820.0f},
+    {"InterfacePreview",   false,  900.0f, 560.0f},
     {"Viewport",   false, 1100.0f, 700.0f},
     {"Game",       false, 1100.0f, 700.0f},
     {"Hierarchy",  false,  380.0f, 720.0f},
@@ -39,6 +46,7 @@ const Default kDefaults[] = {
     {"Lighting",   false,  460.0f, 720.0f},
     {"Assets",     false,  900.0f, 520.0f},
     {"Console",    false,  900.0f, 420.0f},
+    {"Profiler",   false,  720.0f, 520.0f},
 };
 
 struct State {

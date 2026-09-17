@@ -228,3 +228,51 @@ TEST(Interface_old_preset_names_still_resolve) {
 
     CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
 }
+
+// ===========================================================================
+//  Операции дерева: копирование поддерева и перенос между родителями.
+//
+//  Буфер обмена — это тот же ресурс .sageui, и проверяется здесь именно то,
+//  ради чего он сделан описанием, а не списком сущностей: скопированное
+//  переживает удаление оригинала.
+// ===========================================================================
+
+TEST(Interface_a_copied_subtree_outlives_the_original) {
+    // Список сущностей — это буфер, который ломается ровно тогда, когда им
+    // собирались воспользоваться: скопировал панель, удалил, вставил — и
+    // вставлять нечего.
+    Scene scene("S");
+    const std::vector<entt::entity> roots = BuildSample(scene);
+    const Interface copied = sage::ui::Capture(scene, roots);
+
+    // Удаляем оригинал целиком.
+    for (auto e : roots) {
+        const IdComponent* id = scene.Registry().try_get<IdComponent>(e);
+        if (id) scene.RemoveObject(id->Id);
+    }
+    CHECK_FALSE(FindByName(scene, "Panel").Valid());
+
+    // И вставляем из описания.
+    const std::vector<entt::entity> pasted = sage::ui::Instantiate(scene, copied);
+    CHECK_EQ((int)pasted.size(), 1);
+    CHECK_TRUE(FindByName(scene, "Panel").Valid());
+    CHECK_TRUE(FindByName(scene, "Caption").Valid());
+}
+
+TEST(Interface_pasting_into_an_element_makes_it_the_parent) {
+    // «Скопировал кнопку, выбрал панель, вставил — кнопка внутри панели»: это
+    // то, чего ждут, и проверка сторожит именно связь родителя.
+    Scene scene("S");
+    const std::vector<entt::entity> roots = BuildSample(scene);
+    const Interface copied = sage::ui::Capture(scene, roots);
+
+    GameObject host = scene.CreateEmptyObject("Host");
+    scene.Registry().emplace<sage::ui::Element>(host.Entity());
+
+    const std::vector<entt::entity> pasted = sage::ui::Instantiate(scene, copied, host.Entity());
+    // Вставка под родителя не отдаёт корней наружу: корень теперь не корень.
+    CHECK_TRUE(pasted.empty());
+    const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(host.Entity());
+    CHECK_TRUE(h != nullptr);
+    if (h) CHECK_EQ((int)h->Children.size(), 1);
+}

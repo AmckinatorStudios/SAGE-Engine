@@ -339,15 +339,31 @@ void EditorLayer::CheckMultiWindowFrame() {
     if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
     // Не в первых кадрах: окно платформы появляется не в том же кадре, в
     // котором ImGui решил завести вьюпорт.
-    if (m_frameCounter < 6) return;
+    // Панель отстыковывается САМОЙ проверкой, а не берётся отстыкованной по
+    // умолчанию. Умолчаний, где панель живёт своим окном, больше нет (вёрстка
+    // стала пространством внутри главного окна), а проверять надо ВОЗМОЖНОСТЬ:
+    // именно она ломается молча — галочка стоит, состояние верное, а окна на
+    // экране нет.
+    if (m_frameCounter < 3) return;
+    if (m_frameCounter < 10) {
+        // ПРОФИЛИРОВЩИК, а не панель раскладки. Он закрыт по умолчанию и ни в
+        // одном доке не лежит, поэтому его отстыковка ничего не двигает. Панель
+        // из раскладки на её месте оставляла бы дыру в доке, соседи
+        // растягивались бы на освободившееся место, и следующая проверка —
+        // щелчок по вьюпорту — целилась бы в координаты, которые за это время
+        // переехали.
+        m_panels[EditorPanel::Profiler] = true;
+        panelwindows::SetDetached("Profiler", true);
+        return;   // окно платформы появляется не в том же кадре
+    }
     m_multiWindowChecked = true;
 
     const ImGuiID mainId = ImGui::GetMainViewport()->ID;
-    const ImGuiWindow* ui = ImGui::FindWindowByName("UIEditor");
+    const ImGuiWindow* ui = ImGui::FindWindowByName("Profiler");
     const ImGuiWindow* docked = ImGui::FindWindowByName("Hierarchy");
 
     if (ui == nullptr || ui->Viewport == nullptr) {
-        LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — окна редактора интерфейса нет в кадре";
+        LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — окна панели нет в кадре";
         return;
     }
     const bool own = ui->Viewport->ID != mainId;
@@ -362,8 +378,12 @@ void EditorLayer::CheckMultiWindowFrame() {
     const bool singleTitle = (ui->Flags & ImGuiWindowFlags_NoTitleBar) != 0;
     const bool dockedStayed = docked == nullptr || docked->Viewport == nullptr ||
                               docked->Viewport->ID == mainId;
+    // Убираем за собой: панель закрывается и возвращается в док, чтобы на
+    // экране после проверки не осталось плавающего окна поверх вьюпорта.
+    panelwindows::SetDetached("Profiler", false);
+    m_panels[EditorPanel::Profiler] = false;
     if (own && real && decorated && singleTitle && dockedStayed) {
-        LOG_INFO("Editor") << "MULTIWINDOW: OK — редактор интерфейса живёт своим окном системы "
+        LOG_INFO("Editor") << "MULTIWINDOW: OK — панель живёт своим окном системы "
                            << "(рамка системы, один заголовок)";
         return;
     }
@@ -407,6 +427,42 @@ void EditorLayer::TickInputProbe() {
     // пропустить кадр, как «нажатие» и «отпускание» происходят в разных точках:
     // редактор видит не щелчок, а протяжку через полэкрана.
     if (m_probeStep > 0) io.AddMousePosEvent(m_probePos.x, m_probePos.y);
+    // ВЬЮПОРТ ДЕРЖИМ ВПЕРЕДИ КАЖДЫЙ КАДР, пока идёт проверка мыши.
+    //
+    // Он делит центральный узел дока с игровым окном, и вкладка там ОДНА
+    // активная. Кто выходил вперёд последним, тот и получает щелчок: игровое
+    // окно выводит себя вперёд при каждом запуске игры (GamePanel::RequestFocus),
+    // а прогон запускает её не раз. Просьба «выйди вперёд» на одном кадре этого
+    // не решает — к моменту щелчка её уже перебили.
+    // ПАНЕЛЬ, ПО КОТОРОЙ СЕЙЧАС ЩЁЛКАЮТ, ДЕРЖИМ ВПЕРЕДИ КАЖДЫЙ КАДР.
+    //
+    // Панели делят узлы дока вкладками, и активная там ОДНА: вьюпорт делит
+    // центр с игровым окном, панель ассетов — низ с консолью. Кто вышел вперёд
+    // последним, тот и получает щелчок, а выходят вперёд по своим поводам
+    // (игровое окно — при каждом запуске игры, и прогон запускает её не раз).
+    // Просьба «выйди вперёд» на одном кадре этого не решает: к моменту щелчка
+    // её уже перебили. Человек в этот момент просто смотрит на нужную панель —
+    // здесь это выражено явно.
+    //
+    // Окно ищется ПО ИДЕНТИФИКАТОРУ, а не по имени: имя панели переводится
+    // («Assets» / «Ассеты»), и SetWindowFocus по строке в русском редакторе не
+    // находил ничего — молча, потому что «окна с таким именем нет» ImGui не
+    // считает поводом сказать хоть слово. Идентификатор — часть после «###», и
+    // он от языка не зависит (ровно ради этого «###» в именах и стоит).
+    //
+    // ПОКА ОТКРЫТА МОДАЛКА — НЕ ТРОГАЕМ ФОКУС. ImGui::FocusWindow закрывает
+    // всплывающие окна, оказавшиеся поверх того, кого выводят вперёд: просьба
+    // «выйди вперёд, панель ассетов» каждый кадр гасила вопрос «удалить файл?»
+    // на следующем же кадре после его появления. Человек, увидев вопрос, на
+    // другую панель не переключается.
+    auto focusPanel = [](const char* id) {
+        if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return;
+        if (ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr(id))) ImGui::FocusWindow(w);
+    };
+    if (m_probeStep >= 0 && m_workspace == EditorWorkspace::Scene) {
+        if (m_probeStep <= 8) focusPanel("Viewport");
+        else if (m_probeStep >= 21) focusPanel("Assets");
+    }
     if (m_probeWait > 0) { --m_probeWait; return; }
 
     const ImVec2 mn = m_viewport.ViewMin();
@@ -415,6 +471,12 @@ void EditorLayer::TickInputProbe() {
 
     auto fail = [&](const char* what) {
         LOG_ERROR("Editor") << "VIEWPORT_INPUT: FAIL — " << what;
+        LOG_ERROR("Editor") << "PROBE_DIAG: шаг " << m_probeStep << " прост " << (int)m_workspace
+                            << " фокус " << (ImGui::GetCurrentContext()->NavWindow
+                                                 ? ImGui::GetCurrentContext()->NavWindow->Name : "-")
+                            << " под курсором " << (ImGui::GetCurrentContext()->HoveredWindow
+                                                 ? ImGui::GetCurrentContext()->HoveredWindow->Name : "-")
+                            << " курсор " << m_probePos.x << "," << m_probePos.y;
         m_probeFailed = true;
     };
     // Щелчок = положение + нажатие; отпускание — отдельным кадром: редактор
@@ -428,12 +490,19 @@ void EditorLayer::TickInputProbe() {
 
     switch (m_probeStep) {
         case 0: {
-            // ВЬЮПОРТ — ВПЕРЁД И БЕЗ ЧУЖОГО ОКНА СВЕРХУ. Панель редактора
-            // интерфейса на время самопроверки открыта и живёт ОТДЕЛЬНЫМ окном
-            // системы (см. CheckMultiWindowFrame), а в координатах экрана оно
-            // накрывает вид: щелчок доставался ему, а не сцене. Дожидаемся, пока
-            // проверка многооконности отработает, закрываем панель и выводим
-            // вкладку вперёд.
+            // ВЬЮПОРТ — ВПЕРЁД И БЕЗ ЧУЖОГО ОКНА СВЕРХУ.
+            //
+            // Проверка многооконности отстыковывает панель ассетов на несколько
+            // кадров и возвращает её обратно (см. CheckMultiWindowFrame). Пока
+            // панель снаружи, нижний узел дока пуст, центральный растянут — то
+            // есть ВЬЮПОРТ СТОИТ НЕ ТАМ, где он будет через кадр. Щёлкать по
+            // координатам в этот момент значит целиться в место, которое
+            // сейчас переедет, и получать три одинаковых «щелчок ничего не
+            // сделал» подряд.
+            //
+            // Поэтому ждём не только окончания проверки, но и того, чтобы
+            // раскладка устоялась: возврат панели в док занимает несколько
+            // кадров (panelwindows::Settle).
             if (!m_multiWindowChecked) { m_probeWait = 1; return; }
             // МОДАЛЬНОЕ ОКНО СЪЕДАЕТ ВСЕ ЩЕЛЧКИ, и проверка мыши под ним
             // осмысленна не больше, чем нажатие на выключенный экран. Такое
@@ -445,9 +514,15 @@ void EditorLayer::TickInputProbe() {
                 m_probeStep = -1;
                 return;
             }
-            m_panels[EditorPanel::UIEditor] = false;
+            // И В ПРОСТРАНСТВЕ СЦЕНЫ. Проверка щёлкает по вьюпорту сцены и по
+            // списку её объектов, а шаг «каталог объектов» выше создаёт элемент
+            // интерфейса — и уводит редактор в пространство вёрстки, где ни
+            // того, ни другого окна попросту нет. Три подряд «щелчок ничего не
+            // сделал» означали ровно это.
+            SetWorkspace(EditorWorkspace::Scene);
+            m_panels[EditorPanel::InterfaceViewport] = false;
             m_viewport.RequestFocus();
-            m_probeWait = 3;
+            m_probeWait = 12;
             break;
         }
         case 1: {
@@ -603,7 +678,14 @@ void EditorLayer::TickInputProbe() {
             press(m_assets.TileCenter(0));
             break;
         }
-        case 23: release(); break;
+        case 23:
+            release();
+            // ФОКУС ИДЁТ ЗА ЩЕЛЧКОМ НЕ В ТОТ ЖЕ КАДР. Delete в панели ассетов
+            // срабатывает, только когда работают именно с ней, и нажатие в
+            // кадре отпускания приходило в панель, которая ещё не считалась
+            // активной. Даём фокусу дойти.
+            m_probeWait = 3;
+            break;
         case 24: {
             if (m_assets.SelectionSet().empty()) { fail("щелчок по карточке не выбрал файл"); break; }
             io.AddKeyEvent(ImGuiKey_Delete, true);
@@ -5566,15 +5648,11 @@ bool EditorLayer::SelfTestTools() {
     // пустом доке, — возвращает каждую панель.
     if (ok) {
         const bool visibleBefore = m_panels.AnyVisible();
-        m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = false;
-        m_panels[EditorPanel::Viewport] = m_panels[EditorPanel::Game] = m_panels[EditorPanel::Console] = m_panels[EditorPanel::Assets] = false;
-        m_panels[EditorPanel::Profiler] = false;
-        // Панель вёрстки — тоже панель, и AnyPanelVisible её считает. В списке
-        // её не было, потому что до сих пор ни один шаг самопроверки её не
-        // открывал; шаг «каталог объектов» открывает (создание элемента
-        // интерфейса ведёт в редактор интерфейса), и «закрыли всё» переставало
-        // быть правдой.
-        m_panels[EditorPanel::UIEditor] = false;
+        // Закрываем ВСЁ одним вызовом, а не перечислением: список панелей
+        // растёт, и забытая в нём новая означает, что проверка проверяет не то,
+        // что проверяла. Ровно это и случилось, когда вёрстка стала отдельным
+        // пространством с четырьмя своими панелями.
+        m_panels.CloseAll();
         const bool visibleAfterClose = m_panels.AnyVisible();
         m_panels.Restore();
         const bool restored = m_panels[EditorPanel::Hierarchy] && m_panels[EditorPanel::Inspector] && m_panels[EditorPanel::Environment] &&
@@ -5607,7 +5685,7 @@ bool EditorLayer::SelfTestTools() {
             {EditorPanel::Profiler, &m_panels[EditorPanel::Profiler], "Profiler"},
             {EditorPanel::Game, &m_panels[EditorPanel::Game], "Game"},
             {EditorPanel::Viewport, &m_panels[EditorPanel::Viewport], "Viewport"},
-            {EditorPanel::UIEditor, &m_panels[EditorPanel::UIEditor], "UI Editor"},
+            {EditorPanel::InterfaceViewport, &m_panels[EditorPanel::InterfaceViewport], "Interface canvas"},
             {EditorPanel::Settings, &m_panels[EditorPanel::Settings], "Settings"},
         };
         for (const Mapping& m : mapping) {
@@ -5639,32 +5717,36 @@ bool EditorLayer::SelfTestTools() {
     //      на второй монитор. Проверяется прямо: после Before у следующего окна
     //      обязан стоять этот флаг — и обязан НЕ стоять у панели, живущей в
     //      доке, иначе в отдельное окно уедут все подряд.
-    //   2) РЕДАКТОР ИНТЕРФЕЙСА отделён изначально (в нём дерево, холст,
-    //      свойства и инструменты разом — во вкладке центрального дока холсту
-    //      остаётся треть экрана, а верстают именно по холсту).
-    //   3) ПАМЯТЬ МЕЖДУ ЗАПУСКАМИ: состояние живёт в настройках редактора, иначе
+    //   2) ПАМЯТЬ МЕЖДУ ЗАПУСКАМИ: состояние живёт в настройках редактора, иначе
     //      расстановку окон пришлось бы собирать заново каждый запуск.
-    //   4) ПУТЬ НАЗАД: «собрать все окна в главное» возвращает ВСЕ, включая
+    //   3) ПУТЬ НАЗАД: «собрать все окна в главное» возвращает ВСЕ, включая
     //      уехавшее на монитор, которого больше нет, — его иначе не достать.
+    //
+    // ОТСТЫКОВАННЫХ ПО УМОЛЧАНИЮ ПАНЕЛЕЙ БОЛЬШЕ НЕТ, и проверка это учитывает:
+    // раньше редактор интерфейса открывался своим окном, потому что во вкладке
+    // центрального дока его холсту оставалась треть экрана. Теперь вёрстка —
+    // отдельное рабочее пространство со своими панелями, и выталкивать её
+    // наружу незачем. Значит проверять надо ВОЗМОЖНОСТЬ, а не умолчание:
+    // панель отстыковывается здесь же, явно.
     if (ok) {
         namespace prefs = sage::editor::prefs;
         // Настройки общие с живым редактором, поэтому состояние возвращается
         // как было: прогон не имеет права переставить человеку окна.
-        const bool hadUi = panelwindows::Detached("UIEditor");
+        const bool hadInspector = panelwindows::Detached("InterfaceInspector");
         const bool hadViewport = panelwindows::Detached("Viewport");
 
         panelwindows::ResetToDefaults();
-        if (!panelwindows::Detached("UIEditor") || panelwindows::Detached("Viewport")) {
-            LOG_ERROR("Editor") << "SELFTEST: по умолчанию редактор интерфейса обязан быть "
-                                << "отдельным окном, а вьюпорт — нет (интерфейс "
-                                << panelwindows::Detached("UIEditor") << ", вьюпорт "
+        if (panelwindows::Detached("InterfaceInspector") || panelwindows::Detached("Viewport")) {
+            LOG_ERROR("Editor") << "SELFTEST: по умолчанию панели живут в доке (свойства "
+                                << panelwindows::Detached("InterfaceInspector") << ", вьюпорт "
                                 << panelwindows::Detached("Viewport") << ")";
             ok = false;
         }
         // Флаг вьюпорта — то самое, без чего окно слипается с главным.
         if (ok) {
             ImGuiContext* ctx = ImGui::GetCurrentContext();
-            panelwindows::Before("UIEditor");
+            panelwindows::SetDetached("InterfaceInspector", true);
+            panelwindows::Before("InterfaceInspector");
             const bool detachedHasFlag =
                 (ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasWindowClass) != 0 &&
                 (ctx->NextWindowData.WindowClass.ViewportFlagsOverrideSet &
@@ -5691,7 +5773,7 @@ bool EditorLayer::SelfTestTools() {
             const bool saved = prefs::GetBool("window.detached.Hierarchy", false);
             panelwindows::AttachAll();
             const bool allBack = !panelwindows::Detached("Hierarchy") &&
-                                 !panelwindows::Detached("UIEditor");
+                                 !panelwindows::Detached("InterfaceInspector");
             const bool cleared = !prefs::GetBool("window.detached.Hierarchy", true);
             if (!saved || !allBack || !cleared) {
                 LOG_ERROR("Editor") << "SELFTEST: состояние отдельных окон не сохраняется "
@@ -5702,7 +5784,7 @@ bool EditorLayer::SelfTestTools() {
         }
 
         panelwindows::SetDetached("Hierarchy", false);
-        panelwindows::SetDetached("UIEditor", hadUi);
+        panelwindows::SetDetached("InterfaceInspector", hadInspector);
         panelwindows::SetDetached("Viewport", hadViewport);
     }
 

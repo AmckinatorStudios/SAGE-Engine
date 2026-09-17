@@ -1,5 +1,4 @@
-#include "../PanelWindows.h"
-#include "UIEditorPanel.h"
+#include "InterfaceViewportPanel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,17 +8,18 @@
 
 #include "imgui.h"
 
-#include "EditorHost.h"
-#include "EditorIcons.h"
+#include "../EditorHost.h"
+#include "../EditorIcons.h"
 #include "../Localization.h"
-#include "../UIElementProperties.h"
+#include "../PanelWindows.h"
 #include "../Project.h"
+#include "../UIElementProperties.h"
 #include "../UILayoutOps.h"
+#include "../ui/UI.h"
 #include "sage/core/Config.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
-#include "../ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 
@@ -125,13 +125,8 @@ void GameFrameSize(EditorHost& host, int& outW, int& outH) {
 
 } // namespace
 
-// ============================================================================
-//  Верхняя строка: что относится к самому холсту
-// ============================================================================
-void UIEditorPanel::DrawTopBar(EditorHost& host) {
+void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     UIToolSettings& tools = host.Tools().UI;
-
-    DrawCreateMenu(host);
 
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -204,150 +199,8 @@ void UIEditorPanel::DrawTopBar(EditorHost& host) {
 // ============================================================================
 //  Создание элементов
 // ============================================================================
-void UIEditorPanel::DrawCreateMenu(EditorHost& host) {
-    // Кнопка с выпадающим списком заготовок. Заготовки — движковые
-    // (sage::ui::PresetNames): что такое «кнопка», знает движок, а не редактор.
-    if (EditorIcons::Button("plus", T("Element"), T("Add an interface element"))) {
-        ImGui::OpenPopup("##ui_create");
-    }
-    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope).
-    Sage::UI::MenuScope createMenu;
-    if (ImGui::BeginPopup("##ui_create")) {
-        ImGui::TextDisabled("%s", T("New element"));
-        ImGui::Separator();
-        for (const std::string& name : ui::PresetNames()) {
-            if (ImGui::MenuItem(name.c_str())) {
-                host.PushUndoSnapshot();
-                GameObject created = host.CreateUIEntity(name);
-                if (created.Valid()) host.Selection().SetPrimary(created.Id());
-            }
-        }
-        ImGui::Separator();
-        Hint(T("It becomes a child of the selected element."));
-        ImGui::EndPopup();
-    }
-}
 
-// ============================================================================
-//  Дерево элементов
-// ============================================================================
-void UIEditorPanel::DrawTreeNode(EditorHost& host, Scene& scene, int id, int depth) {
-    GameObject obj = scene.Get(id);
-    if (!obj.Valid()) return;
-    entt::registry& reg = scene.Registry();
-    const entt::entity e = obj.Entity();
-    ui::Element* xf = reg.try_get<ui::Element>(e);
-    if (!xf) return;
-
-    ImGui::PushID(id);
-
-    // Глазок — ПЕРВЫМ, а не в свойствах: спрятать мешающую панель, чтобы
-    // добраться до того, что под ней, — самое частое действие в вёрстке.
-    const bool wasVisible = xf->Visible;
-    if (EditorIcons::IconOnlyButton("eye", wasVisible ? T("Hide") : T("Show"), wasVisible)) {
-        host.PushUndoSnapshot();
-        xf->Visible = !wasVisible;
-    }
-    ImGui::SameLine();
-
-    // Дети берутся из HierarchyComponent: у элемента без детей его просто нет.
-    std::vector<entt::entity> children;
-    if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e)) children = h->Children;
-    bool hasUiChildren = false;
-    for (entt::entity c : children)
-        if (reg.all_of<ui::Element>(c)) { hasUiChildren = true; break; }
-
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
-                               ImGuiTreeNodeFlags_DefaultOpen;
-    if (!hasUiChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    if (host.Selection().Contains(id)) flags |= ImGuiTreeNodeFlags_Selected;
-
-    // Выключенный элемент — серым: иначе «почему его не видно» решается
-    // перебором свойств.
-    if (!xf->Visible) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    const bool open = ImGui::TreeNodeEx("##node", flags, "%s", obj.Name().c_str());
-    if (!xf->Visible) ImGui::PopStyleColor();
-
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-        if (ImGui::GetIO().KeyCtrl) host.Selection().Toggle(id);
-        else host.Selection().SetPrimary(id);
-    }
-
-    // Порядок среди соседей — тут же, стрелками. Layer «больше — поверх», и
-    // объяснять это в свойствах отдельным числом дольше, чем показать местом
-    // в списке.
-    ImGui::SameLine(ImGui::GetContentRegionMax().x - 44.0f);
-    if (EditorIcons::IconOnlyButton("up", T("Bring forward"))) {
-        host.PushUndoSnapshot();
-        ++xf->Order;
-    }
-    ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("drop", T("Send backward"))) {
-        host.PushUndoSnapshot();
-        --xf->Order;
-    }
-
-    if (open && hasUiChildren) {
-        for (entt::entity c : children) {
-            if (!reg.all_of<ui::Element>(c)) continue;
-            const IdComponent* cid = reg.try_get<IdComponent>(c);
-            if (cid) DrawTreeNode(host, scene, cid->Id, depth + 1);
-        }
-        ImGui::TreePop();
-    }
-    ImGui::PopID();
-}
-
-void UIEditorPanel::DrawTree(EditorHost& host, float width) {
-    ImGui::BeginChild("##ui_tree", ImVec2(width, 0), ImGuiChildFlags_Borders);
-    Scene& scene = host.CurrentScene();
-    entt::registry& reg = scene.Registry();
-
-    ImGui::TextDisabled("%s", T("Elements"));
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Only interface entities are listed here.\n"
-                                  "The rest of the scene is in the Hierarchy."));
-    }
-    ImGui::Separator();
-
-    // Корни: элементы, у которых нет родителя-элемента. Именно они якорятся к
-    // экрану, остальные — к своему родителю.
-    int roots = 0;
-    auto view = reg.view<ui::Element>();
-    for (entt::entity e : view) {
-        const entt::entity parent = scene.ParentOf(e);
-        if (parent != entt::null && reg.all_of<ui::Element>(parent)) continue;
-        const IdComponent* id = reg.try_get<IdComponent>(e);
-        if (!id) continue;
-        ++roots;
-        DrawTreeNode(host, scene, id->Id, 0);
-    }
-    if (roots == 0) {
-        ImGui::Spacing();
-        Hint(T("There are no interface elements yet. Add one with the Element button above."));
-    }
-
-    // Удаление — внизу и только по выделенному: в дереве это же действие
-    // рядом с каждой строкой превратило бы список в поле мин.
-    ImGui::Separator();
-    ImGui::BeginDisabled(SelectedUICount(host) == 0);
-    if (EditorIcons::Button("trash", T("Delete"), T("Delete the selected elements")))
-        host.DeleteSelected();
-    ImGui::SameLine();
-    if (EditorIcons::Button("copy", T("Duplicate"), T("Duplicate the selected elements")))
-        host.DuplicateSelected();
-    ImGui::EndDisabled();
-
-    ImGui::EndChild();
-}
-
-// ============================================================================
-//  Холст: игровой кадр в разрешении игры
-// ============================================================================
-void UIEditorPanel::DrawCanvas(EditorHost& host) {
+void InterfaceViewportPanel::DrawCanvas(EditorHost& host) {
     UIToolSettings& tools = host.Tools().UI;
 
     int gw = 0, gh = 0;
@@ -458,142 +311,21 @@ void UIEditorPanel::DrawCanvas(EditorHost& host) {
     ImGui::EndChild();
 }
 
-// ============================================================================
-//  Правая колонка: свойства и инструменты вёрстки
-// ============================================================================
-void UIEditorPanel::DrawAlignTools(EditorHost& host) {
-    const int count = SelectedUICount(host);
 
-    ImGui::SeparatorText(T("Align"));
-    if (count == 0) {
-        Hint(T("Select an interface element."));
-    } else {
-        Hint(count == 1 ? T("One element — aligned to its parent")
-                        : T("Aligned to the last clicked element"));
-    }
-    // Шесть кнопок с РИСУНКОМ, а не с подписью: полоска у края квадратика
-    // читается быстрее слова «Left», а шесть слов заняли бы три строки.
-    struct AlignDef { const char* Id; ui::AlignEdge Edge; const char* Tip; };
-    const AlignDef aligns[6] = {
-        {"al", ui::AlignEdge::Left, T("Left edges")},
-        {"ac", ui::AlignEdge::CenterX, T("Centers horizontally")},
-        {"ar", ui::AlignEdge::Right, T("Right edges")},
-        {"at", ui::AlignEdge::Top, T("Top edges")},
-        {"am", ui::AlignEdge::CenterY, T("Centers vertically")},
-        {"ab", ui::AlignEdge::Bottom, T("Bottom edges")},
-    };
-    for (int i = 0; i < 6; ++i) {
-        if (i == 3) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        else if (i > 0) ImGui::SameLine();
-        if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
-            uiops::Align(host, aligns[i].Edge);
-    }
-
-    ImGui::SeparatorText(T("Distribute"));
-    ImGui::BeginDisabled(count < 3);
-    if (ImGui::Button(T("Across"))) uiops::Distribute(host, true, false);
-    ImGui::SameLine();
-    if (ImGui::Button(T("Down"))) uiops::Distribute(host, false, false);
-    ImGui::EndDisabled();
-    if (count < 3) Hint(T("Needs three elements or more."));
-
-    ImGui::SeparatorText(T("Quick actions"));
-    ImGui::BeginDisabled(count == 0);
-    if (ImGui::Button(T("Fill the parent"), ImVec2(-1.0f, 0.0f))) uiops::StretchToParent(host, 0.0f);
-    if (ImGui::Button(T("Fill with a margin"), ImVec2(-1.0f, 0.0f)))
-        uiops::StretchToParent(host, 16.0f);
-    if (ImGui::Button(T("Round to the grid"), ImVec2(-1.0f, 0.0f)))
-        uiops::SnapSelectionToGrid(host);
-    if (ImGui::Button(T("Bring back on screen"), ImVec2(-1.0f, 0.0f))) uiops::BringIntoView(host);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Pushes the selected elements back inside the screen."));
-    ImGui::EndDisabled();
-}
-
-void UIEditorPanel::DrawSide(EditorHost& host, float width) {
-    ImGui::BeginChild("##ui_side", ImVec2(width, 0), ImGuiChildFlags_Borders);
-
-    GameObject obj = host.SelectedObject();
-    entt::registry& reg = host.CurrentScene().Registry();
-    const bool isElement = obj.Valid() && reg.all_of<ui::Element>(obj.Entity());
-
-    if (!isElement) {
-        ImGui::TextDisabled("%s", T("Element"));
-        ImGui::Separator();
-        Hint(T("Select an element on the canvas or in the list on the left."));
-    } else {
-        ImGui::TextDisabled("%s", T("Element"));
-        ImGui::SameLine();
-        ImGui::TextUnformatted(obj.Name().c_str());
-        ImGui::Separator();
-
-        // Имя правится здесь же: в дереве слева его читают, а переименовывают
-        // там, где смотрят на свойства.
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-        if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
-        host.TrackLastImGuiItem();
-
-        // Инструменты вёрстки — ВЫШЕ свойств: они занимают три строки и нужны
-        // постоянно, а свойств три десятка, и уехав под них, выравнивание
-        // оказалось бы за пределами экрана.
-        DrawAlignTools(host);
-
-        ImGui::SeparatorText(T("Properties"));
-        // Подписи у ImGui стоят СПРАВА от поля, и в узкой колонке они
-        // обрезались посередине слова. Отдаём им фиксированную долю ширины.
-        ImGui::PushItemWidth(-118.0f);
-        // ТЕ ЖЕ свойства, что в инспекторе — общий модуль, а не вторая копия.
-        sage::editor::UIPropsContext ctx;
-        ctx.Preview = &m_preview;
-        ctx.Browser = &m_browser;
-        ctx.BrowseTarget = &m_browseTarget;
-        sage::editor::DrawUIElementProperties(host, obj, ctx);
-        ImGui::PopItemWidth();
-    }
-
-    ImGui::EndChild();
-}
-
-// ============================================================================
-void UIEditorPanel::Draw(EditorHost& host, bool* open) {
-    // Обложки в файловом диалоге рисуются ТЕМ ЖЕ превью, что и слоты этой
-    // панели: второй набор буферов в видеопамяти ради модального окна не нужен.
-    m_browser.SetPreview(&m_preview);
+void InterfaceViewportPanel::Draw(EditorHost& host, bool& open) {
+    if (!open) return;
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
-
-    // Файловый диалог качается ДО окна: он живёт дольше одного кадра, а его
-    // результат надо положить в поле, о котором знает только эта панель.
-    if (m_browser.Draw() && m_browseTarget) {
-        // Ссылка ОТНОСИТЕЛЬНО ПРОЕКТА: абсолютный путь уехал бы в .sage и не
-        // открылся бы ни на другой машине, ни в собранной игре.
-        *m_browseTarget = host.CurrentProject().AssetRef(m_browser.Result());
-        m_browseTarget = nullptr;
-    }
-
-    ImGui::SetNextWindowSize(ImVec2(1100, 640), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("Interface" "###UIEditor"), open, panelwindows::WindowFlags("UIEditor"))) {
+    ImGui::SetNextWindowSize(ImVec2(960.0f, 640.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(T("Canvas" "###InterfaceViewport"), &open,
+                      panelwindows::WindowFlags("InterfaceViewport"))) {
         ImGui::End();
         return;
     }
-
-    DrawTopBar(host);
+    DrawToolbar(host);
     ImGui::Separator();
-
-    DrawTree(host, m_treeWidth);
-    ImGui::SameLine();
-    // Холст занимает всё, что осталось между колонками: он здесь главный, и
-    // отдавать ему остаток — единственная раскладка, которая не требует
-    // подгонки при каждом изменении размера окна.
-    ImGui::BeginChild("##ui_center", ImVec2(-m_sideWidth - ImGui::GetStyle().ItemSpacing.x, 0),
-                      ImGuiChildFlags_None);
     DrawCanvas(host);
-    ImGui::EndChild();
-    ImGui::SameLine();
-    DrawSide(host, 0.0f);
-
     ImGui::End();
 }

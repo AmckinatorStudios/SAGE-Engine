@@ -137,6 +137,12 @@ public:
     // PartField::Widget::NineSliceBorder). Пустой путь просто открывает окно.
     virtual void OpenNineSliceEditor(const std::string& imagePath) = 0;
 
+    // Текущее рабочее пространство (см. EditorTypes.h). Панель спрашивает его,
+    // когда ей есть что делать по-разному: холст интерфейса, например, не
+    // рисует гизмо сцены.
+    virtual EditorWorkspace Workspace() const = 0;
+    virtual void SetWorkspace(EditorWorkspace workspace) = 0;
+
     // --- undo/redo ---
     // Подмешать в публичные переменные объекта то, что объявил его скрипт
     // (см. sage/vars/ScriptVars.h). Зовётся инспектором ПЕРЕД показом секции:

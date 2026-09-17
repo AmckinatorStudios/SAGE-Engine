@@ -1667,7 +1667,15 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
     // Условия жёсткие намеренно: клавиша срабатывает, только когда работают
     // ИМЕННО С ЭТОЙ панелью и ничего не печатают, — иначе Delete в поле поиска
     // или в переименовании сносил бы файлы вместо буквы.
-    if (!m_multi.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
+    //
+    // ФОКУС СПРАШИВАЕТСЯ У ВСЕЙ ПАНЕЛИ (RootAndChildWindows), а не у текущего
+    // окна с его детьми. Эта проверка стоит ВНУТРИ дочернего окна прокрутки, и
+    // ChildWindows означал здесь «фокус на самой прокрутке или ниже» — то есть
+    // клавиша работала, только если последним щёлкнули по сетке карточек. Щелчок
+    // по строке пути, по полю фильтра или по дереву папок слева фокусировал
+    // другое дочернее окно той же панели, и Delete переставал работать, ничего
+    // об этом не сообщая. Панель тут одна, и вопрос к ней тоже один.
+    if (!m_multi.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
         !ImGui::GetIO().WantTextInput && m_renameTarget.empty() &&
         m_createKind == CreateKind::None && m_deleteTargets.empty() &&
         !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Delete)) {

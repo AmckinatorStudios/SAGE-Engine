@@ -94,6 +94,55 @@ constexpr float kStatusBarHeight = 26.0f;
 } // namespace
 
 
+// ПЕРЕКЛЮЧЕНИЕ ПРОСТРАНСТВА — не «режим», а смена состава панелей.
+//
+// Выделение при этом СБРАСЫВАЕТСЯ, и это не мелочь: в сцене выбирают объекты, в
+// вёрстке — элементы, и выбранный куб, оставшийся выбранным после перехода к
+// интерфейсу, означает инспектор, показывающий меш там, где ждут раскладку.
+void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
+    if (workspace == m_workspace) return;
+    m_workspace = workspace;
+    m_selection.Clear();
+    // Своя раскладка у каждого пространства строится при первом показе: узла с
+    // таким именем ImGui ещё не знает, и BuildXxxDockLayout сработает сам.
+    if (workspace == EditorWorkspace::Interface) {
+        m_uiViewport.RequestFit();
+        m_uiViewport.RequestFocus();
+    } else {
+        m_viewport.RequestFocus();
+    }
+}
+
+void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
+    // У вёрстки другой главный: ХОЛСТ, а не вьюпорт сцены. Всё остальное
+    // стоит вокруг него так же, как в пространстве сцены, — привычка к
+    // расположению панелей важнее, чем оригинальность раскладки.
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
+
+    ImGuiID center = dockspaceId;
+    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.24f, nullptr, &center);
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.26f, nullptr, &center);
+
+    auto dock = [](const char* id, ImGuiID node) {
+        if (!panelwindows::Detached(id)) ImGui::DockBuilderDockWindow(id, node);
+    };
+    dock("InterfaceHierarchy", left);
+    dock("InterfaceInspector", right);
+    dock("Assets", bottom);
+    dock("Console", bottom);
+    // Холст докается ПЕРВЫМ — он и есть вкладка по умолчанию. Предпросмотр
+    // рядом с ним: переключаться между «верстаю» и «смотрю» надо одним щелчком,
+    // а не раскладкой заново.
+    dock("InterfaceViewport", center);
+    dock("InterfacePreview", center);
+    ImGui::DockBuilderFinish(dockspaceId);
+
+    ImGui::SetWindowFocus("InterfaceViewport");
+}
+
 void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     // Пересобираем узлы доккинга с нуля: Viewport+Game в центре (табами),
     // панели вокруг.
@@ -128,11 +177,8 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     // вперёд при входе в Play (GamePanel::RequestFocus).
     dock("Viewport", center);
     dock("Game", center);
-    // Редактор интерфейса сюда больше не докается: он открывается ОТДЕЛЬНЫМ
-    // окном (см. PanelWindows.cpp, kDefaults). Вкладкой в центре он отбирал
-    // место у вьюпорта, а его собственному холсту — тому самому кадру игры, по
-    // которому и верстают, — оставалась треть экрана.
-    dock("UIEditor", center);
+    // Редактора интерфейса здесь больше нет вовсе: вёрстка — ОТДЕЛЬНОЕ рабочее
+    // пространство со своими панелями и своей раскладкой (см. EditorTypes.h).
     ImGui::DockBuilderFinish(dockspaceId);
 
     ImGui::SetWindowFocus("Viewport");
@@ -386,14 +432,22 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // верхнему краю окна и обратно.
     m_topBar.Draw(*this, TopBarPanel::kHeight);
 
-    ImGuiID dockspaceId = ImGui::GetID("SageDockSpace");
+    // У КАЖДОГО ПРОСТРАНСТВА СВОЁ ДОК-ПРОСТРАНСТВО, и это не деталь
+    // реализации. Общее означало бы, что переключение пересобирает раскладку
+    // заново — то есть настроенное расположение панелей теряется при каждом
+    // переходе «сцена — интерфейс». Разные узлы ImGui запоминает каждый свой,
+    // в том же imgui.ini, и обе раскладки переживают перезапуск.
+    const bool interfaceSpace = m_workspace == EditorWorkspace::Interface;
+    ImGuiID dockspaceId =
+        ImGui::GetID(interfaceSpace ? "SageInterfaceDock" : "SageDockSpace");
     // Куда возвращать панель, у которой сняли галочку «в отдельном окне».
     panelwindows::SetHomeDock(dockspaceId);
     // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)
     // или пользователь попросил сброс (Window > Reset Layout).
     if (m_rebuildDockLayout || ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         m_rebuildDockLayout = false;
-        BuildDefaultDockLayout(dockspaceId);
+        if (interfaceSpace) BuildInterfaceDockLayout(dockspaceId);
+        else BuildDefaultDockLayout(dockspaceId);
     }
     // Док-пространство занимает всё между тулбаром и статус-баром.
     const ImVec2 dockMin = ImGui::GetCursorScreenPos();
@@ -497,7 +551,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // «Освещение» стало «Средой»: в окне остались небо, воздух и
             // окружающий свет, а сами источники света — на объектах сцены.
             ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
-            ImGui::MenuItem(T("Interface"), nullptr, &PanelVisible(EditorPanel::UIEditor));
+            ImGui::MenuItem(T("Elements"), nullptr, &PanelVisible(EditorPanel::InterfaceHierarchy));
+            ImGui::MenuItem(T("Canvas"), nullptr, &PanelVisible(EditorPanel::InterfaceViewport));
+            ImGui::MenuItem(T("Element"), nullptr, &PanelVisible(EditorPanel::InterfaceInspector));
+            ImGui::MenuItem(T("Preview"), nullptr, &PanelVisible(EditorPanel::InterfacePreview));
             ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
             // Редактор девятины. Инструмент, а не панель раскладки: его
             // открывают под задачу «подобрать нарезку картинке» и закрывают,
@@ -518,7 +575,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 ImGui::Separator();
                 struct DetachRow { const char* Id; const char* Label; EditorPanel Panel; };
                 static const DetachRow kRows[] = {
-                    {"UIEditor",  "Interface",   EditorPanel::UIEditor},
+                    {"InterfaceViewport",  "Canvas",   EditorPanel::InterfaceViewport},
+                    {"InterfaceHierarchy", "Elements", EditorPanel::InterfaceHierarchy},
+                    {"InterfaceInspector", "Element",  EditorPanel::InterfaceInspector},
                     {"Viewport",  "Viewport",    EditorPanel::Viewport},
                     {"Game",      "Game",        EditorPanel::Game},
                     {"Hierarchy", "Hierarchy",   EditorPanel::Hierarchy},
@@ -692,7 +751,14 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
     m_nineSlice.Draw(*this, m_showNineSlice);
-    m_profiler.Draw(&m_panels[EditorPanel::Profiler]);
+    // Профилировщик — через ту же обёртку, что и остальные панели: он тоже
+    // имеет право жить своим окном системы, и панель, которую забыли обернуть,
+    // молча теряет это право (см. PanelWindows.h).
+    if (m_panels[EditorPanel::Profiler]) {
+        panelwindows::Before("Profiler");
+        m_profiler.Draw(&m_panels[EditorPanel::Profiler]);
+        panelwindows::After("Profiler");
+    }
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
     DrawAboutWindow();

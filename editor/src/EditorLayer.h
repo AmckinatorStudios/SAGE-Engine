@@ -57,7 +57,10 @@ namespace sage { class Application; }
 #include "panels/AssetsPanel.h"
 #include "ProjectLauncher/ProjectLauncher.h"
 #include "panels/EnvironmentPanel.h"
-#include "panels/UIEditorPanel.h"
+#include "interface/InterfaceHierarchyPanel.h"
+#include "interface/InterfaceInspectorPanel.h"
+#include "interface/InterfacePreviewPanel.h"
+#include "interface/InterfaceViewportPanel.h"
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/InputPanel.h"
@@ -133,6 +136,9 @@ public:
     // редактора. Копия здесь и была всей бедой — см. ApplyEngineSettings.
     sage::EngineConfig& Settings() override { return m_settings; }
     void SetStatusMessage(const std::string& message) override { m_pluginStatusMessage = message; }
+    EditorWorkspace Workspace() const override { return m_workspace; }
+    void SetWorkspace(EditorWorkspace workspace) override;
+
     void OpenNineSliceEditor(const std::string& imagePath) override {
         m_showNineSlice = true;
         m_nineSlice.OpenFor(imagePath);
@@ -295,6 +301,11 @@ private:
     // --- построение кадра UI ---
     void DrawDockspaceAndMenu();
     void BuildDefaultDockLayout(unsigned int dockspaceId);
+    // Раскладка пространства «Интерфейс». Своя, а не общая: у него другой
+    // состав панелей и другой главный — холст, а не вьюпорт сцены.
+    void BuildInterfaceDockLayout(unsigned int dockspaceId);
+    // Рисует панели текущего пространства.
+    void DrawWorkspacePanels();
     void DrawStatusBar(float height);
     void DrawAboutWindow(); // Help > About: версия движка + версии подсистем (v1)
 
@@ -519,7 +530,17 @@ private:
     static std::function<void(const std::vector<std::string>&)> s_dropSink;
     Sage::Launcher::ProjectLauncher m_launcher;
     EnvironmentPanel m_environment;
-    UIEditorPanel m_uiEditor;
+    // --- пространство «Интерфейс» (см. EditorTypes.h) ---
+    //
+    // Четыре докуемые панели вместо одного окна с колонками внутри. Раньше
+    // внутри редактора с доккингом жил кусок без доккинга: дерево, холст и
+    // свойства нельзя было ни перетащить, ни отстыковать, ни положить на
+    // второй монитор.
+    InterfaceHierarchyPanel m_uiHierarchy;
+    InterfaceViewportPanel m_uiViewport;
+    InterfaceInspectorPanel m_uiInspector;
+    InterfacePreviewPanel m_uiPreview;
+    EditorWorkspace m_workspace = EditorWorkspace::Scene;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)

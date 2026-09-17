@@ -488,16 +488,14 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         m_sceneDirty = true;
         // И сразу открывается редактор интерфейса: элемент, которого не видно
         // после создания, выглядит как «кнопка не сработала».
-        m_panels[EditorPanel::UIEditor] = true;
-        m_uiEditor.RequestFocus();
+        SetWorkspace(EditorWorkspace::Interface);
         return newId;
     }
     if (id.rfind("ui.", 0) == 0) {
         const std::string preset = id.substr(std::string("ui.").size());
         PushUndoSnapshot();
         GameObject obj = CreateUIEntity(preset);
-        m_panels[EditorPanel::UIEditor] = true;
-        m_uiEditor.RequestFocus();
+        SetWorkspace(EditorWorkspace::Interface);
         return done(obj);
     }
 
