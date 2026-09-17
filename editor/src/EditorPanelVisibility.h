@@ -44,17 +44,29 @@ public:
     void Restore() {
         for (EditorPanel p : {EditorPanel::Hierarchy, EditorPanel::Inspector,
                               EditorPanel::Environment, EditorPanel::Viewport,
-                              EditorPanel::Game, EditorPanel::Console, EditorPanel::Assets})
+                              EditorPanel::Game, EditorPanel::Console, EditorPanel::Assets,
+                              EditorPanel::InterfaceHierarchy, EditorPanel::InterfaceViewport,
+                              EditorPanel::InterfaceInspector, EditorPanel::InterfacePreview})
             (*this)[p] = true;
+    }
+
+    // Закрыть всё. Нужно ровно одному — проверке «закрыли всё, выход есть»:
+    // перечислять панели в ней руками значит забыть новую и проверять не то,
+    // что проверяли (ровно это и случилось при добавлении вёрстки отдельным
+    // пространством).
+    void CloseAll() {
+        for (bool& v : m_visible) v = false;
     }
 
     // Осталась ли на экране хоть одна панель. Если нет — на месте редактора
     // пустой серый прямоугольник, и молчать про это нельзя.
     bool AnyVisible() const {
         for (EditorPanel p : {EditorPanel::Hierarchy, EditorPanel::Inspector,
-                              EditorPanel::Environment, EditorPanel::UIEditor,
-                              EditorPanel::Viewport, EditorPanel::Game,
-                              EditorPanel::Console, EditorPanel::Assets, EditorPanel::Profiler})
+                              EditorPanel::Environment, EditorPanel::Viewport,
+                              EditorPanel::Game, EditorPanel::Console, EditorPanel::Assets,
+                              EditorPanel::Profiler, EditorPanel::InterfaceHierarchy,
+                              EditorPanel::InterfaceViewport, EditorPanel::InterfaceInspector,
+                              EditorPanel::InterfacePreview})
             if ((*this)[p]) return true;
         return false;
     }
@@ -70,8 +82,14 @@ private:
         false,  // Profiler — окно-инструмент
         true,   // Game
         true,   // Viewport
-        false,  // UIEditor — отдельный инструмент под отдельную задачу
+        false,  // UIEditor — устарело, места в раскладке не занимает
         false,  // Settings — окно-инструмент
         false,  // Input — окно-инструмент
+        // Пространство «Интерфейс»: его панели открыты, но видны только когда
+        // пространство выбрано (см. EditorLayer::DrawDockspaceAndMenu).
+        true,   // InterfaceHierarchy
+        true,   // InterfaceViewport
+        true,   // InterfaceInspector
+        true,   // InterfacePreview
     };
 };

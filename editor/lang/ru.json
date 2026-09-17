@@ -1649,6 +1649,17 @@
     "The description lives next to the picture, so one cut\nserves every element that uses it.": "Описание лежит рядом с картинкой, поэтому одна нарезка\nслужит всем элементам, которые ею пользуются.",
     "Show in Assets": "Показать в ассетах",
     "Order": "Порядок",
-    "Stack": "Раскладка детей"
+    "Stack": "Раскладка детей",
+    "Add an element": "Добавить элемент",
+    "Add one with Create above.": "Добавьте его кнопкой «Создать» выше.",
+    "Design the game interface": "Верстать интерфейс игры",
+    "Detach to root": "Открепить в корень",
+    "Lock": "Запереть",
+    "Unlock": "Отпереть",
+    "No interface elements yet.": "Элементов интерфейса пока нет.",
+    "Paste": "Вставить",
+    "Place objects in the world": "Расставлять объекты в мире",
+    "Search elements...": "Поиск элементов...",
+    "The frame exactly as the player sees it.": "Кадр ровно таким, каким его увидит игрок."
   }
 }

@@ -546,7 +546,7 @@ void EditorLayer::OnAttach() {
     // ОТДЕЛЬНЫМ окном системы (см. PanelWindows.h), а закрытая панель окна не
     // заводит — проверять в кадре было бы нечего. На снимок главного окна это
     // не влияет: окно у него своё.
-    if (std::getenv("SAGE_EDITOR_SELFTEST")) m_panels[EditorPanel::UIEditor] = true;
+    if (std::getenv("SAGE_EDITOR_SELFTEST")) m_panels[EditorPanel::InterfaceViewport] = true;
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
         m_headlessProject = true;
         m_pendingDialog = dlg;   // откроется в кадре, на уровне окна-хоста
@@ -603,8 +603,7 @@ void EditorLayer::OnAttach() {
     // Открыть редактор интерфейса при старте — для скриншот-проверок.
     if (std::getenv("SAGE_EDITOR_UI_EDITOR")) {
         m_headlessProject = true;
-        m_panels[EditorPanel::UIEditor] = true;
-        m_uiEditor.RequestFocus();
+        SetWorkspace(EditorWorkspace::Interface);
     }
     if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
         m_tools.UI.Backdrop = (float)std::atof(b);
@@ -625,7 +624,9 @@ void EditorLayer::OnAttach() {
     // «Все панели закрыты» с кнопкой возврата.
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
         m_headlessProject = true;
-        m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = m_panels[EditorPanel::UIEditor] = false;
+        m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = false;
+        m_panels[EditorPanel::InterfaceViewport] = m_panels[EditorPanel::InterfaceHierarchy] = false;
+        m_panels[EditorPanel::InterfaceInspector] = m_panels[EditorPanel::InterfacePreview] = false;
         m_panels[EditorPanel::Viewport] = m_panels[EditorPanel::Game] = m_panels[EditorPanel::Console] = m_panels[EditorPanel::Assets] = false;
         m_panels[EditorPanel::Profiler] = false;
     }
@@ -1243,12 +1244,30 @@ void EditorLayer::OnRender() {
         draw();
         panelwindows::After(id);
     };
-    panel("Hierarchy", m_panels[EditorPanel::Hierarchy], [&] { m_hierarchy.Draw(*this, &m_panels[EditorPanel::Hierarchy]); });
-    panel("Inspector", m_panels[EditorPanel::Inspector], [&] { m_inspector.Draw(*this, &m_panels[EditorPanel::Inspector]); });
-    panel("Lighting", m_panels[EditorPanel::Environment], [&] { m_environment.Draw(*this, &m_panels[EditorPanel::Environment]); });
-    panel("UIEditor", m_panels[EditorPanel::UIEditor], [&] { m_uiEditor.Draw(*this, &m_panels[EditorPanel::UIEditor]); });
-    panel("Viewport", m_panels[EditorPanel::Viewport], [&] { m_viewport.Draw(*this, &m_panels[EditorPanel::Viewport]); });
-    panel("Game", m_panels[EditorPanel::Game], [&] { m_game.Draw(*this, &m_panels[EditorPanel::Game]); });
+    // ПАНЕЛИ ТЕКУЩЕГО ПРОСТРАНСТВА, а не все сразу. Сцену расставляют и
+    // интерфейс верстают по-разному, и панели им нужны разные; панель чужого
+    // пространства, оставленная на экране, отбирает место и путает, какой
+    // вьюпорт сейчас главный.
+    //
+    // Консоль и ассеты общие: они отвечают на одни и те же вопросы в обоих
+    // случаях, и прятать их при переключении значило бы заводить им по второй
+    // копии с тем же содержимым.
+    if (m_workspace == EditorWorkspace::Scene) {
+        panel("Hierarchy", m_panels[EditorPanel::Hierarchy], [&] { m_hierarchy.Draw(*this, &m_panels[EditorPanel::Hierarchy]); });
+        panel("Inspector", m_panels[EditorPanel::Inspector], [&] { m_inspector.Draw(*this, &m_panels[EditorPanel::Inspector]); });
+        panel("Lighting", m_panels[EditorPanel::Environment], [&] { m_environment.Draw(*this, &m_panels[EditorPanel::Environment]); });
+        panel("Viewport", m_panels[EditorPanel::Viewport], [&] { m_viewport.Draw(*this, &m_panels[EditorPanel::Viewport]); });
+        panel("Game", m_panels[EditorPanel::Game], [&] { m_game.Draw(*this, &m_panels[EditorPanel::Game]); });
+    } else {
+        panel("InterfaceHierarchy", m_panels[EditorPanel::InterfaceHierarchy],
+              [&] { m_uiHierarchy.Draw(*this, m_panels[EditorPanel::InterfaceHierarchy]); });
+        panel("InterfaceViewport", m_panels[EditorPanel::InterfaceViewport],
+              [&] { m_uiViewport.Draw(*this, m_panels[EditorPanel::InterfaceViewport]); });
+        panel("InterfaceInspector", m_panels[EditorPanel::InterfaceInspector],
+              [&] { m_uiInspector.Draw(*this, m_panels[EditorPanel::InterfaceInspector]); });
+        panel("InterfacePreview", m_panels[EditorPanel::InterfacePreview],
+              [&] { m_uiPreview.Draw(*this, m_panels[EditorPanel::InterfacePreview]); });
+    }
     panel("Console", m_panels[EditorPanel::Console], [&] { m_console.Draw(&m_panels[EditorPanel::Console]); });
     panel("Assets", m_panels[EditorPanel::Assets], [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets]); });
     m_plugins.ImGuiAll();

@@ -118,6 +118,30 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
 
     divider();
 
+    // --- РАБОЧЕЕ ПРОСТРАНСТВО ----------------------------------------------
+    //
+    // Два переключателя, а не меню: пространств ровно два, переключаются они
+    // часто, и прятать за меню то, чем пользуются каждые несколько минут,
+    // значит добавлять к каждому переходу лишний щелчок и лишний поиск.
+    //
+    // Слева, сразу после файла: это САМОЕ КРУПНОЕ решение на экране — от него
+    // зависит, какие панели человек вообще видит. Всё, что правее, относится
+    // уже к выбранному пространству.
+    {
+        const EditorWorkspace space = host.Workspace();
+        CenterY(row);
+        if (EditorIcons::Button("cube", T("Scene"), T("Place objects in the world"),
+                                space == EditorWorkspace::Scene))
+            host.SetWorkspace(EditorWorkspace::Scene);
+        ImGui::SameLine(0.0f, ui.SpacingXS);
+        CenterY(row);
+        if (EditorIcons::Button("layout", T("Interface"), T("Design the game interface"),
+                                space == EditorWorkspace::Interface))
+            host.SetWorkspace(EditorWorkspace::Interface);
+    }
+
+    divider();
+
     // --- ОТМЕНА И ПОВТОР ---------------------------------------------------
     //
     // Гаснут, когда отменять нечего: серая кнопка честно говорит «здесь пусто»,
