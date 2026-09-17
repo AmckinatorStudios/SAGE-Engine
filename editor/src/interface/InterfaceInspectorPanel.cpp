@@ -10,6 +10,7 @@
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
 #include "../Project.h"
@@ -27,6 +28,8 @@ namespace {
 
 namespace ui = sage::ui;
 
+using sage::editor::interfacewidgets::AlignButton;
+
 // Приглушённое пояснение с переносом: колонки узкие, а обычный TextDisabled не
 // переносит и обрезает строку посередине слова.
 void Hint(const char* text) {
@@ -35,70 +38,6 @@ void Hint(const char* text) {
     ImGui::PopStyleColor();
 }
 
-// Кнопка выравнивания: рисунок вместо подписи.
-//
-// Подписью тут не обойтись: шесть кнопок «Left/Center/Right/Top/Middle/Bottom»
-// занимают три строки и всё равно читаются медленнее, чем полоска у края
-// квадратика. Рисуется так же, как иконки редактора (EditorIcons.h) — своими
-// примитивами, без шрифта со значками.
-bool AlignButton(const char* id, sage::ui::AlignEdge edge, const char* tip, bool enabled) {
-    const float h = ImGui::GetFrameHeight();
-    ImGui::PushID(id);
-    if (!enabled) ImGui::BeginDisabled();
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const bool pressed = ImGui::Button("##align", ImVec2(h, h));
-    if (!enabled) ImGui::EndDisabled();
-    if (tip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
-    ImGui::PopID();
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImU32 line = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    const ImU32 body = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    const float pad = std::floor(h * 0.22f);
-    const float x0 = p.x + pad, x1 = p.x + h - pad;
-    const float y0 = p.y + pad, y1 = p.y + h - pad;
-
-    // Две «плашки» разной длины и линия, к которой они прижаты: именно так это
-    // выглядит в любом редакторе, и узнаётся без подписи.
-    const float t = std::max(2.0f, std::floor(h * 0.14f));
-    switch (edge) {
-        case sage::ui::AlignEdge::Left:
-            dl->AddLine(ImVec2(x0, y0), ImVec2(x0, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 2, y0 + 1), ImVec2(x1, y0 + 1 + t), body);
-            dl->AddRectFilled(ImVec2(x0 + 2, y1 - 1 - t), ImVec2(x1 - 4, y1 - 1), body);
-            break;
-        case sage::ui::AlignEdge::CenterX: {
-            const float cx = (x0 + x1) * 0.5f;
-            dl->AddLine(ImVec2(cx, y0), ImVec2(cx, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0, y0 + 1), ImVec2(x1, y0 + 1 + t), body);
-            dl->AddRectFilled(ImVec2(x0 + 3, y1 - 1 - t), ImVec2(x1 - 3, y1 - 1), body);
-            break;
-        }
-        case sage::ui::AlignEdge::Right:
-            dl->AddLine(ImVec2(x1, y0), ImVec2(x1, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0, y0 + 1), ImVec2(x1 - 2, y0 + 1 + t), body);
-            dl->AddRectFilled(ImVec2(x0 + 4, y1 - 1 - t), ImVec2(x1 - 2, y1 - 1), body);
-            break;
-        case sage::ui::AlignEdge::Top:
-            dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y0), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 1, y0 + 2), ImVec2(x0 + 1 + t, y1), body);
-            dl->AddRectFilled(ImVec2(x1 - 1 - t, y0 + 2), ImVec2(x1 - 1, y1 - 4), body);
-            break;
-        case sage::ui::AlignEdge::CenterY: {
-            const float cy = (y0 + y1) * 0.5f;
-            dl->AddLine(ImVec2(x0, cy), ImVec2(x1, cy), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 1, y0), ImVec2(x0 + 1 + t, y1), body);
-            dl->AddRectFilled(ImVec2(x1 - 1 - t, y0 + 3), ImVec2(x1 - 1, y1 - 3), body);
-            break;
-        }
-        case sage::ui::AlignEdge::Bottom:
-            dl->AddLine(ImVec2(x0, y1), ImVec2(x1, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 1, y0), ImVec2(x0 + 1 + t, y1 - 2), body);
-            dl->AddRectFilled(ImVec2(x1 - 1 - t, y0 + 4), ImVec2(x1 - 1, y1 - 2), body);
-            break;
-    }
-    return pressed && enabled;
-}
 
 // Сколько выделенных элементов интерфейса: от этого зависит, что имеет смысл.
 int SelectedUICount(EditorHost& host) {

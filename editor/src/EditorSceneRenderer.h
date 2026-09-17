@@ -57,6 +57,22 @@ public:
 
     void SetViewportSize(int w, int h) { m_vpW = w; m_vpH = h; }
     void SetGameSize(int w, int h) { m_gameW = w; m_gameH = h; }
+
+    // ПОДЛОЖКА РЕДАКТОРА ИНТЕРФЕЙСА — ровный фон МЕЖДУ сценой и интерфейсом.
+    //
+    // Рисуется здесь, а не в панели, по единственной причине: интерфейс игры
+    // рисует движок последним проходом прямо в игровой кадр, и всё, что панель
+    // кладёт поверх готового кадра, ложится и на интерфейс тоже. Приглушить
+    // сцену, не трогая меню поверх неё, можно только внутри самого прохода.
+    //
+    // opacity 0 — подложки нет (худ верстают поверх игры), 1 — сцены не видно
+    // совсем. Непрозрачная подложка ещё и заменяет кадр, когда камеры в сцене
+    // нет: смотреть под ней всё равно не на что, а верстать без картинки
+    // нельзя.
+    void SetUIBackdrop(float opacity, glm::vec3 color) {
+        m_uiBackdropAlpha = opacity;
+        m_uiBackdropColor = color;
+    }
     // Размер игрового кадра: под него сверстан интерфейс игры, и с ним же
     // сравнивается курсор, переведённый панелью Game в его координаты.
     int GameWidth() const { return m_gameW; }
@@ -126,6 +142,8 @@ public:
     // Игровое окно от первой Primary-камеры сцены (нет камеры — кадр не рисуется,
     // GameApplied() остаётся false). Всегда Shaded + пост-обработка.
     void RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg);
+    // Подложка редактора и интерфейс сцены одним проходом UIRenderer (см. .cpp).
+    bool DrawGameUI(Scene& scene, const sage::EngineConfig& cfg, bool onlyBackdrop);
 
     // --- ПРЕВЬЮ ВЫБРАННОЙ КАМЕРЫ -------------------------------------------
     //
@@ -176,6 +194,12 @@ public:
     // непохож на себя (см. раздел README о ней). Здесь кадр можно СРАВНИТЬ с
     // предыдущим, и самопроверка редактора делает это на каждом прогоне.
     bool ReadViewportPixels(std::vector<unsigned char>& out, int& outW, int& outH);
+
+    // То же для ИГРОВОГО кадра — того, что показывает панель Game и холст
+    // редактора интерфейса. Нужен ровно затем же: порядок проходов внутри
+    // кадра (сцена, подложка, интерфейс) глазами проверяется только на
+    // картинке, а «подложка легла поверх меню» — это именно порядок.
+    bool ReadGamePixels(std::vector<unsigned char>& out, int& outW, int& outH);
 
     // Что с рендером не так — одной строкой для показа В КАДРЕ. Пусто — всё в
     // порядке. Лог для этого не годится: человек, у которого чёрный вьюпорт,
@@ -272,6 +296,8 @@ private:
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
     int m_gameW = 1280, m_gameH = 720;
+    float m_uiBackdropAlpha = 0.0f;
+    glm::vec3 m_uiBackdropColor{0.10f, 0.11f, 0.13f};
     // Превью выбранной камеры: свой буфер и свой размер (см. RenderCameraPreview).
     std::optional<Framebuffer> m_previewFbo, m_previewPostFbo;
     int m_previewW = 320, m_previewH = 180;

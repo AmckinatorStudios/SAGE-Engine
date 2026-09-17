@@ -10,6 +10,7 @@
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "../EditorPrefs.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
 #include "../Project.h"
@@ -29,77 +30,6 @@ namespace ui = sage::ui;
 
 // Приглушённое пояснение с переносом: колонки узкие, а обычный TextDisabled не
 // переносит и обрезает строку посередине слова.
-void Hint(const char* text) {
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped("%s", text);
-    ImGui::PopStyleColor();
-}
-
-// Кнопка выравнивания: рисунок вместо подписи.
-//
-// Подписью тут не обойтись: шесть кнопок «Left/Center/Right/Top/Middle/Bottom»
-// занимают три строки и всё равно читаются медленнее, чем полоска у края
-// квадратика. Рисуется так же, как иконки редактора (EditorIcons.h) — своими
-// примитивами, без шрифта со значками.
-bool AlignButton(const char* id, sage::ui::AlignEdge edge, const char* tip, bool enabled) {
-    const float h = ImGui::GetFrameHeight();
-    ImGui::PushID(id);
-    if (!enabled) ImGui::BeginDisabled();
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const bool pressed = ImGui::Button("##align", ImVec2(h, h));
-    if (!enabled) ImGui::EndDisabled();
-    if (tip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
-    ImGui::PopID();
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImU32 line = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    const ImU32 body = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    const float pad = std::floor(h * 0.22f);
-    const float x0 = p.x + pad, x1 = p.x + h - pad;
-    const float y0 = p.y + pad, y1 = p.y + h - pad;
-
-    // Две «плашки» разной длины и линия, к которой они прижаты: именно так это
-    // выглядит в любом редакторе, и узнаётся без подписи.
-    const float t = std::max(2.0f, std::floor(h * 0.14f));
-    switch (edge) {
-        case sage::ui::AlignEdge::Left:
-            dl->AddLine(ImVec2(x0, y0), ImVec2(x0, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 2, y0 + 1), ImVec2(x1, y0 + 1 + t), body);
-            dl->AddRectFilled(ImVec2(x0 + 2, y1 - 1 - t), ImVec2(x1 - 4, y1 - 1), body);
-            break;
-        case sage::ui::AlignEdge::CenterX: {
-            const float cx = (x0 + x1) * 0.5f;
-            dl->AddLine(ImVec2(cx, y0), ImVec2(cx, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0, y0 + 1), ImVec2(x1, y0 + 1 + t), body);
-            dl->AddRectFilled(ImVec2(x0 + 3, y1 - 1 - t), ImVec2(x1 - 3, y1 - 1), body);
-            break;
-        }
-        case sage::ui::AlignEdge::Right:
-            dl->AddLine(ImVec2(x1, y0), ImVec2(x1, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0, y0 + 1), ImVec2(x1 - 2, y0 + 1 + t), body);
-            dl->AddRectFilled(ImVec2(x0 + 4, y1 - 1 - t), ImVec2(x1 - 2, y1 - 1), body);
-            break;
-        case sage::ui::AlignEdge::Top:
-            dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y0), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 1, y0 + 2), ImVec2(x0 + 1 + t, y1), body);
-            dl->AddRectFilled(ImVec2(x1 - 1 - t, y0 + 2), ImVec2(x1 - 1, y1 - 4), body);
-            break;
-        case sage::ui::AlignEdge::CenterY: {
-            const float cy = (y0 + y1) * 0.5f;
-            dl->AddLine(ImVec2(x0, cy), ImVec2(x1, cy), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 1, y0), ImVec2(x0 + 1 + t, y1), body);
-            dl->AddRectFilled(ImVec2(x1 - 1 - t, y0 + 3), ImVec2(x1 - 1, y1 - 3), body);
-            break;
-        }
-        case sage::ui::AlignEdge::Bottom:
-            dl->AddLine(ImVec2(x0, y1), ImVec2(x1, y1), line, 1.5f);
-            dl->AddRectFilled(ImVec2(x0 + 1, y0), ImVec2(x0 + 1 + t, y1 - 2), body);
-            dl->AddRectFilled(ImVec2(x1 - 1 - t, y0 + 4), ImVec2(x1 - 1, y1 - 2), body);
-            break;
-    }
-    return pressed && enabled;
-}
-
 // Сколько выделенных элементов интерфейса: от этого зависит, что имеет смысл.
 int SelectedUICount(EditorHost& host) {
     Scene& scene = host.CurrentScene();
@@ -128,6 +58,24 @@ void GameFrameSize(EditorHost& host, int& outW, int& outH) {
 void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     UIToolSettings& tools = host.Tools().UI;
 
+    namespace prefs = sage::editor::prefs;
+    if (!m_backdropLoaded) {
+        m_backdropLoaded = true;
+        tools.Backdrop = std::clamp(prefs::GetFloat("ui.backdrop", tools.Backdrop), 0.0f, 1.0f);
+        tools.BackdropColor.r = std::clamp(prefs::GetFloat("ui.backdrop_r", tools.BackdropColor.r), 0.0f, 1.0f);
+        tools.BackdropColor.g = std::clamp(prefs::GetFloat("ui.backdrop_g", tools.BackdropColor.g), 0.0f, 1.0f);
+        tools.BackdropColor.b = std::clamp(prefs::GetFloat("ui.backdrop_b", tools.BackdropColor.b), 0.0f, 1.0f);
+    }
+    // Запись — ПО ОКОНЧАНИИ правки, а не на каждый кадр перетаскивания: файл
+    // настроек переписывается целиком, и делать это шестьдесят раз в секунду,
+    // пока тянут ползунок, значит молотить по диску ради одного числа.
+    auto save = [&tools]() {
+        prefs::SetFloat("ui.backdrop", tools.Backdrop);
+        prefs::SetFloat("ui.backdrop_r", tools.BackdropColor.r);
+        prefs::SetFloat("ui.backdrop_g", tools.BackdropColor.g);
+        prefs::SetFloat("ui.backdrop_b", tools.BackdropColor.b);
+    };
+
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -151,10 +99,44 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     // Фон под интерфейсом: сцена или ровная заливка. Ползунком, а не галкой,
     // потому что худ правят ПОВЕРХ игры — там нужна полупрозрачная плёнка.
     ImGui::SetNextItemWidth(110.0f);
-    ImGui::SliderFloat(T("Backdrop"), &tools.Backdrop, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("##backdrop", &tools.Backdrop, 0.0f, 1.0f, "%.2f");
+    if (ImGui::IsItemDeactivatedAfterEdit()) save();
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("1 — a flat backdrop instead of the game frame;\n"
+        ImGui::SetTooltip("%s", T("Backdrop under the interface.\n"
+                                  "1 — a flat fill instead of the game frame;\n"
                                   "0 — design the HUD over the game."));
+    }
+    ImGui::SameLine();
+    // ЦВЕТ ПОДЛОЖКИ ВЫБИРАЮТ. Прошитый тёмно-серый годится ровно до первого
+    // тёмного интерфейса: чёрное меню на чёрной подложке — это пустой экран, на
+    // котором не видно даже того, что элемент вообще есть.
+    if (EditorIcons::IconOnlyButton("color", T("Backdrop color")))
+        ImGui::OpenPopup("BackdropColor###BackdropColor");
+    if (Sage::UI::MenuScope backdropMenu; ImGui::BeginPopup("BackdropColor###BackdropColor")) {
+        ImGui::TextDisabled("%s", T("Backdrop color"));
+        ImGui::Separator();
+        ImGui::ColorPicker3("##backdrop_color", &tools.BackdropColor.x,
+                            ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview);
+        if (ImGui::IsItemDeactivatedAfterEdit()) save();
+        // Готовые крайности: тёмный интерфейс смотрят на светлом, светлый — на
+        // тёмном, и чаще всего нужен именно такой щелчок, а не подбор оттенка.
+        bool preset = false;
+        if (ImGui::SmallButton(T("Dark"))) {
+            tools.BackdropColor = glm::vec3(0.10f, 0.11f, 0.13f);
+            preset = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Grey"))) {
+            tools.BackdropColor = glm::vec3(0.50f, 0.50f, 0.52f);
+            preset = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Light"))) {
+            tools.BackdropColor = glm::vec3(0.92f, 0.93f, 0.95f);
+            preset = true;
+        }
+        if (preset) save();
+        ImGui::EndPopup();
     }
 
     ImGui::SameLine();
@@ -237,19 +219,20 @@ void InterfaceViewportPanel::DrawCanvas(EditorHost& host) {
                       IM_COL32(24, 26, 30, 255));
 
     // Сам кадр. Картинка игры под интерфейсом — ровно то, поверх чего худ и
-    // рисуется; Backdrop гасит её, когда мешает.
+    // рисуется; подложка гасит её, когда мешает, — но гасит ВНУТРИ кадра, под
+    // интерфейсом (см. EditorSceneRenderer::DrawGameUI). Здесь её не рисуем:
+    // прямоугольник поверх готового кадра ложился и на интерфейс тоже.
     const uint64_t tex = host.GameTexture();
     ImGui::SetCursorScreenPos(imgPos);
     if (tex) {
         ImGui::Image((ImTextureID)(std::intptr_t)tex, imgSize, ImVec2(0, 1), ImVec2(1, 0));
     } else {
         ImGui::Dummy(imgSize);
+        // Кадра нет (ни камеры, ни подложки) — заглушка ЦВЕТОМ ПОДЛОЖКИ: чужой
+        // прямоугольник посреди выбранного фона читается как поломка.
         dl->AddRectFilled(imgPos, ImVec2(imgPos.x + imgSize.x, imgPos.y + imgSize.y),
-                          IM_COL32(30, 33, 38, 255));
-    }
-    if (tools.Backdrop > 0.001f) {
-        dl->AddRectFilled(imgPos, ImVec2(imgPos.x + imgSize.x, imgPos.y + imgSize.y),
-                          IM_COL32(26, 28, 33, (int)(tools.Backdrop * 255.0f)));
+                          ImGui::GetColorU32(ImVec4(tools.BackdropColor.x, tools.BackdropColor.y,
+                                                    tools.BackdropColor.z, 1.0f)));
     }
     // Граница экрана и осевые линии: по ним ставят то, что должно быть ровно
     // посередине, и промах в пиксель виден сразу.

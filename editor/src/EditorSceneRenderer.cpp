@@ -842,7 +842,18 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // Нет Primary-камеры — кадр не рисуем (панель Game покажет подсказку).
     float aspect = (float)m_gameW / (float)std::max(m_gameH, 1);
     sage::ecs::CameraFrame frame = sage::ecs::PrimaryCameraFrame(scene, aspect);
-    if (!frame.HasPrimary) { m_gamePostApplied = false; m_gameFrameValid = false; return; }
+    if (!frame.HasPrimary) {
+        // КАМЕРЫ НЕТ, А ИНТЕРФЕЙС ЕСТЬ. Редактор интерфейса показывает игровой
+        // кадр — и на сцене без Primary-камеры показывал пустое место: верстать
+        // было не на чем, хотя к камере интерфейс никакого отношения не имеет
+        // (он считается в пикселях кадра, а не в мире). Непрозрачная подложка
+        // сама по себе годится в фон: под ней сцены всё равно не видно.
+        if (m_uiBackdropAlpha >= 0.999f && !DrawGameUI(scene, cfg, /*onlyBackdrop=*/true)) {
+            m_gamePostApplied = false;
+            m_gameFrameValid = false;
+        }
+        return;
+    }
 
     const glm::mat4& view = frame.View;
     const glm::mat4& proj = frame.Proj;
@@ -928,17 +939,57 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
 
     // UI сцены (компоненты интерфейса) — поверх ИТОГОВОЙ картинки (после поста),
     // ровно как его увидит игрок в собранной игре (WYSIWYG панели Game).
-    auto uiView = scene.Registry().view<sage::ui::Element>();
-    if (uiView.begin() != uiView.end()) {
-        if (!m_ui) m_ui = std::make_unique<UIRenderer>();
-        Framebuffer& target = m_gamePostApplied ? *m_gamePostFbo : *m_gameFbo;
-        target.Bind();
-        device.SetViewport(0, 0, m_gameW, m_gameH);
-        m_ui->Begin(m_gameW, m_gameH);
-        sage::ui::DrawSceneUI(scene, *m_ui, m_gameW, m_gameH);
-        m_ui->End();
-    }
+    DrawGameUI(scene, cfg, /*onlyBackdrop=*/false);
     device.BindDefaultFramebuffer();
+}
+
+// Проход интерфейса: подложка редактора и сам интерфейс сцены — ОДНИМ кадром
+// UIRenderer, в правильном порядке.
+//
+// Порядок здесь и есть всё содержание: подложка первой, интерфейс поверх неё.
+// Пока подложку рисовала панель редактора поверх готового кадра, она ложилась
+// и на интерфейс тоже — то есть «приглушить сцену за меню» приглушало и меню.
+//
+// onlyBackdrop — кадр без сцены (нет Primary-камеры): заливка вместо картинки
+// игры. Возвращает false, если рисовать было нечего, — вызывающий по этому
+// признаку объявляет игровой кадр недействительным.
+bool EditorSceneRenderer::DrawGameUI(Scene& scene, const sage::EngineConfig& cfg,
+                                     bool onlyBackdrop) {
+    auto uiView = scene.Registry().view<sage::ui::Element>();
+    const bool hasUI = uiView.begin() != uiView.end();
+    const bool hasBackdrop = m_uiBackdropAlpha > 0.001f;
+    if (!hasUI && !hasBackdrop) return false;
+
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+    if (onlyBackdrop) {
+        // Своего кадра ещё нет: собираем его с нуля из одной заливки.
+        EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg));
+        m_gameFrameValid = true;
+        m_gamePostApplied = false;
+        m_gameFbo->Bind();
+        device.SetClearColor(m_uiBackdropColor.r, m_uiBackdropColor.g, m_uiBackdropColor.b, 1.0f);
+        device.Clear();
+        m_gameFbo->Resolve();
+    }
+
+    if (!m_ui) m_ui = std::make_unique<UIRenderer>();
+    Framebuffer& target = m_gamePostApplied ? *m_gamePostFbo : *m_gameFbo;
+    target.Bind();
+    device.SetViewport(0, 0, m_gameW, m_gameH);
+    m_ui->Begin(m_gameW, m_gameH);
+    if (hasBackdrop && !onlyBackdrop) {
+        m_ui->Rect(0.0f, 0.0f, (float)m_gameW, (float)m_gameH, m_uiBackdropColor,
+                   std::min(m_uiBackdropAlpha, 1.0f));
+    }
+    if (hasUI) sage::ui::DrawSceneUI(scene, *m_ui, m_gameW, m_gameH);
+    m_ui->End();
+    // РЕЗОЛВ ПОСЛЕ ПРОХОДА. При включённом MSAA Bind() кладёт рисование в
+    // многосэмпловый буфер, а показывается обычная текстура — то есть без
+    // этой строки интерфейс (и подложка) просто не доезжали до экрана, и
+    // сглаживание выглядело как «интерфейс в игровом окне пропал».
+    target.Resolve();
+    if (onlyBackdrop) device.BindDefaultFramebuffer();
+    return true;
 }
 
 void EditorSceneRenderer::SetViewportSize(int slot, int w, int h) {
@@ -992,6 +1043,23 @@ bool EditorSceneRenderer::ReadViewportPixels(std::vector<unsigned char>& out, in
     // Тот же буфер, что и у ViewportTexture: показываем и читаем одно и то же,
     // иначе проверка сравнивала бы не то, что видно.
     Framebuffer* target = m_sceneFbo ? &*m_sceneFbo : nullptr;
+    if (!target) return false;
+    outW = target->Width();
+    outH = target->Height();
+    if (outW <= 0 || outH <= 0) return false;
+    out.assign((size_t)outW * (size_t)outH * 3u, 0);
+    target->Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.ReadPixelsRGB(0, 0, outW, outH, out.data());
+    device.BindDefaultFramebuffer();
+    return true;
+}
+
+bool EditorSceneRenderer::ReadGamePixels(std::vector<unsigned char>& out, int& outW, int& outH) {
+    if (!m_gameFrameValid) return false;   // чужой кадр за свой не выдаём
+    // Тот же буфер, что и у GameTexture: читаем ровно то, что видно.
+    Framebuffer* target = m_gamePostApplied ? (m_gamePostFbo ? &*m_gamePostFbo : nullptr)
+                                            : (m_gameFbo ? &*m_gameFbo : nullptr);
     if (!target) return false;
     outW = target->Width();
     outH = target->Height();

@@ -1153,6 +1153,11 @@ void EditorLayer::OnRender() {
         m_renderer.RenderViewport(*m_scene, m_camera, env, m_selection.Primary(), m_selection.All(),
                                   m_tools.RenderMode, m_tools.ShowGrid, cfg, v, p, i, ov);
     } // отдаёт view/proj для гизмо/пикинга
+    // ПОДЛОЖКА — ТОЛЬКО В РЕДАКТОРЕ ИНТЕРФЕЙСА. Это его инструмент показа, а не
+    // свойство игры: панель Game обещает «как увидит игрок», и приглушённая
+    // сцена в ней означала бы, что редактор врёт о картинке.
+    m_renderer.SetUIBackdrop(m_workspace == EditorWorkspace::Interface ? m_tools.UI.Backdrop : 0.0f,
+                             m_tools.UI.BackdropColor);
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 
     // Превью ВЫБРАННОЙ камеры — последним и только по запросу вьюпорта: это
