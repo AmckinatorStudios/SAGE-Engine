@@ -1646,6 +1646,7 @@
     "Saved next to the picture": "Сохранено рядом с картинкой",
     "Select an element with a Picture part.": "Выберите элемент с частью «Картинка».",
     "Repeat is the only right answer for pixel art and patterns:\nan ornament of 16 pixels stretched to 300 turns to mush.": "Повтор — единственный правильный ответ для пиксель-арта и узоров:\nорнамент из 16 пикселей, растянутый на 300, превращается в мыло.",
-    "The description lives next to the picture, so one cut\nserves every element that uses it.": "Описание лежит рядом с картинкой, поэтому одна нарезка\nслужит всем элементам, которые ею пользуются."
+    "The description lives next to the picture, so one cut\nserves every element that uses it.": "Описание лежит рядом с картинкой, поэтому одна нарезка\nслужит всем элементам, которые ею пользуются.",
+    "Show in Assets": "Показать в ассетах"
   }
 }
