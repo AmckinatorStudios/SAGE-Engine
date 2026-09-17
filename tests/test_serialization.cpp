@@ -274,7 +274,7 @@ TEST(Serialization_opacity_and_ui_style_round_trip) {
 
     GameObject hud = scene.CreateObject("Bar");
     entt::registry& reg = scene.Registry();
-    reg.emplace<sage::ui::Transform>(hud.Entity(), sage::ui::Transform{});
+    reg.emplace<sage::ui::Element>(hud.Entity(), sage::ui::Element{});
     sage::ui::Fill fill;
     fill.Gradient = {0.1f, 0.1f, 0.2f, 0.8f};
     fill.ShadowSize = 12.0f;
@@ -800,7 +800,7 @@ TEST(Scene_migration_v5_to_v6_moves_a_shifted_label_into_a_child) {
     // Растянут на родителя: иначе подпись зависела бы от размера, записанного
     // однажды, и разъезжалась бы при растяжении самой галки.
     CHECK_EQ(child["ui"]["transform"]["stretch"].get<int>(),
-             (int)sage::ui::Transform::Stretch::Both);
+             (int)sage::ui::Element::Stretch::Both);
     // Левое поле = прежний сдвиг (сторона квадратика 40 + отступ 8) минус
     // боковой отступ надписи, который надпись добавит сама.
     CHECK_NEAR(child["ui"]["transform"]["margin"]["x"].get<float>(), 40.0f, 1e-4f);

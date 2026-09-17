@@ -238,7 +238,7 @@ void EditorPlaySession::Stop(const PlayContext& ctx) {
 }
 
 void EditorPlaySession::UpdateUiInput(Scene& scene, const PlayUiInput& in) {
-    auto uiView = scene.Registry().view<sage::ui::Transform>();
+    auto uiView = scene.Registry().view<sage::ui::Element>();
     if (uiView.begin() == uiView.end()) return;
 
     // Захваченный курсор — режим обзора: экранной точки у мыши нет, и

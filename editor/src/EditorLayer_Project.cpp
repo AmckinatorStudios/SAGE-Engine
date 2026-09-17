@@ -293,11 +293,11 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // + подложка + шкала.
         entt::registry& reg = m_scene->Registry();
         GameObject hud = m_scene->CreateEmptyObject("HUD Panel");
-        sage::ui::Transform hudXf;
+        sage::ui::Element hudXf;
         hudXf.Anchor = UIAnchor::TopLeft;
-        hudXf.Offset = {16.0f, 16.0f};
+        hudXf.Position = {16.0f, 16.0f};
         hudXf.Size = {230.0f, 64.0f};
-        reg.emplace<sage::ui::Transform>(hud.Entity(), hudXf);
+        reg.emplace<sage::ui::Element>(hud.Entity(), hudXf);
         sage::ui::Fill hudFill;
         hudFill.Rounding = 12.0f;
         hudFill.BorderThickness = 2.0f;
@@ -308,11 +308,11 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         reg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
 
         GameObject hp = m_scene->CreateEmptyObject("HP Bar");
-        sage::ui::Transform hpXf;
+        sage::ui::Element hpXf;
         hpXf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
-        hpXf.Offset = {12.0f, 8.0f};
+        hpXf.Position = {12.0f, 8.0f};
         hpXf.Size = {206.0f, 18.0f};
-        reg.emplace<sage::ui::Transform>(hp.Entity(), hpXf);
+        reg.emplace<sage::ui::Element>(hp.Entity(), hpXf);
         sage::ui::Fill hpFill;
         hpFill.Rounding = 8.0f;
         hpFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};

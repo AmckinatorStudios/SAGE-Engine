@@ -216,9 +216,9 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     }
     // Новый элемент появляется в центре родителя: у края экрана его легко не
     // заметить и решить, что «ничего не создалось».
-    sage::ui::Transform& xf = reg.get<sage::ui::Transform>(obj.Entity());
+    sage::ui::Element& xf = reg.get<sage::ui::Element>(obj.Entity());
     xf.Anchor = UIAnchor::Center;
-    xf.Offset = glm::vec2(0.0f, 0.0f);
+    xf.Position = glm::vec2(0.0f, 0.0f);
 
     return obj;
 }

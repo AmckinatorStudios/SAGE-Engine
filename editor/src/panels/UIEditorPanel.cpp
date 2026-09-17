@@ -107,7 +107,7 @@ int SelectedUICount(EditorHost& host) {
     int count = 0;
     for (int id : host.Selection().All()) {
         GameObject obj = scene.Get(id);
-        if (obj.Valid() && reg.all_of<ui::Transform>(obj.Entity())) ++count;
+        if (obj.Valid() && reg.all_of<ui::Element>(obj.Entity())) ++count;
     }
     return count;
 }
@@ -237,7 +237,7 @@ void UIEditorPanel::DrawTreeNode(EditorHost& host, Scene& scene, int id, int dep
     if (!obj.Valid()) return;
     entt::registry& reg = scene.Registry();
     const entt::entity e = obj.Entity();
-    ui::Transform* xf = reg.try_get<ui::Transform>(e);
+    ui::Element* xf = reg.try_get<ui::Element>(e);
     if (!xf) return;
 
     ImGui::PushID(id);
@@ -256,7 +256,7 @@ void UIEditorPanel::DrawTreeNode(EditorHost& host, Scene& scene, int id, int dep
     if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e)) children = h->Children;
     bool hasUiChildren = false;
     for (entt::entity c : children)
-        if (reg.all_of<ui::Transform>(c)) { hasUiChildren = true; break; }
+        if (reg.all_of<ui::Element>(c)) { hasUiChildren = true; break; }
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
                                ImGuiTreeNodeFlags_DefaultOpen;
@@ -280,17 +280,17 @@ void UIEditorPanel::DrawTreeNode(EditorHost& host, Scene& scene, int id, int dep
     ImGui::SameLine(ImGui::GetContentRegionMax().x - 44.0f);
     if (EditorIcons::IconOnlyButton("up", T("Bring forward"))) {
         host.PushUndoSnapshot();
-        ++xf->Layer;
+        ++xf->Order;
     }
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("drop", T("Send backward"))) {
         host.PushUndoSnapshot();
-        --xf->Layer;
+        --xf->Order;
     }
 
     if (open && hasUiChildren) {
         for (entt::entity c : children) {
-            if (!reg.all_of<ui::Transform>(c)) continue;
+            if (!reg.all_of<ui::Element>(c)) continue;
             const IdComponent* cid = reg.try_get<IdComponent>(c);
             if (cid) DrawTreeNode(host, scene, cid->Id, depth + 1);
         }
@@ -316,10 +316,10 @@ void UIEditorPanel::DrawTree(EditorHost& host, float width) {
     // Корни: элементы, у которых нет родителя-элемента. Именно они якорятся к
     // экрану, остальные — к своему родителю.
     int roots = 0;
-    auto view = reg.view<ui::Transform>();
+    auto view = reg.view<ui::Element>();
     for (entt::entity e : view) {
         const entt::entity parent = scene.ParentOf(e);
-        if (parent != entt::null && reg.all_of<ui::Transform>(parent)) continue;
+        if (parent != entt::null && reg.all_of<ui::Element>(parent)) continue;
         const IdComponent* id = reg.try_get<IdComponent>(e);
         if (!id) continue;
         ++roots;
@@ -515,7 +515,7 @@ void UIEditorPanel::DrawSide(EditorHost& host, float width) {
 
     GameObject obj = host.SelectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
-    const bool isElement = obj.Valid() && reg.all_of<ui::Transform>(obj.Entity());
+    const bool isElement = obj.Valid() && reg.all_of<ui::Element>(obj.Entity());
 
     if (!isElement) {
         ImGui::TextDisabled("%s", T("Element"));

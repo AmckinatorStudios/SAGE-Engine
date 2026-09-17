@@ -100,7 +100,7 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     // (sage::ui::RegisterPart), он не знал по определению — такая часть
     // переживала сохранение сцены и пропадала при дублировании объекта.
     // Объяснить это можно было только чтением исходников движка.
-    CopyIfPresent<sage::ui::Transform>(src, dst);   // прямоугольник — не часть, а сам элемент
+    CopyIfPresent<sage::ui::Element>(src, dst);   // прямоугольник — не часть, а сам элемент
     for (const sage::ui::PartType& part : sage::ui::Parts()) {
         if (part.Copy) part.Copy(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
     }

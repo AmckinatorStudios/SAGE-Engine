@@ -25,7 +25,7 @@ struct Target {
 };
 
 // Выделенные элементы интерфейса — в порядке выделения. Элементы без
-// ui::Transform молча пропускаются: выделение общее на всю сцену, и куб в нём
+// ui::Element молча пропускаются: выделение общее на всю сцену, и куб в нём
 // не ошибка, просто не наше дело.
 //
 // Прямоугольники берутся у sage::ui::SolveSceneRects — тем же расчётом, каким
@@ -43,7 +43,7 @@ std::vector<Target> Collect(EditorHost& host) {
     for (int id : host.Selection().All()) {
         GameObject obj = scene.Get(id);
         if (!obj.Valid()) continue;
-        if (!reg.all_of<sage::ui::Transform>(obj.Entity())) continue;
+        if (!reg.all_of<sage::ui::Element>(obj.Entity())) continue;
         for (const sage::ui::ElementRect& e : solved) {
             if (e.Entity != obj.Entity()) continue;
             out.push_back(Target{e.Entity, e.Rect, e.Parent, e.Scale, e.InLayout});
@@ -55,12 +55,12 @@ std::vector<Target> Collect(EditorHost& host) {
 
 // Пиксели экрана -> опорные единицы холста, в которых и хранятся Offset/Size.
 void Place(Scene& scene, const Target& t, glm::vec2 topLeft, glm::vec2 size) {
-    sage::ui::Transform* u = scene.Registry().try_get<sage::ui::Transform>(t.Entity);
+    sage::ui::Element* u = scene.Registry().try_get<sage::ui::Element>(t.Entity);
     if (!u || t.InLayout) return;   // раскладка родителя всё равно переставит
     const float k = t.Scale > 0.0f ? t.Scale : 1.0f;
     const UIRect parent{t.Parent.x / k, t.Parent.y / k, t.Parent.w / k, t.Parent.h / k};
     u->Size = size / k;
-    u->Offset = sage::ui::OffsetForTopLeft(u->Anchor, topLeft / k, size / k, parent);
+    u->Position = sage::ui::OffsetForTopLeft(u->Anchor, topLeft / k, size / k, parent);
 }
 
 void Shift(Scene& scene, const Target& t, glm::vec2 delta) {
@@ -139,12 +139,12 @@ void SetAnchorKeepingPlace(EditorHost& host, UIAnchor anchor) {
 
     host.PushUndoSnapshot();
     for (const Target& t : targets) {
-        sage::ui::Transform* u = scene.Registry().try_get<sage::ui::Transform>(t.Entity);
+        sage::ui::Element* u = scene.Registry().try_get<sage::ui::Element>(t.Entity);
         if (!u) continue;
         u->Anchor = anchor;
         // Прямоугольник взят ДО смены якоря — именно поэтому элемент и остаётся
         // на месте: новый Offset считается под новый якорь из старого места.
-        u->Offset = sage::ui::OffsetForTopLeft(anchor, glm::vec2(t.Rect.x, t.Rect.y),
+        u->Position = sage::ui::OffsetForTopLeft(anchor, glm::vec2(t.Rect.x, t.Rect.y),
                                                glm::vec2(t.Rect.w, t.Rect.h), t.Parent);
     }
 }

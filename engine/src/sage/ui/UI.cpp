@@ -7,12 +7,12 @@ namespace sage::ui {
 
 // --- Раскладка -------------------------------------------------------------
 
-glm::vec2 ResolveSize(const Transform& t, const UIRect& parent) {
+glm::vec2 ResolveSize(const Element& t, const UIRect& parent) {
     glm::vec2 size = t.Size;
     const bool stretchX =
-        t.Mode == Transform::Stretch::Horizontal || t.Mode == Transform::Stretch::Both;
+        t.Mode == Element::Stretch::Horizontal || t.Mode == Element::Stretch::Both;
     const bool stretchY =
-        t.Mode == Transform::Stretch::Vertical || t.Mode == Transform::Stretch::Both;
+        t.Mode == Element::Stretch::Vertical || t.Mode == Element::Stretch::Both;
     // Растянутый элемент не может быть уже нуля: поля больше родителя дают
     // отрицательную ширину, а отрицательный прямоугольник рисуется вывернутым
     // наизнанку и ловит мышь там, где его не видно.
@@ -21,13 +21,13 @@ glm::vec2 ResolveSize(const Transform& t, const UIRect& parent) {
     return size;
 }
 
-UIRect Resolve(const Transform& t, const UIRect& parent, glm::vec2 size) {
+UIRect Resolve(const Element& t, const UIRect& parent, glm::vec2 size) {
     const bool stretchX =
-        t.Mode == Transform::Stretch::Horizontal || t.Mode == Transform::Stretch::Both;
+        t.Mode == Element::Stretch::Horizontal || t.Mode == Element::Stretch::Both;
     const bool stretchY =
-        t.Mode == Transform::Stretch::Vertical || t.Mode == Transform::Stretch::Both;
+        t.Mode == Element::Stretch::Vertical || t.Mode == Element::Stretch::Both;
 
-    glm::vec2 pos = ResolveAnchored(t.Anchor, t.Offset, size, parent);
+    glm::vec2 pos = ResolveAnchored(t.Anchor, t.Position, size, parent);
     // Растянутая ось не якорится: её положение задают поля от краёв родителя.
     if (stretchX) pos.x = parent.x + t.Margin.x;
     if (stretchY) pos.y = parent.y + t.Margin.y;
@@ -41,11 +41,11 @@ UIRect Resolve(const Transform& t, const UIRect& parent, glm::vec2 size) {
     return UIRect{pos.x, pos.y, size.x, size.y};
 }
 
-UIRect Resolve(const Transform& t, const UIRect& parent) {
+UIRect Resolve(const Element& t, const UIRect& parent) {
     // LayoutSize — то, что посчитали раскладка или авто-ширина; пока его нет,
     // работает заданный размер.
-    const glm::vec2 measured = (t.LayoutSize.x > 0.0f && t.LayoutSize.y > 0.0f)
-                                   ? t.LayoutSize
+    const glm::vec2 measured = (t.Resolved.x > 0.0f && t.Resolved.y > 0.0f)
+                                   ? t.Resolved
                                    : ResolveSize(t, parent);
     return Resolve(t, parent, measured);
 }
@@ -84,47 +84,47 @@ UIRect Intersect(const UIRect& a, const UIRect& b) {
     return UIRect{x0, y0, std::max(0.0f, x1 - x0), std::max(0.0f, y1 - y0)};
 }
 
-glm::vec2 ApplyLayout(const Layout& layout, const UIRect& container,
+glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
                       std::vector<LayoutSlot>& slots) {
     if (slots.empty()) return glm::vec2(0.0f);
 
-    const float left = container.x + layout.Padding.x;
-    const float top = container.y + layout.Padding.y;
-    const float innerW = std::max(0.0f, container.w - layout.Padding.x - layout.Padding.z);
-    const float innerH = std::max(0.0f, container.h - layout.Padding.y - layout.Padding.w);
+    const float left = container.x + stack.Padding.x;
+    const float top = container.y + stack.Padding.y;
+    const float innerW = std::max(0.0f, container.w - stack.Padding.x - stack.Padding.z);
+    const float innerH = std::max(0.0f, container.h - stack.Padding.y - stack.Padding.w);
 
-    if (layout.Direction == Layout::Flow::Grid) {
-        const int columns = std::max(1, layout.Columns);
+    if (stack.Direction == Stack::Flow::Grid) {
+        const int columns = std::max(1, stack.Columns);
         const int rows = ((int)slots.size() + columns - 1) / columns;
         // Ячейка сетки одна на всех: инвентарь с ячейками разной ширины — это
         // не сетка, а список, и притворяться сеткой ему незачем.
         const float cellW =
-            (innerW - layout.Spacing * (float)(columns - 1)) / (float)columns;
+            (innerW - stack.Spacing * (float)(columns - 1)) / (float)columns;
         float cellH = 0.0f;
         for (const LayoutSlot& s : slots) cellH = std::max(cellH, s.Size.y);
         for (size_t i = 0; i < slots.size(); ++i) {
             const int col = (int)i % columns;
             const int row = (int)i / columns;
-            slots[i].Pos = {left + (float)col * (cellW + layout.Spacing),
-                            top + (float)row * (cellH + layout.Spacing)};
-            if (layout.StretchCross) slots[i].Size.x = std::max(0.0f, cellW);
+            slots[i].Pos = {left + (float)col * (cellW + stack.Spacing),
+                            top + (float)row * (cellH + stack.Spacing)};
+            if (stack.StretchCross) slots[i].Size.x = std::max(0.0f, cellW);
         }
-        return glm::vec2(innerW, (float)rows * cellH + layout.Spacing * (float)(rows - 1));
+        return glm::vec2(innerW, (float)rows * cellH + stack.Spacing * (float)(rows - 1));
     }
 
-    const bool horizontal = layout.Direction == Layout::Flow::Horizontal;
+    const bool horizontal = stack.Direction == Stack::Flow::Horizontal;
     const float axisSpace = horizontal ? innerW : innerH;
 
-    float content = layout.Spacing * (float)(slots.size() - 1);
+    float content = stack.Spacing * (float)(slots.size() - 1);
     for (const LayoutSlot& s : slots) content += horizontal ? s.Size.x : s.Size.y;
 
     float cursor = 0.0f;
-    float gap = layout.Spacing;
-    switch (layout.Justify) {
-        case Layout::Align::Start: break;
-        case Layout::Align::Center: cursor = (axisSpace - content) * 0.5f; break;
-        case Layout::Align::End: cursor = axisSpace - content; break;
-        case Layout::Align::SpaceBetween:
+    float gap = stack.Spacing;
+    switch (stack.Justify) {
+        case Stack::Align::Start: break;
+        case Stack::Align::Center: cursor = (axisSpace - content) * 0.5f; break;
+        case Stack::Align::End: cursor = axisSpace - content; break;
+        case Stack::Align::SpaceBetween:
             // Свободное место раздаётся МЕЖДУ детьми, а не по краям: именно так
             // выглядит строка «Назад ... Далее» внизу окна.
             if (slots.size() > 1) {
@@ -138,12 +138,12 @@ glm::vec2 ApplyLayout(const Layout& layout, const UIRect& container,
     float extent = 0.0f;
     for (LayoutSlot& s : slots) {
         if (horizontal) {
-            if (layout.StretchCross) s.Size.y = innerH;
+            if (stack.StretchCross) s.Size.y = innerH;
             s.Pos = {left + cursor, top};
             cursor += s.Size.x + gap;
             extent = std::max(extent, s.Size.y);
         } else {
-            if (layout.StretchCross) s.Size.x = innerW;
+            if (stack.StretchCross) s.Size.x = innerW;
             s.Pos = {left, top + cursor};
             cursor += s.Size.y + gap;
             extent = std::max(extent, s.Size.x);
@@ -166,9 +166,9 @@ std::vector<Preset> BuildPresets() {
     auto TextChild = [](const char* name, const char* text) {
         Preset child;
         child.Name = name;
-        child.Xf.Anchor = UIAnchor::TopLeft;
-        child.Xf.Mode = Transform::Stretch::Both;   // на всю подложку
-        child.Xf.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
+        child.Box.Anchor = UIAnchor::TopLeft;
+        child.Box.Mode = Element::Stretch::Both;   // на всю подложку
+        child.Box.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
         child.HasLabel = true;
         child.LabelStyle.Text = text;
         return child;
@@ -177,14 +177,14 @@ std::vector<Preset> BuildPresets() {
     auto add = [&out](const char* name) -> Preset& {
         out.push_back(Preset{});
         out.back().Name = name;
-        out.back().Xf.Anchor = UIAnchor::Center;
-        out.back().Xf.Offset = {0.0f, 0.0f};
+        out.back().Box.Anchor = UIAnchor::Center;
+        out.back().Box.Position = {0.0f, 0.0f};
         return out.back();
     };
 
     {
         Preset& p = add("Panel");
-        p.Xf.Size = {260.0f, 140.0f};
+        p.Box.Size = {260.0f, 140.0f};
         p.HasFill = true;
     }
     {
@@ -192,7 +192,7 @@ std::vector<Preset> BuildPresets() {
         // внутри. Не «подложка со встроенным текстом»: надпись видно в дереве,
         // её можно подвинуть, покрасить, заменить значком или убрать.
         Preset& p = add("Button");
-        p.Xf.Size = {200.0f, 52.0f};
+        p.Box.Size = {200.0f, 52.0f};
         p.HasFill = true;
         p.FillStyle.Color = {0.16f, 0.22f, 0.34f, 0.95f};
         p.FillStyle.BorderThickness = 1.0f;
@@ -201,19 +201,19 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Label");
-        p.Xf.Size = {220.0f, 40.0f};
+        p.Box.Size = {220.0f, 40.0f};
         p.HasLabel = true;
         p.LabelStyle.Text = "Text";
         p.LabelStyle.AutoWidth = true;
     }
     {
         Preset& p = add("Image");
-        p.Xf.Size = {160.0f, 160.0f};
+        p.Box.Size = {160.0f, 160.0f};
         p.HasImage = true;
     }
     {
         Preset& p = add("Bar");
-        p.Xf.Size = {240.0f, 26.0f};
+        p.Box.Size = {240.0f, 26.0f};
         p.HasFill = true;
         p.FillStyle.Rounding = 6.0f;
         p.HasBar = true;
@@ -224,7 +224,7 @@ std::vector<Preset> BuildPresets() {
         // Раньше подпись жила внутри и начиналась «за квадратиком» по правилу,
         // зашитому в отрисовку; теперь её можно поставить и слева, и под галкой.
         Preset& p = add("Checkbox");
-        p.Xf.Size = {200.0f, 36.0f};
+        p.Box.Size = {200.0f, 36.0f};
         p.HasInteractable = true;
         p.HasRange = true;
         p.RangeValue.Toggle = true;
@@ -235,15 +235,15 @@ std::vector<Preset> BuildPresets() {
         p.RangeValue.BorderThickness = 1.0f;
         p.RangeValue.BorderColor = {0.55f, 0.60f, 0.72f, 0.9f};
         Preset text = TextChild("Текст", "Checkbox");
-        text.Xf.Anchor = UIAnchor::CenterLeft;
-        text.Xf.Offset = {44.0f, 0.0f};      // правее квадратика
-        text.Xf.Size = {150.0f, 28.0f};
+        text.Box.Anchor = UIAnchor::CenterLeft;
+        text.Box.Position = {44.0f, 0.0f};      // правее квадратика
+        text.Box.Size = {150.0f, 28.0f};
         text.LabelStyle.Horizontal = Label::Align::Start;
         p.Children.push_back(text);
     }
     {
         Preset& p = add("Slider");
-        p.Xf.Size = {240.0f, 30.0f};
+        p.Box.Size = {240.0f, 30.0f};
         p.HasInteractable = true;
         p.HasRange = true;
         // Дорожка и ручка — цвета САМОГО ползунка. Подложка здесь закрасила бы
@@ -251,7 +251,7 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Input");
-        p.Xf.Size = {260.0f, 40.0f};
+        p.Box.Size = {260.0f, 40.0f};
         p.HasFill = true;
         p.HasLabel = true;
         p.LabelStyle.Horizontal = Label::Align::Start; // по центру набирать непривычно
@@ -262,37 +262,37 @@ std::vector<Preset> BuildPresets() {
     {
         // Новые заготовки — то, что раньше собиралось руками из пяти сущностей.
         Preset& p = add("Vertical List");
-        p.Xf.Size = {280.0f, 320.0f};
+        p.Box.Size = {280.0f, 320.0f};
         p.HasFill = true;
         p.HasMask = true; // содержимое не вылезает за края списка
-        p.HasLayout = true;
-        p.LayoutRule.Direction = Layout::Flow::Vertical;
+        p.HasStack = true;
+        p.StackRule.Direction = Stack::Flow::Vertical;
     }
     {
         Preset& p = add("Toolbar");
-        p.Xf.Anchor = UIAnchor::TopCenter;
-        p.Xf.Size = {600.0f, 56.0f};
-        p.Xf.Mode = Transform::Stretch::Horizontal;
-        p.Xf.Margin = {24.0f, 16.0f, 24.0f, 0.0f};
+        p.Box.Anchor = UIAnchor::TopCenter;
+        p.Box.Size = {600.0f, 56.0f};
+        p.Box.Mode = Element::Stretch::Horizontal;
+        p.Box.Margin = {24.0f, 16.0f, 24.0f, 0.0f};
         p.HasFill = true;
-        p.HasLayout = true;
-        p.LayoutRule.Direction = Layout::Flow::Horizontal;
-        p.LayoutRule.Justify = Layout::Align::Center;
+        p.HasStack = true;
+        p.StackRule.Direction = Stack::Flow::Horizontal;
+        p.StackRule.Justify = Stack::Align::Center;
     }
     {
         Preset& p = add("Grid");
-        p.Xf.Size = {320.0f, 320.0f};
+        p.Box.Size = {320.0f, 320.0f};
         p.HasFill = true;
         p.HasMask = true;
-        p.HasLayout = true;
-        p.LayoutRule.Direction = Layout::Flow::Grid;
-        p.LayoutRule.Columns = 4;
+        p.HasStack = true;
+        p.StackRule.Direction = Stack::Flow::Grid;
+        p.StackRule.Columns = 4;
     }
     {
         Preset& p = add("Screen");
-        p.Xf.Anchor = UIAnchor::TopLeft;
-        p.Xf.Mode = Transform::Stretch::Both;
-        p.Xf.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
+        p.Box.Anchor = UIAnchor::TopLeft;
+        p.Box.Mode = Element::Stretch::Both;
+        p.Box.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
         p.HasFill = true;
         p.FillStyle.Color = {0.0f, 0.0f, 0.0f, 0.55f};
         p.FillStyle.Rounding = 0.0f;

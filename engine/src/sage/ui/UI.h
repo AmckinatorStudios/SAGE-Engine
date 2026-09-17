@@ -11,7 +11,8 @@
 // ИНТЕРФЕЙС ИГРЫ — отдельная подсистема движка. Один вход: этот заголовок.
 //
 // Устройство:
-//   components/Layout.h   — где элемент стоит: Transform, Mask, Layout, Canvas, Group
+//   Element.h             — САМ ЭЛЕМЕНТ: раскладка, порядок, видимость, замок
+//   components/Layout.h   — что он делает с местом: Mask, Stack, Canvas, Group
 //   components/Visual.h   — из чего он сделан: Fill, Label, Image, Bar, Icon
 //   components/Interact.h — что он делает: Interactable, TextInput, Range, State
 //   UI.h / UI.cpp         — математика раскладки и заготовки (этот файл)
@@ -27,11 +28,12 @@
 // отрисовке. Нельзя и спросить у сцены «все элементы с картинкой» — только
 // «все элементы» с проверкой поля у каждого.
 //
-// Теперь элемент — это НАБОР компонентов поверх обязательного Transform:
-//   кнопка   = Transform + Fill + Label + Interactable
-//   картинка = Transform + Image
-//   шкала    = Transform + Fill + Bar (+ Icon + Label, если нужно)
-//   список   = Transform + Fill + Mask + Layout (дети раскладываются сами)
+// Теперь узел интерфейса — это Element (раскладка, порядок, видимость) плюс
+// НАБОР компонентов:
+//   кнопка   = Element + Fill + Label + Interactable
+//   картинка = Element + Image
+//   шкала    = Element + Fill + Bar (+ Icon + Label, если нужно)
+//   список   = Element + Fill + Mask + Stack (дети раскладываются сами)
 // Свой вид элемента — свой компонент и своя система, без единой правки здесь.
 // ---------------------------------------------------------------------------
 namespace sage::ui {
@@ -40,14 +42,14 @@ namespace sage::ui {
 
 // Итоговый прямоугольник элемента внутри родителя. Чистая математика: без ECS,
 // без GL, юнит-тестируется целиком.
-UIRect Resolve(const Transform& t, const UIRect& parent);
+UIRect Resolve(const Element& t, const UIRect& parent);
 
 // То же с явным размером — для случая, когда ширину содержимого уже измерил
 // шрифт (AutoWidth) или посчитала раскладка родителя.
-UIRect Resolve(const Transform& t, const UIRect& parent, glm::vec2 size);
+UIRect Resolve(const Element& t, const UIRect& parent, glm::vec2 size);
 
 // Размер элемента с учётом растяжения (Stretch) и полей.
-glm::vec2 ResolveSize(const Transform& t, const UIRect& parent);
+glm::vec2 ResolveSize(const Element& t, const UIRect& parent);
 
 // Множитель масштаба интерфейса для холста при данном размере экрана.
 // 1.0 — «пиксель в пиксель».
@@ -68,7 +70,7 @@ struct LayoutSlot {
 // Раскладывает детей внутри контейнера. Порядок — тот, в каком их подали
 // (вызывающий сортирует по Layer). Возвращает размер, занятый содержимым, —
 // по нему контейнер с FitContent подгоняет себя.
-glm::vec2 ApplyLayout(const Layout& layout, const UIRect& container,
+glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
                       std::vector<LayoutSlot>& slots);
 
 // --- Заготовки --------------------------------------------------------------
@@ -80,7 +82,7 @@ glm::vec2 ApplyLayout(const Layout& layout, const UIRect& container,
 // редактора вовсе.
 struct Preset {
     std::string Name;
-    Transform Xf;
+    Element Box;
     bool HasFill = false;
     Fill FillStyle;
     bool HasLabel = false;
@@ -95,8 +97,8 @@ struct Preset {
     TextInput Input;
     bool HasRange = false;
     Range RangeValue;
-    bool HasLayout = false;
-    Layout LayoutRule;
+    bool HasStack = false;
+    Stack StackRule;
     bool HasMask = false;
     Mask MaskRule;
 

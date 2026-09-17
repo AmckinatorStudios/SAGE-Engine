@@ -194,6 +194,25 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
     return m_segments.back();
 }
 
+void UIRenderer::PushRotation(glm::vec2 center, float degrees) {
+    m_rotCenter = center;
+    const float rad = glm::radians(degrees);
+    m_rotCos = std::cos(rad);
+    m_rotSin = std::sin(rad);
+    // Ноль градусов — не поворот: тратить по два умножения на вершину на
+    // тождественное преобразование не за что, а элементов на экране сотни.
+    m_rotActive = std::fabs(degrees) > 0.0001f;
+}
+
+void UIRenderer::PopRotation() { m_rotActive = false; }
+
+glm::vec2 UIRenderer::Rotated(float x, float y) const {
+    if (!m_rotActive) return {x, y};
+    const float dx = x - m_rotCenter.x, dy = y - m_rotCenter.y;
+    return {m_rotCenter.x + dx * m_rotCos - dy * m_rotSin,
+            m_rotCenter.y + dx * m_rotSin + dy * m_rotCos};
+}
+
 void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, float alpha,
                           float radius, float border, bool solidUv,
                           const glm::vec3* bottomColor, const float* bottomAlpha) {
@@ -212,10 +231,12 @@ void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, f
     float u0 = solidUv ? -1.0f : 0.0f, v0 = solidUv ? -1.0f : 0.0f;
     float u1 = solidUv ? -1.0f : 1.0f, v1 = solidUv ? -1.0f : 1.0f;
 
-    m_vertices.push_back({x,     y,     0.0f, r,  g,  b,  a,  u0, v0, -hw, -hh, hw, hh, rad, border});
-    m_vertices.push_back({x + w, y,     0.0f, r,  g,  b,  a,  u1, v0,  hw, -hh, hw, hh, rad, border});
-    m_vertices.push_back({x + w, y + h, 0.0f, r2, g2, b2, a2, u1, v1,  hw,  hh, hw, hh, rad, border});
-    m_vertices.push_back({x,     y + h, 0.0f, r2, g2, b2, a2, u0, v1, -hw,  hh, hw, hh, rad, border});
+    const glm::vec2 p0 = Rotated(x, y), p1 = Rotated(x + w, y);
+    const glm::vec2 p2 = Rotated(x + w, y + h), p3 = Rotated(x, y + h);
+    m_vertices.push_back({p0.x, p0.y, 0.0f, r,  g,  b,  a,  u0, v0, -hw, -hh, hw, hh, rad, border});
+    m_vertices.push_back({p1.x, p1.y, 0.0f, r,  g,  b,  a,  u1, v0,  hw, -hh, hw, hh, rad, border});
+    m_vertices.push_back({p2.x, p2.y, 0.0f, r2, g2, b2, a2, u1, v1,  hw,  hh, hw, hh, rad, border});
+    m_vertices.push_back({p3.x, p3.y, 0.0f, r2, g2, b2, a2, u0, v1, -hw,  hh, hw, hh, rad, border});
     ++m_quadCount;
 }
 
@@ -226,10 +247,12 @@ void UIRenderer::PushGlyphQuad(float x0, float y0, float x1, float y1,
     unsigned char b = static_cast<unsigned char>(glm::clamp(color.b, 0.0f, 1.0f) * 255.0f);
     unsigned char a = static_cast<unsigned char>(glm::clamp(alpha, 0.0f, 1.0f) * 255.0f);
     // Half = 0 — SDF выключен (глиф режется покрытием атласа, не формой).
-    m_vertices.push_back({x0, y0, 0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
-    m_vertices.push_back({x1, y0, 0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
-    m_vertices.push_back({x1, y1, 0.0f, r, g, b, a, uv1.x, uv1.y, 0, 0, 0, 0, 0, 0});
-    m_vertices.push_back({x0, y1, 0.0f, r, g, b, a, uv0.x, uv1.y, 0, 0, 0, 0, 0, 0});
+    const glm::vec2 g0 = Rotated(x0, y0), g1 = Rotated(x1, y0);
+    const glm::vec2 g2v = Rotated(x1, y1), g3 = Rotated(x0, y1);
+    m_vertices.push_back({g0.x, g0.y, 0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({g1.x, g1.y, 0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({g2v.x, g2v.y, 0.0f, r, g, b, a, uv1.x, uv1.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({g3.x, g3.y, 0.0f, r, g, b, a, uv0.x, uv1.y, 0, 0, 0, 0, 0, 0});
     ++m_quadCount;
 }
 
@@ -377,7 +400,8 @@ void UIRenderer::PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const 
         unsigned char b = static_cast<unsigned char>(glm::clamp(c[i].b, 0.0f, 1.0f) * 255.0f);
         unsigned char al = static_cast<unsigned char>(glm::clamp(a[i], 0.0f, 1.0f) * 255.0f);
         // UV = (-1,-1) — сплошная заливка; Half = 0 — SDF не участвует.
-        m_vertices.push_back({p[i].x, p[i].y, 0.0f, r, g, b, al, -1.0f, -1.0f, 0, 0, 0, 0, 0, 0});
+        const glm::vec2 rp = Rotated(p[i].x, p[i].y);
+        m_vertices.push_back({rp.x, rp.y, 0.0f, r, g, b, al, -1.0f, -1.0f, 0, 0, 0, 0, 0, 0});
     }
     ++m_quadCount;
 }

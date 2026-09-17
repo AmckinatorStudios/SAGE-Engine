@@ -86,7 +86,7 @@ TEST(Components_survive_a_scene_round_trip) {
     probe.Registry()->emplace<ReflectionProbeComponent>(probe.Entity()).Resolution = 64;
 
     GameObject ui = scene.CreateObject("UI");
-    ui.Registry()->emplace<sage::ui::Transform>(ui.Entity());
+    ui.Registry()->emplace<sage::ui::Element>(ui.Entity());
     ui.Registry()->emplace<sage::ui::Label>(ui.Entity()).Text = "кнопка";
 
     std::unique_ptr<Scene> loaded = RoundTrip(scene, "core");

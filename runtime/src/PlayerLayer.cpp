@@ -642,7 +642,7 @@ void PlayerLayer::OnUpdate(float dt) {
 void PlayerLayer::UpdateUiInput(float dt) {
     if (!m_scene) return;
 
-    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
+    auto uiView = m_scene->Registry().view<sage::ui::Element>();
     if (uiView.begin() == uiView.end()) { ResetUiEdits(); return; }
 
     // Символы — готовыми кодами Unicode: раскладка, Shift и мёртвые клавиши
@@ -1124,7 +1124,7 @@ void PlayerLayer::OnRender() {
     // UI сцены (компоненты интерфейса из .sage): худ/меню, собранные в редакторе.
     // Рисуется в letterbox-viewport с его размерами — якоря совпадают с панелью
     // Game редактора (WYSIWYG).
-    auto uiView = m_scene->Registry().view<sage::ui::Transform>();
+    auto uiView = m_scene->Registry().view<sage::ui::Element>();
     if (uiView.begin() != uiView.end()) {
         if (!m_ui) m_ui = std::make_unique<UIRenderer>();
         m_uiWidth = vpW;  // тот же прямоугольник, с которым сравнивается мышь

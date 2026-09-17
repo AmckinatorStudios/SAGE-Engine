@@ -573,18 +573,18 @@ const char* const kJustify[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT(SAGE_UI_TEXT
 
 const std::vector<PartField>& LayoutFields() {
     static const std::vector<PartField> f = {
-        {"direction", SAGE_UI_TEXT("Direction"), PartField::Kind::Enum, offsetof(Layout, Direction), 0.0f, 0.0f,
+        {"direction", SAGE_UI_TEXT("Direction"), PartField::Kind::Enum, offsetof(Stack, Direction), 0.0f, 0.0f,
          nullptr, kFlow, 3},
-        {"justify", SAGE_UI_TEXT("Justify"), PartField::Kind::Enum, offsetof(Layout, Justify), 0.0f, 0.0f,
+        {"justify", SAGE_UI_TEXT("Justify"), PartField::Kind::Enum, offsetof(Stack, Justify), 0.0f, 0.0f,
          nullptr, kJustify, 4},
-        {"spacing", SAGE_UI_TEXT("Spacing"), PartField::Kind::Float, offsetof(Layout, Spacing), 0.0f, 128.0f},
-        {"padding", SAGE_UI_TEXT("Padding (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Layout, Padding), 0.0f,
+        {"spacing", SAGE_UI_TEXT("Spacing"), PartField::Kind::Float, offsetof(Stack, Spacing), 0.0f, 128.0f},
+        {"padding", SAGE_UI_TEXT("Padding (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Stack, Padding), 0.0f,
          256.0f},
-        {"columns", SAGE_UI_TEXT("Columns"), PartField::Kind::Int, offsetof(Layout, Columns), 1.0f, 32.0f},
+        {"columns", SAGE_UI_TEXT("Columns"), PartField::Kind::Int, offsetof(Stack, Columns), 1.0f, 32.0f},
         {"stretchCross", SAGE_UI_TEXT("Stretch across"), PartField::Kind::Bool,
-         offsetof(Layout, StretchCross)},
+         offsetof(Stack, StretchCross)},
         {"fitContent", SAGE_UI_TEXT("Size from content"), PartField::Kind::Bool,
-         offsetof(Layout, FitContent)},
+         offsetof(Stack, FitContent)},
     };
     return f;
 }
@@ -677,7 +677,7 @@ void RegisterBuiltins() {
     mask.Hint = SAGE_UI_TEXT("The subtree is clipped by this element's rectangle");
     RegisterPart(mask);
 
-    PartType layout = MakePart<Layout>("layout", SAGE_UI_TEXT("Layout"), 100, &LayoutFields());
+    PartType layout = MakePart<Stack>("layout", SAGE_UI_TEXT("Stack"), 100, &LayoutFields());
     layout.Icon = "layout";
     layout.Hint = SAGE_UI_TEXT("The parent lays its children out: row, column, grid");
     RegisterPart(layout);
