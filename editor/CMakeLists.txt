@@ -82,6 +82,7 @@ add_executable(SageEditor WIN32
     src/interface/InterfaceInspectorPanel.cpp
     src/interface/InterfacePreviewPanel.cpp
     src/interface/InterfaceViewportPanel.cpp
+    src/interface/InterfaceWidgets.cpp
     src/panels/NineSlicePanel.cpp
     src/AssetPreview.cpp
 )

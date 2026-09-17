@@ -1660,6 +1660,9 @@
     "Paste": "Вставить",
     "Place objects in the world": "Расставлять объекты в мире",
     "Search elements...": "Поиск элементов...",
-    "The frame exactly as the player sees it.": "Кадр ровно таким, каким его увидит игрок."
+    "The frame exactly as the player sees it.": "Кадр ровно таким, каким его увидит игрок.",
+    "Backdrop color": "Цвет подложки",
+    "Backdrop under the interface.\n1 — a flat fill instead of the game frame;\n0 — design the HUD over the game.": "Подложка под интерфейсом.\n1 — ровная заливка вместо игрового кадра;\n0 — верстать худ поверх игры.",
+    "Dark": "Тёмный"
   }
 }

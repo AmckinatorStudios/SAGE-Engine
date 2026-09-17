@@ -316,7 +316,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4617,6 +4617,68 @@ bool EditorLayer::SelfTestRenderStability() {
             std::error_code rmec;
             fs::remove(scenePath, rmec);
         }
+    }
+
+    // --- ПОДЛОЖКА РЕДАКТОРА ИНТЕРФЕЙСА: ПОД МЕНЮ, А НЕ ПОВЕРХ НЕГО --------
+    //
+    // Подложка приглушает сцену за интерфейсом. Пока её рисовала панель —
+    // полупрозрачным прямоугольником поверх готового кадра, — она ложилась и
+    // на сам интерфейс: движок рисует его последним проходом ВНУТРИ кадра.
+    // То есть «приглушить фон» приглушало всё, и на единице экран становился
+    // ровной заливкой без единого элемента.
+    //
+    // Проверяется это ТОЛЬКО ПО ПИКСЕЛЯМ: порядок проходов не виден ни в
+    // состоянии, ни в логе — видно лишь то, что получилось на картинке.
+    if (ok) {
+        // Белый элемент во весь левый верхний угол и чёрная подложка: «под» и
+        // «поверх» тогда различаются без порогов и подбора.
+        GameObject e = m_scene->CreateObject("SelftestBackdrop");
+        sage::ui::Element el;
+        el.Anchor = UIAnchor::TopLeft;
+        el.Position = {0.0f, 0.0f};
+        el.Size = {(float)m_renderer.GameWidth() * 0.5f, (float)m_renderer.GameHeight() * 0.5f};
+        m_scene->Registry().emplace<sage::ui::Element>(e.Entity(), el);
+        sage::ui::Fill fill;
+        fill.Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);   // непрозрачный белый
+        fill.Rounding = 0.0f;                              // угол мерим по пикселям
+        fill.Gradient = glm::vec4(0.0f);
+        m_scene->Registry().emplace<sage::ui::Fill>(e.Entity(), fill);
+
+        m_renderer.SetUIBackdrop(1.0f, glm::vec3(0.0f, 0.0f, 0.0f));
+        LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
+        m_renderer.RenderGame(*m_scene, env, cfg);
+
+        std::vector<unsigned char> px;
+        int fw = 0, fh = 0;
+        if (!m_renderer.ReadGamePixels(px, fw, fh) || px.empty()) {
+            LOG_ERROR("Editor") << "SELFTEST: игровой кадр с подложкой не прочитался";
+            ok = false;
+        } else {
+            // Средняя яркость двух точек: внутри элемента и заведомо снаружи.
+            // Строки RHI отдаёт снизу вверх, поэтому «верхний левый угол» —
+            // это верх кадра в координатах UI и низ в координатах чтения.
+            auto luma = [&](int x, int y) {
+                x = std::clamp(x, 0, fw - 1);
+                y = std::clamp(y, 0, fh - 1);
+                const size_t k = ((size_t)y * (size_t)fw + (size_t)x) * 3u;
+                return (int)((px[k] + px[k + 1] + px[k + 2]) / 3);
+            };
+            const int inside = luma(fw / 4, fh - fh / 4);
+            const int outside = luma(fw - fw / 8, fh / 8);
+            if (outside > 24) {
+                LOG_ERROR("Editor") << "SELFTEST: подложка не закрыла сцену (яркость вне "
+                                    << "элемента " << outside << ") — она не попала в кадр";
+                ok = false;
+            }
+            if (inside < 96) {
+                LOG_ERROR("Editor") << "SELFTEST: подложка накрыла сам интерфейс (яркость "
+                                    << "элемента " << inside << ") — она легла поверх кадра, "
+                                    << "а не под интерфейс";
+                ok = false;
+            }
+        }
+        m_renderer.SetUIBackdrop(0.0f, glm::vec3(0.0f));
+        m_scene->RemoveObject(e.Id());
     }
 
     m_scene->RemoveObject(fx.Id());

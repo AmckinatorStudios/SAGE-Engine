@@ -176,7 +176,10 @@ const char* const kNames[] = {
     "code", "question", "layout", "gear",
     "magnet",
     "warn", "error", "info", "debug",
-    "trash", "copy", "save", "open", "plus", "eye", "eye-off", "lock", "unlock",
+    "trash", "copy", "paste", "save", "open", "plus", "eye", "eye-off", "lock", "unlock",
+    "align-left", "align-center-x", "align-right",
+    "align-top", "align-center-y", "align-bottom",
+    "color",
 };
 
 } // namespace

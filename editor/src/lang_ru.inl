@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1660.
+// Язык: Русский. Строк: 1663.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -330,6 +330,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вернуться в редактор"},
     {"Backdrop",
      "Подложка"},
+    {"Backdrop color",
+     "Цвет подложки"},
+    {"Backdrop under the interface.\n1 — a flat fill instead of the game frame;\n0 — design the HUD over the game.",
+     "Подложка под интерфейсом.\n1 — ровная заливка вместо игрового кадра;\n0 — верстать худ поверх игры."},
     {"Background block: groups other elements",
      "Подложка: собирает внутри себя другие элементы"},
     {"Background is a flat colour; ambient uses its own values",
@@ -780,6 +784,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Цилиндр"},
     {"Cylinder with rounded ends: the working shape of a character",
      "Цилиндр со скруглёнными торцами: рабочая форма персонажа"},
+    {"Dark",
+     "Тёмный"},
     {"Darker when pressed",
      "Темнее при нажатии"},
     {"Day and night",
