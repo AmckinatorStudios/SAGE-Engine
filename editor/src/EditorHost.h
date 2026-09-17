@@ -1,4 +1,8 @@
 #pragma once
+#include "EditorTypes.h"
+#include "EditorHistory.h"
+#include "EditorSelection.h"
+#include "EditorTools.h"
 #include "UIToolSettings.h"
 #include <glm/glm.hpp>
 #include <cstdint>
@@ -13,57 +17,6 @@
 
 class Project;
 class AudioEngine;
-
-// Состояние Play-режима редактора (см. EditorLayer): вынесено из класса,
-// чтобы панели зависели от контракта EditorHost, а не от EditorLayer.
-enum class EditorPlayState { Editing, Playing, Paused };
-
-// Режим отображения сцены во вьюпорте (View > Render Mode / тулбар).
-//   Shaded    — полное освещение (по умолчанию);
-//   Wireframe — каркас (полигоны линиями), плоский цвет для читаемости;
-//   дальше    — отладочные виды из sage/render/DebugView.h: вместо результата
-//               освещения показывается одно его слагаемое.
-//
-// Порядок первых двух зафиксирован (на них завязан каркасный режим), остальные
-// идут ровно как в DebugView и переводятся в него сдвигом — держать два разных
-// порядка значило бы однажды показать шероховатость под именем нормалей.
-enum class EditorRenderMode {
-    Shaded,
-    Wireframe,
-    Unlit,
-    Normals,
-    Albedo,
-    Roughness,
-    Metallic,
-    Emissive,
-    AmbientOcclusion,
-    Shadow,
-    Depth,
-    Cascades,
-    WorldGrid,
-    Count
-};
-
-// Панели редактора, у которых есть кнопка быстрого доступа в верхней панели и
-// пункт в меню Window. Перечислением, а не строкой: опечатка в имени панели
-// должна быть ошибкой компиляции, а не тихо не работающей кнопкой.
-enum class EditorPanel {
-    Hierarchy,
-    Inspector,
-    Environment,   // окно среды сцены (небо, воздух, окружающий свет)
-    Assets,
-    Console,
-    Profiler,
-    Game,
-    Viewport,
-    UIEditor,      // редактор интерфейса (холст игрового кадра + элементы)
-    Settings,      // окно настроек движка (качество и цена кадра)
-    Input,         // раскладка управления проекта (действия и привязки)
-    Count
-};
-
-// Пространство манипулятора гизмо: Local — оси объекта, World — оси мира.
-enum class EditorGizmoSpace { Local, World };
 
 // ---------------------------------------------------------------------------
 // EditorHost — контракт операций редактора, доступных панелям.
@@ -83,20 +36,24 @@ public:
 
     // --- сцена и выбор ---
     virtual Scene& CurrentScene() = 0;
-    // Выбор — МНОЖЕСТВЕННЫЙ. SelectedId() — «первичная» (последняя кликнутая)
-    // сущность: под неё Inspector и пивот гизмо. Selection() — весь набор
-    // (включает первичную); гизмо двигает все, Delete/Duplicate — по всем.
-    virtual int SelectedId() const = 0;
-    virtual void SetSelectedId(int id) = 0;               // одиночный выбор (набор = {id})
-    virtual GameObject SelectedObject() = 0;              // первичная; invalid, если пусто
-    virtual const std::vector<int>& Selection() const = 0; // весь набор выбранных id
-    virtual bool IsSelected(int id) const = 0;
-    virtual void ToggleSelection(int id) = 0;             // Ctrl-клик: добавить/убрать из набора
-    // Заменить набор целиком. Нужен рамке выделения: она приносит СРАЗУ
-    // двадцать номеров, и класть их по одному через ToggleSelection значило бы
-    // двадцать раз переназначить первичную сущность и двадцать раз перерисовать
-    // инспектор. additive — добавить к тому, что уже выбрано (Ctrl/Shift).
-    virtual void SetSelection(const std::vector<int>& ids, bool additive = false) = 0;
+    // ВЫБОР — ОТДЕЛЬНЫЙ ОБЪЕКТ (см. EditorSelection.h), а не семь методов здесь.
+    //
+    // Выбор множественный, и правила у него свои: «первичная» — последняя
+    // добавленная (под неё встаёт инспектор и пивот гизмо), пустой набор
+    // сбрасывает первичную, повторное добавление не удваивает. Пока это были
+    // семь плоских методов контракта, правила жили в реализации хоста, и
+    // проверить их можно было только запустив редактор целиком.
+    //
+    // Панель работает с объектом напрямую: у выбора нет побочных действий на
+    // слой, ради которых стоило бы держать переходники.
+    virtual EditorSelection& Selection() = 0;
+    const EditorSelection& Selection() const {
+        return const_cast<EditorHost*>(this)->Selection();
+    }
+    // Первичная сущность объектом. Здесь, а не в EditorSelection: выбор хранит
+    // НОМЕРА и о сцене не знает — между выделением и обращением её могли
+    // перезагрузить, и объект по указателю оказался бы чужим.
+    virtual GameObject SelectedObject() = 0;
 
     // --- префабы (переиспользуемые сущности-поддеревья) ---
     // Сохраняет сущность (с детьми) в .sageprefab; false + err при ошибке.
@@ -211,13 +168,12 @@ public:
     // читается как поломка, а погашенная честно говорит «здесь пусто».
     virtual void Undo() = 0;
     virtual void Redo() = 0;
-    virtual bool CanUndo() const = 0;
-    virtual bool CanRedo() const = 0;
-    // Трекинг «размазанных» правок (перетаскивание DragFloat, набор текста):
-    // Capture — запомнить состояние «до» (на активации виджета/наведении
-    // гизмо), Commit — положить запомненное в undo-стек (на факте изменения).
-    virtual void CapturePendingSnapshot() = 0;
-    virtual void CommitPendingSnapshot() = 0;
+    // Есть ли что отменять, и трекинг «размазанных» правок (перетаскивание
+    // ползунка, набор текста) — у самой истории (см. EditorHistory.h). Push и
+    // TrackLastImGuiItem остаются здесь: первый помечает сцену изменённой, а
+    // второй знает про ImGui, и истории ни то, ни другое не принадлежит.
+    virtual EditorHistory& History() = 0;
+    const EditorHistory& History() const { return const_cast<EditorHost*>(this)->History(); }
     // Обёртка над Capture/Commit для только что нарисованного ImGui-виджета.
     virtual void TrackLastImGuiItem() = 0;
 
@@ -261,30 +217,12 @@ public:
     // соседний предмет, стоящий за стрелкой, было нечем.
     static constexpr int kGizmoSelectOnly = 0;
 
-    virtual int& GizmoOp() = 0;              // значение ImGuizmo::OPERATION
-    virtual bool& GizmoSnap() = 0;
-    virtual EditorGizmoSpace& GizmoSpace() = 0;
-    virtual bool& ShowGrid() = 0;
-    virtual EditorRenderMode& RenderMode() = 0;
-
-    // Шаг привязки — СВОЙ для переноса, поворота и масштаба.
-    //
-    // Раньше это были три константы, зашитые в панель вьюпорта: 0.5 / 15° / 0.1.
-    // Для игры про постройку из блоков шаг переноса — главный инструмент
-    // выравнивания, и он обязан совпадать с размером блока: при шаге 0.5 и блоке
-    // в 1 единицу половина построек встаёт со сдвигом на полблока. Меняется
-    // прямо в тулбаре; живёт до перезапуска редактора (своего файла настроек у
-    // редактора пока нет).
-    virtual float& SnapMove() = 0;
-    virtual float& SnapRotate() = 0;   // градусы
-    virtual float& SnapScale() = 0;
-    // Шаг для текущего режима гизмо — то, что реально уходит в ImGuizmo.
-    virtual float SnapStepForCurrentOp() = 0;
-
-    // Показывать габаритную коробку выделенного. Это ровно та коробка, по
-    // которой считается попадание мышью, — увидеть её полезно именно тогда,
-    // когда «клик не туда» непонятен.
-    virtual bool& ShowBounds() = 0;
+    // ИНСТРУМЕНТЫ — ОДИН ОБЪЕКТ (см. EditorTools.h), а не двенадцать ссылочных
+    // методов здесь: гизмо, оси, привязка и её шаг, сетка, габариты, режим
+    // показа и настройки вёрстки — единый набор, который тулбар, вьюпорт и
+    // редактор интерфейса правят сообща.
+    virtual EditorTools& Tools() = 0;
+    const EditorTools& Tools() const { return const_cast<EditorHost*>(this)->Tools(); }
 
     // Настройки инструментов вёрстки: сетка, привязки, подписи расстояний.
     // Одни на редактор — их читает редактор интерфейса и операции над
@@ -297,7 +235,6 @@ public:
     // включённой она мешала работать со сценой. Теперь интерфейс верстается в
     // своём окне (панель «Интерфейс»), где показан игровой кадр в его
     // собственном разрешении, и никакого режима для этого не нужно.
-    virtual UIToolSettings& UITools() = 0;
 
     // Создать элемент интерфейса по имени заготовки (sage::ui::PresetNames).
     // Новый элемент становится дочерним к выделенному элементу — интерфейс

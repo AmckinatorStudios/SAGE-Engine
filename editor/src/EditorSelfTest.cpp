@@ -445,7 +445,7 @@ void EditorLayer::TickInputProbe() {
                 m_probeStep = -1;
                 return;
             }
-            m_showUIEditor = false;
+            m_panels[EditorPanel::UIEditor] = false;
             m_viewport.RequestFocus();
             m_probeWait = 3;
             break;
@@ -455,7 +455,7 @@ void EditorLayer::TickInputProbe() {
             // Виджет инструментов прижат к самому верху, поэтому берём ниже.
             GameObject any = m_scene->FindByName("Red Cube");
             if (!any.Valid()) { fail("в сцене нет объекта, на котором проверять"); break; }
-            SetSelectedId(any.Id());
+            m_selection.SetPrimary(any.Id());
             press(ImVec2(mn.x + (mx.x - mn.x) * 0.06f, mn.y + (mx.y - mn.y) * 0.35f));
             break;
         }
@@ -494,7 +494,7 @@ void EditorLayer::TickInputProbe() {
             // смотрят, а список — второе такое место после вьюпорта.
             GameObject any = m_scene->FindByName("Red Cube");
             if (!any.Valid()) { fail("в сцене нет объекта, на котором проверять"); break; }
-            SetSelectedId(any.Id());
+            m_selection.SetPrimary(any.Id());
             const ImGuiWindow* list = ImGui::FindWindowByName("Hierarchy");
             if (!list || list->Size.y < 64.0f) { fail("списка объектов нет в кадре"); break; }
             // Ниже строк: у стартовой сцены их единицы, и низ списка пуст.
@@ -1083,7 +1083,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 LOG_ERROR("Editor") << "SELFTEST: в новом проекте остался объект прошлой сцены";
                 ok = false;
             }
-            if (SelectedId() != -1) {
+            if (m_selection.Primary() != -1) {
                 LOG_ERROR("Editor") << "SELFTEST: после смены проекта осталось выделение";
                 ok = false;
             }
@@ -2218,7 +2218,7 @@ bool EditorLayer::SelfTestSystems() {
         RigidBodyComponent rb; rb.RuntimeBody = 12345; // «живое» тело — не должно скопироваться
         m_scene->Registry().emplace<RigidBodyComponent>(src.Entity(), rb);
         m_scene->Registry().emplace<ColliderComponent>(src.Entity());
-        SetSelectedId(src.Id());
+        m_selection.SetPrimary(src.Id());
         DuplicateSelected();
         GameObject copy = m_scene->Get(m_selection.Primary());
         bool compOk = copy.Valid() && copy.Id() != src.Id() &&
@@ -2235,7 +2235,7 @@ bool EditorLayer::SelfTestSystems() {
         }
         if (copy.Valid()) m_scene->RemoveObject(copy.Id());
         m_scene->RemoveObject(src.Id());
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
     }
 
     // --- Звук объекта: компонент, файл сцены, запуск вместе с игрой ---------
@@ -2318,7 +2318,7 @@ bool EditorLayer::SelfTestSelection() {
             ok = false;
         }
         if (ok) {
-            SetSelectedId(parent.Id());
+            m_selection.SetPrimary(parent.Id());
             DeleteSelected(); // PushUndoSnapshot внутри; удаляет родителя С ребёнком
             if (m_scene->Count() != n0) {
                 LOG_ERROR("Editor") << "SELFTEST: hierarchy subtree delete failed (count "
@@ -2338,7 +2338,7 @@ bool EditorLayer::SelfTestSelection() {
             }
             if (p2.Valid()) m_scene->RemoveObject(p2.Id()); // чистим вместе с поддеревом
         }
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
     }
 
     // --- Мультивыделение: набор из двух, Delete удаляет обе, Undo возвращает,
@@ -2346,9 +2346,9 @@ bool EditorLayer::SelfTestSelection() {
     if (ok) {
         GameObject a = m_scene->CreateObject("MultiA");
         GameObject b = m_scene->CreateObject("MultiB");
-        SetSelectedId(a.Id());
-        ToggleSelection(b.Id()); // теперь выбраны обе, первичная — b
-        bool selOk = m_selection.All().size() == 2 && IsSelected(a.Id()) && IsSelected(b.Id()) &&
+        m_selection.SetPrimary(a.Id());
+        m_selection.Toggle(b.Id()); // теперь выбраны обе, первичная — b
+        bool selOk = m_selection.All().size() == 2 && m_selection.Contains(a.Id()) && m_selection.Contains(b.Id()) &&
                      m_selection.Primary() == b.Id();
         if (!selOk) {
             LOG_ERROR("Editor") << "SELFTEST: multi-select set wrong (size " << m_selection.All().size() << ")";
@@ -2365,8 +2365,8 @@ bool EditorLayer::SelfTestSelection() {
             if (ok) DeleteSelected(); // убрать копии (выделены они) -> снова n0
             // Удаляем исходную пару (снова мультивыбор) и проверяем Undo.
             if (ok) {
-                SetSelectedId(m_scene->FindByName("MultiA").Id());
-                ToggleSelection(m_scene->FindByName("MultiB").Id());
+                m_selection.SetPrimary(m_scene->FindByName("MultiA").Id());
+                m_selection.Toggle(m_scene->FindByName("MultiB").Id());
                 size_t nBefore = m_scene->Count();
                 DeleteSelected();
                 bool delOk = m_scene->Count() == nBefore - 2 && m_selection.Empty();
@@ -2385,7 +2385,7 @@ bool EditorLayer::SelfTestSelection() {
             GameObject g = m_scene->FindByName(nm);
             if (g.Valid()) m_scene->RemoveObject(g.Id());
         }
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
     }
 
     // --- Пикинг: клик по объекту выбирает ЕГО, а не пол под ним ---
@@ -2422,7 +2422,7 @@ bool EditorLayer::SelfTestSelection() {
 
         float u = 0.0f, v = 0.0f;
         project(glm::vec3(0.0f, 0.5f, 0.0f), u, v);   // центр кубика
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
         PickAtViewport(u, v, /*additive=*/false);
         if (m_selection.Primary() != box.Id()) {
             LOG_ERROR("Editor") << "SELFTEST: pick on box selected " << m_selection.Primary() << ", expected "
@@ -2433,7 +2433,7 @@ bool EditorLayer::SelfTestSelection() {
         // Клик по полу далеко от кубика — выбирается пол.
         if (ok) {
             project(glm::vec3(-6.0f, 0.0f, -4.0f), u, v);
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
             PickAtViewport(u, v, false);
             if (m_selection.Primary() != floor.Id()) {
                 LOG_ERROR("Editor") << "SELFTEST: pick on floor selected " << m_selection.Primary()
@@ -2453,7 +2453,7 @@ bool EditorLayer::SelfTestSelection() {
             for (const glm::vec3& p : nearMiss) {
                 if (!ok) break;
                 project(p, u, v);
-                SetSelectedId(-1);
+                m_selection.SetPrimary(-1);
                 PickAtViewport(u, v, false);
                 if (m_selection.Primary() != floor.Id()) {
                     LOG_ERROR("Editor") << "SELFTEST: pick near box at (" << p.x << "," << p.z
@@ -2469,7 +2469,7 @@ bool EditorLayer::SelfTestSelection() {
         if (ok) {
             // Габариты считаются по мировой матрице, а не по локальной коробке:
             // кубик поднят на 0.5 и стоит на полу, значит его коробка — от 0 до 1.
-            SetSelectedId(box.Id());
+            m_selection.SetPrimary(box.Id());
             glm::vec3 lo(0.0f), hi(0.0f);
             bool boundsOk = SelectionBounds(lo, hi) && std::abs(lo.y) < 1e-4f &&
                             std::abs(hi.y - 1.0f) < 1e-4f && std::abs(hi.x - 0.5f) < 1e-4f;
@@ -2487,7 +2487,7 @@ bool EditorLayer::SelfTestSelection() {
             // над центром уже стоят объекты предыдущих шагов, и кубик сел бы на
             // них — проверка молча измеряла бы не то.
             box.GetTransform().Position = glm::vec3(-8.0f, 6.0f, -8.0f);
-            SetSelectedId(box.Id());
+            m_selection.SetPrimary(box.Id());
             DropSelectedToSurface();
             const float y = box.GetTransform().Position.y;
             if (std::abs(y - 0.5f) > 1e-3f) {
@@ -2502,8 +2502,8 @@ bool EditorLayer::SelfTestSelection() {
         if (ok) {
             GameObject other = CreatePrimitiveEntity("PickBox2", MeshRef::Type::Cube);
             other.GetTransform().Position = glm::vec3(4.0f, 0.5f, 2.0f);
-            SetSelectedId(other.Id());
-            ToggleSelection(box.Id());   // первичная — box (x = 0)
+            m_selection.SetPrimary(other.Id());
+            m_selection.Toggle(box.Id());   // первичная — box (x = 0)
             AlignSelection(0);
             const glm::vec3 p = other.GetTransform().Position;
             // По X подтянулась, остальные оси не тронуты.
@@ -2513,13 +2513,13 @@ bool EditorLayer::SelfTestSelection() {
                 ok = false;
             }
             m_scene->RemoveObject(other.Id());
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
         }
 
         // Фокус: камера отъезжает от объекта, но смотрит на него — проверяем,
         // что объект оказался ПЕРЕД камерой и на разумной дистанции.
         if (ok) {
-            SetSelectedId(box.Id());
+            m_selection.SetPrimary(box.Id());
             m_camera.Position = glm::vec3(50.0f, 50.0f, 50.0f);
             FocusSelected();
             const glm::vec3 toBox = glm::vec3(0.0f, 0.5f, 0.0f) - m_camera.Position;
@@ -2536,7 +2536,7 @@ bool EditorLayer::SelfTestSelection() {
             GameObject g = m_scene->FindByName(nm);
             if (g.Valid()) m_scene->RemoveObject(g.Id());
         }
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
     }
 
     // --- Ортогональный вид ГЛАВНОГО слота ---
@@ -2664,7 +2664,7 @@ bool EditorLayer::SelfTestSelection() {
         kid.GetTransform().Position = {0.0f, 1.0f, 0.0f};
         m_scene->SetParent(kid.Entity(), root.Entity());
 
-        SetSelectedId(root.Id());
+        m_selection.SetPrimary(root.Id());
         fs::path prefabPath = m_project.Dir() / "assets" / "selftest.sageprefab";
         std::error_code pec;
         fs::create_directories(prefabPath.parent_path(), pec);
@@ -2673,7 +2673,7 @@ bool EditorLayer::SelfTestSelection() {
         // Удаляем оригинал и инстанцируем — проверяем восстановление из файла.
         if (saved) {
             m_scene->RemoveObject(root.Id());
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
             int newRootId = InstantiatePrefab(prefabPath);
             GameObject nr = m_scene->Get(newRootId);
             bool rootOk = nr.Valid() && nr.Name() == "PrefabRoot" &&
@@ -2694,7 +2694,7 @@ bool EditorLayer::SelfTestSelection() {
             ok = false;
         }
         fs::remove(prefabPath, pec);
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
     }
 
     // --- Пресеты качества: Low гасит тяжёлые проходы, значения переживают
@@ -3122,9 +3122,9 @@ bool EditorLayer::SelfTestSelection() {
             const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 0.0f, 8.0f), glm::vec3(0.0f),
                                                glm::vec3(0, 1, 0));
             const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
             SelectInViewportRect(view, proj, 0.0f, 0.0f, 1.0f, 1.0f, false);
-            if (IsSelected(box.Id())) {
+            if (m_selection.Contains(box.Id())) {
                 LOG_ERROR("Editor") << "SELFTEST: рамка выбрала выключенный объект";
                 ok = false;
             }
@@ -3360,7 +3360,7 @@ bool EditorLayer::SelfTestSelection() {
             if (!obj.Valid()) { ok = false; break; }
             // Ставим в начало координат и целимся ровно в него.
             obj.GetTransform().Position = glm::vec3(0.0f);
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
             PickAtViewportWith(view, proj, 0.5f, 0.5f, /*additive=*/false);
             if (m_selection.Primary() != id) {
                 LOG_ERROR("Editor") << "SELFTEST: щелчок по значку не выбирает: " << p.What;
@@ -3634,9 +3634,9 @@ bool EditorLayer::SelfTestSelection() {
         project(glm::vec3(-5.0f, 2.0f, 0.0f), u0, v0);
         project(glm::vec3(1.5f, -2.0f, 0.0f), u1, v1);
 
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
         SelectInViewportRect(view, proj, u0, v0, u1, v1, /*additive=*/false);
-        auto selected = [&](GameObject& o) { return IsSelected(o.Id()); };
+        auto selected = [&](GameObject& o) { return m_selection.Contains(o.Id()); };
         if (m_selection.All().size() != 2 || !selected(a) || !selected(b) || selected(c)) {
             LOG_ERROR("Editor") << "SELFTEST: рамка выделила " << m_selection.All().size()
                                 << " объектов вместо двух левых";
@@ -3662,9 +3662,9 @@ bool EditorLayer::SelfTestSelection() {
         if (ok) {
             GameObject behind = CreatePrimitiveEntity("RectBehind", MeshRef::Type::Cube);
             behind.GetTransform().Position = glm::vec3(0.0f, 0.0f, 40.0f);
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
             SelectInViewportRect(view, proj, 0.0f, 0.0f, 1.0f, 1.0f, false);
-            if (IsSelected(behind.Id())) {
+            if (m_selection.Contains(behind.Id())) {
                 LOG_ERROR("Editor") << "SELFTEST: рамка выбрала объект за спиной камеры";
                 ok = false;
             }
@@ -4266,10 +4266,10 @@ bool EditorLayer::SelfTestSelection() {
         // нельзя — Id() у него бросает, и проверка падала бы вместо проверки.
         const int idA = m_scene->CreateObject("LockA").Id();
         const int idB = m_scene->CreateObject("LockB").Id();
-        SetSelectedId(idA);
+        m_selection.SetPrimary(idA);
         SetInspectorLocked(true);
 
-        SetSelectedId(idB);   // «случайный клик», ради которого всё и затевалось
+        m_selection.SetPrimary(idB);   // «случайный клик», ради которого всё и затевалось
         if (!InspectedObject().Valid() || InspectedObject().Id() != idA) {
             LOG_ERROR("Editor") << "SELFTEST: inspector lock did not hold the object";
             ok = false;
@@ -4287,7 +4287,7 @@ bool EditorLayer::SelfTestSelection() {
         // Запертый объект удалили — панель обязана честно опустеть, а не
         // показывать чужие поля по освободившемуся номеру.
         if (ok) {
-            SetSelectedId(idA);
+            m_selection.SetPrimary(idA);
             SetInspectorLocked(true);
             m_scene->RemoveObject(idA);
             if (InspectedObject().Valid()) {
@@ -4296,7 +4296,7 @@ bool EditorLayer::SelfTestSelection() {
             }
             SetInspectorLocked(false);
         }
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
         if (m_scene->Get(idA).Valid()) m_scene->RemoveObject(idA);
         m_scene->RemoveObject(idB);
     }
@@ -4876,7 +4876,7 @@ bool EditorLayer::SelfTestTools() {
         //    так и должна работать галочка «больше не спрашивать».
         GameObject victim = m_scene->CreateObject("SelfTestVictim");
         const int victimId = victim.Id();
-        SetSelectedId(victimId);
+        m_selection.SetPrimary(victimId);
         m_confirm.SetSuppressed("delete-entity", false);
         DeleteSelected();
         if (!m_scene->Get(victimId).Valid()) {
@@ -4884,7 +4884,7 @@ bool EditorLayer::SelfTestTools() {
             ok = false;
         }
         m_confirm.SetSuppressed("delete-entity", true);
-        SetSelectedId(victimId);
+        m_selection.SetPrimary(victimId);
         DeleteSelected();
         if (m_scene->Get(victimId).Valid()) {
             LOG_ERROR("Editor") << "SELFTEST: с выключенным вопросом объект не удалился";
@@ -5512,23 +5512,23 @@ bool EditorLayer::SelfTestTools() {
     // перезапуска. Закрыв вкладки одну за другой, человек получал пустой
     // прямоугольник и решал, что «свернул весь редактор». Проверяем ровно это:
     // после закрытия ВСЕХ панелей редактор знает, что показывать нечего, а
-    // ShowAllPanels() — то, что делают и «Сбросить раскладку», и кнопка на
+    // m_panels.Restore() — то, что делают и «Сбросить раскладку», и кнопка на
     // пустом доке, — возвращает каждую панель.
     if (ok) {
-        const bool visibleBefore = AnyPanelVisible();
-        m_showHierarchy = m_showInspector = m_showEnvironment = false;
-        m_showViewport = m_showGame = m_showConsole = m_showAssets = false;
-        m_showProfiler = false;
+        const bool visibleBefore = m_panels.AnyVisible();
+        m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = false;
+        m_panels[EditorPanel::Viewport] = m_panels[EditorPanel::Game] = m_panels[EditorPanel::Console] = m_panels[EditorPanel::Assets] = false;
+        m_panels[EditorPanel::Profiler] = false;
         // Панель вёрстки — тоже панель, и AnyPanelVisible её считает. В списке
         // её не было, потому что до сих пор ни один шаг самопроверки её не
         // открывал; шаг «каталог объектов» открывает (создание элемента
         // интерфейса ведёт в редактор интерфейса), и «закрыли всё» переставало
         // быть правдой.
-        m_showUIEditor = false;
-        const bool visibleAfterClose = AnyPanelVisible();
-        ShowAllPanels();
-        const bool restored = m_showHierarchy && m_showInspector && m_showEnvironment &&
-                              m_showViewport && m_showGame && m_showConsole && m_showAssets;
+        m_panels[EditorPanel::UIEditor] = false;
+        const bool visibleAfterClose = m_panels.AnyVisible();
+        m_panels.Restore();
+        const bool restored = m_panels[EditorPanel::Hierarchy] && m_panels[EditorPanel::Inspector] && m_panels[EditorPanel::Environment] &&
+                              m_panels[EditorPanel::Viewport] && m_panels[EditorPanel::Game] && m_panels[EditorPanel::Console] && m_panels[EditorPanel::Assets];
         if (!visibleBefore || visibleAfterClose || !restored) {
             LOG_ERROR("Editor") << "SELFTEST: закрытые панели не возвращаются "
                                 << "(до " << visibleBefore << ", после закрытия " << visibleAfterClose
@@ -5549,16 +5549,16 @@ bool EditorLayer::SelfTestTools() {
     if (ok) {
         struct Mapping { EditorPanel Panel; bool* Field; const char* Name; };
         const Mapping mapping[] = {
-            {EditorPanel::Hierarchy, &m_showHierarchy, "Hierarchy"},
-            {EditorPanel::Inspector, &m_showInspector, "Inspector"},
-            {EditorPanel::Environment, &m_showEnvironment, "Environment"},
-            {EditorPanel::Assets, &m_showAssets, "Assets"},
-            {EditorPanel::Console, &m_showConsole, "Console"},
-            {EditorPanel::Profiler, &m_showProfiler, "Profiler"},
-            {EditorPanel::Game, &m_showGame, "Game"},
-            {EditorPanel::Viewport, &m_showViewport, "Viewport"},
-            {EditorPanel::UIEditor, &m_showUIEditor, "UI Editor"},
-            {EditorPanel::Settings, &m_showSettings, "Settings"},
+            {EditorPanel::Hierarchy, &m_panels[EditorPanel::Hierarchy], "Hierarchy"},
+            {EditorPanel::Inspector, &m_panels[EditorPanel::Inspector], "Inspector"},
+            {EditorPanel::Environment, &m_panels[EditorPanel::Environment], "Environment"},
+            {EditorPanel::Assets, &m_panels[EditorPanel::Assets], "Assets"},
+            {EditorPanel::Console, &m_panels[EditorPanel::Console], "Console"},
+            {EditorPanel::Profiler, &m_panels[EditorPanel::Profiler], "Profiler"},
+            {EditorPanel::Game, &m_panels[EditorPanel::Game], "Game"},
+            {EditorPanel::Viewport, &m_panels[EditorPanel::Viewport], "Viewport"},
+            {EditorPanel::UIEditor, &m_panels[EditorPanel::UIEditor], "UI Editor"},
+            {EditorPanel::Settings, &m_panels[EditorPanel::Settings], "Settings"},
         };
         for (const Mapping& m : mapping) {
             if (&PanelVisible(m.Panel) != m.Field) {
@@ -5727,9 +5727,9 @@ bool EditorLayer::SelfTestTools() {
 
         // Выравнивание по левому краю первичного (последнего кликнутого).
         // Первичный — тот, кого выделили последним, то есть BoxC.
-        SetSelectedId(a.Id());
-        ToggleSelection(b.Id());
-        ToggleSelection(c.Id());
+        m_selection.SetPrimary(a.Id());
+        m_selection.Toggle(b.Id());
+        m_selection.Toggle(c.Id());
         uiops::Align(*this, sage::ui::AlignEdge::Left);
         if (std::abs(offsetOf(a).x - 500.0f) > 0.01f ||
             std::abs(offsetOf(b).x - 500.0f) > 0.01f ||
@@ -5760,7 +5760,7 @@ bool EditorLayer::SelfTestTools() {
 
         // Смена якоря обязана ОСТАВИТЬ элемент на месте.
         if (ok) {
-            SetSelectedId(b.Id());
+            m_selection.SetPrimary(b.Id());
             const std::vector<sage::ui::ElementRect> before2 =
                 sage::ui::SolveSceneRects(*m_scene, 1280, 720, true);
             sage::ui::UIRect was{};
@@ -5784,7 +5784,7 @@ bool EditorLayer::SelfTestTools() {
         // «Растянуть на родителя с полем» — размер и место считаются от
         // родителя, а не от экрана: элемент внутри панели обязан остаться внутри.
         if (ok) {
-            SetSelectedId(c.Id());
+            m_selection.SetPrimary(c.Id());
             uiops::StretchToParent(*this, 16.0f);
             const sage::ui::Transform& t = reg.get<sage::ui::Transform>(c.Entity());
             if (std::abs(t.Size.x - (1280.0f - 32.0f)) > 0.01f ||
@@ -5798,7 +5798,7 @@ bool EditorLayer::SelfTestTools() {
         // Проверяется именно то, ради чего кнопка и появилась, — что элемент
         // становится ВИДИМЫМ, а не просто меняет числа.
         if (ok) {
-            SetSelectedId(a.Id());
+            m_selection.SetPrimary(a.Id());
             sage::ui::Transform& ta = reg.get<sage::ui::Transform>(a.Entity());
             ta.Offset = {5000.0f, -300.0f};   // далеко за краем
             uiops::BringIntoView(*this);
@@ -5813,7 +5813,7 @@ bool EditorLayer::SelfTestTools() {
                 ok = false;
             }
         }
-        SetSelectedId(-1);
+        m_selection.SetPrimary(-1);
     }
 
     // --- Публичные переменные, ссылки и события кнопки ----------------------
@@ -5971,7 +5971,7 @@ bool EditorLayer::SelfTestTools() {
 
         const fs::path pf = m_project.AssetsDir() / "selftest_door.sageprefab";
         std::string perr;
-        SetSelectedId(door.Id());
+        m_selection.SetPrimary(door.Id());
         if (!SaveSelectedAsPrefab(pf, perr)) {
             LOG_ERROR("Editor") << "SELFTEST: заготовка не сохранилась";
             ok = false;
@@ -6016,9 +6016,9 @@ bool EditorLayer::SelfTestTools() {
         // Дублирование идёт тем же путём — проверяем и его: Ctrl+D у объекта со
         // связями обязан давать вторую пару, а не вторую кнопку к первой двери.
         if (ok) {
-            SetSelectedId(door.Id());
+            m_selection.SetPrimary(door.Id());
             DuplicateSelected();
-            const std::vector<int>& sel = Selection();
+            const std::vector<int>& sel = m_selection.All();
             GameObject dup = sel.empty() ? GameObject{} : m_scene->Get(sel.front());
             const HierarchyComponent* dh =
                 dup.Valid() ? m_scene->Registry().try_get<HierarchyComponent>(dup.Entity())
@@ -6039,7 +6039,7 @@ bool EditorLayer::SelfTestTools() {
                     ok = false;
                 }
             }
-            SetSelectedId(-1);
+            m_selection.SetPrimary(-1);
         }
         fs::remove(pf, ec);
         sage::scene::ClearPrefabCache();

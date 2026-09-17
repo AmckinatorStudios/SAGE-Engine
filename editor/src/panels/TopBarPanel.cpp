@@ -122,8 +122,8 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     //
     // Гаснут, когда отменять нечего: серая кнопка честно говорит «здесь пусто»,
     // а живая, которая ничего не делает, читается как поломка.
-    const bool canUndo = host.CanUndo() && !host.InPlayMode();
-    const bool canRedo = host.CanRedo() && !host.InPlayMode();
+    const bool canUndo = host.History().CanUndo() && !host.InPlayMode();
+    const bool canRedo = host.History().CanRedo() && !host.InPlayMode();
     CenterY(row);
     ImGui::BeginDisabled(!canUndo);
     if (EditorIcons::IconOnlyButton("undo", T("Undo (Ctrl+Z)"))) host.Undo();

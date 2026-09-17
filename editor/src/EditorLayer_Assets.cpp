@@ -184,7 +184,7 @@ void EditorLayer::ShowAssetInPanel(const fs::path& path) {
         SetStatusMessage(T("File not found: ") + path.string());
         return;
     }
-    m_showAssets = true;
+    m_panels[EditorPanel::Assets] = true;
     m_assetsCwd = full.parent_path();
     m_assets.Select(full);
 }
@@ -376,7 +376,7 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         return false;
     }
 
-    SetSelectedId(newId);
+    m_selection.SetPrimary(newId);
     m_sceneDirty = true;
     UpdateWindowTitle();
     SetStatusMessage(T("Added to the scene: ") + asset.filename().string());
@@ -446,7 +446,7 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         MeshRendererComponent& mr = m_scene->Registry().get<MeshRendererComponent>(bestEntity);
         AssignMaterial(mr, useRef, ResourceManager::Instance().GetMaterial(useRef));
         const int id = m_scene->Registry().get<IdComponent>(bestEntity).Id;
-        SetSelectedId(id);
+        m_selection.SetPrimary(id);
         SetStatusMessage(status);
         return true;
     }
@@ -492,7 +492,7 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         }
     }
 
-    SetSelectedId(newId);
+    m_selection.SetPrimary(newId);
     m_sceneDirty = true;
     UpdateWindowTitle();
     SetStatusMessage(T("Placed in the scene: ") + asset.filename().string());
@@ -569,7 +569,7 @@ void EditorLayer::SelectInViewportRect(const glm::mat4& view, const glm::mat4& p
     auto lightMarkers = m_scene->Registry().view<LightComponent, Transform, IdComponent>();
     for (auto e : lightMarkers) marker(e, lightMarkers.get<IdComponent>(e).Id);
 
-    SetSelection(picked, additive);
+    m_selection.Set(picked, additive);
 }
 
 void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& proj, float u, float v,
@@ -659,8 +659,8 @@ void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& pro
     // Ctrl-клик (additive): добавить/убрать попадание из набора (клик по пустоте
     // ничего не меняет). Обычный клик: одиночный выбор (мимо всех — снять).
     if (additive) {
-        if (bestId != -1) ToggleSelection(bestId);
+        if (bestId != -1) m_selection.Toggle(bestId);
     } else {
-        SetSelectedId(bestId);
+        m_selection.SetPrimary(bestId);
     }
 }

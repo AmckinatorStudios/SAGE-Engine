@@ -79,7 +79,7 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
             ImGui::SameLine();
             if (ImGui::SmallButton(T("Show the sun"))) {
                 const IdComponent* id = scene.Registry().try_get<IdComponent>(sun);
-                if (id) host.SetSelectedId(id->Id);
+                if (id) host.Selection().SetPrimary(id->Id);
             }
         }
         return;

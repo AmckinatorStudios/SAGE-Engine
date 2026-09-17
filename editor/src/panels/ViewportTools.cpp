@@ -100,11 +100,11 @@ void ViewportPanel::DrawSpaceMenu(EditorHost& host) {
     Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("##space_menu")) return;
     Sage::UI::MenuSection(T("Gizmo axes"), true);
-    const bool world = host.GizmoSpace() == EditorGizmoSpace::World;
-    if (ImGui::MenuItem(T("Global"), nullptr, world)) host.GizmoSpace() = EditorGizmoSpace::World;
+    const bool world = host.Tools().GizmoSpace == EditorGizmoSpace::World;
+    if (ImGui::MenuItem(T("Global"), nullptr, world)) host.Tools().GizmoSpace = EditorGizmoSpace::World;
     ImGui::SameLine();
     ImGui::TextDisabled("%s", T("— axes of the scene"));
-    if (ImGui::MenuItem(T("Local"), nullptr, !world)) host.GizmoSpace() = EditorGizmoSpace::Local;
+    if (ImGui::MenuItem(T("Local"), nullptr, !world)) host.Tools().GizmoSpace = EditorGizmoSpace::Local;
     ImGui::SameLine();
     ImGui::TextDisabled("%s", T("— axes of the object itself"));
     ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
@@ -126,8 +126,8 @@ void ViewportPanel::DrawShadingMenu(EditorHost& host) {
         const char* name = (i == 0)   ? T("Shaded")
                            : (i == 1) ? T("Wireframe")
                                       : sage::render::DebugViewName((sage::render::DebugView)(i - 1));
-        if (ImGui::MenuItem(name, nullptr, (int)host.RenderMode() == i))
-            host.RenderMode() = (EditorRenderMode)i;
+        if (ImGui::MenuItem(name, nullptr, (int)host.Tools().RenderMode == i))
+            host.Tools().RenderMode = (EditorRenderMode)i;
     }
     ImGui::EndPopup();
 }
@@ -149,11 +149,11 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     Sage::UI::MenuSection(T("Over the selection"));
     // Отключены, когда выделения нет: серый пункт честнее пункта, который молча
     // ничего не делает.
-    ImGui::BeginDisabled(host.Selection().empty());
+    ImGui::BeginDisabled(host.Selection().Empty());
     if (ImGui::MenuItem(T("Frame the selection (F)"))) host.FocusSelected();
     if (ImGui::MenuItem(T("Drop onto the surface (End)"))) host.DropSelectedToSurface();
     ImGui::EndDisabled();
-    ImGui::BeginDisabled(host.Selection().size() < 2);
+    ImGui::BeginDisabled(host.Selection().All().size() < 2);
     if (ImGui::BeginMenu(T("Align to axis"))) {
         if (ImGui::MenuItem("X")) host.AlignSelection(0);
         if (ImGui::MenuItem("Y")) host.AlignSelection(1);
@@ -163,8 +163,8 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     ImGui::EndDisabled();
     // Габариты выделенного — та самая коробка, по которой считается попадание
     // мышью. Включается тогда, когда непонятно, почему клик выбрал не то.
-    if (ImGui::MenuItem(T("Bounds of the selection"), nullptr, host.ShowBounds()))
-        host.ShowBounds() = !host.ShowBounds();
+    if (ImGui::MenuItem(T("Bounds of the selection"), nullptr, host.Tools().ShowBounds))
+        host.Tools().ShowBounds = !host.Tools().ShowBounds;
 
     Sage::UI::MenuSection(T("Views"));
     const char* layouts[] = {T("Single view"), T("Two columns"), T("Four views")};
@@ -214,20 +214,20 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
 
     // --- 1. Чем работаем ----------------------------------------------------
     if (EditorIcons::IconOnlyButton("select", T("Select (Q): no gizmo, clicks pick objects"),
-                                    host.GizmoOp() == EditorHost::kGizmoSelectOnly))
-        host.GizmoOp() = EditorHost::kGizmoSelectOnly;
+                                    host.Tools().GizmoOp == EditorHost::kGizmoSelectOnly))
+        host.Tools().GizmoOp = EditorHost::kGizmoSelectOnly;
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("move", T("Move (W)"),
-                                    host.GizmoOp() == (int)ImGuizmo::TRANSLATE))
-        host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
+                                    host.Tools().GizmoOp == (int)ImGuizmo::TRANSLATE))
+        host.Tools().GizmoOp = (int)ImGuizmo::TRANSLATE;
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("rotate", T("Rotate (E)"),
-                                    host.GizmoOp() == (int)ImGuizmo::ROTATE))
-        host.GizmoOp() = (int)ImGuizmo::ROTATE;
+                                    host.Tools().GizmoOp == (int)ImGuizmo::ROTATE))
+        host.Tools().GizmoOp = (int)ImGuizmo::ROTATE;
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("scale", T("Scale (R)"),
-                                    host.GizmoOp() == (int)ImGuizmo::SCALE))
-        host.GizmoOp() = (int)ImGuizmo::SCALE;
+                                    host.Tools().GizmoOp == (int)ImGuizmo::SCALE))
+        host.Tools().GizmoOp = (int)ImGuizmo::SCALE;
     // УНИВЕРСАЛЬНОЕ И РАМКА — В СТРОКЕ, А НЕ В «…». Инструмент, выбираемый
     // мышью, обязан быть виден: спрятанный в меню, он существует только для
     // того, кто помнит про клавиши T и Y. Оба заменяют собой три кнопки сразу
@@ -235,16 +235,16 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
     // грань, оставляя противоположную на месте), — это не «редкое».
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("universal", T("All at once (T): move + rotate + scale"),
-                                    host.GizmoOp() == (int)ImGuizmo::UNIVERSAL))
-        host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
+                                    host.Tools().GizmoOp == (int)ImGuizmo::UNIVERSAL))
+        host.Tools().GizmoOp = (int)ImGuizmo::UNIVERSAL;
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("rect", T("Rect (Y): drag the faces of the bounding box"),
-                                    host.GizmoOp() == (int)ImGuizmo::BOUNDS))
-        host.GizmoOp() = (int)ImGuizmo::BOUNDS;
+                                    host.Tools().GizmoOp == (int)ImGuizmo::BOUNDS))
+        host.Tools().GizmoOp = (int)ImGuizmo::BOUNDS;
 
     // --- 2. В каких осях ----------------------------------------------------
     gap();
-    const bool world = host.GizmoSpace() == EditorGizmoSpace::World;
+    const bool world = host.Tools().GizmoSpace == EditorGizmoSpace::World;
     if (DropdownButton(world ? "world" : "cube", world ? T("Global") : T("Local"),
                        T("Which axes the gizmo works in")))
         ImGui::OpenPopup("##space_menu");
@@ -252,16 +252,16 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
 
     // --- 3. Что помогает ----------------------------------------------------
     gap();
-    if (EditorIcons::IconOnlyButton("magnet", T("Snap to step"), host.GizmoSnap()))
-        host.GizmoSnap() = !host.GizmoSnap();
+    if (EditorIcons::IconOnlyButton("magnet", T("Snap to step"), host.Tools().Snap))
+        host.Tools().Snap = !host.Tools().Snap;
     // Поле шага — ТОЛЬКО при включённой привязке. Серое неактивное поле занимает
     // столько же места, сколько рабочее, а сказать ему нечего.
-    if (host.GizmoSnap()) {
+    if (host.Tools().Snap) {
         ImGui::SameLine();
-        const auto op = (ImGuizmo::OPERATION)host.GizmoOp();
-        float* step = (op == ImGuizmo::ROTATE)  ? &host.SnapRotate()
-                      : (op == ImGuizmo::SCALE) ? &host.SnapScale()
-                                                : &host.SnapMove();
+        const auto op = (ImGuizmo::OPERATION)host.Tools().GizmoOp;
+        float* step = (op == ImGuizmo::ROTATE)  ? &host.Tools().SnapRotate
+                      : (op == ImGuizmo::SCALE) ? &host.Tools().SnapScale
+                                                : &host.Tools().SnapMove;
         const char* fmt = (op == ImGuizmo::ROTATE) ? "%.0f°" : "%.2f";
         ImGui::SetNextItemWidth(56.0f);
         ImGui::DragFloat("##snapstep", step, 0.05f, 0.01f, 360.0f, fmt);
@@ -271,8 +271,8 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
         }
     }
     ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("grid", T("Viewport grid"), host.ShowGrid()))
-        host.ShowGrid() = !host.ShowGrid();
+    if (EditorIcons::IconOnlyButton("grid", T("Viewport grid"), host.Tools().ShowGrid))
+        host.Tools().ShowGrid = !host.Tools().ShowGrid;
 
     // --- 4. Как показывать сцену --------------------------------------------
     //
@@ -280,7 +280,7 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
     // строки «Освещённо», которая девять раз из десяти и так не меняется.
     gap();
     if (EditorIcons::IconOnlyButton("sun", T("How to show the scene"),
-                                    host.RenderMode() != EditorRenderMode::Shaded))
+                                    host.Tools().RenderMode != EditorRenderMode::Shaded))
         ImGui::OpenPopup("##shading_menu");
     DrawShadingMenu(host);
 

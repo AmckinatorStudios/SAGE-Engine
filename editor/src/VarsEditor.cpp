@@ -85,7 +85,7 @@ bool DrawEntityRef(EditorHost& host, const char* id, sage::vars::EntityRef& ref)
     // проверить иначе нечем.
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
         pointed.Valid()) {
-        host.SetSelectedId(ref.Id);
+        host.Selection().SetPrimary(ref.Id);
     }
     ImGui::SameLine();
     if (ImGui::SmallButton(T("Clear##ref"))) {

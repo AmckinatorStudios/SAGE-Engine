@@ -407,12 +407,12 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // --- Хоткеи гизмо (не во время полёта камеры и не в полях ввода) ---
     if (hovered && !m_cameraDriving && !io.WantTextInput) {
         // Q — «просто выбирать»: гизмо убрано с глаз и не ловит клики.
-        if (ImGui::IsKeyPressed(ImGuiKey_Q)) host.GizmoOp() = EditorHost::kGizmoSelectOnly;
-        if (ImGui::IsKeyPressed(ImGuiKey_W)) host.GizmoOp() = (int)ImGuizmo::TRANSLATE;
-        if (ImGui::IsKeyPressed(ImGuiKey_E)) host.GizmoOp() = (int)ImGuizmo::ROTATE;
-        if (ImGui::IsKeyPressed(ImGuiKey_R)) host.GizmoOp() = (int)ImGuizmo::SCALE;
-        if (ImGui::IsKeyPressed(ImGuiKey_T)) host.GizmoOp() = (int)ImGuizmo::UNIVERSAL;
-        if (ImGui::IsKeyPressed(ImGuiKey_Y)) host.GizmoOp() = (int)ImGuizmo::BOUNDS;
+        if (ImGui::IsKeyPressed(ImGuiKey_Q)) host.Tools().GizmoOp = EditorHost::kGizmoSelectOnly;
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) host.Tools().GizmoOp = (int)ImGuizmo::TRANSLATE;
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) host.Tools().GizmoOp = (int)ImGuizmo::ROTATE;
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) host.Tools().GizmoOp = (int)ImGuizmo::SCALE;
+        if (ImGui::IsKeyPressed(ImGuiKey_T)) host.Tools().GizmoOp = (int)ImGuizmo::UNIVERSAL;
+        if (ImGui::IsKeyPressed(ImGuiKey_Y)) host.Tools().GizmoOp = (int)ImGuizmo::BOUNDS;
         // C — правка коллайдера. Рядом с остальными инструментами: это такой же
         // режим гизмо, только тянет он форму столкновения.
         if (ImGui::IsKeyPressed(ImGuiKey_C) && !ImGui::GetIO().KeyCtrl)
@@ -502,14 +502,14 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             glm::mat4 shape = rot * glm::scale(glm::mat4(1.0f), size);
 
             if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !host.InPlayMode()) {
-                host.CapturePendingSnapshot();
+                host.History().CapturePending();
             }
-            const float step = host.SnapStepForCurrentOp();
+            const float step = host.Tools().SnapStepForCurrentOp();
             const float colliderSnap[3] = {step, step, step};
             const bool changed = ImGuizmo::Manipulate(
                 glm::value_ptr(activeView), glm::value_ptr(activeProj), ImGuizmo::SCALE,
                 ImGuizmo::LOCAL, glm::value_ptr(shape), nullptr,
-                host.GizmoSnap() ? colliderSnap : nullptr);
+                host.Tools().Snap ? colliderSnap : nullptr);
             if (changed && !host.InPlayMode()) {
                 const glm::vec3 out(glm::length(glm::vec3(shape[0])),
                                     glm::length(glm::vec3(shape[1])),
@@ -533,7 +533,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                     }
                 }
             }
-            if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.CommitPendingSnapshot();
+            if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.History().CommitPending();
             m_gizmoWasUsing = ImGuizmo::IsUsing();
             // Гизмо объекта в этом кадре уже не нужно: тянут форму, а не объект.
             colliderGizmo = true;
@@ -543,7 +543,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // ни перехвата кликов. У управляемой камеры — тоже: её положение задаёт
     // полёт вида, и ручки, тянущие то же самое, спорили бы с ним каждый кадр.
     if (selected.Valid() && !colliderGizmo && selected.Id() != m_pilotId &&
-        host.GizmoOp() != EditorHost::kGizmoSelectOnly) {
+        host.Tools().GizmoOp != EditorHost::kGizmoSelectOnly) {
         Transform& tr = selected.GetTransform();
         // Гизмо работает в МИРОВОМ пространстве (учёт родителей): манипулируем
         // мировой матрицей, результат переводим обратно в локальную через
@@ -553,7 +553,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
         glm::mat4 model = scene.WorldMatrix(selected.Entity());
 
-        const bool rectTool = (ImGuizmo::OPERATION)host.GizmoOp() == ImGuizmo::BOUNDS;
+        const bool rectTool = (ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::BOUNDS;
 
         // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
         // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
@@ -566,31 +566,31 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         if (!ImGuizmo::IsUsing() && !host.InPlayMode() &&
             (ImGuizmo::IsOver() ||
              (rectTool && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)))) {
-            host.CapturePendingSnapshot();
+            host.History().CapturePending();
         }
 
         // Шаг привязки берём у хоста: он настраивается в тулбаре и запоминается
         // с проектом. Раньше это были три константы, зашитые здесь, — и для
         // постройки из блоков размером в единицу шаг 0.5 означал, что половина
         // построек встаёт со сдвигом на полблока.
-        auto op = (ImGuizmo::OPERATION)host.GizmoOp();
+        auto op = (ImGuizmo::OPERATION)host.Tools().GizmoOp;
         float snapValues[3];
-        const float snapUnit = host.SnapStepForCurrentOp();
+        const float snapUnit = host.Tools().SnapStepForCurrentOp();
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
 
         // Scale всегда в локальном пространстве (ImGuizmo игнорит WORLD для scale);
         // Move/Rotate — по выбору пользователя (тулбар: Local/World).
-        auto mode = (host.GizmoSpace() == EditorGizmoSpace::World && op != ImGuizmo::SCALE)
+        auto mode = (host.Tools().GizmoSpace == EditorGizmoSpace::World && op != ImGuizmo::SCALE)
                         ? ImGuizmo::WORLD : ImGuizmo::LOCAL;
         // Фронт «начали таскать»: одна запись undo + снимок мировых матриц всех
         // выбранных (для мультивыделения — двигаем весь набор относительно
         // первичной, вокруг которой и стоит гизмо).
         bool usingNow = ImGuizmo::IsUsing();
         if (usingNow && !m_gizmoWasUsing && !host.InPlayMode()) {
-            host.CommitPendingSnapshot();
+            host.History().CommitPending();
             m_dragStartPrimary = scene.WorldMatrix(selected.Entity());
             m_dragStartWorlds.clear();
-            for (int id : host.Selection()) {
+            for (int id : host.Selection().All()) {
                 GameObject o = scene.Get(id);
                 if (o.Valid()) m_dragStartWorlds.push_back({id, scene.WorldMatrix(o.Entity())});
             }
@@ -624,8 +624,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                 }
             }
             boundsPtr = localBounds;
-            if (host.GizmoSnap()) {
-                boundsSnap[0] = boundsSnap[1] = boundsSnap[2] = host.SnapMove();
+            if (host.Tools().Snap) {
+                boundsSnap[0] = boundsSnap[1] = boundsSnap[2] = host.Tools().SnapMove;
                 boundsSnapPtr = boundsSnap;
             }
 
@@ -662,7 +662,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const bool manipulated =
             ImGuizmo::Manipulate(glm::value_ptr(activeView), glm::value_ptr(activeProj),
                                  op, mode, glm::value_ptr(model),
-                                 nullptr, host.GizmoSnap() ? snapValues : nullptr,
+                                 nullptr, host.Tools().Snap ? snapValues : nullptr,
                                  boundsPtr, boundsSnapPtr);
 
         if (manipulated) {
@@ -671,7 +671,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             DecomposeToTransform(local, tr);
 
             // Мультивыделение: та же мировая дельта — на остальные выбранные.
-            if (host.Selection().size() > 1) {
+            if (host.Selection().All().size() > 1) {
                 glm::mat4 delta = model * glm::inverse(m_dragStartPrimary);
                 for (auto& [id, startWorld] : m_dragStartWorlds) {
                     if (id == selected.Id()) continue;
@@ -682,7 +682,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                     bool ancestorSelected = false;
                     for (entt::entity a = scene.ParentOf(o.Entity());
                          a != entt::null; a = scene.ParentOf(a)) {
-                        if (host.IsSelected(scene.Registry().get<IdComponent>(a).Id)) {
+                        if (host.Selection().Contains(scene.Registry().get<IdComponent>(a).Id)) {
                             ancestorSelected = true;
                             break;
                         }
@@ -767,7 +767,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             // квадрата отстоит от центра на 0.707 стороны, поэтому подложка
             // должна быть заметно шире — тогда значок лежит внутри неё целиком.
             const int id = reg.get<IdComponent>(e).Id;
-            const bool selected = host.IsSelected(id);
+            const bool selected = host.Selection().Contains(id);
             const ImVec2 mid(at.x + iconSize * 0.5f, at.y + iconSize * 0.5f);
             const float r = iconSize * 0.8f;
             // Сегменты заданы явно: автоматический подбор ImGui считает их от
@@ -921,7 +921,7 @@ void ViewportPanel::StartPilot(EditorHost& host, int cameraId) {
 
     // Одна запись отмены на весь полёт: каждый кадр управления меняет
     // положение, и снимок на кадр превратил бы историю в тысячу шагов.
-    host.CapturePendingSnapshot();
+    host.History().CapturePending();
     m_pilotId = cameraId;
 }
 
@@ -932,7 +932,7 @@ void ViewportPanel::StopPilot(EditorHost& host) {
     view.Position = m_pilotReturnPos;
     view.SetAngles(m_pilotReturnYaw, m_pilotReturnPitch);
     view.Fov = m_pilotReturnFov;
-    host.CommitPendingSnapshot();
+    host.History().CommitPending();
 }
 
 void ViewportPanel::SyncPilotCamera(EditorHost& host) {

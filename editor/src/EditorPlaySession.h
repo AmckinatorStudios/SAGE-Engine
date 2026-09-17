@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include "EditorHost.h"      // EditorPlayState
+#include "EditorTypes.h"    // EditorPlayState
 #include "EditorPlayInput.h"
 
 #include "sage/audio/AudioEngine.h"

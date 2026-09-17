@@ -142,7 +142,7 @@ void EditorLayer::CommitPendingSnapshot() {
 // «до» запоминается на активации виджета, в стек уходит на завершении правки.
 void EditorLayer::TrackLastImGuiItem() {
     if (InPlayMode()) return;
-    if (ImGui::IsItemActivated()) CapturePendingSnapshot();
+    if (ImGui::IsItemActivated()) m_history.CapturePending();
     if (ImGui::IsItemDeactivatedAfterEdit()) CommitPendingSnapshot();
 }
 
@@ -253,7 +253,7 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
     // Готовый объект: снимок для отмены уже сделан, осталось выделить и
     // отметить сцену изменённой.
     auto done = [&](GameObject obj) {
-        SetSelectedId(obj.Id());
+        m_selection.SetPrimary(obj.Id());
         m_sceneDirty = true;
         return obj.Id();
     };
@@ -484,11 +484,11 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         PushUndoSnapshot();
         const int newId = sage::ui::BuildDemo(*m_scene, demo);
         if (newId < 0) return -1;
-        SetSelectedId(newId);
+        m_selection.SetPrimary(newId);
         m_sceneDirty = true;
         // И сразу открывается редактор интерфейса: элемент, которого не видно
         // после создания, выглядит как «кнопка не сработала».
-        m_showUIEditor = true;
+        m_panels[EditorPanel::UIEditor] = true;
         m_uiEditor.RequestFocus();
         return newId;
     }
@@ -496,7 +496,7 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         const std::string preset = id.substr(std::string("ui.").size());
         PushUndoSnapshot();
         GameObject obj = CreateUIEntity(preset);
-        m_showUIEditor = true;
+        m_panels[EditorPanel::UIEditor] = true;
         m_uiEditor.RequestFocus();
         return done(obj);
     }
@@ -650,7 +650,7 @@ bool EditorLayer::SaveSelectedAsPrefab(const fs::path& path, std::string& err) {
 int EditorLayer::InstantiatePrefab(const fs::path& path) {
     PushUndoSnapshot();
     const int rootId = sage::scene::InstantiatePrefab(*m_scene, path.string());
-    if (rootId != -1) SetSelectedId(rootId);
+    if (rootId != -1) m_selection.SetPrimary(rootId);
     return rootId;
 }
 
@@ -744,7 +744,7 @@ void EditorLayer::DropSelectedToSurface() {
         for (auto e : view) {
             // Себя и других выделенных пропускаем: они едут вместе с этим, и
             // опираться на них значило бы ставить объект сам на себя.
-            if (IsSelected(view.get<IdComponent>(e).Id)) continue;
+            if (m_selection.Contains(view.get<IdComponent>(e).Id)) continue;
             Mesh* mesh = view.get<MeshRendererComponent>(e).MeshPtr.get();
             if (!mesh) continue;
             const glm::mat4 inv = glm::inverse(m_scene->WorldMatrix(e));

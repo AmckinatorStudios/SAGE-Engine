@@ -105,7 +105,7 @@ int SelectedUICount(EditorHost& host) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
     int count = 0;
-    for (int id : host.Selection()) {
+    for (int id : host.Selection().All()) {
         GameObject obj = scene.Get(id);
         if (obj.Valid() && reg.all_of<ui::Transform>(obj.Entity())) ++count;
     }
@@ -129,7 +129,7 @@ void GameFrameSize(EditorHost& host, int& outW, int& outH) {
 //  Верхняя строка: что относится к самому холсту
 // ============================================================================
 void UIEditorPanel::DrawTopBar(EditorHost& host) {
-    UIToolSettings& tools = host.UITools();
+    UIToolSettings& tools = host.Tools().UI;
 
     DrawCreateMenu(host);
 
@@ -220,7 +220,7 @@ void UIEditorPanel::DrawCreateMenu(EditorHost& host) {
             if (ImGui::MenuItem(name.c_str())) {
                 host.PushUndoSnapshot();
                 GameObject created = host.CreateUIEntity(name);
-                if (created.Valid()) host.SetSelectedId(created.Id());
+                if (created.Valid()) host.Selection().SetPrimary(created.Id());
             }
         }
         ImGui::Separator();
@@ -261,7 +261,7 @@ void UIEditorPanel::DrawTreeNode(EditorHost& host, Scene& scene, int id, int dep
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
                                ImGuiTreeNodeFlags_DefaultOpen;
     if (!hasUiChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    if (host.IsSelected(id)) flags |= ImGuiTreeNodeFlags_Selected;
+    if (host.Selection().Contains(id)) flags |= ImGuiTreeNodeFlags_Selected;
 
     // Выключенный элемент — серым: иначе «почему его не видно» решается
     // перебором свойств.
@@ -270,8 +270,8 @@ void UIEditorPanel::DrawTreeNode(EditorHost& host, Scene& scene, int id, int dep
     if (!xf->Visible) ImGui::PopStyleColor();
 
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-        if (ImGui::GetIO().KeyCtrl) host.ToggleSelection(id);
-        else host.SetSelectedId(id);
+        if (ImGui::GetIO().KeyCtrl) host.Selection().Toggle(id);
+        else host.Selection().SetPrimary(id);
     }
 
     // Порядок среди соседей — тут же, стрелками. Layer «больше — поверх», и
@@ -348,7 +348,7 @@ void UIEditorPanel::DrawTree(EditorHost& host, float width) {
 //  Холст: игровой кадр в разрешении игры
 // ============================================================================
 void UIEditorPanel::DrawCanvas(EditorHost& host) {
-    UIToolSettings& tools = host.UITools();
+    UIToolSettings& tools = host.Tools().UI;
 
     int gw = 0, gh = 0;
     GameFrameSize(host, gw, gh);

@@ -43,7 +43,7 @@ void UICanvas::Collect(Scene& scene, EditorHost& host, int frameW, int frameH) {
         it.Scale = e.Scale;
         it.InLayout = e.InLayout;
         it.Visible = e.Visible;
-        it.Selected = host.IsSelected(it.Id);
+        it.Selected = host.Selection().Contains(it.Id);
         m_items.push_back(it);
     }
 }
@@ -124,7 +124,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     if (!dl || frameW <= 0 || frameH <= 0) return;
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
-    UIToolSettings& tools = host.UITools();
+    UIToolSettings& tools = host.Tools().UI;
 
     // --- Где на экране лежит холст ------------------------------------------
     //
@@ -166,7 +166,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
                                  tools, sx, sy);
     dl->AddRect(canvasA, canvasB, IM_COL32(255, 255, 255, 120), 0.0f, 0, 1.0f);
 
-    const int selectedId = host.SelectedId();
+    const int selectedId = host.Selection().Primary();
     const ImVec2 mouse = ImGui::GetMousePos();
 
     // --- Рамки элементов + ручки у первичного выделенного --------------------
@@ -301,7 +301,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     // Мышью попасть в пиксель нельзя в принципе, а именно пиксель и решает,
     // ровно ли стоит подпись в кнопке. Shift — шаг сетки: так двигают целыми
     // клетками, не считая нажатия.
-    if (hovered && !ImGui::GetIO().WantTextInput && !host.Selection().empty()) {
+    if (hovered && !ImGui::GetIO().WantTextInput && !host.Selection().Empty()) {
         const float step = ImGui::GetIO().KeyShift ? std::max(1.0f, tools.Snap.GridStep) : 1.0f;
         glm::vec2 nudge(0.0f);
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) nudge.x -= step;
@@ -330,10 +330,10 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
             bool first = true;
             for (const Item& it : m_items) {
                 if (!it.Visible || !Overlaps(it.Rect, box)) continue;
-                if (first) { host.SetSelectedId(it.Id); first = false; }
-                else if (!host.IsSelected(it.Id)) host.ToggleSelection(it.Id);
+                if (first) { host.Selection().SetPrimary(it.Id); first = false; }
+                else if (!host.Selection().Contains(it.Id)) host.Selection().Toggle(it.Id);
             }
-            if (first) host.SetSelectedId(-1);
+            if (first) host.Selection().SetPrimary(-1);
         }
         return;
     }
@@ -372,12 +372,12 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
 
         // Ctrl — добавить/убрать из набора, как везде в редакторе.
         if (ImGui::GetIO().KeyCtrl) {
-            host.ToggleSelection(hit);
+            host.Selection().Toggle(hit);
             return;
         }
         // Клик по тому, что уже в наборе, набор НЕ сбрасывает: иначе набор
         // нельзя было бы утащить целиком — первый же клик оставлял бы один.
-        if (!host.IsSelected(hit)) host.SetSelectedId(hit);
+        if (!host.Selection().Contains(hit)) host.Selection().SetPrimary(hit);
 
         m_drag = Drag::Move;
         m_dragId = hit;
@@ -385,7 +385,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         m_dragStart.clear();
         std::vector<UIRect> selected;
         for (const Item& it : m_items) {
-            if (!host.IsSelected(it.Id)) continue;
+            if (!host.Selection().Contains(it.Id)) continue;
             m_dragStart.emplace_back(it.Id, it.Rect);
             selected.push_back(it.Rect);
             if (it.Id == hit) m_dragStartRect = it.Rect;
@@ -450,7 +450,7 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         siblings.reserve(m_items.size());
         for (const Item& it : m_items) {
             if (it.Id == m_dragId) continue;
-            if (m_drag == Drag::Move && host.IsSelected(it.Id)) continue;
+            if (m_drag == Drag::Move && host.Selection().Contains(it.Id)) continue;
             siblings.push_back(it.Rect);
         }
         // Привязка считается по прямоугольнику НАБОРА (при перемещении) или по

@@ -149,7 +149,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
                                ImGuiTreeNodeFlags_DrawLinesNone;
-    if (host.IsSelected(id)) flags |= ImGuiTreeNodeFlags_Selected; // подсветка всех выбранных
+    if (host.Selection().Contains(id)) flags |= ImGuiTreeNodeFlags_Selected; // подсветка всех выбранных
     if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
     ImGui::PushID(id);
@@ -264,10 +264,10 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         if (io.KeyShift && m_anchorId != -1) {
             m_shiftClickId = id;   // диапазон считается в конце кадра (см. HierarchyPanel.h)
         } else if (io.KeyCtrl) {
-            host.ToggleSelection(id);
+            host.Selection().Toggle(id);
             m_anchorId = id;
         } else {
-            host.SetSelectedId(id);
+            host.Selection().SetPrimary(id);
             m_anchorId = id;
         }
     }
@@ -329,18 +329,18 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     if (Sage::UI::MenuScope rowMenu; ImGui::BeginPopupContextItem()) {
         // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
         // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
-        if (!host.IsSelected(id)) host.SetSelectedId(id);
+        if (!host.Selection().Contains(id)) host.Selection().SetPrimary(id);
         if (EditorIcons::MenuItem("plus", T("Create Child"))) {
             host.PushUndoSnapshot();
             GameObject child = scene.CreateObject("Child");
             scene.SetParent(child.Entity(), e);
-            host.SetSelectedId(child.Id());
+            host.Selection().SetPrimary(child.Id());
         }
         if (EditorIcons::MenuItem("folder-plus", T("Create Folder Inside"))) {
             host.PushUndoSnapshot();
             GameObject folder = scene.CreateFolder(T("Folder"));
             scene.SetParent(folder.Entity(), e);
-            host.SetSelectedId(folder.Id());
+            host.Selection().SetPrimary(folder.Id());
         }
         // ЦВЕТ — только у папки: у предмета сцены цвет уже занят материалом, и
         // вторая, ничего не значащая раскраска рядом путала бы.
@@ -451,10 +451,10 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
         // раскладывая сцену, вложенные группы делают сразу, и лезть потом
         // перетаскивать только что созданную папку внутрь — лишний шаг.
         GameObject folder = scene.CreateFolder(T("Folder"));
-        GameObject selected = scene.Get(host.SelectedId());
+        GameObject selected = scene.Get(host.Selection().Primary());
         if (selected.Valid() && scene.IsFolder(selected.Entity()))
             scene.SetParent(folder.Entity(), selected.Entity());
-        host.SetSelectedId(folder.Id());
+        host.Selection().SetPrimary(folder.Id());
     }
     ImGui::Separator();
 
@@ -571,11 +571,11 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
             // ЩЁЛКНУЛИ, а не последний по порядку: человек смотрит на него.
             range.erase(std::remove(range.begin(), range.end(), m_shiftClickId), range.end());
             range.push_back(m_shiftClickId);
-            host.SetSelection(range, ImGui::GetIO().KeyCtrl);
+            host.Selection().Set(range, ImGui::GetIO().KeyCtrl);
         } else {
             // Якорь свернули вместе с веткой — диапазона нет, но щелчок не
             // должен пропадать: выбираем то, по чему щёлкнули.
-            host.SetSelectedId(m_shiftClickId);
+            host.Selection().SetPrimary(m_shiftClickId);
             m_anchorId = m_shiftClickId;
         }
         m_shiftClickId = -1;
@@ -583,13 +583,13 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
 
     if (m_rectActive && m_rect.Finished) {
         if (rectselect::Meaningful(m_rect)) {
-            host.SetSelection(m_rectHits, m_rect.Additive);
+            host.Selection().Set(m_rectHits, m_rect.Additive);
         } else if (!m_rect.Additive) {
             // ЩЕЛЧОК ПО ПУСТОМУ МЕСТУ СПИСКА СНИМАЕТ ВЫДЕЛЕНИЕ — так же, как во
             // вьюпорте. Раньше такой щелчок не делал ничего: рамка выходила
             // «незначащей», и выбор оставался висеть. Снять его можно было
             // только выбрав другой объект, то есть никак.
-            host.SetSelectedId(-1);
+            host.Selection().SetPrimary(-1);
         }
     }
     rectselect::End(m_rect, ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&

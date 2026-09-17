@@ -40,6 +40,8 @@
 
 namespace sage { class Application; }
 #include "EditorPlaySession.h"
+#include "EditorPanelVisibility.h"
+#include "EditorRecovery.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
 #include "ProjectLauncher/ProjectDatabase.h"
@@ -107,15 +109,8 @@ public:
     // Выделение, история и инструменты — отдельные объекты (см. их заголовки).
     // Слой их только держит и пересказывает панелям через EditorHost: правила
     // выделения и отката живут там, где их можно прочитать и проверить.
-    int SelectedId() const override { return m_selection.Primary(); }
-    void SetSelectedId(int id) override { m_selection.SetPrimary(id); }
+    EditorSelection& Selection() override { return m_selection; }
     GameObject SelectedObject() override { return m_scene->Get(m_selection.Primary()); }
-    const std::vector<int>& Selection() const override { return m_selection.All(); }
-    bool IsSelected(int id) const override { return m_selection.Contains(id); }
-    void ToggleSelection(int id) override { m_selection.Toggle(id); }
-    void SetSelection(const std::vector<int>& ids, bool additive = false) override {
-        m_selection.Set(ids, additive);
-    }
 
     // --- EditorHost: префабы ---
     bool SaveSelectedAsPrefab(const std::filesystem::path& path, std::string& err) override;
@@ -174,10 +169,8 @@ public:
     void PushUndoSnapshot() override;
     // Сцена изменена: звёздочка в заголовке окна и маркер несохранённого.
     void MarkSceneDirty();
-    bool CanUndo() const override { return m_history.CanUndo(); }
-    bool CanRedo() const override { return m_history.CanRedo(); }
-    void CapturePendingSnapshot() override { m_history.CapturePending(); }
-    void CommitPendingSnapshot() override;
+    EditorHistory& History() override { return m_history; }
+    void CommitPendingSnapshot();
     void TrackLastImGuiItem() override;
 
     // --- EditorHost: сущности ---
@@ -206,17 +199,7 @@ public:
     PlayContext MakePlayContext();
 
     // --- EditorHost: общее состояние инструментов (тулбар + вьюпорт) ---
-    int& GizmoOp() override { return m_tools.GizmoOp; }
-    bool& GizmoSnap() override { return m_tools.Snap; }
-    EditorGizmoSpace& GizmoSpace() override { return m_tools.GizmoSpace; }
-    bool& ShowGrid() override { return m_tools.ShowGrid; }
-    EditorRenderMode& RenderMode() override { return m_tools.RenderMode; }
-    float& SnapMove() override { return m_tools.SnapMove; }
-    float& SnapRotate() override { return m_tools.SnapRotate; }
-    float& SnapScale() override { return m_tools.SnapScale; }
-    float SnapStepForCurrentOp() override { return m_tools.SnapStepForCurrentOp(); }
-    bool& ShowBounds() override { return m_tools.ShowBounds; }
-    UIToolSettings& UITools() override { return m_tools.UI; }
+    EditorTools& Tools() override { return m_tools; }
     GameObject CreateUIEntity(const std::string& preset) override;
     bool& ColliderEditMode() override { return m_tools.ColliderEdit; }
 
@@ -262,7 +245,7 @@ public:
                               float u1, float v1, bool additive) override;
 
     // --- EditorHost: панель Game ---
-    void ShowSettingsWindow() override { m_showSettings = true; }
+    void ShowSettingsWindow() override { m_panels[EditorPanel::Settings] = true; }
 
     // --- EditorHost: раскладка управления ---
     sage::input::InputSystem& ProjectInput() override { return m_projectInput; }
@@ -278,22 +261,7 @@ public:
     const std::vector<sage::input::InputEvent>& FrameInputEvents() const override {
         return m_play.Input().FrameEvents();
     }
-    bool& PanelVisible(EditorPanel panel) override {
-        switch (panel) {
-            case EditorPanel::Hierarchy:   return m_showHierarchy;
-            case EditorPanel::Inspector:   return m_showInspector;
-            case EditorPanel::Environment: return m_showEnvironment;
-            case EditorPanel::Assets:      return m_showAssets;
-            case EditorPanel::Console:     return m_showConsole;
-            case EditorPanel::Profiler:    return m_showProfiler;
-            case EditorPanel::Game:        return m_showGame;
-            case EditorPanel::Viewport:    return m_showViewport;
-            case EditorPanel::UIEditor:    return m_showUIEditor;
-            case EditorPanel::Settings:    return m_showSettings;
-            case EditorPanel::Input:       return m_showInput;
-            default:                       return m_showViewport;
-        }
-    }
+    bool& PanelVisible(EditorPanel panel) override { return m_panels[panel]; }
     std::string CurrentSceneName() const override {
         return m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
     }
@@ -436,18 +404,10 @@ private:
     sage::SystemScheduler m_systems;
 
     bool m_sceneDirty = false;           // есть несохранённые правки (маркер '*')
-    // Автосохранение и восстановление после падения. Оба пишут в ОТДЕЛЬНЫЕ
-    // файлы рядом с редактором, а не поверх сцены (см. OnUpdate).
-    float m_autosaveInterval = 60.0f;    // 0 — выключено
-    float m_autosaveTimer = 0.0f;
-    std::string m_lastAutosave;
-    // Найденный при запуске файл восстановления: показать предложение один раз.
-    std::string m_recoveryFile;
-    std::string m_crashReportPath;   // отчёт прошлого падения, пусто — не падали
-    std::string m_crashReportText;   // он же целиком, для показа и копирования
-    size_t m_crashReportCount = 0;   // сколько отчётов лежит рядом
-    bool m_crashPrompt = false;
-    bool m_recoveryPrompt = false;
+    // Что осталось от прошлого запуска и как не потерять этот: автосохранение,
+    // файл восстановления, отчёт о падении (см. EditorRecovery.h). Рисование
+    // окон осталось здесь — модалки это ImGui и переводы.
+    EditorRecovery m_recovery;
 
     // --- ВОПРОС О НЕСОХРАНЁННОЙ СЦЕНЕ ---------------------------------------
     //
@@ -471,8 +431,7 @@ private:
     void ReportModelMaterials(const ModelMaterialImportResult& r);
     void DrawRecoveryPrompt();
     // Окно отчёта о ПРОШЛОМ падении: показывается один раз при запуске, если
-    // рядом лежит sage-crash-*.txt (см. FindCrashReport).
-    void FindCrashReport();
+    // рядом лежит sage-crash-*.txt (см. EditorRecovery::ScanOnStartup).
     void DrawCrashReport();
     std::string m_windowTitle;           // кэш заголовка (не дёргать GLFW каждый кадр)
 
@@ -520,26 +479,11 @@ private:
     // --- docking ---
     bool m_rebuildDockLayout = false; // форс-перестройка (Window > Reset Layout)
 
-    // Видимость панелей. У каждой докнутой панели ImGui рисует крестик на
-    // вкладке, и закрытая панель раньше исчезала НАВСЕГДА: в меню Window её не
-    // было, а раскладка сохранялась в sage_editor_imgui.ini — то есть закрытое
-    // окно не возвращалось и после перезапуска. Закрыв вкладки одну за другой,
-    // человек оставался с пустым серым прямоугольником и делал вывод, что
-    // «свернул весь редактор» и сломал его. Флаг на панель + пункт в меню
-    // Window делают закрытие обратимым, а ShowAllPanels() — «Reset Layout» и
-    // подсказка на пустом доке — возвращают всё одним действием.
-    bool m_showHierarchy = true;
-    bool m_showInspector = true;
-    bool m_showEnvironment = true;
-    // Редактор интерфейса — по умолчанию закрыт: это отдельный инструмент под
-    // отдельную задачу, и открывают его, когда садятся верстать.
-    bool m_showUIEditor = false;
-    bool m_showViewport = true;
-    bool m_showGame = true;
-    bool m_showConsole = true;
-    bool m_showAssets = true;
-    void ShowAllPanels();         // вернуть все панели на экран
-    bool AnyPanelVisible() const; // осталась ли на экране хоть одна панель
+    // Какие панели сейчас на экране (см. EditorPanelVisibility.h): массивом по
+    // перечислению, а не одиннадцатью полями bool — иначе каждая новая панель
+    // требует правки в трёх местах сразу, и забытая строка в «показать все»
+    // означает панель, которую нельзя вернуть.
+    EditorPanelVisibility m_panels;
     // Подсказка на пустом доке. Прямоугольник передаётся числами, а не ImVec2:
     // imgui.h в этот заголовок не входит, и тянуть его сюда ради двух точек —
     // значит навязать его всем, кто включает EditorLayer.h.
@@ -560,7 +504,6 @@ private:
     // EditorHost::RequestCameraPreview).
     int m_cameraPreviewId = -1;
     int m_viewCount = 1;
-    bool m_showProfiler = false;
     bool m_showIconSheet = false; // страница со всеми иконками (Window > Icon sheet)
     HierarchyPanel m_hierarchy;
     InspectorPanel m_inspector;
@@ -611,8 +554,6 @@ private:
     std::string m_settingsStamp;
     // Переносит m_settings в глобальный EngineConfig, если они разошлись.
     void ApplyEngineSettings();
-    bool m_showSettings = false;
-    bool m_showInput = false;
     bool m_showAbout = false; // Help > About SAGE (версии подсистем)
 
     // --- плагины редактора (v1, см. PluginAPI.h/PluginManager.h) ---
