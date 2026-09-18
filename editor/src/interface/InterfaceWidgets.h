@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "sage/ui/UILayoutTools.h"
 
 // ---------------------------------------------------------------------------
@@ -17,5 +19,12 @@ namespace sage::editor::interfacewidgets {
 // enabled=false — кнопка видна, но недоступна: пропадающая кнопка заставляет
 // гадать, куда она делась. Возвращает true при нажатии.
 bool AlignButton(const char* id, sage::ui::AlignEdge edge, const char* tooltip, bool enabled);
+
+// Значок заготовки элемента по её имени («Button» -> «ui-button»).
+//
+// Имя заготовки живёт в движке (sage::ui::PresetNames), а рисунок — дело
+// редактора: движок про иконки не знает и знать не должен. Имя без своего
+// рисунка получает общий — список не рассыпается из-за новой заготовки.
+const char* PresetIcon(const std::string& preset);
 
 } // namespace sage::editor::interfacewidgets

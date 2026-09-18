@@ -345,7 +345,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         // ЦВЕТ — только у папки: у предмета сцены цвет уже занят материалом, и
         // вторая, ничего не значащая раскраска рядом путала бы.
         if (FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
-            if (ImGui::BeginMenu(T("Folder Colour"))) {
+            if (EditorIcons::BeginMenu("color", T("Folder Colour"))) {
                 for (const sage::editor::foldercolors::Tint& tint : sage::editor::foldercolors::Palette()) {
                     // Образец цвета рядом с названием: выбирают глазами, а
                     // список из восьми слов цвет не показывает.

@@ -114,6 +114,33 @@ ICONS = {
     "anchor-cc": "focus-centered", "anchor-cr": "box-align-right",
     "anchor-bl": "box-align-bottom-left", "anchor-bc": "box-align-bottom",
     "anchor-br": "box-align-bottom-right",
+    # --- Пункты меню -------------------------------------------------------
+    #
+    # Меню редактора — это списки из десяти-двадцати одинаковых серых строк, и
+    # читают такой список ЦЕЛИКОМ, каждый раз: зацепиться взгляду не за что.
+    # Со значком нужный пункт находится по форме, до чтения, а одинаковые
+    # действия в разных меню узнаются по одному и тому же рисунку.
+    "exit": "logout", "build": "package", "keyboard": "keyboard",
+    "template": "template", "theme": "contrast", "language": "language",
+    "window": "window", "console": "terminal-2", "inspector": "adjustments",
+    "hierarchy": "hierarchy", "game": "device-gamepad-2", "chart": "chart-line",
+    # «Навести на выделенное» — ВИДОИСКАТЕЛЬ: действие двигает не объект, а
+    # взгляд на него.
+    "focus": "viewfinder",
+    # Девятина — рамка с направляющими: ровно то, что она и делает с картинкой.
+    "nineslice": "border-sides",
+    # «Положить на поверхность» — стрелка в пол, а не капля: капля означает
+    # цвет (см. «drop»).
+    "to-floor": "arrow-bar-to-down",
+    # --- Заготовки элементов интерфейса ------------------------------------
+    #
+    # Список заготовок — тринадцать строк, из которых человек выбирает одну и
+    # ту же четвёрку по двадцать раз на дню. Рисунок находит её быстрее слова.
+    "ui-empty": "square-rounded", "ui-panel": "square", "ui-button": "click",
+    "ui-text": "letter-t", "ui-image": "photo", "ui-bar": "progress",
+    "ui-check": "checkbox", "ui-slider": "adjustments-horizontal",
+    "ui-input": "forms", "ui-list": "list-details", "ui-toolbar": "layout-navbar",
+    "ui-grid": "layout-grid", "ui-screen": "device-desktop",
 }
 
 

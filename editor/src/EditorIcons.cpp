@@ -183,6 +183,12 @@ const char* const kNames[] = {
     "anchor-tl", "anchor-tc", "anchor-tr",
     "anchor-cl", "anchor-cc", "anchor-cr",
     "anchor-bl", "anchor-bc", "anchor-br",
+    "exit", "build", "keyboard", "template", "theme", "language", "window",
+    "console", "inspector", "hierarchy", "game", "chart", "focus", "nineslice",
+    "to-floor",
+    "ui-empty", "ui-panel", "ui-button", "ui-text", "ui-image", "ui-bar",
+    "ui-check", "ui-slider", "ui-input", "ui-list", "ui-toolbar", "ui-grid",
+    "ui-screen",
 };
 
 } // namespace
@@ -384,7 +390,14 @@ static int SpacesFor(float width) {
     return (int)std::ceil(width / spaceW);
 }
 
-bool MenuItem(const char* icon, const char* label, const char* shortcut, bool enabled) {
+namespace {
+
+// Общая часть трёх форм пункта меню: пробелы под значок, сам пункт, рисунок
+// поверх. Отличаются они только тем, как передаётся галка состояния, и
+// повторять ради этого отрисовку значка трижды значит завести три места, где
+// отступ значка может разойтись.
+bool MenuItemImpl(const char* icon, const char* label, const char* shortcut, bool enabled,
+                  bool selected, bool* selectedPtr) {
     const ImVec2 at = ImGui::GetCursorScreenPos();
     const float size = ImGui::GetTextLineHeight();
     const float gap = TextGap();
@@ -393,7 +406,8 @@ bool MenuItem(const char* icon, const char* label, const char* shortcut, bool en
     // интерфейса: в одном меню подпись прилипала к рисунку, в другом уезжала.
     const int count = SpacesFor(size + gap);
     const std::string padded = std::string((size_t)count, ' ') + label;
-    const bool clicked = ImGui::MenuItem(padded.c_str(), shortcut, false, enabled);
+    const bool clicked = selectedPtr ? ImGui::MenuItem(padded.c_str(), shortcut, selectedPtr, enabled)
+                                     : ImGui::MenuItem(padded.c_str(), shortcut, selected, enabled);
 
     // Значок ПРИЖАТ К ПОДПИСИ с тем же зазором: остаток от округления пробелов
     // уходит слева, где он никому не мешает, а не между рисунком и словом, где
@@ -407,6 +421,45 @@ bool MenuItem(const char* icon, const char* label, const char* shortcut, bool en
            ImVec2(at.x + textStart - gap - size, std::floor(r0.y + ((r1.y - r0.y) - size) * 0.5f)),
            size, icon, color);
     return clicked;
+}
+
+} // namespace
+
+bool MenuItem(const char* icon, const char* label, const char* shortcut, bool enabled) {
+    return MenuItemImpl(icon, label, shortcut, enabled, /*selected=*/false, nullptr);
+}
+
+bool MenuItemToggle(const char* icon, const char* label, bool* selected, const char* shortcut,
+                    bool enabled) {
+    return MenuItemImpl(icon, label, shortcut, enabled, /*selected=*/false, selected);
+}
+
+bool MenuItemSelected(const char* icon, const char* label, bool selected, const char* shortcut,
+                      bool enabled) {
+    return MenuItemImpl(icon, label, shortcut, enabled, selected, nullptr);
+}
+
+bool BeginMenu(const char* icon, const char* label, bool enabled) {
+    // Тот же отступ пробелами, что и у пунктов: подменю стоит с ними в одном
+    // столбце, и свой расчёт здесь означал бы столбец из двух разных отступов.
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float size = ImGui::GetTextLineHeight();
+    const float gap = TextGap();
+    const int count = SpacesFor(size + gap);
+    const std::string padded = std::string((size_t)count, ' ') + label;
+    // СПИСОК ОТРИСОВКИ ЗАПОМИНАЕТСЯ ДО BeginMenu. Раскрывшись, он делает
+    // текущим окно подменю — и значок, поданный после, ушёл бы внутрь
+    // раскрытого списка вместо его заголовка.
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const bool open = ImGui::BeginMenu(padded.c_str(), enabled);
+
+    const float textStart = count * ImGui::CalcTextSize(" ").x;
+    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+    const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    DrawAt(dl, ImVec2(at.x + textStart - gap - size,
+                      std::floor(r0.y + ((r1.y - r0.y) - size) * 0.5f)),
+           size, icon, color);
+    return open;
 }
 
 void Inline(const char* icon, const glm::vec3& color) {

@@ -717,7 +717,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
             ImGui::Separator();
             const char* label = model ? T("Convert to .sagemesh")
                                       : T("Convert to .sagetex");
-            if (ImGui::MenuItem(label)) ConvertOne(host, path);
+            if (EditorIcons::MenuItem("refresh", label)) ConvertOne(host, path);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("The engine's own format: loads without parsing and weighs less.\n"
                   "The source file stays where it is."));

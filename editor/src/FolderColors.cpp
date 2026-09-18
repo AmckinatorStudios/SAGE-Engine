@@ -126,7 +126,7 @@ void Rename(const fs::path& from, const fs::path& to) {
 }
 
 void DrawPaletteMenu(const fs::path& folder) {
-    if (!ImGui::BeginMenu(T("Folder Colour"))) return;
+    if (!EditorIcons::BeginMenu("color", T("Folder Colour"))) return;
     for (const Tint& tint : Palette()) {
             // Образец рядом с названием: цвет выбирают глазами, а
             // список из восьми слов цвета не показывает.

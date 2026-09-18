@@ -328,7 +328,11 @@ void InputPanel::DrawBindingsSection(EditorHost& host, Action& action, const std
                 {"PAD_RIGHT_TRIGGER", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightTrigger); }},
             };
             for (const AxisItem& item : kAxes) {
-                if (!ImGui::MenuItem(item.Label)) continue;
+                // Мышь и геймпад — разные рисунки: список из восьми
+                // ПРОПИСНЫХ имён вроде «PAD_RIGHT_TRIGGER» читается по буквам,
+                // а по рисунку видно семейство ещё до чтения.
+                const char* icon = std::strncmp(item.Label, "MOUSE", 5) == 0 ? "select" : "pilot";
+                if (!EditorIcons::MenuItem(icon, item.Label)) continue;
                 Binding b = item.Make();
                 // Вторая ось векторного действия почти всегда Y — угадываем по
                 // имени, чтобы не заставлять переставлять руками каждый раз.
@@ -682,7 +686,7 @@ void InputPanel::Draw(EditorHost& host, bool& open) {
     if (Sage::UI::MenuScope presetMenu; ImGui::BeginPopup("##presetMenu")) {
         Sage::UI::TextSecondary("%s", T("Adds the usual set of actions. Existing ones are left alone."));
         ImGui::Separator();
-        if (ImGui::MenuItem(T("First-person / third-person game"))) {
+        if (EditorIcons::MenuItem("pilot", T("First-person / third-person game"))) {
             Action& move = input.Register("Move", ActionType::Vector);
             if (move.Bindings().empty()) {
                 move.BindVector("W", "S", "A", "D");
