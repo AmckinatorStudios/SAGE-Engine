@@ -257,16 +257,16 @@ ProjectAction DrawProjectMenuItems(const ProjectEntry& entry) {
     // из списка. Выключенные пункты честнее спрятанных: человек видит, что
     // действие существует, и понимает, почему оно сейчас недоступно.
     ImGui::BeginDisabled(entry.Missing);
-    if (ImGui::MenuItem(T("Open"))) action = ProjectAction::Open;
-    if (ImGui::MenuItem(T("Open Folder"))) action = ProjectAction::OpenFolder;
+    if (EditorIcons::MenuItem("open", T("Open"))) action = ProjectAction::Open;
+    if (EditorIcons::MenuItem("folder", T("Open Folder"))) action = ProjectAction::OpenFolder;
     ImGui::Separator();
-    if (ImGui::MenuItem(T("Rename..."))) action = ProjectAction::Rename;
-    if (ImGui::MenuItem(T("Duplicate..."))) action = ProjectAction::Duplicate;
+    if (EditorIcons::MenuItem("pencil", T("Rename..."))) action = ProjectAction::Rename;
+    if (EditorIcons::MenuItem("copy", T("Duplicate..."))) action = ProjectAction::Duplicate;
     ImGui::EndDisabled();
     ImGui::Separator();
-    if (ImGui::MenuItem(T("Remove from Launcher"))) action = ProjectAction::Forget;
+    if (EditorIcons::MenuItem("eye-off", T("Remove from Launcher"))) action = ProjectAction::Forget;
     ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::Danger));
-    if (ImGui::MenuItem(T("Delete Project..."))) action = ProjectAction::Delete;
+    if (EditorIcons::MenuItem("trash", T("Delete Project..."))) action = ProjectAction::Delete;
     ImGui::PopStyleColor();
     Sage::UI::Tooltip(T("Deletes the project folder from disk"));
     return action;

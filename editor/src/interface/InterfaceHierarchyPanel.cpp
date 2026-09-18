@@ -10,6 +10,7 @@
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
 #include "../ui/UI.h"
@@ -176,7 +177,8 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
     if (EditorIcons::Button("plus", T("Create"), T("Add an element"))) ImGui::OpenPopup("##ui_create");
     if (Sage::UI::MenuScope createMenu; ImGui::BeginPopup("##ui_create")) {
         for (const std::string& name : ui::PresetNames()) {
-            if (!ImGui::MenuItem(name.c_str())) continue;
+            if (!EditorIcons::MenuItem(sage::editor::interfacewidgets::PresetIcon(name),
+                                       name.c_str())) continue;
             host.PushUndoSnapshot();
             GameObject created = host.CreateUIEntity(name);
             if (created.Valid()) host.Selection().SetPrimary(created.Id());
@@ -386,15 +388,18 @@ void InterfaceHierarchyPanel::DrawContextMenu(EditorHost& host, Scene& scene, en
         ImGui::Separator();
 
         ui::Element& box = scene.Registry().get<ui::Element>(e);
-        if (ImGui::MenuItem(T("Visible"), nullptr, box.Visible)) {
+        if (EditorIcons::MenuItemSelected(box.Visible ? "eye" : "eye-off", T("Visible"),
+                                          box.Visible)) {
             host.PushUndoSnapshot();
             box.Visible = !box.Visible;
         }
-        if (ImGui::MenuItem(T("Locked"), nullptr, box.Locked)) {
+        if (EditorIcons::MenuItemSelected(box.Locked ? "lock" : "unlock", T("Locked"),
+                                          box.Locked)) {
             host.PushUndoSnapshot();
             box.Locked = !box.Locked;
         }
-        if (ImGui::MenuItem(T("Detach to root"), nullptr, false, scene.ParentOf(e) != entt::null)) {
+        if (EditorIcons::MenuItem("up", T("Detach to root"), nullptr,
+                                  scene.ParentOf(e) != entt::null)) {
             host.PushUndoSnapshot();
             scene.SetParent(e, entt::null);
         }

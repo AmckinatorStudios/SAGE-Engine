@@ -118,6 +118,28 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active = false,
 bool MenuItem(const char* icon, const char* label, const char* shortcut = nullptr,
               bool enabled = true);
 
+// ПУНКТ-ПЕРЕКЛЮЧАТЕЛЬ со значком: слева рисунок, справа галка состояния.
+//
+// Без него половина меню оставалась без значков: «Показывать сетку», «Видимо»,
+// «Замок», список панелей — это переключатели, а не команды, и MenuItem выше
+// про них ничего сказать не умеет. Строка со значком рядом со строкой без него
+// читается как «этот пункт другой» — хотя другой у них только вид.
+//
+// Две формы: с указателем (галка меняется сама, как у ImGui::MenuItem с bool*)
+// и со значением (состояние решает вызывающий — так устроен выбор одного из
+// нескольких: тема, язык, режим показа).
+bool MenuItemToggle(const char* icon, const char* label, bool* selected,
+                    const char* shortcut = nullptr, bool enabled = true);
+bool MenuItemSelected(const char* icon, const char* label, bool selected,
+                      const char* shortcut = nullptr, bool enabled = true);
+
+// ПОДМЕНЮ СО ЗНАЧКОМ. Закрывается ImGui::EndMenu(), как обычное.
+//
+// Без него список получался пегим: у команд значки есть, а у подменю рядом —
+// нет, и подменю читается как пункт другого сорта. Сорт у него и правда
+// другой, но говорит об этом стрелка справа, а не отсутствие рисунка слева.
+bool BeginMenu(const char* icon, const char* label, bool enabled = true);
+
 // Иконка внутри текстовой строки: занимает место одного символа и выравнена по
 // базовой линии. Для списков (иерархия, консоль, ассеты).
 void Inline(const char* icon, const glm::vec3& color = kThemeColor);

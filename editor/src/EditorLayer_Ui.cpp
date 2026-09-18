@@ -510,16 +510,16 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // сам OpenPopup зовётся ниже, после EndMenuBar, на уровне окна-хоста.
     const char* openDialog = nullptr;
     if (ImGui::BeginMenuBar()) {
-        if (ImGui::BeginMenu(T("File"))) {
-            if (ImGui::MenuItem(T("New Project..."))) openDialog = "New Project";
-            if (ImGui::MenuItem(T("Open Project..."))) openDialog = "Open Project";
-            if (ImGui::MenuItem(T("Project Launcher..."))) m_launcherRequested = true;
+        if (EditorIcons::BeginMenu("file", T("File"))) {
+            if (EditorIcons::MenuItem("project", T("New Project..."))) openDialog = "New Project";
+            if (EditorIcons::MenuItem("open", T("Open Project..."))) openDialog = "Open Project";
+            if (EditorIcons::MenuItem("list", T("Project Launcher..."))) m_launcherRequested = true;
             ImGui::Separator();
-            if (ImGui::MenuItem(T("New Scene"))) NewScene(ProjectTemplateKind::Empty);
-            if (ImGui::MenuItem(T("Open Scene..."))) openDialog = "Open Scene";
+            if (EditorIcons::MenuItem("scene", T("New Scene"))) NewScene(ProjectTemplateKind::Empty);
+            if (EditorIcons::MenuItem("open", T("Open Scene..."))) openDialog = "Open Scene";
 
             // Сцены открытого проекта — прямой доступ без файлового диалога.
-            if (ImGui::BeginMenu(T("Project Scenes"))) {
+            if (EditorIcons::BeginMenu("scene", T("Project Scenes"))) {
                 std::error_code ec;
                 std::vector<fs::path> scenes;
                 for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
@@ -529,41 +529,44 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 if (scenes.empty()) ImGui::TextDisabled("%s", T("(no scenes yet)"));
                 for (const fs::path& scenePath : scenes) {
                     bool current = scenePath == m_scenePath;
-                    if (ImGui::MenuItem(scenePath.filename().string().c_str(), nullptr, current)) {
+                    if (EditorIcons::MenuItemSelected("scene", scenePath.filename().string().c_str(),
+                                                      current)) {
                         LoadSceneFromFile(scenePath);
                     }
                 }
                 ImGui::EndMenu();
             }
 
-            if (ImGui::MenuItem(T("Save Scene"), "Ctrl+S")) SaveCurrentScene();
-            if (ImGui::MenuItem(T("Save Scene As..."))) openDialog = "Save Scene As";
+            if (EditorIcons::MenuItem("save", T("Save Scene"), "Ctrl+S")) SaveCurrentScene();
+            if (EditorIcons::MenuItem("save", T("Save Scene As..."))) openDialog = "Save Scene As";
             ImGui::Separator();
-            if (ImGui::MenuItem(T("Build Game..."))) {
+            if (EditorIcons::MenuItem("build", T("Build Game..."))) {
                 openDialog = "Build Game";
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(T("Exit"))) {
+            if (EditorIcons::MenuItem("exit", T("Exit"))) {
                 m_closeAfterPrompt = true;
                 AskUnsaved(nullptr);
                 if (!m_unsavedPrompt) sage::Application::Get().Close();
             }
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu(T("Edit"))) {
-            if (ImGui::MenuItem(T("Undo"), "Ctrl+Z", false, m_history.CanUndo() && !InPlayMode())) Undo();
-            if (ImGui::MenuItem(T("Redo"), "Ctrl+Y", false, m_history.CanRedo() && !InPlayMode())) Redo();
+        if (EditorIcons::BeginMenu("pencil", T("Edit"))) {
+            if (EditorIcons::MenuItem("undo", T("Undo"), "Ctrl+Z",
+                                      m_history.CanUndo() && !InPlayMode())) Undo();
+            if (EditorIcons::MenuItem("redo", T("Redo"), "Ctrl+Y",
+                                      m_history.CanRedo() && !InPlayMode())) Redo();
             ImGui::Separator();
             bool hasSel = m_scene->Get(m_selection.Primary()).Valid();
-            if (ImGui::MenuItem(T("Duplicate"), "Ctrl+D", false, hasSel)) DuplicateSelected();
-            if (ImGui::MenuItem(T("Delete"), "Del", false, hasSel)) DeleteSelected();
+            if (EditorIcons::MenuItem("copy", T("Duplicate"), "Ctrl+D", hasSel)) DuplicateSelected();
+            if (EditorIcons::MenuItem("trash", T("Delete"), "Del", hasSel)) DeleteSelected();
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu(T("Play"))) {
-            if (ImGui::MenuItem(T("Play"), nullptr, false, !m_play.Active())) StartPlay();
-            if (ImGui::MenuItem(T("Pause"), nullptr, false, m_play.Playing())) PausePlay();
-            if (ImGui::MenuItem(T("Resume"), nullptr, false, m_play.Paused())) ResumePlay();
-            if (ImGui::MenuItem(T("Stop"), nullptr, false, InPlayMode())) StopPlay();
+        if (EditorIcons::BeginMenu("play", T("Play"))) {
+            if (EditorIcons::MenuItem("play", T("Play"), nullptr, !m_play.Active())) StartPlay();
+            if (EditorIcons::MenuItem("pause", T("Pause"), nullptr, m_play.Playing())) PausePlay();
+            if (EditorIcons::MenuItem("play", T("Resume"), nullptr, m_play.Paused())) ResumePlay();
+            if (EditorIcons::MenuItem("stop", T("Stop"), nullptr, InPlayMode())) StopPlay();
             ImGui::EndMenu();
         }
         // ОБЪЕКТ — ОДИН КАТАЛОГ НА ВЕСЬ РЕДАКТОР.
@@ -571,18 +574,18 @@ void EditorLayer::DrawDockspaceAndMenu() {
         // Здесь был свой список пунктов, а под правой кнопкой в иерархии —
         // свой, вдвое короче. Теперь оба рисуют общий каталог
         // (editor/src/ObjectCatalog.h), и разойтись им нечем.
-        if (ImGui::BeginMenu(T("Object"))) {
+        if (EditorIcons::BeginMenu("cube", T("Object"))) {
             if (const char* pick = sage::editor::objectcatalog::DrawMenu()) CreateCatalogObject(pick);
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu(T("Window"))) {
+        if (EditorIcons::BeginMenu("layout", T("Window"))) {
             // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
-            if (ImGui::MenuItem(T("Reset Layout"))) {
+            if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) {
                 m_panels.Restore();
                 m_rebuildDockLayout = true;
             }
-            ImGui::MenuItem(T("Show Grid"), nullptr, &m_tools.ShowGrid);
+            EditorIcons::MenuItemToggle("grid", T("Show Grid"), &m_tools.ShowGrid);
             ImGui::Separator();
             // Каждая панель — переключатель. Это единственный путь назад после
             // крестика на вкладке, поэтому здесь перечислены ВСЕ панели, а не
@@ -592,25 +595,25 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // и у кнопок верхней панели. Два списка полей рядом однажды
             // разъедутся: кнопка будет открывать одно окно, а галка меню —
             // отмечать другое.
-            ImGui::MenuItem(T("Hierarchy"), nullptr, &PanelVisible(EditorPanel::Hierarchy));
-            ImGui::MenuItem(T("Inspector"), nullptr, &PanelVisible(EditorPanel::Inspector));
-            ImGui::MenuItem(T("Viewport"), nullptr, &PanelVisible(EditorPanel::Viewport));
-            ImGui::MenuItem(T("Game"), nullptr, &PanelVisible(EditorPanel::Game));
-            ImGui::MenuItem(T("Assets"), nullptr, &PanelVisible(EditorPanel::Assets));
-            ImGui::MenuItem(T("Console"), nullptr, &PanelVisible(EditorPanel::Console));
+            EditorIcons::MenuItemToggle("hierarchy", T("Hierarchy"), &PanelVisible(EditorPanel::Hierarchy));
+            EditorIcons::MenuItemToggle("inspector", T("Inspector"), &PanelVisible(EditorPanel::Inspector));
+            EditorIcons::MenuItemToggle("cube", T("Viewport"), &PanelVisible(EditorPanel::Viewport));
+            EditorIcons::MenuItemToggle("game", T("Game"), &PanelVisible(EditorPanel::Game));
+            EditorIcons::MenuItemToggle("folder", T("Assets"), &PanelVisible(EditorPanel::Assets));
+            EditorIcons::MenuItemToggle("console", T("Console"), &PanelVisible(EditorPanel::Console));
             // «Освещение» стало «Средой»: в окне остались небо, воздух и
             // окружающий свет, а сами источники света — на объектах сцены.
-            ImGui::MenuItem(T("Environment"), nullptr, &PanelVisible(EditorPanel::Environment));
-            ImGui::MenuItem(T("Elements"), nullptr, &PanelVisible(EditorPanel::InterfaceHierarchy));
-            ImGui::MenuItem(T("Canvas"), nullptr, &PanelVisible(EditorPanel::InterfaceViewport));
-            ImGui::MenuItem(T("Element"), nullptr, &PanelVisible(EditorPanel::InterfaceInspector));
-            ImGui::MenuItem(T("Preview"), nullptr, &PanelVisible(EditorPanel::InterfacePreview));
-            ImGui::MenuItem(T("Profiler"), nullptr, &PanelVisible(EditorPanel::Profiler));
+            EditorIcons::MenuItemToggle("sun", T("Environment"), &PanelVisible(EditorPanel::Environment));
+            EditorIcons::MenuItemToggle("hierarchy", T("Elements"), &PanelVisible(EditorPanel::InterfaceHierarchy));
+            EditorIcons::MenuItemToggle("layout", T("Canvas"), &PanelVisible(EditorPanel::InterfaceViewport));
+            EditorIcons::MenuItemToggle("inspector", T("Element"), &PanelVisible(EditorPanel::InterfaceInspector));
+            EditorIcons::MenuItemToggle("eye", T("Preview"), &PanelVisible(EditorPanel::InterfacePreview));
+            EditorIcons::MenuItemToggle("chart", T("Profiler"), &PanelVisible(EditorPanel::Profiler));
             // Редактор девятины. Инструмент, а не панель раскладки: его
             // открывают под задачу «подобрать нарезку картинке» и закрывают,
             // поэтому он не участвует в раскладке по умолчанию.
-            ImGui::MenuItem(T("9-slice editor"), nullptr, &m_showNineSlice);
-            ImGui::MenuItem(T("Icon sheet"), nullptr, &m_showIconSheet);
+            EditorIcons::MenuItemToggle("nineslice", T("9-slice editor"), &m_showNineSlice);
+            EditorIcons::MenuItemToggle("grid", T("Icon sheet"), &m_showIconSheet);
             ImGui::Separator();
 
             // --- Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ -----------------------------
@@ -620,7 +623,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // вкладку за край главного окна, — а вернуть обратно нечем, кроме
             // сброса всей раскладки. И главное, вытащенное окно слипалось с
             // главным обратно, стоило его туда надвинуть (см. PanelWindows.h).
-            if (ImGui::BeginMenu(T("Separate window"))) {
+            if (EditorIcons::BeginMenu("window", T("Separate window"))) {
                 ImGui::TextDisabled("%s", T("Panel becomes a window of the system"));
                 ImGui::Separator();
                 struct DetachRow { const char* Id; const char* Label; EditorPanel Panel; };
@@ -638,7 +641,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 };
                 for (const DetachRow& row : kRows) {
                     const bool detached = panelwindows::Detached(row.Id);
-                    if (ImGui::MenuItem(T(row.Label), nullptr, detached)) {
+                    if (EditorIcons::MenuItemSelected("window", T(row.Label), detached)) {
                         panelwindows::SetDetached(row.Id, !detached);
                         // Отдельное окно ЗАКРЫТОЙ панели — это окно, которого
                         // не видно: галочка стоит, а на экране ничего не
@@ -650,19 +653,20 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 // Путь назад для случая «окно уехало на второй монитор, а
                 // монитора больше нет»: оттуда его не достать ни мышью, ни
                 // галочкой — окна не видно, чтобы за него взяться.
-                if (ImGui::MenuItem(T("Bring all windows back"))) panelwindows::AttachAll();
+                if (EditorIcons::MenuItem("layout", T("Bring all windows back")))
+                    panelwindows::AttachAll();
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            ImGui::MenuItem(T("Game Settings..."), nullptr, &PanelVisible(EditorPanel::Settings));
+            EditorIcons::MenuItemToggle("gear", T("Game Settings..."), &PanelVisible(EditorPanel::Settings));
             // Управление — рядом с настройками игры: это тоже содержимое
             // проекта, которое уезжает в собранную игру, а не настройка
             // редактора.
-            ImGui::MenuItem(T("Controls..."), nullptr, &PanelVisible(EditorPanel::Input));
+            EditorIcons::MenuItemToggle("keyboard", T("Controls..."), &PanelVisible(EditorPanel::Input));
             // Шаблоны — рядом с настройками игры и языком, потому что это
             // настройка ОКРУЖЕНИЯ, а не текущей сцены: что установлено у меня
             // на машине и откуда это брать.
-            ImGui::MenuItem(T("Project templates..."), nullptr, &m_showTemplates);
+            EditorIcons::MenuItemToggle("template", T("Project templates..."), &m_showTemplates);
 
             // Язык интерфейса. Здесь, а не в окне Settings: то окно правит
             // настройки ИГРЫ и сохраняется в проект, а язык — настройка
@@ -672,12 +676,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // РЕДАКТОРА, она живёт в профиле человека, а не в проекте. Проект,
             // навязывающий свою тему каждому, кто его открыл, — не то, чего
             // ждут от проекта.
-            if (ImGui::BeginMenu(T("Appearance"))) {
+            if (EditorIcons::BeginMenu("theme", T("Appearance"))) {
                 for (const EditorTheme::Theme& theme : EditorTheme::Themes()) {
                     const bool active = theme.Id == EditorTheme::CurrentId();
                     // Название темы не переводится — как и название языка: по
                     // нему тему находят в файле настроек и в themes/*.json.
-                    if (ImGui::MenuItem(theme.Name.c_str(), nullptr, active) && !active) {
+                    if (EditorIcons::MenuItemSelected("theme", theme.Name.c_str(), active) && !active) {
                         EditorTheme::SetTheme(theme.Id);
                         SetStatusMessage(T("Theme changed"));
                     }
@@ -691,13 +695,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 ImGui::SetNextItemWidth(160.0f);
                 if (ImGui::SliderFloat("##uiscale", &scale, 0.75f, 2.0f, "%.2fx"))
                     EditorTheme::SetUiScale(scale);
-                if (ImGui::MenuItem(T("Reset scale"), nullptr, false, scale != 1.0f))
+                if (EditorIcons::MenuItem("refresh", T("Reset scale"), nullptr, scale != 1.0f))
                     EditorTheme::SetUiScale(1.0f);
                 ImGui::Separator();
                 // Выгрузка темы файлом — вот ради чего вся система: взять
                 // текущую за основу, поправить цвета в текстовом редакторе и
                 // положить обратно в themes/. Пересборка не нужна.
-                if (ImGui::MenuItem(T("Export theme to themes/..."))) {
+                if (EditorIcons::MenuItem("save", T("Export theme to themes/..."))) {
                     const std::string dir = EditorTheme::ThemesDir();
                     const std::string path = dir + "/" + EditorTheme::Current().Id + "-copy.json";
                     if (EditorTheme::ExportTheme(EditorTheme::Current(), path))
@@ -711,19 +715,19 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // причине: это настройка РЕДАКТОРА, она живёт в профиле человека.
             // Проект, навязывающий соавтору свою IDE, — не то, чего ждут от
             // проекта.
-            if (ImGui::BeginMenu(T("Code editor"))) {
+            if (EditorIcons::BeginMenu("code", T("Code editor"))) {
                 namespace codeapp = sage::editor::codeapp;
                 const std::string current = codeapp::CurrentId();
                 // Системная ассоциация — всегда первая и всегда доступна: это
                 // единственный вариант, который не может «не установиться».
-                if (ImGui::MenuItem(T("As the system opens it"), nullptr, current.empty()))
+                if (EditorIcons::MenuItemSelected("gear", T("As the system opens it"), current.empty()))
                     codeapp::SetCurrent("");
                 const std::vector<codeapp::App>& apps = codeapp::Available();
                 if (!apps.empty()) ImGui::Separator();
                 for (const codeapp::App& app : apps) {
                     // Имя программы НЕ переводится — как название темы и языка:
                     // по нему её узнают в меню «Пуск» и в своей же панели задач.
-                    if (ImGui::MenuItem(app.Name.c_str(), nullptr, app.Id == current))
+                    if (EditorIcons::MenuItemSelected("code", app.Name.c_str(), app.Id == current))
                         codeapp::SetCurrent(app.Id);
                 }
                 ImGui::Separator();
@@ -733,20 +737,20 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     ImGui::TextDisabled("%s", T("No code editors found on this machine"));
                 }
                 ImGui::TextDisabled("%s", T("Only what is actually installed is listed"));
-                if (ImGui::MenuItem(T("Search again"))) {
+                if (EditorIcons::MenuItem("search", T("Search again"))) {
                     codeapp::Rescan();
                     SetStatusMessage(T("Code editors: ") +
                                      std::to_string(codeapp::Available().size()));
                 }
                 ImGui::EndMenu();
             }
-            if (ImGui::BeginMenu(T("Language"))) {
+            if (EditorIcons::BeginMenu("language", T("Language"))) {
                 for (const sage::editor::LanguageInfo& lang : sage::editor::AvailableLanguages()) {
                     const bool active = lang.Code == sage::editor::CurrentLanguageCode();
                     // Название языка НЕ переводится: человек, случайно
                     // переключивший интерфейс на незнакомый, должен найти
                     // дорогу назад по слову «English», а не по переводу.
-                    if (ImGui::MenuItem(lang.Name.c_str(), nullptr, active) && !active) {
+                    if (EditorIcons::MenuItemSelected("language", lang.Name.c_str(), active) && !active) {
                         sage::editor::SetLanguage(lang.Code);
                         SetStatusMessage(T("Interface language changed"));
                     }
@@ -755,8 +759,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
             }
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu(T("Help"))) {
-            ImGui::MenuItem(T("About SAGE..."), nullptr, &m_showAbout);
+        if (EditorIcons::BeginMenu("question", T("Help"))) {
+            EditorIcons::MenuItemToggle("info", T("About SAGE..."), &m_showAbout);
             ImGui::EndMenu();
         }
 

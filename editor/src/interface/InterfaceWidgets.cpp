@@ -33,4 +33,19 @@ bool AlignButton(const char* id, sage::ui::AlignEdge edge, const char* tooltip, 
     return pressed && enabled;
 }
 
+const char* PresetIcon(const std::string& preset) {
+    struct Row { const char* Preset; const char* Icon; };
+    static const Row kRows[] = {
+        {"Empty", "ui-empty"},   {"Panel", "ui-panel"},       {"Button", "ui-button"},
+        {"Text", "ui-text"},     {"Image", "ui-image"},       {"Bar", "ui-bar"},
+        {"Checkbox", "ui-check"},{"Slider", "ui-slider"},     {"Input Field", "ui-input"},
+        {"Vertical List", "ui-list"}, {"Toolbar", "ui-toolbar"}, {"Grid", "ui-grid"},
+        {"Screen", "ui-screen"},
+    };
+    for (const Row& r : kRows) {
+        if (preset == r.Preset) return r.Icon;
+    }
+    return "ui-empty";
+}
+
 } // namespace sage::editor::interfacewidgets

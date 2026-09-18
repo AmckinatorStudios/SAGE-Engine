@@ -101,10 +101,12 @@ void ViewportPanel::DrawSpaceMenu(EditorHost& host) {
     if (!ImGui::BeginPopup("##space_menu")) return;
     Sage::UI::MenuSection(T("Gizmo axes"), true);
     const bool world = host.Tools().GizmoSpace == EditorGizmoSpace::World;
-    if (ImGui::MenuItem(T("Global"), nullptr, world)) host.Tools().GizmoSpace = EditorGizmoSpace::World;
+    if (EditorIcons::MenuItemSelected("world", T("Global"), world))
+        host.Tools().GizmoSpace = EditorGizmoSpace::World;
     ImGui::SameLine();
     ImGui::TextDisabled("%s", T("— axes of the scene"));
-    if (ImGui::MenuItem(T("Local"), nullptr, !world)) host.Tools().GizmoSpace = EditorGizmoSpace::Local;
+    if (EditorIcons::MenuItemSelected("cube", T("Local"), !world))
+        host.Tools().GizmoSpace = EditorGizmoSpace::Local;
     ImGui::SameLine();
     ImGui::TextDisabled("%s", T("— axes of the object itself"));
     ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
@@ -126,7 +128,10 @@ void ViewportPanel::DrawShadingMenu(EditorHost& host) {
         const char* name = (i == 0)   ? T("Shaded")
                            : (i == 1) ? T("Wireframe")
                                       : sage::render::DebugViewName((sage::render::DebugView)(i - 1));
-        if (ImGui::MenuItem(name, nullptr, (int)host.Tools().RenderMode == i))
+        // Затенённый вид — куб, каркас — сетка рёбер, отладочные — «жучок»:
+        // первые два человек переключает постоянно, остальные ищут поломку.
+        const char* icon = (i == 0) ? "cube" : (i == 1) ? "wire" : "debug";
+        if (EditorIcons::MenuItemSelected(icon, name, (int)host.Tools().RenderMode == i))
             host.Tools().RenderMode = (EditorRenderMode)i;
     }
     ImGui::EndPopup();
@@ -142,42 +147,45 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     // дублировать их пунктом меню значит спорить с самим собой о том, где
     // переключают инструмент.
     // Коллайдер (C): гизмо тянет ФОРМУ СТОЛКНОВЕНИЯ, а не объект.
-    if (ImGui::MenuItem(T("Collider (C): drag the collision shape"), nullptr,
-                        host.ColliderEditMode()))
+    if (EditorIcons::MenuItemSelected("physics", T("Collider (C): drag the collision shape"),
+                                      host.ColliderEditMode()))
         host.ColliderEditMode() = !host.ColliderEditMode();
 
     Sage::UI::MenuSection(T("Over the selection"));
     // Отключены, когда выделения нет: серый пункт честнее пункта, который молча
     // ничего не делает.
     ImGui::BeginDisabled(host.Selection().Empty());
-    if (ImGui::MenuItem(T("Frame the selection (F)"))) host.FocusSelected();
-    if (ImGui::MenuItem(T("Drop onto the surface (End)"))) host.DropSelectedToSurface();
+    if (EditorIcons::MenuItem("focus", T("Frame the selection (F)"))) host.FocusSelected();
+    if (EditorIcons::MenuItem("to-floor", T("Drop onto the surface (End)")))
+        host.DropSelectedToSurface();
     ImGui::EndDisabled();
     ImGui::BeginDisabled(host.Selection().All().size() < 2);
-    if (ImGui::BeginMenu(T("Align to axis"))) {
-        if (ImGui::MenuItem("X")) host.AlignSelection(0);
-        if (ImGui::MenuItem("Y")) host.AlignSelection(1);
-        if (ImGui::MenuItem("Z")) host.AlignSelection(2);
+    if (EditorIcons::BeginMenu("align", T("Align to axis"))) {
+        if (EditorIcons::MenuItem("align-left", "X")) host.AlignSelection(0);
+        if (EditorIcons::MenuItem("align-top", "Y")) host.AlignSelection(1);
+        if (EditorIcons::MenuItem("align-center-x", "Z")) host.AlignSelection(2);
         ImGui::EndMenu();
     }
     ImGui::EndDisabled();
     // Габариты выделенного — та самая коробка, по которой считается попадание
     // мышью. Включается тогда, когда непонятно, почему клик выбрал не то.
-    if (ImGui::MenuItem(T("Bounds of the selection"), nullptr, host.Tools().ShowBounds))
+    if (EditorIcons::MenuItemSelected("rect", T("Bounds of the selection"), host.Tools().ShowBounds))
         host.Tools().ShowBounds = !host.Tools().ShowBounds;
 
     Sage::UI::MenuSection(T("Views"));
     const char* layouts[] = {T("Single view"), T("Two columns"), T("Four views")};
     for (int i = 0; i < 3; ++i)
-        if (ImGui::MenuItem(layouts[i], nullptr, (int)m_layout == i)) m_layout = (Layout)i;
+        if (EditorIcons::MenuItemSelected("layout", layouts[i], (int)m_layout == i))
+            m_layout = (Layout)i;
     Sage::UI::TextSecondary("%s", T("Each view is a full scene pass"));
 
     Sage::UI::MenuSection(T("Projection of the active view"));
     const char* kinds[] = {T("Perspective"), T("Top"), T("Front"), T("Side")};
     for (int i = 0; i < 4; ++i)
-        if (ImGui::MenuItem(kinds[i], nullptr, (int)m_kinds[m_activeSlot] == i))
+        if (EditorIcons::MenuItemSelected(i == 0 ? "camera" : "rect", kinds[i],
+                                         (int)m_kinds[m_activeSlot] == i))
             m_kinds[m_activeSlot] = (ViewKind)i;
-    if (ImGui::MenuItem(T("Show all"))) {
+    if (EditorIcons::MenuItem("fit", T("Show all"))) {
         // Вписываем сцену в ортогональные виды: без этого человек, отъехавший
         // колесом далеко, обратно уже не найдёт дорогу.
         for (OrthoView& v : m_ortho) { v.Center = glm::vec3(0.0f); v.Height = 20.0f; }

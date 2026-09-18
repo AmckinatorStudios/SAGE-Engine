@@ -1,7 +1,10 @@
 #include "ObjectCatalog.h"
 
+#include <cstring>
+
 #include <imgui.h>
 
+#include "EditorIcons.h"
 #include "Localization.h"
 
 namespace sage::editor::objectcatalog {
@@ -115,19 +118,63 @@ Group Catalog() {
 
 namespace {
 
+// ЗНАЧОК ПУНКТА — ПО ЕГО КЛЮЧУ, а не по подписи.
+//
+// Ключ («shape.cube», «light.spot») не переводится и не меняется от языка, а
+// подпись — и то и другое. Заводить ещё одно поле в таблице каталога ради
+// рисунка не нужно: ключ уже говорит, что это за объект, и ровно на этом
+// знании таблица и построена.
+const char* IconForId(const char* id) {
+    if (!id) return "cube";
+    struct Row { const char* Id; const char* Icon; };
+    // Точные совпадения — там, где внутри семейства рисунки разные.
+    static const Row kExact[] = {
+        {"shape.sphere", "sphere"},   {"shape.cone", "cone"},
+        {"light.sun", "sun"},         {"light.point", "light"}, {"light.spot", "cone"},
+        {"fx.probe", "probe"},        {"fx.decal", "texture"},
+        {"ui.Panel", "ui-panel"},     {"ui.Button", "ui-button"},
+        {"ui.Label", "ui-text"},      {"ui.Image", "ui-image"},
+        {"ui.Bar", "ui-bar"},         {"ui.Checkbox", "ui-check"},
+        {"ui.Slider", "ui-slider"},   {"ui.Input", "ui-input"},
+    };
+    for (const Row& r : kExact) {
+        if (std::strcmp(id, r.Id) == 0) return r.Icon;
+    }
+    // Семейство целиком — по началу ключа.
+    static const Row kPrefix[] = {
+        {"shape.", "cube"},   {"light.", "light"},  {"camera.", "camera"},
+        {"logic.", "script"}, {"audio.", "audio"},  {"anim.", "anim"},
+        {"physics.", "physics"}, {"fx.", "particles"}, {"ui.screen.", "ui-screen"},
+        {"ui.", "ui-empty"},
+    };
+    for (const Row& r : kPrefix) {
+        if (std::strncmp(id, r.Id, std::strlen(r.Id)) == 0) return r.Icon;
+    }
+    return "cube";
+}
+
+// Значок СПИСКА — значок его первого пункта: «Фигуры» открываются кубом,
+// «Свет» — лампой. Своё поле под это завело бы вторую таблицу, которая
+// однажды разойдётся с первой.
+const char* IconForGroup(const Group& g) {
+    if (!g.Items.empty()) return IconForId(g.Items.front().Id);
+    if (!g.Groups.empty()) return IconForGroup(g.Groups.front());
+    return "folder";
+}
+
 // Рисует пункты и вложенные списки. Первый выбранный Id останавливает разбор:
 // два пункта за один кадр нажать нельзя, а проверять дальше — значит рисовать
 // уже ненужное.
 void DrawGroup(const Group& g, const char*& picked) {
     for (const Item& it : g.Items) {
-        if (ImGui::MenuItem(it.Label)) picked = it.Id;
+        if (EditorIcons::MenuItem(IconForId(it.Id), it.Label)) picked = it.Id;
         // Подсказка — про НАЗНАЧЕНИЕ, а не про название. Список из сорока
         // пунктов без неё требует пробовать каждый, чтобы понять, чем
         // «Плоскость» отличается от «Куба» в деле.
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", it.Hint);
     }
     for (const Group& sub : g.Groups) {
-        if (!ImGui::BeginMenu(sub.Label)) continue;
+        if (!EditorIcons::BeginMenu(IconForGroup(sub), sub.Label)) continue;
         DrawGroup(sub, picked);
         ImGui::EndMenu();
     }
@@ -139,12 +186,12 @@ const char* DrawMenu() {
     const Group root = Catalog();
     const char* picked = nullptr;
     for (const Item& it : root.Items) {
-        if (ImGui::MenuItem(it.Label)) picked = it.Id;
+        if (EditorIcons::MenuItem(IconForId(it.Id), it.Label)) picked = it.Id;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", it.Hint);
     }
     if (!root.Items.empty() && !root.Groups.empty()) ImGui::Separator();
     for (const Group& g : root.Groups) {
-        if (!ImGui::BeginMenu(g.Label)) continue;
+        if (!EditorIcons::BeginMenu(IconForGroup(g), g.Label)) continue;
         DrawGroup(g, picked);
         ImGui::EndMenu();
     }
