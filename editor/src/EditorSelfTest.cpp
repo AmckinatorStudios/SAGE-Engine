@@ -72,6 +72,7 @@
 #include "sage/vars/VarsComponent.h"
 #include "UILayoutOps.h"
 #include "EditorPrefs.h"
+#include "PathScope.h"
 #include "Localization.h"
 #include "ObjectCatalog.h"
 #include "panels/InspectorPanel.h"
@@ -311,7 +312,7 @@ void EditorLayer::RunSelfTest() {
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
-                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + capsule + step + hidden + preview-cache + audio-preview + inspector-lock + build + "
+                               << "materials + camera + light + primitives + environment + icons + folder-state + asset-slots + file-dialog + asset-scope + code-apps + script-reload + model-pack + anim-clips + model-skeleton + texture-set + object-catalog + rect-select + pause + import-any + icons + folders + mesh-component + markers + capsule + step + hidden + preview-cache + audio-preview + inspector-lock + build + "
                                << "recent + dirty + play + physics + animation + config + particles + "
                                << "culling + duplicate + hierarchy + multiselect + prefab + presets + GI + "
                                << "models + prefab-api + confirm + pick + tools + formats + ortho + "
@@ -3251,6 +3252,53 @@ bool EditorLayer::SelfTestSelection() {
                 ok = false;
             }
             sage::editor::prefs::SetBool("filebrowser.grid", had);
+        }
+
+        // --- ДИАЛОГ ВЫБОРА АССЕТА ЗАПЕРТ В ПРОЕКТЕ ------------------------
+        //
+        // У диалога две разные работы: ВНЕСТИ в проект (файл лежит в
+        // «Загрузках», на флешке — границы быть не может) и ВЫБРАТЬ ассет
+        // проекта. Пока границы не было, второе делалось первым: в слот
+        // материала клалась картинка снаружи, и ссылка ломалась при сборке
+        // игры и переносе проекта — при том, что у человека файл на диске
+        // на месте.
+        if (ok) {
+            const fs::path inside = root / "inside";
+            fs::create_directories(inside, ec);
+
+            FileBrowser bound;
+            FileBrowser::Config cfg;
+            cfg.StartDir = inside;
+            cfg.Root = root;
+            bound.Open(cfg);
+            if (bound.CurrentDir() != inside.lexically_normal()) {
+                LOG_ERROR("Editor") << "SELFTEST: диалог открылся не там, где просили";
+                ok = false;
+            }
+
+            // Начальная папка СНАРУЖИ — открываемся с границы, а не «где-то
+            // там»: иначе первый же кадр показал бы место, куда потом нельзя
+            // вернуться.
+            FileBrowser clamped;
+            FileBrowser::Config outsideCfg;
+            outsideCfg.StartDir = root.parent_path();
+            outsideCfg.Root = root;
+            clamped.Open(outsideCfg);
+            if (!sage::editor::pathscope::Within(root, clamped.CurrentDir())) {
+                LOG_ERROR("Editor") << "SELFTEST: диалог с границей открылся ВНЕ её: "
+                                    << clamped.CurrentDir().string();
+                ok = false;
+            }
+
+            // А без границы — весь диск, иначе вносить в проект было бы нечего.
+            FileBrowser free_;
+            FileBrowser::Config freeCfg;
+            freeCfg.StartDir = root.parent_path();
+            free_.Open(freeCfg);
+            if (free_.CurrentDir() != root.parent_path().lexically_normal()) {
+                LOG_ERROR("Editor") << "SELFTEST: диалог импорта не пустили наружу";
+                ok = false;
+            }
         }
         fs::remove_all(root, ec);
     }

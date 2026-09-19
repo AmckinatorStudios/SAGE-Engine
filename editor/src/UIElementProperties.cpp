@@ -178,7 +178,8 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                     c.Title = T("Choose an image");
                     c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
                     c.FilterLabel = T("Images");
-                    c.StartDir = host.CurrentProject().AssetsDir();
+                    // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
                     ctx.Browser->Open(c);
                     if (ctx.BrowseTarget) *ctx.BrowseTarget = &v;
                 }

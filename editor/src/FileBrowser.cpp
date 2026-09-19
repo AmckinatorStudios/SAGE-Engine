@@ -7,6 +7,7 @@
 #include "AssetSlot.h"
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
+#include "PathScope.h"
 #include "Thumbnails.h"
 #include "ui/UI.h"
 #include "sage/core/Paths.h"
@@ -267,8 +268,22 @@ void FileBrowser::Open(const Config& config) {
     std::snprintf(m_name, sizeof(m_name), "%s", m_cfg.DefaultName.c_str());
 
     std::error_code ec;
+    // Граница приводится к каноничному виду ОДИН раз: дальше с ней сравнивают
+    // каждый переход, и делать это над «..» и символическими ссылками значит
+    // сравнивать разные записи одного и того же пути.
+    if (!m_cfg.Root.empty()) {
+        m_cfg.Root = fs::weakly_canonical(fs::absolute(m_cfg.Root, ec), ec);
+        // Границы нет на диске (проект снесли, папку переименовали) — тогда её
+        // нет и вовсе: запереть диалог в несуществующей папке значит показать
+        // пустоту без выхода.
+        if (!fs::is_directory(m_cfg.Root, ec)) m_cfg.Root.clear();
+    }
+
     fs::path start = m_cfg.StartDir;
     if (start.empty() || !fs::is_directory(start, ec)) start = fs::current_path(ec);
+    // Начальная папка вне границы — начинаем с самой границы, а не «где-то там»:
+    // иначе первый же кадр показал бы место, куда потом нельзя вернуться.
+    if (!m_cfg.Root.empty() && !WithinRoot(start)) start = m_cfg.Root;
     GoTo(start);
 
     // --- Быстрый доступ ------------------------------------------------------
@@ -286,6 +301,18 @@ void FileBrowser::Open(const Config& config) {
     auto place = [&](const std::string& label, const fs::path& p) {
         m_places.push_back({label, p, false});
     };
+
+    // ЗА ГРАНИЦЕЙ БЫСТРОМУ ДОСТУПУ НЕ МЕСТО. «Документы», диски и флешки — это
+    // кнопки НАРУЖУ, и в диалоге выбора ассета проекта каждая из них означала
+    // бы «уйти туда, откуда выбрать нельзя». Вместо них — сама граница: одним
+    // щелчком вернуться в корень ассетов.
+    if (!m_cfg.Root.empty()) {
+        group(T("Project"));
+        place(T("Project assets"), m_cfg.Root);
+        m_open = true;
+        m_needsOpen = true;
+        return;
+    }
 
     const std::vector<sage::UserFolder> userFolders = sage::UserFolders();
     if (!userFolders.empty()) {
@@ -332,9 +359,20 @@ void FileBrowser::Open(const Config& config) {
     m_needsOpen = true;
 }
 
+bool FileBrowser::WithinRoot(const fs::path& p) const {
+    // Само правило — в PathScope.h: его же спрашивают и другие места, и там же
+    // оно проверяется тестом.
+    return sage::editor::pathscope::Within(m_cfg.Root, p);
+}
+
 void FileBrowser::GoTo(const fs::path& dir) {
     std::error_code ec;
     if (!fs::is_directory(dir, ec)) return;
+    // ВЫХОД ЗА ГРАНИЦУ ПРОСТО НЕ ПРОИСХОДИТ. Не окно с отказом: человек не
+    // просил объяснений, он нажал «вверх» — и там, куда он метил, выбирать
+    // нечего. Кнопки наружу при этом не показываются вовсе (см. Open и
+    // DrawBreadcrumbs), так что нажать на такую неоткуда.
+    if (!WithinRoot(dir)) return;
     m_dir = fs::absolute(dir, ec).lexically_normal();
     m_selected = -1;
     Refresh();
@@ -402,9 +440,23 @@ void FileBrowser::DrawPlaces() {
 void FileBrowser::DrawBreadcrumbs() {
     // Хлебные крошки кликабельны: подняться на три уровня — один клик, а не три
     // нажатия «вверх».
+    // ЗА ГРАНИЦЕЙ КРОШЕК НЕТ. Показывать «/home/user/Проекты/Игра/assets»
+    // целиком значит рисовать пять кнопок, из которых работает одна: остальные
+    // ведут наружу, куда диалог не пустит. Крошки начинаются с самой границы —
+    // она и есть верх мира для этого диалога.
+    size_t rootParts = 0;
+    for (auto it = m_cfg.Root.begin(); it != m_cfg.Root.end(); ++it) ++rootParts;
+
     fs::path acc;
     std::vector<fs::path> parts;
-    for (const fs::path& part : m_dir) parts.push_back(part);
+    size_t seen = 0;
+    for (const fs::path& part : m_dir) {
+        // Всё, что ВЫШЕ границы, копим в acc молча: по этим кускам собирается
+        // рабочий путь для кнопок, но кнопок у них нет.
+        if (rootParts > 0 && seen + 1 < rootParts) acc /= part;
+        else parts.push_back(part);
+        ++seen;
+    }
     for (size_t i = 0; i < parts.size(); ++i) {
         acc /= parts[i];
         std::string label = parts[i].string();
@@ -631,6 +683,12 @@ bool FileBrowser::Draw() {
         if (m_cfg.Mode == PickMode::OpenAny) {
             ImGui::TextDisabled("%s", T("A file, a folder or a .zip — nothing chosen means this folder"));
         }
+        // ГРАНИЦУ ВИДНО. Человек, не нашедший в диалоге своей папки «Загрузки»,
+        // обязан понять, почему её там нет, — иначе это выглядит как потерянный
+        // список мест.
+        if (!m_cfg.Root.empty()) {
+            ImGui::TextDisabled("%s", T("Inside the project only. Outside files: Assets > Import"));
+        }
 
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
 
@@ -661,6 +719,14 @@ bool FileBrowser::Draw() {
                     m_error = T("No such file or folder: ") + candidate.string();
                 } else if (m_cfg.Mode == PickMode::OpenFile && !fs::exists(candidate, ec)) {
                     m_error = T("No such file: ") + candidate.string();
+                } else if (!WithinRoot(candidate)) {
+                    // ИМЯ МОЖНО НАБРАТЬ РУКАМИ, и «..\..\Загрузки\текстура.png»
+                    // в поле имени обошло бы любые запреты навигации: «папка
+                    // плюс имя» для абсолютного пути даёт сам этот путь. Здесь
+                    // единственное место, где выбор становится ответом, — и
+                    // граница обязана стоять именно тут.
+                    m_error = T("Only from inside the project: put the file into the project first "
+                                "(Assets > Import)");
                 } else {
                     m_result = candidate;
                     confirmed = true;
