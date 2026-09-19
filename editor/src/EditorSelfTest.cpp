@@ -935,6 +935,35 @@ void EditorLayer::TickInputProbe() {
             m_selection.Clear();
             break;
         }
+        case 33:
+            // КНОПКА «СОБРАТЬ» ДОЛЖНА ОТКРЫВАТЬ ОКНО, А НЕ МОЛЧАТЬ.
+            //
+            // Диалоги открываются ПО ИМЕНИ (см. EditorHost::RequestDialog), а
+            // ImGui::OpenPopup для окна, которого никто не начинает, не говорит
+            // ничего: кнопка внешне срабатывает и не делает НИЧЕГО. Ровно так
+            // уже молчали «Сохранить» и «Новая сцена» в верхней панели.
+            RequestDialog("Build Game");
+            m_probeWait = 3;
+            break;
+        case 34: {
+            // Спрашиваем САМО ОКНО, а не ImGui::IsPopupOpen(имя): та считает
+            // идентификатор от ТЕКУЩЕГО окна, а проверка идёт до NewFrame, где
+            // текущего окна нет вовсе — и разыменовывает пустоту. Имя окна
+            // после «###» переводу не подлежит (см. PanelWindowId.h), поэтому
+            // сравнение по нему переживает смену языка.
+            const ImGuiWindow* modal = ImGui::GetTopMostPopupModal();
+            const bool opened =
+                modal && std::string(modal->Name).find("###Build Game") != std::string::npos;
+            if (!opened) {
+                fail("«Собрать» не открыло окно сборки");
+            }
+            io.AddKeyEvent(ImGuiKey_Escape, true);
+            break;
+        }
+        case 35:
+            io.AddKeyEvent(ImGuiKey_Escape, false);
+            m_probeWait = 2;
+            break;
         default:
             if (!m_probeFailed) LOG_INFO("Editor") << "VIEWPORT_INPUT: OK — щелчок по пустому "
                                                       "снимает выбор и во вьюпорте, и в списке "
@@ -942,7 +971,8 @@ void EditorLayer::TickInputProbe() {
                                                       "камеру, полосы долгой работы видны, Shift "
                                                       "выбирает диапазон, Delete спрашивает об "
                                                       "удалении файла и не трогает при этом сцену, "
-                                                      "Ctrl+D даёт одну копию";
+                                                      "Ctrl+D даёт одну копию, «Собрать» "
+                                                      "открывает окно сборки";
             m_probeStep = -1;
             return;
     }

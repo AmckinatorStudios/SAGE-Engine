@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1767.
+// Язык: Русский. Строк: 1768.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -672,6 +672,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сворачивать повторы"},
     {"Collapse the tools",
      "Свернуть инструменты"},
+    {"Collects the game into a folder you can hand over:\nthe player, the project and the assets it uses",
+     "Соберёт игру в папку, которую можно отдать:\nплеер, проект и используемые им ассеты"},
     {"Collider",
      "Коллайдер"},
     {"Collider (C): drag the collision shape",

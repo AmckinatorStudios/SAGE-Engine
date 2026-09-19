@@ -669,6 +669,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             // Мировая -> локальная: убираем вклад родителя.
             glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
             DecomposeToTransform(local, tr);
+            // ВО ВРЕМЯ ИГРЫ ПОЛОЖЕНИЕ ВЕДЁТ ФИЗИКА, и правку Transform она
+            // затирает на следующем же шаге: объект возвращался на место, будто
+            // мышь ничего не делала. Переставляем и само тело — тогда ящик
+            // можно подвинуть под игрока прямо на ходу, ради чего это и нужно.
+            host.SyncBodyToTransform(selected);
 
             // Мультивыделение: та же мировая дельта — на остальные выбранные.
             if (host.Selection().All().size() > 1) {
@@ -693,6 +698,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                     glm::mat4 pw = (p != entt::null) ? scene.WorldMatrix(p) : glm::mat4(1.0f);
                     glm::mat4 loc = (p != entt::null) ? glm::inverse(pw) * newWorld : newWorld;
                     DecomposeToTransform(loc, o.GetTransform());
+                    host.SyncBodyToTransform(o);
                 }
             }
         }

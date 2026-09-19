@@ -656,3 +656,40 @@ TEST(Physics_child_body_follows_parent_rotation) {
     CHECK_TRUE(hit.Hit);
     if (hit.Hit) CHECK_TRUE(hit.Entity == child.Entity());
 }
+
+// --- ТЕЛО МОЖНО ПЕРЕСТАВИТЬ ПРЯМО НА ХОДУ -----------------------------------
+//
+// Пока игра идёт, хозяин положения — физика: каждый шаг она пишет позу тела в
+// Transform. Поэтому правка Transform снаружи (гизмо во вьюпорте, скрипт,
+// телепорт) жила ровно до следующего кадра — объект возвращался, будто его
+// никто не трогал, и выглядело это как «во время игры двигать нельзя».
+TEST(Physics_teleport_moves_the_body_and_not_just_the_transform) {
+    Scene scene("Teleport");
+    GameObject box = scene.CreateObject("Box");
+    box.GetTransform().Position = {0.0f, 5.0f, 0.0f};
+    scene.Registry().emplace<RigidBodyComponent>(box.Entity(),
+                                                 RigidBodyComponent{BodyType::Dynamic});
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.Available()) return;
+    physics.Step(scene, 1.0f / 60.0f);
+
+    // Двигаем ОБЪЕКТ, как это делает гизмо, и говорим об этом физике.
+    box.GetTransform().Position = {10.0f, 5.0f, 0.0f};
+    physics.TeleportEntity(scene, box.Entity());
+    physics.Step(scene, 1.0f / 60.0f);
+
+    // Тело обязано быть ТАМ, куда его поставили: по горизонтали оно никуда не
+    // уезжает (её ничто не тянет), а по вертикали продолжает падать — это и
+    // значит «переставили, а не выключили физику».
+    const Transform& tr = box.GetTransform();
+    CHECK_NEAR(tr.Position.x, 10.0f, 0.05f);
+    CHECK_TRUE(tr.Position.y < 5.0f);
+
+    // И скорость сброшена: предмет ПЕРЕСТАВИЛИ, а не бросили. Иначе поднятый
+    // мышью ящик улетает с той скоростью, которую набрал, пока падал.
+    const RigidBodyComponent& rb = scene.Registry().get<RigidBodyComponent>(box.Entity());
+    const float fallAfterTeleport = 5.0f - tr.Position.y;
+    CHECK_TRUE(fallAfterTeleport < 0.05f);
+    (void)rb;
+}

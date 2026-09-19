@@ -204,6 +204,22 @@ void PhysicsScene::SyncBodies(Scene& scene) {
     m_tracked.resize(alive);
 }
 
+void PhysicsScene::TeleportEntity(Scene& scene, entt::entity e) {
+    if (!m_world || !scene.Registry().valid(e)) return;
+    RigidBodyComponent* rb = scene.Registry().try_get<RigidBodyComponent>(e);
+    if (!rb || rb->RuntimeBody == kInvalidBody) return;
+
+    // Мировая поза, а не локальная: физика живёт в мире, а у объекта может быть
+    // родитель. Разбор — тот же, что у кинематики ниже: две формулы для одного
+    // и того же однажды разойдутся.
+    const WorldTransform tr = DecomposeWorld(scene.WorldMatrix(e));
+    m_world->SetBodyTransform(rb->RuntimeBody, tr.Position, tr.Rotation);
+    // Скорость обнуляется намеренно: тело ПЕРЕСТАВИЛИ, а не бросили. Иначе
+    // предмет, поднятый мышью на метр, улетает с той скоростью, которую набрал,
+    // пока падал.
+    m_world->SetLinearVelocity(rb->RuntimeBody, glm::vec3(0.0f));
+}
+
 void PhysicsScene::Step(Scene& scene, float dt) {
     if (!m_world || !m_world->IsAvailable()) return;
 

@@ -138,6 +138,17 @@ void EditorLayer::FocusPlayTarget() {
     }
 }
 
+// ПЕРЕСТАВИТЬ ТЕЛО ТУДА, КУДА ЕГО ПОСТАВИЛИ МЫШЬЮ (см. EditorHost.h).
+//
+// Мировая поза, а не локальная: физика живёт в мире, а у объекта может быть
+// родитель. Дети тела при этом не трогаются — у них свои тела, если они есть,
+// и физика разберётся с ними сама.
+void EditorLayer::SyncBodyToTransform(GameObject object) {
+    if (!m_play.Active() || !object.Valid() || !m_scene) return;
+    if (PhysicsScene* physics = m_play.Physics())
+        physics->TeleportEntity(*m_scene, object.Entity());
+}
+
 void EditorLayer::StopPlay() {
     if (!m_play.Active()) return;
     m_scenePtr = m_scene.get();
