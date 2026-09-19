@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <vector>
 
 #include "imgui.h"
@@ -77,7 +78,7 @@ public:
 private:
     // Что именно тащим. Ручки нумеруются по сторонам света, чтобы код
     // изменения размера читался, а не расшифровывался.
-    enum class Drag { None, Move, N, S, W, E, NW, NE, SW, SE };
+    enum class Drag { None, Move, N, S, W, E, NW, NE, SW, SE, Rotate };
 
     // Прямоугольник элемента в пикселях кадра плюс всё, что нужно, чтобы его
     // записать обратно. Собирается раз в кадр: и рисование, и попадание, и
@@ -99,6 +100,11 @@ private:
     };
 
     void Collect(Scene& scene, EditorHost& host, int frameW, int frameH);
+    // Ручки якоря на прямоугольнике родителя: девять точек, по которым якорь
+    // МЕНЯЮТ, а не читают. Возвращает true, если якорь сменили в этом кадре.
+    bool DrawAnchorHandles(EditorHost& host, Scene& scene, ImDrawList* dl, const Item& primary,
+                           const std::function<ImVec2(float, float)>& toScreen, ImVec2 mouse,
+                           bool hovered);
     void DrawGrid(ImDrawList* dl, ImVec2 imgPos, ImVec2 imgSize, const UIToolSettings& tools,
                   float sx, float sy) const;
     // Записывает новый прямоугольник в компонент (Offset/Size через якорь),
@@ -124,4 +130,10 @@ private:
     ImVec2 m_marqueeStart{0, 0};
 
     std::vector<sage::ui::SnapGuide> m_guides; // что показывать в этом кадре
+
+    // Поворот: угол на момент нажатия и угол мыши от центра элемента тогда же.
+    // Считать от них, а не накапливать покадрово, — по той же причине, что и у
+    // перемещения: накопление уводит тем сильнее, чем дольше тянут.
+    float m_rotateStart = 0.0f;
+    float m_rotateGrab = 0.0f;
 };

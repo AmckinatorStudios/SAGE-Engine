@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "EditorHost.h"
+#include "Localization.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
@@ -15,6 +16,7 @@ namespace {
 using sage::ui::UIRect;
 
 constexpr float kHandle = 5.0f;      // половина стороны ручки в пикселях панели
+constexpr float kRotateArm = 26.0f;  // длина ножки ручки поворота в пикселях панели
 constexpr float kHandleGrab = 7.0f;  // радиус захвата — больше рисунка: попасть в
                                      // квадратик 10x10 мышью тяжело, и это чувствуется
 
@@ -119,6 +121,64 @@ sage::ui::UIRect UICanvas::ContentBounds(int frameW, int frameH) const {
     return all;
 }
 
+// ЯКОРЬ МЕНЯЮТ НА ХОЛСТЕ, А НЕ СПИСКОМ В ИНСПЕКТОРЕ.
+//
+// Якорь — это место на родителе, ОТ КОТОРОГО считается положение элемента, и
+// список из девяти слов заставляет каждый раз переводить «снизу справа» в
+// место на экране. Девять точек по краям родителя говорят то же самое прямо:
+// щёлкнул в угол — элемент держится за угол.
+//
+// ЭЛЕМЕНТ ПРИ ЭТОМ НЕ ДВИГАЕТСЯ. Смена якоря без пересчёта отступа — это
+// прыжок через весь экран, и выглядит он как поломка: человек просил
+// «держись за правый край», а получил «уехал за правый край». Положение
+// пересчитывается через OffsetForTopLeft, то есть новый отступ берётся от
+// нового якоря к тому же самому месту.
+bool UICanvas::DrawAnchorHandles(EditorHost& host, Scene& scene, ImDrawList* dl,
+                                 const Item& primary,
+                                 const std::function<ImVec2(float, float)>& toScreen, ImVec2 mouse,
+                                 bool hovered) {
+    entt::registry& reg = scene.Registry();
+    sage::ui::Element* u = reg.try_get<sage::ui::Element>(primary.Entity);
+    if (!u) return false;
+
+    const UIRect& pr = primary.Parent;
+    bool changed = false;
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const UIAnchor anchor = (UIAnchor)(row * 3 + col);
+            const float x = pr.x + pr.w * (0.5f * (float)col);
+            const float y = pr.y + pr.h * (0.5f * (float)row);
+            const ImVec2 p = toScreen(x, y);
+            const bool active = u->Anchor == anchor;
+            const bool hot = hovered && std::fabs(mouse.x - p.x) <= kHandleGrab &&
+                             std::fabs(mouse.y - p.y) <= kHandleGrab;
+
+            // Ромб, а не квадрат: ручки размера уже квадратные, и второй
+            // квадрат рядом читался бы как ещё одна ручка размера.
+            const float r = active ? 6.0f : (hot ? 6.0f : 4.0f);
+            const ImU32 col32 = active ? IM_COL32(255, 170, 60, 255)
+                                : hot  ? IM_COL32(255, 220, 160, 255)
+                                       : IM_COL32(180, 190, 210, 150);
+            const ImVec2 quad[4] = {{p.x, p.y - r}, {p.x + r, p.y}, {p.x, p.y + r}, {p.x - r, p.y}};
+            dl->AddConvexPolyFilled(quad, 4, col32);
+            dl->AddPolyline(quad, 4, IM_COL32(25, 25, 30, 200), ImDrawFlags_Closed, 1.0f);
+
+            if (hot && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !active) {
+                host.PushUndoSnapshot();
+                const float k = primary.Scale > 0.0f ? primary.Scale : 1.0f;
+                const UIRect parentUnits{pr.x / k, pr.y / k, pr.w / k, pr.h / k};
+                u->Anchor = anchor;
+                u->Position = sage::ui::OffsetForTopLeft(
+                    anchor, glm::vec2(primary.Rect.x / k, primary.Rect.y / k),
+                    glm::vec2(primary.Rect.w / k, primary.Rect.h / k), parentUnits);
+                changed = true;
+            }
+            if (hot) ImGui::SetTooltip("%s", T("Anchor: what the element holds on to"));
+        }
+    }
+    return changed;
+}
+
 void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgSize, int frameW,
                     int frameH, bool hovered) {
     if (!dl || frameW <= 0 || frameH <= 0) return;
@@ -166,6 +226,35 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
                                  tools, sx, sy);
     dl->AddRect(canvasA, canvasB, IM_COL32(255, 255, 255, 120), 0.0f, 0, 1.0f);
 
+    // --- Безопасная область --------------------------------------------------
+    //
+    // Пунктир внутри кадра: всё за ним может быть срезано вырезом камеры,
+    // скруглением корпуса или «overscan» телевизора. Рисуется ПОД элементами,
+    // а не поверх: это разметка холста, и закрывать ею то, что верстают, — то
+    // же самое, что верстать по линейке, положенной на чертёж.
+    if (tools.ShowSafeArea) {
+        const float m = std::clamp(tools.SafeAreaPercent, 0.0f, 25.0f) * 0.01f;
+        const ImVec2 sa = toScreen((float)screenW * m, (float)screenH * m);
+        const ImVec2 sb = toScreen((float)screenW * (1.0f - m), (float)screenH * (1.0f - m));
+        const ImU32 col = IM_COL32(255, 210, 90, 150);
+        // Пунктир вручную: ImGui рисует только сплошные линии, а сплошная
+        // жёлтая рамка внутри кадра читается как ещё один элемент.
+        auto dash = [&](ImVec2 a, ImVec2 b) {
+            const float len = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+            if (len < 1.0f) return;
+            const float dx = (b.x - a.x) / len, dy = (b.y - a.y) / len;
+            for (float t = 0.0f; t < len; t += 10.0f) {
+                const float e = std::min(t + 5.0f, len);
+                dl->AddLine(ImVec2(a.x + dx * t, a.y + dy * t),
+                            ImVec2(a.x + dx * e, a.y + dy * e), col, 1.0f);
+            }
+        };
+        dash(ImVec2(sa.x, sa.y), ImVec2(sb.x, sa.y));
+        dash(ImVec2(sb.x, sa.y), ImVec2(sb.x, sb.y));
+        dash(ImVec2(sb.x, sb.y), ImVec2(sa.x, sb.y));
+        dash(ImVec2(sa.x, sb.y), ImVec2(sa.x, sa.y));
+    }
+
     const int selectedId = host.Selection().Primary();
     const ImVec2 mouse = ImGui::GetMousePos();
 
@@ -176,11 +265,15 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     UIRect primaryRect{};
     UIRect primaryParent{};
     bool havePrimary = false;
+    ImVec2 rotateHandle{0.0f, 0.0f};
+    bool haveRotate = false;
+    const Item* primaryItem = nullptr;
 
     for (const Item& it : m_items) {
         const ImVec2 a = toScreen(it.Rect.x, it.Rect.y);
         const ImVec2 b = toScreen(it.Rect.x + it.Rect.w, it.Rect.y + it.Rect.h);
         const bool primary = (it.Id == selectedId);
+        const sage::ui::Element& u = reg.get<sage::ui::Element>(it.Entity);
 
         if (!it.Selected && !tools.ShowAllOutlines) continue;
 
@@ -207,8 +300,19 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         havePrimary = true;
         primaryRect = it.Rect;
         primaryParent = it.Parent;
+        primaryItem = &it;
 
         const float mx = (a.x + b.x) * 0.5f, my = (a.y + b.y) * 0.5f;
+        rotateHandle = ImVec2(mx, a.y - kRotateArm);
+        haveRotate = true;
+        // ПОВОРОТ — ОТДЕЛЬНОЙ РУЧКОЙ НАД ВЕРХНИМ КРАЕМ, на ножке. Ставить его
+        // в угол, как делают некоторые редакторы, нельзя: в углу уже сидит
+        // ручка размера, и «повернуть» превращается в лотерею с попаданием
+        // мышью. Кружок на ножке ни с чем не спутать.
+        dl->AddLine(ImVec2(mx, a.y), rotateHandle, IM_COL32(255, 200, 110, 180), 1.0f);
+        dl->AddCircleFilled(rotateHandle, kHandle + 1.0f, IM_COL32(255, 200, 110, 255), 12);
+        dl->AddCircle(rotateHandle, kHandle + 1.0f, IM_COL32(40, 30, 10, 200), 12, 1.0f);
+
         const Handle hs[8] = {{{a.x, a.y}, Drag::NW}, {{mx, a.y}, Drag::N},
                               {{b.x, a.y}, Drag::NE}, {{b.x, my}, Drag::E},
                               {{b.x, b.y}, Drag::SE}, {{mx, b.y}, Drag::S},
@@ -225,7 +329,6 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
 
         // Точка якоря и линия до неё: без этого непонятно, ОТ ЧЕГО считается
         // положение, и элемент «уезжает» при смене разрешения неожиданно.
-        const sage::ui::Element& u = reg.get<sage::ui::Element>(it.Entity);
         const UIRect& pr = it.Parent;
         float ax = pr.x, ay = pr.y;
         switch (u.Anchor) {
@@ -249,7 +352,14 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         // Размер числом рядом с рамкой: верстают по числам, и лезть за ними
         // в инспектор посреди перетаскивания — лишний разрыв внимания.
         char label[64];
-        std::snprintf(label, sizeof(label), "%.0f x %.0f", it.Rect.w, it.Rect.h);
+        // Угол дописывается ТОЛЬКО когда он не нулевой: строка «200 x 56, 0°»
+        // у каждого второго элемента — это шум, из-за которого перестают
+        // читать и размер.
+        if (std::fabs(u.Rotation) > 0.01f)
+            std::snprintf(label, sizeof(label), "%.0f x %.0f, %.0f\xc2\xb0", it.Rect.w, it.Rect.h,
+                          u.Rotation);
+        else
+            std::snprintf(label, sizeof(label), "%.0f x %.0f", it.Rect.w, it.Rect.h);
         dl->AddText(ImVec2(a.x, a.y - ImGui::GetTextLineHeight() - 2.0f),
                     IM_COL32(255, 200, 110, 230), label);
     }
@@ -338,10 +448,39 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         return;
     }
 
+    // --- Ручки якоря ---------------------------------------------------------
+    //
+    // ПОСЛЕ рамок и ДО разбора щелчка: точки лежат на краях родителя, то есть
+    // часто поверх соседних элементов, и щелчок по точке обязан выигрывать у
+    // щелчка по тому, что под ней.
+    if (havePrimary && primaryItem && tools.EditAnchors && m_drag == Drag::None) {
+        if (DrawAnchorHandles(host, scene, dl, *primaryItem, toScreen, mouse, hovered)) return;
+    }
+
     // --- Начало действия -----------------------------------------------------
     if (m_drag == Drag::None) {
         if (!hovered) return;
         if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left)) return;
+
+        // Ручка поворота — первой: она висит НАД элементом, вне его
+        // прямоугольника, и под ней обычно пусто, но попасть в неё должно быть
+        // надёжно.
+        if (haveRotate && std::fabs(mouse.x - rotateHandle.x) <= kHandleGrab + 2.0f &&
+            std::fabs(mouse.y - rotateHandle.y) <= kHandleGrab + 2.0f) {
+            m_drag = Drag::Rotate;
+            m_dragId = selectedId;
+            m_dragStartMouse = mouse;
+            m_dragStartRect = primaryRect;
+            m_dragStartUnion = primaryRect;
+            m_dragStart.clear();
+            m_pushedUndo = false;
+            m_rotateStart = primaryItem ? reg.get<sage::ui::Element>(primaryItem->Entity).Rotation
+                                        : 0.0f;
+            const ImVec2 c = toScreen(primaryRect.x + primaryRect.w * 0.5f,
+                                      primaryRect.y + primaryRect.h * 0.5f);
+            m_rotateGrab = std::atan2(mouse.y - c.y, mouse.x - c.x);
+            return;
+        }
 
         // Сначала ручки первичного: они лежат ПОВЕРХ соседних элементов, и
         // попадание по ручке должно выигрывать у попадания по тому, что под ней.
@@ -412,6 +551,27 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     if (!m_pushedUndo) {
         host.PushUndoSnapshot();
         m_pushedUndo = true;
+    }
+
+    // --- Поворот -------------------------------------------------------------
+    //
+    // Угол считается от ЦЕНТРА элемента к мыши и прибавляется к тому, что было
+    // на момент нажатия: так ручка не «прыгает» под курсор в первый же кадр.
+    if (m_drag == Drag::Rotate) {
+        const ImVec2 c = toScreen(m_dragStartRect.x + m_dragStartRect.w * 0.5f,
+                                  m_dragStartRect.y + m_dragStartRect.h * 0.5f);
+        const float now = std::atan2(mouse.y - c.y, mouse.x - c.x);
+        float deg = m_rotateStart + (now - m_rotateGrab) * 57.2957795f;
+        // Shift — по 15°: ровные углы (45°, 90°) мышью не поймать, а именно они
+        // и нужны чаще всего. Alt снимает притяжку, как и у перемещения.
+        if (ImGui::GetIO().KeyShift && !ImGui::GetIO().KeyAlt)
+            deg = std::round(deg / 15.0f) * 15.0f;
+        // Приводим к (-180, 180]: 370° и 10° — один и тот же поворот, но в поле
+        // инспектора первое читается как ошибка.
+        while (deg > 180.0f) deg -= 360.0f;
+        while (deg <= -180.0f) deg += 360.0f;
+        u->Rotation = deg;
+        return;
     }
 
     const glm::vec2 startUI = toUI(m_dragStartMouse);

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1664.
+// Язык: Русский. Строк: 1673.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -210,6 +210,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выравнивание"},
     {"Align Normal",
      "Выровнять по нормали"},
+    {"Align and distribute",
+     "Выровнять и распределить"},
     {"Align the selection to the primary object",
      "Выровнять выделенные по первичному"},
     {"Align to axis",
@@ -260,6 +262,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Привязка"},
     {"Anchor (offset)",
      "Привязка (смещение)"},
+    {"Anchor: what the element holds on to",
+     "Якорь: за что элемент держится"},
     {"Angle Limit",
      "Предельный угол"},
     {"Animated model",
@@ -280,6 +284,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Применить к выбранному"},
     {"Argument",
      "Аргумент"},
+    {"As in the game",
+     "Как в игре"},
     {"As the system opens it",
      "Как откроет система"},
     {"Aspect Ratio",
@@ -774,6 +780,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка с кубической картой"},
     {"Cursor",
      "Курсор"},
+    {"Custom",
+     "Своё"},
     {"Custom Shader",
      "Свой шейдер"},
     {"Custom values",
@@ -948,6 +956,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Править вёрстку во вьюпорте"},
     {"Edit on the picture…",
      "Править по картинке…"},
+    {"Edit the anchor on the canvas",
+     "Править якорь на холсте"},
     {"Editable text field",
      "Поле для набора текста"},
     {"Edited from the keyboard; the value lives in the Text part",
@@ -1032,6 +1042,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "События"},
     {"Everyone subscribed to this name hears it: scripts and\nengine code alike.",
      "Его услышат все, кто подписан на это имя: и скрипты,\nи код движка."},
+    {"Everything outside it can be cut off: a camera\nnotch, rounded corners, TV overscan.",
+     "Всё за ней может быть срезано: вырезом камеры,\nскруглением корпуса, overscan'ом телевизора."},
     {"Exact modifiers",
      "Точные модификаторы"},
     {"Exit",
@@ -2068,6 +2080,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Спрайт при нажатии"},
     {"Preview",
      "Превью"},
+    {"Preview resolution. The layout is computed in it, and the game\nsettings are not touched — this is a look, not a change.",
+     "Разрешение предпросмотра. Раскладка считается в нём, а настройки\nигры не трогаются — это взгляд, а не правка."},
     {"Preview — drag the corner to resize",
      "Предпросмотр — тяните за угол"},
     {"Previous session crashed",
@@ -2350,6 +2364,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поворот"},
     {"Rotate (E)",
      "Поворот (E)"},
+    {"Rotate the screen",
+     "Повернуть экран"},
     {"Rotation",
      "Поворот"},
     {"Roughness",
@@ -2382,6 +2398,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Проекты SAGE (*.sageproj)"},
     {"SAGE templates (*.sagetemplate)",
      "Шаблоны SAGE (*.sagetemplate)"},
+    {"Safe area",
+     "Безопасная область"},
     {"SagePlayer not found. Put it next to the editor, build the SagePlayer target, or set SAGE_PLAYER_PATH. Looked in:",
      "SagePlayer не найден. Положите его рядом с редактором, соберите цель SagePlayer или задайте SAGE_PLAYER_PATH. Искали:"},
     {"Sample",

@@ -1311,6 +1311,7 @@ void EditorLayer::OnRender() {
     // окно системы заводит платформа — после UpdatePlatformWindows.
     CheckMultiWindowFrame();
     CheckWorkspaceDockFrame();
+    CheckPreviewResolutionFrame();
 
     TakeAutoScreenshot(app);
 }

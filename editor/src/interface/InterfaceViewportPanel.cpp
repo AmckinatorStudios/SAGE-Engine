@@ -11,6 +11,7 @@
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
 #include "../EditorPrefs.h"
+#include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
 #include "../Project.h"
@@ -27,6 +28,8 @@
 namespace {
 
 namespace ui = sage::ui;
+
+using sage::editor::interfacewidgets::AlignButton;
 
 // Приглушённое пояснение с переносом: колонки узкие, а обычный TextDisabled не
 // переносит и обрезает строку посередине слова.
@@ -48,10 +51,30 @@ int SelectedUICount(EditorHost& host) {
 // растяжения и проценты, и верстать в размер окна редактора значило бы верстать
 // под экран, которого у игрока нет.
 void GameFrameSize(EditorHost& host, int& outW, int& outH) {
+    // РАЗРЕШЕНИЕ ПРЕДПРОСМОТРА ПЕРЕБИВАЕТ НАСТРОЙКИ ИГРЫ, но их не меняет.
+    // Посмотреть, как худ ляжет на 1080x1920, раньше можно было, только правя
+    // настройки проекта туда и обратно — то есть трогая то, что уедет в игру,
+    // ради одного взгляда.
+    const glm::ivec2& p = host.Tools().UI.PreviewSize;
+    if (p.x > 0 && p.y > 0) {
+        outW = std::max(64, p.x);
+        outH = std::max(64, p.y);
+        return;
+    }
     const sage::EngineConfig& cfg = host.Settings();
     outW = std::max(64, cfg.Width);
     outH = std::max(64, cfg.Height);
 }
+
+// Готовые разрешения. Вертикальное стоит рядом с горизонтальными нарочно:
+// телефон держат вертикально, и худ, собранный под 16:9, разъезжается на нём
+// первым делом.
+struct PreviewPreset { const char* Label; int W, H; };
+const PreviewPreset kPreviewPresets[] = {
+    {"1920 x 1080", 1920, 1080},
+    {"1280 x 720", 1280, 720},
+    {"1080 x 1920", 1080, 1920},
+};
 
 } // namespace
 
@@ -164,6 +187,64 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     if (EditorIcons::IconOnlyButton("wire", T("Outlines of all elements"), tools.ShowAllOutlines))
         tools.ShowAllOutlines = !tools.ShowAllOutlines;
 
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    // ВЫРАВНИВАНИЕ — НА ХОЛСТЕ, а не только в инспекторе. Поставить пять кнопок
+    // в ряд — действие над тем, что видно, и ходить за ним в другую панель
+    // значит каждый раз отрывать взгляд от того, что равняешь. Меню, а не
+    // восемь кнопок в строке: строка инструментов и так полна.
+    if (EditorIcons::IconOnlyButton("align-left", T("Align and distribute")))
+        ImGui::OpenPopup("AlignTools###AlignTools");
+    if (Sage::UI::MenuScope alignMenu; ImGui::BeginPopup("AlignTools###AlignTools")) {
+        const int count = SelectedUICount(host);
+        ImGui::TextDisabled("%s", count == 1 ? T("One element — aligned to its parent")
+                                             : T("Aligned to the last clicked element"));
+        ImGui::Separator();
+        struct AlignDef { const char* Id; sage::ui::AlignEdge Edge; const char* Tip; };
+        const AlignDef aligns[6] = {
+            {"al", sage::ui::AlignEdge::Left, T("Left edges")},
+            {"ac", sage::ui::AlignEdge::CenterX, T("Centers horizontally")},
+            {"ar", sage::ui::AlignEdge::Right, T("Right edges")},
+            {"at", sage::ui::AlignEdge::Top, T("Top edges")},
+            {"am", sage::ui::AlignEdge::CenterY, T("Centers vertically")},
+            {"ab", sage::ui::AlignEdge::Bottom, T("Bottom edges")},
+        };
+        for (int i = 0; i < 6; ++i) {
+            if (i == 3) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            else if (i > 0) ImGui::SameLine();
+            if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
+                uiops::Align(host, aligns[i].Edge);
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled("%s", T("Distribute"));
+        ImGui::BeginDisabled(count < 3);
+        if (ImGui::Button(T("Across"))) uiops::Distribute(host, true, false);
+        ImGui::SameLine();
+        if (ImGui::Button(T("Down"))) uiops::Distribute(host, false, false);
+        ImGui::EndDisabled();
+        if (count < 3) ImGui::TextDisabled("%s", T("Needs three elements or more."));
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    // Ручки якоря на холсте. Выключаются: когда экран собран, девять точек у
+    // каждого выбранного элемента мешают смотреть на сам интерфейс.
+    if (EditorIcons::IconOnlyButton("anchor-tl", T("Edit the anchor on the canvas"),
+                                    tools.EditAnchors))
+        tools.EditAnchors = !tools.EditAnchors;
+    ImGui::SameLine();
+    if (EditorIcons::IconOnlyButton("rect", T("Safe area"), tools.ShowSafeArea))
+        ImGui::OpenPopup("SafeArea###SafeArea");
+    if (Sage::UI::MenuScope safeMenu; ImGui::BeginPopup("SafeArea###SafeArea")) {
+        ImGui::Checkbox(T("Safe area"), &tools.ShowSafeArea);
+        ImGui::TextDisabled("%s", T("Everything outside it can be cut off: a camera\n"
+                                    "notch, rounded corners, TV overscan."));
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::SliderFloat("##safe", &tools.SafeAreaPercent, 0.0f, 20.0f, "%.1f%%");
+        ImGui::EndPopup();
+    }
+
     // Справа — разрешение, в котором всё это увидит игрок. Не украшение:
     // именно от него считается вся раскладка, и человек должен видеть, подо
     // что верстает.
@@ -171,14 +252,47 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     GameFrameSize(host, gw, gh);
     char res[64];
     std::snprintf(res, sizeof(res), "%d x %d", gw, gh);
-    const float w = ImGui::CalcTextSize(res).x + 90.0f;
+    const bool custom = tools.PreviewSize.x > 0 && tools.PreviewSize.y > 0;
+    const float w = ImGui::CalcTextSize(res).x + 110.0f;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 8.0f, ImGui::GetWindowWidth() - w));
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("%s %s", T("Screen:"), res);
+    // РАЗРЕШЕНИЕ СТАЛО КНОПКОЙ, а не подписью. Подпись отвечала на «подо что
+    // верстаю», но не давала сделать главного — посмотреть, что будет на
+    // другом экране, а якоря и растяжения затем и нужны.
+    ImGui::SetNextItemWidth(w - 20.0f);
+    if (ImGui::BeginCombo("##preview_res", res)) {
+        if (ImGui::Selectable(T("As in the game"), !custom)) tools.PreviewSize = glm::ivec2(0);
+        ImGui::Separator();
+        for (const PreviewPreset& p : kPreviewPresets) {
+            const bool on = custom && tools.PreviewSize.x == p.W && tools.PreviewSize.y == p.H;
+            if (ImGui::Selectable(p.Label, on)) {
+                tools.PreviewSize = glm::ivec2(p.W, p.H);
+                RequestFit();
+            }
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled("%s", T("Custom"));
+        int wh[2] = {custom ? tools.PreviewSize.x : gw, custom ? tools.PreviewSize.y : gh};
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::DragInt2("##custom_res", wh, 1.0f, 64, 8192)) {
+            tools.PreviewSize = glm::ivec2(std::max(64, wh[0]), std::max(64, wh[1]));
+            RequestFit();
+        }
+        // ПОВЕРНУТЬ — ОДНОЙ КНОПКОЙ. Проверка «как это на телефоне боком»
+        // делается постоянно, а руками это два поля, которые надо поменять
+        // местами, не перепутав.
+        if (ImGui::SmallButton(T("Rotate the screen"))) {
+            tools.PreviewSize = glm::ivec2(gh, gw);
+            RequestFit();
+        }
+        ImGui::EndCombo();
+    }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Game resolution from Game Settings.\n"
-                                  "The layout is computed in it, so this is exactly\n"
-                                  "what the player will see."));
+        ImGui::SetTooltip("%s", custom
+            ? T("Preview resolution. The layout is computed in it, and the game\n"
+                "settings are not touched — this is a look, not a change.")
+            : T("Game resolution from Game Settings.\n"
+                "The layout is computed in it, so this is exactly\n"
+                "what the player will see."));
     }
 }
 
