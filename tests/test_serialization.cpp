@@ -1096,3 +1096,35 @@ TEST(Scene_migration_keeps_nine_slice_images_sliced) {
     // нарезку.
     CHECK_NEAR(j["objects"][0]["ui"]["image"]["sliceBorder"][0].get<float>(), 8.0f, 1e-6);
 }
+
+TEST(Scene_migration_gives_ui_elements_their_type) {
+    // ТИП ЭЛЕМЕНТА появился в формате 9. До него элемент был набором галок, и
+    // «кнопка» существовала только как знание человека о том, какие из них
+    // поставлены. Сцена, сохранённая вчера, открылась бы с пустым типом:
+    // инспектор показал бы «элемент неизвестно чего», а список создания — не
+    // тот значок.
+    const std::string oldScene = R"({
+      "name": "UI",
+      "sage_scene_version": 8,
+      "objects": [
+        {"id": 1, "name": "Panel", "ui": {"element": {"anchor": 0}, "fill": {}}},
+        {"id": 2, "name": "Button",
+         "ui": {"element": {"anchor": 0}, "fill": {}, "interactable": {}}},
+        {"id": 3, "name": "Text", "ui": {"element": {"anchor": 0}, "label": {"text": "Привет"}}},
+        {"id": 4, "name": "Field",
+         "ui": {"element": {"anchor": 0}, "fill": {}, "label": {}, "interactable": {},
+                "textInput": {}}}
+      ]
+    })";
+
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    CHECK_TRUE(j["objects"][0]["ui"]["element"]["type"] == "Panel");
+    // Подложка + реакция — это кнопка, а не панель: именно этим она и
+    // отличается.
+    CHECK_TRUE(j["objects"][1]["ui"]["element"]["type"] == "Button");
+    CHECK_TRUE(j["objects"][2]["ui"]["element"]["type"] == "Text");
+    // У поля ввода есть и подложка, и надпись, и реакция: разбор обязан идти
+    // от самого определённого набора, иначе оно стало бы кнопкой.
+    CHECK_TRUE(j["objects"][3]["ui"]["element"]["type"] == "Input Field");
+}

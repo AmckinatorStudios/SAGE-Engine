@@ -253,6 +253,7 @@ void EditorPlaySession::UpdateUiInput(Scene& scene, const PlayUiInput& in) {
     input.MouseReleased = !down && m_uiMouseWasDown;
     input.TypedText = in.TypedText;
     input.DeltaTime = in.DeltaTime;
+    input.Wheel = usable ? in.Wheel : 0.0f;
     m_uiMouseWasDown = down;
 
     if (in.Focused) {

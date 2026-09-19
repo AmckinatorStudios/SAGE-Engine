@@ -611,6 +611,22 @@ const std::vector<PartField>& LayoutFields() {
     return f;
 }
 
+const std::vector<PartField>& ScrollFields() {
+    static const std::vector<PartField> f = {
+        {"offset", SAGE_UI_TEXT("Offset"), PartField::Kind::Vec2, offsetof(Scroll, Offset), -100000.0f,
+         100000.0f, "How far the content has moved. Also the starting position."},
+        {"horizontal", SAGE_UI_TEXT("Scroll sideways"), PartField::Kind::Bool,
+         offsetof(Scroll, Horizontal)},
+        {"vertical", SAGE_UI_TEXT("Scroll up and down"), PartField::Kind::Bool,
+         offsetof(Scroll, Vertical)},
+        {"speed", SAGE_UI_TEXT("Wheel step"), PartField::Kind::Float, offsetof(Scroll, Speed), 1.0f,
+         400.0f},
+        {"clamp", SAGE_UI_TEXT("Stop at the edges"), PartField::Kind::Bool, offsetof(Scroll, Clamp),
+         0.0f, 1.0f, "Off where the edge is deliberate: a map, an endless feed."},
+    };
+    return f;
+}
+
 const char* const kCanvasScale[] = {SAGE_UI_TEXT("Pixels"), SAGE_UI_TEXT(SAGE_UI_TEXT("Scale to reference"))};
 
 const std::vector<PartField>& CanvasFields() {
@@ -692,26 +708,39 @@ void RegisterBuiltins() {
                                           &InteractableFields());
     act.Icon = "cube";
     act.Hint = SAGE_UI_TEXT("Hover, press, click, and an action name for the game");
+    // ВОЗМОЖНОСТЬ: кнопка приносит её с собой, но и обычная панель вправе
+    // ловить щелчок — отсюда и отдельное добавление.
+    act.Extra = true;
     RegisterPart(act);
 
     PartType mask = MakePart<Mask>("mask", SAGE_UI_TEXT("Mask"), 100, &MaskFields());
     mask.Icon = "rect";
     mask.Hint = SAGE_UI_TEXT("The subtree is clipped by this element's rectangle");
+    mask.Extra = true;
     RegisterPart(mask);
 
     PartType layout = MakePart<Stack>("layout", SAGE_UI_TEXT("Stack"), 100, &LayoutFields());
     layout.Icon = "layout";
     layout.Hint = SAGE_UI_TEXT("The parent lays its children out: row, column, grid");
+    layout.Extra = true;
     RegisterPart(layout);
+
+    PartType scroll = MakePart<Scroll>("scroll", SAGE_UI_TEXT("Scroll"), 100, &ScrollFields());
+    scroll.Icon = "list";
+    scroll.Hint = SAGE_UI_TEXT("The content moves inside the element and is clipped by it");
+    scroll.Extra = true;
+    RegisterPart(scroll);
 
     PartType canvas = MakePart<Canvas>("canvas", SAGE_UI_TEXT("Canvas"), 100, &CanvasFields());
     canvas.Icon = "grid";
     canvas.Hint = SAGE_UI_TEXT("A UI root: reference resolution and order between roots");
+    canvas.Extra = true;
     RegisterPart(canvas);
 
     PartType group = MakePart<Group>("group", SAGE_UI_TEXT("Group"), 100, &GroupFields());
     group.Icon = "copy";
     group.Hint = SAGE_UI_TEXT("Alpha and input for the whole subtree");
+    group.Extra = true;
     RegisterPart(group);
 }
 

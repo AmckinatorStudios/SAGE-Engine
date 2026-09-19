@@ -20,7 +20,13 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
         if (present) reg.emplace_or_replace<T>(e, value);
         else reg.remove<T>(e);
     };
-    reg.emplace_or_replace<Element>(e, p.Box);
+    // ТИП ЗАПИСЫВАЕТСЯ В САМ ЭЛЕМЕНТ. Заготовка перестала быть «разовым
+    // набором значений»: она объявляет ТИП, и элемент обязан помнить, чем он
+    // является, — иначе и инспектор, и список, и скрипт снова вынуждены
+    // угадывать это по набору частей.
+    Element box = p.Box;
+    box.Type = p.Name;
+    reg.emplace_or_replace<Element>(e, box);
     part(p.HasFill, p.FillStyle);
     part(p.HasLabel, p.LabelStyle);
     part(p.HasImage, p.ImageStyle);
@@ -73,6 +79,27 @@ bool ApplyPreset(Scene& scene, entt::entity e, const std::string& preset) {
     ApplyNode(reg, e, *p);
     BuildChildren(scene, e, *p);
     return true;
+}
+
+std::string InferType(const entt::registry& reg, entt::entity e) {
+    if (!reg.all_of<Element>(e)) return {};
+    // Порядок проверок — от САМОГО ОПРЕДЕЛЁННОГО набора к менее: у поля ввода
+    // есть и подложка, и надпись, и реакция, и оно же единственное с
+    // TextInput. Начни с подложки — и каждое поле ввода стало бы панелью.
+    if (reg.all_of<TextInput>(e)) return "Input Field";
+    if (const Range* r = reg.try_get<Range>(e)) return r->Toggle ? "Checkbox" : "Slider";
+    if (reg.all_of<Bar>(e)) return "Bar";
+    if (const Stack* st = reg.try_get<Stack>(e)) {
+        if (st->Direction == Stack::Flow::Grid) return "Grid";
+        return st->Direction == Stack::Flow::Horizontal ? "Toolbar" : "Vertical List";
+    }
+    const bool fill = reg.all_of<Fill>(e);
+    if (reg.all_of<Image>(e) && !fill) return "Image";
+    if (reg.all_of<Label>(e) && !fill) return "Text";
+    if (fill && reg.all_of<Interactable>(e)) return "Button";
+    if (fill) return "Panel";
+    if (!reg.all_of<Label>(e) && !reg.all_of<Image>(e)) return "Empty";
+    return {};
 }
 
 } // namespace sage::ui
