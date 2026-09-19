@@ -16,6 +16,7 @@
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
+#include "sage/ui/UISerialize.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UILayoutTools.h"
 #include "sage/scene/SceneLegacyUI.h"
@@ -2048,4 +2049,62 @@ TEST(ui_unrotate_delta_moves_along_the_element_axis) {
         sage::ui::UnrotateDelta(sage::ui::RotatePoint({3.0f, 5.0f}, {0.0f, 0.0f}, 37.0f), 37.0f);
     CHECK_NEAR(back.x, 3.0f, 0.001f);
     CHECK_NEAR(back.y, 5.0f, 0.001f);
+}
+
+// Непустой указатель на текстуру БЕЗ самой текстуры: Texture — это объект GL, а
+// тесты идут без контекста отрисовки. Проверяемое решение смотрит только на то,
+// пуст указатель или нет, и разыменовывать его не будет ни разу.
+static std::shared_ptr<Texture> FakeTexture() {
+    static char stub = 0;
+    return std::shared_ptr<Texture>(std::shared_ptr<char>(&stub, [](char*) {}),
+                                    reinterpret_cast<Texture*>(&stub));
+}
+
+// --- Картинка перечитывается, когда путь сменили ----------------------------
+//
+// Текстура грузилась ТОЛЬКО при чтении сцены. Путь, назначенный в редакторе,
+// до неё не доходил: человек клал картинку в слот и не видел ничего — до тех
+// пор, пока не запускал и не останавливал игру (Play/Stop перечитывает сцену).
+// Сама загрузка требует GL и диска, а вот РЕШЕНИЕ «пора грузить» — нет, и
+// проверяется оно здесь.
+
+TEST(ui_image_texture_is_stale_until_it_is_loaded) {
+    sage::ui::Image img;
+    // Ни пути, ни указателя — грузить нечего, и дёргать загрузку каждый кадр
+    // было бы незачем.
+    CHECK_FALSE(sage::ui::ImageTextureStale(img));
+
+    // Путь назначили — вот он, тот самый случай, который не работал.
+    img.Path = "assets/ui/button.png";
+    CHECK_TRUE(sage::ui::ImageTextureStale(img));
+}
+
+TEST(ui_image_texture_is_stale_when_the_path_changed) {
+    sage::ui::Image img;
+    img.Path = "a.png";
+    img.TexPath = "a.png";
+    img.Tex = FakeTexture();
+    CHECK_FALSE(sage::ui::ImageTextureStale(img));
+
+    // Сменили файл — указатель ведёт на прежнюю картинку.
+    img.Path = "b.png";
+    CHECK_TRUE(sage::ui::ImageTextureStale(img));
+
+    // Пиксель-арт меняет фильтр и мипмапы, то есть САМУ текстуру, а не то, как
+    // её рисуют: её тоже надо перечитать.
+    img.TexPath = "b.png";
+    CHECK_FALSE(sage::ui::ImageTextureStale(img));
+    img.PixelArt = true;
+    CHECK_TRUE(sage::ui::ImageTextureStale(img));
+}
+
+TEST(ui_image_forgets_the_texture_when_the_path_is_cleared) {
+    // Путь стёрли, а указатель остался — старая картинка продолжала бы
+    // рисоваться на элементе, которому её больше не назначали.
+    sage::ui::Image img;
+    img.Path = "a.png";
+    img.TexPath = "a.png";
+    img.Tex = FakeTexture();
+    img.Path.clear();
+    CHECK_TRUE(sage::ui::ImageTextureStale(img));
 }

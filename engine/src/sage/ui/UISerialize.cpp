@@ -121,12 +121,20 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
 
 // Загружает текстуру картинки элемента (рантайм-поле, в файл не пишется).
 void ResolveImageTextureImpl(sage::ui::Image& im) {
-    if (im.Path.empty()) return;
+    // Путь стёрли — картинки нет. Оставить прежний указатель значит показывать
+    // файл, который больше не назначен.
+    if (im.Path.empty()) {
+        im.Tex.reset();
+        im.TexPath.clear();
+        return;
+    }
     // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
     // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
     im.Tex = im.PixelArt ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
                                                                  /*mipmaps=*/false)
                          : ResourceManager::Instance().GetTexture(im.Path);
+    im.TexPath = im.Path;
+    im.TexPixelArt = im.PixelArt;
 }
 
 void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
@@ -192,6 +200,24 @@ bool SaveElement(json& out, const entt::registry& reg, entt::entity e) {
 }
 
 void ResolveImageTexture(Image& image) { ResolveImageTextureImpl(image); }
+
+bool ImageTextureStale(const Image& image) {
+    // Путь стёрли, а указатель остался — старая картинка продолжала бы
+    // рисоваться на элементе, которому её больше не назначали.
+    if (image.Path.empty()) return image.Tex != nullptr;
+    // Путь есть, а указателя нет — ещё не грузили (или не загрузилось).
+    if (!image.Tex) return true;
+    // Загружено НЕ ТО: путь сменили, или переключили пиксель-арт, а он меняет
+    // фильтр и мипмапы — то есть саму текстуру, а не то, как её рисуют.
+    return image.TexPath != image.Path || image.TexPixelArt != image.PixelArt;
+}
+
+void EnsureImageTexture(Image& image) {
+    // Дешёвое сравнение на каждый кадр вместо загрузки. Сама загрузка
+    // кэширована по пути (ResourceManager), так что даже при смене пути файл
+    // читается с диска один раз.
+    if (ImageTextureStale(image)) ResolveImageTextureImpl(image);
+}
 
 void LoadElement(const json& in, entt::registry& reg, entt::entity e) {
     LoadUIComponents(in, reg, e);

@@ -6,6 +6,7 @@
 #include "imgui_internal.h"
 
 #include "EditorPrefs.h"
+#include "Localization.h"
 
 namespace panelwindows {
 namespace {
@@ -184,8 +185,53 @@ void Before(const char* id) {
     }
 }
 
+// КНОПКА «ВЕРНУТЬ В РЕДАКТОР» — ВНУТРИ САМОГО ОКНА.
+//
+// Пути назад мышью не было вовсе, и это не мелочь, а тупик. Заголовок у такой
+// панели рисует СИСТЕМА (io.ConfigViewportsNoDecoration = false), а свой
+// заголовок ImGui у неё погашен — то есть хватать нечего: за системный
+// заголовок окно таскает система, ImGui про этот жест не знает и подсветку
+// док-узлов не показывает. Оставалась галочка в меню «Окно», о которой надо
+// ЗНАТЬ, — а человек видит окно, которое не возвращается, и читает это как
+// поломку.
+//
+// Кнопка стоит в углу самого окна: там, где на неё смотрят, когда хотят его
+// убрать. Отдельным окошком ImGui поверх панели, потому что панели рисуют себя
+// сами и трогать каждую ради одной кнопки значит однажды забыть одну.
+void DrawRedockButton(const char* id, ImGuiWindow* w) {
+    ImGuiWindowClass cls;   // само окошко кнопки наружу не выносим
+    cls.ViewportFlagsOverrideClear = ImGuiViewportFlags_NoAutoMerge;
+    ImGui::SetNextWindowClass(&cls);
+    ImGui::SetNextWindowViewport(w->Viewport->ID);
+    const float pad = 6.0f;
+    ImGui::SetNextWindowPos(ImVec2(w->Pos.x + w->Size.x - pad, w->Pos.y + pad), ImGuiCond_Always,
+                            ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    const std::string name = std::string("##redock_") + id;
+    if (ImGui::Begin(name.c_str(), nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                         ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoNav)) {
+        if (ImGui::SmallButton(T("Back to the editor"))) SetDetached(id, false);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Returns the panel to a tab of the main window"));
+    }
+    ImGui::End();
+}
+
 void After(const char* id) {
     State& s = Get(id);
+
+    // Кнопка возврата — ДО ранних выходов ниже: она нужна ровно тогда, когда
+    // окно уже стоит отдельно, а сверка состояния в этот момент вполне может
+    // пропускать кадры (переезд, перетаскивание).
+    if (ImGuiWindow* win = ImGui::FindWindowByName(id)) {
+        if (win->WasActive && win->Viewport != nullptr &&
+            win->Viewport->ID != ImGui::GetMainViewport()->ID) {
+            DrawRedockButton(id, win);
+        }
+    }
+
     if (s.Settle > 0) { --s.Settle; return; }
 
     ImGuiContext* ctx = ImGui::GetCurrentContext();

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1764.
+// Язык: Русский. Строк: 1765.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -371,7 +371,7 @@ constexpr TranslationPair kRussianStrings[] = {
     {"Back (-Z)",
      "Сзади (-Z)"},
     {"Back to the editor",
-     "Вернуться в редактор"},
+     "В редактор"},
     {"Backdrop",
      "Подложка"},
     {"Backdrop color",
@@ -2468,6 +2468,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Восстановить сцену?"},
     {"Resume",
      "Продолжить"},
+    {"Returns the panel to a tab of the main window",
+     "Вернёт панель вкладкой в главное окно"},
     {"Revert",
      "Откатить"},
     {"Right",
