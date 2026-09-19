@@ -319,7 +319,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -817,6 +817,16 @@ void EditorLayer::TickInputProbe() {
             std::error_code mk;
             fs::create_directories(m_assetsCwd, mk);
             std::ofstream(m_assetsCwd / "selftest_delete_me.txt") << "delete me\n";
+            // ВЫБРАННЫЙ ОБЪЕКТ СЦЕНЫ — ПРИМАНКА. Delete в панели ассетов
+            // спрашивал про файл И ТУТ ЖЕ доходил до общего обработчика,
+            // который молча удалял выбранный объект: человек смотрел в дерево
+            // файлов, а лишался объекта в сцене. Та же клавиша так же утекала
+            // из инструмента анимации, где она убирает ключ.
+            {
+                GameObject victim = m_scene->CreateObject("SelftestHotkeyVictim");
+                m_probeVictimId = victim.Id();
+                m_selection.SetPrimary(m_probeVictimId);
+            }
             m_assets.RequestFocus();
             m_probeWait = 3;
             break;
@@ -850,6 +860,12 @@ void EditorLayer::TickInputProbe() {
             if (!m_assets.DeletePending()) {
                 fail("Delete в панели ассетов не спросил об удалении");
             }
+            // И НЕ УТЁК В СЦЕНУ. Вопрос в прогоне выключен, как у человека,
+            // нажавшего «больше не спрашивать», — утёкшая клавиша удалила бы
+            // объект молча и сразу.
+            if (!m_scene->Get(m_probeVictimId).Valid()) {
+                fail("Delete в панели ассетов удалил объект из сцены");
+            }
             // Уходим из вопроса так же, как человек: Escape.
             io.AddKeyEvent(ImGuiKey_Escape, true);
             break;
@@ -864,6 +880,9 @@ void EditorLayer::TickInputProbe() {
             }
             std::error_code rc;
             fs::remove(m_assetsCwd / "selftest_delete_me.txt", rc);
+            if (m_probeVictimId >= 0) m_scene->RemoveObject(m_probeVictimId);
+            m_probeVictimId = -1;
+            m_selection.Clear();
             break;
         }
         default:
@@ -872,7 +891,7 @@ void EditorLayer::TickInputProbe() {
                                                       "объектов, гизмо навигации поворачивает "
                                                       "камеру, полосы долгой работы видны, Shift "
                                                       "выбирает диапазон, Delete спрашивает об "
-                                                      "удалении";
+                                                      "удалении файла и не трогает при этом сцену";
             m_probeStep = -1;
             return;
     }
@@ -4943,6 +4962,46 @@ bool EditorLayer::SelfTestRenderStability() {
             LOG_ERROR("Editor") << "SELFTEST: настройки и список проектов лежат в разных папках";
             ok = false;
         }
+    }
+
+    // --- ТИПЫ ЭЛЕМЕНТОВ ПЕРЕВЕДЕНЫ ------------------------------------------
+    //
+    // Имена типов («Panel», «Vertical List»), разделы меню создания и пояснения
+    // живут в ДВИЖКЕ, а показывает их редактор. Пока они не были помечены
+    // SAGE_UI_TEXT, проверка переводов их не видела вовсе: список создания и
+    // инспектор стояли по-английски посреди русского редактора, и сказать об
+    // этом было некому.
+    //
+    // Спрашиваем сам каталог: перевод есть, если T() отдаёт НЕ ту же строку.
+    if (ok && sage::editor::CurrentLanguageCode() != "en") {
+        for (const sage::ui::Preset& p : sage::ui::Presets()) {
+            if (std::strcmp(T(p.Name.c_str()), p.Name.c_str()) == 0) {
+                LOG_ERROR("Editor") << "SELFTEST: тип элемента без перевода: " << p.Name;
+                ok = false;
+            }
+            if (std::strcmp(T(p.Category.c_str()), p.Category.c_str()) == 0) {
+                LOG_ERROR("Editor") << "SELFTEST: раздел меню без перевода: " << p.Category;
+                ok = false;
+            }
+        }
+    }
+
+    // --- «ИГРАТЬ» В РЕЖИМЕ ИНТЕРФЕЙСА ПОКАЗЫВАЕТ ИГРУ -----------------------
+    //
+    // Панель Game живёт в рабочем месте сцены. Пока запуск выводил вперёд
+    // только её, «Играть» из режима интерфейса не показывал ВООБЩЕ НИЧЕГО:
+    // человек оставался на холсте с гизмо, а игра шла в окне, которого на
+    // экране нет. Проверять глазами это нельзя — окно просто не появляется.
+    if (ok) {
+        const EditorWorkspace before = m_workspace;
+        m_workspace = EditorWorkspace::Interface;
+        m_panels[EditorPanel::InterfacePreview] = false;
+        FocusPlayTarget();
+        if (!m_panels[EditorPanel::InterfacePreview]) {
+            LOG_ERROR("Editor") << "SELFTEST: запуск в режиме интерфейса не открыл предпросмотр";
+            ok = false;
+        }
+        m_workspace = before;
     }
 
     // --- ПОДЛОЖКА РЕДАКТОРА ИНТЕРФЕЙСА: ПОД МЕНЮ, А НЕ ПОВЕРХ НЕГО --------

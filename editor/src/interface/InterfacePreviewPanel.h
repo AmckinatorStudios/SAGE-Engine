@@ -1,4 +1,6 @@
 #pragma once
+#include <string>
+
 class EditorHost;
 
 // ---------------------------------------------------------------------------
@@ -14,14 +16,35 @@ class EditorHost;
 // Здесь тот же игровой кадр (та же текстура, то же разрешение) — и ничего
 // больше. Панель докуемая: её держат вкладкой рядом с холстом и переключаются
 // одним щелчком, либо раскладывают обе рядом на широком экране.
+//
+// В PLAY-РЕЖИМЕ ПО НЕМУ МОЖНО ЩЁЛКАТЬ. Иначе «посмотреть, как выглядит» и
+// «проверить, как работает» оставались разными делами в разных рабочих
+// местах: человек верстал меню в режиме интерфейса, жал «Играть» — и был
+// обязан уйти в режим сцены, чтобы нажать собственную кнопку. Панель
+// сообщает редактору курсор в пикселях ИГРОВОГО кадра ровно так же, как это
+// делает панель Game (см. GamePanel.h): перевод из окна редактора в кадр
+// знает только тот, кто этот кадр нарисовал.
 // ---------------------------------------------------------------------------
 class InterfacePreviewPanel {
 public:
     void Draw(EditorHost& host, bool& open);
     void RequestFocus() { m_focusFrames = 3; }
 
+    // --- Ввод для интерфейса игры (см. GamePanel.h: там же и почему) --------
+    bool Focused() const { return m_focused; }
+    bool MouseInside() const { return m_mouseInside; }
+    float MouseX() const { return m_mouseX; }
+    float MouseY() const { return m_mouseY; }
+    bool MouseDown() const { return m_mouseDown; }
+    const std::string& TypedText() const { return m_typed; }
+
 private:
     int m_focusFrames = 0;
+    bool m_focused = false;
+    bool m_mouseInside = false;
+    float m_mouseX = -1.0f, m_mouseY = -1.0f;
+    bool m_mouseDown = false;
+    std::string m_typed;
     // Во сколько раз показывать кадр. Ноль — вписать в панель: у предпросмотра
     // это и есть обычный случай, а крупный масштаб нужен, когда смотрят на
     // мелкий текст.

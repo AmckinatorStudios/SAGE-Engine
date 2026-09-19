@@ -1760,6 +1760,10 @@
     "Put on the selected object": "Повесить на выбранный объект",
     "The clip is not on any object yet.": "Клип пока ни на одном объекте.",
     "The component on this object plays the clip.\nTracks address its children by name.": "Клип играет компонент на этом объекте.\nДорожки адресуют его детей по именам.",
-    "Writes a .sageclip into assets and puts the component\nthat plays it on the selected object": "Запишет .sageclip в ассеты и поставит на выбранный объект\nкомпонент, который его играет"
+    "Writes a .sageclip into assets and puts the component\nthat plays it on the selected object": "Запишет .sageclip в ассеты и поставит на выбранный объект\nкомпонент, который его играет",
+    "Input Field": "Поле ввода",
+    "Screen": "Экран",
+    "Toolbar": "Панель кнопок",
+    "Vertical List": "Столбец"
   }
 }

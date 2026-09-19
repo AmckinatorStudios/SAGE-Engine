@@ -1128,3 +1128,33 @@ TEST(Scene_migration_gives_ui_elements_their_type) {
     // от самого определённого набора, иначе оно стало бы кнопкой.
     CHECK_TRUE(j["objects"][3]["ui"]["element"]["type"] == "Input Field");
 }
+
+TEST(Scene_migration_unhides_folders) {
+    // ВЫКЛЮЧЕННАЯ ПАПКА — ЛОВУШКА. Папка заведена, чтобы навести порядок в
+    // списке, и ничего не меняет в игре — так написано на кнопке, которой её
+    // создают. Но глаз рисовался у каждой строки, и один случайный щелчок
+    // гасил ВСЁ поддерево: десяток объектов пропадал из кадра, оставаясь в
+    // списке на своих местах.
+    //
+    // Глаза у папки больше нет (см. HierarchyPanel.cpp) — значит, уже
+    // сохранённую выключенную папку надо расколдовать при открытии. Иначе её
+    // содержимое осталось бы невидимым навсегда: кнопки, которая вернёт его,
+    // на экране больше нет.
+    const std::string oldScene = R"({
+      "name": "Folders",
+      "sage_scene_version": 9,
+      "objects": [
+        {"id": 1, "name": "Уровень", "folder": {}, "hidden": true},
+        {"id": 2, "name": "Видимая папка", "folder": {}},
+        {"id": 3, "name": "Куб", "hidden": true}
+      ]
+    })";
+
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    CHECK_FALSE(j["objects"][0].contains("hidden"));
+    CHECK_FALSE(j["objects"][1].contains("hidden"));
+    // А вот ОБЫЧНЫЙ объект трогать нельзя: его выключили нарочно, и вернуть
+    // его за человека значит отменить его работу.
+    CHECK_TRUE(j["objects"][2].value("hidden", false));
+}

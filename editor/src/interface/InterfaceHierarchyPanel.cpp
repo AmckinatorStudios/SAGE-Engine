@@ -10,6 +10,7 @@
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "../HotkeyScope.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
@@ -193,7 +194,9 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
                 category = preset.Category;
                 ImGui::SeparatorText(T(category.c_str()));
             }
-            if (EditorIcons::MenuItem(preset.Icon, preset.Name.c_str())) {
+            // Имя типа переводится, а создаётся элемент по английскому ключу:
+            // перевод — это то, что видно, а не то, что хранится.
+            if (EditorIcons::MenuItem(preset.Icon, T(preset.Name.c_str()))) {
                 host.PushUndoSnapshot();
                 GameObject created = host.CreateUIEntity(preset.Name);
                 if (created.Valid()) host.Selection().SetPrimary(created.Id());
@@ -509,6 +512,9 @@ void InterfaceHierarchyPanel::HandleShortcuts(EditorHost& host) {
     const ImGuiIO& io = ImGui::GetIO();
     const bool ctrl = io.KeyCtrl;
 
+    // Delete разбираем сами — и говорим об этом, чтобы общий обработчик не
+    // удалил то же самое второй раз (см. HotkeyScope.h).
+    sage::editor::hotkeys::ClaimDelete();
     if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) host.DeleteSelected();
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) host.DuplicateSelected();
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_C, false))

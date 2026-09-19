@@ -24,6 +24,7 @@
 #include "EditorHost.h"
 #include "../AssetSlot.h"
 #include "../EditorIcons.h"
+#include "../HotkeyScope.h"
 #include "../SceneCover.h"
 #include "../Thumbnails.h"
 
@@ -1685,6 +1686,13 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     // по строке пути, по полю фильтра или по дереву папок слева фокусировал
     // другое дочернее окно той же панели, и Delete переставал работать, ничего
     // об этом не сообщая. Панель тут одна, и вопрос к ней тоже один.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        !ImGui::GetIO().WantTextInput) {
+        // Delete принадлежит панели ассетов, пока она в фокусе: иначе он
+        // доходил бы до общего обработчика и удалял объект из СЦЕНЫ — человек
+        // смотрел в дерево файлов, а лишался объекта.
+        sage::editor::hotkeys::ClaimDelete();
+    }
     if (!m_multi.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
         !ImGui::GetIO().WantTextInput && m_renameTarget.empty() &&
         m_createKind == CreateKind::None && m_deleteTargets.empty() &&

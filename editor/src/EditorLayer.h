@@ -405,8 +405,11 @@ private:
     // Шаги разнесены по кадрам, потому что нажатие и отпускание — это разные
     // кадры и для ImGui, и для редактора (выбор происходит на отпускании).
     void TickInputProbe();
+    // Какое окно выводить вперёд по «Играть» (см. EditorLayer_Play.cpp).
+    void FocusPlayTarget();
     int m_probeStep = -1;     // -1 — не запущена
     int m_probeWait = 0;      // кадров подождать перед следующим шагом
+    int m_probeVictimId = -1; // объект, на котором проверяется, что Delete не утёк из панели
     float m_probeYaw = 0.0f;  // угол камеры до щелчка по гизмо
     bool m_probeFailed = false;
     ImVec2 m_probePos{0.0f, 0.0f};  // куда «поставлен» курсор проверки

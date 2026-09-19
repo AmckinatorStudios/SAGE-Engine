@@ -55,6 +55,7 @@ add_executable(SageEditor WIN32
     src/panels/AssetsPanel.cpp
     src/panels/EnvironmentPanel.cpp
     src/EditorPrefs.cpp
+    src/HotkeyScope.cpp
     src/PanelWindows.cpp
     src/ObjectCatalog.cpp
     src/RectSelect.cpp

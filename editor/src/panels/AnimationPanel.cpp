@@ -7,6 +7,7 @@
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "../HotkeyScope.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../PanelWindowId.h"
@@ -934,6 +935,15 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
         ImGui::End();
         return;
     }
+
+    // DELETE ЗДЕСЬ — НАШ, И ОБЩИЙ ОБРАБОТЧИК ЕГО НЕ УВИДИТ.
+    //
+    // Заявка подаётся, пока панель в фокусе, — ВСЕГДА, а не только когда
+    // выбраны ключи и открыт клип. «Клип не открыт» и «ключ не выбран» — не
+    // повод удалить из сцены объект, над анимацией которого человек работает:
+    // ровно так оно и было — Delete в линейке времени уносил сам объект.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+        sage::editor::hotkeys::ClaimDelete();
 
     // КЛИПА НЕТ — И ПАНЕЛЬ ЭТО ГОВОРИТ. Ни линейки, ни дорожек: показывать
     // пустую линейку значит предлагать анимировать то, чего не существует.
