@@ -434,7 +434,16 @@ void EditorLayer::DrawDockspaceAndMenu() {
     ImGuiWindowFlags hostFlags =
         ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+        // ОКНУ-ХОСТУ ПРОКРУТКА НЕ ПОЛОЖЕНА, И БЕЗ ЭТОГО ФЛАГА ОНА ПОЯВЛЯЛАСЬ.
+        //
+        // Хост — это весь редактор: тулбар, док-пространство и статус-бар,
+        // растянутые ровно по окну. Прокручивать его некуда, но ImGui об этом
+        // не знает: содержимое на волосок выше окна (полоса статуса плюс
+        // отступ строки) — и он заводит вертикальную полосу прокрутки. На
+        // экране это серая лента во всю высоту у правого края, отнимающая
+        // место у инспектора, причём ездить по ней некуда.
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     ImGui::Begin("##SageEditorHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
@@ -480,7 +489,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
 
     // Док-пространство занимает всё между тулбаром и статус-баром.
     const ImVec2 dockMin = ImGui::GetCursorScreenPos();
-    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight), ImGuiDockNodeFlags_None);
+    // КРЕСТИК У ПАНЕЛИ ОДИН. ImGui рисует их два: свой у каждой вкладки и ещё
+    // один в правом углу узла — для вкладки, выбранной сейчас. Второй ничего
+    // не добавляет (он закрывает ту же панель, что и первый), а спрашивают о
+    // нём как об ошибке: два одинаковых крестика подряд читаются как «один из
+    // них закроет что-то другое».
+    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight),
+                     ImGuiDockNodeFlags_NoCloseButton);
     const ImVec2 dockMax = ImGui::GetItemRectMax();
     DrawStatusBar(kStatusBarHeight);
 
@@ -832,9 +847,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
         // клавиши (анимация убирает ключ, ассеты — файл, список элементов —
         // элемент). Без этой проверки срабатывали ОБА: человек убирал ключ в
         // линейке времени и вместе с ним терял объект из сцены (HotkeyScope.h).
-        if (!sage::editor::hotkeys::DeleteClaimed() && ImGui::IsKeyPressed(ImGuiKey_Delete))
+        namespace hk = sage::editor::hotkeys;
+        if (!hk::Claimed(hk::Key::Delete) && ImGui::IsKeyPressed(ImGuiKey_Delete))
             DeleteSelected();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) DuplicateSelected();
+        if (!hk::Claimed(hk::Key::Duplicate) && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D))
+            DuplicateSelected();
         // Ctrl+S работает ВСЕГДА, а не только у сцены с именем: у новой сцены
         // имени нет, и «горячая клавиша молча ничего не делает» — это ровно то,
         // как выглядит потерянная работа.

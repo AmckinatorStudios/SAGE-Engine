@@ -556,7 +556,6 @@ void EditorLayer::DuplicateSelected() {
         copies.push_back(copy.Id());
     }
     m_selection.Set(copies);
-    m_selection.Set(copies);
 }
 
 namespace {

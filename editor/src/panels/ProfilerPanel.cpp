@@ -9,6 +9,7 @@
 #include "sage/core/Profiler.h"
 #include "sage/rhi/ResourceLedger.h"
 #include "../Localization.h"
+#include "EditorIcons.h"
 
 namespace {
 
@@ -66,7 +67,7 @@ void ProfilerPanel::Draw(bool* open) {
     }
     if (!wantEnabled) return;
 
-    if (!ImGui::Begin(T("Profiler" "###Profiler"), open,
+    if (!ImGui::Begin(EditorIcons::WindowTitle("chart", T("Profiler"), "Profiler").c_str(), open,
                       panelwindows::WindowFlags("Profiler"))) {
         ImGui::End();
         return;

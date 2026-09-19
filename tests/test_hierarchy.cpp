@@ -6,6 +6,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
+#include "sage/scene/Prefab.h"
 #include "sage/ecs/CameraView.h"
 
 TEST(Hierarchy_child_inherits_parent_translation) {
@@ -210,5 +211,29 @@ TEST(Hierarchy_compute_world_matrices_matches_recursive) {
         for (int c2 = 0; c2 < 4; ++c2)
             for (int r = 0; r < 4; ++r)
                 CHECK_NEAR(got[c2][r], expect[c2][r], 1e-4);
+    }
+}
+
+// --- Копия папки остаётся папкой ТОГО ЖЕ ЦВЕТА -----------------------------
+//
+// Цвет папки — её единственная примета в списке: имена у групп похожи, а цвет
+// виден боковым зрением. Копия, потерявшая цвет, выглядит чужой в собственном
+// ряду, и восстановить её приходится руками.
+TEST(Hierarchy_a_duplicated_folder_keeps_its_colour_and_gets_its_own_id) {
+    Scene scene;
+    GameObject folder = scene.CreateFolder("Уровень");
+    scene.Registry().get<FolderComponent>(folder.Entity()).Color = glm::vec3(0.9f, 0.2f, 0.3f);
+    const int srcId = folder.Id();
+
+    GameObject copy = sage::scene::CopySubtree(scene, folder.Entity(), scene, entt::null);
+
+    CHECK_TRUE(scene.IsFolder(copy.Entity()));
+    CHECK_TRUE(copy.Id() != srcId);
+    const FolderComponent* fc = scene.Registry().try_get<FolderComponent>(copy.Entity());
+    CHECK_TRUE(fc != nullptr);
+    if (fc) {
+        CHECK_NEAR(fc->Color.r, 0.9f, 0.001f);
+        CHECK_NEAR(fc->Color.g, 0.2f, 0.001f);
+        CHECK_NEAR(fc->Color.b, 0.3f, 0.001f);
     }
 }

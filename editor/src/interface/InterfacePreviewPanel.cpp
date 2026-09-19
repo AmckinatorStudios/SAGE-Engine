@@ -7,6 +7,7 @@
 
 #include "../EditorHost.h"
 #include "../Localization.h"
+#include "EditorIcons.h"
 #include "../PanelWindows.h"
 
 #include "sage/core/Config.h"
@@ -19,7 +20,7 @@ void InterfacePreviewPanel::Draw(EditorHost& host, bool& open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("Preview" "###InterfacePreview"), &open,
+    if (!ImGui::Begin(EditorIcons::WindowTitle("eye", T("Preview"), "InterfacePreview").c_str(), &open,
                       panelwindows::WindowFlags("InterfacePreview"))) {
         m_focused = false;
         m_mouseInside = false;

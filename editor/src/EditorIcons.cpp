@@ -216,6 +216,30 @@ void LoadFont() {
         ranges.push_back(0);
     }
 
+    // ПЕРВЫМ — СЛИТЫЙ В ТЕКСТОВЫЙ ШРИФТ. Значок в ЗАГОЛОВКЕ вкладки нельзя
+    // нарисовать поверх: вкладки дока рисует ImGui, и всё, что у нас есть, —
+    // строка с её именем. Значит, значок обязан быть ОБЫЧНОЙ БУКВОЙ текстового
+    // шрифта. Слияние добавляет глифы иконок в шрифт, добавленный последним, —
+    // то есть в текстовый (см. EditorTheme::LoadFont, который зовёт нас сразу
+    // после него).
+    //
+    // Отдельный шрифт ниже при этом остаётся: им рисуют иконки ТОЧНО — в
+    // заданном квадрате, с измерением настоящего размера глифа (см. DrawAt), и
+    // слитая копия этого не умеет.
+    {
+        ImFontConfig merge;
+        merge.FontDataOwnedByAtlas = false;
+        merge.PixelSnapH = true;
+        merge.MergeMode = true;
+        // Значок в строке текста стоит на базовой линии буквы, а нарисован он в
+        // клетке 24x24 с полем сверху: без сдвига он «взлетает» над строкой.
+        merge.GlyphOffset = ImVec2(0.0f, 3.0f);
+        std::snprintf(merge.Name, sizeof(merge.Name), "Tabler Icons (в тексте)");
+        io.Fonts->AddFontFromMemoryTTF((void*)EditorIconFont::kTablerSubset,
+                                       (int)EditorIconFont::kTablerSubsetSize, 16.0f, &merge,
+                                       ranges.Data);
+    }
+
     ImFontConfig cfg;
     // Массив статический и живёт всю программу — атлас не должен его освобождать.
     cfg.FontDataOwnedByAtlas = false;
@@ -224,6 +248,26 @@ void LoadFont() {
     g_iconFont = io.Fonts->AddFontFromMemoryTTF(
         (void*)EditorIconFont::kTablerSubset, (int)EditorIconFont::kTablerSubsetSize, 40.0f, &cfg,
         ranges.Data);
+}
+
+std::string GlyphUtf8(const char* icon) {
+    const unsigned int code = CodeOf(icon);
+    if (code == 0) return {};
+    char utf8[8] = {};
+    ImTextStrToUtf8(utf8, (int)sizeof(utf8), (const ImWchar*)&code, (const ImWchar*)&code + 1);
+    return utf8;
+}
+
+std::string WindowTitle(const char* icon, const char* title, const char* id) {
+    const std::string glyph = GlyphUtf8(icon);
+    std::string out;
+    // Имени без глифа быть не должно, но если оно вдруг есть — заголовок
+    // обязан остаться читаемым, а не начинаться с пустого квадрата.
+    if (!glyph.empty()) out = glyph + "  ";
+    out += title ? title : "";
+    out += "###";
+    out += id ? id : "";
+    return out;
 }
 
 bool FontReady() { return g_iconFont != nullptr; }

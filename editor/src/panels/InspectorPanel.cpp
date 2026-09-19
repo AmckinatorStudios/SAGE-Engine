@@ -114,7 +114,7 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
         }
     }
 
-    ImGui::Begin(T("Inspector" "###Inspector"), open, panelwindows::WindowFlags("Inspector"));
+    ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Inspector"), "Inspector").c_str(), open, panelwindows::WindowFlags("Inspector"));
 
     // --- ЗАМОК --------------------------------------------------------------
     //

@@ -70,7 +70,7 @@ bool ConsolePanel::Passes(const Entry& e) const {
 }
 
 void ConsolePanel::Draw(bool* open, const std::string& windowId) {
-    ImGui::Begin(sage::editor::panelid::Title(T("Console"), windowId).c_str(), open,
+    ImGui::Begin(sage::editor::panelid::Title("console", T("Console"), windowId).c_str(), open,
                      panelwindows::WindowFlags("Console"));
     if (ImGui::IsWindowFocused()) MarkSeen();
 

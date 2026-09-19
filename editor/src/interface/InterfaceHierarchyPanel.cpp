@@ -124,7 +124,7 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(320.0f, 620.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("Elements" "###InterfaceHierarchy"), &open,
+    if (!ImGui::Begin(EditorIcons::WindowTitle("list", T("Elements"), "InterfaceHierarchy").c_str(), &open,
                       panelwindows::WindowFlags("InterfaceHierarchy"))) {
         ImGui::End();
         return;
@@ -512,9 +512,11 @@ void InterfaceHierarchyPanel::HandleShortcuts(EditorHost& host) {
     const ImGuiIO& io = ImGui::GetIO();
     const bool ctrl = io.KeyCtrl;
 
-    // Delete разбираем сами — и говорим об этом, чтобы общий обработчик не
-    // удалил то же самое второй раз (см. HotkeyScope.h).
-    sage::editor::hotkeys::ClaimDelete();
+    // Delete и Ctrl+D разбираем сами — и говорим об этом, чтобы общий
+    // обработчик не сделал то же самое второй раз (см. HotkeyScope.h). До
+    // этого Ctrl+D здесь давал ДВЕ копии: одну от панели, вторую от него.
+    sage::editor::hotkeys::Claim(sage::editor::hotkeys::Key::Delete);
+    sage::editor::hotkeys::Claim(sage::editor::hotkeys::Key::Duplicate);
     if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) host.DeleteSelected();
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) host.DuplicateSelected();
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_C, false))

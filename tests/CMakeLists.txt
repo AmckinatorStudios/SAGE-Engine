@@ -52,11 +52,13 @@ add_executable(sage_tests
     test_posteffect.cpp
     test_editorstate.cpp
     test_pathscope.cpp
+    test_hotkeyscope.cpp
     test_nineslice.cpp
     test_propertyclip.cpp
     test_interface.cpp
     test_savegame.cpp
     ../editor/src/PathScope.cpp
+    ../editor/src/HotkeyScope.cpp
     ../editor/src/EditorSelection.cpp
     ../editor/src/EditorHistory.cpp
 )

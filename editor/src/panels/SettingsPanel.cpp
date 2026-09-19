@@ -10,6 +10,7 @@
 
 #include <imgui.h>
 #include "../Localization.h"
+#include "EditorIcons.h"
 
 // ============================================================================
 //  Окно гибких настроек движка (EngineConfig). Редактирует host.Settings() и
@@ -27,7 +28,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // И нижняя граница: окно меньше этого показывает половину раздела, а полос
     // прокрутки у разделов нет.
     ImGui::SetNextWindowSizeConstraints(ImVec2(520, 360), ImVec2(FLT_MAX, FLT_MAX));
-    if (!ImGui::Begin(T("Game Settings" "###Game Settings"), &open)) { ImGui::End(); return; }
+    if (!ImGui::Begin(EditorIcons::WindowTitle("gear", T("Game Settings"), "Game Settings").c_str(), &open)) { ImGui::End(); return; }
 
     sage::EngineConfig& c = host.Settings();
 
