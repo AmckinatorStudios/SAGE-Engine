@@ -42,6 +42,7 @@
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/ParticlePresets.h"
+#include "sage/anim/PropertyAnimator.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
@@ -240,6 +241,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     bool rmCharacter = false;
     bool rmJoint = false;
     bool rmAnimation = false;
+    bool rmPropertyAnim = false;
     bool rmProbe = false;
     bool rmIk = false;
     bool rmEmitter = false;
@@ -786,6 +788,58 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Анимация свойств: клип .sageclip на этом объекте -------------------
+    //
+    // ОТДЕЛЬНО ОТ «Animation», И ЭТО НЕ ДУБЛИРОВАНИЕ. Тот компонент играет
+    // движение КОСТЕЙ модели, этот — движение СВОЙСТВ объекта и его детей
+    // (положение, цвет, прозрачность, размер). Скелета для него не нужно:
+    // мигающая кнопка интерфейса и всплывающая подсказка — это он.
+    //
+    // ИМЕННО ЭТОТ КОМПОНЕНТ ОТВЕЧАЕТ НА ВОПРОС «ЧТО ИГРАЕТ ЭТОТ ОБЪЕКТ».
+    // Пока его не было видно в инспекторе, клип существовал только внутри
+    // инструмента анимации: объект «анимировался», но в сцене не было ничего,
+    // что это подтверждало бы, и после закрытия редактора движение пропадало.
+    if (reg.all_of<PropertyAnimatorComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader(T("Property Animation" "###Property Animation"),
+                                   ImGuiTreeNodeFlags_DefaultOpen, &rmPropertyAnim,
+                                   T("Plays a .sageclip: properties of this object and its children"))) {
+        if (PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(obj.Entity())) {
+            const assetslot::Result clipSlot =
+                assetslot::Draw(host, "propclip", assetslot::Kind::Animation, pa->ClipPath,
+                                &m_preview, T("No clip — nothing is playing"));
+            if (clipSlot.Changed) {
+                host.PushUndoSnapshot();
+                pa->ClipPath = clipSlot.Path;
+                // Путь сменился — старый клип в памяти больше не тот.
+                pa->Clip.reset();
+                pa->Ready = false;
+            }
+            if (clipSlot.BrowseRequested) {
+                FileBrowser::Config c;
+                c.Title = T("Choose an animation clip");
+                c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
+                c.FilterLabel = T("Animation");
+                c.StartDir = host.CurrentProject().AssetsDir();
+                m_browser.Open(c);
+                m_browseTarget = &pa->ClipPath;
+                m_browseIsShader = false;
+                m_browseIsMesh = false;
+                m_browseIsMaterial = false;
+            }
+            if (pa->ClipPath.empty()) {
+                ImGui::TextDisabled("%s", T("Create a clip in the Animation tool and it lands here."));
+            } else if (EditorIcons::Button("anim", T("Edit the clip"),
+                                           T("Opens this clip in the Animation tool"))) {
+                host.OpenAnimationClip(pa->ClipPath);
+            }
+            ImGui::Checkbox(T("Playing"), &pa->Playing);
+            ImGui::SameLine();
+            ImGui::Checkbox(T("Loop"), &pa->Loop);
+            ImGui::DragFloat(T("Speed"), &pa->Speed, 0.02f, 0.0f, 8.0f);
+            host.TrackLastImGuiItem();
+        }
+    }
+
     // --- Зонд отражений -----------------------------------------------------
     if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
         EditorTheme::SectionHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe,
@@ -1100,6 +1154,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    if (rmPropertyAnim) {
+        host.PushUndoSnapshot();
+        reg.remove<PropertyAnimatorComponent>(obj.Entity());
+    }
+
     if (rmProbe) {
         host.PushUndoSnapshot();
         reg.remove<ReflectionProbeComponent>(obj.Entity());
@@ -1243,6 +1302,14 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Animation", "Animation", "anim",
          "Plays clips on the skeleton of the Mesh model", HasComp<AnimationComponent>,
          AddComp<AnimationComponent>},
+        // АНИМАЦИЯ СВОЙСТВ — ДЛЯ ТЕХ, У КОГО НЕТ СКЕЛЕТА, то есть для
+        // большинства объектов сцены и для всего интерфейса. Без этой строки
+        // компонент можно было завести только руками в .sage, и инструмент
+        // анимации оставался единственным местом, где движение «существует», —
+        // до закрытия редактора.
+        {"Property Animation", "Animation", "clock",
+         "Plays a .sageclip: properties of this object and its children",
+         HasComp<PropertyAnimatorComponent>, AddComp<PropertyAnimatorComponent>},
         // IK В СПИСКЕ НЕТ — НАМЕРЕННО.
         //
         // Обратная кинематика нужна в считаных случаях (стопа на склоне, взгляд
