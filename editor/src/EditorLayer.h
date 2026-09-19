@@ -65,6 +65,7 @@ namespace sage { class Application; }
 #include "panels/SettingsPanel.h"
 #include "panels/InputPanel.h"
 #include "panels/TemplatesPanel.h"
+#include "panels/AnimationPanel.h"
 #include "panels/NineSlicePanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
@@ -139,6 +140,11 @@ public:
     EditorWorkspace Workspace() const override { return m_workspace; }
     void SetWorkspace(EditorWorkspace workspace) override;
 
+    void OpenAnimationClip(const std::string& clipPath) override {
+        m_panels[EditorPanel::Animation] = true;
+        m_animation.RequestFocus();
+        m_animation.OpenClip(*this, clipPath);
+    }
     void OpenNineSliceEditor(const std::string& imagePath) override {
         m_showNineSlice = true;
         m_nineSlice.OpenFor(imagePath);
@@ -511,7 +517,7 @@ private:
     // посреди экрана — «панель отцепилась». Здесь для каждого пространства
     // помнится узел, в котором панель стояла, и при возвращении она встаёт
     // туда же; перетащил её человек сам — запомнится новое место.
-    unsigned int m_sharedDock[2][2]{};   // [пространство][панель]
+    unsigned int m_sharedDock[2][3]{};   // [пространство][панель]
     bool m_redockShared = false;         // пространство только что сменили
 
     // Какие панели сейчас на экране (см. EditorPanelVisibility.h): массивом по
@@ -573,6 +579,11 @@ private:
     // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
     // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
     NineSlicePanel m_nineSlice;
+
+    // Инструмент анимации (см. panels/AnimationPanel.h). Панель раскладки, а не
+    // инструмент под задачу: анимацию правят рядом со сценой и рядом с
+    // вёрсткой, поэтому она докуется в обоих пространствах.
+    AnimationPanel m_animation;
     bool m_showNineSlice = false;
 
     // Реестр команд и палитра (Ctrl+K). Реестр наполняется один раз в

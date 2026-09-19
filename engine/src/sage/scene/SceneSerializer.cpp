@@ -653,6 +653,30 @@ static AnimationComponent ParseAnimation(const json& aj) {
     return am;
 }
 
+// Проигрывание клипа по свойствам (sage/anim/PropertyAnimator.h). Клип —
+// ОТДЕЛЬНЫЙ ФАЙЛ, и в сцену идёт только путь к нему с настройками воспроизведения:
+// тот же «мигание» висит на десяти кнопках, и копия внутри каждой означала бы
+// десять разъехавшихся копий.
+static void SavePropertyAnimator(json& j, const PropertyAnimatorComponent& a) {
+    json& oj = j["propertyAnimator"];
+    oj["clipPath"] = a.ClipPath;
+    oj["playing"] = a.Playing;
+    oj["loop"] = a.Loop;
+    oj["speed"] = a.Speed;
+    // Время НЕ пишется: это положение бегунка сейчас, а не свойство сцены.
+    // Сохранённое «сейчас середина» означало бы сцену, которая открывается с
+    // движением, начатым неизвестно кем.
+}
+
+static PropertyAnimatorComponent ParsePropertyAnimator(const json& aj) {
+    PropertyAnimatorComponent a;
+    a.ClipPath = aj.value("clipPath", std::string());
+    a.Playing = aj.value("playing", true);
+    a.Loop = aj.value("loop", true);
+    a.Speed = aj.value("speed", 1.0f);
+    return a;   // Clip/Ready восстановит первый UpdatePropertyAnimators
+}
+
 // IK: сохраняем только ЗАДАНИЕ (какая кость, куда тянем, как), но не результат.
 // EndJoint/MidJoint/RootJoint — это индексы в конкретном скелете, они
 // разрешаются заново после загрузки модели, а Locked/LockedAt — состояние
@@ -1077,6 +1101,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
         if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
         if (const AnimationComponent* am = reg.try_get<AnimationComponent>(e)) SaveAnimation(j, *am);
+        if (const PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(e))
+            SavePropertyAnimator(j, *pa);
         if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
         if (const ReflectionProbeComponent* rp = reg.try_get<ReflectionProbeComponent>(e))
             SaveReflectionProbe(j, *rp);
@@ -1190,6 +1216,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<JointComponent>(obj.Entity(), ParseJoint(j["joint"]));
         if (j.contains("animation"))
             obj.Registry()->emplace<AnimationComponent>(obj.Entity(), ParseAnimation(j["animation"]));
+        if (j.contains("propertyAnimator"))
+            obj.Registry()->emplace<PropertyAnimatorComponent>(
+                obj.Entity(), ParsePropertyAnimator(j["propertyAnimator"]));
         if (j.contains("ik"))
             obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
         if (j.contains("character"))

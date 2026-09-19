@@ -62,6 +62,9 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
+#include "sage/anim/AnimProperty.h"
+#include "sage/anim/PropertyAnimator.h"
+#include "sage/anim/PropertyClip.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
@@ -316,7 +319,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4748,6 +4751,102 @@ bool EditorLayer::SelfTestRenderStability() {
             std::error_code rmec;
             fs::remove(scenePath, rmec);
         }
+    }
+
+    // --- АНИМАЦИЯ ПО СВОЙСТВАМ: ОТ КЛЮЧА ДО ДВИЖЕНИЯ В СЦЕНЕ -------------
+    //
+    // Счёт кривых проверяет модульный тест (tests/test_propertyclip.cpp), а
+    // здесь — ВОРОТА: свойство находится по ключу в реестре, значение читается
+    // с настоящего объекта, дорожка ложится в файл, компонент поднимает файл и
+    // двигает объект. Каждый шаг по отдельности работает и на разорванном
+    // пути — ломается именно стык, и увидеть это можно было бы только глазами
+    // на шевелящемся кубике.
+    if (ok) {
+        GameObject mover = m_scene->CreateObject("SelftestAnimTarget");
+        mover.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+
+        // Свойство берётся ИЗ РЕЕСТРА по ключу — ровно так, как его возьмёт
+        // собранная игра. Своего списка свойств у редактора нет.
+        const sage::anim::PropertyType* prop = sage::anim::FindProperty("object.position");
+        if (!prop) {
+            LOG_ERROR("Editor") << "SELFTEST: свойства object.position нет в реестре";
+            ok = false;
+        } else {
+            sage::anim::PropertyClip clip;
+            clip.Name = "Selftest";
+            clip.Duration = 2.0f;
+            clip.Loop = false;
+            sage::anim::Track track;
+            track.Property = "object.position";
+            sage::anim::SetKey(track, 0.0f, glm::vec4(0.0f));
+            sage::anim::SetKey(track, 2.0f, glm::vec4(10.0f, 0.0f, 0.0f, 0.0f));
+            clip.Tracks.push_back(track);
+
+            // Применение в середину: значение обязано быть ровно посередине —
+            // это и есть проверка того, что дорожка доехала до компонента,
+            // а не осталась числом в файле.
+            sage::anim::ApplyClipAt(*m_scene, mover.Entity(), clip, 1.0f);
+            const float mid = mover.GetTransform().Position.x;
+            if (std::fabs(mid - 5.0f) > 0.01f) {
+                LOG_ERROR("Editor") << "SELFTEST: клип не сдвинул объект (x=" << mid
+                                    << " вместо 5)";
+                ok = false;
+            }
+
+            // Файл: клип переживает запись и чтение целиком — иначе «сохранил
+            // и открыл» теряет половину работы молча.
+            const fs::path clipPath = m_project.AssetsDir() / "selftest_move.sageclip";
+            std::string cerr;
+            std::error_code cec2;
+            fs::create_directories(clipPath.parent_path(), cec2);
+            if (!sage::anim::SaveClipFile(clip, clipPath.string(), cerr)) {
+                LOG_ERROR("Editor") << "SELFTEST: клип не сохранился: " << cerr;
+                ok = false;
+            } else {
+                sage::anim::PropertyClip back;
+                if (!sage::anim::LoadClipFile(clipPath.string(), back, cerr)) {
+                    LOG_ERROR("Editor") << "SELFTEST: клип не прочитался: " << cerr;
+                    ok = false;
+                } else if (back.Tracks.size() != 1 || back.Tracks[0].Keys.size() != 2 ||
+                           back.Tracks[0].Property != "object.position") {
+                    LOG_ERROR("Editor") << "SELFTEST: клип вернулся не тем, чем был записан";
+                    ok = false;
+                }
+
+                // И КОМПОНЕНТ ЕГО ИГРАЕТ. Это последний стык: путь в сцене,
+                // загрузка файла системой, продвижение времени, запись в
+                // свойство. Ровно он и рвётся, когда компонент забывают
+                // поставить в расписание систем.
+                mover.GetTransform().Position = {0.0f, 0.0f, 0.0f};
+                PropertyAnimatorComponent& pa =
+                    m_scene->Registry().emplace<PropertyAnimatorComponent>(mover.Entity());
+                pa.ClipPath = clipPath.string();
+                pa.Loop = false;
+                sage::anim::UpdatePropertyAnimators(*m_scene, 1.0f);
+                const float played = mover.GetTransform().Position.x;
+                if (std::fabs(played - 5.0f) > 0.01f) {
+                    LOG_ERROR("Editor") << "SELFTEST: компонент не проиграл клип (x=" << played
+                                        << " вместо 5)";
+                    ok = false;
+                }
+            }
+            std::error_code rmec2;
+            fs::remove(clipPath, rmec2);
+
+            // ИМПОРТИРОВАННЫЙ КЛИП — ТОЛЬКО ДЛЯ ЧТЕНИЯ, и признак этот обязан
+            // пережить файл: иначе после перезапуска редактора он станет
+            // обычным, и правку в нём съест следующий переимпорт модели.
+            sage::anim::PropertyClip imported = clip;
+            imported.Imported = true;
+            sage::anim::PropertyClip importedBack;
+            std::string ierr;
+            if (!sage::anim::FromJsonString(sage::anim::ToJsonString(imported), importedBack, ierr) ||
+                !importedBack.Imported) {
+                LOG_ERROR("Editor") << "SELFTEST: признак «из модели» потерялся в файле клипа";
+                ok = false;
+            }
+        }
+        m_scene->RemoveObject(mover.Id());
     }
 
     // --- ПОДЛОЖКА РЕДАКТОРА ИНТЕРФЕЙСА: ПОД МЕНЮ, А НЕ ПОВЕРХ НЕГО --------

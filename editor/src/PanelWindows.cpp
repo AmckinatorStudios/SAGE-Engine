@@ -47,6 +47,7 @@ const Default kDefaults[] = {
     {"Assets",     false,  900.0f, 520.0f},
     {"Console",    false,  900.0f, 420.0f},
     {"Profiler",   false,  720.0f, 520.0f},
+    {"Animation",  false, 1000.0f, 360.0f},
 };
 
 struct State {

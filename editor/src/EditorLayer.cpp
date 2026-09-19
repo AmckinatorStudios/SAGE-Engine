@@ -519,6 +519,7 @@ void EditorLayer::OnAttach() {
         static const char* const kHeadless[] = {
             "SAGE_SCREENSHOT_AT_FRAME", "SAGE_EDITOR_SHOW_SETTINGS", "SAGE_EDITOR_SHOW_PROFILER",
             "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
+            "SAGE_EDITOR_SHOW_ANIMATION",
             "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_UI_PREVIEW",    "SAGE_EDITOR_COLLIDER_MODE",
             "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
@@ -542,6 +543,13 @@ void EditorLayer::OnAttach() {
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_panels[EditorPanel::Settings] = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
+    // Инструмент анимации при старте — для скриншот-проверок: линейка времени и
+    // кривая проверяются глазами, и открыть панель в прогоне больше нечем.
+    if (std::getenv("SAGE_EDITOR_SHOW_ANIMATION")) {
+        m_headlessProject = true;
+        m_panels[EditorPanel::Animation] = true;
+        m_animation.RequestFocus(60);
+    }
     if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_headlessProject = true; m_showIconSheet = true; }
     // Редактор интерфейса открывается в прогоне самопроверки нарочно: он живёт
     // ОТДЕЛЬНЫМ окном системы (см. PanelWindows.h), а закрытая панель окна не

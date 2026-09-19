@@ -35,6 +35,7 @@
 #include "sage/vars/VarsComponent.h"          // публичные переменные и ссылки
 #include "sage/physics/PhysicsComponents.h"    // тело, коллайдер, соединение, персонаж
 #include "sage/anim/AnimationComponents.h"     // скелетная анимация и IK
+#include "sage/anim/PropertyAnimator.h"        // проигрывание клипа по свойствам
 #include "sage/render/ReflectionComponents.h"  // зонды отражений
 #include "sage/render/PostChainComponent.h"    // тракт пост-обработки на камере
 #include "sage/ui/UI.h"                        // элементы интерфейса сцены (компоненты)

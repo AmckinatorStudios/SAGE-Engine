@@ -119,7 +119,7 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
 
 // Панели, живущие в ОБОИХ пространствах. Окно у такой панели одно, а док-узлов
 // два — отсюда и вся возня с запоминанием места (см. m_sharedDock).
-static const char* const kSharedPanels[] = {"Assets", "Console"};
+static const char* const kSharedPanels[] = {"Assets", "Console", "Animation"};
 static constexpr int kSharedPanelCount = (int)(sizeof(kSharedPanels) / sizeof(kSharedPanels[0]));
 
 void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
@@ -142,6 +142,7 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     dock("InterfaceInspector", right);
     dock("Assets", bottom);
     dock("Console", bottom);
+    dock("Animation", bottom);
     // Холст докается ПЕРВЫМ — он и есть вкладка по умолчанию. Предпросмотр
     // рядом с ним: переключаться между «верстаю» и «смотрю» надо одним щелчком,
     // а не раскладкой заново.
@@ -183,6 +184,7 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     dock("Inspector", right);
     dock("Console", bottom);
     dock("Assets", bottom);
+    dock("Animation", bottom);
     // Viewport докается ПЕРВЫМ в центральный узел — так он и есть таб по
     // умолчанию (первый добавленный к узлу становится выбранным). Раньше первым
     // шёл Game, из-за чего редактор открывался на «игровом окне» без пикинга/
@@ -608,6 +610,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             EditorIcons::MenuItemToggle("layout", T("Canvas"), &PanelVisible(EditorPanel::InterfaceViewport));
             EditorIcons::MenuItemToggle("inspector", T("Element"), &PanelVisible(EditorPanel::InterfaceInspector));
             EditorIcons::MenuItemToggle("eye", T("Preview"), &PanelVisible(EditorPanel::InterfacePreview));
+            EditorIcons::MenuItemToggle("anim", T("Animation"), &PanelVisible(EditorPanel::Animation));
             EditorIcons::MenuItemToggle("chart", T("Profiler"), &PanelVisible(EditorPanel::Profiler));
             // Редактор девятины. Инструмент, а не панель раскладки: его
             // открывают под задачу «подобрать нарезку картинке» и закрывают,
@@ -638,6 +641,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     {"Lighting",  "Environment", EditorPanel::Environment},
                     {"Assets",    "Assets",      EditorPanel::Assets},
                     {"Console",   "Console",     EditorPanel::Console},
+                    {"Animation", "Animation",   EditorPanel::Animation},
                 };
                 for (const DetachRow& row : kRows) {
                     const bool detached = panelwindows::Detached(row.Id);
@@ -805,6 +809,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
     m_nineSlice.Draw(*this, m_showNineSlice);
+    m_animation.Draw(*this, &m_panels[EditorPanel::Animation]);
     // Профилировщик — через ту же обёртку, что и остальные панели: он тоже
     // имеет право жить своим окном системы, и панель, которую забыли обернуть,
     // молча теряет это право (см. PanelWindows.h).
