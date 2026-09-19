@@ -139,7 +139,7 @@
     "Axis (-1 .. 1)": "Ось (−1 … 1)",
     "Azimuth": "Азимут",
     "Back (-Z)": "Сзади (-Z)",
-    "Back to the editor": "Вернуться в редактор",
+    "Back to the editor": "В редактор",
     "Backdrop": "Подложка",
     "Background block: groups other elements": "Подложка: собирает внутри себя другие элементы",
     "Background is a flat colour; ambient uses its own values": "Фон — сплошной цвет; окружающий свет берётся из своих значений",
@@ -1764,6 +1764,7 @@
     "Input Field": "Поле ввода",
     "Screen": "Экран",
     "Toolbar": "Панель кнопок",
-    "Vertical List": "Столбец"
+    "Vertical List": "Столбец",
+    "Returns the panel to a tab of the main window": "Вернёт панель вкладкой в главное окно"
   }
 }

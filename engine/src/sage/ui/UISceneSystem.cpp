@@ -1,4 +1,5 @@
 #include "UISceneSystem.h"
+#include "sage/ui/UISerialize.h"
 #include "sage/ui/UIPart.h"
 
 #include "sage/ui/UI.h"
@@ -466,6 +467,11 @@ bool PointIn(const UIRect& r, glm::vec2 p) {
 
 void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
     SAGE_PROFILE("Интерфейс сцены");
+    // КАРТИНКИ — ПЕРЕД ОТРИСОВКОЙ. Путь мог смениться с прошлого кадра (слот в
+    // инспекторе, перетаскивание файла, отмена, скрипт), а загрузка жила
+    // только в чтении сцены: картинка появлялась лишь после Play/Stop.
+    scene.Registry().view<Image>().each([](Image& im) { EnsureImageTexture(im); });
+
     const std::vector<Solved> items = SolveScene(scene, &ui, screenW, screenH);
     const entt::registry& reg = scene.Registry();
 

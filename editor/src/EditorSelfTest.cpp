@@ -381,18 +381,27 @@ void EditorLayer::CheckMultiWindowFrame() {
     const bool singleTitle = (ui->Flags & ImGuiWindowFlags_NoTitleBar) != 0;
     const bool dockedStayed = docked == nullptr || docked->Viewport == nullptr ||
                               docked->Viewport->ID == mainId;
+    // ПУТЬ НАЗАД ВИДЕН В САМОМ ОКНЕ. Заголовок такой панели рисует система, а
+    // свой ImGui погашен: хватать нечего, и ImGui про перетаскивание за
+    // системный заголовок не знает — док-узлы не подсвечиваются. Пока кнопки
+    // не было, вернуть панель можно было только галочкой в меню, о которой
+    // надо знать, — человек видел окно, которое не возвращается.
+    const ImGuiWindow* back = ImGui::FindWindowByName("##redock_Profiler");
+    const bool wayBack = back != nullptr && back->WasActive && back->Viewport != nullptr &&
+                         back->Viewport->ID == ui->Viewport->ID;
     // Убираем за собой: панель закрывается и возвращается в док, чтобы на
     // экране после проверки не осталось плавающего окна поверх вьюпорта.
     panelwindows::SetDetached("Profiler", false);
     m_panels[EditorPanel::Profiler] = false;
-    if (own && real && decorated && singleTitle && dockedStayed) {
+    if (own && real && decorated && singleTitle && dockedStayed && wayBack) {
         LOG_INFO("Editor") << "MULTIWINDOW: OK — панель живёт своим окном системы "
-                           << "(рамка системы, один заголовок)";
+                           << "(рамка системы, один заголовок, есть кнопка возврата)";
         return;
     }
     LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — свой вьюпорт " << own << ", окно платформы "
                         << real << ", рамка системы " << decorated << ", один заголовок "
-                        << singleTitle << ", панель дока осталась в главном " << dockedStayed;
+                        << singleTitle << ", панель дока осталась в главном " << dockedStayed
+                        << ", кнопка возврата " << wayBack;
 }
 
 // ---------------------------------------------------------------------------
