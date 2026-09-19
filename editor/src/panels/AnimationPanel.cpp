@@ -9,6 +9,7 @@
 #include "../EditorIcons.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
+#include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "../Project.h"
 #include "../ui/UI.h"
@@ -736,14 +737,15 @@ void AnimationPanel::DrawCurve(EditorHost& host, ImVec2 size) {
     ImGui::EndChild();
 }
 
-void AnimationPanel::Draw(EditorHost& host, bool* open) {
+void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
     if (!open || !*open) return;
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 320.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("Animation" "###Animation"), open, panelwindows::WindowFlags("Animation"))) {
+    if (!ImGui::Begin(sage::editor::panelid::Title(T("Animation"), windowId).c_str(), open,
+                     panelwindows::WindowFlags("Animation"))) {
         ImGui::End();
         return;
     }

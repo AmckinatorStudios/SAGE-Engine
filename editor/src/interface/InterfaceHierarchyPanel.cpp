@@ -134,6 +134,7 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
 
     Scene& scene = host.CurrentScene();
     m_rows.clear();
+    m_lines.Clear();   // строки прошлого кадра — это координаты, которых уже нет
 
     ImGui::BeginChild("##ui_tree_scroll");
     const std::vector<entt::entity> roots = Roots(scene);
@@ -255,6 +256,57 @@ void InterfaceHierarchyPanel::DropGap(EditorHost& host, Scene& scene, entt::enti
     ImGui::PopID();
 }
 
+// ГЛАЗОК И ЗАМОК У ПРАВОГО КРАЯ СТРОКИ.
+//
+// Спрятать мешающую панель и запереть разложенный фон — два самых частых
+// действия вёрстки, и ходить ради них в другое окно незачем. Но стоять они
+// обязаны СПРАВА: перед именем они оттесняли бы значок типа, по которому
+// строку и находят, а главное — занимали бы место стрелки раскрытия, от
+// которой ImGui считает вложенность (из-за этого дерево и разъезжалось).
+//
+// Рисуются НАКЛАДКОЙ, а не кнопками: кнопка подала бы свой элемент, и
+// «последним элементом» для ImGui стала бы она — выделение строки,
+// перетаскивание и меню по правой кнопке начали бы отвечать про квадратик
+// размером с букву вместо строки.
+void InterfaceHierarchyPanel::DrawRowToggles(EditorHost& host, ui::Element& box,
+                                             const ImVec2& rowPos) {
+    const float size = ImGui::GetTextLineHeight();
+    const float gap = 4.0f;
+    const float right = ImGui::GetWindowContentRegionMax().x - ImGui::GetScrollX();
+    const float baseX = ImGui::GetWindowPos().x + right;
+    const ImVec2 mouse = ImGui::GetMousePos();
+    const bool overRow = ImGui::IsItemHovered();
+
+    struct Toggle { const char* Icon; bool On; bool* Flag; const char* Tip; };
+    const Toggle toggles[2] = {
+        {box.Locked ? "lock" : "unlock", box.Locked, &box.Locked,
+         box.Locked ? T("Unlock") : T("Lock")},
+        {box.Visible ? "eye" : "eye-off", !box.Visible, &box.Visible,
+         box.Visible ? T("Hide") : T("Show")},
+    };
+    float x = baseX - size - 2.0f;
+    for (const Toggle& t : toggles) {
+        const ImVec2 at(x, rowPos.y);
+        const bool over = overRow && mouse.x >= at.x && mouse.x <= at.x + size &&
+                          mouse.y >= at.y && mouse.y <= at.y + size;
+        // Обычное состояние — тусклое: полсотни ярких значков подряд спорят с
+        // именами, по которым список и читают. Наливаются цветом под курсором
+        // и у того, что выключено или заперто.
+        const glm::vec3 col = t.On      ? glm::vec3(0.95f, 0.78f, 0.30f)
+                              : over    ? glm::vec3(0.80f, 0.82f, 0.88f)
+                                        : glm::vec3(0.42f, 0.44f, 0.50f);
+        EditorIcons::Overlay(at.x, at.y, size, t.Icon, col);
+        if (over) {
+            ImGui::SetTooltip("%s", t.Tip);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                host.PushUndoSnapshot();
+                *t.Flag = !*t.Flag;
+            }
+        }
+        x -= size + gap;
+    }
+}
+
 bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e, int depth) {
     entt::registry& reg = scene.Registry();
     ui::Element* box = reg.try_get<ui::Element>(e);
@@ -267,23 +319,17 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
 
     ImGui::PushID(id);
 
-    // ГЛАЗОК И ЗАМОК — в строке, а не в свойствах: спрятать мешающую панель и
-    // запереть разложенный фон это два самых частых действия вёрстки, и ходить
-    // ради них в другое окно незачем.
-    if (EditorIcons::IconOnlyButton("eye", box->Visible ? T("Hide") : T("Show"), box->Visible)) {
-        host.PushUndoSnapshot();
-        box->Visible = !box->Visible;
-    }
-    ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("lock", box->Locked ? T("Unlock") : T("Lock"), box->Locked)) {
-        host.PushUndoSnapshot();
-        box->Locked = !box->Locked;
-    }
-    ImGui::SameLine();
-
     const std::vector<entt::entity> children = UiChildren(scene, e);
+    // СТРОКА УСТРОЕНА ТАК ЖЕ, КАК В ИЕРАРХИИ СЦЕНЫ, и это не про красоту.
+    // Глазок и замок стояли ПЕРЕД узлом дерева, то есть занимали то самое
+    // место, куда ImGui ставит стрелку раскрытия и откуда считает отступ
+    // вложенности: дерево разъезжалось, связи вести было не от чего, и глубина
+    // читалась только по сдвигу подписи. Теперь узел начинается в начале
+    // строки, а переключатели стоят у ПРАВОГО края — там же, где глаз в списке
+    // объектов, и на одном месте независимо от глубины.
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                ImGuiTreeNodeFlags_SpanAvailWidth |
+                               ImGuiTreeNodeFlags_DrawLinesNone |
                                ImGuiTreeNodeFlags_DefaultOpen;
     if (children.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     if (host.Selection().Contains(id)) flags |= ImGuiTreeNodeFlags_Selected;
@@ -310,8 +356,28 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
         }
         open = !children.empty();
     } else {
+        // УЗЕЛ БЕЗ ПОДПИСИ, подпись — рисунком вместе со значком: значок и
+        // подпись это одна пара, и ставит их одна функция с одним зазором на
+        // весь редактор (EditorIcons::DrawLabeled). Подпись внутри узла
+        // потребовала бы пробелов под значок, ширина которых зависит от шрифта.
+        const ImVec2 rowPos = ImGui::GetCursorScreenPos();
+        const float indent = ImGui::GetTreeNodeToLabelSpacing();
+        m_lines.Row(rowPos.y, depth, rowPos.x + ImGui::GetStyle().FramePadding.x,
+                    rowPos.x + indent, !children.empty());
+        open = ImGui::TreeNodeEx("##node", flags, "%s", "");
+        m_rowPos = rowPos;
+        m_rowIndent = indent;
+
         const NameComponent* name = reg.try_get<NameComponent>(e);
-        open = ImGui::TreeNodeEx("##node", flags, "%s", name ? name->Name.c_str() : "Element");
+        // ЗНАЧОК — ПО ТИПУ ЭЛЕМЕНТА: панель, текст, кнопка узнаются по рисунку
+        // до чтения имени, ровно как объекты сцены в списке слева.
+        const ui::Preset* type = ui::FindPreset(box->Type);
+        const ImU32 textCol = ImGui::GetColorU32(dim ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
+                                 ImGui::GetTextLineHeight(), type ? type->Icon : "ui-empty",
+                                 textCol, name ? name->Name.c_str() : "Element", textCol);
+
+        DrawRowToggles(host, *box, rowPos);
     }
     if (dim) ImGui::PopStyleColor();
 
@@ -351,11 +417,16 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
     }
 
     if (open && !children.empty()) {
+        const ImVec2 rowPos = m_rowPos;
+        const float indent = m_rowIndent;
         for (size_t i = 0; i < children.size(); ++i) {
             DropGap(host, scene, children[i], e);
             DrawNode(host, scene, children[i], depth + 1);
         }
         DropGap(host, scene, entt::null, e);
+        // Связи к детям — ПОСЛЕ того, как они нарисованы: иначе неизвестно,
+        // где кончился последний, и вертикаль пришлось бы вести наугад.
+        m_lines.Draw(rowPos, indent, depth + 1);
         ImGui::TreePop();
     }
     ImGui::PopID();

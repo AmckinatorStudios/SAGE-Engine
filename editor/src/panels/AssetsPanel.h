@@ -32,7 +32,10 @@ public:
 
     enum class CreateKind { None, Folder, Script, TextFile, Material };
 
-    void Draw(EditorHost& host, bool* open);
+    // ИМЯ ОКНА приходит снаружи: у каждого рабочего пространства оно своё
+    // (см. PanelWindowId.h). Панель одна, а окон два — иначе раскладки сцены и
+    // вёрстки спорили бы за одно окно, и проигравшая теряла бы панель.
+    void Draw(EditorHost& host, bool* open, const std::string& windowId);
 
     // ДОЛГАЯ РАБОТА ПАНЕЛИ — ПО КАДРАМ, а не одним куском. Зовётся каждый кадр
     // из EditorLayer, независимо от того, открыта ли панель: перевод папки в

@@ -1,4 +1,5 @@
 #pragma once
+#include "../ui/TreeLines.h"
 #include "imgui.h"
 
 #include <vector>
@@ -29,16 +30,11 @@ public:
 private:
     // Линии связи дерева рисуются сами (см. DrawTreeLines): у встроенных в
     // ImGui горизонталь обрывается далеко от значка.
-    struct Row {
-        float Y = 0.0f;      // верх строки
-        float IconX = 0.0f;  // где начинается значок
-        float ArrowX = 0.0f; // левый край стрелки раскрытия (если она есть)
-        bool Arrow = false;  // у строки есть стрелка — линия обязана в неё не влезать
-        int Depth = 0;
-    };
-    std::vector<Row> m_rows;
+    // Линии дерева — ОБЩИЙ модуль (см. ui/TreeLines.h): то же дерево рисует и
+    // панель элементов интерфейса, и вторая реализация связей разошлась бы с
+    // первой на первой же правке.
+    sage::editor::treelines::Lines m_lines;
     int m_depth = 0;
-    void DrawTreeLines(const ImVec2& parentPos, float indent, int childDepth);
 
     void DrawNode(EditorHost& host, Scene& scene, entt::entity e);
 

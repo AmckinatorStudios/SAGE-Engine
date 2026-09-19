@@ -1,8 +1,11 @@
 #pragma once
+#include "../ui/TreeLines.h"
 #include <string>
 #include <vector>
 
 #include <entt/entt.hpp>
+
+#include "sage/ui/Element.h"   // sage::ui::Element в подписи DrawRowToggles
 
 class EditorHost;
 class Scene;
@@ -46,6 +49,17 @@ private:
     // Одна строка дерева. Возвращает false, если строку рисовать не надо
     // (не прошла фильтр поиска и ни один её потомок тоже).
     bool DrawNode(EditorHost& host, Scene& scene, entt::entity e, int depth);
+    // Глазок и замок у правого края строки (см. .cpp).
+    void DrawRowToggles(EditorHost& host, sage::ui::Element& box, const ImVec2& rowPos);
+
+    // Линии дерева — ТОТ ЖЕ модуль, что у списка объектов сцены: это одно и то
+    // же дерево, просто с разным содержимым, и вторая реализация связей
+    // разошлась бы с первой на первой же правке.
+    sage::editor::treelines::Lines m_lines;
+    // Где стоит текущая строка: связи к детям рисуются после них, и к этому
+    // моменту курсор ImGui уже ушёл вниз.
+    ImVec2 m_rowPos{0.0f, 0.0f};
+    float m_rowIndent = 0.0f;
     void DrawToolbar(EditorHost& host);
     void DrawContextMenu(EditorHost& host, Scene& scene, entt::entity e);
     void HandleShortcuts(EditorHost& host);

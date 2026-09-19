@@ -18,7 +18,8 @@ class ConsolePanel {
 public:
     void Attach();
     void Detach();
-    void Draw(bool* open);
+    // Имя окна — от пространства (см. PanelWindowId.h).
+    void Draw(bool* open, const std::string& windowId);
 
     // Сколько было предупреждений и ошибок за сессию — редактор показывает это
     // в статусной строке, чтобы не приходилось открывать панель ради проверки,
