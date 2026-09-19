@@ -9,10 +9,13 @@
 #  сборка детерминирована и не зависит от переконфигурации CMake).
 # ============================================================================
 set(SAGE_ENGINE_SOURCES
+    src/sage/anim/AnimProperty.cpp
     src/sage/anim/AnimationSystem.cpp
     src/sage/anim/Animator.cpp
     src/sage/anim/ClipFile.cpp
     src/sage/anim/IK.cpp
+    src/sage/anim/PropertyAnimator.cpp
+    src/sage/anim/PropertyClip.cpp
     src/sage/anim/Retarget.cpp
     src/sage/anim/Skeleton.cpp
     src/sage/audio/AudioEngine.cpp

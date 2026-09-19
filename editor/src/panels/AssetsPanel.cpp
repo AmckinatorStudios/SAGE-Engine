@@ -83,6 +83,7 @@ std::string KindLabel(const fs::path& path, bool isDir) {
     if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return T("Sound");
     if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return T("Shader");
     if (ext == ".sageanim") return T("Animation clip");
+    if (ext == ".sageclip") return T("Property clip");
     if (ext.empty()) return T("File");
     return ToUpper(ext.substr(1));
 }
@@ -93,6 +94,8 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
     if (ext == ".sage") return { ImVec4(0.45f, 0.62f, 0.95f, 1.0f), "scene", "scene" };
     if (ext == ".sageprefab") return { ImVec4(0.55f, 0.70f, 1.00f, 1.0f), "prefab", "prefab" };
     if (ext == ".sagemat") return { ImVec4(0.90f, 0.62f, 0.35f, 1.0f), "mat", "material" };
+    if (ext == ".sageclip" || ext == ".sageanim")
+        return { ImVec4(0.55f, 0.72f, 0.95f, 1.0f), "clip", "anim" };
     if (ext == ".sageimport") return { ImVec4(0.62f, 0.58f, 0.48f, 1.0f), "import", "file" };
     if (ext == ".lua") return { ImVec4(0.45f, 0.82f, 0.50f, 1.0f), "lua", "script" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
@@ -670,6 +673,11 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         if (isDir) host.AssetsCwd() = path;
         else if (path.extension() == ".sage") host.LoadSceneFromFile(path);
         else if (path.extension() == ".sageprefab") host.InstantiatePrefab(path); // инстанс в сцену
+        // Клип открывается инструментом анимации — и свой, и вынутый из модели:
+        // второй тоже надо уметь посмотреть и проиграть, просто править его
+        // нельзя (см. panels/AnimationPanel.h).
+        else if (path.extension() == ".sageclip" || path.extension() == ".sageanim")
+            host.OpenAnimationClip(path.string());
         else {
             // Текст открывается ТЕМ, ЧЕМ ЕГО ОТКРЫВАЕТ СИСТЕМА. Своего редактора
             // кода у SAGE больше нет: он всегда проигрывал бы тому, что у

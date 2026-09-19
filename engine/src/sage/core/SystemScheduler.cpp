@@ -152,6 +152,10 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
     if (systems.Animation) {
         scheduler.Add(Stage::PostPhysics, "animation", [](Scene& scene, float dt) {
             sage::anim::UpdateAnimators(scene, dt);
+            // Клипы по свойствам — тем же шагом и той же системой: движение
+            // кнопки и движение персонажа отличаются тем, ЧТО они двигают, а
+            // не тем, когда в кадре их считать.
+            sage::anim::UpdatePropertyAnimators(scene, dt);
         });
     }
 
