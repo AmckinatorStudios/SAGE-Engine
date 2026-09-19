@@ -10,6 +10,7 @@
 #include "TestFramework.h"
 
 #include "sage/ui/NineSlice.h"
+#include "sage/ui/components/Visual.h"
 
 #include <algorithm>
 #include <cmath>
@@ -223,4 +224,69 @@ TEST(NineSlice_guess_says_no_on_a_flat_picture) {
     std::vector<unsigned char> px(16 * 16 * 4, 77);
     NineSlice guess;
     CHECK_FALSE(sage::ui::GuessBorder(px.data(), 16, 16, guess));
+}
+
+// ===========================================================================
+//  РЕЖИМ КАРТИНКИ: растянуть, девятина, замостить
+// ===========================================================================
+//
+// Раньше режима не было: девятина включалась тем, что рамка переставала быть
+// нулевой. Отсюда две беды. Выключить её можно было, только обнулив четыре
+// числа — то есть потеряв подобранную нарезку. А замощения не существовало
+// вовсе, хотя движок умеет повторять кусок: добраться до него можно было лишь
+// через девятину с нулевыми углами, о чём догадаться невозможно.
+
+TEST(ImageMode_normal_ignores_the_slice_border) {
+    // Рамка ОСТАЁТСЯ в компоненте — её не теряют при переключении режима, —
+    // но в режиме «растянуть» она не работает. Это и есть проверка того, что
+    // режим решает, а не рамка.
+    sage::ui::Image img;
+    img.SliceBorder = {8.0f, 8.0f, 8.0f, 8.0f};
+    img.Fit = sage::ui::Image::Mode::Normal;
+    CHECK_TRUE(img.DrawSlice().Empty());
+    // Само описание нарезки при этом цело: вернувшись в девятину, человек
+    // получает ту же рамку, а не нули.
+    CHECK_NEAR(img.Slice().Left, 8.0f, 0.001f);
+}
+
+TEST(ImageMode_nineslice_uses_the_border) {
+    sage::ui::Image img;
+    img.SliceBorder = {8.0f, 6.0f, 8.0f, 6.0f};
+    img.Fit = sage::ui::Image::Mode::NineSlice;
+    const NineSlice s = img.DrawSlice();
+    CHECK_FALSE(s.Empty());
+    CHECK_NEAR(s.Left, 8.0f, 0.001f);
+    CHECK_NEAR(s.Top, 6.0f, 0.001f);
+}
+
+TEST(ImageMode_tile_repeats_the_whole_picture) {
+    // Замощение — это та же девятина с НУЛЕВЫМИ полями и повторяющейся
+    // серединой: отдельного пути в отрисовке для него не нужно. Проверяем не
+    // объявление, а результат: кусок 16x16 на поле 64x32 обязан лечь
+    // восемью плитками своего размера, а не одной растянутой.
+    sage::ui::Image img;
+    img.Fit = sage::ui::Image::Mode::Tile;
+    const NineSlice s = img.DrawSlice();
+    CHECK_TRUE(s.CenterFill == SliceFill::Tile);
+    CHECK_TRUE(s.DrawCenter);
+
+    SliceRequest req;
+    req.SrcW = 16.0f; req.SrcH = 16.0f;
+    req.DstW = 64.0f; req.DstH = 32.0f;
+    req.Scale = 1.0f;
+    const std::vector<SliceQuad> quads = sage::ui::Solve(s, req);
+    CHECK_EQ((int)quads.size(), 8);
+    for (const SliceQuad& q : quads) {
+        CHECK_NEAR(q.DstW, 16.0f, 0.001f);
+        CHECK_NEAR(q.DstH, 16.0f, 0.001f);
+    }
+}
+
+TEST(ImageMode_tile_keeps_the_border_out_of_it) {
+    // Рамка девятины в режиме замощения не участвует: иначе подобранная
+    // когда-то нарезка молча резала бы узор на девять частей.
+    sage::ui::Image img;
+    img.SliceBorder = {8.0f, 8.0f, 8.0f, 8.0f};
+    img.Fit = sage::ui::Image::Mode::Tile;
+    CHECK_TRUE(img.DrawSlice().Empty());
 }

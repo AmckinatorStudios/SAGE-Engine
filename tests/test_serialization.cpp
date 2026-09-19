@@ -1068,3 +1068,31 @@ TEST(Scene_hidden_survives_save_and_copy) {
     GameObject copy2 = sage::scene::CopySubtree(scene, visible.Entity(), scene, entt::null);
     CHECK_TRUE(!scene.IsHidden(copy2.Entity()));
 }
+
+TEST(Scene_migration_keeps_nine_slice_images_sliced) {
+    // РЕЖИМ КАРТИНКИ появился в формате 8. До него девятина включалась тем,
+    // что рамка была ненулевой, и без миграции вчерашняя сцена открылась бы с
+    // режимом «растянуть»: рамка на месте, а панели с размазанными углами.
+    const std::string oldScene = R"({
+      "name": "UI",
+      "sage_scene_version": 7,
+      "objects": [
+        {"id": 1, "name": "Panel",
+         "ui": {"element": {"anchor": 0},
+                "image": {"path": "panel.png", "sliceBorder": [8, 8, 8, 8]}}},
+        {"id": 2, "name": "Photo",
+         "ui": {"element": {"anchor": 0},
+                "image": {"path": "photo.png", "sliceBorder": [0, 0, 0, 0]}}}
+      ]
+    })";
+
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    // Ненулевая рамка — девятина (1), нулевая — «растянуть» (0). Додумывать
+    // здесь нечего: замощения в старом формате не существовало.
+    CHECK_EQ(j["objects"][0]["ui"]["image"]["mode"].get<int>(), 1);
+    CHECK_EQ(j["objects"][1]["ui"]["image"]["mode"].get<int>(), 0);
+    // Сама рамка обязана уцелеть: миграция ДОБАВЛЯЕТ режим, а не переписывает
+    // нарезку.
+    CHECK_NEAR(j["objects"][0]["ui"]["image"]["sliceBorder"][0].get<float>(), 8.0f, 1e-6);
+}

@@ -4904,6 +4904,11 @@ bool EditorLayer::SelfTestTools() {
             sage::ui::Image& img = m_scene->Registry().get_or_emplace<sage::ui::Image>(el.Entity());
             img.Path = imagePath.string();
             img.SetSlice(back);
+            // РЕЖИМ — ВМЕСТЕ С НАРЕЗКОЙ. Ровно это делает кнопка «Применить к
+            // выбранному»: подобрать нарезку и не включить режим значит
+            // применить её в никуда — числа на месте, картинка как была
+            // растянутой, так и осталась.
+            img.Fit = sage::ui::Image::Mode::NineSlice;
             const sage::ui::NineSlice roundTrip = img.Slice();
             if (roundTrip.Left != back.Left || roundTrip.EdgeFill != back.EdgeFill ||
                 roundTrip.DrawCenter != back.DrawCenter) {
@@ -4925,6 +4930,13 @@ bool EditorLayer::SelfTestTools() {
                     if (r.SliceBorder.x != back.Left || r.SliceEdgeFill != back.EdgeFill ||
                         r.SliceDrawCenter != back.DrawCenter) {
                         LOG_ERROR("Editor") << "SELFTEST: девятина потерялась в сцене";
+                        ok = false;
+                    }
+                    // Режим тоже: он объявлен в той же таблице полей, и забыть
+                    // ключ там — значит получить сцену, которая открывается с
+                    // растянутыми панелями вместо рамок.
+                    if (r.Fit != sage::ui::Image::Mode::NineSlice) {
+                        LOG_ERROR("Editor") << "SELFTEST: режим картинки потерялся в сцене";
                         ok = false;
                     }
                 }

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1673.
+// Язык: Русский. Строк: 1681.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -92,6 +92,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "1:1"},
     {"2 = analytic two-bone, more = FABRIK",
      "2 — аналитическое решение на две кости, больше — FABRIK"},
+    {"9-slice",
+     "Девятина"},
     {"9-slice (l,t,r,b)",
      "9-срез (л,в,п,н)"},
     {"9-slice centre",
@@ -284,6 +286,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Применить к выбранному"},
     {"Argument",
      "Аргумент"},
+    {"Around the element centre. The handle above the top edge\ndoes the same with the mouse.",
+     "Вокруг центра элемента. Ручка над верхним краем\nделает то же мышью."},
     {"As in the game",
      "Как в игре"},
     {"As the system opens it",
@@ -634,6 +638,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Колонна, бочка, труба"},
     {"Columns",
      "Столбцов"},
+    {"Components",
+     "Из чего сделан"},
     {"Compound parts: %d",
      "Частей составного тела: %d"},
     {"Cone",
@@ -1040,6 +1046,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Событие"},
     {"Events",
      "События"},
+    {"Events live on the Interactable part. Add it in Components.",
+     "События живут на части «Реагирует». Добавьте её в разделе «Из чего сделан»."},
     {"Everyone subscribed to this name hears it: scripts and\nengine code alike.",
      "Его услышат все, кто подписан на это имя: и скрипты,\nи код движка."},
     {"Everything outside it can be cut off: a camera\nnotch, rounded corners, TV overscan.",
@@ -1360,6 +1368,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Наведение, нажатие, щелчок и имя действия для игры"},
     {"How hard the character pushes dynamic bodies",
      "С какой силой персонаж толкает динамические тела"},
+    {"How it fits",
+     "Как ложится"},
     {"How many times the texture repeats across the UV: X and Y.\nWithout it a picture on a large object is stretched over its whole length.",
      "Сколько раз текстура укладывается по развёртке: по X и по Y.\nБез повтора картинка на большом объекте растягивается на всю его длину."},
     {"How tall a step the character climbs without jumping",
@@ -1824,6 +1834,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ничего не нашлось"},
     {"Nothing happens yet. A link lets this element send an event\nor call a method on another object by itself.",
      "Пока ничего не происходит. Связь позволяет элементу самому\nпослать событие или позвать метод у другого объекта."},
+    {"Nothing is drawn yet. Add a part in Components.",
+     "Пока ничего не рисуется. Добавьте часть в разделе «Из чего сделан»."},
     {"Nothing matches",
      "Ничего не найдено"},
     {"Nothing matches the search.",
@@ -2508,6 +2520,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выделите элемент интерфейса."},
     {"Select an object in the viewport or Hierarchy, or a file in Assets.",
      "Выберите объект во вьюпорте или в Hierarchy, либо файл в Assets."},
+    {"Selected: %d — an edit goes to all of them",
+     "Выбрано: %d — правка идёт ко всем"},
     {"Send backward",
      "Ниже соседей"},
     {"Sensitivity",
@@ -2984,6 +2998,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Приводит в порядок экран, собранный до включения привязок."},
     {"Ties this body to another one",
      "Связывает это тело с другим"},
+    {"Tile",
+     "Замостить"},
     {"Tiling",
      "Повтор текстуры"},
     {"Time of day = rotation of the object \"%s\"",

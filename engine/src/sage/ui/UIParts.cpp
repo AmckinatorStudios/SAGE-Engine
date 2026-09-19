@@ -124,10 +124,18 @@ void DrawFillBorder(const PartDrawContext& c) {
 // видит слово — и в инспекторе, и в подсказке.
 const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Repeat")};
 
+// Три режима картинки. Имена — про то, ЧТО СТАНЕТ С КАРТИНКОЙ, а не про
+// механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
+// говорит всё.
+const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("9-slice"),
+                                       SAGE_UI_TEXT("Tile")};
+
 const std::vector<PartField>& ImageFields() {
     static const std::vector<PartField> f = {
         {"path", SAGE_UI_TEXT("File"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
          nullptr, 0, PartField::Widget::Texture},
+        {"mode", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 2.0f,
+         "Stretch, cut into nine pieces, or repeat at its own size.", kImageModeNames, 3},
         {"tint", SAGE_UI_TEXT("Tint"), PartField::Kind::Color, offsetof(Image, Tint)},
         {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Image, Sprite), 0.0f, 4096.0f,
          "A piece of the sheet in source pixels; width 0 means the whole file."},
@@ -136,18 +144,20 @@ const std::vector<PartField>& ImageFields() {
          "Fixed corners in source pixels. Without it a 48x48 panel cannot be\n"
          "stretched to 300x120 — the corners smear along with the middle.\n"
          "Window > 9-slice editor drags these over the picture itself.",
-         nullptr, 0, PartField::Widget::NineSliceBorder},
+         nullptr, 0, PartField::Widget::NineSliceBorder, "mode", (int)Image::Mode::NineSlice},
         {"sliceCenterFill", SAGE_UI_TEXT("9-slice centre"), PartField::Kind::Enum,
          offsetof(Image, SliceCenterFill), 0.0f, 1.0f,
-         "Stretch or repeat the middle piece.", kSliceFillNames, 2},
+         "Stretch or repeat the middle piece.", kSliceFillNames, 2,
+         PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
         {"sliceEdgeFill", SAGE_UI_TEXT("9-slice edges"), PartField::Kind::Enum,
          offsetof(Image, SliceEdgeFill), 0.0f, 1.0f,
          "Repeat is the only right answer for pixel art and patterns: an\n"
          "ornament of 16 pixels stretched to 300 turns to mush.",
-         kSliceFillNames, 2},
+         kSliceFillNames, 2, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
         {"sliceDrawCenter", SAGE_UI_TEXT("9-slice draws the middle"), PartField::Kind::Bool,
          offsetof(Image, SliceDrawCenter), 0.0f, 1.0f,
-         "An outline frame has no middle — what is under the element shows through."},
+         "An outline frame has no middle — what is under the element shows through.",
+         nullptr, 0, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
         {"pixelScale", SAGE_UI_TEXT("Pixel scale"), PartField::Kind::Float, offsetof(Image, PixelScale), 0.0f,
          16.0f, "0 picks it automatically."},
         {"pixelArt", SAGE_UI_TEXT("Pixel art"), PartField::Kind::Bool, offsetof(Image, PixelArt), 0.0f, 1.0f,
@@ -185,15 +195,27 @@ void DrawImagePart(const PartDrawContext& c) {
     }
 
     const UIRenderer::Sprite src = StateSprite(c, img);
-    const NineSlice slice = img.Slice();
-    if (!slice.Empty()) {
+
+    // РЕЖИМ РЕШАЕТ, ЧЕМ РИСОВАТЬ. Раньше решала рамка: ненулевая означала
+    // девятину, нулевая — обычный квад. Выключить девятину можно было только
+    // обнулив четыре числа, то есть потеряв подобранную нарезку.
+    if (img.Fit == Image::Mode::NineSlice || img.Fit == Image::Mode::Tile) {
+        const NineSlice slice = img.DrawSlice();
         // Масштаб пикселя: 0 — «подобрать сам». Для пиксель-арта округляется
         // ВНИЗ до целого: дробный масштаб растягивает одни пиксели исходника на
         // два экранных, а соседние на один, и ровная рамка идёт волнами.
         float pixels = img.PixelScale * c.Scale;
         if (pixels <= 0.0f) {
-            const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
-            pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
+            if (img.Fit == Image::Mode::Tile) {
+                // Замощение по умолчанию — ОДИН К ОДНОМУ: узор повторяется в
+                // своём размере, и это единственное, что означает «замостить».
+                // Подгонять его под высоту элемента, как делает девятина,
+                // значит растягивать то, что просили не растягивать.
+                pixels = c.Scale;
+            } else {
+                const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
+                pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
+            }
             if (img.PixelArt) pixels = std::max(1.0f, std::floor(pixels));
         }
         ui.ImageSliced(r.x, r.y, r.w, r.h, img.Tex.get(), src, slice, pixels, rgb, alpha);
@@ -806,6 +828,28 @@ const std::vector<PartType>& Parts() {
         RegisterBuiltins();
     }
     return Registry();
+}
+
+void CopyField(const PartField& f, const void* src, void* dst) {
+    if (!src || !dst) return;
+    const char* s = static_cast<const char*>(src) + f.Offset;
+    char* d = static_cast<char*>(dst) + f.Offset;
+    switch (f.Type) {
+        case PartField::Kind::Bool:   *reinterpret_cast<bool*>(d) = *reinterpret_cast<const bool*>(s); break;
+        // Enum хранится int'ом — тем же, что и Int: перечисление в компоненте
+        // объявлено через int, иначе offsetof по нему не работал бы.
+        case PartField::Kind::Int:
+        case PartField::Kind::Enum:   *reinterpret_cast<int*>(d) = *reinterpret_cast<const int*>(s); break;
+        case PartField::Kind::Float:  *reinterpret_cast<float*>(d) = *reinterpret_cast<const float*>(s); break;
+        case PartField::Kind::String: *reinterpret_cast<std::string*>(d) = *reinterpret_cast<const std::string*>(s); break;
+        case PartField::Kind::Vec2:   *reinterpret_cast<glm::vec2*>(d) = *reinterpret_cast<const glm::vec2*>(s); break;
+        case PartField::Kind::Color:
+        case PartField::Kind::Vec4:   *reinterpret_cast<glm::vec4*>(d) = *reinterpret_cast<const glm::vec4*>(s); break;
+        case PartField::Kind::Bindings:
+            *reinterpret_cast<sage::events::Bindings*>(d) =
+                *reinterpret_cast<const sage::events::Bindings*>(s);
+            break;
+    }
 }
 
 const PartType* FindPart(std::string_view id) {
