@@ -1691,3 +1691,86 @@ TEST(Element_shown_needs_both_flags) {
     box.Active = false;
     CHECK_FALSE(box.Shown());
 }
+
+// ===========================================================================
+//  ПРАВКА НЕСКОЛЬКИХ ЭЛЕМЕНТОВ СРАЗУ и ПОЛЯ ПО РЕЖИМАМ
+// ===========================================================================
+
+TEST(ui_copy_field_moves_one_field_and_nothing_else) {
+    // На этом держится правка набора: человек крутит поле у выбранного, а то
+    // же значение ложится остальным выбранным. Копируется РОВНО ОДНО поле —
+    // у кнопок набора разные подписи, и «покрасить все» не имеет права снести
+    // их тексты.
+    const sage::ui::PartType* fill = sage::ui::FindPart("fill");
+    CHECK_TRUE(fill != nullptr);
+    CHECK_TRUE(fill->Fields != nullptr);
+
+    const sage::ui::PartField* colour = nullptr;
+    const sage::ui::PartField* rounding = nullptr;
+    for (const sage::ui::PartField& f : *fill->Fields) {
+        if (std::string(f.Key) == "color") colour = &f;
+        if (std::string(f.Key) == "rounding") rounding = &f;
+    }
+    CHECK_TRUE(colour != nullptr);
+    CHECK_TRUE(rounding != nullptr);
+
+    sage::ui::Fill src, dst;
+    src.Color = {0.2f, 0.4f, 0.6f, 0.8f};
+    src.Rounding = 3.0f;
+    dst.Color = {1.0f, 1.0f, 1.0f, 1.0f};
+    dst.Rounding = 17.0f;
+
+    sage::ui::CopyField(*colour, &src, &dst);
+    CHECK_NEAR(dst.Color.r, 0.2f, 1e-5f);
+    CHECK_NEAR(dst.Color.a, 0.8f, 1e-5f);
+    // Соседнее поле НЕ ТРОНУТО: копируется поле, а не компонент.
+    CHECK_NEAR(dst.Rounding, 17.0f, 1e-5f);
+
+    sage::ui::CopyField(*rounding, &src, &dst);
+    CHECK_NEAR(dst.Rounding, 3.0f, 1e-5f);
+}
+
+TEST(ui_copy_field_handles_strings) {
+    // Строка — отдельный случай: побайтовое копирование строки означало бы два
+    // владельца одного буфера и падение при первом же удалении элемента.
+    const sage::ui::PartType* label = sage::ui::FindPart("label");
+    CHECK_TRUE(label != nullptr);
+    const sage::ui::PartField* text = nullptr;
+    for (const sage::ui::PartField& f : *label->Fields)
+        if (std::string(f.Key) == "text") text = &f;
+    CHECK_TRUE(text != nullptr);
+
+    sage::ui::Label src, dst;
+    src.Text = "Играть";
+    dst.Text = "Выход";
+    sage::ui::CopyField(*text, &src, &dst);
+    CHECK_TRUE(dst.Text == "Играть");
+    CHECK_TRUE(src.Text == "Играть");
+}
+
+TEST(ui_fields_hide_outside_their_mode) {
+    // Поля девятины не означают ничего в режимах «растянуть» и «замостить», и
+    // показанные всегда читаются как «работает, просто ничего не делает».
+    // Правило объявлено В ТАБЛИЦЕ поля, и читает его движок: редактор, знающий
+    // про режимы картинки поимённо, — это снова список частей внутри редактора.
+    const sage::ui::PartType* image = sage::ui::FindPart("image");
+    CHECK_TRUE(image != nullptr);
+    const sage::ui::PartField* border = nullptr;
+    const sage::ui::PartField* tint = nullptr;
+    for (const sage::ui::PartField& f : *image->Fields) {
+        if (std::string(f.Key) == "sliceBorder") border = &f;
+        if (std::string(f.Key) == "tint") tint = &f;
+    }
+    CHECK_TRUE(border != nullptr);
+    CHECK_TRUE(tint != nullptr);
+
+    sage::ui::Image img;
+    img.Fit = sage::ui::Image::Mode::Normal;
+    CHECK_FALSE(sage::ui::FieldVisible(*image->Fields, *border, &img));
+    img.Fit = sage::ui::Image::Mode::NineSlice;
+    CHECK_TRUE(sage::ui::FieldVisible(*image->Fields, *border, &img));
+    img.Fit = sage::ui::Image::Mode::Tile;
+    CHECK_FALSE(sage::ui::FieldVisible(*image->Fields, *border, &img));
+    // Поле без условия видно в любом режиме.
+    CHECK_TRUE(sage::ui::FieldVisible(*image->Fields, *tint, &img));
+}

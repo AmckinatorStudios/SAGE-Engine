@@ -36,6 +36,7 @@
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
+#include "sage/ui/UISerialize.h"
 
 namespace fs = std::filesystem;
 
@@ -237,6 +238,9 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                 ImGui::DragFloat4(label, &ui::FieldAs<glm::vec4>(data, f).x, 1.0f, f.Min, f.Max);
                 host.TrackLastImGuiItem();
                 if (ImGui::SmallButton(T("Edit on the picture…"))) {
+                    // Кнопка живёт ВНУТРИ полей девятины, а те видны только в
+                    // своём режиме, — значит режим уже нужный, и включать его
+                    // здесь нечего.
                     // Путь берётся у самой части: девятина описывает ту
                     // картинку, рядом с которой лежит, и спрашивать его у
                     // человека второй раз незачем.
@@ -299,6 +303,83 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
     }
 }
 
+namespace {
+
+// --- ПРАВКА НЕСКОЛЬКИХ ЭЛЕМЕНТОВ СРАЗУ ---------------------------------------
+//
+// Человек выделяет набор кнопок и красит их одним движением — это и есть
+// обычная работа с интерфейсом. Пока инспектор правил только «первый
+// выбранный», набор из двадцати кнопок красили по одной, и одна обязательно
+// оставалась другого цвета: заметить это можно было, только пересчитав их
+// глазами.
+//
+// РАБОТАЕТ ЭТО ТАК: поле крутят у первичного элемента (он и показан), а после
+// правки то же самое значение ложится всем остальным выбранным, у кого есть
+// ТА ЖЕ часть. Копируется ровно одно поле, а не компонент целиком: у кнопок
+// набора разные подписи, и «покрасить все» не имеет права снести их тексты.
+//
+// Части, которой у соседа нет, НЕ ДОБАВЛЯЕМ: правка цвета не должна заводить
+// подложку там, где её не было, — это уже не правка, а сборка чужого элемента.
+void MirrorFieldToSelection(EditorHost& host, GameObject primary, const ui::PartType& part,
+                            const ui::PartField& f) {
+    Scene& scene = host.CurrentScene();
+    entt::registry& reg = scene.Registry();
+    const void* src = part.Get(reg, primary.Entity());
+    if (!src) return;
+    for (int id : host.Selection().All()) {
+        GameObject other = scene.Get(id);
+        if (!other.Valid() || other.Entity() == primary.Entity()) continue;
+        if (!part.Has(reg, other.Entity())) continue;
+        void* dst = part.GetMutable(reg, other.Entity());
+        if (!dst) continue;
+        ui::CopyField(f, src, dst);
+        // Картинке после смены пути нужен свой рантайм-указатель: иначе сосед
+        // получит путь нового файла и указатель на старую текстуру.
+        if (part.Id && std::string(part.Id) == "image") {
+            if (ui::Image* im = reg.try_get<ui::Image>(other.Entity())) ui::ResolveImageTexture(*im);
+        }
+    }
+}
+
+// Сколько элементов интерфейса выделено. По нему инспектор решает, говорить ли
+// про набор вообще: у одного элемента слова «правится у всех выбранных» — шум.
+int SelectedElements(EditorHost& host) {
+    Scene& scene = host.CurrentScene();
+    entt::registry& reg = scene.Registry();
+    int n = 0;
+    for (int id : host.Selection().All()) {
+        GameObject o = scene.Get(id);
+        if (o.Valid() && reg.all_of<ui::Element>(o.Entity())) ++n;
+    }
+    return n;
+}
+
+// Поля ОДНОЙ части с учётом режима и набора. Вынесено, потому что разделов
+// теперь четыре и цикл по полям повторялся бы в каждом.
+void DrawPartFields(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
+                    const ui::PartType& p, void* data, bool bindings, int selected) {
+    for (const ui::PartField& f : *p.Fields) {
+        if ((f.Type == ui::PartField::Kind::Bindings) != bindings) continue;
+        if (!ui::FieldVisible(*p.Fields, f, data)) continue;
+        const bool before = ImGui::IsAnyItemActive();
+        (void)before;
+        DrawPartField(host, obj, ctx, p, f, data);
+        // Правку разносим по набору ПОСЛЕ каждого поля: который именно виджет
+        // её принял, знает только он сам, а «элемент только что отпустили»
+        // ImGui умеет сказать про любой.
+        if (selected > 1 && (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsItemEdited()))
+            MirrorFieldToSelection(host, obj, p, f);
+    }
+}
+
+// Разделы инспектора. Объявлены здесь, определены ниже: главная функция читается
+// как оглавление — четыре раздела подряд, — и это ровно то, чем она и стала.
+void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int selected);
+void DrawComponentsSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
+                           entt::entity e, int selected);
+
+} // namespace
+
 void DrawUIElementProperties(EditorHost& host, GameObject obj,
                              const UIPropsContext& ctx) {
     entt::registry& reg = host.CurrentScene().Registry();
@@ -308,6 +389,107 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     ui::Element* xf = reg.try_get<ui::Element>(e);
     if (!xf) return;
 
+    // СКОЛЬКО ВЫБРАНО — сказано сразу, а не выясняется опытом. Инспектор
+    // показывает поля одного элемента, а правит их у всех, и промолчать об
+    // этом значит превратить обычную правку в неожиданность: покрасил одну
+    // кнопку, покрасились двадцать.
+    const int selected = SelectedElements(host);
+    if (selected > 1) {
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Accent));
+        ImGui::Text(T("Selected: %d — an edit goes to all of them"), selected);
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+    }
+
+    // --- РАЗДЕЛЫ, А НЕ ОДНА ПРОСТЫНЯ ----------------------------------------
+    //
+    // Полей у собранного элемента под сорок, и шли они одним списком: сначала
+    // заготовка, потом галки частей, потом положение, потом поля каждой части
+    // подряд. Найти в нём нужное можно было только прокруткой сверху донизу,
+    // каждый раз заново.
+    //
+    // Четыре раздела отвечают на четыре разных вопроса, и это ровно те
+    // вопросы, с которыми к инспектору и приходят: ГДЕ элемент стоит, КАК он
+    // выглядит, ИЗ ЧЕГО он сделан, ЧТО он делает. Свёрнутый раздел остаётся
+    // свёрнутым — правя цвета, незачем каждый раз проматывать раскладку.
+    //
+    // Раздел «как выглядит» и раздел «из чего сделан» разделены НЕ СПИСКОМ
+    // ЧАСТЕЙ В РЕДАКТОРЕ: рисующая часть объявляет функцию отрисовки, и по её
+    // наличию видно, оформление это или поведение. Часть, пришедшая из игры,
+    // встаёт в нужный раздел сама.
+    if (ImGui::CollapsingHeader(T("Layout"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        DrawLayoutSection(host, e, xf, selected);
+    }
+
+    if (ImGui::CollapsingHeader(T("Appearance"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        bool any = false;
+        for (const ui::PartType& p : ui::Parts()) {
+            if (!p.Fields || !p.Draw || !p.Has(reg, e)) continue;
+            void* data = p.GetMutable(reg, e);
+            if (!data) continue;
+            any = true;
+            ImGui::SeparatorText(T(p.Title));
+            ImGui::PushID(p.Id);
+            DrawPartFields(host, obj, ctx, p, data, /*bindings=*/false, selected);
+            ImGui::PopID();
+        }
+        if (!any) HintWrapped("%s", T("Nothing is drawn yet. Add a part in Components."));
+    }
+
+    if (ImGui::CollapsingHeader(T("Components"))) {
+        DrawComponentsSection(host, obj, ctx, e, selected);
+    }
+
+    // --- События ------------------------------------------------------------
+    //
+    // Связи «когда здесь случилось X — сделать Y» собраны СО ВСЕХ частей в один
+    // раздел. Лежа каждая внутри своей части, они терялись: у элемента с тремя
+    // частями события искали в трёх местах, и найти их можно было, только
+    // раскрыв все.
+    //
+    // Это и есть граница, о которой говорит архитектура: интерфейс не знает
+    // механики игры, а связывают их события и скрипты — и раз это граница, она
+    // обязана быть видна одним разделом, а не растворяться среди цветов.
+    {
+        bool anyEvents = false;
+        for (const ui::PartType& p : ui::Parts()) {
+            if (!p.Fields || !p.Has(reg, e)) continue;
+            for (const ui::PartField& f : *p.Fields)
+                if (f.Type == ui::PartField::Kind::Bindings) { anyEvents = true; break; }
+            if (anyEvents) break;
+        }
+        if (ImGui::CollapsingHeader(T("Events"), anyEvents ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+            if (!anyEvents) {
+                HintWrapped("%s", T("Events live on the Interactable part. Add it in Components."));
+            }
+            for (const ui::PartType& p : ui::Parts()) {
+                if (!p.Fields || !p.Has(reg, e)) continue;
+                void* data = p.GetMutable(reg, e);
+                if (!data) continue;
+                ImGui::PushID(p.Id);
+                DrawPartFields(host, obj, ctx, p, data, /*bindings=*/true, selected);
+                ImGui::PopID();
+            }
+        }
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button(T("Remove UI Element"))) {
+        host.PushUndoSnapshot();
+        // Снимаем ВСЕ зарегистрированные части, а не список из этого файла:
+        // часть, добавленная игрой, тоже должна уходить вместе с элементом.
+        for (const ui::PartType& p : ui::Parts())
+            if (p.Has(reg, e)) p.Remove(reg, e);
+        reg.remove<ui::Element>(e);
+    }
+}
+
+namespace {
+
+// --- Раздел «Из чего сделан» -------------------------------------------------
+void DrawComponentsSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
+                           entt::entity e, int selected) {
+    entt::registry& reg = host.CurrentScene().Registry();
     // --- Заготовка ----------------------------------------------------------
     //
     // Собрать кнопку — значит поставить четыре компонента с нужными значениями.
@@ -355,8 +537,23 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         ImGui::NewLine();
     }
 
-    // --- Положение ----------------------------------------------------------
-    ImGui::SeparatorText(T("Layout"));
+    // Поля невидимых частей (поведение, раскладка, маска) — здесь же: их
+    // немного, и живут они рядом с галками, которыми эти части включают.
+    for (const ui::PartType& p : ui::Parts()) {
+        if (!p.Fields || p.Draw || !p.Has(reg, e)) continue;
+        void* data = p.GetMutable(reg, e);
+        if (!data) continue;
+        ImGui::SeparatorText(T(p.Title));
+        ImGui::PushID(p.Id);
+        DrawPartFields(host, obj, ctx, p, data, /*bindings=*/false, selected);
+        ImGui::PopID();
+    }
+}
+
+// --- Раздел «Где стоит» ------------------------------------------------------
+void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int selected) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    (void)selected;
     if (DrawAnchorPicker(xf->Anchor)) host.PushUndoSnapshot();
     ImGui::DragFloat2(T("Position"), &xf->Position.x, 1.0f); host.TrackLastImGuiItem();
 
@@ -380,41 +577,19 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", T("Which point of the element lands on the anchor"));
     }
+    // УГОЛ — ЧИСЛОМ, а не только мышью. Ручка на холсте ставит его на глаз, а
+    // «ровно 90» набирают здесь; обратное тоже верно — поэтому есть и то, и
+    // другое.
+    ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
+    host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Around the element centre. The handle above the top edge\n"
+                                  "does the same with the mouse."));
     ImGui::DragInt(T("Order"), &xf->Order, 1); host.TrackLastImGuiItem();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
     ImGui::Checkbox(T("Visible"), &xf->Visible);
-
-    // --- ПОЛЯ ЧАСТЕЙ — ПО ТАБЛИЦАМ, а не двести пятьдесят строк вручную ------
-    //
-    // Здесь были расписаны все части поимённо: у подложки семь полей, у текста
-    // восемь, у картинки восемь, и так тринадцать раз. Это был ТРЕТИЙ список
-    // тех же полей — после записи в файл и чтения из файла, — и разъезжались
-    // они регулярно: поле есть в формате, а покрутить его нечем.
-    //
-    // Теперь поля берутся из таблицы, объявленной рядом с самой частью
-    // (sage/ui/UIParts.cpp). Виджет выбирается по типу поля; там, где обычного
-    // мало, поле само говорит какой нужен (PartField::Widget) — путь к
-    // картинке просит слот ассета, имя значка просит список значков.
-    for (const ui::PartType& p : ui::Parts()) {
-        if (!p.Fields || !p.Has(reg, e)) continue;
-        void* data = p.GetMutable(reg, e);
-        if (!data) continue;
-
-        ImGui::SeparatorText(T(p.Title));
-        ImGui::PushID(p.Id);
-        for (const ui::PartField& f : *p.Fields) DrawPartField(host, obj, ctx, p, f, data);
-        ImGui::PopID();
-    }
-
-    ImGui::Separator();
-    if (ImGui::Button(T("Remove UI Element"))) {
-        host.PushUndoSnapshot();
-        // Снимаем ВСЕ зарегистрированные части, а не список из этого файла:
-        // часть, добавленная игрой, тоже должна уходить вместе с элементом.
-        for (const ui::PartType& p : ui::Parts())
-            if (p.Has(reg, e)) p.Remove(reg, e);
-        reg.remove<ui::Element>(e);
-    }
 }
+
+} // namespace
 
 } // namespace sage::editor

@@ -1673,6 +1673,14 @@
     "Everything outside it can be cut off: a camera\nnotch, rounded corners, TV overscan.": "Всё за ней может быть срезано: вырезом камеры,\nскруглением корпуса, overscan'ом телевизора.",
     "Preview resolution. The layout is computed in it, and the game\nsettings are not touched — this is a look, not a change.": "Разрешение предпросмотра. Раскладка считается в нём, а настройки\nигры не трогаются — это взгляд, а не правка.",
     "Rotate the screen": "Повернуть экран",
-    "Safe area": "Безопасная область"
+    "Safe area": "Безопасная область",
+    "9-slice": "Девятина",
+    "How it fits": "Как ложится",
+    "Tile": "Замостить",
+    "Around the element centre. The handle above the top edge\ndoes the same with the mouse.": "Вокруг центра элемента. Ручка над верхним краем\nделает то же мышью.",
+    "Components": "Из чего сделан",
+    "Events live on the Interactable part. Add it in Components.": "События живут на части «Реагирует». Добавьте её в разделе «Из чего сделан».",
+    "Nothing is drawn yet. Add a part in Components.": "Пока ничего не рисуется. Добавьте часть в разделе «Из чего сделан».",
+    "Selected: %d — an edit goes to all of them": "Выбрано: %d — правка идёт ко всем"
   }
 }
