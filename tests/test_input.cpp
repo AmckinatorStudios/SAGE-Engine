@@ -686,3 +686,57 @@ TEST(Input_glfw_codes_translate_into_engine_keys) {
     CHECK_EQ((int)GlfwBridge::FromGlfwMods(GLFW_MOD_CONTROL | GLFW_MOD_SHIFT),
              (int)(ModCtrl | ModShift));
 }
+
+// --- ПЕРЕНОС ДЕЙСТВИЯ В ДРУГОЙ КОНТЕКСТ -------------------------------------
+//
+// Контекст действия — часть раскладки, и менять его приходится: сначала всё
+// заводят в игровом контексте, потом половина уезжает в инвентарь. Пока
+// переноса не было, это означало пересоздать действие руками — имя, вид и все
+// клавиши заново, — а редактор управления не умел даже этого.
+
+TEST(Input_move_action_carries_its_bindings_and_settings) {
+    sage::input::InputSystem input;
+    sage::input::Context& game = input.CreateContext("Gameplay", 10);
+    sage::input::Context& ui = input.CreateContext("Inventory", 20);
+
+    sage::input::Action& take = game.Add("Take", sage::input::ActionType::Axis);
+    take.Bind("E");
+    take.Bind("PAD_X");
+    take.Settings().DeadZone = 0.42f;
+    take.Settings().Sensitivity = 3.0f;
+
+    CHECK_TRUE(input.MoveAction("Gameplay", "Inventory", "Take"));
+
+    // Из источника ушло, в цели появилось — и не половиной.
+    CHECK_TRUE(game.Find("Take") == nullptr);
+    const sage::input::Action* moved = ui.Find("Take");
+    CHECK_TRUE(moved != nullptr);
+    if (!moved) return;
+    CHECK_TRUE(moved->Type() == sage::input::ActionType::Axis);
+    CHECK_EQ((int)moved->Bindings().size(), 2);
+    CHECK_NEAR(moved->Settings().DeadZone, 0.42f, 0.0001f);
+    CHECK_NEAR(moved->Settings().Sensitivity, 3.0f, 0.0001f);
+}
+
+TEST(Input_move_action_refuses_when_the_name_is_taken) {
+    sage::input::InputSystem input;
+    sage::input::Context& game = input.CreateContext("Gameplay", 10);
+    sage::input::Context& ui = input.CreateContext("Inventory", 20);
+    game.Add("Close", sage::input::ActionType::Digital).Bind("Q");
+    ui.Add("Close", sage::input::ActionType::Digital).Bind("ESCAPE");
+
+    // Слить два действия в одно значило бы потерять одно из них молча: у
+    // «Close» инвентаря появилась бы чужая клавиша Q, а игрового «Close» не
+    // стало бы вовсе.
+    CHECK_FALSE(input.MoveAction("Gameplay", "Inventory", "Close"));
+    CHECK_TRUE(game.Find("Close") != nullptr);
+    CHECK_EQ((int)ui.Find("Close")->Bindings().size(), 1);
+}
+
+TEST(Input_move_action_refuses_the_impossible) {
+    sage::input::InputSystem input;
+    input.CreateContext("Gameplay", 10);
+    CHECK_FALSE(input.MoveAction("Gameplay", "NoSuchContext", "Jump"));  // цели нет
+    CHECK_FALSE(input.MoveAction("Nowhere", "Gameplay", "Jump"));        // источника нет
+    CHECK_FALSE(input.MoveAction("Gameplay", "Gameplay", "Jump"));       // сам в себя
+}

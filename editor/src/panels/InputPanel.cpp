@@ -41,7 +41,7 @@ const char* ActionTypeLabel(ActionType type) {
     return "";
 }
 
-// Короткая подпись — для бейджа в списке действий, где полная не влезает.
+// Короткая подпись — для бейджа в строке списка, где полная не влезает.
 const char* ActionTypeShort(ActionType type) {
     switch (type) {
         case ActionType::Digital: return T("Button");
@@ -61,18 +61,20 @@ const char* TriggerLabel(TriggerMode mode) {
     return "";
 }
 
-// Человеческое имя устройства привязки — для колонки «откуда».
-const char* DeviceLabel(const Binding& b) {
+// Значок устройства привязки. Рисунком, а не словом: в строке списка клавиш
+// пять штук, и «Клавиатура, Клавиатура, Мышь» занимает больше места, чем сами
+// клавиши, ради сведения, которое видно по значку без чтения.
+const char* DeviceIcon(const Binding& b) {
     switch (b.Kind) {
-        case SourceKind::Key: return T("Keyboard");
+        case SourceKind::Key: return "keyboard";
         case SourceKind::MouseButton:
         case SourceKind::MouseWheel:
-        case SourceKind::MouseAxis: return T("Mouse");
+        case SourceKind::MouseAxis: return "select";
         case SourceKind::GamepadButton:
-        case SourceKind::GamepadAxis: return T("Gamepad");
-        case SourceKind::None: return "";
+        case SourceKind::GamepadAxis: return "pilot";
+        case SourceKind::None: return "question";
     }
-    return "";
+    return "question";
 }
 
 // Из события ввода — привязка, которую человек только что нажал. Пусто, если
@@ -80,8 +82,7 @@ const char* DeviceLabel(const Binding& b) {
 //
 // Движение мыши сюда НЕ попадает намеренно: назначить «ось мыши» ловлей
 // нельзя — курсор шевелится всегда, и первая же дрожь руки заняла бы поле.
-// Оси мыши и стиков назначаются кнопкой «ось…» рядом, списком из шести
-// пунктов, где выбор осмыслен.
+// Оси мыши и стиков назначаются списком из восьми пунктов, где выбор осмыслен.
 bool BindingFromEvent(const InputEvent& e, Binding& out) {
     switch (e.Type) {
         case InputEventType::KeyPressed: {
@@ -116,20 +117,53 @@ bool BindingFromEvent(const InputEvent& e, Binding& out) {
     }
 }
 
-// Подстрока без учёта регистра — тот же приём, что и в поиске других панелей:
-// действий в раскладке легко набирается два-три десятка (движение, обзор,
-// боевые команды, инвентарь), и пролистывать их глазами дольше, чем набрать
-// три буквы.
+// Подстрока без учёта регистра — тот же приём, что и в поиске других панелей.
 bool ContainsCaseInsensitive(const std::string& haystack, const std::string& needle) {
     if (needle.empty()) return true;
     auto lower = [](std::string s) {
-        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
         return s;
     };
     return lower(haystack).find(lower(needle)) != std::string::npos;
 }
 
+// Все клавиши действия одной строкой — для строки списка.
+std::string BindingSummary(const Action& action) {
+    std::string out;
+    for (const Binding& b : action.Bindings()) {
+        if (!out.empty()) out += "   ";
+        out += b.ToString();
+    }
+    return out;
+}
+
+// Оси, которые нельзя поймать нажатием (см. BindingFromEvent). Список общий у
+// свойств действия и у модалки создания: один и тот же набор, написанный
+// дважды, однажды разойдётся.
+struct AxisItem { const char* Label; Binding (*Make)(); };
+const AxisItem kAxes[] = {
+    {"MOUSE_X", [] { return Binding::MouseAxisX(); }},
+    {"MOUSE_Y", [] { return Binding::MouseAxisY(); }},
+    {"PAD_LEFT_X", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::LeftX); }},
+    {"PAD_LEFT_Y", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::LeftY); }},
+    {"PAD_RIGHT_X", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightX); }},
+    {"PAD_RIGHT_Y", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightY); }},
+    {"PAD_LEFT_TRIGGER", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::LeftTrigger); }},
+    {"PAD_RIGHT_TRIGGER", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightTrigger); }},
+};
+
 } // namespace
+
+bool InputPanel::IsCollapsed(const std::string& context) const {
+    return std::find(m_collapsed.begin(), m_collapsed.end(), context) != m_collapsed.end();
+}
+
+void InputPanel::ToggleCollapsed(const std::string& context) {
+    auto it = std::find(m_collapsed.begin(), m_collapsed.end(), context);
+    if (it == m_collapsed.end()) m_collapsed.push_back(context);
+    else m_collapsed.erase(it);
+}
 
 std::string InputPanel::ConflictWith(InputSystem& input, const Binding& binding,
                                      const Action* self) const {
@@ -150,18 +184,163 @@ bool InputPanel::HasAnyConflict(InputSystem& input, const Action& action) const 
     return false;
 }
 
+// --- ВЫДЕЛЕНИЕ -----------------------------------------------------------
+
+bool InputPanel::IsSelected(const Ref& ref) const {
+    return std::find(m_selection.begin(), m_selection.end(), ref) != m_selection.end();
+}
+
+void InputPanel::SelectOnly(const Ref& ref) {
+    m_selection.clear();
+    m_selection.push_back(ref);
+    m_anchor = ref;
+    m_selectedContext = ref.Context;
+    m_selectedAction = ref.Name;
+}
+
+void InputPanel::ToggleSelected(const Ref& ref) {
+    auto it = std::find(m_selection.begin(), m_selection.end(), ref);
+    if (it != m_selection.end()) {
+        m_selection.erase(it);
+        // Свойства показывают ПЕРВОЕ выделенное: сняли то, что показано —
+        // показываем следующее, а не пустоту при непустом наборе.
+        if (m_selectedContext == ref.Context && m_selectedAction == ref.Name) {
+            if (m_selection.empty()) { m_selectedContext.clear(); m_selectedAction.clear(); }
+            else { m_selectedContext = m_selection.front().Context;
+                   m_selectedAction = m_selection.front().Name; }
+        }
+        return;
+    }
+    m_selection.push_back(ref);
+    m_anchor = ref;
+    m_selectedContext = ref.Context;
+    m_selectedAction = ref.Name;
+}
+
+void InputPanel::SelectRange(const std::vector<Ref>& visible, const Ref& to) {
+    auto findIndex = [&visible](const Ref& r) {
+        for (size_t i = 0; i < visible.size(); ++i)
+            if (visible[i] == r) return (int)i;
+        return -1;
+    };
+    const int from = findIndex(m_anchor);
+    const int target = findIndex(to);
+    if (target < 0) return;
+    // Якоря нет (его строку спрятали поиском или свернули группу) — значит и
+    // диапазона нет: тянуть его от невидимого некуда.
+    if (from < 0) { SelectOnly(to); return; }
+
+    m_selection.clear();
+    const int a = std::min(from, target);
+    const int b = std::max(from, target);
+    for (int i = a; i <= b; ++i) m_selection.push_back(visible[(size_t)i]);
+    m_selectedContext = to.Context;
+    m_selectedAction = to.Name;
+}
+
+void InputPanel::DeleteSelection(EditorHost& host, InputSystem& input) {
+    if (m_selection.empty()) return;
+    for (const Ref& ref : m_selection) {
+        if (Context* ctx = input.FindContext(ref.Context)) ctx->Remove(ref.Name);
+    }
+    m_selection.clear();
+    m_selectedContext.clear();
+    m_selectedAction.clear();
+    host.SetProjectInputDirty(true);
+}
+
+int InputPanel::MoveSelectionTo(EditorHost& host, InputSystem& input,
+                                const std::string& targetContext) {
+    if (!input.FindContext(targetContext)) return 0;
+
+    int moved = 0;
+    std::vector<Ref> stayed;
+    for (const Ref& ref : m_selection) {
+        if (ref.Context == targetContext) { stayed.push_back(ref); continue; }
+        // Сам перенос — в движке (InputSystem::MoveAction): о правилах, при
+        // которых он невозможен, должен знать один.
+        if (!input.MoveAction(ref.Context, targetContext, ref.Name)) {
+            stayed.push_back(ref);
+            continue;
+        }
+        stayed.push_back({targetContext, ref.Name});
+        ++moved;
+    }
+    m_selection = stayed;
+    if (!m_selection.empty()) {
+        m_selectedContext = m_selection.front().Context;
+        m_selectedAction = m_selection.front().Name;
+    }
+    if (moved > 0) host.SetProjectInputDirty(true);
+    return moved;
+}
+
+// --- СВОЙСТВА НАБОРА -----------------------------------------------------
+//
+// Когда выделено больше одного, свойства одного действия показывать нельзя:
+// человек выделял набор, чтобы сделать что-то со ВСЕМ набором. Показываем, что
+// именно с ним можно сделать, и перечисляем, что в нём лежит.
+void InputPanel::DrawMultiSelection(EditorHost& host, InputSystem& input) {
+    char title[96];
+    std::snprintf(title, sizeof(title), T("Selected: %d"), (int)m_selection.size());
+    ImGui::TextUnformatted(title);
+    Sage::UI::TextSecondary("%s", T("Drag them onto a context header to move, or use the buttons."));
+    Sage::UI::Separator();
+
+    std::vector<Context*> contexts = input.ContextsByPriority();
+    if (contexts.size() > 1) {
+        Sage::UI::BeginProperties("moveto");
+        Sage::UI::PropertyLabel(T("Move to context"));
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo("##moveto", T("Choose..."))) {
+            for (Context* c : contexts) {
+                if (ImGui::Selectable(c->Name().c_str())) {
+                    const int moved = MoveSelectionTo(host, input, c->Name());
+                    host.SetStatusMessage(moved > 0 ? T("Actions moved") 
+                                                    : T("Nothing moved: the names are taken there"));
+                }
+            }
+            ImGui::EndCombo();
+        }
+        Sage::UI::EndProperties();
+        ImGui::Spacing();
+    }
+
+    if (Sage::UI::Button(T("Delete selected"), Sage::UI::ButtonStyle::Danger, ImVec2(-1, 0)))
+        DeleteSelection(host, input);
+    Sage::UI::Tooltip(T("Delete removes them too"));
+
+    Sage::UI::Separator();
+    ImGui::BeginChild("##sellist", ImVec2(0, 0));
+    for (const Ref& ref : m_selection) {
+        Sage::UI::TextSecondary("%s", ref.Context.c_str());
+        ImGui::SameLine();
+        ImGui::TextUnformatted(ref.Name.c_str());
+    }
+    ImGui::EndChild();
+}
+
+// --- ЛОВЛЯ --------------------------------------------------------------
+//
+// Окно ловли намеренно пустое: в нём нечего читать, кроме одной строки, и
+// нечего нажимать, кроме отмены. Всё, что человек должен сделать, — нажать ту
+// клавишу, которую он и хотел назначить.
 bool InputPanel::DrawCaptureModal(EditorHost& host, Binding& caught) {
     if (!m_captureOpen) return false;
 
-    ImGui::OpenPopup(T("Assign a control###AssignControl"));
-    ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Always);
+    ImGui::OpenPopup(T("Press a control###AssignControl"));
+    ImGui::SetNextWindowSize(ImVec2(400, 0), ImGuiCond_Always);
     bool captured = false;
-    if (ImGui::BeginPopupModal(T("Assign a control###AssignControl"), nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::TextUnformatted(T("Press a key, a mouse button, the wheel or a gamepad button."));
+    if (ImGui::BeginPopupModal(T("Press a control###AssignControl"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize |
+                                   ImGuiWindowFlags_NoSavedSettings)) {
+        // Кому именно назначаем — написано прямо здесь: модалка перекрывает
+        // список, и «а к чему это окно» иначе приходится вспоминать.
+        Sage::UI::TextSecondary("%s", m_captureAction.c_str());
         ImGui::Spacing();
-        Sage::UI::TextSecondary("%s", T("Hold Ctrl / Shift / Alt to record a combination. Escape cancels."));
-        ImGui::Separator();
+        ImGui::TextUnformatted(T("Press a key, a mouse button, the wheel or a gamepad button."));
+        Sage::UI::TextSecondary("%s", T("Hold Ctrl / Shift / Alt for a combination. Escape cancels."));
+        ImGui::Spacing();
 
         for (const InputEvent& e : host.FrameInputEvents()) {
             // Escape отменяет, а не назначается: иначе первым же действием
@@ -188,120 +367,505 @@ bool InputPanel::DrawCaptureModal(EditorHost& host, Binding& caught) {
     return captured;
 }
 
-bool InputPanel::DrawBindingRow(EditorHost& host, Action& action, int index,
-                                const std::string& contextName) {
-    const std::vector<Binding>& bindings = action.Bindings();
-    if (index < 0 || index >= (int)bindings.size()) return false;
-    const Binding& binding = bindings[(size_t)index];
+// --- НОВОЕ ДЕЙСТВИЕ -----------------------------------------------------
+//
+// Одно окно вместо трёх полей внизу колонки. Спрашивается ровно то, без чего
+// действия не бывает: как его зовут. Вид и контекст стоят готовыми ответами —
+// кнопка и текущий контекст, — и трогают их редко.
+//
+// Сразу после создания открывается ловля: действие без клавиши не срабатывает
+// никогда, и оставить человека перед пустой строкой значит предложить ему
+// догадаться о втором шаге.
+void InputPanel::DrawNewActionModal(EditorHost& host, InputSystem& input) {
+    if (!m_newActionOpen) return;
 
-    ImGui::PushID(index);
-    bool remove = false;
-    ImGui::TableNextRow();
-
-    // --- Источник: он же «переназначить» — то, куда человек и целится: видит
-    // «SPACE» и хочет нажать по нему, чтобы поменять. ---
-    ImGui::TableSetColumnIndex(0);
-    const std::string label = binding.ToString();
-    if (Sage::UI::Button(label.c_str(), Sage::UI::ButtonStyle::Secondary, ImVec2(-1, 0))) {
-        m_captureBinding = index;
-        m_captureOpen = true;
-        m_captureContext = contextName;
-        m_captureAction = action.Name();
-    }
-    Sage::UI::Tooltip(T("Click to reassign"));
-
-    // --- Устройство ---
-    ImGui::TableSetColumnIndex(1);
-    ImGui::AlignTextToFramePadding();
-    Sage::UI::TextSecondary("%s", DeviceLabel(binding));
-
-    // --- Вклад и половина вектора — только там, где они имеют смысл. У
-    // обычной кнопки этих полей нет вовсе — а значит, у кнопочного действия и
-    // КОЛОНКИ «Настройка» вовсе нет (см. DrawBindingsSection): резервировать
-    // под неё место всегда значило бы отбирать его у колонки «Конфликт»,
-    // которая кнопочному действию как раз и важна. ---
-    const bool hasTuning = action.Type() != ActionType::Digital;
-    int col = 2;
-    if (hasTuning) {
-        ImGui::TableSetColumnIndex(col++);
-        const float half = action.Type() == ActionType::Vector
-                                ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f
-                                : -1.0f;
-        ImGui::SetNextItemWidth(half);
-        float scale = binding.Scale;
-        if (ImGui::DragFloat("##scale", &scale, 0.05f, -4.0f, 4.0f, "%.2f")) {
-            action.MutableBindings()[(size_t)index].Scale = scale;
-            host.SetProjectInputDirty(true);
-        }
-        Sage::UI::Tooltip(T("Contribution to the value: W gives +1, S gives -1"));
-        if (action.Type() == ActionType::Vector) {
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(-1);
-            int axis = (binding.Axis == Component::Y) ? 1 : 0;
-            const char* axes[] = {T("X"), T("Y")};
-            if (ImGui::Combo("##axis", &axis, axes, 2)) {
-                action.MutableBindings()[(size_t)index].Axis = axis ? Component::Y : Component::X;
-                host.SetProjectInputDirty(true);
-            }
-            Sage::UI::Tooltip(T("Which half of the vector this source feeds"));
-        }
-    }
-
-    // --- Конфликт: показывается ЗДЕСЬ, а не при сохранении — узнать, что
-    // клавиша занята, надо в момент назначения, а не когда игра повела себя
-    // странно. ---
-    ImGui::TableSetColumnIndex(col++);
-    const std::string conflict = ConflictWith(host.ProjectInput(), binding, &action);
-    if (!conflict.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
-        ImGui::TextUnformatted(T("also:"));
-        ImGui::SameLine();
-        const std::string shown = Sage::UI::Truncate(conflict.c_str(), ImGui::GetContentRegionAvail().x);
-        ImGui::TextUnformatted(shown.c_str());
-        ImGui::PopStyleColor();
-        Sage::UI::Tooltip(T("The same control is bound to another action. That is legal when "
-                            "the two never run at the same time — they live in different contexts."));
-    }
-
-    // --- Удалить ---
-    ImGui::TableSetColumnIndex(col);
-    if (EditorIcons::IconOnlyButton("trash", T("Remove this control"))) remove = true;
-
-    ImGui::PopID();
-    return remove;
-}
-
-void InputPanel::DrawBindingsSection(EditorHost& host, Action& action, const std::string& contextName) {
-    if (action.Bindings().empty()) {
-        Sage::UI::EmptyState(T("No controls yet"), T("The action can never fire. Add one below."));
+    ImGui::OpenPopup(T("New action###NewAction"));
+    ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Always);
+    if (!ImGui::BeginPopupModal(T("New action###NewAction"), nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize |
+                                    ImGuiWindowFlags_NoSavedSettings)) {
         return;
     }
-    // Кнопочное действие не тратит колонку на «Настройку» — ей нечего туда
-    // класть, а конфликту (самому частому вопросу к этой таблице) остаётся
-    // намного больше места.
-    const bool hasTuning = action.Type() != ActionType::Digital;
-    const int columns = hasTuning ? 5 : 4;
-    if (ImGui::BeginTable("##bindings", columns,
-                          ImGuiTableFlags_PadOuterX | ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn(T("Control"), ImGuiTableColumnFlags_WidthFixed, 150.0f);
-        ImGui::TableSetupColumn(T("Device"), ImGuiTableColumnFlags_WidthFixed, 68.0f);
-        if (hasTuning) ImGui::TableSetupColumn(T("Tuning"), ImGuiTableColumnFlags_WidthFixed, 170.0f);
-        ImGui::TableSetupColumn(T("Conflict"), ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("##rm", ImGuiTableColumnFlags_WidthFixed, 28.0f);
 
-        int removeAt = -1;
-        for (int i = 0; i < (int)action.Bindings().size(); ++i) {
-            if (DrawBindingRow(host, action, i, contextName)) removeAt = i;
+    // Фокус в поле имени сразу: окно открыли, чтобы набрать имя, и лишний
+    // щелчок по единственному полю — работа, которой не должно быть.
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1);
+    const bool entered = ImGui::InputTextWithHint("##name", T("Action name, e.g. Jump"),
+                                                  m_newActionName, sizeof(m_newActionName),
+                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+
+    Sage::UI::BeginProperties("newaction");
+    Sage::UI::PropertyLabel(T("Kind"),
+                            T("A button answers yes/no, an axis gives -1..1, a vector gives two "
+                              "axes at once — movement and look."));
+    ImGui::SetNextItemWidth(-1);
+    const char* types[] = {ActionTypeLabel(ActionType::Digital), ActionTypeLabel(ActionType::Axis),
+                           ActionTypeLabel(ActionType::Vector)};
+    ImGui::Combo("##kind", &m_newActionType, types, 3);
+
+    // Контекст спрашивается только когда их БОЛЬШЕ ОДНОГО: у игры с единственным
+    // контекстом этот выбор — поле без выбора.
+    std::vector<Context*> contexts = input.ContextsByPriority();
+    if (contexts.size() > 1) {
+        Sage::UI::PropertyLabel(T("Context"),
+                                T("A group of actions that work at the same time: the game, the "
+                                  "inventory, a dialogue."));
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo("##ctx", m_newActionContext.c_str())) {
+            for (Context* c : contexts) {
+                const bool selected = c->Name() == m_newActionContext;
+                if (ImGui::Selectable(c->Name().c_str(), selected)) m_newActionContext = c->Name();
+            }
+            ImGui::EndCombo();
         }
-        ImGui::EndTable();
-        if (removeAt >= 0) {
-            action.RemoveBindingAt(removeAt);
+    }
+    Sage::UI::EndProperties();
+
+    ImGui::Spacing();
+    const bool named = m_newActionName[0] != '\0';
+    ImGui::BeginDisabled(!named);
+    const bool create = Sage::UI::Button(T("Create and assign a key"),
+                                         Sage::UI::ButtonStyle::Primary, ImVec2(-1, 0));
+    ImGui::EndDisabled();
+    ImGui::Spacing();
+    if (Sage::UI::Button(T("Cancel"), Sage::UI::ButtonStyle::Secondary, ImVec2(-1, 0))) {
+        m_newActionOpen = false;
+        ImGui::CloseCurrentPopup();
+    }
+
+    if ((create || entered) && named) {
+        Context* ctx = input.FindContext(m_newActionContext);
+        if (!ctx && !contexts.empty()) ctx = contexts.front();
+        if (ctx) {
+            ctx->Add(m_newActionName, (ActionType)m_newActionType);
+            m_selectedContext = ctx->Name();
+            m_selectedAction = m_newActionName;
+            host.SetProjectInputDirty(true);
+            // Ловля — сразу, без ещё одного нажатия.
+            m_captureContext = ctx->Name();
+            m_captureAction = m_newActionName;
+            m_captureBinding = -1;
+            m_captureOpen = true;
+        }
+        m_newActionName[0] = '\0';
+        m_newActionOpen = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+void InputPanel::DrawNewContextModal(EditorHost& host, InputSystem& input) {
+    if (!m_newContextOpen) return;
+
+    ImGui::OpenPopup(T("New context###NewContext"));
+    ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_Always);
+    if (!ImGui::BeginPopupModal(T("New context###NewContext"), nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize |
+                                    ImGuiWindowFlags_NoSavedSettings)) {
+        return;
+    }
+    Sage::UI::TextSecondary("%s", T("One key means different things in the game, in the inventory "
+                                    "and in a dialogue. Each set of them is a context."));
+    ImGui::Spacing();
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1);
+    const bool entered = ImGui::InputTextWithHint("##name", T("Context name, e.g. Inventory"),
+                                                  m_newContextName, sizeof(m_newContextName),
+                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    Sage::UI::BeginProperties("newcontext");
+    Sage::UI::PropertyLabel(T("Priority"),
+                            T("Higher priority takes a device away from contexts below it."));
+    ImGui::SetNextItemWidth(-1);
+    ImGui::DragInt("##prio", &m_newContextPriority, 1.0f, -1000, 1000);
+    Sage::UI::EndProperties();
+
+    ImGui::Spacing();
+    const bool named = m_newContextName[0] != '\0';
+    ImGui::BeginDisabled(!named);
+    const bool create =
+        Sage::UI::Button(T("Create"), Sage::UI::ButtonStyle::Primary, ImVec2(-1, 0));
+    ImGui::EndDisabled();
+    ImGui::Spacing();
+    if (Sage::UI::Button(T("Cancel"), Sage::UI::ButtonStyle::Secondary, ImVec2(-1, 0))) {
+        m_newContextOpen = false;
+        ImGui::CloseCurrentPopup();
+    }
+    if ((create || entered) && named) {
+        input.CreateContext(m_newContextName, m_newContextPriority);
+        m_selectedContext = m_newContextName;
+        m_selectedAction.clear();
+        m_newContextName[0] = '\0';
+        m_newContextOpen = false;
+        host.SetProjectInputDirty(true);
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+// --- ШАПКА ---------------------------------------------------------------
+//
+// Поиск и «Действие» — то, чем работают каждый раз, и стоят они там, где рука
+// ищет их первой. Сохранение, перечитывание и типовая раскладка — рядом, но
+// значками: их нажимают раз за сеанс, и подписи они отняли бы у поиска.
+void InputPanel::DrawHeader(EditorHost& host, InputSystem& input) {
+    const Sage::UI::Style& ui = Sage::UI::Get();
+
+    const float addW = 150.0f;
+    const float iconW = ImGui::GetFrameHeight();
+    const float tail = addW + (iconW + ui.SpacingXS) * 3.0f + ui.SpacingSM;
+    const float searchW = std::max(120.0f, ImGui::GetContentRegionAvail().x - tail);
+
+    // Ширина — параметром, а не SetNextItemWidth: поле ставит её себе само
+    // (см. Sage::UI::SearchField), и наша просьба до него не доходила — поиск
+    // занимал всю строку и выталкивал кнопку «Действие» за край окна.
+    Sage::UI::SearchField("##search", m_search, sizeof(m_search), T("Search actions..."), searchW);
+
+    ImGui::SameLine(0.0f, ui.SpacingSM);
+    if (Sage::UI::Button(T("Action"), Sage::UI::ButtonStyle::Primary, ImVec2(addW, 0))) {
+        m_newActionOpen = true;
+        if (m_newActionContext.empty()) {
+            m_newActionContext = m_selectedContext.empty() ? std::string(sage::input::kDefaultContext)
+                                                           : m_selectedContext;
+        }
+    }
+    Sage::UI::Tooltip(T("Create an action and assign a key to it"));
+
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    if (EditorIcons::IconOnlyButton("save", T("Save to the project (input.sageinput)"),
+                                    host.ProjectInputDirty())) {
+        if (host.SaveProjectInput()) host.SetStatusMessage(T("Controls saved: input.sageinput"));
+        else host.SetStatusMessage(T("Controls not saved — no project open?"));
+    }
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    if (EditorIcons::IconOnlyButton("refresh", T("Reread from disk, losing unsaved edits"))) {
+        if (host.ReloadProjectInput()) host.SetStatusMessage(T("Controls reloaded from disk"));
+    }
+    ImGui::SameLine(0.0f, ui.SpacingXS);
+    if (EditorIcons::IconOnlyButton("dots", T("More"))) ImGui::OpenPopup("##inputMore");
+
+    if (Sage::UI::MenuScope moreMenu; ImGui::BeginPopup("##inputMore")) {
+        if (EditorIcons::MenuItem("plus", T("New context..."))) m_newContextOpen = true;
+        ImGui::Separator();
+        Sage::UI::MenuSection(T("Standard layout"), true);
+        Sage::UI::TextSecondary("%s", T("Adds the usual set of actions. Existing ones are left alone."));
+        if (EditorIcons::MenuItem("pilot", T("First-person / third-person game"))) {
+            Action& move = input.Register("Move", ActionType::Vector);
+            if (move.Bindings().empty()) {
+                move.BindVector("W", "S", "A", "D");
+                move.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::LeftX).On(Component::X));
+                move.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::LeftY).On(Component::Y));
+            }
+            Action& look = input.Register("Look", ActionType::Vector);
+            if (look.Bindings().empty()) {
+                look.Bind(Binding::MouseAxisX().On(Component::X));
+                look.Bind(Binding::MouseAxisY().On(Component::Y));
+                look.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::RightX).On(Component::X));
+                look.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::RightY).On(Component::Y));
+                // Обзору сглаживание вредит, а мёртвая зона мыши не нужна.
+                look.Settings().Smoothing = 0.0f;
+                look.Settings().Normalize = false;
+            }
+            struct Simple { const char* Name; const char* Key; const char* Pad; };
+            static const Simple kSimple[] = {
+                {"Jump", "SPACE", "PAD_A"},          {"Sprint", "LEFT_SHIFT", "PAD_LEFT_THUMB"},
+                {"Crouch", "LEFT_CONTROL", "PAD_B"}, {"Interact", "E", "PAD_X"},
+                {"Attack", "MOUSE_LEFT", "PAD_RB"},  {"Aim", "MOUSE_RIGHT", "PAD_LB"},
+                {"Reload", "R", "PAD_Y"},            {"Pause", "ESCAPE", "PAD_START"},
+                {"Inventory", "TAB", "PAD_BACK"},
+            };
+            for (const Simple& item : kSimple) {
+                Action& a = input.Register(item.Name, ActionType::Digital);
+                if (!a.Bindings().empty()) continue;
+                a.Bind(item.Key);
+                a.Bind(item.Pad);
+            }
+            host.SetProjectInputDirty(true);
+            host.SetStatusMessage(T("Standard layout added"));
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// --- НАСТРОЙКИ КОНТЕКСТА -------------------------------------------------
+//
+// Приоритет, отбор устройств и удаление — в меню у заголовка группы, а не на
+// экране всегда. Их трогают при заведении контекста и больше не вспоминают, а
+// места на экране они занимали ровно столько же, сколько список действий.
+void InputPanel::DrawContextMenu(EditorHost& host, Context& ctx) {
+    if (Sage::UI::MenuScope ctxMenu; ImGui::BeginPopup("##ctxSettings")) {
+        Sage::UI::MenuSection(ctx.Name().c_str(), true);
+        Sage::UI::BeginProperties("ctxprops");
+        Sage::UI::PropertyLabel(T("Priority"),
+                                T("Higher priority takes a device away from contexts below it."));
+        ImGui::SetNextItemWidth(140.0f);
+        int priority = ctx.Priority();
+        if (ImGui::DragInt("##priority", &priority, 1.0f, -1000, 1000)) {
+            ctx.SetPriority(priority);
             host.SetProjectInputDirty(true);
         }
+        Sage::UI::PropertyLabel(T("Takes"),
+                                T("Taken from the contexts below only when this context actually "
+                                  "used the device that frame."));
+        bool blocksMouse = (ctx.Blocks() & DeviceMouse) != 0;
+        bool blocksKeys = (ctx.Blocks() & DeviceKeyboard) != 0;
+        if (ImGui::Checkbox(T("Mouse"), &blocksMouse)) {
+            ctx.SetBlocks((uint8_t)((ctx.Blocks() & ~DeviceMouse) | (blocksMouse ? DeviceMouse : 0)));
+            host.SetProjectInputDirty(true);
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox(T("Keyboard"), &blocksKeys)) {
+            ctx.SetBlocks(
+                (uint8_t)((ctx.Blocks() & ~DeviceKeyboard) | (blocksKeys ? DeviceKeyboard : 0)));
+            host.SetProjectInputDirty(true);
+        }
+        Sage::UI::EndProperties();
+
+        // Контекст по умолчанию не удаляется: действия из него никуда бы не
+        // делись, а дома у них не осталось бы.
+        if (ctx.Name() != sage::input::kDefaultContext) {
+            ImGui::Separator();
+            if (EditorIcons::MenuItem("trash", T("Delete the context"))) {
+                host.ProjectInput().RemoveContext(ctx.Name());
+                if (m_selectedContext == ctx.Name()) {
+                    m_selectedContext.clear();
+                    m_selectedAction.clear();
+                }
+                host.SetProjectInputDirty(true);
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// --- СТРОКА ДЕЙСТВИЯ -----------------------------------------------------
+//
+// Две строки: имя сверху, назначенные клавиши снизу. Отвечает ровно на вопрос,
+// с которым в список и смотрят, — «что это и на чём висит». Всё остальное
+// живёт в свойствах справа, у ОДНОГО выбранного действия.
+bool InputPanel::DrawActionRow(EditorHost& host, const Action& action, bool selected) {
+    const Sage::UI::Style& ui = Sage::UI::Get();
+    const float lineH = ImGui::GetTextLineHeight();
+    const float rowH = lineH * 2.0f + ui.SpacingXS * 2.0f;
+
+    const ImVec2 rowPos = ImGui::GetCursorScreenPos();
+    const float rowW = ImGui::GetContentRegionAvail().x;
+    const bool clicked =
+        ImGui::Selectable("##row", selected, ImGuiSelectableFlags_None, ImVec2(rowW, rowH));
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float pad = ui.SpacingSM;
+    const float textY = rowPos.y + ui.SpacingXS;
+
+    // Вид и конфликт — у правого края: их читают взглядом вдоль края, а не
+    // вместе с именем.
+    const char* kindText = ActionTypeShort(action.Type());
+    const ImVec2 kindSize = ImGui::CalcTextSize(kindText);
+    const bool conflict = HasAnyConflict(host.ProjectInput(), action);
+    const char* warn = T("conflict");
+    const ImVec2 warnSize = conflict ? ImGui::CalcTextSize(warn) : ImVec2(0.0f, 0.0f);
+    const float rightLimit = rowPos.x + rowW - pad - std::max(kindSize.x, warnSize.x) - ui.SpacingSM;
+
+    dl->AddText(ImVec2(rowPos.x + pad, textY), ImGui::GetColorU32(ImGuiCol_Text),
+                action.Name().c_str());
+    dl->AddText(ImVec2(rowPos.x + rowW - pad - kindSize.x, textY),
+                ImGui::GetColorU32(ImGuiCol_TextDisabled), kindText);
+
+    // КЛАВИШИ — ГЛАВНОЕ В СТРОКЕ, и у действия без них строка обязана говорить
+    // об этом словами: пустое место читается как «просто не поместилось».
+    const std::string keys = BindingSummary(action);
+    const ImU32 keyColor = keys.empty()
+                               ? ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Warn))
+                               : ImGui::GetColorU32(ImGuiCol_Text);
+    const std::string shown =
+        Sage::UI::Truncate(keys.empty() ? T("no key assigned") : keys.c_str(),
+                           std::max(40.0f, rightLimit - rowPos.x - pad));
+    dl->AddText(ImVec2(rowPos.x + pad, textY + lineH), keyColor, shown.c_str());
+
+    if (conflict) {
+        dl->AddText(ImVec2(rowPos.x + rowW - pad - warnSize.x, textY + lineH),
+                    ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Warn)), warn);
+    }
+    return clicked;
+}
+
+// --- СПИСОК --------------------------------------------------------------
+//
+// ОДИН список на все контексты, а не колонка контекстов плюс колонка действий.
+// Контекстов в игре два-три, и отдельная колонка под них стоила целой трети
+// окна ради выбора из трёх строк. Заголовок группы отвечает на тот же вопрос и
+// стоит там, где он возникает, — над действиями, которые к нему относятся.
+void InputPanel::DrawActionList(EditorHost& host, InputSystem& input) {
+    std::vector<Context*> contexts = input.ContextsByPriority();
+
+    // ПОКАЗАННЫЙ порядок строк — для Shift-диапазона. Он зависит от поиска и
+    // свёрнутых групп, и считать диапазон по хранимому порядку значило бы
+    // выделять то, чего на экране нет.
+    std::vector<Ref> visible;
+
+    int shownTotal = 0;
+    for (Context* ctx : contexts) {
+        const std::vector<std::string> names = ctx->ActionNames();
+        std::vector<std::string> matched;
+        for (const std::string& n : names)
+            if (ContainsCaseInsensitive(n, m_search)) matched.push_back(n);
+        shownTotal += (int)matched.size();
+
+        // ПРИ ПОИСКЕ ПУСТЫЕ ГРУППЫ НЕ ПОКАЗЫВАЮТСЯ: три заголовка без строк —
+        // это три ложных следа, а не сведения о том, где искать дальше.
+        if (m_search[0] != '\0' && matched.empty()) continue;
+
+        ImGui::PushID(ctx->Name().c_str());
+        const bool collapsed = IsCollapsed(ctx->Name());
+
+        // Заголовок группы: стрелка, имя, число действий, меню настроек.
+        // Стрелка — родная ImGui: у набора значков редактора нет «вниз», а
+        // рисовать её седьмым способом ради одного заголовка незачем.
+        if (ImGui::ArrowButton("##fold", collapsed ? ImGuiDir_Right : ImGuiDir_Down))
+            ToggleCollapsed(ctx->Name());
+        Sage::UI::Tooltip(collapsed ? T("Expand") : T("Collapse"));
+        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(ctx->Name().c_str());
+
+        // ЗАГОЛОВОК — ЦЕЛЬ ПЕРЕТАСКИВАНИЯ. Перенести действие в другой контекст
+        // иначе можно было только пересоздав его там руками: имя, вид и все
+        // клавиши заново. Бросок на имя группы отвечает ровно на тот вопрос,
+        // который человек и задаёт: «пусть это живёт вон там».
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_INPUT_ACTIONS")) {
+                (void)p;
+                const int moved = MoveSelectionTo(host, input, ctx->Name());
+                host.SetStatusMessage(moved > 0
+                                          ? T("Actions moved")
+                                          : T("Nothing moved: the names are taken there"));
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        ImGui::SameLine(0.0f, Sage::UI::Get().SpacingSM);
+        Sage::UI::Badge(std::to_string((int)names.size()).c_str(), EditorTheme::Role::TextDim);
+        const float gearW = ImGui::GetFrameHeight();
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x >= gearW + 8.0f
+                            ? ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - gearW
+                            : ImGui::GetCursorPosX());
+        if (EditorIcons::IconOnlyButton("gear", T("Context settings")))
+            ImGui::OpenPopup("##ctxSettings");
+        DrawContextMenu(host, *ctx);
+
+        if (!collapsed) {
+            for (const std::string& name : matched) {
+                Action* action = ctx->Find(name);
+                if (!action) continue;
+                const Ref ref{ctx->Name(), name};
+                visible.push_back(ref);
+
+                ImGui::PushID(name.c_str());
+                if (DrawActionRow(host, *action, IsSelected(ref))) {
+                    const ImGuiIO& io = ImGui::GetIO();
+                    if (io.KeyShift) SelectRange(visible, ref);
+                    else if (io.KeyCtrl) ToggleSelected(ref);
+                    else SelectOnly(ref);
+                }
+
+                // ТАЩИМ ВЕСЬ НАБОР, а не строку под курсором: человек выделил
+                // девять боевых команд именно затем, чтобы перенести девять.
+                // Строка вне набора тащит сама себя — и заодно становится
+                // выделением, иначе перенос сработал бы не с тем, что видно.
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoPreviewTooltip)) {
+                    if (!IsSelected(ref)) SelectOnly(ref);
+                    ImGui::SetDragDropPayload("SAGE_INPUT_ACTIONS", "", 0);
+                    char label[128];
+                    std::snprintf(label, sizeof(label), T("Move: %d"), (int)m_selection.size());
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted(label);
+                    ImGui::EndTooltip();
+                    ImGui::EndDragDropSource();
+                }
+                ImGui::PopID();
+            }
+            if (matched.empty()) {
+                Sage::UI::TextSecondary("   %s", T("No actions in this context yet"));
+            }
+        }
+        ImGui::Spacing();
+        ImGui::PopID();
+    }
+
+    if (shownTotal == 0) {
+        Sage::UI::EmptyState(m_search[0] ? T("Nothing matches") : T("No actions yet"),
+                             m_search[0] ? T("Try another search.")
+                                         : T("Press «Action» above: name it, and the editor will "
+                                             "ask for the key right away."));
+    }
+
+    // DELETE РАБОТАЕТ ПО СПИСКУ, а не по всему окну: пока печатают в поиске или
+    // в поле имени, эта клавиша принадлежит полю.
+    if (!m_selection.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
+        !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+        DeleteSelection(host, input);
+    }
+}
+
+// --- КЛАВИШИ ДЕЙСТВИЯ ----------------------------------------------------
+//
+// Плитками, а не таблицей на пять колонок. Таблица отвечала на пять вопросов
+// сразу («источник, устройство, вклад, конфликт, удалить»), из которых человек
+// задаёт один: какая клавиша. Плитка показывает клавишу и значок устройства;
+// всё остальное — в меню по правой кнопке, там же, где и живёт.
+void InputPanel::DrawControls(EditorHost& host, Action& action, const std::string& contextName) {
+    const Sage::UI::Style& ui = Sage::UI::Get();
+    int removeAt = -1;
+
+    for (int i = 0; i < (int)action.Bindings().size(); ++i) {
+        const Binding& binding = action.Bindings()[(size_t)i];
+        ImGui::PushID(i);
+
+        const std::string label = binding.ToString();
+        const std::string conflict = ConflictWith(host.ProjectInput(), binding, &action);
+        // Спорная клавиша красится сразу: узнать, что она занята, надо в момент
+        // назначения, а не когда игра повела себя странно.
+        if (!conflict.empty())
+            ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
+        if (EditorIcons::Button(DeviceIcon(binding), label.c_str(),
+                                T("Click to reassign, right-click for settings"))) {
+            m_captureBinding = i;
+            m_captureOpen = true;
+            m_captureContext = contextName;
+            m_captureAction = action.Name();
+        }
+        if (!conflict.empty()) ImGui::PopStyleColor();
+
+        if (!conflict.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s %s\n%s", T("also:"), conflict.c_str(),
+                              T("The same control is bound to another action. That is legal when "
+                                "the two never run at the same time — they live in different "
+                                "contexts."));
+        }
+
+        if (Sage::UI::MenuScope bindingMenu; ImGui::BeginPopupContextItem("##bindmenu")) {
+            DrawBindingTuning(host, action, i);
+            if (EditorIcons::MenuItem("trash", T("Remove this control"))) removeAt = i;
+            ImGui::EndPopup();
+        }
+
+        // Плитки идут в строку, пока есть место: у действия их обычно две-три
+        // (клавиша и кнопка геймпада), и столбец из двух строк занимал бы
+        // высоту ради ничего.
+        const float next = ImGui::GetItemRectMax().x + ui.SpacingXS + 90.0f;
+        if (next < ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
+            ImGui::SameLine(0.0f, ui.SpacingXS);
+        ImGui::PopID();
+    }
+
+    if (action.Bindings().empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
+        ImGui::TextUnformatted(T("No key assigned — the action can never fire"));
+        ImGui::PopStyleColor();
     }
 
     ImGui::Spacing();
-    if (EditorIcons::Button("plus", T("Control"), T("Press a key, mouse button or gamepad button"))) {
+    if (EditorIcons::Button("plus", T("Key"), T("Press a key, mouse button or gamepad button"))) {
         m_captureBinding = -1;   // −1 — добавить новую, а не заменить
         m_captureOpen = true;
         m_captureContext = contextName;
@@ -310,27 +874,14 @@ void InputPanel::DrawBindingsSection(EditorHost& host, Action& action, const std
     // Оси назначаются списком, а не ловлей: курсор шевелится всегда, и первая
     // же дрожь руки заняла бы поле (см. BindingFromEvent).
     if (action.Type() != ActionType::Digital) {
-        ImGui::SameLine();
+        ImGui::SameLine(0.0f, ui.SpacingXS);
         if (EditorIcons::Button("plus", T("Axis..."), T("A stick, trigger or the mouse as an axis")))
             ImGui::OpenPopup("##axisMenu");
-        // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-        // момент открытия (см. Sage::UI::MenuScope).
         if (Sage::UI::MenuScope axisMenu; ImGui::BeginPopup("##axisMenu")) {
-            struct AxisItem { const char* Label; Binding (*Make)(); };
-            static const AxisItem kAxes[] = {
-                {"MOUSE_X", [] { return Binding::MouseAxisX(); }},
-                {"MOUSE_Y", [] { return Binding::MouseAxisY(); }},
-                {"PAD_LEFT_X", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::LeftX); }},
-                {"PAD_LEFT_Y", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::LeftY); }},
-                {"PAD_RIGHT_X", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightX); }},
-                {"PAD_RIGHT_Y", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightY); }},
-                {"PAD_LEFT_TRIGGER", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::LeftTrigger); }},
-                {"PAD_RIGHT_TRIGGER", [] { return Binding::OfPadAxis(sage::input::GamepadAxis::RightTrigger); }},
-            };
             for (const AxisItem& item : kAxes) {
-                // Мышь и геймпад — разные рисунки: список из восьми
-                // ПРОПИСНЫХ имён вроде «PAD_RIGHT_TRIGGER» читается по буквам,
-                // а по рисунку видно семейство ещё до чтения.
+                // Мышь и геймпад — разные рисунки: список из восьми ПРОПИСНЫХ
+                // имён читается по буквам, а по рисунку видно семейство ещё до
+                // чтения.
                 const char* icon = std::strncmp(item.Label, "MOUSE", 5) == 0 ? "select" : "pilot";
                 if (!EditorIcons::MenuItem(icon, item.Label)) continue;
                 Binding b = item.Make();
@@ -344,9 +895,50 @@ void InputPanel::DrawBindingsSection(EditorHost& host, Action& action, const std
             ImGui::EndPopup();
         }
     }
+
+    if (removeAt >= 0) {
+        action.RemoveBindingAt(removeAt);
+        host.SetProjectInputDirty(true);
+    }
 }
 
-void InputPanel::DrawBehaviorSection(EditorHost& host, Action& action) {
+// Вклад и половина вектора — в меню у плитки. У кнопочного действия их нет
+// вовсе: «вклад +1» у кнопки прыжка — поле, которое нечем объяснить.
+void InputPanel::DrawBindingTuning(EditorHost& host, Action& action, int index) {
+    if (action.Type() == ActionType::Digital) return;
+    if (index < 0 || index >= (int)action.Bindings().size()) return;
+
+    Sage::UI::MenuSection(T("This control"), true);
+    Sage::UI::BeginProperties("tuning");
+    Sage::UI::PropertyLabel(T("Contribution"),
+                            T("Contribution to the value: W gives +1, S gives -1"));
+    ImGui::SetNextItemWidth(120.0f);
+    float scale = action.Bindings()[(size_t)index].Scale;
+    if (ImGui::DragFloat("##scale", &scale, 0.05f, -4.0f, 4.0f, "%.2f")) {
+        action.MutableBindings()[(size_t)index].Scale = scale;
+        host.SetProjectInputDirty(true);
+    }
+    if (action.Type() == ActionType::Vector) {
+        Sage::UI::PropertyLabel(T("Axis"), T("Which half of the vector this source feeds"));
+        ImGui::SetNextItemWidth(120.0f);
+        int axis = (action.Bindings()[(size_t)index].Axis == Component::Y) ? 1 : 0;
+        const char* axes[] = {T("X"), T("Y")};
+        if (ImGui::Combo("##axis", &axis, axes, 2)) {
+            action.MutableBindings()[(size_t)index].Axis = axis ? Component::Y : Component::X;
+            host.SetProjectInputDirty(true);
+        }
+    }
+    Sage::UI::EndProperties();
+    ImGui::Separator();
+}
+
+// --- ПОВЕДЕНИЕ -----------------------------------------------------------
+//
+// Свёрнуто по умолчанию, и это главное решение раздела: девять человек из
+// десяти приходят сюда поменять клавишу, а не мёртвую зону. Раньше эти поля
+// стояли на экране всегда — то есть человек, которому нужна была одна кнопка,
+// каждый раз читал десяток чужих настроек, чтобы убедиться, что они не его.
+void InputPanel::DrawBehavior(EditorHost& host, Action& action) {
     sage::input::ActionSettings& s = action.Settings();
     Sage::UI::BeginProperties("behavior");
 
@@ -425,25 +1017,34 @@ void InputPanel::DrawBehaviorSection(EditorHost& host, Action& action) {
     Sage::UI::EndProperties();
 }
 
-bool InputPanel::DrawActionDetail(EditorHost& host, Action& action, const std::string& contextName) {
+// --- СВОЙСТВА ДЕЙСТВИЯ ---------------------------------------------------
+bool InputPanel::DrawActionProperties(EditorHost& host, Action& action,
+                                      const std::string& contextName) {
     bool deleteRequested = false;
 
-    // --- Шапка: имя, вид, удаление. Вид — здесь, а не в «Поведении»: от него
-    // зависит, какие поля вообще покажутся ниже, и увидеть его первым важнее,
-    // чем найти в списке настроек. ---
+    // Шапка: имя и контекст, в котором действие живёт. Контекст написан здесь,
+    // потому что свойства открыты по щелчку в длинном списке, и «а где это
+    // было» — вопрос, который возникает сразу.
     ImGui::TextUnformatted(action.Name().c_str());
-    // Кнопка-значок, а не «значок + подпись»: у той ширина зависит от шрифта и
-    // языка перевода, и точный отступ под неё посчитать нельзя было бы, не
-    // нарисовав её дважды. У кнопки-значка ширина ВСЕГДА равна высоте строки.
     const float delW = ImGui::GetFrameHeight();
     ImGui::SameLine(ImGui::GetContentRegionAvail().x >= delW + 8.0f
                         ? ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - delW
                         : ImGui::GetCursorPosX());
-    if (EditorIcons::IconOnlyButton("trash", T("Delete this action")))
-        deleteRequested = true;
+    if (EditorIcons::IconOnlyButton("trash", T("Delete this action"))) deleteRequested = true;
+    Sage::UI::TextSecondary("%s", contextName.c_str());
 
+    Sage::UI::Separator();
+
+    // КЛАВИШИ — ПЕРВЫМИ. За ними сюда и приходят.
+    Sage::UI::TextSecondary("%s", T("Keys"));
+    ImGui::Spacing();
+    DrawControls(host, action, contextName);
+
+    Sage::UI::Separator();
     Sage::UI::BeginProperties("kind");
-    Sage::UI::PropertyLabel(T("Kind"));
+    Sage::UI::PropertyLabel(T("Kind"),
+                            T("A button answers yes/no, an axis gives -1..1, a vector gives two "
+                              "axes at once — movement and look."));
     ImGui::SetNextItemWidth(-1);
     int type = (int)action.Type();
     const char* types[] = {ActionTypeLabel(ActionType::Digital), ActionTypeLabel(ActionType::Axis),
@@ -454,320 +1055,95 @@ bool InputPanel::DrawActionDetail(EditorHost& host, Action& action, const std::s
     }
     Sage::UI::EndProperties();
 
-    Sage::UI::Separator();
-
-    if (Sage::UI::Section(T("Controls"), true)) DrawBindingsSection(host, action, contextName);
-    if (Sage::UI::Section(T("Behavior"), true)) DrawBehaviorSection(host, action);
+    // Свёрнуто: см. DrawBehavior — это настройки для тех, кто их ищет.
+    if (Sage::UI::Section(T("Behavior"), false)) DrawBehavior(host, action);
 
     return deleteRequested;
-}
-
-void InputPanel::DrawContextsColumn(EditorHost& host, InputSystem& input) {
-    std::vector<Context*> contexts = input.ContextsByPriority();
-    if (m_selectedContext.empty() && !contexts.empty()) m_selectedContext = contexts.front()->Name();
-
-    ImGui::BeginChild("##contexts", ImVec2(200, 0), true);
-    Sage::UI::TextSecondary("%s", T("Contexts"));
-    Sage::UI::Tooltip(T("One key means different things in the game, in the inventory and in a "
-                        "dialogue. A context with a higher priority that used a device takes it "
-                        "away from the ones below — a click on a menu button must not fire the "
-                        "weapon."));
-    ImGui::Separator();
-    for (Context* ctx : contexts) {
-        const bool selected = (ctx->Name() == m_selectedContext);
-        ImGui::PushID(ctx->Name().c_str());
-        if (ImGui::Selectable(ctx->Name().c_str(), selected)) {
-            if (ctx->Name() != m_selectedContext) m_selectedAction.clear();
-            m_selectedContext = ctx->Name();
-        }
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x >= 24.0f
-                            ? ImGui::GetWindowContentRegionMax().x - 28.0f
-                            : ImGui::GetCursorPosX());
-        Sage::UI::Badge(std::to_string(ctx->Priority()).c_str(), EditorTheme::Role::TextDim);
-        ImGui::PopID();
-    }
-    ImGui::Separator();
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##newContext", T("new context"), m_newContextName,
-                             sizeof(m_newContextName));
-    // Приоритет — подписан ВИДИМО, а не только подсказкой при наведении: число
-    // без подписи рядом с полем имени читается как чужая, необъяснённая деталь.
-    ImGui::AlignTextToFramePadding();
-    Sage::UI::TextSecondary("%s", T("Priority"));
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(-1);
-    ImGui::DragInt("##prio", &m_newContextPriority, 1.0f, -1000, 1000);
-    Sage::UI::Tooltip(T("Higher priority takes a device away from contexts below it."));
-    if (EditorIcons::Button("plus", T("Context"), T("A new input context")) &&
-        m_newContextName[0] != '\0') {
-        input.CreateContext(m_newContextName, m_newContextPriority);
-        m_selectedContext = m_newContextName;
-        m_selectedAction.clear();
-        m_newContextName[0] = '\0';
-        host.SetProjectInputDirty(true);
-    }
-    ImGui::EndChild();
-}
-
-void InputPanel::DrawActionsColumn(EditorHost& host, Context& ctx) {
-    // Первое действие контекста выбирается само: иначе, открыв панель, человек
-    // упирается в пустую правую колонку и не знает, с чего вообще начинать
-    // смотреть, — надо ДОГАДАТЬСЯ, что щёлкнуть по списку слева.
-    if (m_selectedAction.empty() || !ctx.Find(m_selectedAction)) {
-        const std::vector<std::string> names = ctx.ActionNames();
-        if (!names.empty()) m_selectedAction = names.front();
-    }
-
-    ImGui::BeginChild("##actionsList", ImVec2(290, 0), true);
-
-    ImGui::TextUnformatted(ctx.Name().c_str());
-    Sage::UI::BeginProperties("ctxHeader");
-    Sage::UI::PropertyLabel(T("Priority"),
-                           T("Higher priority takes a device away from contexts below it."));
-    ImGui::SetNextItemWidth(-1);
-    int priority = ctx.Priority();
-    if (ImGui::DragInt("##priority", &priority, 1.0f, -1000, 1000)) {
-        ctx.SetPriority(priority);
-        host.SetProjectInputDirty(true);
-    }
-    Sage::UI::PropertyLabel(T("Takes"),
-                           T("Taken from the contexts below only when this context actually used "
-                             "the device that frame."));
-    bool blocksMouse = (ctx.Blocks() & DeviceMouse) != 0;
-    bool blocksKeys = (ctx.Blocks() & DeviceKeyboard) != 0;
-    if (ImGui::Checkbox(T("Mouse"), &blocksMouse)) {
-        ctx.SetBlocks((uint8_t)((ctx.Blocks() & ~DeviceMouse) | (blocksMouse ? DeviceMouse : 0)));
-        host.SetProjectInputDirty(true);
-    }
-    ImGui::SameLine();
-    if (ImGui::Checkbox(T("Keyboard"), &blocksKeys)) {
-        ctx.SetBlocks((uint8_t)((ctx.Blocks() & ~DeviceKeyboard) | (blocksKeys ? DeviceKeyboard : 0)));
-        host.SetProjectInputDirty(true);
-    }
-    Sage::UI::EndProperties();
-
-    if (ctx.Name() != sage::input::kDefaultContext) {
-        if (Sage::UI::Button(T("Delete context"), Sage::UI::ButtonStyle::Danger, ImVec2(-1, 0))) {
-            host.ProjectInput().RemoveContext(ctx.Name());
-            m_selectedContext.clear();
-            m_selectedAction.clear();
-            host.SetProjectInputDirty(true);
-            ImGui::EndChild();
-            return;
-        }
-    }
-
-    ImGui::Separator();
-    Sage::UI::SearchField("##actionFilter", m_actionFilter, sizeof(m_actionFilter), T("Search actions..."));
-
-    // --- Список действий: ВЫБОР, а не раскрытие. Раньше каждое действие было
-    // раскрывающимся узлом со всеми настройками внутри — раскрыл два и уже не
-    // видно, какое поле чьё. Здесь строка отвечает только на вопрос «что это и
-    // на чём висит», а настройки живут в соседней колонке, ровно у ОДНОГО
-    // выбранного действия за раз. ---
-    //
-    // Высота — с ОТРИЦАТЕЛЬНЫМ запасом снизу: три строки «новое действие» идут
-    // ПОСЛЕ этого дочернего окна в том же родителе, а окно нулевой высоты
-    // забрало бы весь остаток места и вытолкнуло их за нижний край панели —
-    // именно так это и не показывалось до правки.
-    const float newActionRowH = ImGui::GetFrameHeightWithSpacing() * 3.4f;
-    ImGui::BeginChild("##actionRows", ImVec2(0, -newActionRowH));
-    const float lineH = ImGui::GetTextLineHeight();
-    const float rowH = lineH * 2.0f + Sage::UI::Get().SpacingXS * 2.0f;
-    const std::vector<std::string> allNames = ctx.ActionNames();
-    const bool anyMatch = std::any_of(allNames.begin(), allNames.end(), [&](const std::string& n) {
-        return ContainsCaseInsensitive(n, m_actionFilter);
-    });
-    if (!anyMatch) {
-        Sage::UI::EmptyState(allNames.empty() ? T("No actions yet") : T("Nothing matches"),
-                             allNames.empty() ? T("Add one below.") : T("Try another search."));
-    }
-    for (const std::string& name : allNames) {
-        if (!ContainsCaseInsensitive(name, m_actionFilter)) continue;
-        Action* action = ctx.Find(name);
-        if (!action) continue;
-        ImGui::PushID(name.c_str());
-
-        std::string summary;
-        for (const Binding& b : action->Bindings()) {
-            if (!summary.empty()) summary += ", ";
-            summary += b.ToString();
-        }
-        if (summary.empty()) summary = T("no controls");
-
-        const ImVec2 rowPos = ImGui::GetCursorScreenPos();
-        const float rowW = ImGui::GetContentRegionAvail().x;
-        const bool selected = (name == m_selectedAction);
-        if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_None, ImVec2(rowW, rowH)))
-            m_selectedAction = name;
-
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float pad = Sage::UI::Get().SpacingSM;
-        dl->AddText(ImVec2(rowPos.x + pad, rowPos.y + 1.0f),
-                   ImGui::GetColorU32(ImGuiCol_Text), name.c_str());
-        dl->AddText(ImVec2(rowPos.x + pad, rowPos.y + lineH + 2.0f),
-                   ImGui::GetColorU32(ImGuiCol_TextDisabled), summary.c_str());
-
-        // Бейдж вида действия и предупреждение о конфликте — у правого края,
-        // видно СРАЗУ, без раскрытия.
-        const char* kindText = ActionTypeShort(action->Type());
-        const ImVec2 kindSize = ImGui::CalcTextSize(kindText);
-        float rightX = rowPos.x + rowW - pad - kindSize.x;
-        dl->AddText(ImVec2(rightX, rowPos.y + 1.0f),
-                   ImGui::GetColorU32(ImGuiCol_TextDisabled), kindText);
-        if (HasAnyConflict(host.ProjectInput(), *action)) {
-            const char* warn = T("conflict");
-            const ImVec2 warnSize = ImGui::CalcTextSize(warn);
-            dl->AddText(ImVec2(rowPos.x + rowW - pad - warnSize.x, rowPos.y + lineH + 2.0f),
-                       ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Warn)), warn);
-        }
-        Sage::UI::Tooltip(name.c_str());
-
-        ImGui::PopID();
-    }
-    ImGui::EndChild();
-
-    ImGui::Separator();
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##newAction", T("new action"), m_newActionName, sizeof(m_newActionName));
-    ImGui::SetNextItemWidth(-1);
-    const char* types[] = {ActionTypeLabel(ActionType::Digital), ActionTypeLabel(ActionType::Axis),
-                           ActionTypeLabel(ActionType::Vector)};
-    ImGui::Combo("##newActionType", &m_newActionType, types, 3);
-    if (EditorIcons::Button("plus", T("Action"), T("A new action in this context")) &&
-        m_newActionName[0] != '\0') {
-        ctx.Add(m_newActionName, (ActionType)m_newActionType);
-        m_selectedAction = m_newActionName;
-        m_newActionName[0] = '\0';
-        host.SetProjectInputDirty(true);
-    }
-
-    ImGui::EndChild();
 }
 
 void InputPanel::Draw(EditorHost& host, bool& open) {
     if (!open) return;
 
-    ImGui::SetNextWindowSize(ImVec2(1010, 640), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(720, 420), ImVec2(FLT_MAX, FLT_MAX));
-    if (!ImGui::Begin(EditorIcons::WindowTitle("keyboard", T("Controls"), "Controls").c_str(), &open)) {
+    ImGui::SetNextWindowSize(ImVec2(940, 620), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(640, 380), ImVec2(FLT_MAX, FLT_MAX));
+    if (!ImGui::Begin(EditorIcons::WindowTitle("keyboard", T("Controls"), "Controls").c_str(),
+                      &open)) {
         ImGui::End();
         return;
     }
 
     InputSystem& input = host.ProjectInput();
 
-    // --- Верхняя панель: сохранение и типовая раскладка. Пояснение — одной
-    // строкой, а не абзацем: подробности живут в подсказках на местах, а не в
-    // тексте, который читают один раз и потом прокручивают мимо. ---
-    Sage::UI::TextSecondary("%s", T("Actions of the game and what fires them — the game code asks "
-                                    "for the action, never the key."));
+    // Контекст по умолчанию для новых действий — тот, в котором человек сейчас
+    // смотрит: чаще всего заводят соседа тому, на что смотрят.
+    if (m_newActionContext.empty()) m_newActionContext = sage::input::kDefaultContext;
 
-    if (Sage::UI::Button(T("Save to project"), Sage::UI::ButtonStyle::Primary)) {
-        if (host.SaveProjectInput()) host.SetStatusMessage(T("Controls saved: input.sageinput"));
-        else host.SetStatusMessage(T("Controls not saved — no project open?"));
-    }
-    ImGui::SameLine();
-    if (Sage::UI::Button(T("Reload"), Sage::UI::ButtonStyle::Secondary)) {
-        if (host.ReloadProjectInput()) host.SetStatusMessage(T("Controls reloaded from disk"));
-    }
-    ImGui::SameLine();
-    if (Sage::UI::Button(T("Standard layout..."), Sage::UI::ButtonStyle::Secondary))
-        ImGui::OpenPopup("##presetMenu");
-    if (host.ProjectInputDirty()) {
-        ImGui::SameLine();
-        Sage::UI::Badge(T("unsaved changes"), EditorTheme::Role::Warn);
-    }
+    DrawHeader(host, input);
+    Sage::UI::Separator();
 
-    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
-    // держится в границах if — иначе деструктор снялся бы после EndChild()
-    // ниже, и ImGui решил бы, что стиль не сняли вовсе.
-    if (Sage::UI::MenuScope presetMenu; ImGui::BeginPopup("##presetMenu")) {
-        Sage::UI::TextSecondary("%s", T("Adds the usual set of actions. Existing ones are left alone."));
-        ImGui::Separator();
-        if (EditorIcons::MenuItem("pilot", T("First-person / third-person game"))) {
-            Action& move = input.Register("Move", ActionType::Vector);
-            if (move.Bindings().empty()) {
-                move.BindVector("W", "S", "A", "D");
-                move.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::LeftX).On(Component::X));
-                move.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::LeftY).On(Component::Y));
-            }
-            Action& look = input.Register("Look", ActionType::Vector);
-            if (look.Bindings().empty()) {
-                look.Bind(Binding::MouseAxisX().On(Component::X));
-                look.Bind(Binding::MouseAxisY().On(Component::Y));
-                look.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::RightX).On(Component::X));
-                look.Bind(Binding::OfPadAxis(sage::input::GamepadAxis::RightY).On(Component::Y));
-                // Обзору сглаживание вредит, а мёртвая зона мыши не нужна.
-                look.Settings().Smoothing = 0.0f;
-                look.Settings().Normalize = false;
-            }
-            struct Simple { const char* Name; const char* Key; const char* Pad; };
-            static const Simple kSimple[] = {
-                {"Jump", "SPACE", "PAD_A"},      {"Sprint", "LEFT_SHIFT", "PAD_LEFT_THUMB"},
-                {"Crouch", "LEFT_CONTROL", "PAD_B"}, {"Interact", "E", "PAD_X"},
-                {"Attack", "MOUSE_LEFT", "PAD_RB"},  {"Aim", "MOUSE_RIGHT", "PAD_LB"},
-                {"Reload", "R", "PAD_Y"},        {"Pause", "ESCAPE", "PAD_START"},
-                {"Inventory", "TAB", "PAD_BACK"},
-            };
-            for (const Simple& item : kSimple) {
-                Action& a = input.Register(item.Name, ActionType::Digital);
-                if (!a.Bindings().empty()) continue;
-                a.Bind(item.Key);
-                a.Bind(item.Pad);
-            }
-            host.SetProjectInputDirty(true);
-            host.SetStatusMessage(T("Standard layout added"));
+    // ПЕРВОЕ ДЕЙСТВИЕ ВЫБИРАЕТСЯ САМО. Иначе, открыв окно, человек видит
+    // список слева и пустоту справа — и обязан ДОГАДАТЬСЯ, что по списку надо
+    // щёлкнуть, чтобы окно показало хоть что-то.
+    if (m_selection.empty()) {
+        for (Context* c : input.ContextsByPriority()) {
+            const std::vector<std::string>& names = c->ActionNames();
+            if (names.empty()) continue;
+            SelectOnly({c->Name(), names.front()});
+            break;
         }
-        ImGui::EndPopup();
     }
 
-    ImGui::Separator();
+    // --- ДВЕ КОЛОНКИ: список слева, свойства выбранного справа --------------
+    //
+    // Третьей колонки (контекстов) больше нет: контекстов в игре два-три, и
+    // отдельный столбец под выбор из трёх строк стоил трети окна. Теперь они —
+    // заголовки групп в том же списке.
+    const float sideW = std::floor(340.0f * Sage::UI::Scale());
+    const float listW = std::max(240.0f, ImGui::GetContentRegionAvail().x - sideW -
+                                             Sage::UI::Get().SpacingSM);
 
-    // --- Три колонки: контексты -> действия выбранного контекста ->
-    // подробности выбранного действия. ---
-    DrawContextsColumn(host, input);
-    ImGui::SameLine();
+    ImGui::BeginChild("##list", ImVec2(listW, 0), true);
+    DrawActionList(host, input);
+    ImGui::EndChild();
 
-    Context* ctx = input.FindContext(m_selectedContext);
-    if (!ctx) {
-        ImGui::BeginChild("##noContext", ImVec2(0, 0), true);
-        Sage::UI::EmptyState(T("No context selected"), T("Pick one on the left, or create a new one."));
-        ImGui::EndChild();
-        ImGui::End();
-        return;
-    }
-    DrawActionsColumn(host, *ctx);
-    ImGui::SameLine();
+    ImGui::SameLine(0.0f, Sage::UI::Get().SpacingSM);
 
-    ImGui::BeginChild("##actionDetail", ImVec2(0, 0), true);
-    Action* action = m_selectedAction.empty() ? nullptr : ctx->Find(m_selectedAction);
-    if (!action) {
-        Sage::UI::EmptyState(T("No action selected"),
-                             T("Pick one from the list, or create a new one on the left."));
-    } else if (DrawActionDetail(host, *action, ctx->Name())) {
-        ctx->Remove(m_selectedAction);
-        m_selectedAction.clear();
-        host.SetProjectInputDirty(true);
+    ImGui::BeginChild("##props", ImVec2(0, 0), true);
+    if (m_selection.size() > 1) {
+        DrawMultiSelection(host, input);
+    } else {
+        Context* ctx = m_selectedContext.empty() ? nullptr : input.FindContext(m_selectedContext);
+        Action* action = ctx && !m_selectedAction.empty() ? ctx->Find(m_selectedAction) : nullptr;
+        if (!action) {
+            Sage::UI::EmptyState(T("No action selected"),
+                                 T("Pick one on the left — its keys and settings appear here."));
+        } else if (DrawActionProperties(host, *action, ctx->Name())) {
+            ctx->Remove(m_selectedAction);
+            m_selection.clear();
+            m_selectedAction.clear();
+            host.SetProjectInputDirty(true);
+        }
     }
     ImGui::EndChild();
 
-    // --- Ловля назначаемой клавиши ------------------------------------------
+    // --- Окна поверх ---------------------------------------------------------
+    DrawNewActionModal(host, input);
+    DrawNewContextModal(host, input);
+
     Binding caught;
     if (DrawCaptureModal(host, caught)) {
         Context* target = input.FindContext(m_captureContext);
-        Action* target_action = target ? target->Find(m_captureAction) : nullptr;
-        if (target_action) {
-            if (m_captureBinding >= 0 && m_captureBinding < (int)target_action->Bindings().size()) {
+        Action* targetAction = target ? target->Find(m_captureAction) : nullptr;
+        if (targetAction) {
+            if (m_captureBinding >= 0 && m_captureBinding < (int)targetAction->Bindings().size()) {
                 // Переназначение сохраняет вклад и половину вектора: человек
                 // менял КЛАВИШУ, а не роль привязки в оси.
-                const Binding& old = target_action->Bindings()[(size_t)m_captureBinding];
+                const Binding& old = targetAction->Bindings()[(size_t)m_captureBinding];
                 caught.Scale = old.Scale;
                 caught.Axis = old.Axis;
-                target_action->MutableBindings()[(size_t)m_captureBinding] = caught;
+                targetAction->MutableBindings()[(size_t)m_captureBinding] = caught;
             } else {
-                target_action->Bind(caught);
+                targetAction->Bind(caught);
             }
             host.SetProjectInputDirty(true);
         }

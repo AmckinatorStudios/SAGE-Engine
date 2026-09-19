@@ -6990,6 +6990,19 @@ bool EditorLayer::SelfTestTools() {
             } else if (mapping.Find("Move")->Type() != in::ActionType::Vector) {
                 LOG_ERROR("Editor") << "SELFTEST: вид действия Move не пережил сохранение";
                 ok = false;
+            } else if (!mapping.MoveAction(in::kDefaultContext, "Inventory", "Jump") ||
+                       !SaveProjectInput() || !ReloadProjectInput() ||
+                       !mapping.FindContext("Inventory") ||
+                       !mapping.FindContext("Inventory")->Has("Jump") ||
+                       mapping.FindContext("Inventory")->Find("Jump")->Bindings().size() != 2 ||
+                       mapping.FindContext(in::kDefaultContext)->Has("Jump")) {
+                // ПЕРЕНОС ДЕЙСТВИЯ В ДРУГОЙ КОНТЕКСТ — и он обязан пережить
+                // файл. Половина раскладки переезжает в инвентарь уже после
+                // того, как её завели, а до этого перенести действие можно было
+                // только пересоздав его руками: имя, вид и все клавиши заново.
+                LOG_ERROR("Editor") << "SELFTEST: перенос действия между контекстами не пережил "
+                                       "сохранение";
+                ok = false;
             } else if (!mapping.FindContext("Inventory") ||
                        mapping.FindContext("Inventory")->Priority() != 50) {
                 LOG_ERROR("Editor") << "SELFTEST: контекст Inventory не пережил сохранение";

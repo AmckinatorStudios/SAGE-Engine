@@ -116,6 +116,30 @@ bool InputSystem::RemoveContext(const std::string& name) {
     return m_contexts.size() != before;
 }
 
+bool InputSystem::MoveAction(const std::string& fromContext, const std::string& toContext,
+                             const std::string& action) {
+    if (fromContext == toContext) return false;
+    Context* from = FindContext(fromContext);
+    Context* to = FindContext(toContext);
+    if (!from || !to) return false;
+    const Action* src = from->Find(action);
+    if (!src) return false;
+    // Имя занято в цели — отказ. Молчаливое слияние двух действий в одно
+    // потеряло бы одно из них (см. заголовок).
+    if (to->Has(action)) return false;
+
+    // Копируем ДО удаления: src указывает внутрь контекста-источника.
+    const ActionType type = src->Type();
+    const ActionSettings settings = src->Settings();
+    const std::vector<Binding> bindings = src->Bindings();
+
+    Action& dst = to->Add(action, type);
+    dst.Settings() = settings;
+    for (const Binding& b : bindings) dst.Bind(b);
+    from->Remove(action);
+    return true;
+}
+
 void InputSystem::SetContextEnabled(const std::string& name, bool enabled) {
     if (Context* ctx = FindContext(name)) ctx->SetEnabled(enabled);
 }

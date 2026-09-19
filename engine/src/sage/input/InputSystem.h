@@ -122,6 +122,20 @@ public:
     Context& CreateContext(const std::string& name, int priority);
     Context* FindContext(const std::string& name);
     bool RemoveContext(const std::string& name);
+
+    // ПЕРЕНЕСТИ ДЕЙСТВИЕ В ДРУГОЙ КОНТЕКСТ, не потеряв ничего: вид, настройки
+    // и все привязки едут с ним.
+    //
+    // В движке, а не в редакторе: контекст действия — часть раскладки, и
+    // менять его вправе не только человек мышью, но и скрипт, собирающий
+    // раскладку из кусков. Своя копия этого в редакторе означала бы, что о
+    // правилах переноса знают двое, и однажды они разойдутся.
+    //
+    // НЕ ПЕРЕНОСИТ, если в цели уже есть действие с таким именем: Context::Add
+    // вернул бы СУЩЕСТВУЮЩЕЕ действие, и перенос дописал бы привязки к чужому,
+    // потеряв одно из двух молча. Отказ виден по возвращаемому значению.
+    bool MoveAction(const std::string& fromContext, const std::string& toContext,
+                    const std::string& action);
     void SetContextEnabled(const std::string& name, bool enabled);
     bool ContextEnabled(const std::string& name) const;
     // Контексты в порядке убывания приоритета — тот самый порядок, в котором

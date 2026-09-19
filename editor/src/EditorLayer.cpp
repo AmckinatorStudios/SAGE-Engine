@@ -520,7 +520,7 @@ void EditorLayer::OnAttach() {
         static const char* const kHeadless[] = {
             "SAGE_SCREENSHOT_AT_FRAME", "SAGE_EDITOR_SHOW_SETTINGS", "SAGE_EDITOR_SHOW_PROFILER",
             "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
-            "SAGE_EDITOR_SHOW_ANIMATION",
+            "SAGE_EDITOR_SHOW_ANIMATION", "SAGE_EDITOR_SHOW_INPUT", "SAGE_EDITOR_INPUT_DEMO",
             "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_UI_PREVIEW",    "SAGE_EDITOR_COLLIDER_MODE",
             "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
@@ -552,6 +552,29 @@ void EditorLayer::OnAttach() {
         m_animation.RequestFocus(60);
     }
     if (std::getenv("SAGE_EDITOR_ICON_SHEET")) { m_headlessProject = true; m_showIconSheet = true; }
+    // Окно управления при старте — для скриншот-проверок: раскладку смотрят
+    // глазами, и открыть панель в прогоне больше нечем.
+    if (std::getenv("SAGE_EDITOR_SHOW_INPUT")) {
+        m_headlessProject = true;
+        m_panels[EditorPanel::Input] = true;
+        // Раскладка для снимка: пустое окно управления показывает только
+        // подсказку «действий пока нет», а проверять надо СПИСОК.
+        if (std::getenv("SAGE_EDITOR_INPUT_DEMO")) {
+            sage::input::InputSystem& in = m_projectInput;
+            sage::input::Action& move =
+                in.Register("Move", sage::input::ActionType::Vector);
+            move.BindVector("W", "S", "A", "D");
+            sage::input::Action& look =
+                in.Register("Look", sage::input::ActionType::Vector);
+            look.Bind(sage::input::Binding::MouseAxisX());
+            in.Register("Jump", sage::input::ActionType::Digital).Bind("SPACE");
+            in.Register("Attack", sage::input::ActionType::Digital).Bind("MOUSE_LEFT");
+            in.Register("Interact", sage::input::ActionType::Digital).Bind("E");
+            sage::input::Context& ui = in.CreateContext("Inventory", 20);
+            ui.Add("Close", sage::input::ActionType::Digital).Bind("ESCAPE");
+            ui.Add("Take", sage::input::ActionType::Digital).Bind("E");
+        }
+    }
     // Редактор интерфейса открывается в прогоне самопроверки нарочно: он живёт
     // ОТДЕЛЬНЫМ окном системы (см. PanelWindows.h), а закрытая панель окна не
     // заводит — проверять в кадре было бы нечего. На снимок главного окна это
