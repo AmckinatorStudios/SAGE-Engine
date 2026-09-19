@@ -81,6 +81,16 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, boo
         throw std::runtime_error("Font: не удалось разобрать шрифт: " + path);
     }
 
+    // ЧИСЛО ГЛИФОВ — ПЕРВОЕ, ЧТО ОБЯЗАНО БЫТЬ ОСМЫСЛЕННЫМ. stbtt_InitFont
+    // разбирает заголовки и не проверяет их на здравый смысл: у обрезанной или
+    // побитой копии он честно скажет «годен», а упадёт всё позже — в
+    // растеризаторе, по указателю в никуда. Отказ здесь не потеря: у
+    // вызывающего есть другие кандидаты, а в самом конце текст рисуется через
+    // stb_easy_font.
+    if (info.numGlyphs <= 0) {
+        throw std::runtime_error("Font: в шрифте нет глифов: " + path);
+    }
+
     auto font = std::unique_ptr<Font>(new Font());
     font->m_pixelHeight = pixelHeight;
     font->m_atlasW = (float)kAtlasW;
@@ -103,7 +113,12 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, boo
     // палки. Мип-уровни это чинят (усреднение вместо пропуска), но требуют
     // запаса вокруг глифа, иначе на дальних уровнях соседние глифы перетекают
     // друг в друга.
-    std::vector<unsigned char> atlas(kAtlasW * kAtlasH, 0);
+    //
+    // ЗАПАС В КОНЦЕ БУФЕРА. stb пишет глиф шириной «rect минус передискретизация
+    // плюс один», то есть на последнем глифе атласа может заехать за край — и
+    // это уже не мусор на картинке, а запись за пределы выделенной памяти.
+    // Лишняя строка стоит килобайт и превращает падение в невидимую мелочь.
+    std::vector<unsigned char> atlas((size_t)kAtlasW * (kAtlasH + 1), 0);
     stbtt_pack_context pc;
     if (!stbtt_PackBegin(&pc, atlas.data(), kAtlasW, kAtlasH, 0, kGlyphPadding, nullptr)) {
         throw std::runtime_error("Font: stbtt_PackBegin failed");
@@ -120,7 +135,13 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, boo
         ranges[r].num_chars = kRanges[r].count;
         ranges[r].chardata_for_range = packed[r].data();
     }
-    stbtt_PackFontRanges(&pc, ttf.data(), 0, ranges.data(), (int)ranges.size());
+    if (!stbtt_PackFontRanges(&pc, ttf.data(), 0, ranges.data(), (int)ranges.size())) {
+        // Не все глифы влезли — это не отказ: часть букв просто не попадёт в
+        // атлас и уйдёт на фолбэк '?'. Но сказать об этом надо: «половина
+        // текста вопросительными знаками» иначе выглядит поломкой движка.
+        LOG_WARN("Font") << "Не все глифы уместились в атлас " << kAtlasW << "x" << kAtlasH
+                         << " (" << path << ")";
+    }
     stbtt_PackEnd(&pc);
 
     // Переносим packedchar → наши Glyph (метрики + UV).

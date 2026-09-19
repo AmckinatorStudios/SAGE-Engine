@@ -1,3 +1,4 @@
+#include "sage/core/Paths.h"
 #include "ModelLoader.h"
 
 #include "sage/assets/import/Importer.h"
@@ -17,8 +18,13 @@
 
 namespace ModelLoader {
 
-std::string ImportSidecarPath(const std::string& modelPath) {
-    return modelPath + ".sageimport";
+// ПУТЁМ, а не строкой: по ней открывают файл, а узкая строка на Windows
+// читается как ANSI — у модели в папке с кириллицей настройки импорта молча
+// не читались и не сохранялись (см. scripts/check_paths.py).
+std::filesystem::path ImportSidecarPath(const std::string& modelPath) {
+    std::filesystem::path p = sage::PathFromUtf8(modelPath);
+    p += ".sageimport";
+    return p;
 }
 
 ImportSettings LoadImportSettings(const std::string& modelPath) {

@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <string>
 
 // ---------------------------------------------------------------------------
@@ -20,8 +21,10 @@
 // ---------------------------------------------------------------------------
 namespace sage::editor::prefs {
 
-// Путь к файлу настроек (создаётся при первой записи).
-std::string Path();
+// Путь к файлу настроек (создаётся при первой записи). ПУТЁМ, а не строкой:
+// строка на Windows читается как ANSI, и у человека с кириллицей в имени
+// учётной записи настройки уходили мимо (см. sage::ConfigDir).
+std::filesystem::path Path();
 
 bool GetBool(const std::string& key, bool fallback);
 void SetBool(const std::string& key, bool value);

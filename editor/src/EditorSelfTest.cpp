@@ -319,7 +319,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4901,6 +4901,48 @@ bool EditorLayer::SelfTestRenderStability() {
             }
         }
         m_scene->RemoveObject(mover.Id());
+    }
+
+    // --- РЕДАКТОР НЕСЁТ СВОЙ ШРИФТ -----------------------------------------
+    //
+    // Редактор рисует интерфейс ИГРЫ тем же UIRenderer, что и сама игра, а тот
+    // без своего шрифта уходит к системным. На Linux находился DejaVu и всё
+    // выглядело в порядке; на Windows очередь доходила до C:/Windows/Fonts, и
+    // запекание атласа из чужого файла убивало редактор при запуске —
+    // исключением 0xc0000005 внутри растеризатора stb.
+    //
+    // Рядом с любой игрой шрифт кладёт sage_add_game; у редактора своя
+    // add_executable, и его там не оказывалось. Проверяем ФАЙЛ НА ДИСКЕ, а не
+    // список кандидатов: «шрифт загрузился» на Linux сходится и без него.
+    {
+        const std::string fontPath = sage::EngineAssetPath("assets/fonts/sage-default.ttf");
+        std::error_code fec;
+        if (!fs::exists(fs::path(fontPath), fec)) {
+            LOG_ERROR("Editor") << "SELFTEST: шрифта движка нет рядом с редактором ("
+                                << fontPath << ") — интерфейс игры уйдёт к системным шрифтам";
+            ok = false;
+        }
+    }
+
+    // --- ПАПКА НАСТРОЕК — ОДНА НА ВСЕХ --------------------------------------
+    //
+    // Список проектов, язык и привычки редактора лежат в одном каталоге, и
+    // собирать его каждый обязан ОДИНАКОВО. Пока каждый собирал его сам и
+    // сплющивал в UTF-8-строку, на Windows с кириллицей в имени учётной записи
+    // обратный ход давал другой путь: список проектов каждый раз открывался
+    // пустым, а только что созданный проект в нём не появлялся.
+    {
+        const fs::path cfg = sage::ConfigDir();
+        if (cfg.empty() || cfg.filename() != "sage") {
+            LOG_ERROR("Editor") << "SELFTEST: папка настроек собрана не так: "
+                                << sage::PathToUtf8(cfg);
+            ok = false;
+        }
+        if (sage::editor::prefs::Path().parent_path() != cfg ||
+            Sage::Launcher::ProjectDatabase::StorageFile().parent_path() != cfg) {
+            LOG_ERROR("Editor") << "SELFTEST: настройки и список проектов лежат в разных папках";
+            ok = false;
+        }
     }
 
     // --- ПОДЛОЖКА РЕДАКТОРА ИНТЕРФЕЙСА: ПОД МЕНЮ, А НЕ ПОВЕРХ НЕГО --------

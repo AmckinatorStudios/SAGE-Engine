@@ -1,3 +1,4 @@
+#include "sage/core/Paths.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/EngineContext.h"
 #include "sage/assets/Pack.h"
@@ -71,7 +72,14 @@ AssetGuid AssetGuid::Generate() {
 
 namespace {
 
-std::string MetaPath(const std::string& assetPath) { return assetPath + ".meta"; }
+// ПУТЁМ, а не строкой: открывать файл по узкой строке на Windows значит
+// читать её как ANSI, и у проекта в папке с кириллицей .meta не находился и не
+// писался — молча (см. scripts/check_paths.py).
+fs::path MetaPath(const std::string& assetPath) {
+    fs::path p = sage::PathFromUtf8(assetPath);
+    p += ".meta";
+    return p;
+}
 
 // Пути в базе — относительные к проекту и через '/'. Иначе один и тот же файл
 // на Windows и Linux выглядел бы как два разных, и сцена, сохранённая на одной
