@@ -427,7 +427,7 @@ void InterfaceViewportPanel::Draw(EditorHost& host, bool& open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 640.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("Canvas" "###InterfaceViewport"), &open,
+    if (!ImGui::Begin(EditorIcons::WindowTitle("layout", T("Canvas"), "InterfaceViewport").c_str(), &open,
                       panelwindows::WindowFlags("InterfaceViewport"))) {
         ImGui::End();
         return;

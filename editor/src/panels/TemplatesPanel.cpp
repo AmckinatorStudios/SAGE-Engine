@@ -12,6 +12,7 @@
 #include "../EditorHost.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
+#include "EditorIcons.h"
 #include "../Project.h"
 #include "../ProjectTemplates.h"
 #include "sage/core/Log.h"
@@ -102,7 +103,7 @@ void TemplatesPanel::Draw(EditorHost& host, bool& open) {
 
     ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(560, 380), ImVec2(FLT_MAX, FLT_MAX));
-    if (!ImGui::Begin(T("Project templates" "###Project templates"), &open)) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("template", T("Project templates"), "Project templates").c_str(), &open)) {
         ImGui::End();
         return;
     }

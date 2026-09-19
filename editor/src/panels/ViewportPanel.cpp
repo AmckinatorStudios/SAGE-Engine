@@ -140,7 +140,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(T("Viewport" "###Viewport"), open, panelwindows::WindowFlags("Viewport"));
+    ImGui::Begin(EditorIcons::WindowTitle("world", T("Viewport"), "Viewport").c_str(), open, panelwindows::WindowFlags("Viewport"));
 
     // Мышь НА ВИДЖЕТЕ инструментов? Ректом прошлого кадра — сам виджет
     // рисуется в конце, поверх видов, а знать об этом надо здесь: клик по его

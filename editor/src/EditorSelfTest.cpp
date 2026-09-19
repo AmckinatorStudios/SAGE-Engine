@@ -895,13 +895,54 @@ void EditorLayer::TickInputProbe() {
             m_selection.Clear();
             break;
         }
+        case 29: {
+            // CTRL+D ДАЁТ ОДНУ КОПИЮ, А НЕ ДВЕ.
+            //
+            // Список элементов интерфейса разбирает Ctrl+D сам, и следом та же
+            // клавиша доходила до общего обработчика редактора: копий
+            // получалось две, одна поверх другой. Вторую замечали не сразу —
+            // она стоит ровно там же, — а потом находили в списке лишний
+            // объект неизвестно откуда.
+            m_probeVictimId = m_scene->CreateObject("SelftestDupSource").Id();
+            m_selection.SetPrimary(m_probeVictimId);
+            m_probeObjectsBefore = (int)m_scene->Registry().view<IdComponent>().size();
+            m_probeWait = 2;
+            break;
+        }
+        case 30:
+            io.AddKeyEvent(ImGuiMod_Ctrl, true);
+            io.AddKeyEvent(ImGuiKey_D, true);
+            break;
+        case 31:
+            io.AddKeyEvent(ImGuiKey_D, false);
+            io.AddKeyEvent(ImGuiMod_Ctrl, false);
+            m_probeWait = 3;
+            break;
+        case 32: {
+            const int now = (int)m_scene->Registry().view<IdComponent>().size();
+            const int added = now - m_probeObjectsBefore;
+            if (added != 1) {
+                fail(("Ctrl+D создал копий: " + std::to_string(added) + " вместо одной").c_str());
+            }
+            // Прибираем за собой: и исходник, и всё, что от него народилось.
+            std::vector<int> junk;
+            m_scene->Registry().view<IdComponent, NameComponent>().each(
+                [&](const IdComponent& id, const NameComponent& n) {
+                    if (n.Name.rfind("SelftestDupSource", 0) == 0) junk.push_back(id.Id);
+                });
+            for (int id : junk) m_scene->RemoveObject(id);
+            m_probeVictimId = -1;
+            m_selection.Clear();
+            break;
+        }
         default:
             if (!m_probeFailed) LOG_INFO("Editor") << "VIEWPORT_INPUT: OK — щелчок по пустому "
                                                       "снимает выбор и во вьюпорте, и в списке "
                                                       "объектов, гизмо навигации поворачивает "
                                                       "камеру, полосы долгой работы видны, Shift "
                                                       "выбирает диапазон, Delete спрашивает об "
-                                                      "удалении файла и не трогает при этом сцену";
+                                                      "удалении файла и не трогает при этом сцену, "
+                                                      "Ctrl+D даёт одну копию";
             m_probeStep = -1;
             return;
     }

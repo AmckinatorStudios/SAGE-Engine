@@ -317,7 +317,16 @@ bool ProjectLauncher::Draw(EditorHost& host, ProjectDatabase& db) {
 
     DrawTopBar(canClose, closeRequested);
 
-    const float footerH = std::floor(ui.StatusBarHeight + ui.SpacingSM);
+    // НИЖНЯЯ СТРОКА ЗАНИМАЕТ МЕСТО, ТОЛЬКО КОГДА ЕЙ ЕСТЬ ЧТО СКАЗАТЬ.
+    //
+    // Раньше место под неё резервировалось всегда и по высоте строки состояния
+    // редактора (24 плюс отступ), а рисовалась там одна строка текста — да и то
+    // пустая, пока нет ни ошибки, ни сообщения. Под карточками оставалась
+    // пустая полоса во всю ширину: место, которое ни на что не отвечает и
+    // читается как обрезанный список.
+    const bool hasFooter = !m_error.empty() || !m_status.empty();
+    const float footerH =
+        hasFooter ? std::floor(ui.SpacingXS * 2.0f + ImGui::GetTextLineHeight()) : 0.0f;
     const float bodyH = std::max(ui.ControlHeight, ImGui::GetContentRegionAvail().y - footerH);
     const float availW = ImGui::GetContentRegionAvail().x;
     const float sideW = std::floor(196.0f * Sage::UI::Scale());
@@ -359,22 +368,18 @@ bool ProjectLauncher::Draw(EditorHost& host, ProjectDatabase& db) {
 
     // Нижняя строка: ошибка красным, сообщение — приглушённо. Одна на окно —
     // отказ импорта и отказ открытия говорят в одно и то же место.
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + ui.SpacingXS);
-    ImGui::Indent(ui.PaddingPanel);
-    if (!m_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::Danger));
-        ImGui::TextUnformatted(m_error.c_str());
-        ImGui::PopStyleColor();
-    } else if (!m_status.empty()) {
-        Sage::UI::TextSecondary("%s", m_status.c_str());
-    } else {
-        // ПУСТАЯ строка состояния — это тоже элемент. Сдвинуть курсор и ничего
-        // не подать значит «расширить окно курсором»: ImGui отвечает на это
-        // окном с красной руганью поверх экрана, и на стартовом окне оно
-        // встречало бы человека первым.
-        ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
+    if (hasFooter) {
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + ui.SpacingXS);
+        ImGui::Indent(ui.PaddingPanel);
+        if (!m_error.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(Role::Danger));
+            ImGui::TextUnformatted(m_error.c_str());
+            ImGui::PopStyleColor();
+        } else {
+            Sage::UI::TextSecondary("%s", m_status.c_str());
+        }
+        ImGui::Unindent(ui.PaddingPanel);
     }
-    ImGui::Unindent(ui.PaddingPanel);
 
     DrawDialogs(host, db);
 

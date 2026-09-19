@@ -1497,7 +1497,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
-    ImGui::Begin(sage::editor::panelid::Title(T("Assets"), windowId).c_str(), open,
+    ImGui::Begin(sage::editor::panelid::Title("folder-full", T("Assets"), windowId).c_str(), open,
                      panelwindows::WindowFlags("Assets"));
 
     // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
@@ -1691,7 +1691,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         // Delete принадлежит панели ассетов, пока она в фокусе: иначе он
         // доходил бы до общего обработчика и удалял объект из СЦЕНЫ — человек
         // смотрел в дерево файлов, а лишался объекта.
-        sage::editor::hotkeys::ClaimDelete();
+        sage::editor::hotkeys::Claim(sage::editor::hotkeys::Key::Delete);
     }
     if (!m_multi.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
         !ImGui::GetIO().WantTextInput && m_renameTarget.empty() &&

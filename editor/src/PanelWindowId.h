@@ -1,4 +1,5 @@
 #pragma once
+#include "EditorIcons.h"
 #include <string>
 
 #include "EditorTypes.h"
@@ -53,6 +54,12 @@ inline std::string For(const char* base, EditorWorkspace workspace) {
 // языка (иначе раскладка теряется при переключении на английский).
 inline std::string Title(const char* translated, const std::string& id) {
     return std::string(translated) + "###" + id;
+}
+
+// То же со значком на вкладке (см. EditorIcons::WindowTitle): у общих панелей
+// имя окна зависит от рабочего места, а значок — нет.
+inline std::string Title(const char* icon, const char* translated, const std::string& id) {
+    return EditorIcons::WindowTitle(icon, translated, id.c_str());
 }
 
 } // namespace sage::editor::panelid

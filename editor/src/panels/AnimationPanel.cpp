@@ -930,7 +930,7 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 320.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(sage::editor::panelid::Title(T("Animation"), windowId).c_str(), open,
+    if (!ImGui::Begin(sage::editor::panelid::Title("anim", T("Animation"), windowId).c_str(), open,
                      panelwindows::WindowFlags("Animation"))) {
         ImGui::End();
         return;
@@ -943,7 +943,7 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
     // повод удалить из сцены объект, над анимацией которого человек работает:
     // ровно так оно и было — Delete в линейке времени уносил сам объект.
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
-        sage::editor::hotkeys::ClaimDelete();
+        sage::editor::hotkeys::Claim(sage::editor::hotkeys::Key::Delete);
 
     // КЛИПА НЕТ — И ПАНЕЛЬ ЭТО ГОВОРИТ. Ни линейки, ни дорожек: показывать
     // пустую линейку значит предлагать анимировать то, чего не существует.

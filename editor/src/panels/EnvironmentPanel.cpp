@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cmath>
 #include "../Localization.h"
+#include "EditorIcons.h"
 
 void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env) {
     (void)env;
@@ -322,7 +323,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     LightingEnvironment& env = scene.Lighting;
 
-    ImGui::Begin(T("Environment" "###Lighting"), open, panelwindows::WindowFlags("Lighting"));
+    ImGui::Begin(EditorIcons::WindowTitle("sun", T("Environment"), "Lighting").c_str(), open, panelwindows::WindowFlags("Lighting"));
 
     // Ответ диалога приходит ЧЕРЕЗ КАДР, поэтому цель выбора хранится числом, а
     // не указателем на поле: за этот кадр сцену могли перезагрузить (откат,

@@ -382,7 +382,7 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
-    ImGui::Begin(T("Hierarchy" "###Hierarchy"), open, panelwindows::WindowFlags("Hierarchy"));
+    ImGui::Begin(EditorIcons::WindowTitle("hierarchy", T("Hierarchy"), "Hierarchy").c_str(), open, panelwindows::WindowFlags("Hierarchy"));
     // --- ДВЕ КНОПКИ НАД СПИСКОМ ---------------------------------------------
     //
     // Создать объект можно было двумя способами, и оба надо было ЗНАТЬ: меню

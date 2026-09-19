@@ -650,7 +650,7 @@ void InputPanel::Draw(EditorHost& host, bool& open) {
 
     ImGui::SetNextWindowSize(ImVec2(1010, 640), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(720, 420), ImVec2(FLT_MAX, FLT_MAX));
-    if (!ImGui::Begin(T("Controls" "###Controls"), &open)) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("keyboard", T("Controls"), "Controls").c_str(), &open)) {
         ImGui::End();
         return;
     }

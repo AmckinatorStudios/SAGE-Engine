@@ -10,6 +10,7 @@
 #include "EditorHost.h"
 #include "sage/core/Config.h"
 #include "../Localization.h"
+#include "EditorIcons.h"
 #include "sage/ui/UIInteraction.h"
 
 void GamePanel::Draw(EditorHost& host, bool* open) {
@@ -19,7 +20,7 @@ void GamePanel::Draw(EditorHost& host, bool* open) {
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(T("Game" "###Game"), open, panelwindows::WindowFlags("Game"));
+    ImGui::Begin(EditorIcons::WindowTitle("game", T("Game"), "Game").c_str(), open, panelwindows::WindowFlags("Game"));
 
     // Фокус запоминаем для ввода Play-режима (см. GamePanel::Focused).
     // RootAndChildWindows — чтобы клик по изображению внутри панели считался
