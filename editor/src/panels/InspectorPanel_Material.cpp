@@ -76,7 +76,8 @@ void InspectorPanel::DrawShaderSlot(EditorHost& host, const char* label, std::st
         c.Title = std::string(T("Shader: ")) + label;
         c.Filters = assetslot::Extensions(assetslot::Kind::Shader);
         c.FilterLabel = T("Shaders");
-        c.StartDir = host.CurrentProject().AssetsDir();
+        // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+        c.StartDir = c.Root = assetslot::ProjectRoot(host);
         m_browser.Open(c);
         m_browseTarget = &path;
         m_browseIsShader = true;
@@ -109,7 +110,8 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
         c.Title = std::string(T("Texture: ")) + label;
         c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
         c.FilterLabel = T("Images");
-        c.StartDir = host.CurrentProject().AssetsDir();
+        // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+        c.StartDir = c.Root = assetslot::ProjectRoot(host);
         m_browser.Open(c);
         m_browseTarget = &path;
         m_browseIsShader = false;
@@ -429,7 +431,8 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
             }
             label += ")";
             c.FilterLabel = label;
-            c.StartDir = host.CurrentProject().AssetsDir();
+            // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+            c.StartDir = c.Root = assetslot::ProjectRoot(host);
             m_browser.Open(c);
             m_browseTarget = &mr.Ref.path;
             m_browseIsShader = false;
@@ -517,6 +520,9 @@ void InspectorPanel::CreateMaterialForObject(EditorHost& host, MeshRendererCompo
         c.Filters = {".sagemat"};
         c.FilterLabel = T("Materials (*.sagemat)");
         c.DefaultName = name + ".sagemat";
+        // Материал ПРОЕКТА и сохраняется в проект: положенный в «Документы», он
+        // не попадёт ни в сборку игры, ни на другую машину.
+        c.StartDir = c.Root = assetslot::ProjectRoot(host);
         m_browser.Open(c);
         m_browseTarget = &mr.MaterialPath;
         m_browseIsShader = false;
@@ -577,7 +583,8 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
         c.Title = T("Choose a material");
         c.Filters = assetslot::Extensions(assetslot::Kind::Material);
         c.FilterLabel = T("Materials (*.sagemat)");
-        c.StartDir = host.CurrentProject().AssetsDir();
+        // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+        c.StartDir = c.Root = assetslot::ProjectRoot(host);
         m_browser.Open(c);
         m_browseTarget = &mr.MaterialPath;
         m_browseIsShader = false;
@@ -683,7 +690,8 @@ void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponen
             c.Title = T("Choose a material");
             c.Filters = assetslot::Extensions(assetslot::Kind::Material);
             c.FilterLabel = T("Materials (*.sagemat)");
-            c.StartDir = host.CurrentProject().AssetsDir();
+            // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+            c.StartDir = c.Root = assetslot::ProjectRoot(host);
             m_browser.Open(c);
             m_browseTarget = &mr.Slots[i].Path;
             m_browseIsShader = false;

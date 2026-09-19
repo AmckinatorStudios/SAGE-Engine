@@ -24,6 +24,9 @@ namespace fs = std::filesystem;
 
 namespace assetslot {
 
+std::filesystem::path ProjectRoot(EditorHost& host) { return host.CurrentProject().AssetsDir(); }
+
+
 namespace {
 
 std::string Lower(std::string s) {

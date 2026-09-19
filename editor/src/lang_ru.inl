@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1765.
+// Язык: Русский. Строк: 1767.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1498,6 +1498,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поле ввода"},
     {"Input Field",
      "Поле ввода"},
+    {"Inside the project only. Outside files: Assets > Import",
+     "Только внутри проекта. Файлы снаружи — через «Ассеты > Внести»"},
     {"Inspector",
      "Инспектор"},
     {"Install",
@@ -2000,6 +2002,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "В сцену можно добавить модель или префаб"},
     {"Only a name and a transform — a node, a pivot, a script holder",
      "Только имя и положение — узел, точка привязки, держатель скрипта"},
+    {"Only from inside the project: put the file into the project first (Assets > Import)",
+     "Только изнутри проекта: сначала внесите файл в проект («Ассеты > Внести»)"},
     {"Only interface entities are listed here.\nThe rest of the scene is in the Hierarchy.",
      "Здесь перечислены только элементы интерфейса.\nОстальная сцена — в иерархии."},
     {"Only the folders and an empty scene",

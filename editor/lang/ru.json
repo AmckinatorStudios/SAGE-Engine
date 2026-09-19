@@ -1765,6 +1765,8 @@
     "Screen": "Экран",
     "Toolbar": "Панель кнопок",
     "Vertical List": "Столбец",
-    "Returns the panel to a tab of the main window": "Вернёт панель вкладкой в главное окно"
+    "Returns the panel to a tab of the main window": "Вернёт панель вкладкой в главное окно",
+    "Inside the project only. Outside files: Assets > Import": "Только внутри проекта. Файлы снаружи — через «Ассеты > Внести»",
+    "Only from inside the project: put the file into the project first (Assets > Import)": "Только изнутри проекта: сначала внесите файл в проект («Ассеты > Внести»)"
   }
 }

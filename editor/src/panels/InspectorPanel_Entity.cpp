@@ -462,7 +462,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 c.Title = T("Choose a script");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Script);
                 c.FilterLabel = T("Scripts (*.lua)");
-                c.StartDir = host.CurrentProject().AssetsDir();
+                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
                 // Цель — СУЩНОСТЬ, а не указатель на поле компонента: диалог
                 // отвечает через кадр, а за этот кадр сцену могут перезагрузить
@@ -719,7 +720,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 c.Title = T("Choose an animation clip");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
                 c.FilterLabel = T("Animation");
-                c.StartDir = host.CurrentProject().AssetsDir();
+                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
                 m_browseTarget = &am->ClipPath;
                 m_browseIsShader = false;
@@ -819,7 +821,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 c.Title = T("Choose an animation clip");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
                 c.FilterLabel = T("Animation");
-                c.StartDir = host.CurrentProject().AssetsDir();
+                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
                 m_browseTarget = &pa->ClipPath;
                 m_browseIsShader = false;
@@ -1020,7 +1023,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 c.Title = T("Choose a sound");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Audio);
                 c.FilterLabel = T("Sounds (*.wav, *.mp3, *.ogg)");
-                c.StartDir = host.CurrentProject().AssetsDir();
+                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
                 m_browseTarget = nullptr;
                 m_browseAudioEntity = obj.Id();

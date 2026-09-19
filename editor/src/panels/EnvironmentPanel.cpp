@@ -187,7 +187,8 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
             c.Title = T("Choose a sky image");
             c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
             c.FilterLabel = T("Images");
-            c.StartDir = host.CurrentProject().AssetsDir();
+            // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+            c.StartDir = c.Root = assetslot::ProjectRoot(host);
             m_browser.Open(c);
             m_skyPick = -3;
         }
@@ -222,7 +223,8 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
             FileBrowser::Config c;
             c.Title = T("Choose a sky folder");
             c.Mode = FileBrowser::PickMode::PickFolder;
-            c.StartDir = host.CurrentProject().AssetsDir();
+            // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+            c.StartDir = c.Root = assetslot::ProjectRoot(host);
             m_browser.Open(c);
             m_skyPick = -1;
         }
@@ -247,7 +249,8 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
                 c.Title = kFaceLabels[i];
                 c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};
                 c.FilterLabel = T("Images");
-                c.StartDir = host.CurrentProject().AssetsDir();
+                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
                 m_skyPick = i;
             }
