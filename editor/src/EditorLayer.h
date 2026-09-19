@@ -372,6 +372,8 @@ private:
     void CheckMultiWindowFrame();
     // Общие панели переживают переход между пространствами (см. .cpp).
     void CheckWorkspaceDockFrame();
+    // Разрешение предпросмотра правит кадр, а не проект (см. .cpp).
+    void CheckPreviewResolutionFrame();
     // Закрыть всплывающее окно, которое открыли, но никто не рисует: такое
     // окно обездвиживает редактор целиком (см. EditorLayer.cpp).
     void CloseGhostPopups();
@@ -380,6 +382,10 @@ private:
     int m_wsDockStep = 0;              // шаг проверки общих панелей
     int m_wsDockWait = 0;              // кадры на устаканивание раскладки
     unsigned int m_wsDockHome = 0;     // где ассеты стояли в пространстве сцены
+    bool m_previewResChecked = false;
+    int m_previewResStep = 0;
+    int m_previewResWait = 0;
+    int m_previewResGameW = 0, m_previewResGameH = 0;   // размер игры ДО проверки
 
     // --- Мышь В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST=1) -------------------------
     //

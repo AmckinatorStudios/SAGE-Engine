@@ -448,6 +448,76 @@ void EditorLayer::CheckWorkspaceDockFrame() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// РАЗРЕШЕНИЕ ПРЕДПРОСМОТРА ПРАВИТ КАДР, А НЕ ПРОЕКТ.
+//
+// Раскладка интерфейса считается в пикселях кадра, и весь смысл якорей и
+// растяжений в том, что на другом размере экрана она ведёт себя правильно.
+// Посмотреть на это можно было единственным способом: сменить разрешение в
+// настройках игры, взглянуть и вернуть обратно — то есть править то, что
+// уедет в собранную игру, ради одного взгляда.
+//
+// Проверяется живым кадром: холст обязан пересчитаться в выбранный размер, а
+// настройки игры — остаться нетронутыми. Ни то, ни другое не видно нигде,
+// кроме как в числах после настоящего кадра: размер кадра выставляет сама
+// панель холста, когда рисуется.
+void EditorLayer::CheckPreviewResolutionFrame() {
+    if (m_previewResChecked) return;
+    if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
+    if (!m_workspaceDockChecked) return;   // та проверка сама переключает пространство
+    if (m_previewResWait > 0) { --m_previewResWait; return; }
+
+    constexpr int kW = 1080, kH = 1920;   // вертикальный экран: 16:9 наоборот
+    auto done = [this](bool ok, const char* why) {
+        m_previewResChecked = true;
+        m_tools.UI.PreviewSize = glm::ivec2(0);
+        SetWorkspace(EditorWorkspace::Scene);
+        if (ok) LOG_INFO("Editor") << "PREVIEW_RES: OK — холст считается в выбранном разрешении, "
+                                   << "настройки игры не тронуты";
+        else LOG_ERROR("Editor") << "PREVIEW_RES: FAIL — " << why;
+    };
+
+    sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    switch (m_previewResStep) {
+        case 0:
+            m_previewResGameW = cfg.Width;
+            m_previewResGameH = cfg.Height;
+            SetWorkspace(EditorWorkspace::Interface);
+            m_tools.UI.PreviewSize = glm::ivec2(kW, kH);
+            m_previewResStep = 1;
+            m_previewResWait = 4;   // холст пишет размер, когда рисуется
+            return;
+        case 1: {
+            if ((int)m_tools.UI.FrameSize.x != kW || (int)m_tools.UI.FrameSize.y != kH) {
+                done(false, "холст не пересчитался в разрешение предпросмотра");
+                return;
+            }
+            if (m_renderer.GameWidth() != kW || m_renderer.GameHeight() != kH) {
+                done(false, "игровой кадр остался прежнего размера");
+                return;
+            }
+            if (cfg.Width != m_previewResGameW || cfg.Height != m_previewResGameH) {
+                done(false, "предпросмотр залез в настройки игры");
+                return;
+            }
+            m_tools.UI.PreviewSize = glm::ivec2(0);
+            m_previewResStep = 2;
+            m_previewResWait = 4;
+            return;
+        }
+        default:
+            // Ноль — «как в игре»: кадр обязан вернуться к размеру из настроек,
+            // иначе выбранное однажды разрешение осталось бы навсегда.
+            if ((int)m_tools.UI.FrameSize.x != m_previewResGameW ||
+                (int)m_tools.UI.FrameSize.y != m_previewResGameH) {
+                done(false, "холст не вернулся к разрешению игры");
+                return;
+            }
+            done(true, nullptr);
+            return;
+    }
+}
+
 // ============================================================================
 //  МЫШЬ В ЖИВОМ КАДРЕ: щелчок по вьюпорту проверяется НАСТОЯЩИМ щелчком
 // ============================================================================
@@ -563,6 +633,8 @@ void EditorLayer::TickInputProbe() {
             // И проверки общих панелей: она нарочно переключает пространство
             // туда-обратно, а щелчки по вьюпорту сцены в вёрстке бессмысленны.
             if (!m_workspaceDockChecked) { m_probeWait = 1; return; }
+            // И проверки разрешения предпросмотра: она тоже уходит в вёрстку.
+            if (!m_previewResChecked) { m_probeWait = 1; return; }
             // МОДАЛЬНОЕ ОКНО СЪЕДАЕТ ВСЕ ЩЕЛЧКИ, и проверка мыши под ним
             // осмысленна не больше, чем нажатие на выключенный экран. Такое
             // окно в headless-прогоне — само по себе отказ (например, после

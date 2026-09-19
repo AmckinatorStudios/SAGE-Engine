@@ -1664,6 +1664,15 @@
     "Backdrop color": "Цвет подложки",
     "Backdrop under the interface.\n1 — a flat fill instead of the game frame;\n0 — design the HUD over the game.": "Подложка под интерфейсом.\n1 — ровная заливка вместо игрового кадра;\n0 — верстать худ поверх игры.",
     "Dark": "Тёмный",
-    "Fit the frame into the panel": "Вписать кадр в панель"
+    "Fit the frame into the panel": "Вписать кадр в панель",
+    "Align and distribute": "Выровнять и распределить",
+    "Anchor: what the element holds on to": "Якорь: за что элемент держится",
+    "As in the game": "Как в игре",
+    "Custom": "Своё",
+    "Edit the anchor on the canvas": "Править якорь на холсте",
+    "Everything outside it can be cut off: a camera\nnotch, rounded corners, TV overscan.": "Всё за ней может быть срезано: вырезом камеры,\nскруглением корпуса, overscan'ом телевизора.",
+    "Preview resolution. The layout is computed in it, and the game\nsettings are not touched — this is a look, not a change.": "Разрешение предпросмотра. Раскладка считается в нём, а настройки\nигры не трогаются — это взгляд, а не правка.",
+    "Rotate the screen": "Повернуть экран",
+    "Safe area": "Безопасная область"
   }
 }
