@@ -1741,6 +1741,25 @@
     "Children stand in a column and do not leave the edges": "Дети стоят столбцом и не вылезают за края",
     "Children stand in a row across the top": "Дети стоят рядом вдоль верха",
     "Children stand in columns and wrap": "Дети стоят по столбцам с переносом",
-    "A full-screen backing: a menu, a pause, a dimmer": "Подложка во весь экран: меню, пауза, затемнение"
+    "A full-screen backing: a menu, a pause, a dimmer": "Подложка во весь экран: меню, пауза, затемнение",
+    "An animation lives in a clip file and is played by a component\non the object. Create one and both appear at once.": "Анимация живёт в файле клипа, а играет её компонент на объекте.\nСоздайте клип — появится и файл, и компонент.",
+    "An existing clip opens from Assets: double-click the .sageclip.": "Готовый клип открывается из панели Assets: двойной щелчок по .sageclip.",
+    "Clip created: ": "Клип создан: ",
+    "Create a clip for the object": "Создать клип для объекта",
+    "Create a clip in the Animation tool and it lands here.": "Создайте клип в инструменте анимации — он окажется здесь.",
+    "Edit the clip": "Править клип",
+    "It is outside the clip owner. Pick the owner itself\nor one of its children.": "Он не под владельцем клипа. Выберите самого владельца\nили кого-то из его детей.",
+    "New clip for the selected object": "Ещё один клип для выбранного объекта",
+    "No clip open": "Клип не открыт",
+    "No clip — nothing is playing": "Клипа нет — играть нечего",
+    "Not on any object — read only": "Ни на ком не стоит — только чтение",
+    "Opens this clip in the Animation tool": "Откроет этот клип в инструменте анимации",
+    "Plays a .sageclip: properties of this object and its children": "Играет .sageclip: свойства этого объекта и его детей",
+    "Plays on:": "Играет на:",
+    "Property Animation": "Анимация свойств",
+    "Put on the selected object": "Повесить на выбранный объект",
+    "The clip is not on any object yet.": "Клип пока ни на одном объекте.",
+    "The component on this object plays the clip.\nTracks address its children by name.": "Клип играет компонент на этом объекте.\nДорожки адресуют его детей по именам.",
+    "Writes a .sageclip into assets and puts the component\nthat plays it on the selected object": "Запишет .sageclip в ассеты и поставит на выбранный объект\nкомпонент, который его играет"
   }
 }

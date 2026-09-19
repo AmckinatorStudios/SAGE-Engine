@@ -65,6 +65,89 @@ void AnimationPanel::PushUndo() {
     m_dirty = true;
 }
 
+// --- ВЛАДЕЛЕЦ КЛИПА ---------------------------------------------------------
+//
+// «Кто это играет» — не украшение, а условие работы: дорожки адресуют цели
+// путём ОТ ВЛААДЕЛЬЦА, ключ снимается с его настоящих свойств, а в сцене клип
+// живёт компонентом на нём. Без владельца править нечего и некому.
+
+entt::entity AnimationPanel::FindOwner(EditorHost& host) const {
+    if (m_path.empty()) return entt::null;
+    Scene& scene = const_cast<EditorHost&>(host).CurrentScene();
+    entt::registry& reg = scene.Registry();
+    std::error_code ec;
+    const fs::path mine = fs::weakly_canonical(fs::path(m_path), ec);
+    entt::entity found = entt::null;
+    reg.view<PropertyAnimatorComponent>().each(
+        [&](entt::entity e, const PropertyAnimatorComponent& pa) {
+            if (found != entt::null || pa.ClipPath.empty()) return;
+            // Сравниваем РАЗОБРАННЫЕ пути: в компоненте путь мог быть записан
+            // относительным, а открыт клип абсолютным — это тот же файл, и
+            // решать, что это разные клипы, значит терять привязку на ровном
+            // месте.
+            std::error_code e2;
+            const fs::path theirs = fs::weakly_canonical(fs::path(pa.ClipPath), e2);
+            if (theirs == mine) found = e;
+        });
+    return found;
+}
+
+GameObject AnimationPanel::Owner(EditorHost& host) {
+    Scene& scene = host.CurrentScene();
+    if (m_owner != entt::null && !scene.Registry().valid(m_owner)) m_owner = entt::null;
+    if (m_owner == entt::null) m_owner = FindOwner(host);
+    if (m_owner == entt::null) return GameObject{};
+    return GameObject(&scene.Registry(), m_owner);
+}
+
+bool AnimationPanel::CreateClipFor(EditorHost& host, GameObject object) {
+    if (!object.Valid()) return false;
+    // ФАЙЛ СОЗДАЁТСЯ СРАЗУ. Клип, живущий только в памяти панели, — это и есть
+    // «анимация из воздуха»: закрыли редактор, и работы нет.
+    const std::string stem = object.Name().empty() ? std::string("clip") : object.Name();
+    fs::path path = host.CurrentProject().AssetsDir() / (stem + ".sageclip");
+    // Имя занято — берём следующее свободное, а не молча перезаписываем чужой
+    // клип: второй объект с тем же именем обычная вещь.
+    for (int n = 2; fs::exists(path) && n < 1000; ++n)
+        path = host.CurrentProject().AssetsDir() / (stem + " " + std::to_string(n) + ".sageclip");
+
+    anim::PropertyClip c;
+    c.Name = stem;
+    std::string err;
+    if (!anim::SaveClipFile(c, path.string(), err)) {
+        m_status = err;
+        return false;
+    }
+
+    m_clip = std::move(c);
+    m_path = path.string();
+    m_hasClip = true;
+    m_skeletal = false;
+    m_dirty = false;
+    m_time = 0.0f;
+    m_selection.clear();
+    m_undo.clear();
+    m_redo.clear();
+    m_activeTrack = -1;
+    BindTo(host, object);
+    m_status = std::string(T("Clip created: ")) + m_path;
+    return true;
+}
+
+void AnimationPanel::BindTo(EditorHost& host, GameObject object) {
+    if (!object.Valid() || m_path.empty()) return;
+    entt::registry& reg = host.CurrentScene().Registry();
+    host.PushUndoSnapshot();
+    PropertyAnimatorComponent& pa = reg.get_or_emplace<PropertyAnimatorComponent>(object.Entity());
+    pa.ClipPath = m_path;
+    pa.Clip.reset();
+    pa.Ready = false;
+    // В редакторе клип НЕ ИГРАЕТ САМ: позу показывает бегунок панели. Иначе
+    // объект уезжал бы из-под рук, едва его привязали.
+    pa.Playing = false;
+    m_owner = object.Entity();
+}
+
 void AnimationPanel::OpenClip(EditorHost& host, const std::string& path) {
     anim::PropertyClip c;
     std::string err;
@@ -105,6 +188,9 @@ void AnimationPanel::OpenClip(EditorHost& host, const std::string& path) {
     m_skeletal = skeletal;
     m_clip = std::move(c);
     m_path = path;
+    m_hasClip = true;
+    // Кто его играет — вопрос к СЦЕНЕ, а не к тому, что выбрано мышью.
+    m_owner = FindOwner(host);
     m_dirty = false;
     m_time = 0.0f;
     m_selection.clear();
@@ -120,7 +206,7 @@ void AnimationPanel::OpenClip(EditorHost& host, const std::string& path) {
 void AnimationPanel::CaptureKey(EditorHost& host, int trackIndex) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
-    GameObject owner = host.SelectedObject();
+    GameObject owner = Owner(host);
     if (!owner.Valid()) return;
     PushUndo();
     for (int i = 0; i < (int)m_clip.Tracks.size(); ++i) {
@@ -140,7 +226,7 @@ void AnimationPanel::CaptureKey(EditorHost& host, int trackIndex) {
 // смотреть на результат надо на настоящих объектах: иначе «подобрал кривую» и
 // «увидел, что получилось» — два разных дела с переключением окон между ними.
 void AnimationPanel::SyncSceneToTime(EditorHost& host) {
-    GameObject owner = host.SelectedObject();
+    GameObject owner = Owner(host);
     if (!owner.Valid() || m_clip.Tracks.empty()) return;
     anim::ApplyClipAt(host.CurrentScene(), owner.Entity(), m_clip, m_time);
 }
@@ -161,7 +247,7 @@ void AnimationPanel::AutoKeyTick(EditorHost& host) {
     if (!m_autoKey || !Editable() || m_playing) return;
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
-    GameObject owner = host.SelectedObject();
+    GameObject owner = Owner(host);
     if (!owner.Valid()) return;
     bool pushed = false;
     for (anim::Track& t : m_clip.Tracks) {
@@ -184,8 +270,86 @@ void AnimationPanel::AutoKeyTick(EditorHost& host) {
     }
 }
 
+// --- ПУСТОЕ СОСТОЯНИЕ: КЛИПА НЕТ --------------------------------------------
+//
+// Панель открывается БЕЗ клипа и прямо говорит, что анимации пока нет. Раньше
+// здесь всегда лежал безымянный клип «из воздуха»: выглядело это как готовая к
+// работе панель, дорожки в неё добавлялись, ключи ставились — а в проекте не
+// появлялось ни файла, ни компонента, и всё это пропадало вместе с окном.
+void AnimationPanel::DrawNoClip(EditorHost& host) {
+    GameObject sel = host.SelectedObject();
+
+    EditorIcons::Inline("anim");
+    ImGui::SameLine(0.0f, EditorIcons::TextGap());
+    ImGui::TextUnformatted(T("No clip open"));
+    ImGui::Separator();
+    ImGui::TextWrapped("%s", T("An animation lives in a clip file and is played by a component\n"
+                               "on the object. Create one and both appear at once."));
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    ImGui::BeginDisabled(!sel.Valid());
+    if (EditorIcons::Button("plus", T("Create a clip for the object"),
+                            T("Writes a .sageclip into assets and puts the component\n"
+                              "that plays it on the selected object"))) {
+        CreateClipFor(host, sel);
+    }
+    ImGui::EndDisabled();
+    if (!sel.Valid()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", T("Select an object first."));
+    } else {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s %s", T("Object:"), sel.Name().c_str());
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::TextDisabled("%s", T("An existing clip opens from Assets: double-click the .sageclip."));
+    if (!m_status.empty()) ImGui::TextDisabled("%s", m_status.c_str());
+}
+
+// --- ПОЛОСА ВЛАДЕЛЬЦА -------------------------------------------------------
+//
+// Отвечает на вопрос «кого я сейчас анимирую» — тот самый, на который панель
+// раньше не отвечала вовсе. Владелец не «выбранный объект»: его видно, он не
+// меняется от щелчка в иерархии, и если его нет — правки выключены, а не
+// применяются неизвестно к кому.
+void AnimationPanel::DrawOwnerBar(EditorHost& host) {
+    GameObject owner = Owner(host);
+    if (owner.Valid()) {
+        EditorIcons::Inline("cube");
+        ImGui::SameLine(0.0f, EditorIcons::TextGap());
+        ImGui::TextDisabled("%s", T("Plays on:"));
+        ImGui::SameLine();
+        ImGui::TextUnformatted(owner.Name().c_str());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("The component on this object plays the clip.\n"
+                                      "Tracks address its children by name."));
+        return;
+    }
+
+    // Клип открыт, а играть его некому: так бывает у только что открытого
+    // файла. Скрывать это нельзя — иначе снова получится «анимация есть, а в
+    // сцене ничего нет».
+    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
+    EditorIcons::Inline("warn");
+    ImGui::SameLine(0.0f, EditorIcons::TextGap());
+    ImGui::TextUnformatted(T("Not on any object — read only"));
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    GameObject sel = host.SelectedObject();
+    ImGui::BeginDisabled(!sel.Valid() || m_clip.Imported);
+    if (ImGui::SmallButton(T("Put on the selected object"))) BindTo(host, sel);
+    ImGui::EndDisabled();
+    if (!sel.Valid()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", T("Select an object first."));
+    }
+}
+
 void AnimationPanel::DrawToolbar(EditorHost& host) {
     const bool editable = Editable();
+
+    DrawOwnerBar(host);
 
     // --- Откуда клип --------------------------------------------------------
     //
@@ -278,6 +442,7 @@ void AnimationPanel::DrawToolbar(EditorHost& host) {
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
+    ImGui::BeginDisabled(!editable);
     if (EditorIcons::IconOnlyButton("save", T("Save the clip")) && editable) {
         if (m_path.empty()) {
             // Имя файла — из имени клипа: спрашивать его отдельным диалогом
@@ -294,16 +459,15 @@ void AnimationPanel::DrawToolbar(EditorHost& host) {
             m_status = err;
         }
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("file", T("New clip"))) {
-        m_clip = anim::PropertyClip{};
-        m_clip.Name = T("New clip");
-        m_path.clear();
-        m_selection.clear();
-        m_undo.clear();
-        m_dirty = false;
-        m_time = 0.0f;
-    }
+    // «ЕЩЁ ОДИН КЛИП» — ЭТО СНОВА ФАЙЛ И КОМПОНЕНТ, а не чистый лист в памяти.
+    // Кнопка, заводившая безымянный клип ниоткуда, и была главным источником
+    // «анимации из воздуха».
+    ImGui::BeginDisabled(!host.SelectedObject().Valid());
+    if (EditorIcons::IconOnlyButton("file", T("New clip for the selected object")))
+        CreateClipFor(host, host.SelectedObject());
+    ImGui::EndDisabled();
 
     if (m_dirty) {
         ImGui::SameLine();
@@ -315,18 +479,39 @@ void AnimationPanel::DrawAddTrackPopup(EditorHost& host) {
     if (Sage::UI::MenuScope addMenu; ImGui::BeginPopup("AddTrack###AddTrack")) {
         Scene& scene = host.CurrentScene();
         entt::registry& reg = scene.Registry();
-        GameObject owner = host.SelectedObject();
+        GameObject owner = Owner(host);
         if (!owner.Valid()) {
-            ImGui::TextDisabled("%s", T("Select an object first."));
+            ImGui::TextDisabled("%s", T("The clip is not on any object yet."));
             ImGui::EndPopup();
             return;
         }
+        // ДОРОЖКУ СТАВИМ НА ВЫБРАННЫЙ ОБЪЕКТ, НО ТОЛЬКО ЕСЛИ ОН ПОД ВЛАДЕЛЬЦЕМ.
+        // Так анимируются дети («Bar/Fill»), ради которых путь в дорожке и
+        // заведён. Объект со стороны брать нельзя: клип, ссылающийся наружу,
+        // перестанет работать на втором экземпляре — и сломается молча.
+        GameObject target = host.SelectedObject();
+        std::string path;
+        if (target.Valid() && target.Entity() != owner.Entity()) {
+            path = PathFromOwner(scene, owner.Entity(), target.Entity());
+            if (path.empty()) {
+                ImGui::TextDisabled("%s", T("Object:"));
+                ImGui::SameLine();
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                                   target.Name().c_str());
+                ImGui::TextWrapped("%s", T("It is outside the clip owner. Pick the owner itself\n"
+                                           "or one of its children."));
+                ImGui::EndPopup();
+                return;
+            }
+        } else {
+            target = owner;
+        }
         // Предлагается ТО, ЧТО У ЭТОГО ОБЪЕКТА ЕСТЬ. Список всех свойств движка
         // означал бы полсотни строк, из которых работают три.
-        ImGui::TextDisabled("%s %s", T("Object:"), owner.Name().c_str());
+        ImGui::TextDisabled("%s %s", T("Object:"), target.Name().c_str());
         ImGui::Separator();
         const std::vector<const anim::PropertyType*> props =
-            anim::PropertiesFor(reg, owner.Entity());
+            anim::PropertiesFor(reg, target.Entity());
         std::string group;
         for (const anim::PropertyType* p : props) {
             if (p->Group != group) {
@@ -337,12 +522,12 @@ void AnimationPanel::DrawAddTrackPopup(EditorHost& host) {
             // нет размера» — вопрос, на который молчание не отвечает.
             bool already = false;
             for (const anim::Track& t : m_clip.Tracks)
-                if (t.Property == p->Id && t.Target.empty()) { already = true; break; }
+                if (t.Property == p->Id && t.Target == path) { already = true; break; }
             ImGui::BeginDisabled(already);
             if (ImGui::MenuItem(T(p->Title.c_str()))) {
                 PushUndo();
                 anim::Track t;
-                t.Target = PathFromOwner(scene, owner.Entity(), owner.Entity());
+                t.Target = path;
                 t.Property = p->Id;
                 m_clip.Tracks.push_back(t);
                 m_activeTrack = (int)m_clip.Tracks.size() - 1;
@@ -746,6 +931,14 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
     ImGui::SetNextWindowSize(ImVec2(960.0f, 320.0f), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin(sage::editor::panelid::Title(T("Animation"), windowId).c_str(), open,
                      panelwindows::WindowFlags("Animation"))) {
+        ImGui::End();
+        return;
+    }
+
+    // КЛИПА НЕТ — И ПАНЕЛЬ ЭТО ГОВОРИТ. Ни линейки, ни дорожек: показывать
+    // пустую линейку значит предлагать анимировать то, чего не существует.
+    if (!m_hasClip) {
+        DrawNoClip(host);
         ImGui::End();
         return;
     }

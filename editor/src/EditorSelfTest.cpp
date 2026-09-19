@@ -319,7 +319,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4844,7 +4844,46 @@ bool EditorLayer::SelfTestRenderStability() {
                                         << " вместо 5)";
                     ok = false;
                 }
+                // Компонент снимаем: следующая проверка требует, чтобы клип
+                // был НИЧЕЙ, пока его не привязали.
+                m_scene->Registry().remove<PropertyAnimatorComponent>(mover.Entity());
             }
+            // --- КЛИП НЕ БЕРЁТСЯ ИЗ ВОЗДУХА -------------------------------
+            //
+            // Инструмент анимации правил безымянный клип, живший только в
+            // памяти панели: человек выбирал объект, ставил дорожку и двигал
+            // его, но в проекте не появлялось НИ ФАЙЛА, НИ КОМПОНЕНТА, а
+            // владельцем молча считался тот, кто выбран прямо сейчас. Здесь
+            // проверяются оба конца правила: пока панель не открыла клип, она
+            // пуста, а открытый клип принадлежит тому объекту, у которого в
+            // компоненте записан ЭТОТ путь, — и никому другому.
+            if (m_animation.HasClipOpen()) {
+                LOG_ERROR("Editor") << "SELFTEST: панель анимации завела клип сама";
+                ok = false;
+            }
+            m_animation.OpenClip(*this, clipPath.string());
+            if (!m_animation.HasClipOpen()) {
+                LOG_ERROR("Editor") << "SELFTEST: клип не открылся в панели анимации";
+                ok = false;
+            }
+            // Компонента с этим путём в сцене нет — значит и владельца нет,
+            // даже при выбранном объекте. Именно это раньше и «анимировалось».
+            m_selection.SetPrimary(mover.Id());
+            if (m_animation.ClipOwner(*this) != entt::null) {
+                LOG_ERROR("Editor") << "SELFTEST: клип без компонента нашёл владельца";
+                ok = false;
+            }
+            // Ставим компонент — владелец обязан найтись, и именно тот.
+            PropertyAnimatorComponent& bound =
+                m_scene->Registry().get_or_emplace<PropertyAnimatorComponent>(mover.Entity());
+            bound.ClipPath = clipPath.string();
+            bound.Playing = false;
+            if (m_animation.ClipOwner(*this) != mover.Entity()) {
+                LOG_ERROR("Editor") << "SELFTEST: клип не нашёл объект, который его играет";
+                ok = false;
+            }
+            m_scene->Registry().remove<PropertyAnimatorComponent>(mover.Entity());
+
             std::error_code rmec2;
             fs::remove(clipPath, rmec2);
 

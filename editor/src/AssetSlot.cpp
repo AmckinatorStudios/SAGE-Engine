@@ -125,7 +125,11 @@ Kind KindOf(const fs::path& path) {
         ext == ".hdr" || ext == ".sagetex")
         return Kind::Texture;
     if (ext == ".wav" || ext == ".ogg" || ext == ".mp3") return Kind::Audio;
-    if (ext == ".sageanim") return Kind::Animation;
+    // Оба расширения — «клип»: .sageanim вынут из модели (кости), .sageclip
+    // свой (свойства объектов). Для слота это одно и то же: и тот и другой
+    // кладут в поле «клип», и разбираться, который из них, — дело того, кто
+    // его проигрывает, а не того, кто его выбирает.
+    if (ext == ".sageanim" || ext == ".sageclip") return Kind::Animation;
     if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return Kind::Shader;
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
     // умеет .obj/.gltf/.glb/.fbx/.blend/.bbmodel и пополняется плагинами.
@@ -179,7 +183,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::Prefab:   return {".sageprefab"};
         case Kind::Scene:    return {".sage"};
         case Kind::Audio:    return {".wav", ".ogg", ".mp3"};
-        case Kind::Animation: return {".sageanim"};
+        case Kind::Animation: return {".sageanim", ".sageclip"};
         case Kind::Shader:   return {".vert", ".frag", ".glsl"};
         // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-
         // живаются…» в отказе остаётся пустой — перечислять там нечего.
