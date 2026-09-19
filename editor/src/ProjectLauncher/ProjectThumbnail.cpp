@@ -76,7 +76,7 @@ long long FileStamp(const fs::path& p) {
 
 fs::path ProjectThumbnail::CacheDir() {
     // Рядом с базой проектов: одна папка на все данные стартового окна.
-    return fs::path(ProjectDatabase::StoragePath()).parent_path() / "thumbnails";
+    return ProjectDatabase::StorageFile().parent_path() / "thumbnails";
 }
 
 fs::path ProjectThumbnail::CachePathFor(const std::string& source) {

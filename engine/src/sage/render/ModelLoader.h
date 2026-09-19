@@ -2,6 +2,7 @@
 #include "Mesh.h"
 #include "MeshData.h"
 #include "sage/assets/import/Importer.h"
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -69,7 +70,8 @@ namespace ModelLoader {
     sage::render::MeshData LoadGltfData(const std::string& path, bool binary);
 
     // --- Сайдкар настроек импорта (GL-независимо) ---
-    std::string ImportSidecarPath(const std::string& modelPath); // «<path>.sageimport»
+    // ПУТЁМ: по нему открывают файл (см. scripts/check_paths.py).
+    std::filesystem::path ImportSidecarPath(const std::string& modelPath); // «<path>.sageimport»
     ImportSettings LoadImportSettings(const std::string& modelPath); // дефолт, если нет/битый
     bool SaveImportSettings(const std::string& modelPath, const ImportSettings& s);
 

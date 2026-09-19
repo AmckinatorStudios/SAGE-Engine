@@ -86,6 +86,9 @@ public:
     // запуск), испорченный файл — тоже: пустой список честнее отказа запуска.
     void Load();
     void Save() const;
+    // Файл списка — ПУТЁМ: по нему открывают и пишут. Строковый вариант ниже
+    // только показывают человеку (см. ProjectDatabase.cpp).
+    static std::filesystem::path StorageFile();
     static std::string StoragePath();
 
     const std::vector<ProjectEntry>& All() const { return m_items; }

@@ -133,6 +133,19 @@ add_custom_command(TARGET SageEditor POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:SageEditor>/assets
     COMMENT "Копирование ассетов редактора рядом с бинарником")
 
+# ШРИФТ ДВИЖКА — РЯДОМ С РЕДАКТОРОМ, как он кладётся рядом с любой игрой
+# (см. sage_add_game в cmake/SageHelpers.cmake). Редактор рисует интерфейс
+# ИГРЫ тем же UIRenderer, и без своего шрифта тот уходил к системным: на
+# Linux находился DejaVu, а на Windows дело доходило до C:/Windows/Fonts, где
+# чужой шрифт роняет запекание атласа. Идёт ПОСЛЕ копирования ассетов
+# редактора: тот каталог копируется целиком.
+add_custom_command(TARGET SageEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:SageEditor>/assets/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/fonts/sage-default.ttf
+            $<TARGET_FILE_DIR:SageEditor>/assets/fonts/sage-default.ttf
+    COMMENT "Копирование шрифта движка рядом с редактором")
+
 # ТЕМЫ ОФОРМЛЕНИЯ — рядом с бинарником, в themes/. Читаются при запуске, а не
 # вкомпилированы: добавить своё оформление можно, ничего не собирая (см.
 # editor/themes/README.txt и EditorTheme.h).

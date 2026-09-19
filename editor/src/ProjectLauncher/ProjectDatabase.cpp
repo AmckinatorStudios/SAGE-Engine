@@ -217,19 +217,21 @@ bool ProjectDatabase::IsProject(const fs::path& fileOrDir) {
 //  Файл базы
 // ---------------------------------------------------------------------------
 
-std::string ProjectDatabase::StoragePath() {
+fs::path ProjectDatabase::StorageFile() {
     // Тот же каталог, где лежат настройки редактора и список языков: одно
     // место на все «привычки одного человека» (см. EditorPrefs.h).
     //
     // sage::EnvPath, а не getenv: на русской Windows %APPDATA% приходит в узкое
     // окружение байтами ANSI, и std::filesystem::path на них БРОСАЕТ (см.
     // sage/core/Paths.h). Ровно на этом редактор когда-то не запускался вовсе.
-    fs::path base;
-    if (const fs::path xdg = sage::EnvPath("XDG_CONFIG_HOME"); !xdg.empty()) base = xdg;
-    else if (const fs::path home = sage::EnvPath("HOME"); !home.empty()) base = home / ".config";
-    else if (const fs::path appdata = sage::EnvPath("APPDATA"); !appdata.empty()) base = appdata;
-    else { std::error_code ec; base = fs::current_path(ec); }
-    return sage::PathToUtf8(base / "sage" / "projects.json");
+    return sage::ConfigDir() / "projects.json";
+}
+
+// То же самое строкой — ТОЛЬКО ДЛЯ ПОКАЗА человеку (окно настроек стартового
+// экрана). Открывать по ней файлы нельзя: на Windows узкая строка читается как
+// ANSI, и путь с кириллицей превращается в другой путь.
+std::string ProjectDatabase::StoragePath() {
+    return sage::PathToUtf8(StorageFile());
 }
 
 void ProjectDatabase::Load() {
@@ -237,7 +239,7 @@ void ProjectDatabase::Load() {
 
     std::vector<std::pair<std::string, long long>> stored; // путь + когда открывали
     {
-        std::ifstream in(StoragePath());
+        std::ifstream in(StorageFile());
         if (in.is_open()) {
             try {
                 json root;
@@ -262,7 +264,7 @@ void ProjectDatabase::Load() {
     // список проектов не имеет права оказаться пустым: он читает это как
     // «программа потеряла мои проекты», а не как «формат сменился».
     if (stored.empty()) {
-        const fs::path legacy = fs::path(StoragePath()).parent_path() / "recent_projects.json";
+        const fs::path legacy = StorageFile().parent_path() / "recent_projects.json";
         std::ifstream in(legacy);
         if (in.is_open()) {
             try {
@@ -304,7 +306,7 @@ void ProjectDatabase::Load() {
 }
 
 void ProjectDatabase::Save() const {
-    const fs::path path = StoragePath();
+    const fs::path path = StorageFile();
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
     std::ofstream file(path);

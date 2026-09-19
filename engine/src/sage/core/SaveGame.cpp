@@ -66,12 +66,26 @@ std::string UserDataRoot() {
     return ".";
 }
 
+// ПУТЁМ, а не строкой: сохранения лежат в папке пользователя, а её имя на
+// Windows почти всегда содержит имя человека — сплошь и рядом кириллицей.
+// Узкая строка там читается как ANSI, и прогресс молча не сохранялся
+// (см. scripts/check_paths.py).
+fs::path SlotFile(const std::string& slot) {
+    return sage::PathFromUtf8(Directory()) / (SafeSlot(slot) + ".sagesave");
+}
+
 std::string SlotPath(const std::string& slot) {
     return Directory() + "/" + SafeSlot(slot) + ".sagesave";
 }
 
 // Резервная копия лежит РЯДОМ и с тем же именем: так её видно человеку, и
 // «откатиться на прошлое сохранение» не требует объяснять, где оно.
+fs::path BackupFile(const std::string& slot) {
+    fs::path p = SlotFile(slot);
+    p += ".bak";
+    return p;
+}
+
 std::string BackupPath(const std::string& slot) { return SlotPath(slot) + ".bak"; }
 
 // --- Контейнер --------------------------------------------------------------
@@ -248,8 +262,8 @@ bool Write(const std::string& slot, const std::string& payloadJson, const WriteO
     // рабочую копию. Копия — одна: хранить их десяток значит съесть диск
     // игрока ради случая, который бывает раз в игру.
     if (options.KeepBackup && fs::exists(finalPath, ec)) {
-        fs::remove(BackupPath(slot), ec);
-        fs::rename(finalPath, BackupPath(slot), ec);
+        fs::remove(BackupFile(slot), ec);
+        fs::rename(finalPath, BackupFile(slot), ec);
         if (ec) {
             // Не вышло — не повод не сохраниться: копия это подстраховка, а не
             // условие. Но сказать надо, иначе игрок будет думать, что она есть.
@@ -370,7 +384,7 @@ bool Read(const std::string& slot, std::string& outPayloadJson, int* outVersion)
 bool ReadInfo(const std::string& slot, SlotInfo& out) {
     out.Name = SafeSlot(slot);
     std::error_code ec;
-    out.Bytes = (size_t)fs::file_size(SlotPath(slot), ec);
+    out.Bytes = (size_t)fs::file_size(SlotFile(slot), ec);
     if (ec) return false;
     out.Broken = !ParseSlotFile(SlotPath(slot), /*onlyHeader=*/true, &out, nullptr);
     return !out.Broken;
@@ -378,7 +392,7 @@ bool ReadInfo(const std::string& slot, SlotInfo& out) {
 
 bool HasBackup(const std::string& slot) {
     std::error_code ec;
-    return fs::exists(BackupPath(slot), ec);
+    return fs::exists(BackupFile(slot), ec);
 }
 
 bool RestoreBackup(const std::string& slot) {
@@ -387,7 +401,7 @@ bool RestoreBackup(const std::string& slot) {
     if (!fs::exists(backup, ec)) return false;
     // КОПИЕЙ, а не переименованием: откат не должен быть односторонним. Иначе
     // человек, откатившийся по ошибке, теряет то, на что откатился бы обратно.
-    fs::copy_file(backup, SlotPath(slot), fs::copy_options::overwrite_existing, ec);
+    fs::copy_file(backup, SlotFile(slot), fs::copy_options::overwrite_existing, ec);
     if (ec) {
         LOG_ERROR("Save") << "Откат на резервную копию не удался: " << ec.message();
         return false;
@@ -398,7 +412,7 @@ bool RestoreBackup(const std::string& slot) {
 
 bool Exists(const std::string& slot) {
     std::error_code ec;
-    return fs::exists(SlotPath(slot), ec);
+    return fs::exists(SlotFile(slot), ec);
 }
 
 bool Delete(const std::string& slot) {
@@ -406,8 +420,8 @@ bool Delete(const std::string& slot) {
     // Вместе с резервной копией: «удалить сохранение» и значит удалить его, а
     // оставшийся .bak воскрес бы при следующем откате и выглядел бы как
     // «удаление не сработало».
-    fs::remove(BackupPath(slot), ec);
-    return fs::remove(SlotPath(slot), ec);
+    fs::remove(BackupFile(slot), ec);
+    return fs::remove(SlotFile(slot), ec);
 }
 
 std::vector<SlotInfo> Slots() {

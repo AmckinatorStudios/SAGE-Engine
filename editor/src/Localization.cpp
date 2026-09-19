@@ -113,19 +113,14 @@ void LoadExternalCatalogs() {
     }
 }
 
-std::string PrefsPath() {
-    // Тот же путь, что у списка недавних проектов (см. RecentProjects.cpp):
-    // настройки редактора живут рядом друг с другом, а не по файлу на функцию.
-    fs::path base;
-    // sage::EnvPath, а не getenv: на Windows «C:\Users\Вова\AppData\Roaming»
-    // приходит в узкое окружение байтами ANSI, и std::filesystem::path на них
-    // бросает исключение (см. Paths.h). Именно здесь редактор и умирал на
-    // русской Windows — до создания окна, ещё до первой панели.
-    if (const fs::path xdg = sage::EnvPath("XDG_CONFIG_HOME"); !xdg.empty()) base = xdg;
-    else if (const fs::path home = sage::EnvPath("HOME"); !home.empty()) base = home / ".config";
-    else if (const fs::path appdata = sage::EnvPath("APPDATA"); !appdata.empty()) base = appdata;
-    else { std::error_code ec; base = fs::current_path(ec); }
-    return sage::PathToUtf8(base / "sage" / "editor_prefs.json");
+fs::path PrefsPath() {
+    // Тот же файл, что у прочих настроек редактора (см. EditorPrefs.h): язык
+    // — такая же привычка одного человека, как состав тулбара.
+    //
+    // ПУТЁМ, а не строкой: обратный ход «путь -> UTF-8 -> путь» на Windows
+    // читает байты как ANSI, и у человека с кириллицей в имени учётной записи
+    // язык не сохранялся и не читался — молча (см. sage::ConfigDir).
+    return sage::ConfigDir() / "editor_prefs.json";
 }
 
 std::string LoadSavedLanguage() {

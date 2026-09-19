@@ -246,6 +246,22 @@ fs::path HomeDir() {
     return fs::path();
 }
 
+fs::path ConfigDir() {
+    // Порядок тот же, что был у каждого из трёх прежних списков: XDG, дом,
+    // APPDATA, и только в крайнем случае текущая папка — иначе настройки
+    // некуда положить вовсе.
+    //
+    // EnvPath, а не getenv: на русской Windows «C:\Users\Вова\AppData\Roaming»
+    // приходит в узкое окружение байтами ANSI, и fs::path на них БРОСАЕТ.
+    // Именно здесь редактор когда-то умирал до первой панели.
+    fs::path base;
+    if (const fs::path xdg = EnvPath("XDG_CONFIG_HOME"); !xdg.empty()) base = xdg;
+    else if (const fs::path home = EnvPath("HOME"); !home.empty()) base = home / ".config";
+    else if (const fs::path appdata = EnvPath("APPDATA"); !appdata.empty()) base = appdata;
+    else { std::error_code ec; base = fs::current_path(ec); }
+    return base / "sage";
+}
+
 std::vector<UserFolder> UserFolders() {
     const fs::path home = HomeDir();
     std::vector<UserFolder> out;
