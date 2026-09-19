@@ -187,6 +187,10 @@ void NineSlicePanel::DrawToolbar(EditorHost& host) {
         img.Path = m_path;
         img.Tex = m_tex;
         img.SetSlice(m_slice);
+        // И РЕЖИМ ТОЖЕ. Подобрать нарезку и не увидеть её на элементе — это и
+        // есть «инструмент не работает»: числа применились, а картинка как
+        // была растянутой, так и осталась, потому что режим остался прежним.
+        img.Fit = sage::ui::Image::Mode::NineSlice;
         m_status = T("Applied to the selected element");
     }
     ImGui::EndDisabled();

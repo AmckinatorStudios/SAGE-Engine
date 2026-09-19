@@ -350,6 +350,35 @@ void MigrateV6toV7(json& root) {
     }
 }
 
+// --- 7 -> 8: у картинки появился РЕЖИМ ----------------------------------------
+//
+// Раньше девятина включалась тем, что рамка переставала быть нулевой: признака
+// «режим» не было вовсе. Теперь он есть, и по умолчанию это «растянуть» —
+// значит сцена, сохранённая вчера, открылась бы с картинками, у которых рамка
+// на месте, а девятины нет. На экране это выглядит как испорченные панели:
+// углы размазаны вместе с серединой.
+//
+// Правило ровно то, по которому работал старый движок: ненулевая рамка —
+// девятина. Обратное неверно, и додумывать здесь нечего: замощения в старом
+// формате не существовало.
+void MigrateV7toV8(json& root) {
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
+        json& uj = obj["ui"];
+        if (!uj.contains("image") || !uj["image"].is_object()) continue;
+        json& img = uj["image"];
+        if (img.contains("mode")) continue;   // уже новый формат — не трогаем
+        const json& b = img.contains("sliceBorder") ? img["sliceBorder"] : json();
+        bool sliced = false;
+        if (b.is_array() && b.size() == 4) {
+            for (const json& v : b) {
+                if (v.is_number() && v.get<double>() > 0.0) { sliced = true; break; }
+            }
+        }
+        img["mode"] = sliced ? 1 : 0;   // 1 — NineSlice, 0 — Normal
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -357,6 +386,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV4toV5,
     &MigrateV5toV6,
     &MigrateV6toV7,
+    &MigrateV7toV8,
 };
 
 } // namespace
