@@ -1,3 +1,4 @@
+#include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
 #include "../Progress.h"
@@ -1482,7 +1483,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
     if (m_deleteTargets.empty()) m_deleteAsked = false;
 }
 
-void AssetsPanel::Draw(EditorHost& host, bool* open) {
+void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
     // Бюджет превью на кадр: см. ThumbnailFor.
     m_thumbRenderedThisFrame = false;
     Project& project = host.CurrentProject();
@@ -1495,7 +1496,8 @@ void AssetsPanel::Draw(EditorHost& host, bool* open) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
-    ImGui::Begin(T("Assets" "###Assets"), open, panelwindows::WindowFlags("Assets"));
+    ImGui::Begin(sage::editor::panelid::Title(T("Assets"), windowId).c_str(), open,
+                     panelwindows::WindowFlags("Assets"));
 
     // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
     //

@@ -56,6 +56,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "AssetExt.h"
 #include "Localization.h"
+#include "PanelWindowId.h"
 #include "PanelWindows.h"
 #include "Progress.h"
 
@@ -1290,8 +1291,17 @@ void EditorLayer::OnRender() {
         panel("InterfacePreview", m_panels[EditorPanel::InterfacePreview],
               [&] { m_uiPreview.Draw(*this, m_panels[EditorPanel::InterfacePreview]); });
     }
-    panel("Console", m_panels[EditorPanel::Console], [&] { m_console.Draw(&m_panels[EditorPanel::Console]); });
-    panel("Assets", m_panels[EditorPanel::Assets], [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets]); });
+    // ОБЩИЕ ПАНЕЛИ — СВОИМ ОКНОМ В КАЖДОМ ПРОСТРАНСТВЕ. Пока окно было одно на
+    // оба, раскладки спорили за него: построившаяся последней забирала окно
+    // себе, узел соседа пустел и удалялся, и панель в том пространстве либо
+    // всплывала отдельным окном, либо пропадала совсем (см. PanelWindowId.h).
+    namespace panelid = sage::editor::panelid;
+    const std::string consoleId = panelid::For("Console", m_workspace);
+    const std::string assetsId = panelid::For("Assets", m_workspace);
+    panel(consoleId.c_str(), m_panels[EditorPanel::Console],
+          [&] { m_console.Draw(&m_panels[EditorPanel::Console], consoleId); });
+    panel(assetsId.c_str(), m_panels[EditorPanel::Assets],
+          [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets], assetsId); });
     m_plugins.ImGuiAll();
 
     // Полосы долгой работы — ПОВЕРХ панелей и до стартового окна: карточка в

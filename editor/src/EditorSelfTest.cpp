@@ -432,7 +432,20 @@ void EditorLayer::CheckWorkspaceDockFrame() {
             m_wsDockWait = 8;   // раскладка вёрстки строится и устаканивается
             return;
         case 1:
-            if (dockOf("Assets") == 0) { done(false, "в вёрстке панель ассетов оказалась вне дока"); return; }
+            // В ВЁРСТКЕ — СВОЁ ОКНО ПАНЕЛИ («AssetsUI»), и оно обязано быть в
+            // доке вёрстки. Пока окно было одно на оба пространства, эта
+            // раскладка забирала его у сцены, и вернуть его туда было уже
+            // некуда (см. PanelWindowId.h).
+            if (dockOf("AssetsUI") == 0) {
+                done(false, "в вёрстке панель ассетов оказалась вне дока");
+                return;
+            }
+            // И ОКНО СЦЕНЫ ПРИ ЭТОМ НЕ ТРОНУТО. Это и есть та проверка, ради
+            // которой всё: раньше раскладка вёрстки уносила его с собой.
+            if (dockOf("Assets") != m_wsDockHome) {
+                done(false, "раскладка вёрстки забрала окно ассетов у сцены");
+                return;
+            }
             SetWorkspace(EditorWorkspace::Scene);
             m_wsDockStep = 2;
             m_wsDockWait = 8;
@@ -443,6 +456,8 @@ void EditorLayer::CheckWorkspaceDockFrame() {
                 done(false, "вернувшись в сцену, панель ассетов отцепилась от дока");
             } else if (back != m_wsDockHome) {
                 done(false, "вернувшись в сцену, панель ассетов встала в чужой узел дока");
+            } else if (dockOf("AssetsUI") == 0) {
+                done(false, "окно ассетов вёрстки потеряло свой док при возврате в сцену");
             } else {
                 done(true, nullptr);
             }

@@ -95,50 +95,6 @@ const char* HierarchyPanel::IconFor(entt::registry& reg, entt::entity e) {
     return EntityIcon(reg, e);
 }
 
-// ЛИНИИ ДЕРЕВА — СВОИ, а не встроенные в ImGui.
-//
-// ImGui ведёт горизонтальную чёрточку до СТРЕЛКИ раскрытия ребёнка, а значок и
-// подпись у нас начинаются дальше — за отступом до подписи. Между чёрточкой и
-// значком оставался провал в полтора десятка пикселей: линия будто обрывается
-// на полпути, и дерево выглядит недорисованным. Здесь линия идёт до самого
-// значка, а вертикаль — от родителя до СЕРЕДИНЫ последнего ребёнка, а не до
-// конца всего поддерева: иначе она свисает под последней строкой в пустоту.
-//
-// Строки детей собираются в m_rows по ходу отрисовки — по ним и строится
-// вертикаль: другого способа узнать, где кончился последний ребёнок, нет.
-void HierarchyPanel::DrawTreeLines(const ImVec2& parentPos, float indent, int childDepth) {
-    if (m_rows.empty()) return;
-    const float line = ImGui::GetTextLineHeight();
-    const float spineX = std::floor(parentPos.x + indent * 0.5f);
-    const ImU32 col = ImGui::GetColorU32(ImGuiCol_TreeLines);
-    const float thickness = std::max(1.0f, ImGui::GetStyle().TreeLinesSize);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-
-    float lastMid = 0.0f;
-    for (const Row& r : m_rows) {
-        if (r.Depth != childDepth) continue;           // только прямые дети
-        const float mid = std::floor(r.Y + line * 0.5f);
-        lastMid = mid;
-        // ЛИНИЯ НЕ ЛЕЗЕТ В СТРЕЛКУ. У строки с детьми в начале стоит стрелка
-        // раскрытия, и горизонталь, доведённая до значка, шла ПРЯМО СКВОЗЬ неё
-        // — стрелка выглядела перечёркнутой. У листа стрелки нет, и там линию
-        // правильно вести до самого значка: иначе она обрывается в пустоте.
-        const float end = r.Arrow ? r.ArrowX - 2.0f
-                                  : r.IconX - EditorIcons::TextGap() * 0.5f;
-        if (end <= spineX + 1.0f) continue;   // вести нечего: стрелка вплотную к вертикали
-        dl->AddLine(ImVec2(spineX, mid), ImVec2(end, mid), col, thickness);
-    }
-    if (lastMid > 0.0f) {
-        dl->AddLine(ImVec2(spineX, std::floor(parentPos.y + line)), ImVec2(spineX, lastMid), col,
-                    thickness);
-    }
-    // Строки этого уровня уже использованы — дальше их не надо ни родителю, ни
-    // соседям: иначе вертикаль тянулась бы через чужие ветки.
-    m_rows.erase(std::remove_if(m_rows.begin(), m_rows.end(),
-                                [childDepth](const Row& r) { return r.Depth >= childDepth; }),
-                 m_rows.end());
-}
-
 // Рекурсивно рисует узел дерева: сам элемент (выбор/ПКМ/drag-drop) + детей.
 void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     entt::registry& reg = scene.Registry();
@@ -179,8 +135,8 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // Стрелка раскрытия ImGui рисует в начале строки, отступив FramePadding.x
     // (см. TreeNodeBehavior). Линия дерева обязана знать, где она: горизонталь,
     // доведённая до значка, проходила ПО стрелке насквозь.
-    m_rows.push_back({rowPos.y, rowPos.x + indent,
-                      rowPos.x + ImGui::GetStyle().FramePadding.x, hasChildren, m_depth});
+    m_lines.Row(rowPos.y, m_depth, rowPos.x + ImGui::GetStyle().FramePadding.x,
+                rowPos.x + indent, hasChildren);
     {
         const float line = ImGui::GetTextLineHeight();
         const glm::vec3 tint = EntityIconColor(reg, e);
@@ -409,7 +365,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         for (auto k : kids)
             if (reg.valid(k)) DrawNode(host, scene, k);
         --m_depth;
-        DrawTreeLines(rowPos, indent, myDepth + 1);
+        m_lines.Draw(rowPos, indent, myDepth + 1);
         ImGui::TreePop();
     }
     ImGui::PopID();
@@ -515,10 +471,10 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The scene itself: everything lives here"));
 
     if (sceneOpen) {
-        m_rows.clear();
+        m_lines.Clear();
         m_depth = 0;
         for (auto& [id, e] : roots) DrawNode(host, scene, e);
-        DrawTreeLines(rootPos, ImGui::GetTreeNodeToLabelSpacing(), 0);
+        m_lines.Draw(rootPos, ImGui::GetTreeNodeToLabelSpacing(), 0);
         ImGui::TreePop();
     }
 

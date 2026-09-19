@@ -241,4 +241,29 @@ UIRect Union(const std::vector<UIRect>& rects) {
     return UIRect{x0, y0, x1 - x0, y1 - y0};
 }
 
+// --- Поворот ----------------------------------------------------------------
+
+namespace {
+constexpr float kDegToRad = 0.01745329252f;
+}
+
+glm::vec2 RotatePoint(glm::vec2 p, glm::vec2 centre, float angleDeg) {
+    const float a = angleDeg * kDegToRad;
+    const float c = std::cos(a), s = std::sin(a);
+    const glm::vec2 d = p - centre;
+    return {centre.x + d.x * c - d.y * s, centre.y + d.x * s + d.y * c};
+}
+
+void RotatedCorners(const UIRect& r, float angleDeg, glm::vec2 out[4]) {
+    const glm::vec2 centre{r.x + r.w * 0.5f, r.y + r.h * 0.5f};
+    const glm::vec2 raw[4] = {{r.x, r.y}, {r.x + r.w, r.y},
+                              {r.x + r.w, r.y + r.h}, {r.x, r.y + r.h}};
+    for (int i = 0; i < 4; ++i) out[i] = RotatePoint(raw[i], centre, angleDeg);
+}
+
+glm::vec2 UnrotateDelta(glm::vec2 delta, float angleDeg) {
+    // Обратный поворот: из экрана в систему элемента.
+    return RotatePoint(delta, glm::vec2(0.0f, 0.0f), -angleDeg);
+}
+
 } // namespace sage::ui

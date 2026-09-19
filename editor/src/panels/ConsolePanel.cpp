@@ -1,3 +1,4 @@
+#include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "ConsolePanel.h"
 
@@ -68,8 +69,9 @@ bool ConsolePanel::Passes(const Entry& e) const {
     return true;
 }
 
-void ConsolePanel::Draw(bool* open) {
-    ImGui::Begin(T("Console" "###Console"), open, panelwindows::WindowFlags("Console"));
+void ConsolePanel::Draw(bool* open, const std::string& windowId) {
+    ImGui::Begin(sage::editor::panelid::Title(T("Console"), windowId).c_str(), open,
+                     panelwindows::WindowFlags("Console"));
     if (ImGui::IsWindowFocused()) MarkSeen();
 
     // --- ФИЛЬТРЫ ОДНОЙ ЛЕНТОЙ ----------------------------------------------

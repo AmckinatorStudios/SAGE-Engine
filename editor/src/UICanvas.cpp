@@ -9,6 +9,7 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UILayoutTools.h"
 #include "sage/ui/UISceneSystem.h"
 
 namespace {
@@ -19,6 +20,25 @@ constexpr float kHandle = 5.0f;      // половина стороны ручк
 constexpr float kRotateArm = 26.0f;  // длина ножки ручки поворота в пикселях панели
 constexpr float kHandleGrab = 7.0f;  // радиус захвата — больше рисунка: попасть в
                                      // квадратик 10x10 мышью тяжело, и это чувствуется
+
+// ПОВОРОТ ТОЧКИ ВОКРУГ ЦЕНТРА ЭЛЕМЕНТА.
+//
+// Рамка выделения, ручки размера и ручка поворота обязаны стоять ТАМ ЖЕ, ГДЕ
+// САМ ЭЛЕМЕНТ. Пока их рисовали по неповёрнутому прямоугольнику, повёрнутая
+// кнопка выглядела так: рисунок наклонён, а рамка вокруг него стоит прямо, и
+// ручка «правый край» тянет не ту сторону — потому что «правый край» у
+// повёрнутого элемента не справа.
+//
+// Угол берётся из самого элемента (Element::Rotation), и поворот здесь —
+// ровно тот же, что делает отрисовка (UIRenderer::PushRotation вокруг центра
+// прямоугольника). Две разные формулы поворота однажды разойдутся, и рамка
+// поедет от интерфейса тем сильнее, чем больше угол.
+// Сама формула — в движке (sage::ui::RotatePoint): её проверяют тесты, и она
+// же считает углы рамки. Здесь только перевод ImVec2 <-> glm::vec2.
+ImVec2 RotateAround(ImVec2 p, ImVec2 centre, float angleDeg) {
+    const glm::vec2 r = sage::ui::RotatePoint({p.x, p.y}, {centre.x, centre.y}, angleDeg);
+    return ImVec2(r.x, r.y);
+}
 
 bool Overlaps(const UIRect& a, const UIRect& b) {
     return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -290,10 +310,17 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
                     : offscreen   ? IM_COL32(255, 90, 90, 170)
                     : it.Visible  ? IM_COL32(120, 190, 255, 110)
                                   : IM_COL32(150, 150, 160, 70);
-        dl->AddRect(a, b, col, 0.0f, 0, it.Selected ? 2.0f : 1.0f);
+        // Рамка рисуется ЧЕТЫРЬМЯ УГЛАМИ, а не AddRect: у повёрнутого элемента
+        // прямоугольник по осям экрана — это не он, а коробка вокруг него.
+        const ImVec2 centre((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+        const ImVec2 corner[4] = {RotateAround(ImVec2(a.x, a.y), centre, u.Rotation),
+                                  RotateAround(ImVec2(b.x, a.y), centre, u.Rotation),
+                                  RotateAround(ImVec2(b.x, b.y), centre, u.Rotation),
+                                  RotateAround(ImVec2(a.x, b.y), centre, u.Rotation)};
+        dl->AddPolyline(corner, 4, col, ImDrawFlags_Closed, it.Selected ? 2.0f : 1.0f);
         if (offscreen) {
-            dl->AddLine(a, b, IM_COL32(255, 90, 90, 110), 1.0f);
-            dl->AddLine(ImVec2(b.x, a.y), ImVec2(a.x, b.y), IM_COL32(255, 90, 90, 110), 1.0f);
+            dl->AddLine(corner[0], corner[2], IM_COL32(255, 90, 90, 110), 1.0f);
+            dl->AddLine(corner[1], corner[3], IM_COL32(255, 90, 90, 110), 1.0f);
         }
 
         if (!primary) continue;
@@ -303,28 +330,40 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         primaryItem = &it;
 
         const float mx = (a.x + b.x) * 0.5f, my = (a.y + b.y) * 0.5f;
-        rotateHandle = ImVec2(mx, a.y - kRotateArm);
+        // Ручка поворота едет вместе с верхним краем: у элемента, повёрнутого
+        // на 90°, «над верхним краем» — это сбоку, и оставлять её висеть над
+        // экранным верхом значит показывать ручку не от того элемента.
+        rotateHandle = RotateAround(ImVec2(mx, a.y - kRotateArm), centre, u.Rotation);
         haveRotate = true;
         // ПОВОРОТ — ОТДЕЛЬНОЙ РУЧКОЙ НАД ВЕРХНИМ КРАЕМ, на ножке. Ставить его
         // в угол, как делают некоторые редакторы, нельзя: в углу уже сидит
         // ручка размера, и «повернуть» превращается в лотерею с попаданием
         // мышью. Кружок на ножке ни с чем не спутать.
-        dl->AddLine(ImVec2(mx, a.y), rotateHandle, IM_COL32(255, 200, 110, 180), 1.0f);
+        dl->AddLine(RotateAround(ImVec2(mx, a.y), centre, u.Rotation), rotateHandle,
+                    IM_COL32(255, 200, 110, 180), 1.0f);
         dl->AddCircleFilled(rotateHandle, kHandle + 1.0f, IM_COL32(255, 200, 110, 255), 12);
         dl->AddCircle(rotateHandle, kHandle + 1.0f, IM_COL32(40, 30, 10, 200), 12, 1.0f);
 
-        const Handle hs[8] = {{{a.x, a.y}, Drag::NW}, {{mx, a.y}, Drag::N},
-                              {{b.x, a.y}, Drag::NE}, {{b.x, my}, Drag::E},
-                              {{b.x, b.y}, Drag::SE}, {{mx, b.y}, Drag::S},
-                              {{a.x, b.y}, Drag::SW}, {{a.x, my}, Drag::W}};
+        const Handle hs[8] = {
+            {RotateAround(ImVec2(a.x, a.y), centre, u.Rotation), Drag::NW},
+            {RotateAround(ImVec2(mx, a.y), centre, u.Rotation), Drag::N},
+            {RotateAround(ImVec2(b.x, a.y), centre, u.Rotation), Drag::NE},
+            {RotateAround(ImVec2(b.x, my), centre, u.Rotation), Drag::E},
+            {RotateAround(ImVec2(b.x, b.y), centre, u.Rotation), Drag::SE},
+            {RotateAround(ImVec2(mx, b.y), centre, u.Rotation), Drag::S},
+            {RotateAround(ImVec2(a.x, b.y), centre, u.Rotation), Drag::SW},
+            {RotateAround(ImVec2(a.x, my), centre, u.Rotation), Drag::W}};
         for (const Handle& h : hs) handles[handleCount++] = h;
+        // Квадратики ручек ТОЖЕ наклонены: прямые квадраты на наклонённой рамке
+        // читаются как чужие, прилетевшие от другого элемента.
         for (const Handle& h : hs) {
-            dl->AddRectFilled(ImVec2(h.Pos.x - kHandle, h.Pos.y - kHandle),
-                              ImVec2(h.Pos.x + kHandle, h.Pos.y + kHandle),
-                              IM_COL32(255, 200, 110, 255), 2.0f);
-            dl->AddRect(ImVec2(h.Pos.x - kHandle, h.Pos.y - kHandle),
-                        ImVec2(h.Pos.x + kHandle, h.Pos.y + kHandle),
-                        IM_COL32(40, 30, 10, 200), 2.0f);
+            const ImVec2 q[4] = {
+                RotateAround(ImVec2(h.Pos.x - kHandle, h.Pos.y - kHandle), h.Pos, u.Rotation),
+                RotateAround(ImVec2(h.Pos.x + kHandle, h.Pos.y - kHandle), h.Pos, u.Rotation),
+                RotateAround(ImVec2(h.Pos.x + kHandle, h.Pos.y + kHandle), h.Pos, u.Rotation),
+                RotateAround(ImVec2(h.Pos.x - kHandle, h.Pos.y + kHandle), h.Pos, u.Rotation)};
+            dl->AddConvexPolyFilled(q, 4, IM_COL32(255, 200, 110, 255));
+            dl->AddPolyline(q, 4, IM_COL32(40, 30, 10, 200), ImDrawFlags_Closed, 1.0f);
         }
 
         // Точка якоря и линия до неё: без этого непонятно, ОТ ЧЕГО считается
@@ -582,6 +621,15 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     if (ImGui::GetIO().KeyShift && m_drag == Drag::Move) {
         if (std::fabs(d.x) > std::fabs(d.y)) d.y = 0.0f;
         else d.x = 0.0f;
+    }
+
+    // ТЯНЕМ ПО ОСЯМ ЭЛЕМЕНТА, А НЕ ЭКРАНА. Прямоугольник хранится в раскладке
+    // без поворота — угол применяется при отрисовке, вокруг центра, — поэтому
+    // сдвиг мыши надо перевести в систему координат самого элемента. Без этого
+    // у наклонённой кнопки ручка «правый край» тянет вбок и вверх сразу:
+    // человек ведёт вдоль её края, а растёт она по экранному X.
+    if (m_drag != Drag::Move && std::fabs(u->Rotation) > 0.01f) {
+        d = sage::ui::UnrotateDelta(d, u->Rotation);
     }
 
     // Какие рёбра ведёт мышь — от этого зависит, что притягивать.

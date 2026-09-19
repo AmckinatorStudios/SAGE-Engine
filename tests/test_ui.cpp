@@ -1991,3 +1991,61 @@ TEST(ui_wheel_scrolls_the_list_under_the_cursor) {
     sage::ui::UpdateSceneUI(scene, input, 800, 600);
     CHECK_NEAR(reg.get<sage::ui::Scroll>(list.Entity()).Offset.y, 40.0f, 0.01f);
 }
+
+// --- Поворот рамки выделения ------------------------------------------------
+//
+// Ручки гизмо обязаны стоять на углах ПОВЁРНУТОГО элемента. До этих проверок
+// рамка считалась по осевому прямоугольнику и на наклонённом элементе висела
+// в стороне — старый код на них падает.
+
+TEST(ui_rotated_corners_follow_the_element) {
+    const sage::ui::UIRect r{100.0f, 100.0f, 200.0f, 100.0f};
+    glm::vec2 c[4];
+    sage::ui::RotatedCorners(r, 90.0f, c);
+
+    // Центр на месте: поворот вокруг него ничего не сдвигает целиком.
+    const glm::vec2 centre{200.0f, 150.0f};
+    glm::vec2 sum{0.0f, 0.0f};
+    for (int i = 0; i < 4; ++i) sum += c[i];
+    CHECK_NEAR(sum.x * 0.25f, centre.x, 0.01f);
+    CHECK_NEAR(sum.y * 0.25f, centre.y, 0.01f);
+
+    // На 90° широкий прямоугольник встаёт «на бок»: левый верхний угол
+    // (100,100) уезжает вправо-вверх от центра.
+    CHECK_NEAR(c[0].x, 250.0f, 0.01f);
+    CHECK_NEAR(c[0].y, 50.0f, 0.01f);
+    CHECK_NEAR(c[2].x, 150.0f, 0.01f);
+    CHECK_NEAR(c[2].y, 250.0f, 0.01f);
+
+    // Стороны сохраняют длину — поворот не растягивает.
+    CHECK_NEAR(glm::length(c[1] - c[0]), 200.0f, 0.01f);
+    CHECK_NEAR(glm::length(c[2] - c[1]), 100.0f, 0.01f);
+}
+
+TEST(ui_rotate_point_matches_the_renderer_direction) {
+    // Ось Y вниз: положительный угол крутит ПО ЧАСОВОЙ, как рисует движок.
+    // Ошибка в знаке даёт рамку, уезжающую в другую сторону от элемента.
+    const glm::vec2 p = sage::ui::RotatePoint({10.0f, 0.0f}, {0.0f, 0.0f}, 90.0f);
+    CHECK_NEAR(p.x, 0.0f, 0.01f);
+    CHECK_NEAR(p.y, 10.0f, 0.01f);
+
+    // Нулевой угол — тождество.
+    const glm::vec2 q = sage::ui::RotatePoint({7.0f, -3.0f}, {2.0f, 2.0f}, 0.0f);
+    CHECK_NEAR(q.x, 7.0f, 0.001f);
+    CHECK_NEAR(q.y, -3.0f, 0.001f);
+}
+
+TEST(ui_unrotate_delta_moves_along_the_element_axis) {
+    // Тянут вправо по экрану элемент, повёрнутый на 90°: для него самого это
+    // движение ВВЕРХ (по его локальному -Y), иначе ручка «правый край» тянет
+    // не ту сторону.
+    const glm::vec2 d = sage::ui::UnrotateDelta({10.0f, 0.0f}, 90.0f);
+    CHECK_NEAR(d.x, 0.0f, 0.01f);
+    CHECK_NEAR(d.y, -10.0f, 0.01f);
+
+    // Обратный ход точен: повернуть и вернуть — тот же вектор.
+    const glm::vec2 back =
+        sage::ui::UnrotateDelta(sage::ui::RotatePoint({3.0f, 5.0f}, {0.0f, 0.0f}, 37.0f), 37.0f);
+    CHECK_NEAR(back.x, 3.0f, 0.001f);
+    CHECK_NEAR(back.y, 5.0f, 0.001f);
+}

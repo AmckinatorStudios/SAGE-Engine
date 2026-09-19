@@ -65,6 +65,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
 #include "ObjectCatalog.h"
+#include "PanelWindowId.h"
 #include "PanelWindows.h"
 
 namespace fs = std::filesystem;
@@ -105,10 +106,6 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
     m_selection.Clear();
     // Своя раскладка у каждого пространства строится при первом показе: узла с
     // таким именем ImGui ещё не знает, и BuildXxxDockLayout сработает сам.
-    // Общие панели (ассеты, консоль) вернуть туда, где они стояли в ЭТОМ
-    // пространстве: окно у них одно на оба, и построенная раскладка соседа
-    // уносит их с собой (см. m_sharedDock).
-    m_redockShared = true;
     if (workspace == EditorWorkspace::Interface) {
         m_uiViewport.RequestFit();
         m_uiViewport.RequestFocus();
@@ -116,11 +113,6 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
         m_viewport.RequestFocus();
     }
 }
-
-// Панели, живущие в ОБОИХ пространствах. Окно у такой панели одно, а док-узлов
-// два — отсюда и вся возня с запоминанием места (см. m_sharedDock).
-static const char* const kSharedPanels[] = {"Assets", "Console", "Animation"};
-static constexpr int kSharedPanelCount = (int)(sizeof(kSharedPanels) / sizeof(kSharedPanels[0]));
 
 void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     // У вёрстки другой главный: ХОЛСТ, а не вьюпорт сцены. Всё остальное
@@ -140,9 +132,12 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     };
     dock("InterfaceHierarchy", left);
     dock("InterfaceInspector", right);
-    dock("Assets", bottom);
-    dock("Console", bottom);
-    dock("Animation", bottom);
+    // СВОИ ОКНА ЭТОГО ПРОСТРАНСТВА, а не общие с пространством сцены: пока
+    // окно было одно на оба, эта строка ЗАБИРАЛА его у раскладки сцены, и
+    // вернуть его туда было уже некуда (см. PanelWindowId.h).
+    dock("AssetsUI", bottom);
+    dock("ConsoleUI", bottom);
+    dock("AnimationUI", bottom);
     // Холст докается ПЕРВЫМ — он и есть вкладка по умолчанию. Предпросмотр
     // рядом с ним: переключаться между «верстаю» и «смотрю» надо одним щелчком,
     // а не раскладкой заново.
@@ -478,29 +473,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
         else BuildDefaultDockLayout(dockspaceId);
     }
 
-    // ОБЩИЕ ПАНЕЛИ — НА СВОЁ МЕСТО В ЭТОМ ПРОСТРАНСТВЕ. Делается ДО того, как
-    // панели поданы: после Begin просьба о доке опоздает на кадр, и панель
-    // успеет мигнуть отдельным окном.
-    {
-        const int space = interfaceSpace ? 1 : 0;
-        if (m_redockShared) {
-            m_redockShared = false;
-            for (int i = 0; i < kSharedPanelCount; ++i) {
-                const ImGuiID node = (ImGuiID)m_sharedDock[space][i];
-                // Узла может уже не быть: раскладку сбрасывали, окно закрывали,
-                // ini пришёл от другой версии. Тогда пусть стоит как стоит —
-                // затолкать панель в несуществующий узел значит потерять её.
-                if (node != 0 && ImGui::DockBuilderGetNode(node) != nullptr)
-                    ImGui::DockBuilderDockWindow(kSharedPanels[i], node);
-            }
-        }
-        // Где они стоят сейчас: человек мог переложить их сам, и возвращать
-        // панель туда, куда её когда-то поставил редактор, — значит спорить.
-        for (int i = 0; i < kSharedPanelCount; ++i) {
-            ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr(kSharedPanels[i]));
-            if (w && w->DockId != 0) m_sharedDock[space][i] = (unsigned int)w->DockId;
-        }
-    }
     // Док-пространство занимает всё между тулбаром и статус-баром.
     const ImVec2 dockMin = ImGui::GetCursorScreenPos();
     ImGui::DockSpace(dockspaceId, ImVec2(0.0f, -kStatusBarHeight), ImGuiDockNodeFlags_None);
@@ -642,11 +614,18 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     {"Assets",    "Assets",      EditorPanel::Assets},
                     {"Console",   "Console",     EditorPanel::Console},
                     {"Animation", "Animation",   EditorPanel::Animation},
+                    // Окно у панели своё в каждом пространстве, а галочка
+                    // «отдельным окном» — одна: это свойство ПАНЕЛИ, а не
+                    // места, где она сейчас стоит (см. PanelWindowId.h).
                 };
                 for (const DetachRow& row : kRows) {
-                    const bool detached = panelwindows::Detached(row.Id);
+                    // Имя окна — ТЕКУЩЕГО пространства: у общих панелей их два,
+                    // и галочка обязана относиться к тому окну, которое человек
+                    // сейчас видит.
+                    const std::string id = sage::editor::panelid::For(row.Id, m_workspace);
+                    const bool detached = panelwindows::Detached(id.c_str());
                     if (EditorIcons::MenuItemSelected("window", T(row.Label), detached)) {
-                        panelwindows::SetDetached(row.Id, !detached);
+                        panelwindows::SetDetached(id.c_str(), !detached);
                         // Отдельное окно ЗАКРЫТОЙ панели — это окно, которого
                         // не видно: галочка стоит, а на экране ничего не
                         // изменилось. Поэтому отрыв открывает панель заодно.
@@ -809,7 +788,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
     m_templatesPanel.Draw(*this, m_showTemplates);
     m_nineSlice.Draw(*this, m_showNineSlice);
-    m_animation.Draw(*this, &m_panels[EditorPanel::Animation]);
+    {
+        // Инструмент анимации — тоже в обоих пространствах, тоже своим окном.
+        const std::string id = sage::editor::panelid::For("Animation", m_workspace);
+        m_animation.Draw(*this, &m_panels[EditorPanel::Animation], id);
+    }
     // Профилировщик — через ту же обёртку, что и остальные панели: он тоже
     // имеет право жить своим окном системы, и панель, которую забыли обернуть,
     // молча теряет это право (см. PanelWindows.h).
