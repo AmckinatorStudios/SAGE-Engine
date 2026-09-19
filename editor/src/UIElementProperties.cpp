@@ -419,7 +419,11 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     EditorIcons::Inline(type ? type->Icon : "ui-empty");
     ImGui::SameLine(0.0f, EditorIcons::TextGap());
     ImGui::SetNextItemWidth(-90.0f);
-    if (ImGui::BeginCombo(T("Type"), xf->Type.empty() ? T("Custom") : xf->Type.c_str())) {
+    // Имя типа ПЕРЕВОДИТСЯ: «Panel» и «Vertical List» — такие же строки
+    // интерфейса, как всё остальное, и по-английски посреди русского редактора
+    // они читаются как чужие. Само значение при этом не трогаем: тип хранится
+    // и сравнивается английским ключом (см. ApplyPreset).
+    if (ImGui::BeginCombo(T("Type"), xf->Type.empty() ? T("Custom") : T(xf->Type.c_str()))) {
         std::string category;
         for (const ui::Preset& preset : ui::Presets()) {
             if (preset.Category != category) {
@@ -430,7 +434,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             // и «сделать из надписи кнопку» означает поставить те части, из
             // которых кнопка состоит. Своё положение и размер элемент при этом
             // сохраняет: человек просил сменить тип, а не переставить элемент.
-            if (ImGui::Selectable(preset.Name.c_str(), preset.Name == xf->Type)) {
+            if (ImGui::Selectable(T(preset.Name.c_str()), preset.Name == xf->Type)) {
                 host.PushUndoSnapshot();
                 const ui::Element keep = *xf;
                 ui::ApplyPreset(host.CurrentScene(), e, preset.Name);
@@ -458,12 +462,19 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     // --- РАЗДЕЛЫ, А НЕ ОДНА ПРОСТЫНЯ ----------------------------------------
     //
     // Четыре раздела отвечают на четыре разных вопроса, и это ровно те
-    // вопросы, с которыми к инспектору и приходят: ГДЕ элемент стоит, КАК
-    // выглядит ЭТОТ ТИП, какие у него ВОЗМОЖНОСТИ и ЧТО он делает. Свёрнутый
+    // вопросы, с которыми к инспектору и приходят: КАК выглядит ЭТОТ ТИП, ГДЕ
+    // элемент стоит, какие у него ВОЗМОЖНОСТИ и ЧТО он делает. Свёрнутый
     // раздел остаётся свёрнутым — правя цвета, незачем проматывать раскладку.
-    if (ImGui::CollapsingHeader(T("Layout"), ImGuiTreeNodeFlags_DefaultOpen)) {
-        DrawLayoutSection(host, e, xf, selected);
-    }
+    //
+    // ПОРЯДОК: СНАЧАЛА ТО, ЗАЧЕМ ЭЛЕМЕНТ ЗАВЕЛИ. Раскладка стояла первой, и
+    // ради самого частого дела — сменить надпись у текста, картинку у
+    // картинки — приходилось проматывать якорь, режим растяжения, размер,
+    // отступы, точку вращения, угол и порядок. Человек, открывший редактор
+    // впервые, ищет поле «Текст» и не находит его на экране вовсе.
+    //
+    // Теперь сверху свойства типа: у Text — текст, у Image — картинка, у
+    // Slider — пределы. Раскладка сразу под ними: «где стоит» спрашивают
+    // вторым вопросом, а не первым, и держат элемент чаще мышью на холсте.
 
     // СВОЙСТВА ТИПА. Здесь ровно то, из чего этот тип сделан: у надписи —
     // настройки текста, у кнопки — подложка и реакция, у полосы — шкала.
@@ -471,7 +482,8 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     //
     // Что относится к типу, а что к возможностям, решает не этот файл:
     // возможность объявляет себя сама (PartType::Extra).
-    const std::string typeTitle = xf->Type.empty() ? std::string(T("Properties")) : xf->Type;
+    const std::string typeTitle =
+        xf->Type.empty() ? std::string(T("Properties")) : std::string(T(xf->Type.c_str()));
     if (ImGui::CollapsingHeader(typeTitle.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         bool any = false;
         for (const ui::PartType& p : ui::Parts()) {
@@ -488,6 +500,10 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             HintWrapped("%s", T("This type draws nothing by itself. Build the interface from\n"
                                 "child elements, or pick another type above."));
         }
+    }
+
+    if (ImGui::CollapsingHeader(T("Layout"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        DrawLayoutSection(host, e, xf, selected);
     }
 
     if (ImGui::CollapsingHeader(T("Capabilities"))) {

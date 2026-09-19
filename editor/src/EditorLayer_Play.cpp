@@ -115,7 +115,27 @@ void EditorLayer::StartPlay() {
     m_scenePtr = m_scene.get();
     PlayContext ctx = MakePlayContext();
     if (m_play.Start(ctx) < 0) return;
-    m_game.RequestFocus(); // «игровое окно» выходит на передний план при запуске
+    FocusPlayTarget();
+}
+
+// КУДА СМОТРЕТЬ ПОСЛЕ «ИГРАТЬ» — ЗАВИСИТ ОТ ТОГО, ЧТО ЧЕЛОВЕК ДЕЛАЕТ.
+//
+// Панель Game живёт в рабочем месте сцены. Пока фокус уходил только к ней,
+// запуск из режима интерфейса не показывал ВООБЩЕ НИЧЕГО: человек верстал меню,
+// жал «Играть» — и оставался на холсте с гизмо, а игра шла в окне, которого на
+// экране нет. В режиме интерфейса передний план занимает предпросмотр: тот же
+// кадр, и по нему можно щёлкать.
+//
+// Отдельной функцией, а не строкой внутри StartPlay, потому что это решение
+// проверяется само по себе: запускать настоящую игру ради вопроса «какое окно
+// вывести вперёд» значит проверять совсем другое.
+void EditorLayer::FocusPlayTarget() {
+    if (m_workspace == EditorWorkspace::Interface) {
+        m_panels[EditorPanel::InterfacePreview] = true;
+        m_uiPreview.RequestFocus();
+    } else {
+        m_game.RequestFocus();
+    }
 }
 
 void EditorLayer::StopPlay() {
@@ -132,12 +152,29 @@ void EditorLayer::StopPlay() {
 void EditorLayer::UpdatePlayUiInput(float dt) {
     if (!m_scene) return;
     PlayUiInput in;
-    in.MouseInside = m_game.MouseInside();
-    in.MouseDown = m_game.MouseDown();
-    in.Focused = m_game.Focused();
-    in.MouseX = m_game.MouseX();
-    in.MouseY = m_game.MouseY();
-    in.TypedText = m_game.TypedText();
+    // ВВОД БЕРЁТСЯ У ТОГО ОКНА, В КОТОРОЕ СМОТРЯТ. Игровой кадр показывают
+    // двое: панель Game в режиме сцены и предпросмотр в режиме интерфейса.
+    // Пока спрашивали только первую, интерфейс, свёрстанный в режиме
+    // интерфейса, там же и не проверялся — кнопки не нажимались.
+    //
+    // Предпросмотр имеет приоритет ТОЛЬКО когда мышь над ним или он в фокусе:
+    // иначе он отнимал бы ввод у панели Game, просто оставаясь открытым.
+    const bool viaPreview = m_uiPreview.MouseInside() || m_uiPreview.Focused();
+    if (viaPreview) {
+        in.MouseInside = m_uiPreview.MouseInside();
+        in.MouseDown = m_uiPreview.MouseDown();
+        in.Focused = m_uiPreview.Focused();
+        in.MouseX = m_uiPreview.MouseX();
+        in.MouseY = m_uiPreview.MouseY();
+        in.TypedText = m_uiPreview.TypedText();
+    } else {
+        in.MouseInside = m_game.MouseInside();
+        in.MouseDown = m_game.MouseDown();
+        in.Focused = m_game.Focused();
+        in.MouseX = m_game.MouseX();
+        in.MouseY = m_game.MouseY();
+        in.TypedText = m_game.TypedText();
+    }
     in.GameWidth = m_renderer.GameWidth();
     in.GameHeight = m_renderer.GameHeight();
     in.DeltaTime = dt;

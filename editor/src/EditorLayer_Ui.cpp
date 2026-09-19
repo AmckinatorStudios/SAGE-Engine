@@ -38,6 +38,7 @@
 #include "ui/UI.h"
 #include "sage/core/Profiler.h"
 #include "EditorIcons.h"
+#include "HotkeyScope.h"
 #include "ModelMaterialImport.h"
 #include "sage/render/DebugView.h"
 #include "sage/core/Application.h"
@@ -417,6 +418,10 @@ void EditorLayer::DrawEmptyDockHint(float minX, float minY, float maxX, float ma
 }
 
 void EditorLayer::DrawDockspaceAndMenu() {
+    // Заявки на клавиши — ровно на один кадр, и сбрасываются ДО панелей: иначе
+    // забранный вчера Delete молчал бы сегодня (см. HotkeyScope.h).
+    sage::editor::hotkeys::NewFrame();
+
     // Полноэкранное окно-хост под dockspace: без рамок/заголовка, на весь
     // рабочий вьюпорт, с menu bar. Стандартный приём из демо ImGui.
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -823,7 +828,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_palette.Draw(m_commands);
 
     if (!io.WantTextInput) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Delete)) DeleteSelected();
+        // Delete — только если его не забрала панель со своим смыслом этой
+        // клавиши (анимация убирает ключ, ассеты — файл, список элементов —
+        // элемент). Без этой проверки срабатывали ОБА: человек убирал ключ в
+        // линейке времени и вместе с ним терял объект из сцены (HotkeyScope.h).
+        if (!sage::editor::hotkeys::DeleteClaimed() && ImGui::IsKeyPressed(ImGuiKey_Delete))
+            DeleteSelected();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) DuplicateSelected();
         // Ctrl+S работает ВСЕГДА, а не только у сцены с именем: у новой сцены
         // имени нет, и «горячая клавиша молча ничего не делает» — это ровно то,
