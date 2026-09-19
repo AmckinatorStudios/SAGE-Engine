@@ -288,40 +288,55 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // Показывает систему интерфейса сразу в панели Game и служит стартовой
         // точкой для своего интерфейса (правится в Inspector).
         //
-        // Собирается ИЗ ЧАСТЕЙ — так же, как это делает человек в инспекторе:
-        // панель это прямоугольник + подложка + надпись, полоса — прямоугольник
-        // + подложка + шкала.
+        // Собирается ИЗ ТИПОВ, а не из частей руками: панель это тип «Panel»,
+        // полоса — тип «Bar», и ровно так их создаёт человек в окне
+        // «Элементы». Демо, собранное в обход типов, давало бы элементы без
+        // типа — то есть показывало бы новичку ровно то состояние, из которого
+        // редактор и вывели.
         entt::registry& reg = m_scene->Registry();
         GameObject hud = m_scene->CreateEmptyObject("HUD Panel");
-        sage::ui::Element hudXf;
-        hudXf.Anchor = UIAnchor::TopLeft;
-        hudXf.Position = {16.0f, 16.0f};
-        hudXf.Size = {230.0f, 64.0f};
-        reg.emplace<sage::ui::Element>(hud.Entity(), hudXf);
-        sage::ui::Fill hudFill;
-        hudFill.Rounding = 12.0f;
-        hudFill.BorderThickness = 2.0f;
-        reg.emplace<sage::ui::Fill>(hud.Entity(), hudFill);
-        sage::ui::Label hudLabel;
-        hudLabel.Text = "SAGE UI";
-        hudLabel.Horizontal = sage::ui::Label::Align::Start;
-        reg.emplace<sage::ui::Label>(hud.Entity(), hudLabel);
+        sage::ui::ApplyPreset(*m_scene, hud.Entity(), "Panel");
+        {
+            sage::ui::Element& xf = reg.get<sage::ui::Element>(hud.Entity());
+            xf.Anchor = UIAnchor::TopLeft;
+            xf.Position = {16.0f, 16.0f};
+            xf.Size = {230.0f, 64.0f};
+            sage::ui::Fill& fill = reg.get<sage::ui::Fill>(hud.Entity());
+            fill.Rounding = 12.0f;
+            fill.BorderThickness = 2.0f;
+        }
+        // Надпись — ОТДЕЛЬНЫМ ЭЛЕМЕНТОМ внутри панели, как её и строят: панель
+        // группирует, текст показывает текст. «Подложка со встроенной надписью»
+        // — то, от чего система типов и уходит.
+        GameObject title = m_scene->CreateEmptyObject("Title");
+        sage::ui::ApplyPreset(*m_scene, title.Entity(), "Text");
+        {
+            sage::ui::Element& xf = reg.get<sage::ui::Element>(title.Entity());
+            xf.Anchor = UIAnchor::TopLeft;
+            xf.Position = {12.0f, 8.0f};
+            xf.Size = {200.0f, 24.0f};
+            sage::ui::Label& lab = reg.get<sage::ui::Label>(title.Entity());
+            lab.Text = "SAGE UI";
+            lab.Horizontal = sage::ui::Label::Align::Start;
+            lab.AutoWidth = false;
+        }
+        m_scene->SetParent(title.Entity(), hud.Entity());
 
         GameObject hp = m_scene->CreateEmptyObject("HP Bar");
-        sage::ui::Element hpXf;
-        hpXf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
-        hpXf.Position = {12.0f, 8.0f};
-        hpXf.Size = {206.0f, 18.0f};
-        reg.emplace<sage::ui::Element>(hp.Entity(), hpXf);
-        sage::ui::Fill hpFill;
-        hpFill.Rounding = 8.0f;
-        hpFill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
-        reg.emplace<sage::ui::Fill>(hp.Entity(), hpFill);
-        sage::ui::Bar hpBar;
-        hpBar.Value = 0.72f;
-        hpBar.FillColor = {0.85f, 0.30f, 0.30f, 1.0f};
-        hpBar.Smoothing = 3.0f;
-        reg.emplace<sage::ui::Bar>(hp.Entity(), hpBar);
+        sage::ui::ApplyPreset(*m_scene, hp.Entity(), "Bar");
+        {
+            sage::ui::Element& xf = reg.get<sage::ui::Element>(hp.Entity());
+            xf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
+            xf.Position = {12.0f, 8.0f};
+            xf.Size = {206.0f, 18.0f};
+            sage::ui::Fill& fill = reg.get<sage::ui::Fill>(hp.Entity());
+            fill.Rounding = 8.0f;
+            fill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
+            sage::ui::Bar& bar = reg.get<sage::ui::Bar>(hp.Entity());
+            bar.Value = 0.72f;
+            bar.FillColor = {0.85f, 0.30f, 0.30f, 1.0f};
+            bar.Smoothing = 3.0f;
+        }
         m_scene->SetParent(hp.Entity(), hud.Entity());
 
     } else if (content == ProjectTemplateKind::UIStarter) {

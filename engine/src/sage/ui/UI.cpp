@@ -1,4 +1,5 @@
 #include <utility>
+#include "sage/ui/UIPart.h"   // SAGE_UI_TEXT: строки для человека помечены и для сборщика переводов
 #include "sage/ui/UI.h"
 
 #include <algorithm>
@@ -190,10 +191,16 @@ std::vector<Preset> BuildPresets() {
         // Без него «создать просто элемент» приходилось делать, создав панель и
         // сняв с неё заливку.
         Preset& p = add("Empty");
+        p.Category = "Basic";
+        p.Icon = "ui-empty";
+        p.Hint = SAGE_UI_TEXT("An empty node: an anchor for a group, a container, something a script will fill");
         p.Box.Size = {120.0f, 60.0f};
     }
     {
         Preset& p = add("Panel");
+        p.Category = "Basic";
+        p.Icon = "ui-panel";
+        p.Hint = SAGE_UI_TEXT("A background block: it groups other elements");
         p.Box.Size = {260.0f, 140.0f};
         p.HasFill = true;
     }
@@ -202,6 +209,9 @@ std::vector<Preset> BuildPresets() {
         // внутри. Не «подложка со встроенным текстом»: надпись видно в дереве,
         // её можно подвинуть, покрасить, заменить значком или убрать.
         Preset& p = add("Button");
+        p.Category = "Controls";
+        p.Icon = "ui-button";
+        p.Hint = SAGE_UI_TEXT("A backing that reacts to the mouse, with a caption inside it");
         p.Box.Size = {200.0f, 52.0f};
         p.HasFill = true;
         p.FillStyle.Color = {0.16f, 0.22f, 0.34f, 0.95f};
@@ -211,6 +221,9 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Text");
+        p.Category = "Basic";
+        p.Icon = "ui-text";
+        p.Hint = SAGE_UI_TEXT("A line or a paragraph of text");
         p.Box.Size = {220.0f, 40.0f};
         p.HasLabel = true;
         p.LabelStyle.Text = "Text";
@@ -218,11 +231,17 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Image");
+        p.Category = "Basic";
+        p.Icon = "ui-image";
+        p.Hint = SAGE_UI_TEXT("A picture from the project");
         p.Box.Size = {160.0f, 160.0f};
         p.HasImage = true;
     }
     {
         Preset& p = add("Bar");
+        p.Category = "Controls";
+        p.Icon = "ui-bar";
+        p.Hint = SAGE_UI_TEXT("A fill level: health, loading, progress");
         p.Box.Size = {240.0f, 26.0f};
         p.HasFill = true;
         p.FillStyle.Rounding = 6.0f;
@@ -234,6 +253,9 @@ std::vector<Preset> BuildPresets() {
         // Раньше подпись жила внутри и начиналась «за квадратиком» по правилу,
         // зашитому в отрисовку; теперь её можно поставить и слева, и под галкой.
         Preset& p = add("Checkbox");
+        p.Category = "Controls";
+        p.Icon = "ui-check";
+        p.Hint = SAGE_UI_TEXT("An on/off switch with a caption next to it");
         p.Box.Size = {200.0f, 36.0f};
         p.HasInteractable = true;
         p.HasRange = true;
@@ -253,6 +275,9 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Slider");
+        p.Category = "Controls";
+        p.Icon = "ui-slider";
+        p.Hint = SAGE_UI_TEXT("A value picked by dragging");
         p.Box.Size = {240.0f, 30.0f};
         p.HasInteractable = true;
         p.HasRange = true;
@@ -261,6 +286,9 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Input Field");
+        p.Category = "Controls";
+        p.Icon = "ui-input";
+        p.Hint = SAGE_UI_TEXT("A text field edited from the keyboard");
         p.Box.Size = {260.0f, 40.0f};
         p.HasFill = true;
         p.HasLabel = true;
@@ -272,6 +300,9 @@ std::vector<Preset> BuildPresets() {
     {
         // Новые заготовки — то, что раньше собиралось руками из пяти сущностей.
         Preset& p = add("Vertical List");
+        p.Category = "Containers";
+        p.Icon = "ui-list";
+        p.Hint = SAGE_UI_TEXT("Children stand in a column and do not leave the edges");
         p.Box.Size = {280.0f, 320.0f};
         p.HasFill = true;
         p.HasMask = true; // содержимое не вылезает за края списка
@@ -280,6 +311,9 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Toolbar");
+        p.Category = "Containers";
+        p.Icon = "ui-toolbar";
+        p.Hint = SAGE_UI_TEXT("Children stand in a row across the top");
         p.Box.Anchor = UIAnchor::TopCenter;
         p.Box.Size = {600.0f, 56.0f};
         p.Box.Mode = Element::Stretch::Horizontal;
@@ -291,6 +325,9 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Grid");
+        p.Category = "Containers";
+        p.Icon = "ui-grid";
+        p.Hint = SAGE_UI_TEXT("Children stand in columns and wrap");
         p.Box.Size = {320.0f, 320.0f};
         p.HasFill = true;
         p.HasMask = true;
@@ -300,6 +337,9 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add("Screen");
+        p.Category = "Screens";
+        p.Icon = "ui-screen";
+        p.Hint = SAGE_UI_TEXT("A full-screen backing: a menu, a pause, a dimmer");
         p.Box.Anchor = UIAnchor::TopLeft;
         p.Box.Mode = Element::Stretch::Both;
         p.Box.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -310,12 +350,12 @@ std::vector<Preset> BuildPresets() {
     return out;
 }
 
+} // namespace
+
 const std::vector<Preset>& Presets() {
     static const std::vector<Preset> presets = BuildPresets();
     return presets;
 }
-
-} // namespace
 
 const std::vector<std::string>& PresetNames() {
     static const std::vector<std::string> names = [] {

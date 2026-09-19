@@ -401,30 +401,81 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         ImGui::Separator();
     }
 
+    // --- ЧТО ЭТО ЗА ЭЛЕМЕНТ ------------------------------------------------
+    //
+    // ТИП — ПЕРВОЕ, ЧТО ВИДНО, и это не украшение шапки. Раньше на его месте
+    // стоял мешок галок, и ответить на вопрос «что это» можно было, только
+    // прочитав, какие из тринадцати включены. Теперь тип написан прямо, и от
+    // него зависит всё остальное окно.
+    // Элемент, собранный в обход типов (скриптом, демо-сценой, игрой),
+    // приходит без типа. Опознаём его по набору частей — тем же правилом, что
+    // и миграция сцен, — и ЗАПИСЫВАЕМ: иначе тип пришлось бы выводить заново
+    // при каждом взгляде, и он не попал бы в сохранённую сцену.
+    if (xf->Type.empty()) {
+        const std::string guessed = ui::InferType(reg, e);
+        if (!guessed.empty()) xf->Type = guessed;
+    }
+    const ui::Preset* type = ui::FindPreset(xf->Type);
+    EditorIcons::Inline(type ? type->Icon : "ui-empty");
+    ImGui::SameLine(0.0f, EditorIcons::TextGap());
+    ImGui::SetNextItemWidth(-90.0f);
+    if (ImGui::BeginCombo(T("Type"), xf->Type.empty() ? T("Custom") : xf->Type.c_str())) {
+        std::string category;
+        for (const ui::Preset& preset : ui::Presets()) {
+            if (preset.Category != category) {
+                category = preset.Category;
+                ImGui::SeparatorText(T(category.c_str()));
+            }
+            // СМЕНА ТИПА ПЕРЕСОБИРАЕТ ЭЛЕМЕНТ: тип — это и есть его устройство,
+            // и «сделать из надписи кнопку» означает поставить те части, из
+            // которых кнопка состоит. Своё положение и размер элемент при этом
+            // сохраняет: человек просил сменить тип, а не переставить элемент.
+            if (ImGui::Selectable(preset.Name.c_str(), preset.Name == xf->Type)) {
+                host.PushUndoSnapshot();
+                const ui::Element keep = *xf;
+                ui::ApplyPreset(host.CurrentScene(), e, preset.Name);
+                if (ui::Element* now = reg.try_get<ui::Element>(e)) {
+                    now->Anchor = keep.Anchor;
+                    now->Mode = keep.Mode;
+                    now->Position = keep.Position;
+                    now->Size = keep.Size;
+                    now->Margin = keep.Margin;
+                    now->Pivot = keep.Pivot;
+                    now->Rotation = keep.Rotation;
+                    now->Order = keep.Order;
+                    now->Visible = keep.Visible;
+                    now->Active = keep.Active;
+                    now->Locked = keep.Locked;
+                }
+            }
+            if (preset.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(preset.Hint));
+        }
+        ImGui::EndCombo();
+    }
+    if (type && type->Hint) HintWrapped("%s", T(type->Hint));
+    ImGui::Separator();
+
     // --- РАЗДЕЛЫ, А НЕ ОДНА ПРОСТЫНЯ ----------------------------------------
     //
-    // Полей у собранного элемента под сорок, и шли они одним списком: сначала
-    // заготовка, потом галки частей, потом положение, потом поля каждой части
-    // подряд. Найти в нём нужное можно было только прокруткой сверху донизу,
-    // каждый раз заново.
-    //
     // Четыре раздела отвечают на четыре разных вопроса, и это ровно те
-    // вопросы, с которыми к инспектору и приходят: ГДЕ элемент стоит, КАК он
-    // выглядит, ИЗ ЧЕГО он сделан, ЧТО он делает. Свёрнутый раздел остаётся
-    // свёрнутым — правя цвета, незачем каждый раз проматывать раскладку.
-    //
-    // Раздел «как выглядит» и раздел «из чего сделан» разделены НЕ СПИСКОМ
-    // ЧАСТЕЙ В РЕДАКТОРЕ: рисующая часть объявляет функцию отрисовки, и по её
-    // наличию видно, оформление это или поведение. Часть, пришедшая из игры,
-    // встаёт в нужный раздел сама.
+    // вопросы, с которыми к инспектору и приходят: ГДЕ элемент стоит, КАК
+    // выглядит ЭТОТ ТИП, какие у него ВОЗМОЖНОСТИ и ЧТО он делает. Свёрнутый
+    // раздел остаётся свёрнутым — правя цвета, незачем проматывать раскладку.
     if (ImGui::CollapsingHeader(T("Layout"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawLayoutSection(host, e, xf, selected);
     }
 
-    if (ImGui::CollapsingHeader(T("Appearance"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    // СВОЙСТВА ТИПА. Здесь ровно то, из чего этот тип сделан: у надписи —
+    // настройки текста, у кнопки — подложка и реакция, у полосы — шкала.
+    // Включать и выключать тут нечего: это не набор галок, а устройство типа.
+    //
+    // Что относится к типу, а что к возможностям, решает не этот файл:
+    // возможность объявляет себя сама (PartType::Extra).
+    const std::string typeTitle = xf->Type.empty() ? std::string(T("Properties")) : xf->Type;
+    if (ImGui::CollapsingHeader(typeTitle.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         bool any = false;
         for (const ui::PartType& p : ui::Parts()) {
-            if (!p.Fields || !p.Draw || !p.Has(reg, e)) continue;
+            if (!p.Fields || p.Extra || !p.Has(reg, e)) continue;
             void* data = p.GetMutable(reg, e);
             if (!data) continue;
             any = true;
@@ -433,10 +484,13 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             DrawPartFields(host, obj, ctx, p, data, /*bindings=*/false, selected);
             ImGui::PopID();
         }
-        if (!any) HintWrapped("%s", T("Nothing is drawn yet. Add a part in Components."));
+        if (!any) {
+            HintWrapped("%s", T("This type draws nothing by itself. Build the interface from\n"
+                                "child elements, or pick another type above."));
+        }
     }
 
-    if (ImGui::CollapsingHeader(T("Components"))) {
+    if (ImGui::CollapsingHeader(T("Capabilities"))) {
         DrawComponentsSection(host, obj, ctx, e, selected);
     }
 
@@ -460,7 +514,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         }
         if (ImGui::CollapsingHeader(T("Events"), anyEvents ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
             if (!anyEvents) {
-                HintWrapped("%s", T("Events live on the Interactable part. Add it in Components."));
+                HintWrapped("%s", T("Events come with the Interaction capability. Turn it on above."));
             }
             for (const ui::PartType& p : ui::Parts()) {
                 if (!p.Fields || !p.Has(reg, e)) continue;
@@ -487,65 +541,61 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
 namespace {
 
 // --- Раздел «Из чего сделан» -------------------------------------------------
+// --- Раздел «Возможности» ----------------------------------------------------
+//
+// ЗДЕСЬ БЫЛ МЕШОК ГАЛОК. Тринадцать переключателей — «Заливка», «Текст»,
+// «Картинка», «Полоса», «Значок»… — и элемент был ровно их набором. Три беды
+// сразу, и все три молчаливые:
+//
+//   • «Кнопка» существовала только как знание человека о том, какие четыре
+//     галки надо поставить. Снятая по ошибке подложка превращала её в
+//     прямоугольник, и ни одна строка об этом не говорила.
+//   • Инспектор показывал объединение всех свойств всех включённых частей: у
+//     надписи спрашивали толщину рамки, у полосы — подсказку поля ввода.
+//   • На вопрос «что это за элемент» ответить было нечем — ни редактору, ни
+//     скрипту, ни человеку.
+//
+// Теперь элемент ЗНАЕТ СВОЙ ТИП, а устройство типа (подложка у панели, надпись
+// у текста) не переключается вовсе: оно и ЕСТЬ этот тип. Здесь остались только
+// ВОЗМОЖНОСТИ — добавки, осмысленные почти к любому типу и не нужные по
+// умолчанию ни одному: маска, реакция на мышь, раскладка детей, прокрутка.
+//
+// Что возможность, а что устройство типа, объявляет САМА ЧАСТЬ
+// (PartType::Extra). Своего списка частей у редактора по-прежнему нет, и часть
+// из игры встаёт в нужное место сама.
 void DrawComponentsSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                            entt::entity e, int selected) {
     entt::registry& reg = host.CurrentScene().Registry();
-    // --- Заготовка ----------------------------------------------------------
-    //
-    // Собрать кнопку — значит поставить четыре компонента с нужными значениями.
-    // Знать это наизусть человек не обязан: заготовка делает всё разом, и это
-    // ТА ЖЕ заготовка, что у скриптов (sage/ui/UI.h).
-    if (ImGui::BeginCombo(T("Preset"), T("Apply a preset..."))) {
-        for (const std::string& name : ui::PresetNames()) {
-            if (ImGui::Selectable(name.c_str())) {
-                host.PushUndoSnapshot();
-                ui::ApplyPreset(host.CurrentScene(), e, name);
-            }
-        }
-        ImGui::EndCombo();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Replaces the element parts with the preset ones"));
-    }
 
-    // --- Части элемента -----------------------------------------------------
-    //
-    // Здесь видно, ИЗ ЧЕГО элемент сделан, и здесь же это меняется. Раньше на
-    // этом месте стоял выпадающий список «вид элемента» из восьми значений, и
-    // собрать шкалу с иконкой и подписью было нельзя: вид один, а нужно три.
-    ImGui::SeparatorText(T("Parts"));
-    // СПИСОК ЧАСТЕЙ — ИЗ РЕЕСТРА ДВИЖКА, а не из этого файла.
-    //
-    // Здесь стоял свой список из тринадцати галок. Он был четвёртым по счёту
-    // списком одних и тех же частей (отрисовка, запись, чтение, редактор), и
-    // добавить свою часть значило не забыть ни один. Теперь редактор не знает
-    // ни одной части поимённо: он перебирает sage::ui::Parts(). Часть, которую
-    // игра зарегистрировала у себя, появляется здесь сама.
-    {
-        int column = 0;
-        for (const ui::PartType& p : ui::Parts()) {
-            if (!p.Fields) continue; // служебные записи без полей человеку не нужны
-            if (column++ % 3 != 0) ImGui::SameLine();
-            bool on = p.Has(reg, e);
-            if (ImGui::Checkbox(T(p.Title), &on)) {
-                host.PushUndoSnapshot();
-                if (on) p.Add(reg, e);
-                else p.Remove(reg, e);
-            }
-            if (p.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(p.Hint));
-        }
-        ImGui::NewLine();
-    }
+    HintWrapped("%s", T("Extras that any element may have. What the type itself is made of\n"
+                        "is not switched here — it is the type."));
 
-    // Поля невидимых частей (поведение, раскладка, маска) — здесь же: их
-    // немного, и живут они рядом с галками, которыми эти части включают.
     for (const ui::PartType& p : ui::Parts()) {
-        if (!p.Fields || p.Draw || !p.Has(reg, e)) continue;
-        void* data = p.GetMutable(reg, e);
-        if (!data) continue;
-        ImGui::SeparatorText(T(p.Title));
+        if (!p.Fields || !p.Extra) continue;
         ImGui::PushID(p.Id);
-        DrawPartFields(host, obj, ctx, p, data, /*bindings=*/false, selected);
+        bool on = p.Has(reg, e);
+        // Значок перед галкой: список из пяти одинаковых строк читают целиком,
+        // а «маску» от «прокрутки» отличают по рисунку до чтения.
+        if (ImGui::Checkbox("##on", &on)) {
+            host.PushUndoSnapshot();
+            if (on) p.Add(reg, e);
+            else p.Remove(reg, e);
+        }
+        ImGui::SameLine();
+        EditorIcons::Inline(p.Icon ? p.Icon : "cube");
+        ImGui::SameLine(0.0f, EditorIcons::TextGap());
+        ImGui::TextUnformatted(T(p.Title));
+        if (p.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(p.Hint));
+
+        // Поля возможности — СРАЗУ ПОД НЕЙ, а не отдельным разделом ниже:
+        // включил прокрутку — тут же и настроил, не разыскивая её по окну.
+        if (on) {
+            if (void* data = p.GetMutable(reg, e)) {
+                ImGui::Indent();
+                DrawPartFields(host, obj, ctx, p, data, /*bindings=*/false, selected);
+                ImGui::Unindent();
+            }
+        }
         ImGui::PopID();
     }
 }

@@ -200,6 +200,32 @@ struct Solved {
     bool Visible = true;
 };
 
+// Насколько сдвинуть содержимое прокручиваемого элемента.
+//
+// ЗАПОМИНАЕТ РАЗМЕР СОДЕРЖИМОГО В САМОМ КОМПОНЕНТЕ: предел прокрутки
+// («дальше своих границ не пускать») известен только после раскладки, а
+// применить его надо к тому же кадру. Без этого список либо не докручивался
+// до конца, либо уезжал в пустоту — и то и другое выглядит как сломанная
+// прокрутка, а не как выключенный флажок.
+glm::vec2 ScrollShift(entt::registry& reg, entt::entity ent, const UIRect& r,
+                      glm::vec2 content) {
+    Scroll* s = reg.try_get<Scroll>(ent);
+    if (!s) return glm::vec2(0.0f);
+    if (content.x > 0.0f || content.y > 0.0f) s->Content = content;
+    glm::vec2 off = s->Offset;
+    if (!s->Horizontal) off.x = 0.0f;
+    if (!s->Vertical) off.y = 0.0f;
+    if (s->Clamp) {
+        const float maxX = std::max(0.0f, s->Content.x - r.w);
+        const float maxY = std::max(0.0f, s->Content.y - r.h);
+        off.x = glm::clamp(off.x, 0.0f, maxX);
+        off.y = glm::clamp(off.y, 0.0f, maxY);
+        s->Offset = glm::vec2(s->Horizontal ? off.x : s->Offset.x,
+                              s->Vertical ? off.y : s->Offset.y);
+    }
+    return -off;   // содержимое уезжает ВВЕРХ, когда крутят вниз
+}
+
 // Рекурсивный обход: считает прямоугольники, применяет раскладку, маски и
 // групповые свойства. forced — прямоугольник, назначенный раскладкой родителя
 // (nullptr — элемент стоит по своему якорю).
@@ -267,6 +293,16 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     bool childClipped = clipped;
     UIRect childClip = clip;
     const Mask* mask = reg.try_get<Mask>(ent);
+    // ПРОКРУТКА РЕЖЕТ САМА, даже без маски. Содержимое, уехавшее за край
+    // элемента, и есть то, ради чего прокрутку включают: не обрезать его
+    // значит нарисовать весь список поверх соседних панелей — то есть
+    // получить не прокрутку, а кашу. Отдельной галкой это не делается:
+    // «прокрутка без обрезки» не значит ничего.
+    const Scroll* scroll = reg.try_get<Scroll>(ent);
+    if (scroll) {
+        childClip = childClipped ? Intersect(childClip, r) : r;
+        childClipped = true;
+    }
     if (mask) {
         const UIRect window = MaskWindow(*mask, r);
         if (!mask->ShowOutside) {
@@ -317,16 +353,31 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                 ApplyLayout(*layout, r, slots);
             }
         }
+        // СДВИГ ПРОКРУТКОЙ — В САМОМ КОНЦЕ, к готовым местам. Считать
+        // раскладку в сдвинутых координатах нельзя: от них зависят и
+        // выравнивание, и перенос по столбцам, и «по содержимому», — список
+        // менял бы форму от того, насколько его прокрутили.
+        const glm::vec2 shift = ScrollShift(reg, ent, r, content);
         for (size_t i = 0; i < kids.size(); ++i) {
-            const UIRect kr{slots[i].Pos.x, slots[i].Pos.y, slots[i].Size.x, slots[i].Size.y};
+            const UIRect kr{slots[i].Pos.x + shift.x, slots[i].Pos.y + shift.y, slots[i].Size.x,
+                            slots[i].Size.y};
             SolveSubtree(scene, kids[i], r, ui, childClipped, childClip, myAlpha, myInteractive,
                          &kr, includeHidden, out);
         }
         return;
     }
 
+    // Без раскладки дети стоят по своим якорям ВНУТРИ родителя, и сдвинуть их
+    // можно, сдвинув сам прямоугольник, от которого они считаются. Обрезка при
+    // этом остаётся по настоящему элементу — иначе уехало бы и окно.
+    UIRect inner = r;
+    if (scroll) {
+        const glm::vec2 shift = ScrollShift(reg, ent, r, glm::vec2(0.0f));
+        inner.x += shift.x;
+        inner.y += shift.y;
+    }
     for (auto k : kids) {
-        SolveSubtree(scene, k, r, ui, childClipped, childClip, myAlpha, myInteractive, nullptr,
+        SolveSubtree(scene, k, inner, ui, childClipped, childClip, myAlpha, myInteractive, nullptr,
                      includeHidden, out);
     }
 }
@@ -484,6 +535,34 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (!it.Interactive || !usable(it.Entity)) continue;
         if (it.Clipped && !PointIn(it.Clip, input.Mouse)) continue;
         if (PointIn(it.Rect, input.Mouse)) hovered = it.Entity;
+    }
+
+    // --- КОЛЕСО: ПРОКРУТКА ---------------------------------------------------
+    //
+    // Ищется САМЫЙ ВЕРХНИЙ прокручиваемый под курсором, и не важно, ловит ли он
+    // мышь: список с прокруткой обычно из неё и состоит — панель, а внутри
+    // кнопки. Требовать от него ещё и Interactable значило бы «крутится только
+    // то, что нажимается», а это разные вопросы.
+    //
+    // Вложенные прокрутки: крутится ВНУТРЕННЯЯ, потому что items идут в порядке
+    // отрисовки, и последний совпавший — самый глубокий. Ровно этого и ждут:
+    // курсор стоит над внутренним списком.
+    if (input.Wheel != 0.0f) {
+        Scroll* target = nullptr;
+        for (const Solved& it : items) {
+            if (it.Clipped && !PointIn(it.Clip, input.Mouse)) continue;
+            if (!PointIn(it.Rect, input.Mouse)) continue;
+            if (Scroll* sc = reg.try_get<Scroll>(it.Entity)) target = sc;
+        }
+        if (target) {
+            // Вертикаль в приоритете: колесо у мыши одно, и список, у которого
+            // разрешены обе оси, крутят вниз, а не вбок.
+            if (target->Vertical) target->Offset.y -= input.Wheel * target->Speed;
+            else if (target->Horizontal) target->Offset.x -= input.Wheel * target->Speed;
+            // Щелчок колеса СЪЕДЕН интерфейсом: иначе тот же щелчок отъедет
+            // камерой сцены, и список прокрутится вместе с миром за ним.
+            result.WantsMouse = true;
+        }
     }
 
     // СВЯЗИ СОБЫТИЙ. Кнопка делает то, что у неё настроено, САМА — не дожидаясь

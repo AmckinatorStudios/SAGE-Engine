@@ -684,6 +684,9 @@ void PlayerLayer::UpdateUiInput(float dt) {
     m_uiInput.MouseDown = down && !captured;
     m_uiMouseWasDown = down;
     m_uiInput.DeltaTime = dt;
+    // Колесо — прокрутке списков. Захваченный курсор означает обзор, и колесо
+    // там принадлежит камере, а не интерфейсу.
+    m_uiInput.Wheel = captured ? 0.0f : mouse.Wheel();
 
     m_uiResult = sage::ui::UpdateSceneUI(*m_scene, m_uiInput, m_uiWidth, m_uiHeight);
     ResetUiEdits();

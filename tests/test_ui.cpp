@@ -1774,3 +1774,220 @@ TEST(ui_fields_hide_outside_their_mode) {
     // Поле без условия видно в любом режиме.
     CHECK_TRUE(sage::ui::FieldVisible(*image->Fields, *tint, &img));
 }
+
+// ===========================================================================
+//  ТИП ЭЛЕМЕНТА И ВОЗМОЖНОСТИ
+// ===========================================================================
+//
+// Раньше типа не было: элемент был набором включаемых галок, и «кнопка»
+// существовала только как знание человека о том, какие четыре надо поставить.
+// Теперь тип записан в самом элементе, а части делятся на устройство типа и
+// возможности, которые добавляют отдельно.
+
+TEST(ui_apply_preset_writes_the_type) {
+    Scene scene("types");
+    GameObject e = scene.CreateEmptyObject("Кнопка");
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, e.Entity(), "Button"));
+    const sage::ui::Element& box = scene.Registry().get<sage::ui::Element>(e.Entity());
+    CHECK_TRUE(box.Type == "Button");
+    // И части кнопки на месте: тип — это ИМЯ устройства, а не подпись вместо него.
+    CHECK_TRUE(scene.Registry().all_of<sage::ui::Fill>(e.Entity()));
+    CHECK_TRUE(scene.Registry().all_of<sage::ui::Interactable>(e.Entity()));
+}
+
+TEST(ui_infer_type_reads_a_hand_built_element) {
+    // Элемент, собранный в обход типов (скриптом, демо-сценой, игрой), приходит
+    // без типа, и опознать его надо тем же правилом, по которому его читал
+    // человек, глядя на галки.
+    Scene scene("infer");
+    entt::registry& reg = scene.Registry();
+
+    GameObject panel = scene.CreateEmptyObject("П");
+    reg.emplace<sage::ui::Element>(panel.Entity());
+    reg.emplace<sage::ui::Fill>(panel.Entity());
+    CHECK_TRUE(sage::ui::InferType(reg, panel.Entity()) == "Panel");
+
+    // Подложка + реакция — это уже кнопка: именно этим она и отличается от
+    // панели, а не «наличием надписи внутри».
+    reg.emplace<sage::ui::Interactable>(panel.Entity());
+    CHECK_TRUE(sage::ui::InferType(reg, panel.Entity()) == "Button");
+
+    GameObject text = scene.CreateEmptyObject("Т");
+    reg.emplace<sage::ui::Element>(text.Entity());
+    reg.emplace<sage::ui::Label>(text.Entity());
+    CHECK_TRUE(sage::ui::InferType(reg, text.Entity()) == "Text");
+
+    GameObject empty = scene.CreateEmptyObject("Пусто");
+    reg.emplace<sage::ui::Element>(empty.Entity());
+    CHECK_TRUE(sage::ui::InferType(reg, empty.Entity()) == "Empty");
+}
+
+TEST(ui_infer_type_prefers_the_most_specific_set) {
+    // У поля ввода есть и подложка, и надпись, и реакция. Начни разбор с
+    // подложки — и каждое поле ввода стало бы кнопкой.
+    Scene scene("specific");
+    entt::registry& reg = scene.Registry();
+    GameObject input = scene.CreateEmptyObject("Поле");
+    reg.emplace<sage::ui::Element>(input.Entity());
+    reg.emplace<sage::ui::Fill>(input.Entity());
+    reg.emplace<sage::ui::Label>(input.Entity());
+    reg.emplace<sage::ui::Interactable>(input.Entity());
+    reg.emplace<sage::ui::TextInput>(input.Entity());
+    CHECK_TRUE(sage::ui::InferType(reg, input.Entity()) == "Input Field");
+}
+
+TEST(ui_parts_split_into_type_and_capabilities) {
+    // ГРАНИЦА ОБЪЯВЛЕНА САМОЙ ЧАСТЬЮ, а не списком в редакторе. Подложка,
+    // надпись и картинка — устройство типа: их не включают, они и ЕСТЬ тип.
+    // Маска, реакция, раскладка и прокрутка — добавки к любому типу.
+    auto isExtra = [](const char* id) {
+        const sage::ui::PartType* p = sage::ui::FindPart(id);
+        return p && p->Extra;
+    };
+    CHECK_TRUE(isExtra("mask"));
+    CHECK_TRUE(isExtra("interactable"));
+    CHECK_TRUE(isExtra("layout"));
+    CHECK_TRUE(isExtra("scroll"));
+
+    auto isOwn = [](const char* id) {
+        const sage::ui::PartType* p = sage::ui::FindPart(id);
+        return p && !p->Extra;
+    };
+    CHECK_TRUE(isOwn("fill"));
+    CHECK_TRUE(isOwn("label"));
+    CHECK_TRUE(isOwn("image"));
+    CHECK_TRUE(isOwn("bar"));
+}
+
+TEST(ui_every_preset_declares_a_category_and_an_icon) {
+    // Категория и значок живут В ЗАГОТОВКЕ: список типов — это и есть меню
+    // создания, и тип без категории не попал бы ни в один раздел, то есть
+    // создать его было бы нечем.
+    CHECK_TRUE(!sage::ui::Presets().empty());
+    for (const sage::ui::Preset& p : sage::ui::Presets()) {
+        CHECK_TRUE(!p.Name.empty());
+        CHECK_TRUE(!p.Category.empty());
+        CHECK_TRUE(p.Icon != nullptr && *p.Icon != '\0');
+        CHECK_TRUE(p.Hint != nullptr);
+    }
+}
+
+// ===========================================================================
+//  ПРОКРУТКА
+// ===========================================================================
+
+TEST(ui_scroll_moves_the_children_and_clamps) {
+    // Прокрутка — это СДВИГ ДЕТЕЙ, а не вторая система координат: дети
+    // считаются там же, где всегда, и в конце сдвигаются. Проверяем по
+    // настоящей раскладке сцены, а не по полю компонента: поле можно выставить
+    // и не применить, и выглядело бы это как «прокрутка не работает».
+    Scene scene("scroll");
+    entt::registry& reg = scene.Registry();
+
+    GameObject list = scene.CreateEmptyObject("Список");
+    sage::ui::Element listBox;
+    listBox.Anchor = UIAnchor::TopLeft;
+    listBox.Position = {0.0f, 0.0f};
+    listBox.Size = {200.0f, 100.0f};
+    reg.emplace<sage::ui::Element>(list.Entity(), listBox);
+    sage::ui::Scroll sc;
+    sc.Vertical = true;
+    sc.Clamp = false;          // предел проверяем отдельно
+    sc.Offset = {0.0f, 30.0f};
+    reg.emplace<sage::ui::Scroll>(list.Entity(), sc);
+
+    GameObject row = scene.CreateEmptyObject("Строка");
+    sage::ui::Element rowBox;
+    rowBox.Anchor = UIAnchor::TopLeft;
+    rowBox.Position = {0.0f, 50.0f};
+    rowBox.Size = {180.0f, 20.0f};
+    reg.emplace<sage::ui::Element>(row.Entity(), rowBox);
+    scene.SetParent(row.Entity(), list.Entity());
+
+    auto rectOf = [&](entt::entity e) {
+        for (const sage::ui::ElementRect& r : sage::ui::SolveSceneRects(scene, 800, 600, true))
+            if (r.Entity == e) return r.Rect;
+        return sage::ui::UIRect{};
+    };
+    // Строка стояла бы на y = 50; прокрутили на 30 вниз — значит уехала вверх.
+    CHECK_NEAR(rectOf(row.Entity()).y, 20.0f, 0.01f);
+
+    // Ось, которую не разрешили, не двигает ничего: иначе содержимое уехало бы
+    // туда, откуда его не вернуть колесом.
+    reg.get<sage::ui::Scroll>(list.Entity()).Offset = {40.0f, 0.0f};
+    CHECK_NEAR(rectOf(row.Entity()).x, 0.0f, 0.01f);
+}
+
+TEST(ui_scroll_clamp_stops_at_the_content_edge) {
+    // «Не пускать за края» считается от размера СОДЕРЖИМОГО, а он известен
+    // только после раскладки. Без этого список либо не докручивался до конца,
+    // либо уезжал в пустоту.
+    Scene scene("clamp");
+    entt::registry& reg = scene.Registry();
+
+    GameObject list = scene.CreateEmptyObject("Список");
+    sage::ui::Element listBox;
+    listBox.Anchor = UIAnchor::TopLeft;
+    listBox.Position = {0.0f, 0.0f};
+    listBox.Size = {200.0f, 100.0f};
+    reg.emplace<sage::ui::Element>(list.Entity(), listBox);
+    sage::ui::Scroll sc;
+    sc.Clamp = true;
+    reg.emplace<sage::ui::Scroll>(list.Entity(), sc);
+    sage::ui::Stack stack;
+    stack.Direction = sage::ui::Stack::Flow::Vertical;
+    stack.Spacing = 0.0f;
+    reg.emplace<sage::ui::Stack>(list.Entity(), stack);
+
+    // Четыре строки по 40 — содержимое 160 при окне 100: докрутить можно на 60.
+    for (int i = 0; i < 4; ++i) {
+        GameObject row = scene.CreateEmptyObject("Строка");
+        sage::ui::Element rowBox;
+        rowBox.Size = {180.0f, 40.0f};
+        reg.emplace<sage::ui::Element>(row.Entity(), rowBox);
+        scene.SetParent(row.Entity(), list.Entity());
+    }
+
+    // Первый проход считает содержимое, второй применяет к нему предел: размер
+    // содержимого известен только после раскладки, и требовать его заранее
+    // значит требовать знать ответ до вопроса.
+    reg.get<sage::ui::Scroll>(list.Entity()).Offset = {0.0f, 500.0f};
+    sage::ui::SolveSceneRects(scene, 800, 600, true);
+    sage::ui::SolveSceneRects(scene, 800, 600, true);
+    CHECK_NEAR(reg.get<sage::ui::Scroll>(list.Entity()).Offset.y, 60.0f, 0.5f);
+
+    // И назад за начало тоже не пускает.
+    reg.get<sage::ui::Scroll>(list.Entity()).Offset = {0.0f, -200.0f};
+    sage::ui::SolveSceneRects(scene, 800, 600, true);
+    CHECK_NEAR(reg.get<sage::ui::Scroll>(list.Entity()).Offset.y, 0.0f, 0.01f);
+}
+
+TEST(ui_wheel_scrolls_the_list_under_the_cursor) {
+    // Колесо приходит через ввод — тем же путём, что щелчки и текст, — и его
+    // съедает интерфейс: иначе тот же щелчок отъедет камерой сцены, и список
+    // прокрутится вместе с миром за ним.
+    Scene scene("wheel");
+    entt::registry& reg = scene.Registry();
+    GameObject list = scene.CreateEmptyObject("Список");
+    sage::ui::Element box;
+    box.Anchor = UIAnchor::TopLeft;
+    box.Position = {0.0f, 0.0f};
+    box.Size = {200.0f, 100.0f};
+    reg.emplace<sage::ui::Element>(list.Entity(), box);
+    sage::ui::Scroll sc;
+    sc.Clamp = false;
+    sc.Speed = 40.0f;
+    reg.emplace<sage::ui::Scroll>(list.Entity(), sc);
+
+    sage::ui::UIInputState input;
+    input.Mouse = {50.0f, 50.0f};
+    input.Wheel = -1.0f;   // вниз
+    const sage::ui::UIInputResult r = sage::ui::UpdateSceneUI(scene, input, 800, 600);
+    CHECK_NEAR(reg.get<sage::ui::Scroll>(list.Entity()).Offset.y, 40.0f, 0.01f);
+    CHECK_TRUE(r.WantsMouse);
+
+    // Курсор мимо — список стоит: колесо принадлежит тому, над чем мышь.
+    input.Mouse = {600.0f, 400.0f};
+    sage::ui::UpdateSceneUI(scene, input, 800, 600);
+    CHECK_NEAR(reg.get<sage::ui::Scroll>(list.Entity()).Offset.y, 40.0f, 0.01f);
+}

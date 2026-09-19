@@ -141,6 +141,9 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
     in.GameWidth = m_renderer.GameWidth();
     in.GameHeight = m_renderer.GameHeight();
     in.DeltaTime = dt;
+    // Колесо — только пока курсор над игровым окном: иначе список в игре
+    // крутился бы от колеса, которым отъезжают во вьюпорте сцены.
+    if (in.MouseInside) in.Wheel = ImGui::GetIO().MouseWheel;
     if (in.Focused) {
         in.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
         in.Delete = ImGui::IsKeyPressed(ImGuiKey_Delete, true);

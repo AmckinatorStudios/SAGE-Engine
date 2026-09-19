@@ -96,6 +96,7 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     // Раскладка — не компонент, а сам элемент: без неё элемента нет, и в
     // реестре компонентов ей делать нечего.
     json& tj = uj["element"];
+    tj["type"] = t->Type;
     tj["anchor"] = (int)t->Anchor;
     tj["stretch"] = (int)t->Mode;
     tj["position"] = Vec2ToJson(t->Position);
@@ -138,6 +139,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
                                                  : nullptr;
     if (tjp) {
         const json& tj = *tjp;
+        t.Type = tj.value("type", t.Type);
         const int anchor = tj.value("anchor", (int)t.Anchor);
         if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
         const int stretch = tj.value("stretch", (int)t.Mode);

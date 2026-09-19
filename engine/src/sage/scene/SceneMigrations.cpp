@@ -379,6 +379,59 @@ void MigrateV7toV8(json& root) {
     }
 }
 
+// --- 8 -> 9: у элемента интерфейса появился ТИП -------------------------------
+//
+// Раньше типа не было: элемент был набором включаемых частей, и «кнопка»
+// существовала только как знание человека о том, какие четыре галки надо
+// поставить. Теперь тип записан в самом элементе, и по нему инспектор решает,
+// что показывать.
+//
+// Сцена, сохранённая вчера, открылась бы с пустым типом: инспектор показал бы
+// «элемент неизвестно чего», а список создания — не тот значок. Выводим тип ПО
+// НАБОРУ ЧАСТЕЙ — ровно по тому правилу, по которому его читал человек, глядя
+// на галки. Правило приблизительное по своей природе (частей у элемента могло
+// быть сколько угодно), и там, где оно не срабатывает, честнее оставить пусто:
+// «неизвестный тип» редактор показывает как есть и править не мешает.
+void MigrateV8toV9(json& root) {
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
+        json& uj = obj["ui"];
+        json* el = uj.contains("element") ? &uj["element"]
+                   : uj.contains("transform") ? &uj["transform"] : nullptr;
+        if (!el || !el->is_object()) continue;
+        if (el->contains("type")) continue;   // уже новый формат
+
+        const bool fill = uj.contains("fill");
+        const bool label = uj.contains("label");
+        const bool image = uj.contains("image");
+        const bool bar = uj.contains("bar");
+        const bool range = uj.contains("range");
+        const bool input = uj.contains("textInput");
+        const bool act = uj.contains("interactable");
+        const bool stack = uj.contains("layout");
+
+        std::string type;
+        // Порядок проверок — от САМОГО ОПРЕДЕЛЁННОГО набора к менее: у поля
+        // ввода есть и подложка, и надпись, и реакция, и оно же единственное
+        // с textInput. Начни с подложки — и каждое поле ввода стало бы панелью.
+        if (input) type = "Input Field";
+        else if (range && uj["range"].is_object() && uj["range"].value("toggle", false)) type = "Checkbox";
+        else if (range) type = "Slider";
+        else if (bar) type = "Bar";
+        else if (stack) {
+            const json& st = uj["layout"];
+            const int dir = st.is_object() ? st.value("direction", 0) : 0;
+            type = dir == 2 ? "Grid" : (dir == 0 ? "Toolbar" : "Vertical List");
+        } else if (image && !fill) type = "Image";
+        else if (label && !fill) type = "Text";
+        else if (act && fill) type = "Button";
+        else if (fill) type = "Panel";
+        else if (!fill && !label && !image) type = "Empty";
+
+        if (!type.empty()) (*el)["type"] = type;
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -387,6 +440,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV5toV6,
     &MigrateV6toV7,
     &MigrateV7toV8,
+    &MigrateV8toV9,
 };
 
 } // namespace

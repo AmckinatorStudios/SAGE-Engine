@@ -176,12 +176,31 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
     // кнопке, где оно и ожидается.
     if (EditorIcons::Button("plus", T("Create"), T("Add an element"))) ImGui::OpenPopup("##ui_create");
     if (Sage::UI::MenuScope createMenu; ImGui::BeginPopup("##ui_create")) {
-        for (const std::string& name : ui::PresetNames()) {
-            if (!EditorIcons::MenuItem(sage::editor::interfacewidgets::PresetIcon(name),
-                                       name.c_str())) continue;
-            host.PushUndoSnapshot();
-            GameObject created = host.CreateUIEntity(name);
-            if (created.Valid()) host.Selection().SetPrimary(created.Id());
+        // СПИСОК ТИПОВ, РАЗБИТЫЙ ПО КАТЕГОРИЯМ, а не тринадцать строк подряд.
+        //
+        // Тринадцать имён в столбик читают целиком: «Grid» и «Vertical List»
+        // рядом ничем не отличаются, пока не вспомнишь, что делает каждый.
+        // Разделы отвечают на вопрос, с которым сюда и приходят: мне нужна
+        // основа, орган управления, контейнер или целый экран.
+        //
+        // Категория и значок живут В САМОЙ ЗАГОТОВКЕ (sage::ui::Preset), а не
+        // здесь: список типов — это и есть меню создания, и разбиение на
+        // разделы, написанное отдельно от него, однажды потеряет новый тип.
+        std::string category;
+        for (const ui::Preset& preset : ui::Presets()) {
+            if (preset.Category != category) {
+                category = preset.Category;
+                ImGui::SeparatorText(T(category.c_str()));
+            }
+            if (EditorIcons::MenuItem(preset.Icon, preset.Name.c_str())) {
+                host.PushUndoSnapshot();
+                GameObject created = host.CreateUIEntity(preset.Name);
+                if (created.Valid()) host.Selection().SetPrimary(created.Id());
+            }
+            // Пояснение — подсказкой, а не второй строкой в пункте: строка
+            // удвоила бы высоту меню, а читают её один раз, при знакомстве.
+            if (preset.Hint && ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", T(preset.Hint));
         }
         ImGui::EndPopup();
     }
