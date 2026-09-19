@@ -62,6 +62,7 @@
 #include "sage/ui/UIDemos.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/scene/CopyName.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
@@ -538,7 +539,12 @@ GameObject EditorLayer::DuplicateEntity(GameObject src) {
     // Заодно копирование поддерева переписывает ссылки внутрь копии
     // (см. sage::scene::CopySubtree): дубликат двери открывается СВОЕЙ кнопкой.
     GameObject copy = CopySubtree(*m_scene, src.Entity(), *m_scene, entt::null);
-    copy.SetName(src.Name() + " Copy");
+    // ИМЯ КОПИИ — КОРОТКОЕ НА ЛЮБОЙ ГЛУБИНЕ. Раньше к имени просто дописывалось
+    // « Copy», и копия копии становилась «Куб Copy Copy»: через пять нажатий
+    // Ctrl+D имя переставало помещаться в строку списка (см. CopyName.h).
+    copy.SetName(sage::scene::CopyName(src.Name(), [this](const std::string& name) {
+        return m_scene->FindByName(name).Valid();
+    }));
     copy.GetTransform().Position.x += 0.5f;
     return copy;
 }

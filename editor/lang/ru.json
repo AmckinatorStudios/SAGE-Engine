@@ -1767,6 +1767,7 @@
     "Vertical List": "Столбец",
     "Returns the panel to a tab of the main window": "Вернёт панель вкладкой в главное окно",
     "Inside the project only. Outside files: Assets > Import": "Только внутри проекта. Файлы снаружи — через «Ассеты > Внести»",
-    "Only from inside the project: put the file into the project first (Assets > Import)": "Только изнутри проекта: сначала внесите файл в проект («Ассеты > Внести»)"
+    "Only from inside the project: put the file into the project first (Assets > Import)": "Только изнутри проекта: сначала внесите файл в проект («Ассеты > Внести»)",
+    "Collects the game into a folder you can hand over:\nthe player, the project and the assets it uses": "Соберёт игру в папку, которую можно отдать:\nплеер, проект и используемые им ассеты"
   }
 }

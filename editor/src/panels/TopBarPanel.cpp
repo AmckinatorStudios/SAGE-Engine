@@ -169,7 +169,10 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     // игре четыре. Иначе при входе в игру блок раздувался бы и кнопка уезжала
     // из-под курсора ровно в тот момент, когда по ней целятся второй раз.
     const float playBlockW = ui.ControlHeight * 8.0f;
-    const float rightBlockW = ui.ControlHeight * 3.0f;
+    // В правом блоке теперь двое: настройки игры и сборка. Ширина слота
+    // постоянна по той же причине, что у блока запуска — чтобы кнопки не
+    // ездили под курсором.
+    const float rightBlockW = ui.ControlHeight * 7.0f;
     const float gap = ui.SpacingMD;
 
     const float rightStart = windowW - rightBlockW - ui.PaddingPanel;
@@ -244,6 +247,27 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
                                     host.PanelVisible(EditorPanel::Settings))) {
         host.PanelVisible(EditorPanel::Settings) = !host.PanelVisible(EditorPanel::Settings);
     }
+
+    // --- СБОРКА — У САМОГО ПРАВОГО КРАЯ -------------------------------------
+    //
+    // «Собрать игру» жило одним пунктом в меню «Файл», рядом с «новой сценой» и
+    // «открыть проект». Но это не файловая операция, а КОНЕЦ РАБОТЫ — то, ради
+    // чего всё остальное и делается, — и ищут его не в меню, а глазами по
+    // полосе. Место у правого края для этого и держат: слева начинают (файл),
+    // по центру проверяют (запуск), справа заканчивают (сборка).
+    //
+    // Подписью, а не одним значком: значок «собрать» ни с чем не ассоциируется
+    // заранее, а нажатие открывает диалог с выбором папки — то есть цена
+    // ошибочного попадания нулевая, и прятать действие за догадкой незачем.
+    ImGui::SameLine(0.0f, ui.SpacingSM);
+    CenterY(row);
+    ImGui::BeginDisabled(host.InPlayMode());
+    if (EditorIcons::Button("build", T("Build"),
+                            T("Collects the game into a folder you can hand over:\n"
+                              "the player, the project and the assets it uses"))) {
+        host.RequestDialog("Build Game");
+    }
+    ImGui::EndDisabled();
 
     ImGui::EndChild();
     ImGui::PopStyleColor();

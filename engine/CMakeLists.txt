@@ -131,6 +131,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/Ragdoll.cpp
     src/physics/builtin/BuiltinWorld.cpp
     src/physics/builtin/Collide.cpp
+    src/sage/scene/CopyName.cpp
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scene/SceneMigrations.cpp

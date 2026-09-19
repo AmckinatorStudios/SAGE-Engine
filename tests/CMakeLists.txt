@@ -53,6 +53,7 @@ add_executable(sage_tests
     test_editorstate.cpp
     test_pathscope.cpp
     test_hotkeyscope.cpp
+    test_copyname.cpp
     test_nineslice.cpp
     test_propertyclip.cpp
     test_interface.cpp
