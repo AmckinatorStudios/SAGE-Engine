@@ -97,6 +97,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/import/FbxSkin.cpp
     src/sage/assets/Quarantine.cpp
     src/sage/assets/import/GltfAccessor.cpp
+    src/sage/assets/import/GltfFile.cpp
     src/sage/assets/import/GltfImporter.cpp
     src/sage/render/Model.cpp
     src/sage/render/ModelLoader.cpp
