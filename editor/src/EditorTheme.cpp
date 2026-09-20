@@ -662,6 +662,14 @@ void Hint(const char* text) {
     ImGui::EndTooltip();
 }
 
+bool SectionHeader(const char* icon, const char* label, ImGuiTreeNodeFlags flags,
+                   bool* removeClicked, const char* hint) {
+    const std::string glyph = EditorIcons::GlyphUtf8(icon);
+    if (glyph.empty()) return SectionHeader(label, flags, removeClicked, hint);
+    const std::string full = glyph + "  " + label;
+    return SectionHeader(full.c_str(), flags, removeClicked, hint);
+}
+
 bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
                    const char* hint) {
     // AllowOverlap — чтобы кнопка в правом углу принимала нажатие, а не

@@ -985,9 +985,40 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
 //  Сборка игры: SagePlayer + рантайм-ассеты + project/ => запускаемая папка
 // ============================================================================
 
+// ЕСТЬ ЛИ У ПРОЕКТА ХОТЬ ОДНА СЦЕНА.
+//
+// Отдельной функцией, потому что вопрос задают двое: сама сборка (она без
+// сцены отказывается) и окно сборки (оно говорит об этом ДО нажатия, а не
+// после). Два ответа на один вопрос однажды разойдутся — и окно будет
+// обещать то, чего сборка не сделает.
+bool EditorLayer::HasAnyScene() const {
+    if (!m_project.Loaded()) return false;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
+        if (entry.path().extension() == ".sage") return true;
+    }
+    return false;
+}
+
 bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     if (!m_project.Loaded()) {
         err = "No project open";
+        return false;
+    }
+
+    // ИГРЫ БЕЗ ЕДИНОЙ СЦЕНЫ НЕ БЫВАЕТ, и собирать её незачем.
+    //
+    // Плеер при запуске открывает сцену проекта; сцен нет — он показывает
+    // пустой экран, и человек, получивший такую сборку, видит чёрное окно без
+    // единого объяснения. Хуже того, сборка при этом проходит УСПЕШНО:
+    // пятьдесят мегабайт файлов, зелёная строка «готово» — и нерабочая игра.
+    //
+    // Пустая папка scenes/ и её отсутствие — одно и то же: и там и там сцены
+    // нет. Отказ здесь стоит секунды, а разбирательство «почему собранная игра
+    // чёрная» — вечера.
+    if (!HasAnyScene()) {
+        err = T("The project has no scene: there is nothing to run. Create or save a scene "
+                "into scenes/ first.");
         return false;
     }
 

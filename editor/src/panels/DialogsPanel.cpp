@@ -8,6 +8,7 @@
 #include <imgui.h>
 
 #include "EditorIcons.h"
+#include "EditorTheme.h"
 #include <filesystem>
 
 #include <cstdio>
@@ -186,9 +187,27 @@ void DialogsPanel::Draw(EditorHost& host) {
         }
         ImGui::TextDisabled("-> %s/%s/%s", m_buildDir, project.Name().c_str(),
                             project.Name().c_str());
+        // ПРЕДУПРЕЖДЕНИЕ ДО НАЖАТИЯ, А НЕ ОШИБКА ПОСЛЕ. Игры без сцены не
+        // бывает: плеер открыл бы пустой экран, и человек, получивший такую
+        // сборку, увидел бы чёрное окно без единого объяснения. Сказать об
+        // этом надо раньше, чем он нажмёт и подождёт.
+        const bool hasScene = host.HasAnyScene();
+        if (!hasScene) {
+            ImGui::Separator();
+            EditorIcons::Inline("warn", glm::vec3(EditorTheme::Color(EditorTheme::Role::Warn).x,
+                                                  EditorTheme::Color(EditorTheme::Role::Warn).y,
+                                                  EditorTheme::Color(EditorTheme::Role::Warn).z));
+            ImGui::SameLine(0.0f, EditorIcons::TextGap());
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                               T("The project has no scene — there is nothing to run"));
+            ImGui::TextDisabled("%s", T("Create a scene and save it into scenes/ of the project."));
+            ImGui::Separator();
+        }
+
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (!m_buildResult.empty())
             ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1), T("Built: %s"), m_buildResult.c_str());
+        ImGui::BeginDisabled(!hasScene);
         if (ImGui::Button(T("Build"), ImVec2(120, 0))) {
             std::string err;
             if (host.BuildGame(m_buildDir, err)) {
@@ -198,6 +217,7 @@ void DialogsPanel::Draw(EditorHost& host) {
                 m_error = err;
             }
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button(T("Close"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();

@@ -1806,6 +1806,11 @@
     "Selected: %d": "Выбрано: %d",
     "Standard layout": "Типовая раскладка",
     "This control": "Эта клавиша",
-    "no key assigned": "клавиша не назначена"
+    "no key assigned": "клавиша не назначена",
+    "Create a scene and save it into scenes/ of the project.": "Создайте сцену и сохраните её в scenes/ проекта.",
+    "Shared": "Общие",
+    "The project has no scene — there is nothing to run": "В проекте нет ни одной сцены — запускать нечего",
+    "The project has no scene: there is nothing to run. Create or save a scene into scenes/ first.": "В проекте нет ни одной сцены: запускать нечего. Сначала создайте сцену и сохраните её в scenes/.",
+    "Tools": "Инструменты"
   }
 }

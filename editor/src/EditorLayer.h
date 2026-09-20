@@ -130,6 +130,7 @@ public:
     // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
     // рантайм-ассеты + project/. false + err при ошибке.
     bool BuildGame(const std::filesystem::path& outputDir, std::string& err) override;
+    bool HasAnyScene() const override;
     std::filesystem::path& AssetsCwd() override { return m_assetsCwd; }
 
     // --- EditorHost: настройки и статус ---
