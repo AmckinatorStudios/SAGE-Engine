@@ -5,6 +5,7 @@
 
 #include "sage/assets/import/GltfAccessor.h"
 #include "sage/assets/import/GltfFile.h"
+#include "sage/assets/import/SkinInfluences.h"
 
 #include "SkinnedModel.h"
 
@@ -848,23 +849,61 @@ static ModelData ParseGltf(const std::string& path) {
     if (g.skins.empty()) throw std::runtime_error("SkinnedModel: в файле нет скина: " + path);
 
     ModelData data;
-    const tinygltf::Skin& skin = g.skins[0];
-    int jointCount = (int)skin.joints.size();
+
+    // --- Кости ВСЕХ скинов файла — одним скелетом -----------------------------
+    //
+    // ПОЧЕМУ ВСЕХ, А НЕ ПЕРВОГО. Номер кости в JOINTS_n — это место в списке
+    // ТОГО скина, на который ссылается узел с мешем (node.skin), а не общий
+    // номер по файлу. Пока читался один g.skins[0], вершины остальных скинов
+    // попадали в чужие кости: делить персонажа на скины (тело, одежда, волосы,
+    // оружие) — обычная работа экспортёра, и такая модель приезжала с частями,
+    // размазанными по случайным костям, либо теряла их вовсе. Сводим кости всех
+    // скинов в один скелет и держим для каждого скина перевод «его номер → наш».
+    std::vector<int> jointNodes;                 // узел каждой нашей кости
+    std::unordered_map<int, int> nodeToJoint;    // узел -> наша кость
+    std::vector<glm::mat4> invBind;              // обратные bind-матрицы по нашим костям
+    std::vector<char> invBindKnown;
+    std::vector<std::vector<int>> skinMaps(g.skins.size());
+    for (size_t si = 0; si < g.skins.size(); ++si) {
+        const tinygltf::Skin& skin = g.skins[si];
+        const std::vector<float> ibm = skin.inverseBindMatrices >= 0
+                                           ? ReadFloats(g, skin.inverseBindMatrices, 16)
+                                           : std::vector<float>();
+        std::vector<int>& map = skinMaps[si];
+        map.assign(skin.joints.size(), -1);
+        for (size_t j = 0; j < skin.joints.size(); ++j) {
+            const int node = skin.joints[j];
+            // Кость, ссылающаяся на несуществующий узел, — битый файл. Место в
+            // переводной таблице остаётся пустым, и вершина просто теряет это
+            // влияние (см. ResolveInfluences) — вместо чтения g.nodes за границей.
+            if (node < 0 || node >= (int)g.nodes.size()) continue;
+            auto it = nodeToJoint.find(node);
+            int joint;
+            if (it == nodeToJoint.end()) {
+                joint = (int)jointNodes.size();
+                jointNodes.push_back(node);
+                nodeToJoint[node] = joint;
+                invBind.emplace_back(1.0f);
+                invBindKnown.push_back(0);
+            } else {
+                joint = it->second;
+            }
+            map[j] = joint;
+            // Один узел в двух скинах — обычное дело (общий корень скелета), и
+            // матрица привязки у него там одна и та же. Берём первую: кость в
+            // общем скелете одна, второй записи для неё места нет.
+            if (!invBindKnown[(size_t)joint] && (j + 1) * 16 <= ibm.size()) {
+                invBind[(size_t)joint] = glm::make_mat4(&ibm[j * 16]);
+                invBindKnown[(size_t)joint] = 1;
+            }
+        }
+    }
+    const int jointCount = (int)jointNodes.size();
     if (jointCount > kMaxBones) {
         LOG_WARN("Anim") << "SkinnedModel: костей " << jointCount << " > " << kMaxBones
                          << " — лишние не поместятся в палитру";
     }
-
-    // node index -> индекс в нашем скелете (0..jointCount-1)
-    // Кость, ссылающаяся на несуществующий узел, — битый файл. Такую кость
-    // молча заменяем единичной, а не читаем g.nodes за границей.
-    auto jointNode = [&](int j) {
-        const int node = (j >= 0 && j < (int)skin.joints.size()) ? skin.joints[(size_t)j] : -1;
-        return (node >= 0 && node < (int)g.nodes.size()) ? node : -1;
-    };
-    std::unordered_map<int, int> nodeToJoint;
-    for (int i = 0; i < jointCount; ++i)
-        if (jointNode(i) >= 0) nodeToJoint[jointNode(i)] = i;
+    auto jointNode = [&](int j) { return (j >= 0 && j < jointCount) ? jointNodes[(size_t)j] : -1; };
 
     // --- Иерархия узлов: родители и мировые матрицы ---------------------------
     //
@@ -894,14 +933,6 @@ static ModelData ParseGltf(const std::string& path) {
         if (p >= 0) world[(size_t)node] = worldOf(p) * world[(size_t)node];
         return world[(size_t)node];
     };
-
-    // Обратные bind-матрицы (по одной на кость).
-    std::vector<glm::mat4> invBind(jointCount, glm::mat4(1.0f));
-    if (skin.inverseBindMatrices >= 0) {
-        std::vector<float> ibm = ReadFloats(g, skin.inverseBindMatrices, 16);
-        for (int i = 0; i < jointCount && (i + 1) * 16 <= (int)ibm.size(); ++i)
-            invBind[i] = glm::make_mat4(&ibm[i * 16]);
-    }
 
     // Скелет: TRS из узлов + родитель из иерархии узлов.
     Skeleton& sk = data.Skeleton;
@@ -1080,7 +1111,12 @@ static ModelData ParseGltf(const std::string& path) {
 
         // Узел со скином — вершины уже в системе координат скелета (так велит
         // спецификация: их место задают кости, а не трансформ узла).
-        const bool skinned = node.skin >= 0;
+        // Перевод «номер кости в этом скине -> наша кость»: у каждого скина он
+        // свой (см. сбор костей выше).
+        const std::vector<int>* jointMap =
+            (node.skin >= 0 && node.skin < (int)skinMaps.size()) ? &skinMaps[(size_t)node.skin]
+                                                                 : nullptr;
+        const bool skinned = jointMap != nullptr;
 
         // Жёсткая деталь: ищем ближайшую кость ВВЕРХ по дереву. Она и будет
         // единственной костью этой детали с весом 1 — тот же скиннинг, просто
@@ -1110,10 +1146,6 @@ static ModelData ParseGltf(const std::string& path) {
             if (prim.mode != TINYGLTF_MODE_TRIANGLES) { ++skippedParts; continue; }
             auto posIt = prim.attributes.find("POSITION");
             if (posIt == prim.attributes.end()) { ++skippedParts; continue; }
-            auto jIt = prim.attributes.find("JOINTS_0");
-            auto wIt = prim.attributes.find("WEIGHTS_0");
-            const bool hasSkin = skinned && jIt != prim.attributes.end() && wIt != prim.attributes.end();
-
             std::vector<float> pos = ReadFloats(g, posIt->second, 3);
             if (pos.size() < 3) { ++skippedParts; continue; }
             auto nIt = prim.attributes.find("NORMAL");
@@ -1124,13 +1156,44 @@ static ModelData ParseGltf(const std::string& path) {
             std::vector<float> uv2 = uv2It != prim.attributes.end() ? ReadFloats(g, uv2It->second, 2) : std::vector<float>();
             auto tanIt = prim.attributes.find("TANGENT");
             std::vector<float> tan = tanIt != prim.attributes.end() ? ReadFloats(g, tanIt->second, 4) : std::vector<float>();
-            std::vector<unsigned int> joints = hasSkin ? ReadUInts(g, jIt->second, 4) : std::vector<unsigned int>();
-            std::vector<float> weights = hasSkin ? ReadFloats(g, wIt->second, 4) : std::vector<float>();
-
             const size_t vc = pos.size() / 3;
-            if (hasSkin && (joints.size() < vc * 4 || weights.size() < vc * 4)) { ++skippedParts; continue; }
+
+            // --- Наборы влияний: JOINTS_0/WEIGHTS_0, JOINTS_1/WEIGHTS_1, ... ---
+            //
+            // Спецификация разрешает столько наборов, сколько нужно, — по
+            // четыре кости в каждом. Пока читался только нулевой, вершина с
+            // восемью влияниями теряла четыре, и если главная кость оказалась
+            // во втором наборе (волосы, плащ, мягкие части одежды), вершина
+            // повисала на второстепенных — рука тянулась не туда.
+            std::vector<std::vector<unsigned int>> jointSets;
+            std::vector<std::vector<float>> weightSets;
+            bool brokenSkin = false;
+            if (skinned) {
+                for (int set = 0;; ++set) {
+                    const std::string suffix = std::to_string(set);
+                    auto jIt = prim.attributes.find("JOINTS_" + suffix);
+                    auto wIt = prim.attributes.find("WEIGHTS_" + suffix);
+                    if (jIt == prim.attributes.end() || wIt == prim.attributes.end()) break;
+                    std::vector<unsigned int> js = ReadUInts(g, jIt->second, 4);
+                    std::vector<float> ws = ReadFloats(g, wIt->second, 4);
+                    // Набор короче меша — битая разметка. На нулевом это значит
+                    // непригодную часть целиком, на прочих — просто обрываем.
+                    if (js.size() < vc * 4 || ws.size() < vc * 4) {
+                        if (set == 0) brokenSkin = true;
+                        break;
+                    }
+                    jointSets.push_back(std::move(js));
+                    weightSets.push_back(std::move(ws));
+                }
+            }
+            if (brokenSkin) { ++skippedParts; continue; }
+            const bool hasSkin = !jointSets.empty();
 
             std::vector<SkinnedVertex> verts(vc);
+            // Буфер влияний переиспользуется всеми вершинами части: на модели с
+            // сотнями тысяч вершин отдельный вектор на вершину — это только
+            // работа распределителю памяти.
+            std::vector<sage::assets::SkinInfluence> influences;
             for (size_t i = 0; i < vc; ++i) {
                 SkinnedVertex& v = verts[i];
                 v.Position = {pos[i*3], pos[i*3+1], pos[i*3+2]};
@@ -1140,19 +1203,28 @@ static ModelData ParseGltf(const std::string& path) {
                 if (tan.size() >= (i + 1) * 4)
                     v.Tangent = glm::vec4(tan[i*4], tan[i*4+1], tan[i*4+2], tan[i*4+3]);
                 if (hasSkin) {
-                    // Номер кости из файла упирается в РАЗМЕР ПАЛИТРЫ шейдера
-                    // (uBones[kMaxBones]): выход за неё — чтение чужой памяти
-                    // уже на видеокарте, где ни исключения, ни лога не будет,
-                    // а будет чёрный экран или вылет драйвера. Кость за
-                    // границей скелета — тоже битый файл; обе заменяем нулевой.
-                    auto joint = [&](unsigned raw) {
-                        return (float)(raw < (unsigned)std::min(jointCount, kMaxBones) ? raw : 0u);
-                    };
-                    v.Joints = {joint(joints[i*4]), joint(joints[i*4+1]), joint(joints[i*4+2]),
-                                joint(joints[i*4+3])};
-                    glm::vec4 w(weights[i*4], weights[i*4+1], weights[i*4+2], weights[i*4+3]);
-                    const float sum = w.x + w.y + w.z + w.w;
-                    v.Weights = sum > 0.0001f ? w / sum : glm::vec4(1, 0, 0, 0);
+                    // Все влияния всех наборов — в общий список, номера костей
+                    // переведены в номера нашего скелета. Что делать дальше
+                    // (отбросить негодные, взять четыре самых весомых,
+                    // нормировать), решает общий для форматов ResolveInfluences.
+                    influences.clear();
+                    for (size_t set = 0; set < jointSets.size(); ++set) {
+                        for (int c = 0; c < 4; ++c) {
+                            const unsigned raw = jointSets[set][i * 4 + (size_t)c];
+                            const int mapped =
+                                raw < jointMap->size() ? (*jointMap)[(size_t)raw] : -1;
+                            influences.push_back({mapped, weightSets[set][i * 4 + (size_t)c]});
+                        }
+                    }
+                    if (!sage::assets::ResolveInfluences(influences, jointCount, v.Joints,
+                                                         v.Weights)) {
+                        // Годных влияний нет (все веса нулевые или номера
+                        // битые). Вес 0 — шейдер возьмёт единичную матрицу, и
+                        // вершина останется там, где лежит в файле; отдать её
+                        // корню с весом 1 значило бы утянуть к тазу персонажа.
+                        v.Joints = glm::vec4(0.0f);
+                        v.Weights = glm::vec4(0.0f);
+                    }
                 } else {
                     // Жёсткая деталь: одна кость с весом 1, вершины заранее
                     // переведены в систему координат скелета.
