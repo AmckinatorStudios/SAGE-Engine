@@ -5,6 +5,8 @@
 #include <tiny_gltf.h>
 
 #include "sage/render/ModelMaterial.h"
+
+#include "sage/assets/import/TextureResolve.h"
 #include "sage/assets/import/GltfFile.h"
 
 #include "sage/assets/AssetDatabase.h"
@@ -138,17 +140,17 @@ struct GltfImageAccess {
         return Model->textures[textureIndex].source;
     }
 
-    // Картинка лежит отдельным файлом рядом с моделью? Тогда её не надо ни
-    // раскодировать, ни переписывать — просто сослаться.
-    std::string ExternalPath(int imageIndex) const {
+    // Картинка лежит отдельным файлом? Тогда её не надо ни раскодировать, ни
+    // переписывать — просто сослаться.
+    //
+    // ИЩЕТ ОБЩИЙ ПОИСК (assets/import/TextureResolve.h), а не «папка модели +
+    // URI». URI в glTF процентно закодирован (пробел — это %20), экспортёры
+    // пишут абсолютные пути чужих машин, набор карт приезжает отдельной папкой,
+    // а регистр имени не совпадает — и на каждом из этих случаев прежняя
+    // проверка «файла нет» молча теряла карту. Снаружи это «модель белая».
+    std::string ExternalPath(int imageIndex, std::vector<std::string>* warnings = nullptr) const {
         if (!Model || imageIndex < 0 || imageIndex >= (int)Model->images.size()) return {};
-        const std::string& uri = Model->images[imageIndex].uri;
-        // data:... — картинка встроена в сам файл, файла на диске нет.
-        if (uri.empty() || uri.rfind("data:", 0) == 0) return {};
-        std::error_code ec;
-        const fs::path p = ModelDir / uri;
-        if (!fs::exists(p, ec)) return {};
-        return p.generic_string();
+        return sage::assets::ResolveTexturePath(ModelDir, Model->images[imageIndex].uri, warnings);
     }
 };
 
@@ -181,7 +183,11 @@ void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
         if (std::string external = images.ExternalPath(img); !external.empty()) return external;
         const tinygltf::Image& src = model.images[img];
         if (src.image.empty() || src.component < 1) {
-            out.Warnings.push_back(std::string("карта ") + usage + " не раскодирована");
+            // Ни файла рядом, ни картинки внутри. Причину называем ссылкой из
+            // файла: по ней видно, что искали, — «карта не раскодирована» не
+            // говорит ничего.
+            out.Warnings.push_back(std::string("карта ") + usage + ": не найдена «" +
+                                   src.uri + "»");
             return {};
         }
         return WritePng(sink, usage, src.image.data(), src.width, src.height, src.component,
@@ -199,7 +205,8 @@ void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
         int w = src.width, h = src.height, comp = src.component;
         if (!src.image.empty() && comp >= 1) {
             pixels = src.image.data();
-        } else if (std::string external = images.ExternalPath(img); !external.empty()) {
+        } else if (std::string external = images.ExternalPath(img, &out.Warnings);
+                   !external.empty()) {
             // Внешний файл: тут его всё же приходится раскодировать — канал
             // из сжатого png не достать.
             int c = 0;
@@ -242,6 +249,43 @@ void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
     if (!out.MetallicMap.empty() && out.Metallic <= 0.0f) out.Metallic = 1.0f;
     if (!out.RoughnessMap.empty() && out.Roughness <= 0.0f) out.Roughness = 1.0f;
     if (!out.EmissiveMap.empty() && out.Emissive == glm::vec3(0.0f)) out.Emissive = glm::vec3(1.0f);
+
+    // --- ПОВЕДЕНИЕ МАТЕРИАЛА ------------------------------------------------
+    out.DoubleSided = m.doubleSided;
+    if (m.alphaMode == "MASK") out.AlphaMode = 1;
+    else if (m.alphaMode == "BLEND") out.AlphaMode = 2;
+    out.AlphaCutoff = (float)m.alphaCutoff;
+
+    // KHR_materials_emissive_strength: яркость свечения выше единицы. Без неё
+    // светящиеся детали (глаза, лампы) выходят просто светлыми — bloom их не
+    // подхватывает, потому что подхватывать нечего. Скиновый путь это читал, а
+    // статический — нет: одна и та же модель светилась по-разному.
+    if (auto ext = m.extensions.find("KHR_materials_emissive_strength");
+        ext != m.extensions.end() && ext->second.Has("emissiveStrength")) {
+        const tinygltf::Value& v = ext->second.Get("emissiveStrength");
+        if (v.IsNumber()) out.EmissiveStrength = (float)v.GetNumberAsDouble();
+    }
+
+    // KHR_texture_transform: движок выражает МАСШТАБ развёртки (Render.UVScale).
+    // Смещение и поворот он не выражает — и об этом говорится предупреждением:
+    // молча взять половину преобразования значит показать съехавшую текстуру
+    // без единого намёка на причину.
+    if (auto ext = pbr.baseColorTexture.extensions.find("KHR_texture_transform");
+        ext != pbr.baseColorTexture.extensions.end()) {
+        const tinygltf::Value& t = ext->second;
+        if (t.Has("scale")) {
+            const tinygltf::Value& sc = t.Get("scale");
+            if (sc.IsArray() && sc.ArrayLen() >= 2) {
+                out.UVScale = glm::vec2((float)sc.Get(0).GetNumberAsDouble(),
+                                        (float)sc.Get(1).GetNumberAsDouble());
+            }
+        }
+        if (t.Has("offset") || t.Has("rotation")) {
+            out.Warnings.push_back(
+                "у карты задано смещение или поворот развёртки (KHR_texture_transform) — "
+                "движок выражает только масштаб");
+        }
+    }
 }
 
 // Различитель материала в именах создаваемых картинок. Имя, а не номер: по
@@ -300,16 +344,11 @@ void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, Extra
     out.Roughness = m.roughness > 0.0f ? m.roughness : 0.5f;
     out.Opacity = m.dissolve;
 
-    // Пути в .mtl — относительно самого .mtl, то есть папки модели.
+    // Путь из .mtl ищется ТЕМ ЖЕ поиском, что и у остальных форматов
+    // (assets/import/TextureResolve.h). В .mtl из 3ds Max абсолютный путь чужой
+    // машины — норма, и «файла нет» означало ровно потерю карты.
     auto resolve = [&](const std::string& name) -> std::string {
-        if (name.empty()) return {};
-        std::error_code ec;
-        const fs::path p = fs::path(name).is_absolute() ? fs::path(name) : dir / name;
-        if (!fs::exists(p, ec)) {
-            out.Warnings.push_back("текстура не найдена: " + name);
-            return {};
-        }
-        return p.generic_string();
+        return sage::assets::ResolveTexturePath(dir, name, &out.Warnings);
     };
 
     out.AlbedoMap = resolve(m.diffuse_texname);
@@ -324,6 +363,11 @@ void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, Extra
 
     if (!out.MetallicMap.empty() && out.Metallic <= 0.0f) out.Metallic = 1.0f;
     if (!out.EmissiveMap.empty() && out.Emissive == glm::vec3(0.0f)) out.Emissive = glm::vec3(1.0f);
+
+    // У .mtl нет режима прозрачности — есть только d (dissolve). Значение
+    // меньше единицы и означает смешивание: другого способа сказать это в
+    // формате нет, и придумывать за него третий режим не из чего.
+    if (out.Opacity < 0.999f) out.AlphaMode = 2;
 }
 
 void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
@@ -375,28 +419,13 @@ void ExtractFbx(const std::string& modelPath, ExtractedMaterialSet& set) {
     for (const sage::assets::ImportedMaterial& m : scene.Materials) {
         ExtractedMaterial out;
 
+        // ТОТ ЖЕ ПОИСК, ЧТО И У ОСТАЛЬНЫХ ФОРМАТОВ. Здесь лежала своя копия
+        // на полтора десятка строк: свои две соседние папки, без учёта
+        // регистра и без раскодирования ссылки. Копия и отстала — набор, у
+        // которого текстуры лежат в maps/, у FBX не находился, а у glTF
+        // находился.
         auto locate = [&](const std::string& ref) -> std::string {
-            if (ref.empty()) return {};
-            std::error_code ec;
-            const fs::path direct = modelDir / ref;
-            if (fs::exists(direct, ec) && !fs::is_directory(direct, ec))
-                return direct.generic_string();
-            const std::string name = fs::path(ref).filename().string();
-            // Пустая ссылка вида «.» — не картинка. Экспортёры оставляют такие
-            // заглушки у материалов без текстур, и без этой проверки путь
-            // разрешался бы в САМУ ПАПКУ модели: слот «есть, но не грузится».
-            if (name.empty() || name == "." || name == "..") return {};
-            // Соседние папки: у наборов из сети текстуры лежат в textures/, а
-            // модель — в source/, то есть на уровень выше и вбок.
-            const fs::path roots[] = {modelDir, modelDir / "textures", modelDir.parent_path(),
-                                      modelDir.parent_path() / "textures"};
-            for (const fs::path& root : roots) {
-                if (root.empty()) continue;
-                const fs::path candidate = root / name;
-                if (fs::exists(candidate, ec)) return candidate.generic_string();
-            }
-            out.Warnings.push_back("текстура не найдена рядом с моделью: " + name);
-            return {};
+            return sage::assets::ResolveTexturePath(modelDir, ref, &out.Warnings);
         };
 
         out.Found = true;

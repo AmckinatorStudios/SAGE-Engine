@@ -1,4 +1,5 @@
 #include "sage/assets/import/FbxSkin.h"
+#include "sage/assets/import/SkinInfluences.h"
 
 #include <algorithm>
 #include <cmath>
@@ -508,8 +509,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         // Веса по КОНТРОЛЬНЫМ ТОЧКАМ: в FBX они заданы именно так, а вершин
         // после разбиения многоугольников больше — одна контрольная точка даёт
         // по вершине на каждый свой угол.
-        struct Influence { int Joint; float Weight; };
-        std::unordered_map<int64_t, std::vector<Influence>> weights;
+        std::unordered_map<int64_t, std::vector<sage::assets::SkinInfluence>> weights;
         for (const Cluster& c : clustersOfSkin[skin->second]) {
             auto jointIt = jointOf.find(c.Bone);
             if (jointIt == jointOf.end()) continue;
@@ -541,23 +541,12 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             v.TexCoords = corner.TexCoords;
 
             auto it = weights.find(corner.ControlPoint);
-            if (it != weights.end()) {
-                // ЧЕТЫРЕ САМЫХ ВЕСОМЫХ. В шейдере на вершину ровно четыре
-                // места; отбросить «первые попавшиеся» значит потерять главную
-                // кость и получить вершину, висящую на мизинце.
-                std::vector<Influence> list = it->second;
-                std::sort(list.begin(), list.end(),
-                          [](const Influence& a, const Influence& b) { return a.Weight > b.Weight; });
-                float sum = 0.0f;
-                for (size_t k = 0; k < list.size() && k < 4; ++k) {
-                    v.Joints[(int)k] = (float)list[k].Joint;
-                    v.Weights[(int)k] = list[k].Weight;
-                    sum += list[k].Weight;
-                }
-                // Нормировка обязательна: сумма весов после отсечения лишних
-                // меньше единицы, и вершина уезжает к началу координат.
-                if (sum > 1e-6f) v.Weights /= sum;
-            } else {
+            std::vector<sage::assets::SkinInfluence> list;
+            if (it != weights.end()) list = it->second;
+            // Четыре самых весомых, без битых номеров, с нормировкой суммы —
+            // правило общее для всех форматов (assets/import/SkinInfluences.h).
+            if (!sage::assets::ResolveInfluences(list, (int)out.Skeleton.Joints.size(), v.Joints,
+                                                 v.Weights)) {
                 // Вершина без весов остаётся на месте — привязываем к корню с
                 // единичным весом, иначе она схлопнется в ноль.
                 v.Joints = glm::vec4(0.0f);

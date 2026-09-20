@@ -617,3 +617,226 @@ TEST(gltf_cubic_animation_reads_values_not_tangents) {
     ch.Sample(1.0f, v, q);
     CHECK_NEAR(glm::degrees(glm::angle(glm::normalize(q))), 90.0f, 0.5f);
 }
+
+// ============================================================================
+//  ПОИСК ТЕКСТУР: «модель загрузилась, но стала белой»
+//
+//  Ссылка в файле модели почти никогда не годится как путь: glTF кодирует
+//  пробелы, экспортёры пишут абсолютные пути чужих машин и обратные слэши,
+//  набор карт приезжает отдельной папкой, регистр имени не совпадает. На
+//  каждом из этих случаев карта молча терялась — по одному разу в каждом
+//  формате, потому что поиск был у каждого свой.
+// ============================================================================
+#include "sage/assets/import/TextureResolve.h"
+
+namespace {
+
+// Каталог с моделью и набором карт: то, как выглядит скачанный ассет.
+struct TextureFixture {
+    std::filesystem::path Dir;
+    explicit TextureFixture(const char* name) {
+        Dir = std::filesystem::temp_directory_path() / name;
+        std::error_code ec;
+        std::filesystem::remove_all(Dir, ec);
+        std::filesystem::create_directories(Dir / "textures", ec);
+    }
+    ~TextureFixture() {
+        std::error_code ec;
+        std::filesystem::remove_all(Dir, ec);
+    }
+    void Put(const std::string& relative) const {
+        const std::filesystem::path p = Dir / relative;
+        std::error_code ec;
+        std::filesystem::create_directories(p.parent_path(), ec);
+        std::ofstream f(p, std::ios::binary);
+        f << "png";
+    }
+};
+
+} // namespace
+
+TEST(texture_resolve_decodes_percent_encoding) {
+    // glTF ТРЕБУЕТ кодировать пробелы в URI. Файла «body%20normal.png» на
+    // диске нет никогда — и карта терялась у каждой модели, где в имени есть
+    // пробел.
+    TextureFixture fx("sage_tex_uri");
+    fx.Put("body normal.png");
+    const std::string found = ResolveTexturePath(fx.Dir, "body%20normal.png");
+    CHECK_TRUE(!found.empty());
+    CHECK_TRUE(found.find("body normal.png") != std::string::npos);
+    CHECK_EQ(DecodeUri("a%2Fb%20c"), std::string("a/b c"));
+}
+
+TEST(texture_resolve_takes_backslashes_and_foreign_absolute_paths) {
+    // В .mtl из 3ds Max абсолютный путь чужой машины — норма. Имя файла в нём
+    // верное, а дорога к нему — нет.
+    TextureFixture fx("sage_tex_abs");
+    fx.Put("body.png");
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "C:\\Users\\artist\\Desktop\\tex\\body.png").empty());
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "..\\..\\shared\\body.png").empty());
+}
+
+TEST(texture_resolve_looks_into_the_usual_side_folders) {
+    // Набор приезжает папкой: модель в корне, карты в textures/.
+    TextureFixture fx("sage_tex_side");
+    fx.Put("textures/skin.png");
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "skin.png").empty());
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "maps/skin.png").empty());
+}
+
+TEST(texture_resolve_ignores_case_as_a_last_resort) {
+    // «Body.PNG» против «body.png»: на Windows это один файл, на Linux разные.
+    TextureFixture fx("sage_tex_case");
+    fx.Put("Body_Normal.PNG");
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "body_normal.png").empty());
+}
+
+TEST(texture_resolve_says_what_it_could_not_find) {
+    // Молчаливая потеря текстуры хуже отказа: «модель белая» человек видит, а
+    // причину — нет.
+    TextureFixture fx("sage_tex_missing");
+    std::vector<std::string> warnings;
+    CHECK_TRUE(ResolveTexturePath(fx.Dir, "no_such.png", &warnings).empty());
+    CHECK_EQ((int)warnings.size(), 1);
+    if (!warnings.empty()) CHECK_TRUE(warnings[0].find("no_such.png") != std::string::npos);
+
+    // А встроенная картинка — не потеря и не предупреждение: файла на диске у
+    // неё нет по определению.
+    warnings.clear();
+    CHECK_TRUE(ResolveTexturePath(fx.Dir, "data:image/png;base64,iVBORw0K", &warnings).empty());
+    CHECK_TRUE(warnings.empty());
+}
+
+// ============================================================================
+//  СКЕЛЕТ И СКИННИНГ: «персонаж приехал сломанным»
+//
+//  Три разные поломки с одним и тем же видом снаружи — часть модели висит не
+//  на той кости:
+//    • номера костей в JOINTS_n — местные для СВОЕГО скина, а читался один
+//      первый скин файла;
+//    • влияний на вершину бывает больше четырёх (наборы JOINTS_1 и дальше), и
+//      главная кость вполне может оказаться во втором наборе;
+//    • битый номер кости отдавали кости 0 ВМЕСТЕ С ВЕСОМ — вершину тянуло к
+//      корню скелета.
+// ============================================================================
+#include "GltfSkinModel.h"
+#include "sage/assets/import/SkinInfluences.h"
+
+namespace {
+
+// Общий разбор оснастки: файл пишется один раз на проверку и сразу удаляется.
+struct TwoSkinFixture {
+    std::filesystem::path Dir;
+    sage::render::ModelData Data;
+    bool Ok = false;
+
+    explicit TwoSkinFixture(const char* name) {
+        Dir = std::filesystem::temp_directory_path() / name;
+        const std::string path = sage_test::WriteTwoSkinGltf(Dir, "twoskin");
+        if (path.empty()) return;
+        try {
+            Data = sage::render::ParseSkinnedModelFile(path);
+            Ok = true;
+        } catch (const std::exception& e) {
+            std::printf("       разбор не удался: %s\n", e.what());
+        }
+    }
+    ~TwoSkinFixture() {
+        std::error_code ec;
+        std::filesystem::remove_all(Dir, ec);
+    }
+
+    int JointNamed(const char* name) const {
+        for (size_t i = 0; i < Data.Skeleton.Joints.size(); ++i)
+            if (Data.Skeleton.Joints[i].Name == name) return (int)i;
+        return -1;
+    }
+};
+
+// Вес вершины, пришедшийся на кость: места в vec4 не упорядочены, и искать
+// нужную кость надо по номеру, а не по месту.
+float WeightOn(const sage::render::SkinnedVertex& v, int joint) {
+    float sum = 0.0f;
+    for (int k = 0; k < 4; ++k)
+        if ((int)(v.Joints[k] + 0.5f) == joint) sum += v.Weights[k];
+    return sum;
+}
+
+} // namespace
+
+TEST(gltf_joint_numbers_are_local_to_their_own_skin) {
+    TwoSkinFixture fx("sage_skin_two");
+    CHECK_TRUE(fx.Ok);
+    if (!fx.Ok) return;
+
+    // Скелет общий: кости обоих скинов на месте, по одной записи на узел.
+    CHECK_EQ((int)fx.Data.Skeleton.Joints.size(), 5);
+    const int a = fx.JointNamed("boneA");
+    const int c = fx.JointNamed("boneC");
+    CHECK_TRUE(a >= 0 && c >= 0);
+    CHECK_TRUE(a != c);
+    if (a < 0 || c < 0) return;
+
+    // У второго скина список костей свой: его кость номер 0 — это boneC.
+    // Пока читался только первый скин, эти вершины доставались boneA.
+    int onC = 0;
+    for (const auto& sub : fx.Data.SubMeshes)
+        for (const auto& v : sub.Vertices)
+            if (WeightOn(v, c) > 0.99f) ++onC;
+    CHECK_TRUE(onC >= 3);
+}
+
+TEST(gltf_reads_every_influence_set_not_just_the_first) {
+    TwoSkinFixture fx("sage_skin_sets");
+    CHECK_TRUE(fx.Ok);
+    if (!fx.Ok) return;
+    const int e = fx.JointNamed("boneE");
+    CHECK_TRUE(e >= 0);
+    if (e < 0) return;
+
+    // Главное влияние вершины (вес 0.8) лежит в JOINTS_1/WEIGHTS_1, мелкие
+    // (по 0.05) — в нулевом наборе. После отбора четырёх самых весомых и
+    // нормировки на кость E обязано прийтись 0.8/0.95.
+    float best = 0.0f;
+    for (const auto& sub : fx.Data.SubMeshes)
+        for (const auto& v : sub.Vertices) best = std::max(best, WeightOn(v, e));
+    CHECK_NEAR(best, 0.8f / 0.95f, 1e-3f);
+}
+
+TEST(gltf_broken_joint_number_loses_its_weight_instead_of_the_root_taking_it) {
+    TwoSkinFixture fx("sage_skin_broken");
+    CHECK_TRUE(fx.Ok);
+    if (!fx.Ok) return;
+    const int b = fx.JointNamed("boneB");
+    CHECK_TRUE(b >= 0);
+    if (b < 0) return;
+
+    // Вершина задана как «половина на boneB, половина на кость 99». Кости 99
+    // нет — значит у вершины остаётся одно влияние, и после нормировки оно
+    // полное. Раньше половина веса доставалась кости 0, и вершину тянуло к
+    // корню скелета ровно наполовину.
+    float best = 0.0f;
+    for (const auto& sub : fx.Data.SubMeshes)
+        for (const auto& v : sub.Vertices) best = std::max(best, WeightOn(v, b));
+    CHECK_NEAR(best, 1.0f, 1e-4f);
+}
+
+TEST(skin_influences_keep_the_four_heaviest_and_normalize) {
+    using sage::assets::SkinInfluence;
+    std::vector<SkinInfluence> list = {{0, 0.1f}, {1, 0.4f}, {2, 0.05f}, {3, 0.3f},
+                                       {4, 0.2f}, {7, 0.5f}, {1, -1.0f}};
+    glm::vec4 joints(0.0f), weights(0.0f);
+    // Костей всего пять — влияние на кость 7 битое и в отбор не идёт.
+    CHECK_TRUE(sage::assets::ResolveInfluences(list, 5, joints, weights));
+    CHECK_NEAR(weights.x + weights.y + weights.z + weights.w, 1.0f, 1e-5f);
+    // Самая весомая из годных — кость 1 (0.4); отсечённой оказывается самая
+    // лёгкая (кость 2 с весом 0.05).
+    CHECK_EQ((int)(joints.x + 0.5f), 1);
+    for (int k = 0; k < 4; ++k) CHECK_TRUE((int)(joints[k] + 0.5f) != 2);
+    CHECK_NEAR(weights.x, 0.4f / 1.0f, 1e-4f);
+
+    // Влияний не осталось вовсе — вызывающему сообщается отказ, а не тихая
+    // привязка к корню.
+    std::vector<SkinInfluence> none = {{-1, 1.0f}, {9, 1.0f}, {0, 0.0f}};
+    CHECK_FALSE(sage::assets::ResolveInfluences(none, 5, joints, weights));
+}
