@@ -37,9 +37,21 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
     if (Active()) return -1;
     Scene& scene = **ctx.ScenePtr;
 
-    // Снимок сцены — Stop вернёт всё ровно как было до Play.
+    // Снимок сцены — Stop вернёт всё ровно как было до Play. Берётся ЗДЕСЬ, а
+    // не в BuildRuntime: переход на другой уровень посреди игры не имеет права
+    // затереть снимок документа, к которому Stop обязан вернуть человека.
     m_snapshot = SceneSerializer::SaveToString(scene);
 
+    const int attached = BuildRuntime(ctx, scene);
+    m_state = EditorPlayState::Playing;
+    return attached;
+}
+
+// Всё, что делает сцену ЖИВОЙ: скрипты, ввод, звук, физика, состав кадра.
+// Отдельно от Start, потому что то же самое нужно при переходе на другой
+// уровень прямо во время игры (scene:Load) — и делать это вторым, похожим, но
+// другим куском кода значит, что превью и игра однажды разойдутся.
+int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     m_scripts = std::make_unique<ScriptEngine>();
     m_scripts->BindScene(scene);
     // Паритет с рантаймом: частицы доступны скриптам уже в OnStart
@@ -70,50 +82,47 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
     if (const std::string args = sage::EnvString("SAGE_GAME_ARGS"); !args.empty())
         m_scripts->SetLaunchArgsFromString(args);
 
-    // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
-    // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные
-    // продолжают работать.
-    int attached = 0;
-    auto view = scene.Registry().view<ScriptComponent, IdComponent>();
-    for (auto e : view) {
-        const std::string& path = view.get<ScriptComponent>(e).Path;
-        if (path.empty()) continue;
-        // Пути скриптов в сцене — ОТНОСИТЕЛЬНО ПРОЕКТА ("assets/scripts/x.lua"):
-        // так их резолвит собранная игра (SagePlayer делает chdir в проект). CWD
-        // редактора — не папка проекта, поэтому здесь резолвим сами: как есть
-        // (скрипты редактора, абсолютные пути), иначе — от корня проекта. Без
-        // этого скрипты проекта работали бы в собранной игре, но НЕ в Play.
-        std::string resolved = path;
-        std::error_code scriptEc;
-        if (!fs::exists(resolved, scriptEc)) {
-            fs::path inProject = ctx.ProjectDir / path;
-            if (fs::exists(inProject, scriptEc)) resolved = inProject.string();
-        }
-        try {
-            m_scripts->AttachScript(GameObject(&scene.Registry(), e), resolved);
-            ++attached;
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Editor") << "Play: script attach failed: " << ex.what();
-        }
-    }
-
-    // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.
-    // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а файл проекта
-    // — это «как решил автор игры», и он обязан их замещать, а не дописываться
-    // к ним. Иначе переназначенное в редакторе действие продолжало бы работать
-    // и на старой клавише — то есть панель «Управление» выглядела бы
-    // сломанной. Тот же порядок у собранной игры (см. PlayerLayer).
-    if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
-
     // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
     // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).
+    //
+    // ДО скриптов, а не после: Start скрипта вправе спросить у себя
+    // CharacterController и физику, а не получить «не привязано» ровно на
+    // первом кадре. Состав мира всё равно досинхронизируется каждым шагом
+    // (PhysicsScene::SyncBodies), поэтому объекты, созданные из Start, не
+    // теряются.
     m_physics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), scene);
-
-    // Скрипты получают доступ к физике времени выполнения (SetVelocity/GetVelocity/
-    // SetGravity) — привязываем ПОСЛЕ построения мира, чтобы RuntimeBody сущностей
-    // уже существовали к первому OnUpdate.
     m_scripts->BindPhysics(*m_physics);
+
+    // --- СИСТЕМА СКРИПТИНГА -------------------------------------------------
+    //
+    // Поведение объектов ведёт она, а не прежний ScriptEngine: у неё жизненный
+    // цикл (Start/Update/FixedUpdate/LateUpdate/OnDestroy), события
+    // столкновений и публичные переменные из сцены. Язык подключается
+    // бэкендом — Lua работает на состоянии прежнего движка, поэтому и старые
+    // скрипты (глобальные OnStart/OnUpdate), и новые (`return Player`) живут
+    // рядом и видят один и тот же API.
+    m_scripting = std::make_unique<sage::scripting::ScriptingSystem>();
+    m_scripting->AddBackend(sage::scripting::MakeLuaBackend({m_scripts.get()}));
+    m_scripting->SetProjectDir(ctx.ProjectDir);
+    sage::scripting::ScriptServices services;
+    services.ScenePtr = &scene;
+    services.Input = &m_input;
+    services.Physics = m_physics.get();
+    services.Audio = m_audio.get();
+    m_scripting->Bind(services);
+
+    // Ошибка в одном скрипте (нет файла, синтаксис) не срывает Play —
+    // логируется, остальные продолжают работать.
+    const int attached = m_scripting->AttachScene(scene);
+
+    // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.
+    // Скрипты объявляют СВОИ умолчания (BindAction в Start), а файл проекта —
+    // это «как решил автор игры», и он обязан их замещать, а не дописываться к
+    // ним. Иначе переназначенное в редакторе действие продолжало бы работать и
+    // на старой клавише — то есть панель «Управление» выглядела бы сломанной.
+    // Тот же порядок у собранной игры (см. PlayerLayer).
+    if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
 
     // Состав кадра на время Play — ТОТ ЖЕ, что у собранной игры (см.
     // PlayerLayer): скрипты, физика, анимация, частицы, звук в порядке,
@@ -125,6 +134,7 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
     if (ctx.Systems) {
         sage::CoreSystems core;
         core.Scripts = m_scripts.get();
+        core.Scripting = m_scripting.get();
         core.Physics = m_physics.get();
         core.Particles = ctx.Particles;
         core.Audio = m_audio.get();
@@ -142,11 +152,72 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
         if (started > 0) LOG_INFO("Editor") << "Play: звуковых источников запущено: " << started;
     }
 
-    m_state = EditorPlayState::Playing;
-    LOG_INFO("Editor") << "Play started (" << attached << " script(s), "
-                       << m_physics->BodyCount() << " physics body(ies) on "
+    LOG_INFO("Editor") << "Play: сцена «" << scene.Name() << "» — скриптов " << attached
+                       << ", физических тел " << m_physics->BodyCount() << " ("
                        << m_physics->BackendName() << ")";
     return attached;
+}
+
+// Обратное BuildRuntime: снять всё живое, не трогая ни снимка, ни состояния
+// Play. Порядок — тот же, что в Stop, и по тем же причинам (см. там).
+void EditorPlaySession::TeardownRuntime(const PlayContext& ctx, Scene* scene) {
+    if (ctx.Systems) {
+        ctx.Systems->Remove("scripts");
+        ctx.Systems->Remove("scripting");
+        ctx.Systems->Remove("scripting.late");
+        ctx.Systems->Remove("physics");
+    }
+    if (m_audio && scene) sage::audio::StopScene(*scene, *m_audio);
+    if (m_scripting) m_scripting->Shutdown();
+    m_scripting.reset();
+    m_scripts.reset();
+    m_physics.reset();
+    // Шина принадлежит СЦЕНЕ, а её сейчас заменят: указатель обязан уйти раньше.
+    m_input.SetEventBus(nullptr);
+}
+
+// ПЕРЕХОД НА ДРУГОЙ УРОВЕНЬ ПРЯМО В РЕДАКТОРЕ.
+//
+// Раньше `sage.scene.Load` в Play-режиме не делал НИЧЕГО — редактор писал в
+// лог «проверяйте переходы в собранной игре». То есть самую частую ошибку
+// уровня (не та сцена, не тот спавн, потерянный игрок) нельзя было увидеть там,
+// где её правят: цикл «поправил — посмотрел» требовал полной сборки игры.
+//
+// Документ человека при этом НЕ ТРОГАЕТСЯ: Play работает с копией, и Stop
+// возвращает ровно ту сцену, которая была открыта до запуска, — вместе с
+// несохранённой правкой.
+bool EditorPlaySession::SwitchScene(const PlayContext& ctx, const std::string& sceneName) {
+    if (!Active() || !ctx.LoadSceneForPlay) return false;
+    Scene* current = ctx.ScenePtr ? *ctx.ScenePtr : nullptr;
+
+    // Пустое имя — «этот же уровень заново». Берём его из СНИМКА, а не с диска:
+    // играют то, что открыто, а открытая сцена может быть ещё не сохранена —
+    // перезапуск обязан вернуть именно её, а не прошлую версию файла.
+    const bool restartCurrent = sceneName.empty();
+
+    TeardownRuntime(ctx, current);
+    const bool loaded = restartCurrent ? (ctx.RestoreScene && ctx.RestoreScene(m_snapshot))
+                                       : ctx.LoadSceneForPlay(sceneName);
+    if (!loaded) {
+        LOG_ERROR("Editor") << "Play: сцена «"
+                            << (restartCurrent ? std::string("(текущая)") : sceneName)
+                            << "» не загрузилась — игра остановлена";
+        return false;
+    }
+    Scene& fresh = **ctx.ScenePtr;
+    BuildRuntime(ctx, fresh);
+    if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
+    return true;
+}
+
+void EditorPlaySession::StepScripts(Scene& scene, float dt) {
+    if (m_scripts) m_scripts->UpdateAll(dt);
+    if (!m_scripting) return;
+    // Столкновения прошлого шага — до Update, как и в обычном кадре.
+    if (m_physics) m_scripting->DispatchPhysicsEvents(*m_physics, scene);
+    m_scripting->FixedUpdate(dt);
+    m_scripting->Update(dt);
+    m_scripting->LateUpdate(dt);
 }
 
 // ПАУЗА — ЭТО ОСТАНОВЛЕННЫЙ КАДР, А НЕ ЗНАЧОК.
@@ -206,23 +277,10 @@ void EditorPlaySession::Stop(const PlayContext& ctx) {
     // указатель, и оставленная в кадре система обратилась бы к освобождённой
     // памяти. Снимается ровно то, что добавил Start. "particles", "animation" и
     // "audio" остаются: это превью режима правки, а не игровые системы.
-    if (ctx.Systems) {
-        ctx.Systems->Remove("scripts");
-        ctx.Systems->Remove("physics");
-    }
-
-    // Звук объекта не имеет права пережить остановку игры: сцена вернётся из
-    // снимка, а шум водопада продолжал бы идти из точки, где водопада уже нет.
-    // Глушим ДО замены сцены — после неё компонентов с дескрипторами уже не
-    // существует, и остановить их будет нечем.
-    if (m_audio && scene) sage::audio::StopScene(*scene, *m_audio);
-
-    m_scripts.reset();
-    m_physics.reset();
-
-    // Шина событий принадлежит СЦЕНЕ, а сцену сейчас заменит восстановленный
-    // снимок — указатель на неё обязан уйти раньше.
-    m_input.SetEventBus(nullptr);
+    // Системы, звук, скрипты и физика снимаются одним и тем же кодом, что и при
+    // переходе на другой уровень: два похожих порядка гашения — это два места,
+    // где однажды разойдётся то, что обязано совпадать.
+    TeardownRuntime(ctx, scene);
     // Курсор возвращается человеку: игра могла его захватить, и без этого Stop
     // оставил бы редактор без мыши.
     m_cursor.ReleaseCapture();

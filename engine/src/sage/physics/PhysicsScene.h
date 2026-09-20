@@ -126,6 +126,10 @@ private:
     // Step() каждый кадр — состав мира меняется скриптами на ходу.
     void SyncBodies(Scene& scene);
     void SyncCharacters(Scene& scene);
+    // Тяготение, прыжок, опора, склон и ступенька контроллеров персонажа.
+    // Между «состав мира» и шагом мира: скрипт уже сказал, куда идти, а
+    // столкновения ещё не посчитаны.
+    void StepCharacters(Scene& scene, float dt);
     void PullCharacters(Scene& scene);
 
     std::unique_ptr<sage::physics::PhysicsWorld> m_world;

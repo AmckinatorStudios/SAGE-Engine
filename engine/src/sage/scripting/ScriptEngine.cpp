@@ -445,6 +445,12 @@ void ScriptEngine::DispatchMessage(int targetId, const std::string& name, sol::o
         }
     }
 
+    // Скрипты объектов ведёт система скриптинга — до них сообщение доходит
+    // мостом (см. ScriptEngine::SetMessageSink). Без этого кнопка интерфейса
+    // перестала бы звать дверь ровно в тот момент, когда поведение объектов
+    // переехало в новую систему, — и молча.
+    if (m_messageSink) m_messageSink(targetId, name, data);
+
     --m_messageDepth;
 }
 
@@ -473,6 +479,9 @@ void ScriptEngine::DispatchQuit() {
             LOG_ERROR("ScriptEngine") << "Ошибка в OnQuit (" << inst.Path << "): " << err.what();
         }
     }
+    // И скриптам объектов тоже: для игры с сохранением выход — последнее место,
+    // где прогресс ещё можно записать.
+    if (m_quitSink) m_quitSink();
 }
 
 // Сколько раз подряд OnUpdate может упасть, прежде чем движок перестанет его

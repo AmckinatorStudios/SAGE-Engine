@@ -37,6 +37,11 @@ enum class AudioRequest : int {
     None = 0,
     Play,     // начать заново (если уже играет — перезапустить)
     Stop,
+    // Пауза и продолжение: курсор остаётся на месте. Без них «приостановить
+    // музыку» означало бы остановить и начать заново — то есть услышать
+    // вступление ещё раз при каждом открытии меню.
+    Pause,
+    Resume,
 };
 
 // Микс-группа: раздельная громкость в настройках игрока. Значения совпадают с
@@ -80,6 +85,9 @@ struct AudioSourceComponent {
     // Звучит ли ПРЯМО СЕЙЧАС. Отдельно от Handle, потому что одноразовый звук
     // доигрывает сам: дескриптор ещё жив, а звука уже нет.
     bool Playing = false;
+    // Приостановлен. Отдельно от Playing: на паузе источник не звучит, но и не
+    // «доиграл» — продолжать его есть чем.
+    bool Paused = false;
     // Команда на ближайший кадр (см. AudioRequest).
     AudioRequest Request = AudioRequest::None;
 
@@ -87,4 +95,6 @@ struct AudioSourceComponent {
     // трогают устройство, поэтому их можно звать откуда угодно и когда угодно.
     void Play() { Request = AudioRequest::Play; }
     void Stop() { Request = AudioRequest::Stop; }
+    void Pause() { Request = AudioRequest::Pause; }
+    void Resume() { Request = AudioRequest::Resume; }
 };

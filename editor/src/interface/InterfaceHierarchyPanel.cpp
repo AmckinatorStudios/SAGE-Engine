@@ -236,10 +236,20 @@ void InterfaceHierarchyPanel::DrawInterfacePicker(EditorHost& host) {
             }
             if (selected) ImGui::SetItemDefaultFocus();
         }
-        ImGui::EndPopup();
+        // ИМЕННО EndCombo, а не EndPopup. Разница не косметическая: EndCombo
+        // ещё и уменьшает счётчик глубины списков ImGui, по которому тот
+        // ПЕРЕИСПОЛЬЗУЕТ окна («##Combo_00», «##Combo_01» …). С EndPopup
+        // счётчик рос каждый кадр, пока список открыт, и следующий же список
+        // редактора закрывался с проверкой «EndCombo() в чужом окне» — ImGui
+        // прерывал отрисовку окна, и интерфейс редактора разваливался целиком.
+        ImGui::EndCombo();
     }
     ImGui::SameLine();
-    if (EditorIcons::Button("plus", "##new_interface", T("New interface in this scene")))
+    // КНОПКА ТОЛЬКО ЗНАЧКОМ. У кнопки со значком и подписью подпись рисуется
+    // как есть — «##new_interface» и печаталось рядом со значком, а ширина
+    // кнопки считалась по этой надписи: кнопка вылезала за правый край панели,
+    // где её обрезал ImGui, и нажатие не доходило («кнопка не работает»).
+    if (EditorIcons::IconOnlyButton("plus", T("New interface in this scene")))
         CreateInterface(host);
 }
 

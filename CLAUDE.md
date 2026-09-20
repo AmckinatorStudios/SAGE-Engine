@@ -46,6 +46,7 @@ python3 scripts/check_paths.py                                    # пути и�
 python3 scripts/check_asset_slots.py                              # ассеты — слотами
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
 python3 scripts/check_menu_style.py                               # отступы меню
+python3 scripts/check_imgui_pairs.py                              # EndCombo и подписи кнопок
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
@@ -88,6 +89,12 @@ mingw) — половина поломок Windows-сборки на Linux не 
   `BeginPopup` (иначе наследует стиль того, кто его открыл — например,
   обнулённый `WindowPadding` панели). Модальных окон не касается. Проверяет
   `scripts/check_menu_style.py`.
+- **Список закрывается `ImGui::EndCombo`**, а не `EndPopup`: EndCombo ещё и
+  уменьшает счётчик окон списков ImGui, и без него разваливается СЛЕДУЮЩИЙ
+  список редактора, а не этот. **Кнопке без подписи —
+  `EditorIcons::IconOnlyButton`**: `Button(значок, "##имя")` печатает «##имя»
+  рядом со значком и считает по нему ширину — кнопка уезжает за край панели и
+  перестаёт нажиматься. Проверяет `scripts/check_imgui_pairs.py`.
 - **Новая функция скриптам — вызов `Bind(...)`** в
   `engine/src/sage/scripting/`, затем `python3 scripts/gen_script_api.py`
   (собирает подсказку `editor/assets/api/sage.lua`). Сторожит `--check`.

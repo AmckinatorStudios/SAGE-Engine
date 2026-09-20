@@ -578,6 +578,19 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                     ImGui::GetColorU32(ImGuiCol_TextDisabled), kindShown.c_str());
     }
 
+    // СТАРТОВАЯ СЦЕНА ВИДНА В СПИСКЕ, а не только в меню. Иначе «с какой сцены
+    // начнётся игра» — вопрос, на который отвечают, открывая по очереди меню
+    // каждой сцены проекта.
+    if (!isDir && path.extension() == ".sage" && host.CurrentProject().Loaded() &&
+        host.CurrentProject().StartScene() == path.stem().string()) {
+        const std::string tag = T("start");
+        const ImVec2 size = ImGui::CalcTextSize(tag.c_str());
+        const ImVec2 p0(cursor.x + 4.0f, cursor.y + 4.0f);
+        const ImVec2 p1(p0.x + size.x + 8.0f, p0.y + size.y + 2.0f);
+        dl->AddRectFilled(p0, p1, IM_COL32(40, 120, 60, 210), 4.0f);
+        dl->AddText(ImVec2(p0.x + 4.0f, p0.y + 1.0f), IM_COL32(230, 255, 235, 255), tag.c_str());
+    }
+
     // «Ещё» — та же правая кнопка, но нажимаемая мышью без правой кнопки: на
     // ноутбуке и планшете правого клика может не быть вовсе, а действия над
     // файлом (переименовать, удалить, цвет папки) больше нигде не живут.
@@ -716,6 +729,30 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         if (isDir) sage::editor::foldercolors::DrawPaletteMenu(path);
         if (EditorIcons::MenuItem("pencil", T("Rename"))) { m_renameTarget = path; m_error.clear(); }
         if (EditorIcons::MenuItem("trash", T("Delete"))) { m_deleteTargets = m_multi; }
+
+        // СТАРТОВАЯ СЦЕНА — здесь же, в меню самого файла.
+        //
+        // «С какой сцены начинается игра» — решение автора, и до сих пор его
+        // нельзя было принять вовсе: собранная игра брала main.sage, а если её
+        // нет — первую по алфавиту. То есть переименование файла меняло начало
+        // игры, и узнать об этом можно было только собрав её.
+        if (!isDir && path.extension() == ".sage" && host.CurrentProject().Loaded()) {
+            ImGui::Separator();
+            const std::string name = path.stem().string();
+            const bool already = host.CurrentProject().StartScene() == name;
+            if (already) {
+                ImGui::TextDisabled("%s", T("This is the start scene"));
+            } else if (EditorIcons::MenuItem("play", T("Make start scene"))) {
+                std::string err;
+                if (host.CurrentProject().SetStartScene(name, err))
+                    host.SetStatusMessage(T("Start scene: ") + name);
+                else
+                    host.SetStatusMessage(T("Failed to set the start scene: ") + err);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("The built game starts from this scene"));
+            }
+        }
 
         // Конвертация в свой формат — там же, где всё остальное про файл.
         // Отдельной кнопки в меню нет намеренно: конвертируют КОНКРЕТНЫЙ файл,

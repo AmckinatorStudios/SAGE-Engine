@@ -772,6 +772,9 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
             m_debugDraw->WireBox(box, glm::vec3(1.0f, 0.65f, 0.2f));
         }
     }
+    // Отладочная графика игры — вместе с гизмо редактора: и то и другое линии
+    // с тестом глубины, и рисовать их двумя разными способами незачем.
+    DrawScriptDebug();
     m_debugDraw->Flush(outView, outProj);
 
     // Кайма выделения — поверх ИТОГОВОГО кадра (постоянная ширина в пикселях,
@@ -784,6 +787,12 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     sceneFbo.Resolve();
 
     device.BindDefaultFramebuffer();
+}
+
+void EditorSceneRenderer::DrawScriptDebug() {
+    if (!m_scriptDebug || !m_debugDraw) return;
+    for (const sage::render::DebugLine& l : m_scriptDebug->All())
+        m_debugDraw->Line(l.A, l.B, l.Color);
 }
 
 void EditorSceneRenderer::SetCameraPreviewSize(int w, int h) {
@@ -911,6 +920,13 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false,
             /*viewId=*/kGameViewId);
     m_particles->DrawFromView(view, proj);
+
+    // Отладочная графика игры (Debug:DrawLine) — и в панели Game тоже: она
+    // показывает игру, а отладочные линии рисуют, чтобы понять игру.
+    if (m_scriptDebug && !m_scriptDebug->Empty()) {
+        DrawScriptDebug();
+        m_debugDraw->Flush(view, proj);
+    }
 
     // Объём и блик — ТЕ ЖЕ ДВА ПРОХОДА, что у собранной игры (см. PlayerLayer),
     // и в том же порядке: объём после геометрии, блик после объёма, оба до

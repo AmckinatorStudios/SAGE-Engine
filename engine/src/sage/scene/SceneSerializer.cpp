@@ -527,8 +527,11 @@ static sage::render::ReflectionSettings ReflectionsFromJson(const json& root) {
 static void SaveCharacter(json& j, const CharacterControllerComponent& c) {
     j["character"]["radius"] = c.Radius;
     j["character"]["height"] = c.Height;
-    j["character"]["stepHeight"] = c.StepHeight;
-    j["character"]["maxSlopeDeg"] = c.MaxSlopeDeg;
+    j["character"]["stepOffset"] = c.StepOffset;
+    j["character"]["slopeLimit"] = c.SlopeLimit;
+    j["character"]["center"] = Vec3ToJson(c.Center);
+    j["character"]["skinWidth"] = c.SkinWidth;
+    j["character"]["gravity"] = c.Gravity;
     j["character"]["mass"] = c.Mass;
     j["character"]["layer"] = (unsigned)c.Layer;
 }
@@ -537,8 +540,13 @@ static CharacterControllerComponent ParseCharacter(const json& cj) {
     CharacterControllerComponent c;
     c.Radius = cj.value("radius", c.Radius);
     c.Height = cj.value("height", c.Height);
-    c.StepHeight = cj.value("stepHeight", c.StepHeight);
-    c.MaxSlopeDeg = cj.value("maxSlopeDeg", c.MaxSlopeDeg);
+    // Прежние имена читаются по-прежнему: сцены, сделанные до переименования
+    // параметров, обязаны открываться, а не терять настройку персонажа молча.
+    c.StepOffset = cj.value("stepOffset", cj.value("stepHeight", c.StepOffset));
+    c.SlopeLimit = cj.value("slopeLimit", cj.value("maxSlopeDeg", c.SlopeLimit));
+    if (cj.contains("center")) c.Center = Vec3FromJson(cj["center"]);
+    c.SkinWidth = cj.value("skinWidth", c.SkinWidth);
+    c.Gravity = cj.value("gravity", c.Gravity);
     c.Mass = cj.value("mass", c.Mass);
     c.Layer = cj.value("layer", (unsigned)c.Layer);
     return c;
@@ -1081,8 +1089,14 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
             j["folder"]["color"] = Vec3ToJson(fc->Color);
         }
+        if (const TagComponent* tag = reg.try_get<TagComponent>(e))
+            if (!tag->Tag.empty()) j["tag"] = tag->Tag;
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) {
             SaveAssetRef(j, "script", sc->Path);
+            // Значения публичных переменных скрипта — рядом с самим скриптом:
+            // они принадлежат ЭТОМУ объекту, а не файлу, и без них скрипт при
+            // следующей загрузке получил бы умолчания вместо настройки.
+            if (!sc->Fields.Empty()) j["scriptVars"] = VarsToJson(sc->Fields);
         }
         if (const DecalComponent* dc = reg.try_get<DecalComponent>(e)) {
             // Сохраняются ПАРАМЕТРЫ проекции, а не её результат: геометрия
@@ -1191,9 +1205,15 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             if (j["folder"].contains("color")) fc.Color = Vec3FromJson(j["folder"]["color"]);
             obj.Registry()->emplace<FolderComponent>(obj.Entity(), fc);
         }
+        if (j.contains("tag") && j["tag"].is_string()) {
+            const std::string tag = j["tag"].get<std::string>();
+            if (!tag.empty()) obj.Registry()->emplace<TagComponent>(obj.Entity(), TagComponent{tag});
+        }
         if (j.contains("script")) {
-            obj.Registry()->emplace<ScriptComponent>(obj.Entity(),
-                                                     ScriptComponent{LoadAssetRef(j, "script")});
+            ScriptComponent sc;
+            sc.Path = LoadAssetRef(j, "script");
+            if (j.contains("scriptVars")) VarsFromJson(j["scriptVars"], sc.Fields);
+            obj.Registry()->emplace<ScriptComponent>(obj.Entity(), std::move(sc));
         }
 
         // Материал: путь сериализуется, разделяемый экземпляр — из кэша.

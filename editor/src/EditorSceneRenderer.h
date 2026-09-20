@@ -13,6 +13,7 @@
 #include "sage/render/LensFlare.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/render/DebugDraw.h"
+#include "sage/render/DebugLines.h"
 #include "sage/render/GridRenderer.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
@@ -124,6 +125,11 @@ public:
     // параметром RenderViewport: тот и так принимает девять аргументов и
     // вызывается в цикле по всем видам раскладки.
     void SetShowBounds(bool show) { m_showBounds = show; }
+
+    // Отладочная графика ИГРЫ (Debug:DrawLine из скриптов). Указатель, а не
+    // копия: буфер живёт у системы скриптинга и пуст, пока игра не запущена.
+    // nullptr — в режиме правки, там рисовать нечего.
+    void SetScriptDebugLines(const sage::render::DebugLines* lines) { m_scriptDebug = lines; }
 
     // Игрового интерфейса во вьюпорте БОЛЬШЕ НЕТ.
     //
@@ -304,6 +310,11 @@ private:
     // накладывается по нему, а у разных видов раскладки размеры разные.
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
+    const sage::render::DebugLines* m_scriptDebug = nullptr;
+    // Переливает заказы скриптов в DebugDraw. Одно место на оба вида (вьюпорт и
+    // панель Game): две копии этого цикла разошлись бы на первом же новом виде
+    // примитива.
+    void DrawScriptDebug();
     int m_gameW = 1280, m_gameH = 720;
     sage::ui::UIScope m_uiScope;
     float m_uiBackdropAlpha = 0.0f;
