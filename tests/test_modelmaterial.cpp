@@ -11,6 +11,7 @@
 
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/render/Material.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -357,4 +358,99 @@ TEST(model_material_coloured_material_without_maps_is_not_reported) {
         ModelLoader::ExtractMaterials((dir / "colour.gltf").string());
     CHECK_EQ((int)set.Materials.size(), 1);
     CHECK_TRUE(set.Warnings.empty());
+}
+
+// ============================================================================
+//  ПОВЕДЕНИЕ МАТЕРИАЛА: прозрачность, двусторонность, масштаб развёртки
+//
+//  Файл описывает их наравне с цветом, а до движка они не доезжали. Из-за
+//  этого листва и решётки приезжали непрозрачными прямоугольниками (вырез в
+//  альфе никто не смотрел), односторонние листы исчезали с изнанки, а
+//  свечение из KHR_materials_emissive_strength оставалось просто светлым
+//  цветом — bloom его не подхватывал.
+// ============================================================================
+
+// Тот же шаблон, что и выше, но материал описывает своё ПОВЕДЕНИЕ.
+const char* kGltfBehaviourTemplate = R"({
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "material": 0}]}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "min": [0,0,0], "max": [1,1,0]},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+  ],
+  "buffers": [{"byteLength": 42, "uri": "geom.bin"}],
+  "images": [{"uri": "leaf%20base.png"}],
+  "textures": [{"source": 0}],
+  "materials": [{
+    "name": "Листва",
+    "doubleSided": true,
+    "alphaMode": "MASK",
+    "alphaCutoff": 0.33,
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {"index": 0,
+        "extensions": {"KHR_texture_transform": {"scale": [3.0, 2.0]}}}
+    },
+    "emissiveFactor": [1.0, 1.0, 1.0],
+    "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 4.5}}
+  }]
+})";
+
+TEST(model_material_gltf_reads_alpha_mode_and_double_sided) {
+    const fs::path dir = TempDir("sage_test_modelmat_behaviour");
+    const fs::path gltf = dir / "leaf.gltf";
+    WriteText(gltf, kGltfBehaviourTemplate);
+    WriteGeomBin(dir / "geom.bin");
+    // Имя С ПРОБЕЛОМ: в URI оно закодировано как %20, и без раскодирования
+    // карта не находится никогда.
+    WritePixelPng(dir / "leaf base.png", 40, 160, 40);
+
+    const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial(gltf.string());
+    CHECK_TRUE(m.Found);
+    CHECK_TRUE(m.DoubleSided);
+    CHECK_EQ(m.AlphaMode, 1);                      // MASK
+    CHECK_NEAR(m.AlphaCutoff, 0.33f, 1e-4f);
+    CHECK_NEAR(m.EmissiveStrength, 4.5f, 1e-4f);
+    CHECK_NEAR(m.UVScale.x, 3.0f, 1e-4f);
+    CHECK_NEAR(m.UVScale.y, 2.0f, 1e-4f);
+    // И сама карта нашлась, несмотря на пробел в имени.
+    CHECK_TRUE(m.AlbedoMap.find("leaf base.png") != std::string::npos);
+}
+
+TEST(model_material_alpha_cutoff_reaches_the_engine_material) {
+    // Порог доезжает до материала движка: шейдер умел отсекать давно
+    // (uAlphaCutoff), но ставил порог только скиновый путь, и одна и та же
+    // ветка выглядела по-разному со скелетом и без.
+    Material mat;
+    CHECK_NEAR(mat.Render.AlphaCutoff, 0.0f, 1e-6f);   // по умолчанию режима нет
+
+    mat.Render.AlphaCutoff = 0.4f;
+    mat.Render.Cull = CullFaces::None;
+    const fs::path dir = TempDir("sage_test_material_cutoff");
+    const fs::path file = dir / "leaf.sagemat";
+    mat.SaveToFile(file.string());
+
+    const Material back = Material::LoadFromFile(file.string());
+    CHECK_NEAR(back.Render.AlphaCutoff, 0.4f, 1e-4f);
+    CHECK_TRUE(back.Render.Cull == CullFaces::None);
+}
+
+TEST(model_material_obj_dissolve_becomes_blending) {
+    // У .mtl нет режима прозрачности — есть только d. Значение меньше единицы
+    // и означает смешивание: другого способа сказать это в формате нет.
+    const fs::path dir = TempDir("sage_test_modelmat_dissolve");
+    WriteText(dir / "glass.obj", "mtllib glass.mtl\nusemtl Glass\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    WriteText(dir / "glass.mtl", "newmtl Glass\nKd 0.6 0.8 1.0\nd 0.35\n");
+
+    const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial((dir / "glass.obj").string());
+    CHECK_TRUE(m.Found);
+    CHECK_NEAR(m.Opacity, 0.35f, 1e-3f);
+    CHECK_EQ(m.AlphaMode, 2);   // BLEND
 }

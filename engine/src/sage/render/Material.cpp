@@ -46,6 +46,12 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          "Насколько поверхность пользуется плоским отражением сцены.\n"
          "0 — не пользуется, 1 — зеркало. Не выводится из шероховатости:\n"
          "гладкий шар тоже гладкий, но плоскости он не принадлежит."},
+        {"alphaCutoff", "Порог отсечения", MaterialRenderField::Kind::Float,
+         MaterialRenderField::Group::Render, nullptr, &MaterialRender::AlphaCutoff, 0.0f, 1.0f,
+         "Пиксель с альфой ниже порога не рисуется вовсе.\n"
+         "0 — режима нет: альфа текстуры не смотрится.\n"
+         "Нужен листве, траве, решёткам — всему, что вырезано альфой:\n"
+         "полупрозрачный проход там даёт мерцание и просвет друг сквозь друга."},
         {"uvScaleX", "Повтор по X", MaterialRenderField::Kind::Float,
          MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleX, 0.01f, 64.0f,
          "Сколько раз текстура укладывается по ширине развёртки.\n"

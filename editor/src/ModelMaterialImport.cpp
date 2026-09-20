@@ -51,6 +51,14 @@ fs::path EnsureMaterialFile(const Project& project, const fs::path& path,
     mat.Metallic = ex.Metallic;
     mat.Roughness = ex.Roughness;
     mat.Opacity = ex.Opacity;
+    // ПОВЕДЕНИЕ — ТОЖЕ ИЗ ФАЙЛА. Двусторонность, отсечение по альфе и масштаб
+    // развёртки описаны в модели наравне с цветом; пока они не доезжали, листва
+    // приезжала непрозрачным прямоугольником, а односторонний лист исчезал с
+    // изнанки — и починить это можно было только руками, зная, что искать.
+    if (ex.DoubleSided) mat.Render.Cull = CullFaces::None;
+    if (ex.AlphaMode == 1) mat.Render.AlphaCutoff = ex.AlphaCutoff;
+    mat.Render.UVScaleX = ex.UVScale.x;
+    mat.Render.UVScaleY = ex.UVScale.y;
     // Пути карт — относительно проекта: материал переживёт сборку игры и переезд
     // проекта (см. Project::AssetRef).
     mat.TexturePath = project.AssetRef(ex.AlbedoMap);
