@@ -34,15 +34,7 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
         ImGui::TextWrapped("%s", T("No directional light — no sun and no time of day."));
         if (ImGui::Button(T("Create a sun"))) {
             host.PushUndoSnapshot();
-            GameObject sun = scene.CreateEmptyObject("Sun");
-            sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
-            sun.GetTransform().Rotation =
-                sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
-            LightComponent lc;
-            lc.Kind = LightComponent::Type::Directional;
-            lc.Color = {1.0f, 0.95f, 0.85f};
-            lc.Intensity = 1.0f;
-            scene.Registry().emplace<LightComponent>(sun.Entity(), lc);
+            GameObject sun = sage::ecs::CreateSunEntity(scene);
             host.Selection().SetPrimary(sun.Id());
         }
         return;

@@ -254,15 +254,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // Солнце — такая же сущность, как всё остальное. Раньше его роль играли
         // три поля в настройках сцены; теперь его видно в иерархии, можно
         // повернуть гизмо и увидеть, как поехали тени.
-        GameObject sun = m_scene->CreateEmptyObject("Sun");
-        sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
-        sun.GetTransform().Rotation =
-            sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
-        LightComponent sunLc;
-        sunLc.Kind = LightComponent::Type::Directional;
-        sunLc.Color = {1.0f, 0.95f, 0.85f};
-        sunLc.Intensity = 1.0f;
-        m_scene->Registry().emplace<LightComponent>(sun.Entity(), sunLc);
+        sage::ecs::CreateSunEntity(*m_scene);
 
         // Тёплая лампа — демонстрация точечного света-сущности (LightComponent).
         GameObject lamp = m_scene->CreateEmptyObject("Lamp");
@@ -349,6 +341,26 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         if (sel.Valid()) m_selection.SetPrimary(sel.Id());
     }
     UpdateWindowTitle();
+}
+
+// Новая сцена ДЛЯ ЧЕЛОВЕКА — сразу с объектом-солнцем.
+//
+// Пустая сцена теперь и правда пустая: света в ней нет вовсе (см.
+// LightingEnvironment::Sun — поле окружения больше не горит само собой). Без
+// объекта-солнца человек, выбравший «Новая сцена», получил бы чёрный вьюпорт и
+// ни одной подсказки, что делать. Солнце заводится ОБЪЕКТОМ: его видно в
+// иерархии, его можно выбрать, повернуть гизмо и удалить — и вот тогда
+// темнота будет объяснимой, потому что удалил её сам.
+//
+// Отдельно от NewScene намеренно: NewScene(Empty) — чистый лист для кода и
+// самопроверки, и класть туда объекты значит менять смысл «пусто».
+void EditorLayer::NewSceneForUser() {
+    NewScene(ProjectTemplateKind::Empty);
+    sage::ecs::CreateSunEntity(*m_scene);
+    // Выделение НЕ трогаем: смена проекта обязана оставлять его пустым (номера
+    // объектов прошлой сцены принадлежат в новой другим), и солнце,
+    // выделенное «за компанию», выглядело бы как несброшенное выделение.
+    m_sceneDirty = false; // только что созданная сцена ещё не правлена
 }
 
 bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
@@ -793,7 +805,10 @@ bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
         return true;
     }
 
-    NewScene(kind);
+    // Пустой шаблон — это пустой ПРОЕКТ, а не чистый лист для кода: сцену
+    // в нём открывает человек, и она обязана быть освещена своим солнцем.
+    if (kind == ProjectTemplateKind::Empty) NewSceneForUser();
+    else NewScene(kind);
 
     // ШАБЛОН ОБЯЗАН ОСТАВИТЬ ФАЙЛ СЦЕНЫ, а не только картинку в окне.
     //
