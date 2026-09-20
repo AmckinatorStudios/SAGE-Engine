@@ -13,6 +13,31 @@
 # Вызывается для КАЖДОГО исполняемого файла: манифест — свойство процесса, и
 # редактору он нужен ровно так же, как плееру и любой игре. На не-Windows
 # ничего не делает.
+# sage_strip_release(<target>)
+#
+# СНИМАЕТ ОТЛАДОЧНУЮ ИНФОРМАЦИЮ В РЕЛИЗНОЙ СБОРКЕ.
+#
+# ЗАЧЕМ. Редактор весил 88 МБ, плеер — 81 МБ, и архив релиза выходил под 60 МБ.
+# Ничего большого в них нет: весь этот вес — DWARF, то есть таблицы для
+# отладчика, которого у скачавшего нет и быть не должно. После снятия редактор
+# весит 33 МБ, и это уже честный размер программы, а не размер её отладочных
+# таблиц.
+#
+# ПОЧЕМУ --strip-debug, А НЕ --strip-all. Полное снятие дало бы 21 МБ, но
+# вместе с DWARF унесло бы таблицу символов — ту самую, по которой обработчик
+# падений печатает имена функций в отчёте. Отчёт из одних адресов бесполезен
+# ровно там, где он и нужен: у человека на его машине, где отладчика нет. Двенадцать
+# мегабайт — честная цена за то, чтобы «почему упало» оставался вопросом с
+# ответом.
+#
+# ТОЛЬКО В RELEASE: у сборки для разработки отладочные таблицы и есть смысл.
+function(sage_strip_release target)
+    if (MSVC)
+        return()   # у MSVC отладочные данные и так лежат отдельным .pdb
+    endif()
+    target_link_options(${target} PRIVATE $<$<CONFIG:Release>:-Wl,--strip-debug>)
+endfunction()
+
 function(sage_windows_manifest target)
     if (NOT WIN32)
         return()
@@ -44,6 +69,7 @@ function(sage_add_game)
 
     add_executable(${GAME_NAME} ${GAME_SOURCES})
     sage_windows_manifest(${GAME_NAME})
+    sage_strip_release(${GAME_NAME})
     target_link_libraries(${GAME_NAME} PRIVATE sage::engine)
     target_include_directories(${GAME_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -97,6 +123,7 @@ function(sage_add_editor_plugin)
     endif()
 
     add_library(${PLUGIN_NAME} MODULE ${PLUGIN_SOURCES})
+    sage_strip_release(${PLUGIN_NAME})
     # Только заголовки ImGui (см. комментарий выше) — НЕ target_link_libraries(imgui),
     # чтобы не затащить в плагин статическую копию libimgui.a.
     target_include_directories(${PLUGIN_NAME} PRIVATE

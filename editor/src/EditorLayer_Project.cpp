@@ -338,35 +338,6 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
             bar.Smoothing = 3.0f;
         }
         m_scene->SetParent(hp.Entity(), hud.Entity());
-
-    } else if (content == ProjectTemplateKind::UIStarter) {
-        // Стартер интерфейса: сцены как таковой нет, зато есть камера, свет и
-        // два готовых экрана. С этого начинают те, кому нужна не витрина
-        // движка, а меню и худ, — и раньше им приходилось сначала удалить
-        // девять чужих объектов, а потом собрать экраны с нуля.
-        m_scene->Lighting.Skybox.Enabled = true;
-
-        GameObject ground = CreatePrimitiveEntity("Ground", MeshRef::Type::Plane);
-        ground.GetTransform().Scale = {12.0f, 1.0f, 12.0f};
-        PaintWithMaterial(ground, "Ground", {0.30f, 0.32f, 0.36f}, 0.0f, 0.85f);
-
-        GameObject camObj = m_scene->CreateEmptyObject("Main Camera");
-        camObj.GetTransform().Position = {0.0f, 1.6f, 6.0f};
-        camObj.GetTransform().Rotation = {-8.0f, 0.0f, 0.0f};
-        m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
-
-        GameObject sun = m_scene->CreateEmptyObject("Sun");
-        sun.GetTransform().Rotation =
-            sage::ecs::EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
-        LightComponent sunLc;
-        sunLc.Kind = LightComponent::Type::Directional;
-        sunLc.Color = {1.0f, 0.95f, 0.85f};
-        m_scene->Registry().emplace<LightComponent>(sun.Entity(), sunLc);
-
-        // Те же самые демо-экраны, что и в меню «Create UI»: одна реализация,
-        // а не «похожий интерфейс, собранный отдельно для шаблона».
-        sage::ui::BuildDemo(*m_scene, "hud");
-        sage::ui::BuildDemo(*m_scene, "menu");
     }
 
     if (content == ProjectTemplateKind::Demo) {
