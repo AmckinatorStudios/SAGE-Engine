@@ -1199,6 +1199,10 @@ void EditorLayer::OnRender() {
     // сцена в ней означала бы, что редактор врёт о картинке.
     m_renderer.SetUIBackdrop(m_workspace == EditorWorkspace::Interface ? m_tools.UI.Backdrop : 0.0f,
                              m_tools.UI.BackdropColor);
+    // И ТОЛЬКО ТОТ ИНТЕРФЕЙС, КОТОРЫЙ ВЕРСТАЮТ — по той же причине: чужое меню
+    // поверх редактируемого мешает не меньше подложки. В пространстве сцены
+    // область пустая, то есть «всё, как в игре» (см. EditorLayer::UiScope).
+    m_renderer.SetUIScope(UiScope());
     m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
 
     // Превью ВЫБРАННОЙ камеры — последним и только по запросу вьюпорта: это

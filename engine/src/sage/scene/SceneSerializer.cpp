@@ -1120,6 +1120,20 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         // Элемент и его компоненты — общей записью (см. sage/ui/UISerialize.h):
         // тот же формат, каким интерфейс ложится в отдельный ресурс .sageui.
         if (json ui; sage::ui::SaveElement(ui, reg, e)) j["ui"] = std::move(ui);
+        // ИНТЕРФЕЙС — не часть элемента, а его ГРАНИЦА (см.
+        // sage/ui/components/InterfaceComponent.h): отдельным ключом, рядом с
+        // камерой и светом, а не внутри "ui".
+        if (const sage::ui::InterfaceComponent* ic =
+                reg.try_get<sage::ui::InterfaceComponent>(e)) {
+            json ij;
+            ij["visible"] = ic->Visible;
+            ij["sortOrder"] = ic->SortOrder;
+            ij["receivesInput"] = ic->ReceivesInput;
+            ij["canvasMode"] = (int)ic->Canvas.Mode;
+            ij["reference"] = Vec2ToJson(ic->Canvas.Reference);
+            ij["matchWidthOrHeight"] = ic->Canvas.MatchWidthOrHeight;
+            j["interface"] = std::move(ij);
+        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -1248,6 +1262,18 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             VarsFromJson(j["vars"], vc.Values);
             if (!vc.Values.Empty())
                 obj.Registry()->emplace_or_replace<VarsComponent>(obj.Entity(), std::move(vc));
+        }
+        if (j.contains("interface")) {
+            const json& ij = j["interface"];
+            sage::ui::InterfaceComponent ic;
+            ic.Visible = ij.value("visible", true);
+            ic.SortOrder = ij.value("sortOrder", 0);
+            ic.ReceivesInput = ij.value("receivesInput", true);
+            ic.Canvas.Mode = (sage::ui::Canvas::Scale)ij.value("canvasMode", 0);
+            if (ij.contains("reference"))
+                ic.Canvas.Reference = Vec2FromJson(ij["reference"], ic.Canvas.Reference);
+            ic.Canvas.MatchWidthOrHeight = ij.value("matchWidthOrHeight", 0.5f);
+            obj.Registry()->emplace<sage::ui::InterfaceComponent>(obj.Entity(), ic);
         }
         if (j.contains("ui")) {
             const json& uj = j["ui"];

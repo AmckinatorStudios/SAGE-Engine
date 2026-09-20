@@ -21,6 +21,7 @@
 #include "sage/render/ParticleSystem.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/scene/Scene.h"
+#include "sage/ui/UISceneSystem.h"
 #include "sage/scene/Light.h"
 #include "sage/core/Config.h"
 #include "sage/ecs/RenderBatch.h"
@@ -73,6 +74,14 @@ public:
         m_uiBackdropAlpha = opacity;
         m_uiBackdropColor = color;
     }
+
+    // КАКОЙ ИНТЕРФЕЙС РИСОВАТЬ В ИГРОВОМ КАДРЕ.
+    //
+    // В пространстве вёрстки — только тот, который правят: чужое меню поверх
+    // редактируемого мешает ровно так же, как чужие строки в дереве, и прятать
+    // его объектами сцены значит править сцену ради одного взгляда. В
+    // пространстве сцены и в игре — всё, как увидит игрок.
+    void SetUIScope(const sage::ui::UIScope& scope) { m_uiScope = scope; }
     // Размер игрового кадра: под него сверстан интерфейс игры, и с ним же
     // сравнивается курсор, переведённый панелью Game в его координаты.
     int GameWidth() const { return m_gameW; }
@@ -296,6 +305,7 @@ private:
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
     int m_gameW = 1280, m_gameH = 720;
+    sage::ui::UIScope m_uiScope;
     float m_uiBackdropAlpha = 0.0f;
     glm::vec3 m_uiBackdropColor{0.10f, 0.11f, 0.13f};
     // Превью выбранной камеры: свой буфер и свой размер (см. RenderCameraPreview).

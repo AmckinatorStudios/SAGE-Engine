@@ -1,5 +1,7 @@
 #pragma once
 #include "EditorTypes.h"
+
+#include "sage/ui/UISceneSystem.h"
 #include "EditorHistory.h"
 #include "EditorSelection.h"
 #include "EditorTools.h"
@@ -151,6 +153,22 @@ public:
     // рисует гизмо сцены.
     virtual EditorWorkspace Workspace() const = 0;
     virtual void SetWorkspace(EditorWorkspace workspace) = 0;
+
+    // --- ТЕКУЩИЙ ИНТЕРФЕЙС -------------------------------------------------
+    //
+    // Вёрстка идёт ВНУТРИ одного интерфейса (объект с
+    // sage::ui::InterfaceComponent). Панели — дерево, холст, инспектор —
+    // спрашивают его здесь, а не решают каждая по-своему: иначе дерево
+    // показывало бы один интерфейс, а холст рисовал другой.
+    //
+    // -1 — интерфейса нет вовсе; 0 — особый случай «элементы без интерфейса»
+    // (их собирают кодом и скриптом), см. UiScope().
+    virtual int CurrentInterfaceId() const = 0;
+    virtual void SetCurrentInterface(int id) = 0;
+
+    // Область работы для расчётов интерфейса: в пространстве вёрстки — только
+    // текущий интерфейс, в пространстве сцены — всё, как в игре.
+    virtual sage::ui::UIScope UiScope() const = 0;
 
     // --- undo/redo ---
     // Подмешать в публичные переменные объекта то, что объявил его скрипт

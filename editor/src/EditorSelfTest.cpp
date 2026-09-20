@@ -321,7 +321,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2074,6 +2074,71 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         std::error_code rmec;
         fs::remove(texA, rmec);
         fs::remove(texB, rmec);
+    }
+
+    // --- У КАЖДОГО ИНТЕРФЕЙСА СВОЙ КОНТЕКСТ ----------------------------------
+    //
+    // Жалоба: «два объекта с интерфейсом — в режиме вёрстки их элементы
+    // смешаны, и править один, не задевая другой, можно только пряча чужие
+    // объекты». Проверяем границу с обеих сторон: элементы разных интерфейсов
+    // не попадают друг к другу, и редактор умеет показать ровно один.
+    if (ok) {
+        namespace sui = sage::ui;
+        auto build = [&](const char* name, float x) {
+            GameObject iface = m_scene->CreateEmptyObject(name);
+            m_scene->Registry().emplace<sui::InterfaceComponent>(iface.Entity());
+            GameObject root = m_scene->CreateEmptyObject(std::string(name) + "Root");
+            sui::Element box;
+            box.Anchor = UIAnchor::TopLeft;
+            box.Position = {x, 10.0f};
+            box.Size = {80.0f, 40.0f};
+            m_scene->Registry().emplace<sui::Element>(root.Entity(), box);
+            m_scene->Registry().emplace<sui::Fill>(root.Entity());
+            m_scene->SetParent(root.Entity(), iface.Entity());
+            return iface;
+        };
+        GameObject first = build("SelftestUiA", 10.0f);
+        GameObject second = build("SelftestUiB", 300.0f);
+
+        const std::vector<entt::entity> a = sui::InterfaceRoots(*m_scene, first.Entity());
+        const std::vector<entt::entity> b = sui::InterfaceRoots(*m_scene, second.Entity());
+        if (a.size() != 1 || b.size() != 1 || a[0] == b[0]) {
+            LOG_ERROR("Editor") << "SELFTEST: элементы двух интерфейсов смешались (" << a.size()
+                                << " и " << b.size() << ")";
+            ok = false;
+        }
+
+        // Область редактора показывает ОДИН интерфейс — тот, что верстают.
+        const size_t all = sui::SolveSceneRects(*m_scene, 1280, 720, true).size();
+        const size_t one =
+            sui::SolveSceneRects(*m_scene, 1280, 720, true, sui::UIScope::Only(first.Entity()))
+                .size();
+        if (all < 2 || one != 1) {
+            LOG_ERROR("Editor") << "SELFTEST: область вёрстки не ограничивает интерфейс (всего "
+                                << all << ", в области " << one << ")";
+            ok = false;
+        }
+
+        // И редактор ВЫБИРАЕТ его сам: переключение в вёрстку с выделенным
+        // элементом обязано открыть интерфейс ЭТОГО элемента, а не первый
+        // попавшийся.
+        const EditorWorkspace before = m_workspace;
+        const int beforeInterface = m_currentInterface;
+        m_selection.SetPrimary(m_scene->Registry().get<IdComponent>(b[0]).Id);
+        m_currentInterface = -1;
+        m_workspace = EditorWorkspace::Scene;
+        SetWorkspace(EditorWorkspace::Interface);
+        if (m_currentInterface != second.Id()) {
+            LOG_ERROR("Editor") << "SELFTEST: вёрстка открылась не на том интерфейсе ("
+                                << m_currentInterface << " вместо " << second.Id() << ")";
+            ok = false;
+        }
+        m_workspace = before;
+        m_currentInterface = beforeInterface;
+        m_selection.Clear();
+
+        m_scene->RemoveObject(first.Id());
+        m_scene->RemoveObject(second.Id());
     }
 
     // --- ПОСТ-ОБРАБОТКА ПРИНАДЛЕЖИТ КАМЕРЕ -----------------------------------

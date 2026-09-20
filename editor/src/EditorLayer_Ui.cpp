@@ -62,6 +62,7 @@
 #include "sage/ui/UIDemos.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UISceneSystem.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/SceneSerializer.h"
 #include "Localization.h"
@@ -103,6 +104,11 @@ constexpr float kStatusBarHeight = 26.0f;
 // интерфейсу, означает инспектор, показывающий меш там, где ждут раскладку.
 void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
     if (workspace == m_workspace) return;
+    // ВЫБОР ИНТЕРФЕЙСА — ДО СБРОСА ВЫДЕЛЕНИЯ. Самый частый путь в вёрстку:
+    // выбрали в сцене объект интерфейса (или его элемент) и переключились. По
+    // выделению и понятно, какой интерфейс человек собрался править; после
+    // сброса эта подсказка потеряна.
+    if (workspace == EditorWorkspace::Interface) ResolveCurrentInterface();
     m_workspace = workspace;
     m_selection.Clear();
     // Своя раскладка у каждого пространства строится при первом показе: узла с
@@ -113,6 +119,63 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
     } else {
         m_viewport.RequestFocus();
     }
+}
+
+
+// КАКОЙ ИНТЕРФЕЙС ВЕРСТАЕМ.
+//
+// Правило одно на редактор, и вот почему оно здесь, а не в панели: дерево,
+// холст и инспектор обязаны показывать ОДИН И ТОТ ЖЕ интерфейс. Три ответа на
+// этот вопрос в трёх панелях — это дерево от одного экрана поверх холста
+// другого, и объяснить такую картинку нечем.
+void EditorLayer::ResolveCurrentInterface() {
+    auto valid = [&](int id) {
+        if (id < 0) return false;
+        if (id == 0) return true;  // «Без интерфейса» — строка, а не объект
+        GameObject obj = m_scene->Get(id);
+        return obj.Valid() && m_scene->Registry().all_of<sage::ui::InterfaceComponent>(obj.Entity());
+    };
+
+    // 1. Тот, что и был, если он ещё жив: переключение пространств туда-обратно
+    // не должно терять место работы.
+    if (valid(m_currentInterface)) return;
+
+    // 2. Интерфейс ВЫДЕЛЕННОГО объекта: пришли из сцены, выбрав меню или его
+    // кнопку, — значит правят именно его.
+    if (m_selection.Primary() >= 0) {
+        GameObject sel = m_scene->Get(m_selection.Primary());
+        if (sel.Valid()) {
+            const entt::entity owner = sage::ui::InterfaceOf(*m_scene, sel.Entity());
+            if (owner != entt::null) {
+                const IdComponent* id = m_scene->Registry().try_get<IdComponent>(owner);
+                m_currentInterface = id ? id->Id : -1;
+                if (valid(m_currentInterface)) return;
+            }
+        }
+    }
+
+    // 3. Первый в сцене — по тому же порядку, в каком они показываются.
+    const std::vector<entt::entity> all = sage::ui::SortedInterfaces(*m_scene);
+    if (!all.empty()) {
+        const IdComponent* id = m_scene->Registry().try_get<IdComponent>(all.front());
+        m_currentInterface = id ? id->Id : -1;
+        return;
+    }
+
+    // 4. Интерфейсов нет вовсе. Если в сцене есть элементы без интерфейса (их
+    // собрал код или скрипт), показываем их — иначе панель выглядела бы
+    // сломанной при непустой сцене.
+    m_currentInterface = sage::ui::InterfaceRoots(*m_scene, entt::null).empty() ? -1 : 0;
+}
+
+sage::ui::UIScope EditorLayer::UiScope() const {
+    // В пространстве сцены — всё как в игре: там интерфейс не правят, а видят.
+    if (m_workspace != EditorWorkspace::Interface) return sage::ui::UIScope::All();
+    if (m_currentInterface < 0) return sage::ui::UIScope::All();
+    if (m_currentInterface == 0) return sage::ui::UIScope::Only(entt::null);
+    GameObject obj = m_scene->Get(m_currentInterface);
+    if (!obj.Valid()) return sage::ui::UIScope::All();
+    return sage::ui::UIScope::Only(obj.Entity());
 }
 
 void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {

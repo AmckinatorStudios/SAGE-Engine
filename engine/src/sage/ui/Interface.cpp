@@ -40,16 +40,20 @@ InterfaceNode NodeFromJson(const json& j) {
     return n;
 }
 
+// isRoot — узел верхнего уровня ресурса. Отдельным признаком, а не «parent ==
+// null»: корни ресурса теперь кладутся ВНУТРЬ объекта-интерфейса, то есть
+// родитель у них есть, а корнями они быть не перестали.
 void Build(Scene& scene, const InterfaceNode& node, entt::entity parent,
-           std::vector<entt::entity>& roots) {
+           std::vector<entt::entity>& roots, bool isRoot) {
     // ПУСТОЙ объект, а не CreateObject: элемент интерфейса рисует система UI, а
     // не меш, и компонент «Меш» у надписи — это секция с моделью, цветом и
     // тенями, которой нечем распорядиться.
     GameObject obj = scene.CreateEmptyObject(node.Name);
     LoadElement(node.Data, scene.Registry(), obj.Entity());
     if (parent != entt::null) scene.SetParent(obj.Entity(), parent);
-    else roots.push_back(obj.Entity());
-    for (const InterfaceNode& c : node.Children) Build(scene, c, obj.Entity(), roots);
+    if (isRoot) roots.push_back(obj.Entity());
+    for (const InterfaceNode& c : node.Children)
+        Build(scene, c, obj.Entity(), roots, /*isRoot=*/false);
 }
 
 InterfaceNode Snap(const Scene& scene, entt::entity e) {
@@ -121,8 +125,32 @@ bool Interface::LoadFile(const std::string& path, Interface& out, std::string& e
 }
 
 std::vector<entt::entity> Instantiate(Scene& scene, const Interface& ui, entt::entity parent) {
+    entt::registry& reg = scene.Registry();
+
+    // КУДА ЛЯЖЕТ РЕСУРС — зависит от того, КУДА его разворачивают.
+    //
+    //   • в элемент или в готовый интерфейс — прямо туда: контекст уже задан,
+    //     и заводить внутри чужого экрана ещё один значит строить матрёшку там,
+    //     где человек просто вставил скопированную кнопку;
+    //   • в пустое место (или в обычный объект сцены) — СВОИМ интерфейсом.
+    //     Два окна инвентаря рядом — это один ресурс, развёрнутый дважды, и без
+    //     своей границы их элементы оказались бы в одном дереве редактора
+    //     вперемешку: ровно та беда, ради которой интерфейс и стал объектом.
+    const bool intoContext = parent != entt::null && reg.valid(parent) &&
+                             (reg.all_of<Element>(parent) || reg.all_of<InterfaceComponent>(parent));
+    entt::entity container = parent;
+    if (!intoContext) {
+        GameObject obj = scene.CreateEmptyObject(ui.Name.empty() ? "Interface" : ui.Name);
+        reg.emplace<InterfaceComponent>(obj.Entity());
+        if (parent != entt::null) scene.SetParent(obj.Entity(), parent);
+        container = obj.Entity();
+    }
+
     std::vector<entt::entity> roots;
-    for (const InterfaceNode& n : ui.Roots) Build(scene, n, parent, roots);
+    // Наружу отдаются КОРНИ — те, у кого нет родителя-элемента. Вставка внутрь
+    // элемента корней не даёт: корень там перестаёт быть корнем.
+    const bool exposeRoots = !(parent != entt::null && reg.valid(parent) && reg.all_of<Element>(parent));
+    for (const InterfaceNode& n : ui.Roots) Build(scene, n, container, roots, exposeRoots);
     return roots;
 }
 

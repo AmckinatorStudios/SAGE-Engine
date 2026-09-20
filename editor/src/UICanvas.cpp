@@ -54,7 +54,8 @@ void UICanvas::Collect(Scene& scene, EditorHost& host, int frameW, int frameH) {
     // и разъехались рамки с интерфейсом, когда раскладка научилась масштабу
     // холста, а редактор — нет.
     for (const sage::ui::ElementRect& e :
-         sage::ui::SolveSceneRects(scene, frameW, frameH, /*includeHidden=*/true)) {
+         sage::ui::SolveSceneRects(scene, frameW, frameH, /*includeHidden=*/true,
+                                   host.UiScope())) {
         const IdComponent* id = reg.try_get<IdComponent>(e.Entity);
         if (!id) continue;
         Item it;
@@ -539,7 +540,9 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         // Иначе — элемент под курсором тем же попаданием, каким его считает
         // игра: одно правило на редактор и на рантайм.
         const glm::vec2 ui = toUI(mouse);
-        const int hit = sage::ui::HitTest(scene, ui.x, ui.y, screenW, screenH);
+        // Попадание — ТОЛЬКО в текущем интерфейсе: щелчок по холсту не должен
+        // выбирать элемент чужого экрана, который сюда и не рисуется.
+        const int hit = sage::ui::HitTest(scene, ui.x, ui.y, screenW, screenH, host.UiScope());
         if (hit < 0) {
             // Пустое место — рамка выделения. Прежде здесь просто сбрасывался
             // выбор, и выбрать десяток элементов можно было только кликами.

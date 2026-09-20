@@ -33,6 +33,7 @@
 #include "sage/render/ResourceManager.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
@@ -380,6 +381,54 @@ void DrawComponentsSection(EditorHost& host, GameObject obj, const UIPropsContex
                            entt::entity e, int selected);
 
 } // namespace
+
+void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
+    namespace ui = sage::ui;
+    entt::registry& reg = host.CurrentScene().Registry();
+    ui::InterfaceComponent* info = reg.try_get<ui::InterfaceComponent>(obj.Entity());
+    if (!info) return;
+
+    if (ImGui::Checkbox(T("Visible"), &info->Visible)) host.PushUndoSnapshot();
+    EditorTheme::Hint(T("off — the whole interface is hidden, with all its elements"));
+
+    if (ImGui::Checkbox(T("Receives input"), &info->ReceivesInput)) host.PushUndoSnapshot();
+    EditorTheme::Hint(T("off — shown but not clickable: a splash, credits, a hint over the game"));
+
+    ImGui::DragInt(T("Sort order"), &info->SortOrder, 0.1f, -100, 100);
+    host.TrackLastImGuiItem();
+    EditorTheme::Hint(T("order BETWEEN interfaces: the HUD below the pause menu"));
+
+    // --- ХОЛСТ: ПОД КАКОЙ ЭКРАН ВЕРСТАЮТ -----------------------------------
+    //
+    // Свойство ВСЕГО интерфейса, а не его первого элемента: верстают под один
+    // размер экрана весь экран. Пока это поле жило на корневом элементе, два
+    // корня одного интерфейса могли спорить о масштабе.
+    ImGui::SeparatorText(T("Canvas"));
+    const char* kModes[] = {T("Pixels"), T("Scale to reference")};
+    int mode = (int)info->Canvas.Mode;
+    if (ImGui::Combo(T("Scale mode"), &mode, kModes, 2)) {
+        host.PushUndoSnapshot();
+        info->Canvas.Mode = (ui::Canvas::Scale)mode;
+    }
+    if (info->Canvas.Mode == ui::Canvas::Scale::ScaleWithSize) {
+        float ref[2] = {info->Canvas.Reference.x, info->Canvas.Reference.y};
+        if (ImGui::DragFloat2(T("Reference resolution"), ref, 1.0f, 16.0f, 8192.0f, "%.0f")) {
+            info->Canvas.Reference = {ref[0], ref[1]};
+        }
+        host.TrackLastImGuiItem();
+        ImGui::SliderFloat(T("Match width/height"), &info->Canvas.MatchWidthOrHeight, 0.0f, 1.0f);
+        host.TrackLastImGuiItem();
+        EditorTheme::Hint(T("0 — follow width, 1 — follow height"));
+    }
+
+    // Элементы правятся у САМИХ ЭЛЕМЕНТОВ. Сказано прямо, потому что именно
+    // здесь их и искали: объект с интерфейсом выглядит как «тот самый экран».
+    ImGui::Separator();
+    const std::vector<entt::entity> roots = ui::InterfaceRoots(host.CurrentScene(), obj.Entity());
+    ImGui::Text(T("Root elements: %d"), (int)roots.size());
+    EditorTheme::Hint(T("Element properties — colour, text, layout — live on the elements "
+                        "themselves, inside this interface."));
+}
 
 void DrawUIElementProperties(EditorHost& host, GameObject obj,
                              const UIPropsContext& ctx) {

@@ -34,11 +34,43 @@ namespace sage::ui {
 // правило, и оно должно быть записано один раз.
 bool IsElement(const entt::registry& reg, entt::entity e);
 
+// --- ЧЕЙ ЭТО ЭЛЕМЕНТ --------------------------------------------------------
+//
+// Интерфейс — объект с InterfaceComponent (sage/ui/components/InterfaceComponent.h);
+// элемент принадлежит ближайшему такому предку. Правило записано ОДИН раз и
+// здесь: по нему работают и отрисовка, и редактор, и «сколько их в сцене».
+entt::entity InterfaceOf(Scene& scene, entt::entity element);
+
+// Все интерфейсы сцены В ПОРЯДКЕ ПОКАЗА (SortOrder, при равенстве — по id).
+std::vector<entt::entity> SortedInterfaces(Scene& scene);
+
+// Корневые элементы интерфейса: те, у кого нет родителя-ЭЛЕМЕНТА внутри него.
+// interfaceEntity == entt::null — элементы, не лежащие ни в одном интерфейсе
+// (их собирают кодом и скриптом; в редакторе они показываются отдельной
+// строкой списка, а не подмешиваются к чужому интерфейсу).
+std::vector<entt::entity> InterfaceRoots(Scene& scene, entt::entity interfaceEntity);
+
+// ОБЛАСТЬ РАБОТЫ: весь интерфейс сцены или ровно один из них.
+//
+// Нужна редактору вёрстки: он показывает и правит ОДИН интерфейс, а игра
+// рисует все. Один и тот же расчёт на оба случая — иначе редактор считал бы
+// раскладку своей копией формул и отставал от движка (ровно это и было с
+// масштабом холста).
+struct UIScope {
+    bool Limited = false;                  // false — всё, что есть в сцене
+    entt::entity Interface = entt::null;   // какой именно (null — «без интерфейса»)
+
+    static UIScope All() { return {}; }
+    static UIScope Only(entt::entity interfaceEntity) { return {true, interfaceEntity}; }
+    bool Accepts(entt::entity owner) const { return !Limited || owner == Interface; }
+};
+
 // Прямоугольник элемента внутри родителя считает sage::ui::Resolve (UI.h) —
 // чистая математика по его Element, без ECS и без GL.
 
 // Рисует весь UI сцены. Вызывать между ui.Begin() и ui.End().
-void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH);
+void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH,
+                 const UIScope& scope = UIScope::All());
 
 // Один шаг интерактива: подсветка под курсором, нажатие, фокус, набор текста,
 // перетаскивание ползунков. Вызывать РАНЬШЕ игровой логики кадра — по
@@ -47,7 +79,8 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH);
 // Отдельно от DrawSceneUI намеренно: рисовать интерфейс может и тот, кто не
 // даёт ему ввод (превью в редакторе, скриншот), а обрабатывать ввод надо ровно
 // один раз за кадр, даже если панелей с картинкой две.
-UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW, int screenH);
+UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW, int screenH,
+                            const UIScope& scope = UIScope::All());
 
 // Прямоугольник элемента В ЭКРАННЫХ ПИКСЕЛЯХ — ровно тот, в котором его
 // рисуют.
@@ -74,12 +107,14 @@ struct ElementRect {
 // выключенные элементы (нужно редактору: иначе выключенный элемент нельзя
 // найти и включить обратно).
 std::vector<ElementRect> SolveSceneRects(Scene& scene, int screenW, int screenH,
-                                         bool includeHidden);
+                                         bool includeHidden,
+                                         const UIScope& scope = UIScope::All());
 
 // Верхний видимый элемент под экранной точкой (x, y): id сущности или -1.
 // Учитывает Layer/порядок отрисовки (возвращается тот, кто нарисован поверх)
 // и маски (точка вне маски не попадает в её поддерево). Для кнопок: игра
 // сама решает, что делать по клику (см. Lua-биндинг GetUIElementAt).
-int HitTest(Scene& scene, float x, float y, int screenW, int screenH);
+int HitTest(Scene& scene, float x, float y, int screenW, int screenH,
+            const UIScope& scope = UIScope::All());
 
 } // namespace sage::ui

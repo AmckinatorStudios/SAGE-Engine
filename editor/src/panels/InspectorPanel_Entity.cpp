@@ -13,6 +13,7 @@
 #include "EditorTheme.h"
 #include "ui/UI.h"
 #include "InspectorPanel.h"
+#include "../UIElementProperties.h"
 
 #include <cmath>
 #include <cstdio>
@@ -229,6 +230,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     bool rmCamera = false;
     bool rmLight = false;
     bool rmPostProcess = false;
+    bool rmInterface = false;
     bool rmDecal = false;
     bool rmGiStatic = false;
     bool rmNet = false;
@@ -1064,6 +1066,18 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // ИНТЕРФЕЙС И ЭЛЕМЕНТ — РАЗНЫЕ РАЗДЕЛЫ, и это главное разделение этого
+    // окна. Интерфейс — граница: что показывать, в каком порядке и под какой
+    // экран верстать. Элемент — прямоугольник внутри него: цвет, текст,
+    // отступы. Пока разделения не было, у объекта с интерфейсом в инспекторе
+    // оказывались поля кнопки, и понять, чем одно отличается от другого, было
+    // нечем.
+    if (reg.all_of<sage::ui::InterfaceComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader("layout", T("Interface" "###Interface"),
+                                   ImGuiTreeNodeFlags_DefaultOpen, &rmInterface)) {
+        sage::editor::DrawInterfaceProperties(host, obj);
+    }
+
     if (reg.all_of<sage::ui::Element>(obj.Entity()) &&
         EditorTheme::SectionHeader("layout", T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawUIElement(host, obj);
@@ -1098,6 +1112,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (rmPostProcess) {
         host.PushUndoSnapshot();
         reg.remove<sage::render::PostProcessComponent>(obj.Entity());
+    }
+
+    if (rmInterface) {
+        host.PushUndoSnapshot();
+        reg.remove<sage::ui::InterfaceComponent>(obj.Entity());
     }
 
     if (rmDecal) {
@@ -1341,6 +1360,11 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          AddComp<NetReplicatedComponent>},
         // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего
         // элемент состоит дальше, выбирается в самом инспекторе (или заготовкой).
+        // ГРАНИЦА интерфейса — отдельным компонентом и ПЕРВЫМ в разделе:
+        // элементы живут внутри интерфейса, а не сами по себе.
+        {"Interface", "Interface", "layout",
+         "A screen of its own: its elements live inside it and are edited apart",
+         HasComp<sage::ui::InterfaceComponent>, AddComp<sage::ui::InterfaceComponent>},
         {"UI Element", "Interface", "rect",
          "Panel, label, image or bar on screen", HasComp<sage::ui::Element>,
          AddComp<sage::ui::Element>},

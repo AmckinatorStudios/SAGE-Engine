@@ -735,6 +735,17 @@ TEST(MeshRenderer_scene_without_slots_still_loads) {
     CHECK_EQ(lm.MaterialPath, std::string("materials/wood.sagemat"));
 }
 
+// Сколько в сцене ОБЪЕКТОВ-ЭЛЕМЕНТОВ. Считать все объекты подряд здесь больше
+// нельзя: миграция v12->v13 заводит каждому корневому элементу объект-интерфейс
+// (см. InterfaceComponent), и проверка «родился ровно один объект-надпись»
+// начала бы считать ещё и границы интерфейсов.
+static size_t UiObjects(const nlohmann::json& j) {
+    size_t n = 0;
+    for (const nlohmann::json& o : j["objects"])
+        if (o.contains("ui")) ++n;
+    return n;
+}
+
 // --- v5 -> v6: части перестали двигать и перекрашивать друг друга ------------
 //
 // Без миграции каждая уже сделанная галка и каждая строка «значок + подпись»
@@ -758,7 +769,7 @@ TEST(Scene_migration_v5_to_v6_moves_a_shifted_label_into_a_child) {
     })";
     const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
     CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
-    CHECK_EQ(j["objects"].size(), (size_t)3);   // родился ровно один объект-надпись
+    CHECK_EQ(UiObjects(j), (size_t)3);   // родился ровно один объект-надпись
 
     // У галки надписи больше нет — она стала ребёнком.
     CHECK_FALSE(j["objects"][0]["ui"].contains("label"));
@@ -801,7 +812,7 @@ TEST(Scene_migration_v5_to_v6_keeps_the_icon_shift) {
       ]
     })";
     const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
-    CHECK_EQ(j["objects"].size(), (size_t)3);   // значок и надпись — два ребёнка
+    CHECK_EQ(UiObjects(j), (size_t)3);   // значок и надпись — два ребёнка
     CHECK_FALSE(j["objects"][0]["ui"].contains("label"));
     CHECK_FALSE(j["objects"][0]["ui"].contains("icon"));
 
@@ -832,7 +843,7 @@ TEST(Scene_migration_v5_to_v6_leaves_a_lone_icon_in_place) {
       ]
     })";
     const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
-    CHECK_EQ(j["objects"].size(), (size_t)1);
+    CHECK_EQ(UiObjects(j), (size_t)1);
     CHECK_TRUE(j["objects"][0]["ui"].contains("icon"));
 }
 
@@ -873,7 +884,7 @@ TEST(Scene_migration_v5_to_v6_leaves_a_text_input_alone) {
     })";
     const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
     CHECK_TRUE(j["objects"][0]["ui"].contains("label"));   // текст остался у поля
-    CHECK_EQ(j["objects"].size(), (size_t)2);              // но значок всё же съехал
+    CHECK_EQ(UiObjects(j), (size_t)2);              // но значок всё же съехал
 }
 
 // --- Пустой объект ДЕЙСТВИТЕЛЬНО пуст -------------------------------------

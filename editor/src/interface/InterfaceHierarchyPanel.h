@@ -61,6 +61,9 @@ private:
     ImVec2 m_rowPos{0.0f, 0.0f};
     float m_rowIndent = 0.0f;
     void DrawToolbar(EditorHost& host);
+    // Строка выбора интерфейса: с каким из них сейчас работают.
+    void DrawInterfacePicker(EditorHost& host);
+    void CreateInterface(EditorHost& host);
     void DrawContextMenu(EditorHost& host, Scene& scene, entt::entity e);
     void HandleShortcuts(EditorHost& host);
 

@@ -971,8 +971,11 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
 // признаку объявляет игровой кадр недействительным.
 bool EditorSceneRenderer::DrawGameUI(Scene& scene, const sage::EngineConfig& cfg,
                                      bool onlyBackdrop) {
-    auto uiView = scene.Registry().view<sage::ui::Element>();
-    const bool hasUI = uiView.begin() != uiView.end();
+    // ЕСТЬ ЛИ ЧТО РИСОВАТЬ — в текущей области, а не вообще в сцене. Иначе в
+    // пространстве вёрстки пустой интерфейс считался бы непустым из-за чужого,
+    // и кадр собирался бы ради ничего.
+    const bool hasUI = !sage::ui::SolveSceneRects(scene, m_gameW, m_gameH,
+                                                  /*includeHidden=*/false, m_uiScope).empty();
     const bool hasBackdrop = m_uiBackdropAlpha > 0.001f;
     if (!hasUI && !hasBackdrop) return false;
 
@@ -997,7 +1000,7 @@ bool EditorSceneRenderer::DrawGameUI(Scene& scene, const sage::EngineConfig& cfg
         m_ui->Rect(0.0f, 0.0f, (float)m_gameW, (float)m_gameH, m_uiBackdropColor,
                    std::min(m_uiBackdropAlpha, 1.0f));
     }
-    if (hasUI) sage::ui::DrawSceneUI(scene, *m_ui, m_gameW, m_gameH);
+    if (hasUI) sage::ui::DrawSceneUI(scene, *m_ui, m_gameW, m_gameH, m_uiScope);
     m_ui->End();
     // РЕЗОЛВ ПОСЛЕ ПРОХОДА. При включённом MSAA Bind() кладёт рисование в
     // многосэмпловый буфер, а показывается обычная текстура — то есть без

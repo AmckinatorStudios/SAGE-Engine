@@ -143,7 +143,23 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
     entt::registry& reg = host.CurrentScene().Registry();
     const bool isElement = obj.Valid() && reg.all_of<ui::Element>(obj.Entity());
 
-    if (!isElement) {
+    const bool isInterface = obj.Valid() && reg.all_of<ui::InterfaceComponent>(obj.Entity());
+
+    if (isInterface) {
+        // ВЫБРАН САМ ИНТЕРФЕЙС — показываем ЕГО свойства, а не пустоту и не
+        // поля элемента: это разные вещи, и окно обязано их различать.
+        ImGui::TextDisabled("%s", T("Interface"));
+        ImGui::SameLine();
+        ImGui::TextUnformatted(obj.Name().c_str());
+        ImGui::Separator();
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
+        if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
+        host.TrackLastImGuiItem();
+        ImGui::PushItemWidth(-118.0f);
+        sage::editor::DrawInterfaceProperties(host, obj);
+        ImGui::PopItemWidth();
+    } else if (!isElement) {
         ImGui::TextDisabled("%s", T("Element"));
         ImGui::Separator();
         Hint(T("Select an element on the canvas or in the list on the left."));

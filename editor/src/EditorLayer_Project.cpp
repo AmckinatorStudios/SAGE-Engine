@@ -290,8 +290,16 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         // типа — то есть показывало бы новичку ровно то состояние, из которого
         // редактор и вывели.
         entt::registry& reg = m_scene->Registry();
+        // ИНТЕРФЕЙС — ОТДЕЛЬНЫМ ОБЪЕКТОМ, а его элементы внутри. Шаблон — ещё и
+        // образец устройства проекта: интерфейс, собранный россыпью в корне
+        // сцены, учил бы тому, из-за чего два экрана в одной сцене и
+        // перемешивались (см. sage/ui/components/InterfaceComponent.h).
+        GameObject hudInterface = m_scene->CreateEmptyObject("HUD");
+        reg.emplace<sage::ui::InterfaceComponent>(hudInterface.Entity());
+
         GameObject hud = m_scene->CreateEmptyObject("HUD Panel");
         sage::ui::ApplyPreset(*m_scene, hud.Entity(), "Panel");
+        m_scene->SetParent(hud.Entity(), hudInterface.Entity());
         {
             sage::ui::Element& xf = reg.get<sage::ui::Element>(hud.Entity());
             xf.Anchor = UIAnchor::TopLeft;
