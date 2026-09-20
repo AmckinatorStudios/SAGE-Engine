@@ -18,6 +18,7 @@
 #include "AssetSlot.h"
 #include "Thumbnails.h"
 #include "PanelWindows.h"
+#include "UIElementProperties.h"
 #include "Progress.h"
 #include "imgui_internal.h" // NextWindowData: проверка флага вьюпорта у отдельных окон
 #include "panels/AssetsPanel.h"
@@ -321,7 +322,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2137,6 +2138,27 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         if (m_currentInterface != second.Id()) {
             LOG_ERROR("Editor") << "SELFTEST: вёрстка открылась не на том интерфейсе ("
                                 << m_currentInterface << " вместо " << second.Id() << ")";
+            ok = false;
+        }
+        m_workspace = before;
+        m_currentInterface = beforeInterface;
+        m_selection.Clear();
+
+        // И КНОПКА «ОТКРЫТЬ В РЕЖИМЕ ИНТЕРФЕЙСА» у компонента ведёт туда же.
+        //
+        // Порядок шагов здесь неочевиден, и проверяется именно он: переход в
+        // вёрстку СБРАСЫВАЕТ выделение, а прежний открытый интерфейс сохраняет,
+        // пока тот жив. Значит выбор интерфейса и выделение обязаны идти ПОСЛЕ
+        // перехода — иначе кнопка молча открывает не тот экран. Берём худший
+        // случай: открыт интерфейс A, а кнопку жмут на элементе интерфейса B.
+        m_workspace = EditorWorkspace::Scene;
+        m_currentInterface = first.Id();
+        sage::editor::OpenInInterfaceMode(*this, m_scene->Get(m_scene->Registry().get<IdComponent>(b[0]).Id));
+        if (m_workspace != EditorWorkspace::Interface || m_currentInterface != second.Id() ||
+            m_selection.Primary() != m_scene->Registry().get<IdComponent>(b[0]).Id) {
+            LOG_ERROR("Editor") << "SELFTEST: «открыть в режиме интерфейса» открыло не то ("
+                                << m_currentInterface << " вместо " << second.Id()
+                                << ", выделено " << m_selection.Primary() << ")";
             ok = false;
         }
         m_workspace = before;

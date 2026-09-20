@@ -58,6 +58,13 @@ jobs:
       - name: Menu style check (a popup declares its own padding)
         run: python3 scripts/check_menu_style.py
 
+      # Список ImGui закрывается EndCombo (EndPopup ломает счётчик окон
+      # списков — разваливается СЛЕДУЮЩИЙ список, не этот), а кнопка со
+      # значком не получает подпись «##…»: она печатается и растягивает
+      # кнопку за край панели, где нажатие до неё не доходит.
+      - name: ImGui pairing check (EndCombo, icon button labels)
+        run: python3 scripts/check_imgui_pairs.py
+
       # Подсказка по скриптовому API для редакторов кода собирается из вызовов
       # Bind(...) движка. Устареет — начнёт врать: предлагать то, чего нет, и
       # молчать о том, что появилось. Врущая подсказка хуже отсутствующей.

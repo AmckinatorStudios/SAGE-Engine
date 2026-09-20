@@ -1849,6 +1849,8 @@
     "Create interface": "Создать интерфейс",
     "Element properties — colour, text, layout — live on the elements themselves, inside this interface.": "Свойства элементов — цвет, текст, раскладка — живут у самих элементов внутри этого интерфейса.",
     "New interface in this scene": "Новый интерфейс в этой сцене",
+    "Open in interface mode": "Открыть в режиме интерфейса",
+    "Switch to layout and open this interface": "Перейти к вёрстке и открыть этот интерфейс",
     "No interface": "Без интерфейса",
     "No interface in the scene yet.": "В сцене пока нет интерфейса.",
     "Nothing to edit": "Нечего править",

@@ -382,11 +382,41 @@ void DrawComponentsSection(EditorHost& host, GameObject obj, const UIPropsContex
 
 } // namespace
 
+void OpenInInterfaceMode(EditorHost& host, GameObject obj) {
+    Scene& scene = host.CurrentScene();
+    const entt::entity owner = sage::ui::InterfaceOf(scene, obj.Entity());
+    // Интерфейса над элементом нет — это «элементы без интерфейса» (их
+    // собирает код или скрипт), и у них в списке своя строка с номером 0.
+    int id = 0;
+    if (owner != entt::null)
+        if (const IdComponent* idc = scene.Registry().try_get<IdComponent>(owner)) id = idc->Id;
+
+    host.SetWorkspace(EditorWorkspace::Interface);
+    host.SetCurrentInterface(id);
+    host.Selection().SetPrimary(obj.Id());
+}
+
+// Кнопка «открыть в режиме интерфейса» — одна на оба компонента.
+//
+// ЗАЧЕМ ОНА. Объект интерфейса и его элементы видны и в сцене, и найдя их
+// там, человек идёт верстать: до сих пор это значило переключить пространство
+// вручную, а потом ещё выбрать в списке нужный интерфейс из десятка похожих
+// имён — при том, что объект уже был под рукой.
+static void DrawOpenInInterfaceButton(EditorHost& host, GameObject obj) {
+    if (host.Workspace() == EditorWorkspace::Interface) return;   // уже там
+    if (EditorIcons::Button("ui-panel", T("Open in interface mode"),
+                            T("Switch to layout and open this interface")))
+        OpenInInterfaceMode(host, obj);
+    ImGui::Separator();
+}
+
 void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
     namespace ui = sage::ui;
     entt::registry& reg = host.CurrentScene().Registry();
     ui::InterfaceComponent* info = reg.try_get<ui::InterfaceComponent>(obj.Entity());
     if (!info) return;
+
+    DrawOpenInInterfaceButton(host, obj);
 
     if (ImGui::Checkbox(T("Visible"), &info->Visible)) host.PushUndoSnapshot();
     EditorTheme::Hint(T("off — the whole interface is hidden, with all its elements"));
@@ -438,6 +468,8 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
 
     ui::Element* xf = reg.try_get<ui::Element>(e);
     if (!xf) return;
+
+    DrawOpenInInterfaceButton(host, obj);
 
     // СКОЛЬКО ВЫБРАНО — сказано сразу, а не выясняется опытом. Инспектор
     // показывает поля одного элемента, а правит их у всех, и промолчать об
