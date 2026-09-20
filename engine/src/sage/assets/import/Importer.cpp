@@ -1,4 +1,6 @@
 #include "sage/assets/import/Importer.h"
+
+#include "sage/assets/import/MeshNormalize.h"
 #include "sage/core/EngineContext.h"
 
 #include <algorithm>
@@ -59,6 +61,14 @@ sage::render::MeshData ImportedScene::Flatten() const {
             if (sub.Name.empty()) sub.Name = node.Name;
 
             const unsigned int base = (unsigned int)out.Vertices.size();
+            // ЗЕРКАЛЬНЫЙ УЗЕЛ МЕНЯЕТ ОБХОД. Отрицательный определитель — это
+            // отражение: треугольник, обойдённый против часовой, становится
+            // обойдённым по часовой, то есть «задним». Отсечение задних граней
+            // съедает его целиком, и зеркальная половина модели (её делают
+            // масштабом -1 по оси — обычный приём для симметричных моделей)
+            // просто исчезает. Лечится не выключением отсечения, а разворотом
+            // обхода: он и есть то, что отражение сломало.
+            const bool mirrored = glm::determinant(glm::mat3(node.Transform)) < 0.0f;
             // Нормали преобразуются матрицей, ОБРАТНОЙ ТРАНСПОНИРОВАННОЙ к модельной:
             // при неравномерном масштабе обычное умножение перекашивает их, и свет
             // ложится не туда. Для равномерных матриц это то же самое, поэтому
@@ -73,7 +83,15 @@ sage::render::MeshData ImportedScene::Flatten() const {
                 t.Tangent = glm::vec4(l > 1e-12f ? tang / l : glm::vec3(1, 0, 0), v.Tangent.w);
                 out.Vertices.push_back(t);
             }
-            for (unsigned int i : node.Mesh.Indices) out.Indices.push_back(base + i);
+            if (mirrored) {
+                for (size_t i = 0; i + 2 < node.Mesh.Indices.size(); i += 3) {
+                    out.Indices.push_back(base + node.Mesh.Indices[i]);
+                    out.Indices.push_back(base + node.Mesh.Indices[i + 2]);
+                    out.Indices.push_back(base + node.Mesh.Indices[i + 1]);
+                }
+            } else {
+                for (unsigned int i : node.Mesh.Indices) out.Indices.push_back(base + i);
+            }
         }
 
         sub.IndexCount = (unsigned int)out.Indices.size() - sub.FirstIndex;
@@ -120,6 +138,15 @@ bool ImporterRegistry::CanImport(const std::string& extension) const {
     return false;
 }
 
+std::string ImportErrorText(const std::string& path, const std::string& importer,
+                            const std::string& stageAndReason) {
+    // Форма ответа одна на весь импорт: файл, чем разбирали, что случилось.
+    // Этап и причина приходят от импортёра одной строкой («анимация: индекс
+    // кости 57 за пределами скелета»): ему виднее, где он споткнулся.
+    return "не удалось импортировать модель\n  файл: " + path + "\n  импортёр: " + importer +
+           "\n  причина: " + stageAndReason;
+}
+
 bool ImporterRegistry::Import(const std::string& path, ImportedScene& out,
                               std::string& err) const {
     const std::string ext = LowerExt(path);
@@ -133,7 +160,20 @@ bool ImporterRegistry::Import(const std::string& path, ImportedScene& out,
             err = "файл не найден: " + path;
             return false;
         }
-        if (!info.Import(path, out, err)) return false;
+        if (!info.Import(path, out, err)) {
+            // ОШИБКА НАЗЫВАЕТ ФАЙЛ, ИМПОРТЁР И ПРИЧИНУ. «Не удалось загрузить» —
+            // ответ, с которым нечего делать: у человека три десятка моделей, и
+            // ему надо знать, какая, чем разбиралась и что именно не так.
+            err = ImportErrorText(path, info.Label, err);
+            return false;
+        }
+        // НОРМАЛИЗАЦИЯ — ЗДЕСЬ, ПОСЛЕ ЛЮБОГО ИМПОРТЁРА.
+        //
+        // Формат отвечает за чтение, а не за то, каким движок увидит меш.
+        // Нормали и касательные достраиваются одним кодом (см.
+        // assets/import/MeshNormalize.h), иначе у каждого формата был бы свой
+        // ответ на один вопрос — а у двух из трёх ответом было «никак».
+        for (ImportedNode& node : out.Nodes) NormalizeImportedMesh(node.Mesh);
         for (const std::string& w : out.Warnings)
             LOG_WARN("Import") << std::filesystem::path(path).filename().string() << ": " << w;
         return true;

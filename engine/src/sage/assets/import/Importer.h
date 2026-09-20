@@ -123,6 +123,13 @@ private:
     std::vector<ImporterInfo> m_importers;
 };
 
+// Текст отказа: файл, импортёр, этап и причина — в одной форме на весь движок.
+// Этап и причину даёт импортёр («скелет: у кости 57 нет родителя»), остальное
+// дописывается здесь: «не удалось загрузить» без этих трёх строк — ответ, с
+// которым человеку нечего делать.
+std::string ImportErrorText(const std::string& path, const std::string& importer,
+                            const std::string& stageAndReason);
+
 // Встроенные импортёры. Зовётся один раз из ImporterRegistry — вынесено, чтобы
 // каждый формат жил в своём .cpp и не тянул чужие зависимости.
 void RegisterBuiltinImporters(ImporterRegistry& registry);

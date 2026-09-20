@@ -202,6 +202,26 @@ void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& pr
         uvIt != prim.attributes.end() ? ReadFloats(gltf, uvIt->second, 2) : std::vector<float>();
     const bool hasUV = uvs.size() >= count * 2;
 
+    // ВТОРАЯ РАЗВЁРТКА И КАСАТЕЛЬНЫЕ — ИЗ ФАЙЛА, ЕСЛИ ОНИ ТАМ ЕСТЬ.
+    //
+    // Раньше не читались ни те, ни другие. Вторая развёртка — это лайтмапа
+    // (sage/gi), и модель, принёсшая её с собой, теряла запечённый свет. А
+    // касательные и вовсе оставались значением по умолчанию (1,0,0): карта
+    // нормалей на статической модели ложилась в произвольную сторону, и
+    // объяснить это можно было только «почему-то странно блестит».
+    //
+    // Достраивать их теперь есть чем (assets/import/MeshNormalize.h), но
+    // АВТОРСКИЕ важнее посчитанных: экспортёр знает про швы развёртки и
+    // зеркальные острова то, чего по треугольникам не вывести.
+    auto uv2It = prim.attributes.find("TEXCOORD_1");
+    const std::vector<float> uv2 =
+        uv2It != prim.attributes.end() ? ReadFloats(gltf, uv2It->second, 2) : std::vector<float>();
+    const bool hasUV2 = uv2.size() >= count * 2;
+    auto tanIt = prim.attributes.find("TANGENT");
+    const std::vector<float> tangents =
+        tanIt != prim.attributes.end() ? ReadFloats(gltf, tanIt->second, 4) : std::vector<float>();
+    const bool hasTangents = tangents.size() >= count * 4;
+
     ImportedNode node;
     node.Name = std::move(name);
     node.Transform = world;
@@ -214,6 +234,10 @@ void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& pr
         v.Normal = hasNormals ? glm::vec3(normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2])
                               : glm::vec3(0.0f, 1.0f, 0.0f);
         v.TexCoords = hasUV ? glm::vec2(uvs[i * 2], uvs[i * 2 + 1]) : glm::vec2(0.0f);
+        v.TexCoords2 = hasUV2 ? glm::vec2(uv2[i * 2], uv2[i * 2 + 1]) : glm::vec2(0.0f);
+        if (hasTangents)
+            v.Tangent = glm::vec4(tangents[i * 4], tangents[i * 4 + 1], tangents[i * 4 + 2],
+                                  tangents[i * 4 + 3]);
     }
 
     if (prim.indices >= 0) {
