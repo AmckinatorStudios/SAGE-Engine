@@ -14,7 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "sage/render/PostChainComponent.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/render/PostChainIO.h"
 #include "sage/render/PostEffect.h"
 #include "sage/scene/Scene.h"
@@ -49,7 +49,8 @@ PostChain ChainOf(std::initializer_list<const char*> kinds) {
 
 TEST(PostEffect_catalog_offers_the_builtins) {
     const PostEffectCatalog& catalog = PostEffectCatalog::Instance();
-    for (const char* id : {"ao", "dof", "motionblur", "bloom", "tonemap", "fxaa"}) {
+    for (const char* id : {"exposure", "ao", "dof", "motionblur", "bloom", "color", "grading",
+                           "tonemap", "vignette", "chromatic", "grain", "fxaa"}) {
         const PostEffectKind* kind = catalog.Find(id);
         CHECK_TRUE(kind != nullptr);
         if (!kind) continue;
@@ -119,21 +120,42 @@ TEST(PostChain_reports_an_unknown_effect) {
     CHECK_TRUE(report.Error.find("no_such_effect") != std::string::npos);
 }
 
-TEST(PostChain_rejects_ldr_reader_before_tonemap) {
-    // Сглаживание ищет кромки по ВОСПРИНИМАЕМОЙ яркости, а в линейном HDR его
-    // пороги не работают: до тон-маппинга оно бессмысленно, и это обязано быть
-    // отказом, а не тихо испорченной картинкой.
-    const PostChainReport report = ChainOf({"fxaa", "tonemap"}).Compile();
-    CHECK_FALSE(report.Ok);
-    CHECK_TRUE(report.Error.find("FXAA") != std::string::npos);
+TEST(PostChain_puts_the_effects_in_processing_order) {
+    // ПОРЯДОК БОЛЬШЕ НЕ ПРИНАДЛЕЖИТ СПИСКУ. Раньше этот тракт — сглаживание
+    // перед тон-маппингом, свечение после него — был ОТКАЗОМ: человек собирал
+    // бессмысленную последовательность, и движку оставалось об этом сообщить.
+    // Теперь место звена задано его этапом (PostStage), и такой список просто
+    // раскладывается в тот порядок, в котором кадр и обрабатывается.
+    const PostChain ordered = ChainOf({"fxaa", "tonemap", "bloom", "vignette", "exposure"}).Ordered();
+    CHECK_TRUE(IndexOf(ordered, "exposure") < IndexOf(ordered, "bloom"));
+    CHECK_TRUE(IndexOf(ordered, "bloom") < IndexOf(ordered, "tonemap"));
+    CHECK_TRUE(IndexOf(ordered, "tonemap") < IndexOf(ordered, "vignette"));
+    CHECK_TRUE(IndexOf(ordered, "vignette") < IndexOf(ordered, "fxaa"));
+    CHECK_TRUE(ordered.Compile().Ok);
+    // И сам список тоже компилируется: проверка смотрит на порядок исполнения.
+    CHECK_TRUE(ChainOf({"fxaa", "tonemap", "bloom"}).Compile().Ok);
 }
 
-TEST(PostChain_rejects_hdr_reader_after_tonemap) {
-    // Свечение обязано считаться по HDR-кадру; после тон-маппинга значения
-    // обрезаны в [0,1], и свечение превращается в простое осветление.
-    const PostChainReport report = ChainOf({"tonemap", "bloom"}).Compile();
-    CHECK_FALSE(report.Ok);
-    CHECK_TRUE(report.Error.find("Bloom") != std::string::npos);
+TEST(PostChain_order_follows_the_stages_of_the_catalog) {
+    // Порядок разделов инспектора берётся из этих же этапов. Разъехаться им
+    // негде — но проверить, что они те самые, надо: перепутанный этап у вида
+    // виден только по картинке.
+    const PostEffectCatalog& catalog = PostEffectCatalog::Instance();
+    auto stage = [&catalog](const char* id) {
+        const PostEffectKind* k = catalog.Find(id);
+        return k ? (int)k->Stage : -1;
+    };
+    CHECK_TRUE(stage("exposure") < stage("dof"));
+    CHECK_TRUE(stage("dof") < stage("bloom"));
+    CHECK_TRUE(stage("bloom") < stage("color"));
+    CHECK_TRUE(stage("color") < stage("grading"));
+    CHECK_TRUE(stage("grading") < stage("tonemap"));
+    CHECK_TRUE(stage("tonemap") < stage("vignette"));
+    CHECK_TRUE(stage("vignette") < stage("grain"));
+    CHECK_TRUE(stage("grain") < stage("fxaa"));
+    // Виньетка и аберрация — ОДИН этап оптики: они делают одно и то же с
+    // готовым кадром, и разводить их по этапам значило бы придумать порядок.
+    CHECK_EQ(stage("vignette"), stage("chromatic"));
 }
 
 TEST(PostChain_rejects_two_tonemaps) {
@@ -164,88 +186,121 @@ TEST(PostChain_rejects_a_chain_that_never_becomes_ldr) {
     CHECK_TRUE(report.Error.find("LDR") != std::string::npos);
 }
 
-TEST(PostChain_adds_the_tonemap_before_ldr_readers) {
-    // Человек убрал тон-маппинг и ещё не добавил новый — обычное состояние в
-    // момент правки. Дополнение обязано встать ПЕРЕД сглаживанием, иначе
-    // дополненный тракт не скомпилируется, и «просто посмотреть» закончится
-    // отказом вместо картинки.
+TEST(PostChain_completes_a_chain_without_a_tonemap) {
+    // Человек снял галочку с тон-маппинга — обычное действие: «посмотреть без
+    // кривой». Кадр всё равно обязан стать пригодным к показу, иначе на экран
+    // ушёл бы HDR-цвет. Дополняется он НЕЙТРАЛЬНЫМ тон-маппингом: просить убрать
+    // кривую и получить обратно ACES — не то, о чём просили.
     const PostChain completed = ChainOf({"bloom", "fxaa"}).Completed();
     CHECK_EQ(completed.Effects.size(), (size_t)3);
-    CHECK_EQ(completed.Effects[0].Kind, std::string("bloom"));
-    CHECK_EQ(completed.Effects[1].Kind, std::string("tonemap"));
-    CHECK_EQ(completed.Effects[2].Kind, std::string("fxaa"));
+    const PostEffect* tonemap = EffectOf(completed, "tonemap");
+    CHECK_TRUE(tonemap != nullptr);
+    if (tonemap) CHECK_EQ(tonemap->Int("mode"), 0); // Clamp — без характера
     CHECK_TRUE(completed.Compile().Ok);
+    // И в порядке исполнения он стоит там, где положено: после свечения, до
+    // сглаживания.
+    const PostChain ordered = completed.Ordered();
+    CHECK_TRUE(IndexOf(ordered, "bloom") < IndexOf(ordered, "tonemap"));
+    CHECK_TRUE(IndexOf(ordered, "tonemap") < IndexOf(ordered, "fxaa"));
 }
 
-TEST(PostChain_add_puts_an_effect_where_it_can_work) {
-    // Звено, читающее HDR, встаёт ДО тон-маппинга, читающее готовый кадр —
-    // ПОСЛЕ. Иначе «добавил глубину резкости» означало бы «получил отказ».
-    PostChain chain = ChainOf({"tonemap"});
-    AddPostEffect(chain, "bloom");
-    CHECK_EQ(IndexOf(chain, "bloom"), 0);
-    AddPostEffect(chain, "fxaa");
-    CHECK_EQ(IndexOf(chain, "fxaa"), 2);
+TEST(PostChain_default_is_a_working_chain) {
+    // Умолчание компонента — то, что человек получает, добавив камере
+    // «Пост-обработку». Оно обязано работать сразу и не содержать эффектов,
+    // которые нужны не всем.
+    const PostChain chain = PostChain::Default();
     CHECK_TRUE(chain.Compile().Ok);
-    CHECK_TRUE(RemovePostEffect(chain, "bloom"));
-    CHECK_TRUE(EffectOf(chain, "bloom") == nullptr);
-    CHECK_TRUE(chain.Compile().Ok);
-}
-
-TEST(PostChain_from_config_is_ordered_and_complete) {
-    sage::EngineConfig cfg;
-    cfg.AmbientOcclusion = true;
-    cfg.Bloom = true;
-    cfg.DepthOfField = true;
-    cfg.MotionBlur = true;
-    cfg.Fxaa = true;
-    cfg.Msaa = 0;
-
-    const PostChain chain = PostChain::FromConfig(cfg);
-    CHECK_TRUE(chain.Compile().Ok);
-    // Тон-маппинг есть всегда: без него на экран ушёл бы HDR-цвет.
+    CHECK_TRUE(EffectOf(chain, "exposure") != nullptr);
+    CHECK_TRUE(EffectOf(chain, "bloom") != nullptr);
+    CHECK_TRUE(EffectOf(chain, "color") != nullptr);
     CHECK_TRUE(EffectOf(chain, "tonemap") != nullptr);
-    // И стоит он ПОСЛЕ всего, что считает в HDR, но ДО сглаживания.
-    CHECK_TRUE(IndexOf(chain, "tonemap") < IndexOf(chain, "fxaa"));
-    for (const char* hdr : {"ao", "dof", "motionblur", "bloom"})
-        CHECK_TRUE(IndexOf(chain, hdr) < IndexOf(chain, "tonemap"));
-    // Выключенный в конфиге эффект в тракт не попадает вовсе — а не «попадает
-    // выключенным»: тогда его настройки остались бы в файле и ждали своего часа.
-    cfg.Bloom = false;
-    CHECK_TRUE(EffectOf(PostChain::FromConfig(cfg), "bloom") == nullptr);
+    CHECK_TRUE(EffectOf(chain, "dof") == nullptr);
+    CHECK_TRUE(EffectOf(chain, "grain") == nullptr);
+}
+
+TEST(PostChain_effects_carry_their_own_settings) {
+    // ГЛАВНОЕ СЛЕДСТВИЕ РАЗДЕЛЕНИЯ. Виньетка, аберрация и экспозиция были
+    // ПАРАМЕТРАМИ тон-маппинга: убрать тон-маппинг значило убрать и их, а
+    // включить виньетку без него было нельзя вовсе. Теперь это отдельные
+    // звенья со своими настройками.
+    CHECK_TRUE(MakePostEffect("tonemap").Find("vignette") == nullptr);
+    CHECK_TRUE(MakePostEffect("tonemap").Find("exposure") == nullptr);
+    CHECK_TRUE(MakePostEffect("vignette").Find("intensity") != nullptr);
+    CHECK_TRUE(MakePostEffect("exposure").Find("exposure") != nullptr);
+    CHECK_TRUE(MakePostEffect("color").Find("saturation") != nullptr);
+    // У тон-маппинга остался его собственный вопрос: какой кривой переводить.
+    const PostEffectKind* kind = PostEffectCatalog::Instance().Find("tonemap");
+    CHECK_TRUE(kind != nullptr);
+    if (kind) {
+        const PostParamDesc* mode = nullptr;
+        for (const PostParamDesc& p : kind->Params)
+            if (p.Name == "mode") mode = &p;
+        CHECK_TRUE(mode != nullptr);
+        if (mode) {
+            CHECK_TRUE(mode->Type == PostParamType::Enum);
+            CHECK_EQ(mode->Options.size(), (size_t)4); // Clamp/Reinhard/ACES/Filmic
+        }
+    }
 }
 
 // --- Сериализация ------------------------------------------------------------
 
-TEST(PostChain_survives_a_scene_round_trip) {
+TEST(PostProcess_component_survives_a_scene_round_trip) {
     Scene scene;
     GameObject cam = scene.CreateObject("Camera");
     scene.Registry().emplace<CameraComponent>(cam.Entity());
 
-    PostChainComponent component;
-    component.Chain = ChainOf({"bloom", "tonemap"});
+    PostProcessComponent component;
+    component.Chain = ChainOf({"bloom", "vignette", "tonemap"});
     component.Chain.Effects[0].Enabled = false;
-    *component.Chain.Effects[0].Find("threshold") = PostValue{};
     component.Chain.Effects[0].Find("threshold")->V[0] = 2.5f;
-    component.Chain.Effects[1].Find("vignette")->V[0] = 0.1f;
-    scene.Registry().emplace<PostChainComponent>(cam.Entity(), component);
+    component.Chain.Effects[1].Find("intensity")->V[0] = 0.1f;
+    scene.Registry().emplace<PostProcessComponent>(cam.Entity(), component);
 
     const std::string text = SceneSerializer::SaveToString(scene);
     std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
     CHECK_TRUE(loaded != nullptr);
     if (!loaded) return;
 
-    const PostChainComponent* back =
-        loaded->Registry().try_get<PostChainComponent>(loaded->Registry().view<PostChainComponent>().front());
+    const auto view = loaded->Registry().view<PostProcessComponent>();
+    CHECK_TRUE(view.begin() != view.end());
+    if (view.begin() == view.end()) return;
+    const PostProcessComponent* back = loaded->Registry().try_get<PostProcessComponent>(*view.begin());
     CHECK_TRUE(back != nullptr);
     if (!back) return;
-    CHECK_EQ(back->Chain.Effects.size(), (size_t)2);
-    CHECK_EQ(back->UseProjectDefault, false);
+    CHECK_EQ(back->Chain.Effects.size(), (size_t)3);
+    CHECK_TRUE(back->Enabled);
     CHECK_EQ(back->Chain.Effects[0].Kind, std::string("bloom"));
     CHECK_EQ(back->Chain.Effects[0].Enabled, false); // выключенность — тоже данные
     CHECK_NEAR(back->Chain.Effects[0].Float("threshold"), 2.5f, 1e-4);
-    CHECK_EQ(back->Chain.Effects[1].Kind, std::string("tonemap"));
-    CHECK_NEAR(back->Chain.Effects[1].Float("vignette"), 0.1f, 1e-4);
+    CHECK_NEAR(back->Chain.Effects[1].Float("intensity"), 0.1f, 1e-4);
     CHECK_TRUE(back->Chain.Compile().Ok);
+}
+
+TEST(PostProcess_component_reads_the_old_key) {
+    // Компонент назывался «тракт пост-обработки» и лежал под ключом postChain.
+    // Сцена, сохранённая тогда, обязана открыться с теми же эффектами: смена
+    // названия компонента не повод потерять настройку кадра.
+    Scene scene;
+    GameObject cam = scene.CreateObject("Camera");
+    scene.Registry().emplace<CameraComponent>(cam.Entity());
+    PostProcessComponent component;
+    component.Chain = ChainOf({"bloom", "tonemap"});
+    scene.Registry().emplace<PostProcessComponent>(cam.Entity(), component);
+
+    nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    j["objects"][0]["postChain"] = j["objects"][0]["postProcess"];
+    j["objects"][0].erase("postProcess");
+
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(j.dump());
+    CHECK_TRUE(loaded != nullptr);
+    if (!loaded) return;
+    const auto view = loaded->Registry().view<PostProcessComponent>();
+    CHECK_TRUE(view.begin() != view.end());
+    if (view.begin() == view.end()) return;
+    const PostProcessComponent* back = loaded->Registry().try_get<PostProcessComponent>(*view.begin());
+    CHECK_TRUE(back != nullptr);
+    if (back) CHECK_TRUE(EffectOf(back->Chain, "bloom") != nullptr);
 }
 
 TEST(PostChain_file_with_unknown_pieces_does_not_throw) {
@@ -255,24 +310,24 @@ TEST(PostChain_file_with_unknown_pieces_does_not_throw) {
     Scene scene;
     GameObject cam = scene.CreateObject("Camera");
     scene.Registry().emplace<CameraComponent>(cam.Entity());
-    PostChainComponent component;
+    PostProcessComponent component;
     component.Chain = ChainOf({"bloom", "tonemap"});
-    scene.Registry().emplace<PostChainComponent>(cam.Entity(), component);
+    scene.Registry().emplace<PostProcessComponent>(cam.Entity(), component);
 
     std::string text = SceneSerializer::SaveToString(scene);
     nlohmann::json j = nlohmann::json::parse(text);
-    j["objects"][0]["postChain"]["effects"][0]["params"]["threshold"] = "не число";
-    j["objects"][0]["postChain"]["effects"][0]["params"]["выдуманный"] = 42.0;
-    j["objects"][0]["postChain"]["effects"].push_back(
+    j["objects"][0]["postProcess"]["effects"][0]["params"]["threshold"] = "не число";
+    j["objects"][0]["postProcess"]["effects"][0]["params"]["выдуманный"] = 42.0;
+    j["objects"][0]["postProcess"]["effects"].push_back(
         {{"kind", "no_such_effect"}, {"enabled", true}});
 
     std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(j.dump());
     CHECK_TRUE(loaded != nullptr);
     if (!loaded) return;
-    const auto view = loaded->Registry().view<PostChainComponent>();
+    const auto view = loaded->Registry().view<PostProcessComponent>();
     CHECK_TRUE(view.begin() != view.end());
     if (view.begin() == view.end()) return;
-    const PostChainComponent* back = loaded->Registry().try_get<PostChainComponent>(*view.begin());
+    const PostProcessComponent* back = loaded->Registry().try_get<PostProcessComponent>(*view.begin());
     CHECK_TRUE(back != nullptr);
     if (!back) return;
     CHECK_EQ(back->Chain.Effects.size(), (size_t)3);
@@ -284,101 +339,62 @@ TEST(PostChain_file_with_unknown_pieces_does_not_throw) {
     CHECK_TRUE(report.Error.find("no_such_effect") != std::string::npos);
 }
 
-// --- Чей тракт показывать ----------------------------------------------------
+// --- Чья обработка -----------------------------------------------------------
 
-TEST(PostChain_resolves_from_the_camera_then_the_project) {
+TEST(PostProcess_belongs_to_the_camera_and_nowhere_else) {
+    // ГЛАВНОЕ ПРАВИЛО СИСТЕМЫ. Нет компонента — нет обработки: не «тракт
+    // проекта», не «умолчания движка», а кадр как есть. Пока обработка жила
+    // настройкой проекта, выключить её у одной камеры было нельзя вовсе, а
+    // включить незаметно для остальных — тем более.
     Scene scene;
     GameObject plain = scene.CreateObject("Plain");
     scene.Registry().emplace<CameraComponent>(plain.Entity());
     GameObject tuned = scene.CreateObject("Tuned");
     scene.Registry().emplace<CameraComponent>(tuned.Entity());
 
-    PostChainComponent component;
+    PostProcessComponent component;
     component.Chain = ChainOf({"bloom", "tonemap"});
-    scene.Registry().emplace<PostChainComponent>(tuned.Entity(), component);
+    scene.Registry().emplace<PostProcessComponent>(tuned.Entity(), component);
 
-    sage::EngineConfig cfg;
-    cfg.Bloom = false;
-    cfg.AmbientOcclusion = true;
+    PostChain chain;
+    CHECK_TRUE(ResolvePostChain(scene, tuned.Entity(), chain));
+    CHECK_TRUE(EffectOf(chain, "bloom") != nullptr);
 
-    // Камера со своим трактом — берётся он.
-    const PostChain own = ResolvePostChain(scene, tuned.Entity(), cfg);
-    CHECK_TRUE(EffectOf(own, "bloom") != nullptr);
+    // Камера без компонента — обработки нет.
+    PostChain none;
+    CHECK_FALSE(ResolvePostChain(scene, plain.Entity(), none));
 
-    // Камера без компонента — тракт проекта.
-    const PostChain project = ResolvePostChain(scene, plain.Entity(), cfg);
-    CHECK_TRUE(EffectOf(project, "bloom") == nullptr);
-    CHECK_TRUE(EffectOf(project, "ao") != nullptr);
+    // Выключенный компонент — тоже нет, но настройки при этом целы.
+    scene.Registry().get<PostProcessComponent>(tuned.Entity()).Enabled = false;
+    CHECK_FALSE(ResolvePostChain(scene, tuned.Entity(), none));
+    CHECK_TRUE(EffectOf(scene.Registry().get<PostProcessComponent>(tuned.Entity()).Chain, "bloom") !=
+               nullptr);
 
-    // Компонент, просящий умолчание, — тоже тракт проекта: иначе нельзя
-    // отличить «камеру ещё не настроили» от «намеренно не настраивали».
-    scene.Registry().get<PostChainComponent>(tuned.Entity()).UseProjectDefault = true;
-    const PostChain asked = ResolvePostChain(scene, tuned.Entity(), cfg);
-    CHECK_TRUE(EffectOf(asked, "bloom") == nullptr);
-    CHECK_TRUE(EffectOf(asked, "ao") != nullptr);
-
-    // Камеры нет вовсе — тоже проект, а не пустота.
-    CHECK_TRUE(EffectOf(ResolvePostChain(scene, entt::null, cfg), "ao") != nullptr);
+    // Камеры нет вовсе — тоже нет обработки.
+    CHECK_FALSE(ResolvePostChain(scene, entt::null, none));
 }
 
-// --- Тракт ПРОЕКТА: `sage.cfg` и умолчание из полей --------------------------
+TEST(PostProcess_two_cameras_keep_their_own_settings) {
+    // То, ради чего обработка и переехала на камеру: у каждой свой вид.
+    Scene scene;
+    GameObject cinematic = scene.CreateObject("Cinematic");
+    scene.Registry().emplace<CameraComponent>(cinematic.Entity());
+    GameObject map = scene.CreateObject("Map");
+    scene.Registry().emplace<CameraComponent>(map.Entity());
 
-TEST(PostChain_project_chain_comes_from_config_or_from_fields) {
-    sage::EngineConfig cfg;
-    cfg.Bloom = false;
-    cfg.AmbientOcclusion = true;
+    PostProcessComponent rich;
+    rich.Chain = ChainOf({"exposure", "bloom", "grain", "tonemap"});
+    rich.Chain.Effects[0].Find("exposure")->V[0] = 1.5f;
+    scene.Registry().emplace<PostProcessComponent>(cinematic.Entity(), rich);
 
-    // Конфиг тракт не трогал — он собирается из полей. Так выглядят все проекты,
-    // настроенные до появления трактов.
-    const PostChain fromFields = ProjectPostChain(cfg);
-    CHECK_TRUE(EffectOf(fromFields, "ao") != nullptr);
-    CHECK_TRUE(EffectOf(fromFields, "bloom") == nullptr);
+    PostProcessComponent lean;
+    lean.Chain = ChainOf({"tonemap"});
+    scene.Registry().emplace<PostProcessComponent>(map.Entity(), lean);
 
-    // Авторский тракт ПЕРЕКРЫВАЕТ поля: иначе правка в редакторе ничего бы не
-    // значила, а человек не понял бы, почему его тракт не работает.
-    PostChain authored = ChainOf({"bloom", "tonemap"});
-    cfg.PostChain = PostChainToJson(authored).dump();
-    const PostChain loaded = ProjectPostChain(cfg);
-    CHECK_TRUE(EffectOf(loaded, "bloom") != nullptr);
-    CHECK_TRUE(EffectOf(loaded, "ao") == nullptr);
-
-    // Битый текст тракта не оставляет проект БЕЗ обработки вовсе: собираем из
-    // полей. Файл правят руками, и опечатка там — обычное дело.
-    cfg.PostChain = "{ это не json";
-    const PostChain broken = ProjectPostChain(cfg);
-    CHECK_TRUE(EffectOf(broken, "tonemap") != nullptr);
-    CHECK_TRUE(EffectOf(broken, "ao") != nullptr);
-}
-
-TEST(PostChain_survives_a_config_round_trip) {
-    // «Сохранить настройки» в редакторе перезаписывает sage.cfg ЦЕЛИКОМ. Если бы
-    // тракт при этом терялся, правка настроек молча стирала бы всю
-    // пост-обработку проекта — и заметить это можно было бы только по картинке.
-    sage::EngineConfig cfg;
-    cfg.PostChain = PostChainToJson(ChainOf({"bloom", "tonemap"})).dump();
-
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "sage_postchain_test.cfg").string();
-    CHECK_TRUE(cfg.SaveFile(path));
-
-    sage::EngineConfig loaded;
-    CHECK_TRUE(loaded.LoadFile(path));
-    const PostChain back = ProjectPostChain(loaded);
-    CHECK_TRUE(EffectOf(back, "bloom") != nullptr);
-    CHECK_TRUE(EffectOf(back, "tonemap") != nullptr);
-    CHECK_TRUE(back.Compile().Ok);
-    std::filesystem::remove(path);
-
-    // А конфиг БЕЗ тракта остаётся конфигом без тракта: сохранять в него
-    // собранный из полей тракт значило бы «автоматически закрепить» умолчания, и
-    // после первой же правки полей в другой версии проект вёл бы себя по-старому.
-    sage::EngineConfig plain;
-    plain.Bloom = true;
-    const std::string plainPath =
-        (std::filesystem::temp_directory_path() / "sage_postchain_test2.cfg").string();
-    CHECK_TRUE(plain.SaveFile(plainPath));
-    sage::EngineConfig plainBack;
-    CHECK_TRUE(plainBack.LoadFile(plainPath));
-    CHECK_TRUE(plainBack.PostChain.empty());
-    std::filesystem::remove(plainPath);
+    PostChain a, b;
+    CHECK_TRUE(ResolvePostChain(scene, cinematic.Entity(), a));
+    CHECK_TRUE(ResolvePostChain(scene, map.Entity(), b));
+    CHECK_TRUE(EffectOf(a, "grain") != nullptr);
+    CHECK_TRUE(EffectOf(b, "grain") == nullptr);
+    CHECK_NEAR(EffectOf(a, "exposure")->Float("exposure"), 1.5f, 1e-4);
 }

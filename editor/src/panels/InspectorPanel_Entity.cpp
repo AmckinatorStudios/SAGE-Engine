@@ -163,34 +163,31 @@ glm::vec3 InspectorPanel::LinkScaleAxes(const glm::vec3& before, const glm::vec3
     return after;
 }
 
-// --- Тракт пост-обработки камеры ---------------------------------------------
+// --- Пост-обработка камеры ---------------------------------------------------
 //
 // Секция есть только у сущности, у которой компонент УЖЕ есть: как у света и
 // камеры. Добавляется он из списка «Добавить компонент».
 //
-// САМ РЕДАКТОР ТРАКТА — ОБЩИЙ (editor/src/PostChainUi.cpp): ровно тот же
-// рисуется в окне настроек для тракта проекта. Две копии разошлись бы сначала по
-// мелочам, а потом по составу кнопок.
-static void DrawPostChainSection(EditorHost& host, entt::registry& reg, entt::entity entity,
-                                 bool* removed) {
+// САМ РЕДАКТОР — ОБЩИЙ (editor/src/PostChainUi.cpp): разделы в порядке
+// обработки кадра, у каждого эффекта свой выключатель.
+static void DrawPostProcessSection(EditorHost& host, entt::registry& reg, entt::entity entity,
+                                   bool* removed) {
     using namespace sage::render;
-    if (!reg.all_of<PostChainComponent>(entity)) return;
-    if (!EditorTheme::SectionHeader("camera", T("Post-Processing" "###Post-Processing"),
+    if (!reg.all_of<PostProcessComponent>(entity)) return;
+    if (!EditorTheme::SectionHeader("camera", T("Post Processing" "###Post Processing"),
                                     ImGuiTreeNodeFlags_DefaultOpen, removed))
         return;
-    PostChainComponent* component = reg.try_get<PostChainComponent>(entity);
+    PostProcessComponent* component = reg.try_get<PostProcessComponent>(entity);
     if (!component) return;
 
-    if (ImGui::Checkbox(T("Use the project chain"), &component->UseProjectDefault))
-        host.PushUndoSnapshot();
-    ImGui::SameLine();
-    EditorTheme::Hint(T("this camera is processed by the project chain from sage.cfg"));
+    // Общий выключатель — отдельно от удаления компонента: «посмотреть, как без
+    // обработки» делают ежеминутно, и терять ради этого настройки нельзя.
+    if (ImGui::Checkbox(T("Enabled"), &component->Enabled)) host.PushUndoSnapshot();
+    EditorTheme::Hint(T("off — this camera shows the frame as it is"));
 
-    // Откат и пометку «сцена изменена» редактор тракта делает САМ, по каждому
-    // виджету: у дискретной правки — снимок, у протяжки — отслеживание. Поэтому
-    // возвращаемое значение здесь не нужно: оно для того, кто хранит тракт ВНЕ
-    // сцены (окно настроек пишет sage.cfg).
-    ImGui::BeginDisabled(component->UseProjectDefault);
+    // Откат и пометку «сцена изменена» редактор делает САМ, по каждому виджету:
+    // у дискретной правки — снимок, у протяжки — отслеживание.
+    ImGui::BeginDisabled(!component->Enabled);
     sage::editor::DrawPostChainEditor(&host, component->Chain, "camera");
     ImGui::EndDisabled();
 }
@@ -231,7 +228,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     bool rmMesh = false;
     bool rmCamera = false;
     bool rmLight = false;
-    bool rmPostChain = false;
+    bool rmPostProcess = false;
     bool rmDecal = false;
     bool rmGiStatic = false;
     bool rmNet = false;
@@ -375,7 +372,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Тракт пост-обработки камеры ---
-    DrawPostChainSection(host, reg, obj.Entity(), &rmPostChain);
+    DrawPostProcessSection(host, reg, obj.Entity(), &rmPostProcess);
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
@@ -1098,9 +1095,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         reg.remove<LightComponent>(obj.Entity());
     }
 
-    if (rmPostChain) {
+    if (rmPostProcess) {
         host.PushUndoSnapshot();
-        reg.remove<sage::render::PostChainComponent>(obj.Entity());
+        reg.remove<sage::render::PostProcessComponent>(obj.Entity());
     }
 
     if (rmDecal) {
@@ -1275,17 +1272,10 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
 
         {"Camera", "View", "camera",
          "The game looks through this object", HasComp<CameraComponent>, AddComp<CameraComponent>},
-        {"Post-Processing", "View", "camera",
+        {"Post Processing", "View", "camera",
          "What is done to this camera's frame before it is shown",
-         HasComp<sage::render::PostChainComponent>,
-         [](entt::registry& reg, entt::entity e) {
-             // Новая камера СНАЧАЛА показывает как проект. Добавление компонента
-             // не должно менять картинку, пока в нём ничего не настроено: иначе
-             // «посмотреть, что там» стоило бы другого кадра.
-             sage::render::PostChainComponent component;
-             component.UseProjectDefault = true;
-             reg.emplace<sage::render::PostChainComponent>(e, component);
-         }},
+         HasComp<sage::render::PostProcessComponent>,
+         AddComp<sage::render::PostProcessComponent>},
         {"Light", "View", "light",
          "Point, spot or directional light", HasComp<LightComponent>, AddComp<LightComponent>},
 

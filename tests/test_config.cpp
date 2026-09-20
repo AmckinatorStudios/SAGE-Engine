@@ -171,9 +171,6 @@ TEST(Config_preset_low_disables_heavy_passes) {
     EngineConfig c;
     c.ApplyPreset(QualityPreset::Low);
     CHECK_FALSE(c.Shadows);
-    CHECK_FALSE(c.PostProcessing);
-    CHECK_FALSE(c.Bloom);
-    CHECK_FALSE(c.AmbientOcclusion);
     CHECK_NEAR(c.RenderScale, 0.75f, 1e-5);
     CHECK_EQ(c.Msaa, 0);
 }
@@ -183,9 +180,6 @@ TEST(Config_preset_ultra_enables_everything) {
     c.ApplyPreset(QualityPreset::Ultra);
     CHECK_TRUE(c.Shadows);
     CHECK_EQ(c.ShadowResolution, 4096);
-    CHECK_TRUE(c.PostProcessing);
-    CHECK_TRUE(c.Bloom);
-    CHECK_TRUE(c.AmbientOcclusion);
     CHECK_EQ(c.Msaa, 4);
 }
 
@@ -221,7 +215,6 @@ TEST(Config_env_quality_preset_applied) {
     EngineConfig c;
     c.ApplyEnvOverrides();
     CHECK_FALSE(c.Shadows);
-    CHECK_FALSE(c.PostProcessing);
 
     // Точечная env-переменная действует ПОВЕРХ пресета.
     setenv("SAGE_SHADOWS", "1", 1);
@@ -244,9 +237,6 @@ TEST(Config_preset_roundtrip_through_file) {
     CHECK_TRUE(loaded.LoadFile(path));
     CHECK_TRUE(loaded.Shadows);
     CHECK_EQ(loaded.ShadowResolution, 1024);
-    CHECK_TRUE(loaded.PostProcessing);
-    CHECK_FALSE(loaded.Bloom);
-    CHECK_FALSE(loaded.AmbientOcclusion);
 
     std::remove(path);
 }
@@ -353,30 +343,16 @@ TEST(Config_msaa_maps_to_scene_sample_count) {
     cfg.Msaa = 64; CHECK_EQ(sage::render::SceneSamples(cfg), 8);
 }
 
-TEST(Config_fxaa_and_msaa_do_not_stack) {
-    sage::EngineConfig cfg;
-    cfg.Fxaa = true;
-
-    // Спрашиваем у ТРАКТА, а не у плоской структуры настроек: FXAA — это звено,
-    // и «включён ли он» теперь означает «есть ли оно в тракте». Проверять поле
-    // бессмысленно — поля больше нет, а звено либо стоит, либо нет.
-    auto hasFxaa = [](const sage::EngineConfig& c) {
-        const sage::render::PostChain chain = sage::render::PostChain::FromConfig(c);
-        for (const sage::render::PostEffect& e : chain.Effects)
-            if (e.Kind == "fxaa") return true;
-        return false;
-    };
-
-    cfg.Msaa = 0;
-    CHECK_TRUE(hasFxaa(cfg));
-
-    cfg.Msaa = 4;
-    CHECK_FALSE(hasFxaa(cfg));
-
-    // Выключенный руками FXAA не должен включаться сам от отсутствия MSAA.
-    cfg.Fxaa = false;
-    cfg.Msaa = 0;
-    CHECK_FALSE(hasFxaa(cfg));
+// FXAA И MSAA — РАЗНЫЕ СИСТЕМЫ, И ТЕПЕРЬ ЭТО ВИДНО ПО ТИПУ.
+//
+// Раньше FXAA был полем настроек проекта рядом с MSAA, и их приходилось
+// разводить правилом «если MSAA включён, FXAA в тракт не класть». Теперь FXAA —
+// звено пост-обработки КАМЕРЫ, а MSAA — настройка буфера сцены: они лежат в
+// разных местах, и путать их негде. Умолчание камеры FXAA не содержит: кромки
+// лечит MSAA, включённый по умолчанию.
+TEST(Post_default_camera_chain_has_no_fxaa) {
+    const sage::render::PostChain chain = sage::render::PostChain::Default();
+    for (const sage::render::PostEffect& e : chain.Effects) CHECK_TRUE(e.Kind != "fxaa");
 }
 
 // Пресет Ultra обещает MSAA — и обещание должно доходить до буфера сцены.

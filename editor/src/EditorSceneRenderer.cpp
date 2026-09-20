@@ -21,7 +21,7 @@
 #include "sage/render/ScenePasses.h"
 #include "sage/render/SkyDraw.h"
 #include "sage/render/PostFX.h"
-#include "sage/render/PostChainComponent.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/render/ParticleECS.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -51,9 +51,9 @@ void EditorSceneRenderer::Init() {
 // — «в редакторе одна картинка, в игре другая» началось ровно с того, что этот
 // код был здесь и рантайму был недоступен.
 //
-// Чей тракт брать, решает sage::render::ResolvePostChain: у камеры может быть
-// СВОЙ тракт (компонент PostChainComponent), и тогда вид через неё обязан
-// считаться по нему — и в превью, и в игре одинаково.
+// Чей тракт брать, решает sage::render::ResolvePostChain: обработка живёт
+// компонентом «Пост-обработка» на камере, и вид через камеру обязан считаться
+// по нему — и в превью, и в игре одинаково. Нет компонента — нет обработки.
 
 // Небо кадра: кубическая текстура, если у сцены задан её каталог, иначе
 // процедурный градиент. Одна точка на оба окна редактора — иначе вьюпорт и
@@ -598,7 +598,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Объём — после геометрии и до пост-обработки: свечение лучей должно
     // попасть в bloom. В плоском холсте вёрстки его нет — там нет и сцены.
-    if (cfg.Volumetrics && cfg.PostProcessing) {
+    if (cfg.Volumetrics) {
         sceneFbo.Resolve();
         if (!m_volumetrics) m_volumetrics.emplace();
         m_volumetrics->Render(sceneFbo, sceneFbo.DepthTexture(), w, h, outProj, outView, eye, env,
@@ -608,7 +608,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
 
     // Блик — после объёма, чтобы облако его гасило, и до пост-обработки, чтобы
     // он прошёл через bloom вместе с кадром.
-    if (cfg.LensFlare && cfg.PostProcessing) {
+    if (cfg.LensFlare) {
         sceneFbo.Resolve();
         if (!m_lensFlare) m_lensFlare.emplace();
         m_lensFlare->Render(sceneFbo, sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h,
@@ -630,17 +630,23 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // У ортогональных видов её нет НАМЕРЕННО: свечение и глубина резкости на
     // схематичном виде сверху мешают попасть по объекту, а именно ради точного
     // попадания такой вид и открывают.
+    // ВЬЮПОРТ ПОКАЗЫВАЕТ ОБРАБОТКУ ГЛАВНОЙ КАМЕРЫ СЦЕНЫ.
+    //
+    // Смотрит он редакторской камерой, и своего компонента у неё быть не может.
+    // Раньше здесь брался тракт ПРОЕКТА — настройка, которой больше нет:
+    // обработка принадлежит камере. Главная камера и есть тот кадр, ради
+    // которого настраивают вид, поэтому вьюпорт показывает её обработку: «в
+    // редакторе одно, в игре другое» начинается ровно с расхождения этих двух.
+    // Нет камеры с компонентом — вьюпорт честно показывает кадр без обработки.
     bool postApplied = false;
-    if (cfg.PostProcessing && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
+    sage::render::PostChain viewportChain;
+    const bool viewportWantsPost = sage::render::ResolvePostChain(
+        scene, sage::ecs::PrimaryCameraEntity(scene), viewportChain);
+    if (viewportWantsPost && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
         PostWorks()) {
         postFbo.Resize(w, h);
-        // Вид вьюпорта смотрит РЕДАКТОРСКОЙ камерой, а не камерой сцены, поэтому
-        // тракта у него своего быть не может — берём тракт проекта. Тракт
-        // камеры сцены показывается там, где через неё действительно смотрят:
-        // в панели Game и в превью выбранной камеры.
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
-                         sceneFbo.Height(), outProj, outView,
-                         sage::render::PostChain::FromConfig(cfg),
+                         sceneFbo.Height(), outProj, outView, viewportChain,
                          /*output=*/&postFbo, 0, 0, w, h);
         postApplied = true;
     }
@@ -830,12 +836,13 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
     // Пост-обработка — как в игре: превью обещает игровой кадр, а не «сцену без
     // эффектов». Объёмного света и блика здесь нет намеренно: два лишних
     // полноэкранных прохода ради картинки в углу.
-    if (cfg.PostProcessing && PostWorks()) {
+    sage::render::PostChain previewChain;
+    if (sage::render::ResolvePostChain(scene, camera, previewChain) && PostWorks()) {
         EnsureFramebuffer(m_previewPostFbo, m_previewW, m_previewH);
         m_previewPostFbo->Resize(m_previewW, m_previewH);
         m_postfx->Render(m_previewFbo->ColorTexture(), m_previewFbo->DepthTexture(),
                          m_previewFbo->Width(), m_previewFbo->Height(), frame.Proj, frame.View,
-                         sage::render::ResolvePostChain(scene, camera, cfg),
+                         previewChain,
                          /*output=*/&*m_previewPostFbo, 0, 0, m_previewW,
                          m_previewH);
         m_previewPostApplied = true;
@@ -915,7 +922,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // которая обещает показать игру, показывала третью картинку, не совпадающую
     // ни с редактором, ни с игрой; и «в редакторе тёмно, а в игре нормально»
     // начиналось именно с этого расхождения.
-    if (cfg.PostProcessing && (cfg.Volumetrics || cfg.LensFlare)) {
+    if (cfg.Volumetrics || cfg.LensFlare) {
         if (cfg.Volumetrics) {
             m_gameFbo->Resolve();
             if (!m_volumetrics) m_volumetrics.emplace();
@@ -936,12 +943,12 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     m_gameFbo->Resolve();   // MSAA -> обычные текстуры (без MSAA — пустышка)
 
     m_gamePostApplied = false;
-    if (cfg.PostProcessing && PostWorks()) {
+    sage::render::PostChain gameChain;
+    if (sage::render::ResolvePostChain(scene, sage::ecs::PrimaryCameraEntity(scene), gameChain) &&
+        PostWorks()) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
-                             m_gameFbo->Width(), m_gameFbo->Height(), proj, view,
-                             sage::render::ResolvePostChain(
-                                 scene, sage::ecs::PrimaryCameraEntity(scene), cfg),
+                             m_gameFbo->Width(), m_gameFbo->Height(), proj, view, gameChain,
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
         m_gamePostApplied = true;
     }

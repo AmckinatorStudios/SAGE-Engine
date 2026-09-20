@@ -111,9 +111,46 @@ glm::vec2 PostEffect::Vec2(const char* name, glm::vec2 fallback) const {
 //  Компиляция тракта
 // ============================================================================
 
+const char* PostStageLabel(PostStage stage) {
+    switch (stage) {
+        case PostStage::Exposure: return "Exposure";
+        case PostStage::Depth:    return "Depth Effects";
+        case PostStage::Bloom:    return "Bloom";
+        case PostStage::Color:    return "Color";
+        case PostStage::Grading:  return "Color Grading";
+        case PostStage::Tonemap:  return "Tonemapping";
+        case PostStage::Lens:     return "Lens / Image Effects";
+        case PostStage::Film:     return "Film";
+        case PostStage::Output:   return "Output";
+    }
+    return "Post Processing";
+}
+
+PostChain PostChain::Ordered() const {
+    PostChain out = *this;
+    const PostEffectCatalog& catalog = PostEffectCatalog::Instance();
+    auto stageOf = [&catalog](const PostEffect& e) {
+        const PostEffectKind* k = catalog.Find(e.Kind);
+        // Звено неизвестного вида кладём в самый конец: выполнять его всё равно
+        // нечем, а порядок известных от него зависеть не должен.
+        return k ? (int)k->Stage : 1000;
+    };
+    // УСТОЙЧИВАЯ сортировка: внутри этапа порядок списка сохраняется. Это важно
+    // для повторяемых звеньев игры — два её эффекта на одном этапе обязаны идти
+    // в том порядке, в каком их положил автор.
+    std::stable_sort(out.Effects.begin(), out.Effects.end(),
+                     [&](const PostEffect& a, const PostEffect& b) {
+                         return stageOf(a) < stageOf(b);
+                     });
+    return out;
+}
+
 PostChainReport PostChain::Compile() const {
     PostChainReport report;
     const PostEffectCatalog& catalog = PostEffectCatalog::Instance();
+    // ПО ПОРЯДКУ ИСПОЛНЕНИЯ, а не по порядку списка: исполнитель разложит
+    // звенья по этапам, и проверять надо то, что реально выполнится.
+    const PostChain ordered = Ordered();
 
     // Идём по тракту слева направо, помня, в каком ПРОСТРАНСТВЕ идёт картинка:
     // до тон-маппинга это HDR (значения за [0,1], свечение и AO складываются в
@@ -123,7 +160,7 @@ PostChainReport PostChain::Compile() const {
     std::string tonemap;
     std::vector<std::string> placed;
 
-    for (const PostEffect& e : Effects) {
+    for (const PostEffect& e : ordered.Effects) {
         const PostEffectKind* kind = catalog.Find(e.Kind);
         if (!kind) {
             report.Ok = false;
@@ -201,46 +238,25 @@ PostChain PostChain::Completed() const {
     }
     if (haveTonemap) return chain;
 
-    // Куда вставить. В КОНЕЦ нельзя: если в тракте уже есть звено, читающее
-    // готовый кадр (например FXAA), оно обязано оказаться ПОСЛЕ тон-маппинга —
-    // иначе дополненный тракт не скомпилируется, и «я просто убрал тон-маппинг,
-    // чтобы посмотреть» закончится отказом вместо картинки. Поэтому вставляем
-    // перед первым таким звеном, а если его нет — в конец.
-    size_t at = chain.Effects.size();
-    for (size_t i = 0; i < chain.Effects.size(); ++i) {
-        const PostEffect& e = chain.Effects[i];
-        if (!e.Enabled) continue;
-        const PostEffectKind* k = catalog.Find(e.Kind);
-        if (k && Has(k->Needs, PostNeeds::LdrColor)) {
-            at = i;
-            break;
-        }
-    }
-    chain.Effects.insert(chain.Effects.begin() + (long)at, MakePostEffect("tonemap"));
+    // КУДА вставить — вопрос снят: место звена решает его этап (PostStage), а
+    // не позиция в списке. Дописываем в конец, исполнитель поставит тон-маппинг
+    // туда, где он и должен быть — после цвета и до виньетки.
+    // НЕЙТРАЛЬНЫЙ, а не «как по умолчанию»: человек, снявший галочку с
+    // тон-маппинга, просил убрать кривую света, а не получить обратно ACES.
+    // Кадр всё равно обязан стать LDR — иначе на экран ушёл бы HDR-цвет, — но
+    // сделать это можно и без характера: обрезкой.
+    PostEffect neutral = MakePostEffect("tonemap");
+    if (PostValue* mode = neutral.Find("mode")) mode->V[0] = 0.0f;
+    chain.Effects.push_back(std::move(neutral));
     return chain;
 }
 
 PostEffect& AddPostEffect(PostChain& chain, const std::string& kindId) {
-    const PostEffectKind* kind = PostEffectCatalog::Instance().Find(kindId);
-    PostEffect effect = MakePostEffect(kindId);
-
-    // Читающее готовый кадр — в конец: после тон-маппинга оно и должно быть.
-    if (kind && !Has(kind->Needs, PostNeeds::LdrColor)) {
-        // Читающее HDR — перед первым тон-маппингом (или в конец, если
-        // тон-маппинга в тракте ещё нет: тогда его добавит Completed).
-        size_t at = chain.Effects.size();
-        for (size_t i = 0; i < chain.Effects.size(); ++i) {
-            const PostEffectKind* other =
-                PostEffectCatalog::Instance().Find(chain.Effects[i].Kind);
-            if (other && other->Tonemaps) {
-                at = i;
-                break;
-            }
-        }
-        chain.Effects.insert(chain.Effects.begin() + (long)at, std::move(effect));
-        return chain.Effects[at];
-    }
-    chain.Effects.push_back(std::move(effect));
+    // Просто в конец списка: КОГДА звено выполнится, решает его этап
+    // (PostStage), а не место в списке. Раньше здесь была логика «до
+    // тон-маппинга или после» — она и была признанием того, что порядок живёт в
+    // двух местах сразу.
+    chain.Effects.push_back(MakePostEffect(kindId));
     return chain.Effects.back();
 }
 

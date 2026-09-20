@@ -7,6 +7,8 @@
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
+#include "sage/render/PostChainIO.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/SceneJson.h"
 #include "sage/ecs/LightSystem.h"
@@ -478,6 +480,31 @@ void MigrateV10toV11(json& root) {
     SunFieldToEntity(root);
 }
 
+// v11 -> v12. Пост-обработка переехала из НАСТРОЕК ПРОЕКТА в компонент камеры.
+//
+// ПОЧЕМУ ПОМЕНЯЛОСЬ. Экспозиция, свечение, цвет, тон-маппинг и виньетка жили в
+// `sage.cfg` — то есть были настройкой проекта, общей для всех камер сцены
+// сразу. Ни сохранить их в сцену, ни положить в префаб, ни откатить через
+// Ctrl+Z, ни сделать разный вид у главной камеры и у камеры мини-карты было
+// нельзя. Разбор — в комментарии к PostProcessComponent.
+//
+// ЧТО ДЕЛАЕТ МИГРАЦИЯ. Даёт каждой камере компонент «Пост-обработка» с
+// начальным трактом. Без этого сцены, собранные раньше, открылись бы БЕЗ
+// обработки вовсе — «все мои сцены стали плоскими и тусклыми», — потому что
+// настройка, которая их обрабатывала, теперь не существует.
+//
+// Камера, у которой компонент уже есть (его добавили до переезда, ключом
+// postChain), не трогается: своя настройка важнее умолчания.
+void MigrateV11toV12(json& root) {
+    const nlohmann::json chain = sage::render::PostChainToJson(sage::render::PostChain::Default());
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("camera")) continue;
+        if (obj.contains("postProcess") || obj.contains("postChain")) continue;
+        obj["postProcess"] = chain;
+        obj["postProcess"]["enabled"] = true;
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -489,6 +516,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV8toV9,
     &MigrateV9toV10,
     &MigrateV10toV11,
+    &MigrateV11toV12,
 };
 
 } // namespace

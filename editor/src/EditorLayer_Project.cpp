@@ -250,6 +250,10 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         camObj.GetTransform().Position = {0.0f, 1.5f, 6.5f};
         camObj.GetTransform().Rotation = {-6.0f, 0.0f, 0.0f}; // чуть вниз, вдоль -Z
         m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
+        // И «Пост-обработка» на ней: витрина показывает игровой кадр, а кадр
+        // обрабатывает КАМЕРА (см. sage/render/PostProcessComponent.h). Без
+        // компонента шаблон выглядел бы сырым — и учил бы, что так и надо.
+        m_scene->Registry().emplace<sage::render::PostProcessComponent>(camObj.Entity());
 
         // Солнце — такая же сущность, как всё остальное. Раньше его роль играли
         // три поля в настройках сцены; теперь его видно в иерархии, можно

@@ -184,29 +184,36 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
 sage::render::PostChain BaseChain() {
     using namespace sage::render;
     PostChain chain;
-    // Порядок и значения — те же, что были у прежней зашитой цепочки:
-    // затенение -> свечение -> тон-маппинг. Глубины резкости и смаза здесь нет
-    // (их включают отдельные проверки), FXAA — тоже.
-    {
-        PostEffect& ao = AddEffect(chain, "ao");
-        (void)ao;
-        SetParam(chain, "ao", "radius", 0.5f);
-        SetParam(chain, "ao", "strength", 1.0f);
-    }
-    {
-        AddEffect(chain, "bloom");
-        SetParam(chain, "bloom", "threshold", 1.0f);
-        SetParam(chain, "bloom", "intensity", 0.55f);
-    }
-    {
-        AddEffect(chain, "tonemap");
-        SetParam(chain, "tonemap", "exposure", 1.05f);
-        SetParam(chain, "tonemap", "gamma", 2.2f);
-        SetParam(chain, "tonemap", "saturation", 1.16f);
-        SetParam(chain, "tonemap", "contrast", 1.06f);
-        SetParam(chain, "tonemap", "vignette", 0.35f);
-        SetParam(chain, "tonemap", "chromatic", 0.0f);
-    }
+    // Тракт эталонных кадров: затенение -> экспозиция -> свечение -> цвет ->
+    // тон-маппинг -> виньетка. Раньше половина этого была ПАРАМЕТРАМИ
+    // тон-маппинга (экспозиция, насыщенность, контраст, виньетка) — теперь это
+    // отдельные звенья, каждое со своим этапом. Значения те же, что и были,
+    // поэтому кадр меняется настолько, насколько изменился порядок операций, а
+    // не настройки.
+    //
+    // Глубины резкости и смаза здесь нет (их включают отдельные проверки),
+    // FXAA — тоже.
+    AddEffect(chain, "ao");
+    SetParam(chain, "ao", "radius", 0.5f);
+    SetParam(chain, "ao", "strength", 1.0f);
+
+    AddEffect(chain, "exposure");
+    SetParam(chain, "exposure", "exposure", 0.07f); // ~1.05x, как было множителем
+
+    AddEffect(chain, "bloom");
+    SetParam(chain, "bloom", "threshold", 1.0f);
+    SetParam(chain, "bloom", "intensity", 0.55f);
+
+    AddEffect(chain, "color");
+    SetParam(chain, "color", "saturation", 1.16f);
+    SetParam(chain, "color", "contrast", 1.06f);
+
+    AddEffect(chain, "tonemap");
+    SetParam(chain, "tonemap", "mode", 2.0f); // ACES — та же кривая, что была
+    SetParam(chain, "tonemap", "gamma", 2.2f);
+
+    AddEffect(chain, "vignette");
+    SetParam(chain, "vignette", "intensity", 0.35f);
     return chain;
 }
 

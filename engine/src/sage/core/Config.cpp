@@ -99,16 +99,14 @@ void EngineConfig::LetterboxViewport(int winW, int winH, int& x, int& y, int& w,
 void EngineConfig::ApplyPreset(QualityPreset preset) {
     switch (preset) {
         case QualityPreset::Low:
-            // Слабый/старый ПК: убираем оба тяжёлых прохода (тени, HDR-пост со
-            // всеми эффектами) и рендерим в 75% разрешения. Туман и скайбокс
-            // остаются — они почти бесплатны, а картинку держат.
+            // Слабый/старый ПК: убираем тени и рендерим в 75% разрешения.
+            // Туман и скайбокс остаются — они почти бесплатны, а картинку
+            // держат. Пост-обработки здесь нет: она принадлежит камере
+            // (компонент «Пост-обработка»), а не пресету качества.
             Shadows = false;
             ShadowResolution = 512;
             ShadowCascades = 1;
             LocalShadows = false;
-            PostProcessing = false;
-            Bloom = false;
-            AmbientOcclusion = false;
             Msaa = 0;
             RenderScale = 0.75f;
             // Объём не выключаем — его включает игра, а не пресет, — но на
@@ -126,9 +124,6 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             // выбирают «средне».
             LocalShadows = false;
             LocalShadowResolution = 1024;
-            PostProcessing = true;  // тон-маппинг/экспозиция — дёшево и заметно
-            Bloom = false;
-            AmbientOcclusion = false;
             Msaa = 0;
             RenderScale = 1.0f;
             VolumetricScale = 0.5f;
@@ -142,9 +137,6 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             ShadowCascades = 3;
             LocalShadows = true;
             LocalShadowResolution = 2048;
-            PostProcessing = true;
-            Bloom = true;
-            AmbientOcclusion = true;
             Msaa = 0;
             RenderScale = 1.0f;
             VolumetricScale = 1.0f;
@@ -160,9 +152,6 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             ShadowCascades = 3;
             LocalShadows = true;
             LocalShadowResolution = 4096;
-            PostProcessing = true;
-            Bloom = true;
-            AmbientOcclusion = true;
             Msaa = 4;
             RenderScale = 1.0f;
             VolumetricScale = 1.0f;
@@ -208,7 +197,6 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Reflections      = gfx.value("reflections", Reflections);
     PlanarReflections= gfx.value("planarReflections", PlanarReflections);
     ShadowDistance = gfx.value("shadowDistance", ShadowDistance);
-    PostProcessing   = gfx.value("postProcessing", PostProcessing);
     Fog              = gfx.value("fog", Fog);
     Skybox           = gfx.value("skybox", Skybox);
 
@@ -217,19 +205,12 @@ bool EngineConfig::LoadFile(const std::string& path) {
     UiFontPixelHeight = ui.value("fontPixelHeight", UiFontPixelHeight);
     UiFontPixelArt = ui.value("fontPixelArt", UiFontPixelArt);
 
+    // РАЗДЕЛ postProcess ОСТАЛСЯ ТОЛЬКО ПОД ОБЪЁМ И БЛИК. Экспозиция, свечение,
+    // цвет, тон-маппинг, виньетка, зерно, SSAO, глубина резкости, смаз, FXAA
+    // уехали в компонент камеры (sage/render/PostProcessComponent.h) — старые
+    // ключи в файле просто не читаются, и это правильнее, чем читать их в
+    // никуда: настройка, которая ничего не делает, хуже отсутствующей.
     auto pp = j.value("postProcess", json::object());
-    Exposure   = pp.value("exposure", Exposure);
-    Gamma      = pp.value("gamma", Gamma);
-    Saturation = pp.value("saturation", Saturation);
-    Contrast   = pp.value("contrast", Contrast);
-    Vignette   = pp.value("vignette", Vignette);
-    Bloom            = pp.value("bloom", Bloom);
-    BloomThreshold   = pp.value("bloomThreshold", BloomThreshold);
-    BloomIntensity   = pp.value("bloomIntensity", BloomIntensity);
-    // Авторский тракт проекта. Хранится текстом и разбирается тем, кто его
-    // исполняет; здесь важно только не потерять его при перезаписи файла — иначе
-    // «сохранить настройки» в редакторе стирало бы тракт проекта.
-    if (pp.contains("chain") && pp["chain"].is_array()) PostChain = pp["chain"].dump();
     Volumetrics        = pp.value("volumetrics", Volumetrics);
     VolumetricShafts   = pp.value("volumetricShafts", VolumetricShafts);
     VolumetricClouds   = pp.value("volumetricClouds", VolumetricClouds);
@@ -260,19 +241,6 @@ bool EngineConfig::LoadFile(const std::string& path) {
     LensFlareGlare        = pp.value("lensFlareGlare", LensFlareGlare);
     LensFlareChroma       = pp.value("lensFlareChroma", LensFlareChroma);
     LensFlareThreshold    = pp.value("lensFlareThreshold", LensFlareThreshold);
-    AmbientOcclusion = pp.value("ao", AmbientOcclusion);
-    AOStrength       = pp.value("aoStrength", AOStrength);
-    AORadius         = pp.value("aoRadius", AORadius);
-    DepthOfField     = pp.value("depthOfField", DepthOfField);
-    FocusDistance    = pp.value("focusDistance", FocusDistance);
-    Aperture         = pp.value("aperture", Aperture);
-    DofMaxRadius     = pp.value("dofMaxRadius", DofMaxRadius);
-    MotionBlur       = pp.value("motionBlur", MotionBlur);
-    MotionBlurAmount = pp.value("motionBlurAmount", MotionBlurAmount);
-    MotionBlurSamples = pp.value("motionBlurSamples", MotionBlurSamples);
-    ChromaticAberration = pp.value("chromaticAberration", ChromaticAberration);
-    Fxaa = pp.value("fxaa", Fxaa);
-    FxaaContrastThreshold = pp.value("fxaaContrastThreshold", FxaaContrastThreshold);
 
     auto sys = j.value("system", json::object());
     WorkerThreads       = sys.value("workerThreads", WorkerThreads);
@@ -302,16 +270,13 @@ std::string EngineConfig::ToJsonString() const {
         {"localShadows", LocalShadows}, {"localShadowResolution", LocalShadowResolution},
         {"occlusionCulling", OcclusionCulling},
         {"reflections", Reflections}, {"planarReflections", PlanarReflections},
-        {"postProcessing", PostProcessing}, {"fog", Fog}, {"skybox", Skybox},
+        {"fog", Fog}, {"skybox", Skybox},
     };
     j["ui"] = {
         {"font", UiFont}, {"fontPixelHeight", UiFontPixelHeight},
         {"fontPixelArt", UiFontPixelArt},
     };
     j["postProcess"] = {
-        {"exposure", Exposure}, {"gamma", Gamma}, {"saturation", Saturation},
-        {"contrast", Contrast}, {"vignette", Vignette},
-        {"bloom", Bloom}, {"bloomThreshold", BloomThreshold}, {"bloomIntensity", BloomIntensity},
         {"volumetrics", Volumetrics}, {"volumetricShafts", VolumetricShafts},
         {"volumetricClouds", VolumetricClouds}, {"volumetricDensity", VolumetricDensity},
         {"volumetricIntensity", VolumetricIntensity}, {"volumetricSteps", VolumetricSteps},
@@ -331,27 +296,7 @@ std::string EngineConfig::ToJsonString() const {
         {"lensFlareHalo", LensFlareHalo}, {"lensFlareHaloRadius", LensFlareHaloRadius},
         {"lensFlareStarburst", LensFlareStarburst}, {"lensFlareGlare", LensFlareGlare},
         {"lensFlareChroma", LensFlareChroma}, {"lensFlareThreshold", LensFlareThreshold},
-        {"ao", AmbientOcclusion}, {"aoStrength", AOStrength}, {"aoRadius", AORadius},
-        {"depthOfField", DepthOfField}, {"focusDistance", FocusDistance},
-        {"aperture", Aperture}, {"dofMaxRadius", DofMaxRadius},
-        {"motionBlur", MotionBlur}, {"motionBlurAmount", MotionBlurAmount},
-        {"motionBlurSamples", MotionBlurSamples},
-        {"chromaticAberration", ChromaticAberration},
-        {"fxaa", Fxaa},
-        {"fxaaContrastThreshold", FxaaContrastThreshold},
     };
-    // АВТОРСКИЙ ТРАКТ ПРОЕКТА — отдельным присваиванием, а не строкой в списке
-    // выше: он хранится ТЕКСТОМ (см. Config.h) и разбирается в JSON здесь, на
-    // выходе. Пустой тракт в файл НЕ пишется: его отсутствие и означает «собрать
-    // тракт из полей выше», то есть ровно то состояние, в котором проект был до
-    // появления трактов.
-    if (!PostChain.empty()) {
-        try {
-            j["postProcess"]["chain"] = json::parse(PostChain);
-        } catch (const std::exception&) {
-            // Битый текст тракта — не повод не сохранить остальные настройки.
-        }
-    }
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
     };
@@ -424,10 +369,13 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_LENS_FLARE_INTENSITY"))
         LensFlareIntensity = (float)std::atof(v);
 
-    // Графика. SAGE_NO_SHADOWS / SAGE_NO_POST оставлены для обратной
-    // совместимости (их наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…
+    // Графика. SAGE_NO_SHADOWS оставлен для обратной совместимости (его
+    // наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…
+    //
+    // Переменных вида SAGE_POST/SAGE_BLOOM/SAGE_EXPOSURE больше нет: эффекты
+    // принадлежат камере, а не процессу, и «выключить свечение переменной
+    // окружения» означало бы вторую систему поверх компонента.
     if (std::getenv("SAGE_NO_SHADOWS")) Shadows = false;
-    if (std::getenv("SAGE_NO_POST")) PostProcessing = false;
     if (const char* v = std::getenv("SAGE_SHADOWS")) Shadows = EnvBool(v, Shadows);
     if (const char* v = std::getenv("SAGE_SHADOW_RES")) ShadowResolution = std::atoi(v);
     if (const char* v = std::getenv("SAGE_OCCLUSION")) OcclusionCulling = EnvBool(v, OcclusionCulling);
@@ -435,18 +383,9 @@ void EngineConfig::ApplyEnvOverrides() {
         ShadowCascades = std::clamp(std::atoi(v), 1, 3);
     if (const char* v = std::getenv("SAGE_LOCAL_SHADOWS")) LocalShadows = EnvBool(v, LocalShadows);
     if (const char* v = std::getenv("SAGE_SHADOW_DISTANCE")) ShadowDistance = (float)std::atof(v);
-    if (const char* v = std::getenv("SAGE_POST")) PostProcessing = EnvBool(v, PostProcessing);
     // Отдельные эффекты — переменными окружения: проверять их поодиночке
     // (и особенно сравнивать «с ним» и «без него» на одном кадре) иначе
     // приходится правкой файла настроек между запусками.
-    if (const char* v = std::getenv("SAGE_BLOOM")) Bloom = EnvBool(v, Bloom);
-    if (const char* v = std::getenv("SAGE_EXPOSURE")) Exposure = (float)std::atof(v);
-    if (const char* v = std::getenv("SAGE_SATURATION")) Saturation = (float)std::atof(v);
-    if (const char* v = std::getenv("SAGE_CONTRAST")) Contrast = (float)std::atof(v);
-    if (const char* v = std::getenv("SAGE_SSAO")) AmbientOcclusion = EnvBool(v, AmbientOcclusion);
-    if (const char* v = std::getenv("SAGE_FXAA")) Fxaa = EnvBool(v, Fxaa);
-    if (const char* v = std::getenv("SAGE_DOF")) DepthOfField = EnvBool(v, DepthOfField);
-    if (const char* v = std::getenv("SAGE_MOTION_BLUR")) MotionBlur = EnvBool(v, MotionBlur);
     if (const char* v = std::getenv("SAGE_REFLECTIONS")) Reflections = EnvBool(v, Reflections);
     if (const char* v = std::getenv("SAGE_PLANAR_REFLECTIONS"))
         PlanarReflections = EnvBool(v, PlanarReflections);

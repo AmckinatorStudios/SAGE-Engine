@@ -981,8 +981,16 @@ void PlayerLayer::OnRender() {
         // Её отказ выглядит как чёрный экран при живом кадре — с игрой это ещё
         // хуже, чем с редактором: там хотя бы есть отладочные виды, а здесь
         // человек видит просто чёрное окно. Лучше кадр без свечения, чем ничего.
+        // ТРАКТ БЕРЁТСЯ У КАМЕРЫ. Нет компонента «Пост-обработка» или он
+        // выключен — кадр идёт на экран как есть: обработки в игре не бывает
+        // «вообще», она бывает у камеры, которая снимает (см.
+        // sage/render/PostProcessComponent.h).
+        sage::render::PostChain cameraChain;
+        const bool cameraWantsPost = sage::render::ResolvePostChain(
+            *m_scene, sage::ecs::PrimaryCameraEntity(*m_scene), cameraChain);
+
         bool postOk = true;
-        if (cfg.PostProcessing && m_postfx) {
+        if (cameraWantsPost && m_postfx) {
             const sage::render::PostFX::SelfCheck& check = m_postfx->CheckPipeline();
             postOk = !check.Ran || check.Ok;
             if (!postOk && !m_postWarned) {
@@ -991,7 +999,7 @@ void PlayerLayer::OnRender() {
                                     << check.Reason << ") — кадр без эффектов";
             }
         }
-        const bool usePost = cfg.PostProcessing && !debugging && postOk;
+        const bool usePost = cameraWantsPost && !debugging && postOk;
         if (usePost) {
             if (!m_postfx) m_postfx.emplace();
             // Число сэмплов — по конфигу и той же функцией, что у редактора:
@@ -1091,8 +1099,7 @@ void PlayerLayer::OnRender() {
             device.Clear();
             m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                              m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
-                             sage::render::ResolvePostChain(
-                                 *m_scene, sage::ecs::PrimaryCameraEntity(*m_scene), cfg),
+                             cameraChain,
                              /*output=*/nullptr, vpX, vpY, vpW, vpH);
         }
         };

@@ -1812,6 +1812,22 @@
     "The project has no scene — there is nothing to run": "В проекте нет ни одной сцены — запускать нечего",
     "The project has no scene: there is nothing to run. Create or save a scene into scenes/ first.": "В проекте нет ни одной сцены: запускать нечего. Сначала создайте сцену и сохраните её в scenes/.",
     "Tools": "Инструменты",
-    "No light sources in the scene — nothing is lit. Add one: Objects > Light, or \"Create a sun\" in Environment": "В сцене нет источников света — освещать нечем. Добавьте: Объекты > Свет, либо «Создать солнце» в окружении"
+    "No light sources in the scene — nothing is lit. Add one: Objects > Light, or \"Create a sun\" in Environment": "В сцене нет источников света — освещать нечем. Добавьте: Объекты > Свет, либо «Создать солнце» в окружении",
+    "Post Processing": "Пост-обработка",
+    "Post processing is a camera component: select the camera and add \"Post Processing\" in the Inspector.": "Пост-обработка — компонент камеры: выберите камеру и добавьте «Пост-обработка» в инспекторе.",
+    "off — this camera shows the frame as it is": "выключено — камера показывает кадр как есть",
+    "Depth Effects": "Эффекты глубины",
+    "Color Grading": "Цветокоррекция",
+    "Tonemapping": "Тон-маппинг",
+    "Lens / Image Effects": "Оптика",
+    "Film": "Плёнка",
+    "Output": "Вывод",
+    "Color Adjustments": "Коррекция цвета",
+    "Film Grain": "Зерно плёнки",
+    "Bloom Radius": "Радиус свечения",
+    "Temperature": "Температура",
+    "Midtones": "Средние тона",
+    "Highlights": "Света",
+    "Smoothness": "Мягкость"
   }
 }

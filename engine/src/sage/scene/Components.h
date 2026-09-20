@@ -37,7 +37,7 @@
 #include "sage/anim/AnimationComponents.h"     // скелетная анимация и IK
 #include "sage/anim/PropertyAnimator.h"        // проигрывание клипа по свойствам
 #include "sage/render/ReflectionComponents.h"  // зонды отражений
-#include "sage/render/PostChainComponent.h"    // тракт пост-обработки на камере
+#include "sage/render/PostProcessComponent.h"  // пост-обработка на камере
 #include "sage/ui/UI.h"                        // элементы интерфейса сцены (компоненты)
 #include "sage/render/ParticleComponents.h"    // эмиттеры частиц
 #include "sage/audio/AudioComponents.h"       // источник звука на объекте

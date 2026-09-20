@@ -1,5 +1,7 @@
 #include "sage/render/PostFX.h"
 
+#include <chrono>
+
 #include "sage/core/Log.h"
 #include "sage/core/Profiler.h"
 
@@ -621,75 +623,198 @@ void main() {
 }
 )";
 
-const char* kCompositeFrag = R"(#version 330 core
+// ============================================================================
+//  ЗВЕНЬЯ ГОТОВОГО КАДРА — КАЖДОЕ СВОИМ ПРОХОДОМ
+//
+// Раньше экспозиция, цвет, тон-маппинг, виньетка и аберрация жили в ОДНОМ
+// шейдере (kCompositeFrag): порядок между ними был зашит в его текст, включить
+// одно без другого было нельзя, а «виньетка» была параметром тон-маппинга —
+// то есть эффектом, которого нет в списке эффектов.
+//
+// Теперь каждое из них — отдельное звено со своим этапом (PostStage), своим
+// выключателем и своими настройками. Цена — полноэкранный проход на звено;
+// плата честная: выключенное звено не исполняется вовсе, а порядок виден в
+// инспекторе ровно такой, каким он будет выполнен.
+// ============================================================================
+
+// --- Экспозиция: сколько света собрал кадр. HDR -> HDR ----------------------
+// В СТУПЕНЯХ (EV), а не множителем: ступень — это «вдвое», и привычка к ней
+// приходит из фотографии. Множитель 1.7 не говорит ничего, +0.75 EV говорит.
+const char* kExposureFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
 uniform sampler2D uScene;
-uniform sampler2D uBloom;
-uniform sampler2D uAO;
-uniform bool uUseBloom;
-uniform bool uUseAO;
-uniform float uExposure;
-uniform float uGamma;
-uniform float uSaturation;
+uniform float uEV;
+void main() { FragColor = vec4(texture(uScene, vUV).rgb * exp2(uEV), 1.0); }
+)";
+
+// --- Цвет: яркость, контраст, насыщенность, температура. HDR -> HDR ---------
+const char* kColorFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform float uBrightness;
 uniform float uContrast;
-uniform float uVignette;
-uniform float uChromatic;
+uniform float uSaturation;
+uniform float uTemperature;
+uniform float uTint;
+void main() {
+    vec3 c = max(texture(uScene, vUV).rgb, 0.0) * uBrightness;
+
+    // Баланс белого — усилением каналов. Приближение, и намеренно простое:
+    // честный пересчёт через цветовую температуру требует матрицы адаптации и
+    // белой точки, а на глаз в игре крутят именно «теплее/холоднее».
+    c *= vec3(1.0 + uTemperature * 0.25, 1.0 + uTint * 0.15, 1.0 - uTemperature * 0.25);
+
+    // КОНТРАСТ ВОКРУГ СРЕДНЕ-СЕРОГО 0.18, А НЕ ВОКРУГ 0.5.
+    //
+    // Кадр здесь ещё линейный (HDR), и «середина» в нём — не 0.5, а 0.18:
+    // это то, что после тон-маппинга станет серединой картинки. Контраст,
+    // закрученный вокруг 0.5 в линейном кадре, не поджимает его к середине, а
+    // тянет вниз — то есть просто гасит. Ровно на этом однажды и попались,
+    // когда контраст стоял до гаммы.
+    const float pivot = 0.18;
+    c = pow(c / pivot, vec3(uContrast)) * pivot;
+
+    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(luma), c, uSaturation);
+    FragColor = vec4(max(c, 0.0), 1.0);
+}
+)";
+
+// --- Цветокоррекция по диапазонам: тени / средние / света. HDR -> HDR -------
+const char* kGradeFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform vec3 uShadows;
+uniform vec3 uMidtones;
+uniform vec3 uHighlights;
+void main() {
+    vec3 c = max(texture(uScene, vUV).rgb, 0.0);
+    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    // Веса диапазонов перекрываются и в сумме дают единицу: иначе на границе
+    // диапазонов появилась бы ступенька — видно её сразу и объясняется плохо.
+    float hi = smoothstep(0.25, 1.0, luma);
+    float lo = 1.0 - smoothstep(0.0, 0.25, luma);
+    float mid = max(1.0 - hi - lo, 0.0);
+    vec3 gain = uShadows * lo + uMidtones * mid + uHighlights * hi;
+    FragColor = vec4(c * gain, 1.0);
+}
+)";
+
+// --- Тон-маппинг: HDR -> готовый к показу кадр ------------------------------
+// Единственное звено, меняющее пространство картинки. Кривая выбирается
+// режимом: разные кривые — разный характер света, и подменять выбор автора
+// «правильной» нельзя.
+const char* kTonemapFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform int uMode;
+uniform float uGamma;
 
 vec3 ACES(vec3 x) {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
-
-// Чтение сцены с хроматической аберрацией: каналы расходятся ВДОЛЬ РАДИУСА и
-// тем сильнее, чем дальше от центра кадра, — так ведёт себя реальная оптика. В
-// центре расхождения нет, поэтому лицо в центре кадра остаётся чистым.
-vec3 SampleScene(vec2 uv) {
-    if (uChromatic <= 0.0) return texture(uScene, uv).rgb;
-    vec2 radial = uv - 0.5;
-    vec2 off = radial * uChromatic * 0.02;
-    return vec3(texture(uScene, uv + off).r,
-                texture(uScene, uv).g,
-                texture(uScene, uv - off).b);
+vec3 Reinhard(vec3 x) { return x / (1.0 + x); }
+vec3 Filmic(vec3 x) {
+    // Uncharted 2: мягкое плечо в светах и поджатые тени.
+    const float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30, W = 11.2;
+    vec3 v = ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+    float w = ((W * (A * W + C * B) + D * E) / (W * (A * W + B) + D * F)) - E / F;
+    return clamp(v / w, 0.0, 1.0);
 }
 
 void main() {
-    vec3 hdr = SampleScene(vUV);
-    // Затенение и свечение приходят ГОТОВЫМИ картами: и степень затенения, и
-    // сила свечения применены тем звеном, которому эти настройки принадлежат
-    // (см. kAoBlurFrag и kBlurFrag). Здесь они только применяются — и только
-    // если в тракте есть их производитель. Нет производителя — нет и карты, а
-    // значит нет и следа эффекта: ничего не «осталось выключенным».
-    if (uUseAO) {
-        float ao = clamp(texture(uAO, vUV).r, 0.0, 1.0);
-        hdr *= ao;
-    }
-    if (uUseBloom) hdr += texture(uBloom, vUV).rgb;
+    vec3 hdr = max(texture(uScene, vUV).rgb, 0.0);
+    vec3 c;
+    if (uMode == 1)      c = Reinhard(hdr);
+    else if (uMode == 2) c = ACES(hdr);
+    else if (uMode == 3) c = Filmic(hdr);
+    else                 c = clamp(hdr, 0.0, 1.0); // без кривой: просто обрезка
+    FragColor = vec4(pow(c, vec3(1.0 / uGamma)), 1.0);
+}
+)";
 
-    vec3 color = ACES(hdr * uExposure);
+// --- Виньетка: падение яркости к краю кадра. LDR -> LDR ---------------------
+const char* kVignetteFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform float uIntensity;
+uniform float uSmoothness;
+void main() {
+    vec2 d = vUV - 0.5;
+    float r = length(d) * 1.4142;           // 1.0 в углу кадра
+    float edge = smoothstep(1.0 - uSmoothness, 1.0, r);
+    float vig = 1.0 - uIntensity * edge;
+    FragColor = vec4(texture(uScene, vUV).rgb * clamp(vig, 0.0, 1.0), 1.0);
+}
+)";
 
-    // Виньетка — в ЛИНЕЙНОМ пространстве: это падение освещённости к краю
-    // кадра, то есть умножение света, а не правка картинки.
-    vec2 uv = vUV - 0.5;
-    float vig = 1.0 - uVignette * dot(uv, uv) * 2.0;
-    color *= clamp(vig, 0.0, 1.0);
+// --- Хроматическая аберрация: каналы расходятся к краю. LDR -> LDR ----------
+const char* kChromaticFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform float uAmount;
+void main() {
+    // ВДОЛЬ РАДИУСА и тем сильнее, чем дальше от центра, — так ведёт себя
+    // настоящая оптика. В центре расхождения нет, и лицо в центре кадра
+    // остаётся чистым.
+    vec2 off = (vUV - 0.5) * uAmount * 0.02;
+    FragColor = vec4(texture(uScene, vUV + off).r,
+                     texture(uScene, vUV).g,
+                     texture(uScene, vUV - off).b, 1.0);
+}
+)";
 
-    // Гамма — ДО насыщенности и контраста, а не после.
-    //
-    // Обе правки определены для значений, готовых к показу: контраст крутится
-    // вокруг серединки 0.5, насыщенность мешает цвет с его яркостью. В
-    // линейном пространстве серединка не 0.5, а 0.216, поэтому контраст 1.06
-    // не поджимал картинку к середине, а ТЯНУЛ её вниз от 0.216 к 0.5 —
-    // то есть просто гасил кадр. Замер на эталонных кадрах после
-    // перестановки: L* 22.7 -> 27.8 при неизменной насыщенности (C* 56.1 ->
-    // 54.9). Насыщенность после перестановки стоит там, где определена, но
-    // на глаз почти не меняется — заметен именно контраст.
-    color = pow(max(color, 0.0), vec3(1.0 / uGamma));
+// --- Зерно плёнки. LDR -> LDR -----------------------------------------------
+const char* kGrainFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform vec2 uResolution;
+uniform float uAmount;
+uniform float uSize;
+uniform float uTime;
+float Hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+void main() {
+    vec3 c = texture(uScene, vUV).rgb;
+    // Зерно считается в ПИКСЕЛЯХ, а не в UV: иначе его размер менялся бы с
+    // разрешением окна, и снятый в 4K кадр выглядел бы чище того же кадра в HD.
+    vec2 cell = floor(vUV * uResolution / max(uSize, 0.5));
+    float n = Hash(cell + fract(uTime) * 71.3) - 0.5;
+    // Тени зернят сильнее светов — как настоящая плёнка.
+    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float weight = mix(1.0, 0.35, smoothstep(0.2, 0.9, luma));
+    FragColor = vec4(clamp(c + n * uAmount * weight, 0.0, 1.0), 1.0);
+}
+)";
 
-    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    color = mix(vec3(luma), color, uSaturation);
-    color = (color - 0.5) * uContrast + 0.5;
+// --- Подмешивание свечения к кадру ------------------------------------------
+// Раньше это делал тон-маппинг: он читал опубликованную карту свечения. То
+// есть «включить свечение» означало «положить карту, которую подмешает кто-то
+// другой», и выключенный тон-маппинг забирал свечение с собой. Теперь звено
+// само кладёт результат в кадр — как и всякое другое звено тракта.
+const char* kAddFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform sampler2D uAdd;
+void main() { FragColor = vec4(texture(uScene, vUV).rgb + texture(uAdd, vUV).rgb, 1.0); }
+)";
 
-    FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+// --- Умножение кадра на карту (затенение) ------------------------------------
+const char* kMulFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform sampler2D uMul;
+void main() {
+    float m = clamp(texture(uMul, vUV).r, 0.0, 1.0);
+    FragColor = vec4(texture(uScene, vUV).rgb * m, 1.0);
 }
 )";
 
@@ -714,7 +839,15 @@ Shader& DofCompositeShader() { static Shader* s = new Shader(Shader::FromSource(
 Shader& MotionShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kMotionFrag, "PostFX.MotionBlur")); return *s; }
 Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBrightFrag, "PostFX.Bright")); return *s; }
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
-Shader& CompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kCompositeFrag, "PostFX.Composite")); return *s; }
+Shader& ExposureShader()  { static Shader* s = new Shader(Shader::FromSource(kFsVert, kExposureFrag, "PostFX.Exposure")); return *s; }
+Shader& ColorShader()     { static Shader* s = new Shader(Shader::FromSource(kFsVert, kColorFrag, "PostFX.Color")); return *s; }
+Shader& GradeShader()     { static Shader* s = new Shader(Shader::FromSource(kFsVert, kGradeFrag, "PostFX.Grade")); return *s; }
+Shader& TonemapShader()   { static Shader* s = new Shader(Shader::FromSource(kFsVert, kTonemapFrag, "PostFX.Tonemap")); return *s; }
+Shader& VignetteShader()  { static Shader* s = new Shader(Shader::FromSource(kFsVert, kVignetteFrag, "PostFX.Vignette")); return *s; }
+Shader& ChromaticShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kChromaticFrag, "PostFX.Chromatic")); return *s; }
+Shader& GrainShader()     { static Shader* s = new Shader(Shader::FromSource(kFsVert, kGrainFrag, "PostFX.Grain")); return *s; }
+Shader& AddShader()       { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAddFrag, "PostFX.Add")); return *s; }
+Shader& MulShader()       { static Shader* s = new Shader(Shader::FromSource(kFsVert, kMulFrag, "PostFX.Mul")); return *s; }
 Shader& FxaaShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kFxaaFrag, "PostFX.FXAA")); return *s; }
 Shader& CopyShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kCopyFrag, "PostFX.Copy")); return *s; }
 
@@ -771,6 +904,36 @@ PostParamDesc Param(const char* name, const char* label, float def, float min, f
     return p;
 }
 
+// Цвет-множитель. Умолчание — белый: «ничего не менять» обязано быть видно
+// глазом, а не вычисляться из нулей.
+PostParamDesc ColorParam(const char* name, const char* label, const char* hint) {
+    PostParamDesc p;
+    p.Name = name;
+    p.Label = label;
+    p.Type = PostParamType::Color;
+    p.Min = 0.0f;
+    p.Max = 2.0f;
+    p.Default[0] = p.Default[1] = p.Default[2] = p.Default[3] = 1.0f;
+    p.Hint = hint ? hint : "";
+    return p;
+}
+
+// Выбор из именованных вариантов: режим кривой, способ смешивания и прочее,
+// где число само по себе не значит ничего.
+PostParamDesc EnumParam(const char* name, const char* label, int def,
+                        std::vector<std::string> options, const char* hint) {
+    PostParamDesc p;
+    p.Name = name;
+    p.Label = label;
+    p.Type = PostParamType::Enum;
+    p.Min = 0.0f;
+    p.Max = (float)(options.size() > 0 ? options.size() - 1 : 0);
+    p.Default[0] = (float)def;
+    p.Options = std::move(options);
+    p.Hint = hint ? hint : "";
+    return p;
+}
+
 // Подпись-разделитель внутри списка параметров звена. Значения у неё нет:
 // это способ сгруппировать настройки, не заводя вложенных структур.
 PostParamDesc Heading(const char* label) {
@@ -822,7 +985,21 @@ void RunAmbientOcclusion(PostContext& ctx, const PostEffect& e) {
     DrawFullscreen(ctx);
 
     // Готовая карта лежит в Ao: вертикальный проход пишет обратно в него.
+    // Карта ещё и публикуется — звену ИГРЫ она может понадобиться (см.
+    // postaux), — но применяет её к кадру САМО звено: «эффект, который ничего
+    // не меняет, пока его не подмешает кто-то другой», — это не звено тракта.
     PostPublishAux(ctx, postaux::kAO, sc.Ao->ColorTextureHandle());
+
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& mul = MulShader();
+    mul.Use();
+    mul.SetInt("uScene", 0);
+    mul.SetInt("uMul", 1);
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, sc.Ao->ColorTextureHandle());
+    DrawFullscreen(ctx);
+    PostSetColor(ctx, out->ColorTextureHandle(), ctx.ColorIsLdr);
 }
 
 // --- Звено «Depth of Field» --------------------------------------------------
@@ -943,7 +1120,10 @@ void RunBloom(PostContext& ctx, const PostEffect& e) {
     Shader& blur = BlurShader();
     blur.Use();
     blur.SetInt("uTex", 0);
-    const glm::vec2 texel(1.0f / (float)hw, 1.0f / (float)hh);
+    // РАДИУС — шаг между выборками размытия. Он принадлежит звену: «свечение
+    // шире» и «свечение ярче» — разные желания, и одной силой их не выразить.
+    const float radius = glm::clamp(e.Float("radius", 1.0f), 0.25f, 4.0f);
+    const glm::vec2 texel(radius / (float)hw, radius / (float)hh);
     const float intensity = e.Float("intensity", 0.55f);
     sage::rhi::TextureHandle src = sc.Bright->ColorTextureHandle();
     RenderTarget* dstA = sc.BloomA.get();
@@ -964,43 +1144,111 @@ void RunBloom(PostContext& ctx, const PostEffect& e) {
         src = dstB->ColorTextureHandle();
     }
     PostPublishAux(ctx, postaux::kBloom, src);
+
+    // И СРАЗУ В КАДР. Раньше свечение только публиковалось, а складывал его с
+    // кадром тон-маппинг — то есть выключенный тон-маппинг забирал свечение с
+    // собой, а «сила свечения» жила в одном звене, а применялась в другом.
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& add = AddShader();
+    add.Use();
+    add.SetInt("uScene", 0);
+    add.SetInt("uAdd", 1);
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, src);
+    DrawFullscreen(ctx);
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
 }
 
-// --- Звено «Tone Map & Grade» ------------------------------------------------
-// ЕДИНСТВЕННОЕ звено каталога, переводящее кадр из HDR в LDR (см. Tonemaps).
-// Затенение и свечение оно не считает, а ПРИМЕНЯЕТ — и только если их карты
-// кто-то опубликовал до него. Нет производителя — нет карты, нет и следа.
-void RunTonemap(PostContext& ctx, const PostEffect& e) {
-    SAGE_PROFILE("Тон-маппинг");
+// --- Простое звено: один полноэкранный проход по текущей картинке -----------
+//
+// Общее тело для всех звеньев, которым нужен ровно один проход: цель из пула,
+// исходник нулевым юнитом, свои uniform-ы — и результат становится текущим
+// кадром. Без него каждое такое звено повторяло бы восемь одинаковых строк, и
+// ошибиться в них можно было бы по-разному.
+void RunSimplePass(PostContext& ctx, Shader& shader, bool ldrOut,
+                   const std::function<void(Shader&)>& setup) {
     GraphicsDevice& device = Dev(ctx);
     RenderTarget* out = PostAcquireTarget(ctx, 1);
     out->Bind();
-
-    const sage::rhi::TextureHandle bloom = PostAuxTexture(ctx, postaux::kBloom);
-    const sage::rhi::TextureHandle ao = PostAuxTexture(ctx, postaux::kAO);
-
-    Shader& comp = CompositeShader();
-    comp.Use();
-    comp.SetInt("uScene", 0);
-    comp.SetInt("uBloom", 1);
-    comp.SetInt("uAO", 2);
-    comp.SetInt("uUseBloom", bloom.Valid() ? 1 : 0);
-    comp.SetInt("uUseAO", ao.Valid() ? 1 : 0);
-    comp.SetFloat("uExposure", glm::max(e.Float("exposure", 1.05f), 0.001f));
-    comp.SetFloat("uGamma", glm::max(e.Float("gamma", 2.2f), 0.01f));
-    comp.SetFloat("uSaturation", e.Float("saturation", 1.16f));
-    comp.SetFloat("uContrast", e.Float("contrast", 1.06f));
-    comp.SetFloat("uVignette", glm::max(e.Float("vignette", 0.35f), 0.0f));
-    comp.SetFloat("uChromatic", glm::max(e.Float("chromatic", 0.0f), 0.0f));
+    shader.Use();
+    shader.SetInt("uScene", 0);
+    setup(shader);
     device.BindTexture2D(0, ctx.Color);
-    // Сэмплеры привязаны ВСЕГДА, даже когда карты в тракте нет: непривязанный
-    // юнит на части драйверов читается как чёрная текстура, а на части — как
-    // мусор из чужого прохода.
-    device.BindTexture2D(1, bloom.Valid() ? bloom : ctx.Color);
-    device.BindTexture2D(2, ao.Valid() ? ao : ctx.Color);
     DrawFullscreen(ctx);
+    PostSetColor(ctx, out->ColorTextureHandle(), ldrOut);
+}
 
-    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/true);
+// --- Звено «Exposure»: сколько света собрал кадр ----------------------------
+void RunExposure(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Экспозиция");
+    RunSimplePass(ctx, ExposureShader(), /*ldrOut=*/false, [&](Shader& sh) {
+        sh.SetFloat("uEV", e.Float("exposure", 0.0f));
+    });
+}
+
+// --- Звено «Color»: яркость, контраст, насыщенность, температура ------------
+void RunColor(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Цвет");
+    RunSimplePass(ctx, ColorShader(), /*ldrOut=*/false, [&](Shader& sh) {
+        sh.SetFloat("uBrightness", glm::max(e.Float("brightness", 1.0f), 0.0f));
+        sh.SetFloat("uContrast", glm::max(e.Float("contrast", 1.0f), 0.01f));
+        sh.SetFloat("uSaturation", glm::max(e.Float("saturation", 1.0f), 0.0f));
+        sh.SetFloat("uTemperature", e.Float("temperature", 0.0f));
+        sh.SetFloat("uTint", e.Float("tint", 0.0f));
+    });
+}
+
+// --- Звено «Color Grading»: тени, средние, света ----------------------------
+void RunGrading(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Цветокоррекция");
+    auto rgb = [&e](const char* name) {
+        const PostValue* v = e.Find(name);
+        return v ? glm::vec3(v->V[0], v->V[1], v->V[2]) : glm::vec3(1.0f);
+    };
+    RunSimplePass(ctx, GradeShader(), /*ldrOut=*/false, [&](Shader& sh) {
+        sh.SetVec3("uShadows", rgb("shadows"));
+        sh.SetVec3("uMidtones", rgb("midtones"));
+        sh.SetVec3("uHighlights", rgb("highlights"));
+    });
+}
+
+// --- Звено «Tonemapping»: HDR -> готовый к показу кадр ----------------------
+// ЕДИНСТВЕННОЕ звено каталога, переводящее кадр из HDR в LDR (см. Tonemaps).
+void RunTonemap(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Тон-маппинг");
+    RunSimplePass(ctx, TonemapShader(), /*ldrOut=*/true, [&](Shader& sh) {
+        sh.SetInt("uMode", glm::clamp(e.Int("mode", 2), 0, 3));
+        sh.SetFloat("uGamma", glm::max(e.Float("gamma", 2.2f), 0.01f));
+    });
+}
+
+// --- Звено «Vignette» -------------------------------------------------------
+void RunVignette(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Виньетка");
+    RunSimplePass(ctx, VignetteShader(), /*ldrOut=*/true, [&](Shader& sh) {
+        sh.SetFloat("uIntensity", glm::clamp(e.Float("intensity", 0.35f), 0.0f, 1.0f));
+        sh.SetFloat("uSmoothness", glm::clamp(e.Float("smoothness", 0.6f), 0.01f, 1.0f));
+    });
+}
+
+// --- Звено «Chromatic Aberration» -------------------------------------------
+void RunChromatic(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Хроматическая аберрация");
+    RunSimplePass(ctx, ChromaticShader(), /*ldrOut=*/true, [&](Shader& sh) {
+        sh.SetFloat("uAmount", glm::max(e.Float("amount", 0.3f), 0.0f));
+    });
+}
+
+// --- Звено «Film Grain» -----------------------------------------------------
+void RunGrain(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Зерно плёнки");
+    RunSimplePass(ctx, GrainShader(), /*ldrOut=*/true, [&](Shader& sh) {
+        sh.SetVec2("uResolution", glm::vec2((float)ctx.Width, (float)ctx.Height));
+        sh.SetFloat("uAmount", glm::clamp(e.Float("amount", 0.12f), 0.0f, 1.0f));
+        sh.SetFloat("uSize", glm::clamp(e.Float("size", 1.5f), 0.5f, 8.0f));
+        sh.SetFloat("uTime", ctx.Time);
+    });
 }
 
 // --- Звено «FXAA» ------------------------------------------------------------
@@ -1072,12 +1320,26 @@ void PostSetColor(PostContext& ctx, sage::rhi::TextureHandle texture, bool ldr) 
 // ============================================================================
 
 void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
+    // ПОРЯДОК РЕГИСТРАЦИИ — ПОРЯДОК ОБРАБОТКИ. Список «что можно добавить» в
+    // инспекторе идёт отсюда, и он обязан читаться как путь кадра: экспозиция,
+    // глубина, свечение, цвет, тон-маппинг, оптика, плёнка, вывод.
+    {
+        PostEffectKind k;
+        k.Id = "exposure";
+        k.Label = "Exposure";
+        k.Hint = "Сколько света собрал кадр. В ступенях: +1 — вдвое светлее";
+        k.Stage = PostStage::Exposure;
+        k.Params = {Param("exposure", "Exposure", 0.0f, -6.0f, 6.0f, "Ступени экспозиции (EV)")};
+        k.Run = RunExposure;
+        catalog.Register(std::move(k));
+    }
     {
         PostEffectKind k;
         k.Id = "ao";
         k.Label = "Ambient Occlusion";
         k.Hint = "Затемняет щели и места контакта предметов; считается по глубине кадра";
         k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Stage = PostStage::Depth;
         k.ProducesAux = postaux::kAO;
         k.Params = {Param("radius", "Radius", 0.5f, 0.05f, 2.0f, "Радиус выборки в метрах"),
                     Param("strength", "Strength", 1.0f, 0.0f, 4.0f, "Во сколько раз усилить затемнение")};
@@ -1090,6 +1352,7 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Label = "Depth of Field";
         k.Hint = "Размывает то, что дальше или ближе плоскости фокуса";
         k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Stage = PostStage::Depth;
         k.Params = {
             Param("focus", "Focus Distance", 10.0f, 0.05f, 200.0f, "Расстояние до плоскости фокуса"),
             Param("aperture", "Aperture", 2.8f, 0.7f, 16.0f, "f-число: меньше — сильнее размытие"),
@@ -1103,6 +1366,7 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Label = "Motion Blur";
         k.Hint = "Смаз движения камеры (и объектов, если у кадра есть буфер скоростей)";
         k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Stage = PostStage::Depth;
         k.Params = {Param("amount", "Amount", 0.5f, 0.0f, 1.0f, "Доля вектора смещения за кадр"),
                     Param("samples", "Samples", 12.0f, 2.0f, 32.0f, "Выборок вдоль вектора")};
         k.Run = RunMotionBlur;
@@ -1113,40 +1377,100 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Id = "bloom";
         k.Label = "Bloom";
         k.Hint = "Свечение ярких участков; считается до тон-маппинга";
-        k.Needs = PostNeeds::HdrColor;
+        k.Stage = PostStage::Bloom;
         k.ProducesAux = postaux::kBloom;
-        k.Params = {Param("threshold", "Bloom Threshold", 1.0f, 0.0f, 8.0f,
+        k.Params = {Param("intensity", "Bloom Intensity", 0.55f, 0.0f, 4.0f,
+                          "Сила добавляемого свечения"),
+                    Param("threshold", "Bloom Threshold", 1.0f, 0.0f, 8.0f,
                           "Яркость, выше которой пиксель светится"),
-                    Param("intensity", "Bloom Intensity", 0.55f, 0.0f, 4.0f,
-                          "Сила добавляемого свечения")};
+                    Param("radius", "Bloom Radius", 1.0f, 0.25f, 4.0f,
+                          "Ширина свечения: шаг размытия")};
         k.Run = RunBloom;
         catalog.Register(std::move(k));
     }
     {
         PostEffectKind k;
-        k.Id = "tonemap";
-        k.Label = "Tone Map & Grade";
-        k.Hint = "Переводит кадр в готовый к показу вид: экспозиция, кривая, гамма, цвет";
-        k.Needs = PostNeeds::HdrColor;
-        k.Tonemaps = true;
+        k.Id = "color";
+        k.Label = "Color Adjustments";
+        k.Hint = "Яркость, контраст, насыщенность и баланс белого — до тон-маппинга";
+        k.Stage = PostStage::Color;
         k.Params = {
-            Param("exposure", "Exposure", 1.05f, 0.1f, 4.0f, "Экспозиция до тон-маппинга"),
-            Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f, "Гамма вывода"),
-            Heading("Color"),
-            Param("saturation", "Saturation", 1.16f, 0.0f, 2.0f, "Насыщенность"),
-            Param("contrast", "Contrast", 1.06f, 0.5f, 2.0f, "Контраст вокруг середины"),
-            Param("vignette", "Vignette", 0.35f, 0.0f, 1.0f, "Затемнение к краям кадра"),
-            Param("chromatic", "Chromatic Aberration", 0.0f, 0.0f, 1.0f,
-                  "Расхождение каналов к краям кадра")};
+            Param("brightness", "Brightness", 1.0f, 0.0f, 2.0f, "Множитель яркости"),
+            Param("contrast", "Contrast", 1.0f, 0.0f, 2.0f, "Контраст вокруг средне-серого"),
+            Param("saturation", "Saturation", 1.0f, 0.0f, 2.0f, "Насыщенность"),
+            Param("temperature", "Temperature", 0.0f, -1.0f, 1.0f, "Теплее (+) или холоднее (-)"),
+            Param("tint", "Tint", 0.0f, -1.0f, 1.0f, "В зелёный (+) или в пурпурный (-)")};
+        k.Run = RunColor;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "grading";
+        k.Label = "Color Grading";
+        k.Hint = "Свой оттенок теням, средним тонам и светам";
+        k.Stage = PostStage::Grading;
+        k.Params = {ColorParam("shadows", "Shadows", "Оттенок тёмных участков"),
+                    ColorParam("midtones", "Midtones", "Оттенок средних тонов"),
+                    ColorParam("highlights", "Highlights", "Оттенок светлых участков")};
+        k.Run = RunGrading;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "tonemap";
+        k.Label = "Tonemapping";
+        k.Hint = "Переводит HDR-кадр в готовый к показу: кривая света и гамма";
+        k.Stage = PostStage::Tonemap;
+        k.Tonemaps = true;
+        k.Params = {EnumParam("mode", "Mode", 2, {"Clamp", "Reinhard", "ACES", "Filmic"},
+                              "Кривая света: чем переводить HDR в картинку"),
+                    Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f, "Гамма вывода")};
         k.Run = RunTonemap;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "vignette";
+        k.Label = "Vignette";
+        k.Hint = "Затемнение к краям кадра";
+        k.Needs = PostNeeds::LdrColor;
+        k.Stage = PostStage::Lens;
+        k.Params = {Param("intensity", "Intensity", 0.35f, 0.0f, 1.0f, "Насколько темнеет край"),
+                    Param("smoothness", "Smoothness", 0.6f, 0.01f, 1.0f, "Мягкость перехода")};
+        k.Run = RunVignette;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "chromatic";
+        k.Label = "Chromatic Aberration";
+        k.Hint = "Расхождение каналов к краям кадра — как в настоящей оптике";
+        k.Needs = PostNeeds::LdrColor;
+        k.Stage = PostStage::Lens;
+        k.Params = {Param("amount", "Amount", 0.3f, 0.0f, 1.0f, "Сила расхождения")};
+        k.Run = RunChromatic;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "grain";
+        k.Label = "Film Grain";
+        k.Hint = "Зерно плёнки: живой шум поверх готового кадра";
+        k.Needs = PostNeeds::LdrColor;
+        k.Stage = PostStage::Film;
+        k.Params = {Param("amount", "Amount", 0.12f, 0.0f, 1.0f, "Сила зерна"),
+                    Param("size", "Size", 1.5f, 0.5f, 8.0f, "Размер зерна в пикселях")};
+        k.Run = RunGrain;
         catalog.Register(std::move(k));
     }
     {
         PostEffectKind k;
         k.Id = "fxaa";
         k.Label = "FXAA";
-        k.Hint = "Сглаживает кромки по готовой картинке; работает только после тон-маппинга";
+        k.Hint = "Сглаживает кромки по готовой картинке. С включённым MSAA не нужен: "
+                 "он лечит то же самое и только размоет кадр";
         k.Needs = PostNeeds::LdrColor;
+        k.Stage = PostStage::Output;
         k.Params = {Param("threshold", "Contrast Threshold", 0.0625f, 0.0f, 0.5f,
                           "Ниже этого перепада пиксель не считается кромкой")};
         k.Run = RunFxaa;
@@ -1154,60 +1478,23 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
     }
 }
 
-// Тракт проекта по умолчанию. Здесь, а не в PostEffect.cpp, потому что
-// ФОРМА умолчания неотделима от того, какие виды зарегистрировал движок: имена
+// Тракт НОВОГО компонента «Пост-обработка».
+//
+// Здесь, а не в PostEffect.cpp, ровно по той же причине, что и раньше: форма
+// умолчания неотделима от того, какие виды зарегистрировал движок, — имена
 // звеньев и их параметры заданы прямо выше.
-PostChain PostChain::FromConfig(const sage::EngineConfig& cfg) {
+//
+// Что в нём есть: экспозиция, свечение, цвет и тон-маппинг. То есть то, что
+// делает картинку картинкой. Чего нет: глубины резкости, смаза, зерна,
+// аберрации — эффектов, которые нужны НЕ всегда и которые человек добавляет
+// осознанно. Компонент, приезжающий со всем сразу, пришлось бы первым делом
+// раздевать.
+PostChain PostChain::Default() {
     PostChain chain;
-    auto add = [&chain](const char* id) -> PostEffect& {
-        chain.Effects.push_back(MakePostEffect(id));
-        return chain.Effects.back();
-    };
-    auto set = [](PostEffect& effect, const char* name, float value) {
-        if (PostValue* p = effect.Find(name)) p->V[0] = value;
-    };
-
-    if (cfg.AmbientOcclusion) {
-        PostEffect& e = add("ao");
-        set(e, "radius", cfg.AORadius);
-        set(e, "strength", cfg.AOStrength);
-    }
-    if (cfg.DepthOfField) {
-        PostEffect& e = add("dof");
-        set(e, "focus", cfg.FocusDistance);
-        set(e, "aperture", cfg.Aperture);
-        set(e, "maxRadius", cfg.DofMaxRadius);
-    }
-    if (cfg.MotionBlur) {
-        PostEffect& e = add("motionblur");
-        set(e, "amount", cfg.MotionBlurAmount);
-        set(e, "samples", (float)cfg.MotionBlurSamples);
-    }
-    if (cfg.Bloom) {
-        PostEffect& e = add("bloom");
-        set(e, "threshold", cfg.BloomThreshold);
-        set(e, "intensity", cfg.BloomIntensity);
-    }
-    {
-        // Тон-маппинг в тракте по умолчанию есть ВСЕГДА: без него на экран ушёл
-        // бы HDR-цвет, то есть «пост-обработка выключена» выглядело бы как
-        // сломанная картинка, а не как отсутствие эффектов.
-        PostEffect& e = add("tonemap");
-        set(e, "exposure", cfg.Exposure);
-        set(e, "gamma", cfg.Gamma);
-        set(e, "saturation", cfg.Saturation);
-        set(e, "contrast", cfg.Contrast);
-        set(e, "vignette", cfg.Vignette);
-        set(e, "chromatic", cfg.ChromaticAberration);
-    }
-    // FXAA и MSAA НЕ СКЛАДЫВАЮТСЯ: они лечат одно и то же разными способами, и
-    // второй проход поверх первого уже нечего сглаживать — зато он размывает
-    // всё, что похоже на кромку. Тот же запрет, что и раньше, но теперь он
-    // выражен отсутствием звена в тракте, а не полем в настройках.
-    if (cfg.Fxaa && SceneSamples(cfg) <= 1) {
-        PostEffect& e = add("fxaa");
-        set(e, "threshold", cfg.FxaaContrastThreshold);
-    }
+    chain.Effects.push_back(MakePostEffect("exposure"));
+    chain.Effects.push_back(MakePostEffect("bloom"));
+    chain.Effects.push_back(MakePostEffect("color"));
+    chain.Effects.push_back(MakePostEffect("tonemap"));
     return chain;
 }
 
@@ -1297,7 +1584,9 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     // Поэтому тракт сперва дополняется до рабочего (нет тон-маппинга — он
     // вставляется, см. PostChain::Completed), затем компилируется и только потом
     // исполняется.
-    PostChain run = chain.Completed();
+    // ПО ЭТАПАМ, а не по порядку списка: что человек видит разделами в
+    // инспекторе, то и выполняется здесь — см. PostChain::Ordered.
+    PostChain run = chain.Completed().Ordered();
     const PostChainReport report = run.Compile();
     if (!report.Ok) {
         // Неверный тракт НЕ оставляет чёрный экран: кадр показывается с одним
@@ -1325,6 +1614,12 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     ctx.Color = sceneColor;
     ctx.ColorIsLdr = false;
     ctx.Scratch = &m_scratch;
+    // Время — от первого кадра процесса, а не от начала эпохи: у секунд с 1970
+    // года не хватает точности float, и зерно плёнки застывало бы на месте.
+    {
+        static const auto start = std::chrono::steady_clock::now();
+        ctx.Time = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
+    }
 
     const glm::mat4 viewProj = proj * view;
 
