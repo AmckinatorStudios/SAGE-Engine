@@ -75,6 +75,10 @@ public:
     // Упаковывает открытый проект в готовую к запуску игру (SagePlayer + ассеты).
     // false + err при ошибке. Нужен панели диалогов (Build Game...).
     virtual bool BuildGame(const std::filesystem::path& outputDir, std::string& err) = 0;
+    // Есть ли у проекта хоть одна сцена. Окно сборки спрашивает это ДО
+    // нажатия: игры без сцены не бывает, и узнать об этом надо раньше, чем
+    // будут скопированы пятьдесят мегабайт файлов.
+    virtual bool HasAnyScene() const = 0;
     virtual std::filesystem::path& AssetsCwd() = 0; // текущая папка панели Assets
 
     // Попросить открыть диалог по его имени ("Open Scene", "Save Scene As",

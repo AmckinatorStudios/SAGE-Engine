@@ -320,7 +320,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + build-needs-scene + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2062,6 +2062,43 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         std::error_code rmec;
         fs::remove(texA, rmec);
         fs::remove(texB, rmec);
+    }
+
+    // --- ИГРА БЕЗ СЦЕНЫ НЕ СОБИРАЕТСЯ ---------------------------------------
+    //
+    // Плеер при запуске открывает сцену проекта; сцен нет — он показывает
+    // пустой экран. Сборка при этом проходила УСПЕШНО: пятьдесят мегабайт
+    // файлов, зелёная строка «готово» — и нерабочая игра, причину которой
+    // человек ищет вечер.
+    //
+    // Проверяем на ПУСТОЙ папке сцен: отсутствие сцены и пустая scenes/ — одно
+    // и то же, и отказ обязан быть в обоих случаях.
+    if (ok) {
+        std::error_code sceneEc;
+        const fs::path scenesDir = m_project.ScenesDir();
+        const fs::path stash = m_project.Dir() / "scenes_stash";
+        fs::remove_all(stash, sceneEc);
+        fs::rename(scenesDir, stash, sceneEc);
+        fs::create_directories(scenesDir, sceneEc);
+
+        if (HasAnyScene()) {
+            LOG_ERROR("Editor") << "SELFTEST: пустая папка сцен считается сценой";
+            ok = false;
+        }
+        std::string noSceneErr;
+        if (BuildGame("selftest_dist_noscene", noSceneErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: игра без единой сцены собралась";
+            ok = false;
+        }
+
+        // Возвращаем сцены на место: следующая проверка собирает игру по-настоящему.
+        fs::remove_all(scenesDir, sceneEc);
+        fs::rename(stash, scenesDir, sceneEc);
+        fs::remove_all(fs::path("selftest_dist_noscene"), sceneEc);
+        if (!HasAnyScene()) {
+            LOG_ERROR("Editor") << "SELFTEST: сцены не вернулись на место после проверки";
+            ok = false;
+        }
     }
 
     // --- Сборка игры: SagePlayer + project/ упакованы в запускаемую папку ---

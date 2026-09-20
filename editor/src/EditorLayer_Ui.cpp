@@ -573,6 +573,53 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (EditorIcons::BeginMenu("layout", T("Window"))) {
+            // --- МЕНЮ РАЗБИТО ПО СМЫСЛУ, А НЕ ВЫСЫПАНО СПИСКОМ --------------
+            //
+            // Панелей полтора десятка, и плоским столбцом они читаются как
+            // случайный набор: рядом стояли «Иерархия» и «Элементы» — почти
+            // одинаковые слова про совершенно разные вещи (объекты сцены и
+            // элементы интерфейса), — а между ними «Ассеты» и «Консоль»,
+            // которые есть и там и там. Найти нужное можно было только прочитав
+            // все пятнадцать строк подряд.
+            //
+            // Разделы — те же, что и рабочие места редактора: сцена, интерфейс,
+            // общие панели, инструменты. Человек ищет окно в том разделе, в
+            // котором он сейчас работает, и читает четыре строки вместо
+            // пятнадцати.
+            Sage::UI::MenuSection(T("Scene"), true);
+            EditorIcons::MenuItemToggle("world", T("Viewport"), &PanelVisible(EditorPanel::Viewport));
+            EditorIcons::MenuItemToggle("game", T("Game"), &PanelVisible(EditorPanel::Game));
+            EditorIcons::MenuItemToggle("hierarchy", T("Hierarchy"), &PanelVisible(EditorPanel::Hierarchy));
+            EditorIcons::MenuItemToggle("inspector", T("Inspector"), &PanelVisible(EditorPanel::Inspector));
+            // «Освещение» стало «Средой»: в окне остались небо, воздух и
+            // окружающий свет, а сами источники света — на объектах сцены.
+            EditorIcons::MenuItemToggle("sun", T("Environment"), &PanelVisible(EditorPanel::Environment));
+
+            Sage::UI::MenuSection(T("Interface"));
+            EditorIcons::MenuItemToggle("layout", T("Canvas"), &PanelVisible(EditorPanel::InterfaceViewport));
+            EditorIcons::MenuItemToggle("list", T("Elements"), &PanelVisible(EditorPanel::InterfaceHierarchy));
+            EditorIcons::MenuItemToggle("inspector", T("Element"), &PanelVisible(EditorPanel::InterfaceInspector));
+            EditorIcons::MenuItemToggle("eye", T("Preview"), &PanelVisible(EditorPanel::InterfacePreview));
+
+            // Эти трое стоят в ОБОИХ рабочих местах — потому и отдельным
+            // разделом, а не в одном из двух выше.
+            Sage::UI::MenuSection(T("Shared"));
+            EditorIcons::MenuItemToggle("folder-full", T("Assets"), &PanelVisible(EditorPanel::Assets));
+            EditorIcons::MenuItemToggle("console", T("Console"), &PanelVisible(EditorPanel::Console));
+            EditorIcons::MenuItemToggle("anim", T("Animation"), &PanelVisible(EditorPanel::Animation));
+
+            // Инструменты открывают ПОД ЗАДАЧУ и закрывают: они не участвуют в
+            // раскладке по умолчанию и не живут на экране постоянно.
+            Sage::UI::MenuSection(T("Tools"));
+            EditorIcons::MenuItemToggle("chart", T("Profiler"), &PanelVisible(EditorPanel::Profiler));
+            EditorIcons::MenuItemToggle("nineslice", T("9-slice editor"), &m_showNineSlice);
+            EditorIcons::MenuItemToggle("grid", T("Icon sheet"), &m_showIconSheet);
+            // --- РАСКЛАДКА: то, что относится к самому окну редактора -------
+            //
+            // Внизу, а не первой строкой, как было: «сбросить раскладку»
+            // нажимают раз в месяц, а стояло оно там, куда взгляд падает
+            // первым, — перед списком окон, ради которого меню и открывают.
+            Sage::UI::MenuSection(T("Layout"));
             // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
             if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) {
@@ -580,36 +627,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 m_rebuildDockLayout = true;
             }
             EditorIcons::MenuItemToggle("grid", T("Show Grid"), &m_tools.ShowGrid);
-            ImGui::Separator();
-            // Каждая панель — переключатель. Это единственный путь назад после
-            // крестика на вкладке, поэтому здесь перечислены ВСЕ панели, а не
-            // только служебные.
-            //
-            // Флаги берутся через PanelVisible(EditorPanel) — тем же путём, что
-            // и у кнопок верхней панели. Два списка полей рядом однажды
-            // разъедутся: кнопка будет открывать одно окно, а галка меню —
-            // отмечать другое.
-            EditorIcons::MenuItemToggle("hierarchy", T("Hierarchy"), &PanelVisible(EditorPanel::Hierarchy));
-            EditorIcons::MenuItemToggle("inspector", T("Inspector"), &PanelVisible(EditorPanel::Inspector));
-            EditorIcons::MenuItemToggle("cube", T("Viewport"), &PanelVisible(EditorPanel::Viewport));
-            EditorIcons::MenuItemToggle("game", T("Game"), &PanelVisible(EditorPanel::Game));
-            EditorIcons::MenuItemToggle("folder", T("Assets"), &PanelVisible(EditorPanel::Assets));
-            EditorIcons::MenuItemToggle("console", T("Console"), &PanelVisible(EditorPanel::Console));
-            // «Освещение» стало «Средой»: в окне остались небо, воздух и
-            // окружающий свет, а сами источники света — на объектах сцены.
-            EditorIcons::MenuItemToggle("sun", T("Environment"), &PanelVisible(EditorPanel::Environment));
-            EditorIcons::MenuItemToggle("hierarchy", T("Elements"), &PanelVisible(EditorPanel::InterfaceHierarchy));
-            EditorIcons::MenuItemToggle("layout", T("Canvas"), &PanelVisible(EditorPanel::InterfaceViewport));
-            EditorIcons::MenuItemToggle("inspector", T("Element"), &PanelVisible(EditorPanel::InterfaceInspector));
-            EditorIcons::MenuItemToggle("eye", T("Preview"), &PanelVisible(EditorPanel::InterfacePreview));
-            EditorIcons::MenuItemToggle("anim", T("Animation"), &PanelVisible(EditorPanel::Animation));
-            EditorIcons::MenuItemToggle("chart", T("Profiler"), &PanelVisible(EditorPanel::Profiler));
-            // Редактор девятины. Инструмент, а не панель раскладки: его
-            // открывают под задачу «подобрать нарезку картинке» и закрывают,
-            // поэтому он не участвует в раскладке по умолчанию.
-            EditorIcons::MenuItemToggle("nineslice", T("9-slice editor"), &m_showNineSlice);
-            EditorIcons::MenuItemToggle("grid", T("Icon sheet"), &m_showIconSheet);
-            ImGui::Separator();
 
             // --- Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ -----------------------------
             //

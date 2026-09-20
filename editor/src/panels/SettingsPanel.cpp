@@ -63,7 +63,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     }
     ImGui::Separator();
 
-    if (EditorTheme::SectionHeader(T("Window" "###Window settings"), ImGuiTreeNodeFlags_DefaultOpen,
+    if (EditorTheme::SectionHeader("window", T("Window" "###Window settings"), ImGuiTreeNodeFlags_DefaultOpen,
                                    nullptr, T("Window settings apply when the game starts."))) {
         ImGui::InputInt(T("Width"), &c.Width);
         ImGui::InputInt(T("Height"), &c.Height);
@@ -81,7 +81,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
             c.Msaa = kMsaaVals[msaaIdx];
     }
 
-    if (EditorTheme::SectionHeader(T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen,
+    if (EditorTheme::SectionHeader("window", T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen,
                                        nullptr, T("Render Scale < 1 is faster; > 1 supersamples (sharper)."))) {
         const char* aspects[] = {T("Free"), "16:9", "16:10", "4:3", "21:9"};
         int a = (int)c.Aspect;
@@ -89,7 +89,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::SliderFloat(T("Render Scale"), &c.RenderScale, 0.25f, 2.0f, "%.2fx");
     }
 
-    if (EditorTheme::SectionHeader(T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen,
+    if (EditorTheme::SectionHeader("chart", T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen,
                                        nullptr, T("Whether a pass runs at all and at what resolution. Which light casts those shadows is a property of the light object."))) {
         ImGui::Checkbox(T("Shadows"), &c.Shadows);
         static const int kShadowVals[] = {512, 1024, 2048, 4096};
@@ -114,7 +114,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // Плоские поля в конфиге при этом никуда не делись и остаются УМОЛЧАНИЕМ для
     // проекта, который тракт не трогал: так работают все проекты, настроенные до
     // появления трактов (см. ProjectPostChain).
-    if (EditorTheme::SectionHeader(T("Post-Process" "###Post-Process"))) {
+    if (EditorTheme::SectionHeader("camera", T("Post-Process" "###Post-Process"))) {
         ImGui::BeginDisabled(!c.PostProcessing);
         // Читаем тракт проекта и пишем обратно ТОЛЬКО если его изменили: до
         // первой правки в конфиге тракта нет вовсе, и это правильное состояние —

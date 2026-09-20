@@ -73,7 +73,7 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
 
 // --- НЕБО ------------------------------------------------------------------
 void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env) {
-    if (!EditorTheme::SectionHeader(T("Sky" "###Sky"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
+    if (!EditorTheme::SectionHeader("sun", T("Sky" "###Sky"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
                                     T("Time of day is baked into the images — the day/night model does not touch a textured sky."))) return;
     SkyboxSettings& sky = env.Skybox;
 
@@ -268,7 +268,7 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
 
 // --- ОКРУЖАЮЩИЙ СВЕТ -------------------------------------------------------
 void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment& env) {
-    if (!EditorTheme::SectionHeader(T("Ambient light" "###Ambient light"),
+    if (!EditorTheme::SectionHeader("light", T("Ambient light" "###Ambient light"),
                                     ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
@@ -367,7 +367,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     DrawSkySection(host, env);
     DrawAmbientSection(host, env);
 
-    if (EditorTheme::SectionHeader(T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
+    if (EditorTheme::SectionHeader("cone", T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
                                    T("Linear distance fog (applied in Shaded mode)"))) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
         ImGui::ColorEdit3(T("Fog Color"), &env.Fog.Color.x); host.TrackLastImGuiItem();

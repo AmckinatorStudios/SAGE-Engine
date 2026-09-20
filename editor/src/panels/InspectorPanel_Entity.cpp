@@ -175,7 +175,7 @@ static void DrawPostChainSection(EditorHost& host, entt::registry& reg, entt::en
                                  bool* removed) {
     using namespace sage::render;
     if (!reg.all_of<PostChainComponent>(entity)) return;
-    if (!EditorTheme::SectionHeader(T("Post-Processing" "###Post-Processing"),
+    if (!EditorTheme::SectionHeader("camera", T("Post-Processing" "###Post-Processing"),
                                     ImGuiTreeNodeFlags_DefaultOpen, removed))
         return;
     PostChainComponent* component = reg.try_get<PostChainComponent>(entity);
@@ -247,7 +247,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     bool rmEmitter = false;
     bool rmAudio = false;
 
-    if (EditorTheme::SectionHeader(T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (EditorTheme::SectionHeader("move", T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
         // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.
         //
         // У ImGui подпись стоит СПРАВА от поля, и инспектор читался задом
@@ -315,14 +315,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // того, кто ничем не рисуется; добавляется компонент кнопкой «Добавить
     // компонент», как и все остальные.
     if (reg.all_of<MeshRendererComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen, &rmMesh)) {
+        EditorTheme::SectionHeader("cube", T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen, &rmMesh)) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
-    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rmCamera)) {
+    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader("camera", T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rmCamera)) {
         if (CameraComponent* cam = reg.try_get<CameraComponent>(obj.Entity())) {
             ImGui::DragFloat(T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
@@ -334,7 +334,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
 
-    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rmLight)) {
+    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader("light", T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rmLight)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
             const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)")};
             int kind = (int)light->Kind;
@@ -379,7 +379,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rmDecal,
+        EditorTheme::SectionHeader("texture", T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rmDecal,
                                        T("Projection goes along -Z; Scale sets the size"))) {
         DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
         bool changed = false;
@@ -443,7 +443,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         if (ImGui::SmallButton(T("Remove##netreplicated"))) rmNet = true;
     }
 
-    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript,
+    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader("script", T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript,
                                        T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"))) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
@@ -499,7 +499,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         const bool hasScript = reg.all_of<ScriptComponent>(obj.Entity());
         const bool hasVars = reg.all_of<VarsComponent>(obj.Entity());
         if ((hasScript || hasVars) &&
-            EditorTheme::SectionHeader(T("Variables" "###Variables"), ImGuiTreeNodeFlags_DefaultOpen)) {
+            EditorTheme::SectionHeader("list", T("Variables" "###Variables"), ImGuiTreeNodeFlags_DefaultOpen)) {
             VarsComponent& vc = reg.get_or_emplace<VarsComponent>(obj.Entity());
             // Объявление скрипта подмешивается ПЕРЕД показом, а не однажды при
             // назначении: файл правят снаружи редактора, и переменная,
@@ -512,7 +512,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
-    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen, &rmBody,
+    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader("physics", T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen, &rmBody,
                                        T("Dynamic falls under gravity; Static/Kinematic don't"))) {
         if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::BodyType.
@@ -530,7 +530,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
-    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen, &rmCollider,
+    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader("physics", T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen, &rmCollider,
                                        Hint2(T("Sizes are scaled by the entity's Transform scale"),
                                        T("Parts override the single shape above")).c_str())) {
         if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
@@ -609,7 +609,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // скриптом или правкой .sage руками. Компонент, который нельзя увидеть в
     // редакторе, для человека, работающего в редакторе, не существует.
     if (reg.all_of<CharacterControllerComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen, &rmCharacter)) {
+        EditorTheme::SectionHeader("physics", T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen, &rmCharacter)) {
         if (CharacterControllerComponent* ch =
                 reg.try_get<CharacterControllerComponent>(obj.Entity())) {
             ImGui::DragFloat(T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
@@ -633,7 +633,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Соединение (constraint/joint) с другим телом или миром ---
-    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen, &rmJoint,
+    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader("ik", T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen, &rmJoint,
                                        T("Needs a Rigid Body; only the Jolt backend simulates joints"))) {
         if (JointComponent* jc = reg.try_get<JointComponent>(obj.Entity())) {
             const char* types[] = {T("Fixed"), T("Point"), T("Hinge"), T("Slider"),
@@ -679,7 +679,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // объекта. Секция отвечает только на вопрос «как это движется», и первое,
     // что она обязана сказать, — ЕСТЬ ЛИ ЧТО анимировать: компонент,
     // добавленный к кубу, обязан объяснить, почему ничего не происходит.
-    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rmAnimation,
+    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader("anim", T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rmAnimation,
                                        T("Skeleton comes from the Mesh model"))) {
         if (AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity())) {
             const MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity());
@@ -802,7 +802,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // инструмента анимации: объект «анимировался», но в сцене не было ничего,
     // что это подтверждало бы, и после закрытия редактора движение пропадало.
     if (reg.all_of<PropertyAnimatorComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Property Animation" "###Property Animation"),
+        EditorTheme::SectionHeader("clock", T("Property Animation" "###Property Animation"),
                                    ImGuiTreeNodeFlags_DefaultOpen, &rmPropertyAnim,
                                    T("Plays a .sageclip: properties of this object and its children"))) {
         if (PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(obj.Entity())) {
@@ -845,7 +845,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Зонд отражений -----------------------------------------------------
     if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe,
+        EditorTheme::SectionHeader("probe", T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe,
                                        Hint2(T("Captures the scene around this point into a cubemap"),
                                        T("Realtime = 6 scene passes per frame - use sparingly")).c_str())) {
         if (ReflectionProbeComponent* p = reg.try_get<ReflectionProbeComponent>(obj.Entity())) {
@@ -881,7 +881,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Кость задаётся ИМЕНЕМ, а не индексом: модель может смениться (или ещё не
     // загрузиться), а имя переживает и то, и другое. Список имён показываем
     // только когда скелет уже есть.
-    if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen, &rmIk)) {
+    if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader("ik", T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen, &rmIk)) {
         if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
             ImGui::Checkbox(T("IK Enabled"), &ik->Enabled);
             const AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity());
@@ -964,7 +964,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Эмиттер частиц (огонь/дым/искры/…): пресеты + тонкая настройка ---
-    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader(T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen, &rmEmitter)) {
+    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader("particles", T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen, &rmEmitter)) {
         if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
             ParticleEmitterConfig& cfg = em->Config;
             // Пресеты: применяют готовый конфиг, дальше его можно править.
@@ -1009,7 +1009,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // из дерева проекта. Печатать путь к .wav наизусть — ровно тот барьер,
     // из-за которого звук в сценах не появлялся.
     if (reg.all_of<AudioSourceComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("Audio" "###Audio"), ImGuiTreeNodeFlags_DefaultOpen, &rmAudio)) {
+        EditorTheme::SectionHeader("audio", T("Audio" "###Audio"), ImGuiTreeNodeFlags_DefaultOpen, &rmAudio)) {
         if (AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(obj.Entity())) {
             const assetslot::Result r =
                 assetslot::Draw(host, "audioclip", assetslot::Kind::Audio, au->Clip, &m_preview,
@@ -1068,7 +1068,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     if (reg.all_of<sage::ui::Element>(obj.Entity()) &&
-        EditorTheme::SectionHeader(T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        EditorTheme::SectionHeader("layout", T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawUIElement(host, obj);
     }
 

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1806.
+// Язык: Русский. Строк: 1811.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -838,6 +838,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Создайте клип в инструменте анимации — он окажется здесь."},
     {"Create a new project (Ctrl+Shift+N)",
      "Создать новый проект (Ctrl+Shift+N)"},
+    {"Create a scene and save it into scenes/ of the project.",
+     "Создайте сцену и сохраните её в scenes/ проекта."},
     {"Create a sun",
      "Создать солнце"},
     {"Create an action and assign a key to it",
@@ -2772,6 +2774,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Осколки разбитого блока"},
     {"Share the current project",
      "Поделиться текущим проектом"},
+    {"Shared",
+     "Общие"},
     {"Sheet: %d x %d px",
      "Лист: %d x %d пикс."},
     {"Short hot flecks: grinding, shorts",
@@ -3136,6 +3140,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Похоже, прошлый запуск завершился аварийно"},
     {"The project folder will be deleted from disk together with everything inside it.",
      "Папка проекта будет удалена с диска вместе со всем, что в ней лежит."},
+    {"The project has no scene — there is nothing to run",
+     "В проекте нет ни одной сцены — запускать нечего"},
+    {"The project has no scene: there is nothing to run. Create or save a scene into scenes/ first.",
+     "В проекте нет ни одной сцены: запускать нечего. Сначала создайте сцену и сохраните её в scenes/."},
     {"The properties of this entity belong to it alone.",
      "Свойства этой сущности — только её."},
     {"The same control is bound to another action. That is legal when the two never run at the same time — they live in different contexts.",
@@ -3256,6 +3264,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Тон-маппинг и цвет"},
     {"Toolbar",
      "Панель кнопок"},
+    {"Tools",
+     "Инструменты"},
     {"Top",
      "Сверху"},
     {"Top Center",
