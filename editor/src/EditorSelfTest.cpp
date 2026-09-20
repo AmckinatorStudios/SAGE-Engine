@@ -320,7 +320,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + build-needs-scene + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -1005,13 +1005,15 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         // не «тем же, что Expect»: у интерфейсного шаблона Expect — экран меню,
         // и материала у него нет по определению, а покрашенный пол есть.
         struct TemplateCheck { const char* Id; bool Empty; const char* Expect; const char* Painted; };
-        // ВСЕ шаблоны, строящие сцену кодом, а не два из трёх. «Демо» не
-        // проверялся вообще — при том, что он предлагается по умолчанию и
-        // именно его видит человек, открывший редактор впервые.
+        // ВСЕ шаблоны, строящие сцену кодом. «Демо» не проверялся вообще — при
+        // том, что он предлагается по умолчанию и именно его видит человек,
+        // открывший редактор впервые.
+        //
+        // «Стартера интерфейса» в списке больше нет: он давал ту же демо-сцену
+        // с другим набором чужих объектов (см. ProjectTemplates.cpp).
         const TemplateCheck checks[] = {
             {"empty", true, nullptr, nullptr},
             {"demo", false, "Green Cube", "Green Cube"},
-            {"ui", false, "MenuButtons", "Ground"},
         };
         for (const TemplateCheck& c : checks) {
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
@@ -5167,6 +5169,72 @@ bool EditorLayer::SelfTestRenderStability() {
             ok = false;
         }
         m_workspace = before;
+    }
+
+    // --- ГИЗМО И СЕТКА — ДЕБАГ, А НЕ ЧАСТЬ КАРТИНКИ -------------------------
+    //
+    // Сетка шла вместе со сценой, то есть ДО пост-обработки, и тон-маппинг с
+    // экспозицией красили её в тот цвет, который сейчас у кадра: на тёмной
+    // сцене она тонула, на яркой белела, а глубина резкости размывала её у
+    // горизонта. Опорная сетка, меняющая вид от настроек красоты, перестаёт
+    // быть опорной.
+    //
+    // МЕРЯЕМ САМУ СЕТКУ, А НЕ ЯРКОСТЬ КАДРА. Кадр рисуется дважды — с сеткой и
+    // без неё, — и разница между ними и есть её вклад. Иначе в замер попадают
+    // оси и значки, которые и так рисуются после поста: они остались бы
+    // яркими, и проверка прошла бы при полностью потухшей сетке.
+    //
+    // Сравниваются два таких вклада: при выкрученной почти в ноль экспозиции и
+    // без пост-обработки вовсе. Сетка, нарисованная после поста, вносит
+    // одинаково; нарисованная до — гаснет вместе со сценой.
+    if (ok) {
+        auto gridEnergy = [this](const sage::EngineConfig& cfg) -> long long {
+            auto frame = [&](bool grid, std::vector<unsigned char>& out, int& w, int& h) {
+                glm::mat4 v(1.0f), p(1.0f);
+                m_renderer.RenderViewport(*m_scene, m_camera, m_scene->Lighting, -1, {},
+                                          EditorRenderMode::Shaded, grid, cfg, v, p);
+                return m_renderer.ReadViewportPixels(out, w, h) && !out.empty();
+            };
+            std::vector<unsigned char> withGrid, without;
+            int w1 = 0, h1 = 0, w2 = 0, h2 = 0;
+            if (!frame(true, withGrid, w1, h1) || !frame(false, without, w2, h2)) return -1;
+            if (withGrid.size() != without.size()) return -1;
+            // МАКСИМУМ ПО ПИКСЕЛЯМ САМОЙ СЕТКИ, а не сумма разностей: сумма
+            // зависит ещё и от того, по какому фону сетка смешалась, а вопрос
+            // здесь ровно один — доезжает ли до экрана СОБСТВЕННЫЙ цвет её
+            // линий. Линия, нарисованная после поста, остаётся своего цвета
+            // при любой экспозиции; нарисованная до — гаснет вместе с кадром.
+            long long best = 0;
+            for (size_t i = 0; i + 2 < withGrid.size(); i += 4) {
+                const int a = (int)withGrid[i] + (int)withGrid[i + 1] + (int)withGrid[i + 2];
+                const int b = (int)without[i] + (int)without[i + 1] + (int)without[i + 2];
+                if (a > b) best = std::max(best, (long long)a);
+            }
+            return best;
+        };
+
+        sage::EngineConfig dark = m_settings;
+        dark.PostProcessing = true;
+        dark.Exposure = 0.02f;   // кадр сцены практически чёрный
+        sage::EngineConfig plain = m_settings;
+        plain.PostProcessing = false;
+
+        const long long darkGrid = gridEnergy(dark);
+        const long long plainGrid = gridEnergy(plain);
+        if (darkGrid < 0 || plainGrid < 0) {
+            LOG_ERROR("Editor") << "SELFTEST: кадр вьюпорта не прочитался";
+            ok = false;
+        } else if (plainGrid <= 0) {
+            LOG_ERROR("Editor") << "SELFTEST: сетки не видно даже без пост-обработки";
+            ok = false;
+        } else if (darkGrid * 2 < plainGrid) {
+            // Половина — щедрый запас: линия рисуется поверх готового кадра и
+            // своего цвета от экспозиции не меняет. Сетка, ушедшая под пост,
+            // при экспозиции 0.02 гаснет в десятки раз.
+            LOG_ERROR("Editor") << "SELFTEST: сетка гаснет вместе с пост-обработкой (вклад "
+                                << darkGrid << " против " << plainGrid << ")";
+            ok = false;
+        }
     }
 
     // --- ПОДЛОЖКА РЕДАКТОРА ИНТЕРФЕЙСА: ПОД МЕНЮ, А НЕ ПОВЕРХ НЕГО --------

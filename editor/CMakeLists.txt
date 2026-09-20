@@ -123,6 +123,8 @@ target_compile_definitions(SageEditor PRIVATE
 # плагина — рантаймовый (dlopen против уже загруженного процесса).
 # Манифест с activeCodePage=UTF-8 — см. sage_windows_manifest.
 sage_windows_manifest(SageEditor)
+# Отладочные таблицы — только в сборке для разработки (см. sage_strip_release).
+sage_strip_release(SageEditor)
 
 set_target_properties(SageEditor PROPERTIES ENABLE_EXPORTS ON)
 if (WIN32)
