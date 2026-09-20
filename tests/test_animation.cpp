@@ -1065,3 +1065,88 @@ TEST(Animator_extracts_root_motion_and_survives_loop) {
     CHECK_TRUE(glm::length(first) > 0.0f);
     CHECK_NEAR(glm::length(second), 0.0f, 1e-6);
 }
+
+// ============================================================================
+//  КУБИЧЕСКАЯ ИНТЕРПОЛЯЦИЯ (glTF CUBICSPLINE)
+//
+//  Формат даёт кривую не только значениями, но и КАСАТЕЛЬНЫМИ на концах ключа.
+//  Пока её сводили к линейной, разбор брал первую из тройки «касательная на
+//  входе, значение, касательная на выходе» — то есть позой становилось число,
+//  к позе отношения не имеющее. Снаружи это «анимация дёргается и едет не
+//  туда», причём только у клипов, экспортированных кривыми.
+// ============================================================================
+
+TEST(Animation_cubic_spline_hits_its_keys_and_curves_between_them) {
+    sage::anim::AnimChannel ch;
+    ch.Target = sage::anim::AnimPath::Translation;
+    ch.Interp = sage::anim::AnimInterp::CubicSpline;
+    ch.Times = {0.0f, 1.0f};
+    ch.Values = {glm::vec4(0.0f, 0.0f, 0.0f, 0.0f), glm::vec4(10.0f, 0.0f, 0.0f, 0.0f)};
+    // Касательные «в горку»: кривая выходит из ключа полого и входит полого.
+    ch.InTangents = {glm::vec4(0.0f), glm::vec4(0.0f)};
+    ch.OutTangents = {glm::vec4(0.0f), glm::vec4(0.0f)};
+
+    glm::vec3 v(0.0f);
+    glm::quat q(1.0f, 0.0f, 0.0f, 0.0f);
+
+    // В самих ключах — РОВНО значения ключей. Это первое, что ломается, если
+    // значение прочитано не с того места тройки.
+    ch.Sample(0.0f, v, q);
+    CHECK_NEAR(v.x, 0.0f, 1e-4f);
+    ch.Sample(1.0f, v, q);
+    CHECK_NEAR(v.x, 10.0f, 1e-4f);
+
+    // Между ключами с нулевыми касательными кривая Эрмита даёт сглаживание:
+    // в середине это ровно половина, а вот четверть пути — заметно меньше
+    // линейной (2.5): 0.15625 * 10.
+    ch.Sample(0.5f, v, q);
+    CHECK_NEAR(v.x, 5.0f, 1e-3f);
+    ch.Sample(0.25f, v, q);
+    CHECK_NEAR(v.x, 1.5625f, 1e-3f);
+    CHECK_TRUE(v.x < 2.5f);   // именно кривая, а не прямая
+}
+
+TEST(Animation_cubic_spline_rotation_stays_a_unit_quaternion) {
+    // Кубическая кривая по кватернионам единичную длину НЕ сохраняет, а
+    // неединичный кватернион в матрице поворота даёт масштаб: кость растягивает
+    // конечность. Поэтому результат нормализуется.
+    sage::anim::AnimChannel ch;
+    ch.Target = sage::anim::AnimPath::Rotation;
+    ch.Interp = sage::anim::AnimInterp::CubicSpline;
+    ch.Times = {0.0f, 1.0f};
+    const glm::quat a = glm::angleAxis(glm::radians(0.0f), glm::vec3(0, 1, 0));
+    const glm::quat b = glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 1, 0));
+    ch.Values = {glm::vec4(a.x, a.y, a.z, a.w), glm::vec4(b.x, b.y, b.z, b.w)};
+    ch.InTangents = {glm::vec4(0.0f), glm::vec4(0.0f)};
+    ch.OutTangents = {glm::vec4(0.0f), glm::vec4(0.0f)};
+
+    glm::vec3 v(0.0f);
+    glm::quat q(1.0f, 0.0f, 0.0f, 0.0f);
+    for (float t = 0.0f; t <= 1.0f; t += 0.1f) {
+        ch.Sample(t, v, q);
+        CHECK_NEAR(glm::length(q), 1.0f, 1e-4f);
+    }
+    ch.Sample(1.0f, v, q);
+    CHECK_NEAR(glm::degrees(glm::angle(q)), 90.0f, 0.5f);
+}
+
+TEST(Animation_rotation_takes_the_short_way_around) {
+    // Поворот на 190° обязан идти коротким путём — через 170° в другую сторону,
+    // а не длинным. Длинный путь выглядит как рывок персонажа в обратную
+    // сторону на полкадра.
+    sage::anim::AnimChannel ch;
+    ch.Target = sage::anim::AnimPath::Rotation;
+    ch.Times = {0.0f, 1.0f};
+    const glm::quat a = glm::angleAxis(glm::radians(0.0f), glm::vec3(0, 1, 0));
+    const glm::quat b = glm::angleAxis(glm::radians(190.0f), glm::vec3(0, 1, 0));
+    ch.Values = {glm::vec4(a.x, a.y, a.z, a.w), glm::vec4(b.x, b.y, b.z, b.w)};
+
+    glm::vec3 v(0.0f);
+    glm::quat q(1.0f, 0.0f, 0.0f, 0.0f);
+    ch.Sample(0.5f, v, q);
+    // Середина короткого пути — 95° в обратную сторону (то есть -95°), а не 95°
+    // вперёд. Меряем углом между кватернионами: он не должен превышать половину
+    // короткой дуги.
+    const float half = glm::degrees(glm::angle(glm::normalize(q)));
+    CHECK_TRUE(half < 100.0f);
+}

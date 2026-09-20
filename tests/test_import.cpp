@@ -5,6 +5,8 @@
 // не рисуется. Всё это можно посчитать на бумаге, поэтому и проверяется точно.
 #include "TestFramework.h"
 
+#include <glm/gtc/quaternion.hpp>
+
 #include "sage/assets/import/Importer.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -404,4 +406,214 @@ TEST(gltf_with_sparse_morph_target_still_imports_its_geometry) {
 
     std::error_code ec;
     fs::remove_all(dir, ec);
+}
+
+// ============================================================================
+//  НОРМАЛИЗАЦИЯ ГЕОМЕТРИИ: одна на все форматы
+//
+//  Форматы договариваются о разном, а движок обязан получать одно и то же.
+//  Здесь проверяется то, чего раньше не делал НИ ОДИН импортёр статической
+//  геометрии: касательные для карты нормалей и нормали там, где их нет в файле.
+// ============================================================================
+#include "sage/assets/import/MeshNormalize.h"
+
+TEST(import_generates_tangents_when_the_format_has_none) {
+    // Куб с развёрткой, но без касательных: ровно то, что отдают OBJ, FBX и
+    // добрая половина glTF. Без касательных карта нормалей в шейдере ложится
+    // вдоль (1,0,0) — то есть куда попало, и рельеф «почему-то странно блестит».
+    sage::render::MeshData mesh = sage::render::BuildCube();
+    for (Vertex& v : mesh.Vertices) v.Tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+    CHECK_FALSE(HasTangents(mesh));
+
+    NormalizeImportedMesh(mesh);
+    CHECK_TRUE(HasTangents(mesh));
+
+    // Касательная ОРТОГОНАЛЬНА нормали и единичная: иначе базис TBN в шейдере
+    // перекошен, и рельеф едет тем сильнее, чем дальше от ортогональности.
+    for (const Vertex& v : mesh.Vertices) {
+        const glm::vec3 t(v.Tangent);
+        CHECK_NEAR(glm::length(t), 1.0f, 1e-3f);
+        CHECK_NEAR(glm::dot(t, v.Normal), 0.0f, 1e-3f);
+        CHECK_TRUE(std::abs(v.Tangent.w) == 1.0f);
+    }
+}
+
+TEST(import_keeps_the_tangents_the_file_brought) {
+    // АВТОРСКИЕ ВАЖНЕЕ ПОСЧИТАННЫХ: экспортёр знает про швы развёртки и
+    // зеркальные острова то, чего по треугольникам не вывести.
+    sage::render::MeshData mesh = sage::render::BuildCube();
+    for (Vertex& v : mesh.Vertices) v.Tangent = glm::vec4(0.0f, 0.0f, 1.0f, -1.0f);
+    NormalizeImportedMesh(mesh);
+    for (const Vertex& v : mesh.Vertices) {
+        CHECK_NEAR(v.Tangent.z, 1.0f, 1e-5f);
+        CHECK_NEAR(v.Tangent.w, -1.0f, 1e-5f);
+    }
+}
+
+TEST(import_builds_normals_when_the_file_has_none) {
+    // Модель без нормалей — обычное дело для OBJ, выгруженного из CAD. Нулевая
+    // нормаль в шейдере даёт чёрный пиксель, а не «плоский свет».
+    sage::render::MeshData mesh = sage::render::BuildCube();
+    for (Vertex& v : mesh.Vertices) v.Normal = glm::vec3(0.0f);
+    CHECK_FALSE(HasNormals(mesh));
+
+    NormalizeImportedMesh(mesh);
+    CHECK_TRUE(HasNormals(mesh));
+    for (const Vertex& v : mesh.Vertices) CHECK_NEAR(glm::length(v.Normal), 1.0f, 1e-3f);
+
+    // И они смотрят НАРУЖУ: у куба нормаль сонаправлена с направлением от
+    // центра. Проверка ловит перепутанный порядок обхода в формуле.
+    for (const Vertex& v : mesh.Vertices)
+        CHECK_TRUE(glm::dot(v.Normal, glm::normalize(v.Position)) > 0.0f);
+}
+
+TEST(import_flips_winding_for_a_mirrored_node) {
+    // ЗЕРКАЛЬНАЯ ПОЛОВИНА МОДЕЛИ. Симметричные модели делают масштабом -1 по
+    // оси; отражение меняет направление обхода, и отсечение задних граней
+    // съедает такую часть целиком. Со стороны — «половина модели пропала».
+    ImportedScene scene;
+    ImportedNode node;
+    node.Name = "mirrored";
+    node.Mesh = sage::render::BuildCube();
+    node.Transform = glm::scale(glm::mat4(1.0f), glm::vec3(-1.0f, 1.0f, 1.0f));
+    const std::vector<unsigned int> source = node.Mesh.Indices;
+    scene.Nodes.push_back(std::move(node));
+
+    const sage::render::MeshData flat = scene.Flatten();
+    CHECK_EQ((int)flat.Indices.size(), (int)source.size());
+    // Первый треугольник обойдён в обратную сторону.
+    CHECK_EQ((int)flat.Indices[0], (int)source[0]);
+    CHECK_EQ((int)flat.Indices[1], (int)source[2]);
+    CHECK_EQ((int)flat.Indices[2], (int)source[1]);
+
+    // И геометрически это снова «лицом наружу»: нормаль треугольника по обходу
+    // совпадает с нормалью вершины.
+    const glm::vec3 a = flat.Vertices[flat.Indices[0]].Position;
+    const glm::vec3 b = flat.Vertices[flat.Indices[1]].Position;
+    const glm::vec3 c = flat.Vertices[flat.Indices[2]].Position;
+    const glm::vec3 faceNormal = glm::normalize(glm::cross(b - a, c - a));
+    CHECK_TRUE(glm::dot(faceNormal, flat.Vertices[flat.Indices[0]].Normal) > 0.5f);
+}
+
+TEST(import_leaves_winding_alone_without_mirroring) {
+    ImportedScene scene;
+    ImportedNode node;
+    node.Mesh = sage::render::BuildCube();
+    node.Transform = glm::scale(glm::mat4(1.0f), glm::vec3(2.0f, 3.0f, 0.5f)); // неравномерный, но не зеркальный
+    const std::vector<unsigned int> source = node.Mesh.Indices;
+    scene.Nodes.push_back(std::move(node));
+
+    const sage::render::MeshData flat = scene.Flatten();
+    for (size_t i = 0; i < source.size(); ++i) CHECK_EQ((int)flat.Indices[i], (int)source[i]);
+}
+
+TEST(import_pipeline_normalizes_every_format_the_same_way) {
+    // НОРМАЛИЗАЦИЯ ЖИВЁТ В РЕЕСТРЕ, а не в импортёре: формат отвечает за
+    // чтение, а не за то, каким движок увидит меш. Проверяется на настоящем
+    // файле, прошедшем весь путь.
+    //
+    // Квадрат смотрит вдоль +X — и это не случайный выбор: касательная по
+    // умолчанию у вершины как раз (1,0,0), то есть СОВПАДАЕТ с нормалью.
+    // Базис TBN из такой пары вырожден, и карта нормалей по нему ложится
+    // произвольно. Пока касательных не считал никто, ровно это и получалось у
+    // каждой стены, выгруженной из OBJ.
+    const std::string obj =
+        "v 0 0 0\nv 0 1 0\nv 0 1 1\nv 0 0 1\n"
+        "vt 0 0\nvt 0 1\nvt 1 1\nvt 1 0\n"
+        "vn 1 0 0\n"
+        "f 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n";
+    const std::string path = WriteTemp("sage_test_wall.obj", obj);
+
+    ImportedScene scene;
+    std::string err;
+    const bool ok = ImporterRegistry::Instance().Import(path, scene, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok) std::printf("       ошибка импорта: %s\n", err.c_str());
+    if (!ok || scene.Nodes.empty()) return;
+
+    for (const ImportedNode& node : scene.Nodes) {
+        CHECK_TRUE(HasNormals(node.Mesh));
+        CHECK_TRUE(HasTangents(node.Mesh));
+        for (const Vertex& v : node.Mesh.Vertices) {
+            const glm::vec3 t(v.Tangent);
+            CHECK_NEAR(glm::length(t), 1.0f, 1e-3f);
+            // ОРТОГОНАЛЬНА нормали: то, чего не даёт значение по умолчанию.
+            CHECK_NEAR(glm::dot(t, v.Normal), 0.0f, 1e-3f);
+        }
+    }
+}
+
+TEST(import_error_names_the_file_the_importer_and_the_reason) {
+    // «Не удалось загрузить» — ответ, с которым нечего делать. У человека три
+    // десятка моделей, и ему надо знать, какая, чем разбиралась и что не так.
+    const std::string path = WriteTemp("sage_test_broken.gltf", "{ это не json");
+    ImportedScene scene;
+    std::string err;
+    const bool ok = ImporterRegistry::Instance().Import(path, scene, err);
+    std::remove(path.c_str());
+    CHECK_FALSE(ok);
+    CHECK_TRUE(err.find("sage_test_broken.gltf") != std::string::npos);
+    CHECK_TRUE(err.find("импортёр") != std::string::npos);
+    CHECK_TRUE(err.find("причина") != std::string::npos);
+}
+
+// ============================================================================
+//  КУБИЧЕСКАЯ АНИМАЦИЯ ИЗ ФАЙЛА — ОТ .gltf ДО КЛИПА
+//
+//  Проверка Sample (tests/test_animation.cpp) отвечает на вопрос «правильно ли
+//  считается кривая». Здесь вопрос другой: доезжают ли до клипа ТЕ ЖЕ числа,
+//  что лежат в файле. Ошибка была именно тут — разбор брал из тройки
+//  «касательная, значение, касательная» первую.
+// ============================================================================
+#include "GltfCubicAnimModel.h"
+#include "sage/render/ModelData.h"
+#include "sage/render/SkinnedModel.h"
+
+TEST(gltf_cubic_animation_reads_values_not_tangents) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_cubic_gltf";
+    const std::string path = sage_test::WriteCubicAnimGltf(dir, "cubic");
+    CHECK_TRUE(!path.empty());
+    if (path.empty()) return;
+
+    sage::render::ModelData data;
+    try {
+        data = sage::render::ParseSkinnedModelFile(path);
+    } catch (const std::exception& e) {
+        std::printf("       разбор не удался: %s\n", e.what());
+        CHECK_TRUE(false);
+        return;
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+
+    CHECK_EQ((int)data.Clips.size(), 1);
+    if (data.Clips.empty()) return;
+    const sage::anim::AnimationClip& clip = data.Clips[0];
+    CHECK_EQ(clip.Name, std::string("Turn"));
+    CHECK_NEAR(clip.Duration, 1.0f, 1e-4f);
+    CHECK_EQ((int)clip.Channels.size(), 1);
+    if (clip.Channels.empty()) return;
+
+    const sage::anim::AnimChannel& ch = clip.Channels[0];
+    CHECK_TRUE(ch.Interp == sage::anim::AnimInterp::CubicSpline);
+    CHECK_EQ((int)ch.Times.size(), 2);          // ДВА ключа, а не шесть значений
+    CHECK_EQ((int)ch.Values.size(), 2);
+    CHECK_EQ((int)ch.InTangents.size(), 2);
+    CHECK_EQ((int)ch.OutTangents.size(), 2);
+
+    // Поза первого ключа — единичный поворот (значение), а НЕ (0.5,0.5,0.5,0.5)
+    // (касательная на входе). Ровно это и читалось раньше.
+    CHECK_NEAR(ch.Values[0].w, 1.0f, 1e-4f);
+    CHECK_NEAR(ch.Values[0].x, 0.0f, 1e-4f);
+    CHECK_NEAR(ch.InTangents[0].x, 0.5f, 1e-4f);   // а касательная — на своём месте
+
+    // И второй ключ — поворот на 90° вокруг Y.
+    glm::vec3 v(0.0f);
+    glm::quat q(1.0f, 0.0f, 0.0f, 0.0f);
+    ch.Sample(0.0f, v, q);
+    CHECK_NEAR(glm::degrees(glm::angle(glm::normalize(q))), 0.0f, 0.5f);
+    ch.Sample(1.0f, v, q);
+    CHECK_NEAR(glm::degrees(glm::angle(glm::normalize(q))), 90.0f, 0.5f);
 }

@@ -40,7 +40,10 @@ constexpr unsigned int kMagic = 0x434D4753u;
 //           лежат шесть частей из девяноста восьми и ни одного материала, и
 //           без версии человек получил бы ту же развалину, что и до правки, —
 //           причём ровно на той модели, ради которой он обновлялся.
-constexpr unsigned int kVersion = 5;
+// 6: у канала анимации появились касательные кубической кривой (CUBICSPLINE).
+// Номер поднят, потому что старый кэш их не содержит: прочитать его как новый
+// значило бы взять под касательные чужие байты.
+constexpr unsigned int kVersion = 6;
 
 struct State {
     std::string Directory = ".sage-cache";
@@ -237,6 +240,8 @@ bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out)
             r.Pod(ch.Interp);
             r.Array(ch.Times);
             r.Array(ch.Values);
+            r.Array(ch.InTangents);
+            r.Array(ch.OutTangents);
         }
     }
 
@@ -345,6 +350,8 @@ bool WriteModelCache(const std::string& sourcePath, const sage::render::ModelDat
             w.Pod(ch.Interp);
             w.Array(ch.Times);
             w.Array(ch.Values);
+            w.Array(ch.InTangents);
+            w.Array(ch.OutTangents);
         }
     }
 

@@ -1269,22 +1269,46 @@ static ModelData ParseGltf(const std::string& path) {
             else if (ch.target_path == "rotation") out.Target = AnimPath::Rotation;
             else if (ch.target_path == "scale") out.Target = AnimPath::Scale;
             else continue; // weights (morph) не поддерживаем
-            out.Interp = (samp.interpolation == "STEP") ? AnimInterp::Step : AnimInterp::Linear;
+            // ВИД ИНТЕРПОЛЯЦИИ РЕШАЕТ, КАК ЧИТАТЬ ВЫХОД СЭМПЛЕРА.
+            //
+            // У CUBICSPLINE на каждый ключ приходится ТРОЙКА значений:
+            // касательная на входе, само значение, касательная на выходе
+            // (спецификация glTF, 3.11). Раньше вид сводился к линейному, а
+            // тройка читалась как одно значение — то есть позой становилась
+            // ВХОДНАЯ КАСАТЕЛЬНАЯ первого ключа, число, к позе отношения не
+            // имеющее. Снаружи это «анимация дёргается и едет не туда»,
+            // причём только у тех клипов, которые экспортированы кривыми.
+            const bool cubic = samp.interpolation == "CUBICSPLINE";
+            out.Interp = cubic ? AnimInterp::CubicSpline
+                               : (samp.interpolation == "STEP" ? AnimInterp::Step
+                                                               : AnimInterp::Linear);
 
             std::vector<float> times = ReadFloats(g, samp.input, 1);
-            int comps = (out.Target == AnimPath::Rotation) ? 4 : 3;
+            const int comps = (out.Target == AnimPath::Rotation) ? 4 : 3;
+            const int stride = cubic ? comps * 3 : comps;   // in, value, out
             std::vector<float> vals = ReadFloats(g, samp.output, comps);
-            // Ключей столько, на сколько хватает ОБОИХ массивов. Верить длине
-            // времён на слово нельзя: у CUBICSPLINE значений втрое больше, у
-            // битого файла — меньше, и цикл по временам читал бы за концом
-            // значений.
-            size_t keyCount = std::min(times.size(), vals.size() / (size_t)comps);
+            // Ключей столько, на сколько хватает ОБОИХ массивов: у битого файла
+            // значений меньше, чем времён, и цикл по временам читал бы за концом.
+            size_t keyCount = std::min(times.size(), vals.size() / (size_t)stride);
             if (keyCount == 0) continue;
             times.resize(keyCount);
             out.Times = times;
             out.Values.resize(keyCount, glm::vec4(0.0f));
+            if (cubic) {
+                out.InTangents.resize(keyCount, glm::vec4(0.0f));
+                out.OutTangents.resize(keyCount, glm::vec4(0.0f));
+            }
             for (size_t k = 0; k < keyCount; ++k) {
-                for (int c = 0; c < comps; ++c) out.Values[k][c] = vals[k * comps + c];
+                const size_t base = k * (size_t)stride;
+                for (int c = 0; c < comps; ++c) {
+                    if (cubic) {
+                        out.InTangents[k][c] = vals[base + c];
+                        out.Values[k][c] = vals[base + comps + c];
+                        out.OutTangents[k][c] = vals[base + 2 * comps + c];
+                    } else {
+                        out.Values[k][c] = vals[base + c];
+                    }
+                }
                 clip.Duration = std::max(clip.Duration, times[k]);
             }
             clip.Channels.push_back(std::move(out));
@@ -1385,6 +1409,34 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     return model;
 }
 
+ModelData ParseSkinnedModelFile(const std::string& path) {
+    // ФОРМАТ ВЫБИРАЕТ ПУТЬ РАЗБОРА. glTF читает tinygltf, FBX — свой разбор
+    // (assets/import/FbxSkin.h): у FBX скин, кости и клипы лежат совсем иначе,
+    // и делать вид, что это один и тот же файл, нельзя. Пока пути не было,
+    // персонаж из FBX (а это всё, что отдают Blender, Maya, Mixamo и
+    // ассет-сторы по умолчанию) получал «не загрузить glTF … parse error»:
+    // сообщение о ЧУЖОМ формате, из которого следовал вывод «моя модель
+    // движку не подходит».
+    //
+    // БЕЗ ВИДЕОКАРТЫ — и это главное, зачем разбор отделён от загрузки. Так его
+    // можно прогнать в тесте и в конвертере: проверять скелет, веса и клипы по
+    // картинке — то же самое, что не проверять.
+    ModelData data;
+    std::string ext = fs::path(path).extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext == ".fbx") {
+        std::string err;
+        if (!sage::assets::ImportFbxSkinned(path, data, err))
+            throw std::runtime_error("SkinnedModel: " + err);
+    } else {
+        data = ParseGltf(path);
+    }
+    LOG_INFO("Anim") << "SkinnedModel разобран: " << path << " (костей "
+                     << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
+                     << ", клипов " << data.Clips.size() << ")";
+    return data;
+}
+
 std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     // Кэш пробуется ПЕРВЫМ. Промах, устаревший или битый кэш — не ошибка:
     // молча разбираем исходник и перезаписываем кэш. Неверный кэш никогда не
@@ -1404,18 +1456,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     // ассет-сторы по умолчанию) получал «не загрузить glTF … parse error»:
     // сообщение о ЧУЖОМ формате, из которого следовал вывод «моя модель
     // движку не подходит».
-    std::string ext = fs::path(path).extension().string();
-    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
-    if (ext == ".fbx") {
-        std::string err;
-        if (!sage::assets::ImportFbxSkinned(path, data, err))
-            throw std::runtime_error("SkinnedModel: " + err);
-    } else {
-        data = ParseGltf(path);
-        LOG_INFO("Anim") << "SkinnedModel разобран: " << path << " (костей "
-                         << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
-                         << ", клипов " << data.Clips.size() << ")";
-    }
+    data = ParseSkinnedModelFile(path);
     sage::assets::WriteModelCache(path, data);
     return BuildFromData(data);
 }
