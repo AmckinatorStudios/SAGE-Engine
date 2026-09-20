@@ -113,8 +113,8 @@ void ScriptEngine::RegisterPhysicsApi() {
         auto& cc = obj.Registry()->get_or_emplace<CharacterControllerComponent>(obj.Entity());
         cc.Radius = t.get_or("radius", cc.Radius);
         cc.Height = t.get_or("height", cc.Height);
-        cc.StepHeight = t.get_or("step", cc.StepHeight);
-        cc.MaxSlopeDeg = t.get_or("slope", cc.MaxSlopeDeg);
+        cc.StepOffset = t.get_or("step", cc.StepOffset);
+        cc.SlopeLimit = t.get_or("slope", cc.SlopeLimit);
         cc.Mass = t.get_or("mass", cc.Mass);
         // Форма поменялась — контроллер пересоздать. И у бэкенда, и у мотора:
         // иначе новая высота ступеньки вступила бы в силу только после
@@ -122,8 +122,8 @@ void ScriptEngine::RegisterPhysicsApi() {
         cc.Runtime = sage::physics::kInvalidCharacter;
         if (cc.Motor) {
             sage::physics::CharacterDesc d;
-            d.Radius = cc.Radius; d.Height = cc.Height; d.StepHeight = cc.StepHeight;
-            d.MaxSlopeDeg = cc.MaxSlopeDeg; d.Mass = cc.Mass; d.Layer = cc.Layer;
+            d.Radius = cc.Radius; d.Height = cc.Height; d.StepHeight = cc.StepOffset;
+            d.MaxSlopeDeg = cc.SlopeLimit; d.Mass = cc.Mass; d.Layer = cc.Layer;
             d.Position = cc.Motor->State().Position;
             cc.Motor->Configure(d);
         }
@@ -186,8 +186,8 @@ void ScriptEngine::RegisterPhysicsApi() {
         };
         if (!cc.Motor) cc.Motor = std::make_shared<sage::physics::CharacterMotor>();
         sage::physics::CharacterDesc d;
-        d.Radius = cc.Radius; d.Height = cc.Height; d.StepHeight = cc.StepHeight;
-        d.MaxSlopeDeg = cc.MaxSlopeDeg; d.Mass = cc.Mass; d.Layer = cc.Layer;
+        d.Radius = cc.Radius; d.Height = cc.Height; d.StepHeight = cc.StepOffset;
+        d.MaxSlopeDeg = cc.SlopeLimit; d.Mass = cc.Mass; d.Layer = cc.Layer;
         if (auto* tr = obj.Registry()->try_get<Transform>(obj.Entity())) d.Position = tr->Position;
         cc.Motor->Configure(d);
     });
@@ -197,6 +197,11 @@ void ScriptEngine::RegisterPhysicsApi() {
         if (!obj.Valid()) return;
         auto* cc = obj.Registry()->try_get<CharacterControllerComponent>(obj.Entity());
         if (!cc) return;
+        // Игра двигает персонажа САМА — значит, у неё своё тяготение и свой
+        // прыжок. Движковый шаг контроллера (PhysicsScene::StepCharacters)
+        // после этого молчит: два тяготения дали бы падение вдвое быстрее, и
+        // разобраться в этом со стороны игры было бы нечем.
+        cc->Managed = false;
         if (cc->Motor) {
             // Свой мир: шагаем мотором и сразу же переносим результат в
             // Transform и в поля компонента. Ждать PullCharacters нельзя —

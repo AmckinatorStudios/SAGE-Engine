@@ -12,6 +12,8 @@
 #include "sage/input/InputSystem.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/ScriptingSystem.h"
+#include "sage/scripting/lua/LuaBackend.h"
 
 class Scene;
 class ParticleSystem;
@@ -106,6 +108,15 @@ public:
 
     // --- Доступ к живым подсистемам (nullptr вне Play) ---
     ScriptEngine* Scripts() { return m_scripts.get(); }
+    // Система скриптинга объектов (Start/Update/столкновения). Язык — её
+    // забота, не редактора.
+    sage::scripting::ScriptingSystem* Scripting() { return m_scripting.get(); }
+
+    // ОДИН шаг скриптов для тех, кто гоняет игру БЕЗ планировщика: headless-
+    // сессия, E2E-сценарий, съёмка обложки. Зовёт и уровневые скрипты, и
+    // скрипты объектов — забыть одно из двух здесь легче всего, и выглядит это
+    // как «скрипты не работают», а не как «половина скриптов не тикает».
+    void StepScripts(Scene& scene, float dt);
     PhysicsScene* Physics() { return m_physics.get(); }
 
     // Звук — единственная подсистема, которая ПЕРЕЖИВАЕТ Stop: устройство и
@@ -126,6 +137,10 @@ private:
     std::string m_snapshot;   // сцена на момент Play — восстанавливается по Stop
 
     std::unique_ptr<ScriptEngine> m_scripts;  // живут только в Play
+    // ПОСЛЕ m_scripts намеренно: Lua-бэкенд системы работает на состоянии
+    // прежнего движка, и пережить его он не имеет права — члены разрушаются в
+    // обратном порядке объявления.
+    std::unique_ptr<sage::scripting::ScriptingSystem> m_scripting;
     std::unique_ptr<PhysicsScene> m_physics;
     std::unique_ptr<AudioEngine> m_audio;     // переживает Stop (см. Audio())
 

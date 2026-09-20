@@ -37,6 +37,8 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/ScriptingSystem.h"
+#include "sage/scripting/lua/LuaBackend.h"
 #include "sage/ecs/CameraView.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
@@ -358,6 +360,10 @@ void PlayerLayer::OnDetach() {
     // шанс игре сохраниться. Повторный вызов безвреден — DispatchQuit
     // срабатывает один раз.
     if (m_scripts) m_scripts->DispatchQuit();
+    // Скрипты объектов узнают о закрытии ДО того, как исчезнут (OnDestroy), и
+    // уходят раньше прежнего движка: Lua-бэкенд живёт на его состоянии.
+    if (m_scripting) m_scripting->Shutdown();
+    m_scripting.reset();
     m_physics.reset();
     m_scripts.reset();
     // Кэш префабов держит разобранные сцены, а в них — меши на GPU. Он
@@ -423,19 +429,6 @@ void PlayerLayer::BuildSceneRuntime() {
         LOG_INFO("Player") << "Параметры запуска игры: " << m_launchArgs;
     }
 
-    int attached = 0;
-    auto view = m_scene->Registry().view<ScriptComponent>();
-    for (auto e : view) {
-        const std::string& path = view.get<ScriptComponent>(e).Path;
-        if (path.empty()) continue;
-        try {
-            m_scripts->AttachScript(GameObject(&m_scene->Registry(), e), path);
-            ++attached;
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Player") << "Скрипт не привязался: " << ex.what();
-        }
-    }
-
     // Раскладка управления проекта — ПОСЛЕ скриптов, и порядок здесь значащий.
     // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а input.sageinput
     // — это «как решил автор игры» в редакторе, и он обязан их замещать, а не
@@ -461,11 +454,32 @@ void PlayerLayer::BuildSceneRuntime() {
     m_scripts->BindPhysics(*m_physics);
     m_scripts->BindNetwork(m_network); // Net.* в Lua: хост/подключение из скриптов
 
+    // --- СИСТЕМА СКРИПТИНГА -------------------------------------------------
+    //
+    // Поведение объектов ведёт она (Start/Update/FixedUpdate/LateUpdate,
+    // столкновения, публичные переменные), а язык подключается бэкендом. Тот
+    // же состав, что в Play-режиме редактора: превью обязано вести себя как
+    // игра, иначе редактор перестаёт заменять сборку.
+    //
+    // ПОСЛЕ физики: Start скрипта вправе спросить у себя CharacterController и
+    // получить работающий, а не «физика не привязана» ровно на первом кадре.
+    m_scripting = std::make_unique<sage::scripting::ScriptingSystem>();
+    m_scripting->AddBackend(sage::scripting::MakeLuaBackend({m_scripts.get()}));
+    sage::scripting::ScriptServices services;
+    services.ScenePtr = &*m_scene;
+    services.Input = &m_input;
+    services.Physics = m_physics.get();
+    services.Audio = m_audio.get();
+    m_scripting->Bind(services);
+    const int attached = m_scripting->AttachScene(*m_scene);
+    if (attached > 0) LOG_INFO("Player") << "Скриптов привязано: " << attached;
+
     // Состав кадра. Регистрируется здесь, когда все подсистемы уже созданы:
     // порядок при этом не задаётся — он определён стадиями внутри
     // RegisterCoreSystems и не зависит от того, кто когда зарегистрировался.
     sage::CoreSystems core;
     core.Scripts = m_scripts.get();
+    core.Scripting = m_scripting.get();
     core.Physics = m_physics.get();
     core.Particles = m_particles ? &*m_particles : nullptr;
     core.Audio = m_audio.get();
@@ -508,6 +522,8 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     // указатели на скрипты и физику, и оставить его на снесённые подсистемы
     // означало бы обращение по мёртвому адресу в первом же кадре новой сцены.
     m_systems.Clear();
+    if (m_scripting) m_scripting->Shutdown();
+    m_scripting.reset();
     m_physics.reset();
     m_scripts.reset();   // вместе с ним уходит всё состояние скриптов уровня
     // Шина событий принадлежит сцене — снимаем ссылку ДО того, как старая

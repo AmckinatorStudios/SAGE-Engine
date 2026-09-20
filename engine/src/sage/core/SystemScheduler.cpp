@@ -1,5 +1,7 @@
 #include "sage/core/SystemScheduler.h"
 
+#include "sage/scripting/ScriptingSystem.h"
+
 #include "sage/audio/AudioSystem.h"
 
 #include <algorithm>
@@ -139,11 +141,36 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
         });
     }
 
+    // Скрипты объектов — рядом с уровневыми и по той же причине: намерение
+    // задаётся до физики. Порядок внутри кадра записан ЗДЕСЬ целиком:
+    // столкновения прошлого шага, постоянный шаг, обычный Update.
+    if (systems.Scripting) {
+        sage::scripting::ScriptingSystem* scripting = systems.Scripting;
+        PhysicsScene* physics = systems.Physics;
+        scheduler.Add(Stage::Update, "scripting", [scripting, physics](Scene& scene, float dt) {
+            // Удар обязан дойти до скрипта в ТОМ ЖЕ кадре, в котором случился,
+            // иначе взрыв отстаёт от столкновения на кадр — и это видно.
+            if (physics) scripting->DispatchPhysicsEvents(*physics, scene);
+            scripting->FixedUpdate(dt);
+            scripting->Update(dt);
+        }, 1);
+    }
+
     if (systems.Physics) {
         PhysicsScene* physics = systems.Physics;
         scheduler.Add(Stage::Physics, "physics", [physics](Scene& scene, float dt) {
             physics->Step(scene, dt);
         });
+    }
+
+    // LateUpdate — после физики и анимации: камере, следящей за персонажем,
+    // нужна его ОКОНЧАТЕЛЬНАЯ позиция этого кадра. Позови её раньше — камера
+    // отстаёт на кадр, и картинка «плывёт» именно при беге.
+    if (systems.Scripting) {
+        sage::scripting::ScriptingSystem* scripting = systems.Scripting;
+        scheduler.Add(Stage::PostPhysics, "scripting.late", [scripting](Scene&, float dt) {
+            scripting->LateUpdate(dt);
+        }, 20);
     }
 
     // Анимация — ПОСЛЕ физики. Её второй проход (IK) ставит ноги на землю, а

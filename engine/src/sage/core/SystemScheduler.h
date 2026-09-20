@@ -7,6 +7,7 @@ class Scene;
 // Эти классы живут в ГЛОБАЛЬНОМ пространстве имён, а не в sage — объявляем их
 // здесь же, иначе объявление внутри namespace sage создало бы другие типы.
 class ScriptEngine;
+namespace sage::scripting { class ScriptingSystem; }
 class PhysicsScene;
 class ParticleSystem;
 class AudioEngine;
@@ -117,7 +118,12 @@ private:
 // режиме правки нет ни скриптов, ни физики, и это нормальный случай, а не
 // ошибка.
 struct CoreSystems {
+    // Прежний движок Lua: уровневые скрипты, таймеры, корутины, старый API.
     ScriptEngine* Scripts = nullptr;
+    // Система скриптинга объектов (Start/Update/FixedUpdate/LateUpdate и
+    // события столкновений). Язык ей неизвестен — см.
+    // sage/scripting/ScriptingSystem.h.
+    sage::scripting::ScriptingSystem* Scripting = nullptr;
     PhysicsScene* Physics = nullptr;
     ParticleSystem* Particles = nullptr;
     AudioEngine* Audio = nullptr;

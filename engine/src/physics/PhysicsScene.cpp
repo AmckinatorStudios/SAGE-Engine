@@ -227,6 +227,10 @@ void PhysicsScene::Step(Scene& scene, float dt) {
     SyncBodies(scene);
     SyncCharacters(scene);
 
+    // Контроллеры персонажей — ДО шага мира: тяготение, прыжок, склон и
+    // ступенька считаются здесь, а не в скрипте (см. StepCharacters).
+    StepCharacters(scene, dt);
+
     // Кинематика: до шага толкаем тела за Transform сущности (её ведёт скрипт).
     auto view = scene.Registry().view<RigidBodyComponent, Transform>();
     for (auto e : view) {
@@ -310,11 +314,14 @@ void PhysicsScene::SyncCharacters(Scene& scene) {
         CharacterDesc d;
         d.Radius = cc.Radius;
         d.Height = cc.Height;
-        d.StepHeight = cc.StepHeight;
-        d.MaxSlopeDeg = cc.MaxSlopeDeg;
+        d.StepHeight = cc.StepOffset;
+        d.MaxSlopeDeg = cc.SlopeLimit;
+        d.SkinWidth = cc.SkinWidth;
         d.Mass = cc.Mass;
         d.Layer = cc.Layer;
-        d.Position = tr.Position;
+        // Позиция контроллера — ПОДОШВЫ; точка объекта может быть не там
+        // (начало координат модели — в поясе, в центре, где угодно).
+        d.Position = tr.Position + cc.Center;
         cc.Runtime = m_world->CreateCharacter(d);
         if (cc.Runtime != kInvalidCharacter) m_characters.emplace_back(e, cc.Runtime);
     }
@@ -332,6 +339,109 @@ void PhysicsScene::SyncCharacters(Scene& scene) {
     m_characters.resize(alive);
 }
 
+// --- ШАГ КОНТРОЛЛЕРОВ ПЕРСОНАЖА ---------------------------------------------
+//
+// ЗАЧЕМ ОН ЗДЕСЬ, А НЕ В СКРИПТЕ. Контроллеру нужно ровно то, чего у скрипта
+// нет: шаг физики и результат столкновения того же шага. Пока тяготение писала
+// игра, каждая игра писала его заново — и каждая чуть-чуть иначе: у одной
+// падение линейное, у другой прыжок зависит от частоты кадров, у третьей на
+// стыке плит дрожание. Это не разнообразие, это одна и та же ошибка, набранная
+// заново столько раз, сколько есть игр.
+//
+// Что делает шаг: копит вертикальную скорость тяготением, прилипает к опоре
+// (иначе персонаж отрывается на каждой выпуклости пола и «летит» вниз по
+// лестнице), сбрасывает вертикаль при приземлении и об потолок, а на склоне
+// круче предела превращает ход в скольжение вниз.
+void PhysicsScene::StepCharacters(Scene& scene, float dt) {
+    if (dt <= 0.0f) return;
+    auto view = scene.Registry().view<CharacterControllerComponent, Transform>();
+    for (auto e : view) {
+        CharacterControllerComponent& cc = view.get<CharacterControllerComponent>(e);
+        Transform& tr = view.get<Transform>(e);
+        // Игра ведёт этого персонажа сама (старый sage.physics.MoveCharacter) —
+        // второе, движковое тяготение удвоило бы её собственное.
+        if (!cc.Managed) continue;
+        const bool ownWorld = (bool)cc.Solid && cc.Motor;
+        if (!ownWorld && cc.Runtime == sage::physics::kInvalidCharacter) continue;
+
+        // --- Вертикаль -------------------------------------------------------
+        if (cc.Grounded && cc.VerticalVelocity <= 0.0f) {
+            // Небольшая прижимающая скорость, а не ноль: с нулём персонаж на
+            // каждом стыке пола отрывается от опоры на кадр, и «стоит на земле»
+            // мигает — вместе с ним мигают звук шагов и анимация приземления.
+            cc.VerticalVelocity = -2.0f;
+        } else {
+            cc.VerticalVelocity += cc.Gravity * dt;
+            // Предел падения: без него за долгое падение скорость дорастает до
+            // величины, на которой шаг перепрыгивает пол целиком.
+            const float kTerminal = 55.0f;
+            if (cc.VerticalVelocity < -kTerminal) cc.VerticalVelocity = -kTerminal;
+        }
+
+        glm::vec3 velocity = cc.HasRequest ? cc.DesiredVelocity : glm::vec3(0.0f);
+        velocity.y += cc.VerticalVelocity;
+
+        // --- Склон круче предела: не идём, а съезжаем ------------------------
+        if (cc.Grounded) {
+            const float up = glm::clamp(cc.GroundNormal.y, -1.0f, 1.0f);
+            const float slopeDeg = glm::degrees(std::acos(up));
+            if (slopeDeg > cc.SlopeLimit) {
+                // Направление вниз по склону — проекция «вниз» на плоскость
+                // опоры. Склон, по которому нельзя идти, обязан сносить, иначе
+                // на нём можно стоять, просто не двигаясь, — и тогда предел
+                // склона не значит ничего.
+                glm::vec3 down = glm::vec3(0.0f, -1.0f, 0.0f);
+                glm::vec3 slide = down - cc.GroundNormal * glm::dot(down, cc.GroundNormal);
+                const float len = glm::length(slide);
+                if (len > 1e-4f) {
+                    slide /= len;
+                    const float speed = std::abs(cc.Gravity) * 0.5f;
+                    velocity.x = slide.x * speed;
+                    velocity.z = slide.z * speed;
+                }
+            }
+        }
+
+        const glm::vec3 before = ownWorld ? cc.Motor->State().Position : tr.Position + cc.Center;
+
+        if (ownWorld) {
+            sage::physics::CharacterDesc d = cc.Motor->Desc();
+            d.Radius = cc.Radius;
+            d.Height = cc.Height;
+            d.StepHeight = cc.StepOffset;
+            d.MaxSlopeDeg = cc.SlopeLimit;
+            d.SkinWidth = cc.SkinWidth;
+            d.Position = cc.Motor->State().Position;
+            cc.Motor->Configure(d);
+            cc.Motor->Move(cc.Solid, velocity, dt);
+            const sage::physics::CharacterState& st = cc.Motor->State();
+            tr.Position = st.Position - cc.Center;
+            cc.Grounded = st.Grounded;
+            cc.GroundNormal = st.GroundNormal;
+            cc.Landed = cc.Motor->Landed();
+            cc.LeftGround = cc.Motor->LeftGround();
+            cc.Blocked = cc.Motor->Blocked();
+            cc.StepUp = cc.Motor->StepUp();
+            cc.Velocity = (st.Position - before) / dt;
+        } else {
+            m_world->MoveCharacter(cc.Runtime, velocity, dt);
+            // Положение и опора приедут в PullCharacters после шага мира —
+            // читать их здесь значило бы видеть состояние ДО столкновения.
+            cc.Velocity = velocity;
+        }
+
+        // Уткнулись в потолок или встали на опору — вертикаль обнуляется.
+        // Без этого прыжок в низкий проём «прилипает» к потолку, пока не
+        // иссякнет набранная вверх скорость.
+        if (cc.Grounded && cc.VerticalVelocity < 0.0f) cc.VerticalVelocity = 0.0f;
+
+        // Запрос действует ОДИН кадр: персонаж, которому забыли сказать «иди»,
+        // обязан остановиться сам, а не ехать вечно.
+        cc.HasRequest = false;
+        cc.DesiredVelocity = glm::vec3(0.0f);
+    }
+}
+
 // Переносит положение контроллеров в Transform сущностей и обновляет флаг
 // опоры. После шага: до него положение ведёт игра (через MoveCharacter), после
 // — физика, и путать эти два момента значит терять то одно, то другое.
@@ -343,7 +453,7 @@ void PhysicsScene::PullCharacters(Scene& scene) {
         auto* tr = scene.Registry().try_get<Transform>(entity);
         if (!cc || !tr) continue;
         const sage::physics::CharacterState st = m_world->GetCharacterState(handle);
-        tr->Position = st.Position;
+        tr->Position = st.Position - cc->Center;
         cc->Grounded = st.Grounded;
         cc->GroundNormal = st.GroundNormal;
     }

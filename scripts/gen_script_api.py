@@ -251,6 +251,447 @@ function print(...) end
 ---@param seconds number
 function wait(seconds) end
 
+-- ===========================================================================
+--  НОВАЯ СИСТЕМА СКРИПТИНГА: скрипт-таблица, публичные поля, разделы API.
+--
+--  Этот раздел написан РУКАМИ, а не собран из Bind(...), и это не оплошность:
+--  новый API — не набор функций в модулях, а типы с методами
+--  (transform:Translate, character:Move, animator:Play). Собрать такое
+--  разбором вызовов нельзя, а без подсказки к нему редактор кода молчит о
+--  главном, чем теперь пишут игру.
+--
+--  Скрипт выглядит так:
+--
+--      local Player = {}
+--
+--      Player.public = {
+--          MoveSpeed = field.number(5.0, 0.0, 20.0),
+--          Camera    = field.entity(),
+--      }
+--
+--      function Player:Start() end
+--      function Player:Update(dt) end
+--
+--      return Player
+--
+--  Подробнее — docs/scripting.md.
+-- ===========================================================================
+
+---Объявление публичного поля. Читается РАЗБОРОМ ТЕКСТА, поэтому пишется прямо
+---в таблице `public`, а не собирается функцией.
+field = {}
+---@param default? number
+---@param min? number
+---@param max? number
+---@return any
+function field.number(default, min, max) end
+---@param default? integer
+---@param min? number
+---@param max? number
+---@return any
+function field.integer(default, min, max) end
+---@param default? boolean
+---@return any
+function field.boolean(default) end
+---@param default? string
+---@return any
+function field.string(default) end
+---Ссылка на объект сцены: слот с приёмом перетаскивания в инспекторе.
+---@return any
+function field.entity() end
+---Ссылка на КОМПОНЕНТ объекта: скрипт получает сразу компонент, а не объект.
+---@param component string
+---@return any
+function field.component(component) end
+---@return any
+function field.color() end
+---@return any
+function field.vector2() end
+---@return any
+function field.vector3() end
+---Ссылка на файл проекта. kind: "Texture", "Audio", "Animation", "Prefab".
+---@param kind? string
+---@return any
+function field.asset(kind) end
+
+---@class SageTransform
+---@field position Vec3
+---@field rotation Vec3 углы Эйлера, ГРАДУСЫ
+---@field scale Vec3
+---@field localPosition Vec3
+---@field localRotation Vec3
+---@field localScale Vec3
+local SageTransform = {}
+function SageTransform:SetPosition(x, y, z) end
+function SageTransform:SetRotation(x, y, z) end
+function SageTransform:SetLocalRotation(x, y, z) end
+function SageTransform:SetScale(x, y, z) end
+---@param delta Vec3
+function SageTransform:Translate(delta) end
+function SageTransform:Rotate(x, y, z) end
+---@return Vec3
+function SageTransform:Forward() end
+---@return Vec3
+function SageTransform:Right() end
+---@return Vec3
+function SageTransform:Up() end
+---@param target Vec3
+function SageTransform:LookAt(target) end
+---Позиция с учётом цепочки родителей.
+---@return Vec3
+function SageTransform:WorldPosition() end
+
+---Объект сцены.
+---@class SageObject
+---@field name string
+---@field id integer
+---@field active boolean включён (виден и участвует в кадре)
+---@field transform SageTransform
+---@field parent SageObject|nil
+---@field children SageObject[]
+local SageObject = {}
+---@param name string
+---@return any компонент или nil
+function SageObject:GetComponent(name) end
+---@return SageCharacterController|nil
+function SageObject:GetCharacterController() end
+---@return SageAnimation|nil
+function SageObject:GetAnimation() end
+---@return SageAudioSource|nil
+function SageObject:GetAudio() end
+---@return SageCamera|nil
+function SageObject:GetCamera() end
+---Таблица скрипта этого объекта (или nil, если скрипта нет).
+---@return table|nil
+function SageObject:GetScript() end
+---Позвать метод скрипта этого объекта: `enemy:Call("TakeDamage", 20)`.
+---@param method string
+---@return any
+function SageObject:Call(method, ...) end
+---@param parent SageObject|nil
+function SageObject:SetParent(parent) end
+function SageObject:Destroy() end
+---@return boolean
+function SageObject:IsValid() end
+
+---Контроллер персонажа: универсальное управляемое тело. Тяготение, опора,
+---склон и ступенька — внутри него, а не в скрипте.
+---@class SageCharacterController
+local SageCharacterController = {}
+---Горизонтальная СКОРОСТЬ (ед/с) на этот кадр.
+---@param velocity Vec3
+function SageCharacterController:Move(velocity) end
+---Полная скорость, вертикаль включительно (полёт, плавание, отдача).
+---@param velocity Vec3
+function SageCharacterController:MoveVelocity(velocity) end
+---Прыжок заданной ВЫСОТЫ (её видно в игре, в отличие от скорости).
+---@param height number
+function SageCharacterController:Jump(height) end
+---@param velocity number
+function SageCharacterController:SetJumpVelocity(velocity) end
+---@param gravity number
+function SageCharacterController:SetGravity(gravity) end
+---@return number
+function SageCharacterController:GetGravity() end
+---@return boolean
+function SageCharacterController:IsGrounded() end
+---Действительная скорость последнего шага (стена и склон видны именно здесь).
+---@return Vec3
+function SageCharacterController:GetVelocity() end
+---@return Vec3
+function SageCharacterController:GetGroundNormal() end
+---@return boolean
+function SageCharacterController:Landed() end
+---@return boolean
+function SageCharacterController:LeftGround() end
+---@return boolean
+function SageCharacterController:IsBlocked() end
+---@param position Vec3
+function SageCharacterController:Teleport(position) end
+
+---@class SageAnimation
+local SageAnimation = {}
+---@param clip string
+---@param loop? boolean
+---@return boolean
+function SageAnimation:Play(clip, loop) end
+function SageAnimation:Stop() end
+function SageAnimation:Resume() end
+---@param speed number
+function SageAnimation:SetSpeed(speed) end
+---@return string
+function SageAnimation:GetCurrentAnimation() end
+---@param clip? string
+---@return boolean
+function SageAnimation:IsPlaying(clip) end
+---@param name string
+---@param value number
+function SageAnimation:SetFloat(name, value) end
+---@param name string
+---@return number
+function SageAnimation:GetFloat(name) end
+---@param name string
+---@param value boolean
+function SageAnimation:SetBool(name, value) end
+---@param name string
+---@return boolean
+function SageAnimation:GetBool(name) end
+---@param name string
+function SageAnimation:SetTrigger(name) end
+---Прочитал — потребил.
+---@param name string
+---@return boolean
+function SageAnimation:ConsumeTrigger(name) end
+---@param name string
+---@param value number
+function SageAnimation:SetBlend(name, value) end
+---@param layer string
+---@param weight number
+function SageAnimation:SetLayerWeight(layer, weight) end
+---@param layer string
+---@return number
+function SageAnimation:GetLayerWeight(layer) end
+
+---@class SageAudioSource
+local SageAudioSource = {}
+function SageAudioSource:Play() end
+function SageAudioSource:Stop() end
+function SageAudioSource:Pause() end
+function SageAudioSource:Resume() end
+---@return boolean
+function SageAudioSource:IsPlaying() end
+---@param volume number
+function SageAudioSource:SetVolume(volume) end
+---@param pitch number
+function SageAudioSource:SetPitch(pitch) end
+---@param loop boolean
+function SageAudioSource:SetLoop(loop) end
+---@param clip string
+function SageAudioSource:SetClip(clip) end
+---Разовый звук ПОВЕРХ текущего: шаг, щелчок, попадание.
+---@param clip string
+---@param volume? number
+function SageAudioSource:PlayOneShot(clip, volume) end
+
+---@class SageCamera
+---@field transform SageTransform
+local SageCamera = {}
+---@param fov number
+function SageCamera:SetFOV(fov) end
+---@return number
+function SageCamera:GetFOV() end
+---@param value number
+function SageCamera:SetNearClip(value) end
+---@param value number
+function SageCamera:SetFarClip(value) end
+---@param primary boolean
+function SageCamera:SetPrimary(primary) end
+
+---Ввод. Клавиша — для прототипа; игра, которую можно переназначить,
+---спрашивает ДЕЙСТВИЕ.
+Input = {}
+---@param key string
+---@return boolean
+function Input:IsKeyDown(key) end
+---@param key string
+---@return boolean
+function Input:IsKeyPressed(key) end
+---@param button string "MOUSE_LEFT", "MOUSE_RIGHT", …
+---@return boolean
+function Input:IsMouseButtonDown(button) end
+---@param button string
+---@return boolean
+function Input:IsMouseButtonPressed(button) end
+---@return Vec2
+function Input:GetMouseDelta() end
+---@return Vec2
+function Input:GetMousePosition() end
+---@return number
+function Input:GetMouseWheel() end
+---@param action string
+---@return boolean
+function Input:IsActionDown(action) end
+---@param action string
+---@return boolean
+function Input:IsActionPressed(action) end
+---@param action string
+---@return boolean
+function Input:IsActionReleased(action) end
+---@param action string
+---@return number
+function Input:GetAxis(action) end
+---@param action string
+---@return Vec2
+function Input:GetVector2(action) end
+---Объявить действие и клавишу: раскладка принадлежит игре, а не движку.
+---@param action string
+---@param source string
+---@return boolean
+function Input:BindAction(action, source) end
+---@param captured boolean
+function Input:SetCursorCaptured(captured) end
+---@return boolean
+function Input:IsCursorCaptured() end
+
+---Время кадра. timeScale пишется: замедление — обычный приём игры.
+---@class SageTime
+---@field deltaTime number
+---@field fixedDeltaTime number
+---@field time number
+---@field unscaledTime number
+---@field timeScale number
+Time = {}
+
+---Отладочный вывод и отладочная графика.
+Debug = {}
+---@param message string
+function Debug:Log(message) end
+---@param message string
+function Debug:Warning(message) end
+---@param message string
+function Debug:Error(message) end
+function Debug:DrawLine(from, to) end
+function Debug:DrawRay(origin, direction) end
+function Debug:DrawSphere(center, radius) end
+
+---Сцена. Прежний раздел sage.scene (Load и прочее) доступен через этот же
+---объект.
+Scene = {}
+scene = Scene
+---@param name string
+---@return SageObject|nil
+function Scene:Find(name) end
+---@param id integer
+---@return SageObject|nil
+function Scene:FindById(id) end
+---@param tag string
+---@return SageObject|nil
+function Scene:FindByTag(tag) end
+---@param tag string
+---@return SageObject[]
+function Scene:FindAllByTag(tag) end
+---@param name string
+---@return SageObject
+function Scene:Create(name) end
+---Ставит префаб. Точку задают сразу: иначе объект мигает в начале координат.
+---@param prefab string
+---@param position? Vec3
+---@return SageObject|nil
+function Scene:Instantiate(prefab, position) end
+---@param target SageObject|integer
+function Scene:Destroy(target) end
+---@return string
+function Scene:Name() end
+
+---Физические запросы.
+Physics = {}
+---@param origin Vec3
+---@param direction Vec3
+---@param maxDistance? number
+---@return table|nil {object, point, normal, distance}
+function Physics:Raycast(origin, direction, maxDistance) end
+---@param center Vec3
+---@param radius number
+---@return SageObject[]
+function Physics:OverlapSphere(center, radius) end
+---@param gravity Vec3
+function Physics:SetGravity(gravity) end
+
+---Шина событий сцены — одна на кнопку интерфейса, скрипт и код на C++.
+Events = {}
+---@param name string
+---@param arg? any
+function Events:Emit(name, arg) end
+---@param name string
+---@param handler fun(arg: any)
+---@return integer номер подписки
+function Events:On(name, handler) end
+---@param name string
+---@param handler fun(arg: any)
+---@return integer
+function Events:Once(name, handler) end
+---@param subscription integer
+function Events:Off(subscription) end
+
+---Звук без объекта: щелчок интерфейса, взрыв в точке мира.
+Audio = {}
+---@param clip string
+---@param volume? number
+function Audio.Play(clip, volume) end
+---@param clip string
+---@param position Vec3
+---@param volume? number
+function Audio.PlayAt(clip, position, volume) end
+---@param volume number
+function Audio.SetMasterVolume(volume) end
+
+---Vector3 — не второй тип, а конструктор и статические функции поверх Vec3.
+---@overload fun(x: number, y: number, z: number): Vec3
+Vector3 = {}
+---@param a Vec3
+---@param b Vec3
+---@return number
+function Vector3.Dot(a, b) end
+---@param a Vec3
+---@param b Vec3
+---@return Vec3
+function Vector3.Cross(a, b) end
+---@param v Vec3
+---@return Vec3
+function Vector3.Normalize(v) end
+---@param v Vec3
+---@return number
+function Vector3.Length(v) end
+---@param a Vec3
+---@param b Vec3
+---@return number
+function Vector3.Distance(a, b) end
+---@param a Vec3
+---@param b Vec3
+---@param t number
+---@return Vec3
+function Vector3.Lerp(a, b, t) end
+---@param from Vec3
+---@param to Vec3
+---@param maxDelta number
+---@return Vec3
+function Vector3.MoveTowards(from, to, maxDelta) end
+
+---@overload fun(x: number, y: number): Vec2
+Vector2 = {}
+---@overload fun(r: number, g: number, b: number, a?: number): Vec4
+Color = {}
+---@overload fun(): Vec4
+Quaternion = {}
+
+-- --- Хуки скрипта нового стиля --------------------------------------------
+-- Объявляются в таблице, которую файл ВОЗВРАЩАЕТ. Ни один не обязателен:
+-- зовётся только то, что скрипт объявил.
+---@class Script
+---@field gameObject SageObject
+---@field transform SageTransform
+local Script = {}
+function Script:Start() end
+---@param dt number
+function Script:Update(dt) end
+---@param dt number постоянный шаг
+function Script:FixedUpdate(dt) end
+---@param dt number
+function Script:LateUpdate(dt) end
+function Script:OnEnable() end
+function Script:OnDisable() end
+function Script:OnDestroy() end
+---@param other SageObject
+function Script:OnCollisionEnter(other) end
+---@param other SageObject
+function Script:OnCollisionExit(other) end
+---@param other SageObject
+function Script:OnTriggerEnter(other) end
+---@param other SageObject
+function Script:OnTriggerExit(other) end
+---@param name string
+function Script:OnAnimationEvent(name) end
+
 '''
 
 HOOKS = '''

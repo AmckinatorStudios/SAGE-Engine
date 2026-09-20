@@ -2,6 +2,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/Scene.h"
+#include "sage/scripting/ScriptComponent.h"
 #include "sage/vars/VarsComponent.h"
 
 // ---------------------------------------------------------------------------
@@ -33,11 +34,34 @@ struct VarsProxy {
     Scene* Owner = nullptr;
 
     bool Valid() const { return Reg && Reg->valid(Entity); }
-    sage::vars::Table* Table(bool create) const {
+
+    // ДВА ХРАНИЛИЩА, ОДИН ВИД СНАРУЖИ.
+    //
+    // Переменные, ОБЪЯВЛЕННЫЕ скриптом, живут в самом компоненте скрипта: они
+    // принадлежат паре «объект + скрипт» и исчезают вместе с ним. Переменные,
+    // заведённые человеком объекту БЕЗ скрипта (точка появления, зона,
+    // кнопка), живут в VarsComponent. Для скрипта это одно и то же имя, и
+    // разделять их в его глазах значило бы заставить помнить, кто где.
+    sage::vars::Table* Fields() const {
+        if (!Valid()) return nullptr;
+        ScriptComponent* sc = Reg->try_get<ScriptComponent>(Entity);
+        return sc ? &sc->Fields : nullptr;
+    }
+    sage::vars::Table* Own(bool create) const {
         if (!Valid()) return nullptr;
         if (create) return &Reg->get_or_emplace<VarsComponent>(Entity).Values;
         VarsComponent* c = Reg->try_get<VarsComponent>(Entity);
         return c ? &c->Values : nullptr;
+    }
+    // Где лежит ЭТА переменная. Объявленная скриптом — сильнее: инспектор
+    // показывает её рядом с файлом, и писать её надо туда же, иначе значение
+    // из скрипта и значение в инспекторе разойдутся молча.
+    sage::vars::Table* For(const std::string& name, bool create) const {
+        if (sage::vars::Table* f = Fields())
+            if (f->Find(name)) return f;
+        if (sage::vars::Table* o = Own(false))
+            if (o->Find(name)) return o;
+        return create ? Own(true) : nullptr;
     }
 };
 
@@ -98,21 +122,22 @@ void ScriptEngine::RegisterVarsApi() {
         "VarsProxy", sol::no_constructor,
         sol::meta_function::index,
         [this](VarsProxy& p, const std::string& name) -> sol::object {
-            const sage::vars::Table* t = p.Table(false);
+            const sage::vars::Table* t = p.For(name, false);
             if (!t) return sol::nil;
             const sage::vars::Var* v = t->Find(name);
             return v ? ValueToLua(v->Data) : sol::nil;
         },
         sol::meta_function::new_index,
         [this](VarsProxy& p, const std::string& name, sol::object value) {
-            sage::vars::Table* t = p.Table(true);
+            sage::vars::Table* t = p.For(name, true);
             if (!t) return;
             t->Set(name, ValueFromLua(value));
         },
         sol::meta_function::length,
         [](VarsProxy& p) -> int {
-            const sage::vars::Table* t = p.Table(false);
-            return t ? (int)t->Size() : 0;
+            const sage::vars::Table* fields = p.Fields();
+            const sage::vars::Table* own = p.Own(false);
+            return (fields ? (int)fields->Size() : 0) + (own ? (int)own->Size() : 0);
         });
 
     // Точка входа: obj:Vars(). Метод, а не поле, потому что поле usertype
@@ -128,10 +153,11 @@ void ScriptEngine::RegisterVarsApi() {
     go["VarNames"] = [this](GameObject& o) -> sol::table {
         sol::table out = m_lua.create_table();
         if (!o.Valid()) return out;
-        if (const VarsComponent* c = o.Registry()->try_get<VarsComponent>(o.Entity())) {
-            int i = 1;
+        int i = 1;
+        if (const ScriptComponent* sc = o.Registry()->try_get<ScriptComponent>(o.Entity()))
+            for (const sage::vars::Var& v : sc->Fields.All()) out[i++] = v.Name;
+        if (const VarsComponent* c = o.Registry()->try_get<VarsComponent>(o.Entity()))
             for (const sage::vars::Var& v : c->Values.All()) out[i++] = v.Name;
-        }
         return out;
     };
 
@@ -139,6 +165,8 @@ void ScriptEngine::RegisterVarsApi() {
     // отличить «нет переменной» от «переменная равна nil» иначе нечем.
     go["HasVar"] = [](GameObject& o, const std::string& name) -> bool {
         if (!o.Valid()) return false;
+        if (const ScriptComponent* sc = o.Registry()->try_get<ScriptComponent>(o.Entity()))
+            if (sc->Fields.Find(name)) return true;
         const VarsComponent* c = o.Registry()->try_get<VarsComponent>(o.Entity());
         return c && c->Values.Find(name) != nullptr;
     };

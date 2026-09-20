@@ -736,8 +736,10 @@ void EditorLayer::OnAttach() {
         reg.emplace_or_replace<ScriptComponent>(door.Entity(),
                                                 ScriptComponent{m_project.AssetRef(scriptPath)});
         MergeScriptVars(door);
-        if (VarsComponent* vc = reg.try_get<VarsComponent>(door.Entity()))
-            vc->Values.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+        // Переменные, объявленные скриптом, лежат в его компоненте — рядом с
+        // файлом, который их объявил (см. ScriptComponent.h).
+        if (ScriptComponent* sc = reg.try_get<ScriptComponent>(door.Entity()))
+            sc->Fields.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
 
         GameObject button = m_scene->CreateObject("Кнопка «Открыть»");
         sage::ui::Element t;
@@ -802,7 +804,7 @@ void EditorLayer::OnAttach() {
         // тот же, что и от мыши.
         if (mode && std::string(mode) == "play") {
             StartPlay();
-            if (m_play.Scripts()) m_play.Scripts()->UpdateAll(0.016f);
+            if (m_play.Scripts()) m_play.StepScripts(*m_scene, 0.016f);
             sage::ui::UIInputState down;
             down.Mouse = {640.0f, 360.0f};   // центр экрана — там стоит кнопка
             down.MouseDown = true;
@@ -812,7 +814,7 @@ void EditorLayer::OnAttach() {
             up.Mouse = down.Mouse;
             up.MouseReleased = true;
             sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
-            if (m_play.Scripts()) m_play.Scripts()->UpdateAll(0.016f);
+            if (m_play.Scripts()) m_play.StepScripts(*m_scene, 0.016f);
         }
 
         // Выбор: дверь по умолчанию, но SAGE_EDITOR_SELECT_ENTITY сильнее — он
@@ -1018,7 +1020,11 @@ void EditorLayer::OnUpdate(float dt) {
     // правке, и в Play: в правке привязанных скриптов просто нет, и обход
     // пустого списка ничего не стоит.
     if (m_play.Scripts()) {
-        const int n = m_play.Scripts()->ReloadChangedScripts();
+        int n = m_play.Scripts()->ReloadChangedScripts();
+        // Скрипты объектов ведёт система скриптинга, уровневые — прежний
+        // движок. Перечитывать надо и то, и другое: человек правит файл, а не
+        // «объектный скрипт» или «уровневый».
+        if (m_play.Scripting()) n += m_play.Scripting()->ReloadChanged();
         if (n > 0) SetStatusMessage(T("Scripts reloaded: ") + std::to_string(n));
     }
 

@@ -44,6 +44,7 @@ add_executable(sage_tests
     test_assetcache.cpp
     test_lighting.cpp
     test_scripting_lifecycle.cpp
+    test_scripting_system.cpp
     test_fbx.cpp
     test_audio.cpp
     test_clipfile.cpp

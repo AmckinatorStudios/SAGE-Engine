@@ -26,7 +26,7 @@
 | **EngineContext** | Явный владелец подсистем, живущих «одна на процесс»: кэш ресурсов, база ассетов, пул задач, настройки, каталог пост-эффектов, набор render-текстур, реестр импортёров. Создаёт их в объявленном порядке и разрушает в обратном; GPU-объекты освобождает по вызову `Application`, пока устройство живо. Поднимается точкой входа (`SAGE_MAIN`), в тестах — `ScopedEngineContext`. | `sage/core/EngineContext.h` |
 | **ECS (entt)** | Сцена — это `entt::registry`; сущности собираются из компонентов (`Name`, `Transform`, `MeshRenderer`, `Hierarchy` (родитель/дети), `Script`, ...). `GameObject` — дешёвый дескриптор поверх. Мировые матрицы — композицией по иерархии (`Scene::WorldMatrix`). Системы обходят сущности (`sage/ecs/RenderSystem.h`). | `sage/scene/Scene.h`, `Components.h`, `sage/ecs/` |
 | **RHI (абстракция графики)** | Движок обращается не к OpenGL напрямую, а к интерфейсу `GraphicsDevice`. Реализация бэкенда (сейчас OpenGL) изолирована в `engine/src/rhi/opengl/`. Чтобы добавить Vulkan/D3D — реализуют интерфейс, код движка/игр не трогают. | `sage/rhi/GraphicsDevice.h`, `Resources.h`, `engine/src/rhi/opengl/` |
-| **Скриптинг (Lua)** | Управление сущностями и логикой уровня из `.lua` без перекомпиляции. | `sage/scripting/ScriptEngine.*` |
+| **Скриптинг** | Поведение объектов и логика уровня из файла скрипта, без перекомпиляции. Язык — сменная деталь: `ScriptingSystem → ScriptRuntime → LanguageBackend → LuaBackend`, ядро про Lua не знает (см. [scripting.md](scripting.md)). | `sage/scripting/ScriptingSystem.*`, `ScriptRuntime.*`, `lua/` |
 
 ## Структура репозитория
 ```
@@ -58,7 +58,8 @@ SAGE-Engine/
       physics/  PhysicsWorld (абстракция) — встроенный движок / Jolt / Null
       gi/       запечённое глобальное освещение: CPU path tracer (BVH),
                 лайтмапы (развёртка+атлас) и GI-объём световых проб (L1 SH)
-      scripting/ ScriptEngine — Lua (sol2)
+      scripting/ ScriptingSystem/ScriptRuntime — язык не важен
+                 lua/ — LuaBackend и SAGE API на sol2
       audio/    AudioEngine — 2D/3D-звук, музыка (miniaudio)
     src/rhi/opengl/           — OpenGL-бэкенд: ЕДИНСТВЕННОЕ место с glad (уровень устройства)
 

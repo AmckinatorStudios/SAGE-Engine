@@ -700,7 +700,7 @@ void EditorLayer::TickTemplateShots() {
         // Кадры «на устояться»: первый кадр после загрузки сцены ещё не имеет
         // ни теней, ни отражений, ни собранного скриптами мира.
         --m_coverShotWait;
-        if (InPlayMode() && m_play.Scripts()) m_play.Scripts()->UpdateAll(1.0f / 60.0f);
+        if (InPlayMode() && m_play.Scripts()) m_play.StepScripts(*m_scene, 1.0f / 60.0f);
         if (m_coverShotWait == 0) {
             m_coverShotPath =
                 (std::filesystem::path(m_coverShotDir) / (all[(size_t)m_coverShotIndex].Id + ".png"))

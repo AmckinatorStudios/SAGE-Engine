@@ -30,6 +30,7 @@
 #include "sage/physics/PhysicsScene.h"
 
 class ScriptEngine;
+namespace sage::scripting { class ScriptingSystem; }
 
 // ---------------------------------------------------------------------------
 // PlayerLayer — универсальный рантайм игр, собранных в редакторе SAGE
@@ -107,6 +108,10 @@ private:
 
     std::filesystem::path m_scenePath;   // что сейчас загружено
     std::unique_ptr<ScriptEngine> m_scripts;
+    // ПОСЛЕ m_scripts намеренно: Lua-бэкенд системы работает на состоянии
+    // прежнего движка и пережить его не имеет права — члены разрушаются в
+    // обратном порядке объявления.
+    std::unique_ptr<sage::scripting::ScriptingSystem> m_scripting;
     // Сеть игры (Lua: Net.*). По значению, а не по указателю: она ничего не
     // стоит в офлайне — ни сокета, ни потока, — пока скрипт не позвал Net.Host
     // или Net.Connect.

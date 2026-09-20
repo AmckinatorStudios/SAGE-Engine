@@ -70,50 +70,47 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
     if (const std::string args = sage::EnvString("SAGE_GAME_ARGS"); !args.empty())
         m_scripts->SetLaunchArgsFromString(args);
 
-    // Привязываем скрипты всех сущностей со ScriptComponent. Ошибка в одном
-    // скрипте (нет файла, синтаксис) не срывает Play — логируется, остальные
-    // продолжают работать.
-    int attached = 0;
-    auto view = scene.Registry().view<ScriptComponent, IdComponent>();
-    for (auto e : view) {
-        const std::string& path = view.get<ScriptComponent>(e).Path;
-        if (path.empty()) continue;
-        // Пути скриптов в сцене — ОТНОСИТЕЛЬНО ПРОЕКТА ("assets/scripts/x.lua"):
-        // так их резолвит собранная игра (SagePlayer делает chdir в проект). CWD
-        // редактора — не папка проекта, поэтому здесь резолвим сами: как есть
-        // (скрипты редактора, абсолютные пути), иначе — от корня проекта. Без
-        // этого скрипты проекта работали бы в собранной игре, но НЕ в Play.
-        std::string resolved = path;
-        std::error_code scriptEc;
-        if (!fs::exists(resolved, scriptEc)) {
-            fs::path inProject = ctx.ProjectDir / path;
-            if (fs::exists(inProject, scriptEc)) resolved = inProject.string();
-        }
-        try {
-            m_scripts->AttachScript(GameObject(&scene.Registry(), e), resolved);
-            ++attached;
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Editor") << "Play: script attach failed: " << ex.what();
-        }
-    }
-
-    // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.
-    // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а файл проекта
-    // — это «как решил автор игры», и он обязан их замещать, а не дописываться
-    // к ним. Иначе переназначенное в редакторе действие продолжало бы работать
-    // и на старой клавише — то есть панель «Управление» выглядела бы
-    // сломанной. Тот же порядок у собранной игры (см. PlayerLayer).
-    if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
-
     // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
     // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).
+    //
+    // ДО скриптов, а не после: Start скрипта вправе спросить у себя
+    // CharacterController и физику, а не получить «не привязано» ровно на
+    // первом кадре. Состав мира всё равно досинхронизируется каждым шагом
+    // (PhysicsScene::SyncBodies), поэтому объекты, созданные из Start, не
+    // теряются.
     m_physics = std::make_unique<PhysicsScene>(
         sage::physics::PhysicsWorld::DefaultBackend(), scene);
-
-    // Скрипты получают доступ к физике времени выполнения (SetVelocity/GetVelocity/
-    // SetGravity) — привязываем ПОСЛЕ построения мира, чтобы RuntimeBody сущностей
-    // уже существовали к первому OnUpdate.
     m_scripts->BindPhysics(*m_physics);
+
+    // --- СИСТЕМА СКРИПТИНГА -------------------------------------------------
+    //
+    // Поведение объектов ведёт она, а не прежний ScriptEngine: у неё жизненный
+    // цикл (Start/Update/FixedUpdate/LateUpdate/OnDestroy), события
+    // столкновений и публичные переменные из сцены. Язык подключается
+    // бэкендом — Lua работает на состоянии прежнего движка, поэтому и старые
+    // скрипты (глобальные OnStart/OnUpdate), и новые (`return Player`) живут
+    // рядом и видят один и тот же API.
+    m_scripting = std::make_unique<sage::scripting::ScriptingSystem>();
+    m_scripting->AddBackend(sage::scripting::MakeLuaBackend({m_scripts.get()}));
+    m_scripting->SetProjectDir(ctx.ProjectDir);
+    sage::scripting::ScriptServices services;
+    services.ScenePtr = &scene;
+    services.Input = &m_input;
+    services.Physics = m_physics.get();
+    services.Audio = m_audio.get();
+    m_scripting->Bind(services);
+
+    // Ошибка в одном скрипте (нет файла, синтаксис) не срывает Play —
+    // логируется, остальные продолжают работать.
+    const int attached = m_scripting->AttachScene(scene);
+
+    // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.
+    // Скрипты объявляют СВОИ умолчания (BindAction в Start), а файл проекта —
+    // это «как решил автор игры», и он обязан их замещать, а не дописываться к
+    // ним. Иначе переназначенное в редакторе действие продолжало бы работать и
+    // на старой клавише — то есть панель «Управление» выглядела бы сломанной.
+    // Тот же порядок у собранной игры (см. PlayerLayer).
+    if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
 
     // Состав кадра на время Play — ТОТ ЖЕ, что у собранной игры (см.
     // PlayerLayer): скрипты, физика, анимация, частицы, звук в порядке,
@@ -125,6 +122,7 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
     if (ctx.Systems) {
         sage::CoreSystems core;
         core.Scripts = m_scripts.get();
+        core.Scripting = m_scripting.get();
         core.Physics = m_physics.get();
         core.Particles = ctx.Particles;
         core.Audio = m_audio.get();
@@ -147,6 +145,16 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
                        << m_physics->BodyCount() << " physics body(ies) on "
                        << m_physics->BackendName() << ")";
     return attached;
+}
+
+void EditorPlaySession::StepScripts(Scene& scene, float dt) {
+    if (m_scripts) m_scripts->UpdateAll(dt);
+    if (!m_scripting) return;
+    // Столкновения прошлого шага — до Update, как и в обычном кадре.
+    if (m_physics) m_scripting->DispatchPhysicsEvents(*m_physics, scene);
+    m_scripting->FixedUpdate(dt);
+    m_scripting->Update(dt);
+    m_scripting->LateUpdate(dt);
 }
 
 // ПАУЗА — ЭТО ОСТАНОВЛЕННЫЙ КАДР, А НЕ ЗНАЧОК.
@@ -208,6 +216,8 @@ void EditorPlaySession::Stop(const PlayContext& ctx) {
     // "audio" остаются: это превью режима правки, а не игровые системы.
     if (ctx.Systems) {
         ctx.Systems->Remove("scripts");
+        ctx.Systems->Remove("scripting");
+        ctx.Systems->Remove("scripting.late");
         ctx.Systems->Remove("physics");
     }
 
@@ -217,6 +227,11 @@ void EditorPlaySession::Stop(const PlayContext& ctx) {
     // существует, и остановить их будет нечем.
     if (m_audio && scene) sage::audio::StopScene(*scene, *m_audio);
 
+    // Скрипты объектов узнают об остановке ДО того, как исчезнут: OnDestroy —
+    // последнее место, где скрипт ещё может сохранить состояние. И раньше
+    // прежнего движка: Lua-бэкенд живёт на его состоянии.
+    if (m_scripting) m_scripting->Shutdown();
+    m_scripting.reset();
     m_scripts.reset();
     m_physics.reset();
 

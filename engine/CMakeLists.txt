@@ -139,6 +139,15 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
     src/sage/scripting/ScriptEngine.cpp
+    src/sage/scripting/ScriptRuntime.cpp
+    src/sage/scripting/ScriptFields.cpp
+    src/sage/scripting/ScriptingSystem.cpp
+    src/sage/scripting/lua/LuaBackend.cpp
+    src/sage/scripting/lua/LuaFields.cpp
+    src/sage/scripting/lua/LuaApi_Math.cpp
+    src/sage/scripting/lua/LuaApi_Object.cpp
+    src/sage/scripting/lua/LuaApi_Components.cpp
+    src/sage/scripting/lua/LuaApi_Globals.cpp
     src/sage/scripting/ScriptApi_Math.cpp
     src/sage/scripting/ScriptApi_Net.cpp
     src/sage/scripting/ScriptApi_Components.cpp

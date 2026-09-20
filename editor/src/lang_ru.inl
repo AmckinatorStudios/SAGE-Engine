@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1842.
+// Язык: Русский. Строк: 1850.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -444,6 +444,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Синий"},
     {"Body Type",
      "Тип тела"},
+    {"Body offset from the object origin",
+     "Смещение тела относительно точки объекта"},
     {"Bone",
      "Кость"},
     {"Bones reach for a target",
@@ -732,6 +734,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Консоль"},
     {"Constant",
      "Ступенькой"},
+    {"Contact gap that keeps the character from jittering on seams",
+     "Зазор контакта: без него персонаж дрожит на стыках плит"},
     {"Containers",
      "Контейнеры"},
     {"Context",
@@ -2156,6 +2160,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка вывода"},
     {"Over the selection",
      "Над выделением"},
+    {"Own gravity of this character; 0 means it does not fall",
+     "Своё тяготение этого персонажа; 0 — не падает"},
     {"PAUSED",
      "ПАУЗА"},
     {"PBR",
@@ -2644,6 +2650,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Запустить сцену (сцена будет восстановлена по Stop)"},
     {"Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)",
      "Выполняется в режиме игры: OnStart(entity), OnUpdate(entity, dt)"},
+    {"Runs in Play mode: Start, Update, FixedUpdate, collisions",
+     "Работает в Play: Start, Update, FixedUpdate, столкновения"},
     {"SAGE Engine",
      "SAGE Engine"},
     {"SAGE Engine %s",
@@ -2868,6 +2876,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Клипы скелетной анимации"},
     {"Skeleton comes from the Mesh model",
      "Скелет берётся из модели в Mesh"},
+    {"Skin Width",
+     "Зазор контакта"},
     {"Sky",
      "Небо"},
     {"Sky (computed)",
@@ -2890,6 +2900,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ползунок"},
     {"Slider or checkbox value",
      "Значение ползунка или галки"},
+    {"Slope Limit",
+     "Предел склона"},
     {"Slow grey plume",
      "Медленный серый шлейф"},
     {"Smoke",
@@ -2997,6 +3009,8 @@ constexpr TranslationPair kRussianStrings[] = {
     {"Step",
      "Шаг"},
     {"Step Height",
+     "Высота ступеньки"},
+    {"Step Offset",
      "Высота ступеньки"},
     {"Steps decide banding, accumulation decides grain, scale decides sharpness. Turn accumulation off and the same number of steps becomes visibly noisy.",
      "Шаги решают полосы, накопление — зерно, масштаб — резкость. Выключите накопление, и то же число шагов станет заметно зернистым."},
@@ -3202,6 +3216,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Та же кнопка привязана к другому действию. Это законно, когда они не работают одновременно — то есть живут в разных контекстах."},
     {"The scene itself: everything lives here",
      "Сама сцена: здесь живёт всё"},
+    {"The script no longer declares this variable",
+     "Скрипт больше не объявляет эту переменную"},
     {"The server replicates this object to clients",
      "Сервер реплицирует этот объект клиентам"},
     {"The server sends this object to clients; they follow it",
