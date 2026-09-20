@@ -443,7 +443,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader("script", T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript,
-                                       T("Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)"))) {
+                                       T("Runs in Play mode: Start, Update, FixedUpdate, collisions"))) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
             // обложка, приём перетаскивания с проверкой типа, «показать в
@@ -481,6 +481,36 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 }
             }
 
+            // --- ПЕРЕМЕННЫЕ, ОБЪЯВЛЕННЫЕ САМИМ СКРИПТОМ --------------------
+            //
+            // Здесь, внутри секции скрипта, а не отдельным списком: «какой
+            // скрипт» и «с какими настройками» — один вопрос. И ничего, кроме
+            // них: галочек «выполнять ли Update» и «как исполнять» у компонента
+            // нет намеренно — на них нет осмысленного ответа со стороны
+            // человека, собирающего уровень (см. ScriptComponent.h).
+            //
+            // Объявление подмешивается ПЕРЕД показом, а не однажды при
+            // назначении файла: .lua правят снаружи редактора, и переменная,
+            // добавленная в скрипт минуту назад, обязана появиться здесь сама.
+            if (!sc->Path.empty()) host.MergeScriptVars(obj);
+            if (!sc->Fields.Empty()) {
+                ImGui::Separator();
+                ImGui::TextUnformatted(T("Variables"));
+                for (sage::vars::Var& var : sc->Fields.All()) {
+                    // Переменная, которой в скрипте больше нет, остаётся видна
+                    // приглушённой: молча стереть настройку из-за опечатки в
+                    // имени хуже, чем показать лишнюю строку.
+                    if (!var.Declared) ImGui::BeginDisabled();
+                    // Снимок для отмены берёт сам рисовальщик значения (у
+                    // ползунка он нужен ДО перетаскивания, а не после).
+                    varsui::DrawValue(host, var.Name.c_str(), var.Data, &var, &m_preview);
+                    if (!var.Declared) {
+                        ImGui::EndDisabled();
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("%s", T("The script no longer declares this variable"));
+                    }
+                }
+            }
         }
     }
 
@@ -495,15 +525,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // настройками» — один вопрос, и разносить их по разным концам списка
     // значит заставлять прокручивать инспектор туда-обратно.
     {
-        const bool hasScript = reg.all_of<ScriptComponent>(obj.Entity());
+        // Переменные, заведённые ЧЕЛОВЕКОМ, а не скриптом: точка появления с
+        // именем волны, зона с названием следующего уровня, кнопка с
+        // аргументом события. Публичные переменные скрипта показываются в его
+        // собственной секции выше — вместе с файлом, который их объявил.
         const bool hasVars = reg.all_of<VarsComponent>(obj.Entity());
-        if ((hasScript || hasVars) &&
+        if (hasVars &&
             EditorTheme::SectionHeader("list", T("Variables" "###Variables"), ImGuiTreeNodeFlags_DefaultOpen)) {
             VarsComponent& vc = reg.get_or_emplace<VarsComponent>(obj.Entity());
-            // Объявление скрипта подмешивается ПЕРЕД показом, а не однажды при
-            // назначении: файл правят снаружи редактора, и переменная,
-            // добавленная в скрипт минуту назад, обязана появиться здесь сама.
-            if (hasScript) host.MergeScriptVars(obj);
             // Снимок для отмены берут сами поля (см. VarsEditor.cpp): у
             // ползунка он нужен ДО перетаскивания, а не после.
             varsui::DrawTable(host, obj, vc.Values, &m_preview);
@@ -615,14 +644,29 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Height"), &ch->Height, 0.02f, 0.1f, 10.0f);
             host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Step Height"), &ch->StepHeight, 0.01f, 0.0f, 2.0f);
+            ImGui::DragFloat3(T("Center"), &ch->Center.x, 0.01f);
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Body offset from the object origin"));
+            }
+            ImGui::DragFloat(T("Slope Limit"), &ch->SlopeLimit, 0.5f, 0.0f, 89.0f, "%.0f°");
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Steeper than this and the character slides"));
+            ImGui::DragFloat(T("Step Offset"), &ch->StepOffset, 0.01f, 0.0f, 2.0f);
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("How tall a step the character climbs without jumping"));
             }
-            ImGui::DragFloat(T("Max Slope"), &ch->MaxSlopeDeg, 0.5f, 0.0f, 89.0f, "%.0f°");
+            ImGui::DragFloat(T("Skin Width"), &ch->SkinWidth, 0.001f, 0.0f, 0.2f, "%.3f");
             host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Steeper than this and the character slides"));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Contact gap that keeps the character from jittering on seams"));
+            }
+            ImGui::DragFloat(T("Gravity"), &ch->Gravity, 0.1f, -100.0f, 100.0f);
+            host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Own gravity of this character; 0 means it does not fall"));
+            }
             ImGui::DragFloat(T("Mass"), &ch->Mass, 0.5f, 0.1f, 1000.0f);
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
@@ -1353,7 +1397,7 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          AddComp<AudioSourceComponent>},
 
         {"Script", "Logic", "script",
-         "Lua: OnStart and OnUpdate on this object", HasComp<ScriptComponent>,
+         "Behaviour written in a script file, with its public variables", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},
         {"Net Replicated", "Logic", "network",
          "The server replicates this object to clients", HasComp<NetReplicatedComponent>,

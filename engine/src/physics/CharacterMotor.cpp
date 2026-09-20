@@ -35,13 +35,21 @@ void CharacterMotor::Configure(const CharacterDesc& desc) {
     // проскакивало бы над препятствиями целиком. Ограничение здесь, а не в
     // StepMove, чтобы неверная настройка чинилась один раз при создании.
     m_desc.StepHeight = std::clamp(m_desc.StepHeight, 0.0f, m_desc.Height * 0.9f);
+    // Зазор не может съесть тело: радиус в 0.2 с зазором в 0.3 дал бы
+    // отрицательную половину коробки, то есть тело, вывернутое наизнанку.
+    m_desc.SkinWidth = std::clamp(m_desc.SkinWidth, 0.0f, m_desc.Radius * 0.5f);
     m_state.Position = m_desc.Position;
 }
 
 void CharacterMotor::BoundsAt(const glm::vec3& feet, glm::vec3& min, glm::vec3& max) const {
-    const float r = m_desc.Radius - kSkin;
-    min = glm::vec3(feet.x - r, feet.y + kSkin, feet.z - r);
-    max = glm::vec3(feet.x + r, feet.y + m_desc.Height - kSkin, feet.z + r);
+    // Зазор — настройка контроллера (SkinWidth), а не константа мотора: разным
+    // персонажам нужен разный (человек и паук с ногами в полметра стоят на
+    // поверхности по-разному). Ноль оставляет прежнюю жёсткую границу.
+    const float skin = m_desc.SkinWidth > 0.0f ? m_desc.SkinWidth : kSkin;
+    const float r = std::max(0.001f, m_desc.Radius - skin);
+    min = glm::vec3(feet.x - r, feet.y + skin, feet.z - r);
+    max = glm::vec3(feet.x + r, feet.y + std::max(skin * 2.0f + 0.001f, m_desc.Height - skin),
+                    feet.z + r);
 }
 
 bool CharacterMotor::Fits(const SolidQuery& solid, const glm::vec3& feet) const {

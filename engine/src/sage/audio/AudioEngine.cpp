@@ -295,6 +295,16 @@ void AudioEngine::SetListener(const glm::vec3& position, const glm::vec3& forwar
     ma_engine_listener_set_world_up(&m_impl->Engine, 0, up.x, up.y, up.z);
 }
 
+void AudioEngine::SetSoundPaused(SoundHandle handle, bool paused) {
+    if (!m_impl->Available) return;
+    auto it = m_impl->Managed.find(handle);
+    if (it == m_impl->Managed.end()) return;
+    // ma_sound_stop, а не uninit: курсор остаётся на месте, и старт продолжает
+    // с него же. Пауза, теряющая позицию, — это не пауза, а остановка.
+    if (paused) ma_sound_stop(it->second);
+    else ma_sound_start(it->second);
+}
+
 int AudioEngine::SetAllPaused(bool paused) {
     if (!m_impl->Available) return 0;
     int touched = 0;

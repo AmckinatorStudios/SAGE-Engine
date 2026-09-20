@@ -104,6 +104,7 @@ PlayContext EditorLayer::MakePlayContext() {
     ctx.Particles = &m_renderer.Particles();
     ctx.ProjectDir = m_project.Dir();
     ctx.RestoreScene = [this](const std::string& s) { return RestoreSceneFromString(s); };
+    ctx.LoadSceneForPlay = [this](const std::string& name) { return LoadSceneForPlay(name); };
     ctx.ApplyProjectInputMapping = [this] { ApplyProjectInputMapping(); };
     return ctx;
 }
@@ -210,6 +211,45 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
 //  Undo/Redo (снапшот-модель) + dirty-маркер
 // ============================================================================
 
+// СЦЕНА ДЛЯ ИГРЫ, А НЕ ДЛЯ ПРАВКИ.
+//
+// Переход `scene:Load("level2")` во время Play обязан подменить ИГРАЕМУЮ
+// сцену и не трогать документ: ни пути открытой сцены, ни истории правок, ни
+// отметки «изменено». Stop вернёт человека ровно туда, где он был, вместе с
+// несохранённой работой.
+//
+// Имя — как в скрипте: "level2" (без папки и расширения). Путь с расширением
+// тоже принимается: человек, пишущий "level2.sage", имел в виду то же самое, и
+// отвечать ему «сцена не найдена» — вредничать.
+bool EditorLayer::LoadSceneForPlay(const std::string& name) {
+    if (name.empty()) return false;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path path = name;
+    if (path.extension() != ".sage") path += ".sage";
+    if (!path.is_absolute() && !fs::exists(path, ec) && m_project.Loaded())
+        path = m_project.ScenesDir() / path.filename();
+    if (!fs::exists(path, ec)) {
+        LOG_ERROR("Editor") << "Play: сцены нет: " << path.string();
+        return false;
+    }
+    try {
+        std::unique_ptr<Scene> loaded = SceneSerializer::Load(path.string());
+        if (!loaded) return false;
+        m_scene = std::move(loaded);
+        m_scenePtr = m_scene.get();
+        // Выбор принадлежал ПРЕЖНЕЙ сцене: его номера в новой означают другие
+        // объекты, и оставить его значило бы показать в инспекторе чужое.
+        m_selection.Clear();
+        LOG_INFO("Editor") << "Play: перешли на сцену " << path.filename().string() << " ("
+                           << m_scene->Count() << " объектов)";
+        return true;
+    } catch (const std::exception& e) {
+        LOG_ERROR("Editor") << "Play: сцена не загрузилась (" << path.string() << "): " << e.what();
+        return false;
+    }
+}
+
 bool EditorLayer::RestoreSceneFromString(const std::string& snapshot) {
     try {
         std::unique_ptr<Scene> restored = SceneSerializer::LoadFromString(snapshot);
@@ -218,6 +258,10 @@ bool EditorLayer::RestoreSceneFromString(const std::string& snapshot) {
         // (Transplant сверяет отпечаток и при несовпадении не переносит).
         if (m_scene && restored) sage::gi::Transplant(*m_scene, *restored);
         m_scene = std::move(restored);
+        // Указатель, с которым работает Play-сессия, обязан ехать за сценой:
+        // восстановление снимка — это ЗАМЕНА объекта, и оставленный старый
+        // адрес читался бы уже освобождённой памятью.
+        m_scenePtr = m_scene.get();
         // Выбор хранится как id, а сериализатор сохраняет id — выбор переживает
         // откат, если сущность существует в снапшоте (иначе Get() даст invalid).
         return true;

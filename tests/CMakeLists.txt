@@ -44,6 +44,8 @@ add_executable(sage_tests
     test_assetcache.cpp
     test_lighting.cpp
     test_scripting_lifecycle.cpp
+    test_scripting_system.cpp
+    test_project_startscene.cpp
     test_fbx.cpp
     test_audio.cpp
     test_clipfile.cpp
@@ -63,9 +65,11 @@ add_executable(sage_tests
     ../editor/src/HotkeyScope.cpp
     ../editor/src/EditorSelection.cpp
     ../editor/src/EditorHistory.cpp
+    ../editor/src/Project.cpp
 )
 
-target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/../editor/src)
 # tinygltf — ради проверки разреженных аксессоров: она сверяет то, что отдаёт
 # общий читатель (assets/import/GltfAccessor.h), а он работает с tinygltf::Model.
 target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json tinygltf)

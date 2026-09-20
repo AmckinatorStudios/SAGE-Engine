@@ -11,6 +11,7 @@
 
 namespace sage::net { class NetworkSystem; }
 #include <sol/sol.hpp>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -234,6 +235,21 @@ public:
     // Доступ к состоянию Lua — на случай если игре нужно зарегистрировать
     // свою собственную API-функцию/тип в дополнение к базовой
     sol::state& Lua() { return m_lua; }
+
+    // --- МОСТ К СКРИПТАМ ОБЪЕКТОВ --------------------------------------------
+    //
+    // Поведение объектов ведёт система скриптинга (sage/scripting/
+    // ScriptingSystem.h): у неё свои экземпляры, и прежний движок о них ничего
+    // не знает. Но SendMessage/Broadcast, адресные события шины и OnQuit
+    // обязаны доходить И ДО НИХ — иначе кнопка интерфейса перестаёт звать
+    // дверь, а игра теряет прогресс при выходе. Мост ставит Lua-бэкенд: он
+    // единственный, кто знает и про то, и про другое.
+    //
+    // Пустой мост — не ошибка: уровневые скрипты работают и без него.
+    using MessageSink = std::function<void(int targetId, const std::string& name, sol::object data)>;
+    void SetMessageSink(MessageSink sink) { m_messageSink = std::move(sink); }
+    using QuitSink = std::function<void()>;
+    void SetQuitSink(QuitSink sink) { m_quitSink = std::move(sink); }
 
 private:
     struct ScriptInstance {
@@ -537,4 +553,9 @@ private:
     float m_timeScale = 1.0f;
 
     int m_nextTimerId = 1;
+
+    // Мост к скриптам объектов (см. SetMessageSink). ПОСЛЕ m_lua намеренно:
+    // внутри лежат ссылки в реестр Lua.
+    MessageSink m_messageSink;
+    QuitSink m_quitSink;
 };

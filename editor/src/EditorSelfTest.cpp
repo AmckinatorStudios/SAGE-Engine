@@ -321,7 +321,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2340,6 +2340,98 @@ bool EditorLayer::SelfTestSceneAndPlay() {
                 ok = false;
             }
         }
+    }
+
+    // --- ПЕРЕХОД МЕЖДУ УРОВНЯМИ ПРЯМО В РЕДАКТОРЕ ---------------------------
+    //
+    // `scene:Load("...")` в Play-режиме раньше не делал НИЧЕГО — редактор писал
+    // в лог «проверяйте переходы в собранной игре». То есть самую частую ошибку
+    // уровня (не та сцена, не тот спавн, потерянный игрок) нельзя было увидеть
+    // там, где её правят.
+    //
+    // Проверяется путь целиком: две сцены проекта, скрипт-портал, Play,
+    // переход — и Stop, который обязан вернуть человеку ЕГО документ, а не тот
+    // уровень, на котором игра закончилась.
+    if (ok) {
+        // Своя сцена на время проверки: следующие шаги self-test'а работают с
+        // той, что была открыта, и оставить им чужую значило бы уронить их
+        // проверки, не имеющие к переходам никакого отношения.
+        const std::string sceneBefore = SceneSerializer::SaveToString(*m_scene);
+        std::error_code sceneEc;
+        fs::create_directories(m_project.Dir() / "assets" / "scripts", sceneEc);
+        {
+            std::ofstream f(m_project.Dir() / "assets" / "scripts" / "selftest_portal.lua");
+            // Заодно отладочная графика: заказ из скрипта обязан долетать до
+            // буфера кадра, а не быть объявленной и молчащей функцией.
+            f << "local P = {}\n"
+              << "function P:Update(dt)\n"
+              << "    Debug:DrawLine(Vector3(0, 0, 0), Vector3(0, 2, 0))\n"
+              << "    scene:Load(\"selftest_level2\")\n"
+              << "end\n"
+              << "return P\n";
+        }
+
+        // Сцена-назначение: узнаётся по имени объекта.
+        NewScene(ProjectTemplateKind::Empty);
+        m_scene->CreateObject("SelfTestLevelTwoMarker");
+        const fs::path secondPath = m_project.ScenesDir() / "selftest_level2.sage";
+        if (!SaveSceneToFile(secondPath)) {
+            LOG_ERROR("Editor") << "SELFTEST: вторая сцена не сохранилась";
+            ok = false;
+        }
+
+        // Сцена-источник: в ней портал.
+        if (ok) {
+            NewScene(ProjectTemplateKind::Empty);
+            GameObject portal = m_scene->CreateObject("SelfTestPortal");
+            m_scene->Registry().emplace<ScriptComponent>(
+                portal.Entity(), ScriptComponent{"assets/scripts/selftest_portal.lua"});
+            const fs::path firstPath = m_project.ScenesDir() / "selftest_level1.sage";
+            if (!SaveSceneToFile(firstPath)) {
+                LOG_ERROR("Editor") << "SELFTEST: первая сцена не сохранилась";
+                ok = false;
+            }
+        }
+
+        if (ok) {
+            StartPlay();
+            // Через планировщик и обработку запросов кадра — тем же путём, каким
+            // идёт настоящий кадр редактора (см. OnUpdate).
+            bool drewDebug = false;
+            for (int i = 0; i < 3 && m_play.Active(); ++i) {
+                m_systems.Run(*m_scene, 0.05f);
+                if (m_play.Scripting() && !m_play.Scripting()->Debug().Empty()) drewDebug = true;
+                ProcessScriptRequests();
+            }
+            if (!drewDebug) {
+                LOG_ERROR("Editor") << "SELFTEST: Debug:DrawLine из скрипта не дошёл до кадра";
+                ok = false;
+            }
+            const bool switched = m_scene->FindByName("SelfTestLevelTwoMarker").Valid();
+            if (!switched) {
+                LOG_ERROR("Editor") << "SELFTEST: scene:Load в Play не переключил сцену";
+                ok = false;
+            }
+            StopPlay();
+            // Stop возвращает ДОКУМЕНТ, а не уровень, на котором игра кончилась.
+            if (ok && !m_scene->FindByName("SelfTestPortal").Valid()) {
+                LOG_ERROR("Editor") << "SELFTEST: после Stop не вернулась исходная сцена";
+                ok = false;
+            }
+        }
+
+        // Стартовая сцена проекта: назначается и переживает перечитывание.
+        if (ok) {
+            std::string startErr;
+            if (!m_project.SetStartScene("selftest_level1", startErr) ||
+                m_project.StartScene() != "selftest_level1") {
+                LOG_ERROR("Editor") << "SELFTEST: стартовая сцена не назначилась: " << startErr;
+                ok = false;
+            }
+        }
+        // Возвращаем ту сцену, с которой пришли: дальше её ждут другие проверки.
+        RestoreSceneFromString(sceneBefore);
+        if (ok) LOG_INFO("Editor") << "SELFTEST: scene-switch OK";
     }
 
     // --- Скрипты глазами РЕДАКТОРА: путь проекта, поломка, повторный Play ---
@@ -6817,19 +6909,22 @@ bool EditorLayer::SelfTestTools() {
 
         // Тот же вызов, что делает инспектор перед показом секции.
         MergeScriptVars(door);
-        VarsComponent* vc = m_scene->Registry().try_get<VarsComponent>(door.Entity());
-        if (!vc || vc->Values.Size() != 3) {
+        // Публичные переменные живут В КОМПОНЕНТЕ СКРИПТА: они объявлены им и
+        // принадлежат паре «объект + скрипт» (см. ScriptComponent.h).
+        ScriptComponent* doorScript =
+            m_scene->Registry().try_get<ScriptComponent>(door.Entity());
+        if (!doorScript || doorScript->Fields.Size() != 3) {
             LOG_ERROR("Editor") << "SELFTEST: объявление скрипта не дошло до переменных объекта";
             ok = false;
         } else {
-            if (vc->Values.Find("damage") == nullptr ||
-                std::abs(vc->Values.Find("damage")->Max - 100.0f) > 0.01f) {
+            if (doorScript->Fields.Find("damage") == nullptr ||
+                std::abs(doorScript->Fields.Find("damage")->Max - 100.0f) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: границы объявленной переменной потерялись";
                 ok = false;
             }
             // Человек правит значения в инспекторе.
-            vc->Values.Set("speed", sage::vars::Value(9.5f));
-            vc->Values.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+            doorScript->Fields.Set("speed", sage::vars::Value(9.5f));
+            doorScript->Fields.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
         }
 
         // Кнопка со связью: щёлкнули — послала событие и позвала метод двери.
@@ -6870,14 +6965,14 @@ bool EditorLayer::SelfTestTools() {
             GameObject loadedDoor = m_scene->FindByName("SelfTestDoor");
             GameObject loadedKey = m_scene->FindByName("SelfTestKey");
             GameObject loadedBtn = m_scene->FindByName("SelfTestButton");
-            const VarsComponent* lv =
+            const ScriptComponent* lv =
                 loadedDoor.Valid()
-                    ? m_scene->Registry().try_get<VarsComponent>(loadedDoor.Entity())
+                    ? m_scene->Registry().try_get<ScriptComponent>(loadedDoor.Entity())
                     : nullptr;
-            if (!lv || std::abs(lv->Values.Get("speed").AsFloat() - 9.5f) > 0.01f) {
+            if (!lv || std::abs(lv->Fields.Get("speed").AsFloat() - 9.5f) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: значение переменной не пережило сохранение";
                 ok = false;
-            } else if (lv->Values.Get("target").AsEntity().Id != loadedKey.Id()) {
+            } else if (lv->Fields.Get("target").AsEntity().Id != loadedKey.Id()) {
                 LOG_ERROR("Editor") << "SELFTEST: ссылка на объект не пережила сохранение";
                 ok = false;
             }
@@ -7491,7 +7586,7 @@ end
     // --- 5. Play: логика Lua реально играет (бот собирает все монеты) ---
     if (ok) {
         StartPlay();
-        for (int i = 0; i < 240 && ok; ++i) m_play.Scripts()->UpdateAll(0.05f); // ~12 c игры
+        for (int i = 0; i < 240 && ok; ++i) m_play.StepScripts(*m_scene, 0.05f); // ~12 c игры
         bool coinsGone = true;
         for (int i = 1; i <= 5; ++i)
             if (m_scene->FindByName("Coin" + std::to_string(i)).Valid()) coinsGone = false;
@@ -7610,7 +7705,7 @@ void EditorLayer::RunHeadlessProjectSession() {
         StartPlay();
         size_t stepCount = (size_t)(playSeconds / step);
         for (size_t i = 0; i < stepCount; ++i) {
-            m_play.Scripts()->UpdateAll(step);
+            m_play.StepScripts(*m_scene, step);
             if (m_play.Physics()) m_play.Physics()->Step(*m_scene, step);
         }
         LOG_INFO("Editor") << "SESSION: played " << playSeconds << "s in " << stepCount

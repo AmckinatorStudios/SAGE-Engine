@@ -24,6 +24,7 @@ void Silence(AudioSourceComponent& src, AudioEngine& engine) {
     if (src.Handle != 0) engine.StopSound((AudioEngine::SoundHandle)src.Handle);
     src.Handle = 0;
     src.Playing = false;
+    src.Paused = false;
 }
 
 // Запускает источник заново. Позиция берётся МИРОВАЯ: источник может висеть на
@@ -83,6 +84,15 @@ int Update(Scene& scene, AudioEngine& engine) {
         }
         if (request == AudioRequest::Play) {
             Start(src, engine, glm::vec3(scene.WorldMatrix(e)[3]));
+            src.Paused = false;
+        }
+        if (request == AudioRequest::Pause && src.Handle != 0) {
+            engine.SetSoundPaused(src.Handle, true);
+            src.Paused = true;
+        }
+        if (request == AudioRequest::Resume && src.Handle != 0) {
+            engine.SetSoundPaused(src.Handle, false);
+            src.Paused = false;
         }
 
         if (src.Handle == 0) continue;
@@ -90,6 +100,9 @@ int Update(Scene& scene, AudioEngine& engine) {
         // 2. Доиграл ли одноразовый звук. Дескриптор при этом ещё жив — его
         //    освобождает владелец, то есть мы: иначе они копились бы по одному
         //    на каждый выстрел до конца партии.
+        //    Приостановленный звук НЕ звучит и при этом не доиграл: снести его
+        //    здесь значило бы, что «продолжить» после паузы нечего.
+        if (src.Paused) continue;
         if (!engine.IsSoundPlaying((AudioEngine::SoundHandle)src.Handle)) {
             Silence(src, engine);
             continue;

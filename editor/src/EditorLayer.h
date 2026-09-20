@@ -436,7 +436,14 @@ private:
     // редактором, не заводя копию её сцен и скриптов внутри движка.
     void RunHeadlessProjectSession();
 
+    // Чего игра попросила за кадр (выйти, сменить уровень, начать заново).
+    // false — сцена заменена или Play остановлен, и этот кадр доигрывать нечем.
+    bool ProcessScriptRequests();
+
     bool RestoreSceneFromString(const std::string& snapshot);
+    // Подменить ИГРАЕМУЮ сцену во время Play (scene:Load из скрипта), не
+    // трогая документ человека. Подробности — в .cpp.
+    bool LoadSceneForPlay(const std::string& name);
 
     // --- проект ---
     Project m_project;

@@ -736,8 +736,10 @@ void EditorLayer::OnAttach() {
         reg.emplace_or_replace<ScriptComponent>(door.Entity(),
                                                 ScriptComponent{m_project.AssetRef(scriptPath)});
         MergeScriptVars(door);
-        if (VarsComponent* vc = reg.try_get<VarsComponent>(door.Entity()))
-            vc->Values.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+        // Переменные, объявленные скриптом, лежат в его компоненте — рядом с
+        // файлом, который их объявил (см. ScriptComponent.h).
+        if (ScriptComponent* sc = reg.try_get<ScriptComponent>(door.Entity()))
+            sc->Fields.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
 
         GameObject button = m_scene->CreateObject("Кнопка «Открыть»");
         sage::ui::Element t;
@@ -802,7 +804,7 @@ void EditorLayer::OnAttach() {
         // тот же, что и от мыши.
         if (mode && std::string(mode) == "play") {
             StartPlay();
-            if (m_play.Scripts()) m_play.Scripts()->UpdateAll(0.016f);
+            if (m_play.Scripts()) m_play.StepScripts(*m_scene, 0.016f);
             sage::ui::UIInputState down;
             down.Mouse = {640.0f, 360.0f};   // центр экрана — там стоит кнопка
             down.MouseDown = true;
@@ -812,7 +814,7 @@ void EditorLayer::OnAttach() {
             up.Mouse = down.Mouse;
             up.MouseReleased = true;
             sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
-            if (m_play.Scripts()) m_play.Scripts()->UpdateAll(0.016f);
+            if (m_play.Scripts()) m_play.StepScripts(*m_scene, 0.016f);
         }
 
         // Выбор: дверь по умолчанию, но SAGE_EDITOR_SELECT_ENTITY сильнее — он
@@ -1018,7 +1020,11 @@ void EditorLayer::OnUpdate(float dt) {
     // правке, и в Play: в правке привязанных скриптов просто нет, и обход
     // пустого списка ничего не стоит.
     if (m_play.Scripts()) {
-        const int n = m_play.Scripts()->ReloadChangedScripts();
+        int n = m_play.Scripts()->ReloadChangedScripts();
+        // Скрипты объектов ведёт система скриптинга, уровневые — прежний
+        // движок. Перечитывать надо и то, и другое: человек правит файл, а не
+        // «объектный скрипт» или «уровневый».
+        if (m_play.Scripting()) n += m_play.Scripting()->ReloadChanged();
         if (n > 0) SetStatusMessage(T("Scripts reloaded: ") + std::to_string(n));
     }
 
@@ -1050,26 +1056,7 @@ void EditorLayer::OnUpdate(float dt) {
 
     // Чего игра попросила за кадр. Здесь — после того, как все скрипты
     // отработали и ни один не находится на стеке.
-    if (m_play.Scripts()) {
-        if (m_play.Scripts()->TakeQuitRequest()) {
-            // В редакторе «выйти из игры» — это остановить Play, а не закрыть
-            // редактор: у человека несохранённая сцена, и закрывать её по
-            // просьбе скрипта нельзя.
-            LOG_INFO("Editor") << "скрипт попросил выйти из игры — останавливаю Play";
-            StopPlay();
-            return;
-        }
-        std::string sceneName;
-        const bool restart = m_play.Scripts()->TakeRestartRequest();
-        if (m_play.Scripts()->TakeSceneRequest(sceneName) || restart) {
-            // Смена сцены В РЕДАКТОРЕ пока не поддержана: Play работает с той
-            // сценой, что открыта, и подменить её под человеком, не спросив,
-            // значило бы потерять его несохранённую правку. Говорим прямо,
-            // вместо того чтобы молча ничего не сделать.
-            LOG_WARN("Editor") << "sage.scene.Load/Restart в Play-режиме не выполняется — "
-                                  "проверяйте переходы между сценами в собранной игре";
-        }
-    }
+    if (!ProcessScriptRequests()) return; // сцена под ногами заменилась или Play остановлен
 
     // Правка в окне Settings обязана быть видна В КАДРЕ, а не после
     // перезапуска: ползунок, который «сработает потом», невозможно настроить.
@@ -1078,6 +1065,47 @@ void EditorLayer::OnUpdate(float dt) {
     // Файлы, брошенные в окно с прошлого кадра (см. HandleDroppedFiles).
     HandleDroppedFiles();
 }
+
+// ЧЕГО ИГРА ПОПРОСИЛА ЗА КАДР: выйти, перейти на другой уровень, начать заново.
+//
+// Отдельной функцией, а не строками внутри кадра, по той же причине, по которой
+// отдельно живёт StepScripts: это проверяют — и проверять обязаны ТОТ ЖЕ путь,
+// которым идёт настоящий кадр, а не его копию в тесте.
+//
+// false — дальше этот кадр доигрывать нечем: сцена заменена или Play остановлен.
+bool EditorLayer::ProcessScriptRequests() {
+    if (m_play.Scripts()) {
+        if (m_play.Scripts()->TakeQuitRequest()) {
+            // В редакторе «выйти из игры» — это остановить Play, а не закрыть
+            // редактор: у человека несохранённая сцена, и закрывать её по
+            // просьбе скрипта нельзя.
+            LOG_INFO("Editor") << "скрипт попросил выйти из игры — останавливаю Play";
+            StopPlay();
+            return false;
+        }
+        // ПЕРЕХОД МЕЖДУ УРОВНЯМИ — ПРЯМО ЗДЕСЬ, а не «проверяйте в сборке».
+        //
+        // Два источника запроса: прежний движок (sage.scene.Load уровневых
+        // скриптов) и система скриптинга (scene:Load скриптов объектов).
+        // Спрашиваем оба в одном месте — иначе переход работал бы из одного
+        // скрипта и молчал из другого.
+        //
+        // Документ человека при этом не трогается: Play работает с копией, а
+        // Stop вернёт открытую сцену вместе с несохранённой правкой.
+        std::string sceneName;
+        const bool restart = m_play.Scripts()->TakeRestartRequest();
+        bool wantScene = m_play.Scripts()->TakeSceneRequest(sceneName);
+        if (!wantScene && m_play.Scripting())
+            wantScene = m_play.Scripting()->TakeSceneRequest(sceneName);
+        if (wantScene || restart) {
+            PlayContext ctx = MakePlayContext();
+            if (!m_play.SwitchScene(ctx, sceneName)) StopPlay();
+            return false; // сцена под ногами заменилась — этот кадр доигрывать нечем
+        }
+    }
+    return true;
+}
+
 
 // ============================================================================
 //  Плагины редактора — реализация facade'а EditorPluginContext
@@ -1149,6 +1177,9 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_tools.ShowBounds);
+    // Отладочная графика игры (Debug:DrawLine) — только пока игра идёт. В
+    // режиме правки скриптов нет, и показывать нечего.
+    m_renderer.SetScriptDebugLines(m_play.Scripting() ? &m_play.Scripting()->Debug() : nullptr);
     // Игровой интерфейс во ВЬЮПОРТЕ больше не рисуется: холст вёрстки — это
     // окно «Интерфейс», где показан игровой кадр в разрешении игры. Вьюпорт
     // остался вьюпортом, а не наполовину холстом.

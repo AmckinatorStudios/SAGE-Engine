@@ -13,6 +13,7 @@
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
+#include "sage/render/DebugDraw.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
 #include "sage/core/SystemScheduler.h"
@@ -30,6 +31,7 @@
 #include "sage/physics/PhysicsScene.h"
 
 class ScriptEngine;
+namespace sage::scripting { class ScriptingSystem; }
 
 // ---------------------------------------------------------------------------
 // PlayerLayer — универсальный рантайм игр, собранных в редакторе SAGE
@@ -107,6 +109,10 @@ private:
 
     std::filesystem::path m_scenePath;   // что сейчас загружено
     std::unique_ptr<ScriptEngine> m_scripts;
+    // ПОСЛЕ m_scripts намеренно: Lua-бэкенд системы работает на состоянии
+    // прежнего движка и пережить его не имеет права — члены разрушаются в
+    // обратном порядке объявления.
+    std::unique_ptr<sage::scripting::ScriptingSystem> m_scripting;
     // Сеть игры (Lua: Net.*). По значению, а не по указателю: она ничего не
     // стоит в офлайне — ни сокета, ни потока, — пока скрипт не позвал Net.Host
     // или Net.Connect.
@@ -133,6 +139,9 @@ private:
     // нём одном лампы перестанут отбрасывать тень.
     ShadowBinding FrameShadows(bool sunEnabled) const;
     std::optional<SkyRenderer> m_sky;     // процедурный скайбокс сцены
+    // Отладочная графика ИГРЫ (Debug:DrawLine из скриптов). Заводится лениво:
+    // игра, которая её не просит, не платит за шейдер и буфер вершин.
+    std::optional<DebugDraw> m_debugDraw;
     // Отражения кадра. Карта окружения переснимается только при смене цвета
     // неба (см. ReflectionSystem), поэтому в кадре это стоит ноль.
     sage::render::ReflectionSystem m_reflections;

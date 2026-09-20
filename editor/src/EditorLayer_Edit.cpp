@@ -13,6 +13,8 @@
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
 
+#include "sage/scripting/ScriptFields.h"
+
 #include <fstream>
 
 #include "sage/vars/ScriptVars.h"
@@ -105,7 +107,7 @@ constexpr float kStatusBarHeight = 26.0f;
 void EditorLayer::MergeScriptVars(GameObject object) {
     if (!object.Valid()) return;
     entt::registry& reg = m_scene->Registry();
-    const ScriptComponent* sc = reg.try_get<ScriptComponent>(object.Entity());
+    ScriptComponent* sc = reg.try_get<ScriptComponent>(object.Entity());
     if (!sc || sc->Path.empty()) return;
 
     // Путь в сцене относителен корню проекта — тем же способом, каким его
@@ -119,10 +121,17 @@ void EditorLayer::MergeScriptVars(GameObject object) {
     if (!in) return;
     const std::string source((std::istreambuf_iterator<char>(in)),
                              std::istreambuf_iterator<char>());
-    const sage::vars::Table declaration = sage::vars::ParseDeclaration(source);
+
+    // Поля объявляет САМ СКРИПТ, на своём языке; редактор только спрашивает
+    // (см. sage/scripting/ScriptFields.h) — про Lua он не знает ничего.
+    const sage::vars::Table declaration = sage::scripting::ParseFields(sc->Path, source);
     if (declaration.Empty()) return;
 
-    reg.get_or_emplace<VarsComponent>(object.Entity()).Values.MergeDeclaration(declaration);
+    // Значения ЭТОГО объекта живут в самом компоненте скрипта: они объявлены
+    // скриптом и принадлежат паре «объект + скрипт». Слияние сохраняет уже
+    // расставленные настройки и добавляет новые со значением по умолчанию
+    // (см. Table::MergeDeclaration).
+    sc->Fields.MergeDeclaration(declaration);
 }
 
 // Стопки снимков и их правила живут в EditorHistory — здесь остаётся только
