@@ -12,6 +12,8 @@
 #include "sage/ui/Interface.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/scene/SceneSerializer.h"
+#include <memory>
 
 #include <string>
 #include <vector>
@@ -275,4 +277,219 @@ TEST(Interface_pasting_into_an_element_makes_it_the_parent) {
     const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(host.Entity());
     CHECK_TRUE(h != nullptr);
     if (h) CHECK_EQ((int)h->Children.size(), 1);
+}
+
+// ============================================================================
+//  ИНТЕРФЕЙС КАК КОНТЕКСТ: несколько интерфейсов в одной сцене
+// ============================================================================
+//
+// Жалоба звучала так: «создаю два объекта с интерфейсом, вхожу в режим вёрстки
+// — элементы обоих смешаны в одном редакторе, и править один, не задевая
+// другой, можно только пряча чужие объекты». Так и было: корнем считался любой
+// прямоугольник без родителя-прямоугольника, то есть «интерфейс» существовал
+// лишь как наблюдение «эти элементы лежат рядом».
+//
+// Теперь интерфейс — объект с InterfaceComponent, и элемент принадлежит
+// ближайшему такому предку. Ниже проверяется именно это: границы есть, они не
+// протекают, и по ним можно спросить «покажи только этот экран».
+
+namespace {
+
+// Интерфейс с одним корневым элементом внутри: то, что в редакторе получается
+// кнопкой «создать интерфейс» и потом «создать элемент».
+entt::entity MakeInterface(Scene& scene, const char* name, glm::vec2 pos, int sortOrder = 0) {
+    GameObject iface = scene.CreateEmptyObject(name);
+    sage::ui::InterfaceComponent info;
+    info.SortOrder = sortOrder;
+    scene.Registry().emplace<sage::ui::InterfaceComponent>(iface.Entity(), info);
+
+    GameObject root = scene.CreateEmptyObject(std::string(name) + " Root");
+    sage::ui::Element box;
+    box.Anchor = UIAnchor::TopLeft;
+    box.Position = pos;
+    box.Size = {100.0f, 100.0f};
+    scene.Registry().emplace<sage::ui::Element>(root.Entity(), box);
+    scene.Registry().emplace<sage::ui::Fill>(root.Entity());
+    scene.SetParent(root.Entity(), iface.Entity());
+    return iface.Entity();
+}
+
+} // namespace
+
+TEST(Interface_elements_belong_to_their_own_interface) {
+    Scene scene("S");
+    const entt::entity hud = MakeInterface(scene, "HUD", {10.0f, 10.0f});
+    const entt::entity menu = MakeInterface(scene, "Menu", {300.0f, 10.0f});
+
+    const std::vector<entt::entity> hudRoots = sage::ui::InterfaceRoots(scene, hud);
+    const std::vector<entt::entity> menuRoots = sage::ui::InterfaceRoots(scene, menu);
+    CHECK_EQ((int)hudRoots.size(), 1);
+    CHECK_EQ((int)menuRoots.size(), 1);
+    // И это РАЗНЫЕ элементы: смешаться им негде.
+    CHECK_TRUE(hudRoots[0] != menuRoots[0]);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, hudRoots[0]) == hud);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, menuRoots[0]) == menu);
+
+    // Вложенный элемент принадлежит тому же интерфейсу, что и его корень:
+    // граница — ближайший предок-интерфейс, а не ближайший предок вообще.
+    GameObject child = scene.CreateEmptyObject("Child");
+    scene.Registry().emplace<sage::ui::Element>(child.Entity());
+    scene.SetParent(child.Entity(), hudRoots[0]);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, child.Entity()) == hud);
+    // А корнем он не становится: корень — тот, над кем нет ЭЛЕМЕНТА.
+    CHECK_EQ((int)sage::ui::InterfaceRoots(scene, hud).size(), 1);
+}
+
+TEST(Interface_scope_shows_one_interface_at_a_time) {
+    // То, ради чего область и заведена: редактор вёрстки показывает ОДИН
+    // интерфейс. Раньше показать один из двух было нечем — только спрятать
+    // чужие объекты, то есть править сцену ради взгляда на неё.
+    Scene scene("S");
+    const entt::entity hud = MakeInterface(scene, "HUD", {10.0f, 10.0f});
+    const entt::entity menu = MakeInterface(scene, "Menu", {300.0f, 10.0f});
+
+    const auto all = sage::ui::SolveSceneRects(scene, 800, 600, /*includeHidden=*/true);
+    CHECK_EQ((int)all.size(), 2);
+
+    const auto onlyHud = sage::ui::SolveSceneRects(scene, 800, 600, true,
+                                                   sage::ui::UIScope::Only(hud));
+    CHECK_EQ((int)onlyHud.size(), 1);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, onlyHud[0].Entity) == hud);
+
+    const auto onlyMenu = sage::ui::SolveSceneRects(scene, 800, 600, true,
+                                                    sage::ui::UIScope::Only(menu));
+    CHECK_EQ((int)onlyMenu.size(), 1);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, onlyMenu[0].Entity) == menu);
+
+    // Щелчок по холсту тоже смотрит В ОБЛАСТЬ: элемент чужого экрана, который
+    // сюда и не рисуется, выбираться не должен.
+    const int inMenu = sage::ui::HitTest(scene, 320.0f, 30.0f, 800, 600);
+    CHECK_TRUE(inMenu > 0);
+    CHECK_EQ(sage::ui::HitTest(scene, 320.0f, 30.0f, 800, 600, sage::ui::UIScope::Only(hud)), -1);
+    CHECK_EQ(sage::ui::HitTest(scene, 320.0f, 30.0f, 800, 600, sage::ui::UIScope::Only(menu)),
+             inMenu);
+}
+
+TEST(Interface_hidden_interface_takes_all_its_elements_with_it) {
+    // Спрятать экран целиком — одно поле, а не обход всех его элементов.
+    Scene scene("S");
+    const entt::entity hud = MakeInterface(scene, "HUD", {10.0f, 10.0f});
+    MakeInterface(scene, "Menu", {300.0f, 10.0f});
+
+    scene.Registry().get<sage::ui::InterfaceComponent>(hud).Visible = false;
+    // В игре его нет...
+    const auto shown = sage::ui::SolveSceneRects(scene, 800, 600, /*includeHidden=*/false);
+    CHECK_EQ((int)shown.size(), 1);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, shown[0].Entity) != hud);
+    // ...а в редакторе он виден: иначе выключенный интерфейс нельзя было бы ни
+    // найти, ни включить обратно.
+    CHECK_EQ((int)sage::ui::SolveSceneRects(scene, 800, 600, /*includeHidden=*/true).size(), 2);
+}
+
+TEST(Interface_order_between_interfaces_belongs_to_the_interface) {
+    // HUD под меню паузы. Раньше это число жило в холсте КОРНЕВОГО ЭЛЕМЕНТА —
+    // то есть у элемента, а не у экрана, и два корня одного интерфейса могли
+    // спорить о том, каким он показывается.
+    Scene scene("S");
+    const entt::entity menu = MakeInterface(scene, "Menu", {0.0f, 0.0f}, /*sortOrder=*/10);
+    const entt::entity hud = MakeInterface(scene, "HUD", {0.0f, 0.0f}, /*sortOrder=*/0);
+
+    const std::vector<entt::entity> order = sage::ui::SortedInterfaces(scene);
+    CHECK_EQ((int)order.size(), 2);
+    CHECK_TRUE(order[0] == hud);   // рисуется раньше, значит лежит ниже
+    CHECK_TRUE(order[1] == menu);
+
+    // И в общем кадре элементы идут в том же порядке: меню поверх HUD.
+    const auto rects = sage::ui::SolveSceneRects(scene, 800, 600, true);
+    CHECK_EQ((int)rects.size(), 2);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, rects[0].Entity) == hud);
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, rects[1].Entity) == menu);
+}
+
+TEST(Interface_resource_unfolds_into_an_interface_of_its_own) {
+    // Ресурс .sageui, развёрнутый в сцену, приносит СВОЮ границу: две копии
+    // одного окна инвентаря правятся по отдельности.
+    Scene source("S");
+    const Interface ui = sage::ui::Capture(source, BuildSample(source));
+
+    Scene target("T");
+    const std::vector<entt::entity> a = sage::ui::Instantiate(target, ui);
+    const std::vector<entt::entity> b = sage::ui::Instantiate(target, ui);
+    CHECK_EQ((int)a.size(), 1);
+    CHECK_EQ((int)b.size(), 1);
+    const entt::entity ia = sage::ui::InterfaceOf(target, a[0]);
+    const entt::entity ib = sage::ui::InterfaceOf(target, b[0]);
+    CHECK_TRUE(ia != entt::null);
+    CHECK_TRUE(ib != entt::null);
+    CHECK_TRUE(ia != ib);
+    CHECK_EQ((int)sage::ui::SortedInterfaces(target).size(), 2);
+}
+
+TEST(Interface_migration_gives_every_old_root_its_own_interface) {
+    // Сцены, собранные до появления границ: два корня россыпью. Каждый обязан
+    // получить свой интерфейс — иначе меню и HUD остались бы одним экраном, то
+    // есть ровно тем, на что и жаловались.
+    const std::string old = R"({
+      "name": "Old", "sage_scene_version": 12,
+      "objects": [
+        {"id": 1, "name": "HUD",
+         "ui": {"transform": {"size": {"x": 200, "y": 40}},
+                "canvas": {"mode": 1, "sortOrder": 5,
+                           "reference": {"x": 1280, "y": 720}}}},
+        {"id": 2, "name": "Menu", "ui": {"transform": {"size": {"x": 100, "y": 100}}}},
+        {"id": 3, "name": "Label", "parent": 1, "ui": {"transform": {}}}
+      ]
+    })";
+    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(
+        SceneSerializer::MigrateSceneJson(old));
+    CHECK_TRUE(scene != nullptr);
+    if (!scene) return;
+
+    CHECK_EQ((int)sage::ui::SortedInterfaces(*scene).size(), 2);
+    GameObject hud = FindByName(*scene, "HUD");
+    GameObject menu = FindByName(*scene, "Menu");
+    GameObject label = FindByName(*scene, "Label");
+    CHECK_TRUE(hud.Valid() && menu.Valid() && label.Valid());
+    if (!hud.Valid() || !menu.Valid() || !label.Valid()) return;
+
+    const entt::entity hudIface = sage::ui::InterfaceOf(*scene, hud.Entity());
+    const entt::entity menuIface = sage::ui::InterfaceOf(*scene, menu.Entity());
+    CHECK_TRUE(hudIface != entt::null);
+    CHECK_TRUE(menuIface != entt::null);
+    CHECK_TRUE(hudIface != menuIface);
+    // Ребёнок уехал вместе со своим корнем, а не остался в чужом экране.
+    CHECK_TRUE(sage::ui::InterfaceOf(*scene, label.Entity()) == hudIface);
+
+    // Холст корня переехал в интерфейс целиком: это его свойство.
+    const sage::ui::InterfaceComponent& info =
+        scene->Registry().get<sage::ui::InterfaceComponent>(hudIface);
+    CHECK_EQ(info.SortOrder, 5);
+    CHECK_TRUE(info.Canvas.Mode == sage::ui::Canvas::Scale::ScaleWithSize);
+    CHECK_NEAR(info.Canvas.Reference.x, 1280.0f, 0.001f);
+}
+
+TEST(Interface_component_survives_a_scene_round_trip) {
+    Scene scene("S");
+    const entt::entity hud = MakeInterface(scene, "HUD", {10.0f, 10.0f}, /*sortOrder=*/7);
+    sage::ui::InterfaceComponent& info = scene.Registry().get<sage::ui::InterfaceComponent>(hud);
+    info.Visible = false;
+    info.ReceivesInput = false;
+    info.Canvas.Mode = sage::ui::Canvas::Scale::ScaleWithSize;
+    info.Canvas.Reference = {1280.0f, 720.0f};
+
+    std::unique_ptr<Scene> back =
+        SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(back != nullptr);
+    if (!back) return;
+    const std::vector<entt::entity> all = sage::ui::SortedInterfaces(*back);
+    CHECK_EQ((int)all.size(), 1);
+    if (all.empty()) return;
+    const sage::ui::InterfaceComponent& loaded =
+        back->Registry().get<sage::ui::InterfaceComponent>(all[0]);
+    CHECK_FALSE(loaded.Visible);
+    CHECK_FALSE(loaded.ReceivesInput);
+    CHECK_EQ(loaded.SortOrder, 7);
+    CHECK_NEAR(loaded.Canvas.Reference.y, 720.0f, 0.001f);
+    // И элементы приехали внутрь своего интерфейса, а не в корень сцены.
+    CHECK_EQ((int)sage::ui::InterfaceRoots(*back, all[0]).size(), 1);
 }

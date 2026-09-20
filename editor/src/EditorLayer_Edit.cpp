@@ -188,12 +188,40 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     // что до этого они лежали не там. Самый частый шаг верстки требовал
     // отдельного ручного действия — и именно это ощущается как «неудобно
     // прикреплять».
+    entt::entity parent = entt::null;
     if (m_selection.Primary() >= 0) {
         GameObject sel = m_scene->Get(m_selection.Primary());
-        if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity())) {
-            m_scene->SetParent(obj.Entity(), sel.Entity());
+        if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity())) parent = sel.Entity();
+        // Выбран сам интерфейс — новый элемент становится его КОРНЕМ: ровно
+        // это и значит «создать элемент в этом интерфейсе».
+        else if (sel.Valid() && reg.all_of<sage::ui::InterfaceComponent>(sel.Entity()))
+            parent = sel.Entity();
+    }
+
+    // НОВЫЙ ЭЛЕМЕНТ ПОПАДАЕТ В ТЕКУЩИЙ ИНТЕРФЕЙС, а не в корень сцены.
+    //
+    // Элемент принадлежит интерфейсу (sage/ui/components/InterfaceComponent.h),
+    // и созданный мимо него не виден ни в дереве вёрстки, ни на холсте: он
+    // относится к другому экрану — к «без интерфейса». Со стороны это выглядит
+    // как «создал элемент, а его нет».
+    if (parent == entt::null) {
+        if (m_currentInterface > 0) {
+            GameObject iface = m_scene->Get(m_currentInterface);
+            if (iface.Valid() && reg.all_of<sage::ui::InterfaceComponent>(iface.Entity()))
+                parent = iface.Entity();
+        }
+        // Интерфейса нет вовсе — заводим: первый же созданный элемент обязан
+        // где-то жить, и требовать «сначала создайте интерфейс» значит
+        // требовать знания устройства там, где человек просто нажал «кнопка».
+        if (parent == entt::null && m_workspace == EditorWorkspace::Interface &&
+            m_currentInterface != 0) {
+            GameObject iface = m_scene->CreateEmptyObject("Interface");
+            reg.emplace<sage::ui::InterfaceComponent>(iface.Entity());
+            m_currentInterface = iface.Id();
+            parent = iface.Entity();
         }
     }
+    if (parent != entt::null) m_scene->SetParent(obj.Entity(), parent);
 
     // Что именно значит «кнопка» или «полоса», знает ДВИЖОК (sage/ui/UIPresets.h).
     // Раньше это знание жило только здесь, и получить кнопку можно было лишь

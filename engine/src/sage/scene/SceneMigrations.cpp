@@ -2,6 +2,9 @@
 
 #include <stdexcept>
 #include <string>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -505,6 +508,84 @@ void MigrateV11toV12(json& root) {
     }
 }
 
+// v12 -> v13. У интерфейса появился СВОЙ объект — граница.
+//
+// ПОЧЕМУ ПОМЕНЯЛОСЬ. Элементы лежали в сцене россыпью, и «интерфейс» был лишь
+// наблюдением «эти прямоугольники рядом». Пока интерфейс был один, это
+// работало; два интерфейса в одной сцене оказывались в ОДНОМ дереве редактора,
+// вперемешку, и верстать один, не задевая другой, можно было только пряча
+// чужие объекты. Разбор — в комментарии к InterfaceComponent.
+//
+// ЧТО ДЕЛАЕТ МИГРАЦИЯ. Каждому корневому элементу (тому, у кого нет
+// родителя-элемента) заводит объект-интерфейс и кладёт корень внутрь него.
+// Холст корня (опорное разрешение, порядок показа) переезжает в интерфейс:
+// теперь это свойство интерфейса, а не первого его элемента.
+//
+// Почему КАЖДОМУ корню свой интерфейс, а не один на всех: корни якорятся к
+// экрану независимо, у каждого свой холст и свой порядок — то есть это и были
+// разные интерфейсы, просто без имени. Сложить их в один значило бы решить за
+// автора сцены, что его меню и его HUD — одно и то же.
+void MigrateV12toV13(json& root) {
+    if (!root.contains("objects")) return;
+
+    // Кто тут элемент и кто чей родитель — по тем же ключам, какими сцена
+    // записана: "ui" у элемента, "parent" у ребёнка.
+    std::vector<int> elementIds;
+    std::unordered_map<int, int> parentOf;
+    int maxId = 0;
+    for (const json& obj : root["objects"]) {
+        const int id = obj.value("id", 0);
+        maxId = std::max(maxId, id);
+        if (obj.contains("parent")) parentOf[id] = obj.value("parent", -1);
+        if (obj.contains("ui")) elementIds.push_back(id);
+    }
+    if (elementIds.empty()) return;
+    const std::vector<int> elements = elementIds;
+    auto isElement = [&elements](int id) {
+        return std::find(elements.begin(), elements.end(), id) != elements.end();
+    };
+
+    json added = json::array();
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui")) continue;
+        const int id = obj.value("id", 0);
+        const auto parent = parentOf.find(id);
+        if (parent != parentOf.end() && isElement(parent->second)) continue; // не корень
+
+        json iface;
+        iface["id"] = ++maxId;
+        // Имя — от элемента: «HUD Panel» превращается в интерфейс «HUD Panel
+        // Interface», и в иерархии видно, что это тот же экран, а не новый.
+        iface["name"] = obj.value("name", std::string("Interface")) + " Interface";
+        iface["position"] = Vec3ToJson(glm::vec3(0.0f));
+        iface["rotation"] = Vec3ToJson(glm::vec3(0.0f));
+        iface["scale"] = Vec3ToJson(glm::vec3(1.0f));
+        iface["noMesh"] = true;   // граница ничего не рисует
+        json ic;
+        ic["visible"] = true;
+        ic["receivesInput"] = true;
+        // Холст корня переезжает в интерфейс целиком.
+        const json& ui = obj["ui"];
+        if (ui.contains("canvas")) {
+            const json& c = ui["canvas"];
+            ic["sortOrder"] = c.value("sortOrder", 0);
+            ic["canvasMode"] = c.value("mode", 0);
+            if (c.contains("reference")) ic["reference"] = c["reference"];
+            ic["matchWidthOrHeight"] = c.value("matchWidthOrHeight", 0.5f);
+        } else {
+            ic["sortOrder"] = 0;
+        }
+        iface["interface"] = ic;
+        // Интерфейс встаёт НА МЕСТО корня в иерархии: если корень лежал внутри
+        // папки или объекта сцены, интерфейс ложится туда же, а корень — в него.
+        if (parent != parentOf.end() && parent->second >= 0) iface["parent"] = parent->second;
+        obj["parent"] = iface["id"];
+        if (obj.contains("ui")) obj["ui"].erase("canvas");
+        added.push_back(std::move(iface));
+    }
+    for (json& iface : added) root["objects"].push_back(std::move(iface));
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -517,6 +598,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV9toV10,
     &MigrateV10toV11,
     &MigrateV11toV12,
+    &MigrateV12toV13,
 };
 
 } // namespace

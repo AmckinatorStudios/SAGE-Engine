@@ -4,6 +4,7 @@
 
 #include "sage/ui/UIAnchor.h"
 #include "sage/ui/components/Interact.h"
+#include "sage/ui/components/InterfaceComponent.h"
 #include "sage/ui/components/Layout.h"
 #include "sage/ui/components/Visual.h"
 
@@ -12,6 +13,7 @@
 //
 // Устройство:
 //   Element.h             — САМ ЭЛЕМЕНТ: раскладка, порядок, видимость, замок
+//   components/InterfaceComponent.h — ГРАНИЦА интерфейса: чьи это элементы
 //   components/Layout.h   — что он делает с местом: Mask, Stack, Canvas, Group
 //   components/Visual.h   — из чего он сделан: Fill, Label, Image, Bar, Icon
 //   components/Interact.h — что он делает: Interactable, TextInput, Range, State

@@ -31,16 +31,27 @@ constexpr const char* kDragPayload = "SAGE_UI_ELEMENT";
 
 bool IsUi(const entt::registry& reg, entt::entity e) { return reg.all_of<ui::Element>(e); }
 
-// Корни: элементы, у которых нет родителя-ЭЛЕМЕНТА. Именно они якорятся к
-// экрану, остальные — к своему родителю.
-std::vector<entt::entity> Roots(Scene& scene) {
-    std::vector<entt::entity> out;
+// Сущность интерфейса, который сейчас верстают (entt::null — «без интерфейса»
+// либо интерфейса нет вовсе).
+entt::entity CurrentInterface(EditorHost& host) {
+    const int id = host.CurrentInterfaceId();
+    if (id <= 0) return entt::null;
+    GameObject obj = host.CurrentScene().Get(id);
+    return obj.Valid() ? obj.Entity() : entt::null;
+}
+
+// Корни ТЕКУЩЕГО интерфейса, а не все корни сцены.
+//
+// Это и есть главная правка панели. Раньше здесь собирались ВСЕ элементы
+// сцены, у которых нет родителя-элемента: два интерфейса — меню и HUD —
+// оказывались в одном дереве вперемешку, и верстать один, не задевая другой,
+// можно было только пряча чужие объекты глазом в иерархии.
+std::vector<entt::entity> Roots(EditorHost& host, Scene& scene) {
+    // Правило «чей это элемент» живёт в движке (sage/ui/UISceneSystem.h) — тем
+    // же пользуется отрисовка. Своя копия здесь означала бы дерево, которое
+    // показывает не то, что рисует холст.
+    std::vector<entt::entity> out = ui::InterfaceRoots(scene, CurrentInterface(host));
     entt::registry& reg = scene.Registry();
-    for (entt::entity e : reg.view<ui::Element>()) {
-        const entt::entity parent = scene.ParentOf(e);
-        if (parent != entt::null && IsUi(reg, parent)) continue;
-        out.push_back(e);
-    }
     // Порядок корней — тот же, что на экране: больше Order — выше в списке
     // (он рисуется поверх). Иначе дерево и экран отвечают на вопрос «что
     // сверху» по-разному.
@@ -91,10 +102,11 @@ std::string LowerOf(const std::string& s) {
 // Соседям при этом раздаются подряд идущие номера: держать их разреженными
 // «на будущее» — значит однажды упереться в то, что вставить между двумя
 // соседними числами некуда.
-void PlaceBefore(Scene& scene, entt::entity moved, entt::entity before, entt::entity parent) {
+void PlaceBefore(EditorHost& host, Scene& scene, entt::entity moved, entt::entity before,
+                 entt::entity parent) {
     entt::registry& reg = scene.Registry();
     std::vector<entt::entity> siblings =
-        parent == entt::null ? Roots(scene) : UiChildren(scene, parent);
+        parent == entt::null ? Roots(host, scene) : UiChildren(scene, parent);
     siblings.erase(std::remove(siblings.begin(), siblings.end(), moved), siblings.end());
 
     std::vector<entt::entity> ordered;
@@ -130,6 +142,7 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
         return;
     }
 
+    DrawInterfacePicker(host);
     DrawToolbar(host);
     ImGui::Separator();
 
@@ -138,7 +151,7 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
     m_lines.Clear();   // строки прошлого кадра — это координаты, которых уже нет
 
     ImGui::BeginChild("##ui_tree_scroll");
-    const std::vector<entt::entity> roots = Roots(scene);
+    const std::vector<entt::entity> roots = Roots(host, scene);
     for (size_t i = 0; i < roots.size(); ++i) {
         DropGap(host, scene, roots[i], entt::null);
         DrawNode(host, scene, roots[i], 0);
@@ -147,8 +160,18 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
 
     if (roots.empty()) {
         ImGui::Spacing();
-        ImGui::TextDisabled("%s", T("No interface elements yet."));
-        ImGui::TextDisabled("%s", T("Add one with Create above."));
+        if (host.CurrentInterfaceId() < 0) {
+            // Интерфейсов в сцене нет вовсе. Предлагаем завести — а не молчим:
+            // «элементов нет» при отсутствующем интерфейсе отвечает не на тот
+            // вопрос, с которым сюда пришли.
+            ImGui::TextDisabled("%s", T("No interface in the scene yet."));
+            if (EditorIcons::Button("plus", T("Create interface"),
+                                    T("An interface object: its elements live inside it")))
+                CreateInterface(host);
+        } else {
+            ImGui::TextDisabled("%s", T("No interface elements yet."));
+            ImGui::TextDisabled("%s", T("Add one with Create above."));
+        }
     }
 
     // Щелчок по пустому месту снимает выделение — тот же жест, что во вьюпорте.
@@ -170,6 +193,65 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
 
     HandleShortcuts(host);
     ImGui::End();
+}
+
+// ЧТО ИМЕННО ВЕРСТАЕМ — ПЕРВОЙ СТРОКОЙ ПАНЕЛИ.
+//
+// Интерфейсов в сцене может быть сколько угодно, и работают всегда с одним.
+// Раньше выбора не было вовсе: дерево показывало все сразу, и «переключиться
+// на другое меню» означало спрятать чужие объекты. Теперь это список: выбрал —
+// и дерево, холст и инспектор показывают именно его.
+void InterfaceHierarchyPanel::DrawInterfacePicker(EditorHost& host) {
+    Scene& scene = host.CurrentScene();
+    entt::registry& reg = scene.Registry();
+
+    struct Row {
+        int Id = 0;
+        std::string Name;
+    };
+    std::vector<Row> rows;
+    for (entt::entity e : ui::SortedInterfaces(scene)) {
+        const IdComponent* id = reg.try_get<IdComponent>(e);
+        const NameComponent* name = reg.try_get<NameComponent>(e);
+        if (!id) continue;
+        rows.push_back({id->Id, name ? name->Name : std::string("Interface")});
+    }
+    // Элементы без интерфейса — отдельной строкой, а не подмешанные к чужому
+    // экрану: их собирает код или скрипт, и они существуют сами по себе.
+    if (!ui::InterfaceRoots(scene, entt::null).empty()) rows.push_back({0, T("No interface")});
+
+    std::string current = T("Nothing to edit");
+    for (const Row& r : rows)
+        if (r.Id == host.CurrentInterfaceId()) current = r.Name;
+
+    ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
+    if (ImGui::BeginCombo("##interface", current.c_str())) {
+        for (const Row& r : rows) {
+            const bool selected = r.Id == host.CurrentInterfaceId();
+            if (ImGui::Selectable(r.Name.c_str(), selected)) {
+                host.SetCurrentInterface(r.Id);
+                // Выделение сбрасывается: выбранный элемент принадлежал
+                // ПРОШЛОМУ интерфейсу, и инспектор показывал бы чужое.
+                host.Selection().Clear();
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (EditorIcons::Button("plus", "##new_interface", T("New interface in this scene")))
+        CreateInterface(host);
+}
+
+void InterfaceHierarchyPanel::CreateInterface(EditorHost& host) {
+    host.PushUndoSnapshot();
+    Scene& scene = host.CurrentScene();
+    // БЕЗ МЕША: интерфейс ничего не рисует сам, он граница. Объект с
+    // компонентом «Меш» обещал бы модель, цвет и тени, которых у него нет.
+    GameObject obj = scene.CreateEmptyObject("Interface");
+    scene.Registry().emplace<sage::ui::InterfaceComponent>(obj.Entity());
+    host.SetCurrentInterface(obj.Id());
+    host.Selection().SetPrimary(obj.Id());
 }
 
 void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
@@ -248,7 +330,7 @@ void InterfaceHierarchyPanel::DropGap(EditorHost& host, Scene& scene, entt::enti
             const entt::entity dragged = *(const entt::entity*)p->Data;
             host.PushUndoSnapshot();
             scene.SetParent(dragged, parent);
-            PlaceBefore(scene, dragged, before, parent);
+            PlaceBefore(host, scene, dragged, before, parent);
         }
         // Линия под курсором: без неё непонятно, куда именно ляжет элемент.
         const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();

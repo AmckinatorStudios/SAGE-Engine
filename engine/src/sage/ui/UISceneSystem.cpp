@@ -64,13 +64,13 @@ std::vector<entt::entity> SortedUIChildren(Scene& scene, entt::entity parent) {
 // Layer: HUD должен быть под меню паузы, меню — под диалогом, и раскладывать
 // это одним числом на элемент значило подбирать номера так, чтобы случайно не
 // перекрыть чужую панель.
-std::vector<entt::entity> SortedUIRoots(Scene& scene) {
-    std::vector<entt::entity> roots;
+// Порядок КОРНЕЙ ОДНОГО интерфейса: больше Order — выше (рисуется поверх).
+// Порядок между интерфейсами задаёт их собственный SortOrder (см.
+// SortedInterfaces), а не число на элементе: раньше это было поле Canvas у
+// корня, то есть у элемента — и два корня одного интерфейса могли спорить о
+// том, каким он показывается.
+void SortRoots(Scene& scene, std::vector<entt::entity>& roots) {
     entt::registry& reg = scene.Registry();
-    for (auto e : reg.view<Element>()) {
-        entt::entity parent = scene.ParentOf(e);
-        if (parent == entt::null || !IsElement(reg, parent)) roots.push_back(e);
-    }
     auto canvasOrder = [&reg](entt::entity e) {
         const Canvas* c = reg.try_get<Canvas>(e);
         return c ? c->SortOrder : 0;
@@ -83,6 +83,16 @@ std::vector<entt::entity> SortedUIRoots(Scene& scene) {
         if (ta.Order != tb.Order) return ta.Order < tb.Order;
         return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
     });
+}
+
+std::vector<entt::entity> SortedUIRoots(Scene& scene) {
+    std::vector<entt::entity> roots;
+    entt::registry& reg = scene.Registry();
+    for (auto e : reg.view<Element>()) {
+        entt::entity parent = scene.ParentOf(e);
+        if (parent == entt::null || !IsElement(reg, parent)) roots.push_back(e);
+    }
+    SortRoots(scene, roots);
     return roots;
 }
 
@@ -386,25 +396,58 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
 // Все элементы сцены в ПОРЯДКЕ ОТРИСОВКИ. ui нужен для измерения текста; без
 // него берётся размер, посчитанный на прошлом кадре.
 std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int screenH,
-                              bool includeHidden = false) {
+                              bool includeHidden = false,
+                              const UIScope& scope = UIScope::All()) {
     std::vector<Solved> out;
     entt::registry& reg = scene.Registry();
-    for (auto root : SortedUIRoots(scene)) {
-        // Холст задаёт масштаб интерфейса: свёрстанное под 1920x1080 не должно
-        // сжиматься вчетверо на 4K.
+
+    // ГРУППА — ЭТО ИНТЕРФЕЙС. Раньше корни сцены шли одним списком, и два
+    // интерфейса перемешивались между собой: порядок решало число на элементе,
+    // а не то, какому экрану он принадлежит. Теперь считается интерфейс
+    // целиком: свои корни, свой холст, своя видимость.
+    struct Group {
+        entt::entity Interface = entt::null;
+        const InterfaceComponent* Info = nullptr;
+    };
+    std::vector<Group> groups;
+    // «Без интерфейса» — первым: такие элементы собирают кодом и скриптом
+    // (превью ассета, тест, интерфейс, созданный на лету), и они существуют
+    // независимо от того, завёл ли кто-то интерфейсы в сцене.
+    if (scope.Accepts(entt::null) && !InterfaceRoots(scene, entt::null).empty())
+        groups.push_back({entt::null, nullptr});
+    for (entt::entity iface : SortedInterfaces(scene)) {
+        if (!scope.Accepts(iface)) continue;
+        const InterfaceComponent& info = reg.get<InterfaceComponent>(iface);
+        // Выключенный интерфейс не рисуется и не ловит мышь — целиком.
+        // includeHidden (режим редактора) показывает и его: иначе выключенный
+        // интерфейс нельзя было бы ни найти, ни включить обратно.
+        if (!info.Visible && !includeHidden) continue;
+        groups.push_back({iface, &info});
+    }
+
+    for (const Group& group : groups) {
         UIRect screen{0.0f, 0.0f, (float)screenW, (float)screenH};
         float scale = 1.0f;
-        if (const Canvas* c = reg.try_get<Canvas>(root)) {
-            const float k = CanvasScale(*c, {(float)screenW, (float)screenH});
+        std::vector<entt::entity> roots = InterfaceRoots(scene, group.Interface);
+        if (roots.empty()) continue;
+
+        // Холст ИНТЕРФЕЙСА, а не первого его элемента. Компонент Canvas на
+        // корневом элементе по-прежнему читается: так верстали до появления
+        // интерфейсов, и сцены с ним обязаны открываться как раньше.
+        const Canvas* canvas = group.Info ? &group.Info->Canvas : reg.try_get<Canvas>(roots.front());
+        if (canvas) {
+            const float k = CanvasScale(*canvas, {(float)screenW, (float)screenH});
             if (k > 0.0f && k != 1.0f) {
                 scale = k;
                 screen.w = (float)screenW / scale;
                 screen.h = (float)screenH / scale;
             }
         }
+
         const size_t first = out.size();
-        SolveSubtree(scene, root, screen, ui, false, UIRect{}, 1.0f, true, nullptr, includeHidden,
-                     out);
+        for (entt::entity root : roots)
+            SolveSubtree(scene, root, screen, ui, false, UIRect{}, 1.0f, true, nullptr,
+                         includeHidden, out);
         // ПЕРЕВОД В ЭКРАННЫЕ КООРДИНАТЫ. Раскладка считалась в опорных единицах
         // холста — иначе вёрстка под 1920x1080 не сохранила бы пропорции на
         // другом разрешении. Дальше её читают отрисовка, попадание курсором и
@@ -426,14 +469,55 @@ std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int sc
 
 } // namespace
 
+entt::entity InterfaceOf(Scene& scene, entt::entity element) {
+    entt::registry& reg = scene.Registry();
+    for (entt::entity e = element; e != entt::null && reg.valid(e); e = scene.ParentOf(e))
+        if (reg.all_of<InterfaceComponent>(e)) return e;
+    return entt::null;
+}
+
+std::vector<entt::entity> SortedInterfaces(Scene& scene) {
+    std::vector<entt::entity> out;
+    entt::registry& reg = scene.Registry();
+    for (entt::entity e : reg.view<InterfaceComponent>()) out.push_back(e);
+    std::stable_sort(out.begin(), out.end(), [&reg](entt::entity a, entt::entity b) {
+        const int sa = reg.get<InterfaceComponent>(a).SortOrder;
+        const int sb = reg.get<InterfaceComponent>(b).SortOrder;
+        if (sa != sb) return sa < sb;
+        // При равном порядке — по номеру объекта: порядок обхода ECS не обещан
+        // и меняется при удалении сущностей, а «какое меню сверху» не должно
+        // зависеть от того, что удалили в соседнем углу сцены.
+        const IdComponent* ia = reg.try_get<IdComponent>(a);
+        const IdComponent* ib = reg.try_get<IdComponent>(b);
+        return (ia ? ia->Id : 0) < (ib ? ib->Id : 0);
+    });
+    return out;
+}
+
+std::vector<entt::entity> InterfaceRoots(Scene& scene, entt::entity interfaceEntity) {
+    std::vector<entt::entity> roots;
+    entt::registry& reg = scene.Registry();
+    for (entt::entity e : reg.view<Element>()) {
+        // Корень — тот, над кем нет ЭЛЕМЕНТА: он якорится к экрану, а не к
+        // чужому прямоугольнику.
+        const entt::entity parent = scene.ParentOf(e);
+        if (parent != entt::null && IsElement(reg, parent)) continue;
+        if (InterfaceOf(scene, e) != interfaceEntity) continue;
+        roots.push_back(e);
+    }
+    SortRoots(scene, roots);
+    return roots;
+}
+
 std::vector<ElementRect> SolveSceneRects(Scene& scene, int screenW, int screenH,
-                                         bool includeHidden) {
+                                         bool includeHidden, const UIScope& scope) {
     entt::registry& reg = scene.Registry();
     // Без UIRenderer: авто-ширину надписи меряет шрифт, а его здесь нет.
     // Прошлый кадр её уже посчитал и положил в Element::LayoutSize, поэтому
     // рамка редактора отстаёт от изменившегося текста ровно на один кадр —
     // цена за то, что редактор не тащит за собой отрисовку.
-    const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH, includeHidden);
+    const std::vector<Solved> items =
+        SolveScene(scene, nullptr, screenW, screenH, includeHidden, scope);
 
     std::vector<ElementRect> out;
     out.reserve(items.size());
@@ -465,14 +549,15 @@ bool PointIn(const UIRect& r, glm::vec2 p) {
 
 } // namespace
 
-void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
+void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH, const UIScope& scope) {
     SAGE_PROFILE("Интерфейс сцены");
     // КАРТИНКИ — ПЕРЕД ОТРИСОВКОЙ. Путь мог смениться с прошлого кадра (слот в
     // инспекторе, перетаскивание файла, отмена, скрипт), а загрузка жила
     // только в чтении сцены: картинка появлялась лишь после Play/Stop.
     scene.Registry().view<Image>().each([](Image& im) { EnsureImageTexture(im); });
 
-    const std::vector<Solved> items = SolveScene(scene, &ui, screenW, screenH);
+    const std::vector<Solved> items =
+        SolveScene(scene, &ui, screenW, screenH, /*includeHidden=*/false, scope);
     const entt::registry& reg = scene.Registry();
 
     for (const Solved& it : items) {
@@ -490,8 +575,9 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH) {
     }
 }
 
-int HitTest(Scene& scene, float x, float y, int screenW, int screenH) {
-    const std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH);
+int HitTest(Scene& scene, float x, float y, int screenW, int screenH, const UIScope& scope) {
+    const std::vector<Solved> items =
+        SolveScene(scene, nullptr, screenW, screenH, /*includeHidden=*/false, scope);
     const entt::registry& reg = scene.Registry();
     int bestId = -1;
     for (const Solved& it : items) {
@@ -506,14 +592,28 @@ int HitTest(Scene& scene, float x, float y, int screenW, int screenH) {
     return bestId;
 }
 
-UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW, int screenH) {
+UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW, int screenH,
+                            const UIScope& scope) {
     UIInputResult result;
     result.Size = glm::vec2((float)screenW, (float)screenH);
     entt::registry& reg = scene.Registry();
-    std::vector<Solved> items = SolveScene(scene, nullptr, screenW, screenH);
+    std::vector<Solved> items =
+        SolveScene(scene, nullptr, screenW, screenH, /*includeHidden=*/false, scope);
     // Спрятанный не ловит ввод по той же причине, что и не ловит точку.
     items.erase(std::remove_if(items.begin(), items.end(),
                                [](const Solved& s) { return !s.Visible; }),
+                items.end());
+    // И интерфейс, который ПОКАЗЫВАЮТ, но которым не пользуются: заставка,
+    // титры, подсказка поверх игры. Без этого «не ловит мышь» пришлось бы
+    // выражать прозрачной заглушкой поверх всего экрана.
+    items.erase(std::remove_if(items.begin(), items.end(),
+                               [&scene, &reg](const Solved& s) {
+                                   const entt::entity iface = InterfaceOf(scene, s.Entity);
+                                   if (iface == entt::null) return false;
+                                   const InterfaceComponent* info =
+                                       reg.try_get<InterfaceComponent>(iface);
+                                   return info && !info->ReceivesInput;
+                               }),
                 items.end());
 
     // Состояние взаимодействия живёт в Interactable::Runtime, и его НЕТ у

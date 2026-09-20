@@ -1828,6 +1828,20 @@
     "Temperature": "Температура",
     "Midtones": "Средние тона",
     "Highlights": "Света",
-    "Smoothness": "Мягкость"
+    "Smoothness": "Мягкость",
+    "0 — follow width, 1 — follow height": "0 — тянуться за шириной, 1 — за высотой",
+    "An interface object: its elements live inside it": "Объект-интерфейс: его элементы живут внутри него",
+    "Create interface": "Создать интерфейс",
+    "Element properties — colour, text, layout — live on the elements themselves, inside this interface.": "Свойства элементов — цвет, текст, раскладка — живут у самих элементов внутри этого интерфейса.",
+    "New interface in this scene": "Новый интерфейс в этой сцене",
+    "No interface": "Без интерфейса",
+    "No interface in the scene yet.": "В сцене пока нет интерфейса.",
+    "Nothing to edit": "Нечего править",
+    "Receives input": "Принимает ввод",
+    "Root elements: %d": "Корневых элементов: %d",
+    "off — shown but not clickable: a splash, credits, a hint over the game": "выключено — показывается, но не нажимается: заставка, титры, подсказка поверх игры",
+    "off — the whole interface is hidden, with all its elements": "выключено — интерфейс спрятан целиком, со всеми элементами",
+    "order BETWEEN interfaces: the HUD below the pause menu": "порядок МЕЖДУ интерфейсами: HUD под меню паузы",
+    "A screen of its own: its elements live inside it and are edited apart": "Свой экран: его элементы живут внутри и правятся отдельно"
   }
 }

@@ -141,6 +141,14 @@ public:
     EditorWorkspace Workspace() const override { return m_workspace; }
     void SetWorkspace(EditorWorkspace workspace) override;
 
+    int CurrentInterfaceId() const override { return m_currentInterface; }
+    void SetCurrentInterface(int id) override { m_currentInterface = id; }
+    sage::ui::UIScope UiScope() const override;
+    // Выбирает интерфейс, с которым работать: прежний, если он ещё жив; иначе
+    // тот, которому принадлежит выделенное; иначе первый в сцене. Зовётся при
+    // входе в пространство вёрстки и при смене сцены.
+    void ResolveCurrentInterface();
+
     void OpenAnimationClip(const std::string& clipPath) override {
         m_panels[EditorPanel::Animation] = true;
         m_animation.RequestFocus();
@@ -571,6 +579,9 @@ private:
     InterfaceInspectorPanel m_uiInspector;
     InterfacePreviewPanel m_uiPreview;
     EditorWorkspace m_workspace = EditorWorkspace::Scene;
+    // Номер объекта-интерфейса, который сейчас верстают. -1 — ни одного;
+    // 0 — особая строка «Без интерфейса» (элементы, собранные кодом).
+    int m_currentInterface = -1;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)
