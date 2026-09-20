@@ -428,9 +428,29 @@ function Debug:Log(message) end
 function Debug:Warning(message) end
 ---@param message string
 function Debug:Error(message) end
-function Debug:DrawLine(from, to) end
-function Debug:DrawRay(origin, direction) end
-function Debug:DrawSphere(center, radius) end
+---Отладочная линия. Цвет и длительность необязательны; без длительности линия
+---живёт ОДИН кадр (её перезаказывают, пока она нужна).
+---@param from Vec3
+---@param to Vec3
+---@param color? Vec3
+---@param duration? number
+function Debug:DrawLine(from, to, color, duration) end
+---Длина берётся из самого направления.
+---@param origin Vec3
+---@param direction Vec3
+---@param color? Vec3
+---@param duration? number
+function Debug:DrawRay(origin, direction, color, duration) end
+---@param center Vec3
+---@param radius number
+---@param color? Vec3
+---@param duration? number
+function Debug:DrawSphere(center, radius, color, duration) end
+---@param center Vec3
+---@param halfExtents Vec3
+---@param color? Vec3
+---@param duration? number
+function Debug:DrawBox(center, halfExtents, color, duration) end
 
 ---Сцена. Прежний раздел sage.scene (Load и прочее) доступен через этот же
 ---объект.
@@ -460,6 +480,12 @@ function Scene:Instantiate(prefab, position) end
 function Scene:Destroy(target) end
 ---@return string
 function Scene:Name() end
+---Перейти на другой уровень. Имя — без папки и расширения ("level2").
+---ЗАПРОС: выполнит его движок между кадрами, когда ни один скрипт не идёт.
+---@param name string
+function Scene:Load(name) end
+---Начать этот же уровень заново.
+function Scene:Reload() end
 
 ---Физические запросы.
 Physics = {}

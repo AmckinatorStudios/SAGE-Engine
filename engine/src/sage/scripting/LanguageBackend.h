@@ -7,6 +7,7 @@
 
 class Scene;
 class GameObject;
+namespace sage::render { class DebugLines; }
 class Camera;
 class PhysicsScene;
 class AudioEngine;
@@ -35,6 +36,8 @@ namespace sage::input { class InputSystem; }
 // ---------------------------------------------------------------------------
 namespace sage::scripting {
 
+class ScriptingSystem;
+
 // Что движок отдаёт скриптам. Невладеющие указатели: их держит хозяин кадра
 // (рантайм игры, Play-режим редактора), а не язык. Любой может быть nullptr —
 // тогда соответствующий раздел API обязан сказать «не привязано» понятной
@@ -48,6 +51,16 @@ struct ScriptServices {
     // Часы кадра: Time.deltaTime и прочее. Владеет ими ScriptingSystem —
     // один источник времени на все языки сразу.
     ScriptClock* Clock = nullptr;
+    // Куда ложатся заказы Debug:DrawLine и прочей отладочной графики. Владеет
+    // им тоже ScriptingSystem: буфер обязан существовать ВСЕГДА, даже когда
+    // рисовать некому (headless-прогон), иначе отладочная строка в скрипте
+    // валила бы игру там, где она безобидна.
+    sage::render::DebugLines* Debug = nullptr;
+    // Сама система — ради того, что принадлежит ЕЙ, а не движку: запрос смены
+    // сцены (см. ScriptingSystem::RequestScene). Обратный указатель, а не
+    // отдельный интерфейс: система и так создаёт эти службы, а лишний слой
+    // ради одного вызова — это лишний слой ради одного вызова.
+    ScriptingSystem* System = nullptr;
     // Папки поиска модулей (require и его аналоги в других языках).
     std::vector<std::string> ModulePaths;
 };

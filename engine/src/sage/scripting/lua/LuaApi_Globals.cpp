@@ -7,6 +7,8 @@
 #include "sage/input/InputSystem.h"
 #include "sage/input/Keys.h"
 #include "sage/physics/PhysicsScene.h"
+#include "sage/render/DebugLines.h"
+#include "sage/scripting/ScriptingSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/Scene.h"
@@ -176,12 +178,54 @@ void RegisterGlobals(Backend& backend) {
     debug.set_function("Error", [](sol::variadic_args va) {
         LOG_ERROR("Lua") << Str(va, Skip(va));
     });
-    // Отладочные линии: рисовать их некому, пока сцена не в кадре (headless,
-    // тест, сборка без рендера). Это не ошибка — вызов просто ничего не
-    // делает, иначе отладочная строка роняла бы игру там, где она безобидна.
-    debug.set_function("DrawLine", [](sol::variadic_args) {});
-    debug.set_function("DrawRay", [](sol::variadic_args) {});
-    debug.set_function("DrawSphere", [](sol::variadic_args) {});
+    // --- Отладочная графика --------------------------------------------------
+    //
+    // Заказ КЛАДЁТСЯ В БУФЕР, а не рисуется на месте: скрипт зовёт это из
+    // Update, то есть до кадра, а в headless-прогоне кадра нет вовсе. Рисует
+    // тот, кто рисует (вьюпорт редактора, панель Game, собранная игра); если
+    // рисовать некому — заказ просто не доживёт до конца кадра, и отладочная
+    // строка ничего не сломает.
+    //
+    // Цвет и длительность НЕОБЯЗАТЕЛЬНЫ: `Debug:DrawLine(a, b)` — самая частая
+    // запись, и требовать к ней ещё два аргумента значит, что её не напишут.
+    // duration > 0 — для мгновенного (точка попадания, толчок): линия на один
+    // кадр человеческому глазу не видна.
+    auto colorAt = [](const sol::variadic_args& va, size_t i) {
+        if (i < va.size()) {
+            sol::object o = va[i];
+            if (o.is<glm::vec3>()) return o.as<glm::vec3>();
+            if (o.is<glm::vec4>()) return glm::vec3(o.as<glm::vec4>());
+        }
+        return glm::vec3(0.0f, 1.0f, 0.2f); // зелёный «по умолчанию отладочный»
+    };
+    debug.set_function("DrawLine", [self, colorAt](sol::variadic_args va) {
+        sage::render::DebugLines* lines = self->Services().Debug;
+        const size_t b = Skip(va);
+        if (!lines || b + 1 >= va.size()) return;
+        lines->Line(va[b].as<glm::vec3>(), va[b + 1].as<glm::vec3>(), colorAt(va, b + 2),
+                    Num(va, b + 3));
+    });
+    debug.set_function("DrawRay", [self, colorAt](sol::variadic_args va) {
+        sage::render::DebugLines* lines = self->Services().Debug;
+        const size_t b = Skip(va);
+        if (!lines || b + 1 >= va.size()) return;
+        lines->Ray(va[b].as<glm::vec3>(), va[b + 1].as<glm::vec3>(), colorAt(va, b + 2),
+                   Num(va, b + 3));
+    });
+    debug.set_function("DrawSphere", [self, colorAt](sol::variadic_args va) {
+        sage::render::DebugLines* lines = self->Services().Debug;
+        const size_t b = Skip(va);
+        if (!lines || b >= va.size()) return;
+        lines->Sphere(va[b].as<glm::vec3>(), Num(va, b + 1, 1.0f), colorAt(va, b + 2),
+                      Num(va, b + 3));
+    });
+    debug.set_function("DrawBox", [self, colorAt](sol::variadic_args va) {
+        sage::render::DebugLines* lines = self->Services().Debug;
+        const size_t b = Skip(va);
+        if (!lines || b + 1 >= va.size()) return;
+        lines->Box(va[b].as<glm::vec3>(), va[b + 1].as<glm::vec3>(), colorAt(va, b + 2),
+                   Num(va, b + 3));
+    });
     lua["Debug"] = debug;
 
     // =======================================================================
@@ -253,6 +297,27 @@ void RegisterGlobals(Backend& backend) {
     });
     scene.set_function("Name", [self](sol::variadic_args) {
         return SceneOrThrow(*self, "scene:Name")->Name();
+    });
+    // --- Смена сцены ---------------------------------------------------------
+    //
+    // ЗАПРОС, а не действие: выполнит его хозяин кадра между кадрами, когда ни
+    // один скрипт не исполняется (см. ScriptingSystem::RequestScene). Имя — без
+    // папки и расширения: "level2", а не "scenes/level2.sage". Путь в скрипте
+    // означал бы, что игра знает, как разложены её файлы на диске, — а в
+    // собранной игре они лежат внутри пакета.
+    scene.set_function("Load", [self](sol::variadic_args va) {
+        ScriptingSystem* system = self->Services().System;
+        if (!system) throw std::runtime_error("scene:Load: система скриптинга не привязана");
+        const std::string name = Str(va, Skip(va));
+        if (name.empty()) throw std::runtime_error("scene:Load: не задано имя сцены");
+        system->RequestScene(name);
+    });
+    // Начать уровень заново. Отдельно от Load(текущая), потому что имя текущей
+    // сцены скрипту знать незачем — а перезапуск нужен каждой второй игре.
+    scene.set_function("Reload", [self](sol::variadic_args) {
+        ScriptingSystem* system = self->Services().System;
+        if (!system) throw std::runtime_error("scene:Reload: система скриптинга не привязана");
+        system->RequestSceneReload();
     });
     // Прежний раздел sage.scene (Load и прочее) остаётся доступен ЧЕРЕЗ ЭТОТ
     // ЖЕ объект: имя `scene` в скриптах уже занято им, и отобрать его значило

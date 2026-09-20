@@ -21,6 +21,24 @@ public:
     std::filesystem::path AssetsDir() const { return m_dir / "assets"; }
     std::filesystem::path ProjectFile() const { return m_dir / "project.sageproj"; }
 
+    // --- СТАРТОВАЯ СЦЕНА -----------------------------------------------------
+    //
+    // С КАКОЙ СЦЕНЫ НАЧИНАЕТСЯ ИГРА — это решение автора, и оно обязано лежать
+    // в проекте. Раньше его не было вовсе: собранная игра брала
+    // scenes/main.sage, а если её нет — ПЕРВУЮ ПО АЛФАВИТУ. То есть уровень,
+    // названный «arena», молча становился началом игры, а переименование файла
+    // меняло то, что увидит игрок при запуске. Найти это можно было только
+    // собрав игру и запустив её.
+    //
+    // Хранится ИМЕНЕМ без папки и расширения ("main") — ровно так же, как его
+    // пишут в скрипте (`scene:Load("level2")`). Пусто — прежнее поведение:
+    // main.sage, иначе первая по алфавиту.
+    const std::string& StartScene() const { return m_startScene; }
+    // Записывает выбор в project.sageproj СРАЗУ: настройка, живущая только в
+    // памяти редактора, теряется при закрытии — и именно тогда, когда человек
+    // уверен, что уже всё настроил.
+    bool SetStartScene(const std::string& name, std::string& error);
+
     // Создаёт <baseDir>/<name>/ с project.sageproj, scenes/ и assets/ и делает
     // проект текущим. false + error, если папка занята или запись не удалась.
     bool CreateNew(const std::filesystem::path& baseDir, const std::string& name, std::string& error);
@@ -47,7 +65,12 @@ public:
     // панели Assets).
     std::string AssetRef(const std::filesystem::path& path) const;
 
-    void Close() { m_loaded = false; m_name.clear(); m_dir.clear(); }
+    void Close() {
+        m_loaded = false;
+        m_name.clear();
+        m_dir.clear();
+        m_startScene.clear();
+    }
 
     // Сделать m_dir/m_name ДЕЙСТВУЮЩИМ проектом: подпапки, база ассетов, имя
     // для сохранений, сброс кэша префабов. Общее для CreateNew и Open — и это
@@ -68,5 +91,6 @@ private:
 
     bool m_loaded = false;
     std::string m_name;
+    std::string m_startScene;
     std::filesystem::path m_dir;
 };

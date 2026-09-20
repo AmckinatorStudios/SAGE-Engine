@@ -139,6 +139,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
     src/sage/scripting/ScriptEngine.cpp
+    src/sage/render/DebugLines.cpp
     src/sage/scripting/ScriptRuntime.cpp
     src/sage/scripting/ScriptFields.cpp
     src/sage/scripting/ScriptingSystem.cpp

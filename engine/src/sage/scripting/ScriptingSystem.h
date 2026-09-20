@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <memory>
 
+#include "sage/render/DebugLines.h"
 #include "sage/scripting/ScriptRuntime.h"
 
 class Scene;
@@ -48,6 +49,12 @@ public:
     float TimeScale() const { return m_clock.Scale; }
     const ScriptClock& Clock() const { return m_clock; }
 
+    // Отладочная графика, заказанная скриптами этого кадра. Читает её тот, кто
+    // рисует (вьюпорт редактора, панель Game, собранная игра); гасит отжившее —
+    // сама система, в Update.
+    sage::render::DebugLines& Debug() { return m_debug; }
+    const sage::render::DebugLines& Debug() const { return m_debug; }
+
     ScriptRuntime& Runtime() { return m_runtime; }
     const ScriptRuntime& Runtime() const { return m_runtime; }
 
@@ -85,6 +92,25 @@ public:
     // Событие анимации → OnAnimationEvent(name) у скрипта этой сущности.
     void DispatchAnimationEvent(GameObject object, const std::string& name);
 
+    // --- Смена сцены --------------------------------------------------------
+    //
+    // ПОЧЕМУ ЗАПРОС, А НЕ ДЕЙСТВИЕ. Скрипт зовёт `scene:Load("level2")` изнутри
+    // Update — то есть в момент, когда движок ИДЁТ ПО СУЩНОСТЯМ ЭТОЙ ЖЕ СЦЕНЫ,
+    // а сам скрипт держит на них ссылки. Загрузить новую сцену прямо там значит
+    // уничтожить реестр под ногами у обхода и оставить скрипту висячий объект:
+    // падение в лучшем случае, тихая порча памяти в худшем.
+    //
+    // Поэтому запрос ЗАПОМИНАЕТСЯ, а выполняет его хозяин кадра (плеер или
+    // Play-режим редактора) между кадрами, когда ни один скрипт не исполняется.
+    void RequestScene(const std::string& name);
+    // Перезагрузить ТЕКУЩУЮ (начать уровень заново).
+    void RequestSceneReload() { RequestScene(std::string()); }
+
+    // Забирающий геттер: запрос действует ОДИН раз. Скрипт, попросивший сменить
+    // сцену дважды за кадр, не должен получить две загрузки. Пустое имя в
+    // out — «перезагрузить текущую».
+    bool TakeSceneRequest(std::string& name);
+
     // Горячая перезагрузка изменённых файлов (редактор зовёт каждый кадр).
     int ReloadChanged() { return m_runtime.ReloadChanged(); }
 
@@ -94,7 +120,10 @@ public:
 private:
     ScriptRuntime m_runtime;
     ScriptClock m_clock;
+    sage::render::DebugLines m_debug;
     float m_fixedAccum = 0.0f;
+    std::string m_pendingScene;
+    bool m_sceneRequested = false;
     // Максимум шагов постоянного шага за кадр: после долгой паузы (перетащили
     // окно, открыли меню) накопитель иначе требует сотни шагов подряд, и игра
     // «догоняет» время, повиснув на секунду.

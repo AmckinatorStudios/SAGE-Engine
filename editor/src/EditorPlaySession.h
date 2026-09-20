@@ -51,6 +51,10 @@ struct PlayContext {
     // Восстановить сцену из снимка. Знание о сериализаторе и переносе
     // запечённого GI принадлежит редактору, не сессии.
     std::function<bool(const std::string&)> RestoreScene;
+    // Загрузить ДЛЯ ИГРЫ сцену проекта по имени ("level2"). Отдельно от
+    // открытия сцены в редакторе: документ человека при этом не меняется — ни
+    // путь, ни история правок, ни отметка «изменено».
+    std::function<bool(const std::string&)> LoadSceneForPlay;
     // Раскладка управления ПРОЕКТА поверх объявленной скриптами — зовётся
     // после привязки скриптов (порядок важен, см. Start).
     std::function<void()> ApplyProjectInputMapping;
@@ -117,6 +121,10 @@ public:
     // скрипты объектов — забыть одно из двух здесь легче всего, и выглядит это
     // как «скрипты не работают», а не как «половина скриптов не тикает».
     void StepScripts(Scene& scene, float dt);
+
+    // Перейти на другой уровень, не выходя из Play (scene:Load из скрипта).
+    // Документ человека не трогается: Stop вернёт ту сцену, что была открыта.
+    bool SwitchScene(const PlayContext& ctx, const std::string& sceneName);
     PhysicsScene* Physics() { return m_physics.get(); }
 
     // Звук — единственная подсистема, которая ПЕРЕЖИВАЕТ Stop: устройство и
@@ -141,6 +149,8 @@ private:
     // прежнего движка, и пережить его он не имеет права — члены разрушаются в
     // обратном порядке объявления.
     std::unique_ptr<sage::scripting::ScriptingSystem> m_scripting;
+    int BuildRuntime(const PlayContext& ctx, Scene& scene);
+    void TeardownRuntime(const PlayContext& ctx, Scene* scene);
     std::unique_ptr<PhysicsScene> m_physics;
     std::unique_ptr<AudioEngine> m_audio;     // переживает Stop (см. Audio())
 

@@ -50,13 +50,45 @@ PlayerLayer::PlayerLayer(fs::path projectDir, std::string launchArgs)
       m_launchArgs(std::move(launchArgs)) {}
 PlayerLayer::~PlayerLayer() = default;
 
+// С КАКОЙ СЦЕНЫ НАЧИНАЕТСЯ ИГРА.
+//
+// Порядок ответов — от «автор сказал» к «движок угадал», и угадывание идёт
+// последним не случайно. Пока стартовой сцены в проекте не было, игра брала
+// main.sage, а если её нет — ПЕРВУЮ ПО АЛФАВИТУ: уровень, названный «arena»,
+// молча становился началом игры, а переименование файла меняло то, что увидит
+// игрок. Заметить это можно было только собрав игру и запустив её.
+//
+// Через vfs, а не через directory_iterator: в собранной игре проект лежит
+// ПАКЕТОМ, каталога scenes/ на диске нет, и обход вернул бы пустоту — игра
+// честно не нашла бы ни одной сцены и не запустилась.
 fs::path PlayerLayer::FindMainScene() const {
-    // Через vfs, а не через directory_iterator: в собранной игре проект лежит
-    // ПАКЕТОМ, каталога scenes/ на диске нет, и обход вернул бы пустоту — игра
-    // честно не нашла бы ни одной сцены и не запустилась.
+    // 1. Выбор автора: project.sageproj -> startScene.
+    std::string manifest;
+    if (sage::assets::vfs::ReadText("project.sageproj", manifest)) {
+        std::string startScene;
+        try {
+            startScene = nlohmann::json::parse(manifest).value("startScene", std::string());
+        } catch (const std::exception&) {
+            // Битый манифест — не повод не запускаться: имя игры и стартовая
+            // сцена восстановимы догадкой, а игра нужна сейчас.
+        }
+        if (!startScene.empty()) {
+            fs::path path = fs::path("scenes") / (startScene + ".sage");
+            if (sage::assets::vfs::Exists(path.generic_string())) return path;
+            // Сказано прямо: сцену, названную в проекте, не нашли. Молча уйти на
+            // запасной путь значит запустить НЕ ТУ игру и не объяснить почему.
+            LOG_WARN("Player") << "Стартовая сцена проекта не найдена: " << path.generic_string()
+                               << " — беру запасную";
+        }
+    }
+    // 2. Соглашение: scenes/main.sage.
     if (sage::assets::vfs::Exists("scenes/main.sage")) return fs::path("scenes/main.sage");
+    // 3. Догадка: первая по алфавиту. Это уже не выбор, а «хоть что-нибудь».
     const std::vector<std::string> scenes =
         sage::assets::vfs::ListFiles("scenes", ".sage");
+    if (!scenes.empty())
+        LOG_WARN("Player") << "Стартовая сцена не задана в проекте — играю первую по алфавиту ("
+                           << scenes.front() << ")";
     return scenes.empty() ? fs::path() : fs::path(scenes.front());
 }
 
@@ -222,8 +254,9 @@ void PlayerLayer::OnAttach() {
              {"Проект найден, но играть нечего: в scenes/ нет ни одного файла .sage.",
               "Искал в: " + (m_projectDir / "scenes").lexically_normal().string(),
               "",
-              "Сохраните сцену в редакторе (File > Save Scene) — плеер берёт",
-              "scenes/main.sage, а если её нет, то первую по алфавиту."});
+              "Сохраните сцену в редакторе (File > Save Scene) и назначьте её",
+              "стартовой: ПКМ по сцене в панели Assets > «Сделать стартовой сценой».",
+              "Без этого плеер берёт scenes/main.sage, а если её нет — первую по алфавиту."});
         return;
     }
     try {
@@ -554,7 +587,13 @@ void PlayerLayer::ApplyGameFlowRequests() {
     // другое, побеждает более конкретное — переход на названную сцену.
     const bool restart = m_scripts->TakeRestartRequest();
     std::string sceneName;
-    if (m_scripts->TakeSceneRequest(sceneName)) {
+    // Два источника запроса — прежний движок (sage.scene.Load уровневых
+    // скриптов) и система скриптинга (scene:Load скриптов объектов). Спрашиваем
+    // оба и в одном месте: иначе «переход работает из одного скрипта и не
+    // работает из другого» — и объяснить это игре будет нечем.
+    bool wantScene = m_scripts->TakeSceneRequest(sceneName);
+    if (!wantScene && m_scripting) wantScene = m_scripting->TakeSceneRequest(sceneName);
+    if (wantScene) {
         SwitchScene(sceneName);
     } else if (restart) {
         SwitchScene({});   // пустое имя — та же сцена заново
@@ -1079,6 +1118,17 @@ void PlayerLayer::OnRender() {
         // другие полупрозрачные и не пишут глубину, поэтому идут после всей
         // непрозрачной геометрии и до пост-обработки.
         if (m_billboards) m_billboards->DrawFromView(view, proj);
+
+        // Отладочная графика игры (Debug:DrawLine из скриптов) — здесь же, в
+        // буфере сцены: с тестом глубины, то есть заслоняется миром, как и
+        // должна. В СОБРАННОЙ игре она нужна не меньше, чем в редакторе:
+        // «в редакторе работает, в игре нет» разбирают именно ею.
+        if (m_scripting && !m_scripting->Debug().Empty()) {
+            if (!m_debugDraw) m_debugDraw.emplace();
+            for (const sage::render::DebugLine& l : m_scripting->Debug().All())
+                m_debugDraw->Line(l.A, l.B, l.Color);
+            m_debugDraw->Flush(view, proj);
+        }
 
         // Объём — после геометрии и ДО пост-обработки: лучи обязаны попасть в
         // bloom, иначе солнце светится, а его лучи нет. Работает только с

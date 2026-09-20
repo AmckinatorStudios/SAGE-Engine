@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1850.
+// Язык: Русский. Строк: 1857.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1210,6 +1210,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не удалось открыть папку: "},
     {"Failed to open the project: ",
      "Проект не открылся: "},
+    {"Failed to set the start scene: ",
+     "Не удалось назначить стартовую сцену: "},
     {"Failed to write the project file",
      "Не удалось записать файл проекта"},
     {"Falling crate",
@@ -1730,6 +1732,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Главное меню"},
     {"Make it mine",
      "Сделать своим"},
+    {"Make start scene",
+     "Сделать стартовой сценой"},
     {"Manage your games and worlds",
      "Ваши игры и миры"},
     {"Map value multiplies the factor above; Enter applies the path.",
@@ -2996,6 +3000,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Начальный цвет"},
     {"Start from",
      "Начать с"},
+    {"Start scene: ",
+     "Стартовая сцена: "},
     {"Startup folder",
      "Папка запуска"},
     {"Static",
@@ -3126,6 +3132,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Действие никогда не сработает. Добавьте управление ниже."},
     {"The archive could not be unpacked: ",
      "Архив не распаковался: "},
+    {"The built game starts from this scene",
+     "Собранная игра начинается с этой сцены"},
     {"The built game will not find it. Bring it into the project:",
      "В собранной игре не найдётся. Внесите его в проект:"},
     {"The chain will not run:",
@@ -3210,6 +3218,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "В проекте нет ни одной сцены — запускать нечего"},
     {"The project has no scene: there is nothing to run. Create or save a scene into scenes/ first.",
      "В проекте нет ни одной сцены: запускать нечего. Сначала создайте сцену и сохраните её в scenes/."},
+    {"The project's start scene is missing: ",
+     "Стартовая сцена проекта не найдена: "},
     {"The properties of this entity belong to it alone.",
      "Свойства этой сущности — только её."},
     {"The same control is bound to another action. That is legal when the two never run at the same time — they live in different contexts.",
@@ -3288,6 +3298,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Это не папка проекта SAGE: "},
     {"This is not a SAGE project: no project.sageproj in ",
      "Это не проект SAGE: нет project.sageproj в "},
+    {"This is the start scene",
+     "Это стартовая сцена"},
     {"This light IS the sun: it casts the cascaded shadows and it is where the procedural sky draws its disc. Point it by rotating the object, or by azimuth and elevation below.",
      "Этот свет и есть солнце: он отбрасывает каскадные тени, и по нему процедурное небо рисует диск. Направляют его поворотом объекта или азимутом и высотой ниже."},
     {"This model has no skeleton — nothing to animate",
@@ -3672,6 +3684,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "шейдер"},
     {"sound",
      "звук"},
+    {"start",
+     "старт"},
     {"t = %.2f s",
      "t = %.2f с"},
     {"texture",

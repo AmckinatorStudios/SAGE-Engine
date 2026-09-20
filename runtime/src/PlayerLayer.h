@@ -13,6 +13,7 @@
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
+#include "sage/render/DebugDraw.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
 #include "sage/core/SystemScheduler.h"
@@ -138,6 +139,9 @@ private:
     // нём одном лампы перестанут отбрасывать тень.
     ShadowBinding FrameShadows(bool sunEnabled) const;
     std::optional<SkyRenderer> m_sky;     // процедурный скайбокс сцены
+    // Отладочная графика ИГРЫ (Debug:DrawLine из скриптов). Заводится лениво:
+    // игра, которая её не просит, не платит за шейдер и буфер вершин.
+    std::optional<DebugDraw> m_debugDraw;
     // Отражения кадра. Карта окружения переснимается только при смене цвета
     // неба (см. ReflectionSystem), поэтому в кадре это стоит ноль.
     sage::render::ReflectionSystem m_reflections;

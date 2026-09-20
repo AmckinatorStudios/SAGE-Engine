@@ -19,6 +19,7 @@
 
 #include "sage/input/InputSystem.h"
 #include "sage/physics/PhysicsScene.h"
+#include "sage/render/DebugLines.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptFields.h"
@@ -524,4 +525,115 @@ TEST(ScriptSystem_shipped_fps_example_runs) {
     CHECK_TRUE(input.Has("Jump"));
     CHECK_TRUE(input.Has("Sprint"));
     sys->Shutdown();
+}
+
+// --- Отладочная графика ------------------------------------------------------
+//
+// Debug:DrawLine обязан РАБОТАТЬ, а не быть объявленным: отладочная графика —
+// то, чем разбирают «почему персонаж проходит сквозь стену», и заглушка здесь
+// хуже отсутствия API (её принимают за работающую).
+TEST(ScriptSystem_debug_draw_fills_the_buffer) {
+    Scene scene("test");
+    GameObject obj = scene.CreateObject("Probe");
+    const std::string path = WriteScript("debugdraw", R"LUA(
+local D = {}
+function D:Update(dt)
+    Debug:DrawLine(Vector3(0, 0, 0), Vector3(0, 1, 0))
+    Debug:DrawRay(Vector3(1, 0, 0), Vector3(0, 0, 2), Vector3(1, 0, 0))
+    Debug:DrawSphere(Vector3(0, 2, 0), 0.5)
+    Debug:DrawBox(Vector3(0, 0, 0), Vector3(1, 1, 1))
+end
+return D
+)LUA");
+    scene.Registry().emplace<ScriptComponent>(obj.Entity(), ScriptComponent{path});
+
+    auto sys = MakeSystem(scene);
+    sys->AttachScene(scene);
+    sys->Update(0.016f);
+
+    // Линия + луч + коробка (12 рёбер) + сфера (3 круга по 16 сегментов).
+    CHECK_EQ((int)sys->Debug().All().size(), 1 + 1 + 12 + 48);
+
+    // Заказ живёт ОДИН кадр: его перезаказывают, пока он нужен. Иначе линии
+    // копятся до конца прогона, и через минуту в кадре каша из всего, что
+    // когда-либо рисовали.
+    sys->Update(0.016f);
+    CHECK_EQ((int)sys->Debug().All().size(), 1 + 1 + 12 + 48);
+
+    sys->Shutdown();
+    CHECK_TRUE(sys->Debug().Empty());
+    std::filesystem::remove(path);
+}
+
+// Линия с длительностью переживает кадры: то, что случилось раз и мгновенно
+// (точка попадания), на один кадр человеческому глазу не видно.
+TEST(ScriptSystem_debug_draw_duration_outlives_the_frame) {
+    sage::render::DebugLines lines;
+    lines.Line(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec3(1.0f), /*duration=*/0.5f);
+    lines.Line(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec3(1.0f)); // на один кадр
+
+    lines.Tick(0.1f);
+    CHECK_EQ((int)lines.All().size(), 1); // одноразовая ушла, долгая осталась
+    lines.Tick(0.5f);
+    CHECK_TRUE(lines.Empty());
+}
+
+// --- Смена сцены из скрипта --------------------------------------------------
+//
+// ЗАПРОС, а не действие: скрипт зовёт scene:Load из Update, то есть когда
+// движок идёт по сущностям этой же сцены. Загрузить её прямо там — уничтожить
+// реестр под ногами у обхода.
+TEST(ScriptSystem_scene_load_is_a_request) {
+    Scene scene("test");
+    GameObject obj = scene.CreateObject("Portal");
+    const std::string path = WriteScript("portal", R"LUA(
+local P = {}
+function P:Update(dt)
+    if not self.asked then
+        scene:Load("level2")
+        self.asked = true
+    end
+end
+return P
+)LUA");
+    scene.Registry().emplace<ScriptComponent>(obj.Entity(), ScriptComponent{path});
+
+    auto sys = MakeSystem(scene);
+    sys->AttachScene(scene);
+
+    std::string requested;
+    CHECK_FALSE(sys->TakeSceneRequest(requested)); // до Update никто ничего не просил
+
+    sys->Update(0.016f);
+    // Сцена под ногами НЕ заменилась — её меняет хозяин кадра, между кадрами.
+    CHECK_TRUE(scene.FindByName("Portal").Valid());
+    CHECK_TRUE(sys->TakeSceneRequest(requested));
+    CHECK_TRUE(requested == "level2");
+    // Запрос действует ОДИН раз: попросивший дважды не должен получить две
+    // загрузки.
+    CHECK_FALSE(sys->TakeSceneRequest(requested));
+
+    sys->Shutdown();
+    std::filesystem::remove(path);
+}
+
+TEST(ScriptSystem_scene_reload_asks_for_the_current_one) {
+    Scene scene("test");
+    GameObject obj = scene.CreateObject("Restarter");
+    const std::string path = WriteScript("restart", R"LUA(
+local R = {}
+function R:Update(dt) scene:Reload() end
+return R
+)LUA");
+    scene.Registry().emplace<ScriptComponent>(obj.Entity(), ScriptComponent{path});
+
+    auto sys = MakeSystem(scene);
+    sys->AttachScene(scene);
+    sys->Update(0.016f);
+
+    std::string requested = "не тронуто";
+    CHECK_TRUE(sys->TakeSceneRequest(requested));
+    CHECK_TRUE(requested.empty()); // пустое имя — «эта же сцена заново»
+    sys->Shutdown();
+    std::filesystem::remove(path);
 }

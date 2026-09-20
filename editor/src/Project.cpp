@@ -27,12 +27,16 @@ bool Project::CreateNew(const fs::path& baseDir, const std::string& name, std::s
     json j;
     j["sage_project_version"] = 1;
     j["name"] = name;
+    // Новый проект начинается с main: редактор создаёт эту сцену сам, и
+    // оставить поле пустым значило бы, что первая же сборка снова угадывает.
+    j["startScene"] = "main";
     std::ofstream file(dir / "project.sageproj");
     if (!file.is_open()) { error = "Failed to write project file"; return false; }
     file << j.dump(2);
 
     m_dir = dir;
     m_name = name;
+    m_startScene = "main";
     m_loaded = true;
     // ТО ЖЕ, что при открытии существующего проекта.
     //
@@ -144,6 +148,36 @@ std::string Project::AssetRef(const fs::path& path) const {
     return text;
 }
 
+bool Project::SetStartScene(const std::string& name, std::string& error) {
+    if (!m_loaded) { error = "Проект не открыт"; return false; }
+
+    // ЧИТАЕМ-ПРАВИМ-ПИШЕМ, а не пишем заново: в project.sageproj может лежать
+    // то, чего эта версия редактора не знает (настройки сборки, поля будущих
+    // версий), и переписать файл «своими» полями значило бы молча стереть их.
+    json j;
+    {
+        std::ifstream in(ProjectFile());
+        if (in) {
+            try {
+                in >> j;
+            } catch (const std::exception&) {
+                j = json::object(); // битый файл перезапишем целиком — лучше, чем не запустить игру
+            }
+        }
+    }
+    j["sage_project_version"] = j.value("sage_project_version", 1);
+    j["name"] = m_name;
+    j["startScene"] = name;
+
+    std::ofstream out(ProjectFile());
+    if (!out.is_open()) { error = "Не удалось записать project.sageproj"; return false; }
+    out << j.dump(2);
+    if (!out) { error = "Не удалось записать project.sageproj"; return false; }
+    m_startScene = name;
+    LOG_INFO("Editor") << "Стартовая сцена проекта: " << (name.empty() ? "(не задана)" : name);
+    return true;
+}
+
 bool Project::Open(const fs::path& fileOrDir, std::string& error) {
     fs::path file = fileOrDir;
     if (fs::is_directory(file)) file /= "project.sageproj";
@@ -160,6 +194,7 @@ bool Project::Open(const fs::path& fileOrDir, std::string& error) {
 
     m_dir = file.parent_path();
     m_name = j.value("name", m_dir.filename().string());
+    m_startScene = j.value("startScene", std::string());
     m_loaded = true;
 
     // Стандартные подпапки, база ассетов, имя для сохранений, кэш префабов —

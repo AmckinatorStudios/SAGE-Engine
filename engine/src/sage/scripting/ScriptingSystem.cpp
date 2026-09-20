@@ -13,6 +13,8 @@ ScriptingSystem::~ScriptingSystem() { Shutdown(); }
 
 void ScriptingSystem::Bind(ScriptServices services) {
     services.Clock = &m_clock;
+    services.Debug = &m_debug;
+    services.System = this;
     m_runtime.Bind(services);
 }
 
@@ -39,6 +41,11 @@ void ScriptingSystem::Update(float dt) {
     m_clock.Delta = scaled;
     m_clock.Time += scaled;
     m_clock.Unscaled += dt;
+    // Отжившие отладочные линии снимаются ДО Update, а не после: заказанное в
+    // ЭТОМ кадре обязано дожить до отрисовки, которая случится позже него.
+    // Время берётся НЕмасштабированное — отладочная метка, живущая «две
+    // секунды», не должна растягиваться замедлением игры.
+    m_debug.Tick(dt);
     m_runtime.Dispatch(Hook::Update, scaled);
     m_runtime.Tick(scaled);
 }
@@ -83,6 +90,30 @@ void ScriptingSystem::DispatchAnimationEvent(GameObject object, const std::strin
     m_runtime.DispatchNamed(object.Entity(), Hook::OnAnimationEvent, name);
 }
 
-void ScriptingSystem::Shutdown() { m_runtime.DetachAll(); }
+void ScriptingSystem::RequestScene(const std::string& name) {
+    // Первый запрос кадра выигрывает: два скрипта, попросивших разные уровни в
+    // одном кадре, — ошибка игры, и молча выполнить ПОСЛЕДНИЙ значило бы, что
+    // исход зависит от порядка обхода сущностей.
+    if (m_sceneRequested) return;
+    m_pendingScene = name;
+    m_sceneRequested = true;
+}
+
+bool ScriptingSystem::TakeSceneRequest(std::string& name) {
+    if (!m_sceneRequested) return false;
+    m_sceneRequested = false;
+    name = m_pendingScene;
+    m_pendingScene.clear();
+    return true;
+}
+
+void ScriptingSystem::Shutdown() {
+    m_runtime.DetachAll();
+    m_debug.Clear();
+    // Незабранный запрос не имеет права пережить остановку: иначе следующий
+    // запуск начался бы с чужой сцены, попрошенной в прошлой жизни.
+    m_sceneRequested = false;
+    m_pendingScene.clear();
+}
 
 } // namespace sage::scripting

@@ -37,9 +37,21 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
     if (Active()) return -1;
     Scene& scene = **ctx.ScenePtr;
 
-    // Снимок сцены — Stop вернёт всё ровно как было до Play.
+    // Снимок сцены — Stop вернёт всё ровно как было до Play. Берётся ЗДЕСЬ, а
+    // не в BuildRuntime: переход на другой уровень посреди игры не имеет права
+    // затереть снимок документа, к которому Stop обязан вернуть человека.
     m_snapshot = SceneSerializer::SaveToString(scene);
 
+    const int attached = BuildRuntime(ctx, scene);
+    m_state = EditorPlayState::Playing;
+    return attached;
+}
+
+// Всё, что делает сцену ЖИВОЙ: скрипты, ввод, звук, физика, состав кадра.
+// Отдельно от Start, потому что то же самое нужно при переходе на другой
+// уровень прямо во время игры (scene:Load) — и делать это вторым, похожим, но
+// другим куском кода значит, что превью и игра однажды разойдутся.
+int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     m_scripts = std::make_unique<ScriptEngine>();
     m_scripts->BindScene(scene);
     // Паритет с рантаймом: частицы доступны скриптам уже в OnStart
@@ -140,11 +152,62 @@ int EditorPlaySession::Start(const PlayContext& ctx) {
         if (started > 0) LOG_INFO("Editor") << "Play: звуковых источников запущено: " << started;
     }
 
-    m_state = EditorPlayState::Playing;
-    LOG_INFO("Editor") << "Play started (" << attached << " script(s), "
-                       << m_physics->BodyCount() << " physics body(ies) on "
+    LOG_INFO("Editor") << "Play: сцена «" << scene.Name() << "» — скриптов " << attached
+                       << ", физических тел " << m_physics->BodyCount() << " ("
                        << m_physics->BackendName() << ")";
     return attached;
+}
+
+// Обратное BuildRuntime: снять всё живое, не трогая ни снимка, ни состояния
+// Play. Порядок — тот же, что в Stop, и по тем же причинам (см. там).
+void EditorPlaySession::TeardownRuntime(const PlayContext& ctx, Scene* scene) {
+    if (ctx.Systems) {
+        ctx.Systems->Remove("scripts");
+        ctx.Systems->Remove("scripting");
+        ctx.Systems->Remove("scripting.late");
+        ctx.Systems->Remove("physics");
+    }
+    if (m_audio && scene) sage::audio::StopScene(*scene, *m_audio);
+    if (m_scripting) m_scripting->Shutdown();
+    m_scripting.reset();
+    m_scripts.reset();
+    m_physics.reset();
+    // Шина принадлежит СЦЕНЕ, а её сейчас заменят: указатель обязан уйти раньше.
+    m_input.SetEventBus(nullptr);
+}
+
+// ПЕРЕХОД НА ДРУГОЙ УРОВЕНЬ ПРЯМО В РЕДАКТОРЕ.
+//
+// Раньше `sage.scene.Load` в Play-режиме не делал НИЧЕГО — редактор писал в
+// лог «проверяйте переходы в собранной игре». То есть самую частую ошибку
+// уровня (не та сцена, не тот спавн, потерянный игрок) нельзя было увидеть там,
+// где её правят: цикл «поправил — посмотрел» требовал полной сборки игры.
+//
+// Документ человека при этом НЕ ТРОГАЕТСЯ: Play работает с копией, и Stop
+// возвращает ровно ту сцену, которая была открыта до запуска, — вместе с
+// несохранённой правкой.
+bool EditorPlaySession::SwitchScene(const PlayContext& ctx, const std::string& sceneName) {
+    if (!Active() || !ctx.LoadSceneForPlay) return false;
+    Scene* current = ctx.ScenePtr ? *ctx.ScenePtr : nullptr;
+
+    // Пустое имя — «этот же уровень заново». Берём его из СНИМКА, а не с диска:
+    // играют то, что открыто, а открытая сцена может быть ещё не сохранена —
+    // перезапуск обязан вернуть именно её, а не прошлую версию файла.
+    const bool restartCurrent = sceneName.empty();
+
+    TeardownRuntime(ctx, current);
+    const bool loaded = restartCurrent ? (ctx.RestoreScene && ctx.RestoreScene(m_snapshot))
+                                       : ctx.LoadSceneForPlay(sceneName);
+    if (!loaded) {
+        LOG_ERROR("Editor") << "Play: сцена «"
+                            << (restartCurrent ? std::string("(текущая)") : sceneName)
+                            << "» не загрузилась — игра остановлена";
+        return false;
+    }
+    Scene& fresh = **ctx.ScenePtr;
+    BuildRuntime(ctx, fresh);
+    if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
+    return true;
 }
 
 void EditorPlaySession::StepScripts(Scene& scene, float dt) {
@@ -214,30 +277,10 @@ void EditorPlaySession::Stop(const PlayContext& ctx) {
     // указатель, и оставленная в кадре система обратилась бы к освобождённой
     // памяти. Снимается ровно то, что добавил Start. "particles", "animation" и
     // "audio" остаются: это превью режима правки, а не игровые системы.
-    if (ctx.Systems) {
-        ctx.Systems->Remove("scripts");
-        ctx.Systems->Remove("scripting");
-        ctx.Systems->Remove("scripting.late");
-        ctx.Systems->Remove("physics");
-    }
-
-    // Звук объекта не имеет права пережить остановку игры: сцена вернётся из
-    // снимка, а шум водопада продолжал бы идти из точки, где водопада уже нет.
-    // Глушим ДО замены сцены — после неё компонентов с дескрипторами уже не
-    // существует, и остановить их будет нечем.
-    if (m_audio && scene) sage::audio::StopScene(*scene, *m_audio);
-
-    // Скрипты объектов узнают об остановке ДО того, как исчезнут: OnDestroy —
-    // последнее место, где скрипт ещё может сохранить состояние. И раньше
-    // прежнего движка: Lua-бэкенд живёт на его состоянии.
-    if (m_scripting) m_scripting->Shutdown();
-    m_scripting.reset();
-    m_scripts.reset();
-    m_physics.reset();
-
-    // Шина событий принадлежит СЦЕНЕ, а сцену сейчас заменит восстановленный
-    // снимок — указатель на неё обязан уйти раньше.
-    m_input.SetEventBus(nullptr);
+    // Системы, звук, скрипты и физика снимаются одним и тем же кодом, что и при
+    // переходе на другой уровень: два похожих порядка гашения — это два места,
+    // где однажды разойдётся то, что обязано совпадать.
+    TeardownRuntime(ctx, scene);
     // Курсор возвращается человеку: игра могла его захватить, и без этого Stop
     // оставил бы редактор без мыши.
     m_cursor.ReleaseCapture();

@@ -965,15 +965,25 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
     // ошибка (у проекта её просто ещё нет).
     ReloadProjectInput();
 
-    // Автозагрузка первой сцены проекта (по алфавиту) — открытый проект сразу
-    // показывает свой контент, а не осиротевшую демо-сцену.
+    // Открытый проект сразу показывает свой контент, а не осиротевшую демо-сцену.
+    // Открывается СТАРТОВАЯ сцена — та, с которой начнётся игра: человек,
+    // открывший проект, чаще всего идёт править именно её, и показывать вместо
+    // неё случайную первую по алфавиту значит каждый раз искать нужную руками.
     std::error_code ec;
-    std::vector<fs::path> scenes;
-    for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
-        if (entry.path().extension() == ".sage") scenes.push_back(entry.path());
+    fs::path opened;
+    if (!m_project.StartScene().empty()) {
+        const fs::path start = m_project.ScenesDir() / (m_project.StartScene() + ".sage");
+        if (fs::exists(start, ec)) opened = start;
     }
-    std::sort(scenes.begin(), scenes.end());
-    if (!scenes.empty()) LoadSceneFromFile(scenes.front());
+    if (opened.empty()) {
+        std::vector<fs::path> scenes;
+        for (const auto& entry : fs::directory_iterator(m_project.ScenesDir(), ec)) {
+            if (entry.path().extension() == ".sage") scenes.push_back(entry.path());
+        }
+        std::sort(scenes.begin(), scenes.end());
+        if (!scenes.empty()) opened = scenes.front();
+    }
+    if (!opened.empty()) LoadSceneFromFile(opened);
 
     UpdateWindowTitle();
     return true;
@@ -1018,6 +1028,28 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
         err = T("The project has no scene: there is nothing to run. Create or save a scene "
                 "into scenes/ first.");
         return false;
+    }
+
+    // СТАРТОВАЯ СЦЕНА ОБЯЗАНА СУЩЕСТВОВАТЬ.
+    //
+    // Названа в проекте, а файла нет — игра запустится НЕ С ТОЙ сцены
+    // (запасной путь плеера: main.sage, иначе первая по алфавиту) и будет
+    // выглядеть сломанной. Сборка проходит при этом успешно, и связать одно с
+    // другим потом почти нечем: отказ здесь стоит секунды.
+    if (!m_project.StartScene().empty()) {
+        std::error_code startEc;
+        const fs::path start = m_project.ScenesDir() / (m_project.StartScene() + ".sage");
+        if (!fs::exists(start, startEc)) {
+            err = T("The project's start scene is missing: ") + start.filename().string();
+            return false;
+        }
+    } else {
+        // Не отказ: игра соберётся и запустится по прежнему правилу. Но сказать
+        // об этом надо — «почему запускается не тот уровень» иначе выясняют
+        // перебором.
+        LOG_WARN("Editor") << "Стартовая сцена проекта не задана — собранная игра возьмёт "
+                              "scenes/main.sage, а если её нет, первую по алфавиту. "
+                              "Назначить: ПКМ по сцене в панели Assets.";
     }
 
     // 1. Собранный SagePlayer: явный SAGE_PLAYER_PATH, иначе стандартные
