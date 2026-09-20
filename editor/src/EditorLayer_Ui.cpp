@@ -927,15 +927,23 @@ void EditorLayer::DrawDockspaceAndMenu() {
         // клавиши (анимация убирает ключ, ассеты — файл, список элементов —
         // элемент). Без этой проверки срабатывали ОБА: человек убирал ключ в
         // линейке времени и вместе с ним терял объект из сцены (HotkeyScope.h).
+        //
+        // БЕЗ АВТОПОВТОРА. ImGui::IsKeyPressed по умолчанию повторяет нажатие,
+        // пока клавишу держат, — и для «камера вперёд» это правильно, а для
+        // «удалить» и «дублировать» означает, что задержавшаяся на четверть
+        // секунды клавиша делает работу дважды. Ровно так Ctrl+D давал две
+        // копии, одну поверх другой: вторую замечали не сразу, а потом
+        // находили в сцене лишний объект неизвестно откуда.
         namespace hk = sage::editor::hotkeys;
-        if (!hk::Claimed(hk::Key::Delete) && ImGui::IsKeyPressed(ImGuiKey_Delete))
+        if (!hk::Claimed(hk::Key::Delete) && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
             DeleteSelected();
-        if (!hk::Claimed(hk::Key::Duplicate) && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D))
+        if (!hk::Claimed(hk::Key::Duplicate) && io.KeyCtrl &&
+            ImGui::IsKeyPressed(ImGuiKey_D, false))
             DuplicateSelected();
         // Ctrl+S работает ВСЕГДА, а не только у сцены с именем: у новой сцены
         // имени нет, и «горячая клавиша молча ничего не делает» — это ровно то,
         // как выглядит потерянная работа.
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) SaveCurrentScene();
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) SaveCurrentScene();
         if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) Undo();
         if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) ||
             (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z))) Redo();

@@ -476,6 +476,11 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             sh.SetFloat("uMetallic", g.Mat->Metallic);
             sh.SetFloat("uRoughness", g.Mat->Roughness);
             sh.SetFloat("uOpacity", g.Mat->Opacity);
+            // ПОРОГ СТАВИТСЯ ВСЕГДА, в том числе нулевой. Шейдер общий на все
+            // пачки кадра: не обнулив порог у следующего материала, мы отсекали
+            // бы по альфе там, где её никто не задавал, — и обычная текстура с
+            // альфой начала бы дырявить модель.
+            sh.SetFloat("uAlphaCutoff", g.Mat->Render.AlphaCutoff);
             UploadParams(sh, g.Mat->Params);
         }
         if (!g.AnyOverrides) {
@@ -582,6 +587,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             if (it.Mat->RoughnessTex) it.Mat->RoughnessTex->Bind(4);
             if (it.Mat->AOTex) it.Mat->AOTex->Bind(5);
             tex.SetFloat("uOpacity", it.Opacity);
+            tex.SetFloat("uAlphaCutoff", it.Mat->Render.AlphaCutoff);
             it.Mesh_->DrawSubmesh(it.Submesh);
             ++m_stats.Batches;
         }
@@ -692,6 +698,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetFloat("uMetallic", head.Mat->Metallic);
                 t.SetFloat("uRoughness", head.Mat->Roughness);
                 t.SetFloat("uOpacity", head.Inst.Alpha);
+                t.SetFloat("uAlphaCutoff", head.Mat->Render.AlphaCutoff);
                 t.SetInt("uHasAlbedo", head.Mat->AlbedoTex ? 1 : 0);
                 t.SetInt("uHasNormal", head.Mat->NormalTex ? 1 : 0);
                 t.SetInt("uHasMetallic", head.Mat->MetallicTex ? 1 : 0);

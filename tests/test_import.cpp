@@ -617,3 +617,92 @@ TEST(gltf_cubic_animation_reads_values_not_tangents) {
     ch.Sample(1.0f, v, q);
     CHECK_NEAR(glm::degrees(glm::angle(glm::normalize(q))), 90.0f, 0.5f);
 }
+
+// ============================================================================
+//  ПОИСК ТЕКСТУР: «модель загрузилась, но стала белой»
+//
+//  Ссылка в файле модели почти никогда не годится как путь: glTF кодирует
+//  пробелы, экспортёры пишут абсолютные пути чужих машин и обратные слэши,
+//  набор карт приезжает отдельной папкой, регистр имени не совпадает. На
+//  каждом из этих случаев карта молча терялась — по одному разу в каждом
+//  формате, потому что поиск был у каждого свой.
+// ============================================================================
+#include "sage/assets/import/TextureResolve.h"
+
+namespace {
+
+// Каталог с моделью и набором карт: то, как выглядит скачанный ассет.
+struct TextureFixture {
+    std::filesystem::path Dir;
+    explicit TextureFixture(const char* name) {
+        Dir = std::filesystem::temp_directory_path() / name;
+        std::error_code ec;
+        std::filesystem::remove_all(Dir, ec);
+        std::filesystem::create_directories(Dir / "textures", ec);
+    }
+    ~TextureFixture() {
+        std::error_code ec;
+        std::filesystem::remove_all(Dir, ec);
+    }
+    void Put(const std::string& relative) const {
+        const std::filesystem::path p = Dir / relative;
+        std::error_code ec;
+        std::filesystem::create_directories(p.parent_path(), ec);
+        std::ofstream f(p, std::ios::binary);
+        f << "png";
+    }
+};
+
+} // namespace
+
+TEST(texture_resolve_decodes_percent_encoding) {
+    // glTF ТРЕБУЕТ кодировать пробелы в URI. Файла «body%20normal.png» на
+    // диске нет никогда — и карта терялась у каждой модели, где в имени есть
+    // пробел.
+    TextureFixture fx("sage_tex_uri");
+    fx.Put("body normal.png");
+    const std::string found = ResolveTexturePath(fx.Dir, "body%20normal.png");
+    CHECK_TRUE(!found.empty());
+    CHECK_TRUE(found.find("body normal.png") != std::string::npos);
+    CHECK_EQ(DecodeUri("a%2Fb%20c"), std::string("a/b c"));
+}
+
+TEST(texture_resolve_takes_backslashes_and_foreign_absolute_paths) {
+    // В .mtl из 3ds Max абсолютный путь чужой машины — норма. Имя файла в нём
+    // верное, а дорога к нему — нет.
+    TextureFixture fx("sage_tex_abs");
+    fx.Put("body.png");
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "C:\\Users\\artist\\Desktop\\tex\\body.png").empty());
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "..\\..\\shared\\body.png").empty());
+}
+
+TEST(texture_resolve_looks_into_the_usual_side_folders) {
+    // Набор приезжает папкой: модель в корне, карты в textures/.
+    TextureFixture fx("sage_tex_side");
+    fx.Put("textures/skin.png");
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "skin.png").empty());
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "maps/skin.png").empty());
+}
+
+TEST(texture_resolve_ignores_case_as_a_last_resort) {
+    // «Body.PNG» против «body.png»: на Windows это один файл, на Linux разные.
+    TextureFixture fx("sage_tex_case");
+    fx.Put("Body_Normal.PNG");
+    CHECK_TRUE(!ResolveTexturePath(fx.Dir, "body_normal.png").empty());
+}
+
+TEST(texture_resolve_says_what_it_could_not_find) {
+    // Молчаливая потеря текстуры хуже отказа: «модель белая» человек видит, а
+    // причину — нет.
+    TextureFixture fx("sage_tex_missing");
+    std::vector<std::string> warnings;
+    CHECK_TRUE(ResolveTexturePath(fx.Dir, "no_such.png", &warnings).empty());
+    CHECK_EQ((int)warnings.size(), 1);
+    if (!warnings.empty()) CHECK_TRUE(warnings[0].find("no_such.png") != std::string::npos);
+
+    // А встроенная картинка — не потеря и не предупреждение: файла на диске у
+    // неё нет по определению.
+    warnings.clear();
+    CHECK_TRUE(ResolveTexturePath(fx.Dir, "data:image/png;base64,iVBORw0K", &warnings).empty());
+    CHECK_TRUE(warnings.empty());
+}

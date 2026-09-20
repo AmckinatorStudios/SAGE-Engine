@@ -913,6 +913,12 @@ void EditorLayer::TickInputProbe() {
         case 30:
             io.AddKeyEvent(ImGuiMod_Ctrl, true);
             io.AddKeyEvent(ImGuiKey_D, true);
+            // КЛАВИШУ ДЕРЖИМ ДОЛЬШЕ ПОРОГА АВТОПОВТОРА. Человек не отпускает
+            // Ctrl+D мгновенно, а ImGui по умолчанию повторяет нажатие — и
+            // задержавшаяся на четверть секунды клавиша делала работу дважды:
+            // две копии, одна поверх другой. Проверка, отпускающая клавишу в
+            // следующем же кадре, этого не видела никогда.
+            m_probeWait = 25;
             break;
         case 31:
             io.AddKeyEvent(ImGuiKey_D, false);
