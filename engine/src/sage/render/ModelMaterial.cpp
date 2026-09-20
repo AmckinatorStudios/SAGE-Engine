@@ -5,6 +5,7 @@
 #include <tiny_gltf.h>
 
 #include "sage/render/ModelMaterial.h"
+#include "sage/assets/import/GltfFile.h"
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/import/Importer.h"
@@ -260,8 +261,8 @@ void ExtractGltf(const std::string& path, bool binary, const TextureSink& base,
     loader.SetImageLoader(&DecodeImage, nullptr);
     tinygltf::Model model;
     std::string err, warn;
-    const bool ok = binary ? loader.LoadBinaryFromFile(&model, &err, &warn, path)
-                           : loader.LoadASCIIFromFile(&model, &err, &warn, path);
+    (void)binary; // формат берётся из содержимого файла, см. GltfFile.h
+    const bool ok = sage::assets::LoadGltfFile(loader, model, path, err, warn);
     if (!ok) {
         out.Warnings.push_back("материалы не прочитаны: " + (err.empty() ? "разбор glTF" : err));
         return;

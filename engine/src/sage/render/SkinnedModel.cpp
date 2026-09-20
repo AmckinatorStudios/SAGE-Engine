@@ -4,6 +4,7 @@
 #include <tiny_gltf.h>
 
 #include "sage/assets/import/GltfAccessor.h"
+#include "sage/assets/import/GltfFile.h"
 
 #include "SkinnedModel.h"
 
@@ -834,14 +835,14 @@ glm::mat4 NodeLocal(const tinygltf::Node& n) {
 // кусков костюма, а остальные девять десятых модели не рисовались вовсе.
 // Выглядело это как «модель бледная и разваливается».
 static ModelData ParseGltf(const std::string& path) {
-    bool binary = path.size() > 4 && path.substr(path.size() - 4) == ".glb";
-
     tinygltf::TinyGLTF loader;
     loader.SetImageLoader(&GltfSkinImageLoader, nullptr);
     tinygltf::Model g;
     std::string err, warn;
-    bool ok = binary ? loader.LoadBinaryFromFile(&g, &err, &warn, path)
-                     : loader.LoadASCIIFromFile(&g, &err, &warn, path);
+    // Двоичный файл или текстовый — решает общий вход по содержимому
+    // (assets/import/GltfFile.h): здесь это решалось по последним четырём
+    // буквам имени, и «.GLB» уже уходило в текстовый разбор.
+    bool ok = sage::assets::LoadGltfFile(loader, g, path, err, warn);
     if (!warn.empty()) LOG_WARN("Anim") << "glTF (" << path << "): " << warn;
     if (!ok) throw std::runtime_error("SkinnedModel: не загрузить glTF " + path + ": " + err);
     if (g.skins.empty()) throw std::runtime_error("SkinnedModel: в файле нет скина: " + path);

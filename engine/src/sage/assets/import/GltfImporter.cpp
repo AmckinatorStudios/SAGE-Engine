@@ -5,6 +5,7 @@
 #include <tiny_gltf.h>
 
 #include "sage/assets/import/GltfAccessor.h"
+#include "sage/assets/import/GltfFile.h"
 #include "sage/assets/import/Importer.h"
 
 #include <cstdint>
@@ -266,15 +267,13 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
 } // namespace
 
 bool ImportGltf(const std::string& path, ImportedScene& out, std::string& err) {
-    const std::string ext = fs::path(path).extension().string();
-    const bool binary = ext == ".glb" || ext == ".GLB";
-
     tinygltf::TinyGLTF loader;
     loader.SetImageLoader(&DecodeImage, nullptr);
     tinygltf::Model gltf;
     std::string parseErr, warn;
-    const bool ok = binary ? loader.LoadBinaryFromFile(&gltf, &parseErr, &warn, path)
-                           : loader.LoadASCIIFromFile(&gltf, &parseErr, &warn, path);
+    // Расширение тут больше ничего не решает: «.GLB» с большой буквы уходило в
+    // текстовый разбор и не открывалось вовсе. Формат — по содержимому.
+    const bool ok = sage::assets::LoadGltfFile(loader, gltf, path, parseErr, warn);
     if (!ok) {
         err = "не удалось разобрать glTF " + path + ": " +
               (parseErr.empty() ? std::string("неизвестная ошибка") : parseErr);

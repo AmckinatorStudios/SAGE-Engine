@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include "sage/core/Log.h"
 #include "sage/render/MeshData.h"
+#include "sage/assets/import/GltfFile.h"
 #include <stdexcept>
 
 // ----------------------------------------------------------------------
@@ -343,9 +344,10 @@ std::unique_ptr<Model> Model::LoadGltfInternal(const std::string& path, bool bin
 
     tinygltf::Model gltfModel;
     std::string err, warn;
-    bool ok = binary
-        ? loader.LoadBinaryFromFile(&gltfModel, &err, &warn, path)
-        : loader.LoadASCIIFromFile(&gltfModel, &err, &warn, path);
+    // Формат определяет общий вход (assets/import/GltfFile.h) — по содержимому
+    // файла, а не по расширению, и он же чинит вравшую шапку GLB.
+    (void)binary;
+    bool ok = sage::assets::LoadGltfFile(loader, gltfModel, path, err, warn);
 
     if (!warn.empty()) LOG_WARN("Model") << "Предупреждение glTF (" << path << "): " << warn;
     if (!ok) {
