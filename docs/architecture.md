@@ -50,7 +50,7 @@ SAGE-Engine/
       scene/    Scene (ECS), Components, Transform, Light, SceneSerializer
       render/   Shader, Camera, Mesh (+примитивы), Model, SkinnedModel, Font,
                 Material, Skybox, SkyRenderer (небо), ShadowMap, PostProcess,
-                PostEffect/PostChain/PostChainComponent (тракт пост-обработки
+                PostEffect/PostChain/PostProcessComponent (пост-обработка камеры
                 как композиция звеньев, см. rendering.md), PostFX (исполнитель),
                 DebugDraw (гизмо/линии в мире), ...
       anim/     Skeleton, Animator, SkinnedModel — скелетная анимация
@@ -477,13 +477,12 @@ cfg.ApplyEnvOverrides(); EngineConfig::Set(cfg);`, после чего окно 
 - **Дисплей**: соотношение сторон `aspect` (`free`/`16:9`/`16:10`/`4:3`/`21:9`
   — фиксированное даёт letterbox/pillarbox чёрными полосами) и масштаб
   внутреннего разрешения `renderScale` (0.25..2.0 — быстрее/чётче).
-- **Графика**: `shadows` (+`shadowResolution` 512..4096), `postProcessing`,
-  `fog`, `skybox` — любой тяжёлый проход отключается одним флагом.
-- **Пост-эффекты**: `chain` — ТРАКТ проекта (состав и порядок звеньев, см.
-  [rendering.md](rendering.md)); поля `exposure`/`gamma`/`saturation`/`contrast`/
-  `vignette`/`bloom`/`ao`/… остались умолчанием для проекта, который тракт не
-  трогал. Правятся они (точнее, сам тракт) в редакторе, **Window → Game
-  Settings**; у камеры может быть свой тракт — компонентом `Post-Processing`.
+- **Графика**: `shadows` (+`shadowResolution` 512..4096), `fog`, `skybox` —
+  любой тяжёлый проход отключается одним флагом.
+- **Пост-обработки здесь НЕТ**: экспозиция, свечение, цвет, тон-маппинг,
+  виньетка, зерно, SSAO, глубина резкости, смаз и FXAA живут компонентом
+  **«Пост-обработка»** на камере и хранятся в сцене (см.
+  [rendering.md](rendering.md)). Нет компонента — кадр показывается как есть.
 
 **Файл** (`sage.cfg` рядом с игрой). Пример:
 
@@ -491,15 +490,16 @@ cfg.ApplyEnvOverrides(); EngineConfig::Set(cfg);`, после чего окно 
 {
   "window":  { "width": 1920, "height": 1080, "mode": "borderless", "vsync": true },
   "display": { "aspect": "16:9", "renderScale": 1.0 },
-  "graphics":{ "shadows": true, "shadowResolution": 2048, "postProcessing": true }
+  "graphics":{ "shadows": true, "shadowResolution": 2048, "fog": true }
 }
 ```
 
 **env-переопределения** (поверх файла — для отладки/CI): `SAGE_WINDOW_WIDTH/
 HEIGHT`, `SAGE_WINDOW_MODE`, `SAGE_VSYNC`, `SAGE_FRAME_CAP`, `SAGE_MSAA`,
 `SAGE_ASPECT`, `SAGE_RENDER_SCALE`, `SAGE_SHADOWS`(+`SAGE_SHADOW_RES`),
-`SAGE_POST`, `SAGE_FOG`, `SAGE_SKYBOX` (плюс обратно-совместимые
-`SAGE_NO_SHADOWS`/`SAGE_NO_POST`, чьё наличие выключает проход).
+`SAGE_FOG`, `SAGE_SKYBOX` (плюс обратно-совместимый `SAGE_NO_SHADOWS`, чьё
+наличие выключает проход). Переменных для пост-обработки нет: она принадлежит
+камере, а не процессу.
 
 **Редактор**: окно **Window → Settings** правит настройки визуально и сохраняет
 их в `<проект>/sage.cfg`; **File → Build Game** кладёт файл рядом с собранной

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 #include "imgui.h"
 
@@ -37,6 +38,22 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
             if (host) host->PushUndoSnapshot();
             value->B = on;
             value->V[0] = on ? 1.0f : 0.0f;
+            changed = true;
+        }
+        break;
+    }
+    case PostParamType::Enum: {
+        // Числом режим в интерфейсе не показывается: «2» не говорит ничего,
+        // «ACES» говорит всё. Подписи вариантов — ключи перевода, как и подпись
+        // самого параметра.
+        std::vector<const char*> names;
+        names.reserve(desc.Options.size());
+        for (const std::string& option : desc.Options) names.push_back(T(option));
+        int choice = (int)value->V[0];
+        if (!names.empty() &&
+            ImGui::Combo(label, &choice, names.data(), (int)names.size())) {
+            if (host) host->PushUndoSnapshot();
+            value->V[0] = (float)choice;
             changed = true;
         }
         break;
@@ -94,99 +111,92 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
 
     ImGui::PushID(idScope ? idScope : "postChain");
 
-    // ИТОГ КОМПИЛЯЦИИ — ДО СПИСКА. Если тракт неверен (сглаживание перед
-    // тон-маппингом, два тон-маппинга, звено неизвестного вида), человек должен
-    // узнать это ЗДЕСЬ, где он его собирает, а не по странной картинке.
+    // ИТОГ ПРОВЕРКИ — ДО РАЗДЕЛОВ. Порядок тракта человек больше испортить не
+    // может (его задают этапы), но звено неизвестного вида — из сцены другой
+    // версии или другой игры — остаётся возможным, и узнать об этом надо здесь,
+    // а не по странной картинке.
     const PostChainReport report = chain.Compile();
     if (!report.Ok) {
         ImGui::TextDisabled("%s", T("The chain will not run:"));
         ImGui::TextWrapped("%s", report.Error.c_str());
-    } else if (chain.Empty()) {
-        ImGui::TextDisabled("%s", T("Empty chain: the frame is only tone-mapped"));
     }
 
-    int moveFrom = -1, moveTo = -1, removeAt = -1;
-    for (size_t i = 0; i < chain.Effects.size(); ++i) {
-        PostEffect& effect = chain.Effects[i];
-        const PostEffectKind* kind = PostEffectCatalog::Instance().Find(effect.Kind);
-        ImGui::PushID((int)i);
+    const PostEffectCatalog& catalog = PostEffectCatalog::Instance();
 
-        bool enabled = effect.Enabled;
-        if (ImGui::Checkbox("##enabled", &enabled)) {
-            if (host) host->PushUndoSnapshot();
-            effect.Enabled = enabled;
-            changed = true;
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Enabled"));
+    // Порядок разделов — порядок ОБРАБОТКИ кадра. Тот же, в котором звенья
+    // исполняются (PostChain::Ordered), и тот же, в котором они перечислены в
+    // каталоге движка.
+    static const PostStage kStages[] = {PostStage::Exposure, PostStage::Depth,  PostStage::Bloom,
+                                        PostStage::Color,    PostStage::Grading, PostStage::Tonemap,
+                                        PostStage::Lens,     PostStage::Film,   PostStage::Output};
 
-        ImGui::SameLine();
-        if (ImGui::TreeNodeEx("##effect", ImGuiTreeNodeFlags_SpanAvailWidth, "%s",
-                              kind ? T(kind->Label) : T("Unknown effect"))) {
-            if (kind) {
-                if (!kind->Hint.empty()) EditorTheme::Hint(kind->Hint.c_str());
-                for (const PostParamDesc& param : kind->Params)
-                    DrawParam(host, effect, param, changed);
-            } else {
-                // Звено вида, которого нет в каталоге: из файла другой версии или
-                // другой игры. Оно не пропадает молча — его видно, и компилятор о
-                // нём уже сказал выше.
-                ImGui::TextDisabled("%s", T("Unknown effect"));
-            }
-            ImGui::TreePop();
-        }
+    int removeAt = -1;
+    for (PostStage stage : kStages) {
+        // Какие виды живут на этом этапе — спрашиваем каталог, а не помним
+        // здесь: эффект, принесённый игрой, обязан появиться сам.
+        std::vector<const PostEffectKind*> kinds;
+        for (const PostEffectKind* kind : catalog.All())
+            if (kind->Stage == stage) kinds.push_back(kind);
+        if (kinds.empty()) continue;
 
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 90.0f);
-        ImGui::BeginDisabled(i == 0);
-        if (ImGui::SmallButton("^")) {
-            moveFrom = (int)i;
-            moveTo = (int)i - 1;
-        }
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Move up"));
-        ImGui::SameLine();
-        ImGui::BeginDisabled(i + 1 >= chain.Effects.size());
-        if (ImGui::SmallButton("v")) {
-            moveFrom = (int)i;
-            moveTo = (int)i + 1;
-        }
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Move down"));
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x")) removeAt = (int)i;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Remove"));
-        ImGui::PopID();
-    }
+        ImGui::SeparatorText(T(PostStageLabel(stage)));
+        for (const PostEffectKind* kind : kinds) {
+            ImGui::PushID(kind->Id.c_str());
 
-    if (removeAt >= 0) {
-        if (host) host->PushUndoSnapshot();
-        chain.Effects.erase(chain.Effects.begin() + removeAt);
-        changed = true;
-    } else if (moveFrom >= 0 && moveTo >= 0) {
-        if (host) host->PushUndoSnapshot();
-        std::swap(chain.Effects[(size_t)moveFrom], chain.Effects[(size_t)moveTo]);
-        changed = true;
-    }
+            // Звено этого вида в тракте — или его там нет, и тогда эффект
+            // показан выключенным. ЭТО И ЕСТЬ ГЛАВНОЕ РЕШЕНИЕ ЭКРАНА: человек
+            // видит ВСЕ эффекты движка и сразу понимает, какие включены, — а не
+            // ищет в отдельном списке, что ещё можно добавить.
+            int index = -1;
+            for (size_t i = 0; i < chain.Effects.size(); ++i)
+                if (chain.Effects[i].Kind == kind->Id) { index = (int)i; break; }
 
-    // Добавление звена. Неповторяемое, которое уже стоит, в списке не
-    // предлагается: предлагать заведомо неверный тракт — не забота человека.
-    if (ImGui::BeginCombo(T("Add effect"), T("Choose an effect"))) {
-        for (const PostEffectKind* kind : PostEffectCatalog::Instance().All()) {
-            bool already = false;
-            for (const PostEffect& existing : chain.Effects)
-                if (existing.Kind == kind->Id) already = true;
-            if (already && !kind->Repeatable) continue;
-            if (ImGui::Selectable(T(kind->Label))) {
+            bool on = index >= 0 && chain.Effects[(size_t)index].Enabled;
+            if (ImGui::Checkbox(T(kind->Label), &on)) {
                 if (host) host->PushUndoSnapshot();
-                // Место выбирает движок: звено, читающее HDR, встанет до
-                // тон-маппинга. Иначе «добавил эффект» означало бы «получил
-                // отказ компилятора».
-                AddPostEffect(chain, kind->Id);
+                if (index >= 0) {
+                    chain.Effects[(size_t)index].Enabled = on;
+                } else if (on) {
+                    // Место в списке роли не играет — когда звено выполнится,
+                    // решает его этап.
+                    AddPostEffect(chain, kind->Id);
+                    index = (int)chain.Effects.size() - 1;
+                }
                 changed = true;
             }
             if (!kind->Hint.empty() && ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", kind->Hint.c_str());
+
+            // Настройки — ТОЛЬКО У ВКЛЮЧЁННОГО. Выключенный эффект показывает
+            // ровно одну строку: список, где видно два десятка ползунков сразу,
+            // не отвечает ни на один вопрос, ради которого его открыли.
+            if (on && index >= 0) {
+                ImGui::Indent();
+                PostEffect& effect = chain.Effects[(size_t)index];
+                for (const PostParamDesc& param : kind->Params)
+                    DrawParam(host, effect, param, changed);
+                ImGui::Unindent();
+            }
+            ImGui::PopID();
         }
-        ImGui::EndCombo();
+    }
+
+    // Звенья видов, которых в каталоге нет: из сцены другой версии или другой
+    // игры. Их не показать нельзя — иначе они пропадут при первом сохранении, —
+    // но и настроить нечем: описания параметров у нас нет.
+    for (size_t i = 0; i < chain.Effects.size(); ++i) {
+        if (catalog.Find(chain.Effects[i].Kind)) continue;
+        ImGui::PushID((int)i);
+        ImGui::SeparatorText(T("Unknown effect"));
+        ImGui::TextDisabled("%s", chain.Effects[i].Kind.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Remove"))) removeAt = (int)i;
+        ImGui::PopID();
+    }
+    if (removeAt >= 0) {
+        if (host) host->PushUndoSnapshot();
+        chain.Effects.erase(chain.Effects.begin() + removeAt);
+        changed = true;
     }
 
     ImGui::PopID();

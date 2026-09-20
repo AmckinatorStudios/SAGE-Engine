@@ -108,7 +108,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ParticleSystem.cpp
     src/sage/render/DebugView.cpp
     src/sage/render/LensFlare.cpp
-    src/sage/render/PostChainComponent.cpp
+    src/sage/render/PostProcessComponent.cpp
     src/sage/render/PostChainIO.cpp
     src/sage/render/PostEffect.cpp
     src/sage/render/PostFX.cpp

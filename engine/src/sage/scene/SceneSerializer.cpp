@@ -5,6 +5,7 @@
 #include "sage/render/LodGroup.h"
 #include "sage/gi/GI.h"
 #include "sage/render/PostChainIO.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/render/ResourceManager.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -355,14 +356,14 @@ static LightComponent::Type LightTypeFromString(const std::string& text) {
 // Сам формат тракта живёт в движке (sage/render/PostChainIO.h) и ОДИН на всех,
 // кто его хранит: сцену и конфиг проекта. Здесь только место компонента в файле
 // сцены — так же, как у камеры, света и прочих компонентов.
-static void SavePostChain(json& j, const sage::render::PostChainComponent& component) {
-    j["postChain"] = sage::render::PostChainToJson(component.Chain);
-    j["postChain"]["useProjectDefault"] = component.UseProjectDefault;
+static void SavePostProcess(json& j, const sage::render::PostProcessComponent& component) {
+    j["postProcess"] = sage::render::PostChainToJson(component.Chain);
+    j["postProcess"]["enabled"] = component.Enabled;
 }
 
-static sage::render::PostChainComponent ParsePostChain(const json& cj) {
-    sage::render::PostChainComponent component;
-    component.UseProjectDefault = cj.value("useProjectDefault", false);
+static sage::render::PostProcessComponent ParsePostProcess(const json& cj) {
+    sage::render::PostProcessComponent component;
+    component.Enabled = cj.value("enabled", true);
     component.Chain = sage::render::PostChainFromJson(cj);
     return component;
 }
@@ -1094,9 +1095,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (reg.all_of<NetReplicatedComponent>(e)) j["netReplicated"] = true;
         if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
-        if (const sage::render::PostChainComponent* pc =
-                reg.try_get<sage::render::PostChainComponent>(e))
-            SavePostChain(j, *pc);
+        if (const sage::render::PostProcessComponent* pc =
+                reg.try_get<sage::render::PostProcessComponent>(e))
+            SavePostProcess(j, *pc);
         if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
         if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
@@ -1205,9 +1206,15 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<CameraComponent>(obj.Entity(), ParseCamera(j["camera"]));
         if (j.contains("light"))
             obj.Registry()->emplace<LightComponent>(obj.Entity(), ParseLight(j["light"]));
-        if (j.contains("postChain"))
-            obj.Registry()->emplace<sage::render::PostChainComponent>(
-                obj.Entity(), ParsePostChain(j["postChain"]));
+        // Ключ "postChain" — имя этого же компонента ДО того, как он стал
+        // «Пост-обработкой». Читается по-прежнему: сцена, сохранённая раньше,
+        // обязана открыться (миграция v11->v12 переводит остальное).
+        if (j.contains("postProcess"))
+            obj.Registry()->emplace<sage::render::PostProcessComponent>(
+                obj.Entity(), ParsePostProcess(j["postProcess"]));
+        else if (j.contains("postChain"))
+            obj.Registry()->emplace<sage::render::PostProcessComponent>(
+                obj.Entity(), ParsePostProcess(j["postChain"]));
         if (j.contains("rigidBody"))
             obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), ParseRigidBody(j["rigidBody"]));
         if (j.contains("collider"))

@@ -305,29 +305,60 @@ fi
 echo "OK: игра запускается из ЛЮБОЙ папки и понимает путь к project.sageproj (скриншот ${SHOT_SIZE2} байт)"
 
 # Пост-обработка в СОБРАННОЙ ИГРЕ, а не только в редакторе. Движок объявляет её
-# подсистемой, конфиг её настраивает, окно Game редактора её показывает — а
-# плеер рисовал прямо в экран и не выполнял её НИ РАЗУ: игра в редакторе и та же
-# игра, запущенная по-настоящему, выглядели по-разному. Проверка простая и
-# неубиваемая: один и тот же кадр с SAGE_POST=0 и SAGE_POST=1 обязан
-# ОТЛИЧАТЬСЯ. Пока цепочка не подключена, оба кадра совпадают до байта.
+# подсистемой, редактор её показывает — а плеер когда-то рисовал прямо в экран и
+# не выполнял её НИ РАЗУ: игра в редакторе и та же игра, запущенная
+# по-настоящему, выглядели по-разному.
+#
+# Проверка идёт ЧЕРЕЗ КОМПОНЕНТ КАМЕРЫ, потому что больше ей негде взяться:
+# настроек пост-обработки в sage.cfg нет, переменной SAGE_POST нет. Тот же
+# проект запускается дважды — с компонентом «Пост-обработка» на камере и без
+# него, — и кадры обязаны ОТЛИЧАТЬСЯ. Совпали до байта — значит компонент до
+# плеера не доезжает.
+POST_DIR="${SCRATCH_DIR}/postcam"
+rm -rf "${POST_DIR}"
+cp -r "${SWITCH_DIR}" "${POST_DIR}"
+# Скрипт-переключатель сцен из соседней проверки здесь только мешает: на третьем
+# кадре он уводит игру в level2, где камеры с компонентом нет.
+rm -f "${POST_DIR}/assets/scripts/switcher.lua"
 POST_OFF="${SCRATCH_DIR}/post_off.png"
 POST_ON="${SCRATCH_DIR}/post_on.png"
-for MODE in 0 1; do
-    OUT="${POST_OFF}"; [ "${MODE}" = "1" ] && OUT="${POST_ON}"
+for MODE in off on; do
+    python3 - "${POST_DIR}/scenes/main.sage" "${MODE}" <<'PYEOF'
+import json, sys
+path, mode = sys.argv[1], sys.argv[2]
+scene = json.loads(open(path, encoding="utf-8").read())
+key = "objects" if "objects" in scene else "entities"
+cams = [o for o in scene[key] if "camera" in o]
+if not cams:
+    print("в сцене нет камеры — проверять нечего", file=sys.stderr)
+    sys.exit(2)
+for o in cams:
+    o.pop("postProcess", None)
+    o.pop("postChain", None)
+    if mode == "on":
+        # Экспозиция и виньетка: и то и другое видно на любом кадре.
+        o["postProcess"] = {"enabled": True, "effects": [
+            {"kind": "exposure", "enabled": True, "params": {"exposure": 2.0}},
+            {"kind": "tonemap", "enabled": True, "params": {"mode": 2.0, "gamma": 2.2}},
+            {"kind": "vignette", "enabled": True,
+             "params": {"intensity": 0.8, "smoothness": 0.9}}]}
+open(path, "w", encoding="utf-8").write(json.dumps(scene, indent=2))
+PYEOF
+    if [ $? -ne 0 ]; then echo "ОШИБКА: не удалось подготовить сцену для проверки пост-обработки"; exit 1; fi
+    OUT="${POST_OFF}"; [ "${MODE}" = "on" ] && OUT="${POST_ON}"
     STATUS=0
-    ( cd "${GAME_DIR}" && \
-      run_headless env SAGE_POST="${MODE}" SAGE_SCREENSHOT_AT_FRAME=10 \
-          SAGE_SCREENSHOT_PATH="${OUT}" ./selftest_project ) > /dev/null 2>&1 || STATUS=$?
+    ( cd "${POST_DIR}" && run_headless env SAGE_SCREENSHOT_AT_FRAME=3 \
+          SAGE_SCREENSHOT_PATH="${OUT}" "./${SWITCH_EXE}" . ) > /dev/null 2>&1 || STATUS=$?
     if [ ${STATUS} -ne 0 ]; then
-        echo "ОШИБКА: игра с SAGE_POST=${MODE} завершилась с кодом ${STATUS}"; exit 1
+        echo "ОШИБКА: игра (пост-обработка ${MODE}) завершилась с кодом ${STATUS}"; exit 1
     fi
 done
 if cmp -s "${POST_OFF}" "${POST_ON}"; then
-    echo "ОШИБКА: кадр с пост-обработкой и без неё СОВПАДАЕТ — цепочка эффектов"
-    echo "        не выполняется в собранной игре (см. PlayerLayer::OnRender)."
+    echo "ОШИБКА: кадр с компонентом «Пост-обработка» и без него СОВПАДАЕТ —"
+    echo "        обработка камеры не выполняется в собранной игре (PlayerLayer::OnRender)."
     exit 1
 fi
-echo "OK: пост-обработка выполняется в собранной игре (кадры с SAGE_POST=0/1 различаются)"
+echo "OK: пост-обработка камеры выполняется в собранной игре (кадры отличаются)"
 
 echo "=== Smoke-тест 6/11: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-

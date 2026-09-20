@@ -4,9 +4,6 @@
 #include <cfloat>
 #include "EditorHost.h"
 #include "Project.h"
-#include "PostChainUi.h"
-#include "sage/render/PostChainComponent.h"
-#include "sage/render/PostChainIO.h"
 
 #include <imgui.h>
 #include "../Localization.h"
@@ -97,33 +94,21 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         int sr = c.ShadowResolution >= 4096 ? 3 : c.ShadowResolution >= 2048 ? 2 : c.ShadowResolution >= 1024 ? 1 : 0;
         if (ImGui::Combo(T("Shadow Resolution"), &sr, shadowRes, IM_ARRAYSIZE(shadowRes)))
             c.ShadowResolution = kShadowVals[sr];
-        ImGui::Checkbox(T("Post-Processing"), &c.PostProcessing);
         ImGui::Checkbox(T("Fog"), &c.Fog);
         ImGui::SameLine();
         ImGui::Checkbox(T("Skybox"), &c.Skybox);
     }
 
-    // --- Тракт пост-обработки ПРОЕКТА ---------------------------------------
+    // ПОСТ-ОБРАБОТКИ В НАСТРОЙКАХ БОЛЬШЕ НЕТ.
     //
-    // Раньше здесь стоял десяток полей: экспозиция, гамма, насыщенность,
-    // контраст, виньетка, свечение, затенение. Поля описывали ЧТО включать, но
-    // не описывали ПОРЯДОК, и менять этот порядок было нельзя — он жил в коде
-    // движка. Теперь здесь ТРАКТ: тот же редактор, что у камеры, — состав и
-    // порядок эффектов видны и правятся.
-    //
-    // Плоские поля в конфиге при этом никуда не делись и остаются УМОЛЧАНИЕМ для
-    // проекта, который тракт не трогал: так работают все проекты, настроенные до
-    // появления трактов (см. ProjectPostChain).
-    if (EditorTheme::SectionHeader("camera", T("Post-Process" "###Post-Process"))) {
-        ImGui::BeginDisabled(!c.PostProcessing);
-        // Читаем тракт проекта и пишем обратно ТОЛЬКО если его изменили: до
-        // первой правки в конфиге тракта нет вовсе, и это правильное состояние —
-        // «собрать из полей», а не «пустой тракт».
-        sage::render::PostChain chain = sage::render::ProjectPostChain(c);
-        if (sage::editor::DrawPostChainEditor(nullptr, chain, "settings"))
-            c.PostChain = sage::render::PostChainToJson(chain).dump();
-        EditorTheme::Hint(T("a camera with its own chain uses it instead of this one"));
-        ImGui::EndDisabled();
+    // Здесь стоял тракт проекта: экспозиция, свечение, цвет — на все камеры
+    // сцены разом. Обработка принадлежит кадру, а кадр снимает камера, поэтому
+    // она уехала компонентом на объект камеры и живёт в сцене вместе с ней.
+    // Держать её ещё и здесь значило бы иметь две системы, где половина
+    // настроек работает глобально, а половина через компонент.
+    if (EditorTheme::SectionHeader("camera", T("Post Processing" "###Post Processing"))) {
+        ImGui::TextWrapped("%s", T("Post processing is a camera component: select the camera "
+                                   "and add \"Post Processing\" in the Inspector."));
     }
 
     // ОБЪЁМНЫЙ СВЕТ ПОКА УБРАН ИЗ РЕДАКТОРА.

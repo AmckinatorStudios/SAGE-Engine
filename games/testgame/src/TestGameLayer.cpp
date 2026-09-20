@@ -540,16 +540,14 @@ void TestGameLayer::OnAttach() {
         m_screenshotPath = p;
     if (const char* f = std::getenv("SAGE_SCREENSHOT_AT_FRAME")) m_autoScreenshotFrame = std::atoi(f);
     // Качество графики — из гибкого конфига (файл sage.cfg + env-оверрайды,
-    // включая обратно-совместимые SAGE_NO_SHADOWS/SAGE_NO_POST).
+    // включая обратно-совместимый SAGE_NO_SHADOWS).
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     m_shadowsEnabled = cfg.Shadows;
-    m_postEnabled = cfg.PostProcessing;
-    // Тракт пост-обработки — из конфига проекта, тем же способом, что в
-    // редакторе и в плеере. Раньше игра собирала настройки ПОЛЯМИ, и это
-    // означало, что всё, о чём она не написала, оставалось на умолчаниях
-    // структуры: сглаживание включалось само, а глубина резкости и смаз
-    // движения не включались никогда, даже если проект их просил.
-    m_postfxChain = sage::render::PostChain::FromConfig(cfg);
+    m_postEnabled = true;
+    // Тракт пост-обработки — начальный тракт компонента камеры. У витрины
+    // своей камеры-сущности нет (она ведёт камеру кодом), поэтому она берёт то
+    // же умолчание, что человек получает, добавив камере «Пост-обработку».
+    m_postfxChain = sage::render::PostChain::Default();
     m_autopilot = (std::getenv("SAGE_TESTGAME_AUTOPILOT") != nullptr);
 
     // --- аудио (первым: скрипты сцен биндят его при привязке) ---

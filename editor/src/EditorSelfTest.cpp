@@ -85,6 +85,7 @@
 #include "ViewGizmo.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/assets/import/Convert.h"
 #include "AssetPreview.h"
 
@@ -320,7 +321,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2075,6 +2076,69 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         fs::remove(texB, rmec);
     }
 
+    // --- ПОСТ-ОБРАБОТКА ПРИНАДЛЕЖИТ КАМЕРЕ -----------------------------------
+    //
+    // Раньше она была настройкой проекта: одна на все камеры, вне сцены, вне
+    // префаба и вне отмены правки. Проверяем оба конца правила: камера без
+    // компонента обрабатывается НЕ БУДЕТ вовсе, а камера с компонентом
+    // обрабатывается СВОИМ трактом — и порядок звеньев в нём тот, в котором
+    // кадр обрабатывается, а не тот, в котором их положили в список.
+    if (ok) {
+        using namespace sage::render;
+        // В ТЕКУЩЕЙ сцене и со своей камерой: подменять сцену посреди прогона
+        // нельзя — следующие проверки ждут её объекты.
+        GameObject cam = m_scene->CreateEmptyObject("SelftestCamera");
+        m_scene->Registry().emplace<CameraComponent>(cam.Entity());
+
+        PostChain chain;
+        if (ResolvePostChain(*m_scene, cam.Entity(), chain)) {
+            LOG_ERROR("Editor") << "SELFTEST: камера без компонента всё равно обрабатывается";
+            ok = false;
+        }
+
+        PostProcessComponent ppc;
+        // Список НАРОЧНО в неправильном порядке: сглаживание перед
+        // тон-маппингом, свечение после него. Раньше это был неверный тракт;
+        // теперь порядок задают этапы, и он обязан разложиться сам.
+        ppc.Chain.Effects.clear();
+        for (const char* id : {"fxaa", "tonemap", "bloom", "vignette", "exposure"})
+            ppc.Chain.Effects.push_back(MakePostEffect(id));
+        m_scene->Registry().emplace<PostProcessComponent>(cam.Entity(), ppc);
+
+        if (!ResolvePostChain(*m_scene, cam.Entity(), chain)) {
+            LOG_ERROR("Editor") << "SELFTEST: компонент есть, а обработки нет";
+            ok = false;
+        } else {
+            const PostChain ordered = chain.Ordered();
+            auto at = [&ordered](const char* id) {
+                for (size_t i = 0; i < ordered.Effects.size(); ++i)
+                    if (ordered.Effects[i].Kind == id) return (int)i;
+                return -1;
+            };
+            if (!(at("exposure") < at("bloom") && at("bloom") < at("tonemap") &&
+                  at("tonemap") < at("vignette") && at("vignette") < at("fxaa"))) {
+                LOG_ERROR("Editor") << "SELFTEST: порядок обработки не совпадает с этапами";
+                ok = false;
+            }
+            if (!chain.Compile().Ok) {
+                LOG_ERROR("Editor") << "SELFTEST: тракт камеры не компилируется";
+                ok = false;
+            }
+        }
+
+        // Выключенный компонент — обработки нет, но настройки целы.
+        m_scene->Registry().get<PostProcessComponent>(cam.Entity()).Enabled = false;
+        if (ResolvePostChain(*m_scene, cam.Entity(), chain)) {
+            LOG_ERROR("Editor") << "SELFTEST: выключенная пост-обработка всё равно работает";
+            ok = false;
+        }
+        if (m_scene->Registry().get<PostProcessComponent>(cam.Entity()).Chain.Effects.empty()) {
+            LOG_ERROR("Editor") << "SELFTEST: выключение компонента стёрло его настройки";
+            ok = false;
+        }
+        m_scene->RemoveObject(cam.Id());
+    }
+
     // --- ИГРА БЕЗ СЦЕНЫ НЕ СОБИРАЕТСЯ ---------------------------------------
     //
     // Плеер при запуске открывает сцену проекта; сцен нет — он показывает
@@ -2515,7 +2579,6 @@ bool EditorLayer::SelfTestSystems() {
     if (ok) {
         sage::EngineConfig a;
         a.Shadows = false;
-        a.PostProcessing = false;
         a.ShadowResolution = 1024;
         a.Aspect = sage::AspectMode::R21x9;
         a.RenderScale = 0.75f;
@@ -2530,8 +2593,7 @@ bool EditorLayer::SelfTestSystems() {
             if (!b.LoadFile(cfgPath)) {
                 LOG_ERROR("Editor") << "SELFTEST: config load failed";
                 ok = false;
-            } else if (b.Shadows != false || b.PostProcessing != false ||
-                       b.ShadowResolution != 1024 || b.Aspect != sage::AspectMode::R21x9 ||
+            } else if (b.Shadows != false || b.ShadowResolution != 1024 || b.Aspect != sage::AspectMode::R21x9 ||
                        std::abs(b.RenderScale - 0.75f) > 0.001f || b.VSync != false || b.Msaa != 4) {
                 LOG_ERROR("Editor") << "SELFTEST: config round-trip mismatch";
                 ok = false;
@@ -3082,14 +3144,13 @@ bool EditorLayer::SelfTestSelection() {
         sage::EngineConfig pc;
         pc.Width = 1600; pc.VSync = false;
         pc.ApplyPreset(sage::QualityPreset::Low);
-        bool presetOk = !pc.Shadows && !pc.PostProcessing && !pc.AmbientOcclusion &&
-                        std::abs(pc.RenderScale - 0.75f) < 0.001f &&
+        bool presetOk = !pc.Shadows && std::abs(pc.RenderScale - 0.75f) < 0.001f &&
                         pc.Width == 1600 && pc.VSync == false;
         std::string pPath = "selftest_preset.cfg";
         bool fileOk = presetOk && pc.SaveFile(pPath);
         if (fileOk) {
             sage::EngineConfig back;
-            fileOk = back.LoadFile(pPath) && !back.Shadows && !back.PostProcessing &&
+            fileOk = back.LoadFile(pPath) && !back.Shadows &&
                      std::abs(back.RenderScale - 0.75f) < 0.001f;
             std::error_code pEc;
             fs::remove(pPath, pEc);
@@ -5222,14 +5283,23 @@ bool EditorLayer::SelfTestRenderStability() {
             return best;
         };
 
-        sage::EngineConfig dark = m_settings;
-        dark.PostProcessing = true;
-        dark.Exposure = 0.02f;   // кадр сцены практически чёрный
-        sage::EngineConfig plain = m_settings;
-        plain.PostProcessing = false;
+        // ОБРАБОТКА — У КАМЕРЫ, а не в настройках. Заводим камеру с
+        // «Пост-обработкой» и сажаем экспозицию в пол: кадр сцены становится
+        // почти чёрным, и если сетка ушла под пост, она чернеет вместе с ним.
+        GameObject postCam = m_scene->CreateEmptyObject("SelftestPostCamera");
+        m_scene->Registry().emplace<CameraComponent>(postCam.Entity());
+        sage::render::PostProcessComponent ppc;
+        ppc.Chain = sage::render::PostChain::Default();
+        for (sage::render::PostEffect& e : ppc.Chain.Effects)
+            if (e.Kind == "exposure")
+                if (sage::render::PostValue* v = e.Find("exposure")) v->V[0] = -6.0f;
+        sage::render::PostProcessComponent& live =
+            m_scene->Registry().emplace<sage::render::PostProcessComponent>(postCam.Entity(), ppc);
 
-        const long long darkGrid = gridEnergy(dark);
-        const long long plainGrid = gridEnergy(plain);
+        const long long darkGrid = gridEnergy(m_settings);
+        live.Enabled = false;   // та же сцена, но кадр без обработки вовсе
+        const long long plainGrid = gridEnergy(m_settings);
+        m_scene->RemoveObject(postCam.Id());
         if (darkGrid < 0 || plainGrid < 0) {
             LOG_ERROR("Editor") << "SELFTEST: кадр вьюпорта не прочитался";
             ok = false;

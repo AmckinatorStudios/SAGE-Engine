@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -26,45 +27,27 @@ static std::string TempPath(const std::string& name) {
 
 // --- EngineConfig round-trip -----------------------------------------------
 
-// Параметры кинематографических эффектов (глубина резкости, смаз движения,
-// хроматическая аберрация) должны переживать сохранение конфига: иначе
-// выставленная в редакторе картинка молча возвращалась бы к дефолтам при
-// каждом перезапуске.
-TEST(Config_cinematic_effects_roundtrip) {
-    sage::EngineConfig out;
-    out.DepthOfField = true;
-    out.FocusDistance = 7.25f;
-    out.Aperture = 1.4f;
-    out.DofMaxRadius = 20.0f;
-    out.MotionBlur = true;
-    out.MotionBlurAmount = 0.75f;
-    out.MotionBlurSamples = 20;
-    out.ChromaticAberration = 0.45f;
-
-    std::string path = TempPath("config_fx.json");
-    CHECK_TRUE(out.SaveFile(path));
-
-    sage::EngineConfig in;
-    CHECK_TRUE(in.LoadFile(path));
-    CHECK_TRUE(in.DepthOfField);
-    CHECK_NEAR(in.FocusDistance, 7.25f, 1e-5);
-    CHECK_NEAR(in.Aperture, 1.4f, 1e-5);
-    CHECK_NEAR(in.DofMaxRadius, 20.0f, 1e-5);
-    CHECK_TRUE(in.MotionBlur);
-    CHECK_NEAR(in.MotionBlurAmount, 0.75f, 1e-5);
-    CHECK_EQ(in.MotionBlurSamples, 20);
-    CHECK_NEAR(in.ChromaticAberration, 0.45f, 1e-5);
-
-    std::remove(path.c_str());
-}
-
-// Конфиг без раздела эффектов (файл от прежней версии движка) должен грузиться
-// с безопасными дефолтами, а не включать тяжёлые проходы сам по себе.
-TEST(Config_effects_default_off_for_old_files) {
+// НАСТРОЕК ПОСТ-ОБРАБОТКИ В КОНФИГЕ БОЛЬШЕ НЕТ.
+//
+// Здесь проверялось, что глубина резкости, смаз и аберрация переживают
+// сохранение `sage.cfg`. Переживать им там нечего: обработка принадлежит камере
+// (компонент «Пост-обработка», см. tests/test_posteffect.cpp) и хранится в
+// сцене. Проверка, что старые ключи в файле не оживают, — ниже.
+TEST(Config_ignores_post_process_keys_from_old_files) {
+    // Файл от прежней версии движка: в нём есть раздел postProcess со старыми
+    // ключами. Он обязан открыться и НЕ включить ничего: полей под них нет, и
+    // молча вернуть их в игру нечем.
+    const std::string path = TempPath("config_old_post.json");
+    {
+        std::ofstream f(path);
+        f << R"({"graphics":{"postProcessing":true,"shadows":false},)"
+             R"("postProcess":{"exposure":2.5,"bloom":true,"fxaa":true,"volumetrics":true}})";
+    }
     sage::EngineConfig cfg;
-    CHECK_FALSE(cfg.DepthOfField);
-    CHECK_FALSE(cfg.MotionBlur);
-    CHECK_NEAR(cfg.ChromaticAberration, 0.0f, 1e-6);
+    CHECK_TRUE(cfg.LoadFile(path));
+    CHECK_FALSE(cfg.Shadows);       // остальные настройки графики читаются как раньше
+    CHECK_TRUE(cfg.Volumetrics);    // объём остался настройкой проекта
+    std::remove(path.c_str());
 }
 
 TEST(Config_save_load_roundtrip) {
@@ -79,9 +62,6 @@ TEST(Config_save_load_roundtrip) {
     out.RenderScale = 1.5f;
     out.Shadows = false;
     out.ShadowResolution = 1024;
-    out.PostProcessing = false;
-    out.Exposure = 1.3f;
-    out.Gamma = 2.4f;
 
     std::string path = TempPath("config.json");
     CHECK_TRUE(out.SaveFile(path));
@@ -98,9 +78,6 @@ TEST(Config_save_load_roundtrip) {
     CHECK_NEAR(in.RenderScale, 1.5f, 1e-5);
     CHECK_FALSE(in.Shadows);
     CHECK_EQ(in.ShadowResolution, 1024);
-    CHECK_FALSE(in.PostProcessing);
-    CHECK_NEAR(in.Exposure, 1.3f, 1e-5);
-    CHECK_NEAR(in.Gamma, 2.4f, 1e-5);
 
     fs::remove(path);
 }
