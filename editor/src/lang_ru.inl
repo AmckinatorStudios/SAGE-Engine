@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1811.
+// Язык: Русский. Строк: 1812.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1936,6 +1936,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Элементов интерфейса пока нет."},
     {"No key assigned — the action can never fire",
      "Клавиша не назначена — действие никогда не сработает"},
+    {"No light sources in the scene — nothing is lit. Add one: Objects > Light, or \"Create a sun\" in Environment",
+     "В сцене нет источников света — освещать нечем. Добавьте: Объекты > Свет, либо «Создать солнце» в окружении"},
     {"No messages of the selected level",
      "Нет сообщений выбранного уровня"},
     {"No model assigned",

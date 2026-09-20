@@ -868,6 +868,10 @@ void TestEmissive(FrameRenderer& r, Scene& scene) {
 void TestDecals(FrameRenderer& r) {
     auto build = [&](bool withDecal) {
         Scene local;
+        // Свет — явной строкой: сцена сама собой больше не светится (см.
+        // LightingEnvironment::Sun), а наклейку надо чем-то осветить.
+        local.Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -1.0f, -0.4f));
+        local.Lighting.Sun.Intensity = 1.6f;
         GameObject floor = local.CreateObject("Floor");
         MeshRendererComponent& fmr = floor.Renderer();
         fmr.Ref = MeshRef{MeshRef::Type::Cube, ""};

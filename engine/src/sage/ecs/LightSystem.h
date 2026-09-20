@@ -2,6 +2,7 @@
 #ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
 #endif
+#include <algorithm>
 #include <cmath>
 
 #include <glm/glm.hpp>
@@ -74,6 +75,44 @@ inline entt::entity FindSunEntity(Scene& scene) {
         sun = e;
         sunId = candidate;
     }
+    return sun;
+}
+
+// Светит ли в сцене хоть что-нибудь. Нужен редактору: сцена без единого
+// источника честно чёрная (см. LightingEnvironment::Sun), и человеку, который
+// смотрит в чёрный вьюпорт, надо сказать ПОЧЕМУ — иначе это неотличимо от
+// поломки рендера.
+inline bool SceneHasAnyLight(Scene& scene) {
+    auto view = scene.Registry().view<LightComponent>();
+    for (auto e : view) {
+        if (scene.IsHidden(e)) continue;
+        if (view.get<LightComponent>(e).Intensity > 0.0f) return true;
+    }
+    if (scene.Lighting.Sun.Intensity > 0.0f) return true;
+    // Окружающий свет — тоже свет: сцена под небом видна и без источников.
+    if (scene.Lighting.AmbientStrength > 0.0f) {
+        glm::vec3 sky(0.0f), ground(0.0f);
+        scene.Lighting.ResolveAmbient(sky, ground);
+        const float best = std::max({sky.x, sky.y, sky.z, ground.x, ground.y, ground.z});
+        if (best > 0.0f) return true;
+    }
+    return false;
+}
+
+// Заводит в сцене объект-солнце — ровно тот, который дальше собирает
+// CollectLighting. ОДНА функция на движок и редактор: солнце создают три
+// места (новая сцена, шаблон-витрина, кнопка «Создать солнце» в окружении), и
+// разойтись они не должны — иначе «солнце» в одном случае светит иначе, чем в
+// другом, а сравнить нечем.
+inline GameObject CreateSunEntity(Scene& scene, const char* name = "Sun") {
+    GameObject sun = scene.CreateEmptyObject(name);
+    sun.GetTransform().Position = {0.0f, 10.0f, 0.0f};
+    sun.GetTransform().Rotation = EulerFromForward(glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f)));
+    LightComponent lc;
+    lc.Kind = LightComponent::Type::Directional;
+    lc.Color = {1.0f, 0.95f, 0.85f};
+    lc.Intensity = 1.0f;
+    scene.Registry().emplace<LightComponent>(sun.Entity(), lc);
     return sun;
 }
 

@@ -296,3 +296,57 @@ TEST(Lighting_set_sun_falls_back_to_scene_settings) {
     CHECK_NEAR(env.Sun.Intensity, 0.75f, 1e-4);
     CHECK_NEAR(glm::normalize(env.Sun.Direction).z, -0.7071f, 1e-3);
 }
+
+// --- НЕТ ОБЪЕКТА СВЕТА — НЕТ И СВЕТА ----------------------------------------
+//
+// Жалоба звучала так: «в иерархии нет ни одного источника, а сцена освещена».
+// Так и было: у настроек сцены осталось поле «солнце», и его яркость по
+// умолчанию равнялась единице. То есть КАЖДАЯ новая сцена светилась
+// направленным светом ниоткуда — его нельзя было ни выбрать, ни выключить, ни
+// найти. Миграция v4->v5 гасила это поле только у сцен, приехавших с формата 4;
+// сцена, созданная позже, получала горящее поле заново.
+TEST(Lighting_a_fresh_scene_has_no_hidden_sun) {
+    Scene scene("Пустая");
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    CHECK_NEAR(env.Sun.Intensity, 0.0f, 1e-6);
+    CHECK_FALSE(sage::ecs::SceneHasAnyLight(scene));
+}
+
+TEST(Lighting_appears_with_the_object_and_leaves_with_it) {
+    // Создали свет — сцена освещена; удалили — темно. Ровно то, чего ждёшь от
+    // объекта, и ровно то, чего раньше добиться было нельзя.
+    Scene scene("Свет");
+    CHECK_FALSE(sage::ecs::SceneHasAnyLight(scene));
+
+    GameObject sun = sage::ecs::CreateSunEntity(scene);
+    CHECK_TRUE(sage::ecs::SceneHasAnyLight(scene));
+    CHECK_NEAR(sage::ecs::CollectLighting(scene).Sun.Intensity, 1.0f, 1e-4);
+
+    scene.RemoveObject(sun.Id());
+    CHECK_FALSE(sage::ecs::SceneHasAnyLight(scene));
+    CHECK_NEAR(sage::ecs::CollectLighting(scene).Sun.Intensity, 0.0f, 1e-6);
+}
+
+TEST(Lighting_scene_saved_with_a_burning_field_gets_a_real_sun_object) {
+    // Уже сохранённые сцены светом не обделяются: поле, которое горело,
+    // превращается в объект — тот же цвет, та же яркость, то же направление.
+    // Иначе «починка» означала бы «ваши сцены потемнели».
+    const char* json = R"({
+        "sage_scene_version": 10, "name": "Своя",
+        "objects": [ {"id": 1, "name": "Пусто", "mesh": {"type": "none", "path": ""}} ],
+        "lighting": { "sun": { "direction": {"x": 0.0, "y": -1.0, "z": 0.0},
+                               "color": {"x": 1.0, "y": 0.5, "z": 0.25},
+                               "intensity": 1.75 } }
+    })";
+    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(json);
+    CHECK_TRUE(scene != nullptr);
+    if (!scene) return;
+
+    CHECK_NEAR(scene->Lighting.Sun.Intensity, 0.0f, 1e-6); // поле погасло
+    GameObject sun = scene->FindByName("Sun");
+    CHECK_TRUE(sun.Valid());                               // а свет стал объектом
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    CHECK_NEAR(env.Sun.Intensity, 1.75f, 1e-4);
+    CHECK_NEAR(env.Sun.Direction.y, -1.0f, 1e-3);
+    CHECK_NEAR(env.Sun.Color.r, 1.0f, 1e-4);
+}

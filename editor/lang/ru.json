@@ -1811,6 +1811,7 @@
     "Shared": "Общие",
     "The project has no scene — there is nothing to run": "В проекте нет ни одной сцены — запускать нечего",
     "The project has no scene: there is nothing to run. Create or save a scene into scenes/ first.": "В проекте нет ни одной сцены: запускать нечего. Сначала создайте сцену и сохраните её в scenes/.",
-    "Tools": "Инструменты"
+    "Tools": "Инструменты",
+    "No light sources in the scene — nothing is lit. Add one: Objects > Light, or \"Create a sun\" in Environment": "В сцене нет источников света — освещать нечем. Добавьте: Объекты > Свет, либо «Создать солнце» в окружении"
   }
 }

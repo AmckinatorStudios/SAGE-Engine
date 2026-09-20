@@ -509,7 +509,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (EditorIcons::MenuItem("open", T("Open Project..."))) openDialog = "Open Project";
             if (EditorIcons::MenuItem("list", T("Project Launcher..."))) m_launcherRequested = true;
             ImGui::Separator();
-            if (EditorIcons::MenuItem("scene", T("New Scene"))) NewScene(ProjectTemplateKind::Empty);
+            if (EditorIcons::MenuItem("scene", T("New Scene"))) NewSceneForUser();
             if (EditorIcons::MenuItem("open", T("Open Scene..."))) openDialog = "Open Scene";
 
             // Сцены открытого проекта — прямой доступ без файлового диалога.

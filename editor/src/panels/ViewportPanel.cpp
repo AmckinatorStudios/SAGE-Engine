@@ -17,6 +17,7 @@
 #include "EditorHost.h"
 #include "sage/core/Application.h"
 #include "sage/scene/Components.h"
+#include "sage/ecs/LightSystem.h"
 #include "../Localization.h"
 #include "EditorIcons.h"
 #include "../EditorPrefs.h"
@@ -120,6 +121,31 @@ static void DrawRenderWarning(const std::string& text, ImVec2 pos, ImVec2 cell) 
     dl->AddRect(a, b, IM_COL32(255, 140, 90, 220), 5.0f);
     dl->AddText(nullptr, 0.0f, ImVec2(a.x + pad, a.y + pad * 0.5f), IM_COL32(255, 226, 210, 255),
                 text.c_str(), nullptr, wrap);
+}
+
+// СЦЕНА БЕЗ ЕДИНОГО ИСТОЧНИКА СВЕТА — подсказкой в кадре, а не молча.
+//
+// Свет в сцене дают ТОЛЬКО объекты (см. sage::ecs::CollectLighting): движок
+// больше не подсвечивает сцену сам собой. Это честно, но чёрный вьюпорт сам по
+// себе неотличим от поломки рендера — и смотрят в этот момент сюда, а не в
+// консоль. Одна строка на месте вопроса снимает его целиком.
+static void DrawNoLightHint(ImVec2 pos, ImVec2 cell) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const char* text = T("No light sources in the scene — nothing is lit. "
+                         "Add one: Objects > Light, or \"Create a sun\" in Environment");
+    const float pad = 8.0f;
+    const float wrap = std::max(cell.x * 0.6f, 180.0f);
+    const ImVec2 ts = ImGui::CalcTextSize(text, nullptr, false, wrap);
+    const float boxW = ts.x + pad * 2.0f;
+    const float boxH = ts.y + pad;
+    // Внизу по центру: верх кадра занят виджетом инструментов и предупреждением
+    // рендера, и накрывать их подсказкой нельзя.
+    const ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f), pos.y + cell.y - boxH - 28.0f);
+    const ImVec2 b(a.x + boxW, a.y + boxH);
+    dl->AddRectFilled(a, b, IM_COL32(28, 30, 38, 235), 5.0f);
+    dl->AddRect(a, b, IM_COL32(120, 130, 155, 200), 5.0f);
+    dl->AddText(nullptr, 0.0f, ImVec2(a.x + pad, a.y + pad * 0.5f), IM_COL32(215, 222, 235, 255),
+                text, nullptr, wrap);
 }
 
 void ViewportPanel::Draw(EditorHost& host, bool* open) {
@@ -291,6 +317,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         // Закрывать его нечем — оно исчезнет само, когда исчезнет причина.
         if (i == 0 && !host.RenderWarning().empty())
             DrawRenderWarning(host.RenderWarning(), slotPos[0], cell);
+
+        // Нечем светить — так и написано. Проверка дешёвая (обход только
+        // светов), а без неё чёрный кадр приходится объяснять словами.
+        if (i == 0 && !sage::ecs::SceneHasAnyLight(host.CurrentScene()))
+            DrawNoLightHint(slotPos[0], cell);
 
         // Клик по виду делает его активным — дальше в нём работают гизмо и
         // хоткеи. Без этого в раскладке из четырёх видов работал бы только один.

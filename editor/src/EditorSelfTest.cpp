@@ -320,7 +320,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -1033,9 +1033,18 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 //   • настройки сцены — они НЕ сущности, и скайбокс, включённый
                 //     «за компанию» с остальными шаблонами, дал бы пустому
                 //     проекту небо при нулевом счётчике объектов.
-                if (m_scene->Count() != 0) {
+                // ПУСТОЙ — ЭТО ПУСТОЙ ПЛЮС СОЛНЦЕ, и это не оговорка. Свет в
+                // сцене дают только объекты (см. LightingEnvironment::Sun):
+                // движок больше не подсвечивает сцену сам собой, и пустой
+                // проект без объекта-солнца открывался бы чёрным вьюпортом.
+                // Солнце — обычный объект: видно в иерархии, можно удалить.
+                if (m_scene->Count() != 1) {
                     LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс " << m_scene->Count()
-                                        << " сущностей";
+                                        << " сущностей (ожидалось одно солнце)";
+                    ok = false;
+                }
+                if (!sage::ecs::SceneHasAnyLight(*m_scene)) {
+                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон приехал без света вовсе";
                     ok = false;
                 }
                 const auto uiView = m_scene->Registry().view<sage::ui::Element>();

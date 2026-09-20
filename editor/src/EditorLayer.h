@@ -321,6 +321,8 @@ private:
     // Новая сцена по ШАБЛОНУ (см. ProjectTemplates.h). Empty — пустая; она же
     // используется пунктом «Новая сцена» и самопроверкой.
     void NewScene(ProjectTemplateKind content);
+    // Новая сцена по просьбе человека: пустая, но со своим солнцем-объектом.
+    void NewSceneForUser();
     // Смена проекта: прошлый исчезает целиком — сцена, кэш ресурсов, частицы,
     // обложки, префабы, выделение. Подробности — в EditorLayer_Project.cpp.
     void ForgetPreviousProject();
@@ -358,7 +360,7 @@ public:
         else SaveSceneToFile(m_scenePath);
     }
     void NewSceneWithPrompt() override {
-        AskUnsaved([this] { NewScene(ProjectTemplateKind::Empty); });
+        AskUnsaved([this] { NewSceneForUser(); });
     }
 
 private:
