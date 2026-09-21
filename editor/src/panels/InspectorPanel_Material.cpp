@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 #include <cstdarg>
 #include "InspectorPanel.h"
+#include "../EditorTheme.h"
 
 #include <cmath>
 #include <cstdio>
@@ -233,16 +234,52 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // плиткой — это вопрос к карте, а не к тому, как рисуются грани. Какие
     // свойства сюда попадают, решает таблица (MaterialRenderFields), а не этот
     // файл: формат .sagemat от переезда подписи не меняется.
+    ImGui::SeparatorText(T("Tiling"));
     {
-        float tiling[2] = {material->Render.UVScaleX, material->Render.UVScaleY};
-        if (ImGui::DragFloat2(T("Tiling"), tiling, 0.05f, 0.01f, 64.0f, "%.2f")) {
-            material->Render.UVScaleX = std::clamp(tiling[0], 0.01f, 64.0f);
-            material->Render.UVScaleY = std::clamp(tiling[1], 0.01f, 64.0f);
+        using Mode = MaterialRender::TilingMode;
+        // РЕЖИМ ПЕРВЫМ: от него зависит, что вообще значат числа ниже, и
+        // показывать поле «Повтор по Y» там, где оно ни на что не влияет,
+        // значит обещать настройку, которой нет.
+        const char* kModes[] = {T("Uniform"), T("Per axis"), T("Per object size")};
+        int mode = (int)material->Render.Tiling;
+        if (ImGui::Combo(T("Tiling mode"), &mode, kModes, 3))
+            material->Render.Tiling = (Mode)std::clamp(mode, 0, 2);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Uniform — one number for both axes.\n"
+                                      "Per axis — width and height apart (planks, brickwork).\n"
+                                      "Per object size — repeats PER METRE: the tile keeps its\n"
+                                      "physical size however the object is scaled."));
+
+        // ПРЕДЕЛОВ ПОЛЗУНКА ЗДЕСЬ НЕТ: повтор берут и сотнями (мелкий песок на
+        // большом поле), и долями (одна картинка на пол-объекта). Прежний
+        // потолок 64 не пропускал даже введённое числом значение.
+        const float kMin = 0.001f, kMax = 512.0f;
+        if (material->Render.Tiling == Mode::Uniform) {
+            float uniform = material->Render.UVScaleX;
+            if (ImGui::DragFloat(T("Tiling"), &uniform, 0.05f, kMin, kMax, "%.3f"))
+                material->Render.UVScaleX = std::clamp(uniform, kMin, kMax);
+        } else {
+            float tiling[2] = {material->Render.UVScaleX, material->Render.UVScaleY};
+            if (ImGui::DragFloat2(T("Tiling"), tiling, 0.05f, kMin, kMax, "%.3f")) {
+                material->Render.UVScaleX = std::clamp(tiling[0], kMin, kMax);
+                material->Render.UVScaleY = std::clamp(tiling[1], kMin, kMax);
+            }
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("How many times the texture repeats across the UV: X and Y.\n"
+            ImGui::SetTooltip("%s", T("How many times the texture repeats across the UV.\n"
               "Without it a picture on a large object is stretched over its whole length."));
         }
+        if (material->Render.Tiling == Mode::WorldSize)
+            EditorTheme::Hint(T("Repeats per metre of the object's two larger sides."));
+
+        float offset[2] = {material->Render.UVOffsetX, material->Render.UVOffsetY};
+        if (ImGui::DragFloat2(T("Offset"), offset, 0.01f, -64.0f, 64.0f, "%.3f")) {
+            material->Render.UVOffsetX = std::clamp(offset[0], -64.0f, 64.0f);
+            material->Render.UVOffsetY = std::clamp(offset[1], -64.0f, 64.0f);
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Shifts the texture in tiles: a seam landing in the middle\n"
+                                      "of a wall is cheaper to move than to re-model."));
     }
 
     ImGui::TextDisabled("%s", T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));

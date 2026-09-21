@@ -379,6 +379,9 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
     shader.SetInt("uAOMap", 5);
     shader.SetInt("uEmissiveMap", kEmissiveUnit);
     shader.SetVec2("uUVScale", glm::vec2(1.0f));  // повтор развёртки задаёт файл модели
+    // Сдвиг ставится ЯВНО нулём: uniform живёт в программе, а не в вызове, и
+    // оставленный от прошлого материала сдвиг уехал бы на персонажа.
+    shader.SetVec2("uUVOffset", glm::vec2(0.0f));
 
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
 

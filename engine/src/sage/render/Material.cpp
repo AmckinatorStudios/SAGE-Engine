@@ -1,6 +1,7 @@
 #include "sage/render/Material.h"
 
 #include <algorithm>
+#include <glm/gtc/matrix_transform.hpp>
 #include "sage/assets/Pack.h"
 
 #include <fstream>
@@ -23,6 +24,8 @@ static glm::vec3 Vec3FromJson(const json& j, glm::vec3 fallback) {
 namespace {
 // Значения списка отсечения: как пишутся в файл и как называются в инспекторе.
 // Порядок обязан совпадать с CullFaces.
+const char* const kTilingKeys[] = {"uniform", "separate", "worldSize"};
+const char* const kTilingLabels[] = {"Общий", "По осям", "По размеру объекта"};
 const char* const kCullKeys[] = {"back", "front", "none"};
 const char* const kCullLabels[] = {"Задние", "Передние", "Не отсекать"};
 } // namespace
@@ -52,17 +55,82 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          "0 — режима нет: альфа текстуры не смотрится.\n"
          "Нужен листве, траве, решёткам — всему, что вырезано альфой:\n"
          "полупрозрачный проход там даёт мерцание и просвет друг сквозь друга."},
+        {"tilingMode", "Режим повтора", MaterialRenderField::Kind::Enum,
+         MaterialRenderField::Group::Textures,
+         nullptr, nullptr, 0.0f, 0.0f,
+         "Общий — одно число на обе оси (песок, штукатурка: направления нет).\n"
+         "По осям — отдельно ширина и высота (доски, кладка, обои).\n"
+         "По размеру объекта — повторов НА МЕТР: плитка остаётся одного\n"
+         "физического размера, как бы объект ни растягивали.",
+         [](const MaterialRender& r) { return (int)r.Tiling; },
+         [](MaterialRender& r, int v) { r.Tiling = (MaterialRender::TilingMode)v; },
+         kTilingKeys, kTilingLabels, 3},
         {"uvScaleX", "Повтор по X", MaterialRenderField::Kind::Float,
-         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleX, 0.01f, 64.0f,
+         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleX, 0.001f, 512.0f,
          "Сколько раз текстура укладывается по ширине развёртки.\n"
          "Развёртка примитивов — 0..1 на грань, поэтому без повтора\n"
          "картинка на большом объекте растягивается на всю его длину."},
         {"uvScaleY", "Повтор по Y", MaterialRenderField::Kind::Float,
-         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleY, 0.01f, 64.0f,
+         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVScaleY, 0.001f, 512.0f,
          "То же по высоте. Отдельно от X: у стены 4 x 2.5 метра равный\n"
          "повтор по осям растянул бы кладку."},
+        {"uvOffsetX", "Сдвиг по X", MaterialRenderField::Kind::Float,
+         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVOffsetX, -64.0f, 64.0f,
+         "Сдвиг развёртки в долях текстуры. Шов плитки попадает в середину\n"
+         "стены — подвинуть рисунок дешевле, чем переделывать геометрию."},
+        {"uvOffsetY", "Сдвиг по Y", MaterialRenderField::Kind::Float,
+         MaterialRenderField::Group::Textures, nullptr, &MaterialRender::UVOffsetY, -64.0f, 64.0f,
+         "То же по вертикали."},
     };
     return fields;
+}
+
+const char* TilingModeKey(MaterialRender::TilingMode mode) {
+    const int i = std::clamp((int)mode, 0, 2);
+    return kTilingKeys[i];
+}
+
+bool TilingModeFromKey(const std::string& key, MaterialRender::TilingMode& out) {
+    for (int i = 0; i < 3; ++i) {
+        if (key == kTilingKeys[i]) {
+            out = (MaterialRender::TilingMode)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+glm::vec3 WorldScaleOf(const glm::mat4& model) {
+    return {glm::length(glm::vec3(model[0])), glm::length(glm::vec3(model[1])),
+            glm::length(glm::vec3(model[2]))};
+}
+
+glm::vec2 TilingFactor(const MaterialRender& render, const glm::vec3& worldScale) {
+    switch (render.Tiling) {
+        case MaterialRender::TilingMode::Uniform:
+            // Одно число на обе оси — берётся X: он же и показан в инспекторе,
+            // когда режим общий. Второе поле при этом не трогается, чтобы
+            // возврат к режиму «по осям» вернул подобранную пару, а не единицу.
+            return {render.UVScaleX, render.UVScaleX};
+        case MaterialRender::TilingMode::WorldSize: {
+            // ДВА БОЛЬШИХ ИЗМЕРЕНИЯ объекта: поверхность тянется вдоль них, а
+            // третье — толщина пола или стены, к развёртке отношения не имеющая.
+            // У пола (10, 0.2, 10) это X и Z, у стены (10, 5, 0.2) — X и Y:
+            // правило одно, а «пол» и «стена» различать не приходится.
+            const glm::vec3 s = glm::abs(worldScale);
+            float a = s.x, b = s.y;
+            if (s.z > s.x && s.x <= s.y) { a = s.y; b = s.z; }
+            else if (s.z > s.y) { b = s.z; }
+            // Ноль в масштабе (сплющенный объект) не должен схлопнуть развёртку
+            // в одну точку: там текстуры всё равно не видно, а деление на ноль
+            // ушло бы в шейдер числом NaN и покрасило бы объект в чёрное.
+            a = glm::max(a, 0.0001f);
+            b = glm::max(b, 0.0001f);
+            return {render.UVScaleX * a, render.UVScaleY * b};
+        }
+        default:
+            return {render.UVScaleX, render.UVScaleY};
+    }
 }
 
 Material Material::LoadFromFile(const std::string& path) {

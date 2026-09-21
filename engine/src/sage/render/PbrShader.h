@@ -814,6 +814,10 @@ uniform vec3 uAlbedoFactor;
 // ЗДЕСЬ, а не в вершинном шейдере: TBN и вторая развёртка (лайтмапа) повтора
 // не знают и знать не должны — лайтмапа уникальна на объект по построению.
 uniform vec2 uUVScale;
+// Сдвиг развёртки (доли текстуры). Складывается ПОСЛЕ умножения на повтор:
+// сдвиг задают в плитках («на треть плитки правее»), а не в долях грани, —
+// иначе смысл числа менялся бы при каждой смене повтора.
+uniform vec2 uUVOffset;
 uniform float uMetallic;
 uniform float uRoughness;
 uniform sampler2D uAlbedoMap;
@@ -849,7 +853,7 @@ uniform sampler2D uEmissiveMap;
 uniform bool uHasEmissive;
 )") + kPbrSharedGlsl + R"(
 void main() {
-    vec2 uv = TexCoords * uUVScale;
+    vec2 uv = TexCoords * uUVScale + uUVOffset;
     vec4 base = vec4(uAlbedoFactor, 1.0);
     if (uHasAlbedo) base *= texture(uAlbedoMap, uv);
     // Отсечение по альфе — ДО всей остальной работы: отброшенный пиксель не
