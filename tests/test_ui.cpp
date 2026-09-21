@@ -2108,3 +2108,64 @@ TEST(ui_image_forgets_the_texture_when_the_path_is_cleared) {
     img.Path.clear();
     CHECK_TRUE(sage::ui::ImageTextureStale(img));
 }
+
+// ============================================================================
+//  КАРТИНКА, СОХРАНЯЮЩАЯ ПРОПОРЦИИ
+//
+//  Растяжение под элемент меняет соотношение сторон: портрет в широкой кнопке
+//  становится блином, герб 1:1 в полосе — овалом. Единственным способом этого
+//  избежать был подбор размера элемента под каждую картинку руками — и заново
+//  при смене картинки. Проверяем оба новых режима числами: арифметика на то и
+//  вынесена в ImageFit.h, чтобы её проверяли без видеокарты.
+// ============================================================================
+#include "sage/ui/ImageFit.h"
+
+TEST(ui_image_fit_keeps_the_aspect_and_leaves_margins) {
+    using namespace sage::ui;
+    // Широкий элемент 200x100 и КВАДРАТНАЯ картинка 64x64.
+    const ImagePlacement p = PlaceImage(UIRect{0.0f, 0.0f, 200.0f, 100.0f}, 0.0f, 0.0f, 64.0f,
+                                        64.0f, /*cover=*/false, /*pixelArt=*/false);
+    // Сторона одна: квадрат остался квадратом (растяжение дало бы 200x100).
+    CHECK_NEAR(p.Dst.w, 100.0f, 0.51f);
+    CHECK_NEAR(p.Dst.h, 100.0f, 0.51f);
+    // И стоит по центру: поля поровну слева и справа.
+    CHECK_NEAR(p.Dst.x, 50.0f, 0.51f);
+    CHECK_NEAR(p.Dst.y, 0.0f, 0.51f);
+    // Исходник берётся целиком — ничего не обрезано.
+    CHECK_NEAR(p.SrcW, 64.0f, 1e-3f);
+    CHECK_NEAR(p.SrcH, 64.0f, 1e-3f);
+}
+
+TEST(ui_image_cover_fills_the_element_and_crops_the_source) {
+    using namespace sage::ui;
+    // Тот же элемент 200x100, картинка 64x64: чтобы занять элемент без полей,
+    // сверху и снизу придётся отрезать.
+    const ImagePlacement p = PlaceImage(UIRect{10.0f, 20.0f, 200.0f, 100.0f}, 0.0f, 0.0f, 64.0f,
+                                        64.0f, /*cover=*/true, /*pixelArt=*/false);
+    // Рисуем во весь элемент — полей нет.
+    CHECK_NEAR(p.Dst.x, 10.0f, 1e-3f);
+    CHECK_NEAR(p.Dst.y, 20.0f, 1e-3f);
+    CHECK_NEAR(p.Dst.w, 200.0f, 1e-3f);
+    CHECK_NEAR(p.Dst.h, 100.0f, 1e-3f);
+    // По ширине исходник взят целиком, по высоте — половина (пропорции 2:1).
+    CHECK_NEAR(p.SrcW, 64.0f, 1e-3f);
+    CHECK_NEAR(p.SrcH, 32.0f, 1e-3f);
+    // И вырезано ПО ЦЕНТРУ, а не от края: иначе у портрета отрезалась бы
+    // голова, а не поровну сверху и снизу.
+    CHECK_NEAR(p.SrcX, 0.0f, 1e-3f);
+    CHECK_NEAR(p.SrcY, 16.0f, 1e-3f);
+    // Пропорции куска исходника совпали с пропорциями элемента — это и значит
+    // «без искажения».
+    CHECK_NEAR(p.SrcW / p.SrcH, p.Dst.w / p.Dst.h, 1e-3f);
+}
+
+TEST(ui_image_fit_scales_pixel_art_by_whole_numbers) {
+    using namespace sage::ui;
+    // 32x32 в элементе 100x100: дробный масштаб (3.125) растянул бы одни
+    // пиксели исходника на четыре экранных, а соседние на три — ровные линии
+    // пошли бы ступенями.
+    const ImagePlacement p = PlaceImage(UIRect{0.0f, 0.0f, 100.0f, 100.0f}, 0.0f, 0.0f, 32.0f,
+                                        32.0f, /*cover=*/false, /*pixelArt=*/true);
+    CHECK_NEAR(p.Dst.w, 96.0f, 1e-3f);   // ровно 3 экранных пикселя на исходный
+    CHECK_NEAR(p.Dst.h, 96.0f, 1e-3f);
+}

@@ -142,7 +142,14 @@ private:
     // Превью карточек. Материалы, префабы и модели рендерятся по одному за кадр
     // и запоминаются (см. ThumbnailFor): один такой рендер — полный проход
     // сцены со светом.
-    uint64_t ThumbnailFor(EditorHost& host, const std::filesystem::path& path, bool isDir);
+    // Обложка вместе с ПРОПОРЦИЯМИ исходника: без них панорама 4096x1024
+    // рисовалась квадратом, а обложку смотрят затем, чтобы узнать свой файл.
+    // У снятых обложек (материал, модель, префаб) кадр квадратный — 1:1.
+    struct Cover {
+        uint64_t Id = 0;
+        int W = 0, H = 0;   // 0 — пропорции неизвестны, рисуем во всю площадку
+    };
+    Cover ThumbnailFor(EditorHost& host, const std::filesystem::path& path, bool isDir);
     AssetPreview m_preview;
     struct Thumb {
         uint64_t Id = 0;      // 0 — превью не получилось (негативный кэш)

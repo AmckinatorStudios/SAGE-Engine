@@ -14,6 +14,7 @@
 // «значок слева, подпись справа»: это не одна хитрая часть, а контейнер с
 // раскладкой и два ОБЪЕКТА внутри.
 // ---------------------------------------------------------------------------
+#include "sage/ui/ImageFit.h"
 #include "sage/ui/UIPart.h"
 
 #include <algorithm>
@@ -128,14 +129,18 @@ const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Re
 // механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
 // говорит всё.
 const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("9-slice"),
-                                       SAGE_UI_TEXT("Tile")};
+                                       SAGE_UI_TEXT("Tile"), SAGE_UI_TEXT("Keep aspect"),
+                                       SAGE_UI_TEXT("Fill, keep aspect")};
 
 const std::vector<PartField>& ImageFields() {
     static const std::vector<PartField> f = {
         {"path", SAGE_UI_TEXT("File"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
          nullptr, 0, PartField::Widget::Texture},
-        {"mode", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 2.0f,
-         "Stretch, cut into nine pieces, or repeat at its own size.", kImageModeNames, 3},
+        {"mode", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 4.0f,
+         "Stretch, cut into nine pieces, repeat at its own size, or keep the\n"
+         "aspect ratio: show the whole picture with margins, or fill the\n"
+         "element and cut off what does not fit.",
+         kImageModeNames, 5},
         {"tint", SAGE_UI_TEXT("Tint"), PartField::Kind::Color, offsetof(Image, Tint)},
         {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Image, Sprite), 0.0f, 4096.0f,
          "A piece of the sheet in source pixels; width 0 means the whole file."},
@@ -222,14 +227,37 @@ void DrawImagePart(const PartDrawContext& c) {
         return;
     }
 
+    UIRect dst = r;
+    UIRenderer::Sprite drawn = src;
+    const float srcW = src.Whole() ? (float)img.Tex->Width() : src.W;
+    const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
+
+    // СОХРАНЕНИЕ ПРОПОРЦИЙ — ДВА РАЗНЫХ ОТВЕТА, и оба нужны.
+    //
+    // Fit вписывает картинку ЦЕЛИКОМ: масштаб один на обе оси, по краям
+    // остаются поля. Так показывают то, что обязано быть видно полностью —
+    // портрет персонажа, герб, схему.
+    // Cover заполняет элемент БЕЗ ПОЛЕЙ, обрезая лишнее по длинной стороне.
+    // Обрезка делается ИСХОДНИКОМ (берём из него кусок нужных пропорций от
+    // середины), а не рисованием за границами элемента: элемент может не иметь
+    // обрезки, и картинка вылезла бы на соседей.
+    if (img.Fit == Image::Mode::Fit || img.Fit == Image::Mode::Cover) {
+        const ImagePlacement fit =
+            PlaceImage(r, src.Whole() ? 0.0f : src.X, src.Whole() ? 0.0f : src.Y, srcW, srcH,
+                       img.Fit == Image::Mode::Cover, img.PixelArt);
+        dst = fit.Dst;
+        drawn = {fit.SrcX, fit.SrcY, fit.SrcW, fit.SrcH};
+        ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, img.Tex.get(), drawn, rgb, alpha);
+        return;
+    }
+
     // Спрайт БЕЗ девятины: пиксель-арт нельзя просто растянуть под элемент —
     // разный дробный масштаб по осям даёт рваные края. Берём ЦЕЛЫЙ масштаб и
     // ставим по центру: элемент может остаться больше картинки, и это честнее.
-    UIRect dst = r;
     float pixels = img.PixelScale * c.Scale;
     if (img.PixelArt || pixels > 0.0f) {
-        const float sw = src.Whole() ? (float)img.Tex->Width() : src.W;
-        const float sh = src.Whole() ? (float)img.Tex->Height() : src.H;
+        const float sw = srcW;
+        const float sh = srcH;
         if (sw > 0.0f && sh > 0.0f) {
             if (pixels <= 0.0f) {
                 pixels = std::min(r.w / sw, r.h / sh);
