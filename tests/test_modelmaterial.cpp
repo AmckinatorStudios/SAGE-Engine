@@ -454,3 +454,87 @@ TEST(model_material_obj_dissolve_becomes_blending) {
     CHECK_NEAR(m.Opacity, 0.35f, 1e-3f);
     CHECK_EQ(m.AlphaMode, 2);   // BLEND
 }
+
+// ============================================================================
+//  ПОВТОР ТЕКСТУРЫ: ТРИ РЕЖИМА
+//
+//  Развёртка примитива — 0..1 на грань, поэтому без повтора картинка на
+//  большом объекте растянута на всю его длину, а с постоянным повтором
+//  растягивается заново при каждом изменении РАЗМЕРА объекта: тот же пол,
+//  растянутый с 5 до 50 метров, снова показывает одну плитку на всю длину.
+//  Арифметика режима вынесена отдельно (TilingFactor) и проверяется числами,
+//  без видеокарты: подставляют её три разных прохода отрисовки, и разойтись
+//  им нельзя.
+// ============================================================================
+#include <glm/gtc/matrix_transform.hpp>
+
+TEST(material_uniform_tiling_uses_one_number_for_both_axes) {
+    MaterialRender r;
+    r.Tiling = MaterialRender::TilingMode::Uniform;
+    r.UVScaleX = 6.0f;
+    r.UVScaleY = 2.0f;   // второе число режим не трогает...
+    const glm::vec2 f = TilingFactor(r, glm::vec3(1.0f));
+    CHECK_NEAR(f.x, 6.0f, 1e-4f);
+    CHECK_NEAR(f.y, 6.0f, 1e-4f);
+
+    // ...и оно сохраняется: вернувшись к режиму «по осям», человек получает
+    // подобранную пару, а не единицу.
+    r.Tiling = MaterialRender::TilingMode::Separate;
+    const glm::vec2 s = TilingFactor(r, glm::vec3(1.0f));
+    CHECK_NEAR(s.x, 6.0f, 1e-4f);
+    CHECK_NEAR(s.y, 2.0f, 1e-4f);
+}
+
+TEST(material_world_size_tiling_keeps_the_tile_the_same_size) {
+    MaterialRender r;
+    r.Tiling = MaterialRender::TilingMode::WorldSize;
+    r.UVScaleX = 0.5f;   // пол-плитки на метр
+    r.UVScaleY = 0.5f;
+
+    // Пол 10 x 10 метров толщиной 0.2 — большие измерения X и Z.
+    const glm::vec2 floor = TilingFactor(r, glm::vec3(10.0f, 0.2f, 10.0f));
+    CHECK_NEAR(floor.x, 5.0f, 1e-4f);
+    CHECK_NEAR(floor.y, 5.0f, 1e-4f);
+
+    // Растянули пол вдвое — плитка осталась того же физического размера,
+    // то есть повторов стало вдвое больше. Ровно этого и нет у постоянного
+    // повтора: там растяжение объекта растягивает и рисунок.
+    const glm::vec2 wider = TilingFactor(r, glm::vec3(20.0f, 0.2f, 10.0f));
+    CHECK_NEAR(wider.x, 10.0f, 1e-4f);
+    CHECK_NEAR(wider.y, 5.0f, 1e-4f);
+
+    // Стена 10 x 5 толщиной 0.2 — большие измерения X и Y, и правило то же:
+    // «пол» и «стену» различать не приходится.
+    const glm::vec2 wall = TilingFactor(r, glm::vec3(10.0f, 5.0f, 0.2f));
+    CHECK_NEAR(wall.x, 5.0f, 1e-4f);
+    CHECK_NEAR(wall.y, 2.5f, 1e-4f);
+
+    // Сплющенный в ноль объект не даёт ни нуля, ни NaN: такое число ушло бы в
+    // шейдер и покрасило объект в чёрное.
+    const glm::vec2 flat = TilingFactor(r, glm::vec3(0.0f));
+    CHECK_TRUE(flat.x > 0.0f && flat.y > 0.0f);
+    CHECK_TRUE(flat.x == flat.x && flat.y == flat.y);   // не NaN
+}
+
+TEST(material_world_scale_comes_from_the_model_matrix) {
+    const glm::mat4 m = glm::scale(glm::rotate(glm::mat4(1.0f), 1.1f, glm::vec3(0, 1, 0)),
+                                   glm::vec3(3.0f, 1.0f, 7.0f));
+    const glm::vec3 s = WorldScaleOf(m);
+    // Поворот масштаб не меняет — иначе повтор «по размеру» ехал бы от одного
+    // только разворота объекта.
+    CHECK_NEAR(s.x, 3.0f, 1e-3f);
+    CHECK_NEAR(s.y, 1.0f, 1e-3f);
+    CHECK_NEAR(s.z, 7.0f, 1e-3f);
+}
+
+TEST(material_tiling_mode_is_written_as_a_name) {
+    // Числом режим в файл не пишется: вставка нового режима в середину списка
+    // переназначила бы уже сохранённые материалы.
+    MaterialRender::TilingMode mode = MaterialRender::TilingMode::Uniform;
+    CHECK_TRUE(TilingModeFromKey("worldSize", mode));
+    CHECK_TRUE(mode == MaterialRender::TilingMode::WorldSize);
+    CHECK_EQ(std::string(TilingModeKey(mode)), std::string("worldSize"));
+    // Опечатка не сбрасывает настройку молча.
+    CHECK_FALSE(TilingModeFromKey("worldsize", mode));
+    CHECK_TRUE(mode == MaterialRender::TilingMode::WorldSize);
+}

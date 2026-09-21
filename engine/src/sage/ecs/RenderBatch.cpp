@@ -565,7 +565,13 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             // Свёрнутое значение, а не it.Mat->Albedo: тон экземпляра обязан
             // работать и на текстурном пути (см. TexturedItem в заголовке).
             tex.SetVec3("uAlbedoFactor", it.Color);
-            tex.SetVec2("uUVScale", glm::vec2(it.Mat->Render.UVScaleX, it.Mat->Render.UVScaleY));
+            // Повтор считает ОБЩАЯ функция (Material.h): режимов у него три, и
+            // повторять их разбор у каждого прохода значило бы показывать одну
+            // и ту же стену с разным размером плитки в зависимости от того,
+            // каким путём её нарисовали.
+            tex.SetVec2("uUVScale", TilingFactor(it.Mat->Render, WorldScaleOf(it.Model)));
+            tex.SetVec2("uUVOffset",
+                        glm::vec2(it.Mat->Render.UVOffsetX, it.Mat->Render.UVOffsetY));
             tex.SetFloat("uMetallic", it.Mat->Metallic);
             tex.SetFloat("uRoughness", it.Mat->Roughness);
             tex.SetInt("uHasAlbedo", it.Mat->AlbedoTex ? 1 : 0);
@@ -694,7 +700,9 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 // остальных путях; см. TexturedItem в заголовке.
                 t.SetVec3("uAlbedoFactor", head.Inst.Color);
                 t.SetVec2("uUVScale",
-                          glm::vec2(head.Mat->Render.UVScaleX, head.Mat->Render.UVScaleY));
+                          TilingFactor(head.Mat->Render, WorldScaleOf(head.Inst.Model)));
+                t.SetVec2("uUVOffset",
+                          glm::vec2(head.Mat->Render.UVOffsetX, head.Mat->Render.UVOffsetY));
                 t.SetFloat("uMetallic", head.Mat->Metallic);
                 t.SetFloat("uRoughness", head.Mat->Roughness);
                 t.SetFloat("uOpacity", head.Inst.Alpha);

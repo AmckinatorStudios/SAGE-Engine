@@ -142,7 +142,20 @@ void ScriptEngine::RegisterComponentTypes() {
         // Повтор текстуры по развёртке: без него картинка на большом объекте
         // растягивается, и пол приходится собирать из тысяч плиток-объектов.
         "UVScaleX", &MaterialRender::UVScaleX,
-        "UVScaleY", &MaterialRender::UVScaleY
+        "UVScaleY", &MaterialRender::UVScaleY,
+        "UVOffsetX", &MaterialRender::UVOffsetX,
+        "UVOffsetY", &MaterialRender::UVOffsetY,
+        // Режим повтора — СТРОКОЙ: «uniform», «separate», «worldSize».
+        // Непонятный ключ не молчит и не сбрасывает настройку, а остаётся
+        // прежним значением: опечатка в скрипте не должна тихо менять вид.
+        "TilingMode", sol::property(
+                          [](const MaterialRender& r) {
+                              return std::string(::TilingModeKey(r.Tiling));
+                          },
+                          [](MaterialRender& r, const std::string& key) {
+                              MaterialRender::TilingMode mode = r.Tiling;
+                              if (::TilingModeFromKey(key, mode)) r.Tiling = mode;
+                          })
     );
     m_lua.new_usertype<Material>("Material",
         "Albedo", &Material::Albedo,

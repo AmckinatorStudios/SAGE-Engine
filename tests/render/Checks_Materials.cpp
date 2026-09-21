@@ -395,6 +395,66 @@ void TestAlbedoMapAndTiling(FrameRenderer& r) {
     Check(e1 > 1.0, "карта альбедо видна на объекте");
     Check(e6 > e1 * 1.5, "повтор текстуры (UVScale) доходит до шейдера");
 
+    // --- ОБЩИЙ РЕЖИМ: одно число на обе оси ---------------------------------
+    // Второе поле при этом не участвует вовсе — именно за этим режим и нужен:
+    // у песка и штукатурки направления нет, и следить за двумя числами,
+    // которые обязаны совпадать, не за чем.
+    material->Render.Tiling = MaterialRender::TilingMode::Uniform;
+    material->Render.UVScaleX = 6.0f;
+    material->Render.UVScaleY = 1.0f;   // намеренно другое
+    const double eUniform = edges(Shot(r, *scene));
+    std::printf("       кромок: общий режим %.2f (раздельный 6/6 — %.2f)\n", eUniform, e6);
+    Check(std::fabs(eUniform - e6) < e6 * 0.25,
+          "общий режим укладывает по обеим осям, а не по одной");
+
+    // --- ПО РАЗМЕРУ ОБЪЕКТА: повторов НА МЕТР -------------------------------
+    // Плоскость 6 x 6 метров при «одном повторе на метр» обязана выглядеть так
+    // же, как постоянный повтор 6, — то есть плитка становится свойством МИРА,
+    // а не развёртки. Ради этого режим и нужен: растянутый пол больше не надо
+    // перенастраивать.
+    material->Render.Tiling = MaterialRender::TilingMode::WorldSize;
+    material->Render.UVScaleX = material->Render.UVScaleY = 1.0f;
+    const double eWorld = edges(Shot(r, *scene));
+    std::printf("       кромок: по размеру объекта %.2f\n", eWorld);
+    Check(std::fabs(eWorld - e6) < e6 * 0.25,
+          "режим «по размеру объекта» считает повтор от масштаба в мире");
+
+    // И растяжение объекта НЕ растягивает плитку: вдвое больший пол получает
+    // вдвое больше повторов. У постоянного повтора здесь было бы одно и то же
+    // число кромок на объект, то есть вдвое более крупная плитка.
+    ball.GetTransform().Scale = {12.0f, 1.0f, 12.0f};
+    const double eWorldBig = edges(Shot(r, *scene));
+    material->Render.Tiling = MaterialRender::TilingMode::Separate;
+    material->Render.UVScaleX = material->Render.UVScaleY = 6.0f;
+    const double eFixedBig = edges(Shot(r, *scene));
+    std::printf("       кромок на большом полу: по размеру %.2f, постоянный повтор %.2f\n",
+                eWorldBig, eFixedBig);
+    Check(eWorldBig > eFixedBig * 1.3,
+          "растянутый объект не растягивает плитку в режиме «по размеру»");
+    ball.GetTransform().Scale = {6.0f, 1.0f, 6.0f};
+
+    // --- СДВИГ РАЗВЁРТКИ ----------------------------------------------------
+    // Сдвиг на ПОЛПЛИТКИ меняет картинку: клетки шахматки встают на место
+    // соседних. Мерится доля светлого — она у шахматки одна и та же, поэтому
+    // сравниваем конкретный участок, а не среднее по кадру.
+    material->Render.Tiling = MaterialRender::TilingMode::Separate;
+    material->Render.UVScaleX = material->Render.UVScaleY = 4.0f;
+    material->Render.UVOffsetX = material->Render.UVOffsetY = 0.0f;
+    const Image before = Shot(r, *scene);
+    material->Render.UVOffsetX = 0.125f;   // половина клетки при четырёх повторах
+    const Image after = Shot(r, *scene);
+    // Кадры сравниваются ПОПИКСЕЛЬНО, а не по средней яркости: у шахматки доля
+    // светлого от сдвига не меняется вовсе, поэтому среднее одинаково и при
+    // работающем сдвиге, и при полностью потерянном.
+    double diff = 0.0;
+    const size_t n = std::min(before.Pixels.size(), after.Pixels.size());
+    for (size_t i = 0; i < n; ++i)
+        diff += std::abs((int)before.Pixels[i] - (int)after.Pixels[i]);
+    diff = n ? diff / (double)n : 0.0;
+    std::printf("       сдвиг развёртки: средняя разница кадров %.2f\n", diff);
+    Check(diff > 3.0, "сдвиг развёртки (UVOffset) доходит до шейдера");
+    material->Render.UVOffsetX = 0.0f;
+
     ResourceManager::Instance().Clear();
     fs::remove_all(dir, ec);
 }

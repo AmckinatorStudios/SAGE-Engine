@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1872.
+// Язык: Русский. Строк: 1879.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1526,6 +1526,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "С какой силой персонаж толкает динамические тела"},
     {"How it fits",
      "Как ложится"},
+    {"How many times the texture repeats across the UV.\nWithout it a picture on a large object is stretched over its whole length.",
+     "Сколько раз текстура укладывается по развёртке.\nБез повтора картинка на большом объекте растянута на всю его длину."},
     {"How many times the texture repeats across the UV: X and Y.\nWithout it a picture on a large object is stretched over its whole length.",
      "Сколько раз текстура укладывается по развёртке: по X и по Y.\nБез повтора картинка на большом объекте растягивается на всю его длину."},
     {"How tall a step the character climbs without jumping",
@@ -2246,6 +2248,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Приостановить"},
     {"Per axis",
      "По осям"},
+    {"Per object size",
+     "По размеру объекта"},
     {"Per-frame numbers swing by tens of percent because of the OS scheduler.\nThe 30-frame average is what you actually read.\n\nGPU time lags three frames behind: asking for it right away means waiting\nfor the card, that is, creating the delay you are measuring.",
      "Покадровые значения скачут на десятки процентов от планировщика ОС.\nУсреднение по 30 кадрам — то, по чему и смотрят.\n\nВремя GPU отстаёт на три кадра: спросить его сразу значит дождаться\nвидеокарты, то есть своим измерением создать измеряемую задержку."},
     {"Perspective",
@@ -2594,6 +2598,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Повторить"},
     {"Repeat is the only right answer for pixel art and patterns:\nan ornament of 16 pixels stretched to 300 turns to mush.",
      "Повтор — единственный правильный ответ для пиксель-арта и узоров:\nорнамент из 16 пикселей, растянутый на 300, превращается в мыло."},
+    {"Repeats per metre of the object's two larger sides.",
+     "Повторов на метр по двум большим сторонам объекта."},
     {"Replace this object's mesh",
      "Заменить меш этого объекта"},
     {"Replaces the element parts with the preset ones",
@@ -2864,6 +2870,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Общие"},
     {"Sheet: %d x %d px",
      "Лист: %d x %d пикс."},
+    {"Shifts the texture in tiles: a seam landing in the middle\nof a wall is cheaper to move than to re-model.",
+     "Сдвигает текстуру в плитках: шов посреди стены дешевле подвинуть,\nчем переделывать геометрию."},
     {"Short hot flecks: grinding, shorts",
      "Короткие горячие крупинки: шлифовка, замыкание"},
     {"Show",
@@ -3352,6 +3360,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Замостить"},
     {"Tiling",
      "Повтор текстуры"},
+    {"Tiling mode",
+     "Режим повтора"},
     {"Time",
      "Время"},
     {"Time of day = rotation of the object \"%s\"",
@@ -3440,6 +3450,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Отменить"},
     {"Undo (Ctrl+Z)",
      "Отменить (Ctrl+Z)"},
+    {"Uniform",
+     "Общий"},
+    {"Uniform — one number for both axes.\nPer axis — width and height apart (planks, brickwork).\nPer object size — repeats PER METRE: the tile keeps its\nphysical size however the object is scaled.",
+     "Общий — одно число на обе оси.\nПо осям — ширина и высота отдельно (доски, кладка).\nПо размеру объекта — повторов НА МЕТР: плитка остаётся одного\nфизического размера, как бы объект ни масштабировали."},
     {"Units per second; 0 — jump straight to the value",
      "Единиц в секунду; 0 — сразу к значению"},
     {"Unknown effect",
