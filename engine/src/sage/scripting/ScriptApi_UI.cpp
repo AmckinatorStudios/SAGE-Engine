@@ -287,7 +287,19 @@ void ScriptEngine::RegisterUIApi() {
         // такая же обычная просьба, как в редакторе.
         "Font", UI_FIELD(sage::ui::Label, Font),
         "FontPixelHeight", UI_FIELD(sage::ui::Label, FontPixelHeight),
-        "FontPixelArt", UI_FIELD(sage::ui::Label, FontPixelArt),
+        // Фильтрация строкой: "smooth" или "nearest". Движок не знает жанра
+        // «пиксель-арт», он знает ближайшего соседа (см. TextureFiltering).
+        "FontFilter", sol::property(
+                          [](UIRef& r) {
+                              const sage::ui::Label* l = r.Peek<sage::ui::Label>();
+                              return std::string(l && l->Sharp() ? "nearest" : "smooth");
+                          },
+                          [](UIRef& r, const std::string& mode) {
+                              if (!r.Alive()) return;
+                              r.Part<sage::ui::Label>().FontFiltering =
+                                  mode == "nearest" ? sage::ui::TextureFiltering::Nearest
+                                                    : sage::ui::TextureFiltering::Smooth;
+                          }),
         "Bold", sol::property([](UIRef& r) {
                                   const sage::ui::Label* l = r.Peek<sage::ui::Label>();
                                   return l && (l->Face == sage::ui::Label::Style::Bold ||
@@ -328,7 +340,17 @@ void ScriptEngine::RegisterUIApi() {
         "SpritePressed", UI_FIELD(sage::ui::Image, SpritePressed),
         "SliceBorder", UI_FIELD(sage::ui::Image, SliceBorder),
         "PixelScale", UI_FIELD(sage::ui::Image, PixelScale),
-        "PixelArt", UI_FIELD(sage::ui::Image, PixelArt),
+        "Filter", sol::property(
+                      [](UIRef& r) {
+                          const sage::ui::Image* im = r.Peek<sage::ui::Image>();
+                          return std::string(im && im->Sharp() ? "nearest" : "smooth");
+                      },
+                      [](UIRef& r, const std::string& mode) {
+                          if (!r.Alive()) return;
+                          r.Part<sage::ui::Image>().Filtering =
+                              mode == "nearest" ? sage::ui::TextureFiltering::Nearest
+                                                : sage::ui::TextureFiltering::Smooth;
+                      }),
         // Полоса и значок.
         "BarFillColor", UI_FIELD(sage::ui::Bar, FillColor),
         "Icon", UI_FIELD(sage::ui::Icon, Name),
@@ -437,11 +459,15 @@ void ScriptEngine::RegisterUIApi() {
     // загрузить надо с правильной фильтрацией — из скрипта об этом помнить
     // незачем.
     Bind("ui", "SetImage", "SetUIImage", [](GameObject& obj, const std::string& path,
-                                        sol::optional<bool> pixelArt) {
+                                        sol::optional<bool> sharp) {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
         im.Path = path;
-        im.PixelArt = pixelArt.value_or(false);
+        // Второй аргумент — РЕЗКАЯ ли фильтрация (ближайший сосед). Прежде он
+        // назывался «пиксель-арт», то есть обещал знание о жанре картинки,
+        // которого у движка нет.
+        im.Filtering = sharp.value_or(false) ? sage::ui::TextureFiltering::Nearest
+                                             : sage::ui::TextureFiltering::Smooth;
         // "rt:<имя>" — картинка, которую движок рисует сам (см. render/
         // RenderTexture.h). Проверяется ПЕРЕД диском: иначе объёмная иконка
         // искалась бы файлом, не находилась и молча становилась заглушкой.
@@ -449,7 +475,7 @@ void ScriptEngine::RegisterUIApi() {
             im.Tex = rt;
         } else {
             im.Tex = path.empty() ? nullptr
-                     : im.PixelArt
+                     : im.Sharp()
                          ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
                          : ResourceManager::Instance().GetTexture(path);
         }

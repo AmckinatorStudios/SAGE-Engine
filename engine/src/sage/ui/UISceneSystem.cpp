@@ -41,7 +41,7 @@ glm::vec2 MeasuredWidth(const entt::registry& reg, entt::entity e, glm::vec2 siz
     if (!label->Text.empty() && label->Color.a > 0.0f) {
         UITextStyle style;
         if (!label->Font.empty())
-            style.UseFont = ui.LoadFont(label->Font, label->FontPixelHeight, label->FontPixelArt);
+            style.UseFont = ui.LoadFont(label->Font, label->FontPixelHeight, label->Sharp());
         style.Bold = label->Face == Label::Style::Bold || label->Face == Label::Style::BoldItalic;
         style.Italic = label->Face == Label::Style::Italic || label->Face == Label::Style::BoldItalic;
         w += ui.MeasureText(label->Text, label->Scale, style);

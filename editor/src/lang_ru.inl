@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1879.
+// Язык: Русский. Строк: 1883.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1270,6 +1270,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Плёнка"},
     {"Film Grain",
      "Зерно плёнки"},
+    {"Filtering",
+     "Фильтрация"},
     {"Find",
      "Найти"},
     {"Find (Enter for next)",
@@ -1328,6 +1330,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Размер запекания шрифта"},
     {"Font file",
      "Файл шрифта"},
+    {"Font filtering",
+     "Фильтрация шрифта"},
     {"Font size",
      "Размер шрифта"},
     {"Fonts",
@@ -1916,6 +1920,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Имя, которое спрашивает игра, вместо номера сущности"},
     {"Near",
      "Ближняя плоскость"},
+    {"Nearest",
+     "Ближайший сосед"},
     {"Needs a %s",
      "Нужен: %s"},
     {"Needs a Rigid Body; only the Jolt backend simulates joints",
@@ -2944,6 +2950,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Медленный серый шлейф"},
     {"Smoke",
      "Дым"},
+    {"Smooth",
+     "Сглаженная"},
     {"Smoothing",
      "Сглаживание"},
     {"Smoothing, sec",

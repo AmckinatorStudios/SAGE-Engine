@@ -47,9 +47,29 @@ std::string HumanSize(uintmax_t bytes);
 // ответ добывался открыванием файла. Превью показывает ту же картинку в
 // шесть-семь раз крупнее и подписывает то, что по ней не прочитать.
 //
+// ОТКУДА БРАТЬ КАРТИНКУ ПРЕВЬЮ. Отдельным ответом, а не ветками внутри
+// отрисовки: «у одних файлов превью есть, у других нет» — это и была жалоба,
+// и проверять такое надо по решению, а не по кадру.
+//
+//   Image      — файл сам себе обложка (.png и прочие картинки);
+//   SceneCover — снимок сцены рядом с проектом (.sage);
+//   Rendered   — обложку надо СНЯТЬ (материал, модель, префаб);
+//   Icon       — обложки не бывает (скрипт, звук, шрифт, папка) — значок типа.
+enum class PreviewSource { Image, SceneCover, Rendered, Icon };
+PreviewSource SourceOf(const std::filesystem::path& full, bool isDir, bool hasPreview,
+                       const std::filesystem::path& projectDir);
+
+// Площадка превью — ПОСТОЯННАЯ И КВАДРАТНАЯ, картинка вписывается в неё по
+// своим пропорциям: раньше размер окошка задавала сама картинка, и оно прыгало
+// от файла к файлу (панорама — лента, иконка 32x32 — квадратик), а два файла
+// нельзя было сравнить, потому что показаны они в разном масштабе.
+//
 // preview — кэш съёмок редактора для материала, модели и префаба (nullptr —
 // показать только картинки и подпись).
+// projectDir — папка проекта: по ней находится снимок сцены (.sage). Пусто —
+// сцена получит значок типа, как и всё, у чего обложки нет.
 void DrawHoverPreview(const std::filesystem::path& full, bool isDir, const std::string& name,
-                      uintmax_t bytes, AssetPreview* preview);
+                      uintmax_t bytes, AssetPreview* preview,
+                      const std::filesystem::path& projectDir = {});
 
 } // namespace sage::editor::covers

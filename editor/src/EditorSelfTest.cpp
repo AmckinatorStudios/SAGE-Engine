@@ -323,7 +323,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4782,6 +4782,43 @@ bool EditorLayer::SelfTestSelection() {
             if (fh <= 0.0f || std::fabs(fw / fh - 4.0f) > 0.05f || fw > 100.5f) {
                 LOG_ERROR("Editor") << "SELFTEST: обложка 64x16 вписана не по пропорциям (" << fw
                                     << "x" << fh << ")";
+                ok = false;
+            }
+        }
+
+        // И ПРЕВЬЮ ПОД КУРСОРОМ ЕСТЬ У КАЖДОГО ФАЙЛА. Жалоба: «показываются не
+        // все». Так и было: картинка показывалась сама собой, материал и
+        // модель — съёмкой, а сцена, скрипт, звук и шрифт не показывали
+        // ничего — пустая подсказка с одним именем. Обложки у них разные (у
+        // сцены — свой снимок, у остальных — значок типа), но ответ обязан
+        // быть у всех.
+        if (ok) {
+            namespace covers = sage::editor::covers;
+            using Src = covers::PreviewSource;
+            const fs::path scenePath = root / "level.sage";
+            { std::ofstream f(scenePath); f << "{}"; }
+            struct Case { fs::path Path; Src Want; const char* Why; };
+            const Case cases[] = {
+                {wide, Src::Image, "картинка — сама себе обложка"},
+                {root / "hero.sagemat", Src::Rendered, "материал снимается"},
+                {root / "hero.sageprefab", Src::Rendered, "префаб снимается"},
+                {scenePath, Src::Icon, "сцена без снимка — значок, а не пустота"},
+                {root / "hero.lua", Src::Icon, "скрипт — значок типа"},
+                {root / "step.wav", Src::Icon, "звук — значок типа"},
+                {root / "pixel.ttf", Src::Icon, "шрифт — значок типа"},
+            };
+            for (const Case& c : cases) {
+                const Src got = covers::SourceOf(c.Path, /*isDir=*/false, /*hasPreview=*/true,
+                                                 root);
+                if (got != c.Want) {
+                    LOG_ERROR("Editor") << "SELFTEST: превью ассета — не тот источник ("
+                                        << c.Why << ")";
+                    ok = false;
+                }
+            }
+            // Папка — тоже ответ, а не пустота.
+            if (ok && covers::SourceOf(root, /*isDir=*/true, true, root) != Src::Icon) {
+                LOG_ERROR("Editor") << "SELFTEST: у папки нет превью";
                 ok = false;
             }
         }

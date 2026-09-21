@@ -128,6 +128,10 @@ const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Re
 // Три режима картинки. Имена — про то, ЧТО СТАНЕТ С КАРТИНКОЙ, а не про
 // механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
 // говорит всё.
+// Фильтрация — общий список на картинку и на шрифт: настройка одна и та же,
+// и два разных набора подписей для неё разошлись бы на первой же правке.
+const char* const kImageFilterNames[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest")};
+
 const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("9-slice"),
                                        SAGE_UI_TEXT("Tile"), SAGE_UI_TEXT("Keep aspect"),
                                        SAGE_UI_TEXT("Fill, keep aspect")};
@@ -165,8 +169,13 @@ const std::vector<PartField>& ImageFields() {
          nullptr, 0, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
         {"pixelScale", SAGE_UI_TEXT("Pixel scale"), PartField::Kind::Float, offsetof(Image, PixelScale), 0.0f,
          16.0f, "0 picks it automatically."},
-        {"pixelArt", SAGE_UI_TEXT("Pixel art"), PartField::Kind::Bool, offsetof(Image, PixelArt), 0.0f, 1.0f,
-         "Nearest neighbour and no mipmaps."},
+        {"filter", SAGE_UI_TEXT("Filtering"), PartField::Kind::Enum, offsetof(Image, Filtering),
+         0.0f, 1.0f,
+         "Smooth — averaging with mipmaps, for anything that gets scaled down.\n"
+         "Nearest — sharp texels, no mipmaps and a whole-number scale: what a\n"
+         "picture drawn texel by texel needs, and what any small icon that must\n"
+         "stay crisp needs too.",
+         kImageFilterNames, 2},
         {"spriteHover", SAGE_UI_TEXT("Sprite on hover"), PartField::Kind::Vec4, offsetof(Image, SpriteHover),
          0.0f, 4096.0f},
         {"spritePressed", SAGE_UI_TEXT("Sprite when pressed"), PartField::Kind::Vec4, offsetof(Image, SpritePressed),
@@ -221,7 +230,7 @@ void DrawImagePart(const PartDrawContext& c) {
                 const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
                 pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
             }
-            if (img.PixelArt) pixels = std::max(1.0f, std::floor(pixels));
+            if (img.Sharp()) pixels = std::max(1.0f, std::floor(pixels));
         }
         ui.ImageSliced(r.x, r.y, r.w, r.h, img.Tex.get(), src, slice, pixels, rgb, alpha);
         return;
@@ -244,7 +253,7 @@ void DrawImagePart(const PartDrawContext& c) {
     if (img.Fit == Image::Mode::Fit || img.Fit == Image::Mode::Cover) {
         const ImagePlacement fit =
             PlaceImage(r, src.Whole() ? 0.0f : src.X, src.Whole() ? 0.0f : src.Y, srcW, srcH,
-                       img.Fit == Image::Mode::Cover, img.PixelArt);
+                       img.Fit == Image::Mode::Cover, img.Sharp());
         dst = fit.Dst;
         drawn = {fit.SrcX, fit.SrcY, fit.SrcW, fit.SrcH};
         ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, img.Tex.get(), drawn, rgb, alpha);
@@ -255,13 +264,13 @@ void DrawImagePart(const PartDrawContext& c) {
     // разный дробный масштаб по осям даёт рваные края. Берём ЦЕЛЫЙ масштаб и
     // ставим по центру: элемент может остаться больше картинки, и это честнее.
     float pixels = img.PixelScale * c.Scale;
-    if (img.PixelArt || pixels > 0.0f) {
+    if (img.Sharp() || pixels > 0.0f) {
         const float sw = srcW;
         const float sh = srcH;
         if (sw > 0.0f && sh > 0.0f) {
             if (pixels <= 0.0f) {
                 pixels = std::min(r.w / sw, r.h / sh);
-                if (img.PixelArt) pixels = std::max(1.0f, std::floor(pixels));
+                if (img.Sharp()) pixels = std::max(1.0f, std::floor(pixels));
             }
             dst.w = sw * pixels;
             dst.h = sh * pixels;
@@ -385,11 +394,12 @@ const std::vector<PartField>& LabelFields() {
          offsetof(Label, FontPixelHeight), 8.0f, 256.0f,
          "How tall glyphs are baked into the atlas. Bigger is sharper at large\n"
          "sizes and costs more texture memory."},
-        {"fontPixelArt", SAGE_UI_TEXT("Pixel font"), PartField::Kind::Bool,
-         offsetof(Label, FontPixelArt), 0.0f, 1.0f,
+        {"fontFilter", SAGE_UI_TEXT("Font filtering"), PartField::Kind::Enum,
+         offsetof(Label, FontFiltering), 0.0f, 1.0f,
          "Nearest neighbour, no mipmaps and a whole-number scale: a fractional\n"
          "one stretches some strokes of a letter over two screen pixels and the\n"
-         "neighbouring ones over one, and the text goes wavy."},
+         "neighbouring ones over one, and the text goes wavy.",
+         kImageFilterNames, 2},
         {"horizontal", SAGE_UI_TEXT("Horizontal"), PartField::Kind::Enum, offsetof(Label, Horizontal), 0.0f,
          0.0f, nullptr, kAlign, 3},
         {"vertical", SAGE_UI_TEXT("Vertical"), PartField::Kind::Enum, offsetof(Label, Vertical), 0.0f, 0.0f,
@@ -413,7 +423,7 @@ const std::vector<PartField>& LabelFields() {
 UITextStyle StyleOf(const Label& label, UIRenderer& ui) {
     UITextStyle style;
     if (!label.Font.empty())
-        style.UseFont = ui.LoadFont(label.Font, label.FontPixelHeight, label.FontPixelArt);
+        style.UseFont = ui.LoadFont(label.Font, label.FontPixelHeight, label.Sharp());
     style.Bold = label.Face == Label::Style::Bold || label.Face == Label::Style::BoldItalic;
     style.Italic = label.Face == Label::Style::Italic || label.Face == Label::Style::BoldItalic;
     return style;

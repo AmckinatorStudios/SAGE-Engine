@@ -319,9 +319,9 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
         if (ui::Image* im = reg.try_get<ui::Image>(e)) {
             im->Tex = im->Path.empty()
                           ? nullptr
-                          : (im->PixelArt ? ResourceManager::Instance().GetTexture(
-                                                im->Path, TextureFilter::Nearest, false)
-                                          : ResourceManager::Instance().GetTexture(im->Path));
+                          : (im->Sharp() ? ResourceManager::Instance().GetTexture(
+                                               im->Path, TextureFilter::Nearest, false)
+                                         : ResourceManager::Instance().GetTexture(im->Path));
         }
     }
 }

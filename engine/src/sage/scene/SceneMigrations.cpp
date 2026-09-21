@@ -586,6 +586,31 @@ void MigrateV12toV13(json& root) {
     for (json& iface : added) root["objects"].push_back(std::move(iface));
 }
 
+// v13 -> v14: «пиксель-арт» стал ФИЛЬТРАЦИЕЙ.
+//
+// Движок не знает и не может знать, нарисована картинка по пикселям или снята
+// фотоаппаратом: он знает, ближайшего соседа брать или сглаживание. Галка
+// называлась жанром и потому обещала знание, которого нет, — а заодно мешала
+// включить резкость там, где «пиксель-арт» звучит неправдой (мелкая иконка,
+// которую надо показать чёткой). Старое true — это и есть Nearest.
+void MigrateV13toV14(json& root) {
+    if (!root.contains("objects")) return;
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui")) continue;
+        json& uj = obj["ui"];
+        if (uj.contains("image") && uj["image"].contains("pixelArt")) {
+            const bool sharp = uj["image"].value("pixelArt", false);
+            uj["image"]["filter"] = sharp ? 1 : 0;   // TextureFiltering::Nearest / Smooth
+            uj["image"].erase("pixelArt");
+        }
+        if (uj.contains("label") && uj["label"].contains("fontPixelArt")) {
+            const bool sharp = uj["label"].value("fontPixelArt", false);
+            uj["label"]["fontFilter"] = sharp ? 1 : 0;
+            uj["label"].erase("fontPixelArt");
+        }
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -599,6 +624,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV10toV11,
     &MigrateV11toV12,
     &MigrateV12toV13,
+    &MigrateV13toV14,
 };
 
 } // namespace

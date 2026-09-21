@@ -2090,11 +2090,11 @@ TEST(ui_image_texture_is_stale_when_the_path_changed) {
     img.Path = "b.png";
     CHECK_TRUE(sage::ui::ImageTextureStale(img));
 
-    // Пиксель-арт меняет фильтр и мипмапы, то есть САМУ текстуру, а не то, как
-    // её рисуют: её тоже надо перечитать.
+    // Смена фильтрации меняет фильтр и мипмапы, то есть САМУ текстуру, а не
+    // то, как её рисуют: её тоже надо перечитать.
     img.TexPath = "b.png";
     CHECK_FALSE(sage::ui::ImageTextureStale(img));
-    img.PixelArt = true;
+    img.Filtering = sage::ui::TextureFiltering::Nearest;
     CHECK_TRUE(sage::ui::ImageTextureStale(img));
 }
 
@@ -2220,7 +2220,7 @@ TEST(ui_label_keeps_its_font_and_face_through_save_and_load) {
     label.Font = "assets/fonts/pixel.ttf";
     label.Face = sage::ui::Label::Style::BoldItalic;
     label.FontPixelHeight = 96.0f;
-    label.FontPixelArt = true;
+    label.FontFiltering = sage::ui::TextureFiltering::Nearest;
     label.Scale = 48.0f;    // кегль, который прежнее ограничение не пропускало
     label.PadX = 200.0f;    // и отступ, которого тоже было не задать
     scene.Registry().emplace<sage::ui::Label>(e.Entity(), label);
@@ -2237,7 +2237,7 @@ TEST(ui_label_keeps_its_font_and_face_through_save_and_load) {
     CHECK_EQ(back->Font, std::string("assets/fonts/pixel.ttf"));
     CHECK_TRUE(back->Face == sage::ui::Label::Style::BoldItalic);
     CHECK_NEAR(back->FontPixelHeight, 96.0f, 1e-3f);
-    CHECK_TRUE(back->FontPixelArt);
+    CHECK_TRUE(back->Sharp());
     CHECK_NEAR(back->Scale, 48.0f, 1e-3f);
     CHECK_NEAR(back->PadX, 200.0f, 1e-3f);
 }
