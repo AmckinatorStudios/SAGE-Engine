@@ -32,6 +32,9 @@
 #include "sage/ui/components/Layout.h"
 #include "sage/ui/components/Visual.h"
 
+#include <filesystem>
+#include <system_error>
+
 namespace sage::rendertest {
 namespace {
 
@@ -331,6 +334,104 @@ void CheckLabelUsesItsOwnFontFile(UIRenderer& ui) {
           "высота запекания меняет чёткость, а не кегль");
 }
 
+// --- Фильтрация картинки: меняет РЕЗКОСТЬ, а не размер ----------------------
+//
+// Жалоба: «фильтрация не работает — ничего не меняется, только картинка на
+// пиксель меньше становится». Так и было: резкость съедал общий кэш текстур
+// (см. кадровые проверки текстур), а единственным видимым следствием
+// переключателя оставалось округление масштаба до целого, которое включалось
+// заодно. Проверяем обе стороны развязки: резкость меняется, размер — нет.
+void CheckFilteringChangesSharpnessNotSize(UIRenderer& ui) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "sage_ui_filter";
+    fs::create_directories(dir, ec);
+    const fs::path file = dir / "tiny.png";
+    // Шахматка 4x4 из очень крупных клеток: увеличенная до элемента, она
+    // показывает разницу фильтраций в чистом виде — сглаживание размывает
+    // границы клеток, ближайший сосед оставляет их ступенькой.
+    {
+        Image tiny;
+        tiny.Width = tiny.Height = 4;
+        tiny.Pixels.assign((size_t)4 * 4 * 3, 0);
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 4; ++x) {
+                const size_t i = ((size_t)y * 4 + x) * 3;
+                const unsigned char v = ((x + y) % 2) ? 245 : 20;
+                tiny.Pixels[i] = tiny.Pixels[i + 1] = tiny.Pixels[i + 2] = v;
+            }
+        }
+        if (!SavePng(file.string(), tiny)) {
+            std::printf("    не удалось записать картинку — проверка пропущена\n");
+            CountFail();
+            return;
+        }
+    }
+
+    auto shot = [&](sage::ui::TextureFiltering filtering) {
+        Scene scene("filter");
+        GameObject e = Screen(scene, "Pic", {160.0f, 160.0f});
+        sage::ui::Image img;
+        img.Path = file.string();
+        img.Filtering = filtering;
+        scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+        return RenderUI(ui, scene);
+    };
+
+    const Image smooth = shot(sage::ui::TextureFiltering::Smooth);
+    const Image sharp = shot(sage::ui::TextureFiltering::Nearest);
+
+    // Полутона: пиксели, которые не чёрные и не белые, — это и есть размытые
+    // границы клеток. У ближайшего соседа их почти нет.
+    auto midtones = [](const Image& img) {
+        int mid = 0, total = 0;
+        for (int y = 4; y < 156; ++y) {
+            for (int x = 4; x < 156; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                const int v = img.Pixels[i];
+                ++total;
+                if (v > 60 && v < 200) ++mid;
+            }
+        }
+        return total ? (double)mid / total : 0.0;
+    };
+    const double midSmooth = midtones(smooth);
+    const double midSharp = midtones(sharp);
+    std::printf("    фильтрация: полутонов при сглаживании %.3f, при ближайшем соседе %.3f\n",
+                midSmooth, midSharp);
+    Check(midSmooth > midSharp * 2.0 + 0.01, "фильтрация меняет резкость картинки");
+
+    // А РАЗМЕР — НЕ МЕНЯЕТ. Закрашенная площадь у обоих кадров одна и та же:
+    // округление масштаба переехало в свою настройку («Кратный масштаб»).
+    const double coverSmooth = Covered(smooth, 0, 0, 160, 160);
+    const double coverSharp = Covered(sharp, 0, 0, 160, 160);
+    std::printf("    фильтрация: закрашено %.3f и %.3f\n", coverSmooth, coverSharp);
+    Check(std::fabs(coverSmooth - coverSharp) < 0.02, "фильтрация не меняет размер картинки");
+
+    // И ТО ЖЕ САМОЕ — У ФАЙЛА С ПРОБЕЛАМИ И КИРИЛЛИЦЕЙ В ИМЕНИ. Наборы
+    // спрайтов приезжают именно такими («Basic Charakter Spritesheet.png»), и
+    // проверять картинку только на «tiny.png» значит не проверять тот случай,
+    // с которым к движку и приходят.
+    const fs::path spaced = dir / "Набор спрайтов 16x16.png";
+    {
+        std::error_code copyEc;
+        fs::copy_file(file, spaced, fs::copy_options::overwrite_existing, copyEc);
+        if (!copyEc) {
+            Scene scene("spaced");
+            GameObject e = Screen(scene, "Pic", {160.0f, 160.0f});
+            sage::ui::Image img;
+            img.Path = spaced.string();
+            img.Filtering = sage::ui::TextureFiltering::Nearest;
+            scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+            const double cover = Covered(RenderUI(ui, scene), 0, 0, 160, 160);
+            std::printf("    имя с пробелами и кириллицей: закрашено %.3f\n", cover);
+            Check(cover > 0.9, "картинка из файла с пробелами в имени рисуется");
+        }
+    }
+
+    fs::remove_all(dir, ec);
+}
+
 } // namespace
 
 void RunUIChecks() {
@@ -343,6 +444,7 @@ void RunUIChecks() {
     CheckHudDemoDraws(ui);
     CheckFaceMakesTextBolderAndSlanted(ui);
     CheckLabelUsesItsOwnFontFile(ui);
+    CheckFilteringChangesSharpnessNotSize(ui);
 }
 
 } // namespace sage::rendertest

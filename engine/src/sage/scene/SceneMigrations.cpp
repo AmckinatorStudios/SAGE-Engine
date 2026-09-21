@@ -611,6 +611,26 @@ void MigrateV13toV14(json& root) {
     }
 }
 
+// v14 -> v15: КРАТНЫЙ МАСШТАБ отделён от фильтрации.
+//
+// Целый масштаб («не растягивать пиксель исходника дробно») включался заодно с
+// резкой фильтрацией. Это разные вопросы: один про то, чем сглаживать, другой
+// — можно ли рисовать пиксель исходника дробным числом экранных. Пока они были
+// одним флагом, смена фильтрации ВИДИМО меняла только размер картинки — «стала
+// на пиксель меньше», — а резкость оставалась прежней.
+//
+// Вид уже собранных экранов менять нельзя, поэтому у всего, что было резким,
+// кратный масштаб включается: ровно так эти элементы и выглядели.
+void MigrateV14toV15(json& root) {
+    if (!root.contains("objects")) return;
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui") || !obj["ui"].contains("image")) continue;
+        json& im = obj["ui"]["image"];
+        if (im.contains("snapPixels")) continue;
+        im["snapPixels"] = im.value("filter", 0) == 1;   // 1 — Nearest
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -625,6 +645,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV11toV12,
     &MigrateV12toV13,
     &MigrateV13toV14,
+    &MigrateV14toV15,
 };
 
 } // namespace

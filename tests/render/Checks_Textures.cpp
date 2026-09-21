@@ -259,6 +259,45 @@ void TestMaterialTexturesUseAnisotropy(const std::string& texture) {
     ResourceManager::Instance().Clear();
 }
 
+// --- ОДИН ФАЙЛ, ДВЕ ФИЛЬТРАЦИИ ----------------------------------------------
+//
+// Жалоба: «фильтрация не работает, ничего не меняется». Так и было, причём по
+// причине, которую в самой настройке не увидеть: кэш держал ОДНУ картинку на
+// файл, а фильтрация была её состоянием. Набор спрайтов, показанный элементом
+// интерфейса с Nearest и тут же слотом ассета со сглаживанием, перекидывался
+// туда-обратно каждый кадр; чтобы не заливать текстуру дважды за кадр, после
+// двух перекидываний настройка ЗАМОРАЖИВАЛАСЬ на той, что уже на видеокарте.
+// Дальше переключатель фильтрации не делал ничего.
+void TestTwoFiltersOfOneFileCoexist(const std::string& texture) {
+    ResourceManager& rm = ResourceManager::Instance();
+    rm.Clear();
+
+    std::shared_ptr<Texture> smooth = rm.GetTexture(texture, TextureFilter::Trilinear, true);
+    std::shared_ptr<Texture> sharp = rm.GetTexture(texture, TextureFilter::Nearest, false);
+    Check(smooth && sharp, "обе картинки загрузились");
+    if (!smooth || !sharp) { rm.Clear(); return; }
+    Check(smooth.get() != sharp.get(), "разные настройки выборки — разные картинки");
+    Check(smooth->Filter() == TextureFilter::Trilinear, "сглаженная осталась сглаженной");
+    Check(sharp->Filter() == TextureFilter::Nearest, "резкая осталась резкой");
+
+    // И это не «работает один раз»: раньше замораживало ровно на третьем
+    // обращении, поэтому спрашиваем по кругу — как и делает редактор, где
+    // элемент и слот ассета просят одну картинку каждый кадр.
+    for (int i = 0; i < 5; ++i) {
+        smooth = rm.GetTexture(texture, TextureFilter::Trilinear, true);
+        sharp = rm.GetTexture(texture, TextureFilter::Nearest, false);
+    }
+    Check(smooth->Filter() == TextureFilter::Trilinear && sharp->Filter() == TextureFilter::Nearest,
+          "фильтрация не отбирается соседним потребителем");
+
+    // Повторный запрос с теми же настройками — та же картинка, а не вторая
+    // копия: иначе набор спрайтов лежал бы в видеопамяти столько раз, сколько
+    // на него ссылаются.
+    Check(rm.GetTexture(texture, TextureFilter::Nearest, false).get() == sharp.get(),
+          "одни и те же настройки отдают ту же картинку");
+    rm.Clear();
+}
+
 } // namespace
 
 void RunTextureChecks(FrameRenderer& r) {
@@ -276,6 +315,7 @@ void RunTextureChecks(FrameRenderer& r) {
     TestMipmapsKillShimmer(r, file.string());
     TestAnisotropySharpensGrazingSurfaces(r, file.string());
     TestMaterialTexturesUseAnisotropy(file.string());
+    TestTwoFiltersOfOneFileCoexist(file.string());
 
     fs::remove_all(dir, ec);
 }
