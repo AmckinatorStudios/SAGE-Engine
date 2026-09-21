@@ -241,6 +241,96 @@ void CheckHudDemoDraws(UIRenderer& ui) {
     Check(bar > 0.5, "худ: шкала здоровья нарисована рядом, а не под значком");
 }
 
+// --- Начертание и свой шрифт надписи ----------------------------------------
+//
+// Жирный и курсив рисует сам движок (второй оттиск со сдвигом и наклон
+// глифов), поэтому проверяется то, что от этого и ждут: жирный кладёт БОЛЬШЕ
+// краски, чем обычный, а курсив — столько же, но не в тех же местах. Числами,
+// а не эталонным кадром: форма букв зависит от шрифта системы, а «жирнее»
+// и «наклонено» — нет.
+void CheckFaceMakesTextBolderAndSlanted(UIRenderer& ui) {
+    auto draw = [&](sage::ui::Label::Style face) {
+        Scene scene("face");
+        GameObject e = Screen(scene, "Caption", {(float)kUiW, 40.0f});
+        sage::ui::Label label;
+        label.Text = "Bold and slanted";
+        label.Scale = 3.0f;
+        label.Face = face;
+        label.Horizontal = sage::ui::Label::Align::Start;
+        label.Vertical = sage::ui::Label::Align::Center;
+        scene.Registry().emplace<sage::ui::Label>(e.Entity(), label);
+        return RenderUI(ui, scene);
+    };
+
+    const Image plain = draw(sage::ui::Label::Style::Regular);
+    const Image bold = draw(sage::ui::Label::Style::Bold);
+    const Image italic = draw(sage::ui::Label::Style::Italic);
+
+    const double inkPlain = Covered(plain, 0, 0, kUiW, 40);
+    const double inkBold = Covered(bold, 0, 0, kUiW, 40);
+    const double inkItalic = Covered(italic, 0, 0, kUiW, 40);
+    std::printf("    начертание: обычный %.4f, жирный %.4f, курсив %.4f\n", inkPlain, inkBold,
+                inkItalic);
+    Check(inkPlain > 0.002, "надпись нарисована");
+    // Жирный — это второй оттиск со сдвигом: краски заметно больше.
+    Check(inkBold > inkPlain * 1.15, "жирный кладёт больше краски, чем обычный");
+    // Курсив краски добавляет немного (наклон), но САМА КАРТИНКА другая:
+    // сравниваем верхнюю полосу строки, куда уезжают наклонённые верхушки.
+    const double topPlain = Covered(plain, 0, 8, kUiW, 16);
+    const double topItalic = Covered(italic, 0, 8, kUiW, 16);
+    std::printf("    курсив: верх строки обычный %.4f, курсив %.4f\n", topPlain, topItalic);
+    Check(std::fabs(topItalic - topPlain) > 0.0005, "курсив наклоняет глифы");
+}
+
+// Свой шрифт у надписи: берётся ИМЕННО он, а не шрифт интерфейса. Проверяем
+// тем, что доступно без второго файла в репозитории, — размером букв: тот же
+// текст, набранный своим шрифтом с ВДВОЕ меньшей высотой запекания, обязан
+// остаться таким же по размеру на экране (высота запекания — про чёткость
+// атласа, а не про кегль), и при этом надпись обязана нарисоваться.
+void CheckLabelUsesItsOwnFontFile(UIRenderer& ui) {
+    // Шрифт берётся ИЗ РЕПОЗИТОРИЯ (тесты запускаются из его корня — оттуда же
+    // им передают tests/render/references): рядом с этим бинарником движковых
+    // ассетов нет, а тест обязан работать на настоящем файле, а не на том, что
+    // найдётся случайно.
+    const std::string path = "engine/assets/fonts/sage-default.ttf";
+    auto draw = [&](const std::string& font, float bake) {
+        Scene scene("font");
+        GameObject e = Screen(scene, "Caption", {(float)kUiW, 40.0f});
+        sage::ui::Label label;
+        label.Text = "Font file";
+        label.Scale = 3.0f;
+        label.Font = font;
+        label.FontPixelHeight = bake;
+        label.Horizontal = sage::ui::Label::Align::Start;
+        label.Vertical = sage::ui::Label::Align::Center;
+        scene.Registry().emplace<sage::ui::Label>(e.Entity(), label);
+        return RenderUI(ui, scene);
+    };
+
+    // СНАЧАЛА убеждаемся, что файл вообще открылся. Без этой проверки тест
+    // был бы пустым: не открывшийся шрифт молча заменяется шрифтом интерфейса,
+    // и «надпись нарисована» оказалось бы правдой при полностью сломанной
+    // загрузке своих шрифтов.
+    const Font* loaded = ui.LoadFont(path);
+    Check(loaded != nullptr, "свой шрифт открылся из файла");
+    // А несуществующий файл даёт отказ, а не пустой шрифт с нулевыми метриками.
+    Check(ui.LoadFont("engine/assets/fonts/no-such-font.ttf") == nullptr,
+          "отсутствующий файл шрифта не притворяется загруженным");
+
+    const Image own = draw(path, 48.0f);
+    const double ink = Covered(own, 0, 0, kUiW, 40);
+    std::printf("    свой шрифт: краска %.4f\n", ink);
+    Check(ink > 0.002, "надпись со своим шрифтом нарисована");
+
+    // Та же надпись, запечённая вдвое мельче: на экране тот же кегль (разница
+    // только в чёткости), то есть доля краски рядом.
+    const Image coarse = draw(path, 24.0f);
+    const double inkCoarse = Covered(coarse, 0, 0, kUiW, 40);
+    std::printf("    свой шрифт: краска при мелком запекании %.4f\n", inkCoarse);
+    Check(inkCoarse > ink * 0.6 && inkCoarse < ink * 1.6,
+          "высота запекания меняет чёткость, а не кегль");
+}
+
 } // namespace
 
 void RunUIChecks() {
@@ -251,6 +341,8 @@ void RunUIChecks() {
     CheckSliderStaysThin(ui);
     CheckRangeColourIsItsOwn(ui);
     CheckHudDemoDraws(ui);
+    CheckFaceMakesTextBolderAndSlanted(ui);
+    CheckLabelUsesItsOwnFontFile(ui);
 }
 
 } // namespace sage::rendertest

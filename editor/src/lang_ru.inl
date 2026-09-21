@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1861.
+// Язык: Русский. Строк: 1872.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -446,6 +446,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Тип тела"},
     {"Body offset from the object origin",
      "Смещение тела относительно точки объекта"},
+    {"Bold",
+     "Жирный"},
+    {"Bold italic",
+     "Жирный курсив"},
     {"Bone",
      "Кость"},
     {"Bones reach for a target",
@@ -620,6 +624,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Дети стоят по столбцам с переносом"},
     {"Choose a folder",
      "Выберите папку"},
+    {"Choose a font",
+     "Выберите шрифт"},
     {"Choose a material",
      "Выбрать материал"},
     {"Choose a model",
@@ -1198,6 +1204,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Кадр/с"},
     {"FXAA",
      "FXAA"},
+    {"Face",
+     "Начертание"},
     {"Failed",
      "Не получилось"},
     {"Failed to copy the project: ",
@@ -1316,8 +1324,14 @@ constexpr TranslationPair kRussianStrings[] = {
      "Следовать"},
     {"Follows the parent size instead of a fixed one",
      "Тянется за размером родителя вместо фиксированного"},
+    {"Font baking size",
+     "Размер запекания шрифта"},
+    {"Font file",
+     "Файл шрифта"},
     {"Font size",
      "Размер шрифта"},
+    {"Fonts",
+     "Шрифты"},
     {"Foot Lock",
      "Фиксация стоп"},
     {"Forward Scattering",
@@ -1610,6 +1624,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Он не перезаписывал вашу сцену — это отдельная копия."},
     {"It is outside the clip owner. Pick the owner itself\nor one of its children.",
      "Он не под владельцем клипа. Выберите самого владельца\nили кого-то из его детей."},
+    {"Italic",
+     "Курсив"},
     {"Joint",
      "Сочленение"},
     {"Justify",
@@ -2260,6 +2276,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Масштаб пикселя"},
     {"Pixel art",
      "Пиксель-арт"},
+    {"Pixel font",
+     "Пиксельный шрифт"},
     {"Pixel scale",
      "Масштаб пикселя"},
     {"Pixels",
@@ -2502,6 +2520,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Зонд отражений"},
     {"Refresh",
      "Обновить"},
+    {"Regular",
+     "Обычный"},
     {"Reimport",
      "Переимпортировать"},
     {"Reinstall",
@@ -3642,6 +3662,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "файл"},
     {"folder",
      "папка"},
+    {"font",
+     "шрифт"},
     {"for example: game.start",
      "например: game.start"},
     {"it does not move its contents and is not drawn.",
