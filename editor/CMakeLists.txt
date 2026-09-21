@@ -72,6 +72,7 @@ add_executable(SageEditor WIN32
     src/panels/TemplatesPanel.cpp
     src/panels/DialogsPanel.cpp
     src/panels/ProfilerPanel.cpp
+    src/AssetCovers.cpp
     src/FileBrowser.cpp
     src/PathScope.cpp
     src/Thumbnails.cpp

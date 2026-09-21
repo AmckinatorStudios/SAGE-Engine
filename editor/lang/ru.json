@@ -1848,6 +1848,8 @@
     "An interface object: its elements live inside it": "Объект-интерфейс: его элементы живут внутри него",
     "Create interface": "Создать интерфейс",
     "Element properties — colour, text, layout — live on the elements themselves, inside this interface.": "Свойства элементов — цвет, текст, раскладка — живут у самих элементов внутри этого интерфейса.",
+    "Keep aspect": "Сохранять пропорции",
+    "Fill, keep aspect": "Заполнить, сохраняя пропорции",
     "New interface in this scene": "Новый интерфейс в этой сцене",
     "Open in interface mode": "Открыть в режиме интерфейса",
     "Switch to layout and open this interface": "Перейти к вёрстке и открыть этот интерфейс",

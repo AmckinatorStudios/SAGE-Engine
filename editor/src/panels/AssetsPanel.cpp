@@ -27,6 +27,7 @@
 #include "../HotkeyScope.h"
 #include "../SceneCover.h"
 #include "../Thumbnails.h"
+#include "../AssetCovers.h"
 
 #include "sage/assets/import/Convert.h"
 #include "sage/render/ResourceManager.h"
@@ -37,6 +38,7 @@
 #include "../Localization.h"
 
 namespace fs = std::filesystem;
+namespace covers = sage::editor::covers;
 
 namespace {
 
@@ -269,8 +271,8 @@ void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
 // проход сцены со светом, и делать двадцать таких на открытие папки значит
 // уронить редактор . Остальные карточки получат своё превью в
 // следующих кадрах — за десяток кадров это незаметно глазу.
-uint64_t AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& path, bool isDir) {
-    if (isDir) return 0;
+AssetsPanel::Cover AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& path, bool isDir) {
+    if (isDir) return {};
     const std::string key = path.string();
 
     std::string ext = path.extension().string();
@@ -284,18 +286,22 @@ uint64_t AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& path, bool 
     // её целиком ради картинки размером с ноготь.
     if (ext == ".sage") {
         const fs::path cover = scenecover::For(host.CurrentProject().Dir(), path);
-        if (cover.empty()) return 0;
+        if (cover.empty()) return {};
         // Через общий кэш обложек-картинок: он асинхронный и с мипмапами, то
         // есть снимок 1920x1080 не разбирается в кадре и не рябит в плитке.
-        return thumbs::Get(cover, thumbs::Size::Tile).Id;
+        const thumbs::Thumb t = thumbs::Get(cover, thumbs::Size::Tile);
+        return {t.Id, t.W, t.H};
     }
 
-    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
-        ext == ".hdr" || ext == ".sagetex") {
-        // Текстуры и так кэшируются менеджером ресурсов — просто спрашиваем.
-        // Негативный кэш там же: битый файл не будет перечитываться каждый кадр.
-        std::shared_ptr<Texture> tex = ResourceManager::Instance().GetTexture(key);
-        return tex ? tex->NativeHandle() : 0;
+    if (thumbs::IsImage(path)) {
+        // ЧЕРЕЗ КЭШ ОБЛОЖЕК, а не через ResourceManager. Прежний путь просил у
+        // менеджера ресурсов САМУ текстуру: полный синхронный разбор файла и
+        // заливка его в видеопамять прямо в кадре — папка с сотней фотографий
+        // по 4000x3000 вставала колом и съедала гигабайты ради картинок
+        // размером с ноготь (см. Thumbnails.h). И главное: оттуда не узнать
+        // пропорций исходника, а без них обложка рисовалась квадратом.
+        const thumbs::Thumb t = thumbs::Get(path, thumbs::Size::Tile);
+        return {t.Id, t.W, t.H};
     }
 
     // Материал — шариком, префаб — собой, модель — своей геометрией. Все трое
@@ -304,19 +310,20 @@ uint64_t AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& path, bool 
     // десятками префабов иначе уронила бы кадр при первом же открытии.
     const bool renderable = ext == ".sagemat" || ext == ".sageprefab" ||
                             sage::assets::IsConvertibleModel(key) || ext == ".sagemesh";
-    if (!renderable) return 0;
+    if (!renderable) return {};
 
     std::error_code ec;
     const auto write = fs::last_write_time(path, ec);
     const long long stamp = ec ? 0 : (long long)write.time_since_epoch().count();
 
+    // Кадр съёмки квадратный, поэтому пропорции у таких обложек 1:1.
     auto it = m_thumbs.find(key);
-    if (it != m_thumbs.end() && it->second.Stamp == stamp) return it->second.Id;
+    if (it != m_thumbs.end() && it->second.Stamp == stamp) return {it->second.Id, 1, 1};
     if (m_thumbRenderedThisFrame) {
         // Очередь занята — отдаём прошлую обложку, если она была. Мигание
         // «пусто -> картинка» на каждой правке файла заметнее, чем кадр
         // устаревшего превью.
-        return it != m_thumbs.end() ? it->second.Id : 0;
+        return it != m_thumbs.end() ? Cover{it->second.Id, 1, 1} : Cover{};
     }
 
     // Ключ = путь: у каждой обложки СВОЙ буфер. С общим буфером все запомненные
@@ -342,7 +349,7 @@ uint64_t AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& path, bool 
     // карточкам получить свои обложки.
     m_thumbs[key] = Thumb{id, stamp};
     if (id) m_thumbRenderedThisFrame = true;
-    return id;
+    return {id, 1, 1};
 }
 
 void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int depth) {
@@ -510,28 +517,26 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // панели ассетов ищет КОНКРЕТНУЮ картинку или материал среди двух десятков
     // одинаковых оранжевых прямоугольников с надписью MAT. Имя файла помогает
     // только если его помнят.
-    const uint64_t thumb = ThumbnailFor(host, path, isDir);
-    if (thumb) {
-        // Шахматка под картинкой: прозрачные места иначе неотличимы от фона
-        // карточки, и текстура с альфой выглядит просто дырявой.
-        const float checker = 8.0f;
-        dl->PushClipRect(sw0, sw1, true);
-        for (float y = sw0.y; y < sw1.y; y += checker) {
-            for (float x = sw0.x; x < sw1.x; x += checker) {
-                const bool odd = ((int)((x - sw0.x) / checker) + (int)((y - sw0.y) / checker)) % 2;
-                dl->AddRectFilled(ImVec2(x, y), ImVec2(x + checker, y + checker),
-                                  odd ? IM_COL32(70, 70, 76, 255) : IM_COL32(52, 52, 58, 255));
-            }
-        }
-        // Вписываем по меньшей стороне, сохраняя пропорции: растянутое превью
-        // врёт о содержимом.
-        const float availW = sw1.x - sw0.x, availH = sw1.y - sw0.y;
-        const float side = std::min(availW, availH);
-        const ImVec2 c0(sw0.x + (availW - side) * 0.5f, sw0.y + (availH - side) * 0.5f);
-        dl->AddImage((ImTextureID)(std::intptr_t)thumb, c0, ImVec2(c0.x + side, c0.y + side),
-                     ImVec2(0, 1), ImVec2(1, 0));
-        dl->PopClipRect();
+    const Cover thumb = ThumbnailFor(host, path, isDir);
+    if (thumb.Id) {
+        // КАРТИНКА ВПИСЫВАЕТСЯ ПО СВОИМ ПРОПОРЦИЯМ, а не в квадрат. Прежний
+        // «квадрат по меньшей стороне» сохранял пропорции только у квадратных
+        // исходников: панорама 4096x1024 выходила квадратом, тайл-лист 1:4 —
+        // квадратом, скриншот 16:9 — квадратом. Узнать по такой обложке свой
+        // файл нельзя, а она ровно для этого и нужна.
+        const covers::FitRect fit = covers::Fit(sw0, sw1, thumb.W, thumb.H);
+        // Шахматка — ПОД САМОЙ КАРТИНКОЙ, а не под всей площадкой: иначе поля
+        // по бокам вписанной картинки выглядят её частью.
+        covers::DrawChecker(dl, fit.A, fit.B);
+        dl->AddImage((ImTextureID)(std::intptr_t)thumb.Id, fit.A, fit.B, ImVec2(0, 1),
+                     ImVec2(1, 0));
         dl->AddRect(sw0, sw1, IM_COL32(255, 255, 255, 30), 6.0f);
+    } else if (!isDir && thumbs::IsImage(path)) {
+        // Картинка ещё читается фоновым потоком — крутилка вместо пустоты:
+        // пустая площадка читается как «здесь ничего нет».
+        covers::DrawSpinner(dl, ImVec2((sw0.x + sw1.x) * 0.5f, (sw0.y + sw1.y) * 0.5f),
+                            std::min(sw1.x - sw0.x, sw1.y - sw0.y) * 0.18f,
+                            ImGui::GetColorU32(ImGuiCol_TextDisabled));
     } else {
         // Значок типа по центру поля — тот же набор, что в иерархии, тулбаре и
         // инспекторе. Три буквы «MAT»/«LUA» приходилось читать, значок узнаётся.
@@ -610,6 +615,23 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
             if (std::find(m_multi.begin(), m_multi.end(), path) == m_multi.end()) m_multi = {path};
             ImGui::OpenPopup("##tile_ctx");
         }
+    }
+
+    // ПРЕВЬЮ ПОД КУРСОРОМ — то же самое, что в файловом диалоге
+    // (AssetCovers.h). Плитка 80x80 отвечает на вопрос «который из этих
+    // файлов» и молчит обо всём остальном: та ли это картинка, что на ней
+    // написано, какого она размера, почему весит сорок мегабайт. До сих пор
+    // ответ добывался открыванием файла.
+    //
+    // ПОСЛЕ плитки и с задержкой (ForTooltip): подсказка уходит в своё окно, и
+    // открывать её раньше, чем дорисована плитка, значит перемешивать два
+    // списка отрисовки, а без задержки она выскакивала бы у каждой карточки,
+    // над которой просто провели мышью. Во время перетаскивания ImGui сам не
+    // считает плитку наведённой, так что тянущийся файл подсказку не откроет.
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
+        std::error_code sizeEc;
+        const uintmax_t bytes = isDir ? 0 : fs::file_size(path, sizeEc);
+        covers::DrawHoverPreview(path, isDir, filename, sizeEc ? 0 : bytes, &m_preview);
     }
 
     // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.

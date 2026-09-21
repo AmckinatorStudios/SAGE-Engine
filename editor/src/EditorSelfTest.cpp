@@ -16,6 +16,7 @@
 #include "EditorIcons.h"
 #include "CodeEditorApp.h"
 #include "AssetSlot.h"
+#include "AssetCovers.h"
 #include "Thumbnails.h"
 #include "PanelWindows.h"
 #include "UIElementProperties.h"
@@ -322,7 +323,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -4766,6 +4767,23 @@ bool EditorLayer::SelfTestSelection() {
             LOG_ERROR("Editor") << "SELFTEST: the cover did not arrive with the source size ("
                                 << ready.W << "x" << ready.H << ")";
             ok = false;
+        }
+
+        // И ОБЛОЖКА РИСУЕТСЯ ПО ЭТИМ ПРОПОРЦИЯМ, а не квадратом. Панель
+        // ассетов вписывала картинку в квадрат по меньшей стороне: пропорции
+        // сохранялись только у квадратных исходников, а панорама 4096x1024,
+        // тайл-лист 1:4 и скриншот 16:9 одинаково выходили квадратами. Узнать
+        // по такой обложке свой файл нельзя — а она ровно для этого и нужна.
+        if (ok) {
+            namespace covers = sage::editor::covers;
+            const covers::FitRect fit =
+                covers::Fit(ImVec2(0.0f, 0.0f), ImVec2(100.0f, 100.0f), ready.W, ready.H);
+            const float fw = fit.B.x - fit.A.x, fh = fit.B.y - fit.A.y;
+            if (fh <= 0.0f || std::fabs(fw / fh - 4.0f) > 0.05f || fw > 100.5f) {
+                LOG_ERROR("Editor") << "SELFTEST: обложка 64x16 вписана не по пропорциям (" << fw
+                                    << "x" << fh << ")";
+                ok = false;
+            }
         }
 
         if (ok) {
