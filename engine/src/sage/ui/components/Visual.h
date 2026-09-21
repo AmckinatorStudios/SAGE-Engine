@@ -83,6 +83,13 @@ struct Label {
     // и целый масштаб (иначе ровный шрифт идёт волнами).
     TextureFiltering FontFiltering = TextureFiltering::Smooth;
 
+    // Кратный масштаб шрифта — отдельно от фильтрации, как и у картинки.
+    // Пока он включался вместе с резкостью, попытка изменить кегль давала
+    // худший из ответов: у мелких размеров текст не менялся вовсе (масштаб
+    // упирался в единицу и стоял крупнее заданного), а потом скачком
+    // удваивался.
+    bool FontSnapPixels = false;
+
     bool Sharp() const { return FontFiltering == TextureFiltering::Nearest; }
     Align Horizontal = Align::Center;
     Align Vertical = Align::Center;

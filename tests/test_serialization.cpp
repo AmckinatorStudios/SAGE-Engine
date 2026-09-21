@@ -1203,3 +1203,24 @@ TEST(Scene_migration_keeps_sharp_images_pixel_snapped) {
     // переписывает одну другой.
     CHECK_EQ(j["objects"][0]["ui"]["image"]["filter"].get<int>(), 1);
 }
+
+TEST(Scene_migration_keeps_sharp_fonts_pixel_snapped) {
+    // У надписи кратный масштаб тоже включался вместе с резким шрифтом. Разделив
+    // их, сохраняем вид собранных экранов: что было резким — остаётся с целым
+    // масштабом, остальное считается кеглем как написано.
+    const std::string oldScene = R"({
+      "name": "UI",
+      "sage_scene_version": 15,
+      "objects": [
+        {"id": 1, "name": "Pixel",
+         "ui": {"element": {"anchor": 0}, "label": {"text": "HP", "fontFilter": 1}}},
+        {"id": 2, "name": "Smooth",
+         "ui": {"element": {"anchor": 0}, "label": {"text": "Score", "fontFilter": 0}}}
+      ]
+    })";
+
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    CHECK_TRUE(j["objects"][0]["ui"]["label"]["fontSnapPixels"].get<bool>());
+    CHECK_FALSE(j["objects"][1]["ui"]["label"]["fontSnapPixels"].get<bool>());
+}

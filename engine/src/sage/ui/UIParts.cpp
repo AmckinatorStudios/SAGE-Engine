@@ -405,6 +405,11 @@ const std::vector<PartField>& LabelFields() {
          offsetof(Label, FontPixelHeight), 8.0f, 256.0f,
          "How tall glyphs are baked into the atlas. Bigger is sharper at large\n"
          "sizes and costs more texture memory."},
+        {"fontSnapPixels", SAGE_UI_TEXT("Whole-number font scale"), PartField::Kind::Bool,
+         offsetof(Label, FontSnapPixels), 0.0f, 1.0f,
+         "Rounds the glyph scale down to a whole number — what a font drawn\n"
+         "pixel by pixel needs. The price is that the size then changes in\n"
+         "steps, so it is a choice and not a side effect of filtering."},
         {"fontFilter", SAGE_UI_TEXT("Font filtering"), PartField::Kind::Enum,
          offsetof(Label, FontFiltering), 0.0f, 1.0f,
          "Nearest neighbour, no mipmaps and a whole-number scale: a fractional\n"
@@ -435,6 +440,7 @@ UITextStyle StyleOf(const Label& label, UIRenderer& ui) {
     UITextStyle style;
     if (!label.Font.empty())
         style.UseFont = ui.LoadFont(label.Font, label.FontPixelHeight, label.Sharp());
+    style.SnapPixels = label.FontSnapPixels;
     style.Bold = label.Face == Label::Style::Bold || label.Face == Label::Style::BoldItalic;
     style.Italic = label.Face == Label::Style::Italic || label.Face == Label::Style::BoldItalic;
     return style;
@@ -482,8 +488,12 @@ void DrawLabelPart(const PartDrawContext& c) {
         lines = WrapLines(label.Text, 0.0f, textScale, ui, &style); // только по явным \n
     else lines.push_back(label.Text);
 
+    // ВЫСОТА БЛОКА — ЦЕЛИКОМ ПО ШРИФТУ. Раньше последняя строка считалась
+    // номиналом тулкита (8·scale), а остальные — высотой строки шрифта:
+    // вёрстка мерила блок одним числом, а рисовала его другим, и надпись
+    // съезжала вверх тем сильнее, чем крупнее кегль.
     const float lineH = ui.LineHeight(textScale, style);
-    const float blockH = lineH * (float)(lines.size() - 1) + ui.TextHeight(textScale);
+    const float blockH = lineH * (float)lines.size();
     float y = AlignY(label.Vertical, r, blockH);
 
     // Перенесённый текст ОБРЕЗАЕТСЯ своим элементом: он переносился под эту
@@ -619,9 +629,10 @@ void DrawTextInputPart(const PartDrawContext& c) {
     const float textScale = label->Scale * c.Scale;
     const float left = r.x + label->PadX * c.Scale;
     const glm::vec3 rgb{label->Color.r, label->Color.g, label->Color.b};
-    const float y = r.y + (r.h - ui.TextHeight(textScale)) * 0.5f;
-
     const UITextStyle style = StyleOf(*label, ui);
+    // По реальной высоте строки, а не по номиналу: иначе содержимое поля
+    // стоит не по центру, и тем заметнее, чем крупнее кегль.
+    const float y = r.y + (r.h - ui.LineHeight(textScale, style)) * 0.5f;
     const bool empty = label->Text.empty();
     const std::string shown =
         empty ? input.Placeholder : (input.Password ? MaskText(label->Text) : label->Text);
@@ -641,7 +652,7 @@ void DrawTextInputPart(const PartDrawContext& c) {
     // Полсекунды виден, полсекунды нет; после каждой правки счётчик
     // сбрасывается, чтобы курсор не пропал ровно тогда, когда на него смотрят.
     if (std::fmod(act->Runtime.CaretBlink, 1.0f) < 0.5f) {
-        const float ch = ui.TextHeight(textScale) * 1.15f;
+        const float ch = ui.LineHeight(textScale, style) * 0.92f;
         ui.Rect(cx, r.y + (r.h - ch) * 0.5f, std::max(textScale, 1.0f), ch, rgb,
                 AlphaOf(c, label->Color.a));
     }

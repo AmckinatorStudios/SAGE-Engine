@@ -33,6 +33,7 @@
 #include "sage/ui/components/Visual.h"
 
 #include <filesystem>
+#include <utility>
 #include <system_error>
 
 namespace sage::rendertest {
@@ -432,6 +433,193 @@ void CheckFilteringChangesSharpnessNotSize(UIRenderer& ui) {
     fs::remove_all(dir, ec);
 }
 
+// --- Кегль значит то, что написано -------------------------------------------
+//
+// Жалоба: «размер шрифта становится вдвое больше текущего значения, а когда
+// пытаюсь увеличивать — сначала текст подымается, потом скачком становится
+// большим». Обе половины — следствия одного: номинал вёрстки (8·кегль) и
+// реальная высота строки шрифта расходились, а у резкого шрифта масштаб ещё и
+// округлялся до целого, то есть у мелких кеглей не менялся вовсе, а потом
+// удваивался.
+void CheckFontSizeMatchesTheNumber(UIRenderer& ui) {
+    // Высота закрашенного: у строки из заглавных без выносных элементов это
+    // высота самих букв, и она обязана расти РОВНО пропорционально кеглю.
+    auto textRows = [](const Image& img) {
+        int top = -1, bottom = -1;
+        for (int y = 0; y < img.Height; ++y) {
+            bool lit = false;
+            for (int x = 0; x < img.Width && !lit; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                lit = img.Pixels[i] > 40;
+            }
+            if (lit) {
+                if (top < 0) top = y;
+                bottom = y;
+            }
+        }
+        return std::pair<int, int>(top, bottom);
+    };
+
+    auto shot = [&](float size) {
+        Scene scene("size");
+        GameObject e = Screen(scene, "Caption", {(float)kUiW, (float)kUiH});
+        sage::ui::Label label;
+        label.Text = "HHHH";
+        label.Scale = size;
+        label.Horizontal = sage::ui::Label::Align::Center;
+        label.Vertical = sage::ui::Label::Align::Center;
+        scene.Registry().emplace<sage::ui::Label>(e.Entity(), label);
+        return RenderUI(ui, scene);
+    };
+
+    const Image small = shot(3.0f);
+    const Image big = shot(6.0f);
+    const auto rowsSmall = textRows(small);
+    const auto rowsBig = textRows(big);
+    const double hSmall = rowsSmall.second - rowsSmall.first + 1;
+    const double hBig = rowsBig.second - rowsBig.first + 1;
+    std::printf("    кегль: высота букв %.0f (размер 3) и %.0f (размер 6)\n", hSmall, hBig);
+    Check(hSmall > 4.0 && hBig > 8.0, "текст нарисован при обоих кеглях");
+    // Вдвое больший кегль — вдвое более высокие буквы. Ступеней («не менялось,
+    // потом удвоилось») здесь быть не должно.
+    Check(std::fabs(hBig / std::max(hSmall, 1.0) - 2.0) < 0.25, "кегль меняет размер линейно");
+    // И буквы НЕ ВЫШЕ заявленной строки: 8 пикселей на единицу кегля — то, по
+    // чему считает вёрстка, и заглавная обязана в неё помещаться.
+    Check(hSmall <= 3.0 * 8.0 + 1.0 && hBig <= 6.0 * 8.0 + 1.0,
+          "буквы помещаются в заявленную высоту строки");
+
+    // ЦЕНТРИРОВАНИЕ. Оно и «подымало» текст: блок мерили номиналом, а рисовали
+    // шрифтом, и промах рос вместе с кеглем.
+    const double centerSmall = (rowsSmall.first + rowsSmall.second) * 0.5;
+    const double centerBig = (rowsBig.first + rowsBig.second) * 0.5;
+    std::printf("    кегль: центр строки %.1f и %.1f (центр элемента %.1f)\n", centerSmall,
+                centerBig, kUiH * 0.5);
+    // Допуск — пара пикселей, а не «на глаз»: промах центрирования РОС вместе
+    // с кеглем, и мягкий допуск пропустил бы ровно то, на что жалуются.
+    Check(std::fabs(centerSmall - kUiH * 0.5) < 3.0, "мелкий текст стоит по центру");
+    Check(std::fabs(centerBig - kUiH * 0.5) < 3.0, "крупный текст стоит по центру");
+
+    // И ГЛАВНОЕ: заявленная высота строки совпадает с настоящей. Пока они
+    // расходились, вёрстка мерила блок одним числом, а рисовала другим —
+    // отсюда и «текст подымается», и «размер не тот, что в поле».
+    for (float size : {2.0f, 3.5f, 6.0f}) {
+        const float nominal = ui.TextHeight(size);
+        const float real = ui.LineHeight(size);
+        std::printf("    кегль %.1f: заявлено %.2f, у шрифта %.2f\n", size, nominal, real);
+        Check(std::fabs(real - nominal) < nominal * 0.02f,
+              "высота строки совпадает с заявленной");
+    }
+}
+
+// --- Резкий шрифт тоже слушается кегля ---------------------------------------
+//
+// Ровно то, на что жалуются: «размер шрифта становится вдвое больше значения, а
+// увеличиваю — сначала текст подымается, потом скачком большим становится». Так
+// и было у шрифта с резкой фильтрацией: масштаб глифа округлялся до целого САМ,
+// поэтому у мелких кеглей упирался в единицу (то есть стоял на месте и крупнее
+// заданного), а на каком-то шаге удваивался. Теперь округление — отдельная
+// настройка («Кратный масштаб шрифта»), и по умолчанию его нет.
+void CheckSharpFontStillFollowsTheSize(UIRenderer& ui) {
+    auto height = [&](float size, bool snap) {
+        Scene scene("sharp");
+        GameObject e = Screen(scene, "Caption", {(float)kUiW, (float)kUiH});
+        sage::ui::Label label;
+        label.Text = "HHHH";
+        label.Scale = size;
+        label.Font = "engine/assets/fonts/sage-default.ttf";
+        label.FontPixelHeight = 32.0f;
+        label.FontFiltering = sage::ui::TextureFiltering::Nearest;
+        label.FontSnapPixels = snap;
+        label.Horizontal = sage::ui::Label::Align::Center;
+        label.Vertical = sage::ui::Label::Align::Center;
+        scene.Registry().emplace<sage::ui::Label>(e.Entity(), label);
+        const Image img = RenderUI(ui, scene);
+        int top = -1, bottom = -1;
+        for (int y = 0; y < img.Height; ++y) {
+            bool lit = false;
+            for (int x = 0; x < img.Width && !lit; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                lit = img.Pixels[i] > 40;
+            }
+            if (lit) { if (top < 0) top = y; bottom = y; }
+        }
+        return (double)(bottom - top + 1);
+    };
+
+    const double h2 = height(2.0f, /*snap=*/false);
+    const double h4 = height(4.0f, /*snap=*/false);
+    std::printf("    резкий шрифт: высота букв %.0f (размер 2) и %.0f (размер 4)\n", h2, h4);
+    Check(h2 > 2.0 && h4 > 4.0, "резкий шрифт нарисован");
+    Check(std::fabs(h4 / std::max(h2, 1.0) - 2.0) < 0.3,
+          "резкая фильтрация не мешает кеглю меняться");
+
+    // А включённый кратный масштаб — это по-прежнему ступени, и теперь так и
+    // задумано: он для шрифтов, нарисованных по пикселям.
+    const double snapped2 = height(2.0f, /*snap=*/true);
+    const double snapped4 = height(4.0f, /*snap=*/true);
+    std::printf("    кратный масштаб: %.0f и %.0f\n", snapped2, snapped4);
+    Check(snapped2 > 0.0 && snapped4 > 0.0, "с кратным масштабом текст тоже рисуется");
+}
+
+// --- Поворот элемента поворачивает и КАРТИНКУ --------------------------------
+//
+// Из отчёта: «изображение, именно загруженная картинка, не поворачивается
+// вообще». Так и было: поворот применялся к подложке и к буквам, а квад
+// картинки складывался из неповёрнутых углов — единственное место, где это
+// пропускалось.
+void CheckImageRotates(UIRenderer& ui) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "sage_ui_rotate";
+    fs::create_directories(dir, ec);
+    const fs::path file = dir / "bar.png";
+    {
+        // Узкая горизонтальная полоса: повернув её на 90°, ни с чем не
+        // перепутаешь — она станет вертикальной.
+        Image bar;
+        bar.Width = 32;
+        bar.Height = 8;
+        bar.Pixels.assign((size_t)bar.Width * bar.Height * 3, 0);
+        for (size_t i = 0; i < bar.Pixels.size(); i += 3) {
+            bar.Pixels[i] = 250;
+            bar.Pixels[i + 1] = 250;
+            bar.Pixels[i + 2] = 250;
+        }
+        if (!SavePng(file.string(), bar)) {
+            std::printf("    не удалось записать картинку — проверка пропущена\n");
+            CountFail();
+            return;
+        }
+    }
+
+    auto shot = [&](float degrees) {
+        Scene scene("rotate");
+        GameObject e = Screen(scene, "Pic", {120.0f, 30.0f});
+        sage::ui::Element& box = scene.Registry().get<sage::ui::Element>(e.Entity());
+        box.Rotation = degrees;
+        sage::ui::Image img;
+        img.Path = file.string();
+        scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+        return RenderUI(ui, scene);
+    };
+
+    const Image flat = shot(0.0f);
+    const Image turned = shot(90.0f);
+    // Полоса 120x30 в левом верхнем углу: повёрнутая на 90° она уходит вниз за
+    // пределы своей горизонтальной полосы и освобождает её правый конец.
+    const double rightFlat = Covered(flat, 90, 2, 118, 28);
+    const double rightTurned = Covered(turned, 90, 2, 118, 28);
+    const double belowFlat = Covered(flat, 40, 40, 80, 90);
+    const double belowTurned = Covered(turned, 40, 40, 80, 90);
+    std::printf("    поворот картинки: правый конец %.2f -> %.2f, ниже элемента %.2f -> %.2f\n",
+                rightFlat, rightTurned, belowFlat, belowTurned);
+    Check(rightFlat > 0.8, "картинка нарисована");
+    Check(rightTurned < 0.2, "повёрнутая картинка ушла с прежнего места");
+    Check(belowTurned > belowFlat + 0.2, "повёрнутая картинка встала вертикально");
+
+    fs::remove_all(dir, ec);
+}
+
 } // namespace
 
 void RunUIChecks() {
@@ -445,6 +633,9 @@ void RunUIChecks() {
     CheckFaceMakesTextBolderAndSlanted(ui);
     CheckLabelUsesItsOwnFontFile(ui);
     CheckFilteringChangesSharpnessNotSize(ui);
+    CheckFontSizeMatchesTheNumber(ui);
+    CheckSharpFontStillFollowsTheSize(ui);
+    CheckImageRotates(ui);
 }
 
 } // namespace sage::rendertest

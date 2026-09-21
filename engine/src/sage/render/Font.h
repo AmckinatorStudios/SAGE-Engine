@@ -61,6 +61,10 @@ public:
     float MeasureWidth(const std::string& utf8, float scale) const;
     // Высота строки (для вертикальной вёрстки) при данном масштабе.
     float LineHeight(float scale) const { return m_lineHeight * scale; }
+    // Высота строки в единицах базового запекания. По ней движок нормирует
+    // кегль: «размер шрифта 2» обязан значить одну и ту же высоту строки у
+    // любого файла, иначе смена шрифта меняет вёрстку всего экрана.
+    float LineHeightUnits() const { return m_lineHeight; }
     // Высота над базовой линией (ascent) — для выравнивания по базовой линии.
     float Ascent(float scale) const { return m_ascent * scale; }
 
