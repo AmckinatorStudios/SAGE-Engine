@@ -631,7 +631,10 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
         std::error_code sizeEc;
         const uintmax_t bytes = isDir ? 0 : fs::file_size(path, sizeEc);
-        covers::DrawHoverPreview(path, isDir, filename, sizeEc ? 0 : bytes, &m_preview);
+        // Папка проекта — чтобы у сцены (.sage) показался её снимок, а не
+        // значок: обложка у сцены есть, просто лежит она рядом с проектом.
+        covers::DrawHoverPreview(path, isDir, filename, sizeEc ? 0 : bytes, &m_preview,
+                                 host.CurrentProject().Dir());
     }
 
     // Источник перетаскивания: файл можно бросить в слот текстуры инспектора.

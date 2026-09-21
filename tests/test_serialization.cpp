@@ -1146,3 +1146,35 @@ TEST(Scene_migration_unhides_folders) {
     // его за человека значит отменить его работу.
     CHECK_TRUE(j["objects"][2].value("hidden", false));
 }
+
+TEST(Scene_migration_turns_pixel_art_into_nearest_filtering) {
+    // «Пиксель-арт» был галкой у картинки и у шрифта — то есть настройка
+    // называлась ЖАНРОМ, а движок про жанр ничего не знает: он знает, брать
+    // ближайшего соседа или сглаживание. Вчерашняя сцена обязана открыться с
+    // той же резкостью, а не со сглаженным набором спрайтов.
+    const std::string oldScene = R"({
+      "name": "UI",
+      "sage_scene_version": 13,
+      "objects": [
+        {"id": 1, "name": "Sprite",
+         "ui": {"element": {"anchor": 0},
+                "image": {"path": "hero.png", "pixelArt": true}}},
+        {"id": 2, "name": "Photo",
+         "ui": {"element": {"anchor": 0},
+                "image": {"path": "photo.png", "pixelArt": false}}},
+        {"id": 3, "name": "Caption",
+         "ui": {"element": {"anchor": 0},
+                "label": {"text": "HP", "fontPixelArt": true}}}
+      ]
+    })";
+
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    // 1 — Nearest, 0 — Smooth (sage::ui::TextureFiltering).
+    CHECK_EQ(j["objects"][0]["ui"]["image"]["filter"].get<int>(), 1);
+    CHECK_EQ(j["objects"][1]["ui"]["image"]["filter"].get<int>(), 0);
+    CHECK_EQ(j["objects"][2]["ui"]["label"]["fontFilter"].get<int>(), 1);
+    // Старого ключа не остаётся: два ключа про одно и то же однажды разойдутся.
+    CHECK_FALSE(j["objects"][0]["ui"]["image"].contains("pixelArt"));
+    CHECK_FALSE(j["objects"][2]["ui"]["label"].contains("fontPixelArt"));
+}

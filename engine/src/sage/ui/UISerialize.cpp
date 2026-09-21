@@ -130,11 +130,14 @@ void ResolveImageTextureImpl(sage::ui::Image& im) {
     }
     // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
     // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
-    im.Tex = im.PixelArt ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
+    // Резкая фильтрация грузится ближайшим соседом и без мипмапов — иначе
+    // набор спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний
+    // спрайт.
+    im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
                                                                  /*mipmaps=*/false)
-                         : ResourceManager::Instance().GetTexture(im.Path);
+                        : ResourceManager::Instance().GetTexture(im.Path);
     im.TexPath = im.Path;
-    im.TexPixelArt = im.PixelArt;
+    im.TexFiltering = im.Filtering;
 }
 
 void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
@@ -209,7 +212,7 @@ bool ImageTextureStale(const Image& image) {
     if (!image.Tex) return true;
     // Загружено НЕ ТО: путь сменили, или переключили пиксель-арт, а он меняет
     // фильтр и мипмапы — то есть саму текстуру, а не то, как её рисуют.
-    return image.TexPath != image.Path || image.TexPixelArt != image.PixelArt;
+    return image.TexPath != image.Path || image.TexFiltering != image.Filtering;
 }
 
 void EnsureImageTexture(Image& image) {

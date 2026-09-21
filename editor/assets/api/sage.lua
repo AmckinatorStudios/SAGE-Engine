@@ -1551,8 +1551,8 @@ function sage.ui.ScreenSize() end
 function sage.ui.SetCanvas(entity, opts) end
 ---@param entity Entity
 ---@param path string
----@param pixelArt boolean
-function sage.ui.SetImage(entity, path, pixelArt) end
+---@param sharp boolean
+function sage.ui.SetImage(entity, path, sharp) end
 ---@param entity Entity
 ---@param opts table
 function sage.ui.SetLayout(entity, opts) end
