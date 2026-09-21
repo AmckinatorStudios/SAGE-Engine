@@ -306,11 +306,18 @@ void UIRenderer::PushImageQuad(float x, float y, float w, float h, glm::vec2 uv0
         return static_cast<unsigned char>(glm::clamp(v, 0.0f, 1.0f) * 255.0f);
     };
     const unsigned char r = byte(tint.r), g = byte(tint.g), b = byte(tint.b), a = byte(alpha);
+    // ПОВОРОТ ПРИМЕНЯЕТСЯ И К КАРТИНКЕ. Здесь его не было, и это единственное
+    // место, где он пропускался: подложка (PushQuad) и буквы (PushGlyphQuad)
+    // поворачивались, а картинка оставалась стоять прямо. Снаружи это
+    // выглядело как «изображение не поворачивается вообще» — причём у кнопки с
+    // фоном и подписью поворачивалось всё, кроме её значка.
+    const glm::vec2 p0 = Rotated(x, y), p1 = Rotated(x + w, y);
+    const glm::vec2 p2 = Rotated(x + w, y + h), p3 = Rotated(x, y + h);
     // Half = 0 — SDF выключен: у куска листа нет своей формы, он прямоугольный.
-    m_vertices.push_back({x,     y,     0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
-    m_vertices.push_back({x + w, y,     0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
-    m_vertices.push_back({x + w, y + h, 0.0f, r, g, b, a, uv1.x, uv1.y, 0, 0, 0, 0, 0, 0});
-    m_vertices.push_back({x,     y + h, 0.0f, r, g, b, a, uv0.x, uv1.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({p0.x, p0.y, 0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({p1.x, p1.y, 0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({p2.x, p2.y, 0.0f, r, g, b, a, uv1.x, uv1.y, 0, 0, 0, 0, 0, 0});
+    m_vertices.push_back({p3.x, p3.y, 0.0f, r, g, b, a, uv0.x, uv1.y, 0, 0, 0, 0, 0, 0});
     ++m_quadCount;
 }
 
@@ -494,18 +501,34 @@ void UIRenderer::PopClipRect() {
     m_clipStack.pop_back();
 }
 
-// Множитель шрифта относительно базовой высоты запекания.
+// Множитель шрифта: во сколько раз запечённый глиф больше или меньше того, что
+// уйдёт на экран.
 //
-// У ПИКСЕЛЬНОГО шрифта он округляется до целого. Полупиксельное увеличение
-// растягивает одни штрихи буквы на два экранных пикселя, а соседние на один:
-// «M» выходит с ножками разной толщины, и весь текст едет волнами. Целый
-// масштаб — единственный способ сохранить рисунок таким, каким его нарисовали;
-// цена — шрифт меняет размер ступенями, и это правильная цена.
-float UIRenderer::FontScale(float scale, const Font* font) const {
+// НОРМИРУЕТСЯ ПО ВЫСОТЕ СТРОКИ, а не по высоте запекания атласа. Разница видна
+// сразу: высота строки на экране становится РОВНО TextHeight(scale), то есть
+// «размер шрифта 3» — это строка в 24 экранных пикселя у любого файла шрифта.
+// Пока делили на высоту запекания, номинал тулкита (8·scale) и реальная строка
+// расходились на метрики конкретного шрифта: текст оказывался заметно крупнее
+// заданного, вёрстка считалась по одному числу, а рисовалась по другому — и от
+// смены шрифта ехал весь экран.
+//
+// ОКРУГЛЕНИЕ ДО ЦЕЛОГО — ТОЛЬКО ПО ЯВНОЙ ПРОСЬБЕ (UITextStyle::SnapPixels).
+// Раньше оно включалось само у «пиксельного» шрифта, и это давало худший из
+// возможных ответов на попытку изменить кегль: у мелких размеров масштаб
+// упирался в единицу и не менялся вовсе (текст стоял крупнее заданного), а
+// потом скачком удваивался. Снаружи — «сначала текст подымается, потом
+// становится вдвое больше».
+float UIRenderer::FontScale(float scale, const Font* font, bool snapPixels) const {
     const Font* f = font ? font : m_font.get();
     if (!f) return scale;
-    const float raw = (scale * m_scaleToPixels) / f->PixelHeight();
-    if (!f->IsPixelArt()) return raw;
+    const float line = f->LineHeightUnits();
+    const float raw = line > 0.0f ? (scale * m_scaleToPixels) / line
+                                  : (scale * m_scaleToPixels) / f->PixelHeight();
+    if (!snapPixels) return raw;
+    // Целый масштаб сохраняет рисунок пиксельного шрифта: дробный растягивает
+    // одни штрихи буквы на два экранных пикселя, а соседние на один, и «M»
+    // выходит с ножками разной толщины. Цена — размер меняется ступенями,
+    // поэтому это и есть отдельная настройка.
     return glm::max(1.0f, glm::floor(raw + 0.001f));
 }
 
@@ -560,7 +583,7 @@ void UIRenderer::Text(float x, float y, float scale, glm::vec3 color, const std:
     if (font) {
         CurrentSegment(nullptr, style.UseFont); // глифы идут в сегмент СВОЕГО шрифта
         // Масштаб API → множитель шрифта относительно базовой высоты запекания.
-        const float fontScale = FontScale(scale, font);
+        const float fontScale = FontScale(scale, font, style.SnapPixels);
         std::vector<Font::PositionedGlyph> quads;
         font->BuildQuads(text, x, y, fontScale, quads);
         // Наклон курсива — 0.21 ≈ 12°, столько же берут настоящие курсивные
@@ -621,7 +644,8 @@ void UIRenderer::TextEasyFont(float x, float y, float scale, glm::vec3 color, co
 }
 
 float UIRenderer::LineHeight(float scale, const UITextStyle& style) const {
-    if (const Font* font = FontOf(style)) return font->LineHeight(FontScale(scale, font));
+    if (const Font* font = FontOf(style))
+        return font->LineHeight(FontScale(scale, font, style.SnapPixels));
     return TextHeight(scale) * 1.6f; // без шрифта — векторный fallback
 }
 
@@ -635,7 +659,7 @@ float UIRenderer::MeasureText(const std::string& text, float scale, const UIText
     float extra = 0.0f;
     if (style.Bold) extra += BoldOffset(scale, font);
     if (style.Italic) extra += LineHeight(scale, style) * 0.21f * 0.5f;
-    if (font) return font->MeasureWidth(text, FontScale(scale, font)) + extra;
+    if (font) return font->MeasureWidth(text, FontScale(scale, font, style.SnapPixels)) + extra;
     return stb_easy_font_width(const_cast<char*>(text.c_str())) * scale + extra;
 }
 

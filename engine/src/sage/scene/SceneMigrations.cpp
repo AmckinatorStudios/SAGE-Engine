@@ -631,6 +631,22 @@ void MigrateV14toV15(json& root) {
     }
 }
 
+// v15 -> v16: кратный масштаб ШРИФТА тоже отделён от фильтрации.
+//
+// У надписи он включался вместе с резким шрифтом — и давал ступени размера
+// там, где просили просто резкость. Разделяем так же, как у картинки, и по
+// той же причине сохраняем вид уже собранных экранов: что было резким,
+// продолжает считаться целым масштабом.
+void MigrateV15toV16(json& root) {
+    if (!root.contains("objects")) return;
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("ui") || !obj["ui"].contains("label")) continue;
+        json& label = obj["ui"]["label"];
+        if (label.contains("fontSnapPixels")) continue;
+        label["fontSnapPixels"] = label.value("fontFilter", 0) == 1;   // 1 — Nearest
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -646,6 +662,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV12toV13,
     &MigrateV13toV14,
     &MigrateV14toV15,
+    &MigrateV15toV16,
 };
 
 } // namespace

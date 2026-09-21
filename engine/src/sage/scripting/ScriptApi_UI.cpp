@@ -289,6 +289,7 @@ void ScriptEngine::RegisterUIApi() {
         "FontPixelHeight", UI_FIELD(sage::ui::Label, FontPixelHeight),
         // Фильтрация строкой: "smooth" или "nearest". Движок не знает жанра
         // «пиксель-арт», он знает ближайшего соседа (см. TextureFiltering).
+        "FontSnapPixels", UI_FIELD(sage::ui::Label, FontSnapPixels),
         "FontFilter", sol::property(
                           [](UIRef& r) {
                               const sage::ui::Label* l = r.Peek<sage::ui::Label>();
