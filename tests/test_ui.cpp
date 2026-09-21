@@ -2169,3 +2169,75 @@ TEST(ui_image_fit_scales_pixel_art_by_whole_numbers) {
     CHECK_NEAR(p.Dst.w, 96.0f, 1e-3f);   // ровно 3 экранных пикселя на исходный
     CHECK_NEAR(p.Dst.h, 96.0f, 1e-3f);
 }
+
+// ============================================================================
+//  ШРИФТ И НАЧЕРТАНИЕ НАДПИСИ
+//
+//  Три разные жалобы с одним корнем — «текст в интерфейсе нельзя настроить»:
+//  шрифт один на всю игру, кегль упирается в потолок поля, боковой отступ
+//  тоже, а жирного и курсива нет вовсе.
+// ============================================================================
+#include "sage/ui/UIPart.h"
+#include "sage/ui/components/Visual.h"
+
+namespace {
+
+const sage::ui::PartField* LabelField(const char* key) {
+    const sage::ui::PartType* part = sage::ui::FindPart("label");
+    if (!part || !part->Fields) return nullptr;
+    for (const sage::ui::PartField& f : *part->Fields)
+        if (std::string(f.Key) == key) return &f;
+    return nullptr;
+}
+
+} // namespace
+
+TEST(ui_label_size_and_padding_are_not_capped_at_the_old_limits) {
+    // Потолок кегля был 12 — это около сотни экранных пикселей: заголовок
+    // меню, надпись на весь экран, счёт в аркаде оказывались недоступны
+    // вовсе, потому что поле ограничивало и ввод числа, а не только ползунок.
+    const sage::ui::PartField* scale = LabelField("scale");
+    CHECK_TRUE(scale != nullptr);
+    if (scale) {
+        CHECK_TRUE(scale->Max >= 64.0f);
+        CHECK_TRUE(scale->Min <= 0.5f);
+    }
+    // Боковой отступ был ограничен 64 — хватало кнопке и не хватало ни колонке
+    // текста, ни полю с широкой рамкой, ни отступу под значок слева.
+    const sage::ui::PartField* padX = LabelField("padX");
+    CHECK_TRUE(padX != nullptr);
+    if (padX) CHECK_TRUE(padX->Max >= 256.0f);
+}
+
+TEST(ui_label_keeps_its_font_and_face_through_save_and_load) {
+    // Шрифт и начертание — свойства СЦЕНЫ: без записи в файл «сделал заголовок
+    // жирным» живёт до первого сохранения.
+    Scene scene("fonts");
+    GameObject e = scene.CreateObject("Caption");
+    scene.Registry().emplace<sage::ui::Element>(e.Entity(), sage::ui::Element{});
+    sage::ui::Label label;
+    label.Text = "Заголовок";
+    label.Font = "assets/fonts/pixel.ttf";
+    label.Face = sage::ui::Label::Style::BoldItalic;
+    label.FontPixelHeight = 96.0f;
+    label.FontPixelArt = true;
+    label.Scale = 48.0f;    // кегль, который прежнее ограничение не пропускало
+    label.PadX = 200.0f;    // и отступ, которого тоже было не задать
+    scene.Registry().emplace<sage::ui::Label>(e.Entity(), label);
+
+    nlohmann::json j;
+    CHECK_TRUE(sage::ui::SaveElement(j, scene.Registry(), e.Entity()));
+
+    Scene loaded("fonts2");
+    GameObject copy = loaded.CreateObject("Caption");
+    sage::ui::LoadElement(j, loaded.Registry(), copy.Entity());
+    const sage::ui::Label* back = loaded.Registry().try_get<sage::ui::Label>(copy.Entity());
+    CHECK_TRUE(back != nullptr);
+    if (!back) return;
+    CHECK_EQ(back->Font, std::string("assets/fonts/pixel.ttf"));
+    CHECK_TRUE(back->Face == sage::ui::Label::Style::BoldItalic);
+    CHECK_NEAR(back->FontPixelHeight, 96.0f, 1e-3f);
+    CHECK_TRUE(back->FontPixelArt);
+    CHECK_NEAR(back->Scale, 48.0f, 1e-3f);
+    CHECK_NEAR(back->PadX, 200.0f, 1e-3f);
+}

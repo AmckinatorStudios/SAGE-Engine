@@ -35,7 +35,17 @@ glm::vec2 MeasuredWidth(const entt::registry& reg, entt::entity e, glm::vec2 siz
     // Значок занимает квадрат в высоту элемента — текст начинается за ним
     // (ровно там же, где его кладёт DrawElement).
     float w = hasIcon ? size.y : label->PadX;
-    if (!label->Text.empty() && label->Color.a > 0.0f) w += ui.MeasureText(label->Text, label->Scale);
+    // Ширина по тексту считается ТЕМ ЖЕ шрифтом и начертанием, которым текст
+    // будет нарисован: посчитанная шрифтом интерфейса, она обрезала бы конец
+    // надписи, набранной своим шрифтом или жирным.
+    if (!label->Text.empty() && label->Color.a > 0.0f) {
+        UITextStyle style;
+        if (!label->Font.empty())
+            style.UseFont = ui.LoadFont(label->Font, label->FontPixelHeight, label->FontPixelArt);
+        style.Bold = label->Face == Label::Style::Bold || label->Face == Label::Style::BoldItalic;
+        style.Italic = label->Face == Label::Style::Italic || label->Face == Label::Style::BoldItalic;
+        w += ui.MeasureText(label->Text, label->Scale, style);
+    }
     return {glm::max(w + label->PadX, size.y), size.y};
 }
 

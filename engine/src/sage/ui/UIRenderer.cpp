@@ -3,6 +3,9 @@
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
 #include "sage/rhi/GraphicsDevice.h"
+#include "sage/assets/AssetDatabase.h"
+#include <filesystem>
+#include <system_error>
 #include "sage/core/Config.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -175,12 +178,15 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_quadCount = 0;
 }
 
-UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
+UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image, const Font* font) {
     bool clipped = !m_clipStack.empty();
     glm::vec4 clip = clipped ? m_clipStack.back() : glm::vec4(0.0f);
     if (!m_segments.empty()) {
         Segment& last = m_segments.back();
-        if (last.Image == image && last.Clipped == clipped &&
+        // Шрифт — такая же смена состояния, как текстура: у каждого свой атлас,
+        // и склеить в один кусок глифы двух шрифтов значит взять буквы второго
+        // из картинки первого.
+        if (last.Image == image && last.TextFont == font && last.Clipped == clipped &&
             (!clipped || last.Clip == clip)) {
             return last; // состояние не изменилось — продолжаем батч
         }
@@ -188,6 +194,7 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image) {
     Segment seg;
     seg.FirstQuad = m_quadCount;
     seg.Image = image;
+    seg.TextFont = font;
     seg.Clipped = clipped;
     seg.Clip = clip;
     m_segments.push_back(seg);
@@ -241,14 +248,20 @@ void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, f
 }
 
 void UIRenderer::PushGlyphQuad(float x0, float y0, float x1, float y1,
-                               glm::vec2 uv0, glm::vec2 uv1, glm::vec3 color, float alpha) {
+                               glm::vec2 uv0, glm::vec2 uv1, glm::vec3 color, float alpha,
+                               float slant, float baseline) {
     unsigned char r = static_cast<unsigned char>(glm::clamp(color.r, 0.0f, 1.0f) * 255.0f);
     unsigned char g = static_cast<unsigned char>(glm::clamp(color.g, 0.0f, 1.0f) * 255.0f);
     unsigned char b = static_cast<unsigned char>(glm::clamp(color.b, 0.0f, 1.0f) * 255.0f);
     unsigned char a = static_cast<unsigned char>(glm::clamp(alpha, 0.0f, 1.0f) * 255.0f);
     // Half = 0 — SDF выключен (глиф режется покрытием атласа, не формой).
-    const glm::vec2 g0 = Rotated(x0, y0), g1 = Rotated(x1, y0);
-    const glm::vec2 g2v = Rotated(x1, y1), g3 = Rotated(x0, y1);
+    // Курсив: глиф наклоняется ОТНОСИТЕЛЬНО БАЗОВОЙ ЛИНИИ — верх уезжает
+    // вправо, низ (хвосты у «р», «у») влево. Наклон вокруг верха строки
+    // поставил бы буквы на воздух: у строки уехал бы весь низ.
+    const float topShift = slant != 0.0f ? (baseline - y0) * slant : 0.0f;
+    const float botShift = slant != 0.0f ? (baseline - y1) * slant : 0.0f;
+    const glm::vec2 g0 = Rotated(x0 + topShift, y0), g1 = Rotated(x1 + topShift, y0);
+    const glm::vec2 g2v = Rotated(x1 + botShift, y1), g3 = Rotated(x0 + botShift, y1);
     m_vertices.push_back({g0.x, g0.y, 0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
     m_vertices.push_back({g1.x, g1.y, 0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
     m_vertices.push_back({g2v.x, g2v.y, 0.0f, r, g, b, a, uv1.x, uv1.y, 0, 0, 0, 0, 0, 0});
@@ -488,27 +501,89 @@ void UIRenderer::PopClipRect() {
 // «M» выходит с ножками разной толщины, и весь текст едет волнами. Целый
 // масштаб — единственный способ сохранить рисунок таким, каким его нарисовали;
 // цена — шрифт меняет размер ступенями, и это правильная цена.
-float UIRenderer::FontScale(float scale) const {
-    if (!m_font) return scale;
-    const float raw = (scale * m_scaleToPixels) / m_font->PixelHeight();
-    if (!m_font->IsPixelArt()) return raw;
+float UIRenderer::FontScale(float scale, const Font* font) const {
+    const Font* f = font ? font : m_font.get();
+    if (!f) return scale;
+    const float raw = (scale * m_scaleToPixels) / f->PixelHeight();
+    if (!f->IsPixelArt()) return raw;
     return glm::max(1.0f, glm::floor(raw + 0.001f));
 }
 
+// Толщина синтетического жирного: доля от высоты строки, а не постоянное
+// число пикселей. Постоянная давала бы жирную сноску и еле заметный заголовок
+// — «жирность» обязана расти вместе с кеглем.
+float UIRenderer::BoldOffset(float scale, const Font* font) const {
+    const Font* f = font ? font : m_font.get();
+    if (!f) return glm::max(1.0f, scale * 0.15f);
+    return glm::max(1.0f, f->LineHeight(FontScale(scale, f)) * 0.035f);
+}
+
+const Font* UIRenderer::LoadFont(const std::string& path, float pixelHeight, bool pixelArt) {
+    if (path.empty()) return nullptr;
+    const std::string key =
+        path + "|" + std::to_string((int)pixelHeight) + "|" + (pixelArt ? "1" : "0");
+    auto it = m_fontCache.find(key);
+    if (it != m_fontCache.end()) return it->second.get();
+    std::unique_ptr<Font> font;
+    try {
+        // ПУТЬ РАЗРЕШАЕТСЯ ТАК ЖЕ, КАК У КАРТИНКИ ЭЛЕМЕНТА. Слот ассета хранит
+        // ссылку ОТНОСИТЕЛЬНО ПРОЕКТА («assets/fonts/pixel.ttf»), а открывается
+        // файл из текущего каталога процесса — у игры, редактора и тестов он
+        // разный. Перевод делает база ассетов (LocatePath), и ровно им же
+        // пользуется ResourceManager для текстур: своя выдумка здесь значила бы
+        // шрифт, который виден в редакторе и пропадает в собранной игре.
+        std::string file = sage::AssetDatabase::Instance().LocatePath(path);
+        std::error_code ec;
+        // Движковые шрифты лежат рядом с бинарником, а не в проекте.
+        if (!std::filesystem::exists(file, ec)) {
+            const std::string engineFile = sage::EngineAssetPath(path);
+            if (std::filesystem::exists(engineFile, ec)) file = engineFile;
+        }
+        font = Font::Load(file, pixelHeight, pixelArt);
+    } catch (const std::exception& e) {
+        // Жалуемся ОДИН раз на файл: запись кладётся пустой, и следующий кадр
+        // уже ничего не пытается открыть. Иначе битый путь у надписи на экране
+        // — это строка в логе каждый кадр, то есть лог, в котором не найти
+        // ничего другого.
+        LOG_WARN("UIRenderer") << "шрифт не открылся (" << path << "): " << e.what();
+    }
+    const Font* raw = font.get();
+    m_fontCache[key] = std::move(font);
+    return raw;
+}
+
 void UIRenderer::Text(float x, float y, float scale, glm::vec3 color, const std::string& text,
-                      float alpha) {
+                      float alpha, const UITextStyle& style) {
     if (text.empty()) return;
 
-    if (m_font) {
-        CurrentSegment(nullptr); // глифы идут в шрифтовый сегмент
+    const Font* font = FontOf(style);
+    if (font) {
+        CurrentSegment(nullptr, style.UseFont); // глифы идут в сегмент СВОЕГО шрифта
         // Масштаб API → множитель шрифта относительно базовой высоты запекания.
-        float fontScale = FontScale(scale);
+        const float fontScale = FontScale(scale, font);
         std::vector<Font::PositionedGlyph> quads;
-        m_font->BuildQuads(text, x, y, fontScale, quads);
+        font->BuildQuads(text, x, y, fontScale, quads);
+        // Наклон курсива — 0.21 ≈ 12°, столько же берут настоящие курсивные
+        // начертания. Базовая линия у строки одна: глифы наклоняются как одно
+        // целое, а не каждый вокруг себя.
+        const float slant = style.Italic ? 0.21f : 0.0f;
+        const float baseline = y + font->Ascent(fontScale);
         size_t added = 0;
         for (const auto& q : quads) {
-            PushGlyphQuad(q.x0, q.y0, q.x1, q.y1, q.uv0, q.uv1, color, alpha);
+            PushGlyphQuad(q.x0, q.y0, q.x1, q.y1, q.uv0, q.uv1, color, alpha, slant, baseline);
             ++added;
+        }
+        // Жирный — ВТОРОЙ проход со сдвигом вправо: два оттиска буквы, смещённые
+        // на доли кегля, дают ту же утолщённую форму, что и настоящий Bold, и
+        // не требуют второго файла шрифта (у половины бесплатных наборов его
+        // просто нет).
+        if (style.Bold) {
+            const float d = BoldOffset(scale, font);
+            for (const auto& q : quads) {
+                PushGlyphQuad(q.x0 + d, q.y0, q.x1 + d, q.y1, q.uv0, q.uv1, color, alpha, slant,
+                              baseline);
+                ++added;
+            }
         }
         m_segments.back().QuadCount += added;
         return;
@@ -545,17 +620,23 @@ void UIRenderer::TextEasyFont(float x, float y, float scale, glm::vec3 color, co
     }
 }
 
-float UIRenderer::LineHeight(float scale) const {
-    if (m_font) return m_font->LineHeight(FontScale(scale));
+float UIRenderer::LineHeight(float scale, const UITextStyle& style) const {
+    if (const Font* font = FontOf(style)) return font->LineHeight(FontScale(scale, font));
     return TextHeight(scale) * 1.6f; // без шрифта — векторный fallback
 }
 
-float UIRenderer::MeasureText(const std::string& text, float scale) const {
+float UIRenderer::MeasureText(const std::string& text, float scale, const UITextStyle& style) const {
     if (text.empty()) return 0.0f;
-    if (m_font) {
-        return m_font->MeasureWidth(text, FontScale(scale));
-    }
-    return stb_easy_font_width(const_cast<char*>(text.c_str())) * scale;
+    const Font* font = FontOf(style);
+    // Жирный шире ровно на свой сдвиг, курсив — на наклон последней строчной
+    // высоты. Без этих поправок текст, размеченный по ширине (перенос,
+    // выравнивание по правому краю, «ширина по тексту»), обрезал бы себе
+    // последнюю букву.
+    float extra = 0.0f;
+    if (style.Bold) extra += BoldOffset(scale, font);
+    if (style.Italic) extra += LineHeight(scale, style) * 0.21f * 0.5f;
+    if (font) return font->MeasureWidth(text, FontScale(scale, font)) + extra;
+    return stb_easy_font_width(const_cast<char*>(text.c_str())) * scale + extra;
 }
 
 void UIRenderer::TextCentered(float centerX, float y, float scale, glm::vec3 color,
@@ -627,7 +708,8 @@ void UIRenderer::End() {
             seg.Image->Bind(0);
         } else {
             m_shader.SetInt("uMode", 0);
-            if (m_font) m_font->Atlas().Bind(0);
+            const Font* font = seg.TextFont ? seg.TextFont : m_font.get();
+            if (font) font->Atlas().Bind(0);
         }
         m_geometry->DrawIndexedRange(seg.FirstQuad * 6, seg.QuadCount * 6);
     }

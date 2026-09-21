@@ -282,6 +282,42 @@ void ScriptEngine::RegisterUIApi() {
                                               centered ? sage::ui::Label::Align::Center
                                                        : sage::ui::Label::Align::Start;
                                       }),
+        // Шрифт и начертание надписи — из скрипта тоже: диалоги, титры и
+        // всплывающие подсказки собирает код, и «этот заголовок жирным» там
+        // такая же обычная просьба, как в редакторе.
+        "Font", UI_FIELD(sage::ui::Label, Font),
+        "FontPixelHeight", UI_FIELD(sage::ui::Label, FontPixelHeight),
+        "FontPixelArt", UI_FIELD(sage::ui::Label, FontPixelArt),
+        "Bold", sol::property([](UIRef& r) {
+                                  const sage::ui::Label* l = r.Peek<sage::ui::Label>();
+                                  return l && (l->Face == sage::ui::Label::Style::Bold ||
+                                               l->Face == sage::ui::Label::Style::BoldItalic);
+                              },
+                              [](UIRef& r, bool bold) {
+                                  if (!r.Alive()) return;
+                                  sage::ui::Label& l = r.Part<sage::ui::Label>();
+                                  const bool italic = l.Face == sage::ui::Label::Style::Italic ||
+                                                      l.Face == sage::ui::Label::Style::BoldItalic;
+                                  l.Face = bold ? (italic ? sage::ui::Label::Style::BoldItalic
+                                                          : sage::ui::Label::Style::Bold)
+                                                : (italic ? sage::ui::Label::Style::Italic
+                                                          : sage::ui::Label::Style::Regular);
+                              }),
+        "Italic", sol::property([](UIRef& r) {
+                                    const sage::ui::Label* l = r.Peek<sage::ui::Label>();
+                                    return l && (l->Face == sage::ui::Label::Style::Italic ||
+                                                 l->Face == sage::ui::Label::Style::BoldItalic);
+                                },
+                                [](UIRef& r, bool italic) {
+                                    if (!r.Alive()) return;
+                                    sage::ui::Label& l = r.Part<sage::ui::Label>();
+                                    const bool bold = l.Face == sage::ui::Label::Style::Bold ||
+                                                      l.Face == sage::ui::Label::Style::BoldItalic;
+                                    l.Face = italic ? (bold ? sage::ui::Label::Style::BoldItalic
+                                                            : sage::ui::Label::Style::Italic)
+                                                    : (bold ? sage::ui::Label::Style::Bold
+                                                            : sage::ui::Label::Style::Regular);
+                                }),
         "WrapText", UI_FIELD(sage::ui::Label, Wrap),
         "AutoWidth", UI_FIELD(sage::ui::Label, AutoWidth),
         "PadX", UI_FIELD(sage::ui::Label, PadX),

@@ -184,6 +184,27 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                     ctx.Browser->Open(c);
                     if (ctx.BrowseTarget) *ctx.BrowseTarget = &v;
                 }
+            } else if (f.Editor == W::Font) {
+                // Шрифт выбирается ТАКИМ ЖЕ слотом, как картинка: набирать путь
+                // руками к файлу, который у набора лежит в подпапке рядом с
+                // лицензией, — ровно то, ради чего слоты и заведены.
+                const assetslot::Result r =
+                    assetslot::Draw(host, f.Key, assetslot::Kind::Font, v, ctx.Preview,
+                                    f.Tooltip ? T(f.Tooltip) : label);
+                if (r.Changed) {
+                    host.PushUndoSnapshot();
+                    v = r.Path;
+                    changed = true;
+                }
+                if (r.BrowseRequested && ctx.Browser) {
+                    FileBrowser::Config c;
+                    c.Title = T("Choose a font");
+                    c.Filters = assetslot::Extensions(assetslot::Kind::Font);
+                    c.FilterLabel = T("Fonts");
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    ctx.Browser->Open(c);
+                    if (ctx.BrowseTarget) *ctx.BrowseTarget = &v;
+                }
             } else if (f.Editor == W::IconName) {
                 // Значки выбираются ГЛАЗАМИ: список имён без картинок — это
                 // угадывание, как выглядит «drop» и чем он отличается от «wire».

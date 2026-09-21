@@ -360,21 +360,63 @@ void DrawIconPart(const PartDrawContext& c) {
 
 const char* const kAlign[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT(SAGE_UI_TEXT("Center")), SAGE_UI_TEXT("End")};
 
+const char* const kLabelFaces[] = {SAGE_UI_TEXT("Regular"), SAGE_UI_TEXT("Bold"),
+                                   SAGE_UI_TEXT("Italic"), SAGE_UI_TEXT("Bold italic")};
+
 const std::vector<PartField>& LabelFields() {
     static const std::vector<PartField> f = {
         {"text", SAGE_UI_TEXT("Text"), PartField::Kind::String, offsetof(Label, Text), 0.0f, 0.0f, nullptr,
          nullptr, 0, PartField::Widget::Multiline},
-        {"scale", SAGE_UI_TEXT("Font size"), PartField::Kind::Float, offsetof(Label, Scale), 0.5f, 12.0f},
+        // ПРЕДЕЛ КЕГЛЯ — 128, а не 12. Прежние 12 упирались примерно в сотню
+        // экранных пикселей: заголовок меню, надпись на весь экран, счёт в
+        // аркаде — всё, что крупнее, было просто НЕДОСТУПНО (поле ограничивало
+        // и ввод числа, а не только ползунок). Нижняя граница тоже опущена:
+        // сноска мельче половинного кегля — обычное дело.
+        {"scale", SAGE_UI_TEXT("Font size"), PartField::Kind::Float, offsetof(Label, Scale), 0.1f, 128.0f},
         {"color", SAGE_UI_TEXT("Colour"), PartField::Kind::Color, offsetof(Label, Color)},
+        {"face", SAGE_UI_TEXT("Face"), PartField::Kind::Enum, offsetof(Label, Face), 0.0f, 3.0f,
+         "Bold and italic are drawn by the engine itself, so they work with any\n"
+         "font file — including those that ship a single face.",
+         kLabelFaces, 4},
+        {"font", SAGE_UI_TEXT("Font file"), PartField::Kind::String, offsetof(Label, Font), 0.0f, 0.0f,
+         "Empty — the project interface font. A .ttf/.otf next to the game.",
+         nullptr, 0, PartField::Widget::Font},
+        {"fontPixelHeight", SAGE_UI_TEXT("Font baking size"), PartField::Kind::Float,
+         offsetof(Label, FontPixelHeight), 8.0f, 256.0f,
+         "How tall glyphs are baked into the atlas. Bigger is sharper at large\n"
+         "sizes and costs more texture memory."},
+        {"fontPixelArt", SAGE_UI_TEXT("Pixel font"), PartField::Kind::Bool,
+         offsetof(Label, FontPixelArt), 0.0f, 1.0f,
+         "Nearest neighbour, no mipmaps and a whole-number scale: a fractional\n"
+         "one stretches some strokes of a letter over two screen pixels and the\n"
+         "neighbouring ones over one, and the text goes wavy."},
         {"horizontal", SAGE_UI_TEXT("Horizontal"), PartField::Kind::Enum, offsetof(Label, Horizontal), 0.0f,
          0.0f, nullptr, kAlign, 3},
         {"vertical", SAGE_UI_TEXT("Vertical"), PartField::Kind::Enum, offsetof(Label, Vertical), 0.0f, 0.0f,
          nullptr, kAlign, 3},
         {"wrap", SAGE_UI_TEXT("Wrap"), PartField::Kind::Bool, offsetof(Label, Wrap)},
         {"autoWidth", SAGE_UI_TEXT("Width from text"), PartField::Kind::Bool, offsetof(Label, AutoWidth)},
-        {"padX", SAGE_UI_TEXT("Side padding"), PartField::Kind::Float, offsetof(Label, PadX), 0.0f, 64.0f},
+        // БОКОВОЙ ОТСТУП — до 512. Прежние 64 хватало кнопке и не хватало
+        // ничему другому: колонка текста в письме, поле с широкой рамкой,
+        // отступ под значок слева — всё это десятки и сотни пикселей, и поле
+        // не давало их даже ввести числом.
+        {"padX", SAGE_UI_TEXT("Side padding"), PartField::Kind::Float, offsetof(Label, PadX), 0.0f, 512.0f},
     };
     return f;
+}
+
+// Что и чем писать: свой шрифт надписи (если задан и открылся) плюс
+// начертание. Одной функцией, потому что текст надписи рисует не только
+// DrawLabelPart: поле ввода показывает то же содержимое ТЕМ ЖЕ шрифтом, и
+// разойтись здесь значило бы получить в поле ввода другой шрифт, чем в
+// подписи рядом.
+UITextStyle StyleOf(const Label& label, UIRenderer& ui) {
+    UITextStyle style;
+    if (!label.Font.empty())
+        style.UseFont = ui.LoadFont(label.Font, label.FontPixelHeight, label.FontPixelArt);
+    style.Bold = label.Face == Label::Style::Bold || label.Face == Label::Style::BoldItalic;
+    style.Italic = label.Face == Label::Style::Italic || label.Face == Label::Style::BoldItalic;
+    return style;
 }
 
 float AlignX(Label::Align a, float left, float avail, float textWidth) {
@@ -411,14 +453,15 @@ void DrawLabelPart(const PartDrawContext& c) {
     const float avail = std::max(r.w - padX * 2.0f, 1.0f);
     const glm::vec3 rgb{label.Color.r, label.Color.g, label.Color.b};
     const float alpha = AlphaOf(c, label.Color.a);
+    const UITextStyle style = StyleOf(label, ui);
 
     std::vector<std::string> lines;
-    if (label.Wrap) lines = WrapLines(label.Text, avail, textScale, ui);
+    if (label.Wrap) lines = WrapLines(label.Text, avail, textScale, ui, &style);
     else if (label.Text.find('\n') != std::string::npos)
-        lines = WrapLines(label.Text, 0.0f, textScale, ui); // только по явным \n
+        lines = WrapLines(label.Text, 0.0f, textScale, ui, &style); // только по явным \n
     else lines.push_back(label.Text);
 
-    const float lineH = ui.LineHeight(textScale);
+    const float lineH = ui.LineHeight(textScale, style);
     const float blockH = lineH * (float)(lines.size() - 1) + ui.TextHeight(textScale);
     float y = AlignY(label.Vertical, r, blockH);
 
@@ -429,8 +472,8 @@ void DrawLabelPart(const PartDrawContext& c) {
     if (clip) ui.PushClipRect(r.x, r.y, r.w, r.h);
     for (const std::string& line : lines) {
         if (!line.empty()) {
-            ui.Text(AlignX(label.Horizontal, left, avail, ui.MeasureText(line, textScale)), y,
-                    textScale, rgb, line, alpha);
+            ui.Text(AlignX(label.Horizontal, left, avail, ui.MeasureText(line, textScale, style)),
+                    y, textScale, rgb, line, alpha, style);
         }
         y += lineH;
     }
@@ -557,13 +600,15 @@ void DrawTextInputPart(const PartDrawContext& c) {
     const glm::vec3 rgb{label->Color.r, label->Color.g, label->Color.b};
     const float y = r.y + (r.h - ui.TextHeight(textScale)) * 0.5f;
 
+    const UITextStyle style = StyleOf(*label, ui);
     const bool empty = label->Text.empty();
     const std::string shown =
         empty ? input.Placeholder : (input.Password ? MaskText(label->Text) : label->Text);
     if (!shown.empty()) {
         // Подсказка бледнее содержимого — иначе пустое поле выглядит
         // заполненным, и человек стирает то, чего не вводил.
-        ui.Text(left, y, textScale, rgb, shown, AlphaOf(c, label->Color.a) * (empty ? 0.45f : 1.0f));
+        ui.Text(left, y, textScale, rgb, shown, AlphaOf(c, label->Color.a) * (empty ? 0.45f : 1.0f),
+                style);
     }
 
     // Курсор мигает только в фокусе и только когда поле включено.
@@ -571,7 +616,7 @@ void DrawTextInputPart(const PartDrawContext& c) {
     if (!c.Focused || !c.Enabled || !act) return;
     const int caret = std::clamp(act->Runtime.Caret, 0, (int)label->Text.size());
     const std::string head = label->Text.substr(0, (size_t)caret);
-    const float cx = left + ui.MeasureText(input.Password ? MaskText(head) : head, textScale);
+    const float cx = left + ui.MeasureText(input.Password ? MaskText(head) : head, textScale, style);
     // Полсекунды виден, полсекунды нет; после каждой правки счётчик
     // сбрасывается, чтобы курсор не пропал ровно тогда, когда на него смотрят.
     if (std::fmod(act->Runtime.CaretBlink, 1.0f) < 0.5f) {
@@ -809,7 +854,8 @@ int Utf8Length(const std::string& s) {
 // влезает целиком, режется по символам — иначе одно длинное слово молча уехало
 // бы за край, то есть ровно то, от чего перенос и спасает. Явные \n уважаются.
 std::vector<std::string> WrapLines(const std::string& text, float maxWidth, float scale,
-                                   UIRenderer& ui) {
+                                   UIRenderer& ui, const UITextStyle* styleOrNull) {
+    const UITextStyle style = styleOrNull ? *styleOrNull : UITextStyle{};
     std::vector<std::string> lines;
     if (maxWidth <= 0.0f) { lines.push_back(text); return lines; }
 
@@ -826,15 +872,15 @@ std::vector<std::string> WrapLines(const std::string& text, float maxWidth, floa
             if (wordEnd == std::string::npos) wordEnd = paragraph.size();
             const std::string word = paragraph.substr(i, wordEnd - i);
             const std::string candidate = line.empty() ? word : line + " " + word;
-            if (ui.MeasureText(candidate, scale) <= maxWidth || line.empty()) {
-                if (ui.MeasureText(candidate, scale) > maxWidth && line.empty()) {
+            if (ui.MeasureText(candidate, scale, style) <= maxWidth || line.empty()) {
+                if (ui.MeasureText(candidate, scale, style) > maxWidth && line.empty()) {
                     // Слово шире строки — режем по символам (по границам UTF-8).
                     std::string chunk;
                     size_t c = 0;
                     while (c < word.size()) {
                         const size_t next = (size_t)NextCharBoundary(word, (int)c);
                         const std::string grown = chunk + word.substr(c, next - c);
-                        if (!chunk.empty() && ui.MeasureText(grown, scale) > maxWidth) {
+                        if (!chunk.empty() && ui.MeasureText(grown, scale, style) > maxWidth) {
                             lines.push_back(chunk);
                             chunk.clear();
                             continue;

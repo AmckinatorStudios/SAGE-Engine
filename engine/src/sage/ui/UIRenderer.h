@@ -5,6 +5,7 @@
 #include "sage/rhi/Resources.h"
 #include "sage/ui/NineSlice.h"
 #include <memory>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
@@ -39,6 +40,27 @@
 // умолчанию грузится сам (assets/fonts/sage-default.ttf → системные), при
 // отсутствии — fallback на stb_easy_font (ASCII).
 // ---------------------------------------------------------------------
+// --- ЧЕМ ПИШЕТ ЭТА НАДПИСЬ ---------------------------------------------
+//
+// Шрифт у интерфейса был ОДИН на всю игру (тот, что в настройках проекта).
+// Заголовок рубленым, а текст квеста — своим рукописным; подпись под
+// кнопкой жирной, а сноску курсивом — всё это было нечем сделать вовсе:
+// либо меняешь шрифт целиком, либо не меняешь.
+//
+// НАЧЕРТАНИЕ СИНТЕТИЧЕСКОЕ, и это осознанный выбор. Настоящие жирный и
+// курсив — ОТДЕЛЬНЫЕ файлы шрифта (Roboto-Bold.ttf), и требовать их значит
+// требовать, чтобы у человека они были: у половины бесплатных шрифтов в
+// наборе одно начертание, а «сделать жирным» нужно всем. Поэтому жирный
+// рисуется вторым проходом со сдвигом (обводка толщиной в доли кегля), а
+// курсив — наклоном глифов относительно базовой линии. Если у шрифта есть
+// свой Bold-файл, он назначается как отдельный шрифт и выйдет лучше — одно
+// другому не мешает.
+struct UITextStyle {
+    const Font* UseFont = nullptr;   // nullptr — шрифт интерфейса
+    bool Bold = false;
+    bool Italic = false;
+};
+
 class UIRenderer {
 public:
     UIRenderer();
@@ -193,10 +215,17 @@ public:
     void PushClipRect(float x, float y, float w, float h);
     void PopClipRect();
 
+    // Шрифт из файла (.ttf/.otf) с запоминанием: одна и та же надпись рисуется
+    // каждый кадр, и читать файл заново было бы разорительно. nullptr — файл
+    // не открылся (о причине — один раз в лог, дальше молча: иначе битый путь
+    // залил бы лог по строке на кадр).
+    const Font* LoadFont(const std::string& path, float pixelHeight = 48.0f,
+                         bool pixelArt = false);
+
     // Текст с левым верхним углом в (x, y). scale 1.0 — "родные" ~7px глифы,
     // на практике для читаемости используем 1.5–2.5. alpha — прозрачность.
     void Text(float x, float y, float scale, glm::vec3 color, const std::string& text,
-              float alpha = 1.0f);
+              float alpha = 1.0f, const UITextStyle& style = UITextStyle{});
 
     // Текст, отцентрированный по горизонтали относительно centerX
     void TextCentered(float centerX, float y, float scale, glm::vec3 color,
@@ -204,17 +233,17 @@ public:
 
     // Ширина строки в экранных пикселях при данном масштабе (для вёрстки).
     // Учитывает текущий шрифт (пропорциональные метрики TrueType).
-    float MeasureText(const std::string& text, float scale) const;
+    float MeasureText(const std::string& text, float scale, const UITextStyle& style = UITextStyle{}) const;
     // Множитель шрифта относительно базовой высоты запекания (у пиксельного
     // шрифта — целый). Открыт наружу, потому что по нему выравнивают вёрстку.
-    float FontScale(float scale) const;
+    float FontScale(float scale, const Font* font = nullptr) const;
     // Высота строки в пикселях при данном масштабе (для вертикальной вёрстки).
     float TextHeight(float scale) const { return 8.0f * scale; }
     // Шаг между строками. Берётся у ШРИФТА, а не из TextHeight: та — номинальная
     // высота строки тулкита (8·scale), к реальному кеглю отношения не имеющая.
     // На пиксельном шрифте с целым масштабом глиф вдвое выше номинала, и абзац,
     // разложенный по TextHeight, налезает сам на себя.
-    float LineHeight(float scale) const;
+    float LineHeight(float scale, const UITextStyle& style = UITextStyle{}) const;
 
     void End();
 
@@ -242,6 +271,11 @@ private:
     struct Segment {
         size_t FirstQuad = 0, QuadCount = 0;
         const Texture* Image = nullptr; // nullptr — шрифт/сплошные квады
+        // Чей атлас привязывать глифам этого куска. nullptr — шрифт интерфейса.
+        // Без этого поля вся надпись рисовалась ОДНИМ атласом: у второго шрифта
+        // на экране глифы брались бы из чужой картинки — то есть текст выходил
+        // бы кашей из случайных букв.
+        const Font* TextFont = nullptr;
         bool Clipped = false;
         glm::vec4 Clip{0.0f}; // x, y, w, h (экранные координаты, верхний левый угол)
     };
@@ -266,13 +300,23 @@ private:
     // общая основа и для градиента, и для наклонных форм. SDF выключен
     // (Half = 0): у произвольного четырёхугольника нет «центра и полуразмера».
     void PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]);
+    // slant — наклон курсива (сдвиг по X на единицу высоты НАД базовой
+    // линией); 0 — прямой глиф.
     void PushGlyphQuad(float x0, float y0, float x1, float y1,
-                       glm::vec2 uv0, glm::vec2 uv1, glm::vec3 color, float alpha);
+                       glm::vec2 uv0, glm::vec2 uv1, glm::vec3 color, float alpha,
+                       float slant = 0.0f, float baseline = 0.0f);
     void TextEasyFont(float x, float y, float scale, glm::vec3 color, const std::string& text);
     void EnsureIndexCapacity(size_t quadCount);
     // Сегмент для следующего квада с нужным состоянием (текстура/клип):
     // продолжает текущий, если состояние совпадает, иначе начинает новый.
-    Segment& CurrentSegment(const Texture* image);
+    Segment& CurrentSegment(const Texture* image, const Font* font = nullptr);
+
+    // Шрифт, которым на самом деле писать: свой у надписи или общий.
+    const Font* FontOf(const UITextStyle& style) const {
+        return style.UseFont ? style.UseFont : m_font.get();
+    }
+    // Сдвиг второго прохода у жирного, в экранных пикселях.
+    float BoldOffset(float scale, const Font* font) const;
 
     std::vector<UIVertex> m_vertices; // все квады кадра (прямоугольники, картинки, глифы)
     std::vector<Segment> m_segments;
@@ -283,6 +327,10 @@ private:
     size_t m_indexCapacity = 0;
     Shader m_shader;
     std::unique_ptr<Font> m_font;   // TrueType-шрифт (nullptr → stb_easy_font)
+    // Шрифты надписей: ключ — «путь|высота запекания|пиксельный». Пустая запись
+    // означает «этот файл не открылся» — негативный кэш, чтобы битый путь не
+    // пытались читать каждый кадр.
+    std::unordered_map<std::string, std::unique_ptr<Font>> m_fontCache;
     // Множитель scale→пиксели для TrueType: старый API оперировал масштабами
     // ~1.5–2.5 (глифы stb_easy_font ~7px). Чтобы вёрстка игр не поехала,
     // отображаем scale в пиксельную высоту так же по порядку величины.
