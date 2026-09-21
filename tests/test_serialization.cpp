@@ -1178,3 +1178,28 @@ TEST(Scene_migration_turns_pixel_art_into_nearest_filtering) {
     CHECK_FALSE(j["objects"][0]["ui"]["image"].contains("pixelArt"));
     CHECK_FALSE(j["objects"][2]["ui"]["label"].contains("fontPixelArt"));
 }
+
+TEST(Scene_migration_keeps_sharp_images_pixel_snapped) {
+    // Кратный масштаб («не растягивать пиксель исходника дробно») включался
+    // ЗАОДНО с резкой фильтрацией. Разделив их, нельзя менять вид уже
+    // собранных экранов: всё, что было резким, продолжает считаться целым
+    // масштабом, а сглаженное — нет.
+    const std::string oldScene = R"({
+      "name": "UI",
+      "sage_scene_version": 14,
+      "objects": [
+        {"id": 1, "name": "Sprite",
+         "ui": {"element": {"anchor": 0}, "image": {"path": "hero.png", "filter": 1}}},
+        {"id": 2, "name": "Photo",
+         "ui": {"element": {"anchor": 0}, "image": {"path": "photo.png", "filter": 0}}}
+      ]
+    })";
+
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    CHECK_EQ(j["sage_scene_version"].get<int>(), SceneSerializer::CurrentVersion());
+    CHECK_TRUE(j["objects"][0]["ui"]["image"]["snapPixels"].get<bool>());
+    CHECK_FALSE(j["objects"][1]["ui"]["image"]["snapPixels"].get<bool>());
+    // Фильтрация при этом осталась своей: миграция разделяет настройки, а не
+    // переписывает одну другой.
+    CHECK_EQ(j["objects"][0]["ui"]["image"]["filter"].get<int>(), 1);
+}

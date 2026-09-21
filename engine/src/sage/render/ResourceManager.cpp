@@ -89,6 +89,24 @@ std::string Locate(const std::string& path) {
 // одному полю. Тем же путём один и тот же меш и одна и та же текстура ложились
 // в память по два раза.
 //
+// НАСТРОЙКИ ВЫБОРКИ — ЧАСТЬ КЛЮЧА.
+//
+// Раньше ключом был только путь, то есть одна картинка на файл. Два
+// потребителя с разными требованиями (материал просит анизотропную с
+// мипмапами, элемент интерфейса — Nearest без них) перекидывали её туда-сюда
+// каждый кадр; чтобы не заливать текстуру на видеокарту дважды за кадр, после
+// двух перекидываний настройка ЗАМОРАЖИВАЛАСЬ на той, что уже на карте.
+//
+// Снаружи это и было «фильтрация не работает»: набор спрайтов 16x16 остаётся
+// сглаженным, что ни поставь, — потому что ту же картинку рядом показывает
+// слот ассета, и он просит сглаживание. Причём замирало оно молча (кроме одной
+// строки в логе), а от порядка обращений зависело, чья настройка победит.
+//
+// Теперь у каждой пары «фильтр + мипмапы» своя запись: никто ни у кого ничего
+// не отнимает, пересоздавать нечего, и обе картинки на видеокарте существуют
+// ровно столько, сколько ими действительно пользуются (GarbageCollectUnused
+// выгружает ту, на которую не осталось ссылок).
+//
 // Сначала Locate (ссылка проекта -> открывающийся путь), затем
 // weakly_canonical: он убирает «.», «..», разницу разделителей и символические
 // ссылки, и НЕ требует существования файла — несуществующий путь тоже получает
@@ -103,6 +121,10 @@ std::string Locate(const std::string& path) {
 // объекту, а не в кадре — в кадре материалы и текстуры уже разобраны в
 // shared_ptr. Таблица же добавила бы устаревание, привязанное к текущему
 // каталогу процесса и к корню проекта: файл при этом существует, просто не тот.
+std::string SamplingSuffix(TextureFilter filter, bool mipmaps) {
+    return std::string("|f") + std::to_string((int)filter) + (mipmaps ? "m" : "");
+}
+
 std::string CacheKey(const std::string& path) {
     if (path.empty()) return path;
     std::error_code ec;
@@ -258,13 +280,16 @@ int ResourceManager::ReloadChangedAssets() {
     for (const auto& [path, stamp] : m_skinnedStamps) {
         if (FileStamp(Locate(path)) != stamp) staleSkinned.push_back(path);
     }
+    // КЛЮЧ, А НЕ ПУТЬ: у одного файла в кэше столько записей, сколько у него
+    // разных настроек выборки, и перечитать надо КАЖДУЮ — иначе сглаженная
+    // копия обновится, а резкая останется со вчерашними пикселями.
     std::vector<std::string> staleTextures;
-    for (const auto& [path, rec] : m_textures) {
+    for (const auto& [key, rec] : m_textures) {
         // Процедурную (Generated) перечитывать неоткуда, а грузящуюся (Pending)
         // рано: её пиксели ещё едут из фонового потока, и подмена сейчас
         // означала бы гонку с ними.
         if (rec.Generated || rec.Pending || !rec.Tex) continue;
-        if (FileStamp(Locate(path)) != rec.Stamp) staleTextures.push_back(path);
+        if (FileStamp(Locate(rec.Source)) != rec.Stamp) staleTextures.push_back(key);
     }
 
     for (const std::string& path : staleModels) {
@@ -316,8 +341,9 @@ int ResourceManager::ReloadChangedAssets() {
 
     // ТЕКСТУРА — НА МЕСТЕ: на неё ссылаются материалы и интерфейс, и заменить
     // запись в кэше значило бы оставить их со старой картинкой.
-    for (const std::string& path : staleTextures) {
-        TextureRecord& rec = m_textures[path];
+    for (const std::string& key : staleTextures) {
+        TextureRecord& rec = m_textures[key];
+        const std::string path = rec.Source;
         try {
             *rec.Tex = Texture(Locate(path), rec.Filter, rec.Mipmaps);
             m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
@@ -343,48 +369,24 @@ int ResourceManager::ReloadChangedAssets() {
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
                                                     TextureFilter filter, bool mipmaps) {
     if (path.empty()) return nullptr;
-    const std::string key = CacheKey(path);
+    // Ключ = файл + настройки выборки: две фильтрации одного файла — это две
+    // картинки, а не одна, которую отнимают друг у друга (см. CacheKey выше).
+    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps);
     auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick(); // обращение -> «свежая» для LRU
-        // Тот же файл запросили с другой фильтрацией: пересоздаём картинку НА
-        // МЕСТЕ, чтобы все, кто уже держит на неё shared_ptr, увидели правку.
-        // Ключ кэша остаётся путём к файлу — по нему же идут перезагрузка и
-        // стриминг, и подмешивать в него настройки нельзя.
-        if (it->second.Tex && (it->second.Filter != filter || it->second.Mipmaps != mipmaps)) {
-            // Перекидывать картинку туда-обратно нельзя: см. FilterFlips.
-            // После двух смен настройки остаётся та, что уже на видеокарте, а
-            // причина — в лог, ОДИН раз и с именем файла: иначе «редактор
-            // просел на ровном месте» ищется по всему рендеру, хотя ответ в
-            // одной строке.
-            constexpr int kMaxFilterFlips = 2;
-            if (it->second.FilterFlips >= kMaxFilterFlips) {
-                if (!it->second.FilterWarned) {
-                    it->second.FilterWarned = true;
-                    LOG_WARN("Resources")
-                        << "Текстура " << path
-                        << " запрашивается с разной фильтрацией из разных мест — оставлена та, "
-                           "что уже на видеокарте. Пересоздавать её каждый кадр дороже, чем "
-                           "разница в фильтрации.";
-                }
-                return it->second.Tex;
-            }
-            ++it->second.FilterFlips;
-            try {
-                *it->second.Tex = Texture(Locate(path), filter, mipmaps);
-                m_textureBytes -= it->second.Bytes;
-                it->second.Bytes = it->second.Tex->GpuBytes();
-                m_textureBytes += it->second.Bytes;
-                it->second.Filter = filter;
-                it->second.Mipmaps = mipmaps;
-            } catch (const std::exception& e) {
-                LOG_ERROR("Resources") << "Смена фильтрации не удалась (" << path
-                                       << "): " << e.what();
-            }
-        }
         return it->second.Tex;
     }
+    // Процедурная картинка зарегистрирована ПОД ИМЕНЕМ, без настроек выборки:
+    // её пиксели собраны движком, перечитывать их неоткуда, и просить её с
+    // другой фильтрацией — значит просить ту же самую.
+    auto generated = m_textures.find(CacheKey(path));
+    if (generated != m_textures.end() && generated->second.Generated) {
+        generated->second.Tick = NextTick();
+        return generated->second.Tex;
+    }
     TextureRecord rec;
+    rec.Source = path;
     rec.Filter = filter;
     rec.Mipmaps = mipmaps;
     try {
@@ -406,7 +408,11 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
 
 std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& path) {
     if (path.empty()) return nullptr;
-    const std::string key = CacheKey(path);
+    // Те же настройки, что у GetTexture по умолчанию, — иначе асинхронно
+    // загруженная картинка легла бы в ДРУГУЮ запись кэша, чем ту, которую
+    // потом спросят обычным путём, и файл прочитался бы дважды.
+    const std::string key =
+        CacheKey(path) + SamplingSuffix(TextureFilter::Trilinear, /*mipmaps=*/true);
     auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick();
@@ -425,6 +431,9 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
         return nullptr;
     }
     rec.Bytes = rec.Tex->GpuBytes();
+    rec.Source = path;
+    rec.Filter = TextureFilter::Trilinear;
+    rec.Mipmaps = true;
     rec.Tick = NextTick();
     rec.Pending = true;
     rec.Stamp = FileStamp(Locate(path));
@@ -523,18 +532,24 @@ std::shared_ptr<Skybox> ResourceManager::GetSkyboxImage(const std::string& file,
 
 void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture) {
     if (name.empty() || !texture) return;
-    auto it = m_textures.find(name);
+    // Имя приводится тем же CacheKey, что и путь файла: спрашивать
+    // посчитанную картинку будут через GetTexture, и там ключ строится так же.
+    // Настройки выборки в ключ НЕ идут: пиксели собраны движком, перечитать их
+    // неоткуда, и «та же картинка с другой фильтрацией» для неё не существует.
+    const std::string key = CacheKey(name);
+    auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         m_textureBytes -= std::min(m_textureBytes, it->second.Bytes);
         m_textures.erase(it);
     }
     TextureRecord rec;
     rec.Bytes = texture->GpuBytes();
+    rec.Source = name;
     rec.Tick = NextTick();
     rec.Generated = true;
     rec.Tex = std::move(texture);
     m_textureBytes += rec.Bytes;
-    m_textures[name] = std::move(rec);
+    m_textures[key] = std::move(rec);
 }
 
 std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) {
@@ -802,10 +817,13 @@ void ResourceManager::EvictToBudget() {
     }
 }
 
-void ResourceManager::DowngradeTexture(const std::string& path) {
-    auto it = m_textures.find(path);
+void ResourceManager::DowngradeTexture(const std::string& key) {
+    auto it = m_textures.find(key);
     if (it == m_textures.end() || !it->second.Tex) return;
     TextureRecord& rec = it->second;
+    // Пиксели читаются ПО ПУТИ записи: ключ теперь несёт ещё и настройки
+    // выборки, и открыть его как файл нельзя.
+    const std::string path = rec.Source;
 
     // Пиксели берём заново с диска: держать их копию в оперативной памяти ради
     // возможного понижения значило бы экономить видеопамять за счёт обычной,

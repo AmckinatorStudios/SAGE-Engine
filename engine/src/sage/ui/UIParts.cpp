@@ -167,8 +167,19 @@ const std::vector<PartField>& ImageFields() {
          offsetof(Image, SliceDrawCenter), 0.0f, 1.0f,
          "An outline frame has no middle — what is under the element shows through.",
          nullptr, 0, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
-        {"pixelScale", SAGE_UI_TEXT("Pixel scale"), PartField::Kind::Float, offsetof(Image, PixelScale), 0.0f,
-         16.0f, "0 picks it automatically."},
+        {"pixelScale", SAGE_UI_TEXT("Source pixel size"), PartField::Kind::Float,
+         offsetof(Image, PixelScale), 0.0f, 16.0f,
+         "How many screen pixels one pixel of the file takes.\n"
+         "0 — fit to the element (that is, stretch it).\n"
+         "Sprite sheets need it: a 48x48 frame stretched to 300x120 turns to\n"
+         "mush, while at scale 3 its drawing keeps its own size."},
+        {"snapPixels", SAGE_UI_TEXT("Whole-number scale"), PartField::Kind::Bool,
+         offsetof(Image, SnapPixels), 0.0f, 1.0f,
+         "Rounds the scale down to a whole number: at 3.125 some strokes are\n"
+         "stretched over four screen pixels and the neighbouring ones over\n"
+         "three, and a straight frame goes wavy. The element is then not filled\n"
+         "completely — that is the price, and that is why it is a choice and\n"
+         "not a side effect of filtering."},
         {"filter", SAGE_UI_TEXT("Filtering"), PartField::Kind::Enum, offsetof(Image, Filtering),
          0.0f, 1.0f,
          "Smooth — averaging with mipmaps, for anything that gets scaled down.\n"
@@ -230,7 +241,7 @@ void DrawImagePart(const PartDrawContext& c) {
                 const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
                 pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
             }
-            if (img.Sharp()) pixels = std::max(1.0f, std::floor(pixels));
+            if (img.SnapPixels) pixels = std::max(1.0f, std::floor(pixels));
         }
         ui.ImageSliced(r.x, r.y, r.w, r.h, img.Tex.get(), src, slice, pixels, rgb, alpha);
         return;
@@ -253,7 +264,7 @@ void DrawImagePart(const PartDrawContext& c) {
     if (img.Fit == Image::Mode::Fit || img.Fit == Image::Mode::Cover) {
         const ImagePlacement fit =
             PlaceImage(r, src.Whole() ? 0.0f : src.X, src.Whole() ? 0.0f : src.Y, srcW, srcH,
-                       img.Fit == Image::Mode::Cover, img.Sharp());
+                       img.Fit == Image::Mode::Cover, img.SnapPixels);
         dst = fit.Dst;
         drawn = {fit.SrcX, fit.SrcY, fit.SrcW, fit.SrcH};
         ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, img.Tex.get(), drawn, rgb, alpha);
@@ -264,13 +275,13 @@ void DrawImagePart(const PartDrawContext& c) {
     // разный дробный масштаб по осям даёт рваные края. Берём ЦЕЛЫЙ масштаб и
     // ставим по центру: элемент может остаться больше картинки, и это честнее.
     float pixels = img.PixelScale * c.Scale;
-    if (img.Sharp() || pixels > 0.0f) {
+    if (img.SnapPixels || pixels > 0.0f) {
         const float sw = srcW;
         const float sh = srcH;
         if (sw > 0.0f && sh > 0.0f) {
             if (pixels <= 0.0f) {
                 pixels = std::min(r.w / sw, r.h / sh);
-                if (img.Sharp()) pixels = std::max(1.0f, std::floor(pixels));
+                if (img.SnapPixels) pixels = std::max(1.0f, std::floor(pixels));
             }
             dst.w = sw * pixels;
             dst.h = sh * pixels;

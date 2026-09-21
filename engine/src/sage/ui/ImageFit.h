@@ -25,10 +25,10 @@ struct ImagePlacement {
 // rect — прямоугольник элемента; srcX/srcY/srcW/srcH — кусок исходника
 // (весь файл: 0,0,ширина,высота). cover=false — вписать целиком (поля по
 // краям), cover=true — заполнить без полей (лишнее по длинной стороне
-// обрезается). pixelArt округляет масштаб вниз до целого: дробный растягивает
+// обрезается). snapPixels округляет масштаб вниз до целого: дробный растягивает
 // одни пиксели исходника на два экранных, а соседние на один.
 inline ImagePlacement PlaceImage(const UIRect& rect, float srcX, float srcY, float srcW,
-                                 float srcH, bool cover, bool pixelArt) {
+                                 float srcH, bool cover, bool snapPixels) {
     ImagePlacement out;
     out.Dst = rect;
     out.SrcX = srcX;
@@ -39,7 +39,7 @@ inline ImagePlacement PlaceImage(const UIRect& rect, float srcX, float srcY, flo
 
     if (!cover) {
         float k = std::min(rect.w / srcW, rect.h / srcH);
-        if (pixelArt) k = std::max(1.0f, std::floor(k));
+        if (snapPixels) k = std::max(1.0f, std::floor(k));
         out.Dst.w = srcW * k;
         out.Dst.h = srcH * k;
         out.Dst.x = rect.x + std::floor((rect.w - out.Dst.w) * 0.5f);

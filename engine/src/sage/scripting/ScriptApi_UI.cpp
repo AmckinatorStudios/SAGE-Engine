@@ -340,6 +340,7 @@ void ScriptEngine::RegisterUIApi() {
         "SpritePressed", UI_FIELD(sage::ui::Image, SpritePressed),
         "SliceBorder", UI_FIELD(sage::ui::Image, SliceBorder),
         "PixelScale", UI_FIELD(sage::ui::Image, PixelScale),
+        "SnapPixels", UI_FIELD(sage::ui::Image, SnapPixels),
         "Filter", sol::property(
                       [](UIRef& r) {
                           const sage::ui::Image* im = r.Peek<sage::ui::Image>();

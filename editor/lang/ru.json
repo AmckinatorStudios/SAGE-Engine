@@ -1870,6 +1870,8 @@
     "Font filtering": "Фильтрация шрифта",
     "Smooth": "Сглаженная",
     "Nearest": "Ближайший сосед",
+    "Source pixel size": "Размер пикселя исходника",
+    "Whole-number scale": "Кратный масштаб",
     "Keep aspect": "Сохранять пропорции",
     "Fill, keep aspect": "Заполнить, сохраняя пропорции",
     "New interface in this scene": "Новый интерфейс в этой сцене",
