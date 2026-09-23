@@ -4664,10 +4664,13 @@ bool EditorLayer::SelfTestSelection() {
                         ok = false;
                     } else {
                         // Вершина 1 в TEXCOORD_0 = (1,0), в TEXCOORD_1 = (0.5,0.75).
+                        // Статика переводит v в соглашение своих текстур
+                        // (перевёрнутых под OpenGL, см. GltfImporter.cpp):
+                        // (1,0) glTF — это (1,1) у статического меша.
                         const glm::vec2 uv = (*verts)[1].TexCoords;
-                        if (std::abs(uv.x - 1.0f) > 1e-3f || std::abs(uv.y) > 1e-3f) {
+                        if (std::abs(uv.x - 1.0f) > 1e-3f || std::abs(uv.y - 1.0f) > 1e-3f) {
                             LOG_ERROR("Editor") << "SELFTEST: взята не та развёртка: uv=("
-                                                << uv.x << ", " << uv.y << "), ожидалось (1, 0)";
+                                                << uv.x << ", " << uv.y << "), ожидалось (1, 1)";
                             ok = false;
                         }
                         // ТРАНСФОРМ УЗЛА У СКИНА НЕ ПРИМЕНЯЕТСЯ (см.

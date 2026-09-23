@@ -209,8 +209,10 @@ Shader& SkinShader() {
 // что и основной скиннинг-шейдер (0/3/4).
 const char* kSkinDepthVertBody = R"(
 layout (location = 0) in vec3 aPos;
+layout (location = 2) in vec2 aUV;
 layout (location = 3) in vec4 aJoints;
 layout (location = 4) in vec4 aWeights;
+out vec2 TexCoords;   // для выреза по альфе в тени (волосы, листва, бахрома)
 
 uniform mat4 uLightSpace;
 uniform mat4 uModel;
@@ -233,6 +235,7 @@ void main() {
              + aWeights.z * uBones[int(aJoints.z)]
              + aWeights.w * uBones[int(aJoints.w)];
     }
+    TexCoords = aUV;
     gl_Position = uLightSpace * uModel * skin * vec4(morphedPos, 1.0);
 }
 )";
@@ -242,8 +245,16 @@ std::string SkinDepthVertSource() {
     return std::string("#version 330 core\n") + kMorphGlsl + kSkinDepthVertBody;
 }
 
+// Вырез по альфе — тот же, что у цветного прохода: пряди волос и бахрома
+// сделаны карточками с прозрачностью, и без выреза тень от причёски была
+// сплошным колпаком. Ноль порога — режима нет, альфа не смотрится.
 const char* kSkinDepthFrag = R"(#version 330 core
-void main() {}
+in vec2 TexCoords;
+uniform sampler2D uAlbedoMap;
+uniform float uAlphaCutoff;
+void main() {
+    if (uAlphaCutoff > 0.0 && texture(uAlbedoMap, TexCoords).a < uAlphaCutoff) discard;
+}
 )";
 
 Shader& SkinDepthShader() {
@@ -491,12 +502,21 @@ void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatri
         shader.SetInt("uSkinned", 0);
     }
 
+    shader.SetInt("uAlbedoMap", 0);
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
     for (const auto& sub : m_subMeshes) {
         // Тень обязана повторять ту же форму, что и сам меш, иначе лицо и его
         // тень «разъедутся» при любом выражении.
         UploadMorphs(shader, sub, morphWeights);
+        const SkinnedMaterial& m = sub.Material;
+        const bool cut = m.Mode == SkinnedMaterial::Alpha::Mask && m.Albedo;
+        shader.SetFloat("uAlphaCutoff", cut ? m.AlphaCutoff : 0.0f);
+        if (cut) m.Albedo->Bind(0);
+        // Двустороннее отбрасывает тень обеими сторонами — как и рисуется.
+        device.SetCullMode(m.DoubleSided ? sage::rhi::CullMode::Off : sage::rhi::CullMode::Back);
         sub.Mesh->Draw();
     }
+    device.SetCullMode(sage::rhi::CullMode::Back);
 }
 
 void SkinnedModel::DrawSilhouette(const glm::mat4& model, const glm::mat4& viewProj,

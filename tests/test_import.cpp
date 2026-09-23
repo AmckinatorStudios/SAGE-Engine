@@ -840,3 +840,44 @@ TEST(skin_influences_keep_the_four_heaviest_and_normalize) {
     std::vector<SkinInfluence> none = {{-1, 1.0f}, {9, 1.0f}, {0, 0.0f}};
     CHECK_FALSE(sage::assets::ResolveInfluences(none, 5, joints, weights));
 }
+
+TEST(texture_resolve_finds_a_sibling_folder_named_in_another_case) {
+    // Набор из магазина: OBJ/, FBX/ и glTF/ рядом, а карты — в «Textures» с
+    // заглавной (Stylized Nature MegaKit). На Windows это совпадает с
+    // «textures», на Linux — нет, и у OBJ и FBX карты молча терялись: модель
+    // приезжала белой, а листва — сплошными квадратами.
+    TextureFixture fx("sage_tex_sibling_case");
+    fx.Put("Textures/Leaves.png");
+    fx.Put("OBJ/tree.obj");
+    const std::string found = ResolveTexturePath(fx.Dir / "OBJ", "C:/Leaves.png");
+    CHECK_TRUE(!found.empty());
+    CHECK_TRUE(found.find("Textures") != std::string::npos);
+}
+
+#include "sage/assets/import/PolygonTriangulate.h"
+
+TEST(polygon_triangulation_keeps_concave_faces_inside_their_outline) {
+    // Вогнутая «буква L» из шести вершин площадью 3. Веер от первой вершины
+    // режет её снаружи контура; правильное разбиение — четыре треугольника
+    // суммарной площадью ровно 3, все лицом в одну сторону.
+    const std::vector<glm::vec3> l = {
+        {0, 0, 0}, {2, 0, 0}, {2, 1, 0}, {1, 1, 0}, {1, 2, 0}, {0, 2, 0},
+    };
+    // Начинаем обход с вогнутой вершины — самый неудобный для веера случай.
+    std::vector<glm::vec3> ring;
+    for (size_t i = 0; i < l.size(); ++i) ring.push_back(l[(i + 3) % l.size()]);
+    const std::vector<uint32_t> tris = sage::assets::TriangulatePolygon(ring);
+    CHECK_EQ((int)tris.size(), 12);
+    float area = 0.0f;
+    for (size_t i = 0; i + 2 < tris.size(); i += 3) {
+        const glm::vec3 n = glm::cross(ring[tris[i + 1]] - ring[tris[i]], ring[tris[i + 2]] - ring[tris[i]]);
+        CHECK_TRUE(n.z > 0.0f);
+        area += 0.5f * glm::length(n);
+    }
+    CHECK_NEAR(area, 3.0f, 1e-4f);
+    // Треугольник и выпуклый квад — без изменений против прежнего веера.
+    CHECK_EQ((int)sage::assets::TriangulatePolygon({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}).size(), 3);
+    const std::vector<uint32_t> quad =
+        sage::assets::TriangulatePolygon({{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}});
+    CHECK_TRUE(quad == (std::vector<uint32_t>{0, 1, 2, 0, 2, 3}));
+}

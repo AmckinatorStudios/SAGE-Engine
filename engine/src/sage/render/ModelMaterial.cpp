@@ -368,6 +368,16 @@ void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, Extra
     // меньше единицы и означает смешивание: другого способа сказать это в
     // формате нет, и придумывать за него третий режим не из чего.
     if (out.Opacity < 0.999f) out.AlphaMode = 2;
+
+    // map_d — КАРТА прозрачности. Blender пишет её для листвы, травы и
+    // решёток, и почти всегда это та же картинка, что и альбедо (её альфа).
+    // Смысл у неё — вырез: лист либо есть, либо нет. Без этого карточки листьев
+    // приезжали сплошными квадратами и так же квадратами отбрасывали тень.
+    if (!m.alpha_texname.empty() && out.Opacity >= 0.999f) {
+        out.AlphaMode = 1;
+        out.AlphaCutoff = 0.5f;
+        out.DoubleSided = true;   // карточка листа видна с обеих сторон
+    }
 }
 
 void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
@@ -441,6 +451,12 @@ void ExtractFbx(const std::string& modelPath, ExtractedMaterialSet& set) {
         out.RoughnessMap = locate(m.RoughnessTexture);
         out.AOMap = locate(m.AOTexture);
         out.EmissiveMap = locate(m.EmissiveTexture);
+        // Вырез по альфе и двусторонность импортёр прочитал из слотов
+        // материала (карта прозрачности) — терять их здесь значило бы снова
+        // получить листву квадратами.
+        out.AlphaMode = m.AlphaMode;
+        out.AlphaCutoff = m.AlphaCutoff;
+        out.DoubleSided = m.DoubleSided;
         set.Materials.push_back(std::move(out));
     }
 }

@@ -403,3 +403,192 @@ TEST(Fbx_skin_keeps_rigid_parts_on_bones_and_their_materials) {
     CHECK_TRUE(staticRight > 0.02f - 1e-4f);
     (void)staticTop;
 }
+
+// --- Дерево из набора: один меш, два материала, вырез по альфе --------------
+//
+// Так экспортирует Blender ЛЮБОЕ дерево (проверено на Stylized Nature MegaKit):
+// кора и листва — одна геометрия, материал задан на каждой грани
+// (LayerElementMaterial). Импортёр брал один «первый попавшийся» материал на
+// всю геометрию — листва рисовалась корой, сплошными квадратами, и так же
+// квадратами отбрасывала тень. Карта прозрачности (TransparencyFactor) не
+// читалась вовсе.
+namespace {
+
+float TriangleArea(const Vertex& a, const Vertex& b, const Vertex& c, glm::vec3* normal = nullptr) {
+    const glm::vec3 n = glm::cross(b.Position - a.Position, c.Position - a.Position);
+    if (normal) *normal = n;
+    return glm::length(n) * 0.5f;
+}
+
+} // namespace
+
+TEST(Fbx_one_mesh_painted_by_faces_splits_into_parts_by_material) {
+    const std::string path = MakeFbx("sage_test_foliage.fbx", "--foliage");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok) return;
+
+    CHECK_EQ((int)scene.Nodes.size(), 2);
+    CHECK_EQ((int)scene.Materials.size(), 2);
+    if (scene.Nodes.size() != 2 || scene.Materials.size() != 2) return;
+    const sage::assets::ImportedNode& bark = scene.Nodes[0];
+    const sage::assets::ImportedNode& leaf = scene.Nodes[1];
+    CHECK_TRUE(bark.MaterialIndex != leaf.MaterialIndex);
+    if (bark.MaterialIndex < 0 || leaf.MaterialIndex < 0) return;
+    CHECK_TRUE(scene.Materials[(size_t)bark.MaterialIndex].Name == "Bark");
+    CHECK_TRUE(scene.Materials[(size_t)leaf.MaterialIndex].Name == "Leaves");
+    // Лист — выше трёх метров, кора — ниже двух: части не перепутаны.
+    for (const Vertex& v : leaf.Mesh.Vertices) CHECK_TRUE(v.Position.y > 2.9f);
+    for (const Vertex& v : bark.Mesh.Vertices) CHECK_TRUE(v.Position.y < 2.1f);
+}
+
+TEST(Fbx_transparency_map_makes_an_alpha_cutout_double_sided_material) {
+    const std::string path = MakeFbx("sage_test_foliage_alpha.fbx", "--foliage");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok) return;
+    for (const sage::assets::ImportedMaterial& m : scene.Materials) {
+        if (m.Name == "Leaves") {
+            CHECK_EQ(m.AlphaMode, 1);
+            CHECK_TRUE(m.DoubleSided);
+            CHECK_TRUE(m.AlbedoTexture == "leaf.png");
+        } else {
+            // Кора без карты прозрачности — сплошная, как и была.
+            CHECK_EQ(m.AlphaMode, 0);
+            CHECK_TRUE(!m.DoubleSided);
+        }
+    }
+}
+
+TEST(Fbx_concave_face_is_cut_inside_its_outline_not_by_a_fan) {
+    // Кора в тестовом файле — вогнутый «дротик» площадью 1.25 м². Веер от
+    // первой вершины режет его по диагонали СНАРУЖИ: треугольник вылезает за
+    // контур, второй выворачивается изнанкой, площадь выходит 2.75.
+    const std::string path = MakeFbx("sage_test_concave.fbx", "--foliage");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok || scene.Nodes.empty()) return;
+
+    const sage::render::MeshData& mesh = scene.Nodes[0].Mesh;
+    CHECK_EQ((int)mesh.Indices.size(), 6);
+    float area = 0.0f;
+    for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3) {
+        glm::vec3 n;
+        area += TriangleArea(mesh.Vertices[mesh.Indices[i]], mesh.Vertices[mesh.Indices[i + 1]],
+                             mesh.Vertices[mesh.Indices[i + 2]], &n);
+        CHECK_TRUE(n.z > 0.0f);   // ни один треугольник не вывернут изнанкой
+    }
+    CHECK_NEAR(area, 1.25f, 1e-3f);
+}
+
+TEST(Fbx_pre_rotation_of_a_node_turns_its_mesh) {
+    // Maya и 3ds Max кладут разворот узла в PreRotation. Статический импорт
+    // читал только Lcl Translation/Rotation/Scaling, и такие детали стояли
+    // повёрнутыми не туда — «часть модели искажена».
+    const std::string path = MakeFbx("sage_test_prerot.fbx", "--pre-rotation 0 0 90");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok || scene.Nodes.empty() || scene.Nodes[0].Mesh.Vertices.empty()) return;
+    // Первая вершина куба (-0.5,-0.5,-0.5) после поворота на 90° вокруг Z.
+    const glm::vec3 p = scene.Nodes[0].Mesh.Vertices[0].Position;
+    CHECK_NEAR(p.x, 0.5f, 1e-4f);
+    CHECK_NEAR(p.y, -0.5f, 1e-4f);
+    CHECK_NEAR(p.z, -0.5f, 1e-4f);
+}
+
+TEST(Fbx_mirrored_node_keeps_its_faces_facing_outward) {
+    // Масштаб -1 — обычный приём для симметричных деталей. Отражение меняет
+    // обход треугольников, и без разворота деталь оказывалась вывернутой
+    // наизнанку: отсечение задних граней съедало её целиком.
+    const std::string path = MakeFbx("sage_test_mirror.fbx", "--node-scale -1");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok || scene.Nodes.empty()) return;
+    const sage::render::MeshData& mesh = scene.Nodes[0].Mesh;
+    int agree = 0, triangles = 0;
+    for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3) {
+        const Vertex& a = mesh.Vertices[mesh.Indices[i]];
+        glm::vec3 n;
+        TriangleArea(a, mesh.Vertices[mesh.Indices[i + 1]], mesh.Vertices[mesh.Indices[i + 2]], &n);
+        // Лицевая сторона по обходу обязана совпадать с нормалью из файла
+        // (отражённой вместе с узлом): иначе свет падает на одну сторону, а
+        // видна другая.
+        if (glm::dot(n, a.Normal) > 0.0f) ++agree;
+        ++triangles;
+    }
+    CHECK_EQ(triangles, 12);
+    CHECK_EQ(agree, triangles);
+}
+
+TEST(Fbx_normals_given_per_face_light_each_face_by_its_own_normal) {
+    // ByPolygon — одна нормаль на грань. Раньше она читалась как «по углу»:
+    // угол k брал нормаль грани k, и уже со второй грани свет ложился чужой
+    // нормалью (а после шестого угла — нулевой).
+    const std::string path = MakeFbx("sage_test_facenormals.fbx", "--normals-by-polygon");
+    if (path.empty()) return;
+    bool ok = false;
+    std::string err;
+    sage::assets::ImportedScene scene = Import(path, ok, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok || scene.Nodes.empty()) return;
+    const sage::render::MeshData& mesh = scene.Nodes[0].Mesh;
+    int agree = 0, corners = 0;
+    for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3) {
+        glm::vec3 n;
+        TriangleArea(mesh.Vertices[mesh.Indices[i]], mesh.Vertices[mesh.Indices[i + 1]],
+                     mesh.Vertices[mesh.Indices[i + 2]], &n);
+        n = glm::normalize(n);
+        for (int c = 0; c < 3; ++c) {
+            ++corners;
+            if (glm::dot(mesh.Vertices[mesh.Indices[i + (size_t)c]].Normal, n) > 0.99f) ++agree;
+        }
+    }
+    CHECK_EQ(corners, 36);
+    CHECK_EQ(agree, corners);
+}
+
+TEST(Fbx_skinned_uv_follows_the_image_convention_of_the_skinned_pass) {
+    // Развёртка FBX — с началом внизу, а картинки скелетной модели лежат
+    // строками сверху вниз (соглашение glTF, общее для скелетного прохода).
+    // Взятая как есть, развёртка читала текстуру вверх ногами.
+    const std::string path = MakeFbx("sage_test_skin_uv.fbx", "--skin");
+    if (path.empty()) return;
+    sage::render::ModelData data;
+    std::string err;
+    const bool ok = sage::assets::ImportFbxSkinned(path, data, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok || data.SubMeshes.empty()) return;
+    // Нижняя левая вершина полосы (y = 0, x < 0) в FBX имеет uv (0, 0) —
+    // низ картинки, то есть v = 1 в соглашении «строки сверху вниз».
+    bool found = false;
+    for (const sage::render::SkinnedVertex& v : data.SubMeshes[0].Vertices) {
+        if (v.Position.y < 0.01f && v.Position.x < 0.0f) {
+            found = true;
+            CHECK_NEAR(v.TexCoords.x, 0.0f, 1e-5f);
+            CHECK_NEAR(v.TexCoords.y, 1.0f, 1e-5f);
+        }
+    }
+    CHECK_TRUE(found);
+}

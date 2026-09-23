@@ -116,7 +116,8 @@ QUADS = [
 ]
 
 
-def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0), scale=1.0):
+def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0), scale=1.0,
+          pre_rotation=None, normals_by_polygon=False):
     if ascii_mode:
         with open(path, 'w', encoding='utf-8') as f:
             f.write('; FBX 6.1.0 project file\n; текстовый вариант — импортёр обязан сказать об этом прямо\n')
@@ -130,8 +131,9 @@ def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0),
     for quad in QUADS:
         indices.extend([quad[0], quad[1], quad[2], ~quad[3]])  # последний — с ~
 
-    # Нормали по вершинам полигонов (ByPolygonVertex): для теста достаточно
-    # направления грани, посчитанного грубо по первой тройке.
+    # Нормали по вершинам полигонов (ByPolygonVertex) или по граням
+    # (ByPolygon, --normals-by-polygon): для теста достаточно направления
+    # грани, посчитанного грубо по первой тройке.
     normals = []
     for quad in QUADS:
         a = CUBE[quad[0]]
@@ -144,7 +146,7 @@ def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0),
         n = (nx / length, ny / length, nz / length)
         if zup:
             n = (n[0], -n[2], n[1])
-        for _ in range(4):
+        for _ in range(1 if normals_by_polygon else 4):
             normals.extend(n)
 
     uvs = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0] * len(QUADS)
@@ -163,7 +165,8 @@ def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0),
             node('Vertices', prop_double_array(verts)),
             node('PolygonVertexIndex', prop_int_array(indices)),
             node('LayerElementNormal', prop_int(0), [
-                node('MappingInformationType', prop_string('ByPolygonVertex')),
+                node('MappingInformationType',
+                     prop_string('ByPolygon' if normals_by_polygon else 'ByPolygonVertex')),
                 node('ReferenceInformationType', prop_string('Direct')),
                 node('Normals', prop_double_array(normals)),
             ]),
@@ -174,15 +177,17 @@ def build(path, zup=False, unit=100.0, ascii_mode=False, offset=(0.0, 0.0, 0.0),
             ]),
         ])
 
+    model_p70 = [
+        p70v('Lcl Translation', offset),
+        p70v('Lcl Scaling', (scale, scale, scale)),
+    ]
+    if pre_rotation is not None:
+        model_p70.append(p70_vec('PreRotation', 'Vector3D', pre_rotation))
+
     # Узел Model с трансформом и СВЯЗЬЮ с геометрией: без связи импортёр не
     # знает, чьим узлом является меш, и трансформ применить не к чему.
     model_props = prop_long(4321) + prop_string('TestCube\x00\x01Model') + prop_string('Mesh')
-    model = node('Model', model_props, [
-        node('Properties70', b'', [
-            p70v('Lcl Translation', offset),
-            p70v('Lcl Scaling', (scale, scale, scale)),
-        ]),
-    ])
+    model = node('Model', model_props, [node('Properties70', b'', model_p70)])
     objects = node('Objects', b'', [geometry, model])
     # Connections: Geometry (1234) -> Model (4321)
     connections = node('Connections', b'', [
@@ -397,6 +402,98 @@ def build_skinned(path, unit=100.0, rigid=False):
         f.write(header + body)
 
 
+def build_foliage(path):
+    """Дерево в миниатюре: ОДНА геометрия, ДВА материала по граням.
+
+    Так экспортирует Blender любое дерево: кора и листва — один меш, а
+    материал задан на каждой грани (LayerElementMaterial, ByPolygon). У листвы
+    вторая карта — прозрачности (TransparencyFactor), тот же файл, что и
+    альбедо. Кора — нарочно ВОГНУТЫЙ четырёхугольник («дротик»): веер от
+    первой вершины режет его по диагонали СНАРУЖИ грани.
+
+    Координаты в метрах (UnitScaleFactor 100 — сантиметры, узел масштаба 100
+    нет; вершины заданы в сотнях единиц файла).
+    """
+    verts = [
+        # кора: дротик, вогнутая вершина 2 — внутрь к вершине 0
+        0.0, 0.0, 0.0,      # 0
+        200.0, 100.0, 0.0,  # 1
+        50.0, 100.0, 0.0,   # 2 — вогнутая
+        0.0, 200.0, 0.0,    # 3
+        # лист: обычный квадрат, повыше
+        0.0, 300.0, 0.0,    # 4
+        100.0, 300.0, 0.0,  # 5
+        100.0, 400.0, 0.0,  # 6
+        0.0, 400.0, 0.0,    # 7
+    ]
+    # Обход коры начинается с вершины 1, чтобы вогнутая (2) стала ВТОРОЙ в
+    # грани: тогда диагональ веера 0-2 проходит снаружи дротика.
+    indices = [1, 2, 3, ~0, 4, 5, 6, ~7]
+    normals = [0.0, 0.0, 1.0] * 8
+    uvs = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0] * 2
+
+    geometry = node(
+        'Geometry', prop_long(10) + prop_string('Tree\x00\x01Geometry') + prop_string('Mesh'),
+        [
+            node('Vertices', prop_double_array(verts)),
+            node('PolygonVertexIndex', prop_int_array(indices)),
+            node('LayerElementNormal', prop_int(0), [
+                node('MappingInformationType', prop_string('ByPolygonVertex')),
+                node('ReferenceInformationType', prop_string('Direct')),
+                node('Normals', prop_double_array(normals)),
+            ]),
+            node('LayerElementUV', prop_int(0), [
+                node('MappingInformationType', prop_string('ByPolygonVertex')),
+                node('ReferenceInformationType', prop_string('Direct')),
+                node('UV', prop_double_array(uvs)),
+            ]),
+            node('LayerElementMaterial', prop_int(0), [
+                node('MappingInformationType', prop_string('ByPolygon')),
+                node('ReferenceInformationType', prop_string('IndexToDirect')),
+                node('Materials', prop_int_array([0, 1])),
+            ]),
+        ])
+    model = node('Model', prop_long(20) + prop_string('Tree\x00\x01Model') + prop_string('Mesh'),
+                 [node('Properties70', b'', [])])
+    bark = node('Material', prop_long(30) + prop_string('Bark\x00\x01Material') + prop_string(''),
+                [node('Properties70', b'', [p70v('DiffuseColor', (0.4, 0.3, 0.2))])])
+    leaves = node('Material', prop_long(31) + prop_string('Leaves\x00\x01Material') + prop_string(''),
+                  [node('Properties70', b'', [p70v('DiffuseColor', (0.2, 0.6, 0.2))])])
+
+    def texture(uid, file):
+        return node('Texture', prop_long(uid) + prop_string('t\x00\x01Texture') + prop_string(''), [
+            node('FileName', prop_string('C:\\Users\\someone\\' + file)),
+            node('RelativeFilename', prop_string(file)),
+        ])
+
+    objects = node('Objects', b'', [geometry, model, bark, leaves,
+                                    texture(40, 'bark.png'), texture(41, 'leaf.png'),
+                                    texture(42, 'leaf.png')])
+    settings = node('GlobalSettings', b'', [
+        node('Properties70', b'', [p70('UpAxis', 'int', 1), p70('UnitScaleFactor', 'double', 1.0)]),
+    ])
+    connections = node('Connections', b'', [
+        node('C', prop_string('OO') + prop_long(20) + prop_long(0)),
+        node('C', prop_string('OO') + prop_long(10) + prop_long(20)),   # Geometry -> Model
+        node('C', prop_string('OO') + prop_long(30) + prop_long(20)),   # Bark -> Model (номер 0)
+        node('C', prop_string('OO') + prop_long(31) + prop_long(20)),   # Leaves -> Model (номер 1)
+        node('C', prop_string('OP') + prop_long(40) + prop_long(30) + prop_string('DiffuseColor')),
+        node('C', prop_string('OP') + prop_long(41) + prop_long(31) + prop_string('DiffuseColor')),
+        node('C', prop_string('OP') + prop_long(42) + prop_long(31) + prop_string('TransparencyFactor')),
+    ])
+
+    header = b'Kaydara FBX Binary  \x00\x1a\x00' + struct.pack('<I', VERSION)
+    body = b''
+    cursor = len(header)
+    for top in (settings, objects, connections):
+        blob = top(cursor)
+        body += blob
+        cursor += len(blob)
+    body += b'\0' * 13
+    with open(path, 'wb') as f:
+        f.write(header + body)
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('out')
@@ -409,9 +506,18 @@ if __name__ == '__main__':
     ap.add_argument('--skin', action='store_true', help='модель со скином, костями и клипом')
     ap.add_argument('--rigid', action='store_true',
                     help='вместе с --skin: добавить жёсткую деталь на кости и материал с цветом')
+    ap.add_argument('--pre-rotation', nargs=3, type=float, default=None,
+                    help='PreRotation узла Model, градусы (так пишут Maya и 3ds Max)')
+    ap.add_argument('--normals-by-polygon', action='store_true',
+                    help='нормали по граням (ByPolygon), а не по углам')
+    ap.add_argument('--foliage', action='store_true',
+                    help='один меш, два материала по граням, карта прозрачности, вогнутая грань')
     args = ap.parse_args()
     if args.skin:
         build_skinned(args.out, args.unit, args.rigid)
+    elif args.foliage:
+        build_foliage(args.out)
     else:
-        build(args.out, args.zup, args.unit, args.ascii, tuple(args.offset), args.node_scale)
+        build(args.out, args.zup, args.unit, args.ascii, tuple(args.offset), args.node_scale,
+              tuple(args.pre_rotation) if args.pre_rotation else None, args.normals_by_polygon)
     print('записан', args.out)

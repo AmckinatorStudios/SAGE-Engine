@@ -112,6 +112,15 @@ sage::render::MeshData LoadObjData(const std::string& path,
             im.RoughnessTexture = m.roughness_texname;
             im.AOTexture = m.ambient_texname;
             im.EmissiveTexture = m.emissive_texname;
+            // map_d — карта выреза (листва): то же правило, что и в
+            // ModelMaterial.cpp, иначе .obj через реестр и через извлечение
+            // материалов давал бы разную листву.
+            if (!m.alpha_texname.empty() && m.dissolve >= 0.999f) {
+                im.AlphaMode = 1;
+                im.DoubleSided = true;
+            } else if (m.dissolve < 0.999f) {
+                im.AlphaMode = 2;
+            }
             materialsOut->push_back(std::move(im));
         }
     }

@@ -9,7 +9,6 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/euler_angles.hpp>
 
 #include "sage/assets/import/FbxTree.h"
 #include "sage/assets/import/Importer.h"
@@ -56,17 +55,12 @@ using fbx::Property70;
 using fbx::Property70Vec;
 using fbx::Text;
 
-// Геометрия одного узла Geometry -> MeshData. Разбор треугольников — общий
+// Углы одного материала -> MeshData. Разбор треугольников — общий
 // (fbx::BuildCorners), здесь углы лишь раскладываются по вершинам и индексам.
-sage::render::MeshData BuildMesh(const Node& geometry, const fbx::Units& units,
-                                 const glm::mat4& nodeXform,
-                                 std::vector<std::string>& warnings) {
+sage::render::MeshData BuildMesh(const std::vector<fbx::MeshCorner>& corners, int material) {
     sage::render::MeshData mesh;
-    const std::vector<fbx::MeshCorner> corners =
-        fbx::BuildCorners(geometry, units, nodeXform, warnings);
-    mesh.Vertices.reserve(corners.size());
-    mesh.Indices.reserve(corners.size());
     for (const fbx::MeshCorner& c : corners) {
+        if (c.Material != material) continue;
         Vertex v;
         v.Position = c.Position;
         v.Normal = c.Normal;
@@ -115,20 +109,14 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
 
         ModelInfo info;
         info.Name = name;
-        auto compose = [](const glm::vec3& t, const glm::vec3& r, const glm::vec3& s) {
-            // Порядок поворота FBX по умолчанию — XYZ, то есть Rz * Ry * Rx.
-            glm::mat4 m = glm::translate(glm::mat4(1.0f), t);
-            m *= glm::eulerAngleZYX(glm::radians(r.z), glm::radians(r.y), glm::radians(r.x));
-            return glm::scale(m, s);
-        };
-        info.Local = compose(Property70Vec(&n, "Lcl Translation", glm::vec3(0.0f)),
-                             Property70Vec(&n, "Lcl Rotation", glm::vec3(0.0f)),
-                             Property70Vec(&n, "Lcl Scaling", glm::vec3(1.0f)));
+        // Полный трансформ FBX (предповорот, опоры, порядок осей) — общий со
+        // скелетным разбором. Здесь стоял свой, урезанный до T*R*S, и детали
+        // моделей из Maya/3ds Max, у которых разворот лежит в PreRotation и
+        // опорах, разъезжались и поворачивались как попало.
+        info.Local = fbx::ReadTransform(n).Matrix();
         // Геометрический трансформ применяется ТОЛЬКО к мешу узла и не
         // наследуется детьми — этим он и отличается от Lcl.
-        info.Geometric = compose(Property70Vec(&n, "GeometricTranslation", glm::vec3(0.0f)),
-                                 Property70Vec(&n, "GeometricRotation", glm::vec3(0.0f)),
-                                 Property70Vec(&n, "GeometricScaling", glm::vec3(1.0f)));
+        info.Geometric = fbx::GeometricMatrix(n);
         if (!n.Props.empty()) models[(int64_t)n.Props[0].Number] = info;
     }
 
@@ -207,7 +195,11 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
 
     // Связи «по свойству» (OP): текстура привязана к КОНКРЕТНОМУ слоту
     // материала, и без имени свойства нормаль неотличима от альбедо.
-    std::unordered_multimap<int64_t, int64_t> materialOfModel;
+    //
+    // Материалы модели — СПИСКОМ В ПОРЯДКЕ СВЯЗЕЙ: номер материала грани
+    // (LayerElementMaterial) — это номер именно в нём. Здесь была хэш-таблица,
+    // из которой брался один, «первый попавшийся» материал на всю геометрию.
+    std::unordered_map<int64_t, std::vector<int64_t>> materialsOfModel;
     if (const Node* conns = root.Find("Connections")) {
         for (const Node& c : conns->Children) {
             if (c.Name != "C" || c.Props.size() < 3) continue;
@@ -219,7 +211,7 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
                     mat->second.Slots[c.Props[3].Text] = child;
                 }
             } else if (c.Props[0].Text == "OO") {
-                if (materials.count(child)) materialOfModel.emplace(parent, child);
+                if (materials.count(child)) materialsOfModel[parent].push_back(child);
             }
         }
     }
@@ -257,6 +249,17 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
         out_m.RoughnessTexture = slotFile(m, {"Maya|specularRoughness", "ShininessExponent"});
         out_m.AOTexture = slotFile(m, {"AmbientColor", "Maya|ambientOcclusion"});
         out_m.EmissiveTexture = slotFile(m, {"EmissiveColor"});
+        // Карта прозрачности — вырез по альфе: листва, трава, решётки. Blender
+        // кладёт её в TransparencyFactor, Maya и 3ds Max — в TransparentColor;
+        // файл обычно тот же, что у альбедо (альфа-канал картинки). Без этого
+        // карточки листьев приезжали сплошными квадратами и так же квадратами
+        // отбрасывали тень.
+        if (!slotFile(m, {"TransparencyFactor", "TransparentColor"}).empty()) {
+            out_m.AlphaMode = 1;
+            out_m.AlphaCutoff = 0.5f;
+            // Карточка листа — одна плоскость, и видна она с обеих сторон.
+            out_m.DoubleSided = true;
+        }
         out.Materials.push_back(out_m);
         const int index = (int)out.Materials.size() - 1;
         materialIndexOf[uid] = index;
@@ -268,7 +271,7 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
         if (n.Name != "Geometry") continue;
         glm::mat4 xform(1.0f);
         std::string nodeName;
-        int meshMaterial = -1;
+        const std::vector<int64_t>* modelMaterials = nullptr;
         if (!n.Props.empty()) {
             auto owner = parentOf.find((int64_t)n.Props[0].Number);
             if (owner != parentOf.end()) {
@@ -276,25 +279,43 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
                 if (mi != models.end()) {
                     xform = worldOf(owner->second) * mi->second.Geometric;
                     nodeName = mi->second.Name;
-                    auto mat = materialOfModel.find(owner->second);
-                    if (mat != materialOfModel.end()) meshMaterial = materialIndex(mat->second);
+                    auto mats = materialsOfModel.find(owner->second);
+                    if (mats != materialsOfModel.end()) modelMaterials = &mats->second;
                 }
             }
         }
-        sage::render::MeshData mesh = BuildMesh(n, units, xform, out.Warnings);
-        if (mesh.Empty()) {
+        const std::vector<fbx::MeshCorner> corners =
+            fbx::BuildCorners(n, units, xform, out.Warnings);
+        if (corners.empty()) {
             ++geometryIndex;
             continue;
         }
-        ImportedNode node;
-        node.Name = !nodeName.empty()
-                        ? nodeName
-                        : (geometryIndex < modelNames.size() && !modelNames[geometryIndex].empty()
-                               ? modelNames[geometryIndex]
-                               : fs::path(path).stem().string());
-        node.Mesh = std::move(mesh);
-        node.MaterialIndex = meshMaterial;
-        out.Nodes.push_back(std::move(node));
+        const std::string baseName =
+            !nodeName.empty()
+                ? nodeName
+                : (geometryIndex < modelNames.size() && !modelNames[geometryIndex].empty()
+                       ? modelNames[geometryIndex]
+                       : fs::path(path).stem().string());
+
+        // ПО УЗЛУ НА МАТЕРИАЛ. Один меш FBX часто покрашен несколькими
+        // материалами по граням (дерево: кора и листва в одной геометрии).
+        // Раньше вся геометрия получала один материал — и листва рисовалась
+        // корой, сплошными непрозрачными квадратами.
+        std::vector<int> used;
+        for (const fbx::MeshCorner& c : corners)
+            if (std::find(used.begin(), used.end(), c.Material) == used.end())
+                used.push_back(c.Material);
+        for (int local : used) {
+            ImportedNode node;
+            node.Name = used.size() > 1 ? baseName + "#" + std::to_string(local) : baseName;
+            node.Mesh = BuildMesh(corners, local);
+            if (modelMaterials && !modelMaterials->empty()) {
+                const size_t k = local >= 0 && (size_t)local < modelMaterials->size()
+                                     ? (size_t)local : 0;
+                node.MaterialIndex = materialIndex((*modelMaterials)[k]);
+            }
+            out.Nodes.push_back(std::move(node));
+        }
         ++geometryIndex;
     }
 

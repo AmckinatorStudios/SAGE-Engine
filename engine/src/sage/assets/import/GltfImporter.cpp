@@ -161,6 +161,10 @@ void ReadMaterials(const tinygltf::Model& gltf, ImportedScene& out) {
         im.MetallicTexture = ImageUri(gltf, pbr.metallicRoughnessTexture.index);
         im.RoughnessTexture = im.MetallicTexture;
         im.AOTexture = ImageUri(gltf, m.occlusionTexture.index);
+        if (m.alphaMode == "MASK") im.AlphaMode = 1;
+        else if (m.alphaMode == "BLEND") im.AlphaMode = 2;
+        im.AlphaCutoff = (float)m.alphaCutoff;
+        im.DoubleSided = m.doubleSided;
         out.Materials.push_back(std::move(im));
     }
 }
@@ -233,7 +237,14 @@ void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& pr
         v.Position = glm::vec3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
         v.Normal = hasNormals ? glm::vec3(normals[i * 3], normals[i * 3 + 1], normals[i * 3 + 2])
                               : glm::vec3(0.0f, 1.0f, 0.0f);
-        v.TexCoords = hasUV ? glm::vec2(uvs[i * 2], uvs[i * 2 + 1]) : glm::vec2(0.0f);
+        // РАЗВЁРТКА — В СОГЛАШЕНИЕ СТАТИЧЕСКОГО МЕША. В glTF v=0 — ВЕРХНИЙ край
+        // картинки, а текстуры статики грузятся перевёрнутыми под OpenGL
+        // (Texture.cpp: v=0 — нижний край, как у OBJ и FBX). Взятая как есть,
+        // развёртка читала картинку вверх ногами: на тайловой коре этого не
+        // видно, а на атласе и палитре каждая часть модели получала чужой
+        // кусок — «часть модели искажена». Скелетный проход грузит картинки
+        // без переворота и берёт развёртку glTF как есть — там всё верно.
+        v.TexCoords = hasUV ? glm::vec2(uvs[i * 2], 1.0f - uvs[i * 2 + 1]) : glm::vec2(0.0f);
         v.TexCoords2 = hasUV2 ? glm::vec2(uv2[i * 2], uv2[i * 2 + 1]) : glm::vec2(0.0f);
         if (hasTangents)
             v.Tangent = glm::vec4(tangents[i * 4], tangents[i * 4 + 1], tangents[i * 4 + 2],

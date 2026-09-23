@@ -90,6 +90,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/format/TextureFormat.cpp
     src/sage/assets/import/Importer.cpp
     src/sage/assets/import/MeshNormalize.cpp
+    src/sage/assets/import/PolygonTriangulate.cpp
     src/sage/assets/import/SkinInfluences.cpp
     src/sage/assets/import/TextureResolve.cpp
     src/sage/assets/import/Convert.cpp
