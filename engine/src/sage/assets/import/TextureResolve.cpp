@@ -50,6 +50,25 @@ fs::path FindIgnoringCase(const fs::path& dir, const std::string& fileName) {
     return {};
 }
 
+// Подпапки с именем name БЕЗ УЧЁТА РЕГИСТРА. Наборы кладут карты в
+// «Textures», «Maps», «TEXTURES» — как придётся, и на Linux (а это сборка и CI)
+// точное «textures» такую папку не видит: у модели из набора, где рядом с
+// OBJ/ и FBX/ лежит Textures/, карты молча терялись, и модель приезжала белой.
+// Все варианты, а не первый: пустая «textures» рядом с полной «Textures» не
+// должна её заслонять. Точное имя — первым, как и было.
+void AddSubdirsIgnoringCase(const fs::path& dir, const std::string& name,
+                            std::vector<fs::path>& roots) {
+    roots.push_back(dir / name);
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) return;
+    const std::string want = Lower(name);
+    for (const fs::directory_entry& entry : fs::directory_iterator(dir, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        const std::string have = sage::PathToUtf8(entry.path().filename());
+        if (have != name && Lower(have) == want) roots.push_back(entry.path());
+    }
+}
+
 } // namespace
 
 std::string DecodeUri(const std::string& uri) {
@@ -99,13 +118,13 @@ std::string ResolveTexturePath(const fs::path& modelDir, const std::string& refe
     // относительно другого корня.
     const fs::path refDir = refPath.parent_path().filename();
     if (!refDir.empty() && refDir != "." && refDir != "..") roots.push_back(modelDir / refDir);
-    for (const char* dir : kTextureDirs) roots.push_back(modelDir / dir);
+    for (const char* dir : kTextureDirs) AddSubdirsIgnoringCase(modelDir, dir, roots);
     // Уровень выше: модель нередко лежит в своей папке, а текстуры — общие для
     // набора. Выше одного уровня не поднимаемся: там уже чужие ассеты проекта.
     const fs::path up = modelDir.parent_path();
     if (!up.empty()) {
         roots.push_back(up);
-        for (const char* dir : kTextureDirs) roots.push_back(up / dir);
+        for (const char* dir : kTextureDirs) AddSubdirsIgnoringCase(up, dir, roots);
     }
 
     for (const fs::path& root : roots) {

@@ -12,6 +12,7 @@
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/Material.h"
+#include "sage/render/ModelLoader.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -537,4 +538,58 @@ TEST(material_tiling_mode_is_written_as_a_name) {
     // Опечатка не сбрасывает настройку молча.
     CHECK_FALSE(TilingModeFromKey("worldsize", mode));
     CHECK_TRUE(mode == MaterialRender::TilingMode::WorldSize);
+}
+
+TEST(model_material_obj_alpha_map_becomes_a_double_sided_cutout) {
+    // map_d — КАРТА прозрачности: так Blender пишет листву, траву и решётки
+    // (Stylized Nature MegaKit — у каждого дерева). Она не читалась, и листва
+    // приезжала сплошными непрозрачными квадратами.
+    const fs::path dir = TempDir("sage_test_modelmat_alphamap");
+    WriteText(dir / "tree.obj", "mtllib tree.mtl\nusemtl Leaves\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    WriteText(dir / "tree.mtl",
+              "newmtl Leaves\nKd 1 1 1\nmap_Kd leaves.png\nmap_d leaves.png\n");
+    WritePixelPng(dir / "leaves.png", 60, 160, 40);
+
+    const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial((dir / "tree.obj").string());
+    CHECK_TRUE(m.Found);
+    CHECK_EQ(m.AlphaMode, 1);   // вырез, а не смешивание
+    CHECK_TRUE(m.DoubleSided);
+    CHECK_NEAR(m.Opacity, 1.0f, 1e-4f);
+}
+
+TEST(model_material_gltf_uv_matches_the_flipped_textures_of_static_meshes) {
+    // В glTF v=0 — ВЕРХНИЙ край картинки, а текстуры статического меша
+    // грузятся перевёрнутыми под OpenGL (v=0 — нижний край). Развёртка,
+    // взятая как есть, читала картинку вверх ногами: на атласе и палитре
+    // каждая часть модели получала чужой кусок.
+    const fs::path dir = TempDir("sage_test_gltf_uv");
+    const float data[] = {0, 0, 0, 1, 0, 0, 0, 1, 0,     // позиции
+                          0.0f, 0.25f, 1.0f, 0.25f, 0.0f, 0.75f};   // uv
+    const unsigned short idx[3] = {0, 1, 2};
+    {
+        std::ofstream f(dir / "uv.bin", std::ios::binary);
+        f.write((const char*)data, sizeof(data));
+        f.write((const char*)idx, sizeof(idx));
+    }
+    WriteText(dir / "uv.gltf", R"({
+  "asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2}]}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0,0,0], "max": [1,1,0]},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 60, "byteLength": 6}
+  ],
+  "buffers": [{"byteLength": 66, "uri": "uv.bin"}]
+})");
+    const sage::render::MeshData mesh = ModelLoader::LoadMeshData((dir / "uv.gltf").string());
+    CHECK_EQ((int)mesh.Vertices.size(), 3);
+    if (mesh.Vertices.size() != 3) return;
+    CHECK_NEAR(mesh.Vertices[0].TexCoords.x, 0.0f, 1e-5f);
+    CHECK_NEAR(mesh.Vertices[0].TexCoords.y, 0.75f, 1e-5f);
+    CHECK_NEAR(mesh.Vertices[2].TexCoords.y, 0.25f, 1e-5f);
 }

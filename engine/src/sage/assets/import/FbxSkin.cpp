@@ -61,58 +61,17 @@ glm::mat4 MatrixFrom(const Node* n) {
     return m;
 }
 
-// --- Локальный трансформ узла FBX -------------------------------------------
-//
-// Это НЕ просто «перенос-поворот-масштаб»: между ними стоят предповорот,
-// постповорот и опорные точки, и пропустить их нельзя. Mixamo и Maya кладут
-// разворот кости именно в PreRotation, и модель, собранная без него, выходит
-// вывернутой — руки назад, ноги в стороны, — хотя все числа «прочитаны верно».
-//
-// Порядок из спецификации FBX:
-//   Local = T * Roff * Rp * Rpre * R * Rpost⁻¹ * Rp⁻¹ * Soff * Sp * S * Sp⁻¹
-struct NodeTransform {
-    glm::vec3 Translation{0.0f};
-    glm::vec3 Rotation{0.0f};      // градусы, порядок XYZ
-    glm::vec3 Scale{1.0f};
-    glm::vec3 PreRotation{0.0f};
-    glm::vec3 PostRotation{0.0f};
-    glm::vec3 RotationOffset{0.0f};
-    glm::vec3 RotationPivot{0.0f};
-    glm::vec3 ScalingOffset{0.0f};
-    glm::vec3 ScalingPivot{0.0f};
+// Локальный трансформ узла — общий со статикой (fbx::NodeTransform в
+// FbxTree.h): предповорот, опоры и порядок поворота там же и описаны.
+using fbx::NodeTransform;
+using fbx::ReadTransform;
 
-    glm::mat4 Matrix() const {
-        auto euler = [](const glm::vec3& deg) {
-            // Порядок поворота FBX по умолчанию — XYZ, то есть Rz * Ry * Rx.
-            return glm::eulerAngleZYX(glm::radians(deg.z), glm::radians(deg.y),
-                                      glm::radians(deg.x));
-        };
-        const glm::mat4 T = glm::translate(glm::mat4(1.0f), Translation);
-        const glm::mat4 Roff = glm::translate(glm::mat4(1.0f), RotationOffset);
-        const glm::mat4 Rp = glm::translate(glm::mat4(1.0f), RotationPivot);
-        const glm::mat4 RpInv = glm::translate(glm::mat4(1.0f), -RotationPivot);
-        const glm::mat4 Soff = glm::translate(glm::mat4(1.0f), ScalingOffset);
-        const glm::mat4 Sp = glm::translate(glm::mat4(1.0f), ScalingPivot);
-        const glm::mat4 SpInv = glm::translate(glm::mat4(1.0f), -ScalingPivot);
-        const glm::mat4 S = glm::scale(glm::mat4(1.0f), Scale);
-        return T * Roff * Rp * euler(PreRotation) * euler(Rotation) *
-               glm::inverse(euler(PostRotation)) * RpInv * Soff * Sp * S * SpInv;
-    }
-};
-
-NodeTransform ReadTransform(const Node& n) {
-    NodeTransform t;
-    t.Translation = Property70Vec(&n, "Lcl Translation", glm::vec3(0.0f));
-    t.Rotation = Property70Vec(&n, "Lcl Rotation", glm::vec3(0.0f));
-    t.Scale = Property70Vec(&n, "Lcl Scaling", glm::vec3(1.0f));
-    t.PreRotation = Property70Vec(&n, "PreRotation", glm::vec3(0.0f));
-    t.PostRotation = Property70Vec(&n, "PostRotation", glm::vec3(0.0f));
-    t.RotationOffset = Property70Vec(&n, "RotationOffset", glm::vec3(0.0f));
-    t.RotationPivot = Property70Vec(&n, "RotationPivot", glm::vec3(0.0f));
-    t.ScalingOffset = Property70Vec(&n, "ScalingOffset", glm::vec3(0.0f));
-    t.ScalingPivot = Property70Vec(&n, "ScalingPivot", glm::vec3(0.0f));
-    return t;
-}
+// Развёртка FBX — с началом ВНИЗУ (v=0 — нижний край картинки, как у OBJ и в
+// Blender), а картинки скелетной модели лежат строками СВЕРХУ ВНИЗ, без
+// переворота (так их ждёт glTF, и скелетный проход у форматов общий). Взятая
+// как есть, развёртка читала текстуру вверх ногами: атлас листвы и лица
+// ложился чужими кусками. Переводим в соглашение glTF здесь, одним местом.
+glm::vec2 SkinUV(const glm::vec2& fbxUV) { return glm::vec2(fbxUV.x, 1.0f - fbxUV.y); }
 
 // Разложение матрицы на TRS. Скелет хранит именно TRS (см. anim/Skeleton.h):
 // так каналы анимации правят перенос и поворот независимо, а поворот
@@ -451,20 +410,53 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         m.RoughnessMap = slotImage({"Maya|specularRoughness", "ShininessExponent"});
         m.AOMap = slotImage({"AmbientColor", "Maya|ambientOcclusion"});
         m.EmissiveMap = slotImage({"EmissiveColor"});
+        // Карта ПРОЗРАЧНОСТИ (Blender пишет её в TransparencyFactor, Maya и Max —
+        // в TransparentColor) — это листва, волосы, решётки: вырез по альфе
+        // альбедо. Без неё они приезжали сплошными прямоугольниками.
+        if (slots != materialSlots.end() &&
+            (slots->second.count("TransparencyFactor") || slots->second.count("TransparentColor"))) {
+            m.AlphaMode = 1;
+            m.AlphaCutoff = 0.5f;
+            m.DoubleSided = true;   // карточка листа видна с обеих сторон
+        }
         materialOf[Uid(n)] = std::move(m);
     }
 
-    // Материал геометрии — через её Model: Material --OO--> Model --OO--> …
-    auto materialOfGeometry = [&](int64_t geometry) {
-        sage::render::ModelSubMeshMaterial m;
+    // Материалы геометрии — через её Model, В ПОРЯДКЕ СВЯЗЕЙ: номер материала
+    // грани (MeshCorner::Material) — это номер именно в этом списке.
+    auto materialsOfGeometry = [&](int64_t geometry) {
+        std::vector<sage::render::ModelSubMeshMaterial> list;
         const int64_t model = parentOfKind(geometry, "Model");
-        if (model == 0) return m;
-        auto range = conns.ChildrenOf.equal_range(model);
-        for (auto it = range.first; it != range.second; ++it) {
-            auto known = materialOf.find(it->second);
-            if (known != materialOf.end()) return known->second;
+        if (model == 0) return list;
+        for (int64_t child : fbx::ChildrenInOrder(root, model)) {
+            auto known = materialOf.find(child);
+            if (known != materialOf.end()) list.push_back(known->second);
         }
-        return m;
+        return list;
+    };
+    // Углы геометрии -> по подмешу на материал. Раньше вся геометрия уходила в
+    // один подмеш с первым материалом модели: дерево с корой и листвой в
+    // одном меше красилось корой целиком.
+    auto emitByMaterial = [&](const std::vector<fbx::MeshCorner>& corners, int64_t geometry,
+                              const auto& makeVertex) {
+        const std::vector<sage::render::ModelSubMeshMaterial> mats = materialsOfGeometry(geometry);
+        std::vector<int> used;
+        for (const fbx::MeshCorner& c : corners)
+            if (std::find(used.begin(), used.end(), c.Material) == used.end()) used.push_back(c.Material);
+        int emitted = 0;
+        for (int material : used) {
+            sage::render::ModelSubMeshData sub;
+            for (const fbx::MeshCorner& corner : corners) {
+                if (corner.Material != material) continue;
+                sub.Indices.push_back((unsigned int)sub.Vertices.size());
+                sub.Vertices.push_back(makeVertex(corner));
+            }
+            if (material >= 0 && material < (int)mats.size()) sub.Material = mats[(size_t)material];
+            else if (!mats.empty()) sub.Material = mats.front();
+            out.SubMeshes.push_back(std::move(sub));
+            ++emitted;
+        }
+        return emitted;
     };
 
     // --- Геометрия -----------------------------------------------------------
@@ -531,14 +523,11 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             out.Skeleton.Joints[(size_t)jointIt->second].InverseBind = C * ib * Cinv;
         }
 
-        sage::render::ModelSubMeshData sub;
-        sub.Vertices.reserve(corners.size());
-        sub.Indices.reserve(corners.size());
-        for (const fbx::MeshCorner& corner : corners) {
+        submeshes += emitByMaterial(corners, Uid(n), [&](const fbx::MeshCorner& corner) {
             sage::render::SkinnedVertex v;
             v.Position = corner.Position;
             v.Normal = corner.Normal;
-            v.TexCoords = corner.TexCoords;
+            v.TexCoords = SkinUV(corner.TexCoords);
 
             auto it = weights.find(corner.ControlPoint);
             std::vector<sage::assets::SkinInfluence> list;
@@ -552,12 +541,8 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
                 v.Joints = glm::vec4(0.0f);
                 v.Weights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
             }
-            sub.Indices.push_back((unsigned int)sub.Vertices.size());
-            sub.Vertices.push_back(v);
-        }
-        sub.Material = materialOfGeometry(Uid(n));
-        out.SubMeshes.push_back(std::move(sub));
-        ++submeshes;
+            return v;
+        });
         (void)modelUid;
     }
 
@@ -631,24 +616,17 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             rigidJoint >= 0 ? glm::inverse(bindBone[(size_t)rigidJoint]) : glm::mat4(1.0f);
         const glm::mat3 toBoneNrm = glm::mat3(glm::transpose(glm::inverse(toBone)));
 
-        sage::render::ModelSubMeshData sub;
-        sub.Vertices.reserve(corners.size());
-        sub.Indices.reserve(corners.size());
-        for (const fbx::MeshCorner& corner : corners) {
+        rigidParts += emitByMaterial(corners, Uid(n), [&](const fbx::MeshCorner& corner) {
             sage::render::SkinnedVertex v;
             v.Position = glm::vec3(toBone * glm::vec4(corner.Position, 1.0f));
             v.Normal = glm::normalize(toBoneNrm * corner.Normal);
-            v.TexCoords = corner.TexCoords;
+            v.TexCoords = SkinUV(corner.TexCoords);
             v.Joints = glm::vec4((float)std::max(rigidJoint, 0), 0.0f, 0.0f, 0.0f);
             // Кости не нашлось (деталь вне скелета) — вес 0: шейдер возьмёт
             // единичную матрицу, и деталь останется там, где стоит в файле.
             v.Weights = rigidJoint >= 0 ? glm::vec4(1.0f, 0.0f, 0.0f, 0.0f) : glm::vec4(0.0f);
-            sub.Indices.push_back((unsigned int)sub.Vertices.size());
-            sub.Vertices.push_back(v);
-        }
-        sub.Material = materialOfGeometry(Uid(n));
-        out.SubMeshes.push_back(std::move(sub));
-        ++rigidParts;
+            return v;
+        }) > 0 ? 1 : 0;
     }
 
     LOG_INFO("Anim") << "FBX: частей со скином " << submeshes << ", жёстких " << rigidParts

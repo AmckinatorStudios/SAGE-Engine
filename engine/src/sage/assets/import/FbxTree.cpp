@@ -6,8 +6,10 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 #include "sage/assets/format/Blob.h"
+#include "sage/assets/import/PolygonTriangulate.h"
 
 // Разбор дерева записей двоичного FBX — см. FbxTree.h о том, почему он общий.
 namespace sage::assets::fbx {
@@ -240,13 +242,19 @@ struct LayerData {
 
     bool Empty() const { return Values.empty(); }
 
-    // Значение для (индекс вершины в полигоне, индекс контрольной точки).
-    glm::vec3 At(size_t polyVertex, int64_t controlPoint) const {
+    // Значение для (индекс вершины в полигоне, индекс контрольной точки,
+    // номер многоугольника).
+    glm::vec3 At(size_t polyVertex, int64_t controlPoint, size_t polygon) const {
         int64_t idx = 0;
         if (Mapping == "ByVertice" || Mapping == "ByVertex" || Mapping == "ByControlPoint") {
             idx = controlPoint;
         } else if (Mapping == "AllSame") {
             idx = 0;
+        } else if (Mapping == "ByPolygon") {
+            // Одно значение на ГРАНЬ (плоские нормали, материал). Раньше этот
+            // случай читался как «по углу», и угол k брал значение грани k —
+            // нормали и цвета перемешивались по всей модели.
+            idx = (int64_t)polygon;
         } else {
             idx = (int64_t)polyVertex; // ByPolygonVertex — самый частый случай
         }
@@ -354,6 +362,28 @@ std::vector<MeshCorner> BuildCorners(const Node& geometry, const Units& units,
     const LayerData uvs = ReadLayer(geometry.Find("LayerElementUV"), "UV", "UVIndex", 2);
     if (normals.Empty()) warnings.push_back("в FBX нет нормалей — посчитаны по граням");
 
+    // Материал ГРАНИ. Массив целых, а не чисел с плавающей точкой, поэтому
+    // читается мимо ReadLayer. AllSame — вся геометрия одним материалом,
+    // ByPolygon — по номеру на многоугольник.
+    const Node* materialLayer = geometry.Find("LayerElementMaterial");
+    const std::vector<int64_t>* polyMaterials =
+        materialLayer ? Ints(materialLayer->Find("Materials")) : nullptr;
+    const bool materialPerPolygon =
+        polyMaterials && Text(materialLayer->Find("MappingInformationType")) == "ByPolygon";
+    auto materialOf = [&](size_t polygon) -> int {
+        if (!polyMaterials || polyMaterials->empty()) return 0;
+        const size_t k = materialPerPolygon ? polygon : 0;
+        if (k >= polyMaterials->size()) return 0;
+        const int64_t m = (*polyMaterials)[k];
+        return m >= 0 ? (int)m : 0;
+    };
+
+    // ЗЕРКАЛЬНЫЙ УЗЕЛ (масштаб -1 по оси — обычный приём для симметричных
+    // деталей) меняет обход треугольников: лицевые становятся задними, и
+    // отсечение съедает деталь целиком. Разворачиваем обход — он и есть то, что
+    // отражение сломало. Смена осей в Units — поворот, обход она не меняет.
+    const bool mirrored = glm::determinant(glm::mat3(nodeXform)) < 0.0f;
+
     auto controlPoint = [&](int64_t index) {
         glm::vec3 p(0.0f);
         const size_t base = (size_t)index * 3;
@@ -372,34 +402,50 @@ std::vector<MeshCorner> BuildCorners(const Node& geometry, const Units& units,
     };
 
     // Многоугольники: индекс отрицателен на ПОСЛЕДНЕЙ вершине полигона
-    // (хранится как ~index). Разбиваем веером от первой вершины.
+    // (хранится как ~index).
     std::vector<size_t> polygon; // позиции в плоском массиве polys
+    std::vector<MeshCorner> ring;
+    std::vector<glm::vec3> ringPos;
+    size_t polygonIndex = 0;
     for (size_t i = 0; i < polys->size(); ++i) {
         polygon.push_back(i);
         const int64_t raw = (*polys)[i];
         if (raw >= 0) continue; // полигон ещё не кончился
 
-        for (size_t k = 2; k < polygon.size(); ++k) {
-            const size_t corner[3] = {polygon[0], polygon[k - 1], polygon[k]};
-            const size_t first = corners.size();
-            for (int c = 0; c < 3; ++c) {
-                const size_t pv = corner[c];
-                int64_t cp = (*polys)[pv];
-                if (cp < 0) cp = ~cp;
+        ring.clear();
+        ringPos.clear();
+        const int material = materialOf(polygonIndex);
+        for (size_t pv : polygon) {
+            int64_t cp = (*polys)[pv];
+            if (cp < 0) cp = ~cp;
+            MeshCorner out;
+            out.ControlPoint = cp;
+            out.Position = controlPoint(cp);
+            out.Material = material;
+            if (!normals.Empty()) {
+                const glm::vec3 n =
+                    units.DirToEngine(normalXform * normals.At(pv, cp, polygonIndex));
+                const float len = glm::length(n);
+                out.Normal = len > 1e-6f ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
+            }
+            if (!uvs.Empty()) {
+                const glm::vec3 uv = uvs.At(pv, cp, polygonIndex);
+                out.TexCoords = glm::vec2(uv.x, uv.y);
+            }
+            ring.push_back(out);
+            ringPos.push_back(out.Position);
+        }
 
-                MeshCorner out;
-                out.ControlPoint = cp;
-                out.Position = controlPoint(cp);
-                if (!normals.Empty()) {
-                    const glm::vec3 n = units.DirToEngine(normalXform * normals.At(pv, cp));
-                    const float len = glm::length(n);
-                    out.Normal = len > 1e-6f ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
-                }
-                if (!uvs.Empty()) {
-                    const glm::vec3 uv = uvs.At(pv, cp);
-                    out.TexCoords = glm::vec2(uv.x, uv.y);
-                }
-                corners.push_back(out);
+        const std::vector<uint32_t> tris = sage::assets::TriangulatePolygon(ringPos);
+        for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+            const size_t first = corners.size();
+            corners.push_back(ring[tris[t]]);
+            if (mirrored) {
+                corners.push_back(ring[tris[t + 2]]);
+                corners.push_back(ring[tris[t + 1]]);
+            } else {
+                corners.push_back(ring[tris[t + 1]]);
+                corners.push_back(ring[tris[t + 2]]);
             }
             if (normals.Empty()) {
                 const glm::vec3 a = corners[first + 1].Position - corners[first].Position;
@@ -411,8 +457,73 @@ std::vector<MeshCorner> BuildCorners(const Node& geometry, const Units& units,
             }
         }
         polygon.clear();
+        ++polygonIndex;
     }
     return corners;
+}
+
+// --- Трансформ узла -----------------------------------------------------------
+
+glm::mat4 EulerMatrix(const glm::vec3& deg, int order) {
+    const glm::mat4 X = glm::eulerAngleX(glm::radians(deg.x));
+    const glm::mat4 Y = glm::eulerAngleY(glm::radians(deg.y));
+    const glm::mat4 Z = glm::eulerAngleZ(glm::radians(deg.z));
+    // Порядок ПРИМЕНЕНИЯ: XYZ значит «сначала X», то есть матрица Z * Y * X.
+    switch (order) {
+        case 1: return Y * Z * X;   // XZY
+        case 2: return X * Z * Y;   // YZX
+        case 3: return Z * X * Y;   // YXZ
+        case 4: return Y * X * Z;   // ZXY
+        case 5: return X * Y * Z;   // ZYX
+        default: return Z * Y * X;  // XYZ
+    }
+}
+
+glm::mat4 NodeTransform::Matrix() const {
+    const glm::mat4 T = glm::translate(glm::mat4(1.0f), Translation);
+    const glm::mat4 Roff = glm::translate(glm::mat4(1.0f), RotationOffset);
+    const glm::mat4 Rp = glm::translate(glm::mat4(1.0f), RotationPivot);
+    const glm::mat4 RpInv = glm::translate(glm::mat4(1.0f), -RotationPivot);
+    const glm::mat4 Soff = glm::translate(glm::mat4(1.0f), ScalingOffset);
+    const glm::mat4 Sp = glm::translate(glm::mat4(1.0f), ScalingPivot);
+    const glm::mat4 SpInv = glm::translate(glm::mat4(1.0f), -ScalingPivot);
+    const glm::mat4 S = glm::scale(glm::mat4(1.0f), Scale);
+    return T * Roff * Rp * EulerMatrix(PreRotation) * EulerMatrix(Rotation, RotationOrder) *
+           glm::inverse(EulerMatrix(PostRotation)) * RpInv * Soff * Sp * S * SpInv;
+}
+
+NodeTransform ReadTransform(const Node& n) {
+    NodeTransform t;
+    t.Translation = Property70Vec(&n, "Lcl Translation", glm::vec3(0.0f));
+    t.Rotation = Property70Vec(&n, "Lcl Rotation", glm::vec3(0.0f));
+    t.Scale = Property70Vec(&n, "Lcl Scaling", glm::vec3(1.0f));
+    t.PreRotation = Property70Vec(&n, "PreRotation", glm::vec3(0.0f));
+    t.PostRotation = Property70Vec(&n, "PostRotation", glm::vec3(0.0f));
+    t.RotationOffset = Property70Vec(&n, "RotationOffset", glm::vec3(0.0f));
+    t.RotationPivot = Property70Vec(&n, "RotationPivot", glm::vec3(0.0f));
+    t.ScalingOffset = Property70Vec(&n, "ScalingOffset", glm::vec3(0.0f));
+    t.ScalingPivot = Property70Vec(&n, "ScalingPivot", glm::vec3(0.0f));
+    const int order = (int)Property70(&n, "RotationOrder", 0.0);
+    t.RotationOrder = order >= 0 && order <= 5 ? order : 0;
+    return t;
+}
+
+glm::mat4 GeometricMatrix(const Node& n) {
+    const glm::vec3 t = Property70Vec(&n, "GeometricTranslation", glm::vec3(0.0f));
+    const glm::vec3 r = Property70Vec(&n, "GeometricRotation", glm::vec3(0.0f));
+    const glm::vec3 s = Property70Vec(&n, "GeometricScaling", glm::vec3(1.0f));
+    return glm::translate(glm::mat4(1.0f), t) * EulerMatrix(r) * glm::scale(glm::mat4(1.0f), s);
+}
+
+std::vector<int64_t> ChildrenInOrder(const Node& root, int64_t parent) {
+    std::vector<int64_t> out;
+    const Node* conns = root.Find("Connections");
+    if (!conns) return out;
+    for (const Node& c : conns->Children) {
+        if (c.Name != "C" || c.Props.size() < 3 || c.Props[0].Text != "OO") continue;
+        if ((int64_t)c.Props[2].Number == parent) out.push_back((int64_t)c.Props[1].Number);
+    }
+    return out;
 }
 
 } // namespace sage::assets::fbx

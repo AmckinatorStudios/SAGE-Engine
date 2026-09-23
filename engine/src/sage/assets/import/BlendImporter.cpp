@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "sage/assets/import/Importer.h"
+#include "sage/assets/import/PolygonTriangulate.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
 
@@ -473,8 +474,10 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
                                 const int32_t nloops = (int32_t)pr.U32();
                                 if (nloops < 3 || loopstart < 0 || loopstart + nloops > totloop)
                                     continue;
-                                // Веер треугольников: грани Blender'а выпуклые,
-                                // и для них веер даёт правильную триангуляцию.
+                                // Грань режется по своей плоскости, а не
+                                // веером: n-угольники Blender бывают вогнутыми,
+                                // и веер вытаскивает треугольник за контур
+                                // (см. PolygonTriangulate.h).
                                 std::vector<uint32_t> vidx((size_t)nloops);
                                 for (int32_t k = 0; k < nloops; ++k) {
                                     Reader lr(bytes, header.LittleEndian);
@@ -482,14 +485,22 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
                                              (size_t)(loopstart + k) * loopStride + offV;
                                     vidx[(size_t)k] = lr.U32();
                                 }
-                                for (int32_t k = 1; k + 1 < nloops; ++k) {
-                                    if (vidx[0] >= (uint32_t)totvert ||
-                                        vidx[(size_t)k] >= (uint32_t)totvert ||
-                                        vidx[(size_t)k + 1] >= (uint32_t)totvert)
-                                        continue;
-                                    node.Mesh.Indices.push_back(vidx[0]);
-                                    node.Mesh.Indices.push_back(vidx[(size_t)k + 1]);
-                                    node.Mesh.Indices.push_back(vidx[(size_t)k]);
+                                bool valid = true;
+                                std::vector<glm::vec3> ring;
+                                ring.reserve(vidx.size());
+                                for (uint32_t vi : vidx) {
+                                    if (vi >= (uint32_t)totvert) { valid = false; break; }
+                                    ring.push_back(node.Mesh.Vertices[vi].Position);
+                                }
+                                if (!valid) continue;
+                                const std::vector<uint32_t> tris = TriangulatePolygon(ring);
+                                for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+                                    // Обход разворачивается так же, как было у
+                                    // веера (0, k+1, k): смена осей Z-up -> Y-up
+                                    // здесь сделана заменой координат.
+                                    node.Mesh.Indices.push_back(vidx[tris[t]]);
+                                    node.Mesh.Indices.push_back(vidx[tris[t + 2]]);
+                                    node.Mesh.Indices.push_back(vidx[tris[t + 1]]);
                                 }
                             }
 

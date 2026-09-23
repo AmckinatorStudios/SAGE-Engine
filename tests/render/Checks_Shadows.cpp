@@ -36,6 +36,8 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/render/SkyRenderer.h"
+#include "sage/render/Texture.h"
+#include "sage/render/Material.h"
 #include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
@@ -398,12 +400,77 @@ void TestLocalShadows(FrameRenderer& r) {
     TestLocalShadowsOfKind(r, LightComponent::Type::Point, "точечный", "local_point");
 }
 
+// --- Тень листвы: вырез по альфе и двусторонность -----------------------------
+//
+// Дерево из набора (Stylized Nature MegaKit) отбрасывало тень КВАДРАТАМИ: проход
+// теней рисовал карточку листа целиком, не глядя на альфу, хотя сам лист на
+// экране вырезан по контуру. Вторая половина той же беды: карточка — одна
+// плоскость, и та, что повёрнута от света изнанкой, в карту теней не попадала
+// вовсе (проход отсекал задние грани), — у кроны тень давала половина листьев.
+//
+// Проверка — той же парой «с тенями / без», что и у ламп выше: плита заменена
+// плоскостью с материалом листа.
+long long LeafShadow(FrameRenderer& r, const std::shared_ptr<Material>& material, bool upsideDown) {
+    std::unique_ptr<Scene> scene = MakeLampScene(LightComponent::Type::Spot, true);
+    {
+        GameObject blocker = scene->FindByName("Blocker");
+        blocker.GetTransform().Scale = {1.6f, 1.0f, 1.6f};
+        // Изнанкой к лампе: лицевая сторона плоскости смотрит вниз.
+        if (upsideDown) blocker.GetTransform().Rotation = {180.0f, 0.0f, 0.0f};
+        blocker.Renderer().Ref = MeshRef{MeshRef::Type::Plane};
+        blocker.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Plane);
+        blocker.Renderer().MaterialPtr = material;
+    }
+    sage::render::LocalShadowAtlas atlas(1024, 256);
+    const Image lit = RenderWithLampShadows(r, *scene, nullptr);
+    const Image shadowed = RenderWithLampShadows(r, *scene, &atlas);
+    return NewlyShadowed(lit, shadowed);
+}
+
+std::shared_ptr<Material> LeafMaterial(unsigned char alpha) {
+    // Карта 8x8 одного цвета с заданной альфой: проверяется вырез, а не рисунок.
+    std::vector<unsigned char> pixels(8 * 8 * 4);
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        pixels[i] = 60;
+        pixels[i + 1] = 160;
+        pixels[i + 2] = 40;
+        pixels[i + 3] = alpha;
+    }
+    auto material = std::make_shared<Material>();
+    material->AlbedoTex = std::make_shared<Texture>(pixels.data(), 8, 8);
+    material->Render.AlphaCutoff = 0.5f;
+    material->Render.Cull = CullFaces::None;
+    return material;
+}
+
+void TestFoliageShadows(FrameRenderer& r) {
+    const long long hole = LeafShadow(r, LeafMaterial(0), false);
+    const long long leaf = LeafShadow(r, LeafMaterial(255), false);
+    std::printf("    листва: тень прозрачной карточки %lld, плотной %lld\n", hole, leaf);
+    // Прозрачная часть листа тени не даёт — как не даёт её и на экране.
+    Check(hole < 50, "прозрачная по альфе карточка не отбрасывает тень");
+    // А плотная — даёт: вырез не выключил тень целиком.
+    Check(leaf > 400, "плотная часть карточки отбрасывает тень");
+
+    // Двусторонний материал без карт — плоский инстансный путь: у него своя
+    // пачка и своё отсечение, и изнанка должна отбрасывать тень и там.
+    auto twoSided = std::make_shared<Material>();
+    twoSided->Render.Cull = CullFaces::None;
+    const long long flipped = LeafShadow(r, twoSided, true);
+    const long long flippedTextured = LeafShadow(r, LeafMaterial(255), true);
+    std::printf("    листва изнанкой к свету: без карт %lld, с картой %lld\n", flipped,
+                flippedTextured);
+    Check(flipped > 400, "двусторонняя плоскость изнанкой к свету отбрасывает тень");
+    Check(flippedTextured > 400, "двусторонняя карточка листа изнанкой к свету отбрасывает тень");
+}
+
 } // namespace
 
 void RunShadowChecks(FrameRenderer& r, Scene& scene) {
     TestShadowSoftness(r, scene);
     TestShadowCascades(r);
     TestLocalShadows(r);
+    TestFoliageShadows(r);
 }
 
 } // namespace sage::rendertest

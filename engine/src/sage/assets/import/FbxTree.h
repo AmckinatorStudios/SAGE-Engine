@@ -92,13 +92,63 @@ struct MeshCorner {
     glm::vec3 Position{0.0f};
     glm::vec3 Normal{0.0f, 1.0f, 0.0f};
     glm::vec2 TexCoords{0.0f};
+    // Номер материала МОДЕЛИ, которым покрашен многоугольник угла (слой
+    // LayerElementMaterial): 0 — первый материал, связанный с моделью, 1 —
+    // второй и так далее. Один меш с корой и листвой — обычный экспорт из
+    // Blender, и без этого номера вся модель красилась первым материалом.
+    int Material = 0;
 };
 
 // Треугольники узла Geometry: по три угла на треугольник, уже в пространстве
 // движка (nodeXform применяется к сырым координатам, затем единицы и ось).
-// Нормали, которых нет в файле, считаются по граням.
+// Нормали, которых нет в файле, считаются по граням. Многоугольники режутся
+// по своей плоскости (PolygonTriangulate.h), а не веером; зеркальный
+// nodeXform разворачивает обход, иначе отражённая часть модели исчезает под
+// отсечением задних граней.
 std::vector<MeshCorner> BuildCorners(const Node& geometry, const Units& units,
                                      const glm::mat4& nodeXform,
                                      std::vector<std::string>& warnings);
+
+// --- Трансформ узла Model ---------------------------------------------------
+//
+// Это НЕ просто «перенос-поворот-масштаб»: между ними стоят предповорот,
+// постповорот и опорные точки, и пропустить их нельзя. Mixamo, Maya и 3ds Max
+// кладут разворот узла именно в PreRotation и опоры, и модель, собранная без
+// них, разъезжается по частям — хотя все числа «прочитаны верно».
+//
+// Порядок из спецификации FBX:
+//   Local = T * Roff * Rp * Rpre * R * Rpost⁻¹ * Rp⁻¹ * Soff * Sp * S * Sp⁻¹
+//
+// Общий для статики (FbxImporter.cpp) и скина (FbxSkin.cpp): пока у статики
+// был свой, урезанный до T*R*S, одна и та же деталь стояла в сцене не там, где
+// у той же модели со скелетом.
+struct NodeTransform {
+    glm::vec3 Translation{0.0f};
+    glm::vec3 Rotation{0.0f};      // градусы, порядок — RotationOrder
+    glm::vec3 Scale{1.0f};
+    glm::vec3 PreRotation{0.0f};   // всегда XYZ — так требует формат
+    glm::vec3 PostRotation{0.0f};
+    glm::vec3 RotationOffset{0.0f};
+    glm::vec3 RotationPivot{0.0f};
+    glm::vec3 ScalingOffset{0.0f};
+    glm::vec3 ScalingPivot{0.0f};
+    // 0 XYZ, 1 XZY, 2 YZX, 3 YXZ, 4 ZXY, 5 ZYX (eEulerXYZ… в FBX SDK). Порядок
+    // ПРИМЕНЕНИЯ осей: XYZ — сначала X. Модели из 3ds Max нередко не XYZ.
+    int RotationOrder = 0;
+
+    glm::mat4 Matrix() const;
+};
+
+// Поворот из углов (градусы) в заданном порядке применения осей.
+glm::mat4 EulerMatrix(const glm::vec3& degrees, int order = 0);
+
+NodeTransform ReadTransform(const Node& model);
+// Геометрический трансформ: только меш узла, детям не наследуется.
+glm::mat4 GeometricMatrix(const Node& model);
+
+// Дети объекта по связям OO — В ПОРЯДКЕ ФАЙЛА. Порядок здесь смысловой: номер
+// материала в LayerElementMaterial — это номер среди материалов модели именно
+// в порядке их связей, и хэш-таблица, которая его теряет, перекрашивает части.
+std::vector<int64_t> ChildrenInOrder(const Node& root, int64_t parent);
 
 } // namespace sage::assets::fbx

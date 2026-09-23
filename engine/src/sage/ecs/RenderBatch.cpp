@@ -181,6 +181,34 @@ const char* kDepthFrag = R"(#version 330 core
 void main() {}
 )";
 
+// Глубина С ВЫРЕЗОМ ПО АЛЬФЕ — для материалов с порогом отсечения (листва,
+// трава, решётки, волосы). Карта теней знает только «есть поверхность или
+// нет», и без этого прохода карточка листа отбрасывала тень целиком — сплошным
+// квадратом, хотя сам лист на экране вырезан по контуру. Порог, повтор и
+// сдвиг развёртки — те же, что у цветного прохода: тень обязана совпадать с
+// тем, что видно, до пикселя.
+const char* kDepthAlphaVert = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 2) in vec2 aUV;
+uniform mat4 uLightSpace;
+uniform mat4 uModel;
+out vec2 TexCoords;
+void main() {
+    TexCoords = aUV;
+    gl_Position = uLightSpace * uModel * vec4(aPos, 1.0);
+}
+)";
+const char* kDepthAlphaFrag = R"(#version 330 core
+in vec2 TexCoords;
+uniform sampler2D uAlbedoMap;
+uniform vec2 uUVScale;
+uniform vec2 uUVOffset;
+uniform float uAlphaCutoff;
+void main() {
+    if (texture(uAlbedoMap, TexCoords * uUVScale + uUVOffset).a < uAlphaCutoff) discard;
+}
+)";
+
 // Заливка пользовательских юниформ материала в программу. Тип берётся из
 // самого параметра: залить vec4 туда, где объявлен float, — молча ничего не
 // сделать, а разбираться потом с «шейдер не реагирует на настройку».
@@ -199,6 +227,14 @@ Shader& LitShader() { static Shader* s = new Shader(Shader::FromSource(kLitVert,
 Shader& TexShader() { static Shader* s = new Shader(Shader::FromSource(kTexVert, TexFragSource(), "RenderBatchTex")); return *s; }
 Shader& DepthInstShader() { static Shader* s = new Shader(Shader::FromSource(kDepthInstVert, kDepthFrag, "RenderBatchDepthInst")); return *s; }
 Shader& DepthUModelShader() { static Shader* s = new Shader(Shader::FromSource(kDepthUModelVert, kDepthFrag, "RenderBatchDepthU")); return *s; }
+Shader& DepthAlphaShader() { static Shader* s = new Shader(Shader::FromSource(kDepthAlphaVert, kDepthAlphaFrag, "RenderBatchDepthAlpha")); return *s; }
+
+// Режет ли материал поверхность по альфе альбедо. Нужна и карта, и порог:
+// порог без карты резать нечем, карта без порога — обычный цвет, и начинать
+// по её альфе дырявить тень значило бы продырявить готовые сцены.
+bool CutsByAlpha(const Material* mat) {
+    return mat && mat->AlbedoTex && mat->Render.AlphaCutoff > 0.0f;
+}
 
 } // namespace
 
@@ -987,6 +1023,17 @@ void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
     m_collectingShadows = true;
     CollectVisible(scene, lightMatrix); // отсечение по фрустуму света
     m_collectingShadows = false;
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+
+    // ДВУСТОРОННЕЕ ОТБРАСЫВАЕТ ТЕНЬ ОБЕИМИ СТОРОНАМИ. Проход теней отсекает
+    // задние грани, и одиночная плоскость (лист, трава, ткань, забор), которая
+    // смотрит от света, в карту теней не попадала вовсе: у дерева тень
+    // отбрасывала только половина листвы, и какая — зависело от угла солнца.
+    // Материал, видимый с обеих сторон, и тень обязан давать с обеих.
+    auto depthCull = [&device](const Material* mat) {
+        device.SetCullMode(mat && mat->Render.Cull == CullFaces::None ? sage::rhi::CullMode::Off
+                                                                       : sage::rhi::CullMode::Back);
+    };
 
     // Flat — инстансно.
     Shader& di = DepthInstShader();
@@ -994,35 +1041,59 @@ void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
     di.SetMat4("uLightSpace", lightMatrix);
     for (auto& kv : m_groups) {
         if (kv.second.Instances.empty()) continue;
+        device.SetCullMode(kv.first.Cull == (int)CullFaces::None ? sage::rhi::CullMode::Off
+                                                                  : sage::rhi::CullMode::Back);
         kv.first.Mesh_->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
         kv.first.Mesh_->DrawSubmeshInstances(kv.first.Submesh, kv.second.Instances.size());
     }
+
+    // Сплошные — одной программой, вырезаемые по альфе — другой; сперва
+    // раскладываем, чтобы не переключать программу на каждом объекте.
+    struct DepthItem { Mesh* Mesh_; unsigned int Submesh; glm::mat4 Model; const Material* Mat; };
+    std::vector<DepthItem> solid, cutout;
     // Полупрозрачные: тень отбрасывают только ПЛОТНЫЕ из них. Карта теней
     // бинарна — она не умеет «половину тени», — поэтому выбор всегда между
     // полной тенью и никакой. Стекло и вода не должны затемнять дно, а
     // притемнённая до 0.7 доска обязана оставаться доской: порог посередине и
     // есть наименее неправильный ответ.
-    if (!m_transparent.empty()) {
-        Shader& du = DepthUModelShader();
-        du.Use();
-        du.SetMat4("uLightSpace", lightMatrix);
-        for (const TransparentItem& it : m_transparent) {
-            if (it.Inst.Alpha < 0.5f) continue;
-            du.SetMat4("uModel", it.Inst.Model);
-            it.Mesh_->DrawSubmesh(it.Submesh);
-        }
+    for (const TransparentItem& it : m_transparent) {
+        if (it.Inst.Alpha < 0.5f) continue;
+        (CutsByAlpha(it.Mat) ? cutout : solid).push_back({it.Mesh_, it.Submesh, it.Inst.Model, it.Mat});
     }
-
     // Текстурные — индивидуально (uModel).
-    if (!m_textured.empty()) {
+    for (const TexturedItem& it : m_textured)
+        (CutsByAlpha(it.Mat) ? cutout : solid).push_back({it.Mesh_, it.Submesh, it.Model, it.Mat});
+
+    if (!solid.empty()) {
         Shader& du = DepthUModelShader();
         du.Use();
         du.SetMat4("uLightSpace", lightMatrix);
-        for (const TexturedItem& it : m_textured) {
+        for (const DepthItem& it : solid) {
+            depthCull(it.Mat);
             du.SetMat4("uModel", it.Model);
             it.Mesh_->DrawSubmesh(it.Submesh);
         }
     }
+    if (!cutout.empty()) {
+        Shader& da = DepthAlphaShader();
+        da.Use();
+        da.SetMat4("uLightSpace", lightMatrix);
+        da.SetInt("uAlbedoMap", 0);
+        for (const DepthItem& it : cutout) {
+            depthCull(it.Mat);
+            da.SetMat4("uModel", it.Model);
+            // Повтор и сдвиг — той же общей функцией, что и в цветном проходе
+            // (Material.h): иначе вырез тени съехал бы относительно листа.
+            da.SetVec2("uUVScale", TilingFactor(it.Mat->Render, WorldScaleOf(it.Model)));
+            da.SetVec2("uUVOffset", glm::vec2(it.Mat->Render.UVOffsetX, it.Mat->Render.UVOffsetY));
+            da.SetFloat("uAlphaCutoff", it.Mat->Render.AlphaCutoff);
+            it.Mat->AlbedoTex->Bind(0);
+            it.Mesh_->DrawSubmesh(it.Submesh);
+        }
+    }
+    // Отсечение вернулось к обычному: следующий проход (скелетные модели,
+    // следующий каскад) не должен унаследовать чужое.
+    device.SetCullMode(sage::rhi::CullMode::Back);
 }
 
 } // namespace sage::ecs
