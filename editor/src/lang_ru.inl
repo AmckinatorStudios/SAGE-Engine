@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1924.
+// Язык: Русский. Строк: 1926.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -128,6 +128,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Кнопка отвечает «да/нет», ось даёт −1..1, вектор — сразу две оси: движение и обзор."},
     {"A caption: size, colour, alignment, wrapping",
      "Надпись: размер, цвет, выравнивание, перенос"},
+    {"A character taller than 50 m was exported in centimetres:\nit is scaled down 100 times. Static models are not touched.",
+     "Персонаж выше 50 м выгружен в сантиметрах:\nон уменьшается в 100 раз. Статичные модели не трогаются."},
     {"A file on disk — the change affects EVERY object using this material.",
      "Файл на диске — изменится у ВСЕХ объектов с этим материалом."},
     {"A file with this name already exists",
@@ -612,6 +614,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "По центру, по горизонтали"},
     {"Centers vertically",
      "По центру, по вертикали"},
+    {"Centimetres to metres (characters)",
+     "Сантиметры в метры (персонажи)"},
     {"Chain Length",
      "Длина цепочки"},
     {"Channel R. Multiplied by the Metallic factor above.",

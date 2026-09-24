@@ -69,6 +69,8 @@ struct ExtractedMaterial {
     // есть модель «загрузилась», но выглядела не так, и починить это можно
     // было только руками в инспекторе, зная, что искать.
     bool DoubleSided = false;
+    // Без освещения (glTF KHR_materials_unlit).
+    bool Unlit = false;
     // 0 — непрозрачный, 1 — отсечение по порогу (MASK), 2 — смешивание (BLEND).
     int AlphaMode = 0;
     float AlphaCutoff = 0.5f;

@@ -318,6 +318,29 @@ void TestEmissiveShows(FrameRenderer& r) {
     Check(glowing.g > dark.g + 0.15f, "свечение материала видно на объекте");
 }
 
+// --- 6б. Без освещения: цвет как есть ---------------------------------------
+//
+// Мультяшные модели (KHR_materials_unlit) задуманы плоской заливкой. В полной
+// темноте освещённый шар чёрный, а шар «без освещения» — своего цвета: иначе
+// режим ничего не делает, и тун-модель покрыта светом и тенями.
+void TestUnlitIgnoresLight(FrameRenderer& r) {
+    GameObject ball;
+    std::unique_ptr<Scene> scene = MakeMaterialScene(ball);
+    scene->Lighting.Sun.Intensity = 0.0f;
+    scene->Lighting.AmbientStrength = 0.0f;
+    auto material = std::make_shared<Material>();
+    material->Albedo = {0.9f, 0.3f, 0.1f};
+    ball.Renderer().MaterialPtr = material;
+
+    const glm::vec3 lit = BallColor(Shot(r, *scene));
+    material->Render.Unlit = true;
+    const glm::vec3 flat = BallColor(Shot(r, *scene));
+
+    std::printf("       в темноте: освещённый %.3f, без освещения %.3f\n", lit.r, flat.r);
+    Check(lit.r < 0.08f, "освещённый шар в полной темноте чёрный");
+    Check(flat.r > 0.5f && flat.r > flat.b + 0.3f, "материал без освещения — своего цвета и в темноте");
+}
+
 // --- 7. Карта альбедо и её ПОВТОР ------------------------------------------
 //
 // Текстурный путь отрисовки — отдельный от плоского цвета (см. RenderBatch:
@@ -698,6 +721,7 @@ void RunMaterialChecks(FrameRenderer& r) {
     TestOpacityBlends(r);
     TestSaveReloadKeepsTheLook(r);
     TestEmissiveShows(r);
+    TestUnlitIgnoresLight(r);
     TestAlbedoMapAndTiling(r);
     TestTextureAssignedAfterLoadReachesTheMaterial();
     TestEveryMapReachesTheFrame(r);

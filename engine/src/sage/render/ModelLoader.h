@@ -28,6 +28,12 @@ namespace ModelLoader {
         bool NormalizeSize = false; // наибольшая сторона -> 1 (до умножения на Scale)
         glm::vec3 Rotation{0.0f};   // градусы, оси X, Y, Z (Z вверх -> Y вверх: X = -90)
         glm::vec3 Offset{0.0f};     // сдвиг после масштаба и поворота, метры
+        // Персонаж в САНТИМЕТРАХ — привести к метрам (×0.01). Выгрузки из
+        // Sketchfab, Unreal и 3ds Max часто пишут сантиметры без масштаба в
+        // узлах, и человек ростом 1.8 м приезжал башней в 180 м. Срабатывает
+        // только у моделей со скелетом выше kCentimetreGuess: персонаж такого
+        // роста не бывает, а большой статичный ландшафт — бывает.
+        bool AutoUnits = true;
 
         // --- Геометрия -------------------------------------------------------
         enum class NormalMode { Import = 0, Smooth = 1, Flat = 2 };
@@ -50,6 +56,25 @@ namespace ModelLoader {
         // тратит время на пересчёты.
         bool ChangesGeometry() const;
     };
+
+    // Больше этого (метров) по наибольшей стороне персонаж со скелетом быть не
+    // может — значит, файл в сантиметрах (см. ImportSettings::AutoUnits).
+    constexpr float kCentimetreGuess = 50.0f;
+
+    // Множитель единиц: 0.01 — «модель в сантиметрах», иначе 1.
+    float AutoUnitScale(const ImportSettings& s, bool hasSkeleton, float maxExtent);
+
+    // Настройки из сайдкара + решение о единицах по самой геометрии (min/max
+    // её вершин). Одна точка для статики и персонажей: иначе одна и та же
+    // модель в сцене и в редакторе оказалась бы разного размера.
+    ImportSettings ResolveImportSettings(const std::string& path, const glm::vec3& lo,
+                                         const glm::vec3& hi);
+
+    // Центрирование, нормировка, масштаб, поворот и сдвиг — ОДНОЙ матрицей, в
+    // том же порядке, что ApplyImportSettings для вершин. Её получает
+    // скелетная модель: её вершины нельзя «запечь» — кости и клипы остались
+    // бы в прежнем размере.
+    glm::mat4 ImportMatrix(const ImportSettings& s, const glm::vec3& lo, const glm::vec3& hi);
 
     // Загружает модель ЛЮБОГО поддерживаемого формата (.obj, .gltf, .glb) и
     // возвращает Mesh, применив ImportSettings из сайдкара.

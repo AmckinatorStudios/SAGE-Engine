@@ -145,6 +145,10 @@ bool DrawSettings(ModelLoader::ImportSettings& s, bool* overwriteMaterials) {
     changed |= ImGui::DragFloat3(T("Offset (m)"), &s.Offset.x, 0.01f);
     changed |= ImGui::Checkbox(T("Move the centre to the origin"), &s.Recenter);
     changed |= ImGui::Checkbox(T("Fit into one metre"), &s.NormalizeSize);
+    changed |= ImGui::Checkbox(T("Centimetres to metres (characters)"), &s.AutoUnits);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("A character taller than 50 m was exported in centimetres:\n"
+                                  "it is scaled down 100 times. Static models are not touched."));
 
     ImGui::SeparatorText(T("Geometry"));
     const char* normals[] = {T("From the file"), T("Recompute smooth"), T("Recompute flat")};

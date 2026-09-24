@@ -36,6 +36,13 @@ namespace sage::assets {
 bool LoadGltfFile(tinygltf::TinyGLTF& loader, tinygltf::Model& out, const std::string& path,
                   std::string& err, std::string& warn);
 
+// KHR_materials_pbrSpecularGlossiness -> обычный металл-шероховатость, прямо в
+// модели. Старое расширение до сих пор пишут выгрузки Sketchfab и конвертеры из
+// FBX; не читая его, движок получал материал по умолчанию — БЕЛЫЙ металл без
+// текстур, и модель целиком выходила белой. Возвращает число переведённых
+// материалов. LoadGltfFile зовёт её сам.
+int ConvertSpecularGlossiness(tinygltf::Model& model);
+
 // Пересборка GLB из памяти: вынуть куски, выровнять, переписать длину.
 // Отдельно от загрузки — чтобы проверять её без tinygltf и без диска.
 // Возвращает false с err, если файл не GLB или обрезан.

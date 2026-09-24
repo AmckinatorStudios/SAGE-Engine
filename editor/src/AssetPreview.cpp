@@ -197,6 +197,7 @@ const std::vector<std::shared_ptr<Material>>& AssetPreview::MaterialsForModel(
         if (extracted.AlphaMode == 1) material->Render.AlphaCutoff = extracted.AlphaCutoff;
         if (extracted.DoubleSided) material->Render.Cull = CullFaces::None;
         if (extracted.AlphaMode == 1 && extracted.DoubleSided) material->Render.Translucency = 0.5f;
+        material->Render.Unlit = extracted.Unlit;
         ResourceManager::Instance().ResolveMaterialTextures(*material);
         materials.push_back(std::move(material));
     }

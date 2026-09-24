@@ -48,7 +48,7 @@ constexpr unsigned int kMagic = 0x434D4753u;
 // переворачивает развёртку под соглашение скелетного прохода и помечает
 // материалы с картой прозрачности вырезом по альфе. Поля те же, содержимое
 // другое: старый кэш вернул бы дерево одной корой и текстуры вверх ногами.
-constexpr unsigned int kVersion = 7;
+constexpr unsigned int kVersion = 8;   // 8: Unlit у материала подмеша
 
 struct State {
     std::string Directory = ".sage-cache";
@@ -285,6 +285,7 @@ bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out)
         r.Pod(sub.Material.AlphaMode);
         r.Pod(sub.Material.AlphaCutoff);
         r.Pod(sub.Material.DoubleSided);
+        r.Pod(sub.Material.Unlit);
         r.Pod(sub.MorphCount);
         r.Pod(sub.MorphWidth);
         r.Pod(sub.MorphRows);
@@ -389,6 +390,7 @@ bool WriteModelCache(const std::string& sourcePath, const sage::render::ModelDat
         w.Pod(sub.Material.AlphaMode);
         w.Pod(sub.Material.AlphaCutoff);
         w.Pod(sub.Material.DoubleSided);
+        w.Pod(sub.Material.Unlit);
         w.Pod(sub.MorphCount);
         w.Pod(sub.MorphWidth);
         w.Pod(sub.MorphRows);

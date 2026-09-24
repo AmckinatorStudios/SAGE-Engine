@@ -15,9 +15,11 @@
 
 #include <glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
 #include "sage/assets/import/MeshNormalize.h"
+#include "sage/assets/import/ModelProbe.h"
 #include "sage/assets/import/ObjMtl.h"
 #include "sage/assets/import/PolygonTriangulate.h"
 #include <nlohmann/json.hpp>
@@ -70,6 +72,7 @@ ImportSettings LoadImportSettings(const std::string& modelPath) {
                       : twoSided == "off" ? ImportSettings::TwoSided::Off
                                           : ImportSettings::TwoSided::Auto;
         s.ImportAnimation = j.value("importAnimation", s.ImportAnimation);
+        s.AutoUnits = j.value("autoUnits", s.AutoUnits);
     } catch (const std::exception& e) {
         LOG_WARN("Model") << "Битый .sageimport (" << modelPath << "): " << e.what();
     }
@@ -92,6 +95,7 @@ bool SaveImportSettings(const std::string& modelPath, const ImportSettings& s) {
         {"alphaCutoff", s.AlphaCutoff},
         {"twoSided", kTwoSided[(int)s.DoubleSided]},
         {"importAnimation", s.ImportAnimation},
+        {"autoUnits", s.AutoUnits},
     };
     std::ofstream f(ImportSidecarPath(modelPath));
     if (!f) return false;
@@ -119,6 +123,59 @@ void ApplyImportSettings(std::vector<Vertex>& vertices, const ImportSettings& s)
         v.Position *= scale;                     // нормализация + равномерный масштаб
     }
 }
+
+float AutoUnitScale(const ImportSettings& s, bool hasSkeleton, float maxExtent) {
+    return s.AutoUnits && hasSkeleton && maxExtent > kCentimetreGuess ? 0.01f : 1.0f;
+}
+
+ImportSettings ResolveImportSettings(const std::string& path, const glm::vec3& lo,
+                                     const glm::vec3& hi) {
+    ImportSettings s = LoadImportSettings(path);
+    if (!s.AutoUnits || hi.x < lo.x) return s;
+    const glm::vec3 size = hi - lo;
+    const float extent = glm::max(size.x, glm::max(size.y, size.z));
+    if (extent <= kCentimetreGuess) return s;   // проба скелета — только когда есть о чём
+    const float unit = AutoUnitScale(s, sage::assets::ModelHasSkeleton(path), extent);
+    if (unit != 1.0f) {
+        s.Scale *= unit;
+        LOG_INFO("Model") << "Модель " << path << " высотой " << extent
+                          << " — похоже, в сантиметрах: уменьшена в 100 раз "
+                          << "(настройки импорта -> «Сантиметры в метры»)";
+    }
+    return s;
+}
+
+glm::mat4 ImportMatrix(const ImportSettings& s, const glm::vec3& lo, const glm::vec3& hi) {
+    const bool bounds = hi.x >= lo.x;
+    const glm::vec3 center = bounds ? (lo + hi) * 0.5f : glm::vec3(0.0f);
+    float norm = 1.0f;
+    if (s.NormalizeSize && bounds) {
+        const glm::vec3 size = hi - lo;
+        const float maxDim = glm::max(size.x, glm::max(size.y, size.z));
+        if (maxDim > 1e-6f) norm = 1.0f / maxDim;
+    }
+    const float scale = norm * (s.Scale > 0.0f ? s.Scale : 1.0f);
+    glm::mat4 m(1.0f);
+    m = glm::translate(m, s.Offset);
+    if (s.Rotation != glm::vec3(0.0f))
+        m *= glm::eulerAngleZYX(glm::radians(s.Rotation.z), glm::radians(s.Rotation.y),
+                                glm::radians(s.Rotation.x));
+    m = glm::scale(m, glm::vec3(scale));
+    if (s.Recenter) m = glm::translate(m, -center);
+    return m;
+}
+
+namespace {
+// Настройки для уже прочитанной геометрии: границы — по её вершинам.
+ImportSettings SettingsFor(const std::string& path, const sage::render::MeshData& mesh) {
+    glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
+    for (const Vertex& v : mesh.Vertices) {
+        lo = glm::min(lo, v.Position);
+        hi = glm::max(hi, v.Position);
+    }
+    return ResolveImportSettings(path, lo, hi);
+}
+} // namespace
 
 bool ImportSettings::ChangesGeometry() const {
     return Scale != 1.0f || Recenter || NormalizeSize || Rotation != glm::vec3(0.0f) ||
@@ -375,7 +432,7 @@ sage::render::MeshData LoadObjData(const std::string& path,
 
     // Применяем настройки импорта из сайдкара (масштаб/центрирование/нормализация)
     // ДО создания GPU-меша — модель приходит в сцену уже приведённой.
-    ApplyImportSettings(out, LoadImportSettings(path));
+    ApplyImportSettings(out, SettingsFor(path, out));
 
     return out;
 }
@@ -426,7 +483,7 @@ sage::render::MeshData LoadGltfData(const std::string& path, bool) {
     // центрирование — свойство ассета, а не формата, и разное поведение у .obj
     // и .glb означало бы, что одна и та же модель ведёт себя по-разному в
     // зависимости от того, как её экспортировали.
-    ApplyImportSettings(d, LoadImportSettings(path));
+    ApplyImportSettings(d, SettingsFor(path, d));
     return d;
 }
 
@@ -464,7 +521,7 @@ sage::render::MeshData LoadMeshData(const std::string& path) {
             // Настройки импорта — и здесь: FBX, .blend и остальные форматы
             // реестра их раньше не получали вовсе, и масштаб, выставленный в
             // инспекторе FBX-модели, ни на что не влиял.
-            ApplyImportSettings(data, LoadImportSettings(path));
+            ApplyImportSettings(data, SettingsFor(path, data));
             if (!data.Empty()) return data;
             throw std::runtime_error("В файле нет геометрии: " + path);
         }

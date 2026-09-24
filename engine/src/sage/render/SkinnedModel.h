@@ -133,6 +133,8 @@ struct SkinnedMaterial {
     // «плоских» деталей (провода, ремни, ткань) без этого пропадает половина
     // поверхности — и выглядит это как дырки в модели.
     bool DoubleSided = false;
+    // Без освещения (KHR_materials_unlit): мультяшная заливка как есть.
+    bool Unlit = false;
 
     bool Transparent() const { return Mode == Alpha::Blend || Opacity < 0.999f; }
 };
@@ -170,6 +172,12 @@ public:
     // ключей.
     int BorrowClipsFrom(const SkinnedModel& source);
     int SubMeshCount() const { return (int)m_subMeshes.size(); }
+
+    // Масштаб, поворот и сдвиг из настроек импорта (.sageimport) — матрица,
+    // которую Draw/DrawDepth/DrawSilhouette ставят между сущностью и
+    // вершинами. Load ставит её сам.
+    void SetImportTransform(const glm::mat4& m) { m_import = m; }
+    const glm::mat4& ImportTransform() const { return m_import; }
 
     // --- Блендшейпы ---
     // Имена морф-целей модели. Их порядок — это и есть порядок весов, которые
@@ -235,6 +243,7 @@ private:
     std::vector<sage::anim::AnimationClip> m_clips;
     std::vector<std::string> m_morphNames;
     std::vector<float> m_morphDefaults;
+    glm::mat4 m_import{1.0f};
 };
 
 // Разбор скелетной модели БЕЗ ВИДЕОКАРТЫ: скелет, веса, подмеши, клипы.
