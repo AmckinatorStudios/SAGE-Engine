@@ -11,12 +11,15 @@
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/euler_angles.hpp>
 
 #include "sage/assets/import/MeshNormalize.h"
+#include "sage/assets/import/ObjMtl.h"
+#include "sage/assets/import/PolygonTriangulate.h"
 #include <nlohmann/json.hpp>
 
 #include "sage/core/Log.h"
@@ -219,6 +222,14 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
 sage::render::MeshData LoadObjData(const std::string& path,
                                    std::vector<sage::assets::ImportedMaterial>* materialsOut) {
     tinyobj::ObjReaderConfig config;
+    // Грани режем САМИ (TriangulatePolygon), а не силами tinyobj: он делит
+    // четырёхугольник по КОРОТКОЙ диагонали, а многоугольник — веером. У
+    // вогнутой грани (изгиб ветки, скрученная кора) обе стратегии проводят
+    // диагональ СНАРУЖИ грани: один треугольник выворачивается изнанкой и
+    // отсекается, другой накрывает чужое место. На модели это «пила» из дыр
+    // и тёмных зубцов вдоль изгиба — у .obj, и никогда у той же модели в glTF,
+    // которую экспортёр триангулировал сам.
+    config.triangulate = false;
     tinyobj::ObjReader reader;
 
     if (!reader.ParseFromFile(path, config)) {
@@ -233,10 +244,14 @@ sage::render::MeshData LoadObjData(const std::string& path,
     if (materialsOut) {
         materialsOut->clear();
         materialsOut->reserve(materials.size());
+        const std::unordered_set<std::string> noKd = sage::assets::MtlTexturedWithoutKd(path);
         for (const tinyobj::material_t& m : materials) {
             sage::assets::ImportedMaterial im;
             im.Name = m.name;
             im.Albedo = glm::vec3(m.diffuse[0], m.diffuse[1], m.diffuse[2]);
+            // Kd не записан, цвет — из карты: множитель единица, а не 0.6,
+            // подставленные tinyobj (см. ObjMtl.h).
+            if (noKd.count(m.name)) im.Albedo = glm::vec3(1.0f);
             im.Emissive = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
             im.Metallic = m.metallic;
             // Roughness в .mtl есть далеко не всегда, и ноль по умолчанию
@@ -299,9 +314,21 @@ sage::render::MeshData LoadObjData(const std::string& path,
             Bucket& bucket =
                 bucketFor(material >= 0 && (size_t)material < materials.size() ? material : -1);
 
-            for (size_t c = 0; c < faceVerts && corner + c < shape.mesh.indices.size(); ++c) {
+            // Грань целиком или никак: битый индекс в одном углу сдвинул бы
+            // тройки всех следующих треугольников.
+            bool valid = faceVerts >= 3 && corner + faceVerts <= shape.mesh.indices.size();
+            std::vector<glm::vec3> polygon;
+            for (size_t c = 0; valid && c < faceVerts; ++c) {
+                const int vi = shape.mesh.indices[corner + c].vertex_index;
+                if (vi < 0 || (size_t)vi >= vertexCount) { valid = false; break; }
+                polygon.emplace_back(attrib.vertices[3 * vi + 0], attrib.vertices[3 * vi + 1],
+                                     attrib.vertices[3 * vi + 2]);
+            }
+            if (!valid) { corner += faceVerts; continue; }
+            const std::vector<uint32_t> triangles = sage::assets::TriangulatePolygon(polygon);
+
+            for (uint32_t c : triangles) {
                 const tinyobj::index_t& idx = shape.mesh.indices[corner + c];
-                if (idx.vertex_index < 0 || (size_t)idx.vertex_index >= vertexCount) continue;
                 Vertex v{};
                 v.Position = {
                     attrib.vertices[3 * idx.vertex_index + 0],

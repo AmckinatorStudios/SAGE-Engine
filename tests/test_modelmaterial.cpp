@@ -664,3 +664,60 @@ TEST(alpha_bleed_gives_transparent_pixels_the_leaf_colour) {
             CHECK_EQ((int)p[3], x < 2 ? 255 : 0);     // вырез — прежний
         }
 }
+
+// --- .obj: текстура без Kd — множитель единица -------------------------------
+//
+// Blender не пишет Kd, когда цвет взят из карты, а tinyobj подставляет тогда
+// 0.6. Кора и листва из .obj выходили на 40 % темнее той же модели в glTF.
+TEST(model_material_obj_texture_without_kd_is_not_darkened) {
+    const fs::path dir = TempDir("sage_test_modelmat_nokd");
+    WriteText(dir / "tree.obj", "mtllib tree.mtl\nusemtl Bark\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+                                "usemtl Plain\nf 1 3 2\n");
+    WriteText(dir / "tree.mtl", "newmtl Bark\nKs 0.5 0.5 0.5\nmap_Kd bark.png\n"
+                                "newmtl Plain\nKd 0.6 0.6 0.6\nmap_Kd bark.png\n");
+    WritePixelPng(dir / "bark.png", 140, 88, 67);
+    const ModelLoader::ExtractedMaterialSet set = ModelLoader::ExtractMaterials((dir / "tree.obj").string());
+    CHECK_EQ((int)set.Materials.size(), 2);
+    if (set.Materials.size() != 2) return;
+    CHECK_NEAR(set.Materials[0].Albedo.r, 1.0f, 1e-4f);                 // Kd не записан
+    CHECK_NEAR(SrgbToLinear(set.Materials[1].Albedo.r), 0.6f, 1e-4f);   // записан — как есть
+
+    // Тот же ответ у реестра импорта (материалы модели в сцене).
+    std::vector<sage::assets::ImportedMaterial> imported;
+    ModelLoader::LoadObjData((dir / "tree.obj").string(), &imported);
+    CHECK_EQ((int)imported.size(), 2);
+    if (imported.size() == 2) CHECK_NEAR(imported[0].Albedo.r, 1.0f, 1e-4f);
+}
+
+// --- .obj: вогнутая грань режется по диагонали ВНУТРИ неё ---------------------
+//
+// tinyobj делит четырёхугольник по КОРОТКОЙ диагонали. У «дротика» ниже она
+// идёт снаружи: один треугольник накрывает вырез, второй вывернут и
+// отсекается — на изгибе ветки это «пила» из дыр и тёмных зубцов.
+TEST(model_obj_concave_faces_are_triangulated_inside) {
+    const fs::path dir = TempDir("sage_test_obj_concave");
+    // Дротик: остриё (0,10), крылья (-1,0) и (1,0), вогнутая вершина (0,0.5).
+    // Диагональ от вогнутой вершины (9.5) длиннее внешней (2).
+    // Второй — пятиугольник с вогнутой вершиной, его tinyobj режет веером.
+    WriteText(dir / "dart.obj",
+              "v 0 10 0\nv -1 0 0\nv 0 0.5 0\nv 1 0 0\n"
+              "v 3 0 0\nv 7 0 0\nv 7 4 0\nv 5 1 0\nv 3 4 0\n"
+              "f 1 2 3 4\n"
+              "f 5 6 7 8 9\n");
+    const sage::render::MeshData mesh = ModelLoader::LoadObjData((dir / "dart.obj").string());
+    CHECK_EQ((int)mesh.Indices.size(), (2 + 3) * 3);
+    float area = 0.0f;
+    bool allFront = true;
+    for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3) {
+        const glm::vec3 a = mesh.Vertices[mesh.Indices[i]].Position;
+        const glm::vec3 b = mesh.Vertices[mesh.Indices[i + 1]].Position;
+        const glm::vec3 c = mesh.Vertices[mesh.Indices[i + 2]].Position;
+        const float z = glm::cross(b - a, c - a).z;   // обе грани — против часовой, +Z
+        if (z <= 0.0f) allFront = false;
+        area += 0.5f * std::abs(z);
+    }
+    CHECK_TRUE(allFront);                    // ни одного вывернутого треугольника
+    // Площадь сумм треугольников = площади граней: без перекрытий и дыр.
+    // Дротик 9.5, пятиугольник 4*4 - (вырез 0.5*4*3) = 10.
+    CHECK_NEAR(area, 9.5f + 10.0f, 1e-3f);
+}
