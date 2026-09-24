@@ -92,7 +92,8 @@ inline glm::vec3 SkyRadiance(const LightingEnvironment& env, const glm::vec3& di
     glm::vec3 sky, ground;
     env.ResolveAmbient(sky, ground);
     float w = dir.y * 0.5f + 0.5f;
-    return glm::mix(ground, sky, w) * env.AmbientStrength;
+    // ×π — та же калибровка, что у CalcHemisphereAmbient в PbrShader.h.
+    return glm::mix(ground, sky, w) * env.AmbientStrength * glm::pi<float>();
 }
 
 // Прямой свет в точке поверхности (Ламберт, с теневыми лучами): Σ по

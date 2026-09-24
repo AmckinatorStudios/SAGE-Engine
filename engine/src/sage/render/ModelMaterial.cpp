@@ -7,6 +7,7 @@
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/ModelLoader.h"
 
+#include "sage/assets/import/ObjMtl.h"
 #include "sage/assets/import/TextureResolve.h"
 #include "sage/assets/import/GltfFile.h"
 
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
@@ -404,10 +406,14 @@ void ExtractGltf(const std::string& path, bool binary, const TextureSink& base,
 
 // --- OBJ + MTL ---------------------------------------------------------------
 
-void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, ExtractedMaterial& out) {
+void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, bool kdMissing,
+                        ExtractedMaterial& out) {
     out.Found = true;
     out.Name = m.name;
     out.Albedo = glm::vec3(m.diffuse[0], m.diffuse[1], m.diffuse[2]);
+    // Карта цвета без строки Kd: множитель единица. tinyobj подставляет сюда
+    // 0.6, и текстура из .obj темнела на 40 % (см. ObjMtl.h).
+    if (kdMissing) out.Albedo = glm::vec3(1.0f);
     out.Emissive = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
     out.Metallic = m.metallic;
     // Roughness в .mtl (map_Pr/Pr) есть далеко не всегда, и ноль по умолчанию
@@ -471,9 +477,10 @@ void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
 
     // Порядок tinyobj — порядок .mtl, он же индекс в разметке меша
     // (LoadObjData ставит в Submesh::Material тот же material_id).
+    const std::unordered_set<std::string> noKd = sage::assets::MtlTexturedWithoutKd(path);
     for (const tinyobj::material_t& m : mats) {
         ExtractedMaterial extracted;
-        ExtractObjMaterial(dir, m, extracted);
+        ExtractObjMaterial(dir, m, noKd.count(m.name) > 0, extracted);
         out.Materials.push_back(std::move(extracted));
     }
 }

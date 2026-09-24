@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include "sage/core/Log.h"
 #include "sage/render/MeshData.h"
+#include "sage/assets/import/PolygonTriangulate.h"
 #include "sage/assets/import/GltfFile.h"
 #include <stdexcept>
 
@@ -49,6 +50,9 @@ std::unique_ptr<Model> Model::LoadObjInternal(const std::string& path) {
 
     tinyobj::ObjReaderConfig config;
     config.mtl_search_path = dir.empty() ? "." : dir;
+    // Грани режет TriangulatePolygon, не tinyobj: см. LoadObjData в
+    // ModelLoader.cpp — у вогнутой грани его диагональ проходит снаружи.
+    config.triangulate = false;
 
     tinyobj::ObjReader reader;
     if (!reader.ParseFromFile(path, config)) {
@@ -76,7 +80,16 @@ std::unique_ptr<Model> Model::LoadObjInternal(const std::string& path) {
             int materialId = shape.mesh.material_ids.empty() ? -1 : shape.mesh.material_ids[f];
             Group& group = groups[materialId];
 
-            for (int v = 0; v < fv; ++v) {
+            std::vector<glm::vec3> polygon;
+            bool valid = fv >= 3 && indexOffset + (size_t)fv <= shape.mesh.indices.size();
+            for (int v = 0; valid && v < fv; ++v) {
+                const int vi = shape.mesh.indices[indexOffset + v].vertex_index;
+                if (vi < 0 || (size_t)(3 * vi + 2) >= attrib.vertices.size()) { valid = false; break; }
+                polygon.emplace_back(attrib.vertices[3 * vi + 0], attrib.vertices[3 * vi + 1],
+                                     attrib.vertices[3 * vi + 2]);
+            }
+            if (!valid) { indexOffset += fv; continue; }
+            for (uint32_t v : sage::assets::TriangulatePolygon(polygon)) {
                 tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
                 Vertex vertex{};
                 vertex.Position = {

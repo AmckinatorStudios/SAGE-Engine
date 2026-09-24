@@ -565,9 +565,29 @@ float SunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
     return s * (1.0 - smoothstep(uShadowFadeStart, uShadowFadeEnd, d));
 }
 
+// СВЕТ НЕБА ОТКАЛИБРОВАН ТАК ЖЕ, КАК СОЛНЦЕ (×π, см. PbrContrib).
+//
+// Когда солнце получило честный множитель π, небо осталось прежним — и тень
+// провалилась в π раз: сила окружающего света 0.3, подобранная под старое
+// солнце, стала означать «тень почти чёрная». Отсюда «непонятные тёмные
+// участки» под кроной и на изнанке веток. Тот же множитель здесь возвращает
+// прежнее соотношение неба и солнца: 0.3 значит то же, что значило всегда.
 vec3 CalcHemisphereAmbient(vec3 normal) {
     float w = normal.y * 0.5 + 0.5;
-    return mix(uAmbientGround, uAmbientSky, w) * uAmbientStrength;
+    return mix(uAmbientGround, uAmbientSky, w) * uAmbientStrength * PI;
+}
+
+// Нормаль, по которой ищется ТЕНЬ, — нормаль вершины, без карты нормалей.
+//
+// Карта нормалей — рельеф в пределах текселя, а карта теней знает только
+// геометрию. Отступ выборки тени по «рельефной» нормали скачет от пикселя к
+// пикселю, и вместе с ним скачет тень: кора и листья покрываются рябью и
+// тёмными пятнами, которых нет ни на одном предмете вокруг. Шейдер, у которого
+// есть обе нормали, кладёт сюда нормаль вершины; нулевой вектор — «такой нет»,
+// тогда берётся нормаль освещения.
+vec3 gShadowNormal = vec3(0.0);
+vec3 ShadowNormal(vec3 N) {
+    return dot(gShadowNormal, gShadowNormal) > 0.5 ? gShadowNormal : N;
 }
 
 // --- Запечённое GI (см. sage/gi): объём световых проб (L1 SH) -------------
@@ -721,7 +741,8 @@ vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rou
 
     // Солнце (направленное) + PCF-тень.
     vec3 sunL = normalize(-uSunDir);
-    float shadow = uShadowsEnabled ? SunShadow(fragPos, N, sunL) : 0.0;
+    vec3 shN = ShadowNormal(N);
+    float shadow = uShadowsEnabled ? SunShadow(fragPos, shN, sunL) : 0.0;
     Lo += PbrContrib(N, V, sunL, uSunColor * uSunIntensity * (1.0 - shadow), albedo, metallic, rough);
 
     // Поворот диска выборки считается ОДИН раз на фрагмент и раздаётся всем
@@ -740,7 +761,7 @@ vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rou
         // выборка стоит восьми чтений атласа.
         float sh = 0.0;
         if (uLocalShadowsEnabled && uPointLights[i].shadowSlot >= 0 && ndl > 0.0) {
-            sh = PointShadow(uPointLights[i].shadowSlot, fragPos, N, uPointLights[i].position, ndl, localRot);
+            sh = PointShadow(uPointLights[i].shadowSlot, fragPos, shN, uPointLights[i].position, ndl, localRot);
         }
         Lo += PbrContrib(N, V, L, uPointLights[i].color * uPointLights[i].intensity * att * (1.0 - sh), albedo, metallic, rough);
     }
@@ -757,7 +778,7 @@ vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rou
         float att = 1.0 / (uSpotLights[i].constant + uSpotLights[i].linear * dist + uSpotLights[i].quadratic * dist * dist);
         float sh = 0.0;
         if (uLocalShadowsEnabled && uSpotLights[i].shadowSlot >= 0 && ndl > 0.0) {
-            sh = SpotShadow(uSpotLights[i].shadowSlot, fragPos, N, ndl, dist, localRot);
+            sh = SpotShadow(uSpotLights[i].shadowSlot, fragPos, shN, ndl, dist, localRot);
         }
         Lo += PbrContrib(N, V, L, uSpotLights[i].color * uSpotLights[i].intensity * att * cone * (1.0 - sh), albedo, metallic, rough);
     }
@@ -894,6 +915,7 @@ void main() {
     // Односторонним материалам разворот не мешает: их задние грани отсекаются
     // и до сюда не доходят.
     if (!gl_FrontFacing) N = -N;
+    gShadowNormal = normalize(gl_FrontFacing ? Normal : -Normal);
     // metallic/roughness/ao — из своих карт (канал задаёт маска) × фактор,
     // иначе только фактор.
     float metallic = uMetallic;
@@ -914,6 +936,13 @@ void main() {
     }
     vec3 indirect = uLightmapEnabled ? texture(uLightmap, vUV2).rgb
                                      : DefaultIndirect(FragPos, N);
+    // НЕБО СКВОЗЬ ЛИСТ. Тонкая поверхность получает окружающий свет с обеих
+    // сторон: лист, повёрнутый к земле, всё равно светится небом над собой.
+    // Без этого нижние листья кроны брали только тёмный «свет земли» и крона
+    // выходила пятнистой — тёмные провалы там, где у живого дерева мягкая
+    // зелень.
+    if (uTranslucency > 0.0 && !uLightmapEnabled)
+        indirect += DefaultIndirect(FragPos, -N) * uTranslucency;
     vec3 emissive = uEmissive;
     if (uHasEmissive) emissive *= texture(uEmissiveMap, uv).rgb;
     vec3 lit = ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect);
@@ -931,7 +960,7 @@ void main() {
         float ndl = dot(N, L);
         float back = max(-ndl, 0.0);
         float wrap = max((ndl + 0.5) / 1.5, 0.0) - max(ndl, 0.0);
-        float vis = uShadowsEnabled ? 1.0 - SunShadow(FragPos, ndl < 0.0 ? -N : N, L) : 1.0;
+        float vis = uShadowsEnabled ? 1.0 - SunShadow(FragPos, ndl < 0.0 ? -gShadowNormal : gShadowNormal, L) : 1.0;
         // Та же калибровка, что у PbrContrib: интенсивность 1 — лист под
         // солнцем принимает весь свет (π сокращается с π Ламберта).
         lit += albedo * uSunColor * uSunIntensity * uTranslucency * (back + wrap) * vis;

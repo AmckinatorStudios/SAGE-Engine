@@ -512,7 +512,10 @@ std::unique_ptr<Scene> MakeRigScene(float ambient, float sun) {
     scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
     scene->Lighting.SkyColor = {0.55f, 0.62f, 0.72f};
     scene->Lighting.GroundColor = {0.22f, 0.20f, 0.18f};
-    scene->Lighting.AmbientStrength = ambient;
+    // Экспозиция оснастки — прежняя: свет неба откалиброван множителем π
+    // (CalcHemisphereAmbient), и «ярко» = 1 без поправки ушло бы в насыщение,
+    // где разницу «тускло/ярко» уже не измерить.
+    scene->Lighting.AmbientStrength = ambient / 3.14159265f;
     scene->Lighting.Skybox.Enabled = false;
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.4f, -0.8f, -0.5f));
     scene->Lighting.Sun.Intensity = sun;
