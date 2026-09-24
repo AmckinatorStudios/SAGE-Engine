@@ -397,9 +397,11 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
 
             MeshInstance inst;
             inst.Model = c.Model;
-            inst.Color = EffectiveColor(mr, mat);
+            // В шейдер — ЛИНЕЙНЫЙ цвет (см. ShadingAlbedo): выбранный цвет
+            // хранится в sRGB, как его показывает инспектор.
+            inst.Color = ShadingAlbedo(mr, mat);
             inst.Alpha = opacity;
-            inst.Emissive = EffectiveEmissive(mr, mat);
+            inst.Emissive = ShadingEmissive(mr, mat);
             if (mat) {
                 inst.Metallic = mat->Metallic;
                 inst.Roughness = mat->Roughness;
@@ -508,7 +510,9 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         sh.SetFloat("uTime", m_time);
         bindLightmap(sh, g.LmPage);
         if (g.Mat) {
-            sh.SetVec3("uAlbedoFactor", g.Mat->Albedo);
+            // Линейный, как у штатного пути (ShadingAlbedo): свой шейдер
+            // получает тот же контракт, что и встроенный.
+            sh.SetVec3("uAlbedoFactor", SrgbToLinear(g.Mat->Albedo));
             sh.SetFloat("uMetallic", g.Mat->Metallic);
             sh.SetFloat("uRoughness", g.Mat->Roughness);
             sh.SetFloat("uOpacity", g.Mat->Opacity);
@@ -517,6 +521,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             // бы по альфе там, где её никто не задавал, — и обычная текстура с
             // альфой начала бы дырявить модель.
             sh.SetFloat("uAlphaCutoff", g.Mat->Render.AlphaCutoff);
+            sh.SetFloat("uTranslucency", g.Mat->Render.Translucency);
             UploadParams(sh, g.Mat->Params);
         }
         if (!g.AnyOverrides) {
@@ -630,6 +635,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             if (it.Mat->AOTex) it.Mat->AOTex->Bind(5);
             tex.SetFloat("uOpacity", it.Opacity);
             tex.SetFloat("uAlphaCutoff", it.Mat->Render.AlphaCutoff);
+            tex.SetFloat("uTranslucency", it.Mat->Render.Translucency);
             it.Mesh_->DrawSubmesh(it.Submesh);
             ++m_stats.Batches;
         }
@@ -743,6 +749,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetFloat("uRoughness", head.Mat->Roughness);
                 t.SetFloat("uOpacity", head.Inst.Alpha);
                 t.SetFloat("uAlphaCutoff", head.Mat->Render.AlphaCutoff);
+                t.SetFloat("uTranslucency", head.Mat->Render.Translucency);
                 t.SetInt("uHasAlbedo", head.Mat->AlbedoTex ? 1 : 0);
                 t.SetInt("uHasNormal", head.Mat->NormalTex ? 1 : 0);
                 t.SetInt("uHasMetallic", head.Mat->MetallicTex ? 1 : 0);

@@ -55,6 +55,12 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          "0 — режима нет: альфа текстуры не смотрится.\n"
          "Нужен листве, траве, решёткам — всему, что вырезано альфой:\n"
          "полупрозрачный проход там даёт мерцание и просвет друг сквозь друга."},
+        {"translucency", "Просвечивание", MaterialRenderField::Kind::Float,
+         MaterialRenderField::Group::Render, nullptr, &MaterialRender::Translucency, 0.0f, 1.0f,
+         "Сколько солнечного света проходит сквозь поверхность на сторону зрителя.\n"
+         "0 — обычная поверхность. Листва и трава — 0.4–0.7: лист, повёрнутый\n"
+         "к солнцу изнанкой, светится, а не чернеет, и крона выглядит сочной.\n"
+         "Бумага, ткань, лепестки — поменьше."},
         {"tilingMode", "Режим повтора", MaterialRenderField::Kind::Enum,
          MaterialRenderField::Group::Textures,
          nullptr, nullptr, 0.0f, 0.0f,

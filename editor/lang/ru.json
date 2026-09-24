@@ -1916,6 +1916,14 @@
     "Reset rotation": "Сбросить поворот",
     "Rotation (degrees)": "Поворот (градусы)",
     "Visible sides": "Видимые стороны",
-    "Z up -> Y up": "Z вверх -> Y вверх"
+    "Z up -> Y up": "Z вверх -> Y вверх",
+    "Hue": "Тон",
+    "Opacity. Drag the bar or type a percentage.": "Непрозрачность. Тяните полосу или впишите процент.",
+    "New colour": "Новый цвет",
+    "Original colour. Click to restore it.": "Исходный цвет. Щелчок возвращает его.",
+    "Hex colour: #RRGGBB or #RRGGBBAA. Ctrl+C and Ctrl+V copy and paste it.": "Цвет в hex: #RRGGBB или #RRGGBBAA. Ctrl+C и Ctrl+V копируют и вставляют его.",
+    "RGB": "RGB",
+    "HSV": "HSV",
+    "Click to pick a colour. Drag it onto another colour to copy it.": "Щелчок — выбрать цвет. Перетащите на другой цвет, чтобы скопировать."
   }
 }

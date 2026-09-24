@@ -28,6 +28,7 @@
 #include "panels/HierarchyPanel.h"
 
 #include "sage/ecs/DecalSystem.h"
+#include "sage/ecs/RenderComponents.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -6424,7 +6425,9 @@ bool EditorLayer::SelfTestTools() {
         if (ok) {
             const ModelLoader::ExtractedMaterial ex =
                 ModelLoader::ExtractMaterial((destDir / "crate.obj").string());
-            if (!ex.Found || std::abs(ex.Albedo.g - 0.6f) > 1e-3f) {
+            // Kd в .mtl — линейный; в материале цвет хранится так, как его
+            // показывает инспектор (sRGB, см. ExtractMaterials).
+            if (!ex.Found || std::abs(SrgbToLinear(ex.Albedo.g) - 0.6f) > 1e-3f) {
                 LOG_ERROR("Editor") << "SELFTEST: материал модели не прочитан из .mtl";
                 ok = false;
             }

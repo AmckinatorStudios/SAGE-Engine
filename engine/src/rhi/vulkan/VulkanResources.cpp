@@ -77,6 +77,8 @@ VulkanTexture2D::VulkanTexture2D(VulkanDevice& device, const Texture2DDesc& desc
         LOG_ERROR("Vulkan") << "неподдерживаемое число каналов текстуры: " << desc.Channels;
         return;
     }
+    // Цвет в sRGB — декод на выборке (см. Texture2DDesc::Srgb).
+    if (desc.Srgb && format == VK_FORMAT_R8G8B8A8_UNORM) format = VK_FORMAT_R8G8B8A8_SRGB;
 
     const uint32_t mips = desc.GenerateMipmaps ? MipCount(desc.Width, desc.Height) : 1;
 

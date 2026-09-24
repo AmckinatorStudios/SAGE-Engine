@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 1916.
+// Язык: Русский. Строк: 1924.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -670,6 +670,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Стереть запечённое"},
     {"Clear the console",
      "Очистить консоль"},
+    {"Click to pick a colour. Drag it onto another colour to copy it.",
+     "Щелчок — выбрать цвет. Перетащите на другой цвет, чтобы скопировать."},
     {"Click to reassign",
      "Щёлкните, чтобы переназначить"},
     {"Click to reassign, right-click for settings",
@@ -1498,6 +1500,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Подобрать"},
     {"Guessed from the picture — check and correct",
      "Подобрано по картинке — проверьте и поправьте"},
+    {"HSV",
+     "HSV"},
     {"HUD",
      "Худ"},
     {"HUD under the pause menu",
@@ -1516,6 +1520,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Спад с высотой"},
     {"Help",
      "Справка"},
+    {"Hex colour: #RRGGBB or #RRGGBBAA. Ctrl+C and Ctrl+V copy and paste it.",
+     "Цвет в hex: #RRGGBB или #RRGGBBAA. Ctrl+C и Ctrl+V копируют и вставляют его."},
     {"Hidden",
      "Скрытые"},
     {"Hide",
@@ -1570,6 +1576,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Чем заполняются тянущиеся куски"},
     {"How to show the scene",
      "Чем показывать сцену"},
+    {"Hue",
+     "Тон"},
     {"IK",
      "Обратная кинематика"},
     {"IK Enabled",
@@ -1990,6 +1998,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Новый клип"},
     {"New clip for the selected object",
      "Ещё один клип для выбранного объекта"},
+    {"New colour",
+     "Новый цвет"},
     {"New context",
      "Новый контекст"},
     {"New context...",
@@ -2190,6 +2200,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Показано только то, что действительно установлено"},
     {"Opacity",
      "Непрозрачность"},
+    {"Opacity. Drag the bar or type a percentage.",
+     "Непрозрачность. Тяните полосу или впишите процент."},
     {"Opaque",
      "Непрозрачный"},
     {"Open",
@@ -2228,6 +2240,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Оранжевый"},
     {"Order",
      "Порядок"},
+    {"Original colour. Click to restore it.",
+     "Исходный цвет. Щелчок возвращает его."},
     {"Outer Cone",
      "Внешний конус"},
     {"Outlines of all elements",
@@ -2506,6 +2520,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Быстрые действия"},
     {"Quick actions",
      "Быстрые действия"},
+    {"RGB",
+     "RGB"},
     {"Radial",
      "Радиальная"},
     {"Radial is the right choice for a stick: otherwise the diagonal leaves the zone earlier than a straight push.",

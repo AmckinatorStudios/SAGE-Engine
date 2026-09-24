@@ -28,14 +28,19 @@ public:
     // едва заметное протекание чужого цвета по краям (используй Nearest +
     // generateMipmaps=false для атласов). Для обычных отдельных текстур
     // (не атласов) мипмапы включать можно и нужно — Trilinear или Anisotropic.
+    //
+    // srgb — картинка это ЦВЕТ (альбедо, свечение) и хранится в sRGB: выборка
+    // вернёт линейные значения (см. rhi::Texture2DDesc::Srgb). Для карт-данных
+    // (нормали, шероховатость, маски) — false.
     explicit Texture(const std::string& path, TextureFilter filter = TextureFilter::Trilinear,
-                      bool generateMipmaps = true);
+                      bool generateMipmaps = true, bool srgb = false);
 
     // Создаёт текстуру из уже декодированных пикселей в памяти (RGBA8) —
     // нужно для встроенных (embedded) текстур GLTF/GLB, у которых нет
     // отдельного файла на диске.
     Texture(const unsigned char* pixelsRGBA, int width, int height,
-            TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true);
+            TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true,
+            bool srgb = false);
 
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;
@@ -77,6 +82,8 @@ public:
     // отвечать здесь «анизотропная» значило бы врать тому, кто спрашивает.
     TextureFilter Filter() const { return m_filter; }
     bool HasMipmaps() const { return m_hasMipmaps; }
+    // Цвет в sRGB (декодируется на выборке). ReplacePixels его сохраняет.
+    bool Srgb() const { return m_srgb; }
 
     // Максимальный уровень анизотропии, который поддерживает текущая
     // видеокарта/драйвер (обычно 4, 8 или 16).
@@ -100,5 +107,6 @@ private:
     std::unique_ptr<sage::rhi::Texture2D> m_texture;
     int m_width = 0, m_height = 0, m_channels = 0;
     bool m_hasMipmaps = true;
+    bool m_srgb = false;
     TextureFilter m_filter = TextureFilter::Trilinear;
 };

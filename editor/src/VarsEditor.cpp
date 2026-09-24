@@ -10,6 +10,7 @@
 #include "EditorIcons.h"
 #include "Localization.h"
 #include "sage/scene/Scene.h"
+#include "ui/ColorPicker.h"
 
 namespace varsui {
 
@@ -148,7 +149,7 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
         }
         case Kind::Color: {
             glm::vec4 v = value.AsVec4();
-            if (ImGui::ColorEdit4("##v", &v.x, ImGuiColorEditFlags_NoInputs)) {
+            if (Sage::UI::ColorField4("##v", &v.x, Sage::UI::ColorField_Compact)) {
                 value = Value(v);
                 changed = true;
             }

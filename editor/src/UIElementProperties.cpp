@@ -38,6 +38,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
+#include "ui/ColorPicker.h"
 
 namespace fs = std::filesystem;
 
@@ -244,7 +245,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
         }
 
         case K::Color:
-            ImGui::ColorEdit4(label, &ui::FieldAs<glm::vec4>(data, f).x);
+            Sage::UI::ColorField4(label, &ui::FieldAs<glm::vec4>(data, f).x);
             host.TrackLastImGuiItem();
             break;
 

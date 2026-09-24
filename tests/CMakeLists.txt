@@ -61,18 +61,27 @@ add_executable(sage_tests
     test_propertyclip.cpp
     test_interface.cpp
     test_savegame.cpp
+    test_colorpicker.cpp
     ../editor/src/PathScope.cpp
     ../editor/src/HotkeyScope.cpp
     ../editor/src/EditorSelection.cpp
     ../editor/src/EditorHistory.cpp
     ../editor/src/Project.cpp
+    # Выбор цвета и то, на чём он стоит (подписи, отступы меню, тема).
+    ../editor/src/ui/ColorPicker.cpp
+    ../editor/src/ui/UI.cpp
+    ../editor/src/ui/UIStyle.cpp
+    ../editor/src/EditorTheme.cpp
+    ../editor/src/EditorIcons.cpp
+    ../editor/src/EditorPrefs.cpp
+    ../editor/src/Localization.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                               ${CMAKE_CURRENT_SOURCE_DIR}/../editor/src)
 # tinygltf — ради проверки разреженных аксессоров: она сверяет то, что отдаёт
 # общий читатель (assets/import/GltfAccessor.h), а он работает с tinygltf::Model.
-target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json tinygltf)
+target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json tinygltf imgui imguizmo)
 
 add_test(NAME sage_tests COMMAND sage_tests)
 

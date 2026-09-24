@@ -125,9 +125,10 @@ std::string Locate(const std::string& path) {
 // объекту, а не в кадре — в кадре материалы и текстуры уже разобраны в
 // shared_ptr. Таблица же добавила бы устаревание, привязанное к текущему
 // каталогу процесса и к корню проекта: файл при этом существует, просто не тот.
-std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed = false) {
+std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed = false,
+                           bool srgb = false) {
     return std::string("|f") + std::to_string((int)filter) + (mipmaps ? "m" : "") +
-           (bleed ? "b" : "");
+           (bleed ? "b" : "") + (srgb ? "s" : "");
 }
 
 std::string CacheKey(const std::string& path) {
@@ -381,7 +382,8 @@ int ResourceManager::ReloadChangedAssets(size_t budget) {
         TextureRecord& rec = m_textures[key];
         const std::string path = rec.Source;
         try {
-            *rec.Tex = std::move(*LoadTextureFile(Locate(path), rec.Filter, rec.Mipmaps, rec.Bleed));
+            *rec.Tex = std::move(
+                *LoadTextureFile(Locate(path), rec.Filter, rec.Mipmaps, rec.Bleed, rec.Srgb));
             m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
             rec.Bytes = rec.Tex->GpuBytes();
             m_textureBytes += rec.Bytes;
@@ -407,14 +409,14 @@ int ResourceManager::ReloadChangedAssets(size_t budget) {
 // декод в память, где цвет под прозрачностью правится до заливки.
 std::shared_ptr<Texture> ResourceManager::LoadTextureFile(const std::string& file,
                                                           TextureFilter filter, bool mipmaps,
-                                                          bool bleed) {
-    if (!bleed) return std::make_shared<Texture>(file, filter, mipmaps);
+                                                          bool bleed, bool srgb) {
+    if (!bleed) return std::make_shared<Texture>(file, filter, mipmaps, srgb);
     std::vector<unsigned char> pixels;
     int w = 0, h = 0;
     if (!DecodeImageFile(file, pixels, w, h))
-        return std::make_shared<Texture>(file, filter, mipmaps);   // .sagetex и прочее
+        return std::make_shared<Texture>(file, filter, mipmaps, srgb);   // .sagetex и прочее
     sage::render::BleedTransparentColor(pixels, w, h);
-    return std::make_shared<Texture>(pixels.data(), w, h, filter, mipmaps);
+    return std::make_shared<Texture>(pixels.data(), w, h, filter, mipmaps, srgb);
 }
 
 int ResourceManager::PendingAsyncTextures() const {
@@ -423,11 +425,11 @@ int ResourceManager::PendingAsyncTextures() const {
 
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
                                                     TextureFilter filter, bool mipmaps,
-                                                    bool bleed) {
+                                                    bool bleed, bool srgb) {
     if (path.empty()) return nullptr;
     // Ключ = файл + настройки выборки: две фильтрации одного файла — это две
     // картинки, а не одна, которую отнимают друг у друга (см. CacheKey выше).
-    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps, bleed);
+    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps, bleed, srgb);
     auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick(); // обращение -> «свежая» для LRU
@@ -446,8 +448,9 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
     rec.Filter = filter;
     rec.Mipmaps = mipmaps;
     rec.Bleed = bleed;
+    rec.Srgb = srgb;
     try {
-        rec.Tex = LoadTextureFile(Locate(path), filter, mipmaps, bleed);
+        rec.Tex = LoadTextureFile(Locate(path), filter, mipmaps, bleed, srgb);
         rec.Bytes = rec.Tex->GpuBytes();
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Текстура не загрузилась (" << path << "): " << e.what();
@@ -465,12 +468,12 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
 
 std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& path,
                                                          TextureFilter filter, bool mipmaps,
-                                                         bool bleed) {
+                                                         bool bleed, bool srgb) {
     if (path.empty()) return nullptr;
     // Тот же ключ, что у GetTexture с теми же настройками, — иначе асинхронно
     // загруженная картинка легла бы в ДРУГУЮ запись кэша, чем ту, которую
     // потом спросят обычным путём, и файл прочитался бы дважды.
-    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps, bleed);
+    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps, bleed, srgb);
     auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick();
@@ -484,7 +487,9 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     const unsigned char kPlaceholder[4] = {128, 128, 128, (unsigned char)(bleed ? 0 : 255)};
     TextureRecord rec;
     try {
-        rec.Tex = std::make_shared<Texture>(kPlaceholder, 1, 1, TextureFilter::Bilinear, false);
+        // Цветовое пространство — сразу настоящее: ReplacePixels его сохраняет,
+        // и картинка, доехавшая фоном, окажется в том же формате.
+        rec.Tex = std::make_shared<Texture>(kPlaceholder, 1, 1, TextureFilter::Bilinear, false, srgb);
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Не удалось создать плейсхолдер текстуры (" << path << "): " << e.what();
         m_textures[key] = TextureRecord{}; // негативный кэш
@@ -495,6 +500,7 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     rec.Filter = filter;
     rec.Mipmaps = mipmaps;
     rec.Bleed = bleed;
+    rec.Srgb = srgb;
     rec.Tick = NextTick();
     rec.Pending = true;
     rec.Stamp = FileStamp(Locate(path));
@@ -743,16 +749,19 @@ void ResourceManager::ResolveMaterialTextures(Material& m) {
     // Цвет под прозрачностью правится только у карты, которую материал режет
     // по альфе (см. AlphaBleed.h): у остальных альфа значит что-то своё.
     const bool cutout = m.Render.AlphaCutoff > 0.0f;
-    auto get = [&](const std::string& path, bool bleed) {
-        return m_streamMaterialTextures ? GetTextureAsync(path, kSurface, true, bleed)
-                                        : GetTexture(path, kSurface, true, bleed);
+    auto get = [&](const std::string& path, bool bleed, bool colour) {
+        return m_streamMaterialTextures ? GetTextureAsync(path, kSurface, true, bleed, colour)
+                                        : GetTexture(path, kSurface, true, bleed, colour);
     };
-    m.AlbedoTex = get(m.TexturePath, cutout);
-    m.NormalTex = get(m.NormalMapPath, false);
-    m.MetallicTex = get(m.MetallicMapPath, false);
-    m.RoughnessTex = get(m.RoughnessMapPath, false);
-    m.AOTex = get(m.AOMapPath, false);
-    m.EmissiveTex = get(m.EmissiveMap, false);
+    // ЦВЕТ — в sRGB, ДАННЫЕ — как есть. Альбедо и свечение — это картинки,
+    // нарисованные для глаза (sRGB); нормали, металличность, шероховатость и
+    // затенение — числа, и переводить их нельзя: нормаль «исказилась бы».
+    m.AlbedoTex = get(m.TexturePath, cutout, true);
+    m.NormalTex = get(m.NormalMapPath, false, false);
+    m.MetallicTex = get(m.MetallicMapPath, false, false);
+    m.RoughnessTex = get(m.RoughnessMapPath, false, false);
+    m.AOTex = get(m.AOMapPath, false, false);
+    m.EmissiveTex = get(m.EmissiveMap, false, true);
     m.TexturesFrom = PathsOf(m);
     m.TexturesCutout = cutout;
 }

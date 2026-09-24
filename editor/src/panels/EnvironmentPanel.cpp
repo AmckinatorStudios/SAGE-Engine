@@ -21,6 +21,7 @@
 #include <cmath>
 #include "../Localization.h"
 #include "EditorIcons.h"
+#include "ui/ColorPicker.h"
 
 void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env) {
     (void)env;
@@ -101,7 +102,7 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
     // (сутки, закат, светила, звёзды) по смыслу режима не существует, и
     // показывать их значило бы обещать то, чего не будет.
     if (sky.Kind == SkyboxSettings::Source::Solid) {
-        ImGui::ColorEdit3(T("Sky colour"), &sky.TopColor.x);
+        Sage::UI::ColorField3(T("Sky colour"), &sky.TopColor.x);
         EditorTheme::Hint(T("Flat fill: no gradient, no sun, no time of day. "
                             "Ambient light from the sky takes this colour"));
         host.TrackLastImGuiItem();
@@ -123,15 +124,15 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         }
 
         ImGui::TextDisabled("%s", T("Daytime"));
-        ImGui::ColorEdit3(T("Zenith"), &sky.TopColor.x); host.TrackLastImGuiItem();
-        ImGui::ColorEdit3(T("Horizon"), &sky.HorizonColor.x); host.TrackLastImGuiItem();
+        Sage::UI::ColorField3(T("Zenith"), &sky.TopColor.x); host.TrackLastImGuiItem();
+        Sage::UI::ColorField3(T("Horizon"), &sky.HorizonColor.x); host.TrackLastImGuiItem();
         if (sky.DayNight) {
             ImGui::TextDisabled("%s", T("Night"));
-            ImGui::ColorEdit3(T("Zenith (night)"), &sky.NightTopColor.x); host.TrackLastImGuiItem();
-            ImGui::ColorEdit3(T("Horizon (night)"), &sky.NightHorizonColor.x);
+            Sage::UI::ColorField3(T("Zenith (night)"), &sky.NightTopColor.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField3(T("Horizon (night)"), &sky.NightHorizonColor.x);
             host.TrackLastImGuiItem();
-            ImGui::ColorEdit3(T("Sunset glow"), &sky.DuskColor.x); host.TrackLastImGuiItem();
-            ImGui::ColorEdit3(T("Moonlight"), &sky.MoonlightColor.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField3(T("Sunset glow"), &sky.DuskColor.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField3(T("Moonlight"), &sky.MoonlightColor.x); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Moonlight strength"), &sky.MoonlightIntensity, 0.005f, 0.0f, 1.0f,
                              "%.3f");
             host.TrackLastImGuiItem();
@@ -146,12 +147,12 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         if (sky.Celestials) {
             // Цвет и направление диска солнца — у объекта-солнца; здесь только
             // то, что принадлежит НЕБУ: размер диска, луна, звёзды.
-            ImGui::ColorEdit3(T("Sun disc colour"), &sky.SunColor.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField3(T("Sun disc colour"), &sky.SunColor.x); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Sun size"), &sky.SunSize, 0.002f, 0.005f, 0.4f, "%.3f");
             host.TrackLastImGuiItem();
             if (ImGui::Checkbox(T("Moon"), &sky.Moon)) host.PushUndoSnapshot();
             if (sky.Moon) {
-                ImGui::ColorEdit3(T("Moon colour"), &sky.MoonColor.x); host.TrackLastImGuiItem();
+                Sage::UI::ColorField3(T("Moon colour"), &sky.MoonColor.x); host.TrackLastImGuiItem();
                 ImGui::DragFloat(T("Moon size"), &sky.MoonSize, 0.002f, 0.005f, 0.4f, "%.3f");
                 host.TrackLastImGuiItem();
             }
@@ -277,11 +278,9 @@ void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment&
         // образцы честнее, чем активные ползунки, которые ничего не делают.
         glm::vec3 skyC, groundC;
         env.ResolveAmbient(skyC, groundC);
-        ImGui::ColorEdit3(T("Sky (computed)"), &skyC.x, ImGuiColorEditFlags_NoInputs |
-                                                            ImGuiColorEditFlags_NoPicker);
+        Sage::UI::ColorField3(T("Sky (computed)"), &skyC.x, Sage::UI::ColorField_ReadOnly);
         EditorTheme::Hint(T("Taken from the sky, so it darkens with it"));
-        ImGui::ColorEdit3(T("Ground (computed)"), &groundC.x, ImGuiColorEditFlags_NoInputs |
-                                                                  ImGuiColorEditFlags_NoPicker);
+        Sage::UI::ColorField3(T("Ground (computed)"), &groundC.x, Sage::UI::ColorField_ReadOnly);
     } else if (env.AmbientMode == LightingEnvironment::AmbientSource::FromSky) {
         // НЕБА НЕТ — И СВЕТА ОТ НЕГО НЕТ, и поля тут ни при чём: они
         // принадлежат другому режиму. Показывать их рабочими значило бы
@@ -293,19 +292,17 @@ void EnvironmentPanel::DrawAmbientSection(EditorHost& host, LightingEnvironment&
         ImGui::TextDisabled("%s", T("Switch to Custom values for light without a sky"));
         ImGui::BeginDisabled(true);
         glm::vec3 none(0.0f);
-        ImGui::ColorEdit3(T("Sky"), &none.x, ImGuiColorEditFlags_NoInputs |
-                                                 ImGuiColorEditFlags_NoPicker);
-        ImGui::ColorEdit3(T("Ground"), &none.x, ImGuiColorEditFlags_NoInputs |
-                                                    ImGuiColorEditFlags_NoPicker);
+        Sage::UI::ColorField3(T("Sky"), &none.x, Sage::UI::ColorField_ReadOnly);
+        Sage::UI::ColorField3(T("Ground"), &none.x, Sage::UI::ColorField_ReadOnly);
         float zero = 0.0f;
         ImGui::DragFloat(T("Strength"), &zero, 0.01f, 0.0f, 2.0f);
         ImGui::EndDisabled();
         return;
     } else {
-        ImGui::ColorEdit3(T("Sky"), &env.SkyColor.x);
+        Sage::UI::ColorField3(T("Sky"), &env.SkyColor.x);
         EditorTheme::Hint(T("Sky tints upward faces, Ground — downward"));
         host.TrackLastImGuiItem();
-        ImGui::ColorEdit3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
+        Sage::UI::ColorField3(T("Ground"), &env.GroundColor.x); host.TrackLastImGuiItem();
     }
     ImGui::DragFloat(T("Strength"), &env.AmbientStrength, 0.01f, 0.0f, 2.0f);
     host.TrackLastImGuiItem();
@@ -362,7 +359,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     if (EditorTheme::SectionHeader("cone", T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
                                    T("Linear distance fog (applied in Shaded mode)"))) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
-        ImGui::ColorEdit3(T("Fog Color"), &env.Fog.Color.x); host.TrackLastImGuiItem();
+        Sage::UI::ColorField3(T("Fog Color"), &env.Fog.Color.x); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Fog Start"), &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
         ImGui::DragFloat(T("Fog End"), &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
         if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;

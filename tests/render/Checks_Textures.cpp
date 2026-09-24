@@ -70,7 +70,10 @@ FloorScene MakeFloor(const std::string& texture) {
     FloorScene f;
     f.Data = std::make_unique<Scene>("TextureTest");
     f.Data->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.2f, -1.0f, -0.2f));
-    f.Data->Lighting.Sun.Intensity = 1.4f;
+    // Прежняя экспозиция (1.4 до калибровки «интенсивность 1 — белое под
+    // солнцем», см. PbrContrib): дрожь и детали меряются в единицах пикселя, и
+    // пересвеченная шахматка поменяла бы сами шкалы проверок.
+    f.Data->Lighting.Sun.Intensity = 1.4f / 3.14159265f;
     f.Data->Lighting.Sun.Color = {1.0f, 1.0f, 1.0f};
     f.Data->Lighting.SkyColor = {0.25f, 0.28f, 0.34f};
     f.Data->Lighting.GroundColor = {0.10f, 0.10f, 0.10f};

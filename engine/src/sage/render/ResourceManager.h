@@ -139,9 +139,14 @@ public:
     // прозрачностью лежит чёрное, и мип-уровни подмешивали его в край листа.
     // Это отдельная запись кэша: у обычного использования той же картинки
     // альфа может значить что угодно, и цвет под ней трогать нельзя.
+    //
+    // srgb — картинка это цвет (альбедо, свечение): хранится в sRGB-формате и
+    // на выборке отдаёт линейные значения (см. rhi::Texture2DDesc::Srgb).
+    // Тоже часть ключа кэша: одна картинка бывает и цветом, и данными.
     std::shared_ptr<Texture> GetTexture(const std::string& path,
                                         TextureFilter filter = TextureFilter::Trilinear,
-                                        bool mipmaps = true, bool bleed = false);
+                                        bool mipmaps = true, bool bleed = false,
+                                        bool srgb = false);
 
     // Текстура по пути АСИНХРОННО: возвращает объект немедленно (сначала
     // плейсхолдер 1x1), реальные пиксели подгружаются фоновым потоком и
@@ -154,7 +159,8 @@ public:
     // непрозрачный квадрат на месте листа — ровно то, от чего вырез и спасает.
     std::shared_ptr<Texture> GetTextureAsync(const std::string& path,
                                              TextureFilter filter = TextureFilter::Trilinear,
-                                             bool mipmaps = true, bool bleed = false);
+                                             bool mipmaps = true, bool bleed = false,
+                                             bool srgb = false);
 
     // КАРТЫ МАТЕРИАЛОВ — ФОНОМ. Выключено по умолчанию: игре важнее, чтобы
     // уровень появился целиком, а не дорисовывался на глазах. Редактор
@@ -281,7 +287,7 @@ public:
     // Слепок путей к картам материала (для сравнения «устарели ли указатели»).
     static Material::ResolvedFrom PathsOf(const Material& m);
     static std::shared_ptr<Texture> LoadTextureFile(const std::string& file, TextureFilter filter,
-                                                    bool mipmaps, bool bleed);
+                                                    bool mipmaps, bool bleed, bool srgb = false);
 
     // --- Управление памятью ---
 
@@ -446,6 +452,8 @@ private:
         bool Generated = false;
         // Прозрачным пикселям отдан цвет соседних (см. GetTexture, bleed).
         bool Bleed = false;
+        // Цвет в sRGB (см. GetTexture, srgb).
+        bool Srgb = false;
         // Время правки файла на момент загрузки — по нему ReloadChangedAssets
         // видит, что картинку перерисовали снаружи. У Generated смысла не
         // имеет: файла нет.

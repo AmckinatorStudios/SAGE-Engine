@@ -681,6 +681,13 @@ vec3 SpecularIBL(vec3 N, vec3 V, vec3 albedo, float metallic, float rough, float
 
 // Вклад одного источника (Cook-Torrance): N — нормаль, V — к камере, L — к свету,
 // radiance — цвет*интенсивность источника (с затуханием/тенью, посчитанными выше).
+//
+// ИНТЕНСИВНОСТЬ 1 — ЭТО «БЕЛАЯ ПОВЕРХНОСТЬ ПОД СОЛНЦЕМ БЕЛАЯ» (как в Unity и
+// Unreal): освещённость источника равна π·интенсивность, и π BRDF Ламберта
+// сокращается. Раньше этого множителя не было, и полное солнце давало белой
+// стене треть её цвета; тусклость прятала ошибка гаммы (текстуры читались без
+// перевода из sRGB и выходили светлее, чем нарисованы). Исправив одно, нельзя
+// было оставить другое: текстурированная сцена стала бы втрое темнее.
 vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic, float rough) {
     vec3 H = normalize(V + L);
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
@@ -690,7 +697,7 @@ vec3 PbrContrib(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metall
     vec3 spec = (NDF * G * F) / max(4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0), 1e-4);
     vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
     float NdotL = max(dot(N, L), 0.0);
-    return (kd * albedo / PI + spec) * radiance * NdotL;
+    return (kd * albedo / PI + spec) * radiance * NdotL * PI;
 }
 
 // Полное PBR-освещение фрагмента с ЯВНОЙ непрямой составляющей (indirect —
@@ -848,6 +855,10 @@ uniform float uOpacity;
 // текстуры не смотрится вовсе: у обычного материала в ней бывает что угодно,
 // и внезапно начать по ней отсекать значило бы продырявить готовые сцены.
 uniform float uAlphaCutoff;
+// Просвечивание (MaterialRender::Translucency): доля солнца, проходящая сквозь
+// тонкую поверхность. Ноль — обычная поверхность. Программа общая на все
+// материалы кадра, поэтому ставится ВСЕГДА, в том числе нулём.
+uniform float uTranslucency;
 uniform vec3 uEmissive;
 uniform sampler2D uEmissiveMap;
 uniform bool uHasEmissive;
@@ -905,8 +916,27 @@ void main() {
                                      : DefaultIndirect(FragPos, N);
     vec3 emissive = uEmissive;
     if (uHasEmissive) emissive *= texture(uEmissiveMap, uv).rgb;
-    FragColor = vec4(emissive + ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect),
-                     uOpacity);
+    vec3 lit = ShadePBRgi(N, FragPos, albedo, metallic, rough, ao, indirect);
+    // ПРОСВЕЧИВАНИЕ ЛИСТВЫ. Две добавки к солнцу, обе только для тонких
+    // поверхностей (uTranslucency > 0):
+    //   • свет С ОБРАТНОЙ СТОРОНЫ: лист, повёрнутый к солнцу изнанкой,
+    //     пропускает его насквозь — окрашенным в свой цвет. Без этого такой
+    //     лист освещался одним окружением, и крона выходила тёмной и пятнистой;
+    //   • «обёрнутый» диффуз у границы тени: у тонкой поверхности свет не
+    //     обрывается на терминаторе, а мягко сходит на нет.
+    // Тень солнца учитывается: лист внутри кроны, до которого солнце не
+    // доходит, светиться не должен — иначе крона стала бы плоской.
+    if (uTranslucency > 0.0) {
+        vec3 L = normalize(-uSunDir);
+        float ndl = dot(N, L);
+        float back = max(-ndl, 0.0);
+        float wrap = max((ndl + 0.5) / 1.5, 0.0) - max(ndl, 0.0);
+        float vis = uShadowsEnabled ? 1.0 - SunShadow(FragPos, ndl < 0.0 ? -N : N, L) : 1.0;
+        // Та же калибровка, что у PbrContrib: интенсивность 1 — лист под
+        // солнцем принимает весь свет (π сокращается с π Ламберта).
+        lit += albedo * uSunColor * uSunIntensity * uTranslucency * (back + wrap) * vis;
+    }
+    FragColor = vec4(emissive + lit, uOpacity);
 }
 )";
 }

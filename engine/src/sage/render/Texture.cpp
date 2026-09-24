@@ -33,7 +33,8 @@ TextureFilter EffectiveFilter(TextureFilter want, bool mipmaps) {
 }
 } // namespace
 
-Texture::Texture(const std::string& path, TextureFilter filter, bool generateMipmaps) {
+Texture::Texture(const std::string& path, TextureFilter filter, bool generateMipmaps, bool srgb)
+    : m_srgb(srgb) {
     // Свой формат — своя ветка, и она ПЕРВАЯ: .sagetex это не картинка, stb его
     // не откроет, а сообщение «unknown image type» ничего бы не объяснило.
     if (path.size() > 8 && path.compare(path.size() - 8, 8, ".sagetex") == 0) {
@@ -53,6 +54,7 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
     desc.Width = m_width;
     desc.Height = m_height;
     desc.Channels = m_channels;
+    desc.Srgb = m_srgb;
     filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
     m_filter = filter;
@@ -98,6 +100,7 @@ bool Texture::LoadFromNative(const std::string& path, TextureFilter filter) {
     desc.Width = w;
     desc.Height = h;
     desc.Channels = 4;
+    desc.Srgb = m_srgb;
     desc.GenerateMipmaps = tex.Levels.size() > 1;
     m_hasMipmaps = desc.GenerateMipmaps;
     filter = EffectiveFilter(filter, desc.GenerateMipmaps);
@@ -133,7 +136,9 @@ std::shared_ptr<Texture> Texture::Wrap(sage::rhi::TextureHandle handle, int widt
     return t;
 }
 
-Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, TextureFilter filter, bool generateMipmaps) {
+Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, TextureFilter filter,
+                 bool generateMipmaps, bool srgb)
+    : m_srgb(srgb) {
     m_width = width;
     m_height = height;
     m_channels = 4;
@@ -142,6 +147,7 @@ Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, Texture
     desc.Width = width;
     desc.Height = height;
     desc.Channels = 4;
+    desc.Srgb = m_srgb;
     filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
     m_filter = filter;
@@ -161,6 +167,7 @@ void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int heig
     desc.Width = width;
     desc.Height = height;
     desc.Channels = 4;
+    desc.Srgb = m_srgb;   // цветовое пространство — свойство картинки, не заливки
     filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
     m_filter = filter;
