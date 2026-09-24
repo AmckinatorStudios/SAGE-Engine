@@ -6,12 +6,17 @@
 #define TINYOBJLOADER_IMPLEMENTATION_ALREADY_IN_LIB
 #include <tiny_obj_loader.h>
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
 
 #include <glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/euler_angles.hpp>
+
+#include "sage/assets/import/MeshNormalize.h"
 #include <nlohmann/json.hpp>
 
 #include "sage/core/Log.h"
@@ -37,6 +42,31 @@ ImportSettings LoadImportSettings(const std::string& modelPath) {
         s.Scale = j.value("scale", s.Scale);
         s.Recenter = j.value("recenter", s.Recenter);
         s.NormalizeSize = j.value("normalize", s.NormalizeSize);
+        auto vec3 = [&j](const char* key, glm::vec3 fallback) {
+            if (!j.contains(key) || !j[key].is_array() || j[key].size() != 3) return fallback;
+            return glm::vec3(j[key][0].get<float>(), j[key][1].get<float>(), j[key][2].get<float>());
+        };
+        s.Rotation = vec3("rotation", s.Rotation);
+        s.Offset = vec3("offset", s.Offset);
+        // Режимы — СЛОВАМИ, а не номерами: файл читают глазами и правят руками,
+        // а номер молча сменит смысл, если порядок в перечислении поменяется.
+        const std::string normals = j.value("normals", std::string("import"));
+        s.Normals = normals == "smooth" ? ImportSettings::NormalMode::Smooth
+                  : normals == "flat"   ? ImportSettings::NormalMode::Flat
+                                        : ImportSettings::NormalMode::Import;
+        s.FlipUV = j.value("flipUV", s.FlipUV);
+        s.FlipWinding = j.value("flipWinding", s.FlipWinding);
+        s.ImportMaterials = j.value("importMaterials", s.ImportMaterials);
+        const std::string alpha = j.value("alpha", std::string("auto"));
+        s.Alpha = alpha == "opaque" ? ImportSettings::AlphaMode::Opaque
+                : alpha == "cutout" ? ImportSettings::AlphaMode::Cutout
+                                    : ImportSettings::AlphaMode::Auto;
+        s.AlphaCutoff = j.value("alphaCutoff", s.AlphaCutoff);
+        const std::string twoSided = j.value("twoSided", std::string("auto"));
+        s.DoubleSided = twoSided == "on"  ? ImportSettings::TwoSided::On
+                      : twoSided == "off" ? ImportSettings::TwoSided::Off
+                                          : ImportSettings::TwoSided::Auto;
+        s.ImportAnimation = j.value("importAnimation", s.ImportAnimation);
     } catch (const std::exception& e) {
         LOG_WARN("Model") << "Битый .sageimport (" << modelPath << "): " << e.what();
     }
@@ -44,8 +74,21 @@ ImportSettings LoadImportSettings(const std::string& modelPath) {
 }
 
 bool SaveImportSettings(const std::string& modelPath, const ImportSettings& s) {
+    static const char* kNormals[] = {"import", "smooth", "flat"};
+    static const char* kAlpha[] = {"auto", "opaque", "cutout"};
+    static const char* kTwoSided[] = {"auto", "on", "off"};
     nlohmann::json j = {
         {"scale", s.Scale}, {"recenter", s.Recenter}, {"normalize", s.NormalizeSize},
+        {"rotation", {s.Rotation.x, s.Rotation.y, s.Rotation.z}},
+        {"offset", {s.Offset.x, s.Offset.y, s.Offset.z}},
+        {"normals", kNormals[(int)s.Normals]},
+        {"flipUV", s.FlipUV},
+        {"flipWinding", s.FlipWinding},
+        {"importMaterials", s.ImportMaterials},
+        {"alpha", kAlpha[(int)s.Alpha]},
+        {"alphaCutoff", s.AlphaCutoff},
+        {"twoSided", kTwoSided[(int)s.DoubleSided]},
+        {"importAnimation", s.ImportAnimation},
     };
     std::ofstream f(ImportSidecarPath(modelPath));
     if (!f) return false;
@@ -72,6 +115,100 @@ void ApplyImportSettings(std::vector<Vertex>& vertices, const ImportSettings& s)
         if (s.Recenter) v.Position -= center;   // центр AABB -> 0
         v.Position *= scale;                     // нормализация + равномерный масштаб
     }
+}
+
+bool ImportSettings::ChangesGeometry() const {
+    return Scale != 1.0f || Recenter || NormalizeSize || Rotation != glm::vec3(0.0f) ||
+           Offset != glm::vec3(0.0f) || Normals != NormalMode::Import || FlipUV || FlipWinding;
+}
+
+namespace {
+
+// Нормали заново. Гладкие — усреднение по ПОЛОЖЕНИЮ, а не по номеру вершины:
+// у OBJ и FBX каждый угол треугольника — своя вершина, и усреднение по номеру
+// дало бы те же плоские грани. Плоские — каждому треугольнику свои вершины
+// (общие вершины glTF не могут нести две нормали сразу).
+void RecomputeNormals(sage::render::MeshData& mesh, bool smooth) {
+    std::vector<Vertex>& v = mesh.Vertices;
+    std::vector<unsigned int>& idx = mesh.Indices;
+    if (!smooth) {
+        std::vector<Vertex> flat;
+        flat.reserve(idx.size());
+        for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+            if (idx[i] >= v.size() || idx[i + 1] >= v.size() || idx[i + 2] >= v.size()) continue;
+            Vertex a = v[idx[i]], b = v[idx[i + 1]], c = v[idx[i + 2]];
+            glm::vec3 n = glm::cross(b.Position - a.Position, c.Position - a.Position);
+            const float l = glm::length(n);
+            n = l > 1e-12f ? n / l : glm::vec3(0, 1, 0);
+            a.Normal = b.Normal = c.Normal = n;
+            flat.push_back(a); flat.push_back(b); flat.push_back(c);
+        }
+        // Разметка по материалам — в индексах, а индексы стали 0..N подряд в
+        // том же порядке: отрезки подмешей остаются теми же.
+        v.swap(flat);
+        idx.resize(v.size());
+        for (size_t i = 0; i < idx.size(); ++i) idx[i] = (unsigned int)i;
+        return;
+    }
+    // Ключ положения — с округлением: швы развёртки дают вершины в одной точке
+    // с разницей в последнем знаке, и без округления шов остался бы резким.
+    auto key = [](const glm::vec3& p) {
+        const long long x = std::llround(p.x * 1e4), y = std::llround(p.y * 1e4),
+                        z = std::llround(p.z * 1e4);
+        return std::to_string(x) + "," + std::to_string(y) + "," + std::to_string(z);
+    };
+    std::unordered_map<std::string, glm::vec3> acc;
+    acc.reserve(v.size());
+    for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+        if (idx[i] >= v.size() || idx[i + 1] >= v.size() || idx[i + 2] >= v.size()) continue;
+        const glm::vec3& a = v[idx[i]].Position;
+        const glm::vec3 n = glm::cross(v[idx[i + 1]].Position - a, v[idx[i + 2]].Position - a);
+        for (int c = 0; c < 3; ++c) acc[key(v[idx[i + (size_t)c]].Position)] += n;   // вес — площадь
+    }
+    for (Vertex& vert : v) {
+        auto it = acc.find(key(vert.Position));
+        if (it == acc.end()) continue;
+        const float l = glm::length(it->second);
+        if (l > 1e-12f) vert.Normal = it->second / l;
+    }
+}
+
+} // namespace
+
+void ApplyImportSettings(sage::render::MeshData& mesh, const ImportSettings& s) {
+    if (mesh.Vertices.empty()) return;
+    if (!s.ChangesGeometry()) return;
+    if (s.FlipWinding) {
+        for (size_t i = 0; i + 2 < mesh.Indices.size(); i += 3)
+            std::swap(mesh.Indices[i + 1], mesh.Indices[i + 2]);
+        // Вывернутая модель — это и нормали внутрь: иначе освещена будет
+        // изнанка того, что теперь стало лицом.
+        for (Vertex& v : mesh.Vertices) v.Normal = -v.Normal;
+    }
+    if (s.FlipUV)
+        for (Vertex& v : mesh.Vertices) v.TexCoords.y = 1.0f - v.TexCoords.y;
+    if (s.Normals != ImportSettings::NormalMode::Import)
+        RecomputeNormals(mesh, s.Normals == ImportSettings::NormalMode::Smooth);
+
+    // Центрирование, нормировка и масштаб — прежней функцией (её числа
+    // сторожат тесты), затем поворот и сдвиг.
+    ApplyImportSettings(mesh.Vertices, s);
+    if (s.Rotation != glm::vec3(0.0f)) {
+        const glm::mat3 r = glm::mat3(glm::eulerAngleZYX(glm::radians(s.Rotation.z),
+                                                         glm::radians(s.Rotation.y),
+                                                         glm::radians(s.Rotation.x)));
+        for (Vertex& v : mesh.Vertices) {
+            v.Position = r * v.Position;
+            v.Normal = r * v.Normal;
+            v.Tangent = glm::vec4(r * glm::vec3(v.Tangent), v.Tangent.w);
+        }
+    }
+    if (s.Offset != glm::vec3(0.0f))
+        for (Vertex& v : mesh.Vertices) v.Position += s.Offset;
+
+    // Касательные зависят от нормалей и развёртки: изменились они — пересчёт.
+    if (s.FlipUV || s.FlipWinding || s.Normals != ImportSettings::NormalMode::Import)
+        sage::assets::GenerateTangents(mesh);
 }
 
 std::shared_ptr<Mesh> LoadObj(const std::string& path) {
@@ -104,7 +241,11 @@ sage::render::MeshData LoadObjData(const std::string& path,
             im.Metallic = m.metallic;
             // Roughness в .mtl есть далеко не всегда, и ноль по умолчанию
             // означал бы зеркало на каждой модели без PBR-полей.
-            im.Roughness = m.roughness > 0.0f ? m.roughness : 0.5f;
+            // Нет Pr — из блеска Ns по формуле Blender (см. ModelMaterial.cpp).
+            im.Roughness = m.roughness > 0.0f
+                               ? m.roughness
+                               : std::clamp(1.0f - std::sqrt(std::max(m.shininess, 0.0f)) / 30.0f,
+                                            0.04f, 1.0f);
             im.Opacity = m.dissolve;
             im.AlbedoTexture = m.diffuse_texname;
             im.NormalTexture = !m.normal_texname.empty() ? m.normal_texname : m.bump_texname;
@@ -207,7 +348,7 @@ sage::render::MeshData LoadObjData(const std::string& path,
 
     // Применяем настройки импорта из сайдкара (масштаб/центрирование/нормализация)
     // ДО создания GPU-меша — модель приходит в сцену уже приведённой.
-    ApplyImportSettings(out.Vertices, LoadImportSettings(path));
+    ApplyImportSettings(out, LoadImportSettings(path));
 
     return out;
 }
@@ -258,7 +399,7 @@ sage::render::MeshData LoadGltfData(const std::string& path, bool) {
     // центрирование — свойство ассета, а не формата, и разное поведение у .obj
     // и .glb означало бы, что одна и та же модель ведёт себя по-разному в
     // зависимости от того, как её экспортировали.
-    ApplyImportSettings(d.Vertices, LoadImportSettings(path));
+    ApplyImportSettings(d, LoadImportSettings(path));
     return d;
 }
 
@@ -293,6 +434,10 @@ sage::render::MeshData LoadMeshData(const std::string& path) {
         std::string err;
         if (sage::assets::ImporterRegistry::Instance().Import(path, scene, err)) {
             sage::render::MeshData data = scene.Flatten();
+            // Настройки импорта — и здесь: FBX, .blend и остальные форматы
+            // реестра их раньше не получали вовсе, и масштаб, выставленный в
+            // инспекторе FBX-модели, ни на что не влиял.
+            ApplyImportSettings(data, LoadImportSettings(path));
             if (!data.Empty()) return data;
             throw std::runtime_error("В файле нет геометрии: " + path);
         }

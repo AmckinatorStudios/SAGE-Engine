@@ -1,7 +1,9 @@
 #include "../PanelWindows.h"
 #include "ViewportPanel.h"
+#include "ModelImportDialog.h"
 
 #include <cmath>
+#include <filesystem>
 
 #include <cstdint>
 #include <cstdlib>
@@ -746,9 +748,20 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const float du = (m_pendingDrop.Pos.x - imgPos.x) / avail.x;
         const float dv = (m_pendingDrop.Pos.y - imgPos.y) / avail.y;
         if (du >= 0.0f && du <= 1.0f && dv >= 0.0f && dv <= 1.0f) {
-            if (!host.DropAssetAtViewport(activeView, activeProj, du, dv, m_pendingDrop.Path)) {
-                host.SetStatusMessage(T("You can drop a model, a prefab or a material into the scene"));
-            }
+            // Модель, у которой ещё нет настроек импорта, сперва спрашивает их
+            // (ModelImportDialog.h) и встаёт в сцену уже по ним — в ту же
+            // точку, куда её уронили.
+            const std::filesystem::path dropped = m_pendingDrop.Path;
+            auto place = [&host, activeView, activeProj, du, dv, dropped]() {
+                if (!host.DropAssetAtViewport(activeView, activeProj, du, dv, dropped)) {
+                    host.SetStatusMessage(
+                        T("You can drop a model, a prefab or a material into the scene"));
+                }
+            };
+            if (sage::editor::modelimport::NeedsSettings(dropped))
+                sage::editor::modelimport::Ask({dropped}, place);
+            else
+                place();
         }
         m_pendingDrop = {};
     }

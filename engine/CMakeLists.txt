@@ -91,6 +91,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/import/Importer.cpp
     src/sage/assets/import/MeshNormalize.cpp
     src/sage/assets/import/PolygonTriangulate.cpp
+    src/sage/assets/import/ModelProbe.cpp
     src/sage/assets/import/SkinInfluences.cpp
     src/sage/assets/import/TextureResolve.cpp
     src/sage/assets/import/Convert.cpp
@@ -119,6 +120,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
     src/sage/render/ResourceManager.cpp
+    src/sage/render/AlphaBleed.cpp
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
     src/sage/render/SkinnedModel.cpp

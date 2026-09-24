@@ -593,3 +593,70 @@ TEST(model_material_gltf_uv_matches_the_flipped_textures_of_static_meshes) {
     CHECK_NEAR(mesh.Vertices[0].TexCoords.y, 0.75f, 1e-5f);
     CHECK_NEAR(mesh.Vertices[2].TexCoords.y, 0.25f, 1e-5f);
 }
+
+// --- Листва из .obj: матовость и вырез без map_d ----------------------------
+#include <stb_image_write.h>   // реализация — в движке (render/Screenshot.cpp)
+
+#include "sage/render/AlphaBleed.h"
+
+TEST(model_material_obj_shininess_becomes_roughness) {
+    // Ns не читался, и любой .obj получал шероховатость 0.5: у совсем матовой
+    // листвы и коры (Ns 0 у Blender) — белёсый блик неба по всей кроне.
+    const fs::path dir = TempDir("sage_test_modelmat_ns");
+    WriteText(dir / "tree.obj", "mtllib tree.mtl\nusemtl Matte\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+                                "usemtl Glossy\nf 1 3 2\n");
+    WriteText(dir / "tree.mtl", "newmtl Matte\nNs 0.000000\nKd 1 1 1\n"
+                                "newmtl Glossy\nNs 900.000000\nKd 1 1 1\n");
+    const ModelLoader::ExtractedMaterialSet set = ModelLoader::ExtractMaterials((dir / "tree.obj").string());
+    CHECK_EQ((int)set.Materials.size(), 2);
+    if (set.Materials.size() != 2) return;
+    CHECK_NEAR(set.Materials[0].Roughness, 1.0f, 1e-3f);
+    CHECK_NEAR(set.Materials[1].Roughness, 0.04f, 1e-3f);
+}
+
+TEST(model_material_albedo_with_cut_out_alpha_is_detected_without_map_d) {
+    // Кусты и цветы из набора: карта прозрачности в .mtl не записана, а
+    // альбедо режет по альфе. Без выреза — квадраты с чёрными полосами.
+    const fs::path dir = TempDir("sage_test_modelmat_cutout");
+    std::vector<unsigned char> px(16 * 16 * 4, 0);
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) {
+            unsigned char* p = &px[(size_t)(y * 16 + x) * 4];
+            p[1] = 160;
+            p[3] = x < 8 ? 255 : 0;   // половина — лист, половина — пусто
+        }
+    stbi_write_png((dir / "bush.png").string().c_str(), 16, 16, 4, px.data(), 16 * 4);
+    // Та же картинка без прозрачности — вырезать там нечего.
+    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    stbi_write_png((dir / "bark.png").string().c_str(), 16, 16, 4, px.data(), 16 * 4);
+
+    WriteText(dir / "bush.obj", "mtllib bush.mtl\nusemtl Leaves\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+                                "usemtl Bark\nf 1 3 2\n");
+    WriteText(dir / "bush.mtl", "newmtl Leaves\nKd 1 1 1\nmap_Kd bush.png\n"
+                                "newmtl Bark\nKd 1 1 1\nmap_Kd bark.png\n");
+    const ModelLoader::ExtractedMaterialSet set = ModelLoader::ExtractMaterials((dir / "bush.obj").string());
+    CHECK_EQ((int)set.Materials.size(), 2);
+    if (set.Materials.size() != 2) return;
+    CHECK_EQ(set.Materials[0].AlphaMode, 1);
+    CHECK_TRUE(set.Materials[0].DoubleSided);
+    CHECK_EQ(set.Materials[1].AlphaMode, 0);
+    CHECK_TRUE(!set.Materials[1].DoubleSided);
+}
+
+TEST(alpha_bleed_gives_transparent_pixels_the_leaf_colour) {
+    // Под прозрачностью листвы лежит ЧЁРНОЕ, и мип-уровни подмешивали его в
+    // край листа: тёмная кайма вблизи, потемневшая крона вдали.
+    std::vector<unsigned char> px(8 * 8 * 4, 0);
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 2; ++x) {
+            unsigned char* p = &px[(size_t)(y * 8 + x) * 4];
+            p[0] = 60; p[1] = 160; p[2] = 40; p[3] = 255;
+        }
+    sage::render::BleedTransparentColor(px, 8, 8);
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x) {
+            const unsigned char* p = &px[(size_t)(y * 8 + x) * 4];
+            CHECK_EQ((int)p[1], 160);                 // цвет листа — везде
+            CHECK_EQ((int)p[3], x < 2 ? 255 : 0);     // вырез — прежний
+        }
+}

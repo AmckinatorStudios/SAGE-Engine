@@ -12,6 +12,7 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "ModelImportDialog.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -106,6 +107,7 @@ void EditorLayer::HandleDroppedFiles() {
     }
 
     int imported = 0;
+    std::vector<fs::path> broughtIn;   // что внесено — для окна настроек импорта моделей
     std::string lastError;
     for (const std::string& raw : dropped) {
         const fs::path path(raw);
@@ -132,6 +134,7 @@ void EditorLayer::HandleDroppedFiles() {
             // них считаются битыми до следующего открытия проекта.
             sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
             ++imported;
+            broughtIn.push_back(dest);
             m_assets.Select(dest);
             LOG_INFO("Editor") << "Внесена папка: " << dest.string();
             continue;
@@ -158,9 +161,19 @@ void EditorLayer::HandleDroppedFiles() {
             continue;
         }
         ++imported;
+        broughtIn.push_back(rep.Created);
         m_assets.Select(rep.Created);
         for (const std::string& missing : rep.Missing)
             LOG_WARN("Editor") << "Перетаскивание: спутник не найден — " << missing;
+    }
+
+    // Модели среди внесённого — окно настроек импорта (ModelImportDialog.h).
+    if (!broughtIn.empty()) {
+        std::vector<fs::path> models;
+        for (const fs::path& p : broughtIn)
+            for (fs::path& m : sage::editor::modelimport::ModelsNeedingSettings(p))
+                models.push_back(std::move(m));
+        sage::editor::modelimport::Ask(std::move(models));
     }
 
     if (imported == 1) SetStatusMessage(T("Brought into the project: ") + m_assets.Selected().filename().string());

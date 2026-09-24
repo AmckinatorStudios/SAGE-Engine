@@ -5,6 +5,7 @@
 #include <tiny_gltf.h>
 
 #include "sage/render/ModelMaterial.h"
+#include "sage/render/ModelLoader.h"
 
 #include "sage/assets/import/TextureResolve.h"
 #include "sage/assets/import/GltfFile.h"
@@ -14,6 +15,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <mutex>
+#include <unordered_map>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
@@ -38,6 +42,11 @@ namespace {
 // девяти строк.
 bool DecodeImage(tinygltf::Image* image, const int, std::string* err, std::string*, int, int,
                  const unsigned char* bytes, int size, void*) {
+    // ВНЕШНЯЯ КАРТИНКА (.gltf с файлами рядом) здесь не нужна: на неё материал
+    // ССЫЛАЕТСЯ (см. wholeMap), а канал из неё channelMap читает сам. Декод
+    // таких картинок был чистой потерей — две 2048² у дерева из набора, при
+    // каждом разборе материалов, в том числе ради обложки в панели ассетов.
+    if (!image->uri.empty() && image->uri.rfind("data:", 0) != 0) return true;
     int w = 0, h = 0, comp = 0;
     unsigned char* data = stbi_load_from_memory(bytes, size, &w, &h, &comp, 4); // всегда RGBA
     if (!data) {
@@ -52,6 +61,69 @@ bool DecodeImage(tinygltf::Image* image, const int, std::string* err, std::strin
     image->image.assign(data, data + (size_t)w * h * 4);
     stbi_image_free(data);
     return true;
+}
+
+// РЕЖЕТ ЛИ КАРТИНКА ПО АЛЬФЕ — по её содержимому. Нужна там, где формат
+// режима прозрачности не несёт вовсе или экспортёр его не записал: в .mtl и
+// FBX карта прозрачности пишется далеко не всегда, а листва из набора, у
+// которой три четверти картинки прозрачны, без выреза рисуется квадратами с
+// чёрными полосами (цвет под прозрачностью у неё чёрный).
+//
+// «Режет» — это заметная доля и прозрачных, и непрозрачных пикселей: альфа,
+// где почти всё 255, — это чей-то запас канала, а не лист. Ответ кэшируется по
+// пути и времени правки: обложки и повторный импорт спрашивают те же файлы.
+bool ImageHasCutoutAlpha(const std::string& file) {
+    if (file.empty()) return false;
+    std::error_code ec;
+    const auto stamp = fs::last_write_time(file, ec);
+    const std::string key = file + "|" + std::to_string(ec ? 0 : (long long)stamp.time_since_epoch().count());
+    static std::mutex mx;
+    static std::unordered_map<std::string, bool> cache;
+    {
+        std::lock_guard<std::mutex> lk(mx);
+        auto it = cache.find(key);
+        if (it != cache.end()) return it->second;
+    }
+    bool cutout = false;
+    int w = 0, h = 0, comp = 0;
+    if (stbi_info(file.c_str(), &w, &h, &comp) && (comp == 4 || comp == 2) && w > 0 && h > 0) {
+        stbi_set_flip_vertically_on_load_thread(false);
+        unsigned char* px = stbi_load(file.c_str(), &w, &h, &comp, 4);
+        if (px) {
+            size_t clear = 0, solid = 0;
+            const size_t count = (size_t)w * h;
+            for (size_t i = 0; i < count; ++i) {
+                const unsigned char a = px[i * 4 + 3];
+                if (a < 128) ++clear;
+                else if (a > 200) ++solid;
+            }
+            stbi_image_free(px);
+            cutout = clear > count / 50 && solid > count / 50;
+        }
+    }
+    std::lock_guard<std::mutex> lk(mx);
+    cache[key] = cutout;
+    return cutout;
+}
+
+// Материал без явного режима прозрачности, но с альбедо, которое режет по
+// альфе, — вырез и две стороны (карточка листа — одна плоскость).
+void DetectCutoutFromAlbedo(ExtractedMaterial& m) {
+    if (m.AlphaMode != 0 || m.Opacity < 0.999f || m.AlbedoMap.empty()) return;
+    if (!ImageHasCutoutAlpha(m.AlbedoMap)) return;
+    m.AlphaMode = 1;
+    m.AlphaCutoff = 0.5f;
+    m.DoubleSided = true;
+}
+
+// Шероховатость из блеска Phong (Ns в .mtl). Формула — обратная той, по
+// которой её пишет Blender: Ns = (30·(1 − roughness))², то есть 0..900. Прежде
+// Ns не читался вовсе, и любой материал .obj получал шероховатость 0.5 — у
+// листвы и коры (Ns 0, то есть совсем матовых) это давало белёсый блик неба
+// по всей кроне: «бледные текстуры» у .obj при тех же картах, что у glTF.
+float RoughnessFromShininess(float ns) {
+    const float r = 1.0f - std::sqrt(std::max(ns, 0.0f)) / 30.0f;
+    return std::clamp(r, 0.04f, 1.0f);
 }
 
 std::string ExtLower(const std::string& path) {
@@ -339,9 +411,9 @@ void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, Extra
     out.Emissive = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
     out.Metallic = m.metallic;
     // Roughness в .mtl (map_Pr/Pr) есть далеко не всегда, и ноль по умолчанию
-    // означал бы зеркало на каждой модели без PBR-полей. Отсутствие — это «не
-    // задано», а не «идеально гладкая».
-    out.Roughness = m.roughness > 0.0f ? m.roughness : 0.5f;
+    // означал бы зеркало на каждой модели без PBR-полей. Нет Pr — берём из
+    // блеска Ns (его пишет любой экспортёр, см. RoughnessFromShininess).
+    out.Roughness = m.roughness > 0.0f ? m.roughness : RoughnessFromShininess(m.shininess);
     out.Opacity = m.dissolve;
 
     // Путь из .mtl ищется ТЕМ ЖЕ поиском, что и у остальных форматов
@@ -378,6 +450,9 @@ void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, Extra
         out.AlphaCutoff = 0.5f;
         out.DoubleSided = true;   // карточка листа видна с обеих сторон
     }
+    // map_d не записан, а альбедо всё равно режет (кусты и цветы из того же
+    // набора) — узнаём по самой картинке.
+    DetectCutoutFromAlbedo(out);
 }
 
 void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
@@ -457,6 +532,7 @@ void ExtractFbx(const std::string& modelPath, ExtractedMaterialSet& set) {
         out.AlphaMode = m.AlphaMode;
         out.AlphaCutoff = m.AlphaCutoff;
         out.DoubleSided = m.DoubleSided;
+        DetectCutoutFromAlbedo(out);
         set.Materials.push_back(std::move(out));
     }
 }
@@ -529,6 +605,26 @@ ExtractedMaterialSet ExtractMaterials(const std::string& ref, const std::string&
                 "Так выходит, когда материал в Blender собран узлами: в glTF попадает "
                 "только Principled BSDF. Запеките узлы в текстуры при экспорте или "
                 "возьмите этот же меш в .fbx — туда цвета материалов попадают");
+        }
+    }
+
+    // НАСТРОЙКИ ИМПОРТА МОДЕЛИ главнее того, что описал файл (ModelLoader.h):
+    // экспорт мог не донести режим прозрачности, а человек, выбравший «вырез»
+    // в окне импорта, обязан получить вырез везде — в сцене, на обложке и в
+    // превью. Поэтому переопределение здесь, в единой точке разбора.
+    {
+        const ImportSettings settings = LoadImportSettings(modelPath);
+        for (ExtractedMaterial& m : out.Materials) {
+            switch (settings.Alpha) {
+                case ImportSettings::AlphaMode::Opaque: m.AlphaMode = 0; break;
+                case ImportSettings::AlphaMode::Cutout:
+                    m.AlphaMode = 1;
+                    m.AlphaCutoff = settings.AlphaCutoff;
+                    break;
+                case ImportSettings::AlphaMode::Auto: break;
+            }
+            if (settings.DoubleSided == ImportSettings::TwoSided::On) m.DoubleSided = true;
+            else if (settings.DoubleSided == ImportSettings::TwoSided::Off) m.DoubleSided = false;
         }
     }
 

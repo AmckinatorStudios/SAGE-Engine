@@ -388,7 +388,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         // важно лишь, чтобы полированное не приезжало матовым (та же формула,
         // что на статическом пути).
         const float shininess = (float)Property70(&n, "Shininess", -1.0);
-        if (shininess > 0.0f)
+        if (shininess >= 0.0f)
             m.Roughness = std::clamp(1.0f - std::sqrt(shininess / 100.0f), 0.04f, 1.0f);
 
         const auto slots = materialSlots.find(Uid(n));

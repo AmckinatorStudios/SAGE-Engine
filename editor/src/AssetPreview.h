@@ -125,6 +125,24 @@ public:
     // выглядел бы одной.
     uint64_t RenderPrefab(const std::string& path, int size, const std::string& key = {});
 
+    // ОБЛОЖКА МОДЕЛИ — ФОНОМ.
+    //
+    // Раньше обложка модели снималась так: ResourceManager::GetModel (полный
+    // разбор файла и заливка в кэш сцены), затем MaterialsForModel (разбор
+    // того же файла ещё раз и загрузка ВСЕХ карт в полном размере) — и всё это
+    // в кадре. У дерева из набора это три картинки 2048², у папки набора —
+    // сотни моделей: панель ассетов замирала на каждой обложке, а кэш сцены
+    // забивался ассетами, которые никто не ставил в сцену.
+    //
+    // Теперь разбор модели, материалов и уменьшение карт до размера обложки
+    // идут в фоновом потоке (не больше двух моделей разом); главный поток
+    // только заливает готовое и снимает кадр. Кэш ресурсов сцены не трогается.
+    //
+    // Возвращает хендл готовой обложки; 0 и pending = true — ещё грузится
+    // (спросите в следующих кадрах); 0 и pending = false — снять нечего.
+    uint64_t RenderModelCover(const std::string& path, int size, const std::string& key,
+                              bool& pending);
+
     // Угол обзора превью — крутится мышью в панели.
     void Orbit(float dYaw, float dPitch);
     void Zoom(float delta);
@@ -144,6 +162,10 @@ private:
                          const std::string& key);
     // Буфер под ключ (см. комментарий про key выше).
     Framebuffer& TargetFor(const std::string& key, int size);
+
+    // Фоновые разборы моделей для обложек (см. RenderModelCover). Путь — ключ.
+    struct ModelCoverJob;
+    std::unordered_map<std::string, std::shared_ptr<ModelCoverJob>> m_modelJobs;
 
     std::optional<Framebuffer> m_fbo;                       // общий, для key == ""
     std::unordered_map<std::string, Framebuffer> m_targets;  // именованные

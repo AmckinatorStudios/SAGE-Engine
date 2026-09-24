@@ -4,6 +4,8 @@
 #include "sage/core/EngineContext.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Quarantine.h"
+#include "sage/assets/import/ModelProbe.h"
+#include "sage/render/AlphaBleed.h"
 #include "sage/render/SkinnedModel.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
@@ -40,6 +42,7 @@ struct ResourceManager::AsyncImpl {
     struct Job {
         std::string Key;
         std::string File;
+        bool Bleed = false;   // вырез по альфе: цвет под прозрачностью (AlphaBleed.h)
     };
     std::deque<Job> Jobs;
 
@@ -63,6 +66,7 @@ struct ResourceManager::AsyncImpl {
             Decoded d;
             d.Path = job.Key;
             d.Ok = ResourceManager::DecodeImageFile(job.File, d.Pixels, d.W, d.H);
+            if (d.Ok && job.Bleed) sage::render::BleedTransparentColor(d.Pixels, d.W, d.H);
             {
                 std::lock_guard<std::mutex> lk(ResMx);
                 Results.push_back(std::move(d));
@@ -121,8 +125,9 @@ std::string Locate(const std::string& path) {
 // объекту, а не в кадре — в кадре материалы и текстуры уже разобраны в
 // shared_ptr. Таблица же добавила бы устаревание, привязанное к текущему
 // каталогу процесса и к корню проекта: файл при этом существует, просто не тот.
-std::string SamplingSuffix(TextureFilter filter, bool mipmaps) {
-    return std::string("|f") + std::to_string((int)filter) + (mipmaps ? "m" : "");
+std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed = false) {
+    return std::string("|f") + std::to_string((int)filter) + (mipmaps ? "m" : "") +
+           (bleed ? "b" : "");
 }
 
 std::string CacheKey(const std::string& path) {
@@ -236,6 +241,18 @@ std::shared_ptr<sage::render::SkinnedModel> ResourceManager::GetSkinnedModel(
     auto it = m_skinned.find(key);
     if (it != m_skinned.end()) return it->second;
     std::shared_ptr<sage::render::SkinnedModel> model;
+    // СНАЧАЛА — ЕСТЬ ЛИ ВООБЩЕ СКЕЛЕТ. Редактор спрашивает скелетную версию у
+    // каждой поставленной в сцену модели, и без этой проверки .obj уходил в
+    // разбор glTF («Скиннинг-модель не загрузилась … parse error» — ошибкой на
+    // обычной декорации), а статический .gltf разбирался целиком, с декодом
+    // всех текстур, только чтобы узнать, что костей нет. Проверка читает одно
+    // оглавление файла (assets/import/ModelProbe.h); «нет скелета» — не
+    // ошибка, а обычное состояние модели, и в лог оно не пишется.
+    if (!sage::assets::ModelHasSkeleton(Locate(path))) {
+        m_skinned[key] = nullptr;
+        m_skinnedStamps[key] = FileStamp(Locate(path));
+        return nullptr;
+    }
     if (sage::assets::quarantine::Blocked(path)) {
         LOG_ERROR("Resources") << "Скелетная модель «" << path
                                << "» в карантине: на ней оборвался прошлый запуск. "
@@ -262,29 +279,48 @@ std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
     return GetModel(path);
 }
 
-int ResourceManager::ReloadChangedAssets() {
+int ResourceManager::ReloadChangedAssets(size_t budget) {
     int reloaded = 0;
+
+    // ОКНО ОПРОСА. Все записи четырёх кэшей пронумерованы подряд (модели,
+    // материалы, скелетные модели, текстуры), и за вызов опрашиваются только
+    // номера из окна [курсор, курсор + budget) по кругу. Обход самих
+    // контейнеров дёшев — дорог системный вызов на каждый файл, и именно их
+    // число бюджет ограничивает.
+    const size_t total =
+        m_modelStamps.size() + m_materialStamps.size() + m_skinnedStamps.size() + m_textures.size();
+    if (total == 0) return 0;
+    const bool all = budget == 0 || budget >= total;
+    const size_t start = all ? 0 : m_reloadCursor % total;
+    const size_t window = all ? total : budget;
+    if (!all) m_reloadCursor = (start + window) % total;
+    size_t index = 0;
+    auto inWindow = [&]() {
+        const size_t i = index++;
+        return all || (i + total - start) % total < window;
+    };
 
     // Списки путей собираются ЗАРАНЕЕ: перезагрузка меняет те самые
     // контейнеры, по которым идёт обход, и обходить их на ходу — обращение по
     // недействительному итератору.
     std::vector<std::string> staleModels;
     for (const auto& [path, stamp] : m_modelStamps) {
-        if (FileStamp(Locate(path)) != stamp) staleModels.push_back(path);
+        if (inWindow() && FileStamp(Locate(path)) != stamp) staleModels.push_back(path);
     }
     std::vector<std::string> staleMaterials;
     for (const auto& [path, stamp] : m_materialStamps) {
-        if (FileStamp(Locate(path)) != stamp) staleMaterials.push_back(path);
+        if (inWindow() && FileStamp(Locate(path)) != stamp) staleMaterials.push_back(path);
     }
     std::vector<std::string> staleSkinned;
     for (const auto& [path, stamp] : m_skinnedStamps) {
-        if (FileStamp(Locate(path)) != stamp) staleSkinned.push_back(path);
+        if (inWindow() && FileStamp(Locate(path)) != stamp) staleSkinned.push_back(path);
     }
     // КЛЮЧ, А НЕ ПУТЬ: у одного файла в кэше столько записей, сколько у него
     // разных настроек выборки, и перечитать надо КАЖДУЮ — иначе сглаженная
     // копия обновится, а резкая останется со вчерашними пикселями.
     std::vector<std::string> staleTextures;
     for (const auto& [key, rec] : m_textures) {
+        if (!inWindow()) continue;
         // Процедурную (Generated) перечитывать неоткуда, а грузящуюся (Pending)
         // рано: её пиксели ещё едут из фонового потока, и подмена сейчас
         // означала бы гонку с ними.
@@ -345,7 +381,7 @@ int ResourceManager::ReloadChangedAssets() {
         TextureRecord& rec = m_textures[key];
         const std::string path = rec.Source;
         try {
-            *rec.Tex = Texture(Locate(path), rec.Filter, rec.Mipmaps);
+            *rec.Tex = std::move(*LoadTextureFile(Locate(path), rec.Filter, rec.Mipmaps, rec.Bleed));
             m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
             rec.Bytes = rec.Tex->GpuBytes();
             m_textureBytes += rec.Bytes;
@@ -366,12 +402,32 @@ int ResourceManager::ReloadChangedAssets() {
     return reloaded;
 }
 
+// Картинка с диска в текстуру. Обычная — прямо конструктором Texture (он
+// знает и свой формат .sagetex, и число каналов файла); с bleed — через
+// декод в память, где цвет под прозрачностью правится до заливки.
+std::shared_ptr<Texture> ResourceManager::LoadTextureFile(const std::string& file,
+                                                          TextureFilter filter, bool mipmaps,
+                                                          bool bleed) {
+    if (!bleed) return std::make_shared<Texture>(file, filter, mipmaps);
+    std::vector<unsigned char> pixels;
+    int w = 0, h = 0;
+    if (!DecodeImageFile(file, pixels, w, h))
+        return std::make_shared<Texture>(file, filter, mipmaps);   // .sagetex и прочее
+    sage::render::BleedTransparentColor(pixels, w, h);
+    return std::make_shared<Texture>(pixels.data(), w, h, filter, mipmaps);
+}
+
+int ResourceManager::PendingAsyncTextures() const {
+    return m_async ? std::max(0, m_async->Pending.load()) : 0;
+}
+
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
-                                                    TextureFilter filter, bool mipmaps) {
+                                                    TextureFilter filter, bool mipmaps,
+                                                    bool bleed) {
     if (path.empty()) return nullptr;
     // Ключ = файл + настройки выборки: две фильтрации одного файла — это две
     // картинки, а не одна, которую отнимают друг у друга (см. CacheKey выше).
-    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps);
+    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps, bleed);
     auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick(); // обращение -> «свежая» для LRU
@@ -389,8 +445,9 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
     rec.Source = path;
     rec.Filter = filter;
     rec.Mipmaps = mipmaps;
+    rec.Bleed = bleed;
     try {
-        rec.Tex = std::make_shared<Texture>(Locate(path), filter, mipmaps);
+        rec.Tex = LoadTextureFile(Locate(path), filter, mipmaps, bleed);
         rec.Bytes = rec.Tex->GpuBytes();
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Текстура не загрузилась (" << path << "): " << e.what();
@@ -406,13 +463,14 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
     return result;
 }
 
-std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& path) {
+std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& path,
+                                                         TextureFilter filter, bool mipmaps,
+                                                         bool bleed) {
     if (path.empty()) return nullptr;
-    // Те же настройки, что у GetTexture по умолчанию, — иначе асинхронно
+    // Тот же ключ, что у GetTexture с теми же настройками, — иначе асинхронно
     // загруженная картинка легла бы в ДРУГУЮ запись кэша, чем ту, которую
     // потом спросят обычным путём, и файл прочитался бы дважды.
-    const std::string key =
-        CacheKey(path) + SamplingSuffix(TextureFilter::Trilinear, /*mipmaps=*/true);
+    const std::string key = CacheKey(path) + SamplingSuffix(filter, mipmaps, bleed);
     auto it = m_textures.find(key);
     if (it != m_textures.end()) {
         it->second.Tick = NextTick();
@@ -421,7 +479,9 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
 
     // Плейсхолдер 1x1 (нейтральный серый) — виден мгновенно, реальные пиксели
     // заменят его на PumpAsyncUploads(). Без мипмапов -> размер ничтожен.
-    const unsigned char kPlaceholder[4] = {128, 128, 128, 255};
+    // У выреза по альфе заглушка прозрачная: серый квадрат на месте листа на
+    // пару кадров — это то самое «листва квадратами», только мигающее.
+    const unsigned char kPlaceholder[4] = {128, 128, 128, (unsigned char)(bleed ? 0 : 255)};
     TextureRecord rec;
     try {
         rec.Tex = std::make_shared<Texture>(kPlaceholder, 1, 1, TextureFilter::Bilinear, false);
@@ -432,8 +492,9 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     }
     rec.Bytes = rec.Tex->GpuBytes();
     rec.Source = path;
-    rec.Filter = TextureFilter::Trilinear;
-    rec.Mipmaps = true;
+    rec.Filter = filter;
+    rec.Mipmaps = mipmaps;
+    rec.Bleed = bleed;
     rec.Tick = NextTick();
     rec.Pending = true;
     rec.Stamp = FileStamp(Locate(path));
@@ -446,7 +507,7 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
         // Ключ задачи — тот же канонический: результат ищется в кэше по нему,
         // и разойдись они, готовые пиксели не нашли бы своей записи.
         std::lock_guard<std::mutex> lk(m_async->JobMx);
-        m_async->Jobs.push_back({key, Locate(path)});
+        m_async->Jobs.push_back({key, Locate(path), bleed});
     }
     m_async->Pending.fetch_add(1);
     m_async->JobCv.notify_one();
@@ -468,7 +529,10 @@ int ResourceManager::PumpAsyncUploads() {
         TextureRecord& rec = it->second;
         if (d.Ok && rec.Tex && d.W > 0 && d.H > 0) {
             m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
-            rec.Tex->ReplacePixels(d.Pixels.data(), d.W, d.H); // GL-заливка на главном потоке
+            // С ТЕМИ настройками выборки, с какими заказывали: здесь стояли
+            // значения по умолчанию, и картинка, заказанная резкой или без
+            // мипмапов, приезжала сглаженной.
+            rec.Tex->ReplacePixels(d.Pixels.data(), d.W, d.H, rec.Filter, rec.Mipmaps);
             rec.Bytes = rec.Tex->GpuBytes();
             m_textureBytes += rec.Bytes;
             rec.Tick = NextTick();
@@ -676,13 +740,21 @@ std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& pat
 // EffectiveFilter в Texture.cpp) — запрос не отказывает, а опускается.
 void ResourceManager::ResolveMaterialTextures(Material& m) {
     constexpr TextureFilter kSurface = TextureFilter::Anisotropic;
-    m.AlbedoTex = GetTexture(m.TexturePath, kSurface);
-    m.NormalTex = GetTexture(m.NormalMapPath, kSurface);
-    m.MetallicTex = GetTexture(m.MetallicMapPath, kSurface);
-    m.RoughnessTex = GetTexture(m.RoughnessMapPath, kSurface);
-    m.AOTex = GetTexture(m.AOMapPath, kSurface);
-    m.EmissiveTex = GetTexture(m.EmissiveMap, kSurface);
+    // Цвет под прозрачностью правится только у карты, которую материал режет
+    // по альфе (см. AlphaBleed.h): у остальных альфа значит что-то своё.
+    const bool cutout = m.Render.AlphaCutoff > 0.0f;
+    auto get = [&](const std::string& path, bool bleed) {
+        return m_streamMaterialTextures ? GetTextureAsync(path, kSurface, true, bleed)
+                                        : GetTexture(path, kSurface, true, bleed);
+    };
+    m.AlbedoTex = get(m.TexturePath, cutout);
+    m.NormalTex = get(m.NormalMapPath, false);
+    m.MetallicTex = get(m.MetallicMapPath, false);
+    m.RoughnessTex = get(m.RoughnessMapPath, false);
+    m.AOTex = get(m.AOMapPath, false);
+    m.EmissiveTex = get(m.EmissiveMap, false);
     m.TexturesFrom = PathsOf(m);
+    m.TexturesCutout = cutout;
 }
 
 // Слепок путей к картам — по нему видно, что указатели устарели.
@@ -698,7 +770,10 @@ Material::ResolvedFrom ResourceManager::PathsOf(const Material& m) {
 }
 
 bool ResourceManager::RefreshMaterialTextures(Material& m) {
-    if (m.TexturesFrom == PathsOf(m)) return false;
+    // Включили или сняли вырез — карта альбедо нужна другая (с цветом под
+    // прозрачностью или без), хотя пути не менялись.
+    if (m.TexturesFrom == PathsOf(m) && m.TexturesCutout == (m.Render.AlphaCutoff > 0.0f))
+        return false;
     ResolveMaterialTextures(m);
     return true;
 }
@@ -833,6 +908,7 @@ void ResourceManager::DowngradeTexture(const std::string& key) {
     std::vector<unsigned char> pixels;
     int w = 0, h = 0;
     if (!DecodeImageFile(path, pixels, w, h)) return;
+    if (rec.Bleed) sage::render::BleedTransparentColor(pixels, w, h);
 
     // Целевая сторона — вдвое меньше текущей, а не исходной: понижения
     // накапливаются, и второй проход должен уменьшать то, что уже уменьшено.
@@ -847,7 +923,7 @@ void ResourceManager::DowngradeTexture(const std::string& key) {
     }
 
     const size_t before = rec.Bytes;
-    rec.Tex->ReplacePixels(pixels.data(), sw, sh);
+    rec.Tex->ReplacePixels(pixels.data(), sw, sh, rec.Filter, rec.Mipmaps);
     rec.Bytes = rec.Tex->GpuBytes();
     rec.MaxSide = std::max(sw, sh);
     m_textureBytes -= std::min(m_textureBytes, before);
@@ -926,6 +1002,13 @@ void ResourceManager::Clear() {
     // видеокарты после смерти GL-контекста — то есть падением при выходе.
     for (std::shared_ptr<Mesh>& primitive : m_primitives) primitive.reset();
     m_models.clear();
+    // Штампы — вместе с записями: оставшись без своих ресурсов, они заставляли
+    // ReloadChangedAssets «перечитывать» давно выгруженные файлы (а удалённые —
+    // с ошибкой в лог).
+    m_modelStamps.clear();
+    m_materialStamps.clear();
+    m_skinnedStamps.clear();
+    m_reloadCursor = 0;
     m_skinned.clear(); // GPU-ресурс: чистится, пока GL-контекст ещё жив
     // Материал держит свою программу через ShaderPtr, а копии shared_ptr на сам
     // материал живут в сущностях сцены — она переживает Clear(). Снимаем ссылку

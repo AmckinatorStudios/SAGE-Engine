@@ -21,7 +21,25 @@
 #include "sage/scene/Scene.h"
 #include "../Localization.h"
 #include "../ObjectCatalog.h"
+#include "../ModelImportDialog.h"
 #include "../FolderColors.h"
+
+namespace {
+
+// Ассет в сцену из списка — с окном настроек импорта для новой модели
+// (ModelImportDialog.h): модель встаёт уже по ним, а не «как экспортировали».
+void AddAssetAskingSettings(EditorHost& host, const std::string& dropped) {
+    auto add = [&host, dropped]() {
+        if (!host.AddAssetToScene(dropped))
+            host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
+    };
+    if (sage::editor::modelimport::NeedsSettings(dropped))
+        sage::editor::modelimport::Ask({std::filesystem::path(dropped)}, add);
+    else
+        add();
+}
+
+} // namespace
 
 namespace {
 
@@ -470,8 +488,7 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
             std::string dropped((const char*)p->Data, (size_t)p->DataSize);
             if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            if (!host.AddAssetToScene(dropped))
-                host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
+            AddAssetAskingSettings(host, dropped);
         }
         ImGui::EndDragDropTarget();
     }
@@ -500,8 +517,7 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
             // Точки под курсором тут нет — список это не трёхмерный вид,
             // — поэтому объект встаёт в начало координат, как при создании
             // через меню Entity.
-            if (!host.AddAssetToScene(dropped))
-                host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
+            AddAssetAskingSettings(host, dropped);
         }
         ImGui::EndDragDropTarget();
     }

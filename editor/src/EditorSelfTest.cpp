@@ -18,6 +18,7 @@
 #include "AssetSlot.h"
 #include "AssetCovers.h"
 #include "Thumbnails.h"
+#include "ModelImportDialog.h"
 #include "PanelWindows.h"
 #include "UIElementProperties.h"
 #include "Progress.h"
@@ -323,7 +324,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -3566,6 +3567,47 @@ bool EditorLayer::SelfTestSelection() {
         fs::remove_all(root, ec);
     }
 
+    // --- Окно настроек импорта модели: кому оно показывается -------------------
+    //
+    // Окно спрашивает настройки у МОДЕЛИ БЕЗ .sageimport — и только у неё:
+    // модель с настройками второй раз вопросов не задаёт, а картинка и
+    // материал моделями не являются. Внесённая в проект папка набора даёт
+    // список ровно тех моделей, что ещё без настроек.
+    if (ok) {
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path(ec) / "sage_selftest_model_import";
+        fs::remove_all(root, ec);
+        fs::create_directories(root / "OBJ", ec);
+        { std::ofstream(root / "OBJ" / "bush.obj") << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
+        { std::ofstream(root / "OBJ" / "tree.obj") << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
+        { std::ofstream(root / "leaf.png") << "x"; }
+        ModelLoader::ImportSettings configured;
+        configured.Scale = 2.0f;
+        ModelLoader::SaveImportSettings((root / "OBJ" / "tree.obj").string(), configured);
+
+        namespace modelimport = sage::editor::modelimport;
+        const std::vector<fs::path> asked = modelimport::ModelsNeedingSettings(root);
+        if (asked.size() != 1 || asked.front().filename() != "bush.obj") {
+            LOG_ERROR("Editor") << "SELFTEST: окно импорта спрашивает не те модели (" << asked.size()
+                                << ")";
+            ok = false;
+        }
+        if (ok && (modelimport::NeedsSettings(root / "leaf.png") ||
+                   modelimport::NeedsSettings(root / "OBJ" / "tree.obj"))) {
+            LOG_ERROR("Editor") << "SELFTEST: окно импорта спрашивает картинку или настроенную модель";
+            ok = false;
+        }
+        // Пустой список — действие сразу, без окна: внесение папки без моделей
+        // не должно открывать пустое окно.
+        bool ran = false;
+        modelimport::Ask({}, [&ran]() { ran = true; });
+        if (ok && (!ran || modelimport::IsOpen())) {
+            LOG_ERROR("Editor") << "SELFTEST: окно импорта открылось без моделей";
+            ok = false;
+        }
+        fs::remove_all(root, ec);
+    }
+
     // --- Файловый диалог: обложки и выбор вида ---------------------------------
     //
     // Диалог показывал строку с именем и размером — и всё. Имена в скачанных
@@ -3587,7 +3629,18 @@ bool EditorLayer::SelfTestSelection() {
         }
         { std::ofstream(root / "notes.txt") << "текст"; }
 
-        if (assetslot::Cover(nullptr, png, 64) == 0) {
+        // Обложка картинки приезжает ФОНОМ (кэш обложек, Thumbnails.h): слот
+        // больше не декодирует картинку целиком в кадре. Ждём её, прокачивая
+        // очередь так же, как это делает кадр редактора, — но не вечно.
+        uint64_t pictureCover = 0;
+        for (int attempt = 0; attempt < 400 && pictureCover == 0; ++attempt) {
+            pictureCover = assetslot::Cover(nullptr, png, 64);
+            if (pictureCover == 0) {
+                thumbs::Pump();
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+        if (pictureCover == 0) {
             LOG_ERROR("Editor") << "SELFTEST: picture got no cover in the file dialog";
             ok = false;
         }

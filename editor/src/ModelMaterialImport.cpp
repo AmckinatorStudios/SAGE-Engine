@@ -8,6 +8,7 @@
 #include "sage/core/Log.h"
 #include "sage/render/Material.h"
 #include "sage/anim/ClipFile.h"
+#include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/render/ResourceManager.h"
@@ -82,6 +83,18 @@ fs::path EnsureMaterialFile(const Project& project, const fs::path& path,
 
 } // namespace
 
+int RemoveModelMaterialFiles(const std::string& modelPath) {
+    const ModelLoader::ExtractedMaterialSet set = ModelLoader::ExtractMaterials(modelPath);
+    int removed = 0;
+    for (size_t i = 0; i < set.Materials.size(); ++i) {
+        std::error_code ec;
+        const fs::path file =
+            MaterialFileFor(fs::path(modelPath), set.Materials[i], i, set.Materials.size());
+        if (fs::remove(file, ec)) ++removed;
+    }
+    return removed;
+}
+
 ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRendererComponent& mr) {
     ModelMaterialImportResult result;
     if (mr.Ref.path.empty()) return result;
@@ -90,6 +103,9 @@ ModelMaterialImportResult ImportModelMaterials(const Project& project, MeshRende
     // а читать надо настоящий файл на диске.
     const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(mr.Ref.path);
     if (modelPath.empty()) return result;
+    // «Не создавать материалы» в окне импорта (ModelImportDialog.h): модель
+    // встаёт голой геометрией, красит её материал объекта.
+    if (!ModelLoader::LoadImportSettings(modelPath).ImportMaterials) return result;
 
     // Разметка меша — источник числа слотов. Её нет только у процедурных
     // примитивов и форматов без материалов; там и импортировать нечего сверх
@@ -248,6 +264,12 @@ ModelMaterialImportResult& SetupModelAnimation(const Project& project, entt::reg
                                                entt::entity entity, const std::string& modelRef,
                                                ModelMaterialImportResult& result) {
     if (modelRef.empty() || !registry.valid(entity)) return result;
+
+    // Анимацию выключили в настройках импорта — модель ставится статикой,
+    // даже если в файле есть кости.
+    if (!ModelLoader::LoadImportSettings(sage::AssetDatabase::Instance().LocatePath(modelRef))
+             .ImportAnimation)
+        return result;
 
     // Скелет берём через кэш: ту же модель сейчас же попросит и сцена.
     std::shared_ptr<sage::render::SkinnedModel> model =

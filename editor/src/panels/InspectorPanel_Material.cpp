@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 #include <cstdarg>
 #include "InspectorPanel.h"
+#include "../ModelImportDialog.h"
 #include "../EditorTheme.h"
 
 #include <cmath>
@@ -340,29 +341,71 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     if (ImGui::Button(T("Revert"))) ResourceManager::Instance().ReloadMaterial(pathStr);
 }
 
-// Настройки импорта выбранной модели (.obj/.gltf/.glb): масштаб/центрирование/
-// нормализация в сайдкар .sageimport. Reimport перечитывает меш и обновляет все
-// сущности сцены, использующие эту модель.
+// Настройки импорта выбранной модели — ТЕ ЖЕ, что в окне импорта
+// (ModelImportDialog.h): трансформ, геометрия, материалы, анимация. Пишутся в
+// сайдкар .sageimport; «Переимпортировать» перечитывает меш и обновляет все
+// экземпляры модели в сцене.
 void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
-    std::string path = host.InspectedAssetPath().string();
-    ModelLoader::ImportSettings s = ModelLoader::LoadImportSettings(path);
-    ImGui::DragFloat(T("Import Scale"), &s.Scale, 0.01f, 0.001f, 1000.0f);
-    ImGui::Checkbox(T("Recenter (AABB -> origin)"), &s.Recenter);
-    ImGui::Checkbox(T("Normalize size (max side = 1)"), &s.NormalizeSize);
+    const std::string path = host.InspectedAssetPath().string();
+    // Правки копятся здесь до нажатия кнопки: перечитывать модель на каждое
+    // движение ползунка масштаба значило бы разбирать файл десятки раз в секунду.
+    static std::string editingPath;
+    static ModelLoader::ImportSettings editing;
+    static bool overwrite = false;
+    if (editingPath != path) {
+        editingPath = path;
+        editing = ModelLoader::LoadImportSettings(path);
+        overwrite = false;
+    }
+    sage::editor::modelimport::DrawSettings(editing, &overwrite);
 
+    ImGui::Spacing();
     if (ImGui::Button(T("Reimport"))) {
-        if (!ModelLoader::SaveImportSettings(path, s)) {
-            host.SetStatusMessage("Import settings save failed");
+        if (!ModelLoader::SaveImportSettings(path, editing)) {
+            host.SetStatusMessage(T("Import settings save failed"));
         } else {
-            // Перечитываем меш и переназначаем всем сущностям с этой моделью.
+            Project& project = host.CurrentProject();
+            if (overwrite) RemoveModelMaterialFiles(path);
             std::shared_ptr<Mesh> mesh = ResourceManager::Instance().ReloadModel(path);
+            // Экземпляры держат ссылку ПРОЕКТА («assets/tree.fbx»), а инспектор —
+            // настоящий путь: сравнивать надо ссылки. Здесь сравнивались пути
+            // как есть, и переимпорт не обновлял ни одного экземпляра в сцене.
+            const std::string ref = project.AssetRef(path);
             Scene& scene = host.CurrentScene();
+            std::error_code ec;
+            int updated = 0;
             auto view = scene.Registry().view<MeshRendererComponent>();
             for (auto e : view) {
                 MeshRendererComponent& mr = view.get<MeshRendererComponent>(e);
-                if (mr.Ref.type == MeshRef::Type::Model && mr.Ref.path == path) mr.MeshPtr = mesh;
+                if (mr.Ref.type != MeshRef::Type::Model || mr.Ref.path != ref) continue;
+                mr.MeshPtr = mesh;
+                if (overwrite) {
+                    // Слоты, чьих файлов больше нет, освобождаются — импорт
+                    // заполнит их заново; назначенное человеком остаётся.
+                    for (MaterialSlot& slot : mr.Slots) {
+                        if (!slot.Path.empty() &&
+                            !fs::exists(sage::AssetDatabase::Instance().LocatePath(slot.Path), ec))
+                            slot = MaterialSlot{};
+                    }
+                    if (!mr.MaterialPath.empty() &&
+                        !fs::exists(sage::AssetDatabase::Instance().LocatePath(mr.MaterialPath), ec)) {
+                        mr.MaterialPath.clear();
+                        mr.MaterialPtr = nullptr;
+                    }
+                    ImportModelMaterials(project, mr);
+                    // Материалы в кэше ресурсов — те же объекты, что держат
+                    // другие экземпляры: перечитываем НА МЕСТЕ.
+                    for (const MaterialSlot& slot : mr.Slots)
+                        if (!slot.Path.empty()) ResourceManager::Instance().ReloadMaterial(slot.Path);
+                    if (!mr.MaterialPath.empty())
+                        ResourceManager::Instance().ReloadMaterial(mr.MaterialPath);
+                }
+                ++updated;
             }
-            host.SetStatusMessage("Reimported: " + host.InspectedAssetPath().filename().string());
+            overwrite = false;
+            host.SetStatusMessage(std::string(T("Reimported: ")) +
+                                  host.InspectedAssetPath().filename().string() + " (" +
+                                  std::to_string(updated) + ")");
         }
     }
     ImGui::TextDisabled("%s", T("Baked into the mesh on load — affects editor and built game"));

@@ -1,4 +1,5 @@
 #include "AssetSlot.h"
+#include "Thumbnails.h"
 
 #include <algorithm>
 #include <cctype>
@@ -55,11 +56,10 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     const std::string key = path.string();
     const std::string ext = Lower(path.extension().string());
 
-    // Картинки не рендерятся — они уже картинки.
-    if (KindOf(path) == Kind::Texture) {
-        std::shared_ptr<Texture> tex = ResourceManager::Instance().GetTexture(key);
-        return tex ? tex->NativeHandle() : 0;
-    }
+    // Картинки не рендерятся — они уже картинки. Берутся из кэша ОБЛОЖЕК
+    // (Thumbnails.h): уменьшенные, фоном. Через GetTexture картинка 4096²
+    // декодировалась в кадре целиком ради квадратика в инспекторе.
+    if (KindOf(path) == Kind::Texture) return thumbs::Get(path, thumbs::Size::Tile).Id;
     if (!preview) return 0;
 
     const bool renderable = ext == ".sagemat" || ext == ".sageprefab" || ext == ".sagemesh" ||
@@ -86,17 +86,24 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
 
     const std::string bufferKey = "slot:" + key;
     uint64_t id = 0;
+    // См. AssetsPanel::CoverFor: снимок с картами «в пути» не запоминается.
+    bool provisional = false;
     if (ext == ".sagemat") {
         if (std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key))
             id = preview->RenderMaterial(mat, size, bufferKey);
+        provisional = ResourceManager::Instance().PendingAsyncTextures() > 0;
     } else if (ext == ".sageprefab") {
         id = preview->RenderPrefab(key, size, bufferKey);
+        provisional = ResourceManager::Instance().PendingAsyncTextures() > 0;
     } else {
-        if (std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(key))
-            id = preview->RenderMesh(mesh, size, bufferKey, AssetPreview::MaterialsForModel(key));
+        // Модель — фоном (AssetPreview::RenderModelCover): пока идёт разбор,
+        // слот показывает прошлую обложку или значок.
+        bool pending = false;
+        id = preview->RenderModelCover(key, size, bufferKey, pending);
+        if (pending) return it != cache.end() ? it->second.Id : 0;
     }
     lastRenderFrame = frame;
-    cache[key] = Cached{id, stamp, frame};
+    cache[key] = Cached{id, provisional ? -1 : stamp, frame};
 
     // Обложки, на которые давно никто не смотрел, отпускаем вместе с их
     // буферами: слот, которому за сеанс назначили десяток разных материалов,

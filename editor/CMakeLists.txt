@@ -76,6 +76,8 @@ add_executable(SageEditor WIN32
     src/FileBrowser.cpp
     src/PathScope.cpp
     src/Thumbnails.cpp
+    src/FsCache.cpp
+    src/ModelImportDialog.cpp
     src/CodeEditorApp.cpp
     src/ConfirmDialog.cpp
     src/UICanvas.cpp

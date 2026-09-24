@@ -3,6 +3,7 @@
 #include "MeshData.h"
 #include "sage/assets/import/Importer.h"
 #include <filesystem>
+#include <glm/glm.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,10 +14,41 @@ namespace ModelLoader {
     // модель приходит в сцену уже нормализованной, без ручной правки масштаба
     // каждого инстанса. Простой ассет-импорт-пайплайн: настройка живёт при
     // ассете, редактируется в Inspector, действует и в редакторе, и в игре.
+    //
+    // НАБОР КАК В БОЛЬШИХ ДВИЖКАХ. Раньше здесь были масштаб, центрирование и
+    // нормировка — и всё. Всё остальное, что чинят при импорте чужой модели
+    // (лежит на боку, вывернута наизнанку, текстура вверх ногами, листва
+    // квадратами, резкие грани вместо гладких), чинилось руками в сцене — и
+    // заново для каждого экземпляра. Теперь это свойства АССЕТА: заданы один
+    // раз, применяются при каждой загрузке — в редакторе и в собранной игре.
     struct ImportSettings {
+        // --- Трансформ (запекается в вершины) --------------------------------
         float Scale = 1.0f;         // равномерный множитель размера
         bool Recenter = false;      // центр AABB -> в начало координат
         bool NormalizeSize = false; // наибольшая сторона -> 1 (до умножения на Scale)
+        glm::vec3 Rotation{0.0f};   // градусы, оси X, Y, Z (Z вверх -> Y вверх: X = -90)
+        glm::vec3 Offset{0.0f};     // сдвиг после масштаба и поворота, метры
+
+        // --- Геометрия -------------------------------------------------------
+        enum class NormalMode { Import = 0, Smooth = 1, Flat = 2 };
+        NormalMode Normals = NormalMode::Import;  // из файла или пересчитать
+        bool FlipUV = false;        // v -> 1 - v (текстура вверх ногами)
+        bool FlipWinding = false;   // модель вывернута наизнанку
+
+        // --- Материалы (применяются при создании .sagemat) -------------------
+        bool ImportMaterials = true;             // создавать .sagemat из файла
+        enum class AlphaMode { Auto = 0, Opaque = 1, Cutout = 2 };
+        AlphaMode Alpha = AlphaMode::Auto;       // Auto — как описал файл
+        float AlphaCutoff = 0.5f;                // порог для Cutout
+        enum class TwoSided { Auto = 0, On = 1, Off = 2 };
+        TwoSided DoubleSided = TwoSided::Auto;
+
+        // --- Анимация --------------------------------------------------------
+        bool ImportAnimation = true;             // скелет и клипы, если они есть
+
+        // Трогают ли настройки геометрию вообще — без этого загрузка не
+        // тратит время на пересчёты.
+        bool ChangesGeometry() const;
     };
 
     // Загружает модель ЛЮБОГО поддерживаемого формата (.obj, .gltf, .glb) и
@@ -78,4 +110,8 @@ namespace ModelLoader {
     // Применяет настройки к вершинам НА МЕСТЕ (recenter -> normalize -> scale).
     // Чистая CPU-функция без GL — ядро пайплайна, юнит-тестируется.
     void ApplyImportSettings(std::vector<Vertex>& vertices, const ImportSettings& s);
+    // Полное применение к мешу: трансформ (с нормалями и касательными), пересчёт
+    // нормалей, развёртка, обход граней. Порядок: геометрия файла -> нормали ->
+    // центрирование/нормировка/масштаб -> поворот -> сдвиг.
+    void ApplyImportSettings(sage::render::MeshData& mesh, const ImportSettings& s);
 }
