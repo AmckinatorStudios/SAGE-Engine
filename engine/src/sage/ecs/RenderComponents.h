@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -181,6 +182,36 @@ inline glm::vec3 EffectiveColor(const MeshRendererComponent& mr, const Material*
 inline glm::vec3 EffectiveEmissive(const MeshRendererComponent& mr, const Material* mat) {
     (void)mr;
     return mat ? mat->Emissive * mat->EmissiveStrength : glm::vec3(0.0f);
+}
+
+// --- Цвет для ШЕЙДЕРА: линейный -----------------------------------------------
+//
+// Цвет, выбранный в редакторе (albedo материала, Color объекта, свечение), —
+// это цвет sRGB: таким его показывает образец в инспекторе и таким его видит
+// глаз. Освещение же считается в линейном пространстве, а кадр на выходе
+// кодируется в sRGB. Пока цвет уходил в шейдер как есть, он кодировался
+// дважды: выбранный серый 0.34 рисовался светлым 0.6, коричневый — розоватым, и
+// сцена выглядела выцветшей. Перевод — ровно здесь, на пути в шейдер; хранится
+// и показывается цвет по-прежнему в sRGB.
+inline float SrgbToLinear(float c) {
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+inline glm::vec3 SrgbToLinear(const glm::vec3& c) {
+    return glm::vec3(SrgbToLinear(c.r), SrgbToLinear(c.g), SrgbToLinear(c.b));
+}
+inline float LinearToSrgb(float c) {
+    return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+}
+inline glm::vec3 LinearToSrgb(const glm::vec3& c) {
+    return glm::vec3(LinearToSrgb(c.r), LinearToSrgb(c.g), LinearToSrgb(c.b));
+}
+// Базовый цвет и свечение в том виде, в каком их ждёт шейдер.
+inline glm::vec3 ShadingAlbedo(const MeshRendererComponent& mr, const Material* mat) {
+    return SrgbToLinear(EffectiveColor(mr, mat));
+}
+inline glm::vec3 ShadingEmissive(const MeshRendererComponent& mr, const Material* mat) {
+    (void)mr;
+    return mat ? SrgbToLinear(mat->Emissive) * mat->EmissiveStrength : glm::vec3(0.0f);
 }
 
 // Непрозрачность — тоже только материала.

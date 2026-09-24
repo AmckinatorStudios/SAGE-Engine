@@ -196,6 +196,7 @@ const std::vector<std::shared_ptr<Material>>& AssetPreview::MaterialsForModel(
         // иначе листва на превью квадратная, хотя в сцене вырезана.
         if (extracted.AlphaMode == 1) material->Render.AlphaCutoff = extracted.AlphaCutoff;
         if (extracted.DoubleSided) material->Render.Cull = CullFaces::None;
+        if (extracted.AlphaMode == 1 && extracted.DoubleSided) material->Render.Translucency = 0.5f;
         ResourceManager::Instance().ResolveMaterialTextures(*material);
         materials.push_back(std::move(material));
     }
@@ -313,8 +314,11 @@ uint64_t AssetPreview::RenderModelCover(const std::string& path, int size, const
         material->Opacity = m.Opacity;
         material->Render.AlphaCutoff = m.AlphaCutoff;
         if (m.DoubleSided) material->Render.Cull = CullFaces::None;
+        if (m.AlphaCutoff > 0.0f && m.DoubleSided) material->Render.Translucency = 0.5f;
         if (!m.Pixels.empty() && m.W > 0 && m.H > 0)
-            material->AlbedoTex = std::make_shared<Texture>(m.Pixels.data(), m.W, m.H);
+            material->AlbedoTex = std::make_shared<Texture>(m.Pixels.data(), m.W, m.H,
+                                                            TextureFilter::Trilinear, true,
+                                                            /*srgb=*/true);
         materials.push_back(std::move(material));
     }
     return Render(mesh, materials, size, BoundingRadius(*mesh), key);

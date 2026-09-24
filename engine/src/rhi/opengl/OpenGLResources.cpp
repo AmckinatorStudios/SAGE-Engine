@@ -304,7 +304,12 @@ GLTexture2D::GLTexture2D(const Texture2DDesc& desc, const void* pixels) {
         GLenum internal = desc.Channels == 4 ? GL_RGBA16F : (desc.Channels == 3 ? GL_RGB16F : GL_R16F);
         glTexImage2D(GL_TEXTURE_2D, 0, internal, desc.Width, desc.Height, 0, format, GL_FLOAT, pixels);
     } else {
-        glTexImage2D(GL_TEXTURE_2D, 0, format, desc.Width, desc.Height, 0, format, GL_UNSIGNED_BYTE, pixels);
+        // sRGB-хранилище: выборка отдаёт линейный цвет, а мипмапы и
+        // билинейная фильтрация усредняют уже линейные значения (см. Srgb).
+        GLenum internal = format;
+        if (desc.Srgb && desc.Channels == 4) internal = GL_SRGB8_ALPHA8;
+        else if (desc.Srgb && desc.Channels == 3) internal = GL_SRGB8;
+        glTexImage2D(GL_TEXTURE_2D, 0, internal, desc.Width, desc.Height, 0, format, GL_UNSIGNED_BYTE, pixels);
     }
     if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 4); // вернуть по умолчанию
     if (desc.GenerateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);

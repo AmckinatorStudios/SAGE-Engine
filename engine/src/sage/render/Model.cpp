@@ -125,7 +125,7 @@ std::unique_ptr<Model> Model::LoadObjInternal(const std::string& path) {
                     sub.DiffuseTexture = it->second;
                 } else {
                     try {
-                        sub.DiffuseTexture = std::make_shared<Texture>(texPath, TextureFilter::Trilinear, true);
+                        sub.DiffuseTexture = std::make_shared<Texture>(texPath, TextureFilter::Trilinear, true, /*srgb=*/true);
                         textureCache[texPath] = sub.DiffuseTexture;
                     } catch (const std::exception& e) {
                         LOG_WARN("Model") << "Не удалось загрузить текстуру " << texPath << ": " << e.what();
@@ -267,7 +267,7 @@ void ProcessPrimitive(const tinygltf::Model& gltfModel, const tinygltf::Primitiv
         if (imageIndex < 0 || imageIndex >= (int)gltfModel.images.size()) return nullptr;
         const auto& img = gltfModel.images[imageIndex];
         if (img.image.empty()) return nullptr;
-        auto tex = std::make_shared<Texture>(img.image.data(), img.width, img.height, TextureFilter::Trilinear, true);
+        auto tex = std::make_shared<Texture>(img.image.data(), img.width, img.height, TextureFilter::Trilinear, true, /*srgb=*/true);
         textureCache[imageIndex] = tex;
         return tex;
     };

@@ -12,6 +12,7 @@
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/Material.h"
+#include "sage/ecs/RenderComponents.h"
 #include "sage/render/ModelLoader.h"
 
 #include <cstdio>
@@ -112,13 +113,16 @@ TEST(model_material_gltf_reads_factors) {
     const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial(gltf.string());
     CHECK_TRUE(m.Found);
     CHECK_EQ(m.Name, std::string("Ржавое железо"));
-    CHECK_NEAR(m.Albedo.r, 0.8f, 1e-4f);
-    CHECK_NEAR(m.Albedo.g, 0.4f, 1e-4f);
-    CHECK_NEAR(m.Albedo.b, 0.2f, 1e-4f);
+    // Цвет файла ЛИНЕЙНЫЙ (так требует glTF), материал движка хранит его в
+    // sRGB (как показывает инспектор) — сверяем то, что дойдёт до шейдера.
+    CHECK_NEAR(SrgbToLinear(m.Albedo.r), 0.8f, 1e-4f);
+    CHECK_NEAR(SrgbToLinear(m.Albedo.g), 0.4f, 1e-4f);
+    CHECK_NEAR(SrgbToLinear(m.Albedo.b), 0.2f, 1e-4f);
+    CHECK_TRUE(m.Albedo.g > 0.6f);   // и хранится он именно в sRGB, а не как в файле
     CHECK_NEAR(m.Opacity, 0.5f, 1e-4f);   // альфа baseColorFactor
     CHECK_NEAR(m.Metallic, 0.75f, 1e-4f);
     CHECK_NEAR(m.Roughness, 0.25f, 1e-4f);
-    CHECK_NEAR(m.Emissive.b, 0.3f, 1e-4f);
+    CHECK_NEAR(SrgbToLinear(m.Emissive.b), 0.3f, 1e-4f);
 }
 
 TEST(model_material_gltf_unpacks_orm_channels) {
@@ -169,7 +173,7 @@ TEST(model_material_obj_reads_mtl) {
 
     const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial((dir / "box.obj").string());
     CHECK_TRUE(m.Found);
-    CHECK_NEAR(m.Albedo.g, 0.6f, 1e-4f);
+    CHECK_NEAR(SrgbToLinear(m.Albedo.g), 0.6f, 1e-4f);   // Kd линейный, .sagemat — sRGB
     CHECK_NEAR(m.Opacity, 0.75f, 1e-4f);
     CHECK_NEAR(m.Metallic, 0.3f, 1e-4f);
     CHECK_NEAR(m.Roughness, 0.6f, 1e-4f);

@@ -60,7 +60,11 @@ glm::vec3 PatchColor(const Image& img, float x0, float y0, float x1, float y1) {
 std::unique_ptr<Scene> MakeMaterialScene(GameObject& outBall) {
     auto scene = std::make_unique<Scene>("MaterialTest");
     scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -0.7f, -0.6f));
-    scene->Lighting.Sun.Intensity = 1.6f;
+    // Экспозиция этой сцены — прежняя: проверки ниже мерят РАЗНИЦЫ (блик
+    // гладкого и матового, AO, свечение), и белый шар в насыщении их съел бы.
+    // Интенсивность 1 теперь значит «белое под солнцем белое» (π, см.
+    // PbrContrib), поэтому прежние 1.6 записаны как 1.6/π.
+    scene->Lighting.Sun.Intensity = 1.6f / 3.14159265f;
     scene->Lighting.Sun.Color = {1.0f, 1.0f, 1.0f};
     scene->Lighting.SkyColor = {0.10f, 0.11f, 0.13f};
     scene->Lighting.GroundColor = {0.05f, 0.05f, 0.05f};

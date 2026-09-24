@@ -58,6 +58,9 @@ fs::path EnsureMaterialFile(const Project& project, const fs::path& path,
     // изнанки — и починить это можно было только руками, зная, что искать.
     if (ex.DoubleSided) mat.Render.Cull = CullFaces::None;
     if (ex.AlphaMode == 1) mat.Render.AlphaCutoff = ex.AlphaCutoff;
+    // Вырез + две стороны — это карточка листа, травы, лепестка: тонкая
+    // поверхность, сквозь которую светит солнце (см. MaterialRender::Translucency).
+    if (ex.AlphaMode == 1 && ex.DoubleSided) mat.Render.Translucency = 0.5f;
     mat.Render.UVScaleX = ex.UVScale.x;
     mat.Render.UVScaleY = ex.UVScale.y;
     // Пути карт — относительно проекта: материал переживёт сборку игры и переезд

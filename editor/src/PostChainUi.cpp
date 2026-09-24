@@ -9,6 +9,7 @@
 #include "EditorHost.h"
 #include "EditorTheme.h"
 #include "Localization.h"
+#include "ui/ColorPicker.h"
 
 namespace sage::editor {
 
@@ -79,7 +80,7 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
     }
     case PostParamType::Color: {
         float rgba[4] = {value->V[0], value->V[1], value->V[2], value->V[3]};
-        if (ImGui::ColorEdit4(label, rgba)) {
+        if (Sage::UI::ColorField4(label, rgba)) {
             for (int c = 0; c < 4; ++c) value->V[c] = rgba[c];
             changed = true;
         }

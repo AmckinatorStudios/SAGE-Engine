@@ -45,6 +45,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "../Localization.h"
+#include "ui/ColorPicker.h"
 
 namespace fs = std::filesystem;
 
@@ -193,8 +194,11 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         ImGui::Spacing();
     }
 
-    ImGui::ColorEdit3(T("Albedo"), &material->Albedo.x);
-    ImGui::ColorEdit3(T("Emissive"), &material->Emissive.x);
+    // Базовый цвет — ВМЕСТЕ с непрозрачностью: у материала это два поля файла
+    // (Albedo и Opacity), но смотрят на них как на один цвет «какой он и
+    // насколько просвечивает». Ползунок «Непрозрачность» ниже правит то же число.
+    Sage::UI::ColorFieldAlpha(T("Albedo"), &material->Albedo.x, &material->Opacity);
+    Sage::UI::ColorField3(T("Emissive"), &material->Emissive.x);
     // Сила свечения отдельным ползунком, и его предел заметно больше единицы:
     // bloom срабатывает от яркости ВЫШЕ 1 (EngineConfig::BloomThreshold), а цвет
     // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто

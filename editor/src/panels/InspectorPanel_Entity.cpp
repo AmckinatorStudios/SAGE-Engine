@@ -50,6 +50,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "../Localization.h"
+#include "ui/ColorPicker.h"
 
 namespace fs = std::filesystem;
 
@@ -117,7 +118,7 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
     // внешность ЭТОГО источника, а не отдельное светило.
     LightingEnvironment& env = scene.Lighting;
     ImGui::BeginDisabled(!env.Skybox.Enabled || !env.Skybox.Celestials);
-    ImGui::ColorEdit3(T("Disc Colour"), &env.Skybox.SunColor.x); host.TrackLastImGuiItem();
+    Sage::UI::ColorField3(T("Disc Colour"), &env.Skybox.SunColor.x); host.TrackLastImGuiItem();
     ImGui::SliderFloat(T("Disc Size"), &env.Skybox.SunSize, 0.005f, 0.2f, "%.3f");
     host.TrackLastImGuiItem();
     ImGui::EndDisabled();
@@ -211,7 +212,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // то, чего у неё нет и не будет, — и каждый, кто это попробует, решит, что
     // настройка не работает.
     if (FolderComponent* folder = reg.try_get<FolderComponent>(obj.Entity())) {
-        if (ImGui::ColorEdit3(T("Colour"), &folder->Color.x, ImGuiColorEditFlags_NoInputs))
+        if (Sage::UI::ColorField3(T("Colour"), &folder->Color.x, Sage::UI::ColorField_Compact))
             host.PushUndoSnapshot();
         EditorTheme::Hint(T("Mark in the list. A folder is for sorting only: it does not move its "
                             "contents and is not drawn."));
@@ -341,7 +342,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
                 light->Kind = (LightComponent::Type)kind;
             }
-            ImGui::ColorEdit3(T("Colour"), &light->Color.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField3(T("Colour"), &light->Color.x); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Intensity"), &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
             // Дальность и углы конуса у направленного света не значат ничего:
             // он светит из бесконечности. Показывать поля, которые ни на что не
@@ -1038,8 +1039,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloatRange2("Lifetime", &cfg.LifetimeMin, &cfg.LifetimeMax, 0.02f, 0.02f, 20.0f); host.TrackLastImGuiItem();
             ImGui::DragFloatRange2("Start Size", &cfg.StartSizeMin, &cfg.StartSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
             ImGui::DragFloatRange2("End Size", &cfg.EndSizeMin, &cfg.EndSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
-            ImGui::ColorEdit4(T("Start Color"), &cfg.StartColor.x); host.TrackLastImGuiItem();
-            ImGui::ColorEdit4(T("End Color"), &cfg.EndColor.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField4(T("Start Color"), &cfg.StartColor.x); host.TrackLastImGuiItem();
+            Sage::UI::ColorField4(T("End Color"), &cfg.EndColor.x); host.TrackLastImGuiItem();
             ImGui::DragFloat3(T("Dir Min"), &cfg.DirectionMin.x, 0.02f); host.TrackLastImGuiItem();
             ImGui::DragFloat3(T("Dir Max"), &cfg.DirectionMax.x, 0.02f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Spin"), &cfg.AngularVelocityMax, 0.05f, 0.0f, 20.0f); host.TrackLastImGuiItem();

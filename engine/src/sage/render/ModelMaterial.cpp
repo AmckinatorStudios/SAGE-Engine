@@ -608,6 +608,20 @@ ExtractedMaterialSet ExtractMaterials(const std::string& ref, const std::string&
         }
     }
 
+    // ЦВЕТ ФАЙЛА — ЛИНЕЙНЫЙ, ЦВЕТ .sagemat — sRGB. glTF требует линейный
+    // baseColorFactor, Blender пишет в .mtl и FBX тоже линейные значения своего
+    // материала, а материал движка хранит цвет так, как его показывает
+    // инспектор, и переводит в линейный на пути в шейдер (ShadingAlbedo в
+    // ecs/RenderComponents.h). Без перевода здесь цвет из файла светлел бы.
+    for (ExtractedMaterial& m : out.Materials) {
+        auto toSrgb = [](float c) {
+            c = std::clamp(c, 0.0f, 1.0f);
+            return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+        };
+        m.Albedo = glm::vec3(toSrgb(m.Albedo.r), toSrgb(m.Albedo.g), toSrgb(m.Albedo.b));
+        m.Emissive = glm::vec3(toSrgb(m.Emissive.r), toSrgb(m.Emissive.g), toSrgb(m.Emissive.b));
+    }
+
     // НАСТРОЙКИ ИМПОРТА МОДЕЛИ главнее того, что описал файл (ModelLoader.h):
     // экспорт мог не донести режим прозрачности, а человек, выбравший «вырез»
     // в окне импорта, обязан получить вырез везде — в сцене, на обложке и в

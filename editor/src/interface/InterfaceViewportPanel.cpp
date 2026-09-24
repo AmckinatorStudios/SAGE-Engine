@@ -24,6 +24,7 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "ui/ColorPicker.h"
 
 namespace {
 
@@ -142,8 +143,7 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     if (Sage::UI::MenuScope backdropMenu; ImGui::BeginPopup("BackdropColor###BackdropColor")) {
         ImGui::TextDisabled("%s", T("Backdrop color"));
         ImGui::Separator();
-        ImGui::ColorPicker3("##backdrop_color", &tools.BackdropColor.x,
-                            ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview);
+        Sage::UI::ColorPickerInline("##backdrop_color", &tools.BackdropColor.x);
         if (ImGui::IsItemDeactivatedAfterEdit()) save();
         // Готовые крайности: тёмный интерфейс смотрят на светлом, светлый — на
         // тёмном, и чаще всего нужен именно такой щелчок, а не подбор оттенка.

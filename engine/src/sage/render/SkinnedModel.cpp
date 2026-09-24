@@ -412,6 +412,10 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
         shader.SetFloat("uMetallic", m.Metallic);
         shader.SetFloat("uRoughness", m.Roughness);
         shader.SetFloat("uOpacity", m.Opacity);
+        // Просвечивание — у выреза с двумя сторонами (пряди волос, бахрома,
+        // листва на скелете): тот же признак тонкой карточки, что у импорта.
+        shader.SetFloat("uTranslucency",
+                        m.Mode == SkinnedMaterial::Alpha::Mask && m.DoubleSided ? 0.5f : 0.0f);
         shader.SetFloat("uAlphaCutoff", m.Mode == SkinnedMaterial::Alpha::Mask ? m.AlphaCutoff
                                                                                : 0.0f);
         shader.SetVec3("uEmissive", m.Emissive);
@@ -1430,17 +1434,33 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     model->m_morphNames = std::move(data.MorphNames);
     model->m_morphDefaults = std::move(data.MorphDefaults);
 
-    std::vector<std::shared_ptr<Texture>> textures;
-    textures.reserve(data.Images.size());
-    for (const ModelImage& img : data.Images) {
+    // ЦВЕТ И ДАННЫЕ — разными текстурами. Картинка, которая служит альбедо или
+    // свечением, хранится в sRGB и на выборке отдаёт линейный цвет (см.
+    // rhi::Texture2DDesc::Srgb); карты нормалей и ORM — как есть. Одна и та
+    // же картинка в обеих ролях (бывает у палитр) получает две текстуры.
+    std::vector<bool> usedAsColour(data.Images.size(), false), usedAsData(data.Images.size(), false);
+    for (const ModelSubMeshData& src : data.SubMeshes) {
+        const ModelSubMeshMaterial& m = src.Material;
+        for (int c : {m.Albedo, m.EmissiveMap})
+            if (c >= 0 && c < (int)data.Images.size()) usedAsColour[(size_t)c] = true;
+        for (int d : {m.Normal, m.MetallicMap, m.RoughnessMap, m.AOMap})
+            if (d >= 0 && d < (int)data.Images.size()) usedAsData[(size_t)d] = true;
+    }
+    auto makeTexture = [](const ModelImage& img, bool srgb) {
         // Палитра — тот же атлас: мип-уровни усредняют её целиком, а у
         // палитровой модели 90% текстуры пусто, и на дальних уровнях от цвета
         // не остаётся ничего. Мелкие текстуры (палитры, пиксель-арт) берём
         // ближайшим соседом и без мипов; крупные — как раньше.
         const bool palette = img.Width <= 128 && img.Height <= 128;
-        textures.push_back(std::make_shared<Texture>(
-            img.Pixels.data(), img.Width, img.Height,
-            palette ? TextureFilter::Nearest : TextureFilter::Trilinear, !palette));
+        return std::make_shared<Texture>(img.Pixels.data(), img.Width, img.Height,
+                                         palette ? TextureFilter::Nearest : TextureFilter::Trilinear,
+                                         !palette, srgb);
+    };
+    std::vector<std::shared_ptr<Texture>> textures(data.Images.size());       // данные
+    std::vector<std::shared_ptr<Texture>> colourTextures(data.Images.size()); // цвет (sRGB)
+    for (size_t i = 0; i < data.Images.size(); ++i) {
+        if (usedAsColour[i]) colourTextures[i] = makeTexture(data.Images[i], true);
+        if (usedAsData[i] || !usedAsColour[i]) textures[i] = makeTexture(data.Images[i], false);
     }
 
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
@@ -1455,13 +1475,17 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
         auto pick = [&](int index) -> std::shared_ptr<Texture> {
             return index >= 0 && index < (int)textures.size() ? textures[(size_t)index] : nullptr;
         };
+        auto pickColour = [&](int index) -> std::shared_ptr<Texture> {
+            return index >= 0 && index < (int)colourTextures.size() ? colourTextures[(size_t)index]
+                                                                    : nullptr;
+        };
         sub.Material.Name = m.Name;
-        sub.Material.Albedo = pick(m.Albedo);
+        sub.Material.Albedo = pickColour(m.Albedo);
         sub.Material.Normal = pick(m.Normal);
         sub.Material.MetallicMap = pick(m.MetallicMap);
         sub.Material.RoughnessMap = pick(m.RoughnessMap);
         sub.Material.AOMap = pick(m.AOMap);
-        sub.Material.EmissiveMap = pick(m.EmissiveMap);
+        sub.Material.EmissiveMap = pickColour(m.EmissiveMap);
         auto mask = [](int channel) {
             glm::vec4 v(0.0f);
             v[channel >= 0 && channel < 4 ? channel : 0] = 1.0f;

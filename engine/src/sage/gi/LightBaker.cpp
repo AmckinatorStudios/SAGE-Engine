@@ -138,7 +138,10 @@ glm::vec3 DirectLight(const BVH& bvh, const LightingEnvironment& env,
         if (bvh.Occluded(orig, L, dist - kRayEps)) continue;
         sum += l.Color * l.Intensity * att * cone * cosT;
     }
-    return sum;
+    // Освещённость — π·интенсивность, как в кадре (см. PbrContrib в
+    // PbrShader.h): иначе отскок света был бы в π раз тусклее прямого, и
+    // запечённая сцена темнела бы относительно незапечённой.
+    return sum * glm::pi<float>();
 }
 
 // Радианс, ПРИХОДЯЩИЙ вдоль луча (не считая прямого света в точке старта):

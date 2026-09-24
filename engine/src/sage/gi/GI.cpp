@@ -117,7 +117,8 @@ BakeInput CollectBakeInput(Scene& scene, const GISettings& settings) {
         StaticItem item;
         item.EntityId = c.Id;
         item.World = scene.WorldMatrix(c.Entity);
-        item.Albedo = EffectiveColor(*c.MR);
+        // Отскок считается в линейном свете, как и кадр (см. ShadingAlbedo).
+        item.Albedo = SrgbToLinear(EffectiveColor(*c.MR));
         item.TexelScale = c.GIC->TexelScale > 0.0f ? c.GIC->TexelScale : 1.0f;
         item.Lightmapped = c.GIC->Lightmapped;
         item.Mesh = ResolveMeshData(c.MR->Ref);
