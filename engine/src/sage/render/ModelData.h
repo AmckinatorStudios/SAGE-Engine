@@ -68,6 +68,7 @@ struct ModelSubMeshMaterial {
     int AlphaMode = 0;       // 0 Opaque, 1 Mask, 2 Blend (см. SkinnedMaterial::Alpha)
     float AlphaCutoff = 0.5f;
     bool DoubleSided = false;
+    bool Unlit = false;      // KHR_materials_unlit: цвет как есть, без света
 };
 
 struct ModelSubMeshData {

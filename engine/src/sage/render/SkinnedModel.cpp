@@ -6,6 +6,8 @@
 #include "sage/assets/import/GltfAccessor.h"
 #include "sage/assets/import/GltfFile.h"
 #include "sage/assets/import/SkinInfluences.h"
+#include "sage/render/ModelLoader.h"
+#include <limits>
 
 #include "SkinnedModel.h"
 
@@ -337,12 +339,13 @@ void UploadMorphs(const Shader& shader, const SkinnedSubMesh& sub,
 
 } // namespace
 
-void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj,
+void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const std::vector<glm::mat4>& bones,
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections,
                         const std::vector<float>* morphWeights, int shadingMode) const {
+    const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
     Shader& shader = SkinShader();
     shader.Use();
     shader.SetMat4("uModel", model);
@@ -418,6 +421,7 @@ void SkinnedModel::Draw(const glm::mat4& model, const glm::mat4& view, const glm
                         m.Mode == SkinnedMaterial::Alpha::Mask && m.DoubleSided ? 0.5f : 0.0f);
         shader.SetFloat("uAlphaCutoff", m.Mode == SkinnedMaterial::Alpha::Mask ? m.AlphaCutoff
                                                                                : 0.0f);
+        shader.SetInt("uUnlit", m.Unlit ? 1 : 0);
         shader.SetVec3("uEmissive", m.Emissive);
         shader.SetInt("uHasAlbedo", m.Albedo ? 1 : 0);
         shader.SetInt("uHasNormal", m.Normal ? 1 : 0);
@@ -490,9 +494,10 @@ int SkinnedModel::BorrowClipsFrom(const SkinnedModel& source) {
     return added;
 }
 
-void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatrix,
+void SkinnedModel::DrawDepth(const glm::mat4& entityModel, const glm::mat4& lightMatrix,
                              const std::vector<glm::mat4>& bones,
                              const std::vector<float>* morphWeights) const {
+    const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
     Shader& shader = SkinDepthShader();
     shader.Use();
     shader.SetMat4("uLightSpace", lightMatrix);
@@ -523,9 +528,10 @@ void SkinnedModel::DrawDepth(const glm::mat4& model, const glm::mat4& lightMatri
     device.SetCullMode(sage::rhi::CullMode::Back);
 }
 
-void SkinnedModel::DrawSilhouette(const glm::mat4& model, const glm::mat4& viewProj,
+void SkinnedModel::DrawSilhouette(const glm::mat4& entityModel, const glm::mat4& viewProj,
                                   const std::vector<glm::mat4>& bones,
                                   const std::vector<float>* morphWeights) const {
+    const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
     Shader& shader = SkinSilhouetteShader();
     shader.Use();
     // uLightSpace — имя из общего с depth-проходом вершинного шейдера; здесь в
@@ -1096,6 +1102,7 @@ static ModelData ParseGltf(const std::string& path) {
         else if (m.alphaMode == "BLEND") out.AlphaMode = 2;
         out.AlphaCutoff = (float)m.alphaCutoff;
         out.DoubleSided = m.doubleSided;
+        out.Unlit = m.extensions.count("KHR_materials_unlit") > 0;
     }
 
     // Ширина текстуры дельт. 1024 — заведомо в пределах любого GL 3.3
@@ -1504,6 +1511,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
                                                : SkinnedMaterial::Alpha::Opaque;
         sub.Material.AlphaCutoff = m.AlphaCutoff;
         sub.Material.DoubleSided = m.DoubleSided;
+        sub.Material.Unlit = m.Unlit;
 
         if (src.MorphCount > 0) {
             // Nearest и без мипов: выборка идёт texelFetch по точному индексу
@@ -1556,6 +1564,28 @@ ModelData ParseSkinnedModelFile(const std::string& path) {
     return data;
 }
 
+namespace {
+
+// Настройки импорта у скелетной модели — матрицей поверх её вершин, а не
+// правкой самих вершин: кости и клипы остались бы в прежнем размере, и
+// персонаж разъехался бы на первом же кадре анимации. Границы — по вершинам
+// привязки: ими же решается и «модель в сантиметрах» (см. ModelLoader.h).
+std::unique_ptr<SkinnedModel> WithImportSettings(std::unique_ptr<SkinnedModel> model,
+                                                 const ModelData& data, const std::string& path) {
+    if (!model) return model;
+    glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
+    for (const ModelSubMeshData& sub : data.SubMeshes)
+        for (const SkinnedVertex& v : sub.Vertices) {
+            lo = glm::min(lo, v.Position);
+            hi = glm::max(hi, v.Position);
+        }
+    const ::ModelLoader::ImportSettings s = ::ModelLoader::ResolveImportSettings(path, lo, hi);
+    model->SetImportTransform(::ModelLoader::ImportMatrix(s, lo, hi));
+    return model;
+}
+
+} // namespace
+
 std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     // Кэш пробуется ПЕРВЫМ. Промах, устаревший или битый кэш — не ошибка:
     // молча разбираем исходник и перезаписываем кэш. Неверный кэш никогда не
@@ -1565,7 +1595,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
         LOG_INFO("Anim") << "SkinnedModel из кэша: " << path << " (костей "
                          << data.Skeleton.Count() << ", submesh " << data.SubMeshes.size()
                          << ", клипов " << data.Clips.size() << ")";
-        return BuildFromData(data);
+        return WithImportSettings(BuildFromData(data), data, path);
     }
 
     // ФОРМАТ ВЫБИРАЕТ ПУТЬ РАЗБОРА. glTF читает tinygltf, FBX — свой разбор
@@ -1577,7 +1607,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::Load(const std::string& path) {
     // движку не подходит».
     data = ParseSkinnedModelFile(path);
     sage::assets::WriteModelCache(path, data);
-    return BuildFromData(data);
+    return WithImportSettings(BuildFromData(data), data, path);
 }
 
 } // namespace sage::render

@@ -721,3 +721,63 @@ TEST(model_obj_concave_faces_are_triangulated_inside) {
     // Дротик 9.5, пятиугольник 4*4 - (вырез 0.5*4*3) = 10.
     CHECK_NEAR(area, 9.5f + 10.0f, 1e-3f);
 }
+
+// --- glTF: старое расширение specular-glossiness ------------------------------
+//
+// Выгрузки Sketchfab и конвертеры из FBX до сих пор пишут материал только в
+// KHR_materials_pbrSpecularGlossiness. Не читая его, движок получал материал
+// glTF по умолчанию — белый металл без текстур: модель целиком белая.
+TEST(model_material_gltf_specular_glossiness_becomes_colour_and_texture) {
+    const fs::path dir = TempDir("sage_test_modelmat_specgloss");
+    std::string json = kGltfTemplate;
+    const size_t at = json.find("\"materials\"");
+    json = json.substr(0, at) + R"("extensionsUsed": ["KHR_materials_pbrSpecularGlossiness"],
+  "materials": [{
+    "name": "Fur",
+    "extensions": {"KHR_materials_pbrSpecularGlossiness": {
+      "diffuseFactor": [1.0, 0.6, 0.0, 1.0],
+      "diffuseTexture": {"index": 0},
+      "glossinessFactor": 0.25,
+      "specularFactor": [1.0, 1.0, 1.0]
+    }}
+  }]
+})";
+    WriteText(dir / "fur.gltf", json);
+    WriteGeomBin(dir / "geom.bin");
+    WritePixelPng(dir / "base.png", 200, 150, 40);
+    WritePixelPng(dir / "orm.png", 255, 128, 0);
+
+    const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial((dir / "fur.gltf").string());
+    CHECK_TRUE(m.Found);
+    CHECK_NEAR(SrgbToLinear(m.Albedo.g), 0.6f, 1e-3f);   // цвет из diffuseFactor
+    CHECK_NEAR(m.Metallic, 0.0f, 1e-4f);                  // не металл по умолчанию
+    CHECK_NEAR(m.Roughness, 0.75f, 1e-3f);                // 1 - блеск
+    CHECK_TRUE(m.AlbedoMap.find("base.png") != std::string::npos);
+}
+
+// --- glTF: KHR_materials_unlit — мультяшная заливка без света ----------------
+TEST(model_material_gltf_unlit_reaches_the_material) {
+    const fs::path dir = TempDir("sage_test_modelmat_unlit");
+    std::string json = kGltfTemplate;
+    const size_t at = json.find("\"materials\"");
+    json = json.substr(0, at) + R"("extensionsUsed": ["KHR_materials_unlit"],
+  "materials": [{
+    "name": "Toon",
+    "extensions": {"KHR_materials_unlit": {}},
+    "pbrMetallicRoughness": {"baseColorFactor": [1, 0.5, 0, 1], "baseColorTexture": {"index": 0}}
+  }]
+})";
+    WriteText(dir / "toon.gltf", json);
+    WriteGeomBin(dir / "geom.bin");
+    WritePixelPng(dir / "base.png", 200, 150, 40);
+    WritePixelPng(dir / "orm.png", 255, 128, 0);
+    const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial((dir / "toon.gltf").string());
+    CHECK_TRUE(m.Found);
+    CHECK_TRUE(m.Unlit);
+
+    // И переживает запись в .sagemat.
+    Material mat;
+    mat.Render.Unlit = true;
+    mat.SaveToFile((dir / "toon.sagemat").string());
+    CHECK_TRUE(Material::LoadFromFile((dir / "toon.sagemat").string()).Render.Unlit);
+}

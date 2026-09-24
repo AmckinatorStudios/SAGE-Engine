@@ -5,6 +5,7 @@
 
 #include "sage/assets/import/GltfFile.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -137,6 +138,49 @@ bool RepackGlb(const std::string& data, std::string& out, std::string& err, std:
     return true;
 }
 
+int ConvertSpecularGlossiness(tinygltf::Model& model) {
+    int converted = 0;
+    for (tinygltf::Material& m : model.materials) {
+        auto it = m.extensions.find("KHR_materials_pbrSpecularGlossiness");
+        if (it == m.extensions.end() || !it->second.IsObject()) continue;
+        const tinygltf::Value& sg = it->second;
+        tinygltf::PbrMetallicRoughness& pbr = m.pbrMetallicRoughness;
+
+        // Цвет: diffuse — ровно то, что в металл-шероховатости называется
+        // базовым цветом у неметалла. По умолчанию — белый, как в спецификации.
+        pbr.baseColorFactor = {1.0, 1.0, 1.0, 1.0};
+        if (sg.Has("diffuseFactor") && sg.Get("diffuseFactor").IsArray()) {
+            const tinygltf::Value& f = sg.Get("diffuseFactor");
+            for (int i = 0; i < 4 && i < (int)f.ArrayLen(); ++i)
+                if (f.Get(i).IsNumber()) pbr.baseColorFactor[i] = f.Get(i).GetNumberAsDouble();
+        }
+        pbr.baseColorTexture = tinygltf::TextureInfo();
+        if (sg.Has("diffuseTexture") && sg.Get("diffuseTexture").IsObject()) {
+            const tinygltf::Value& t = sg.Get("diffuseTexture");
+            if (t.Has("index") && t.Get("index").IsNumber())
+                pbr.baseColorTexture.index = (int)t.Get("index").GetNumberAsDouble();
+            if (t.Has("texCoord") && t.Get("texCoord").IsNumber())
+                pbr.baseColorTexture.texCoord = (int)t.Get("texCoord").GetNumberAsDouble();
+        }
+        // Блеск — обратная шероховатость. Металличности у этой модели
+        // материала нет вовсе: блик задаётся цветом отражения, и для
+        // окрашенных поверхностей (а таких почти все) это диэлектрик. Без
+        // явного нуля осталась бы металличность 1 по умолчанию glTF — модель
+        // выходила бы тёмным зеркалом.
+        double gloss = 1.0;
+        if (sg.Has("glossinessFactor") && sg.Get("glossinessFactor").IsNumber())
+            gloss = sg.Get("glossinessFactor").GetNumberAsDouble();
+        pbr.roughnessFactor = std::clamp(1.0 - gloss, 0.0, 1.0);
+        pbr.metallicFactor = 0.0;
+        // Карта блеска (альфа specularGlossinessTexture) лежит не в том канале,
+        // которого ждёт металл-шероховатость (зелёный, и наоборот по смыслу),
+        // поэтому она не подставляется: шероховатость берётся числом.
+        pbr.metallicRoughnessTexture = tinygltf::TextureInfo();
+        ++converted;
+    }
+    return converted;
+}
+
 bool LoadGltfFile(tinygltf::TinyGLTF& loader, tinygltf::Model& model, const std::string& path,
                   std::string& err, std::string& warn) {
     std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
@@ -170,6 +214,10 @@ bool LoadGltfFile(tinygltf::TinyGLTF& loader, tinygltf::Model& model, const std:
 
     if (!tinyWarn.empty()) warn += tinyWarn;
     if (!ok) err += tinyErr.empty() ? std::string("разбор glTF не удался") : tinyErr;
+    // Здесь, в единственной двери, — чтобы все четыре читателя материалов
+    // (статика, скелет, извлечение .sagemat, импорт) увидели обычный
+    // металл-шероховатость и не знали о старом расширении вовсе.
+    if (ok) ConvertSpecularGlossiness(model);
     (void)ec;
     return ok;
 }

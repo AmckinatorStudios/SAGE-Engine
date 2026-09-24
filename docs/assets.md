@@ -338,6 +338,29 @@ glTF переносит только то, что сводится к Principled
 `model_material_obj_texture_without_kd_is_not_darkened` в
 `tests/test_modelmaterial.cpp`.
 
+### Модели со Sketchfab: белые, огромные, «мультяшные»
+
+| что было | причина | где исправлено |
+|---|---|---|
+| модель целиком белая, без текстур (FNaF Spring Bonnie, Low Poly Environment) | материал только в `KHR_materials_pbrSpecularGlossiness`, движок его не читал и брал белый металл по умолчанию | `GltfFile.cpp`: `ConvertSpecularGlossiness` — diffuse → базовый цвет и карта, блеск → 1 − шероховатость, металличность 0; одна дверь для всех четырёх читателей |
+| персонаж высотой 260 м (FNaF 3 William Afton) | файл в сантиметрах без масштаба в узлах | `ImportSettings::AutoUnits` («Сантиметры в метры»): модель со скелетом выше 50 м уменьшается в 100 раз; статика не трогается |
+| масштаб из окна импорта не действовал на персонажей | настройки запекались только в вершины статики | `SkinnedModel::SetImportTransform` — та же матрица (`ModelLoader::ImportMatrix`) между сущностью и вершинами; кости и клипы не трогаются |
+| тун-модель в пятнах света и тени | `KHR_materials_unlit` не читался | `MaterialRender::Unlit` («Без освещения»): цвет как есть; импорт ставит сам |
+
+У Toony William Afton три персонажа стоят В ОДНОЙ ТОЧКЕ — так собран сам файл
+(позы для витрины), это не ошибка загрузки: каждый персонаж отдельно выглядит
+правильно.
+
+Материалы, созданные до исправления (белые `.sagemat` рядом с моделью), сами
+не перезаписываются: «Пересоздать существующие материалы» в окне импорта.
+Кэш скелетных моделей сменил версию (8) и пересоберётся сам.
+
+Проверки: `model_material_gltf_specular_glossiness_becomes_colour_and_texture`,
+`model_material_gltf_unlit_reaches_the_material`,
+`ModelImport_character_in_centimetres_is_scaled_to_metres`,
+`ModelImport_matrix_matches_vertex_path`, кадровая «без освещения — своего
+цвета и в темноте».
+
 ## Окно настроек импорта модели
 
 Модель без `.sageimport` при первом попадании в работу — внесении в проект

@@ -390,7 +390,10 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             if (m_skipPlanarReflectors && mat && mat->Render.PlanarReflectivity > 0.0f) continue;
 
             const float opacity = EffectiveOpacity(mr, mat);
-            const bool textured = mat && mat->HasMaps();
+            // Без освещения — тоже текстурный путь: у инстансного
+            // нетекстурного шейдера нет ветки «цвет как есть», а материал
+            // обводки мультяшной модели — именно такой, одним цветом.
+            const bool textured = mat && (mat->HasMaps() || mat->Render.Unlit);
             Shader* custom = (mat && mat->ShaderPtr) ? mat->ShaderPtr.get() : nullptr;
 
             m_stats.Triangles += (long long)(subs[si].IndexCount / 3);
@@ -636,6 +639,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             tex.SetFloat("uOpacity", it.Opacity);
             tex.SetFloat("uAlphaCutoff", it.Mat->Render.AlphaCutoff);
             tex.SetFloat("uTranslucency", it.Mat->Render.Translucency);
+            tex.SetInt("uUnlit", it.Mat->Render.Unlit ? 1 : 0);
             it.Mesh_->DrawSubmesh(it.Submesh);
             ++m_stats.Batches;
         }
@@ -750,6 +754,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetFloat("uOpacity", head.Inst.Alpha);
                 t.SetFloat("uAlphaCutoff", head.Mat->Render.AlphaCutoff);
                 t.SetFloat("uTranslucency", head.Mat->Render.Translucency);
+                t.SetInt("uUnlit", head.Mat->Render.Unlit ? 1 : 0);
                 t.SetInt("uHasAlbedo", head.Mat->AlbedoTex ? 1 : 0);
                 t.SetInt("uHasNormal", head.Mat->NormalTex ? 1 : 0);
                 t.SetInt("uHasMetallic", head.Mat->MetallicTex ? 1 : 0);

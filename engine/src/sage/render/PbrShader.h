@@ -880,6 +880,8 @@ uniform float uAlphaCutoff;
 // тонкую поверхность. Ноль — обычная поверхность. Программа общая на все
 // материалы кадра, поэтому ставится ВСЕГДА, в том числе нулём.
 uniform float uTranslucency;
+// Материал без освещения (MaterialRender::Unlit): цвет как есть.
+uniform bool uUnlit;
 uniform vec3 uEmissive;
 uniform sampler2D uEmissiveMap;
 uniform bool uHasEmissive;
@@ -892,6 +894,14 @@ void main() {
     // должен стоить ни выборок карт, ни освещения.
     if (uAlphaCutoff > 0.0 && base.a < uAlphaCutoff) discard;
     vec3 albedo = base.rgb;
+    // БЕЗ ОСВЕЩЕНИЯ — раньше всего остального: ни карты нормалей, ни тени,
+    // ни туман мультяшной заливке не нужны, и платить за них незачем.
+    if (uUnlit && uShadingMode == 0) {
+        vec3 glow = uEmissive;
+        if (uHasEmissive) glow *= texture(uEmissiveMap, uv).rgb;
+        FragColor = vec4(albedo + glow, uOpacity);
+        return;
+    }
 
     vec3 N = normalize(Normal);
     if (uHasNormal) {

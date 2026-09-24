@@ -61,6 +61,10 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          "0 — обычная поверхность. Листва и трава — 0.4–0.7: лист, повёрнутый\n"
          "к солнцу изнанкой, светится, а не чернеет, и крона выглядит сочной.\n"
          "Бумага, ткань, лепестки — поменьше."},
+        {"unlit", "Без освещения", MaterialRenderField::Kind::Bool,
+         MaterialRenderField::Group::Render, &MaterialRender::Unlit, nullptr, 0.0f, 1.0f,
+         "Цвет как есть, без света и теней: мультяшная заливка, экраны,\n"
+         "подсказки в мире. Модели в стиле «тун» приносят его из файла."},
         {"tilingMode", "Режим повтора", MaterialRenderField::Kind::Enum,
          MaterialRenderField::Group::Textures,
          nullptr, nullptr, 0.0f, 0.0f,

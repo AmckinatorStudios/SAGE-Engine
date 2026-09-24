@@ -1924,6 +1924,8 @@
     "Hex colour: #RRGGBB or #RRGGBBAA. Ctrl+C and Ctrl+V copy and paste it.": "Цвет в hex: #RRGGBB или #RRGGBBAA. Ctrl+C и Ctrl+V копируют и вставляют его.",
     "RGB": "RGB",
     "HSV": "HSV",
-    "Click to pick a colour. Drag it onto another colour to copy it.": "Щелчок — выбрать цвет. Перетащите на другой цвет, чтобы скопировать."
+    "Click to pick a colour. Drag it onto another colour to copy it.": "Щелчок — выбрать цвет. Перетащите на другой цвет, чтобы скопировать.",
+    "Centimetres to metres (characters)": "Сантиметры в метры (персонажи)",
+    "A character taller than 50 m was exported in centimetres:\nit is scaled down 100 times. Static models are not touched.": "Персонаж выше 50 м выгружен в сантиметрах:\nон уменьшается в 100 раз. Статичные модели не трогаются."
   }
 }

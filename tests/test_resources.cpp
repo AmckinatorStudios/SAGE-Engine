@@ -162,6 +162,43 @@ TEST(ModelImport_scale_and_recenter) {
     CHECK_NEAR(verts[1].Position.x, 3.0f, 1e-4);
 }
 
+// Персонаж в сантиметрах: 180 «метров» роста при скелете — это 1.8 м.
+// Статику (ландшафт в сотни метров) правило не трогает.
+TEST(ModelImport_character_in_centimetres_is_scaled_to_metres) {
+    ModelLoader::ImportSettings s;
+    CHECK_NEAR(ModelLoader::AutoUnitScale(s, /*hasSkeleton=*/true, 180.0f), 0.01f, 1e-6f);
+    CHECK_NEAR(ModelLoader::AutoUnitScale(s, /*hasSkeleton=*/true, 1.8f), 1.0f, 1e-6f);
+    CHECK_NEAR(ModelLoader::AutoUnitScale(s, /*hasSkeleton=*/false, 500.0f), 1.0f, 1e-6f);
+    s.AutoUnits = false;   // выключено в окне импорта — как есть
+    CHECK_NEAR(ModelLoader::AutoUnitScale(s, true, 180.0f), 1.0f, 1e-6f);
+}
+
+// Матрица импорта скелетной модели делает с точкой ровно то же, что
+// ApplyImportSettings с вершиной статической: иначе один и тот же файл в
+// сцене и в выборе мышью был бы разного размера и места.
+TEST(ModelImport_matrix_matches_vertex_path) {
+    ModelLoader::ImportSettings s;
+    s.Recenter = true;
+    s.Scale = 2.0f;
+    s.Rotation = {0.0f, 90.0f, 0.0f};
+    s.Offset = {1.0f, 0.0f, 0.0f};
+    sage::render::MeshData mesh;
+    Vertex a, b;
+    a.Position = {0.0f, 0.0f, 0.0f};
+    b.Position = {2.0f, 4.0f, 0.0f};
+    mesh.Vertices = {a, b};
+    mesh.Indices = {0, 1, 0};
+    const glm::mat4 m = ModelLoader::ImportMatrix(s, glm::vec3(0.0f), glm::vec3(2.0f, 4.0f, 0.0f));
+    ModelLoader::ApplyImportSettings(mesh, s);
+    for (int i = 0; i < 2; ++i) {
+        const glm::vec3 src = i == 0 ? a.Position : b.Position;
+        const glm::vec3 viaMatrix = glm::vec3(m * glm::vec4(src, 1.0f));
+        CHECK_NEAR(viaMatrix.x, mesh.Vertices[i].Position.x, 1e-4f);
+        CHECK_NEAR(viaMatrix.y, mesh.Vertices[i].Position.y, 1e-4f);
+        CHECK_NEAR(viaMatrix.z, mesh.Vertices[i].Position.z, 1e-4f);
+    }
+}
+
 TEST(ModelImport_normalize_size) {
     std::vector<Vertex> verts(2);
     verts[0].Position = {0.0f, 0.0f, 0.0f};

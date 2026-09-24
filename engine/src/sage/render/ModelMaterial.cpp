@@ -326,6 +326,9 @@ void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
 
     // --- ПОВЕДЕНИЕ МАТЕРИАЛА ------------------------------------------------
     out.DoubleSided = m.doubleSided;
+    // KHR_materials_unlit: мультяшная модель задумана без света (см.
+    // MaterialRender::Unlit).
+    out.Unlit = m.extensions.count("KHR_materials_unlit") > 0;
     if (m.alphaMode == "MASK") out.AlphaMode = 1;
     else if (m.alphaMode == "BLEND") out.AlphaMode = 2;
     out.AlphaCutoff = (float)m.alphaCutoff;
