@@ -1,12 +1,48 @@
 #include "sage/anim/Animator.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp> // glm::slerp для смешивания поворотов костей
 
 namespace sage::anim {
+
+int PreferredIdleClip(const std::vector<AnimationClip>& clips) {
+    int best = -1;
+    size_t bestExtra = 0, bestLength = 0;
+    for (size_t i = 0; i < clips.size(); ++i) {
+        std::string name = clips[i].Name;
+        if (const size_t bar = name.find_last_of("|:"); bar != std::string::npos)
+            name = name.substr(bar + 1);
+        std::string lower;
+        for (unsigned char c : name) lower.push_back((char)std::tolower(c));
+        if (lower.find("idle") == std::string::npos) continue;
+        // Слова — по разделителям и по смене регистра («CrouchIdle»).
+        std::vector<std::string> words;
+        std::string word;
+        auto flush = [&]() { if (!word.empty()) words.push_back(word); word.clear(); };
+        for (size_t k = 0; k < name.size(); ++k) {
+            const unsigned char c = (unsigned char)name[k];
+            if (!std::isalnum(c)) { flush(); continue; }
+            if (std::isupper(c) && k > 0 && std::islower((unsigned char)name[k - 1])) flush();
+            word.push_back((char)std::tolower(c));
+        }
+        flush();
+        size_t extra = 0;
+        for (const std::string& w : words)
+            if (w != "idle" && w != "loop" && w != "anim" && w != "animation" && w != "loopable")
+                ++extra;
+        if (best < 0 || extra < bestExtra || (extra == bestExtra && lower.size() < bestLength)) {
+            best = (int)i;
+            bestExtra = extra;
+            bestLength = lower.size();
+        }
+    }
+    if (best >= 0) return best;
+    return clips.empty() ? -1 : 0;
+}
 
 void Animator::SetRig(const Skeleton* skeleton, const std::vector<AnimationClip>* clips) {
     m_skeleton = skeleton;

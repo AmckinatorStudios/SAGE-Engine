@@ -1,4 +1,5 @@
 #include "ModelMaterialImport.h"
+#include "sage/anim/Animator.h"
 
 #include <filesystem>
 #include <system_error>
@@ -252,14 +253,10 @@ namespace {
 // с любым префиксом экспортёра («SpringBonnie_LegacyFit--Idle»). Не нашли —
 // берём первый: он всё равно лучше неподвижной позы привязки, по которой не
 // видно даже, что скелет вообще работает.
+// Сам выбор — в движке (sage::anim::PreferredIdleClip): там он проверяется
+// тестом, и игра, ставящая персонажа кодом, выберет то же самое.
 int PreferredClipIndex(const std::vector<sage::anim::AnimationClip>& clips) {
-    for (size_t i = 0; i < clips.size(); ++i) {
-        std::string lower;
-        lower.reserve(clips[i].Name.size());
-        for (unsigned char c : clips[i].Name) lower.push_back((char)std::tolower(c));
-        if (lower.find("idle") != std::string::npos) return (int)i;
-    }
-    return clips.empty() ? -1 : 0;
+    return sage::anim::PreferredIdleClip(clips);
 }
 
 } // namespace
