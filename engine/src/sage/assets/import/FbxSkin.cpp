@@ -51,6 +51,20 @@ std::string ObjectName(const Node& n) {
 
 int64_t Uid(const Node& n) { return n.Props.empty() ? 0 : (int64_t)n.Props[0].Number; }
 
+// Насколько две матрицы расходятся: наибольшая разница элементов, перенос —
+// относительно размера сцены (иначе миллиметровая модель «совпадала» бы с
+// чем угодно, а модель в сантиметрах не совпадала бы ни с чем).
+float MatrixDistance(const glm::mat4& a, const glm::mat4& b) {
+    float rot = 0.0f, move = 0.0f, scale = 1e-6f;
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r) rot = std::max(rot, std::abs(a[c][r] - b[c][r]));
+    for (int r = 0; r < 3; ++r) {
+        move = std::max(move, std::abs(a[3][r] - b[3][r]));
+        scale = std::max({scale, std::abs(a[3][r]), std::abs(b[3][r])});
+    }
+    return rot + move / scale;
+}
+
 // Матрица 4x4 из записи вида Transform/TransformLink (16 чисел по столбцам).
 glm::mat4 MatrixFrom(const Node* n) {
     const std::vector<double>* v = Doubles(n);
@@ -518,8 +532,22 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             // приведение из этого пространства: Transform * inverse(nodeWorld)
             // (у согласованного экспорта это единица, у рассогласованного —
             // именно то, что спасает модель от разъезда).
-            const glm::mat4 ib =
-                glm::inverse(c.TransformLink) * c.Transform * glm::inverse(nodeWorld);
+            //
+            // ЧТО ТАКОЕ Transform — зависит от того, КТО ПИСАЛ ФАЙЛ. По
+            // спецификации Autodesk это мир меша на момент привязки. Blender
+            // пишет другое: inverse(TransformLink) * мир меша — меш ОТНОСИТЕЛЬНО
+            // кости. Прочитав блендеровский файл по Autodesk, мы умножали на
+            // обратную кость дважды: персонаж в позе покоя схлопывался в комок
+            // с торчащими во все стороны «лучами» (Universal Animation Library,
+            // FBX для Unity). Выбираем толкование, при котором мир меша
+            // сходится с тем, что на самом деле лежит в узлах файла.
+            const glm::mat4 meshAutodesk = c.Transform;
+            const glm::mat4 meshBlender = c.TransformLink * c.Transform;
+            const glm::mat4 meshWorld =
+                MatrixDistance(meshBlender, nodeWorld) < MatrixDistance(meshAutodesk, nodeWorld)
+                    ? meshBlender
+                    : meshAutodesk;
+            const glm::mat4 ib = glm::inverse(c.TransformLink) * meshWorld * glm::inverse(nodeWorld);
             out.Skeleton.Joints[(size_t)jointIt->second].InverseBind = C * ib * Cinv;
         }
 
@@ -711,6 +739,13 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             auto name = stackNames.find(stack);
             if (name != stackNames.end()) clip.Name = name->second;
         }
+        // «Armature|Idle» — Blender приписывает к действию имя скелета. Для
+        // человека клип называется «Idle», и так же он называется в glTF того
+        // же набора: скрипт, игравший Play("Idle"), не должен ломаться от
+        // смены формата.
+        if (const size_t bar = clip.Name.rfind('|');
+            bar != std::string::npos && bar + 1 < clip.Name.size())
+            clip.Name = clip.Name.substr(bar + 1);
         if (clip.Name.empty()) clip.Name = "clip" + std::to_string(out.Clips.size());
 
         for (const auto& [boneUid, animated] : nodes) {

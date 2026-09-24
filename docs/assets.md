@@ -355,6 +355,20 @@ glTF переносит только то, что сводится к Principled
 не перезаписываются: «Пересоздать существующие материалы» в окне импорта.
 Кэш скелетных моделей сменил версию (8) и пересоберётся сам.
 
+### Universal Animation Library (Quaternius): FBX из Blender
+
+| что было | причина | где исправлено |
+|---|---|---|
+| FBX-персонаж — комок с торчащими «лучами», glb того же набора цел | Blender пишет `Transform` кластера как `inverse(TransformLink) * мир меша`, а не мир меша (Autodesk); обратная кость умножалась дважды | `FbxSkin.cpp`: из двух толкований берётся то, при котором мир меша сходится с узлами файла |
+| клипы FBX назывались «Armature\|Idle_Loop» | Blender приписывает имя скелета к действию | префикс до `\|` отбрасывается — те же имена, что в glb |
+| персонаж ставился в сцену на корточках | клипом по умолчанию брался первый с «idle» — «Crouch_Idle_Loop» | `sage::anim::PreferredIdleClip`: «idle» с наименьшим числом прочих слов |
+
+FBX и glb набора дают одинаковую позу (до тысячной метра) в покое и на
+клипах Walk, Dance, Jump. Кэш скелетных моделей — версия 9: разобранные раньше
+FBX пересоберутся сами. Проверки —
+`Fbx_blender_cluster_transform_keeps_the_rest_pose_in_place`,
+`Preferred_idle_clip_is_the_plainest_one` (`tests/test_fbx.cpp`).
+
 Проверки: `model_material_gltf_specular_glossiness_becomes_colour_and_texture`,
 `model_material_gltf_unlit_reaches_the_material`,
 `ModelImport_character_in_centimetres_is_scaled_to_metres`,

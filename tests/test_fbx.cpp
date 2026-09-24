@@ -9,6 +9,7 @@
 // заранее — поэтому здесь сверяются КООРДИНАТЫ, а не факт «загрузилось».
 #include "TestFramework.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -310,6 +311,56 @@ TEST(Fbx_with_skin_loads_bones_weights_and_clips) {
     const glm::vec3 base = glm::vec3(palette[0] * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
     CHECK_NEAR(base.x, 0.0f, 1e-4f);
     CHECK_NEAR(base.y, 0.0f, 1e-4f);
+}
+
+// Blender пишет Transform кластера ОТНОСИТЕЛЬНО КОСТИ (inverse(TransformLink) *
+// мир меша), а не мир меша, как Autodesk. Прочитанный по Autodesk, такой файл
+// умножался на обратную кость дважды: персонаж в позе покоя схлопывался в
+// комок с «лучами» (Universal Animation Library, FBX для Unity). И клип там
+// назван «Armature|Wave» — для человека и для Play("Wave") это «Wave».
+TEST(Fbx_blender_cluster_transform_keeps_the_rest_pose_in_place) {
+    const std::string path = MakeFbx("sage_test_skin_blender.fbx", "--skin --blender-bind");
+    if (path.empty()) return;
+    sage::render::ModelData data;
+    std::string err;
+    const bool ok = sage::assets::ImportFbxSkinned(path, data, err);
+    std::remove(path.c_str());
+    CHECK_TRUE(ok);
+    if (!ok || data.Skeleton.Count() != 2 || data.SubMeshes.empty()) return;
+
+    // Поза покоя: палитра не двигает ни одной вершины.
+    sage::anim::Animator animator;
+    animator.SetRig(&data.Skeleton, &data.Clips);
+    animator.Update(0.0f);
+    const std::vector<glm::mat4>& palette = animator.BoneMatrices();
+    float worst = 0.0f;
+    for (const sage::render::SkinnedVertex& v : data.SubMeshes[0].Vertices) {
+        const glm::vec3 moved = glm::vec3(palette[(size_t)v.Joints[0]] * glm::vec4(v.Position, 1.0f));
+        worst = std::max(worst, glm::length(moved - v.Position));
+    }
+    std::printf("       поза покоя сдвинула вершины на %.4f\n", worst);
+    CHECK_TRUE(worst < 1e-4f);
+
+    CHECK_EQ((int)data.Clips.size(), 1);
+    if (!data.Clips.empty()) CHECK_EQ(data.Clips[0].Name, std::string("Wave"));
+}
+
+// Клип по умолчанию — самая простая поза покоя: библиотека анимаций несёт
+// десяток «idle», и персонаж на корточках (Crouch_Idle_Loop) выглядит сломанным.
+TEST(Preferred_idle_clip_is_the_plainest_one) {
+    std::vector<sage::anim::AnimationClip> clips(5);
+    clips[0].Name = "A_TPose";
+    clips[1].Name = "Crouch_Idle_Loop";
+    clips[2].Name = "Idle_Talking_Loop";
+    clips[3].Name = "Armature|Idle_Loop";
+    clips[4].Name = "Pistol_Idle_Loop";
+    CHECK_EQ(sage::anim::PreferredIdleClip(clips), 3);
+
+    std::vector<sage::anim::AnimationClip> none(2);
+    none[0].Name = "Run";
+    none[1].Name = "Jump";
+    CHECK_EQ(sage::anim::PreferredIdleClip(none), 0);   // idle нет — первый
+    CHECK_EQ(sage::anim::PreferredIdleClip({}), -1);
 }
 
 // ============================================================================
