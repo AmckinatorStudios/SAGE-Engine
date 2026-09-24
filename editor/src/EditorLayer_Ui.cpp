@@ -12,6 +12,7 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "ModelImportDialog.h"
 #include "sage/assets/Pack.h"
 
 #include <cstdint>
@@ -871,6 +872,13 @@ void EditorLayer::DrawDockspaceAndMenu() {
         openDialog = m_pendingDialog;
         m_pendingDialog = nullptr;
     }
+    // Окно настроек импорта модели — не из набора диалогов, у него своя
+    // очередь моделей; для снимка ему дают вымышленную модель из набора.
+    if (openDialog && std::strcmp(openDialog, "model-import") == 0) {
+        sage::editor::modelimport::Ask({std::filesystem::path("Stylized Nature MegaKit/FBX/CommonTree_1.fbx"),
+                                        std::filesystem::path("Stylized Nature MegaKit/FBX/Bush_Common.fbx")});
+        openDialog = nullptr;
+    }
     if (openDialog) m_dialogs.Open(openDialog);
     m_dialogs.Draw(*this);
     // Отчёт о падении — ПЕРЕД предложением восстановить сцену: сначала «что
@@ -903,6 +911,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
     }
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
+    // Окно настроек импорта модели (ModelImportDialog.h): его заказывают
+    // панели, когда модель впервые попадает в проект или в сцену.
+    sage::editor::modelimport::Draw();
     DrawAboutWindow();
 
     ImGui::End();

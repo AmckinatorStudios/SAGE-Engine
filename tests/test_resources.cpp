@@ -193,6 +193,105 @@ TEST(ModelImport_sidecar_roundtrip) {
     CHECK_FALSE(def.Recenter);
 }
 
+// --- Настройки импорта «как в больших движках» ------------------------------
+//
+// Поворот, развёртка, обход граней и нормали — то, что раньше чинилось руками в
+// сцене у каждого экземпляра. Проверяется арифметика на треугольнике, чьи
+// числа известны заранее.
+namespace {
+
+sage::render::MeshData Triangle() {
+    sage::render::MeshData m;
+    m.Vertices.resize(3);
+    m.Vertices[0].Position = {0, 0, 0};
+    m.Vertices[1].Position = {1, 0, 0};
+    m.Vertices[2].Position = {0, 0, -1};   // лицом вверх (+Y) при обходе 0-1-2
+    for (Vertex& v : m.Vertices) v.Normal = {0, 1, 0};
+    m.Vertices[0].TexCoords = {0.0f, 0.25f};
+    m.Indices = {0, 1, 2};
+    return m;
+}
+
+} // namespace
+
+TEST(ModelImport_rotation_turns_z_up_models_upright) {
+    // Z вверх (3ds Max, старый Blender): модель лежит на боку. -90° по X
+    // ставит её: то, что смотрело вверх по Z, смотрит вверх по Y.
+    sage::render::MeshData m = Triangle();
+    m.Vertices[0].Position = {0, 0, 2};
+    m.Vertices[0].Normal = {0, 0, 1};
+    ModelLoader::ImportSettings s;
+    s.Rotation = {-90.0f, 0.0f, 0.0f};
+    ModelLoader::ApplyImportSettings(m, s);
+    CHECK_NEAR(m.Vertices[0].Position.y, 2.0f, 1e-4);
+    CHECK_NEAR(m.Vertices[0].Position.z, 0.0f, 1e-4);
+    CHECK_NEAR(m.Vertices[0].Normal.y, 1.0f, 1e-4);
+}
+
+TEST(ModelImport_flips_uv_and_winding) {
+    sage::render::MeshData m = Triangle();
+    ModelLoader::ImportSettings s;
+    s.FlipUV = true;
+    s.FlipWinding = true;
+    ModelLoader::ApplyImportSettings(m, s);
+    CHECK_NEAR(m.Vertices[0].TexCoords.y, 0.75f, 1e-5);
+    CHECK_TRUE(m.Indices == (std::vector<unsigned int>{0, 2, 1}));
+    // Вывернутая модель — это и нормали внутрь: разворот обязан перевернуть и их.
+    CHECK_NEAR(m.Vertices[0].Normal.y, -1.0f, 1e-5);
+}
+
+TEST(ModelImport_recomputed_normals_follow_the_faces) {
+    // Две грани под углом 90° с РАЗДЕЛЁННЫМИ вершинами (так их отдают OBJ и
+    // FBX): гладкие нормали общего ребра — среднее граней, плоские — своя у
+    // каждой грани.
+    sage::render::MeshData m;
+    m.Vertices.resize(6);
+    m.Vertices[0].Position = {0, 0, 0}; m.Vertices[1].Position = {1, 0, 0}; m.Vertices[2].Position = {0, 0, -1};
+    m.Vertices[3].Position = {0, 0, 0}; m.Vertices[4].Position = {0, 0, -1}; m.Vertices[5].Position = {0, -1, 0};
+    m.Indices = {0, 1, 2, 3, 4, 5};
+    sage::render::MeshData flat = m;
+
+    ModelLoader::ImportSettings s;
+    s.Normals = ModelLoader::ImportSettings::NormalMode::Smooth;
+    ModelLoader::ApplyImportSettings(m, s);
+    // Вершина 0 и 3 — одна точка на ребре: у них одна и та же нормаль.
+    CHECK_NEAR(glm::dot(m.Vertices[0].Normal, m.Vertices[3].Normal), 1.0f, 1e-4);
+    CHECK_TRUE(m.Vertices[0].Normal.y > 0.3f && m.Vertices[0].Normal.x < -0.3f);
+
+    s.Normals = ModelLoader::ImportSettings::NormalMode::Flat;
+    ModelLoader::ApplyImportSettings(flat, s);
+    CHECK_NEAR(flat.Vertices[0].Normal.y, 1.0f, 1e-4);
+    CHECK_NEAR(flat.Vertices[3].Normal.x, -1.0f, 1e-4);
+}
+
+TEST(ModelImport_new_settings_survive_the_sidecar) {
+    std::string model = (fs::temp_directory_path() / "sage_test_model_ext.fbx").string();
+    ModelLoader::ImportSettings s;
+    s.Rotation = {-90.0f, 0.0f, 45.0f};
+    s.Offset = {0.0f, 1.5f, 0.0f};
+    s.Normals = ModelLoader::ImportSettings::NormalMode::Smooth;
+    s.FlipUV = true;
+    s.ImportMaterials = false;
+    s.Alpha = ModelLoader::ImportSettings::AlphaMode::Cutout;
+    s.AlphaCutoff = 0.3f;
+    s.DoubleSided = ModelLoader::ImportSettings::TwoSided::On;
+    s.ImportAnimation = false;
+    CHECK_TRUE(ModelLoader::SaveImportSettings(model, s));
+    const ModelLoader::ImportSettings back = ModelLoader::LoadImportSettings(model);
+    CHECK_NEAR(back.Rotation.x, -90.0f, 1e-4);
+    CHECK_NEAR(back.Rotation.z, 45.0f, 1e-4);
+    CHECK_NEAR(back.Offset.y, 1.5f, 1e-4);
+    CHECK_TRUE(back.Normals == ModelLoader::ImportSettings::NormalMode::Smooth);
+    CHECK_TRUE(back.FlipUV);
+    CHECK_FALSE(back.ImportMaterials);
+    CHECK_TRUE(back.Alpha == ModelLoader::ImportSettings::AlphaMode::Cutout);
+    CHECK_NEAR(back.AlphaCutoff, 0.3f, 1e-4);
+    CHECK_TRUE(back.DoubleSided == ModelLoader::ImportSettings::TwoSided::On);
+    CHECK_FALSE(back.ImportAnimation);
+    std::error_code ec;
+    fs::remove(ModelLoader::ImportSidecarPath(model), ec);
+}
+
 // ============================================================================
 //  Null-бэкенд: доказательство границы RHI
 // ============================================================================

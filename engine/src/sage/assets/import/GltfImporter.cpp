@@ -16,7 +16,6 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <stb_image.h>
 
 // ---------------------------------------------------------------------------
 // glTF/GLB -> ImportedScene: УЗЛЫ, а не один слипшийся меш.
@@ -49,25 +48,15 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Раскодировать картинку tinygltf сам не умеет (собран с TINYGLTF_NO_STB_IMAGE),
-// и без колбэка ЛЮБОЙ файл с текстурами разбирается с ошибкой — то есть модель
-// не грузится вовсе. Геометрия при этом картинки не использует, но разбор
-// файла общий.
-bool DecodeImage(tinygltf::Image* image, const int, std::string* err, std::string*, int, int,
-                 const unsigned char* bytes, int size, void*) {
-    int w = 0, h = 0, comp = 0;
-    unsigned char* data = stbi_load_from_memory(bytes, size, &w, &h, &comp, 4);
-    if (!data) {
-        if (err) *err += "не удалось раскодировать изображение glTF\n";
-        return false;
-    }
-    image->width = w;
-    image->height = h;
-    image->component = 4;
-    image->bits = 8;
-    image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-    image->image.assign(data, data + (size_t)w * h * 4);
-    stbi_image_free(data);
+// КАРТИНКИ ЗДЕСЬ НЕ НУЖНЫ — И НЕ ДЕКОДИРУЮТСЯ. tinygltf без колбэка разбора
+// картинок отказывается открывать файл вовсе, поэтому колбэк есть, но он
+// только соглашается: импортёр геометрии берёт у материала лишь ССЫЛКИ на
+// карты (ImageUri), а пиксели читает тот, кто их рисует. Раньше здесь стоял
+// полный декод stb: дерево из набора (две картинки 2048² и одна 1024²) при
+// каждой загрузке геометрии распаковывалось целиком и тут же выбрасывалось —
+// сотни миллисекунд в кадре на ровном месте.
+bool SkipImage(tinygltf::Image*, const int, std::string*, std::string*, int, int,
+               const unsigned char*, int, void*) {
     return true;
 }
 
@@ -303,7 +292,7 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
 
 bool ImportGltf(const std::string& path, ImportedScene& out, std::string& err) {
     tinygltf::TinyGLTF loader;
-    loader.SetImageLoader(&DecodeImage, nullptr);
+    loader.SetImageLoader(&SkipImage, nullptr);
     tinygltf::Model gltf;
     std::string parseErr, warn;
     // Расширение тут больше ничего не решает: «.GLB» с большой буквы уходило в

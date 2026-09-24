@@ -295,6 +295,9 @@ struct Material {
         bool operator!=(const ResolvedFrom& o) const { return !(*this == o); }
     };
     ResolvedFrom TexturesFrom;
+    // Карты брались под вырез по альфе (альбедо с цветом под прозрачностью,
+    // см. render/AlphaBleed.h). Включили или сняли порог — карту берут заново.
+    bool TexturesCutout = false;
 
     // Рисуется текстурным PBR-путём, если задана хотя бы одна карта.
     bool HasMaps() const {

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <cmath>
@@ -591,4 +592,82 @@ TEST(Fbx_skinned_uv_follows_the_image_convention_of_the_skinned_pass) {
         }
     }
     CHECK_TRUE(found);
+}
+
+// --- Есть ли скелет: по оглавлению, без разбора модели ----------------------
+//
+// Редактор спрашивает скелетную версию у КАЖДОЙ поставленной модели. Без пробы
+// .obj уходил в разбор glTF и сыпал в консоль «Скиннинг-модель не загрузилась
+// … parse error» — ошибкой на обычной декорации (набор Stylized Nature MegaKit:
+// каждый куст, каждое дерево).
+#include "sage/assets/import/ModelProbe.h"
+
+TEST(Model_probe_tells_skinned_files_from_static_ones) {
+    const fs::path repo = fs::path(__FILE__).parent_path().parent_path();
+    CHECK_TRUE(sage::assets::ModelHasSkeleton((repo / "engine/assets/test_rig.glb").string()));
+    // Статический .gltf — дерево из набора устроено так же: сетка и материалы,
+    // без skins.
+    const fs::path gltf = fs::temp_directory_path() / "sage_test_probe_static.gltf";
+    {
+        std::ofstream f(gltf);
+        f << R"({"asset":{"version":"2.0"},"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)"
+             R"("meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}]})";
+    }
+    CHECK_TRUE(!sage::assets::ModelHasSkeleton(gltf.string()));
+    std::remove(gltf.string().c_str());
+
+    const std::string skin = MakeFbx("sage_test_probe_skin.fbx", "--skin");
+    const std::string cube = MakeFbx("sage_test_probe_cube.fbx", "");
+    if (!skin.empty()) CHECK_TRUE(sage::assets::ModelHasSkeleton(skin));
+    if (!cube.empty()) CHECK_TRUE(!sage::assets::ModelHasSkeleton(cube));
+    std::remove(skin.c_str());
+    std::remove(cube.c_str());
+
+    // .obj скелета не несёт вовсе — и в разбор glTF его отправлять нельзя.
+    const fs::path obj = fs::temp_directory_path() / "sage_test_probe.obj";
+    { std::ofstream f(obj); f << "# Blender\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
+    CHECK_TRUE(!sage::assets::ModelHasSkeleton(obj.string()));
+    std::remove(obj.string().c_str());
+}
+
+// Настройки импорта (.sageimport) не доходили до FBX вовсе: их применяли
+// только загрузчики .obj и glTF, и масштаб, выставленный у FBX-модели, ни на
+// что не влиял.
+TEST(Fbx_import_settings_reach_the_mesh) {
+    const std::string path = MakeFbx("sage_test_fbx_settings.fbx", "");
+    if (path.empty()) return;
+    ModelLoader::ImportSettings s;
+    s.Scale = 3.0f;
+    CHECK_TRUE(ModelLoader::SaveImportSettings(path, s));
+    const sage::render::MeshData mesh = ModelLoader::LoadMeshData(path);
+    std::error_code ec;
+    fs::remove(ModelLoader::ImportSidecarPath(path), ec);
+    std::remove(path.c_str());
+    glm::vec3 mn(1e9f), mx(-1e9f);
+    for (const Vertex& v : mesh.Vertices) { mn = glm::min(mn, v.Position); mx = glm::max(mx, v.Position); }
+    CHECK_NEAR(mx.x - mn.x, 3.0f, 1e-3f);   // куб со стороной 1, масштаб 3
+}
+
+// Выбор в окне импорта главнее того, что описал файл: «вырез» и «обе
+// стороны» доходят до материала, даже если экспорт их не записал.
+#include "sage/render/ModelMaterial.h"
+
+TEST(Fbx_import_settings_override_material_transparency) {
+    const std::string path = MakeFbx("sage_test_fbx_matsettings.fbx", "--foliage");
+    if (path.empty()) return;
+    ModelLoader::ImportSettings s;
+    s.Alpha = ModelLoader::ImportSettings::AlphaMode::Cutout;
+    s.AlphaCutoff = 0.3f;
+    s.DoubleSided = ModelLoader::ImportSettings::TwoSided::On;
+    CHECK_TRUE(ModelLoader::SaveImportSettings(path, s));
+    const ModelLoader::ExtractedMaterialSet set = ModelLoader::ExtractMaterials(path);
+    std::error_code ec;
+    fs::remove(ModelLoader::ImportSidecarPath(path), ec);
+    std::remove(path.c_str());
+    CHECK_EQ((int)set.Materials.size(), 2);
+    for (const ModelLoader::ExtractedMaterial& m : set.Materials) {
+        CHECK_EQ(m.AlphaMode, 1);
+        CHECK_NEAR(m.AlphaCutoff, 0.3f, 1e-4f);
+        CHECK_TRUE(m.DoubleSided);
+    }
 }

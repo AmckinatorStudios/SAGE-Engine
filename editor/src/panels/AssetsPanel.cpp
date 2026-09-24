@@ -1,6 +1,8 @@
 #include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
+#include "FsCache.h"
+#include "ModelImportDialog.h"
 #include "../Progress.h"
 
 #include <chrono>
@@ -205,10 +207,10 @@ void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
 
     std::vector<fs::path> chain;
     std::error_code cec;
-    const fs::path rootCanon = fs::weakly_canonical(root, cec);
+    const fs::path& rootCanon = sage::editor::fscache::Canonical(root);
     for (fs::path p = cwd; p.has_parent_path(); p = p.parent_path()) {
         chain.push_back(p);
-        if (fs::weakly_canonical(p, cec) == rootCanon) break;
+        if (sage::editor::fscache::Canonical(p) == rootCanon) break;
         if (p.parent_path() == p) break; // достигли корня файловой системы
     }
     std::reverse(chain.begin(), chain.end());
@@ -312,9 +314,10 @@ AssetsPanel::Cover AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& p
                             sage::assets::IsConvertibleModel(key) || ext == ".sagemesh";
     if (!renderable) return {};
 
-    std::error_code ec;
-    const auto write = fs::last_write_time(path, ec);
-    const long long stamp = ec ? 0 : (long long)write.time_since_epoch().count();
+    // Время правки — с памятью (не чаще раза в секунду на файл): обложка
+    // спрашивает его в каждом кадре, и пересохранённый материал всё равно
+    // переснимется через секунду.
+    const long long stamp = sage::editor::fscache::Stamp(path);
 
     // Кадр съёмки квадратный, поэтому пропорции у таких обложек 1:1.
     auto it = m_thumbs.find(key);
@@ -330,38 +333,44 @@ AssetsPanel::Cover AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& p
     // хендлы указывали бы на одну текстуру, и вся папка показывала бы то, что
     // нарисовали последним (см. комментарий про key в AssetPreview).
     uint64_t id = 0;
+    // Карты материала ещё едут фоном (редактор грузит их потоково): снимок,
+    // сделанный сейчас, запомнил бы серые заглушки навсегда. Такая обложка
+    // показывается, но не запоминается — её переснимут, когда карты доедут.
+    bool provisional = false;
     if (ext == ".sagemat") {
         if (std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key))
             id = m_preview.RenderMaterial(mat, 96, key);
+        provisional = ResourceManager::Instance().PendingAsyncTextures() > 0;
     } else if (ext == ".sageprefab") {
         id = m_preview.RenderPrefab(key, 96, key);
+        provisional = ResourceManager::Instance().PendingAsyncTextures() > 0;
     } else {
-        // Модель: копия геометрии на стороне процессора нужна, чтобы вписать её
-        // в кадр по габаритам (см. AssetPreview::RenderMesh).
-        if (std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(key)) {
-            // Обложка модели — с ЕЁ материалом, а не серым пластиком: иначе
-            // текстурированный персонаж и болванка в сетке неотличимы.
-            id = m_preview.RenderMesh(mesh, 96, key, AssetPreview::MaterialsForModel(key));
+        // Модель — ФОНОМ (см. AssetPreview::RenderModelCover): разбор файла,
+        // материалов и уменьшение карт идут в другом потоке, а кэш ресурсов
+        // сцены не трогается. Пока разбор идёт — крутилка на плитке.
+        bool pending = false;
+        id = m_preview.RenderModelCover(key, 96, key, pending);
+        if (pending) {
+            return it != m_thumbs.end() ? Cover{it->second.Id, 1, 1} : Cover{};
         }
     }
     // Ноль тоже запоминаем — иначе битый или пустой ассет пытался бы
     // отрисоваться каждый кадр, съедая всю очередь превью и не давая остальным
     // карточкам получить свои обложки.
-    m_thumbs[key] = Thumb{id, stamp};
+    m_thumbs[key] = Thumb{id, provisional ? -1 : stamp};
     if (id) m_thumbRenderedThisFrame = true;
     return {id, 1, 1};
 }
 
 void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int depth) {
-    std::error_code ec;
-    std::vector<fs::path> subdirs;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        if (entry.is_directory(ec)) subdirs.push_back(entry.path());
-    }
-    std::sort(subdirs.begin(), subdirs.end());
+    // Подпапки и «та ли это папка» — с памятью (FsCache.h): дерево рисуется
+    // каждый кадр, и листать диск на каждую его строку в каждом кадре — это и
+    // был заметный кусок просевшего FPS на наборе с сотней папок.
+    namespace fscache = sage::editor::fscache;
+    const std::vector<fs::path>& subdirs = fscache::List(dir, 0.5).Dirs;
 
     fs::path& cwd = host.AssetsCwd();
-    const bool current = fs::weakly_canonical(cwd, ec) == fs::weakly_canonical(dir, ec);
+    const bool current = fscache::Canonical(cwd) == fscache::Canonical(dir);
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
                                ImGuiTreeNodeFlags_DrawLinesNone;
     if (subdirs.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
@@ -517,7 +526,10 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // панели ассетов ищет КОНКРЕТНУЮ картинку или материал среди двух десятков
     // одинаковых оранжевых прямоугольников с надписью MAT. Имя файла помогает
     // только если его помнят.
-    const Cover thumb = ThumbnailFor(host, path, isDir);
+    // Обложку просят только ВИДИМЫЕ плитки: папка набора — это сотни файлов,
+    // и заказывать разбор модели для плитки за краем окна значило грузить
+    // машину тем, чего никто не видит.
+    const Cover thumb = ImGui::IsItemVisible() ? ThumbnailFor(host, path, isDir) : Cover{};
     if (thumb.Id) {
         // КАРТИНКА ВПИСЫВАЕТСЯ ПО СВОИМ ПРОПОРЦИЯМ, а не в квадрат. Прежний
         // «квадрат по меньшей стороне» сохранял пропорции только у квадратных
@@ -979,16 +991,12 @@ void RegisterInDatabase(const fs::path& file) {
 // импорта модели): оставить их на старом месте значило бы, что переехавшая
 // модель потеряла и свой GUID, и свой масштаб.
 const char* AssetsPanel::FolderIcon(const fs::path& dir) {
-    std::error_code ec;
-    fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
-    if (ec) return "folder"; // нечитаемая папка — пусть выглядит пустой, а не полной
-    // Сайдкары .meta не в счёт: это служебная запись движка на каждый файл, и
-    // без своего файла она не остаётся. Сам файл здесь же и папку заполняет.
-    for (const fs::directory_entry& e : it) {
-        if (!e.is_directory(ec) && e.path().extension() == ".meta") continue;
-        return "folder-full";
-    }
-    return "folder";
+    // Через кэш листингов (FsCache.h): значок папки рисуется в каждой строке
+    // дерева и на каждой плитке В КАЖДОМ КАДРЕ, и листать для него диск каждый
+    // раз значило платить сотнями системных вызовов за кадр. Сайдкары .meta
+    // кэш уже отбросил: без своего файла они не остаются.
+    const sage::editor::fscache::Listing& l = sage::editor::fscache::List(dir, 0.5);
+    return l.Dirs.empty() && l.Files.empty() ? "folder" : "folder-full";
 }
 
 void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const fs::path& folder) {
@@ -1323,6 +1331,10 @@ void AssetsPanel::FinishImport(EditorHost& host) {
     RegisterImported(r);
     m_selected = r.Created;
     m_multi = {r.Created};
+    // Модели среди внесённого — сразу окно настроек импорта (как в Unreal):
+    // ось, масштаб, листва задаются один раз на ассет, до того как модель
+    // встанет в сцену неправильно.
+    sage::editor::modelimport::Ask(sage::editor::modelimport::ModelsNeedingSettings(r.Created));
 
     std::string message = T("Brought in: ") + r.Created.filename().string();
     if (!r.Extra.empty()) message += " (+" + std::to_string(r.Extra.size()) + T(" file(s) inside)");
@@ -1575,7 +1587,9 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     // редактору не принадлежат, а ссылка на них не переживёт сборку игры.
     const fs::path root = AssetsRoot(host);
     std::error_code upec;
-    const bool atRoot = fs::weakly_canonical(cwd, upec) == fs::weakly_canonical(root, upec);
+    const bool atRoot = sage::editor::fscache::Canonical(cwd) ==
+                        sage::editor::fscache::Canonical(root);
+    (void)upec;
     const bool canGoUp = cwd.has_parent_path() && !atRoot;
     ImGui::BeginDisabled(!canGoUp);
     if (EditorIcons::IconOnlyButton("up", T("Up"))) cwd = cwd.parent_path();
@@ -1638,22 +1652,14 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     m_rectActive = rectselect::Begin(m_rect);
     m_rectHits.clear();
     std::error_code ec;
-    std::vector<fs::directory_entry> dirs, files;
-    for (const auto& entry : fs::directory_iterator(cwd, ec)) {
-        // Сайдкары .meta в сетке не показываем. Это служебная запись движка
-        // (GUID ассета, см. AssetDatabase) — по одной НА КАЖДЫЙ файл: папка с
-        // двадцатью ассетами показывала сорок карточек, половина из которых
-        // одинаковые серые «meta», которые нельзя ни открыть, ни осмысленно
-        // править. Файл при этом никуда не девается и переезжает вместе с
-        // ассетом при переносе и переименовании.
-        if (!entry.is_directory(ec) && entry.path().extension() == ".meta") continue;
-        (entry.is_directory(ec) ? dirs : files).push_back(entry);
-    }
-    auto byName = [](const fs::directory_entry& a, const fs::directory_entry& b) {
-        return a.path().filename() < b.path().filename();
-    };
-    std::sort(dirs.begin(), dirs.end(), byName);
-    std::sort(files.begin(), files.end(), byName);
+    // Содержимое папки — из кэша листингов (FsCache.h): перечитывается, когда
+    // меняется время правки самой папки (добавили, удалили, переименовали), а
+    // не в каждом кадре. Сайдкары .meta кэш не показывает: это служебная
+    // запись движка (GUID ассета, см. AssetDatabase) — по одной НА КАЖДЫЙ
+    // файл, и папка с двадцатью ассетами показывала бы сорок карточек.
+    const sage::editor::fscache::Listing& listing = sage::editor::fscache::List(cwd, 0.0);
+    const std::vector<fs::path>& dirs = listing.Dirs;
+    const std::vector<fs::path>& files = listing.Files;
 
     std::string filter = ToLower(m_search);
     auto matches = [&](const fs::path& p) {
@@ -1671,8 +1677,8 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     // диапазон Shift-выбора, а щелчок разбирается внутри DrawTile — то есть
     // раньше, чем нарисуются карточки ниже (см. m_visibleOrder).
     m_visibleOrder.clear();
-    for (const auto& d : dirs) if (matches(d.path())) m_visibleOrder.push_back(d.path());
-    for (const auto& f : files) if (matches(f.path())) m_visibleOrder.push_back(f.path());
+    for (const auto& d : dirs) if (matches(d)) m_visibleOrder.push_back(d);
+    for (const auto& f : files) if (matches(f)) m_visibleOrder.push_back(f);
 
     m_tileCenters.clear();
     auto placeTile = [&](const fs::path& p, bool isDir) {
@@ -1685,8 +1691,8 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         m_tileCenters.push_back(ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f));
         col = (col + 1) % columns;
     };
-    for (const auto& d : dirs) if (matches(d.path())) placeTile(d.path(), true);
-    for (const auto& f : files) if (matches(f.path())) placeTile(f.path(), false);
+    for (const auto& d : dirs) if (matches(d)) placeTile(d, true);
+    for (const auto& f : files) if (matches(f)) placeTile(f, false);
     ImGui::PopStyleVar();
 
     // Обложки файлов, которых в этой папке нет, больше не нужны — отпускаем и

@@ -240,7 +240,7 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
         out_m.Albedo = m.Diffuse;
         // Блеск Phong -> шероховатость PBR. Точного перевода нет ни у кого;
         // важно лишь, чтобы отполированный металл не приезжал матовым.
-        if (m.Shininess > 0.0f) {
+        if (m.Shininess >= 0.0f) {
             out_m.Roughness = std::clamp(1.0f - std::sqrt(m.Shininess / 100.0f), 0.04f, 1.0f);
         }
         out_m.AlbedoTexture = slotFile(m, {"DiffuseColor", "Maya|baseColor", "BaseColor"});

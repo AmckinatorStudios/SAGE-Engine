@@ -1,11 +1,17 @@
 #include "AssetPreview.h"
 
+#include <chrono>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <system_error>
 #include <unordered_map>
 
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/render/AlphaBleed.h"
+#include "sage/render/ModelLoader.h"
+#include "sage/render/Texture.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,6 +29,7 @@
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include "sage/assets/AssetDatabase.h"
 
 namespace {
 
@@ -99,6 +106,7 @@ void AssetPreview::Shutdown() {
     // Первым делом — материалы моделей: в них текстуры, и отпустить их надо
     // при живом контексте (см. ModelMaterialCache).
     ModelMaterialCache().clear();
+    m_modelJobs.clear();   // дождаться фоновых разборов: их результат уже некуда класть
     m_fbo.reset();
     m_targets.clear();
     m_sphere.reset();
@@ -184,11 +192,132 @@ const std::vector<std::shared_ptr<Material>>& AssetPreview::MaterialsForModel(
         material->RoughnessMapPath = extracted.RoughnessMap;
         material->AOMapPath = extracted.AOMap;
         material->EmissiveMap = extracted.EmissiveMap;
+        // Вырез и двусторонность — как в сцене (ModelMaterialImport.cpp):
+        // иначе листва на превью квадратная, хотя в сцене вырезана.
+        if (extracted.AlphaMode == 1) material->Render.AlphaCutoff = extracted.AlphaCutoff;
+        if (extracted.DoubleSided) material->Render.Cull = CullFaces::None;
         ResourceManager::Instance().ResolveMaterialTextures(*material);
         materials.push_back(std::move(material));
     }
     // И пустой ответ кэшируется: иначе файл разбирался бы каждый кадр.
     return cache.emplace(path, std::move(materials)).first->second;
+}
+
+// --- Обложка модели фоном ----------------------------------------------------
+
+namespace {
+
+// Всё, что нужно для обложки, собранное БЕЗ видеокарты.
+struct ModelCoverData {
+    bool Ok = false;
+    sage::render::MeshData Mesh;
+    struct Mat {
+        bool Found = false;
+        glm::vec3 Albedo{1.0f}, Emissive{0.0f};
+        float Metallic = 0.0f, Roughness = 0.5f, Opacity = 1.0f;
+        float AlphaCutoff = 0.0f;
+        bool DoubleSided = false;
+        std::vector<unsigned char> Pixels;   // альбедо, уменьшенное под обложку
+        int W = 0, H = 0;
+    };
+    std::vector<Mat> Materials;
+};
+
+// Сторона карты на обложке: кадр обложки 96-192 пикселя, и карта крупнее
+// этого на снимке неотличима — а в памяти и в декоде стоит в сотни раз дороже.
+constexpr int kCoverMapSide = 128;
+
+ModelCoverData LoadModelCoverData(const std::string& file, const std::string& scratchDir) {
+    ModelCoverData out;
+    try {
+        out.Mesh = ModelLoader::LoadMeshData(file);
+    } catch (const std::exception&) {
+        return out;   // причину покажет обычная загрузка, если модель поставят в сцену
+    }
+    out.Ok = !out.Mesh.Empty();
+    for (const ModelLoader::ExtractedMaterial& ex :
+         ModelLoader::ExtractMaterials(file, scratchDir).Materials) {
+        ModelCoverData::Mat m;
+        m.Found = ex.Found;
+        m.Albedo = ex.Albedo;
+        m.Emissive = ex.Emissive * ex.EmissiveStrength;
+        m.Metallic = ex.Metallic;
+        m.Roughness = ex.Roughness;
+        m.Opacity = ex.Opacity;
+        m.AlphaCutoff = ex.AlphaMode == 1 ? ex.AlphaCutoff : 0.0f;
+        m.DoubleSided = ex.DoubleSided;
+        if (!ex.AlbedoMap.empty() &&
+            ResourceManager::DecodeImageFile(ex.AlbedoMap, m.Pixels, m.W, m.H)) {
+            if (m.AlphaCutoff > 0.0f) sage::render::BleedTransparentColor(m.Pixels, m.W, m.H);
+            std::vector<unsigned char> half;
+            while (std::max(m.W, m.H) > kCoverMapSide) {
+                ResourceManager::DownscaleRGBA(m.Pixels, m.W, m.H, half, m.W, m.H);
+                m.Pixels.swap(half);
+            }
+        }
+        out.Materials.push_back(std::move(m));
+    }
+    return out;
+}
+
+} // namespace
+
+struct AssetPreview::ModelCoverJob {
+    std::future<ModelCoverData> Future;
+};
+
+uint64_t AssetPreview::RenderModelCover(const std::string& path, int size, const std::string& key,
+                                        bool& pending) {
+    pending = false;
+    auto it = m_modelJobs.find(path);
+    if (it == m_modelJobs.end()) {
+        // Не больше двух разборов разом: остальные ядра нужны кадру, а папка
+        // набора — это сотни моделей, и все они разом положили бы машину.
+        int running = 0;
+        for (const auto& kv : m_modelJobs) running += kv.second->Future.valid() ? 1 : 0;
+        pending = true;
+        if (running >= 2) return 0;
+        // Путь, который откроется: разрешает его главный поток (база ассетов
+        // живёт здесь), фоновый получает готовую строку.
+        const std::string file = sage::AssetDatabase::Instance().LocatePath(path);
+        std::error_code ec;
+        const std::filesystem::path scratch = std::filesystem::temp_directory_path() /
+                                              "sage_preview_textures" /
+                                              std::to_string(std::hash<std::string>{}(file));
+        std::filesystem::create_directories(scratch, ec);
+        auto job = std::make_shared<ModelCoverJob>();
+        job->Future = std::async(std::launch::async, LoadModelCoverData, file, scratch.string());
+        m_modelJobs.emplace(path, std::move(job));
+        return 0;
+    }
+    ModelCoverJob& job = *it->second;
+    if (job.Future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+        pending = true;
+        return 0;
+    }
+    ModelCoverData data = job.Future.get();
+    m_modelJobs.erase(it);   // разобранное нужно ровно на один снимок
+    if (!data.Ok) return 0;
+
+    Init();
+    auto mesh = std::make_shared<Mesh>(data.Mesh.Vertices, data.Mesh.Indices, data.Mesh.Submeshes,
+                                       /*keepCpuData=*/true);
+    std::vector<std::shared_ptr<Material>> materials;
+    for (ModelCoverData::Mat& m : data.Materials) {
+        if (!m.Found) { materials.push_back(nullptr); continue; }
+        auto material = std::make_shared<Material>();
+        material->Albedo = m.Albedo;
+        material->Emissive = m.Emissive;
+        material->Metallic = m.Metallic;
+        material->Roughness = m.Roughness;
+        material->Opacity = m.Opacity;
+        material->Render.AlphaCutoff = m.AlphaCutoff;
+        if (m.DoubleSided) material->Render.Cull = CullFaces::None;
+        if (!m.Pixels.empty() && m.W > 0 && m.H > 0)
+            material->AlbedoTex = std::make_shared<Texture>(m.Pixels.data(), m.W, m.H);
+        materials.push_back(std::move(material));
+    }
+    return Render(mesh, materials, size, BoundingRadius(*mesh), key);
 }
 
 void AssetPreview::ReleaseTarget(const std::string& key) { m_targets.erase(key); }
@@ -206,6 +335,9 @@ Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
 // Смена проекта: все именованные буферы — прочь (см. заголовок).
 void AssetPreview::ForgetProject() {
     m_targets.clear();
+    // Разборы моделей старого проекта: пути у нового проекта свои, и ответ
+    // для «assets/tree.fbx» прошлого проекта лёг бы обложкой чужому файлу.
+    m_modelJobs.clear();
 }
 
 uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,

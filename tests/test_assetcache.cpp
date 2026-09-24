@@ -223,6 +223,46 @@ TEST(ResourceManager_reloads_a_material_edited_outside_the_editor) {
     fs::remove_all(dir, ec);
 }
 
+// ОПРОС ПОРЦИЯМИ. Редактор зовёт ReloadChangedAssets каждый кадр, и пока
+// за вызов опрашивался КАЖДЫЙ загруженный файл, просмотр набора ассетов
+// (сотни ресурсов в кэше) ронял FPS вдвое: 180 -> 90. С бюджетом за вызов
+// трогается не больше budget файлов, а правка всё равно находится — за
+// несколько вызовов, по кругу.
+TEST(ResourceManager_polls_changed_files_a_few_per_call) {
+    const fs::path dir = MakeDir("sage_reload_budget");
+    std::error_code ec;
+    const fs::path saved = fs::current_path(ec);
+    fs::current_path(dir, ec);
+
+    ResourceManager& rm = ResourceManager::Instance();
+    rm.Clear();   // кэш общий на все тесты: чужие записи сбили бы счёт
+    std::vector<std::shared_ptr<Material>> mats;
+    for (int i = 0; i < 8; ++i) {
+        const std::string name = "m" + std::to_string(i) + ".sagemat";
+        { std::ofstream f(dir / name); f << R"({"albedo":[1.0,0.0,0.0]})"; }
+        mats.push_back(rm.GetMaterial(name));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    { std::ofstream f(dir / "m5.sagemat"); f << R"({"albedo":[0.0,1.0,0.0]})"; }
+
+    // Два файла за вызов: правку обязан найти не первый вызов, а один из
+    // первых четырёх (8 записей / 2), и ни один вызов не перечитывает больше
+    // одного — изменён только m5.
+    int found = 0, calls = 0;
+    while (found == 0 && calls < 4) {
+        found += rm.ReloadChangedAssets(2);
+        ++calls;
+    }
+    CHECK_EQ(found, 1);
+    if (mats[5]) CHECK_NEAR(mats[5]->Albedo.y, 1.0f, 1e-4);
+    // Полный круг без правок — тишина.
+    for (int i = 0; i < 4; ++i) CHECK_EQ(rm.ReloadChangedAssets(2), 0);
+
+    rm.Clear();
+    fs::current_path(saved, ec);
+    fs::remove_all(dir, ec);
+}
+
 // ОДИН ФАЙЛ — ОДИН МАТЕРИАЛ, как бы к нему ни обратились.
 //
 // Из-за этого «редактор материалов не работал». Сущность держит ссылку
