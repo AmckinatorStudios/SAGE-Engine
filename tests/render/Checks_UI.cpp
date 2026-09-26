@@ -622,6 +622,61 @@ void CheckImageRotates(UIRenderer& ui) {
 
 } // namespace
 
+// --- Тень и обводка текста ---------------------------------------------------
+//
+// У стилизованных интерфейсов (Minecraft) весь текст с тенью на пиксель, цифры
+// уровня — в обводке. Раньше это делалось ВТОРОЙ надписью, сдвинутой руками.
+// Проверка: белый текст, красная тень со сдвигом и синяя обводка — каждый
+// цвет обязан появиться, и только там, где ему место: тень — правее-ниже
+// текста, обводка — со всех сторон.
+void CheckLabelShadowAndOutline(UIRenderer& ui) {
+    auto render = [&](glm::vec2 shadow, float outline) {
+        Scene scene("shadow");
+        GameObject e = Screen(scene, "Text", {200.0f, 60.0f});
+        sage::ui::Label l;
+        l.Text = "IIII";
+        l.Scale = 5.0f;
+        l.Color = {1.0f, 1.0f, 1.0f, 1.0f};
+        l.ShadowOffset = shadow;
+        l.ShadowColor = {1.0f, 0.0f, 0.0f, 1.0f};
+        l.OutlineWidth = outline;
+        l.OutlineColor = {0.0f, 0.0f, 1.0f, 1.0f};
+        scene.Registry().emplace<sage::ui::Label>(e.Entity(), l);
+        return RenderUI(ui, scene);
+    };
+    auto count = [](const Image& img, int want) {   // 0 — красный, 2 — синий
+        int n = 0;
+        for (size_t i = 0; i + 2 < img.Pixels.size(); i += 3) {
+            const int c[3] = {img.Pixels[i], img.Pixels[i + 1], img.Pixels[i + 2]};
+            const int other = want == 0 ? std::max(c[1], c[2]) : std::max(c[0], c[1]);
+            if (c[want] > 150 && other < 60) ++n;
+        }
+        return n;
+    };
+    const Image plain = render({0.0f, 0.0f}, 0.0f);
+    const Image shadowed = render({4.0f, 4.0f}, 0.0f);
+    const Image outlined = render({0.0f, 0.0f}, 2.0f);
+    std::printf("    тень: красных %d (без тени %d); обводка: синих %d (без неё %d)\n",
+                count(shadowed, 0), count(plain, 0), count(outlined, 2), count(plain, 2));
+    Check(count(plain, 0) == 0 && count(plain, 2) == 0, "без тени и обводки — только сам текст");
+    Check(count(shadowed, 0) > 100, "тень нарисована");
+    Check(count(outlined, 2) > 100, "обводка нарисована");
+    // Тень — правее и ниже: самый правый красный столбец правее самого
+    // правого белого.
+    auto rightmost = [](const Image& img, bool red) {
+        int best = -1;
+        for (int y = 0; y < img.Height; ++y)
+            for (int x = 0; x < img.Width; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                const bool isRed = img.Pixels[i] > 150 && img.Pixels[i + 1] < 60;
+                const bool isWhite = img.Pixels[i] > 200 && img.Pixels[i + 1] > 200 && img.Pixels[i + 2] > 200;
+                if (red ? isRed : isWhite) best = std::max(best, x);
+            }
+        return best;
+    };
+    Check(rightmost(shadowed, true) >= rightmost(shadowed, false) + 3, "тень сдвинута вправо");
+}
+
 void RunUIChecks() {
     std::printf("\n--- Интерфейс игры ---\n");
     UIRenderer ui;
@@ -636,6 +691,7 @@ void RunUIChecks() {
     CheckFontSizeMatchesTheNumber(ui);
     CheckSharpFontStillFollowsTheSize(ui);
     CheckImageRotates(ui);
+    CheckLabelShadowAndOutline(ui);
 }
 
 } // namespace sage::rendertest

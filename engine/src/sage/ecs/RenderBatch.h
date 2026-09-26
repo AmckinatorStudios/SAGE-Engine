@@ -183,7 +183,8 @@ private:
     struct TexturedItem { Mesh* Mesh_; unsigned int Submesh; glm::mat4 Model;
                           const Material* Mat; int LmPage;
                           float Opacity = 1.0f;
-                          glm::vec3 Color{1.0f}; glm::vec3 Emissive{0.0f}; };
+                          glm::vec3 Color{1.0f}; glm::vec3 Emissive{0.0f};
+                          int Probe = -1; };   // зонд отражений (ReflectionProbeSet::Pick)
 
     // Полупрозрачный кандидат. В отличие от непрозрачных, эти НЕЛЬЗЯ сложить в
     // бакеты по мешу и нарисовать в любом порядке: результат смешивания зависит
@@ -197,6 +198,7 @@ private:
         int LmPage;
         float Depth;           // квадрат расстояния до камеры (сортировка)
         bool Textured;
+        int Probe = -1;        // зонд отражений (ReflectionProbeSet::Pick)
     };
 
     // Кандидат кадра: заполняется ПОСЛЕДОВАТЕЛЬНЫМ проходом по реестру (чтение
@@ -251,14 +253,17 @@ private:
         Mesh* Mesh_ = nullptr;
         unsigned int Submesh = 0;
         int Cull = 0;   // sage::render::CullFaces
+        // Зонд отражений — часть ключа: объекты в разных комнатах отражают
+        // разное окружение и в одну пачку не складываются.
+        int Probe = -1;
         bool operator==(const MeshSlotKey& o) const {
-            return Mesh_ == o.Mesh_ && Submesh == o.Submesh && Cull == o.Cull;
+            return Mesh_ == o.Mesh_ && Submesh == o.Submesh && Cull == o.Cull && Probe == o.Probe;
         }
     };
     struct MeshSlotKeyHash {
         size_t operator()(const MeshSlotKey& k) const {
             return std::hash<const void*>()(k.Mesh_) ^ (std::hash<unsigned int>()(k.Submesh) << 1) ^
-                   (std::hash<int>()(k.Cull) << 2);
+                   (std::hash<int>()(k.Cull) << 2) ^ (std::hash<int>()(k.Probe) << 3);
         }
     };
 
@@ -277,14 +282,16 @@ private:
         Mesh* Mesh_ = nullptr;
         unsigned int Submesh = 0;
         Shader* Program = nullptr;
+        int Probe = -1;
         bool operator==(const CustomKey& o) const {
-            return Mesh_ == o.Mesh_ && Submesh == o.Submesh && Program == o.Program;
+            return Mesh_ == o.Mesh_ && Submesh == o.Submesh && Program == o.Program &&
+                   Probe == o.Probe;
         }
     };
     struct CustomKeyHash {
         size_t operator()(const CustomKey& k) const {
             return std::hash<const void*>()(k.Mesh_) ^ (std::hash<const void*>()(k.Program) << 1) ^
-                   (std::hash<unsigned int>()(k.Submesh) << 2);
+                   (std::hash<unsigned int>()(k.Submesh) << 2) ^ (std::hash<int>()(k.Probe) << 3);
         }
     };
     struct CustomGroup {
@@ -319,6 +326,9 @@ private:
     std::vector<TransparentItem> m_transparent;                    // полупрозрачные (по глубине)
     std::unordered_map<CustomKey, CustomGroup, CustomKeyHash> m_custom; // свои шейдеры
     glm::vec3 m_viewPos{0.0f}; // позиция камеры кадра — по ней сортируются прозрачные
+    // Зонды отражений этого прохода (nullptr — только небо). По ним сбор
+    // раскладывает объекты по зондам.
+    const sage::render::ReflectionProbeSet* m_probes = nullptr;
     float m_time = 0.0f;       // время сцены — юниформа uTime собственных шейдеров
     std::vector<MeshInstance> m_transparentBatch; // буфер пачки прозрачных (переиспользуется)
     std::vector<unsigned int> m_customOrder;      // перестановка инстансов при сортировке группы

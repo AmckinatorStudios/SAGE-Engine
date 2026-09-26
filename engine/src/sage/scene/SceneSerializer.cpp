@@ -180,6 +180,40 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["skybox"]["moonColor"] = Vec3ToJson(lighting.Skybox.MoonColor);
     j["skybox"]["moonSize"] = lighting.Skybox.MoonSize;
     j["skybox"]["stars"] = lighting.Skybox.StarIntensity;
+    {
+        // Форма процедурного неба — отдельным объектом: полей много, и в
+        // общей куче ключей неба их не найти глазами.
+        const SkyboxSettings& s = lighting.Skybox;
+        json& sh = j["skybox"]["shape"];
+        sh["gradientExponent"] = s.GradientExponent;
+        sh["horizonSoftness"] = s.HorizonSoftness;
+        sh["horizonOffset"] = s.HorizonOffset;
+        sh["ground"] = s.Ground;
+        sh["groundColor"] = Vec3ToJson(s.GroundColor);
+        sh["nightGroundColor"] = Vec3ToJson(s.NightGroundColor);
+        sh["groundBlend"] = s.GroundBlend;
+        sh["sunShape"] = s.SunShape == SkyboxSettings::DiscShape::Square ? "square" : "round";
+        sh["moonShape"] = s.MoonShape == SkyboxSettings::DiscShape::Square ? "square" : "round";
+        sh["sunBrightness"] = s.SunBrightness;
+        sh["sunGlow"] = s.SunGlow;
+        sh["moonPhase"] = s.MoonPhase;
+        sh["sunTexture"] = s.SunTexture;
+        sh["moonTexture"] = s.MoonTexture;
+        sh["pixelArt"] = s.PixelArt;
+        sh["starDensity"] = s.StarDensity;
+        sh["starSize"] = s.StarSize;
+        json& cl = j["skybox"]["clouds"];
+        cl["enabled"] = s.Clouds;
+        cl["style"] = s.CloudKind == SkyboxSettings::CloudStyle::Soft ? "soft" : "blocky";
+        cl["color"] = Vec3ToJson(s.CloudColor);
+        cl["nightColor"] = Vec3ToJson(s.NightCloudColor);
+        cl["height"] = s.CloudHeight;
+        cl["scale"] = s.CloudScale;
+        cl["coverage"] = s.CloudCoverage;
+        cl["opacity"] = s.CloudOpacity;
+        cl["wind"] = json::array({s.CloudWind.x, s.CloudWind.y});
+        cl["fade"] = s.CloudFade;
+    }
 
     // Дальность теней сцены. Ноль (по умолчанию) — «взять из настроек движка»,
     // и такие сцены ведут себя ровно как до появления поля.
@@ -303,6 +337,45 @@ static LightingEnvironment LightingFromJson(const json& root) {
         if (sj.contains("moonColor")) lighting.Skybox.MoonColor = Vec3FromJson(sj["moonColor"]);
         lighting.Skybox.MoonSize = sj.value("moonSize", lighting.Skybox.MoonSize);
         lighting.Skybox.StarIntensity = sj.value("stars", lighting.Skybox.StarIntensity);
+        SkyboxSettings& s = lighting.Skybox;
+        if (sj.contains("shape") && sj["shape"].is_object()) {
+            const json& sh = sj["shape"];
+            s.GradientExponent = sh.value("gradientExponent", s.GradientExponent);
+            s.HorizonSoftness = sh.value("horizonSoftness", s.HorizonSoftness);
+            s.HorizonOffset = sh.value("horizonOffset", s.HorizonOffset);
+            s.Ground = sh.value("ground", s.Ground);
+            if (sh.contains("groundColor")) s.GroundColor = Vec3FromJson(sh["groundColor"]);
+            if (sh.contains("nightGroundColor"))
+                s.NightGroundColor = Vec3FromJson(sh["nightGroundColor"]);
+            s.GroundBlend = sh.value("groundBlend", s.GroundBlend);
+            s.SunShape = sh.value("sunShape", std::string("round")) == "square"
+                             ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
+            s.MoonShape = sh.value("moonShape", std::string("round")) == "square"
+                              ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
+            s.SunBrightness = sh.value("sunBrightness", s.SunBrightness);
+            s.SunGlow = sh.value("sunGlow", s.SunGlow);
+            s.MoonPhase = sh.value("moonPhase", s.MoonPhase);
+            s.SunTexture = sh.value("sunTexture", s.SunTexture);
+            s.MoonTexture = sh.value("moonTexture", s.MoonTexture);
+            s.PixelArt = sh.value("pixelArt", s.PixelArt);
+            s.StarDensity = sh.value("starDensity", s.StarDensity);
+            s.StarSize = sh.value("starSize", s.StarSize);
+        }
+        if (sj.contains("clouds") && sj["clouds"].is_object()) {
+            const json& cl = sj["clouds"];
+            s.Clouds = cl.value("enabled", s.Clouds);
+            s.CloudKind = cl.value("style", std::string("blocky")) == "soft"
+                              ? SkyboxSettings::CloudStyle::Soft : SkyboxSettings::CloudStyle::Blocky;
+            if (cl.contains("color")) s.CloudColor = Vec3FromJson(cl["color"]);
+            if (cl.contains("nightColor")) s.NightCloudColor = Vec3FromJson(cl["nightColor"]);
+            s.CloudHeight = cl.value("height", s.CloudHeight);
+            s.CloudScale = cl.value("scale", s.CloudScale);
+            s.CloudCoverage = cl.value("coverage", s.CloudCoverage);
+            s.CloudOpacity = cl.value("opacity", s.CloudOpacity);
+            if (cl.contains("wind") && cl["wind"].is_array() && cl["wind"].size() == 2)
+                s.CloudWind = glm::vec2(cl["wind"][0].get<float>(), cl["wind"][1].get<float>());
+            s.CloudFade = cl.value("fade", s.CloudFade);
+        }
     }
     return lighting;
 }

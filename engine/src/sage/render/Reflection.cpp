@@ -2,6 +2,7 @@
 #include "sage/core/Profiler.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <string>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -36,7 +37,127 @@ const glm::vec3 kFaceUp[6] = {
     { 0.0f, -1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f},
 };
 
+// СВЁРТКА ПО GGX — то, чем мип куба становится шероховатостью.
+//
+// Раньше мипы строила аппаратная фильтрация (среднее четырёх текселей). Это
+// уменьшенная копия, а не размытое отражение: на средней шероховатости матовый
+// материал показывал узнаваемую, только крупно-пиксельную картинку комнаты —
+// кубики на пластике, «отражение там, где его быть не должно», — а на стыках
+// граней ступеньки. Здесь каждый мип — честный интеграл окружения по лепестку
+// GGX своей шероховатости (importance sampling, Karis 2013), с выборкой из
+// мипа источника по плотности сэмпла (filtered importance sampling): 64 луча
+// дают гладкий результат без шума.
+const char* kPrefilterVS = R"GLSL(
+#version 330 core
+out vec3 vDir;
+uniform mat4 uInvProj;
+uniform mat4 uInvViewRot;
+void main() {
+    vec2 pos = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+    vec2 ndc = pos * 2.0 - 1.0;
+    vec4 vp = uInvProj * vec4(ndc, 1.0, 1.0);
+    // Не нормализуем до фрагментного шейдера — см. SkyRenderer.cpp.
+    vDir = mat3(uInvViewRot) * (vp.xyz / vp.w);
+    gl_Position = vec4(ndc, 1.0, 1.0);
+}
+)GLSL";
+
+const char* kPrefilterFS = R"GLSL(
+#version 330 core
+in vec3 vDir;
+out vec4 FragColor;
+uniform samplerCube uSrc;
+uniform float uRough;
+uniform float uSrcSize;
+uniform float uSrcMaxLod;
+const float PI = 3.14159265;
+const uint kSamples = 64u;
+
+float RadicalInverse(uint bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+void main() {
+    vec3 N = normalize(vDir);
+    // Нулевой мип — зеркало: копия без свёртки.
+    if (uRough < 1e-3) {
+        FragColor = vec4(textureLod(uSrc, N, 0.0).rgb, 1.0);
+        return;
+    }
+    float a = uRough * uRough;
+    float a2 = a * a;
+    vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 T = normalize(cross(up, N));
+    vec3 B = cross(N, T);
+    // Телесный угол одного текселя нулевого мипа источника.
+    float saTexel = 4.0 * PI / (6.0 * uSrcSize * uSrcSize);
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    for (uint i = 0u; i < kSamples; ++i) {
+        vec2 xi = vec2(float(i) / float(kSamples), RadicalInverse(i));
+        float phi = 2.0 * PI * xi.x;
+        float cosT = sqrt((1.0 - xi.y) / (1.0 + (a2 - 1.0) * xi.y));
+        float sinT = sqrt(max(1.0 - cosT * cosT, 0.0));
+        vec3 H = T * (cos(phi) * sinT) + B * (sin(phi) * sinT) + N * cosT;
+        vec3 L = 2.0 * dot(N, H) * H - N;
+        float NdotL = dot(N, L);
+        if (NdotL <= 0.0) continue;
+        // Плотность сэмпла: D·NdotH / (4·VdotH), а при N = V это D / 4.
+        float d = cosT * cosT * (a2 - 1.0) + 1.0;
+        float pdf = a2 / (PI * d * d) * 0.25;
+        float saSample = 1.0 / (float(kSamples) * pdf + 1e-4);
+        float lod = clamp(0.5 * log2(saSample / saTexel) + 1.0, 0.0, uSrcMaxLod);
+        sum += textureLod(uSrc, L, lod).rgb * NdotL;
+        wsum += NdotL;
+    }
+    FragColor = vec4(sum / max(wsum, 1e-4), 1.0);
+}
+)GLSL";
+
+// Сколько мипов у свёрнутого куба. Шесть (128 → 4) — шкала «зеркало →
+// матовое»: грань в 4 текселя уже ровнее любого лепестка, а ещё меньшие мипы
+// только стоят времени свёртки.
+constexpr int kFilteredMips = 6;
+
 } // namespace
+
+SkyCelestials ReflectedSky(const LightingEnvironment& env) {
+    // Форма неба, низ и облака — те же, что в кадре: иначе вода под небом
+    // Minecraft отражала бы небо движка по умолчанию.
+    SkyCelestials c = CelestialsFromEnvironment(env);
+    // Диски светил в куб НЕ идут. Солнце уже даёт блик прямым светом (см.
+    // PbrContrib), и его диск в отражении — второй блик рядом с первым; к тому
+    // же он в шесть раз ярче неба и при размытии по шероховатости растекается
+    // пятном по всему матовому материалу.
+    c.Enabled = false;
+    return c;
+}
+
+std::string SkyShapeKey(const SkyCelestials& c) {
+    // Строкой, а не operator==: полей три десятка, и забытое в сравнении поле
+    // означало бы отражение, которое не обновляется от одной-единственной
+    // настройки. Время в ключ не входит: облака в отражении не плывут —
+    // переснимать куб каждый кадр ради них слишком дорого.
+    char buf[768];
+    std::snprintf(buf, sizeof(buf),
+                  "%g %g %g %d %g %g %g %g|%d %d %g %g %d|%g %g|%d %d %g %g %g %g %g %g %g %g %g %g|"
+                  "%d %g %g %g %g %g %g %g %g %g %g",
+                  c.GradientExponent, c.HorizonSoftness, c.HorizonOffset, (int)c.Ground,
+                  c.GroundColor.x, c.GroundColor.y, c.GroundColor.z, c.GroundBlend,
+                  c.SunShape, c.MoonShape, c.SunBrightness, c.SunGlow, (int)c.MoonPhase,
+                  c.StarDensity, c.StarSize,
+                  (int)c.Clouds, c.CloudStyle, c.CloudColor.x, c.CloudColor.y, c.CloudColor.z,
+                  c.CloudHeight, c.CloudScale, c.CloudCoverage, c.CloudOpacity, c.CloudFade,
+                  c.CloudWind.x, c.CloudWind.y,
+                  (int)c.HeightFog, c.FogColor.x, c.FogColor.y, c.FogColor.z, c.FogDensity,
+                  c.FogFalloff, c.FogHeight, c.FogMaxOpacity, c.FogSunScatter, c.FogSunExponent);
+    return std::string(buf) + "|" + c.SunTexture + "|" + c.MoonTexture;
+}
 
 glm::mat4 EnvironmentMap::FaceView(int face, const glm::vec3& pos) {
     if (face < 0 || face > 5) face = 0;
@@ -49,48 +170,95 @@ glm::mat4 EnvironmentMap::FaceProj(float nearClip, float farClip) {
 }
 
 EnvironmentMap::EnvironmentMap(int size) {
-    sage::rhi::CubeRenderTargetDesc desc;
-    desc.Size = size;
-    desc.WithDepth = true;
-    m_cube = sage::rhi::GraphicsDevice::Get().CreateCubeRenderTarget(desc);
-    if (!m_cube) {
-        LOG_WARN("Reflection") << "Бэкенд не умеет кубические таргеты — отражения окружения выключены";
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    // Два куба: СЫРОЙ — в него снимается сцена (с глубиной и обычными
+    // мипами для выборки свёртки), и СВЁРНУТЫЙ — его читает шейдер материала.
+    // Один куб на оба дела нельзя: свёртка читает нулевой мип и пишет в
+    // остальные, а читать и писать одну текстуру за проход GL не разрешает.
+    sage::rhi::CubeRenderTargetDesc raw;
+    raw.Size = size;
+    raw.WithDepth = true;
+    m_raw = device.CreateCubeRenderTarget(raw);
+    sage::rhi::CubeRenderTargetDesc filtered;
+    filtered.Size = size;
+    filtered.WithDepth = false;
+    filtered.MipLevels = kFilteredMips;
+    m_cube = device.CreateCubeRenderTarget(filtered);
+    if (m_raw && m_cube) {
+        m_filter = device.CreateShaderProgram(kPrefilterVS, kPrefilterFS);
+        m_quad = device.CreateGeometry(sage::rhi::VertexLayout{});
     }
+    if (!m_raw || !m_cube || !m_filter || !m_quad) {
+        LOG_WARN("Reflection") << "Бэкенд не умеет кубические таргеты — отражения окружения выключены";
+        m_raw.reset();
+        m_cube.reset();
+    }
+}
+
+EnvironmentMap::~EnvironmentMap() = default;
+
+void EnvironmentMap::Prefilter() {
+    SAGE_PROFILE("Свёртка куба отражений");
+    sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
+    m_raw->GenerateMips();
+    dev.SetBlend(false);
+    dev.SetDepthTest(false);
+    dev.SetDepthWrite(false);
+    dev.SetCullMode(sage::rhi::CullMode::Off);
+    m_filter->Use();
+    m_raw->Bind(0);
+    m_filter->SetInt("uSrc", 0);
+    m_filter->SetFloat("uSrcSize", (float)m_raw->Size());
+    m_filter->SetFloat("uSrcMaxLod", (float)(m_raw->MipLevels() - 1));
+    m_filter->SetMat4("uInvProj", glm::inverse(FaceProj(0.1f, 10.0f)));
+    const int mips = m_cube->MipLevels();
+    for (int mip = 0; mip < mips; ++mip) {
+        // Шероховатость мипа — та же линейная шкала, по которой его выбирает
+        // шейдер материала (rough * uEnvMaxLod, см. SpecularIBL).
+        m_filter->SetFloat("uRough", mips > 1 ? (float)mip / (float)(mips - 1) : 0.0f);
+        for (int face = 0; face < 6; ++face) {
+            m_cube->BindFace(face, mip);
+            m_filter->SetMat4("uInvViewRot",
+                              glm::mat4(glm::transpose(glm::mat3(FaceView(face, glm::vec3(0.0f))))));
+            m_quad->DrawArrays(3);
+        }
+    }
+    dev.SetCullMode(sage::rhi::CullMode::Back);
+    dev.SetDepthWrite(true);
+    dev.SetDepthTest(true);
 }
 
 void EnvironmentMap::Capture(const glm::vec3& pos, float nearClip, float farClip,
                              const FaceDraw& draw) {
-    if (!m_cube || !draw) return;
+    if (!Valid() || !draw) return;
     m_position = pos;
     const glm::mat4 proj = FaceProj(nearClip, farClip);
     for (int face = 0; face < 6; ++face) {
-        m_cube->BindFace(face, 0);
+        m_raw->BindFace(face, 0);
         draw(FaceView(face, pos), proj);
     }
-    // Мипы — уже по всем шести граням: строить их по одной нельзя, фильтр
-    // соседнего мипа на краю грани заглядывает к соседям.
-    m_cube->GenerateMips();
+    Prefilter();
 }
 
 void EnvironmentMap::CaptureSky(SkyRenderer& sky, const LightingEnvironment& env,
                                 const Skybox* cubemap) {
     SAGE_PROFILE("Куб окружения");
-    if (!m_cube) return;
+    if (!Valid()) return;
     m_position = glm::vec3(0.0f);
     m_hasBox = false;      // небо бесконечно, коробку к нему приложить не к чему
     const glm::mat4 proj = FaceProj(0.1f, 10.0f);
     sage::rhi::GraphicsDevice& dev = sage::rhi::GraphicsDevice::Get();
     for (int face = 0; face < 6; ++face) {
-        m_cube->BindFace(face, 0);
+        m_raw->BindFace(face, 0);
         dev.Clear(true, true);
         const glm::mat4 view = FaceView(face, glm::vec3(0.0f));
         if (cubemap) cubemap->Draw(view, proj, env.Skybox.Intensity, env.Skybox.RotationDeg);
         // ЦВЕТА РАЗРЕШЁННЫЕ, а не авторские: в них учтено время суток (см.
         // sage/render/SkyModel.h). С полями настроек вода ночью отражала бы
         // полуденное небо — то есть светилась бы ярче, чем всё вокруг.
-        else sky.Draw(view, proj, env.SkyTop(), env.SkyHorizon());
+        else sky.Draw(view, proj, env.SkyTop(), env.SkyHorizon(), ReflectedSky(env));
     }
-    m_cube->GenerateMips();
+    Prefilter();
 }
 
 // ---------------------------------------------------------------------------
@@ -127,38 +295,44 @@ int UpdateReflectionProbes(Scene& scene, const EnvironmentMap::FaceDraw& draw, i
     return captured;
 }
 
-const EnvironmentMap* PickReflectionProbe(Scene& scene, const glm::vec3& cameraPos,
-                                          float* outIntensity) {
-    const EnvironmentMap* best = nullptr;
-    float bestScore = 0.0f;
-    float bestIntensity = 1.0f;
-    bool bestInside = false;
+int ReflectionProbeSet::Pick(const glm::vec3& p) const {
+    for (int i = 0; i < (int)Entries.size(); ++i) {
+        const Entry& e = Entries[(size_t)i];
+        if (glm::all(glm::greaterThanEqual(p, e.Min)) && glm::all(glm::lessThanEqual(p, e.Max)))
+            return i;
+    }
+    return -1;
+}
 
+ReflectionProbeSet CollectReflectionProbes(Scene& scene) {
+    ReflectionProbeSet set;
     auto view = scene.Registry().view<ReflectionProbeComponent, Transform>();
     for (auto e : view) {
         const ReflectionProbeComponent& probe = view.get<ReflectionProbeComponent>(e);
         const auto env = std::static_pointer_cast<EnvironmentMap>(probe.Runtime);
         if (!env || !env->Valid() || probe.Dirty) continue;   // ещё не снят
-
         const glm::vec3 pos(scene.WorldMatrix(e)[3]);
-        const glm::vec3 d = glm::abs(cameraPos - pos);
-        const bool inside = glm::all(glm::lessThanEqual(d, probe.BoxHalfExtents));
-        // Внутри коробки — «объём» коробки (меньше значит теснее и подробнее);
-        // снаружи — расстояние. Разные величины не сравниваются: сначала
-        // предпочтение отдаётся любому зонду, внутри которого стоит камера.
-        const float score = inside ? (probe.BoxHalfExtents.x * probe.BoxHalfExtents.y *
-                                      probe.BoxHalfExtents.z)
-                                   : glm::length(cameraPos - pos);
-        const bool better = !best || (inside && !bestInside) ||
-                            (inside == bestInside && score < bestScore);
-        if (!better) continue;
-        best = env.get();
-        bestScore = score;
-        bestIntensity = probe.Intensity;
-        bestInside = inside;
+        const glm::vec3 half = glm::abs(probe.BoxHalfExtents);
+        set.Entries.push_back({env.get(), probe.Intensity, pos - half, pos + half});
     }
-    if (outIntensity && best) *outIntensity = bestIntensity;
-    return best;
+    std::stable_sort(set.Entries.begin(), set.Entries.end(),
+                     [](const ReflectionProbeSet::Entry& a, const ReflectionProbeSet::Entry& b) {
+                         const glm::vec3 da = a.Max - a.Min, db = b.Max - b.Min;
+                         return da.x * da.y * da.z < db.x * db.y * db.z;
+                     });
+    return set;
+}
+
+ReflectionBinding ReflectionBinding::ForProbe(int probe) const {
+    ReflectionBinding b = *this;
+    if (Probes && probe >= 0 && probe < (int)Probes->Entries.size()) {
+        const ReflectionProbeSet::Entry& e = Probes->Entries[(size_t)probe];
+        b.Env = e.Env;
+        // Общая сила отражений сцены действует и на зонды: иначе ползунок
+        // «Отражения» в окружении гасил бы небо и не трогал комнаты.
+        b.Intensity = Intensity * e.Intensity;
+    }
+    return b;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,8 +361,11 @@ void ReflectionSystem::UpdateSky(SkyRenderer& sky, const LightingEnvironment& en
     }
     // Сравниваются РАЗРЕШЁННЫЕ цвета: по авторским куб не пересняли бы ни разу
     // за весь заход солнца — они не меняются, меняется время суток.
+    // Форма неба — тоже часть ключа: поменяли низ или облака — вода обязана
+    // это отразить, хотя цвета зенита и горизонта остались прежними.
+    const std::string shape = cubemap ? std::string() : SkyShapeKey(ReflectedSky(env));
     if (m_captured && m_skyTop == env.SkyTop() &&
-        m_skyHorizon == env.SkyHorizon() && m_skyCubemap == dir &&
+        m_skyHorizon == env.SkyHorizon() && m_skyCubemap == dir && m_skyShape == shape &&
         m_skyIntensity == env.Skybox.Intensity && m_skyRotation == env.Skybox.RotationDeg) {
         return;
     }
@@ -197,6 +374,7 @@ void ReflectionSystem::UpdateSky(SkyRenderer& sky, const LightingEnvironment& en
     e.CaptureSky(sky, env, cubemap);
     m_skyTop = env.SkyTop();
     m_skyHorizon = env.SkyHorizon();
+    m_skyShape = shape;
     m_skyCubemap = dir;
     m_skyIntensity = env.Skybox.Intensity;
     m_skyRotation = env.Skybox.RotationDeg;
@@ -214,6 +392,7 @@ void ReflectionSystem::CaptureScene(const glm::vec3& pos, float nearClip, float 
     // куб, иначе он молча оставил бы в нём снимок сцены.
     m_skyTop = glm::vec3(-1.0f);
     m_skyHorizon = glm::vec3(-1.0f);
+    m_skyShape.clear();
     m_skyCubemap.clear();
     m_skyIntensity = -1.0f;
 }

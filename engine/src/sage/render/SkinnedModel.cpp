@@ -370,8 +370,9 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
 
     // Тени от солнца: каскады на свои юниты + матрицы — как у статики.
     BindAndUploadShadows(shader, shadows);
-    // Отражения — тоже как у статики, включая пустую привязку (см. RenderBatch).
-    sage::render::UploadReflection(shader, reflections ? *reflections
+    // Отражения — тоже как у статики, включая пустую привязку (см. RenderBatch),
+    // и зонд — по положению персонажа, а не камеры (см. ReflectionProbeSet).
+    sage::render::UploadReflection(shader, reflections ? reflections->At(glm::vec3(entityModel[3]))
                                                        : sage::render::ReflectionBinding{});
 
     int boneCount = std::min((int)bones.size(), kMaxBones);

@@ -645,6 +645,118 @@ void TestSkyRayDirection() {
     Check(worst <= 8.0, "луч неба совпадает с лучом камеры");
 }
 
+// --- Небо: форма настраивается -----------------------------------------------
+//
+// Форма градиента, низ неба, квадратное солнце и облака. Ответ — снова
+// АНАЛИТИЧЕСКИЙ: шейдер обязан посчитать ровно то, что говорят настройки.
+// До появления настроек низ неба всегда был цветом горизонта, солнце — только
+// кругом с ореолом, облаков не было вовсе: клон неба Minecraft собрать было
+// нельзя.
+void TestSkyShape() {
+    SkyRenderer sky;
+    constexpr int w = 256, h = 128;
+    const glm::vec3 top(0.05f, 0.10f, 0.55f);
+    const glm::vec3 horizon(0.9f, 0.85f, 0.7f);
+    const glm::vec3 ground(0.1f, 0.2f, 0.9f);
+    const float fov = glm::radians(100.0f);
+    const float aspect = (float)w / (float)h;
+    const glm::mat4 proj = glm::perspective(fov, aspect, 0.1f, 500.0f);
+    const glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, -1.0f),
+                                       glm::vec3(0.0f, 1.0f, 0.0f));
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    auto render = [&](const SkyCelestials& c) {
+        Framebuffer fbo(w, h);
+        fbo.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        sky.Draw(view, proj, top, horizon, c);
+        Image img = Capture(w, h);
+        device.BindDefaultFramebuffer();
+        return img;
+    };
+    const float tanHalf = std::tan(fov * 0.5f);
+    auto rayAt = [&](int x, int y) {
+        const float ndcX = ((x + 0.5f) / w) * 2.0f - 1.0f;
+        const float ndcY = 1.0f - ((y + 0.5f) / h) * 2.0f;
+        return glm::normalize(glm::vec3(ndcX * tanHalf * aspect, ndcY * tanHalf, -1.0f));
+    };
+    auto pixelOf = [&](const glm::vec3& dir) {
+        const glm::vec4 clip = proj * view * glm::vec4(glm::vec3(0.0f, 1.0f, 0.0f) + dir * 10.0f, 1.0f);
+        const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+        return glm::ivec2((int)((ndc.x * 0.5f + 0.5f) * w), (int)((0.5f - ndc.y * 0.5f) * h));
+    };
+    auto at = [&](const Image& img, glm::ivec2 p, int c) {
+        return (int)img.Pixels[((size_t)p.y * img.Width + p.x) * 3 + c];
+    };
+
+    // 1. Кривая, сдвиг горизонта и свой цвет ниже горизонта — поточечно.
+    SkyCelestials shape;
+    shape.GradientExponent = 1.0f;
+    shape.HorizonSoftness = 0.0f;
+    shape.HorizonOffset = -0.1f;
+    shape.Ground = true;
+    shape.GroundColor = ground;
+    shape.GroundBlend = 0.0f;
+    const Image img = render(shape);
+    int bad = 0, groundPixels = 0;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const float yy = rayAt(x, y).y + 0.1f;
+            glm::vec3 expect = glm::mix(horizon, top, glm::clamp(yy, 0.0f, 1.0f));
+            if (yy < 0.0f) { expect = ground; ++groundPixels; }
+            for (int c = 0; c < 3; ++c)
+                if (std::abs(at(img, {x, y}, c) - expect[c] * 255.0f) > 8.0f) { ++bad; break; }
+        }
+    std::printf("       форма неба: пикселей ниже горизонта %d, расхождений %d\n", groundPixels, bad);
+    Check(groundPixels > 1000, "сдвинутый горизонт оставил кадру низ неба");
+    // Край «низа» резкий: пиксель на самой границе может уйти в любую сторону.
+    Check(bad <= w, "градиент, сдвиг горизонта и низ неба — как в настройках");
+
+    // 2. Квадратное солнце: угол квадрата (внутри квадрата, но вне вписанного
+    //    круга) светится у квадрата и тёмен у круга.
+    SkyCelestials disc;
+    disc.Enabled = true;
+    disc.SunDir = glm::normalize(glm::vec3(0.0f, 0.35f, -1.0f));
+    disc.SunColor = {1.0f, 0.0f, 0.0f};
+    disc.SunSize = 0.15f;
+    disc.SunBrightness = 1.0f;
+    disc.SunGlow = 0.0f;
+    disc.Moon = false;
+    disc.StarDensity = 0.0f;
+    const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0, 1, 0), disc.SunDir));
+    const glm::vec3 up = glm::cross(disc.SunDir, right);
+    const float t = std::tan(disc.SunSize);
+    const glm::ivec2 corner = pixelOf(disc.SunDir + (right + up) * (0.8f * t));
+    const glm::ivec2 centre = pixelOf(disc.SunDir);
+    const Image round = render(disc);
+    disc.SunShape = 1;
+    const Image square = render(disc);
+    std::printf("       солнце: центр круг %d / квадрат %d, угол круг %d / квадрат %d\n",
+                at(round, centre, 0), at(square, centre, 0), at(round, corner, 0), at(square, corner, 0));
+    Check(at(square, centre, 0) >= 250 && at(round, centre, 0) >= 250, "центр диска светится у обеих форм");
+    Check(at(square, corner, 0) >= 250, "угол квадрата светится у квадратного солнца");
+    Check(at(round, corner, 0) < 250, "у круглого солнца угол квадрата — уже небо");
+
+    // 3. Облака: сплошной слой виден над горизонтом и не виден под ним.
+    SkyCelestials clouds;
+    clouds.Clouds = true;
+    clouds.CloudColor = {0.0f, 1.0f, 0.0f};
+    clouds.CloudCoverage = 1.0f;
+    clouds.CloudOpacity = 1.0f;
+    clouds.CloudFade = 1e6f;
+    clouds.CloudHeight = 100.0f;
+    const Image cl = render(clouds);
+    const glm::ivec2 upPix = pixelOf(glm::normalize(glm::vec3(0.0f, 0.8f, -1.0f)));
+    const glm::ivec2 downPix = pixelOf(glm::normalize(glm::vec3(0.0f, -0.4f, -1.0f)));
+    std::printf("       облака: над горизонтом G=%d R=%d, под ним G=%d\n", at(cl, upPix, 1),
+                at(cl, upPix, 0), at(cl, downPix, 1));
+    Check(at(cl, upPix, 1) >= 250 && at(cl, upPix, 0) <= 5, "сплошные облака закрыли небо над головой");
+    Check(std::abs(at(cl, downPix, 1) - (int)(horizon.y * 255.0f)) <= 3, "под горизонтом облаков нет");
+    clouds.CloudCoverage = 0.0f;
+    const Image clear = render(clouds);
+    Check(at(clear, upPix, 1) < 200, "без покрытия облаков нет");
+}
+
 // --- Небо: ночь обязана быть ночью -------------------------------------------
 //
 // Жалоба звучала так: «солнце садится, а освещение не меняется — только звёзды
@@ -860,6 +972,7 @@ void RunSceneChecks(FrameRenderer& r) {
     TestOcclusionDoesNotEatShadows();
     TestAssetCache();
     TestSkyRayDirection();
+    TestSkyShape();
     TestSkyNightIsDark();
     TestSkyFromSingleImage();
     TestRhiConformance();

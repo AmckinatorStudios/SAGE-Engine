@@ -2,6 +2,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -12,6 +13,7 @@ class Scene;
 struct LightingEnvironment;
 class SkyRenderer;
 class Skybox;
+struct SkyCelestials;
 
 // ---------------------------------------------------------------------------
 // Отражения.
@@ -67,21 +69,28 @@ struct ReflectionSettings {
     float PlanarScale = 0.5f;   // доля разрешения кадра
 };
 
+// Небо, каким его снимают в карту отражений: форма, низ, облака и туман — как
+// в кадре, но без дисков светил (см. .cpp). И ключ этого вида — по нему
+// решается, пора ли переснимать.
+SkyCelestials ReflectedSky(const LightingEnvironment& env);
+std::string SkyShapeKey(const SkyCelestials& sky);
+
 // Карта окружения: cubemap с мипами, где мип — это шероховатость.
 //
 // Мипы не «уменьшенные копии для экономии», а шкала размытия: зеркало берёт
-// нулевой, матовая краска — дальний. Строятся аппаратной фильтрацией
-// (GenerateMips), а не сверткой по GGX: свёртка честнее, но стоит секунды на
-// зонд, а разница видна только на средней шероховатости. Честная оговорка —
-// это приближение, и именно поэтому мип выбирается по rough * MaxLod, а не по
-// физически выведенному углу.
+// нулевой, матовая краска — дальний. Каждый мип — свёртка окружения по
+// лепестку GGX своей шероховатости (rough = mip / MaxLod; см. Prefilter в
+// .cpp). Раньше мипы строила аппаратная фильтрация — уменьшенные копии, и
+// матовый пластик показывал крупнопиксельную, но узнаваемую картинку комнаты
+// вместо мягкого блика.
 class EnvironmentMap {
 public:
     // size — сторона грани. 128 хватает: отражение либо размыто шероховатостью,
     // либо его перекрывают SSR/плоское отражение, которые куда подробнее.
     explicit EnvironmentMap(int size = 128);
+    ~EnvironmentMap();
 
-    bool Valid() const { return m_cube != nullptr; }
+    bool Valid() const { return m_cube != nullptr && m_raw != nullptr; }
     void Bind(int unit) const { if (m_cube) m_cube->Bind(unit); }
     float MaxLod() const { return m_cube ? (float)(m_cube->MipLevels() - 1) : 0.0f; }
     int Size() const { return m_cube ? m_cube->Size() : 0; }
@@ -124,7 +133,13 @@ public:
     static glm::mat4 FaceProj(float nearClip, float farClip);
 
 private:
-    std::unique_ptr<sage::rhi::CubeRenderTarget> m_cube;
+    // Сырой снимок -> свёрнутые мипы m_cube.
+    void Prefilter();
+
+    std::unique_ptr<sage::rhi::CubeRenderTarget> m_raw;    // снимок сцены/неба
+    std::unique_ptr<sage::rhi::CubeRenderTarget> m_cube;   // свёрнутый, его читают материалы
+    std::unique_ptr<sage::rhi::ShaderProgram> m_filter;
+    std::unique_ptr<sage::rhi::Geometry> m_quad;
     glm::vec3 m_position{0.0f};
     glm::vec3 m_boxMin{0.0f}, m_boxMax{0.0f};
     bool m_hasBox = false;
@@ -178,12 +193,53 @@ private:
     bool m_valid = false;
 };
 
+// Зонды кадра: карты и их коробки влияния.
+//
+// ЗОНД ВЫБИРАЕТСЯ ДЛЯ КАЖДОГО ОБЪЕКТА, а не для камеры. Раньше зонд выбирался
+// по положению камеры и отдавался ВСЕМ объектам кадра, а стоящей вне коробок
+// камере доставался просто ближайший. Отсюда оба дефекта, которые видно
+// глазами: предмет в двадцати метрах от комнаты отражал интерьер этой комнаты
+// (чужая картинка на матовой краске, «отражение появилось у того, у кого его
+// быть не должно»), а параллакс-коррекция по чужой коробке выгибала отражение
+// (у точки вне коробки поправки нет, у соседней внутри — есть, и картинка
+// рвалась по границе коробки). Теперь объект, чей центр лежит в коробке,
+// отражает этот зонд; вне всех коробок — небо.
+struct ReflectionProbeSet {
+    struct Entry {
+        const EnvironmentMap* Env = nullptr;
+        float Intensity = 1.0f;
+        glm::vec3 Min{0.0f}, Max{0.0f};
+    };
+    // По возрастанию объёма коробки: вложенная (кладовка в зале) проверяется
+    // раньше объемлющей и побеждает — она ближе к тому, что вокруг предмета.
+    std::vector<Entry> Entries;
+
+    // Зонд для точки: самая тесная коробка, в которой она лежит; -1 — ни в
+    // одной (отражается небо).
+    int Pick(const glm::vec3& p) const;
+    bool Empty() const { return Entries.empty(); }
+};
+
+// Готовые (снятые) зонды сцены. Зовётся раз за кадр, после
+// UpdateReflectionProbes.
+ReflectionProbeSet CollectReflectionProbes(Scene& scene);
+
 // Всё, что проход сцены отдаёт шейдерам про отражения. Одна структура, а не
 // список аргументов: набор источников растёт, и каждый новый иначе пришлось бы
 // протаскивать через все проходы поимённо.
 struct ReflectionBinding {
     const EnvironmentMap* Env = nullptr;
     float Intensity = 1.0f;
+    // Зонды кадра (может не быть). Env выше — небо: его отражает всё, что не
+    // попало ни в одну коробку.
+    const ReflectionProbeSet* Probes = nullptr;
+
+    // Привязка для объекта с зондом probe (индекс из Probes->Pick; -1 — небо).
+    ReflectionBinding ForProbe(int probe) const;
+    // То же по точке (центр объекта).
+    ReflectionBinding At(const glm::vec3& p) const {
+        return ForProbe(Probes ? Probes->Pick(p) : -1);
+    }
 
     sage::rhi::TextureHandle PlanarTexture;   // невалидный — плоского отражения нет
     glm::vec2 ScreenTexel{0.0f};      // 1/размер кадра
@@ -255,6 +311,7 @@ private:
     // таймлайн, и уговориться, что все они дёргают флаг, не выйдет.
     glm::vec3 m_skyTop{-1.0f}, m_skyHorizon{-1.0f};
     std::string m_skyCubemap;      // какой набор граней снят сейчас
+    std::string m_skyShape;        // форма процедурного неба (SkyShapeKey)
     float m_skyIntensity = -1.0f;
     float m_skyRotation = 0.0f;
     bool m_captured = false;
@@ -277,12 +334,6 @@ private:
 // нечего, пока никто ничего не менял.
 int UpdateReflectionProbes(Scene& scene, const EnvironmentMap::FaceDraw& draw,
                            int maxPerCall = 1);
-
-// Выбирает зонд для камеры: сначала тот, в чьей коробке она стоит (из
-// нескольких — самый тесный, он подробнее), иначе ближайший по центру.
-// nullptr — зондов нет или ни один ещё не снят.
-const EnvironmentMap* PickReflectionProbe(Scene& scene, const glm::vec3& cameraPos,
-                                          float* outIntensity = nullptr);
 
 // Заливает uniform'ы отражений (имена совпадают с PbrShader.h). Выключенный
 // источник обязан быть выключен ЯВНО: невыставленный bool в GLSL равен нулю

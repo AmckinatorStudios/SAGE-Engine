@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "sage/ui/UIAnchor.h"
+#include "sage/render/SkyPresets.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/scene/Light.h"
 #include "sage/ui/UISceneSystem.h"
@@ -675,6 +676,68 @@ TEST(sky_celestials_sun_points_where_light_comes_from) {
 }
 
 
+TEST(sky_shape_reaches_renderer_with_time_of_day) {
+    // Форма неба, низ и облака доходят до рисования, а цвета низа и облаков
+    // темнеют по тому же времени суток, что и остальное небо.
+    LightingEnvironment env;
+    env.Skybox.Ground = true;
+    env.Skybox.GroundColor = {0.2f, 0.4f, 1.0f};
+    env.Skybox.NightGroundColor = {0.0f, 0.0f, 0.0f};
+    env.Skybox.Clouds = true;
+    env.Skybox.CloudColor = {1.0f, 1.0f, 1.0f};
+    env.Skybox.NightCloudColor = {0.0f, 0.0f, 0.0f};
+    env.Skybox.SunShape = SkyboxSettings::DiscShape::Square;
+    env.Skybox.GradientExponent = 1.5f;
+    env.DayFactor = 0.5f;
+    SkyCelestials c = CelestialsFromEnvironment(env);
+    CHECK_TRUE(c.Ground);
+    CHECK_TRUE(c.Clouds);
+    CHECK_EQ(c.SunShape, 1);
+    CHECK_NEAR(c.GradientExponent, 1.5f, 1e-6f);
+    CHECK_NEAR(c.GroundColor.z, 0.5f, 1e-5f);
+    CHECK_NEAR(c.CloudColor.x, 0.5f, 1e-5f);
+
+    // Одноцветное небо — заливка: ни низа, ни облаков.
+    env.Skybox.Kind = SkyboxSettings::Source::Solid;
+    c = CelestialsFromEnvironment(env);
+    CHECK_FALSE(c.Ground);
+    CHECK_FALSE(c.Clouds);
+}
+
+TEST(sky_presets_parse_and_keep_textured_sky) {
+    sage::render::SkyPreset p = sage::render::SkyPreset::Default;
+    CHECK_TRUE(sage::render::ParseSkyPreset("minecraft", p));
+    CHECK_TRUE(p == sage::render::SkyPreset::Minecraft);
+    CHECK_FALSE(sage::render::ParseSkyPreset("mars", p));
+
+    SkyboxSettings sky;
+    sky.ImagePath = "sky/space.png";
+    sky.Kind = SkyboxSettings::Source::Image;
+    sky.Intensity = 1.7f;
+    sky.DayNight = false;
+    sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Minecraft);
+    // Пресет — это ВИД процедурного неба: выбранная картинка, яркость и смена
+    // суток остаются решениями автора.
+    CHECK_TRUE(sky.Kind == SkyboxSettings::Source::Procedural);
+    CHECK_EQ(sky.ImagePath, std::string("sky/space.png"));
+    CHECK_NEAR(sky.Intensity, 1.7f, 1e-6f);
+    CHECK_FALSE(sky.DayNight);
+    // Узнаваемые приметы Minecraft.
+    CHECK_TRUE(sky.Ground);
+    CHECK_TRUE(sky.Clouds);
+    CHECK_TRUE(sky.CloudKind == SkyboxSettings::CloudStyle::Blocky);
+    CHECK_TRUE(sky.SunShape == SkyboxSettings::DiscShape::Square);
+    CHECK_NEAR(sky.SunGlow, 0.0f, 1e-6f);
+
+    // «По умолчанию» возвращает прежний вид целиком — без облаков Minecraft.
+    sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Default);
+    const SkyboxSettings def;
+    CHECK_FALSE(sky.Clouds);
+    CHECK_FALSE(sky.Ground);
+    CHECK_NEAR(sky.GradientExponent, def.GradientExponent, 1e-6f);
+    CHECK_NEAR(sky.TopColor.z, def.TopColor.z, 1e-6f);
+}
+
 TEST(UI_presets_are_the_same_everywhere) {
     // «Кнопка» — это не вид элемента, а НАБОР ЧАСТЕЙ. Знание об этом жило в
     // функции РЕДАКТОРА, то есть кнопку можно было получить только мышью:
@@ -869,6 +932,42 @@ TEST(UI2_masks_intersect_and_never_go_negative) {
     UIRect w = sage::ui::MaskWindow(m, UIRect{0, 0, 100, 100});
     CHECK_NEAR(w.x, 4.0f, 1e-4f);
     CHECK_NEAR(w.w, 92.0f, 1e-4f);
+}
+
+TEST(UI2_canvas_integer_scale_for_pixel_art) {
+    // Пиксельный интерфейс (Minecraft) масштабируется ЦЕЛЫМ числом: при
+    // дробном одни пиксели картинки выходят двумя экранными, соседние одним.
+    sage::ui::Canvas c;
+    c.Mode = sage::ui::Canvas::Scale::IntegerFit;
+    c.Reference = {320.0f, 240.0f};
+    CHECK_NEAR(sage::ui::CanvasScale(c, {1280.0f, 720.0f}), 3.0f, 1e-6f);   // 4 по ширине, 3 по высоте
+    CHECK_NEAR(sage::ui::CanvasScale(c, {1920.0f, 1080.0f}), 4.0f, 1e-6f);  // 1080/240 = 4.5 -> 4
+    CHECK_NEAR(sage::ui::CanvasScale(c, {300.0f, 200.0f}), 1.0f, 1e-6f);    // меньше опорного — 1, не 0
+    c.MaxScale = 2;
+    CHECK_NEAR(sage::ui::CanvasScale(c, {1920.0f, 1080.0f}), 2.0f, 1e-6f);  // «масштаб интерфейса 2»
+}
+
+TEST(UI_label_shadow_and_outline_survive_save) {
+    Scene scene("U");
+    GameObject e = scene.CreateObject("Level");
+    scene.Registry().emplace<sage::ui::Element>(e.Entity());
+    sage::ui::Label l;
+    l.Text = "30";
+    l.ShadowOffset = {3.0f, 3.0f};
+    l.ShadowColor = {0.25f, 0.25f, 0.25f, 1.0f};
+    l.OutlineWidth = 2.0f;
+    l.OutlineColor = {0.0f, 0.0f, 0.1f, 1.0f};
+    scene.Registry().emplace<sage::ui::Label>(e.Entity(), l);
+    auto loaded = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    GameObject back = loaded->FindByName("Level");
+    const auto* l2 = back.Valid() ? loaded->Registry().try_get<sage::ui::Label>(back.Entity()) : nullptr;
+    CHECK_TRUE(l2 != nullptr);
+    if (l2) {
+        CHECK_NEAR(l2->ShadowOffset.x, 3.0f, 1e-5f);
+        CHECK_NEAR(l2->ShadowColor.r, 0.25f, 1e-5f);
+        CHECK_NEAR(l2->OutlineWidth, 2.0f, 1e-5f);
+        CHECK_NEAR(l2->OutlineColor.b, 0.1f, 1e-5f);
+    }
 }
 
 TEST(UI2_canvas_scales_symmetrically) {

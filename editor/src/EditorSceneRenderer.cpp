@@ -64,7 +64,7 @@ void EditorSceneRenderer::DrawSky(const LightingEnvironment& env, const glm::mat
     // всего движка (sage/render/SkyDraw.h). Своя копия здесь означала бы, что
     // вьюпорт, панель Game и собранная игра показывают разное небо, стоит
     // появиться новому режиму.
-    sage::render::DrawSceneSky(*m_sky, env, view, proj);
+    sage::render::DrawSceneSky(*m_sky, env, view, proj, m_sceneTime);
 }
 
 void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnvironment& env) {
@@ -254,13 +254,11 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
     color.ViewId = viewId;
     color.Time = m_sceneTime;
     color.Reflection = m_reflections.Binding(1, 1);
-    // Зонд перебивает небо: если камера стоит в его коробке, отражается
-    // окружение, снятое им, а не небо вообще.
-    float probeIntensity = 1.0f;
-    if (const sage::render::EnvironmentMap* probe =
-            sage::render::PickReflectionProbe(scene, viewPos, &probeIntensity)) {
-        color.Reflection.Env = probe;
-        color.Reflection.Intensity = probeIntensity;
+    // Зонды — каждому объекту свой, по его положению (см. ReflectionProbeSet):
+    // выбор по камере раздавал интерьер комнаты всему кадру.
+    if (m_reflections.Enabled()) {
+        m_probeSet = sage::render::CollectReflectionProbes(scene);
+        color.Reflection.Probes = &m_probeSet;
     }
     m_lastStats = sage::render::RenderSceneColor(scene, m_batch, color);
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);

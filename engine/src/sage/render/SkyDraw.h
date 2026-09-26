@@ -47,8 +47,9 @@ glm::vec3 SceneClearColor(const LightingEnvironment& env);
 // отсутствующем файле нельзя, а чёрный фон вместо неба выглядит как поломка
 // рендера, а не как отсутствующий ассет.
 //
-// Ничего не делает, если небо у сцены выключено.
+// Ничего не делает, если небо у сцены выключено. time — секунды сцены: по
+// ним плывут облака (0 — облака стоят).
 void DrawSceneSky(SkyRenderer& fallback, const LightingEnvironment& env, const glm::mat4& view,
-                  const glm::mat4& proj);
+                  const glm::mat4& proj, float time = 0.0f);
 
 } // namespace sage::render

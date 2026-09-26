@@ -902,7 +902,7 @@ void PlayerLayer::OnRender() {
                     device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                     device.Clear(true, true);
                     if (m_sky && env.Skybox.Enabled)
-                        sage::render::DrawSceneSky(*m_sky, env, v, p);
+                        sage::render::DrawSceneSky(*m_sky, env, v, p, m_sceneTime);
                     sage::render::SceneColorInput c;
                     c.View = v;
                     c.Proj = p;
@@ -990,7 +990,7 @@ void PlayerLayer::OnRender() {
                                  const glm::vec3 mirrorEye =
                                      glm::vec3(glm::inverse(mv)[3]);
                                  if (m_sky && env.Skybox.Enabled)
-                                     sage::render::DrawSceneSky(*m_sky, env, mv, mp);
+                                     sage::render::DrawSceneSky(*m_sky, env, mv, mp, m_sceneTime);
                                  sage::render::SceneColorInput rc;
                                  rc.View = mv;
                                  rc.Proj = mp;
@@ -1087,7 +1087,7 @@ void PlayerLayer::OnRender() {
         }
 
         if (env.Skybox.Enabled) {
-            sage::render::DrawSceneSky(*m_sky, env, view, proj);
+            sage::render::DrawSceneSky(*m_sky, env, view, proj, m_sceneTime);
         }
 
         // Статика — через RenderBatch: отсечение по фрустуму + инстансный батчинг.
@@ -1102,12 +1102,9 @@ void PlayerLayer::OnRender() {
         color.Reflection = m_reflections.Binding(
             vpW, vpH, wantPlanar ? m_planar.Texture() : sage::rhi::TextureHandle{});
         if (wantReflections) {
-            float probeIntensity = 1.0f;
-            if (const sage::render::EnvironmentMap* probe =
-                    sage::render::PickReflectionProbe(*m_scene, viewPos, &probeIntensity)) {
-                color.Reflection.Env = probe;
-                color.Reflection.Intensity = probeIntensity;
-            }
+            // Зонд — каждому объекту по его положению (см. ReflectionProbeSet).
+            m_probeSet = sage::render::CollectReflectionProbes(*m_scene);
+            color.Reflection.Probes = &m_probeSet;
         }
         color.ShadingMode = (int)debugView;
         sage::render::RenderSceneColor(*m_scene, m_batch, color);

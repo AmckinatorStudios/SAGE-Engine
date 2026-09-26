@@ -427,6 +427,15 @@ const std::vector<PartField>& LabelFields() {
         // отступ под значок слева — всё это десятки и сотни пикселей, и поле
         // не давало их даже ввести числом.
         {"padX", SAGE_UI_TEXT("Side padding"), PartField::Kind::Float, offsetof(Label, PadX), 0.0f, 512.0f},
+        {"shadowOffset", SAGE_UI_TEXT("Shadow offset"), PartField::Kind::Vec2,
+         offsetof(Label, ShadowOffset), -32.0f, 32.0f,
+         "A copy of the text drawn underneath, shifted by this much.\n"
+         "0, 0 — no shadow."},
+        {"shadowColor", SAGE_UI_TEXT("Shadow colour"), PartField::Kind::Color, offsetof(Label, ShadowColor)},
+        {"outline", SAGE_UI_TEXT("Outline width"), PartField::Kind::Float, offsetof(Label, OutlineWidth),
+         0.0f, 16.0f, "0 — no outline."},
+        {"outlineColor", SAGE_UI_TEXT("Outline colour"), PartField::Kind::Color,
+         offsetof(Label, OutlineColor)},
     };
     return f;
 }
@@ -501,10 +510,37 @@ void DrawLabelPart(const PartDrawContext& c) {
     // фон, выглядит хуже обрезанного — и не читается как ошибка вёрстки.
     const bool clip = label.Wrap && blockH > r.h;
     if (clip) ui.PushClipRect(r.x, r.y, r.w, r.h);
+    // Сдвиги тени и обводки — ЦЕЛЫМИ пикселями у шрифта с целым масштабом:
+    // дробный сдвиг раскладывает пиксельную тень на два экранных пикселя
+    // полупрозрачно, и она выглядит грязной каймой, а не тенью.
+    auto px = [&](float v) {
+        const float scaled = v * c.Scale;
+        return label.FontSnapPixels ? std::round(scaled) : scaled;
+    };
+    const glm::vec2 shadow{px(label.ShadowOffset.x), px(label.ShadowOffset.y)};
+    const bool hasShadow = (shadow.x != 0.0f || shadow.y != 0.0f) && label.ShadowColor.a > 0.0f;
+    const float outline = label.OutlineWidth > 0.0f ? std::max(px(label.OutlineWidth), 1.0f) : 0.0f;
+    const bool hasOutline = outline > 0.0f && label.OutlineColor.a > 0.0f;
     for (const std::string& line : lines) {
         if (!line.empty()) {
-            ui.Text(AlignX(label.Horizontal, left, avail, ui.MeasureText(line, textScale, style)),
-                    y, textScale, rgb, line, alpha, style);
+            const float x = AlignX(label.Horizontal, left, avail, ui.MeasureText(line, textScale, style));
+            // Порядок — снизу вверх: тень, обводка, сам текст.
+            if (hasShadow) {
+                ui.Text(x + shadow.x, y + shadow.y, textScale,
+                        {label.ShadowColor.r, label.ShadowColor.g, label.ShadowColor.b}, line,
+                        AlphaOf(c, label.ShadowColor.a * label.Color.a), style);
+            }
+            if (hasOutline) {
+                // Восемь копий по кругу: четырёх (крест) не хватает — на
+                // диагональных штрихах в углах остаются просветы.
+                const glm::vec3 oc{label.OutlineColor.r, label.OutlineColor.g, label.OutlineColor.b};
+                const float oa = AlphaOf(c, label.OutlineColor.a * label.Color.a);
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        if (dx != 0 || dy != 0)
+                            ui.Text(x + dx * outline, y + dy * outline, textScale, oc, line, oa, style);
+            }
+            ui.Text(x, y, textScale, rgb, line, alpha, style);
         }
         y += lineH;
     }
@@ -732,17 +768,20 @@ const std::vector<PartField>& ScrollFields() {
     return f;
 }
 
-const char* const kCanvasScale[] = {SAGE_UI_TEXT("Pixels"), SAGE_UI_TEXT(SAGE_UI_TEXT("Scale to reference"))};
+const char* const kCanvasScale[] = {SAGE_UI_TEXT("Pixels"), SAGE_UI_TEXT("Scale to reference"),
+                                    SAGE_UI_TEXT("Whole-number scale (pixel art)")};
 
 const std::vector<PartField>& CanvasFields() {
     static const std::vector<PartField> f = {
         {"mode", SAGE_UI_TEXT("Scale mode"), PartField::Kind::Enum, offsetof(Canvas, Mode), 0.0f, 0.0f, nullptr,
-         kCanvasScale, 2},
+         kCanvasScale, 3},
         {"reference", SAGE_UI_TEXT("Reference resolution"), PartField::Kind::Vec2, offsetof(Canvas, Reference),
          64.0f, 8192.0f},
         {"matchWidthOrHeight", SAGE_UI_TEXT("Follow"), PartField::Kind::Float,
          offsetof(Canvas, MatchWidthOrHeight), 0.0f, 1.0f,
          "0 follows the width, 1 the height, 0.5 the average."},
+        {"maxScale", SAGE_UI_TEXT("Largest scale"), PartField::Kind::Int, offsetof(Canvas, MaxScale), 0.0f,
+         16.0f, "Whole-number scale only. 0 — as large as fits."},
         {"sortOrder", SAGE_UI_TEXT("Root order"), PartField::Kind::Int, offsetof(Canvas, SortOrder), -100.0f,
          100.0f, "The HUD under the pause menu, the menu under a dialog."},
     };

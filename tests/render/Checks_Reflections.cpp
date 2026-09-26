@@ -128,17 +128,19 @@ double Sharpness(const Image& img) {
     std::sort(steps.begin(), steps.end());
     const double steepest = (double)steps[(size_t)((steps.size() - 1) * 99 / 100)];
 
-    // Делим на ПОЛНЫЙ размах яркости шара.
+    // Меряем АБСОЛЮТНЫЙ шаг, в долях полной шкалы.
     //
-    // Абсолютный шаг мерит не только размытие, но и контраст, а он с
-    // шероховатостью РАСТЁТ: чем шероховатее металл, тем больше окружения
-    // собирает env-BRDF, и шар в целом становится ярче. Из-за этого абсолютная
-    // мера сначала росла и только потом падала — она мерила две вещи сразу.
-    // Отношение «самый крутой шаг к полному размаху» отвечает ровно на нужный
-    // вопрос: за какую долю всего перепада отвечает один пиксель. Резкая кромка
-    // — за большую, размытая — за малую, и яркость на это не влияет.
-    const double range = (double)(hi - lo);
-    return range > 1.0 ? steepest / range : 0.0;
+    // Раньше шаг делился на размах яркости шара: при мипах, построенных
+    // усреднением, контраст шара с шероховатостью РОС (env-BRDF собирал больше
+    // окружения), и абсолютная мера сначала росла, а потом падала. Теперь мипы —
+    // свёртка по GGX, она сохраняет энергию и честно сглаживает: у матового
+    // металла контраст падает вместе с резкостью, и деление на размах давало
+    // обратный эффект — почти ровный шар делил единичный шаг квантования на
+    // крошечный размах и выходил «резким». Абсолютный шаг отвечает ровно на
+    // вопрос теста: насколько круто меняется цвет от пикселя к пикселю.
+    (void)lo;
+    (void)hi;
+    return steepest / (255.0 * 3.0);
 }
 
 // Кадр сцены с картой окружения (или без неё, если reflect == nullptr).
@@ -204,7 +206,7 @@ void TestReflections(FrameRenderer& r) {
 
     // 2. Шероховатость размывает отражение. Меряем резкость перехода между
     //    цветами неба на шаре — она обязана падать монотонно.
-    double prev = 1e9;
+    double prev = 1e9, first = -1.0;
     bool monotone = true;
     // Солнце в этом заходе выключено НАМЕРЕННО: прямой блик сам по себе
     // расплывается с шероховатостью и попадал бы в ту же меру, которой мы
@@ -215,10 +217,12 @@ void TestReflections(FrameRenderer& r) {
         sage::render::ReflectionSystem rs;
         const double sharp = Sharpness(RenderReflected(r, *s, &rs, sky, kW, kH));
         std::printf("       шероховатость %.2f -> резкость перехода %.3f\n", rough, sharp);
-        if (sharp > prev + 0.02) monotone = false;
+        if (sharp > prev + 0.002) monotone = false;
+        if (first < 0.0) first = sharp;
         prev = sharp;
     }
     Check(monotone, "чем шероховатее, тем размытее отражение");
+    Check(prev < first * 0.5, "матовый металл размыт вдвое сильнее зеркального");
 
     // 3. Диэлектрик отражает по Френелю: у него F0 около 0.04 против почти
     //    единицы у металла. Если бы отражение вешалось всем одинаково, пластик
@@ -406,6 +410,201 @@ void TestReflectionProbe(FrameRenderer& r) {
     Check(right > 0.25, "зонд снял сцену: красная стена видна в отражении");
     Check(right > left * 3.0, "и отразилась с ТОЙ стороны, где стоит (грани куба не перепутаны)");
     Report("reflect_probe", CompareWithReference("reflect_probe", img));
+}
+
+// Зонд действует ТОЛЬКО на объекты в своей коробке.
+//
+// Раньше зонд выбирался по положению КАМЕРЫ и раздавался всему кадру, а
+// камере вне всех коробок доставался ближайший. На деле это выглядело так:
+// поставил зонд в комнате — и предмет на улице, в двадцати метрах, начинал
+// отражать её интерьер. Здесь два одинаковых хромовых шара: один в коробке
+// зонда, другой снаружи; небо чёрное. Красное (стена, снятая зондом) обязано
+// быть на первом и не имеет права появиться на втором.
+void TestProbeInfluence(FrameRenderer& r) {
+    std::printf("=== Отражения: зонд действует только в своей коробке ===\n");
+    auto scene = std::make_unique<Scene>("ProbeInfluence");
+    scene->Lighting.Sun.Intensity = 0.0f;
+    scene->Lighting.AmbientStrength = 1.6f;
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.SkyColor = {1.0f, 1.0f, 1.0f};
+    scene->Lighting.GroundColor = {1.0f, 1.0f, 1.0f};
+    scene->Lighting.Skybox.Enabled = true;
+    scene->Lighting.Skybox.TopColor = {0.0f, 0.0f, 0.0f};
+    scene->Lighting.Skybox.HorizonColor = {0.0f, 0.0f, 0.0f};
+
+    auto cube = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    GameObject wall = scene->CreateObject("RedWall");
+    wall.GetTransform().Position = {-6.5f, 0.8f, 0.0f};
+    wall.GetTransform().Scale = {0.4f, 6.0f, 30.0f};
+    wall.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    wall.Renderer().MeshPtr = cube;
+    auto wm = std::make_shared<Material>();
+    wm->Albedo = {1.0f, 0.05f, 0.05f};
+    wm->Roughness = 1.0f;
+    wall.Renderer().MaterialPtr = wm;
+
+    // Зонд — обычным компонентом сцены и обычным путём съёмки, как в редакторе.
+    GameObject probeObj = scene->CreateObject("Probe");
+    probeObj.GetTransform().Position = {-2.5f, 0.8f, 0.0f};
+    auto& probe = scene->Registry().emplace<ReflectionProbeComponent>(probeObj.Entity());
+    probe.BoxHalfExtents = {3.0f, 3.0f, 3.0f};
+    probe.BoxParallax = false;
+    const int captured = sage::render::UpdateReflectionProbes(
+        *scene, [&](const glm::mat4& v, const glm::mat4& p) {
+            sage::rhi::GraphicsDevice& d = sage::rhi::GraphicsDevice::Get();
+            d.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            d.Clear(true, true);
+            const LightingEnvironment e = sage::ecs::CollectLighting(*scene);
+            r.Batch.RenderColor(*scene, v, p, glm::vec3(glm::inverse(v)[3]), e, ShadowBinding(), 0);
+        });
+    Check(captured == 1, "зонд снят");
+    wall.Renderer().MeshPtr = nullptr;
+
+    auto ballAt = [&](const char* name, glm::vec3 pos) {
+        GameObject b = scene->CreateObject(name);
+        b.GetTransform().Position = pos;
+        b.GetTransform().Scale = glm::vec3(2.2f);
+        b.Renderer().Ref = MeshRef{MeshRef::Type::Sphere};
+        b.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Sphere);
+        auto m = std::make_shared<Material>();
+        m->Albedo = {1.0f, 1.0f, 1.0f};
+        m->Metallic = 1.0f;
+        m->Roughness = 0.05f;
+        b.Renderer().MaterialPtr = m;
+    };
+    ballAt("Inside", {-2.5f, 0.8f, 0.0f});
+    ballAt("Outside", {3.5f, 0.8f, 0.0f});
+
+    // Небо в карте отражений — чёрное: всё красное на шарах пришло из зонда.
+    SkyRenderer sky;
+    sage::render::ReflectionSystem reflections;
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    reflections.UpdateSky(sky, env);
+    const sage::render::ReflectionProbeSet probes = sage::render::CollectReflectionProbes(*scene);
+    Check(probes.Entries.size() == 1, "снятый зонд попал в набор кадра");
+    Check(probes.Pick({-2.5f, 0.8f, 0.0f}) == 0 && probes.Pick({3.5f, 0.8f, 0.0f}) == -1,
+          "центр в коробке — зонд, снаружи — небо");
+
+    Framebuffer fbo(kW, kH), out(kW, kH);
+    // Камера стоит В КОРОБКЕ зонда — ровно тот случай, когда раньше зонд
+    // доставался всему кадру.
+    const glm::vec3 eye(0.5f, 0.8f, 2.9f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.5f, 0.8f, 0.0f) + glm::vec3(0, 0, -1.0f),
+                                       glm::vec3(0, 1, 0));
+    const glm::mat4 proj = glm::perspective(glm::radians(100.0f), (float)kW / kH, 0.1f, 100.0f);
+    fbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear(true, true);
+    sage::render::ReflectionBinding binding = reflections.Binding(kW, kH);
+    binding.Probes = &probes;
+    r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0, &binding);
+    r.Fx.ResetHistory();
+    sage::render::PostChain fx = BaseChain();
+    RemoveEffect(fx, "bloom");
+    SetParam(fx, "tonemap", "vignette", 0.0f);
+    r.Fx.Render(fbo.ColorTexture(), fbo.DepthTexture(), kW, kH, proj, view, fx, &out, 0, 0, kW, kH);
+    out.Bind();
+    const Image img = Capture(kW, kH);
+
+    auto redPixels = [&](int x0, int x1) {
+        int red = 0;
+        for (int y = 0; y < kH; ++y)
+            for (int x = x0; x < x1; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                const int rr = img.Pixels[i], gg = img.Pixels[i + 1], bb = img.Pixels[i + 2];
+                if (rr > 40 && rr - gg > 30 && rr - bb > 30) ++red;
+            }
+        return red;
+    };
+    const int inside = redPixels(0, kW / 2);
+    const int outside = redPixels(kW / 2, kW);
+    std::printf("       красных пикселей: шар в коробке %d, шар снаружи %d\n", inside, outside);
+    Check(inside > 200, "шар в коробке отражает снятую зондом стену");
+    Check(outside == 0, "шар вне коробки её НЕ отражает (там небо)");
+}
+
+// Шероховатость размывает отражение ЛЕПЕСТКОМ GGX, а не уменьшенной копией.
+//
+// Раньше мипы куба строились усреднением четырёх текселей: матовый материал
+// показывал ту же картинку, только крупнопиксельную, — яркое окно на
+// пластике оставалось узнаваемым квадратиком. Здесь в чёрной комнате одна
+// маленькая яркая панель, и на шероховатом шаре её отражение обязано
+// расплыться широким пятном: доля шара, где светло хотя бы на пятую часть
+// самого яркого места, должна быть в разы больше, чем у почти зеркального.
+void TestRoughReflectionSpread(FrameRenderer& r) {
+    std::printf("=== Отражения: шероховатость — лепесток GGX ===\n");
+    auto litArea = [&](float rough) {
+        auto scene = std::make_unique<Scene>("Spread");
+        scene->Lighting.Sun.Intensity = 0.0f;
+        scene->Lighting.AmbientStrength = 0.0f;
+        scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+        auto cube = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        GameObject panel = scene->CreateObject("Panel");
+        panel.GetTransform().Position = {0.0f, 0.8f, 6.0f};
+        panel.GetTransform().Scale = {0.8f, 0.8f, 0.1f};
+        panel.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        panel.Renderer().MeshPtr = cube;
+        auto pm = std::make_shared<Material>();
+        pm->Albedo = {0.0f, 0.0f, 0.0f};
+        pm->Emissive = {2.0f, 2.0f, 2.0f};
+        panel.Renderer().MaterialPtr = pm;
+
+        sage::render::ReflectionSystem rs;
+        rs.CaptureScene(glm::vec3(0.0f, 0.8f, 0.0f), 0.1f, 60.0f,
+                        [&](const glm::mat4& v, const glm::mat4& p) {
+                            sage::rhi::GraphicsDevice& d = sage::rhi::GraphicsDevice::Get();
+                            d.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                            d.Clear(true, true);
+                            const LightingEnvironment e = sage::ecs::CollectLighting(*scene);
+                            r.Batch.RenderColor(*scene, v, p, glm::vec3(0.0f, 0.8f, 0.0f), e,
+                                                ShadowBinding(), 0);
+                        });
+        panel.Renderer().MeshPtr = nullptr;
+        GameObject ball = scene->CreateObject("Ball");
+        ball.GetTransform().Position = {0.0f, 0.8f, 0.0f};
+        ball.GetTransform().Scale = glm::vec3(1.6f);
+        ball.Renderer().Ref = MeshRef{MeshRef::Type::Sphere};
+        ball.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Sphere);
+        auto mm = std::make_shared<Material>();
+        mm->Albedo = {1.0f, 1.0f, 1.0f};
+        mm->Metallic = 1.0f;
+        mm->Roughness = rough;
+        ball.Renderer().MaterialPtr = mm;
+
+        Framebuffer fbo(kW, kH), out(kW, kH);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        const glm::vec3 eye(0.0f, 0.8f, 5.0f);
+        const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f, 0.8f, 0.0f), glm::vec3(0, 1, 0));
+        const glm::mat4 proj = PerspectiveProj();
+        fbo.Bind();
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        const sage::render::ReflectionBinding binding = rs.Binding(kW, kH);
+        r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0, &binding);
+        r.Fx.ResetHistory();
+        sage::render::PostChain fx = BaseChain();
+        RemoveEffect(fx, "bloom");
+        SetParam(fx, "tonemap", "vignette", 0.0f);
+        r.Fx.Render(fbo.ColorTexture(), fbo.DepthTexture(), kW, kH, proj, view, fx, &out, 0, 0, kW,
+                    kH);
+        out.Bind();
+        const Image img = Capture(kW, kH);
+        int peak = 0;
+        for (size_t i = 0; i + 2 < img.Pixels.size(); i += 3)
+            peak = std::max(peak, img.Pixels[i] + img.Pixels[i + 1] + img.Pixels[i + 2]);
+        int lit = 0;
+        for (size_t i = 0; i + 2 < img.Pixels.size(); i += 3)
+            if (img.Pixels[i] + img.Pixels[i + 1] + img.Pixels[i + 2] > peak / 5) ++lit;
+        return lit;
+    };
+    const int sharp = litArea(0.05f);
+    const int rough = litArea(0.5f);
+    std::printf("       светлое пятно: шероховатость 0.05 -> %d пикс., 0.5 -> %d пикс.\n", sharp,
+                rough);
+    Check(sharp > 0, "панель видна в почти зеркальном шаре");
+    Check(rough > sharp * 6, "на шероховатом шаре она расплылась широким пятном");
 }
 
 // --- Блик в объективе --------------------------------------------------------
@@ -770,6 +969,8 @@ void RunReflectionChecks(FrameRenderer& r) {
     TestReflections(r);
     TestReflectionFollowsTimeOfDay(r);
     TestReflectionProbe(r);
+    TestProbeInfluence(r);
+    TestRoughReflectionSpread(r);
     TestReflectionSeams();
     TestPlanarReflectionMath();
     TestPlanarReflectionRender(r);

@@ -307,6 +307,8 @@ private:
     // Сетка пола — ШЕЙДЕРОМ, а не набором линий (sage::render::GridRenderer).
     std::optional<sage::render::GridRenderer> m_grid;
     std::optional<SkyRenderer> m_sky;
+    // Зонды отражений кадра: привязка прохода держит на них указатель.
+    sage::render::ReflectionProbeSet m_probeSet;
     // Отражения вьюпорта. Свои, а не общие с рантаймом: карта окружения
     // снимается из точки и принадлежит виду.
     sage::render::ReflectionSystem m_reflections;

@@ -456,9 +456,9 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
     // размер экрана весь экран. Пока это поле жило на корневом элементе, два
     // корня одного интерфейса могли спорить о масштабе.
     ImGui::SeparatorText(T("Canvas"));
-    const char* kModes[] = {T("Pixels"), T("Scale to reference")};
+    const char* kModes[] = {T("Pixels"), T("Scale to reference"), T("Whole-number scale (pixel art)")};
     int mode = (int)info->Canvas.Mode;
-    if (ImGui::Combo(T("Scale mode"), &mode, kModes, 2)) {
+    if (ImGui::Combo(T("Scale mode"), &mode, kModes, 3)) {
         host.PushUndoSnapshot();
         info->Canvas.Mode = (ui::Canvas::Scale)mode;
     }
@@ -471,6 +471,16 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
         ImGui::SliderFloat(T("Match width/height"), &info->Canvas.MatchWidthOrHeight, 0.0f, 1.0f);
         host.TrackLastImGuiItem();
         EditorTheme::Hint(T("0 — follow width, 1 — follow height"));
+    }
+    if (info->Canvas.Mode == ui::Canvas::Scale::IntegerFit) {
+        float ref[2] = {info->Canvas.Reference.x, info->Canvas.Reference.y};
+        if (ImGui::DragFloat2(T("Reference resolution"), ref, 1.0f, 16.0f, 8192.0f, "%.0f")) {
+            info->Canvas.Reference = {ref[0], ref[1]};
+        }
+        host.TrackLastImGuiItem();
+        ImGui::DragInt(T("Largest scale"), &info->Canvas.MaxScale, 0.05f, 0, 16);
+        host.TrackLastImGuiItem();
+        EditorTheme::Hint(T("The largest whole number that fits the reference screen: pixel art stays crisp (like Minecraft's GUI scale). 0 — no limit"));
     }
 
     // Элементы правятся у САМИХ ЭЛЕМЕНТОВ. Сказано прямо, потому что именно

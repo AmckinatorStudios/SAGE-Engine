@@ -9,6 +9,7 @@
 
 #include "EditorHost.h"
 #include "sage/core/Log.h"
+#include "sage/render/SkyPresets.h"
 #include "sage/physics/PhysicsTypes.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
@@ -64,6 +65,27 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
     if (ImGui::Button(T("Select"))) host.Selection().SetPrimary(id ? id->Id : 0);
 }
 
+// Картинка светила — слотом, как всякий ассет (см. AssetSlot.h). pick —
+// номер цели для ответа файлового диалога (см. m_skyPick).
+void EnvironmentPanel::DrawDiscTexture(EditorHost& host, const char* id, const char* label,
+                                       std::string& path, int pick) {
+    ImGui::TextUnformatted(label);
+    assetslot::Result r = assetslot::Draw(host, id, assetslot::Kind::Texture, path, nullptr, label);
+    if (r.Changed) {
+        host.PushUndoSnapshot();
+        path = r.Path;
+    }
+    if (r.BrowseRequested) {
+        FileBrowser::Config c;
+        c.Title = label;
+        c.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};
+        c.FilterLabel = T("Images");
+        c.StartDir = c.Root = assetslot::ProjectRoot(host);
+        m_browser.Open(c);
+        m_skyPick = pick;
+    }
+}
+
 // --- НЕБО ------------------------------------------------------------------
 void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env) {
     if (!EditorTheme::SectionHeader("sun", T("Sky" "###Sky"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
@@ -114,6 +136,18 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
 
     if (sky.Kind == SkyboxSettings::Source::Procedural) {
         DrawSunLink(host, host.CurrentScene(), env);
+        // Готовый вид — отправная точка: собрать узнаваемое небо из трёх
+        // десятков полей с нуля — полчаса подбора цветов.
+        if (ImGui::BeginCombo(T("Preset"), T("Apply a ready-made look…"))) {
+            for (int i = 0; i < (int)sage::render::SkyPreset::Count; ++i) {
+                const auto preset = (sage::render::SkyPreset)i;
+                if (ImGui::Selectable(T(sage::render::SkyPresetLabel(preset)))) {
+                    host.PushUndoSnapshot();
+                    sage::render::ApplySkyPreset(sky, preset);
+                }
+            }
+            ImGui::EndCombo();
+        }
         ImGui::Separator();
 
         if (ImGui::Checkbox(T("Day and night"), &sky.DayNight)) host.PushUndoSnapshot();
@@ -142,21 +176,106 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
             }
         }
 
+        // --- Форма градиента -----------------------------------------------
+        ImGui::Separator();
+        ImGui::TextDisabled("%s", T("Gradient"));
+        ImGui::DragFloat(T("Gradient curve"), &sky.GradientExponent, 0.01f, 0.05f, 8.0f, "%.2f");
+        host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("How fast the zenith colour takes over going up.\n"
+                                      "0.5 — a narrow bright band at the horizon; 1 — an even\n"
+                                      "gradient; above 1 — a wide hazy horizon."));
+        }
+        ImGui::DragFloat(T("Horizon softness"), &sky.HorizonSoftness, 0.005f, 0.0f, 1.0f, "%.3f");
+        host.TrackLastImGuiItem();
+        ImGui::DragFloat(T("Horizon offset"), &sky.HorizonOffset, 0.002f, -0.5f, 0.5f, "%.3f");
+        host.TrackLastImGuiItem();
+        if (ImGui::Checkbox(T("Own colour below the horizon"), &sky.Ground)) host.PushUndoSnapshot();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Off — the horizon colour goes down to the nadir.\n"
+                                      "On — its own colour below the horizon (the deep blue\n"
+                                      "void of Minecraft)."));
+        }
+        if (sky.Ground) {
+            Sage::UI::ColorField3(T("Below horizon"), &sky.GroundColor.x); host.TrackLastImGuiItem();
+            if (sky.DayNight) {
+                Sage::UI::ColorField3(T("Below horizon (night)"), &sky.NightGroundColor.x);
+                host.TrackLastImGuiItem();
+            }
+            ImGui::DragFloat(T("Edge width"), &sky.GroundBlend, 0.002f, 0.0f, 0.5f, "%.3f");
+            host.TrackLastImGuiItem();
+        }
+
         ImGui::Separator();
         if (ImGui::Checkbox(T("Sun and moon in the sky"), &sky.Celestials)) host.PushUndoSnapshot();
         if (sky.Celestials) {
             // Цвет и направление диска солнца — у объекта-солнца; здесь только
-            // то, что принадлежит НЕБУ: размер диска, луна, звёзды.
+            // то, что принадлежит НЕБУ: вид диска, луна, звёзды.
+            const char* kShapes[] = {T("Round"), T("Square")};
             Sage::UI::ColorField3(T("Sun disc colour"), &sky.SunColor.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Sun size"), &sky.SunSize, 0.002f, 0.005f, 0.4f, "%.3f");
+            int sunShape = (int)sky.SunShape;
+            if (ImGui::Combo(T("Sun shape"), &sunShape, kShapes, 2)) {
+                host.PushUndoSnapshot();
+                sky.SunShape = (SkyboxSettings::DiscShape)sunShape;
+            }
+            ImGui::DragFloat(T("Sun size"), &sky.SunSize, 0.002f, 0.005f, 0.6f, "%.3f");
             host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Sun brightness"), &sky.SunBrightness, 0.05f, 0.0f, 20.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Sun glow"), &sky.SunGlow, 0.02f, 0.0f, 4.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            DrawDiscTexture(host, "sun_tex", T("Sun picture"), sky.SunTexture, -4);
             if (ImGui::Checkbox(T("Moon"), &sky.Moon)) host.PushUndoSnapshot();
             if (sky.Moon) {
                 Sage::UI::ColorField3(T("Moon colour"), &sky.MoonColor.x); host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Moon size"), &sky.MoonSize, 0.002f, 0.005f, 0.4f, "%.3f");
+                int moonShape = (int)sky.MoonShape;
+                if (ImGui::Combo(T("Moon shape"), &moonShape, kShapes, 2)) {
+                    host.PushUndoSnapshot();
+                    sky.MoonShape = (SkyboxSettings::DiscShape)moonShape;
+                }
+                ImGui::DragFloat(T("Moon size"), &sky.MoonSize, 0.002f, 0.005f, 0.6f, "%.3f");
                 host.TrackLastImGuiItem();
+                if (ImGui::Checkbox(T("Moon phase"), &sky.MoonPhase)) host.PushUndoSnapshot();
+                DrawDiscTexture(host, "moon_tex", T("Moon picture"), sky.MoonTexture, -5);
+            }
+            if (ImGui::Checkbox(T("Pixel art"), &sky.PixelArt)) host.PushUndoSnapshot();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Sun and moon pictures without smoothing — crisp pixels."));
             }
             ImGui::DragFloat(T("Stars"), &sky.StarIntensity, 0.02f, 0.0f, 3.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Star density"), &sky.StarDensity, 0.02f, 0.0f, 20.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Star size"), &sky.StarSize, 0.02f, 0.1f, 10.0f, "%.2f");
+            host.TrackLastImGuiItem();
+        }
+
+        // --- Облака ---------------------------------------------------------
+        ImGui::Separator();
+        if (ImGui::Checkbox(T("Clouds"), &sky.Clouds)) host.PushUndoSnapshot();
+        if (sky.Clouds) {
+            const char* kStyles[] = {T("Blocks"), T("Soft")};
+            int style = (int)sky.CloudKind;
+            if (ImGui::Combo(T("Cloud style"), &style, kStyles, 2)) {
+                host.PushUndoSnapshot();
+                sky.CloudKind = (SkyboxSettings::CloudStyle)style;
+            }
+            Sage::UI::ColorField3(T("Cloud colour"), &sky.CloudColor.x); host.TrackLastImGuiItem();
+            if (sky.DayNight) {
+                Sage::UI::ColorField3(T("Cloud colour (night)"), &sky.NightCloudColor.x);
+                host.TrackLastImGuiItem();
+            }
+            ImGui::DragFloat(T("Cloud height"), &sky.CloudHeight, 1.0f, -2000.0f, 5000.0f, "%.0f m");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Cloud size"), &sky.CloudScale, 0.1f, 0.1f, 1000.0f, "%.1f m");
+            host.TrackLastImGuiItem();
+            ImGui::SliderFloat(T("Coverage"), &sky.CloudCoverage, 0.0f, 1.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            ImGui::SliderFloat(T("Cloud opacity"), &sky.CloudOpacity, 0.0f, 1.0f, "%.2f");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat2(T("Wind"), &sky.CloudWind.x, 0.05f, -100.0f, 100.0f, "%.2f m/s");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Fade distance"), &sky.CloudFade, 5.0f, 10.0f, 50000.0f, "%.0f m");
             host.TrackLastImGuiItem();
         }
         return;
@@ -325,6 +444,12 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
         } else if (m_skyPick == -3) {
             host.PushUndoSnapshot();
             env.Skybox.ImagePath = picked;
+        } else if (m_skyPick == -4) {
+            host.PushUndoSnapshot();
+            env.Skybox.SunTexture = picked;
+        } else if (m_skyPick == -5) {
+            host.PushUndoSnapshot();
+            env.Skybox.MoonTexture = picked;
         } else if (m_skyPick >= 0 && m_skyPick < 6) {
             host.PushUndoSnapshot();
             env.Skybox.FacePaths[m_skyPick] = picked;

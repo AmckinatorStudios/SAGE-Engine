@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string>
 #include <glm/glm.hpp>
 #include "sage/rhi/GraphicsDevice.h"
 
@@ -51,6 +52,31 @@ struct SkyCelestials {
     float FogDensity = 0.0f, FogFalloff = 0.2f, FogHeight = 0.0f, FogMaxOpacity = 1.0f;
     float FogSunScatter = 0.0f, FogSunExponent = 8.0f;
     glm::vec3 FogSunLight{0.0f};   // цвет * яркость солнца сцены
+
+    // --- Форма неба (см. SkyboxSettings: там смысл каждого поля) ---------
+    // Умолчания — прежняя картинка: небо, собранное кодом без этих полей,
+    // выглядит как раньше.
+    float GradientExponent = 0.5f;
+    float HorizonSoftness = 0.25f;
+    float HorizonOffset = 0.0f;
+    bool Ground = false;
+    glm::vec3 GroundColor{0.10f, 0.14f, 0.45f};  // уже с учётом времени суток
+    float GroundBlend = 0.05f;
+    int SunShape = 0, MoonShape = 0;             // SkyboxSettings::DiscShape
+    float SunBrightness = 6.0f;
+    float SunGlow = 1.0f;
+    bool MoonPhase = true;
+    std::string SunTexture, MoonTexture;         // пусто — диск формой
+    bool PixelArt = false;                       // картинки светил без сглаживания
+    float StarDensity = 1.0f, StarSize = 1.0f;
+    bool Clouds = false;
+    int CloudStyle = 0;                          // SkyboxSettings::CloudStyle
+    glm::vec3 CloudColor{1.0f};                  // уже с учётом времени суток
+    float CloudHeight = 120.0f, CloudScale = 12.0f, CloudCoverage = 0.45f;
+    float CloudOpacity = 0.85f, CloudFade = 1500.0f;
+    glm::vec2 CloudWind{1.0f, 0.0f};
+    // Время, секунды: по нему плывут облака. Ноль — облака стоят.
+    float Time = 0.0f;
 };
 
 // Светила из окружения сцены. Отдельной функцией, потому что потребителей у

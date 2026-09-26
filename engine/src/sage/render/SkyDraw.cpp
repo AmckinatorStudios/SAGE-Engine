@@ -32,7 +32,7 @@ glm::vec3 SceneClearColor(const LightingEnvironment& env) {
 }
 
 void DrawSceneSky(SkyRenderer& fallback, const LightingEnvironment& env, const glm::mat4& view,
-                  const glm::mat4& proj) {
+                  const glm::mat4& proj, float time) {
     if (!env.Skybox.Enabled) return;
 
     if (std::shared_ptr<Skybox> cubemap = SceneSkyCubemap(env)) {
@@ -47,7 +47,9 @@ void DrawSceneSky(SkyRenderer& fallback, const LightingEnvironment& env, const g
     // ЦВЕТА — РАЗРЕШЁННЫЕ, а не авторские: в них уже учтено время суток (см.
     // sage/render/SkyModel.h). Пока здесь стояли поля настроек, небо оставалось
     // полуденным независимо от того, где солнце.
-    fallback.Draw(view, proj, env.SkyTop(), env.SkyHorizon(), CelestialsFromEnvironment(env));
+    SkyCelestials sky = CelestialsFromEnvironment(env);
+    sky.Time = time;
+    fallback.Draw(view, proj, env.SkyTop(), env.SkyHorizon(), sky);
 }
 
 } // namespace sage::render

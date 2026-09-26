@@ -379,6 +379,9 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         // одним материалом даёт ровно один проход этого цикла — то есть ровно
         // то, что было до подмешей.
         const MeshRendererComponent& mr = *c.MR;
+        // Зонд — по центру объекта, один на все его части: одна модель не
+        // должна отражать две разные комнаты.
+        const int probeOfItem = m_probes ? m_probes->Pick(c.Center) : -1;
         // Предметы «на камере» (рука, оружие) в карту теней и в зеркало не
         // идут: см. MeshRendererComponent::CastShadows / InReflections.
         if (m_collectingShadows && !mr.CastShadows) continue;
@@ -397,6 +400,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
             Shader* custom = (mat && mat->ShaderPtr) ? mat->ShaderPtr.get() : nullptr;
 
             m_stats.Triangles += (long long)(subs[si].IndexCount / 3);
+            const int probe = probeOfItem;
 
             MeshInstance inst;
             inst.Model = c.Model;
@@ -417,7 +421,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
                 // своим шейдером остаётся одним draw call'ом — иначе своим
                 // шейдером нельзя было бы рисовать воду или траву, то есть
                 // именно то, ради чего он и нужен.
-                CustomGroup& g = m_custom[CustomKey{c.Mesh_, si, custom}];
+                CustomGroup& g = m_custom[CustomKey{c.Mesh_, si, custom, probe}];
                 g.Instances.push_back(inst);
                 g.Entities.push_back(c.Entity);
                 g.Depths.push_back(glm::dot(c.Center - m_viewPos, c.Center - m_viewPos));
@@ -433,16 +437,16 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
                 // непрозрачной геометрии и в своём порядке (см. RenderColor).
                 m_transparent.push_back({c.Mesh_, si, inst, mat, c.LmPage,
                                          glm::dot(c.Center - m_viewPos, c.Center - m_viewPos),
-                                         textured});
+                                         textured, probe});
             } else if (textured) {
                 // Есть текстурные карты — индивидуальный текстурный PBR-путь.
                 m_textured.push_back({c.Mesh_, si, c.Model, mat, c.LmPage, opacity,
-                                      inst.Color, inst.Emissive});
+                                      inst.Color, inst.Emissive, probe});
             } else {
                 // Плоский цвет — быстрый инстансный путь. Metallic/roughness из
                 // материала (если назначен), иначе дефолты MeshInstance.
                 const int cull = mat ? (int)mat->Render.Cull : (int)CullFaces::Back;
-                Group& g = m_groups[MeshSlotKey{c.Mesh_, si, cull}];
+                Group& g = m_groups[MeshSlotKey{c.Mesh_, si, cull, probe}];
                 g.Instances.push_back(inst);
                 g.LmPage = c.LmPage; // у запечённой статики меш уникален — страница одна
             }
@@ -457,7 +461,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     m_stats = {};
     m_viewPos = viewPos; // нужна сборке: по ней считается глубина прозрачных
     m_skipPlanarReflectors = reflections && reflections->CapturingPlanar;
+    m_probes = (reflections && reflections->Probes && !reflections->Probes->Empty())
+                   ? reflections->Probes : nullptr;
     CollectVisible(scene, proj * view);
+    m_probes = nullptr;
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
 
     sage::gi::GIState* gi = scene.GI && scene.GI->Baked ? scene.GI.get() : nullptr;
@@ -478,6 +485,13 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // прошлом объекте куб остался бы висеть в программе шейдера.
         sage::render::UploadReflection(sh, reflections ? *reflections
                                                        : sage::render::ReflectionBinding{});
+    };
+
+    // Зонд отражений объекта. Заливается ТОЛЬКО когда зонды есть: без них
+    // привязка одна на весь проход и уже залита в setupCommon.
+    const bool anyProbes = reflections && reflections->Probes && !reflections->Probes->Empty();
+    auto bindProbe = [&](Shader& sh, int probe) {
+        if (anyProbes) sage::render::UploadReflection(sh, reflections->ForProbe(probe));
     };
 
     // Отсечение граней по материалу. Состояние конвейера, поэтому ставится
@@ -507,8 +521,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // Отрисовка одной группы «меш + своя программа». Вынесена, потому что
     // непрозрачные группы рисуются до общего прозрачного прохода, а
     // полупрозрачные — внутри него, с блендингом и в своём порядке.
-    auto drawCustom = [&](Shader& sh, Mesh& mesh, unsigned int submesh, CustomGroup& g) {
+    auto drawCustom = [&](Shader& sh, Mesh& mesh, unsigned int submesh, int probe,
+                          CustomGroup& g) {
         setupCommon(sh);
+        bindProbe(sh, probe);
         if (!g.Transparent) setCull(g.Mat ? (int)g.Mat->Render.Cull : (int)CullFaces::Back);
         sh.SetFloat("uTime", m_time);
         bindLightmap(sh, g.LmPage);
@@ -579,6 +595,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     for (auto& kv : m_groups) {
         if (kv.second.Instances.empty()) continue;
         bindLightmap(lit, kv.second.LmPage);
+        bindProbe(lit, kv.first.Probe);
         setCull(kv.first.Cull);
         kv.first.Mesh_->SetInstances(kv.second.Instances.data(), kv.second.Instances.size());
         kv.first.Mesh_->DrawSubmeshInstances(kv.first.Submesh, kv.second.Instances.size());
@@ -604,6 +621,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         tex.SetVec4("uAOMask", glm::vec4(1, 0, 0, 0));
         for (const TexturedItem& it : m_textured) {
             bindLightmap(tex, it.LmPage);
+            bindProbe(tex, it.Probe);
             setCull(it.Mat ? (int)it.Mat->Render.Cull : (int)CullFaces::Back);
             tex.SetMat4("uModel", it.Model);
             // Свёрнутое значение, а не it.Mat->Albedo: тон экземпляра обязан
@@ -651,7 +669,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // Непрозрачные — здесь; полупрозрачные ждут прохода 4 (см. ниже).
     for (auto& kv : m_custom) {
         if (kv.second.Instances.empty() || kv.second.Transparent) continue;
-        drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, kv.second);
+        drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, kv.first.Probe, kv.second);
     }
 
     // Есть ли вообще что смешивать в этом кадре — от этого зависит, поднимать ли
@@ -722,7 +740,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             const int passes = passCount(g.Mat);
             for (int pass = 0; pass < passes; ++pass) {
                 setCullForPass(g.Mat, passes == 1 ? 1 : pass);
-                drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, g);
+                drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, kv.first.Probe, g);
             }
         }
 
@@ -741,6 +759,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 t.SetVec4("uRoughnessMask", glm::vec4(1, 0, 0, 0));
                 t.SetVec4("uAOMask", glm::vec4(1, 0, 0, 0));
                 bindLightmap(t, head.LmPage);
+                bindProbe(t, head.Probe);
                 t.SetMat4("uModel", head.Inst.Model);
                 // Тон и свечение — из инстанса (свёрнутые), как на всех
                 // остальных путях; см. TexturedItem в заголовке.
@@ -790,12 +809,13 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             while (j < m_transparent.size() && !m_transparent[j].Textured &&
                    m_transparent[j].Mesh_ == head.Mesh_ &&
                    m_transparent[j].Submesh == head.Submesh &&
-                   m_transparent[j].Mat == head.Mat) {
+                   m_transparent[j].Mat == head.Mat && m_transparent[j].Probe == head.Probe) {
                 m_transparentBatch.push_back(m_transparent[j].Inst);
                 ++j;
             }
             lit.Use();
             bindLightmap(lit, head.LmPage);
+            bindProbe(lit, head.Probe);
             head.Mesh_->SetInstances(m_transparentBatch.data(), m_transparentBatch.size());
             for (int pass = 0; pass < passes; ++pass) {
                 setCullForPass(head.Mat, passes == 1 ? 1 : pass);

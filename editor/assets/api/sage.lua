@@ -1080,6 +1080,8 @@ light = nil
 
 ---@return any
 function sage.light.Get() end
+---@param name string
+function sage.light.SetSkyPreset(name) end
 ---@param t table
 function sage.light.SetSun(t) end
 
@@ -1627,6 +1629,8 @@ AnimationIndex = sage.anim.Index
 AnimationNames = sage.anim.Names
 ---@type fun(...): any
 AnimationTime = sage.anim.Time
+---@type fun(...): any
+ApplySkyPreset = sage.light.SetSkyPreset
 ---@type fun(...): any
 BindAction = sage.input.Bind
 ---@type fun(...): any
