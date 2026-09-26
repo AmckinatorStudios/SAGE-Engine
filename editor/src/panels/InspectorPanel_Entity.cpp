@@ -38,6 +38,7 @@
 #include <algorithm>
 
 #include "AssetSlot.h"
+#include "ObjectSlot.h"
 #include "EditorIcons.h"
 #include "../EditorPrefs.h"
 #include "ModelMaterialImport.h"
@@ -566,6 +567,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 rb->Type = (sage::physics::BodyType)kind;
             }
             ImGui::DragFloat(T("Mass"), &rb->Mass, 0.05f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
+            // Трение, упругость и слой — нужны реже, чем тип и масса.
+            if (EditorTheme::BeginMore("rbMore")) {
             ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
 
@@ -577,6 +580,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::SliderInt(T("Layer"), &layer, 1, 32)) {
                 host.PushUndoSnapshot();
                 rb->Layer = 1u << (layer - 1);
+            }
+            EditorTheme::EndMore();
             }
 
             // Триггер: пропускает сквозь себя и сообщает скриптам
@@ -659,7 +664,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
 
             // --- Составная (compound) форма: список дочерних примитивов ---
-            ImGui::Separator();
+            //
+            // Нужна редко (тележка из коробки и четырёх колёс), поэтому — под
+            // «Ещё»; но если части уже есть, группа раскрыта: их надо видеть.
+            if (!col->Parts.empty()) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+            if (EditorTheme::BeginMore("colliderParts")) {
             ImGui::Text(T("Compound parts: %d"), (int)col->Parts.size());
 
             const char* shapeNames[] = {T("Box"), T("Sphere"), T("Capsule")};
@@ -701,6 +710,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 col->Parts.push_back(ColliderComponent::Part{});
             }
+            EditorTheme::EndMore();
+            }
 
         }
     }
@@ -724,6 +735,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("Body offset from the object origin"));
             }
+            if (EditorTheme::BeginMore("charMore")) {
             ImGui::DragFloat(T("Slope Limit"), &ch->SlopeLimit, 0.5f, 0.0f, 89.0f, "%.0f°");
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Steeper than this and the character slides"));
@@ -747,6 +759,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("How hard the character pushes dynamic bodies"));
             }
+            EditorTheme::EndMore();
+            }
         }
     }
 
@@ -761,8 +775,23 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 jc->Type = (sage::physics::JointType)t;
             }
-            ImGui::DragInt(T("Target Id (-1 = world)"), &jc->TargetId, 0.1f, -1, 100000);
-            host.TrackLastImGuiItem();
+            // Второе тело — СЛОТОМ ОБЪЕКТА, а не номером: номер сущности
+            // человек не видит нигде и сверить его ему не с чем.
+            ImGui::TextUnformatted(T("Connected to"));
+            objectslot::Options target;
+            target.AllowWorld = true;
+            target.WorldId = -1;
+            target.SelfId = obj.Id();
+            target.Accept = [](const entt::registry& r, entt::entity e) {
+                return r.all_of<RigidBodyComponent>(e);
+            };
+            target.AcceptHint = "Only an object with a Rigid Body can hold a joint";
+            const objectslot::Result tr = objectslot::Draw(host, "jointTarget", jc->TargetId, target);
+            if (tr.Changed) {
+                host.PushUndoSnapshot();
+                // Пусто у сустава — это «к миру»: висеть ни на чём он не умеет.
+                jc->TargetId = tr.Id > 0 ? tr.Id : -1;
+            }
             ImGui::DragFloat3(T("Anchor (offset)"), &jc->Anchor.x, 0.02f);
             host.TrackLastImGuiItem();
             using JT = sage::physics::JointType;
@@ -983,12 +1012,15 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 p->Dirty = true;
             host.TrackLastImGuiItem();
 
-            if (ImGui::Checkbox(T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
             ImGui::SliderFloat(T("Intensity"), &p->Intensity, 0.0f, 3.0f);
             host.TrackLastImGuiItem();
-            if (ImGui::DragFloat(T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
-            host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Realtime (re-capture every frame)"), &p->Realtime);
+            if (EditorTheme::BeginMore("probeMore")) {
+                if (ImGui::Checkbox(T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
+                if (ImGui::DragFloat(T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
+                host.TrackLastImGuiItem();
+                ImGui::Checkbox(T("Realtime (re-capture every frame)"), &p->Realtime);
+                EditorTheme::EndMore();
+            }
 
 
             if (ImGui::Button(T("Bake Probe"))) p->Dirty = true;
@@ -1046,6 +1078,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                         if (ImGui::SliderInt(T("Chain Length"), &g.ChainLength, 2, 8)) g.Resolved = false;
                         host.TrackLastImGuiItem();
                         ImGui::TextDisabled("%s", T("2 = analytic two-bone, more = FABRIK"));
+                        // Полюс, выравнивание стопы и её фиксация — тонкая
+                        // настройка ног; цель и вес — выше и ниже, на виду.
+                        if (EditorTheme::BeginMore("ikMore")) {
                         ImGui::Checkbox(T("Use Pole"), &g.UsePole);
                         if (g.UsePole) {
                             ImGui::DragFloat3(T("Pole"), &g.Pole.x, 0.02f);
@@ -1059,6 +1094,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                             host.TrackLastImGuiItem();
                             ImGui::DragFloat(T("Release Time"), &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
                             host.TrackLastImGuiItem();
+                        }
+                        EditorTheme::EndMore();
                         }
                     }
                     ImGui::DragFloat3(T("Target (world)"), &g.Target.x, 0.02f);
@@ -1213,7 +1250,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             }
 
             ImGui::DragFloat(T("Volume"), &au->Volume, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Pitch"), &au->Pitch, 0.01f, 0.25f, 4.0f); host.TrackLastImGuiItem();
             ImGui::Checkbox(T("Loop"), &au->Loop); host.TrackLastImGuiItem();
             ImGui::SameLine();
             ImGui::Checkbox(T("Auto Play"), &au->AutoPlay); host.TrackLastImGuiItem();
@@ -1223,14 +1259,21 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.TrackLastImGuiItem();
                 ImGui::DragFloat(T("Max Distance"), &au->MaxDistance, 0.5f, 0.2f, 5000.0f);
                 host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Rolloff"), &au->Rolloff, 0.05f, 0.0f, 10.0f);
-                host.TrackLastImGuiItem();
             }
-            const char* kCategories[] = {T("Effects"), T("Music"), T("Ambience")};
-            int cat = (int)au->Category;
-            if (ImGui::Combo(T("Mix Group"), &cat, kCategories, 3)) {
-                host.PushUndoSnapshot();
-                au->Category = (AudioCategory)cat;
+            // Высота тона, спад и группа микшера — тонкая настройка.
+            if (EditorTheme::BeginMore("audioMore")) {
+                ImGui::DragFloat(T("Pitch"), &au->Pitch, 0.01f, 0.25f, 4.0f); host.TrackLastImGuiItem();
+                if (au->Spatial) {
+                    ImGui::DragFloat(T("Rolloff"), &au->Rolloff, 0.05f, 0.0f, 10.0f);
+                    host.TrackLastImGuiItem();
+                }
+                const char* kCategories[] = {T("Effects"), T("Music"), T("Ambience")};
+                int cat = (int)au->Category;
+                if (ImGui::Combo(T("Mix Group"), &cat, kCategories, 3)) {
+                    host.PushUndoSnapshot();
+                    au->Category = (AudioCategory)cat;
+                }
+                EditorTheme::EndMore();
             }
 
             // Послушать ПРЯМО В РЕДАКТОРЕ, не запуская игру. Иначе подбор

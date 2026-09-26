@@ -397,49 +397,163 @@ bool Passes(const ui::PartField& f, FieldFilter filter, bool splitContent) {
     return (filter == FieldFilter::Behaviour) == f.Content;
 }
 
-// Поля ОДНОЙ части с учётом режима и набора. Виды (Kind::Look) — свёрнутыми
-// группами: у ползунка их три, у кнопки до пяти, и раскрытые разом они
-// превратили бы инспектор в простыню.
-void DrawPartFields(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
-                    const ui::PartType& p, void* data, FieldFilter filter, bool splitContent,
-                    int selected) {
+// КАКИЕ ПОЛЯ ПОКАЗАТЬ ЗА ОДИН ПРОХОД. Инспектор делит поля части на
+// основные (видны сразу) и редкие («Ещё настройки»), а поля состояний кнопки
+// — по вкладкам. Одним описанием, чтобы «есть ли вообще что показать под
+// “Ещё”» считалось тем же правилом, что и сам показ.
+struct FieldView {
+    FieldFilter Filter = FieldFilter::Look;
+    bool SplitContent = false;   // у реакции на мышь поведение — отдельным разделом
+    bool Advanced = false;       // false — основные поля, true — «Ещё настройки»
+    const char* Tab = nullptr;   // nullptr — поля без вкладки; иначе только эта вкладка
+};
+
+// Есть ли у элемента часть, без которой поле не имеет смысла.
+bool RequirementMet(const entt::registry& reg, entt::entity e, const ui::PartField& f) {
+    if (!f.Requires || !*f.Requires) return true;
+    const ui::PartType* need = ui::FindPart(f.Requires);
+    return need && need->Has && need->Has(reg, e);
+}
+
+bool SameTab(const char* a, const char* b) {
+    if (!a || !b) return a == b;
+    return std::strcmp(a, b) == 0;
+}
+
+// Проходит ли поле (не вид) под нынешний показ.
+bool Shows(const std::vector<ui::PartField>& fields, const ui::PartField& f, const void* data,
+           const entt::registry& reg, entt::entity e, const FieldView& view) {
+    if (f.Hidden || f.Type == ui::PartField::Kind::Look) return false;
+    if (!Passes(f, view.Filter, view.SplitContent)) return false;
+    if (!SameTab(f.Tab, view.Tab)) return false;
+    if (f.Advanced != view.Advanced) return false;
+    if (!RequirementMet(reg, e, f)) return false;
+    return ui::FieldVisible(fields, f, data);
+}
+
+void DrawOneField(EditorHost& host, GameObject obj, const UIPropsContext& ctx, const ui::PartType& p,
+                  const ui::PartField& f, void* data, int selected) {
+    DrawPartField(host, obj, ctx, p, f, data);
+    // Правку разносим по набору ПОСЛЕ каждого поля: который именно виджет её
+    // принял, знает только он сам.
+    if (selected > 1 && (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsItemEdited()))
+        MirrorFieldToSelection(host, obj, p, f);
+}
+
+// Поля одного ВИДА (Kind::Look): основные сразу, редкие — своим «Ещё».
+void DrawLookGroup(EditorHost& host, GameObject obj, const UIPropsContext& ctx, const ui::PartType& p,
+                   const std::vector<ui::PartField>& fields, size_t first, size_t end, void* data,
+                   const entt::registry& reg, entt::entity e, int selected) {
+    bool anyAdvanced = false;
+    for (size_t k = first; k < end; ++k) {
+        const ui::PartField& lf = fields[k];
+        if (lf.Hidden || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf)) continue;
+        if (lf.Advanced) { anyAdvanced = true; continue; }
+        DrawOneField(host, obj, ctx, p, lf, data, selected);
+    }
+    if (anyAdvanced && ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        for (size_t k = first; k < end; ++k) {
+            const ui::PartField& lf = fields[k];
+            if (lf.Hidden || !lf.Advanced || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf))
+                continue;
+            DrawOneField(host, obj, ctx, p, lf, data, selected);
+        }
+        ImGui::TreePop();
+    }
+}
+
+// Поля ОДНОЙ части под нынешний показ. Виды (Kind::Look) — свёрнутыми
+// группами: у ползунка их три, и раскрытые разом они были бы простынёй.
+// Возвращает, сколько нарисовано (заголовки видов тоже считаются).
+int DrawFieldsOf(EditorHost& host, GameObject obj, const UIPropsContext& ctx, const ui::PartType& p,
+                 void* data, const FieldView& view, int selected, bool dryRun = false) {
+    const entt::registry& reg = host.CurrentScene().Registry();
+    const entt::entity e = obj.Entity();
     const std::vector<ui::PartField> fields = ui::EditableFields(*p.Fields);
     const size_t lookSize = ui::LookFields().size();
+    int drawn = 0;
     for (size_t i = 0; i < fields.size(); ++i) {
         const ui::PartField& f = fields[i];
-        if (f.Hidden) continue;
         if (f.Type == ui::PartField::Kind::Look) {
             const size_t end = std::min(fields.size(), i + 1 + lookSize);
-            if (filter != FieldFilter::Look || !ui::FieldVisible(fields, f, data)) {
-                i = end - 1;
-                continue;
-            }
-            ImGui::PushID(f.Key);
-            const bool open = ImGui::TreeNodeEx(T(f.Label), ImGuiTreeNodeFlags_SpanAvailWidth);
-            if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
-            if (open) {
-                for (size_t k = i + 1; k < end; ++k) {
-                    const ui::PartField& lf = fields[k];
-                    if (lf.Hidden || !ui::FieldVisible(fields, lf, data)) continue;
-                    DrawPartField(host, obj, ctx, p, lf, data);
-                    if (selected > 1 && (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsItemEdited()))
-                        MirrorFieldToSelection(host, obj, p, lf);
+            const bool show = !f.Hidden && view.Filter == FieldFilter::Look && SameTab(f.Tab, view.Tab) &&
+                              f.Advanced == view.Advanced && RequirementMet(reg, e, f) &&
+                              ui::FieldVisible(fields, f, data);
+            if (show) {
+                ++drawn;
+                if (!dryRun) {
+                    ImGui::PushID(f.Key);
+                    // Вид состояния на своей вкладке раскрыт сразу: вкладку и
+                    // открывают ради него.
+                    const ImGuiTreeNodeFlags flags =
+                        ImGuiTreeNodeFlags_SpanAvailWidth | (view.Tab ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+                    const bool open = ImGui::TreeNodeEx(T(f.Label), flags);
+                    if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
+                    if (open) {
+                        DrawLookGroup(host, obj, ctx, p, fields, i + 1, end, data, reg, e, selected);
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
                 }
-                ImGui::TreePop();
             }
-            ImGui::PopID();
             i = end - 1;
             continue;
         }
-        if (!Passes(f, filter, splitContent)) continue;
-        if (!ui::FieldVisible(fields, f, data)) continue;
-        DrawPartField(host, obj, ctx, p, f, data);
-        // Правку разносим по набору ПОСЛЕ каждого поля: который именно виджет
-        // её принял, знает только он сам, а «элемент только что отпустили»
-        // ImGui умеет сказать про любой.
-        if (selected > 1 && (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsItemEdited()))
-            MirrorFieldToSelection(host, obj, p, f);
+        if (!Shows(fields, f, data, reg, e, view)) continue;
+        ++drawn;
+        if (!dryRun) DrawOneField(host, obj, ctx, p, f, data, selected);
     }
+    return drawn;
+}
+
+// Раздел части: основные поля, а редкие — под «Ещё настройки» (свёрнуто).
+void DrawPartSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx, const ui::PartType& p,
+                     void* data, FieldView view, int selected) {
+    // Своя область имён: «Ещё настройки» бывает у каждой части и вкладки.
+    ImGui::PushID(p.Id ? p.Id : "part");
+    ImGui::PushID(view.Tab ? view.Tab : "");
+    view.Advanced = false;
+    DrawFieldsOf(host, obj, ctx, p, data, view, selected);
+    view.Advanced = true;
+    if (DrawFieldsOf(host, obj, ctx, p, data, view, selected, /*dryRun=*/true) > 0 &&
+        ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        DrawFieldsOf(host, obj, ctx, p, data, view, selected);
+        ImGui::TreePop();
+    }
+    ImGui::PopID();
+    ImGui::PopID();
+}
+
+// Совместимость: все поля части под фильтр (события, части сверх типа).
+void DrawPartFields(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
+                    const ui::PartType& p, void* data, FieldFilter filter, bool splitContent,
+                    int selected) {
+    FieldView view;
+    view.Filter = filter;
+    view.SplitContent = splitContent;
+    DrawPartSection(host, obj, ctx, p, data, view, selected);
+}
+
+// Вкладки состояний, которые у поля части вообще встречаются (по порядку
+// таблицы) и к которым у элемента есть что показать.
+std::vector<const char*> StateTabs(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
+                                   const ui::PartType& p, void* data) {
+    std::vector<const char*> tabs;
+    for (const ui::PartField& f : *p.Fields) {
+        if (!f.Tab) continue;
+        bool known = false;
+        for (const char* t : tabs) known |= SameTab(t, f.Tab);
+        if (known) continue;
+        FieldView v;
+        v.SplitContent = true;
+        v.Tab = f.Tab;
+        v.Advanced = false;
+        int n = DrawFieldsOf(host, obj, ctx, p, data, v, 1, true);
+        v.Advanced = true;
+        n += DrawFieldsOf(host, obj, ctx, p, data, v, 1, true);
+        if (n > 0) tabs.push_back(f.Tab);
+    }
+    return tabs;
 }
 
 // Входит ли часть в устройство типа. По флагам заготовки — тем же, по которым
@@ -458,6 +572,7 @@ bool TypeHasPart(const ui::Preset& t, const char* id) {
 // как оглавление.
 void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int selected);
 void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf);
+void DrawGroupSettings(EditorHost& host, entt::entity e);
 
 } // namespace
 
@@ -649,15 +764,55 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         const std::string typeTitle =
             xf->Type.empty() ? std::string(T("Look")) : std::string(T(xf->Type.c_str()));
         if (ImGui::CollapsingHeader(typeTitle.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            // СОСТОЯНИЯ КНОПКИ — ВКЛАДКАМИ: «обычная», «при наведении»,
+            // «при нажатии»... Каждая вкладка — вид в одном состоянии, а не
+            // двадцать полей всех состояний подряд.
+            const ui::PartType* act = ui::FindPart("interactable");
+            void* actData = (act && act->Has(reg, e) && belongs(*act)) ? act->GetMutable(reg, e) : nullptr;
+            const std::vector<const char*> tabs =
+                actData ? StateTabs(host, obj, ctx, *act, actData) : std::vector<const char*>{};
+            const ui::PartType* fillPart = ui::FindPart("fill");
+            const bool fillInTabs = !tabs.empty() && fillPart && fillPart->Has(reg, e) && belongs(*fillPart);
+
+            auto stateTabs = [&](bool withNormal) {
+                if (!ImGui::BeginTabBar("##ui_states", ImGuiTabBarFlags_FittingPolicyScroll)) return;
+                if (withNormal && ImGui::BeginTabItem(T("Normal"))) {
+                    if (void* fd = fillPart->GetMutable(reg, e))
+                        DrawPartSection(host, obj, ctx, *fillPart, fd, FieldView{}, selected);
+                    ImGui::EndTabItem();
+                }
+                for (const char* tab : tabs) {
+                    if (!ImGui::BeginTabItem(T(tab))) continue;
+                    FieldView v;
+                    v.SplitContent = true;
+                    v.Tab = tab;
+                    DrawPartSection(host, obj, ctx, *act, actData, v, selected);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            };
+
+            bool statesDrawn = false;
             for (const ui::PartType& p : ui::Parts()) {
                 if (!p.Fields || p.Container || p.Hidden || !p.Has(reg, e) || !belongs(p)) continue;
+                if (act && &p == act) continue;   // реакция — вкладками и «Поведением»
                 void* data = p.GetMutable(reg, e);
                 if (!data) continue;
-                const bool interaction = p.Id && std::string(p.Id) == "interactable";
-                ImGui::SeparatorText(interaction ? T("States") : T(p.Title));
+                if (fillInTabs && &p == fillPart) {
+                    stateTabs(true);
+                    statesDrawn = true;
+                    continue;
+                }
+                ImGui::SeparatorText(T(p.Title));
                 ImGui::PushID(p.Id);
-                DrawPartFields(host, obj, ctx, p, data, FieldFilter::Look, interaction, selected);
+                DrawPartSection(host, obj, ctx, p, data, FieldView{}, selected);
                 ImGui::PopID();
+            }
+            // Без подложки (ползунок, галка) у состояний только подкраска —
+            // она и показывается своими вкладками после вида.
+            if (!statesDrawn && !tabs.empty()) {
+                ImGui::SeparatorText(T("States"));
+                stateTabs(false);
             }
         }
     }
@@ -674,7 +829,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
                 if (!data) continue;
                 ImGui::SeparatorText(T(p.Title));
                 ImGui::PushID(p.Id);
-                DrawPartFields(host, obj, ctx, p, data, FieldFilter::Look, false, selected);
+                DrawPartSection(host, obj, ctx, p, data, FieldView{}, selected);
                 ImGui::PopID();
             }
         }
@@ -853,12 +1008,16 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
                                           "two children with 1 and 2 split the rest 1:2."));
             ImGui::DragFloat2(T("Size"), &xf->Size.x, 1.0f, 0.0f, 4096.0f);
             host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
-            host.TrackLastImGuiItem();
-            ImGui::DragInt(T("Order"), &xf->Order, 1);
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Place in the row: lower comes first"));
             ImGui::Checkbox(T("Visible"), &xf->Visible);
+            if (ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                ImGui::DragInt(T("Order"), &xf->Order, 1);
+                host.TrackLastImGuiItem();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Place in the row: lower comes first"));
+                ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
+                host.TrackLastImGuiItem();
+                DrawGroupSettings(host, e);
+                ImGui::TreePop();
+            }
             return;
         }
         ImGui::SeparatorText(T("Position"));
@@ -883,22 +1042,33 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     if (xf->Mode != ui::Element::Stretch::None) {
         ImGui::DragFloat4(T("Margin l,t,r,b"), &xf->Margin.x, 1.0f); host.TrackLastImGuiItem();
     }
-    ImGui::DragFloat2(T("Pivot"), &xf->Pivot.x, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Which point of the element lands on the anchor"));
-    }
-    ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
-    host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Around the element centre. The handle above the top edge\n"
-                                  "does the same with the mouse."));
-    ImGui::DragInt(T("Order"), &xf->Order, 1); host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
     ImGui::Checkbox(T("Visible"), &xf->Visible);
 
-    // ПРОЗРАЧНОСТЬ И ВВОД ВСЕГО ПОДДЕРЕВА — общая настройка любого элемента,
-    // а не добавка, которую надо включить: плавно спрятать панель со всем
-    // содержимым — одно число.
+    // Точка привязки, поворот, порядок, прозрачность — нужны реже, чем «где и
+    // какого размера», и уходят под «Ещё».
+    if (ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        ImGui::DragFloat2(T("Pivot"), &xf->Pivot.x, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Which point of the element lands on the anchor"));
+        }
+        // УГОЛ — ЧИСЛОМ, а не только мышью: «ровно 90» набирают здесь.
+        ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
+        host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Around the element centre. The handle above the top edge\n"
+                                      "does the same with the mouse."));
+        ImGui::DragInt(T("Order"), &xf->Order, 1); host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
+        DrawGroupSettings(host, e);
+        ImGui::TreePop();
+    }
+}
+
+// ПРОЗРАЧНОСТЬ И ВВОД ВСЕГО ПОДДЕРЕВА — общая настройка любого элемента, а не
+// добавка, которую надо включить: плавно спрятать панель со всем содержимым —
+// одно число.
+void DrawGroupSettings(EditorHost& host, entt::entity e) {
+    entt::registry& reg = host.CurrentScene().Registry();
     ui::Group* group = reg.try_get<ui::Group>(e);
     float alpha = group ? group->Alpha : 1.0f;
     if (ImGui::SliderFloat(T("Opacity"), &alpha, 0.0f, 1.0f, "%.2f")) {

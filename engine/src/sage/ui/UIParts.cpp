@@ -19,7 +19,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <list>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -263,6 +265,24 @@ void DrawLook(const PartDrawContext& c, const Look& look, const UIRect& r, bool 
     DrawLookBorder(c, look, r, alpha);
 }
 
+// Пометить поля таблицы по ключам. Списком после таблицы, а не флагом в
+// каждой строке инициализатора: что основное, а что редкое, читается одним
+// взглядом и правится в одном месте.
+void MarkAdvanced(std::vector<PartField>& v, std::initializer_list<const char*> keys) {
+    for (PartField& f : v)
+        for (const char* k : keys)
+            if (f.Key && std::string_view(f.Key) == k) f.Advanced = true;
+}
+void MarkTab(std::vector<PartField>& v, const char* tab, const char* need,
+             std::initializer_list<const char*> keys) {
+    for (PartField& f : v)
+        for (const char* k : keys)
+            if (f.Key && std::string_view(f.Key) == k) {
+                f.Tab = tab;
+                if (need) f.Requires = need;
+            }
+}
+
 // Таблица полей ОДНОГО вида — со смещениями от начала Look.
 //
 // Условия показа выстроены цепочкой: режим «как ложится» виден, только когда
@@ -325,6 +345,11 @@ const std::vector<PartField>& LookFieldTable() {
             {"shadowColor", SAGE_UI_TEXT("Shadow colour"), PartField::Kind::Color,
              offsetof(Look, ShadowColor)},
         };
+        // Основное у вида — цвет, картинка, как она ложится, нарезка и
+        // скругление. Остальное трогают редко.
+        MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
+                         "snapPixels", "filter", "gradient", "borderThickness", "borderColor",
+                         "shadowSize", "shadowColor"});
         return v;
     }();
     return f;
@@ -344,10 +369,17 @@ const char* Intern(const std::string& s) {
 // Поля вида, пересаженные внутрь компонента: смещение сдвинуто на место вида,
 // ключи — с приставкой. Поля без своего условия показа наследуют условие
 // самого вида («свой вид при наведении» — только когда он включён).
-std::vector<PartField> ShiftLookFields(const char* prefix, size_t offset, const char* showIfKey,
-                                       int showIfValue) {
+std::vector<PartField> ShiftLookFields(const char* prefix, size_t offset, const PartField* owner) {
+    const char* showIfKey = owner ? owner->ShowIfKey : nullptr;
+    const int showIfValue = owner ? owner->ShowIfValue : 0;
     std::vector<PartField> out;
     for (PartField f : LookFieldTable()) {
+        // Вкладка и требование — у вида целиком: поля вида при наведении
+        // живут на вкладке «при наведении» и нужны только при подложке.
+        if (owner) {
+            f.Tab = owner->Tab;
+            f.Requires = owner->Requires;
+        }
         f.Offset += offset;
         if (prefix && *prefix) {
             f.Key = Intern(std::string(prefix) + "." + f.Key);
@@ -373,7 +405,7 @@ const std::vector<PartField>& FillFields() {
         Fill probe;
         const size_t base = (size_t)(reinterpret_cast<const char*>(static_cast<const Look*>(&probe)) -
                                      reinterpret_cast<const char*>(&probe));
-        return ShiftLookFields(nullptr, base, nullptr, 0);
+        return ShiftLookFields(nullptr, base, nullptr);
     }();
     return f;
 }
@@ -459,6 +491,8 @@ const std::vector<PartField>& ImageFields() {
         };
         v[v.size() - 1].Hidden = true;
         v[v.size() - 2].Hidden = true;
+        MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
+                         "snapPixels", "filter"});
         return v;
     }();
     return f;
@@ -523,6 +557,7 @@ const std::vector<PartField>& BarFields() {
             {"filled", SAGE_UI_TEXT("Fill"), PartField::Kind::Look, offsetof(Bar, Filled)},
         };
         v[0].Content = true;
+        MarkAdvanced(v, {"fillMode", "padding", "smoothing"});
         return v;
     }();
     return f;
@@ -671,6 +706,9 @@ const std::vector<PartField>& LabelFields() {
          "stateColors", 1},
     };
     v[0].Content = true;
+    MarkAdvanced(v, {"font", "fontPixelHeight", "fontSnapPixels", "fontFilter", "autoWidth", "padX",
+                     "shadowOffset", "shadowColor", "outline", "outlineColor", "stateColors",
+                     "hoverColor", "pressedColor", "disabledColor"});
     return v; }();
     return f;
 }
@@ -834,6 +872,7 @@ const std::vector<PartField>& RangeFields() {
         // «Квадратик» галки — это та же дорожка (Track), показанная под своим
         // именем. В файл второй раз не пишется: один вид, одно место.
         v[10].EditorOnly = true;
+        MarkAdvanced(v, {"trackThickness", "knobSize"});
         return v;
     }();
     return f;
@@ -917,6 +956,7 @@ const std::vector<PartField>& TextInputFields() {
              offsetof(TextInput, CaretWidth), 0.5f, 8.0f},
         };
         for (int i = 0; i < 4; ++i) v[(size_t)i].Content = true;
+        MarkAdvanced(v, {"readOnly", "placeholderColor", "caretColor", "caretWidth"});
         return v;
     }();
     return f;
@@ -1027,6 +1067,16 @@ const std::vector<PartField>& InteractableFields() {
         };
         v[0].Content = v[1].Content = v[2].Content = true;
         v.back().Content = true;
+        // Состояния — ВКЛАДКАМИ, и свой вид состояния рисует подложка: без
+        // неё (у ползунка, галки) эти поля не делают ничего и не показываются.
+        MarkTab(v, SAGE_UI_TEXT("On hover"), nullptr, {"hoverBrightness"});
+        MarkTab(v, SAGE_UI_TEXT("On hover"), "fill", {"useHoverLook", "hoverLook"});
+        MarkTab(v, SAGE_UI_TEXT("When pressed"), nullptr, {"pressedBrightness", "pressedOffset"});
+        MarkTab(v, SAGE_UI_TEXT("When pressed"), "fill", {"usePressedLook", "pressedLook"});
+        MarkTab(v, SAGE_UI_TEXT("When focused"), "textInput", {"useFocusedLook", "focusedLook"});
+        MarkTab(v, SAGE_UI_TEXT("When disabled"), nullptr, {"disabledAlpha"});
+        MarkTab(v, SAGE_UI_TEXT("When disabled"), "fill", {"useDisabledLook", "disabledLook"});
+        MarkAdvanced(v, {"cursor"});
         return v;
     }();
     return f;
@@ -1089,6 +1139,11 @@ const std::vector<PartField>& LayoutFields() {
         {"fitContent", SAGE_UI_TEXT("Size from content"), PartField::Kind::Bool,
          offsetof(Stack, FitContent)},
     };
+    static const bool marked = [] {
+        MarkAdvanced(const_cast<std::vector<PartField>&>(f), {"cellSize", "fitContent", "padding"});
+        return true;
+    }();
+    (void)marked;
     return f;
 }
 
@@ -1105,6 +1160,11 @@ const std::vector<PartField>& ScrollFields() {
         {"clamp", SAGE_UI_TEXT("Stop at the edges"), PartField::Kind::Bool, offsetof(Scroll, Clamp),
          0.0f, 1.0f, "Off where the edge is deliberate: a map, an endless feed."},
     };
+    static const bool marked = [] {
+        MarkAdvanced(const_cast<std::vector<PartField>&>(f), {"offset", "speed", "clamp"});
+        return true;
+    }();
+    (void)marked;
     return f;
 }
 
@@ -1383,8 +1443,7 @@ const std::vector<PartField>& LookFieldsOf(const PartField& lookField) {
     for (const auto& [key, fields] : cache)
         if (key == id) return fields;
     cache.emplace_back(id, ShiftLookFields(Intern(lookField.Key ? lookField.Key : ""),
-                                           lookField.Offset, lookField.ShowIfKey,
-                                           lookField.ShowIfValue));
+                                           lookField.Offset, &lookField));
     return cache.back().second;
 }
 

@@ -667,6 +667,29 @@ bool EditorLayer::SaveSelectedAsPrefab(const fs::path& path, std::string& err) {
     return true;
 }
 
+fs::path EditorLayer::SaveObjectAsPrefab(int objectId, const fs::path& folder, std::string& err) {
+    GameObject root = m_scene->Get(objectId);
+    if (!root.Valid()) {
+        err = T("the object is gone");
+        return {};
+    }
+    // Имя файла — имя объекта, без символов, запрещённых в именах файлов
+    // Windows; занятое — с номером, а не поверх: перетаскивание не имеет права
+    // молча затереть чужой префаб.
+    std::string base = root.Name().empty() ? std::string("Prefab") : root.Name();
+    for (char& c : base)
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' ||
+            c == '|')
+            c = '_';
+    std::error_code ec;
+    fs::path path = folder / sage::PathFromUtf8(base + ".sageprefab");
+    for (int n = 2; fs::exists(path, ec) && n < 1000; ++n)
+        path = folder / sage::PathFromUtf8(base + " " + std::to_string(n) + ".sageprefab");
+    if (!sage::scene::SavePrefab(*m_scene, root.Entity(), sage::PathToUtf8(path), err)) return {};
+    SetStatusMessage(T("Prefab saved: ") + sage::PathToUtf8(path.filename()));
+    return path;
+}
+
 int EditorLayer::InstantiatePrefab(const fs::path& path) {
     PushUndoSnapshot();
     const int rootId = sage::scene::InstantiatePrefab(*m_scene, path.string());

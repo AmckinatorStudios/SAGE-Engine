@@ -403,3 +403,50 @@ TEST(UISkin_type_change_keeps_children) {
     CHECK_TRUE(scene.ParentOf(inner.Entity()) == panel.Entity());
     CHECK_TRUE(scene.Registry().all_of<sage::ui::Interactable>(panel.Entity()));
 }
+
+// --- Инспектор: сразу видно немногое ------------------------------------------------
+
+TEST(UISkin_each_part_shows_few_settings_up_front) {
+    // Раздел части показывает сразу только основное; редкое — под «Ещё
+    // настройки», состояния кнопки — вкладками. Раньше у надписи сразу было
+    // видно два десятка полей, и нужное терялось.
+    Scene scene("fields");
+    GameObject obj = scene.CreateEmptyObject("E");
+    entt::registry& reg = scene.Registry();
+    reg.emplace<sage::ui::Element>(obj.Entity());
+    for (const sage::ui::PartType& p : sage::ui::Parts()) {
+        if (!p.Fields || p.Hidden || !p.Add) continue;
+        p.Add(reg, obj.Entity());
+        const void* data = p.Get(reg, obj.Entity());
+        const auto fields = sage::ui::EditableFields(*p.Fields);
+        int upFront = 0;
+        for (const auto& f : fields) {
+            if (f.Hidden || f.Advanced || f.Tab || f.LookKey) continue;   // поля вида — внутри его группы
+            if (f.Type == sage::ui::PartField::Kind::Bindings) continue;   // события — своим разделом
+            if (!sage::ui::FieldVisible(fields, f, data)) continue;
+            ++upFront;
+        }
+        if (upFront > 8)
+            sagetest::ReportFail(__FILE__, __LINE__,
+                                 std::string("слишком много полей сразу у части ") + p.Id + ": " +
+                                     std::to_string(upFront));
+    }
+
+    auto field = [](const char* part, const char* key) -> sage::ui::PartField {
+        const sage::ui::PartType* p = sage::ui::FindPart(part);
+        for (const auto& f : sage::ui::EditableFields(*p->Fields))
+            if (std::string(f.Key) == key) return f;
+        return {};
+    };
+    // Основное — на виду, редкое — под «Ещё».
+    CHECK_FALSE(field("label", "text").Advanced);
+    CHECK_FALSE(field("label", "color").Advanced);
+    CHECK_TRUE(field("label", "fontFilter").Advanced);
+    CHECK_FALSE(field("fill", "texture").Advanced);
+    CHECK_TRUE(field("fill", "shadowColor").Advanced);
+    // Вид при наведении — на своей вкладке и только при подложке.
+    const auto hover = field("interactable", "hoverLook");
+    CHECK_TRUE(hover.Tab != nullptr);
+    CHECK_TRUE(hover.Requires && std::string(hover.Requires) == "fill");
+    CHECK_TRUE(field("interactable", "hoverLook.color").Tab != nullptr);
+}

@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 
 #include "imgui.h"
+#include "imgui_internal.h" // BeginDragDropTargetCustom: объект на всё окно сетки
 
 #include "EditorHost.h"
 #include "../AssetSlot.h"
@@ -40,6 +41,8 @@
 #include "../Localization.h"
 
 namespace fs = std::filesystem;
+
+static void AcceptObjectAsPrefab(EditorHost& host, const fs::path& folder);
 namespace covers = sage::editor::covers;
 
 namespace {
@@ -418,12 +421,14 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
         ImGui::EndPopup();
     }
     // Бросок файла на папку дерева — перенос в неё: то же, что и в сетке.
+    // Бросок ОБЪЕКТА из иерархии — новый префаб в этой папке.
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
             std::string dropped((const char*)p->Data, (size_t)p->DataSize);
             if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
             MoveIntoFolder(host, dropped, dir);
         }
+        AcceptObjectAsPrefab(host, dir);
         ImGui::EndDragDropTarget();
     }
     if (open && !subdirs.empty()) {
@@ -673,6 +678,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
             if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
             MoveIntoFolder(host, dropped, path);
         }
+        AcceptObjectAsPrefab(host, path);
         ImGui::EndDragDropTarget();
     }
 
@@ -1558,6 +1564,18 @@ void AssetsPanel::DrawModals(EditorHost& host) {
     if (m_deleteTargets.empty()) m_deleteAsked = false;
 }
 
+// Бросок строки из иерархии на панель Assets: объект становится префабом в
+// папке folder. Подсказка у курсора — ещё до отпускания, как у слотов.
+static void AcceptObjectAsPrefab(EditorHost& host, const fs::path& folder) {
+    const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY", ImGuiDragDropFlags_AcceptBeforeDelivery);
+    if (!p || p->DataSize != (int)sizeof(int)) return;
+    ImGui::SetTooltip("%s", T("Drop to save the object as a prefab here"));
+    if (!p->IsDelivery()) return;
+    std::string err;
+    const fs::path made = host.SaveObjectAsPrefab(*(const int*)p->Data, folder, err);
+    if (made.empty()) host.SetStatusMessage(T("The prefab was not saved: ") + err);
+}
+
 void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
     // Бюджет превью на кадр: см. ThumbnailFor.
     m_thumbRenderedThisFrame = false;
@@ -1789,6 +1807,18 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
                                 !ImGui::IsAnyItemHovered() &&
                                 !ImGui::IsPopupOpen("##assets_create_ctx"));
     rectselect::Draw(m_rect);
+
+    // ОБЪЕКТ ИЗ ИЕРАРХИИ — В ПАНЕЛЬ: новый префаб в открытой папке. Цель — всё
+    // окно сетки, а не отдельная карточка: бросают «сюда, в эту папку», и
+    // промахнуться мимо пустого места нельзя.
+    {
+        const ImVec2 wmin = ImGui::GetWindowPos();
+        const ImVec2 wmax(wmin.x + ImGui::GetWindowSize().x, wmin.y + ImGui::GetWindowSize().y);
+        if (ImGui::BeginDragDropTargetCustom(ImRect(wmin, wmax), ImGui::GetID("##assets_object_drop"))) {
+            AcceptObjectAsPrefab(host, host.AssetsCwd());
+            ImGui::EndDragDropTarget();
+        }
+    }
     ImGui::EndChild();
 
     DrawModals(host);

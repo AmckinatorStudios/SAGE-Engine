@@ -119,6 +119,8 @@ public:
     // --- EditorHost: префабы ---
     bool SaveSelectedAsPrefab(const std::filesystem::path& path, std::string& err) override;
     int InstantiatePrefab(const std::filesystem::path& path) override;
+    std::filesystem::path SaveObjectAsPrefab(int objectId, const std::filesystem::path& folder,
+                                             std::string& err) override;
 
     // --- EditorHost: проект и файлы сцен ---
     Project& CurrentProject() override { return m_project; }
@@ -386,6 +388,7 @@ private:
     bool SelfTestSelection();
     bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
+    bool SelfTestPickerAndPrefabs(); // пипетка слота объекта, префабы броском
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
     void CheckMultiWindowFrame();
