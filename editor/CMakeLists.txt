@@ -35,6 +35,7 @@ add_executable(SageEditor WIN32
     src/ui/CommandPalette.cpp
     src/EditorIcons.cpp
     src/AssetSlot.cpp
+    src/ObjectSlot.cpp
     src/ModelMaterialImport.cpp
     src/ProjectTemplates.cpp
     src/TemplateStore.cpp

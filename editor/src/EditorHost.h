@@ -64,6 +64,11 @@ public:
     // Инстанцирует префаб из файла в сцену (новые id), выделяет корень. Возвращает
     // id корня инстанса или -1 при ошибке.
     virtual int InstantiatePrefab(const std::filesystem::path& path) = 0;
+    // Объект сцены (с детьми) — новым префабом в папке проекта: объект
+    // перетаскивают из иерархии в панель Assets. Имя — по объекту, занятое —
+    // с номером. Возвращает путь файла (пусто — не вышло, причина в err).
+    virtual std::filesystem::path SaveObjectAsPrefab(int objectId, const std::filesystem::path& folder,
+                                                     std::string& err) = 0;
 
     // --- проект и файлы сцен ---
     virtual Project& CurrentProject() = 0;

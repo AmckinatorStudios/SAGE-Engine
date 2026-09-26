@@ -1,5 +1,9 @@
 #include "VarsEditor.h"
 
+#include <algorithm>
+
+#include "ObjectSlot.h"
+
 #include <cstring>
 #include <vector>
 
@@ -50,51 +54,14 @@ bool InputText(const char* id, std::string& text, const char* hint = nullptr) {
 } // namespace
 
 bool DrawEntityRef(EditorHost& host, const char* id, sage::vars::EntityRef& ref) {
-    Scene& scene = host.CurrentScene();
-    GameObject pointed = ref.Valid() ? scene.Get(ref.Id) : GameObject{};
-    // ЧТО ИМЕННО ПОКАЗЫВАТЬ. Имя, а не номер: номер сущности человек не видит
-    // нигде и сверить его ему не с чем. Но и «ссылка есть, объекта нет» —
-    // состояние, о котором надо сказать вслух: связь молча перестала работать.
-    std::string label;
-    if (!ref.Valid()) label = T("Nothing — drag an object here");
-    else if (pointed.Valid()) label = pointed.Name();
-    else label = std::string(T("Object is gone (id ")) + std::to_string(ref.Id) + ")";
-
-    bool changed = false;
-    ImGui::PushID(id);
-    const bool missing = ref.Valid() && !pointed.Valid();
-    if (missing) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.45f, 0.16f, 0.16f, 1.0f));
-    ImGui::Button(label.c_str(), ImVec2(-70.0f, 0.0f));
-    if (missing) ImGui::PopStyleColor();
-
-    // Приём броска из дерева иерархии — тем же типом нагрузки, каким дерево
-    // начинает перетаскивание (HierarchyPanel).
-    if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY")) {
-            if (p->DataSize == (int)sizeof(int)) {
-                ref.Id = *(const int*)p->Data;
-                changed = true;
-            }
-        }
-        ImGui::EndDragDropTarget();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Drag an object from Hierarchy. The link holds the object's\n"
-                                  "id, so renaming it does not break anything."));
-    }
-    // Двойной щелчок — «покажи мне его»: связь, ведущую неизвестно куда,
-    // проверить иначе нечем.
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-        pointed.Valid()) {
-        host.Selection().SetPrimary(ref.Id);
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton(T("Clear##ref"))) {
-        ref.Id = 0;
-        changed = true;
-    }
-    ImGui::PopID();
-    return changed;
+    // Слот объекта — общий на весь редактор (см. ObjectSlot.h): список с
+    // поиском, бросок из иерархии, пипетка, «показать», «очистить».
+    objectslot::Options opt;
+    opt.EmptyLabel = "Nothing — pick or drag an object";
+    const objectslot::Result r = objectslot::Draw(host, id, ref.Id, opt);
+    if (!r.Changed) return false;
+    ref.Id = std::max(0, r.Id);
+    return true;
 }
 
 bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,

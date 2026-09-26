@@ -2283,6 +2283,24 @@
     "When pressed": "При нажатии",
     "Wrap Row": "Ряд с переносом",
     "Writes the look of this element (not its text or value) to a\nfile. Give the same file to other elements — editing it\nchanges them all.": "Записывает вид этого элемента (без текста и значения) в\nфайл. Дайте тот же файл другим элементам — правка файла\nизменит их все.",
-    "interface style": "стиль интерфейса"
+    "interface style": "стиль интерфейса",
+    "An object cannot point at itself": "Объект не может ссылаться сам на себя",
+    "Clear the link": "Очистить ссылку",
+    "Click an object in the scene or the hierarchy…": "Щёлкните объект в сцене или в иерархии…",
+    "Click the object in the viewport or in Hierarchy (Esc — cancel)": "Щёлкните объект во вьюпорте или в иерархии (Esc — отмена)",
+    "Click to choose from the list, or drag an object here from Hierarchy.\nThe link keeps the object's id: renaming it breaks nothing.": "Щёлкните, чтобы выбрать из списка, или перетащите сюда объект из иерархии.\nСсылка держит номер объекта: переименование ничего не сломает.",
+    "Connected to": "Соединён с",
+    "Drop to save the object as a prefab here": "Отпустите, чтобы сохранить объект префабом здесь",
+    "More settings": "Ещё настройки",
+    "Normal": "Обычная",
+    "Pick in the scene: click the object in the viewport or in Hierarchy (Esc — cancel)": "Пипетка: щёлкните объект во вьюпорте или в иерархии (Esc — отмена)",
+    "Prefab added inside: ": "Префаб добавлен внутрь: ",
+    "Search objects...": "Поиск объектов…",
+    "Select the linked object": "Выбрать объект по ссылке",
+    "The prefab was not saved: ": "Префаб не сохранён: ",
+    "This object does not fit here": "Этот объект сюда не подходит",
+    "the object is gone": "объекта больше нет",
+    "Nothing — pick or drag an object": "Ничего — выберите или перетащите объект",
+    "Only an object with a Rigid Body can hold a joint": "Сустав держится только за объект с твёрдым телом"
   }
 }

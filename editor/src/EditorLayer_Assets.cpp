@@ -37,6 +37,7 @@
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "AssetSlot.h"
+#include "ObjectSlot.h"
 #include "TextureSet.h"
 #include "sage/render/DebugView.h"
 #include "sage/core/Application.h"
@@ -273,9 +274,28 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         return true;
     }
 
-    // Префаб на сущность НЕ применяется: он сам себе поддерево, и «применить» его
-    // к чужой сущности значило бы её заменить. Ставится он в сцену — броском во
-    // вьюпорт или в список.
+    // ПРЕФАБ НА ОБЪЕКТ — РЕБЁНКОМ. Заменять им объект нельзя (он сам себе
+    // поддерево), а «положить внутрь» — то, что обещает подсказка при броске на
+    // строку иерархии: оружие в руку персонажа, лампу на столб. Встаёт в точку
+    // самого родителя.
+    if (ext == ".sageprefab") {
+        PushUndoSnapshot();
+        // Путь — РАЗРЕШЁННЫЙ от проекта: ссылка относительная, а текущая
+        // папка процесса не обязана быть корнем проекта.
+        const int child =
+            sage::scene::InstantiatePrefab(*m_scene, sage::AssetDatabase::Instance().LocatePath(ref));
+        if (child < 0) {
+            SetStatusMessage(T("The prefab could not be placed: ") + asset.filename().string());
+            return true;
+        }
+        GameObject made = m_scene->Get(child);
+        m_scene->SetParent(made.Entity(), obj.Entity());
+        if (Transform* tr = m_scene->Registry().try_get<Transform>(made.Entity())) tr->Position = glm::vec3(0.0f);
+        m_selection.SetPrimary(child);
+        SetStatusMessage(T("Prefab added inside: ") + obj.Name());
+        return true;
+    }
+
     SetStatusMessage(T("This file cannot be assigned to an object"));
     return false;
 }
@@ -367,7 +387,7 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
     int newId = -1;
     if (ext == ".sageprefab") {
         PushUndoSnapshot();
-        newId = sage::scene::InstantiatePrefab(*m_scene, ref);
+        newId = sage::scene::InstantiatePrefab(*m_scene, sage::AssetDatabase::Instance().LocatePath(ref));
         if (newId < 0) {
             SetStatusMessage(T("The prefab could not be placed: ") + asset.filename().string());
             return true;
@@ -467,12 +487,28 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     // в паре метров от камеры. Ронять в бесконечность нельзя, а «в начало
     // координат» означало бы, что объект исчез из виду.
     const bool onSurface = bestEntity != entt::null;
-    const glm::vec3 point = onSurface ? (ro + rd * bestT) : (ro + rd * 8.0f);
+    glm::vec3 point = onSurface ? (ro + rd * bestT) : (ro + rd * 8.0f);
+    // МИМО ОБЪЕКТОВ — НА ПОЛ. Точка «в восьми метрах по лучу» висела в
+    // воздухе или уходила под землю, и первое, что делали после броска, —
+    // опускали объект руками. Луч, идущий вниз, пересекает плоскость y = 0 —
+    // туда и ставим (если это не дальше разумного).
+    bool onGround = false;
+    if (!onSurface && rd.y < -1e-4f) {
+        const float t = -ro.y / rd.y;
+        if (t > 0.0f && t < 500.0f) {
+            point = ro + rd * t;
+            onGround = true;
+        }
+    }
 
     PushUndoSnapshot();
     int newId = -1;
     if (isPrefab) {
-        newId = sage::scene::InstantiatePrefabAt(*m_scene, ref, point);
+        // Разрешённый от проекта путь (см. бросок префаба на объект выше):
+        // по голой ссылке префаб находился, только если процесс случайно
+        // стоял в корне проекта.
+        newId = sage::scene::InstantiatePrefabAt(*m_scene, sage::AssetDatabase::Instance().LocatePath(ref),
+                                                 point);
         if (newId < 0) {
             SetStatusMessage(T("The prefab could not be placed: ") + asset.filename().string());
             return true;
@@ -498,7 +534,7 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         // Ставим НА поверхность, а не центром в точку попадания: иначе половина
         // модели уходит под пол, и первое, что приходится делать после
         // перетаскивания, — поднимать её вручную.
-        if (onSurface) {
+        if (onSurface || onGround) {
             const glm::vec3 bmin = mr.MeshPtr->BoundsMin();
             obj.GetTransform().Position.y -= bmin.y * obj.GetTransform().Scale.y;
         }
@@ -667,6 +703,14 @@ void EditorLayer::PickAtViewportWith(const glm::mat4& view, const glm::mat4& pro
     pickMarkerView(reg.view<ParticleEmitterComponent, Transform, IdComponent>());
     pickMarkerView(reg.view<ReflectionProbeComponent, Transform, IdComponent>());
     pickMarkerView(reg.view<AudioSourceComponent, Transform, IdComponent>());
+
+    // ПИПЕТКА СЛОТА ОБЪЕКТА: щелчок в сцене назначает объект полю, а не
+    // выбирает его — иначе инспектор переключился бы на щёлкнутый объект, и
+    // поле, которое заполняли, пропало бы с экрана.
+    if (objectslot::Picking()) {
+        if (bestId != -1) objectslot::Deliver(bestId);
+        return;
+    }
 
     // Ctrl-клик (additive): добавить/убрать попадание из набора (клик по пустоте
     // ничего не меняет). Обычный клик: одиночный выбор (мимо всех — снять).

@@ -1,5 +1,7 @@
 #include "EditorTheme.h"
 
+#include <string>
+
 #include "ImGuizmo.h"
 #include "Localization.h"
 #include "EditorIcons.h"
@@ -661,6 +663,15 @@ void Hint(const char* text) {
     ImGui::PopTextWrapPos();
     ImGui::EndTooltip();
 }
+
+bool BeginMore(const char* id) {
+    // Метка «##id» в самой подписи, а не PushID вокруг: открытый узел кладёт
+    // свой идентификатор на стек, и PopID сразу за ним снял бы не тот.
+    const std::string label = std::string(T("More settings")) + "##" + id;
+    return ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
+}
+
+void EndMore() { ImGui::TreePop(); }
 
 bool SectionHeader(const char* icon, const char* label, ImGuiTreeNodeFlags flags,
                    bool* removeClicked, const char* hint) {

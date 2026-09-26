@@ -16,6 +16,7 @@
 #include "EditorIcons.h"
 #include "CodeEditorApp.h"
 #include "AssetSlot.h"
+#include "ObjectSlot.h"
 #include "AssetCovers.h"
 #include "Thumbnails.h"
 #include "ModelImportDialog.h"
@@ -313,6 +314,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestSelection() && ok;
         ok = SelfTestTools() && ok;
         ok = SelfTestRenderStability() && ok;
+        ok = SelfTestPickerAndPrefabs() && ok;
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
@@ -324,7 +326,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import + object-picker + prefab-drop, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }
@@ -2665,6 +2667,108 @@ bool EditorLayer::SelfTestSceneAndPlay() {
     return ok;
 }
 
+
+// --- ПИПЕТКА СЛОТА ОБЪЕКТА И ПРЕФАБЫ БРОСКОМ ---------------------------------
+//
+// Пипетка: щелчок по объекту во вьюпорте, пока она включена, обязан уйти в
+// поле, а не сменить выбор — иначе инспектор переключился бы и поле пропало.
+// Префабы: объект из иерархии в Assets — новый файл; префаб на строку
+// объекта — его ребёнок (подсказка обещала это давно, а бросок не делал
+// ничего); префаб во вьюпорт мимо объектов — на пол, а не в воздух.
+bool EditorLayer::SelfTestPickerAndPrefabs() {
+    bool ok = true;
+    // В ТЕКУЩЕЙ сцене и далеко от её объектов: следующие проверки (мышь во
+    // вьюпорте) работают с демо-сценой, и подменять её пустой нельзя. Всё
+    // созданное здесь в конце убирается.
+    std::vector<int> made;
+    const int selectedBefore = m_selection.Primary();
+    const glm::mat4 proj = glm::perspective(glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 500.0f);
+    const glm::vec3 far(3000.0f, 0.0f, 3000.0f);
+
+    // --- пипетка ---
+    {
+        GameObject cube = CreatePrimitiveEntity("PickMe", MeshRef::Type::Cube);
+        GameObject other = CreatePrimitiveEntity("Holder", MeshRef::Type::Cube);
+        made.push_back(cube.Id());
+        made.push_back(other.Id());
+        cube.GetTransform().Position = far;
+        other.GetTransform().Position = far + glm::vec3(50.0f, 0.0f, 0.0f);
+        m_selection.SetPrimary(other.Id());
+        const glm::mat4 view = glm::lookAt(far + glm::vec3(0.0f, 0.0f, 8.0f), far, glm::vec3(0, 1, 0));
+        constexpr unsigned int kField = 0x5A6E01u;
+        objectslot::StartPick(kField);
+        PickAtViewportWith(view, proj, 0.5f, 0.5f, /*additive=*/false);
+        int got = 0;
+        if (!objectslot::TakeDelivered(kField, got) || got != cube.Id()) {
+            LOG_ERROR("Editor") << "SELFTEST: пипетка слота объекта не получила объект из вьюпорта";
+            ok = false;
+        }
+        if (m_selection.Primary() != other.Id()) {
+            LOG_ERROR("Editor") << "SELFTEST: пипетка сменила выбор вместо того, чтобы заполнить поле";
+            ok = false;
+        }
+        objectslot::Cancel();
+    }
+
+    // --- объект в Assets — префаб; префаб на объект — ребёнок ---
+    fs::path prefab;
+    std::error_code ec;
+    {
+        GameObject src = CreatePrimitiveEntity("SelftestLamp", MeshRef::Type::Sphere);
+        made.push_back(src.Id());
+        std::string err;
+        prefab = SaveObjectAsPrefab(src.Id(), m_project.Dir() / "assets", err);
+        if (prefab.empty() || !fs::exists(prefab, ec)) {
+            LOG_ERROR("Editor") << "SELFTEST: объект, брошенный в Assets, не стал префабом: " << err;
+            ok = false;
+        }
+        // Второй бросок того же объекта не затирает первый файл.
+        const fs::path second = SaveObjectAsPrefab(src.Id(), m_project.Dir() / "assets", err);
+        if (ok && (second.empty() || second == prefab)) {
+            LOG_ERROR("Editor") << "SELFTEST: второй префаб с тем же именем затёр первый";
+            ok = false;
+        }
+        if (!second.empty()) fs::remove(second, ec);
+    }
+    if (ok) {
+        GameObject parent = CreatePrimitiveEntity("SelftestPole", MeshRef::Type::Cube);
+        made.push_back(parent.Id());
+        parent.GetTransform().Position = far + glm::vec3(0.0f, 0.0f, 40.0f);
+        const size_t before = m_scene->Count();
+        const bool applied = ApplyAssetToEntity(parent.Id(), prefab);
+        GameObject child = m_scene->Get(m_selection.Primary());
+        if (child.Valid() && child.Id() != parent.Id()) made.push_back(child.Id());
+        if (!applied || m_scene->Count() <= before || !child.Valid() ||
+            m_scene->ParentOf(child.Entity()) != parent.Entity()) {
+            LOG_ERROR("Editor") << "SELFTEST: префаб, брошенный на объект, не лёг внутрь него";
+            ok = false;
+        }
+    }
+    if (ok) {
+        // Камера далеко от всех объектов и смотрит вниз-вперёд: луч мимо
+        // объектов обязан лечь на пол (y = 0).
+        const glm::vec3 eye = far + glm::vec3(900.0f, 10.0f, 900.0f);
+        const glm::mat4 view = glm::lookAt(eye, eye + glm::vec3(0.0f, -10.0f, -10.0f), glm::vec3(0, 1, 0));
+        if (!DropAssetAtViewport(view, proj, 0.5f, 0.5f, prefab)) {
+            LOG_ERROR("Editor") << "SELFTEST: префаб не бросается во вьюпорт";
+            ok = false;
+        } else {
+            GameObject placed = m_scene->Get(m_selection.Primary());
+            if (placed.Valid()) made.push_back(placed.Id());
+            const float y = placed.Valid() ? placed.GetTransform().Position.y : 99.0f;
+            if (std::fabs(y) > 0.05f) {
+                LOG_ERROR("Editor") << "SELFTEST: префаб мимо объектов повис в воздухе (y = " << y << ")";
+                ok = false;
+            }
+        }
+    }
+    if (!prefab.empty()) fs::remove(prefab, ec);
+    // Детей убирает удаление родителя; уже удалённые номера пропускаются.
+    for (auto it = made.rbegin(); it != made.rend(); ++it)
+        if (m_scene->Get(*it).Valid()) m_scene->RemoveObject(*it);
+    m_selection.SetPrimary(selectedBefore);
+    return ok;
+}
 
 // --- физика, анимация, частицы, отсечение, настройки -----------------------
 //

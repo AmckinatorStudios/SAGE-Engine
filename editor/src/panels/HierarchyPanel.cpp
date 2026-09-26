@@ -13,6 +13,7 @@
 
 #include "EditorHost.h"
 #include "AssetSlot.h"
+#include "ObjectSlot.h"
 #include "EditorIcons.h"
 #include "Project.h"
 #include "sage/scene/Components.h"
@@ -242,7 +243,10 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // посреди него означало бы мигание выбора.
     if (!m_rectActive && !eyeClicked && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         const ImGuiIO& io = ImGui::GetIO();
-        if (io.KeyShift && m_anchorId != -1) {
+        // Пипетка слота объекта: щелчок по строке назначает объект полю.
+        if (objectslot::Picking()) {
+            objectslot::Deliver(id);
+        } else if (io.KeyShift && m_anchorId != -1) {
             m_shiftClickId = id;   // диапазон считается в конце кадра (см. HierarchyPanel.h)
         } else if (io.KeyCtrl) {
             host.Selection().Toggle(id);
