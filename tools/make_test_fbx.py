@@ -230,7 +230,7 @@ def p70_vec(name, kind, values):
 KTIME = 46186158000
 
 
-def build_skinned(path, unit=100.0, rigid=False, blender_bind=False):
+def build_skinned(path, unit=100.0, rigid=False, bind_relative=False):
     """Модель СО СКИНОМ: полоса из четырёх вершин на двух костях + клип.
 
     Геометрия нарочно простейшая, а веса — заведомо разные: нижние вершины
@@ -284,10 +284,10 @@ def build_skinned(path, unit=100.0, rigid=False, blender_bind=False):
     ident = [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, 0.0, 0.0, 1.0]
     # TransformLink второй кости — её мировая матрица привязки (сдвиг на 1 по Y).
     link_child = [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, 1.0, 0.0, 1.0]
-    # Transform кластера. По Autodesk — мир меша (здесь единица). Blender пишет
+    # Transform кластера. По Autodesk — мир меша (здесь единица). 3D-редактор пишет
     # иначе: inverse(TransformLink) * мир меша — меш относительно кости.
     transform_child = ident
-    if blender_bind:
+    if bind_relative:
         transform_child = [1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, -1.0, 0.0, 1.0]
 
     skin = node('Deformer', prop_long(400) + prop_string('Skin\x00\x01Deformer') + prop_string('Skin'))
@@ -309,8 +309,8 @@ def build_skinned(path, unit=100.0, rigid=False, blender_bind=False):
         ])
 
     # Клип: вторая кость поворачивается вокруг Z с 0 до 90 градусов за секунду.
-    # Blender называет действие «Скелет|Действие».
-    stack_name = 'Armature|Wave' if blender_bind else 'Wave'
+    # 3D-редактор называет действие «Скелет|Действие».
+    stack_name = 'Armature|Wave' if bind_relative else 'Wave'
     stack = node('AnimationStack', prop_long(500) + prop_string(stack_name + '\x00\x01AnimStack') + prop_string(''))
     layer = node('AnimationLayer', prop_long(501) + prop_string('Base\x00\x01AnimLayer') + prop_string(''))
     curve_node = node('AnimationCurveNode', prop_long(502) + prop_string('R\x00\x01AnimCurveNode') + prop_string(''),
@@ -363,7 +363,7 @@ def build_skinned(path, unit=100.0, rigid=False, blender_bind=False):
             'Model', prop_long(210) + prop_string('Panel\x00\x01Model') + prop_string('Mesh'),
             [node('Properties70', b'', [p70v('Lcl Translation', (0.0, 0.0, 0.0))])])
         # Цвет материала — тот же приём, что у настоящих экспортёров: узловой
-        # материал Blender в FBX доезжает хотя бы DiffuseColor.
+        # материал 3D-редактора в FBX доезжает хотя бы DiffuseColor.
         material = node(
             'Material', prop_long(600) + prop_string('Suit\x00\x01Material') + prop_string(''),
             [node('Properties70', b'', [
@@ -412,7 +412,7 @@ def build_skinned(path, unit=100.0, rigid=False, blender_bind=False):
 def build_foliage(path):
     """Дерево в миниатюре: ОДНА геометрия, ДВА материала по граням.
 
-    Так экспортирует Blender любое дерево: кора и листва — один меш, а
+    Так экспортирует 3D-редактор любое дерево: кора и листва — один меш, а
     материал задан на каждой грани (LayerElementMaterial, ByPolygon). У листвы
     вторая карта — прозрачности (TransparencyFactor), тот же файл, что и
     альбедо. Кора — нарочно ВОГНУТЫЙ четырёхугольник («дротик»): веер от
@@ -511,8 +511,8 @@ if __name__ == '__main__':
                     help='Lcl Translation узла Model')
     ap.add_argument('--node-scale', type=float, default=1.0, help='Lcl Scaling узла Model')
     ap.add_argument('--skin', action='store_true', help='модель со скином, костями и клипом')
-    ap.add_argument('--blender-bind', action='store_true',
-                    help='привязка кластеров и имя клипа — как пишет Blender')
+    ap.add_argument('--bind-relative', action='store_true',
+                    help='привязка кластеров и имя клипа — как пишет 3D-редактор')
     ap.add_argument('--rigid', action='store_true',
                     help='вместе с --skin: добавить жёсткую деталь на кости и материал с цветом')
     ap.add_argument('--pre-rotation', nargs=3, type=float, default=None,
@@ -523,7 +523,7 @@ if __name__ == '__main__':
                     help='один меш, два материала по граням, карта прозрачности, вогнутая грань')
     args = ap.parse_args()
     if args.skin:
-        build_skinned(args.out, args.unit, args.rigid, args.blender_bind)
+        build_skinned(args.out, args.unit, args.rigid, args.bind_relative)
     elif args.foliage:
         build_foliage(args.out)
     else:

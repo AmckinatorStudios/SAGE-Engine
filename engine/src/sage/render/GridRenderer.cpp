@@ -196,8 +196,9 @@ void GridRenderer::Draw(const glm::mat4& view, const glm::mat4& proj, const glm:
     // перекрывала бы то, что за ней), но пишет из точки пересечения.
     device.SetBlend(true);
     device.SetDepthTest(true);
-    device.SetDepthWrite(true);
+    device.SetDepthWrite(s.WriteDepth);
     m_fsTri->DrawArrays(3);
+    device.SetDepthWrite(true);
     device.SetBlend(false);
 }
 

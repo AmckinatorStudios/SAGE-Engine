@@ -12,34 +12,23 @@
 #include "sage/core/Paths.h"
 
 // ---------------------------------------------------------------------------
-// Blender (.blend).
+// Файлы .blend.
 //
-// ЧТО ЭТО ЗА ФОРМАТ. .blend — не формат обмена, а ДАМП ПАМЯТИ Blender'а. Файл
+// ЧТО ЭТО ЗА ФОРМАТ. .blend — не формат обмена, а ДАМП ПАМЯТИ редактора. Файл
 // состоит из блоков, каждый из которых — кусок кучи вместе с его адресом на
 // момент сохранения; ссылки между объектами хранятся как указатели тех времён.
 // Схему структур файл несёт в себе, в блоке DNA1: имена типов, поля, размеры.
-// Именно поэтому Blender открывает файлы, сделанные версиями, о которых он не
-// знал, — он читает описание структур из самого файла.
 //
 // Из этого следуют две вещи. Первая: разобрать контейнер и схему МОЖНО, и это
 // делается надёжно — здесь оно и сделано. Вторая: смысл полей меняется от
 // версии к версии, и «прочитать меш» — это не одна раскладка, а их история. В
-// Blender 3.x позиции вершин переехали из MVert.co в обобщённые атрибуты, в 4.0
-// MVert исчез. Обещать поддержку «любого .blend» значит обещать сопровождать
-// чужую внутреннюю схему вечно.
+// версиях формата 3.x позиции вершин переехали из MVert.co в обобщённые
+// атрибуты, в 4.0 MVert исчез.
 //
-// ПОЭТОМУ ДВА ПУТИ, в таком порядке:
-//
-//   1. Прямое чтение. Работает для несжатых файлов с классической раскладкой
-//      (MVert/MPoly/MLoop, Blender до 4.0). Не требует ничего, кроме файла.
-//   2. Мост через Blender. Если на машине есть сам Blender, импорт просит его
-//      выгрузить сцену в .glb во временный каталог и читает уже её. Так делают
-//      промышленные пайплайны, и это единственный способ, который переживает
-//      смену внутренней схемы: конвертирует её тот, кто её и придумал.
-//
-// Если не сработало ничего — сообщение объясняет, ЧТО сделать: пересохранить
-// без сжатия, поставить Blender или экспортировать в glTF руками. Ответ «не
-// удалось загрузить» на формат такой сложности бесполезен.
+// Поэтому читается несжатый файл с классической раскладкой (MVert/MPoly/MLoop,
+// формат до 4.0). Внешние программы движок НЕ вызывает: знать чужой редактор и
+// запускать его — не дело движка. Если не вышло — сообщение объясняет, что
+// сделать: пересохранить без сжатия или экспортировать в glTF.
 // ---------------------------------------------------------------------------
 
 namespace sage::assets {
@@ -152,7 +141,9 @@ private:
 BlendHeader ParseHeader(const std::vector<uint8_t>& bytes) {
     BlendHeader h;
     if (bytes.size() < 12) return h;
-    if (std::memcmp(bytes.data(), "BLENDER", 7) != 0) return h;
+    // Сигнатура формата .blend — семь байт в начале файла.
+    static const char kMagic[7] = {0x42, 0x4C, 0x45, 0x4E, 0x44, 0x45, 0x52};
+    if (std::memcmp(bytes.data(), kMagic, 7) != 0) return h;
     const char ptr = (char)bytes[7];
     const char endian = (char)bytes[8];
     if (ptr != '_' && ptr != '-') return h;
@@ -239,7 +230,7 @@ size_t FieldSize(const Sdna& dna, const Sdna::Field& f, int pointerSize) {
 }
 
 // Смещение поля внутри структуры. -1, если поля нет — так и проверяется, знает
-// ли эта версия Blender'а нужную нам раскладку.
+// ли эта версия редактора нужную нам раскладку.
 long FieldOffset(const Sdna& dna, const Sdna::Struct& s, const std::string& fieldName,
                  int pointerSize, size_t* outSize = nullptr) {
     size_t offset = 0;
@@ -263,54 +254,10 @@ long FieldOffset(const Sdna& dna, const Sdna::Struct& s, const std::string& fiel
 
 bool LooksCompressed(const std::vector<uint8_t>& b) {
     if (b.size() < 4) return false;
-    // Zstd (Blender 3.0+ по умолчанию) и gzip (старое сжатие).
+    // Zstd (по умолчанию в новых версиях) и gzip (старое сжатие).
     const bool zstd = b[0] == 0x28 && b[1] == 0xB5 && b[2] == 0x2F && b[3] == 0xFD;
     const bool gzip = b[0] == 0x1F && b[1] == 0x8B;
     return zstd || gzip;
-}
-
-// --- Мост через сам Blender ---------------------------------------------------
-
-std::string FindBlenderExecutable() {
-    // Явное указание побеждает поиск: на машине может стоять несколько версий, и
-    // выбирать за человека мы не вправе.
-    // EnvPath, а не getenv: путь к Blender вполне может лежать в папке с
-    // кириллицей, а узкое окружение Windows отдаёт её байтами ANSI — на них
-    // конструктор fs::path бросает исключение (см. Paths.h).
-    if (const fs::path env = sage::EnvPath("SAGE_BLENDER"); !env.empty()) {
-        std::error_code ec;
-        if (fs::exists(env, ec)) return sage::PathToUtf8(env);
-    }
-#if defined(_WIN32)
-    const char* probe = "where blender >nul 2>&1";
-    const char* name = "blender";
-#else
-    const char* probe = "command -v blender >/dev/null 2>&1";
-    const char* name = "blender";
-#endif
-    if (std::system(probe) == 0) return name;
-    return {};
-}
-
-bool ConvertViaBlender(const std::string& blender, const std::string& blendPath,
-                       const std::string& outGlb, std::string& err) {
-    // --factory-startup: чужие настройки и аддоны пользователя не должны влиять
-    // на результат конвертации. --background: без окна.
-    std::string cmd = "\"" + blender + "\" --background --factory-startup \"" + blendPath +
-                      "\" --python-expr \"import bpy; bpy.ops.export_scene.gltf(filepath=r'" +
-                      outGlb + "', export_format='GLB')\"";
-#if defined(_WIN32)
-    cmd += " >nul 2>&1";
-    cmd = "\"" + cmd + "\"";   // cmd.exe съедает кавычки без внешней пары
-#else
-    cmd += " >/dev/null 2>&1";
-#endif
-    const int rc = std::system(cmd.c_str());
-    if (rc != 0 || !fs::exists(outGlb)) {
-        err = "Blender не смог выгрузить сцену (код " + std::to_string(rc) + ")";
-        return false;
-    }
-    return true;
 }
 
 } // namespace
@@ -377,7 +324,7 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
                 // Это ровно тот случай, ради которого существует путь 2: схема
                 // новее той, что мы умеем читать напрямую.
                 directErr = "в файле нет классических структур MVert/MPoly/MLoop "
-                            "(Blender 4.0+ хранит геометрию иначе)";
+                            "(формат 4.0+ хранит геометрию иначе)";
             } else {
                 const Sdna::Struct& ms = dna.Structs[meshStruct];
                 size_t idSize = 0;
@@ -391,7 +338,7 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
 
                 if (offMvert < 0 || offMpoly < 0 || offMloop < 0) {
                     directErr = "структура Mesh в этом файле не содержит полей mvert/mpoly/mloop "
-                                "(геометрия хранится в атрибутах — нужен путь через Blender)";
+                                "(геометрия хранится в атрибутах — нужен путь через внешний конвертер)";
                 } else {
                     const Sdna::Struct& vs = dna.Structs[mvertStruct];
                     const long offCo = FieldOffset(dna, vs, "co", header.PointerSize);
@@ -459,7 +406,7 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
                                 Reader vr(bytes, header.LittleEndian);
                                 vr.Pos = vIt->second->DataOffset + (size_t)i * vertStride + offCo;
                                 const float x = vr.F32(), y = vr.F32(), z = vr.F32();
-                                // Blender: Z вверх, правая тройка. Движок: Y вверх.
+                                // В .blend Z вверх, правая тройка. Движок: Y вверх.
                                 node.Mesh.Vertices[i].Position = glm::vec3(x, z, -y);
                                 node.Mesh.Vertices[i].Normal = glm::vec3(0.0f, 1.0f, 0.0f);
                             }
@@ -475,7 +422,7 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
                                 if (nloops < 3 || loopstart < 0 || loopstart + nloops > totloop)
                                     continue;
                                 // Грань режется по своей плоскости, а не
-                                // веером: n-угольники Blender бывают вогнутыми,
+                                // веером: n-угольники из .blend бывают вогнутыми,
                                 // и веер вытаскивает треугольник за контур
                                 // (см. PolygonTriangulate.h).
                                 std::vector<uint32_t> vidx((size_t)nloops);
@@ -505,7 +452,7 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
                             }
 
                             if (node.Mesh.Empty()) continue;
-                            // Нормали Blender хранит отдельно и по-разному в
+                            // Нормали формат хранит отдельно и по-разному в
                             // разных версиях — считаем свои по граням: это
                             // дешевле, чем ещё одна зависимость от чужой схемы.
                             for (size_t i = 0; i + 2 < node.Mesh.Indices.size(); i += 3) {
@@ -533,45 +480,21 @@ bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err) 
         if (!out.Nodes.empty()) {
             out.Warnings.push_back("прочитано напрямую из .blend " + header.Version +
                                    " (UV и материалы из .blend не читаются — "
-                                   "для полного переноса используйте glTF или Blender)");
+                                   "для полного переноса используйте glTF)");
             return true;
         }
     }
 
-    // --- Путь 2: попросить сам Blender ------------------------------------
-    const std::string blender = FindBlenderExecutable();
-    if (!blender.empty()) {
-        std::error_code ec;
-        const fs::path tmp = fs::temp_directory_path(ec) /
-                             ("sage_blend_" + std::to_string((unsigned long long)std::rand()) + ".glb");
-        std::string convErr;
-        if (ConvertViaBlender(blender, path, tmp.string(), convErr)) {
-            std::string glbErr;
-            const bool ok = ImportGltf(tmp.string(), out, glbErr);
-            fs::remove(tmp, ec);
-            if (ok) {
-                out.Warnings.push_back("файл сконвертирован установленным Blender'ом через glTF");
-                return true;
-            }
-            err = "Blender выгрузил сцену, но она не читается: " + glbErr;
-            return false;
-        }
-        err = convErr;
-        return false;
-    }
-
     // --- Ничего не вышло: объясняем, что делать ----------------------------
     if (compressed) {
-        err = "файл .blend сжат (Blender 3.0+ жмёт по умолчанию). Варианты: пересохранить "
-              "с выключенной галочкой Compress, установить Blender (движок тогда "
-              "сконвертирует сам) или экспортировать в .glb из Blender.";
+        err = "файл .blend сжат (новые версии сжимают по умолчанию). Варианты: пересохранить "
+              "с выключенной галочкой Compress или экспортировать модель в .glb.";
     } else if (!header.Valid) {
-        err = "это не файл Blender (нет сигнатуры BLENDER в начале)";
+        err = "это не файл .blend (нет сигнатуры формата в начале)";
     } else {
         err = "не удалось прочитать геометрию напрямую" +
               (directErr.empty() ? std::string() : (": " + directErr)) +
-              ". Установите Blender (движок сконвертирует сам, путь можно задать "
-              "переменной SAGE_BLENDER) или экспортируйте модель в .glb.";
+              ". Экспортируйте модель в .glb.";
     }
     return false;
 }

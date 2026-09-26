@@ -591,8 +591,10 @@ function Script:OnCollisionEnter(other) end
 function Script:OnCollisionExit(other) end
 ---@param other SageObject
 function Script:OnTriggerEnter(other) end
----@param other SageObject
+---@param other SageObject|nil  nil — гостя удалили, пока он был в зоне
 function Script:OnTriggerExit(other) end
+---@param other SageObject
+function Script:OnTriggerStay(other) end
 ---@param name string
 function Script:OnAnimationEvent(name) end
 
@@ -1192,10 +1194,17 @@ function sage.physics.GroundNormal(entity) end
 ---@param entity Entity
 ---@return boolean
 function sage.physics.IsGrounded(entity) end
+---@param zone Entity
+---@param entity Entity
+---@return boolean
+function sage.physics.IsInTrigger(zone, entity) end
 ---@param entity Entity
 ---@param velocity Vec3
 ---@param dt number
 function sage.physics.MoveCharacter(entity, velocity, dt) end
+---@param zone Entity
+---@return table
+function sage.physics.ObjectsInTrigger(zone) end
 ---@param center Vec3
 ---@param radius number
 ---@param mask number
@@ -1225,8 +1234,14 @@ function sage.physics.SetLayer(entity, layer) end
 ---@param on boolean
 function sage.physics.SetSensor(entity, on) end
 ---@param entity Entity
+---@param mask number
+function sage.physics.SetTriggerMask(entity, mask) end
+---@param entity Entity
 ---@param v Vec3
 function sage.physics.SetVelocity(entity, v) end
+---@param entity Entity
+---@return table
+function sage.physics.TriggersOf(entity) end
 
 ---@class sage.reflect
 sage.reflect = {}
@@ -1748,6 +1763,8 @@ IsActionDown = sage.input.IsDown
 ---@type fun(...): any
 IsGrounded = sage.physics.IsGrounded
 ---@type fun(...): any
+IsInTrigger = sage.physics.IsInTrigger
+---@type fun(...): any
 IsInputContextEnabled = sage.input.IsContextEnabled
 ---@type fun(...): any
 IsMouseCaptured = sage.input.IsMouseCaptured
@@ -1777,6 +1794,8 @@ MaterialOf = sage.render.MaterialOf
 MoveCharacter = sage.physics.MoveCharacter
 ---@type fun(...): any
 NewMaterial = sage.render.NewMaterial
+---@type fun(...): any
+ObjectsInTrigger = sage.physics.ObjectsInTrigger
 ---@type fun(...): any
 OffEvent = sage.events.Off
 ---@type fun(...): any
@@ -1950,6 +1969,8 @@ SetSubmeshMaterial = sage.render.SetSubmeshMaterial
 ---@type fun(...): any
 SetSun = sage.light.SetSun
 ---@type fun(...): any
+SetTriggerMask = sage.physics.SetTriggerMask
+---@type fun(...): any
 SetUICanvas = sage.ui.SetCanvas
 ---@type fun(...): any
 SetUIImage = sage.ui.SetImage
@@ -1997,6 +2018,8 @@ Stop = sage.audio.Stop
 StopMusic = sage.audio.StopMusic
 ---@type fun(...): any
 SubmeshCount = sage.render.SubmeshCount
+---@type fun(...): any
+TriggersOf = sage.physics.TriggersOf
 ---@type fun(...): any
 TweenCancel = sage.tween.Cancel
 ---@type fun(...): any

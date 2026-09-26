@@ -203,6 +203,8 @@ void EditorLayer::OnAttach() {
     // (см. EditorPlayInput): иначе игра, попросившая обзор от первого лица,
     // отняла бы у редактора мышь насовсем. Всё это связывает сессия.
     m_play.Attach(m_playInputBridge, app.GetWindow());
+    // Вид гизмо коллайдеров — привычка человека, а не сцены: из настроек редактора.
+    m_tools.ColliderGizmo.Load();
 
     // --- ImGui: docking + multi-viewport (панели можно вытаскивать в
     // отдельные OS-окна — «плавающие» панели становятся полноценными окнами) ---
@@ -1004,7 +1006,7 @@ void EditorLayer::OnUpdate(float dt) {
     // изменённых .vert/.frag: правка шейдера видна во вьюпорте сразу.
     m_renderer.Tick(dt);
     ResourceManager::Instance().ReloadChangedShaders();
-    // И ресурсы: модель или материал могли поправить снаружи (Blender, другой
+    // И ресурсы: модель или материал могли поправить снаружи (3D-редактор, другой
     // редактор, скрипт). Без этого движок показывал бы прежние данные до
     // перезапуска — ровно то, что выглядит как «правка не применилась».
     // И О ПЕРЕЧИТЫВАНИИ ГОВОРИМ ВСЛУХ. Молчаливая перезагрузка неотличима от
@@ -1186,6 +1188,7 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_tools.ShowBounds);
+    m_renderer.SetColliderGizmo(m_tools.ColliderGizmo);
     // Отладочная графика игры (Debug:DrawLine) — только пока игра идёт. В
     // режиме правки скриптов нет, и показывать нечего.
     m_renderer.SetScriptDebugLines(m_play.Scripting() ? &m_play.Scripting()->Debug() : nullptr);

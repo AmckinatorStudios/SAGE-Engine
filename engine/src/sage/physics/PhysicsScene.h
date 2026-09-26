@@ -8,6 +8,12 @@
 
 class Scene;
 
+namespace sage::physics {
+// Касание «капсула персонажа (ось [a, b], радиус r) — тело desc». Открыто ради
+// теста: геометрия зон, по которой персонаж входит в триггер.
+bool CapsuleTouchesBodyForTest(const glm::vec3& a, const glm::vec3& b, float r, const BodyDesc& desc);
+}
+
 // ---------------------------------------------------------------------------
 // PhysicsScene — мост между ECS-сценой и физическим миром (аналог того, как
 // ScriptEngine связывает сцену со скриптами). Создаётся на время симуляции
@@ -100,6 +106,30 @@ public:
         bool Sensor = false;
     };
     const std::vector<EntityContact>& Contacts() const { return m_contacts; }
+
+    // --- Триггер-зоны --------------------------------------------------------
+    //
+    // КТО СЕЙЧАС ВНУТРИ, а не только «кто вошёл/вышел». Пары ведёт сама сцена,
+    // а не бэкенд, и на то три причины:
+    //  • персонаж (контроллер) — не тело мира, и ни один бэкенд не сообщал о
+    //    его входе в зону: игрок проходил сквозь «кнопку» молча, хотя это
+    //    самый частый случай триггера вообще;
+    //  • удалённый объект уходил из зоны без «вышел» — счётчик «сколько
+    //    внутри» у скрипта навсегда оставался на единицу больше;
+    //  • маска слоёв зоны (RigidBodyComponent::TriggerMask) должна одинаково
+    //    отсеивать гостей у всех бэкендов.
+    // События Enter/Exit в Contacts() строятся по разнице этого списка между
+    // шагами, так что расходиться с ним они не могут.
+    struct TriggerOverlap {
+        entt::entity Trigger = entt::null;   // зона (сенсор)
+        entt::entity Other = entt::null;     // гость: тело или персонаж
+        bool Entered = false;                // вошёл на этом шаге (для Stay — ещё не «внутри»)
+    };
+    const std::vector<TriggerOverlap>& TriggerOverlaps() const { return m_inside; }
+    // Кто сейчас в зоне trigger. Возвращает число.
+    int ObjectsInTrigger(entt::entity trigger, std::vector<entt::entity>& out) const;
+    // В чьих зонах сейчас стоит объект. Возвращает число.
+    int TriggersOf(entt::entity other, std::vector<entt::entity>& out) const;
     bool SupportsContacts() const { return m_world && m_world->SupportsContacts(); }
 
     // --- Контроллер персонажа ------------------------------------------------
@@ -131,6 +161,11 @@ private:
     // столкновения ещё не посчитаны.
     void StepCharacters(Scene& scene, float dt);
     void PullCharacters(Scene& scene);
+    // Пересчитывает m_inside по событиям сенсоров бэкенда и по персонажам и
+    // дописывает в m_contacts разницу с прошлым шагом.
+    void UpdateTriggers(Scene& scene);
+    // Сообщение бэкенда о касании сенсора: пополняет/чистит m_bodyInside.
+    void NoteSensorContact(Scene& scene, entt::entity a, entt::entity b, bool begin);
 
     std::unique_ptr<sage::physics::PhysicsWorld> m_world;
     // Что кому принадлежит: по этой паре Step() понимает, чьё тело осиротело.
@@ -147,4 +182,8 @@ private:
     std::vector<EntityContact> m_contacts;
     std::vector<sage::physics::ContactEvent> m_rawContacts;   // буфер, чтобы не выделять каждый кадр
     std::vector<std::pair<entt::entity, sage::physics::CharacterHandle>> m_characters;
+    // Пары «зона — гость», что касались по сообщениям бэкенда (тело с телом).
+    // Отдельно от персонажей: те пересчитываются геометрией каждый шаг.
+    std::vector<std::pair<entt::entity, entt::entity>> m_bodyInside;
+    std::vector<TriggerOverlap> m_inside;
 };

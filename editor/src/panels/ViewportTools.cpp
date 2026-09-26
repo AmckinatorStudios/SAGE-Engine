@@ -150,6 +150,30 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     if (EditorIcons::MenuItemSelected("physics", T("Collider (C): drag the collision shape"),
                                       host.ColliderEditMode()))
         host.ColliderEditMode() = !host.ColliderEditMode();
+    // Как рисовать формы столкновения: каркасом, заливкой по нормалям или
+    // обоими. Меняется сразу и запоминается в настройках редактора.
+    if (EditorIcons::BeginMenu("physics", T("Collider display"))) {
+        ColliderGizmoStyle& cg = host.Tools().ColliderGizmo;
+        bool changed = false;
+        const char* modes[] = {T("Lines"), T("Solid (shaded)"), T("Solid + lines")};
+        const char* icons[] = {"wire", "cube", "cube"};
+        for (int i = 0; i < 3; ++i) {
+            if (EditorIcons::MenuItemSelected(icons[i], modes[i], (int)cg.Draw == i)) {
+                cg.Draw = (ColliderGizmoStyle::Mode)i;
+                changed = true;
+            }
+        }
+        ImGui::BeginDisabled(!cg.DrawFill());
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::SliderFloat(T("Fill opacity"), &cg.FillOpacity, 0.05f, 0.9f, "%.2f");
+        // Запись — по отпусканию, а не в каждом кадре перетаскивания: файл
+        // настроек не должен переписываться шестьдесят раз в секунду.
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::EndDisabled();
+        if (ImGui::Checkbox(T("Only the selection"), &cg.OnlySelected)) changed = true;
+        if (changed) cg.Save();
+        ImGui::EndMenu();
+    }
 
     Sage::UI::MenuSection(T("Over the selection"));
     // Отключены, когда выделения нет: серый пункт честнее пункта, который молча

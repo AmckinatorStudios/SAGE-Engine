@@ -73,7 +73,21 @@ public:
     // Оси объекта: X — красная, Y — зелёная, Z — синяя.
     void Axes(const glm::mat4& transform, float size = 1.0f);
 
-    bool Empty() const { return m_vertices.empty(); }
+    // --- ЗАЛИТЫЕ формы -------------------------------------------------------
+    //
+    // Полупрозрачная заливка с затенением по нормалям: грань, смотрящая на
+    // камеру, светлее, уходящая вбок — темнее. Каркас из дюжины линий не
+    // отвечает на вопрос «где у формы перед, а где зад» — рёбра переднего и
+    // заднего плана рисуются одинаково, и сложная составная форма читается как
+    // клубок. Заливка отвечает на него сразу. Рисуются ДО линий того же
+    // Flush, глубину не пишут: каркас поверх заливки остаётся виден.
+    // color.a — непрозрачность заливки.
+    void SolidBox(const glm::mat4& transform, glm::vec4 color);   // единичный куб, как WireBox
+    void SolidSphere(glm::vec3 center, float radius, glm::vec4 color, int segments = 20);
+    void SolidCapsule(const glm::mat4& transform, float radius, float halfHeight, glm::vec4 color,
+                      int segments = 20);
+
+    bool Empty() const { return m_vertices.empty() && m_solid.empty(); }
 
     // Рисует накопленный батч и очищает его. Вызывать после отрисовки сцены
     // в тот же кадровый буфер (иначе тесту глубины не с чем сравнивать).
@@ -85,7 +99,20 @@ private:
         glm::vec3 Color;
     };
 
+    struct SolidVertex {
+        glm::vec3 Pos;
+        glm::vec3 Normal;
+        glm::vec4 Color;
+    };
+    // Треугольник с нормалями; обход разворачивается так, чтобы лицевая
+    // сторона смотрела по нормали, — отсечение задних граней тогда верно для
+    // любой формы, и генераторам не нужно помнить про обход.
+    void SolidTri(const SolidVertex& a, SolidVertex b, SolidVertex c);
+
     std::vector<LineVertex> m_vertices;
     std::unique_ptr<sage::rhi::ShaderProgram> m_shader;
     std::unique_ptr<sage::rhi::Geometry> m_geometry;
+    std::vector<SolidVertex> m_solid;
+    std::unique_ptr<sage::rhi::ShaderProgram> m_solidShader;
+    std::unique_ptr<sage::rhi::Geometry> m_solidGeometry;
 };

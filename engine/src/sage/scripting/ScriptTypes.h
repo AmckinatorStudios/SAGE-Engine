@@ -36,6 +36,9 @@ enum class Hook {
     OnTriggerEnter,
     OnTriggerExit,
     OnAnimationEvent,
+    // Каждый шаг, пока гость в зоне (кроме шага входа — тот уже OnTriggerEnter).
+    // В конце списка: номера хуков старше него не сдвигаются.
+    OnTriggerStay,
     Count
 };
 

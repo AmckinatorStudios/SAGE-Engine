@@ -1894,7 +1894,7 @@
     "Both sides": "С обеих сторон",
     "Create materials from the file": "Создать материалы из файла",
     "Cutout threshold": "Порог выреза",
-    "FBX from Blender is often 100 times too big or too small.": "FBX из Blender часто в 100 раз крупнее или мельче нужного.",
+    "A model from a 3D editor is often 100 times too big or too small.": "Модель из 3D-редактора часто в 100 раз крупнее или мельче нужного.",
     "Fit into one metre": "Вписать в один метр",
     "Flip faces (the model is inside out)": "Развернуть грани (модель вывернута наизнанку)",
     "Flip the texture vertically": "Перевернуть текстуру по вертикали",
@@ -1996,7 +1996,6 @@
     "The largest whole number that fits the reference screen: pixel art stays crisp. 0 — no limit": "Наибольшее целое, при котором опорный экран помещается в окно: пиксельная графика остаётся чёткой. 0 — без предела",
     "Whole-number scale (pixel art)": "Целый масштаб (пиксель-арт)",
     "Wind": "Ветер",
-    "Blocky": "Блочное",
     "Overcast": "Пасмурно",
     "A copy of the text drawn underneath, shifted by this much.\n0, 0 — no shadow.": "Копия текста под ним, сдвинутая на столько.\n0, 0 — без тени.",
     "0 — no outline.": "0 — без обводки.",
@@ -2027,6 +2026,20 @@
     "Low Percent": "Нижний процент",
     "High Percent": "Верхний процент",
     "Black Level": "Уровень чёрного",
-    "Post processing is a component: on a camera it processes that camera, on any other object — every camera of the scene. Add \"Post Processing\" in the Inspector.": "Пост-обработка — это компонент: на камере он обрабатывает её кадр, на любом другом объекте — все камеры сцены. Добавьте «Пост-обработка» в Инспекторе."
+    "Post processing is a component: on a camera it processes that camera, on any other object — every camera of the scene. Add \"Post Processing\" in the Inspector.": "Пост-обработка — это компонент: на камере он обрабатывает её кадр, на любом другом объекте — все камеры сцены. Добавьте «Пост-обработка» в Инспекторе.",
+    "Is Trigger": "Триггер",
+    "Objects pass through; scripts get OnTriggerEnter / Stay / Exit": "Объекты проходят сквозь; скрипты получают OnTriggerEnter / Stay / Exit",
+    "All layers": "Все слои",
+    "Nothing": "Ничего",
+    "%d layers": "Слоёв: %d",
+    "Detects Layers": "Замечает слои",
+    "Layer %d": "Слой %d",
+    "Inside now: %d": "Внутри сейчас: %d",
+    "Collider display": "Вид коллайдеров",
+    "Lines": "Линии",
+    "Solid (shaded)": "Заливка (по нормалям)",
+    "Solid + lines": "Заливка + линии",
+    "Fill opacity": "Непрозрачность заливки",
+    "Only the selection": "Только у выделенного"
   }
 }

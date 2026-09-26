@@ -686,13 +686,11 @@ TEST(sky_shape_reaches_renderer_with_time_of_day) {
     env.Skybox.Clouds = true;
     env.Skybox.CloudColor = {1.0f, 1.0f, 1.0f};
     env.Skybox.NightCloudColor = {0.0f, 0.0f, 0.0f};
-    env.Skybox.SunShape = SkyboxSettings::DiscShape::Square;
     env.Skybox.GradientExponent = 1.5f;
     env.DayFactor = 0.5f;
     SkyCelestials c = CelestialsFromEnvironment(env);
     CHECK_TRUE(c.Ground);
     CHECK_TRUE(c.Clouds);
-    CHECK_EQ(c.SunShape, 1);
     CHECK_NEAR(c.GradientExponent, 1.5f, 1e-6f);
     CHECK_NEAR(c.GroundColor.z, 0.5f, 1e-5f);
     CHECK_NEAR(c.CloudColor.x, 0.5f, 1e-5f);
@@ -706,8 +704,10 @@ TEST(sky_shape_reaches_renderer_with_time_of_day) {
 
 TEST(sky_presets_parse_and_keep_textured_sky) {
     sage::render::SkyPreset p = sage::render::SkyPreset::Default;
-    CHECK_TRUE(sage::render::ParseSkyPreset("blocky", p));
-    CHECK_TRUE(p == sage::render::SkyPreset::Blocky);
+    CHECK_TRUE(sage::render::ParseSkyPreset("overcast", p));
+    CHECK_TRUE(p == sage::render::SkyPreset::Overcast);
+    // Пресетов, повторяющих небо чужих игр, у движка нет.
+    CHECK_FALSE(sage::render::ParseSkyPreset("blocky", p));
     CHECK_FALSE(sage::render::ParseSkyPreset("mars", p));
 
     SkyboxSettings sky;
@@ -715,21 +715,18 @@ TEST(sky_presets_parse_and_keep_textured_sky) {
     sky.Kind = SkyboxSettings::Source::Image;
     sky.Intensity = 1.7f;
     sky.DayNight = false;
-    sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Blocky);
+    sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Overcast);
     // Пресет — это ВИД процедурного неба: выбранная картинка, яркость и смена
     // суток остаются решениями автора.
     CHECK_TRUE(sky.Kind == SkyboxSettings::Source::Procedural);
     CHECK_EQ(sky.ImagePath, std::string("sky/space.png"));
     CHECK_NEAR(sky.Intensity, 1.7f, 1e-6f);
     CHECK_FALSE(sky.DayNight);
-    // Узнаваемые приметы блочного неба.
-    CHECK_TRUE(sky.Ground);
+    // Приметы пасмурного неба.
     CHECK_TRUE(sky.Clouds);
-    CHECK_TRUE(sky.CloudKind == SkyboxSettings::CloudStyle::Blocky);
-    CHECK_TRUE(sky.SunShape == SkyboxSettings::DiscShape::Square);
-    CHECK_NEAR(sky.SunGlow, 0.0f, 1e-6f);
+    CHECK_FALSE(sky.Celestials);
 
-    // «По умолчанию» возвращает прежний вид целиком — без блочных облаков.
+    // «По умолчанию» возвращает прежний вид целиком — без облаков.
     sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Default);
     const SkyboxSettings def;
     CHECK_FALSE(sky.Clouds);

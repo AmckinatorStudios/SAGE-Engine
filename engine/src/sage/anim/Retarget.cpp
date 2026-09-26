@@ -40,7 +40,7 @@ float SkeletonReach(const Skeleton& skeleton) {
 } // namespace
 
 std::string NormalizeBoneName(const std::string& name) {
-    // Префикс экспортёра: всё до последнего ':' или '|' ("mixamorig:LeftArm",
+    // Префикс экспортёра: всё до последнего ':' или '|' ("rig:LeftArm",
     // "Armature|Hips"). Он говорит про пайплайн, а не про кость.
     size_t start = 0;
     for (size_t i = 0; i < name.size(); ++i) {

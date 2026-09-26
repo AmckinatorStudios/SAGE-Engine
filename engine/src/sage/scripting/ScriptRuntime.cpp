@@ -24,6 +24,7 @@ const char* HookName(Hook hook) {
         case Hook::OnCollisionExit: return "OnCollisionExit";
         case Hook::OnTriggerEnter: return "OnTriggerEnter";
         case Hook::OnTriggerExit: return "OnTriggerExit";
+        case Hook::OnTriggerStay: return "OnTriggerStay";
         case Hook::OnAnimationEvent: return "OnAnimationEvent";
         case Hook::Count: break;
     }

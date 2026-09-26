@@ -270,7 +270,7 @@ TEST(blend_refuses_clearly_when_it_cannot_read) {
     CHECK_FALSE(err.empty());
     std::remove(notBlend.c_str());
 
-    // Сжатый .blend (zstd — умолчание Blender 3.0+): сообщение обязано назвать
+    // Сжатый .blend (zstd — умолчание новых версий): сообщение обязано назвать
     // причину и дать выход, иначе человек видит «не загрузилось» и всё.
     std::string zstd;
     zstd.push_back((char)0x28);
@@ -282,7 +282,7 @@ TEST(blend_refuses_clearly_when_it_cannot_read) {
     ImportedScene s2;
     std::string err2;
     CHECK_FALSE(ImportBlend(packed, s2, err2));
-    // Либо сказали про сжатие, либо на машине есть Blender и он не справился —
+    // Либо сказали про сжатие, либо на машине есть 3D-редактор и он не справился —
     // но пустым сообщение быть не имеет права.
     CHECK_FALSE(err2.empty());
     std::remove(packed.c_str());
@@ -327,11 +327,11 @@ TEST(imported_scene_flatten_bakes_transforms) {
 //
 //  На них редактор ПАДАЛ. По спецификации поле bufferView у аксессора
 //  необязательно: без него аксессор считается нулевым, а значения лежат в блоке
-//  sparse парами «номер вершины — значение». Blender пишет так каждый ключ
+//  sparse парами «номер вершины — значение». 3D-редактор пишет так каждый ключ
 //  формы, tinygltf разворачивать их не умеет и оставляет bufferView = -1, а
 //  разбор скелетной модели читал bufferViews[-1] — то есть за начало вектора.
 //  Не «модель приехала кривой», а падение процесса: у проверочной модели
-//  (Spring Bonnie из Blender) таких аксессоров 29 из 535.
+//  (персонаж из присланного набора) таких аксессоров 29 из 535.
 // ============================================================================
 #include "GltfSparseModel.h"
 #include "sage/assets/import/GltfAccessor.h"

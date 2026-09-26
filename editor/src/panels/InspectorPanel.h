@@ -7,6 +7,7 @@
 
 #include "AssetPreview.h"
 #include "sage/audio/AudioEngine.h"
+#include "sage/audio/AudioScrub.h"
 #include "FileBrowser.h"
 
 
@@ -99,6 +100,10 @@ private:
     std::string m_audioPath;
     AudioEngine::SoundHandle m_audioHandle = 0;
     bool m_audioLoop = false;
+    // Бегунок: пока тянут, звук на паузе; перемотка — одна, при отпускании.
+    sage::audio::ScrubState m_audioScrub;
+    // Откуда начать, если бегунок сдвинули у остановленного звука.
+    float m_audioStartAt = 0.0f;
     float m_audioVolume = 1.0f;
     // Огибающая для рисования: пары «минимум-максимум» по столбцам. Считается
     // один раз на файл — декодирование минуты звука это миллионы сэмплов, и

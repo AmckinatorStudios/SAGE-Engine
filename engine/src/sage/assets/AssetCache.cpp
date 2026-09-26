@@ -48,7 +48,7 @@ constexpr unsigned int kMagic = 0x434D4753u;
 // переворачивает развёртку под соглашение скелетного прохода и помечает
 // материалы с картой прозрачности вырезом по альфе. Поля те же, содержимое
 // другое: старый кэш вернул бы дерево одной корой и текстуры вверх ногами.
-constexpr unsigned int kVersion = 9;   // 8: Unlit у материала подмеша; 9: привязка FBX из Blender
+constexpr unsigned int kVersion = 9;   // 8: Unlit у материала подмеша; 9: привязка FBX из 3D-редактора
 
 struct State {
     std::string Directory = ".sage-cache";

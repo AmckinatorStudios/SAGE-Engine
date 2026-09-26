@@ -81,7 +81,7 @@ using fbx::NodeTransform;
 using fbx::ReadTransform;
 
 // Развёртка FBX — с началом ВНИЗУ (v=0 — нижний край картинки, как у OBJ и в
-// Blender), а картинки скелетной модели лежат строками СВЕРХУ ВНИЗ, без
+// 3D-редактор), а картинки скелетной модели лежат строками СВЕРХУ ВНИЗ, без
 // переворота (так их ждёт glTF, и скелетный проход у форматов общий). Взятая
 // как есть, развёртка читала текстуру вверх ногами: атлас листвы и лица
 // ложился чужими кусками. Переводим в соглашение glTF здесь, одним местом.
@@ -424,7 +424,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         m.RoughnessMap = slotImage({"Maya|specularRoughness", "ShininessExponent"});
         m.AOMap = slotImage({"AmbientColor", "Maya|ambientOcclusion"});
         m.EmissiveMap = slotImage({"EmissiveColor"});
-        // Карта ПРОЗРАЧНОСТИ (Blender пишет её в TransparencyFactor, Maya и Max —
+        // Карта ПРОЗРАЧНОСТИ (3D-редактор пишет её в TransparencyFactor, Maya и Max —
         // в TransparentColor) — это листва, волосы, решётки: вырез по альфе
         // альбедо. Без неё они приезжали сплошными прямоугольниками.
         if (slots != materialSlots.end() &&
@@ -479,7 +479,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
     // пропускаем», и это выбрасывало почти всю модель: жёсткие детали
     // (панели эндоскелета, зубы, глазницы, пряжки, инструмент) риггят НЕ
     // весами, а привязкой узла к кости — это дешевле и точнее. У проверочной
-    // модели (Spring Bonnie из Blender) со скином 6 геометрий из 98: в сцену
+    // модели (персонаж из присланного набора) со скином 6 геометрий из 98: в сцену
     // попадали шесть кусков, остальные девяносто два не рисовались вовсе.
     // Выглядело это как «модель загрузилась развалинами».
     //
@@ -534,19 +534,19 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             // именно то, что спасает модель от разъезда).
             //
             // ЧТО ТАКОЕ Transform — зависит от того, КТО ПИСАЛ ФАЙЛ. По
-            // спецификации Autodesk это мир меша на момент привязки. Blender
+            // спецификации Autodesk это мир меша на момент привязки. 3D-редактор
             // пишет другое: inverse(TransformLink) * мир меша — меш ОТНОСИТЕЛЬНО
             // кости. Прочитав блендеровский файл по Autodesk, мы умножали на
             // обратную кость дважды: персонаж в позе покоя схлопывался в комок
             // с торчащими во все стороны «лучами» (Universal Animation Library,
             // FBX под другие движки). Выбираем толкование, при котором мир меша
             // сходится с тем, что на самом деле лежит в узлах файла.
-            const glm::mat4 meshAutodesk = c.Transform;
-            const glm::mat4 meshBlender = c.TransformLink * c.Transform;
+            const glm::mat4 meshAbsolute = c.Transform;
+            const glm::mat4 meshBindRelative = c.TransformLink * c.Transform;
             const glm::mat4 meshWorld =
-                MatrixDistance(meshBlender, nodeWorld) < MatrixDistance(meshAutodesk, nodeWorld)
-                    ? meshBlender
-                    : meshAutodesk;
+                MatrixDistance(meshBindRelative, nodeWorld) < MatrixDistance(meshAbsolute, nodeWorld)
+                    ? meshBindRelative
+                    : meshAbsolute;
             const glm::mat4 ib = glm::inverse(c.TransformLink) * meshWorld * glm::inverse(nodeWorld);
             out.Skeleton.Joints[(size_t)jointIt->second].InverseBind = C * ib * Cinv;
         }
@@ -604,7 +604,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
     // Второй проход — по геометрии БЕЗ скина. Раньше её просто не было в
     // результате, и это выбрасывало почти всю модель: панели эндоскелета, зубы,
     // глазницы, пряжки, инструмент риггят НЕ весами, а привязкой узла к кости
-    // (дешевле и точнее). У проверочной модели (Spring Bonnie из Blender) со
+    // (дешевле и точнее). У проверочной модели (персонаж из присланного набора) со
     // скином 6 геометрий из 98 — в сцену попадали шесть кусков, остальные
     // девяносто два не рисовались вовсе. Выглядит это как «модель загрузилась
     // развалинами», и на движок это списывают заслуженно.
@@ -739,7 +739,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             auto name = stackNames.find(stack);
             if (name != stackNames.end()) clip.Name = name->second;
         }
-        // «Armature|Idle» — Blender приписывает к действию имя скелета. Для
+        // «Armature|Idle» — 3D-редактор приписывает к действию имя скелета. Для
         // человека клип называется «Idle», и так же он называется в glTF того
         // же набора: скрипт, игравший Play("Idle"), не должен ломаться от
         // смены формата.

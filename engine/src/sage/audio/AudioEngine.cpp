@@ -282,7 +282,14 @@ float AudioEngine::SoundLength(SoundHandle handle) const {
 void AudioEngine::SeekSound(SoundHandle handle, float seconds) {
     auto it = m_impl->Managed.find(handle);
     if (it == m_impl->Managed.end()) return;
-    const ma_uint32 rate = ma_engine_get_sample_rate(&m_impl->Engine);
+    // Номер кадра — в частоте САМОГО ФАЙЛА, а не устройства: звуковой поток
+    // перематывает источник данных, у которого своя частота. Частота движка
+    // (48 кГц) на файле в 44.1 кГц уводила бегунок на 9% дальше, чем тянули.
+    ma_uint32 rate = 0;
+    if (ma_sound_get_data_format(it->second, nullptr, nullptr, &rate, nullptr, 0) != MA_SUCCESS ||
+        rate == 0) {
+        rate = ma_engine_get_sample_rate(&m_impl->Engine);
+    }
     if (rate == 0) return;
     if (seconds < 0.0f) seconds = 0.0f;
     ma_sound_seek_to_pcm_frame(it->second, (ma_uint64)(seconds * (float)rate));

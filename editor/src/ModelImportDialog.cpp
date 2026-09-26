@@ -129,9 +129,9 @@ bool DrawSettings(ModelLoader::ImportSettings& s, bool* overwriteMaterials) {
     ImGui::SeparatorText(T("Transform"));
     changed |= ImGui::DragFloat(T("Scale"), &s.Scale, 0.01f, 0.0001f, 10000.0f, "%.4g");
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("FBX from Blender is often 100 times too big or too small."));
+        ImGui::SetTooltip("%s", T("A model from a 3D editor is often 100 times too big or too small."));
     changed |= ImGui::DragFloat3(T("Rotation (degrees)"), &s.Rotation.x, 1.0f, -360.0f, 360.0f, "%.0f");
-    // Самая частая беда чужой модели — ось Z вверх (3ds Max, старый Blender):
+    // Самая частая беда чужой модели — ось Z вверх (3ds Max, старые экспортёры):
     // модель лежит на боку. Одна кнопка вместо поиска правильного угла.
     if (ImGui::SmallButton(T("Z up -> Y up"))) {
         s.Rotation = glm::vec3(-90.0f, 0.0f, 0.0f);

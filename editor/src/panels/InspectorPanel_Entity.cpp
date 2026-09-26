@@ -30,6 +30,7 @@
 #include "VarsEditor.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
+#include "sage/physics/PhysicsScene.h"
 #include <algorithm>
 
 #include "AssetSlot.h"
@@ -565,6 +566,66 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
 
+            // Слой — номер (1..32), а хранится битом: так его понимает маска
+            // лучей и зон, а человек думает «слой 3», а не «бит 4».
+            int layer = 1;
+            for (int b = 0; b < 32; ++b)
+                if (rb->Layer & (1u << b)) { layer = b + 1; break; }
+            if (ImGui::SliderInt(T("Layer"), &layer, 1, 32)) {
+                host.PushUndoSnapshot();
+                rb->Layer = 1u << (layer - 1);
+            }
+
+            // Триггер: пропускает сквозь себя и сообщает скриптам
+            // OnTriggerEnter/Stay/Exit. Раньше включался только из скрипта —
+            // в редакторе зону было не сделать вовсе.
+            bool sensor = rb->Sensor;
+            if (ImGui::Checkbox(T("Is Trigger"), &sensor)) {
+                host.PushUndoSnapshot();
+                rb->Sensor = sensor;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", T("Objects pass through; scripts get OnTriggerEnter / Stay / Exit"));
+            if (rb->Sensor) {
+                char preview[32];
+                if (rb->TriggerMask == sage::physics::kAllLayers) std::snprintf(preview, sizeof(preview), "%s", T("All layers"));
+                else if (rb->TriggerMask == 0) std::snprintf(preview, sizeof(preview), "%s", T("Nothing"));
+                else {
+                    int n = 0;
+                    for (int b = 0; b < 32; ++b) n += (rb->TriggerMask >> b) & 1u;
+                    std::snprintf(preview, sizeof(preview), T("%d layers"), n);
+                }
+                if (ImGui::BeginCombo(T("Detects Layers"), preview)) {
+                    if (ImGui::Selectable(T("All layers"), rb->TriggerMask == sage::physics::kAllLayers)) {
+                        host.PushUndoSnapshot();
+                        rb->TriggerMask = sage::physics::kAllLayers;
+                    }
+                    for (int b = 0; b < 32; ++b) {
+                        char label[32];
+                        std::snprintf(label, sizeof(label), T("Layer %d"), b + 1);
+                        bool on = (rb->TriggerMask >> b) & 1u;
+                        ImGui::PushID(b);
+                        if (ImGui::Checkbox(label, &on)) {
+                            host.PushUndoSnapshot();
+                            if (on) rb->TriggerMask |= 1u << b;
+                            else rb->TriggerMask &= ~(1u << b);
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::EndCombo();
+                }
+                // Кто внутри прямо сейчас — в игре видно, почему дверь не
+                // открылась: гость не дошёл, или его слой зона не замечает.
+                if (PhysicsScene* physics = host.PlayPhysics()) {
+                    std::vector<entt::entity> inside;
+                    physics->ObjectsInTrigger(obj.Entity(), inside);
+                    ImGui::TextDisabled(T("Inside now: %d"), (int)inside.size());
+                    for (entt::entity e : inside) {
+                        GameObject g(&reg, e);
+                        if (g.Valid()) ImGui::BulletText("%s", g.Name().c_str());
+                    }
+                }
+            }
         }
     }
 

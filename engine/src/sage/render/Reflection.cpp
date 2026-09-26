@@ -145,13 +145,13 @@ std::string SkyShapeKey(const SkyCelestials& c) {
     // переснимать куб каждый кадр ради них слишком дорого.
     char buf[768];
     std::snprintf(buf, sizeof(buf),
-                  "%g %g %g %d %g %g %g %g|%d %d %g %g %d|%g %g|%d %d %g %g %g %g %g %g %g %g %g %g|"
+                  "%g %g %g %d %g %g %g %g|%g %g %d|%g %g|%d %g %g %g %g %g %g %g %g %g %g|"
                   "%d %g %g %g %g %g %g %g %g %g %g",
                   c.GradientExponent, c.HorizonSoftness, c.HorizonOffset, (int)c.Ground,
                   c.GroundColor.x, c.GroundColor.y, c.GroundColor.z, c.GroundBlend,
-                  c.SunShape, c.MoonShape, c.SunBrightness, c.SunGlow, (int)c.MoonPhase,
+                  c.SunBrightness, c.SunGlow, (int)c.MoonPhase,
                   c.StarDensity, c.StarSize,
-                  (int)c.Clouds, c.CloudStyle, c.CloudColor.x, c.CloudColor.y, c.CloudColor.z,
+                  (int)c.Clouds, c.CloudColor.x, c.CloudColor.y, c.CloudColor.z,
                   c.CloudHeight, c.CloudScale, c.CloudCoverage, c.CloudOpacity, c.CloudFade,
                   c.CloudWind.x, c.CloudWind.y,
                   (int)c.HeightFog, c.FogColor.x, c.FogColor.y, c.FogColor.z, c.FogDensity,
