@@ -602,6 +602,28 @@ TEST(AssetDatabase_gives_a_file_a_stable_identity) {
     CHECK_TRUE(db2.GuidOf("assets/models/hero.glb") == guid);
 }
 
+// ОГЛАВЛЕНИЕ БАЗЫ ДЛЯ СОБРАННОЙ ИГРЫ. .meta в пакет не едут, и плеер
+// собирал базу сканированием диска рядом с exe — находил пару файлов и
+// объявлял битой каждую ссылку сцены по GUID. Теперь сборка кладёт в пакет
+// оглавление, и игра получает ту же пару «GUID -> путь», что и редактор.
+TEST(AssetDatabase_index_carries_guids_into_the_built_game) {
+    TempProject p("index");
+    p.Write("assets/models/hero.glb");
+    p.Write("assets/tex/wall.png");
+    sage::AssetDatabase editor;
+    editor.ScanProject(p.Dir.string());
+    const sage::AssetGuid hero = editor.GuidOf("assets/models/hero.glb");
+    CHECK_TRUE(hero.Valid());
+
+    sage::AssetDatabase game;   // диска у игры нет — только оглавление
+    CHECK_EQ(game.LoadIndex(editor.ExportIndex()), editor.Count());
+    CHECK_TRUE(game.PathOf(hero) == "assets/models/hero.glb");
+    CHECK_TRUE(game.GuidOf("assets/tex/wall.png") == editor.GuidOf("assets/tex/wall.png"));
+    // Битое оглавление — не падение, а ноль записей и строка в логе.
+    sage::AssetDatabase broken;
+    CHECK_EQ(broken.LoadIndex("{не json"), 0);
+}
+
 TEST(AssetDatabase_survives_a_rename) {
     TempProject p("rename");
     p.Write("assets/models/hero.glb");

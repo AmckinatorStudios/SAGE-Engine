@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "sage/core/Paths.h"
+#include "sage/assets/Pack.h"
 
 namespace fs = std::filesystem;
 
@@ -31,7 +32,10 @@ int HexDigit(char c) {
 const char* const kTextureDirs[] = {"textures", "texture", "tex", "maps", "materials",
                                     "images",   "img",     "source"};
 
+// Через vfs: в собранной игре карты лежат в пакете, и проверка по диску
+// теряла их все — модели приезжали белыми.
 bool ExistsFile(const fs::path& p) {
+    if (vfs::Mounted() && !vfs::PackedKey(sage::PathToUtf8(p)).empty()) return true;
     std::error_code ec;
     return fs::exists(p, ec) && fs::is_regular_file(p, ec);
 }
@@ -41,8 +45,15 @@ bool ExistsFile(const fs::path& p) {
 // записей в папке — десятки.
 fs::path FindIgnoringCase(const fs::path& dir, const std::string& fileName) {
     std::error_code ec;
-    if (!fs::is_directory(dir, ec)) return {};
     const std::string want = Lower(sage::PathToUtf8(fs::path(fileName).filename()));
+    if (vfs::Mounted()) {
+        for (const std::string& f : vfs::ListFiles(sage::PathToUtf8(dir), "")) {
+            const size_t slash = f.rfind('/');
+            if (Lower(slash == std::string::npos ? f : f.substr(slash + 1)) == want)
+                return sage::PathFromUtf8(f);
+        }
+    }
+    if (!fs::is_directory(dir, ec)) return {};
     for (const fs::directory_entry& entry : fs::directory_iterator(dir, ec)) {
         if (!entry.is_regular_file(ec)) continue;
         if (Lower(sage::PathToUtf8(entry.path().filename())) == want) return entry.path();

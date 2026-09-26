@@ -98,6 +98,16 @@ public:
     // менять личность.
     AssetGuid Register(const std::string& path, const std::string& type = "");
 
+    // ОГЛАВЛЕНИЕ БАЗЫ ДЛЯ СОБРАННОЙ ИГРЫ. Сайдкары .meta в пакет не едут (это
+    // данные редактора), а без них игра не знает, какой GUID какой путь: база
+    // собиралась сканированием ДИСКА рядом с exe, находила там пять файлов и
+    // объявляла битой каждую ссылку сцены — вдобавок раскладывая .meta по
+    // папке игры. Сборка кладёт в пакет индекс (ExportIndex), плеер читает его
+    // (LoadIndex) вместо сканирования.
+    std::string ExportIndex() const;
+    int LoadIndex(const std::string& json);
+    static constexpr const char* kIndexFile = "assetdb.json";
+
     const std::vector<AssetRecord>& All() const { return m_records; }
     int Count() const { return (int)m_records.size(); }
     const std::string& ProjectDir() const { return m_projectDir; }

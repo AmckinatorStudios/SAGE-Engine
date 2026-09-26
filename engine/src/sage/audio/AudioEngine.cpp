@@ -1,6 +1,9 @@
 #include "AudioEngine.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
+#include "sage/assets/Pack.h"
+
+#include <cstring>
 
 // Только ОБЪЯВЛЕНИЯ miniaudio — реализация (MINIAUDIO_IMPLEMENTATION) собрана
 // в отдельном TU (miniaudio_impl.cpp), чтобы её ~90k строк не перекомпилировались
@@ -20,6 +23,64 @@ constexpr float kClamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : 
 constexpr float k3DMinDistance = 1.0f;   // ближе — громкость не растёт
 constexpr float k3DMaxDistance = 40.0f;  // дальше — практически не слышно
 constexpr float k3DRolloff = 1.0f;
+} // namespace
+
+// ФАЙЛОВАЯ СИСТЕМА ЗВУКА — ЧЕРЕЗ vfs.
+//
+// miniaudio открывает файлы сам, и о пакете собранной игры не знал ничего:
+// в игре не звучал ни один звук и ни одна мелодия, хотя все они лежали в
+// game.sagepak. Своя ma_vfs отдаёт ему байты из пакета (или с диска — в
+// редакторе), а заодно правильно открывает пути с кириллицей на Windows.
+namespace {
+struct MemFile {
+    std::vector<uint8_t> Bytes;
+    size_t Pos = 0;
+};
+
+ma_result VfsOpen(ma_vfs*, const char* path, ma_uint32 mode, ma_vfs_file* out) {
+    if (!path || !out || (mode & MA_OPEN_MODE_WRITE)) return MA_INVALID_ARGS;
+    auto* f = new MemFile;
+    if (!sage::assets::vfs::ReadFile(path, f->Bytes)) {
+        delete f;
+        return MA_DOES_NOT_EXIST;
+    }
+    *out = (ma_vfs_file)f;
+    return MA_SUCCESS;
+}
+ma_result VfsOpenW(ma_vfs*, const wchar_t*, ma_uint32, ma_vfs_file*) { return MA_NOT_IMPLEMENTED; }
+ma_result VfsClose(ma_vfs*, ma_vfs_file file) {
+    delete (MemFile*)file;
+    return MA_SUCCESS;
+}
+ma_result VfsRead(ma_vfs*, ma_vfs_file file, void* dst, size_t size, size_t* read) {
+    auto* f = (MemFile*)file;
+    const size_t n = std::min(size, f->Bytes.size() - std::min(f->Pos, f->Bytes.size()));
+    if (n) std::memcpy(dst, f->Bytes.data() + f->Pos, n);
+    f->Pos += n;
+    if (read) *read = n;
+    return n == 0 && size > 0 ? MA_AT_END : MA_SUCCESS;
+}
+ma_result VfsWrite(ma_vfs*, ma_vfs_file, const void*, size_t, size_t*) { return MA_NOT_IMPLEMENTED; }
+ma_result VfsSeek(ma_vfs*, ma_vfs_file file, ma_int64 offset, ma_seek_origin origin) {
+    auto* f = (MemFile*)file;
+    ma_int64 base = origin == ma_seek_origin_start ? 0
+                  : origin == ma_seek_origin_current ? (ma_int64)f->Pos
+                                                     : (ma_int64)f->Bytes.size();
+    const ma_int64 pos = base + offset;
+    if (pos < 0 || pos > (ma_int64)f->Bytes.size()) return MA_BAD_SEEK;
+    f->Pos = (size_t)pos;
+    return MA_SUCCESS;
+}
+ma_result VfsTell(ma_vfs*, ma_vfs_file file, ma_int64* cursor) {
+    *cursor = (ma_int64)((MemFile*)file)->Pos;
+    return MA_SUCCESS;
+}
+ma_result VfsInfo(ma_vfs*, ma_vfs_file file, ma_file_info* info) {
+    info->sizeInBytes = ((MemFile*)file)->Bytes.size();
+    return MA_SUCCESS;
+}
+
+ma_vfs_callbacks g_soundVfs{VfsOpen, VfsOpenW, VfsClose, VfsRead, VfsWrite, VfsSeek, VfsTell, VfsInfo};
 } // namespace
 
 // Всё «сырьё» miniaudio живёт здесь, за pImpl — публичный заголовок остаётся
@@ -129,7 +190,9 @@ struct AudioEngine::Impl {
 };
 
 AudioEngine::AudioEngine() : m_impl(std::make_unique<Impl>()) {
-    ma_result r = ma_engine_init(nullptr, &m_impl->Engine);
+    ma_engine_config engineConfig = ma_engine_config_init();
+    engineConfig.pResourceManagerVFS = &g_soundVfs;
+    ma_result r = ma_engine_init(&engineConfig, &m_impl->Engine);
     if (r != MA_SUCCESS) {
         // Нет устройства (headless/CI) — переходим в немой режим, но остаёмся
         // полностью рабочим объектом: все Play* просто ничего не делают.
@@ -429,7 +492,7 @@ bool AudioEngine::DecodeToMono(const std::string& path, std::vector<float>& outS
     const std::string resolved = sage::AssetDatabase::Instance().LocatePath(path);
     ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 0, 0);
     ma_decoder decoder;
-    if (ma_decoder_init_file(resolved.c_str(), &config, &decoder) != MA_SUCCESS) {
+    if (ma_decoder_init_vfs(&g_soundVfs, resolved.c_str(), &config, &decoder) != MA_SUCCESS) {
         LOG_WARN("Audio") << "Не удалось открыть для разбора: '" << path << "' -> '" << resolved
                           << "'";
         return false;

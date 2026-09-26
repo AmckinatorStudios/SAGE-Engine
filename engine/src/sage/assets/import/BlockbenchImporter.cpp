@@ -1,4 +1,5 @@
 #include <cmath>
+#include "sage/assets/Pack.h"
 #include <filesystem>
 #include <fstream>
 
@@ -79,14 +80,14 @@ void BoxUV(const char* face, float u, float v, float dx, float dy, float dz, flo
 } // namespace
 
 bool ImportBlockbench(const std::string& path, ImportedScene& out, std::string& err) {
-    std::ifstream f(path);
-    if (!f) {
+    std::string text;
+    if (!sage::assets::vfs::ReadText(path, text)) {
         err = "не открыть файл: " + path;
         return false;
     }
     json doc;
     try {
-        f >> doc;
+        doc = json::parse(text);
     } catch (const std::exception& e) {
         err = std::string("файл .bbmodel не разбирается как JSON: ") + e.what();
         return false;

@@ -11,6 +11,8 @@
 #include <random>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "sage/core/Log.h"
 
 namespace fs = std::filesystem;
@@ -135,6 +137,9 @@ AssetGuid AssetDatabase::ReadMeta(const std::string& assetPath, std::string* out
 
 bool AssetDatabase::WriteMeta(const std::string& assetPath, const AssetGuid& guid,
                               const std::string& type) {
+    // В собранной игре проект — это пакет: писать сайдкары некуда и незачем,
+    // а на диске рядом с exe они остались бы мусором в папке игрока.
+    if (assets::vfs::Mounted()) return false;
     std::ofstream f(MetaPath(assetPath), std::ios::trunc);
     if (!f) return false;
     f << "sage_meta=1\n";
@@ -241,6 +246,35 @@ AssetGuid AssetDatabase::Register(const std::string& path, const std::string& ty
     m_byPath[rel] = m_records.size();
     m_records.push_back({guid, rel, kind});
     return guid;
+}
+
+std::string AssetDatabase::ExportIndex() const {
+    nlohmann::json list = nlohmann::json::array();
+    for (const AssetRecord& r : m_records)
+        list.push_back({{"g", r.Guid.ToString()}, {"p", r.Path}, {"t", r.Type}});
+    return nlohmann::json{{"version", 1}, {"assets", list}}.dump();
+}
+
+int AssetDatabase::LoadIndex(const std::string& text) {
+    int loaded = 0;
+    try {
+        const nlohmann::json j = nlohmann::json::parse(text);
+        for (const nlohmann::json& a : j.value("assets", nlohmann::json::array())) {
+            const AssetGuid guid = AssetGuid::FromString(a.value("g", std::string()));
+            const std::string rel = Normalize(a.value("p", std::string()));
+            if (!guid.Valid() || rel.empty() || m_byGuid.count(guid)) continue;
+            m_byGuid[guid] = m_records.size();
+            m_byPath[rel] = m_records.size();
+            m_records.push_back({guid, rel, a.value("t", std::string())});
+            ++loaded;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Assets") << "Оглавление базы ассетов не читается: " << e.what();
+        return 0;
+    }
+    if (m_projectDir.empty()) m_projectDir = ".";
+    LOG_INFO("Assets") << "База ассетов из пакета: " << loaded << " файлов";
+    return loaded;
 }
 
 std::string AssetDatabase::LocatePath(const std::string& path) const {

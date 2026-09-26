@@ -5,6 +5,7 @@
 
 #include "Model.h"
 #include <tiny_obj_loader.h>
+#include "sage/assets/import/ObjMtl.h"
 #include <stb_image.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -14,6 +15,17 @@
 #include "sage/assets/import/PolygonTriangulate.h"
 #include "sage/assets/import/GltfFile.h"
 #include <stdexcept>
+
+namespace {
+// .obj и его .mtl — через vfs (пакет собранной игры), см. ReadObjWithMtl.
+bool ParseObjViaVfs(tinyobj::ObjReader& reader, const std::string& path,
+                    const tinyobj::ObjReaderConfig& config) {
+    std::string objText, mtlText;
+    if (!sage::assets::ReadObjWithMtl(path, objText, mtlText)) return false;
+    return reader.ParseFromString(objText, mtlText, config);
+}
+} // namespace
+
 
 // ----------------------------------------------------------------------
 // Общее: декодирование картинки (используется tinygltf для встроенных/
@@ -55,7 +67,7 @@ std::unique_ptr<Model> Model::LoadObjInternal(const std::string& path) {
     config.triangulate = false;
 
     tinyobj::ObjReader reader;
-    if (!reader.ParseFromFile(path, config)) {
+    if (!ParseObjViaVfs(reader, path, config)) {
         std::string err = reader.Error().empty() ? "неизвестная ошибка" : reader.Error();
         LOG_ERROR("Model") << "Не удалось загрузить OBJ " << path << ": " << err;
         throw std::runtime_error("Не удалось загрузить OBJ " + path + ": " + err);

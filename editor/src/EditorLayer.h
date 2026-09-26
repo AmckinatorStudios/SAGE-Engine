@@ -9,6 +9,7 @@
 #include <set>
 
 #include "ModelMaterialImport.h"
+#include "GameBuilder.h"
 #include "sage/core/Layer.h"
 #include "sage/core/Log.h"
 #include "sage/render/Shader.h"
@@ -132,7 +133,12 @@ public:
     // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
     // рантайм-ассеты + project/. false + err при ошибке.
     bool BuildGame(const std::filesystem::path& outputDir, std::string& err) override;
+    bool StartBuildGame(const std::filesystem::path& outputDir, std::string& err) override;
+    GameBuilder& Builder() override { return m_builder; }
     bool HasAnyScene() const override;
+    // Проверки перед сборкой (сцена, стартовая сцена, плеер) и заявка сборщику.
+    bool PrepareBuild(const std::filesystem::path& outputDir, GameBuilder::Request& req,
+                      std::string& err);
     std::filesystem::path& AssetsCwd() override { return m_assetsCwd; }
 
     // --- EditorHost: настройки и статус ---
@@ -633,6 +639,7 @@ private:
     // --- гибкие настройки движка (редактируются панелью Settings, сохраняются
     //     в <проект>/sage.cfg; Build Game кладёт их в собранную игру). Буферы
     //     полей модалок File-меню теперь живут внутри DialogsPanel. ---
+    GameBuilder m_builder;   // фоновая сборка игры (окно File > Build Game)
     sage::EngineConfig m_settings;
     // Отпечаток m_settings, по которому видно, что настройки правили: конфиг —
     // простая структура без сигналов, а перекладывать её в глобальную каждый

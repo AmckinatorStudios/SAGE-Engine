@@ -1,4 +1,5 @@
 #include "sage/assets/import/FbxTree.h"
+#include "sage/assets/Pack.h"
 
 #include <algorithm>
 #include <cstring>
@@ -307,15 +308,12 @@ Units ReadUnits(const Node& root) {
 }
 
 bool ReadTree(const std::string& path, Node& root, std::string& err) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) {
+    // Через vfs: в собранной игре модель лежит в пакете.
+    std::vector<uint8_t> bytes;
+    if (!sage::assets::vfs::ReadFile(path, bytes)) {
         err = "не открыть файл: " + path;
         return false;
     }
-    const std::streamsize size = f.tellg();
-    f.seekg(0);
-    std::vector<uint8_t> bytes((size_t)std::max<std::streamsize>(size, 0));
-    if (size > 0) f.read((char*)bytes.data(), size);
 
     static const char kMagic[] = "Kaydara FBX Binary";
     if (bytes.size() < 27 || std::memcmp(bytes.data(), kMagic, sizeof(kMagic) - 1) != 0) {

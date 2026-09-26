@@ -508,6 +508,12 @@ void Apply() {
     style.IndentSpacing = m.IndentSpacing;
     style.ScrollbarSize = ui.ScrollbarSize;
     style.GrabMinSize = ui.SpacingMD;
+    // ГАЛОЧКА МЕНЬШЕ ПОЛЯ. Квадрат ImGui равен высоте поля ввода, и на
+    // крупном кегле галки выходили размером с кнопку — жирные жёлтые плитки,
+    // перетягивающие взгляд с подписей. Три четверти высоты строки — как
+    // флажок в системных диалогах; строка при этом той же высоты, ряды
+    // инспектора не прыгают (см. правку [SAGE] в imgui_widgets.cpp).
+    style.CheckboxScale = 0.72f;
 
     style.WindowBorderSize = m.BorderWindow;
     style.ChildBorderSize = m.BorderWindow;

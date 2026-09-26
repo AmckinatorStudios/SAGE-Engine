@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "sage/core/Paths.h"
+#include "sage/assets/Pack.h"
 
 namespace fs = std::filesystem;
 
@@ -183,12 +184,43 @@ int ConvertSpecularGlossiness(tinygltf::Model& model) {
 
 bool LoadGltfFile(tinygltf::TinyGLTF& loader, tinygltf::Model& model, const std::string& path,
                   std::string& err, std::string& warn) {
-    std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
-    if (!f) {
+    // ЧЕРЕЗ vfs — и сам файл, и всё, что он тянет за собой (внешние .bin и
+    // картинки): в собранной игре модель лежит в пакете, и std::ifstream её
+    // не видел — персонаж и анимации в игре не загружались вовсе.
+    std::vector<uint8_t> bytes;
+    if (!sage::assets::vfs::ReadFile(path, bytes)) {
         err = "файл не открывается: " + path;
         return false;
     }
-    std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::string data(bytes.begin(), bytes.end());
+    bytes.clear();
+    {
+        tinygltf::FsCallbacks fsc;
+        fsc.FileExists = [](const std::string& p, void*) { return sage::assets::vfs::Exists(p); };
+        fsc.ExpandFilePath = [](const std::string& p, void*) { return p; };
+        fsc.ReadWholeFile = [](std::vector<unsigned char>* out, std::string* e, const std::string& p,
+                               void*) {
+            if (sage::assets::vfs::ReadFile(p, *out)) return true;
+            if (e) *e += "не читается: " + p + "\n";
+            return false;
+        };
+        fsc.WriteWholeFile = [](std::string* e, const std::string&, const std::vector<unsigned char>&,
+                                void*) {
+            if (e) *e += "запись не поддерживается\n";
+            return false;
+        };
+        fsc.GetFileSizeInBytes = [](size_t* size, std::string* e, const std::string& p, void*) {
+            std::vector<uint8_t> b;
+            if (!sage::assets::vfs::ReadFile(p, b)) {
+                if (e) *e += "не читается: " + p + "\n";
+                return false;
+            }
+            *size = b.size();
+            return true;
+        };
+        fsc.user_data = nullptr;
+        loader.SetFsCallbacks(fsc);
+    }
     if (data.empty()) {
         err = "файл пустой: " + path;
         return false;

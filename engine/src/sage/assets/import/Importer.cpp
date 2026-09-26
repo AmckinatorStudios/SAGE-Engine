@@ -1,4 +1,5 @@
 #include "sage/assets/import/Importer.h"
+#include "sage/assets/Pack.h"
 
 #include "sage/assets/import/MeshNormalize.h"
 #include "sage/core/EngineContext.h"
@@ -156,7 +157,7 @@ bool ImporterRegistry::Import(const std::string& path, ImportedScene& out,
     }
     for (const ImporterInfo& info : m_importers) {
         if (info.Extension != ext) continue;
-        if (!std::filesystem::exists(path)) {
+        if (!vfs::Exists(path)) {
             err = "файл не найден: " + path;
             return false;
         }

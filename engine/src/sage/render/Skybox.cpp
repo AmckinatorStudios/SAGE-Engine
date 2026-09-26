@@ -1,3 +1,5 @@
+#include "sage/assets/Pack.h"
+#include "sage/core/Paths.h"
 #include "Skybox.h"
 #include <stb_image.h>
 #include <algorithm>
@@ -60,7 +62,7 @@ Skybox::Skybox(const std::array<std::string, 6>& faces) {
     try {
         for (int i = 0; i < 6; ++i) {
             int width, height, channels;
-            pixels[i] = stbi_load(faces[i].c_str(), &width, &height, &channels, 0);
+            pixels[i] = sage::assets::vfs::LoadImage(faces[i], &width, &height, &channels, 0);
             if (!pixels[i]) {
                 throw std::runtime_error("Не удалось загрузить грань skybox: " + faces[i] +
                                          " (" + stbi_failure_reason() + ")");
@@ -167,7 +169,7 @@ glm::vec3 FaceDirection(int face, float u, float v) {
 std::unique_ptr<Skybox> Skybox::LoadFromImage(const std::string& file, Layout layout) {
     stbi_set_flip_vertically_on_load_thread(false);   // у cubemap своя конвенция
     int w = 0, h = 0, comp = 0;
-    unsigned char* src = stbi_load(file.c_str(), &w, &h, &comp, 0);
+    unsigned char* src = sage::assets::vfs::LoadImage(file, &w, &h, &comp, 0);
     stbi_set_flip_vertically_on_load_thread(true);
     if (!src) {
         LOG_ERROR("Skybox") << "Небо не прочиталось: " << file << " ("
@@ -267,7 +269,9 @@ std::unique_ptr<Skybox> Skybox::LoadFromDirectory(const std::string& directory) 
     static const char* kExtensions[] = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};
 
     std::error_code ec;
-    if (directory.empty() || !fs::is_directory(directory, ec)) {
+    // Каталог неба может жить в пакете собранной игры — тогда на диске его нет,
+    // а грани находятся через vfs.
+    if (directory.empty() || (!fs::is_directory(directory, ec) && !sage::assets::vfs::Mounted())) {
         LOG_ERROR("Skybox") << "Каталог неба не найден: " << directory;
         return nullptr;
     }
@@ -275,8 +279,9 @@ std::unique_ptr<Skybox> Skybox::LoadFromDirectory(const std::string& directory) 
     std::array<std::string, 6> faces;
     for (int i = 0; i < 6; ++i) {
         for (const char* ext : kExtensions) {
-            fs::path candidate = fs::path(directory) / (std::string(FaceNames()[i]) + ext);
-            if (fs::exists(candidate, ec)) { faces[i] = candidate.string(); break; }
+            const std::string candidate =
+                sage::PathToUtf8(sage::PathFromUtf8(directory) / (std::string(FaceNames()[i]) + ext));
+            if (sage::assets::vfs::Exists(candidate)) { faces[i] = candidate; break; }
         }
         if (faces[i].empty()) {
             LOG_ERROR("Skybox") << "В каталоге " << directory << " нет грани '"

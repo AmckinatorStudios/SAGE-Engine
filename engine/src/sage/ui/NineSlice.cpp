@@ -1,3 +1,4 @@
+#include "sage/assets/Pack.h"
 #include "sage/ui/NineSlice.h"
 
 #include <algorithm>
@@ -204,12 +205,11 @@ bool NineSlice::SaveFile(const std::string& path, std::string& err) const {
 }
 
 bool NineSlice::LoadFile(const std::string& path, NineSlice& out, std::string& err) {
-    std::ifstream file(sage::PathFromUtf8(path), std::ios::binary);
-    if (!file) {
+    std::string text;   // через vfs — нарезка едет в пакете рядом с картинкой
+    if (!sage::assets::vfs::ReadText(path, text)) {
         err = "нет файла: " + path;
         return false;
     }
-    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     return FromJsonString(text, out, err);
 }
 
@@ -278,7 +278,7 @@ bool GuessBorderFromFile(const std::string& imagePath, NineSlice& out) {
     // выставляется явно, а не берётся тем, каким его оставил кто-то другой.
     stbi_set_flip_vertically_on_load_thread(false);
     int w = 0, h = 0, channels = 0;
-    unsigned char* px = stbi_load(imagePath.c_str(), &w, &h, &channels, 4);
+    unsigned char* px = sage::assets::vfs::LoadImage(imagePath, &w, &h, &channels, 4);
     if (!px) return false;
     const bool ok = GuessBorder(px, w, h, out);
     stbi_image_free(px);

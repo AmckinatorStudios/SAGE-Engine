@@ -5,6 +5,9 @@
 #include <vector>
 
 #include "sage/core/Paths.h"
+#include "sage/assets/Pack.h"
+
+#include <sstream>
 
 namespace sage::assets {
 
@@ -27,13 +30,40 @@ bool Keyword(const std::string& line, const char* kw, std::string* rest = nullpt
     return true;
 }
 
+std::vector<std::string> MtlLibs(const std::string& objText) {
+    std::vector<std::string> libs;
+    std::istringstream obj(objText);
+    std::string line;
+    while (std::getline(obj, line)) {
+        std::string rest;
+        if (Keyword(Trim(line), "mtllib", &rest) && !rest.empty()) libs.push_back(rest);
+    }
+    return libs;
+}
+
+std::string SiblingPath(const std::string& objPath, const std::string& name) {
+    namespace fs = std::filesystem;
+    return sage::PathToUtf8(sage::PathFromUtf8(objPath).parent_path() / sage::PathFromUtf8(name));
+}
+
 } // namespace
+
+bool ReadObjWithMtl(const std::string& objPath, std::string& objText, std::string& mtlText) {
+    mtlText.clear();
+    if (!vfs::ReadText(objPath, objText)) return false;
+    for (const std::string& lib : MtlLibs(objText)) {
+        std::string text;
+        if (vfs::ReadText(SiblingPath(objPath, lib), text)) mtlText += text + "\n";
+    }
+    return true;
+}
 
 std::unordered_set<std::string> MtlTexturedWithoutKd(const std::string& objPath) {
     namespace fs = std::filesystem;
     std::unordered_set<std::string> out;
-    std::ifstream obj(sage::PathFromUtf8(objPath));
-    if (!obj) return out;
+    std::string objText;
+    if (!vfs::ReadText(objPath, objText)) return out;
+    std::istringstream obj(objText);
 
     // mtllib может стоять где угодно, но пишут её в шапке; читаем строки целиком,
     // сравнение идёт по первым символам — это дёшево и на большом файле.
@@ -45,8 +75,9 @@ std::unordered_set<std::string> MtlTexturedWithoutKd(const std::string& objPath)
     }
     const fs::path dir = sage::PathFromUtf8(objPath).parent_path();
     for (const std::string& lib : libs) {
-        std::ifstream mtl(dir / sage::PathFromUtf8(lib));
-        if (!mtl) continue;
+        std::string mtlText;
+        if (!vfs::ReadText(sage::PathToUtf8(dir / sage::PathFromUtf8(lib)), mtlText)) continue;
+        std::istringstream mtl(mtlText);
         std::string name;
         bool hasKd = false, hasMap = false;
         auto flush = [&]() {

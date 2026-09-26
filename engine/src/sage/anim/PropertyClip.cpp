@@ -1,4 +1,5 @@
 #include "sage/anim/PropertyClip.h"
+#include "sage/assets/Pack.h"
 
 #include <algorithm>
 #include <cmath>
@@ -243,14 +244,12 @@ bool SaveClipFile(const PropertyClip& clip, const std::string& path, std::string
 }
 
 bool LoadClipFile(const std::string& path, PropertyClip& out, std::string& err) {
-    std::ifstream f(sage::PathFromUtf8(path));
-    if (!f) {
+    std::string text;   // через vfs — клип едет в пакете
+    if (!sage::assets::vfs::ReadText(path, text)) {
         err = "не удалось открыть файл: " + path;
         return false;
     }
-    std::stringstream ss;
-    ss << f.rdbuf();
-    return FromJsonString(ss.str(), out, err);
+    return FromJsonString(text, out, err);
 }
 
 } // namespace sage::anim

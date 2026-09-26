@@ -2,6 +2,7 @@
 // (второе разворачивание дало бы дублирующиеся символы на линковке).
 #define TINYGLTF_NO_STB_IMAGE
 #define TINYGLTF_NO_STB_IMAGE_WRITE
+#include "sage/assets/Pack.h"
 #include <tiny_gltf.h>
 
 #include "sage/render/ModelMaterial.h"
@@ -29,6 +30,17 @@
 #include <tiny_obj_loader.h>
 
 #include "sage/core/Log.h"
+
+namespace {
+// .obj и его .mtl — через vfs (пакет собранной игры), см. ReadObjWithMtl.
+bool ParseObjViaVfs(tinyobj::ObjReader& reader, const std::string& path,
+                    const tinyobj::ObjReaderConfig& config) {
+    std::string objText, mtlText;
+    if (!sage::assets::ReadObjWithMtl(path, objText, mtlText)) return false;
+    return reader.ParseFromString(objText, mtlText, config);
+}
+} // namespace
+
 
 namespace fs = std::filesystem;
 
@@ -88,9 +100,9 @@ bool ImageHasCutoutAlpha(const std::string& file) {
     }
     bool cutout = false;
     int w = 0, h = 0, comp = 0;
-    if (stbi_info(file.c_str(), &w, &h, &comp) && (comp == 4 || comp == 2) && w > 0 && h > 0) {
+    if (sage::assets::vfs::ImageInfo(file, &w, &h, &comp) && (comp == 4 || comp == 2) && w > 0 && h > 0) {
         stbi_set_flip_vertically_on_load_thread(false);
-        unsigned char* px = stbi_load(file.c_str(), &w, &h, &comp, 4);
+        unsigned char* px = sage::assets::vfs::LoadImage(file, &w, &h, &comp, 4);
         if (px) {
             size_t clear = 0, solid = 0;
             const size_t count = (size_t)w * h;
@@ -284,7 +296,7 @@ void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
             // Внешний файл: тут его всё же приходится раскодировать — канал
             // из сжатого png не достать.
             int c = 0;
-            unsigned char* raw = stbi_load(external.c_str(), &w, &h, &c, 4);
+            unsigned char* raw = sage::assets::vfs::LoadImage(external, &w, &h, &c, 4);
             if (!raw) {
                 out.Warnings.push_back(std::string("карта ") + usage + ": не читается " + external);
                 return {};
@@ -470,7 +482,7 @@ void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
     tinyobj::ObjReaderConfig config;
     config.mtl_search_path = dir.empty() ? "." : dir.string();
     tinyobj::ObjReader reader;
-    if (!reader.ParseFromFile(path, config)) {
+    if (!ParseObjViaVfs(reader, path, config)) {
         out.Warnings.push_back("материалы не прочитаны: " +
                                (reader.Error().empty() ? std::string("разбор OBJ") : reader.Error()));
         return;
@@ -561,7 +573,7 @@ ExtractedMaterialSet ExtractMaterials(const std::string& ref, const std::string&
     const std::string modelPath = sage::AssetDatabase::Instance().LocatePath(ref);
 
     std::error_code ec;
-    if (!fs::exists(modelPath, ec)) {
+    if (!sage::assets::vfs::Exists(modelPath)) {
         out.Warnings.push_back("файл модели не найден: " + modelPath);
         LOG_WARN("Model") << modelPath << ": " << out.Warnings.back();
         return out;

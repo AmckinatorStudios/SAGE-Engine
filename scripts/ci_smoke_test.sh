@@ -10,6 +10,7 @@
 set -euo pipefail
 
 BUILD_DIR="${1:-build}"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SANDBOX_EXE="${BUILD_DIR}/games/sandbox/Sandbox"
 EDITOR_EXE="${BUILD_DIR}/editor/SageEditor"
 SCRATCH_DIR=$(mktemp -d)
@@ -179,12 +180,24 @@ if [ -f "${GAME_DIR}/project.sageproj" ]; then
     echo "ОШИБКА: рядом с игрой лежит project.sageproj — сборка по умолчанию его не кладёт"
     exit 1
 fi
-if ! python3 - "${GAME_DIR}/game.sagepak" <<'PYEOF'
-import struct, sys
-# Разбирать пакет целиком незачем: проверяется только НАЛИЧИЕ имени в каталоге.
-data = open(sys.argv[1], 'rb').read()
-sys.exit(0 if b"project.sageproj" in data else 1)
-PYEOF
+# Пакет зашифрован: имя ищется в разобранном оглавлении (scripts/sagepak.py),
+# а не в байтах файла. Заодно проверяется, что в пакете ресурсы движка и
+# оглавление базы ассетов, а россыпи assets/ рядом с exe нет.
+if [ -d "${GAME_DIR}/assets" ]; then
+    echo "ОШИБКА: рядом с игрой лежит россыпь assets/ — всё обязано быть в пакете"; exit 1
+fi
+PACK_LIST="${SCRATCH_DIR}/pack_list.txt"
+python3 "${REPO_ROOT}/scripts/sagepak.py" list "${GAME_DIR}/game.sagepak" > "${PACK_LIST}" || {
+    echo "ОШИБКА: пакет игры не разбирается"; exit 1; }
+for NEED in assets/shaders/lit.vert assetdb.json; do
+    if ! grep -qx "${NEED}" "${PACK_LIST}"; then
+        echo "ОШИБКА: в game.sagepak нет ${NEED}"; exit 1
+    fi
+done
+if grep -aq "project.sageproj" "${GAME_DIR}/game.sagepak"; then
+    echo "ОШИБКА: пакет игры читается в лоб — имена файлов видны без расшифровки"; exit 1
+fi
+if ! grep -qx "project.sageproj" "${PACK_LIST}"
 then
     echo "ОШИБКА: в game.sagepak нет project.sageproj — плееру неоткуда узнать имя игры"
     exit 1
@@ -211,26 +224,22 @@ SWITCH_DIR="${SCRATCH_DIR}/twoscene"
 rm -rf "${SWITCH_DIR}"
 cp -r "${GAME_DIR}" "${SWITCH_DIR}"
 mkdir -p "${SWITCH_DIR}/scenes" "${SWITCH_DIR}/assets/scripts"
-python3 - "${GAME_DIR}/game.sagepak" "${SWITCH_DIR}" <<'PYEOF'
-import json, pathlib, struct, sys
+# Без пакета плееру нужны его собственные ресурсы россыпью — кладём их рядом.
+cp -r "${BUILD_DIR}/runtime/assets/." "${SWITCH_DIR}/assets/"
+python3 - "${GAME_DIR}/game.sagepak" "${SWITCH_DIR}" "${REPO_ROOT}/scripts" <<'PYEOF'
+import json, pathlib, sys
 pack, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+sys.path.insert(0, sys.argv[3])
+import sagepak
 
-# Достаём сцену из пакета — тем же форматом, которым его пишет движок.
-# Разбор здесь СВОЙ и намеренно: если формат разъедется с описанием, тест
-# упадёт, а не «просто не найдёт сцену».
-import zlib
-data = pack.read_bytes()
-count = struct.unpack_from("<I", data, 8)[0]
-index_off = struct.unpack_from("<Q", data, 16)[0]
-p = index_off
+# Достаём сцену из пакета — своим разбором формата (scripts/sagepak.py): если
+# формат разъедется с описанием, тест упадёт, а не «просто не найдёт сцену».
+_, entries = sagepak.read_pack(pack)
 scene = None
-for _ in range(count):
-    n = struct.unpack_from("<I", data, p)[0]; p += 4
-    name = data[p:p+n].decode(); p += n
-    off, stored, orig, comp = struct.unpack_from("<QQQI", data, p); p += 28
-    if name.endswith(".sage") and scene is None:
-        raw = data[off:off+stored]
-        scene = json.loads(zlib.decompress(raw) if comp else raw)
+for name in sorted(entries):
+    if name.startswith("scenes/") and name.endswith(".sage"):
+        scene = json.loads(entries[name])
+        break
 assert scene is not None, "в пакете нет ни одной сцены"
 
 level2 = json.loads(json.dumps(scene)); level2["name"] = "level2"

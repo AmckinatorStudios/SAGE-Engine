@@ -1,3 +1,5 @@
+#include "sage/assets/Pack.h"
+#include "sage/core/Paths.h"
 #include "sage/assets/import/FbxSkin.h"
 #include "sage/assets/import/SkinInfluences.h"
 
@@ -352,9 +354,10 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
 
         std::error_code ec;
         fs::path file = modelDir / name;
-        if (!fs::exists(file, ec)) {
+        // vfs::Exists — в собранной игре карты лежат в пакете.
+        if (!sage::assets::vfs::Exists(sage::PathToUtf8(file))) {
             file = modelDir / "textures" / name;
-            if (!fs::exists(file, ec)) { imageSlots[name] = -1; return -1; }
+            if (!sage::assets::vfs::Exists(sage::PathToUtf8(file))) { imageSlots[name] = -1; return -1; }
         }
         // Переворот выключаем ЯВНО и ПОТОЧНО — по той же причине, что и у glTF
         // (см. GltfSkinImageLoader): фоновый загрузчик текстур ставит себе
@@ -362,7 +365,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         // через раз.
         stbi_set_flip_vertically_on_load_thread(false);
         int w = 0, h = 0, comp = 0;
-        unsigned char* pixels = stbi_load(file.string().c_str(), &w, &h, &comp, 4);
+        unsigned char* pixels = sage::assets::vfs::LoadImage(sage::PathToUtf8(file), &w, &h, &comp, 4);
         if (!pixels) { imageSlots[name] = -1; return -1; }
         sage::render::ModelImage image;
         image.Width = w;

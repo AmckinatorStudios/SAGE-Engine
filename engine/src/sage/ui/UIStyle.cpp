@@ -1,4 +1,5 @@
 #include "sage/ui/UIStyle.h"
+#include "sage/assets/Pack.h"
 
 #include <chrono>
 #include <filesystem>
@@ -53,14 +54,12 @@ bool SaveStyleFile(const std::string& path, const json& style, std::string* err)
 }
 
 bool LoadStyleFile(const std::string& path, json& out, std::string* err) {
-    std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
-    if (!f) {
+    std::string text;   // через vfs — стиль едет в пакете
+    if (!sage::assets::vfs::ReadText(path, text)) {
         if (err) *err = "не открылся: " + path;
         return false;
     }
-    std::stringstream ss;
-    ss << f.rdbuf();
-    out = json::parse(ss.str(), nullptr, /*allow_exceptions=*/false);
+    out = json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (out.is_discarded() || !out.is_object()) {
         if (err) *err = "не JSON стиля: " + path;
         return false;

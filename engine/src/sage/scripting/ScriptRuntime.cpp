@@ -96,7 +96,7 @@ bool ScriptRuntime::ReadSource(const std::string& path, ScriptSource& out) const
     if (!m_projectDir.empty()) candidates.push_back((m_projectDir / path).string());
 
     for (const std::string& candidate : candidates) {
-        if (!fs::exists(candidate, ec)) continue;
+        if (!sage::assets::vfs::Exists(candidate)) continue;
         std::string text;
         if (!sage::assets::vfs::ReadText(candidate, text)) continue;
         out.Text = std::move(text);

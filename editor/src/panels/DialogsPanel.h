@@ -38,7 +38,14 @@ private:
     char m_sceneName[128] = "level1";
     char m_buildDir[512] = "";
     std::string m_error;       // сообщение об ошибке текущей модалки
-    std::string m_buildResult; // путь готовой сборки (успех Build Game)
+
+public:
+    // Открыть обзор с заданной настройкой и писать результат в buffer.
+    // Открыт наружу ради снимка диалога (SAGE_EDITOR_OPEN_DIALOG=file-dialog).
+    void Browse(const FileBrowser::Config& cfg, char* buffer, size_t size);
+
+private:
+    std::string m_buildDirProject; // для какого проекта выставлена папка сборки
 
     // Обзор файловой системы. Раньше КАЖДЫЙ путь здесь вводился руками, и это
     // была не мелочь: человек не помнит абсолютный путь к своему проекту, а
@@ -48,8 +55,6 @@ private:
     // пришлось бы заводить по браузеру на каждый.
     char* m_browseTarget = nullptr;
     size_t m_browseTargetSize = 0;
-    // Открыть обзор с заданной настройкой и писать результат в buffer.
-    void Browse(const FileBrowser::Config& cfg, char* buffer, size_t size);
     // Кнопка «Обзор…» рядом с полем; сама зовёт Browse.
     void BrowseButton(const char* id, const FileBrowser::Config& cfg, char* buffer, size_t size);
 };
