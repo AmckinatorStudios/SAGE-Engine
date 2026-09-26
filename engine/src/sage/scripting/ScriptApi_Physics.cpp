@@ -296,6 +296,43 @@ void ScriptEngine::RegisterPhysicsApi() {
         }
     });
 
+    // Какие слои замечает зона (маска битов, как у Raycast). Тело не
+    // пересоздаётся: маску читает сама сцена, когда решает, кто в зоне.
+    Bind("physics", "SetTriggerMask", "SetTriggerMask", [](GameObject& obj, unsigned mask) {
+        if (!obj.Valid()) return;
+        if (auto* rb = obj.Registry()->try_get<RigidBodyComponent>(obj.Entity())) rb->TriggerMask = mask;
+    });
+
+    // --- Кто в зоне ---------------------------------------------------------
+    //
+    // Опрос в дополнение к OnTriggerEnter/Exit: «открыть дверь, если на плите
+    // хоть кто-то» по событиям требует вести счётчик, и одно пропущенное
+    // событие (объект создан уже внутри, скрипт включили позже) ломает его
+    // навсегда. Спросить список — всегда правда на текущий шаг.
+    Bind("physics", "ObjectsInTrigger", "ObjectsInTrigger", [this](GameObject& zone) -> sol::table {
+        sol::table list = m_lua.create_table();
+        if (!m_physics || !zone.Valid()) return list;
+        std::vector<entt::entity> found;
+        m_physics->ObjectsInTrigger(zone.Entity(), found);
+        for (size_t i = 0; i < found.size(); ++i) list[i + 1] = GameObject(&m_scene->Registry(), found[i]);
+        return list;
+    });
+    // Обратный вопрос: в каких зонах стоит объект («я в воде?»).
+    Bind("physics", "TriggersOf", "TriggersOf", [this](GameObject& obj) -> sol::table {
+        sol::table list = m_lua.create_table();
+        if (!m_physics || !obj.Valid()) return list;
+        std::vector<entt::entity> found;
+        m_physics->TriggersOf(obj.Entity(), found);
+        for (size_t i = 0; i < found.size(); ++i) list[i + 1] = GameObject(&m_scene->Registry(), found[i]);
+        return list;
+    });
+    Bind("physics", "IsInTrigger", "IsInTrigger", [this](GameObject& zone, GameObject& obj) -> bool {
+        if (!m_physics || !zone.Valid() || !obj.Valid()) return false;
+        for (const PhysicsScene::TriggerOverlap& o : m_physics->TriggerOverlaps())
+            if (o.Trigger == zone.Entity() && o.Other == obj.Entity()) return true;
+        return false;
+    });
+
     Bind("physics", "SetGravity", "SetGravity", [this](const glm::vec3& g) {
         if (!m_physics) throw std::runtime_error("SetGravity: физика не привязана (BindPhysics не вызван)");
         m_physics->SetGravity(g);

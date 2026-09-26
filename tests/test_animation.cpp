@@ -422,11 +422,11 @@ TEST(Animator_global_matrices_exclude_inverse_bind) {
 static Skeleton MakeTargetRig() {
     Skeleton sk;
     sk.Joints.resize(2);
-    sk.Joints[0].Name = "mixamorig:Root";
+    sk.Joints[0].Name = "rig:Root";
     sk.Joints[0].Parent = -1;
     sk.Joints[0].Translation = {0, 0, 0};
     sk.Joints[0].InverseBind = glm::mat4(1.0f);
-    sk.Joints[1].Name = "mixamorig:Child_01";
+    sk.Joints[1].Name = "rig:Child_01";
     sk.Joints[1].Parent = 0;
     sk.Joints[1].Translation = {0, 2, 0}; // кость вдвое длиннее исходной
     sk.Joints[1].InverseBind = glm::mat4(1.0f);
@@ -441,7 +441,7 @@ static Skeleton MakeNamedSourceRig() {
 }
 
 TEST(Retarget_normalizes_bone_names) {
-    CHECK_TRUE(NormalizeBoneName("mixamorig:LeftArm") == "leftarm");
+    CHECK_TRUE(NormalizeBoneName("rig:LeftArm") == "leftarm");
     CHECK_TRUE(NormalizeBoneName("Armature|Hips") == "hips");
     CHECK_TRUE(NormalizeBoneName("Hand_L") == "handl");
     CHECK_TRUE(NormalizeBoneName("hand.l") == "handl");

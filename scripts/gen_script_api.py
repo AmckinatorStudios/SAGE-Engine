@@ -713,8 +713,10 @@ function Script:OnCollisionEnter(other) end
 function Script:OnCollisionExit(other) end
 ---@param other SageObject
 function Script:OnTriggerEnter(other) end
----@param other SageObject
+---@param other SageObject|nil  nil — гостя удалили, пока он был в зоне
 function Script:OnTriggerExit(other) end
+---@param other SageObject
+function Script:OnTriggerStay(other) end
 ---@param name string
 function Script:OnAnimationEvent(name) end
 

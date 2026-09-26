@@ -81,7 +81,20 @@ void ScriptingSystem::DispatchPhysicsEvents(PhysicsScene& physics, Scene& scene)
         if (reg->valid(c.A) && reg->valid(c.B)) {
             m_runtime.DispatchTo(c.A, hook, GameObject(reg, c.B));
             m_runtime.DispatchTo(c.B, hook, GameObject(reg, c.A));
+        } else if (c.Sensor && !c.Begin) {
+            // Гостя удалили, пока он стоял в зоне. Выход всё равно сообщается —
+            // оставшейся стороне, с other = nil: скрипт, считающий «сколько
+            // внутри», иначе навсегда остался бы на единицу впереди.
+            if (reg->valid(c.A)) m_runtime.DispatchTo(c.A, hook, GameObject(reg, c.B));
+            if (reg->valid(c.B)) m_runtime.DispatchTo(c.B, hook, GameObject(reg, c.A));
         }
+    }
+    // Пребывание в зоне — тем, кто в ней уже не первый шаг. Обеим сторонам, как
+    // и вход: и зоне («кто стоит на плите»), и гостю («я в воде»).
+    for (const PhysicsScene::TriggerOverlap& o : physics.TriggerOverlaps()) {
+        if (o.Entered || !reg->valid(o.Trigger) || !reg->valid(o.Other)) continue;
+        m_runtime.DispatchTo(o.Trigger, Hook::OnTriggerStay, GameObject(reg, o.Other));
+        m_runtime.DispatchTo(o.Other, Hook::OnTriggerStay, GameObject(reg, o.Trigger));
     }
 }
 

@@ -1,6 +1,8 @@
 #include "sage/render/DebugDraw.h"
 
+#include <algorithm>
 #include <cmath>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 
 namespace {
@@ -30,6 +32,49 @@ void main() {
 }
 )GLSL";
 
+// Заливка форм: цвет затеняется по тому, насколько грань смотрит на камеру.
+// Не освещение сцены — гизмо обязан одинаково читаться в тёмной и в светлой
+// сцене, поэтому «свет» у него свой и всегда из глаза.
+const char* kSolidVertexSrc = R"GLSL(
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec4 aColor;
+uniform mat4 uView;
+uniform mat4 uProjection;
+out vec3 vWorld;
+out vec3 vNormal;
+out vec4 vColor;
+void main() {
+    vWorld = aPos;
+    vNormal = aNormal;
+    vColor = aColor;
+    gl_Position = uProjection * uView * vec4(aPos, 1.0);
+}
+)GLSL";
+
+const char* kSolidFragmentSrc = R"GLSL(
+#version 330 core
+in vec3 vWorld;
+in vec3 vNormal;
+in vec4 vColor;
+uniform vec3 uCameraPos;
+out vec4 FragColor;
+void main() {
+    vec3 n = normalize(vNormal);
+    vec3 v = normalize(uCameraPos - vWorld);
+    // Грань к камере — светлая, по касательной — тёмная: так читается объём.
+    float facing = clamp(dot(n, v), 0.0, 1.0);
+    // Лёгкий верхний свет: без него у коробки, повёрнутой к камере ребром,
+    // две видимые грани одного тона и сливаются в плоский шестиугольник.
+    float top = 0.85 + 0.15 * clamp(dot(n, normalize(vec3(0.35, 1.0, 0.25))), 0.0, 1.0);
+    float shade = (0.38 + 0.62 * facing) * top;
+    // Край силуэта чуть плотнее: форма не растворяется на пёстром фоне.
+    float alpha = vColor.a * (1.0 + 0.6 * (1.0 - facing));
+    FragColor = vec4(vColor.rgb * shade, clamp(alpha, 0.0, 1.0));
+}
+)GLSL";
+
 } // namespace
 
 DebugDraw::DebugDraw() {
@@ -43,6 +88,89 @@ DebugDraw::DebugDraw() {
         {1, 3, sage::rhi::AttribType::Float, (int)offsetof(LineVertex, Color)},
     };
     m_geometry = device.CreateGeometry(layout);
+
+    m_solidShader = device.CreateShaderProgram(kSolidVertexSrc, kSolidFragmentSrc);
+    sage::rhi::VertexLayout solid;
+    solid.Stride = sizeof(SolidVertex);
+    solid.Attributes = {
+        {0, 3, sage::rhi::AttribType::Float, 0},
+        {1, 3, sage::rhi::AttribType::Float, (int)offsetof(SolidVertex, Normal)},
+        {2, 4, sage::rhi::AttribType::Float, (int)offsetof(SolidVertex, Color)},
+    };
+    m_solidGeometry = device.CreateGeometry(solid);
+}
+
+void DebugDraw::SolidTri(const SolidVertex& a, SolidVertex b, SolidVertex c) {
+    const glm::vec3 face = glm::cross(b.Pos - a.Pos, c.Pos - a.Pos);
+    if (glm::dot(face, a.Normal + b.Normal + c.Normal) < 0.0f) std::swap(b, c);
+    m_solid.push_back(a);
+    m_solid.push_back(b);
+    m_solid.push_back(c);
+}
+
+void DebugDraw::SolidBox(const glm::mat4& transform, glm::vec4 color) {
+    // Нормали — обратной транспонированной: у неравномерно растянутого ящика
+    // нормаль грани не совпадает с преобразованным локальным вектором.
+    const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(transform)));
+    auto P = [&](float x, float y, float z) { return glm::vec3(transform * glm::vec4(x, y, z, 1.0f)); };
+    for (int axis = 0; axis < 3; ++axis) {
+        for (float sign : {-1.0f, 1.0f}) {
+            glm::vec3 n(0.0f);
+            n[axis] = sign;
+            const glm::vec3 wn = glm::normalize(normalMat * n);
+            const int u = (axis + 1) % 3, w = (axis + 2) % 3;
+            glm::vec3 corner[4];
+            const float us[4] = {-0.5f, 0.5f, 0.5f, -0.5f}, ws[4] = {-0.5f, -0.5f, 0.5f, 0.5f};
+            for (int k = 0; k < 4; ++k) {
+                glm::vec3 l(0.0f);
+                l[axis] = 0.5f * sign;
+                l[u] = us[k];
+                l[w] = ws[k];
+                corner[k] = P(l.x, l.y, l.z);
+            }
+            SolidTri({corner[0], wn, color}, {corner[1], wn, color}, {corner[2], wn, color});
+            SolidTri({corner[0], wn, color}, {corner[2], wn, color}, {corner[3], wn, color});
+        }
+    }
+}
+
+void DebugDraw::SolidCapsule(const glm::mat4& transform, float radius, float halfHeight,
+                             glm::vec4 color, int segments) {
+    if (segments < 6) segments = 6;
+    const int half = std::max(segments / 4, 2);   // колец на полусферу
+    const glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(transform)));
+    // Кольца снизу вверх: нижняя полусфера, затем верхняя. Два кольца на
+    // экваторе (со сдвигом -h и +h) и дают цилиндр между полусферами.
+    struct Ring { float Y, R, Ny, Nr; };
+    std::vector<Ring> rings;
+    for (int i = 0; i <= half; ++i) {
+        const float phi = -glm::half_pi<float>() + glm::half_pi<float>() * i / half;
+        rings.push_back({std::sin(phi) * radius - halfHeight, std::cos(phi) * radius, std::sin(phi), std::cos(phi)});
+    }
+    for (int i = 0; i <= half; ++i) {
+        const float phi = glm::half_pi<float>() * i / half;
+        rings.push_back({std::sin(phi) * radius + halfHeight, std::cos(phi) * radius, std::sin(phi), std::cos(phi)});
+    }
+    auto vert = [&](const Ring& r, int k) {
+        const float a = glm::two_pi<float>() * k / segments;
+        const glm::vec3 lp(std::cos(a) * r.R, r.Y, std::sin(a) * r.R);
+        const glm::vec3 ln(std::cos(a) * r.Nr, r.Ny, std::sin(a) * r.Nr);
+        return SolidVertex{glm::vec3(transform * glm::vec4(lp, 1.0f)),
+                           glm::normalize(normalMat * ln), color};
+    };
+    for (size_t i = 0; i + 1 < rings.size(); ++i) {
+        for (int k = 0; k < segments; ++k) {
+            const SolidVertex a = vert(rings[i], k), b = vert(rings[i], k + 1);
+            const SolidVertex c = vert(rings[i + 1], k + 1), d = vert(rings[i + 1], k);
+            // У полюса кольцо вырождается в точку — один треугольник вместо двух.
+            if (rings[i].R > 1e-6f) SolidTri(a, b, c);
+            if (rings[i + 1].R > 1e-6f) SolidTri(a, c, d);
+        }
+    }
+}
+
+void DebugDraw::SolidSphere(glm::vec3 center, float radius, glm::vec4 color, int segments) {
+    SolidCapsule(glm::translate(glm::mat4(1.0f), center), radius, 0.0f, color, segments);
 }
 
 void DebugDraw::Line(glm::vec3 a, glm::vec3 b, glm::vec3 color) {
@@ -219,9 +347,29 @@ void DebugDraw::Axes(const glm::mat4& transform, float size) {
 }
 
 void DebugDraw::Flush(const glm::mat4& view, const glm::mat4& proj) {
-    if (m_vertices.empty()) return;
+    if (m_vertices.empty() && m_solid.empty()) return;
 
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+
+    // Заливка — первой и без записи глубины: каркас, нарисованный следом,
+    // остаётся виден сквозь неё, а заливки разных форм не выгрызают друг друга.
+    // Задние грани отсекаются: иначе дальняя стенка удваивала бы плотность, и
+    // форма выглядела бы темнее посередине, чем у краёв, — наоборот объёму.
+    if (!m_solid.empty()) {
+        m_solidShader->Use();
+        m_solidShader->SetMat4("uView", view);
+        m_solidShader->SetMat4("uProjection", proj);
+        m_solidShader->SetVec3("uCameraPos", glm::vec3(glm::inverse(view)[3]));
+        m_solidGeometry->SetVertexData(m_solid.data(), m_solid.size() * sizeof(SolidVertex), true);
+        device.SetBlend(true);
+        device.SetDepthWrite(false);
+        device.SetCullMode(sage::rhi::CullMode::Back);
+        m_solidGeometry->DrawArrays(m_solid.size());
+        device.SetDepthWrite(true);
+        device.SetBlend(false);
+        m_solid.clear();
+    }
+    if (m_vertices.empty()) return;
     m_shader->Use();
     m_shader->SetMat4("uView", view);
     m_shader->SetMat4("uProjection", proj);

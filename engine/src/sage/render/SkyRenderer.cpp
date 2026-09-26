@@ -73,8 +73,6 @@ uniform float uHorizonOffset;
 uniform int uGround;
 uniform vec3 uGroundColor;
 uniform float uGroundBlend;
-uniform int uSunShape;       // 0 круг, 1 квадрат
-uniform int uMoonShape;
 uniform float uSunBrightness;
 uniform float uSunGlow;
 uniform int uMoonPhase;
@@ -85,7 +83,6 @@ uniform sampler2D uMoonMap;
 uniform float uStarDensity;
 uniform float uStarSize;
 uniform int uClouds;
-uniform int uCloudStyle;     // 0 блоки, 1 мягкие
 uniform vec3 uCloudColor;
 uniform float uCloudHeight;
 uniform float uCloudScale;
@@ -109,29 +106,15 @@ float ValueNoise(vec2 p) {
 }
 
 // Диск светила в касательной плоскости к направлению на него. Координаты —
-// тангенсы углов, поэтому и круг, и квадрат, и картинка не зависят ни от поля
+// тангенсы углов, поэтому картинка не зависит ни от поля
 // зрения, ни от соотношения сторон кадра. Базис — «восток/верх» светила:
-// квадрат и картинка не крутятся при повороте камеры.
+// картинка не крутится при повороте камеры.
 vec2 DiscPlane(vec3 dir, vec3 toBody, out float facing) {
     vec3 right = abs(toBody.y) < 0.999 ? normalize(cross(vec3(0.0, 1.0, 0.0), toBody))
                                        : vec3(1.0, 0.0, 0.0);
     vec3 up = cross(toBody, right);
     facing = dot(dir, toBody);
     return facing > 1e-3 ? vec2(dot(dir, right), dot(dir, up)) / facing : vec2(1e3);
-}
-
-// Маска формы: 1 внутри, 0 снаружи, край сглажен на пиксель.
-//
-// Ширина сглаживания ограничена половиной диска НЕ для красоты. На большом
-// круге, где светило оказывается «сбоку» (facing ~ 0), координаты касательной
-// плоскости улетают в бесконечность, и fwidth между соседними пикселями там
-// огромен: без ограничения край «сглаживался» на всё небо, и через кадр шла
-// тонкая светлая линия — ровно по этому кругу.
-float DiscMask(vec2 p, float size, int shape, float facing) {
-    if (facing <= 0.0) return 0.0;
-    float m = shape == 1 ? max(abs(p.x), abs(p.y)) : length(p);
-    float aa = clamp(fwidth(m), 1e-5, size * 0.5);
-    return 1.0 - smoothstep(size - aa, size + aa, m);
 }
 
 // Картинка светила: сложением (чёрный фон — прозрачен).
@@ -184,12 +167,10 @@ void main() {
         // ноль не берём — у самого горизонта диск ещё виден, и это закат.
         float sunVisible = smoothstep(-0.12, 0.06, uSunDir.y);
         vec3 sunLight;
-        if (uSunTex == 1 || uSunShape == 1) {
+        if (uSunTex == 1) {
             float facing;
             vec2 p = DiscPlane(dir, uSunDir, facing);
-            float size = tan(uSunSize);
-            sunLight = uSunTex == 1 ? DiscTexture(uSunMap, p, size, facing)
-                                    : vec3(DiscMask(p, size, uSunShape, facing));
+            sunLight = DiscTexture(uSunMap, p, tan(uSunSize), facing);
         } else {
             float sunAng = acos(clamp(sunCos, -1.0, 1.0));
             sunLight = vec3(1.0 - smoothstep(uSunSize * 0.85, uSunSize, sunAng));
@@ -214,12 +195,10 @@ void main() {
                 : 1.0;
             float moonGlow = pow(max(0.0, moonCos), 400.0) * 0.25 * uSunGlow;
             vec3 moonLight;
-            if (uMoonTex == 1 || uMoonShape == 1) {
+            if (uMoonTex == 1) {
                 float facing;
                 vec2 p = DiscPlane(dir, moonDir, facing);
-                float size = tan(uMoonSize);
-                moonLight = uMoonTex == 1 ? DiscTexture(uMoonMap, p, size, facing) * 1.6
-                                          : vec3(DiscMask(p, size, uMoonShape, facing)) * mix(0.15, 1.6, phase);
+                moonLight = DiscTexture(uMoonMap, p, tan(uMoonSize), facing) * 1.6;
             } else {
                 float moonAng = acos(clamp(moonCos, -1.0, 1.0));
                 float moonDisk = 1.0 - smoothstep(uMoonSize * 0.8, uMoonSize, moonAng);
@@ -249,20 +228,11 @@ void main() {
         float dist = uCloudHeight / dir.y;
         vec2 xz = uCamPos.xz + dir.xz * dist + uCloudOffset;
         vec2 q = xz / max(uCloudScale, 0.01);
-        float cover;
-        if (uCloudStyle == 0) {
-            // Блоки: клетка целиком либо облако, либо нет. Крупный шум по
-            // центрам клеток собирает их в острова, мелкий хэш рвёт края.
-            vec2 cell = floor(q);
-            float n = ValueNoise((cell + 0.5) * 0.13) * 0.8 + Hash2(cell) * 0.2;
-            cover = step(1.0 - uCloudCoverage, n);
-        } else {
-            float n = ValueNoise(q * 0.125) * 0.5 + ValueNoise(q * 0.25) * 0.3
-                    + ValueNoise(q * 0.5) * 0.2;
-            cover = smoothstep(1.0 - uCloudCoverage, 1.0 - uCloudCoverage + 0.25, n);
-        }
-        // Вдали клетка меньше пикселя — узор там превращается в муар. Там,
-        // где клеток на пиксель больше одной, берётся их средняя доля.
+        float n = ValueNoise(q * 0.125) * 0.5 + ValueNoise(q * 0.25) * 0.3
+                + ValueNoise(q * 0.5) * 0.2;
+        float cover = smoothstep(1.0 - uCloudCoverage, 1.0 - uCloudCoverage + 0.25, n);
+        // Вдали узор мельче пикселя и превращается в муар: там берётся его
+        // средняя доля.
         float px = length(fwidth(q));
         cover = mix(cover, uCloudCoverage * 0.8, smoothstep(0.35, 1.2, px));
         float fade = exp(-abs(dist) / max(uCloudFade, 1.0));
@@ -335,8 +305,6 @@ SkyCelestials CelestialsFromEnvironment(const LightingEnvironment& env) {
     // Без смены суток DayFactor равен единице — дневные цвета.
     c.GroundColor = glm::mix(sky.NightGroundColor, sky.GroundColor, env.DayFactor);
     c.GroundBlend = sky.GroundBlend;
-    c.SunShape = (int)sky.SunShape;
-    c.MoonShape = (int)sky.MoonShape;
     c.SunBrightness = sky.SunBrightness;
     c.SunGlow = sky.SunGlow;
     c.MoonPhase = sky.MoonPhase;
@@ -346,7 +314,6 @@ SkyCelestials CelestialsFromEnvironment(const LightingEnvironment& env) {
     c.StarDensity = sky.StarDensity;
     c.StarSize = sky.StarSize;
     c.Clouds = sky.Clouds;
-    c.CloudStyle = (int)sky.CloudKind;
     c.CloudColor = glm::mix(sky.NightCloudColor, sky.CloudColor, env.DayFactor);
     c.CloudHeight = sky.CloudHeight;
     c.CloudScale = sky.CloudScale;
@@ -410,15 +377,12 @@ void SkyRenderer::Draw(const glm::mat4& view, const glm::mat4& proj,
     m_shader->SetInt("uGround", sky.Ground ? 1 : 0);
     m_shader->SetVec3("uGroundColor", sky.GroundColor);
     m_shader->SetFloat("uGroundBlend", std::max(sky.GroundBlend, 0.0f));
-    m_shader->SetInt("uSunShape", sky.SunShape);
-    m_shader->SetInt("uMoonShape", sky.MoonShape);
     m_shader->SetFloat("uSunBrightness", std::max(sky.SunBrightness, 0.0f));
     m_shader->SetFloat("uSunGlow", std::max(sky.SunGlow, 0.0f));
     m_shader->SetInt("uMoonPhase", sky.MoonPhase ? 1 : 0);
     m_shader->SetFloat("uStarDensity", std::clamp(sky.StarDensity, 0.0f, 50.0f));
     m_shader->SetFloat("uStarSize", std::clamp(sky.StarSize, 0.05f, 20.0f));
     m_shader->SetInt("uClouds", sky.Clouds ? 1 : 0);
-    m_shader->SetInt("uCloudStyle", sky.CloudStyle);
     m_shader->SetVec3("uCloudColor", sky.CloudColor);
     m_shader->SetFloat("uCloudHeight", sky.CloudHeight);
     m_shader->SetFloat("uCloudScale", std::max(sky.CloudScale, 0.01f));

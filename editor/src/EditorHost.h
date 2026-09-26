@@ -19,6 +19,7 @@
 
 class Project;
 class AudioEngine;
+class PhysicsScene;
 
 // ---------------------------------------------------------------------------
 // EditorHost — контракт операций редактора, доступных панелям.
@@ -226,6 +227,9 @@ public:
     // --- Play-режим ---
     virtual EditorPlayState GetPlayState() const = 0;
     virtual bool InPlayMode() const = 0;
+    // Физика идущей игры; nullptr вне Play. Инспектору — показать, кто сейчас
+    // в зоне триггера.
+    virtual PhysicsScene* PlayPhysics() = 0;
 
     // ПЕРЕСТАВИТЬ ФИЗИЧЕСКОЕ ТЕЛО ТУДА, КУДА ЕГО ПОСТАВИЛИ МЫШЬЮ.
     //

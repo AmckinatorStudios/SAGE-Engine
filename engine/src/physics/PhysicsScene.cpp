@@ -1,5 +1,7 @@
 #include "sage/physics/PhysicsScene.h"
 
+#include <algorithm>
+
 #ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
 #endif
@@ -111,7 +113,64 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
     return d;
 }
 
+// --- Геометрия зон для персонажей ---------------------------------------------
+//
+// Персонаж — не тело мира, и бэкенд о его входе в зону не сообщает. Поэтому
+// касание «капсула персонажа — форма зоны» считается здесь. Расстояние от
+// точки до выпуклой формы — выпуклая функция, и вдоль отрезка оси капсулы у
+// неё один минимум: троичный поиск находит его точно, без особых случаев
+// «отрезок против коробки» на каждую пару форм.
+
+// Расстояние от точки (в ЛОКАЛЬНЫХ осях формы, капсула — вдоль Y) до формы;
+// 0 — точка внутри.
+float DistToShape(const glm::vec3& p, ShapeType shape, const glm::vec3& half, float radius,
+                  float halfHeight) {
+    switch (shape) {
+        case ShapeType::Sphere: return glm::max(glm::length(p) - radius, 0.0f);
+        case ShapeType::Capsule: {
+            const glm::vec3 axis(0.0f, glm::clamp(p.y, -halfHeight, halfHeight), 0.0f);
+            return glm::max(glm::length(p - axis) - radius, 0.0f);
+        }
+        case ShapeType::Box:
+        default: return glm::length(glm::max(glm::abs(p) - half, glm::vec3(0.0f)));
+    }
+}
+
+// Ближе всего отрезок [a, b] подходит к форме на этом расстоянии.
+float SegmentToShape(const glm::vec3& a, const glm::vec3& b, ShapeType shape, const glm::vec3& half,
+                     float radius, float halfHeight) {
+    float lo = 0.0f, hi = 1.0f;
+    for (int i = 0; i < 40; ++i) {
+        const float m1 = lo + (hi - lo) / 3.0f, m2 = hi - (hi - lo) / 3.0f;
+        const float d1 = DistToShape(glm::mix(a, b, m1), shape, half, radius, halfHeight);
+        const float d2 = DistToShape(glm::mix(a, b, m2), shape, half, radius, halfHeight);
+        if (d1 > d2) lo = m1;
+        else hi = m2;
+    }
+    return DistToShape(glm::mix(a, b, 0.5f * (lo + hi)), shape, half, radius, halfHeight);
+}
+
+// Касается ли капсула (ось [a, b] в мире, радиус r) тела, описанного desc.
+bool CapsuleTouchesBody(const glm::vec3& a, const glm::vec3& b, float r, const BodyDesc& desc) {
+    const glm::quat inv = glm::inverse(desc.Rotation);
+    const glm::vec3 la = inv * (a - desc.Position), lb = inv * (b - desc.Position);
+    if (desc.Children.empty())
+        return SegmentToShape(la, lb, desc.Shape, desc.HalfExtents, desc.Radius, desc.HalfHeight) <= r;
+    for (const ChildShape& c : desc.Children) {
+        const glm::quat ci = glm::inverse(c.Rotation);
+        if (SegmentToShape(ci * (la - c.Position), ci * (lb - c.Position), c.Shape, c.HalfExtents,
+                           c.Radius, c.HalfHeight) <= r)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
+
+bool sage::physics::CapsuleTouchesBodyForTest(const glm::vec3& a, const glm::vec3& b, float r,
+                                              const BodyDesc& desc) {
+    return CapsuleTouchesBody(a, b, r, desc);
+}
 
 PhysicsScene::PhysicsScene(Backend backend, Scene& scene) {
     m_world = PhysicsWorld::Create(backend);
@@ -284,6 +343,13 @@ void PhysicsScene::Step(Scene& scene, float dt) {
             // Тело без сущности — не ошибка: сущность могли удалить в этом же
             // кадре, и событие про неё игре уже не адресовать.
             if (ia == m_bodyToEntity.end() || ib == m_bodyToEntity.end()) continue;
+            // Зона — не удар: её касания копятся в списке «кто внутри», а
+            // события входа и выхода строит UpdateTriggers по его разнице.
+            if (raw.Sensor) {
+                NoteSensorContact(scene, ia->second, ib->second,
+                                  raw.When == ContactEvent::Phase::Begin);
+                continue;
+            }
             EntityContact c;
             c.Begin = raw.When == ContactEvent::Phase::Begin;
             c.A = ia->second;
@@ -295,6 +361,7 @@ void PhysicsScene::Step(Scene& scene, float dt) {
             m_contacts.push_back(c);
         }
     }
+    UpdateTriggers(scene);
 }
 
 // Заводит контроллеры для сущностей, у которых есть компонент, но ещё нет
@@ -485,5 +552,124 @@ int PhysicsScene::OverlapSphere(const glm::vec3& center, float radius,
         auto it = m_bodyToEntity.find(b);
         if (it != m_bodyToEntity.end()) out.push_back(it->second);
     }
+    return (int)out.size();
+}
+
+// --- Триггер-зоны ------------------------------------------------------------
+
+void PhysicsScene::NoteSensorContact(Scene& scene, entt::entity a, entt::entity b, bool begin) {
+    auto& reg = scene.Registry();
+    auto note = [&](entt::entity zone, entt::entity guest) {
+        const RigidBodyComponent* rb = reg.valid(zone) ? reg.try_get<RigidBodyComponent>(zone) : nullptr;
+        if (!rb || !rb->Sensor) return;
+        const std::pair<entt::entity, entt::entity> key(zone, guest);
+        auto it = std::find(m_bodyInside.begin(), m_bodyInside.end(), key);
+        if (begin && it == m_bodyInside.end()) m_bodyInside.push_back(key);
+        else if (!begin && it != m_bodyInside.end()) m_bodyInside.erase(it);
+    };
+    // Обе стороны: две зоны, коснувшиеся друг друга, — гость каждая у другой.
+    note(a, b);
+    note(b, a);
+}
+
+void PhysicsScene::UpdateTriggers(Scene& scene) {
+    auto& reg = scene.Registry();
+    std::vector<TriggerOverlap> prev;
+    prev.swap(m_inside);
+
+    auto zoneOf = [&](entt::entity e) -> const RigidBodyComponent* {
+        if (!reg.valid(e)) return nullptr;
+        const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e);
+        return rb && rb->Sensor && rb->RuntimeBody != kInvalidBody ? rb : nullptr;
+    };
+    // Слой гостя: у тела — свой, у персонажа — свой. Нет ни того ни другого —
+    // гостя больше нет в физике, и в зоне ему делать нечего.
+    auto layerOf = [&](entt::entity e, LayerMask& out) -> bool {
+        if (!reg.valid(e)) return false;
+        if (const auto* rb = reg.try_get<RigidBodyComponent>(e)) { out = rb->Layer; return true; }
+        if (const auto* cc = reg.try_get<CharacterControllerComponent>(e)) { out = cc->Layer; return true; }
+        return false;
+    };
+    auto admit = [&](entt::entity zone, entt::entity guest) {
+        const RigidBodyComponent* rb = zoneOf(zone);
+        LayerMask layer = 0;
+        if (!rb || zone == guest || !layerOf(guest, layer)) return;
+        if ((layer & rb->TriggerMask) == 0) return;
+        for (const TriggerOverlap& o : m_inside)
+            if (o.Trigger == zone && o.Other == guest) return;
+        m_inside.push_back({zone, guest, false});
+    };
+
+    // 1. Тело с телом — по сообщениям бэкенда. Пары удалённых и переставших
+    // быть зонами выбрасываются здесь: иначе они жили бы вечно.
+    m_bodyInside.erase(std::remove_if(m_bodyInside.begin(), m_bodyInside.end(),
+                                      [&](const auto& p) {
+                                          return !zoneOf(p.first) || !reg.valid(p.second) ||
+                                                 !reg.all_of<RigidBodyComponent>(p.second);
+                                      }),
+                       m_bodyInside.end());
+    for (const auto& [zone, guest] : m_bodyInside) admit(zone, guest);
+
+    // 2. Персонажи — геометрией (бэкенд о них не сообщает).
+    auto characters = reg.view<CharacterControllerComponent, Transform>();
+    if (characters.begin() != characters.end()) {
+        for (const auto& [zone, body] : m_tracked) {
+            const RigidBodyComponent* rb = zoneOf(zone);
+            if (!rb) continue;
+            const ColliderComponent* col = reg.try_get<ColliderComponent>(zone);
+            const BodyDesc desc = DescFromEntity(*rb, col, DecomposeWorld(scene.WorldMatrix(zone)));
+            for (auto e : characters) {
+                const CharacterControllerComponent& cc = characters.get<CharacterControllerComponent>(e);
+                // Подошвы — там, где их ставит контроллер: точка объекта + Center.
+                const glm::vec3 feet = glm::vec3(scene.WorldMatrix(e)[3]) + cc.Center;
+                const float r = glm::max(cc.Radius, 0.001f);
+                const float top = glm::max(cc.Height - r, r);
+                if (CapsuleTouchesBody(feet + glm::vec3(0.0f, r, 0.0f), feet + glm::vec3(0.0f, top, 0.0f),
+                                       r, desc))
+                    admit(zone, e);
+            }
+        }
+    }
+
+    // 3. Разница с прошлым шагом — события входа и выхода.
+    auto had = [](const std::vector<TriggerOverlap>& list, const TriggerOverlap& o) {
+        for (const TriggerOverlap& x : list)
+            if (x.Trigger == o.Trigger && x.Other == o.Other) return true;
+        return false;
+    };
+    for (TriggerOverlap& o : m_inside) {
+        o.Entered = !had(prev, o);
+        if (!o.Entered) continue;
+        EntityContact c;
+        c.Begin = true;
+        c.A = o.Trigger;
+        c.B = o.Other;
+        c.Sensor = true;
+        m_contacts.push_back(c);
+    }
+    // Выход — и для удалённого гостя: скрипт зоны, считающий «сколько внутри»,
+    // обязан узнать, что одного не стало, даже если того уже нет в сцене.
+    for (const TriggerOverlap& o : prev) {
+        if (had(m_inside, o)) continue;
+        EntityContact c;
+        c.Begin = false;
+        c.A = o.Trigger;
+        c.B = o.Other;
+        c.Sensor = true;
+        m_contacts.push_back(c);
+    }
+}
+
+int PhysicsScene::ObjectsInTrigger(entt::entity trigger, std::vector<entt::entity>& out) const {
+    out.clear();
+    for (const TriggerOverlap& o : m_inside)
+        if (o.Trigger == trigger) out.push_back(o.Other);
+    return (int)out.size();
+}
+
+int PhysicsScene::TriggersOf(entt::entity other, std::vector<entt::entity>& out) const {
+    out.clear();
+    for (const TriggerOverlap& o : m_inside)
+        if (o.Other == other) out.push_back(o.Trigger);
     return (int)out.size();
 }

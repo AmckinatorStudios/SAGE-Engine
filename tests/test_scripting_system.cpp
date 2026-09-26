@@ -637,3 +637,57 @@ return R
     sys->Shutdown();
     std::filesystem::remove(path);
 }
+
+// --- Триггер-зона: вход, пребывание и выход доходят до скрипта ---------------
+//
+// Персонаж входит в зону — у скрипта зоны OnTriggerEnter, пока стоит —
+// OnTriggerStay каждый шаг (кроме шага входа), ушёл — OnTriggerExit. Раньше
+// персонажа зона не замечала вовсе, а Stay не было.
+TEST(ScriptSystem_trigger_zone_hooks_for_a_character) {
+    Scene scene("test");
+    GameObject zone = scene.CreateObject("Zone");
+    zone.GetTransform().Position = glm::vec3(5.0f, 1.0f, 0.0f);
+    RigidBodyComponent rb{sage::physics::BodyType::Static};
+    rb.Sensor = true;
+    scene.Registry().emplace<RigidBodyComponent>(zone.Entity(), rb);
+    ColliderComponent col;
+    col.HalfExtents = glm::vec3(1.0f);
+    scene.Registry().emplace<ColliderComponent>(zone.Entity(), col);
+
+    GameObject hero = scene.CreateObject("Hero");
+    CharacterControllerComponent cc;
+    cc.Gravity = 0.0f;
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity(), cc);
+
+    const std::string path = WriteScript("zone", R"LUA(
+local Z = {}
+function Z:Start() self.e, self.s, self.x = 0, 0, 0 end
+local function show(self) self.gameObject.name = string.format("e%d s%d x%d", self.e, self.s, self.x) end
+function Z:OnTriggerEnter(other) if other and other.name == "Hero" then self.e = self.e + 1 end show(self) end
+function Z:OnTriggerStay(other) self.s = self.s + 1 show(self) end
+function Z:OnTriggerExit(other) self.x = self.x + 1 show(self) end
+return Z
+)LUA");
+    scene.Registry().emplace<ScriptComponent>(zone.Entity(), ScriptComponent{path});
+
+    PhysicsScene physics(sage::physics::Backend::Builtin, scene);
+    if (!physics.Available() || !physics.SupportsCharacters()) return;
+    auto sys = MakeSystem(scene);
+    sys->AttachScene(scene);
+    auto step = [&] {
+        physics.Step(scene, 1.0f / 60.0f);
+        sys->DispatchPhysicsEvents(physics, scene);
+    };
+    step();
+    auto& live = scene.Registry().get<CharacterControllerComponent>(hero.Entity());
+    physics.SetCharacterPosition(live.Runtime, glm::vec3(5.0f, 0.0f, 0.0f));
+    step();                 // вход
+    step();                 // стоит
+    step();                 // стоит
+    physics.SetCharacterPosition(live.Runtime, glm::vec3(-5.0f, 0.0f, 0.0f));
+    step();                 // вышел
+    std::printf("       хуки зоны: %s\n", zone.Name().c_str());
+    CHECK_TRUE(zone.Name() == "e1 s2 x1");
+    sys->Shutdown();
+    std::filesystem::remove(path);
+}

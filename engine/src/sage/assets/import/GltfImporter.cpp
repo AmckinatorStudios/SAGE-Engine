@@ -167,7 +167,7 @@ std::string PrimitiveName(const tinygltf::Model& gltf, const tinygltf::Node& nod
         name = gltf.meshes[(size_t)meshIndex].name;
     if (name.empty()) name = "node";
     // Номер части дописываем, только если частей больше одной: у обычного
-    // односоставного узла имя должно совпадать с именем из Blender, иначе
+    // односоставного узла имя должно совпадать с именем из 3D-редактора, иначе
     // сопоставить слот материала с тем, что видно в файле, не получится.
     if (primCount > 1) name += "#" + std::to_string(primIndex);
     return name;

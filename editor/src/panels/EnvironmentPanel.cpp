@@ -211,13 +211,7 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         if (sky.Celestials) {
             // Цвет и направление диска солнца — у объекта-солнца; здесь только
             // то, что принадлежит НЕБУ: вид диска, луна, звёзды.
-            const char* kShapes[] = {T("Round"), T("Square")};
             Sage::UI::ColorField3(T("Sun disc colour"), &sky.SunColor.x); host.TrackLastImGuiItem();
-            int sunShape = (int)sky.SunShape;
-            if (ImGui::Combo(T("Sun shape"), &sunShape, kShapes, 2)) {
-                host.PushUndoSnapshot();
-                sky.SunShape = (SkyboxSettings::DiscShape)sunShape;
-            }
             ImGui::DragFloat(T("Sun size"), &sky.SunSize, 0.002f, 0.005f, 0.6f, "%.3f");
             host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Sun brightness"), &sky.SunBrightness, 0.05f, 0.0f, 20.0f, "%.2f");
@@ -228,11 +222,6 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
             if (ImGui::Checkbox(T("Moon"), &sky.Moon)) host.PushUndoSnapshot();
             if (sky.Moon) {
                 Sage::UI::ColorField3(T("Moon colour"), &sky.MoonColor.x); host.TrackLastImGuiItem();
-                int moonShape = (int)sky.MoonShape;
-                if (ImGui::Combo(T("Moon shape"), &moonShape, kShapes, 2)) {
-                    host.PushUndoSnapshot();
-                    sky.MoonShape = (SkyboxSettings::DiscShape)moonShape;
-                }
                 ImGui::DragFloat(T("Moon size"), &sky.MoonSize, 0.002f, 0.005f, 0.6f, "%.3f");
                 host.TrackLastImGuiItem();
                 if (ImGui::Checkbox(T("Moon phase"), &sky.MoonPhase)) host.PushUndoSnapshot();
@@ -254,12 +243,6 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         ImGui::Separator();
         if (ImGui::Checkbox(T("Clouds"), &sky.Clouds)) host.PushUndoSnapshot();
         if (sky.Clouds) {
-            const char* kStyles[] = {T("Blocks"), T("Soft")};
-            int style = (int)sky.CloudKind;
-            if (ImGui::Combo(T("Cloud style"), &style, kStyles, 2)) {
-                host.PushUndoSnapshot();
-                sky.CloudKind = (SkyboxSettings::CloudStyle)style;
-            }
             Sage::UI::ColorField3(T("Cloud colour"), &sky.CloudColor.x); host.TrackLastImGuiItem();
             if (sky.DayNight) {
                 Sage::UI::ColorField3(T("Cloud colour (night)"), &sky.NightCloudColor.x);

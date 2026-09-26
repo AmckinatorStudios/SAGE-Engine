@@ -176,7 +176,7 @@ std::string ClipFileName(const std::string& modelFileStem, const std::string& cl
     for (unsigned char ch : clipName) {
         // Разрешаем буквы, цифры, дефис и подчёркивание; кириллицу (>= 0x80)
         // тоже — имена клипов в русских проектах бывают русскими. Всё прочее
-        // (пробелы, «|» из Blender, двоеточия из Mixamo) заменяем.
+        // (пробелы, «|» из 3D-редактора, двоеточия сервисов риггинга) заменяем.
         const bool ok = (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') ||
                         (ch >= 'a' && ch <= 'z') || ch == '-' || ch == '_' || ch >= 0x80;
         name.push_back(ok ? (char)ch : '_');

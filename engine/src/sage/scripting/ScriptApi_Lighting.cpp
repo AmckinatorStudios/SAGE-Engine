@@ -65,8 +65,7 @@ void ScriptEngine::RegisterLightingApi() {
         "MoonColor", &SkyboxSettings::MoonColor,
         "MoonSize", &SkyboxSettings::MoonSize,
         "StarIntensity", &SkyboxSettings::StarIntensity,
-        // Форма неба и облака (см. SkyboxSettings). Формы и стиль — строками:
-        // "round"/"square", "blocky"/"soft".
+        // Форма неба и облака (см. SkyboxSettings).
         "GradientExponent", &SkyboxSettings::GradientExponent,
         "HorizonSoftness", &SkyboxSettings::HorizonSoftness,
         "HorizonOffset", &SkyboxSettings::HorizonOffset,
@@ -82,22 +81,7 @@ void ScriptEngine::RegisterLightingApi() {
         "PixelArt", &SkyboxSettings::PixelArt,
         "StarDensity", &SkyboxSettings::StarDensity,
         "StarSize", &SkyboxSettings::StarSize,
-        "SunShape", sol::property(
-            [](const SkyboxSettings& s) { return std::string(s.SunShape == SkyboxSettings::DiscShape::Square ? "square" : "round"); },
-            [](SkyboxSettings& s, const std::string& v) {
-                s.SunShape = v == "square" ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
-            }),
-        "MoonShape", sol::property(
-            [](const SkyboxSettings& s) { return std::string(s.MoonShape == SkyboxSettings::DiscShape::Square ? "square" : "round"); },
-            [](SkyboxSettings& s, const std::string& v) {
-                s.MoonShape = v == "square" ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
-            }),
         "Clouds", &SkyboxSettings::Clouds,
-        "CloudStyle", sol::property(
-            [](const SkyboxSettings& s) { return std::string(s.CloudKind == SkyboxSettings::CloudStyle::Soft ? "soft" : "blocky"); },
-            [](SkyboxSettings& s, const std::string& v) {
-                s.CloudKind = v == "soft" ? SkyboxSettings::CloudStyle::Soft : SkyboxSettings::CloudStyle::Blocky;
-            }),
         "CloudColor", &SkyboxSettings::CloudColor,
         "NightCloudColor", &SkyboxSettings::NightCloudColor,
         "CloudHeight", &SkyboxSettings::CloudHeight,
@@ -107,7 +91,7 @@ void ScriptEngine::RegisterLightingApi() {
         "CloudWind", &SkyboxSettings::CloudWind,
         "CloudFade", &SkyboxSettings::CloudFade
     );
-    // Готовый вид неба одним вызовом: "default", "blocky", "overcast".
+    // Готовый вид неба одним вызовом: "default", "overcast".
     // Меняет только вид процедурного неба — выбранные файлы текстурного неба
     // остаются на месте.
     Bind("light", "SetSkyPreset", "ApplySkyPreset", [this](const std::string& name) {

@@ -647,10 +647,10 @@ void TestSkyRayDirection() {
 
 // --- Небо: форма настраивается -----------------------------------------------
 //
-// Форма градиента, низ неба, квадратное солнце и облака. Ответ — снова
+// Форма градиента, низ неба, солнце без ореола и облака. Ответ — снова
 // АНАЛИТИЧЕСКИЙ: шейдер обязан посчитать ровно то, что говорят настройки.
 // До появления настроек низ неба всегда был цветом горизонта, солнце — только
-// кругом с ореолом, облаков не было вовсе: блочное пиксельное небо собрать было
+// кругом с ореолом, облаков не было вовсе: стилизованное небо собрать было
 // нельзя.
 void TestSkyShape() {
     SkyRenderer sky;
@@ -712,8 +712,7 @@ void TestSkyShape() {
     // Край «низа» резкий: пиксель на самой границе может уйти в любую сторону.
     Check(bad <= w, "градиент, сдвиг горизонта и низ неба — как в настройках");
 
-    // 2. Квадратное солнце: угол квадрата (внутри квадрата, но вне вписанного
-    //    круга) светится у квадрата и тёмен у круга.
+    // 2. Солнце без ореола: диск светится, а сразу за его краем — уже небо.
     SkyCelestials disc;
     disc.Enabled = true;
     disc.SunDir = glm::normalize(glm::vec3(0.0f, 0.35f, -1.0f));
@@ -726,16 +725,12 @@ void TestSkyShape() {
     const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0, 1, 0), disc.SunDir));
     const glm::vec3 up = glm::cross(disc.SunDir, right);
     const float t = std::tan(disc.SunSize);
-    const glm::ivec2 corner = pixelOf(disc.SunDir + (right + up) * (0.8f * t));
+    const glm::ivec2 outside = pixelOf(disc.SunDir + (right + up) * (0.9f * t));
     const glm::ivec2 centre = pixelOf(disc.SunDir);
-    const Image round = render(disc);
-    disc.SunShape = 1;
-    const Image square = render(disc);
-    std::printf("       солнце: центр круг %d / квадрат %d, угол круг %d / квадрат %d\n",
-                at(round, centre, 0), at(square, centre, 0), at(round, corner, 0), at(square, corner, 0));
-    Check(at(square, centre, 0) >= 250 && at(round, centre, 0) >= 250, "центр диска светится у обеих форм");
-    Check(at(square, corner, 0) >= 250, "угол квадрата светится у квадратного солнца");
-    Check(at(round, corner, 0) < 250, "у круглого солнца угол квадрата — уже небо");
+    const Image sun = render(disc);
+    std::printf("       солнце: центр %d, за краем диска %d\n", at(sun, centre, 0), at(sun, outside, 0));
+    Check(at(sun, centre, 0) >= 250, "диск солнца светится");
+    Check(at(sun, outside, 0) < 250, "без ореола за краем диска — уже небо");
 
     // 3. Облака: сплошной слой виден над горизонтом и не виден под ним.
     SkyCelestials clouds;

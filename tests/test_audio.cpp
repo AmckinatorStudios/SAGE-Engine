@@ -26,6 +26,7 @@
 
 #include "sage/audio/AudioComponents.h"
 #include "sage/audio/AudioEngine.h"
+#include "sage/audio/AudioScrub.h"
 #include "sage/audio/AudioSystem.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/scene/Components.h"
@@ -310,3 +311,42 @@ TEST(Audio_resolves_a_project_relative_path) {
 }
 
 } // namespace
+
+// --- Бегунок проигрывателя: пока тянут, звук молчит -------------------------
+//
+// Бегунок перематывал звук в каждом кадре перетаскивания, не останавливая его:
+// перемотка отложенная, курсор в следующем кадре ещё старый, и из динамиков шла
+// каша обрывков. Теперь: схватили — пауза, тянут — ни одной перемотки,
+// отпустили — ровно одна и продолжение.
+
+TEST(Audio_scrub_pauses_while_dragging_and_seeks_once) {
+    sage::audio::ScrubState s;
+    int pauses = 0, seeks = 0, resumes = 0;
+    float seekTo = -1.0f;
+    auto frame = [&](bool active, float value, bool playing) {
+        const sage::audio::ScrubAction a = sage::audio::StepScrub(s, active, value, playing);
+        pauses += a.Pause;
+        seeks += a.Seek;
+        resumes += a.Resume;
+        if (a.Seek) seekTo = a.SeekTo;
+    };
+    frame(false, 1.0f, true);                                    // просто играет
+    CHECK_EQ(pauses + seeks + resumes, 0);
+    frame(true, 1.5f, true);                                     // схватили
+    for (int i = 0; i < 10; ++i) frame(true, 2.0f + i, false);   // тянут
+    CHECK_EQ(pauses, 1);
+    CHECK_EQ(seeks, 0);                                          // ни одной за время перетаскивания
+    CHECK_NEAR(s.Target, 11.0f, 1e-5f);                          // бегунок показывает, куда тянут
+    frame(false, 11.0f, false);                                  // отпустили
+    CHECK_EQ(seeks, 1);
+    CHECK_NEAR(seekTo, 11.0f, 1e-5f);
+    CHECK_EQ(resumes, 1);                                        // играло — продолжает
+
+    // Остановленный звук не оживает от того, что сдвинули бегунок.
+    pauses = seeks = resumes = 0;
+    frame(true, 3.0f, false);
+    frame(false, 3.0f, false);
+    CHECK_EQ(pauses, 0);
+    CHECK_EQ(seeks, 1);
+    CHECK_EQ(resumes, 0);
+}

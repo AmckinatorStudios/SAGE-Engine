@@ -252,7 +252,7 @@ sage::render::MeshData Triangle() {
 } // namespace
 
 TEST(ModelImport_rotation_turns_z_up_models_upright) {
-    // Z вверх (3ds Max, старый Blender): модель лежит на боку. -90° по X
+    // Z вверх (3ds Max, старые экспортёры): модель лежит на боку. -90° по X
     // ставит её: то, что смотрело вверх по Z, смотрит вверх по Y.
     sage::render::MeshData m = Triangle();
     m.Vertices[0].Position = {0, 0, 2};
@@ -783,7 +783,7 @@ TEST(RHI_null_backend_satisfies_the_contract) {
 //
 // Сущность сцены держит один Mesh, и грузился он через LoadObj — то есть в
 // редакторе нельзя было поставить в сцену НИ ОДНУ модель в glTF, а это формат,
-// в который экспортирует Blender по умолчанию. Класс Model формат понимал, но
+// в который экспортирует 3D-редактор по умолчанию. Класс Model формат понимал, но
 // он не Mesh и в ECS не подключён; выглядело это как «модели не грузятся».
 TEST(ModelLoader_reads_gltf_not_only_obj) {
     const afs::path dir = afs::temp_directory_path() / "sage_gltf_test";

@@ -15,6 +15,7 @@
 #include "sage/render/DebugDraw.h"
 #include "sage/render/DebugLines.h"
 #include "sage/render/GridRenderer.h"
+#include "EditorTools.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/ScenePasses.h"
@@ -132,6 +133,7 @@ public:
     // параметром RenderViewport: тот и так принимает девять аргументов и
     // вызывается в цикле по всем видам раскладки.
     void SetShowBounds(bool show) { m_showBounds = show; }
+    void SetColliderGizmo(const ColliderGizmoStyle& style) { m_colliderGizmo = style; }
 
     // Отладочная графика ИГРЫ (Debug:DrawLine из скриптов). Указатель, а не
     // копия: буфер живёт у системы скриптинга и пуст, пока игра не запущена.
@@ -338,6 +340,7 @@ private:
     // накладывается по нему, а у разных видов раскладки размеры разные.
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
+    ColliderGizmoStyle m_colliderGizmo;
     const sage::render::DebugLines* m_scriptDebug = nullptr;
     // Переливает заказы скриптов в DebugDraw. Одно место на оба вида (вьюпорт и
     // панель Game): две копии этого цикла разошлись бы на первом же новом виде

@@ -456,10 +456,41 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
     // столкновения, и врущее гизмо хуже отсутствующего — по нему принимают
     // решения.
     auto colView = reg.view<ColliderComponent, Transform, IdComponent>();
+    const ColliderGizmoStyle& cg = m_colliderGizmo;
+    // Одна форма — каркасом, заливкой или обоими, как выбрал человек (меню «…»
+    // вьюпорта). Заливка чуть светлее каркаса: иначе при «заливка + линии»
+    // линии тонут в собственной заливке.
+    auto shape = [&](sage::physics::ShapeType type, const glm::mat4& frame, const glm::vec3& half,
+                     float radius, float halfHeight, const glm::vec3& color, float alphaScale) {
+        const glm::vec4 fill(glm::min(color * 1.15f, glm::vec3(1.0f)), cg.FillOpacity * alphaScale);
+        const glm::vec3 center(frame[3]);
+        switch (type) {
+            case sage::physics::ShapeType::Box: {
+                const glm::mat4 box = frame * glm::scale(glm::mat4(1.0f), half * 2.0f);
+                if (cg.DrawFill()) m_debugDraw->SolidBox(box, fill);
+                if (cg.DrawLines()) m_debugDraw->WireBox(box, color);
+                break;
+            }
+            case sage::physics::ShapeType::Sphere:
+                // Шар поворачивать незачем — он от поворота не меняется.
+                if (cg.DrawFill()) m_debugDraw->SolidSphere(center, radius, fill);
+                if (cg.DrawLines()) m_debugDraw->WireSphere(center, radius, color);
+                break;
+            case sage::physics::ShapeType::Capsule:
+                if (cg.DrawFill()) m_debugDraw->SolidCapsule(frame, radius, halfHeight, fill);
+                if (cg.DrawLines()) m_debugDraw->WireCapsule(frame, radius, halfHeight, color);
+                break;
+        }
+    };
     for (auto e : colView) {
         const ColliderComponent& col = colView.get<ColliderComponent>(e);
         bool selected = isSel(colView.get<IdComponent>(e).Id);
+        if (cg.OnlySelected && !selected) continue;
         glm::vec3 color = selected ? glm::vec3(0.3f, 1.0f, 0.4f) : glm::vec3(0.25f, 0.55f, 0.30f);
+        // Зона-триггер — другим цветом: «пропускает сквозь себя» и «стена»
+        // выглядят одинаково только до первого разбора, почему игрок прошёл.
+        if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e); rb && rb->Sensor)
+            color = selected ? glm::vec3(1.0f, 0.78f, 0.25f) : glm::vec3(0.75f, 0.55f, 0.20f);
 
         const glm::mat4 world = scene.WorldMatrix(e);
         const glm::vec3 wpos = glm::vec3(world[3]);
@@ -476,21 +507,11 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         }
         rot[3] = glm::vec4(wpos, 1.0f);
 
-        switch (col.Shape) {
-            case sage::physics::ShapeType::Box:
-                m_debugDraw->WireBox(rot * glm::scale(glm::mat4(1.0f),
-                                                      col.HalfExtents * scale * 2.0f),
-                                     color);
-                break;
-            case sage::physics::ShapeType::Sphere:
-                // Шар поворачивать незачем — он от поворота не меняется.
-                m_debugDraw->WireSphere(wpos, col.Radius * uniform, color);
-                break;
-            case sage::physics::ShapeType::Capsule:
-                m_debugDraw->WireCapsule(rot, col.Radius * uniform, col.HalfHeight * scale.y,
-                                         color);
-                break;
-        }
+        // Одиночная форма — только без частей: с частями физика её поля не
+        // читает, и рисовать её значит показывать форму, которой нет.
+        if (col.Parts.empty())
+            shape(col.Shape, rot, col.HalfExtents * scale, col.Radius * uniform,
+                  col.HalfHeight * scale.y, color, selected ? 1.0f : 0.7f);
 
         // Составная форма: каждая часть в своём локальном смещении и повороте.
         // Без этого у молотка или Т-образной детали гизмо показывало ОДИН ящик
@@ -500,21 +521,8 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
                 rot * glm::translate(glm::mat4(1.0f), p.Offset * scale) *
                 glm::eulerAngleXYZ(glm::radians(p.EulerDeg.x), glm::radians(p.EulerDeg.y),
                                    glm::radians(p.EulerDeg.z));
-            switch (p.Shape) {
-                case sage::physics::ShapeType::Box:
-                    m_debugDraw->WireBox(
-                        partWorld * glm::scale(glm::mat4(1.0f), p.HalfExtents * scale * 2.0f),
-                        color * 0.8f);
-                    break;
-                case sage::physics::ShapeType::Sphere:
-                    m_debugDraw->WireSphere(glm::vec3(partWorld[3]), p.Radius * uniform,
-                                            color * 0.8f);
-                    break;
-                case sage::physics::ShapeType::Capsule:
-                    m_debugDraw->WireCapsule(partWorld, p.Radius * uniform, p.HalfHeight * scale.y,
-                                             color * 0.8f);
-                    break;
-            }
+            shape(p.Shape, partWorld, p.HalfExtents * scale, p.Radius * uniform,
+                  p.HalfHeight * scale.y, color * 0.8f, selected ? 1.0f : 0.7f);
         }
     }
 }
@@ -732,6 +740,14 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         gs.MinorColor = glm::vec3(0.24f, 0.26f, 0.30f);
         gs.MajorColor = glm::vec3(0.38f, 0.41f, 0.47f);
         gs.Opacity = 1.0f;
+        // Оси сетки — теми же чистыми цветами, что гизмо и оси объекта: в
+        // приглушённом виде они на тёмном полу читались как «ещё две серые
+        // линии», и было не понять, где X, а где Z.
+        gs.XAxisColor = glm::vec3(1.00f, 0.22f, 0.22f);
+        gs.ZAxisColor = glm::vec3(0.22f, 0.46f, 1.00f);
+        // Глубину сетка в редакторе НЕ пишет: следом рисуются гизмо, и линии на
+        // её плоскости иначе проигрывают ей тест глубины (см. GridSettings).
+        gs.WriteDepth = false;
         // ДАЛЬНОСТЬ ЗАТУХАНИЯ — от высоты, но с приличным запасом: автоматика
         // шейдера рассчитана на «сетку под ногами», а во вьюпорте по ней
         // выравнивают предметы в десятках метров от камеры, и обрыв в двух

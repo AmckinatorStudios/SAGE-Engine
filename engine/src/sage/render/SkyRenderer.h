@@ -62,7 +62,6 @@ struct SkyCelestials {
     bool Ground = false;
     glm::vec3 GroundColor{0.10f, 0.14f, 0.45f};  // уже с учётом времени суток
     float GroundBlend = 0.05f;
-    int SunShape = 0, MoonShape = 0;             // SkyboxSettings::DiscShape
     float SunBrightness = 6.0f;
     float SunGlow = 1.0f;
     bool MoonPhase = true;
@@ -70,7 +69,6 @@ struct SkyCelestials {
     bool PixelArt = false;                       // картинки светил без сглаживания
     float StarDensity = 1.0f, StarSize = 1.0f;
     bool Clouds = false;
-    int CloudStyle = 0;                          // SkyboxSettings::CloudStyle
     glm::vec3 CloudColor{1.0f};                  // уже с учётом времени суток
     float CloudHeight = 120.0f, CloudScale = 12.0f, CloudCoverage = 0.45f;
     float CloudOpacity = 0.85f, CloudFade = 1500.0f;

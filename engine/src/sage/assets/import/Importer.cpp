@@ -41,7 +41,7 @@ sage::render::MeshData ImportedScene::Flatten() const {
 
     // Порядок групп — по ПЕРВОМУ появлению материала, а не по его номеру:
     // порядок частей в файле — это порядок, в котором их видит человек в
-    // Blender, и слоты материалов в инспекторе должны идти так же.
+    // 3D-редактор, и слоты материалов в инспекторе должны идти так же.
     std::vector<int> order;
     for (const ImportedNode& node : Nodes) {
         if (std::find(order.begin(), order.end(), node.MaterialIndex) == order.end())
@@ -250,9 +250,9 @@ void RegisterBuiltinImporters(ImporterRegistry& registry) {
     registry.Register(".gltf", "glTF 2.0", &ImportGltf);
     registry.Register(".glb", "glTF 2.0 (binary)", &ImportGltf);
     registry.Register(".bbmodel", "Blockbench", &ImportBlockbench);
-    registry.Register(".blend", "Blender", &ImportBlend);
-    // FBX — то, во что по умолчанию экспортируют Blender, Maya, 3ds Max,
-    // Mixamo и любой ассет-стор. Без него «своя модель» чаще всего не
+    registry.Register(".blend", "Blend", &ImportBlend);
+    // FBX — то, во что по умолчанию экспортируют 3D-редакторы, сервисы риггинга
+    // и любой ассет-стор. Без него «своя модель» чаще всего не
     // открывалась вовсе (см. FbxImporter.cpp).
     registry.Register(".fbx", "Autodesk FBX", &ImportFbx);
     registry.Register(".sagemesh", "SAGE mesh", &ImportSageMesh);

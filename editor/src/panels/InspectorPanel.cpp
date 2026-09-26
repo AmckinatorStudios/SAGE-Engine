@@ -262,6 +262,7 @@ InspectorPanel::AssetKind InspectorPanel::ClassifyAsset(const std::filesystem::p
 // мусора в сцене ради проверки, тот ли это выстрел.
 
 void InspectorPanel::StopAudioPreview(EditorHost& host) {
+    m_audioScrub = {};
     if (!m_audioHandle) return;
     if (AudioEngine* audio = host.Audio()) audio->StopSound(m_audioHandle);
     m_audioHandle = 0;
@@ -279,6 +280,7 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
         m_audioPath = path;
         m_audioWave.clear();
         m_audioSeconds = 0.0f;
+        m_audioStartAt = 0.0f;
 
         std::vector<float> samples;
         int rate = 0;
@@ -318,7 +320,9 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
     const bool playing = alive && audio->IsSoundPlaying(m_audioHandle);
     // Доигравший звук отпускаем сам: дескриптор живёт, пока владелец его не
     // снял, и без этого второй «Играть» ничего бы не запустил.
-    if (alive && !playing && !m_audioLoop) StopAudioPreview(host);
+    // Кроме паузы бегунка: её держит сам проигрыватель, и отпустить звук
+    // посреди перетаскивания — значит потерять его при отпускании.
+    if (alive && !playing && !m_audioLoop && !m_audioScrub.Dragging) StopAudioPreview(host);
 
     if (playing) {
         if (EditorIcons::Button("stop", T("Stop"))) StopAudioPreview(host);
@@ -331,6 +335,9 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
             p.Spatial = false;   // слушаем ФАЙЛ, а не источник в сцене
             p.Cat = AudioEngine::Category::Sfx;
             m_audioHandle = audio->Play(path, p);
+            // Бегунок сдвинули у остановленного звука — начинаем оттуда.
+            if (m_audioHandle && m_audioStartAt > 0.0f) audio->SeekSound(m_audioHandle, m_audioStartAt);
+            m_audioStartAt = 0.0f;
             if (!m_audioHandle) {
                 LOG_ERROR("Audio") << "Проигрыватель: звук не запустился — '" << path
                                    << "' (причина строкой выше)";
@@ -352,13 +359,24 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
     const float length = alive && audio->SoundLength(m_audioHandle) > 0.0f
                              ? audio->SoundLength(m_audioHandle)
                              : m_audioSeconds;
-    float position = alive ? audio->SoundPosition(m_audioHandle) : 0.0f;
+    float position = m_audioScrub.Dragging ? m_audioScrub.Target
+                   : alive                  ? audio->SoundPosition(m_audioHandle)
+                                            : m_audioStartAt;
     if (length > 0.0f) {
         ImGui::SetNextItemWidth(-1.0f);
-        // Бегунок ведёт себя как бегунок: тянут — перематываем. Без этого
-        // послушать конец длинного файла можно было бы только дослушав его.
-        if (ImGui::SliderFloat("##audiopos", &position, 0.0f, length, "%.2f s") && alive) {
-            audio->SeekSound(m_audioHandle, position);
+        // Бегунок ведёт себя как в любом проигрывателе: схватили — пауза,
+        // тянут — движется только бегунок, отпустили — одна перемотка и
+        // продолжение. Перемотка в каждом кадре при играющем звуке давала кашу
+        // из обрывков (подробно — sage/audio/AudioScrub.h).
+        ImGui::SliderFloat("##audiopos", &position, 0.0f, length, "%.2f s");
+        const sage::audio::ScrubAction act =
+            sage::audio::StepScrub(m_audioScrub, ImGui::IsItemActive(), position, playing);
+        if (alive) {
+            if (act.Pause) audio->SetSoundPaused(m_audioHandle, true);
+            if (act.Seek) audio->SeekSound(m_audioHandle, act.SeekTo);
+            if (act.Resume) audio->SetSoundPaused(m_audioHandle, false);
+        } else if (act.Seek) {
+            m_audioStartAt = act.SeekTo;
         }
         ImGui::TextDisabled(T("%.2f of %.2f s"), position, length);
     } else {

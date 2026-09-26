@@ -48,6 +48,7 @@ add_executable(sage_tests
     test_project_startscene.cpp
     test_fbx.cpp
     test_audio.cpp
+    test_triggers.cpp
     test_clipfile.cpp
     test_components_mesh_animation.cpp
     test_sky.cpp

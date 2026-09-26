@@ -192,8 +192,6 @@ static json LightingToJson(const LightingEnvironment& lighting) {
         sh["groundColor"] = Vec3ToJson(s.GroundColor);
         sh["nightGroundColor"] = Vec3ToJson(s.NightGroundColor);
         sh["groundBlend"] = s.GroundBlend;
-        sh["sunShape"] = s.SunShape == SkyboxSettings::DiscShape::Square ? "square" : "round";
-        sh["moonShape"] = s.MoonShape == SkyboxSettings::DiscShape::Square ? "square" : "round";
         sh["sunBrightness"] = s.SunBrightness;
         sh["sunGlow"] = s.SunGlow;
         sh["moonPhase"] = s.MoonPhase;
@@ -204,7 +202,6 @@ static json LightingToJson(const LightingEnvironment& lighting) {
         sh["starSize"] = s.StarSize;
         json& cl = j["skybox"]["clouds"];
         cl["enabled"] = s.Clouds;
-        cl["style"] = s.CloudKind == SkyboxSettings::CloudStyle::Soft ? "soft" : "blocky";
         cl["color"] = Vec3ToJson(s.CloudColor);
         cl["nightColor"] = Vec3ToJson(s.NightCloudColor);
         cl["height"] = s.CloudHeight;
@@ -348,10 +345,6 @@ static LightingEnvironment LightingFromJson(const json& root) {
             if (sh.contains("nightGroundColor"))
                 s.NightGroundColor = Vec3FromJson(sh["nightGroundColor"]);
             s.GroundBlend = sh.value("groundBlend", s.GroundBlend);
-            s.SunShape = sh.value("sunShape", std::string("round")) == "square"
-                             ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
-            s.MoonShape = sh.value("moonShape", std::string("round")) == "square"
-                              ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
             s.SunBrightness = sh.value("sunBrightness", s.SunBrightness);
             s.SunGlow = sh.value("sunGlow", s.SunGlow);
             s.MoonPhase = sh.value("moonPhase", s.MoonPhase);
@@ -364,8 +357,6 @@ static LightingEnvironment LightingFromJson(const json& root) {
         if (sj.contains("clouds") && sj["clouds"].is_object()) {
             const json& cl = sj["clouds"];
             s.Clouds = cl.value("enabled", s.Clouds);
-            s.CloudKind = cl.value("style", std::string("blocky")) == "soft"
-                              ? SkyboxSettings::CloudStyle::Soft : SkyboxSettings::CloudStyle::Blocky;
             if (cl.contains("color")) s.CloudColor = Vec3FromJson(cl["color"]);
             if (cl.contains("nightColor")) s.NightCloudColor = Vec3FromJson(cl["nightColor"]);
             s.CloudHeight = cl.value("height", s.CloudHeight);
@@ -489,6 +480,7 @@ static void SaveRigidBody(json& j, const RigidBodyComponent& rb) {
     j["rigidBody"]["restitution"] = rb.Restitution;
     j["rigidBody"]["layer"] = (unsigned)rb.Layer;
     j["rigidBody"]["sensor"] = rb.Sensor;
+    j["rigidBody"]["triggerMask"] = (unsigned)rb.TriggerMask;
 }
 
 static RigidBodyComponent ParseRigidBody(const json& rj) {
@@ -502,6 +494,7 @@ static RigidBodyComponent ParseRigidBody(const json& rj) {
     rb.Restitution = rj.value("restitution", rb.Restitution);
     rb.Layer = rj.value("layer", (unsigned)rb.Layer);
     rb.Sensor = rj.value("sensor", rb.Sensor);
+    rb.TriggerMask = rj.value("triggerMask", (unsigned)rb.TriggerMask);
     return rb;
 }
 

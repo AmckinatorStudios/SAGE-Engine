@@ -1,6 +1,6 @@
 // Импорт FBX. До этого движок открывал .obj/.gltf/.glb/.blend/.bbmodel — то
-// есть всё, кроме формата, в который по умолчанию экспортируют Blender, Maya,
-// 3ds Max, Mixamo и любой ассет-стор. Человек со скачанной моделью упирался в
+// есть всё, кроме формата, в который по умолчанию экспортируют 3D-редактор, Maya,
+// 3ds Max, сервисы риггинга и любой ассет-стор. Человек со скачанной моделью упирался в
 // «формат не поддерживается» и делал вывод, что своя модель движку не нужна.
 //
 // Файлы для проверки собирает tools/make_test_fbx.py: чужой .fbx в репозиторий
@@ -130,7 +130,7 @@ TEST(Fbx_centimetres_are_converted_to_metres) {
 }
 
 TEST(Fbx_z_up_files_are_turned_into_engine_orientation) {
-    // 3ds Max и часть экспортов Blender пишут Z вверх. Без разворота модель
+    // 3ds Max и часть экспортёров пишут Z вверх. Без разворота модель
     // лежит на боку — и это чинят вручную поворотом на 90°, который потом
     // ломает физику и анимацию.
     const std::string flat = MakeFbx("sage_test_cube_y.fbx", "");
@@ -231,7 +231,7 @@ TEST(Fbx_node_transform_places_and_scales_the_mesh) {
 
 // --- СКИН: кости, веса и клип ----------------------------------------------
 //
-// FBX — то, во что экспортируют по умолчанию Blender, Maya, Mixamo и любой
+// FBX — то, во что экспортируют по умолчанию 3D-редакторы, сервисы риггинга и любой
 // ассет-стор, и персонажи оттуда приходят СО СКИНОМ. Пока скин не читался,
 // движок отвечал «не загрузить glTF … parse error» — сообщением о чужом
 // формате, из которого следовал вывод «моя модель движку не подходит».
@@ -313,13 +313,13 @@ TEST(Fbx_with_skin_loads_bones_weights_and_clips) {
     CHECK_NEAR(base.y, 0.0f, 1e-4f);
 }
 
-// Blender пишет Transform кластера ОТНОСИТЕЛЬНО КОСТИ (inverse(TransformLink) *
+// 3D-редактор пишет Transform кластера ОТНОСИТЕЛЬНО КОСТИ (inverse(TransformLink) *
 // мир меша), а не мир меша, как Autodesk. Прочитанный по Autodesk, такой файл
 // умножался на обратную кость дважды: персонаж в позе покоя схлопывался в
 // комок с «лучами» (библиотека анимаций, FBX под другие движки). И клип там
 // назван «Armature|Wave» — для человека и для Play("Wave") это «Wave».
-TEST(Fbx_blender_cluster_transform_keeps_the_rest_pose_in_place) {
-    const std::string path = MakeFbx("sage_test_skin_blender.fbx", "--skin --blender-bind");
+TEST(Fbx_bind_relative_cluster_transform_keeps_the_rest_pose_in_place) {
+    const std::string path = MakeFbx("sage_test_skin_bindrel.fbx", "--skin --bind-relative");
     if (path.empty()) return;
     sage::render::ModelData data;
     std::string err;
@@ -367,13 +367,13 @@ TEST(Preferred_idle_clip_is_the_plainest_one) {
 //  Жёсткие детали на костях и материалы скиновой модели
 //
 //  Обе беды видны на одной жалобе: «модель грузится без текстур и выглядит не
-//  как в Blender». Причин было две, и обе — в скиновом пути FBX.
+//  как в 3D-редакторе». Причин было две, и обе — в скиновом пути FBX.
 //
 //  1. Отбор геометрии шёл по одному признаку — есть ли у неё скин, — и всё
 //     остальное молча выбрасывалось. Но деталь, которая не гнётся (панель,
 //     зуб, глазница, пряжка, инструмент), риггят НЕ весами, а привязкой узла к
 //     кости: это дешевле и точнее. У разбираемой модели (Spring Bonnie из
-//     Blender) со скином 6 геометрий из 98 — в сцену попадали шесть кусков.
+//     3D-редактор) со скином 6 геометрий из 98 — в сцену попадали шесть кусков.
 //  2. Материалы не читались ВООБЩЕ. Цвета в FBX есть всегда (Properties70
 //     материала), статический путь их брал — и одна и та же модель была
 //     цветной в панели ассетов и белой в сцене.
@@ -458,7 +458,7 @@ TEST(Fbx_skin_keeps_rigid_parts_on_bones_and_their_materials) {
 
 // --- Дерево из набора: один меш, два материала, вырез по альфе --------------
 //
-// Так экспортирует Blender ЛЮБОЕ дерево (проверено на Stylized Nature MegaKit):
+// Так экспортирует 3D-редактор ЛЮБОЕ дерево (проверено на Stylized Nature MegaKit):
 // кора и листва — одна геометрия, материал задан на каждой грани
 // (LayerElementMaterial). Импортёр брал один «первый попавшийся» материал на
 // всю геометрию — листва рисовалась корой, сплошными квадратами, и так же
@@ -676,7 +676,7 @@ TEST(Model_probe_tells_skinned_files_from_static_ones) {
 
     // .obj скелета не несёт вовсе — и в разбор glTF его отправлять нельзя.
     const fs::path obj = fs::temp_directory_path() / "sage_test_probe.obj";
-    { std::ofstream f(obj); f << "# Blender\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
+    { std::ofstream f(obj); f << "# 3D-редактор\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
     CHECK_TRUE(!sage::assets::ModelHasSkeleton(obj.string()));
     std::remove(obj.string().c_str());
 }

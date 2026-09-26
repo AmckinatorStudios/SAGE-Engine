@@ -28,6 +28,7 @@
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/ScenePasses.h"
+#include "sage/render/DebugDraw.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
 #include "sage/render/LensFlare.h"
@@ -938,6 +939,92 @@ void TestDecals(FrameRenderer& r) {
     Check(after > before + 500, "наклейка видна в кадре");
 }
 
+// --- Сетка не рвёт гизмо на своей плоскости ---------------------------------
+//
+// В редакторе после сетки рисуются оси выделенного объекта и прочие гизмо. Ось
+// X объекта в начале координат лежит ровно на оси X сетки, и пока сетка писала
+// глубину (да ещё со сдвигом к камере), линия проигрывала ей тест: вместо
+// чистой оси объекта проступала приглушённая ось сетки, а сама линия рвалась.
+// Проверка: зелёная линия по оси X поверх сетки видна, пока сетка глубину не
+// пишет, и пропадает, если пишет (старое поведение редактора).
+void TestGridKeepsGizmoLinesOnItsPlane(FrameRenderer& r) {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    const glm::mat4 view = TestView();
+    const glm::mat4 proj = PerspectiveProj();
+    auto draw = [&](bool writeDepth) {
+        Framebuffer out(kW, kH);
+        out.Bind();
+        device.SetSRGBWrite(false);
+        device.SetClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+        device.Clear(true, true);
+        device.SetDepthTest(true);
+        device.SetDepthWrite(true);
+        sage::render::GridSettings gs;
+        gs.CellSize = 1.0f;
+        gs.WriteDepth = writeDepth;
+        r.Grid.Draw(view, proj, kEye, gs);
+        DebugDraw dd;
+        dd.Line({-40.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+        dd.Flush(view, proj);
+        const Image im = Capture(kW, kH);
+        long long green = 0;
+        for (size_t i = 0; i + 2 < im.Pixels.size(); i += 3) {
+            const int rr = im.Pixels[i], gg = im.Pixels[i + 1], bb = im.Pixels[i + 2];
+            if (gg > 200 && rr < 90 && bb < 90) ++green;
+        }
+        return green;
+    };
+    const long long editor = draw(false);
+    const long long occluding = draw(true);
+    std::printf("       пикселей оси поверх сетки: без записи глубины %lld, с записью %lld\n",
+                editor, occluding);
+    Check(editor > 100, "ось на плоскости сетки видна целиком, сетка её не рвёт");
+    Check(editor > occluding * 2, "именно запись глубины сеткой прятала ось");
+}
+
+// --- Заливка гизмо: объём по нормалям и прозрачность --------------------------
+//
+// Режим «заливка» у гизмо коллайдера обязан давать ОБЪЁМ: видимые грани
+// коробки разной яркости (иначе это плоское пятно, по которому перед от бока не
+// отличить), и оставаться полупрозрачным (иначе закрывает модель, ради которой
+// коллайдер и смотрят).
+void TestSolidGizmoShading(FrameRenderer&) {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    const glm::mat4 view = glm::lookAt(glm::vec3(3.0f, 2.5f, 4.0f), glm::vec3(0.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = PerspectiveProj();
+    auto draw = [&](float alpha) {
+        Framebuffer out(kW, kH);
+        out.Bind();
+        device.SetSRGBWrite(false);
+        device.SetClearColor(0.0f, 0.0f, 1.0f, 1.0f);   // синий фон — видно, просвечивает ли он
+        device.Clear(true, true);
+        device.SetDepthTest(true);
+        DebugDraw dd;
+        dd.SolidBox(glm::scale(glm::mat4(1.0f), glm::vec3(2.0f)), glm::vec4(0.2f, 1.0f, 0.3f, alpha));
+        dd.Flush(view, proj);
+        return Capture(kW, kH);
+    };
+    const Image opaque = draw(1.0f);
+    const Image faint = draw(0.3f);
+    // Яркости зелёного у закрашенных пикселей: у разных граней они обязаны
+    // заметно разойтись.
+    int lo = 255, hi = 0;
+    long long covered = 0, blueThrough = 0;
+    for (size_t i = 0; i + 2 < opaque.Pixels.size(); i += 3) {
+        const int g = opaque.Pixels[i + 1], b = opaque.Pixels[i + 2];
+        if (g < 20 || b > 200) continue;   // фон
+        ++covered;
+        lo = std::min(lo, g);
+        hi = std::max(hi, g);
+        if (faint.Pixels[i + 2] > 80) ++blueThrough;
+    }
+    std::printf("       заливка: покрыто %lld пикселей, зелёный %d..%d, фон просвечивает у %lld\n",
+                covered, lo, hi, blueThrough);
+    Check(covered > 2000, "залитая форма видна");
+    Check(hi - lo > 40, "грани затенены по нормалям по-разному — виден объём");
+    Check(blueThrough > covered * 9 / 10, "полупрозрачная заливка не закрывает то, что за ней");
+}
+
 void TestGrid(FrameRenderer& r, Scene& scene) {
     const glm::mat4 proj = PerspectiveProj();
 
@@ -1465,6 +1552,8 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestTransparentFaceOrder(r, scene);
     TestEmissive(r, scene);
     TestGrid(r, scene);
+    TestGridKeepsGizmoLinesOnItsPlane(r);
+    TestSolidGizmoShading(r);
     TestDecals(r);
     TestObjectMotionBlur(r);
     TestCameraMotionBlurOverSky(r);

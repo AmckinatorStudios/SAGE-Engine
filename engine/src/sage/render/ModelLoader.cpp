@@ -313,7 +313,7 @@ sage::render::MeshData LoadObjData(const std::string& path,
             im.Metallic = m.metallic;
             // Roughness в .mtl есть далеко не всегда, и ноль по умолчанию
             // означал бы зеркало на каждой модели без PBR-полей.
-            // Нет Pr — из блеска Ns по формуле Blender (см. ModelMaterial.cpp).
+            // Нет Pr — из блеска Ns по общепринятой формуле (см. ModelMaterial.cpp).
             im.Roughness = m.roughness > 0.0f
                                ? m.roughness
                                : std::clamp(1.0f - std::sqrt(std::max(m.shininess, 0.0f)) / 30.0f,

@@ -122,7 +122,7 @@ TEST(Clip_survives_reexport_with_reordered_joints) {
 TEST(Clip_reports_bones_it_could_not_find) {
     const Skeleton skel = MakeSkeleton({"Hips", "Spine", "Head"});
     ClipAsset asset = ToAsset(MakeClip(1), skel);
-    asset.Channels[0].Joint = "mixamorig:LeftFoot";   // такой кости здесь нет
+    asset.Channels[0].Joint = "rig:LeftFoot";   // такой кости здесь нет
 
     int missing = -1;
     const AnimationClip bound = Bind(asset, skel, &missing);
@@ -132,8 +132,8 @@ TEST(Clip_reports_bones_it_could_not_find) {
 
 // --- 4. Имя файла годится в имя файла ---------------------------------------
 //
-// Клипы из чужих пакетов зовутся «Armature|Walk» (Blender) и «mixamo.com»
-// (Mixamo). Такое имя нельзя положить на диск как есть.
+// Клипы из чужих пакетов зовутся «Armature|Walk» (3D-редакторы) и «take.001»
+// (сервисы риггинга). Такое имя нельзя положить на диск как есть.
 TEST(Clip_file_name_is_usable_on_disk) {
     CHECK_EQ(ClipFileName("hero", "Walk"), std::string("hero.Walk.sageanim"));
     CHECK_EQ(ClipFileName("hero", "Armature|Walk"), std::string("hero.Armature_Walk.sageanim"));

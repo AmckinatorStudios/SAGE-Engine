@@ -319,7 +319,7 @@ TEST(model_material_resolves_a_project_relative_path) {
 //
 // Это и стоит за жалобой «модель грузится без текстур». В файле четырнадцать
 // материалов с правильными именами — и все белые, без единой карты: так
-// экспортёр glTF выгружает узловые материалы Blender, из которых он понимает
+// экспортёр glTF выгружает узловые материалы 3D-редакторов, из которых он понимает
 // только Principled BSDF. Молчать об этом нельзя: белая модель без объяснения
 // читается как «движок не грузит текстуры», и человек ищет поломку не там.
 TEST(model_material_export_without_maps_and_colours_is_reported) {
@@ -545,7 +545,7 @@ TEST(material_tiling_mode_is_written_as_a_name) {
 }
 
 TEST(model_material_obj_alpha_map_becomes_a_double_sided_cutout) {
-    // map_d — КАРТА прозрачности: так Blender пишет листву, траву и решётки
+    // map_d — КАРТА прозрачности: так 3D-редактор пишет листву, траву и решётки
     // (Stylized Nature MegaKit — у каждого дерева). Она не читалась, и листва
     // приезжала сплошными непрозрачными квадратами.
     const fs::path dir = TempDir("sage_test_modelmat_alphamap");
@@ -605,7 +605,7 @@ TEST(model_material_gltf_uv_matches_the_flipped_textures_of_static_meshes) {
 
 TEST(model_material_obj_shininess_becomes_roughness) {
     // Ns не читался, и любой .obj получал шероховатость 0.5: у совсем матовой
-    // листвы и коры (Ns 0 у Blender) — белёсый блик неба по всей кроне.
+    // листвы и коры (Ns 0 у 3D-редактора) — белёсый блик неба по всей кроне.
     const fs::path dir = TempDir("sage_test_modelmat_ns");
     WriteText(dir / "tree.obj", "mtllib tree.mtl\nusemtl Matte\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
                                 "usemtl Glossy\nf 1 3 2\n");
@@ -667,7 +667,7 @@ TEST(alpha_bleed_gives_transparent_pixels_the_leaf_colour) {
 
 // --- .obj: текстура без Kd — множитель единица -------------------------------
 //
-// Blender не пишет Kd, когда цвет взят из карты, а tinyobj подставляет тогда
+// 3D-редактор не пишет Kd, когда цвет взят из карты, а tinyobj подставляет тогда
 // 0.6. Кора и листва из .obj выходили на 40 % темнее той же модели в glTF.
 TEST(model_material_obj_texture_without_kd_is_not_darkened) {
     const fs::path dir = TempDir("sage_test_modelmat_nokd");
@@ -724,7 +724,7 @@ TEST(model_obj_concave_faces_are_triangulated_inside) {
 
 // --- glTF: старое расширение specular-glossiness ------------------------------
 //
-// Выгрузки Sketchfab и конвертеры из FBX до сих пор пишут материал только в
+// Выгрузки магазинов моделей и конвертеры из FBX до сих пор пишут материал только в
 // KHR_materials_pbrSpecularGlossiness. Не читая его, движок получал материал
 // glTF по умолчанию — белый металл без текстур: модель целиком белая.
 TEST(model_material_gltf_specular_glossiness_becomes_colour_and_texture) {

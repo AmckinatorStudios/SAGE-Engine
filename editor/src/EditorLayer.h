@@ -208,6 +208,7 @@ public:
     // заметку шаблона.
     EditorPlayState GetPlayState() const override { return m_play.State(); }
     bool InPlayMode() const override { return m_play.Active(); }
+    PhysicsScene* PlayPhysics() override { return m_play.Active() ? m_play.Physics() : nullptr; }
     void SyncBodyToTransform(GameObject object) override;
     void StartPlay() override;
     void PausePlay() override { m_play.Pause(); }
