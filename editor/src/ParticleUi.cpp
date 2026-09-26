@@ -631,7 +631,8 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
             changed |= DragF(T("Frame rate"), &fx.FrameRate, 0.2f, 0.0f, 240.0f, "%.1f fps", h);
         changed |= DragI(T("Start frame"), &fx.StartFrame, 0.1f, 0, 4096, h);
         changed |= Check(T("Random start frame"), fx.RandomStartFrame, h);
-        changed |= Check(T("Pixel art (no smoothing)"), fx.PixelArt, h);
+        const char* filtering[] = {T("Smooth"), T("Nearest pixel")};
+        changed |= Combo(T("Filtering"), fx.Filtering, filtering, 2, h);
     }
 
     // --- Отрисовка ---

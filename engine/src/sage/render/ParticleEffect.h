@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/render/TextureFiltering.h"
 #include <string>
 #include <vector>
 
@@ -203,7 +204,7 @@ struct ParticleEffect {
     float Cycles = 1.0f;
     int StartFrame = 0;
     bool RandomStartFrame = false;
-    bool PixelArt = false;             // без сглаживания (пиксельная графика)
+    sage::TextureFiltering Filtering = sage::TextureFiltering::Smooth;  // Nearest — чёткие пиксели
 
     // --- Отрисовка -----------------------------------------------------------
     RenderMode Render = RenderMode::Billboard;

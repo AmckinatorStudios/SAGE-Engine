@@ -949,7 +949,7 @@ TEST(UI2_masks_intersect_and_never_go_negative) {
     CHECK_NEAR(w.w, 92.0f, 1e-4f);
 }
 
-TEST(UI2_canvas_integer_scale_for_pixel_art) {
+TEST(UI2_canvas_integer_scale_keeps_pixels_whole) {
     // Пиксельный интерфейс масштабируется ЦЕЛЫМ числом: при
     // дробном одни пиксели картинки выходят двумя экранными, соседние одним.
     sage::ui::Canvas c;
@@ -2252,7 +2252,7 @@ TEST(ui_image_fit_keeps_the_aspect_and_leaves_margins) {
     using namespace sage::ui;
     // Широкий элемент 200x100 и КВАДРАТНАЯ картинка 64x64.
     const ImagePlacement p = PlaceImage(UIRect{0.0f, 0.0f, 200.0f, 100.0f}, 0.0f, 0.0f, 64.0f,
-                                        64.0f, /*cover=*/false, /*pixelArt=*/false);
+                                        64.0f, /*cover=*/false, /*snapPixels=*/false);
     // Сторона одна: квадрат остался квадратом (растяжение дало бы 200x100).
     CHECK_NEAR(p.Dst.w, 100.0f, 0.51f);
     CHECK_NEAR(p.Dst.h, 100.0f, 0.51f);
@@ -2269,7 +2269,7 @@ TEST(ui_image_cover_fills_the_element_and_crops_the_source) {
     // Тот же элемент 200x100, картинка 64x64: чтобы занять элемент без полей,
     // сверху и снизу придётся отрезать.
     const ImagePlacement p = PlaceImage(UIRect{10.0f, 20.0f, 200.0f, 100.0f}, 0.0f, 0.0f, 64.0f,
-                                        64.0f, /*cover=*/true, /*pixelArt=*/false);
+                                        64.0f, /*cover=*/true, /*snapPixels=*/false);
     // Рисуем во весь элемент — полей нет.
     CHECK_NEAR(p.Dst.x, 10.0f, 1e-3f);
     CHECK_NEAR(p.Dst.y, 20.0f, 1e-3f);
@@ -2287,13 +2287,13 @@ TEST(ui_image_cover_fills_the_element_and_crops_the_source) {
     CHECK_NEAR(p.SrcW / p.SrcH, p.Dst.w / p.Dst.h, 1e-3f);
 }
 
-TEST(ui_image_fit_scales_pixel_art_by_whole_numbers) {
+TEST(ui_image_fit_snaps_to_whole_numbers) {
     using namespace sage::ui;
     // 32x32 в элементе 100x100: дробный масштаб (3.125) растянул бы одни
     // пиксели исходника на четыре экранных, а соседние на три — ровные линии
     // пошли бы ступенями.
     const ImagePlacement p = PlaceImage(UIRect{0.0f, 0.0f, 100.0f, 100.0f}, 0.0f, 0.0f, 32.0f,
-                                        32.0f, /*cover=*/false, /*pixelArt=*/true);
+                                        32.0f, /*cover=*/false, /*snapPixels=*/true);
     CHECK_NEAR(p.Dst.w, 96.0f, 1e-3f);   // ровно 3 экранных пикселя на исходный
     CHECK_NEAR(p.Dst.h, 96.0f, 1e-3f);
 }

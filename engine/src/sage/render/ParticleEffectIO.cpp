@@ -194,7 +194,7 @@ json ToJson(const ParticleEffect& f) {
     j["cycles"] = f.Cycles;
     j["startFrame"] = f.StartFrame;
     j["randomStartFrame"] = f.RandomStartFrame;
-    j["pixelArt"] = f.PixelArt;
+    j["filtering"] = sage::TextureFilteringKey(f.Filtering);
 
     j["render"] = Name(f.Render, kRenders);
     j["blend"] = Name(f.Blend, kBlends);
@@ -317,7 +317,11 @@ ParticleEffect FromJson(const json& j) {
     Get(j, "cycles", f.Cycles);
     Get(j, "startFrame", f.StartFrame);
     Get(j, "randomStartFrame", f.RandomStartFrame);
-    Get(j, "pixelArt", f.PixelArt);
+    // Старые .sagefx писали галку «pixelArt» — она и есть Nearest.
+    if (j.contains("filtering") && j["filtering"].is_string())
+        sage::TextureFilteringFromKey(j["filtering"].get<std::string>(), f.Filtering);
+    else if (j.contains("pixelArt") && j["pixelArt"].is_boolean() && j["pixelArt"].get<bool>())
+        f.Filtering = sage::TextureFiltering::Nearest;
 
     f.Render = Parse(j, "render", f.Render, kRenders);
     f.Blend = Parse(j, "blend", f.Blend, kBlends);

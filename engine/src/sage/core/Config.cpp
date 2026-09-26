@@ -203,7 +203,12 @@ bool EngineConfig::LoadFile(const std::string& path) {
     auto ui = j.value("ui", json::object());
     UiFont = ui.value("font", UiFont);
     UiFontPixelHeight = ui.value("fontPixelHeight", UiFontPixelHeight);
-    UiFontPixelArt = ui.value("fontPixelArt", UiFontPixelArt);
+    // Фильтрация шрифта словом. Старые game.json писали галку «fontPixelArt» —
+    // она и есть Nearest.
+    if (ui.contains("fontFiltering") && ui["fontFiltering"].is_string())
+        sage::TextureFilteringFromKey(ui["fontFiltering"].get<std::string>(), UiFontFiltering);
+    else if (ui.value("fontPixelArt", false))
+        UiFontFiltering = sage::TextureFiltering::Nearest;
 
     // РАЗДЕЛ postProcess ОСТАЛСЯ ТОЛЬКО ПОД ОБЪЁМ И БЛИК. Экспозиция, свечение,
     // цвет, тон-маппинг, виньетка, зерно, SSAO, глубина резкости, смаз, FXAA
@@ -262,7 +267,7 @@ std::string EngineConfig::ToJsonString() const {
     };
     j["ui"] = {
         {"font", UiFont}, {"fontPixelHeight", UiFontPixelHeight},
-        {"fontPixelArt", UiFontPixelArt},
+        {"fontFiltering", sage::TextureFilteringKey(UiFontFiltering)},
     };
     j["postProcess"] = {
         {"volumetrics", Volumetrics}, {"volumetricShafts", VolumetricShafts},

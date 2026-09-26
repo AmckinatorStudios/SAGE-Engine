@@ -393,7 +393,6 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
     shader.SetInt("uRoughnessMap", 4);
     shader.SetInt("uAOMap", 5);
     shader.SetInt("uEmissiveMap", kEmissiveUnit);
-    shader.SetVec2("uUVScale", glm::vec2(1.0f));  // повтор развёртки задаёт файл модели
     // Сдвиг ставится ЯВНО нулём: uniform живёт в программе, а не в вызове, и
     // оставленный от прошлого материала сдвиг уехал бы на персонажа.
     shader.SetVec2("uUVOffset", glm::vec2(0.0f));
@@ -1457,7 +1456,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     auto makeTexture = [](const ModelImage& img, bool srgb) {
         // Палитра — тот же атлас: мип-уровни усредняют её целиком, а у
         // палитровой модели 90% текстуры пусто, и на дальних уровнях от цвета
-        // не остаётся ничего. Мелкие текстуры (палитры, пиксель-арт) берём
+        // не остаётся ничего. Мелкие текстуры (палитры, рисунки по пикселям) берём
         // ближайшим соседом и без мипов; крупные — как раньше.
         const bool palette = img.Width <= 128 && img.Height <= 128;
         return std::make_shared<Texture>(img.Pixels.data(), img.Width, img.Height,

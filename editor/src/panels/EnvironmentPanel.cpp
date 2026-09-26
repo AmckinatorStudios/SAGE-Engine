@@ -227,9 +227,15 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
                 if (ImGui::Checkbox(T("Moon phase"), &sky.MoonPhase)) host.PushUndoSnapshot();
                 DrawDiscTexture(host, "moon_tex", T("Moon picture"), sky.MoonTexture, -5);
             }
-            if (ImGui::Checkbox(T("Pixel art"), &sky.PixelArt)) host.PushUndoSnapshot();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Sun and moon pictures without smoothing — crisp pixels."));
+            {
+                const char* filtering[] = {T("Smooth"), T("Nearest pixel")};
+                int f = (int)sky.Filtering;
+                if (ImGui::Combo(T("Filtering"), &f, filtering, 2)) {
+                    sky.Filtering = (sage::TextureFiltering)f;
+                    host.PushUndoSnapshot();
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("How the sun and moon pictures are filtered: nearest pixel keeps them crisp."));
             }
             ImGui::DragFloat(T("Stars"), &sky.StarIntensity, 0.02f, 0.0f, 3.0f, "%.2f");
             host.TrackLastImGuiItem();

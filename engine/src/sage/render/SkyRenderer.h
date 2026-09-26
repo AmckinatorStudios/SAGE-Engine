@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/render/TextureFiltering.h"
 #include <memory>
 #include <string>
 #include <glm/glm.hpp>
@@ -66,7 +67,7 @@ struct SkyCelestials {
     float SunGlow = 1.0f;
     bool MoonPhase = true;
     std::string SunTexture, MoonTexture;         // пусто — диск формой
-    bool PixelArt = false;                       // картинки светил без сглаживания
+    sage::TextureFiltering Filtering = sage::TextureFiltering::Smooth;  // картинок светил
     float StarDensity = 1.0f, StarSize = 1.0f;
     bool Clouds = false;
     glm::vec3 CloudColor{1.0f};                  // уже с учётом времени суток

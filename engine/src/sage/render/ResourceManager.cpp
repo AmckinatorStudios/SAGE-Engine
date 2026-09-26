@@ -740,12 +740,17 @@ std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& pat
 // Почему именно карты материала, а не все текстуры подряд: анизотропия имеет
 // смысл там, где поверхность видна ПОД УГЛОМ и сжата сильнее по одной оси, —
 // это пол, стены, дорога. Картинки интерфейса всегда фронтальны, и платить за
-// них нечем и незачем; пиксель-арт и вовсе грузится Nearest без мипмапов.
+// них нечем и незачем.
 //
 // Карта без расширения получает трилинейную фильтрацию сама (см.
 // EffectiveFilter в Texture.cpp) — запрос не отказывает, а опускается.
+//
+// Фильтрация «ближайший пиксель» (MaterialRender::Filter) — Nearest С
+// мипмапами: вблизи чёткие квадраты, вдали — уменьшенные копии, а не рябь.
 void ResourceManager::ResolveMaterialTextures(Material& m) {
-    constexpr TextureFilter kSurface = TextureFilter::Anisotropic;
+    const TextureFilter kSurface = m.Render.Filter == MaterialRender::Filtering::Nearest
+                                       ? TextureFilter::Nearest
+                                       : TextureFilter::Anisotropic;
     // Цвет под прозрачностью правится только у карты, которую материал режет
     // по альфе (см. AlphaBleed.h): у остальных альфа значит что-то своё.
     const bool cutout = m.Render.AlphaCutoff > 0.0f;
@@ -764,6 +769,7 @@ void ResourceManager::ResolveMaterialTextures(Material& m) {
     m.EmissiveTex = get(m.EmissiveMap, false, true);
     m.TexturesFrom = PathsOf(m);
     m.TexturesCutout = cutout;
+    m.TexturesFilter = m.Render.Filter;
 }
 
 // Слепок путей к картам — по нему видно, что указатели устарели.
@@ -781,7 +787,8 @@ Material::ResolvedFrom ResourceManager::PathsOf(const Material& m) {
 bool ResourceManager::RefreshMaterialTextures(Material& m) {
     // Включили или сняли вырез — карта альбедо нужна другая (с цветом под
     // прозрачностью или без), хотя пути не менялись.
-    if (m.TexturesFrom == PathsOf(m) && m.TexturesCutout == (m.Render.AlphaCutoff > 0.0f))
+    if (m.TexturesFrom == PathsOf(m) && m.TexturesCutout == (m.Render.AlphaCutoff > 0.0f) &&
+        m.TexturesFilter == m.Render.Filter)
         return false;
     ResolveMaterialTextures(m);
     return true;

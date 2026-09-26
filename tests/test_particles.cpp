@@ -396,7 +396,7 @@ TEST(Particles_effect_survives_json_round_trip) {
     f.Collision = CollisionMode::World;
     f.Frames = {"assets/fx/s_0.png", "assets/fx/s_1.png"};
     f.Flipbook = FlipbookMode::Random;
-    f.PixelArt = true;
+    f.Filtering = sage::TextureFiltering::Nearest;
     f.Render = RenderMode::Trail;
     f.Blend = BlendMode::Additive;
     f.TrailWidth = Curve::Linear(1.0f, 0.0f);
@@ -417,7 +417,7 @@ TEST(Particles_effect_survives_json_round_trip) {
     CHECK_TRUE(back.Collision == CollisionMode::World);
     CHECK_EQ((int)back.Frames.size(), 2);
     CHECK_TRUE(back.Flipbook == FlipbookMode::Random);
-    CHECK_TRUE(back.PixelArt);
+    CHECK_TRUE(back.Filtering == sage::TextureFiltering::Nearest);
     CHECK_TRUE(back.Render == RenderMode::Trail);
     CHECK_TRUE(back.Blend == BlendMode::Additive);
     CHECK_EQ((int)back.SubEmitters.size(), 1);
@@ -433,6 +433,20 @@ TEST(Particles_effect_survives_json_round_trip) {
 }
 
 // --- 14. Старая сцена: прежний эмиттер открывается и выглядит как раньше -------------------
+// Старый .sagefx с галкой «pixelArt» открывается с фильтрацией «ближайший
+// пиксель», а новый пишет слово «filtering» — жанра в файле больше нет.
+TEST(Particles_old_pixel_flag_reads_as_nearest_filtering) {
+    ParticleEffect f;
+    nlohmann::json j = nlohmann::json::parse(EffectToJson(f));
+    CHECK_EQ(j.value("filtering", std::string()), std::string("smooth"));
+    CHECK_FALSE(j.contains("pixelArt"));
+    j.erase("filtering");
+    j["pixelArt"] = true;
+    ParticleEffect back;
+    CHECK_TRUE(EffectFromJson(j.dump(), back));
+    CHECK_TRUE(back.Filtering == sage::TextureFiltering::Nearest);
+}
+
 TEST(Particles_old_scene_emitter_is_migrated) {
     Scene scene("old");
     GameObject obj = scene.CreateObject("Old");

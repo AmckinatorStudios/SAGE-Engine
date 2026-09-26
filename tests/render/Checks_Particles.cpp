@@ -130,7 +130,7 @@ void TestTextureAndFlipbookFrames(const fs::path& dir) {
         e.Frames = frames;
         e.Flipbook = FlipbookMode::Fixed;
         e.StartFrame = k;
-        e.PixelArt = true;
+        e.Filtering = sage::TextureFiltering::Nearest;
         s.Burst(e, glm::vec3(0.0f), 1);
         const glm::ivec3 got = At(Shoot(s), W / 2, H / 2);
         const glm::ivec3 want(colors[k].r, colors[k].g, colors[k].b);
@@ -254,7 +254,7 @@ void ShootPack(const fs::path& pack, const fs::path& shots) {
     if (!sequence("big_smoke_").empty()) {
         ParticleEffect f;
         f.Frames = sequence("big_smoke_");
-        f.PixelArt = true;
+        f.Filtering = sage::TextureFiltering::Nearest;
         f.RateOverTime = 25.0f;
         f.Shape = EmitShape::Cone;
         f.Radius = 0.3f;
@@ -279,7 +279,7 @@ void ShootPack(const fs::path& pack, const fs::path& shots) {
     if (has("flame.png")) {
         ParticleEffect f;
         f.Texture = path("flame.png");
-        f.PixelArt = true;
+        f.Filtering = sage::TextureFiltering::Nearest;
         f.RateOverTime = 40.0f;
         f.Shape = EmitShape::Circle;
         f.Radius = 0.35f;
@@ -299,7 +299,7 @@ void ShootPack(const fs::path& pack, const fs::path& shots) {
     if (!sequence("spark_").empty() || !sequence("generic_").empty()) {
         ParticleEffect f;
         f.Frames = !sequence("spark_").empty() ? sequence("spark_") : sequence("generic_");
-        f.PixelArt = true;
+        f.Filtering = sage::TextureFiltering::Nearest;
         f.RateOverTime = 0.0f;
         f.Duration = 1.0f;
         f.Bursts.push_back({0.0f, 60, 80, 0, 1.0f});
@@ -320,7 +320,7 @@ void ShootPack(const fs::path& pack, const fs::path& shots) {
     if (has("bubble.png")) {
         ParticleEffect f;
         f.Texture = path("bubble.png");
-        f.PixelArt = true;
+        f.Filtering = sage::TextureFiltering::Nearest;
         f.RateOverTime = 15.0f;
         f.Shape = EmitShape::Box;
         f.BoxSize = {3.0f, 0.1f, 1.0f};
@@ -335,7 +335,7 @@ void ShootPack(const fs::path& pack, const fs::path& shots) {
     if (has("drip_fall.png")) {
         ParticleEffect f;   // дождь: коробка над сценой, вытянутые капли, отскок от земли
         f.Texture = path("drip_fall.png");
-        f.PixelArt = true;
+        f.Filtering = sage::TextureFiltering::Nearest;
         f.RateOverTime = 300.0f;
         f.Shape = EmitShape::Box;
         f.BoxSize = {8.0f, 0.1f, 4.0f};

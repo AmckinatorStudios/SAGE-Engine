@@ -482,6 +482,58 @@ void TestAlbedoMapAndTiling(FrameRenderer& r) {
     Check(diff > 3.0, "сдвиг развёртки (UVOffset) доходит до шейдера");
     material->Render.UVOffsetX = 0.0f;
 
+    // --- ПО РАЗМЕРУ ОБЪЕКТА НА КУБЕ: ПАРА ОСЕЙ У КАЖДОЙ ГРАНИ СВОЯ ----------
+    // Ящик 2 x 2 x 6 при «плитке на два метра»: лицевая грань (+Z) — 2 x 2
+    // метра, то есть ОДНА плитка, ровно как постоянный повтор 1 x 1. Прежде
+    // одна пара осей на весь объект («два больших измерения» — Y и Z) давала
+    // этой грани 1 x 3 плитки: на кубе правильно выглядела лишь одна сторона.
+    // Кромки считаются в пятне ЭТОЙ грани (её середина, спроецированная той
+    // же камерой), а не по кадру: верх и бок у ящика другого размера.
+    ball.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    ball.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    ball.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+    ball.GetTransform().Scale = {2.0f, 2.0f, 6.0f};
+    const glm::mat4 vp = PerspectiveProj() * TestView();
+    auto toScreen = [&](glm::vec3 p) {
+        const glm::vec4 c = vp * glm::vec4(p, 1.0f);
+        return glm::vec2((c.x / c.w * 0.5f + 0.5f) * kW, (0.5f - c.y / c.w * 0.5f) * kH);
+    };
+    glm::vec2 lo(1e9f), hi(-1e9f);
+    for (float x : {-0.6f, 0.6f})
+        for (float y : {0.4f, 1.6f}) {
+            const glm::vec2 q = toScreen({x, y, 3.0f});
+            lo = glm::min(lo, q);
+            hi = glm::max(hi, q);
+        }
+    auto faceEdges = [&](const Image& img) {
+        long long sum = 0;
+        long n = 0;
+        const int x0 = std::max(1, (int)lo.x), x1 = std::min(img.Width - 1, (int)hi.x);
+        const int y0 = std::max(1, (int)lo.y), y1 = std::min(img.Height - 1, (int)hi.y);
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x) {
+                const size_t i = ((size_t)y * img.Width + x) * 3;
+                sum += std::abs((int)img.Pixels[i] - (int)img.Pixels[i - 3]);
+                sum += std::abs((int)img.Pixels[i] - (int)img.Pixels[i - (size_t)img.Width * 3]);
+                ++n;
+            }
+        return n ? (double)sum / (double)n : 0.0;
+    };
+    material->Render.Tiling = MaterialRender::TilingMode::Separate;
+    material->Render.UVScaleX = material->Render.UVScaleY = 1.0f;
+    const double eFaceOne = faceEdges(Shot(r, *scene));
+    material->Render.UVScaleY = 3.0f;
+    const double eFaceThree = faceEdges(Shot(r, *scene));
+    material->Render.Tiling = MaterialRender::TilingMode::WorldSize;
+    material->Render.UVScaleX = material->Render.UVScaleY = 0.5f;
+    const double eFaceWorld = faceEdges(Shot(r, *scene));
+    std::printf("       кромок на грани 2x2 ящика 2x2x6: по размеру %.2f, 1x1 %.2f, 1x3 %.2f\n",
+                eFaceWorld, eFaceOne, eFaceThree);
+    Check(eFaceThree > eFaceOne * 1.3, "пятно грани различает число плиток");
+    Check(std::fabs(eFaceWorld - eFaceOne) < std::fabs(eFaceWorld - eFaceThree),
+          "режим «по размеру» считает повтор по грани, а не по всему объекту");
+    material->Render.Tiling = MaterialRender::TilingMode::Separate;
+
     ResourceManager::Instance().Clear();
     fs::remove_all(dir, ec);
 }

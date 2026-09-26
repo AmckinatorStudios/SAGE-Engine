@@ -233,6 +233,17 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
                     T("Ambient occlusion, channel R. Empty means AO = 1."));
 
+    // ФИЛЬТРАЦИЯ — сразу под картами: решают её, глядя на картинку (чёткие
+    // пиксели или сглаживание), а не на поведение рендера. Подписи и ключи —
+    // из той же таблицы, что пишет файл (MaterialRenderFields).
+    for (const MaterialRenderField& f : MaterialRenderFields()) {
+        if (std::strcmp(f.Key, "filtering") != 0 || !f.GetEnum || !f.SetEnum) continue;
+        int value = f.GetEnum(material->Render);
+        if (ImGui::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount))
+            f.SetEnum(material->Render, value);
+        if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
+    }
+
     // ПОВТОР ТЕКСТУРЫ («тайлинг») — ЗДЕСЬ, среди карт, а не в поведении рендера.
     // Настраивают его, глядя на текстуру: пол в сто метров с одной растянутой
     // плиткой — это вопрос к карте, а не к тому, как рисуются грани. Какие
@@ -274,7 +285,7 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
               "Without it a picture on a large object is stretched over its whole length."));
         }
         if (material->Render.Tiling == Mode::WorldSize)
-            EditorTheme::Hint(T("Repeats per metre of the object's two larger sides."));
+            EditorTheme::Hint(T("Repeats per metre of each face: a 4 x 1 x 2 box gets 4 x 1 tiles in front and 2 x 1 on the side."));
 
         float offset[2] = {material->Render.UVOffsetX, material->Render.UVOffsetY};
         if (ImGui::DragFloat2(T("Offset"), offset, 0.01f, -64.0f, 64.0f, "%.3f")) {

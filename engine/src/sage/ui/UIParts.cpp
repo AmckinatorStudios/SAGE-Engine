@@ -79,7 +79,12 @@ const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Re
 
 // Фильтрация — общий список на картинку и на шрифт: настройка одна и та же,
 // и два разных набора подписей для неё разошлись бы на первой же правке.
-const char* const kImageFilterNames[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest")};
+const char* const kImageFilterNames[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest pixel")};
+
+// Подсказка к числу повторов — одна на картинку и на вид.
+const char* const kRepeatTip =
+    "How many copies across and down. A fraction cuts the last copy.\n"
+    "0 on an axis — the picture at its own size (source pixel size).";
 
 // Режимы картинки. Имена — про то, ЧТО СТАНЕТ С КАРТИНКОЙ, а не про
 // механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
@@ -100,6 +105,7 @@ struct PictureParams {
     NineSlice Slice;              // для девятины
     float PixelScale = 0.0f;
     bool SnapPixels = false;
+    glm::vec2 Repeat{0.0f, 0.0f};   // замощение: копий по осям, 0 — своим размером
 };
 
 void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float canvasScale,
@@ -110,6 +116,17 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
 
     // РЕЖИМ РЕШАЕТ, ЧЕМ РИСОВАТЬ: девятина и замощение — нарезкой, остальное
     // одним квадом.
+    // Замощение с заданным числом копий — плитка из доли элемента, по осям
+    // отдельно; одна пиксельная шкала девятины такое не выражает.
+    if (mode == Image::Mode::Tile && (p.Repeat.x > 0.0f || p.Repeat.y > 0.0f)) {
+        const float srcW = src.Whole() ? (float)p.Tex->Width() : src.W;
+        const float srcH = src.Whole() ? (float)p.Tex->Height() : src.H;
+        float tileW = 0.0f, tileH = 0.0f;
+        TileSize(srcW, srcH, p.Repeat.x, p.Repeat.y, r.w, r.h,
+                 SlicedPixelScale(p.PixelScale, p.SnapPixels, canvasScale), tileW, tileH);
+        ui.ImageTiled(r.x, r.y, r.w, r.h, p.Tex, src, tileW, tileH, rgb, alpha);
+        return;
+    }
     if (mode == Image::Mode::NineSlice || mode == Image::Mode::Tile) {
         NineSlice slice = p.Slice;
         if (mode == Image::Mode::Tile) {
@@ -217,6 +234,7 @@ void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, g
         p.Slice = look.Slice();
         p.PixelScale = look.PixelScale;
         p.SnapPixels = look.SnapPixels;
+        p.Repeat = look.Repeat;
         DrawPicture(ui, p, r, c.Scale, rgb, alpha);
         return;
     }
@@ -406,6 +424,8 @@ const std::vector<PartField>& LookFieldTable() {
              offsetof(Look, SliceDrawCenter), 0.0f, 1.0f,
              "An outline frame has no middle — what is under it shows through.", nullptr, 0,
              PartField::Widget::Auto, "fit", (int)Image::Mode::NineSlice},
+            {"repeat", SAGE_UI_TEXT("Repeat count"), PartField::Kind::Vec2, offsetof(Look, Repeat), 0.0f,
+             256.0f, kRepeatTip, nullptr, 0, PartField::Widget::Auto, "fit", (int)Image::Mode::Tile},
             {"pixelScale", SAGE_UI_TEXT("Source pixel size"), PartField::Kind::Float,
              offsetof(Look, PixelScale), 0.0f, 16.0f,
              "How many interface pixels one pixel of the file takes.\n"
@@ -436,7 +456,7 @@ const std::vector<PartField>& LookFieldTable() {
         // Основное у вида — цвет, картинка, как она ложится, нарезка и
         // скругление. Остальное трогают редко.
         MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
-                         "snapPixels", "filter", "gradient", "borderThickness", "borderColor",
+                         "snapPixels", "gradient", "borderThickness", "borderColor",
                          "shadowSize", "shadowColor"});
         // В оформлении движка у вида только цвет: форму, рамку, тень и
         // картинку задаёт движок.
@@ -582,6 +602,8 @@ const std::vector<PartField>& ImageFields() {
              offsetof(Image, SliceDrawCenter), 0.0f, 1.0f,
              "An outline frame has no middle — what is under it shows through.", nullptr, 0,
              PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
+            {"repeat", SAGE_UI_TEXT("Repeat count"), PartField::Kind::Vec2, offsetof(Image, Repeat), 0.0f,
+             256.0f, kRepeatTip, nullptr, 0, PartField::Widget::Auto, "mode", (int)Image::Mode::Tile},
             {"pixelScale", SAGE_UI_TEXT("Source pixel size"), PartField::Kind::Float,
              offsetof(Image, PixelScale), 0.0f, 16.0f,
              "How many interface pixels one pixel of the file takes.\n"
@@ -605,8 +627,11 @@ const std::vector<PartField>& ImageFields() {
         };
         v[v.size() - 1].Hidden = true;
         v[v.size() - 2].Hidden = true;
+        // Фильтрация — НА ВИДУ: чёткие пиксели или сглаживание решают, глядя
+        // на картинку, и прятать этот выбор в «Ещё настройки» значило, что
+        // его не находили.
         MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
-                         "snapPixels", "filter"});
+                         "snapPixels"});
         return v;
     }();
     return f;
@@ -643,6 +668,7 @@ void DrawImagePart(const PartDrawContext& c) {
     p.Slice = img.Slice();
     p.PixelScale = img.PixelScale;
     p.SnapPixels = img.SnapPixels;
+    p.Repeat = img.Repeat;
     DrawPicture(ui, p, r, c.Scale, rgb, alpha);
 }
 
@@ -1310,7 +1336,7 @@ const std::vector<PartField>& ScrollFields() {
 }
 
 const char* const kCanvasScale[] = {SAGE_UI_TEXT("Pixels"), SAGE_UI_TEXT("Scale to reference"),
-                                    SAGE_UI_TEXT("Whole-number scale (pixel art)")};
+                                    SAGE_UI_TEXT("Whole-number scale")};
 
 const std::vector<PartField>& CanvasFields() {
     static const std::vector<PartField> f = {
@@ -1358,7 +1384,7 @@ void RegisterBuiltins() {
 
     PartType image = MakePart<Image>("image", SAGE_UI_TEXT("Image"), 20, &ImageFields(), DrawImagePart);
     image.Icon = "texture";
-    image.Hint = SAGE_UI_TEXT("A file, a piece of a sprite sheet, 9-slice, pixel art");
+    image.Hint = SAGE_UI_TEXT("A file, a piece of a sprite sheet, 9-slice, tiling");
     RegisterPart(image);
 
     PartType bar = MakePart<Bar>("bar", SAGE_UI_TEXT("Bar"), 30, &BarFields(), DrawBarPart);

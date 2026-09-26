@@ -24,7 +24,7 @@ FitRect Fit(const ImVec2& a, const ImVec2& b, int w, int h) {
     // означать в обложке одно, а в элементе другое.
     const sage::ui::ImagePlacement p =
         sage::ui::PlaceImage(sage::ui::UIRect{a.x, a.y, boxW, boxH}, 0.0f, 0.0f, (float)w, (float)h,
-                             /*cover=*/false, /*pixelArt=*/false);
+                             /*cover=*/false, /*snapPixels=*/false);
     return {ImVec2(p.Dst.x, p.Dst.y), ImVec2(p.Dst.x + p.Dst.w, p.Dst.y + p.Dst.h)};
 }
 

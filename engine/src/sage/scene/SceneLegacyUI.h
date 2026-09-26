@@ -62,7 +62,7 @@ struct LegacyElement {
     glm::vec4 Sprite{0.0f, 0.0f, 0.0f, 0.0f};
     glm::vec4 SliceBorder{0.0f, 0.0f, 0.0f, 0.0f};
     float PixelScale = 0.0f;
-    bool PixelArt = false;
+    bool Nearest = false;   // старый ключ «pixelArt»: резкая фильтрация
     glm::vec4 SpriteHover{0.0f, 0.0f, 0.0f, 0.0f};
     glm::vec4 SpritePressed{0.0f, 0.0f, 0.0f, 0.0f};
 

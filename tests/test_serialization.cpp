@@ -50,6 +50,32 @@ TEST(Config_ignores_post_process_keys_from_old_files) {
     std::remove(path.c_str());
 }
 
+// ФИЛЬТРАЦИЯ ШРИФТА — СЛОВОМ, а старая галка «fontPixelArt» читается как
+// «ближайший пиксель»: игра с пиксельным шрифтом не должна после обновления
+// получить мыльные буквы.
+TEST(Config_font_filtering_is_a_word_and_old_flag_still_reads) {
+    const std::string oldPath = TempPath("config_old_font.json");
+    {
+        std::ofstream f(oldPath);
+        f << R"({"ui":{"font":"f.ttf","fontPixelArt":true}})";
+    }
+    sage::EngineConfig old;
+    CHECK_TRUE(old.LoadFile(oldPath));
+    CHECK_TRUE(old.UiFontFiltering == sage::TextureFiltering::Nearest);
+    std::remove(oldPath.c_str());
+
+    const std::string path = TempPath("config_font.json");
+    CHECK_TRUE(old.SaveFile(path));
+    std::ifstream in(path);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK_TRUE(text.find("fontFiltering") != std::string::npos);
+    CHECK_TRUE(text.find("PixelArt") == std::string::npos);
+    sage::EngineConfig back;
+    CHECK_TRUE(back.LoadFile(path));
+    CHECK_TRUE(back.UiFontFiltering == sage::TextureFiltering::Nearest);
+    std::remove(path.c_str());
+}
+
 TEST(Config_save_load_roundtrip) {
     sage::EngineConfig out;
     out.Width = 1920;
@@ -243,7 +269,7 @@ TEST(Scene_roundtrip_preserves_sky_shape_and_clouds) {
     s.MoonPhase = false;
     s.SunTexture = "textures/sun.png";
     s.MoonTexture = "textures/moon.png";
-    s.PixelArt = true;
+    s.Filtering = sage::TextureFiltering::Nearest;
     s.StarDensity = 3.0f;
     s.StarSize = 2.0f;
     s.Clouds = true;
@@ -268,7 +294,7 @@ TEST(Scene_roundtrip_preserves_sky_shape_and_clouds) {
     CHECK_FALSE(g.MoonPhase);
     CHECK_EQ(g.SunTexture, std::string("textures/sun.png"));
     CHECK_EQ(g.MoonTexture, std::string("textures/moon.png"));
-    CHECK_TRUE(g.PixelArt);
+    CHECK_TRUE(g.Filtering == sage::TextureFiltering::Nearest);
     CHECK_NEAR(g.StarDensity, 3.0f, 1e-5f);
     CHECK_NEAR(g.StarSize, 2.0f, 1e-5f);
     CHECK_TRUE(g.Clouds);
@@ -296,6 +322,21 @@ TEST(Scene_old_sky_without_shape_keeps_defaults) {
     CHECK_NEAR(g.HorizonSoftness, def.HorizonSoftness, 1e-6f);
     CHECK_FALSE(g.Ground);
     CHECK_FALSE(g.Clouds);
+}
+
+// Небо: фильтрация картинок светил пишется словом, а сцена прежней версии с
+// галкой «pixelArt» открывается с резкими светилами, как и выглядела.
+TEST(Scene_sky_filtering_is_a_word_and_old_pixel_flag_still_reads) {
+    Scene scene("SkyFilter");
+    scene.Lighting.Skybox.Enabled = true;
+    nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    nlohmann::json& shape = j["lighting"]["skybox"]["shape"];
+    CHECK_EQ(shape.value("filtering", std::string()), std::string("smooth"));
+    CHECK_FALSE(shape.contains("pixelArt"));
+    shape.erase("filtering");
+    shape["pixelArt"] = true;
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(j.dump());
+    CHECK_TRUE(loaded->Lighting.Skybox.Filtering == sage::TextureFiltering::Nearest);
 }
 
 TEST(Scene_roundtrip_preserves_parent_hierarchy) {
@@ -1244,7 +1285,7 @@ TEST(Scene_migration_unhides_folders) {
     CHECK_TRUE(j["objects"][2].value("hidden", false));
 }
 
-TEST(Scene_migration_turns_pixel_art_into_nearest_filtering) {
+TEST(Scene_migration_turns_old_pixel_flag_into_nearest_filtering) {
     // «Пиксель-арт» был галкой у картинки и у шрифта — то есть настройка
     // называлась ЖАНРОМ, а движок про жанр ничего не знает: он знает, брать
     // ближайшего соседа или сглаживание. Вчерашняя сцена обязана открыться с

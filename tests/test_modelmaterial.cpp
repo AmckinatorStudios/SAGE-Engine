@@ -14,7 +14,9 @@
 #include "sage/render/Material.h"
 #include "sage/ecs/RenderComponents.h"
 #include "sage/render/ModelLoader.h"
+#include "sage/render/MeshData.h"
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -467,9 +469,8 @@ TEST(model_material_obj_dissolve_becomes_blending) {
 //  большом объекте растянута на всю его длину, а с постоянным повтором
 //  растягивается заново при каждом изменении РАЗМЕРА объекта: тот же пол,
 //  растянутый с 5 до 50 метров, снова показывает одну плитку на всю длину.
-//  Арифметика режима вынесена отдельно (TilingFactor) и проверяется числами,
-//  без видеокарты: подставляют её три разных прохода отрисовки, и разойтись
-//  им нельзя.
+//  Арифметика режима вынесена отдельно (TilingFactor — копия шейдерной
+//  TiledUV) и проверяется числами, без видеокарты.
 // ============================================================================
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -478,14 +479,14 @@ TEST(material_uniform_tiling_uses_one_number_for_both_axes) {
     r.Tiling = MaterialRender::TilingMode::Uniform;
     r.UVScaleX = 6.0f;
     r.UVScaleY = 2.0f;   // второе число режим не трогает...
-    const glm::vec2 f = TilingFactor(r, glm::vec3(1.0f));
+    const glm::vec2 f = TilingFactor(r, glm::vec3(1.0f), glm::vec3(0, 1, 0));
     CHECK_NEAR(f.x, 6.0f, 1e-4f);
     CHECK_NEAR(f.y, 6.0f, 1e-4f);
 
     // ...и оно сохраняется: вернувшись к режиму «по осям», человек получает
     // подобранную пару, а не единицу.
     r.Tiling = MaterialRender::TilingMode::Separate;
-    const glm::vec2 s = TilingFactor(r, glm::vec3(1.0f));
+    const glm::vec2 s = TilingFactor(r, glm::vec3(1.0f), glm::vec3(0, 1, 0));
     CHECK_NEAR(s.x, 6.0f, 1e-4f);
     CHECK_NEAR(s.y, 2.0f, 1e-4f);
 }
@@ -496,29 +497,79 @@ TEST(material_world_size_tiling_keeps_the_tile_the_same_size) {
     r.UVScaleX = 0.5f;   // пол-плитки на метр
     r.UVScaleY = 0.5f;
 
-    // Пол 10 x 10 метров толщиной 0.2 — большие измерения X и Z.
-    const glm::vec2 floor = TilingFactor(r, glm::vec3(10.0f, 0.2f, 10.0f));
+    const glm::vec3 up(0, 1, 0), front(0, 0, 1);
+    // Пол 10 x 10 метров толщиной 0.2: верхняя грань тянется по X и Z.
+    const glm::vec2 floor = TilingFactor(r, glm::vec3(10.0f, 0.2f, 10.0f), up);
     CHECK_NEAR(floor.x, 5.0f, 1e-4f);
     CHECK_NEAR(floor.y, 5.0f, 1e-4f);
 
     // Растянули пол вдвое — плитка осталась того же физического размера,
     // то есть повторов стало вдвое больше. Ровно этого и нет у постоянного
     // повтора: там растяжение объекта растягивает и рисунок.
-    const glm::vec2 wider = TilingFactor(r, glm::vec3(20.0f, 0.2f, 10.0f));
+    const glm::vec2 wider = TilingFactor(r, glm::vec3(20.0f, 0.2f, 10.0f), up);
     CHECK_NEAR(wider.x, 10.0f, 1e-4f);
     CHECK_NEAR(wider.y, 5.0f, 1e-4f);
 
-    // Стена 10 x 5 толщиной 0.2 — большие измерения X и Y, и правило то же:
-    // «пол» и «стену» различать не приходится.
-    const glm::vec2 wall = TilingFactor(r, glm::vec3(10.0f, 5.0f, 0.2f));
+    // Стена 10 x 5 толщиной 0.2: лицевая грань тянется по X и Y.
+    const glm::vec2 wall = TilingFactor(r, glm::vec3(10.0f, 5.0f, 0.2f), front);
     CHECK_NEAR(wall.x, 5.0f, 1e-4f);
     CHECK_NEAR(wall.y, 2.5f, 1e-4f);
 
     // Сплющенный в ноль объект не даёт ни нуля, ни NaN: такое число ушло бы в
     // шейдер и покрасило объект в чёрное.
-    const glm::vec2 flat = TilingFactor(r, glm::vec3(0.0f));
+    const glm::vec2 flat = TilingFactor(r, glm::vec3(0.0f), up);
     CHECK_TRUE(flat.x > 0.0f && flat.y > 0.0f);
     CHECK_TRUE(flat.x == flat.x && flat.y == flat.y);   // не NaN
+}
+
+// КУБ 4 x 1 x 2 при «одной плитке на метр»: у КАЖДОЙ грани плиток столько,
+// сколько в ней метров. Прежде пара осей была одна на весь объект («два
+// больших измерения» — X и Z), и правильно выглядел только верх: передняя
+// грань 4 x 1 получала 4 x 2 плитки, боковая 2 x 1 — тоже 4 x 2, то есть
+// плитка на боках растягивалась и сплющивалась.
+TEST(material_world_size_tiling_is_per_face_on_a_cube) {
+    MaterialRender r;
+    r.Tiling = MaterialRender::TilingMode::WorldSize;
+    r.UVScaleX = r.UVScaleY = 1.0f;
+    const glm::vec3 box(4.0f, 1.0f, 2.0f);
+
+    const glm::vec2 top = TilingFactor(r, box, {0, 1, 0});
+    CHECK_NEAR(top.x, 4.0f, 1e-4f);
+    CHECK_NEAR(top.y, 2.0f, 1e-4f);
+    const glm::vec2 front = TilingFactor(r, box, {0, 0, -1});
+    CHECK_NEAR(front.x, 4.0f, 1e-4f);
+    CHECK_NEAR(front.y, 1.0f, 1e-4f);
+    const glm::vec2 side = TilingFactor(r, box, {1, 0, 0});
+    CHECK_NEAR(side.x, 2.0f, 1e-4f);
+    CHECK_NEAR(side.y, 1.0f, 1e-4f);
+}
+
+// РАЗВЁРТКА КУБА: у всех четырёх боковых граней U идёт ПО ГОРИЗОНТАЛИ, V —
+// вверх. У граней ±X U шла вверх — картинка там лежала на боку, и повтор «по
+// ширине» раскладывал плитку по высоте: с одной стороны куб выглядел
+// правильно, с другой — повёрнутым. Проверка — по вершинам: вдоль ребра
+// грани, идущего вверх, U не меняется, а V растёт.
+TEST(cube_side_faces_run_u_horizontally_and_v_up) {
+    const sage::render::MeshData cube = sage::render::BuildCube();
+    int sides = 0;
+    for (size_t f = 0; f < 6; ++f) {
+        const auto* v = &cube.Vertices[f * 4];
+        if (std::fabs(v[0].Normal.y) > 0.5f) continue;   // верх и низ — свои правила
+        ++sides;
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                if (i == j) continue;
+                const glm::vec3 d = v[j].Position - v[i].Position;
+                const glm::vec2 duv = v[j].TexCoords - v[i].TexCoords;
+                // Чисто вертикальное ребро: V растёт вместе с Y, U стоит.
+                if (std::fabs(d.x) < 1e-4f && std::fabs(d.z) < 1e-4f) {
+                    CHECK_NEAR(duv.x, 0.0f, 1e-4f);
+                    CHECK_TRUE(duv.y * d.y > 0.0f);
+                }
+            }
+        }
+    }
+    CHECK_EQ(sides, 4);
 }
 
 TEST(material_world_scale_comes_from_the_model_matrix) {
@@ -542,6 +593,24 @@ TEST(material_tiling_mode_is_written_as_a_name) {
     // Опечатка не сбрасывает настройку молча.
     CHECK_FALSE(TilingModeFromKey("worldsize", mode));
     CHECK_TRUE(mode == MaterialRender::TilingMode::WorldSize);
+}
+
+// ФИЛЬТРАЦИЯ КАРТ ПЕРЕЖИВАЕТ ФАЙЛ и пишется словом. Старый .sagemat без
+// ключа читается сглаженным — так он и выглядел до появления настройки.
+TEST(material_filtering_survives_the_file_and_defaults_to_smooth) {
+    const fs::path dir = TempDir("sage_test_mat_filtering");
+    Material m;
+    m.Render.Filter = MaterialRender::Filtering::Nearest;
+    const std::string path = (dir / "blocks.sagemat").string();
+    m.SaveToFile(path);
+    std::ifstream in(path);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK_TRUE(text.find("\"filtering\": \"nearest\"") != std::string::npos);
+    CHECK_TRUE(Material::LoadFromFile(path).Render.Filter == MaterialRender::Filtering::Nearest);
+
+    WriteText(dir / "old.sagemat", "{\"albedo\": [1, 1, 1]}\n");
+    CHECK_TRUE(Material::LoadFromFile((dir / "old.sagemat").string()).Render.Filter ==
+               MaterialRender::Filtering::Smooth);
 }
 
 TEST(model_material_obj_alpha_map_becomes_a_double_sided_cutout) {

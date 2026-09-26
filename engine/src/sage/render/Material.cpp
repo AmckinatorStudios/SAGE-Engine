@@ -26,6 +26,8 @@ namespace {
 // Порядок обязан совпадать с CullFaces.
 const char* const kTilingKeys[] = {"uniform", "separate", "worldSize"};
 const char* const kTilingLabels[] = {"Общий", "По осям", "По размеру объекта"};
+const char* const kFilterKeys[] = {"smooth", "nearest"};
+const char* const kFilterLabels[] = {"Сглаживание", "Ближайший пиксель"};
 const char* const kCullKeys[] = {"back", "front", "none"};
 const char* const kCullLabels[] = {"Задние", "Передние", "Не отсекать"};
 } // namespace
@@ -65,6 +67,16 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          MaterialRenderField::Group::Render, &MaterialRender::Unlit, nullptr, 0.0f, 1.0f,
          "Цвет как есть, без света и теней: мультяшная заливка, экраны,\n"
          "подсказки в мире. Модели в стиле «тун» приносят его из файла."},
+        {"filtering", "Фильтрация", MaterialRenderField::Kind::Enum,
+         MaterialRenderField::Group::Textures,
+         nullptr, nullptr, 0.0f, 0.0f,
+         "Как выглядит текстура вблизи, когда один её пиксель занимает много.\n"
+         "Сглаживание — для фотографий и рисованного «вживую».\n"
+         "Ближайший пиксель — чёткие квадраты: текстуры, нарисованные по пикселю.\n"
+         "Действует на все карты материала сразу.",
+         [](const MaterialRender& r) { return (int)r.Filter; },
+         [](MaterialRender& r, int v) { r.Filter = (MaterialRender::Filtering)v; },
+         kFilterKeys, kFilterLabels, 2},
         {"tilingMode", "Режим повтора", MaterialRenderField::Kind::Enum,
          MaterialRenderField::Group::Textures,
          nullptr, nullptr, 0.0f, 0.0f,
@@ -115,32 +127,29 @@ glm::vec3 WorldScaleOf(const glm::mat4& model) {
             glm::length(glm::vec3(model[2]))};
 }
 
-glm::vec2 TilingFactor(const MaterialRender& render, const glm::vec3& worldScale) {
-    switch (render.Tiling) {
-        case MaterialRender::TilingMode::Uniform:
-            // Одно число на обе оси — берётся X: он же и показан в инспекторе,
-            // когда режим общий. Второе поле при этом не трогается, чтобы
-            // возврат к режиму «по осям» вернул подобранную пару, а не единицу.
-            return {render.UVScaleX, render.UVScaleX};
-        case MaterialRender::TilingMode::WorldSize: {
-            // ДВА БОЛЬШИХ ИЗМЕРЕНИЯ объекта: поверхность тянется вдоль них, а
-            // третье — толщина пола или стены, к развёртке отношения не имеющая.
-            // У пола (10, 0.2, 10) это X и Z, у стены (10, 5, 0.2) — X и Y:
-            // правило одно, а «пол» и «стена» различать не приходится.
-            const glm::vec3 s = glm::abs(worldScale);
-            float a = s.x, b = s.y;
-            if (s.z > s.x && s.x <= s.y) { a = s.y; b = s.z; }
-            else if (s.z > s.y) { b = s.z; }
-            // Ноль в масштабе (сплющенный объект) не должен схлопнуть развёртку
-            // в одну точку: там текстуры всё равно не видно, а деление на ноль
-            // ушло бы в шейдер числом NaN и покрасило бы объект в чёрное.
-            a = glm::max(a, 0.0001f);
-            b = glm::max(b, 0.0001f);
-            return {render.UVScaleX * a, render.UVScaleY * b};
-        }
-        default:
-            return {render.UVScaleX, render.UVScaleY};
-    }
+glm::vec2 BaseTiling(const MaterialRender& render) {
+    // Одно число на обе оси — берётся X: он же и показан в инспекторе, когда
+    // режим общий. Второе поле при этом не трогается, чтобы возврат к режиму
+    // «по осям» вернул подобранную пару, а не единицу.
+    if (render.Tiling == MaterialRender::TilingMode::Uniform) return {render.UVScaleX, render.UVScaleX};
+    return {render.UVScaleX, render.UVScaleY};
+}
+
+glm::vec2 TilingFactor(const MaterialRender& render, const glm::vec3& worldScale,
+                       const glm::vec3& localNormal) {
+    const glm::vec2 base = BaseTiling(render);
+    if (render.Tiling != MaterialRender::TilingMode::WorldSize) return base;
+    // Ноль в масштабе (сплющенный объект) не должен схлопнуть развёртку в одну
+    // точку: там текстуры всё равно не видно, а деление на ноль ушло бы в
+    // шейдер числом NaN и покрасило бы объект в чёрное.
+    const glm::vec3 s = glm::max(glm::abs(worldScale), glm::vec3(0.0001f));
+    // Доли осей по нормали: у грани куба одна из них единица, и пара осей
+    // выходит ровно её. У скруглённых форм (сфера, цилиндр) доли плавно
+    // перетекают, и шва на стыке «чужих» пар нет.
+    glm::vec3 w = glm::abs(localNormal);
+    w /= glm::max(w.x + w.y + w.z, 0.0001f);
+    const glm::vec2 face = w.x * glm::vec2(s.z, s.y) + w.y * glm::vec2(s.x, s.z) + w.z * glm::vec2(s.x, s.y);
+    return base * face;
 }
 
 Material Material::LoadFromFile(const std::string& path) {

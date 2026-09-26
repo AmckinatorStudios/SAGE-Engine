@@ -295,7 +295,7 @@ bool ImageTextureStale(const Image& image) {
     if (image.Path.empty()) return image.Tex != nullptr;
     // Путь есть, а указателя нет — ещё не грузили (или не загрузилось).
     if (!image.Tex) return true;
-    // Загружено НЕ ТО: путь сменили, или переключили пиксель-арт, а он меняет
+    // Загружено НЕ ТО: путь сменили, или переключили фильтрацию, а она меняет
     // фильтр и мипмапы — то есть саму текстуру, а не то, как её рисуют.
     return image.TexPath != image.Path || image.TexFiltering != image.Filtering;
 }

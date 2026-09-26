@@ -152,7 +152,16 @@ void ScriptEngine::RegisterComponentTypes() {
                           [](MaterialRender& r, const std::string& key) {
                               MaterialRender::TilingMode mode = r.Tiling;
                               if (::TilingModeFromKey(key, mode)) r.Tiling = mode;
-                          })
+                          }),
+        // Фильтрация карт — СТРОКОЙ: «smooth» или «nearest», как в .sagemat.
+        // Непонятное слово оставляет прежнее значение — по той же причине.
+        "Filtering", sol::property(
+                         [](const MaterialRender& r) {
+                             return std::string(sage::TextureFilteringKey(r.Filter));
+                         },
+                         [](MaterialRender& r, const std::string& key) {
+                             sage::TextureFilteringFromKey(key, r.Filter);
+                         })
     );
     m_lua.new_usertype<Material>("Material",
         "Albedo", &Material::Albedo,

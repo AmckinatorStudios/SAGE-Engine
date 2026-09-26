@@ -138,7 +138,12 @@ void ScriptEngine::RegisterParticleApi() {
         "TilesX", &ParticleEffect::TilesX,
         "TilesY", &ParticleEffect::TilesY,
         "FrameRate", &ParticleEffect::FrameRate,
-        "PixelArt", &ParticleEffect::PixelArt,
+        // Фильтрация картинки частиц словом: «smooth» или «nearest».
+        "Filtering", sol::property(
+                         [](const ParticleEffect& f) { return std::string(sage::TextureFilteringKey(f.Filtering)); },
+                         [](ParticleEffect& f, const std::string& key) {
+                             sage::TextureFilteringFromKey(key, f.Filtering);
+                         }),
         "Intensity", &ParticleEffect::Intensity,
         "SortByDistance", &ParticleEffect::SortByDistance,
         "StretchLength", &ParticleEffect::StretchLength,

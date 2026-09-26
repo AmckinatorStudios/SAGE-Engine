@@ -223,9 +223,9 @@ TexturePixelFormat ChooseFormat(const TextureWriteOptions& opts, bool hasAlpha) 
     switch (opts.Intent) {
         case TextureIntent::NormalMap:
         case TextureIntent::DataMap:
-        case TextureIntent::PixelArt:
+        case TextureIntent::Nearest:
             // Блочное сжатие здесь портит именно то, ради чего карту и делали:
-            // рельеф, точные значения, резкие края пиксель-арта.
+            // рельеф, точные значения, резкие края при ближайшем пикселе.
             return TexturePixelFormat::RGBA8;
         case TextureIntent::Albedo:
         default:
@@ -252,7 +252,7 @@ Blob PackTexture(const uint8_t* rgba, int width, int height, const TextureWriteO
     const TexturePixelFormat fmt = ChooseFormat(opts, hasAlpha);
     // Пиксель-арт без мипов намеренно: мипы на листе спрайтов подмешивают
     // соседний спрайт по краям, и картинка «течёт» на расстоянии.
-    const bool mips = opts.GenerateMips && opts.Intent != TextureIntent::PixelArt;
+    const bool mips = opts.GenerateMips && opts.Intent != TextureIntent::Nearest;
 
     std::vector<uint8_t> level(rgba, rgba + (size_t)width * height * 4);
     int w = width, h = height;

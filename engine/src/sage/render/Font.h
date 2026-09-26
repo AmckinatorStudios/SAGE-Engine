@@ -41,15 +41,15 @@ public:
 
     // Загружает шрифт из .ttf/.otf. pixelHeight — базовый размер запекания
     // (крупнее = чётче при увеличении, но больше атлас). Бросает при ошибке.
-    // pixelArt — шрифт нарисован по пикселям (любой
-    // другой из набора). Тогда атлас берётся Nearest и БЕЗ мип-уровней, а
+    // nearest — фильтрация «ближайший пиксель» (шрифт нарисован по пикселям).
+    // Тогда атлас берётся Nearest и БЕЗ мип-уровней, а
     // масштаб на отрисовке округляется до целого: полупиксельное увеличение
     // растягивает одни штрихи буквы на два экранных пикселя, а соседние на
     // один, и ровный шрифт идёт волнами — ровно то, что видно как «артефакты».
     static std::unique_ptr<Font> Load(const std::string& path, float pixelHeight = 48.0f,
-                                      bool pixelArt = false);
+                                      bool nearest = false);
 
-    bool IsPixelArt() const { return m_pixelArt; }
+    bool IsNearest() const { return m_nearest; }
 
     // Раскладывает UTF-8 строку в квады, начиная с (startX, startY) —
     // startY — координата ВЕРХА строки. scale домножает базовый размер.
@@ -84,7 +84,7 @@ private:
     const Glyph* Find(uint32_t codepoint) const;
 
     std::unordered_map<uint32_t, Glyph> m_glyphs;
-    bool m_pixelArt = false;
+    bool m_nearest = false;
     std::unique_ptr<sage::rhi::Texture2D> m_atlas;
     float m_pixelHeight = 48.0f;
     float m_lineHeight = 0.0f; // ascent - descent + lineGap, в пикселях базового размера
