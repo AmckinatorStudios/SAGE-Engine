@@ -163,7 +163,7 @@ int BuildHud(Scene& scene) {
     Add(scene, barObj, PanelFill({0.12f, 0.05f, 0.05f, 0.7f}, 5.0f));
     Bar bar;
     bar.Value = 0.72f;
-    bar.FillColor = {0.85f, 0.25f, 0.25f, 1.0f};
+    bar.SetFillColor({0.85f, 0.25f, 0.25f, 1.0f});
     // Сглаживание: шкала едет к цели за четверть секунды, а не прыгает рывком.
     bar.Smoothing = 3.0f;
     Add(scene, barObj, bar);
@@ -276,7 +276,7 @@ int BuildSettings(Scene& scene) {
     volumeRange.Max = 100.0f;
     volumeRange.Value = 70.0f;
     volumeRange.Step = 5.0f;
-    volumeRange.TrackColor = {0.13f, 0.15f, 0.20f, 1.0f};
+    volumeRange.Track.Color = {0.13f, 0.15f, 0.20f, 1.0f};
     GameObject volume = labelledRow("VolumeSlider", "Громкость", 30.0f);
     Add(scene, volume, Interactable{});
     Add(scene, volume, volumeRange);
@@ -285,7 +285,7 @@ int BuildSettings(Scene& scene) {
     sensRange.Min = 0.1f;
     sensRange.Max = 5.0f;
     sensRange.Value = 1.5f;
-    sensRange.TrackColor = {0.13f, 0.15f, 0.20f, 1.0f};
+    sensRange.Track.Color = {0.13f, 0.15f, 0.20f, 1.0f};
     GameObject sens = labelledRow("SensitivitySlider", "Чувствительность", 30.0f);
     Add(scene, sens, Interactable{});
     Add(scene, sens, sensRange);
@@ -301,7 +301,7 @@ int BuildSettings(Scene& scene) {
     toggle.Toggle = true;
     toggle.Step = 1.0f;
     toggle.Value = 1.0f;
-    toggle.TrackColor = {0.13f, 0.15f, 0.20f, 1.0f};
+    toggle.Track.Color = {0.13f, 0.15f, 0.20f, 1.0f};
     Add(scene, fullscreen, toggle);
 
     Element fsTextXf;
@@ -339,10 +339,14 @@ const std::vector<std::string>& DemoNames() {
 }
 
 int BuildDemo(Scene& scene, const std::string& name) {
-    if (name == "menu") return BuildMenu(scene);
-    if (name == "hud") return BuildHud(scene);
-    if (name == "settings") return BuildSettings(scene);
-    return -1;   // молча собрать «что-нибудь» значило бы скрыть опечатку в имени
+    int root = -1;   // молча собрать «что-нибудь» значило бы скрыть опечатку в имени
+    if (name == "menu") root = BuildMenu(scene);
+    else if (name == "hud") root = BuildHud(scene);
+    else if (name == "settings") root = BuildSettings(scene);
+    // Демо собраны частями прямо в коде — типы им выводятся, а панель со
+    // списком делится на панель и контейнер так же, как в старой сцене.
+    if (root >= 0) NormalizeElements(scene);
+    return root;
 }
 
 } // namespace sage::ui

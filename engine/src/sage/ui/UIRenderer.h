@@ -212,7 +212,7 @@ public:
     // под ней, — без неё интерфейс «прилипает» к сцене и теряет читаемость на
     // пёстром фоне.
     void RectShadow(float x, float y, float w, float h, float radius,
-                    float size = 10.0f, float alpha = 0.35f);
+                    float size = 10.0f, float alpha = 0.35f, glm::vec3 color = glm::vec3(0.0f));
 
     // --- Маски (ножницы): всё между Push и Pop обрезается прямоугольником.
     // Вложенные вызовы пересекаются с текущей маской. Пары обязаны сходиться

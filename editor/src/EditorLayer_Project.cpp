@@ -326,7 +326,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         m_scene->SetParent(title.Entity(), hud.Entity());
 
         GameObject hp = m_scene->CreateEmptyObject("HP Bar");
-        sage::ui::ApplyPreset(*m_scene, hp.Entity(), "Bar");
+        sage::ui::ApplyPreset(*m_scene, hp.Entity(), "Progress Bar");
         {
             sage::ui::Element& xf = reg.get<sage::ui::Element>(hp.Entity());
             xf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
@@ -337,7 +337,7 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
             fill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
             sage::ui::Bar& bar = reg.get<sage::ui::Bar>(hp.Entity());
             bar.Value = 0.72f;
-            bar.FillColor = {0.85f, 0.30f, 0.30f, 1.0f};
+            bar.SetFillColor({0.85f, 0.30f, 0.30f, 1.0f});
             bar.Smoothing = 3.0f;
         }
         m_scene->SetParent(hp.Entity(), hud.Entity());

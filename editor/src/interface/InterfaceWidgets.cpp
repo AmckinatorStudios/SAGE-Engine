@@ -1,5 +1,7 @@
 #include "InterfaceWidgets.h"
 
+#include "sage/ui/UI.h"
+
 #include "imgui.h"
 
 #include "../EditorIcons.h"
@@ -34,17 +36,9 @@ bool AlignButton(const char* id, sage::ui::AlignEdge edge, const char* tooltip, 
 }
 
 const char* PresetIcon(const std::string& preset) {
-    struct Row { const char* Preset; const char* Icon; };
-    static const Row kRows[] = {
-        {"Empty", "ui-empty"},   {"Panel", "ui-panel"},       {"Button", "ui-button"},
-        {"Text", "ui-text"},     {"Image", "ui-image"},       {"Bar", "ui-bar"},
-        {"Checkbox", "ui-check"},{"Slider", "ui-slider"},     {"Input Field", "ui-input"},
-        {"Vertical List", "ui-list"}, {"Toolbar", "ui-toolbar"}, {"Grid", "ui-grid"},
-        {"Screen", "ui-screen"},
-    };
-    for (const Row& r : kRows) {
-        if (preset == r.Preset) return r.Icon;
-    }
+    // Значок объявлен у самого типа (sage::ui::Preset::Icon): второй список
+    // здесь расходился с ним при каждом переименовании.
+    if (const sage::ui::Preset* p = sage::ui::FindPreset(preset)) return p->Icon;
     return "ui-empty";
 }
 

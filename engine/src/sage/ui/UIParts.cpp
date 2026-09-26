@@ -19,8 +19,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <list>
 #include <string>
 #include <vector>
+
+#include "sage/render/ResourceManager.h"
+#include "sage/render/Texture.h"
 
 #include "sage/ui/UI.h"
 #include "sage/ui/UIIcons.h"
@@ -51,7 +55,7 @@ float AlphaOf(const PartDrawContext& c, float channelAlpha) {
 glm::vec3 StateTint(const PartDrawContext& c, glm::vec3 base) {
     const Interactable* act = c.Sibling<Interactable>();
     if (!act) return base;
-    if (!c.Enabled) return glm::mix(base, glm::vec3(0.5f), 0.5f);
+    if (!c.Enabled) return glm::mix(base, glm::vec3(1.0f) * 0.5f, 0.5f);
     if (c.Pressed) return base * act->PressedBrightness;
     if (c.Hovered) return glm::mix(base, glm::vec3(1.0f), act->HoverBrightness - 1.0f);
     return base;
@@ -64,134 +68,399 @@ float RoundingOf(const PartDrawContext& c) {
     return fill ? fill->Rounding * c.Scale : 0.0f;
 }
 
-void FillRectImpl(const Fill& fill, const UIRect& r, float rounding, glm::vec3 rgb, float alpha,
-                  UIRenderer& ui) {
-    if (alpha <= 0.0f) return;
-    if (fill.Gradient.a > 0.0f) {
-        ui.GradientRect(r.x, r.y, r.w, r.h, rgb, {fill.Gradient.r, fill.Gradient.g, fill.Gradient.b},
-                        alpha, fill.Gradient.a * (alpha / std::max(fill.Color.a, 1e-4f)), rounding);
+// Имена значений SliceFill для таблицы полей: enum пишется числом, но человек
+// видит слово — и в инспекторе, и в подсказке.
+const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Repeat")};
+
+// Фильтрация — общий список на картинку и на шрифт: настройка одна и та же,
+// и два разных набора подписей для неё разошлись бы на первой же правке.
+const char* const kImageFilterNames[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest")};
+
+// Режимы картинки. Имена — про то, ЧТО СТАНЕТ С КАРТИНКОЙ, а не про
+// механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
+// говорит всё.
+const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("9-slice"),
+                                       SAGE_UI_TEXT("Tile"), SAGE_UI_TEXT("Keep aspect"),
+                                       SAGE_UI_TEXT("Fill, keep aspect")};
+
+// --- Картинка в прямоугольнике — ОДНА на картинку и на любой вид ---------------
+//
+// Рисует и часть «Картинка», и вид с текстурой (подложка кнопки, дорожка
+// ползунка, отметка галки, заполнение полосы). Одна функция, а не две копии:
+// девятина, починенная в одной, иначе осталась бы сломанной в другой.
+struct PictureParams {
+    const Texture* Tex = nullptr;
+    UIRenderer::Sprite Src;
+    int Fit = 0;                  // как Image::Mode
+    NineSlice Slice;              // для девятины
+    float PixelScale = 0.0f;
+    bool SnapPixels = false;
+};
+
+void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float canvasScale,
+                 glm::vec3 rgb, float alpha) {
+    if (!p.Tex || alpha <= 0.0f || r.w <= 0.0f || r.h <= 0.0f) return;
+    const UIRenderer::Sprite& src = p.Src;
+    const auto mode = (Image::Mode)p.Fit;
+
+    // РЕЖИМ РЕШАЕТ, ЧЕМ РИСОВАТЬ: девятина и замощение — нарезкой, остальное
+    // одним квадом.
+    if (mode == Image::Mode::NineSlice || mode == Image::Mode::Tile) {
+        NineSlice slice = p.Slice;
+        if (mode == Image::Mode::Tile) {
+            // Замощение — та же нарезка с нулевыми полями и повторяющейся
+            // серединой: второй путь в отрисовке ради него не нужен.
+            slice = NineSlice{};
+            slice.CenterFill = SliceFill::Tile;
+            slice.EdgeFill = SliceFill::Tile;
+            slice.DrawCenter = true;
+        }
+        ui.ImageSliced(r.x, r.y, r.w, r.h, p.Tex, src, slice,
+                       SlicedPixelScale(p.PixelScale, p.SnapPixels, canvasScale), rgb, alpha);
+        return;
+    }
+
+    const float srcW = src.Whole() ? (float)p.Tex->Width() : src.W;
+    const float srcH = src.Whole() ? (float)p.Tex->Height() : src.H;
+
+    // СОХРАНЕНИЕ ПРОПОРЦИЙ — ДВА РАЗНЫХ ОТВЕТА, и оба нужны.
+    //
+    // Fit вписывает картинку ЦЕЛИКОМ: масштаб один на обе оси, по краям
+    // остаются поля. Cover заполняет элемент БЕЗ ПОЛЕЙ, обрезая лишнее по
+    // длинной стороне — обрезка делается ИСХОДНИКОМ (берём кусок нужных
+    // пропорций от середины), а не рисованием за границей: у элемента может не
+    // быть обрезки, и картинка вылезла бы на соседей.
+    if (mode == Image::Mode::Fit || mode == Image::Mode::Cover) {
+        const ImagePlacement fit =
+            PlaceImage(r, src.Whole() ? 0.0f : src.X, src.Whole() ? 0.0f : src.Y, srcW, srcH,
+                       mode == Image::Mode::Cover, p.SnapPixels);
+        ui.ImageSprite(fit.Dst.x, fit.Dst.y, fit.Dst.w, fit.Dst.h, p.Tex,
+                       {fit.SrcX, fit.SrcY, fit.SrcW, fit.SrcH}, rgb, alpha);
+        return;
+    }
+
+    // Растяжение. С заданным размером пикселя или кратным масштабом картинка
+    // рисуется своим размером по центру: разный дробный масштаб по осям даёт
+    // рваные края у рисунка по пикселям, и элемент, оставшийся больше
+    // картинки, честнее.
+    UIRect dst = r;
+    float pixels = p.PixelScale * canvasScale;
+    if ((p.SnapPixels || pixels > 0.0f) && srcW > 0.0f && srcH > 0.0f) {
+        if (pixels <= 0.0f) {
+            pixels = std::min(r.w / srcW, r.h / srcH);
+            if (p.SnapPixels) pixels = std::max(1.0f, std::floor(pixels));
+        }
+        dst.w = srcW * pixels;
+        dst.h = srcH * pixels;
+        dst.x = r.x + std::floor((r.w - dst.w) * 0.5f);
+        dst.y = r.y + std::floor((r.h - dst.h) * 0.5f);
+    }
+    ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, p.Tex, src, rgb, alpha);
+}
+
+// --- Вид (Look) ---------------------------------------------------------------
+
+// Картинка вида — лениво, при отрисовке: путь правят в инспекторе посреди
+// кадра, и повода перечитать файл, кроме отрисовки, нет (так же, как у части
+// «Картинка», см. EnsureImageTexture).
+const Texture* LookTexture(const Look& look) {
+    if (look.Texture.empty()) {
+        look.Tex.reset();
+        look.TexPath.clear();
+        return nullptr;
+    }
+    if (!look.Tex || look.TexPath != look.Texture || look.TexFiltering != look.Filtering) {
+        // Резкая фильтрация — ближайшим соседом и без мипмапов: мипмапы ЛИСТА
+        // подмешивают в края куска соседний спрайт.
+        look.Tex = look.Sharp() ? ResourceManager::Instance().GetTexture(
+                                      look.Texture, TextureFilter::Nearest, /*mipmaps=*/false)
+                                : ResourceManager::Instance().GetTexture(look.Texture);
+        look.TexPath = look.Texture;
+        look.TexFiltering = look.Filtering;
+    }
+    return look.Tex.get();
+}
+
+float LookRounding(const Look& look, const UIRect& r, float scale) {
+    return std::min(look.Rounding * scale, std::min(r.w, r.h) * 0.5f);
+}
+
+void DrawLookShadow(const PartDrawContext& c, const Look& look, const UIRect& r, float alpha) {
+    if (look.ShadowSize <= 0.0f || look.ShadowColor.a <= 0.0f) return;
+    c.Ui->RectShadow(r.x, r.y, r.w, r.h, LookRounding(look, r, c.Scale), look.ShadowSize * c.Scale,
+                     look.ShadowColor.a * alpha, glm::vec3(look.ShadowColor));
+}
+
+// Тело вида: картинка или плашка цветом. rgb — уже подкрашенный под
+// состояние цвет, alpha — итоговая прозрачность.
+void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, glm::vec3 rgb,
+                  float alpha) {
+    if (alpha <= 0.0f || r.w <= 0.0f || r.h <= 0.0f) return;
+    UIRenderer& ui = *c.Ui;
+    if (look.HasTexture()) {
+        const Texture* tex = LookTexture(look);
+        if (!tex) {
+            // Путь задан, а файла нет: «не загрузилось» должно отличаться от
+            // «не назначено» — плашка цветом на месте картинки.
+            ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha * 0.5f, LookRounding(look, r, c.Scale));
+            return;
+        }
+        PictureParams p;
+        p.Tex = tex;
+        p.Src = {look.Sprite.x, look.Sprite.y, look.Sprite.z, look.Sprite.w};
+        p.Fit = look.Fit;
+        p.Slice = look.Slice();
+        p.PixelScale = look.PixelScale;
+        p.SnapPixels = look.SnapPixels;
+        DrawPicture(ui, p, r, c.Scale, rgb, alpha);
+        return;
+    }
+    const float rounding = LookRounding(look, r, c.Scale);
+    if (look.Gradient.a > 0.0f) {
+        ui.GradientRect(r.x, r.y, r.w, r.h, rgb, glm::vec3(look.Gradient), alpha,
+                        look.Gradient.a * (alpha / std::max(look.Color.a, 1e-4f)), rounding);
     } else {
         ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha, rounding);
     }
 }
 
+void DrawLookBorder(const PartDrawContext& c, const Look& look, const UIRect& r, float alpha) {
+    const float t = look.BorderThickness * c.Scale;
+    if (t <= 0.0f || look.BorderColor.a <= 0.0f || alpha <= 0.0f) return;
+    c.Ui->RoundedRectOutline(r.x, r.y, r.w, r.h, LookRounding(look, r, c.Scale), t,
+                             glm::vec3(look.BorderColor), look.BorderColor.a * alpha);
+}
+
+// КАКОЙ ВИД У ЭЛЕМЕНТА СЕЙЧАС. Свой вид состояния, если он включён; иначе
+// обычный, подкрашенный множителями (stateTinted = true).
+const Look& StateLook(const PartDrawContext& c, const Look& normal, bool& stateTinted) {
+    stateTinted = true;
+    const Interactable* act = c.Sibling<Interactable>();
+    if (!act) return normal;
+    const Look* chosen = nullptr;
+    if (!c.Enabled) {
+        if (act->UseDisabledLook) chosen = &act->DisabledLook;
+    } else if (c.Pressed && act->UsePressedLook) {
+        chosen = &act->PressedLook;
+    } else if (c.Focused && act->UseFocusedLook) {
+        chosen = &act->FocusedLook;
+    } else if (c.Hovered && act->UseHoverLook) {
+        chosen = &act->HoverLook;
+    }
+    if (!chosen) return normal;
+    stateTinted = false;
+    return *chosen;
+}
+
+// Вид целиком — тень, тело, рамка — для составных частей (дорожка, ручка,
+// квадратик галки, заполнение полосы). У подложки слои разнесены по порядку
+// отрисовки (тень под всем, рамка поверх всего), здесь — сразу подряд.
+void DrawLook(const PartDrawContext& c, const Look& look, const UIRect& r, bool tint = true) {
+    const glm::vec3 rgb = tint ? StateTint(c, glm::vec3(look.Color)) : glm::vec3(look.Color);
+    const float alpha = AlphaOf(c, 1.0f);
+    DrawLookShadow(c, look, r, alpha);
+    DrawLookBody(c, look, r, rgb, alpha * look.Color.a);
+    DrawLookBorder(c, look, r, alpha);
+}
+
+// Таблица полей ОДНОГО вида — со смещениями от начала Look.
+//
+// Условия показа выстроены цепочкой: режим «как ложится» виден, только когда
+// выбрана картинка; поля девятины — только в режиме девятины; скругление и
+// градиент — только у плашки цветом (у картинки форму задаёт сам рисунок).
+const std::vector<PartField>& LookFieldTable() {
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"color", SAGE_UI_TEXT("Colour"), PartField::Kind::Color, offsetof(Look, Color), 0.0f, 1.0f,
+             "The plate colour. With a picture — the tint it is multiplied by."},
+            {"texture", SAGE_UI_TEXT("Picture"), PartField::Kind::String, offsetof(Look, Texture), 0.0f,
+             0.0f, "Empty — a plain colour plate.", nullptr, 0, PartField::Widget::Texture},
+            {"fit", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Look, Fit), 0.0f, 4.0f,
+             "Stretch, cut into nine pieces (corners keep their size), repeat at\n"
+             "its own size, or keep the aspect ratio.",
+             kImageModeNames, 5, PartField::Widget::Auto, "texture", 1},
+            {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Look, Sprite), 0.0f,
+             4096.0f, "A piece of the sheet in source pixels; width 0 means the whole file.", nullptr, 0,
+             PartField::Widget::Auto, "texture", 1},
+            {"sliceBorder", SAGE_UI_TEXT("9-slice (l,t,r,b)"), PartField::Kind::Vec4,
+             offsetof(Look, SliceBorder), 0.0f, 512.0f,
+             "Fixed corners in source pixels. The 9-slice editor sets them by\n"
+             "dragging lines over the picture itself.",
+             nullptr, 0, PartField::Widget::NineSliceBorder, "fit", (int)Image::Mode::NineSlice},
+            {"sliceCenterFill", SAGE_UI_TEXT("9-slice centre"), PartField::Kind::Enum,
+             offsetof(Look, SliceCenterFill), 0.0f, 1.0f, "Stretch or repeat the middle piece.",
+             kSliceFillNames, 2, PartField::Widget::Auto, "fit", (int)Image::Mode::NineSlice},
+            {"sliceEdgeFill", SAGE_UI_TEXT("9-slice edges"), PartField::Kind::Enum,
+             offsetof(Look, SliceEdgeFill), 0.0f, 1.0f,
+             "Repeat keeps an ornament crisp; stretch smears it.", kSliceFillNames, 2,
+             PartField::Widget::Auto, "fit", (int)Image::Mode::NineSlice},
+            {"sliceDrawCenter", SAGE_UI_TEXT("9-slice draws the middle"), PartField::Kind::Bool,
+             offsetof(Look, SliceDrawCenter), 0.0f, 1.0f,
+             "An outline frame has no middle — what is under it shows through.", nullptr, 0,
+             PartField::Widget::Auto, "fit", (int)Image::Mode::NineSlice},
+            {"pixelScale", SAGE_UI_TEXT("Source pixel size"), PartField::Kind::Float,
+             offsetof(Look, PixelScale), 0.0f, 16.0f,
+             "How many interface pixels one pixel of the file takes.\n"
+             "0 — one to one for 9-slice and tile (corners keep their size),\n"
+             "fit to the element for the other modes.",
+             nullptr, 0, PartField::Widget::Auto, "texture", 1},
+            {"snapPixels", SAGE_UI_TEXT("Whole-number scale"), PartField::Kind::Bool,
+             offsetof(Look, SnapPixels), 0.0f, 1.0f,
+             "Rounds the scale down to a whole number, so a frame drawn pixel by\n"
+             "pixel does not go wavy.",
+             nullptr, 0, PartField::Widget::Auto, "texture", 1},
+            {"filter", SAGE_UI_TEXT("Filtering"), PartField::Kind::Enum, offsetof(Look, Filtering), 0.0f,
+             1.0f, "Smooth for photos and anything scaled down; Nearest for crisp pixels.",
+             kImageFilterNames, 2, PartField::Widget::Auto, "texture", 1},
+            {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Look, Rounding), 0.0f,
+             64.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "texture", 0},
+            {"gradient", SAGE_UI_TEXT("Gradient down"), PartField::Kind::Color, offsetof(Look, Gradient),
+             0.0f, 1.0f, "Alpha 0 means a flat fill.", nullptr, 0, PartField::Widget::Auto, "texture", 0},
+            {"borderThickness", SAGE_UI_TEXT("Border width"), PartField::Kind::Float,
+             offsetof(Look, BorderThickness), 0.0f, 16.0f},
+            {"borderColor", SAGE_UI_TEXT("Border colour"), PartField::Kind::Color,
+             offsetof(Look, BorderColor)},
+            {"shadowSize", SAGE_UI_TEXT("Shadow"), PartField::Kind::Float, offsetof(Look, ShadowSize), 0.0f,
+             48.0f, "Separates the element from a busy background. 0 — no shadow."},
+            {"shadowColor", SAGE_UI_TEXT("Shadow colour"), PartField::Kind::Color,
+             offsetof(Look, ShadowColor)},
+        };
+        return v;
+    }();
+    return f;
+}
+
+// Постоянные строки для сдвинутых таблиц: ключи вида «hoverLook.color»
+// составные, а поле таблицы хранит const char*. Список, а не вектор: адреса
+// уже выданных строк обязаны пережить добавление новых.
+const char* Intern(const std::string& s) {
+    static std::list<std::string> pool;
+    for (const std::string& have : pool)
+        if (have == s) return have.c_str();
+    pool.push_back(s);
+    return pool.back().c_str();
+}
+
+// Поля вида, пересаженные внутрь компонента: смещение сдвинуто на место вида,
+// ключи — с приставкой. Поля без своего условия показа наследуют условие
+// самого вида («свой вид при наведении» — только когда он включён).
+std::vector<PartField> ShiftLookFields(const char* prefix, size_t offset, const char* showIfKey,
+                                       int showIfValue) {
+    std::vector<PartField> out;
+    for (PartField f : LookFieldTable()) {
+        f.Offset += offset;
+        if (prefix && *prefix) {
+            f.Key = Intern(std::string(prefix) + "." + f.Key);
+            if (f.ShowIfKey) f.ShowIfKey = Intern(std::string(prefix) + "." + f.ShowIfKey);
+            f.LookKey = prefix;
+        }
+        if (!f.ShowIfKey && showIfKey) {
+            f.ShowIfKey = showIfKey;
+            f.ShowIfValue = showIfValue;
+        }
+        out.push_back(f);
+    }
+    return out;
+}
+
 // --- Подложка ---------------------------------------------------------------
 
+// Подложка — это вид целиком, раскрытый прямо в часть: ключи в файле те же,
+// что были у неё всегда (color, rounding, borderThickness...), и старые сцены
+// читаются без перевода.
 const std::vector<PartField>& FillFields() {
-    static const std::vector<PartField> f = {
-        {"color", SAGE_UI_TEXT("Colour"), PartField::Kind::Color, offsetof(Fill, Color)},
-        {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Fill, Rounding), 0.0f, 64.0f},
-        {"borderThickness", SAGE_UI_TEXT("Border width"), PartField::Kind::Float,
-         offsetof(Fill, BorderThickness), 0.0f, 16.0f},
-        {"borderColor", SAGE_UI_TEXT("Border colour"), PartField::Kind::Color, offsetof(Fill, BorderColor)},
-        {"gradient", SAGE_UI_TEXT("Gradient down"), PartField::Kind::Color, offsetof(Fill, Gradient), 0.0f, 1.0f,
-         "Alpha 0 means a flat fill. Flat panels are the first thing that makes\n"
-         "an interface look unfinished."},
-        {"shadowSize", SAGE_UI_TEXT("Shadow"), PartField::Kind::Float, offsetof(Fill, ShadowSize), 0.0f, 48.0f,
-         "Separates the interface from the scene: without it a panel blends into\n"
-         "a busy background."},
-        {"shadowColor", SAGE_UI_TEXT("Shadow colour"), PartField::Kind::Color, offsetof(Fill, ShadowColor)},
-    };
+    static const std::vector<PartField> f = [] {
+        Fill probe;
+        const size_t base = (size_t)(reinterpret_cast<const char*>(static_cast<const Look*>(&probe)) -
+                                     reinterpret_cast<const char*>(&probe));
+        return ShiftLookFields(nullptr, base, nullptr, 0);
+    }();
     return f;
 }
 
 void DrawFill(const PartDrawContext& c) {
     const Fill& fill = *static_cast<const Fill*>(c.Data);
-    const glm::vec3 rgb = StateTint(c, glm::vec3(fill.Color));
-    FillRectImpl(fill, c.Rect, fill.Rounding * c.Scale, rgb, AlphaOf(c, fill.Color.a), *c.Ui);
+    bool tinted = true;
+    const Look& look = StateLook(c, fill, tinted);
+    const glm::vec3 rgb = tinted ? StateTint(c, glm::vec3(look.Color)) : glm::vec3(look.Color);
+    // Свой вид недоступного состояния уже нарисован бледным — второй раз его
+    // не бледнят.
+    const float alpha = tinted ? AlphaOf(c, look.Color.a) : look.Color.a * c.Alpha;
+    DrawLookBody(c, look, c.Rect, rgb, alpha);
 }
 
 // Тень и рамка — разными слоями: тень под всем, рамка поверх всего. Иначе
 // картинка ложилась бы на рамку, а тень — на соседний элемент.
 void DrawFillShadow(const PartDrawContext& c) {
     const Fill& fill = *static_cast<const Fill*>(c.Data);
-    if (fill.ShadowSize <= 0.0f) return;
-    c.Ui->RectShadow(c.Rect.x, c.Rect.y, c.Rect.w, c.Rect.h, fill.Rounding * c.Scale,
-                     fill.ShadowSize * c.Scale);
+    bool tinted = true;
+    const Look& look = StateLook(c, fill, tinted);
+    DrawLookShadow(c, look, c.Rect, c.Alpha);
 }
 
 void DrawFillBorder(const PartDrawContext& c) {
     const Fill& fill = *static_cast<const Fill*>(c.Data);
-    const float t = fill.BorderThickness * c.Scale;
-    if (t <= 0.0f || fill.BorderColor.a <= 0.0f) return;
-    const glm::vec4& b = fill.BorderColor;
-    c.Ui->RoundedRectOutline(c.Rect.x, c.Rect.y, c.Rect.w, c.Rect.h, fill.Rounding * c.Scale, t,
-                             {b.r, b.g, b.b}, AlphaOf(c, b.a));
+    bool tinted = true;
+    const Look& look = StateLook(c, fill, tinted);
+    DrawLookBorder(c, look, c.Rect, tinted ? AlphaOf(c, 1.0f) : c.Alpha);
 }
 
 // --- Картинка ---------------------------------------------------------------
 
-// Имена значений SliceFill для таблицы полей: enum пишется числом, но человек
-// видит слово — и в инспекторе, и в подсказке.
-const char* const kSliceFillNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Repeat")};
-
-// Три режима картинки. Имена — про то, ЧТО СТАНЕТ С КАРТИНКОЙ, а не про
-// механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
-// говорит всё.
-// Фильтрация — общий список на картинку и на шрифт: настройка одна и та же,
-// и два разных набора подписей для неё разошлись бы на первой же правке.
-const char* const kImageFilterNames[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest")};
-
-const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("9-slice"),
-                                       SAGE_UI_TEXT("Tile"), SAGE_UI_TEXT("Keep aspect"),
-                                       SAGE_UI_TEXT("Fill, keep aspect")};
-
 const std::vector<PartField>& ImageFields() {
-    static const std::vector<PartField> f = {
-        {"path", SAGE_UI_TEXT("File"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
-         nullptr, 0, PartField::Widget::Texture},
-        {"mode", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 4.0f,
-         "Stretch, cut into nine pieces, repeat at its own size, or keep the\n"
-         "aspect ratio: show the whole picture with margins, or fill the\n"
-         "element and cut off what does not fit.",
-         kImageModeNames, 5},
-        {"tint", SAGE_UI_TEXT("Tint"), PartField::Kind::Color, offsetof(Image, Tint)},
-        {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Image, Sprite), 0.0f, 4096.0f,
-         "A piece of the sheet in source pixels; width 0 means the whole file."},
-        {"sliceBorder", SAGE_UI_TEXT("9-slice (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Image, SliceBorder),
-         0.0f, 512.0f,
-         "Fixed corners in source pixels. Without it a 48x48 panel cannot be\n"
-         "stretched to 300x120 — the corners smear along with the middle.\n"
-         "Window > 9-slice editor drags these over the picture itself.",
-         nullptr, 0, PartField::Widget::NineSliceBorder, "mode", (int)Image::Mode::NineSlice},
-        {"sliceCenterFill", SAGE_UI_TEXT("9-slice centre"), PartField::Kind::Enum,
-         offsetof(Image, SliceCenterFill), 0.0f, 1.0f,
-         "Stretch or repeat the middle piece.", kSliceFillNames, 2,
-         PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
-        {"sliceEdgeFill", SAGE_UI_TEXT("9-slice edges"), PartField::Kind::Enum,
-         offsetof(Image, SliceEdgeFill), 0.0f, 1.0f,
-         "Repeat is the only right answer for pixel art and patterns: an\n"
-         "ornament of 16 pixels stretched to 300 turns to mush.",
-         kSliceFillNames, 2, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
-        {"sliceDrawCenter", SAGE_UI_TEXT("9-slice draws the middle"), PartField::Kind::Bool,
-         offsetof(Image, SliceDrawCenter), 0.0f, 1.0f,
-         "An outline frame has no middle — what is under the element shows through.",
-         nullptr, 0, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
-        {"pixelScale", SAGE_UI_TEXT("Source pixel size"), PartField::Kind::Float,
-         offsetof(Image, PixelScale), 0.0f, 16.0f,
-         "How many screen pixels one pixel of the file takes.\n"
-         "0 — fit to the element (that is, stretch it).\n"
-         "Sprite sheets need it: a 48x48 frame stretched to 300x120 turns to\n"
-         "mush, while at scale 3 its drawing keeps its own size."},
-        {"snapPixels", SAGE_UI_TEXT("Whole-number scale"), PartField::Kind::Bool,
-         offsetof(Image, SnapPixels), 0.0f, 1.0f,
-         "Rounds the scale down to a whole number: at 3.125 some strokes are\n"
-         "stretched over four screen pixels and the neighbouring ones over\n"
-         "three, and a straight frame goes wavy. The element is then not filled\n"
-         "completely — that is the price, and that is why it is a choice and\n"
-         "not a side effect of filtering."},
-        {"filter", SAGE_UI_TEXT("Filtering"), PartField::Kind::Enum, offsetof(Image, Filtering),
-         0.0f, 1.0f,
-         "Smooth — averaging with mipmaps, for anything that gets scaled down.\n"
-         "Nearest — sharp texels, no mipmaps and a whole-number scale: what a\n"
-         "picture drawn texel by texel needs, and what any small icon that must\n"
-         "stay crisp needs too.",
-         kImageFilterNames, 2},
-        {"spriteHover", SAGE_UI_TEXT("Sprite on hover"), PartField::Kind::Vec4, offsetof(Image, SpriteHover),
-         0.0f, 4096.0f},
-        {"spritePressed", SAGE_UI_TEXT("Sprite when pressed"), PartField::Kind::Vec4, offsetof(Image, SpritePressed),
-         0.0f, 4096.0f},
-    };
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"path", SAGE_UI_TEXT("File"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
+             nullptr, 0, PartField::Widget::Texture},
+            {"mode", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 4.0f,
+             "Stretch, cut into nine pieces (corners keep their size), repeat at\n"
+             "its own size, or keep the aspect ratio: show the whole picture with\n"
+             "margins, or fill the element and cut off what does not fit.",
+             kImageModeNames, 5},
+            {"tint", SAGE_UI_TEXT("Tint"), PartField::Kind::Color, offsetof(Image, Tint)},
+            {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Image, Sprite), 0.0f,
+             4096.0f, "A piece of the sheet in source pixels; width 0 means the whole file."},
+            {"sliceBorder", SAGE_UI_TEXT("9-slice (l,t,r,b)"), PartField::Kind::Vec4,
+             offsetof(Image, SliceBorder), 0.0f, 512.0f,
+             "Fixed corners in source pixels. The 9-slice editor sets them by\n"
+             "dragging lines over the picture itself.",
+             nullptr, 0, PartField::Widget::NineSliceBorder, "mode", (int)Image::Mode::NineSlice},
+            {"sliceCenterFill", SAGE_UI_TEXT("9-slice centre"), PartField::Kind::Enum,
+             offsetof(Image, SliceCenterFill), 0.0f, 1.0f, "Stretch or repeat the middle piece.",
+             kSliceFillNames, 2, PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
+            {"sliceEdgeFill", SAGE_UI_TEXT("9-slice edges"), PartField::Kind::Enum,
+             offsetof(Image, SliceEdgeFill), 0.0f, 1.0f,
+             "Repeat keeps an ornament crisp; stretch smears it.", kSliceFillNames, 2,
+             PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
+            {"sliceDrawCenter", SAGE_UI_TEXT("9-slice draws the middle"), PartField::Kind::Bool,
+             offsetof(Image, SliceDrawCenter), 0.0f, 1.0f,
+             "An outline frame has no middle — what is under it shows through.", nullptr, 0,
+             PartField::Widget::Auto, "mode", (int)Image::Mode::NineSlice},
+            {"pixelScale", SAGE_UI_TEXT("Source pixel size"), PartField::Kind::Float,
+             offsetof(Image, PixelScale), 0.0f, 16.0f,
+             "How many interface pixels one pixel of the file takes.\n"
+             "0 — one to one for 9-slice and tile (corners keep their size),\n"
+             "fit to the element for the other modes."},
+            {"snapPixels", SAGE_UI_TEXT("Whole-number scale"), PartField::Kind::Bool,
+             offsetof(Image, SnapPixels), 0.0f, 1.0f,
+             "Rounds the scale down to a whole number, so a frame drawn pixel by\n"
+             "pixel does not go wavy. The element is then not filled completely."},
+            {"filter", SAGE_UI_TEXT("Filtering"), PartField::Kind::Enum, offsetof(Image, Filtering), 0.0f,
+             1.0f, "Smooth for photos and anything scaled down; Nearest for crisp pixels.",
+             kImageFilterNames, 2},
+            // Спрайты состояний — из тех времён, когда картинку делали
+            // кнопкой. Теперь у кнопки свои виды состояний; поля читаются,
+            // чтобы старая сцена не потеряла их при сохранении, но не
+            // показываются: у картинки состояний нет.
+            {"spriteHover", SAGE_UI_TEXT("Sprite on hover"), PartField::Kind::Vec4,
+             offsetof(Image, SpriteHover), 0.0f, 4096.0f},
+            {"spritePressed", SAGE_UI_TEXT("Sprite when pressed"), PartField::Kind::Vec4,
+             offsetof(Image, SpritePressed), 0.0f, 4096.0f},
+        };
+        v[v.size() - 1].Hidden = true;
+        v[v.size() - 2].Hidden = true;
+        return v;
+    }();
     return f;
 }
 
@@ -219,94 +488,43 @@ void DrawImagePart(const PartDrawContext& c) {
         return;
     }
 
-    const UIRenderer::Sprite src = StateSprite(c, img);
-
-    // РЕЖИМ РЕШАЕТ, ЧЕМ РИСОВАТЬ. Раньше решала рамка: ненулевая означала
-    // девятину, нулевая — обычный квад. Выключить девятину можно было только
-    // обнулив четыре числа, то есть потеряв подобранную нарезку.
-    if (img.Fit == Image::Mode::NineSlice || img.Fit == Image::Mode::Tile) {
-        const NineSlice slice = img.DrawSlice();
-        // Масштаб пикселя: 0 — «подобрать сам». Для пиксель-арта округляется
-        // ВНИЗ до целого: дробный масштаб растягивает одни пиксели исходника на
-        // два экранных, а соседние на один, и ровная рамка идёт волнами.
-        float pixels = img.PixelScale * c.Scale;
-        if (pixels <= 0.0f) {
-            if (img.Fit == Image::Mode::Tile) {
-                // Замощение по умолчанию — ОДИН К ОДНОМУ: узор повторяется в
-                // своём размере, и это единственное, что означает «замостить».
-                // Подгонять его под высоту элемента, как делает девятина,
-                // значит растягивать то, что просили не растягивать.
-                pixels = c.Scale;
-            } else {
-                const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
-                pixels = srcH > 0.0f ? r.h / srcH : 1.0f;
-            }
-            if (img.SnapPixels) pixels = std::max(1.0f, std::floor(pixels));
-        }
-        ui.ImageSliced(r.x, r.y, r.w, r.h, img.Tex.get(), src, slice, pixels, rgb, alpha);
-        return;
-    }
-
-    UIRect dst = r;
-    UIRenderer::Sprite drawn = src;
-    const float srcW = src.Whole() ? (float)img.Tex->Width() : src.W;
-    const float srcH = src.Whole() ? (float)img.Tex->Height() : src.H;
-
-    // СОХРАНЕНИЕ ПРОПОРЦИЙ — ДВА РАЗНЫХ ОТВЕТА, и оба нужны.
-    //
-    // Fit вписывает картинку ЦЕЛИКОМ: масштаб один на обе оси, по краям
-    // остаются поля. Так показывают то, что обязано быть видно полностью —
-    // портрет персонажа, герб, схему.
-    // Cover заполняет элемент БЕЗ ПОЛЕЙ, обрезая лишнее по длинной стороне.
-    // Обрезка делается ИСХОДНИКОМ (берём из него кусок нужных пропорций от
-    // середины), а не рисованием за границами элемента: элемент может не иметь
-    // обрезки, и картинка вылезла бы на соседей.
-    if (img.Fit == Image::Mode::Fit || img.Fit == Image::Mode::Cover) {
-        const ImagePlacement fit =
-            PlaceImage(r, src.Whole() ? 0.0f : src.X, src.Whole() ? 0.0f : src.Y, srcW, srcH,
-                       img.Fit == Image::Mode::Cover, img.SnapPixels);
-        dst = fit.Dst;
-        drawn = {fit.SrcX, fit.SrcY, fit.SrcW, fit.SrcH};
-        ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, img.Tex.get(), drawn, rgb, alpha);
-        return;
-    }
-
-    // Спрайт БЕЗ девятины: пиксель-арт нельзя просто растянуть под элемент —
-    // разный дробный масштаб по осям даёт рваные края. Берём ЦЕЛЫЙ масштаб и
-    // ставим по центру: элемент может остаться больше картинки, и это честнее.
-    float pixels = img.PixelScale * c.Scale;
-    if (img.SnapPixels || pixels > 0.0f) {
-        const float sw = srcW;
-        const float sh = srcH;
-        if (sw > 0.0f && sh > 0.0f) {
-            if (pixels <= 0.0f) {
-                pixels = std::min(r.w / sw, r.h / sh);
-                if (img.SnapPixels) pixels = std::max(1.0f, std::floor(pixels));
-            }
-            dst.w = sw * pixels;
-            dst.h = sh * pixels;
-            dst.x = r.x + std::floor((r.w - dst.w) * 0.5f);
-            dst.y = r.y + std::floor((r.h - dst.h) * 0.5f);
-        }
-    }
-    ui.ImageSprite(dst.x, dst.y, dst.w, dst.h, img.Tex.get(), src, rgb, alpha);
+    PictureParams p;
+    p.Tex = img.Tex.get();
+    p.Src = StateSprite(c, img);
+    p.Fit = (int)img.Fit;
+    p.Slice = img.Slice();
+    p.PixelScale = img.PixelScale;
+    p.SnapPixels = img.SnapPixels;
+    DrawPicture(ui, p, r, c.Scale, rgb, alpha);
 }
 
 // --- Шкала ------------------------------------------------------------------
 
-const char* const kBarGrow[] = {SAGE_UI_TEXT("Right"), SAGE_UI_TEXT(SAGE_UI_TEXT("Left")), SAGE_UI_TEXT("Up"), SAGE_UI_TEXT("Down")};
+const char* const kBarGrow[] = {SAGE_UI_TEXT("Right"), SAGE_UI_TEXT("Left"), SAGE_UI_TEXT("Up"),
+                                SAGE_UI_TEXT("Down")};
+const char* const kBarFillMode[] = {SAGE_UI_TEXT("Squeeze"), SAGE_UI_TEXT("Reveal")};
 
 const std::vector<PartField>& BarFields() {
-    static const std::vector<PartField> f = {
-        {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Bar, Value), 0.0f, 1.0f},
-        {"fillColor", SAGE_UI_TEXT("Fill colour"), PartField::Kind::Color, offsetof(Bar, FillColor)},
-        {"grow", SAGE_UI_TEXT("Grows"), PartField::Kind::Enum, offsetof(Bar, Grow), 0.0f, 0.0f,
-         "A vertical gauge (mana at the side, a volume column) is impossible without it.",
-         kBarGrow, 4},
-        {"smoothing", SAGE_UI_TEXT("Smoothing"), PartField::Kind::Float, offsetof(Bar, Smoothing), 0.0f, 8.0f,
-         "Units per second; 0 is instant. A health bar that jumps reads worse\n"
-         "than one that travels over a quarter of a second."},
-    };
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Bar, Value), 0.0f, 1.0f},
+            {"grow", SAGE_UI_TEXT("Grows"), PartField::Kind::Enum, offsetof(Bar, Grow), 0.0f, 0.0f,
+             "A vertical gauge (mana at the side, a volume column) needs Up or Down.", kBarGrow, 4},
+            {"fillMode", SAGE_UI_TEXT("Picture shows value by"), PartField::Kind::Enum, offsetof(Bar, Mode),
+             0.0f, 1.0f,
+             "Squeeze — the fill picture shrinks to the value.\n"
+             "Reveal — it stays in place and is uncovered: marks on a health bar\n"
+             "do not get squashed when health is low.",
+             kBarFillMode, 2, PartField::Widget::Auto, "filled.texture", 1},
+            {"padding", SAGE_UI_TEXT("Fill inset (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Bar, Padding),
+             0.0f, 64.0f, "How far the fill stays from the edge of the bar."},
+            {"smoothing", SAGE_UI_TEXT("Smoothing"), PartField::Kind::Float, offsetof(Bar, Smoothing), 0.0f,
+             8.0f, "Units per second; 0 is instant."},
+            {"filled", SAGE_UI_TEXT("Fill"), PartField::Kind::Look, offsetof(Bar, Filled)},
+        };
+        v[0].Content = true;
+        return v;
+    }();
     return f;
 }
 
@@ -318,12 +536,11 @@ void DrawBarPart(const PartDrawContext& c) {
     const Bar& bar = *static_cast<const Bar*>(c.Data);
     const UIRect& r = c.Rect;
     const float t = std::clamp(BarShown(bar), 0.0f, 1.0f);
-    const float alpha = AlphaOf(c, bar.FillColor.a);
-    if (t <= 0.0f || alpha <= 0.0f) return;
+    if (t <= 0.0f) return;
 
-    const float pad = std::min(2.0f, std::min(r.w, r.h) * 0.15f);
-    const float rounding = std::max(RoundingOf(c) - pad, 0.0f);
-    const UIRect inner{r.x + pad, r.y + pad, r.w - pad * 2.0f, r.h - pad * 2.0f};
+    const glm::vec4 pad = bar.Padding * c.Scale;
+    const UIRect inner{r.x + pad.x, r.y + pad.y, std::max(0.0f, r.w - pad.x - pad.z),
+                       std::max(0.0f, r.h - pad.y - pad.w)};
     UIRect fillRect = inner;
     switch (bar.Grow) {
         case Bar::Direction::LeftToRight: fillRect.w = inner.w * t; break;
@@ -337,12 +554,16 @@ void DrawBarPart(const PartDrawContext& c) {
             break;
         case Bar::Direction::TopToBottom: fillRect.h = inner.h * t; break;
     }
-    const glm::vec3 fill{bar.FillColor.r, bar.FillColor.g, bar.FillColor.b};
-    // Заполнение всегда с градиентом к более тёмному краю: плоская полоса
-    // выглядит нарисованной в редакторе, а не «налитой».
-    c.Ui->GradientRect(fillRect.x, fillRect.y, fillRect.w, fillRect.h,
-                       glm::mix(fill, glm::vec3(1.0f), 0.22f), fill * 0.78f, alpha, alpha,
-                       rounding);
+    // ОТКРЫТЬ, А НЕ СЖАТЬ: картинка заполнения рисуется во всю полосу и
+    // обрезается долей. Для плашки цветом разницы нет — сжатие честнее
+    // скругляет край.
+    if (bar.Mode == Bar::FillMode::Reveal && bar.Filled.HasTexture()) {
+        c.Ui->PushClipRect(fillRect.x, fillRect.y, fillRect.w, fillRect.h);
+        DrawLook(c, bar.Filled, inner, /*tint=*/false);
+        c.Ui->PopClipRect();
+        return;
+    }
+    DrawLook(c, bar.Filled, fillRect, /*tint=*/false);
 }
 
 // --- Значок -----------------------------------------------------------------
@@ -378,13 +599,13 @@ void DrawIconPart(const PartDrawContext& c) {
 
 // --- Текст ------------------------------------------------------------------
 
-const char* const kAlign[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT(SAGE_UI_TEXT("Center")), SAGE_UI_TEXT("End")};
+const char* const kAlign[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End")};
 
 const char* const kLabelFaces[] = {SAGE_UI_TEXT("Regular"), SAGE_UI_TEXT("Bold"),
                                    SAGE_UI_TEXT("Italic"), SAGE_UI_TEXT("Bold italic")};
 
 const std::vector<PartField>& LabelFields() {
-    static const std::vector<PartField> f = {
+    static const std::vector<PartField> f = [] { std::vector<PartField> v = {
         {"text", SAGE_UI_TEXT("Text"), PartField::Kind::String, offsetof(Label, Text), 0.0f, 0.0f, nullptr,
          nullptr, 0, PartField::Widget::Multiline},
         // ПРЕДЕЛ КЕГЛЯ — 128, а не 12. Прежние 12 упирались примерно в сотню
@@ -436,7 +657,21 @@ const std::vector<PartField>& LabelFields() {
          0.0f, 16.0f, "0 — no outline."},
         {"outlineColor", SAGE_UI_TEXT("Outline colour"), PartField::Kind::Color,
          offsetof(Label, OutlineColor)},
+        {"stateColors", SAGE_UI_TEXT("Colour follows the button"), PartField::Kind::Bool,
+         offsetof(Label, StateColors), 0.0f, 1.0f,
+         "The caption changes colour with the nearest button above it: lighter\n"
+         "on hover, darker when pressed, faded when disabled."},
+        {"hoverColor", SAGE_UI_TEXT("Colour on hover"), PartField::Kind::Color, offsetof(Label, HoverColor),
+         0.0f, 1.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "stateColors", 1},
+        {"pressedColor", SAGE_UI_TEXT("Colour when pressed"), PartField::Kind::Color,
+         offsetof(Label, PressedColor), 0.0f, 1.0f, nullptr, nullptr, 0, PartField::Widget::Auto,
+         "stateColors", 1},
+        {"disabledColor", SAGE_UI_TEXT("Colour when disabled"), PartField::Kind::Color,
+         offsetof(Label, DisabledColor), 0.0f, 1.0f, nullptr, nullptr, 0, PartField::Widget::Auto,
+         "stateColors", 1},
     };
+    v[0].Content = true;
+    return v; }();
     return f;
 }
 
@@ -487,8 +722,16 @@ void DrawLabelPart(const PartDrawContext& c) {
     const float padX = label.PadX * c.Scale;
     const float left = r.x + padX;
     const float avail = std::max(r.w - padX * 2.0f, 1.0f);
-    const glm::vec3 rgb{label.Color.r, label.Color.g, label.Color.b};
-    const float alpha = AlphaOf(c, label.Color.a);
+    // Цвет по состоянию хозяина: надпись кнопки — её ребёнок, и светлеть
+    // при наведении она должна вместе с кнопкой.
+    glm::vec4 color = label.Color;
+    if (label.StateColors) {
+        if (!c.OwnerEnabled) color = label.DisabledColor;
+        else if (c.OwnerPressed) color = label.PressedColor;
+        else if (c.OwnerHovered) color = label.HoverColor;
+    }
+    const glm::vec3 rgb{color.r, color.g, color.b};
+    const float alpha = AlphaOf(c, color.a);
     const UITextStyle style = StyleOf(label, ui);
 
     std::vector<std::string> lines;
@@ -550,21 +793,49 @@ void DrawLabelPart(const PartDrawContext& c) {
 // --- Диапазон: галка и ползунок ---------------------------------------------
 
 const std::vector<PartField>& RangeFields() {
-    static const std::vector<PartField> f = {
-        {"min", SAGE_UI_TEXT("Minimum"), PartField::Kind::Float, offsetof(Range, Min), -1000.0f, 1000.0f},
-        {"max", SAGE_UI_TEXT("Maximum"), PartField::Kind::Float, offsetof(Range, Max), -1000.0f, 1000.0f},
-        {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Range, Value), -1000.0f, 1000.0f},
-        {"step", SAGE_UI_TEXT("Step"), PartField::Kind::Float, offsetof(Range, Step), 0.0f, 100.0f,
-         "0 is smooth; above zero snaps to the step (volume in 5% notches)."},
-        {"toggle", SAGE_UI_TEXT("Checkbox"), PartField::Kind::Bool, offsetof(Range, Toggle),
-         0.0f, 1.0f, "The same 0..1 range with step 1, drawn as a box."},
-        {"trackColor", SAGE_UI_TEXT("Track colour"), PartField::Kind::Color, offsetof(Range, TrackColor)},
-        {"accentColor", SAGE_UI_TEXT("Accent colour"), PartField::Kind::Color, offsetof(Range, AccentColor)},
-        {"borderColor", SAGE_UI_TEXT("Border colour"), PartField::Kind::Color, offsetof(Range, BorderColor)},
-        {"borderThickness", SAGE_UI_TEXT("Border thickness"), PartField::Kind::Float,
-         offsetof(Range, BorderThickness), 0.0f, 8.0f},
-        {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Range, Rounding), 0.0f, 64.0f},
-    };
+    // Поля ползунка и поля галки разведены условием «галка»: у галки нет ни
+    // дорожки с ручкой, ни шага, у ползунка — отметки. Показанные всегда, они
+    // читались бы как «работает, просто ничего не делает».
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Range, Value), -1000.0f,
+             1000.0f},
+            {"min", SAGE_UI_TEXT("Minimum"), PartField::Kind::Float, offsetof(Range, Min), -1000.0f, 1000.0f,
+             nullptr, nullptr, 0, PartField::Widget::Auto, "toggle", 0},
+            {"max", SAGE_UI_TEXT("Maximum"), PartField::Kind::Float, offsetof(Range, Max), -1000.0f, 1000.0f,
+             nullptr, nullptr, 0, PartField::Widget::Auto, "toggle", 0},
+            {"step", SAGE_UI_TEXT("Step"), PartField::Kind::Float, offsetof(Range, Step), 0.0f, 100.0f,
+             "0 is smooth; above zero snaps to the step (volume in 5% notches).", nullptr, 0,
+             PartField::Widget::Auto, "toggle", 0},
+            // «Галка» — не настройка, а ТИП: её задаёт заготовка, и в
+            // инспекторе её не переключают (галка с дорожкой и ручкой — это
+            // уже не галка). Читается и пишется ради старых сцен.
+            {"toggle", SAGE_UI_TEXT("Checkbox"), PartField::Kind::Bool, offsetof(Range, Toggle)},
+            {"trackThickness", SAGE_UI_TEXT("Track thickness"), PartField::Kind::Float,
+             offsetof(Range, TrackThickness), 0.02f, 1.0f, "A share of the element height.", nullptr, 0,
+             PartField::Widget::Auto, "toggle", 0},
+            {"knobSize", SAGE_UI_TEXT("Knob size"), PartField::Kind::Float, offsetof(Range, KnobSize), 0.0f,
+             2.0f, "A share of the element height; the knob is square. 0 — no knob.", nullptr, 0,
+             PartField::Widget::Auto, "toggle", 0},
+            {"track", SAGE_UI_TEXT("Track"), PartField::Kind::Look, offsetof(Range, Track), 0.0f, 0.0f,
+             nullptr, nullptr, 0, PartField::Widget::Auto, "toggle", 0},
+            {"filled", SAGE_UI_TEXT("Filled part"), PartField::Kind::Look, offsetof(Range, Filled), 0.0f,
+             0.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "toggle", 0},
+            {"knob", SAGE_UI_TEXT("Knob"), PartField::Kind::Look, offsetof(Range, Knob), 0.0f, 0.0f, nullptr,
+             nullptr, 0, PartField::Widget::Auto, "toggle", 0},
+            {"box", SAGE_UI_TEXT("Box"), PartField::Kind::Look, offsetof(Range, Track), 0.0f, 0.0f, nullptr,
+             nullptr, 0, PartField::Widget::Auto, "toggle", 1},
+            {"check", SAGE_UI_TEXT("Check mark"), PartField::Kind::Look, offsetof(Range, Check), 0.0f, 0.0f,
+             "Without a picture — the engine's check mark in this colour.", nullptr, 0,
+             PartField::Widget::Auto, "toggle", 1},
+        };
+        v[0].Content = v[1].Content = v[2].Content = v[3].Content = v[4].Content = true;
+        v[4].Hidden = true;
+        // «Квадратик» галки — это та же дорожка (Track), показанная под своим
+        // именем. В файл второй раз не пишется: один вид, одно место.
+        v[10].EditorOnly = true;
+        return v;
+    }();
     return f;
 }
 
@@ -573,9 +844,6 @@ float RangeFraction(const Range& range) {
     if (std::fabs(span) < 1e-6f) return 0.0f;
     return std::clamp((range.Value - range.Min) / span, 0.0f, 1.0f);
 }
-
-// Акцентный цвет: у шкалы, если она есть, — так у элемента остаётся ОДНО
-// место, где задан его цвет заполнения.
 
 UIRect ToggleBox(const UIRect& r) {
     const float side = std::min(r.w, r.h);
@@ -586,64 +854,71 @@ void DrawRangePart(const PartDrawContext& c) {
     const Range& range = *static_cast<const Range*>(c.Data);
     const UIRect& r = c.Rect;
     UIRenderer& ui = *c.Ui;
-    const glm::vec3 accentRgb = StateTint(c, glm::vec3(range.AccentColor));
-    const glm::vec3 trackRgb = StateTint(c, glm::vec3(range.TrackColor));
-    const float border = range.BorderThickness * c.Scale;
-    const bool hasBorder = border > 0.0f && range.BorderColor.a > 0.0f;
-    const glm::vec3 borderRgb{range.BorderColor.r, range.BorderColor.g, range.BorderColor.b};
 
     if (range.Toggle) {
         // Галка: квадратик у левого края СВОЕГО элемента. Подпись к нему —
         // отдельный объект рядом, а не сдвинутый текст внутри: так галку можно
         // поставить и справа от подписи, и под ней.
         const UIRect box = ToggleBox(r);
-        const float rounding = std::min(range.Rounding * c.Scale, box.h * 0.5f);
-        const float trackA = AlphaOf(c, range.TrackColor.a);
-        if (trackA > 0.0f) ui.RoundedRect(box.x, box.y, box.w, box.h, trackRgb, trackA, rounding);
-        if (hasBorder) {
-            ui.RoundedRectOutline(box.x, box.y, box.w, box.h, rounding, border, borderRgb,
-                                  AlphaOf(c, range.BorderColor.a));
-        }
+        DrawLook(c, range.Track, box);
         // Включена — если значение ближе к верхнему концу диапазона.
-        if (range.Value >= (range.Min + range.Max) * 0.5f) {
-            const float pad = box.h * 0.18f;
-            DrawIconInto(ui, "check", box.x + pad, box.y + pad, box.h - pad * 2.0f, accentRgb,
-                         AlphaOf(c, range.AccentColor.a));
+        if (range.Value < (range.Min + range.Max) * 0.5f) return;
+        if (range.Check.HasTexture()) {
+            DrawLook(c, range.Check, box, /*tint=*/false);
+            return;
         }
+        const float pad = box.h * 0.18f;
+        const glm::vec3 rgb = StateTint(c, glm::vec3(range.Check.Color));
+        DrawIcon(ui, "check", box.x + pad, box.y + pad, box.h - pad * 2.0f, rgb,
+                 AlphaOf(c, range.Check.Color.a));
         return;
     }
 
-    // Ползунок: дорожка тонкая и по центру, ручка во всю высоту. Попасть в
-    // тонкую полоску мышью трудно, а нажатие ловит весь элемент.
-    const float track = std::max(r.h * 0.28f, 4.0f);
-    const UIRect bar{r.x, r.y + (r.h - track) * 0.5f, r.w, track};
-    const float trackA = AlphaOf(c, range.TrackColor.a);
-    if (trackA > 0.0f) ui.RoundedRect(bar.x, bar.y, bar.w, bar.h, trackRgb, trackA, track * 0.5f);
+    // Ползунок: дорожка по центру, ручка поверх. Попасть в тонкую полоску
+    // мышью трудно, а нажатие ловит весь элемент.
+    const float thick = std::max(r.h * std::clamp(range.TrackThickness, 0.0f, 1.0f), 2.0f);
+    const UIRect track{r.x, r.y + (r.h - thick) * 0.5f, r.w, thick};
+    DrawLook(c, range.Track, track);
 
     const float t = RangeFraction(range);
-    const float fillA = AlphaOf(c, range.AccentColor.a);
-    if (t > 0.0f && fillA > 0.0f) {
-        ui.RoundedRect(bar.x, bar.y, bar.w * t, bar.h, accentRgb, fillA, track * 0.5f);
+    const float knob = r.h * std::max(range.KnobSize, 0.0f);
+    // Ручка не выезжает за концы: её центр ходит от половины ручки до
+    // «ширина минус половина».
+    const float kx = r.x + knob * 0.5f + (r.w - knob) * t;
+    if (t > 0.0f) {
+        UIRect filled = track;
+        filled.w = std::max(0.0f, kx - track.x);
+        if (knob <= 0.0f) filled.w = track.w * t;
+        DrawLook(c, range.Filled, filled);
     }
-    const float knob = r.h * 0.5f;
-    const float kx = r.x + (r.w - knob * 2.0f) * t + knob;
-    ui.Circle(kx, r.y + r.h * 0.5f, knob, accentRgb, AlphaOf(c, 1.0f));
-    if (hasBorder) {
-        ui.Ring(kx, r.y + r.h * 0.5f, knob, border, borderRgb, AlphaOf(c, range.BorderColor.a));
+    if (knob > 0.0f) {
+        DrawLook(c, range.Knob, {kx - knob * 0.5f, r.y + (r.h - knob) * 0.5f, knob, knob});
     }
 }
 
 // --- Поле ввода -------------------------------------------------------------
 
 const std::vector<PartField>& TextInputFields() {
-    static const std::vector<PartField> f = {
-        {"placeholder", SAGE_UI_TEXT("Placeholder"), PartField::Kind::String, offsetof(TextInput, Placeholder)},
-        {"maxLength", SAGE_UI_TEXT("Max length"), PartField::Kind::Int, offsetof(TextInput, MaxLength), 0.0f,
-         4096.0f, "0 means no limit."},
-        {"password", SAGE_UI_TEXT("Password"), PartField::Kind::Bool, offsetof(TextInput, Password),
-         0.0f, 1.0f, "Hide the content behind dots."},
-        {"readOnly", SAGE_UI_TEXT("Read only"), PartField::Kind::Bool, offsetof(TextInput, ReadOnly)},
-    };
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"placeholder", SAGE_UI_TEXT("Placeholder"), PartField::Kind::String,
+             offsetof(TextInput, Placeholder)},
+            {"maxLength", SAGE_UI_TEXT("Max length"), PartField::Kind::Int, offsetof(TextInput, MaxLength),
+             0.0f, 4096.0f, "0 means no limit."},
+            {"password", SAGE_UI_TEXT("Password"), PartField::Kind::Bool, offsetof(TextInput, Password), 0.0f,
+             1.0f, "Hide the content behind dots."},
+            {"readOnly", SAGE_UI_TEXT("Read only"), PartField::Kind::Bool, offsetof(TextInput, ReadOnly)},
+            {"placeholderColor", SAGE_UI_TEXT("Placeholder colour"), PartField::Kind::Color,
+             offsetof(TextInput, PlaceholderColor), 0.0f, 1.0f,
+             "Alpha 0 — the text colour, half as bright."},
+            {"caretColor", SAGE_UI_TEXT("Caret colour"), PartField::Kind::Color,
+             offsetof(TextInput, CaretColor), 0.0f, 1.0f, "Alpha 0 — the text colour."},
+            {"caretWidth", SAGE_UI_TEXT("Caret width"), PartField::Kind::Float,
+             offsetof(TextInput, CaretWidth), 0.5f, 8.0f},
+        };
+        for (int i = 0; i < 4; ++i) v[(size_t)i].Content = true;
+        return v;
+    }();
     return f;
 }
 
@@ -670,13 +945,16 @@ void DrawTextInputPart(const PartDrawContext& c) {
     // стоит не по центру, и тем заметнее, чем крупнее кегль.
     const float y = r.y + (r.h - ui.LineHeight(textScale, style)) * 0.5f;
     const bool empty = label->Text.empty();
-    const std::string shown =
-        empty ? input.Placeholder : (input.Password ? MaskText(label->Text) : label->Text);
-    if (!shown.empty()) {
+    if (empty && !input.Placeholder.empty()) {
         // Подсказка бледнее содержимого — иначе пустое поле выглядит
         // заполненным, и человек стирает то, чего не вводил.
-        ui.Text(left, y, textScale, rgb, shown, AlphaOf(c, label->Color.a) * (empty ? 0.45f : 1.0f),
-                style);
+        const bool own = input.PlaceholderColor.a > 0.0f;
+        const glm::vec3 prgb = own ? glm::vec3(input.PlaceholderColor) : rgb;
+        const float pa = own ? input.PlaceholderColor.a : label->Color.a * 0.45f;
+        ui.Text(left, y, textScale, prgb, input.Placeholder, AlphaOf(c, pa), style);
+    } else if (!empty) {
+        ui.Text(left, y, textScale, rgb, input.Password ? MaskText(label->Text) : label->Text,
+                AlphaOf(c, label->Color.a), style);
     }
 
     // Курсор мигает только в фокусе и только когда поле включено.
@@ -689,63 +967,125 @@ void DrawTextInputPart(const PartDrawContext& c) {
     // сбрасывается, чтобы курсор не пропал ровно тогда, когда на него смотрят.
     if (std::fmod(act->Runtime.CaretBlink, 1.0f) < 0.5f) {
         const float ch = ui.LineHeight(textScale, style) * 0.92f;
-        ui.Rect(cx, r.y + (r.h - ch) * 0.5f, std::max(textScale, 1.0f), ch, rgb,
-                AlphaOf(c, label->Color.a));
+        const bool own = input.CaretColor.a > 0.0f;
+        ui.Rect(cx, r.y + (r.h - ch) * 0.5f, std::max(input.CaretWidth * c.Scale, 1.0f), ch,
+                own ? glm::vec3(input.CaretColor) : rgb,
+                AlphaOf(c, own ? input.CaretColor.a : label->Color.a));
     }
 }
 
-// --- Невидимые части: поведение и раскладка ---------------------------------
+// --- Реакция на мышь -----------------------------------------------------------
 
 const std::vector<PartField>& InteractableFields() {
-    static const std::vector<PartField> f = {
-        {"action", SAGE_UI_TEXT("Action"), PartField::Kind::String, offsetof(Interactable, Action), 0.0f, 0.0f,
-         "A name for the game: a script asks whether Continue was pressed, not\n"
-         "whether entity 37 was."},
-        {"enabled", SAGE_UI_TEXT("Enabled"), PartField::Kind::Bool, offsetof(Interactable, Enabled)},
-        {"cursor", SAGE_UI_TEXT("Cursor"), PartField::Kind::String, offsetof(Interactable, Cursor)},
-        {"hoverBrightness", SAGE_UI_TEXT("Brighter on hover"), PartField::Kind::Float,
-         offsetof(Interactable, HoverBrightness), 0.5f, 2.0f},
-        {"pressedBrightness", SAGE_UI_TEXT("Darker when pressed"), PartField::Kind::Float,
-         offsetof(Interactable, PressedBrightness), 0.5f, 2.0f},
-        {"disabledAlpha", SAGE_UI_TEXT("Disabled alpha"), PartField::Kind::Float,
-         offsetof(Interactable, DisabledAlpha), 0.0f, 1.0f},
-        {"events", SAGE_UI_TEXT("Events"), PartField::Kind::Bindings, offsetof(Interactable, Events),
-         0.0f, 0.0f,
-         "What the button does itself: send an event, call a method on another\n"
-         "object. Without this a button needs a script polling it every frame."},
-    };
+    // Вид состояния показывается под своей галкой: выключена — подложка
+    // подкрашивается множителями (их поля и видны), включена — рисуется свой
+    // вид целиком (и видны его поля).
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"enabled", SAGE_UI_TEXT("Enabled"), PartField::Kind::Bool, offsetof(Interactable, Enabled)},
+            {"action", SAGE_UI_TEXT("Action"), PartField::Kind::String, offsetof(Interactable, Action), 0.0f,
+             0.0f,
+             "A name for the game: a script asks whether Continue was pressed, not\n"
+             "whether entity 37 was."},
+            {"cursor", SAGE_UI_TEXT("Cursor"), PartField::Kind::String, offsetof(Interactable, Cursor)},
+            {"hoverBrightness", SAGE_UI_TEXT("Brighter on hover"), PartField::Kind::Float,
+             offsetof(Interactable, HoverBrightness), 0.5f, 2.0f, nullptr, nullptr, 0,
+             PartField::Widget::Auto, "useHoverLook", 0},
+            {"pressedBrightness", SAGE_UI_TEXT("Darker when pressed"), PartField::Kind::Float,
+             offsetof(Interactable, PressedBrightness), 0.5f, 2.0f, nullptr, nullptr, 0,
+             PartField::Widget::Auto, "usePressedLook", 0},
+            {"disabledAlpha", SAGE_UI_TEXT("Disabled alpha"), PartField::Kind::Float,
+             offsetof(Interactable, DisabledAlpha), 0.0f, 1.0f, nullptr, nullptr, 0,
+             PartField::Widget::Auto, "useDisabledLook", 0},
+            {"pressedOffset", SAGE_UI_TEXT("Content shift when pressed"), PartField::Kind::Vec2,
+             offsetof(Interactable, PressedOffset), -16.0f, 16.0f,
+             "Moves everything inside the button while it is held — a caption\n"
+             "that sinks together with a pressed picture."},
+            {"useHoverLook", SAGE_UI_TEXT("Own look on hover"), PartField::Kind::Bool,
+             offsetof(Interactable, UseHoverLook)},
+            {"hoverLook", SAGE_UI_TEXT("On hover"), PartField::Kind::Look, offsetof(Interactable, HoverLook),
+             0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "useHoverLook", 1},
+            {"usePressedLook", SAGE_UI_TEXT("Own look when pressed"), PartField::Kind::Bool,
+             offsetof(Interactable, UsePressedLook)},
+            {"pressedLook", SAGE_UI_TEXT("When pressed"), PartField::Kind::Look,
+             offsetof(Interactable, PressedLook), 0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Auto,
+             "usePressedLook", 1},
+            {"useFocusedLook", SAGE_UI_TEXT("Own look when focused"), PartField::Kind::Bool,
+             offsetof(Interactable, UseFocusedLook)},
+            {"focusedLook", SAGE_UI_TEXT("When focused"), PartField::Kind::Look,
+             offsetof(Interactable, FocusedLook), 0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Auto,
+             "useFocusedLook", 1},
+            {"useDisabledLook", SAGE_UI_TEXT("Own look when disabled"), PartField::Kind::Bool,
+             offsetof(Interactable, UseDisabledLook)},
+            {"disabledLook", SAGE_UI_TEXT("When disabled"), PartField::Kind::Look,
+             offsetof(Interactable, DisabledLook), 0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Auto,
+             "useDisabledLook", 1},
+            {"events", SAGE_UI_TEXT("Events"), PartField::Kind::Bindings, offsetof(Interactable, Events), 0.0f,
+             0.0f,
+             "What the element does itself: send an event, call a method on another\n"
+             "object. Without this a button needs a script polling it every frame."},
+        };
+        v[0].Content = v[1].Content = v[2].Content = true;
+        v.back().Content = true;
+        return v;
+    }();
     return f;
 }
 
-const char* const kMaskShape[] = {SAGE_UI_TEXT("Rectangle"), SAGE_UI_TEXT(SAGE_UI_TEXT("Rounded"))};
+const char* const kMaskShape[] = {SAGE_UI_TEXT("Rectangle"), SAGE_UI_TEXT("Rounded")};
 
 const std::vector<PartField>& MaskFields() {
-    static const std::vector<PartField> f = {
-        {"form", SAGE_UI_TEXT("Shape"), PartField::Kind::Enum, offsetof(Mask, Form), 0.0f, 0.0f, nullptr,
-         kMaskShape, 2},
-        {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Mask, Rounding), -1.0f, 64.0f,
-         "Below zero takes the rounding from the fill."},
-        {"padding", SAGE_UI_TEXT("Padding (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Mask, Padding), 0.0f, 256.0f},
-        {"showOutside", SAGE_UI_TEXT("Do not clip"), PartField::Kind::Bool, offsetof(Mask, ShowOutside)},
-    };
+    // Обрезка прямоугольная: форма и скругление в файле есть (старые сцены),
+    // но отрисовка режет только прямоугольником — показывать их значило бы
+    // обещать то, чего не происходит.
+    static const std::vector<PartField> f = [] {
+        std::vector<PartField> v = {
+            {"form", SAGE_UI_TEXT("Shape"), PartField::Kind::Enum, offsetof(Mask, Form), 0.0f, 0.0f, nullptr,
+             kMaskShape, 2},
+            {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Mask, Rounding), -1.0f,
+             64.0f},
+            {"padding", SAGE_UI_TEXT("Clip inset (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Mask, Padding),
+             0.0f, 256.0f, "Shrinks the clipping window inside the container."},
+            {"showOutside", SAGE_UI_TEXT("Do not clip"), PartField::Kind::Bool, offsetof(Mask, ShowOutside)},
+        };
+        v[0].Hidden = v[1].Hidden = v[3].Hidden = true;
+        return v;
+    }();
     return f;
 }
 
-const char* const kFlow[] = {SAGE_UI_TEXT("Row"), SAGE_UI_TEXT(SAGE_UI_TEXT("Column")), SAGE_UI_TEXT("Grid")};
-const char* const kJustify[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT(SAGE_UI_TEXT("Center")), SAGE_UI_TEXT("End"), SAGE_UI_TEXT("Even")};
+const char* const kFlow[] = {SAGE_UI_TEXT("Row"), SAGE_UI_TEXT("Column"), SAGE_UI_TEXT("Grid")};
+const char* const kJustify[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
+                                SAGE_UI_TEXT("Even")};
+const char* const kCross[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
+                              SAGE_UI_TEXT("Stretch")};
 
 const std::vector<PartField>& LayoutFields() {
+    // Поля сетки видны только у сетки, перенос — только у ряда и столбца:
+    // «столбцы» у ряда и «перенос» у сетки не значат ничего.
     static const std::vector<PartField> f = {
         {"direction", SAGE_UI_TEXT("Direction"), PartField::Kind::Enum, offsetof(Stack, Direction), 0.0f, 0.0f,
          nullptr, kFlow, 3},
-        {"justify", SAGE_UI_TEXT("Justify"), PartField::Kind::Enum, offsetof(Stack, Justify), 0.0f, 0.0f,
-         nullptr, kJustify, 4},
+        {"justify", SAGE_UI_TEXT("Along"), PartField::Kind::Enum, offsetof(Stack, Justify), 0.0f, 0.0f,
+         "Where the children gather along the main direction when there is\n"
+         "room left. Children with Grow take that room instead.",
+         kJustify, 4},
+        {"cross", SAGE_UI_TEXT("Across"), PartField::Kind::Enum, offsetof(Stack, Cross), 0.0f, 0.0f,
+         "Where each child stands across the main direction — or stretch it\n"
+         "to the full width (height) of the container.",
+         kCross, 4},
         {"spacing", SAGE_UI_TEXT("Spacing"), PartField::Kind::Float, offsetof(Stack, Spacing), 0.0f, 128.0f},
         {"padding", SAGE_UI_TEXT("Padding (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Stack, Padding), 0.0f,
          256.0f},
-        {"columns", SAGE_UI_TEXT("Columns"), PartField::Kind::Int, offsetof(Stack, Columns), 1.0f, 32.0f},
-        {"stretchCross", SAGE_UI_TEXT("Stretch across"), PartField::Kind::Bool,
-         offsetof(Stack, StretchCross)},
+        {"wrap", SAGE_UI_TEXT("Wrap"), PartField::Kind::Bool, offsetof(Stack, Wrap), 0.0f, 1.0f,
+         "Children that do not fit go on to the next line.", nullptr, 0, PartField::Widget::Auto,
+         "direction", ShowIfNot((int)Stack::Flow::Grid)},
+        {"columns", SAGE_UI_TEXT("Columns"), PartField::Kind::Int, offsetof(Stack, Columns), 0.0f, 32.0f,
+         "0 — as many as fit at the cell size.", nullptr, 0, PartField::Widget::Auto, "direction",
+         (int)Stack::Flow::Grid},
+        {"cellSize", SAGE_UI_TEXT("Cell size"), PartField::Kind::Vec2, offsetof(Stack, CellSize), 0.0f,
+         2048.0f, "0 — width from the columns, height from the tallest child.", nullptr, 0,
+         PartField::Widget::Auto, "direction", (int)Stack::Flow::Grid},
         {"fitContent", SAGE_UI_TEXT("Size from content"), PartField::Kind::Bool,
          offsetof(Stack, FitContent)},
     };
@@ -846,45 +1186,48 @@ void RegisterBuiltins() {
     input.Hint = SAGE_UI_TEXT("Edited from the keyboard; the value lives in the Text part");
     RegisterPart(input);
 
-    // Невидимые части: рисовать нечего, но в реестре они нужны — по нему идут и
-    // запись в файл, и список «добавить часть» в редакторе.
-    PartType act = MakePart<Interactable>("interactable", SAGE_UI_TEXT("Interactable"), 100,
+    // Реакция на мышь — УСТРОЙСТВО ТИПА (кнопка, галка, ползунок, поле
+    // ввода), а не добавка: её не включают галкой на картинке. Рисовать ей
+    // нечего — виды состояний рисует подложка.
+    PartType act = MakePart<Interactable>("interactable", SAGE_UI_TEXT("Interaction"), 100,
                                           &InteractableFields());
     act.Icon = "cube";
-    act.Hint = SAGE_UI_TEXT("Hover, press, click, and an action name for the game");
-    // ВОЗМОЖНОСТЬ: кнопка приносит её с собой, но и обычная панель вправе
-    // ловить щелчок — отсюда и отдельное добавление.
-    act.Extra = true;
+    act.Hint = SAGE_UI_TEXT("Hover, press, click, looks for each state and what the element does");
     RegisterPart(act);
 
-    PartType mask = MakePart<Mask>("mask", SAGE_UI_TEXT("Mask"), 100, &MaskFields());
+    // --- Части КОНТЕЙНЕРОВ: невидимая раскладка детей ------------------------
+    PartType mask = MakePart<Mask>("mask", SAGE_UI_TEXT("Clipping"), 100, &MaskFields());
     mask.Icon = "rect";
-    mask.Hint = SAGE_UI_TEXT("The subtree is clipped by this element's rectangle");
-    mask.Extra = true;
+    mask.Hint = SAGE_UI_TEXT("Children are clipped by this container");
+    mask.Container = true;
     RegisterPart(mask);
 
-    PartType layout = MakePart<Stack>("layout", SAGE_UI_TEXT("Stack"), 100, &LayoutFields());
+    PartType layout = MakePart<Stack>("layout", SAGE_UI_TEXT("Layout"), 100, &LayoutFields());
     layout.Icon = "layout";
-    layout.Hint = SAGE_UI_TEXT("The parent lays its children out: row, column, grid");
-    layout.Extra = true;
+    layout.Hint = SAGE_UI_TEXT("Children stand in a row, a column or a grid");
+    layout.Container = true;
     RegisterPart(layout);
 
-    PartType scroll = MakePart<Scroll>("scroll", SAGE_UI_TEXT("Scroll"), 100, &ScrollFields());
+    PartType scroll = MakePart<Scroll>("scroll", SAGE_UI_TEXT("Scrolling"), 100, &ScrollFields());
     scroll.Icon = "list";
-    scroll.Hint = SAGE_UI_TEXT("The content moves inside the element and is clipped by it");
-    scroll.Extra = true;
+    scroll.Hint = SAGE_UI_TEXT("The content moves inside the container and is clipped by it");
+    scroll.Container = true;
     RegisterPart(scroll);
 
+    // Холст корня — из тех времён, когда корнем интерфейса был элемент. Теперь
+    // масштаб задаёт сам интерфейс; часть читается ради старых сцен.
     PartType canvas = MakePart<Canvas>("canvas", SAGE_UI_TEXT("Canvas"), 100, &CanvasFields());
     canvas.Icon = "grid";
     canvas.Hint = SAGE_UI_TEXT("A UI root: reference resolution and order between roots");
-    canvas.Extra = true;
+    canvas.Hidden = true;
     RegisterPart(canvas);
 
-    PartType group = MakePart<Group>("group", SAGE_UI_TEXT("Group"), 100, &GroupFields());
+    // Прозрачность и приём ввода всего поддерева — общая настройка ЛЮБОГО
+    // элемента (инспектор показывает её в разделе «Элемент»), а не добавка.
+    PartType group = MakePart<Group>("group", SAGE_UI_TEXT("Opacity and input"), 100, &GroupFields());
     group.Icon = "copy";
-    group.Hint = SAGE_UI_TEXT("Alpha and input for the whole subtree");
-    group.Extra = true;
+    group.Hint = SAGE_UI_TEXT("Opacity and input for the whole subtree");
+    group.Hidden = true;
     RegisterPart(group);
 }
 
@@ -1023,7 +1366,37 @@ void CopyField(const PartField& f, const void* src, void* dst) {
             *reinterpret_cast<sage::events::Bindings*>(d) =
                 *reinterpret_cast<const sage::events::Bindings*>(s);
             break;
+        case PartField::Kind::Look:
+            *reinterpret_cast<Look*>(d) = *reinterpret_cast<const Look*>(s);
+            break;
     }
+}
+
+const std::vector<PartField>& LookFields() { return LookFieldTable(); }
+
+const std::vector<PartField>& LookFieldsOf(const PartField& lookField) {
+    // Таблица на каждый вид строится один раз: редактор спрашивает её каждый
+    // кадр, а ключи в ней — постоянные строки.
+    static std::list<std::pair<std::string, std::vector<PartField>>> cache;
+    const std::string id = std::string(lookField.Key ? lookField.Key : "") + "@" +
+                           std::to_string(lookField.Offset);
+    for (const auto& [key, fields] : cache)
+        if (key == id) return fields;
+    cache.emplace_back(id, ShiftLookFields(Intern(lookField.Key ? lookField.Key : ""),
+                                           lookField.Offset, lookField.ShowIfKey,
+                                           lookField.ShowIfValue));
+    return cache.back().second;
+}
+
+std::vector<PartField> EditableFields(const std::vector<PartField>& fields) {
+    std::vector<PartField> out;
+    for (const PartField& f : fields) {
+        out.push_back(f);
+        if (f.Type != PartField::Kind::Look) continue;
+        const std::vector<PartField>& inner = LookFieldsOf(f);
+        out.insert(out.end(), inner.begin(), inner.end());
+    }
+    return out;
 }
 
 const PartType* FindPart(std::string_view id) {

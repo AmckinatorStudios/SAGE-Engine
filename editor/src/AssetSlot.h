@@ -55,7 +55,7 @@ namespace assetslot {
 // выбирается именно она. Без этого типа такое поле оставалось бы единственным
 // местом редактора, где путь набирают руками.
 enum class Kind { Any, Model, Material, Texture, Script, Shader, Prefab, Scene, Audio,
-                  Animation, Folder, Font, Effect };
+                  Animation, Folder, Font, Effect, UiStyle };
 
 // Тип файла по расширению. Единственное место, где расширения превращаются в
 // смысл: раньше эти списки были переписаны в семи местах и уже разошлись —

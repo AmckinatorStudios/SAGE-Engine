@@ -92,11 +92,11 @@ Group Catalog() {
          {
              {T("Elements"),
               {
-                  {"ui.Panel",    T("Panel"),    T("Background block: groups other elements")},
+                  {"ui.Panel",    T("Panel"),    T("A background: colour or your own picture")},
                   {"ui.Button",   T("Button"),   T("Backing, caption and a reaction to the mouse")},
                   {"ui.Label",    T("Label"),    T("Line of text")},
                   {"ui.Image",    T("Image"),    T("Picture from the project")},
-                  {"ui.Bar",      T("Bar"),      T("Fill level: health, loading, progress")},
+                  {"ui.Bar",      T("Progress Bar"), T("Fill level: health, loading, progress")},
                   {"ui.Checkbox", T("Checkbox"), T("On/off switch")},
                   {"ui.Slider",   T("Slider"),   T("Value picked by dragging")},
                   {"ui.Input",    T("Input"),    T("Text field")},

@@ -62,7 +62,7 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
     if (flat.Type == Kind::Bar) {
         Bar bar;
         bar.Value = flat.Value;
-        bar.FillColor = flat.BarFillColor;
+        bar.SetFillColor(flat.BarFillColor);
         reg.emplace_or_replace<Bar>(e, bar);
     }
     if (!flat.Icon.empty()) {
@@ -95,11 +95,12 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
         // дорожкой и квадратиком, а цвет заполнения полосы — ручкой и
         // галочкой. Раньше ради второго рядом заводилась пустая шкала, и
         // «перекрасить ползунок» означало «повесить на него полосу».
-        range.TrackColor = flat.Color;
-        range.AccentColor = flat.BarFillColor;
-        range.BorderColor = flat.BorderColor;
-        range.BorderThickness = flat.BorderThickness;
-        range.Rounding = flat.Rounding;
+        range.Track.Color = flat.Color;
+        range.Filled.Color = range.Knob.Color = range.Check.Color = flat.BarFillColor;
+        range.Track.BorderColor = range.Knob.BorderColor = flat.BorderColor;
+        range.Track.BorderThickness = range.Knob.BorderThickness = flat.BorderThickness;
+        if (range.Toggle) range.Track.Rounding = flat.Rounding;
+        else range.Track.Rounding = range.Filled.Rounding = 64.0f;
         reg.emplace_or_replace<Range>(e, range);
     }
     if (flat.ClipChildren) reg.emplace_or_replace<Mask>(e, Mask{});
